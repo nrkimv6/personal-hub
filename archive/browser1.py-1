@@ -1,0 +1,174 @@
+import threading
+from concurrent.futures import ThreadPoolExecutor
+import random
+
+from pushbullet_message import send_message
+import time
+import hashlib
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+
+from valid_check import is_content_valid, is_full_reservation
+
+# https://chromedriver.storage.googleapis.com/LATEST_RELEASE
+# https://googlechromelabs.github.io/chrome-for-testing/
+#https://chromedriver.storage.googleapis.com/index.html?path=114.0.5735.90/
+# https://sites.google.com/chromium.org/driver/
+
+# Function to initialize the Selenium WebDriver
+
+user_data_dir = r"C:\Users\Narang\AppData\Local\Google\Chrome\User Data"
+profile_dir = r"Default"
+
+default_port=9223
+
+# chrome --user-data-dir="C:\Users\Narang\AppData\Local\Google\Chrome\User Data" --profile-directory="Default"
+def initialize_driver(user_data_dir, profile_dir, port):
+    chrome_options = Options()
+    # chrome_options.add_argument("--headless")  # Run in headless mode if needed
+
+    # (session not created: DevToolsActivePort file doesn't exist)
+    # chrome_options.add_argument("--single-process")
+    # chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--no-sandbox")
+    # chrome_options.add_argument("--disable-setuid-sandbox")
+    chrome_options.binary_location = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+
+    # chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument(f"--remote-debugging-port={port}")  # Add this line
+    # chrome_options.add_argument("--disable-software-rasterizer")  # Add this line
+    chrome_options.add_argument(f"--user-data-dir={user_data_dir}")  # Path to the user data directory
+    chrome_options.add_argument(f"--profile-directory={profile_dir}")  # Profile directory
+
+    # chrome_service = ChromeService(executable_path=ChromeDriverManager().install())
+    # chrome_service = ChromeService(executable_path=ChromeDriverManager().install())
+    driver = webdriver.Chrome(options=chrome_options)
+    return driver
+
+# def initialize_driver2():
+#     import time
+#     # Setup WebDriver
+#     service = ChromeService(ChromeDriverManager().install())
+#     driver = webdriver.Chrome(service=service)
+#     return driver
+
+# Function to get the hash of the page content
+def get_hash(driver, url):
+    try:
+        driver.get(url)
+        page_content = driver.page_source
+        page_hash = hashlib.md5(page_content.encode('utf-8')).hexdigest()
+        return page_hash, page_content
+    except Exception as e:
+        print(f"Error fetching the URL: {e}")
+        return None, None
+
+
+def monitor_url(url, tag, interval_min=3, interval_max=60, index=1):
+    print("Starting URL monitor...")
+    send_message(f"[{tag}] Starting URL monitor...", None)
+
+    interval = random.uniform(interval_min, interval_max/2)
+    print(f"[{tag}] Waiting for {interval:.2f} seconds before check.")
+    time.sleep(interval)  # 랜덤한 시간만큼 대기
+
+    # driver = initialize_driver2()
+    print(f"[{tag}] driver port {default_port+index}")
+    driver = initialize_driver(user_data_dir, profile_dir, default_port+index)
+    current_hash, current_content = get_hash(driver, url)
+
+    if current_hash is None:
+        send_message(f"[{tag}] Failed to fetch URL content.", None)
+        print(f"[{tag}] Failed to fetch URL content.")
+        driver.quit()
+        return
+
+    try:
+        while True:
+
+            new_hash, new_content = get_hash(driver, url)
+            if new_hash != current_hash:
+                print(f"[{tag}] Change detected at:", time.ctime())
+                print(f"[{tag}] new_hash {new_hash}")
+                # if new_content != current_content:
+                #     send_message(f"Change detected at: {time.ctime()}", url)
+                #     print("Content also changed at:", time.ctime())
+                #     print(f"new_content {new_content}")
+
+                if new_hash != current_hash:
+                    if is_full_reservation(new_content):
+                        print(f"[{tag}] Detected the inactive page message, not sending update.")
+
+
+                    else:
+                        rtn_contents = is_content_valid(new_content)
+
+                        if rtn_contents == None:
+                            print(f"[{tag}] Detected the inactive page message2, not sending update.")
+
+                        else:
+                            send_message(f"[{tag}] Change detected! {rtn_contents} at: {time.ctime()}", url)
+                            print(f"[{tag}] Change detected at:", time.ctime())
+                            print(f"[{tag}] new_content {new_content}")
+                            print(f"[{tag}] rtn_contents {rtn_contents}")
+
+                    current_hash = new_hash
+                    current_content = new_content
+                else:
+                    print(f"[{tag}] No change detected.")
+
+                current_hash = new_hash
+                current_content = new_content
+            else:
+                print(f"[{tag}] No change detected.")
+
+            interval = random.uniform(interval_min, interval_max)
+            print(f"Waiting for {interval:.2f} seconds before next check.")
+            time.sleep(interval)  # 랜덤한 시간만큼 대기
+
+    except KeyboardInterrupt:
+        print(f"[{tag}] Monitoring stopped.")
+        send_message(f"[{tag}] Monitoring stopped.", None)
+    finally:
+        driver.quit()
+
+
+# Example usage
+# monitor_url("http://example.com", interval=60)
+url = "https://booking.naver.com/booking/13/bizes/1184162/items/5992713?startDate=2024-07-06"
+url1 = "https://booking.naver.com/booking/13/bizes/1184162/items/5992713?startDate=2024-07-06"
+url2 = "https://booking.naver.com/booking/6/bizes/1176343/items/5950967?startDateTime=2024-07-05T20%3A00%3A00%2B09%3A00"
+url2_2 = "https://m.booking.naver.com/booking/6/bizes/1176343/items/5950967?startDateTime=2024-07-05T20%3A00%3A00%2B09%3A00"
+# monitor_url(url, interval=300)  # Check every 5 minutes
+# monitor_url(url1, "어퓨", interval=30)
+# monitor_url(url2, "달달", interval=30)
+#
+#
+# thread1 = threading.Thread(target=monitor_url, args=(url1, "어퓨", 5))
+# thread2 = threading.Thread(target=monitor_url, args=(url2, "달달", 5))
+#
+# # 스레드 시작
+# thread1.start()
+# thread2.start()
+#
+# # 스레드가 종료될 때까지 대기
+# thread1.join()
+# thread2.join()
+
+
+
+urls = [
+    {"url": "https://booking.naver.com/booking/13/bizes/1184162/items/5992713?startDate=2024-07-06", "tag":"어퓨_0706"},
+    # {"url": "https://booking.naver.com/booking/13/bizes/1184162/items/5992713?startDate=2024-07-07", "tag":"어퓨_0707"},
+    {"url": "https://booking.naver.com/booking/6/bizes/1176343/items/5950967?startDateTime=2024-07-05T20%3A00%3A00%2B09%3A00", "tag":"달달_0705"},
+    {"url": "https://booking.naver.com/booking/6/bizes/1176343/items/5950967?startDateTime=2024-07-06T20%3A00%3A00%2B09%3A00", "tag":"달달_0706"},
+    # {"url": "https://booking.naver.com/booking/6/bizes/1176343/items/5950967?startDateTime=2024-07-07T20%3A00%3A00%2B09%3A00", "tag":"달달_0707"}
+]
+
+# ThreadPoolExecutor를 사용하여 여러 URL을 모니터링
+with ThreadPoolExecutor(max_workers=len(urls)) as executor:
+    futures = [executor.submit(monitor_url, item["url"], item["tag"], 3, 30, index) for index, item in enumerate(urls, start=1)]
+
+    # 각 작업의 완료를 기다림
+    for future in futures:
+        future.result()
