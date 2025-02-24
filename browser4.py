@@ -1,13 +1,14 @@
 import random
 import threading
+import heapq
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from queue import Queue
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 
-from pushbullet_message import send_message, send_message_t
+from pushbullet_message import send_message_t, MessageSender
 from urls import urls
 from util import get_hash
 from valid_check import is_content_valid
@@ -16,9 +17,11 @@ user_data_dir = r"C:\Users\Narang\AppData\Local\Google\Chrome\User Data"
 profile_dir = r"Default"
 chrome_path = r"C:\Program Files\Google\Chrome Dev\Application\chrome.exe"
 # driver_path = r"D:\save\Programs\executable\chromedriver\chromedriver.exe"
-driver_path=r"D:\save\Programs\executable\chromedriver\130\chromedriver.exe"
+driver_path=r"D:\save\Programs\executable\chromedriver\133.0.6847.2\chromedriver.exe"
 current_hash = ""
 # https://www.chromedriverdownload.com/en/downloads/chromedriver-130-download
+
+sender = MessageSender()
 
 def create_browser():
     options = Options()
@@ -54,7 +57,7 @@ def extract_date_from_url(url):
 def calculate_interval(start_date_str):
     if start_date_str is None:
         #아마도 에러
-        send_message(f"[Note] Error detected! {start_date_str}", "")
+        sender.send_message(f"[Note] Error detected! {start_date_str}", "","err")
         return None
     if start_date_str.find("T") > 0:
         start_datetime = datetime.strptime(start_date_str, "%Y-%m-%dT%H:%M:%S%z")
@@ -89,17 +92,21 @@ def perform_task(driver, url, tag, index, current_hash, current_data, validate_l
             ret = is_content_valid(new_content, validate_level_max)
             if ret is None:
                 print(f"[{tag}] Detected the inactive page message2, not sending update.")
+                sender.clear_message( url, ret)
             else:
                 if len(ret) > 0:
                     if current_data == ret:
                         print(f"[{tag}] same with prev")
                     else:
-                        send_message(f"[{tag}] Change detected! {ret} at: {time.ctime()}", url)
+                        sender.send_message(f"[{tag}] Change detected with ret {ret} at: {time.ctime()}", url, ret)
                         print(f"[{tag}] Change detected at:", time.ctime())
                         print(f"[{tag}] rtn_contents {ret}")
                 else:
                     if validate_level_max == 1:
-                        send_message(f"[{tag}] Change detected! {ret} at: {time.ctime()}", url)
+                        sender.send_message(f"[{tag}] Change detected! {ret} at: {time.ctime()}", url, ret)
+                    else:
+                        sender.clear_message( url, ret)
+
     else:
         print(f"[{tag}] Detected same page")
     return new_hash, ret
@@ -120,16 +127,37 @@ def worker(task_queue):
         task_queue.put((url, tag, index, new_hash, new_data, validate_level, work_cnt + 1))
 
 
-def task_scheduler(urls, task_queue):
+
+def improved_task_scheduler(urls, task_queue):
+    next_run_times = []
+    for index, item in enumerate(urls, start=1):
+        date = extract_date_from_url(item["url"])
+        interval = calculate_interval(date)
+        next_run = time.time() + interval
+        heapq.heappush(next_run_times, (next_run, index - 1))  # index - 1 to match list indexing
+
     while True:
-        for index, item in enumerate(urls, start=1):
+        now = time.time()
+        if next_run_times and next_run_times[0][0] <= now:
+            _, url_index = heapq.heappop(next_run_times)
+            item = urls[url_index]
+
+            # Add task to queue
+            task_queue.put((item["url"], item["tag"], url_index + 1, None, None, item.get("validate"), 1))
+
+            # Calculate next run time and add back to heap
             date = extract_date_from_url(item["url"])
             interval = calculate_interval(date)
-            if interval < 0:
-                print(f"tag {item['tag']} skipped since it is passed")
+            if interval:
+                next_run = now + interval
+            else:
+                next_run=now+random.uniform(2, 7)
+            heapq.heappush(next_run_times, (next_run, url_index))
+
             print(f"Scheduled task for {item['tag']} with interval {interval:.2f} seconds.")
-            task_queue.put((item["url"], item["tag"], index, None, None, item.get("validate"), 1))
-            time.sleep(interval)
+        else:
+            # Sleep for a short time if no tasks are ready
+            time.sleep(0.1)
 
 
 # 단일 워커 스레드 생성 및 시작
@@ -139,7 +167,7 @@ worker_thread = threading.Thread(target=worker, args=(task_queue,))
 worker_thread.start()
 
 # Task Scheduler 스레드 생성 및 시작
-scheduler_thread = threading.Thread(target=task_scheduler, args=(urls, task_queue))
+scheduler_thread = threading.Thread(target=improved_task_scheduler, args=(urls, task_queue))
 scheduler_thread.start()
 
 # 메인 스레드는 계속 대기

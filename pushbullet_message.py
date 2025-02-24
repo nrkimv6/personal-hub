@@ -20,28 +20,54 @@ class MessageSender:
         self.expiry_time = expiry_time
         self.cleanup_timer = None
 
-    def send_message(self, message_content, url=None):
+    def clear_message(self,url, identifier=""):
+        current_time = time.time()
+        key = url
+        self.message_queue[key] = {
+            'content': "",
+            'timestamp': current_time,
+            'identifier': identifier
+        }
+
+    def send_message(self, message_content, url, identifier=""):
         message_title = "alert"
         content = message_content
-        if url:
-            content += f"\nurl: {url}"
+        identifier = str(identifier) if identifier is not None else ""
 
         current_time = time.time()
-        if content not in self.message_queue:
-            self.message_queue[content] = current_time
+        key = url
+
+        if identifier == 'err':
+            send_message_pushbullet(message_title, content)
+            # 'err' 메시지도 큐에 저장하고 만료 시간을 설정
+            self.message_queue[key] = {
+                'content': content,
+                'timestamp': current_time,
+                'identifier': identifier
+            }
+        elif key not in self.message_queue or self.message_queue[key]['identifier'] != identifier:
+            self.message_queue[key] = {
+                'content': content,
+                'timestamp': current_time,
+                'identifier': identifier
+            }
             send_message_pushbullet(message_title, content)
 
             # 첫 메시지가 추가되면 cleanup 타이머 시작
             if len(self.message_queue) == 1:
                 self.schedule_next_cleanup()
-
+        else:
+            # identifier가 다르면 업데이트만 수행
+            self.message_queue[key]['identifier'] = identifier
+            self.message_queue[key]['timestamp'] = current_time
+            print(f"Message for URL {url} already exists. Updating identifier to {identifier}")
 
     def schedule_next_cleanup(self):
         if self.cleanup_timer:
             self.cleanup_timer.cancel()
 
         if self.message_queue:
-            oldest_message_time = next(iter(self.message_queue.values()))
+            oldest_message_time = min(item['timestamp'] for item in self.message_queue.values())
             time_until_expiry = (oldest_message_time + self.expiry_time) - time.time()
 
             if time_until_expiry > 0:
@@ -52,14 +78,16 @@ class MessageSender:
 
     def cleanup_expired_messages(self):
         current_time = time.time()
-        expired_messages = [
-            content for content, timestamp in self.message_queue.items()
-            if current_time - timestamp >= self.expiry_time
+        expired_keys = [
+            key for key, data in self.message_queue.items()
+            if current_time - data['timestamp'] >= self.expiry_time
         ]
 
-        for content in expired_messages:
-            del self.message_queue[content]
-            print(f"Message expired and removed: {content}")
+        for key in expired_keys:
+            expired_data = self.message_queue.pop(key)
+            print(f"Message expired and removed for URL: {key}")
+            print(f"Expired content: {expired_data['content']}")
+            print(f"Identifier: {expired_data['identifier']}")
 
         self.schedule_next_cleanup()
 

@@ -1,5 +1,6 @@
 from bs4 import BeautifulSoup
 import re
+import time
 
 
 def is_full_reservation(html_content):
@@ -41,20 +42,13 @@ def is_page_availabe(html_content):
     return True
 
 
-def is_content_valid(html_content, level):
+def is_content_valid(html_content, level, desired_day=None):
     if level > 0:
         if not is_page_availabe(html_content):
             return None
 
     if level > 1:
         soup = BeautifulSoup(html_content, 'html.parser')
-        # # disabled 속성이 없는 버튼 필터링
-        #     enabled_buttons = [button for button in buttons if not button.has_attr('disabled')]
-        #
-        #     if len(enabled_buttons) > 0:
-        #         return True
-        #     else:
-        #         return False
 
         # 첫 번째 조건: btn_time 클래스가 있고 unselectable 클래스가 없는 버튼 찾기
         buttons = soup.select('div.section_content > div.time_area > div > ul > li > button')
@@ -68,6 +62,26 @@ def is_content_valid(html_content, level):
 
         if len(filtered_buttons) > 0:
             return [button.text for button in filtered_buttons]
+
+        # 새로운 조건 추가: #calendar > table > tbody > tr:nth-child(n) > td.on > a.calendar-date 확인
+        on_date = soup.select_one('#calendar > table > tbody > tr > td.on > a.calendar-date')
+
+        if not on_date:
+            print("No .on date found. Checking for desired day...")
+            if desired_day:
+                all_dates = soup.select('#calendar > table > tbody > tr > td > a.calendar-date > span.num')
+                for date in all_dates:
+                    if date.text.strip() == str(desired_day):
+                        print(f"Found desired day: {desired_day}")
+                        date.find_parent('a').click()  # 원하는 날짜 클릭
+                        time.sleep(10)  # 10초 대기
+                        break
+                else:
+                    print(f"Desired day {desired_day} not found")
+                    return None
+            else:
+                print("No desired day specified")
+                return None
 
         # 두 번째 조건: sold_out 클래스가 없는 li.item 요소 찾기
         items = soup.select('div.schedule_time > div > div > div > ul.list_time > li.item')
@@ -84,9 +98,3 @@ def is_content_valid(html_content, level):
         return None
     else:
         return ""
-
-    # Example usage within your script when processing new_content:
-    # if is_content_valid(new_content):
-    #     print("Content is valid and does not match the error or unwanted static page.")
-    # else:
-    #     print("Detected unwanted content. No actions will be performed.")
