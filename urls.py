@@ -105,8 +105,16 @@ urls = [
     #     "validate": 1
     # },F
      {
-        "url": "https://booking.naver.com/booking/12/bizes/1276629/items/6332309?from=myp&startDateTime=2024-12-13T00%3A00%3A00%2B09%3A00",
-        "tag": "티르티르_1213"
+        "url": "https://booking.naver.com/booking/12/bizes/1344902/items/6513108?area=ple&lang=ko&startDateTime=2025-03-01T00%3A00%3A00%2B09%3A00&tab=book&theme=place",
+        "tag": "나르카_0301"
+    },
+     {
+        "url": "https://booking.naver.com/booking/12/bizes/1344902/items/6513108?area=ple&lang=ko&startDateTime=2025-03-02T00%3A00%3A00%2B09%3A00&tab=book&theme=place",
+        "tag": "나르카_0302"
+    },
+     {
+        "url": "https://booking.naver.com/booking/12/bizes/1344902/items/6513108?area=ple&lang=ko&startDateTime=2025-03-03T00%3A00%3A00%2B09%3A00&tab=book&theme=place",
+        "tag": "나르카_0303"
     },
     # https://booking.naver.com/booking/12/bizes/1243139/items/6207807?bookingId=769366787&endDateTime=2024-10-19T05:30:00Z&options=&prices=7591773&startDateTime=2024-10-19T05:30:00Z
     # https://booking.naver.com/booking/6/bizes/1239631/items/6194317
