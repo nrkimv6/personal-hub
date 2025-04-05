@@ -4,6 +4,8 @@ import heapq
 import time
 from datetime import datetime, timedelta
 from queue import Queue
+
+from plyer import notification
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -29,31 +31,28 @@ asyncio.set_event_loop(loop)
 
 
 # send_telegram_notification을 동기적으로 실행하는 헬퍼 함수 추가
-def send_telegram_sync(message):
-    try:
-        future = asyncio.run_coroutine_threadsafe(
-            send_telegram_notification(message),
-            loop
-        )
-        return future.result(timeout=10)  # 10초 타임아웃 설정
-    except Exception as e:
-        print(f"텔레그램 발송 실패: {str(e)}")
-        return None
-
-
 def create_browser():
     options = Options()
     options.add_argument("--disable-setuid-sandbox")
-
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    
+    # 임시 프로필 디렉토리 사용
+    import tempfile
+    import os
+    temp_dir = tempfile.mkdtemp()
+    options.add_argument(f"--user-data-dir={temp_dir}")
+    
     service = Service(executable_path=driver_path)
-    options.add_argument(f"--user-data-dir={user_data_dir}")  # Path to the user data directory
-    options.add_argument(f"--profile-directory={profile_dir}")  # Profile directory
-    # options.add_argument("--single-process")
-    # options.add_argument("--disable-gpu")
-    # options.add_argument("--no-sandbox")
-    options.add_argument(f"--remote-debugging-port=9354")  # Add this line
-    # options.add_argument("--disable-software-rasterizer")  # Add this line
+    options.add_argument(f"--remote-debugging-port=0")  # 랜덤 포트 사용
     options.binary_location = chrome_path
+    
+    # 추가 옵션
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--disable-extensions")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option('useAutomationExtension', False)
+    
     driver = webdriver.Chrome(service=service, options=options)
     return driver
 
@@ -71,6 +70,15 @@ def extract_date_from_url(url):
     else:
         return None
 
+def send_desktop_notification(title, message):
+    try:
+        notification.notify(
+            title=title,
+            message=message,
+            timeout=10
+        )
+    except Exception as e:
+        print(f"데스크톱 알림 발송 실패: {e}")
 
 def calculate_interval(start_date_str):
     if start_date_str is None:
@@ -106,7 +114,7 @@ def perform_task(driver, url, tag, index, current_hash, current_data, validate_l
     driver, new_hash, new_content = get_hash(driver, url, create_browser)
     if new_hash is None:
         print("fatal error to get hash!")
-        return current_hash
+        return current_hash, None
     validate_level_max = 2
     try:
         validate_level_max = int(validate_level)
@@ -135,55 +143,3 @@ def perform_task(driver, url, tag, index, current_hash, current_data, validate_l
     else:
         print(f"[{tag}] Detected same page")
     return new_hash, ret
-
-#
-# def worker(task_queue):
-#     driver = create_browser()
-#     while True:
-#         url, tag, index, current_hash, current_data, validate_level, work_cnt = task_queue.get()
-#         if url is None:
-#             break
-#         if work_cnt == 0:
-#             send_telegram_sync(f"work add for tag:{tag}, index:{index}")
-#         print(f"pop task : {tag} work_cnt {work_cnt}")
-#         new_hash, new_data = perform_task(driver, url, tag, index, current_hash, current_data, validate_level)
-#         task_queue.task_done()
-#         # 작업 완료 후 다시 큐에 추가
-#         task_queue.put((url, tag, index, new_hash, new_data, validate_level, work_cnt + 1))
-
-#
-# def improved_task_scheduler(urls, task_queue):
-#     next_run_times = []
-#     for index, item in enumerate(urls, start=1):
-#         date = extract_date_from_url(item["url"])
-#         interval = calculate_interval(date)
-#         # interval이 None인 경우 기본값으로 짧은 간격 설정
-#         if interval is None:
-#             interval = random.uniform(2, 7)
-#         next_run = time.time() + interval
-#         heapq.heappush(next_run_times, (next_run, index - 1))
-#
-#     while True:
-#         now = time.time()
-#         if next_run_times and next_run_times[0][0] <= now:
-#             _, url_index = heapq.heappop(next_run_times)
-#             item = urls[url_index]
-#
-#             # Add task to queue
-#             task_queue.put((item["url"], item["tag"], url_index + 1, None, None, item.get("validate"), 1))
-#
-#             # Calculate next run time and add back to heap
-#             date = extract_date_from_url(item["url"])
-#             interval = calculate_interval(date)
-#             # interval이 None인 경우 기본값으로 짧은 간격 설정
-#             if interval is None:
-#                 interval = random.uniform(2, 7)
-#             next_run = now + interval
-#             heapq.heappush(next_run_times, (next_run, url_index))
-#
-#             print(f"Scheduled task for {item['tag']} with interval {interval:.2f} seconds.")
-#         else:
-#             # Sleep for a short time if no tasks are ready
-#             time.sleep(0.1)
-
-
