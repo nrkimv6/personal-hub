@@ -3,6 +3,8 @@ import time
 import asyncio
 from datetime import datetime
 from pathlib import Path
+import re
+import os
 
 import playwright.async_api as pw
 from plyer import notification
@@ -28,6 +30,10 @@ async def send_telegram_notification_wrapper(message):
 
 def send_desktop_notification(title, message):
     try:
+        # Windows 알림 시스템은 메시지 길이에 256자 제한이 있으므로 메시지를 잘라냅니다
+        if len(message) > 256:
+            message = message[:253] + "..."
+            
         notification.notify(
             title=title,
             message=message,
@@ -83,18 +89,93 @@ def calculate_interval(start_date_str):
 
 async def get_hash(page, url):
     try:
+        print(f"[DEBUG] get_hash 시작: URL={url}")
+        print(f"[DEBUG] page 객체 타입: {type(page)}")
+        print(f"[DEBUG] page.goto 메서드 타입: {type(page.goto)}")
+        
         await page.goto(url, wait_until="networkidle", timeout=30000)
+        print(f"[DEBUG] 페이지 로딩 완료")
+        
+        # 현재 URL 확인
+        current_url = page.url
+        print(f"Page URL: {current_url}")
+        
+        # 에러 페이지 감지
+        if "error" in current_url or "invalidBusiness" in current_url:
+            error_message = f"[ERROR] 에러 페이지로 리다이렉트됨: {current_url}"
+            print(error_message)
+            
+            # 에러 페이지 타입 확인
+            error_type = "알 수 없음"
+            if "invalidBusiness" in current_url:
+                error_type = "유효하지 않은 비즈니스"
+            elif "error" in current_url:
+                error_type = "일반 오류"
+                
+            # 에러 페이지 스크린샷 저장 (선택적)
+            try:
+                screenshot_path = f"error_screenshots/error_{int(time.time())}.png"
+                os.makedirs("error_screenshots", exist_ok=True)
+                await page.screenshot(path=screenshot_path)
+                print(f"[DEBUG] 에러 페이지 스크린샷 저장: {screenshot_path}")
+            except Exception as e:
+                print(f"[WARNING] 스크린샷 저장 실패: {e}")
+                
+            # 데스크톱 알림 발송
+            send_desktop_notification(
+                "에러 페이지 감지", 
+                f"URL: {url}\n에러 타입: {error_type}\n리다이렉트 URL: {current_url}"
+            )
+            
+            return None, None
+        
+        # title 속성 접근 방식 수정
+        try:
+            page_title = await page.title()
+            print(f"Page Title: {page_title}")
+        except Exception as e:
+            print(f"[WARNING] 페이지 제목 가져오기 실패: {e}")
+            page_title = "제목 없음"
+        
         content = await page.content()
-        print(f"Page URL: {await page.url()}")
-        print(f"Page Title: {await page.title()}")
-        return hash(content), content
+        print(f"[DEBUG] 페이지 콘텐츠 추출 완료, 길이: {len(content)}")
+        
+        print(f"[DEBUG] hash 함수 타입: {type(hash)}")
+        content_hash = hash(content)
+        print(f"[DEBUG] 해시 계산 완료: {content_hash}")
+        
+        return content_hash, content
     except Exception as e:
         print(f"Error getting hash: {e}")
+        print(f"[DEBUG] 예외 타입: {type(e)}")
+        import traceback
+        print(f"[DEBUG] 예외 스택트레이스: {traceback.format_exc()}")
         return None, None
+
+
+# 시간과 매수를 파싱하는 함수 추가
+def parse_time_and_stock(button_text):
+    """
+    버튼 텍스트에서 시간과 매수를 파싱합니다.
+    예: "오전 11:001매" -> ("오전 11:00", "1")
+    """
+    # 시간 패턴 (오전/오후 HH:MM)
+    time_pattern = r'(오전|오후)\s+\d{1,2}:\d{2}'
+    time_match = re.search(time_pattern, button_text)
+    time_str = time_match.group(0) if time_match else ""
+    
+    # 매수 패턴 (숫자+매)
+    stock_pattern = r'(\d+)매'
+    stock_match = re.search(stock_pattern, button_text)
+    stock_str = stock_match.group(1) if stock_match else "0"
+    
+    return time_str, stock_str
 
 
 async def perform_task(browser_context, url, tag, current_hash, current_data, validate_level=2):
     print(f"[{tag}] perform_task at: {time.ctime()}")
+    print(f"[DEBUG] perform_task 시작: URL={url}, tag={tag}, current_hash={current_hash}")
+    print(f"[DEBUG] browser_context 타입: {type(browser_context)}")
 
     try:
         # browser_context가 Page 객체인 경우 (browser7.py에서 호출될 때)
@@ -129,8 +210,27 @@ async def perform_task(browser_context, url, tag, current_hash, current_data, va
                         if current_data == ret:
                             print(f"[{tag}] same with prev")
                         else:
-                            message = f"[{tag}] Change detected with ret {ret} at: {time.ctime()}"
-                            await send_telegram_notification(message)
+                            # 시간과 매수 정보 파싱
+                            time_changes = []
+                            stock_changes = []
+                            
+                            for button_text in ret:
+                                time_str, stock_str = parse_time_and_stock(button_text)
+                                if time_str:
+                                    time_changes.append(time_str)
+                                if stock_str:
+                                    stock_changes.append(f"{time_str}: {stock_str}매")
+                            
+                            # 텔레그램 메시지 (시간만)
+                            if time_changes:
+                                telegram_message = f"[{tag}] 시간 변경 감지: {', '.join(time_changes)} at: {time.ctime()}"
+                                await send_telegram_notification(telegram_message)
+                            
+                            # 데스크톱 메시지 (시간과 매수)
+                            if stock_changes:
+                                desktop_message = f"[{tag}] 변경 감지: {', '.join(stock_changes)} at: {time.ctime()}"
+                                send_desktop_notification(f"[{tag}] 변경 감지", desktop_message)
+                            
                             print(f"[{tag}] Change detected at:", time.ctime())
                             print(f"[{tag}] rtn_contents {ret}")
                     else:

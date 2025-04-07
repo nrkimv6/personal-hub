@@ -9,6 +9,7 @@ from plyer import notification
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from setting import user_data_dir, profile_dir, chrome_path, driver_path
 import asyncio
 from functools import partial
 
@@ -17,11 +18,7 @@ from urls import urls
 from util import get_hash
 from valid_check import is_content_valid
 
-user_data_dir = r"C:\Users\Narang\AppData\Local\Google\Chrome\User Data"
-profile_dir = r"Default"
-chrome_path = r"C:\Program Files\Google\Chrome Dev\Application\chrome.exe"
-# driver_path = r"D:\save\Programs\executable\chromedriver\chromedriver.exe"
-driver_path = r"D:\save\Programs\executable\chromedriver\135.0.7023\chromedriver.exe"
+
 current_hash = ""
 # https://www.chromedriverdownload.com/en/downloads/chromedriver-130-download
 

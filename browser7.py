@@ -7,6 +7,7 @@ import random
 from datetime import datetime
 
 from run_playwright import user_data_dir, perform_task, extract_date_from_url, calculate_interval
+from setting import user_data_dir, profile_dir, chrome_path, driver_path
 
 # Global dictionary to store URL states across workers
 url_states = {}
@@ -21,7 +22,7 @@ from functools import partial
 
 from telegram_message import send_telegram_notification, send_desktop_notification
 from urls import urls
-from util import get_hash
+from util import get_hash as util_get_hash
 from valid_check import is_content_valid
 
 # URL별 상태를 저장하는 전역 딕셔너리
@@ -95,21 +96,26 @@ async def initialize_browser():
     global browser_context, playwright_instance
     
     if browser_context is None:
-        # Windows 환경의 Chrome 프로필 디렉토리 설정
-        profile_dir = Path(os.environ['LOCALAPPDATA']) / "Google" / "Chrome" / "User Data"
-        worker_profile_dir = profile_dir / "Default"
+        # setting.py에서 가져온 프로필 디렉토리 사용
+        # user_data_dir과 profile_dir이 문자열인 경우를 고려
+        if isinstance(user_data_dir, str) and isinstance(profile_dir, str):
+            worker_profile_dir = os.path.join(user_data_dir, profile_dir)
+        else:
+            # Path 객체인 경우
+            worker_profile_dir = user_data_dir / profile_dir
         
         # 프로필 디렉토리가 없으면 생성
-        if not worker_profile_dir.exists():
-            print("프로필 디렉토리가 없습니다. 새로 생성합니다.")
-            worker_profile_dir.mkdir(parents=True, exist_ok=True)
+        if not os.path.exists(worker_profile_dir):
+            print(f"프로필 디렉토리가 없습니다: {worker_profile_dir}")
+            print("프로필 디렉토리를 새로 생성합니다.")
+            os.makedirs(worker_profile_dir, exist_ok=True)
         
         # Playwright 인스턴스 생성 및 저장
         playwright_instance = await async_playwright().start()
         
         # 브라우저 컨텍스트 생성 및 저장
         browser_context = await playwright_instance.chromium.launch_persistent_context(
-            user_data_dir=str(worker_profile_dir),
+            user_data_dir=worker_profile_dir,
             headless=False,
             args=[
                 '--disable-blink-features=AutomationControlled',
@@ -119,7 +125,7 @@ async def initialize_browser():
                 '--disable-dev-shm-usage',
             ]
         )
-        print("브라우저 컨텍스트가 초기화되었습니다.")
+        print(f"브라우저 컨텍스트가 초기화되었습니다. 프로필 디렉토리: {worker_profile_dir}")
     
     return browser_context
 
