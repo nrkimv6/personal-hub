@@ -61,20 +61,28 @@ def calculate_interval(start_date_str):
     if start_date_str is None:
         # 아마도 에러
         asyncio.create_task(send_telegram_notification_wrapper(f"[Note] Error detected! {start_date_str}"))
+        send_desktop_notification("에러 감지", f"날짜 데이터 없음: {start_date_str}")
         return None
     try:
         if start_date_str.find("T") > 0:
             # 공백으로 구분된 시간대 처리
             if " " in start_date_str:
-                date_part = start_date_str.replace(" ", "+").replace(":", "", 1)
+                # 공백을 +로 변환하고 시간 형식 수정
+                date_part = start_date_str.replace(" ", "+")
+                if "0000" in date_part:
+                    date_part = date_part.replace("0000", "00:00")
                 start_datetime = datetime.strptime(date_part, "%Y-%m-%dT%H:%M:%S%z")
             else:
+                # 0000 형식 처리
+                if "0000" in start_date_str:
+                    start_date_str = start_date_str.replace("0000", "00:00")
                 start_datetime = datetime.strptime(start_date_str, "%Y-%m-%dT%H:%M:%S%z")
         else:
             start_datetime = datetime.strptime(start_date_str + "T00:00:00+0900", "%Y-%m-%dT%H:%M:%S%z")
     except ValueError as e:
-        asyncio.create_task(
-            send_telegram_notification_wrapper(f"[Note] Date parsing error! {start_date_str}: {str(e)}"))
+        error_message = f"[Note] Date parsing error! {start_date_str}: {str(e)}"
+        asyncio.create_task(send_telegram_notification_wrapper(error_message))
+        send_desktop_notification("날짜 파싱 에러", f"날짜: {start_date_str}\n에러: {str(e)}")
         return random.uniform(2, 7)
     now = datetime.now(start_datetime.tzinfo)
     delta = start_datetime - now
@@ -109,8 +117,15 @@ async def get_hash(page, url):
             error_type = "알 수 없음"
             if "invalidBusiness" in current_url:
                 error_type = "유효하지 않은 비즈니스"
+                # invalidBusiness는 매진 상태이므로 데스크톱 알림을 보내지 않음
+                return None, None
             elif "error" in current_url:
                 error_type = "일반 오류"
+                # 일반 오류일 경우에만 데스크톱 알림 발송
+                send_desktop_notification(
+                    "에러 페이지 감지", 
+                    f"URL: {url}\n에러 타입: {error_type}\n리다이렉트 URL: {current_url}"
+                )
                 
             # 에러 페이지 스크린샷 저장 (선택적)
             try:
@@ -121,12 +136,6 @@ async def get_hash(page, url):
             except Exception as e:
                 print(f"[WARNING] 스크린샷 저장 실패: {e}")
                 
-            # 데스크톱 알림 발송
-            send_desktop_notification(
-                "에러 페이지 감지", 
-                f"URL: {url}\n에러 타입: {error_type}\n리다이렉트 URL: {current_url}"
-            )
-            
             return None, None
         
         # title 속성 접근 방식 수정

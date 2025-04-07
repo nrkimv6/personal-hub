@@ -158,7 +158,7 @@ urls = [
     },
 
     {
-        "url": "https://m.booking.naver.com/booking/12/bizes/1357646/items/6616979?startDateTime=2025-04-11T00:00:00+09:00",
+        "url": "https://booking.naver.com/booking/12/bizes/1357646/items/6616979?startDateTime=2025-04-11T00:00:00+09:00",
         "tag": "삐아_0411"
     },
     {

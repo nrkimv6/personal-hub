@@ -81,19 +81,28 @@ def calculate_interval(start_date_str):
     if start_date_str is None:
         # 아마도 에러
         send_telegram_sync(f"[Note] Error detected! {start_date_str}")
+        send_desktop_notification("에러 감지", f"날짜 데이터 없음: {start_date_str}")
         return None
     try:
         if start_date_str.find("T") > 0:
             # 공백으로 구분된 시간대 처리
             if " " in start_date_str:
-                date_part = start_date_str.replace(" ", "+").replace(":", "", 1)
+                # 공백을 +로 변환하고 시간 형식 수정
+                date_part = start_date_str.replace(" ", "+")
+                if "0000" in date_part:
+                    date_part = date_part.replace("0000", "00:00")
                 start_datetime = datetime.strptime(date_part, "%Y-%m-%dT%H:%M:%S%z")
             else:
+                # 0000 형식 처리
+                if "0000" in start_date_str:
+                    start_date_str = start_date_str.replace("0000", "00:00")
                 start_datetime = datetime.strptime(start_date_str, "%Y-%m-%dT%H:%M:%S%z")
         else:
             start_datetime = datetime.strptime(start_date_str + "T00:00:00+0900", "%Y-%m-%dT%H:%M:%S%z")
     except ValueError as e:
-        send_telegram_sync(f"[Note] Date parsing error! {start_date_str}: {str(e)}")
+        error_message = f"[Note] Date parsing error! {start_date_str}: {str(e)}"
+        send_telegram_sync(error_message)
+        send_desktop_notification("날짜 파싱 에러", f"날짜: {start_date_str}\n에러: {str(e)}")
         return random.uniform(2, 7)
     now = datetime.now(start_datetime.tzinfo)
     delta = start_datetime - now
