@@ -1,5 +1,0 @@
-user_data_dir = r"C:\Users\Narang\AppData\Local\Google\Chrome\User Data"
-profile_dir = r"Default"
-chrome_path = r"C:\Program Files\Google\Chrome Dev\Application\chrome.exe"
-# driver_path = r"D:\save\Programs\executable\chromedriver\chromedriver.exe"
-driver_path = r"D:\save\Programs\executable\chromedriver\135.0.7023\chromedriver.exe"
