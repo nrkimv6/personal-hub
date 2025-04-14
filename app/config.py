@@ -40,9 +40,9 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = "7912548094:AAGp1Ii05IPFpM3uec75NTzJceYwrq2Lb4g"
     TELEGRAM_CHAT_ID: str = "7774293093"
     ENABLE_DESKTOP_NOTIFICATION: bool = True
-    EMAIL_ADDRESS = "g100mkrw1@gmail.com"
-    EMAIL_PASSWORD = "Caww@60925"  # Gmail 앱 비밀번호
-    RECIPIENT_EMAIL = "orangepie2236@email.com"
+    EMAIL_ADDRESS:str = "g100mkrw1@gmail.com"
+    EMAIL_PASSWORD:str = "Caww@60925"  # Gmail 앱 비밀번호
+    RECIPIENT_EMAIL:str = "orangepie2236@email.com"
     
     # 중복 메시지 필터링 설정
     MESSAGE_DEDUPLICATION: bool = True  # 중복 메시지 필터링 활성화 여부
@@ -52,11 +52,12 @@ class Settings(BaseSettings):
     # 에러 페이지 감지 설정
     ERROR_PAGE_DETECTION: bool = True  # 에러 페이지 감지 활성화 여부
     ERROR_PATTERNS: list = [
-        "error", 
-        "invalidBusiness", 
-        "not-found",
-        "reservation-error"
-    ]  # 에러 URL 패턴
+        "invalidBusiness",  # 매진 상태
+        "error",  # 일반 에러
+        "errorPage",  # 에러 페이지
+        "페이지를 찾을 수 없습니다",  # 404 에러
+        "서비스 점검 중입니다",  # 서비스 점검
+    ]
 
     class Config:
         env_file = ".env"
