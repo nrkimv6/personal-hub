@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>모니터링 시스템</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .target-card {
+            transition: all 0.3s ease;
+        }
+        .target-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .status-badge {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-eye"></i> 모니터링 시스템
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="#">대시보드</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-bs-toggle="modal" data-bs-target="#addTargetModal">
+                            <i class="bi bi-plus-circle"></i> 새 대상 추가
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row mb-4">
+            <div class="col">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">모니터링 통계</h5>
+                        <div class="row text-center">
+                            <div class="col">
+                                <h3 id="totalTargets">0</h3>
+                                <p class="text-muted">전체 대상</p>
+                            </div>
+                            <div class="col">
+                                <h3 id="activeTargets">0</h3>
+                                <p class="text-muted">활성 대상</p>
+                            </div>
+                            <div class="col">
+                                <h3 id="changesToday">0</h3>
+                                <p class="text-muted">오늘의 변경</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row" id="targetList">
+            <!-- 대상 카드들이 여기에 동적으로 추가됩니다 -->
+        </div>
+    </div>
+
+    <!-- 새 대상 추가 모달 -->
+    <div class="modal fade" id="addTargetModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">새 모니터링 대상 추가</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="addTargetForm">
+                        <div class="mb-3">
+                            <label class="form-label">URL</label>
+                            <input type="url" class="form-control" name="url" id="urlInput" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">레이블</label>
+                            <input type="text" class="form-control" name="label" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">카테고리</label>
+                            <input type="text" class="form-control" name="category" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">서비스 타입</label>
+                            <input type="text" class="form-control" name="service_type" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">날짜</label>
+                            <input type="date" class="form-control" name="date" id="dateInput" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">시간</label>
+                            <input type="text" class="form-control" name="times" placeholder="HH:MM,HH:MM" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">기본 URL</label>
+                            <input type="url" class="form-control" name="base_url" id="baseUrlInput" required>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                    <button type="button" class="btn btn-primary" onclick="addTarget()">추가</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // API 기본 URL
+        const API_BASE = '/api/v1/monitor';
+
+        // 페이지 로드 시 실행
+        document.addEventListener('DOMContentLoaded', () => {
+            loadTargets();
+            updateStats();
+        });
+
+        // 대상 목록 로드
+        async function loadTargets() {
+            try {
+                const response = await fetch(`${API_BASE}/targets`);
+                const targets = await response.json();
+                
+                const targetList = document.getElementById('targetList');
+                targetList.innerHTML = '';
+                
+                targets.forEach(target => {
+                    targetList.appendChild(createTargetCard(target));
+                });
+            } catch (error) {
+                console.error('대상 목록 로드 실패:', error);
+            }
+        }
+
+        // 대상 카드 생성
+        function createTargetCard(target) {
+            const card = document.createElement('div');
+            card.className = 'col-md-4 mb-4';
+            card.innerHTML = `
+                <div class="card target-card">
+                    <div class="card-body">
+                        <span class="badge ${target.is_active ? 'bg-success' : 'bg-danger'} status-badge">
+                            ${target.is_active ? '활성' : '비활성'}
+                        </span>
+                        <h5 class="card-title">${target.label}</h5>
+                        <p class="card-text">
+                            <small class="text-muted">${target.category} / ${target.service_type}</small>
+                        </p>
+                        <p class="card-text">
+                            <a href="${target.url}" target="_blank" class="text-truncate d-block">
+                                ${target.url}
+                            </a>
+                        </p>
+                        <div class="btn-group">
+                            <button class="btn btn-sm btn-outline-primary" onclick="toggleMonitoring(${target.id}, ${!target.is_active})">
+                                ${target.is_active ? '중지' : '시작'}
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="editTarget(${target.id})">
+                                수정
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteTarget(${target.id})">
+                                삭제
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            return card;
+        }
+
+        // 통계 업데이트
+        async function updateStats() {
+            try {
+                const response = await fetch(`${API_BASE}/targets`);
+                const targets = await response.json();
+                
+                document.getElementById('totalTargets').textContent = targets.length;
+                document.getElementById('activeTargets').textContent = 
+                    targets.filter(t => t.is_active).length;
+                // TODO: 오늘의 변경 수 구현
+                document.getElementById('changesToday').textContent = '0';
+            } catch (error) {
+                console.error('통계 업데이트 실패:', error);
+            }
+        }
+
+        // 새 대상 추가
+        async function addTarget() {
+            const form = document.getElementById('addTargetForm');
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+            
+            // times 문자열을 배열로 변환
+            data.times = data.times.split(',').map(t => t.trim());
+            
+            try {
+                const response = await fetch(`${API_BASE}/targets`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data),
+                });
+                
+                if (response.ok) {
+                    bootstrap.Modal.getInstance(document.getElementById('addTargetModal')).hide();
+                    form.reset();
+                    loadTargets();
+                    updateStats();
+                }
+            } catch (error) {
+                console.error('대상 추가 실패:', error);
+            }
+        }
+
+        // 모니터링 토글
+        async function toggleMonitoring(targetId, start) {
+            try {
+                const response = await fetch(
+                    `${API_BASE}/targets/${targetId}/${start ? 'start' : 'stop'}`,
+                    { method: 'POST' }
+                );
+                
+                if (response.ok) {
+                    loadTargets();
+                    updateStats();
+                }
+            } catch (error) {
+                console.error('모니터링 상태 변경 실패:', error);
+            }
+        }
+
+        // 대상 삭제
+        async function deleteTarget(targetId) {
+            if (!confirm('정말 삭제하시겠습니까?')) return;
+            
+            try {
+                const response = await fetch(`${API_BASE}/targets/${targetId}`, {
+                    method: 'DELETE',
+                });
+                
+                if (response.ok) {
+                    loadTargets();
+                    updateStats();
+                }
+            } catch (error) {
+                console.error('대상 삭제 실패:', error);
+            }
+        }
+
+        // 대상 수정 (TODO: 구현)
+        function editTarget(targetId) {
+            // TODO: 수정 모달 구현
+            alert('수정 기능은 아직 구현되지 않았습니다.');
+        }
+
+        document.getElementById('urlInput').addEventListener('input', function() {
+            const url = new URL(this.value);
+            const baseUrl = `${url.origin}${url.pathname}`;
+            const params = new URLSearchParams(url.search);
+            const date = params.get('startDateTime') ? params.get('startDateTime').split('T')[0] : '';
+
+            document.getElementById('baseUrlInput').value = baseUrl;
+            document.getElementById('dateInput').value = date;
+        });
+    </script>
+</body>
+</html> 
