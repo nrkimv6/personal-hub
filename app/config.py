@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     # 모니터링 설정
     MAX_WORKERS: int = 3
     MAX_TABS_PER_WORKER: int = 5
-    TAB_CLEANUP_THRESHOLD: int = 300
+    TAB_CLEANUP_THRESHOLD: int = 3000
     CHECK_INTERVAL: int = 60  # 모니터링 체크 간격 (초)
     
     # 날짜 기반 스케줄링 설정
