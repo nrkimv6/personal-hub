@@ -2,3 +2,5 @@
 archive/*
 .idea/
 __pycache__/
+error_screenshots/
+logs/
