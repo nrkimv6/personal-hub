@@ -30,8 +30,18 @@ class NotificationService:
         """메시지의 해시값을 계산합니다."""
         return hashlib.md5(message.encode('utf-8')).hexdigest()
         
-    def _is_duplicate_message(self, message: str) -> bool:
-        """메시지가 중복인지 확인합니다."""
+    def _is_duplicate_message(self, message: str, url: str = None, status: str = None, time_info: list = None) -> bool:
+        """메시지가 중복인지 확인합니다.
+        
+        Args:
+            message: 알림 메시지
+            url: 대상 URL (선택적)
+            status: 현재 상태 (선택적)
+            time_info: 시간 정보 목록 (선택적)
+            
+        Returns:
+            bool: 중복 메시지 여부
+        """
         if not settings.MESSAGE_DEDUPLICATION:
             return False
             
@@ -48,11 +58,37 @@ class NotificationService:
         for msg_hash in expired_hashes:
             if msg_hash in self.message_timestamps:
                 del self.message_timestamps[msg_hash]
-                
-        # 중복 확인
+        
+        # 기본 해시 계산
         msg_hash = self._hash_message(message)
+        
+        # 시간 정보와 URL 상태를 결합한 고급 필터링
+        # URL과 상태 정보가 제공된 경우
+        if url and status and time_info:
+            # URL 상태 확인
+            url_info = self._get_url_status(url)
+            last_update_time = url_info.get("last_update")
+            
+            # 마지막 상태 업데이트 시간이 10분 이내인지 확인
+            if last_update_time and current_time - last_update_time < timedelta(minutes=10):
+                # 상태가 동일하고 동일한 시간 정보가 있는 경우
+                if url_info.get("status") == status:
+                    # 시간 정보 중복 확인
+                    for time_str in time_info:
+                        if self._is_time_recently_alerted(url, time_str):
+                            print(f"시간 정보 중복 감지: {url} - {time_str}")
+                            return True
+                            
+            # 특별한 상태 변화의 경우 항상 알림 (예: 매진→예약가능)
+            if status == "예약가능" and url_info.get("status") == "매진":
+                print(f"중요 상태 변화 감지! {url_info.get('status')} → {status}")
+                # 중요 변경은 필터링하지 않음
+                pass
+        
+        # 일반 해시 기반 중복 확인
         if msg_hash in self.message_timestamps:
-            print(f"중복 메시지 감지됨: {message[:30]}...")
+            time_diff = (current_time - self.message_timestamps[msg_hash]).total_seconds()
+            print(f"중복 메시지 감지됨: {message[:30]}... ({int(time_diff)}초 전)")
             return True
             
         # 새 메시지 추가
@@ -131,11 +167,6 @@ class NotificationService:
         if not self.telegram_bot_token or not self.telegram_chat_id:
             return False
             
-        # 중복 메시지 확인
-        if self._is_duplicate_message(message):
-            print("중복 메시지로 텔레그램 알림 발송 건너뜀")
-            return False
-
         try:
             url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
             data = {
@@ -265,8 +296,17 @@ class NotificationService:
             # 정렬에 실패하면 원래 순서로 리턴
             return "\n".join(stocks)
 
-    async def notify_change(self, target_id: int, url: str, label: str, content: str, last_check_time=None):
-        """변경 사항을 알립니다."""
+    async def notify_change(self, target_id: int, url: str, label: str, content: str, last_check_time=None, validity_info=None):
+        """변경 사항을 알립니다.
+        
+        Args:
+            target_id: 모니터링 대상 ID
+            url: 모니터링 URL
+            label: 모니터링 라벨
+            content: 페이지 콘텐츠
+            last_check_time: 마지막 확인 시간
+            validity_info: 유효성 검사 결과 정보 (선택적)
+        """
         # 현재 시간과 경과 시간 계산
         current_time = datetime.now()
         timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S")
@@ -275,22 +315,47 @@ class NotificationService:
         elapsed_time_str = "확인 불가"
         if last_check_time:
             elapsed_seconds = (current_time - last_check_time).total_seconds()
-            elapsed_minutes = int(elapsed_seconds // 60)
-            elapsed_seconds = int(elapsed_seconds % 60)
-            elapsed_time_str = f"{elapsed_minutes}분 {elapsed_seconds}초"
+            
+            # 가독성 향상된 경과 시간 표시
+            if elapsed_seconds < 60:
+                elapsed_time_str = f"{int(elapsed_seconds)}초"
+            elif elapsed_seconds < 3600:
+                minutes = int(elapsed_seconds // 60)
+                seconds = int(elapsed_seconds % 60)
+                elapsed_time_str = f"{minutes}분 {seconds}초"
+            else:
+                hours = int(elapsed_seconds // 3600)
+                minutes = int((elapsed_seconds % 3600) // 60)
+                seconds = int(elapsed_seconds % 60)
+                elapsed_time_str = f"{hours}시간 {minutes}분 {seconds}초"
         
         # 콘텐츠 유효성 검사 및 정보 파싱
         page_info = parse_page_info(content)
         
-        # 콘텐츠 상태 결정
-        if page_info["available"] and page_info["times"]:
-            status = "예약가능"
-        elif is_full_reservation(content):
-            status = "매진"
-        elif not is_page_available(content):
-            status = "에러"
+        # 유효성 검사 정보가 제공된 경우 사용
+        if validity_info:
+            # 유효성 검사 결과에 따라 상태 결정
+            if validity_info.get("is_full", False):
+                status = "매진"
+            elif not validity_info.get("is_available", True):
+                status = "에러"
+            elif validity_info.get("is_valid", False) and validity_info.get("valid_times"):
+                status = "예약가능"
+                # 유효성 검사에서 반환된 시간 정보가 있으면 사용
+                if isinstance(validity_info.get("valid_times"), list):
+                    page_info["times"] = validity_info["valid_times"]
+            else:
+                status = "변경"
         else:
-            status = "변경"
+            # 기존 방식으로 상태 결정
+            if page_info["available"] and page_info["times"]:
+                status = "예약가능"
+            elif is_full_reservation(content):
+                status = "매진"
+            elif not is_page_available(content):
+                status = "에러"
+            else:
+                status = "변경"
             
         # URL 상태 업데이트
         change_type = self._update_url_status(url, status)
@@ -298,9 +363,26 @@ class NotificationService:
         # 알림 제목 결정
         notification_title = self._get_notification_title(status, change_type)
         
+        # 시간 정보 추가 파싱 및 처리
+        additional_times_info = []
+        if page_info["times"]:
+            for time_text in page_info["times"]:
+                time_str, stock_str = parse_time_and_stock(time_text)
+                stock_int = int(stock_str) if stock_str and stock_str.isdigit() else 0
+                
+                if time_str:
+                    info = f"{time_str}"
+                    if stock_int > 0:
+                        info += f": {stock_int}매"
+                    additional_times_info.append(info)
+        
         # 시간 및 매수 정보 포맷팅
         formatted_times = self._format_time_info(page_info["times"])
         formatted_stocks = self._format_stock_info(page_info["stocks"])
+        
+        # 추가 파싱 정보가 있고 기존 정보가 없는 경우 대체
+        if additional_times_info and not formatted_stocks:
+            formatted_stocks = self._format_stock_info(additional_times_info)
         
         # URL 단축
         short_url = url
@@ -330,7 +412,7 @@ class NotificationService:
                 if days_left > 0:
                     days_left_str = f" (D-{days_left})"
                 elif days_left == 0:
-                    days_left_str = " (D-day)"
+                    days_left_str = f" (D-day)"
                 else:
                     days_left_str = f" (D+{abs(days_left)})"
             except:
@@ -362,12 +444,17 @@ class NotificationService:
         if formatted_times:
             telegram_message += f"\n\n<b>예약 가능 시간:</b>\n{formatted_times}"
         
-        # 매수 정보 추가
+        # 매수 정보 추가 (더 상세한 정보 있으면 사용)
         if formatted_stocks:
             telegram_message += f"\n\n<b>매수 정보:</b>\n{formatted_stocks}"
             
         # 빠른 링크 추가
         telegram_message += f"\n\n<a href='{url}'>🔗 링크 열기</a>"
+        
+        # 중복 메시지 확인 (향상된 버전 사용)
+        if self._is_duplicate_message(telegram_message, url=url, status=status, time_info=page_info["times"]):
+            print(f"중복 알림 건너뜀: {label}")
+            return
         
         # 텔레그램 알림 발송
         await self.send_telegram(telegram_message)
@@ -382,14 +469,19 @@ class NotificationService:
             desktop_message += f"\n날짜: {target_date}{days_left_str}"
         
         # 시간 및 매수 정보 요약 추가
-        if page_info["stocks"]:
-            stock_summary = ", ".join([f"{time}: {stock}매" for time, stock in 
-                                      zip(page_info["times"][:3], [re.search(r'(\d+)매', s).group(1) 
-                                                                 if re.search(r'(\d+)매', s) else "?" 
-                                                                 for s in page_info["stocks"][:3]])])
+        if page_info["stocks"] or additional_times_info:
+            if page_info["stocks"]:
+                stock_summary = ", ".join([f"{time}: {stock}매" for time, stock in 
+                                          zip(page_info["times"][:3], [re.search(r'(\d+)매', s).group(1) 
+                                                                     if re.search(r'(\d+)매', s) else "?" 
+                                                                     for s in page_info["stocks"][:3]])])
+            else:
+                stock_summary = ", ".join(additional_times_info[:3])
+                
             desktop_message += f"\n매수 정보: {stock_summary}"
-            if len(page_info["stocks"]) > 3:
-                desktop_message += f" 외 {len(page_info['stocks']) - 3}건"
+            item_count = len(page_info["stocks"]) or len(additional_times_info)
+            if item_count > 3:
+                desktop_message += f" 외 {item_count - 3}건"
         elif page_info["times"]:
             time_summary = ", ".join(page_info["times"][:3])
             desktop_message += f"\n예약 가능 시간: {time_summary}"

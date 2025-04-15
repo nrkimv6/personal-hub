@@ -1,5 +1,6 @@
 from pydantic import BaseSettings
 from pathlib import Path
+import logging
 
 class Settings(BaseSettings):
     # 기본 설정
@@ -12,7 +13,7 @@ class Settings(BaseSettings):
     # 모니터링 설정
     MAX_WORKERS: int = 3
     MAX_TABS_PER_WORKER: int = 5
-    TAB_CLEANUP_THRESHOLD: int = 3000
+    TAB_CLEANUP_THRESHOLD: int = 3000  # 탭 정리 임계값 (초)
     CHECK_INTERVAL: int = 60  # 모니터링 체크 간격 (초)
     
     # 날짜 기반 스케줄링 설정
@@ -58,8 +59,46 @@ class Settings(BaseSettings):
         "페이지를 찾을 수 없습니다",  # 404 에러
         "서비스 점검 중입니다",  # 서비스 점검
     ]
+    
+    # 브라우저 리소스 관리 설정
+    MEMORY_CHECK_INTERVAL: int = 300  # 메모리 확인 간격 (초)
+    MEMORY_THRESHOLD_MB: int = 500  # 메모리 정리 임계값 (MB)
+    GLOBAL_CLEANUP_INTERVAL: int = 3600  # 전체 정리 간격 (초)
+    
+    # 탭 관리 최적화 설정
+    TAB_ROTATION_THRESHOLD: int = 100  # 탭 회전 임계값 (요청 횟수)
+    CACHE_CLEANUP_INTERVAL: int = 20  # 캐시 정리 간격 (요청 횟수)
+    
+    # 로깅 설정
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    LOG_FILE: str = "monitor.log"
+    LOG_RETENTION: int = 7  # 로그 보관 일수
+    LOG_BACKUP_COUNT: int = 5  # 로그 백업 파일 수
+    LOG_TO_CONSOLE: bool = True  # 콘솔에 로그 출력 여부
 
     class Config:
         env_file = ".env"
 
-settings = Settings() 
+settings = Settings()
+
+# 로깅 설정 초기화
+def setup_logging():
+    logger = logging.getLogger("monitor")
+    logger.setLevel(getattr(logging, settings.LOG_LEVEL))
+    
+    # 파일 핸들러 설정
+    file_handler = logging.FileHandler(settings.LOG_FILE)
+    file_handler.setFormatter(logging.Formatter(settings.LOG_FORMAT))
+    logger.addHandler(file_handler)
+    
+    # 콘솔 핸들러 설정 (선택적)
+    if settings.LOG_TO_CONSOLE:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(logging.Formatter(settings.LOG_FORMAT))
+        logger.addHandler(console_handler)
+    
+    return logger
+
+# 로거 인스턴스 생성
+logger = setup_logging() 
