@@ -1,6 +1,7 @@
-from pydantic import BaseSettings
+from pydantic_settings import BaseSettings
 from pathlib import Path
 import logging
+from datetime import datetime
 
 class Settings(BaseSettings):
     # 기본 설정
@@ -72,13 +73,23 @@ class Settings(BaseSettings):
     # 로깅 설정
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    LOG_FILE: str = "monitor.log"
+    LOG_FILE_PREFIX: str = "monitor"
     LOG_RETENTION: int = 7  # 로그 보관 일수
     LOG_BACKUP_COUNT: int = 5  # 로그 백업 파일 수
     LOG_TO_CONSOLE: bool = True  # 콘솔에 로그 출력 여부
+    LOG_ENCODING: str = "utf-8"  # 로그 파일 인코딩 방식
+    
+    # 로그 파일명 생성용 시작 시간 (서버 부팅 시간)
+    SERVER_START_TIME: str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # 동적 로그 파일명 생성 (시작시간 포함)
+    @property
+    def LOG_FILE(self) -> str:
+        return f"{self.LOG_FILE_PREFIX}_{self.SERVER_START_TIME}.log"
 
-    class Config:
-        env_file = ".env"
+    model_config = {
+        "env_file": ".env"
+    }
 
 settings = Settings()
 
@@ -87,8 +98,12 @@ def setup_logging():
     logger = logging.getLogger("monitor")
     logger.setLevel(getattr(logging, settings.LOG_LEVEL))
     
-    # 파일 핸들러 설정
-    file_handler = logging.FileHandler(settings.LOG_FILE)
+    # 기존 핸들러 제거 (재시작 시 중복 방지)
+    if logger.handlers:
+        logger.handlers.clear()
+    
+    # 파일 핸들러 설정 - UTF-8 인코딩 명시
+    file_handler = logging.FileHandler(settings.LOG_FILE, encoding=settings.LOG_ENCODING)
     file_handler.setFormatter(logging.Formatter(settings.LOG_FORMAT))
     logger.addHandler(file_handler)
     
@@ -97,6 +112,10 @@ def setup_logging():
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(logging.Formatter(settings.LOG_FORMAT))
         logger.addHandler(console_handler)
+    
+    # 서버 시작 로그 기록
+    logger.info(f"로깅 시스템 초기화 완료 - 로그 파일: {settings.LOG_FILE} (인코딩: {settings.LOG_ENCODING})")
+    logger.info(f"서버 시작 시간: {settings.SERVER_START_TIME}")
     
     return logger
 

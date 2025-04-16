@@ -19,6 +19,15 @@
             top: 10px;
             right: 10px;
         }
+        .alert {
+            z-index: 1060; /* 부트스트랩 모달의 z-index는 1050입니다 */
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            min-width: 300px;
+            max-width: 80%;
+        }
     </style>
 </head>
 <body>
@@ -221,15 +230,53 @@
                     body: JSON.stringify(data),
                 });
                 
+                const result = await response.json();
+                
                 if (response.ok) {
+                    // 성공 시 모달 닫기 및 데이터 갱신
                     bootstrap.Modal.getInstance(document.getElementById('addTargetModal')).hide();
                     form.reset();
                     loadTargets();
                     updateStats();
+                    
+                    // 성공 메시지 표시
+                    showAlert('success', result.message || '모니터링 대상이 성공적으로 추가되었습니다.');
+                } else {
+                    // 오류 메시지 표시
+                    showAlert('danger', result.detail || '모니터링 대상 추가에 실패했습니다.');
                 }
             } catch (error) {
                 console.error('대상 추가 실패:', error);
+                showAlert('danger', '모니터링 대상 추가 중 오류가 발생했습니다.');
             }
+        }
+
+        // 알림 표시 함수
+        function showAlert(type, message) {
+            // 기존 알림 제거
+            const existingAlert = document.querySelector('.alert');
+            if (existingAlert) {
+                existingAlert.remove();
+            }
+            
+            // 새 알림 생성
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+            alertDiv.role = 'alert';
+            alertDiv.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            `;
+            
+            // 페이지에 알림 추가
+            const container = document.querySelector('.container');
+            container.insertBefore(alertDiv, container.firstChild);
+            
+            // 5초 후 자동 닫기
+            setTimeout(() => {
+                const alert = bootstrap.Alert.getOrCreateInstance(alertDiv);
+                alert.close();
+            }, 5000);
         }
 
         // 모니터링 토글

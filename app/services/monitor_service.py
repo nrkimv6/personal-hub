@@ -8,19 +8,25 @@ import json
 import random
 from urllib.parse import urlparse, parse_qs
 import pytz
+import logging
 
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql import text
+import sqlalchemy.exc
 
-from app.config import settings
+from app.config import settings, logger
 from app.models.monitor import MonitorTarget
 from app.schemas.monitor import MonitorTargetCreate, MonitorTargetUpdate
 
 # SQLite 데이터베이스 설정
 DB_URL = settings.DATABASE_URL
-engine = create_engine(DB_URL)
+# UTF-8 지원을 위한 쿼리 파라미터 추가
+if 'sqlite:///' in DB_URL and '?' not in DB_URL:
+    DB_URL += '?charset=utf8'
+
+engine = create_engine(DB_URL, connect_args={"check_same_thread": False})
 Base = declarative_base()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -52,32 +58,61 @@ class MonitorService:
 
     def _init_db(self):
         """데이터베이스 초기화"""
-        conn = sqlite3.connect(self.db_path)
+        # UTF-8 인코딩 지원을 명시적으로 설정
+        conn = sqlite3.connect(self.db_path, detect_types=sqlite3.PARSE_DECLTYPES)
+        conn.execute("PRAGMA encoding = 'UTF-8'")
         cursor = conn.cursor()
         
-        # 모니터링 대상 테이블 생성
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS monitor_targets (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                url TEXT NOT NULL,
-                base_url TEXT NOT NULL,
-                label TEXT NOT NULL,
-                date TEXT NOT NULL,
-                times TEXT NOT NULL,
-                category TEXT NOT NULL,
-                service_type TEXT NOT NULL,
-                is_active BOOLEAN DEFAULT TRUE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        conn.commit()
-        conn.close()
+        try:
+            # 기존 테이블 구조 확인
+            cursor.execute("PRAGMA table_info(monitor_targets)")
+            columns = cursor.fetchall()
+            column_names = [col[1] for col in columns]
+            
+            # 모니터링 대상 테이블 생성 (존재하지 않는 경우)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS monitor_targets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    url TEXT NOT NULL,
+                    base_url TEXT NOT NULL,
+                    label TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    times TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    service_type TEXT NOT NULL,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    interval REAL,
+                    custom_interval BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # 필요한 열 추가 (없는 경우)
+            if 'interval' not in column_names:
+                logger.info("interval 열 추가")
+                cursor.execute("ALTER TABLE monitor_targets ADD COLUMN interval REAL")
+            
+            if 'custom_interval' not in column_names:
+                logger.info("custom_interval 열 추가")
+                cursor.execute("ALTER TABLE monitor_targets ADD COLUMN custom_interval BOOLEAN DEFAULT FALSE")
+            
+            conn.commit()
+            logger.info("데이터베이스 초기화 완료")
+        except Exception as e:
+            logger.error(f"데이터베이스 초기화 오류: {str(e)}")
+            conn.rollback()
+        finally:
+            conn.close()
 
     def _get_connection(self):
         """데이터베이스 연결 반환"""
-        return sqlite3.connect(self.db_path)
+        # UTF-8 인코딩 지원을 명시적으로 설정
+        conn = sqlite3.connect(self.db_path, detect_types=sqlite3.PARSE_DECLTYPES)
+        conn.execute("PRAGMA encoding = 'UTF-8'")
+        # Row 객체를 딕셔너리처럼 접근할 수 있도록 설정
+        conn.row_factory = sqlite3.Row
+        return conn
 
     async def get_targets(self, 
                          filter_params: Optional[Dict[str, Any]] = None) -> List[MonitorTarget]:
@@ -103,24 +138,38 @@ class MonitorService:
             rows = cursor.fetchall()
             
             targets = []
-            for row in cursor.fetchall():
-                target_dict = {
-                    "id": row[0],
-                    "url": row[1],
-                    "base_url": row[2],
-                    "label": row[3],
-                    "date": row[4],
-                    "times": row[5].split(","),
-                    "category": row[6],
-                    "service_type": row[7],
-                    "is_active": bool(row[8]),
-                    "created_at": datetime.fromisoformat(row[9]),
-                    "updated_at": datetime.fromisoformat(row[10])
-                }
-                targets.append(MonitorTarget(**target_dict))
+            for row in rows:  # cursor.fetchall()에서 수정
+                try:
+                    # row_factory를 사용하여 딕셔너리 형태로 접근
+                    times_str = row['times']
+                    try:
+                        times = json.loads(times_str)
+                    except:
+                        # 콤마로 구분된 형식인 경우 처리
+                        times = times_str.split(',')
+                    
+                    target_dict = {
+                        "id": row['id'],
+                        "url": row['url'],
+                        "base_url": row['base_url'],
+                        "label": row['label'],
+                        "date": row['date'],
+                        "times": times,
+                        "category": row['category'],
+                        "service_type": row['service_type'],
+                        "is_active": bool(row['is_active']),
+                        "interval": row['interval'],
+                        "custom_interval": bool(row['custom_interval']),
+                        "created_at": datetime.fromisoformat(row['created_at']),
+                        "updated_at": datetime.fromisoformat(row['updated_at'])
+                    }
+                    targets.append(MonitorTarget(**target_dict))
+                except Exception as e:
+                    logger.error(f"대상 변환 중 오류 발생: {str(e)}, Row: {dict(row)}")
             
             return targets
         except Exception as e:
+            logger.error(f"데이터 조회 실패: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"데이터 조회 실패: {str(e)}")
         finally:
             conn.close()
@@ -212,35 +261,79 @@ class MonitorService:
         """새로운 모니터링 대상을 생성합니다."""
         db = SessionLocal()
         try:
+            logger.info(f"모니터링 대상 생성 시작: {target_data}")
+            
+            # URL 중복 검사
+            existing_target = db.query(DBMonitorTarget).filter(DBMonitorTarget.url == str(target_data.url)).first()
+            if existing_target:
+                logger.warning(f"이미 존재하는 URL입니다: {target_data.url}")
+                raise HTTPException(
+                    status_code=409,  # Conflict
+                    detail=f"이미 존재하는 URL입니다: {target_data.url}"
+                )
+            
             # 모니터링 간격 계산 (설정되지 않은 경우에만)
             if target_data.interval is None:
                 date_str = self.extract_date_from_url(str(target_data.url))
+                logger.info(f"URL에서 추출한 날짜: {date_str}")
                 calculated_interval = self.calculate_interval(date_str)
+                logger.info(f"계산된 모니터링 간격: {calculated_interval}")
                 custom_interval = False
             else:
                 calculated_interval = target_data.interval
                 custom_interval = target_data.custom_interval or True
+                logger.info(f"사용자 지정 모니터링 간격: {calculated_interval}, 커스텀: {custom_interval}")
             
             # 데이터베이스 객체 생성
-            db_target = DBMonitorTarget(
-                url=str(target_data.url),
-                base_url=str(target_data.base_url),
-                label=target_data.label,
-                date=target_data.date,
-                times=json.dumps(target_data.times),
-                category=target_data.category,
-                service_type=target_data.service_type,
-                interval=calculated_interval,
-                custom_interval=custom_interval
-            )
+            try:
+                db_target = DBMonitorTarget(
+                    url=str(target_data.url),
+                    base_url=str(target_data.base_url),
+                    label=target_data.label,
+                    date=target_data.date,
+                    times=json.dumps(target_data.times),
+                    category=target_data.category,
+                    service_type=target_data.service_type,
+                    interval=calculated_interval,
+                    custom_interval=custom_interval
+                )
+                logger.info(f"DBMonitorTarget 객체 생성 완료")
+            except Exception as e:
+                logger.error(f"DBMonitorTarget 객체 생성 실패: {str(e)}")
+                raise Exception(f"모니터링 대상 데이터 변환 실패: {str(e)}")
             
-            db.add(db_target)
-            db.commit()
-            db.refresh(db_target)
+            try:
+                db.add(db_target)
+                db.commit()
+                db.refresh(db_target)
+                logger.info(f"DB에 모니터링 대상 저장 완료: ID {db_target.id}")
+            except sqlalchemy.exc.IntegrityError as e:
+                logger.error(f"DB 저장 실패 - 중복 URL: {str(e)}")
+                db.rollback()
+                if "UNIQUE constraint failed: monitor_targets.url" in str(e):
+                    raise HTTPException(
+                        status_code=409,  # Conflict
+                        detail=f"이미 등록된 URL입니다: {target_data.url}"
+                    )
+                raise Exception(f"모니터링 대상 저장 실패: {str(e)}")
+            except Exception as e:
+                logger.error(f"DB 저장 실패: {str(e)}")
+                db.rollback()
+                raise Exception(f"모니터링 대상 저장 실패: {str(e)}")
             
-            return self._convert_to_model(db_target)
+            try:
+                model = self._convert_to_model(db_target)
+                logger.info(f"모니터링 대상 모델 변환 완료: ID {model.id}")
+                return model
+            except Exception as e:
+                logger.error(f"모델 변환 실패: {str(e)}")
+                raise Exception(f"모니터링 대상 모델 변환 실패: {str(e)}")
+        except HTTPException:
+            # 이미 정의된 HTTP 예외는 그대로 전달
+            raise
         except Exception as e:
             db.rollback()
+            logger.error(f"모니터링 대상 생성 중 오류 발생: {str(e)}", exc_info=True)
             raise Exception(f"모니터링 대상 생성 중 오류 발생: {str(e)}")
         finally:
             db.close()
@@ -257,22 +350,35 @@ class MonitorService:
             if not row:
                 return None
             
-            target_dict = {
-                "id": row[0],
-                "url": row[1],
-                "base_url": row[2],
-                "label": row[3],
-                "date": row[4],
-                "times": row[5].split(","),
-                "category": row[6],
-                "service_type": row[7],
-                "is_active": bool(row[8]),
-                "created_at": datetime.fromisoformat(row[9]),
-                "updated_at": datetime.fromisoformat(row[10])
-            }
-            
-            return MonitorTarget(**target_dict)
+            try:
+                times_str = row['times']
+                try:
+                    times = json.loads(times_str)
+                except:
+                    # 콤마로 구분된 형식인 경우 처리
+                    times = times_str.split(',')
+                
+                target_dict = {
+                    "id": row['id'],
+                    "url": row['url'],
+                    "base_url": row['base_url'],
+                    "label": row['label'],
+                    "date": row['date'],
+                    "times": times,
+                    "category": row['category'],
+                    "service_type": row['service_type'],
+                    "is_active": bool(row['is_active']),
+                    "interval": row['interval'],
+                    "custom_interval": bool(row['custom_interval']),
+                    "created_at": datetime.fromisoformat(row['created_at']),
+                    "updated_at": datetime.fromisoformat(row['updated_at'])
+                }
+                return MonitorTarget(**target_dict)
+            except Exception as e:
+                logger.error(f"대상 변환 중 오류 발생: {str(e)}, Row: {dict(row)}")
+                return None
         except Exception as e:
+            logger.error(f"데이터 조회 실패: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"데이터 조회 실패: {str(e)}")
         finally:
             conn.close()
