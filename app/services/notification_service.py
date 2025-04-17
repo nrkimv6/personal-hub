@@ -13,11 +13,11 @@ from app.config import settings, logger
 from app.utils.validators import is_content_valid, is_full_reservation, is_page_available
 from app.utils.parsers import parse_time_and_stock, parse_page_info, extract_date_from_url
 from app.services.monitor_service import DBNotificationSettings
-from app.database import SessionLocal
+from app.database import SessionLocal, get_db
 
 class NotificationService:
     def __init__(self):
-        self.db = SessionLocal()
+        self.db = next(get_db())
         self._load_settings()
         self.telegram_bot_token = settings.TELEGRAM_BOT_TOKEN
         self.telegram_chat_id = settings.TELEGRAM_CHAT_ID
@@ -186,16 +186,18 @@ class NotificationService:
         
         return "변화없음"
 
-    async def send_notification(self, message: str, state: str = None):
+    async def send_notification(self, message: str, state: str = None, 
+                                send_telegram: bool = False, 
+                                send_desktop: bool = False, force_send=False):
         """알림을 전송합니다."""
-        if state and state not in self.notify_states:
+        if state and state not in self.notify_states and not force_send:
             logger.debug(f"알림 상태 {state}가 설정에 포함되지 않아 알림을 전송하지 않습니다.")
             return
         
-        if self.enable_telegram:
+        if (self.enable_telegram and send_telegram) or force_send:
             await self._send_telegram(message)
         
-        if self.enable_desktop:
+        if (self.enable_desktop and send_desktop) or force_send:
             await self._send_desktop(message)
     
     async def _send_telegram(self, message: str):
@@ -347,213 +349,65 @@ class NotificationService:
             send_telegram: 텔레그램 알림 발송 여부 (None인 경우 설정값 사용)
             send_desktop: 데스크톱 알림 발송 여부 (None인 경우 설정값 사용)
         """
-        # 현재 시간과 경과 시간 계산
-        current_time = datetime.now()
-        timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S")
-        
-        # 마지막 확인 시간부터 현재까지의 경과 시간 계산
-        elapsed_time_str = "확인 불가"
-        if last_check_time:
-            elapsed_seconds = (current_time - last_check_time).total_seconds()
+        try:
+            # 알림 설정 로드
+            self._load_settings()
             
-            # 가독성 향상된 경과 시간 표시
-            if elapsed_seconds < 60:
-                elapsed_time_str = f"{int(elapsed_seconds)}초"
-            elif elapsed_seconds < 3600:
-                minutes = int(elapsed_seconds // 60)
-                seconds = int(elapsed_seconds % 60)
-                elapsed_time_str = f"{minutes}분 {seconds}초"
-            else:
-                hours = int(elapsed_seconds // 3600)
-                minutes = int((elapsed_seconds % 3600) // 60)
-                seconds = int(elapsed_seconds % 60)
-                elapsed_time_str = f"{hours}시간 {minutes}분 {seconds}초"
-        
-        # 콘텐츠 유효성 검사 및 정보 파싱
-        page_info = parse_page_info(content)
-        
-        # 유효성 검사 정보가 제공된 경우 사용
-        if validity_info:
-            # 유효성 검사 결과에 따라 상태 결정
-            if validity_info.get("is_full", False):
-                status = "full"
-            elif not validity_info.get("is_available", True):
-                status = "error"
-            elif validity_info.get("is_valid", False) and validity_info.get("valid_times"):
-                status = "available"
-                # 유효성 검사에서 반환된 시간 정보가 있으면 사용
-                if isinstance(validity_info.get("valid_times"), list):
-                    page_info["times"] = validity_info["valid_times"]
-            else:
-                status = "change"
-        else:
-            # 기존 방식으로 상태 결정
-            if page_info["available"] and page_info["times"]:
-                status = "available"
-            elif is_full_reservation(content):
-                status = "full"
-            elif not is_page_available(content):
-                status = "error"
-            else:
-                status = "change"
+            # 알림 상태 확인
+            if validity_info:
+                current_status = "available" if validity_info.get("is_valid") else "error"
+                if current_status not in self.notify_states:
+                    logger.debug(f"현재 상태 {current_status}가 알림 설정에 포함되지 않아 알림을 보내지 않습니다.")
+                    return
             
-        # URL 상태 업데이트 및 변경 유형 확인
-        change_type = self._update_url_status(url, status)
-        
-        # 변경 유형에 따라 알림 발송 여부 결정
-        should_notify = False
-        
-        # 항상 알림을 보내야 하는 상태인지 확인
-        if status in settings.ALWAYS_NOTIFY_STATES:
-            should_notify = True
-            logger.debug(f"항상 알림 대상 상태: {status}")
-        # 설정된 알림 대상 변경 유형인지 확인
-        elif status in self.notify_states:
-            should_notify = True
-            logger.debug(f"알림 대상 변경 유형: {status}")
-        else:
-            logger.debug(f"알림 제외 상태: {status}")
+            # 알림 메시지 생성
+            message = f"🔔 <b>{label}</b>\n\n"
+            message += f"URL: {url}\n"
             
-        # 알림을 보내지 않는 경우 여기서 종료
-        if not should_notify:
+            if validity_info:
+                if validity_info.get("is_valid"):
+                    message += "상태: 예약 가능\n"
+                elif validity_info.get("is_full"):
+                    message += "상태: 매진\n"
+                else:
+                    message += "상태: 에러\n"
+            
+            # 텔레그램 알림 전송
+            if send_telegram is None:
+                send_telegram = self.enable_telegram
+                
+            if send_telegram:
+                await self.send_telegram(message)
+            
+            # 데스크톱 알림 전송
+            if send_desktop is None:
+                send_desktop = self.enable_desktop
+                
+            if send_desktop:
+                await self._send_desktop(message)
+                
+        except Exception as e:
+            logger.error(f"알림 전송 중 오류 발생: {str(e)}")
+
+    async def send_telegram(self, message: str, force_send: bool = False):
+        """텔레그램으로 알림을 보냅니다."""
+        if not self.enable_telegram and not force_send:
             return
             
-        # 알림 제목 결정
-        notification_title = self._get_notification_title(status, change_type)
-        
-        # 시간 정보 추가 파싱 및 처리
-        additional_times_info = []
-        if page_info["times"]:
-            for time_text in page_info["times"]:
-                time_str, stock_str = parse_time_and_stock(time_text)
-                stock_int = int(stock_str) if stock_str and stock_str.isdigit() else 0
-                
-                if time_str:
-                    info = f"{time_str}"
-                    if stock_int > 0:
-                        info += f": {stock_int}매"
-                    additional_times_info.append(info)
-        
-        # 시간 및 매수 정보 포맷팅
-        formatted_times = self._format_time_info(page_info["times"])
-        formatted_stocks = self._format_stock_info(page_info["stocks"])
-        
-        # 추가 파싱 정보가 있고 기존 정보가 없는 경우 대체
-        if additional_times_info and not formatted_stocks:
-            formatted_stocks = self._format_stock_info(additional_times_info)
-        
-        # URL 단축
-        short_url = url
-        if len(url) > 60:
-            # URL 단축 (일부 생략)
-            url_parts = url.split("?")
-            if len(url_parts) > 1:
-                domain = url_parts[0]
-                short_url = f"{domain}?...({len(url_parts[1])}자 생략)"
-                
-        # 남은 날짜 계산
-        target_date = extract_date_from_url(url)
-        days_left_str = ""
-        if target_date:
-            try:
-                # 날짜 형식 변환
-                if "T" in target_date:
-                    # ISO 형식이면 그대로 파싱
-                    date_obj = datetime.fromisoformat(target_date.replace("Z", "+00:00"))
-                else:
-                    # YYYY-MM-DD 형식이면 시간 추가
-                    date_obj = datetime.strptime(target_date + " 00:00:00", "%Y-%m-%d %H:%M:%S")
-                
-                # 날짜 차이 계산
-                days_left = (date_obj.date() - current_time.date()).days
-                
-                if days_left > 0:
-                    days_left_str = f" (D-{days_left})"
-                elif days_left == 0:
-                    days_left_str = f" (D-day)"
-                else:
-                    days_left_str = f" (D+{abs(days_left)})"
-            except:
-                days_left_str = ""
-        
-        # 텔레그램 메시지 구성
-        telegram_message = (
-            f"{notification_title}\n\n"
-            f"대상: {label}\n"
-        )
-        
-        # 제목 정보 추가
-        if page_info["title"]:
-            telegram_message += f"제목: {page_info['title']}\n"
-        
-        # 기본 정보 추가
-        telegram_message += (
-            f"URL: {short_url}\n"
-            f"시간: {timestamp}\n"
-            f"마지막 확인 후 경과: {elapsed_time_str}\n"
-            f"ID: {target_id}"
-        )
-        
-        # 날짜 정보 추가
-        if target_date:
-            telegram_message += f"\n날짜: {target_date}{days_left_str}"
-        
-        # 시간 정보 추가
-        if formatted_times:
-            telegram_message += f"\n\n<b>예약 가능 시간:</b>\n{formatted_times}"
-        
-        # 매수 정보 추가 (더 상세한 정보 있으면 사용)
-        if formatted_stocks:
-            telegram_message += f"\n\n<b>매수 정보:</b>\n{formatted_stocks}"
-            
-        # 빠른 링크 추가
-        telegram_message += f"\n\n<a href='{url}'>🔗 링크 열기</a>"
-        
-        # 중복 메시지 확인 (향상된 버전 사용)
-        if self._is_duplicate_message(telegram_message, url=url, status=status, time_info=page_info["times"]):
-            print(f"중복 알림 건너뜀: {label}")
+        if not self.telegram_bot_token or not self.telegram_chat_id:
+            logger.warning("텔레그램 봇 토큰이나 채팅 ID가 설정되지 않았습니다.")
             return
-        
-        # 데스크톱 알림 구성
-        desktop_title = f"{notification_title} - {label}"
-        
-        desktop_message = f"URL: {short_url}\n시간: {timestamp}\n경과: {elapsed_time_str}"
-        
-        # 날짜 정보 추가
-        if target_date:
-            desktop_message += f"\n날짜: {target_date}{days_left_str}"
-        
-        # 시간 및 매수 정보 요약 추가
-        if page_info["stocks"] or additional_times_info:
-            if page_info["stocks"]:
-                stock_summary = ", ".join([f"{time}: {stock}매" for time, stock in 
-                                          zip(page_info["times"][:3], [re.search(r'(\d+)매', s).group(1) 
-                                                                     if re.search(r'(\d+)매', s) else "?" 
-                                                                     for s in page_info["stocks"][:3]])])
-            else:
-                stock_summary = ", ".join(additional_times_info[:3])
-                
-            desktop_message += f"\n매수 정보: {stock_summary}"
-            item_count = len(page_info["stocks"]) or len(additional_times_info)
-            if item_count > 3:
-                desktop_message += f" 외 {item_count - 3}건"
-        elif page_info["times"]:
-            time_summary = ", ".join(page_info["times"][:3])
-            desktop_message += f"\n예약 가능 시간: {time_summary}"
-            if len(page_info["times"]) > 3:
-                desktop_message += f" 외 {len(page_info['times']) - 3}건"
-        
-        # 알림 발송 제어
-        if send_telegram is None:
-            # 설정값 사용
-            await self._send_telegram(telegram_message)
-        elif send_telegram:
-            # 강제 발송
-            await self._send_telegram(telegram_message)
             
-        if send_desktop is None:
-            # 설정값 사용
-            await self._send_desktop(desktop_message)
-        elif send_desktop:
-            # 강제 발송
-            await self._send_desktop(desktop_message) 
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
+                data = {
+                    "chat_id": self.telegram_chat_id,
+                    "text": message,
+                    "parse_mode": "HTML"
+                }
+                async with session.post(url, json=data) as response:
+                    if response.status != 200:
+                        logger.error(f"텔레그램 알림 전송 실패: {await response.text()}")
+        except Exception as e:
+            logger.error(f"텔레그램 알림 전송 중 오류 발생: {str(e)}") 

@@ -54,8 +54,8 @@ class Settings(BaseSettings):
     #     return create_client(self.SUPABASE_URL, self.SUPABASE_KEY)
     
     # 알림 설정
-    TELEGRAM_BOT_TOKEN: Optional[str] = None
-    TELEGRAM_CHAT_ID: Optional[str] = None
+    TELEGRAM_BOT_TOKEN: str = "7912548094:AAGp1Ii05IPFpM3uec75NTzJceYwrq2Lb4g"
+    TELEGRAM_CHAT_ID: str = "7774293093"
     ENABLE_DESKTOP_NOTIFICATION: bool = True
     EMAIL_ADDRESS:str = "g100mkrw1@gmail.com"
     EMAIL_PASSWORD:str = "Caww@60925"  # Gmail 앱 비밀번호
