@@ -5,13 +5,20 @@ from collections import deque
 import hashlib
 import re
 from typing import Optional, Dict, Any, List
+import json
+import asyncio
+from sqlalchemy.orm import Session
 
-from app.config import settings
+from app.config import settings, logger
 from app.utils.validators import is_content_valid, is_full_reservation, is_page_available
 from app.utils.parsers import parse_time_and_stock, parse_page_info, extract_date_from_url
+from app.services.monitor_service import DBNotificationSettings
+from app.database import SessionLocal
 
 class NotificationService:
     def __init__(self):
+        self.db = SessionLocal()
+        self._load_settings()
         self.telegram_bot_token = settings.TELEGRAM_BOT_TOKEN
         self.telegram_chat_id = settings.TELEGRAM_CHAT_ID
         self.enable_desktop = settings.ENABLE_DESKTOP_NOTIFICATION
@@ -25,6 +32,23 @@ class NotificationService:
         
         # 시간별 알림 로그
         self.time_alert_log = {}  # url: {time_key: last_alert_time}
+        
+    def _load_settings(self):
+        """알림 설정을 로드합니다."""
+        settings = self.db.query(DBNotificationSettings).first()
+        if not settings:
+            settings = DBNotificationSettings(
+                enable_telegram=True,
+                enable_desktop=True,
+                notify_states=json.dumps([])
+            )
+            self.db.add(settings)
+            self.db.commit()
+            self.db.refresh(settings)
+        
+        self.enable_telegram = settings.enable_telegram
+        self.enable_desktop = settings.enable_desktop
+        self.notify_states = json.loads(settings.notify_states)
         
     def _hash_message(self, message: str) -> str:
         """메시지의 해시값을 계산합니다."""
@@ -162,10 +186,23 @@ class NotificationService:
         
         return "변화없음"
 
-    async def send_telegram(self, message: str) -> bool:
-        """텔레그램으로 알림을 보냅니다."""
+    async def send_notification(self, message: str, state: str = None):
+        """알림을 전송합니다."""
+        if state and state not in self.notify_states:
+            logger.debug(f"알림 상태 {state}가 설정에 포함되지 않아 알림을 전송하지 않습니다.")
+            return
+        
+        if self.enable_telegram:
+            await self._send_telegram(message)
+        
+        if self.enable_desktop:
+            await self._send_desktop(message)
+    
+    async def _send_telegram(self, message: str):
+        """텔레그램으로 알림을 전송합니다."""
         if not self.telegram_bot_token or not self.telegram_chat_id:
-            return False
+            logger.warning("텔레그램 설정이 없어 알림을 전송할 수 없습니다.")
+            return
             
         try:
             url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
@@ -179,19 +216,19 @@ class NotificationService:
                 async with session.post(url, json=data) as response:
                     return response.status == 200
         except Exception as e:
-            print(f"텔레그램 알림 발송 실패: {str(e)}")
+            logger.error(f"텔레그램 알림 전송 실패: {str(e)}")
             return False
 
-    def send_desktop(self, title: str, message: str) -> bool:
-        """데스크톱 알림을 보냅니다."""
+    async def _send_desktop(self, message: str):
+        """데스크톱 알림을 전송합니다."""
         if not self.enable_desktop:
-            return False
+            return
             
         # 중복 메시지 확인
-        combined_message = f"{title}:{message}"
+        combined_message = f"{message}"
         if self._is_duplicate_message(combined_message):
             print("중복 메시지로 데스크톱 알림 발송 건너뜀")
-            return False
+            return
 
         try:
             # Windows 알림 시스템은 메시지 길이에 256자 제한이 있으므로 메시지를 잘라냅니다
@@ -199,13 +236,13 @@ class NotificationService:
                 message = message[:253] + "..."
                 
             notification.notify(
-                title=title,
+                title="알림",
                 message=message,
                 timeout=10
             )
             return True
         except Exception as e:
-            print(f"데스크톱 알림 발송 실패: {str(e)}")
+            logger.error(f"데스크톱 알림 전송 실패: {str(e)}")
             return False
 
     def _get_notification_emoji(self, status: str, change_type: str) -> str:
@@ -296,7 +333,8 @@ class NotificationService:
             # 정렬에 실패하면 원래 순서로 리턴
             return "\n".join(stocks)
 
-    async def notify_change(self, target_id: int, url: str, label: str, content: str, last_check_time=None, validity_info=None):
+    async def notify_change(self, target_id: int, url: str, label: str, content: str, last_check_time=None, validity_info=None, 
+                           send_telegram: bool = None, send_desktop: bool = None):
         """변경 사항을 알립니다.
         
         Args:
@@ -306,6 +344,8 @@ class NotificationService:
             content: 페이지 콘텐츠
             last_check_time: 마지막 확인 시간
             validity_info: 유효성 검사 결과 정보 (선택적)
+            send_telegram: 텔레그램 알림 발송 여부 (None인 경우 설정값 사용)
+            send_desktop: 데스크톱 알림 발송 여부 (None인 경우 설정값 사용)
         """
         # 현재 시간과 경과 시간 계산
         current_time = datetime.now()
@@ -336,30 +376,48 @@ class NotificationService:
         if validity_info:
             # 유효성 검사 결과에 따라 상태 결정
             if validity_info.get("is_full", False):
-                status = "매진"
+                status = "full"
             elif not validity_info.get("is_available", True):
-                status = "에러"
+                status = "error"
             elif validity_info.get("is_valid", False) and validity_info.get("valid_times"):
-                status = "예약가능"
+                status = "available"
                 # 유효성 검사에서 반환된 시간 정보가 있으면 사용
                 if isinstance(validity_info.get("valid_times"), list):
                     page_info["times"] = validity_info["valid_times"]
             else:
-                status = "변경"
+                status = "change"
         else:
             # 기존 방식으로 상태 결정
             if page_info["available"] and page_info["times"]:
-                status = "예약가능"
+                status = "available"
             elif is_full_reservation(content):
-                status = "매진"
+                status = "full"
             elif not is_page_available(content):
-                status = "에러"
+                status = "error"
             else:
-                status = "변경"
+                status = "change"
             
-        # URL 상태 업데이트
+        # URL 상태 업데이트 및 변경 유형 확인
         change_type = self._update_url_status(url, status)
         
+        # 변경 유형에 따라 알림 발송 여부 결정
+        should_notify = False
+        
+        # 항상 알림을 보내야 하는 상태인지 확인
+        if status in settings.ALWAYS_NOTIFY_STATES:
+            should_notify = True
+            logger.debug(f"항상 알림 대상 상태: {status}")
+        # 설정된 알림 대상 변경 유형인지 확인
+        elif status in self.notify_states:
+            should_notify = True
+            logger.debug(f"알림 대상 변경 유형: {status}")
+        else:
+            logger.debug(f"알림 제외 상태: {status}")
+            
+        # 알림을 보내지 않는 경우 여기서 종료
+        if not should_notify:
+            return
+            
         # 알림 제목 결정
         notification_title = self._get_notification_title(status, change_type)
         
@@ -456,9 +514,6 @@ class NotificationService:
             print(f"중복 알림 건너뜀: {label}")
             return
         
-        # 텔레그램 알림 발송
-        await self.send_telegram(telegram_message)
-        
         # 데스크톱 알림 구성
         desktop_title = f"{notification_title} - {label}"
         
@@ -488,5 +543,17 @@ class NotificationService:
             if len(page_info["times"]) > 3:
                 desktop_message += f" 외 {len(page_info['times']) - 3}건"
         
-        # 데스크톱 알림 발송
-        self.send_desktop(desktop_title, desktop_message) 
+        # 알림 발송 제어
+        if send_telegram is None:
+            # 설정값 사용
+            await self._send_telegram(telegram_message)
+        elif send_telegram:
+            # 강제 발송
+            await self._send_telegram(telegram_message)
+            
+        if send_desktop is None:
+            # 설정값 사용
+            await self._send_desktop(desktop_message)
+        elif send_desktop:
+            # 강제 발송
+            await self._send_desktop(desktop_message) 

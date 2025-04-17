@@ -1,6 +1,7 @@
 from fastapi import Depends
-from typing import Annotated
+from sqlalchemy.orm import Session
 
+from app.database import get_db, SessionLocal
 from app.services.browser_service import BrowserService
 from app.config import logger
 
@@ -20,5 +21,8 @@ async def get_browser_service() -> BrowserService:
     else:
         logger.info("기존 BrowserService 인스턴스 재사용")
     return _browser_service
+
+def get_db_session() -> Session:
+    return SessionLocal()
 
 # 불필요한 BrowserServiceDep 정의를 제거 

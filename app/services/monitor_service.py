@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
 from fastapi import HTTPException
 import sqlite3
@@ -43,8 +43,22 @@ class DBMonitorTarget(Base):
     category = Column(String)
     service_type = Column(String)
     is_active = Column(Boolean, default=True)
+    is_enabled = Column(Boolean, default=True)  # 사용자 활성화/비활성화 설정
+    run_status = Column(String, default="idle")  # 실행 상태
+    last_error = Column(String, nullable=True)  # 마지막 오류 메시지
+    error_count = Column(Integer, default=0)  # 오류 발생 횟수
     interval = Column(Float, nullable=True)  # 모니터링 간격 (초)
     custom_interval = Column(Boolean, default=False)  # 사용자 정의 간격 여부
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+class DBNotificationSettings(Base):
+    __tablename__ = "notification_settings"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    enable_telegram = Column(Boolean, default=True)
+    enable_desktop = Column(Boolean, default=True)
+    notify_states = Column(String)  # JSON 문자열로 저장
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -81,6 +95,10 @@ class MonitorService:
                     category TEXT NOT NULL,
                     service_type TEXT NOT NULL,
                     is_active BOOLEAN DEFAULT TRUE,
+                    is_enabled BOOLEAN DEFAULT TRUE,
+                    run_status TEXT DEFAULT 'idle',
+                    last_error TEXT,
+                    error_count INTEGER DEFAULT 0,
                     interval REAL,
                     custom_interval BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -96,6 +114,22 @@ class MonitorService:
             if 'custom_interval' not in column_names:
                 logger.info("custom_interval 열 추가")
                 cursor.execute("ALTER TABLE monitor_targets ADD COLUMN custom_interval BOOLEAN DEFAULT FALSE")
+            
+            if 'is_enabled' not in column_names:
+                logger.info("is_enabled 열 추가")
+                cursor.execute("ALTER TABLE monitor_targets ADD COLUMN is_enabled BOOLEAN DEFAULT TRUE")
+            
+            if 'run_status' not in column_names:
+                logger.info("run_status 열 추가")
+                cursor.execute("ALTER TABLE monitor_targets ADD COLUMN run_status TEXT DEFAULT 'idle'")
+            
+            if 'last_error' not in column_names:
+                logger.info("last_error 열 추가")
+                cursor.execute("ALTER TABLE monitor_targets ADD COLUMN last_error TEXT")
+            
+            if 'error_count' not in column_names:
+                logger.info("error_count 열 추가")
+                cursor.execute("ALTER TABLE monitor_targets ADD COLUMN error_count INTEGER DEFAULT 0")
             
             conn.commit()
             logger.info("데이터베이스 초기화 완료")
@@ -148,6 +182,16 @@ class MonitorService:
                         # 콤마로 구분된 형식인 경우 처리
                         times = times_str.split(',')
                     
+                    # datetime 필드 처리 개선
+                    created_at = row['created_at']
+                    updated_at = row['updated_at']
+                    
+                    # 문자열이면 datetime으로 변환, 아니면 그대로 사용
+                    if isinstance(created_at, str):
+                        created_at = datetime.fromisoformat(created_at)
+                    if isinstance(updated_at, str):
+                        updated_at = datetime.fromisoformat(updated_at)
+                    
                     target_dict = {
                         "id": row['id'],
                         "url": row['url'],
@@ -160,9 +204,31 @@ class MonitorService:
                         "is_active": bool(row['is_active']),
                         "interval": row['interval'],
                         "custom_interval": bool(row['custom_interval']),
-                        "created_at": datetime.fromisoformat(row['created_at']),
-                        "updated_at": datetime.fromisoformat(row['updated_at'])
+                        "created_at": created_at,
+                        "updated_at": updated_at
                     }
+                    
+                    # 새 필드 추가
+                    if 'is_enabled' in row.keys():
+                        target_dict["is_enabled"] = bool(row['is_enabled'])
+                    else:
+                        target_dict["is_enabled"] = True
+                        
+                    if 'run_status' in row.keys():
+                        target_dict["run_status"] = row['run_status']
+                    else:
+                        target_dict["run_status"] = "idle"
+                        
+                    if 'last_error' in row.keys():
+                        target_dict["last_error"] = row['last_error']
+                    else:
+                        target_dict["last_error"] = None
+                        
+                    if 'error_count' in row.keys():
+                        target_dict["error_count"] = int(row['error_count']) if row['error_count'] is not None else 0
+                    else:
+                        target_dict["error_count"] = 0
+                    
                     targets.append(MonitorTarget(**target_dict))
                 except Exception as e:
                     logger.error(f"대상 변환 중 오류 발생: {str(e)}, Row: {dict(row)}")
@@ -240,21 +306,54 @@ class MonitorService:
     # DB에서 모델로 변환
     def _convert_to_model(self, db_target) -> MonitorTarget:
         """데이터베이스 객체를 Pydantic 모델로 변환합니다."""
-        return MonitorTarget(
-            id=db_target.id,
-            url=db_target.url,
-            base_url=db_target.base_url,
-            label=db_target.label,
-            date=db_target.date,
-            times=json.loads(db_target.times),
-            category=db_target.category,
-            service_type=db_target.service_type,
-            is_active=db_target.is_active,
-            interval=db_target.interval,
-            custom_interval=db_target.custom_interval,
-            created_at=db_target.created_at,
-            updated_at=db_target.updated_at
-        )
+        try:
+            # times 필드 안전하게 파싱
+            times = []
+            if db_target.times:
+                try:
+                    times = json.loads(db_target.times)
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Times 필드 JSON 파싱 오류 (ID {db_target.id}): {str(e)}")
+                    # 손상된 JSON이면 기본값으로 빈 배열 사용
+                    times = []
+                    # 필요시 DB 업데이트도 가능
+                    # db = SessionLocal()
+                    # db_target.times = json.dumps(times)
+                    # db.commit()
+            
+            return MonitorTarget(
+                id=db_target.id,
+                url=db_target.url,
+                base_url=db_target.base_url,
+                label=db_target.label,
+                date=db_target.date,
+                times=times,
+                category=db_target.category,
+                service_type=db_target.service_type,
+                is_active=db_target.is_active,
+                interval=db_target.interval,
+                custom_interval=db_target.custom_interval,
+                created_at=db_target.created_at,
+                updated_at=db_target.updated_at
+            )
+        except Exception as e:
+            logger.error(f"모델 변환 중 오류 발생 (ID {db_target.id}): {str(e)}", exc_info=True)
+            # 최소한의 필수 필드만으로 모델 생성
+            return MonitorTarget(
+                id=db_target.id,
+                url=db_target.url,
+                base_url=db_target.base_url or "",
+                label=db_target.label or f"대상 {db_target.id}",
+                date=db_target.date or "",
+                times=[],
+                category=db_target.category or "",
+                service_type=db_target.service_type or "",
+                is_active=db_target.is_active,
+                interval=db_target.interval or 60.0,
+                custom_interval=db_target.custom_interval or False,
+                created_at=db_target.created_at or datetime.now(),
+                updated_at=db_target.updated_at or datetime.now()
+            )
     
     # 모니터링 대상 생성
     async def create_target(self, target_data: MonitorTargetCreate) -> MonitorTarget:
@@ -358,6 +457,16 @@ class MonitorService:
                     # 콤마로 구분된 형식인 경우 처리
                     times = times_str.split(',')
                 
+                # datetime 필드 처리 개선
+                created_at = row['created_at']
+                updated_at = row['updated_at']
+                
+                # 문자열이면 datetime으로 변환, 아니면 그대로 사용
+                if isinstance(created_at, str):
+                    created_at = datetime.fromisoformat(created_at)
+                if isinstance(updated_at, str):
+                    updated_at = datetime.fromisoformat(updated_at)
+                
                 target_dict = {
                     "id": row['id'],
                     "url": row['url'],
@@ -370,8 +479,8 @@ class MonitorService:
                     "is_active": bool(row['is_active']),
                     "interval": row['interval'],
                     "custom_interval": bool(row['custom_interval']),
-                    "created_at": datetime.fromisoformat(row['created_at']),
-                    "updated_at": datetime.fromisoformat(row['updated_at'])
+                    "created_at": created_at,
+                    "updated_at": updated_at
                 }
                 return MonitorTarget(**target_dict)
             except Exception as e:
@@ -384,60 +493,112 @@ class MonitorService:
             conn.close()
 
     # 모니터링 대상 업데이트
-    async def update_target(self, target_id: int, target_data: MonitorTargetUpdate) -> Optional[MonitorTarget]:
-        """모니터링 대상을 업데이트합니다."""
+    async def update_target(self, target_id: int, target_data: Union[MonitorTargetUpdate, Dict[str, Any]]) -> Optional[MonitorTarget]:
+        """모니터링 대상의 정보를 업데이트합니다."""
         db = SessionLocal()
         try:
             db_target = db.query(DBMonitorTarget).filter(DBMonitorTarget.id == target_id).first()
             if not db_target:
                 return None
             
+            # dict 타입인 경우 처리
+            is_dict = isinstance(target_data, dict)
+            
             # 날짜 변경 감지 및 interval 재계산 (사용자 정의가 아닌 경우에만)
-            date_changed = target_data.date is not None and target_data.date != db_target.date
-            url_changed = target_data.url is not None and target_data.url != db_target.url
+            date_changed = False
+            url_changed = False
+            
+            if is_dict:
+                date_changed = 'date' in target_data and target_data['date'] is not None and target_data['date'] != db_target.date
+                url_changed = 'url' in target_data and target_data['url'] is not None and target_data['url'] != db_target.url
+            else:
+                date_changed = target_data.date is not None and target_data.date != db_target.date
+                url_changed = target_data.url is not None and target_data.url != db_target.url
             
             # 업데이트할 데이터 준비
             update_data = {}
             
             # 기본 필드 업데이트
-            if target_data.url is not None:
-                update_data["url"] = target_data.url
-            if target_data.base_url is not None:
-                update_data["base_url"] = target_data.base_url
-            if target_data.label is not None:
-                update_data["label"] = target_data.label
-            if target_data.date is not None:
-                update_data["date"] = target_data.date
-            if target_data.times is not None:
-                update_data["times"] = json.dumps(target_data.times)
-            if target_data.category is not None:
-                update_data["category"] = target_data.category
-            if target_data.service_type is not None:
-                update_data["service_type"] = target_data.service_type
-            if target_data.is_active is not None:
-                update_data["is_active"] = target_data.is_active
+            if is_dict:
+                # dict 타입인 경우
+                if 'url' in target_data and target_data['url'] is not None:
+                    update_data["url"] = target_data['url']
+                if 'base_url' in target_data and target_data['base_url'] is not None:
+                    update_data["base_url"] = target_data['base_url']
+                if 'label' in target_data and target_data['label'] is not None:
+                    update_data["label"] = target_data['label']
+                if 'date' in target_data and target_data['date'] is not None:
+                    update_data["date"] = target_data['date']
+                if 'times' in target_data and target_data['times'] is not None:
+                    update_data["times"] = json.dumps(target_data['times'])
+                if 'category' in target_data and target_data['category'] is not None:
+                    update_data["category"] = target_data['category']
+                if 'service_type' in target_data and target_data['service_type'] is not None:
+                    update_data["service_type"] = target_data['service_type']
+                if 'is_active' in target_data and target_data['is_active'] is not None:
+                    update_data["is_active"] = target_data['is_active']
                 
-            # interval 업데이트 (명시적으로 제공된 경우 사용자 정의로 설정)
-            if target_data.interval is not None:
-                update_data["interval"] = target_data.interval
-                update_data["custom_interval"] = True
-            elif (not db_target.custom_interval) and (date_changed or url_changed):
-                # 사용자 정의가 아니고, 날짜나 URL이 변경된 경우 자동 재계산
-                new_url = target_data.url or db_target.url
-                date_str = self.extract_date_from_url(new_url)
-                calculated_interval = self.calculate_interval(date_str)
-                update_data["interval"] = calculated_interval
-            
-            # custom_interval 업데이트 (명시적으로 제공된 경우)
-            if target_data.custom_interval is not None:
-                update_data["custom_interval"] = target_data.custom_interval
-                
-                # 사용자 정의를 False로 변경하는 경우, interval 재계산
-                if not target_data.custom_interval:
-                    url_to_use = target_data.url or db_target.url
-                    date_str = self.extract_date_from_url(url_to_use)
+                # interval 업데이트 (명시적으로 제공된 경우 사용자 정의로 설정)
+                if 'interval' in target_data and target_data['interval'] is not None:
+                    update_data["interval"] = target_data['interval']
+                    update_data["custom_interval"] = True
+                elif (not db_target.custom_interval) and (date_changed or url_changed):
+                    # 사용자 정의가 아니고, 날짜나 URL이 변경된 경우 자동 재계산
+                    new_url = target_data.get('url', db_target.url)
+                    date_str = self.extract_date_from_url(new_url)
                     calculated_interval = self.calculate_interval(date_str)
                     update_data["interval"] = calculated_interval
+                
+                # custom_interval 업데이트 (명시적으로 제공된 경우)
+                if 'custom_interval' in target_data and target_data['custom_interval'] is not None:
+                    update_data["custom_interval"] = target_data['custom_interval']
+                    
+                    # 사용자 정의를 False로 변경하는 경우, interval 재계산
+                    if not target_data['custom_interval']:
+                        url_to_use = target_data.get('url', db_target.url)
+                        date_str = self.extract_date_from_url(url_to_use)
+                        calculated_interval = self.calculate_interval(date_str)
+                        update_data["interval"] = calculated_interval
+            else:
+                # Pydantic 모델인 경우 (기존 코드)
+                if target_data.url is not None:
+                    update_data["url"] = target_data.url
+                if target_data.base_url is not None:
+                    update_data["base_url"] = target_data.base_url
+                if target_data.label is not None:
+                    update_data["label"] = target_data.label
+                if target_data.date is not None:
+                    update_data["date"] = target_data.date
+                if target_data.times is not None:
+                    update_data["times"] = json.dumps(target_data.times)
+                if target_data.category is not None:
+                    update_data["category"] = target_data.category
+                if target_data.service_type is not None:
+                    update_data["service_type"] = target_data.service_type
+                if target_data.is_active is not None:
+                    update_data["is_active"] = target_data.is_active
+                
+                # interval 업데이트 (명시적으로 제공된 경우 사용자 정의로 설정)
+                if target_data.interval is not None:
+                    update_data["interval"] = target_data.interval
+                    update_data["custom_interval"] = True
+                elif (not db_target.custom_interval) and (date_changed or url_changed):
+                    # 사용자 정의가 아니고, 날짜나 URL이 변경된 경우 자동 재계산
+                    new_url = target_data.url or db_target.url
+                    date_str = self.extract_date_from_url(new_url)
+                    calculated_interval = self.calculate_interval(date_str)
+                    update_data["interval"] = calculated_interval
+                
+                # custom_interval 업데이트 (명시적으로 제공된 경우)
+                if target_data.custom_interval is not None:
+                    update_data["custom_interval"] = target_data.custom_interval
+                    
+                    # 사용자 정의를 False로 변경하는 경우, interval 재계산
+                    if not target_data.custom_interval:
+                        url_to_use = target_data.url or db_target.url
+                        date_str = self.extract_date_from_url(url_to_use)
+                        calculated_interval = self.calculate_interval(date_str)
+                        update_data["interval"] = calculated_interval
             
             # 업데이트 실행
             if update_data:
@@ -450,6 +611,7 @@ class MonitorService:
             return self._convert_to_model(db_target)
         except Exception as e:
             db.rollback()
+            logger.error(f"모니터링 대상 업데이트 중 오류 발생: {str(e)}", exc_info=True)
             raise Exception(f"모니터링 대상 업데이트 중 오류 발생: {str(e)}")
         finally:
             db.close()
@@ -479,4 +641,41 @@ class MonitorService:
 
     async def get_active_targets(self) -> List[MonitorTarget]:
         """활성화된 모니터링 대상만 조회합니다."""
-        return await self.get_targets({"is_active": True}) 
+        return await self.get_targets({"is_active": True})
+
+    async def fix_invalid_times(self):
+        """손상된 times 필드를 가진 모니터링 대상을 수정합니다."""
+        db = SessionLocal()
+        try:
+            logger.info("손상된 times 필드 검사 시작")
+            targets = db.query(DBMonitorTarget).all()
+            fixed_count = 0
+            
+            for target in targets:
+                try:
+                    # times 필드가 유효한 JSON인지 확인
+                    if target.times:
+                        try:
+                            json.loads(target.times)
+                        except json.JSONDecodeError:
+                            # 손상된 JSON 수정
+                            logger.warning(f"손상된 times 필드 발견 (ID {target.id}): {target.times}")
+                            # 기본값으로 빈 배열 사용
+                            target.times = json.dumps([])
+                            fixed_count += 1
+                except Exception as e:
+                    logger.error(f"대상 ID {target.id} 검사 중 오류: {str(e)}")
+            
+            if fixed_count > 0:
+                db.commit()
+                logger.info(f"총 {fixed_count}개의 손상된 times 필드 수정 완료")
+            else:
+                logger.info("손상된 times 필드가 발견되지 않았습니다")
+            
+            return fixed_count
+        except Exception as e:
+            db.rollback()
+            logger.error(f"times 필드 수정 중 오류 발생: {str(e)}", exc_info=True)
+            raise Exception(f"times 필드 수정 중 오류 발생: {str(e)}")
+        finally:
+            db.close() 

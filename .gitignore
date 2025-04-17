@@ -5,3 +5,4 @@ __pycache__/
 error_screenshots/
 logs/
 *.log
+app_bin

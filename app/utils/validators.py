@@ -15,10 +15,16 @@ def is_full_reservation(html_content: str) -> bool:
         bool: 예약 마감 여부
     """
     soup = BeautifulSoup(html_content, 'html.parser')
+    
+    # 기존 체크 - 운영하지 않는 매장
     error_title = soup.find('h1', class_='error_title')
-
     if error_title and "운영하지 않는" in error_title.text:
         return True
+    
+    # 추가 체크 - "error" 키워드 확인 (매진 상태)
+    if "error" in html_content:
+        return True
+        
     return False
 
 
@@ -41,6 +47,12 @@ def is_page_available(html_content: str) -> bool:
     if error_tag and "운영하지 않는" in error_tag.get_text(strip=True):
         print("Page contains the error message. Skipping...")
         return False
+        
+    # "error" 패턴이 있더라도 페이지 자체는 유효한 것으로 간주
+    # (매진 상태를 나타내는 에러이므로)
+    if "error" in html_content:
+        print("Page contains 'error' pattern but it indicates sold-out status. Treating as available page.")
+        return True
 
     # 원치 않는 정적 페이지 확인
     unwanted_content = '''

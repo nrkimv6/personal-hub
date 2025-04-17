@@ -20,7 +20,7 @@ urls = [
         "base_url": "https://booking.naver.com/booking/12/bizes/1249231",
         "label": "나전칠기_0417",
         "date": "2025-04-17T00:00:00+09:00",
-        "times": ["00:00"],
+        "times": [],
         "category": "워크샵",
         "service_type": "네이버예약"
     },
@@ -29,7 +29,7 @@ urls = [
         "base_url": "https://booking.naver.com/booking/12/bizes/1249231",
         "label": "나전칠기_0424",
         "date": "2025-04-24T00:00:00+09:00",
-        "times": ["00:00"],
+        "times": [],
         "category": "워크샵",
         "service_type": "네이버예약"
     },
@@ -38,7 +38,7 @@ urls = [
         "base_url": "https://booking.naver.com/booking/12/bizes/1249231",
         "label": "요가_0426",
         "date": "2025-04-26T00:00:00+09:00",
-        "times": ["00:00"],
+        "times": [],
         "category": "요가",
         "service_type": "네이버예약"
     },
@@ -47,7 +47,7 @@ urls = [
         "base_url": "https://booking.naver.com/booking/12/bizes/1182237",
         "label": "케라스타즈_0419",
         "date": "2025-04-19T00:00:00+09:00",
-        "times": ["00:00"],
+        "times": [],
         "category": "뷰티",
         "service_type": "네이버예약"
     },
@@ -56,7 +56,7 @@ urls = [
         "base_url": "https://booking.naver.com/booking/12/bizes/1182237",
         "label": "케라스타즈_0420",
         "date": "2025-04-20T00:00:00+09:00",
-        "times": ["00:00"],
+        "times": [],
         "category": "뷰티",
         "service_type": "네이버예약"
     },
@@ -65,7 +65,7 @@ urls = [
         "base_url": "https://booking.naver.com/booking/12/bizes/1182237",
         "label": "케라스타즈_0418",
         "date": "2025-04-18T00:00:00+09:00",
-        "times": ["00:00"],
+        "times": [],
         "category": "뷰티",
         "service_type": "네이버예약"
     },
@@ -74,7 +74,7 @@ urls = [
         "base_url": "https://booking.naver.com/booking/12/bizes/1182237",
         "label": "케라스타즈_0425",
         "date": "2025-04-25T00:00:00+09:00",
-        "times": ["00:00"],
+        "times": [],
         "category": "뷰티",
         "service_type": "네이버예약"
     },
@@ -83,7 +83,7 @@ urls = [
         "base_url": "https://booking.naver.com/booking/12/bizes/1182237",
         "label": "케라스타즈_0426",
         "date": "2025-04-26T00:00:00+09:00",
-        "times": ["00:00"],
+        "times": [],
         "category": "뷰티",
         "service_type": "네이버예약"
     },
@@ -92,7 +92,7 @@ urls = [
         "base_url": "https://booking.naver.com/booking/12/bizes/1182237",
         "label": "케라스타즈_0427",
         "date": "2025-04-27T00:00:00+09:00",
-        "times": ["00:00"],
+        "times": [],
         "category": "뷰티",
         "service_type": "네이버예약"
     },
@@ -101,7 +101,7 @@ urls = [
         "base_url": "https://booking.naver.com/booking/12/bizes/1357646",
         "label": "삐아_0418",
         "date": "2025-04-18T00:00:00+09:00",
-        "times": ["00:00"],
+        "times": [],
         "category": "뷰티",
         "service_type": "네이버예약"
     },
@@ -110,7 +110,7 @@ urls = [
         "base_url": "https://booking.naver.com/booking/13/bizes/1388009",
         "label": "파파레서피_0418",
         "date": "2025-04-18T00:00:00+09:00",
-        "times": ["00:00"],
+        "times": [],
         "category": "뷰티",
         "service_type": "네이버예약"
     },
@@ -119,7 +119,7 @@ urls = [
         "base_url": "https://booking.naver.com/booking/13/bizes/1388009",
         "label": "파파레서피_0419",
         "date": "2025-04-19T00:00:00+09:00",
-        "times": ["00:00"],
+        "times": [],
         "category": "뷰티",
         "service_type": "네이버예약"
     },
@@ -128,7 +128,7 @@ urls = [
         "base_url": "https://booking.naver.com/booking/13/bizes/1388009",
         "label": "파파레서피_0420",
         "date": "2025-04-20T00:00:00+09:00",
-        "times": ["00:00"],
+        "times": [],
         "category": "뷰티",
         "service_type": "네이버예약"
     },
@@ -137,7 +137,7 @@ urls = [
         "base_url": "https://booking.naver.com/booking/12/bizes/1386180",
         "label": "바닐라코_0418",
         "date": "2025-04-18T00:00:00+09:00",
-        "times": ["00:00"],
+        "times": [],
         "category": "뷰티",
         "service_type": "네이버예약"
     },
@@ -146,7 +146,7 @@ urls = [
         "base_url": "https://booking.naver.com/booking/12/bizes/1386180",
         "label": "바닐라코_0419",
         "date": "2025-04-19T00:00:00+09:00",
-        "times": ["00:00"],
+        "times": [],
         "category": "뷰티",
         "service_type": "네이버예약"
     },
@@ -155,7 +155,7 @@ urls = [
         "base_url": "https://booking.naver.com/booking/12/bizes/1386180",
         "label": "바닐라코_0420",
         "date": "2025-04-20T00:00:00+09:00",
-        "times": ["00:00"],
+        "times": [],
         "category": "뷰티",
         "service_type": "네이버예약"
     }

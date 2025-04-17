@@ -35,7 +35,7 @@ playwright install chromium
 프로젝트 루트 디렉토리(monitor-page)에서 다음 명령어를 실행합니다:
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 8001
 ```
 
 ### 방법 2: app 디렉토리에서 실행
@@ -43,14 +43,14 @@ app 디렉토리로 이동하여 다음 명령어를 실행합니다:
 
 ```bash
 cd app
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uvicorn main:app --reload --host 0.0.0.0 --port 8001
 ```
 
 ## 4. 접속 방법
 
 서버 실행 후 브라우저에서 다음 주소로 접속할 수 있습니다:
-- API 메인 페이지: http://localhost:8000
-- API 문서: http://localhost:8000/docs
+- API 메인 페이지: http://localhost:8001
+- API 문서: http://localhost:8001/docs
 
 ## 5. 문제 해결 방법
 
