@@ -1,0 +1,11 @@
+CREATE TABLE monitor_targets ( id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT NOT NULL, base_url TEXT NOT NULL, label TEXT NOT NULL, date TEXT NOT NULL, times TEXT NOT NULL, category TEXT NOT NULL, service_type TEXT NOT NULL, is_active BOOLEAN DEFAULT TRUE, interval REAL, custom_interval BOOLEAN DEFAULT FALSE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP , is_enabled BOOLEAN DEFAULT TRUE, run_status TEXT DEFAULT 'idle', last_error TEXT, error_count INTEGER DEFAULT 0)
+CREATE TABLE notification_settings ( id INTEGER NOT NULL, enable_telegram BOOLEAN, enable_desktop BOOLEAN, notify_states VARCHAR, created_at DATETIME, updated_at DATETIME, PRIMARY KEY (id) )
+CREATE TABLE request_logs ( id INTEGER PRIMARY KEY AUTOINCREMENT, request_time DATETIME DEFAULT CURRENT_TIMESTAMP, url VARCHAR(500) NOT NULL, label VARCHAR(100) NOT NULL, date VARCHAR(50), -- 모니터링 날짜 times TEXT, -- 모니터링 시간대 (JSON 문자열) category VARCHAR(50), service_type VARCHAR(50), response_hash VARCHAR(32), -- 응답 내용의 해시값 is_valid BOOLEAN DEFAULT TRUE, -- 응답이 유효한지 여부 is_full BOOLEAN DEFAULT FALSE, -- 예약 마감 여부 is_available BOOLEAN DEFAULT TRUE, -- 페이지 이용 가능 여부 error_message VARCHAR(500), created_at DATETIME DEFAULT CURRENT_TIMESTAMP )
+CREATE TABLE sqlite_sequence(name,seq)
+
+CREATE INDEX idx_request_logs_category ON request_logs(category)
+CREATE INDEX idx_request_logs_created_at ON request_logs(created_at)
+CREATE INDEX idx_request_logs_date ON request_logs(date)
+CREATE INDEX idx_request_logs_service_type ON request_logs(service_type)
+CREATE INDEX idx_request_logs_url ON request_logs(url)
+CREATE INDEX ix_notification_settings_id ON notification_settings (id)
