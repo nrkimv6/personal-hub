@@ -28,10 +28,11 @@ class Settings(BaseSettings):
     
     # 모니터링 설정
     MAX_WORKERS: int = 3
-    MAX_TABS_PER_WORKER: int = 3
-    TAB_CLEANUP_THRESHOLD: int = 3000  # 탭 정리 임계값 (초)
+    MAX_TABS_PER_WORKER: int = 5  # auto_booking_graphql.py와 동일 (기존 3)
+    TAB_CLEANUP_THRESHOLD: int = 600  # 탭 정리 임계값 (초) - auto_booking_graphql.py와 동일 (기존 3000)
     CHECK_INTERVAL: int = 60  # 모니터링 체크 간격 (초)
     MAX_CONCURRENT_CHECKS: int = 5  # 동시 체크 최대 수
+    MAX_USES_PER_TAB: int = 50  # 탭당 최대 사용 횟수 (신규 - auto_booking_graphql.py에서 가져옴)
     
     # 날짜 기반 스케줄링 설정
     DATE_BASED_SCHEDULING: bool = True  # 날짜 기반 스케줄링 활성화 여부

@@ -160,10 +160,16 @@ class MonitoringSystemManager:
                 for key, value in filters.items():
                     if value is not None:
                         conditions.append(f"{key} = ?")
-                        params.append(value)
-                
+                        # SQLite boolean 처리: True/False를 1/0으로 변환
+                        if isinstance(value, bool):
+                            params.append(1 if value else 0)
+                        else:
+                            params.append(value)
+
                 if conditions:
                     query += " WHERE " + " AND ".join(conditions)
+
+            logger.debug(f"쿼리 실행: {query}, 파라미터: {params}")
             
             cursor.execute(query, params)
             rows = cursor.fetchall()
