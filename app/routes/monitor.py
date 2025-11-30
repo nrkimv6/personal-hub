@@ -5,8 +5,8 @@ from datetime import datetime, date
 import asyncio
 
 from app.schemas.monitor import MonitorTarget, MonitorTargetCreate, MonitorTargetUpdate
-from app.services.monitor_service import MonitorService
-from app.dependencies import get_browser_service
+from app.services.monitoring_system_manager import MonitoringSystemManager
+from app.dependencies import get_browser_service, get_monitoring_manager
 from app.config import logger
 
 router = APIRouter(
@@ -19,7 +19,7 @@ async def get_monitor_targets(
     service_type: Optional[str] = None,
     category: Optional[str] = None,
     is_active: Optional[bool] = None,
-    monitor_service: MonitorService = Depends()
+    monitoring_manager: MonitoringSystemManager = Depends(get_monitoring_manager)
 ):
     """모니터링 대상 목록을 조회합니다."""
     filters = {}
@@ -30,13 +30,14 @@ async def get_monitor_targets(
     if is_active is not None:
         filters["is_active"] = is_active
     
-    return await monitor_service.get_targets(filters)
+    targets = await monitoring_manager.get_targets(filters)
+    return targets
 
 @router.post("/targets", response_model=None)
 async def create_monitor_target(
     target: MonitorTargetCreate,
     background_tasks: BackgroundTasks,
-    monitor_service: MonitorService = Depends(),
+    monitoring_manager: MonitoringSystemManager = Depends(get_monitoring_manager),
     browser_service = Depends(get_browser_service)
 ):
     """새로운 모니터링 대상을 추가합니다."""
@@ -51,7 +52,7 @@ async def create_monitor_target(
             logger.info(f"필드 {k} = {v} (타입: {type(v)})")
         
         # 데이터베이스에 저장
-        new_target = await monitor_service.create_target(target)
+        new_target = await monitoring_manager.create_target(target)
         logger.info(f"모니터링 대상 생성 성공: ID {new_target.id}")
         
         # 백그라운드에서 모니터링 시작
@@ -103,12 +104,12 @@ async def create_monitor_target(
 @router.get("/targets/{target_id}", response_model=Dict[str, Any])
 async def get_target_by_id(
     target_id: int,
-    monitor_service: MonitorService = Depends(),
+    monitoring_manager: MonitoringSystemManager = Depends(get_monitoring_manager),
     browser_service = Depends(get_browser_service)
 ):
     """특정 ID의 모니터링 대상을 조회합니다."""
     try:
-        target = await monitor_service.get_target(target_id)
+        target = await monitoring_manager.get_target(target_id)
         if not target:
             raise HTTPException(status_code=404, detail="모니터링 대상을 찾을 수 없습니다")
         
@@ -147,10 +148,10 @@ async def get_target_by_id(
 async def update_monitor_target(
     target_id: int,
     target: MonitorTargetUpdate,
-    monitor_service: MonitorService = Depends()
+    monitoring_manager: MonitoringSystemManager = Depends(get_monitoring_manager)
 ):
     """모니터링 대상의 정보를 수정합니다."""
-    updated_target = await monitor_service.update_target(target_id, target)
+    updated_target = await monitoring_manager.update_target(target_id, target)
     if not updated_target:
         raise HTTPException(status_code=404, detail="모니터링 대상을 찾을 수 없습니다")
     return updated_target
@@ -158,10 +159,10 @@ async def update_monitor_target(
 @router.delete("/targets/{target_id}")
 async def delete_monitor_target(
     target_id: int,
-    monitor_service: MonitorService = Depends()
+    monitoring_manager: MonitoringSystemManager = Depends(get_monitoring_manager)
 ):
     """모니터링 대상을 삭제합니다."""
-    success = await monitor_service.delete_target(target_id)
+    success = await monitoring_manager.delete_target(target_id)
     if not success:
         raise HTTPException(status_code=404, detail="모니터링 대상을 찾을 수 없습니다")
     return {"status": "success"}
@@ -170,16 +171,16 @@ async def delete_monitor_target(
 async def start_monitoring(
     target_id: int,
     background_tasks: BackgroundTasks,
-    monitor_service: MonitorService = Depends(),
+    monitoring_manager: MonitoringSystemManager = Depends(get_monitoring_manager),
     browser_service = Depends(get_browser_service)
 ):
     """특정 모니터링 대상의 모니터링을 시작합니다."""
-    target = await monitor_service.get_target(target_id)
+    target = await monitoring_manager.get_target(target_id)
     if not target:
         raise HTTPException(status_code=404, detail="모니터링 대상을 찾을 수 없습니다")
     
     # is_enabled 필드를 True로 설정
-    await monitor_service.update_target(target_id, {"is_enabled": True})
+    await monitoring_manager.update_target(target_id, {"is_enabled": True})
     
     background_tasks.add_task(
         browser_service.start_monitoring,
@@ -191,15 +192,15 @@ async def start_monitoring(
 async def pause_monitoring(
     target_id: int,
     browser_service = Depends(get_browser_service),
-    monitor_service: MonitorService = Depends()
+    monitoring_manager: MonitoringSystemManager = Depends(get_monitoring_manager)
 ):
     """특정 모니터링 대상의 모니터링을 일시 중지합니다. (is_enabled=False 설정)"""
-    target = await monitor_service.get_target(target_id)
+    target = await monitoring_manager.get_target(target_id)
     if not target:
         raise HTTPException(status_code=404, detail="모니터링 대상을 찾을 수 없습니다")
     
     # is_enabled 필드만 False로 설정 (is_active는 유지)
-    await monitor_service.update_target(target_id, {"is_enabled": False})
+    await monitoring_manager.update_target(target_id, {"is_enabled": False})
     
     # 현재 실행 중이면 중지
     if target_id in browser_service.monitoring_tasks and not browser_service.monitoring_tasks[target_id].done():
@@ -220,34 +221,34 @@ async def stop_monitoring(
 @router.get("/stats", response_model=Dict[str, Any])
 async def get_monitoring_stats(
     browser_service = Depends(get_browser_service),
-    monitor_service: MonitorService = Depends()
+    monitoring_manager: MonitoringSystemManager = Depends(get_monitoring_manager)
 ):
     """모니터링 시스템 통계 정보를 조회합니다."""
     try:
         logger.debug(f"통계 정보 요청 시작")
         
         # 전체 대상 수 조회
-        all_targets = await monitor_service.get_targets()
+        all_targets = await monitoring_manager.get_targets()
         total_count = len(all_targets)
         logger.debug(f"전체 대상 수: {total_count}")
         
         # 활성 대상 수 조회
-        active_targets = await monitor_service.get_targets({"is_active": True})
+        active_targets = await monitoring_manager.get_targets({"is_active": True})
         active_count = len(active_targets)
         logger.debug(f"활성 대상 수: {active_count}")
         
         # 활성화된 대상 수 조회 (사용자 설정)
-        enabled_targets = await monitor_service.get_targets({"is_enabled": True})
+        enabled_targets = await monitoring_manager.get_targets({"is_enabled": True})
         enabled_count = len(enabled_targets)
         logger.debug(f"사용자 활성화 대상 수: {enabled_count}")
         
         # 실행 중인 대상 수 조회
-        running_targets = await monitor_service.get_targets({"run_status": "running"})
+        running_targets = await monitoring_manager.get_targets({"run_status": "running"})
         running_count = len(running_targets)
         logger.debug(f"실행 중인 대상 수: {running_count}")
         
         # 오류 상태 대상 수 조회
-        error_targets = await monitor_service.get_targets({"run_status": "error"})
+        error_targets = await monitoring_manager.get_targets({"run_status": "error"})
         error_count = len(error_targets)
         logger.debug(f"오류 상태 대상 수: {error_count}")
         
@@ -290,11 +291,11 @@ async def get_monitoring_stats(
 
 @router.post("/fix-database")
 async def fix_database(
-    monitor_service: MonitorService = Depends()
+    monitoring_manager: MonitoringSystemManager = Depends(get_monitoring_manager)
 ):
     """데이터베이스 손상 문제를 수정합니다."""
     try:
-        fixed_count = await monitor_service.fix_invalid_times()
+        fixed_count = await monitoring_manager.fix_invalid_times()
         return {
             "status": "success", 
             "message": f"데이터베이스 수정 완료. {fixed_count}개의 손상된 레코드가 수정되었습니다."

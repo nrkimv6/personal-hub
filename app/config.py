@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     MAX_TABS_PER_WORKER: int = 3
     TAB_CLEANUP_THRESHOLD: int = 3000  # 탭 정리 임계값 (초)
     CHECK_INTERVAL: int = 60  # 모니터링 체크 간격 (초)
+    MAX_CONCURRENT_CHECKS: int = 5  # 동시 체크 최대 수
     
     # 날짜 기반 스케줄링 설정
     DATE_BASED_SCHEDULING: bool = True  # 날짜 기반 스케줄링 활성화 여부
@@ -43,7 +44,7 @@ class Settings(BaseSettings):
     USER_DATA_DIR: Path = Path("./browser_data")
     #r"C:\Users\Narang\AppData\Local\Google\Chrome\User Data"
     CHROME_PATH: str = r"C:\Program Files\Google\Chrome Dev\Application\chrome.exe"
-    DRIVER_PATH: str = r"D:\save\Programs\executable\chromedriver\135.0.7023\chromedriver.exe"
+    DRIVER_PATH: str = r"D:\Programs\executable\chromedriver\135.0.7023\chromedriver.exe"
     
     # # Supabase 설정
     # SUPABASE_URL: str

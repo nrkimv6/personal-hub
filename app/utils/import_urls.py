@@ -35,7 +35,7 @@ sys.path.insert(0, root_dir)
 # 필요한 모듈 임포트
 try:
     from app.utils.urls import urls
-    from app.services.monitor_service import MonitorService
+    from app.services.monitoring_system_manager import MonitoringSystemManager
     from app.schemas.monitor import MonitorTargetCreate
     from pydantic import HttpUrl
     logger.info("모듈 임포트 성공")
@@ -50,7 +50,7 @@ async def import_urls():
     logger.info("URL 데이터 임포트 시작")
     
     # MonitorService 인스턴스 생성
-    monitor_service = MonitorService()
+    monitor_service = MonitoringSystemManager()
     
     # 카운터 초기화
     total_urls = len(urls)

@@ -8,12 +8,16 @@ from typing import Optional, Dict, Any, List
 import json
 import asyncio
 from sqlalchemy.orm import Session
+import logging
 
 from app.config import settings, logger
-from app.utils.validators import is_content_valid, is_full_reservation, is_page_available
-from app.utils.parsers import parse_time_and_stock, parse_page_info, extract_date_from_url
-from app.services.monitor_service import DBNotificationSettings
+from app.utils.validators import is_naver_content_valid, is_naver_full_reservation, is_naver_page_available
+from app.utils.parsers import parse_time_and_stock, parse_naver_page_info, extract_date_from_url
+from app.models.notification_settings import DBNotificationSettings
 from app.database import SessionLocal, get_db
+from app.models.monitor_target import MonitorTarget
+
+logger = logging.getLogger(__name__)
 
 class NotificationService:
     def __init__(self):
@@ -186,20 +190,59 @@ class NotificationService:
         
         return "변화없음"
 
-    async def send_notification(self, message: str, state: str = None, 
-                                send_telegram: bool = False, 
-                                send_desktop: bool = False, force_send=False):
-        """알림을 전송합니다."""
-        if state and state not in self.notify_states and not force_send:
-            logger.debug(f"알림 상태 {state}가 설정에 포함되지 않아 알림을 전송하지 않습니다.")
-            return
+    async def send_notification(self, target: MonitorTarget, status: Dict[str, Any]) -> None:
+        """
+        모니터링 상태 변화에 대한 알림을 발송합니다.
+        """
+        try:
+            # 텔레그램 알림 발송
+            await self._send_telegram_notification(target, status)
+            
+            # 상태 변화 로깅
+            logger.info(f"Notification sent for target {target.id}: {status}")
+            
+        except Exception as e:
+            logger.error(f"Error sending notification: {str(e)}")
+            raise
+
+    async def send_notification_message(self, message: str, send_desktop: bool = False, force_send: bool = False) -> None:
+        """
+        단순 문자열 메시지를 알림으로 발송합니다.
         
-        if (self.enable_telegram and send_telegram) or force_send:
+        Args:
+            message: 발송할 메시지
+            send_desktop: 데스크톱 알림 발송 여부
+            force_send: 중복 메시지 검사를 건너뛰고 강제로 발송할지 여부
+        """
+        try:
+            # 텔레그램 알림 발송
             await self._send_telegram(message)
-        
-        if (self.enable_desktop and send_desktop) or force_send:
-            await self._send_desktop(message)
-    
+            
+            # 데스크톱 알림 발송 (요청된 경우)
+            if send_desktop:
+                await self._send_desktop(message)
+            
+            # 로깅
+            logger.info(f"Notification message sent: {message[:100]}...")
+            
+        except Exception as e:
+            logger.error(f"Error sending notification message: {str(e)}")
+            raise
+
+    async def _send_telegram_notification(self, target: MonitorTarget, status: Dict[str, Any]) -> None:
+        """
+        텔레그램으로 알림을 발송합니다.
+        """
+        try:
+            message = f"🔔 {target.label}\n"
+            message += f"상태: {status.get('status', 'unknown')}\n"
+            message += f"URL: {target.url}"
+            
+            await self._send_telegram(message)
+        except Exception as e:
+            logger.error(f"텔레그램 알림 전송 중 오류 발생: {str(e)}")
+            raise
+
     async def _send_telegram(self, message: str):
         """텔레그램으로 알림을 전송합니다."""
         if not self.telegram_bot_token or not self.telegram_chat_id:

@@ -1,5 +1,5 @@
-from typing import List, Optional, Dict, Any, Union
-from datetime import datetime
+from typing import List, Optional, Dict, Any, Union, Set
+from datetime import datetime, timedelta
 from fastapi import HTTPException
 import sqlite3
 from pathlib import Path
@@ -9,8 +9,10 @@ import random
 from urllib.parse import urlparse, parse_qs
 import pytz
 import logging
+from concurrent.futures import ThreadPoolExecutor
+import hashlib
 
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Float
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Float, and_
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql import text
@@ -19,6 +21,10 @@ import sqlalchemy.exc
 from app.config import settings, logger
 from app.models.monitor import MonitorTarget
 from app.schemas.monitor import MonitorTargetCreate, MonitorTargetUpdate
+from app.services.site_monitor_factory import SiteMonitorFactory
+from app.services.abstract_site_monitor import AbstractSiteMonitor
+from app.services.notification_service import NotificationService
+from app.services.browser_service import BrowserService
 
 # SQLite 데이터베이스 설정
 DB_URL = settings.DATABASE_URL
@@ -65,10 +71,24 @@ class DBNotificationSettings(Base):
 # 테이블 생성
 Base.metadata.create_all(bind=engine)
 
-class MonitorService:
-    def __init__(self):
+class MonitoringSystemManager:
+    """모니터링 시스템 관리자"""
+    
+    def __init__(self, notification_service: NotificationService, browser_service: BrowserService):
         self.db_path = Path("monitor.db")
         self._init_db()
+        self._monitoring_tasks: Dict[str, asyncio.Task] = {}
+        self._status_cache: Dict[str, Dict[str, Any]] = {}
+        self._error_counts: Dict[str, int] = {}
+        self._last_errors: Dict[str, str] = {}
+        self._last_checks: Dict[str, datetime] = {}
+        self._maintenance_mode: bool = False
+        self._scheduled_maintenance: Dict[str, datetime] = {}
+        self._concurrent_checks: Set[str] = set()
+        self._executor = ThreadPoolExecutor(max_workers=settings.MAX_CONCURRENT_CHECKS)
+        self._check_semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_CHECKS)
+        self.notification_service = notification_service
+        self.browser_service = browser_service
 
     def _init_db(self):
         """데이터베이스 초기화"""
@@ -107,29 +127,9 @@ class MonitorService:
             """)
             
             # 필요한 열 추가 (없는 경우)
-            if 'interval' not in column_names:
-                logger.info("interval 열 추가")
-                cursor.execute("ALTER TABLE monitor_targets ADD COLUMN interval REAL")
-            
-            if 'custom_interval' not in column_names:
-                logger.info("custom_interval 열 추가")
-                cursor.execute("ALTER TABLE monitor_targets ADD COLUMN custom_interval BOOLEAN DEFAULT FALSE")
-            
-            if 'is_enabled' not in column_names:
-                logger.info("is_enabled 열 추가")
-                cursor.execute("ALTER TABLE monitor_targets ADD COLUMN is_enabled BOOLEAN DEFAULT TRUE")
-            
-            if 'run_status' not in column_names:
-                logger.info("run_status 열 추가")
-                cursor.execute("ALTER TABLE monitor_targets ADD COLUMN run_status TEXT DEFAULT 'idle'")
-            
-            if 'last_error' not in column_names:
-                logger.info("last_error 열 추가")
-                cursor.execute("ALTER TABLE monitor_targets ADD COLUMN last_error TEXT")
-            
-            if 'error_count' not in column_names:
-                logger.info("error_count 열 추가")
-                cursor.execute("ALTER TABLE monitor_targets ADD COLUMN error_count INTEGER DEFAULT 0")
+            for column in ['interval', 'custom_interval', 'is_enabled', 'run_status', 'last_error', 'error_count']:
+                if column not in column_names:
+                    cursor.execute(f"ALTER TABLE monitor_targets ADD COLUMN {column} {'REAL' if column == 'interval' else 'BOOLEAN' if column == 'custom_interval' or column == 'is_enabled' else 'TEXT' if column == 'run_status' or column == 'last_error' else 'INTEGER'}")
             
             conn.commit()
             logger.info("데이터베이스 초기화 완료")
@@ -209,25 +209,11 @@ class MonitorService:
                     }
                     
                     # 새 필드 추가
-                    if 'is_enabled' in row.keys():
-                        target_dict["is_enabled"] = bool(row['is_enabled'])
-                    else:
-                        target_dict["is_enabled"] = True
-                        
-                    if 'run_status' in row.keys():
-                        target_dict["run_status"] = row['run_status']
-                    else:
-                        target_dict["run_status"] = "idle"
-                        
-                    if 'last_error' in row.keys():
-                        target_dict["last_error"] = row['last_error']
-                    else:
-                        target_dict["last_error"] = None
-                        
-                    if 'error_count' in row.keys():
-                        target_dict["error_count"] = int(row['error_count']) if row['error_count'] is not None else 0
-                    else:
-                        target_dict["error_count"] = 0
+                    for field in ['is_enabled', 'run_status', 'last_error', 'error_count']:
+                        if field in row.keys():
+                            target_dict[field] = row[field] if field != 'error_count' else int(row[field]) if row[field] is not None else 0
+                        else:
+                            target_dict[field] = True if field == 'is_enabled' else "idle" if field == 'run_status' else None if field == 'last_error' else 0
                     
                     targets.append(MonitorTarget(**target_dict))
                 except Exception as e:
@@ -334,7 +320,11 @@ class MonitorService:
                 interval=db_target.interval,
                 custom_interval=db_target.custom_interval,
                 created_at=db_target.created_at,
-                updated_at=db_target.updated_at
+                updated_at=db_target.updated_at,
+                is_enabled=getattr(db_target, 'is_enabled', True),
+                run_status=getattr(db_target, 'run_status', 'idle'),
+                last_error=getattr(db_target, 'last_error', None),
+                error_count=getattr(db_target, 'error_count', 0)
             )
         except Exception as e:
             logger.error(f"모델 변환 중 오류 발생 (ID {db_target.id}): {str(e)}", exc_info=True)
@@ -352,7 +342,11 @@ class MonitorService:
                 interval=db_target.interval or 60.0,
                 custom_interval=db_target.custom_interval or False,
                 created_at=db_target.created_at or datetime.now(),
-                updated_at=db_target.updated_at or datetime.now()
+                updated_at=db_target.updated_at or datetime.now(),
+                is_enabled=True,
+                run_status='idle',
+                last_error=None,
+                error_count=0
             )
     
     # 모니터링 대상 생성
@@ -482,6 +476,13 @@ class MonitorService:
                     "created_at": created_at,
                     "updated_at": updated_at
                 }
+                
+                for field in ['is_enabled', 'run_status', 'last_error', 'error_count']:
+                    if field in row.keys():
+                        target_dict[field] = row[field] if field != 'error_count' else int(row[field]) if row[field] is not None else 0
+                    else:
+                        target_dict[field] = True if field == 'is_enabled' else "idle" if field == 'run_status' else None if field == 'last_error' else 0
+                
                 return MonitorTarget(**target_dict)
             except Exception as e:
                 logger.error(f"대상 변환 중 오류 발생: {str(e)}, Row: {dict(row)}")
@@ -678,4 +679,336 @@ class MonitorService:
             logger.error(f"times 필드 수정 중 오류 발생: {str(e)}", exc_info=True)
             raise Exception(f"times 필드 수정 중 오류 발생: {str(e)}")
         finally:
-            db.close() 
+            db.close()
+
+    async def start_monitoring(self, target: MonitorTarget) -> None:
+        """모니터링을 시작합니다."""
+        if target.id in self._monitoring_tasks:
+            logger.warning(f"이미 모니터링 중인 대상입니다: {target.id}")
+            return
+        
+        # 모니터링 서비스 생성
+        service = SiteMonitorFactory.create_service(target)
+        
+        # 모니터링 작업 시작
+        task = asyncio.create_task(self._monitor_loop(target, service))
+        self._monitoring_tasks[target.id] = task
+        logger.info(f"모니터링 시작: {target.label}")
+    
+    async def stop_monitoring(self, target_id: str) -> None:
+        """모니터링을 중지합니다."""
+        task = self._monitoring_tasks.get(target_id)
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            del self._monitoring_tasks[target_id]
+            logger.info(f"모니터링 중지: {target_id}")
+    
+    async def _monitor_loop(self, target: MonitorTarget, service: AbstractSiteMonitor) -> None:
+        """모니터링 루프를 실행합니다."""
+        while True:
+            try:
+                # 유지보수 모드 확인
+                if self._maintenance_mode:
+                    logger.info(f"유지보수 모드로 인해 모니터링 일시 중지: {target.id}")
+                    await asyncio.sleep(60)
+                    continue
+                
+                # 예약된 유지보수 확인
+                maintenance_time = self._scheduled_maintenance.get(target.id)
+                if maintenance_time and datetime.now() >= maintenance_time:
+                    logger.info(f"예약된 유지보수로 인해 모니터링 일시 중지: {target.id}")
+                    await asyncio.sleep(60)
+                    continue
+                
+                # 동시성 제어
+                async with self._check_semaphore:
+                    if target.id in self._concurrent_checks:
+                        logger.warning(f"이미 체크 중인 대상입니다: {target.id}")
+                        await asyncio.sleep(5)
+                        continue
+                    
+                    self._concurrent_checks.add(target.id)
+                    try:
+                        # 브라우저 탭 획득
+                        page = await self.browser_service.get_tab(target.id)
+                        if not page:
+                            logger.error(f"브라우저 탭을 획득할 수 없습니다: {target.id}")
+                            await asyncio.sleep(5)
+                            continue
+                            
+                        try:
+                            # 상태 확인
+                            new_status = await service.check_status(target, page)
+                            self._last_checks[target.id] = datetime.now()
+                            
+                            # 상태 변경 감지
+                            if self._has_status_changed(target.id, new_status):
+                                await service.handle_status_change(target, new_status)
+                                self._status_cache[target.id] = new_status
+                                self._error_counts[target.id] = 0
+                                self._last_errors[target.id] = None
+                                
+                                # 성공적인 체크 후 상태 업데이트
+                                db = SessionLocal()
+                                try:
+                                    db_target = db.query(DBMonitorTarget).filter(DBMonitorTarget.id == target.id).first()
+                                    if db_target:
+                                        db_target.error_count = 0
+                                        db_target.last_error = None
+                                        db_target.run_status = "running"
+                                        db.commit()
+                                finally:
+                                    db.close()
+                        finally:
+                            # 브라우저 탭 반환
+                            await self.browser_service.release_tab(target.id, page)
+                    finally:
+                        self._concurrent_checks.remove(target.id)
+                
+                # 다음 체크까지 대기
+                interval = await service.get_interval(target)
+                await asyncio.sleep(interval)
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"모니터링 중 에러 발생: {error_msg}")
+                
+                # 에러 카운트 증가
+                self._error_counts[target.id] = self._error_counts.get(target.id, 0) + 1
+                self._last_errors[target.id] = error_msg
+                
+                # 에러 상태 업데이트
+                db = SessionLocal()
+                try:
+                    db_target = db.query(DBMonitorTarget).filter(DBMonitorTarget.id == target.id).first()
+                    if db_target:
+                        db_target.error_count = self._error_counts[target.id]
+                        db_target.last_error = error_msg
+                        db_target.run_status = "error"
+                        db.commit()
+                except Exception as db_error:
+                    logger.error(f"에러 상태 업데이트 실패: {str(db_error)}")
+                finally:
+                    db.close()
+                
+                # 에러 발생 시 대기 시간 조정
+                error_wait = min(30 * (2 ** (self._error_counts[target.id] - 1)), 3600)
+                await asyncio.sleep(error_wait)
+    
+    def _has_status_changed(self, target_id: str, new_status: Dict[str, Any]) -> bool:
+        """상태 변경 여부를 확인합니다."""
+        old_status = self._status_cache.get(target_id)
+        if not old_status:
+            return True
+        
+        # 해시값 비교
+        return old_status.get("hash") != new_status.get("hash")
+    
+    def get_monitoring_status(self) -> List[Dict[str, Any]]:
+        """모니터링 상태를 반환합니다."""
+        status_list = []
+        for target_id, status in self._status_cache.items():
+            status_info = {
+                "target_id": target_id,
+                "status": status,
+                "last_check": self._last_checks.get(target_id, datetime.now()).isoformat(),
+                "error_count": self._error_counts.get(target_id, 0),
+                "last_error": self._last_errors.get(target_id),
+                "is_monitoring": target_id in self._monitoring_tasks
+            }
+            status_list.append(status_info)
+        return status_list
+    
+    async def get_target_status(self, target_id: str) -> Optional[Dict[str, Any]]:
+        """특정 모니터링 대상의 상태를 반환합니다."""
+        if target_id not in self._status_cache:
+            return None
+            
+        return {
+            "status": self._status_cache[target_id],
+            "last_check": self._last_checks.get(target_id, datetime.now()).isoformat(),
+            "error_count": self._error_counts.get(target_id, 0),
+            "last_error": self._last_errors.get(target_id),
+            "is_monitoring": target_id in self._monitoring_tasks
+        }
+    
+    async def reset_target_status(self, target_id: str) -> bool:
+        """특정 모니터링 대상의 상태를 초기화합니다."""
+        if target_id in self._status_cache:
+            del self._status_cache[target_id]
+        if target_id in self._error_counts:
+            del self._error_counts[target_id]
+        if target_id in self._last_errors:
+            del self._last_errors[target_id]
+        if target_id in self._last_checks:
+            del self._last_checks[target_id]
+            
+        db = SessionLocal()
+        try:
+            db_target = db.query(DBMonitorTarget).filter(DBMonitorTarget.id == target_id).first()
+            if db_target:
+                db_target.error_count = 0
+                db_target.last_error = None
+                db_target.run_status = "idle"
+                db.commit()
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"상태 초기화 실패: {str(e)}")
+            return False
+        finally:
+            db.close()
+    
+    async def start_all_monitoring(self) -> None:
+        """모든 활성화된 모니터링 대상을 시작합니다."""
+        targets = await self.get_active_targets()
+        for target in targets:
+            if target.is_enabled:
+                await self.start_monitoring(target)
+    
+    async def stop_all_monitoring(self) -> None:
+        """모든 모니터링을 중지합니다."""
+        for target_id in list(self._monitoring_tasks.keys()):
+            await self.stop_monitoring(target_id)
+    
+    async def restart_monitoring(self, target_id: str) -> None:
+        """특정 모니터링 대상을 재시작합니다."""
+        await self.stop_monitoring(target_id)
+        target = await self.get_target(target_id)
+        if target and target.is_enabled:
+            await self.start_monitoring(target)
+    
+    async def update_monitoring_interval(self, target_id: str, interval: float) -> bool:
+        """모니터링 간격을 업데이트합니다."""
+        db = SessionLocal()
+        try:
+            db_target = db.query(DBMonitorTarget).filter(DBMonitorTarget.id == target_id).first()
+            if db_target:
+                db_target.interval = interval
+                db_target.custom_interval = True
+                db.commit()
+                
+                # 실행 중인 모니터링 재시작
+                if target_id in self._monitoring_tasks:
+                    await self.restart_monitoring(target_id)
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"모니터링 간격 업데이트 실패: {str(e)}")
+            return False
+        finally:
+            db.close()
+    
+    async def set_maintenance_mode(self, enabled: bool) -> None:
+        """유지보수 모드를 설정합니다."""
+        self._maintenance_mode = enabled
+        if enabled:
+            logger.info("유지보수 모드 활성화")
+        else:
+            logger.info("유지보수 모드 비활성화")
+    
+    async def schedule_maintenance(self, target_id: str, start_time: datetime, duration: int) -> None:
+        """특정 대상에 대한 유지보수를 예약합니다."""
+        self._scheduled_maintenance[target_id] = start_time
+        logger.info(f"대상 {target_id}에 대한 유지보수 예약: {start_time}부터 {duration}분간")
+        
+        # 유지보수 종료 시간 설정
+        end_time = start_time + timedelta(minutes=duration)
+        asyncio.create_task(self._end_maintenance(target_id, end_time))
+    
+    async def _end_maintenance(self, target_id: str, end_time: datetime) -> None:
+        """예약된 유지보수를 종료합니다."""
+        await asyncio.sleep((end_time - datetime.now()).total_seconds())
+        if target_id in self._scheduled_maintenance:
+            del self._scheduled_maintenance[target_id]
+            logger.info(f"대상 {target_id}의 유지보수 종료")
+    
+    async def get_maintenance_schedule(self) -> Dict[str, datetime]:
+        """예약된 유지보수 일정을 반환합니다."""
+        return self._scheduled_maintenance
+    
+    async def get_concurrent_checks(self) -> Set[str]:
+        """현재 체크 중인 대상 목록을 반환합니다."""
+        return self._concurrent_checks
+    
+    async def cleanup_old_status(self, days: int = 7) -> None:
+        """지정된 일수 이전의 상태 데이터를 정리합니다."""
+        cutoff_date = datetime.now() - timedelta(days=days)
+        db = SessionLocal()
+        try:
+            # 오래된 상태 데이터 삭제
+            db.query(DBMonitorTarget).filter(
+                and_(
+                    DBMonitorTarget.updated_at < cutoff_date,
+                    DBMonitorTarget.run_status == "idle"
+                )
+            ).delete()
+            db.commit()
+            logger.info(f"{days}일 이전의 오래된 상태 데이터 정리 완료")
+        except Exception as e:
+            logger.error(f"상태 데이터 정리 실패: {str(e)}")
+            db.rollback()
+        finally:
+            db.close()
+    
+    async def get_performance_metrics(self) -> Dict[str, Any]:
+        """모니터링 성능 메트릭을 반환합니다."""
+        return {
+            "active_targets": len(self._monitoring_tasks),
+            "concurrent_checks": len(self._concurrent_checks),
+            "error_counts": sum(self._error_counts.values()),
+            "last_checks": {
+                target_id: last_check.isoformat()
+                for target_id, last_check in self._last_checks.items()
+            },
+            "maintenance_mode": self._maintenance_mode,
+            "scheduled_maintenance": {
+                target_id: time.isoformat()
+                for target_id, time in self._scheduled_maintenance.items()
+            }
+        }
+
+    async def check_status(self, target: MonitorTarget) -> Dict[str, Any]:
+        """
+        모니터링 대상의 상태를 확인합니다.
+        """
+        raise NotImplementedError("Subclasses must implement check_status")
+
+    async def handle_status_change(self, target: MonitorTarget, new_status: Dict[str, Any]) -> None:
+        """
+        상태 변화를 처리하고 필요한 알림을 발송합니다.
+        """
+        try:
+            # 상태 변화 로깅
+            logger.info(f"Status changed for target {target.id}: {new_status}")
+
+            # 알림 발송
+            await self.notification_service.send_notification(
+                target=target,
+                status=new_status
+            )
+
+        except Exception as e:
+            logger.error(f"Error handling status change: {str(e)}")
+            raise
+
+    def get_interval(self, target: MonitorTarget) -> int:
+        """
+        모니터링 간격을 계산합니다.
+        """
+        # 기본 간격은 5초
+        return 5
+
+    def validate_target(self, target: MonitorTarget) -> bool:
+        """
+        모니터링 대상의 유효성을 검사합니다.
+        """
+        if not target.url or not target.label:
+            return False
+        return True 

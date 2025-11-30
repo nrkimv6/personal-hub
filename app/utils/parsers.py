@@ -100,7 +100,7 @@ def parse_time_and_stock(button_text: str) -> Tuple[str, str]:
     return time_str, stock_str
 
 
-def parse_page_info(html_content: str) -> Dict[str, Any]:
+def parse_naver_page_info(html_content: str) -> Dict[str, Any]:
     """
     HTML 콘텐츠에서 페이지 정보를 추출합니다.
     
@@ -128,9 +128,9 @@ def parse_page_info(html_content: str) -> Dict[str, Any]:
             result["title"] = title_elem.get_text(strip=True)
         
         # 시간 및 매수 정보 추출
-        from .validators import is_content_valid
+        from .validators import is_naver_content_valid
         
-        valid_items = is_content_valid(html_content, level=2)
+        valid_items = is_naver_content_valid(html_content, level=2)
         if valid_items and isinstance(valid_items, list):
             result["available"] = True
             

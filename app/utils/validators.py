@@ -4,7 +4,7 @@ import time
 from typing import Optional, List, Union
 
 
-def is_full_reservation(html_content: str) -> bool:
+def is_naver_full_reservation(html_content: str) -> bool:
     """
     페이지가 예약 마감되었는지 확인합니다.
     
@@ -28,7 +28,7 @@ def is_full_reservation(html_content: str) -> bool:
     return False
 
 
-def is_page_available(html_content: str) -> bool:
+def is_naver_page_available(html_content: str) -> bool:
     """
     페이지가 유효한지 확인합니다.
     
@@ -73,7 +73,7 @@ def is_page_available(html_content: str) -> bool:
     return True
 
 
-def is_content_valid(html_content: str, level: int = 2, desired_day: Optional[int] = None) -> Union[None, str, List[str]]:
+def is_naver_content_valid(html_content: str, level: int = 2, desired_day: Optional[int] = None) -> Union[None, str, List[str]]:
     """
     HTML 콘텐츠의 유효성을 검사하고 예약 가능한 시간 목록을 반환합니다.
     
@@ -88,7 +88,7 @@ def is_content_valid(html_content: str, level: int = 2, desired_day: Optional[in
         시간 목록: 예약 가능한 시간 목록
     """
     if level > 0:
-        if not is_page_available(html_content):
+        if not is_naver_page_available(html_content):
             return None
 
     if level > 1:
