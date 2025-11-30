@@ -21,5 +21,13 @@ class MonitorTarget(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+    # 예약 관련 필드 (신규)
+    auto_booking_enabled: bool = False  # 자동 예약 활성화
+    max_bookings: int = 1  # 최대 예약 횟수
+    booking_count: int = 0  # 현재 예약 횟수
+    time_range: Optional[str] = None  # 예약 시간 범위 (예: "10:00-21:00")
+    last_booking_time: Optional[datetime] = None  # 마지막 예약 시각
+    booking_options: Optional[str] = None  # JSON: 사업자별 옵션 설정 오버라이드
+
     class Config:
         from_attributes = True 

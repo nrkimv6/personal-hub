@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     #r"C:\Users\Narang\AppData\Local\Google\Chrome\User Data"
     CHROME_PATH: str = r"C:\Program Files\Google\Chrome Dev\Application\chrome.exe"
     DRIVER_PATH: str = r"D:\Programs\executable\chromedriver\135.0.7023\chromedriver.exe"
+    BROWSER_HEADLESS: bool = False  # 브라우저 UI 표시 여부 (False: 창 표시, True: 백그라운드)
     
     # # Supabase 설정
     # SUPABASE_URL: str
