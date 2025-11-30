@@ -99,6 +99,13 @@ class Settings(BaseSettings):
     LOG_BACKUP_COUNT: int = 5  # 로그 백업 파일 수
     LOG_TO_CONSOLE: bool = True  # 콘솔에 로그 출력 여부
     LOG_ENCODING: str = "utf-8"  # 로그 파일 인코딩 방식
+
+    # 워커 프로세스 설정
+    WORKER_AUTO_START: bool = True  # API 서버 시작 시 워커 자동 시작 여부
+    WORKER_AUTO_RESTART: bool = True  # 워커 비정상 종료 시 자동 재시작 여부
+    WORKER_RESTART_DELAY: int = 5  # 워커 재시작 대기 시간 (초)
+    WORKER_HEALTH_CHECK_INTERVAL: int = 30  # 워커 헬스체크 간격 (초)
+    WORKER_LOG_PREFIX: str = "logs/worker"  # 워커 로그 파일 접두사
     
     # 로그 파일명 생성용 시작 시간 (서버 부팅 시간)
     SERVER_START_TIME: str = datetime.now().strftime("%Y%m%d_%H%M%S")
