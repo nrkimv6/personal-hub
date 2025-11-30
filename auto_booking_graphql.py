@@ -70,6 +70,91 @@ url_booking_locks = {}
 browser_context = None
 playwright_instance = None
 
+# 병렬 예약 설정
+MAX_PARALLEL_BOOKING_TABS = 3  # 동시 예약 시도 최대 탭 수
+
+
+def filter_slots_by_time_range(slots, time_range_str):
+    """
+    슬롯 리스트에서 time_range 내에 있는 슬롯만 필터링하여 반환합니다.
+
+    Args:
+        slots: 슬롯 리스트 (예: ["2025-11-30 09:00:00 (2매)", "2025-11-30 11:00:00 (1매)"])
+        time_range_str: 시간 범위 문자열 (예: "10:00-21:00")
+
+    Returns:
+        list: time_range 내에 있는 슬롯만 포함된 리스트
+    """
+    import re
+
+    if not time_range_str:
+        return slots  # 시간 범위 필터 없으면 전체 반환
+
+    if not slots:
+        return []
+
+    try:
+        # 시간 범위 파싱
+        start_str, end_str = time_range_str.split('-')
+        start_time = datetime.strptime(start_str, '%H:%M').time()
+        end_time = datetime.strptime(end_str, '%H:%M').time()
+
+        filtered_slots = []
+
+        for slot in slots:
+            slot_str = str(slot).lower()
+
+            # 오전/오후 패턴 매칭
+            am_pm_match = re.search(r'(오전|오후|am|pm)\s*(\d{1,2}):(\d{2})', slot_str)
+            if am_pm_match:
+                period = am_pm_match.group(1)
+                hour = int(am_pm_match.group(2))
+                minute = int(am_pm_match.group(3))
+
+                # 24시간 형식으로 변환
+                if period in ['오후', 'pm']:
+                    if hour != 12:
+                        hour += 12
+                elif period in ['오전', 'am']:
+                    if hour == 12:
+                        hour = 0
+
+                extracted_time = datetime.strptime(f"{hour:02d}:{minute:02d}", '%H:%M').time()
+            else:
+                # 일반 시간 패턴 (HH:MM:SS 또는 HH:MM)
+                time_match = re.search(r'(\d{1,2}):(\d{2})(?::\d{2})?', str(slot))
+                if not time_match:
+                    continue  # 시간 파싱 불가 → 스킵
+
+                hour = int(time_match.group(1))
+                minute = int(time_match.group(2))
+                extracted_time = datetime.strptime(f"{hour:02d}:{minute:02d}", '%H:%M').time()
+
+            # 시간 범위 체크
+            in_range = False
+            if start_time == end_time:
+                # 정확한 시간 매칭 (예: 12:00-12:00)
+                in_range = extracted_time.hour == start_time.hour and extracted_time.minute == start_time.minute
+            elif start_time < end_time:
+                # 일반적인 시간 범위 (예: 09:00-18:00)
+                in_range = start_time <= extracted_time <= end_time
+            else:
+                # 야간 시간 범위 (예: 22:00-06:00)
+                in_range = extracted_time >= start_time or extracted_time <= end_time
+
+            if in_range:
+                filtered_slots.append(slot)
+                print(f"[FILTER] ✓ 슬롯 포함: {slot} ({extracted_time} in {start_time}-{end_time})")
+            else:
+                print(f"[FILTER] ✗ 슬롯 제외: {slot} ({extracted_time} not in {start_time}-{end_time})")
+
+        return filtered_slots
+
+    except (ValueError, IndexError) as e:
+        print(f"[FILTER] 시간 범위 파싱 오류 '{time_range_str}': {e}. 전체 슬롯 반환")
+        return slots
+
+
 # GraphQL 쿼리 캐시 (브라우저에서 캡처한 실제 쿼리)
 GRAPHQL_QUERIES = {
     "schedule": """query schedule($scheduleParams: ScheduleParams) {
@@ -337,38 +422,29 @@ async def get_schedule_info(page, business_id, biz_item_id, business_type_id, ta
     return None
 
 
-async def perform_booking_graphql(page, url, tag, available_slots):
+async def perform_booking_for_single_slot(page, url, tag, slot_str, slot_index=0):
     """
-    GraphQL API를 직접 호출하여 예약을 수행합니다.
-
-    기존 방식:
-    - 상품 상세 페이지 → 시간 선택 → 다음 버튼 → 예매 버튼 (느림)
-
-    새 방식:
-    - 상품 상세 페이지 (쿠키 획득) → GraphQL API 직접 호출 (빠름)
+    단일 슬롯에 대해 예약을 수행합니다.
 
     Args:
         page: Playwright 페이지 객체
         url: 예약 URL
         tag: 예약 태그
-        available_slots: 예약 가능한 슬롯 리스트
+        slot_str: 단일 슬롯 문자열 (예: "2025-12-10 18:00:00 (2매)")
+        slot_index: 슬롯 인덱스 (로깅용)
 
     Returns:
-        bool: 예약 성공 여부
+        tuple: (성공 여부, 슬롯 문자열)
     """
-    print(f"\n[BOOKING-GRAPHQL] {tag} 예약 시작 (GraphQL 방식)")
+    import re
 
-    if not available_slots:
-        print("[BOOKING-GRAPHQL] 예약 가능한 슬롯이 없습니다.")
-        return False
+    print(f"\n[BOOKING-SLOT-{slot_index}] {tag} 슬롯 예약 시작: {slot_str}")
 
     # 슬롯에서 시간 추출
-    first_slot = str(available_slots[0])
-    import re
-    time_match = re.search(r'(\d{4}-\d{2}-\d{2})\s+(\d{2}):(\d{2}):(\d{2})', first_slot)
+    time_match = re.search(r'(\d{4}-\d{2}-\d{2})\s+(\d{2}):(\d{2}):(\d{2})', slot_str)
     if not time_match:
-        print(f"[BOOKING-GRAPHQL] 슬롯에서 시간을 추출할 수 없습니다: {first_slot}")
-        return False
+        print(f"[BOOKING-SLOT-{slot_index}] 슬롯에서 시간을 추출할 수 없습니다: {slot_str}")
+        return False, slot_str
 
     slot_date = time_match.group(1)   # 2025-12-10
     slot_hour = time_match.group(2)   # 18
@@ -390,14 +466,15 @@ async def perform_booking_graphql(page, url, tag, available_slots):
     url_pattern = r'booking/(\d+)/bizes/(\d+)/items/(\d+)'
     url_match = re.search(url_pattern, url)
     if not url_match:
-        print(f"[BOOKING-GRAPHQL] URL에서 비즈니스 정보를 추출할 수 없습니다: {url}")
-        return False
+        print(f"[BOOKING-SLOT-{slot_index}] URL에서 비즈니스 정보를 추출할 수 없습니다: {url}")
+        return False, slot_str
 
     category = url_match.group(1)
     business_id = url_match.group(2)
     item_id = url_match.group(3)
 
-    print(f"[BOOKING-GRAPHQL] 예약 정보:")
+    print(f"[BOOKING-SLOT-{slot_index}] 예약 정보:")
+    print(f"  - 슬롯: {slot_str}")
     print(f"  - 날짜: {slot_date}")
     print(f"  - 시간: {slot_hour}:{slot_minute}")
     print(f"  - 카테고리: {category}")
@@ -409,7 +486,7 @@ async def perform_booking_graphql(page, url, tag, available_slots):
 
     try:
         # STEP 1: /request URL 구성 (시간 자동 선택)
-        print("\n[STEP 1] /request URL 구성 중 (시간 자동 선택)...")
+        print(f"\n[SLOT-{slot_index}][STEP 1] /request URL 구성 중 (시간 자동 선택)...")
 
         from urllib.parse import quote
         # 수정: 올바른 ISO 형식으로 생성
@@ -424,10 +501,10 @@ async def perform_booking_graphql(page, url, tag, available_slots):
         print(f"  - /request URL로 직접 접근 → 예매 페이지 바로 로드")
 
         # STEP 2: 예매 페이지로 직접 이동 (/request URL)
-        print("\n[STEP 2] 예매 페이지 직접 이동 중...")
+        print(f"\n[SLOT-{slot_index}][STEP 2] 예매 페이지 직접 이동 중...")
         await page.goto(detail_url_with_slot, wait_until="domcontentloaded")
         await asyncio.sleep(3)  # 페이지 로드 대기
-        print("[STEP 2] ✓ 예매 페이지 로드 완료")
+        print(f"[SLOT-{slot_index}][STEP 2] ✓ 예매 페이지 로드 완료")
 
         # STEP 3: 옵션 선택 (날짜 선택 페이지에서 "다음" 버튼 활성화를 위해)
         print("\n[STEP 3] 옵션 선택 확인 중...")
@@ -564,8 +641,8 @@ async def perform_booking_graphql(page, url, tag, available_slots):
                             break
 
                     if not date_selected:
-                        print(f"[STEP 4-1] ⚠️ 날짜({day_str}일)를 찾을 수 없습니다.")
-                        return False
+                        print(f"[SLOT-{slot_index}][STEP 4-1] ⚠️ 날짜({day_str}일)를 찾을 수 없습니다.")
+                        return False, slot_str
             except Exception as e:
                 print(f"[STEP 4-1] 날짜 선택 오류: {e}")
 
@@ -627,14 +704,14 @@ async def perform_booking_graphql(page, url, tag, available_slots):
                         btn_text = await btn.inner_text()
                         aria_selected = await btn.get_attribute('aria-selected')
                         available_times_list.append(f"{btn_text.replace(chr(10), ' ')} (aria-selected: {aria_selected})")
-                    print(f"[STEP 4-2] 사용 가능한 시간: {', '.join(available_times_list)}")
-                    return False
+                    print(f"[SLOT-{slot_index}][STEP 4-2] 사용 가능한 시간: {', '.join(available_times_list)}")
+                    return False, slot_str
 
             except Exception as e:
-                print(f"[STEP 4-2] 시간 선택 오류: {e}")
+                print(f"[SLOT-{slot_index}][STEP 4-2] 시간 선택 오류: {e}")
                 import traceback
                 traceback.print_exc()
-                return False
+                return False, slot_str
 
             # STEP 4-3: "다음" 버튼 다시 찾기 및 클릭
             print("\n[STEP 4-3] '다음' 버튼 다시 확인 중...")
@@ -649,8 +726,8 @@ async def perform_booking_graphql(page, url, tag, available_slots):
                     continue
 
             if not next_button:
-                print("[STEP 4-3] ⚠️ '다음' 버튼을 찾을 수 없습니다. 예약 실패")
-                return False
+                print(f"[SLOT-{slot_index}][STEP 4-3] ⚠️ '다음' 버튼을 찾을 수 없습니다. 예약 실패")
+                return False, slot_str
 
         # "다음" 버튼 클릭
         print("\n[STEP 4-FINAL] '다음' 버튼 클릭...")
@@ -823,11 +900,11 @@ async def perform_booking_graphql(page, url, tag, available_slots):
         is_enabled = await wait_for_button_enabled(page, timeout=10000)
 
         if not is_enabled:
-            print("[STEP 6] ⚠️ 예매 버튼이 활성화되지 않았습니다.")
-            print("[STEP 6] 필수 입력이 완료되지 않았거나 다른 문제가 있을 수 있습니다.")
-            return False
+            print(f"[SLOT-{slot_index}][STEP 6] ⚠️ 예매 버튼이 활성화되지 않았습니다.")
+            print(f"[SLOT-{slot_index}][STEP 6] 필수 입력이 완료되지 않았거나 다른 문제가 있을 수 있습니다.")
+            return False, slot_str
 
-        print("[STEP 6] ✓ 예매 버튼 활성화됨!")
+        print(f"[SLOT-{slot_index}][STEP 6] ✓ 예매 버튼 활성화됨!")
 
         # STEP 7: 예매 버튼 클릭
         print("\n[STEP 7] 예매 버튼 클릭 준비...")
@@ -839,17 +916,111 @@ async def perform_booking_graphql(page, url, tag, available_slots):
         else:
             # 실제 예매 버튼 클릭
             await page.click('button.btn_request')
-            print("[STEP 7] ✅ 예매 버튼 클릭 완료!")
+            print(f"[SLOT-{slot_index}][STEP 7] ✅ 예매 버튼 클릭 완료!")
             await asyncio.sleep(3)
 
-        print("\n[SUCCESS] 예약 프로세스 완료!")
-        return True
+        print(f"\n[BOOKING-SLOT-{slot_index}] ✅ 예약 프로세스 완료! 슬롯: {slot_str}")
+        return True, slot_str
 
     except Exception as e:
-        print(f"[ERROR] 예약 중 오류 발생: {e}")
+        print(f"[BOOKING-SLOT-{slot_index}] ❌ 예약 중 오류 발생: {e}")
         import traceback
         traceback.print_exc()
+        return False, slot_str
+
+
+async def perform_booking_parallel(url, tag, filtered_slots, worker_id):
+    """
+    여러 슬롯을 병렬로 예약 시도합니다.
+    각 슬롯마다 별도의 탭을 생성하여 동시에 예약을 시도합니다.
+
+    Args:
+        url: 예약 URL
+        tag: 예약 태그
+        filtered_slots: time_range로 필터링된 슬롯 리스트
+        worker_id: 워커 ID
+
+    Returns:
+        tuple: (성공 여부, 성공한 슬롯 문자열 또는 None)
+    """
+    global browser_context
+
+    if not filtered_slots:
+        print(f"[PARALLEL-BOOKING] {tag} 예약 가능한 슬롯이 없습니다.")
+        return False, None
+
+    # 최대 병렬 탭 수 제한
+    slots_to_try = filtered_slots[:MAX_PARALLEL_BOOKING_TABS]
+    print(f"\n[PARALLEL-BOOKING] {tag} 병렬 예약 시작")
+    print(f"[PARALLEL-BOOKING] 총 슬롯: {len(filtered_slots)}개, 시도할 슬롯: {len(slots_to_try)}개")
+    for i, slot in enumerate(slots_to_try):
+        print(f"[PARALLEL-BOOKING]   [{i}] {slot}")
+
+    # 각 슬롯에 대해 새 탭 생성
+    tabs = []
+    try:
+        for i, slot in enumerate(slots_to_try):
+            tab = await browser_context.new_page()
+            tabs.append((tab, slot, i))
+            print(f"[PARALLEL-BOOKING] 탭 {i} 생성 완료 (슬롯: {slot})")
+
+        # 모든 슬롯에 대해 병렬로 예약 시도
+        tasks = [
+            perform_booking_for_single_slot(tab, url, tag, slot, idx)
+            for tab, slot, idx in tabs
+        ]
+
+        print(f"[PARALLEL-BOOKING] {len(tasks)}개 예약 태스크 동시 실행 시작...")
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 결과 확인
+        success_slot = None
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                print(f"[PARALLEL-BOOKING] 슬롯 {i} 예외 발생: {result}")
+            elif isinstance(result, tuple) and result[0]:
+                success, slot = result
+                print(f"[PARALLEL-BOOKING] ✅ 슬롯 {i} 예약 성공: {slot}")
+                if success_slot is None:
+                    success_slot = slot  # 첫 번째 성공한 슬롯 저장
+            else:
+                print(f"[PARALLEL-BOOKING] ❌ 슬롯 {i} 예약 실패")
+
+        if success_slot:
+            print(f"[PARALLEL-BOOKING] 🎉 {tag} 예약 성공! 슬롯: {success_slot}")
+            return True, success_slot
+        else:
+            print(f"[PARALLEL-BOOKING] 😢 {tag} 모든 슬롯 예약 실패")
+            return False, None
+
+    except Exception as e:
+        print(f"[PARALLEL-BOOKING] 예외 발생: {e}")
+        import traceback
+        traceback.print_exc()
+        return False, None
+
+    finally:
+        # 생성한 탭들 정리
+        for tab, slot, idx in tabs:
+            try:
+                await tab.close()
+                print(f"[PARALLEL-BOOKING] 탭 {idx} 정리 완료")
+            except Exception as e:
+                print(f"[PARALLEL-BOOKING] 탭 {idx} 정리 중 오류: {e}")
+
+
+# 레거시 호환용 래퍼 함수
+async def perform_booking_graphql(page, url, tag, available_slots):
+    """
+    레거시 호환용 래퍼 함수.
+    단일 탭으로 첫 번째 슬롯만 시도합니다.
+    새로운 코드에서는 perform_booking_parallel()을 사용하세요.
+    """
+    if not available_slots:
         return False
+
+    success, slot = await perform_booking_for_single_slot(page, url, tag, str(available_slots[0]), 0)
+    return success
 
 
 async def worker_task(url, tag, worker_id, url_info):
@@ -913,12 +1084,18 @@ async def worker_task(url, tag, worker_id, url_info):
                 else:
                     # 데이터가 있는 경우
                     print(f"Worker {worker_id}: [{tag}] ✅ 예약 가능 감지!")
-                    print(f"Worker {worker_id}: [{tag}] 슬롯: {new_data}")
+                    print(f"Worker {worker_id}: [{tag}] 전체 슬롯: {new_data}")
 
-                    # 시간 범위 필터링
-                    in_range = is_data_time_in_range(new_data, time_range) if time_range else True
+                    # ★ 핵심 변경: time_range로 슬롯 필터링
+                    if time_range:
+                        filtered_slots = filter_slots_by_time_range(new_data, time_range)
+                        print(f"Worker {worker_id}: [{tag}] 필터링 후 슬롯: {filtered_slots} (time_range: {time_range})")
+                    else:
+                        filtered_slots = new_data
+                        print(f"Worker {worker_id}: [{tag}] time_range 미설정 - 전체 슬롯 사용")
 
-                    if in_range:
+                    # 필터링된 슬롯이 있는 경우에만 예약 시도
+                    if filtered_slots:
                         # === 예약 시도 전 Lock 획득 (동시 예약 방지) ===
                         if url not in url_booking_locks:
                             url_booking_locks[url] = asyncio.Lock()
@@ -938,56 +1115,52 @@ async def worker_task(url, tag, worker_id, url_info):
 
                             # 텔레그램 알림
                             from old.telegram_message import send_telegram_notification
-                            message = f"🎯 [{tag}] 예약 가능! (GraphQL 방식)\n\n"
-                            message += f"슬롯: {', '.join(str(slot) for slot in new_data)}\n"
+                            message = f"🎯 [{tag}] 예약 가능! (병렬 예약 방식)\n\n"
+                            message += f"전체 슬롯: {len(new_data)}개\n"
+                            message += f"필터링된 슬롯: {len(filtered_slots)}개\n"
+                            for i, slot in enumerate(filtered_slots[:MAX_PARALLEL_BOOKING_TABS]):
+                                message += f"  [{i}] {slot}\n"
                             if time_range:
                                 message += f"시간 범위: {time_range}\n"
                             message += f"URL: {url}\n\n"
 
                             if ENABLE_AUTO_BOOKING:
-                                message += "🤖 GraphQL API로 자동 예약을 시도합니다..."
+                                message += f"🤖 {min(len(filtered_slots), MAX_PARALLEL_BOOKING_TABS)}개 슬롯 병렬 예약 시도 중..."
                                 await send_telegram_notification(message)
 
-                                print(f"Worker {worker_id}: [{tag}] 🔒 탭 독점 + 예약 락 획득 - 예약 시작")
+                                print(f"Worker {worker_id}: [{tag}] 🔒 예약 락 획득 - 병렬 예약 시작")
 
-                                # GraphQL 방식으로 자동 예약
-                                booking_success = await perform_booking_graphql(tab, url, tag, new_data)
+                                # ★ 핵심 변경: 병렬 예약 시도 (각 슬롯별 별도 탭)
+                                booking_success, success_slot = await perform_booking_parallel(
+                                    url, tag, filtered_slots, worker_id
+                                )
 
                                 if booking_success:
                                     # 예약 성공 카운터 증가
                                     url_states[url]["booking_count"] = url_states[url].get("booking_count", 0) + 1
                                     current_count = url_states[url]["booking_count"]
 
-                                    success_msg = f"✅ [{tag}] GraphQL 자동 예약 {'시뮬레이션' if DRY_RUN_MODE else ''} 완료!\n"
+                                    success_msg = f"✅ [{tag}] 병렬 예약 {'시뮬레이션' if DRY_RUN_MODE else ''} 성공!\n"
+                                    success_msg += f"성공 슬롯: {success_slot}\n"
                                     if max_bookings:
-                                        success_msg += f"예약 성공: {current_count}/{max_bookings}회"
+                                        success_msg += f"예약 횟수: {current_count}/{max_bookings}회"
                                     else:
-                                        success_msg += f"예약 성공: {current_count}회 (무제한)"
+                                        success_msg += f"예약 횟수: {current_count}회 (무제한)"
                                     print(f"Worker {worker_id}: {success_msg}")
                                     await send_telegram_notification(success_msg)
                                 else:
-                                    fail_msg = f"❌ [{tag}] GraphQL 자동 예약 실패"
+                                    fail_msg = f"❌ [{tag}] 병렬 예약 실패 (모든 슬롯 실패)"
                                     print(f"Worker {worker_id}: {fail_msg}")
                                     await send_telegram_notification(fail_msg)
 
-                                # 탭 교체
-                                print(f"Worker {worker_id}: [{tag}] 🔓 탭 독점 해제")
-                                try:
-                                    await tab.close()
-                                except:
-                                    pass
-                                if worker_id in tab_pools and tab_id in tab_pools[worker_id]:
-                                    del tab_pools[worker_id][tab_id]
-                                if worker_id in tab_last_used and tab_id in tab_last_used[worker_id]:
-                                    del tab_last_used[worker_id][tab_id]
-                                if worker_id in tab_usage_counts and tab_id in tab_usage_counts[worker_id]:
-                                    del tab_usage_counts[worker_id][tab_id]
+                                # 기존 탭 교체 (병렬 예약에서 별도 탭을 사용했으므로 기존 탭은 유지)
+                                print(f"Worker {worker_id}: [{tag}] 🔓 예약 락 해제")
                             else:
                                 message += "ℹ️ 자동 예약이 비활성화되어 있습니다."
                                 await send_telegram_notification(message)
                         # Lock은 여기서 자동으로 해제됨 (async with 종료)
 
-                        # 상태 업데이트
+                        # 상태 업데이트 (예약 시도 후)
                         url_states[url] = {
                             "hash": new_hash,
                             "data": new_data,
@@ -995,9 +1168,10 @@ async def worker_task(url, tag, worker_id, url_info):
                             "last_notified_hash": data_hash,
                             "booking_count": url_states[url].get("booking_count", 0)
                         }
-                        print(f"Worker {worker_id}: New change for {tag} is in time range. Notification sent.")
+                        print(f"Worker {worker_id}: [{tag}] 상태 업데이트 완료")
                     else:
-                        print(f"Worker {worker_id}: [{tag}] ⏭️ 시간 범위 밖 슬롯")
+                        # time_range 내 슬롯이 없는 경우
+                        print(f"Worker {worker_id}: [{tag}] ⏭️ time_range({time_range}) 내 슬롯 없음 - 예약 스킵")
                         url_states[url]["hash"] = new_hash
                         url_states[url]["data"] = new_data
                         url_states[url]["last_check_time"] = datetime.now(KST)

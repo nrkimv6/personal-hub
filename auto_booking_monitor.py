@@ -160,72 +160,182 @@ async def get_tab(browser_context, worker_id):
     return tab, tab_id
 
 
-async def perform_booking(page, url, tag):
+async def perform_booking(page, url, tag, available_slots):
     """
     예약 프로세스를 실행합니다.
 
+    올바른 플로우:
+    1. 상품 상세 페이지 접속 (startDateTime 파라미터 포함)
+    2. 시간 선택
+    3. "다음" 버튼 클릭 → /request 페이지로 이동
+    4. 필수 항목 선택 & 동의
+    5. 예매 버튼 클릭
+
     Args:
         page: Playwright 페이지 객체
-        url: 예약 URL
+        url: 예약 URL (상품 상세 페이지)
         tag: 예약 태그 (로그용)
+        available_slots: 예약 가능한 슬롯 리스트
 
     Returns:
         bool: 예약 성공 여부
     """
     print(f"\n[BOOKING] {tag} 예약 시작")
 
-    # URL 정규화
-    normalized_url = normalize_booking_url(url)
+    # 첫 번째 예약 가능 슬롯에서 시간 추출
+    if not available_slots:
+        print("[BOOKING] 예약 가능한 슬롯이 없습니다.")
+        return False
+
+    # 슬롯 형식: "2025-12-02 21:00:00 (2매) [부분모호:...]"
+    first_slot = str(available_slots[0])
+    import re
+    time_match = re.search(r'(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}):(\d{2})', first_slot)
+    if not time_match:
+        print(f"[BOOKING] 슬롯에서 시간을 추출할 수 없습니다: {first_slot}")
+        return False
+
+    slot_date = time_match.group(1)  # 2025-12-02
+    slot_hour = time_match.group(2)  # 21
+    slot_minute = time_match.group(3)  # 00
+
+    # 오전/오후 형식으로 변환
+    hour_int = int(slot_hour)
+    if hour_int == 0:
+        display_time = f"오전 12:{slot_minute}"
+    elif hour_int < 12:
+        display_time = f"오전 {hour_int}:{slot_minute}"
+    elif hour_int == 12:
+        display_time = f"오후 12:{slot_minute}"
+    else:
+        display_time = f"오후 {hour_int - 12}:{slot_minute}"
+
+    print(f"[BOOKING] 예약할 시간: {slot_date} {display_time}")
+
+    # URL에서 비즈니스 파라미터 추출
+    url_pattern = r'booking/(\d+)/bizes/(\d+)/items/(\d+)'
+    url_match = re.search(url_pattern, url)
+    if not url_match:
+        print(f"[BOOKING] URL에서 비즈니스 정보를 추출할 수 없습니다: {url}")
+        return False
+
+    category = url_match.group(1)
+    business_id = url_match.group(2)
+    item_id = url_match.group(3)
+
+    # 상품 상세 페이지 URL 구성 (startDateTime 파라미터 포함)
+    from urllib.parse import quote
+    start_datetime = f"{slot_date}T00:00:00+09:00"
+    start_datetime_encoded = quote(start_datetime, safe='')
+    detail_url = f"https://booking.naver.com/booking/{category}/bizes/{business_id}/items/{item_id}?startDateTime={start_datetime_encoded}"
+
+    print(f"[BOOKING] 상품 상세 페이지 URL: {detail_url}")
 
     try:
-        # 1. 페이지 로드
-        print("[STEP 1] 페이지 로딩 중...")
-        await page.goto(normalized_url, wait_until="domcontentloaded")
-        await page.wait_for_timeout(2000)  # 2초 대기
+        # STEP 1: 상품 상세 페이지 접속
+        print("[STEP 1] 상품 상세 페이지 로딩 중...")
+        await page.goto(detail_url, wait_until="domcontentloaded")
+        await page.wait_for_timeout(2000)  # 페이지 로드 대기
 
-        # 2. 날짜 버튼 확인 (이미 URL에 날짜가 포함되어 있으므로 선택되어 있어야 함)
+        # STEP 2: 날짜 확인 (URL에 포함되어 있으므로 자동 선택되어야 함)
         print("[STEP 2] 날짜 선택 확인 중...")
-        selected_date = await page.query_selector('button.calendar_date.selected')
-        if selected_date:
-            date_text = await selected_date.inner_text()
-            print(f"[STEP 2] 선택된 날짜: {date_text}")
-        else:
-            print("[STEP 2] 경고: 날짜가 선택되지 않았습니다.")
+        try:
+            selected_date = await page.wait_for_selector('button.calendar_date.selected', timeout=5000)
+            if selected_date:
+                date_text = await selected_date.inner_text()
+                print(f"[STEP 2] ✓ 선택된 날짜: {date_text}")
+        except Exception as e:
+            print(f"[STEP 2] 경고: 날짜 선택 확인 실패 ({e})")
 
-        # 3. 시간 슬롯 확인
-        print("[STEP 3] 시간 슬롯 확인 중...")
-        available_times = await check_time_slots(page)
+        # STEP 3: 시간 선택
+        print(f"[STEP 3] 시간 선택 중... (목표: {display_time})")
+        try:
+            # 시간 버튼 찾기 (텍스트로 매칭)
+            time_buttons = await page.query_selector_all('button.btn_time')
+            time_selected = False
 
-        if not available_times:
-            print("[STEP 3] 예약 가능한 시간이 없습니다. 종료합니다.")
+            for btn in time_buttons:
+                btn_text = await btn.inner_text()
+                if display_time in btn_text:
+                    await btn.click()
+                    print(f"[STEP 3] ✓ 시간 선택 완료: {btn_text}")
+                    time_selected = True
+                    await page.wait_for_timeout(500)
+                    break
+
+            if not time_selected:
+                print(f"[STEP 3] ⚠️ 목표 시간({display_time})을 찾을 수 없습니다.")
+                # 사용 가능한 시간 목록 출력
+                available_times_list = []
+                for btn in time_buttons:
+                    btn_text = await btn.inner_text()
+                    available_times_list.append(btn_text)
+                print(f"[STEP 3] 사용 가능한 시간: {', '.join(available_times_list)}")
+                return False
+
+        except Exception as e:
+            print(f"[STEP 3] 시간 선택 실패: {e}")
             return False
 
-        # 4. 시간 선택 (첫 번째 가능한 시간 선택)
-        print("[STEP 4] 시간 선택 중...")
-        selected_time = await page.query_selector('button.btn_time.selected')
-        if selected_time:
-            time_text = await selected_time.inner_text()
-            print(f"[STEP 4] 이미 선택된 시간: {time_text}")
-        else:
-            # URL에 시간이 포함되어 있으므로 자동 선택되어야 하지만, 명시적으로 클릭도 가능
-            print("[STEP 4] 시간이 자동 선택되어야 합니다.")
+        # STEP 4: "다음" 버튼 클릭 → /request 페이지로 이동
+        print("[STEP 4] '다음' 버튼 클릭 중...")
+        try:
+            # "다음" 버튼 찾기 (여러 가능한 선택자 시도)
+            next_button_selectors = [
+                'button.NextButton__btn_next__kfLFW',  # 분석 결과에서 발견된 선택자
+                'button:has-text("다음")',
+                'button.btn_next',
+                'button[class*="btn_next"]'
+            ]
 
-        # 5. 인원 선택 확인 (필요한 경우)
+            next_button = None
+            for selector in next_button_selectors:
+                try:
+                    next_button = await page.wait_for_selector(selector, timeout=3000)
+                    if next_button:
+                        print(f"[STEP 4] ✓ '다음' 버튼 찾음 (선택자: {selector})")
+                        break
+                except:
+                    continue
+
+            if not next_button:
+                print("[STEP 4] ⚠️ '다음' 버튼을 찾을 수 없습니다.")
+                return False
+
+            # 버튼 클릭
+            await next_button.click()
+            print("[STEP 4] ✓ '다음' 버튼 클릭 완료")
+
+            # /request 페이지로 이동 대기
+            await page.wait_for_url('**/request**', timeout=10000)
+            print("[STEP 4] ✓ 예매 확인 페이지(/request)로 이동 완료")
+            await page.wait_for_timeout(2000)
+
+        except Exception as e:
+            print(f"[STEP 4] '다음' 버튼 클릭 실패: {e}")
+            return False
+
+        # STEP 5: 인원 선택 확인 (필요한 경우)
         print("[STEP 5] 인원 선택 확인 중...")
-        person_button = await page.query_selector('button.select_btn')
-        if person_button:
-            person_text = await person_button.inner_text()
-            print(f"[STEP 5] 현재 인원: {person_text}")
+        try:
+            person_button = await page.query_selector('button.select_btn')
+            if person_button:
+                person_text = await person_button.inner_text()
+                print(f"[STEP 5] ✓ 현재 인원: {person_text}")
+        except Exception as e:
+            print(f"[STEP 5] 인원 확인 실패 (계속 진행): {e}")
 
-        # 6. 예매 버튼 활성화 대기
+        # STEP 6: 예매 버튼 활성화 대기
         print("[STEP 6] 예매 버튼 활성화 대기 중...")
         is_enabled = await wait_for_button_enabled(page, timeout=10000)
 
         if not is_enabled:
-            print("[STEP 6] 예매 버튼이 활성화되지 않았습니다.")
+            print("[STEP 6] ⚠️ 예매 버튼이 활성화되지 않았습니다.")
             return False
 
-        # 7. 예매 버튼 클릭
+        print("[STEP 6] ✓ 예매 버튼 활성화됨!")
+
+        # STEP 7: 예매 버튼 클릭
         print("[STEP 7] 예매 버튼 클릭 준비...")
 
         if DRY_RUN_MODE:
@@ -242,6 +352,8 @@ async def perform_booking(page, url, tag):
 
     except Exception as e:
         print(f"[ERROR] 예약 중 오류 발생: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -325,9 +437,12 @@ async def monitor_and_book_worker(browser_context, url_info, worker_id):
                                 message += "🤖 자동 예약을 시도합니다..."
                                 await send_telegram_notification(message)
 
-                                # 자동 예약 실행
+                                # ⚠️ 예약 시작: 탭을 독점하고 모니터링 중단
+                                print(f"[WORKER {worker_id}] [{tag}] 🔒 탭 독점 모드 - 예약 완료까지 모니터링 중단")
+
+                                # 자동 예약 실행 (전용 탭 사용)
                                 print(f"[WORKER {worker_id}] [{tag}] 🤖 자동 예약 시작...")
-                                booking_success = await perform_booking(tab, url, tag)
+                                booking_success = await perform_booking(tab, url, tag, new_data)
 
                                 if booking_success:
                                     success_msg = f"✅ [{tag}] 자동 예약 {'시뮬레이션' if DRY_RUN_MODE else ''} 완료!"
@@ -337,6 +452,21 @@ async def monitor_and_book_worker(browser_context, url_info, worker_id):
                                     fail_msg = f"❌ [{tag}] 자동 예약 실패"
                                     print(f"[WORKER {worker_id}] {fail_msg}")
                                     await send_telegram_notification(fail_msg)
+
+                                # 예약 종료 후 탭 복구
+                                print(f"[WORKER {worker_id}] [{tag}] 🔓 탭 독점 해제 - 모니터링 재개 준비")
+                                # 탭을 닫고 풀에서 제거하여 다음 루프에서 새 탭 생성
+                                try:
+                                    await tab.close()
+                                except:
+                                    pass
+                                if worker_id in tab_pools and tab_id in tab_pools[worker_id]:
+                                    del tab_pools[worker_id][tab_id]
+                                if worker_id in tab_last_used and tab_id in tab_last_used[worker_id]:
+                                    del tab_last_used[worker_id][tab_id]
+                                if worker_id in tab_usage_counts and tab_id in tab_usage_counts[worker_id]:
+                                    del tab_usage_counts[worker_id][tab_id]
+                                print(f"[WORKER {worker_id}] [{tag}] 🆕 탭 교체 완료 - 다음 확인부터 새 탭 사용")
                             else:
                                 message += "ℹ️ 자동 예약이 비활성화되어 있습니다."
                                 await send_telegram_notification(message)
@@ -390,31 +520,35 @@ async def monitor_and_book_worker(browser_context, url_info, worker_id):
                     # 데이터 처리 오류는 탭을 보존 (탭 재사용 최적화)
 
             # 탭 사용 통계 업데이트 (성공/실패 관계없이) - browser7.py와 동일
-            if worker_id not in tab_last_used:
-                tab_last_used[worker_id] = {}
-            if worker_id not in tab_usage_counts:
-                tab_usage_counts[worker_id] = {}
+            # 단, 탭이 풀에 존재하는 경우만 (예약으로 인해 탭이 제거된 경우 스킵)
+            if worker_id in tab_pools and tab_id in tab_pools[worker_id]:
+                if worker_id not in tab_last_used:
+                    tab_last_used[worker_id] = {}
+                if worker_id not in tab_usage_counts:
+                    tab_usage_counts[worker_id] = {}
 
-            tab_last_used[worker_id][tab_id] = time.time()
-            current_usage = tab_usage_counts[worker_id].get(tab_id, 0) + 1
-            tab_usage_counts[worker_id][tab_id] = current_usage
-            print(f"[WORKER {worker_id}] Tab {tab_id} used {current_usage} times.")
+                tab_last_used[worker_id][tab_id] = time.time()
+                current_usage = tab_usage_counts[worker_id].get(tab_id, 0) + 1
+                tab_usage_counts[worker_id][tab_id] = current_usage
+                print(f"[WORKER {worker_id}] Tab {tab_id} used {current_usage} times.")
 
-            # 탭 사용 횟수 제한에 도달하면 교체 (메모리 관리)
-            if current_usage >= MAX_USES_PER_TAB:
-                print(f"[WORKER {worker_id}] Tab {tab_id} reached max uses ({MAX_USES_PER_TAB}). Replacing for memory management.")
-                if tab:
-                    try:
-                        await tab.close()
-                    except:
-                        pass
-                # 탭 풀에서 제거
-                if worker_id in tab_pools and tab_id in tab_pools[worker_id]:
-                    del tab_pools[worker_id][tab_id]
-                if worker_id in tab_last_used and tab_id in tab_last_used[worker_id]:
-                    del tab_last_used[worker_id][tab_id]
-                if worker_id in tab_usage_counts and tab_id in tab_usage_counts[worker_id]:
-                    del tab_usage_counts[worker_id][tab_id]
+                # 탭 사용 횟수 제한에 도달하면 교체 (메모리 관리)
+                if current_usage >= MAX_USES_PER_TAB:
+                    print(f"[WORKER {worker_id}] Tab {tab_id} reached max uses ({MAX_USES_PER_TAB}). Replacing for memory management.")
+                    if tab:
+                        try:
+                            await tab.close()
+                        except:
+                            pass
+                    # 탭 풀에서 제거
+                    if worker_id in tab_pools and tab_id in tab_pools[worker_id]:
+                        del tab_pools[worker_id][tab_id]
+                    if worker_id in tab_last_used and tab_id in tab_last_used[worker_id]:
+                        del tab_last_used[worker_id][tab_id]
+                    if worker_id in tab_usage_counts and tab_id in tab_usage_counts[worker_id]:
+                        del tab_usage_counts[worker_id][tab_id]
+            else:
+                print(f"[WORKER {worker_id}] Tab {tab_id} was removed (booking completed), skipping statistics update.")
 
             # 다음 확인까지 대기 (간격 조정 가능)
             await asyncio.sleep(5)  # 5초마다 확인
