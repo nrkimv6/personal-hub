@@ -1,8 +1,12 @@
 """
 일괄 작업 API 엔드포인트
 
+프로세스 분리 아키텍처:
+    - API 서버: DB 상태만 변경
+    - 워커: DB를 확인하여 실제 모니터링 수행
+
 - URL 일괄 임포트
-- 일괄 시작/중지
+- 일괄 시작/중지 (DB 상태 변경으로)
 """
 
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
@@ -12,7 +16,7 @@ from datetime import datetime
 
 from app.services.monitoring_system_manager import MonitoringSystemManager
 from app.schemas.monitor import MonitorTargetCreate
-from app.dependencies import get_browser_service, get_monitoring_manager
+from app.dependencies import get_monitoring_manager
 from app.config import logger
 
 router = APIRouter(
@@ -70,15 +74,13 @@ class BulkActionResponse(BaseModel):
 @router.post("/import", response_model=BulkImportResponse)
 async def bulk_import(
     request: BulkImportRequest,
-    background_tasks: BackgroundTasks,
-    monitoring_manager: MonitoringSystemManager = Depends(get_monitoring_manager),
-    browser_service=Depends(get_browser_service)
+    monitoring_manager: MonitoringSystemManager = Depends(get_monitoring_manager)
 ):
     """
     URL을 일괄 임포트합니다.
 
     - 여러 URL을 한 번에 등록
-    - start_monitoring=True이면 등록 후 바로 모니터링 시작
+    - start_monitoring=True이면 pending 상태로 설정하여 워커가 자동 시작
     """
     results = []
     success_count = 0
@@ -114,11 +116,19 @@ async def bulk_import(
             new_target = await monitoring_manager.create_target(target_data)
 
             # 예약 관련 설정 업데이트
-            if item.time_range or item.auto_booking_enabled:
-                await monitoring_manager.update_target(new_target.id, {
-                    "time_range": item.time_range,
-                    "auto_booking_enabled": item.auto_booking_enabled
-                })
+            update_data = {}
+            if item.time_range:
+                update_data["time_range"] = item.time_range
+            if item.auto_booking_enabled:
+                update_data["auto_booking_enabled"] = item.auto_booking_enabled
+
+            # 모니터링 시작 여부
+            if request.start_monitoring:
+                update_data["is_active"] = True
+                update_data["run_status"] = "pending"  # 워커가 감지하여 시작
+
+            if update_data:
+                await monitoring_manager.update_target(new_target.id, update_data)
 
             results.append({
                 "url": item.url,
@@ -127,14 +137,6 @@ async def bulk_import(
                 "target_id": new_target.id
             })
             success_count += 1
-
-            # 모니터링 시작 (선택적)
-            if request.start_monitoring:
-                target_dict = new_target.dict()
-                background_tasks.add_task(
-                    browser_service.add_to_monitoring_queue,
-                    target_dict
-                )
 
         except Exception as e:
             logger.error(f"URL 임포트 실패 ({item.url}): {e}")
@@ -156,15 +158,14 @@ async def bulk_import(
 @router.post("/start", response_model=BulkActionResponse)
 async def bulk_start(
     request: BulkActionRequest,
-    background_tasks: BackgroundTasks,
-    monitoring_manager: MonitoringSystemManager = Depends(get_monitoring_manager),
-    browser_service=Depends(get_browser_service)
+    monitoring_manager: MonitoringSystemManager = Depends(get_monitoring_manager)
 ):
     """
     모니터링을 일괄 시작합니다.
 
     - target_ids가 지정되면 해당 대상만
     - 지정되지 않으면 필터 조건에 맞는 모든 대상
+    - DB 상태만 pending으로 변경, 워커가 자동으로 시작
     """
     results = []
 
@@ -183,15 +184,12 @@ async def bulk_start(
 
     for target in targets:
         try:
-            # is_enabled 활성화
-            await monitoring_manager.update_target(target.id, {"is_enabled": True})
-
-            # 대기열에 추가
-            target_dict = target.dict()
-            background_tasks.add_task(
-                browser_service.add_to_monitoring_queue,
-                target_dict
-            )
+            # DB 상태 변경 - 워커가 감지하여 시작
+            await monitoring_manager.update_target(target.id, {
+                "is_enabled": True,
+                "is_active": True,
+                "run_status": "pending"
+            })
 
             results.append({
                 "target_id": target.id,
@@ -217,11 +215,12 @@ async def bulk_start(
 @router.post("/stop", response_model=BulkActionResponse)
 async def bulk_stop(
     request: BulkActionRequest,
-    monitoring_manager: MonitoringSystemManager = Depends(get_monitoring_manager),
-    browser_service=Depends(get_browser_service)
+    monitoring_manager: MonitoringSystemManager = Depends(get_monitoring_manager)
 ):
     """
     모니터링을 일괄 중지합니다.
+
+    DB 상태만 stopped로 변경, 워커가 감지하여 중지
     """
     results = []
 
@@ -240,12 +239,12 @@ async def bulk_stop(
 
     for target in targets:
         try:
-            # is_enabled 비활성화
-            await monitoring_manager.update_target(target.id, {"is_enabled": False})
-
-            # 모니터링 중지
-            if target.id in browser_service.monitoring_tasks:
-                await browser_service.stop_monitoring(target.id)
+            # DB 상태 변경 - 워커가 감지하여 중지
+            await monitoring_manager.update_target(target.id, {
+                "is_enabled": False,
+                "is_active": False,
+                "run_status": "stopped"
+            })
 
             results.append({
                 "target_id": target.id,
@@ -271,11 +270,12 @@ async def bulk_stop(
 @router.post("/pause", response_model=BulkActionResponse)
 async def bulk_pause(
     request: BulkActionRequest,
-    monitoring_manager: MonitoringSystemManager = Depends(get_monitoring_manager),
-    browser_service=Depends(get_browser_service)
+    monitoring_manager: MonitoringSystemManager = Depends(get_monitoring_manager)
 ):
     """
     모니터링을 일괄 일시 중지합니다 (is_enabled=False).
+
+    DB 상태만 paused로 변경, 워커가 감지하여 일시 중지
     """
     results = []
 
@@ -290,10 +290,11 @@ async def bulk_pause(
 
     for target in targets:
         try:
-            await monitoring_manager.update_target(target.id, {"is_enabled": False})
-
-            if target.id in browser_service.monitoring_tasks:
-                await browser_service.stop_monitoring(target.id)
+            # DB 상태 변경 - 워커가 감지하여 일시 중지
+            await monitoring_manager.update_target(target.id, {
+                "is_enabled": False,
+                "run_status": "paused"
+            })
 
             results.append({
                 "target_id": target.id,
@@ -318,8 +319,7 @@ async def bulk_pause(
 @router.delete("/delete", response_model=BulkActionResponse)
 async def bulk_delete(
     request: BulkActionRequest,
-    monitoring_manager: MonitoringSystemManager = Depends(get_monitoring_manager),
-    browser_service=Depends(get_browser_service)
+    monitoring_manager: MonitoringSystemManager = Depends(get_monitoring_manager)
 ):
     """
     대상을 일괄 삭제합니다.
@@ -336,9 +336,11 @@ async def bulk_delete(
 
     for target_id in request.target_ids:
         try:
-            # 모니터링 중지
-            if target_id in browser_service.monitoring_tasks:
-                await browser_service.stop_monitoring(target_id)
+            # 먼저 중지 상태로 변경 (워커가 감지)
+            await monitoring_manager.update_target(target_id, {
+                "is_active": False,
+                "run_status": "stopped"
+            })
 
             # 삭제
             success = await monitoring_manager.delete_target(target_id)

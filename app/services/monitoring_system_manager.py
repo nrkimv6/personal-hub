@@ -80,7 +80,9 @@ class MonitoringSystemManager:
         self._executor = ThreadPoolExecutor(max_workers=settings.MAX_CONCURRENT_CHECKS)
         self._check_semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_CHECKS)
         self.notification_service = notification_service or NotificationService()
-        self.browser_service = browser_service or BrowserService(monitor_service=self)
+        # browser_service는 명시적으로 전달된 경우에만 사용
+        # API 서버에서는 None으로 전달되어야 하며, 워커에서만 BrowserService를 초기화
+        self.browser_service = browser_service  # None이면 None으로 유지
         
         # 대기열 관리 추가
         self._monitoring_queue = asyncio.Queue()
@@ -638,8 +640,8 @@ class MonitoringSystemManager:
         return await self.get_targets({"category": category})
 
     async def get_active_targets(self) -> List[MonitorTarget]:
-        """활성화된 모니터링 대상만 조회합니다."""
-        return await self.get_targets({"is_active": True})
+        """활성화된 모니터링 대상만 조회합니다. (is_active=True AND is_enabled=True)"""
+        return await self.get_targets({"is_active": True, "is_enabled": True})
 
     async def fix_invalid_times(self):
         """손상된 times 필드를 가진 모니터링 대상을 수정합니다."""
