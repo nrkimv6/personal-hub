@@ -31,9 +31,9 @@ function Test-ProcessRunning {
     param([string]$PidFile)
 
     if (Test-Path $PidFile) {
-        $pid = Get-Content $PidFile -ErrorAction SilentlyContinue
-        if ($pid) {
-            $process = Get-Process -Id $pid -ErrorAction SilentlyContinue
+        $savedPid = Get-Content $PidFile -ErrorAction SilentlyContinue
+        if ($savedPid) {
+            $process = Get-Process -Id $savedPid -ErrorAction SilentlyContinue
             if ($process) {
                 return $true
             }
