@@ -39,7 +39,23 @@
   }
 
   function getBookingTargets() {
+    // auto_booking_enabled가 true인 모든 타겟 반환 (is_enabled 상태와 무관)
     return targets.filter(t => t.auto_booking_enabled);
+  }
+
+  function isTargetInactive(target: MonitorTarget) {
+    // is_enabled가 false이거나 run_status가 idle인 경우 비활성 상태
+    return !target.is_enabled || target.run_status === 'idle';
+  }
+
+  function getRunStatusBadge(status: string) {
+    switch (status) {
+      case 'running': return { class: 'badge-success', label: '실행중' };
+      case 'paused': return { class: 'badge-warning', label: '일시정지' };
+      case 'queued': return { class: 'badge-info', label: '대기중' };
+      case 'error': return { class: 'badge-error', label: '오류' };
+      default: return { class: 'badge-gray', label: '유휴' };
+    }
   }
 
   async function handleManualBooking() {
@@ -252,7 +268,8 @@
         <thead>
           <tr>
             <th>라벨</th>
-            <th>상태</th>
+            <th>모니터링</th>
+            <th>예약 상태</th>
             <th>시간 범위</th>
             <th>예약 현황</th>
             <th>마지막 예약</th>
@@ -261,13 +278,25 @@
         </thead>
         <tbody>
           {#each getBookingTargets() as target (target.id)}
-            <tr>
+            {@const inactive = isTargetInactive(target)}
+            {@const statusBadge = getRunStatusBadge(target.run_status)}
+            <tr class={inactive ? 'opacity-50 bg-gray-50' : ''}>
               <td class="font-medium">{target.label}</td>
               <td>
+                <div class="flex flex-col gap-1">
+                  {#if target.is_enabled}
+                    <span class="badge badge-success">활성</span>
+                  {:else}
+                    <span class="badge badge-gray">비활성</span>
+                  {/if}
+                  <span class="badge {statusBadge.class}">{statusBadge.label}</span>
+                </div>
+              </td>
+              <td>
                 {#if target.auto_booking_enabled}
-                  <span class="badge badge-success">활성</span>
+                  <span class="badge badge-success">자동예약 ON</span>
                 {:else}
-                  <span class="badge badge-gray">비활성</span>
+                  <span class="badge badge-gray">자동예약 OFF</span>
                 {/if}
               </td>
               <td class="text-sm text-gray-500">
@@ -303,7 +332,7 @@
             </tr>
           {:else}
             <tr>
-              <td colspan="6" class="text-center text-gray-500 py-8">
+              <td colspan="7" class="text-center text-gray-500 py-8">
                 자동 예약이 활성화된 대상이 없습니다.
               </td>
             </tr>
