@@ -290,7 +290,7 @@ async def bulk_pause(
 
     for target in targets:
         try:
-            # DB 상태 변경 - 워커가 감지하여 일시 중지
+            # 사용자 설정만 변경 - 워커가 감지하여 is_active를 변경함
             await monitoring_manager.update_target(target.id, {
                 "is_enabled": False,
                 "run_status": "paused"

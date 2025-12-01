@@ -195,7 +195,7 @@ async def pause_monitoring(
     if not target:
         raise HTTPException(status_code=404, detail="모니터링 대상을 찾을 수 없습니다")
 
-    # DB 상태만 변경 - 워커가 감지하여 중지
+    # 사용자 설정만 변경 - 워커가 감지하여 is_active를 변경함
     await monitoring_manager.update_target(target_id, {
         "is_enabled": False,
         "run_status": "paused"

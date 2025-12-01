@@ -537,7 +537,23 @@ class MonitoringSystemManager:
                     update_data["service_type"] = target_data['service_type']
                 if 'is_active' in target_data and target_data['is_active'] is not None:
                     update_data["is_active"] = target_data['is_active']
-                
+
+                # run_status 업데이트 (실행 상태: idle, queued, running, error)
+                if 'run_status' in target_data and target_data['run_status'] is not None:
+                    update_data["run_status"] = target_data['run_status']
+
+                # is_enabled 업데이트
+                if 'is_enabled' in target_data and target_data['is_enabled'] is not None:
+                    update_data["is_enabled"] = target_data['is_enabled']
+
+                # error_count 업데이트
+                if 'error_count' in target_data and target_data['error_count'] is not None:
+                    update_data["error_count"] = target_data['error_count']
+
+                # last_error 업데이트
+                if 'last_error' in target_data:
+                    update_data["last_error"] = target_data['last_error']
+
                 # interval 업데이트 (명시적으로 제공된 경우 사용자 정의로 설정)
                 if 'interval' in target_data and target_data['interval'] is not None:
                     update_data["interval"] = target_data['interval']
