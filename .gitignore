@@ -1,5 +1,4 @@
 *.py-1
-archive/*
 .idea/
 __pycache__/
 error_screenshots/
