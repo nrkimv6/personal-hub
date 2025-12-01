@@ -1,17 +1,22 @@
-# Monitor Page - 백그라운드 실행 스크립트
-# FastAPI 서버와 모니터링 워커를 백그라운드에서 실행합니다.
+# Monitor Page - Background Process Startup Script
+# Starts FastAPI server, monitoring worker, and Frontend in background
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
+$FrontendDir = Join-Path $ProjectRoot "frontend"
 
-# 로그 디렉토리 생성
+# Port settings
+$ApiPort = 8000
+$FrontendPort = 5173
+
+# Create log directory
 $LogDir = Join-Path $ProjectRoot "logs"
 if (-not (Test-Path $LogDir)) {
     New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 }
 
-# PID 파일 경로
+# PID file paths
 $PidDir = Join-Path $ProjectRoot ".pids"
 if (-not (Test-Path $PidDir)) {
     New-Item -ItemType Directory -Path $PidDir -Force | Out-Null
@@ -19,8 +24,9 @@ if (-not (Test-Path $PidDir)) {
 
 $ApiPidFile = Join-Path $PidDir "api.pid"
 $WorkerPidFile = Join-Path $PidDir "worker.pid"
+$FrontendPidFile = Join-Path $PidDir "frontend.pid"
 
-# 이미 실행 중인 프로세스 확인
+# Check if process is running
 function Test-ProcessRunning {
     param([string]$PidFile)
 
@@ -36,112 +42,179 @@ function Test-ProcessRunning {
     return $false
 }
 
-# API 서버 확인
+# Kill process using specific port
+function Stop-ProcessOnPort {
+    param([int]$Port)
+
+    $connections = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue
+    if ($connections) {
+        $pids = $connections | Select-Object -ExpandProperty OwningProcess -Unique
+        foreach ($procId in $pids) {
+            $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
+            if ($proc) {
+                Write-Host "    [!] Killing process on port ${Port}: $($proc.Name) (PID: $procId)" -ForegroundColor Yellow
+                Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Milliseconds 500
+            }
+        }
+        return $true
+    }
+    return $false
+}
+
+# Check API server
 if (Test-ProcessRunning $ApiPidFile) {
     $apiPid = Get-Content $ApiPidFile
-    Write-Host "[!] API 서버가 이미 실행 중입니다 (PID: $apiPid)" -ForegroundColor Yellow
+    Write-Host "[!] API server already running (PID: $apiPid)" -ForegroundColor Yellow
     $runApi = $false
 } else {
     $runApi = $true
 }
 
-# 워커 확인
+# Check Worker
 if (Test-ProcessRunning $WorkerPidFile) {
     $workerPid = Get-Content $WorkerPidFile
-    Write-Host "[!] 워커가 이미 실행 중입니다 (PID: $workerPid)" -ForegroundColor Yellow
+    Write-Host "[!] Worker already running (PID: $workerPid)" -ForegroundColor Yellow
     $runWorker = $false
 } else {
     $runWorker = $true
 }
 
-# 둘 다 실행 중이면 종료
-if (-not $runApi -and -not $runWorker) {
-    Write-Host "`n모든 프로세스가 이미 실행 중입니다." -ForegroundColor Green
-    Write-Host "로그 보기: .\scripts\logs.ps1"
-    Write-Host "프로세스 종료: .\scripts\stop.ps1"
+# Check Frontend
+if (Test-ProcessRunning $FrontendPidFile) {
+    $frontendPid = Get-Content $FrontendPidFile
+    Write-Host "[!] Frontend already running (PID: $frontendPid)" -ForegroundColor Yellow
+    $runFrontend = $false
+} else {
+    $runFrontend = $true
+}
+
+# Exit if all processes are running
+if (-not $runApi -and -not $runWorker -and -not $runFrontend) {
+    Write-Host "`nAll processes are already running." -ForegroundColor Green
+    Write-Host "View logs: .\scripts\logs.ps1"
+    Write-Host "Stop processes: .\scripts\stop.ps1"
     exit 0
 }
 
-# 작업 디렉토리 변경
+# Change working directory
 Set-Location $ProjectRoot
 
-# 가상환경 활성화 (있는 경우)
+# Activate virtual environment if exists
 $VenvPath = Join-Path $ProjectRoot "venv\Scripts\Activate.ps1"
 $VenvPath2 = Join-Path $ProjectRoot ".venv\Scripts\Activate.ps1"
 
 if (Test-Path $VenvPath) {
-    Write-Host "[*] 가상환경 활성화 중..." -ForegroundColor Cyan
+    Write-Host "[*] Activating virtual environment..." -ForegroundColor Cyan
     & $VenvPath
 } elseif (Test-Path $VenvPath2) {
-    Write-Host "[*] 가상환경 활성화 중..." -ForegroundColor Cyan
+    Write-Host "[*] Activating virtual environment..." -ForegroundColor Cyan
     & $VenvPath2
 }
 
-# 타임스탬프 생성
+# Generate timestamp
 $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 
 Write-Host "`n========================================" -ForegroundColor Green
-Write-Host "  Monitor Page 백그라운드 실행" -ForegroundColor Green
+Write-Host "  Monitor Page Background Startup" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 
-# API 서버 시작 (워커 자동 시작 비활성화)
+# Start API server (disable auto worker start)
 if ($runApi) {
-    Write-Host "[*] API 서버 시작 중..." -ForegroundColor Cyan
+    Write-Host "[*] Starting API server..." -ForegroundColor Cyan
 
-    # 환경 변수 설정 (워커 자동 시작 비활성화)
+    # Check and clean port
+    Stop-ProcessOnPort -Port $ApiPort | Out-Null
+
+    # Set environment variable (disable auto worker start)
     $env:WORKER_AUTO_START = "false"
 
     $apiLogFile = Join-Path $LogDir "api_$Timestamp.log"
 
-    # 백그라운드에서 API 서버 실행
-    $apiProcess = Start-Process -FilePath "python" `
-        -ArgumentList "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000" `
+    # Start API server in background using cmd to redirect both stdout and stderr
+    $apiProcess = Start-Process -FilePath "cmd.exe" `
+        -ArgumentList "/c", "python -m uvicorn app.main:app --host 0.0.0.0 --port $ApiPort > `"$apiLogFile`" 2>&1" `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
-        -RedirectStandardOutput $apiLogFile `
-        -RedirectStandardError $apiLogFile `
         -PassThru
 
-    # PID 저장
+    # Save PID
     $apiProcess.Id | Out-File $ApiPidFile -Encoding ascii
 
-    Write-Host "[+] API 서버 시작됨 (PID: $($apiProcess.Id))" -ForegroundColor Green
-    Write-Host "    로그: $apiLogFile"
+    Write-Host "[+] API server started (PID: $($apiProcess.Id))" -ForegroundColor Green
+    Write-Host "    Port: $ApiPort"
+    Write-Host "    Log: $apiLogFile"
 }
 
-# 잠시 대기 (API 서버 초기화 시간)
+# Wait for API server initialization
 Start-Sleep -Seconds 2
 
-# 워커 시작
+# Start Worker
 if ($runWorker) {
-    Write-Host "`n[*] 워커 시작 중..." -ForegroundColor Cyan
+    Write-Host "`n[*] Starting Worker..." -ForegroundColor Cyan
 
     $workerLogFile = Join-Path $LogDir "worker_$Timestamp.log"
 
-    # 백그라운드에서 워커 실행
-    $workerProcess = Start-Process -FilePath "python" `
-        -ArgumentList "-m", "app.worker.monitor_worker" `
+    # Start worker in background using cmd to redirect both stdout and stderr
+    $workerProcess = Start-Process -FilePath "cmd.exe" `
+        -ArgumentList "/c", "python -m app.worker.monitor_worker > `"$workerLogFile`" 2>&1" `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
-        -RedirectStandardOutput $workerLogFile `
-        -RedirectStandardError $workerLogFile `
         -PassThru
 
-    # PID 저장
+    # Save PID
     $workerProcess.Id | Out-File $WorkerPidFile -Encoding ascii
 
-    Write-Host "[+] 워커 시작됨 (PID: $($workerProcess.Id))" -ForegroundColor Green
-    Write-Host "    로그: $workerLogFile"
+    Write-Host "[+] Worker started (PID: $($workerProcess.Id))" -ForegroundColor Green
+    Write-Host "    Log: $workerLogFile"
+}
+
+# Start Frontend
+if ($runFrontend) {
+    Write-Host "`n[*] Starting Frontend..." -ForegroundColor Cyan
+
+    # Check and clean port
+    Stop-ProcessOnPort -Port $FrontendPort | Out-Null
+
+    $frontendLogFile = Join-Path $LogDir "frontend_$Timestamp.log"
+
+    # Check node_modules
+    $nodeModules = Join-Path $FrontendDir "node_modules"
+    if (-not (Test-Path $nodeModules)) {
+        Write-Host "    [*] Running npm install..." -ForegroundColor Yellow
+        $npmInstall = Start-Process -FilePath "npm" `
+            -ArgumentList "install" `
+            -WorkingDirectory $FrontendDir `
+            -Wait `
+            -NoNewWindow `
+            -PassThru
+    }
+
+    # Start Frontend in background using cmd to redirect both stdout and stderr
+    $frontendProcess = Start-Process -FilePath "cmd.exe" `
+        -ArgumentList "/c", "npm run dev -- --port $FrontendPort > `"$frontendLogFile`" 2>&1" `
+        -WorkingDirectory $FrontendDir `
+        -WindowStyle Hidden `
+        -PassThru
+
+    # Save PID
+    $frontendProcess.Id | Out-File $FrontendPidFile -Encoding ascii
+
+    Write-Host "[+] Frontend started (PID: $($frontendProcess.Id))" -ForegroundColor Green
+    Write-Host "    Port: $FrontendPort"
+    Write-Host "    Log: $frontendLogFile"
 }
 
 Write-Host "`n========================================" -ForegroundColor Green
-Write-Host "  모든 프로세스가 시작되었습니다" -ForegroundColor Green
+Write-Host "  All processes started" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "API 서버: http://localhost:8000" -ForegroundColor Cyan
+Write-Host "Frontend:   http://localhost:$FrontendPort" -ForegroundColor Cyan
+Write-Host "API Server: http://localhost:$ApiPort" -ForegroundColor Cyan
+Write-Host "API Docs:   http://localhost:$ApiPort/docs" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "유용한 명령어:" -ForegroundColor Yellow
-Write-Host "  로그 보기:       .\scripts\logs.ps1"
-Write-Host "  프로세스 종료:   .\scripts\stop.ps1"
+Write-Host "Commands:" -ForegroundColor Yellow
+Write-Host "  View logs:    .\scripts\logs.ps1"
+Write-Host "  Stop all:     .\scripts\stop.ps1"
 Write-Host ""
