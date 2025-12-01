@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     TAB_REQUEST_TIMEOUT: int = 60  # 탭 요청 시간 초과 (초)
     TAB_WAIT_RETRY_INTERVAL: int = 5  # 탭 요청 재시도 간격 (초)
     TOTAL_MAX_TABS: int = 5  # 전체 브라우저에서 사용할 최대 탭 수
+
+    # bizItems API 캐싱 설정 (REQ-MON-006)
+    BIZ_ITEMS_CACHE_TTL_NORMAL: int = 300  # 정상 운영 시 캐시 TTL (초) - 5분
+    BIZ_ITEMS_CACHE_TTL_CLOSED: int = 1800  # 비공개/운영중지 시 캐시 TTL (초) - 30분
+    BIZ_ITEMS_CACHE_TTL_PAUSED: int = 300  # 일시중지 시 캐시 TTL (초) - 5분
     
     # 로깅 설정
     LOG_LEVEL: str = "DEBUG"

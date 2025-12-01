@@ -1,7 +1,7 @@
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING
+from dataclasses import dataclass, field
 from app.models.monitor import MonitorTarget
 from app.services.abstract_site_monitor import AbstractSiteMonitor
-from app.services.browser_service import BrowserService
 from app.services.notification_service import NotificationService
 from app.utils.validators import is_naver_content_valid, is_naver_full_reservation, is_naver_page_available
 import hashlib
@@ -10,21 +10,36 @@ import re
 from datetime import datetime, timedelta, timezone
 import aiohttp
 import asyncio
-from app.config import logger
+from app.config import logger, settings
 from app.utils.parsers import parse_time_and_stock, parse_naver_page_info, extract_date_from_url
+
+# 순환 참조 방지를 위한 지연 import
+if TYPE_CHECKING:
+    from app.services.browser_service import BrowserService
 
 # 한국 시간대 정의
 KST = timezone(timedelta(hours=9))
 
+
+@dataclass
+class BizItemsCacheEntry:
+    """bizItems API 캐시 엔트리 (REQ-MON-006)"""
+    business_id: str                    # 캐시 키
+    items: List[Dict] = field(default_factory=list)  # 전체 아이템 목록
+    cached_at: datetime = field(default_factory=lambda: datetime.now(KST))
+    expires_at: datetime = field(default_factory=lambda: datetime.now(KST))
+    status: str = "unknown"             # "normal", "paused", "closed", "not_found", "waiting_open"
+
 class NaverSiteMonitor(AbstractSiteMonitor):
     """네이버 예약 모니터링 서비스"""
 
-    # bizItems API 캐시 (클래스 레벨)
-    _biz_items_cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    # bizItems API 캐시 (클래스 레벨) - business_id 단위로 캐싱 (REQ-MON-006)
+    _biz_items_cache: Dict[str, BizItemsCacheEntry] = {}
 
     def __init__(self, notification_service=None, browser_service=None):
         super().__init__(notification_service)
-        self.browser_service = browser_service or BrowserService()
+        # browser_service가 None이면 나중에 set_browser_service()로 설정
+        self.browser_service = browser_service
         self.session: Optional[aiohttp.ClientSession] = None
         # URL별 해시 상태 저장
         self._url_states: Dict[str, Dict[str, Any]] = {}
@@ -236,41 +251,172 @@ class NaverSiteMonitor(AbstractSiteMonitor):
     # Fetch API 기반 모니터링 메서드 (browser7.py에서 마이그레이션)
     # ============================================================
 
-    async def check_biz_items(
+    def _calculate_cache_ttl(
         self,
-        page,
-        business_id: str,
+        items: List[Dict],
+        biz_item_id: Optional[str] = None,
+        tag: str = ""
+    ) -> Tuple[int, str]:
+        """
+        아이템 상태에 따라 캐시 TTL을 계산합니다. (REQ-MON-006)
+
+        Args:
+            items: bizItems API 응답의 아이템 목록
+            biz_item_id: 특정 아이템 ID (옵션)
+            tag: 로깅용 태그
+
+        Returns:
+            Tuple[int, str]: (TTL 초, 상태 문자열)
+        """
+        TTL_NORMAL = settings.BIZ_ITEMS_CACHE_TTL_NORMAL
+        TTL_PAUSED = settings.BIZ_ITEMS_CACHE_TTL_PAUSED
+        TTL_CLOSED = settings.BIZ_ITEMS_CACHE_TTL_CLOSED
+
+        # 빈 배열 = 업체 비공개/운영중지
+        if not items:
+            logger.debug(f"[{tag}] Cache TTL: {TTL_CLOSED}s (closed)")
+            return TTL_CLOSED, "closed"
+
+        # 특정 아이템이 지정되지 않은 경우, 전체 아이템 중 가장 짧은 TTL 적용
+        items_to_check = items
+        if biz_item_id:
+            item = next((i for i in items if str(i.get('bizItemId')) == str(biz_item_id)), None)
+            if not item:
+                logger.debug(f"[{tag}] Cache TTL: {TTL_CLOSED}s (not_found)")
+                return TTL_CLOSED, "not_found"
+            items_to_check = [item]
+
+        min_ttl = TTL_NORMAL
+        status = "normal"
+        now = datetime.now(KST)
+
+        for item in items_to_check:
+            # bookableSettingJson 파싱
+            bookable = item.get('bookableSettingJson', {})
+            if isinstance(bookable, str):
+                try:
+                    bookable = json.loads(bookable) if bookable else {}
+                except json.JSONDecodeError:
+                    bookable = {}
+
+            # 일시중지 체크
+            if bookable.get('isPaused', False):
+                if TTL_PAUSED < min_ttl:
+                    min_ttl = TTL_PAUSED
+                    status = "paused"
+                continue
+
+            # 미오픈 체크 - openDateTime까지 대기 (최대 TTL_NORMAL)
+            if not bookable.get('isOpened', False):
+                open_dt_str = bookable.get('openDateTime', '')
+                if open_dt_str:
+                    try:
+                        # ISO 형식 파싱 시도
+                        open_dt_str_clean = open_dt_str.replace('Z', '+00:00')
+                        if '+' not in open_dt_str_clean and '-' not in open_dt_str_clean[10:]:
+                            # 시간대 정보 없으면 KST로 가정
+                            open_dt = datetime.fromisoformat(open_dt_str_clean).replace(tzinfo=KST)
+                        else:
+                            open_dt = datetime.fromisoformat(open_dt_str_clean).astimezone(KST)
+
+                        seconds_until_open = (open_dt - now).total_seconds()
+                        if 0 < seconds_until_open < TTL_NORMAL:
+                            # 오픈까지 남은 시간이 TTL_NORMAL보다 짧으면 그 시간 사용
+                            ttl_for_open = int(seconds_until_open) + 1  # 1초 여유
+                            if ttl_for_open < min_ttl:
+                                min_ttl = ttl_for_open
+                                status = "waiting_open"
+                            logger.debug(f"[{tag}] Item waiting for open at {open_dt}, TTL: {ttl_for_open}s")
+                            continue
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"[{tag}] Failed to parse openDateTime '{open_dt_str}': {e}")
+
+                # openDateTime 파싱 실패 또는 없는 경우
+                if TTL_NORMAL < min_ttl:
+                    min_ttl = TTL_NORMAL
+                    status = "not_opened"
+                continue
+
+        logger.debug(f"[{tag}] Cache TTL: {min_ttl}s ({status})")
+        return min_ttl, status
+
+    def _get_item_availability(
+        self,
+        items: List[Dict],
         biz_item_id: str,
         tag: str
     ) -> Optional[Dict[str, Any]]:
         """
-        bizItems API를 호출하여 예약 가능 상태를 확인합니다.
-        정각마다 갱신하고, 그 사이에는 캐시된 데이터를 사용합니다.
+        캐시된 아이템 목록에서 특정 아이템의 가용성을 확인합니다. (REQ-MON-006)
 
         Args:
-            page: Playwright 페이지 객체
-            business_id: 비즈니스 ID
+            items: bizItems API 응답의 아이템 목록
             biz_item_id: 비즈니스 아이템 ID
             tag: 로깅용 태그
 
         Returns:
             dict: {"available": bool, "reason": str, "data": dict} 또는 None (오류 시)
         """
-        cache_key = (business_id, biz_item_id)
-        now = datetime.now(KST)
+        # bizItems가 빈 배열이면 업체 비공개/운영중지
+        if not items:
+            logger.warning(f"[{tag}] bizItems 없음 - 업체 비공개/운영중지")
+            return {"available": False, "reason": "업체 비공개 또는 운영중지", "data": None}
 
-        # 캐시 확인
-        if cache_key in self._biz_items_cache:
-            cached = self._biz_items_cache[cache_key]
-            next_check = cached["next_check"]
+        # 해당 아이템 찾기
+        item = next((i for i in items if str(i.get('bizItemId')) == str(biz_item_id)), None)
 
-            # 다음 체크 시간 전이면 캐시 반환
-            if now < next_check:
-                logger.debug(f"[{tag}] Using cached bizItems (next check: {next_check.strftime('%H:%M:%S')})")
-                return cached["result"]
+        if not item:
+            logger.warning(f"[{tag}] bizItemId {biz_item_id} 없음")
+            return {"available": False, "reason": "아이템 없음", "data": None}
 
-        # bizItems API 호출
-        logger.debug(f"[{tag}] Fetching bizItems API...")
+        # bookableSettingJson 파싱
+        bookable_setting = item.get('bookableSettingJson', {})
+        if isinstance(bookable_setting, str):
+            try:
+                bookable_setting = json.loads(bookable_setting)
+            except json.JSONDecodeError:
+                bookable_setting = {}
+
+        # 일시중지 체크
+        if bookable_setting.get('isPaused', False):
+            logger.warning(f"[{tag}] 예약 일시중지")
+            return {"available": False, "reason": "예약 일시중지", "data": bookable_setting}
+
+        # isOpened 체크
+        is_opened = bookable_setting.get('isOpened', False)
+
+        if not is_opened:
+            open_datetime_str = bookable_setting.get('openDateTime', '')
+            logger.warning(f"[{tag}] 예약 미오픈 (openDateTime: {open_datetime_str})")
+            return {
+                "available": False,
+                "reason": "예약 미오픈",
+                "data": bookable_setting,
+                "openDateTime": open_datetime_str
+            }
+
+        # 예약 가능!
+        logger.debug(f"[{tag}] bizItems 예약 가능 확인 완료")
+        return {"available": True, "reason": "OK", "data": bookable_setting}
+
+    async def _fetch_biz_items_api(
+        self,
+        page,
+        business_id: str,
+        tag: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        bizItems GraphQL API를 호출합니다. (REQ-MON-006)
+
+        Args:
+            page: Playwright 페이지 객체
+            business_id: 비즈니스 ID
+            tag: 로깅용 태그
+
+        Returns:
+            dict: API 응답 또는 None (오류 시)
+        """
+        logger.debug(f"[{tag}] Fetching bizItems API for business_id={business_id}...")
 
         try:
             result = await page.evaluate("""
@@ -335,88 +481,65 @@ class NaverSiteMonitor(AbstractSiteMonitor):
                 logger.error(f"[{tag}] bizItems API returned invalid response (no data field)")
                 return None
 
-            biz_items = result['data'].get('bizItems', [])
-
-            # 다음 정각 계산
-            next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
-
-            # bizItems가 빈 배열이면 업체 비공개/운영중지
-            if not biz_items:
-                check_result = {"available": False, "reason": "업체 비공개 또는 운영중지", "data": None}
-                self._biz_items_cache[cache_key] = {
-                    "result": check_result,
-                    "cached_at": now,
-                    "next_check": next_hour
-                }
-                logger.warning(f"[{tag}] bizItems 없음 - 업체 비공개/운영중지")
-                return check_result
-
-            # 해당 아이템 찾기
-            item = next((i for i in biz_items if str(i.get('bizItemId')) == str(biz_item_id)), None)
-
-            if not item:
-                check_result = {"available": False, "reason": "아이템 없음", "data": None}
-                self._biz_items_cache[cache_key] = {
-                    "result": check_result,
-                    "cached_at": now,
-                    "next_check": next_hour
-                }
-                logger.warning(f"[{tag}] bizItemId {biz_item_id} 없음")
-                return check_result
-
-            # bookableSettingJson 확인
-            bookable_setting = item.get('bookableSettingJson', {})
-
-            # JSON 문자열인 경우 파싱
-            if isinstance(bookable_setting, str):
-                try:
-                    bookable_setting = json.loads(bookable_setting)
-                except:
-                    bookable_setting = {}
-
-            # 일시중지 체크
-            if bookable_setting.get('isPaused', False):
-                check_result = {"available": False, "reason": "예약 일시중지", "data": bookable_setting}
-                self._biz_items_cache[cache_key] = {
-                    "result": check_result,
-                    "cached_at": now,
-                    "next_check": next_hour
-                }
-                logger.warning(f"[{tag}] 예약 일시중지")
-                return check_result
-
-            # isOpened 체크
-            is_opened = bookable_setting.get('isOpened', False)
-
-            if not is_opened:
-                open_datetime_str = bookable_setting.get('openDateTime', '')
-                check_result = {
-                    "available": False,
-                    "reason": "예약 미오픈",
-                    "data": bookable_setting,
-                    "openDateTime": open_datetime_str
-                }
-                self._biz_items_cache[cache_key] = {
-                    "result": check_result,
-                    "cached_at": now,
-                    "next_check": next_hour
-                }
-                logger.warning(f"[{tag}] 예약 미오픈 (openDateTime: {open_datetime_str})")
-                return check_result
-
-            # 예약 가능!
-            check_result = {"available": True, "reason": "OK", "data": bookable_setting}
-            self._biz_items_cache[cache_key] = {
-                "result": check_result,
-                "cached_at": now,
-                "next_check": next_hour
-            }
-            logger.debug(f"[{tag}] bizItems 예약 가능 확인 완료")
-            return check_result
+            return result
 
         except Exception as e:
             logger.error(f"[{tag}] bizItems API error: {e}")
             return None
+
+    async def check_biz_items(
+        self,
+        page,
+        business_id: str,
+        biz_item_id: str,
+        tag: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        bizItems API를 호출하여 예약 가능 상태를 확인합니다. (REQ-MON-006)
+        business_id 단위로 캐싱하여 동일 업체의 여러 아이템 모니터링 시 중복 호출 방지.
+
+        Args:
+            page: Playwright 페이지 객체
+            business_id: 비즈니스 ID
+            biz_item_id: 비즈니스 아이템 ID
+            tag: 로깅용 태그
+
+        Returns:
+            dict: {"available": bool, "reason": str, "data": dict} 또는 None (오류 시)
+        """
+        now = datetime.now(KST)
+
+        # 캐시 확인 (business_id로만 조회)
+        if business_id in self._biz_items_cache:
+            cached = self._biz_items_cache[business_id]
+
+            # 캐시가 유효한 경우
+            if now < cached.expires_at:
+                logger.debug(f"[{tag}] Using cached bizItems for business_id={business_id} "
+                           f"(expires: {cached.expires_at.strftime('%H:%M:%S')}, status: {cached.status})")
+                return self._get_item_availability(cached.items, biz_item_id, tag)
+
+        # API 호출
+        result = await self._fetch_biz_items_api(page, business_id, tag)
+        if result is None:
+            return None
+
+        items = result.get('data', {}).get('bizItems', [])
+
+        # TTL 계산 및 캐싱
+        ttl, status = self._calculate_cache_ttl(items, biz_item_id, tag)
+        self._biz_items_cache[business_id] = BizItemsCacheEntry(
+            business_id=business_id,
+            items=items,
+            cached_at=now,
+            expires_at=now + timedelta(seconds=ttl),
+            status=status
+        )
+
+        logger.info(f"[{tag}] Cached bizItems for business_id={business_id} "
+                   f"(TTL: {ttl}s, status: {status}, items: {len(items)})")
+
+        return self._get_item_availability(items, biz_item_id, tag)
 
     def parse_slot_datetime(self, slot: Dict[str, Any]) -> Optional[datetime]:
         """
