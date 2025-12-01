@@ -1,0 +1,226 @@
+"""
+MonitorSchedule 서비스 - 일정 CRUD
+설계 문서: 2025-12-01_monitoring_restructure_design.md
+"""
+import json
+from typing import List, Optional, Dict, Any
+from sqlalchemy.orm import Session, joinedload
+from datetime import datetime
+
+from app.models.monitor_schedule import MonitorSchedule
+from app.models.biz_item import BizItem
+from app.models.business import Business
+from app.schemas.monitor_schedule import (
+    MonitorScheduleCreate,
+    MonitorScheduleUpdate,
+    BulkScheduleCreate,
+    ScheduleWithContext,
+)
+
+
+class ScheduleService:
+    """일정 관리 서비스"""
+
+    def get_by_item(self, db: Session, biz_item_id: int) -> List[MonitorSchedule]:
+        """아이템별 일정 목록 조회"""
+        return db.query(MonitorSchedule).filter(
+            MonitorSchedule.biz_item_id == biz_item_id
+        ).order_by(MonitorSchedule.date).all()
+
+    def get_by_id(self, db: Session, schedule_id: int) -> Optional[MonitorSchedule]:
+        """ID로 일정 조회"""
+        return db.query(MonitorSchedule).filter(MonitorSchedule.id == schedule_id).first()
+
+    def get_by_date(
+        self, db: Session, biz_item_id: int, date: str
+    ) -> Optional[MonitorSchedule]:
+        """아이템 ID + 날짜로 일정 조회"""
+        return db.query(MonitorSchedule).filter(
+            MonitorSchedule.biz_item_id == biz_item_id,
+            MonitorSchedule.date == date
+        ).first()
+
+    def get_all_enabled(self, db: Session) -> List[MonitorSchedule]:
+        """활성화된 모든 일정 조회"""
+        return db.query(MonitorSchedule).filter(
+            MonitorSchedule.is_enabled == True
+        ).order_by(MonitorSchedule.date).all()
+
+    def get_all_active(self, db: Session) -> List[MonitorSchedule]:
+        """현재 모니터링 중인 일정 조회"""
+        return db.query(MonitorSchedule).filter(
+            MonitorSchedule.is_active == True
+        ).all()
+
+    def get_enabled_with_context(self, db: Session) -> List[Dict[str, Any]]:
+        """활성화된 일정 + 상위 컨텍스트 조회 (워커용)"""
+        results = db.query(
+            MonitorSchedule,
+            BizItem,
+            Business
+        ).join(
+            BizItem, MonitorSchedule.biz_item_id == BizItem.id
+        ).join(
+            Business, BizItem.business_id == Business.id
+        ).filter(
+            MonitorSchedule.is_enabled == True
+        ).order_by(
+            MonitorSchedule.date
+        ).all()
+
+        schedules_with_context = []
+        for schedule, item, business in results:
+            schedules_with_context.append({
+                # Schedule 정보
+                "id": schedule.id,
+                "date": schedule.date,
+                "times": json.loads(schedule.times) if schedule.times else None,
+                "is_enabled": schedule.is_enabled,
+                "is_active": schedule.is_active,
+                "run_status": schedule.run_status,
+                "last_error": schedule.last_error,
+                "error_count": schedule.error_count,
+                "interval": schedule.interval,
+                "custom_interval": schedule.custom_interval,
+                "booking_count": schedule.booking_count,
+                "last_booking_time": schedule.last_booking_time,
+                # BizItem 정보
+                "biz_item_pk": item.id,
+                "biz_item_id": item.biz_item_id,
+                "item_name": item.name,
+                "base_url": item.base_url,
+                "time_range": item.time_range,
+                "auto_booking_enabled": item.auto_booking_enabled,
+                "max_bookings_per_schedule": item.max_bookings_per_schedule,
+                "booking_options_override": json.loads(item.booking_options_override) if item.booking_options_override else None,
+                # Business 정보
+                "business_pk": business.id,
+                "business_id": business.business_id,
+                "business_type_id": business.business_type_id,
+                "business_name": business.name,
+                "service_type": business.service_type,
+                "category": business.category,
+                "booking_options": json.loads(business.booking_options) if business.booking_options else None,
+            })
+
+        return schedules_with_context
+
+    def create(self, db: Session, data: MonitorScheduleCreate) -> MonitorSchedule:
+        """일정 생성"""
+        times_json = None
+        if data.times:
+            times_json = json.dumps(data.times, ensure_ascii=False)
+
+        schedule = MonitorSchedule(
+            biz_item_id=data.biz_item_id,
+            date=data.date,
+            times=times_json,
+            is_enabled=data.is_enabled,
+            interval=data.interval,
+            custom_interval=data.custom_interval,
+        )
+        db.add(schedule)
+        db.commit()
+        db.refresh(schedule)
+        return schedule
+
+    def create_bulk(self, db: Session, data: BulkScheduleCreate) -> List[MonitorSchedule]:
+        """일정 일괄 생성"""
+        times_json = None
+        if data.times:
+            times_json = json.dumps(data.times, ensure_ascii=False)
+
+        schedules = []
+        for date in data.dates:
+            # 이미 존재하는 일정은 스킵
+            existing = self.get_by_date(db, data.biz_item_id, date)
+            if existing:
+                schedules.append(existing)
+                continue
+
+            schedule = MonitorSchedule(
+                biz_item_id=data.biz_item_id,
+                date=date,
+                times=times_json,
+                is_enabled=data.is_enabled,
+                interval=data.interval,
+                custom_interval=data.custom_interval,
+            )
+            db.add(schedule)
+            schedules.append(schedule)
+
+        db.commit()
+
+        # refresh all
+        for schedule in schedules:
+            db.refresh(schedule)
+
+        return schedules
+
+    def update(self, db: Session, schedule_id: int, data: MonitorScheduleUpdate) -> Optional[MonitorSchedule]:
+        """일정 수정"""
+        schedule = self.get_by_id(db, schedule_id)
+        if not schedule:
+            return None
+
+        update_data = data.model_dump(exclude_unset=True)
+
+        # times JSON 변환
+        if "times" in update_data and update_data["times"] is not None:
+            update_data["times"] = json.dumps(update_data["times"], ensure_ascii=False)
+
+        for key, value in update_data.items():
+            setattr(schedule, key, value)
+
+        schedule.updated_at = datetime.now()
+        db.commit()
+        db.refresh(schedule)
+        return schedule
+
+    def delete(self, db: Session, schedule_id: int) -> bool:
+        """일정 삭제"""
+        schedule = self.get_by_id(db, schedule_id)
+        if not schedule:
+            return False
+
+        db.delete(schedule)
+        db.commit()
+        return True
+
+    def enable(self, db: Session, schedule_id: int) -> Optional[MonitorSchedule]:
+        """일정 활성화"""
+        return self.update(db, schedule_id, MonitorScheduleUpdate(
+            is_enabled=True,
+            run_status="pending"
+        ))
+
+    def disable(self, db: Session, schedule_id: int) -> Optional[MonitorSchedule]:
+        """일정 비활성화"""
+        return self.update(db, schedule_id, MonitorScheduleUpdate(
+            is_enabled=False,
+            run_status="paused"
+        ))
+
+    def set_active(self, db: Session, schedule_id: int, is_active: bool) -> Optional[MonitorSchedule]:
+        """시스템 활성 상태 설정 (워커용)"""
+        return self.update(db, schedule_id, MonitorScheduleUpdate(
+            is_active=is_active,
+            run_status="running" if is_active else "idle"
+        ))
+
+    def increment_booking_count(self, db: Session, schedule_id: int) -> Optional[MonitorSchedule]:
+        """예약 횟수 증가"""
+        schedule = self.get_by_id(db, schedule_id)
+        if not schedule:
+            return None
+
+        schedule.booking_count += 1
+        schedule.last_booking_time = datetime.now()
+        schedule.updated_at = datetime.now()
+        db.commit()
+        db.refresh(schedule)
+        return schedule
+
+
+# 싱글톤 인스턴스
+schedule_service = ScheduleService()
