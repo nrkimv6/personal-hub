@@ -21,6 +21,85 @@ if TYPE_CHECKING:
 KST = timezone(timedelta(hours=9))
 
 
+def filter_slots_by_time_range(slots: List[str], time_range_str: Optional[str]) -> List[str]:
+    """
+    슬롯 리스트에서 time_range 내에 있는 슬롯만 필터링하여 반환합니다. (REQ-BOOK-002)
+
+    Args:
+        slots: 슬롯 리스트 (예: ["2025-11-30 09:00:00 (2매)", "2025-11-30 11:00:00 (1매)"])
+        time_range_str: 시간 범위 문자열 (예: "10:00-21:00")
+
+    Returns:
+        list: time_range 내에 있는 슬롯만 포함된 리스트
+    """
+    if not time_range_str:
+        return slots  # 시간 범위 필터 없으면 전체 반환
+
+    if not slots:
+        return []
+
+    try:
+        # 시간 범위 파싱
+        start_str, end_str = time_range_str.split('-')
+        start_time = datetime.strptime(start_str.strip(), '%H:%M').time()
+        end_time = datetime.strptime(end_str.strip(), '%H:%M').time()
+
+        filtered_slots = []
+
+        for slot in slots:
+            slot_str = str(slot).lower()
+
+            # 오전/오후 패턴 매칭
+            am_pm_match = re.search(r'(오전|오후|am|pm)\s*(\d{1,2}):(\d{2})', slot_str)
+            if am_pm_match:
+                period = am_pm_match.group(1)
+                hour = int(am_pm_match.group(2))
+                minute = int(am_pm_match.group(3))
+
+                # 24시간 형식으로 변환
+                if period in ['오후', 'pm']:
+                    if hour != 12:
+                        hour += 12
+                elif period in ['오전', 'am']:
+                    if hour == 12:
+                        hour = 0
+
+                extracted_time = datetime.strptime(f"{hour:02d}:{minute:02d}", '%H:%M').time()
+            else:
+                # 일반 시간 패턴 (HH:MM:SS 또는 HH:MM)
+                time_match = re.search(r'(\d{1,2}):(\d{2})(?::\d{2})?', str(slot))
+                if not time_match:
+                    continue  # 시간 파싱 불가 → 스킵
+
+                hour = int(time_match.group(1))
+                minute = int(time_match.group(2))
+                extracted_time = datetime.strptime(f"{hour:02d}:{minute:02d}", '%H:%M').time()
+
+            # 시간 범위 체크
+            in_range = False
+            if start_time == end_time:
+                # 정확한 시간 매칭 (예: 12:00-12:00)
+                in_range = extracted_time.hour == start_time.hour and extracted_time.minute == start_time.minute
+            elif start_time < end_time:
+                # 일반적인 시간 범위 (예: 09:00-18:00)
+                in_range = start_time <= extracted_time <= end_time
+            else:
+                # 야간 시간 범위 (예: 22:00-06:00)
+                in_range = extracted_time >= start_time or extracted_time <= end_time
+
+            if in_range:
+                filtered_slots.append(slot)
+                logger.debug(f"[FILTER] ✓ 슬롯 포함: {slot} ({extracted_time} in {start_time}-{end_time})")
+            else:
+                logger.debug(f"[FILTER] ✗ 슬롯 제외: {slot} ({extracted_time} not in {start_time}-{end_time})")
+
+        return filtered_slots
+
+    except (ValueError, IndexError) as e:
+        logger.warning(f"[FILTER] 시간 범위 파싱 오류 '{time_range_str}': {e}. 전체 슬롯 반환")
+        return slots
+
+
 @dataclass
 class BizItemsCacheEntry:
     """bizItems API 캐시 엔트리 (REQ-MON-006)"""
