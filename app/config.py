@@ -7,16 +7,9 @@ import os
 from typing import Optional, Dict, Any, List, Set
 from pydantic import Field, validator, AnyHttpUrl
 
-# 로거 구성
+# 로거 구성 - 나중에 setup_logging()에서 초기화됨
 logger = logging.getLogger("monitor_app")
 logger.setLevel(logging.INFO)
-
-# 콘솔 핸들러 추가
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-console_handler.setFormatter(formatter)
-logger.addHandler(console_handler)
 
 class Settings(BaseSettings):
     # 기본 설정
@@ -99,7 +92,7 @@ class Settings(BaseSettings):
     # 로깅 설정
     LOG_LEVEL: str = "DEBUG"
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    LOG_FILE_PREFIX: str = "logs/monitor"
+    LOG_DIR: str = "logs"  # 로그 디렉토리
     LOG_RETENTION: int = 7  # 로그 보관 일수
     LOG_BACKUP_COUNT: int = 5  # 로그 백업 파일 수
     LOG_TO_CONSOLE: bool = True  # 콘솔에 로그 출력 여부
@@ -110,15 +103,6 @@ class Settings(BaseSettings):
     WORKER_AUTO_RESTART: bool = True  # 워커 비정상 종료 시 자동 재시작 여부
     WORKER_RESTART_DELAY: int = 5  # 워커 재시작 대기 시간 (초)
     WORKER_HEALTH_CHECK_INTERVAL: int = 30  # 워커 헬스체크 간격 (초)
-    WORKER_LOG_PREFIX: str = "logs/worker"  # 워커 로그 파일 접두사
-    
-    # 로그 파일명 생성용 시작 시간 (서버 부팅 시간)
-    SERVER_START_TIME: str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    # 동적 로그 파일명 생성 (시작시간 포함)
-    @property
-    def LOG_FILE(self) -> str:
-        return f"{self.LOG_FILE_PREFIX}_{self.SERVER_START_TIME}.log"
 
     # 모니터링 설정
     INITIAL_CHECK_DELAY: int = 2  # 초기 검사 지연 (초)
@@ -145,36 +129,67 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# 로깅 설정 초기화
-def setup_logging():
-    logger.setLevel(getattr(logging, settings.LOG_LEVEL))
-    
+
+def setup_logging(logger_name: str = "api_server", log_prefix: str = "api"):
+    """
+    로깅 시스템을 초기화합니다.
+
+    Args:
+        logger_name: 로거 이름 (api_server 또는 monitor_worker)
+        log_prefix: 로그 파일 접두사 (api 또는 worker)
+
+    Returns:
+        설정된 로거 인스턴스
+    """
+    from pathlib import Path
+
+    # 로그 디렉토리 생성
+    log_dir = Path(settings.LOG_DIR)
+    log_dir.mkdir(exist_ok=True)
+
+    # 프로세스별 고유 시작 시간
+    start_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = log_dir / f"{log_prefix}_{start_time}.log"
+
+    # 로거 가져오기
+    app_logger = logging.getLogger(logger_name)
+    app_logger.setLevel(getattr(logging, settings.LOG_LEVEL))
+
     # 기존 핸들러 제거 (재시작 시 중복 방지)
-    if logger.handlers:
-        logger.handlers.clear()
-    
+    if app_logger.handlers:
+        app_logger.handlers.clear()
+
     # 파일 핸들러 설정 - UTF-8 인코딩 명시
-    file_handler = logging.FileHandler(settings.LOG_FILE, encoding=settings.LOG_ENCODING)
-    file_handler.setFormatter(logging.Formatter(settings.LOG_FORMAT))
-    logger.addHandler(file_handler)
-    
+    file_handler = logging.FileHandler(str(log_file), encoding=settings.LOG_ENCODING)
+    file_handler.setFormatter(logging.Formatter(
+        f'%(asctime)s - [{log_prefix.upper()}] %(levelname)s - %(message)s'
+    ))
+    app_logger.addHandler(file_handler)
+
     # 콘솔 핸들러 설정 (선택적)
     if settings.LOG_TO_CONSOLE:
         console_handler = logging.StreamHandler()
-        console_handler.setFormatter(logging.Formatter(settings.LOG_FORMAT))
-        logger.addHandler(console_handler)
-    
-    # 서버 시작 로그 기록
-    logger.info(f"로깅 시스템 초기화 완료 - 로그 파일: {settings.LOG_FILE} (인코딩: {settings.LOG_ENCODING})")
-    logger.info(f"서버 시작 시간: {settings.SERVER_START_TIME}")
-    
-    return logger
+        console_handler.setFormatter(logging.Formatter(
+            f'%(asctime)s - [{log_prefix.upper()}] %(levelname)s - %(message)s'
+        ))
+        app_logger.addHandler(console_handler)
 
-# 로거 인스턴스 생성
-logger = setup_logging()
+    # 로거에 로그 파일 경로 저장 (나중에 참조용)
+    app_logger.log_file = str(log_file)
+    app_logger.start_time = start_time
 
-# 로깅 레벨 설정
+    # 시작 로그 기록
+    app_logger.info(f"로깅 시스템 초기화 완료 - 로그 파일: {log_file}")
+    app_logger.info(f"프로세스 시작 시간: {start_time}")
+
+    return app_logger
+
+
+# API 서버용 로거 초기화 (모듈 import 시 자동 초기화)
+# 워커에서는 별도로 setup_logging("monitor_worker", "worker") 호출
+logger = setup_logging("api_server", "api")
+
+# 디버그 모드 설정
 if settings.DEBUG:
     logger.setLevel(logging.DEBUG)
-    console_handler.setLevel(logging.DEBUG)
-    logger.debug("디버그 모드 활성화됨") 
+    logger.debug("디버그 모드 활성화됨")
