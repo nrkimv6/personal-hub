@@ -1,7 +1,20 @@
 # Monitor Page - Process Stop Script
 # Stops FastAPI server, monitoring worker, and Frontend (including zombie processes)
 
-$ErrorActionPreference = "SilentlyContinue"
+param(
+    [switch]$Force  # Skip confirmations
+)
+
+# Trap all errors and wait for key before exit
+trap {
+    Write-Host ""
+    Write-Host "ERROR: $_" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Press any key to exit..." -ForegroundColor Gray
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    exit 1
+}
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 
@@ -15,175 +28,190 @@ $ApiPidFile = Join-Path $PidDir "api.pid"
 $WorkerPidFile = Join-Path $PidDir "worker.pid"
 $FrontendPidFile = Join-Path $PidDir "frontend.pid"
 
-Write-Host "`n========================================" -ForegroundColor Red
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Red
 Write-Host "  Monitor Page Process Stop" -ForegroundColor Red
 Write-Host "========================================" -ForegroundColor Red
 Write-Host ""
 
-# Stop process function
-function Stop-MonitorProcess {
-    param(
-        [string]$Name,
-        [string]$PidFile
-    )
+# ============================================================
+# STEP 1: Kill all Python processes matching our patterns
+# ============================================================
+Write-Host "[1] Killing all monitor-page Python processes" -ForegroundColor Cyan
+Write-Host "----------------------------------------"
 
-    $stopped = $false
+$pythonKilled = 0
 
-    # Stop process from PID file
-    if (Test-Path $PidFile) {
-        $pid = Get-Content $PidFile -ErrorAction SilentlyContinue
-        if ($pid) {
-            $process = Get-Process -Id $pid -ErrorAction SilentlyContinue
-            if ($process) {
-                Write-Host "[*] Stopping $Name (PID: $pid)..." -ForegroundColor Yellow
+# Get all python processes with their command lines
+$pythonProcs = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue
 
-                # Try graceful termination
-                $process | Stop-Process -ErrorAction SilentlyContinue
+if ($pythonProcs) {
+    foreach ($proc in $pythonProcs) {
+        $cmd = $proc.CommandLine
+        if (-not $cmd) { continue }
 
-                # Wait a moment
-                Start-Sleep -Seconds 2
-
-                # Force kill if still running
-                $process = Get-Process -Id $pid -ErrorAction SilentlyContinue
-                if ($process) {
-                    Write-Host "[!] Force killing $Name..." -ForegroundColor Red
-                    $process | Stop-Process -Force -ErrorAction SilentlyContinue
-                    Start-Sleep -Seconds 1
-                }
-
-                # Final check
-                $process = Get-Process -Id $pid -ErrorAction SilentlyContinue
-                if (-not $process) {
-                    Write-Host "[+] $Name stopped (PID: $pid)" -ForegroundColor Green
-                    $stopped = $true
-                } else {
-                    Write-Host "[-] Failed to stop $Name (PID: $pid)" -ForegroundColor Red
-                }
-            } else {
-                Write-Host "[*] $Name process already stopped (PID: $pid)" -ForegroundColor Gray
-                $stopped = $true
-            }
+        # Check if this is a monitor-page related process
+        $isOurs = $false
+        if ($cmd -match "app\.main" -or
+            $cmd -match "app\.worker" -or
+            $cmd -match "uvicorn" -or
+            $cmd -match "monitor-page") {
+            $isOurs = $true
         }
-        # Delete PID file
-        Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
-    } else {
-        Write-Host "[*] $Name PID file not found" -ForegroundColor Gray
-    }
 
-    return $stopped
-}
-
-# Find and kill zombie processes
-function Stop-ZombieProcesses {
-    param([string]$Pattern, [string]$Name)
-
-    $zombies = Get-WmiObject Win32_Process | Where-Object {
-        $_.CommandLine -like "*$Pattern*" -and $_.Name -eq "python.exe"
-    }
-
-    if ($zombies) {
-        Write-Host "`n[!] Found zombie processes for ${Name}:" -ForegroundColor Yellow
-        foreach ($zombie in $zombies) {
-            $cmdPreview = $zombie.CommandLine.Substring(0, [Math]::Min(80, $zombie.CommandLine.Length))
-            Write-Host "    PID: $($zombie.ProcessId) - ${cmdPreview}..." -ForegroundColor Gray
+        if ($isOurs) {
+            $procId = $proc.ProcessId
+            $cmdShort = if ($cmd.Length -gt 70) { $cmd.Substring(0, 70) + "..." } else { $cmd }
+            Write-Host "  [*] PID $procId : $cmdShort" -ForegroundColor Yellow
 
             try {
-                Stop-Process -Id $zombie.ProcessId -Force -ErrorAction Stop
-                Write-Host "    [+] Killed" -ForegroundColor Green
+                Stop-Process -Id $procId -Force -ErrorAction Stop
+                Write-Host "      -> Killed" -ForegroundColor Green
+                $pythonKilled++
             } catch {
-                Write-Host "    [-] Failed to kill: $_" -ForegroundColor Red
+                Write-Host "      -> Failed: $($_.Exception.Message)" -ForegroundColor Red
             }
         }
     }
 }
 
-# Kill process using specific port
-function Stop-ProcessOnPort {
-    param(
-        [int]$Port,
-        [string]$Name
-    )
+if ($pythonKilled -eq 0) {
+    Write-Host "  (no matching processes found)" -ForegroundColor Gray
+} else {
+    Write-Host "  Total killed: $pythonKilled" -ForegroundColor Green
+}
 
-    $connections = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue
-    if ($connections) {
-        $pids = $connections | Select-Object -ExpandProperty OwningProcess -Unique
-        foreach ($procId in $pids) {
+# ============================================================
+# STEP 2: Kill processes on our ports
+# ============================================================
+Write-Host ""
+Write-Host "[2] Killing processes on ports $ApiPort, $FrontendPort" -ForegroundColor Cyan
+Write-Host "----------------------------------------"
+
+$portKilled = 0
+
+foreach ($port in @($ApiPort, $FrontendPort)) {
+    $conns = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
+    if ($conns) {
+        foreach ($conn in $conns) {
+            $procId = $conn.OwningProcess
             if ($procId -eq 0) { continue }
+
             $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
             if ($proc) {
-                Write-Host "    [*] Killing process on port $Port ($Name): $($proc.Name) (PID: $procId)" -ForegroundColor Yellow
-                Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
-                Start-Sleep -Milliseconds 500
+                Write-Host "  [*] Port $port : $($proc.ProcessName) (PID $procId)" -ForegroundColor Yellow
+                try {
+                    Stop-Process -Id $procId -Force -ErrorAction Stop
+                    Write-Host "      -> Killed" -ForegroundColor Green
+                    $portKilled++
+                } catch {
+                    Write-Host "      -> Failed: $($_.Exception.Message)" -ForegroundColor Red
+                }
             }
         }
     }
 }
 
-# 1. Stop processes using PID files
-Write-Host "[1] Stopping processes using PID files" -ForegroundColor Cyan
-Write-Host "-" * 40
-
-Stop-MonitorProcess -Name "API Server" -PidFile $ApiPidFile
-Stop-MonitorProcess -Name "Worker" -PidFile $WorkerPidFile
-Stop-MonitorProcess -Name "Frontend" -PidFile $FrontendPidFile
-
-# 2. Stop processes by port
-Write-Host "`n[2] Stopping processes by port" -ForegroundColor Cyan
-Write-Host "-" * 40
-
-Stop-ProcessOnPort -Port $ApiPort -Name "API Server"
-Stop-ProcessOnPort -Port $FrontendPort -Name "Frontend"
-
-# 3. Find and kill zombie processes
-Write-Host "`n[3] Finding and killing zombie processes" -ForegroundColor Cyan
-Write-Host "-" * 40
-
-# API server related zombie processes
-Stop-ZombieProcesses -Pattern "app.main" -Name "API Server"
-Stop-ZombieProcesses -Pattern "uvicorn" -Name "Uvicorn"
-
-# Worker related zombie processes
-Stop-ZombieProcesses -Pattern "app.worker.monitor_worker" -Name "Worker"
-
-# Frontend (vite/node) related zombie processes
-Stop-ZombieProcesses -Pattern "vite" -Name "Frontend (Vite)"
-
-# 4. Browser process cleanup (optional)
-Write-Host "`n[4] Checking related browser processes" -ForegroundColor Cyan
-Write-Host "-" * 40
-
-$browserDataPath = Join-Path $ProjectRoot "browser_data"
-$chromeProcesses = Get-WmiObject Win32_Process | Where-Object {
-    $_.Name -eq "chrome.exe" -and $_.CommandLine -like "*$browserDataPath*"
+if ($portKilled -eq 0) {
+    Write-Host "  (no processes on these ports)" -ForegroundColor Gray
 }
 
-if ($chromeProcesses) {
-    Write-Host "[?] Found Chrome processes for monitoring." -ForegroundColor Yellow
-    Write-Host "    Process count: $($chromeProcesses.Count)"
+# ============================================================
+# STEP 3: Kill Node/Vite processes
+# ============================================================
+Write-Host ""
+Write-Host "[3] Killing Vite/Node processes" -ForegroundColor Cyan
+Write-Host "----------------------------------------"
 
-    $response = Read-Host "    Kill them? (y/N)"
-    if ($response -eq "y" -or $response -eq "Y") {
-        foreach ($chrome in $chromeProcesses) {
+$nodeKilled = 0
+$nodeProcs = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue
+
+if ($nodeProcs) {
+    foreach ($proc in $nodeProcs) {
+        $cmd = $proc.CommandLine
+        if ($cmd -and $cmd -match "vite") {
+            $procId = $proc.ProcessId
+            Write-Host "  [*] PID $procId : vite dev server" -ForegroundColor Yellow
+            try {
+                Stop-Process -Id $procId -Force -ErrorAction Stop
+                Write-Host "      -> Killed" -ForegroundColor Green
+                $nodeKilled++
+            } catch {
+                Write-Host "      -> Failed: $($_.Exception.Message)" -ForegroundColor Red
+            }
+        }
+    }
+}
+
+if ($nodeKilled -eq 0) {
+    Write-Host "  (no vite processes found)" -ForegroundColor Gray
+}
+
+# ============================================================
+# STEP 4: Clean up PID files
+# ============================================================
+Write-Host ""
+Write-Host "[4] Cleaning up PID files" -ForegroundColor Cyan
+Write-Host "----------------------------------------"
+
+foreach ($pidFile in @($ApiPidFile, $WorkerPidFile, $FrontendPidFile)) {
+    if (Test-Path $pidFile) {
+        $name = Split-Path $pidFile -Leaf
+        Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+        Write-Host "  [+] Deleted: $name" -ForegroundColor Green
+    }
+}
+
+# ============================================================
+# STEP 5: Browser cleanup (optional)
+# ============================================================
+Write-Host ""
+Write-Host "[5] Checking Chrome processes" -ForegroundColor Cyan
+Write-Host "----------------------------------------"
+
+$browserDataPath = Join-Path $ProjectRoot "browser_data"
+$chromeProcs = Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'" -ErrorAction SilentlyContinue | Where-Object {
+    $_.CommandLine -and $_.CommandLine -like "*$browserDataPath*"
+}
+
+if ($chromeProcs) {
+    $count = @($chromeProcs).Count
+    Write-Host "  Found $count Chrome process(es) for monitoring" -ForegroundColor Yellow
+
+    $doKill = $Force
+    if (-not $Force) {
+        $response = Read-Host "  Kill them? (y/N)"
+        $doKill = ($response -eq "y" -or $response -eq "Y")
+    }
+
+    if ($doKill) {
+        foreach ($chrome in $chromeProcs) {
             try {
                 Stop-Process -Id $chrome.ProcessId -Force -ErrorAction Stop
-                Write-Host "    [+] Chrome killed (PID: $($chrome.ProcessId))" -ForegroundColor Green
+                Write-Host "  [+] Killed Chrome PID $($chrome.ProcessId)" -ForegroundColor Green
             } catch {
-                Write-Host "    [-] Failed to kill Chrome (PID: $($chrome.ProcessId))" -ForegroundColor Red
+                Write-Host "  [-] Failed to kill Chrome PID $($chrome.ProcessId)" -ForegroundColor Red
             }
         }
     }
 } else {
-    Write-Host "[*] No related Chrome processes found" -ForegroundColor Gray
+    Write-Host "  (no monitoring Chrome processes)" -ForegroundColor Gray
 }
 
-# 5. Clean up browser profile lock file
+# Clean browser lock file
 $lockFile = Join-Path $browserDataPath "browser_profile\lockfile"
 if (Test-Path $lockFile) {
     Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
-    Write-Host "`n[+] Browser profile lock file deleted" -ForegroundColor Green
+    Write-Host "  [+] Deleted browser lockfile" -ForegroundColor Green
 }
 
-Write-Host "`n========================================" -ForegroundColor Green
-Write-Host "  Process stop complete" -ForegroundColor Green
+# ============================================================
+# DONE
+# ============================================================
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Green
+Write-Host "  Stop complete" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
+Write-Host "Press any key to exit..." -ForegroundColor Gray
+$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
