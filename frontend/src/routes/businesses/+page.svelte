@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { businessApi, itemApi, scheduleApi } from '$lib/api';
-  import type { Business, BusinessWithItems, BizItem, MonitorSchedule } from '$lib/types';
+  import { businessApi, itemApi, scheduleApi, accountApi } from '$lib/api';
+  import type { Business, BusinessWithItems, BizItem, MonitorSchedule, Account } from '$lib/types';
 
   let businesses: Business[] = [];
+  let accounts: Account[] = [];
   let loading = true;
   let error: string | null = null;
 
@@ -52,10 +53,11 @@
     time_range: '',
     is_enabled: true,
     auto_booking_enabled: false,
-    max_bookings_per_schedule: 1
+    max_bookings_per_schedule: 1,
+    account_id: null as number | null
   };
 
-  let editItem: BizItem | null = null;
+  let editItem: (BizItem & { account_id: number | null }) | null = null;
 
   let newSchedule = {
     date: '',
@@ -72,6 +74,14 @@
       error = e instanceof Error ? e.message : '데이터 로드 실패';
     } finally {
       loading = false;
+    }
+  }
+
+  async function fetchAccounts() {
+    try {
+      accounts = await accountApi.listActive();
+    } catch (e) {
+      console.error('계정 목록 로드 실패:', e);
     }
   }
 
@@ -176,10 +186,11 @@
         time_range: newItem.time_range || undefined,
         is_enabled: newItem.is_enabled,
         auto_booking_enabled: newItem.auto_booking_enabled,
-        max_bookings_per_schedule: newItem.max_bookings_per_schedule
+        max_bookings_per_schedule: newItem.max_bookings_per_schedule,
+        account_id: newItem.account_id
       });
       showAddItemModal = false;
-      newItem = { biz_item_id: '', name: '', time_range: '', is_enabled: true, auto_booking_enabled: false, max_bookings_per_schedule: 1 };
+      newItem = { biz_item_id: '', name: '', time_range: '', is_enabled: true, auto_booking_enabled: false, max_bookings_per_schedule: 1, account_id: null };
       selectedBusiness = await businessApi.get(selectedBusiness.id);
     } catch (e) {
       alert('아이템 생성 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
@@ -194,7 +205,8 @@
         time_range: editItem.time_range || undefined,
         is_enabled: editItem.is_enabled,
         auto_booking_enabled: editItem.auto_booking_enabled,
-        max_bookings_per_schedule: editItem.max_bookings_per_schedule
+        max_bookings_per_schedule: editItem.max_bookings_per_schedule,
+        account_id: editItem.account_id
       });
       showEditItemModal = false;
       editItem = null;
@@ -288,6 +300,12 @@
     }
   }
 
+  function getAccountName(accountId: number | null | undefined): string | null {
+    if (!accountId) return null;
+    const account = accounts.find(a => a.id === accountId);
+    return account ? account.name : null;
+  }
+
   async function handleUrlImport() {
     if (!urlImport.url || !urlImport.item_name) {
       alert('URL과 아이템명은 필수입니다.');
@@ -329,7 +347,10 @@
     }
   }
 
-  onMount(fetchBusinesses);
+  onMount(() => {
+    fetchBusinesses();
+    fetchAccounts();
+  });
 </script>
 
 <div class="p-6">
@@ -457,6 +478,7 @@
               </thead>
               <tbody>
                 {#each selectedBusiness.items as item (item.id)}
+                  {@const accountName = getAccountName(item.account_id)}
                   <tr
                     class="cursor-pointer hover:bg-gray-50 {selectedItem?.id === item.id ? 'bg-blue-50' : ''} {!item.is_enabled ? 'opacity-50' : ''}"
                     on:click={() => selectItem(item)}
@@ -473,6 +495,9 @@
                     <td>
                       <div class="font-medium">{item.name}</div>
                       <div class="text-xs text-gray-500">{item.biz_item_id}</div>
+                      {#if accountName}
+                        <span class="badge badge-info text-xs">👤 {accountName}</span>
+                      {/if}
                     </td>
                     <td>
                       {#if item.auto_booking_enabled}
@@ -485,7 +510,7 @@
                       <div class="flex gap-1">
                         <button
                           class="btn btn-secondary btn-xs"
-                          on:click|stopPropagation={() => { editItem = {...item}; showEditItemModal = true; }}
+                          on:click|stopPropagation={() => { editItem = {...item, account_id: item.account_id ?? null}; showEditItemModal = true; }}
                           title="수정"
                         >
                           ✏
@@ -668,6 +693,16 @@
           <input id="item_name" type="text" class="input" bind:value={newItem.name} required placeholder="표시 이름" />
         </div>
         <div>
+          <label for="account_id" class="block text-sm font-medium text-gray-700 mb-1">사용 계정</label>
+          <select id="account_id" class="input" bind:value={newItem.account_id}>
+            <option value={null}>기본 계정</option>
+            {#each accounts as account}
+              <option value={account.id}>{account.name} ({account.profile_dir})</option>
+            {/each}
+          </select>
+          <p class="text-xs text-gray-500 mt-1">이 아이템을 모니터링할 때 사용할 계정을 선택하세요</p>
+        </div>
+        <div>
           <label for="time_range" class="block text-sm font-medium text-gray-700 mb-1">시간 범위</label>
           <input id="time_range" type="text" class="input" bind:value={newItem.time_range} placeholder="예: 10:00-21:00" />
         </div>
@@ -720,6 +755,15 @@
         <div>
           <label for="edit-item-name" class="block text-sm font-medium text-gray-700 mb-1">아이템명</label>
           <input id="edit-item-name" type="text" class="input" bind:value={editItem.name} required />
+        </div>
+        <div>
+          <label for="edit-account-id" class="block text-sm font-medium text-gray-700 mb-1">사용 계정</label>
+          <select id="edit-account-id" class="input" bind:value={editItem.account_id}>
+            <option value={null}>기본 계정</option>
+            {#each accounts as account}
+              <option value={account.id}>{account.name} ({account.profile_dir})</option>
+            {/each}
+          </select>
         </div>
         <div>
           <label for="edit-time-range" class="block text-sm font-medium text-gray-700 mb-1">시간 범위</label>
