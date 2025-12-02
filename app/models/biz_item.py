@@ -17,6 +17,7 @@ class BizItem(Base):
 
     # 관계
     business_id = Column(Integer, ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False)
+    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True)  # 다중 프로필 지원
 
     # 식별자
     biz_item_id = Column(String, nullable=False)  # 네이버 biz_item_id
@@ -37,6 +38,7 @@ class BizItem(Base):
 
     # 관계
     business = relationship("Business", back_populates="items")
+    account = relationship("Account", back_populates="biz_items")
     schedules = relationship("MonitorSchedule", back_populates="biz_item", cascade="all, delete-orphan")
 
     def __repr__(self):

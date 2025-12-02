@@ -56,6 +56,7 @@ class ScheduleMonitorService:
                     bi.time_range,
                     bi.auto_booking_enabled,
                     bi.max_bookings_per_schedule,
+                    bi.account_id,
                     b.id as business_id,
                     b.business_id as naver_business_id,
                     b.business_type_id,
@@ -74,8 +75,8 @@ class ScheduleMonitorService:
 
             # URL 생성
             url = build_naver_booking_url(
-                business_type_id=result[20],
-                business_id=result[19],
+                business_type_id=result[21],
+                business_id=result[20],
                 biz_item_id=result[13],
                 date=result[1]
             )
@@ -99,15 +100,16 @@ class ScheduleMonitorService:
                 "time_range": result[15],
                 "auto_booking_enabled": bool(result[16]),
                 "max_bookings_per_schedule": result[17] or 1,
-                "business_id": result[18],
-                "naver_business_id": result[19],
-                "business_type_id": result[20],
-                "business_name": result[21],
-                "category": result[22],
-                "service_type": result[23],
-                "booking_options": json.loads(result[24]) if result[24] else None,
+                "account_id": result[18],  # 다중 프로필 지원
+                "business_id": result[19],
+                "naver_business_id": result[20],
+                "business_type_id": result[21],
+                "business_name": result[22],
+                "category": result[23],
+                "service_type": result[24],
+                "booking_options": json.loads(result[25]) if result[25] else None,
                 "url": url,
-                "label": f"{result[21]} - {result[14]} ({result[1]})"
+                "label": f"{result[22]} - {result[14]} ({result[1]})"
             }
 
         except Exception as e:
