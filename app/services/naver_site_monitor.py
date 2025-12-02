@@ -10,7 +10,7 @@ import re
 from datetime import datetime, timedelta, timezone
 import aiohttp
 import asyncio
-from app.config import logger, settings
+from app.config import settings, logger
 from app.utils.parsers import parse_time_and_stock, parse_naver_page_info, extract_date_from_url
 
 # 순환 참조 방지를 위한 지연 import

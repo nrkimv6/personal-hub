@@ -16,8 +16,6 @@ from app.utils.validators import is_naver_content_valid, is_naver_full_reservati
 from app.utils.parsers import parse_time_and_stock, parse_naver_page_info, extract_date_from_url
 from app.database import SessionLocal, get_db
 
-logger = logging.getLogger(__name__)
-
 class NotificationService:
     def __init__(self):
         self.db = next(get_db())

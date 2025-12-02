@@ -185,11 +185,19 @@ def setup_logging(logger_name: str = "api_server", log_prefix: str = "api"):
     return app_logger
 
 
-# API 서버용 로거 초기화 (모듈 import 시 자동 초기화)
-# 워커에서는 별도로 setup_logging("monitor_worker", "worker") 호출
-logger = setup_logging("api_server", "api")
+# 로거 초기화 - 워커 프로세스에서는 API 로거를 초기화하지 않음
+# 워커는 자체적으로 async_logger를 사용하여 monitor_worker 로거를 설정함
+import __main__
+_is_worker = hasattr(__main__, '__file__') and 'worker' in getattr(__main__, '__file__', '')
 
-# 디버그 모드 설정
-if settings.DEBUG:
-    logger.setLevel(logging.DEBUG)
-    logger.debug("디버그 모드 활성화됨")
+if not _is_worker:
+    # API 서버용 로거 초기화
+    logger = setup_logging("api_server", "api")
+
+    # 디버그 모드 설정
+    if settings.DEBUG:
+        logger.setLevel(logging.DEBUG)
+        logger.debug("디버그 모드 활성화됨")
+else:
+    # 워커에서는 빈 로거 (나중에 async_logger에서 설정)
+    logger = logging.getLogger("monitor_worker")

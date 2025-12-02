@@ -132,9 +132,11 @@ if ($runApi) {
 
     $apiLogFile = Join-Path $LogDir "api_$Timestamp.log"
 
-    # Start API server in background using cmd to redirect both stdout and stderr
+    # Start API server in background
+    # stdout/stderr goes to separate file (stdout_api_*.log), Python logging goes to api_*.log
+    $stdoutLogFile = Join-Path $LogDir "stdout_api_$Timestamp.log"
     $apiProcess = Start-Process -FilePath "cmd.exe" `
-        -ArgumentList "/c", "python -m uvicorn app.main:app --host 0.0.0.0 --port $ApiPort > `"$apiLogFile`" 2>&1" `
+        -ArgumentList "/c", "set PYTHONIOENCODING=utf-8 && python -m uvicorn app.main:app --host 0.0.0.0 --port $ApiPort > `"$stdoutLogFile`" 2>&1" `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
         -PassThru
@@ -156,9 +158,11 @@ if ($runWorker) {
 
     $workerLogFile = Join-Path $LogDir "worker_$Timestamp.log"
 
-    # Start worker in background using cmd to redirect both stdout and stderr
+    # Start worker in background
+    # stdout/stderr goes to separate file (stdout_worker_*.log), Python logging goes to worker_*.log
+    $stdoutLogFile = Join-Path $LogDir "stdout_worker_$Timestamp.log"
     $workerProcess = Start-Process -FilePath "cmd.exe" `
-        -ArgumentList "/c", "python -m app.worker.monitor_worker > `"$workerLogFile`" 2>&1" `
+        -ArgumentList "/c", "set PYTHONIOENCODING=utf-8 && python -m app.worker.monitor_worker > `"$stdoutLogFile`" 2>&1" `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
         -PassThru

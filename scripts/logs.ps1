@@ -211,7 +211,7 @@ function Start-LogTail {
     }
 }
 
-# Real-time combined log tail
+# Real-time combined log tail (using FileSystemWatcher instead of Start-Job for UTF-8 support)
 function Start-CombinedLogTail {
     param(
         [string]$ApiLog,
@@ -225,80 +225,87 @@ function Start-CombinedLogTail {
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host ""
 
-    # Create jobs to monitor file changes
-    $jobs = @()
+    # Track file positions
+    $filePositions = @{}
+    $logFiles = @{}
 
     if ($ApiLog -and (Test-Path $ApiLog)) {
-        $job = Start-Job -ScriptBlock {
-            param($logPath)
-            Get-Content $logPath -Wait -Tail 5 -Encoding UTF8 | ForEach-Object {
-                "[API] $_"
-            }
-        } -ArgumentList $ApiLog
-        $jobs += $job
+        $logFiles["API"] = $ApiLog
+        $filePositions["API"] = (Get-Item $ApiLog).Length
+        # Show last 5 lines initially
+        $initLines = Get-Content $ApiLog -Tail 5 -Encoding UTF8 -ErrorAction SilentlyContinue
+        foreach ($line in $initLines) {
+            Write-Host "[API] $line" -ForegroundColor Cyan
+        }
     }
 
     if ($WorkerLog -and (Test-Path $WorkerLog)) {
-        $job = Start-Job -ScriptBlock {
-            param($logPath)
-            Get-Content $logPath -Wait -Tail 5 -Encoding UTF8 | ForEach-Object {
-                "[WORKER] $_"
-            }
-        } -ArgumentList $WorkerLog
-        $jobs += $job
+        $logFiles["WORKER"] = $WorkerLog
+        $filePositions["WORKER"] = (Get-Item $WorkerLog).Length
+        # Show last 5 lines initially
+        $initLines = Get-Content $WorkerLog -Tail 5 -Encoding UTF8 -ErrorAction SilentlyContinue
+        foreach ($line in $initLines) {
+            Write-Host "[WORKER] $line" -ForegroundColor Magenta
+        }
     }
 
     if ($FrontendLog -and (Test-Path $FrontendLog)) {
-        $job = Start-Job -ScriptBlock {
-            param($logPath)
-            Get-Content $logPath -Wait -Tail 5 -Encoding UTF8 | ForEach-Object {
-                "[FRONTEND] $_"
-            }
-        } -ArgumentList $FrontendLog
-        $jobs += $job
+        $logFiles["FRONTEND"] = $FrontendLog
+        $filePositions["FRONTEND"] = (Get-Item $FrontendLog).Length
+        # Show last 5 lines initially
+        $initLines = Get-Content $FrontendLog -Tail 5 -Encoding UTF8 -ErrorAction SilentlyContinue
+        foreach ($line in $initLines) {
+            Write-Host "[FRONTEND] $line" -ForegroundColor Green
+        }
     }
 
-    if ($jobs.Count -eq 0) {
+    if ($logFiles.Count -eq 0) {
         Write-Host "[!] No log files to follow." -ForegroundColor Red
         return
     }
 
+    Write-Host "`n--- Following logs... ---`n" -ForegroundColor DarkGray
+
     try {
         while ($true) {
-            foreach ($job in $jobs) {
-                $output = Receive-Job -Job $job -ErrorAction SilentlyContinue
-                if ($output) {
-                    foreach ($line in $output) {
-                        $lineColor = "White"
-                        if ($line -match "ERROR|CRITICAL|error") {
-                            $lineColor = "Red"
-                        } elseif ($line -match "WARNING|warn") {
-                            $lineColor = "Yellow"
-                        } elseif ($line -match "INFO") {
-                            $lineColor = "Green"
-                        } elseif ($line -match "DEBUG") {
-                            $lineColor = "Gray"
+            foreach ($source in $logFiles.Keys) {
+                $filePath = $logFiles[$source]
+                $currentSize = (Get-Item $filePath -ErrorAction SilentlyContinue).Length
+
+                if ($currentSize -gt $filePositions[$source]) {
+                    # Read new content using StreamReader for proper UTF-8
+                    $stream = [System.IO.FileStream]::new($filePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                    $stream.Seek($filePositions[$source], [System.IO.SeekOrigin]::Begin) | Out-Null
+                    $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
+
+                    while ($null -ne ($line = $reader.ReadLine())) {
+                        # Determine color based on source
+                        $sourceColor = switch ($source) {
+                            "API" { "Cyan" }
+                            "WORKER" { "Magenta" }
+                            "FRONTEND" { "Green" }
+                            default { "White" }
                         }
 
-                        # Color by source
-                        if ($line -match "^\[API\]") {
-                            Write-Host $line -ForegroundColor Cyan
-                        } elseif ($line -match "^\[WORKER\]") {
-                            Write-Host $line -ForegroundColor Magenta
-                        } elseif ($line -match "^\[FRONTEND\]") {
-                            Write-Host $line -ForegroundColor Green
-                        } else {
-                            Write-Host $line -ForegroundColor $lineColor
+                        # Override color for errors/warnings
+                        if ($line -match "ERROR|CRITICAL") {
+                            $sourceColor = "Red"
+                        } elseif ($line -match "WARNING") {
+                            $sourceColor = "Yellow"
                         }
+
+                        Write-Host "[$source] $line" -ForegroundColor $sourceColor
                     }
+
+                    $filePositions[$source] = $stream.Position
+                    $reader.Close()
+                    $stream.Close()
                 }
             }
-            Start-Sleep -Milliseconds 100
+            Start-Sleep -Milliseconds 200
         }
-    } finally {
-        # Cleanup jobs
-        $jobs | Stop-Job -ErrorAction SilentlyContinue
-        $jobs | Remove-Job -Force -ErrorAction SilentlyContinue
+    } catch {
+        Write-Host "Error: $_" -ForegroundColor Red
     }
 }
 
