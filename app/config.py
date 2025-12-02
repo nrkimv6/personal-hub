@@ -168,7 +168,11 @@ def setup_logging(logger_name: str = "api_server", log_prefix: str = "api"):
 
     # 콘솔 핸들러 설정 (선택적)
     if settings.LOG_TO_CONSOLE:
-        console_handler = logging.StreamHandler()
+        # UTF-8 인코딩을 지원하는 스트림 생성
+        console_stream = sys.stdout
+        console_stream.reconfigure(encoding='utf-8') if hasattr(console_stream, 'reconfigure') else None
+
+        console_handler = logging.StreamHandler(console_stream)
         console_handler.setFormatter(logging.Formatter(
             f'%(asctime)s - [{log_prefix.upper()}] %(levelname)s - %(message)s'
         ))

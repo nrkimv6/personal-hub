@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { businessApi, itemApi, scheduleApi } from '$lib/api';
-  import type { Business, BusinessWithItems, BizItem, MonitorSchedule } from '$lib/types';
+  import { businessApi, itemApi, scheduleApi, accountApi } from '$lib/api';
+  import type { Business, BusinessWithItems, BizItem, MonitorSchedule, Account } from '$lib/types';
 
   let businesses: Business[] = [];
+  let accounts: Account[] = [];
   let loading = true;
   let error: string | null = null;
 
@@ -36,7 +37,8 @@
     name: '',
     time_range: '',
     auto_booking_enabled: false,
-    max_bookings_per_schedule: 1
+    max_bookings_per_schedule: 1,
+    account_id: null as number | null
   };
 
   let newSchedule = {
@@ -54,6 +56,14 @@
       error = e instanceof Error ? e.message : '데이터 로드 실패';
     } finally {
       loading = false;
+    }
+  }
+
+  async function fetchAccounts() {
+    try {
+      accounts = await accountApi.listActive();
+    } catch (e) {
+      console.error('계정 목록 로드 실패:', e);
     }
   }
 
@@ -128,10 +138,11 @@
         name: newItem.name,
         time_range: newItem.time_range || undefined,
         auto_booking_enabled: newItem.auto_booking_enabled,
-        max_bookings_per_schedule: newItem.max_bookings_per_schedule
+        max_bookings_per_schedule: newItem.max_bookings_per_schedule,
+        account_id: newItem.account_id
       });
       showAddItemModal = false;
-      newItem = { biz_item_id: '', name: '', time_range: '', auto_booking_enabled: false, max_bookings_per_schedule: 1 };
+      newItem = { biz_item_id: '', name: '', time_range: '', auto_booking_enabled: false, max_bookings_per_schedule: 1, account_id: null };
       // 아이템 목록 새로고침
       expandedBusiness = await businessApi.get(expandedBusinessId);
     } catch (e) {
@@ -212,7 +223,10 @@
     }
   }
 
-  onMount(fetchBusinesses);
+  onMount(() => {
+    fetchBusinesses();
+    fetchAccounts();
+  });
 </script>
 
 <div class="p-6">
@@ -300,6 +314,12 @@
                               <span class="text-sm text-gray-500 ml-2">({item.biz_item_id})</span>
                               {#if item.auto_booking_enabled}
                                 <span class="badge badge-success ml-2">자동예약</span>
+                              {/if}
+                              {#if item.account_id}
+                                {@const account = accounts.find(a => a.id === item.account_id)}
+                                {#if account}
+                                  <span class="badge badge-info ml-2">👤 {account.name}</span>
+                                {/if}
                               {/if}
                             </div>
                           </button>
@@ -431,6 +451,16 @@
         <div>
           <label for="item_name" class="block text-sm font-medium text-gray-700 mb-1">아이템명</label>
           <input id="item_name" type="text" class="input" bind:value={newItem.name} required placeholder="표시 이름" />
+        </div>
+        <div>
+          <label for="account_id" class="block text-sm font-medium text-gray-700 mb-1">사용 계정</label>
+          <select id="account_id" class="input" bind:value={newItem.account_id}>
+            <option value={null}>기본 계정</option>
+            {#each accounts as account}
+              <option value={account.id}>{account.name} ({account.profile_dir})</option>
+            {/each}
+          </select>
+          <p class="text-xs text-gray-500 mt-1">이 아이템을 모니터링할 때 사용할 계정을 선택하세요</p>
         </div>
         <div>
           <label for="time_range" class="block text-sm font-medium text-gray-700 mb-1">시간 범위</label>
