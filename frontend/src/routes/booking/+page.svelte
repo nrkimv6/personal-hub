@@ -1,23 +1,20 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { bookingApi, targetsApi } from '$lib/api';
-  import type { MonitorTarget } from '$lib/types';
+  import { scheduleApi, bookingApi, itemApi } from '$lib/api';
+  import type { ScheduleWithContext, MonitorScheduleUpdate } from '$lib/types';
 
-  let targets: MonitorTarget[] = [];
+  let schedules: ScheduleWithContext[] = [];
   let loading = true;
   let error: string | null = null;
 
-  // 수동 예약 폼
-  let manualBooking = {
-    url: '',
-    tag: '',
-    slots: '',
+  // 수정 모달
+  let editingSchedule: ScheduleWithContext | null = null;
+  let editForm = {
+    times: '',
     time_range: '',
-    max_bookings: 1,
-    dry_run: false
+    max_bookings_per_schedule: 1,
+    is_enabled: true
   };
-  let bookingResult: { success: boolean; message: string } | null = null;
-  let isBooking = false;
 
   // 슬롯 필터링 테스트
   let filterTest = {
@@ -26,10 +23,10 @@
     result: null as { filtered_slots: string[]; original_count: number; filtered_count: number } | null
   };
 
-  async function fetchTargets() {
+  async function fetchSchedules() {
     loading = true;
     try {
-      targets = await targetsApi.list();
+      schedules = await scheduleApi.getActive();
       error = null;
     } catch (e) {
       error = e instanceof Error ? e.message : '데이터 로드 실패';
@@ -38,14 +35,15 @@
     }
   }
 
-  function getBookingTargets() {
-    // auto_booking_enabled가 true인 모든 타겟 반환 (is_enabled 상태와 무관)
-    return targets.filter(t => t.auto_booking_enabled);
+  function getAutoBookingSchedules() {
+    return schedules.filter(s => s.auto_booking_enabled);
   }
 
-  function isTargetInactive(target: MonitorTarget) {
-    // is_enabled가 false이거나 run_status가 idle인 경우 비활성 상태
-    return !target.is_enabled || target.run_status === 'idle';
+  function isScheduleInactive(schedule: ScheduleWithContext) {
+    return !schedule.is_enabled ||
+           !schedule.business_is_enabled ||
+           !schedule.item_is_enabled ||
+           schedule.run_status === 'idle';
   }
 
   function getRunStatusBadge(status: string) {
@@ -58,27 +56,81 @@
     }
   }
 
-  async function handleManualBooking() {
-    isBooking = true;
-    bookingResult = null;
+  function formatDateTime(dateStr: string | null) {
+    if (!dateStr) return '-';
+    const date = new Date(dateStr);
+    return date.toLocaleString('ko-KR', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
+
+  function openEditModal(schedule: ScheduleWithContext) {
+    editingSchedule = schedule;
+    editForm = {
+      times: schedule.times?.join(', ') || '',
+      time_range: schedule.time_range || '',
+      max_bookings_per_schedule: schedule.max_bookings_per_schedule,
+      is_enabled: schedule.is_enabled
+    };
+  }
+
+  async function handleUpdateSchedule() {
+    if (!editingSchedule) return;
     try {
-      const slots = manualBooking.slots.split('\n').filter(s => s.trim());
-      const result = await bookingApi.execute({
-        url: manualBooking.url,
-        tag: manualBooking.tag,
-        slots,
-        time_range: manualBooking.time_range || undefined,
-        max_bookings: manualBooking.max_bookings,
-        dry_run: manualBooking.dry_run
+      // 일정(schedule) 업데이트
+      const times = editForm.times ? editForm.times.split(',').map(t => t.trim()).filter(t => t) : undefined;
+      await scheduleApi.update(editingSchedule.id, {
+        times: times,
+        is_enabled: editForm.is_enabled
       });
-      bookingResult = result;
+
+      // 아이템(time_range, max_bookings) 업데이트
+      await itemApi.update(editingSchedule.biz_item_pk, {
+        time_range: editForm.time_range || undefined,
+        max_bookings_per_schedule: editForm.max_bookings_per_schedule
+      });
+
+      editingSchedule = null;
+      await fetchSchedules();
     } catch (e) {
-      bookingResult = {
-        success: false,
-        message: e instanceof Error ? e.message : '예약 실패'
-      };
-    } finally {
-      isBooking = false;
+      alert('수정 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+    }
+  }
+
+  async function handleToggleAutoBooking(schedule: ScheduleWithContext) {
+    try {
+      await itemApi.update(schedule.biz_item_pk, {
+        auto_booking_enabled: !schedule.auto_booking_enabled
+      });
+      await fetchSchedules();
+    } catch (e) {
+      alert('변경 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+    }
+  }
+
+  async function handleToggleEnabled(schedule: ScheduleWithContext) {
+    try {
+      if (schedule.is_enabled) {
+        await scheduleApi.disable(schedule.id);
+      } else {
+        await scheduleApi.enable(schedule.id);
+      }
+      await fetchSchedules();
+    } catch (e) {
+      alert('상태 변경 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+    }
+  }
+
+  async function handleResetBookingCount(schedule: ScheduleWithContext) {
+    if (!confirm('예약 횟수를 초기화하시겠습니까?')) return;
+    try {
+      await bookingApi.resetBySchedule(schedule.id);
+      await fetchSchedules();
+    } catch (e) {
+      alert('초기화 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
     }
   }
 
@@ -91,118 +143,138 @@
     }
   }
 
-  async function handleResetBookingCount(url: string) {
-    if (!confirm('예약 횟수를 초기화하시겠습니까?')) return;
-    try {
-      await bookingApi.reset(url);
-      await fetchTargets();
-    } catch (e) {
-      alert('초기화 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
-    }
-  }
-
-  async function handleToggleAutoBooking(target: MonitorTarget) {
-    try {
-      await targetsApi.update(target.id, {
-        auto_booking_enabled: !target.auto_booking_enabled
-      });
-      await fetchTargets();
-    } catch (e) {
-      alert('변경 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
-    }
-  }
-
-  onMount(fetchTargets);
+  onMount(fetchSchedules);
 </script>
 
 <div class="p-6">
-  <div class="mb-6">
+  <div class="mb-6 flex justify-between items-center">
     <h2 class="text-2xl font-bold text-gray-900">예약 관리</h2>
+    <button class="btn btn-secondary btn-sm" on:click={fetchSchedules}>
+      새로고침
+    </button>
   </div>
 
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <!-- 수동 예약 -->
-    <div class="card">
-      <h3 class="text-lg font-semibold text-gray-900 mb-4">수동 예약 실행</h3>
-      <form on:submit|preventDefault={handleManualBooking} class="space-y-4">
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">URL</label>
-          <input
-            type="url"
-            class="input"
-            bind:value={manualBooking.url}
-            required
-            placeholder="https://booking.naver.com/..."
-          />
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">태그 (표시용)</label>
-          <input
-            type="text"
-            class="input"
-            bind:value={manualBooking.tag}
-            required
-            placeholder="예약 대상 이름"
-          />
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">
-            슬롯 목록 (한 줄에 하나씩)
-          </label>
-          <textarea
-            class="input h-32"
-            bind:value={manualBooking.slots}
-            required
-            placeholder="2025-12-10 18:00:00 (2매)&#10;2025-12-10 19:00:00 (3매)"
-          ></textarea>
-        </div>
-        <div class="grid grid-cols-2 gap-4">
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">시간 범위</label>
-            <input
-              type="text"
-              class="input"
-              bind:value={manualBooking.time_range}
-              placeholder="18:00-21:00"
-            />
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">최대 예약 수</label>
-            <input
-              type="number"
-              class="input"
-              bind:value={manualBooking.max_bookings}
-              min="1"
-            />
-          </div>
-        </div>
-        <div class="flex items-center gap-2">
-          <input type="checkbox" id="dry_run" bind:checked={manualBooking.dry_run} />
-          <label for="dry_run" class="text-sm font-medium text-gray-700">
-            테스트 모드 (실제 예약 안함)
-          </label>
-        </div>
-        <button type="submit" class="btn btn-primary w-full" disabled={isBooking}>
-          {isBooking ? '예약 중...' : '📅 예약 실행'}
-        </button>
-      </form>
-
-      {#if bookingResult}
-        <div class="mt-4 p-4 rounded-lg {bookingResult.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}">
-          <p class="{bookingResult.success ? 'text-green-800' : 'text-red-800'} font-medium">
-            {bookingResult.success ? '✅ 성공' : '❌ 실패'}
-          </p>
-          <p class="text-sm mt-1 {bookingResult.success ? 'text-green-600' : 'text-red-600'}">
-            {bookingResult.message}
-          </p>
-        </div>
-      {/if}
+  <!-- 자동 예약 대상 목록 -->
+  <div class="card">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="text-lg font-semibold text-gray-900">
+        자동 예약 대상 ({getAutoBookingSchedules().length})
+      </h3>
     </div>
 
-    <!-- 슬롯 필터링 테스트 -->
-    <div class="card">
-      <h3 class="text-lg font-semibold text-gray-900 mb-4">슬롯 필터링 테스트</h3>
-      <form on:submit|preventDefault={handleFilterTest} class="space-y-4">
+    {#if loading}
+      <div class="flex justify-center py-8">
+        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    {:else if error}
+      <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+        {error}
+      </div>
+    {:else if getAutoBookingSchedules().length === 0}
+      <p class="text-gray-500 text-center py-8">
+        자동 예약이 활성화된 일정이 없습니다.
+      </p>
+    {:else}
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-3 py-2 text-left font-medium text-gray-600">대상</th>
+              <th class="px-3 py-2 text-left font-medium text-gray-600 w-24">날짜</th>
+              <th class="px-3 py-2 text-left font-medium text-gray-600 w-20">상태</th>
+              <th class="px-3 py-2 text-left font-medium text-gray-600 w-24">시간범위</th>
+              <th class="px-3 py-2 text-left font-medium text-gray-600 w-20">예약</th>
+              <th class="px-3 py-2 text-left font-medium text-gray-600 w-28">마지막 확인</th>
+              <th class="px-3 py-2 text-center font-medium text-gray-600 w-24">작업</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-200">
+            {#each getAutoBookingSchedules() as schedule (schedule.id)}
+              {@const inactive = isScheduleInactive(schedule)}
+              {@const statusBadge = getRunStatusBadge(schedule.run_status)}
+              <tr class={inactive ? 'bg-gray-50 text-gray-400' : ''}>
+                <td class="px-3 py-2">
+                  <div class="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={schedule.is_enabled}
+                      on:change={() => handleToggleEnabled(schedule)}
+                      title={schedule.is_enabled ? '비활성화' : '활성화'}
+                    />
+                    <div>
+                      <div class="font-medium {inactive ? 'text-gray-400' : 'text-gray-900'}">
+                        {schedule.business_name}
+                      </div>
+                      <div class="text-xs {inactive ? 'text-gray-400' : 'text-gray-500'}">
+                        {schedule.item_name}
+                        {#if schedule.times && schedule.times.length > 0}
+                          <span class="text-gray-400">({schedule.times.join(', ')})</span>
+                        {/if}
+                      </div>
+                    </div>
+                  </div>
+                </td>
+                <td class="px-3 py-2 {inactive ? 'text-gray-400' : ''}">
+                  {schedule.date}
+                </td>
+                <td class="px-3 py-2">
+                  <div class="flex flex-col gap-1">
+                    <span class="badge {statusBadge.class}">{statusBadge.label}</span>
+                    {#if !schedule.business_is_enabled}
+                      <span class="badge badge-gray text-xs">업체OFF</span>
+                    {:else if !schedule.item_is_enabled}
+                      <span class="badge badge-gray text-xs">아이템OFF</span>
+                    {/if}
+                  </div>
+                </td>
+                <td class="px-3 py-2 text-xs {inactive ? 'text-gray-400' : 'text-gray-600'}">
+                  {schedule.time_range || '-'}
+                </td>
+                <td class="px-3 py-2">
+                  <span class="font-medium {inactive ? 'text-gray-400' : ''}">{schedule.booking_count}</span>
+                  <span class="text-gray-400">/ {schedule.max_bookings_per_schedule}</span>
+                </td>
+                <td class="px-3 py-2 text-xs {inactive ? 'text-gray-400' : 'text-gray-500'}">
+                  {formatDateTime(schedule.last_check)}
+                </td>
+                <td class="px-3 py-2">
+                  <div class="flex justify-center gap-1">
+                    <button
+                      class="btn btn-secondary btn-xs"
+                      on:click={() => openEditModal(schedule)}
+                      title="수정"
+                    >
+                      ✏
+                    </button>
+                    <button
+                      class="btn btn-secondary btn-xs"
+                      on:click={() => handleResetBookingCount(schedule)}
+                      title="예약 횟수 초기화"
+                    >
+                      0
+                    </button>
+                    <button
+                      class="btn btn-xs {schedule.auto_booking_enabled ? 'btn-warning' : 'btn-success'}"
+                      on:click={() => handleToggleAutoBooking(schedule)}
+                      title={schedule.auto_booking_enabled ? '자동예약 중지' : '자동예약 활성화'}
+                    >
+                      {schedule.auto_booking_enabled ? '⏸' : '▶'}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
+  </div>
+
+  <!-- 슬롯 필터링 테스트 -->
+  <div class="card mt-6">
+    <h3 class="text-lg font-semibold text-gray-900 mb-4">슬롯 필터링 테스트</h3>
+    <form on:submit|preventDefault={handleFilterTest} class="space-y-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">
             슬롯 목록 (한 줄에 하나씩)
@@ -223,122 +295,133 @@
             required
             placeholder="18:00-21:00"
           />
-        </div>
-        <button type="submit" class="btn btn-secondary w-full">🔍 필터링 테스트</button>
-      </form>
+          <button type="submit" class="btn btn-secondary w-full mt-4">테스트</button>
 
-      {#if filterTest.result}
-        <div class="mt-4 p-4 bg-gray-50 rounded-lg">
-          <p class="text-sm text-gray-600">
-            원본: {filterTest.result.original_count}개 → 필터링: {filterTest.result.filtered_count}개
-          </p>
-          {#if filterTest.result.filtered_slots.length > 0}
-            <ul class="mt-2 text-sm space-y-1">
-              {#each filterTest.result.filtered_slots as slot}
-                <li class="text-green-600">✓ {slot}</li>
-              {/each}
-            </ul>
-          {:else}
-            <p class="text-sm text-yellow-600 mt-2">조건에 맞는 슬롯이 없습니다.</p>
+          {#if filterTest.result}
+            <div class="mt-4 p-3 bg-gray-50 rounded-lg text-sm">
+              <p class="text-gray-600">
+                원본: {filterTest.result.original_count}개 → 필터링: {filterTest.result.filtered_count}개
+              </p>
+              {#if filterTest.result.filtered_slots.length > 0}
+                <ul class="mt-2 space-y-1">
+                  {#each filterTest.result.filtered_slots as slot}
+                    <li class="text-green-600">✓ {slot}</li>
+                  {/each}
+                </ul>
+              {:else}
+                <p class="text-yellow-600 mt-2">조건에 맞는 슬롯이 없습니다.</p>
+              {/if}
+            </div>
           {/if}
         </div>
-      {/if}
-    </div>
-  </div>
-
-  <!-- 자동 예약 대상 목록 -->
-  <div class="card mt-6">
-    <div class="flex justify-between items-center mb-4">
-      <h3 class="text-lg font-semibold text-gray-900">자동 예약 대상</h3>
-      <button class="btn btn-secondary btn-sm" on:click={fetchTargets}>
-        🔄 새로고침
-      </button>
-    </div>
-
-    {#if loading}
-      <div class="flex justify-center py-8">
-        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
       </div>
-    {:else if error}
-      <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-        {error}
-      </div>
-    {:else}
-      <table class="table">
-        <thead>
-          <tr>
-            <th>라벨</th>
-            <th>모니터링</th>
-            <th>예약 상태</th>
-            <th>시간 범위</th>
-            <th>예약 현황</th>
-            <th>마지막 예약</th>
-            <th>작업</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each getBookingTargets() as target (target.id)}
-            {@const inactive = isTargetInactive(target)}
-            {@const statusBadge = getRunStatusBadge(target.run_status)}
-            <tr class={inactive ? 'opacity-50 bg-gray-50' : ''}>
-              <td class="font-medium">{target.label}</td>
-              <td>
-                <div class="flex flex-col gap-1">
-                  {#if target.is_enabled}
-                    <span class="badge badge-success">활성</span>
-                  {:else}
-                    <span class="badge badge-gray">비활성</span>
-                  {/if}
-                  <span class="badge {statusBadge.class}">{statusBadge.label}</span>
-                </div>
-              </td>
-              <td>
-                {#if target.auto_booking_enabled}
-                  <span class="badge badge-success">자동예약 ON</span>
-                {:else}
-                  <span class="badge badge-gray">자동예약 OFF</span>
-                {/if}
-              </td>
-              <td class="text-sm text-gray-500">
-                {target.time_range || '-'}
-              </td>
-              <td>
-                <span class="font-medium">{target.booking_count}</span>
-                <span class="text-gray-400">/ {target.max_bookings}</span>
-              </td>
-              <td class="text-sm text-gray-500">
-                {#if target.last_booking_time}
-                  {new Date(target.last_booking_time).toLocaleString('ko-KR')}
-                {:else}
-                  -
-                {/if}
-              </td>
-              <td>
-                <div class="flex gap-1">
-                  <button
-                    class="btn btn-sm {target.auto_booking_enabled ? 'btn-secondary' : 'btn-success'}"
-                    on:click={() => handleToggleAutoBooking(target)}
-                  >
-                    {target.auto_booking_enabled ? '⏸ 중지' : '▶ 활성화'}
-                  </button>
-                  <button
-                    class="btn btn-secondary btn-sm"
-                    on:click={() => handleResetBookingCount(target.url)}
-                  >
-                    🔄 초기화
-                  </button>
-                </div>
-              </td>
-            </tr>
-          {:else}
-            <tr>
-              <td colspan="7" class="text-center text-gray-500 py-8">
-                자동 예약이 활성화된 대상이 없습니다.
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    {/if}
+    </form>
   </div>
 </div>
+
+<!-- 수정 모달 -->
+{#if editingSchedule}
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+      <div class="p-4 border-b">
+        <h3 class="text-lg font-semibold">일정 설정 수정</h3>
+        <p class="text-sm text-gray-500 mt-1">
+          {editingSchedule.business_name} - {editingSchedule.item_name} ({editingSchedule.date})
+        </p>
+      </div>
+      <form on:submit|preventDefault={handleUpdateSchedule} class="p-4 space-y-4">
+        <div>
+          <label for="edit-times" class="block text-sm font-medium text-gray-700 mb-1">
+            시간 필터 (쉼표 구분)
+          </label>
+          <input
+            id="edit-times"
+            type="text"
+            class="input"
+            bind:value={editForm.times}
+            placeholder="예: 18:00, 19:00, 20:00"
+          />
+          <p class="text-xs text-gray-500 mt-1">특정 시간만 모니터링하려면 입력하세요</p>
+        </div>
+        <div>
+          <label for="edit-time-range" class="block text-sm font-medium text-gray-700 mb-1">
+            시간 범위 (자동예약용)
+          </label>
+          <input
+            id="edit-time-range"
+            type="text"
+            class="input"
+            bind:value={editForm.time_range}
+            placeholder="예: 18:00-21:00"
+          />
+          <p class="text-xs text-gray-500 mt-1">자동예약 시 이 시간대의 슬롯만 예약합니다</p>
+        </div>
+        <div>
+          <label for="edit-max-bookings" class="block text-sm font-medium text-gray-700 mb-1">
+            최대 예약 수
+          </label>
+          <input
+            id="edit-max-bookings"
+            type="number"
+            class="input"
+            bind:value={editForm.max_bookings_per_schedule}
+            min="1"
+            style="width: 100px;"
+          />
+        </div>
+        <label class="flex items-center gap-2">
+          <input type="checkbox" bind:checked={editForm.is_enabled} />
+          <span class="text-sm font-medium text-gray-700">모니터링 활성화</span>
+        </label>
+        <div class="flex justify-end gap-2 pt-4">
+          <button type="button" class="btn btn-secondary" on:click={() => editingSchedule = null}>
+            취소
+          </button>
+          <button type="submit" class="btn btn-primary">저장</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{/if}
+
+<style>
+  .badge {
+    display: inline-block;
+    padding: 0.125rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.7rem;
+    font-weight: 500;
+  }
+  .badge-success {
+    background-color: #dcfce7;
+    color: #166534;
+  }
+  .badge-info {
+    background-color: #dbeafe;
+    color: #1e40af;
+  }
+  .badge-warning {
+    background-color: #fef9c3;
+    color: #854d0e;
+  }
+  .badge-error {
+    background-color: #fee2e2;
+    color: #991b1b;
+  }
+  .badge-gray {
+    background-color: #f3f4f6;
+    color: #4b5563;
+  }
+  .btn-xs {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+  }
+  .btn-warning {
+    background-color: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fcd34d;
+  }
+  .btn-warning:hover {
+    background-color: #fde68a;
+  }
+</style>

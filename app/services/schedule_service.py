@@ -84,11 +84,14 @@ class ScheduleService:
                 "custom_interval": schedule.custom_interval,
                 "booking_count": schedule.booking_count,
                 "last_booking_time": schedule.last_booking_time,
+                "created_at": schedule.created_at,
+                "updated_at": schedule.updated_at,
                 # BizItem 정보
                 "biz_item_pk": item.id,
-                "biz_item_id": item.biz_item_id,
+                "item_biz_item_id": item.biz_item_id,
                 "item_name": item.name,
                 "base_url": item.base_url,
+                "item_is_enabled": getattr(item, 'is_enabled', True),
                 "time_range": item.time_range,
                 "auto_booking_enabled": item.auto_booking_enabled,
                 "max_bookings_per_schedule": item.max_bookings_per_schedule,
@@ -98,9 +101,12 @@ class ScheduleService:
                 "business_id": business.business_id,
                 "business_type_id": business.business_type_id,
                 "business_name": business.name,
+                "business_is_enabled": getattr(business, 'is_enabled', True),
                 "service_type": business.service_type,
                 "category": business.category,
                 "booking_options": json.loads(business.booking_options) if business.booking_options else None,
+                # 마지막 모니터링 시간 (updated_at을 대신 사용)
+                "last_check": schedule.updated_at,
             })
 
         return schedules_with_context

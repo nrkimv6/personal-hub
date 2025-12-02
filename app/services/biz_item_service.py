@@ -44,6 +44,7 @@ class BizItemService:
             biz_item_id=data.biz_item_id,
             name=data.name,
             base_url=data.base_url,
+            is_enabled=data.is_enabled,
             time_range=data.time_range,
             auto_booking_enabled=data.auto_booking_enabled,
             max_bookings_per_schedule=data.max_bookings_per_schedule,

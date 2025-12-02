@@ -39,6 +39,7 @@ class BusinessService:
             service_type=data.service_type,
             category=data.category,
             booking_options=booking_options_json,
+            is_enabled=data.is_enabled,
         )
         db.add(business)
         db.commit()

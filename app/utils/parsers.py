@@ -3,6 +3,102 @@ import asyncio
 from datetime import datetime
 from typing import Tuple, Optional, Dict, Any
 from urllib.parse import urlparse, parse_qs
+from dataclasses import dataclass
+
+
+@dataclass
+class ParsedNaverUrl:
+    """네이버 예약 URL 파싱 결과"""
+    category: str
+    business_id: str
+    item_id: str
+    start_date: Optional[str] = None
+    business_type_id: Optional[str] = None
+    is_valid: bool = True
+    error: Optional[str] = None
+
+
+def parse_naver_booking_url(url: str) -> ParsedNaverUrl:
+    """
+    네이버 예약 URL에서 정보를 추출합니다.
+
+    URL 형식: /booking/{category}/bizes/{businessId}/items/{itemId}?startDateTime=...
+    또는: https://booking.naver.com/booking/{category}/bizes/{businessId}/items/{itemId}?startDateTime=...
+
+    Args:
+        url: 네이버 예약 URL
+
+    Returns:
+        ParsedNaverUrl: 파싱된 URL 정보
+    """
+    try:
+        parsed = urlparse(url)
+        path = parsed.path
+
+        # /booking/{category}/bizes/{businessId}/items/{itemId} 패턴 매칭
+        pattern = r'/booking/([^/]+)/bizes/(\d+)/items/(\d+)'
+        match = re.search(pattern, path)
+
+        if not match:
+            return ParsedNaverUrl(
+                category="", business_id="", item_id="",
+                is_valid=False, error="Invalid URL format"
+            )
+
+        category = match.group(1)
+        business_id = match.group(2)
+        item_id = match.group(3)
+
+        # 쿼리 파라미터에서 날짜 추출
+        query_params = parse_qs(parsed.query)
+        start_date = None
+        if 'startDateTime' in query_params:
+            start_date = query_params['startDateTime'][0]
+        elif 'startDate' in query_params:
+            start_date = query_params['startDate'][0]
+
+        # businessTypeId 추출 (있는 경우)
+        business_type_id = None
+        if 'businessTypeId' in query_params:
+            business_type_id = query_params['businessTypeId'][0]
+
+        return ParsedNaverUrl(
+            category=category,
+            business_id=business_id,
+            item_id=item_id,
+            start_date=start_date,
+            business_type_id=business_type_id,
+            is_valid=True
+        )
+    except Exception as e:
+        return ParsedNaverUrl(
+            category="", business_id="", item_id="",
+            is_valid=False, error=str(e)
+        )
+
+
+def extract_date_only(date_str: Optional[str]) -> Optional[str]:
+    """
+    날짜 문자열에서 YYYY-MM-DD 형식만 추출합니다.
+
+    Args:
+        date_str: 날짜 문자열 (예: 2025-12-15T00:00:00+09:00)
+
+    Returns:
+        Optional[str]: YYYY-MM-DD 형식 또는 None
+    """
+    if not date_str:
+        return None
+
+    # T로 시작하는 시간 부분 제거
+    if 'T' in date_str:
+        date_str = date_str.split('T')[0]
+
+    # YYYY-MM-DD 패턴 확인
+    if re.match(r'^\d{4}-\d{2}-\d{2}$', date_str):
+        return date_str
+
+    return None
 
 
 def extract_date_from_url(url: str) -> Optional[str]:

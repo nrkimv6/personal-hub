@@ -25,6 +25,9 @@ class BizItem(Base):
     name = Column(String, nullable=False)  # 아이템명
     base_url = Column(String, nullable=True)  # 기본 URL (날짜 제외)
 
+    # 활성화 상태
+    is_enabled = Column(Boolean, default=True)  # 아이템 활성화/비활성화
+
     # 아이템 레벨 설정
     time_range = Column(String, nullable=True)  # 예약 시간 범위 (예: "10:00-21:00")
     auto_booking_enabled = Column(Boolean, default=False)  # 자동 예약 활성화

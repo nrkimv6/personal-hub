@@ -3,7 +3,7 @@ Business 모델 - 업체 정보
 설계 문서: 2025-12-01_monitoring_restructure_design.md
 """
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean
 from sqlalchemy.orm import relationship
 
 from app.models.base import Base, ServiceType
@@ -26,6 +26,9 @@ class Business(Base):
 
     # 업체 레벨 설정
     booking_options = Column(Text, nullable=True)  # JSON: 사업자별 예약 옵션
+
+    # 활성화 상태
+    is_enabled = Column(Boolean, default=True)  # 업체 전체 활성화/비활성화
 
     # 메타
     created_at = Column(DateTime, default=datetime.now)

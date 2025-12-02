@@ -15,6 +15,7 @@ class BizItemBase(BaseModel):
     biz_item_id: str
     name: str
     base_url: Optional[str] = None
+    is_enabled: bool = True
     time_range: Optional[str] = None
     auto_booking_enabled: bool = False
     max_bookings_per_schedule: int = 1
@@ -30,6 +31,7 @@ class BizItemUpdate(BaseModel):
     """BizItem 수정 스키마"""
     name: Optional[str] = None
     base_url: Optional[str] = None
+    is_enabled: Optional[bool] = None
     time_range: Optional[str] = None
     auto_booking_enabled: Optional[bool] = None
     max_bookings_per_schedule: Optional[int] = None

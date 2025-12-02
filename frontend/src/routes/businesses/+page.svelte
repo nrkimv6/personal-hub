@@ -7,20 +7,32 @@
   let loading = true;
   let error: string | null = null;
 
-  // 확장된 업체 (아이템 표시)
-  let expandedBusinessId: number | null = null;
-  let expandedBusiness: BusinessWithItems | null = null;
+  // 선택된 업체/아이템
+  let selectedBusiness: BusinessWithItems | null = null;
+  let selectedItem: BizItem | null = null;
+  let itemSchedules: MonitorSchedule[] = [];
   let loadingItems = false;
-
-  // 확장된 아이템 (일정 표시)
-  let expandedItemId: number | null = null;
-  let expandedItemSchedules: MonitorSchedule[] = [];
   let loadingSchedules = false;
 
   // 모달 상태
   let showAddBusinessModal = false;
+  let showEditBusinessModal = false;
   let showAddItemModal = false;
+  let showEditItemModal = false;
   let showAddScheduleModal = false;
+  let showUrlImportModal = false;
+
+  // URL 임포트 폼
+  let urlImport = {
+    url: '',
+    item_name: '',
+    business_name: '',
+    auto_booking_enabled: false,
+    time_range: '',
+    max_bookings_per_schedule: 1
+  };
+  let urlImportResult: { success: boolean; message: string; parsed_info?: Record<string, unknown> } | null = null;
+  let urlImportLoading = false;
 
   // 폼 데이터
   let newBusiness = {
@@ -28,16 +40,22 @@
     business_type_id: '',
     name: '',
     category: 'default',
-    service_type: 'naver'
+    service_type: 'naver',
+    is_enabled: true
   };
+
+  let editBusiness: Business | null = null;
 
   let newItem = {
     biz_item_id: '',
     name: '',
     time_range: '',
+    is_enabled: true,
     auto_booking_enabled: false,
     max_bookings_per_schedule: 1
   };
+
+  let editItem: BizItem | null = null;
 
   let newSchedule = {
     date: '',
@@ -57,19 +75,19 @@
     }
   }
 
-  async function toggleBusinessExpand(businessId: number) {
-    if (expandedBusinessId === businessId) {
-      expandedBusinessId = null;
-      expandedBusiness = null;
-      expandedItemId = null;
+  async function selectBusiness(business: Business) {
+    if (selectedBusiness?.id === business.id) {
+      selectedBusiness = null;
+      selectedItem = null;
+      itemSchedules = [];
       return;
     }
 
     loadingItems = true;
-    expandedBusinessId = businessId;
-    expandedItemId = null;
+    selectedItem = null;
+    itemSchedules = [];
     try {
-      expandedBusiness = await businessApi.get(businessId);
+      selectedBusiness = await businessApi.get(business.id);
     } catch (e) {
       alert('아이템 로드 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
     } finally {
@@ -77,17 +95,17 @@
     }
   }
 
-  async function toggleItemExpand(itemId: number) {
-    if (expandedItemId === itemId) {
-      expandedItemId = null;
-      expandedItemSchedules = [];
+  async function selectItem(item: BizItem) {
+    if (selectedItem?.id === item.id) {
+      selectedItem = null;
+      itemSchedules = [];
       return;
     }
 
     loadingSchedules = true;
-    expandedItemId = itemId;
+    selectedItem = item;
     try {
-      expandedItemSchedules = await itemApi.getSchedules(itemId);
+      itemSchedules = await itemApi.getSchedules(item.id);
     } catch (e) {
       alert('일정 로드 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
     } finally {
@@ -99,85 +117,143 @@
     try {
       await businessApi.create(newBusiness);
       showAddBusinessModal = false;
-      newBusiness = { business_id: '', business_type_id: '', name: '', category: 'default', service_type: 'naver' };
+      newBusiness = { business_id: '', business_type_id: '', name: '', category: 'default', service_type: 'naver', is_enabled: true };
       await fetchBusinesses();
     } catch (e) {
       alert('업체 생성 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
     }
   }
 
-  async function handleDeleteBusiness(id: number) {
-    if (!confirm('이 업체와 모든 하위 아이템/일정이 삭제됩니다. 계속하시겠습니까?')) return;
+  async function handleUpdateBusiness() {
+    if (!editBusiness) return;
     try {
-      await businessApi.delete(id);
+      await businessApi.update(editBusiness.id, {
+        name: editBusiness.name,
+        category: editBusiness.category,
+        is_enabled: editBusiness.is_enabled
+      });
+      showEditBusinessModal = false;
+      editBusiness = null;
       await fetchBusinesses();
-      if (expandedBusinessId === id) {
-        expandedBusinessId = null;
-        expandedBusiness = null;
+      if (selectedBusiness?.id) {
+        selectedBusiness = await businessApi.get(selectedBusiness.id);
+      }
+    } catch (e) {
+      alert('수정 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+    }
+  }
+
+  async function handleDeleteBusiness(business: Business) {
+    if (!confirm(`"${business.name}" 업체와 모든 하위 아이템/일정이 삭제됩니다. 계속하시겠습니까?`)) return;
+    try {
+      await businessApi.delete(business.id);
+      await fetchBusinesses();
+      if (selectedBusiness?.id === business.id) {
+        selectedBusiness = null;
+        selectedItem = null;
+        itemSchedules = [];
       }
     } catch (e) {
       alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
     }
   }
 
-  async function handleCreateItem() {
-    if (!expandedBusinessId) return;
+  async function handleToggleBusinessEnabled(business: Business) {
     try {
-      await itemApi.create(expandedBusinessId, {
+      await businessApi.update(business.id, { is_enabled: !business.is_enabled });
+      await fetchBusinesses();
+    } catch (e) {
+      alert('상태 변경 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+    }
+  }
+
+  async function handleCreateItem() {
+    if (!selectedBusiness) return;
+    try {
+      await itemApi.create(selectedBusiness.id, {
         biz_item_id: newItem.biz_item_id,
         name: newItem.name,
         time_range: newItem.time_range || undefined,
+        is_enabled: newItem.is_enabled,
         auto_booking_enabled: newItem.auto_booking_enabled,
         max_bookings_per_schedule: newItem.max_bookings_per_schedule
       });
       showAddItemModal = false;
-      newItem = { biz_item_id: '', name: '', time_range: '', auto_booking_enabled: false, max_bookings_per_schedule: 1 };
-      // 아이템 목록 새로고침
-      expandedBusiness = await businessApi.get(expandedBusinessId);
+      newItem = { biz_item_id: '', name: '', time_range: '', is_enabled: true, auto_booking_enabled: false, max_bookings_per_schedule: 1 };
+      selectedBusiness = await businessApi.get(selectedBusiness.id);
     } catch (e) {
       alert('아이템 생성 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
     }
   }
 
-  async function handleDeleteItem(itemId: number) {
-    if (!confirm('이 아이템과 모든 일정이 삭제됩니다. 계속하시겠습니까?')) return;
+  async function handleUpdateItem() {
+    if (!editItem || !selectedBusiness) return;
     try {
-      await itemApi.delete(itemId);
-      if (expandedBusinessId) {
-        expandedBusiness = await businessApi.get(expandedBusinessId);
+      await itemApi.update(editItem.id, {
+        name: editItem.name,
+        time_range: editItem.time_range || undefined,
+        is_enabled: editItem.is_enabled,
+        auto_booking_enabled: editItem.auto_booking_enabled,
+        max_bookings_per_schedule: editItem.max_bookings_per_schedule
+      });
+      showEditItemModal = false;
+      editItem = null;
+      selectedBusiness = await businessApi.get(selectedBusiness.id);
+    } catch (e) {
+      alert('수정 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+    }
+  }
+
+  async function handleDeleteItem(item: BizItem) {
+    if (!confirm(`"${item.name}" 아이템과 모든 일정이 삭제됩니다. 계속하시겠습니까?`)) return;
+    try {
+      await itemApi.delete(item.id);
+      if (selectedBusiness) {
+        selectedBusiness = await businessApi.get(selectedBusiness.id);
       }
-      if (expandedItemId === itemId) {
-        expandedItemId = null;
-        expandedItemSchedules = [];
+      if (selectedItem?.id === item.id) {
+        selectedItem = null;
+        itemSchedules = [];
       }
     } catch (e) {
       alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
     }
   }
 
+  async function handleToggleItemEnabled(item: BizItem) {
+    try {
+      await itemApi.update(item.id, { is_enabled: !item.is_enabled });
+      if (selectedBusiness) {
+        selectedBusiness = await businessApi.get(selectedBusiness.id);
+      }
+    } catch (e) {
+      alert('상태 변경 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+    }
+  }
+
   async function handleCreateSchedule() {
-    if (!expandedItemId) return;
+    if (!selectedItem) return;
     try {
       const times = newSchedule.times ? newSchedule.times.split(',').map(t => t.trim()) : [];
-      await itemApi.createSchedule(expandedItemId, {
+      await itemApi.createSchedule(selectedItem.id, {
         date: newSchedule.date,
         times: times,
         is_enabled: newSchedule.is_enabled
       });
       showAddScheduleModal = false;
       newSchedule = { date: '', times: '', is_enabled: true };
-      expandedItemSchedules = await itemApi.getSchedules(expandedItemId);
+      itemSchedules = await itemApi.getSchedules(selectedItem.id);
     } catch (e) {
       alert('일정 생성 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
     }
   }
 
-  async function handleDeleteSchedule(scheduleId: number) {
+  async function handleDeleteSchedule(schedule: MonitorSchedule) {
     if (!confirm('이 일정을 삭제하시겠습니까?')) return;
     try {
-      await scheduleApi.delete(scheduleId);
-      if (expandedItemId) {
-        expandedItemSchedules = await itemApi.getSchedules(expandedItemId);
+      await scheduleApi.delete(schedule.id);
+      if (selectedItem) {
+        itemSchedules = await itemApi.getSchedules(selectedItem.id);
       }
     } catch (e) {
       alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
@@ -191,8 +267,8 @@
       } else {
         await scheduleApi.enable(schedule.id);
       }
-      if (expandedItemId) {
-        expandedItemSchedules = await itemApi.getSchedules(expandedItemId);
+      if (selectedItem) {
+        itemSchedules = await itemApi.getSchedules(selectedItem.id);
       }
     } catch (e) {
       alert('상태 변경 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
@@ -212,6 +288,47 @@
     }
   }
 
+  async function handleUrlImport() {
+    if (!urlImport.url || !urlImport.item_name) {
+      alert('URL과 아이템명은 필수입니다.');
+      return;
+    }
+
+    urlImportLoading = true;
+    urlImportResult = null;
+    try {
+      const result = await businessApi.importFromUrl({
+        url: urlImport.url,
+        item_name: urlImport.item_name,
+        business_name: urlImport.business_name || undefined,
+        auto_booking_enabled: urlImport.auto_booking_enabled,
+        time_range: urlImport.time_range || undefined,
+        max_bookings_per_schedule: urlImport.max_bookings_per_schedule
+      });
+      urlImportResult = result;
+
+      if (result.success) {
+        await fetchBusinesses();
+        // 성공 시 폼 초기화
+        urlImport = {
+          url: '',
+          item_name: '',
+          business_name: '',
+          auto_booking_enabled: false,
+          time_range: '',
+          max_bookings_per_schedule: 1
+        };
+      }
+    } catch (e) {
+      urlImportResult = {
+        success: false,
+        message: e instanceof Error ? e.message : '임포트 실패'
+      };
+    } finally {
+      urlImportLoading = false;
+    }
+  }
+
   onMount(fetchBusinesses);
 </script>
 
@@ -221,6 +338,9 @@
     <div class="flex gap-2">
       <button class="btn btn-secondary btn-sm" on:click={fetchBusinesses}>
         새로고침
+      </button>
+      <button class="btn btn-success" on:click={() => showUrlImportModal = true}>
+        URL 임포트
       </button>
       <button class="btn btn-primary" on:click={() => showAddBusinessModal = true}>
         + 업체 추가
@@ -236,138 +356,214 @@
     <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
       {error}
     </div>
-  {:else if businesses.length === 0}
-    <div class="card text-center py-8">
-      <p class="text-gray-500 mb-4">등록된 업체가 없습니다.</p>
-      <button class="btn btn-primary" on:click={() => showAddBusinessModal = true}>
-        첫 업체 추가하기
-      </button>
-    </div>
   {:else}
-    <div class="space-y-4">
-      {#each businesses as business (business.id)}
-        <div class="card">
-          <!-- 업체 헤더 -->
-          <div class="flex items-center justify-between">
-            <button
-              class="flex-1 text-left flex items-center gap-3"
-              on:click={() => toggleBusinessExpand(business.id)}
-            >
-              <span class="text-lg">{expandedBusinessId === business.id ? '▼' : '▶'}</span>
-              <div>
-                <h3 class="font-semibold text-gray-900">{business.name}</h3>
-                <p class="text-sm text-gray-500">
-                  {business.business_id} | {business.service_type} | {business.category}
-                </p>
-              </div>
-            </button>
-            <button
-              class="btn btn-danger btn-sm"
-              on:click={() => handleDeleteBusiness(business.id)}
-            >
-              삭제
-            </button>
-          </div>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- 업체 목록 (왼쪽) -->
+      <div class="card">
+        <h3 class="text-lg font-semibold text-gray-900 mb-4">업체 목록 ({businesses.length})</h3>
 
-          <!-- 아이템 목록 (확장 시) -->
-          {#if expandedBusinessId === business.id}
-            <div class="mt-4 pl-8 border-l-2 border-gray-200">
-              {#if loadingItems}
-                <div class="py-4 text-center text-gray-500">로딩 중...</div>
-              {:else if expandedBusiness && expandedBusiness.items}
-                <div class="flex justify-between items-center mb-3">
-                  <h4 class="font-medium text-gray-700">아이템 ({expandedBusiness.items.length})</h4>
-                  <button class="btn btn-secondary btn-sm" on:click={() => showAddItemModal = true}>
-                    + 아이템 추가
-                  </button>
-                </div>
-
-                {#if expandedBusiness.items.length === 0}
-                  <p class="text-gray-500 py-2">등록된 아이템이 없습니다.</p>
-                {:else}
-                  <div class="space-y-3">
-                    {#each expandedBusiness.items as item (item.id)}
-                      <div class="bg-gray-50 rounded-lg p-3">
-                        <!-- 아이템 헤더 -->
-                        <div class="flex items-center justify-between">
-                          <button
-                            class="flex-1 text-left flex items-center gap-2"
-                            on:click={() => toggleItemExpand(item.id)}
-                          >
-                            <span>{expandedItemId === item.id ? '▼' : '▶'}</span>
-                            <div>
-                              <span class="font-medium">{item.name}</span>
-                              <span class="text-sm text-gray-500 ml-2">({item.biz_item_id})</span>
-                              {#if item.auto_booking_enabled}
-                                <span class="badge badge-success ml-2">자동예약</span>
-                              {/if}
-                            </div>
-                          </button>
-                          <button
-                            class="btn btn-danger btn-sm"
-                            on:click={() => handleDeleteItem(item.id)}
-                          >
-                            삭제
-                          </button>
-                        </div>
-
-                        <!-- 일정 목록 (확장 시) -->
-                        {#if expandedItemId === item.id}
-                          <div class="mt-3 pl-6 border-l-2 border-gray-300">
-                            {#if loadingSchedules}
-                              <div class="py-2 text-center text-gray-500">로딩 중...</div>
-                            {:else}
-                              <div class="flex justify-between items-center mb-2">
-                                <h5 class="text-sm font-medium text-gray-600">일정 ({expandedItemSchedules.length})</h5>
-                                <button class="btn btn-secondary btn-sm" on:click={() => showAddScheduleModal = true}>
-                                  + 일정 추가
-                                </button>
-                              </div>
-
-                              {#if expandedItemSchedules.length === 0}
-                                <p class="text-gray-500 text-sm py-2">등록된 일정이 없습니다.</p>
-                              {:else}
-                                <div class="space-y-2">
-                                  {#each expandedItemSchedules as schedule (schedule.id)}
-                                    {@const status = getStatusBadge(schedule.run_status, schedule.is_enabled)}
-                                    <div class="flex items-center justify-between bg-white rounded p-2 text-sm {!schedule.is_enabled ? 'opacity-50' : ''}">
-                                      <div class="flex items-center gap-3">
-                                        <input
-                                          type="checkbox"
-                                          checked={schedule.is_enabled}
-                                          on:change={() => handleToggleSchedule(schedule)}
-                                        />
-                                        <span class="font-medium">{schedule.date}</span>
-                                        <span class="badge {status.class}">{status.text}</span>
-                                        {#if schedule.times && schedule.times.length > 0}
-                                          <span class="text-gray-500">{schedule.times.join(', ')}</span>
-                                        {/if}
-                                        {#if schedule.booking_count > 0}
-                                          <span class="text-green-600">예약: {schedule.booking_count}</span>
-                                        {/if}
-                                      </div>
-                                      <button
-                                        class="text-red-500 hover:text-red-700"
-                                        on:click={() => handleDeleteSchedule(schedule.id)}
-                                      >
-                                        X
-                                      </button>
-                                    </div>
-                                  {/each}
-                                </div>
-                              {/if}
-                            {/if}
-                          </div>
-                        {/if}
+        {#if businesses.length === 0}
+          <p class="text-gray-500 text-center py-4">등록된 업체가 없습니다.</p>
+        {:else}
+          <div class="overflow-x-auto">
+            <table class="table table-sm">
+              <thead>
+                <tr>
+                  <th class="w-8"></th>
+                  <th>업체명</th>
+                  <th>서비스</th>
+                  <th class="w-20">작업</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each businesses as business (business.id)}
+                  <tr
+                    class="cursor-pointer hover:bg-gray-50 {selectedBusiness?.id === business.id ? 'bg-blue-50' : ''} {!business.is_enabled ? 'opacity-50' : ''}"
+                    on:click={() => selectBusiness(business)}
+                  >
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={business.is_enabled}
+                        on:click|stopPropagation
+                        on:change={() => handleToggleBusinessEnabled(business)}
+                        title={business.is_enabled ? '비활성화' : '활성화'}
+                      />
+                    </td>
+                    <td>
+                      <div class="font-medium">{business.name}</div>
+                      <div class="text-xs text-gray-500">{business.business_id}</div>
+                    </td>
+                    <td>
+                      <span class="badge badge-info">{business.service_type}</span>
+                    </td>
+                    <td>
+                      <div class="flex gap-1">
+                        <button
+                          class="btn btn-secondary btn-xs"
+                          on:click|stopPropagation={() => { editBusiness = {...business}; showEditBusinessModal = true; }}
+                          title="수정"
+                        >
+                          ✏
+                        </button>
+                        <button
+                          class="btn btn-danger btn-xs"
+                          on:click|stopPropagation={() => handleDeleteBusiness(business)}
+                          title="삭제"
+                        >
+                          🗑
+                        </button>
                       </div>
-                    {/each}
-                  </div>
-                {/if}
-              {/if}
-            </div>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+      </div>
+
+      <!-- 아이템 목록 (가운데) -->
+      <div class="card">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-lg font-semibold text-gray-900">
+            아이템 {#if selectedBusiness}({selectedBusiness.items?.length || 0}){/if}
+          </h3>
+          {#if selectedBusiness}
+            <button class="btn btn-secondary btn-sm" on:click={() => showAddItemModal = true}>
+              + 추가
+            </button>
           {/if}
         </div>
-      {/each}
+
+        {#if !selectedBusiness}
+          <p class="text-gray-500 text-center py-8">업체를 선택하세요</p>
+        {:else if loadingItems}
+          <div class="flex justify-center py-8">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          </div>
+        {:else if !selectedBusiness.items || selectedBusiness.items.length === 0}
+          <p class="text-gray-500 text-center py-4">등록된 아이템이 없습니다.</p>
+        {:else}
+          <div class="overflow-x-auto">
+            <table class="table table-sm">
+              <thead>
+                <tr>
+                  <th class="w-8"></th>
+                  <th>아이템명</th>
+                  <th>자동예약</th>
+                  <th class="w-20">작업</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each selectedBusiness.items as item (item.id)}
+                  <tr
+                    class="cursor-pointer hover:bg-gray-50 {selectedItem?.id === item.id ? 'bg-blue-50' : ''} {!item.is_enabled ? 'opacity-50' : ''}"
+                    on:click={() => selectItem(item)}
+                  >
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={item.is_enabled}
+                        on:click|stopPropagation
+                        on:change={() => handleToggleItemEnabled(item)}
+                        title={item.is_enabled ? '비활성화' : '활성화'}
+                      />
+                    </td>
+                    <td>
+                      <div class="font-medium">{item.name}</div>
+                      <div class="text-xs text-gray-500">{item.biz_item_id}</div>
+                    </td>
+                    <td>
+                      {#if item.auto_booking_enabled}
+                        <span class="badge badge-success">ON</span>
+                      {:else}
+                        <span class="badge badge-gray">OFF</span>
+                      {/if}
+                    </td>
+                    <td>
+                      <div class="flex gap-1">
+                        <button
+                          class="btn btn-secondary btn-xs"
+                          on:click|stopPropagation={() => { editItem = {...item}; showEditItemModal = true; }}
+                          title="수정"
+                        >
+                          ✏
+                        </button>
+                        <button
+                          class="btn btn-danger btn-xs"
+                          on:click|stopPropagation={() => handleDeleteItem(item)}
+                          title="삭제"
+                        >
+                          🗑
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+      </div>
+
+      <!-- 일정 목록 (오른쪽) -->
+      <div class="card">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-lg font-semibold text-gray-900">
+            일정 {#if selectedItem}({itemSchedules.length}){/if}
+          </h3>
+          {#if selectedItem}
+            <button class="btn btn-secondary btn-sm" on:click={() => showAddScheduleModal = true}>
+              + 추가
+            </button>
+          {/if}
+        </div>
+
+        {#if !selectedItem}
+          <p class="text-gray-500 text-center py-8">아이템을 선택하세요</p>
+        {:else if loadingSchedules}
+          <div class="flex justify-center py-8">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          </div>
+        {:else if itemSchedules.length === 0}
+          <p class="text-gray-500 text-center py-4">등록된 일정이 없습니다.</p>
+        {:else}
+          <div class="space-y-2 max-h-96 overflow-y-auto">
+            {#each itemSchedules as schedule (schedule.id)}
+              {@const status = getStatusBadge(schedule.run_status, schedule.is_enabled)}
+              <div class="flex items-center justify-between p-2 rounded bg-gray-50 {!schedule.is_enabled ? 'opacity-50' : ''}">
+                <div class="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={schedule.is_enabled}
+                    on:change={() => handleToggleSchedule(schedule)}
+                  />
+                  <div>
+                    <div class="font-medium text-sm">{schedule.date}</div>
+                    {#if schedule.times && schedule.times.length > 0}
+                      <div class="text-xs text-gray-500">{schedule.times.join(', ')}</div>
+                    {/if}
+                  </div>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="badge {status.class}">{status.text}</span>
+                  {#if schedule.booking_count > 0}
+                    <span class="text-xs text-green-600">예약:{schedule.booking_count}</span>
+                  {/if}
+                  <button
+                    class="text-red-500 hover:text-red-700 text-sm"
+                    on:click={() => handleDeleteSchedule(schedule)}
+                    title="삭제"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
     </div>
   {/if}
 </div>
@@ -405,11 +601,50 @@
             <input id="category" type="text" class="input" bind:value={newBusiness.category} placeholder="default" />
           </div>
         </div>
+        <label class="flex items-center gap-2">
+          <input type="checkbox" bind:checked={newBusiness.is_enabled} />
+          <span class="text-sm font-medium text-gray-700">활성화</span>
+        </label>
         <div class="flex justify-end gap-2 pt-4">
           <button type="button" class="btn btn-secondary" on:click={() => showAddBusinessModal = false}>
             취소
           </button>
           <button type="submit" class="btn btn-primary">추가</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{/if}
+
+<!-- 업체 수정 모달 -->
+{#if showEditBusinessModal && editBusiness}
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+      <div class="p-4 border-b">
+        <h3 class="text-lg font-semibold">업체 수정</h3>
+      </div>
+      <form on:submit|preventDefault={handleUpdateBusiness} class="p-4 space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Business ID</label>
+          <input type="text" class="input bg-gray-100" value={editBusiness.business_id} disabled />
+        </div>
+        <div>
+          <label for="edit-name" class="block text-sm font-medium text-gray-700 mb-1">업체명</label>
+          <input id="edit-name" type="text" class="input" bind:value={editBusiness.name} required />
+        </div>
+        <div>
+          <label for="edit-category" class="block text-sm font-medium text-gray-700 mb-1">카테고리</label>
+          <input id="edit-category" type="text" class="input" bind:value={editBusiness.category} />
+        </div>
+        <label class="flex items-center gap-2">
+          <input type="checkbox" bind:checked={editBusiness.is_enabled} />
+          <span class="text-sm font-medium text-gray-700">활성화</span>
+        </label>
+        <div class="flex justify-end gap-2 pt-4">
+          <button type="button" class="btn btn-secondary" on:click={() => { showEditBusinessModal = false; editBusiness = null; }}>
+            취소
+          </button>
+          <button type="submit" class="btn btn-primary">저장</button>
         </div>
       </form>
     </div>
@@ -436,6 +671,10 @@
           <label for="time_range" class="block text-sm font-medium text-gray-700 mb-1">시간 범위</label>
           <input id="time_range" type="text" class="input" bind:value={newItem.time_range} placeholder="예: 10:00-21:00" />
         </div>
+        <label class="flex items-center gap-2">
+          <input type="checkbox" bind:checked={newItem.is_enabled} />
+          <span class="text-sm font-medium text-gray-700">활성화</span>
+        </label>
         <div class="flex items-center gap-4">
           <label class="flex items-center gap-2">
             <input type="checkbox" bind:checked={newItem.auto_booking_enabled} />
@@ -460,6 +699,60 @@
             취소
           </button>
           <button type="submit" class="btn btn-primary">추가</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{/if}
+
+<!-- 아이템 수정 모달 -->
+{#if showEditItemModal && editItem}
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+      <div class="p-4 border-b">
+        <h3 class="text-lg font-semibold">아이템 수정</h3>
+      </div>
+      <form on:submit|preventDefault={handleUpdateItem} class="p-4 space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Biz Item ID</label>
+          <input type="text" class="input bg-gray-100" value={editItem.biz_item_id} disabled />
+        </div>
+        <div>
+          <label for="edit-item-name" class="block text-sm font-medium text-gray-700 mb-1">아이템명</label>
+          <input id="edit-item-name" type="text" class="input" bind:value={editItem.name} required />
+        </div>
+        <div>
+          <label for="edit-time-range" class="block text-sm font-medium text-gray-700 mb-1">시간 범위</label>
+          <input id="edit-time-range" type="text" class="input" bind:value={editItem.time_range} placeholder="예: 10:00-21:00" />
+        </div>
+        <label class="flex items-center gap-2">
+          <input type="checkbox" bind:checked={editItem.is_enabled} />
+          <span class="text-sm font-medium text-gray-700">활성화</span>
+        </label>
+        <div class="flex items-center gap-4">
+          <label class="flex items-center gap-2">
+            <input type="checkbox" bind:checked={editItem.auto_booking_enabled} />
+            <span class="text-sm font-medium text-gray-700">자동 예약</span>
+          </label>
+          {#if editItem.auto_booking_enabled}
+            <div class="flex items-center gap-2">
+              <label for="edit-max-bookings" class="text-sm text-gray-700">최대 예약:</label>
+              <input
+                id="edit-max-bookings"
+                type="number"
+                class="input"
+                style="width: 80px;"
+                bind:value={editItem.max_bookings_per_schedule}
+                min="1"
+              />
+            </div>
+          {/if}
+        </div>
+        <div class="flex justify-end gap-2 pt-4">
+          <button type="button" class="btn btn-secondary" on:click={() => { showEditItemModal = false; editItem = null; }}>
+            취소
+          </button>
+          <button type="submit" class="btn btn-primary">저장</button>
         </div>
       </form>
     </div>
@@ -497,6 +790,130 @@
   </div>
 {/if}
 
+<!-- URL 임포트 모달 -->
+{#if showUrlImportModal}
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4">
+      <div class="p-4 border-b">
+        <h3 class="text-lg font-semibold">URL로 임포트</h3>
+        <p class="text-sm text-gray-500 mt-1">
+          네이버 예약 URL에서 업체/아이템/일정을 자동 생성합니다.
+        </p>
+      </div>
+      <form on:submit|preventDefault={handleUrlImport} class="p-4 space-y-4">
+        <div>
+          <label for="import-url" class="block text-sm font-medium text-gray-700 mb-1">
+            URL <span class="text-red-500">*</span>
+          </label>
+          <input
+            id="import-url"
+            type="text"
+            class="input"
+            bind:value={urlImport.url}
+            required
+            placeholder="https://booking.naver.com/booking/...?startDateTime=..."
+          />
+          <p class="text-xs text-gray-500 mt-1">
+            형식: /booking/{'{category}'}/bizes/{'{businessId}'}/items/{'{itemId}'}?startDateTime=...
+          </p>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label for="import-item-name" class="block text-sm font-medium text-gray-700 mb-1">
+              아이템명 <span class="text-red-500">*</span>
+            </label>
+            <input
+              id="import-item-name"
+              type="text"
+              class="input"
+              bind:value={urlImport.item_name}
+              required
+              placeholder="표시할 이름"
+            />
+          </div>
+          <div>
+            <label for="import-business-name" class="block text-sm font-medium text-gray-700 mb-1">
+              업체명 (선택)
+            </label>
+            <input
+              id="import-business-name"
+              type="text"
+              class="input"
+              bind:value={urlImport.business_name}
+              placeholder="없으면 자동 생성"
+            />
+          </div>
+        </div>
+        <div>
+          <label for="import-time-range" class="block text-sm font-medium text-gray-700 mb-1">
+            시간 범위 (선택)
+          </label>
+          <input
+            id="import-time-range"
+            type="text"
+            class="input"
+            bind:value={urlImport.time_range}
+            placeholder="예: 18:00-21:00"
+          />
+        </div>
+        <div class="flex items-center gap-4">
+          <label class="flex items-center gap-2">
+            <input type="checkbox" bind:checked={urlImport.auto_booking_enabled} />
+            <span class="text-sm font-medium text-gray-700">자동 예약</span>
+          </label>
+          {#if urlImport.auto_booking_enabled}
+            <div class="flex items-center gap-2">
+              <label for="import-max-bookings" class="text-sm text-gray-700">최대 예약:</label>
+              <input
+                id="import-max-bookings"
+                type="number"
+                class="input"
+                style="width: 80px;"
+                bind:value={urlImport.max_bookings_per_schedule}
+                min="1"
+              />
+            </div>
+          {/if}
+        </div>
+
+        {#if urlImportResult}
+          <div class="p-3 rounded-lg {urlImportResult.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}">
+            <p class="{urlImportResult.success ? 'text-green-800' : 'text-red-800'} font-medium">
+              {urlImportResult.success ? '성공' : '실패'}
+            </p>
+            <p class="text-sm mt-1 {urlImportResult.success ? 'text-green-600' : 'text-red-600'}">
+              {urlImportResult.message}
+            </p>
+            {#if urlImportResult.parsed_info}
+              <div class="text-xs text-gray-500 mt-2">
+                <p>카테고리: {urlImportResult.parsed_info.category}</p>
+                <p>업체ID: {urlImportResult.parsed_info.naver_business_id}</p>
+                <p>아이템ID: {urlImportResult.parsed_info.naver_item_id}</p>
+                {#if urlImportResult.parsed_info.date}
+                  <p>날짜: {urlImportResult.parsed_info.date}</p>
+                {/if}
+              </div>
+            {/if}
+          </div>
+        {/if}
+
+        <div class="flex justify-end gap-2 pt-4">
+          <button
+            type="button"
+            class="btn btn-secondary"
+            on:click={() => { showUrlImportModal = false; urlImportResult = null; }}
+          >
+            닫기
+          </button>
+          <button type="submit" class="btn btn-primary" disabled={urlImportLoading}>
+            {urlImportLoading ? '처리 중...' : '임포트'}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+{/if}
+
 <style>
   .badge {
     padding: 0.125rem 0.5rem;
@@ -523,5 +940,13 @@
   .badge-gray {
     background-color: #f3f4f6;
     color: #4b5563;
+  }
+  .table-sm th, .table-sm td {
+    padding: 0.5rem;
+    font-size: 0.875rem;
+  }
+  .btn-xs {
+    padding: 0.125rem 0.375rem;
+    font-size: 0.75rem;
   }
 </style>

@@ -18,6 +18,7 @@ class BusinessBase(BaseModel):
     service_type: str = "naver"
     category: Optional[str] = None
     booking_options: Optional[Dict[str, Any]] = None
+    is_enabled: bool = True
 
 
 class BusinessCreate(BusinessBase):
@@ -31,6 +32,7 @@ class BusinessUpdate(BaseModel):
     business_type_id: Optional[int] = None
     category: Optional[str] = None
     booking_options: Optional[Dict[str, Any]] = None
+    is_enabled: Optional[bool] = None
 
 
 class Business(BusinessBase):
@@ -54,3 +56,23 @@ class BusinessWithItems(Business):
 # Forward reference 해결
 from app.schemas.biz_item import BizItem
 BusinessWithItems.model_rebuild()
+
+
+class UrlImportRequest(BaseModel):
+    """URL 기반 임포트 요청 스키마"""
+    url: str
+    item_name: str
+    business_name: Optional[str] = None  # 없으면 자동 생성
+    auto_booking_enabled: bool = False
+    time_range: Optional[str] = None
+    max_bookings_per_schedule: int = 1
+
+
+class UrlImportResponse(BaseModel):
+    """URL 기반 임포트 응답 스키마"""
+    success: bool
+    message: str
+    business_id: Optional[int] = None
+    item_id: Optional[int] = None
+    schedule_id: Optional[int] = None
+    parsed_info: Optional[Dict[str, Any]] = None
