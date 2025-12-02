@@ -1,13 +1,6 @@
 """
 스키마 모듈
 """
-from app.schemas.monitor import (
-    MonitorTargetBase,
-    MonitorTargetCreate,
-    MonitorTargetUpdate,
-    MonitorTarget,
-    NotificationSettings,
-)
 from app.schemas.business import (
     BusinessBase,
     BusinessCreate,
@@ -32,25 +25,19 @@ from app.schemas.monitor_schedule import (
 )
 
 __all__ = [
-    # 기존 monitor
-    "MonitorTargetBase",
-    "MonitorTargetCreate",
-    "MonitorTargetUpdate",
-    "MonitorTarget",
-    "NotificationSettings",
-    # 신규 business
+    # business
     "BusinessBase",
     "BusinessCreate",
     "BusinessUpdate",
     "Business",
     "BusinessWithItems",
-    # 신규 biz_item
+    # biz_item
     "BizItemBase",
     "BizItemCreate",
     "BizItemUpdate",
     "BizItem",
     "BizItemWithSchedules",
-    # 신규 monitor_schedule
+    # monitor_schedule
     "MonitorScheduleBase",
     "MonitorScheduleCreate",
     "MonitorScheduleUpdate",

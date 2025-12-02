@@ -8,14 +8,13 @@ from typing import Optional, Dict, Any, List
 import json
 import asyncio
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 import logging
 
 from app.config import settings, logger
 from app.utils.validators import is_naver_content_valid, is_naver_full_reservation, is_naver_page_available
 from app.utils.parsers import parse_time_and_stock, parse_naver_page_info, extract_date_from_url
-from app.models.notification_settings import DBNotificationSettings
 from app.database import SessionLocal, get_db
-from app.models.monitor_target import MonitorTarget
 
 logger = logging.getLogger(__name__)
 
@@ -39,20 +38,31 @@ class NotificationService:
         
     def _load_settings(self):
         """알림 설정을 로드합니다."""
-        settings = self.db.query(DBNotificationSettings).first()
-        if not settings:
-            settings = DBNotificationSettings(
-                enable_telegram=True,
-                enable_desktop=True,
-                notify_states=json.dumps([])
-            )
-            self.db.add(settings)
-            self.db.commit()
-            self.db.refresh(settings)
-        
-        self.enable_telegram = settings.enable_telegram
-        self.enable_desktop = settings.enable_desktop
-        self.notify_states = json.loads(settings.notify_states)
+        try:
+            result = self.db.execute(text("""
+                SELECT enable_telegram, enable_desktop, notify_states
+                FROM notification_settings WHERE id = 1
+            """)).fetchone()
+
+            if not result:
+                # 기본 설정 생성
+                self.db.execute(text("""
+                    INSERT INTO notification_settings (id, enable_telegram, enable_desktop, notify_states)
+                    VALUES (1, 1, 1, '[]')
+                """))
+                self.db.commit()
+                self.enable_telegram = True
+                self.enable_desktop = True
+                self.notify_states = []
+            else:
+                self.enable_telegram = bool(result[0])
+                self.enable_desktop = bool(result[1])
+                self.notify_states = json.loads(result[2]) if result[2] else []
+        except Exception as e:
+            logger.warning(f"알림 설정 로드 실패: {e}, 기본값 사용")
+            self.enable_telegram = True
+            self.enable_desktop = True
+            self.notify_states = []
         
     def _hash_message(self, message: str) -> str:
         """메시지의 해시값을 계산합니다."""
@@ -190,7 +200,7 @@ class NotificationService:
         
         return "변화없음"
 
-    async def send_notification(self, target: MonitorTarget, status: Dict[str, Any]) -> None:
+    async def send_notification(self, target: Dict[str, Any], status: Dict[str, Any]) -> None:
         """
         모니터링 상태 변화에 대한 알림을 발송합니다.
         """
@@ -199,7 +209,7 @@ class NotificationService:
             await self._send_telegram_notification(target, status)
             
             # 상태 변화 로깅
-            logger.info(f"Notification sent for target {target.id}: {status}")
+            logger.info(f"Notification sent for target {target.get('id')}: {status}")
             
         except Exception as e:
             logger.error(f"Error sending notification: {str(e)}")
@@ -229,15 +239,15 @@ class NotificationService:
             logger.error(f"Error sending notification message: {str(e)}")
             raise
 
-    async def _send_telegram_notification(self, target: MonitorTarget, status: Dict[str, Any]) -> None:
+    async def _send_telegram_notification(self, target: Dict[str, Any], status: Dict[str, Any]) -> None:
         """
         텔레그램으로 알림을 발송합니다.
         """
         try:
-            message = f"🔔 {target.label}\n"
+            message = f"🔔 {target.get('label')}\n"
             message += f"상태: {status.get('status', 'unknown')}\n"
-            message += f"URL: {target.url}"
-            
+            message += f"URL: {target.get('url')}"
+
             await self._send_telegram(message)
         except Exception as e:
             logger.error(f"텔레그램 알림 전송 중 오류 발생: {str(e)}")
