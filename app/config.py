@@ -34,12 +34,19 @@ class Settings(BaseSettings):
     DEFAULT_NEAR_INTERVAL: tuple = (20, 50)  # 1-7일 이내 간격 (최소, 최대)
     DEFAULT_FAR_INTERVAL: tuple = (200, 300)  # 7일 이상 간격 (최소, 최대)
     
-    # 브라우저 설정
-    USER_DATA_DIR: Path = Path("./browser_data")
+    # 데이터 디렉토리 설정
+    DATA_DIR: str = "./data"  # 데이터 저장 디렉토리 (DB, 브라우저 프로필 등)
+
+    # 브라우저 설정 (레거시 - 하위 호환성)
+    USER_DATA_DIR: Path = Path("./browser_data")  # 구 버전 호환용 (deprecated)
     #r"C:\Users\Narang\AppData\Local\Google\Chrome\User Data"
     CHROME_PATH: str = r"C:\Program Files\Google\Chrome Dev\Application\chrome.exe"
     DRIVER_PATH: str = r"D:\Programs\executable\chromedriver\135.0.7023\chromedriver.exe"
     BROWSER_HEADLESS: bool = False  # 브라우저 UI 표시 여부 (False: 창 표시, True: 백그라운드)
+
+    # 다중 프로필 설정
+    BROWSER_PROFILES_DIR: str = "browser_profiles"  # DATA_DIR 하위의 프로필 디렉토리명
+    DEFAULT_PROFILE_NAME: str = "default"  # 기본 프로필 이름
     
     # # Supabase 설정
     # SUPABASE_URL: str
