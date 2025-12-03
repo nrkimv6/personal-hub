@@ -61,6 +61,18 @@ class NotificationService:
             self.enable_telegram = True
             self.enable_desktop = True
             self.notify_states = []
+
+    def should_notify(self, state: str) -> bool:
+        """특정 상태에 대해 알림을 보내야 하는지 확인합니다.
+
+        Args:
+            state: 알림 상태 (예: "startup", "shutdown", "available", "booking_success", "booking_failed", "error")
+
+        Returns:
+            bool: 알림을 보내야 하면 True
+        """
+        self._load_settings()
+        return self.enable_telegram and state in self.notify_states
         
     def _hash_message(self, message: str) -> str:
         """메시지의 해시값을 계산합니다."""

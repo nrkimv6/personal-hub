@@ -33,7 +33,7 @@ def get_notification_settings_from_db() -> NotificationSettings:
                 try:
                     notify_states = json.loads(notify_states)
                 except json.JSONDecodeError:
-                    notify_states = ["available", "booking_success", "booking_failed", "error", "startup"]
+                    notify_states = ["available", "booking_success", "booking_failed", "error", "startup", "shutdown"]
 
             return NotificationSettings(
                 enable_telegram=bool(result[0]),
@@ -45,14 +45,14 @@ def get_notification_settings_from_db() -> NotificationSettings:
         return NotificationSettings(
             enable_telegram=True,
             enable_desktop=True,
-            notify_states=["available", "booking_success", "booking_failed", "error", "startup"]
+            notify_states=["available", "booking_success", "booking_failed", "error", "startup", "shutdown"]
         )
     except Exception as e:
         logger.error(f"알림 설정 조회 중 오류: {str(e)}")
         return NotificationSettings(
             enable_telegram=True,
             enable_desktop=True,
-            notify_states=["available", "booking_success", "booking_failed", "error", "startup"]
+            notify_states=["available", "booking_success", "booking_failed", "error", "startup", "shutdown"]
         )
     finally:
         db.close()
@@ -125,6 +125,7 @@ async def update_notification_settings(settings: NotificationSettingsUpdate):
         - booking_failed: 예약 실패
         - error: 오류 발생
         - startup: 서버 시작
+        - shutdown: 서버 종료
     """
     try:
         return update_notification_settings_in_db(settings)
