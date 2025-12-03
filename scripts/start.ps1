@@ -1,6 +1,10 @@
 # Monitor Page - Background Process Startup Script
 # Starts FastAPI server, monitoring worker, and Frontend in background
 
+param(
+    [switch]$Dev  # Use 'npm run dev' instead of background mode for frontend
+)
+
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
@@ -195,30 +199,50 @@ if ($runFrontend) {
             -PassThru
     }
 
-    # Start Frontend in background using cmd to redirect both stdout and stderr
-    $frontendProcess = Start-Process -FilePath "cmd.exe" `
-        -ArgumentList "/c", "npm run dev -- --port $FrontendPort > `"$frontendLogFile`" 2>&1" `
-        -WorkingDirectory $FrontendDir `
-        -WindowStyle Hidden `
-        -PassThru
+    if ($Dev) {
+        # Dev mode: Run npm run dev in foreground (interactive)
+        Write-Host "[+] Frontend starting in DEV mode (foreground)..." -ForegroundColor Green
+        Write-Host "    Port: $FrontendPort"
+        Write-Host "    Exit: Ctrl+C" -ForegroundColor Yellow
+        Write-Host ""
 
-    # Save PID
-    $frontendProcess.Id | Out-File $FrontendPidFile -Encoding ascii
+        # Store info that frontend is running in dev mode
+        "DEV_MODE" | Out-File $FrontendPidFile -Encoding ascii
 
-    Write-Host "[+] Frontend started (PID: $($frontendProcess.Id))" -ForegroundColor Green
-    Write-Host "    Port: $FrontendPort"
-    Write-Host "    Log: $frontendLogFile"
+        Set-Location $FrontendDir
+        npm run dev -- --port $FrontendPort
+
+        # When npm run dev exits, clean up
+        Remove-Item $FrontendPidFile -Force -ErrorAction SilentlyContinue
+    } else {
+        # Background mode: Start Frontend in background using cmd to redirect both stdout and stderr
+        $frontendProcess = Start-Process -FilePath "cmd.exe" `
+            -ArgumentList "/c", "npm run dev -- --port $FrontendPort > `"$frontendLogFile`" 2>&1" `
+            -WorkingDirectory $FrontendDir `
+            -WindowStyle Hidden `
+            -PassThru
+
+        # Save PID
+        $frontendProcess.Id | Out-File $FrontendPidFile -Encoding ascii
+
+        Write-Host "[+] Frontend started (PID: $($frontendProcess.Id))" -ForegroundColor Green
+        Write-Host "    Port: $FrontendPort"
+        Write-Host "    Log: $frontendLogFile"
+    }
 }
 
-Write-Host "`n========================================" -ForegroundColor Green
-Write-Host "  All processes started" -ForegroundColor Green
-Write-Host "========================================" -ForegroundColor Green
-Write-Host ""
-Write-Host "Frontend:   http://localhost:$FrontendPort" -ForegroundColor Cyan
-Write-Host "API Server: http://localhost:$ApiPort" -ForegroundColor Cyan
-Write-Host "API Docs:   http://localhost:$ApiPort/docs" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "Commands:" -ForegroundColor Yellow
-Write-Host "  View logs:    .\scripts\logs.ps1"
-Write-Host "  Stop all:     .\scripts\stop.ps1"
-Write-Host ""
+# Skip summary if we were in Dev mode (frontend ran in foreground and already exited)
+if (-not $Dev) {
+    Write-Host "`n========================================" -ForegroundColor Green
+    Write-Host "  All processes started" -ForegroundColor Green
+    Write-Host "========================================" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "Frontend:   http://localhost:$FrontendPort" -ForegroundColor Cyan
+    Write-Host "API Server: http://localhost:$ApiPort" -ForegroundColor Cyan
+    Write-Host "API Docs:   http://localhost:$ApiPort/docs" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Commands:" -ForegroundColor Yellow
+    Write-Host "  View logs:    .\scripts\logs.ps1"
+    Write-Host "  Stop all:     .\scripts\stop.ps1"
+    Write-Host ""
+}
