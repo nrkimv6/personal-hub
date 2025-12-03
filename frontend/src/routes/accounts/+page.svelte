@@ -143,6 +143,89 @@
     if (!dateStr) return '-';
     return new Date(dateStr).toLocaleString('ko-KR');
   }
+
+  // 브라우저 제어 상태
+  let browserLoading: { [key: number]: string } = {};
+
+  async function openBrowser(account: Account) {
+    browserLoading[account.id] = 'open';
+    try {
+      const res = await fetch(`/api/v1/accounts/${account.id}/browser/open`, {
+        method: 'POST'
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || '브라우저 열기 실패');
+      }
+      const result = await res.json();
+      alert(`브라우저가 열렸습니다: ${result.message}`);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : '알 수 없는 오류');
+    } finally {
+      delete browserLoading[account.id];
+      browserLoading = browserLoading;
+    }
+  }
+
+  async function openNaverLogin(account: Account) {
+    browserLoading[account.id] = 'login';
+    try {
+      const res = await fetch(`/api/v1/accounts/${account.id}/browser/naver-login`, {
+        method: 'POST'
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || '네이버 로그인 페이지 열기 실패');
+      }
+      alert('네이버 로그인 페이지가 열렸습니다.\n브라우저에서 로그인 후 "상태 확인" 버튼을 눌러주세요.');
+    } catch (e) {
+      alert(e instanceof Error ? e.message : '알 수 없는 오류');
+    } finally {
+      delete browserLoading[account.id];
+      browserLoading = browserLoading;
+    }
+  }
+
+  async function checkLoginStatus(account: Account) {
+    browserLoading[account.id] = 'check';
+    try {
+      const res = await fetch(`/api/v1/accounts/${account.id}/browser/check-login`, {
+        method: 'POST'
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || '상태 확인 실패');
+      }
+      const result = await res.json();
+      await loadAccounts();
+      alert(result.is_logged_in ? '로그인 확인됨' : '로그인 필요');
+    } catch (e) {
+      alert(e instanceof Error ? e.message : '알 수 없는 오류');
+    } finally {
+      delete browserLoading[account.id];
+      browserLoading = browserLoading;
+    }
+  }
+
+  async function closeBrowser(account: Account) {
+    browserLoading[account.id] = 'close';
+    try {
+      const res = await fetch(`/api/v1/accounts/${account.id}/browser/close`, {
+        method: 'POST'
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || '브라우저 종료 실패');
+      }
+      const result = await res.json();
+      alert(result.message);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : '알 수 없는 오류');
+    } finally {
+      delete browserLoading[account.id];
+      browserLoading = browserLoading;
+    }
+  }
 </script>
 
 <div class="p-6">
@@ -210,9 +293,45 @@
                     <p>🕐 마지막 사용: {formatDate(account.last_used_at)}</p>
                   {/if}
                 </div>
+
+                <!-- 브라우저 제어 버튼 -->
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <button
+                    on:click={() => openBrowser(account)}
+                    disabled={!!browserLoading[account.id]}
+                    class="px-3 py-1.5 text-sm bg-slate-100 text-slate-700 rounded hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                    title="브라우저 열기"
+                  >
+                    {browserLoading[account.id] === 'open' ? '...' : '🌐 브라우저'}
+                  </button>
+                  <button
+                    on:click={() => openNaverLogin(account)}
+                    disabled={!!browserLoading[account.id]}
+                    class="px-3 py-1.5 text-sm bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                    title="네이버 로그인 페이지 열기"
+                  >
+                    {browserLoading[account.id] === 'login' ? '...' : '🔐 네이버 로그인'}
+                  </button>
+                  <button
+                    on:click={() => checkLoginStatus(account)}
+                    disabled={!!browserLoading[account.id]}
+                    class="px-3 py-1.5 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                    title="로그인 상태 확인"
+                  >
+                    {browserLoading[account.id] === 'check' ? '...' : '🔄 상태 확인'}
+                  </button>
+                  <button
+                    on:click={() => closeBrowser(account)}
+                    disabled={!!browserLoading[account.id]}
+                    class="px-3 py-1.5 text-sm bg-orange-100 text-orange-700 rounded hover:bg-orange-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                    title="브라우저 세션 종료"
+                  >
+                    {browserLoading[account.id] === 'close' ? '...' : '✕ 세션 종료'}
+                  </button>
+                </div>
               </div>
 
-              <div class="flex items-center gap-2">
+              <div class="flex items-start gap-2">
                 <button
                   on:click={() => toggleActive(account)}
                   class="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 transition-colors"

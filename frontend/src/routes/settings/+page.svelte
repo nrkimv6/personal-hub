@@ -180,8 +180,8 @@
                   {item.position}
                 </span>
                 <div class="flex-1 min-w-0">
-                  <p class="font-medium truncate">{item.label}</p>
-                  <p class="text-sm text-gray-500 truncate">{item.url}</p>
+                  <p class="font-medium truncate">{item.biz_item_name}</p>
+                  <p class="text-sm text-gray-500 truncate">{item.date} · {item.run_status}</p>
                 </div>
               </div>
             {/each}
