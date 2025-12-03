@@ -113,6 +113,17 @@ class BizItemService:
         )
         return self.create(db, data)
 
+    def mark_api_synced(self, db: Session, item_id: int) -> Optional[BizItem]:
+        """API 동기화 시간 업데이트"""
+        item = self.get_by_id(db, item_id)
+        if not item:
+            return None
+
+        item.api_synced_at = datetime.now()
+        db.commit()
+        db.refresh(item)
+        return item
+
 
 # 싱글톤 인스턴스
 biz_item_service = BizItemService()

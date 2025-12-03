@@ -9,7 +9,7 @@ import aiohttp
 import json
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from app.config import logger
 
 
@@ -59,6 +59,35 @@ class BizItemInfo:
     raw_data: Dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class ScheduleSlot:
+    """예약 가능 슬롯 정보"""
+    slot_id: str
+    start_time: str  # "2025-12-20 11:30:00" 형식
+    date: str  # "2025-12-20"
+    time: str  # "11:30"
+    is_business_day: bool
+    is_sale_day: bool
+    stock: int
+    unit_stock: int
+    unit_booking_count: int
+    duration: int
+    min_booking_count: int
+    max_booking_count: int
+    prices: List[Dict[str, Any]] = field(default_factory=list)
+    raw_data: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ScheduleInfo:
+    """스케줄 조회 결과"""
+    business_id: str
+    biz_item_id: str
+    available_dates: List[str]  # 예약 가능한 날짜 목록
+    slots: List[ScheduleSlot]  # 모든 슬롯 정보
+    slots_by_date: Dict[str, List[ScheduleSlot]] = field(default_factory=dict)  # 날짜별 슬롯
+
+
 class NaverGraphQLClient:
     """네이버 예약 GraphQL API 클라이언트"""
 
@@ -105,6 +134,34 @@ class NaverGraphQLClient:
             bookingCountSettingJson
             bookableSettingJson
             __typename
+        }
+    }
+    """
+
+    # Schedule 쿼리 (예약 가능 시간 및 가격 정보)
+    SCHEDULE_QUERY = """
+    query schedule($scheduleParams: ScheduleParams) {
+        schedule(input: $scheduleParams) {
+            bizItemSchedule {
+                hourly {
+                    isBusinessDay
+                    isSaleDay
+                    unitStock
+                    unitBookingCount
+                    stock
+                    duration
+                    minBookingCount
+                    maxBookingCount
+                    unitStartTime
+                    slotId
+                    prices {
+                        priceId
+                        name
+                        price
+                        normalPrice
+                    }
+                }
+            }
         }
     }
     """
@@ -372,6 +429,208 @@ class NaverGraphQLClient:
             "business": business_info,
             "items": items,
             "item": target_item
+        }
+
+    async def fetch_schedule(
+        self,
+        business_type_id: int,
+        business_id: str,
+        biz_item_id: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        days_ahead: int = 35
+    ) -> Optional[ScheduleInfo]:
+        """
+        예약 가능한 스케줄(날짜/시간/가격)을 조회합니다.
+
+        Args:
+            business_type_id: 업체 타입 ID (예: 5, 6)
+            business_id: 네이버 업체 ID
+            biz_item_id: 상품 ID
+            start_date: 조회 시작일 (YYYY-MM-DD, 기본: 오늘)
+            end_date: 조회 종료일 (YYYY-MM-DD, 기본: start_date + days_ahead)
+            days_ahead: end_date가 없을 때 조회할 기간 (기본: 35일)
+
+        Returns:
+            ScheduleInfo: 스케줄 정보 또는 None
+        """
+        # 날짜 기본값 설정
+        today = datetime.now()
+        if not start_date:
+            start_date = today.strftime("%Y-%m-%d")
+        if not end_date:
+            end_dt = datetime.strptime(start_date, "%Y-%m-%d") + timedelta(days=days_ahead)
+            end_date = end_dt.strftime("%Y-%m-%d")
+
+        variables = {
+            "scheduleParams": {
+                "businessTypeId": int(business_type_id),
+                "businessId": str(business_id),
+                "bizItemId": str(biz_item_id),
+                "startDateTime": f"{start_date}T00:00:00",
+                "endDateTime": f"{end_date}T23:59:59",
+                "fixedTime": True,
+                "includesHolidaySchedules": True
+            }
+        }
+
+        data = await self._execute_query(self.SCHEDULE_QUERY, variables, "schedule")
+        if not data or not data.get("schedule"):
+            logger.warning(f"[NaverGraphQL] No schedule data for {business_id}/{biz_item_id}")
+            return None
+
+        hourly = data["schedule"].get("bizItemSchedule", {}).get("hourly", [])
+        if not hourly:
+            logger.warning(f"[NaverGraphQL] Empty hourly schedule for {business_id}/{biz_item_id}")
+            return ScheduleInfo(
+                business_id=business_id,
+                biz_item_id=biz_item_id,
+                available_dates=[],
+                slots=[],
+                slots_by_date={}
+            )
+
+        slots = []
+        slots_by_date: Dict[str, List[ScheduleSlot]] = {}
+        available_dates_set = set()
+
+        for slot_data in hourly:
+            # "2025-12-20 11:30:00" 형식 파싱
+            unit_start_time = slot_data.get("unitStartTime", "")
+            if not unit_start_time:
+                continue
+
+            parts = unit_start_time.split(" ")
+            slot_date = parts[0] if parts else ""
+            slot_time_full = parts[1] if len(parts) > 1 else "00:00:00"
+            slot_time = slot_time_full[:5]  # "11:30"
+
+            # 예약 가능 여부 체크 (재고 있고, 판매일인 경우)
+            is_available = (
+                slot_data.get("isSaleDay", False) and
+                slot_data.get("stock", 0) > 0
+            )
+
+            slot = ScheduleSlot(
+                slot_id=str(slot_data.get("slotId", "")),
+                start_time=unit_start_time,
+                date=slot_date,
+                time=slot_time,
+                is_business_day=slot_data.get("isBusinessDay", False),
+                is_sale_day=slot_data.get("isSaleDay", False),
+                stock=slot_data.get("stock", 0),
+                unit_stock=slot_data.get("unitStock", 0),
+                unit_booking_count=slot_data.get("unitBookingCount", 0),
+                duration=slot_data.get("duration", 0),
+                min_booking_count=slot_data.get("minBookingCount", 1),
+                max_booking_count=slot_data.get("maxBookingCount", 10),
+                prices=slot_data.get("prices", []),
+                raw_data=slot_data
+            )
+            slots.append(slot)
+
+            # 날짜별 그룹화
+            if slot_date not in slots_by_date:
+                slots_by_date[slot_date] = []
+            slots_by_date[slot_date].append(slot)
+
+            # 예약 가능한 날짜 수집
+            if is_available:
+                available_dates_set.add(slot_date)
+
+        # 날짜 정렬
+        available_dates = sorted(list(available_dates_set))
+
+        return ScheduleInfo(
+            business_id=business_id,
+            biz_item_id=biz_item_id,
+            available_dates=available_dates,
+            slots=slots,
+            slots_by_date=slots_by_date
+        )
+
+    def get_smart_time_slots(
+        self,
+        schedule_info: ScheduleInfo,
+        target_date: Optional[str] = None,
+        prefer_time_start: Optional[str] = None,
+        prefer_time_end: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        스마트 시간 선택: 평일은 18:00 이후, 주말은 첫 시간
+
+        Args:
+            schedule_info: 스케줄 정보
+            target_date: 대상 날짜 (없으면 첫 예약 가능일)
+            prefer_time_start: 선호 시작 시간 (예: "18:00")
+            prefer_time_end: 선호 종료 시간 (예: "21:00")
+
+        Returns:
+            Dict: {
+                "target_date": str,
+                "recommended_times": List[str],
+                "all_available_times": List[str],
+                "is_weekend": bool
+            }
+        """
+        # 대상 날짜 결정
+        if not target_date:
+            if schedule_info.available_dates:
+                target_date = schedule_info.available_dates[0]
+            else:
+                return {
+                    "target_date": None,
+                    "recommended_times": [],
+                    "all_available_times": [],
+                    "is_weekend": False,
+                    "message": "예약 가능한 날짜가 없습니다."
+                }
+
+        # 해당 날짜의 슬롯 가져오기
+        date_slots = schedule_info.slots_by_date.get(target_date, [])
+        if not date_slots:
+            return {
+                "target_date": target_date,
+                "recommended_times": [],
+                "all_available_times": [],
+                "is_weekend": False,
+                "message": f"{target_date}에 예약 가능한 시간이 없습니다."
+            }
+
+        # 예약 가능한 시간만 필터링
+        available_slots = [s for s in date_slots if s.is_sale_day and s.stock > 0]
+        all_times = sorted([s.time for s in available_slots])
+
+        # 주말/평일 판단
+        dt = datetime.strptime(target_date, "%Y-%m-%d")
+        is_weekend = dt.weekday() >= 5  # 토(5), 일(6)
+
+        # 시간 필터링
+        recommended_times = []
+
+        if prefer_time_start or prefer_time_end:
+            # 사용자 지정 시간대 필터링
+            for t in all_times:
+                if prefer_time_start and t < prefer_time_start:
+                    continue
+                if prefer_time_end and t > prefer_time_end:
+                    continue
+                recommended_times.append(t)
+        elif is_weekend:
+            # 주말: 전체 시간 (첫 시간부터)
+            recommended_times = all_times
+        else:
+            # 평일: 18:00 이후 우선
+            recommended_times = [t for t in all_times if t >= "18:00"]
+            # 18:00 이후가 없으면 전체 시간
+            if not recommended_times:
+                recommended_times = all_times
+
+        return {
+            "target_date": target_date,
+            "recommended_times": recommended_times,
+            "all_available_times": all_times,
+            "is_weekend": is_weekend
         }
 
 
