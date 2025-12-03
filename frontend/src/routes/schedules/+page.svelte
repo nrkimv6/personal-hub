@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { scheduleApi, businessApi, accountApi } from '$lib/api';
-  import type { ScheduleWithContext, Business, Account, MonitorScheduleUpdate } from '$lib/types';
+  import { scheduleApi, businessApi, accountApi, itemApi } from '$lib/api';
+  import type { ScheduleWithContext, Business, BusinessWithItems, BizItem, Account, MonitorScheduleUpdate, MonitorScheduleCreate } from '$lib/types';
 
   let schedules: ScheduleWithContext[] = [];
   let businesses: Business[] = [];
@@ -9,12 +9,18 @@
   let loading = true;
   let error: string | null = null;
 
+  // 오늘 날짜 계산
+  function getTodayDate(): string {
+    const today = new Date();
+    return today.toISOString().split('T')[0];
+  }
+
   // 필터
   let filters = {
     search: '',
     business_id: null as number | null,
     is_enabled: null as boolean | null,
-    date_from: '',
+    date_from: getTodayDate(),
     date_to: ''
   };
 
@@ -25,6 +31,32 @@
     times: '',
     is_enabled: true,
     interval: 10,
+    account_id: null as number | null
+  };
+
+  // 등록 모달
+  let showCreateModal = false;
+  let createMode: 'url' | 'select' = 'select';
+  let createForm = {
+    url: '',
+    item_name: '',
+    business_name: '',
+    business_id: null as number | null,
+    item_id: null as number | null,
+    date: '',
+    times: '',
+    is_enabled: true,
+    account_id: null as number | null
+  };
+  let selectedBusinessItems: BizItem[] = [];
+  let createLoading = false;
+
+  // 복제 모달
+  let showDuplicateModal = false;
+  let duplicateSchedule: ScheduleWithContext | null = null;
+  let duplicateForm = {
+    date: '',
+    times: '',
     account_id: null as number | null
   };
 
@@ -143,6 +175,128 @@
     }
   }
 
+  // 등록 모달 열기
+  function openCreateModal() {
+    createForm = {
+      url: '',
+      item_name: '',
+      business_name: '',
+      business_id: null,
+      item_id: null,
+      date: '',
+      times: '',
+      is_enabled: true,
+      account_id: null
+    };
+    selectedBusinessItems = [];
+    createMode = 'select';
+    showCreateModal = true;
+  }
+
+  // 업체 선택 시 아이템 목록 로드
+  async function handleBusinessSelect() {
+    if (!createForm.business_id) {
+      selectedBusinessItems = [];
+      createForm.item_id = null;
+      return;
+    }
+    try {
+      selectedBusinessItems = await businessApi.getItems(createForm.business_id);
+      createForm.item_id = null;
+    } catch (e) {
+      console.error('아이템 목록 로드 실패:', e);
+      selectedBusinessItems = [];
+    }
+  }
+
+  // URL로 일정 생성
+  async function handleCreateFromUrl() {
+    if (!createForm.url || !createForm.item_name) {
+      alert('URL과 아이템 이름을 입력해주세요.');
+      return;
+    }
+    createLoading = true;
+    try {
+      const result = await businessApi.importFromUrl({
+        url: createForm.url,
+        item_name: createForm.item_name,
+        business_name: createForm.business_name || undefined,
+        auto_booking_enabled: false
+      });
+      if (result.success) {
+        showCreateModal = false;
+        await fetchSchedules();
+        alert('일정이 등록되었습니다.');
+      } else {
+        alert(result.message || '등록 실패');
+      }
+    } catch (e) {
+      alert('등록 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+    } finally {
+      createLoading = false;
+    }
+  }
+
+  // 아이템 선택으로 일정 생성
+  async function handleCreateFromSelect() {
+    if (!createForm.item_id || !createForm.date) {
+      alert('아이템과 날짜를 선택해주세요.');
+      return;
+    }
+    createLoading = true;
+    try {
+      const times = createForm.times ? createForm.times.split(',').map(t => t.trim()).filter(t => t) : [];
+      const scheduleData: MonitorScheduleCreate = {
+        date: createForm.date,
+        times,
+        is_enabled: createForm.is_enabled,
+        account_id: createForm.account_id
+      };
+      await itemApi.createSchedule(createForm.item_id, scheduleData);
+      showCreateModal = false;
+      await fetchSchedules();
+      alert('일정이 등록되었습니다.');
+    } catch (e) {
+      alert('등록 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+    } finally {
+      createLoading = false;
+    }
+  }
+
+  // 복제 모달 열기
+  function openDuplicateModal(schedule: ScheduleWithContext) {
+    duplicateSchedule = schedule;
+    duplicateForm = {
+      date: schedule.date,
+      times: schedule.times?.join(', ') || '',
+      account_id: schedule.account_id
+    };
+    showDuplicateModal = true;
+  }
+
+  // 일정 복제
+  async function handleDuplicate() {
+    if (!duplicateSchedule || !duplicateForm.date) {
+      alert('날짜를 입력해주세요.');
+      return;
+    }
+    try {
+      const times = duplicateForm.times ? duplicateForm.times.split(',').map(t => t.trim()).filter(t => t) : [];
+      const scheduleData: MonitorScheduleCreate = {
+        date: duplicateForm.date,
+        times,
+        is_enabled: true,
+        account_id: duplicateForm.account_id
+      };
+      await itemApi.createSchedule(duplicateSchedule.biz_item_pk, scheduleData);
+      showDuplicateModal = false;
+      duplicateSchedule = null;
+      await fetchSchedules();
+    } catch (e) {
+      alert('복제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+    }
+  }
+
   function formatDate(dateStr: string) {
     const date = new Date(dateStr);
     const today = new Date();
@@ -172,9 +326,14 @@
 <div class="p-6">
   <div class="mb-6 flex justify-between items-center">
     <h2 class="text-2xl font-bold text-gray-900">일정 관리</h2>
-    <button class="btn btn-secondary btn-sm" on:click={fetchSchedules}>
-      새로고침
-    </button>
+    <div class="flex gap-2">
+      <button class="btn btn-primary btn-sm" on:click={openCreateModal}>
+        일정 등록
+      </button>
+      <button class="btn btn-secondary btn-sm" on:click={fetchSchedules}>
+        새로고침
+      </button>
+    </div>
   </div>
 
   <!-- 필터 영역 -->
@@ -245,7 +404,6 @@
         <table class="table">
           <thead>
             <tr>
-              <th class="w-10"></th>
               <th>날짜</th>
               <th>업체</th>
               <th>아이템</th>
@@ -253,7 +411,7 @@
               <th>계정</th>
               <th>상태</th>
               <th>예약</th>
-              <th class="w-24">작업</th>
+              <th class="w-32">작업</th>
             </tr>
           </thead>
           <tbody>
@@ -261,15 +419,11 @@
               {@const status = getStatusBadge(schedule.run_status, schedule.is_enabled)}
               {@const dateInfo = formatDate(schedule.date)}
               <tr class="{!schedule.is_enabled ? 'opacity-60' : ''} {schedule.error_count > 0 ? 'bg-red-50' : ''}">
-                <td>
-                  <input
-                    type="checkbox"
-                    checked={schedule.is_enabled}
-                    on:change={() => handleToggleSchedule(schedule)}
-                    title={schedule.is_enabled ? '비활성화' : '활성화'}
-                  />
-                </td>
-                <td>
+                <td
+                  class="cursor-pointer hover:bg-gray-100"
+                  on:click={() => handleToggleSchedule(schedule)}
+                  title={schedule.is_enabled ? '클릭하여 비활성화' : '클릭하여 활성화'}
+                >
                   <div class="flex items-center gap-2">
                     <span class="font-medium">{dateInfo.date}</span>
                     {#if dateInfo.badge}
@@ -277,7 +431,11 @@
                     {/if}
                   </div>
                 </td>
-                <td>
+                <td
+                  class="cursor-pointer hover:bg-gray-100"
+                  on:click={() => handleToggleSchedule(schedule)}
+                  title={schedule.is_enabled ? '클릭하여 비활성화' : '클릭하여 활성화'}
+                >
                   <div class="flex items-center gap-2">
                     <span>{schedule.business_name}</span>
                     {#if !schedule.business_is_enabled}
@@ -285,7 +443,11 @@
                     {/if}
                   </div>
                 </td>
-                <td>
+                <td
+                  class="cursor-pointer hover:bg-gray-100"
+                  on:click={() => handleToggleSchedule(schedule)}
+                  title={schedule.is_enabled ? '클릭하여 비활성화' : '클릭하여 활성화'}
+                >
                   <div class="flex items-center gap-2">
                     <span>{schedule.item_name}</span>
                     {#if schedule.auto_booking_enabled}
@@ -296,7 +458,11 @@
                     {/if}
                   </div>
                 </td>
-                <td>
+                <td
+                  class="cursor-pointer hover:bg-gray-100"
+                  on:click={() => handleToggleSchedule(schedule)}
+                  title={schedule.is_enabled ? '클릭하여 비활성화' : '클릭하여 활성화'}
+                >
                   {#if schedule.times && schedule.times.length > 0}
                     <div class="text-sm">
                       {#if schedule.times.length <= 3}
@@ -312,14 +478,22 @@
                     <span class="text-gray-400">-</span>
                   {/if}
                 </td>
-                <td>
+                <td
+                  class="cursor-pointer hover:bg-gray-100"
+                  on:click={() => handleToggleSchedule(schedule)}
+                  title={schedule.is_enabled ? '클릭하여 비활성화' : '클릭하여 활성화'}
+                >
                   {#if schedule.account_name}
                     <span class="badge badge-info">{schedule.account_name}</span>
                   {:else}
                     <span class="text-gray-400">기본</span>
                   {/if}
                 </td>
-                <td>
+                <td
+                  class="cursor-pointer hover:bg-gray-100"
+                  on:click={() => handleToggleSchedule(schedule)}
+                  title={schedule.is_enabled ? '클릭하여 비활성화' : '클릭하여 활성화'}
+                >
                   <span class="badge {status.class}">{status.text}</span>
                   {#if schedule.error_count > 0}
                     <span class="text-xs text-red-600 block" title={schedule.last_error || ''}>
@@ -342,6 +516,13 @@
                       title="수정"
                     >
                       수정
+                    </button>
+                    <button
+                      class="btn btn-secondary btn-xs"
+                      on:click={() => openDuplicateModal(schedule)}
+                      title="복제"
+                    >
+                      복제
                     </button>
                     <button
                       class="btn btn-danger btn-xs"
@@ -412,6 +593,183 @@
             취소
           </button>
           <button type="submit" class="btn btn-primary">저장</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{/if}
+
+<!-- 등록 모달 -->
+{#if showCreateModal}
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4">
+      <div class="p-4 border-b">
+        <h3 class="text-lg font-semibold">일정 등록</h3>
+        <div class="flex gap-2 mt-3">
+          <button
+            class="px-3 py-1 text-sm rounded-md {createMode === 'select' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}"
+            on:click={() => createMode = 'select'}
+          >
+            업체/아이템 선택
+          </button>
+          <button
+            class="px-3 py-1 text-sm rounded-md {createMode === 'url' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}"
+            on:click={() => createMode = 'url'}
+          >
+            URL로 등록
+          </button>
+        </div>
+      </div>
+
+      {#if createMode === 'select'}
+        <form on:submit|preventDefault={handleCreateFromSelect} class="p-4 space-y-4">
+          <div>
+            <label for="create-business" class="block text-sm font-medium text-gray-700 mb-1">업체</label>
+            <select
+              id="create-business"
+              class="input"
+              bind:value={createForm.business_id}
+              on:change={handleBusinessSelect}
+            >
+              <option value={null}>업체 선택</option>
+              {#each businesses as business}
+                <option value={business.id}>{business.name}</option>
+              {/each}
+            </select>
+          </div>
+          <div>
+            <label for="create-item" class="block text-sm font-medium text-gray-700 mb-1">아이템</label>
+            <select id="create-item" class="input" bind:value={createForm.item_id} disabled={!createForm.business_id}>
+              <option value={null}>아이템 선택</option>
+              {#each selectedBusinessItems as item}
+                <option value={item.id}>{item.name}</option>
+              {/each}
+            </select>
+          </div>
+          <div>
+            <label for="create-date" class="block text-sm font-medium text-gray-700 mb-1">날짜</label>
+            <input id="create-date" type="date" class="input" bind:value={createForm.date} />
+          </div>
+          <div>
+            <label for="create-times" class="block text-sm font-medium text-gray-700 mb-1">시간 (쉼표 구분, 선택)</label>
+            <input
+              id="create-times"
+              type="text"
+              class="input"
+              bind:value={createForm.times}
+              placeholder="예: 10:00, 14:00, 18:00"
+            />
+            <p class="text-xs text-gray-500 mt-1">비워두면 아이템의 시간 범위 설정을 따릅니다</p>
+          </div>
+          <div>
+            <label for="create-account" class="block text-sm font-medium text-gray-700 mb-1">사용 계정</label>
+            <select id="create-account" class="input" bind:value={createForm.account_id}>
+              <option value={null}>기본 계정</option>
+              {#each accounts as account}
+                <option value={account.id}>{account.name}</option>
+              {/each}
+            </select>
+          </div>
+          <label class="flex items-center gap-2">
+            <input type="checkbox" bind:checked={createForm.is_enabled} />
+            <span class="text-sm font-medium text-gray-700">활성화</span>
+          </label>
+          <div class="flex justify-end gap-2 pt-4">
+            <button type="button" class="btn btn-secondary" on:click={() => showCreateModal = false}>
+              취소
+            </button>
+            <button type="submit" class="btn btn-primary" disabled={createLoading}>
+              {createLoading ? '등록 중...' : '등록'}
+            </button>
+          </div>
+        </form>
+      {:else}
+        <form on:submit|preventDefault={handleCreateFromUrl} class="p-4 space-y-4">
+          <div>
+            <label for="create-url" class="block text-sm font-medium text-gray-700 mb-1">네이버 예약 URL</label>
+            <input
+              id="create-url"
+              type="url"
+              class="input"
+              bind:value={createForm.url}
+              placeholder="https://booking.naver.com/booking/..."
+            />
+          </div>
+          <div>
+            <label for="create-item-name" class="block text-sm font-medium text-gray-700 mb-1">아이템 이름</label>
+            <input
+              id="create-item-name"
+              type="text"
+              class="input"
+              bind:value={createForm.item_name}
+              placeholder="예: 프라이빗 사우나 A"
+            />
+          </div>
+          <div>
+            <label for="create-business-name" class="block text-sm font-medium text-gray-700 mb-1">업체 이름 (선택)</label>
+            <input
+              id="create-business-name"
+              type="text"
+              class="input"
+              bind:value={createForm.business_name}
+              placeholder="자동으로 가져옵니다"
+            />
+            <p class="text-xs text-gray-500 mt-1">비워두면 URL에서 자동으로 가져옵니다</p>
+          </div>
+          <div class="flex justify-end gap-2 pt-4">
+            <button type="button" class="btn btn-secondary" on:click={() => showCreateModal = false}>
+              취소
+            </button>
+            <button type="submit" class="btn btn-primary" disabled={createLoading}>
+              {createLoading ? '등록 중...' : '등록'}
+            </button>
+          </div>
+        </form>
+      {/if}
+    </div>
+  </div>
+{/if}
+
+<!-- 복제 모달 -->
+{#if showDuplicateModal && duplicateSchedule}
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+      <div class="p-4 border-b">
+        <h3 class="text-lg font-semibold">일정 복제</h3>
+        <p class="text-sm text-gray-500 mt-1">
+          {duplicateSchedule.business_name} - {duplicateSchedule.item_name}
+        </p>
+      </div>
+      <form on:submit|preventDefault={handleDuplicate} class="p-4 space-y-4">
+        <div>
+          <label for="dup-date" class="block text-sm font-medium text-gray-700 mb-1">날짜</label>
+          <input id="dup-date" type="date" class="input" bind:value={duplicateForm.date} />
+        </div>
+        <div>
+          <label for="dup-times" class="block text-sm font-medium text-gray-700 mb-1">시간 (쉼표 구분)</label>
+          <input
+            id="dup-times"
+            type="text"
+            class="input"
+            bind:value={duplicateForm.times}
+            placeholder="예: 10:00, 14:00, 18:00"
+          />
+          <p class="text-xs text-gray-500 mt-1">비워두면 아이템의 시간 범위 설정을 따릅니다</p>
+        </div>
+        <div>
+          <label for="dup-account" class="block text-sm font-medium text-gray-700 mb-1">사용 계정</label>
+          <select id="dup-account" class="input" bind:value={duplicateForm.account_id}>
+            <option value={null}>기본 계정</option>
+            {#each accounts as account}
+              <option value={account.id}>{account.name}</option>
+            {/each}
+          </select>
+        </div>
+        <div class="flex justify-end gap-2 pt-4">
+          <button type="button" class="btn btn-secondary" on:click={() => { showDuplicateModal = false; duplicateSchedule = null; }}>
+            취소
+          </button>
+          <button type="submit" class="btn btn-primary">복제</button>
         </div>
       </form>
     </div>
