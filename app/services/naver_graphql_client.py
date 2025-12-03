@@ -273,9 +273,6 @@ class NaverGraphQLClient:
             List[BizItemInfo]: 상품 정보 목록
         """
         variables = {
-            "withTypeValues": False,
-            "withReviewStat": False,
-            "withBookedCount": False,
             "input": {
                 "businessId": str(business_id),
                 "lang": "ko",
