@@ -76,7 +76,10 @@ if (Test-ProcessRunning $ApiPidFile) {
 }
 
 # Check Worker
-if (Test-ProcessRunning $WorkerPidFile) {
+if ($env:SKIP_WORKER -eq "true") {
+    Write-Host "[!] Skipping worker (SKIP_WORKER=true)" -ForegroundColor Yellow
+    $runWorker = $false
+} elseif (Test-ProcessRunning $WorkerPidFile) {
     $workerPid = Get-Content $WorkerPidFile
     Write-Host "[!] Worker already running (PID: $workerPid)" -ForegroundColor Yellow
     $runWorker = $false

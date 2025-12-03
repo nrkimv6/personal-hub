@@ -2,7 +2,8 @@
 # Starts all processes, shows logs, and stops on exit (Ctrl+C)
 
 param(
-    [switch]$Dev  # Pass -Dev to start.ps1 for frontend foreground mode
+    [switch]$Dev,        # Pass -Dev to start.ps1 for frontend foreground mode
+    [switch]$SkipWorker  # Skip worker (run it separately in PyCharm debugger)
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,16 +43,27 @@ try {
 
         # Start API and Worker only (not frontend)
         $env:SKIP_FRONTEND = "true"
+        if ($SkipWorker) {
+            $env:SKIP_WORKER = "true"
+        }
         & $startScript
         $env:SKIP_FRONTEND = $null
+        $env:SKIP_WORKER = $null
 
         # Wait for log files to be created
         Start-Sleep -Seconds 2
 
-        # Find the latest log files
+        # Find log files created AFTER start.ps1 ran (within last 30 seconds)
         $LogDir = Join-Path $ProjectRoot "logs"
-        $apiLog = Get-ChildItem -Path $LogDir -Filter "api_*.log" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-        $workerLog = Get-ChildItem -Path $LogDir -Filter "worker_*.log" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        $startTime = (Get-Date).AddSeconds(-30)
+
+        $apiLog = Get-ChildItem -Path $LogDir -Filter "api_*.log" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CreationTime -gt $startTime } |
+            Sort-Object CreationTime -Descending | Select-Object -First 1
+
+        $workerLog = Get-ChildItem -Path $LogDir -Filter "worker_*.log" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CreationTime -gt $startTime } |
+            Sort-Object CreationTime -Descending | Select-Object -First 1
 
         Write-Host ""
         Write-Host "[Step 2] Starting frontend + tailing backend logs..." -ForegroundColor Cyan
