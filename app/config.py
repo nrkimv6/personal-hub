@@ -210,5 +210,6 @@ if not _is_worker:
         logger.setLevel(logging.DEBUG)
         logger.debug("디버그 모드 활성화됨")
 else:
-    # 워커에서는 빈 로거 (나중에 async_logger에서 설정)
-    logger = logging.getLogger("monitor_worker")
+    # 워커에서는 async_logger에서 설정한 로거를 사용
+    # monitor_worker.py에서 setup_worker_logger("worker", ...)를 호출하면 "worker_logger" 이름으로 생성됨
+    logger = logging.getLogger("worker_logger")
