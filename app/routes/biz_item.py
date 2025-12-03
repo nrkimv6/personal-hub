@@ -77,7 +77,12 @@ def get_item_schedules(item_id: int, db: Session = Depends(get_db)):
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
 
-    return schedule_service.get_by_item(db, item_id)
+    schedules = schedule_service.get_by_item(db, item_id)
+    # account_name 채우기
+    for schedule in schedules:
+        if schedule.account:
+            schedule.account_name = schedule.account.name
+    return schedules
 
 
 @router.post("/items/{item_id}/schedules", response_model=MonitorSchedule, status_code=201)
@@ -90,15 +95,19 @@ def create_schedule(item_id: int, data: MonitorScheduleCreate, db: Session = Dep
     # biz_item_id 강제 설정
     data.biz_item_id = item_id
 
-    # 중복 체크
+    # 중복 체크 (같은 날짜, 같은 계정의 일정만 중복으로 처리)
     existing = schedule_service.get_by_date(db, item_id, data.date)
-    if existing:
+    if existing and existing.account_id == data.account_id:
         raise HTTPException(
             status_code=400,
-            detail=f"Schedule for date '{data.date}' already exists"
+            detail=f"Schedule for date '{data.date}' with this account already exists"
         )
 
-    return schedule_service.create(db, data)
+    schedule = schedule_service.create(db, data)
+    # account_name 채우기
+    if schedule.account:
+        schedule.account_name = schedule.account.name
+    return schedule
 
 
 @router.post("/items/{item_id}/schedules/bulk", response_model=List[MonitorSchedule], status_code=201)
@@ -111,4 +120,9 @@ def create_bulk_schedules(item_id: int, data: BulkScheduleCreate, db: Session = 
     # biz_item_id 강제 설정
     data.biz_item_id = item_id
 
-    return schedule_service.create_bulk(db, data)
+    schedules = schedule_service.create_bulk(db, data)
+    # account_name 채우기
+    for schedule in schedules:
+        if schedule.account:
+            schedule.account_name = schedule.account.name
+    return schedules

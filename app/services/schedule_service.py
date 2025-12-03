@@ -22,14 +22,18 @@ class ScheduleService:
     """일정 관리 서비스"""
 
     def get_by_item(self, db: Session, biz_item_id: int) -> List[MonitorSchedule]:
-        """아이템별 일정 목록 조회"""
-        return db.query(MonitorSchedule).filter(
+        """아이템별 일정 목록 조회 (account 포함)"""
+        return db.query(MonitorSchedule).options(
+            joinedload(MonitorSchedule.account)
+        ).filter(
             MonitorSchedule.biz_item_id == biz_item_id
         ).order_by(MonitorSchedule.date).all()
 
     def get_by_id(self, db: Session, schedule_id: int) -> Optional[MonitorSchedule]:
-        """ID로 일정 조회"""
-        return db.query(MonitorSchedule).filter(MonitorSchedule.id == schedule_id).first()
+        """ID로 일정 조회 (account 포함)"""
+        return db.query(MonitorSchedule).options(
+            joinedload(MonitorSchedule.account)
+        ).filter(MonitorSchedule.id == schedule_id).first()
 
     def get_by_date(
         self, db: Session, biz_item_id: int, date: str
@@ -52,64 +56,104 @@ class ScheduleService:
             MonitorSchedule.is_active == True
         ).all()
 
-    def get_enabled_with_context(self, db: Session) -> List[Dict[str, Any]]:
-        """활성화된 일정 + 상위 컨텍스트 조회 (워커용)"""
-        results = db.query(
+    def get_all_with_context(
+        self,
+        db: Session,
+        is_enabled: Optional[bool] = None,
+        business_id: Optional[int] = None,
+        biz_item_id: Optional[int] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """전체 일정 + 상위 컨텍스트 조회 (일정 관리 페이지용)"""
+        query = db.query(
             MonitorSchedule,
             BizItem,
             Business
+        ).options(
+            joinedload(MonitorSchedule.account)
         ).join(
             BizItem, MonitorSchedule.biz_item_id == BizItem.id
         ).join(
             Business, BizItem.business_id == Business.id
-        ).filter(
-            MonitorSchedule.is_enabled == True
-        ).order_by(
-            MonitorSchedule.date
-        ).all()
+        )
 
+        # 필터 적용
+        if is_enabled is not None:
+            query = query.filter(MonitorSchedule.is_enabled == is_enabled)
+        if business_id is not None:
+            query = query.filter(Business.id == business_id)
+        if biz_item_id is not None:
+            query = query.filter(BizItem.id == biz_item_id)
+        if date_from:
+            query = query.filter(MonitorSchedule.date >= date_from)
+        if date_to:
+            query = query.filter(MonitorSchedule.date <= date_to)
+        if search:
+            search_pattern = f"%{search}%"
+            query = query.filter(
+                (Business.name.ilike(search_pattern)) |
+                (BizItem.name.ilike(search_pattern))
+            )
+
+        results = query.order_by(MonitorSchedule.date.desc()).all()
+        return self._build_context_list(results)
+
+    def _build_context_list(self, results) -> List[Dict[str, Any]]:
+        """결과 목록을 컨텍스트 딕셔너리 목록으로 변환"""
         schedules_with_context = []
         for schedule, item, business in results:
-            schedules_with_context.append({
-                # Schedule 정보
-                "id": schedule.id,
-                "date": schedule.date,
-                "times": json.loads(schedule.times) if schedule.times else None,
-                "is_enabled": schedule.is_enabled,
-                "is_active": schedule.is_active,
-                "run_status": schedule.run_status,
-                "last_error": schedule.last_error,
-                "error_count": schedule.error_count,
-                "interval": schedule.interval,
-                "custom_interval": schedule.custom_interval,
-                "booking_count": schedule.booking_count,
-                "last_booking_time": schedule.last_booking_time,
-                "created_at": schedule.created_at,
-                "updated_at": schedule.updated_at,
-                # BizItem 정보
-                "biz_item_pk": item.id,
-                "item_biz_item_id": item.biz_item_id,
-                "item_name": item.name,
-                "base_url": item.base_url,
-                "item_is_enabled": getattr(item, 'is_enabled', True),
-                "time_range": item.time_range,
-                "auto_booking_enabled": item.auto_booking_enabled,
-                "max_bookings_per_schedule": item.max_bookings_per_schedule,
-                "booking_options_override": json.loads(item.booking_options_override) if item.booking_options_override else None,
-                # Business 정보
-                "business_pk": business.id,
-                "business_id": business.business_id,
-                "business_type_id": business.business_type_id,
-                "business_name": business.name,
-                "business_is_enabled": getattr(business, 'is_enabled', True),
-                "service_type": business.service_type,
-                "category": business.category,
-                "booking_options": json.loads(business.booking_options) if business.booking_options else None,
-                # 마지막 모니터링 시간 (updated_at을 대신 사용)
-                "last_check": schedule.updated_at,
-            })
-
+            schedules_with_context.append(self._build_context_dict(schedule, item, business))
         return schedules_with_context
+
+    def _build_context_dict(self, schedule, item, business) -> Dict[str, Any]:
+        """단일 결과를 컨텍스트 딕셔너리로 변환"""
+        return {
+            # Schedule 정보
+            "id": schedule.id,
+            "date": schedule.date,
+            "times": json.loads(schedule.times) if schedule.times else None,
+            "is_enabled": schedule.is_enabled,
+            "is_active": schedule.is_active,
+            "run_status": schedule.run_status,
+            "last_error": schedule.last_error,
+            "error_count": schedule.error_count,
+            "interval": schedule.interval,
+            "custom_interval": schedule.custom_interval,
+            "booking_count": schedule.booking_count,
+            "last_booking_time": schedule.last_booking_time,
+            "account_id": schedule.account_id,
+            "account_name": schedule.account.name if schedule.account else None,
+            "created_at": schedule.created_at,
+            "updated_at": schedule.updated_at,
+            # BizItem 정보
+            "biz_item_pk": item.id,
+            "biz_item_id": schedule.biz_item_id,
+            "item_biz_item_id": item.biz_item_id,
+            "item_name": item.name,
+            "base_url": item.base_url,
+            "item_is_enabled": getattr(item, 'is_enabled', True),
+            "time_range": item.time_range,
+            "auto_booking_enabled": item.auto_booking_enabled,
+            "max_bookings_per_schedule": item.max_bookings_per_schedule,
+            "booking_options_override": json.loads(item.booking_options_override) if item.booking_options_override else None,
+            # Business 정보
+            "business_pk": business.id,
+            "business_id": business.business_id,
+            "business_type_id": business.business_type_id,
+            "business_name": business.name,
+            "business_is_enabled": getattr(business, 'is_enabled', True),
+            "service_type": business.service_type,
+            "category": business.category,
+            "booking_options": json.loads(business.booking_options) if business.booking_options else None,
+            # 마지막 모니터링 시간
+            "last_check": schedule.updated_at,
+        }
+
+    def get_enabled_with_context(self, db: Session) -> List[Dict[str, Any]]:
+        """활성화된 일정 + 상위 컨텍스트 조회 (워커용)"""
+        return self.get_all_with_context(db, is_enabled=True)
 
     def create(self, db: Session, data: MonitorScheduleCreate) -> MonitorSchedule:
         """일정 생성"""
@@ -124,6 +168,7 @@ class ScheduleService:
             is_enabled=data.is_enabled,
             interval=data.interval,
             custom_interval=data.custom_interval,
+            account_id=data.account_id,
         )
         db.add(schedule)
         db.commit()
@@ -151,6 +196,7 @@ class ScheduleService:
                 is_enabled=data.is_enabled,
                 interval=data.interval,
                 custom_interval=data.custom_interval,
+                account_id=data.account_id,
             )
             db.add(schedule)
             schedules.append(schedule)

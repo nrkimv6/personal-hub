@@ -16,3 +16,4 @@ build
 /.pids/
 *.db
 data/browser_profiles/
+*.db-journal
