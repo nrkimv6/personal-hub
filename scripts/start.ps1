@@ -209,11 +209,15 @@ if ($runFrontend) {
         # Store info that frontend is running in dev mode
         "DEV_MODE" | Out-File $FrontendPidFile -Encoding ascii
 
-        Set-Location $FrontendDir
-        npm run dev -- --port $FrontendPort
-
-        # When npm run dev exits, clean up
-        Remove-Item $FrontendPidFile -Force -ErrorAction SilentlyContinue
+        # Save current location and restore after
+        Push-Location $FrontendDir
+        try {
+            npm run dev -- --port $FrontendPort
+        } finally {/
+            Pop-Location
+            # When npm run dev exits, clean up
+            Remove-Item $FrontendPidFile -Force -ErrorAction SilentlyContinue
+        }
     } else {
         # Background mode: Start Frontend in background using cmd to redirect both stdout and stderr
         $frontendProcess = Start-Process -FilePath "cmd.exe" `
