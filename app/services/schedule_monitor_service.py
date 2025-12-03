@@ -8,13 +8,14 @@
 기존 monitoring_system_manager.py의 역할을 대체합니다.
 """
 import json
-from datetime import datetime
+from datetime import datetime, date
 from typing import Dict, Any, Optional, List
 from sqlalchemy import text
 
 from app.database import SessionLocal
 from app.config import settings, logger
 from app.utils.url_builder import build_naver_booking_url
+from app.services.schedule_service import calculate_default_interval
 
 
 class ScheduleMonitorService:
@@ -81,6 +82,13 @@ class ScheduleMonitorService:
                 date=result[1]
             )
 
+            # interval 계산: custom_interval이면 저장된 값, 아니면 날짜 기반 기본값
+            custom_interval = bool(result[7])
+            if custom_interval and result[6] is not None:
+                effective_interval = result[6]
+            else:
+                effective_interval = calculate_default_interval(result[1])
+
             return {
                 "id": result[0],
                 "date": result[1],
@@ -88,8 +96,8 @@ class ScheduleMonitorService:
                 "is_enabled": bool(result[3]),
                 "is_active": bool(result[4]),
                 "run_status": result[5],
-                "interval": result[6] or settings.CHECK_INTERVAL,
-                "custom_interval": bool(result[7]),
+                "interval": effective_interval,
+                "custom_interval": custom_interval,
                 "error_count": result[8] or 0,
                 "last_error": result[9],
                 "booking_count": result[10] or 0,

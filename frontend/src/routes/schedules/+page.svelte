@@ -31,8 +31,17 @@
     times: '',
     is_enabled: true,
     interval: 10,
+    custom_interval: false,
     account_id: null as number | null
   };
+
+  // 간격 포맷팅
+  function formatInterval(seconds: number | null | undefined): string {
+    if (!seconds) return '-';
+    if (seconds < 60) return `${seconds}초`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}분`;
+    return `${Math.floor(seconds / 3600)}시간`;
+  }
 
   // 등록 모달
   let showCreateModal = false;
@@ -148,7 +157,8 @@
     editForm = {
       times: schedule.times?.join(', ') || '',
       is_enabled: schedule.is_enabled,
-      interval: schedule.interval || 10,
+      interval: schedule.interval || 30,
+      custom_interval: schedule.custom_interval || false,
       account_id: schedule.account_id
     };
     showEditModal = true;
@@ -161,7 +171,8 @@
       const updateData: MonitorScheduleUpdate = {
         times,
         is_enabled: editForm.is_enabled,
-        interval: editForm.interval,
+        interval: editForm.custom_interval ? editForm.interval : null,
+        custom_interval: editForm.custom_interval,
         account_id: editForm.account_id
       };
       await scheduleApi.update(editSchedule.id, updateData);
@@ -419,6 +430,7 @@
               <th>업체</th>
               <th>아이템</th>
               <th>시간</th>
+              <th>간격</th>
               <th>계정</th>
               <th>상태</th>
               <th>자동예약</th>
@@ -471,6 +483,13 @@
                     <span class="text-gray-500">{schedule.time_range}</span>
                   {:else}
                     <span class="text-gray-400">-</span>
+                  {/if}
+                </td>
+                <td>
+                  {#if schedule.custom_interval}
+                    <span class="text-blue-600 font-medium" title="수동 설정">{formatInterval(schedule.interval)}</span>
+                  {:else}
+                    <span class="text-gray-500" title="자동 (날짜 기반)">{formatInterval(schedule.interval)}</span>
                   {/if}
                 </td>
                 <td>
@@ -563,15 +582,35 @@
           <p class="text-xs text-gray-500 mt-1">비워두면 시간 범위 설정을 따릅니다</p>
         </div>
         <div>
-          <label for="edit-interval" class="block text-sm font-medium text-gray-700 mb-1">모니터링 간격 (초)</label>
-          <input
-            id="edit-interval"
-            type="number"
-            class="input"
-            bind:value={editForm.interval}
-            min="1"
-            max="300"
-          />
+          <label class="block text-sm font-medium text-gray-700 mb-2">모니터링 간격</label>
+          <div class="space-y-2">
+            <label class="flex items-center gap-2">
+              <input type="checkbox" bind:checked={editForm.custom_interval} />
+              <span class="text-sm text-gray-700">수동 설정</span>
+            </label>
+            {#if editForm.custom_interval}
+              <div class="flex items-center gap-2">
+                <input
+                  id="edit-interval"
+                  type="number"
+                  class="input w-24"
+                  bind:value={editForm.interval}
+                  min="5"
+                  max="3600"
+                />
+                <span class="text-sm text-gray-600">초</span>
+              </div>
+            {:else}
+              {@const dateInfo = formatDate(editSchedule?.date || '')}
+              <div class="text-sm text-gray-500 bg-gray-50 px-3 py-2 rounded">
+                기본값: <span class="font-medium text-gray-700">{formatInterval(editSchedule?.interval)}</span>
+                <span class="text-gray-400 ml-1">({dateInfo.badge || '날짜 기준'})</span>
+              </div>
+              <p class="text-xs text-gray-400">
+                D-1 이하: 30초 / D-3 이하: 1분 / D-7 이하: 5분 / D-7 초과: 15분
+              </p>
+            {/if}
+          </div>
         </div>
         <div>
           <label for="edit-account" class="block text-sm font-medium text-gray-700 mb-1">사용 계정</label>

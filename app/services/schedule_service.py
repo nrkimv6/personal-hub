@@ -5,7 +5,7 @@ MonitorSchedule 서비스 - 일정 CRUD
 import json
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session, joinedload
-from datetime import datetime
+from datetime import datetime, date
 
 from app.models.monitor_schedule import MonitorSchedule
 from app.models.biz_item import BizItem
@@ -16,6 +16,33 @@ from app.schemas.monitor_schedule import (
     BulkScheduleCreate,
     ScheduleWithContext,
 )
+
+
+def calculate_default_interval(target_date_str: str) -> int:
+    """
+    날짜 기반 기본 모니터링 간격 계산
+
+    Args:
+        target_date_str: 목표 날짜 (YYYY-MM-DD 형식)
+
+    Returns:
+        모니터링 간격 (초)
+    """
+    try:
+        target_date = datetime.strptime(target_date_str, "%Y-%m-%d").date()
+        today = date.today()
+        days_until = (target_date - today).days
+
+        if days_until <= 1:
+            return 30      # D-1 이하: 30초
+        elif days_until <= 3:
+            return 60      # D-3 이하: 1분
+        elif days_until <= 7:
+            return 300     # D-7 이하: 5분
+        else:
+            return 900     # D-7 초과: 15분
+    except (ValueError, TypeError):
+        return 60  # 파싱 실패 시 기본값 1분
 
 
 class ScheduleService:
@@ -109,6 +136,12 @@ class ScheduleService:
 
     def _build_context_dict(self, schedule, item, business) -> Dict[str, Any]:
         """단일 결과를 컨텍스트 딕셔너리로 변환"""
+        # interval 계산: custom_interval이면 저장된 값, 아니면 날짜 기반 기본값
+        if schedule.custom_interval and schedule.interval is not None:
+            effective_interval = schedule.interval
+        else:
+            effective_interval = calculate_default_interval(schedule.date)
+
         return {
             # Schedule 정보
             "id": schedule.id,
@@ -119,7 +152,7 @@ class ScheduleService:
             "run_status": schedule.run_status,
             "last_error": schedule.last_error,
             "error_count": schedule.error_count,
-            "interval": schedule.interval,
+            "interval": effective_interval,
             "custom_interval": schedule.custom_interval,
             "booking_count": schedule.booking_count,
             "last_booking_time": schedule.last_booking_time,
