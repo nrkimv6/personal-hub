@@ -100,6 +100,17 @@ class BusinessService:
         )
         return self.create(db, data)
 
+    def mark_api_synced(self, db: Session, business_id: int) -> Optional[Business]:
+        """API 동기화 시간 업데이트"""
+        business = self.get_by_id(db, business_id)
+        if not business:
+            return None
+
+        business.api_synced_at = datetime.now()
+        db.commit()
+        db.refresh(business)
+        return business
+
 
 # 싱글톤 인스턴스
 business_service = BusinessService()
