@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     
     # 데이터베이스 설정
-    DATABASE_URL: str = "sqlite:///./monitor_v2.db"  # 새 계층 구조용 DB
+    DATABASE_URL: str = "sqlite:///./data/monitor.db"  # database 이동
     
     # 모니터링 설정
     MAX_WORKERS: int = 3
