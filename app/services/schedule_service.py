@@ -125,6 +125,7 @@ class ScheduleService:
             "last_booking_time": schedule.last_booking_time,
             "account_id": schedule.account_id,
             "account_name": schedule.account.name if schedule.account else None,
+            "auto_booking_enabled": getattr(schedule, 'auto_booking_enabled', False),
             "created_at": schedule.created_at,
             "updated_at": schedule.updated_at,
             # BizItem 정보
@@ -135,7 +136,6 @@ class ScheduleService:
             "base_url": item.base_url,
             "item_is_enabled": getattr(item, 'is_enabled', True),
             "time_range": item.time_range,
-            "auto_booking_enabled": item.auto_booking_enabled,
             "max_bookings_per_schedule": item.max_bookings_per_schedule,
             "booking_options_override": json.loads(item.booking_options_override) if item.booking_options_override else None,
             # Business 정보
@@ -166,6 +166,7 @@ class ScheduleService:
             date=data.date,
             times=times_json,
             is_enabled=data.is_enabled,
+            auto_booking_enabled=data.auto_booking_enabled,
             interval=data.interval,
             custom_interval=data.custom_interval,
             account_id=data.account_id,

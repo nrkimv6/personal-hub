@@ -1,10 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { notificationApi, systemApi } from '$lib/api';
-  import type { NotificationSettings, QueueItem } from '$lib/types';
+  import { notificationApi } from '$lib/api';
+  import type { NotificationSettings } from '$lib/types';
 
   let notificationSettings: NotificationSettings | null = null;
-  let queue: QueueItem[] = [];
   let loading = true;
   let saving = false;
   let error: string | null = null;
@@ -20,12 +19,7 @@
   async function fetchData() {
     loading = true;
     try {
-      const [settings, queueData] = await Promise.all([
-        notificationApi.getSettings(),
-        systemApi.queue()
-      ]);
-      notificationSettings = settings;
-      queue = queueData;
+      notificationSettings = await notificationApi.getSettings();
       error = null;
     } catch (e) {
       error = e instanceof Error ? e.message : '데이터 로드 실패';
@@ -54,17 +48,6 @@
       notificationSettings.notify_states = notificationSettings.notify_states.filter(s => s !== state);
     } else {
       notificationSettings.notify_states = [...notificationSettings.notify_states, state];
-    }
-  }
-
-  async function handleClearQueue() {
-    if (!confirm('대기열을 비우시겠습니까?')) return;
-    try {
-      const result = await systemApi.clearQueue();
-      alert(`${result.cleared_count}개 항목이 삭제되었습니다.`);
-      await fetchData();
-    } catch (e) {
-      alert('실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
     }
   }
 
@@ -146,68 +129,31 @@
               on:click={saveNotificationSettings}
               disabled={saving}
             >
-              {saving ? '저장 중...' : '💾 설정 저장'}
+              {saving ? '저장 중...' : '설정 저장'}
             </button>
           </div>
         {/if}
       </div>
 
-      <!-- 대기열 관리 -->
+      <!-- API 문서 링크 -->
       <div class="card">
-        <div class="flex justify-between items-center mb-4">
-          <h3 class="text-lg font-semibold text-gray-900">대기열</h3>
-          <div class="flex gap-2">
-            <button class="btn btn-secondary btn-sm" on:click={fetchData}>
-              🔄 새로고침
-            </button>
-            {#if queue.length > 0}
-              <button class="btn btn-danger btn-sm" on:click={handleClearQueue}>
-                🗑️ 비우기
-              </button>
-            {/if}
-          </div>
+        <h3 class="text-lg font-semibold text-gray-900 mb-4">API 문서</h3>
+        <div class="flex gap-4">
+          <a
+            href="/docs"
+            target="_blank"
+            class="btn btn-secondary"
+          >
+            Swagger UI
+          </a>
+          <a
+            href="/redoc"
+            target="_blank"
+            class="btn btn-secondary"
+          >
+            ReDoc
+          </a>
         </div>
-
-        {#if queue.length === 0}
-          <div class="text-center text-gray-500 py-8">
-            대기열이 비어있습니다.
-          </div>
-        {:else}
-          <div class="space-y-2 max-h-96 overflow-y-auto">
-            {#each queue as item (item.position)}
-              <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                <span class="w-8 h-8 flex items-center justify-center bg-blue-100 text-blue-800 rounded-full font-medium text-sm">
-                  {item.position}
-                </span>
-                <div class="flex-1 min-w-0">
-                  <p class="font-medium truncate">{item.biz_item_name}</p>
-                  <p class="text-sm text-gray-500 truncate">{item.date} · {item.run_status}</p>
-                </div>
-              </div>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    </div>
-
-    <!-- API 문서 링크 -->
-    <div class="card mt-6">
-      <h3 class="text-lg font-semibold text-gray-900 mb-4">API 문서</h3>
-      <div class="flex gap-4">
-        <a
-          href="/docs"
-          target="_blank"
-          class="btn btn-secondary"
-        >
-          📖 Swagger UI
-        </a>
-        <a
-          href="/redoc"
-          target="_blank"
-          class="btn btn-secondary"
-        >
-          📚 ReDoc
-        </a>
       </div>
     </div>
   {/if}

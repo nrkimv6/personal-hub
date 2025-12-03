@@ -122,6 +122,17 @@
     }
   }
 
+  async function handleToggleAutoBooking(schedule: ScheduleWithContext) {
+    try {
+      await scheduleApi.update(schedule.id, {
+        auto_booking_enabled: !schedule.auto_booking_enabled
+      });
+      await fetchSchedules();
+    } catch (e) {
+      alert('자동예약 설정 변경 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+    }
+  }
+
   async function handleDeleteSchedule(schedule: ScheduleWithContext) {
     if (!confirm(`${schedule.business_name} - ${schedule.item_name}\n${schedule.date} 일정을 삭제하시겠습니까?`)) return;
     try {
@@ -410,7 +421,7 @@
               <th>시간</th>
               <th>계정</th>
               <th>상태</th>
-              <th>예약</th>
+              <th>자동예약</th>
               <th class="w-32">작업</th>
             </tr>
           </thead>
@@ -419,11 +430,7 @@
               {@const status = getStatusBadge(schedule.run_status, schedule.is_enabled)}
               {@const dateInfo = formatDate(schedule.date)}
               <tr class="{!schedule.is_enabled ? 'opacity-60' : ''} {schedule.error_count > 0 ? 'bg-red-50' : ''}">
-                <td
-                  class="cursor-pointer hover:bg-gray-100"
-                  on:click={() => handleToggleSchedule(schedule)}
-                  title={schedule.is_enabled ? '클릭하여 비활성화' : '클릭하여 활성화'}
-                >
+                <td>
                   <div class="flex items-center gap-2">
                     <span class="font-medium">{dateInfo.date}</span>
                     {#if dateInfo.badge}
@@ -431,11 +438,7 @@
                     {/if}
                   </div>
                 </td>
-                <td
-                  class="cursor-pointer hover:bg-gray-100"
-                  on:click={() => handleToggleSchedule(schedule)}
-                  title={schedule.is_enabled ? '클릭하여 비활성화' : '클릭하여 활성화'}
-                >
+                <td>
                   <div class="flex items-center gap-2">
                     <span>{schedule.business_name}</span>
                     {#if !schedule.business_is_enabled}
@@ -443,11 +446,7 @@
                     {/if}
                   </div>
                 </td>
-                <td
-                  class="cursor-pointer hover:bg-gray-100"
-                  on:click={() => handleToggleSchedule(schedule)}
-                  title={schedule.is_enabled ? '클릭하여 비활성화' : '클릭하여 활성화'}
-                >
+                <td>
                   <div class="flex items-center gap-2">
                     <span>{schedule.item_name}</span>
                     {#if schedule.auto_booking_enabled}
@@ -458,11 +457,7 @@
                     {/if}
                   </div>
                 </td>
-                <td
-                  class="cursor-pointer hover:bg-gray-100"
-                  on:click={() => handleToggleSchedule(schedule)}
-                  title={schedule.is_enabled ? '클릭하여 비활성화' : '클릭하여 활성화'}
-                >
+                <td>
                   {#if schedule.times && schedule.times.length > 0}
                     <div class="text-sm">
                       {#if schedule.times.length <= 3}
@@ -478,11 +473,7 @@
                     <span class="text-gray-400">-</span>
                   {/if}
                 </td>
-                <td
-                  class="cursor-pointer hover:bg-gray-100"
-                  on:click={() => handleToggleSchedule(schedule)}
-                  title={schedule.is_enabled ? '클릭하여 비활성화' : '클릭하여 활성화'}
-                >
+                <td>
                   {#if schedule.account_name}
                     <span class="badge badge-info">{schedule.account_name}</span>
                   {:else}
@@ -502,11 +493,18 @@
                   {/if}
                 </td>
                 <td>
-                  {#if schedule.booking_count > 0}
-                    <span class="text-green-600 font-medium">{schedule.booking_count}건</span>
-                  {:else}
-                    <span class="text-gray-400">-</span>
-                  {/if}
+                  <div class="flex items-center gap-2">
+                    <button
+                      class="btn btn-xs {schedule.auto_booking_enabled ? 'btn-success' : 'btn-secondary'}"
+                      on:click={() => handleToggleAutoBooking(schedule)}
+                      title={schedule.auto_booking_enabled ? '자동예약 해제' : '자동예약 등록'}
+                    >
+                      {schedule.auto_booking_enabled ? 'ON' : 'OFF'}
+                    </button>
+                    {#if schedule.booking_count > 0}
+                      <span class="text-green-600 font-medium">{schedule.booking_count}건</span>
+                    {/if}
+                  </div>
                 </td>
                 <td>
                   <div class="flex gap-1">
@@ -825,5 +823,13 @@
   .btn-xs {
     padding: 0.25rem 0.5rem;
     font-size: 0.75rem;
+  }
+  .btn-success {
+    background-color: #dcfce7;
+    color: #166534;
+    border: 1px solid #86efac;
+  }
+  .btn-success:hover {
+    background-color: #bbf7d0;
   }
 </style>
