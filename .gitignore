@@ -14,3 +14,4 @@ build
 /app/static/
 /archive/*
 /.pids/
+/data/browser_profiles/
