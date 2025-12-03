@@ -639,7 +639,7 @@ class TestDataModelExtension:
         """
         from app.models.biz_item import BizItem
 
-        # 새로 추가된 필드 확인
+        # 새로 추가된 필드 확인 (GraphQL API + 다중 프로필 통합)
         new_fields = [
             "description",
             "biz_item_type",
@@ -651,11 +651,21 @@ class TestDataModelExtension:
             "end_date",
             "extra_desc_json",
             "booking_precaution_json",
-            "api_synced_at"
+            "api_synced_at",
+            "account_id",  # 다중 프로필 지원
         ]
 
         for field in new_fields:
             assert hasattr(BizItem, field), f"BizItem 모델에 {field} 필드가 없습니다"
+
+    def test_reference_biz_item_account_relationship(self):
+        """
+        [Reference] BizItem과 Account 관계가 설정되었는지
+        """
+        from app.models.biz_item import BizItem
+
+        assert hasattr(BizItem, "account"), "BizItem 모델에 account 관계가 없습니다"
+        assert hasattr(BizItem, "account_id"), "BizItem 모델에 account_id 필드가 없습니다"
 
     # --- Conformance: 형식 준수 ---
 
