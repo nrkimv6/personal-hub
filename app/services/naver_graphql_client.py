@@ -63,6 +63,7 @@ class NaverGraphQLClient:
     """네이버 예약 GraphQL API 클라이언트"""
 
     # Business 쿼리 (업체 정보)
+    # Note: addressJson, phoneInformationJson은 JSON 타입이므로 하위 필드 선택 불가
     BUSINESS_QUERY = """
     query business($input: BusinessParams) {
         business(input: $input) {
@@ -73,14 +74,8 @@ class NaverGraphQLClient:
             name
             serviceName
             coordinates
-            addressJson {
-                roadAddr
-                jibunAddr
-                detailAddr
-            }
-            phoneInformationJson {
-                reprPhone
-            }
+            addressJson
+            phoneInformationJson
             bookingAvailableCode
             bookingAvailableValue
             __typename
@@ -89,8 +84,9 @@ class NaverGraphQLClient:
     """
 
     # BizItems 쿼리 (상품 목록)
+    # Note: 스키마 변경으로 bookingPrecautionJson은 하위 필드 필요, extraDescJson은 JSON 타입
     BIZ_ITEMS_QUERY = """
-    query bizItems($input: BizItemsParams, $withTypeValues: Boolean = false, $withReviewStat: Boolean = false, $withBookedCount: Boolean = false) {
+    query bizItems($input: BizItemsParams) {
         bizItems(input: $input) {
             id
             bizItemId
@@ -102,7 +98,10 @@ class NaverGraphQLClient:
             startDate
             endDate
             extraDescJson
-            bookingPrecautionJson
+            bookingPrecautionJson {
+                title
+                desc
+            }
             bookingCountSettingJson
             bookableSettingJson
             __typename
