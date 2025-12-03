@@ -13,6 +13,9 @@ param(
     [switch]$Follow,
 
     [Parameter()]
+    [switch]$FromStart,  # Show logs from beginning of file (not just tail)
+
+    [Parameter()]
     [switch]$Help
 )
 

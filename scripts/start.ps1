@@ -85,7 +85,10 @@ if (Test-ProcessRunning $WorkerPidFile) {
 }
 
 # Check Frontend
-if (Test-ProcessRunning $FrontendPidFile) {
+if ($env:SKIP_FRONTEND -eq "true") {
+    Write-Host "[!] Skipping frontend (SKIP_FRONTEND=true)" -ForegroundColor Yellow
+    $runFrontend = $false
+} elseif (Test-ProcessRunning $FrontendPidFile) {
     $frontendPid = Get-Content $FrontendPidFile
     Write-Host "[!] Frontend already running (PID: $frontendPid)" -ForegroundColor Yellow
     $runFrontend = $false

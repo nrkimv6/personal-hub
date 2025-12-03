@@ -160,8 +160,9 @@ class AsyncDBWriter:
         )
         try:
             self.queue.put_nowait(op)
+            logger.debug(f"[{self.name}] 큐 추가: {operation.__name__}")
         except asyncio.QueueFull:
-            logger.error(f"[{self.name}] 큐가 가득 찼습니다. 작업이 무시됩니다.")
+            logger.error(f"[{self.name}] 큐가 가득 찼습니다. 작업이 무시됩니다: {operation.__name__}")
 
     async def write_priority(self, operation: Callable, priority: int, *args, **kwargs):
         """

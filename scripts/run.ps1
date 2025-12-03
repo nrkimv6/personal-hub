@@ -36,11 +36,168 @@ try {
     $startScript = Join-Path $ScriptDir "start.ps1"
 
     if ($Dev) {
-        # In Dev mode, frontend runs in foreground
-        # When user exits frontend (Ctrl+C), we'll stop everything
-        Write-Host "[!] Dev mode: Frontend will run in foreground" -ForegroundColor Yellow
+        # In Dev mode: API/Worker background + Frontend foreground + show all logs
+        Write-Host "[!] Dev mode: Frontend in foreground + backend logs" -ForegroundColor Yellow
         Write-Host ""
-        & $startScript -Dev
+
+        # Start API and Worker only (not frontend)
+        $env:SKIP_FRONTEND = "true"
+        & $startScript
+        $env:SKIP_FRONTEND = $null
+
+        # Wait for log files to be created
+        Start-Sleep -Seconds 2
+
+        # Find the latest log files
+        $LogDir = Join-Path $ProjectRoot "logs"
+        $apiLog = Get-ChildItem -Path $LogDir -Filter "api_*.log" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        $workerLog = Get-ChildItem -Path $LogDir -Filter "worker_*.log" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+
+        Write-Host ""
+        Write-Host "[Step 2] Starting frontend + tailing backend logs..." -ForegroundColor Cyan
+        Write-Host "----------------------------------------"
+
+        # Show existing log content first
+        if ($apiLog) {
+            Write-Host "[API] === Log from start ===" -ForegroundColor Cyan
+            Get-Content $apiLog.FullName -Encoding UTF8 -ErrorAction SilentlyContinue | ForEach-Object {
+                Write-Host "[API] $_" -ForegroundColor Cyan
+            }
+        }
+        if ($workerLog) {
+            Write-Host "[WORKER] === Log from start ===" -ForegroundColor Magenta
+            Get-Content $workerLog.FullName -Encoding UTF8 -ErrorAction SilentlyContinue | ForEach-Object {
+                Write-Host "[WORKER] $_" -ForegroundColor Magenta
+            }
+        }
+
+        Write-Host ""
+        Write-Host "--- Frontend starting (Ctrl+C to stop all) ---" -ForegroundColor Yellow
+        Write-Host ""
+
+        # Track log file positions for tailing
+        $apiPos = if ($apiLog) { (Get-Item $apiLog.FullName).Length } else { 0 }
+        $workerPos = if ($workerLog) { (Get-Item $workerLog.FullName).Length } else { 0 }
+
+        # Start frontend in background (so we can tail logs)
+        $FrontendDir = Join-Path $ProjectRoot "frontend"
+        $frontendLogFile = Join-Path $LogDir "frontend_dev.log"
+
+        # Start frontend and capture its actual PID via port
+        $FrontendPidFile = Join-Path $ProjectRoot ".pids\frontend.pid"
+        "DEV_MODE" | Out-File $FrontendPidFile -Encoding ascii
+        $frontendPos = 0
+
+        # Start frontend in background
+        Start-Process -FilePath "cmd.exe" `
+            -ArgumentList "/c", "cd /d `"$FrontendDir`" && npm run dev -- --port 5173 > `"$frontendLogFile`" 2>&1" `
+            -WindowStyle Hidden
+
+        # Wait for vite to start (check port with timeout)
+        Write-Host "[*] Waiting for frontend to start on port 5173..." -ForegroundColor Gray
+        $maxWait = 30  # 30 seconds max
+        $waited = 0
+        while ($waited -lt $maxWait) {
+            $conn = Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue
+            if ($conn) {
+                Write-Host "[+] Frontend is running on port 5173" -ForegroundColor Green
+                break
+            }
+            Start-Sleep -Seconds 1
+            $waited++
+
+            # Also tail logs while waiting
+            if (Test-Path $frontendLogFile) {
+                $currentSize = (Get-Item $frontendLogFile).Length
+                if ($currentSize -gt $frontendPos) {
+                    $stream = [System.IO.FileStream]::new($frontendLogFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                    $stream.Seek($frontendPos, [System.IO.SeekOrigin]::Begin) | Out-Null
+                    $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
+                    while ($null -ne ($line = $reader.ReadLine())) {
+                        Write-Host "[FRONTEND] $line" -ForegroundColor Green
+                    }
+                    $frontendPos = $stream.Position
+                    $reader.Close()
+                    $stream.Close()
+                }
+            }
+        }
+
+        if ($waited -ge $maxWait) {
+            Write-Host "[!] Frontend failed to start within ${maxWait}s" -ForegroundColor Red
+            throw "Frontend startup timeout"
+        }
+
+        try {
+            # Tail all logs while frontend runs (check port)
+            while ($true) {
+                # Check if frontend is still running via port
+                $conn = Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue
+                if (-not $conn) {
+                    Write-Host "[!] Frontend stopped" -ForegroundColor Yellow
+                    break
+                }
+                # Tail API log
+                if ($apiLog -and (Test-Path $apiLog.FullName)) {
+                    $currentSize = (Get-Item $apiLog.FullName).Length
+                    if ($currentSize -gt $apiPos) {
+                        $stream = [System.IO.FileStream]::new($apiLog.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                        $stream.Seek($apiPos, [System.IO.SeekOrigin]::Begin) | Out-Null
+                        $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
+                        while ($null -ne ($line = $reader.ReadLine())) {
+                            Write-Host "[API] $line" -ForegroundColor Cyan
+                        }
+                        $apiPos = $stream.Position
+                        $reader.Close()
+                        $stream.Close()
+                    }
+                }
+
+                # Tail Worker log
+                if ($workerLog -and (Test-Path $workerLog.FullName)) {
+                    $currentSize = (Get-Item $workerLog.FullName).Length
+                    if ($currentSize -gt $workerPos) {
+                        $stream = [System.IO.FileStream]::new($workerLog.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                        $stream.Seek($workerPos, [System.IO.SeekOrigin]::Begin) | Out-Null
+                        $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
+                        while ($null -ne ($line = $reader.ReadLine())) {
+                            Write-Host "[WORKER] $line" -ForegroundColor Magenta
+                        }
+                        $workerPos = $stream.Position
+                        $reader.Close()
+                        $stream.Close()
+                    }
+                }
+
+                # Tail Frontend log
+                if (Test-Path $frontendLogFile) {
+                    $currentSize = (Get-Item $frontendLogFile).Length
+                    if ($currentSize -gt $frontendPos) {
+                        $stream = [System.IO.FileStream]::new($frontendLogFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                        $stream.Seek($frontendPos, [System.IO.SeekOrigin]::Begin) | Out-Null
+                        $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
+                        while ($null -ne ($line = $reader.ReadLine())) {
+                            Write-Host "[FRONTEND] $line" -ForegroundColor Green
+                        }
+                        $frontendPos = $stream.Position
+                        $reader.Close()
+                        $stream.Close()
+                    }
+                }
+
+                Start-Sleep -Milliseconds 200
+            }
+        } finally {
+            # Cleanup - kill frontend via port
+            $conn = Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue
+            if ($conn) {
+                $pids = $conn | Select-Object -ExpandProperty OwningProcess -Unique
+                foreach ($pid in $pids) {
+                    Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+                }
+            }
+            Remove-Item $FrontendPidFile -Force -ErrorAction SilentlyContinue
+        }
     } else {
         # Normal mode: all background, then follow logs
         & $startScript
