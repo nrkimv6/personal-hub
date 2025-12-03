@@ -32,6 +32,8 @@ class WorkerStatusResponse(BaseModel):
     error_message: Optional[str] = None
     uptime_seconds: Optional[int] = None
     memory_usage_mb: Optional[float] = None
+    global_pause: bool = False
+    paused_at: Optional[str] = None
 
 
 class WorkerActionResponse(BaseModel):
@@ -55,7 +57,8 @@ def get_worker_status_from_db() -> dict:
     db = SessionLocal()
     try:
         result = db.execute(text("""
-            SELECT pid, status, start_time, last_heartbeat, active_tasks, error_message
+            SELECT pid, status, start_time, last_heartbeat, active_tasks, error_message,
+                   global_pause, paused_at
             FROM worker_status
             WHERE id = 1
         """)).fetchone()
@@ -67,7 +70,9 @@ def get_worker_status_from_db() -> dict:
                 "start_time": result[2],
                 "last_heartbeat": result[3],
                 "active_tasks": result[4],
-                "error_message": result[5]
+                "error_message": result[5],
+                "global_pause": bool(result[6]) if result[6] is not None else False,
+                "paused_at": result[7]
             }
         return {
             "pid": None,
@@ -75,7 +80,9 @@ def get_worker_status_from_db() -> dict:
             "start_time": None,
             "last_heartbeat": None,
             "active_tasks": 0,
-            "error_message": None
+            "error_message": None,
+            "global_pause": False,
+            "paused_at": None
         }
     except Exception as e:
         logger.error(f"워커 상태 조회 실패: {str(e)}")
@@ -85,7 +92,9 @@ def get_worker_status_from_db() -> dict:
             "start_time": None,
             "last_heartbeat": None,
             "active_tasks": 0,
-            "error_message": str(e)
+            "error_message": str(e),
+            "global_pause": False,
+            "paused_at": None
         }
     finally:
         db.close()
@@ -373,3 +382,95 @@ async def check_worker_health():
             health["details"]["error"] = status_data["error_message"]
 
     return health
+
+
+@router.post("/pause", response_model=WorkerActionResponse)
+async def pause_monitoring():
+    """전체 모니터링을 일시중지합니다.
+
+    워커 프로세스는 계속 실행되지만 새로운 스케줄 처리와
+    기존 모니터링 체크를 일시적으로 중단합니다.
+    """
+    db = SessionLocal()
+    try:
+        # 현재 상태 확인
+        result = db.execute(text(
+            "SELECT global_pause FROM worker_status WHERE id = 1"
+        )).fetchone()
+
+        if result and result[0]:
+            return WorkerActionResponse(
+                success=False,
+                message="모니터링이 이미 일시중지 상태입니다",
+                pid=None
+            )
+
+        # 일시중지 상태로 변경
+        db.execute(text("""
+            UPDATE worker_status
+            SET global_pause = 1, paused_at = datetime('now', 'localtime'), updated_at = datetime('now', 'localtime')
+            WHERE id = 1
+        """))
+        db.commit()
+
+        logger.info("전체 모니터링 일시중지됨")
+
+        return WorkerActionResponse(
+            success=True,
+            message="전체 모니터링이 일시중지되었습니다",
+            pid=None
+        )
+    except Exception as e:
+        db.rollback()
+        logger.error(f"모니터링 일시중지 실패: {str(e)}")
+        return WorkerActionResponse(
+            success=False,
+            message=f"일시중지 실패: {str(e)}",
+            pid=None
+        )
+    finally:
+        db.close()
+
+
+@router.post("/resume", response_model=WorkerActionResponse)
+async def resume_monitoring():
+    """일시중지된 모니터링을 재개합니다."""
+    db = SessionLocal()
+    try:
+        # 현재 상태 확인
+        result = db.execute(text(
+            "SELECT global_pause FROM worker_status WHERE id = 1"
+        )).fetchone()
+
+        if result and not result[0]:
+            return WorkerActionResponse(
+                success=False,
+                message="모니터링이 이미 실행 중입니다",
+                pid=None
+            )
+
+        # 재개 상태로 변경
+        db.execute(text("""
+            UPDATE worker_status
+            SET global_pause = 0, paused_at = NULL, updated_at = datetime('now', 'localtime')
+            WHERE id = 1
+        """))
+        db.commit()
+
+        logger.info("전체 모니터링 재개됨")
+
+        return WorkerActionResponse(
+            success=True,
+            message="전체 모니터링이 재개되었습니다",
+            pid=None
+        )
+    except Exception as e:
+        db.rollback()
+        logger.error(f"모니터링 재개 실패: {str(e)}")
+        return WorkerActionResponse(
+            success=False,
+            message=f"재개 실패: {str(e)}",
+            pid=None
+        )
+    finally:
+        db.close()
