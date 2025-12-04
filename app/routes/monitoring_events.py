@@ -27,7 +27,7 @@ def get_monitoring_events(
     schedule_id: Optional[int] = Query(None, description="스케줄 ID로 필터링"),
     biz_item_id: Optional[int] = Query(None, description="상품 ID로 필터링"),
     business_id: Optional[int] = Query(None, description="업체 ID로 필터링"),
-    status: Optional[str] = Query(None, description="상태로 필터링 (success/available/no_slots/error)"),
+    status: Optional[str] = Query(None, description="상태로 필터링 (success/available/no_slots/hidden/paused/closed/not_opened/error)"),
     event_type: Optional[str] = Query(None, description="이벤트 타입으로 필터링"),
     date_from: Optional[str] = Query(None, description="시작 날짜 (YYYY-MM-DD)"),
     date_to: Optional[str] = Query(None, description="종료 날짜 (YYYY-MM-DD)"),
@@ -183,6 +183,10 @@ def get_monitoring_stats(
     success_count = query.filter(MonitoringEvent.status == "success").count()
     available_count = query.filter(MonitoringEvent.status == "available").count()
     no_slots_count = query.filter(MonitoringEvent.status == "no_slots").count()
+    hidden_count = query.filter(MonitoringEvent.status == "hidden").count()
+    paused_count = query.filter(MonitoringEvent.status == "paused").count()
+    closed_count = query.filter(MonitoringEvent.status == "closed").count()
+    not_opened_count = query.filter(MonitoringEvent.status == "not_opened").count()
     error_count = query.filter(MonitoringEvent.status == "error").count()
 
     # 평균 응답 시간
@@ -197,6 +201,10 @@ def get_monitoring_stats(
         success_count=success_count,
         available_count=available_count,
         no_slots_count=no_slots_count,
+        hidden_count=hidden_count,
+        paused_count=paused_count,
+        closed_count=closed_count,
+        not_opened_count=not_opened_count,
         error_count=error_count,
         avg_response_time_ms=float(avg_result) if avg_result else None,
         last_check_time=last_check_time

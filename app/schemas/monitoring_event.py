@@ -10,7 +10,7 @@ from typing import Optional, List, Any
 class MonitoringEventBase(BaseModel):
     """MonitoringEvent 기본 스키마"""
     event_type: str  # check, slot_detected, slot_booked, error
-    status: str  # success, available, no_slots, error
+    status: str  # success, available, no_slots, hidden, paused, closed, not_opened, error
     available_count: int = 0
     slots_info: Optional[List[Any]] = None
     error_message: Optional[str] = None
@@ -70,6 +70,10 @@ class MonitoringEventStats(BaseModel):
     success_count: int = 0
     available_count: int = 0
     no_slots_count: int = 0
+    hidden_count: int = 0  # 아이템 숨김
+    paused_count: int = 0  # 예약 일시중지
+    closed_count: int = 0  # 업체 비공개/운영중지
+    not_opened_count: int = 0  # 예약 미오픈
     error_count: int = 0
     avg_response_time_ms: Optional[float] = None
     last_check_time: Optional[datetime] = None

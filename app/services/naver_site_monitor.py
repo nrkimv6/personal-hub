@@ -21,6 +21,15 @@ if TYPE_CHECKING:
 KST = timezone(timedelta(hours=9))
 
 
+@dataclass
+class FetchResult:
+    """Fetch API 결과"""
+    hash: int
+    slots: List[str]
+    status: str = "no_slots"  # available, no_slots, hidden, paused, closed, error
+    reason: Optional[str] = None  # 상세 사유
+
+
 def filter_slots_by_time_range(slots: List[str], time_range_str: Optional[str]) -> List[str]:
     """
     슬롯 리스트에서 time_range 내에 있는 슬롯만 필터링하여 반환합니다. (REQ-BOOK-002)
@@ -769,7 +778,7 @@ class NaverSiteMonitor(AbstractSiteMonitor):
         tag: str,
         current_hash: int,
         current_data: List[str]
-    ) -> Tuple[int, List[str]]:
+    ) -> FetchResult:
         """
         Fetch API를 사용하여 네이버 예약 상태를 모니터링합니다.
         browser7.py의 perform_task_with_fetch 함수를 마이그레이션한 것입니다.
@@ -782,7 +791,7 @@ class NaverSiteMonitor(AbstractSiteMonitor):
             current_data: 현재 데이터
 
         Returns:
-            Tuple[int, List[str]]: (새 해시값, 예약 가능 슬롯 리스트)
+            FetchResult: 조회 결과 (hash, slots, status, reason)
         """
         try:
             # URL에서 비즈니스 파라미터 추출
@@ -790,7 +799,7 @@ class NaverSiteMonitor(AbstractSiteMonitor):
             url_match = re.search(url_pattern, url)
             if not url_match:
                 logger.error(f"[{tag}] Could not extract business parameters from URL: {url}")
-                return current_hash, current_data
+                return FetchResult(hash=current_hash, slots=current_data, status="error", reason="URL 파싱 오류")
 
             business_type_id = int(url_match.group(1))
             business_id = url_match.group(2)
@@ -800,7 +809,7 @@ class NaverSiteMonitor(AbstractSiteMonitor):
             date_match = re.search(r'start(?:Date|DateTime)=(\d{4}-\d{2}-\d{2})', url)
             if not date_match:
                 logger.error(f"[{tag}] Could not extract date from URL: {url}")
-                return current_hash, current_data
+                return FetchResult(hash=current_hash, slots=current_data, status="error", reason="날짜 파싱 오류")
 
             start_date = date_match.group(1)
 
@@ -867,7 +876,16 @@ class NaverSiteMonitor(AbstractSiteMonitor):
                 # disappeared 등 다른 상태 변화는 로깅만
 
                 logger.info(f"[{tag}] {reason} - 예약 불가")
-                return current_hash, []
+
+                # reason을 status로 매핑
+                reason_to_status = {
+                    "아이템 없음": "hidden",
+                    "업체 비공개 또는 운영중지": "closed",
+                    "예약 일시중지": "paused",
+                    "예약 미오픈": "not_opened",
+                }
+                status = reason_to_status.get(reason, "no_slots")
+                return FetchResult(hash=current_hash, slots=[], status=status, reason=reason)
             else:
                 # 예약 가능 상태 - 상태 추적
                 status_change = self._track_item_status(business_id, biz_item_id, "available", tag)
@@ -937,7 +955,7 @@ class NaverSiteMonitor(AbstractSiteMonitor):
 
             if not result:
                 logger.error(f"[{tag}] Fetch API returned null")
-                return current_hash, current_data
+                return FetchResult(hash=current_hash, slots=current_data, status="error", reason="API 응답 없음")
 
             # 데이터 파싱
             if result and 'data' in result:
@@ -981,14 +999,14 @@ class NaverSiteMonitor(AbstractSiteMonitor):
                 if available_slots:
                     new_hash = hash(str(available_slots))
                     logger.debug(f"[{tag}] Found {len(available_slots)} available slots")
-                    return new_hash, available_slots
+                    return FetchResult(hash=new_hash, slots=available_slots, status="available")
                 else:
                     logger.debug(f"[{tag}] No available slots")
-                    return hash(str([])), []
+                    return FetchResult(hash=hash(str([])), slots=[], status="no_slots")
             else:
                 logger.error(f"[{tag}] Invalid API response structure")
-                return current_hash, current_data
+                return FetchResult(hash=current_hash, slots=current_data, status="error", reason="API 응답 구조 오류")
 
         except Exception as e:
             logger.error(f"[{tag}] Fetch API error: {e}")
-            return current_hash, current_data
+            return FetchResult(hash=current_hash, slots=current_data, status="error", reason=str(e))
