@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { scheduleApi, businessApi, accountApi, itemApi, scheduleRecurringApi } from '$lib/api';
-  import type { ScheduleWithContext, Business, BusinessWithItems, BizItem, Account, MonitorScheduleUpdate, MonitorScheduleCreate, RecurringRuleWithContext, RecurringRuleCreate, WEEKDAYS } from '$lib/types';
+  import type { ScheduleWithContext, Business, BusinessWithItems, BizItem, Account, MonitorScheduleUpdate, MonitorScheduleCreate, RecurringRuleWithContext, RecurringRuleCreate, TargetPattern } from '$lib/types';
 
   let schedules: ScheduleWithContext[] = [];
   let businesses: Business[] = [];
@@ -16,6 +16,30 @@
   let recurringRules: RecurringRuleWithContext[] = [];
   let recurringLoading = false;
   let recurringError: string | null = null;
+
+  // 반복 규칙 생성 모달 상태
+  let showRecurringCreateModal = false;
+  let recurringCreateLoading = false;
+  let recurringCreateError: string | null = null;
+  let recurringSelectedBusinessItems: BizItem[] = [];
+
+  // 반복 규칙 생성 폼
+  let recurringForm = {
+    name: '',
+    business_id: null as number | null,
+    biz_item_id: null as number | null,
+    account_id: null as number | null,
+    recurrence_day: 4, // 금요일
+    trigger_time: '12:00',
+    auto_booking_enabled: false,
+    target_patterns: [] as Array<{
+      day_offset: number;
+      label: string;
+      times: string;
+      time_range: string;
+      use_time_range: boolean;
+    }>
+  };
 
   // 요일 상수
   const WEEKDAY_NAMES = ['월', '화', '수', '목', '금', '토', '일'];
@@ -195,6 +219,108 @@
       const time = p.times?.join(',') || p.time_range || '';
       return `${day}: ${time}`;
     }).join(' / ');
+  }
+
+  // 반복 규칙 생성 관련 함수들
+  async function handleRecurringBusinessSelect() {
+    if (!recurringForm.business_id) {
+      recurringSelectedBusinessItems = [];
+      recurringForm.biz_item_id = null;
+      return;
+    }
+    try {
+      recurringSelectedBusinessItems = await businessApi.getItems(recurringForm.business_id);
+      recurringForm.biz_item_id = null;
+    } catch (e) {
+      console.error('아이템 목록 로드 실패:', e);
+      recurringSelectedBusinessItems = [];
+    }
+  }
+
+  function openRecurringCreateModal() {
+    recurringForm = {
+      name: '',
+      business_id: null,
+      biz_item_id: null,
+      account_id: null,
+      recurrence_day: 4,
+      trigger_time: '12:00',
+      auto_booking_enabled: false,
+      target_patterns: []
+    };
+    recurringSelectedBusinessItems = [];
+    recurringCreateError = null;
+    showRecurringCreateModal = true;
+  }
+
+  function addRecurringTargetPattern() {
+    recurringForm.target_patterns = [
+      ...recurringForm.target_patterns,
+      {
+        day_offset: recurringForm.target_patterns.length + 3,
+        label: '',
+        times: '',
+        time_range: '',
+        use_time_range: false
+      }
+    ];
+  }
+
+  function removeRecurringTargetPattern(index: number) {
+    recurringForm.target_patterns = recurringForm.target_patterns.filter((_, i) => i !== index);
+  }
+
+  // 트리거 요일 기준 day_offset에 해당하는 요일 계산
+  function getRecurringDayLabel(dayOffset: number): string {
+    const targetDay = (recurringForm.recurrence_day + dayOffset) % 7;
+    return WEEKDAY_NAMES[targetDay] + '요일';
+  }
+
+  async function createRecurringRule() {
+    if (!recurringForm.biz_item_id) {
+      recurringCreateError = '상품을 선택해주세요.';
+      return;
+    }
+    if (!recurringForm.name.trim()) {
+      recurringCreateError = '규칙 이름을 입력해주세요.';
+      return;
+    }
+    if (recurringForm.target_patterns.length === 0) {
+      recurringCreateError = '대상 패턴을 하나 이상 추가해주세요.';
+      return;
+    }
+
+    recurringCreateLoading = true;
+    recurringCreateError = null;
+
+    try {
+      // 타겟 패턴 변환
+      const targetPatterns: TargetPattern[] = recurringForm.target_patterns.map(p => ({
+        day_offset: p.day_offset,
+        label: p.label || getRecurringDayLabel(p.day_offset),
+        times: p.use_time_range ? undefined : p.times.split(',').map(t => t.trim()).filter(t => t),
+        time_range: p.use_time_range ? p.time_range : undefined
+      }));
+
+      const data: RecurringRuleCreate = {
+        type: 'monitor',
+        biz_item_id: recurringForm.biz_item_id,
+        account_id: recurringForm.account_id,
+        name: recurringForm.name,
+        recurrence_day: recurringForm.recurrence_day,
+        trigger_time: recurringForm.trigger_time,
+        target_patterns: targetPatterns,
+        auto_booking_enabled: recurringForm.auto_booking_enabled
+      };
+
+      await scheduleRecurringApi.create(data);
+      showRecurringCreateModal = false;
+      await fetchRecurringRules();
+    } catch (e) {
+      recurringCreateError = e instanceof Error ? e.message : '생성 실패';
+    } finally {
+      recurringCreateLoading = false;
+    }
   }
 
   async function fetchBusinesses() {
@@ -490,6 +616,9 @@
       {:else}
         <button class="btn btn-secondary btn-sm" on:click={fetchRecurringRules}>
           새로고침
+        </button>
+        <button class="btn btn-primary btn-sm" on:click={openRecurringCreateModal}>
+          + 반복 규칙 등록
         </button>
       {/if}
     </div>
@@ -1093,6 +1222,212 @@
             취소
           </button>
           <button type="submit" class="btn btn-primary">복제</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{/if}
+
+<!-- 반복 규칙 생성 모달 -->
+{#if showRecurringCreateModal}
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+      <div class="p-4 border-b sticky top-0 bg-white">
+        <h3 class="text-lg font-semibold">반복 모니터링 규칙 생성</h3>
+      </div>
+
+      <form on:submit|preventDefault={createRecurringRule} class="p-4 space-y-4">
+        {#if recurringCreateError}
+          <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+            {recurringCreateError}
+          </div>
+        {/if}
+
+        <!-- 규칙 이름 -->
+        <div>
+          <label for="recurring-name" class="block text-sm font-medium text-gray-700 mb-1">규칙 이름</label>
+          <input
+            id="recurring-name"
+            type="text"
+            class="input"
+            bind:value={recurringForm.name}
+            placeholder="예: 금요일 정기 오픈"
+            required
+          />
+        </div>
+
+        <!-- 대상 상품 -->
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label for="recurring-business" class="block text-sm font-medium text-gray-700 mb-1">업체</label>
+            <select
+              id="recurring-business"
+              class="input"
+              bind:value={recurringForm.business_id}
+              on:change={handleRecurringBusinessSelect}
+              required
+            >
+              <option value={null}>업체 선택</option>
+              {#each businesses as business}
+                <option value={business.id}>{business.name}</option>
+              {/each}
+            </select>
+          </div>
+          <div>
+            <label for="recurring-item" class="block text-sm font-medium text-gray-700 mb-1">상품</label>
+            <select
+              id="recurring-item"
+              class="input"
+              bind:value={recurringForm.biz_item_id}
+              disabled={!recurringForm.business_id}
+              required
+            >
+              <option value={null}>상품 선택</option>
+              {#each recurringSelectedBusinessItems as item}
+                <option value={item.id}>{item.name}</option>
+              {/each}
+            </select>
+          </div>
+        </div>
+
+        <!-- 계정 선택 -->
+        <div>
+          <label for="recurring-account" class="block text-sm font-medium text-gray-700 mb-1">사용 계정 (선택사항)</label>
+          <select id="recurring-account" class="input" bind:value={recurringForm.account_id}>
+            <option value={null}>계정 선택 안함</option>
+            {#each accounts as account}
+              <option value={account.id}>{account.name}</option>
+            {/each}
+          </select>
+        </div>
+
+        <!-- 반복 설정 -->
+        <div class="border-t pt-4">
+          <h4 class="text-sm font-medium text-gray-900 mb-3">반복 설정</h4>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label for="recurring-day" class="block text-sm font-medium text-gray-700 mb-1">트리거 요일</label>
+              <select id="recurring-day" class="input" bind:value={recurringForm.recurrence_day}>
+                {#each WEEKDAY_NAMES as name, idx}
+                  <option value={idx}>{name}요일</option>
+                {/each}
+              </select>
+            </div>
+            <div>
+              <label for="recurring-time" class="block text-sm font-medium text-gray-700 mb-1">트리거 시간 (오픈 시간)</label>
+              <input
+                id="recurring-time"
+                type="time"
+                class="input"
+                bind:value={recurringForm.trigger_time}
+                required
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- 대상 날짜/시간 패턴 -->
+        <div class="border-t pt-4">
+          <div class="flex justify-between items-center mb-3">
+            <h4 class="text-sm font-medium text-gray-900">대상 날짜/시간 패턴</h4>
+            <button type="button" class="btn btn-secondary btn-sm" on:click={addRecurringTargetPattern}>
+              + 패턴 추가
+            </button>
+          </div>
+
+          {#if recurringForm.target_patterns.length === 0}
+            <div class="text-sm text-gray-500 text-center py-4 bg-gray-50 rounded">
+              패턴을 추가해주세요. 트리거 날짜 기준 D+N일에 대한 시간을 설정합니다.
+            </div>
+          {:else}
+            <div class="space-y-3">
+              {#each recurringForm.target_patterns as pattern, idx}
+                <div class="border rounded-lg p-3 bg-gray-50">
+                  <div class="flex items-center gap-3 mb-2">
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm font-medium">D+</span>
+                      <input
+                        type="number"
+                        class="input w-16"
+                        bind:value={pattern.day_offset}
+                        min="0"
+                        max="30"
+                      />
+                    </div>
+                    <span class="text-sm text-gray-500">({getRecurringDayLabel(pattern.day_offset)})</span>
+                    <input
+                      type="text"
+                      class="input flex-1"
+                      bind:value={pattern.label}
+                      placeholder="라벨 (선택)"
+                    />
+                    <button
+                      type="button"
+                      class="btn btn-danger btn-sm"
+                      on:click={() => removeRecurringTargetPattern(idx)}
+                    >
+                      삭제
+                    </button>
+                  </div>
+                  <div class="flex items-center gap-3">
+                    <label class="flex items-center gap-2">
+                      <input type="radio" bind:group={pattern.use_time_range} value={false} />
+                      <span class="text-sm">시간 목록</span>
+                    </label>
+                    <label class="flex items-center gap-2">
+                      <input type="radio" bind:group={pattern.use_time_range} value={true} />
+                      <span class="text-sm">시간 범위</span>
+                    </label>
+                  </div>
+                  <div class="mt-2">
+                    {#if pattern.use_time_range}
+                      <input
+                        type="text"
+                        class="input"
+                        bind:value={pattern.time_range}
+                        placeholder="예: 13:00-19:00"
+                      />
+                    {:else}
+                      <input
+                        type="text"
+                        class="input"
+                        bind:value={pattern.times}
+                        placeholder="예: 18:00, 19:00"
+                      />
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+
+        <!-- 모니터링 옵션 -->
+        <div class="border-t pt-4">
+          <h4 class="text-sm font-medium text-gray-900 mb-3">모니터링 옵션</h4>
+          <label class="flex items-center gap-2">
+            <input type="checkbox" bind:checked={recurringForm.auto_booking_enabled} />
+            <span class="text-sm">자동 예약 활성화</span>
+          </label>
+          <p class="text-xs text-gray-500 mt-1">생성되는 일정에서 슬롯 발견 시 자동으로 예약을 수행합니다.</p>
+        </div>
+
+        <!-- 버튼 -->
+        <div class="flex justify-end gap-3 pt-4 border-t">
+          <button
+            type="button"
+            class="btn btn-secondary"
+            on:click={() => showRecurringCreateModal = false}
+          >
+            취소
+          </button>
+          <button
+            type="submit"
+            class="btn btn-primary"
+            disabled={recurringCreateLoading}
+          >
+            {recurringCreateLoading ? '생성 중...' : '생성'}
+          </button>
         </div>
       </form>
     </div>
