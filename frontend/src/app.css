@@ -104,6 +104,24 @@ body {
   background-color: #b91c1c;
 }
 
+.btn-info {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.btn-info:hover {
+  background-color: #bfdbfe;
+}
+
+.btn-warning {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.btn-warning:hover {
+  background-color: #fde68a;
+}
+
 .btn-sm {
   padding: 0.375rem 0.75rem;
   font-size: 0.875rem;

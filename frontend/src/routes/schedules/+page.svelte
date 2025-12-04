@@ -1,13 +1,24 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { scheduleApi, businessApi, accountApi, itemApi } from '$lib/api';
-  import type { ScheduleWithContext, Business, BusinessWithItems, BizItem, Account, MonitorScheduleUpdate, MonitorScheduleCreate } from '$lib/types';
+  import { scheduleApi, businessApi, accountApi, itemApi, scheduleRecurringApi } from '$lib/api';
+  import type { ScheduleWithContext, Business, BusinessWithItems, BizItem, Account, MonitorScheduleUpdate, MonitorScheduleCreate, RecurringRuleWithContext, RecurringRuleCreate, WEEKDAYS } from '$lib/types';
 
   let schedules: ScheduleWithContext[] = [];
   let businesses: Business[] = [];
   let accounts: Account[] = [];
   let loading = true;
   let error: string | null = null;
+
+  // 탭 상태
+  let activeTab: 'schedules' | 'recurring' = 'schedules';
+
+  // 반복 규칙 관련 상태
+  let recurringRules: RecurringRuleWithContext[] = [];
+  let recurringLoading = false;
+  let recurringError: string | null = null;
+
+  // 요일 상수
+  const WEEKDAY_NAMES = ['월', '화', '수', '목', '금', '토', '일'];
 
   // 오늘 날짜 계산
   function getTodayDate(): string {
@@ -113,6 +124,77 @@
     } finally {
       loading = false;
     }
+  }
+
+  async function fetchRecurringRules() {
+    recurringLoading = true;
+    recurringError = null;
+    try {
+      recurringRules = await scheduleRecurringApi.list();
+    } catch (e) {
+      recurringError = e instanceof Error ? e.message : '반복 규칙 로드 실패';
+    } finally {
+      recurringLoading = false;
+    }
+  }
+
+  async function handleToggleRecurringRule(rule: RecurringRuleWithContext) {
+    try {
+      if (rule.is_enabled) {
+        await scheduleRecurringApi.disable(rule.id);
+      } else {
+        await scheduleRecurringApi.enable(rule.id);
+      }
+      await fetchRecurringRules();
+    } catch (e) {
+      alert('상태 변경 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+    }
+  }
+
+  async function handleDeleteRecurringRule(rule: RecurringRuleWithContext) {
+    if (!confirm(`${rule.business_name} - ${rule.item_name}\n"${rule.name}" 반복 규칙을 삭제하시겠습니까?`)) return;
+    try {
+      await scheduleRecurringApi.delete(rule.id);
+      await fetchRecurringRules();
+    } catch (e) {
+      alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+    }
+  }
+
+  async function handleTriggerRecurringRule(rule: RecurringRuleWithContext) {
+    if (!confirm(`"${rule.name}" 규칙을 수동으로 트리거하시겠습니까?\n일정이 즉시 생성됩니다.`)) return;
+    try {
+      const result = await scheduleRecurringApi.trigger(rule.id);
+      alert(`${result.created_count}개의 일정이 생성되었습니다.`);
+      await fetchRecurringRules();
+      await fetchSchedules();
+    } catch (e) {
+      alert('트리거 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+    }
+  }
+
+  function formatNextTrigger(nextTriggerAt: string | null): string {
+    if (!nextTriggerAt) return '-';
+    const date = new Date(nextTriggerAt);
+    const now = new Date();
+    const diffMs = date.getTime() - now.getTime();
+    if (diffMs < 0) return '대기 중';
+
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+
+    if (diffDays > 0) return `${diffDays}일 ${diffHours}시간 후`;
+    if (diffHours > 0) return `${diffHours}시간 후`;
+    const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+    return `${diffMins}분 후`;
+  }
+
+  function formatTargetPatterns(patterns: Array<{day_offset: number; label?: string; times?: string[]; time_range?: string}>): string {
+    return patterns.map(p => {
+      const day = p.label || `D+${p.day_offset}`;
+      const time = p.times?.join(',') || p.time_range || '';
+      return `${day}: ${time}`;
+    }).join(' / ');
   }
 
   async function fetchBusinesses() {
@@ -390,6 +472,7 @@
     fetchSchedules();
     fetchBusinesses();
     fetchAccounts();
+    fetchRecurringRules();
   });
 </script>
 
@@ -397,15 +480,42 @@
   <div class="mb-6 flex justify-between items-center">
     <h2 class="text-2xl font-bold text-gray-900">일정 관리</h2>
     <div class="flex gap-2">
-      <button class="btn btn-primary btn-sm" on:click={openCreateModal}>
-        일정 등록
-      </button>
-      <button class="btn btn-secondary btn-sm" on:click={fetchSchedules}>
-        새로고침
-      </button>
+      {#if activeTab === 'schedules'}
+        <button class="btn btn-primary btn-sm" on:click={openCreateModal}>
+          일정 등록
+        </button>
+        <button class="btn btn-secondary btn-sm" on:click={fetchSchedules}>
+          새로고침
+        </button>
+      {:else}
+        <button class="btn btn-secondary btn-sm" on:click={fetchRecurringRules}>
+          새로고침
+        </button>
+      {/if}
     </div>
   </div>
 
+  <!-- 탭 네비게이션 -->
+  <div class="border-b border-gray-200 mb-6">
+    <nav class="flex space-x-8">
+      <button
+        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'schedules' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}"
+        on:click={() => activeTab = 'schedules'}
+      >
+        일정 목록
+        <span class="ml-2 px-2 py-0.5 text-xs rounded-full {activeTab === 'schedules' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'}">{schedules.length}</span>
+      </button>
+      <button
+        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'recurring' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}"
+        on:click={() => activeTab = 'recurring'}
+      >
+        반복 규칙
+        <span class="ml-2 px-2 py-0.5 text-xs rounded-full {activeTab === 'recurring' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'}">{recurringRules.length}</span>
+      </button>
+    </nav>
+  </div>
+
+  {#if activeTab === 'schedules'}
   <!-- 필터 영역 -->
   <div class="card mb-6">
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
@@ -628,6 +738,110 @@
         </table>
       </div>
     </div>
+  {/if}
+  {/if}
+
+  <!-- 반복 규칙 탭 -->
+  {#if activeTab === 'recurring'}
+    {#if recurringLoading}
+      <div class="flex justify-center items-center h-64">
+        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    {:else if recurringError}
+      <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+        {recurringError}
+      </div>
+    {:else if recurringRules.length === 0}
+      <div class="card text-center py-12">
+        <p class="text-gray-500 mb-4">등록된 반복 규칙이 없습니다.</p>
+        <p class="text-sm text-gray-400">반복 규칙은 매주 특정 요일/시간에 일정을 자동으로 생성합니다.</p>
+      </div>
+    {:else}
+      <div class="card">
+        <div class="mb-4 text-sm text-gray-600">
+          총 {recurringRules.length}개의 반복 규칙
+        </div>
+        <div class="overflow-x-auto">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>이름</th>
+                <th>업체</th>
+                <th>아이템</th>
+                <th>트리거</th>
+                <th>대상 패턴</th>
+                <th>상태</th>
+                <th>다음 실행</th>
+                <th>마지막 실행</th>
+                <th class="w-32">작업</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each recurringRules as rule (rule.id)}
+                <tr class="{!rule.is_enabled ? 'opacity-60' : ''}">
+                  <td class="font-medium">{rule.name}</td>
+                  <td>{rule.business_name}</td>
+                  <td>{rule.item_name}</td>
+                  <td>
+                    <div class="text-sm">
+                      <span class="font-medium">{WEEKDAY_NAMES[rule.recurrence_day]}요일</span>
+                      <span class="text-gray-500 ml-1">{rule.trigger_time}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="text-xs text-gray-600 max-w-xs truncate" title={formatTargetPatterns(rule.target_patterns)}>
+                      {formatTargetPatterns(rule.target_patterns)}
+                    </div>
+                  </td>
+                  <td
+                    class="cursor-pointer hover:bg-gray-100"
+                    on:click={() => handleToggleRecurringRule(rule)}
+                    title={rule.is_enabled ? '클릭하여 비활성화' : '클릭하여 활성화'}
+                  >
+                    <span class="badge {rule.is_enabled ? 'badge-success' : 'badge-gray'}">
+                      {rule.is_enabled ? '활성' : '비활성'}
+                    </span>
+                  </td>
+                  <td class="text-xs">
+                    {#if rule.is_enabled && rule.next_trigger_at}
+                      <div class="text-blue-600 font-medium">{formatNextTrigger(rule.next_trigger_at)}</div>
+                      <div class="text-gray-400">{new Date(rule.next_trigger_at).toLocaleString('ko-KR')}</div>
+                    {:else}
+                      <span class="text-gray-400">-</span>
+                    {/if}
+                  </td>
+                  <td class="text-xs text-gray-600">
+                    {#if rule.last_triggered_at}
+                      {new Date(rule.last_triggered_at).toLocaleString('ko-KR')}
+                    {:else}
+                      <span class="text-gray-400">-</span>
+                    {/if}
+                  </td>
+                  <td>
+                    <div class="flex gap-1">
+                      <button
+                        class="btn btn-info btn-xs"
+                        on:click={() => handleTriggerRecurringRule(rule)}
+                        title="수동 트리거"
+                      >
+                        실행
+                      </button>
+                      <button
+                        class="btn btn-danger btn-xs"
+                        on:click={() => handleDeleteRecurringRule(rule)}
+                        title="삭제"
+                      >
+                        삭제
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {/if}
   {/if}
 </div>
 
@@ -942,5 +1156,13 @@
   }
   .btn-success:hover {
     background-color: #bbf7d0;
+  }
+  .btn-info {
+    background-color: #dbeafe;
+    color: #1e40af;
+    border: 1px solid #93c5fd;
+  }
+  .btn-info:hover {
+    background-color: #bfdbfe;
   }
 </style>

@@ -63,6 +63,7 @@ class BizItem(Base):
     business = relationship("Business", back_populates="items")
     account = relationship("Account", back_populates="biz_items")
     schedules = relationship("MonitorSchedule", back_populates="biz_item", cascade="all, delete-orphan")
+    recurring_rules = relationship("RecurringRule", back_populates="biz_item", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<BizItem(id={self.id}, biz_item_id={self.biz_item_id}, name={self.name})>"

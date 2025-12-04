@@ -1,6 +1,7 @@
 """
 MonitorSchedule 라우트 - 일정 API
 설계 문서: 2025-12-01_monitoring_restructure_design.md
+업데이트: 2025-12-04 - 반복 규칙 엔드포인트 추가
 """
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,7 +12,14 @@ from app.schemas.monitor_schedule import (
     MonitorSchedule,
     MonitorScheduleUpdate,
 )
+from app.schemas.recurring_rule import (
+    RecurringRuleCreate,
+    RecurringRuleUpdate,
+    RecurringRuleWithContext,
+    PreviewResponse,
+)
 from app.services.schedule_service import schedule_service
+from app.services.recurring_rule_service import recurring_rule_service
 
 router = APIRouter(prefix="/api/v1/schedules", tags=["schedules"])
 
@@ -148,3 +156,170 @@ def disable_schedule(schedule_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Schedule not found")
     schedule = schedule_service.get_by_id(db, schedule_id)
     return _fill_account_name(schedule)
+
+
+# =====================================================
+# 반복 규칙 (Recurring Rules) - 모니터링용
+# =====================================================
+
+@router.get("/recurring")
+def get_recurring_rules(
+    is_enabled: Optional[bool] = Query(None, description="활성화 상태로 필터링"),
+    biz_item_id: Optional[int] = Query(None, description="아이템 ID로 필터링"),
+    search: Optional[str] = Query(None, description="이름/업체명/아이템명 검색"),
+    db: Session = Depends(get_db)
+):
+    """
+    반복 모니터링 규칙 목록 조회
+
+    모니터링용 반복 규칙만 반환합니다 (type=monitor).
+    """
+    return recurring_rule_service.get_all_with_context(
+        db,
+        rule_type="monitor",
+        is_enabled=is_enabled,
+        biz_item_id=biz_item_id,
+        search=search,
+    )
+
+
+@router.post("/recurring")
+def create_recurring_rule(data: RecurringRuleCreate, db: Session = Depends(get_db)):
+    """
+    반복 모니터링 규칙 생성
+
+    매주 지정된 요일/시간에 모니터링 일정을 자동 생성합니다.
+    """
+    # 타입 강제 설정
+    data.type = "monitor"
+    rule = recurring_rule_service.create(db, data)
+    return recurring_rule_service.get_all_with_context(
+        db, rule_type="monitor", biz_item_id=rule.biz_item_id
+    )[0] if rule else None
+
+
+@router.get("/recurring/{rule_id}")
+def get_recurring_rule(rule_id: int, db: Session = Depends(get_db)):
+    """반복 모니터링 규칙 상세 조회"""
+    rules = recurring_rule_service.get_all_with_context(db, rule_type="monitor")
+    for rule in rules:
+        if rule["id"] == rule_id:
+            return rule
+    raise HTTPException(status_code=404, detail="Recurring rule not found")
+
+
+@router.put("/recurring/{rule_id}")
+def update_recurring_rule(
+    rule_id: int,
+    data: RecurringRuleUpdate,
+    db: Session = Depends(get_db)
+):
+    """반복 모니터링 규칙 수정"""
+    rule = recurring_rule_service.update(db, rule_id, data)
+    if not rule:
+        raise HTTPException(status_code=404, detail="Recurring rule not found")
+    return recurring_rule_service.get_all_with_context(
+        db, rule_type="monitor", biz_item_id=rule.biz_item_id
+    )[0] if rule else None
+
+
+@router.delete("/recurring/{rule_id}", status_code=204)
+def delete_recurring_rule(rule_id: int, db: Session = Depends(get_db)):
+    """반복 모니터링 규칙 삭제"""
+    success = recurring_rule_service.delete(db, rule_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Recurring rule not found")
+    return None
+
+
+@router.post("/recurring/{rule_id}/enable")
+def enable_recurring_rule(rule_id: int, db: Session = Depends(get_db)):
+    """반복 모니터링 규칙 활성화"""
+    rule = recurring_rule_service.enable(db, rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="Recurring rule not found")
+    return {"success": True, "next_trigger_at": rule.next_trigger_at.isoformat() if rule.next_trigger_at else None}
+
+
+@router.post("/recurring/{rule_id}/disable")
+def disable_recurring_rule(rule_id: int, db: Session = Depends(get_db)):
+    """반복 모니터링 규칙 비활성화"""
+    rule = recurring_rule_service.disable(db, rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail="Recurring rule not found")
+    return {"success": True}
+
+
+@router.post("/recurring/{rule_id}/trigger")
+def trigger_recurring_rule(rule_id: int, db: Session = Depends(get_db)):
+    """
+    반복 모니터링 규칙 수동 트리거
+
+    즉시 모니터링 일정을 생성합니다 (테스트/수동 실행용).
+    """
+    result = recurring_rule_service.trigger(db, rule_id)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result.get("error", "Trigger failed"))
+    return result
+
+
+@router.get("/recurring/{rule_id}/preview", response_model=PreviewResponse)
+def preview_recurring_rule(rule_id: int, db: Session = Depends(get_db)):
+    """
+    반복 모니터링 규칙 미리보기
+
+    트리거 시 생성될 일정 목록을 반환합니다.
+    """
+    preview = recurring_rule_service.preview(db, rule_id)
+    if not preview:
+        raise HTTPException(status_code=404, detail="Recurring rule not found")
+    return preview
+
+
+@router.get("/unified")
+def get_unified_schedules(
+    item_type: Optional[str] = Query(None, description="all|recurring|single"),
+    is_enabled: Optional[bool] = Query(None, description="활성화 상태로 필터링"),
+    biz_item_id: Optional[int] = Query(None, description="아이템 ID로 필터링"),
+    search: Optional[str] = Query(None, description="검색어"),
+    db: Session = Depends(get_db)
+):
+    """
+    통합 일정 조회 (반복 규칙 + 단발 일정)
+
+    일정관리 페이지에서 반복 규칙과 단발 일정을 섞어서 표시할 때 사용합니다.
+    """
+    items = []
+
+    # 반복 규칙 조회
+    if item_type in (None, "all", "recurring"):
+        recurring_rules = recurring_rule_service.get_all_with_context(
+            db,
+            rule_type="monitor",
+            is_enabled=is_enabled,
+            biz_item_id=biz_item_id,
+            search=search,
+        )
+        for rule in recurring_rules:
+            items.append({
+                "item_type": "recurring",
+                **rule
+            })
+
+    # 단발 일정 조회
+    if item_type in (None, "all", "single"):
+        single_schedules = schedule_service.get_all_with_context(
+            db,
+            is_enabled=is_enabled,
+            biz_item_id=biz_item_id,
+            search=search,
+        )
+        # recurring_rule_id가 없는 것만 (반복 규칙에서 생성되지 않은 것)
+        for schedule in single_schedules:
+            if not schedule.get("recurring_rule_id"):
+                items.append({
+                    "item_type": "single",
+                    **schedule
+                })
+
+    return {"items": items}
