@@ -34,6 +34,9 @@ class MonitoringEvent(MonitoringEventBase):
     schedule_date: Optional[str] = None
     biz_item_name: Optional[str] = None
     business_name: Optional[str] = None
+    # URL 생성용 ID (네이버 예약)
+    naver_business_id: Optional[str] = None
+    naver_biz_item_id: Optional[str] = None
 
     @field_validator('slots_info', mode='before')
     @classmethod

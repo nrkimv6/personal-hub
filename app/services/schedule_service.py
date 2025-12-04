@@ -182,6 +182,8 @@ class ScheduleService:
             "booking_options": json.loads(business.booking_options) if business.booking_options else None,
             # 마지막 모니터링 시간
             "last_check": schedule.updated_at,
+            "last_check_time": getattr(schedule, 'last_check_time', None),
+            "next_run_time": getattr(schedule, 'next_run_time', None),
         }
 
     def get_enabled_with_context(self, db: Session) -> List[Dict[str, Any]]:

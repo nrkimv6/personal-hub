@@ -114,6 +114,8 @@ def get_monitoring_events(
             "schedule_date": schedule.date if schedule else None,
             "biz_item_name": biz_item.name if biz_item else None,
             "business_name": business.name if business else None,
+            "naver_business_id": business.business_id if business else None,
+            "naver_biz_item_id": biz_item.biz_item_id if biz_item else None,
         }
         result.append(MonitoringEventSchema(**event_dict))
 
@@ -234,6 +236,8 @@ def get_monitoring_event(event_id: int, db: Session = Depends(get_db)):
         schedule_date=schedule.date if schedule else None,
         biz_item_name=biz_item.name if biz_item else None,
         business_name=business.name if business else None,
+        naver_business_id=business.business_id if business else None,
+        naver_biz_item_id=biz_item.biz_item_id if biz_item else None,
     )
 
 

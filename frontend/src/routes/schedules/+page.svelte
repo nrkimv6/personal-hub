@@ -43,6 +43,34 @@
     return `${Math.floor(seconds / 3600)}시간`;
   }
 
+  // 시간 포맷팅 (HH:MM:SS)
+  function formatTime(isoString: string | null | undefined): string {
+    if (!isoString) return '-';
+    try {
+      const date = new Date(isoString);
+      return date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch {
+      return '-';
+    }
+  }
+
+  // 남은 시간 계산
+  function getRemainingTime(nextRunTime: string | null | undefined): string {
+    if (!nextRunTime) return '-';
+    try {
+      const next = new Date(nextRunTime);
+      const now = new Date();
+      const diffSeconds = Math.floor((next.getTime() - now.getTime()) / 1000);
+      if (diffSeconds <= 0) return '곧 실행';
+      const mins = Math.floor(diffSeconds / 60);
+      const secs = diffSeconds % 60;
+      if (mins > 0) return `${mins}분 ${secs}초`;
+      return `${secs}초`;
+    } catch {
+      return '-';
+    }
+  }
+
   // 등록 모달
   let showCreateModal = false;
   let createMode: 'url' | 'select' = 'select';
@@ -338,6 +366,26 @@
     return { date: dateStr, badge };
   }
 
+  // 네이버 예약 URL 생성
+  function buildBookingUrl(schedule: ScheduleWithContext): string {
+    return `https://booking.naver.com/booking/13/bizes/${schedule.business_id}/items/${schedule.item_biz_item_id}`;
+  }
+
+  // 클립보드 복사
+  let copiedId: number | null = null;
+  async function copyToClipboard(text: string, scheduleId: number) {
+    try {
+      await navigator.clipboard.writeText(text);
+      copiedId = scheduleId;
+      setTimeout(() => {
+        copiedId = null;
+      }, 2000);
+    } catch (e) {
+      console.error('클립보드 복사 실패:', e);
+      alert('클립보드 복사에 실패했습니다.');
+    }
+  }
+
   onMount(() => {
     fetchSchedules();
     fetchBusinesses();
@@ -429,10 +477,13 @@
               <th>날짜</th>
               <th>업체</th>
               <th>아이템</th>
+              <th>링크</th>
               <th>시간</th>
               <th>간격</th>
               <th>계정</th>
               <th>상태</th>
+              <th>마지막 체크</th>
+              <th>다음 실행</th>
               <th>자동예약</th>
               <th class="w-32">작업</th>
             </tr>
@@ -468,6 +519,15 @@
                       <span class="badge badge-gray text-xs">비활성</span>
                     {/if}
                   </div>
+                </td>
+                <td>
+                  <button
+                    class="btn btn-xs {copiedId === schedule.id ? 'btn-success' : 'btn-secondary'}"
+                    on:click={() => copyToClipboard(buildBookingUrl(schedule), schedule.id)}
+                    title={buildBookingUrl(schedule)}
+                  >
+                    {copiedId === schedule.id ? '복사됨' : '복사'}
+                  </button>
                 </td>
                 <td>
                   {#if schedule.times && schedule.times.length > 0}
@@ -509,6 +569,18 @@
                     <span class="text-xs text-red-600 block" title={schedule.last_error || ''}>
                       오류 {schedule.error_count}회
                     </span>
+                  {/if}
+                </td>
+                <td class="text-xs text-gray-600 whitespace-nowrap">
+                  {formatTime(schedule.last_check_time)}
+                </td>
+                <td class="text-xs whitespace-nowrap">
+                  {#if schedule.run_status === 'running'}
+                    <span class="text-green-600 font-medium">실행 중</span>
+                  {:else if schedule.run_status === 'queued'}
+                    <span class="text-blue-600">{getRemainingTime(schedule.next_run_time)}</span>
+                  {:else}
+                    <span class="text-gray-400">-</span>
                   {/if}
                 </td>
                 <td>

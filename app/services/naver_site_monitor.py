@@ -115,6 +115,10 @@ class NaverSiteMonitor(AbstractSiteMonitor):
     # bizItems API 캐시 (클래스 레벨) - business_id 단위로 캐싱 (REQ-MON-006)
     _biz_items_cache: Dict[str, BizItemsCacheEntry] = {}
 
+    # 아이템별 상태 추적 (REQ-MON-007: 복귀 감지)
+    # key: "{business_id}:{biz_item_id}", value: {"status": "not_found"|"available", "last_checked": datetime}
+    _item_status_tracker: Dict[str, Dict[str, Any]] = {}
+
     def __init__(self, notification_service=None, browser_service=None):
         super().__init__(notification_service)
         # browser_service가 None이면 나중에 set_browser_service()로 설정
@@ -361,8 +365,10 @@ class NaverSiteMonitor(AbstractSiteMonitor):
         if biz_item_id:
             item = next((i for i in items if str(i.get('bizItemId')) == str(biz_item_id)), None)
             if not item:
-                logger.debug(f"[{tag}] Cache TTL: {TTL_CLOSED}s (not_found)")
-                return TTL_CLOSED, "not_found"
+                # 아이템 없음 상태: 짧은 TTL로 복귀 감지 (REQ-MON-007)
+                ttl_not_found = settings.BIZ_ITEMS_CACHE_TTL_NOT_FOUND
+                logger.debug(f"[{tag}] Cache TTL: {ttl_not_found}s (not_found - 복귀 감지 모드)")
+                return ttl_not_found, "not_found"
             items_to_check = [item]
 
         min_ttl = TTL_NORMAL
@@ -477,6 +483,64 @@ class NaverSiteMonitor(AbstractSiteMonitor):
         # 예약 가능!
         logger.debug(f"[{tag}] bizItems 예약 가능 확인 완료")
         return {"available": True, "reason": "OK", "data": bookable_setting}
+
+    def _track_item_status(
+        self,
+        business_id: str,
+        biz_item_id: str,
+        current_status: str,
+        tag: str
+    ) -> Optional[str]:
+        """
+        아이템 상태 변화를 추적합니다. (REQ-MON-007: 복귀 감지)
+
+        Args:
+            business_id: 업체 ID
+            biz_item_id: 아이템 ID
+            current_status: 현재 상태 ("not_found", "available", "paused", "closed", "not_opened")
+            tag: 로깅용 태그
+
+        Returns:
+            str: 상태 변화 유형 ("appeared" = 복귀, "disappeared" = 사라짐, None = 변화 없음)
+        """
+        tracker_key = f"{business_id}:{biz_item_id}"
+        now = datetime.now(KST)
+
+        prev_data = self._item_status_tracker.get(tracker_key)
+
+        if prev_data is None:
+            # 최초 추적: 상태 저장
+            self._item_status_tracker[tracker_key] = {
+                "status": current_status,
+                "last_checked": now
+            }
+            logger.debug(f"[{tag}] 아이템 상태 추적 시작: {current_status}")
+            return None
+
+        prev_status = prev_data.get("status")
+
+        # 상태 변화 감지
+        status_change = None
+
+        if prev_status == "not_found" and current_status == "available":
+            # 복귀 감지!
+            status_change = "appeared"
+            logger.info(f"[{tag}] 🔔 아이템 복귀 감지! (not_found → available)")
+        elif prev_status == "available" and current_status == "not_found":
+            # 사라짐 감지
+            status_change = "disappeared"
+            logger.info(f"[{tag}] ⚠️ 아이템 사라짐 감지 (available → not_found)")
+        elif prev_status != current_status:
+            # 기타 상태 변화
+            logger.debug(f"[{tag}] 아이템 상태 변화: {prev_status} → {current_status}")
+
+        # 상태 업데이트
+        self._item_status_tracker[tracker_key] = {
+            "status": current_status,
+            "last_checked": now
+        }
+
+        return status_change
 
     async def _fetch_biz_items_api(
         self,
@@ -793,8 +857,37 @@ class NaverSiteMonitor(AbstractSiteMonitor):
                 logger.warning(f"[{tag}] bizItems API 오류, schedule만으로 체크 진행")
             elif not biz_check["available"]:
                 reason = biz_check["reason"]
+
+                # 아이템 상태 추적 (REQ-MON-007: 복귀 감지)
+                current_status = "not_found" if reason == "아이템 없음" else reason
+                status_change = self._track_item_status(business_id, biz_item_id, current_status, tag)
+
+                # 복귀 감지 시 알림 (appeared 상태일 때)
+                # 이 경우는 not_found → available 이므로 여기서는 발생하지 않음
+                # disappeared 등 다른 상태 변화는 로깅만
+
                 logger.info(f"[{tag}] {reason} - 예약 불가")
                 return current_hash, []
+            else:
+                # 예약 가능 상태 - 상태 추적
+                status_change = self._track_item_status(business_id, biz_item_id, "available", tag)
+
+                # 복귀 감지 시 알림 발송
+                if status_change == "appeared":
+                    logger.info(f"[{tag}] 🎉 아이템 복귀! 예약 가능 상태로 변경됨")
+                    # 알림 발송
+                    if self.notification_service:
+                        try:
+                            await self.notification_service.send_notification_message(
+                                f"🔔 <b>아이템 복귀 감지!</b>\n\n"
+                                f"📍 {tag}\n"
+                                f"상태: 아이템 없음 → 예약 가능\n"
+                                f"시각: {datetime.now(KST).strftime('%H:%M:%S')}",
+                                send_desktop=True,
+                                force_send=True
+                            )
+                        except Exception as e:
+                            logger.error(f"[{tag}] 복귀 알림 발송 실패: {e}")
 
             # GraphQL schedule API 호출
             result = await page.evaluate("""

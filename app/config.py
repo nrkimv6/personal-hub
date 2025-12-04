@@ -95,6 +95,7 @@ class Settings(BaseSettings):
     BIZ_ITEMS_CACHE_TTL_NORMAL: int = 300  # 정상 운영 시 캐시 TTL (초) - 5분
     BIZ_ITEMS_CACHE_TTL_CLOSED: int = 1800  # 비공개/운영중지 시 캐시 TTL (초) - 30분
     BIZ_ITEMS_CACHE_TTL_PAUSED: int = 300  # 일시중지 시 캐시 TTL (초) - 5분
+    BIZ_ITEMS_CACHE_TTL_NOT_FOUND: int = 10  # 아이템 없음 시 캐시 TTL (초) - 10초 (복귀 감지용)
     
     # 로깅 설정
     LOG_LEVEL: str = "DEBUG"
