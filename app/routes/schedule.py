@@ -109,57 +109,9 @@ def get_active_schedules(db: Session = Depends(get_db)):
     return schedule_service.get_enabled_with_context(db)
 
 
-@router.get("/{schedule_id}", response_model=MonitorSchedule)
-def get_schedule(schedule_id: int, db: Session = Depends(get_db)):
-    """일정 상세 조회"""
-    schedule = schedule_service.get_by_id(db, schedule_id)
-    if not schedule:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-    return _fill_account_name(schedule)
-
-
-@router.put("/{schedule_id}", response_model=MonitorSchedule)
-def update_schedule(schedule_id: int, data: MonitorScheduleUpdate, db: Session = Depends(get_db)):
-    """일정 수정"""
-    schedule = schedule_service.update(db, schedule_id, data)
-    if not schedule:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-    # 다시 로드하여 account 정보 포함
-    schedule = schedule_service.get_by_id(db, schedule_id)
-    return _fill_account_name(schedule)
-
-
-@router.delete("/{schedule_id}", status_code=204)
-def delete_schedule(schedule_id: int, db: Session = Depends(get_db)):
-    """일정 삭제"""
-    success = schedule_service.delete(db, schedule_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-    return None
-
-
-@router.post("/{schedule_id}/enable", response_model=MonitorSchedule)
-def enable_schedule(schedule_id: int, db: Session = Depends(get_db)):
-    """일정 활성화 (is_enabled=true, run_status=pending)"""
-    schedule = schedule_service.enable(db, schedule_id)
-    if not schedule:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-    schedule = schedule_service.get_by_id(db, schedule_id)
-    return _fill_account_name(schedule)
-
-
-@router.post("/{schedule_id}/disable", response_model=MonitorSchedule)
-def disable_schedule(schedule_id: int, db: Session = Depends(get_db)):
-    """일정 비활성화 (is_enabled=false, run_status=paused)"""
-    schedule = schedule_service.disable(db, schedule_id)
-    if not schedule:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-    schedule = schedule_service.get_by_id(db, schedule_id)
-    return _fill_account_name(schedule)
-
-
 # =====================================================
 # 반복 규칙 (Recurring Rules) - 모니터링용
+# NOTE: /{schedule_id} 라우트보다 앞에 있어야 함
 # =====================================================
 
 @router.get("/recurring")
@@ -274,6 +226,59 @@ def preview_recurring_rule(rule_id: int, db: Session = Depends(get_db)):
     if not preview:
         raise HTTPException(status_code=404, detail="Recurring rule not found")
     return preview
+
+
+# =====================================================
+# 개별 일정 CRUD
+# =====================================================
+
+@router.get("/{schedule_id}", response_model=MonitorSchedule)
+def get_schedule(schedule_id: int, db: Session = Depends(get_db)):
+    """일정 상세 조회"""
+    schedule = schedule_service.get_by_id(db, schedule_id)
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    return _fill_account_name(schedule)
+
+
+@router.put("/{schedule_id}", response_model=MonitorSchedule)
+def update_schedule(schedule_id: int, data: MonitorScheduleUpdate, db: Session = Depends(get_db)):
+    """일정 수정"""
+    schedule = schedule_service.update(db, schedule_id, data)
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    # 다시 로드하여 account 정보 포함
+    schedule = schedule_service.get_by_id(db, schedule_id)
+    return _fill_account_name(schedule)
+
+
+@router.delete("/{schedule_id}", status_code=204)
+def delete_schedule(schedule_id: int, db: Session = Depends(get_db)):
+    """일정 삭제"""
+    success = schedule_service.delete(db, schedule_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    return None
+
+
+@router.post("/{schedule_id}/enable", response_model=MonitorSchedule)
+def enable_schedule(schedule_id: int, db: Session = Depends(get_db)):
+    """일정 활성화 (is_enabled=true, run_status=pending)"""
+    schedule = schedule_service.enable(db, schedule_id)
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    schedule = schedule_service.get_by_id(db, schedule_id)
+    return _fill_account_name(schedule)
+
+
+@router.post("/{schedule_id}/disable", response_model=MonitorSchedule)
+def disable_schedule(schedule_id: int, db: Session = Depends(get_db)):
+    """일정 비활성화 (is_enabled=false, run_status=paused)"""
+    schedule = schedule_service.disable(db, schedule_id)
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    schedule = schedule_service.get_by_id(db, schedule_id)
+    return _fill_account_name(schedule)
 
 
 @router.get("/unified")

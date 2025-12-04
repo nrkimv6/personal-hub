@@ -407,7 +407,7 @@
       const updateData: MonitorScheduleUpdate = {
         times,
         is_enabled: editForm.is_enabled,
-        interval: editForm.custom_interval ? editForm.interval : null,
+        interval: editForm.custom_interval ? editForm.interval : undefined,
         custom_interval: editForm.custom_interval,
         account_id: editForm.account_id
       };
