@@ -213,12 +213,14 @@
     return `${diffMins}분 후`;
   }
 
-  function formatTargetPatterns(patterns: Array<{day_offset: number; label?: string; times?: string[]; time_range?: string}>): string {
+  function formatTargetPatterns(patterns: Array<{day_offset: number; label?: string; times?: string[]; time_range?: string}> | null | undefined): string {
+    if (!patterns || !Array.isArray(patterns)) return '-';
     return patterns.map(p => {
-      const day = p.label || `D+${p.day_offset}`;
+      if (!p || typeof p !== 'object') return '';
+      const day = p.label || `D+${p.day_offset ?? 0}`;
       const time = p.times?.join(',') || p.time_range || '';
       return `${day}: ${time}`;
-    }).join(' / ');
+    }).filter(s => s).join(' / ') || '-';
   }
 
   // 반복 규칙 생성 관련 함수들
