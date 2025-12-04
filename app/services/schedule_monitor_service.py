@@ -154,6 +154,8 @@ class ScheduleMonitorService:
                 "booking_count": "booking_count",
                 "last_booking_time": "last_booking_time",
                 "times": "times",
+                "last_check_time": "last_check_time",
+                "next_run_time": "next_run_time",
             }
 
             for key, value in update_data.items():
