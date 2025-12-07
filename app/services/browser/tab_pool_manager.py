@@ -130,9 +130,13 @@ class TabPoolManager:
                 tab_id = max(available_tabs, key=lambda tid: self.tab_last_used.get(tid, 0))
                 tab = account_tab_pool[tab_id]
 
+                # ★ 즉시 탭 잠금 (다른 코루틴이 같은 탭을 선택하지 못하도록)
+                self.tab_in_use[tab_id] = True
+
                 # 탭 유효성 검사 - 닫혔으면 풀에서 제거하고 다시 시도
                 if await self._is_tab_closed(tab):
                     logger.warning(f"탭 {tab_id}이 닫혀있어 풀에서 제거합니다 (account_id={account_id})")
+                    self.tab_in_use[tab_id] = False  # 잠금 해제
                     await self._remove_tab_from_pool(tab_id, account_id)
                     continue
 
@@ -159,7 +163,7 @@ class TabPoolManager:
                 account_tab_pool[tab_id] = tab
                 self.tab_pool[tab_id] = tab  # 하위 호환성
                 self.tab_last_used[tab_id] = time.time()
-                self.tab_in_use[tab_id] = False
+                self.tab_in_use[tab_id] = True  # ★ 새 탭도 즉시 잠금
                 self.tab_use_count[tab_id] = 0
                 self.tab_account[tab_id] = account_id
                 self.total_active_tabs = total_tabs + 1
@@ -185,8 +189,7 @@ class TabPoolManager:
                     await asyncio.sleep(0.5)
                     continue
 
-        # 탭 사용 시작 표시
-        self.tab_in_use[tab_id] = True
+        # 탭 메타데이터 설정 (tab_in_use는 이미 루프 안에서 True로 설정됨)
         self.tab_current_target[tab_id] = target_id
         self.tab_use_count[tab_id] = self.tab_use_count.get(tab_id, 0) + 1
         self.tab_last_used[tab_id] = time.time()

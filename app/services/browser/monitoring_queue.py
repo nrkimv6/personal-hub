@@ -386,7 +386,12 @@ class MonitoringQueue:
 
                 if active_tasks < self.TOTAL_MAX_TABS and total_tabs < self.TOTAL_MAX_TABS:
                     try:
-                        queue_item = await self.monitoring_queue.get()
+                        # 대기열이 비어있으면 짧게 대기 후 다시 시도
+                        if self.monitoring_queue.empty():
+                            await asyncio.sleep(0.5)
+                            continue
+
+                        queue_item = await asyncio.wait_for(self.monitoring_queue.get(), timeout=0.5)
                         target_id = queue_item["target_id"]
                         target_data = queue_item.get("target", {})
                         schedule = queue_item.get("schedule") or self.schedule_service.get_schedule(target_id)
@@ -401,7 +406,7 @@ class MonitoringQueue:
                             remaining = int(next_run_time - current_time)
                             self.monitoring_queue.task_done()
                             await self.monitoring_queue.put(queue_item)
-                            await asyncio.sleep(1)
+                            await asyncio.sleep(0.1)  # 짧게 대기 후 다른 작업 확인
                             continue
 
                         wait_time = current_time - added_time
@@ -442,11 +447,19 @@ class MonitoringQueue:
                             f"현재 실행 중인 모니터링: {active_tasks+1}/{self.TOTAL_MAX_TABS}개"
                         )
 
-                    except asyncio.QueueEmpty:
-                        await asyncio.sleep(1)
+                        # 여유 공간이 있으면 즉시 다음 항목 처리 시도 (sleep 없이)
                         continue
 
-                await asyncio.sleep(1)
+                    except asyncio.TimeoutError:
+                        # 대기열에서 항목 가져오기 시간 초과
+                        await asyncio.sleep(0.1)
+                        continue
+                    except asyncio.QueueEmpty:
+                        await asyncio.sleep(0.5)
+                        continue
+                else:
+                    # 탭 또는 태스크 제한에 도달, 대기
+                    await asyncio.sleep(0.5)
 
         except asyncio.CancelledError:
             logger.info("모니터링 대기열 처리 태스크 취소됨")
