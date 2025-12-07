@@ -111,6 +111,21 @@ class ContextManager:
             # 자동화 감지 방지 스크립트 주입
             await self._bypass_automation_detection(self.browser_context)
 
+            # default 프로필을 사용하는 계정이 있으면 browser_contexts에도 등록
+            # 이렇게 해야 get_or_create_context(account_id)가 중복 창을 열지 않음
+            from app.database import SessionLocal
+            from app.services.account_service import account_service
+            db = SessionLocal()
+            try:
+                # default 프로필을 사용하는 계정 찾기
+                accounts = account_service.get_active_accounts(db)
+                for account in accounts:
+                    if account.profile_dir == settings.DEFAULT_PROFILE_NAME:
+                        self.browser_contexts[account.id] = self.browser_context
+                        logger.info(f"default 프로필 컨텍스트를 계정 {account.id}에 등록")
+            finally:
+                db.close()
+
             logger.info("브라우저 컨텍스트 초기화 완료")
             return self.browser_context
 

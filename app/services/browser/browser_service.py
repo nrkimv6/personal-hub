@@ -448,7 +448,10 @@ class BrowserService:
     # =========================================================================
 
     async def open_browser_for_account(self, account_id: int, url: Optional[str] = None) -> Dict:
-        """특정 계정의 브라우저를 열고 선택적으로 URL로 이동합니다."""
+        """특정 계정의 브라우저를 열고 선택적으로 URL로 이동합니다.
+
+        기존 컨텍스트가 있으면 재사용하고 창을 포커스합니다.
+        """
         from app.services.account_service import account_service
 
         db = SessionLocal()
@@ -457,6 +460,52 @@ class BrowserService:
             if not account:
                 return {"success": False, "message": f"계정 {account_id}를 찾을 수 없습니다"}
 
+            # 기존 컨텍스트 확인
+            existing_context = self._context_manager.browser_contexts.get(account_id)
+            if existing_context:
+                try:
+                    pages = existing_context.pages
+                    if pages:
+                        # 기존 창을 화면 중앙으로 이동하고 포커스
+                        page = pages[0]
+                        try:
+                            cdp = await page.context.new_cdp_session(page)
+                            window_info = await cdp.send("Browser.getWindowForTarget")
+                            window_id = window_info.get("windowId")
+                            if window_id:
+                                await cdp.send("Browser.setWindowBounds", {
+                                    "windowId": window_id,
+                                    "bounds": {
+                                        "left": 560,
+                                        "top": 240,
+                                        "width": 1280,
+                                        "height": 800,
+                                        "windowState": "normal"
+                                    }
+                                })
+                            await page.bring_to_front()
+                            logger.info(f"계정 {account_id} 기존 브라우저 창을 포커스했습니다")
+                        except Exception as e:
+                            logger.warning(f"창 포커스 실패, 새 탭으로 이동: {e}")
+
+                        # URL이 지정된 경우 해당 URL로 이동
+                        if url:
+                            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                            logger.info(f"계정 {account_id} 브라우저가 {url}로 이동했습니다")
+
+                        return {
+                            "success": True,
+                            "message": f"기존 브라우저 창을 포커스했습니다",
+                            "account_id": account_id,
+                            "account_name": account.name,
+                            "url": url or page.url
+                        }
+                except Exception:
+                    # 컨텍스트가 닫혀있으면 딕셔너리에서 제거
+                    del self._context_manager.browser_contexts[account_id]
+                    logger.info(f"계정 {account_id} 컨텍스트가 닫혀있어 새로 생성합니다")
+
+            # 기존 컨텍스트가 없으면 새로 생성
             context = await self._create_browser_context_visible(account_id)
             page = await context.new_page()
 
