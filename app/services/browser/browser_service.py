@@ -451,14 +451,38 @@ class BrowserService:
         """특정 계정의 브라우저를 열고 선택적으로 URL로 이동합니다.
 
         기존 컨텍스트가 있으면 재사용하고 창을 포커스합니다.
+        프로필이 다른 프로세스에서 사용 중이면 에러를 반환합니다.
         """
         from app.services.account_service import account_service
+        from pathlib import Path
 
         db = SessionLocal()
         try:
             account = account_service.get_by_id(db, account_id)
             if not account:
                 return {"success": False, "message": f"계정 {account_id}를 찾을 수 없습니다"}
+
+            # 프로필 잠금 파일 확인 (다른 프로세스에서 사용 중인지)
+            # Chromium은 Default 서브디렉토리에 LOCK 파일을 생성합니다
+            profile_path = Path(account.profile_path)
+            lock_file = profile_path / "Default" / "LOCK"
+            if lock_file.exists():
+                # LOCK 파일이 실제로 다른 프로세스에 의해 잠겨있는지 확인
+                # Windows에서는 배타적 열기를 시도하여 확인
+                try:
+                    with open(lock_file, 'r+b') as f:
+                        # 파일을 열 수 있으면 잠기지 않은 상태 (잔여 파일)
+                        pass
+                except (PermissionError, OSError):
+                    # 파일이 잠겨있으면 브라우저가 실행 중
+                    logger.info(f"계정 {account_id} 프로필이 이미 사용 중입니다 (Worker에서 실행 중)")
+                    return {
+                        "success": True,
+                        "message": f"브라우저가 이미 열려있습니다. Worker에서 관리 중인 브라우저를 확인하세요.",
+                        "account_id": account_id,
+                        "account_name": account.name,
+                        "already_open": True
+                    }
 
             # 기존 컨텍스트 확인
             existing_context = self._context_manager.browser_contexts.get(account_id)

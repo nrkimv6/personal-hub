@@ -207,6 +207,11 @@ class TabPoolManager:
                 target_id = getattr(tab, '_target_id', None)
 
                 if tab_id in self.tab_in_use:
+                    # 이미 반환된 탭인지 확인 (중복 반환 방지)
+                    if not self.tab_in_use[tab_id]:
+                        logger.debug(f"탭 {tab_id} 이미 반환됨 (중복 호출 무시)")
+                        return
+
                     self.tab_in_use[tab_id] = False
                     self.tab_last_used[tab_id] = time.time()
                     self.tab_current_target.pop(tab_id, None)
