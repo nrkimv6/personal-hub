@@ -296,7 +296,9 @@ async def import_from_url(data: UrlImportRequest, db: Session = Depends(get_db))
             "business_type_id": parsed.business_type_id
         },
         business_details=business_details_dict,
-        item_details=item_details_dict
+        item_details=item_details_dict,
+        business=business,
+        biz_item=item
     )
 
 

@@ -21,12 +21,14 @@
   let showRecurringCreateModal = false;
   let recurringCreateLoading = false;
   let recurringCreateError: string | null = null;
-  let recurringSelectedBusinessItems: BizItem[] = [];
+  let recurringUrlParsing = false;
+  let recurringUrlParsed = false;
+  let recurringParsedInfo: { business_name?: string; item_name?: string } = {};
 
   // 반복 규칙 생성 폼
   let recurringForm = {
+    url: '',
     name: '',
-    business_id: null as number | null,
     biz_item_id: null as number | null,
     account_id: null as number | null,
     recurrence_day: 4, // 금요일
@@ -224,25 +226,47 @@
   }
 
   // 반복 규칙 생성 관련 함수들
-  async function handleRecurringBusinessSelect() {
-    if (!recurringForm.business_id) {
-      recurringSelectedBusinessItems = [];
-      recurringForm.biz_item_id = null;
-      return;
-    }
+  async function parseRecurringUrl() {
+    if (!recurringForm.url) return;
+
+    recurringUrlParsing = true;
+    recurringCreateError = null;
+
     try {
-      recurringSelectedBusinessItems = await businessApi.getItems(recurringForm.business_id);
-      recurringForm.biz_item_id = null;
+      // DB에서 biz_item 정보 조회 (import API 사용)
+      const importResult = await fetch('/api/v1/businesses/import-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: recurringForm.url })
+      }).then(r => r.json());
+
+      if (importResult.biz_item) {
+        recurringForm.biz_item_id = importResult.biz_item.id;
+        recurringParsedInfo = {
+          business_name: importResult.business?.name,
+          item_name: importResult.biz_item?.name
+        };
+        recurringUrlParsed = true;
+
+        // 이름 자동 설정
+        if (!recurringForm.name && recurringParsedInfo.item_name) {
+          recurringForm.name = `${recurringParsedInfo.item_name} 반복 모니터링`;
+        }
+      } else {
+        recurringCreateError = 'URL에서 상품 정보를 찾을 수 없습니다. 먼저 업체 관리에서 URL을 등록해주세요.';
+      }
     } catch (e) {
-      console.error('아이템 목록 로드 실패:', e);
-      recurringSelectedBusinessItems = [];
+      recurringCreateError = e instanceof Error ? e.message : 'URL 파싱 실패';
+      recurringUrlParsed = false;
+    } finally {
+      recurringUrlParsing = false;
     }
   }
 
   function openRecurringCreateModal() {
     recurringForm = {
+      url: '',
       name: '',
-      business_id: null,
       biz_item_id: null,
       account_id: null,
       recurrence_day: 4,
@@ -250,7 +274,8 @@
       auto_booking_enabled: false,
       target_patterns: []
     };
-    recurringSelectedBusinessItems = [];
+    recurringUrlParsed = false;
+    recurringParsedInfo = {};
     recurringCreateError = null;
     showRecurringCreateModal = true;
   }
@@ -1258,38 +1283,47 @@
           />
         </div>
 
-        <!-- 대상 상품 -->
-        <div class="grid grid-cols-2 gap-4">
-          <div>
-            <label for="recurring-business" class="block text-sm font-medium text-gray-700 mb-1">업체</label>
-            <select
-              id="recurring-business"
-              class="input"
-              bind:value={recurringForm.business_id}
-              on:change={handleRecurringBusinessSelect}
+        <!-- URL 입력 -->
+        <div>
+          <label for="recurring-url" class="block text-sm font-medium text-gray-700 mb-1">네이버 예약 URL</label>
+          <div class="flex gap-2">
+            <input
+              id="recurring-url"
+              type="url"
+              class="input flex-1"
+              bind:value={recurringForm.url}
+              placeholder="https://booking.naver.com/booking/..."
+              disabled={recurringUrlParsed}
               required
-            >
-              <option value={null}>업체 선택</option>
-              {#each businesses as business}
-                <option value={business.id}>{business.name}</option>
-              {/each}
-            </select>
+            />
+            {#if !recurringUrlParsed}
+              <button
+                type="button"
+                class="btn btn-secondary"
+                on:click={parseRecurringUrl}
+                disabled={recurringUrlParsing || !recurringForm.url}
+              >
+                {#if recurringUrlParsing}
+                  확인 중...
+                {:else}
+                  확인
+                {/if}
+              </button>
+            {:else}
+              <button
+                type="button"
+                class="btn btn-secondary"
+                on:click={() => { recurringUrlParsed = false; recurringParsedInfo = {}; recurringForm.biz_item_id = null; }}
+              >
+                변경
+              </button>
+            {/if}
           </div>
-          <div>
-            <label for="recurring-item" class="block text-sm font-medium text-gray-700 mb-1">상품</label>
-            <select
-              id="recurring-item"
-              class="input"
-              bind:value={recurringForm.biz_item_id}
-              disabled={!recurringForm.business_id}
-              required
-            >
-              <option value={null}>상품 선택</option>
-              {#each recurringSelectedBusinessItems as item}
-                <option value={item.id}>{item.name}</option>
-              {/each}
-            </select>
-          </div>
+          {#if recurringUrlParsed && recurringParsedInfo.business_name}
+            <div class="mt-2 p-2 bg-green-50 border border-green-200 rounded text-sm text-green-700">
+              ✓ {recurringParsedInfo.business_name} - {recurringParsedInfo.item_name}
+            </div>
+          {/if}
         </div>
 
         <!-- 계정 선택 -->

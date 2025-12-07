@@ -100,3 +100,6 @@ class UrlImportResponse(BaseModel):
     # 조회된 상세정보
     business_details: Optional[Dict[str, Any]] = None
     item_details: Optional[Dict[str, Any]] = None
+    # 생성/조회된 객체 (프론트엔드용)
+    business: Optional[Business] = None
+    biz_item: Optional[BizItem] = None
