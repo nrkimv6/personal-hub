@@ -267,6 +267,28 @@
   let showPatternCopyModal = false;
   let patternCopySource: RecurringRuleWithContext | null = null;
 
+  // 반복 규칙 수정 모달 상태
+  let showRecurringEditModal = false;
+  let editRecurringRule: RecurringRuleWithContext | null = null;
+  let recurringEditLoading = false;
+  let recurringEditError: string | null = null;
+
+  // 반복 규칙 수정 폼
+  let recurringEditForm = {
+    name: '',
+    account_id: null as number | null,
+    recurrence_day: 0,
+    trigger_time: '12:00',
+    auto_booking_enabled: false,
+    target_patterns: [] as Array<{
+      day_offset: number;
+      label: string;
+      times: string;
+      time_range: string;
+      use_time_range: boolean;
+    }>
+  };
+
   function openRecurringCreateModal() {
     recurringForm = {
       url: '',
@@ -287,6 +309,96 @@
   function openPatternCopyModal() {
     patternCopySource = null;
     showPatternCopyModal = true;
+  }
+
+  // 반복 규칙 수정 모달 열기
+  function openRecurringEditModal(rule: RecurringRuleWithContext) {
+    editRecurringRule = rule;
+    recurringEditForm = {
+      name: rule.name,
+      account_id: rule.account_id,
+      recurrence_day: rule.recurrence_day,
+      trigger_time: rule.trigger_time,
+      auto_booking_enabled: rule.auto_booking_enabled ?? false,
+      target_patterns: (rule.target_patterns || []).map(p => ({
+        day_offset: p.day_offset ?? 0,
+        label: p.label || '',
+        times: p.times?.join(', ') || '',
+        time_range: p.time_range || '',
+        use_time_range: !!p.time_range && !p.times?.length
+      }))
+    };
+    recurringEditError = null;
+    showRecurringEditModal = true;
+  }
+
+  // 반복 규칙 수정 시 day_offset에 따른 요일 라벨 계산
+  function getRecurringEditDayLabel(dayOffset: number): string {
+    const targetDay = (recurringEditForm.recurrence_day + dayOffset) % 7;
+    return WEEKDAY_NAMES[targetDay] + '요일';
+  }
+
+  // 반복 규칙 수정 폼에 패턴 추가
+  function addRecurringEditTargetPattern() {
+    recurringEditForm.target_patterns = [
+      ...recurringEditForm.target_patterns,
+      {
+        day_offset: recurringEditForm.target_patterns.length + 3,
+        label: '',
+        times: '',
+        time_range: '',
+        use_time_range: false
+      }
+    ];
+  }
+
+  // 반복 규칙 수정 폼에서 패턴 삭제
+  function removeRecurringEditTargetPattern(index: number) {
+    recurringEditForm.target_patterns = recurringEditForm.target_patterns.filter((_, i) => i !== index);
+  }
+
+  // 반복 규칙 수정 저장
+  async function handleUpdateRecurringRule() {
+    if (!editRecurringRule) return;
+
+    if (!recurringEditForm.name.trim()) {
+      recurringEditError = '규칙 이름을 입력해주세요.';
+      return;
+    }
+    if (recurringEditForm.target_patterns.length === 0) {
+      recurringEditError = '대상 패턴을 하나 이상 추가해주세요.';
+      return;
+    }
+
+    recurringEditLoading = true;
+    recurringEditError = null;
+
+    try {
+      // 타겟 패턴 변환
+      const targetPatterns: TargetPattern[] = recurringEditForm.target_patterns.map(p => ({
+        day_offset: p.day_offset,
+        label: p.label || getRecurringEditDayLabel(p.day_offset),
+        times: p.use_time_range ? undefined : p.times.split(',').map(t => t.trim()).filter(t => t),
+        time_range: p.use_time_range ? p.time_range : undefined
+      }));
+
+      await scheduleRecurringApi.update(editRecurringRule.id, {
+        name: recurringEditForm.name,
+        account_id: recurringEditForm.account_id,
+        recurrence_day: recurringEditForm.recurrence_day,
+        trigger_time: recurringEditForm.trigger_time,
+        target_patterns: targetPatterns,
+        auto_booking_enabled: recurringEditForm.auto_booking_enabled
+      });
+
+      showRecurringEditModal = false;
+      editRecurringRule = null;
+      await fetchRecurringRules();
+    } catch (e) {
+      recurringEditError = e instanceof Error ? e.message : '수정 실패';
+    } finally {
+      recurringEditLoading = false;
+    }
   }
 
   function copyPatternFromRule(rule: RecurringRuleWithContext) {
@@ -1001,6 +1113,13 @@
                   <td>
                     <div class="flex gap-1">
                       <button
+                        class="btn btn-secondary btn-xs"
+                        on:click={() => openRecurringEditModal(rule)}
+                        title="수정"
+                      >
+                        수정
+                      </button>
+                      <button
                         class="btn btn-info btn-xs"
                         on:click={() => handleTriggerRecurringRule(rule)}
                         title="수동 트리거"
@@ -1549,6 +1668,181 @@
           취소
         </button>
       </div>
+    </div>
+  </div>
+{/if}
+
+<!-- 반복 규칙 수정 모달 -->
+{#if showRecurringEditModal && editRecurringRule}
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+      <div class="p-4 border-b sticky top-0 bg-white">
+        <h3 class="text-lg font-semibold">반복 모니터링 규칙 수정</h3>
+        <p class="text-sm text-gray-500 mt-1">
+          {editRecurringRule.business_name} - {editRecurringRule.item_name}
+        </p>
+      </div>
+
+      <form on:submit|preventDefault={handleUpdateRecurringRule} class="p-4 space-y-4">
+        {#if recurringEditError}
+          <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+            {recurringEditError}
+          </div>
+        {/if}
+
+        <!-- 규칙 이름 -->
+        <div>
+          <label for="recurring-edit-name" class="block text-sm font-medium text-gray-700 mb-1">규칙 이름</label>
+          <input
+            id="recurring-edit-name"
+            type="text"
+            class="input"
+            bind:value={recurringEditForm.name}
+            placeholder="예: 금요일 정기 오픈"
+            required
+          />
+        </div>
+
+        <!-- 계정 선택 -->
+        <div>
+          <label for="recurring-edit-account" class="block text-sm font-medium text-gray-700 mb-1">사용 계정 (선택사항)</label>
+          <select id="recurring-edit-account" class="input" bind:value={recurringEditForm.account_id}>
+            <option value={null}>계정 선택 안함</option>
+            {#each accounts as account}
+              <option value={account.id}>{account.name}</option>
+            {/each}
+          </select>
+        </div>
+
+        <!-- 반복 설정 -->
+        <div class="border-t pt-4">
+          <h4 class="text-sm font-medium text-gray-900 mb-3">반복 설정</h4>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label for="recurring-edit-day" class="block text-sm font-medium text-gray-700 mb-1">트리거 요일</label>
+              <select id="recurring-edit-day" class="input" bind:value={recurringEditForm.recurrence_day}>
+                {#each WEEKDAY_NAMES as name, idx}
+                  <option value={idx}>{name}요일</option>
+                {/each}
+              </select>
+            </div>
+            <div>
+              <label for="recurring-edit-time" class="block text-sm font-medium text-gray-700 mb-1">트리거 시간 (오픈 시간)</label>
+              <input
+                id="recurring-edit-time"
+                type="time"
+                class="input"
+                bind:value={recurringEditForm.trigger_time}
+                required
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- 대상 날짜/시간 패턴 -->
+        <div class="border-t pt-4">
+          <div class="flex justify-between items-center mb-3">
+            <h4 class="text-sm font-medium text-gray-900">대상 날짜/시간 패턴</h4>
+            <button type="button" class="btn btn-secondary btn-sm" on:click={addRecurringEditTargetPattern}>
+              + 패턴 추가
+            </button>
+          </div>
+
+          {#if recurringEditForm.target_patterns.length === 0}
+            <div class="text-sm text-gray-500 text-center py-4 bg-gray-50 rounded">
+              패턴을 추가해주세요. 트리거 날짜 기준 D+N일에 대한 시간을 설정합니다.
+            </div>
+          {:else}
+            <div class="space-y-3">
+              {#each recurringEditForm.target_patterns as pattern, idx}
+                <div class="border rounded-lg p-3 bg-gray-50">
+                  <div class="flex items-center gap-3 mb-2">
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm font-medium">D+</span>
+                      <input
+                        type="number"
+                        class="input w-16"
+                        bind:value={pattern.day_offset}
+                        min="0"
+                        max="30"
+                      />
+                    </div>
+                    <span class="text-sm text-gray-500">({getRecurringEditDayLabel(pattern.day_offset)})</span>
+                    <input
+                      type="text"
+                      class="input flex-1"
+                      bind:value={pattern.label}
+                      placeholder="라벨 (선택)"
+                    />
+                    <button
+                      type="button"
+                      class="btn btn-danger btn-sm"
+                      on:click={() => removeRecurringEditTargetPattern(idx)}
+                    >
+                      삭제
+                    </button>
+                  </div>
+                  <div class="flex items-center gap-3">
+                    <label class="flex items-center gap-2">
+                      <input type="radio" bind:group={pattern.use_time_range} value={false} />
+                      <span class="text-sm">시간 목록</span>
+                    </label>
+                    <label class="flex items-center gap-2">
+                      <input type="radio" bind:group={pattern.use_time_range} value={true} />
+                      <span class="text-sm">시간 범위</span>
+                    </label>
+                  </div>
+                  <div class="mt-2">
+                    {#if pattern.use_time_range}
+                      <input
+                        type="text"
+                        class="input"
+                        bind:value={pattern.time_range}
+                        placeholder="예: 13:00-19:00"
+                      />
+                    {:else}
+                      <input
+                        type="text"
+                        class="input"
+                        bind:value={pattern.times}
+                        placeholder="예: 18:00, 19:00"
+                      />
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+
+        <!-- 모니터링 옵션 -->
+        <div class="border-t pt-4">
+          <h4 class="text-sm font-medium text-gray-900 mb-3">모니터링 옵션</h4>
+          <label class="flex items-center gap-2">
+            <input type="checkbox" bind:checked={recurringEditForm.auto_booking_enabled} />
+            <span class="text-sm">자동 예약 활성화</span>
+          </label>
+          <p class="text-xs text-gray-500 mt-1">생성되는 일정에서 슬롯 발견 시 자동으로 예약을 수행합니다.</p>
+        </div>
+
+        <!-- 버튼 -->
+        <div class="flex justify-end gap-3 pt-4 border-t">
+          <button
+            type="button"
+            class="btn btn-secondary"
+            on:click={() => { showRecurringEditModal = false; editRecurringRule = null; }}
+          >
+            취소
+          </button>
+          <button
+            type="submit"
+            class="btn btn-primary"
+            disabled={recurringEditLoading}
+          >
+            {recurringEditLoading ? '저장 중...' : '저장'}
+          </button>
+        </div>
+      </form>
     </div>
   </div>
 {/if}
