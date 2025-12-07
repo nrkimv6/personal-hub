@@ -1,0 +1,50 @@
+"""
+{MODULE_DISPLAY_NAME} 모듈
+
+{MODULE_DESCRIPTION}
+"""
+
+from typing import List, Type, Dict, Callable
+from fastapi import APIRouter
+
+from app.modules import ModuleInterface
+
+
+class {MODULE_CLASS_NAME}(ModuleInterface):
+    """{MODULE_DISPLAY_NAME} 모듈"""
+
+    @property
+    def name(self) -> str:
+        return "{module_name}"
+
+    @property
+    def display_name(self) -> str:
+        return "{MODULE_DISPLAY_NAME}"
+
+    @property
+    def api_prefix(self) -> str:
+        return "/{api_prefix}"
+
+    def get_router(self) -> APIRouter:
+        """라우터 반환"""
+        router = APIRouter(prefix=self.api_prefix, tags=[self.display_name])
+        # TODO: 라우터 구성
+        return router
+
+    def get_worker_hooks(self) -> Dict[str, Callable]:
+        """워커 훅 반환"""
+        return {
+            # "monitoring": monitoring_loop,
+        }
+
+    def get_models(self) -> List[Type]:
+        """DB 모델 반환"""
+        return [
+            # TODO: 모델 추가
+        ]
+
+
+# 모듈 인스턴스 (자동 검색용)
+module = {MODULE_CLASS_NAME}()
+
+__all__ = ['{MODULE_CLASS_NAME}', 'module']

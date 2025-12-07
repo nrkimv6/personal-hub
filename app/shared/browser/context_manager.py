@@ -1,0 +1,466 @@
+"""
+브라우저 컨텍스트 관리 모듈
+
+계정별 브라우저 컨텍스트의 생성, 관리, 종료를 담당합니다.
+"""
+
+import os
+import asyncio
+from pathlib import Path
+from typing import Dict, Optional
+
+from playwright.async_api import async_playwright, BrowserContext
+
+from app.core.config import settings, logger
+
+
+class ContextManager:
+    """브라우저 컨텍스트 관리자"""
+
+    def __init__(self):
+        """ContextManager 초기화"""
+        # 다중 프로필 지원: account_id별 브라우저 컨텍스트 관리
+        self.browser_contexts: Dict[int, BrowserContext] = {}
+        self.browser_context: Optional[BrowserContext] = None  # 하위 호환성 (기본 컨텍스트)
+        self.playwright_instance = None
+
+    async def initialize_browser(self) -> BrowserContext:
+        """
+        단일 브라우저 컨텍스트를 초기화합니다.
+        (레거시 메서드 - get_or_create_context 사용 권장)
+        """
+        if self.browser_context is not None:
+            return self.browser_context
+
+        # 새 프로필 구조 사용: data/browser_profiles/default
+        profile_dir = Path(os.path.abspath(settings.DATA_DIR)) / settings.BROWSER_PROFILES_DIR / settings.DEFAULT_PROFILE_NAME
+        try:
+            # 디렉토리가 없으면 생성
+            if not profile_dir.exists():
+                os.makedirs(profile_dir, exist_ok=True)
+                logger.info(f"브라우저 프로필 디렉토리 생성: {profile_dir}")
+            else:
+                logger.info(f"브라우저 프로필 디렉토리 확인: {profile_dir}")
+
+            # 디렉토리 권한 확인
+            if not os.access(profile_dir, os.W_OK):
+                logger.warning(f"브라우저 프로필 디렉토리에 쓰기 권한이 없습니다: {profile_dir}")
+                # 임시 디렉토리 사용 시도
+                temp_dir = Path(os.path.abspath(settings.USER_DATA_DIR)) / "temp_profile"
+                os.makedirs(temp_dir, exist_ok=True)
+                profile_dir = temp_dir
+                logger.info(f"임시 프로필 디렉토리 사용: {profile_dir}")
+        except Exception as e:
+            logger.error(f"프로필 디렉토리 생성 실패: {str(e)}")
+            raise
+
+        try:
+            # Playwright 초기화
+            logger.info("Playwright 브라우저 초기화 시작")
+
+            # 현재 이벤트 루프 확인
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+            # Playwright 인스턴스가 없으면 새로 생성
+            if self.playwright_instance is None:
+                self.playwright_instance = await async_playwright().start()
+                logger.info("Playwright 인스턴스 생성 완료")
+
+            # 브라우저 컨텍스트 생성 - 설정에서 headless 모드 읽기
+            self.browser_context = await self.playwright_instance.chromium.launch_persistent_context(
+                user_data_dir=str(profile_dir),
+                headless=settings.BROWSER_HEADLESS,
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-features=IsolateOrigins,site-per-process',
+                    '--disable-site-isolation-trials',
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--disable-gpu',
+                    '--window-size=1920,1080',
+                    '--disable-web-security',
+                    '--disable-features=IsolateOrigins,site-per-process',
+                    '--disable-site-isolation-trials',
+                    '--disable-features=BlockInsecurePrivateNetworkRequests',
+                    '--disable-features=CrossSiteDocumentBlockingAlways',
+                    '--disable-features=CrossSiteDocumentBlockingIfIsolating',
+                    '--disable-features=IsolateOrigins',
+                    '--disable-features=IsolateOrigins,site-per-process',
+                    '--disable-features=NetworkService',
+                    '--disable-features=NetworkServiceInProcess',
+                    '--disable-features=NetworkServiceInProcess2',
+                    '--disable-features=NetworkServiceInProcess3',
+                    '--disable-features=NetworkServiceInProcess4',
+                    '--disable-features=NetworkServiceInProcess5',
+                    '--window-position=2000,1000',
+                ],
+                viewport={'width': 800, 'height': 600},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            )
+
+            # 자동화 감지 방지 스크립트 주입
+            await self._bypass_automation_detection(self.browser_context)
+
+            # default 프로필을 사용하는 계정이 있으면 browser_contexts에도 등록
+            # 이렇게 해야 get_or_create_context(account_id)가 중복 창을 열지 않음
+            from app.core.database import SessionLocal
+            from app.services.account_service import account_service
+            db = SessionLocal()
+            try:
+                # default 프로필을 사용하는 계정 찾기
+                accounts = account_service.get_active_accounts(db)
+                for account in accounts:
+                    if account.profile_dir == settings.DEFAULT_PROFILE_NAME:
+                        self.browser_contexts[account.id] = self.browser_context
+                        logger.info(f"default 프로필 컨텍스트를 계정 {account.id}에 등록")
+            finally:
+                db.close()
+
+            logger.info("브라우저 컨텍스트 초기화 완료")
+            return self.browser_context
+
+        except Exception as e:
+            logger.error(f"브라우저 초기화 중 오류 발생: {str(e)}", exc_info=True)
+            # 오류 발생 시 리소스 정리
+            if self.playwright_instance:
+                try:
+                    await self.playwright_instance.stop()
+                except:
+                    pass
+                self.playwright_instance = None
+            self.browser_context = None
+            raise
+
+    async def get_or_create_context(self, account_id: Optional[int] = None) -> BrowserContext:
+        """
+        계정별 브라우저 컨텍스트를 가져오거나 생성합니다.
+
+        Args:
+            account_id: 계정 ID (None이면 기본 계정 사용)
+
+        Returns:
+            BrowserContext: 계정에 해당하는 브라우저 컨텍스트
+        """
+        # account_id가 None이면 기본 계정(id=1) 사용
+        if account_id is None:
+            from app.core.database import SessionLocal
+            from app.services.account_service import account_service
+            db = SessionLocal()
+            try:
+                default_account = account_service.get_default_account(db)
+                if default_account:
+                    account_id = default_account.id
+                else:
+                    account_id = 1  # fallback
+            finally:
+                db.close()
+
+        # 이미 존재하면 유효성 확인 후 반환
+        if account_id in self.browser_contexts:
+            context = self.browser_contexts[account_id]
+            # 컨텍스트가 닫혔는지 확인
+            try:
+                _ = context.pages  # 유효성 확인
+                logger.debug(f"기존 브라우저 컨텍스트 재사용 (account_id={account_id})")
+                return context
+            except Exception:
+                # 컨텍스트가 닫혔으면 딕셔너리에서 제거
+                logger.info(f"브라우저 컨텍스트가 닫혀있어 새로 생성합니다 (account_id={account_id})")
+                del self.browser_contexts[account_id]
+
+        # 새로 생성
+        logger.info(f"새 브라우저 컨텍스트 생성 중 (account_id={account_id})")
+        context = await self._create_browser_context(account_id)
+        self.browser_contexts[account_id] = context
+
+        # 첫 번째 컨텍스트는 하위 호환을 위해 browser_context에도 저장
+        if self.browser_context is None:
+            self.browser_context = context
+            logger.info("기본 브라우저 컨텍스트 설정 완료")
+
+        return context
+
+    async def _create_browser_context(self, account_id: int) -> BrowserContext:
+        """
+        계정별 브라우저 컨텍스트를 생성합니다.
+
+        Args:
+            account_id: 계정 ID
+
+        Returns:
+            BrowserContext: 생성된 브라우저 컨텍스트
+        """
+        from app.core.database import SessionLocal
+        from app.services.account_service import account_service
+
+        db = SessionLocal()
+        try:
+            account = account_service.get_by_id(db, account_id)
+            if not account:
+                raise ValueError(f"Account {account_id} not found")
+
+            profile_path = Path(account.profile_path)
+
+            # 프로필 디렉토리 생성
+            if not profile_path.exists():
+                profile_path.mkdir(parents=True, exist_ok=True)
+                logger.info(f"프로필 디렉토리 생성: {profile_path}")
+
+            # Playwright 인스턴스 초기화
+            if self.playwright_instance is None:
+                self.playwright_instance = await async_playwright().start()
+                logger.info("Playwright 인스턴스 생성 완료")
+
+            # 브라우저 컨텍스트 생성
+            context = await self.playwright_instance.chromium.launch_persistent_context(
+                user_data_dir=str(profile_path),
+                headless=settings.BROWSER_HEADLESS,
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-features=IsolateOrigins,site-per-process',
+                    '--disable-site-isolation-trials',
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--disable-gpu',
+                    '--window-size=800,600',
+                    '--window-position=2000,1000',
+                    '--disable-web-security',
+                    '--disable-features=BlockInsecurePrivateNetworkRequests',
+                ],
+                viewport={'width': 800, 'height': 600},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            )
+
+            # 자동화 감지 방지
+            await self._bypass_automation_detection(context)
+
+            logger.info(f"브라우저 컨텍스트 생성 완료 (account_id={account_id}, profile={account.profile_dir})")
+
+            # 마지막 사용 시간 업데이트
+            account_service.update_last_used(db, account_id)
+
+            return context
+
+        finally:
+            db.close()
+
+    async def _create_browser_context_visible(self, account_id: int) -> BrowserContext:
+        """
+        계정별 브라우저 컨텍스트를 headless=False로 생성합니다.
+        수동 로그인용으로 사용합니다.
+
+        Args:
+            account_id: 계정 ID
+
+        Returns:
+            BrowserContext: 생성된 브라우저 컨텍스트
+        """
+        from app.core.database import SessionLocal
+        from app.services.account_service import account_service
+
+        # 이미 존재하면 유효성 확인 후 반환
+        if account_id in self.browser_contexts:
+            context = self.browser_contexts[account_id]
+            try:
+                _ = context.pages  # 유효성 확인
+                logger.debug(f"기존 브라우저 컨텍스트 재사용 (account_id={account_id})")
+                return context
+            except Exception:
+                logger.info(f"브라우저 컨텍스트가 닫혀있어 새로 생성합니다 (account_id={account_id})")
+                del self.browser_contexts[account_id]
+
+        db = SessionLocal()
+        try:
+            account = account_service.get_by_id(db, account_id)
+            if not account:
+                raise ValueError(f"Account {account_id} not found")
+
+            profile_path = Path(account.profile_path)
+
+            # 프로필 디렉토리 생성
+            if not profile_path.exists():
+                profile_path.mkdir(parents=True, exist_ok=True)
+                logger.info(f"프로필 디렉토리 생성: {profile_path}")
+
+            # Playwright 인스턴스 초기화
+            if self.playwright_instance is None:
+                self.playwright_instance = await async_playwright().start()
+                logger.info("Playwright 인스턴스 생성 완료")
+
+            # 브라우저 컨텍스트 생성 (headless=False 강제)
+            context = await self.playwright_instance.chromium.launch_persistent_context(
+                user_data_dir=str(profile_path),
+                headless=False,
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-features=IsolateOrigins,site-per-process',
+                    '--disable-site-isolation-trials',
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--window-size=1280,800',
+                    '--window-position=100,100',
+                ],
+                viewport={'width': 1280, 'height': 800},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            )
+
+            # 자동화 감지 방지
+            await self._bypass_automation_detection(context)
+
+            logger.info(f"브라우저 컨텍스트 생성 완료 (account_id={account_id}, profile={account.profile_dir}, headless=False)")
+
+            # 컨텍스트 저장
+            self.browser_contexts[account_id] = context
+
+            # 마지막 사용 시간 업데이트
+            account_service.update_last_used(db, account_id)
+
+            return context
+
+        finally:
+            db.close()
+
+    async def close_context(self, account_id: int):
+        """
+        특정 계정의 브라우저 컨텍스트를 닫습니다.
+
+        Args:
+            account_id: 계정 ID
+        """
+        if account_id in self.browser_contexts:
+            try:
+                context = self.browser_contexts[account_id]
+                await context.close()
+                del self.browser_contexts[account_id]
+                logger.info(f"브라우저 컨텍스트 종료 완료 (account_id={account_id})")
+            except Exception as e:
+                logger.error(f"브라우저 컨텍스트 종료 실패 (account_id={account_id}): {str(e)}")
+
+    async def close_all_contexts(self):
+        """모든 브라우저 컨텍스트를 닫습니다."""
+        for account_id in list(self.browser_contexts.keys()):
+            await self.close_context(account_id)
+
+        if self.playwright_instance:
+            try:
+                await self.playwright_instance.stop()
+                self.playwright_instance = None
+                logger.info("Playwright 인스턴스 종료 완료")
+            except Exception as e:
+                logger.error(f"Playwright 인스턴스 종료 실패: {str(e)}")
+
+    async def _bypass_automation_detection(self, context: BrowserContext):
+        """자동화 감지를 우회하기 위한 스크립트를 주입합니다."""
+        await context.add_init_script("""
+        // navigator.webdriver 제거
+        if (navigator.webdriver === true) {
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => false
+            });
+        }
+
+        // plugins 속성 수정
+        if (navigator.plugins.length === 0) {
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [1, 2, 3, 4, 5]
+            });
+        }
+
+        // 자동화 감지에 사용되는 다른 속성 속이기
+        Object.defineProperty(navigator, 'maxTouchPoints', {
+            get: () => 1
+        });
+        """)
+
+    async def move_window_to_center(self) -> bool:
+        """브라우저 창을 화면 중앙으로 이동합니다."""
+        try:
+            if not self.browser_context:
+                logger.warning("브라우저 컨텍스트가 없어 창 이동 불가")
+                return False
+
+            pages = self.browser_context.pages
+            if not pages:
+                logger.warning("열린 페이지가 없어 창 이동 불가")
+                return False
+
+            page = pages[0]
+            cdp = await page.context.new_cdp_session(page)
+
+            window_info = await cdp.send("Browser.getWindowForTarget")
+            window_id = window_info.get("windowId")
+
+            if window_id:
+                center_x = 560
+                center_y = 240
+
+                await cdp.send("Browser.setWindowBounds", {
+                    "windowId": window_id,
+                    "bounds": {
+                        "left": center_x,
+                        "top": center_y,
+                        "width": 800,
+                        "height": 600,
+                        "windowState": "normal"
+                    }
+                })
+                logger.info(f"브라우저 창을 화면 중앙으로 이동 (x={center_x}, y={center_y})")
+                return True
+
+            return False
+        except Exception as e:
+            logger.error(f"창 위치 이동 실패: {e}")
+            return False
+
+    async def move_window_to_corner(self) -> bool:
+        """브라우저 창을 화면 우측 하단 구석으로 이동합니다."""
+        try:
+            if not self.browser_context:
+                logger.warning("브라우저 컨텍스트가 없어 창 이동 불가")
+                return False
+
+            pages = self.browser_context.pages
+            if not pages:
+                logger.warning("열린 페이지가 없어 창 이동 불가")
+                return False
+
+            page = pages[0]
+            cdp = await page.context.new_cdp_session(page)
+
+            window_info = await cdp.send("Browser.getWindowForTarget")
+            window_id = window_info.get("windowId")
+
+            if window_id:
+                corner_x = 2000
+                corner_y = 1000
+
+                await cdp.send("Browser.setWindowBounds", {
+                    "windowId": window_id,
+                    "bounds": {
+                        "left": corner_x,
+                        "top": corner_y,
+                        "width": 800,
+                        "height": 600,
+                        "windowState": "normal"
+                    }
+                })
+                logger.info(f"브라우저 창을 구석으로 이동 (x={corner_x}, y={corner_y})")
+                return True
+
+            return False
+        except Exception as e:
+            logger.error(f"창 위치 이동 실패: {e}")
+            return False
