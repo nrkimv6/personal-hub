@@ -90,9 +90,11 @@ class TabPoolManager:
             # 컨텍스트 재생성
             context = await self.context_manager.get_or_create_context(account_id)
 
-        # 계정별 탭 풀 초기화
+        # 계정별 탭 풀 초기화 및 초기 빈 탭 등록
         if account_id not in self.tab_pools:
             self.tab_pools[account_id] = {}
+            # 새 컨텍스트의 초기 빈 탭 등록 (launch_persistent_context로 생성된 탭 재사용)
+            await self.register_initial_tabs(account_id, context)
 
         account_tab_pool = self.tab_pools[account_id]
 
@@ -316,6 +318,60 @@ class TabPoolManager:
             logger.info(f"탭 {tab_id} 풀에서 제거됨 (전체 탭: {self.total_active_tabs}/{self.TOTAL_MAX_TABS})")
         except Exception as e:
             logger.error(f"탭 풀 제거 중 오류: {str(e)}")
+
+    async def register_initial_tabs(self, account_id: int, context: BrowserContext) -> int:
+        """
+        브라우저 컨텍스트의 기존 페이지들을 탭 풀에 등록합니다.
+        launch_persistent_context로 생성된 초기 빈 탭을 재사용하기 위함.
+
+        Args:
+            account_id: 계정 ID
+            context: 브라우저 컨텍스트
+
+        Returns:
+            int: 등록된 탭 수
+        """
+        pages = context.pages
+        registered_count = 0
+
+        # 계정별 탭 풀 초기화
+        if account_id not in self.tab_pools:
+            self.tab_pools[account_id] = {}
+
+        for page in pages:
+            # 이미 등록된 탭인지 확인
+            if hasattr(page, '_tab_id') and page._tab_id in self.tab_pool:
+                continue
+
+            # URL이 about:blank인 경우만 등록 (초기 빈 탭)
+            if page.url == "about:blank":
+                # 고유 탭 ID 생성
+                tab_id = f"{account_id}_{random.randint(1000, 9999)}"
+                while tab_id in self.tab_pools[account_id] or tab_id in self.tab_pool:
+                    tab_id = f"{account_id}_{random.randint(1000, 9999)}"
+
+                # 풀에 등록
+                self.tab_pools[account_id][tab_id] = page
+                self.tab_pool[tab_id] = page  # 하위 호환성
+                self.tab_last_used[tab_id] = time.time()
+                self.tab_in_use[tab_id] = False
+                self.tab_use_count[tab_id] = 0
+                self.tab_account[tab_id] = account_id
+
+                # 탭에 메타데이터 저장
+                page._tab_id = tab_id
+                page._account_id = account_id
+
+                registered_count += 1
+                logger.info(f"초기 빈 탭 등록: {tab_id} (account_id={account_id})")
+
+        # 전체 활성 탭 수 업데이트
+        self.total_active_tabs = sum(len(pool) for pool in self.tab_pools.values())
+
+        if registered_count > 0:
+            logger.info(f"계정 {account_id}의 초기 탭 {registered_count}개 등록 완료 (전체 탭: {self.total_active_tabs}/{self.TOTAL_MAX_TABS})")
+
+        return registered_count
 
     async def handle_browser_closed_error(self, account_id: int):
         """브라우저가 닫혔을 때 해당 계정의 컨텍스트와 탭을 정리합니다."""
