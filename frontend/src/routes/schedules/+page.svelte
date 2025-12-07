@@ -263,6 +263,10 @@
     }
   }
 
+  // 패턴 복사 모달 상태
+  let showPatternCopyModal = false;
+  let patternCopySource: RecurringRuleWithContext | null = null;
+
   function openRecurringCreateModal() {
     recurringForm = {
       url: '',
@@ -278,6 +282,27 @@
     recurringParsedInfo = {};
     recurringCreateError = null;
     showRecurringCreateModal = true;
+  }
+
+  function openPatternCopyModal() {
+    patternCopySource = null;
+    showPatternCopyModal = true;
+  }
+
+  function copyPatternFromRule(rule: RecurringRuleWithContext) {
+    if (!rule.target_patterns || !Array.isArray(rule.target_patterns)) return;
+
+    // 기존 패턴을 복사된 패턴으로 대체
+    recurringForm.target_patterns = rule.target_patterns.map(p => ({
+      day_offset: p.day_offset ?? 0,
+      label: p.label || '',
+      times: p.times?.join(', ') || '',
+      time_range: p.time_range || '',
+      use_time_range: !!p.time_range && !p.times?.length
+    }));
+
+    showPatternCopyModal = false;
+    patternCopySource = null;
   }
 
   function addRecurringTargetPattern() {
@@ -1366,9 +1391,16 @@
         <div class="border-t pt-4">
           <div class="flex justify-between items-center mb-3">
             <h4 class="text-sm font-medium text-gray-900">대상 날짜/시간 패턴</h4>
-            <button type="button" class="btn btn-secondary btn-sm" on:click={addRecurringTargetPattern}>
-              + 패턴 추가
-            </button>
+            <div class="flex gap-2">
+              {#if recurringRules.length > 0}
+                <button type="button" class="btn btn-info btn-sm" on:click={openPatternCopyModal}>
+                  기존 패턴 복사
+                </button>
+              {/if}
+              <button type="button" class="btn btn-secondary btn-sm" on:click={addRecurringTargetPattern}>
+                + 패턴 추가
+              </button>
+            </div>
           </div>
 
           {#if recurringForm.target_patterns.length === 0}
@@ -1466,6 +1498,57 @@
           </button>
         </div>
       </form>
+    </div>
+  </div>
+{/if}
+
+<!-- 패턴 복사 모달 -->
+{#if showPatternCopyModal}
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 max-h-[70vh] overflow-y-auto">
+      <div class="p-4 border-b sticky top-0 bg-white">
+        <h3 class="text-lg font-semibold">대상 패턴 복사</h3>
+        <p class="text-sm text-gray-500 mt-1">기존 반복 규칙에서 대상 패턴을 복사합니다.</p>
+      </div>
+
+      <div class="p-4">
+        {#if recurringRules.length === 0}
+          <div class="text-center py-8 text-gray-500">
+            복사할 수 있는 반복 규칙이 없습니다.
+          </div>
+        {:else}
+          <div class="space-y-2">
+            {#each recurringRules as rule (rule.id)}
+              <button
+                type="button"
+                class="w-full text-left p-3 border rounded-lg hover:bg-blue-50 hover:border-blue-300 transition-colors"
+                on:click={() => copyPatternFromRule(rule)}
+              >
+                <div class="flex items-center justify-between">
+                  <div>
+                    <div class="font-medium text-gray-900">{rule.name}</div>
+                    <div class="text-sm text-gray-500">{rule.business_name} - {rule.item_name}</div>
+                    <div class="text-xs text-gray-400 mt-1">
+                      {formatTargetPatterns(rule.target_patterns)}
+                    </div>
+                  </div>
+                  <span class="text-blue-600 text-sm">선택</span>
+                </div>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+
+      <div class="p-4 border-t flex justify-end">
+        <button
+          type="button"
+          class="btn btn-secondary"
+          on:click={() => showPatternCopyModal = false}
+        >
+          취소
+        </button>
+      </div>
     </div>
   </div>
 {/if}
