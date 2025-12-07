@@ -146,6 +146,7 @@ class ScheduleService:
             # Schedule 정보
             "id": schedule.id,
             "date": schedule.date,
+            "time_range": getattr(schedule, 'time_range', None) or item.time_range,  # schedule 우선, 없으면 item
             "times": json.loads(schedule.times) if schedule.times else None,
             "is_enabled": schedule.is_enabled,
             "is_active": schedule.is_active,
@@ -168,7 +169,7 @@ class ScheduleService:
             "item_name": item.name,
             "base_url": item.base_url,
             "item_is_enabled": getattr(item, 'is_enabled', True),
-            "time_range": item.time_range,
+            "item_time_range": item.time_range,  # 아이템 레벨 time_range (폴백용)
             "max_bookings_per_schedule": item.max_bookings_per_schedule,
             "booking_options_override": json.loads(item.booking_options_override) if item.booking_options_override else None,
             # Business 정보
@@ -199,6 +200,7 @@ class ScheduleService:
         schedule = MonitorSchedule(
             biz_item_id=data.biz_item_id,
             date=data.date,
+            time_range=data.time_range,
             times=times_json,
             is_enabled=data.is_enabled,
             auto_booking_enabled=data.auto_booking_enabled,
@@ -228,6 +230,7 @@ class ScheduleService:
             schedule = MonitorSchedule(
                 biz_item_id=data.biz_item_id,
                 date=date,
+                time_range=data.time_range,
                 times=times_json,
                 is_enabled=data.is_enabled,
                 interval=data.interval,
