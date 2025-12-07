@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Dict, Optional, TYPE_CHECKING
 
 from app.config import settings, logger
+from app.utils.time_utils import is_schedule_expired
 
 if TYPE_CHECKING:
     from .tab_pool_manager import TabPoolManager
@@ -283,6 +284,21 @@ class MonitoringQueue:
                     schedule = self.schedule_service.get_schedule(target_id)
                     if not schedule or not schedule.get("is_active"):
                         logger.info(f"⏹️ [{label}] 모니터링 중지됨 (비활성화 또는 삭제)")
+                        break
+
+                    # 실행 직전 만료 체크: 날짜/시간이 지났으면 비활성화
+                    schedule_date = schedule.get("date")
+                    schedule_times = schedule.get("times", [])
+                    schedule_time_range = schedule.get("time_range")
+
+                    if is_schedule_expired(schedule_date, schedule_times, schedule_time_range):
+                        logger.info(f"⏹️ [{label}] 예약 시간이 지나 자동 비활성화됨 (date={schedule_date})")
+                        self.schedule_service.update_schedule(target_id, {
+                            "is_enabled": False,
+                            "is_active": False,
+                            "run_status": "expired",
+                            "last_error": "예약 시간이 지나 자동 비활성화됨"
+                        })
                         break
 
                     # 첫 실행인지 확인
