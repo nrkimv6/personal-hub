@@ -297,6 +297,12 @@ class BrowserService:
         """단일 브라우저 컨텍스트를 초기화합니다."""
         return await self._context_manager.initialize_browser()
 
+    async def ensure_browser(self) -> BrowserContext:
+        """브라우저 컨텍스트가 없으면 초기화합니다."""
+        if self.browser_context is None:
+            return await self.initialize_browser()
+        return self.browser_context
+
     async def get_or_create_context(self, account_id: Optional[int] = None) -> BrowserContext:
         """계정별 브라우저 컨텍스트를 가져오거나 생성합니다."""
         return await self._context_manager.get_or_create_context(account_id)
