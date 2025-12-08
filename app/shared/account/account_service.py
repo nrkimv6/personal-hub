@@ -43,6 +43,14 @@ class AccountService:
             profile_path.mkdir(parents=True, exist_ok=True)
             logger.info(f"프로필 디렉토리 생성: {profile_path}")
 
+        # booking_info 처리 (Pydantic 객체 → dict)
+        booking_info_dict = None
+        if hasattr(data, 'booking_info') and data.booking_info is not None:
+            if hasattr(data.booking_info, 'model_dump'):
+                booking_info_dict = data.booking_info.model_dump(exclude_none=True)
+            else:
+                booking_info_dict = data.booking_info
+
         account = Account(
             name=data.name,
             email=data.email,
@@ -50,6 +58,9 @@ class AccountService:
             is_active=data.is_active,
             description=data.description,
         )
+        # booking_info는 property setter를 통해 JSON 문자열로 변환됨
+        if booking_info_dict:
+            account.booking_info = booking_info_dict
         db.add(account)
         db.commit()
         db.refresh(account)
@@ -65,6 +76,11 @@ class AccountService:
         update_data = data.model_dump(exclude_unset=True)
 
         for key, value in update_data.items():
+            # booking_info는 Pydantic 객체 → dict 변환 필요
+            if key == 'booking_info' and value is not None:
+                # Pydantic 객체인 경우 dict로 변환
+                if hasattr(value, 'model_dump'):
+                    value = value.model_dump(exclude_none=True)
             setattr(account, key, value)
 
         account.updated_at = datetime.now()
