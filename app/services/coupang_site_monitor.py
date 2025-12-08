@@ -357,7 +357,7 @@ class CoupangSiteMonitor(AbstractSiteMonitor):
             )
             
             # 알림 발송
-            await self.notification_service.send_notification(message)
+            await self.notification_service.send_notification_message(message)
 
     def _log_api_request(self, product_id: str, select_date: str) -> None:
         """API 요청 정보를 로그 파일에 기록합니다."""

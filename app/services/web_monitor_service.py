@@ -37,7 +37,7 @@ class GenericSiteMonitor(AbstractSiteMonitor):
         if new_status["error_type"]:
             # 에러 처리
             error_message = f"⚠️ <b>에러 발생</b>\n\n대상: {target.label}\nURL: {target.url}\n에러 유형: {new_status['error_type']}"
-            await self.notification_service.send_notification(error_message, force_send=True)
+            await self.notification_service.send_notification_message(error_message, force_send=True)
             return
         
         # 상태 변경 알림
@@ -58,7 +58,7 @@ class GenericSiteMonitor(AbstractSiteMonitor):
         
         # 알림 메시지 생성
         message = f"🔄 <b>상태 변경 감지</b>\n\n대상: {target.label}\nURL: {target.url}\n상태: {', '.join(status_message)}"
-        await self.notification_service.send_notification(message)
+        await self.notification_service.send_notification_message(message)
     
     async def get_interval(self, target: MonitorTarget) -> float:
         """웹 페이지 모니터링 간격을 계산합니다."""
