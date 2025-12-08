@@ -140,7 +140,8 @@ class TabPoolManager:
                     await self._remove_tab_from_pool(tab_id, account_id)
                     continue
 
-                logger.info(f"대상 {target_id}가 계정 {account_id}의 기존 탭 {tab_id} 재사용 (계정 탭: {len(account_tab_pool)}, 전체 탭: {total_tabs}/{self.TOTAL_MAX_TABS})")
+                tabs_in_use = sum(1 for in_use in self.tab_in_use.values() if in_use)
+                logger.info(f"🔒 탭 획득: {tab_id} → 대상 {target_id} (사용 중: {tabs_in_use}/{self.TOTAL_MAX_TABS})")
                 break
 
             # 새 탭 생성 가능 여부 확인 (전체 최대 탭 수 기준)
@@ -168,7 +169,8 @@ class TabPoolManager:
                 self.tab_account[tab_id] = account_id
                 self.total_active_tabs = total_tabs + 1
 
-                logger.info(f"대상 {target_id}를 위한 새 탭 {tab_id} 생성 (계정 {account_id}, 전체 탭: {total_tabs + 1}/{self.TOTAL_MAX_TABS})")
+                tabs_in_use = sum(1 for in_use in self.tab_in_use.values() if in_use)
+                logger.info(f"🔒 새 탭 생성: {tab_id} → 대상 {target_id} (사용 중: {tabs_in_use}/{self.TOTAL_MAX_TABS}, 전체 탭: {total_tabs + 1})")
                 break
             else:
                 # 모든 탭이 사용 중, 대기
@@ -218,7 +220,8 @@ class TabPoolManager:
                     self.tab_in_use[tab_id] = False
                     self.tab_last_used[tab_id] = time.time()
                     self.tab_current_target.pop(tab_id, None)
-                    logger.info(f"탭 {tab_id} 반환 (대상 {target_id}에서 사용 완료)")
+                    tabs_in_use = sum(1 for in_use in self.tab_in_use.values() if in_use)
+                    logger.info(f"🔓 탭 반환: {tab_id} ← 대상 {target_id} (사용 중: {tabs_in_use}/{self.TOTAL_MAX_TABS})")
 
                     # 대기 중인 요청에 신호 전송
                     if self.tab_waiters:

@@ -131,9 +131,10 @@ class ResourceMonitor:
 
         self.last_memory_check = current_time
 
-        # 로그 출력
+        # 로그 출력 (사용 중인 탭 수도 함께 표시)
         tab_pool = self.tab_pool_manager.tab_pool
-        logger.info(f"전역 메모리 사용량: {memory_mb:.2f}MB (탭 수: {len(tab_pool)}/{self.tab_pool_manager.TOTAL_MAX_TABS})")
+        tabs_in_use = sum(1 for in_use in self.tab_pool_manager.tab_in_use.values() if in_use)
+        logger.info(f"전역 메모리 사용량: {memory_mb:.2f}MB (탭 수: {len(tab_pool)}/{self.tab_pool_manager.TOTAL_MAX_TABS}, 사용 중: {tabs_in_use})")
 
         # 메모리 사용량이 임계값을 초과하면 정리 작업 수행
         if memory_mb > self.MEMORY_THRESHOLD_MB and len(tab_pool) > 1:
