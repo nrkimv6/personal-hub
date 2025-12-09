@@ -474,3 +474,61 @@ class TabPoolManager:
             del self.context_manager.browser_contexts[account_id]
 
         logger.info(f"계정 {account_id}의 브라우저 정리 완료. 다음 요청 시 재생성됩니다.")
+
+    async def close_all_tabs(self) -> int:
+        """
+        모든 탭을 강제로 닫습니다.
+
+        스나이핑 시작 전 모니터링 탭을 정리할 때 사용합니다.
+        브라우저 컨텍스트는 유지하고 탭만 닫습니다.
+
+        Returns:
+            닫힌 탭 수
+        """
+        closed_count = 0
+
+        # 모든 계정의 탭 풀 정리
+        for account_id in list(self.tab_pools.keys()):
+            tab_pool = self.tab_pools[account_id]
+
+            for tab_id in list(tab_pool.keys()):
+                try:
+                    tab = tab_pool[tab_id]
+
+                    # 사용 중 상태 해제
+                    self.tab_in_use[tab_id] = False
+
+                    # 탭 닫기
+                    try:
+                        if not tab.is_closed():
+                            await tab.close()
+                    except Exception as e:
+                        logger.debug(f"탭 닫기 오류 (무시): {e}")
+
+                    # 풀에서 제거
+                    del tab_pool[tab_id]
+
+                    # 메타데이터 정리
+                    self.tab_pool.pop(tab_id, None)
+                    self.tab_last_used.pop(tab_id, None)
+                    self.tab_in_use.pop(tab_id, None)
+                    self.tab_use_count.pop(tab_id, None)
+                    self.tab_current_target.pop(tab_id, None)
+                    self.tab_account.pop(tab_id, None)
+
+                    closed_count += 1
+                    logger.debug(f"탭 {tab_id} 닫힘 (account_id={account_id})")
+
+                except Exception as e:
+                    logger.warning(f"탭 {tab_id} 정리 중 오류: {e}")
+
+        # 전체 활성 탭 수 업데이트
+        self.total_active_tabs = 0
+
+        # 대기 중인 요청들에게 신호 전송 (탭이 해제됨)
+        for waiter_id, event in list(self.tab_waiters.items()):
+            event.set()
+            self.tab_waiters.pop(waiter_id, None)
+
+        logger.info(f"[TAB-POOL] 모든 탭 닫기 완료: {closed_count}개 탭 정리됨")
+        return closed_count
