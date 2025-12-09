@@ -70,13 +70,30 @@ class TabPoolManager:
         context = await self.context_manager.get_or_create_context(account_id)
 
         # 컨텍스트 유효성 확인
+        context_valid = False
         try:
             _ = context.pages
+            # 추가로 실제 접근 가능한지 확인
+            if len(context.pages) > 0:
+                # 첫 번째 페이지로 간단한 테스트
+                try:
+                    _ = context.pages[0].url
+                    context_valid = True
+                except Exception:
+                    pass
+            else:
+                context_valid = True  # 페이지가 없어도 컨텍스트는 유효할 수 있음
         except Exception as e:
-            logger.warning(f"브라우저 컨텍스트가 닫힘 (account_id={account_id}), 재생성 필요: {str(e)}")
+            logger.warning(f"브라우저 컨텍스트가 닫힘 (account_id={account_id}): {str(e)}")
+
+        if not context_valid:
+            logger.warning(f"브라우저 컨텍스트 재생성 필요 (account_id={account_id})")
             # 해당 계정의 컨텍스트 제거 및 탭 풀 정리
             if account_id in self.context_manager.browser_contexts:
-                del self.context_manager.browser_contexts[account_id]
+                try:
+                    del self.context_manager.browser_contexts[account_id]
+                except Exception:
+                    pass
             if account_id in self.tab_pools:
                 # 해당 계정의 탭들 정리
                 for tab_id in list(self.tab_pools[account_id].keys()):
@@ -88,7 +105,9 @@ class TabPoolManager:
                     self.tab_pool.pop(tab_id, None)
                 del self.tab_pools[account_id]
             # 컨텍스트 재생성
+            logger.info(f"브라우저 컨텍스트 재생성 시작 (account_id={account_id})")
             context = await self.context_manager.get_or_create_context(account_id)
+            logger.info(f"브라우저 컨텍스트 재생성 완료 (account_id={account_id})")
 
         # 계정별 탭 풀 초기화 및 초기 빈 탭 등록
         if account_id not in self.tab_pools:

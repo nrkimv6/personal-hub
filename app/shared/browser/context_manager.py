@@ -168,15 +168,33 @@ class ContextManager:
         # 이미 존재하면 유효성 확인 후 반환
         if account_id in self.browser_contexts:
             context = self.browser_contexts[account_id]
-            # 컨텍스트가 닫혔는지 확인
+            # 컨텍스트가 닫혔는지 확인 (더 엄격한 검사)
+            context_valid = False
             try:
-                _ = context.pages  # 유효성 확인
+                pages = context.pages  # 유효성 확인
+                # 실제로 페이지에 접근 가능한지도 확인
+                if len(pages) > 0:
+                    try:
+                        _ = pages[0].url
+                        context_valid = True
+                    except Exception:
+                        pass
+                else:
+                    # 페이지가 없어도 새 페이지를 만들 수 있으면 유효
+                    context_valid = True
+            except Exception as e:
+                logger.warning(f"브라우저 컨텍스트 유효성 검사 실패 (account_id={account_id}): {e}")
+
+            if context_valid:
                 logger.debug(f"기존 브라우저 컨텍스트 재사용 (account_id={account_id})")
                 return context
-            except Exception:
+            else:
                 # 컨텍스트가 닫혔으면 딕셔너리에서 제거
                 logger.info(f"브라우저 컨텍스트가 닫혀있어 새로 생성합니다 (account_id={account_id})")
-                del self.browser_contexts[account_id]
+                try:
+                    del self.browser_contexts[account_id]
+                except Exception:
+                    pass
 
         # 새로 생성
         logger.info(f"새 브라우저 컨텍스트 생성 중 (account_id={account_id})")
