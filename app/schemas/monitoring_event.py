@@ -17,6 +17,14 @@ class MonitoringEventBase(BaseModel):
     response_time_ms: Optional[float] = None
     data_hash: Optional[str] = None
     hash_changed: bool = False
+    # 상세 정보 (2025-12-08 추가)
+    fetch_method: Optional[str] = None  # graphql_api, html_scrape
+    time_range: Optional[str] = None  # 적용된 시간 필터 (예: "10:00-21:00")
+    original_slot_count: Optional[int] = None  # 필터링 전 전체 슬롯 개수
+    filtered_slot_count: Optional[int] = None  # 필터링 후 슬롯 개수
+    target_time_matched: bool = False  # time_range 내 슬롯 존재 여부
+    booking_triggered: bool = False  # 자동 예약 트리거 여부
+    booking_success: Optional[bool] = None  # 예약 성공 여부 (None: 미시도)
 
 
 class MonitoringEventCreate(MonitoringEventBase):

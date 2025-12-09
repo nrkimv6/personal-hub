@@ -37,6 +37,15 @@ class MonitoringEvent(Base):
     data_hash = Column(String, nullable=True)
     hash_changed = Column(Boolean, default=False)
 
+    # 상세 정보 (2025-12-08 추가)
+    fetch_method = Column(String, nullable=True)  # graphql_api, html_scrape
+    time_range = Column(String, nullable=True)  # 적용된 시간 필터 (예: "10:00-21:00")
+    original_slot_count = Column(Integer, nullable=True)  # 필터링 전 전체 슬롯 개수
+    filtered_slot_count = Column(Integer, nullable=True)  # 필터링 후 슬롯 개수
+    target_time_matched = Column(Boolean, default=False)  # time_range 내 슬롯 존재 여부
+    booking_triggered = Column(Boolean, default=False)  # 자동 예약 트리거 여부
+    booking_success = Column(Boolean, nullable=True)  # 예약 성공 여부 (None: 미시도)
+
     # 관계
     schedule = relationship("MonitorSchedule")
 
