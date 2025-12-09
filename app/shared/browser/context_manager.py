@@ -382,26 +382,63 @@ class ContextManager:
 
     async def _bypass_automation_detection(self, context: BrowserContext):
         """자동화 감지를 우회하기 위한 스크립트를 주입합니다."""
-        await context.add_init_script("""
-        // navigator.webdriver 제거
-        if (navigator.webdriver === true) {
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => false
-            });
+        await context.add_init_script(self._get_anti_detection_script())
+
+    @staticmethod
+    def _get_anti_detection_script() -> str:
+        """자동화 감지 우회 JavaScript 스크립트를 반환합니다."""
+        return """
+        // 1. navigator.webdriver 완전 제거
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined,
+            configurable: true
+        });
+        // 프로토타입에서도 제거 시도
+        try {
+            delete Object.getPrototypeOf(navigator).webdriver;
+        } catch (e) {}
+
+        // 2. window.chrome 객체 스푸핑 (일반 Chrome처럼 보이게)
+        if (!window.chrome) {
+            window.chrome = {
+                runtime: {},
+                loadTimes: function() {},
+                csi: function() {},
+                app: {}
+            };
         }
 
-        // plugins 속성 수정
-        if (navigator.plugins.length === 0) {
-            Object.defineProperty(navigator, 'plugins', {
-                get: () => [1, 2, 3, 4, 5]
-            });
-        }
+        // 3. navigator.permissions.query 스푸핑
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters) => (
+            parameters.name === 'notifications' ?
+                Promise.resolve({ state: Notification.permission }) :
+                originalQuery(parameters)
+        );
 
-        // 자동화 감지에 사용되는 다른 속성 속이기
+        // 4. navigator.plugins 실제 플러그인 형태로 개선
+        Object.defineProperty(navigator, 'plugins', {
+            get: () => {
+                const plugins = [
+                    { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                    { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+                    { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' }
+                ];
+                plugins.length = 3;
+                return plugins;
+            }
+        });
+
+        // 5. navigator.languages 한국어 우선 설정
+        Object.defineProperty(navigator, 'languages', {
+            get: () => ['ko-KR', 'ko', 'en-US', 'en']
+        });
+
+        // 6. navigator.maxTouchPoints 설정
         Object.defineProperty(navigator, 'maxTouchPoints', {
             get: () => 1
         });
-        """)
+        """
 
     async def move_window_to_center(self) -> bool:
         """브라우저 창을 화면 중앙으로 이동합니다."""
