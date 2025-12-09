@@ -24,6 +24,10 @@ class ContextManager:
         self.browser_context: Optional[BrowserContext] = None  # 하위 호환성 (기본 컨텍스트)
         self.playwright_instance = None
 
+        # 계정별 브라우저 생성 Lock (동시 생성 방지)
+        self._context_locks: Dict[int, asyncio.Lock] = {}
+        self._locks_lock = asyncio.Lock()  # Lock 딕셔너리 접근용 Lock
+
     async def initialize_browser(self) -> BrowserContext:
         """
         단일 브라우저 컨텍스트를 초기화합니다.
@@ -141,6 +145,13 @@ class ContextManager:
             self.browser_context = None
             raise
 
+    async def _get_context_lock(self, account_id: int) -> asyncio.Lock:
+        """계정별 Lock을 가져오거나 생성합니다."""
+        async with self._locks_lock:
+            if account_id not in self._context_locks:
+                self._context_locks[account_id] = asyncio.Lock()
+            return self._context_locks[account_id]
+
     async def get_or_create_context(self, account_id: Optional[int] = None) -> BrowserContext:
         """
         계정별 브라우저 컨텍스트를 가져오거나 생성합니다.
@@ -165,48 +176,52 @@ class ContextManager:
             finally:
                 db.close()
 
-        # 이미 존재하면 유효성 확인 후 반환
-        if account_id in self.browser_contexts:
-            context = self.browser_contexts[account_id]
-            # 컨텍스트가 닫혔는지 확인 (더 엄격한 검사)
-            context_valid = False
-            try:
-                pages = context.pages  # 유효성 확인
-                # 실제로 페이지에 접근 가능한지도 확인
-                if len(pages) > 0:
-                    try:
-                        _ = pages[0].url
+        # 계정별 Lock 획득 (동시 브라우저 생성 방지)
+        context_lock = await self._get_context_lock(account_id)
+
+        async with context_lock:
+            # 이미 존재하면 유효성 확인 후 반환
+            if account_id in self.browser_contexts:
+                context = self.browser_contexts[account_id]
+                # 컨텍스트가 닫혔는지 확인 (더 엄격한 검사)
+                context_valid = False
+                try:
+                    pages = context.pages  # 유효성 확인
+                    # 실제로 페이지에 접근 가능한지도 확인
+                    if len(pages) > 0:
+                        try:
+                            _ = pages[0].url
+                            context_valid = True
+                        except Exception:
+                            pass
+                    else:
+                        # 페이지가 없어도 새 페이지를 만들 수 있으면 유효
                         context_valid = True
+                except Exception as e:
+                    logger.warning(f"브라우저 컨텍스트 유효성 검사 실패 (account_id={account_id}): {e}")
+
+                if context_valid:
+                    logger.debug(f"기존 브라우저 컨텍스트 재사용 (account_id={account_id})")
+                    return context
+                else:
+                    # 컨텍스트가 닫혔으면 딕셔너리에서 제거
+                    logger.info(f"브라우저 컨텍스트가 닫혀있어 새로 생성합니다 (account_id={account_id})")
+                    try:
+                        del self.browser_contexts[account_id]
                     except Exception:
                         pass
-                else:
-                    # 페이지가 없어도 새 페이지를 만들 수 있으면 유효
-                    context_valid = True
-            except Exception as e:
-                logger.warning(f"브라우저 컨텍스트 유효성 검사 실패 (account_id={account_id}): {e}")
 
-            if context_valid:
-                logger.debug(f"기존 브라우저 컨텍스트 재사용 (account_id={account_id})")
-                return context
-            else:
-                # 컨텍스트가 닫혔으면 딕셔너리에서 제거
-                logger.info(f"브라우저 컨텍스트가 닫혀있어 새로 생성합니다 (account_id={account_id})")
-                try:
-                    del self.browser_contexts[account_id]
-                except Exception:
-                    pass
+            # 새로 생성
+            logger.info(f"새 브라우저 컨텍스트 생성 중 (account_id={account_id})")
+            context = await self._create_browser_context(account_id)
+            self.browser_contexts[account_id] = context
 
-        # 새로 생성
-        logger.info(f"새 브라우저 컨텍스트 생성 중 (account_id={account_id})")
-        context = await self._create_browser_context(account_id)
-        self.browser_contexts[account_id] = context
+            # 첫 번째 컨텍스트는 하위 호환을 위해 browser_context에도 저장
+            if self.browser_context is None:
+                self.browser_context = context
+                logger.info("기본 브라우저 컨텍스트 설정 완료")
 
-        # 첫 번째 컨텍스트는 하위 호환을 위해 browser_context에도 저장
-        if self.browser_context is None:
-            self.browser_context = context
-            logger.info("기본 브라우저 컨텍스트 설정 완료")
-
-        return context
+            return context
 
     async def _create_browser_context(self, account_id: int) -> BrowserContext:
         """
