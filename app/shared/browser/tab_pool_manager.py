@@ -257,6 +257,9 @@ class TabPoolManager:
         current_time = time.time()
         tabs_to_remove = []
 
+        # 먼저 탭 풀에 등록되지 않은 고아 탭들 정리
+        await self._cleanup_orphan_tabs()
+
         if not self.tab_last_used:
             return 0
 
@@ -315,6 +318,59 @@ class TabPoolManager:
             logger.info(f"탭 풀 정리 완료: {len(tabs_to_remove)}개 제거, 남은 탭 수: {self.total_active_tabs}")
 
         return len(tabs_to_remove)
+
+    async def _cleanup_orphan_tabs(self):
+        """
+        탭 풀에 등록되지 않은 고아 탭들을 정리합니다.
+
+        브라우저 컨텍스트에 존재하지만 탭 풀에서 관리되지 않는 탭들을 찾아서 닫습니다.
+        특히 about:blank 상태로 방치된 탭들을 정리합니다.
+        """
+        orphan_count = 0
+        try:
+            # 모든 브라우저 컨텍스트의 페이지 확인
+            for account_id, context in list(self.context_manager.browser_contexts.items()):
+                try:
+                    pages = context.pages
+                except Exception:
+                    # 컨텍스트가 닫혀있으면 건너뜀
+                    continue
+
+                # 탭 풀에 등록된 페이지 목록
+                registered_pages = set()
+                if account_id in self.tab_pools:
+                    registered_pages = set(self.tab_pools[account_id].values())
+
+                # 컨텍스트의 모든 페이지 확인
+                for page in pages:
+                    # 이미 탭 풀에 등록된 페이지는 건너뜀
+                    if page in registered_pages:
+                        continue
+
+                    # _tab_id가 있으면 탭 풀에서 관리되는 것
+                    if hasattr(page, '_tab_id') and page._tab_id in self.tab_pool:
+                        continue
+
+                    # 탭 풀에 등록되지 않은 페이지 (고아 탭)
+                    try:
+                        page_url = page.url
+                        # about:blank나 빈 페이지는 닫기
+                        # 또는 최대 탭 수를 초과한 경우에도 닫기
+                        total_tabs = sum(len(pool) for pool in self.tab_pools.values())
+                        if page_url == "about:blank" or total_tabs > self.TOTAL_MAX_TABS:
+                            await page.close()
+                            orphan_count += 1
+                            logger.info(f"고아 탭 정리: account_id={account_id}, url={page_url}")
+                    except Exception as e:
+                        logger.debug(f"고아 탭 정리 중 오류 (무시): {e}")
+
+            if orphan_count > 0:
+                logger.info(f"고아 탭 {orphan_count}개 정리 완료")
+
+        except Exception as e:
+            logger.warning(f"고아 탭 정리 중 오류: {e}")
+
+        return orphan_count
 
     async def _is_tab_closed(self, tab: Page) -> bool:
         """탭이 닫혔는지 확인합니다."""
