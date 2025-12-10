@@ -2,7 +2,9 @@
 MonitorSchedule 라우트 - 일정 API
 설계 문서: 2025-12-01_monitoring_restructure_design.md
 업데이트: 2025-12-04 - 반복 규칙 엔드포인트 추가
+업데이트: 2025-12-10 - 시간 추천 API 추가
 """
+from datetime import datetime
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -20,6 +22,7 @@ from app.schemas.recurring_rule import (
 )
 from app.services.schedule_service import schedule_service
 from app.services.recurring_rule_service import recurring_rule_service
+from app.services.anonymous_monitor import get_anonymous_monitor
 
 router = APIRouter(prefix="/api/v1/schedules", tags=["schedules"])
 
@@ -226,6 +229,81 @@ def preview_recurring_rule(rule_id: int, db: Session = Depends(get_db)):
     if not preview:
         raise HTTPException(status_code=404, detail="Recurring rule not found")
     return preview
+
+
+# =====================================================
+# 시간 추천 API (익명 모니터링용)
+# =====================================================
+
+@router.get("/{schedule_id}/suggest-times")
+async def suggest_monitoring_times(
+    schedule_id: int,
+    days_ahead: int = Query(7, description="분석할 기간 (일)"),
+    db: Session = Depends(get_db)
+):
+    """
+    스케줄에 대한 모니터링 시간 추천
+
+    익명 GraphQL API를 사용하여 해당 상품의 활성 슬롯을 분석하고,
+    예약 이력이 있는 시간대를 추천합니다.
+
+    Returns:
+        - suggested_times: 추천 시간 목록 (예약 많은 순)
+        - estimated_hours: 추정 영업시간
+    """
+    from app.models.monitor_schedule import MonitorSchedule as ScheduleModel
+    from app.models.biz_item import BizItem
+    from app.models.business import Business
+
+    # 스케줄 조회
+    schedule = db.query(ScheduleModel).filter(ScheduleModel.id == schedule_id).first()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    # BizItem 조회
+    biz_item = db.query(BizItem).filter(BizItem.id == schedule.biz_item_id).first()
+    if not biz_item:
+        raise HTTPException(status_code=404, detail="BizItem not found")
+
+    # Business 조회
+    business = db.query(Business).filter(Business.id == biz_item.business_id).first()
+    if not business:
+        raise HTTPException(status_code=404, detail="Business not found")
+
+    # 익명 모니터로 슬롯 분석
+    anonymous_monitor = get_anonymous_monitor()
+    try:
+        result = await anonymous_monitor.analyze_slots(
+            business_type_id=business.business_type_id or 13,  # 기본값 13 (음식점)
+            business_id=business.business_id,
+            biz_item_id=biz_item.biz_item_id,
+            start_date=schedule.date or datetime.now().strftime("%Y-%m-%d"),
+            days_ahead=days_ahead
+        )
+
+        # 응답 포맷 변환
+        suggested_times = [
+            {
+                "time": stat.time,
+                "bookings": stat.bookings,
+                "available_days": stat.available_days,
+                "total_stock": stat.total_stock
+            }
+            for stat in result["suggested_times"]
+        ]
+
+        return {
+            "schedule_id": schedule_id,
+            "suggested_times": suggested_times,
+            "estimated_hours": result["estimated_hours"],
+            "analyzed_days": days_ahead
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"슬롯 분석 실패: {str(e)}"
+        )
 
 
 # =====================================================
