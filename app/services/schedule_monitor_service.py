@@ -76,10 +76,11 @@ class ScheduleMonitorService:
                 return None
 
             # URL 생성
+            # 컬럼 인덱스: 0-12: schedule 필드, 13-19: biz_item 필드, 20-27: business 필드
             url = build_naver_booking_url(
-                business_type_id=result[22],
-                business_id=result[21],
-                biz_item_id=result[14],
+                business_type_id=result[23],  # business_type_id
+                business_id=result[22],       # naver_business_id
+                biz_item_id=result[14],       # naver_biz_item_id
                 date=result[1]
             )
 
@@ -103,23 +104,23 @@ class ScheduleMonitorService:
                 "last_error": result[9],
                 "booking_count": result[10] or 0,
                 "last_booking_time": result[11],
-                "monitoring_mode": result[13] or "legacy",  # 모니터링 모드 (anonymous/legacy)
-                "biz_item_id": result[14],
-                "naver_biz_item_id": result[15],
-                "item_name": result[16],
-                "time_range": result[17],
-                "auto_booking_enabled": bool(result[18]),
-                "max_bookings_per_schedule": result[19] or 1,
-                "account_id": result[20],  # 다중 프로필 지원
-                "business_id": result[21],
-                "naver_business_id": result[22],
-                "business_type_id": result[23],
-                "business_name": result[24],
-                "category": result[25],
-                "service_type": result[26],
-                "booking_options": json.loads(result[27]) if result[27] else None,
+                "monitoring_mode": result[12] or "legacy",  # 모니터링 모드 (anonymous/legacy)
+                "biz_item_id": result[13],
+                "naver_biz_item_id": result[14],
+                "item_name": result[15],
+                "time_range": result[16],
+                "auto_booking_enabled": bool(result[17]),
+                "max_bookings_per_schedule": result[18] or 1,
+                "account_id": result[19],  # 다중 프로필 지원
+                "business_id": result[20],
+                "naver_business_id": result[21],
+                "business_type_id": result[22],
+                "business_name": result[23],
+                "category": result[24],
+                "service_type": result[25],
+                "booking_options": json.loads(result[26]) if result[26] else None,
                 "url": url,
-                "label": f"{result[24]} - {result[16]} ({result[1]})"
+                "label": f"{result[23]} - {result[15]} ({result[1]})"
             }
 
         except Exception as e:
