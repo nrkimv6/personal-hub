@@ -57,32 +57,47 @@ def mock_schedule_slots():
     return [
         ScheduleSlot(
             slot_id="slot-1",
+            start_time="2025-12-15 18:00:00",
             date="2025-12-15",
             time="18:00",
+            is_business_day=True,
+            is_sale_day=True,
             stock=2,
             unit_stock=10,
             unit_booking_count=5,
-            is_sale_day=True,
+            duration=60,
+            min_booking_count=1,
+            max_booking_count=10,
             prices=[{"min": 50000, "max": 50000}]
         ),
         ScheduleSlot(
             slot_id="slot-2",
+            start_time="2025-12-15 19:00:00",
             date="2025-12-15",
             time="19:00",
+            is_business_day=True,
+            is_sale_day=True,
             stock=0,
             unit_stock=10,
             unit_booking_count=8,
-            is_sale_day=True,
+            duration=60,
+            min_booking_count=1,
+            max_booking_count=10,
             prices=[{"min": 50000, "max": 50000}]
         ),
         ScheduleSlot(
             slot_id="slot-3",
+            start_time="2025-12-15 20:00:00",
             date="2025-12-15",
             time="20:00",
+            is_business_day=True,
+            is_sale_day=True,
             stock=3,
             unit_stock=10,
             unit_booking_count=3,
-            is_sale_day=True,
+            duration=60,
+            min_booking_count=1,
+            max_booking_count=10,
             prices=[{"min": 50000, "max": 50000}]
         ),
     ]
@@ -92,6 +107,9 @@ def mock_schedule_slots():
 def mock_schedule_info(mock_schedule_slots):
     """테스트용 스케줄 정보"""
     return ScheduleInfo(
+        business_id="1234567",
+        biz_item_id="7654321",
+        available_dates=["2025-12-15"],
         slots=mock_schedule_slots,
         slots_by_date={"2025-12-15": mock_schedule_slots}
     )
@@ -147,16 +165,24 @@ class TestCheckAvailability:
         no_stock_slots = [
             ScheduleSlot(
                 slot_id="slot-1",
+                start_time="2025-12-15 18:00:00",
                 date="2025-12-15",
                 time="18:00",
+                is_business_day=True,
+                is_sale_day=True,
                 stock=0,
                 unit_stock=10,
                 unit_booking_count=10,
-                is_sale_day=True,
+                duration=60,
+                min_booking_count=1,
+                max_booking_count=10,
                 prices=[]
             )
         ]
         schedule = ScheduleInfo(
+            business_id="1234567",
+            biz_item_id="7654321",
+            available_dates=["2025-12-15"],
             slots=no_stock_slots,
             slots_by_date={"2025-12-15": no_stock_slots}
         )
