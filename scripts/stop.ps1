@@ -89,6 +89,7 @@ Write-Host "[2] Killing processes on ports $ApiPort, $FrontendPort" -ForegroundC
 Write-Host "----------------------------------------"
 
 $portKilled = 0
+$killedPids = @{}  # Track already killed PIDs to avoid duplicate attempts
 
 foreach ($port in @($ApiPort, $FrontendPort)) {
     $conns = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
@@ -96,6 +97,7 @@ foreach ($port in @($ApiPort, $FrontendPort)) {
         foreach ($conn in $conns) {
             $procId = $conn.OwningProcess
             if ($procId -eq 0) { continue }
+            if ($killedPids.ContainsKey($procId)) { continue }  # Skip already killed
 
             $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
             if ($proc) {
@@ -104,6 +106,7 @@ foreach ($port in @($ApiPort, $FrontendPort)) {
                     Stop-Process -Id $procId -Force -ErrorAction Stop
                     Write-Host "      -> Killed" -ForegroundColor Green
                     $portKilled++
+                    $killedPids[$procId] = $true  # Mark as killed
                 } catch {
                     Write-Host "      -> Failed: $($_.Exception.Message)" -ForegroundColor Red
                 }
