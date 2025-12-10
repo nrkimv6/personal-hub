@@ -52,6 +52,9 @@ class TabPoolManager:
         # 전체 현재 활성 탭 수 추적
         self.total_active_tabs = 0
 
+        # 계정별 브라우저 복구 진행 중 플래그 (race condition 방지)
+        self._recovery_in_progress: Dict[int, bool] = {}
+
     async def get_tab(self, target_id: int, account_id: Optional[int] = None) -> Page:
         """계정별 탭 풀에서 사용 가능한 탭을 가져오거나 새로 생성합니다.
 
@@ -88,26 +91,18 @@ class TabPoolManager:
 
         if not context_valid:
             logger.warning(f"브라우저 컨텍스트 재생성 필요 (account_id={account_id})")
-            # 해당 계정의 컨텍스트 제거 및 탭 풀 정리
-            if account_id in self.context_manager.browser_contexts:
-                try:
-                    del self.context_manager.browser_contexts[account_id]
-                except Exception:
-                    pass
-            if account_id in self.tab_pools:
-                # 해당 계정의 탭들 정리
-                for tab_id in list(self.tab_pools[account_id].keys()):
-                    self.tab_last_used.pop(tab_id, None)
-                    self.tab_in_use.pop(tab_id, None)
-                    self.tab_use_count.pop(tab_id, None)
-                    self.tab_current_target.pop(tab_id, None)
-                    self.tab_account.pop(tab_id, None)
-                    self.tab_pool.pop(tab_id, None)
-                del self.tab_pools[account_id]
-            # 컨텍스트 재생성
-            logger.info(f"브라우저 컨텍스트 재생성 시작 (account_id={account_id})")
+
+            # handle_browser_closed_error를 통해 Lock 획득 후 정리 및 재생성 (race condition 방지)
+            cleanup_performed = await self.handle_browser_closed_error(account_id, recreate=True)
+
+            if cleanup_performed:
+                logger.info(f"브라우저 컨텍스트 재생성 완료 (account_id={account_id})")
+            else:
+                # 다른 태스크가 복구 중이면, get_or_create_context로 대기 후 기존 컨텍스트 사용
+                logger.info(f"다른 태스크에서 복구 중, 컨텍스트 대기 (account_id={account_id})")
+
+            # 재생성된 컨텍스트 가져오기
             context = await self.context_manager.get_or_create_context(account_id)
-            logger.info(f"브라우저 컨텍스트 재생성 완료 (account_id={account_id})")
 
         # 계정별 탭 풀 초기화 및 초기 빈 탭 등록
         if account_id not in self.tab_pools:
@@ -459,21 +454,70 @@ class TabPoolManager:
 
         return registered_count
 
-    async def handle_browser_closed_error(self, account_id: int):
-        """브라우저가 닫혔을 때 해당 계정의 컨텍스트와 탭을 정리합니다."""
-        logger.warning(f"계정 {account_id}의 브라우저가 닫혔습니다. 컨텍스트 및 탭 정리 중...")
+    async def handle_browser_closed_error(self, account_id: int, recreate: bool = False) -> bool:
+        """브라우저가 닫혔을 때 해당 계정의 컨텍스트와 탭을 정리합니다.
 
-        # 해당 계정의 모든 탭 제거
-        if account_id in self.tab_pools:
-            for tab_id in list(self.tab_pools[account_id].keys()):
-                await self._remove_tab_from_pool(tab_id, account_id)
-            del self.tab_pools[account_id]
+        Args:
+            account_id: 계정 ID
+            recreate: True면 정리 후 즉시 재생성까지 수행
 
-        # 브라우저 컨텍스트 제거
-        if account_id in self.context_manager.browser_contexts:
-            del self.context_manager.browser_contexts[account_id]
+        Returns:
+            bool: True if cleanup was performed, False if recovery already in progress
+        """
+        # 이미 복구 진행 중이면 스킵 (race condition 방지)
+        if self._recovery_in_progress.get(account_id, False):
+            logger.info(f"계정 {account_id}의 브라우저 복구가 이미 진행 중입니다. 정리 스킵.")
+            return False
 
-        logger.info(f"계정 {account_id}의 브라우저 정리 완료. 다음 요청 시 재생성됩니다.")
+        # context_manager의 Lock 획득 (브라우저 생성과 동기화)
+        context_lock = await self.context_manager._get_context_lock(account_id)
+
+        async with context_lock:
+            # Lock 획득 후 다시 확인 (다른 태스크가 이미 처리했을 수 있음)
+            if self._recovery_in_progress.get(account_id, False):
+                logger.info(f"계정 {account_id}의 브라우저 복구가 이미 진행 중입니다. 정리 스킵.")
+                return False
+
+            # 복구 진행 중 플래그 설정
+            self._recovery_in_progress[account_id] = True
+
+            try:
+                logger.warning(f"계정 {account_id}의 브라우저가 닫혔습니다. 컨텍스트 및 탭 정리 중...")
+
+                # 해당 계정의 모든 탭 제거
+                if account_id in self.tab_pools:
+                    for tab_id in list(self.tab_pools[account_id].keys()):
+                        await self._remove_tab_from_pool(tab_id, account_id)
+                    try:
+                        del self.tab_pools[account_id]
+                    except KeyError:
+                        pass
+
+                # 브라우저 컨텍스트 제거
+                if account_id in self.context_manager.browser_contexts:
+                    try:
+                        del self.context_manager.browser_contexts[account_id]
+                    except KeyError:
+                        pass
+
+                logger.info(f"계정 {account_id}의 브라우저 정리 완료.")
+
+                # recreate=True면 즉시 재생성 (Lock 내에서 수행하여 race condition 방지)
+                if recreate:
+                    logger.info(f"계정 {account_id}의 브라우저 재생성 시작...")
+                    try:
+                        # _create_browser_context 직접 호출 (Lock은 이미 획득됨)
+                        context = await self.context_manager._create_browser_context(account_id)
+                        self.context_manager.browser_contexts[account_id] = context
+                        logger.info(f"계정 {account_id}의 브라우저 재생성 완료")
+                    except Exception as e:
+                        logger.error(f"계정 {account_id}의 브라우저 재생성 실패: {e}")
+                        raise
+
+                return True
+            finally:
+                # 복구 진행 중 플래그 해제
+                self._recovery_in_progress[account_id] = False
 
     async def close_all_tabs(self) -> int:
         """

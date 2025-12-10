@@ -506,9 +506,11 @@ class NaverGraphQLClient:
             slot_time = slot_time_full[:5]  # "11:30"
 
             # 예약 가능 여부 체크 (재고 있고, 판매일인 경우)
+            # None 값 처리: API가 null을 반환할 수 있음
+            stock_value = slot_data.get("stock") or 0
             is_available = (
                 slot_data.get("isSaleDay", False) and
-                slot_data.get("stock", 0) > 0
+                stock_value > 0
             )
 
             slot = ScheduleSlot(
@@ -518,13 +520,13 @@ class NaverGraphQLClient:
                 time=slot_time,
                 is_business_day=slot_data.get("isBusinessDay", False),
                 is_sale_day=slot_data.get("isSaleDay", False),
-                stock=slot_data.get("stock", 0),
-                unit_stock=slot_data.get("unitStock", 0),
-                unit_booking_count=slot_data.get("unitBookingCount", 0),
-                duration=slot_data.get("duration", 0),
-                min_booking_count=slot_data.get("minBookingCount", 1),
-                max_booking_count=slot_data.get("maxBookingCount", 10),
-                prices=slot_data.get("prices", []),
+                stock=stock_value,
+                unit_stock=slot_data.get("unitStock") or 0,
+                unit_booking_count=slot_data.get("unitBookingCount") or 0,
+                duration=slot_data.get("duration") or 0,
+                min_booking_count=slot_data.get("minBookingCount") or 1,
+                max_booking_count=slot_data.get("maxBookingCount") or 10,
+                prices=slot_data.get("prices") or [],
                 raw_data=slot_data
             )
             slots.append(slot)
