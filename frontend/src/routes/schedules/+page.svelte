@@ -69,7 +69,8 @@
     is_enabled: true,
     interval: 10,
     custom_interval: false,
-    account_id: null as number | null
+    account_id: null as number | null,
+    monitoring_mode: 'legacy' as 'legacy' | 'anonymous'
   };
 
   // 간격 포맷팅
@@ -559,7 +560,8 @@
       is_enabled: schedule.is_enabled,
       interval: schedule.interval || 30,
       custom_interval: schedule.custom_interval || false,
-      account_id: schedule.account_id
+      account_id: schedule.account_id,
+      monitoring_mode: (schedule as any).monitoring_mode || 'legacy'
     };
     showEditModal = true;
   }
@@ -573,7 +575,8 @@
         is_enabled: editForm.is_enabled,
         interval: editForm.custom_interval ? editForm.interval : undefined,
         custom_interval: editForm.custom_interval,
-        account_id: editForm.account_id
+        account_id: editForm.account_id,
+        monitoring_mode: editForm.monitoring_mode
       };
       await scheduleApi.update(editSchedule.id, updateData);
       showEditModal = false;
@@ -1206,6 +1209,20 @@
               <option value={account.id}>{account.name}</option>
             {/each}
           </select>
+        </div>
+        <div>
+          <label for="edit-monitoring-mode" class="block text-sm font-medium text-gray-700 mb-1">모니터링 모드</label>
+          <select id="edit-monitoring-mode" class="input" bind:value={editForm.monitoring_mode}>
+            <option value="legacy">기존 방식 (로그인 탭 사용)</option>
+            <option value="anonymous">익명 모드 (효율 우선)</option>
+          </select>
+          <p class="text-xs text-gray-500 mt-1">
+            {#if editForm.monitoring_mode === 'anonymous'}
+              재고 확인은 익명으로, 예약 시에만 탭을 사용합니다. 더 많은 스케줄을 동시에 모니터링할 수 있습니다.
+            {:else}
+              모든 작업에 로그인된 탭을 사용합니다. 안정성이 높지만 동시 모니터링 수가 제한됩니다.
+            {/if}
+          </p>
         </div>
         <label class="flex items-center gap-2">
           <input type="checkbox" bind:checked={editForm.is_enabled} />
