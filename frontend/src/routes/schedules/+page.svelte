@@ -9,6 +9,58 @@
   let loading = true;
   let error: string | null = null;
 
+  // 멀티 선택
+  let selectedIds: Set<number> = new Set();
+
+  function toggleSelect(id: number) {
+    if (selectedIds.has(id)) {
+      selectedIds.delete(id);
+    } else {
+      selectedIds.add(id);
+    }
+    selectedIds = selectedIds; // trigger reactivity
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === schedules.length) {
+      selectedIds = new Set();
+    } else {
+      selectedIds = new Set(schedules.map(s => s.id));
+    }
+  }
+
+  async function bulkToggleEnabled(enable: boolean) {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`선택한 ${selectedIds.size}개 일정을 ${enable ? '활성화' : '비활성화'}하시겠습니까?`)) return;
+    try {
+      for (const id of selectedIds) {
+        if (enable) {
+          await scheduleApi.enable(id);
+        } else {
+          await scheduleApi.disable(id);
+        }
+      }
+      selectedIds = new Set();
+      await fetchSchedules();
+    } catch (e) {
+      alert('일괄 처리 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+    }
+  }
+
+  async function bulkDelete() {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`선택한 ${selectedIds.size}개 일정을 삭제하시겠습니까?`)) return;
+    try {
+      for (const id of selectedIds) {
+        await scheduleApi.delete(id);
+      }
+      selectedIds = new Set();
+      await fetchSchedules();
+    } catch (e) {
+      alert('일괄 삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+    }
+  }
+
   // 탭 상태
   let activeTab: 'schedules' | 'recurring' = 'schedules';
 
@@ -873,158 +925,220 @@
     </div>
   {:else}
     <div class="card">
-      <div class="mb-4 text-sm text-gray-600">
-        총 {schedules.length}개의 일정
+      <div class="mb-4 flex items-center justify-between">
+        <div class="text-sm text-gray-600">
+          총 {schedules.length}개의 일정
+          {#if selectedIds.size > 0}
+            <span class="ml-2 text-blue-600">({selectedIds.size}개 선택)</span>
+          {/if}
+        </div>
+        {#if selectedIds.size > 0}
+          <div class="flex gap-2">
+            <button class="btn btn-secondary btn-sm" on:click={() => bulkToggleEnabled(true)}>
+              일괄 활성화
+            </button>
+            <button class="btn btn-secondary btn-sm" on:click={() => bulkToggleEnabled(false)}>
+              일괄 비활성화
+            </button>
+            <button class="btn btn-danger btn-sm" on:click={bulkDelete}>
+              일괄 삭제
+            </button>
+          </div>
+        {/if}
       </div>
       <div class="overflow-x-auto">
         <table class="table">
           <thead>
             <tr>
-              <th>날짜</th>
-              <th>업체</th>
-              <th>아이템</th>
-              <th>링크</th>
-              <th>시간</th>
-              <th>간격</th>
-              <th>계정</th>
+              <th class="w-8">
+                <input
+                  type="checkbox"
+                  class="w-4 h-4 cursor-pointer"
+                  checked={schedules.length > 0 && selectedIds.size === schedules.length}
+                  indeterminate={selectedIds.size > 0 && selectedIds.size < schedules.length}
+                  on:change={toggleSelectAll}
+                  title="전체 선택/해제"
+                />
+              </th>
               <th>상태</th>
-              <th>마지막 체크</th>
-              <th>다음 실행</th>
-              <th>자동예약</th>
-              <th class="w-32">작업</th>
+              <th>업체/아이템</th>
+              <th>일정</th>
+              <th class="hidden md:table-cell">계정</th>
+              <th class="hidden lg:table-cell">체크</th>
+              <th>예약</th>
+              <th>관리</th>
             </tr>
           </thead>
           <tbody>
             {#each schedules as schedule (schedule.id)}
               {@const status = getStatusBadge(schedule.run_status, schedule.is_enabled)}
               {@const dateInfo = formatDate(schedule.date)}
-              <tr class="{!schedule.is_enabled ? 'opacity-60' : ''} {schedule.error_count > 0 ? 'bg-red-50' : ''}">
+              <tr class="{!schedule.is_enabled ? 'opacity-60' : ''} {schedule.error_count > 0 ? 'bg-red-50' : ''} {selectedIds.has(schedule.id) ? 'bg-blue-50' : ''}">
+                <!-- 체크박스 -->
                 <td>
-                  <div class="flex items-center gap-2">
-                    <span class="font-medium">{dateInfo.date}</span>
-                    {#if dateInfo.badge}
-                      <span class="badge {dateInfo.badge === '지남' ? 'badge-gray' : dateInfo.badge === '오늘' ? 'badge-warning' : 'badge-info'}">{dateInfo.badge}</span>
-                    {/if}
-                  </div>
+                  <input
+                    type="checkbox"
+                    class="w-4 h-4 cursor-pointer"
+                    checked={selectedIds.has(schedule.id)}
+                    on:change={() => toggleSelect(schedule.id)}
+                  />
                 </td>
-                <td>
-                  <div class="flex items-center gap-2">
-                    <span>{schedule.business_name}</span>
-                    {#if !schedule.business_is_enabled}
-                      <span class="badge badge-gray text-xs">비활성</span>
-                    {/if}
-                  </div>
-                </td>
-                <td>
-                  <div class="flex items-center gap-2">
-                    <span>{schedule.item_name}</span>
-                    {#if schedule.auto_booking_enabled}
-                      <span class="badge badge-success text-xs">자동예약</span>
-                    {/if}
-                    {#if !schedule.item_is_enabled}
-                      <span class="badge badge-gray text-xs">비활성</span>
-                    {/if}
-                  </div>
-                </td>
-                <td>
-                  <button
-                    class="btn btn-xs {copiedId === schedule.id ? 'btn-success' : 'btn-secondary'}"
-                    on:click={() => copyToClipboard(buildBookingUrl(schedule), schedule.id)}
-                    title={buildBookingUrl(schedule)}
-                  >
-                    {copiedId === schedule.id ? '복사됨' : '복사'}
-                  </button>
-                </td>
-                <td>
-                  {#if schedule.times && schedule.times.length > 0}
-                    <div class="text-sm">
-                      {#if schedule.times.length <= 3}
-                        {schedule.times.join(', ')}
-                      {:else}
-                        {schedule.times.slice(0, 3).join(', ')}
-                        <span class="text-gray-400">외 {schedule.times.length - 3}개</span>
-                      {/if}
-                    </div>
-                  {:else if schedule.time_range}
-                    <span class="text-gray-500">{schedule.time_range}</span>
-                  {:else}
-                    <span class="text-gray-400">-</span>
-                  {/if}
-                </td>
-                <td>
-                  {#if schedule.custom_interval}
-                    <span class="text-blue-600 font-medium" title="수동 설정">{formatInterval(schedule.interval)}</span>
-                  {:else}
-                    <span class="text-gray-500" title="자동 (날짜 기반)">{formatInterval(schedule.interval)}</span>
-                  {/if}
-                </td>
-                <td>
-                  {#if schedule.account_name}
-                    <span class="badge badge-info">{schedule.account_name}</span>
-                  {:else}
-                    <span class="text-gray-400">기본</span>
-                  {/if}
-                </td>
+                <!-- 상태 (간격 포함) -->
                 <td
                   class="cursor-pointer hover:bg-gray-100"
                   on:click={() => handleToggleSchedule(schedule)}
                   title={schedule.is_enabled ? '클릭하여 비활성화' : '클릭하여 활성화'}
                 >
-                  <span class="badge {status.class}">{status.text}</span>
-                  {#if schedule.error_count > 0}
-                    <span class="text-xs text-red-600 block" title={schedule.last_error || ''}>
-                      오류 {schedule.error_count}회
-                    </span>
-                  {/if}
-                </td>
-                <td class="text-xs text-gray-600 whitespace-nowrap">
-                  {formatTime(schedule.last_check_time)}
-                </td>
-                <td class="text-xs whitespace-nowrap">
-                  {#if schedule.run_status === 'running'}
-                    <span class="text-green-600 font-medium">실행 중</span>
-                  {:else if schedule.run_status === 'queued'}
-                    <span class="text-blue-600">{getRemainingTime(schedule.next_run_time)}</span>
-                  {:else}
-                    <span class="text-gray-400">-</span>
-                  {/if}
-                </td>
-                <td>
-                  <div class="flex items-center gap-2">
-                    <button
-                      class="btn btn-xs {schedule.auto_booking_enabled ? 'btn-success' : 'btn-secondary'}"
-                      on:click={() => handleToggleAutoBooking(schedule)}
-                      title={schedule.auto_booking_enabled ? '자동예약 해제' : '자동예약 등록'}
-                    >
-                      {schedule.auto_booking_enabled ? 'ON' : 'OFF'}
-                    </button>
-                    {#if schedule.booking_count > 0}
-                      <span class="text-green-600 font-medium">{schedule.booking_count}건</span>
+                  <div class="flex items-center gap-1">
+                    <span class="badge {status.class}">{status.text}</span>
+                    {#if schedule.error_count > 0}
+                      <span class="badge badge-error text-xs" title={schedule.last_error || ''}>
+                        {schedule.error_count}
+                      </span>
+                    {/if}
+                  </div>
+                  <div class="text-xs text-gray-500 mt-0.5">
+                    {#if schedule.custom_interval}
+                      <span class="text-blue-600" title="수동 설정">{formatInterval(schedule.interval)}</span>
+                    {:else}
+                      {formatInterval(schedule.interval)}
                     {/if}
                   </div>
                 </td>
+                <!-- 업체/아이템 + 링크 -->
+                <td class="max-w-48">
+                  <div class="flex items-center gap-1">
+                    <div class="min-w-0 flex-1">
+                      <div class="font-medium text-sm truncate flex items-center gap-1" title={schedule.business_name}>
+                        {schedule.business_name}
+                        {#if !schedule.business_is_enabled}
+                          <span class="badge badge-gray text-xs">OFF</span>
+                        {/if}
+                      </div>
+                      <div class="text-xs text-gray-500 truncate flex items-center gap-1" title={schedule.item_name}>
+                        {schedule.item_name}
+                        {#if !schedule.item_is_enabled}
+                          <span class="badge badge-gray text-xs">OFF</span>
+                        {/if}
+                      </div>
+                    </div>
+                    <button
+                      on:click|stopPropagation={() => copyToClipboard(buildBookingUrl(schedule), schedule.id)}
+                      class="btn btn-secondary btn-xs p-1 shrink-0"
+                      title="예약 링크 복사"
+                    >
+                      {#if copiedId === schedule.id}
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3.5 h-3.5 text-green-600">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                        </svg>
+                      {:else}
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3.5 h-3.5">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
+                        </svg>
+                      {/if}
+                    </button>
+                  </div>
+                </td>
+                <!-- 일정 (날짜+시간 병합) -->
+                <td>
+                  <div class="text-sm">
+                    <div class="flex items-center gap-1">
+                      <span class="font-medium">{dateInfo.date}</span>
+                      {#if dateInfo.badge}
+                        <span class="badge text-xs {dateInfo.badge === '지남' ? 'badge-gray' : dateInfo.badge === '오늘' ? 'badge-warning' : 'badge-info'}">{dateInfo.badge}</span>
+                      {/if}
+                    </div>
+                    <div class="text-xs text-gray-500">
+                      {#if schedule.times && schedule.times.length > 0}
+                        {#if schedule.times.length <= 2}
+                          {schedule.times.join(', ')}
+                        {:else}
+                          {schedule.times.slice(0, 2).join(', ')}
+                          <span class="text-gray-400">+{schedule.times.length - 2}</span>
+                        {/if}
+                      {:else if schedule.time_range}
+                        {schedule.time_range}
+                      {:else}
+                        전체 시간
+                      {/if}
+                    </div>
+                  </div>
+                </td>
+                <!-- 계정 (md 이상에서만 표시) -->
+                <td class="hidden md:table-cell">
+                  {#if schedule.account_name}
+                    <span class="badge badge-info text-xs">{schedule.account_name}</span>
+                  {:else}
+                    <span class="text-gray-400 text-xs">기본</span>
+                  {/if}
+                </td>
+                <!-- 체크 (마지막 체크 + 다음 실행 병합, lg 이상에서만 표시) -->
+                <td class="hidden lg:table-cell text-xs whitespace-nowrap">
+                  <div class="text-gray-500">
+                    최근: {formatTime(schedule.last_check_time)}
+                  </div>
+                  <div>
+                    {#if schedule.run_status === 'running'}
+                      <span class="text-green-600 font-medium">실행 중</span>
+                    {:else if schedule.run_status === 'queued'}
+                      <span class="text-blue-600">다음: {getRemainingTime(schedule.next_run_time)}</span>
+                    {:else}
+                      <span class="text-gray-400">-</span>
+                    {/if}
+                  </div>
+                </td>
+                <!-- 예약 (자동예약 토글 + 예약건수) -->
+                <td>
+                  <div class="flex items-center gap-1">
+                    <button
+                      class="btn btn-xs p-1 {schedule.auto_booking_enabled ? 'btn-success' : 'btn-secondary'}"
+                      on:click={() => handleToggleAutoBooking(schedule)}
+                      title={schedule.auto_booking_enabled ? '자동예약 해제' : '자동예약 등록'}
+                    >
+                      {#if schedule.auto_booking_enabled}
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
+                          <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
+                        </svg>
+                      {:else}
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                        </svg>
+                      {/if}
+                    </button>
+                    {#if schedule.booking_count > 0}
+                      <span class="text-green-600 font-medium text-xs">{schedule.booking_count}</span>
+                    {/if}
+                  </div>
+                </td>
+                <!-- 관리 (아이콘 버튼) -->
                 <td>
                   <div class="flex gap-1">
                     <button
-                      class="btn btn-secondary btn-xs"
+                      class="btn btn-secondary btn-xs p-1"
                       on:click={() => openEditModal(schedule)}
                       title="수정"
                     >
-                      수정
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
+                      </svg>
                     </button>
                     <button
-                      class="btn btn-secondary btn-xs"
+                      class="btn btn-secondary btn-xs p-1"
                       on:click={() => openDuplicateModal(schedule)}
                       title="복제"
                     >
-                      복제
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75" />
+                      </svg>
                     </button>
                     <button
-                      class="btn btn-danger btn-xs"
+                      class="btn btn-danger btn-xs p-1"
                       on:click={() => handleDeleteSchedule(schedule)}
                       title="삭제"
                     >
-                      삭제
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                      </svg>
                     </button>
                   </div>
                 </td>
@@ -1061,34 +1175,18 @@
           <table class="table">
             <thead>
               <tr>
-                <th>이름</th>
-                <th>업체</th>
-                <th>아이템</th>
-                <th>트리거</th>
-                <th>대상 패턴</th>
                 <th>상태</th>
-                <th>다음 실행</th>
-                <th>마지막 실행</th>
-                <th class="w-32">작업</th>
+                <th>규칙/업체</th>
+                <th>트리거</th>
+                <th class="hidden md:table-cell">대상 패턴</th>
+                <th class="hidden lg:table-cell">실행 정보</th>
+                <th>관리</th>
               </tr>
             </thead>
             <tbody>
               {#each recurringRules as rule (rule.id)}
                 <tr class="{!rule.is_enabled ? 'opacity-60' : ''}">
-                  <td class="font-medium">{rule.name}</td>
-                  <td>{rule.business_name}</td>
-                  <td>{rule.item_name}</td>
-                  <td>
-                    <div class="text-sm">
-                      <span class="font-medium">{WEEKDAY_NAMES[rule.recurrence_day]}요일</span>
-                      <span class="text-gray-500 ml-1">{rule.trigger_time}</span>
-                    </div>
-                  </td>
-                  <td>
-                    <div class="text-xs text-gray-600 max-w-xs truncate" title={formatTargetPatterns(rule.target_patterns)}>
-                      {formatTargetPatterns(rule.target_patterns)}
-                    </div>
-                  </td>
+                  <!-- 상태 -->
                   <td
                     class="cursor-pointer hover:bg-gray-100"
                     on:click={() => handleToggleRecurringRule(rule)}
@@ -1097,44 +1195,76 @@
                     <span class="badge {rule.is_enabled ? 'badge-success' : 'badge-gray'}">
                       {rule.is_enabled ? '활성' : '비활성'}
                     </span>
-                  </td>
-                  <td class="text-xs">
-                    {#if rule.is_enabled && rule.next_trigger_at}
-                      <div class="text-blue-600 font-medium">{formatNextTrigger(rule.next_trigger_at)}</div>
-                      <div class="text-gray-400">{new Date(rule.next_trigger_at).toLocaleString('ko-KR')}</div>
-                    {:else}
-                      <span class="text-gray-400">-</span>
+                    {#if rule.auto_booking_enabled}
+                      <div class="text-xs text-green-600 mt-0.5">자동예약</div>
                     {/if}
                   </td>
-                  <td class="text-xs text-gray-600">
-                    {#if rule.last_triggered_at}
-                      {new Date(rule.last_triggered_at).toLocaleString('ko-KR')}
-                    {:else}
-                      <span class="text-gray-400">-</span>
-                    {/if}
+                  <!-- 규칙/업체 (이름+업체+아이템 병합) -->
+                  <td class="max-w-48">
+                    <div class="font-medium text-sm truncate" title={rule.name}>{rule.name}</div>
+                    <div class="text-xs text-gray-500 truncate" title="{rule.business_name} - {rule.item_name}">
+                      {rule.business_name} / {rule.item_name}
+                    </div>
                   </td>
+                  <!-- 트리거 -->
+                  <td>
+                    <div class="text-sm">
+                      <div class="font-medium">{WEEKDAY_NAMES[rule.recurrence_day]}요일</div>
+                      <div class="text-xs text-gray-500">{rule.trigger_time}</div>
+                    </div>
+                  </td>
+                  <!-- 대상 패턴 (md 이상에서만 표시) -->
+                  <td class="hidden md:table-cell">
+                    <div class="text-xs text-gray-600 max-w-xs truncate" title={formatTargetPatterns(rule.target_patterns)}>
+                      {formatTargetPatterns(rule.target_patterns)}
+                    </div>
+                  </td>
+                  <!-- 실행 정보 (다음실행+마지막실행 병합, lg 이상에서만 표시) -->
+                  <td class="hidden lg:table-cell text-xs whitespace-nowrap">
+                    <div>
+                      {#if rule.is_enabled && rule.next_trigger_at}
+                        <span class="text-blue-600 font-medium">다음: {formatNextTrigger(rule.next_trigger_at)}</span>
+                      {:else}
+                        <span class="text-gray-400">다음: -</span>
+                      {/if}
+                    </div>
+                    <div class="text-gray-500">
+                      {#if rule.last_triggered_at}
+                        최근: {new Date(rule.last_triggered_at).toLocaleDateString('ko-KR')}
+                      {:else}
+                        최근: -
+                      {/if}
+                    </div>
+                  </td>
+                  <!-- 관리 (아이콘 버튼) -->
                   <td>
                     <div class="flex gap-1">
                       <button
-                        class="btn btn-secondary btn-xs"
+                        class="btn btn-secondary btn-xs p-1"
                         on:click={() => openRecurringEditModal(rule)}
                         title="수정"
                       >
-                        수정
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
+                        </svg>
                       </button>
                       <button
-                        class="btn btn-info btn-xs"
+                        class="btn btn-info btn-xs p-1"
                         on:click={() => handleTriggerRecurringRule(rule)}
                         title="수동 트리거"
                       >
-                        실행
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
+                        </svg>
                       </button>
                       <button
-                        class="btn btn-danger btn-xs"
+                        class="btn btn-danger btn-xs p-1"
                         on:click={() => handleDeleteRecurringRule(rule)}
                         title="삭제"
                       >
-                        삭제
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                        </svg>
                       </button>
                     </div>
                   </td>
