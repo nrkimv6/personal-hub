@@ -117,13 +117,24 @@ class Settings(BaseSettings):
     WORKER_RESTART_DELAY: int = 5  # 워커 재시작 대기 시간 (초)
     WORKER_HEALTH_CHECK_INTERVAL: int = 30  # 워커 헬스체크 간격 (초)
 
-    # 프록시 설정
+    # 프록시 설정 (공통)
     PROXY_ENABLED: bool = False  # 프록시 사용 여부
     PROXY_ROTATION_INTERVAL: int = 5  # 프록시 교체 주기 (요청 수)
     PROXY_MAX_ACTIVE_POOL: int = 10  # 활성 프록시 풀 최대 크기
     PROXY_CONNECTION_TIMEOUT: int = 5  # 프록시 연결 타임아웃 (초)
     PROXY_BLACKLIST_DURATION: int = 300  # 블랙리스트 유지 시간 (초)
     PROXY_FILE_CHECK_INTERVAL: int = 300  # 프록시 파일 변경 확인 간격 (초)
+
+    # 프록시 V2 설정 (DB 기반)
+    PROXY_BACKEND: str = "file"  # 프록시 백엔드 ("file" | "db")
+    PROXY_MIN_SUCCESS_RATE: float = 0.5  # 최소 성공률 (0.0~1.0)
+    PROXY_POOL_REFRESH_INTERVAL: int = 300  # 풀 갱신 주기 (초)
+    PROXY_ADAPTIVE_TIMEOUT_ENABLED: bool = True  # 적응형 타임아웃 활성화
+    PROXY_ADAPTIVE_TIMEOUT_MULTIPLIER: float = 2.0  # 평균 응답시간 배수
+    PROXY_ADAPTIVE_TIMEOUT_MIN: float = 3.0  # 최소 타임아웃 (초)
+    PROXY_ADAPTIVE_TIMEOUT_MAX: float = 10.0  # 최대 타임아웃 (초)
+    PROXY_WEIGHTED_SELECTION: bool = True  # 가중치 기반 선택 활성화
+    PROXY_VALIDATOR_TYPE: str = "naver"  # 검증기 타입 ("naver" | "httpbin")
 
     # 모니터링 설정
     INITIAL_CHECK_DELAY: int = 2  # 초기 검사 지연 (초)
