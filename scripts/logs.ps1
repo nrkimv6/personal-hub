@@ -65,12 +65,13 @@ if (-not (Test-Path $LogDir)) {
     exit 1
 }
 
-# Get latest log file function
+# Get latest log file function (by filename timestamp, not LastWriteTime)
 function Get-LatestLogFile {
     param([string]$Prefix)
 
     $pattern = Join-Path $LogDir "$Prefix*.log"
-    $files = Get-ChildItem $pattern -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+    # Sort by Name descending - filenames contain timestamps like api_20251211_094846.log
+    $files = Get-ChildItem $pattern -ErrorAction SilentlyContinue | Sort-Object Name -Descending
     if ($files) {
         return $files[0].FullName
     }

@@ -96,6 +96,11 @@ class Settings(BaseSettings):
     BIZ_ITEMS_CACHE_TTL_CLOSED: int = 1800  # 비공개/운영중지 시 캐시 TTL (초) - 30분
     BIZ_ITEMS_CACHE_TTL_PAUSED: int = 300  # 일시중지 시 캐시 TTL (초) - 5분
     BIZ_ITEMS_CACHE_TTL_NOT_FOUND: int = 300  # 아이템 없음 시 캐시 TTL (초) - 모니터링 간격과 동일 (복귀 감지용)
+
+    # GraphQL API Rate Limiting 설정
+    MAX_CONCURRENT_GRAPHQL_REQUESTS: int = 5  # GraphQL API 동시 요청 제한
+    MAX_CONCURRENT_ANONYMOUS: int = 10  # Anonymous 모드 동시 실행 제한
+    GRAPHQL_CACHE_TTL: int = 10  # GraphQL 응답 캐시 TTL (초)
     
     # 로깅 설정
     LOG_LEVEL: str = "DEBUG"
