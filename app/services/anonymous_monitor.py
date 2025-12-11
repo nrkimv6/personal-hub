@@ -28,6 +28,8 @@ class AvailabilityResult:
     all_active_slots: List[ScheduleSlot] = field(default_factory=list)  # 모든 활성 슬롯
     estimated_hours: Optional[Tuple[str, str]] = None  # 추정 영업시간 (시작, 종료)
     error: Optional[str] = None  # 에러 메시지
+    # 프록시 정보 (2025-12-11 추가)
+    proxy_url: Optional[str] = None  # 사용한 프록시 URL
 
 
 @dataclass
@@ -159,7 +161,8 @@ class AnonymousMonitor:
             return AvailabilityResult(
                 available=False,
                 slots=[],
-                estimated_hours=None
+                estimated_hours=None,
+                proxy_url=None
             )
 
         # 해당 날짜의 슬롯만 필터링
@@ -193,7 +196,8 @@ class AnonymousMonitor:
             available=len(available_slots) > 0,
             slots=available_slots,
             all_active_slots=active_slots,
-            estimated_hours=estimated_hours
+            estimated_hours=estimated_hours,
+            proxy_url=schedule.proxy_url
         )
 
     def _update_slot_history(self, cache_key: str, times: List[str]):
