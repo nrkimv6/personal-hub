@@ -1,0 +1,28 @@
+
+bookingAvailableCode, bookingAvailableValue는 item 단위일 것 같은데 (예상) 매진된 예약페이지는 되게 열리지 않는 경우가 많아서 없으면 없는대로 동작하고, 있으면 어디다 저장해두면 좋겠어. 그렇게 가능할까? 
+2)  isUnitSaleDay도 활용하고 있는가? 
+3) 수정한 정보를 마크다운 파일에 적어줘 
+
+
+
+[DEBUG][코스알엑스_1130] Keeping future slot: 2025-11-30 00:00:00+09:00 >= 2025-11-29 23:31:42.028546+09:00 (slot_time=2025-11-30 00:00:00)
+[DEBUG][코스알엑스_1130] Keeping future slot: 2025-11-30 00:30:00+09:00 >= 2025-11-29 23:31:42.030547+09:00 (slot_time=2025-11-30 00:30:00)
+...
+[DEBUG][코스알엑스_1130] Keeping future slot: 2025-11-30 23:30:00+09:00 >= 2025-11-29 23:31:42.033546+09:00 (slot_time=2025-11-30 23:30:00)
+[DEBUG][코스알엑스_1130] Fetch found 34 available slots (notifiable: 0)
+[WORKER 1] Tab e3493577-4d39-444a-a39e-c43f9d053c2a used 1 times.
+
+
+
+화면에 표시되는 시간 리스트는:
+
+hourly 배열의 각 객체를 순회
+unitStartDateTime을 한국 시간으로 변환 (UTC +9시간)
+desc 필드로 회차 표시 (1회차, 2회차...)
+unitBookingCount와 unitStock 비교로 예약 가능 여부 판단
+
+매진: unitBookingCount >= unitStock
+예약 가능: unitBookingCount < unitStock
+
+
+https://booking.naver.com/booking/12/bizes/1515818/items/7127905/request?startDateTime=2025-12-02T21%3A00%3A00%2B09%3A00

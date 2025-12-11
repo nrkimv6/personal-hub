@@ -53,17 +53,15 @@ try {
         # Wait for log files to be created
         Start-Sleep -Seconds 2
 
-        # Find log files created AFTER start.ps1 ran (within last 30 seconds)
+        # Find the most recent log files by filename (contains timestamp like worker_20251211_094846.log)
+        # Using Name sort instead of LastWriteTime because old log files may be updated when processes stop
         $LogDir = Join-Path $ProjectRoot "logs"
-        $startTime = (Get-Date).AddSeconds(-30)
 
         $apiLog = Get-ChildItem -Path $LogDir -Filter "api_*.log" -ErrorAction SilentlyContinue |
-            Where-Object { $_.CreationTime -gt $startTime } |
-            Sort-Object CreationTime -Descending | Select-Object -First 1
+            Sort-Object Name -Descending | Select-Object -First 1
 
         $workerLog = Get-ChildItem -Path $LogDir -Filter "worker_*.log" -ErrorAction SilentlyContinue |
-            Where-Object { $_.CreationTime -gt $startTime } |
-            Sort-Object CreationTime -Descending | Select-Object -First 1
+            Sort-Object Name -Descending | Select-Object -First 1
 
         Write-Host ""
         Write-Host "[Step 2] Starting frontend + tailing backend logs..." -ForegroundColor Cyan
