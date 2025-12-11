@@ -9,7 +9,7 @@
   let loading = true;
   let error: string | null = null;
 
-  $: proxyId = parseInt($page.params.id);
+  $: proxyId = parseInt($page.params.id || '0');
 
   onMount(async () => {
     await loadData();
