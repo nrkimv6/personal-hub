@@ -4,13 +4,20 @@ NaverGraphQLClient - 네이버 예약 GraphQL API 클라이언트
 요구사항: REQ-DATA-004 (업체/상품 상세정보 조회)
 
 네이버 예약 GraphQL API를 통해 업체(Business) 및 상품(BizItem) 정보를 조회합니다.
+
+Rate Limiting (2025-12-11):
+- Semaphore로 동시 요청 제한 (MAX_CONCURRENT_GRAPHQL_REQUESTS)
+- TTL 캐시로 동일 요청 중복 방지 (GRAPHQL_CACHE_TTL)
 """
 import aiohttp
+import asyncio
 import json
+import time
+import hashlib
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from app.config import logger
+from app.config import logger, settings
 
 
 # GraphQL 엔드포인트
@@ -88,8 +95,95 @@ class ScheduleInfo:
     slots_by_date: Dict[str, List[ScheduleSlot]] = field(default_factory=dict)  # 날짜별 슬롯
 
 
+@dataclass
+class CacheEntry:
+    """캐시 엔트리"""
+    data: Any
+    expires_at: float
+
+
 class NaverGraphQLClient:
-    """네이버 예약 GraphQL API 클라이언트"""
+    """네이버 예약 GraphQL API 클라이언트
+
+    Rate Limiting:
+    - _semaphore: 동시 요청 제한 (MAX_CONCURRENT_GRAPHQL_REQUESTS)
+    - _cache: TTL 캐시 (GRAPHQL_CACHE_TTL초)
+    """
+
+    # 클래스 레벨 Semaphore 및 캐시 (모든 인스턴스 공유)
+    _semaphore: Optional[asyncio.Semaphore] = None
+    _cache: Dict[str, CacheEntry] = {}
+    _last_cleanup: float = 0
+    _cleanup_interval: int = 60  # 캐시 정리 간격 (초)
+
+    @classmethod
+    def _get_semaphore(cls) -> asyncio.Semaphore:
+        """Semaphore 싱글톤 반환"""
+        if cls._semaphore is None:
+            cls._semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_GRAPHQL_REQUESTS)
+            logger.info(f"[NaverGraphQL] Semaphore 초기화: 최대 {settings.MAX_CONCURRENT_GRAPHQL_REQUESTS}개 동시 요청")
+        return cls._semaphore
+
+    @classmethod
+    def _get_cache_key(cls, operation: str, variables: Dict) -> str:
+        """캐시 키 생성"""
+        key_str = f"{operation}:{json.dumps(variables, sort_keys=True)}"
+        return hashlib.md5(key_str.encode()).hexdigest()
+
+    @classmethod
+    def _get_from_cache(cls, key: str) -> Optional[Any]:
+        """캐시에서 조회 (만료된 항목은 None 반환)"""
+        if key in cls._cache:
+            entry = cls._cache[key]
+            if time.time() < entry.expires_at:
+                return entry.data
+            else:
+                del cls._cache[key]
+        return None
+
+    @classmethod
+    def _set_cache(cls, key: str, data: Any):
+        """캐시에 저장"""
+        cls._cache[key] = CacheEntry(
+            data=data,
+            expires_at=time.time() + settings.GRAPHQL_CACHE_TTL
+        )
+
+    @classmethod
+    def _cleanup_expired_cache(cls):
+        """만료된 캐시 항목 정리 (주기적)"""
+        current_time = time.time()
+        if current_time - cls._last_cleanup < cls._cleanup_interval:
+            return
+
+        cls._last_cleanup = current_time
+        expired_keys = [
+            key for key, entry in cls._cache.items()
+            if current_time >= entry.expires_at
+        ]
+        for key in expired_keys:
+            del cls._cache[key]
+
+        if expired_keys:
+            logger.debug(f"[NaverGraphQL] 만료된 캐시 {len(expired_keys)}개 정리됨")
+
+    @classmethod
+    def get_cache_stats(cls) -> Dict[str, Any]:
+        """캐시 통계 반환 (디버그용)"""
+        current_time = time.time()
+        valid_count = sum(1 for entry in cls._cache.values() if current_time < entry.expires_at)
+        return {
+            "total_entries": len(cls._cache),
+            "valid_entries": valid_count,
+            "expired_entries": len(cls._cache) - valid_count,
+            "cache_ttl": settings.GRAPHQL_CACHE_TTL
+        }
+
+    @classmethod
+    def clear_cache(cls):
+        """캐시 전체 삭제"""
+        cls._cache.clear()
+        logger.info("[NaverGraphQL] 캐시 전체 삭제됨")
 
     # Business 쿼리 (업체 정보)
     # Note: addressJson, phoneInformationJson은 JSON 타입이므로 하위 필드 선택 불가
@@ -190,19 +284,63 @@ class NaverGraphQLClient:
         self,
         query: str,
         variables: Dict[str, Any],
-        operation_name: str
+        operation_name: str,
+        use_cache: bool = True
     ) -> Optional[Dict[str, Any]]:
         """
         GraphQL 쿼리를 실행합니다.
+
+        Rate Limiting:
+        - 캐시 확인 후 히트 시 즉시 반환
+        - Semaphore로 동시 요청 제한
+        - 성공 시 캐시에 저장
 
         Args:
             query: GraphQL 쿼리 문자열
             variables: 쿼리 변수
             operation_name: 오퍼레이션 이름
+            use_cache: 캐시 사용 여부 (기본: True)
 
         Returns:
             Dict: API 응답 데이터 또는 None
         """
+        # 주기적 캐시 정리
+        self._cleanup_expired_cache()
+
+        # 캐시 확인
+        cache_key = self._get_cache_key(operation_name, variables)
+        if use_cache:
+            cached = self._get_from_cache(cache_key)
+            if cached is not None:
+                logger.debug(f"[NaverGraphQL] 캐시 히트: {operation_name}")
+                return cached
+
+        # Semaphore로 동시 요청 제한
+        semaphore = self._get_semaphore()
+        async with semaphore:
+            # Semaphore 획득 후 다시 캐시 확인 (대기 중 다른 요청이 캐시에 저장했을 수 있음)
+            if use_cache:
+                cached = self._get_from_cache(cache_key)
+                if cached is not None:
+                    logger.debug(f"[NaverGraphQL] 캐시 히트 (대기 후): {operation_name}")
+                    return cached
+
+            # 실제 API 호출
+            result = await self._do_execute_query(query, variables, operation_name)
+
+            # 성공 시 캐시에 저장
+            if result is not None and use_cache:
+                self._set_cache(cache_key, result)
+
+            return result
+
+    async def _do_execute_query(
+        self,
+        query: str,
+        variables: Dict[str, Any],
+        operation_name: str
+    ) -> Optional[Dict[str, Any]]:
+        """실제 GraphQL 쿼리 실행 (내부용)"""
         session = await self._ensure_session()
 
         headers = {
