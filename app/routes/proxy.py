@@ -11,11 +11,26 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import Dict, Any, Optional, List
 
-from sqlalchemy.orm import Session
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings, logger
-from app.database import get_db
 from app.services.proxy_manager import get_proxy_manager, init_proxy_manager, ProxyManager
+
+# 프록시 전용 DB 연결 (별도 DB 파일)
+PROXY_DB_PATH = "D:/work/project/tools/shared/data/proxies.db"
+PROXY_DB_URL = f"sqlite:///{PROXY_DB_PATH}"
+proxy_engine = create_engine(PROXY_DB_URL, connect_args={"check_same_thread": False})
+ProxySessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=proxy_engine)
+
+
+def get_proxy_db():
+    """프록시 DB 세션을 반환합니다."""
+    db = ProxySessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 from app.services.proxy_db_service import ProxyDBService, get_proxy_db_service
 from app.schemas.proxy import (
     ProxyStatsResponse,
@@ -168,7 +183,7 @@ async def get_proxy_list() -> Dict[str, Any]:
 # ============== DB 기반 API ==============
 
 @router.get("/db/stats", response_model=ProxyStatsResponse)
-async def get_proxy_db_stats(db: Session = Depends(get_db)) -> ProxyStatsResponse:
+async def get_proxy_db_stats(db: Session = Depends(get_proxy_db)) -> ProxyStatsResponse:
     """
     프록시 전체 통계를 조회합니다. (DB 기반)
 
@@ -199,7 +214,7 @@ async def get_proxy_db_list(
     sort_order: str = Query("desc", description="정렬 방향 (asc/desc)"),
     page: int = Query(1, ge=1, description="페이지 번호"),
     page_size: int = Query(50, ge=1, le=100, description="페이지당 항목 수"),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_proxy_db),
 ) -> ProxyListResponse:
     """
     프록시 목록을 조회합니다. (DB 기반, 필터/정렬/페이징)
@@ -222,7 +237,7 @@ async def get_proxy_db_list(
 async def get_top_proxies(
     limit: int = Query(10, ge=1, le=100, description="조회할 프록시 수"),
     status: str = Query("active", description="상태 필터"),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_proxy_db),
 ) -> List[ProxyResponse]:
     """
     상위 프록시 목록을 조회합니다. (우선순위순)
@@ -236,7 +251,7 @@ async def get_top_proxies(
 async def get_proxy_detail(
     proxy_id: int,
     history_limit: int = Query(50, ge=1, le=200, description="검증 이력 조회 수"),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_proxy_db),
 ) -> ProxyDetailResponse:
     """
     프록시 상세 정보를 조회합니다. (검증 이력 포함)
@@ -255,7 +270,7 @@ async def get_proxy_history(
     proxy_id: int,
     limit: int = Query(50, ge=1, le=200, description="조회할 이력 수"),
     offset: int = Query(0, ge=0, description="오프셋"),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_proxy_db),
 ) -> List[ProxyCheckHistoryResponse]:
     """
     프록시 검증 이력을 조회합니다.
@@ -275,7 +290,7 @@ async def get_proxy_history(
 async def update_proxy_status(
     proxy_id: int,
     status: str = Query(..., description="변경할 상태 (pending/active/inactive/blacklisted)"),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_proxy_db),
 ) -> Dict[str, Any]:
     """
     프록시 상태를 변경합니다.
@@ -303,7 +318,7 @@ async def update_proxy_status(
 @router.delete("/db/{proxy_id}")
 async def delete_proxy(
     proxy_id: int,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_proxy_db),
 ) -> Dict[str, Any]:
     """
     프록시를 삭제합니다.
@@ -324,7 +339,7 @@ async def delete_proxy(
 async def get_collection_runs(
     limit: int = Query(20, ge=1, le=100, description="조회할 이력 수"),
     status: Optional[str] = Query(None, description="상태 필터"),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_proxy_db),
 ) -> List[ProxyCollectionRunResponse]:
     """
     프록시 수집 실행 이력을 조회합니다.
@@ -338,7 +353,7 @@ async def get_collection_runs(
 async def import_proxies_from_file(
     file_path: Optional[str] = Query(None, description="프록시 파일 경로 (기본: shared/proxies/proxy_list.txt)"),
     source: str = Query("file_import", description="소스 이름"),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_proxy_db),
 ) -> ProxyImportResult:
     """
     프록시 파일에서 DB로 임포트합니다.
@@ -370,7 +385,7 @@ async def import_proxies_from_file(
 async def cleanup_proxy_data(
     history_days: int = Query(90, ge=1, description="검증 이력 보관 일수"),
     stale_days: int = Query(7, ge=1, description="비활성화 기준 일수"),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_proxy_db),
 ) -> Dict[str, Any]:
     """
     오래된 프록시 데이터를 정리합니다.
