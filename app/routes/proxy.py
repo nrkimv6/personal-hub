@@ -247,6 +247,20 @@ async def get_top_proxies(
     return [ProxyResponse.model_validate(p) for p in proxies]
 
 
+@router.get("/db/runs", response_model=List[ProxyCollectionRunResponse])
+async def get_collection_runs(
+    limit: int = Query(20, ge=1, le=100, description="조회할 이력 수"),
+    status: Optional[str] = Query(None, description="상태 필터"),
+    db: Session = Depends(get_proxy_db),
+) -> List[ProxyCollectionRunResponse]:
+    """
+    프록시 수집 실행 이력을 조회합니다.
+    """
+    service = get_proxy_db_service(db)
+    runs = service.get_collection_runs(limit=limit, status=status)
+    return [ProxyCollectionRunResponse.model_validate(r) for r in runs]
+
+
 @router.get("/db/{proxy_id}", response_model=ProxyDetailResponse)
 async def get_proxy_detail(
     proxy_id: int,
@@ -333,20 +347,6 @@ async def delete_proxy(
         "success": True,
         "message": "프록시가 삭제되었습니다",
     }
-
-
-@router.get("/db/runs", response_model=List[ProxyCollectionRunResponse])
-async def get_collection_runs(
-    limit: int = Query(20, ge=1, le=100, description="조회할 이력 수"),
-    status: Optional[str] = Query(None, description="상태 필터"),
-    db: Session = Depends(get_proxy_db),
-) -> List[ProxyCollectionRunResponse]:
-    """
-    프록시 수집 실행 이력을 조회합니다.
-    """
-    service = get_proxy_db_service(db)
-    runs = service.get_collection_runs(limit=limit, status=status)
-    return [ProxyCollectionRunResponse.model_validate(r) for r in runs]
 
 
 @router.post("/db/import", response_model=ProxyImportResult)
