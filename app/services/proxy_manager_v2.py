@@ -146,6 +146,31 @@ class ProxyManagerV2:
         if elapsed >= self._pool_refresh_interval:
             await self._refresh_pool()
 
+    def _sync_refresh_pool(self) -> None:
+        """동기적으로 풀 갱신 (풀 고갈 시 호출)"""
+        try:
+            proxies = self._db_service.get_top_proxies_for_pool(
+                limit=self._pool_size,
+                status="active",
+                min_success_rate=self._min_success_rate,
+            )
+
+            # pending 상태의 프록시도 포함 (신규 프록시 테스트용)
+            if len(proxies) < self._pool_size:
+                pending_proxies = self._db_service.get_top_proxies_for_pool(
+                    limit=self._pool_size - len(proxies),
+                    status="pending",
+                )
+                proxies.extend(pending_proxies)
+
+            self._active_pool = proxies
+            self._last_refresh = datetime.now()
+            self._current_index = 0
+
+            logger.info(f"Pool sync-refreshed with {len(proxies)} proxies (was depleted)")
+        except Exception as e:
+            logger.error(f"Failed to sync-refresh proxy pool: {e}")
+
     def get_next_proxy(self) -> Optional[ProxyInfo]:
         """
         다음 프록시 선택
@@ -156,6 +181,10 @@ class ProxyManagerV2:
         Returns:
             선택된 ProxyInfo 또는 None
         """
+        # 풀이 비었거나 너무 적으면 동기적으로 갱신 시도
+        if len(self._active_pool) < 3:
+            self._sync_refresh_pool()
+
         if not self._active_pool:
             return None
 
