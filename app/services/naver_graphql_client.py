@@ -100,6 +100,8 @@ class ScheduleInfo:
     available_dates: List[str]  # 예약 가능한 날짜 목록
     slots: List[ScheduleSlot]  # 모든 슬롯 정보
     slots_by_date: Dict[str, List[ScheduleSlot]] = field(default_factory=dict)  # 날짜별 슬롯
+    # 프록시 정보 (2025-12-11 추가)
+    proxy_url: Optional[str] = None  # 사용한 프록시 URL
 
 
 @dataclass
@@ -280,6 +282,7 @@ class NaverGraphQLClient:
         self._session = session
         self._own_session = session is None
         self._proxy_manager = proxy_manager
+        self._last_used_proxy: Optional[str] = None  # 마지막 사용한 프록시 URL
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         """세션이 없으면 생성"""
@@ -375,6 +378,9 @@ class NaverGraphQLClient:
         if self._proxy_manager and self._proxy_manager.is_available:
             proxy_url = self._proxy_manager.get_aiohttp_proxy()
             logger.debug(f"[NaverGraphQL] 프록시 사용: {proxy_url}")
+
+        # 마지막 사용한 프록시 저장 (추적용)
+        self._last_used_proxy = proxy_url
 
         try:
             async with session.post(
@@ -644,6 +650,9 @@ class NaverGraphQLClient:
         }
 
         data = await self._execute_query(self.SCHEDULE_QUERY, variables, "schedule")
+        # 이 호출에 사용된 프록시 URL 저장
+        used_proxy = self._last_used_proxy
+
         if not data or not data.get("schedule"):
             logger.warning(f"[NaverGraphQL] No schedule data for {business_id}/{biz_item_id}")
             return None
@@ -656,7 +665,8 @@ class NaverGraphQLClient:
                 biz_item_id=biz_item_id,
                 available_dates=[],
                 slots=[],
-                slots_by_date={}
+                slots_by_date={},
+                proxy_url=used_proxy
             )
 
         slots = []
@@ -717,7 +727,8 @@ class NaverGraphQLClient:
             biz_item_id=biz_item_id,
             available_dates=available_dates,
             slots=slots,
-            slots_by_date=slots_by_date
+            slots_by_date=slots_by_date,
+            proxy_url=used_proxy
         )
 
     def get_smart_time_slots(
