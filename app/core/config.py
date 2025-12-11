@@ -126,7 +126,7 @@ class Settings(BaseSettings):
     PROXY_FILE_CHECK_INTERVAL: int = 300  # 프록시 파일 변경 확인 간격 (초)
 
     # 프록시 V2 설정 (DB 기반)
-    PROXY_BACKEND: str = "file"  # 프록시 백엔드 ("file" | "db")
+    PROXY_BACKEND: str = "db"  # 프록시 백엔드 ("file" | "db")
     PROXY_MIN_SUCCESS_RATE: float = 0.5  # 최소 성공률 (0.0~1.0)
     PROXY_POOL_REFRESH_INTERVAL: int = 300  # 풀 갱신 주기 (초)
     PROXY_ADAPTIVE_TIMEOUT_ENABLED: bool = True  # 적응형 타임아웃 활성화
