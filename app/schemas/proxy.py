@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, computed_field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
+from dataclasses import dataclass, field
 
 
 class ProxyStatus(str, Enum):
@@ -21,6 +22,82 @@ class ProxyProtocol(str, Enum):
     HTTP = "http"
     HTTPS = "https"
     SOCKS5 = "socks5"
+
+
+# ============== 프록시 정보 (런타임용) ==============
+
+@dataclass
+class ProxyInfo:
+    """
+    프록시 정보 데이터 클래스 (런타임 사용)
+
+    ProxyManagerV2에서 활성 풀 관리 및 프록시 선택에 사용
+    """
+    id: int
+    url: str
+    protocol: str
+    host: str
+    port: int
+    username: Optional[str] = None
+    password: Optional[str] = None
+
+    # 품질 메트릭
+    priority_score: float = 0.0
+    avg_response_time: Optional[float] = None
+    success_count: int = 0
+    fail_count: int = 0
+    total_checks: int = 0
+
+    def to_aiohttp_proxy(self) -> str:
+        """aiohttp용 프록시 URL 반환"""
+        if self.username and self.password:
+            return f"{self.protocol}://{self.username}:{self.password}@{self.host}:{self.port}"
+        return f"{self.protocol}://{self.host}:{self.port}"
+
+    def to_playwright_proxy(self) -> dict:
+        """Playwright용 프록시 설정 반환"""
+        config = {"server": f"{self.protocol}://{self.host}:{self.port}"}
+        if self.username:
+            config["username"] = self.username
+            config["password"] = self.password or ""
+        return config
+
+    @property
+    def success_rate(self) -> Optional[float]:
+        """성공률 (0.0 ~ 1.0)"""
+        if self.total_checks > 0:
+            return self.success_count / self.total_checks
+        return None
+
+    @classmethod
+    def from_db_row(cls, row: dict) -> "ProxyInfo":
+        """DB 조회 결과에서 ProxyInfo 생성"""
+        return cls(
+            id=row["id"],
+            url=row["url"],
+            protocol=row["protocol"],
+            host=row["host"],
+            port=row["port"],
+            username=row.get("username"),
+            password=row.get("password"),
+            priority_score=row.get("priority_score", 0.0),
+            avg_response_time=row.get("avg_response_time"),
+            success_count=row.get("success_count", 0),
+            fail_count=row.get("fail_count", 0),
+            total_checks=row.get("total_checks", 0),
+        )
+
+
+@dataclass
+class ValidationResult:
+    """프록시 검증 결과"""
+    is_valid: bool
+    response_time: Optional[float] = None
+    error_type: Optional[str] = None
+    error_message: Optional[str] = None
+    detected_ip: Optional[str] = None
+    is_anonymous: Optional[bool] = None
+    http_status: Optional[int] = None
 
 
 # ============== 검증 이력 ==============
