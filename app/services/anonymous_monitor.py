@@ -157,12 +157,15 @@ class AnonymousMonitor:
             days_ahead=1  # 단일 날짜만 조회
         )
 
+        # 에러 시에도 사용한 프록시 URL 가져오기
+        used_proxy = self.client._last_used_proxy
+
         if not schedule:
             return AvailabilityResult(
                 available=False,
                 slots=[],
                 estimated_hours=None,
-                proxy_url=None
+                proxy_url=used_proxy  # 에러 시에도 프록시 정보 전달
             )
 
         # 해당 날짜의 슬롯만 필터링
