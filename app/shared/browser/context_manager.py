@@ -2,31 +2,59 @@
 브라우저 컨텍스트 관리 모듈
 
 계정별 브라우저 컨텍스트의 생성, 관리, 종료를 담당합니다.
+
+Proxy Support (2025-12-11):
+- ProxyManager를 통한 Playwright 프록시 설정 지원
 """
 
 import os
 import asyncio
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, TYPE_CHECKING
 
 from playwright.async_api import async_playwright, BrowserContext
 
 from app.core.config import settings, logger
 
+if TYPE_CHECKING:
+    from app.services.proxy_manager import ProxyManager
+
 
 class ContextManager:
     """브라우저 컨텍스트 관리자"""
 
-    def __init__(self):
-        """ContextManager 초기화"""
+    def __init__(self, proxy_manager: Optional["ProxyManager"] = None):
+        """
+        ContextManager 초기화
+
+        Args:
+            proxy_manager: 프록시 매니저 (없으면 프록시 미사용)
+        """
         # 다중 프로필 지원: account_id별 브라우저 컨텍스트 관리
         self.browser_contexts: Dict[int, BrowserContext] = {}
         self.browser_context: Optional[BrowserContext] = None  # 하위 호환성 (기본 컨텍스트)
         self.playwright_instance = None
 
+        # 프록시 매니저
+        self._proxy_manager = proxy_manager
+
         # 계정별 브라우저 생성 Lock (동시 생성 방지)
         self._context_locks: Dict[int, asyncio.Lock] = {}
         self._locks_lock = asyncio.Lock()  # Lock 딕셔너리 접근용 Lock
+
+    def set_proxy_manager(self, proxy_manager: Optional["ProxyManager"]):
+        """프록시 매니저 설정 (런타임 변경용)"""
+        self._proxy_manager = proxy_manager
+        logger.info(f"[ContextManager] 프록시 매니저 {'설정됨' if proxy_manager else '해제됨'}")
+
+    def _get_proxy_config(self) -> Optional[Dict]:
+        """Playwright용 프록시 설정 반환"""
+        if self._proxy_manager and self._proxy_manager.is_available:
+            proxy_config = self._proxy_manager.get_playwright_proxy()
+            if proxy_config:
+                logger.debug(f"[ContextManager] 프록시 사용: {proxy_config.get('server')}")
+                return proxy_config
+        return None
 
     async def initialize_browser(self) -> BrowserContext:
         """
@@ -254,10 +282,14 @@ class ContextManager:
                 self.playwright_instance = await async_playwright().start()
                 logger.info("Playwright 인스턴스 생성 완료")
 
+            # 프록시 설정 가져오기
+            proxy_config = self._get_proxy_config()
+
             # 브라우저 컨텍스트 생성
             context = await self.playwright_instance.chromium.launch_persistent_context(
                 user_data_dir=str(profile_path),
                 headless=settings.BROWSER_HEADLESS,
+                proxy=proxy_config,
                 args=[
                     '--disable-blink-features=AutomationControlled',
                     '--disable-features=IsolateOrigins,site-per-process',
@@ -279,7 +311,8 @@ class ContextManager:
             # 자동화 감지 방지
             await self._bypass_automation_detection(context)
 
-            logger.info(f"브라우저 컨텍스트 생성 완료 (account_id={account_id}, profile={account.profile_dir})")
+            proxy_info = f", proxy={proxy_config.get('server')}" if proxy_config else ""
+            logger.info(f"브라우저 컨텍스트 생성 완료 (account_id={account_id}, profile={account.profile_dir}{proxy_info})")
 
             # 마지막 사용 시간 업데이트
             account_service.update_last_used(db, account_id)

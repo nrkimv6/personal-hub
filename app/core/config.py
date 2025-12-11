@@ -117,6 +117,14 @@ class Settings(BaseSettings):
     WORKER_RESTART_DELAY: int = 5  # 워커 재시작 대기 시간 (초)
     WORKER_HEALTH_CHECK_INTERVAL: int = 30  # 워커 헬스체크 간격 (초)
 
+    # 프록시 설정
+    PROXY_ENABLED: bool = False  # 프록시 사용 여부
+    PROXY_ROTATION_INTERVAL: int = 5  # 프록시 교체 주기 (요청 수)
+    PROXY_MAX_ACTIVE_POOL: int = 10  # 활성 프록시 풀 최대 크기
+    PROXY_CONNECTION_TIMEOUT: int = 5  # 프록시 연결 타임아웃 (초)
+    PROXY_BLACKLIST_DURATION: int = 300  # 블랙리스트 유지 시간 (초)
+    PROXY_FILE_CHECK_INTERVAL: int = 300  # 프록시 파일 변경 확인 간격 (초)
+
     # 모니터링 설정
     INITIAL_CHECK_DELAY: int = 2  # 초기 검사 지연 (초)
     ERROR_RETRY_DELAY: int = 30  # 오류 재시도 지연 (초)

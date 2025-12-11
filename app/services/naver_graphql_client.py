@@ -8,16 +8,23 @@ NaverGraphQLClient - 네이버 예약 GraphQL API 클라이언트
 Rate Limiting (2025-12-11):
 - Semaphore로 동시 요청 제한 (MAX_CONCURRENT_GRAPHQL_REQUESTS)
 - TTL 캐시로 동일 요청 중복 방지 (GRAPHQL_CACHE_TTL)
+
+Proxy Support (2025-12-11):
+- ProxyManager를 통한 프록시 로테이션 지원
+- HTTP 403/429 에러 시 자동 프록시 교체
 """
 import aiohttp
 import asyncio
 import json
 import time
 import hashlib
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, TYPE_CHECKING
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from app.config import logger, settings
+
+if TYPE_CHECKING:
+    from app.services.proxy_manager import ProxyManager
 
 
 # GraphQL 엔드포인트
@@ -260,13 +267,19 @@ class NaverGraphQLClient:
     }
     """
 
-    def __init__(self, session: Optional[aiohttp.ClientSession] = None):
+    def __init__(
+        self,
+        session: Optional[aiohttp.ClientSession] = None,
+        proxy_manager: Optional["ProxyManager"] = None
+    ):
         """
         Args:
             session: aiohttp 세션 (없으면 자동 생성)
+            proxy_manager: 프록시 매니저 (없으면 프록시 미사용)
         """
         self._session = session
         self._own_session = session is None
+        self._proxy_manager = proxy_manager
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         """세션이 없으면 생성"""
@@ -357,13 +370,28 @@ class NaverGraphQLClient:
             "query": query
         }
 
+        # 프록시 URL 가져오기
+        proxy_url = None
+        if self._proxy_manager and self._proxy_manager.is_available:
+            proxy_url = self._proxy_manager.get_aiohttp_proxy()
+            logger.debug(f"[NaverGraphQL] 프록시 사용: {proxy_url}")
+
         try:
             async with session.post(
                 f"{NAVER_GRAPHQL_ENDPOINT}?opName={operation_name}",
                 headers=headers,
                 json=payload,
+                proxy=proxy_url,
                 timeout=aiohttp.ClientTimeout(total=30)
             ) as response:
+                # 프록시 관련 에러 처리
+                if response.status in (403, 429) and proxy_url and self._proxy_manager:
+                    logger.warning(
+                        f"[NaverGraphQL] HTTP {response.status} - 프록시 실패 처리: {proxy_url}"
+                    )
+                    self._proxy_manager.mark_failed(proxy_url, f"HTTP {response.status}")
+                    return None
+
                 if response.status != 200:
                     logger.error(f"[NaverGraphQL] HTTP {response.status} for {operation_name}")
                     return None
@@ -377,6 +405,9 @@ class NaverGraphQLClient:
                 return data.get("data")
 
         except aiohttp.ClientError as e:
+            # 프록시 연결 실패 시 블랙리스트 등록
+            if proxy_url and self._proxy_manager:
+                self._proxy_manager.mark_failed(proxy_url, str(e)[:50])
             logger.error(f"[NaverGraphQL] Request error for {operation_name}: {e}")
             return None
         except json.JSONDecodeError as e:
@@ -778,12 +809,32 @@ class NaverGraphQLClient:
 _client_instance: Optional[NaverGraphQLClient] = None
 
 
-def get_naver_graphql_client() -> NaverGraphQLClient:
-    """NaverGraphQLClient 싱글톤 인스턴스 반환"""
+def get_naver_graphql_client(
+    proxy_manager: Optional["ProxyManager"] = None
+) -> NaverGraphQLClient:
+    """
+    NaverGraphQLClient 싱글톤 인스턴스 반환
+
+    Args:
+        proxy_manager: 프록시 매니저 (최초 호출 시에만 적용)
+
+    Returns:
+        NaverGraphQLClient 인스턴스
+    """
     global _client_instance
     if _client_instance is None:
-        _client_instance = NaverGraphQLClient()
+        _client_instance = NaverGraphQLClient(proxy_manager=proxy_manager)
     return _client_instance
+
+
+def set_proxy_manager(proxy_manager: Optional["ProxyManager"]):
+    """싱글톤 인스턴스에 프록시 매니저 설정 (런타임 변경용)"""
+    global _client_instance
+    if _client_instance is not None:
+        _client_instance._proxy_manager = proxy_manager
+        logger.info(
+            f"[NaverGraphQL] 프록시 매니저 {'설정됨' if proxy_manager else '해제됨'}"
+        )
 
 
 async def close_naver_graphql_client():
