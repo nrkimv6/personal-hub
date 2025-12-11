@@ -158,8 +158,13 @@ class ProxyManager:
 
         return result["valid"], result["response_time"], result
 
-    async def refresh_active_pool(self) -> bool:
-        """활성 프록시 풀 재구성 (병렬 검증)"""
+    async def refresh_active_pool(self, verbose: bool = True) -> bool:
+        """
+        활성 프록시 풀 재구성 (병렬 검증)
+
+        Args:
+            verbose: 상세 로그 출력 여부
+        """
         if not self.proxy_list:
             logger.error("프록시 리스트가 비어있습니다")
             return False
@@ -174,7 +179,11 @@ class ProxyManager:
             self.blacklist.clear()
             candidates = self.proxy_list.copy()
 
+        if verbose:
+            print(f"\n[ProxyManager] {len(candidates)}개 프록시 품질 테스트 시작...")
         logger.info(f"{len(candidates)}개 프록시 품질 테스트 시작...")
+
+        start_time = time.time()
 
         # 병렬 검증
         tasks = [self.validate_proxy(proxy) for proxy in candidates]
@@ -182,28 +191,41 @@ class ProxyManager:
 
         # 유효한 프록시 수집
         valid_proxies = []
+        failed_count = 0
         now = time.time()
 
         for i, result in enumerate(results):
             proxy = candidates[i]
 
             if isinstance(result, Exception):
+                if verbose:
+                    print(f"  [FAIL] {proxy} - {str(result)[:40]}")
                 logger.debug(f"프록시 검증 예외: {proxy} - {result}")
                 self.blacklist[proxy] = now + self.blacklist_duration
+                failed_count += 1
                 continue
 
             is_valid, response_time, detail = result
 
             if is_valid:
                 valid_proxies.append((proxy, response_time))
+                if verbose:
+                    print(f"  [OK]   {proxy} - {response_time:.2f}s")
                 logger.debug(f"프록시 유효: {proxy} - {response_time:.2f}s")
             else:
+                if verbose:
+                    print(f"  [FAIL] {proxy} - {detail.get('error', 'unknown')}")
                 logger.debug(f"프록시 무효: {proxy} - {detail.get('error')}")
                 self.blacklist[proxy] = now + self.blacklist_duration
+                failed_count += 1
 
         # 응답 시간순 정렬, 상위 N개 선택
         valid_proxies.sort(key=lambda x: x[1])
         self.active_pool = [proxy for proxy, _ in valid_proxies[: self.max_active_pool]]
+
+        elapsed = time.time() - start_time
+        if verbose:
+            print(f"\n[ProxyManager] 검증 완료: {len(valid_proxies)}개 유효, {failed_count}개 실패 ({elapsed:.1f}초 소요)")
 
         if self.active_pool:
             self.current_proxy = self.active_pool[0]
