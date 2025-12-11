@@ -220,11 +220,18 @@ class ContextManager:
                         try:
                             _ = pages[0].url
                             context_valid = True
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.warning(f"페이지 접근 실패 (account_id={account_id}): {e}")
                     else:
-                        # 페이지가 없어도 새 페이지를 만들 수 있으면 유효
-                        context_valid = True
+                        # 페이지가 없으면 브라우저가 살아있는지 직접 확인
+                        try:
+                            browser = context.browser
+                            if browser and browser.is_connected():
+                                context_valid = True
+                            else:
+                                logger.warning(f"브라우저 연결 끊김 (account_id={account_id})")
+                        except Exception as e:
+                            logger.warning(f"브라우저 연결 상태 확인 실패 (account_id={account_id}): {e}")
                 except Exception as e:
                     logger.warning(f"브라우저 컨텍스트 유효성 검사 실패 (account_id={account_id}): {e}")
 

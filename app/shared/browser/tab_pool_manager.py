@@ -75,17 +75,25 @@ class TabPoolManager:
         # 컨텍스트 유효성 확인
         context_valid = False
         try:
-            _ = context.pages
+            pages = context.pages
             # 추가로 실제 접근 가능한지 확인
-            if len(context.pages) > 0:
+            if len(pages) > 0:
                 # 첫 번째 페이지로 간단한 테스트
                 try:
-                    _ = context.pages[0].url
+                    _ = pages[0].url
                     context_valid = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"페이지 접근 실패 (account_id={account_id}): {e}")
             else:
-                context_valid = True  # 페이지가 없어도 컨텍스트는 유효할 수 있음
+                # 페이지가 없으면 브라우저가 살아있는지 직접 확인
+                try:
+                    browser = context.browser
+                    if browser and browser.is_connected():
+                        context_valid = True
+                    else:
+                        logger.warning(f"브라우저 연결 끊김 (account_id={account_id})")
+                except Exception as e:
+                    logger.warning(f"브라우저 연결 상태 확인 실패 (account_id={account_id}): {e}")
         except Exception as e:
             logger.warning(f"브라우저 컨텍스트가 닫힘 (account_id={account_id}): {str(e)}")
 
@@ -576,3 +584,103 @@ class TabPoolManager:
 
         logger.info(f"[TAB-POOL] 모든 탭 닫기 완료: {closed_count}개 탭 정리됨")
         return closed_count
+
+    def get_pool_size(self, account_id: Optional[int] = None) -> int:
+        """
+        탭 풀의 현재 크기를 반환합니다.
+
+        Args:
+            account_id: 특정 계정의 탭 풀 크기만 반환 (None이면 전체)
+
+        Returns:
+            탭 풀 크기
+        """
+        if account_id is not None:
+            return len(self.tab_pools.get(account_id, {}))
+        return sum(len(pool) for pool in self.tab_pools.values())
+
+    async def warmup(self, min_tabs: int = 3, account_id: Optional[int] = None):
+        """
+        탭 풀을 미리 워밍업합니다.
+        브라우저 컨텍스트와 탭을 미리 생성하여 스나이핑 시 지연을 방지합니다.
+
+        Args:
+            min_tabs: 최소 탭 수 (기본 3개)
+            account_id: 계정 ID (None이면 기본 계정)
+        """
+        target_account_id = account_id or 1
+
+        try:
+            # 1. 브라우저 컨텍스트 확보
+            context = await self.context_manager.get_or_create_context(target_account_id)
+            if not context:
+                logger.warning(f"[TAB-WARMUP] 브라우저 컨텍스트 생성 실패 (account_id={target_account_id})")
+                return
+
+            # 2. 현재 풀 크기 확인
+            current_size = len(self.tab_pools.get(target_account_id, {}))
+
+            # 3. 필요한 탭 수 계산
+            tabs_needed = max(0, min_tabs - current_size)
+            if tabs_needed == 0:
+                logger.info(f"[TAB-WARMUP] 탭 풀 충분함 (account_id={target_account_id}, 크기={current_size})")
+                return
+
+            # 4. 탭 풀 초기화 (필요한 경우)
+            if target_account_id not in self.tab_pools:
+                self.tab_pools[target_account_id] = {}
+                # 기존 빈 탭 등록
+                await self.register_initial_tabs(target_account_id, context)
+                current_size = len(self.tab_pools.get(target_account_id, {}))
+                tabs_needed = max(0, min_tabs - current_size)
+
+            # 5. 부족한 탭 생성
+            logger.info(f"[TAB-WARMUP] 탭 {tabs_needed}개 생성 중 (account_id={target_account_id})")
+
+            for i in range(tabs_needed):
+                try:
+                    # 전체 탭 수 확인
+                    total_tabs = sum(len(pool) for pool in self.tab_pools.values())
+                    if total_tabs >= self.TOTAL_MAX_TABS:
+                        logger.warning(f"[TAB-WARMUP] 최대 탭 수 도달 ({total_tabs}/{self.TOTAL_MAX_TABS})")
+                        break
+
+                    # 새 탭 생성
+                    page = await context.new_page()
+
+                    # 자동화 감지 방지 설정
+                    await page.set_extra_http_headers({
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
+                    })
+
+                    # 고유 탭 ID 생성
+                    tab_id = f"{target_account_id}_{random.randint(1000, 9999)}"
+                    while tab_id in self.tab_pools[target_account_id] or tab_id in self.tab_pool:
+                        tab_id = f"{target_account_id}_{random.randint(1000, 9999)}"
+
+                    # 풀에 등록
+                    self.tab_pools[target_account_id][tab_id] = page
+                    self.tab_pool[tab_id] = page
+                    self.tab_last_used[tab_id] = time.time()
+                    self.tab_in_use[tab_id] = False
+                    self.tab_use_count[tab_id] = 0
+                    self.tab_account[tab_id] = target_account_id
+
+                    # 탭에 메타데이터 저장
+                    page._tab_id = tab_id
+                    page._account_id = target_account_id
+
+                    logger.debug(f"[TAB-WARMUP] 탭 생성: {tab_id}")
+
+                except Exception as e:
+                    logger.error(f"[TAB-WARMUP] 탭 생성 실패: {e}")
+                    break
+
+            # 6. 결과 업데이트
+            self.total_active_tabs = sum(len(pool) for pool in self.tab_pools.values())
+            final_size = len(self.tab_pools.get(target_account_id, {}))
+            logger.info(f"[TAB-WARMUP] 워밍업 완료 (account_id={target_account_id}, 탭 수: {current_size} → {final_size})")
+
+        except Exception as e:
+            logger.error(f"[TAB-WARMUP] 워밍업 중 오류: {e}")
