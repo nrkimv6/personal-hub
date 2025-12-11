@@ -31,6 +31,26 @@ from app.schemas.monitor_schedule import (
     ScheduleWithContext,
     BulkScheduleCreate,
 )
+from app.schemas.proxy import (
+    ProxyStatus,
+    ProxyProtocol,
+    ProxyCheckHistoryBase,
+    ProxyCheckHistoryCreate,
+    ProxyCheckHistoryResponse,
+    ProxyBase,
+    ProxyCreate,
+    ProxyUpdate,
+    ProxyResponse,
+    ProxyDetailResponse,
+    ProxyCollectionRunBase,
+    ProxyCollectionRunCreate,
+    ProxyCollectionRunUpdate,
+    ProxyCollectionRunResponse,
+    ProxyStatsResponse,
+    ProxyListParams,
+    ProxyListResponse,
+    ProxyImportResult,
+)
 
 __all__ = [
     # account
@@ -59,4 +79,23 @@ __all__ = [
     "MonitorSchedule",
     "ScheduleWithContext",
     "BulkScheduleCreate",
+    # proxy
+    "ProxyStatus",
+    "ProxyProtocol",
+    "ProxyCheckHistoryBase",
+    "ProxyCheckHistoryCreate",
+    "ProxyCheckHistoryResponse",
+    "ProxyBase",
+    "ProxyCreate",
+    "ProxyUpdate",
+    "ProxyResponse",
+    "ProxyDetailResponse",
+    "ProxyCollectionRunBase",
+    "ProxyCollectionRunCreate",
+    "ProxyCollectionRunUpdate",
+    "ProxyCollectionRunResponse",
+    "ProxyStatsResponse",
+    "ProxyListParams",
+    "ProxyListResponse",
+    "ProxyImportResult",
 ]
