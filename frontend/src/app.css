@@ -53,6 +53,11 @@ body {
   color: #1f2937;
 }
 
+.badge-purple {
+  background-color: #f3e8ff;
+  color: #7c3aed;
+}
+
 /* 버튼 */
 .btn {
   padding: 0.5rem 1rem;
