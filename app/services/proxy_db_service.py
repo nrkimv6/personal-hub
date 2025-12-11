@@ -26,6 +26,7 @@ from app.schemas.proxy import (
     ProxyCollectionRunResponse,
     ProxyImportResult,
     ProxyCheckHistoryCreate,
+    ProxyInfo,
 )
 
 logger = logging.getLogger(__name__)
@@ -520,6 +521,131 @@ class ProxyDBService:
             .order_by(desc(Proxy.priority_score))
             .limit(limit)
             .all()
+        )
+
+    def get_top_proxies_for_pool(
+        self,
+        limit: int = 10,
+        status: str = "active",
+        min_success_rate: float = 0.0,
+        min_checks: int = 0,
+    ) -> List[ProxyInfo]:
+        """
+        ProxyManagerV2용 상위 프록시 조회
+
+        Args:
+            limit: 조회할 프록시 수
+            status: 상태 필터 (기본: active)
+            min_success_rate: 최소 성공률 (0.0~1.0)
+            min_checks: 최소 검증 횟수 (신뢰도 확보)
+
+        Returns:
+            ProxyInfo 리스트 (우선순위 내림차순)
+        """
+        query = self.db.query(Proxy).filter(Proxy.status == status)
+
+        # 최소 검증 횟수 필터
+        if min_checks > 0:
+            query = query.filter(Proxy.total_checks >= min_checks)
+
+        # 최소 성공률 필터 (검증 횟수가 있는 경우만)
+        if min_success_rate > 0:
+            query = query.filter(
+                or_(
+                    Proxy.total_checks == 0,  # 아직 검증 안 된 프록시 포함
+                    (Proxy.success_count * 1.0 / Proxy.total_checks) >= min_success_rate,
+                )
+            )
+
+        proxies = (
+            query.order_by(desc(Proxy.priority_score))
+            .limit(limit)
+            .all()
+        )
+
+        return [
+            ProxyInfo(
+                id=p.id,
+                url=p.url,
+                protocol=p.protocol,
+                host=p.host,
+                port=p.port,
+                username=p.username,
+                password=p.password,
+                priority_score=p.priority_score or 0.0,
+                avg_response_time=p.avg_response_time,
+                success_count=p.success_count or 0,
+                fail_count=p.fail_count or 0,
+                total_checks=p.total_checks or 0,
+            )
+            for p in proxies
+        ]
+
+    def record_check_result(
+        self,
+        proxy_id: int,
+        is_valid: bool,
+        response_time: Optional[float] = None,
+        error_type: Optional[str] = None,
+        error_message: Optional[str] = None,
+        detected_ip: Optional[str] = None,
+        is_anonymous: Optional[bool] = None,
+        http_status: Optional[int] = None,
+    ) -> bool:
+        """
+        프록시 검증 결과 기록 (ProxyManagerV2용 간편 인터페이스)
+
+        검증 이력을 추가하고 프록시 통계를 업데이트합니다.
+
+        Args:
+            proxy_id: 프록시 ID
+            is_valid: 검증 성공 여부
+            response_time: 응답 시간 (초)
+            error_type: 에러 유형 (timeout, connection, http_4xx 등)
+            error_message: 에러 메시지
+            detected_ip: 감지된 IP
+            is_anonymous: 익명성 여부
+            http_status: HTTP 상태 코드
+
+        Returns:
+            성공 여부
+        """
+        try:
+            history_data = ProxyCheckHistoryCreate(
+                proxy_id=proxy_id,
+                is_valid=is_valid,
+                response_time=response_time,
+                error_type=error_type,
+                error_message=error_message,
+                detected_ip=detected_ip,
+                is_anonymous=is_anonymous,
+                http_status=http_status,
+            )
+            self.add_check_history(history_data)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to record check result for proxy {proxy_id}: {e}")
+            return False
+
+    def get_proxy_info_by_id(self, proxy_id: int) -> Optional[ProxyInfo]:
+        """ID로 ProxyInfo 조회"""
+        proxy = self.get_by_id(proxy_id)
+        if not proxy:
+            return None
+
+        return ProxyInfo(
+            id=proxy.id,
+            url=proxy.url,
+            protocol=proxy.protocol,
+            host=proxy.host,
+            port=proxy.port,
+            username=proxy.username,
+            password=proxy.password,
+            priority_score=proxy.priority_score or 0.0,
+            avg_response_time=proxy.avg_response_time,
+            success_count=proxy.success_count or 0,
+            fail_count=proxy.fail_count or 0,
+            total_checks=proxy.total_checks or 0,
         )
 
     def cleanup_old_history(self, days: int = 90) -> int:
