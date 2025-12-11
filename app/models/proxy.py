@@ -1,15 +1,20 @@
 """
 프록시 관련 모델
 작성일: 2025-12-11
+
+Note: 프록시 모델은 별도의 DB 파일(proxies.db)을 사용하므로
+메인 앱의 Base와 분리된 ProxyBase를 사용합니다.
 """
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey
 from sqlalchemy.orm import relationship
+from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
 
-from app.models.base import Base
+# 프록시 전용 Base (메인 앱 모델과 분리)
+ProxyBase = declarative_base()
 
 
-class Proxy(Base):
+class Proxy(ProxyBase):
     """프록시 마스터 테이블"""
     __tablename__ = "proxies"
 
@@ -62,7 +67,7 @@ class Proxy(Base):
         return None
 
 
-class ProxyCheckHistory(Base):
+class ProxyCheckHistory(ProxyBase):
     """프록시 검증 이력 테이블"""
     __tablename__ = "proxy_check_history"
 
@@ -85,7 +90,7 @@ class ProxyCheckHistory(Base):
     proxy = relationship("Proxy", back_populates="check_history")
 
 
-class ProxyCollectionRun(Base):
+class ProxyCollectionRun(ProxyBase):
     """프록시 수집 실행 이력 테이블"""
     __tablename__ = "proxy_collection_runs"
 

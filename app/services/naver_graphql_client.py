@@ -841,7 +841,13 @@ def get_naver_graphql_client(
 def set_proxy_manager(proxy_manager: Optional["ProxyManager"]):
     """싱글톤 인스턴스에 프록시 매니저 설정 (런타임 변경용)"""
     global _client_instance
-    if _client_instance is not None:
+    # 인스턴스가 없으면 먼저 생성
+    if _client_instance is None:
+        _client_instance = NaverGraphQLClient(proxy_manager=proxy_manager)
+        logger.info(
+            f"[NaverGraphQL] 싱글톤 인스턴스 생성됨 (프록시 매니저: {'있음' if proxy_manager else '없음'})"
+        )
+    else:
         _client_instance._proxy_manager = proxy_manager
         logger.info(
             f"[NaverGraphQL] 프록시 매니저 {'설정됨' if proxy_manager else '해제됨'}"
