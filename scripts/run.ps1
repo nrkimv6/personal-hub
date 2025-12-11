@@ -100,7 +100,7 @@ try {
 
         # Start frontend in background
         Start-Process -FilePath "cmd.exe" `
-            -ArgumentList "/c", "cd /d `"$FrontendDir`" && npm run dev -- --port 5173 > `"$frontendLogFile`" 2>&1" `
+            -ArgumentList "/c", "cd /d `"$FrontendDir`" && npm run dev -- --host --port 5173 > `"$frontendLogFile`" 2>&1" `
             -WindowStyle Hidden
 
         # Wait for vite to start (check port with timeout)
