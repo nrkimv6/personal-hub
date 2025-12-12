@@ -23,10 +23,12 @@ def build_naver_booking_url(
     Returns:
         완전한 네이버 예약 URL
     """
+    # startDateTime 형식 사용 (00:00:00+09:00)
+    start_datetime = f"{date}T00%3A00%3A00%2B09%3A00"
     return (
         f"https://booking.naver.com/booking/{business_type_id}"
         f"/bizes/{business_id}/items/{biz_item_id}"
-        f"?startDate={date}"
+        f"?startDateTime={start_datetime}"
     )
 
 
@@ -78,14 +80,15 @@ def build_monitoring_url(schedule_context: Dict[str, Any]) -> str:
             date=schedule_context["date"],
         )
     else:
-        # 기본적으로 base_url 사용
+        # 기본적으로 base_url 사용 (startDateTime 형식)
         base_url = schedule_context.get("base_url", "")
         date = schedule_context.get("date", "")
         if base_url:
+            start_datetime = f"{date}T00%3A00%3A00%2B09%3A00"
             if "?" in base_url:
-                return f"{base_url}&startDate={date}"
+                return f"{base_url}&startDateTime={start_datetime}"
             else:
-                return f"{base_url}?startDate={date}"
+                return f"{base_url}?startDateTime={start_datetime}"
         return ""
 
 
