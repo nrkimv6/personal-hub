@@ -487,6 +487,105 @@ class TestGetStatus:
         assert status["pool_size"] == proxy_manager_v2.pool_size
 
 
+class TestGetFreshProxy:
+    """get_fresh_proxy 테스트 (기존 ProxyManager 호환 인터페이스)"""
+
+    @pytest.mark.asyncio
+    async def test_right_get_fresh_proxy(self, proxy_manager_v2):
+        """[Right] 기본 동작 - 프록시 URL 반환"""
+        await proxy_manager_v2.initialize()
+
+        url = proxy_manager_v2.get_fresh_proxy()
+
+        assert url is not None
+        assert url.startswith("http://")
+        assert "192.168.1" in url
+
+    @pytest.mark.asyncio
+    async def test_right_get_fresh_proxy_excludes(self, proxy_manager_v2):
+        """[Right] exclude 세트에 있는 프록시 제외"""
+        await proxy_manager_v2.initialize()
+
+        # 첫 번째 프록시 가져오기
+        first_url = proxy_manager_v2.get_fresh_proxy()
+        assert first_url is not None
+
+        # 첫 번째 프록시를 exclude하고 다시 호출
+        second_url = proxy_manager_v2.get_fresh_proxy(exclude={first_url})
+        assert second_url is not None
+        assert second_url != first_url
+
+    @pytest.mark.asyncio
+    async def test_right_get_fresh_proxy_excludes_multiple(self, proxy_manager_v2):
+        """[Right] 여러 프록시 exclude"""
+        await proxy_manager_v2.initialize()
+
+        tried = set()
+        for _ in range(3):
+            url = proxy_manager_v2.get_fresh_proxy(exclude=tried)
+            assert url is not None
+            assert url not in tried
+            tried.add(url)
+
+        assert len(tried) == 3
+
+    @pytest.mark.asyncio
+    async def test_boundary_get_fresh_proxy_all_excluded(self, mock_db_service):
+        """[Boundary] 모든 프록시가 exclude된 경우 None 반환"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        proxies = [
+            ProxyInfo(id=i, url=f"http://192.168.1.{i}:8080", protocol="http",
+                      host=f"192.168.1.{i}", port=8080)
+            for i in range(1, 4)
+        ]
+        mock_db_service.get_top_proxies_for_pool.return_value = proxies
+
+        manager = ProxyManagerV2(db_service=mock_db_service)
+        await manager.initialize()
+
+        # 모든 프록시 URL을 exclude에 추가
+        all_urls = {p.to_aiohttp_proxy() for p in proxies}
+        url = manager.get_fresh_proxy(exclude=all_urls)
+
+        assert url is None
+
+    @pytest.mark.asyncio
+    async def test_boundary_get_fresh_proxy_empty_pool(self, mock_db_service):
+        """[Boundary] 빈 풀에서 호출"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        mock_db_service.get_top_proxies_for_pool.return_value = []
+        manager = ProxyManagerV2(db_service=mock_db_service)
+
+        url = manager.get_fresh_proxy()
+        assert url is None
+
+    @pytest.mark.asyncio
+    async def test_right_get_fresh_proxy_moves_to_back(self, mock_db_service):
+        """[Right] 선택된 프록시가 풀 뒤로 이동"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        proxies = [
+            ProxyInfo(id=i, url=f"http://192.168.1.{i}:8080", protocol="http",
+                      host=f"192.168.1.{i}", port=8080, priority_score=50.0)
+            for i in range(1, 6)
+        ]
+        mock_db_service.get_top_proxies_for_pool.return_value = proxies
+
+        manager = ProxyManagerV2(
+            db_service=mock_db_service,
+            weighted_selection=False,  # 라운드 로빈으로 예측 가능하게
+        )
+        await manager.initialize()
+
+        first_proxy_id = manager._active_pool[0].id
+        manager.get_fresh_proxy()
+
+        # 첫 번째 프록시가 맨 뒤로 이동
+        assert manager._active_pool[-1].id == first_proxy_id
+
+
 class TestMarkFailed:
     """레거시 인터페이스 테스트"""
 

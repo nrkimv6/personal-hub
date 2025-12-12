@@ -160,6 +160,7 @@ class ScheduleService:
             "account_id": schedule.account_id,
             "account_name": schedule.account.name if schedule.account else None,
             "auto_booking_enabled": getattr(schedule, 'auto_booking_enabled', False),
+            "monitoring_mode": getattr(schedule, 'monitoring_mode', 'legacy'),
             "created_at": schedule.created_at,
             "updated_at": schedule.updated_at,
             # BizItem 정보
@@ -207,6 +208,7 @@ class ScheduleService:
             interval=data.interval,
             custom_interval=data.custom_interval,
             account_id=data.account_id,
+            monitoring_mode=data.monitoring_mode,
         )
         db.add(schedule)
         db.commit()
@@ -236,6 +238,7 @@ class ScheduleService:
                 interval=data.interval,
                 custom_interval=data.custom_interval,
                 account_id=data.account_id,
+                monitoring_mode=data.monitoring_mode,
             )
             db.add(schedule)
             schedules.append(schedule)
