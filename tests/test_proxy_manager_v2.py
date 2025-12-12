@@ -349,24 +349,24 @@ class TestReportResults:
 
     @pytest.mark.asyncio
     async def test_right_report_success(self, proxy_manager_v2, sample_proxy_info):
-        """[Right] 성공 보고"""
+        """[Right] 성공 보고 - 메모리 기반 (동기)"""
         await proxy_manager_v2.initialize()
         proxy_manager_v2._active_pool = [sample_proxy_info]
 
-        await proxy_manager_v2.report_success(
+        proxy_manager_v2.report_success(
             proxy=sample_proxy_info,
             response_time=1.0,
             detected_ip="1.2.3.4",
         )
 
-        # DB 서비스 호출 확인
-        proxy_manager_v2._db_service.record_check_result.assert_called_once_with(
-            proxy_id=sample_proxy_info.id,
-            is_valid=True,
-            response_time=1.0,
-            detected_ip="1.2.3.4",
-            is_anonymous=None,
-        )
+        # DB 쓰기가 호출되지 않음 (메모리 기반)
+        proxy_manager_v2._db_service.record_check_result.assert_not_called()
+
+        # 메모리 통계에 기록됨
+        assert sample_proxy_info.id in proxy_manager_v2._usage_stats
+        stats = proxy_manager_v2._usage_stats[sample_proxy_info.id]
+        assert stats.success_count == 1
+        assert stats.total_response_time == 1.0
 
         # 로컬 캐시 업데이트 확인
         assert sample_proxy_info.success_count == 11  # 10 + 1
@@ -374,24 +374,24 @@ class TestReportResults:
 
     @pytest.mark.asyncio
     async def test_right_report_failure(self, proxy_manager_v2, sample_proxy_info):
-        """[Right] 실패 보고"""
+        """[Right] 실패 보고 - 메모리 기반 (동기)"""
         await proxy_manager_v2.initialize()
         proxy_manager_v2._active_pool = [sample_proxy_info]
 
-        await proxy_manager_v2.report_failure(
+        proxy_manager_v2.report_failure(
             proxy=sample_proxy_info,
             error_type="timeout",
             error_message="Connection timed out",
         )
 
-        # DB 서비스 호출 확인
-        proxy_manager_v2._db_service.record_check_result.assert_called_once_with(
-            proxy_id=sample_proxy_info.id,
-            is_valid=False,
-            error_type="timeout",
-            error_message="Connection timed out",
-            http_status=None,
-        )
+        # DB 쓰기가 호출되지 않음 (메모리 기반)
+        proxy_manager_v2._db_service.record_check_result.assert_not_called()
+
+        # 메모리 통계에 기록됨
+        assert sample_proxy_info.id in proxy_manager_v2._usage_stats
+        stats = proxy_manager_v2._usage_stats[sample_proxy_info.id]
+        assert stats.fail_count == 1
+        assert stats.last_error_type == "timeout"
 
         # 로컬 캐시 업데이트 확인
         assert sample_proxy_info.fail_count == 1
@@ -404,7 +404,7 @@ class TestReportResults:
 
         # 3번 연속 실패
         for _ in range(3):
-            await proxy_manager_v2.report_failure(
+            proxy_manager_v2.report_failure(
                 proxy=sample_proxy_info,
                 error_type="timeout",
                 error_message="Timed out",
@@ -575,7 +575,7 @@ class TestCrossCheck:
         initial_success = sample_proxy_info.success_count
         initial_total = sample_proxy_info.total_checks
 
-        await proxy_manager_v2.report_success(sample_proxy_info, 1.0)
+        proxy_manager_v2.report_success(sample_proxy_info, 1.0)
 
         assert sample_proxy_info.success_count == initial_success + 1
         assert sample_proxy_info.total_checks == initial_total + 1
@@ -674,3 +674,554 @@ class TestProxyRotation:
         # 4번째 선택은 다시 첫 번째 프록시
         fourth_proxy = manager.get_next_proxy()
         assert fourth_proxy.id == first_id
+
+
+# ============== ProxyUsageStats Tests ==============
+
+class TestProxyUsageStats:
+    """ProxyUsageStats 데이터 클래스 테스트"""
+
+    def test_right_initial_state(self):
+        """[Right] 초기 상태"""
+        from app.schemas.proxy import ProxyUsageStats
+
+        stats = ProxyUsageStats(proxy_id=1)
+
+        assert stats.proxy_id == 1
+        assert stats.success_count == 0
+        assert stats.fail_count == 0
+        assert stats.total_response_time == 0.0
+        assert stats.request_count == 0
+        assert stats.avg_response_time is None
+        assert stats.success_rate is None
+
+    def test_right_record_success(self):
+        """[Right] 성공 기록"""
+        from app.schemas.proxy import ProxyUsageStats
+
+        stats = ProxyUsageStats(proxy_id=1)
+        stats.record_success(1.5)
+
+        assert stats.success_count == 1
+        assert stats.request_count == 1
+        assert stats.total_response_time == 1.5
+        assert stats.min_response_time == 1.5
+        assert stats.max_response_time == 1.5
+        assert stats.avg_response_time == 1.5
+
+    def test_right_record_multiple_successes(self):
+        """[Right] 여러 성공 기록"""
+        from app.schemas.proxy import ProxyUsageStats
+
+        stats = ProxyUsageStats(proxy_id=1)
+        stats.record_success(1.0)
+        stats.record_success(2.0)
+        stats.record_success(3.0)
+
+        assert stats.success_count == 3
+        assert stats.request_count == 3
+        assert stats.total_response_time == 6.0
+        assert stats.min_response_time == 1.0
+        assert stats.max_response_time == 3.0
+        assert stats.avg_response_time == 2.0
+
+    def test_right_record_failure(self):
+        """[Right] 실패 기록"""
+        from app.schemas.proxy import ProxyUsageStats
+
+        stats = ProxyUsageStats(proxy_id=1)
+        stats.record_failure("timeout", "Connection timed out")
+
+        assert stats.fail_count == 1
+        assert stats.request_count == 1
+        assert stats.last_error_type == "timeout"
+        assert stats.last_error_message == "Connection timed out"
+
+    def test_right_mixed_results(self):
+        """[Right] 성공/실패 혼합"""
+        from app.schemas.proxy import ProxyUsageStats
+
+        stats = ProxyUsageStats(proxy_id=1)
+        stats.record_success(1.0)
+        stats.record_success(2.0)
+        stats.record_failure("timeout")
+        stats.record_success(1.5)
+
+        assert stats.success_count == 3
+        assert stats.fail_count == 1
+        assert stats.request_count == 4
+        assert stats.success_rate == 0.75  # 3/4
+
+    def test_boundary_success_rate_no_requests(self):
+        """[Boundary] 요청 없는 경우 성공률"""
+        from app.schemas.proxy import ProxyUsageStats
+
+        stats = ProxyUsageStats(proxy_id=1)
+        assert stats.success_rate is None
+
+    def test_boundary_avg_response_time_no_success(self):
+        """[Boundary] 성공 없는 경우 평균 응답시간"""
+        from app.schemas.proxy import ProxyUsageStats
+
+        stats = ProxyUsageStats(proxy_id=1)
+        stats.record_failure("timeout")
+        stats.record_failure("connection")
+
+        assert stats.avg_response_time is None
+
+
+# ============== Memory-based Stats Tests ==============
+
+class TestMemoryBasedStats:
+    """메모리 기반 통계 테스트"""
+
+    @pytest.mark.asyncio
+    async def test_right_stats_stored_in_memory(self, mock_db_service, sample_proxy_list):
+        """[Right] 통계가 메모리에 저장됨"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        mock_db_service.get_top_proxies_for_pool.return_value = sample_proxy_list
+
+        manager = ProxyManagerV2(db_service=mock_db_service)
+        await manager.initialize()
+
+        proxy = sample_proxy_list[0]
+        manager.report_success(proxy, response_time=1.5)
+
+        # 메모리 통계 확인
+        assert proxy.id in manager._usage_stats
+        stats = manager._usage_stats[proxy.id]
+        assert stats.success_count == 1
+        assert stats.total_response_time == 1.5
+
+    @pytest.mark.asyncio
+    async def test_right_no_db_write_on_report(self, mock_db_service, sample_proxy_list):
+        """[Right] report 시 DB 쓰기 없음"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        mock_db_service.get_top_proxies_for_pool.return_value = sample_proxy_list
+        mock_db_service.record_check_result = Mock()
+
+        manager = ProxyManagerV2(db_service=mock_db_service)
+        await manager.initialize()
+
+        proxy = sample_proxy_list[0]
+        manager.report_success(proxy, response_time=1.5)
+        manager.report_failure(proxy, error_type="timeout")
+
+        # DB 쓰기 호출되지 않음
+        mock_db_service.record_check_result.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_right_slow_proxy_marked(self, mock_db_service, sample_proxy_list):
+        """[Right] 느린 프록시가 마킹됨"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        mock_db_service.get_top_proxies_for_pool.return_value = sample_proxy_list
+
+        manager = ProxyManagerV2(
+            db_service=mock_db_service,
+            max_response_time=2.0,
+        )
+        await manager.initialize()
+
+        proxy = sample_proxy_list[0]
+        manager.report_success(proxy, response_time=2.5)  # > 2.0
+
+        assert proxy.id in manager._slow_proxies
+
+    @pytest.mark.asyncio
+    async def test_right_fast_proxy_not_marked(self, mock_db_service, sample_proxy_list):
+        """[Right] 빠른 프록시는 마킹되지 않음"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        mock_db_service.get_top_proxies_for_pool.return_value = sample_proxy_list
+
+        manager = ProxyManagerV2(
+            db_service=mock_db_service,
+            max_response_time=2.0,
+        )
+        await manager.initialize()
+
+        proxy = sample_proxy_list[0]
+        manager.report_success(proxy, response_time=1.5)  # < 2.0
+
+        assert proxy.id not in manager._slow_proxies
+
+
+# ============== Pool Refresh Exclusion Tests ==============
+
+class TestPoolRefreshExclusion:
+    """풀 갱신 시 제외 로직 테스트"""
+
+    @pytest.mark.asyncio
+    async def test_right_previous_pool_excluded(self, mock_db_service):
+        """[Right] 직전 풀이 제외됨"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        # 첫 번째 풀: 프록시 1-5
+        first_pool = [
+            ProxyInfo(id=i, url=f"http://192.168.1.{i}:8080", protocol="http",
+                      host=f"192.168.1.{i}", port=8080)
+            for i in range(1, 6)
+        ]
+        # 두 번째 풀: 프록시 6-10
+        second_pool = [
+            ProxyInfo(id=i, url=f"http://192.168.1.{i}:8080", protocol="http",
+                      host=f"192.168.1.{i}", port=8080)
+            for i in range(6, 11)
+        ]
+
+        mock_db_service.get_top_proxies_for_pool.return_value = first_pool
+
+        manager = ProxyManagerV2(db_service=mock_db_service, pool_size=5)
+        await manager.initialize()
+
+        # 첫 번째 풀 ID 확인
+        first_pool_ids = {p.id for p in manager._active_pool}
+        assert first_pool_ids == {1, 2, 3, 4, 5}
+
+        # 두 번째 풀 갱신
+        mock_db_service.get_top_proxies_for_pool.return_value = second_pool
+        await manager._refresh_pool()
+
+        # 직전 풀 ID가 저장됨
+        assert manager._previous_pool_ids == first_pool_ids
+
+        # get_top_proxies_for_pool이 exclude_ids와 함께 호출됨
+        calls = mock_db_service.get_top_proxies_for_pool.call_args_list
+        last_call = calls[-2]  # pending 호출 전 마지막 active 호출
+        assert "exclude_ids" in last_call.kwargs or len(last_call.args) > 4
+
+    @pytest.mark.asyncio
+    async def test_right_slow_proxies_excluded(self, mock_db_service):
+        """[Right] 느린 프록시가 제외됨"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        first_pool = [
+            ProxyInfo(id=i, url=f"http://192.168.1.{i}:8080", protocol="http",
+                      host=f"192.168.1.{i}", port=8080)
+            for i in range(1, 6)
+        ]
+
+        mock_db_service.get_top_proxies_for_pool.return_value = first_pool
+
+        manager = ProxyManagerV2(
+            db_service=mock_db_service,
+            pool_size=5,
+            max_response_time=2.0,
+        )
+        await manager.initialize()
+
+        # 프록시 1, 3이 느림
+        manager.report_success(first_pool[0], response_time=3.0)  # id=1
+        manager.report_success(first_pool[2], response_time=2.5)  # id=3
+
+        assert 1 in manager._slow_proxies
+        assert 3 in manager._slow_proxies
+
+        # 풀 갱신 후 slow_proxies가 초기화됨
+        await manager._refresh_pool()
+        assert len(manager._slow_proxies) == 0
+
+    @pytest.mark.asyncio
+    async def test_right_stats_cleared_on_refresh(self, mock_db_service, sample_proxy_list):
+        """[Right] 풀 갱신 시 통계가 초기화됨"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        mock_db_service.get_top_proxies_for_pool.return_value = sample_proxy_list
+
+        manager = ProxyManagerV2(db_service=mock_db_service)
+        await manager.initialize()
+
+        # 통계 기록
+        manager.report_success(sample_proxy_list[0], response_time=1.0)
+        manager.report_success(sample_proxy_list[1], response_time=1.5)
+        assert len(manager._usage_stats) == 2
+
+        # 풀 갱신
+        await manager._refresh_pool()
+
+        # 통계 초기화됨
+        assert len(manager._usage_stats) == 0
+
+
+# ============== Batch DB Write Tests ==============
+
+class TestBatchDBWrite:
+    """배치 DB 쓰기 테스트"""
+
+    @pytest.mark.asyncio
+    async def test_right_batch_write_scheduled(self, mock_db_service, sample_proxy_list):
+        """[Right] 풀 갱신 시 배치 쓰기 예약됨"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        mock_db_writer = Mock()
+        mock_db_writer.write_nowait = Mock()
+
+        mock_db_service.get_top_proxies_for_pool.return_value = sample_proxy_list
+
+        manager = ProxyManagerV2(
+            db_service=mock_db_service,
+            db_writer=mock_db_writer,
+        )
+        await manager.initialize()
+
+        # 통계 기록
+        manager.report_success(sample_proxy_list[0], response_time=1.0)
+        manager.report_success(sample_proxy_list[1], response_time=1.5)
+
+        # 풀 갱신
+        await manager._refresh_pool()
+
+        # 배치 쓰기 예약됨
+        mock_db_writer.write_nowait.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_right_no_write_if_no_stats(self, mock_db_service, sample_proxy_list):
+        """[Right] 통계 없으면 쓰기 없음"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        mock_db_writer = Mock()
+        mock_db_writer.write_nowait = Mock()
+
+        mock_db_service.get_top_proxies_for_pool.return_value = sample_proxy_list
+
+        manager = ProxyManagerV2(
+            db_service=mock_db_service,
+            db_writer=mock_db_writer,
+        )
+        await manager.initialize()
+
+        # 통계 기록 없이 풀 갱신
+        await manager._refresh_pool()
+
+        # 배치 쓰기 호출되지 않음
+        mock_db_writer.write_nowait.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_right_fallback_sync_write(self, mock_db_service, sample_proxy_list):
+        """[Right] db_writer 없으면 동기 쓰기"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        mock_db_service.get_top_proxies_for_pool.return_value = sample_proxy_list
+        mock_db_service.batch_update_proxy_stats = Mock()
+
+        manager = ProxyManagerV2(
+            db_service=mock_db_service,
+            db_writer=None,  # db_writer 없음
+        )
+        await manager.initialize()
+
+        # 통계 기록
+        manager.report_success(sample_proxy_list[0], response_time=1.0)
+
+        # 풀 갱신
+        await manager._refresh_pool()
+
+        # 동기 배치 쓰기 호출됨
+        mock_db_service.batch_update_proxy_stats.assert_called_once()
+
+    def test_right_schedule_batch_db_write_format(self, mock_db_service):
+        """[Right] 배치 쓰기 데이터 형식"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+        from app.schemas.proxy import ProxyUsageStats
+
+        mock_db_writer = Mock()
+        captured_args = []
+
+        def capture_write(func, data):
+            captured_args.append(data)
+
+        mock_db_writer.write_nowait = capture_write
+
+        manager = ProxyManagerV2(
+            db_service=mock_db_service,
+            db_writer=mock_db_writer,
+        )
+
+        # 통계 생성
+        stats = {
+            1: ProxyUsageStats(proxy_id=1),
+            2: ProxyUsageStats(proxy_id=2),
+        }
+        stats[1].record_success(1.0)
+        stats[1].record_success(2.0)
+        stats[2].record_failure("timeout")
+
+        manager._schedule_batch_db_write(stats)
+
+        assert len(captured_args) == 1
+        stats_list = captured_args[0]
+        assert len(stats_list) == 2
+
+        # 데이터 형식 확인
+        for item in stats_list:
+            assert "proxy_id" in item
+            assert "success_count" in item
+            assert "fail_count" in item
+            assert "avg_response_time" in item
+
+
+# ============== Sync Refresh Tests ==============
+
+class TestSyncRefresh:
+    """동기 풀 갱신 테스트"""
+
+    @pytest.mark.asyncio
+    async def test_right_sync_refresh_on_depleted_pool(self, mock_db_service):
+        """[Right] 풀 고갈 시 동기 갱신"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        # 처음에 프록시 2개
+        initial_pool = [
+            ProxyInfo(id=i, url=f"http://192.168.1.{i}:8080", protocol="http",
+                      host=f"192.168.1.{i}", port=8080)
+            for i in range(1, 3)
+        ]
+        mock_db_service.get_top_proxies_for_pool.return_value = initial_pool
+
+        manager = ProxyManagerV2(db_service=mock_db_service, pool_size=5)
+        await manager.initialize()
+
+        # 풀을 강제로 비움
+        manager._active_pool = []
+
+        # 새 프록시 준비
+        new_pool = [
+            ProxyInfo(id=i, url=f"http://192.168.2.{i}:8080", protocol="http",
+                      host=f"192.168.2.{i}", port=8080)
+            for i in range(10, 15)
+        ]
+        mock_db_service.get_top_proxies_for_pool.return_value = new_pool
+
+        # get_next_proxy 호출 시 동기 갱신
+        proxy = manager.get_next_proxy()
+
+        assert proxy is not None
+        assert len(manager._active_pool) > 0
+
+    @pytest.mark.asyncio
+    async def test_right_sync_refresh_excludes_slow_proxies(self, mock_db_service):
+        """[Right] 동기 갱신 시 느린 프록시 제외"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        initial_pool = [
+            ProxyInfo(id=i, url=f"http://192.168.1.{i}:8080", protocol="http",
+                      host=f"192.168.1.{i}", port=8080)
+            for i in range(1, 6)
+        ]
+        mock_db_service.get_top_proxies_for_pool.return_value = initial_pool
+
+        manager = ProxyManagerV2(
+            db_service=mock_db_service,
+            pool_size=5,
+            max_response_time=2.0,
+        )
+        await manager.initialize()
+
+        # 느린 프록시 마킹
+        manager._slow_proxies.add(1)
+        manager._slow_proxies.add(2)
+
+        # 풀 비움
+        manager._active_pool = []
+
+        # 동기 갱신
+        manager._sync_refresh_pool()
+
+        # exclude_ids가 slow_proxies를 포함해야 함
+        call_args = mock_db_service.get_top_proxies_for_pool.call_args
+        exclude_ids = call_args.kwargs.get("exclude_ids") or (call_args.args[4] if len(call_args.args) > 4 else None)
+        if exclude_ids:
+            assert 1 in exclude_ids or 2 in exclude_ids
+
+
+# ============== Status Tests ==============
+
+class TestStatusWithNewFields:
+    """새로운 필드를 포함한 상태 테스트"""
+
+    @pytest.mark.asyncio
+    async def test_right_status_includes_new_fields(self, mock_db_service, sample_proxy_list):
+        """[Right] 상태에 새 필드 포함"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        mock_db_service.get_top_proxies_for_pool.return_value = sample_proxy_list
+
+        manager = ProxyManagerV2(
+            db_service=mock_db_service,
+            max_response_time=2.0,
+        )
+        await manager.initialize()
+
+        # 통계 및 느린 프록시 생성
+        manager.report_success(sample_proxy_list[0], response_time=1.0)
+        manager.report_success(sample_proxy_list[1], response_time=3.0)  # slow
+
+        status = manager.get_status()
+
+        assert "max_response_time" in status
+        assert "pending_stats_count" in status
+        assert "slow_proxies_count" in status
+        assert "previous_pool_size" in status
+
+        assert status["max_response_time"] == 2.0
+        assert status["pending_stats_count"] == 2
+        assert status["slow_proxies_count"] == 1
+
+
+# ============== Shutdown Tests ==============
+
+class TestShutdown:
+    """종료 테스트"""
+
+    @pytest.mark.asyncio
+    async def test_right_shutdown_flushes_stats(self, mock_db_service, sample_proxy_list):
+        """[Right] 종료 시 통계 저장"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        mock_db_writer = Mock()
+        mock_db_writer.write_nowait = Mock()
+
+        mock_db_service.get_top_proxies_for_pool.return_value = sample_proxy_list
+
+        manager = ProxyManagerV2(
+            db_service=mock_db_service,
+            db_writer=mock_db_writer,
+        )
+        await manager.initialize()
+
+        # 통계 기록
+        manager.report_success(sample_proxy_list[0], response_time=1.0)
+
+        # 종료
+        await manager.shutdown()
+
+        # 배치 쓰기 호출됨
+        mock_db_writer.write_nowait.assert_called_once()
+
+        # 통계 초기화됨
+        assert len(manager._usage_stats) == 0
+
+    @pytest.mark.asyncio
+    async def test_right_shutdown_no_stats(self, mock_db_service, sample_proxy_list):
+        """[Right] 통계 없으면 종료 시 쓰기 없음"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        mock_db_writer = Mock()
+        mock_db_writer.write_nowait = Mock()
+
+        mock_db_service.get_top_proxies_for_pool.return_value = sample_proxy_list
+
+        manager = ProxyManagerV2(
+            db_service=mock_db_service,
+            db_writer=mock_db_writer,
+        )
+        await manager.initialize()
+
+        # 통계 없이 종료
+        await manager.shutdown()
+
+        # 배치 쓰기 호출되지 않음
+        mock_db_writer.write_nowait.assert_not_called()

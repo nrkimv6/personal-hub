@@ -135,6 +135,7 @@ class Settings(BaseSettings):
     PROXY_ADAPTIVE_TIMEOUT_MAX: float = 10.0  # 최대 타임아웃 (초)
     PROXY_WEIGHTED_SELECTION: bool = True  # 가중치 기반 선택 활성화
     PROXY_VALIDATOR_TYPE: str = "naver"  # 검증기 타입 ("naver" | "httpbin")
+    PROXY_MAX_RESPONSE_TIME: float = 2.0  # 최대 허용 응답시간 (초) - 초과 시 다음 풀에서 제외
 
     # 모니터링 설정
     INITIAL_CHECK_DELAY: int = 2  # 초기 검사 지연 (초)

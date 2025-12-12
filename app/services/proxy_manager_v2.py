@@ -1,24 +1,27 @@
 """
 DB 기반 프록시 매니저 V2
 작성일: 2025-12-11
+수정일: 2025-12-12
 
 Features:
 - 우선순위 점수 기반 프록시 선택 (가중치 랜덤)
 - 적응형 타임아웃 (프록시별 평균 응답시간 기반)
-- 실시간 품질 피드백 (성공/실패 시 DB 기록)
-- DB 기반 상태 관리 (영구 저장)
+- 메모리 기반 통계 누적 (모니터링 중 DB 쓰기 없음)
+- 풀 갱신 시 배치 DB 쓰기 (별도 스레드)
+- 직전 풀/느린 프록시 제외
 """
 import asyncio
 import logging
 import random
 import time
 from datetime import datetime, timedelta
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, Optional, Dict, Set, TYPE_CHECKING
 
-from app.schemas.proxy import ProxyInfo
+from app.schemas.proxy import ProxyInfo, ProxyUsageStats
 
 if TYPE_CHECKING:
     from app.services.proxy_db_service import ProxyDBService
+    from app.utils.async_db_writer import AsyncDBWriter
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +45,8 @@ class ProxyManagerV2:
         adaptive_timeout_min: float = 3.0,
         adaptive_timeout_max: float = 10.0,
         weighted_selection: bool = True,
+        max_response_time: float = 2.0,
+        db_writer: Optional["AsyncDBWriter"] = None,
     ):
         """
         Args:
@@ -54,6 +59,8 @@ class ProxyManagerV2:
             adaptive_timeout_min: 최소 타임아웃 (초)
             adaptive_timeout_max: 최대 타임아웃 (초)
             weighted_selection: 가중치 기반 선택 사용 여부
+            max_response_time: 최대 허용 응답시간 (초) - 초과 시 다음 풀에서 제외
+            db_writer: 비동기 DB Writer (배치 쓰기용)
         """
         self._db_service = db_service
         self._pool_size = pool_size
@@ -64,6 +71,8 @@ class ProxyManagerV2:
         self._adaptive_timeout_min = adaptive_timeout_min
         self._adaptive_timeout_max = adaptive_timeout_max
         self._weighted_selection = weighted_selection
+        self._max_response_time = max_response_time
+        self._db_writer = db_writer
 
         # 활성 풀
         self._active_pool: List[ProxyInfo] = []
@@ -76,6 +85,13 @@ class ProxyManagerV2:
         # 상태
         self._initialized = False
         self._enabled = True
+
+        # 메모리 통계 (풀 갱신 시까지 누적, DB 쓰기 없음)
+        self._usage_stats: Dict[int, ProxyUsageStats] = {}
+
+        # 풀 관리 (다음 풀에서 제외할 프록시)
+        self._previous_pool_ids: Set[int] = set()  # 직전 풀 프록시 ID
+        self._slow_proxies: Set[int] = set()  # 느린 프록시 ID (응답시간 > max_response_time)
 
     @property
     def is_available(self) -> bool:
@@ -111,13 +127,29 @@ class ProxyManagerV2:
             return False
 
     async def _refresh_pool(self) -> None:
-        """활성 풀 갱신: DB에서 우선순위 상위 N개 조회"""
+        """
+        활성 풀 갱신
+
+        1. 종료된 풀 정보 보존
+        2. 새 풀 구성 (DB 읽기) - 직전 풀 + 느린 프록시 제외
+        3. 새 풀로 즉시 전환
+        4. 종료된 풀 통계 → 별도 스레드에서 DB 쓰기
+        """
         async with self._lock:
             try:
+                # 1. 종료된 풀 정보 보존
+                old_pool_ids = {p.id for p in self._active_pool}
+                old_stats = dict(self._usage_stats)
+
+                # 2. 새 풀 구성 - 직전 풀 + 느린 프록시 제외
+                exclude_ids = list(self._previous_pool_ids | self._slow_proxies)
+
                 proxies = self._db_service.get_top_proxies_for_pool(
                     limit=self._pool_size,
                     status="active",
                     min_success_rate=self._min_success_rate,
+                    exclude_ids=exclude_ids if exclude_ids else None,
+                    max_response_time=self._max_response_time,
                 )
 
                 # pending 상태의 프록시도 포함 (신규 프록시 테스트용)
@@ -125,14 +157,27 @@ class ProxyManagerV2:
                     pending_proxies = self._db_service.get_top_proxies_for_pool(
                         limit=self._pool_size - len(proxies),
                         status="pending",
+                        exclude_ids=exclude_ids if exclude_ids else None,
                     )
                     proxies.extend(pending_proxies)
 
+                # 3. 새 풀로 즉시 전환
+                self._previous_pool_ids = old_pool_ids
                 self._active_pool = proxies
+                self._usage_stats.clear()
+                self._slow_proxies.clear()
                 self._last_refresh = datetime.now()
                 self._current_index = 0
 
-                logger.debug(f"Pool refreshed with {len(proxies)} proxies")
+                logger.info(
+                    f"Pool refreshed: {len(proxies)} proxies "
+                    f"(excluded {len(exclude_ids)} from previous pool)"
+                )
+
+                # 4. 종료된 풀 통계 → 별도 스레드에서 DB 쓰기
+                if old_stats:
+                    self._schedule_batch_db_write(old_stats)
+
             except Exception as e:
                 logger.error(f"Failed to refresh proxy pool: {e}")
 
@@ -149,10 +194,15 @@ class ProxyManagerV2:
     def _sync_refresh_pool(self) -> None:
         """동기적으로 풀 갱신 (풀 고갈 시 호출)"""
         try:
+            # 긴급 갱신이므로 직전 풀 제외 없이 조회
+            exclude_ids = list(self._slow_proxies) if self._slow_proxies else None
+
             proxies = self._db_service.get_top_proxies_for_pool(
                 limit=self._pool_size,
                 status="active",
                 min_success_rate=self._min_success_rate,
+                exclude_ids=exclude_ids,
+                max_response_time=self._max_response_time,
             )
 
             # pending 상태의 프록시도 포함 (신규 프록시 테스트용)
@@ -160,6 +210,7 @@ class ProxyManagerV2:
                 pending_proxies = self._db_service.get_top_proxies_for_pool(
                     limit=self._pool_size - len(proxies),
                     status="pending",
+                    exclude_ids=exclude_ids,
                 )
                 proxies.extend(pending_proxies)
 
@@ -170,6 +221,49 @@ class ProxyManagerV2:
             logger.info(f"Pool sync-refreshed with {len(proxies)} proxies (was depleted)")
         except Exception as e:
             logger.error(f"Failed to sync-refresh proxy pool: {e}")
+
+    def _schedule_batch_db_write(self, stats: Dict[int, ProxyUsageStats]) -> None:
+        """배치 DB 쓰기 예약 (별도 스레드)"""
+        if not stats:
+            return
+
+        # 통계를 dict 리스트로 변환
+        stats_list = [
+            {
+                "proxy_id": s.proxy_id,
+                "success_count": s.success_count,
+                "fail_count": s.fail_count,
+                "avg_response_time": s.avg_response_time,
+                "min_response_time": s.min_response_time,
+                "max_response_time": s.max_response_time,
+            }
+            for s in stats.values()
+            if s.request_count > 0
+        ]
+
+        if not stats_list:
+            return
+
+        if self._db_writer:
+            # 비동기 DB Writer 사용 (논블로킹)
+            self._db_writer.write_nowait(
+                self._db_service.batch_update_proxy_stats,
+                stats_list,
+            )
+            logger.debug(f"Scheduled batch DB write for {len(stats_list)} proxies")
+        else:
+            # fallback: 동기 처리 (블로킹)
+            try:
+                self._db_service.batch_update_proxy_stats(stats_list)
+                logger.debug(f"Batch DB write completed for {len(stats_list)} proxies")
+            except Exception as e:
+                logger.error(f"Failed to batch update proxy stats: {e}")
+
+    def _get_or_create_stats(self, proxy_id: int) -> ProxyUsageStats:
+        """프록시 통계 가져오기 또는 생성"""
+        if proxy_id not in self._usage_stats:
+            self._usage_stats[proxy_id] = ProxyUsageStats(proxy_id=proxy_id)
+        return self._usage_stats[proxy_id]
 
     def get_next_proxy(self) -> Optional[ProxyInfo]:
         """
@@ -286,7 +380,7 @@ class ProxyManagerV2:
 
         return proxy.to_playwright_proxy()
 
-    async def report_success(
+    def report_success(
         self,
         proxy: ProxyInfo,
         response_time: float,
@@ -294,61 +388,56 @@ class ProxyManagerV2:
         is_anonymous: Optional[bool] = None,
     ) -> None:
         """
-        성공 보고: DB에 이력 저장
+        성공 보고: 메모리에만 기록 (DB 쓰기 없음, 논블로킹)
+
+        풀 갱신 시점에 배치로 DB에 저장됩니다.
 
         Args:
             proxy: 사용된 프록시
             response_time: 응답 시간 (초)
-            detected_ip: 감지된 IP
-            is_anonymous: 익명성 여부
+            detected_ip: 감지된 IP (현재 미사용, 향후 확장용)
+            is_anonymous: 익명성 여부 (현재 미사용, 향후 확장용)
         """
-        try:
-            self._db_service.record_check_result(
-                proxy_id=proxy.id,
-                is_valid=True,
-                response_time=response_time,
-                detected_ip=detected_ip,
-                is_anonymous=is_anonymous,
-            )
+        # 메모리 통계 업데이트
+        stats = self._get_or_create_stats(proxy.id)
+        stats.record_success(response_time)
 
-            # 로컬 캐시 업데이트
-            self._update_local_proxy(proxy.id, is_valid=True, response_time=response_time)
+        # 느린 프록시 마킹 (다음 풀 갱신 시 제외)
+        if response_time > self._max_response_time:
+            self._slow_proxies.add(proxy.id)
+            logger.debug(f"Proxy {proxy.id} marked as slow ({response_time:.2f}s > {self._max_response_time}s)")
 
-            logger.debug(f"Proxy {proxy.id} success reported: {response_time:.2f}s")
-        except Exception as e:
-            logger.error(f"Failed to report success for proxy {proxy.id}: {e}")
+        # 로컬 캐시 업데이트 (풀 내 프록시 정보)
+        self._update_local_proxy(proxy.id, is_valid=True, response_time=response_time)
 
-    async def report_failure(
+        logger.debug(f"Proxy {proxy.id} success recorded: {response_time:.2f}s (memory only)")
+
+    def report_failure(
         self,
         proxy: ProxyInfo,
         error_type: str,
-        error_message: str,
+        error_message: Optional[str] = None,
         http_status: Optional[int] = None,
     ) -> None:
         """
-        실패 보고: DB에 이력 저장 및 풀에서 제거 고려
+        실패 보고: 메모리에만 기록 (DB 쓰기 없음, 논블로킹)
+
+        풀 갱신 시점에 배치로 DB에 저장됩니다.
 
         Args:
             proxy: 사용된 프록시
             error_type: 에러 유형 (timeout, connection, http_4xx 등)
             error_message: 에러 메시지
-            http_status: HTTP 상태 코드
+            http_status: HTTP 상태 코드 (현재 미사용, 향후 확장용)
         """
-        try:
-            self._db_service.record_check_result(
-                proxy_id=proxy.id,
-                is_valid=False,
-                error_type=error_type,
-                error_message=error_message,
-                http_status=http_status,
-            )
+        # 메모리 통계 업데이트
+        stats = self._get_or_create_stats(proxy.id)
+        stats.record_failure(error_type, error_message)
 
-            # 로컬 캐시 업데이트 및 필요시 풀에서 제거
-            self._update_local_proxy(proxy.id, is_valid=False)
+        # 로컬 캐시 업데이트 및 필요시 풀에서 제거
+        self._update_local_proxy(proxy.id, is_valid=False)
 
-            logger.debug(f"Proxy {proxy.id} failure reported: {error_type}")
-        except Exception as e:
-            logger.error(f"Failed to report failure for proxy {proxy.id}: {e}")
+        logger.debug(f"Proxy {proxy.id} failure recorded: {error_type} (memory only)")
 
     def _update_local_proxy(
         self,
@@ -427,9 +516,13 @@ class ProxyManagerV2:
             "pool_size": len(self._active_pool),
             "target_pool_size": self._pool_size,
             "min_success_rate": self._min_success_rate,
+            "max_response_time": self._max_response_time,
             "last_refresh": self._last_refresh.isoformat() if self._last_refresh else None,
             "adaptive_timeout_enabled": self._adaptive_timeout_enabled,
             "weighted_selection": self._weighted_selection,
+            "pending_stats_count": len(self._usage_stats),
+            "slow_proxies_count": len(self._slow_proxies),
+            "previous_pool_size": len(self._previous_pool_ids),
             "proxies": [
                 {
                     "id": p.id,
@@ -442,3 +535,14 @@ class ProxyManagerV2:
                 for p in self._active_pool
             ],
         }
+
+    async def shutdown(self) -> None:
+        """
+        매니저 종료 - 남은 통계를 DB에 저장
+
+        애플리케이션 종료 시 호출하여 미저장 통계 손실 방지
+        """
+        if self._usage_stats:
+            logger.info(f"Flushing {len(self._usage_stats)} pending stats before shutdown")
+            self._schedule_batch_db_write(self._usage_stats)
+            self._usage_stats.clear()

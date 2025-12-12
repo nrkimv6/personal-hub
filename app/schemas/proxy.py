@@ -100,6 +100,56 @@ class ValidationResult:
     http_status: Optional[int] = None
 
 
+@dataclass
+class ProxyUsageStats:
+    """
+    프록시 사용 통계 (메모리 누적용)
+
+    풀 갱신 시점까지 메모리에 누적되며, 갱신 시 배치로 DB에 저장됩니다.
+    """
+    proxy_id: int
+    success_count: int = 0
+    fail_count: int = 0
+    total_response_time: float = 0.0
+    request_count: int = 0
+    last_error_type: Optional[str] = None
+    last_error_message: Optional[str] = None
+    min_response_time: Optional[float] = None
+    max_response_time: Optional[float] = None
+
+    def record_success(self, response_time: float) -> None:
+        """성공 기록"""
+        self.success_count += 1
+        self.request_count += 1
+        self.total_response_time += response_time
+
+        if self.min_response_time is None or response_time < self.min_response_time:
+            self.min_response_time = response_time
+        if self.max_response_time is None or response_time > self.max_response_time:
+            self.max_response_time = response_time
+
+    def record_failure(self, error_type: str, error_message: Optional[str] = None) -> None:
+        """실패 기록"""
+        self.fail_count += 1
+        self.request_count += 1
+        self.last_error_type = error_type
+        self.last_error_message = error_message
+
+    @property
+    def avg_response_time(self) -> Optional[float]:
+        """평균 응답시간"""
+        if self.success_count > 0:
+            return self.total_response_time / self.success_count
+        return None
+
+    @property
+    def success_rate(self) -> Optional[float]:
+        """성공률 (0.0 ~ 1.0)"""
+        if self.request_count > 0:
+            return self.success_count / self.request_count
+        return None
+
+
 # ============== 검증 이력 ==============
 
 class ProxyCheckHistoryBase(BaseModel):
