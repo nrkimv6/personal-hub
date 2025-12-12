@@ -529,6 +529,8 @@ class ProxyDBService:
         status: str = "active",
         min_success_rate: float = 0.0,
         min_checks: int = 0,
+        exclude_ids: Optional[List[int]] = None,
+        max_response_time: Optional[float] = None,
     ) -> List[ProxyInfo]:
         """
         ProxyManagerV2용 상위 프록시 조회
@@ -538,11 +540,26 @@ class ProxyDBService:
             status: 상태 필터 (기본: active)
             min_success_rate: 최소 성공률 (0.0~1.0)
             min_checks: 최소 검증 횟수 (신뢰도 확보)
+            exclude_ids: 제외할 프록시 ID 목록 (직전 풀, 느린 프록시 등)
+            max_response_time: 최대 허용 응답시간 (초) - 초과 시 제외
 
         Returns:
             ProxyInfo 리스트 (우선순위 내림차순)
         """
         query = self.db.query(Proxy).filter(Proxy.status == status)
+
+        # 제외할 프록시 ID 필터
+        if exclude_ids:
+            query = query.filter(Proxy.id.notin_(exclude_ids))
+
+        # 최대 응답시간 필터 (아직 측정 안 된 프록시는 포함)
+        if max_response_time is not None:
+            query = query.filter(
+                or_(
+                    Proxy.avg_response_time.is_(None),
+                    Proxy.avg_response_time <= max_response_time,
+                )
+            )
 
         # 최소 검증 횟수 필터
         if min_checks > 0:
@@ -672,6 +689,89 @@ class ProxyDBService:
         )
         self.db.commit()
         return updated
+
+    def batch_update_proxy_stats(
+        self,
+        stats_list: List[Dict[str, Any]],
+    ) -> int:
+        """
+        프록시 통계 배치 업데이트 (풀 갱신 시 사용)
+
+        Args:
+            stats_list: 통계 목록
+                [{"proxy_id": 1, "success_count": 5, "fail_count": 1, "avg_response_time": 1.2}, ...]
+
+        Returns:
+            업데이트된 프록시 수
+        """
+        updated_count = 0
+        now = datetime.now()
+
+        for stats in stats_list:
+            proxy_id = stats.get("proxy_id")
+            if not proxy_id:
+                continue
+
+            proxy = self.get_by_id(proxy_id)
+            if not proxy:
+                continue
+
+            # 성공/실패 카운트 누적
+            success_delta = stats.get("success_count", 0)
+            fail_delta = stats.get("fail_count", 0)
+
+            proxy.success_count = (proxy.success_count or 0) + success_delta
+            proxy.total_checks = (proxy.total_checks or 0) + success_delta + fail_delta
+
+            # 실패 카운트: 성공이 있으면 리셋, 아니면 누적
+            if success_delta > 0:
+                proxy.fail_count = fail_delta  # 리셋 후 새 실패만
+                proxy.last_success_at = now
+            else:
+                proxy.fail_count = (proxy.fail_count or 0) + fail_delta
+
+            # 응답시간 업데이트 (이동 평균)
+            new_avg = stats.get("avg_response_time")
+            if new_avg is not None:
+                if proxy.avg_response_time is not None:
+                    # 이동 평균: 기존 70% + 새로운 30%
+                    proxy.avg_response_time = proxy.avg_response_time * 0.7 + new_avg * 0.3
+                else:
+                    proxy.avg_response_time = new_avg
+
+            # min/max 응답시간
+            min_rt = stats.get("min_response_time")
+            max_rt = stats.get("max_response_time")
+            if min_rt is not None:
+                if proxy.min_response_time is None or min_rt < proxy.min_response_time:
+                    proxy.min_response_time = min_rt
+            if max_rt is not None:
+                if proxy.max_response_time is None or max_rt > proxy.max_response_time:
+                    proxy.max_response_time = max_rt
+
+            # 마지막 체크 시간
+            proxy.last_checked_at = now
+
+            # 우선순위 점수 재계산
+            proxy.priority_score = self.calculate_priority_score(proxy)
+
+            # 상태 업데이트 (연속 실패 시 비활성화)
+            if proxy.fail_count >= 7:
+                proxy.status = "inactive"
+            elif proxy.status == "pending" and success_delta > 0:
+                proxy.status = "active"
+
+            updated_count += 1
+
+        try:
+            self.db.commit()
+            logger.debug(f"Batch updated {updated_count} proxies")
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Failed to batch update proxy stats: {e}")
+            raise
+
+        return updated_count
 
 
 # 의존성 주입을 위한 팩토리 함수
