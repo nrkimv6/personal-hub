@@ -116,6 +116,16 @@ def get_monitoring_events(
             "business_name": business.name if business else None,
             "naver_business_id": business.business_id if business else None,
             "naver_biz_item_id": biz_item.biz_item_id if biz_item else None,
+            # 상세 정보 (2025-12-08 추가)
+            "fetch_method": event.fetch_method,
+            "time_range": event.time_range,
+            "original_slot_count": event.original_slot_count,
+            "filtered_slot_count": event.filtered_slot_count,
+            "target_time_matched": event.target_time_matched,
+            "booking_triggered": event.booking_triggered,
+            "booking_success": event.booking_success,
+            # 프록시 정보 (2025-12-11 추가)
+            "proxy_url": event.proxy_url,
         }
         result.append(MonitoringEventSchema(**event_dict))
 
@@ -246,6 +256,16 @@ def get_monitoring_event(event_id: int, db: Session = Depends(get_db)):
         business_name=business.name if business else None,
         naver_business_id=business.business_id if business else None,
         naver_biz_item_id=biz_item.biz_item_id if biz_item else None,
+        # 상세 정보
+        fetch_method=event.fetch_method,
+        time_range=event.time_range,
+        original_slot_count=event.original_slot_count,
+        filtered_slot_count=event.filtered_slot_count,
+        target_time_matched=event.target_time_matched,
+        booking_triggered=event.booking_triggered,
+        booking_success=event.booking_success,
+        # 프록시 정보
+        proxy_url=event.proxy_url,
     )
 
 
