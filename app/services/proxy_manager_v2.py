@@ -47,6 +47,12 @@ class ProxyManagerV2:
         weighted_selection: bool = True,
         max_response_time: float = 2.0,
         db_writer: Optional["AsyncDBWriter"] = None,
+        # 쿨다운 설정 (2025-12-12)
+        proxy_cooldown_seconds: float = 10.0,
+        # 응답시간 기반 풀 구성 (2025-12-12)
+        fast_response_threshold: float = 0.5,
+        fast_proxy_ratio: float = 0.7,
+        normal_response_threshold: float = 2.0,
     ):
         """
         Args:
@@ -61,6 +67,10 @@ class ProxyManagerV2:
             weighted_selection: 가중치 기반 선택 사용 여부
             max_response_time: 최대 허용 응답시간 (초) - 초과 시 다음 풀에서 제외
             db_writer: 비동기 DB Writer (배치 쓰기용)
+            proxy_cooldown_seconds: 프록시 재사용 금지 시간 (초, 기본: 10)
+            fast_response_threshold: fast 프록시 기준 응답시간 (초, 기본: 0.5)
+            fast_proxy_ratio: fast 프록시 비율 (0.0~1.0, 기본: 0.7 = 70%)
+            normal_response_threshold: normal 프록시 최대 응답시간 (초, 기본: 2.0)
         """
         self._db_service = db_service
         self._pool_size = pool_size
@@ -73,6 +83,15 @@ class ProxyManagerV2:
         self._weighted_selection = weighted_selection
         self._max_response_time = max_response_time
         self._db_writer = db_writer
+
+        # 쿨다운 설정 (2025-12-12)
+        self._proxy_cooldown_seconds = proxy_cooldown_seconds
+        self._proxy_last_used: Dict[int, float] = {}  # proxy_id → last_used_timestamp
+
+        # 응답시간 기반 풀 구성 설정 (2025-12-12)
+        self._fast_response_threshold = fast_response_threshold
+        self._fast_proxy_ratio = fast_proxy_ratio
+        self._normal_response_threshold = normal_response_threshold
 
         # 활성 풀
         self._active_pool: List[ProxyInfo] = []
@@ -267,12 +286,13 @@ class ProxyManagerV2:
 
     def get_next_proxy(self) -> Optional[ProxyInfo]:
         """
-        다음 프록시 선택
+        다음 프록시 선택 (쿨다운 적용)
 
         weighted_selection=True: 우선순위 점수 기반 가중치 랜덤
         weighted_selection=False: 라운드 로빈
 
         선택된 프록시는 풀의 맨 뒤로 이동하여 재사용 간격을 최대화합니다.
+        쿨다운 중인 프록시는 선택에서 제외됩니다.
 
         Returns:
             선택된 ProxyInfo 또는 None
@@ -284,13 +304,39 @@ class ProxyManagerV2:
         if not self._active_pool:
             return None
 
+        # 쿨다운 지난 프록시만 필터링
+        available = [p for p in self._active_pool if self._is_cooldown_passed(p.id)]
+
+        if not available:
+            # 모든 프록시가 쿨다운 중 - 가장 오래된 것 선택 (fallback)
+            logger.warning(
+                f"All {len(self._active_pool)} proxies in cooldown, "
+                f"selecting oldest used proxy"
+            )
+            # 마지막 사용 시간이 가장 오래된 프록시 선택
+            oldest_proxy = min(
+                self._active_pool,
+                key=lambda p: self._proxy_last_used.get(p.id, 0)
+            )
+            self._mark_proxy_used(oldest_proxy.id)
+            self._move_to_back(oldest_proxy)
+            return oldest_proxy
+
         if self._weighted_selection:
-            proxy = self._weighted_random_select()
+            weights = [max(p.priority_score, 1.0) for p in available]
+            proxy = random.choices(available, weights=weights, k=1)[0]
         else:
-            proxy = self._round_robin_select()
+            proxy = available[0]
+
+        # 프록시 사용 시간 기록
+        self._mark_proxy_used(proxy.id)
 
         # 선택된 프록시를 풀의 맨 뒤로 이동 (재사용 간격 최대화)
         self._move_to_back(proxy)
+
+        # 주기적으로 오래된 쿨다운 기록 정리
+        if len(self._proxy_last_used) > self._pool_size * 5:
+            self._cleanup_cooldown_records()
 
         return proxy
 
@@ -318,6 +364,41 @@ class ProxyManagerV2:
         proxy = self._active_pool[self._current_index]
         self._current_index = (self._current_index + 1) % len(self._active_pool)
         return proxy
+
+    def _is_cooldown_passed(self, proxy_id: int) -> bool:
+        """
+        프록시 쿨다운 경과 여부 확인
+
+        Args:
+            proxy_id: 프록시 ID
+
+        Returns:
+            True: 쿨다운 경과됨 (재사용 가능)
+            False: 쿨다운 중 (재사용 불가)
+        """
+        last_used = self._proxy_last_used.get(proxy_id)
+        if last_used is None:
+            return True
+        return (time.time() - last_used) >= self._proxy_cooldown_seconds
+
+    def _mark_proxy_used(self, proxy_id: int) -> None:
+        """
+        프록시 사용 시간 기록
+
+        Args:
+            proxy_id: 프록시 ID
+        """
+        self._proxy_last_used[proxy_id] = time.time()
+
+    def _cleanup_cooldown_records(self) -> None:
+        """오래된 쿨다운 기록 정리 (메모리 누수 방지)"""
+        current_time = time.time()
+        expired_ids = [
+            proxy_id for proxy_id, last_used in self._proxy_last_used.items()
+            if (current_time - last_used) > self._proxy_cooldown_seconds * 10
+        ]
+        for proxy_id in expired_ids:
+            del self._proxy_last_used[proxy_id]
 
     def get_timeout_for_proxy(self, proxy: ProxyInfo) -> float:
         """
@@ -484,9 +565,10 @@ class ProxyManagerV2:
 
     def get_fresh_proxy(self, exclude: Optional[Set[str]] = None) -> Optional[str]:
         """
-        새 프록시 URL 반환 (재시도용, 기존 ProxyManager 호환)
+        새 프록시 URL 반환 (재시도용, 기존 ProxyManager 호환, 쿨다운 적용)
 
         exclude에 포함된 프록시 URL을 제외하고 다음 프록시를 반환합니다.
+        쿨다운 중인 프록시도 제외됩니다.
 
         Args:
             exclude: 제외할 프록시 URL 집합 (이미 시도한 프록시)
@@ -503,11 +585,22 @@ class ProxyManagerV2:
         if not self._active_pool:
             return None
 
-        # exclude에 포함되지 않은 프록시 필터링
+        # exclude에 포함되지 않고 쿨다운 지난 프록시 필터링
         available = [
             p for p in self._active_pool
-            if p.to_aiohttp_proxy() not in exclude
+            if p.to_aiohttp_proxy() not in exclude and self._is_cooldown_passed(p.id)
         ]
+
+        if not available:
+            # 쿨다운 무시하고 exclude만 적용
+            available = [
+                p for p in self._active_pool
+                if p.to_aiohttp_proxy() not in exclude
+            ]
+            if available:
+                logger.warning(
+                    f"All non-excluded proxies in cooldown, ignoring cooldown"
+                )
 
         if not available:
             # 모든 프록시가 exclude에 포함된 경우
@@ -522,6 +615,9 @@ class ProxyManagerV2:
             proxy = random.choices(available, weights=weights, k=1)[0]
         else:
             proxy = available[0]
+
+        # 프록시 사용 시간 기록
+        self._mark_proxy_used(proxy.id)
 
         # 선택된 프록시를 풀의 맨 뒤로 이동
         self._move_to_back(proxy)
