@@ -170,18 +170,106 @@ async def check_specific_item(item_name: str = None, biz_item_id: str = None, ta
         await client.close()
 
 
+async def check_by_ids(business_id: str, biz_item_id: str, target_date: str = None):
+    """business_id와 biz_item_id로 직접 조회"""
+    client = NaverGraphQLClient()
+    try:
+        start_date = target_date or datetime.now().strftime("%Y-%m-%d")
+
+        print(f"\n🏪 업체 ID: {business_id}")
+        print(f"📦 상품 ID: {biz_item_id}")
+        print(f"📆 조회 시작일: {start_date}")
+
+        # 업체 정보 조회
+        business_info = await client.fetch_business_info(business_id)
+        if business_info:
+            print(f"\n📋 업체 정보:")
+            print(f"   이름: {business_info.name}")
+            print(f"   business_type_id: {business_info.business_type_id}")
+
+        # 상품 정보 조회
+        items = await client.fetch_biz_items(business_id)
+        item_name = biz_item_id
+        for item in items:
+            if str(item.biz_item_id) == str(biz_item_id):
+                item_name = item.name
+                print(f"\n📦 상품 정보: {item.name}")
+                break
+
+        # 슬롯 조회
+        print(f"\n{'='*60}")
+        print(f"상품: {item_name} (biz_item_id={biz_item_id})")
+        print(f"{'='*60}")
+
+        schedule = await client.fetch_schedule(
+            business_type_id=BUSINESS_TYPE_ID,
+            business_id=business_id,
+            biz_item_id=biz_item_id,
+            start_date=start_date,
+            days_ahead=14
+        )
+
+        if not schedule:
+            print("❌ 스케줄 정보를 가져올 수 없습니다.")
+            return
+
+        print(f"\n📅 예약 가능 날짜: {schedule.available_dates or '없음'}")
+        print(f"📊 총 슬롯 수: {len(schedule.slots)}")
+
+        if not schedule.slots:
+            print("⚠️ 슬롯 데이터가 없습니다.")
+            return
+
+        # 날짜별 슬롯 정보 출력
+        for date in sorted(schedule.slots_by_date.keys()):
+            slots = schedule.slots_by_date[date]
+            slots_sorted = sorted(slots, key=lambda s: s.time)
+
+            # 날짜별 합계 계산 (남은 재고 = 정원 - 예약됨)
+            total_unit_stock = sum(s.unit_stock or 0 for s in slots)
+            total_booked = sum(s.unit_booking_count or 0 for s in slots)
+            total_remaining = total_unit_stock - total_booked
+
+            print(f"\n📆 {date} | 정원:{total_unit_stock} | 예약됨:{total_booked} | 남음:{total_remaining}")
+            print(f"  {'시간':<6} | {'정원':>6} | {'예약됨':>6} | {'남음':>6}")
+            print(f"  {'-'*6}-+-{'-'*6}-+-{'-'*6}-+-{'-'*6}")
+            for slot in slots_sorted:
+                unit_stock = slot.unit_stock or 0
+                booked = slot.unit_booking_count or 0
+                remaining = unit_stock - booked  # 실제 남은 재고
+                status = "✅" if remaining > 0 else "⛔"
+                print(f"  {slot.time:<6} | {unit_stock:>6} | {booked:>6} | {remaining:>6} {status}")
+    finally:
+        await client.close()
+
+
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="네이버 예약 슬롯 정보 확인")
     parser.add_argument("--item", "-i", help="상품명 (에스테덤, LBB, 리쥬란)")
     parser.add_argument("--item-id", help="biz_item_id 직접 지정")
+    parser.add_argument("--business-id", "-b", help="business_id 직접 지정")
     parser.add_argument("--date", "-d", help="조회 시작일 (YYYY-MM-DD)")
     parser.add_argument("--all", "-a", action="store_true", help="모든 상품 조회")
+    parser.add_argument("--url", "-u", help="네이버 예약 URL (예: https://booking.naver.com/booking/13/bizes/1357646/items/7268668)")
 
     args = parser.parse_args()
 
-    if args.all or (not args.item and not args.item_id):
+    if args.url:
+        # URL에서 business_id와 biz_item_id 추출
+        # 형식: https://booking.naver.com/booking/13/bizes/{business_id}/items/{biz_item_id}
+        import re
+        match = re.search(r'/bizes/(\d+)/items/(\d+)', args.url)
+        if match:
+            business_id = match.group(1)
+            biz_item_id = match.group(2)
+            asyncio.run(check_by_ids(business_id, biz_item_id, args.date))
+        else:
+            print("URL 형식이 올바르지 않습니다.")
+    elif args.business_id and args.item_id:
+        asyncio.run(check_by_ids(args.business_id, args.item_id, args.date))
+    elif args.all or (not args.item and not args.item_id):
         asyncio.run(check_all_items())
     else:
         asyncio.run(check_specific_item(args.item, args.item_id, args.date))
