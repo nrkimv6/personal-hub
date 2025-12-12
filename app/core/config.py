@@ -120,7 +120,7 @@ class Settings(BaseSettings):
     # 프록시 설정 (공통)
     PROXY_ENABLED: bool = False  # 프록시 사용 여부
     PROXY_ROTATION_INTERVAL: int = 5  # 프록시 교체 주기 (요청 수)
-    PROXY_MAX_ACTIVE_POOL: int = 10  # 활성 프록시 풀 최대 크기
+    PROXY_MAX_ACTIVE_POOL: int = 100  # 활성 프록시 풀 최대 크기
     PROXY_CONNECTION_TIMEOUT: int = 5  # 프록시 연결 타임아웃 (초)
     PROXY_BLACKLIST_DURATION: int = 300  # 블랙리스트 유지 시간 (초)
     PROXY_FILE_CHECK_INTERVAL: int = 300  # 프록시 파일 변경 확인 간격 (초)

@@ -178,6 +178,8 @@ class ProxyManagerV2:
         weighted_selection=True: 우선순위 점수 기반 가중치 랜덤
         weighted_selection=False: 라운드 로빈
 
+        선택된 프록시는 풀의 맨 뒤로 이동하여 재사용 간격을 최대화합니다.
+
         Returns:
             선택된 ProxyInfo 또는 None
         """
@@ -189,9 +191,27 @@ class ProxyManagerV2:
             return None
 
         if self._weighted_selection:
-            return self._weighted_random_select()
+            proxy = self._weighted_random_select()
         else:
-            return self._round_robin_select()
+            proxy = self._round_robin_select()
+
+        # 선택된 프록시를 풀의 맨 뒤로 이동 (재사용 간격 최대화)
+        self._move_to_back(proxy)
+
+        return proxy
+
+    def _move_to_back(self, proxy: ProxyInfo) -> None:
+        """선택된 프록시를 풀의 맨 뒤로 이동"""
+        try:
+            idx = None
+            for i, p in enumerate(self._active_pool):
+                if p.id == proxy.id:
+                    idx = i
+                    break
+            if idx is not None:
+                self._active_pool.append(self._active_pool.pop(idx))
+        except (ValueError, IndexError):
+            pass  # 이미 제거된 경우 무시
 
     def _weighted_random_select(self) -> ProxyInfo:
         """우선순위 점수 기반 가중치 랜덤 선택"""

@@ -579,3 +579,98 @@ class TestCrossCheck:
 
         assert sample_proxy_info.success_count == initial_success + 1
         assert sample_proxy_info.total_checks == initial_total + 1
+
+
+class TestProxyRotation:
+    """프록시 로테이션 테스트"""
+
+    @pytest.mark.asyncio
+    async def test_right_move_to_back_after_selection(self, proxy_manager_v2):
+        """[Right] 선택된 프록시가 풀 뒤로 이동"""
+        await proxy_manager_v2.initialize()
+
+        # 라운드 로빈 모드로 변경하여 예측 가능하게
+        proxy_manager_v2._weighted_selection = False
+        proxy_manager_v2._current_index = 0
+
+        first_proxy = proxy_manager_v2._active_pool[0]
+        first_id = first_proxy.id
+
+        # 선택
+        selected = proxy_manager_v2.get_next_proxy()
+        assert selected.id == first_id
+
+        # 선택된 프록시는 맨 뒤로 이동해야 함
+        assert proxy_manager_v2._active_pool[-1].id == first_id
+        # 맨 앞은 이제 다른 프록시
+        assert proxy_manager_v2._active_pool[0].id != first_id
+
+    @pytest.mark.asyncio
+    async def test_right_no_repeat_until_full_rotation(self, mock_db_service):
+        """[Right] 전체 로테이션 전까지 동일 프록시 재사용 없음"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        # 5개 프록시 생성
+        proxies = [
+            ProxyInfo(
+                id=i,
+                url=f"http://192.168.1.{i}:8080",
+                protocol="http",
+                host=f"192.168.1.{i}",
+                port=8080,
+                priority_score=50.0,  # 모두 동일한 점수
+            )
+            for i in range(1, 6)
+        ]
+        mock_db_service.get_top_proxies_for_pool.return_value = proxies
+
+        manager = ProxyManagerV2(
+            db_service=mock_db_service,
+            weighted_selection=False,  # 라운드 로빈으로 예측 가능하게
+        )
+        await manager.initialize()
+
+        # 5개 프록시를 순서대로 선택
+        selected_ids = []
+        for _ in range(5):
+            proxy = manager.get_next_proxy()
+            selected_ids.append(proxy.id)
+
+        # 모두 다른 프록시여야 함
+        assert len(set(selected_ids)) == 5
+
+    @pytest.mark.asyncio
+    async def test_right_rotation_after_full_cycle(self, mock_db_service):
+        """[Right] 전체 순환 후 처음 프록시 재사용"""
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        # 3개 프록시 생성
+        proxies = [
+            ProxyInfo(
+                id=i,
+                url=f"http://192.168.1.{i}:8080",
+                protocol="http",
+                host=f"192.168.1.{i}",
+                port=8080,
+                priority_score=50.0,
+            )
+            for i in range(1, 4)
+        ]
+        mock_db_service.get_top_proxies_for_pool.return_value = proxies
+
+        manager = ProxyManagerV2(
+            db_service=mock_db_service,
+            weighted_selection=False,
+        )
+        await manager.initialize()
+
+        first_proxy = manager.get_next_proxy()
+        first_id = first_proxy.id
+
+        # 나머지 2개 선택
+        manager.get_next_proxy()
+        manager.get_next_proxy()
+
+        # 4번째 선택은 다시 첫 번째 프록시
+        fourth_proxy = manager.get_next_proxy()
+        assert fourth_proxy.id == first_id
