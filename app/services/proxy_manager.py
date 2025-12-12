@@ -59,8 +59,11 @@ class ProxyManager:
         self.current_index = 0
         self.request_count = 0
 
-        # 블랙리스트 (실패한 프록시 -> 만료 시간)
+        # 블랙리스트 (실패한 프록시 -> 만료 시간) - 임시 블랙리스트
         self.blacklist: Dict[str, float] = {}
+
+        # 세션 블랙리스트 (실패한 프록시 -> 에러 메시지) - 세션 동안 영구
+        self.session_blacklist: Dict[str, str] = {}
 
         # 파일 변경 감지용
         self._file_mtime: Optional[float] = None
@@ -277,20 +280,30 @@ class ProxyManager:
         self.request_count += 1
         self._cleanup_blacklist()
 
-        # 활성 풀에서 사용 가능한 프록시
-        available = [p for p in self.active_pool if p not in self.blacklist]
+        # 활성 풀에서 사용 가능한 프록시 (세션 블랙리스트 + 임시 블랙리스트 제외)
+        available = [
+            p for p in self.active_pool
+            if p not in self.session_blacklist and p not in self.blacklist
+        ]
 
         if not available:
-            # 전체 리스트에서 시도
-            available = [p for p in self.proxy_list if p not in self.blacklist]
+            # 전체 리스트에서 시도 (세션 블랙리스트는 계속 제외)
+            available = [
+                p for p in self.proxy_list
+                if p not in self.session_blacklist and p not in self.blacklist
+            ]
 
         if not available:
-            # 블랙리스트 초기화
-            logger.warning("사용 가능한 프록시 없음, 블랙리스트 초기화")
+            # 임시 블랙리스트만 초기화 (세션 블랙리스트는 유지)
+            logger.warning("사용 가능한 프록시 없음, 임시 블랙리스트 초기화")
             self.blacklist.clear()
-            available = self.active_pool if self.active_pool else self.proxy_list
+            available = [
+                p for p in (self.active_pool if self.active_pool else self.proxy_list)
+                if p not in self.session_blacklist
+            ]
 
         if not available:
+            logger.error(f"모든 프록시가 세션 블랙리스트됨 ({len(self.session_blacklist)}개)")
             return None
 
         # 로테이션 체크
@@ -312,6 +325,45 @@ class ProxyManager:
         """aiohttp용 프록시 URL 반환"""
         return self.get_next_proxy()
 
+    def get_fresh_proxy(self, exclude: Optional[set] = None) -> Optional[str]:
+        """
+        새 프록시 반환 (재시도용, 로테이션 무시)
+
+        Args:
+            exclude: 제외할 프록시 URL 집합 (이미 시도한 프록시)
+
+        Returns:
+            새 프록시 URL 또는 None
+        """
+        self._cleanup_blacklist()
+        exclude = exclude or set()
+
+        # 활성 풀에서 사용 가능한 프록시 (세션 블랙리스트 + 임시 블랙리스트 + exclude 제외)
+        available = [
+            p for p in self.active_pool
+            if p not in self.session_blacklist and p not in self.blacklist and p not in exclude
+        ]
+
+        if not available:
+            # 전체 리스트에서 시도 (세션 블랙리스트는 계속 제외)
+            available = [
+                p for p in self.proxy_list
+                if p not in self.session_blacklist and p not in self.blacklist and p not in exclude
+            ]
+
+        if not available:
+            # 모든 프록시를 시도했으면 None 반환
+            logger.warning(
+                f"사용 가능한 새 프록시 없음 "
+                f"(exclude: {len(exclude)}개, session_blacklist: {len(self.session_blacklist)}개, "
+                f"blacklist: {len(self.blacklist)}개)"
+            )
+            return None
+
+        # 순차적으로 다음 프록시 선택 (request_count 기반이 아닌 exclude 크기 기반)
+        index = len(exclude) % len(available)
+        return available[index]
+
     def get_playwright_proxy(self) -> Optional[Dict]:
         """Playwright 컨텍스트용 프록시 설정 반환"""
         proxy = self.get_next_proxy()
@@ -330,7 +382,7 @@ class ProxyManager:
         return proxy_config
 
     def mark_failed(self, proxy: str, error: str = "unknown"):
-        """프록시 실패 처리 (블랙리스트 등록)"""
+        """프록시 실패 처리 (세션 블랙리스트에 영구 등록)"""
         # 부분 매칭 지원 (URL 일부만 전달된 경우)
         matched_proxy = None
         for p in self.proxy_list:
@@ -339,8 +391,11 @@ class ProxyManager:
                 break
 
         if matched_proxy:
+            # 세션 블랙리스트에 영구 등록 (에러 메시지 포함)
+            self.session_blacklist[matched_proxy] = error
+            # 임시 블랙리스트에도 등록 (호환성)
             self.blacklist[matched_proxy] = time.time() + self.blacklist_duration
-            logger.warning(f"프록시 블랙리스트 등록: {matched_proxy} - {error}")
+            logger.warning(f"프록시 세션 블랙리스트 등록: {matched_proxy} - {error}")
 
             if matched_proxy in self.active_pool:
                 self.active_pool.remove(matched_proxy)
@@ -355,6 +410,8 @@ class ProxyManager:
             "total": len(self.proxy_list),
             "active_pool": len(self.active_pool),
             "blacklisted": len(self.blacklist),
+            "session_blacklisted": len(self.session_blacklist),
+            "session_blacklist_details": dict(self.session_blacklist),  # 프록시 -> 에러 메시지
             "current": self.current_proxy,
             "request_count": self.request_count,
             "next_rotation_in": self.rotation_interval
@@ -364,8 +421,14 @@ class ProxyManager:
 
     @property
     def is_available(self) -> bool:
-        """프록시 사용 가능 여부"""
-        return self._initialized and len(self.active_pool) > 0
+        """프록시 사용 가능 여부 (세션 블랙리스트 제외 후)"""
+        if not self._initialized:
+            return False
+        # 세션 블랙리스트를 제외하고 사용 가능한 프록시가 있는지 확인
+        available = [p for p in self.active_pool if p not in self.session_blacklist]
+        if not available:
+            available = [p for p in self.proxy_list if p not in self.session_blacklist]
+        return len(available) > 0
 
 
 # 싱글톤 인스턴스 (선택적 사용)

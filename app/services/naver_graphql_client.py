@@ -354,9 +354,17 @@ class NaverGraphQLClient:
         self,
         query: str,
         variables: Dict[str, Any],
-        operation_name: str
+        operation_name: str,
+        max_retries: int = 10
     ) -> Optional[Dict[str, Any]]:
-        """실제 GraphQL 쿼리 실행 (내부용)"""
+        """실제 GraphQL 쿼리 실행 (내부용)
+
+        Args:
+            query: GraphQL 쿼리
+            variables: 쿼리 변수
+            operation_name: 오퍼레이션 이름
+            max_retries: 프록시 실패 시 최대 재시도 횟수 (기본: 10)
+        """
         session = await self._ensure_session()
 
         headers = {
@@ -373,52 +381,68 @@ class NaverGraphQLClient:
             "query": query
         }
 
-        # 프록시 URL 가져오기
-        proxy_url = None
-        if self._proxy_manager and self._proxy_manager.is_available:
-            proxy_url = self._proxy_manager.get_aiohttp_proxy()
-            logger.debug(f"[NaverGraphQL] 프록시 사용: {proxy_url}")
+        last_error = None
+        tried_proxies: set = set()  # 이미 시도한 프록시 추적
 
-        # 마지막 사용한 프록시 저장 (추적용)
-        self._last_used_proxy = proxy_url
+        for attempt in range(max_retries + 1):
+            # 프록시 URL 가져오기
+            proxy_url = None
+            if self._proxy_manager and self._proxy_manager.is_available:
+                proxy_url = self._proxy_manager.get_fresh_proxy(exclude=tried_proxies)
+                if proxy_url:
+                    tried_proxies.add(proxy_url)
+                if attempt == 0:
+                    logger.debug(f"[NaverGraphQL] 프록시 사용: {proxy_url}")
+                else:
+                    logger.info(f"[NaverGraphQL] 재시도 #{attempt}/{max_retries} - 프록시: {proxy_url}")
 
-        try:
-            async with session.post(
-                f"{NAVER_GRAPHQL_ENDPOINT}?opName={operation_name}",
-                headers=headers,
-                json=payload,
-                proxy=proxy_url,
-                timeout=aiohttp.ClientTimeout(total=30)
-            ) as response:
-                # 프록시 관련 에러 처리
-                if response.status in (403, 429) and proxy_url and self._proxy_manager:
-                    logger.warning(
-                        f"[NaverGraphQL] HTTP {response.status} - 프록시 실패 처리: {proxy_url}"
-                    )
-                    self._proxy_manager.mark_failed(proxy_url, f"HTTP {response.status}")
-                    return None
+            # 마지막 사용한 프록시 저장 (추적용)
+            self._last_used_proxy = proxy_url
 
-                if response.status != 200:
-                    logger.error(f"[NaverGraphQL] HTTP {response.status} for {operation_name}")
-                    return None
+            try:
+                async with session.post(
+                    f"{NAVER_GRAPHQL_ENDPOINT}?opName={operation_name}",
+                    headers=headers,
+                    json=payload,
+                    proxy=proxy_url,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    # 프록시 관련 에러 처리 - 재시도
+                    if response.status in (403, 429) and proxy_url and self._proxy_manager:
+                        logger.warning(
+                            f"[NaverGraphQL] HTTP {response.status} - 프록시 실패: {proxy_url}"
+                        )
+                        self._proxy_manager.mark_failed(proxy_url, f"HTTP {response.status}")
+                        last_error = f"HTTP {response.status}"
+                        continue  # 다음 프록시로 재시도
 
-                data = await response.json()
+                    if response.status != 200:
+                        logger.error(f"[NaverGraphQL] HTTP {response.status} for {operation_name}")
+                        return None  # 프록시 문제가 아닌 에러는 재시도하지 않음
 
-                if "errors" in data and data["errors"]:
-                    logger.error(f"[NaverGraphQL] GraphQL errors: {data['errors']}")
-                    return None
+                    data = await response.json()
 
-                return data.get("data")
+                    if "errors" in data and data["errors"]:
+                        logger.error(f"[NaverGraphQL] GraphQL errors: {data['errors']}")
+                        return None
 
-        except aiohttp.ClientError as e:
-            # 프록시 연결 실패 시 블랙리스트 등록
-            if proxy_url and self._proxy_manager:
-                self._proxy_manager.mark_failed(proxy_url, str(e)[:50])
-            logger.error(f"[NaverGraphQL] Request error for {operation_name}: {e}")
-            return None
-        except json.JSONDecodeError as e:
-            logger.error(f"[NaverGraphQL] JSON decode error for {operation_name}: {e}")
-            return None
+                    return data.get("data")
+
+            except aiohttp.ClientError as e:
+                # 프록시 연결 실패 시 블랙리스트 등록 후 재시도
+                if proxy_url and self._proxy_manager:
+                    self._proxy_manager.mark_failed(proxy_url, str(e)[:50])
+                logger.error(f"[NaverGraphQL] Request error for {operation_name}: {e}")
+                last_error = str(e)[:50]
+                continue  # 다음 프록시로 재시도
+
+            except json.JSONDecodeError as e:
+                logger.error(f"[NaverGraphQL] JSON decode error for {operation_name}: {e}")
+                return None  # JSON 에러는 재시도하지 않음
+
+        # 모든 재시도 실패
+        logger.error(f"[NaverGraphQL] {operation_name} 모든 재시도 실패 ({max_retries}회) - 마지막 에러: {last_error}")
+        return None
 
     async def fetch_business_info(
         self,

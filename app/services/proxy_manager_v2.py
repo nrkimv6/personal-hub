@@ -476,6 +476,52 @@ class ProxyManagerV2:
                         )
                 break
 
+    def get_fresh_proxy(self, exclude: Optional[Set[str]] = None) -> Optional[str]:
+        """
+        새 프록시 URL 반환 (재시도용, 기존 ProxyManager 호환)
+
+        exclude에 포함된 프록시 URL을 제외하고 다음 프록시를 반환합니다.
+
+        Args:
+            exclude: 제외할 프록시 URL 집합 (이미 시도한 프록시)
+
+        Returns:
+            새 프록시 URL 또는 None
+        """
+        exclude = exclude or set()
+
+        # 풀이 비었거나 너무 적으면 동기적으로 갱신 시도
+        if len(self._active_pool) < 3:
+            self._sync_refresh_pool()
+
+        if not self._active_pool:
+            return None
+
+        # exclude에 포함되지 않은 프록시 필터링
+        available = [
+            p for p in self._active_pool
+            if p.to_aiohttp_proxy() not in exclude
+        ]
+
+        if not available:
+            # 모든 프록시가 exclude에 포함된 경우
+            logger.warning(
+                f"No fresh proxy available (exclude: {len(exclude)}, pool: {len(self._active_pool)})"
+            )
+            return None
+
+        # 가중치 선택 또는 라운드로빈
+        if self._weighted_selection:
+            weights = [max(p.priority_score, 1.0) for p in available]
+            proxy = random.choices(available, weights=weights, k=1)[0]
+        else:
+            proxy = available[0]
+
+        # 선택된 프록시를 풀의 맨 뒤로 이동
+        self._move_to_back(proxy)
+
+        return proxy.to_aiohttp_proxy()
+
     def mark_failed(self, proxy_url: str, reason: str) -> None:
         """
         기존 ProxyManager 호환 인터페이스
