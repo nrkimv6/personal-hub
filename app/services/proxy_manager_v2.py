@@ -147,10 +147,10 @@ class ProxyManagerV2:
 
     async def _refresh_pool(self) -> None:
         """
-        활성 풀 갱신
+        활성 풀 갱신 (응답시간 기반 70/30 비율 적용)
 
         1. 종료된 풀 정보 보존
-        2. 새 풀 구성 (DB 읽기) - 직전 풀 + 느린 프록시 제외
+        2. 새 풀 구성 (DB 읽기) - 70% fast + 30% normal
         3. 새 풀로 즉시 전환
         4. 종료된 풀 통계 → 별도 스레드에서 DB 쓰기
         """
@@ -160,25 +160,59 @@ class ProxyManagerV2:
                 old_pool_ids = {p.id for p in self._active_pool}
                 old_stats = dict(self._usage_stats)
 
-                # 2. 새 풀 구성 - 직전 풀 + 느린 프록시 제외
+                # 2. 새 풀 구성 - 70% fast + 30% normal
                 exclude_ids = list(self._previous_pool_ids | self._slow_proxies)
 
-                proxies = self._db_service.get_top_proxies_for_pool(
-                    limit=self._pool_size,
+                # 목표 개수 계산
+                fast_count = int(self._pool_size * self._fast_proxy_ratio)  # 70%
+                normal_count = self._pool_size - fast_count  # 30%
+
+                # 2-1. Fast 프록시 조회 (응답시간 <= 0.5초)
+                fast_proxies = self._db_service.get_proxies_by_response_time(
+                    max_response_time=self._fast_response_threshold,
+                    limit=fast_count,
                     status="active",
-                    min_success_rate=self._min_success_rate,
                     exclude_ids=exclude_ids if exclude_ids else None,
-                    max_response_time=self._max_response_time,
+                    min_success_rate=self._min_success_rate,
                 )
 
-                # pending 상태의 프록시도 포함 (신규 프록시 테스트용)
-                if len(proxies) < self._pool_size:
-                    pending_proxies = self._db_service.get_top_proxies_for_pool(
-                        limit=self._pool_size - len(proxies),
-                        status="pending",
-                        exclude_ids=exclude_ids if exclude_ids else None,
-                    )
-                    proxies.extend(pending_proxies)
+                # 2-2. Normal 프록시 조회 (0.5초 < 응답시간 <= 2.0초)
+                used_ids = exclude_ids + [p.id for p in fast_proxies]
+                normal_proxies = self._db_service.get_proxies_by_response_time(
+                    min_response_time=self._fast_response_threshold,
+                    max_response_time=self._normal_response_threshold,
+                    limit=normal_count,
+                    status="active",
+                    exclude_ids=used_ids if used_ids else None,
+                    min_success_rate=self._min_success_rate,
+                )
+
+                # 2-3. 부족분 처리
+                proxies = fast_proxies + normal_proxies
+                shortage = self._pool_size - len(proxies)
+
+                if shortage > 0:
+                    # fast가 부족하면 normal 범위에서 추가
+                    if len(fast_proxies) < fast_count:
+                        extra_normal = self._db_service.get_proxies_by_response_time(
+                            min_response_time=self._fast_response_threshold,
+                            max_response_time=self._normal_response_threshold,
+                            limit=shortage,
+                            status="active",
+                            exclude_ids=[p.id for p in proxies] + exclude_ids,
+                            min_success_rate=self._min_success_rate,
+                        )
+                        proxies.extend(extra_normal)
+                        shortage = self._pool_size - len(proxies)
+
+                    # 여전히 부족하면 pending 상태 프록시 추가
+                    if shortage > 0:
+                        pending_proxies = self._db_service.get_top_proxies_for_pool(
+                            limit=shortage,
+                            status="pending",
+                            exclude_ids=[p.id for p in proxies] + exclude_ids,
+                        )
+                        proxies.extend(pending_proxies)
 
                 # 3. 새 풀로 즉시 전환
                 self._previous_pool_ids = old_pool_ids
@@ -190,7 +224,8 @@ class ProxyManagerV2:
 
                 logger.info(
                     f"Pool refreshed: {len(proxies)} proxies "
-                    f"(excluded {len(exclude_ids)} from previous pool)"
+                    f"(fast: {len(fast_proxies)}, normal: {len(normal_proxies)}, "
+                    f"excluded: {len(exclude_ids)})"
                 )
 
                 # 4. 종료된 풀 통계 → 별도 스레드에서 DB 쓰기
@@ -211,25 +246,45 @@ class ProxyManagerV2:
             await self._refresh_pool()
 
     def _sync_refresh_pool(self) -> None:
-        """동기적으로 풀 갱신 (풀 고갈 시 호출)"""
+        """동기적으로 풀 갱신 (풀 고갈 시 호출, 70/30 비율 적용)"""
         try:
-            # 긴급 갱신이므로 직전 풀 제외 없이 조회
-            exclude_ids = list(self._slow_proxies) if self._slow_proxies else None
+            # 긴급 갱신이므로 직전 풀 제외 없이 조회 (느린 프록시만 제외)
+            exclude_ids = list(self._slow_proxies) if self._slow_proxies else []
 
-            proxies = self._db_service.get_top_proxies_for_pool(
-                limit=self._pool_size,
+            # 목표 개수 계산
+            fast_count = int(self._pool_size * self._fast_proxy_ratio)  # 70%
+            normal_count = self._pool_size - fast_count  # 30%
+
+            # Fast 프록시 조회 (응답시간 <= 0.5초)
+            fast_proxies = self._db_service.get_proxies_by_response_time(
+                max_response_time=self._fast_response_threshold,
+                limit=fast_count,
                 status="active",
+                exclude_ids=exclude_ids if exclude_ids else None,
                 min_success_rate=self._min_success_rate,
-                exclude_ids=exclude_ids,
-                max_response_time=self._max_response_time,
             )
 
-            # pending 상태의 프록시도 포함 (신규 프록시 테스트용)
-            if len(proxies) < self._pool_size:
+            # Normal 프록시 조회 (0.5초 < 응답시간 <= 2.0초)
+            used_ids = exclude_ids + [p.id for p in fast_proxies]
+            normal_proxies = self._db_service.get_proxies_by_response_time(
+                min_response_time=self._fast_response_threshold,
+                max_response_time=self._normal_response_threshold,
+                limit=normal_count,
+                status="active",
+                exclude_ids=used_ids if used_ids else None,
+                min_success_rate=self._min_success_rate,
+            )
+
+            # 부족분 처리
+            proxies = fast_proxies + normal_proxies
+            shortage = self._pool_size - len(proxies)
+
+            if shortage > 0:
+                # pending 상태 프록시 추가
                 pending_proxies = self._db_service.get_top_proxies_for_pool(
-                    limit=self._pool_size - len(proxies),
+                    limit=shortage,
                     status="pending",
-                    exclude_ids=exclude_ids,
+                    exclude_ids=[p.id for p in proxies] + exclude_ids,
                 )
                 proxies.extend(pending_proxies)
 
@@ -237,7 +292,10 @@ class ProxyManagerV2:
             self._last_refresh = datetime.now()
             self._current_index = 0
 
-            logger.info(f"Pool sync-refreshed with {len(proxies)} proxies (was depleted)")
+            logger.info(
+                f"Pool sync-refreshed: {len(proxies)} proxies "
+                f"(fast: {len(fast_proxies)}, normal: {len(normal_proxies)})"
+            )
         except Exception as e:
             logger.error(f"Failed to sync-refresh proxy pool: {e}")
 
