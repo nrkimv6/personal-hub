@@ -529,11 +529,11 @@ class NaverGraphQLClient:
 
             # extraDescJson, bookingPrecautionJson은 JSON 문자열로 저장
             extra_desc = item.get("extraDescJson")
-            if extra_desc and not isinstance(extra_desc, str):
+            if extra_desc is not None and not isinstance(extra_desc, str):
                 extra_desc = json.dumps(extra_desc, ensure_ascii=False)
 
             booking_precaution = item.get("bookingPrecautionJson")
-            if booking_precaution and not isinstance(booking_precaution, str):
+            if booking_precaution is not None and not isinstance(booking_precaution, str):
                 booking_precaution = json.dumps(booking_precaution, ensure_ascii=False)
 
             items.append(BizItemInfo(
