@@ -383,6 +383,7 @@ class NaverGraphQLClient:
 
         last_error = None
         tried_proxies: set = set()  # 이미 시도한 프록시 추적
+        slow_proxy_threshold = 10.0  # 느린 프록시 임계값 (초)
 
         for attempt in range(max_retries + 1):
             # 프록시 URL 가져오기
@@ -399,6 +400,9 @@ class NaverGraphQLClient:
             # 마지막 사용한 프록시 저장 (추적용)
             self._last_used_proxy = proxy_url
 
+            # 응답 시간 측정 시작
+            request_start_time = time.time()
+
             try:
                 async with session.post(
                     f"{NAVER_GRAPHQL_ENDPOINT}?opName={operation_name}",
@@ -407,6 +411,9 @@ class NaverGraphQLClient:
                     proxy=proxy_url,
                     timeout=aiohttp.ClientTimeout(total=30)
                 ) as response:
+                    # 응답 시간 계산
+                    response_time = time.time() - request_start_time
+
                     # 프록시 관련 에러 처리 - 재시도
                     if response.status in (403, 429) and proxy_url and self._proxy_manager:
                         logger.warning(
@@ -425,6 +432,13 @@ class NaverGraphQLClient:
                     if "errors" in data and data["errors"]:
                         logger.error(f"[NaverGraphQL] GraphQL errors: {data['errors']}")
                         return None
+
+                    # 성공 - 느린 프록시 체크 및 블랙리스트
+                    if proxy_url and self._proxy_manager and response_time > slow_proxy_threshold:
+                        logger.warning(
+                            f"[NaverGraphQL] 프록시 느림: {proxy_url} - {response_time:.2f}s > {slow_proxy_threshold}s"
+                        )
+                        self._proxy_manager.mark_failed(proxy_url, f"slow:{response_time:.1f}s")
 
                     return data.get("data")
 
@@ -708,12 +722,15 @@ class NaverGraphQLClient:
             slot_time_full = parts[1] if len(parts) > 1 else "00:00:00"
             slot_time = slot_time_full[:5]  # "11:30"
 
-            # 예약 가능 여부 체크 (재고 있고, 판매일인 경우)
-            # None 값 처리: API가 null을 반환할 수 있음
+            # 예약 가능 여부 체크 (해당 시간대에 남은 자리가 있고, 판매일인 경우)
+            # stock은 전체 재고, 개별 시간대 남은 자리는 unit_stock - unit_booking_count
             stock_value = slot_data.get("stock") or 0
+            unit_stock_value = slot_data.get("unitStock") or 0
+            unit_booking_count_value = slot_data.get("unitBookingCount") or 0
+            remaining_slots = unit_stock_value - unit_booking_count_value
             is_available = (
                 slot_data.get("isSaleDay", False) and
-                stock_value > 0
+                remaining_slots > 0
             )
 
             slot = ScheduleSlot(

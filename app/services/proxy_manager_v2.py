@@ -47,6 +47,12 @@ class ProxyManagerV2:
         weighted_selection: bool = True,
         max_response_time: float = 2.0,
         db_writer: Optional["AsyncDBWriter"] = None,
+        # 쿨다운 설정 (2025-12-12)
+        proxy_cooldown_seconds: float = 10.0,
+        # 응답시간 기반 풀 구성 (2025-12-12)
+        fast_response_threshold: float = 0.5,
+        fast_proxy_ratio: float = 0.7,
+        normal_response_threshold: float = 2.0,
     ):
         """
         Args:
@@ -61,6 +67,10 @@ class ProxyManagerV2:
             weighted_selection: 가중치 기반 선택 사용 여부
             max_response_time: 최대 허용 응답시간 (초) - 초과 시 다음 풀에서 제외
             db_writer: 비동기 DB Writer (배치 쓰기용)
+            proxy_cooldown_seconds: 프록시 재사용 금지 시간 (초, 기본: 10)
+            fast_response_threshold: fast 프록시 기준 응답시간 (초, 기본: 0.5)
+            fast_proxy_ratio: fast 프록시 비율 (0.0~1.0, 기본: 0.7 = 70%)
+            normal_response_threshold: normal 프록시 최대 응답시간 (초, 기본: 2.0)
         """
         self._db_service = db_service
         self._pool_size = pool_size
@@ -73,6 +83,15 @@ class ProxyManagerV2:
         self._weighted_selection = weighted_selection
         self._max_response_time = max_response_time
         self._db_writer = db_writer
+
+        # 쿨다운 설정 (2025-12-12)
+        self._proxy_cooldown_seconds = proxy_cooldown_seconds
+        self._proxy_last_used: Dict[int, float] = {}  # proxy_id → last_used_timestamp
+
+        # 응답시간 기반 풀 구성 설정 (2025-12-12)
+        self._fast_response_threshold = fast_response_threshold
+        self._fast_proxy_ratio = fast_proxy_ratio
+        self._normal_response_threshold = normal_response_threshold
 
         # 활성 풀
         self._active_pool: List[ProxyInfo] = []
@@ -128,10 +147,10 @@ class ProxyManagerV2:
 
     async def _refresh_pool(self) -> None:
         """
-        활성 풀 갱신
+        활성 풀 갱신 (응답시간 기반 70/30 비율 적용)
 
         1. 종료된 풀 정보 보존
-        2. 새 풀 구성 (DB 읽기) - 직전 풀 + 느린 프록시 제외
+        2. 새 풀 구성 (DB 읽기) - 70% fast + 30% normal
         3. 새 풀로 즉시 전환
         4. 종료된 풀 통계 → 별도 스레드에서 DB 쓰기
         """
@@ -141,25 +160,59 @@ class ProxyManagerV2:
                 old_pool_ids = {p.id for p in self._active_pool}
                 old_stats = dict(self._usage_stats)
 
-                # 2. 새 풀 구성 - 직전 풀 + 느린 프록시 제외
+                # 2. 새 풀 구성 - 70% fast + 30% normal
                 exclude_ids = list(self._previous_pool_ids | self._slow_proxies)
 
-                proxies = self._db_service.get_top_proxies_for_pool(
-                    limit=self._pool_size,
+                # 목표 개수 계산
+                fast_count = int(self._pool_size * self._fast_proxy_ratio)  # 70%
+                normal_count = self._pool_size - fast_count  # 30%
+
+                # 2-1. Fast 프록시 조회 (응답시간 <= 0.5초)
+                fast_proxies = self._db_service.get_proxies_by_response_time(
+                    max_response_time=self._fast_response_threshold,
+                    limit=fast_count,
                     status="active",
-                    min_success_rate=self._min_success_rate,
                     exclude_ids=exclude_ids if exclude_ids else None,
-                    max_response_time=self._max_response_time,
+                    min_success_rate=self._min_success_rate,
                 )
 
-                # pending 상태의 프록시도 포함 (신규 프록시 테스트용)
-                if len(proxies) < self._pool_size:
-                    pending_proxies = self._db_service.get_top_proxies_for_pool(
-                        limit=self._pool_size - len(proxies),
-                        status="pending",
-                        exclude_ids=exclude_ids if exclude_ids else None,
-                    )
-                    proxies.extend(pending_proxies)
+                # 2-2. Normal 프록시 조회 (0.5초 < 응답시간 <= 2.0초)
+                used_ids = exclude_ids + [p.id for p in fast_proxies]
+                normal_proxies = self._db_service.get_proxies_by_response_time(
+                    min_response_time=self._fast_response_threshold,
+                    max_response_time=self._normal_response_threshold,
+                    limit=normal_count,
+                    status="active",
+                    exclude_ids=used_ids if used_ids else None,
+                    min_success_rate=self._min_success_rate,
+                )
+
+                # 2-3. 부족분 처리
+                proxies = fast_proxies + normal_proxies
+                shortage = self._pool_size - len(proxies)
+
+                if shortage > 0:
+                    # fast가 부족하면 normal 범위에서 추가
+                    if len(fast_proxies) < fast_count:
+                        extra_normal = self._db_service.get_proxies_by_response_time(
+                            min_response_time=self._fast_response_threshold,
+                            max_response_time=self._normal_response_threshold,
+                            limit=shortage,
+                            status="active",
+                            exclude_ids=[p.id for p in proxies] + exclude_ids,
+                            min_success_rate=self._min_success_rate,
+                        )
+                        proxies.extend(extra_normal)
+                        shortage = self._pool_size - len(proxies)
+
+                    # 여전히 부족하면 pending 상태 프록시 추가
+                    if shortage > 0:
+                        pending_proxies = self._db_service.get_top_proxies_for_pool(
+                            limit=shortage,
+                            status="pending",
+                            exclude_ids=[p.id for p in proxies] + exclude_ids,
+                        )
+                        proxies.extend(pending_proxies)
 
                 # 3. 새 풀로 즉시 전환
                 self._previous_pool_ids = old_pool_ids
@@ -171,7 +224,8 @@ class ProxyManagerV2:
 
                 logger.info(
                     f"Pool refreshed: {len(proxies)} proxies "
-                    f"(excluded {len(exclude_ids)} from previous pool)"
+                    f"(fast: {len(fast_proxies)}, normal: {len(normal_proxies)}, "
+                    f"excluded: {len(exclude_ids)})"
                 )
 
                 # 4. 종료된 풀 통계 → 별도 스레드에서 DB 쓰기
@@ -192,25 +246,45 @@ class ProxyManagerV2:
             await self._refresh_pool()
 
     def _sync_refresh_pool(self) -> None:
-        """동기적으로 풀 갱신 (풀 고갈 시 호출)"""
+        """동기적으로 풀 갱신 (풀 고갈 시 호출, 70/30 비율 적용)"""
         try:
-            # 긴급 갱신이므로 직전 풀 제외 없이 조회
-            exclude_ids = list(self._slow_proxies) if self._slow_proxies else None
+            # 긴급 갱신이므로 직전 풀 제외 없이 조회 (느린 프록시만 제외)
+            exclude_ids = list(self._slow_proxies) if self._slow_proxies else []
 
-            proxies = self._db_service.get_top_proxies_for_pool(
-                limit=self._pool_size,
+            # 목표 개수 계산
+            fast_count = int(self._pool_size * self._fast_proxy_ratio)  # 70%
+            normal_count = self._pool_size - fast_count  # 30%
+
+            # Fast 프록시 조회 (응답시간 <= 0.5초)
+            fast_proxies = self._db_service.get_proxies_by_response_time(
+                max_response_time=self._fast_response_threshold,
+                limit=fast_count,
                 status="active",
+                exclude_ids=exclude_ids if exclude_ids else None,
                 min_success_rate=self._min_success_rate,
-                exclude_ids=exclude_ids,
-                max_response_time=self._max_response_time,
             )
 
-            # pending 상태의 프록시도 포함 (신규 프록시 테스트용)
-            if len(proxies) < self._pool_size:
+            # Normal 프록시 조회 (0.5초 < 응답시간 <= 2.0초)
+            used_ids = exclude_ids + [p.id for p in fast_proxies]
+            normal_proxies = self._db_service.get_proxies_by_response_time(
+                min_response_time=self._fast_response_threshold,
+                max_response_time=self._normal_response_threshold,
+                limit=normal_count,
+                status="active",
+                exclude_ids=used_ids if used_ids else None,
+                min_success_rate=self._min_success_rate,
+            )
+
+            # 부족분 처리
+            proxies = fast_proxies + normal_proxies
+            shortage = self._pool_size - len(proxies)
+
+            if shortage > 0:
+                # pending 상태 프록시 추가
                 pending_proxies = self._db_service.get_top_proxies_for_pool(
-                    limit=self._pool_size - len(proxies),
+                    limit=shortage,
                     status="pending",
-                    exclude_ids=exclude_ids,
+                    exclude_ids=[p.id for p in proxies] + exclude_ids,
                 )
                 proxies.extend(pending_proxies)
 
@@ -218,7 +292,10 @@ class ProxyManagerV2:
             self._last_refresh = datetime.now()
             self._current_index = 0
 
-            logger.info(f"Pool sync-refreshed with {len(proxies)} proxies (was depleted)")
+            logger.info(
+                f"Pool sync-refreshed: {len(proxies)} proxies "
+                f"(fast: {len(fast_proxies)}, normal: {len(normal_proxies)})"
+            )
         except Exception as e:
             logger.error(f"Failed to sync-refresh proxy pool: {e}")
 
@@ -267,12 +344,13 @@ class ProxyManagerV2:
 
     def get_next_proxy(self) -> Optional[ProxyInfo]:
         """
-        다음 프록시 선택
+        다음 프록시 선택 (쿨다운 적용)
 
         weighted_selection=True: 우선순위 점수 기반 가중치 랜덤
         weighted_selection=False: 라운드 로빈
 
         선택된 프록시는 풀의 맨 뒤로 이동하여 재사용 간격을 최대화합니다.
+        쿨다운 중인 프록시는 선택에서 제외됩니다.
 
         Returns:
             선택된 ProxyInfo 또는 None
@@ -284,13 +362,39 @@ class ProxyManagerV2:
         if not self._active_pool:
             return None
 
+        # 쿨다운 지난 프록시만 필터링
+        available = [p for p in self._active_pool if self._is_cooldown_passed(p.id)]
+
+        if not available:
+            # 모든 프록시가 쿨다운 중 - 가장 오래된 것 선택 (fallback)
+            logger.warning(
+                f"All {len(self._active_pool)} proxies in cooldown, "
+                f"selecting oldest used proxy"
+            )
+            # 마지막 사용 시간이 가장 오래된 프록시 선택
+            oldest_proxy = min(
+                self._active_pool,
+                key=lambda p: self._proxy_last_used.get(p.id, 0)
+            )
+            self._mark_proxy_used(oldest_proxy.id)
+            self._move_to_back(oldest_proxy)
+            return oldest_proxy
+
         if self._weighted_selection:
-            proxy = self._weighted_random_select()
+            weights = [max(p.priority_score, 1.0) for p in available]
+            proxy = random.choices(available, weights=weights, k=1)[0]
         else:
-            proxy = self._round_robin_select()
+            proxy = available[0]
+
+        # 프록시 사용 시간 기록
+        self._mark_proxy_used(proxy.id)
 
         # 선택된 프록시를 풀의 맨 뒤로 이동 (재사용 간격 최대화)
         self._move_to_back(proxy)
+
+        # 주기적으로 오래된 쿨다운 기록 정리
+        if len(self._proxy_last_used) > self._pool_size * 5:
+            self._cleanup_cooldown_records()
 
         return proxy
 
@@ -318,6 +422,41 @@ class ProxyManagerV2:
         proxy = self._active_pool[self._current_index]
         self._current_index = (self._current_index + 1) % len(self._active_pool)
         return proxy
+
+    def _is_cooldown_passed(self, proxy_id: int) -> bool:
+        """
+        프록시 쿨다운 경과 여부 확인
+
+        Args:
+            proxy_id: 프록시 ID
+
+        Returns:
+            True: 쿨다운 경과됨 (재사용 가능)
+            False: 쿨다운 중 (재사용 불가)
+        """
+        last_used = self._proxy_last_used.get(proxy_id)
+        if last_used is None:
+            return True
+        return (time.time() - last_used) >= self._proxy_cooldown_seconds
+
+    def _mark_proxy_used(self, proxy_id: int) -> None:
+        """
+        프록시 사용 시간 기록
+
+        Args:
+            proxy_id: 프록시 ID
+        """
+        self._proxy_last_used[proxy_id] = time.time()
+
+    def _cleanup_cooldown_records(self) -> None:
+        """오래된 쿨다운 기록 정리 (메모리 누수 방지)"""
+        current_time = time.time()
+        expired_ids = [
+            proxy_id for proxy_id, last_used in self._proxy_last_used.items()
+            if (current_time - last_used) > self._proxy_cooldown_seconds * 10
+        ]
+        for proxy_id in expired_ids:
+            del self._proxy_last_used[proxy_id]
 
     def get_timeout_for_proxy(self, proxy: ProxyInfo) -> float:
         """
@@ -402,10 +541,16 @@ class ProxyManagerV2:
         stats = self._get_or_create_stats(proxy.id)
         stats.record_success(response_time)
 
-        # 느린 프록시 마킹 (다음 풀 갱신 시 제외)
+        # 느린 프록시 마킹 및 즉시 풀에서 제거
         if response_time > self._max_response_time:
             self._slow_proxies.add(proxy.id)
-            logger.debug(f"Proxy {proxy.id} marked as slow ({response_time:.2f}s > {self._max_response_time}s)")
+            # 현재 풀에서도 즉시 제거 (재사용 방지)
+            self._active_pool = [p for p in self._active_pool if p.id != proxy.id]
+            logger.warning(
+                f"Proxy {proxy.id} removed from pool - too slow "
+                f"({response_time:.2f}s > {self._max_response_time}s), "
+                f"pool size: {len(self._active_pool)}"
+            )
 
         # 로컬 캐시 업데이트 (풀 내 프록시 정보)
         self._update_local_proxy(proxy.id, is_valid=True, response_time=response_time)
@@ -478,9 +623,10 @@ class ProxyManagerV2:
 
     def get_fresh_proxy(self, exclude: Optional[Set[str]] = None) -> Optional[str]:
         """
-        새 프록시 URL 반환 (재시도용, 기존 ProxyManager 호환)
+        새 프록시 URL 반환 (재시도용, 기존 ProxyManager 호환, 쿨다운 적용)
 
         exclude에 포함된 프록시 URL을 제외하고 다음 프록시를 반환합니다.
+        쿨다운 중인 프록시도 제외됩니다.
 
         Args:
             exclude: 제외할 프록시 URL 집합 (이미 시도한 프록시)
@@ -497,11 +643,22 @@ class ProxyManagerV2:
         if not self._active_pool:
             return None
 
-        # exclude에 포함되지 않은 프록시 필터링
+        # exclude에 포함되지 않고 쿨다운 지난 프록시 필터링
         available = [
             p for p in self._active_pool
-            if p.to_aiohttp_proxy() not in exclude
+            if p.to_aiohttp_proxy() not in exclude and self._is_cooldown_passed(p.id)
         ]
+
+        if not available:
+            # 쿨다운 무시하고 exclude만 적용
+            available = [
+                p for p in self._active_pool
+                if p.to_aiohttp_proxy() not in exclude
+            ]
+            if available:
+                logger.warning(
+                    f"All non-excluded proxies in cooldown, ignoring cooldown"
+                )
 
         if not available:
             # 모든 프록시가 exclude에 포함된 경우
@@ -516,6 +673,9 @@ class ProxyManagerV2:
             proxy = random.choices(available, weights=weights, k=1)[0]
         else:
             proxy = available[0]
+
+        # 프록시 사용 시간 기록
+        self._mark_proxy_used(proxy.id)
 
         # 선택된 프록시를 풀의 맨 뒤로 이동
         self._move_to_back(proxy)
