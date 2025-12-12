@@ -50,8 +50,15 @@ def filter_slots_by_time_range(slots: List[str], time_range_str: Optional[str]) 
     try:
         # 시간 범위 파싱
         start_str, end_str = time_range_str.split('-')
-        start_time = datetime.strptime(start_str.strip(), '%H:%M').time()
-        end_time = datetime.strptime(end_str.strip(), '%H:%M').time()
+        # 24:00은 23:59로 처리 (자정까지를 의미)
+        start_str_clean = start_str.strip()
+        end_str_clean = end_str.strip()
+        if start_str_clean == '24:00':
+            start_str_clean = '23:59'
+        if end_str_clean == '24:00':
+            end_str_clean = '23:59'
+        start_time = datetime.strptime(start_str_clean, '%H:%M').time()
+        end_time = datetime.strptime(end_str_clean, '%H:%M').time()
 
         filtered_slots = []
 

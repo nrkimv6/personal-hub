@@ -18,7 +18,7 @@ import asyncio
 import json
 import time
 import hashlib
-from typing import Dict, Any, Optional, List, TYPE_CHECKING
+from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from app.config import logger, settings
@@ -109,6 +109,16 @@ class CacheEntry:
     """캐시 엔트리"""
     data: Any
     expires_at: float
+
+
+@dataclass
+class DualCheckResult:
+    """GraphQL + HTTP 동시 체크 결과"""
+    can_book: bool  # 예약 가능 여부 (최종 판단)
+    schedule: Optional[ScheduleInfo]  # GraphQL 스케줄 결과
+    has_slots: bool  # 슬롯 존재 여부
+    http_ok: bool  # HTTP 302가 아닌지 (True면 정상)
+    error_reason: Optional[str]  # 실패 사유: "graphql_failed", "no_slots", "http_302"
 
 
 class NaverGraphQLClient:
@@ -413,6 +423,11 @@ class NaverGraphQLClient:
                 ) as response:
                     # 응답 시간 계산
                     response_time = time.time() - request_start_time
+
+                    # 302 리다이렉트 - 실패 처리 (봇 탐지 등)
+                    if response.status == 302:
+                        logger.warning(f"[NaverGraphQL] HTTP 302 리다이렉트 감지 - 실패 처리")
+                        return None
 
                     # 프록시 관련 에러 처리 - 재시도
                     if response.status in (403, 429) and proxy_url and self._proxy_manager:
@@ -770,6 +785,326 @@ class NaverGraphQLClient:
             slots=slots,
             slots_by_date=slots_by_date,
             proxy_url=used_proxy
+        )
+
+    async def fetch_schedule_http(
+        self,
+        business_type_id: int,
+        business_id: str,
+        biz_item_id: str,
+        target_date: str,
+        max_retries: int = 5
+    ) -> Optional[ScheduleInfo]:
+        """
+        HTTP 요청으로 예약 페이지 HTML을 파싱하여 스케줄 정보를 조회합니다.
+        GraphQL 실패 시 fallback으로 사용합니다.
+
+        Args:
+            business_type_id: 업체 타입 ID
+            business_id: 업체 ID
+            biz_item_id: 상품 ID
+            target_date: 대상 날짜 (YYYY-MM-DD)
+            max_retries: 최대 재시도 횟수
+
+        Returns:
+            ScheduleInfo: 스케줄 정보 또는 None
+        """
+        from bs4 import BeautifulSoup
+        import re
+
+        session = await self._ensure_session()
+
+        # 네이버 예약 페이지 URL
+        url = (
+            f"https://m.booking.naver.com/booking/{business_type_id}/bizes/"
+            f"{business_id}/items/{biz_item_id}?startDateTime={target_date}"
+        )
+
+        headers = {
+            "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "accept-language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+            "user-agent": DEFAULT_USER_AGENT,
+            "referer": "https://m.booking.naver.com/",
+        }
+
+        last_error = None
+        tried_proxies: set = set()
+
+        for attempt in range(max_retries + 1):
+            # 프록시 URL 가져오기
+            proxy_url = None
+            if self._proxy_manager and self._proxy_manager.is_available:
+                proxy_url = self._proxy_manager.get_fresh_proxy(exclude=tried_proxies)
+                if proxy_url:
+                    tried_proxies.add(proxy_url)
+                if attempt > 0:
+                    logger.info(f"[NaverHTTP] 재시도 #{attempt}/{max_retries} - 프록시: {proxy_url}")
+
+            self._last_used_proxy = proxy_url
+
+            try:
+                async with session.get(
+                    url,
+                    headers=headers,
+                    proxy=proxy_url,
+                    timeout=aiohttp.ClientTimeout(total=30),
+                    allow_redirects=False  # 302 감지를 위해 리다이렉트 비허용
+                ) as response:
+                    # 302 리다이렉트 - 실패 처리 (봇 탐지 등)
+                    if response.status == 302:
+                        logger.warning(f"[NaverHTTP] HTTP 302 리다이렉트 감지 - 실패 처리")
+                        return None
+
+                    # 403/429 처리 - 프록시 실패로 재시도
+                    if response.status in (403, 429):
+                        if proxy_url and self._proxy_manager:
+                            logger.warning(f"[NaverHTTP] HTTP {response.status} - 프록시 실패: {proxy_url}")
+                            self._proxy_manager.mark_failed(proxy_url, f"HTTP {response.status}")
+                        else:
+                            logger.warning(f"[NaverHTTP] HTTP {response.status} - 재시도")
+                        last_error = f"HTTP {response.status}"
+                        continue
+
+                    if response.status != 200:
+                        logger.error(f"[NaverHTTP] HTTP {response.status} for {url}")
+                        return None
+
+                    html = await response.text()
+
+                    # HTML 파싱
+                    schedule_info = self._parse_schedule_from_html(
+                        html, business_id, biz_item_id, target_date, proxy_url
+                    )
+
+                    if schedule_info:
+                        logger.info(f"[NaverHTTP] HTML 파싱 성공 - {len(schedule_info.slots)}개 슬롯")
+                        return schedule_info
+                    else:
+                        logger.warning(f"[NaverHTTP] HTML 파싱 실패 - 유효한 슬롯 없음")
+                        return None
+
+            except aiohttp.ClientError as e:
+                if proxy_url and self._proxy_manager:
+                    self._proxy_manager.mark_failed(proxy_url, str(e)[:50])
+                logger.error(f"[NaverHTTP] 요청 에러: {e}")
+                last_error = str(e)[:50]
+                continue
+
+        logger.error(f"[NaverHTTP] 모든 재시도 실패 ({max_retries}회) - 마지막 에러: {last_error}")
+        return None
+
+    def _parse_schedule_from_html(
+        self,
+        html: str,
+        business_id: str,
+        biz_item_id: str,
+        target_date: str,
+        proxy_url: Optional[str]
+    ) -> Optional[ScheduleInfo]:
+        """
+        HTML에서 스케줄 정보를 파싱합니다.
+
+        Args:
+            html: HTML 콘텐츠
+            business_id: 업체 ID
+            biz_item_id: 상품 ID
+            target_date: 대상 날짜
+            proxy_url: 사용한 프록시 URL
+
+        Returns:
+            ScheduleInfo: 파싱된 스케줄 정보 또는 None
+        """
+        from bs4 import BeautifulSoup
+        import re
+
+        try:
+            soup = BeautifulSoup(html, 'html.parser')
+
+            slots = []
+            slots_by_date: Dict[str, List[ScheduleSlot]] = {}
+            available_dates_set = set()
+
+            # 방법 1: btn_time 버튼에서 시간 추출
+            buttons = soup.select('div.section_content > div.time_area > div > ul > li > button')
+            time_buttons = [
+                btn for btn in buttons
+                if 'btn_time' in btn.get('class', [])
+            ]
+
+            # 방법 2: list_time에서 시간 추출
+            if not time_buttons:
+                time_buttons = soup.select('div.schedule_time ul.list_time > li.item')
+
+            for btn in time_buttons:
+                btn_text = btn.get_text(strip=True)
+                is_sold_out = 'unselectable' in btn.get('class', []) or 'sold_out' in btn.get('class', [])
+
+                # 시간 추출 (오전/오후 HH:MM 또는 HH:MM)
+                time_match = re.search(r'(오전|오후)?\s*(\d{1,2}):(\d{2})', btn_text)
+                if not time_match:
+                    continue
+
+                period = time_match.group(1)
+                hour = int(time_match.group(2))
+                minute = int(time_match.group(3))
+
+                # 24시간 형식으로 변환
+                if period == '오후' and hour != 12:
+                    hour += 12
+                elif period == '오전' and hour == 12:
+                    hour = 0
+
+                slot_time = f"{hour:02d}:{minute:02d}"
+                start_time = f"{target_date} {slot_time}:00"
+
+                # 매수 추출
+                stock_match = re.search(r'(\d+)매', btn_text)
+                stock = int(stock_match.group(1)) if stock_match else 0
+
+                slot = ScheduleSlot(
+                    slot_id=f"{target_date}_{slot_time}",
+                    start_time=start_time,
+                    date=target_date,
+                    time=slot_time,
+                    is_business_day=True,
+                    is_sale_day=not is_sold_out,
+                    stock=stock if not is_sold_out else 0,
+                    unit_stock=stock,
+                    unit_booking_count=0 if not is_sold_out else stock,
+                    duration=0,
+                    min_booking_count=1,
+                    max_booking_count=10,
+                    prices=[],
+                    raw_data={"source": "html", "text": btn_text}
+                )
+                slots.append(slot)
+
+                if target_date not in slots_by_date:
+                    slots_by_date[target_date] = []
+                slots_by_date[target_date].append(slot)
+
+                if not is_sold_out and stock > 0:
+                    available_dates_set.add(target_date)
+
+            if not slots:
+                logger.debug(f"[NaverHTTP] HTML에서 슬롯을 찾지 못함")
+                return None
+
+            return ScheduleInfo(
+                business_id=business_id,
+                biz_item_id=biz_item_id,
+                available_dates=sorted(list(available_dates_set)),
+                slots=slots,
+                slots_by_date=slots_by_date,
+                proxy_url=proxy_url
+            )
+
+        except Exception as e:
+            logger.error(f"[NaverHTTP] HTML 파싱 에러: {e}")
+            return None
+
+    async def fetch_schedule_dual(
+        self,
+        business_type_id: int,
+        business_id: str,
+        biz_item_id: str,
+        target_date: str,
+        days_ahead: int = 1
+    ) -> DualCheckResult:
+        """
+        GraphQL과 HTTP 요청을 동시에 실행하여 예약 가능 여부를 판단합니다.
+
+        예약 가능 조건:
+        - GraphQL 성공 AND 슬롯 있음 AND HTTP 302 아님
+
+        Args:
+            business_type_id: 업체 타입 ID
+            business_id: 업체 ID
+            biz_item_id: 상품 ID
+            target_date: 대상 날짜 (YYYY-MM-DD)
+            days_ahead: 조회 기간 (GraphQL용)
+
+        Returns:
+            DualCheckResult: 체크 결과
+        """
+        # GraphQL과 HTTP를 동시에 실행
+        graphql_task = asyncio.create_task(
+            self.fetch_schedule(
+                business_type_id=business_type_id,
+                business_id=business_id,
+                biz_item_id=biz_item_id,
+                start_date=target_date,
+                days_ahead=days_ahead
+            )
+        )
+
+        http_task = asyncio.create_task(
+            self.fetch_schedule_http(
+                business_type_id=business_type_id,
+                business_id=business_id,
+                biz_item_id=biz_item_id,
+                target_date=target_date
+            )
+        )
+
+        # 둘 다 완료될 때까지 대기
+        graphql_result, http_result = await asyncio.gather(
+            graphql_task, http_task, return_exceptions=True
+        )
+
+        # 예외 처리
+        if isinstance(graphql_result, Exception):
+            logger.error(f"[NaverGraphQL] GraphQL 예외: {graphql_result}")
+            graphql_result = None
+        if isinstance(http_result, Exception):
+            logger.error(f"[NaverHTTP] HTTP 예외: {http_result}")
+            http_result = None
+
+        # 1. GraphQL 실패 → 전체 실패
+        if graphql_result is None:
+            logger.warning(f"[NaverDual] GraphQL 실패 - 예약 불가")
+            return DualCheckResult(
+                can_book=False,
+                schedule=None,
+                has_slots=False,
+                http_ok=http_result is not None,
+                error_reason="graphql_failed"
+            )
+
+        # 2. 슬롯 확인
+        has_slots = len(graphql_result.slots) > 0 and len(graphql_result.available_dates) > 0
+        http_ok = http_result is not None
+
+        # 3. 슬롯 없음 → 예약 불가 (정상 케이스)
+        if not has_slots:
+            logger.info(f"[NaverDual] GraphQL 성공, 슬롯 없음 - 예약 불가")
+            return DualCheckResult(
+                can_book=False,
+                schedule=graphql_result,
+                has_slots=False,
+                http_ok=http_ok,
+                error_reason="no_slots"
+            )
+
+        # 4. 슬롯 있음 + HTTP 302 → 예약 불가 (에러 케이스)
+        if not http_ok:
+            logger.warning(f"[NaverDual] GraphQL 성공 + 슬롯 있음 + HTTP 302 - 예약 불가 (봇 탐지)")
+            return DualCheckResult(
+                can_book=False,
+                schedule=graphql_result,
+                has_slots=True,
+                http_ok=False,
+                error_reason="http_302"
+            )
+
+        # 5. 슬롯 있음 + HTTP OK → 예약 가능
+        logger.info(f"[NaverDual] GraphQL 성공 + 슬롯 {len(graphql_result.slots)}개 + HTTP OK - 예약 가능")
+        return DualCheckResult(
+            can_book=True,
+            schedule=graphql_result,
+            has_slots=True,
+            http_ok=True,
+            error_reason=None
         )
 
     def get_smart_time_slots(
