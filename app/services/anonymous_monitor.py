@@ -23,13 +23,15 @@ from app.services.naver_graphql_client import (
 @dataclass
 class AvailabilityResult:
     """재고 확인 결과"""
-    available: bool  # 예약 가능 여부
+    available: bool  # 예약 가능 여부 (GraphQL 성공 + 슬롯 있음 + HTTP OK)
     slots: List[ScheduleSlot]  # 예약 가능 슬롯 목록
     all_active_slots: List[ScheduleSlot] = field(default_factory=list)  # 모든 활성 슬롯
     estimated_hours: Optional[Tuple[str, str]] = None  # 추정 영업시간 (시작, 종료)
     error: Optional[str] = None  # 에러 메시지
     # 프록시 정보 (2025-12-11 추가)
     proxy_url: Optional[str] = None  # 사용한 프록시 URL
+    # HTTP 302 체크 (2025-12-12 추가)
+    http_ok: bool = True  # HTTP 302가 아닌지 (True면 정상, False면 봇 탐지)
 
 
 @dataclass
@@ -148,25 +150,31 @@ class AnonymousMonitor:
         biz_item_id: str,
         target_date: str
     ) -> AvailabilityResult:
-        """실제 API 호출 및 결과 처리"""
-        schedule = await self.client.fetch_schedule(
+        """실제 API 호출 및 결과 처리 (GraphQL + HTTP 동시 체크)"""
+        # fetch_schedule_dual 사용: GraphQL + HTTP 동시 체크
+        dual_result = await self.client.fetch_schedule_dual(
             business_type_id=business_type_id,
             business_id=business_id,
             biz_item_id=biz_item_id,
-            start_date=target_date,
+            target_date=target_date,
             days_ahead=1  # 단일 날짜만 조회
         )
 
         # 에러 시에도 사용한 프록시 URL 가져오기
         used_proxy = self.client._last_used_proxy
 
-        if not schedule:
+        # GraphQL 실패
+        if dual_result.schedule is None:
             return AvailabilityResult(
                 available=False,
                 slots=[],
                 estimated_hours=None,
-                proxy_url=used_proxy  # 에러 시에도 프록시 정보 전달
+                proxy_url=used_proxy,
+                http_ok=dual_result.http_ok,
+                error=dual_result.error_reason
             )
+
+        schedule = dual_result.schedule
 
         # 해당 날짜의 슬롯만 필터링
         date_slots = schedule.slots_by_date.get(target_date, [])
@@ -196,12 +204,14 @@ class AnonymousMonitor:
         if booked_times:
             self._update_slot_history(cache_key, booked_times)
 
+        # available = 슬롯 있음 AND HTTP OK (can_book과 동일)
         return AvailabilityResult(
-            available=len(available_slots) > 0,
+            available=dual_result.can_book,
             slots=available_slots,
             all_active_slots=active_slots,
             estimated_hours=estimated_hours,
-            proxy_url=schedule.proxy_url
+            proxy_url=schedule.proxy_url,
+            http_ok=dual_result.http_ok
         )
 
     def _update_slot_history(self, cache_key: str, times: List[str]):

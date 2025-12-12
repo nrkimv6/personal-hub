@@ -38,6 +38,9 @@ from app.services.naver_graphql_client import (
     NaverGraphQLClient,
     BusinessInfo,
     BizItemInfo,
+    ScheduleInfo,
+    ScheduleSlot,
+    DualCheckResult,
     get_naver_graphql_client,
     NAVER_GRAPHQL_ENDPOINT,
 )
@@ -603,7 +606,369 @@ class TestUrlImportIntegration:
 
 
 # ============================================================
-# 5. 데이터 모델 확장 테스트
+# 5. DualCheckResult 및 fetch_schedule_dual 테스트
+# ============================================================
+
+class TestDualCheckResult:
+    """DualCheckResult 데이터클래스 테스트"""
+
+    # --- Right: 결과가 올바른가? ---
+
+    def test_right_dual_check_result_creation(self):
+        """
+        [Right] DualCheckResult가 올바르게 생성되는지
+        """
+        result = DualCheckResult(
+            can_book=True,
+            schedule=None,
+            has_slots=True,
+            http_ok=True,
+            error_reason=None
+        )
+
+        assert result.can_book is True
+        assert result.has_slots is True
+        assert result.http_ok is True
+        assert result.error_reason is None
+
+    # --- Conformance: 형식 준수 ---
+
+    def test_conformance_error_reason_values(self):
+        """
+        [Conformance] error_reason이 예상된 값만 가지는지
+        """
+        valid_reasons = ["graphql_failed", "no_slots", "http_302", None]
+
+        for reason in valid_reasons:
+            result = DualCheckResult(
+                can_book=reason is None,
+                schedule=None,
+                has_slots=False,
+                http_ok=True,
+                error_reason=reason
+            )
+            assert result.error_reason in valid_reasons
+
+
+class TestFetchScheduleDual:
+    """fetch_schedule_dual 메서드 테스트"""
+
+    @pytest.fixture
+    def sample_schedule_info(self):
+        """스케줄 정보 샘플"""
+        slot = ScheduleSlot(
+            slot_id="2025-12-13_10:00",
+            start_time="2025-12-13 10:00:00",
+            date="2025-12-13",
+            time="10:00",
+            is_business_day=True,
+            is_sale_day=True,
+            stock=5,
+            unit_stock=5,
+            unit_booking_count=0,
+            duration=60,
+            min_booking_count=1,
+            max_booking_count=10,
+            prices=[],
+            raw_data={}
+        )
+        return ScheduleInfo(
+            business_id="123",
+            biz_item_id="456",
+            available_dates=["2025-12-13"],
+            slots=[slot],
+            slots_by_date={"2025-12-13": [slot]},
+            proxy_url=None
+        )
+
+    @pytest.fixture
+    def empty_schedule_info(self):
+        """빈 스케줄 정보 (슬롯 없음)"""
+        return ScheduleInfo(
+            business_id="123",
+            biz_item_id="456",
+            available_dates=[],
+            slots=[],
+            slots_by_date={},
+            proxy_url=None
+        )
+
+    # --- Right: 결과가 올바른가? ---
+
+    @pytest.mark.asyncio
+    async def test_right_can_book_when_graphql_success_slots_exist_http_ok(self, sample_schedule_info):
+        """
+        [Right] GraphQL 성공 + 슬롯 있음 + HTTP OK → can_book=True
+        """
+        client = NaverGraphQLClient()
+
+        with patch.object(client, 'fetch_schedule', new_callable=AsyncMock) as mock_graphql, \
+             patch.object(client, 'fetch_schedule_http', new_callable=AsyncMock) as mock_http:
+
+            mock_graphql.return_value = sample_schedule_info
+            mock_http.return_value = sample_schedule_info  # HTTP도 성공
+
+            result = await client.fetch_schedule_dual(
+                business_type_id=5,
+                business_id="123",
+                biz_item_id="456",
+                target_date="2025-12-13"
+            )
+
+            assert result.can_book is True
+            assert result.has_slots is True
+            assert result.http_ok is True
+            assert result.error_reason is None
+            assert result.schedule is not None
+
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_right_cannot_book_when_graphql_failed(self, sample_schedule_info):
+        """
+        [Right] GraphQL 실패 → can_book=False, error_reason="graphql_failed"
+        """
+        client = NaverGraphQLClient()
+
+        with patch.object(client, 'fetch_schedule', new_callable=AsyncMock) as mock_graphql, \
+             patch.object(client, 'fetch_schedule_http', new_callable=AsyncMock) as mock_http:
+
+            mock_graphql.return_value = None  # GraphQL 실패
+            mock_http.return_value = sample_schedule_info
+
+            result = await client.fetch_schedule_dual(
+                business_type_id=5,
+                business_id="123",
+                biz_item_id="456",
+                target_date="2025-12-13"
+            )
+
+            assert result.can_book is False
+            assert result.error_reason == "graphql_failed"
+            assert result.schedule is None
+
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_right_cannot_book_when_no_slots(self, empty_schedule_info):
+        """
+        [Right] GraphQL 성공 + 슬롯 없음 → can_book=False, error_reason="no_slots"
+        """
+        client = NaverGraphQLClient()
+
+        with patch.object(client, 'fetch_schedule', new_callable=AsyncMock) as mock_graphql, \
+             patch.object(client, 'fetch_schedule_http', new_callable=AsyncMock) as mock_http:
+
+            mock_graphql.return_value = empty_schedule_info  # 슬롯 없음
+            mock_http.return_value = empty_schedule_info
+
+            result = await client.fetch_schedule_dual(
+                business_type_id=5,
+                business_id="123",
+                biz_item_id="456",
+                target_date="2025-12-13"
+            )
+
+            assert result.can_book is False
+            assert result.has_slots is False
+            assert result.error_reason == "no_slots"
+
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_right_cannot_book_when_http_302(self, sample_schedule_info):
+        """
+        [Right] GraphQL 성공 + 슬롯 있음 + HTTP 302 → can_book=False, error_reason="http_302"
+        """
+        client = NaverGraphQLClient()
+
+        with patch.object(client, 'fetch_schedule', new_callable=AsyncMock) as mock_graphql, \
+             patch.object(client, 'fetch_schedule_http', new_callable=AsyncMock) as mock_http:
+
+            mock_graphql.return_value = sample_schedule_info  # GraphQL 성공
+            mock_http.return_value = None  # HTTP 302 (실패)
+
+            result = await client.fetch_schedule_dual(
+                business_type_id=5,
+                business_id="123",
+                biz_item_id="456",
+                target_date="2025-12-13"
+            )
+
+            assert result.can_book is False
+            assert result.has_slots is True
+            assert result.http_ok is False
+            assert result.error_reason == "http_302"
+
+        await client.close()
+
+    # --- Boundary: 경계값 테스트 ---
+
+    @pytest.mark.asyncio
+    async def test_boundary_slots_exist_but_no_available_dates(self):
+        """
+        [Boundary] 슬롯은 있지만 available_dates가 비어있는 경우
+        """
+        slot = ScheduleSlot(
+            slot_id="test", start_time="2025-12-13 10:00:00",
+            date="2025-12-13", time="10:00", is_business_day=True,
+            is_sale_day=False,  # 판매 불가
+            stock=0, unit_stock=0, unit_booking_count=0,
+            duration=60, min_booking_count=1, max_booking_count=10,
+            prices=[], raw_data={}
+        )
+        schedule = ScheduleInfo(
+            business_id="123", biz_item_id="456",
+            available_dates=[],  # 예약 가능 날짜 없음
+            slots=[slot],
+            slots_by_date={"2025-12-13": [slot]},
+            proxy_url=None
+        )
+
+        client = NaverGraphQLClient()
+
+        with patch.object(client, 'fetch_schedule', new_callable=AsyncMock) as mock_graphql, \
+             patch.object(client, 'fetch_schedule_http', new_callable=AsyncMock) as mock_http:
+
+            mock_graphql.return_value = schedule
+            mock_http.return_value = schedule
+
+            result = await client.fetch_schedule_dual(
+                business_type_id=5,
+                business_id="123",
+                biz_item_id="456",
+                target_date="2025-12-13"
+            )
+
+            # slots > 0 but available_dates == 0 → has_slots = False
+            assert result.can_book is False
+            assert result.has_slots is False
+            assert result.error_reason == "no_slots"
+
+        await client.close()
+
+    # --- Error: 에러 조건 테스트 ---
+
+    @pytest.mark.asyncio
+    async def test_error_graphql_exception(self, sample_schedule_info):
+        """
+        [Error] GraphQL에서 예외 발생 시 처리
+        """
+        client = NaverGraphQLClient()
+
+        with patch.object(client, 'fetch_schedule', new_callable=AsyncMock) as mock_graphql, \
+             patch.object(client, 'fetch_schedule_http', new_callable=AsyncMock) as mock_http:
+
+            mock_graphql.side_effect = Exception("GraphQL Error")
+            mock_http.return_value = sample_schedule_info
+
+            result = await client.fetch_schedule_dual(
+                business_type_id=5,
+                business_id="123",
+                biz_item_id="456",
+                target_date="2025-12-13"
+            )
+
+            assert result.can_book is False
+            assert result.error_reason == "graphql_failed"
+
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_error_http_exception(self, sample_schedule_info):
+        """
+        [Error] HTTP에서 예외 발생 시 처리 (http_ok=False)
+        """
+        client = NaverGraphQLClient()
+
+        with patch.object(client, 'fetch_schedule', new_callable=AsyncMock) as mock_graphql, \
+             patch.object(client, 'fetch_schedule_http', new_callable=AsyncMock) as mock_http:
+
+            mock_graphql.return_value = sample_schedule_info
+            mock_http.side_effect = Exception("HTTP Error")
+
+            result = await client.fetch_schedule_dual(
+                business_type_id=5,
+                business_id="123",
+                biz_item_id="456",
+                target_date="2025-12-13"
+            )
+
+            assert result.can_book is False
+            assert result.http_ok is False
+            assert result.error_reason == "http_302"
+
+        await client.close()
+
+    # --- Cross-check: 교차 검증 ---
+
+    @pytest.mark.asyncio
+    async def test_cross_check_both_methods_called_concurrently(self, sample_schedule_info):
+        """
+        [Cross-check] GraphQL과 HTTP가 동시에 호출되는지
+        """
+        client = NaverGraphQLClient()
+        call_times = []
+
+        async def mock_graphql(*args, **kwargs):
+            call_times.append(("graphql", asyncio.get_event_loop().time()))
+            await asyncio.sleep(0.1)
+            return sample_schedule_info
+
+        async def mock_http(*args, **kwargs):
+            call_times.append(("http", asyncio.get_event_loop().time()))
+            await asyncio.sleep(0.1)
+            return sample_schedule_info
+
+        with patch.object(client, 'fetch_schedule', side_effect=mock_graphql), \
+             patch.object(client, 'fetch_schedule_http', side_effect=mock_http):
+
+            await client.fetch_schedule_dual(
+                business_type_id=5,
+                business_id="123",
+                biz_item_id="456",
+                target_date="2025-12-13"
+            )
+
+            # 두 메서드 모두 호출됨
+            assert len(call_times) == 2
+
+            # 거의 동시에 호출됨 (차이 0.05초 미만)
+            time_diff = abs(call_times[0][1] - call_times[1][1])
+            assert time_diff < 0.05, f"동시 호출 아님: {time_diff}초 차이"
+
+        await client.close()
+
+    # --- Cardinality: 개수 검증 ---
+
+    @pytest.mark.asyncio
+    async def test_cardinality_schedule_slots_preserved(self, sample_schedule_info):
+        """
+        [Cardinality] 반환된 schedule의 슬롯 개수가 보존되는지
+        """
+        client = NaverGraphQLClient()
+
+        with patch.object(client, 'fetch_schedule', new_callable=AsyncMock) as mock_graphql, \
+             patch.object(client, 'fetch_schedule_http', new_callable=AsyncMock) as mock_http:
+
+            mock_graphql.return_value = sample_schedule_info
+            mock_http.return_value = sample_schedule_info
+
+            result = await client.fetch_schedule_dual(
+                business_type_id=5,
+                business_id="123",
+                biz_item_id="456",
+                target_date="2025-12-13"
+            )
+
+            assert result.schedule is not None
+            assert len(result.schedule.slots) == len(sample_schedule_info.slots)
+
+        await client.close()
+
+
+# ============================================================
+# 6. 데이터 모델 확장 테스트
 # ============================================================
 
 class TestDataModelExtension:

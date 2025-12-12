@@ -44,6 +44,7 @@ from app.services.naver_graphql_client import (
     NaverGraphQLClient,
     ScheduleInfo,
     ScheduleSlot,
+    DualCheckResult,
 )
 
 
@@ -119,7 +120,51 @@ def mock_schedule_info(mock_schedule_slots):
 def mock_graphql_client():
     """모의 GraphQL 클라이언트"""
     client = MagicMock(spec=NaverGraphQLClient)
+    client._last_used_proxy = None
     return client
+
+
+@pytest.fixture
+def mock_dual_result_available(mock_schedule_info):
+    """재고 있고 HTTP OK인 DualCheckResult"""
+    return DualCheckResult(
+        can_book=True,
+        schedule=mock_schedule_info,
+        has_slots=True,
+        http_ok=True,
+        error_reason=None
+    )
+
+
+@pytest.fixture
+def mock_dual_result_no_slots(mock_schedule_info):
+    """슬롯 없는 DualCheckResult"""
+    empty_schedule = ScheduleInfo(
+        business_id="1234567",
+        biz_item_id="7654321",
+        available_dates=[],
+        slots=[],
+        slots_by_date={}
+    )
+    return DualCheckResult(
+        can_book=False,
+        schedule=empty_schedule,
+        has_slots=False,
+        http_ok=True,
+        error_reason="no_slots"
+    )
+
+
+@pytest.fixture
+def mock_dual_result_http_302(mock_schedule_info):
+    """HTTP 302인 DualCheckResult"""
+    return DualCheckResult(
+        can_book=False,
+        schedule=mock_schedule_info,
+        has_slots=True,
+        http_ok=False,
+        error_reason="http_302"
+    )
 
 
 @pytest.fixture
@@ -138,10 +183,10 @@ class TestCheckAvailability:
 
     @pytest.mark.asyncio
     async def test_returns_available_when_stock_exists(
-        self, anonymous_monitor, mock_graphql_client, mock_schedule_info
+        self, anonymous_monitor, mock_graphql_client, mock_schedule_info, mock_dual_result_available
     ):
         """재고가 있을 때 available=True 반환"""
-        mock_graphql_client.fetch_schedule = AsyncMock(return_value=mock_schedule_info)
+        mock_graphql_client.fetch_schedule_dual = AsyncMock(return_value=mock_dual_result_available)
 
         result = await anonymous_monitor.check_availability(
             business_type_id=13,
@@ -155,6 +200,7 @@ class TestCheckAvailability:
         assert len(result.slots) == 2  # stock > 0인 슬롯만
         assert result.slots[0].time == "18:00"
         assert result.slots[1].time == "20:00"
+        assert result.http_ok is True
 
     @pytest.mark.asyncio
     async def test_returns_unavailable_when_no_stock(
@@ -182,11 +228,18 @@ class TestCheckAvailability:
         schedule = ScheduleInfo(
             business_id="1234567",
             biz_item_id="7654321",
-            available_dates=["2025-12-15"],
+            available_dates=[],  # 예약 가능 날짜 없음
             slots=no_stock_slots,
             slots_by_date={"2025-12-15": no_stock_slots}
         )
-        mock_graphql_client.fetch_schedule = AsyncMock(return_value=schedule)
+        dual_result = DualCheckResult(
+            can_book=False,
+            schedule=schedule,
+            has_slots=False,
+            http_ok=True,
+            error_reason="no_slots"
+        )
+        mock_graphql_client.fetch_schedule_dual = AsyncMock(return_value=dual_result)
 
         result = await anonymous_monitor.check_availability(
             business_type_id=13,
@@ -201,10 +254,10 @@ class TestCheckAvailability:
 
     @pytest.mark.asyncio
     async def test_returns_all_active_slots(
-        self, anonymous_monitor, mock_graphql_client, mock_schedule_info
+        self, anonymous_monitor, mock_graphql_client, mock_schedule_info, mock_dual_result_available
     ):
         """모든 활성 슬롯 반환 (예약/재고 설정된 슬롯)"""
-        mock_graphql_client.fetch_schedule = AsyncMock(return_value=mock_schedule_info)
+        mock_graphql_client.fetch_schedule_dual = AsyncMock(return_value=mock_dual_result_available)
 
         result = await anonymous_monitor.check_availability(
             business_type_id=13,
@@ -219,10 +272,10 @@ class TestCheckAvailability:
 
     @pytest.mark.asyncio
     async def test_estimates_business_hours(
-        self, anonymous_monitor, mock_graphql_client, mock_schedule_info
+        self, anonymous_monitor, mock_graphql_client, mock_schedule_info, mock_dual_result_available
     ):
         """영업시간 추정"""
-        mock_graphql_client.fetch_schedule = AsyncMock(return_value=mock_schedule_info)
+        mock_graphql_client.fetch_schedule_dual = AsyncMock(return_value=mock_dual_result_available)
 
         result = await anonymous_monitor.check_availability(
             business_type_id=13,
@@ -236,6 +289,26 @@ class TestCheckAvailability:
         assert result.estimated_hours[0] == "18:00"  # 시작
         assert result.estimated_hours[1] == "20:00"  # 종료
 
+    @pytest.mark.asyncio
+    async def test_returns_unavailable_when_http_302(
+        self, anonymous_monitor, mock_graphql_client, mock_dual_result_http_302
+    ):
+        """HTTP 302일 때 available=False, http_ok=False 반환"""
+        mock_graphql_client.fetch_schedule_dual = AsyncMock(return_value=mock_dual_result_http_302)
+
+        result = await anonymous_monitor.check_availability(
+            business_type_id=13,
+            business_id="1234567",
+            biz_item_id="7654321",
+            target_date="2025-12-15",
+            use_cache=False
+        )
+
+        assert result.available is False
+        assert result.http_ok is False
+        # 슬롯은 있지만 예약 불가 (http_302)
+        assert len(result.slots) == 2
+
 
 # ============================================================
 # Boundary: 경계값 테스트
@@ -248,8 +321,15 @@ class TestBoundaryConditions:
     async def test_empty_schedule_response(
         self, anonymous_monitor, mock_graphql_client
     ):
-        """빈 스케줄 응답 처리"""
-        mock_graphql_client.fetch_schedule = AsyncMock(return_value=None)
+        """빈 스케줄 응답 처리 (GraphQL 실패)"""
+        dual_result = DualCheckResult(
+            can_book=False,
+            schedule=None,
+            has_slots=False,
+            http_ok=True,
+            error_reason="graphql_failed"
+        )
+        mock_graphql_client.fetch_schedule_dual = AsyncMock(return_value=dual_result)
 
         result = await anonymous_monitor.check_availability(
             business_type_id=13,
@@ -265,10 +345,10 @@ class TestBoundaryConditions:
 
     @pytest.mark.asyncio
     async def test_date_not_in_schedule(
-        self, anonymous_monitor, mock_graphql_client, mock_schedule_info
+        self, anonymous_monitor, mock_graphql_client, mock_schedule_info, mock_dual_result_available
     ):
         """요청한 날짜가 스케줄에 없는 경우"""
-        mock_graphql_client.fetch_schedule = AsyncMock(return_value=mock_schedule_info)
+        mock_graphql_client.fetch_schedule_dual = AsyncMock(return_value=mock_dual_result_available)
 
         result = await anonymous_monitor.check_availability(
             business_type_id=13,
