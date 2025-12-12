@@ -177,10 +177,11 @@ class AnonymousMonitor:
             if s.unit_stock > 0 or s.unit_booking_count > 0 or s.stock > 0
         ]
 
-        # 예약 가능 슬롯 (재고 있고 판매일인 슬롯)
+        # 예약 가능 슬롯 (해당 시간대에 남은 자리가 있고 판매일인 슬롯)
+        # stock은 전체 재고, 개별 시간대 남은 자리는 unit_stock - unit_booking_count
         available_slots = [
             s for s in active_slots
-            if s.stock > 0 and s.is_sale_day
+            if s.is_sale_day and (s.unit_stock - s.unit_booking_count) > 0
         ]
 
         # 영업시간 추정

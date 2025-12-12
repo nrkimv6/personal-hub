@@ -523,6 +523,81 @@ class ProxyDBService:
             .all()
         )
 
+    def get_proxies_by_response_time(
+        self,
+        min_response_time: Optional[float] = None,
+        max_response_time: Optional[float] = None,
+        limit: int = 10,
+        status: str = "active",
+        exclude_ids: Optional[List[int]] = None,
+        min_success_rate: float = 0.5,
+    ) -> List[ProxyInfo]:
+        """
+        응답시간 범위로 프록시 조회
+
+        Args:
+            min_response_time: 최소 응답시간 (초), None이면 제한 없음 (초과 조건)
+            max_response_time: 최대 응답시간 (초), None이면 제한 없음 (이하 조건)
+            limit: 조회할 개수
+            status: 상태 필터 (기본: active)
+            exclude_ids: 제외할 프록시 ID
+            min_success_rate: 최소 성공률 (0.0~1.0)
+
+        Returns:
+            ProxyInfo 리스트 (우선순위 내림차순)
+        """
+        query = self.db.query(Proxy).filter(Proxy.status == status)
+
+        # 제외할 프록시 ID 필터
+        if exclude_ids:
+            query = query.filter(Proxy.id.notin_(exclude_ids))
+
+        # 응답시간 범위 필터 (측정된 프록시만)
+        # min_response_time: 초과 조건 (>)
+        if min_response_time is not None:
+            query = query.filter(
+                Proxy.avg_response_time.isnot(None),
+                Proxy.avg_response_time > min_response_time,
+            )
+
+        # max_response_time: 이하 조건 (<=)
+        if max_response_time is not None:
+            query = query.filter(
+                Proxy.avg_response_time.isnot(None),
+                Proxy.avg_response_time <= max_response_time,
+            )
+
+        # 최소 성공률 필터
+        if min_success_rate > 0:
+            query = query.filter(
+                Proxy.total_checks > 0,
+                (Proxy.success_count * 1.0 / Proxy.total_checks) >= min_success_rate,
+            )
+
+        proxies = (
+            query.order_by(desc(Proxy.priority_score))
+            .limit(limit)
+            .all()
+        )
+
+        return [
+            ProxyInfo(
+                id=p.id,
+                url=p.url,
+                protocol=p.protocol,
+                host=p.host,
+                port=p.port,
+                username=p.username,
+                password=p.password,
+                priority_score=p.priority_score or 0.0,
+                avg_response_time=p.avg_response_time,
+                success_count=p.success_count or 0,
+                fail_count=p.fail_count or 0,
+                total_checks=p.total_checks or 0,
+            )
+            for p in proxies
+        ]
+
     def get_top_proxies_for_pool(
         self,
         limit: int = 10,

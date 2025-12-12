@@ -402,10 +402,16 @@ class ProxyManagerV2:
         stats = self._get_or_create_stats(proxy.id)
         stats.record_success(response_time)
 
-        # 느린 프록시 마킹 (다음 풀 갱신 시 제외)
+        # 느린 프록시 마킹 및 즉시 풀에서 제거
         if response_time > self._max_response_time:
             self._slow_proxies.add(proxy.id)
-            logger.debug(f"Proxy {proxy.id} marked as slow ({response_time:.2f}s > {self._max_response_time}s)")
+            # 현재 풀에서도 즉시 제거 (재사용 방지)
+            self._active_pool = [p for p in self._active_pool if p.id != proxy.id]
+            logger.warning(
+                f"Proxy {proxy.id} removed from pool - too slow "
+                f"({response_time:.2f}s > {self._max_response_time}s), "
+                f"pool size: {len(self._active_pool)}"
+            )
 
         # 로컬 캐시 업데이트 (풀 내 프록시 정보)
         self._update_local_proxy(proxy.id, is_valid=True, response_time=response_time)
