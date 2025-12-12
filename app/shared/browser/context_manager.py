@@ -346,13 +346,38 @@ class ContextManager:
         # 이미 존재하면 유효성 확인 후 반환
         if account_id in self.browser_contexts:
             context = self.browser_contexts[account_id]
+            context_valid = False
             try:
-                _ = context.pages  # 유효성 확인
+                pages = context.pages  # 유효성 확인
+                # 페이지가 있으면 URL에 접근해서 실제로 살아있는지 확인
+                if len(pages) > 0:
+                    try:
+                        _ = pages[0].url
+                        context_valid = True
+                    except Exception as e:
+                        logger.warning(f"페이지 접근 실패 (account_id={account_id}): {e}")
+                else:
+                    # 페이지가 없으면 브라우저 연결 상태 확인
+                    try:
+                        browser = context.browser
+                        if browser and browser.is_connected():
+                            context_valid = True
+                        else:
+                            logger.warning(f"브라우저 연결 끊김 (account_id={account_id})")
+                    except Exception as e:
+                        logger.warning(f"브라우저 연결 상태 확인 실패 (account_id={account_id}): {e}")
+            except Exception as e:
+                logger.warning(f"브라우저 컨텍스트 유효성 검사 실패 (account_id={account_id}): {e}")
+
+            if context_valid:
                 logger.debug(f"기존 브라우저 컨텍스트 재사용 (account_id={account_id})")
                 return context
-            except Exception:
+            else:
                 logger.info(f"브라우저 컨텍스트가 닫혀있어 새로 생성합니다 (account_id={account_id})")
-                del self.browser_contexts[account_id]
+                try:
+                    del self.browser_contexts[account_id]
+                except Exception:
+                    pass
 
         db = SessionLocal()
         try:
