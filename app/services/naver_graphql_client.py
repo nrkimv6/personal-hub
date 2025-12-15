@@ -109,6 +109,8 @@ class ScheduleInfo:
     slots_by_date: Dict[str, List[ScheduleSlot]] = field(default_factory=dict)  # 날짜별 슬롯
     # 프록시 정보 (2025-12-11 추가)
     proxy_url: Optional[str] = None  # 사용한 프록시 URL
+    # GraphQL 원본 응답 (2025-12-16 추가)
+    raw_response: Optional[Dict[str, Any]] = None  # GraphQL API 원본 응답 데이터
 
 
 @dataclass
@@ -124,8 +126,9 @@ class DualCheckResult:
     can_book: bool  # 예약 가능 여부 (최종 판단)
     schedule: Optional[ScheduleInfo]  # GraphQL 스케줄 결과
     has_slots: bool  # 슬롯 존재 여부
-    http_ok: bool  # HTTP 302가 아닌지 (True면 정상)
-    error_reason: Optional[str]  # 실패 사유: "graphql_failed", "no_slots", "http_302"
+    http_ok: bool  # HTTP 302가 아닌지 (True면 정상, False면 302 또는 확인 실패)
+    http_checked: bool  # HTTP 체크 성공 여부 (True면 200 또는 302 확인됨)
+    error_reason: Optional[str]  # 실패 사유: "graphql_failed", "no_slots", "http_302", "http_check_failed"
 
 
 class NaverGraphQLClient:
@@ -759,7 +762,8 @@ class NaverGraphQLClient:
                 available_dates=[],
                 slots=[],
                 slots_by_date={},
-                proxy_url=used_proxy
+                proxy_url=used_proxy,
+                raw_response=data
             )
 
         slots = []
@@ -824,7 +828,8 @@ class NaverGraphQLClient:
             available_dates=available_dates,
             slots=slots,
             slots_by_date=slots_by_date,
-            proxy_url=used_proxy
+            proxy_url=used_proxy,
+            raw_response=data
         )
 
     async def check_http_302(
@@ -885,14 +890,18 @@ class NaverGraphQLClient:
                     timeout=aiohttp.ClientTimeout(total=10),
                     allow_redirects=False  # 302 감지를 위해 리다이렉트 비허용
                 ) as response:
-                    # 302 리다이렉트 - 봇 탐지
+                    # 상세 로그 (디버깅용)
+                    location = response.headers.get('Location', '')
+                    logger.info(f"[HTTP302] status={response.status} | location={location[:60] if location else 'N/A'} | proxy={'Y' if proxy_url else 'N'}")
+
+                    # 302 리다이렉트 - 비활성화 감지
                     if response.status == 302:
-                        logger.warning(f"[HTTP302] 302 감지 - 봇 탐지")
+                        logger.warning(f"[HTTP302] 302 감지 - 비활성화")
                         return False
 
-                    # 200 OK - 정상
+                    # 200 OK - 정상 (활성 상태)
                     if response.status == 200:
-                        logger.debug(f"[HTTP302] 200 OK - 정상")
+                        logger.debug(f"[HTTP302] 200 OK - 활성 상태")
                         return True
 
                     # 403/429 - 프록시 실패로 재시도
@@ -991,7 +1000,7 @@ class NaverGraphQLClient:
         )
 
         # 둘 다 완료될 때까지 대기
-        graphql_result, http_ok = await asyncio.gather(
+        graphql_result, http_result = await asyncio.gather(
             graphql_task, http_task, return_exceptions=True
         )
 
@@ -999,9 +1008,14 @@ class NaverGraphQLClient:
         if isinstance(graphql_result, Exception):
             logger.error(f"[NaverGraphQL] GraphQL 예외: {graphql_result}")
             graphql_result = None
-        if isinstance(http_ok, Exception):
-            logger.error(f"[HTTP302] HTTP 예외: {http_ok}")
-            http_ok = False  # 예외 시 안전하게 False
+        if isinstance(http_result, Exception):
+            logger.error(f"[HTTP302] HTTP 예외: {http_result}")
+            http_result = None  # 예외 시 확인 실패
+
+        # HTTP 결과 해석
+        # http_result: True=200 OK, False=302, None=확인 실패
+        http_ok = http_result is True  # True일 때만 OK
+        http_checked = http_result is not None  # None이 아니면 체크 성공
 
         # 1. GraphQL 실패 → 전체 실패
         if graphql_result is None:
@@ -1011,41 +1025,59 @@ class NaverGraphQLClient:
                 schedule=None,
                 has_slots=False,
                 http_ok=http_ok,
+                http_checked=http_checked,
                 error_reason="graphql_failed"
             )
 
         # 2. 슬롯 확인
-        has_slots = len(graphql_result.slots) > 0 and len(graphql_result.available_dates) > 0
+        total_slots = len(graphql_result.slots)
+        available_dates = len(graphql_result.available_dates)
+        has_slots = total_slots > 0 and available_dates > 0
 
         # 3. 슬롯 없음 → 예약 불가 (정상 케이스)
         if not has_slots:
-            logger.info(f"[NaverDual] GraphQL 성공, 슬롯 없음 - 예약 불가")
+            logger.info(f"[NaverDual] GraphQL 성공, 슬롯 없음 (전체:{total_slots}, 가용일:{available_dates})")
             return DualCheckResult(
                 can_book=False,
                 schedule=graphql_result,
                 has_slots=False,
                 http_ok=http_ok,
+                http_checked=http_checked,
                 error_reason="no_slots"
             )
 
-        # 4. 슬롯 있음 + HTTP 302 → 예약 불가 (에러 케이스)
-        if not http_ok:
-            logger.warning(f"[NaverDual] GraphQL 성공 + 슬롯 있음 + HTTP 302 - 예약 불가 (봇 탐지)")
+        # 4. 슬롯 있음 + HTTP 확인 실패 → 예약 불가 (확인 불가)
+        if not http_checked:
+            logger.warning(f"[NaverDual] GraphQL 성공 + 슬롯 {total_slots}개 + HTTP 확인 실패")
             return DualCheckResult(
                 can_book=False,
                 schedule=graphql_result,
                 has_slots=True,
                 http_ok=False,
+                http_checked=False,
+                error_reason="http_check_failed"
+            )
+
+        # 5. 슬롯 있음 + HTTP 302 → 예약 불가 (비활성화)
+        if http_result is False:
+            logger.warning(f"[NaverDual] GraphQL 성공 + 슬롯 {total_slots}개 + HTTP 302 감지 (비활성화)")
+            return DualCheckResult(
+                can_book=False,
+                schedule=graphql_result,
+                has_slots=True,
+                http_ok=False,
+                http_checked=True,
                 error_reason="http_302"
             )
 
-        # 5. 슬롯 있음 + HTTP OK → 예약 가능
-        logger.info(f"[NaverDual] GraphQL 성공 + 슬롯 {len(graphql_result.slots)}개 + HTTP OK - 예약 가능")
+        # 6. 슬롯 있음 + HTTP OK → 예약 가능
+        logger.info(f"[NaverDual] GraphQL 성공 + 슬롯 {total_slots}개 + HTTP OK - 예약 가능")
         return DualCheckResult(
             can_book=True,
             schedule=graphql_result,
             has_slots=True,
             http_ok=True,
+            http_checked=True,
             error_reason=None
         )
 
