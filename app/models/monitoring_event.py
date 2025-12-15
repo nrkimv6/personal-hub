@@ -49,6 +49,9 @@ class MonitoringEvent(Base):
     # 프록시 정보 (2025-12-11 추가)
     proxy_url = Column(String, nullable=True)  # 사용한 프록시 URL (예: http://1.2.3.4:8080)
 
+    # GraphQL 원본 응답 (2025-12-16 추가)
+    graphql_response = Column(Text, nullable=True)  # JSON: GraphQL API 원본 응답 데이터
+
     # 관계
     schedule = relationship("MonitorSchedule")
 
