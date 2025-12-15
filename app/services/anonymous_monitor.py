@@ -32,6 +32,8 @@ class AvailabilityResult:
     proxy_url: Optional[str] = None  # 사용한 프록시 URL
     # HTTP 302 체크 (2025-12-12 추가)
     http_ok: bool = True  # HTTP 302가 아닌지 (True면 정상, False면 봇 탐지)
+    # GraphQL 원본 응답 (2025-12-16 추가)
+    raw_response: Optional[Dict[str, Any]] = None  # GraphQL API 원본 응답 데이터
 
 
 @dataclass
@@ -171,7 +173,8 @@ class AnonymousMonitor:
                 estimated_hours=None,
                 proxy_url=used_proxy,
                 http_ok=dual_result.http_ok,
-                error=dual_result.error_reason
+                error=dual_result.error_reason,
+                raw_response=None
             )
 
         schedule = dual_result.schedule
@@ -185,12 +188,23 @@ class AnonymousMonitor:
             if s.unit_stock > 0 or s.unit_booking_count > 0 or s.stock > 0
         ]
 
+        # 슬롯 상세 로그 (디버깅용)
+        if date_slots:
+            logger.info(f"[AnonymousMonitor] {target_date} 슬롯 현황: 전체={len(date_slots)}, 활성={len(active_slots)}")
+            for s in date_slots[:5]:  # 처음 5개만 로그
+                remaining = s.unit_stock - s.unit_booking_count
+                logger.debug(f"  - {s.time}: unit_stock={s.unit_stock}, unit_booking={s.unit_booking_count}, stock={s.stock}, remaining={remaining}, is_sale={s.is_sale_day}")
+
         # 예약 가능 슬롯 (해당 시간대에 남은 자리가 있고 판매일인 슬롯)
         # stock은 전체 재고, 개별 시간대 남은 자리는 unit_stock - unit_booking_count
         available_slots = [
             s for s in active_slots
             if s.is_sale_day and (s.unit_stock - s.unit_booking_count) > 0
         ]
+
+        # 예약 가능 슬롯 로그
+        if available_slots:
+            logger.info(f"[AnonymousMonitor] 예약 가능 슬롯 {len(available_slots)}개: {[s.time for s in available_slots[:5]]}")
 
         # 영업시간 추정
         estimated_hours = None
@@ -211,7 +225,8 @@ class AnonymousMonitor:
             all_active_slots=active_slots,
             estimated_hours=estimated_hours,
             proxy_url=schedule.proxy_url,
-            http_ok=dual_result.http_ok
+            http_ok=dual_result.http_ok,
+            raw_response=schedule.raw_response
         )
 
     def _update_slot_history(self, cache_key: str, times: List[str]):

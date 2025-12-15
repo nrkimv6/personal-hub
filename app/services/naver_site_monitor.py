@@ -106,8 +106,8 @@ def filter_slots_by_time_range(slots: List[str], time_range_str: Optional[str]) 
             if in_range:
                 filtered_slots.append(slot)
                 logger.debug(f"[FILTER] ✓ 슬롯 포함: {slot} ({extracted_time} in {start_time}-{end_time})")
-            else:
-                logger.debug(f"[FILTER] ✗ 슬롯 제외: {slot} ({extracted_time} not in {start_time}-{end_time})")
+            # else:
+                # logger.debug(f"[FILTER] ✗ 슬롯 제외: {slot} ({extracted_time} not in {start_time}-{end_time})")
 
         return filtered_slots
 

@@ -126,6 +126,8 @@ def get_monitoring_events(
             "booking_success": event.booking_success,
             # 프록시 정보 (2025-12-11 추가)
             "proxy_url": event.proxy_url,
+            # GraphQL 원본 응답 (2025-12-16 추가)
+            "graphql_response": event.graphql_response,
         }
         result.append(MonitoringEventSchema(**event_dict))
 
@@ -270,6 +272,8 @@ def get_monitoring_event(event_id: int, db: Session = Depends(get_db)):
         booking_success=event.booking_success,
         # 프록시 정보
         proxy_url=event.proxy_url,
+        # GraphQL 원본 응답
+        graphql_response=event.graphql_response,
     )
 
 

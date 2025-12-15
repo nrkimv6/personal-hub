@@ -27,6 +27,8 @@ class MonitoringEventBase(BaseModel):
     booking_success: Optional[bool] = None  # 예약 성공 여부 (None: 미시도)
     # 프록시 정보 (2025-12-11 추가)
     proxy_url: Optional[str] = None  # 사용한 프록시 URL (익명 모니터링 시)
+    # GraphQL 원본 응답 (2025-12-16 추가)
+    graphql_response: Optional[Any] = None  # GraphQL API 원본 응답 데이터
 
 
 class MonitoringEventCreate(MonitoringEventBase):
@@ -52,6 +54,19 @@ class MonitoringEvent(MonitoringEventBase):
     @classmethod
     def parse_slots_info(cls, v):
         """JSON 문자열을 리스트로 변환"""
+        if v is None:
+            return None
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except (json.JSONDecodeError, TypeError):
+                return None
+        return v
+
+    @field_validator('graphql_response', mode='before')
+    @classmethod
+    def parse_graphql_response(cls, v):
+        """JSON 문자열을 딕셔너리로 변환"""
         if v is None:
             return None
         if isinstance(v, str):
