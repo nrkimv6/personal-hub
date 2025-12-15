@@ -18,10 +18,12 @@ import asyncio
 import json
 import time
 import hashlib
+import re
 from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from app.config import logger, settings
+from app.utils.slot_utils import is_slot_available_from_dict
 
 if TYPE_CHECKING:
     from app.services.proxy_manager import ProxyManager
@@ -781,16 +783,10 @@ class NaverGraphQLClient:
             slot_time_full = parts[1] if len(parts) > 1 else "00:00:00"
             slot_time = slot_time_full[:5]  # "11:30"
 
-            # 예약 가능 여부 체크 (해당 시간대에 남은 자리가 있고, 판매일인 경우)
-            # stock은 전체 재고, 개별 시간대 남은 자리는 unit_stock - unit_booking_count
+            # 예약 가능 여부 체크
+            # stock > 0 AND (unit_stock - unit_booking_count) > 0 AND is_sale_day
             stock_value = slot_data.get("stock") or 0
-            unit_stock_value = slot_data.get("unitStock") or 0
-            unit_booking_count_value = slot_data.get("unitBookingCount") or 0
-            remaining_slots = unit_stock_value - unit_booking_count_value
-            is_available = (
-                slot_data.get("isSaleDay", False) and
-                remaining_slots > 0
-            )
+            is_available = is_slot_available_from_dict(slot_data)
 
             slot = ScheduleSlot(
                 slot_id=str(slot_data.get("slotId", "")),
@@ -832,6 +828,44 @@ class NaverGraphQLClient:
             raw_response=data
         )
 
+    def _check_page_active(self, html_content: str) -> bool:
+        """
+        HTML 페이지 내용에서 상품 활성화 상태를 확인합니다.
+
+        비활성화 판단 기준:
+        - __APOLLO_STATE__.ROOT_QUERY에 'placeProfile' 또는 'account' 키가 없으면 비활성화
+
+        Args:
+            html_content: HTML 페이지 내용
+
+        Returns:
+            bool: True면 활성, False면 비활성화
+        """
+        try:
+            # __APOLLO_STATE__ 추출
+            apollo_match = re.search(r'window\.__APOLLO_STATE__\s*=\s*(\{[^<]*\})', html_content)
+            if not apollo_match:
+                logger.warning("[PageCheck] __APOLLO_STATE__ not found")
+                return True  # 파싱 실패 시 활성으로 간주 (GraphQL 결과에 의존)
+
+            apollo_state = json.loads(apollo_match.group(1))
+            root_query = apollo_state.get('ROOT_QUERY', {})
+
+            # ROOT_QUERY 키 확인 - placeProfile 또는 account가 있으면 활성
+            has_place_profile = any('placeProfile' in key for key in root_query.keys())
+            has_account = any('account' in key for key in root_query.keys())
+
+            if has_place_profile or has_account:
+                logger.debug(f"[PageCheck] 활성 (placeProfile={has_place_profile}, account={has_account})")
+                return True
+            else:
+                logger.info(f"[PageCheck] 비활성화 감지 (ROOT_QUERY keys: {list(root_query.keys())})")
+                return False
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"[PageCheck] JSON 파싱 실패: {e}")
+            return True  # 파싱 실패 시 활성으로 간주
+
     async def check_http_302(
         self,
         business_type_id: int,
@@ -841,8 +875,11 @@ class NaverGraphQLClient:
         max_retries: int = 3
     ) -> bool:
         """
-        HTTP 요청으로 302 응답 여부만 체크합니다.
-        302 응답이면 봇 탐지로 간주합니다.
+        HTTP 요청으로 상품 활성 상태를 체크합니다.
+
+        체크 방법:
+        1. HTTP 302 리다이렉트 - 비활성화
+        2. HTTP 200이지만 페이지 내용에서 비활성화 감지 (JS redirect)
 
         Args:
             business_type_id: 업체 타입 ID
@@ -852,7 +889,7 @@ class NaverGraphQLClient:
             max_retries: 최대 재시도 횟수
 
         Returns:
-            bool: True면 HTTP OK (302 아님), False면 302 감지
+            bool: True면 활성, False면 비활성화, None이면 확인 불가
         """
         session = await self._ensure_session()
 
@@ -899,10 +936,16 @@ class NaverGraphQLClient:
                         logger.warning(f"[HTTP302] 302 감지 - 비활성화")
                         return False
 
-                    # 200 OK - 정상 (활성 상태)
+                    # 200 OK - 페이지 내용 확인 필요
                     if response.status == 200:
-                        logger.debug(f"[HTTP302] 200 OK - 활성 상태")
-                        return True
+                        html_content = await response.text()
+                        is_active = self._check_page_active(html_content)
+                        if is_active:
+                            logger.debug(f"[HTTP302] 200 OK + 페이지 활성 확인")
+                            return True
+                        else:
+                            logger.warning(f"[HTTP302] 200 OK but 페이지 비활성화 감지 (JS redirect)")
+                            return False
 
                     # 403/429 - 프록시 실패로 재시도
                     if response.status in (403, 429):
@@ -943,8 +986,14 @@ class NaverGraphQLClient:
                         logger.info(f"[HTTP302] 직접 연결: 302 감지 (비활성화)")
                         return False
                     if response.status == 200:
-                        logger.info(f"[HTTP302] 직접 연결: 200 OK")
-                        return True
+                        html_content = await response.text()
+                        is_active = self._check_page_active(html_content)
+                        if is_active:
+                            logger.info(f"[HTTP302] 직접 연결: 200 OK + 활성")
+                            return True
+                        else:
+                            logger.info(f"[HTTP302] 직접 연결: 200 OK but 비활성화 (JS redirect)")
+                            return False
                     logger.warning(f"[HTTP302] 직접 연결: HTTP {response.status}")
             except asyncio.TimeoutError:
                 logger.warning(f"[HTTP302] 직접 연결: timeout")

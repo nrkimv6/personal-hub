@@ -12,6 +12,7 @@ import aiohttp
 import asyncio
 from app.config import settings, logger
 from app.utils.parsers import parse_time_and_stock, parse_naver_page_info, extract_date_from_url
+from app.utils.slot_utils import is_slot_available
 
 # 순환 참조 방지를 위한 지연 import
 if TYPE_CHECKING:
@@ -973,20 +974,20 @@ class NaverSiteMonitor(AbstractSiteMonitor):
                 available_slots = []
 
                 for slot in hourly_slots:
-                    # 판매일이 아니면 스킵
-                    if not slot.get('isUnitSaleDay', False):
-                        continue
-
                     # 영업일이 아니면 스킵
                     if not slot.get('isUnitBusinessDay', False):
                         continue
 
+                    # 재고 확인: stock > 0 AND (unit_stock - unit_booking_count) > 0 AND is_sale_day
+                    stock = slot.get('stock', 0)
                     unit_stock = slot.get('unitStock', 0)
                     unit_booking_count = slot.get('unitBookingCount', 0)
-                    available_count = unit_stock - unit_booking_count
+                    is_sale_day = slot.get('isUnitSaleDay', False)
 
-                    if available_count <= 0:
+                    if not is_slot_available(stock, unit_stock, unit_booking_count, is_sale_day):
                         continue
+
+                    available_count = unit_stock - unit_booking_count
 
                     # 시간 파싱 및 범위 체크
                     slot_datetime = self.parse_slot_datetime(slot)

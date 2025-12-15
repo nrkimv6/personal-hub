@@ -18,6 +18,7 @@ from app.services.naver_graphql_client import (
     ScheduleSlot,
     get_naver_graphql_client,
 )
+from app.utils.slot_utils import is_slot_available_from_obj
 
 
 @dataclass
@@ -195,11 +196,10 @@ class AnonymousMonitor:
                 remaining = s.unit_stock - s.unit_booking_count
                 logger.debug(f"  - {s.time}: unit_stock={s.unit_stock}, unit_booking={s.unit_booking_count}, stock={s.stock}, remaining={remaining}, is_sale={s.is_sale_day}")
 
-        # 예약 가능 슬롯 (해당 시간대에 남은 자리가 있고 판매일인 슬롯)
-        # stock은 전체 재고, 개별 시간대 남은 자리는 unit_stock - unit_booking_count
+        # 예약 가능 슬롯 (stock > 0 AND (unit_stock - unit_booking_count) > 0 AND is_sale_day)
         available_slots = [
             s for s in active_slots
-            if s.is_sale_day and (s.unit_stock - s.unit_booking_count) > 0
+            if is_slot_available_from_obj(s)
         ]
 
         # 예약 가능 슬롯 로그
