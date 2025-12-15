@@ -403,6 +403,85 @@ class ProxyManager:
             if matched_proxy == self.current_proxy:
                 self.current_proxy = None
 
+    def mark_slow(self, proxy: str, response_time: float) -> int:
+        """
+        느린 프록시 처리 - 4단계 점진적 페널티
+
+        Args:
+            proxy: 프록시 URL
+            response_time: 응답 시간 (초)
+
+        Returns:
+            int: 현재 페널티 단계 (1~4)
+                1: 풀 맨 뒤로 이동
+                2: 현재 풀에서 제거
+                3: 다음 풀에서도 제외 (세션 블랙리스트)
+                4: DB에 느림 표시 (향후 구현)
+        """
+        # 부분 매칭 지원
+        matched_proxy = None
+        for p in self.proxy_list:
+            if proxy in p or p in proxy:
+                matched_proxy = p
+                break
+
+        if not matched_proxy:
+            return 0
+
+        # 카운트 증가
+        self.slow_count[matched_proxy] = self.slow_count.get(matched_proxy, 0) + 1
+        count = self.slow_count[matched_proxy]
+
+        if count == 1:
+            # 1단계: 풀 맨 뒤로 이동
+            if matched_proxy in self.active_pool:
+                self.active_pool.remove(matched_proxy)
+                self.active_pool.append(matched_proxy)
+            logger.info(
+                f"프록시 느림 (1/4): {matched_proxy} - {response_time:.2f}s → 풀 맨 뒤로 이동"
+            )
+            return 1
+
+        elif count == 2:
+            # 2단계: 현재 풀에서 제거
+            if matched_proxy in self.active_pool:
+                self.active_pool.remove(matched_proxy)
+            # 임시 블랙리스트에 등록 (풀 갱신 시 복구 가능)
+            self.blacklist[matched_proxy] = time.time() + self.blacklist_duration
+            logger.warning(
+                f"프록시 느림 (2/4): {matched_proxy} - {response_time:.2f}s → 풀에서 제거"
+            )
+
+            if matched_proxy == self.current_proxy:
+                self.current_proxy = None
+            return 2
+
+        elif count == 3:
+            # 3단계: 다음 풀에서도 제외 (세션 블랙리스트 등록)
+            error_msg = f"slow:{response_time:.1f}s (누적 {count}회)"
+            self.session_blacklist[matched_proxy] = error_msg
+            self.blacklist[matched_proxy] = time.time() + self.blacklist_duration
+            logger.warning(
+                f"프록시 느림 (3/4): {matched_proxy} - {response_time:.2f}s → 세션 블랙리스트"
+            )
+
+            if matched_proxy in self.active_pool:
+                self.active_pool.remove(matched_proxy)
+            if matched_proxy == self.current_proxy:
+                self.current_proxy = None
+            return 3
+
+        else:
+            # 4단계 이상: DB에 느림 표시 (향후 구현)
+            # 현재는 세션 블랙리스트 유지
+            error_msg = f"slow:{response_time:.1f}s (누적 {count}회, DB 기록 대상)"
+            self.session_blacklist[matched_proxy] = error_msg
+            logger.warning(
+                f"프록시 느림 (4/4): {matched_proxy} - {response_time:.2f}s → DB 기록 대상"
+            )
+            # TODO: DB에 느림 상태 기록 (proxy_db_service.update_status 또는 tags 추가)
+            return 4
+
     def get_status(self) -> Dict:
         """현재 프록시 상태 반환"""
         return {
@@ -412,6 +491,8 @@ class ProxyManager:
             "blacklisted": len(self.blacklist),
             "session_blacklisted": len(self.session_blacklist),
             "session_blacklist_details": dict(self.session_blacklist),  # 프록시 -> 에러 메시지
+            "slow_count": len(self.slow_count),  # 느림 기록된 프록시 수
+            "slow_details": dict(self.slow_count),  # 프록시 -> 느림 횟수
             "current": self.current_proxy,
             "request_count": self.request_count,
             "next_rotation_in": self.rotation_interval
