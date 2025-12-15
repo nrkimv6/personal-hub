@@ -65,6 +65,9 @@ class ProxyManager:
         # 세션 블랙리스트 (실패한 프록시 -> 에러 메시지) - 세션 동안 영구
         self.session_blacklist: Dict[str, str] = {}
 
+        # 느린 프록시 카운트 (프록시 URL -> 느림 횟수) - 4단계 점진적 페널티용
+        self.slow_count: Dict[str, int] = {}
+
         # 파일 변경 감지용
         self._file_mtime: Optional[float] = None
 

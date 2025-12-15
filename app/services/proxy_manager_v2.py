@@ -717,22 +717,34 @@ class ProxyManagerV2:
                 3: 다음 풀에서도 제외 (_slow_proxies)
                 4: DB에 느림 표시 (향후 구현)
         """
-        # 프록시 찾기
+        # 프록시 찾기 (풀에서)
         matched_proxy = None
+        proxy_id = None
+
         for proxy in self._active_pool:
             if proxy.url == proxy_url or proxy.to_aiohttp_proxy() == proxy_url:
                 matched_proxy = proxy
+                proxy_id = proxy.id
                 break
 
-        # 풀에 없으면 proxy_list에서 찾기 (이미 제거된 경우)
+        # 풀에 없으면 이미 추적 중인 프록시인지 확인 (URL -> ID 매핑 필요)
         if not matched_proxy:
-            # _slow_count에서 URL로 매칭되는 ID 찾기
-            for proxy_id, count in self._slow_count.items():
-                # 이미 추적 중인 프록시면 카운트만 증가
-                pass
-            return 0
+            # _slow_count에서 이미 추적 중인 프록시 찾기
+            # URL을 ID로 매핑하기 위해 _url_to_id 캐시 활용
+            if not hasattr(self, '_url_to_id'):
+                self._url_to_id: Dict[str, int] = {}
 
-        proxy_id = matched_proxy.id
+            if proxy_url in self._url_to_id:
+                proxy_id = self._url_to_id[proxy_url]
+            else:
+                # 알 수 없는 프록시
+                return 0
+
+        # URL -> ID 매핑 저장
+        if not hasattr(self, '_url_to_id'):
+            self._url_to_id: Dict[str, int] = {}
+        if proxy_id:
+            self._url_to_id[proxy_url] = proxy_id
 
         # 카운트 증가
         self._slow_count[proxy_id] = self._slow_count.get(proxy_id, 0) + 1
@@ -740,7 +752,8 @@ class ProxyManagerV2:
 
         if count == 1:
             # 1단계: 풀 맨 뒤로 이동
-            self._move_to_back(matched_proxy)
+            if matched_proxy:
+                self._move_to_back(matched_proxy)
             logger.info(
                 f"Proxy {proxy_id} slow (1/4): {response_time:.2f}s → moved to back"
             )
@@ -748,8 +761,7 @@ class ProxyManagerV2:
 
         elif count == 2:
             # 2단계: 현재 풀에서 제거
-            if matched_proxy in self._active_pool:
-                self._active_pool = [p for p in self._active_pool if p.id != proxy_id]
+            self._active_pool = [p for p in self._active_pool if p.id != proxy_id]
             logger.warning(
                 f"Proxy {proxy_id} slow (2/4): {response_time:.2f}s → removed from pool"
             )
@@ -758,8 +770,7 @@ class ProxyManagerV2:
         elif count == 3:
             # 3단계: 다음 풀에서도 제외
             self._slow_proxies.add(proxy_id)
-            if matched_proxy in self._active_pool:
-                self._active_pool = [p for p in self._active_pool if p.id != proxy_id]
+            self._active_pool = [p for p in self._active_pool if p.id != proxy_id]
             logger.warning(
                 f"Proxy {proxy_id} slow (3/4): {response_time:.2f}s → excluded from next pool"
             )

@@ -219,6 +219,7 @@ def get_monitoring_stats(
         paused_count=paused_count,
         closed_count=closed_count,
         not_opened_count=not_opened_count,
+        inactive_count=inactive_count,
         error_count=error_count,
         avg_response_time_ms=float(avg_result) if avg_result else None,
         last_check_time=last_check_time
