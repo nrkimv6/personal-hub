@@ -1,34 +1,46 @@
-"""HTTP 302 테스트 스크립트"""
-import aiohttp
+"""비활성화 상품 GraphQL 응답 테스트"""
 import asyncio
+import sys
+sys.path.insert(0, 'D:/work/project/tools/monitor-page')
+
+from app.services.naver_graphql_client import get_naver_graphql_client
+import json
 
 async def test():
-    url = 'https://m.booking.naver.com/booking/13/bizes/1269828/items/6308953'
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Referer': 'https://m.booking.naver.com/',
-    }
+    client = get_naver_graphql_client()
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-            print(f'Status: {resp.status}')
-            print(f'Location: {resp.headers.get("Location", "N/A")}')
-            print(f'Content-Type: {resp.headers.get("Content-Type", "N/A")}')
+    # 비활성화 상품
+    business_id = '1269828'
+    biz_item_id = '6308953'
 
-            # 페이지 내용 확인
-            content = await resp.text()
-            print(f'\nContent length: {len(content)} bytes')
+    print(f'Testing item status: {business_id}/{biz_item_id}')
+    print('='*60)
 
-            # 비활성화 관련 키워드 검색
-            keywords = ['redirect', 'error', '비활성', '운영중지', '예약불가', 'closed', 'disabled']
-            for kw in keywords:
-                if kw.lower() in content.lower():
-                    print(f'Found keyword: {kw}')
+    # 1. 상품 목록 조회 (상태 확인)
+    items = await client.fetch_biz_items(business_id)
+    print(f'\nTotal items: {len(items)}')
 
-            # 처음 500자 출력
-            print(f'\nFirst 500 chars:\n{content[:500]}')
+    target_item = None
+    for item in items:
+        if str(item.biz_item_id) == biz_item_id:
+            target_item = item
+            break
+
+    if target_item:
+        print(f'\nTarget item found:')
+        print(f'  name: {target_item.name}')
+        print(f'  biz_item_id: {target_item.biz_item_id}')
+        print(f'  is_display: {target_item.is_display}')
+        print(f'  is_reservation_available: {target_item.is_reservation_available}')
+        # 모든 속성 출력
+        print(f'\nAll attributes:')
+        for attr in dir(target_item):
+            if not attr.startswith('_'):
+                print(f'  {attr}: {getattr(target_item, attr)}')
+    else:
+        print(f'Item {biz_item_id} NOT FOUND in items list!')
+
+    await client.close()
 
 if __name__ == '__main__':
     asyncio.run(test())
