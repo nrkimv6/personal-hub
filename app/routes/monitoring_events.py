@@ -197,6 +197,10 @@ def get_monitoring_stats(
     paused_count = query.filter(MonitoringEvent.status == "paused").count()
     closed_count = query.filter(MonitoringEvent.status == "closed").count()
     not_opened_count = query.filter(MonitoringEvent.status == "not_opened").count()
+    # 비활성화: http_check_failed (HTTP 체크 실패) + http_302 (302 리다이렉트 감지)
+    inactive_count = query.filter(
+        MonitoringEvent.status.in_(["http_check_failed", "http_302"])
+    ).count()
     error_count = query.filter(MonitoringEvent.status == "error").count()
 
     # 평균 응답 시간

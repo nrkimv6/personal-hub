@@ -112,6 +112,9 @@ class ProxyManagerV2:
         self._previous_pool_ids: Set[int] = set()  # 직전 풀 프록시 ID
         self._slow_proxies: Set[int] = set()  # 느린 프록시 ID (응답시간 > max_response_time)
 
+        # 느림 횟수 추적 (4단계 점진적 페널티용)
+        self._slow_count: Dict[int, int] = {}  # proxy_id → 느림 횟수
+
     @property
     def is_available(self) -> bool:
         """프록시 사용 가능 여부"""
@@ -699,6 +702,78 @@ class ProxyManagerV2:
                     logger.info(f"Proxy {proxy.id} removed from pool: {reason}")
                 break
 
+    def mark_slow(self, proxy_url: str, response_time: float) -> int:
+        """
+        느린 프록시 처리 - 4단계 점진적 페널티
+
+        Args:
+            proxy_url: 프록시 URL
+            response_time: 응답 시간 (초)
+
+        Returns:
+            int: 현재 페널티 단계 (1~4)
+                1: 풀 맨 뒤로 이동
+                2: 현재 풀에서 제거
+                3: 다음 풀에서도 제외 (_slow_proxies)
+                4: DB에 느림 표시 (향후 구현)
+        """
+        # 프록시 찾기
+        matched_proxy = None
+        for proxy in self._active_pool:
+            if proxy.url == proxy_url or proxy.to_aiohttp_proxy() == proxy_url:
+                matched_proxy = proxy
+                break
+
+        # 풀에 없으면 proxy_list에서 찾기 (이미 제거된 경우)
+        if not matched_proxy:
+            # _slow_count에서 URL로 매칭되는 ID 찾기
+            for proxy_id, count in self._slow_count.items():
+                # 이미 추적 중인 프록시면 카운트만 증가
+                pass
+            return 0
+
+        proxy_id = matched_proxy.id
+
+        # 카운트 증가
+        self._slow_count[proxy_id] = self._slow_count.get(proxy_id, 0) + 1
+        count = self._slow_count[proxy_id]
+
+        if count == 1:
+            # 1단계: 풀 맨 뒤로 이동
+            self._move_to_back(matched_proxy)
+            logger.info(
+                f"Proxy {proxy_id} slow (1/4): {response_time:.2f}s → moved to back"
+            )
+            return 1
+
+        elif count == 2:
+            # 2단계: 현재 풀에서 제거
+            if matched_proxy in self._active_pool:
+                self._active_pool = [p for p in self._active_pool if p.id != proxy_id]
+            logger.warning(
+                f"Proxy {proxy_id} slow (2/4): {response_time:.2f}s → removed from pool"
+            )
+            return 2
+
+        elif count == 3:
+            # 3단계: 다음 풀에서도 제외
+            self._slow_proxies.add(proxy_id)
+            if matched_proxy in self._active_pool:
+                self._active_pool = [p for p in self._active_pool if p.id != proxy_id]
+            logger.warning(
+                f"Proxy {proxy_id} slow (3/4): {response_time:.2f}s → excluded from next pool"
+            )
+            return 3
+
+        else:
+            # 4단계 이상: DB에 느림 표시 (향후 구현)
+            self._slow_proxies.add(proxy_id)
+            logger.warning(
+                f"Proxy {proxy_id} slow (4/4): {response_time:.2f}s → marked for DB update"
+            )
+            # TODO: DB에 느림 상태 기록 (tags에 'slow' 추가 등)
+            return 4
+
     def enable(self) -> None:
         """프록시 활성화"""
         self._enabled = True
@@ -728,6 +803,7 @@ class ProxyManagerV2:
             "weighted_selection": self._weighted_selection,
             "pending_stats_count": len(self._usage_stats),
             "slow_proxies_count": len(self._slow_proxies),
+            "slow_count_details": dict(self._slow_count),  # proxy_id → 느림 횟수
             "previous_pool_size": len(self._previous_pool_ids),
             "proxies": [
                 {

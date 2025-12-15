@@ -84,6 +84,7 @@ class MonitoringEventStats(BaseModel):
     paused_count: int = 0  # 예약 일시중지
     closed_count: int = 0  # 업체 비공개/운영중지
     not_opened_count: int = 0  # 예약 미오픈
+    inactive_count: int = 0  # 비활성화 (http_check_failed + http_302)
     error_count: int = 0
     avg_response_time_ms: Optional[float] = None
     last_check_time: Optional[datetime] = None
