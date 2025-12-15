@@ -907,15 +907,44 @@ class NaverGraphQLClient:
                     last_error = f"HTTP {response.status}"
                     continue
 
+            except asyncio.TimeoutError:
+                if proxy_url and self._proxy_manager:
+                    self._proxy_manager.mark_failed(proxy_url, "timeout")
+                last_error = "timeout"
+                continue
+
             except aiohttp.ClientError as e:
                 if proxy_url and self._proxy_manager:
                     self._proxy_manager.mark_failed(proxy_url, str(e)[:30])
                 last_error = str(e)[:30]
                 continue
 
-        # 모든 재시도 실패 - 안전하게 False 반환 (예약 차단)
-        logger.warning(f"[HTTP302] 모든 재시도 실패 - 안전 모드로 False 반환")
-        return False
+        # 모든 프록시 재시도 실패 - 프록시 없이 직접 연결 시도
+        if self._proxy_manager and tried_proxies:
+            logger.info(f"[HTTP302] 프록시 {len(tried_proxies)}개 모두 실패 → 직접 연결 시도")
+            try:
+                async with session.get(
+                    url,
+                    headers=headers,
+                    proxy=None,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                    allow_redirects=False
+                ) as response:
+                    if response.status == 302:
+                        logger.info(f"[HTTP302] 직접 연결: 302 감지 (비활성화)")
+                        return False
+                    if response.status == 200:
+                        logger.info(f"[HTTP302] 직접 연결: 200 OK")
+                        return True
+                    logger.warning(f"[HTTP302] 직접 연결: HTTP {response.status}")
+            except asyncio.TimeoutError:
+                logger.warning(f"[HTTP302] 직접 연결: timeout")
+            except aiohttp.ClientError as e:
+                logger.warning(f"[HTTP302] 직접 연결: {e}")
+
+        # 최종 실패 - None 반환 (확인 불가)
+        logger.warning(f"[HTTP302] 모든 재시도 실패 (직접 연결 포함) - 확인 불가")
+        return None
 
     async def fetch_schedule_dual(
         self,
