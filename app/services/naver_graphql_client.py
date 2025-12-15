@@ -30,6 +30,13 @@ if TYPE_CHECKING:
 # GraphQL 엔드포인트
 NAVER_GRAPHQL_ENDPOINT = "https://m.booking.naver.com/graphql"
 
+# 프록시 요청 타임아웃 (초) - 느린 프록시 감지용
+# 1초 초과 시 타임아웃 → 다른 프록시로 재시도
+PROXY_REQUEST_TIMEOUT = 1.0
+
+# 직접 연결 타임아웃 (초) - 프록시 없이 연결 시
+DIRECT_REQUEST_TIMEOUT = 30.0
+
 # User-Agent (모바일 브라우저 에뮬레이션)
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
@@ -393,7 +400,6 @@ class NaverGraphQLClient:
 
         last_error = None
         tried_proxies: set = set()  # 이미 시도한 프록시 추적
-        slow_proxy_threshold = 10.0  # 느린 프록시 임계값 (초)
 
         for attempt in range(max_retries + 1):
             # 프록시 URL 가져오기
@@ -410,6 +416,9 @@ class NaverGraphQLClient:
             # 마지막 사용한 프록시 저장 (추적용)
             self._last_used_proxy = proxy_url
 
+            # 타임아웃 설정: 프록시 사용 시 1초, 직접 연결 시 30초
+            request_timeout = PROXY_REQUEST_TIMEOUT if proxy_url else DIRECT_REQUEST_TIMEOUT
+
             # 응답 시간 측정 시작
             request_start_time = time.time()
 
@@ -419,7 +428,7 @@ class NaverGraphQLClient:
                     headers=headers,
                     json=payload,
                     proxy=proxy_url,
-                    timeout=aiohttp.ClientTimeout(total=30)
+                    timeout=aiohttp.ClientTimeout(total=request_timeout)
                 ) as response:
                     # 응답 시간 계산
                     response_time = time.time() - request_start_time
@@ -448,14 +457,26 @@ class NaverGraphQLClient:
                         logger.error(f"[NaverGraphQL] GraphQL errors: {data['errors']}")
                         return None
 
-                    # 성공 - 느린 프록시 체크 및 블랙리스트
-                    if proxy_url and self._proxy_manager and response_time > slow_proxy_threshold:
-                        logger.warning(
-                            f"[NaverGraphQL] 프록시 느림: {proxy_url} - {response_time:.2f}s > {slow_proxy_threshold}s"
-                        )
-                        self._proxy_manager.mark_failed(proxy_url, f"slow:{response_time:.1f}s")
+                    # 성공 로깅
+                    if proxy_url:
+                        logger.debug(f"[NaverGraphQL] 성공 - 프록시: {proxy_url}, 응답시간: {response_time:.2f}s")
 
                     return data.get("data")
+
+            except asyncio.TimeoutError:
+                # 타임아웃 = 느린 프록시 → mark_slow() 호출 + 재시도
+                response_time = time.time() - request_start_time
+                if proxy_url and self._proxy_manager:
+                    logger.warning(
+                        f"[NaverGraphQL] 프록시 타임아웃 ({response_time:.1f}s > {request_timeout}s): {proxy_url}"
+                    )
+                    self._proxy_manager.mark_slow(proxy_url, response_time)
+                    last_error = f"timeout:{response_time:.1f}s"
+                    continue  # 다른 프록시로 재시도
+                else:
+                    # 직접 연결 타임아웃은 재시도하지 않음
+                    logger.error(f"[NaverGraphQL] 직접 연결 타임아웃 for {operation_name}")
+                    return None
 
             except aiohttp.ClientError as e:
                 # 프록시 연결 실패 시 블랙리스트 등록 후 재시도
@@ -469,7 +490,26 @@ class NaverGraphQLClient:
                 logger.error(f"[NaverGraphQL] JSON decode error for {operation_name}: {e}")
                 return None  # JSON 에러는 재시도하지 않음
 
-        # 모든 재시도 실패
+        # 모든 프록시 재시도 실패 → 직접 연결로 폴백
+        if self._proxy_manager and tried_proxies:
+            logger.info(f"[NaverGraphQL] 프록시 {len(tried_proxies)}개 모두 실패 → 직접 연결 시도")
+            try:
+                async with session.post(
+                    f"{NAVER_GRAPHQL_ENDPOINT}?opName={operation_name}",
+                    headers=headers,
+                    json=payload,
+                    proxy=None,
+                    timeout=aiohttp.ClientTimeout(total=DIRECT_REQUEST_TIMEOUT)
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if "errors" not in data or not data["errors"]:
+                            logger.info(f"[NaverGraphQL] 직접 연결 성공")
+                            return data.get("data")
+            except Exception as e:
+                logger.error(f"[NaverGraphQL] 직접 연결도 실패: {e}")
+
+        # 최종 실패
         logger.error(f"[NaverGraphQL] {operation_name} 모든 재시도 실패 ({max_retries}회) - 마지막 에러: {last_error}")
         return None
 
