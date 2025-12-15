@@ -124,13 +124,13 @@ class CacheEntry:
 
 @dataclass
 class DualCheckResult:
-    """GraphQL + HTTP 동시 체크 결과"""
+    """GraphQL + 페이지 활성 동시 체크 결과"""
     can_book: bool  # 예약 가능 여부 (최종 판단)
     schedule: Optional[ScheduleInfo]  # GraphQL 스케줄 결과
     has_slots: bool  # 슬롯 존재 여부
-    http_ok: bool  # HTTP 302가 아닌지 (True면 정상, False면 302 또는 확인 실패)
-    http_checked: bool  # HTTP 체크 성공 여부 (True면 200 또는 302 확인됨)
-    error_reason: Optional[str]  # 실패 사유: "graphql_failed", "no_slots", "http_302", "http_check_failed"
+    http_ok: bool  # 상품 활성 여부 (True면 활성, False면 비활성화 또는 확인 실패)
+    http_checked: bool  # 페이지 체크 성공 여부 (True면 활성/비활성 확인됨)
+    error_reason: Optional[str]  # 실패 사유: "graphql_failed", "no_slots", "inactive", "page_check_failed"
 
 
 class NaverGraphQLClient:
@@ -866,7 +866,7 @@ class NaverGraphQLClient:
             logger.warning(f"[PageCheck] JSON 파싱 실패: {e}")
             return True  # 파싱 실패 시 활성으로 간주
 
-    async def check_http_302(
+    async def check_product_active(
         self,
         business_type_id: int,
         business_id: str,
@@ -878,8 +878,8 @@ class NaverGraphQLClient:
         HTTP 요청으로 상품 활성 상태를 체크합니다.
 
         체크 방법:
-        1. HTTP 302 리다이렉트 - 비활성화
-        2. HTTP 200이지만 페이지 내용에서 비활성화 감지 (JS redirect)
+        - 페이지 HTML의 __APOLLO_STATE__ 파싱
+        - ROOT_QUERY에 placeProfile/account 키 존재 여부로 활성 판단
 
         Args:
             business_type_id: 업체 타입 ID
@@ -917,7 +917,7 @@ class NaverGraphQLClient:
                 if proxy_url:
                     tried_proxies.add(proxy_url)
                 if attempt > 0:
-                    logger.debug(f"[HTTP302] 재시도 #{attempt}/{max_retries} - 프록시: {proxy_url}")
+                    logger.debug(f"[PageActive] 재시도 #{attempt}/{max_retries} - 프록시: {proxy_url}")
 
             try:
                 async with session.get(
@@ -925,27 +925,25 @@ class NaverGraphQLClient:
                     headers=headers,
                     proxy=proxy_url,
                     timeout=aiohttp.ClientTimeout(total=10),
-                    allow_redirects=False  # 302 감지를 위해 리다이렉트 비허용
+                    allow_redirects=False
                 ) as response:
-                    # 상세 로그 (디버깅용)
-                    location = response.headers.get('Location', '')
-                    logger.info(f"[HTTP302] status={response.status} | location={location[:60] if location else 'N/A'} | proxy={'Y' if proxy_url else 'N'}")
+                    logger.debug(f"[PageActive] status={response.status} | proxy={'Y' if proxy_url else 'N'}")
 
-                    # 302 리다이렉트 - 비활성화 감지
-                    if response.status == 302:
-                        logger.warning(f"[HTTP302] 302 감지 - 비활성화")
-                        return False
-
-                    # 200 OK - 페이지 내용 확인 필요
+                    # 200 OK - 페이지 내용 확인
                     if response.status == 200:
                         html_content = await response.text()
                         is_active = self._check_page_active(html_content)
                         if is_active:
-                            logger.debug(f"[HTTP302] 200 OK + 페이지 활성 확인")
+                            logger.debug(f"[PageActive] 활성 상품")
                             return True
                         else:
-                            logger.warning(f"[HTTP302] 200 OK but 페이지 비활성화 감지 (JS redirect)")
+                            logger.info(f"[PageActive] 비활성화 감지")
                             return False
+
+                    # 302 - 비활성화 (fallback)
+                    if response.status == 302:
+                        logger.info(f"[PageActive] 302 redirect - 비활성화")
+                        return False
 
                     # 403/429 - 프록시 실패로 재시도
                     if response.status in (403, 429):
@@ -955,7 +953,7 @@ class NaverGraphQLClient:
                         continue
 
                     # 기타 에러 - 재시도
-                    logger.warning(f"[HTTP302] HTTP {response.status} - 재시도")
+                    logger.warning(f"[PageActive] HTTP {response.status} - 재시도")
                     last_error = f"HTTP {response.status}"
                     continue
 
@@ -973,7 +971,7 @@ class NaverGraphQLClient:
 
         # 모든 프록시 재시도 실패 - 프록시 없이 직접 연결 시도
         if self._proxy_manager and tried_proxies:
-            logger.info(f"[HTTP302] 프록시 {len(tried_proxies)}개 모두 실패 → 직접 연결 시도")
+            logger.info(f"[PageActive] 프록시 {len(tried_proxies)}개 모두 실패 → 직접 연결 시도")
             try:
                 async with session.get(
                     url,
@@ -982,26 +980,26 @@ class NaverGraphQLClient:
                     timeout=aiohttp.ClientTimeout(total=10),
                     allow_redirects=False
                 ) as response:
-                    if response.status == 302:
-                        logger.info(f"[HTTP302] 직접 연결: 302 감지 (비활성화)")
-                        return False
                     if response.status == 200:
                         html_content = await response.text()
                         is_active = self._check_page_active(html_content)
                         if is_active:
-                            logger.info(f"[HTTP302] 직접 연결: 200 OK + 활성")
+                            logger.info(f"[PageActive] 직접 연결: 활성")
                             return True
                         else:
-                            logger.info(f"[HTTP302] 직접 연결: 200 OK but 비활성화 (JS redirect)")
+                            logger.info(f"[PageActive] 직접 연결: 비활성화")
                             return False
-                    logger.warning(f"[HTTP302] 직접 연결: HTTP {response.status}")
+                    if response.status == 302:
+                        logger.info(f"[PageActive] 직접 연결: 302 - 비활성화")
+                        return False
+                    logger.warning(f"[PageActive] 직접 연결: HTTP {response.status}")
             except asyncio.TimeoutError:
-                logger.warning(f"[HTTP302] 직접 연결: timeout")
+                logger.warning(f"[PageActive] 직접 연결: timeout")
             except aiohttp.ClientError as e:
-                logger.warning(f"[HTTP302] 직접 연결: {e}")
+                logger.warning(f"[PageActive] 직접 연결: {e}")
 
         # 최종 실패 - None 반환 (확인 불가)
-        logger.warning(f"[HTTP302] 모든 재시도 실패 (직접 연결 포함) - 확인 불가")
+        logger.warning(f"[PageActive] 모든 재시도 실패 - 확인 불가")
         return None
 
     async def fetch_schedule_dual(
@@ -1013,10 +1011,10 @@ class NaverGraphQLClient:
         days_ahead: int = 1
     ) -> DualCheckResult:
         """
-        GraphQL과 HTTP 요청을 동시에 실행하여 예약 가능 여부를 판단합니다.
+        GraphQL과 페이지 활성 체크를 동시에 실행하여 예약 가능 여부를 판단합니다.
 
         예약 가능 조건:
-        - GraphQL 성공 AND 슬롯 있음 AND HTTP 302 아님
+        - GraphQL 성공 AND 슬롯 있음 AND 상품 활성
 
         Args:
             business_type_id: 업체 타입 ID
@@ -1028,7 +1026,7 @@ class NaverGraphQLClient:
         Returns:
             DualCheckResult: 체크 결과
         """
-        # GraphQL과 HTTP 302 체크를 동시에 실행
+        # GraphQL과 페이지 활성 체크를 동시에 실행
         graphql_task = asyncio.create_task(
             self.fetch_schedule(
                 business_type_id=business_type_id,
@@ -1039,8 +1037,8 @@ class NaverGraphQLClient:
             )
         )
 
-        http_task = asyncio.create_task(
-            self.check_http_302(
+        page_task = asyncio.create_task(
+            self.check_product_active(
                 business_type_id=business_type_id,
                 business_id=business_id,
                 biz_item_id=biz_item_id,
@@ -1049,22 +1047,22 @@ class NaverGraphQLClient:
         )
 
         # 둘 다 완료될 때까지 대기
-        graphql_result, http_result = await asyncio.gather(
-            graphql_task, http_task, return_exceptions=True
+        graphql_result, page_result = await asyncio.gather(
+            graphql_task, page_task, return_exceptions=True
         )
 
         # 예외 처리
         if isinstance(graphql_result, Exception):
             logger.error(f"[NaverGraphQL] GraphQL 예외: {graphql_result}")
             graphql_result = None
-        if isinstance(http_result, Exception):
-            logger.error(f"[HTTP302] HTTP 예외: {http_result}")
-            http_result = None  # 예외 시 확인 실패
+        if isinstance(page_result, Exception):
+            logger.error(f"[PageActive] 예외: {page_result}")
+            page_result = None  # 예외 시 확인 실패
 
-        # HTTP 결과 해석
-        # http_result: True=200 OK, False=302, None=확인 실패
-        http_ok = http_result is True  # True일 때만 OK
-        http_checked = http_result is not None  # None이 아니면 체크 성공
+        # 페이지 결과 해석
+        # page_result: True=활성, False=비활성화, None=확인 실패
+        http_ok = page_result is True  # True일 때만 OK
+        http_checked = page_result is not None  # None이 아니면 체크 성공
 
         # 1. GraphQL 실패 → 전체 실패
         if graphql_result is None:
@@ -1095,32 +1093,32 @@ class NaverGraphQLClient:
                 error_reason="no_slots"
             )
 
-        # 4. 슬롯 있음 + HTTP 확인 실패 → 예약 불가 (확인 불가)
+        # 4. 슬롯 있음 + 페이지 확인 실패 → 예약 불가 (확인 불가)
         if not http_checked:
-            logger.warning(f"[NaverDual] GraphQL 성공 + 슬롯 {total_slots}개 + HTTP 확인 실패")
+            logger.warning(f"[NaverDual] GraphQL 성공 + 슬롯 {total_slots}개 + 페이지 확인 실패")
             return DualCheckResult(
                 can_book=False,
                 schedule=graphql_result,
                 has_slots=True,
                 http_ok=False,
                 http_checked=False,
-                error_reason="http_check_failed"
+                error_reason="page_check_failed"
             )
 
-        # 5. 슬롯 있음 + HTTP 302 → 예약 불가 (비활성화)
-        if http_result is False:
-            logger.warning(f"[NaverDual] GraphQL 성공 + 슬롯 {total_slots}개 + HTTP 302 감지 (비활성화)")
+        # 5. 슬롯 있음 + 상품 비활성화 → 예약 불가
+        if page_result is False:
+            logger.warning(f"[NaverDual] GraphQL 성공 + 슬롯 {total_slots}개 + 상품 비활성화")
             return DualCheckResult(
                 can_book=False,
                 schedule=graphql_result,
                 has_slots=True,
                 http_ok=False,
                 http_checked=True,
-                error_reason="http_302"
+                error_reason="inactive"
             )
 
-        # 6. 슬롯 있음 + HTTP OK → 예약 가능
-        logger.info(f"[NaverDual] GraphQL 성공 + 슬롯 {total_slots}개 + HTTP OK - 예약 가능")
+        # 6. 슬롯 있음 + 상품 활성 → 예약 가능
+        logger.info(f"[NaverDual] GraphQL 성공 + 슬롯 {total_slots}개 + 상품 활성 - 예약 가능")
         return DualCheckResult(
             can_book=True,
             schedule=graphql_result,

@@ -156,14 +156,14 @@ def mock_dual_result_no_slots(mock_schedule_info):
 
 
 @pytest.fixture
-def mock_dual_result_http_302(mock_schedule_info):
-    """HTTP 302인 DualCheckResult"""
+def mock_dual_result_inactive(mock_schedule_info):
+    """상품 비활성화인 DualCheckResult"""
     return DualCheckResult(
         can_book=False,
         schedule=mock_schedule_info,
         has_slots=True,
         http_ok=False,
-        error_reason="http_302"
+        error_reason="inactive"
     )
 
 
@@ -290,11 +290,11 @@ class TestCheckAvailability:
         assert result.estimated_hours[1] == "20:00"  # 종료
 
     @pytest.mark.asyncio
-    async def test_returns_unavailable_when_http_302(
-        self, anonymous_monitor, mock_graphql_client, mock_dual_result_http_302
+    async def test_returns_unavailable_when_inactive(
+        self, anonymous_monitor, mock_graphql_client, mock_dual_result_inactive
     ):
-        """HTTP 302일 때 available=False, http_ok=False 반환"""
-        mock_graphql_client.fetch_schedule_dual = AsyncMock(return_value=mock_dual_result_http_302)
+        """상품 비활성화일 때 available=False, http_ok=False 반환"""
+        mock_graphql_client.fetch_schedule_dual = AsyncMock(return_value=mock_dual_result_inactive)
 
         result = await anonymous_monitor.check_availability(
             business_type_id=13,
@@ -306,7 +306,7 @@ class TestCheckAvailability:
 
         assert result.available is False
         assert result.http_ok is False
-        # 슬롯은 있지만 예약 불가 (http_302)
+        # 슬롯은 있지만 예약 불가 (비활성화)
         assert len(result.slots) == 2
 
 

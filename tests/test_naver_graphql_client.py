@@ -637,7 +637,7 @@ class TestDualCheckResult:
         """
         [Conformance] error_reason이 예상된 값만 가지는지
         """
-        valid_reasons = ["graphql_failed", "no_slots", "http_302", None]
+        valid_reasons = ["graphql_failed", "no_slots", "inactive", "page_check_failed", None]
 
         for reason in valid_reasons:
             result = DualCheckResult(
@@ -776,17 +776,17 @@ class TestFetchScheduleDual:
         await client.close()
 
     @pytest.mark.asyncio
-    async def test_right_cannot_book_when_http_302(self, sample_schedule_info):
+    async def test_right_cannot_book_when_inactive(self, sample_schedule_info):
         """
-        [Right] GraphQL 성공 + 슬롯 있음 + HTTP 302 → can_book=False, error_reason="http_302"
+        [Right] GraphQL 성공 + 슬롯 있음 + 상품 비활성화 → can_book=False, error_reason="inactive"
         """
         client = NaverGraphQLClient()
 
         with patch.object(client, 'fetch_schedule', new_callable=AsyncMock) as mock_graphql, \
-             patch.object(client, 'fetch_schedule_http', new_callable=AsyncMock) as mock_http:
+             patch.object(client, 'check_product_active', new_callable=AsyncMock) as mock_page:
 
             mock_graphql.return_value = sample_schedule_info  # GraphQL 성공
-            mock_http.return_value = None  # HTTP 302 (실패)
+            mock_page.return_value = False  # 상품 비활성화
 
             result = await client.fetch_schedule_dual(
                 business_type_id=5,
@@ -798,7 +798,7 @@ class TestFetchScheduleDual:
             assert result.can_book is False
             assert result.has_slots is True
             assert result.http_ok is False
-            assert result.error_reason == "http_302"
+            assert result.error_reason == "inactive"
 
         await client.close()
 
@@ -875,17 +875,17 @@ class TestFetchScheduleDual:
         await client.close()
 
     @pytest.mark.asyncio
-    async def test_error_http_exception(self, sample_schedule_info):
+    async def test_error_page_check_exception(self, sample_schedule_info):
         """
-        [Error] HTTP에서 예외 발생 시 처리 (http_ok=False)
+        [Error] 페이지 체크에서 예외 발생 시 처리 (http_ok=False)
         """
         client = NaverGraphQLClient()
 
         with patch.object(client, 'fetch_schedule', new_callable=AsyncMock) as mock_graphql, \
-             patch.object(client, 'fetch_schedule_http', new_callable=AsyncMock) as mock_http:
+             patch.object(client, 'check_product_active', new_callable=AsyncMock) as mock_page:
 
             mock_graphql.return_value = sample_schedule_info
-            mock_http.side_effect = Exception("HTTP Error")
+            mock_page.side_effect = Exception("Page Check Error")
 
             result = await client.fetch_schedule_dual(
                 business_type_id=5,
@@ -896,7 +896,7 @@ class TestFetchScheduleDual:
 
             assert result.can_book is False
             assert result.http_ok is False
-            assert result.error_reason == "http_302"
+            assert result.error_reason == "page_check_failed"
 
         await client.close()
 

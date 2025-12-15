@@ -199,9 +199,11 @@ def get_monitoring_stats(
     paused_count = query.filter(MonitoringEvent.status == "paused").count()
     closed_count = query.filter(MonitoringEvent.status == "closed").count()
     not_opened_count = query.filter(MonitoringEvent.status == "not_opened").count()
-    # 비활성화: http_302 (302 리다이렉트 = 상품 비활성화/매진)
-    # http_check_failed는 HTTP 체크 실패 (타임아웃/에러)이므로 별도 분류
-    inactive_count = query.filter(MonitoringEvent.status == "http_302").count()
+    # 비활성화: inactive (상품 비활성화 감지)
+    # 이전 상태명 http_302도 포함하여 호환성 유지
+    inactive_count = query.filter(
+        MonitoringEvent.status.in_(["inactive", "http_302", "inactive_blocked"])
+    ).count()
     error_count = query.filter(MonitoringEvent.status == "error").count()
 
     # 평균 응답 시간
