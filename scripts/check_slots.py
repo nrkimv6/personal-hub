@@ -4,6 +4,8 @@
 Usage:
     cd D:/work/project/tools/monitor-page
     python scripts/check_slots.py
+   python scripts/check_slots.py -u "https://booking.naver.com/booking/12/bizes/1551499/items/7277503"
+
 
 릴리영N강남 (business_id=1269828):
 - 에스테덤 (6309738)
@@ -17,7 +19,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 # 프로젝트 루트를 path에 추가
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__fiscripts/check_slots.pyle__).parent.parent))
 
 from app.services.naver_graphql_client import NaverGraphQLClient
 
