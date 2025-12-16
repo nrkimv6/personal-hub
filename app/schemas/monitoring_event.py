@@ -29,6 +29,11 @@ class MonitoringEventBase(BaseModel):
     proxy_url: Optional[str] = None  # 사용한 프록시 URL (익명 모니터링 시)
     # GraphQL 원본 응답 (2025-12-16 추가)
     graphql_response: Optional[Any] = None  # GraphQL API 원본 응답 데이터
+    # 타이밍 상세 (2025-12-16 추가)
+    graphql_time_ms: Optional[float] = None  # GraphQL 호출 시간 (ms)
+    proxy_retry_count: Optional[int] = None  # 프록시 재시도 횟수
+    booking_time_ms: Optional[float] = None  # 예약 실행 시간 (ms)
+    booking_attempt_count: Optional[int] = None  # 예약 시도 슬롯 수
 
 
 class MonitoringEventCreate(MonitoringEventBase):

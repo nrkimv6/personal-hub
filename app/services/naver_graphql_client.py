@@ -113,6 +113,8 @@ class ScheduleInfo:
     proxy_url: Optional[str] = None  # 사용한 프록시 URL
     # GraphQL 원본 응답 (2025-12-16 추가)
     raw_response: Optional[Dict[str, Any]] = None  # GraphQL API 원본 응답 데이터
+    # 타이밍 상세 (2025-12-16 추가)
+    retry_count: int = 0  # 프록시 재시도 횟수
 
 
 @dataclass
@@ -305,6 +307,7 @@ class NaverGraphQLClient:
         self._own_session = session is None
         self._proxy_manager = proxy_manager
         self._last_used_proxy: Optional[str] = None  # 마지막 사용한 프록시 URL
+        self._last_retry_count: int = 0  # 마지막 요청의 재시도 횟수
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         """세션이 없으면 생성"""
@@ -466,6 +469,8 @@ class NaverGraphQLClient:
                     if proxy_url:
                         logger.debug(f"[NaverGraphQL] 성공 - 프록시: {proxy_url}, 응답시간: {response_time:.2f}s")
 
+                    # 재시도 횟수 저장 (attempt는 0부터 시작하므로 실제 재시도 횟수)
+                    self._last_retry_count = attempt
                     return data.get("data")
 
             except asyncio.TimeoutError:
@@ -510,6 +515,8 @@ class NaverGraphQLClient:
                         data = await response.json()
                         if "errors" not in data or not data["errors"]:
                             logger.info(f"[NaverGraphQL] 직접 연결 성공")
+                            # 프록시 실패 후 직접 연결 성공: 재시도 횟수 = 프록시 시도 수
+                            self._last_retry_count = len(tried_proxies)
                             return data.get("data")
             except Exception as e:
                 logger.error(f"[NaverGraphQL] 직접 연결도 실패: {e}")
@@ -748,8 +755,9 @@ class NaverGraphQLClient:
         }
 
         data = await self._execute_query(self.SCHEDULE_QUERY, variables, "schedule")
-        # 이 호출에 사용된 프록시 URL 저장
+        # 이 호출에 사용된 프록시 URL 및 재시도 횟수 저장
         used_proxy = self._last_used_proxy
+        retry_count = self._last_retry_count
 
         if not data or not data.get("schedule"):
             logger.warning(f"[NaverGraphQL] No schedule data for {business_id}/{biz_item_id}")
@@ -765,7 +773,8 @@ class NaverGraphQLClient:
                 slots=[],
                 slots_by_date={},
                 proxy_url=used_proxy,
-                raw_response=data
+                raw_response=data,
+                retry_count=retry_count
             )
 
         slots = []
@@ -825,7 +834,8 @@ class NaverGraphQLClient:
             slots=slots,
             slots_by_date=slots_by_date,
             proxy_url=used_proxy,
-            raw_response=data
+            raw_response=data,
+            retry_count=retry_count
         )
 
     def _check_page_active(self, html_content: str) -> bool:

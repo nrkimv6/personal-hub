@@ -52,6 +52,12 @@ class MonitoringEvent(Base):
     # GraphQL 원본 응답 (2025-12-16 추가)
     graphql_response = Column(Text, nullable=True)  # JSON: GraphQL API 원본 응답 데이터
 
+    # 타이밍 상세 (2025-12-16 추가)
+    graphql_time_ms = Column(Float, nullable=True)  # GraphQL 호출 시간 (ms)
+    proxy_retry_count = Column(Integer, nullable=True)  # 프록시 재시도 횟수
+    booking_time_ms = Column(Float, nullable=True)  # 예약 실행 시간 (ms)
+    booking_attempt_count = Column(Integer, nullable=True)  # 예약 시도 슬롯 수
+
     # 관계
     schedule = relationship("MonitorSchedule")
 
