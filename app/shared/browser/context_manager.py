@@ -599,3 +599,86 @@ class ContextManager:
         except Exception as e:
             logger.error(f"창 위치 이동 실패: {e}")
             return False
+
+    async def take_screenshot(self, filename_prefix: str = "screenshot") -> Optional[str]:
+        """
+        현재 브라우저 페이지의 스크린샷을 저장합니다.
+
+        Args:
+            filename_prefix: 파일명 접두사 (타임스탬프가 자동 추가됨)
+
+        Returns:
+            저장된 파일 경로, 실패 시 None
+        """
+        try:
+            if not self.browser_context:
+                logger.warning("브라우저 컨텍스트가 없어 스크린샷 불가")
+                return None
+
+            pages = self.browser_context.pages
+            if not pages:
+                logger.warning("열린 페이지가 없어 스크린샷 불가")
+                return None
+
+            # 스크린샷 저장 디렉토리 생성
+            screenshot_dir = Path(settings.BASE_DIR) / "logs" / "screenshots"
+            screenshot_dir.mkdir(parents=True, exist_ok=True)
+
+            # 타임스탬프 포함 파일명 생성
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # 밀리초까지
+            filename = f"{filename_prefix}_{timestamp}.png"
+            filepath = screenshot_dir / filename
+
+            # 첫 번째 페이지 스크린샷 (활성 탭)
+            page = pages[0]
+            await page.screenshot(path=str(filepath), full_page=False)
+
+            logger.info(f"스크린샷 저장됨: {filepath}")
+            return str(filepath)
+        except Exception as e:
+            logger.error(f"스크린샷 저장 실패: {e}")
+            return None
+
+    async def take_screenshots_all_pages(self, filename_prefix: str = "screenshot") -> list[str]:
+        """
+        모든 열린 페이지의 스크린샷을 저장합니다.
+
+        Args:
+            filename_prefix: 파일명 접두사
+
+        Returns:
+            저장된 파일 경로 목록
+        """
+        saved_paths = []
+        try:
+            if not self.browser_context:
+                logger.warning("브라우저 컨텍스트가 없어 스크린샷 불가")
+                return saved_paths
+
+            pages = self.browser_context.pages
+            if not pages:
+                logger.warning("열린 페이지가 없어 스크린샷 불가")
+                return saved_paths
+
+            # 스크린샷 저장 디렉토리 생성
+            screenshot_dir = Path(settings.BASE_DIR) / "logs" / "screenshots"
+            screenshot_dir.mkdir(parents=True, exist_ok=True)
+
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+
+            for idx, page in enumerate(pages):
+                try:
+                    filename = f"{filename_prefix}_{timestamp}_tab{idx}.png"
+                    filepath = screenshot_dir / filename
+                    await page.screenshot(path=str(filepath), full_page=False)
+                    saved_paths.append(str(filepath))
+                    logger.info(f"스크린샷 저장됨: {filepath}")
+                except Exception as page_err:
+                    logger.warning(f"탭 {idx} 스크린샷 실패: {page_err}")
+
+            return saved_paths
+        except Exception as e:
+            logger.error(f"스크린샷 저장 실패: {e}")
+            return saved_paths
