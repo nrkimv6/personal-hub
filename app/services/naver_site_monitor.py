@@ -117,6 +117,86 @@ def filter_slots_by_time_range(slots: List[str], time_range_str: Optional[str]) 
         return slots
 
 
+def filter_slots_by_times(slots: List[str], target_times: Optional[List[str]]) -> List[str]:
+    """
+    슬롯 리스트에서 target_times 목록에 있는 시간만 필터링하여 반환합니다.
+
+    Args:
+        slots: 슬롯 리스트 (예: ["2025-11-30 09:00:00 (2매)", "2025-11-30 11:00:00 (1매)"])
+               또는 dict 리스트 (예: [{"time": "09:00", ...}, {"time": "11:00", ...}])
+        target_times: 목표 시간 리스트 (예: ["11:00", "13:00"])
+
+    Returns:
+        list: target_times에 해당하는 슬롯만 포함된 리스트
+    """
+    if not target_times:
+        return slots  # 목표 시간 없으면 전체 반환
+
+    if not slots:
+        return []
+
+    # target_times를 HH:MM 형식으로 정규화
+    normalized_targets = set()
+    for t in target_times:
+        t_clean = t.strip()
+        # HH:MM:SS → HH:MM
+        if len(t_clean) == 8 and t_clean[2] == ':' and t_clean[5] == ':':
+            t_clean = t_clean[:5]
+        # H:MM → HH:MM
+        if len(t_clean) == 4 and t_clean[1] == ':':
+            t_clean = '0' + t_clean
+        normalized_targets.add(t_clean)
+
+    filtered_slots = []
+
+    for slot in slots:
+        # dict 형태 지원 (anonymous 모드에서 사용)
+        if isinstance(slot, dict):
+            slot_time = slot.get('time', '')
+            # HH:MM 형식으로 정규화
+            if len(slot_time) == 8 and slot_time[2] == ':':
+                slot_time = slot_time[:5]
+            if slot_time in normalized_targets:
+                filtered_slots.append(slot)
+                logger.debug(f"[FILTER-TIMES] ✓ 슬롯 포함: {slot} (time={slot_time})")
+            continue
+
+        # 문자열 형태
+        slot_str = str(slot).lower()
+
+        # 오전/오후 패턴 매칭
+        am_pm_match = re.search(r'(오전|오후|am|pm)\s*(\d{1,2}):(\d{2})', slot_str)
+        if am_pm_match:
+            period = am_pm_match.group(1)
+            hour = int(am_pm_match.group(2))
+            minute = int(am_pm_match.group(3))
+
+            # 24시간 형식으로 변환
+            if period in ['오후', 'pm']:
+                if hour != 12:
+                    hour += 12
+            elif period in ['오전', 'am']:
+                if hour == 12:
+                    hour = 0
+
+            extracted_time = f"{hour:02d}:{minute:02d}"
+        else:
+            # 일반 시간 패턴 (HH:MM:SS 또는 HH:MM)
+            time_match = re.search(r'(\d{1,2}):(\d{2})(?::\d{2})?', str(slot))
+            if not time_match:
+                continue  # 시간 파싱 불가 → 스킵
+
+            hour = int(time_match.group(1))
+            minute = int(time_match.group(2))
+            extracted_time = f"{hour:02d}:{minute:02d}"
+
+        if extracted_time in normalized_targets:
+            filtered_slots.append(slot)
+            logger.debug(f"[FILTER-TIMES] ✓ 슬롯 포함: {slot} (time={extracted_time})")
+
+    return filtered_slots
+
+
 @dataclass
 class BizItemsCacheEntry:
     """bizItems API 캐시 엔트리 (REQ-MON-006)"""

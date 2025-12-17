@@ -661,6 +661,202 @@ class TestLifecycle:
 
 
 # ============================================================
+# 6. filter_slots_by_times 테스트
+# ============================================================
+
+class TestFilterSlotsByTimes:
+    """filter_slots_by_times 함수 테스트 (특정 시간 목록 필터링)"""
+
+    # --- Right: 결과가 올바른가? ---
+
+    def test_right_basic_filter(self):
+        """
+        [Right] 기본 특정 시간 필터링
+        """
+        from app.services.naver_site_monitor import filter_slots_by_times
+
+        slots = [
+            "2025-12-10 09:00:00 (2매)",
+            "2025-12-10 11:00:00 (1매)",
+            "2025-12-10 13:00:00 (3매)",
+            "2025-12-10 19:00:00 (1매)",
+        ]
+
+        result = filter_slots_by_times(slots, ["11:00"])
+
+        assert len(result) == 1
+        assert "11:00:00" in result[0]
+
+    def test_right_multiple_times(self):
+        """
+        [Right] 여러 시간 필터링
+        """
+        from app.services.naver_site_monitor import filter_slots_by_times
+
+        slots = [
+            "2025-12-10 09:00:00 (2매)",
+            "2025-12-10 11:00:00 (1매)",
+            "2025-12-10 13:00:00 (3매)",
+            "2025-12-10 19:00:00 (1매)",
+        ]
+
+        result = filter_slots_by_times(slots, ["11:00", "19:00"])
+
+        assert len(result) == 2
+        assert any("11:00:00" in s for s in result)
+        assert any("19:00:00" in s for s in result)
+
+    def test_right_ampm_format(self):
+        """
+        [Right] 오전/오후 형식 슬롯에서 특정 시간 필터링
+        """
+        from app.services.naver_site_monitor import filter_slots_by_times
+
+        slots = [
+            "오전 9:00",
+            "오전 11:00",
+            "오후 1:00",
+            "오후 7:00",
+        ]
+
+        # 11:00 = 오전 11:00
+        result = filter_slots_by_times(slots, ["11:00"])
+
+        assert len(result) == 1
+        assert "오전 11:00" in result
+
+    def test_right_dict_format(self):
+        """
+        [Right] dict 형태 슬롯 필터링 (anonymous 모드)
+        """
+        from app.services.naver_site_monitor import filter_slots_by_times
+
+        slots = [
+            {"time": "09:00", "date": "2025-12-10"},
+            {"time": "11:00", "date": "2025-12-10"},
+            {"time": "13:00", "date": "2025-12-10"},
+            {"time": "19:00", "date": "2025-12-10"},
+        ]
+
+        result = filter_slots_by_times(slots, ["11:00"])
+
+        assert len(result) == 1
+        assert result[0]["time"] == "11:00"
+
+    def test_right_dict_with_seconds(self):
+        """
+        [Right] dict 형태에서 HH:MM:SS 형식 처리
+        """
+        from app.services.naver_site_monitor import filter_slots_by_times
+
+        slots = [
+            {"time": "09:00:00", "date": "2025-12-10"},
+            {"time": "11:00:00", "date": "2025-12-10"},
+            {"time": "13:00:00", "date": "2025-12-10"},
+        ]
+
+        result = filter_slots_by_times(slots, ["11:00"])
+
+        assert len(result) == 1
+        assert result[0]["time"] == "11:00:00"
+
+    # --- Boundary: 경계값 테스트 ---
+
+    def test_boundary_empty_slots(self):
+        """
+        [Boundary] 빈 슬롯 리스트
+        """
+        from app.services.naver_site_monitor import filter_slots_by_times
+
+        result = filter_slots_by_times([], ["11:00"])
+
+        assert result == []
+
+    def test_boundary_empty_times(self):
+        """
+        [Boundary] 빈 시간 목록 → 전체 슬롯 반환
+        """
+        from app.services.naver_site_monitor import filter_slots_by_times
+
+        slots = [
+            "2025-12-10 09:00:00 (2매)",
+            "2025-12-10 11:00:00 (1매)",
+        ]
+
+        result = filter_slots_by_times(slots, [])
+
+        assert result == slots
+
+    def test_boundary_none_times(self):
+        """
+        [Boundary] None 시간 목록 → 전체 슬롯 반환
+        """
+        from app.services.naver_site_monitor import filter_slots_by_times
+
+        slots = [
+            "2025-12-10 09:00:00 (2매)",
+            "2025-12-10 11:00:00 (1매)",
+        ]
+
+        result = filter_slots_by_times(slots, None)
+
+        assert result == slots
+
+    def test_boundary_no_match(self):
+        """
+        [Boundary] 매칭되는 슬롯 없음
+        """
+        from app.services.naver_site_monitor import filter_slots_by_times
+
+        slots = [
+            "2025-12-10 09:00:00 (2매)",
+            "2025-12-10 10:00:00 (1매)",
+        ]
+
+        result = filter_slots_by_times(slots, ["11:00"])
+
+        assert result == []
+
+    def test_boundary_time_format_variations(self):
+        """
+        [Boundary] 시간 형식 변형 (HH:MM:SS, H:MM)
+        """
+        from app.services.naver_site_monitor import filter_slots_by_times
+
+        slots = [
+            "2025-12-10 09:00:00 (2매)",
+            "2025-12-10 11:00:00 (1매)",
+        ]
+
+        # HH:MM:SS 형식으로 지정해도 동작
+        result = filter_slots_by_times(slots, ["11:00:00"])
+        assert len(result) == 1
+
+        # 짧은 형식으로 지정해도 동작
+        result2 = filter_slots_by_times(slots, ["9:00"])
+        assert len(result2) == 1
+
+    # --- Error: 에러 조건 테스트 ---
+
+    def test_error_invalid_slot_format(self):
+        """
+        [Error] 파싱 불가 슬롯 → 건너뜀
+        """
+        from app.services.naver_site_monitor import filter_slots_by_times
+
+        slots = [
+            "invalid slot",
+            "2025-12-10 11:00:00 (1매)",
+            "no time here",
+        ]
+
+        result = filter_slots_by_times(slots, ["11:00"])
+
+        assert len(result) == 1
+        assert "11:00:00" in result[0]
+
+
+# ============================================================
 # 실행
 # ============================================================
 
