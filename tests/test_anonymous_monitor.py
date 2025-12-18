@@ -132,6 +132,7 @@ def mock_dual_result_available(mock_schedule_info):
         schedule=mock_schedule_info,
         has_slots=True,
         http_ok=True,
+        http_checked=True,
         error_reason=None
     )
 
@@ -151,6 +152,7 @@ def mock_dual_result_no_slots(mock_schedule_info):
         schedule=empty_schedule,
         has_slots=False,
         http_ok=True,
+        http_checked=True,
         error_reason="no_slots"
     )
 
@@ -163,6 +165,7 @@ def mock_dual_result_inactive(mock_schedule_info):
         schedule=mock_schedule_info,
         has_slots=True,
         http_ok=False,
+        http_checked=True,
         error_reason="inactive"
     )
 
@@ -237,6 +240,7 @@ class TestCheckAvailability:
             schedule=schedule,
             has_slots=False,
             http_ok=True,
+            http_checked=True,
             error_reason="no_slots"
         )
         mock_graphql_client.fetch_schedule_dual = AsyncMock(return_value=dual_result)
@@ -327,6 +331,7 @@ class TestBoundaryConditions:
             schedule=None,
             has_slots=False,
             http_ok=True,
+            http_checked=True,
             error_reason="graphql_failed"
         )
         mock_graphql_client.fetch_schedule_dual = AsyncMock(return_value=dual_result)
@@ -345,10 +350,10 @@ class TestBoundaryConditions:
 
     @pytest.mark.asyncio
     async def test_date_not_in_schedule(
-        self, anonymous_monitor, mock_graphql_client, mock_schedule_info, mock_dual_result_available
+        self, anonymous_monitor, mock_graphql_client, mock_dual_result_no_slots
     ):
         """요청한 날짜가 스케줄에 없는 경우"""
-        mock_graphql_client.fetch_schedule_dual = AsyncMock(return_value=mock_dual_result_available)
+        mock_graphql_client.fetch_schedule_dual = AsyncMock(return_value=mock_dual_result_no_slots)
 
         result = await anonymous_monitor.check_availability(
             business_type_id=13,
@@ -374,7 +379,7 @@ class TestErrorHandling:
         self, anonymous_monitor, mock_graphql_client
     ):
         """타임아웃 에러 처리"""
-        mock_graphql_client.fetch_schedule = AsyncMock(
+        mock_graphql_client.fetch_schedule_dual = AsyncMock(
             side_effect=asyncio.TimeoutError()
         )
 
@@ -394,7 +399,7 @@ class TestErrorHandling:
         self, anonymous_monitor, mock_graphql_client
     ):
         """일반 예외 처리"""
-        mock_graphql_client.fetch_schedule = AsyncMock(
+        mock_graphql_client.fetch_schedule_dual = AsyncMock(
             side_effect=Exception("Network error")
         )
 
@@ -419,10 +424,10 @@ class TestCaching:
 
     @pytest.mark.asyncio
     async def test_cache_hit(
-        self, anonymous_monitor, mock_graphql_client, mock_schedule_info
+        self, anonymous_monitor, mock_graphql_client, mock_dual_result_available
     ):
         """캐시 히트 - API 재호출 없음"""
-        mock_graphql_client.fetch_schedule = AsyncMock(return_value=mock_schedule_info)
+        mock_graphql_client.fetch_schedule_dual = AsyncMock(return_value=mock_dual_result_available)
 
         # 첫 번째 호출
         result1 = await anonymous_monitor.check_availability(
@@ -443,15 +448,15 @@ class TestCaching:
         )
 
         # API는 한 번만 호출
-        assert mock_graphql_client.fetch_schedule.call_count == 1
+        assert mock_graphql_client.fetch_schedule_dual.call_count == 1
         assert result1.available == result2.available
 
     @pytest.mark.asyncio
     async def test_cache_bypass(
-        self, anonymous_monitor, mock_graphql_client, mock_schedule_info
+        self, anonymous_monitor, mock_graphql_client, mock_dual_result_available
     ):
         """캐시 우회 - 매번 API 호출"""
-        mock_graphql_client.fetch_schedule = AsyncMock(return_value=mock_schedule_info)
+        mock_graphql_client.fetch_schedule_dual = AsyncMock(return_value=mock_dual_result_available)
 
         # use_cache=False로 두 번 호출
         await anonymous_monitor.check_availability(
@@ -471,7 +476,7 @@ class TestCaching:
         )
 
         # API가 두 번 호출됨
-        assert mock_graphql_client.fetch_schedule.call_count == 2
+        assert mock_graphql_client.fetch_schedule_dual.call_count == 2
 
 
 # ============================================================
@@ -534,7 +539,7 @@ class TestConcurrency:
 
     @pytest.mark.asyncio
     async def test_semaphore_limits_concurrent_requests(
-        self, mock_graphql_client, mock_schedule_info
+        self, mock_graphql_client, mock_dual_result_available
     ):
         """세마포어가 동시 요청 수 제한"""
         # 최대 동시 요청 수를 2로 설정
@@ -544,9 +549,9 @@ class TestConcurrency:
         # 지연 응답 설정
         async def delayed_response(*args, **kwargs):
             await asyncio.sleep(0.1)
-            return mock_schedule_info
+            return mock_dual_result_available
 
-        mock_graphql_client.fetch_schedule = AsyncMock(side_effect=delayed_response)
+        mock_graphql_client.fetch_schedule_dual = AsyncMock(side_effect=delayed_response)
 
         # 5개 동시 요청
         tasks = [

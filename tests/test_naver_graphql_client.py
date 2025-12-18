@@ -623,12 +623,14 @@ class TestDualCheckResult:
             schedule=None,
             has_slots=True,
             http_ok=True,
+            http_checked=True,
             error_reason=None
         )
 
         assert result.can_book is True
         assert result.has_slots is True
         assert result.http_ok is True
+        assert result.http_checked is True
         assert result.error_reason is None
 
     # --- Conformance: 형식 준수 ---
@@ -645,6 +647,7 @@ class TestDualCheckResult:
                 schedule=None,
                 has_slots=False,
                 http_ok=True,
+                http_checked=True,
                 error_reason=reason
             )
             assert result.error_reason in valid_reasons
@@ -703,10 +706,10 @@ class TestFetchScheduleDual:
         client = NaverGraphQLClient()
 
         with patch.object(client, 'fetch_schedule', new_callable=AsyncMock) as mock_graphql, \
-             patch.object(client, 'fetch_schedule_http', new_callable=AsyncMock) as mock_http:
+             patch.object(client, 'check_product_active', new_callable=AsyncMock) as mock_page:
 
             mock_graphql.return_value = sample_schedule_info
-            mock_http.return_value = sample_schedule_info  # HTTP도 성공
+            mock_page.return_value = True  # 상품 활성
 
             result = await client.fetch_schedule_dual(
                 business_type_id=5,
@@ -718,6 +721,7 @@ class TestFetchScheduleDual:
             assert result.can_book is True
             assert result.has_slots is True
             assert result.http_ok is True
+            assert result.http_checked is True
             assert result.error_reason is None
             assert result.schedule is not None
 
@@ -731,10 +735,10 @@ class TestFetchScheduleDual:
         client = NaverGraphQLClient()
 
         with patch.object(client, 'fetch_schedule', new_callable=AsyncMock) as mock_graphql, \
-             patch.object(client, 'fetch_schedule_http', new_callable=AsyncMock) as mock_http:
+             patch.object(client, 'check_product_active', new_callable=AsyncMock) as mock_page:
 
             mock_graphql.return_value = None  # GraphQL 실패
-            mock_http.return_value = sample_schedule_info
+            mock_page.return_value = True  # 상품 활성
 
             result = await client.fetch_schedule_dual(
                 business_type_id=5,
@@ -757,10 +761,10 @@ class TestFetchScheduleDual:
         client = NaverGraphQLClient()
 
         with patch.object(client, 'fetch_schedule', new_callable=AsyncMock) as mock_graphql, \
-             patch.object(client, 'fetch_schedule_http', new_callable=AsyncMock) as mock_http:
+             patch.object(client, 'check_product_active', new_callable=AsyncMock) as mock_page:
 
             mock_graphql.return_value = empty_schedule_info  # 슬롯 없음
-            mock_http.return_value = empty_schedule_info
+            mock_page.return_value = True  # 상품 활성
 
             result = await client.fetch_schedule_dual(
                 business_type_id=5,
@@ -828,10 +832,10 @@ class TestFetchScheduleDual:
         client = NaverGraphQLClient()
 
         with patch.object(client, 'fetch_schedule', new_callable=AsyncMock) as mock_graphql, \
-             patch.object(client, 'fetch_schedule_http', new_callable=AsyncMock) as mock_http:
+             patch.object(client, 'check_product_active', new_callable=AsyncMock) as mock_page:
 
             mock_graphql.return_value = schedule
-            mock_http.return_value = schedule
+            mock_page.return_value = True  # 상품 활성
 
             result = await client.fetch_schedule_dual(
                 business_type_id=5,
@@ -857,10 +861,10 @@ class TestFetchScheduleDual:
         client = NaverGraphQLClient()
 
         with patch.object(client, 'fetch_schedule', new_callable=AsyncMock) as mock_graphql, \
-             patch.object(client, 'fetch_schedule_http', new_callable=AsyncMock) as mock_http:
+             patch.object(client, 'check_product_active', new_callable=AsyncMock) as mock_page:
 
             mock_graphql.side_effect = Exception("GraphQL Error")
-            mock_http.return_value = sample_schedule_info
+            mock_page.return_value = True  # 상품 활성
 
             result = await client.fetch_schedule_dual(
                 business_type_id=5,
@@ -905,7 +909,7 @@ class TestFetchScheduleDual:
     @pytest.mark.asyncio
     async def test_cross_check_both_methods_called_concurrently(self, sample_schedule_info):
         """
-        [Cross-check] GraphQL과 HTTP가 동시에 호출되는지
+        [Cross-check] GraphQL과 페이지 체크가 동시에 호출되는지
         """
         client = NaverGraphQLClient()
         call_times = []
@@ -915,13 +919,13 @@ class TestFetchScheduleDual:
             await asyncio.sleep(0.1)
             return sample_schedule_info
 
-        async def mock_http(*args, **kwargs):
-            call_times.append(("http", asyncio.get_event_loop().time()))
+        async def mock_page(*args, **kwargs):
+            call_times.append(("page", asyncio.get_event_loop().time()))
             await asyncio.sleep(0.1)
-            return sample_schedule_info
+            return True  # 상품 활성
 
         with patch.object(client, 'fetch_schedule', side_effect=mock_graphql), \
-             patch.object(client, 'fetch_schedule_http', side_effect=mock_http):
+             patch.object(client, 'check_product_active', side_effect=mock_page):
 
             await client.fetch_schedule_dual(
                 business_type_id=5,
@@ -949,10 +953,10 @@ class TestFetchScheduleDual:
         client = NaverGraphQLClient()
 
         with patch.object(client, 'fetch_schedule', new_callable=AsyncMock) as mock_graphql, \
-             patch.object(client, 'fetch_schedule_http', new_callable=AsyncMock) as mock_http:
+             patch.object(client, 'check_product_active', new_callable=AsyncMock) as mock_page:
 
             mock_graphql.return_value = sample_schedule_info
-            mock_http.return_value = sample_schedule_info
+            mock_page.return_value = True  # 상품 활성
 
             result = await client.fetch_schedule_dual(
                 business_type_id=5,
