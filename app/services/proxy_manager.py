@@ -485,6 +485,55 @@ class ProxyManager:
             # TODO: DB에 느림 상태 기록 (proxy_db_service.update_status 또는 tags 추가)
             return 4
 
+    def init_slow_count_from_db(self, timeout_counts: Dict[str, int]) -> int:
+        """
+        DB에서 조회한 timeout 카운트로 slow_count 초기화
+
+        워커 시작 시 호출하여 이전 세션의 timeout 이력을 복원
+
+        Args:
+            timeout_counts: {proxy_host: timeout_count} 딕셔너리
+                           proxy_host는 "host:port" 형식
+
+        Returns:
+            초기화된 프록시 수
+        """
+        initialized_count = 0
+
+        for proxy_host, count in timeout_counts.items():
+            # proxy_host (host:port) -> proxy_url 매칭
+            matched_proxy = None
+            for p in self.proxy_list:
+                if proxy_host in p:
+                    matched_proxy = p
+                    break
+
+            if not matched_proxy:
+                continue
+
+            # slow_count 설정
+            self.slow_count[matched_proxy] = count
+            initialized_count += 1
+
+            # 3회 이상이면 세션 블랙리스트에도 등록
+            if count >= 3:
+                error_msg = f"slow:DB복원 (누적 {count}회)"
+                self.session_blacklist[matched_proxy] = error_msg
+
+                # active_pool에서 제거
+                if matched_proxy in self.active_pool:
+                    self.active_pool.remove(matched_proxy)
+
+                logger.warning(
+                    f"프록시 느림 복원: {matched_proxy} - {count}회 → 세션 블랙리스트"
+                )
+
+        logger.info(
+            f"slow_count DB 초기화 완료: {initialized_count}개 프록시, "
+            f"세션 블랙리스트: {len(self.session_blacklist)}개"
+        )
+        return initialized_count
+
     def get_status(self) -> Dict:
         """현재 프록시 상태 반환"""
         return {

@@ -486,6 +486,42 @@ class ProxyUsageService:
             cutoff_date=cutoff,
         )
 
+    def get_timeout_counts(
+        self,
+        db: Session,
+        hours: int = 24,
+        min_timeouts: int = 1,
+    ) -> Dict[str, int]:
+        """
+        최근 N시간 내 프록시별 timeout 카운트 조회
+
+        워커 시작 시 slow_count 초기화에 사용
+
+        Args:
+            db: 데이터베이스 세션
+            hours: 조회 기간 (시간)
+            min_timeouts: 최소 timeout 횟수
+
+        Returns:
+            {proxy_host: timeout_count} 딕셔너리
+        """
+        cutoff = datetime.utcnow() - timedelta(hours=hours)
+
+        query = db.query(
+            ProxyUsageLog.proxy_host,
+            func.count(ProxyUsageLog.id).label("timeout_count"),
+        ).filter(
+            ProxyUsageLog.timestamp >= cutoff,
+            ProxyUsageLog.proxy_host.isnot(None),
+            ProxyUsageLog.error_type == "timeout",
+        ).group_by(
+            ProxyUsageLog.proxy_host
+        ).having(
+            func.count(ProxyUsageLog.id) >= min_timeouts
+        )
+
+        return {row.proxy_host: row.timeout_count for row in query.all()}
+
 
 # 싱글톤 인스턴스
 proxy_usage_service = ProxyUsageService()
