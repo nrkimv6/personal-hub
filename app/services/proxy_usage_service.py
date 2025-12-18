@@ -8,7 +8,7 @@ import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc, and_
+from sqlalchemy import func, desc, and_, case
 
 from app.models.proxy_usage import ProxyUsageLog
 from app.models.monitor_schedule import MonitorSchedule
@@ -143,8 +143,8 @@ class ProxyUsageService:
             func.count(ProxyUsageLog.id).label("total_attempts"),
             func.sum(ProxyUsageLog.success).label("success_count"),
             func.avg(
-                func.case(
-                    (ProxyUsageLog.success == 1, ProxyUsageLog.response_time_ms),
+                case(
+                    [(ProxyUsageLog.success == 1, ProxyUsageLog.response_time_ms)],
                     else_=None
                 )
             ).label("avg_response_time_ms"),
@@ -397,10 +397,10 @@ class ProxyUsageService:
             ProxyUsageLog.proxy_host,
             func.count(ProxyUsageLog.id).label("total_attempts"),
             func.sum(ProxyUsageLog.success).label("success_count"),
-            func.sum(func.case((ProxyUsageLog.success == 0, 1), else_=0)).label("fail_count"),
+            func.sum(case([(ProxyUsageLog.success == 0, 1)], else_=0)).label("fail_count"),
             func.avg(
-                func.case(
-                    (ProxyUsageLog.success == 1, ProxyUsageLog.response_time_ms),
+                case(
+                    [(ProxyUsageLog.success == 1, ProxyUsageLog.response_time_ms)],
                     else_=None
                 )
             ).label("avg_response_time_ms"),
@@ -411,7 +411,7 @@ class ProxyUsageService:
         ).group_by(
             ProxyUsageLog.proxy_host
         ).having(
-            func.sum(func.case((ProxyUsageLog.success == 0, 1), else_=0)) >= min_failures
+            func.sum(case([(ProxyUsageLog.success == 0, 1)], else_=0)) >= min_failures
         ).order_by(
             desc("fail_count")
         ).limit(50)
