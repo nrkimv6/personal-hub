@@ -144,7 +144,7 @@ class ProxyUsageService:
             func.sum(ProxyUsageLog.success).label("success_count"),
             func.avg(
                 case(
-                    [(ProxyUsageLog.success == 1, ProxyUsageLog.response_time_ms)],
+                    (ProxyUsageLog.success == 1, ProxyUsageLog.response_time_ms),
                     else_=None
                 )
             ).label("avg_response_time_ms"),
@@ -397,10 +397,10 @@ class ProxyUsageService:
             ProxyUsageLog.proxy_host,
             func.count(ProxyUsageLog.id).label("total_attempts"),
             func.sum(ProxyUsageLog.success).label("success_count"),
-            func.sum(case([(ProxyUsageLog.success == 0, 1)], else_=0)).label("fail_count"),
+            func.sum(case((ProxyUsageLog.success == 0, 1), else_=0)).label("fail_count"),
             func.avg(
                 case(
-                    [(ProxyUsageLog.success == 1, ProxyUsageLog.response_time_ms)],
+                    (ProxyUsageLog.success == 1, ProxyUsageLog.response_time_ms),
                     else_=None
                 )
             ).label("avg_response_time_ms"),
@@ -411,7 +411,7 @@ class ProxyUsageService:
         ).group_by(
             ProxyUsageLog.proxy_host
         ).having(
-            func.sum(case([(ProxyUsageLog.success == 0, 1)], else_=0)) >= min_failures
+            func.sum(case((ProxyUsageLog.success == 0, 1), else_=0)) >= min_failures
         ).order_by(
             desc("fail_count")
         ).limit(50)
