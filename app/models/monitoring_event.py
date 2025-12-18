@@ -60,6 +60,11 @@ class MonitoringEvent(Base):
 
     # 관계
     schedule = relationship("MonitorSchedule")
+    proxy_usage_logs = relationship(
+        "ProxyUsageLog",
+        back_populates="monitoring_event",
+        cascade="all, delete-orphan"
+    )
 
     # 인덱스
     __table_args__ = (
