@@ -3,7 +3,8 @@
 
   const tabs = [
     { href: '/proxy', label: '대시보드', exact: true },
-    { href: '/proxy/list', label: '프록시 목록', exact: false }
+    { href: '/proxy/list', label: '프록시 목록', exact: false },
+    { href: '/proxy/usage', label: '사용 이력', exact: false }
   ];
 
   function isTabActive(tab: { href: string; exact: boolean }, pathname: string): boolean {
