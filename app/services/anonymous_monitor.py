@@ -79,7 +79,8 @@ class AnonymousMonitor:
         business_id: str,
         biz_item_id: str,
         target_date: str,
-        use_cache: bool = True
+        use_cache: bool = True,
+        schedule_id: Optional[int] = None
     ) -> AvailabilityResult:
         """
         익명으로 재고 확인
@@ -90,6 +91,7 @@ class AnonymousMonitor:
             biz_item_id: 상품 ID
             target_date: 대상 날짜 (YYYY-MM-DD)
             use_cache: 캐시 사용 여부
+            schedule_id: 모니터링 스케줄 ID (프록시 사용 이력 추적용)
 
         Returns:
             AvailabilityResult: 재고 확인 결과
@@ -110,7 +112,7 @@ class AnonymousMonitor:
 
             try:
                 result = await self._do_check(
-                    business_type_id, business_id, biz_item_id, target_date
+                    business_type_id, business_id, biz_item_id, target_date, schedule_id
                 )
 
                 # 캐시 저장
@@ -151,7 +153,8 @@ class AnonymousMonitor:
         business_type_id: int,
         business_id: str,
         biz_item_id: str,
-        target_date: str
+        target_date: str,
+        schedule_id: Optional[int] = None
     ) -> AvailabilityResult:
         """실제 API 호출 및 결과 처리 (GraphQL + HTTP 동시 체크)"""
         # fetch_schedule_dual 사용: GraphQL + HTTP 동시 체크
@@ -160,7 +163,8 @@ class AnonymousMonitor:
             business_id=business_id,
             biz_item_id=biz_item_id,
             target_date=target_date,
-            days_ahead=1  # 단일 날짜만 조회
+            days_ahead=1,  # 단일 날짜만 조회
+            schedule_id=schedule_id
         )
 
         # 에러 시에도 사용한 프록시 URL 가져오기
