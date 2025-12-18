@@ -214,7 +214,7 @@ class TestRight:
         assert slot.remaining == 5  # capacity - booked
         assert slot.is_available is True
 
-    @patch('app.routes.slot_check.NaverGraphQLClient')
+    @patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient')
     def test_check_slots_by_url(self, mock_client_class):
         """URL로 슬롯 조회"""
         # Mock 설정
@@ -234,7 +234,7 @@ class TestRight:
         assert data["business"]["business_id"] == "1269828"
         assert data["biz_item"]["biz_item_id"] == "6309738"
 
-    @patch('app.routes.slot_check.NaverGraphQLClient')
+    @patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient')
     def test_check_slots_by_ids(self, mock_client_class):
         """ID로 슬롯 조회"""
         mock_client = AsyncMock()
@@ -258,7 +258,7 @@ class TestBoundary:
 
     def test_days_ahead_min(self):
         """days_ahead 최소값 (1)"""
-        with patch('app.routes.slot_check.NaverGraphQLClient') as mock_client_class:
+        with patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client_class.return_value = mock_client
             mock_client.fetch_business_info.return_value = create_mock_business_info()
@@ -278,7 +278,7 @@ class TestBoundary:
 
     def test_days_ahead_max(self):
         """days_ahead 최대값 (35)"""
-        with patch('app.routes.slot_check.NaverGraphQLClient') as mock_client_class:
+        with patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient') as mock_client_class:
             mock_client = AsyncMock()
             mock_client_class.return_value = mock_client
             mock_client.fetch_business_info.return_value = create_mock_business_info()
@@ -333,7 +333,7 @@ class TestError:
         data = response.json()
         assert data["detail"]["code"] == "INVALID_URL"
 
-    @patch('app.routes.slot_check.NaverGraphQLClient')
+    @patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient')
     def test_business_not_found(self, mock_client_class):
         """업체를 찾을 수 없음"""
         mock_client = AsyncMock()
@@ -349,7 +349,7 @@ class TestError:
         data = response.json()
         assert data["detail"]["code"] == "BUSINESS_NOT_FOUND"
 
-    @patch('app.routes.slot_check.NaverGraphQLClient')
+    @patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient')
     def test_item_not_found(self, mock_client_class):
         """상품을 찾을 수 없음"""
         mock_client = AsyncMock()
@@ -366,7 +366,7 @@ class TestError:
         data = response.json()
         assert data["detail"]["code"] == "ITEM_NOT_FOUND"
 
-    @patch('app.routes.slot_check.NaverGraphQLClient')
+    @patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient')
     def test_graphql_error(self, mock_client_class):
         """GraphQL API 실패"""
         mock_client = AsyncMock()
@@ -526,7 +526,7 @@ class TestRange:
 class TestExistence:
     """Existence: 존재 여부"""
 
-    @patch('app.routes.slot_check.NaverGraphQLClient')
+    @patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient')
     def test_empty_schedule(self, mock_client_class):
         """슬롯이 없는 경우"""
         mock_client = AsyncMock()
@@ -593,7 +593,7 @@ class TestCardinality:
 class TestTime:
     """Time: 시간 관련 테스트"""
 
-    @patch('app.routes.slot_check.NaverGraphQLClient')
+    @patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient')
     def test_target_date_parameter(self, mock_client_class):
         """target_date 파라미터 전달"""
         mock_client = AsyncMock()
@@ -637,7 +637,7 @@ class TestTime:
 class TestIntegration:
     """통합 테스트"""
 
-    @patch('app.routes.slot_check.NaverGraphQLClient')
+    @patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient')
     def test_full_flow_with_url(self, mock_client_class):
         """URL -> 파싱 -> API 호출 -> 응답 전체 흐름"""
         mock_client = AsyncMock()
@@ -677,7 +677,7 @@ class TestIntegration:
         mock_client.fetch_business_info.assert_called_once_with("1269828")
         mock_client.fetch_biz_item.assert_called_once_with("1269828", "6309738")
 
-    @patch('app.routes.slot_check.NaverGraphQLClient')
+    @patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient')
     def test_response_json_serializable(self, mock_client_class):
         """응답이 JSON 직렬화 가능"""
         mock_client = AsyncMock()
