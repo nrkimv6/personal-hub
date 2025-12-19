@@ -23,7 +23,7 @@ from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from app.config import logger, settings
-from app.utils.slot_utils import is_slot_available_from_dict
+from app.utils.slot_utils import is_slot_available_from_dict, is_slot_available_from_obj
 
 if TYPE_CHECKING:
     from app.services.proxy_manager import ProxyManager
@@ -1189,8 +1189,9 @@ class NaverGraphQLClient:
                 error_reason="graphql_failed"
             )
 
-        # 2. 슬롯 확인
-        total_slots = len(graphql_result.slots)
+        # 2. 슬롯 확인 (stock > 0 AND remaining > 0 AND is_sale_day인 슬롯만 카운트)
+        available_slots = [s for s in graphql_result.slots if is_slot_available_from_obj(s)]
+        total_slots = len(available_slots)
         available_dates = len(graphql_result.available_dates)
         has_slots = total_slots > 0 and available_dates > 0
 
