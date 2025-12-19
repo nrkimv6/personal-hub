@@ -292,28 +292,63 @@ class ContextManager:
             # 프록시 설정 가져오기
             proxy_config = self._get_proxy_config()
 
-            # 브라우저 컨텍스트 생성
-            context = await self.playwright_instance.chromium.launch_persistent_context(
-                user_data_dir=str(profile_path),
-                headless=settings.BROWSER_HEADLESS,
-                proxy=proxy_config,
-                args=[
-                    '--disable-blink-features=AutomationControlled',
-                    '--disable-features=IsolateOrigins,site-per-process',
-                    '--disable-site-isolation-trials',
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-accelerated-2d-canvas',
-                    '--disable-gpu',
-                    '--window-size=800,600',
-                    '--window-position=2000,1000',
-                    '--disable-web-security',
-                    '--disable-features=BlockInsecurePrivateNetworkRequests',
-                ],
-                viewport={'width': 800, 'height': 600},
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            )
+            # 브라우저 컨텍스트 생성 (손상된 인스턴스 복구 지원)
+            try:
+                context = await self.playwright_instance.chromium.launch_persistent_context(
+                    user_data_dir=str(profile_path),
+                    headless=settings.BROWSER_HEADLESS,
+                    proxy=proxy_config,
+                    args=[
+                        '--disable-blink-features=AutomationControlled',
+                        '--disable-features=IsolateOrigins,site-per-process',
+                        '--disable-site-isolation-trials',
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-dev-shm-usage',
+                        '--disable-accelerated-2d-canvas',
+                        '--disable-gpu',
+                        '--window-size=800,600',
+                        '--window-position=2000,1000',
+                        '--disable-web-security',
+                        '--disable-features=BlockInsecurePrivateNetworkRequests',
+                    ],
+                    viewport={'width': 800, 'height': 600},
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                )
+            except Exception as e:
+                # Playwright 인스턴스가 손상된 경우 재생성 후 재시도
+                if "closed" in str(e).lower():
+                    logger.warning(f"Playwright 인스턴스 손상 감지, 재생성 중: {e}")
+                    try:
+                        await self.playwright_instance.stop()
+                    except Exception:
+                        pass
+                    self.playwright_instance = await async_playwright().start()
+                    logger.info("Playwright 인스턴스 재생성 완료")
+
+                    context = await self.playwright_instance.chromium.launch_persistent_context(
+                        user_data_dir=str(profile_path),
+                        headless=settings.BROWSER_HEADLESS,
+                        proxy=proxy_config,
+                        args=[
+                            '--disable-blink-features=AutomationControlled',
+                            '--disable-features=IsolateOrigins,site-per-process',
+                            '--disable-site-isolation-trials',
+                            '--no-sandbox',
+                            '--disable-setuid-sandbox',
+                            '--disable-dev-shm-usage',
+                            '--disable-accelerated-2d-canvas',
+                            '--disable-gpu',
+                            '--window-size=800,600',
+                            '--window-position=2000,1000',
+                            '--disable-web-security',
+                            '--disable-features=BlockInsecurePrivateNetworkRequests',
+                        ],
+                        viewport={'width': 800, 'height': 600},
+                        user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    )
+                else:
+                    raise
 
             # 자동화 감지 방지
             await self._bypass_automation_detection(context)
