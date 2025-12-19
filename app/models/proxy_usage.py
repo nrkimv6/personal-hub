@@ -71,12 +71,23 @@ class ProxyUsageLog(Base):
 
     @staticmethod
     def extract_host(proxy_url: str) -> str:
-        """프록시 URL에서 호스트 추출"""
+        """프록시 URL에서 호스트 추출
+
+        지원 프로토콜: http, https, socks4, socks5
+        예시:
+            - http://1.2.3.4:8080 -> 1.2.3.4
+            - socks4://user:pass@1.2.3.4:1080 -> 1.2.3.4
+            - socks5://1.2.3.4:1080 -> 1.2.3.4
+        """
         try:
-            # http://user:pass@host:port -> host
-            url = proxy_url.replace("http://", "").replace("https://", "")
+            url = proxy_url
+            # 모든 프로토콜 제거
+            for protocol in ["http://", "https://", "socks4://", "socks5://"]:
+                url = url.replace(protocol, "")
+            # 인증 정보 제거 (user:pass@)
             if "@" in url:
                 url = url.split("@")[1]
+            # 포트 제거
             return url.split(":")[0]
         except Exception:
             return proxy_url

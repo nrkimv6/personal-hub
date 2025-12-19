@@ -115,6 +115,10 @@ class ProxyManagerV2:
         # 느림 횟수 추적 (4단계 점진적 페널티용)
         self._slow_count: Dict[int, int] = {}  # proxy_id → 느림 횟수
 
+        # 세션 블랙리스트 (워커 실행 중 영구 유지, 재시작 시 리셋) - 2025-12-20
+        self._session_blacklist: Dict[int, str] = {}  # proxy_id → 사유
+        self._consecutive_fail_threshold: int = 3  # 연속 실패 임계값
+
     @property
     def is_available(self) -> bool:
         """프록시 사용 가능 여부"""
@@ -164,7 +168,12 @@ class ProxyManagerV2:
                 old_stats = dict(self._usage_stats)
 
                 # 2. 새 풀 구성 - 70% fast + 30% normal
-                exclude_ids = list(self._previous_pool_ids | self._slow_proxies)
+                # 세션 블랙리스트 추가 (2025-12-20)
+                exclude_ids = list(
+                    self._previous_pool_ids |
+                    self._slow_proxies |
+                    set(self._session_blacklist.keys())
+                )
 
                 # 목표 개수 계산
                 fast_count = int(self._pool_size * self._fast_proxy_ratio)  # 70%
@@ -221,7 +230,8 @@ class ProxyManagerV2:
                 self._previous_pool_ids = old_pool_ids
                 self._active_pool = proxies
                 self._usage_stats.clear()
-                self._slow_proxies.clear()
+                # _slow_proxies는 초기화하지 않음! (2025-12-20)
+                # _session_blacklist도 초기화하지 않음!
                 self._last_refresh = datetime.now()
                 self._current_index = 0
 
@@ -365,18 +375,30 @@ class ProxyManagerV2:
         if not self._active_pool:
             return None
 
-        # 쿨다운 지난 프록시만 필터링
-        available = [p for p in self._active_pool if self._is_cooldown_passed(p.id)]
+        # 쿨다운 지난 프록시만 필터링 (세션 블랙리스트도 제외 - 2025-12-20)
+        available = [
+            p for p in self._active_pool
+            if self._is_cooldown_passed(p.id) and p.id not in self._session_blacklist
+        ]
 
         if not available:
-            # 모든 프록시가 쿨다운 중 - 가장 오래된 것 선택 (fallback)
+            # 모든 프록시가 쿨다운 중 - 세션 블랙리스트 제외하고 가장 오래된 것 선택 (fallback)
+            non_blacklisted = [
+                p for p in self._active_pool if p.id not in self._session_blacklist
+            ]
+            if not non_blacklisted:
+                logger.error(
+                    f"All proxies in session blacklist ({len(self._session_blacklist)})"
+                )
+                return None
+
             logger.warning(
-                f"All {len(self._active_pool)} proxies in cooldown, "
+                f"All {len(non_blacklisted)} proxies in cooldown, "
                 f"selecting oldest used proxy"
             )
             # 마지막 사용 시간이 가장 오래된 프록시 선택
             oldest_proxy = min(
-                self._active_pool,
+                non_blacklisted,
                 key=lambda p: self._proxy_last_used.get(p.id, 0)
             )
             self._mark_proxy_used(oldest_proxy.id)
@@ -596,13 +618,13 @@ class ProxyManagerV2:
         """
         로컬 풀의 프록시 정보 업데이트
 
-        연속 실패 시 풀에서 제거
+        연속 실패 시 풀에서 제거하고 세션 블랙리스트에 등록
         """
         for i, proxy in enumerate(self._active_pool):
             if proxy.id == proxy_id:
                 if is_valid:
                     proxy.success_count += 1
-                    proxy.fail_count = 0
+                    proxy.fail_count = 0  # 성공 시 리셋
                     proxy.total_checks += 1
                     if response_time:
                         # 간단한 이동 평균
@@ -616,11 +638,13 @@ class ProxyManagerV2:
                     proxy.fail_count += 1
                     proxy.total_checks += 1
 
-                    # 연속 3회 실패 시 풀에서 제거
-                    if proxy.fail_count >= 3:
+                    # 연속 N회 실패 시 세션 블랙리스트 등록 (2025-12-20)
+                    if proxy.fail_count >= self._consecutive_fail_threshold:
+                        self._session_blacklist[proxy_id] = "consecutive_failures"
                         self._active_pool.pop(i)
-                        logger.info(
-                            f"Proxy {proxy_id} removed from pool (consecutive failures)"
+                        logger.warning(
+                            f"Proxy {proxy_id} session-blacklisted: consecutive failures "
+                            f"(threshold: {self._consecutive_fail_threshold})"
                         )
                 break
 
@@ -647,16 +671,20 @@ class ProxyManagerV2:
             return None
 
         # exclude에 포함되지 않고 쿨다운 지난 프록시 필터링
+        # 세션 블랙리스트도 제외 (2025-12-20)
         available = [
             p for p in self._active_pool
-            if p.to_aiohttp_proxy() not in exclude and self._is_cooldown_passed(p.id)
+            if p.to_aiohttp_proxy() not in exclude
+            and self._is_cooldown_passed(p.id)
+            and p.id not in self._session_blacklist
         ]
 
         if not available:
-            # 쿨다운 무시하고 exclude만 적용
+            # 쿨다운 무시하고 exclude와 세션 블랙리스트만 적용 (2025-12-20)
             available = [
                 p for p in self._active_pool
                 if p.to_aiohttp_proxy() not in exclude
+                and p.id not in self._session_blacklist
             ]
             if available:
                 logger.warning(
@@ -697,9 +725,14 @@ class ProxyManagerV2:
             if proxy.url == proxy_url or proxy.to_aiohttp_proxy() == proxy_url:
                 # 동기 호출이므로 DB 기록은 생략, 로컬만 업데이트
                 proxy.fail_count += 1
-                if proxy.fail_count >= 3:
+                if proxy.fail_count >= self._consecutive_fail_threshold:
+                    # 세션 블랙리스트에 영구 등록 (2025-12-20)
+                    self._session_blacklist[proxy.id] = reason
                     self._active_pool.remove(proxy)
-                    logger.info(f"Proxy {proxy.id} removed from pool: {reason}")
+                    logger.warning(
+                        f"Proxy {proxy.id} session-blacklisted: {reason} "
+                        f"(threshold: {self._consecutive_fail_threshold})"
+                    )
                 break
 
     def mark_slow(self, proxy_url: str, response_time: float) -> int:
@@ -816,6 +849,10 @@ class ProxyManagerV2:
             "slow_proxies_count": len(self._slow_proxies),
             "slow_count_details": dict(self._slow_count),  # proxy_id → 느림 횟수
             "previous_pool_size": len(self._previous_pool_ids),
+            # 세션 블랙리스트 정보 추가 (2025-12-20)
+            "session_blacklist_count": len(self._session_blacklist),
+            "session_blacklist_details": dict(self._session_blacklist),  # proxy_id → 사유
+            "consecutive_fail_threshold": self._consecutive_fail_threshold,
             "proxies": [
                 {
                     "id": p.id,
