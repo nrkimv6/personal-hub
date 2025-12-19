@@ -16,4 +16,5 @@ build
 /.pids/
 *.db
 data/browser_profiles/
-*.db-journal
+*.db-journaldata/monitor.db-shm
+data/monitor.db-wal
