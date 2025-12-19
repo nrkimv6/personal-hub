@@ -27,7 +27,8 @@ from app.modules.naver_booking.services.graphql_client import (
     BusinessInfo,
     BizItemInfo,
 )
-from app.modules.naver_booking.utils.parsers import parse_naver_booking_url, extract_date_only
+from app.modules.naver_booking.utils.parsers import parse_naver_booking_url
+from app.utils.parsers import extract_date_only
 from app.config import logger
 
 router = APIRouter(prefix="/api/v1/businesses", tags=["businesses"])
