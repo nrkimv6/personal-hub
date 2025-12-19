@@ -1,12 +1,23 @@
 <script lang="ts">
-  import { slotApi } from '$lib/api';
-  import type { SlotCheckResponse, DateSlots, SlotInfo } from '$lib/types';
+  import { onMount } from 'svelte';
+  import { slotApi, businessApi, monitoringEventApi } from '$lib/api';
+  import type { SlotCheckResponse, DateSlots, SlotInfo, Business, BizItem, MonitoringEventStats } from '$lib/types';
 
-  // 입력 상태
+  // 입력 모드: 'select' (등록된 상품) 또는 'url' (URL 입력)
+  let inputMode = $state<'select' | 'url'>('select');
+
+  // URL 입력 모드
   let url = $state('');
-  let advancedMode = $state(false);
-  let businessId = $state('');
-  let bizItemId = $state('');
+
+  // 등록된 상품 선택 모드
+  let businesses = $state<Business[]>([]);
+  let selectedBusinessId = $state<number | null>(null);
+  let bizItems = $state<BizItem[]>([]);
+  let selectedItem = $state<BizItem | null>(null);
+  let loadingBusinesses = $state(false);
+  let loadingItems = $state(false);
+
+  // 공통 옵션
   let targetDate = $state('');
   let daysAhead = $state(14);
 
@@ -15,39 +26,104 @@
   let error = $state<string | null>(null);
   let result = $state<SlotCheckResponse | null>(null);
 
+  // 모니터링 통계
+  let monitoringStats = $state<MonitoringEventStats | null>(null);
+  let loadingStats = $state(false);
+
   // 날짜별 접기/펼치기 상태
   let expandedDates = $state<Set<string>>(new Set());
 
+  // 페이지 마운트 시 초기화
+  onMount(async () => {
+    // localStorage에서 마지막 선택한 모드 복원
+    const savedMode = localStorage.getItem('slotCheckInputMode');
+    if (savedMode === 'url' || savedMode === 'select') {
+      inputMode = savedMode;
+    }
+
+    // 업체 목록 로드
+    await loadBusinesses();
+  });
+
+  // 입력 모드 변경 시 저장
+  function setInputMode(mode: 'select' | 'url') {
+    inputMode = mode;
+    localStorage.setItem('slotCheckInputMode', mode);
+    error = null;
+  }
+
+  // 업체 목록 로드
+  async function loadBusinesses() {
+    loadingBusinesses = true;
+    try {
+      businesses = await businessApi.list();
+    } catch (e) {
+      console.error('Failed to load businesses:', e);
+    } finally {
+      loadingBusinesses = false;
+    }
+  }
+
+  // 업체 선택 시 상품 목록 로드
+  async function onBusinessChange(businessId: number) {
+    selectedBusinessId = businessId;
+    selectedItem = null;
+    bizItems = [];
+    loadingItems = true;
+    try {
+      bizItems = await businessApi.getItems(businessId);
+    } catch (e) {
+      console.error('Failed to load items:', e);
+    } finally {
+      loadingItems = false;
+    }
+  }
+
+  // 상품 선택
+  function onItemChange(item: BizItem) {
+    selectedItem = item;
+  }
+
   // 슬롯 조회
   async function checkSlots() {
-    if (!url && !advancedMode) {
-      error = 'URL을 입력해주세요';
-      return;
-    }
-    if (advancedMode && (!businessId || !bizItemId)) {
-      error = '업체 ID와 상품 ID를 모두 입력해주세요';
-      return;
+    if (inputMode === 'url') {
+      if (!url) {
+        error = 'URL을 입력해주세요';
+        return;
+      }
+    } else {
+      if (!selectedItem) {
+        error = '상품을 선택해주세요';
+        return;
+      }
     }
 
     loading = true;
     error = null;
     result = null;
+    monitoringStats = null;
 
     try {
-      if (advancedMode) {
-        result = await slotApi.check({
-          business_id: businessId,
-          biz_item_id: bizItemId,
-          target_date: targetDate || undefined,
-          days_ahead: daysAhead
-        });
-      } else {
+      if (inputMode === 'url') {
         result = await slotApi.check({
           url,
           target_date: targetDate || undefined,
           days_ahead: daysAhead
         });
+      } else {
+        // 등록된 상품에서 business 정보 가져오기
+        const business = businesses.find(b => b.id === selectedBusinessId);
+        result = await slotApi.check({
+          business_id: business?.business_id,
+          biz_item_id: selectedItem!.biz_item_id,
+          target_date: targetDate || undefined,
+          days_ahead: daysAhead
+        });
+
+        // 등록된 상품인 경우 모니터링 통계도 로드
+        await loadMonitoringStats();
       }
+
       // 첫 번째 날짜 자동 펼치기
       if (result?.slots_by_date?.length > 0) {
         expandedDates = new Set([result.slots_by_date[0].date]);
@@ -56,6 +132,27 @@
       error = e instanceof Error ? e.message : '조회 실패';
     } finally {
       loading = false;
+    }
+  }
+
+  // 모니터링 통계 로드
+  async function loadMonitoringStats() {
+    if (!selectedItem) return;
+
+    loadingStats = true;
+    try {
+      const startDate = targetDate || getTodayDate();
+      const endDate = addDays(startDate, daysAhead);
+
+      monitoringStats = await monitoringEventApi.stats({
+        biz_item_id: selectedItem.id,
+        date_from: startDate,
+        date_to: endDate
+      });
+    } catch (e) {
+      console.error('Failed to load monitoring stats:', e);
+    } finally {
+      loadingStats = false;
     }
   }
 
@@ -140,6 +237,19 @@
   function getTodayDate(): string {
     return new Date().toISOString().split('T')[0];
   }
+
+  // 날짜 더하기
+  function addDays(dateStr: string, days: number): string {
+    const date = new Date(dateStr);
+    date.setDate(date.getDate() + days);
+    return date.toISOString().split('T')[0];
+  }
+
+  // 재고 발견률 계산
+  function getAvailableRate(): string {
+    if (!monitoringStats || monitoringStats.total_checks === 0) return '0';
+    return ((monitoringStats.available_count / monitoringStats.total_checks) * 100).toFixed(1);
+  }
 </script>
 
 <div class="p-6 max-w-6xl mx-auto">
@@ -151,87 +261,99 @@
 
   <!-- 입력 폼 -->
   <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
-    {#if !advancedMode}
+    <!-- 탭 UI -->
+    <div class="flex border-b border-gray-200 mb-4">
+      <button
+        onclick={() => setInputMode('select')}
+        class="px-4 py-2 text-sm font-medium border-b-2 transition-colors {inputMode === 'select'
+          ? 'border-blue-500 text-blue-600'
+          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}"
+      >
+        등록된 상품
+      </button>
+      <button
+        onclick={() => setInputMode('url')}
+        class="px-4 py-2 text-sm font-medium border-b-2 transition-colors {inputMode === 'url'
+          ? 'border-blue-500 text-blue-600'
+          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}"
+      >
+        URL 입력
+      </button>
+    </div>
+
+    <!-- 등록된 상품 선택 -->
+    {#if inputMode === 'select'}
+      <div class="space-y-4">
+        <!-- 업체 선택 -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">업체</label>
+          {#if loadingBusinesses}
+            <div class="text-gray-500 text-sm">로딩 중...</div>
+          {:else if businesses.length === 0}
+            <div class="text-gray-500 text-sm p-3 bg-gray-50 rounded-lg">
+              등록된 업체가 없습니다. 먼저 업체를 등록해주세요.
+            </div>
+          {:else}
+            <select
+              class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              onchange={(e) => {
+                const target = e.target as HTMLSelectElement;
+                if (target.value) onBusinessChange(Number(target.value));
+              }}
+            >
+              <option value="">업체를 선택하세요</option>
+              {#each businesses as business}
+                <option value={business.id}>{business.name}</option>
+              {/each}
+            </select>
+          {/if}
+        </div>
+
+        <!-- 상품 선택 -->
+        {#if selectedBusinessId}
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">상품</label>
+            {#if loadingItems}
+              <div class="text-gray-500 text-sm">로딩 중...</div>
+            {:else if bizItems.length === 0}
+              <div class="text-gray-500 text-sm p-3 bg-gray-50 rounded-lg">
+                이 업체에 등록된 상품이 없습니다.
+              </div>
+            {:else}
+              <select
+                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                onchange={(e) => {
+                  const target = e.target as HTMLSelectElement;
+                  const item = bizItems.find(i => i.id === Number(target.value));
+                  if (item) onItemChange(item);
+                }}
+              >
+                <option value="">상품을 선택하세요</option>
+                {#each bizItems as item}
+                  <option value={item.id}>{item.name}</option>
+                {/each}
+              </select>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    {:else}
       <!-- URL 입력 -->
-      <div class="flex gap-3">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">네이버 예약 URL</label>
         <input
           type="text"
           bind:value={url}
           onkeydown={handleKeydown}
-          placeholder="네이버 예약 URL 입력 (예: https://booking.naver.com/booking/13/bizes/...)"
-          class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          placeholder="https://booking.naver.com/booking/13/bizes/..."
+          class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
         />
-        <button
-          onclick={checkSlots}
-          disabled={loading}
-          class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-        >
-          {#if loading}
-            <span class="flex items-center gap-2">
-              <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              조회 중
-            </span>
-          {:else}
-            조회
-          {/if}
-        </button>
       </div>
-    {:else}
-      <!-- 고급 모드: ID 직접 입력 -->
-      <div class="grid grid-cols-2 gap-4 mb-4">
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">업체 ID (business_id)</label>
-          <input
-            type="text"
-            bind:value={businessId}
-            placeholder="예: 1269828"
-            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          />
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">상품 ID (biz_item_id)</label>
-          <input
-            type="text"
-            bind:value={bizItemId}
-            placeholder="예: 6309738"
-            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          />
-        </div>
-      </div>
-      <button
-        onclick={checkSlots}
-        disabled={loading}
-        class="w-full px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-      >
-        {#if loading}
-          <span class="flex items-center justify-center gap-2">
-            <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            조회 중
-          </span>
-        {:else}
-          조회
-        {/if}
-      </button>
     {/if}
 
-    <!-- 옵션 -->
+    <!-- 옵션 및 조회 버튼 -->
     <div class="mt-4 pt-4 border-t border-gray-200">
-      <div class="flex flex-wrap items-center gap-6">
-        <label class="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            bind:checked={advancedMode}
-            class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-          />
-          <span class="text-sm text-gray-700">고급 모드 (ID 직접 입력)</span>
-        </label>
-
+      <div class="flex flex-wrap items-center gap-4">
         <div class="flex items-center gap-2">
           <label class="text-sm text-gray-700">시작일:</label>
           <input
@@ -255,6 +377,24 @@
             <option value={35}>35일</option>
           </select>
         </div>
+
+        <button
+          onclick={checkSlots}
+          disabled={loading}
+          class="ml-auto px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+        >
+          {#if loading}
+            <span class="flex items-center gap-2">
+              <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              조회 중
+            </span>
+          {:else}
+            조회
+          {/if}
+        </button>
       </div>
     </div>
   </div>
@@ -328,6 +468,48 @@
         </div>
       </div>
     </div>
+
+    <!-- 모니터링 이력 (등록된 상품인 경우만) -->
+    {#if inputMode === 'select' && selectedItem}
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
+        <h3 class="text-sm font-semibold text-gray-700 mb-3">모니터링 이력</h3>
+        {#if loadingStats}
+          <div class="text-gray-500 text-sm">통계 로딩 중...</div>
+        {:else if monitoringStats && monitoringStats.total_checks > 0}
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="p-3 bg-gray-50 rounded-lg">
+              <p class="text-xs text-gray-500">총 체크</p>
+              <p class="text-lg font-bold text-gray-900">{monitoringStats.total_checks.toLocaleString()}회</p>
+            </div>
+            <div class="p-3 bg-green-50 rounded-lg">
+              <p class="text-xs text-gray-500">재고 발견</p>
+              <p class="text-lg font-bold text-green-600">
+                {monitoringStats.available_count}회
+                <span class="text-sm font-normal">({getAvailableRate()}%)</span>
+              </p>
+            </div>
+            <div class="p-3 bg-blue-50 rounded-lg">
+              <p class="text-xs text-gray-500">평균 응답</p>
+              <p class="text-lg font-bold text-blue-600">
+                {monitoringStats.avg_response_time_ms ? Math.round(monitoringStats.avg_response_time_ms) : '-'}ms
+              </p>
+            </div>
+            <div class="p-3 bg-gray-50 rounded-lg">
+              <p class="text-xs text-gray-500">마지막 체크</p>
+              <p class="text-sm font-medium text-gray-700">
+                {monitoringStats.last_check_time
+                  ? new Date(monitoringStats.last_check_time).toLocaleString('ko-KR')
+                  : '-'}
+              </p>
+            </div>
+          </div>
+        {:else}
+          <div class="text-gray-500 text-sm p-3 bg-gray-50 rounded-lg">
+            이 상품에 대한 모니터링 이력이 없습니다.
+          </div>
+        {/if}
+      </div>
+    {/if}
 
     <!-- 날짜별 슬롯 -->
     <div class="space-y-3">
@@ -424,10 +606,14 @@
       <svg class="w-16 h-16 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
       </svg>
-      <p class="text-gray-600 mb-2">네이버 예약 URL을 입력하고 조회 버튼을 클릭하세요</p>
-      <p class="text-gray-400 text-sm">
-        예: https://booking.naver.com/booking/13/bizes/1269828/items/6309738
-      </p>
+      {#if inputMode === 'select'}
+        <p class="text-gray-600 mb-2">업체와 상품을 선택하고 조회 버튼을 클릭하세요</p>
+      {:else}
+        <p class="text-gray-600 mb-2">네이버 예약 URL을 입력하고 조회 버튼을 클릭하세요</p>
+        <p class="text-gray-400 text-sm">
+          예: https://booking.naver.com/booking/13/bizes/1269828/items/6309738
+        </p>
+      {/if}
     </div>
   {/if}
 </div>

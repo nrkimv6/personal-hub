@@ -8,10 +8,13 @@ scripts/check_slots.py의 기능을 API 엔드포인트로 제공합니다.
 import re
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
 
+from app.core.database import get_db
+from app.models.business import Business
+from app.models.biz_item import BizItem
 from app.modules.naver_booking.services.graphql_client import (
-    NaverGraphQLClient,
     ScheduleInfo,
     get_naver_graphql_client,
 )
@@ -62,20 +65,15 @@ def parse_naver_url(url: str) -> tuple[str, str]:
 
 
 def build_response(
-    business_info,
-    biz_item_info,
+    business_id: str,
+    business_name: str,
+    business_type_id: Optional[int],
+    biz_item_id: str,
+    biz_item_name: str,
     schedule: ScheduleInfo
 ) -> SlotCheckResponse:
     """
-    GraphQL 조회 결과를 API 응답 형식으로 변환
-
-    Args:
-        business_info: 업체 정보 (NaverGraphQLClient.BusinessInfo)
-        biz_item_info: 상품 정보 (NaverGraphQLClient.BizItemInfo)
-        schedule: 스케줄 정보 (NaverGraphQLClient.ScheduleInfo)
-
-    Returns:
-        SlotCheckResponse
+    조회 결과를 API 응답 형식으로 변환
     """
     slots_by_date = []
     total_available_slots = 0
@@ -127,13 +125,13 @@ def build_response(
 
     return SlotCheckResponse(
         business=SlotCheckBusinessInfo(
-            business_id=business_info.business_id,
-            name=business_info.name,
-            business_type_id=business_info.business_type_id
+            business_id=business_id,
+            name=business_name,
+            business_type_id=business_type_id
         ),
         biz_item=SlotCheckBizItemInfo(
-            biz_item_id=biz_item_info.biz_item_id,
-            name=biz_item_info.name
+            biz_item_id=biz_item_id,
+            name=biz_item_name
         ),
         summary=SlotCheckSummary(
             total_slots=len(schedule.slots),
@@ -151,7 +149,8 @@ async def check_slots(
     business_id: Optional[str] = Query(None, description="업체 ID"),
     biz_item_id: Optional[str] = Query(None, description="상품 ID"),
     target_date: Optional[str] = Query(None, description="조회 시작일 (YYYY-MM-DD)"),
-    days_ahead: int = Query(14, ge=1, le=35, description="조회 기간 (일)")
+    days_ahead: int = Query(14, ge=1, le=35, description="조회 기간 (일)"),
+    db: Session = Depends(get_db)
 ):
     """
     네이버 예약 슬롯 현황 조회
@@ -188,35 +187,32 @@ async def check_slots(
             }
         )
 
-    # GraphQL 클라이언트로 조회 (싱글톤 사용 - 프록시 매니저 연동)
     client = get_naver_graphql_client()
 
-    # 1. 업체 정보 조회
-    business_info = await client.fetch_business_info(business_id)
-    if not business_info:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "BUSINESS_NOT_FOUND",
-                "message": f"업체를 찾을 수 없습니다 (business_id={business_id})"
-            }
-        )
+    # 1. 업체 정보: 로컬 DB → GraphQL → 기본값
+    business = db.query(Business).filter(Business.business_id == business_id).first()
+    if not business:
+        # DB에 없으면 GraphQL 조회
+        business_info = await client.fetch_business_info(business_id)
+        business_name = business_info.name if business_info else "(미등록 업체)"
+        business_type_id = (business_info.business_type_id if business_info else None) or 13
+    else:
+        business_name = business.name
+        business_type_id = business.business_type_id or 13
 
-    # 2. 상품 정보 조회
-    biz_item_info = await client.fetch_biz_item(business_id, biz_item_id)
-    if not biz_item_info:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "ITEM_NOT_FOUND",
-                "message": f"상품을 찾을 수 없습니다 (biz_item_id={biz_item_id})"
-            }
-        )
+    # 2. 상품 정보: 로컬 DB → GraphQL → 기본값
+    biz_item = db.query(BizItem).filter(BizItem.biz_item_id == biz_item_id).first()
+    if not biz_item:
+        # DB에 없으면 GraphQL 조회
+        biz_item_info = await client.fetch_biz_item(business_id, biz_item_id)
+        biz_item_name = biz_item_info.name if biz_item_info else "(미등록 상품)"
+    else:
+        biz_item_name = biz_item.name
 
-    # 3. 스케줄 조회
+    # 3. GraphQL로 스케줄 조회 (핵심 - 실패 시 에러)
     start_date = target_date or datetime.now().strftime("%Y-%m-%d")
     schedule = await client.fetch_schedule(
-        business_type_id=business_info.business_type_id or 13,
+        business_type_id=business_type_id,
         business_id=business_id,
         biz_item_id=biz_item_id,
         start_date=start_date,
@@ -227,10 +223,17 @@ async def check_slots(
         raise HTTPException(
             status_code=500,
             detail={
-                "code": "GRAPHQL_ERROR",
+                "code": "SCHEDULE_ERROR",
                 "message": "스케줄 조회에 실패했습니다"
             }
         )
 
     # 4. 응답 변환
-    return build_response(business_info, biz_item_info, schedule)
+    return build_response(
+        business_id=business_id,
+        business_name=business_name,
+        business_type_id=business_type_id,
+        biz_item_id=biz_item_id,
+        biz_item_name=biz_item_name,
+        schedule=schedule
+    )

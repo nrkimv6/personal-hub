@@ -187,23 +187,19 @@ class AnonymousMonitor:
         # 해당 날짜의 슬롯만 필터링
         date_slots = schedule.slots_by_date.get(target_date, [])
 
-        # 활성 슬롯 필터링 (실제 영업 시간대 + 재고 설정되었거나 예약 이력 있는 슬롯)
-        # is_unit_business_day가 True인 슬롯만 실제 판매 시간대
-        active_slots = [
-            s for s in date_slots
-            if s.is_unit_business_day and (s.unit_stock > 0 or s.unit_booking_count > 0 or s.stock > 0)
-        ]
+        # 영업 시간대 슬롯만 필터링 (is_unit_business_day=True)
+        business_slots = [s for s in date_slots if s.is_unit_business_day]
 
-        # 슬롯 상세 로그 (디버깅용)
-        if date_slots:
-            logger.info(f"[AnonymousMonitor] {target_date} 슬롯 현황: 전체={len(date_slots)}, 활성={len(active_slots)}")
-            for s in date_slots[:5]:  # 처음 5개만 로그
+        # 슬롯 상세 로그
+        if business_slots:
+            logger.info(f"[AnonymousMonitor] {target_date} 슬롯 현황: 영업시간대={len(business_slots)}개")
+            for s in business_slots[:5]:  # 처음 5개만 로그
                 remaining = s.unit_stock - s.unit_booking_count
-                logger.debug(f"  - {s.time}: unit_stock={s.unit_stock}, unit_booking={s.unit_booking_count}, stock={s.stock}, remaining={remaining}, is_sale={s.is_sale_day}")
+                logger.debug(f"  - {s.time}: unit_stock={s.unit_stock}, unit_booking={s.unit_booking_count}, stock={s.stock}, remaining={remaining}")
 
         # 예약 가능 슬롯 (stock > 0 AND (unit_stock - unit_booking_count) > 0 AND is_sale_day)
         available_slots = [
-            s for s in active_slots
+            s for s in business_slots
             if is_slot_available_from_obj(s)
         ]
 
@@ -213,13 +209,13 @@ class AnonymousMonitor:
 
         # 영업시간 추정
         estimated_hours = None
-        if active_slots:
-            times = sorted([s.time for s in active_slots])
+        if business_slots:
+            times = sorted([s.time for s in business_slots])
             estimated_hours = (times[0], times[-1])
 
         # 이력 업데이트 (영업시간 학습용)
         cache_key = f"{business_id}:{biz_item_id}"
-        booked_times = [s.time for s in active_slots if s.unit_booking_count > 0]
+        booked_times = [s.time for s in business_slots if s.unit_booking_count > 0]
         if booked_times:
             self._update_slot_history(cache_key, booked_times)
 
@@ -227,7 +223,7 @@ class AnonymousMonitor:
         return AvailabilityResult(
             available=dual_result.can_book,
             slots=available_slots,
-            all_active_slots=active_slots,
+            all_active_slots=business_slots,
             estimated_hours=estimated_hours,
             proxy_url=schedule.proxy_url,
             http_ok=dual_result.http_ok,
