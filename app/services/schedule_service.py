@@ -3,8 +3,9 @@ MonitorSchedule 서비스 - 일정 CRUD
 설계 문서: 2025-12-01_monitoring_restructure_design.md
 """
 import json
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func
 from datetime import datetime, date
 
 from app.models.monitor_schedule import MonitorSchedule
@@ -92,8 +93,19 @@ class ScheduleService:
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
         search: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """전체 일정 + 상위 컨텍스트 조회 (일정 관리 페이지용)"""
+        page: Optional[int] = None,
+        page_size: int = 100,
+    ) -> Dict[str, Any]:
+        """전체 일정 + 상위 컨텍스트 조회 (일정 관리 페이지용)
+
+        Args:
+            page: 페이지 번호 (1부터 시작). None이면 전체 반환 (하위호환)
+            page_size: 페이지 크기 (기본값 100)
+
+        Returns:
+            page가 None이면 List[Dict] (하위호환)
+            page가 있으면 Dict with items, total, page, page_size, total_pages
+        """
         query = db.query(
             MonitorSchedule,
             BizItem,
@@ -124,8 +136,24 @@ class ScheduleService:
                 (BizItem.name.ilike(search_pattern))
             )
 
-        results = query.order_by(MonitorSchedule.date.desc()).all()
-        return self._build_context_list(results)
+        # 페이지네이션 적용
+        if page is not None:
+            total = query.count()
+            offset = (page - 1) * page_size
+            results = query.order_by(MonitorSchedule.date.desc()).offset(offset).limit(page_size).all()
+            total_pages = (total + page_size - 1) // page_size
+
+            return {
+                "items": self._build_context_list(results),
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages,
+            }
+        else:
+            # 하위호환: page가 없으면 전체 리스트 반환
+            results = query.order_by(MonitorSchedule.date.desc()).all()
+            return self._build_context_list(results)
 
     def _build_context_list(self, results) -> List[Dict[str, Any]]:
         """결과 목록을 컨텍스트 딕셔너리 목록으로 변환"""

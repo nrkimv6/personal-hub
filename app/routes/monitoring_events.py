@@ -5,8 +5,8 @@
 from typing import Optional
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func, desc, case
 
 from app.database import get_db
 from app.models.monitoring_event import MonitoringEvent
@@ -42,8 +42,12 @@ def get_monitoring_events(
     - 상태 및 날짜 범위 필터링 지원
     - 페이지네이션 지원
     """
-    # 기본 쿼리
-    query = db.query(MonitoringEvent).join(
+    # 기본 쿼리 - joinedload로 N+1 쿼리 방지
+    query = db.query(MonitoringEvent).options(
+        joinedload(MonitoringEvent.schedule)
+        .joinedload(MonitorSchedule.biz_item)
+        .joinedload(BizItem.business)
+    ).join(
         MonitorSchedule, MonitoringEvent.schedule_id == MonitorSchedule.id
     ).join(
         BizItem, MonitorSchedule.biz_item_id == BizItem.id
@@ -88,16 +92,12 @@ def get_monitoring_events(
     offset = (page - 1) * page_size
     events = query.order_by(desc(MonitoringEvent.timestamp)).offset(offset).limit(page_size).all()
 
-    # 컨텍스트 정보 추가
+    # 컨텍스트 정보 추가 - 이미 joinedload로 로드된 관계 사용 (N+1 쿼리 방지)
     result = []
     for event in events:
-        schedule = db.query(MonitorSchedule).filter(MonitorSchedule.id == event.schedule_id).first()
-        biz_item = None
-        business = None
-        if schedule:
-            biz_item = db.query(BizItem).filter(BizItem.id == schedule.biz_item_id).first()
-            if biz_item:
-                business = db.query(Business).filter(Business.id == biz_item.business_id).first()
+        schedule = event.schedule
+        biz_item = schedule.biz_item if schedule else None
+        business = biz_item.business if biz_item else None
 
         event_dict = {
             "id": event.id,
@@ -153,6 +153,7 @@ def get_monitoring_stats(
 ):
     """
     모니터링 이벤트 통계를 조회합니다.
+    단일 쿼리로 모든 상태별 카운트를 집계합니다. (성능 최적화)
     """
     # 기본 쿼리
     query = db.query(MonitoringEvent)
@@ -190,42 +191,35 @@ def get_monitoring_stats(
         except ValueError:
             pass
 
-    # 통계 계산
-    total_checks = query.count()
-    success_count = query.filter(MonitoringEvent.status == "success").count()
-    available_count = query.filter(MonitoringEvent.status == "available").count()
-    no_slots_count = query.filter(MonitoringEvent.status == "no_slots").count()
-    hidden_count = query.filter(MonitoringEvent.status == "hidden").count()
-    paused_count = query.filter(MonitoringEvent.status == "paused").count()
-    closed_count = query.filter(MonitoringEvent.status == "closed").count()
-    not_opened_count = query.filter(MonitoringEvent.status == "not_opened").count()
-    # 비활성화: inactive (상품 비활성화 감지)
-    # 이전 상태명 http_302도 포함하여 호환성 유지
-    inactive_count = query.filter(
-        MonitoringEvent.status.in_(["inactive", "http_302", "inactive_blocked"])
-    ).count()
-    error_count = query.filter(MonitoringEvent.status == "error").count()
-
-    # 평균 응답 시간
-    avg_result = query.with_entities(func.avg(MonitoringEvent.response_time_ms)).scalar()
-
-    # 마지막 체크 시간
-    last_event = query.order_by(desc(MonitoringEvent.timestamp)).first()
-    last_check_time = last_event.timestamp if last_event else None
+    # 통계 계산 - 단일 쿼리로 모든 카운트 집계 (10개 쿼리 -> 1개로 최적화)
+    stats = query.with_entities(
+        func.count(MonitoringEvent.id).label('total'),
+        func.sum(case((MonitoringEvent.status == 'success', 1), else_=0)).label('success'),
+        func.sum(case((MonitoringEvent.status == 'available', 1), else_=0)).label('available'),
+        func.sum(case((MonitoringEvent.status == 'no_slots', 1), else_=0)).label('no_slots'),
+        func.sum(case((MonitoringEvent.status == 'hidden', 1), else_=0)).label('hidden'),
+        func.sum(case((MonitoringEvent.status == 'paused', 1), else_=0)).label('paused'),
+        func.sum(case((MonitoringEvent.status == 'closed', 1), else_=0)).label('closed'),
+        func.sum(case((MonitoringEvent.status == 'not_opened', 1), else_=0)).label('not_opened'),
+        func.sum(case((MonitoringEvent.status.in_(['inactive', 'http_302', 'inactive_blocked']), 1), else_=0)).label('inactive'),
+        func.sum(case((MonitoringEvent.status == 'error', 1), else_=0)).label('error'),
+        func.avg(MonitoringEvent.response_time_ms).label('avg_response_time'),
+        func.max(MonitoringEvent.timestamp).label('last_check')
+    ).first()
 
     return MonitoringEventStats(
-        total_checks=total_checks,
-        success_count=success_count,
-        available_count=available_count,
-        no_slots_count=no_slots_count,
-        hidden_count=hidden_count,
-        paused_count=paused_count,
-        closed_count=closed_count,
-        not_opened_count=not_opened_count,
-        inactive_count=inactive_count,
-        error_count=error_count,
-        avg_response_time_ms=float(avg_result) if avg_result else None,
-        last_check_time=last_check_time
+        total_checks=stats.total or 0,
+        success_count=int(stats.success or 0),
+        available_count=int(stats.available or 0),
+        no_slots_count=int(stats.no_slots or 0),
+        hidden_count=int(stats.hidden or 0),
+        paused_count=int(stats.paused or 0),
+        closed_count=int(stats.closed or 0),
+        not_opened_count=int(stats.not_opened or 0),
+        inactive_count=int(stats.inactive or 0),
+        error_count=int(stats.error or 0),
+        avg_response_time_ms=float(stats.avg_response_time) if stats.avg_response_time else None,
+        last_check_time=stats.last_check
     )
 
 
