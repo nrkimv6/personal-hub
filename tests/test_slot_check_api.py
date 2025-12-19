@@ -36,8 +36,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from fastapi.testclient import TestClient
 from app.main import app
-from app.routes.slot_check import parse_naver_url, build_response, DAY_OF_WEEK_KR
-from app.services.naver_graphql_client import (
+from app.modules.naver_booking.routes.slot_check import parse_naver_url, build_response, DAY_OF_WEEK_KR
+from app.modules.naver_booking.services.graphql_client import (
     BusinessInfo, BizItemInfo, ScheduleInfo, ScheduleSlot
 )
 
