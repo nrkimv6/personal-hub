@@ -22,8 +22,6 @@ CORRECT 테스트:
 import sys
 import os
 import pytest
-from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch
 
 # 상위 디렉토리를 모듈 검색 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -166,36 +164,6 @@ class TestN1QueryPrevention:
     def test_conformance_bizitem_business_relationship(self):
         """아이템-업체 관계 설정 확인"""
         assert hasattr(BizItem, 'business'), "BizItem에 business 관계가 있어야 함"
-
-
-# ============== 통합 테스트 ==============
-
-class TestIntegration:
-    """통합 테스트"""
-
-    @pytest.fixture
-    def mock_db_session(self):
-        """Mock DB 세션"""
-        session = MagicMock()
-        session.query.return_value.options.return_value.join.return_value.join.return_value.join.return_value = MagicMock()
-        return session
-
-    def test_right_schedule_service_pagination_backward_compatible(self):
-        """schedule_service 페이지네이션 하위호환성 검증"""
-        from app.services.schedule_service import ScheduleService
-
-        service = ScheduleService()
-
-        # get_all_with_context 메서드에 page 파라미터가 있는지 확인
-        import inspect
-        sig = inspect.signature(service.get_all_with_context)
-        params = list(sig.parameters.keys())
-
-        assert 'page' in params, "page 파라미터가 있어야 함"
-        assert 'page_size' in params, "page_size 파라미터가 있어야 함"
-
-        # page 기본값이 None인지 확인 (하위호환)
-        assert sig.parameters['page'].default is None, "page 기본값은 None이어야 함 (하위호환)"
 
 
 # ============== 실행 ==============

@@ -1,35 +1,23 @@
 """
 URL 빌더 유틸리티
-설계 문서: 2025-12-01_monitoring_restructure_design.md
+
+build_naver_booking_url은 app.modules.naver_booking.utils.url_builder로 이동되었습니다.
 """
 from typing import Dict, Any, Optional
+import warnings as _warnings
 
-
-def build_naver_booking_url(
-    business_type_id: int,
-    business_id: str,
-    biz_item_id: str,
-    date: str
-) -> str:
-    """
-    네이버 예약 URL 생성
-
-    Args:
-        business_type_id: 네이버 비즈니스 타입 ID
-        business_id: 네이버 비즈니스 ID
-        biz_item_id: 네이버 아이템 ID
-        date: 예약 날짜 (YYYY-MM-DD)
-
-    Returns:
-        완전한 네이버 예약 URL
-    """
-    # startDateTime 형식 사용 (00:00:00+09:00)
-    start_datetime = f"{date}T00%3A00%3A00%2B09%3A00"
-    return (
-        f"https://booking.naver.com/booking/{business_type_id}"
-        f"/bizes/{business_id}/items/{biz_item_id}"
-        f"?startDateTime={start_datetime}"
-    )
+# Re-export naver-specific builder for backward compatibility
+def __getattr__(name):
+    if name == 'build_naver_booking_url':
+        _warnings.warn(
+            "app.utils.url_builder.build_naver_booking_url은 deprecated입니다. "
+            "app.modules.naver_booking.utils.url_builder를 사용하세요.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        from app.modules.naver_booking.utils.url_builder import build_naver_booking_url
+        return build_naver_booking_url
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def build_coupang_url(
@@ -67,6 +55,7 @@ def build_monitoring_url(schedule_context: Dict[str, Any]) -> str:
     service_type = schedule_context.get("service_type", "naver")
 
     if service_type == "naver":
+        from app.modules.naver_booking.utils.url_builder import build_naver_booking_url
         return build_naver_booking_url(
             business_type_id=schedule_context.get("business_type_id", 0),
             business_id=schedule_context["business_id"],

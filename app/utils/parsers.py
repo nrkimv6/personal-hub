@@ -1,81 +1,35 @@
+"""
+URL 파싱 유틸리티
+
+네이버 전용 파서(ParsedNaverUrl, parse_naver_booking_url, parse_naver_page_info)는
+app.modules.naver_booking.utils.parsers로 이동되었습니다.
+"""
 import re
-import asyncio
 from datetime import datetime
 from typing import Tuple, Optional, Dict, Any
 from urllib.parse import urlparse, parse_qs
-from dataclasses import dataclass
+
+# Re-export naver-specific parsers for backward compatibility
+import warnings as _warnings
+
+def _warn_deprecated():
+    _warnings.warn(
+        "app.utils.parsers의 네이버 전용 함수들은 deprecated입니다. "
+        "app.modules.naver_booking.utils.parsers를 사용하세요.",
+        DeprecationWarning,
+        stacklevel=3
+    )
+
+# Lazy import to avoid circular imports
+def __getattr__(name):
+    if name in ('ParsedNaverUrl', 'parse_naver_booking_url', 'parse_naver_page_info', 'parse_time_and_stock'):
+        _warn_deprecated()
+        from app.modules.naver_booking.utils import parsers as naver_parsers
+        return getattr(naver_parsers, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-@dataclass
-class ParsedNaverUrl:
-    """네이버 예약 URL 파싱 결과"""
-    category: str
-    business_id: str
-    item_id: str
-    start_date: Optional[str] = None
-    business_type_id: Optional[str] = None
-    is_valid: bool = True
-    error: Optional[str] = None
-
-
-def parse_naver_booking_url(url: str) -> ParsedNaverUrl:
-    """
-    네이버 예약 URL에서 정보를 추출합니다.
-
-    URL 형식: /booking/{category}/bizes/{businessId}/items/{itemId}?startDateTime=...
-    또는: https://booking.naver.com/booking/{category}/bizes/{businessId}/items/{itemId}?startDateTime=...
-
-    Args:
-        url: 네이버 예약 URL
-
-    Returns:
-        ParsedNaverUrl: 파싱된 URL 정보
-    """
-    try:
-        parsed = urlparse(url)
-        path = parsed.path
-
-        # /booking/{category}/bizes/{businessId}/items/{itemId} 패턴 매칭
-        pattern = r'/booking/([^/]+)/bizes/(\d+)/items/(\d+)'
-        match = re.search(pattern, path)
-
-        if not match:
-            return ParsedNaverUrl(
-                category="", business_id="", item_id="",
-                is_valid=False, error="Invalid URL format"
-            )
-
-        category = match.group(1)
-        business_id = match.group(2)
-        item_id = match.group(3)
-
-        # 쿼리 파라미터에서 날짜 추출
-        query_params = parse_qs(parsed.query)
-        start_date = None
-        if 'startDateTime' in query_params:
-            start_date = query_params['startDateTime'][0]
-        elif 'startDate' in query_params:
-            start_date = query_params['startDate'][0]
-
-        # businessTypeId 추출 (있는 경우)
-        business_type_id = None
-        if 'businessTypeId' in query_params:
-            business_type_id = query_params['businessTypeId'][0]
-
-        return ParsedNaverUrl(
-            category=category,
-            business_id=business_id,
-            item_id=item_id,
-            start_date=start_date,
-            business_type_id=business_type_id,
-            is_valid=True
-        )
-    except Exception as e:
-        return ParsedNaverUrl(
-            category="", business_id="", item_id="",
-            is_valid=False, error=str(e)
-        )
-
+# Common utility functions (not naver-specific)
 
 def extract_date_only(date_str: Optional[str]) -> Optional[str]:
     """
@@ -104,10 +58,10 @@ def extract_date_only(date_str: Optional[str]) -> Optional[str]:
 def extract_date_from_url(url: str) -> Optional[str]:
     """
     URL에서 날짜 정보를 추출합니다.
-    
+
     Args:
         url: URL 문자열
-        
+
     Returns:
         Optional[str]: 추출된 날짜 문자열 또는 None
     """
@@ -115,7 +69,7 @@ def extract_date_from_url(url: str) -> Optional[str]:
     query_params = parse_qs(parsed_url.query)
     start_date_time = query_params.get('startDateTime')
     start_date = query_params.get('startDate')
-    
+
     if start_date_time:
         return start_date_time[0]
     elif start_date:
@@ -127,20 +81,19 @@ def extract_date_from_url(url: str) -> Optional[str]:
 def calculate_interval(start_date_str: Optional[str]) -> Optional[float]:
     """
     URL의 날짜에 따른 모니터링 간격을 계산합니다.
-    
+
     Args:
         start_date_str: 시작 날짜 문자열
-        
+
     Returns:
         Optional[float]: 계산된 모니터링 간격(초) 또는 None
     """
     import random
-    from datetime import datetime
-    
+
     if start_date_str is None:
         print(f"[Note] Error detected! {start_date_str}")
         return None
-    
+
     try:
         if start_date_str.find("T") > 0:
             # 공백으로 구분된 시간대 처리
@@ -160,10 +113,10 @@ def calculate_interval(start_date_str: Optional[str]) -> Optional[float]:
     except ValueError as e:
         print(f"[Note] Date parsing error! {start_date_str}: {str(e)}")
         return random.uniform(2, 7)
-    
+
     now = datetime.now(start_datetime.tzinfo)
     delta = start_datetime - now
-    
+
     if delta.total_seconds() < 0:  # 이미 지난 날짜
         return random.uniform(2, 7)
     if delta.days > 7:  # 7일 이상
@@ -171,73 +124,3 @@ def calculate_interval(start_date_str: Optional[str]) -> Optional[float]:
     if delta.days > 1:  # 1-7일 이내
         return random.uniform(20, 50)
     return random.uniform(3, 10)  # 내일
-
-
-def parse_time_and_stock(button_text: str) -> Tuple[str, str]:
-    """
-    버튼 텍스트에서 시간과 매수 정보를 추출합니다.
-    
-    Args:
-        button_text: 버튼 텍스트
-        
-    Returns:
-        Tuple[str, str]: (시간 문자열, 매수 문자열)
-    """
-    # 시간 패턴 (오전/오후 HH:MM)
-    time_pattern = r'(오전|오후)\s+\d{1,2}:\d{2}'
-    time_match = re.search(time_pattern, button_text)
-    time_str = time_match.group(0) if time_match else ""
-    
-    # 매수 패턴 (숫자+매)
-    stock_pattern = r'(\d+)매'
-    stock_match = re.search(stock_pattern, button_text)
-    stock_str = stock_match.group(1) if stock_match else "0"
-    
-    return time_str, stock_str
-
-
-def parse_naver_page_info(html_content: str) -> Dict[str, Any]:
-    """
-    HTML 콘텐츠에서 페이지 정보를 추출합니다.
-    
-    Args:
-        html_content: HTML 콘텐츠
-        
-    Returns:
-        Dict[str, Any]: 추출된 페이지 정보
-    """
-    from bs4 import BeautifulSoup
-    
-    result = {
-        "title": "",
-        "times": [],
-        "stocks": [],
-        "available": False
-    }
-    
-    try:
-        soup = BeautifulSoup(html_content, 'html.parser')
-        
-        # 제목 추출
-        title_elem = soup.select_one('h2.detail_title, h2.title, div.title')
-        if title_elem:
-            result["title"] = title_elem.get_text(strip=True)
-        
-        # 시간 및 매수 정보 추출
-        from .validators import is_naver_content_valid
-        
-        valid_items = is_naver_content_valid(html_content, level=2)
-        if valid_items and isinstance(valid_items, list):
-            result["available"] = True
-            
-            for item in valid_items:
-                time_str, stock_str = parse_time_and_stock(item)
-                if time_str:
-                    result["times"].append(time_str)
-                    if stock_str:
-                        result["stocks"].append(f"{time_str}: {stock_str}매")
-    
-    except Exception as e:
-        print(f"페이지 정보 파싱 중 오류 발생: {str(e)}")
-    
-    return result 

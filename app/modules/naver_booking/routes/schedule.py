@@ -22,7 +22,7 @@ from app.schemas.recurring_rule import (
 )
 from app.services.schedule_service import schedule_service
 from app.services.recurring_rule_service import recurring_rule_service
-from app.services.anonymous_monitor import get_anonymous_monitor
+from app.modules.naver_booking.services.anonymous_monitor import get_anonymous_monitor
 
 router = APIRouter(prefix="/api/v1/schedules", tags=["schedules"])
 
@@ -41,49 +41,39 @@ def _fill_account_names(schedules):
     return schedules
 
 
-@router.get("/")
+@router.get("/", response_model=List[MonitorSchedule])
 def get_all_schedules(
     is_enabled: Optional[bool] = Query(None, description="활성화 상태로 필터링"),
-    page: Optional[int] = Query(None, ge=1, description="페이지 번호 (1부터 시작)"),
-    page_size: int = Query(100, ge=1, le=500, description="페이지 크기"),
     db: Session = Depends(get_db)
 ):
     """
-    전체 일정 목록 조회 (페이지네이션 지원)
+    전체 일정 목록 조회
 
     - is_enabled=true: 활성화된 일정만
     - is_enabled=false: 비활성화된 일정만
     - 파라미터 없음: 전체 일정
-    - page: 페이지 번호 (없으면 전체 반환)
     """
     from sqlalchemy.orm import joinedload
     from app.models.monitor_schedule import MonitorSchedule as ScheduleModel
 
-    query = db.query(ScheduleModel).options(joinedload(ScheduleModel.account))
-
     if is_enabled is True:
-        query = query.filter(ScheduleModel.is_enabled == True)
+        schedules = db.query(ScheduleModel).options(
+            joinedload(ScheduleModel.account)
+        ).filter(
+            ScheduleModel.is_enabled == True
+        ).order_by(ScheduleModel.date).all()
     elif is_enabled is False:
-        query = query.filter(ScheduleModel.is_enabled == False)
-
-    # 페이지네이션 적용
-    if page is not None:
-        total = query.count()
-        offset = (page - 1) * page_size
-        schedules = query.order_by(ScheduleModel.date).offset(offset).limit(page_size).all()
-        total_pages = (total + page_size - 1) // page_size
-
-        return {
-            "items": _fill_account_names(schedules),
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-            "total_pages": total_pages,
-        }
+        schedules = db.query(ScheduleModel).options(
+            joinedload(ScheduleModel.account)
+        ).filter(
+            ScheduleModel.is_enabled == False
+        ).order_by(ScheduleModel.date).all()
     else:
-        # 하위호환: page 파라미터 없으면 전체 리스트 반환
-        schedules = query.order_by(ScheduleModel.date).all()
-        return _fill_account_names(schedules)
+        schedules = db.query(ScheduleModel).options(
+            joinedload(ScheduleModel.account)
+        ).order_by(ScheduleModel.date).all()
+
+    return _fill_account_names(schedules)
 
 
 @router.get("/with-context")
@@ -94,15 +84,12 @@ def get_schedules_with_context(
     date_from: Optional[str] = Query(None, description="시작 날짜 (YYYY-MM-DD)"),
     date_to: Optional[str] = Query(None, description="종료 날짜 (YYYY-MM-DD)"),
     search: Optional[str] = Query(None, description="업체명/아이템명 검색"),
-    page: Optional[int] = Query(None, ge=1, description="페이지 번호 (1부터 시작)"),
-    page_size: int = Query(100, ge=1, le=500, description="페이지 크기"),
     db: Session = Depends(get_db)
 ):
     """
-    전체 일정 + 상위 컨텍스트 조회 (일정 관리 페이지용, 페이지네이션 지원)
+    전체 일정 + 상위 컨텍스트 조회 (일정 관리 페이지용)
 
     업체/아이템 정보를 포함하여 반환합니다.
-    page 파라미터가 있으면 페이지네이션 응답, 없으면 전체 리스트 반환.
     """
     return schedule_service.get_all_with_context(
         db,
@@ -112,8 +99,6 @@ def get_schedules_with_context(
         date_from=date_from,
         date_to=date_to,
         search=search,
-        page=page,
-        page_size=page_size,
     )
 
 
