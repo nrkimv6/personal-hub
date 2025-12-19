@@ -10,7 +10,11 @@ from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
-from app.modules.naver_booking.services.graphql_client import NaverGraphQLClient, ScheduleInfo
+from app.modules.naver_booking.services.graphql_client import (
+    NaverGraphQLClient,
+    ScheduleInfo,
+    get_naver_graphql_client,
+)
 from app.schemas.slot_check import (
     SlotCheckResponse,
     SlotCheckBusinessInfo,
@@ -184,52 +188,49 @@ async def check_slots(
             }
         )
 
-    # GraphQL 클라이언트로 조회
-    client = NaverGraphQLClient()
-    try:
-        # 1. 업체 정보 조회
-        business_info = await client.fetch_business_info(business_id)
-        if not business_info:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "code": "BUSINESS_NOT_FOUND",
-                    "message": f"업체를 찾을 수 없습니다 (business_id={business_id})"
-                }
-            )
+    # GraphQL 클라이언트로 조회 (싱글톤 사용 - 프록시 매니저 연동)
+    client = get_naver_graphql_client()
 
-        # 2. 상품 정보 조회
-        biz_item_info = await client.fetch_biz_item(business_id, biz_item_id)
-        if not biz_item_info:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "code": "ITEM_NOT_FOUND",
-                    "message": f"상품을 찾을 수 없습니다 (biz_item_id={biz_item_id})"
-                }
-            )
-
-        # 3. 스케줄 조회
-        start_date = target_date or datetime.now().strftime("%Y-%m-%d")
-        schedule = await client.fetch_schedule(
-            business_type_id=business_info.business_type_id or 13,
-            business_id=business_id,
-            biz_item_id=biz_item_id,
-            start_date=start_date,
-            days_ahead=days_ahead
+    # 1. 업체 정보 조회
+    business_info = await client.fetch_business_info(business_id)
+    if not business_info:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "BUSINESS_NOT_FOUND",
+                "message": f"업체를 찾을 수 없습니다 (business_id={business_id})"
+            }
         )
 
-        if not schedule:
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "code": "GRAPHQL_ERROR",
-                    "message": "스케줄 조회에 실패했습니다"
-                }
-            )
+    # 2. 상품 정보 조회
+    biz_item_info = await client.fetch_biz_item(business_id, biz_item_id)
+    if not biz_item_info:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "ITEM_NOT_FOUND",
+                "message": f"상품을 찾을 수 없습니다 (biz_item_id={biz_item_id})"
+            }
+        )
 
-        # 4. 응답 변환
-        return build_response(business_info, biz_item_info, schedule)
+    # 3. 스케줄 조회
+    start_date = target_date or datetime.now().strftime("%Y-%m-%d")
+    schedule = await client.fetch_schedule(
+        business_type_id=business_info.business_type_id or 13,
+        business_id=business_id,
+        biz_item_id=biz_item_id,
+        start_date=start_date,
+        days_ahead=days_ahead
+    )
 
-    finally:
-        await client.close()
+    if not schedule:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "GRAPHQL_ERROR",
+                "message": "스케줄 조회에 실패했습니다"
+            }
+        )
+
+    # 4. 응답 변환
+    return build_response(business_info, biz_item_info, schedule)
