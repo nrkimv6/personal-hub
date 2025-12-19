@@ -98,6 +98,8 @@ class ScheduleSlot:
     time: str  # "11:30"
     is_business_day: bool
     is_sale_day: bool
+    is_unit_business_day: bool  # 실제 영업 시간대 여부 (핵심 필드)
+    is_unit_sale_day: bool  # 슬롯별 판매일 여부
     stock: int
     unit_stock: int
     unit_booking_count: int
@@ -280,6 +282,8 @@ class NaverGraphQLClient:
                 hourly {
                     isBusinessDay
                     isSaleDay
+                    isUnitBusinessDay
+                    isUnitSaleDay
                     unitStock
                     unitBookingCount
                     stock
@@ -904,6 +908,8 @@ class NaverGraphQLClient:
                 time=slot_time,
                 is_business_day=slot_data.get("isBusinessDay", False),
                 is_sale_day=slot_data.get("isSaleDay", False),
+                is_unit_business_day=slot_data.get("isUnitBusinessDay", False),
+                is_unit_sale_day=slot_data.get("isUnitSaleDay", False),
                 stock=stock_value,
                 unit_stock=slot_data.get("unitStock") or 0,
                 unit_booking_count=slot_data.get("unitBookingCount") or 0,
@@ -1291,7 +1297,11 @@ class NaverGraphQLClient:
             }
 
         # 예약 가능한 시간만 필터링
-        available_slots = [s for s in date_slots if s.is_sale_day and s.stock > 0]
+        # is_unit_business_day가 True인 시간대만 실제 판매 시간
+        available_slots = [
+            s for s in date_slots
+            if s.is_unit_business_day and s.is_unit_sale_day and s.stock > 0
+        ]
         all_times = sorted([s.time for s in available_slots])
 
         # 주말/평일 판단

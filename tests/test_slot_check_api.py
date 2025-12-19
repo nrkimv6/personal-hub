@@ -79,7 +79,9 @@ def create_mock_schedule_slot(
     time: str = "10:00",
     unit_stock: int = 10,
     unit_booking_count: int = 5,
-    is_sale_day: bool = True
+    is_sale_day: bool = True,
+    is_unit_business_day: bool = True,
+    is_unit_sale_day: bool = True
 ) -> ScheduleSlot:
     """테스트용 슬롯 생성"""
     return ScheduleSlot(
@@ -89,6 +91,8 @@ def create_mock_schedule_slot(
         time=time,
         is_business_day=True,
         is_sale_day=is_sale_day,
+        is_unit_business_day=is_unit_business_day,
+        is_unit_sale_day=is_unit_sale_day,
         stock=unit_stock - unit_booking_count if is_sale_day else 0,
         unit_stock=unit_stock,
         unit_booking_count=unit_booking_count,

@@ -1055,17 +1055,18 @@ class NaverSiteMonitor(AbstractSiteMonitor):
                 available_slots = []
 
                 for slot in hourly_slots:
-                    # 영업일이 아니면 스킵
-                    if not slot.get('isUnitBusinessDay', False):
+                    # isUnitBusinessDay가 False면 실제 판매하지 않는 시간대이므로 스킵
+                    is_unit_business_day = slot.get('isUnitBusinessDay', False)
+                    if not is_unit_business_day:
                         continue
 
-                    # 재고 확인: stock > 0 AND (unit_stock - unit_booking_count) > 0 AND is_sale_day
+                    # 재고 확인: is_unit_business_day AND is_sale_day AND stock > 0 AND (unit_stock - unit_booking_count) > 0
                     stock = slot.get('stock', 0)
                     unit_stock = slot.get('unitStock', 0)
                     unit_booking_count = slot.get('unitBookingCount', 0)
                     is_sale_day = slot.get('isUnitSaleDay', False)
 
-                    if not is_slot_available(stock, unit_stock, unit_booking_count, is_sale_day):
+                    if not is_slot_available(stock, unit_stock, unit_booking_count, is_sale_day, is_unit_business_day):
                         continue
 
                     available_count = unit_stock - unit_booking_count

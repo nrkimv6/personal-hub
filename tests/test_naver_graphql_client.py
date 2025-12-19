@@ -666,6 +666,8 @@ class TestFetchScheduleDual:
             time="10:00",
             is_business_day=True,
             is_sale_day=True,
+            is_unit_business_day=True,
+            is_unit_sale_day=True,
             stock=5,
             unit_stock=5,
             unit_booking_count=0,
@@ -817,6 +819,7 @@ class TestFetchScheduleDual:
             slot_id="test", start_time="2025-12-13 10:00:00",
             date="2025-12-13", time="10:00", is_business_day=True,
             is_sale_day=False,  # 판매 불가
+            is_unit_business_day=False, is_unit_sale_day=False,
             stock=0, unit_stock=0, unit_booking_count=0,
             duration=60, min_booking_count=1, max_booking_count=10,
             prices=[], raw_data={}
