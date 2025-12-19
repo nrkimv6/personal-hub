@@ -14,8 +14,8 @@ from app.schemas.biz_item import (
     BizItemWithSchedules,
 )
 from app.schemas.monitor_schedule import MonitorSchedule, MonitorScheduleCreate, BulkScheduleCreate
-from app.services.business_service import business_service
-from app.services.biz_item_service import biz_item_service
+from app.modules.naver_booking.services.business_service import business_service
+from app.modules.naver_booking.services.biz_item_service import biz_item_service
 from app.services.schedule_service import schedule_service
 
 router = APIRouter(prefix="/api/v1", tags=["items"])

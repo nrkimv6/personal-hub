@@ -12,7 +12,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.config import logger
-from app.utils.parsers import parse_naver_booking_url, ParsedNaverUrl
+from app.modules.naver_booking.utils.parsers import parse_naver_booking_url, ParsedNaverUrl
 from app.modules.naver_booking.services.graphql_client import (
     get_naver_graphql_client,
     BusinessInfo,

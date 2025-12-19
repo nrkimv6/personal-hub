@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
-from app.services.naver_graphql_client import NaverGraphQLClient, ScheduleInfo
+from app.modules.naver_booking.services.graphql_client import NaverGraphQLClient, ScheduleInfo
 from app.schemas.slot_check import (
     SlotCheckResponse,
     SlotCheckBusinessInfo,

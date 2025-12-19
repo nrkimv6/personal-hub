@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.services.url_import_service import url_import_service
+from app.modules.naver_booking.services.url_import_service import url_import_service
 from app.config import logger
 
 

@@ -12,8 +12,9 @@ from sqlalchemy import text
 import logging
 
 from app.core.config import settings, logger
-from app.utils.validators import is_naver_content_valid, is_naver_full_reservation, is_naver_page_available
-from app.utils.parsers import parse_time_and_stock, parse_naver_page_info, extract_date_from_url
+from app.modules.naver_booking.utils.validators import is_naver_content_valid, is_naver_full_reservation, is_naver_page_available
+from app.modules.naver_booking.utils.parsers import parse_time_and_stock, parse_naver_page_info
+from app.utils.parsers import extract_date_from_url
 from app.core.database import SessionLocal, get_db
 
 class NotificationService:

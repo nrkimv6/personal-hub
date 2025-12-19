@@ -19,6 +19,6 @@ from app.modules.naver_booking.routes.slot_check import (
     build_response,
 )
 # 테스트 mock을 위해 NaverGraphQLClient도 re-export
-from app.services.naver_graphql_client import NaverGraphQLClient, ScheduleInfo
+from app.modules.naver_booking.services.graphql_client import NaverGraphQLClient, ScheduleInfo
 
 __all__ = ['router', 'DAY_OF_WEEK_KR', 'parse_naver_url', 'build_response', 'NaverGraphQLClient', 'ScheduleInfo']

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
 from urllib.parse import urlparse
 
-from sqlalchemy import select, func, desc, asc, and_, or_, Integer
+from sqlalchemy import select, func, desc, asc, and_, or_, Integer, case, nullslast
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.proxy import Proxy, ProxyCheckHistory, ProxyCollectionRun
@@ -158,11 +158,42 @@ class ProxyDBService:
         total = query.count()
 
         # 정렬
+        # inactive/blacklisted 상태는 항상 맨 아래로, NULL 응답시간도 맨 아래로
         sort_column = getattr(Proxy, params.sort_by, Proxy.priority_score)
-        if params.sort_order == "desc":
-            query = query.order_by(desc(sort_column))
+
+        # 상태 우선순위: active(0), pending(1), inactive(2), blacklisted(3)
+        status_priority = case(
+            (Proxy.status == "active", 0),
+            (Proxy.status == "pending", 1),
+            (Proxy.status == "inactive", 2),
+            (Proxy.status == "blacklisted", 3),
+            else_=4
+        )
+
+        if params.sort_by == "avg_response_time":
+            # 응답시간 정렬 시: 상태 우선순위 -> NULL 여부 -> 응답시간
+            null_priority = case(
+                (Proxy.avg_response_time.is_(None), 1),
+                else_=0
+            )
+            if params.sort_order == "desc":
+                query = query.order_by(
+                    status_priority,
+                    null_priority,
+                    desc(sort_column)
+                )
+            else:
+                query = query.order_by(
+                    status_priority,
+                    null_priority,
+                    asc(sort_column)
+                )
         else:
-            query = query.order_by(asc(sort_column))
+            # 다른 컬럼 정렬 시: 상태 우선순위 -> 해당 컬럼
+            if params.sort_order == "desc":
+                query = query.order_by(status_priority, desc(sort_column))
+            else:
+                query = query.order_by(status_priority, asc(sort_column))
 
         # 페이징
         offset = (params.page - 1) * params.page_size

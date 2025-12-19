@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from app.models.monitor import MonitorTarget
 from app.services.abstract_site_monitor import AbstractSiteMonitor
 from app.services.notification_service import NotificationService
-from app.utils.validators import is_naver_content_valid, is_naver_full_reservation, is_naver_page_available
+from app.modules.naver_booking.utils.validators import is_naver_content_valid, is_naver_full_reservation, is_naver_page_available
 import hashlib
 import json
 import re
@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 import aiohttp
 import asyncio
 from app.config import settings, logger
-from app.utils.parsers import parse_time_and_stock, parse_naver_page_info, extract_date_from_url
+from app.modules.naver_booking.utils.parsers import parse_time_and_stock, parse_naver_page_info, extract_date_from_url
 from app.utils.slot_utils import is_slot_available
 
 # 순환 참조 방지를 위한 지연 import

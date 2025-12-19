@@ -2,7 +2,7 @@ from typing import Dict, Type
 from app.models.monitor_target import MonitorTarget, ServiceType
 from app.services.abstract_site_monitor import AbstractSiteMonitor
 from app.services.coupang_site_monitor import CoupangSiteMonitor
-from app.services.naver_site_monitor import NaverSiteMonitor
+from app.modules.naver_booking.services.site_monitor import NaverSiteMonitor
 
 class SiteMonitorFactory:
     """사이트 모니터링 서비스 팩토리"""

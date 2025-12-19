@@ -2,7 +2,7 @@ from typing import Dict, Type, Optional
 from app.models.monitor_target import MonitorTarget, ServiceType
 from app.services.abstract_site_monitor import AbstractSiteMonitor
 from app.services.coupang_site_monitor import CoupangSiteMonitor
-from app.services.naver_site_monitor import NaverSiteMonitor
+from app.modules.naver_booking.services.site_monitor import NaverSiteMonitor
 from app.services.notification_service import NotificationService
 from app.services.browser_service import BrowserService
 

@@ -147,7 +147,7 @@ async def disable_proxy() -> Dict[str, Any]:
 
     현재 세션에서만 적용됩니다. 서버 재시작 시 설정값을 따릅니다.
     """
-    from app.services.naver_graphql_client import set_proxy_manager
+    from app.modules.naver_booking.services.graphql_client import set_proxy_manager
 
     # NaverGraphQLClient에서 프록시 매니저 제거
     set_proxy_manager(None)

@@ -14,7 +14,7 @@ from sqlalchemy import text
 
 from app.database import SessionLocal
 from app.config import settings, logger
-from app.utils.url_builder import build_naver_booking_url
+from app.modules.naver_booking.utils.url_builder import build_naver_booking_url
 from app.services.schedule_service import calculate_default_interval
 
 

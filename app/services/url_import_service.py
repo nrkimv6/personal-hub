@@ -22,7 +22,7 @@ from app.modules.naver_booking.services.url_import_service import (
 import_from_url = url_import_service.import_from_url
 
 # validate_naver_url은 별도 유틸로 유지 (parsers.py에 있음)
-from app.utils.parsers import parse_naver_booking_url
+from app.modules.naver_booking.utils.parsers import parse_naver_booking_url
 
 def validate_naver_url(url: str) -> bool:
     """네이버 예약 URL 유효성 검사"""

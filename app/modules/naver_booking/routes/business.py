@@ -19,15 +19,15 @@ from app.schemas.business import (
 )
 from app.schemas.biz_item import BizItem, BizItemCreate, BizItemUpdate
 from app.schemas.monitor_schedule import MonitorScheduleCreate
-from app.services.business_service import business_service
-from app.services.biz_item_service import biz_item_service
+from app.modules.naver_booking.services.business_service import business_service
+from app.modules.naver_booking.services.biz_item_service import biz_item_service
 from app.services.schedule_service import schedule_service
-from app.services.naver_graphql_client import (
+from app.modules.naver_booking.services.graphql_client import (
     get_naver_graphql_client,
     BusinessInfo,
     BizItemInfo,
 )
-from app.utils.parsers import parse_naver_booking_url, extract_date_only
+from app.modules.naver_booking.utils.parsers import parse_naver_booking_url, extract_date_only
 from app.config import logger
 
 router = APIRouter(prefix="/api/v1/businesses", tags=["businesses"])
