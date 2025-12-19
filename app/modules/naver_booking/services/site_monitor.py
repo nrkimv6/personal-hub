@@ -11,7 +11,8 @@ from datetime import datetime, timedelta, timezone
 import aiohttp
 import asyncio
 from app.config import settings, logger
-from app.modules.naver_booking.utils.parsers import parse_time_and_stock, parse_naver_page_info, extract_date_from_url
+from app.modules.naver_booking.utils.parsers import parse_time_and_stock, parse_naver_page_info
+from app.utils.parsers import extract_date_from_url
 from app.utils.slot_utils import is_slot_available
 
 # 순환 참조 방지를 위한 지연 import
