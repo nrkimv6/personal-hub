@@ -194,6 +194,7 @@ class CrawlService:
         duplicate_stop_count: Optional[int] = None,
         max_retries: Optional[int] = None,
         retry_interval_minutes: Optional[int] = None,
+        account_id: Optional[int] = None,
     ) -> InstagramScheduleConfig:
         """스케줄 설정 업데이트.
 
@@ -234,6 +235,10 @@ class CrawlService:
 
         if retry_interval_minutes is not None:
             config.retry_interval_minutes = retry_interval_minutes
+
+        # 계정 지정
+        if account_id is not None:
+            config.account_id = account_id
 
         config.updated_at = datetime.utcnow()
 

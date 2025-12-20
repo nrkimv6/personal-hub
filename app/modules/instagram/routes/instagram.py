@@ -235,6 +235,7 @@ async def update_schedule_config(
         duplicate_stop_count=update.duplicate_stop_count,
         max_retries=update.max_retries,
         retry_interval_minutes=update.retry_interval_minutes,
+        account_id=update.account_id,
     )
 
     return _config_to_schema(config)
@@ -264,6 +265,8 @@ def _config_to_schema(config) -> ScheduleConfigSchema:
         duplicate_stop_count=getattr(config, 'duplicate_stop_count', 5) or 5,
         max_retries=getattr(config, 'max_retries', 3) or 3,
         retry_interval_minutes=getattr(config, 'retry_interval_minutes', 5) or 5,
+        account_id=getattr(config, 'account_id', None),
+        account_name=config.account.name if getattr(config, 'account', None) else None,
         updated_at=config.updated_at,
     )
 

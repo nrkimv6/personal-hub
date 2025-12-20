@@ -100,6 +100,9 @@ class ScheduleConfigSchema(BaseModel):
     duplicate_stop_count: int = 5
     max_retries: int = 3
     retry_interval_minutes: int = 5
+    # 계정 지정 (2025-12-21 추가)
+    account_id: Optional[int] = None
+    account_name: Optional[str] = None
     updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -117,6 +120,8 @@ class ScheduleConfigUpdateSchema(BaseModel):
     duplicate_stop_count: Optional[int] = None
     max_retries: Optional[int] = None
     retry_interval_minutes: Optional[int] = None
+    # 계정 지정 (2025-12-21 추가)
+    account_id: Optional[int] = None
 
 
 class TodayScheduleItem(BaseModel):
