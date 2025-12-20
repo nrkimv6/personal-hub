@@ -52,11 +52,14 @@
     error = null;
   }
 
-  // 업체 목록 로드
+  // 업체 목록 로드 (슬롯 조회용: 네이버 예약만, 최근 30일 내 업데이트된 것만)
   async function loadBusinesses() {
     loadingBusinesses = true;
     try {
-      businesses = await businessApi.list();
+      businesses = await businessApi.list({
+        service_type: 'naver',
+        recent_days: 30
+      });
     } catch (e) {
       console.error('Failed to load businesses:', e);
     } finally {

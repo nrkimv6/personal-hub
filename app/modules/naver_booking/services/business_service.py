@@ -5,7 +5,7 @@ Business 서비스 - 업체 CRUD
 import json
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.models.business import Business
 from app.schemas.business import BusinessCreate, BusinessUpdate
@@ -14,9 +14,30 @@ from app.schemas.business import BusinessCreate, BusinessUpdate
 class BusinessService:
     """업체 관리 서비스"""
 
-    def get_all(self, db: Session) -> List[Business]:
-        """전체 업체 목록 조회"""
-        return db.query(Business).order_by(Business.name).all()
+    def get_all(
+        self,
+        db: Session,
+        service_type: Optional[str] = None,
+        recent_days: Optional[int] = None,
+    ) -> List[Business]:
+        """
+        전체 업체 목록 조회
+
+        Args:
+            db: DB 세션
+            service_type: 서비스 타입 필터 (예: "naver")
+            recent_days: 최근 N일 이내 업데이트된 업체만 조회
+        """
+        query = db.query(Business)
+
+        if service_type:
+            query = query.filter(Business.service_type == service_type)
+
+        if recent_days is not None:
+            cutoff_date = datetime.now() - timedelta(days=recent_days)
+            query = query.filter(Business.updated_at >= cutoff_date)
+
+        return query.order_by(Business.name).all()
 
     def get_by_id(self, db: Session, business_id: int) -> Optional[Business]:
         """ID로 업체 조회"""

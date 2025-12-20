@@ -35,9 +35,18 @@ router = APIRouter(prefix="/api/v1/businesses", tags=["businesses"])
 
 
 @router.get("/", response_model=List[Business])
-def get_businesses(db: Session = Depends(get_db)):
-    """전체 업체 목록 조회"""
-    return business_service.get_all(db)
+def get_businesses(
+    service_type: str = None,
+    recent_days: int = None,
+    db: Session = Depends(get_db),
+):
+    """
+    전체 업체 목록 조회
+
+    - service_type: 서비스 타입 필터 (예: "naver", "coupang")
+    - recent_days: 최근 N일 이내 업데이트된 업체만 조회
+    """
+    return business_service.get_all(db, service_type=service_type, recent_days=recent_days)
 
 
 @router.post("/", response_model=Business, status_code=201)
