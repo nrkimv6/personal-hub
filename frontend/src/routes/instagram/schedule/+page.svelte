@@ -4,13 +4,16 @@
 	import type {
 		InstagramScheduleConfig,
 		InstagramTimeWindow,
-		InstagramTodayScheduleItem
+		InstagramTodayScheduleItem,
+		InstagramCrawlRequest
 	} from '$lib/types';
 
 	let config: InstagramScheduleConfig | null = null;
 	let todaySchedule: InstagramTodayScheduleItem[] = [];
+	let pendingRequests: InstagramCrawlRequest[] = [];
 	let loading = true;
 	let saving = false;
+	let requesting = false;
 	let error: string | null = null;
 	let successMessage: string | null = null;
 
@@ -20,16 +23,24 @@
 	let editTimeWindows: InstagramTimeWindow[] = [];
 	let editMaxPosts = 50;
 	let editScrollCount = 5;
+	// 고급 설정
+	let editMinIntervalHours = 2;
+	let editDuplicateStopCount = 5;
+	let editMaxRetries = 3;
+	let editRetryIntervalMinutes = 5;
+	let showAdvanced = false;
 
 	async function fetchData() {
 		loading = true;
 		try {
-			const [configData, scheduleData] = await Promise.all([
+			const [configData, scheduleData, pendingData] = await Promise.all([
 				instagramApi.getSchedule(),
-				instagramApi.todaySchedule()
+				instagramApi.todaySchedule(),
+				instagramApi.getPendingRequests(5)
 			]);
 			config = configData;
 			todaySchedule = scheduleData;
+			pendingRequests = pendingData;
 
 			// 편집용 상태 초기화
 			editEnabled = configData.enabled;
@@ -37,6 +48,11 @@
 			editTimeWindows = [...configData.time_windows];
 			editMaxPosts = configData.max_posts;
 			editScrollCount = configData.scroll_count;
+			// 고급 설정
+			editMinIntervalHours = configData.min_interval_hours ?? 2;
+			editDuplicateStopCount = configData.duplicate_stop_count ?? 5;
+			editMaxRetries = configData.max_retries ?? 3;
+			editRetryIntervalMinutes = configData.retry_interval_minutes ?? 5;
 
 			error = null;
 		} catch (e) {
@@ -55,7 +71,11 @@
 				daily_runs: editDailyRuns,
 				time_windows: editTimeWindows,
 				max_posts: editMaxPosts,
-				scroll_count: editScrollCount
+				scroll_count: editScrollCount,
+				min_interval_hours: editMinIntervalHours,
+				duplicate_stop_count: editDuplicateStopCount,
+				max_retries: editMaxRetries,
+				retry_interval_minutes: editRetryIntervalMinutes
 			});
 			successMessage = '설정이 저장되었습니다';
 			await fetchData();
@@ -63,6 +83,21 @@
 			error = e instanceof Error ? e.message : '저장 실패';
 		} finally {
 			saving = false;
+		}
+	}
+
+	async function requestManualCrawl() {
+		requesting = true;
+		successMessage = null;
+		try {
+			// 기본 계정 ID 1 사용 (TODO: 실제 계정 선택 기능 추가)
+			const result = await instagramApi.requestManualCrawl(1);
+			successMessage = `수집 요청 #${result.id}이(가) 추가되었습니다`;
+			await fetchData();
+		} catch (e) {
+			error = e instanceof Error ? e.message : '요청 실패';
+		} finally {
+			requesting = false;
 		}
 	}
 
@@ -238,6 +273,85 @@
 						<p class="text-xs text-gray-500 mt-1">더 많은 게시물을 로드하기 위한 스크롤 횟수</p>
 					</div>
 
+					<!-- 고급 설정 토글 -->
+					<div class="border-t border-gray-200 pt-4">
+						<button
+							type="button"
+							onclick={() => showAdvanced = !showAdvanced}
+							class="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1"
+						>
+							{showAdvanced ? '▼' : '▶'} 고급 설정
+						</button>
+
+						{#if showAdvanced}
+							<div class="mt-4 space-y-4 bg-gray-50 p-4 rounded-lg">
+								<!-- 최소 실행 간격 -->
+								<div>
+									<label for="minInterval" class="block font-medium text-gray-700 mb-1"
+										>최소 실행 간격 (시간)</label
+									>
+									<input
+										id="minInterval"
+										type="number"
+										bind:value={editMinIntervalHours}
+										min="0"
+										max="24"
+										class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+									/>
+									<p class="text-xs text-gray-500 mt-1">마지막 수집 후 최소 대기 시간 (0이면 비활성화)</p>
+								</div>
+
+								<!-- 중복 감지 중단 -->
+								<div>
+									<label for="duplicateStop" class="block font-medium text-gray-700 mb-1"
+										>중복 감지 중단</label
+									>
+									<input
+										id="duplicateStop"
+										type="number"
+										bind:value={editDuplicateStopCount}
+										min="0"
+										max="50"
+										class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+									/>
+									<p class="text-xs text-gray-500 mt-1">연속 N개 중복 시 수집 중단 (0이면 비활성화)</p>
+								</div>
+
+								<!-- 최대 재시도 -->
+								<div>
+									<label for="maxRetries" class="block font-medium text-gray-700 mb-1"
+										>최대 재시도</label
+									>
+									<input
+										id="maxRetries"
+										type="number"
+										bind:value={editMaxRetries}
+										min="0"
+										max="10"
+										class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+									/>
+									<p class="text-xs text-gray-500 mt-1">실패 시 최대 재시도 횟수</p>
+								</div>
+
+								<!-- 재시도 간격 -->
+								<div>
+									<label for="retryInterval" class="block font-medium text-gray-700 mb-1"
+										>재시도 간격 (분)</label
+									>
+									<input
+										id="retryInterval"
+										type="number"
+										bind:value={editRetryIntervalMinutes}
+										min="1"
+										max="60"
+										class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+									/>
+									<p class="text-xs text-gray-500 mt-1">재시도 기본 간격 (지수 백오프 적용)</p>
+								</div>
+							</div>
+						{/if}
+					</div>
+
 					<!-- 저장 버튼 -->
 					<button onclick={saveConfig} disabled={saving} class="btn btn-primary w-full">
 						{saving ? '저장 중...' : '설정 저장'}
@@ -247,7 +361,30 @@
 
 			<!-- 오늘 스케줄 -->
 			<div class="card">
-				<h3 class="text-lg font-semibold text-gray-900 mb-4">오늘 수집 스케줄</h3>
+				<div class="flex justify-between items-center mb-4">
+					<h3 class="text-lg font-semibold text-gray-900">오늘 수집 스케줄</h3>
+					<button
+						onclick={requestManualCrawl}
+						disabled={requesting || pendingRequests.length > 0}
+						class="btn btn-primary btn-sm"
+					>
+						{#if requesting}
+							수집 요청 중...
+						{:else if pendingRequests.length > 0}
+							대기 중 ({pendingRequests.length})
+						{:else}
+							지금 수집
+						{/if}
+					</button>
+				</div>
+
+				{#if pendingRequests.length > 0}
+					<div class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+						<p class="text-sm text-yellow-800">
+							대기 중인 요청: {pendingRequests.length}개
+						</p>
+					</div>
+				{/if}
 
 				{#if todaySchedule.length === 0}
 					<p class="text-gray-500 text-center py-8">
