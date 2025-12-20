@@ -215,13 +215,23 @@ class TestProxySelection:
         assert isinstance(proxy, ProxyInfo)
 
     @pytest.mark.asyncio
-    async def test_right_weighted_selection(self, proxy_manager_v2):
+    async def test_right_weighted_selection(self, mock_db_service, sample_proxy_list):
         """[Right] 가중치 기반 선택 (높은 점수 프록시가 더 자주 선택됨)"""
-        await proxy_manager_v2.initialize()
+        from app.services.proxy_manager_v2 import ProxyManagerV2
+
+        mock_db_service.get_top_proxies_for_pool.return_value = sample_proxy_list
+
+        # cooldown을 0으로 설정해 가중치 선택 테스트
+        manager = ProxyManagerV2(
+            db_service=mock_db_service,
+            weighted_selection=True,
+            proxy_cooldown_seconds=0,  # cooldown 비활성화
+        )
+        await manager.initialize()
 
         selection_counts = {}
         for _ in range(1000):
-            proxy = proxy_manager_v2.get_next_proxy()
+            proxy = manager.get_next_proxy()
             selection_counts[proxy.id] = selection_counts.get(proxy.id, 0) + 1
 
         # 높은 점수 프록시(id=5, score=50)가 낮은 점수 프록시(id=1, score=10)보다 더 자주 선택
@@ -1021,9 +1031,11 @@ class TestPoolRefreshExclusion:
         assert 1 in manager._slow_proxies
         assert 3 in manager._slow_proxies
 
-        # 풀 갱신 후 slow_proxies가 초기화됨
+        # 풀 갱신 후 slow_proxies는 유지됨 (다음 갱신에서도 제외하기 위해)
         await manager._refresh_pool()
-        assert len(manager._slow_proxies) == 0
+        # slow_proxies가 유지되어 다음 풀 구성에서도 제외됨
+        assert 1 in manager._slow_proxies
+        assert 3 in manager._slow_proxies
 
     @pytest.mark.asyncio
     async def test_right_stats_cleared_on_refresh(self, mock_db_service, sample_proxy_list):

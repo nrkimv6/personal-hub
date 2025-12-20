@@ -225,10 +225,12 @@ class TestProxyManagerBoundaryConditions:
 
         manager.mark_failed("http://1.1.1.1:80", "test error")
 
-        # 블랙리스트가 초기화되고 다시 사용 가능해야 함
+        # mark_failed는 session_blacklist(영구)에 추가하므로
+        # 임시 blacklist 초기화해도 session_blacklist에 남아 있음
+        # → 결과는 None (사용 가능한 프록시 없음)
         result = manager.get_next_proxy()
-        assert result == "http://1.1.1.1:80"
-        assert len(manager.blacklist) == 0
+        assert result is None
+        assert len(manager.session_blacklist) == 1
 
     def test_blacklist_expiration(self):
         """블랙리스트 만료 테스트"""

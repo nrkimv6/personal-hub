@@ -71,11 +71,15 @@ def get_anonymous_monitor():
 
 
 def get_event_logger():
+    # Import all models first to resolve relationships
+    import app.models  # noqa: F401
     from app.services.event_logger import EventLogger
     return EventLogger
 
 
 def get_monitoring_event_model():
+    # Import all models first to resolve relationships
+    import app.models  # noqa: F401
     from app.models.monitoring_event import MonitoringEvent
     return MonitoringEvent
 
@@ -180,10 +184,10 @@ class TestNaverGraphQLClientProxyTracking:
         """프록시 매니저가 있을 때 _last_used_proxy가 설정되어야 함"""
         NaverGraphQLClient = get_naver_graphql_client()
 
-        # Mock proxy manager
+        # Mock proxy manager - 현재 구현은 get_fresh_proxy() 사용
         mock_proxy_manager = MagicMock()
         mock_proxy_manager.is_available = True
-        mock_proxy_manager.get_aiohttp_proxy.return_value = "http://proxy:8080"
+        mock_proxy_manager.get_fresh_proxy.return_value = "http://proxy:8080"
 
         client = NaverGraphQLClient(proxy_manager=mock_proxy_manager)
 
@@ -225,6 +229,11 @@ class TestNaverGraphQLClientProxyTracking:
         assert client._last_used_proxy is None
 
 
+def get_dual_check_result():
+    from app.modules.naver_booking.services.graphql_client import DualCheckResult
+    return DualCheckResult
+
+
 class TestAnonymousMonitorProxyPropagation:
     """AnonymousMonitor 프록시 정보 전파 테스트"""
 
@@ -232,9 +241,11 @@ class TestAnonymousMonitorProxyPropagation:
     async def test_check_availability_propagates_proxy_url(self):
         """check_availability가 proxy_url을 전파해야 함"""
         ScheduleInfo = get_schedule_info()
+        DualCheckResult = get_dual_check_result()
         AnonymousMonitor = get_anonymous_monitor()
 
-        mock_client = AsyncMock()
+        mock_client = MagicMock()
+        mock_client._last_used_proxy = "http://proxy:8080"
 
         # Mock schedule info with proxy_url
         mock_schedule = ScheduleInfo(
@@ -245,7 +256,17 @@ class TestAnonymousMonitorProxyPropagation:
             slots_by_date={"2025-12-11": []},
             proxy_url="http://proxy:8080"
         )
-        mock_client.fetch_schedule = AsyncMock(return_value=mock_schedule)
+
+        # Mock DualCheckResult
+        mock_dual_result = DualCheckResult(
+            can_book=False,
+            schedule=mock_schedule,
+            has_slots=False,
+            http_ok=True,
+            http_checked=True,
+            error_reason=None
+        )
+        mock_client.fetch_schedule_dual = AsyncMock(return_value=mock_dual_result)
 
         monitor = AnonymousMonitor(client=mock_client)
         result = await monitor._do_check(
@@ -260,10 +281,22 @@ class TestAnonymousMonitorProxyPropagation:
     @pytest.mark.asyncio
     async def test_check_availability_none_when_no_schedule(self):
         """schedule이 None일 때 proxy_url도 None이어야 함"""
+        DualCheckResult = get_dual_check_result()
         AnonymousMonitor = get_anonymous_monitor()
 
-        mock_client = AsyncMock()
-        mock_client.fetch_schedule = AsyncMock(return_value=None)
+        mock_client = MagicMock()
+        mock_client._last_used_proxy = None
+
+        # Mock DualCheckResult with no schedule
+        mock_dual_result = DualCheckResult(
+            can_book=False,
+            schedule=None,
+            has_slots=False,
+            http_ok=False,
+            http_checked=True,
+            error_reason="graphql_failed"
+        )
+        mock_client.fetch_schedule_dual = AsyncMock(return_value=mock_dual_result)
 
         monitor = AnonymousMonitor(client=mock_client)
         result = await monitor._do_check(
