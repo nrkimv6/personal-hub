@@ -65,7 +65,11 @@ class CrawlService:
                 options = CrawlOptions(
                     max_posts=config.max_posts if config else 20,
                     scroll_count=config.scroll_count if config else 3,
+                    duplicate_stop_count=getattr(config, 'duplicate_stop_count', 5) if config else 5,
                 )
+
+            # DB 중복 체크 콜백 설정
+            crawler._db_duplicate_checker = lambda post_id: self.post_service.exists_by_post_id(post_id)
 
             posts = await crawler.crawl_feed(options)
 

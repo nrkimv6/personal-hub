@@ -135,7 +135,8 @@ class InstagramScheduler:
         self,
         last_run: Optional[datetime] = None,
         now: datetime = None,
-        tolerance_minutes: int = 5
+        tolerance_minutes: int = 5,
+        min_interval_hours: int = 0
     ) -> bool:
         """현재 실행해야 하는지 확인.
 
@@ -143,12 +144,19 @@ class InstagramScheduler:
             last_run: 마지막 실행 시간
             now: 현재 시간 (기본: datetime.now())
             tolerance_minutes: 허용 오차 (분)
+            min_interval_hours: 최소 실행 간격 (시간, 0이면 무시)
 
         Returns:
             실행해야 하면 True
         """
         if now is None:
             now = datetime.now()
+
+        # 최소 간격 체크: 마지막 실행 후 min_interval_hours 시간이 지나지 않았으면 스킵
+        if min_interval_hours > 0 and last_run is not None:
+            min_interval = timedelta(hours=min_interval_hours)
+            if (now - last_run) < min_interval:
+                return False
 
         today_schedule = self.generate_daily_schedule(now.date())
         tolerance = timedelta(minutes=tolerance_minutes)

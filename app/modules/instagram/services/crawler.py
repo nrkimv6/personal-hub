@@ -19,6 +19,7 @@ class CrawlOptions:
     scroll_count: int = 3
     wait_after_more: float = 0.5
     wait_after_scroll: float = 2.0
+    duplicate_stop_count: int = 5  # 연속 중복 N개 시 중단 (0이면 비활성화)
 
 
 @dataclass
@@ -44,13 +45,15 @@ class InstagramCrawler:
     # 계정명 패턴: /username/ 또는 /username
     ACCOUNT_PATTERN = re.compile(r'^/([a-z0-9_.]+)/?$')
 
-    def __init__(self, page: Page):
+    def __init__(self, page: Page, db_duplicate_checker=None):
         """
         Args:
             page: Playwright Page 객체 (Instagram 로그인 상태)
+            db_duplicate_checker: DB 중복 체크 함수 (post_id -> bool)
         """
         self.page = page
         self.processed_urls: Set[str] = set()
+        self._db_duplicate_checker = db_duplicate_checker
 
     async def extract_post(self, article: ElementHandle, index: int) -> PostData:
         """단일 게시물에서 모든 정보 추출.
@@ -211,6 +214,26 @@ class InstagramCrawler:
         articles = await self.page.query_selector_all("article")
         return len(articles)
 
+    def _extract_post_id_from_url(self, url: Optional[str]) -> Optional[str]:
+        """URL에서 게시물 ID 추출."""
+        if not url:
+            return None
+        # https://www.instagram.com/p/ABC123/
+        if "/p/" in url:
+            parts = url.split("/p/")
+            if len(parts) > 1:
+                return parts[1].rstrip("/").split("?")[0]
+        return None
+
+    def _is_db_duplicate(self, post: PostData) -> bool:
+        """DB에서 중복 체크."""
+        if not self._db_duplicate_checker:
+            return False
+        post_id = self._extract_post_id_from_url(post.url)
+        if not post_id:
+            return False
+        return self._db_duplicate_checker(post_id)
+
     async def crawl_feed(self, options: CrawlOptions = None) -> List[PostData]:
         """피드 크롤링 메인 함수.
 
@@ -225,8 +248,9 @@ class InstagramCrawler:
 
         all_posts: List[PostData] = []
         self.processed_urls.clear()
+        consecutive_duplicates = 0
 
-        logger.info(f"Starting Instagram feed crawl (max_posts={options.max_posts})")
+        logger.info(f"Starting Instagram feed crawl (max_posts={options.max_posts}, duplicate_stop={options.duplicate_stop_count})")
 
         # 초기 게시물 수집
         articles = await self.page.query_selector_all("article")
@@ -236,15 +260,28 @@ class InstagramCrawler:
             if len(all_posts) >= options.max_posts:
                 break
 
+            # 연속 중복 체크로 중단
+            if options.duplicate_stop_count > 0 and consecutive_duplicates >= options.duplicate_stop_count:
+                logger.info(f"Stopping: {consecutive_duplicates} consecutive DB duplicates detected")
+                break
+
             post = await self.extract_post(article, len(all_posts) + 1)
 
-            # URL 중복 체크
+            # URL 중복 체크 (세션 내 중복)
             if post.url and post.url in self.processed_urls:
-                logger.debug(f"Skipping duplicate post: {post.url}")
+                logger.debug(f"Skipping session duplicate post: {post.url}")
                 continue
 
             if post.url:
                 self.processed_urls.add(post.url)
+
+            # DB 중복 체크
+            if self._is_db_duplicate(post):
+                consecutive_duplicates += 1
+                logger.debug(f"DB duplicate #{consecutive_duplicates}: {post.url}")
+                continue
+            else:
+                consecutive_duplicates = 0
 
             all_posts.append(post)
             logger.debug(f"Extracted post #{post.index}: {post.account}")
@@ -252,6 +289,11 @@ class InstagramCrawler:
         # 스크롤하여 추가 게시물 로드
         for scroll in range(options.scroll_count):
             if len(all_posts) >= options.max_posts:
+                break
+
+            # 연속 중복 체크로 중단
+            if options.duplicate_stop_count > 0 and consecutive_duplicates >= options.duplicate_stop_count:
+                logger.info(f"Stopping scroll: {consecutive_duplicates} consecutive DB duplicates")
                 break
 
             logger.debug(f"Scroll {scroll + 1}/{options.scroll_count}")
@@ -267,6 +309,10 @@ class InstagramCrawler:
                 if len(all_posts) >= options.max_posts:
                     break
 
+                # 연속 중복 체크로 중단
+                if options.duplicate_stop_count > 0 and consecutive_duplicates >= options.duplicate_stop_count:
+                    break
+
                 post = await self.extract_post(articles[i], len(all_posts) + 1)
 
                 if post.url and post.url in self.processed_urls:
@@ -275,9 +321,17 @@ class InstagramCrawler:
                 if post.url:
                     self.processed_urls.add(post.url)
 
+                # DB 중복 체크
+                if self._is_db_duplicate(post):
+                    consecutive_duplicates += 1
+                    logger.debug(f"DB duplicate #{consecutive_duplicates}: {post.url}")
+                    continue
+                else:
+                    consecutive_duplicates = 0
+
                 all_posts.append(post)
 
-        logger.info(f"Crawl completed: {len(all_posts)} posts collected")
+        logger.info(f"Crawl completed: {len(all_posts)} posts collected (consecutive_duplicates={consecutive_duplicates})")
         return all_posts
 
     async def navigate_to_feed(self) -> bool:
