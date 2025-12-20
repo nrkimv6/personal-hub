@@ -435,7 +435,8 @@ class NaverGraphQLClient:
         for attempt in range(max_retries + 1):
             # 프록시 URL 가져오기
             proxy_url = None
-            if self._proxy_manager and self._proxy_manager.is_available:
+            if self._proxy_manager:
+                # is_available 체크 제거: get_fresh_proxy() 내부에서 풀 갱신 시도
                 proxy_url = self._proxy_manager.get_fresh_proxy(exclude=tried_proxies)
                 if proxy_url:
                     tried_proxies.add(proxy_url)
@@ -1028,7 +1029,8 @@ class NaverGraphQLClient:
         for attempt in range(max_retries + 1):
             # 프록시 URL 가져오기
             proxy_url = None
-            if self._proxy_manager and self._proxy_manager.is_available:
+            if self._proxy_manager:
+                # is_available 체크 제거: get_fresh_proxy() 내부에서 풀 갱신 시도
                 proxy_url = self._proxy_manager.get_fresh_proxy(exclude=tried_proxies)
                 if proxy_url:
                     tried_proxies.add(proxy_url)
