@@ -1,19 +1,22 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { instagramApi } from '$lib/api';
+	import { instagramApi, accountApi } from '$lib/api';
 	import type {
 		InstagramScheduleConfig,
 		InstagramTimeWindow,
 		InstagramTodayScheduleItem,
-		InstagramCrawlRequest
+		InstagramCrawlRequest,
+		Account
 	} from '$lib/types';
 
 	let config: InstagramScheduleConfig | null = null;
 	let todaySchedule: InstagramTodayScheduleItem[] = [];
 	let pendingRequests: InstagramCrawlRequest[] = [];
+	let accounts: Account[] = [];
 	let loading = true;
 	let saving = false;
 	let requesting = false;
+	let openingBrowser = false;
 	let error: string | null = null;
 	let successMessage: string | null = null;
 
@@ -23,6 +26,7 @@
 	let editTimeWindows: InstagramTimeWindow[] = [];
 	let editMaxPosts = 50;
 	let editScrollCount = 5;
+	let editAccountId: number | null = null;
 	// 고급 설정
 	let editMinIntervalHours = 2;
 	let editDuplicateStopCount = 5;
@@ -33,14 +37,16 @@
 	async function fetchData() {
 		loading = true;
 		try {
-			const [configData, scheduleData, pendingData] = await Promise.all([
+			const [configData, scheduleData, pendingData, accountsData] = await Promise.all([
 				instagramApi.getSchedule(),
 				instagramApi.todaySchedule(),
-				instagramApi.getPendingRequests(5)
+				instagramApi.getPendingRequests(5),
+				accountApi.listActive()
 			]);
 			config = configData;
 			todaySchedule = scheduleData;
 			pendingRequests = pendingData;
+			accounts = accountsData;
 
 			// 편집용 상태 초기화
 			editEnabled = configData.enabled;
@@ -48,6 +54,7 @@
 			editTimeWindows = [...configData.time_windows];
 			editMaxPosts = configData.max_posts;
 			editScrollCount = configData.scroll_count;
+			editAccountId = configData.account_id;
 			// 고급 설정
 			editMinIntervalHours = configData.min_interval_hours ?? 2;
 			editDuplicateStopCount = configData.duplicate_stop_count ?? 5;
@@ -75,7 +82,8 @@
 				min_interval_hours: editMinIntervalHours,
 				duplicate_stop_count: editDuplicateStopCount,
 				max_retries: editMaxRetries,
-				retry_interval_minutes: editRetryIntervalMinutes
+				retry_interval_minutes: editRetryIntervalMinutes,
+				account_id: editAccountId
 			});
 			successMessage = '설정이 저장되었습니다';
 			await fetchData();
@@ -87,11 +95,14 @@
 	}
 
 	async function requestManualCrawl() {
+		if (!editAccountId) {
+			error = '계정을 먼저 선택해주세요';
+			return;
+		}
 		requesting = true;
 		successMessage = null;
 		try {
-			// 기본 계정 ID 1 사용 (TODO: 실제 계정 선택 기능 추가)
-			const result = await instagramApi.requestManualCrawl(1);
+			const result = await instagramApi.requestManualCrawl(editAccountId);
 			successMessage = `수집 요청 #${result.id}이(가) 추가되었습니다`;
 			await fetchData();
 		} catch (e) {
@@ -100,6 +111,26 @@
 			requesting = false;
 		}
 	}
+
+	async function openLoginBrowser() {
+		if (!editAccountId) {
+			error = '계정을 먼저 선택해주세요';
+			return;
+		}
+		openingBrowser = true;
+		successMessage = null;
+		try {
+			const result = await instagramApi.openLoginBrowser(editAccountId);
+			successMessage = result.message;
+		} catch (e) {
+			error = e instanceof Error ? e.message : '브라우저 열기 실패';
+		} finally {
+			openingBrowser = false;
+		}
+	}
+
+	// 선택된 계정 정보
+	$: selectedAccount = accounts.find((a) => a.id === editAccountId);
 
 	function addTimeWindow() {
 		editTimeWindows = [...editTimeWindows, { start: '09:00', end: '12:00' }];
@@ -173,6 +204,48 @@
 				<h3 class="text-lg font-semibold text-gray-900 mb-4">스케줄 설정</h3>
 
 				<div class="space-y-4">
+					<!-- 계정 선택 -->
+					<div>
+						<label for="account" class="block font-medium text-gray-700 mb-1"
+							>크롤링 계정</label
+						>
+						<div class="flex gap-2">
+							<select
+								id="account"
+								bind:value={editAccountId}
+								class="flex-1 px-3 py-2 border border-gray-300 rounded-lg"
+							>
+								<option value={null}>-- 계정 선택 --</option>
+								{#each accounts as account}
+									<option value={account.id}>
+										{account.name}
+										{#if account.is_logged_in}
+											(로그인됨)
+										{:else}
+											(로그인 필요)
+										{/if}
+									</option>
+								{/each}
+							</select>
+							<button
+								onclick={openLoginBrowser}
+								disabled={!editAccountId || openingBrowser}
+								class="btn btn-secondary btn-sm whitespace-nowrap"
+							>
+								{openingBrowser ? '열기...' : '로그인'}
+							</button>
+						</div>
+						{#if !editAccountId}
+							<p class="text-xs text-amber-600 mt-1">
+								계정이 선택되지 않으면 크롤링이 실행되지 않습니다
+							</p>
+						{:else if selectedAccount && !selectedAccount.is_logged_in}
+							<p class="text-xs text-amber-600 mt-1">
+								선택한 계정으로 Instagram 로그인이 필요합니다
+							</p>
+						{/if}
+					</div>
+
 					<!-- 활성화 -->
 					<div class="flex items-center justify-between">
 						<label for="enabled" class="font-medium text-gray-700">자동 수집</label>
@@ -365,13 +438,16 @@
 					<h3 class="text-lg font-semibold text-gray-900">오늘 수집 스케줄</h3>
 					<button
 						onclick={requestManualCrawl}
-						disabled={requesting || pendingRequests.length > 0}
+						disabled={!editAccountId || requesting || pendingRequests.length > 0}
 						class="btn btn-primary btn-sm"
+						title={!editAccountId ? '계정을 먼저 선택하세요' : ''}
 					>
 						{#if requesting}
 							수집 요청 중...
 						{:else if pendingRequests.length > 0}
 							대기 중 ({pendingRequests.length})
+						{:else if !editAccountId}
+							계정 선택 필요
 						{:else}
 							지금 수집
 						{/if}
