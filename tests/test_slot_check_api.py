@@ -64,6 +64,18 @@ def create_mock_business_info(business_id: str = "1269828"):
     )
 
 
+def call_build_response(business: BusinessInfo, biz_item: BizItemInfo, schedule: ScheduleInfo):
+    """build_response를 새 시그니처로 호출하는 헬퍼"""
+    return build_response(
+        business_id=business.business_id,
+        business_name=business.name,
+        business_type_id=business.business_type_id,
+        biz_item_id=biz_item.biz_item_id,
+        biz_item_name=biz_item.name,
+        schedule=schedule
+    )
+
+
 def create_mock_biz_item_info(biz_item_id: str = "6309738"):
     """테스트용 상품 정보 생성"""
     return BizItemInfo(
@@ -192,7 +204,7 @@ class TestRight:
         biz_item = create_mock_biz_item_info()
         schedule = create_mock_schedule_info()
 
-        response = build_response(business, biz_item, schedule)
+        response = call_build_response(business, biz_item, schedule)
 
         # 필수 필드 확인
         assert response.business.business_id == "1269828"
@@ -208,7 +220,7 @@ class TestRight:
         biz_item = create_mock_biz_item_info()
         schedule = create_mock_schedule_info(dates=["2025-12-20"], slots_per_day=1)
 
-        response = build_response(business, biz_item, schedule)
+        response = call_build_response(business, biz_item, schedule)
 
         date_slots = response.slots_by_date[0]
         slot = date_slots.slots[0]
@@ -218,12 +230,12 @@ class TestRight:
         assert slot.remaining == 5  # capacity - booked
         assert slot.is_available is True
 
-    @patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient')
-    def test_check_slots_by_url(self, mock_client_class):
+    @patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client')
+    def test_check_slots_by_url(self, mock_get_client):
         """URL로 슬롯 조회"""
         # Mock 설정
         mock_client = AsyncMock()
-        mock_client_class.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.fetch_business_info.return_value = create_mock_business_info()
         mock_client.fetch_biz_item.return_value = create_mock_biz_item_info()
         mock_client.fetch_schedule.return_value = create_mock_schedule_info()
@@ -238,11 +250,11 @@ class TestRight:
         assert data["business"]["business_id"] == "1269828"
         assert data["biz_item"]["biz_item_id"] == "6309738"
 
-    @patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient')
-    def test_check_slots_by_ids(self, mock_client_class):
+    @patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client')
+    def test_check_slots_by_ids(self, mock_get_client):
         """ID로 슬롯 조회"""
         mock_client = AsyncMock()
-        mock_client_class.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.fetch_business_info.return_value = create_mock_business_info()
         mock_client.fetch_biz_item.return_value = create_mock_biz_item_info()
         mock_client.fetch_schedule.return_value = create_mock_schedule_info()
@@ -262,9 +274,9 @@ class TestBoundary:
 
     def test_days_ahead_min(self):
         """days_ahead 최소값 (1)"""
-        with patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient') as mock_client_class:
+        with patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client') as mock_get_client:
             mock_client = AsyncMock()
-            mock_client_class.return_value = mock_client
+            mock_get_client.return_value = mock_client
             mock_client.fetch_business_info.return_value = create_mock_business_info()
             mock_client.fetch_biz_item.return_value = create_mock_biz_item_info()
             mock_client.fetch_schedule.return_value = create_mock_schedule_info()
@@ -282,9 +294,9 @@ class TestBoundary:
 
     def test_days_ahead_max(self):
         """days_ahead 최대값 (35)"""
-        with patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient') as mock_client_class:
+        with patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client') as mock_get_client:
             mock_client = AsyncMock()
-            mock_client_class.return_value = mock_client
+            mock_get_client.return_value = mock_client
             mock_client.fetch_business_info.return_value = create_mock_business_info()
             mock_client.fetch_biz_item.return_value = create_mock_biz_item_info()
             mock_client.fetch_schedule.return_value = create_mock_schedule_info()
@@ -337,44 +349,49 @@ class TestError:
         data = response.json()
         assert data["detail"]["code"] == "INVALID_URL"
 
-    @patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient')
-    def test_business_not_found(self, mock_client_class):
-        """업체를 찾을 수 없음"""
+    @patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client')
+    def test_business_not_registered(self, mock_get_client):
+        """미등록 업체 조회 시 기본값 사용"""
         mock_client = AsyncMock()
-        mock_client_class.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.fetch_business_info.return_value = None
+        mock_client.fetch_biz_item.return_value = create_mock_biz_item_info()
+        mock_client.fetch_schedule.return_value = create_mock_schedule_info()
 
         response = client.get(
             "/api/v1/slots/check",
             params={"business_id": "9999999", "biz_item_id": "1234567"}
         )
 
-        assert response.status_code == 404
+        # 미등록 업체도 정상 조회 가능 (기본값 사용)
+        assert response.status_code == 200
         data = response.json()
-        assert data["detail"]["code"] == "BUSINESS_NOT_FOUND"
+        assert data["business"]["name"] == "(미등록 업체)"
 
-    @patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient')
-    def test_item_not_found(self, mock_client_class):
-        """상품을 찾을 수 없음"""
+    @patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client')
+    def test_item_not_registered(self, mock_get_client):
+        """미등록 상품 조회 시 기본값 사용"""
         mock_client = AsyncMock()
-        mock_client_class.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.fetch_business_info.return_value = create_mock_business_info()
         mock_client.fetch_biz_item.return_value = None
+        mock_client.fetch_schedule.return_value = create_mock_schedule_info()
 
         response = client.get(
             "/api/v1/slots/check",
             params={"business_id": "1269828", "biz_item_id": "9999999"}
         )
 
-        assert response.status_code == 404
+        # 미등록 상품도 정상 조회 가능 (기본값 사용)
+        assert response.status_code == 200
         data = response.json()
-        assert data["detail"]["code"] == "ITEM_NOT_FOUND"
+        assert data["biz_item"]["name"] == "(미등록 상품)"
 
-    @patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient')
-    def test_graphql_error(self, mock_client_class):
-        """GraphQL API 실패"""
+    @patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client')
+    def test_schedule_fetch_error(self, mock_get_client):
+        """스케줄 조회 실패"""
         mock_client = AsyncMock()
-        mock_client_class.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.fetch_business_info.return_value = create_mock_business_info()
         mock_client.fetch_biz_item.return_value = create_mock_biz_item_info()
         mock_client.fetch_schedule.return_value = None
@@ -386,7 +403,7 @@ class TestError:
 
         assert response.status_code == 500
         data = response.json()
-        assert data["detail"]["code"] == "GRAPHQL_ERROR"
+        assert data["detail"]["code"] == "SCHEDULE_ERROR"
 
 
 class TestInverse:
@@ -415,7 +432,7 @@ class TestCrossCheck:
         # 2일 x 3슬롯, 각 날짜에 1개씩 예약 가능
         schedule = create_mock_schedule_info(dates=["2025-12-20", "2025-12-21"], slots_per_day=3)
 
-        response = build_response(business, biz_item, schedule)
+        response = call_build_response(business, biz_item, schedule)
 
         # summary.total_available_slots와 실제 개수 비교
         actual_count = sum(
@@ -441,7 +458,7 @@ class TestConformance:
         biz_item = create_mock_biz_item_info()
         schedule = create_mock_schedule_info(dates=["2025-12-20"])
 
-        response = build_response(business, biz_item, schedule)
+        response = call_build_response(business, biz_item, schedule)
 
         date_str = response.slots_by_date[0].date
         # YYYY-MM-DD 형식 검증
@@ -453,7 +470,7 @@ class TestConformance:
         biz_item = create_mock_biz_item_info()
         schedule = create_mock_schedule_info(dates=["2025-12-20"], slots_per_day=1)
 
-        response = build_response(business, biz_item, schedule)
+        response = call_build_response(business, biz_item, schedule)
 
         time_str = response.slots_by_date[0].slots[0].time
         # HH:MM 형식 검증
@@ -465,7 +482,7 @@ class TestConformance:
         biz_item = create_mock_biz_item_info()
         schedule = create_mock_schedule_info(dates=["2025-12-20"])  # 토요일
 
-        response = build_response(business, biz_item, schedule)
+        response = call_build_response(business, biz_item, schedule)
 
         day_of_week = response.slots_by_date[0].day_of_week
         assert day_of_week in DAY_OF_WEEK_KR
@@ -482,7 +499,7 @@ class TestOrdering:
         # 역순으로 넣어도 정렬되어야 함
         schedule = create_mock_schedule_info(dates=["2025-12-25", "2025-12-20", "2025-12-22"])
 
-        response = build_response(business, biz_item, schedule)
+        response = call_build_response(business, biz_item, schedule)
 
         dates = [ds.date for ds in response.slots_by_date]
         assert dates == sorted(dates)
@@ -493,7 +510,7 @@ class TestOrdering:
         biz_item = create_mock_biz_item_info()
         schedule = create_mock_schedule_info(dates=["2025-12-20"], slots_per_day=3)
 
-        response = build_response(business, biz_item, schedule)
+        response = call_build_response(business, biz_item, schedule)
 
         times = [s.time for s in response.slots_by_date[0].slots]
         assert times == sorted(times)
@@ -508,7 +525,7 @@ class TestRange:
         biz_item = create_mock_biz_item_info()
         schedule = create_mock_schedule_info()
 
-        response = build_response(business, biz_item, schedule)
+        response = call_build_response(business, biz_item, schedule)
 
         for date_slots in response.slots_by_date:
             for slot in date_slots.slots:
@@ -520,7 +537,7 @@ class TestRange:
         biz_item = create_mock_biz_item_info()
         schedule = create_mock_schedule_info()
 
-        response = build_response(business, biz_item, schedule)
+        response = call_build_response(business, biz_item, schedule)
 
         for date_slots in response.slots_by_date:
             for slot in date_slots.slots:
@@ -530,11 +547,11 @@ class TestRange:
 class TestExistence:
     """Existence: 존재 여부"""
 
-    @patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient')
-    def test_empty_schedule(self, mock_client_class):
+    @patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client')
+    def test_empty_schedule(self, mock_get_client):
         """슬롯이 없는 경우"""
         mock_client = AsyncMock()
-        mock_client_class.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.fetch_business_info.return_value = create_mock_business_info()
         mock_client.fetch_biz_item.return_value = create_mock_biz_item_info()
 
@@ -569,7 +586,7 @@ class TestCardinality:
         biz_item = create_mock_biz_item_info()
         schedule = create_mock_schedule_info(dates=["2025-12-20", "2025-12-21"], slots_per_day=3)
 
-        response = build_response(business, biz_item, schedule)
+        response = call_build_response(business, biz_item, schedule)
 
         # 2일 x 3슬롯 = 6개
         assert response.summary.total_slots == 6
@@ -580,7 +597,7 @@ class TestCardinality:
         biz_item = create_mock_biz_item_info()
         schedule = create_mock_schedule_info(dates=["2025-12-20"], slots_per_day=3)
 
-        response = build_response(business, biz_item, schedule)
+        response = call_build_response(business, biz_item, schedule)
 
         date_slots = response.slots_by_date[0]
         summary = date_slots.summary
@@ -597,11 +614,11 @@ class TestCardinality:
 class TestTime:
     """Time: 시간 관련 테스트"""
 
-    @patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient')
-    def test_target_date_parameter(self, mock_client_class):
+    @patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client')
+    def test_target_date_parameter(self, mock_get_client):
         """target_date 파라미터 전달"""
         mock_client = AsyncMock()
-        mock_client_class.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.fetch_business_info.return_value = create_mock_business_info()
         mock_client.fetch_biz_item.return_value = create_mock_biz_item_info()
         mock_client.fetch_schedule.return_value = create_mock_schedule_info()
@@ -627,7 +644,7 @@ class TestTime:
         schedule = create_mock_schedule_info()
 
         before = datetime.now()
-        response = build_response(business, biz_item, schedule)
+        response = call_build_response(business, biz_item, schedule)
         after = datetime.now()
 
         # queried_at이 before와 after 사이
@@ -641,11 +658,11 @@ class TestTime:
 class TestIntegration:
     """통합 테스트"""
 
-    @patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient')
-    def test_full_flow_with_url(self, mock_client_class):
+    @patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client')
+    def test_full_flow_with_url(self, mock_get_client):
         """URL -> 파싱 -> API 호출 -> 응답 전체 흐름"""
         mock_client = AsyncMock()
-        mock_client_class.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.fetch_business_info.return_value = create_mock_business_info("1269828")
         mock_client.fetch_biz_item.return_value = create_mock_biz_item_info("6309738")
         mock_client.fetch_schedule.return_value = create_mock_schedule_info(
@@ -672,20 +689,19 @@ class TestIntegration:
         assert "slots_by_date" in data
         assert "queried_at" in data
 
-        # 데이터 일관성 검증
+        # 데이터 일관성 검증 (business_id 파싱 확인)
         assert data["business"]["business_id"] == "1269828"
         assert data["biz_item"]["biz_item_id"] == "6309738"
         assert len(data["slots_by_date"]) == 3  # 3일
 
-        # API 호출 검증
-        mock_client.fetch_business_info.assert_called_once_with("1269828")
-        mock_client.fetch_biz_item.assert_called_once_with("1269828", "6309738")
+        # 스케줄 조회는 항상 호출됨 (로컬 DB에 상관없이)
+        mock_client.fetch_schedule.assert_called_once()
 
-    @patch('app.modules.naver_booking.routes.slot_check.NaverGraphQLClient')
-    def test_response_json_serializable(self, mock_client_class):
+    @patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client')
+    def test_response_json_serializable(self, mock_get_client):
         """응답이 JSON 직렬화 가능"""
         mock_client = AsyncMock()
-        mock_client_class.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.fetch_business_info.return_value = create_mock_business_info()
         mock_client.fetch_biz_item.return_value = create_mock_biz_item_info()
         mock_client.fetch_schedule.return_value = create_mock_schedule_info()
