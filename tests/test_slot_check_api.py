@@ -27,7 +27,7 @@ CORRECT 조건 적용:
 import pytest
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch, MagicMock
 
 # 프로젝트 루트 추가
@@ -742,6 +742,196 @@ class TestTime:
         # total_remaining은 예약 가능한 슬롯(future_slot)의 remaining만 포함
         # past_slot의 remaining=7은 제외됨
         assert date_slots.summary.total_remaining == 5  # future_slot의 remaining만
+
+    def test_ri02_policy_blocks_near_future_dates(self):
+        """RI02 정책: N일 후부터 예약 가능 - 가까운 미래 날짜 차단"""
+        business = create_mock_business_info()
+        biz_item = create_mock_biz_item_info()
+
+        # 내일 날짜로 슬롯 생성
+        tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        slot = create_mock_schedule_slot(
+            date=tomorrow,
+            time="12:00",
+            unit_stock=10,
+            unit_booking_count=5
+        )
+        schedule = ScheduleInfo(
+            business_id="1269828",
+            biz_item_id="6309738",
+            available_dates=[tomorrow],
+            slots=[slot],
+            slots_by_date={tomorrow: [slot]}
+        )
+
+        # RI02 정책: 3일 후부터 예약 가능
+        response = build_response(
+            business_id=business.business_id,
+            business_name=business.name,
+            business_type_id=business.business_type_id,
+            biz_item_id=biz_item.biz_item_id,
+            biz_item_name=biz_item.name,
+            schedule=schedule,
+            booking_available_code="RI02",
+            booking_available_value=3
+        )
+
+        # 내일은 3일 이내이므로 예약 불가
+        assert response.slots_by_date[0].slots[0].is_available is False
+        assert response.summary.total_available_slots == 0
+
+    def test_ri02_policy_allows_far_future_dates(self):
+        """RI02 정책: N일 후부터 예약 가능 - 먼 미래 날짜 허용"""
+        business = create_mock_business_info()
+        biz_item = create_mock_biz_item_info()
+
+        # 5일 후 날짜로 슬롯 생성
+        future_date = (datetime.now() + timedelta(days=5)).strftime("%Y-%m-%d")
+        slot = create_mock_schedule_slot(
+            date=future_date,
+            time="12:00",
+            unit_stock=10,
+            unit_booking_count=5
+        )
+        schedule = ScheduleInfo(
+            business_id="1269828",
+            biz_item_id="6309738",
+            available_dates=[future_date],
+            slots=[slot],
+            slots_by_date={future_date: [slot]}
+        )
+
+        # RI02 정책: 3일 후부터 예약 가능
+        response = build_response(
+            business_id=business.business_id,
+            business_name=business.name,
+            business_type_id=business.business_type_id,
+            biz_item_id=biz_item.biz_item_id,
+            biz_item_name=biz_item.name,
+            schedule=schedule,
+            booking_available_code="RI02",
+            booking_available_value=3
+        )
+
+        # 5일 후는 3일 이후이므로 예약 가능
+        assert response.slots_by_date[0].slots[0].is_available is True
+        assert response.summary.total_available_slots == 1
+
+    def test_ri03_policy_blocks_near_future_hours(self):
+        """RI03 정책: N시간 후부터 예약 가능 - 가까운 시간 차단"""
+        business = create_mock_business_info()
+        biz_item = create_mock_biz_item_info()
+
+        # 현재 시간 + 1시간 슬롯 생성
+        now = datetime.now()
+        slot_time = now + timedelta(hours=1)
+        slot_date = slot_time.strftime("%Y-%m-%d")
+        slot_time_str = slot_time.strftime("%H:%M")
+
+        slot = create_mock_schedule_slot(
+            date=slot_date,
+            time=slot_time_str,
+            unit_stock=10,
+            unit_booking_count=5
+        )
+        schedule = ScheduleInfo(
+            business_id="1269828",
+            biz_item_id="6309738",
+            available_dates=[slot_date],
+            slots=[slot],
+            slots_by_date={slot_date: [slot]}
+        )
+
+        # RI03 정책: 2시간 후부터 예약 가능
+        response = build_response(
+            business_id=business.business_id,
+            business_name=business.name,
+            business_type_id=business.business_type_id,
+            biz_item_id=biz_item.biz_item_id,
+            biz_item_name=biz_item.name,
+            schedule=schedule,
+            booking_available_code="RI03",
+            booking_available_value=2
+        )
+
+        # 1시간 후는 2시간 이내이므로 예약 불가
+        assert response.slots_by_date[0].slots[0].is_available is False
+
+    def test_ri03_policy_allows_far_future_hours(self):
+        """RI03 정책: N시간 후부터 예약 가능 - 먼 시간 허용"""
+        business = create_mock_business_info()
+        biz_item = create_mock_biz_item_info()
+
+        # 현재 시간 + 5시간 슬롯 생성
+        now = datetime.now()
+        slot_time = now + timedelta(hours=5)
+        slot_date = slot_time.strftime("%Y-%m-%d")
+        slot_time_str = slot_time.strftime("%H:%M")
+
+        slot = create_mock_schedule_slot(
+            date=slot_date,
+            time=slot_time_str,
+            unit_stock=10,
+            unit_booking_count=5
+        )
+        schedule = ScheduleInfo(
+            business_id="1269828",
+            biz_item_id="6309738",
+            available_dates=[slot_date],
+            slots=[slot],
+            slots_by_date={slot_date: [slot]}
+        )
+
+        # RI03 정책: 2시간 후부터 예약 가능
+        response = build_response(
+            business_id=business.business_id,
+            business_name=business.name,
+            business_type_id=business.business_type_id,
+            biz_item_id=biz_item.biz_item_id,
+            biz_item_name=biz_item.name,
+            schedule=schedule,
+            booking_available_code="RI03",
+            booking_available_value=2
+        )
+
+        # 5시간 후는 2시간 이후이므로 예약 가능
+        assert response.slots_by_date[0].slots[0].is_available is True
+
+    def test_ri01_policy_no_restrictions(self):
+        """RI01 정책: 즉시 예약 가능 - 제한 없음"""
+        business = create_mock_business_info()
+        biz_item = create_mock_biz_item_info()
+
+        # 미래 날짜 슬롯 (과거 시간 체크 회피)
+        slot = create_mock_schedule_slot(
+            date="2099-12-20",
+            time="12:00",
+            unit_stock=10,
+            unit_booking_count=5
+        )
+        schedule = ScheduleInfo(
+            business_id="1269828",
+            biz_item_id="6309738",
+            available_dates=["2099-12-20"],
+            slots=[slot],
+            slots_by_date={"2099-12-20": [slot]}
+        )
+
+        # RI01 정책: 즉시 예약 가능
+        response = build_response(
+            business_id=business.business_id,
+            business_name=business.name,
+            business_type_id=business.business_type_id,
+            biz_item_id=biz_item.biz_item_id,
+            biz_item_name=biz_item.name,
+            schedule=schedule,
+            booking_available_code="RI01",
+            booking_available_value=0
+        )
+
+        # RI01은 제한 없음
+        assert response.slots_by_date[0].slots[0].is_available is True
+        assert response.summary.total_available_slots == 1
 
 
 # ============================================================

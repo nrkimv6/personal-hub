@@ -6,7 +6,7 @@
 scripts/check_slots.py의 기능을 API 엔드포인트로 제공합니다.
 """
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -71,10 +71,19 @@ def build_response(
     business_type_id: Optional[int],
     biz_item_id: str,
     biz_item_name: str,
-    schedule: ScheduleInfo
+    schedule: ScheduleInfo,
+    booking_available_code: Optional[str] = None,
+    booking_available_value: Optional[int] = None
 ) -> SlotCheckResponse:
     """
     조회 결과를 API 응답 형식으로 변환
+
+    Args:
+        booking_available_code: 예약 가능 정책 코드
+            - RI01: 즉시 예약 가능
+            - RI02: N일 후부터 예약 가능 (booking_available_value = 일 수)
+            - RI03: N시간 후부터 예약 가능 (booking_available_value = 시간 수)
+        booking_available_value: 정책 값 (일 수 또는 시간 수)
     """
     slots_by_date = []
     total_available_slots = 0
@@ -83,6 +92,18 @@ def build_response(
     now = datetime.now()
     today_str = now.strftime("%Y-%m-%d")
     current_time = now.strftime("%H:%M")
+
+    # RI02/RI03 정책에 따른 예약 가능 임계값 계산
+    booking_threshold_date = None  # RI02용
+    booking_threshold_time = None  # RI03용
+
+    if booking_available_code == "RI02" and booking_available_value:
+        # N일 후부터 예약 가능
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        booking_threshold_date = today_start + timedelta(days=booking_available_value)
+    elif booking_available_code == "RI03" and booking_available_value:
+        # N시간 후부터 예약 가능
+        booking_threshold_time = now + timedelta(hours=booking_available_value)
 
     for date in sorted(schedule.slots_by_date.keys()):
         date_slots = schedule.slots_by_date[date]
@@ -109,9 +130,22 @@ def build_response(
             # - remaining > 0: 슬롯별 남은 자리
             is_available = is_slot_available_from_obj(slot)
 
-            # 오늘 날짜이고 슬롯 시간이 현재 시간 이전이면 예약 불가
+            # 슬롯 시간을 datetime으로 변환
+            slot_datetime = datetime.strptime(f"{date} {slot.time}", "%Y-%m-%d %H:%M")
+
+            # 1. 과거 시간 체크: 오늘 날짜이고 슬롯 시간이 현재 시간 이전이면 예약 불가
             if is_today and slot.time < current_time:
                 is_available = False
+
+            # 2. RI02 정책 체크 (N일 후부터 예약 가능)
+            if is_available and booking_threshold_date:
+                if slot_datetime < booking_threshold_date:
+                    is_available = False
+
+            # 3. RI03 정책 체크 (N시간 후부터 예약 가능)
+            if is_available and booking_threshold_time:
+                if slot_datetime < booking_threshold_time:
+                    is_available = False
 
             if is_available:
                 total_available_slots += 1
@@ -211,15 +245,25 @@ async def check_slots(
     client = get_naver_graphql_client()
 
     # 1. 업체 정보: 로컬 DB → GraphQL → 기본값
+    # bookingAvailableCode/Value는 항상 GraphQL에서 조회 (실시간 정책)
+    booking_available_code = None
+    booking_available_value = None
+
     business = db.query(Business).filter(Business.business_id == business_id).first()
-    if not business:
-        # DB에 없으면 GraphQL 조회
-        business_info = await client.fetch_business_info(business_id)
-        business_name = business_info.name if business_info else "(미등록 업체)"
-        business_type_id = (business_info.business_type_id if business_info else None) or 13
-    else:
+    business_info = await client.fetch_business_info(business_id)
+
+    if business_info:
+        business_name = business_info.name
+        business_type_id = business_info.business_type_id or 13
+        # raw_data에서 예약 정책 추출
+        booking_available_code = business_info.raw_data.get("bookingAvailableCode")
+        booking_available_value = business_info.raw_data.get("bookingAvailableValue")
+    elif business:
         business_name = business.name
         business_type_id = business.business_type_id or 13
+    else:
+        business_name = "(미등록 업체)"
+        business_type_id = 13
 
     # 2. 상품 정보: 로컬 DB → GraphQL → 기본값
     biz_item = db.query(BizItem).filter(BizItem.biz_item_id == biz_item_id).first()
@@ -256,5 +300,7 @@ async def check_slots(
         business_type_id=business_type_id,
         biz_item_id=biz_item_id,
         biz_item_name=biz_item_name,
-        schedule=schedule
+        schedule=schedule,
+        booking_available_code=booking_available_code,
+        booking_available_value=booking_available_value
     )
