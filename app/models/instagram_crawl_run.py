@@ -24,6 +24,11 @@ class InstagramCrawlRun(Base):
     new_saved = Column(Integer, default=0)
     error_message = Column(Text)
 
+    # 재시도 정보 (2025-12-21 추가)
+    retry_count = Column(Integer, default=0)
+    retry_of_run_id = Column(Integer, ForeignKey("instagram_crawl_runs.id"), nullable=True)
+    failure_reason = Column(String(50), nullable=True)  # 'login_required', 'network_error', 'timeout', 'rate_limit', 'unknown'
+
     # 관계
     posts = relationship("InstagramPost", back_populates="crawl_run")
 

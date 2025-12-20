@@ -133,6 +133,9 @@ async def get_crawl_runs(
             total_collected=run.total_collected,
             new_saved=run.new_saved,
             error_message=run.error_message,
+            retry_count=getattr(run, 'retry_count', 0) or 0,
+            retry_of_run_id=getattr(run, 'retry_of_run_id', None),
+            failure_reason=getattr(run, 'failure_reason', None),
         )
         for run in runs
     ]
@@ -163,15 +166,7 @@ async def get_schedule_config(
         # 기본 설정 생성
         config = service.update_schedule_config()
 
-    return ScheduleConfigSchema(
-        id=config.id,
-        enabled=config.enabled,
-        daily_runs=config.daily_runs,
-        time_windows=[TimeWindow(**tw) for tw in (config.time_windows or [])],
-        max_posts=config.max_posts,
-        scroll_count=config.scroll_count,
-        updated_at=config.updated_at,
-    )
+    return _config_to_schema(config)
 
 
 @router.put("/schedule", response_model=ScheduleConfigSchema)
@@ -188,17 +183,13 @@ async def update_schedule_config(
         time_windows=update.time_windows,
         max_posts=update.max_posts,
         scroll_count=update.scroll_count,
+        min_interval_hours=update.min_interval_hours,
+        duplicate_stop_count=update.duplicate_stop_count,
+        max_retries=update.max_retries,
+        retry_interval_minutes=update.retry_interval_minutes,
     )
 
-    return ScheduleConfigSchema(
-        id=config.id,
-        enabled=config.enabled,
-        daily_runs=config.daily_runs,
-        time_windows=[TimeWindow(**tw) for tw in (config.time_windows or [])],
-        max_posts=config.max_posts,
-        scroll_count=config.scroll_count,
-        updated_at=config.updated_at,
-    )
+    return _config_to_schema(config)
 
 
 @router.get("/schedule/today", response_model=List[TodayScheduleItem])
@@ -211,6 +202,23 @@ async def get_today_schedule(
 
 
 # ============== Helpers ==============
+
+def _config_to_schema(config) -> ScheduleConfigSchema:
+    """InstagramScheduleConfig 모델을 ScheduleConfigSchema로 변환."""
+    return ScheduleConfigSchema(
+        id=config.id,
+        enabled=config.enabled,
+        daily_runs=config.daily_runs,
+        time_windows=[TimeWindow(**tw) for tw in (config.time_windows or [])],
+        max_posts=config.max_posts,
+        scroll_count=config.scroll_count,
+        min_interval_hours=getattr(config, 'min_interval_hours', 2) or 2,
+        duplicate_stop_count=getattr(config, 'duplicate_stop_count', 5) or 5,
+        max_retries=getattr(config, 'max_retries', 3) or 3,
+        retry_interval_minutes=getattr(config, 'retry_interval_minutes', 5) or 5,
+        updated_at=config.updated_at,
+    )
+
 
 def _post_to_schema(post) -> PostSchema:
     """InstagramPost 모델을 PostSchema로 변환."""

@@ -23,6 +23,14 @@ class InstagramScheduleConfig(Base):
     max_posts = Column(Integer, default=20)
     scroll_count = Column(Integer, default=3)
 
+    # 고급 설정 (2025-12-21 추가)
+    min_interval_hours = Column(Integer, default=2)  # 최소 실행 간격
+    duplicate_stop_count = Column(Integer, default=5)  # 연속 중복 시 중단
+
+    # 재시도 설정
+    max_retries = Column(Integer, default=3)
+    retry_interval_minutes = Column(Integer, default=5)
+
     # 메타
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

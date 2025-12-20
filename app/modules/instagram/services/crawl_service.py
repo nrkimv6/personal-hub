@@ -186,6 +186,10 @@ class CrawlService:
         time_windows: Optional[List[TimeWindow]] = None,
         max_posts: Optional[int] = None,
         scroll_count: Optional[int] = None,
+        min_interval_hours: Optional[int] = None,
+        duplicate_stop_count: Optional[int] = None,
+        max_retries: Optional[int] = None,
+        retry_interval_minutes: Optional[int] = None,
     ) -> InstagramScheduleConfig:
         """스케줄 설정 업데이트.
 
@@ -213,6 +217,19 @@ class CrawlService:
 
         if scroll_count is not None:
             config.scroll_count = scroll_count
+
+        # 고급 설정
+        if min_interval_hours is not None:
+            config.min_interval_hours = min_interval_hours
+
+        if duplicate_stop_count is not None:
+            config.duplicate_stop_count = duplicate_stop_count
+
+        if max_retries is not None:
+            config.max_retries = max_retries
+
+        if retry_interval_minutes is not None:
+            config.retry_interval_minutes = retry_interval_minutes
 
         config.updated_at = datetime.utcnow()
 

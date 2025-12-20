@@ -52,6 +52,7 @@ class CrawlOptionsSchema(BaseModel):
     """크롤링 옵션."""
     max_posts: int = 20
     scroll_count: int = 3
+    duplicate_stop_count: int = 5  # 연속 중복 시 중단 (0이면 비활성화)
 
 
 class CrawlResponse(BaseModel):
@@ -73,6 +74,9 @@ class CrawlRunSchema(BaseModel):
     total_collected: int
     new_saved: int
     error_message: Optional[str] = None
+    retry_count: int = 0
+    retry_of_run_id: Optional[int] = None
+    failure_reason: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -91,6 +95,11 @@ class ScheduleConfigSchema(BaseModel):
     time_windows: List[TimeWindow] = []
     max_posts: int = 20
     scroll_count: int = 3
+    # 고급 설정
+    min_interval_hours: int = 2
+    duplicate_stop_count: int = 5
+    max_retries: int = 3
+    retry_interval_minutes: int = 5
     updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -103,6 +112,11 @@ class ScheduleConfigUpdateSchema(BaseModel):
     time_windows: Optional[List[TimeWindow]] = None
     max_posts: Optional[int] = None
     scroll_count: Optional[int] = None
+    # 고급 설정
+    min_interval_hours: Optional[int] = None
+    duplicate_stop_count: Optional[int] = None
+    max_retries: Optional[int] = None
+    retry_interval_minutes: Optional[int] = None
 
 
 class TodayScheduleItem(BaseModel):
@@ -118,3 +132,23 @@ class StatsSchema(BaseModel):
     last_crawl_time: Optional[datetime] = None
     next_crawl_time: Optional[datetime] = None
     accounts_active: int = 0
+
+
+class CrawlRequestSchema(BaseModel):
+    """크롤링 요청 스키마."""
+    id: int
+    account_id: int
+    requested_at: datetime
+    requested_by: str = "manual"
+    status: str = "pending"
+    processed_at: Optional[datetime] = None
+    crawl_run_id: Optional[int] = None
+    error_message: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CrawlRequestCreateSchema(BaseModel):
+    """크롤링 요청 생성 스키마."""
+    account_id: int
+    requested_by: str = "manual"
