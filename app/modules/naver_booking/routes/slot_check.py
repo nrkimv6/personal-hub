@@ -27,6 +27,7 @@ from app.schemas.slot_check import (
     DateSummary,
     SlotInfo,
 )
+from app.utils.slot_utils import is_slot_available_from_obj
 
 router = APIRouter(prefix="/api/v1/slots", tags=["slots"])
 
@@ -94,7 +95,12 @@ def build_response(
             capacity = slot.unit_stock or 0
             booked = slot.unit_booking_count or 0
             remaining = capacity - booked
-            is_available = remaining > 0 and slot.is_sale_day
+            # slot_utils.py의 통일된 재고 확인 로직 사용
+            # - is_unit_business_day: 실제 영업 시간대
+            # - is_sale_day: 판매일
+            # - stock > 0: 전체 재고
+            # - remaining > 0: 슬롯별 남은 자리
+            is_available = is_slot_available_from_obj(slot)
 
             if is_available:
                 total_available_slots += 1
