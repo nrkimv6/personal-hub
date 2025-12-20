@@ -298,3 +298,91 @@ class CrawlService:
             )
             for run_time, completed in schedule_status
         ]
+
+    def classify_failure(self, error: Exception) -> str:
+        """실패 원인 분류.
+
+        Args:
+            error: 발생한 예외
+
+        Returns:
+            실패 원인 문자열
+        """
+        error_str = str(error).lower()
+
+        if "login" in error_str or "로그인" in error_str:
+            return "login_required"
+        elif "timeout" in error_str or "timed out" in error_str:
+            return "timeout"
+        elif "network" in error_str or "connection" in error_str:
+            return "network_error"
+        elif "rate" in error_str or "limit" in error_str:
+            return "rate_limit"
+        else:
+            return "unknown"
+
+    def should_retry(self, run: InstagramCrawlRun, max_retries: int = 3) -> bool:
+        """재시도 가능 여부 확인.
+
+        Args:
+            run: 크롤링 실행 기록
+            max_retries: 최대 재시도 횟수
+
+        Returns:
+            재시도 가능하면 True
+        """
+        if run.success:
+            return False
+
+        retry_count = getattr(run, 'retry_count', 0) or 0
+        if retry_count >= max_retries:
+            return False
+
+        # 로그인 필요 에러는 재시도 불가
+        failure_reason = getattr(run, 'failure_reason', None)
+        if failure_reason == "login_required":
+            return False
+
+        return True
+
+    def get_retry_delay(self, retry_count: int, base_minutes: int = 5) -> int:
+        """재시도 대기 시간 계산 (지수 백오프).
+
+        Args:
+            retry_count: 현재 재시도 횟수
+            base_minutes: 기본 대기 시간 (분)
+
+        Returns:
+            대기 시간 (분)
+        """
+        # 지수 백오프: 5분 -> 10분 -> 20분 -> 40분
+        return base_minutes * (2 ** retry_count)
+
+    def mark_run_failed(
+        self,
+        run_id: int,
+        error: Exception,
+    ) -> InstagramCrawlRun:
+        """크롤링 실패 기록.
+
+        Args:
+            run_id: 크롤링 실행 ID
+            error: 발생한 예외
+
+        Returns:
+            업데이트된 실행 기록
+        """
+        run = self.db.query(InstagramCrawlRun).get(run_id)
+        if not run:
+            raise ValueError(f"CrawlRun {run_id} not found")
+
+        run.success = False
+        run.error_message = str(error)
+        run.failure_reason = self.classify_failure(error)
+        run.finished_at = datetime.utcnow()
+
+        self.db.commit()
+        self.db.refresh(run)
+
+        logger.warning(f"Run {run_id} failed: {run.failure_reason} - {error}")
+        return run

@@ -351,3 +351,46 @@ class InstagramCrawler:
         except Exception as e:
             logger.error(f"Failed to navigate to feed: {e}")
             return False
+
+    async def check_login_status(self) -> bool:
+        """로그인 상태 확인.
+
+        Returns:
+            로그인 되어 있으면 True
+        """
+        try:
+            # 현재 URL 확인
+            current_url = self.page.url
+
+            # 로그인 페이지로 리다이렉트되었는지 확인
+            if "/accounts/login" in current_url:
+                logger.warning("Redirected to login page")
+                return False
+
+            # 로그인 버튼 존재 여부 확인
+            login_button = await self.page.query_selector('a[href="/accounts/login/"]')
+            if login_button:
+                logger.warning("Login button found - not logged in")
+                return False
+
+            # 프로필 아이콘 확인 (로그인 시 나타남)
+            profile_link = await self.page.query_selector('a[href*="/accounts/edit/"]')
+            if profile_link:
+                return True
+
+            # article 요소가 있으면 피드가 로드된 것으로 간주
+            articles = await self.page.query_selector_all("article")
+            if len(articles) > 0:
+                return True
+
+            logger.warning("Could not determine login status")
+            return False
+
+        except Exception as e:
+            logger.error(f"Failed to check login status: {e}")
+            return False
+
+
+class LoginRequiredError(Exception):
+    """로그인이 필요한 경우 발생하는 예외."""
+    pass
