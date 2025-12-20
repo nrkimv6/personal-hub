@@ -19,8 +19,9 @@ from ..models.schemas import (
     StatsSchema,
     TodayScheduleItem,
     TimeWindow,
+    CrawlRequestSchema,
 )
-from ..services import PostService, CrawlService
+from ..services import PostService, CrawlService, CrawlRequestService
 
 logger = logging.getLogger("instagram.api")
 
@@ -91,25 +92,72 @@ async def delete_post(
 
 # ============== Crawl ==============
 
+@router.post("/crawl/manual", response_model=CrawlRequestSchema)
+async def request_manual_crawl(
+    account_id: int = Query(..., description="수집 계정 ID"),
+    db: Session = Depends(get_db),
+):
+    """수동 크롤링 요청.
+
+    요청은 큐에 추가되며 워커가 처리합니다.
+    이미 대기 중인 요청이 있으면 기존 요청을 반환합니다.
+    """
+    request_service = CrawlRequestService(db)
+
+    # 이미 활성 요청이 있는지 확인
+    if request_service.has_active_request(account_id):
+        existing = request_service.get_pending_request(account_id)
+        if existing:
+            return CrawlRequestSchema.model_validate(existing)
+
+    # 새 요청 생성
+    request = request_service.create_request(account_id, requested_by="manual")
+    return CrawlRequestSchema.model_validate(request)
+
+
+@router.get("/crawl/requests", response_model=List[CrawlRequestSchema])
+async def get_crawl_requests(
+    limit: int = Query(10, ge=1, le=50, description="조회 개수"),
+    account_id: Optional[int] = Query(None, description="계정 필터"),
+    db: Session = Depends(get_db),
+):
+    """크롤링 요청 목록 조회."""
+    request_service = CrawlRequestService(db)
+    requests = request_service.get_recent_requests(limit=limit, account_id=account_id)
+    return [CrawlRequestSchema.model_validate(r) for r in requests]
+
+
+@router.get("/crawl/requests/pending", response_model=List[CrawlRequestSchema])
+async def get_pending_requests(
+    limit: int = Query(10, ge=1, le=50, description="조회 개수"),
+    db: Session = Depends(get_db),
+):
+    """대기 중인 크롤링 요청 목록."""
+    request_service = CrawlRequestService(db)
+    requests = request_service.get_pending_requests(limit=limit)
+    return [CrawlRequestSchema.model_validate(r) for r in requests]
+
+
 @router.post("/crawl", response_model=CrawlResponse)
 async def run_crawl(
     account_id: int = Query(..., description="수집 계정 ID"),
     options: Optional[CrawlOptionsSchema] = None,
     db: Session = Depends(get_db),
 ):
-    """수동 크롤링 실행.
+    """수동 크롤링 실행 (레거시 - /crawl/manual 사용 권장).
 
     Note: 실제 크롤링은 워커에서 실행됩니다.
     이 API는 크롤링 요청을 큐에 추가합니다.
     """
-    # TODO: 실제 구현에서는 워커에 크롤링 요청을 전달
-    # 현재는 바로 실행하지 않고 응답만 반환
+    request_service = CrawlRequestService(db)
+    request = request_service.create_request(account_id, requested_by="manual")
 
     return CrawlResponse(
-        success=False,
+        success=True,
         total_collected=0,
         new_saved=0,
-        message="Crawl request queued. Worker will execute soon.",
+        crawl_run_id=None,
+        message=f"Crawl request #{request.id} queued. Worker will execute soon.",
     )
 
 
