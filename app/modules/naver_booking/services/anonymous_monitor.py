@@ -18,7 +18,7 @@ from app.modules.naver_booking.services.graphql_client import (
     ScheduleSlot,
     get_naver_graphql_client,
 )
-from app.utils.slot_utils import is_slot_available_from_obj
+from app.utils.slot_utils import is_slot_available_from_obj, is_slot_displayable_from_obj
 
 
 @dataclass
@@ -187,8 +187,8 @@ class AnonymousMonitor:
         # 해당 날짜의 슬롯만 필터링
         date_slots = schedule.slots_by_date.get(target_date, [])
 
-        # 영업 시간대 슬롯만 필터링 (is_unit_business_day=True)
-        business_slots = [s for s in date_slots if s.is_unit_business_day]
+        # 영업 시간대 슬롯만 필터링 (slots_by_date는 이미 displayable만 포함하지만 방어적으로 체크)
+        business_slots = [s for s in date_slots if is_slot_displayable_from_obj(s)]
 
         # 슬롯 상세 로그
         if business_slots:
@@ -329,12 +329,12 @@ class AnonymousMonitor:
                 "estimated_hours": None
             }
 
-        # 시간별 통계 집계 (is_unit_business_day가 True인 실제 영업 시간대만)
+        # 시간별 통계 집계 (실제 영업 시간대만)
         slot_stats: Dict[str, Dict[str, int]] = {}
 
         for slot in schedule.slots:
             # 실제 영업 시간대가 아니면 통계에서 제외
-            if not slot.is_unit_business_day:
+            if not is_slot_displayable_from_obj(slot):
                 continue
             if slot.unit_booking_count > 0 or slot.stock > 0 or slot.unit_stock > 0:
                 if slot.time not in slot_stats:

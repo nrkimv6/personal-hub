@@ -79,17 +79,24 @@ def build_response(
     slots_by_date = []
     total_available_slots = 0
 
+    # 현재 시각 (과거 슬롯 체크용)
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    current_time = now.strftime("%H:%M")
+
     for date in sorted(schedule.slots_by_date.keys()):
         date_slots = schedule.slots_by_date[date]
 
         # 날짜에서 요일 계산
         dt = datetime.strptime(date, "%Y-%m-%d")
         day_of_week = DAY_OF_WEEK_KR[dt.weekday()]
+        is_today = (date == today_str)
 
         # 슬롯 정보 변환
         slot_infos = []
         date_capacity = 0
         date_booked = 0
+        date_available_remaining = 0  # 예약 가능한 슬롯의 remaining 합계
 
         for slot in sorted(date_slots, key=lambda s: s.time):
             capacity = slot.unit_stock or 0
@@ -102,8 +109,13 @@ def build_response(
             # - remaining > 0: 슬롯별 남은 자리
             is_available = is_slot_available_from_obj(slot)
 
+            # 오늘 날짜이고 슬롯 시간이 현재 시간 이전이면 예약 불가
+            if is_today and slot.time < current_time:
+                is_available = False
+
             if is_available:
                 total_available_slots += 1
+                date_available_remaining += remaining
 
             date_capacity += capacity
             date_booked += booked
@@ -116,18 +128,21 @@ def build_response(
                 is_available=is_available
             ))
 
-        date_remaining = date_capacity - date_booked
+        # 슬롯이 있는 날짜만 포함
+        if slot_infos:
+            slots_by_date.append(DateSlots(
+                date=date,
+                day_of_week=day_of_week,
+                summary=DateSummary(
+                    total_capacity=date_capacity,
+                    total_booked=date_booked,
+                    total_remaining=date_available_remaining  # 예약 가능한 슬롯만 카운트
+                ),
+                slots=slot_infos
+            ))
 
-        slots_by_date.append(DateSlots(
-            date=date,
-            day_of_week=day_of_week,
-            summary=DateSummary(
-                total_capacity=date_capacity,
-                total_booked=date_booked,
-                total_remaining=date_remaining
-            ),
-            slots=slot_infos
-        ))
+    # 실제 표시되는 슬롯 수 계산 (slots_by_date는 이미 displayable 슬롯만 포함)
+    total_displayed_slots = sum(len(d.slots) for d in slots_by_date)
 
     return SlotCheckResponse(
         business=SlotCheckBusinessInfo(
@@ -140,7 +155,7 @@ def build_response(
             name=biz_item_name
         ),
         summary=SlotCheckSummary(
-            total_slots=len(schedule.slots),
+            total_slots=total_displayed_slots,
             available_dates=schedule.available_dates,
             total_available_slots=total_available_slots
         ),

@@ -23,7 +23,7 @@ from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from app.config import logger, settings
-from app.utils.slot_utils import is_slot_available_from_dict, is_slot_available_from_obj
+from app.utils.slot_utils import is_slot_available_from_dict, is_slot_available_from_obj, is_slot_displayable_from_dict
 
 if TYPE_CHECKING:
     from app.services.proxy_manager import ProxyManager
@@ -922,10 +922,11 @@ class NaverGraphQLClient:
             )
             slots.append(slot)
 
-            # 날짜별 그룹화
-            if slot_date not in slots_by_date:
-                slots_by_date[slot_date] = []
-            slots_by_date[slot_date].append(slot)
+            # 날짜별 그룹화 (실제 영업 시간대만 표시)
+            if is_slot_displayable_from_dict(slot_data):
+                if slot_date not in slots_by_date:
+                    slots_by_date[slot_date] = []
+                slots_by_date[slot_date].append(slot)
 
             # 예약 가능한 날짜 수집
             if is_available:
