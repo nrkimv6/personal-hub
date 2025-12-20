@@ -222,7 +222,9 @@ class InstagramCrawler:
         if "/p/" in url:
             parts = url.split("/p/")
             if len(parts) > 1:
-                return parts[1].rstrip("/").split("?")[0]
+                # 쿼리 파라미터 먼저 제거, 그 다음 trailing slash 제거
+                post_id = parts[1].split("?")[0].rstrip("/")
+                return post_id
         return None
 
     def _is_db_duplicate(self, post: PostData) -> bool:

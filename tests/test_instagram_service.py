@@ -461,3 +461,327 @@ class TestTimeWindowSchema:
         assert window1.start == window2.start
         assert window1.end == window2.end
         assert window1.start != window3.start
+
+
+# ============================================================
+# 최소 실행 간격 테스트 (min_interval_hours)
+# ============================================================
+
+class TestSchedulerMinInterval:
+    """스케줄러 최소 실행 간격 테스트"""
+
+    def test_should_run_when_no_min_interval(self, scheduler):
+        """min_interval이 0이면 기존 로직대로 동작"""
+        today = date.today()
+        schedule = scheduler.generate_daily_schedule(today)
+
+        if schedule:
+            run_time = schedule[0]
+            now = run_time + timedelta(minutes=2)
+            last_run = run_time - timedelta(minutes=30)
+
+            # min_interval_hours=0이면 제한 없음
+            should_run = scheduler.should_run_now(
+                last_run=last_run,
+                now=now,
+                tolerance_minutes=5,
+                min_interval_hours=0
+            )
+            assert should_run is True
+
+    def test_should_not_run_within_min_interval(self, scheduler):
+        """min_interval 이내에는 실행하지 않음"""
+        today = date.today()
+        schedule = scheduler.generate_daily_schedule(today)
+
+        if schedule:
+            run_time = schedule[0]
+            now = run_time + timedelta(minutes=2)
+            # 30분 전에 실행됨 - 2시간 간격 설정시 실행 안함
+            last_run = now - timedelta(minutes=30)
+
+            should_run = scheduler.should_run_now(
+                last_run=last_run,
+                now=now,
+                tolerance_minutes=5,
+                min_interval_hours=2  # 2시간 간격
+            )
+            assert should_run is False
+
+    def test_should_run_after_min_interval(self, scheduler):
+        """min_interval 경과 후에는 실행"""
+        today = date.today()
+        schedule = scheduler.generate_daily_schedule(today)
+
+        if schedule:
+            run_time = schedule[0]
+            now = run_time + timedelta(minutes=2)
+            # 3시간 전에 실행됨 - 2시간 간격 설정시 실행 가능
+            last_run = now - timedelta(hours=3)
+
+            should_run = scheduler.should_run_now(
+                last_run=last_run,
+                now=now,
+                tolerance_minutes=5,
+                min_interval_hours=2  # 2시간 간격
+            )
+            assert should_run is True
+
+    def test_min_interval_boundary_exact(self, scheduler):
+        """정확히 min_interval 시간 경과 시 - 경계값 테스트"""
+        today = date.today()
+        schedule = scheduler.generate_daily_schedule(today)
+
+        if schedule:
+            run_time = schedule[0]
+            now = run_time + timedelta(minutes=2)
+            # 정확히 2시간 전에 실행됨
+            last_run = now - timedelta(hours=2)
+
+            should_run = scheduler.should_run_now(
+                last_run=last_run,
+                now=now,
+                tolerance_minutes=5,
+                min_interval_hours=2
+            )
+            # 정확히 같으면 실행 (>= 조건이 아니라 < 조건이므로 정확히 같으면 실행됨)
+            assert should_run is True
+
+    def test_min_interval_with_no_last_run(self, scheduler):
+        """마지막 실행 기록이 없으면 min_interval 무시"""
+        today = date.today()
+        schedule = scheduler.generate_daily_schedule(today)
+
+        if schedule:
+            run_time = schedule[0]
+            now = run_time + timedelta(minutes=2)
+
+            should_run = scheduler.should_run_now(
+                last_run=None,
+                now=now,
+                tolerance_minutes=5,
+                min_interval_hours=2
+            )
+            assert should_run is True
+
+
+# ============================================================
+# 중복 감지 중단 테스트 (duplicate_stop_count)
+# ============================================================
+
+class TestCrawlerDuplicateStop:
+    """크롤러 중복 감지 중단 테스트"""
+
+    def test_crawl_options_has_duplicate_stop_count(self):
+        """CrawlOptions에 duplicate_stop_count 필드 존재"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions()
+        assert hasattr(options, 'duplicate_stop_count')
+        assert options.duplicate_stop_count == 5  # 기본값
+
+    def test_crawl_options_custom_duplicate_stop(self):
+        """CrawlOptions에 커스텀 duplicate_stop_count 설정"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions(duplicate_stop_count=10)
+        assert options.duplicate_stop_count == 10
+
+    def test_crawl_options_disable_duplicate_stop(self):
+        """duplicate_stop_count=0이면 비활성화"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions(duplicate_stop_count=0)
+        assert options.duplicate_stop_count == 0
+
+    def test_crawler_has_db_duplicate_checker(self):
+        """InstagramCrawler에 db_duplicate_checker 속성 존재"""
+        from app.modules.instagram.services.crawler import InstagramCrawler
+
+        # Mock page 객체
+        mock_page = MagicMock()
+        crawler = InstagramCrawler(mock_page)
+
+        assert hasattr(crawler, '_db_duplicate_checker')
+        assert crawler._db_duplicate_checker is None
+
+    def test_crawler_with_duplicate_checker(self):
+        """InstagramCrawler에 duplicate_checker 설정"""
+        from app.modules.instagram.services.crawler import InstagramCrawler
+
+        mock_page = MagicMock()
+        mock_checker = MagicMock(return_value=True)
+
+        crawler = InstagramCrawler(mock_page, db_duplicate_checker=mock_checker)
+
+        assert crawler._db_duplicate_checker is mock_checker
+
+    def test_extract_post_id_from_url(self):
+        """URL에서 게시물 ID 추출"""
+        from app.modules.instagram.services.crawler import InstagramCrawler
+
+        mock_page = MagicMock()
+        crawler = InstagramCrawler(mock_page)
+
+        # 정상 URL
+        assert crawler._extract_post_id_from_url("https://www.instagram.com/p/ABC123/") == "ABC123"
+        assert crawler._extract_post_id_from_url("https://www.instagram.com/p/ABC123") == "ABC123"
+        assert crawler._extract_post_id_from_url("https://www.instagram.com/p/ABC123/?utm_source=test") == "ABC123"
+
+        # 비정상 URL
+        assert crawler._extract_post_id_from_url(None) is None
+        assert crawler._extract_post_id_from_url("https://www.instagram.com/username/") is None
+
+
+# ============================================================
+# 스키마 테스트 (새 필드)
+# ============================================================
+
+class TestScheduleConfigSchema:
+    """스케줄 설정 스키마 테스트"""
+
+    def test_schedule_config_has_new_fields(self):
+        """ScheduleConfigSchema에 새 필드 존재"""
+        from app.modules.instagram.models.schemas import ScheduleConfigSchema
+
+        # 필드 존재 확인
+        fields = ScheduleConfigSchema.model_fields
+        assert 'min_interval_hours' in fields
+        assert 'duplicate_stop_count' in fields
+        assert 'max_retries' in fields
+        assert 'retry_interval_minutes' in fields
+
+    def test_schedule_config_default_values(self):
+        """ScheduleConfigSchema 기본값"""
+        from app.modules.instagram.models.schemas import ScheduleConfigSchema
+
+        config = ScheduleConfigSchema(id=1)
+        assert config.min_interval_hours == 2
+        assert config.duplicate_stop_count == 5
+        assert config.max_retries == 3
+        assert config.retry_interval_minutes == 5
+
+    def test_schedule_config_update_has_new_fields(self):
+        """ScheduleConfigUpdateSchema에 새 필드 존재"""
+        from app.modules.instagram.models.schemas import ScheduleConfigUpdateSchema
+
+        fields = ScheduleConfigUpdateSchema.model_fields
+        assert 'min_interval_hours' in fields
+        assert 'duplicate_stop_count' in fields
+        assert 'max_retries' in fields
+        assert 'retry_interval_minutes' in fields
+
+
+class TestCrawlRunSchema:
+    """크롤링 실행 기록 스키마 테스트"""
+
+    def test_crawl_run_has_retry_fields(self):
+        """CrawlRunSchema에 재시도 필드 존재"""
+        from app.modules.instagram.models.schemas import CrawlRunSchema
+
+        fields = CrawlRunSchema.model_fields
+        assert 'retry_count' in fields
+        assert 'retry_of_run_id' in fields
+        assert 'failure_reason' in fields
+
+    def test_crawl_run_default_values(self):
+        """CrawlRunSchema 기본값"""
+        from app.modules.instagram.models.schemas import CrawlRunSchema
+        from datetime import datetime
+
+        run = CrawlRunSchema(
+            id=1,
+            account_id=1,
+            started_at=datetime.now(),
+            success=True,
+            total_collected=10,
+            new_saved=5,
+        )
+        assert run.retry_count == 0
+        assert run.retry_of_run_id is None
+        assert run.failure_reason is None
+
+
+class TestCrawlOptionsSchema:
+    """크롤링 옵션 스키마 테스트"""
+
+    def test_crawl_options_has_duplicate_stop_count(self):
+        """CrawlOptionsSchema에 duplicate_stop_count 필드 존재"""
+        from app.modules.instagram.models.schemas import CrawlOptionsSchema
+
+        fields = CrawlOptionsSchema.model_fields
+        assert 'duplicate_stop_count' in fields
+
+    def test_crawl_options_default_value(self):
+        """CrawlOptionsSchema 기본값"""
+        from app.modules.instagram.models.schemas import CrawlOptionsSchema
+
+        options = CrawlOptionsSchema()
+        assert options.duplicate_stop_count == 5
+
+
+# ============================================================
+# 모델 테스트 (새 필드)
+# ============================================================
+
+class TestInstagramModels:
+    """Instagram 모델 테스트"""
+
+    def test_schedule_config_model_has_new_columns(self):
+        """InstagramScheduleConfig 모델에 새 컬럼 존재"""
+        from app.models.instagram_schedule_config import InstagramScheduleConfig
+
+        # 컬럼 존재 확인
+        assert hasattr(InstagramScheduleConfig, 'min_interval_hours')
+        assert hasattr(InstagramScheduleConfig, 'duplicate_stop_count')
+        assert hasattr(InstagramScheduleConfig, 'max_retries')
+        assert hasattr(InstagramScheduleConfig, 'retry_interval_minutes')
+
+    def test_crawl_run_model_has_retry_columns(self):
+        """InstagramCrawlRun 모델에 재시도 컬럼 존재"""
+        from app.models.instagram_crawl_run import InstagramCrawlRun
+
+        assert hasattr(InstagramCrawlRun, 'retry_count')
+        assert hasattr(InstagramCrawlRun, 'retry_of_run_id')
+        assert hasattr(InstagramCrawlRun, 'failure_reason')
+
+    def test_crawl_request_model_exists(self):
+        """InstagramCrawlRequest 모델 존재"""
+        from app.models.instagram_crawl_request import InstagramCrawlRequest
+
+        assert InstagramCrawlRequest is not None
+        assert hasattr(InstagramCrawlRequest, 'account_id')
+        assert hasattr(InstagramCrawlRequest, 'status')
+        assert hasattr(InstagramCrawlRequest, 'requested_by')
+
+
+# ============================================================
+# 마이그레이션 테스트 (새 마이그레이션)
+# ============================================================
+
+class TestMigration007:
+    """007 마이그레이션 검증 테스트"""
+
+    def test_migration_007_exists(self):
+        """007_instagram_enhancements.sql 파일 존재"""
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "007_instagram_enhancements.sql"
+        assert migration_path.exists(), "007_instagram_enhancements.sql should exist"
+
+    def test_migration_007_contains_new_columns(self):
+        """007 마이그레이션에 새 컬럼 포함"""
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "007_instagram_enhancements.sql"
+        content = migration_path.read_text(encoding="utf-8")
+
+        assert "min_interval_hours" in content
+        assert "duplicate_stop_count" in content
+        assert "max_retries" in content
+        assert "retry_interval_minutes" in content
+        assert "retry_count" in content
+        assert "failure_reason" in content
+
+    def test_migration_007_contains_crawl_requests_table(self):
+        """007 마이그레이션에 instagram_crawl_requests 테이블 포함"""
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "007_instagram_enhancements.sql"
+        content = migration_path.read_text(encoding="utf-8")
+
+        assert "instagram_crawl_requests" in content
