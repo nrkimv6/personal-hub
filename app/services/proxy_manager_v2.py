@@ -123,14 +123,10 @@ class ProxyManagerV2:
     def is_available(self) -> bool:
         """프록시 사용 가능 여부
 
-        풀이 비어있으면 갱신을 시도하여 풀 고갈 시에도 복구 가능하도록 함.
+        Note: 풀 고갈 시 복구는 get_fresh_proxy() 내부에서 처리됨.
+        graphql_client.py에서 is_available 체크 없이 get_fresh_proxy()를 직접 호출.
         """
-        if self._enabled and self._initialized:
-            if len(self._active_pool) == 0:
-                # 풀이 비었으면 갱신 시도 (풀 고갈 복구)
-                self._sync_refresh_pool()
-            return len(self._active_pool) > 0
-        return False
+        return self._enabled and self._initialized and len(self._active_pool) > 0
 
     @property
     def pool_size(self) -> int:

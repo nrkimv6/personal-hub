@@ -97,21 +97,18 @@ def proxy_manager_v2_with_pool(mock_db_service, sample_proxy_list):
 class TestPoolExhaustionRecovery:
     """풀 고갈 복구 테스트"""
 
-    def test_is_available_triggers_refresh_on_empty_pool(
+    def test_is_available_false_on_empty_pool(
         self, proxy_manager_v2_empty, mock_db_service, sample_proxy_list
     ):
-        """풀이 비었을 때 is_available 접근 시 풀 갱신 시도됨"""
-        # Given: 빈 풀 + DB에서 반환할 프록시 설정
-        mock_db_service.get_proxies_by_response_time.return_value = sample_proxy_list
+        """풀이 비었을 때 is_available=False 반환 (갱신은 get_fresh_proxy에서)"""
+        # Given: 빈 풀
+        # is_available은 풀 상태만 확인, 갱신은 get_fresh_proxy()에서 처리
 
         # When: is_available 접근
         result = proxy_manager_v2_empty.is_available
 
-        # Then: DB에서 프록시를 가져오는 메서드가 호출됨
-        assert mock_db_service.get_proxies_by_response_time.called
-        # 프록시가 로드되면 is_available=True
-        assert result is True
-        assert len(proxy_manager_v2_empty._active_pool) > 0
+        # Then: False 반환 (풀이 비어있으므로)
+        assert result is False
 
     def test_is_available_returns_false_when_refresh_fails(
         self, proxy_manager_v2_empty, mock_db_service
@@ -305,11 +302,11 @@ class TestPoolExhaustionScenario:
         self, proxy_manager_v2_with_pool, mock_db_service, sample_proxy_list
     ):
         """
-        전체 시나리오: 풀 고갈 → 복구
+        전체 시나리오: 풀 고갈 → get_fresh_proxy에서 복구
 
         1. 초기 상태: 풀에 프록시 있음
         2. 모든 프록시 사용 후 풀 고갈
-        3. 다음 요청 시 풀 갱신
+        3. get_fresh_proxy() 호출 시 풀 갱신
         4. 프록시 다시 사용 가능
         """
         manager = proxy_manager_v2_with_pool
@@ -321,13 +318,13 @@ class TestPoolExhaustionScenario:
         # 2. 풀 고갈 시뮬레이션 (모든 프록시 제거)
         manager._active_pool = []
 
-        # 3. 다음 요청 시 풀 갱신 (is_available에서 갱신 시도)
+        # 3. is_available은 False (풀이 비어있으므로)
+        assert manager.is_available is False
+
+        # 4. get_fresh_proxy() 호출 시 풀 갱신 시도
         mock_db_service.get_proxies_by_response_time.return_value = sample_proxy_list
 
-        # 4. is_available 접근 → 갱신 → True
-        assert manager.is_available is True
-        assert len(manager._active_pool) > 0
-
-        # 5. 프록시 사용 가능
+        # 5. get_fresh_proxy()는 내부에서 풀 갱신 시도 후 프록시 반환
         proxy_url = manager.get_fresh_proxy()
         assert proxy_url is not None
+        assert len(manager._active_pool) > 0

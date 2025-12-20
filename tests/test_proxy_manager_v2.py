@@ -27,8 +27,10 @@ def mock_db_service():
     """Mock ProxyDBService"""
     service = Mock()
     service.get_top_proxies_for_pool = Mock(return_value=[])
+    service.get_proxies_by_response_time = Mock(return_value=[])
     service.record_check_result = Mock(return_value=True)
     service.get_proxy_info_by_id = Mock(return_value=None)
+    service.batch_update_proxy_stats = Mock()
     return service
 
 
