@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.services.browser_service import get_browser_service
+from app.services.account_service import account_service
 from ..models.schemas import (
     PostSchema,
     PostListResponse,
@@ -248,6 +250,38 @@ async def get_today_schedule(
     """오늘 스케줄 조회."""
     service = CrawlService(db)
     return service.get_today_schedule()
+
+
+# ============== Login ==============
+
+@router.post("/login/open-browser")
+async def open_login_browser(
+    account_id: int = Query(..., description="계정 ID"),
+    db: Session = Depends(get_db),
+):
+    """Instagram 수동 로그인용 브라우저 열기.
+
+    지정된 계정의 브라우저 프로필로 Instagram 로그인 페이지를 엽니다.
+    사용자가 수동으로 로그인하면 세션이 저장됩니다.
+    """
+    account = account_service.get_by_id(db, account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
+
+    browser_service = get_browser_service()
+    result = await browser_service.open_browser_for_account(
+        account_id, "https://www.instagram.com/"
+    )
+
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("message", "브라우저 열기 실패"))
+
+    return {
+        "success": True,
+        "message": "Instagram 로그인 페이지가 열렸습니다. 수동으로 로그인해주세요.",
+        "account_id": account_id,
+        "account_name": account.name,
+    }
 
 
 # ============== Helpers ==============
