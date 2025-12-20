@@ -51,22 +51,22 @@ pytestmark = pytest.mark.skipif(
 
 # Lazy import helpers to avoid import errors during collection
 def get_schedule_info():
-    from app.services.naver_graphql_client import ScheduleInfo
+    from app.modules.naver_booking.services.graphql_client import ScheduleInfo
     return ScheduleInfo
 
 
 def get_naver_graphql_client():
-    from app.services.naver_graphql_client import NaverGraphQLClient
+    from app.modules.naver_booking.services.graphql_client import NaverGraphQLClient
     return NaverGraphQLClient
 
 
 def get_availability_result():
-    from app.services.anonymous_monitor import AvailabilityResult
+    from app.modules.naver_booking.services.anonymous_monitor import AvailabilityResult
     return AvailabilityResult
 
 
 def get_anonymous_monitor():
-    from app.services.anonymous_monitor import AnonymousMonitor
+    from app.modules.naver_booking.services.anonymous_monitor import AnonymousMonitor
     return AnonymousMonitor
 
 

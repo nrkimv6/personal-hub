@@ -33,14 +33,14 @@ from dataclasses import asdict
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.services.anonymous_monitor import (
+from app.modules.naver_booking.services.anonymous_monitor import (
     AnonymousMonitor,
     AvailabilityResult,
     SlotStatistics,
     CacheEntry,
     get_anonymous_monitor,
 )
-from app.services.naver_graphql_client import (
+from app.modules.naver_booking.services.graphql_client import (
     NaverGraphQLClient,
     ScheduleInfo,
     ScheduleSlot,
@@ -590,7 +590,7 @@ class TestSingleton:
     def test_get_anonymous_monitor_returns_same_instance(self):
         """동일 인스턴스 반환"""
         # 싱글톤 인스턴스 초기화
-        from app.services import anonymous_monitor as am_module
+        from app.modules.naver_booking.services import anonymous_monitor as am_module
         am_module._anonymous_monitor_instance = None
 
         instance1 = get_anonymous_monitor()

@@ -30,7 +30,7 @@ from datetime import datetime
 # 테스트 대상
 from app.services.proxy_manager import ProxyManager
 from app.services.proxy_manager_v2 import ProxyManagerV2
-from app.services.naver_graphql_client import (
+from app.modules.naver_booking.services.graphql_client import (
     PROXY_REQUEST_TIMEOUT,
     DIRECT_REQUEST_TIMEOUT,
 )
@@ -439,7 +439,7 @@ class TestIntegrationMocked:
 
     def test_timeout_constants_applied(self):
         """타임아웃 상수가 올바르게 설정되었는지 확인"""
-        from app.services.naver_graphql_client import (
+        from app.modules.naver_booking.services.graphql_client import (
             PROXY_REQUEST_TIMEOUT,
             DIRECT_REQUEST_TIMEOUT,
         )

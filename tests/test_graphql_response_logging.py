@@ -34,12 +34,12 @@ from datetime import datetime
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.services.naver_graphql_client import (
+from app.modules.naver_booking.services.graphql_client import (
     NaverGraphQLClient,
     ScheduleInfo,
     ScheduleSlot,
 )
-from app.services.anonymous_monitor import (
+from app.modules.naver_booking.services.anonymous_monitor import (
     AnonymousMonitor,
     AvailabilityResult,
 )

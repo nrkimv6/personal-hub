@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 # 프로젝트 루트를 path에 추가
 sys.path.insert(0, str(Path(__fiscripts/check_slots.pyle__).parent.parent))
 
-from app.services.naver_graphql_client import NaverGraphQLClient
+from app.modules.naver_booking.services.graphql_client import NaverGraphQLClient
 
 
 # 릴리영N강남 상품 정보
