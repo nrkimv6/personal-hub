@@ -785,3 +785,108 @@ class TestMigration007:
         content = migration_path.read_text(encoding="utf-8")
 
         assert "instagram_crawl_requests" in content
+
+
+# ============================================================
+# Account ID 관련 테스트 (2025-12-21 추가)
+# ============================================================
+
+class TestScheduleConfigAccountId:
+    """스케줄 설정 account_id 테스트"""
+
+    def test_schedule_config_model_has_account_id(self):
+        """InstagramScheduleConfig 모델에 account_id 컬럼 존재"""
+        from app.models.instagram_schedule_config import InstagramScheduleConfig
+
+        assert hasattr(InstagramScheduleConfig, 'account_id')
+        assert hasattr(InstagramScheduleConfig, 'account')
+
+    def test_schedule_config_schema_has_account_fields(self):
+        """ScheduleConfigSchema에 account 필드 존재"""
+        from app.modules.instagram.models.schemas import ScheduleConfigSchema
+
+        fields = ScheduleConfigSchema.model_fields
+        assert 'account_id' in fields
+        assert 'account_name' in fields
+
+    def test_schedule_config_update_schema_has_account_id(self):
+        """ScheduleConfigUpdateSchema에 account_id 필드 존재"""
+        from app.modules.instagram.models.schemas import ScheduleConfigUpdateSchema
+
+        fields = ScheduleConfigUpdateSchema.model_fields
+        assert 'account_id' in fields
+
+    def test_schedule_config_schema_default_values(self):
+        """ScheduleConfigSchema account 필드 기본값"""
+        from app.modules.instagram.models.schemas import ScheduleConfigSchema
+
+        config = ScheduleConfigSchema(id=1)
+        assert config.account_id is None
+        assert config.account_name is None
+
+    def test_update_schedule_config_with_account_id(self, mock_db):
+        """account_id로 스케줄 설정 업데이트"""
+        from app.modules.instagram.services.crawl_service import CrawlService
+
+        existing_config = MagicMock()
+        existing_config.account_id = None
+        mock_db.query.return_value.first.return_value = existing_config
+
+        service = CrawlService(mock_db)
+        updated = service.update_schedule_config(account_id=1)
+
+        assert updated.account_id == 1
+
+    def test_update_schedule_config_clear_account_id(self, mock_db):
+        """account_id 초기화 (None 설정)는 명시적 값이 필요"""
+        from app.modules.instagram.services.crawl_service import CrawlService
+
+        existing_config = MagicMock()
+        existing_config.account_id = 1
+        mock_db.query.return_value.first.return_value = existing_config
+
+        service = CrawlService(mock_db)
+        # account_id를 전달하지 않으면 변경되지 않음
+        updated = service.update_schedule_config(enabled=True)
+
+        # account_id는 변경되지 않음 (None이 아닌 기존 값 유지)
+        assert updated.account_id == 1
+
+
+class TestMigration030:
+    """030_add_instagram_account_id 마이그레이션 테스트"""
+
+    def test_migration_030_exists(self):
+        """030_add_instagram_account_id.sql 파일 존재"""
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "030_add_instagram_account_id.sql"
+        assert migration_path.exists(), "030_add_instagram_account_id.sql should exist"
+
+    def test_migration_030_contains_account_id(self):
+        """030 마이그레이션에 account_id 컬럼 추가 포함"""
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "030_add_instagram_account_id.sql"
+        content = migration_path.read_text(encoding="utf-8")
+
+        assert "account_id" in content
+        assert "ALTER TABLE" in content.upper() or "instagram_schedule_config" in content
+
+
+class TestAccountRelationship:
+    """Account 관계(relationship) 테스트"""
+
+    def test_schedule_config_account_relationship(self):
+        """InstagramScheduleConfig.account relationship 존재"""
+        from app.models.instagram_schedule_config import InstagramScheduleConfig
+        from sqlalchemy.orm import RelationshipProperty
+
+        # account relationship이 정의되어 있는지 확인
+        mapper = InstagramScheduleConfig.__mapper__
+        assert 'account' in mapper.relationships
+
+    def test_account_model_exists(self):
+        """Account 모델 존재 및 필수 필드"""
+        from app.models.account import Account
+
+        assert hasattr(Account, 'id')
+        assert hasattr(Account, 'name')
+        assert hasattr(Account, 'is_logged_in')
+        assert hasattr(Account, 'profile_path')
