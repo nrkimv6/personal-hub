@@ -118,6 +118,8 @@
   let editSchedule: ScheduleWithContext | null = null;
   let editForm = {
     times: '',
+    time_range: '',
+    use_time_range: false,
     is_enabled: true,
     interval: 10,
     custom_interval: false,
@@ -609,6 +611,8 @@
     editSchedule = schedule;
     editForm = {
       times: schedule.times?.join(', ') || '',
+      time_range: schedule.time_range || '',
+      use_time_range: !!schedule.time_range && !schedule.times?.length,
       is_enabled: schedule.is_enabled,
       interval: schedule.interval || 30,
       custom_interval: schedule.custom_interval || false,
@@ -621,9 +625,11 @@
   async function handleUpdateSchedule() {
     if (!editSchedule) return;
     try {
-      const times = editForm.times ? editForm.times.split(',').map(t => t.trim()).filter(t => t) : [];
+      const times = editForm.use_time_range ? undefined : (editForm.times ? editForm.times.split(',').map(t => t.trim()).filter(t => t) : []);
+      const time_range = editForm.use_time_range ? editForm.time_range : undefined;
       const updateData: MonitorScheduleUpdate = {
         times,
+        time_range,
         is_enabled: editForm.is_enabled,
         interval: editForm.custom_interval ? editForm.interval : undefined,
         custom_interval: editForm.custom_interval,
@@ -1290,15 +1296,35 @@
       </div>
       <form on:submit|preventDefault={handleUpdateSchedule} class="p-4 space-y-4">
         <div>
-          <label for="edit-times" class="block text-sm font-medium text-gray-700 mb-1">시간 (쉼표 구분)</label>
-          <input
-            id="edit-times"
-            type="text"
-            class="input"
-            bind:value={editForm.times}
-            placeholder="예: 10:00, 14:00, 18:00"
-          />
-          <p class="text-xs text-gray-500 mt-1">비워두면 시간 범위 설정을 따릅니다</p>
+          <label class="block text-sm font-medium text-gray-700 mb-2">시간 설정 방식</label>
+          <div class="flex gap-4 mb-2">
+            <label class="flex items-center gap-1">
+              <input type="radio" bind:group={editForm.use_time_range} value={false} />
+              <span class="text-sm">특정 시간</span>
+            </label>
+            <label class="flex items-center gap-1">
+              <input type="radio" bind:group={editForm.use_time_range} value={true} />
+              <span class="text-sm">시간 범위</span>
+            </label>
+          </div>
+          {#if editForm.use_time_range}
+            <input
+              type="text"
+              class="input"
+              bind:value={editForm.time_range}
+              placeholder="예: 13:00-20:00"
+            />
+            <p class="text-xs text-gray-500 mt-1">시작-종료 시간 범위</p>
+          {:else}
+            <input
+              id="edit-times"
+              type="text"
+              class="input"
+              bind:value={editForm.times}
+              placeholder="예: 10:00, 14:00, 18:00"
+            />
+            <p class="text-xs text-gray-500 mt-1">쉼표로 구분하여 여러 시간 입력</p>
+          {/if}
         </div>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-2">모니터링 간격</label>
