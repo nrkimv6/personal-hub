@@ -1,6 +1,7 @@
 """Instagram Schedule Config SQLAlchemy Model."""
 
-from sqlalchemy import Column, Integer, DateTime, Boolean, JSON
+from sqlalchemy import Column, Integer, DateTime, Boolean, JSON, ForeignKey
+from sqlalchemy.orm import relationship
 from datetime import datetime
 
 from .base import Base
@@ -30,6 +31,10 @@ class InstagramScheduleConfig(Base):
     # 재시도 설정
     max_retries = Column(Integer, default=3)
     retry_interval_minutes = Column(Integer, default=5)
+
+    # 계정 지정 (2025-12-21 추가)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    account = relationship("Account")
 
     # 메타
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
