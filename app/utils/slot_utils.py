@@ -176,6 +176,35 @@ def is_slot_available_from_obj(slot: Any) -> bool:
     )
 
 
+def is_slot_displayable_from_dict(slot: Dict[str, Any]) -> bool:
+    """
+    슬롯이 UI에 표시되어야 하는지 확인합니다.
+
+    표시 조건: is_unit_business_day=True (실제 영업 시간대)
+    예약 불가능한 슬롯도 표시할 수 있음 (마감 표시용)
+
+    Args:
+        slot: 슬롯 데이터 딕셔너리
+
+    Returns:
+        bool: 표시 여부
+    """
+    return slot.get('isUnitBusinessDay', slot.get('is_unit_business_day', False))
+
+
+def is_slot_displayable_from_obj(slot: Any) -> bool:
+    """
+    슬롯이 UI에 표시되어야 하는지 확인합니다 (객체용).
+
+    Args:
+        slot: 슬롯 객체
+
+    Returns:
+        bool: 표시 여부
+    """
+    return getattr(slot, 'is_unit_business_day', False)
+
+
 def get_remaining_count(unit_stock: int, unit_booking_count: int) -> int:
     """
     슬롯의 남은 자리 수를 계산합니다.

@@ -218,7 +218,8 @@ class TestRight:
         """슬롯 계산 검증 (정원/예약됨/남음)"""
         business = create_mock_business_info()
         biz_item = create_mock_biz_item_info()
-        schedule = create_mock_schedule_info(dates=["2025-12-20"], slots_per_day=1)
+        # 미래 날짜 사용 (과거 시간 슬롯 필터링 회피)
+        schedule = create_mock_schedule_info(dates=["2099-12-20"], slots_per_day=1)
 
         response = call_build_response(business, biz_item, schedule)
 
@@ -429,8 +430,8 @@ class TestCrossCheck:
         business = create_mock_business_info()
         biz_item = create_mock_biz_item_info()
 
-        # 2일 x 3슬롯, 각 날짜에 1개씩 예약 가능
-        schedule = create_mock_schedule_info(dates=["2025-12-20", "2025-12-21"], slots_per_day=3)
+        # 2일 x 3슬롯, 각 날짜에 1개씩 예약 가능 (미래 날짜 사용)
+        schedule = create_mock_schedule_info(dates=["2099-12-20", "2099-12-21"], slots_per_day=3)
 
         response = call_build_response(business, biz_item, schedule)
 
@@ -595,7 +596,8 @@ class TestCardinality:
         """날짜별 요약과 슬롯 합계 일치"""
         business = create_mock_business_info()
         biz_item = create_mock_biz_item_info()
-        schedule = create_mock_schedule_info(dates=["2025-12-20"], slots_per_day=3)
+        # 미래 날짜 사용 (과거 시간 슬롯 필터링 회피)
+        schedule = create_mock_schedule_info(dates=["2099-12-20"], slots_per_day=3)
 
         response = call_build_response(business, biz_item, schedule)
 
@@ -605,10 +607,12 @@ class TestCardinality:
         # 슬롯들의 합계와 summary 비교
         slots_capacity = sum(s.capacity for s in date_slots.slots)
         slots_booked = sum(s.booked for s in date_slots.slots)
+        # total_remaining은 예약 가능한 슬롯의 remaining 합계
+        available_remaining = sum(s.remaining for s in date_slots.slots if s.is_available)
 
         assert summary.total_capacity == slots_capacity
         assert summary.total_booked == slots_booked
-        assert summary.total_remaining == slots_capacity - slots_booked
+        assert summary.total_remaining == available_remaining
 
 
 class TestTime:
@@ -649,6 +653,95 @@ class TestTime:
 
         # queried_at이 before와 after 사이
         assert before <= response.queried_at <= after
+
+    def test_past_time_slots_unavailable(self):
+        """오늘 날짜의 과거 시간 슬롯은 예약 불가"""
+        business = create_mock_business_info()
+        biz_item = create_mock_biz_item_info()
+
+        # 오늘 날짜로 슬롯 생성 (00:00 시간 - 항상 과거)
+        today = datetime.now().strftime("%Y-%m-%d")
+        slot = create_mock_schedule_slot(
+            date=today,
+            time="00:00",  # 항상 과거 시간
+            unit_stock=10,
+            unit_booking_count=5
+        )
+        schedule = ScheduleInfo(
+            business_id="1269828",
+            biz_item_id="6309738",
+            available_dates=[today],
+            slots=[slot],
+            slots_by_date={today: [slot]}
+        )
+
+        response = call_build_response(business, biz_item, schedule)
+
+        # 과거 시간 슬롯은 is_available=False
+        assert response.slots_by_date[0].slots[0].is_available is False
+        assert response.summary.total_available_slots == 0
+
+    def test_future_date_slots_available(self):
+        """미래 날짜의 슬롯은 시간과 무관하게 예약 가능"""
+        business = create_mock_business_info()
+        biz_item = create_mock_biz_item_info()
+
+        # 미래 날짜로 슬롯 생성
+        slot = create_mock_schedule_slot(
+            date="2099-12-20",
+            time="00:00",  # 이른 시간이지만 미래 날짜이므로 가능
+            unit_stock=10,
+            unit_booking_count=5
+        )
+        schedule = ScheduleInfo(
+            business_id="1269828",
+            biz_item_id="6309738",
+            available_dates=["2099-12-20"],
+            slots=[slot],
+            slots_by_date={"2099-12-20": [slot]}
+        )
+
+        response = call_build_response(business, biz_item, schedule)
+
+        # 미래 날짜는 시간과 무관하게 is_available=True
+        assert response.slots_by_date[0].slots[0].is_available is True
+        assert response.summary.total_available_slots == 1
+
+    def test_date_summary_excludes_unavailable_remaining(self):
+        """날짜별 요약의 total_remaining은 예약 가능한 슬롯만 포함"""
+        business = create_mock_business_info()
+        biz_item = create_mock_biz_item_info()
+
+        # 오늘 날짜 슬롯 (과거 시간 - 예약 불가)
+        today = datetime.now().strftime("%Y-%m-%d")
+        past_slot = create_mock_schedule_slot(
+            date=today,
+            time="00:00",  # 과거 시간
+            unit_stock=10,
+            unit_booking_count=3  # remaining=7
+        )
+        # 미래 시간 슬롯 (예약 가능)
+        future_slot = create_mock_schedule_slot(
+            date=today,
+            time="23:59",  # 미래 시간 (거의 항상)
+            unit_stock=10,
+            unit_booking_count=5  # remaining=5
+        )
+
+        schedule = ScheduleInfo(
+            business_id="1269828",
+            biz_item_id="6309738",
+            available_dates=[today],
+            slots=[past_slot, future_slot],
+            slots_by_date={today: [past_slot, future_slot]}
+        )
+
+        response = call_build_response(business, biz_item, schedule)
+
+        date_slots = response.slots_by_date[0]
+        # total_remaining은 예약 가능한 슬롯(future_slot)의 remaining만 포함
+        # past_slot의 remaining=7은 제외됨
+        assert date_slots.summary.total_remaining == 5  # future_slot의 remaining만
 
 
 # ============================================================
