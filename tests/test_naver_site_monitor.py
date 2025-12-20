@@ -41,7 +41,7 @@ class TestFilterSlotsByTimeRange:
         """
         [Right] 기본 시간 범위 필터링
         """
-        from app.services.naver_site_monitor import filter_slots_by_time_range
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_time_range
 
         slots = [
             "2025-12-10 09:00:00 (2매)",
@@ -60,7 +60,7 @@ class TestFilterSlotsByTimeRange:
         """
         [Right] 오전/오후 형식 슬롯 필터링
         """
-        from app.services.naver_site_monitor import filter_slots_by_time_range
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_time_range
 
         slots = [
             "오전 9:00",
@@ -79,7 +79,7 @@ class TestFilterSlotsByTimeRange:
         """
         [Right] AM/PM 형식 슬롯 필터링
         """
-        from app.services.naver_site_monitor import filter_slots_by_time_range
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_time_range
 
         slots = [
             "AM 9:00",
@@ -98,7 +98,7 @@ class TestFilterSlotsByTimeRange:
         """
         [Boundary] 빈 슬롯 리스트
         """
-        from app.services.naver_site_monitor import filter_slots_by_time_range
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_time_range
 
         result = filter_slots_by_time_range([], "10:00-18:00")
         assert result == []
@@ -107,7 +107,7 @@ class TestFilterSlotsByTimeRange:
         """
         [Boundary] None 시간 범위 (전체 반환)
         """
-        from app.services.naver_site_monitor import filter_slots_by_time_range
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_time_range
 
         slots = ["slot1", "slot2"]
         result = filter_slots_by_time_range(slots, None)
@@ -117,7 +117,7 @@ class TestFilterSlotsByTimeRange:
         """
         [Boundary] 빈 시간 범위 문자열 (전체 반환)
         """
-        from app.services.naver_site_monitor import filter_slots_by_time_range
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_time_range
 
         slots = ["2025-12-10 10:00:00"]
         result = filter_slots_by_time_range(slots, "")
@@ -127,7 +127,7 @@ class TestFilterSlotsByTimeRange:
         """
         [Boundary] 정확한 시간 매칭 (12:00-12:00)
         """
-        from app.services.naver_site_monitor import filter_slots_by_time_range
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_time_range
 
         slots = [
             "2025-12-10 11:00:00",
@@ -144,7 +144,7 @@ class TestFilterSlotsByTimeRange:
         """
         [Boundary] 야간 시간 범위 (22:00-06:00)
         """
-        from app.services.naver_site_monitor import filter_slots_by_time_range
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_time_range
 
         slots = [
             "2025-12-10 21:00:00",
@@ -163,7 +163,7 @@ class TestFilterSlotsByTimeRange:
         """
         [Boundary] 시작 시간 포함 확인
         """
-        from app.services.naver_site_monitor import filter_slots_by_time_range
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_time_range
 
         slots = ["2025-12-10 10:00:00"]
         result = filter_slots_by_time_range(slots, "10:00-18:00")
@@ -174,7 +174,7 @@ class TestFilterSlotsByTimeRange:
         """
         [Boundary] 종료 시간 포함 확인
         """
-        from app.services.naver_site_monitor import filter_slots_by_time_range
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_time_range
 
         slots = ["2025-12-10 18:00:00"]
         result = filter_slots_by_time_range(slots, "10:00-18:00")
@@ -187,7 +187,7 @@ class TestFilterSlotsByTimeRange:
         """
         [Error] 잘못된 시간 범위 형식 (전체 반환)
         """
-        from app.services.naver_site_monitor import filter_slots_by_time_range
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_time_range
 
         slots = ["2025-12-10 10:00:00"]
         result = filter_slots_by_time_range(slots, "invalid")
@@ -198,7 +198,7 @@ class TestFilterSlotsByTimeRange:
         """
         [Error] 파싱 불가능한 슬롯 (스킵)
         """
-        from app.services.naver_site_monitor import filter_slots_by_time_range
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_time_range
 
         slots = [
             "no time here",
@@ -221,7 +221,7 @@ class TestCalculateCacheTtl:
 
     @pytest.fixture
     def monitor(self):
-        from app.services.naver_site_monitor import NaverSiteMonitor
+        from app.modules.naver_booking.services.site_monitor import NaverSiteMonitor
         return NaverSiteMonitor()
 
     # --- Right: 결과가 올바른가? ---
@@ -339,7 +339,7 @@ class TestGetItemAvailability:
 
     @pytest.fixture
     def monitor(self):
-        from app.services.naver_site_monitor import NaverSiteMonitor
+        from app.modules.naver_booking.services.site_monitor import NaverSiteMonitor
         return NaverSiteMonitor()
 
     # --- Right: 결과가 올바른가? ---
@@ -450,7 +450,7 @@ class TestTrackItemStatus:
 
     @pytest.fixture
     def monitor(self):
-        from app.services.naver_site_monitor import NaverSiteMonitor
+        from app.modules.naver_booking.services.site_monitor import NaverSiteMonitor
         m = NaverSiteMonitor()
         # 상태 트래커 초기화
         m._item_status_tracker = {}
@@ -544,7 +544,7 @@ class TestValidateTarget:
 
     @pytest.fixture
     def monitor(self):
-        from app.services.naver_site_monitor import NaverSiteMonitor
+        from app.modules.naver_booking.services.site_monitor import NaverSiteMonitor
         return NaverSiteMonitor()
 
     # --- Right: 결과가 올바른가? ---
@@ -597,7 +597,7 @@ class TestGetMonitoringInterval:
 
     @pytest.fixture
     def monitor(self):
-        from app.services.naver_site_monitor import NaverSiteMonitor
+        from app.modules.naver_booking.services.site_monitor import NaverSiteMonitor
         return NaverSiteMonitor()
 
     # --- Right: 결과가 올바른가? ---
@@ -630,7 +630,7 @@ class TestLifecycle:
 
     @pytest.fixture
     def monitor(self):
-        from app.services.naver_site_monitor import NaverSiteMonitor
+        from app.modules.naver_booking.services.site_monitor import NaverSiteMonitor
         return NaverSiteMonitor()
 
     @pytest.mark.asyncio
@@ -673,7 +673,7 @@ class TestFilterSlotsByTimes:
         """
         [Right] 기본 특정 시간 필터링
         """
-        from app.services.naver_site_monitor import filter_slots_by_times
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_times
 
         slots = [
             "2025-12-10 09:00:00 (2매)",
@@ -691,7 +691,7 @@ class TestFilterSlotsByTimes:
         """
         [Right] 여러 시간 필터링
         """
-        from app.services.naver_site_monitor import filter_slots_by_times
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_times
 
         slots = [
             "2025-12-10 09:00:00 (2매)",
@@ -710,7 +710,7 @@ class TestFilterSlotsByTimes:
         """
         [Right] 오전/오후 형식 슬롯에서 특정 시간 필터링
         """
-        from app.services.naver_site_monitor import filter_slots_by_times
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_times
 
         slots = [
             "오전 9:00",
@@ -729,7 +729,7 @@ class TestFilterSlotsByTimes:
         """
         [Right] dict 형태 슬롯 필터링 (anonymous 모드)
         """
-        from app.services.naver_site_monitor import filter_slots_by_times
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_times
 
         slots = [
             {"time": "09:00", "date": "2025-12-10"},
@@ -747,7 +747,7 @@ class TestFilterSlotsByTimes:
         """
         [Right] dict 형태에서 HH:MM:SS 형식 처리
         """
-        from app.services.naver_site_monitor import filter_slots_by_times
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_times
 
         slots = [
             {"time": "09:00:00", "date": "2025-12-10"},
@@ -766,7 +766,7 @@ class TestFilterSlotsByTimes:
         """
         [Boundary] 빈 슬롯 리스트
         """
-        from app.services.naver_site_monitor import filter_slots_by_times
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_times
 
         result = filter_slots_by_times([], ["11:00"])
 
@@ -776,7 +776,7 @@ class TestFilterSlotsByTimes:
         """
         [Boundary] 빈 시간 목록 → 전체 슬롯 반환
         """
-        from app.services.naver_site_monitor import filter_slots_by_times
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_times
 
         slots = [
             "2025-12-10 09:00:00 (2매)",
@@ -791,7 +791,7 @@ class TestFilterSlotsByTimes:
         """
         [Boundary] None 시간 목록 → 전체 슬롯 반환
         """
-        from app.services.naver_site_monitor import filter_slots_by_times
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_times
 
         slots = [
             "2025-12-10 09:00:00 (2매)",
@@ -806,7 +806,7 @@ class TestFilterSlotsByTimes:
         """
         [Boundary] 매칭되는 슬롯 없음
         """
-        from app.services.naver_site_monitor import filter_slots_by_times
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_times
 
         slots = [
             "2025-12-10 09:00:00 (2매)",
@@ -821,7 +821,7 @@ class TestFilterSlotsByTimes:
         """
         [Boundary] 시간 형식 변형 (HH:MM:SS, H:MM)
         """
-        from app.services.naver_site_monitor import filter_slots_by_times
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_times
 
         slots = [
             "2025-12-10 09:00:00 (2매)",
@@ -842,7 +842,7 @@ class TestFilterSlotsByTimes:
         """
         [Error] 파싱 불가 슬롯 → 건너뜀
         """
-        from app.services.naver_site_monitor import filter_slots_by_times
+        from app.modules.naver_booking.services.site_monitor import filter_slots_by_times
 
         slots = [
             "invalid slot",
