@@ -118,7 +118,7 @@ class Settings(BaseSettings):
     WORKER_HEALTH_CHECK_INTERVAL: int = 30  # 워커 헬스체크 간격 (초)
 
     # 프록시 설정 (공통)
-    PROXY_ENABLED: bool = False  # 프록시 사용 여부
+    PROXY_ENABLED: bool = True  # 프록시 사용 여부
     PROXY_ROTATION_INTERVAL: int = 5  # 프록시 교체 주기 (요청 수)
     PROXY_MAX_ACTIVE_POOL: int = 100  # 활성 프록시 풀 최대 크기
     PROXY_CONNECTION_TIMEOUT: int = 5  # 프록시 연결 타임아웃 (초)
