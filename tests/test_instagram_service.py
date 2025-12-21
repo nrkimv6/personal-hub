@@ -1054,3 +1054,235 @@ class TestGetTodaySchedule:
         future_items = [item for item in result if item.status == "pending"]
         for item in future_items:
             assert item.run_id is None
+
+
+# ============================================================
+# 크롤러 개선 테스트 (2025-12-21 추가)
+# - 광고 식별 개선
+# - 스크롤 동작 개선
+# - 더보기 버튼 안정화
+# ============================================================
+
+class TestCrawlerAdDetection:
+    """광고 게시물 식별 테스트 (RIGHT-BICEP)"""
+
+    def test_crawl_options_has_scroll_behavior(self):
+        """CrawlOptions에 스크롤 동작 설정 존재"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions()
+        assert hasattr(options, 'scroll_behavior')
+        assert options.scroll_behavior == "human"  # 기본값
+
+    def test_crawl_options_scroll_delay_range(self):
+        """CrawlOptions에 스크롤 딜레이 범위 설정 존재"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions()
+        assert hasattr(options, 'min_scroll_delay')
+        assert hasattr(options, 'max_scroll_delay')
+        assert options.min_scroll_delay == 1.5
+        assert options.max_scroll_delay == 3.5
+
+    def test_crawl_options_read_pause_probability(self):
+        """CrawlOptions에 읽기 멈춤 확률 설정 존재"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions()
+        assert hasattr(options, 'read_pause_probability')
+        assert options.read_pause_probability == 0.3
+
+    def test_crawl_options_wait_after_more_increased(self):
+        """wait_after_more가 1.0초로 증가됨"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions()
+        assert options.wait_after_more == 1.0
+
+    def test_crawler_has_more_button_texts(self):
+        """InstagramCrawler에 다국어 더보기 버튼 텍스트 존재"""
+        from app.modules.instagram.services.crawler import InstagramCrawler
+
+        mock_page = MagicMock()
+        crawler = InstagramCrawler(mock_page)
+
+        assert hasattr(crawler, 'MORE_BUTTON_TEXTS')
+        texts = crawler.MORE_BUTTON_TEXTS
+
+        # 다국어 지원 확인
+        assert '더 보기' in texts  # 한국어
+        assert 'more' in texts  # 영어
+        assert 'もっと見る' in texts  # 일본어
+
+
+class TestCrawlerScrollBehavior:
+    """크롤러 스크롤 동작 테스트 (CORRECT)"""
+
+    def test_scroll_behavior_human_option(self):
+        """human 스크롤 동작 옵션"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions(scroll_behavior="human")
+        assert options.scroll_behavior == "human"
+
+    def test_scroll_behavior_fast_option(self):
+        """fast 스크롤 동작 옵션"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions(scroll_behavior="fast")
+        assert options.scroll_behavior == "fast"
+
+    def test_custom_scroll_delays(self):
+        """커스텀 스크롤 딜레이 설정"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions(
+            min_scroll_delay=2.0,
+            max_scroll_delay=5.0
+        )
+        assert options.min_scroll_delay == 2.0
+        assert options.max_scroll_delay == 5.0
+
+    def test_custom_read_pause_probability(self):
+        """커스텀 읽기 멈춤 확률 설정"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions(read_pause_probability=0.5)
+        assert options.read_pause_probability == 0.5
+
+
+class TestCrawlerHumanLikeScroll:
+    """사람처럼 스크롤 테스트"""
+
+    def test_crawler_has_scroll_human_like_method(self):
+        """InstagramCrawler에 _scroll_human_like 메서드 존재"""
+        from app.modules.instagram.services.crawler import InstagramCrawler
+
+        mock_page = MagicMock()
+        crawler = InstagramCrawler(mock_page)
+
+        assert hasattr(crawler, '_scroll_human_like')
+        assert callable(crawler._scroll_human_like)
+
+    def test_crawler_scroll_page_accepts_options(self):
+        """_scroll_page 메서드가 options 인자를 받음"""
+        from app.modules.instagram.services.crawler import InstagramCrawler
+        import inspect
+
+        mock_page = MagicMock()
+        crawler = InstagramCrawler(mock_page)
+
+        sig = inspect.signature(crawler._scroll_page)
+        params = list(sig.parameters.keys())
+
+        assert 'options' in params
+
+
+class TestCrawlerMoreButtonImprovement:
+    """더보기 버튼 개선 테스트"""
+
+    def test_more_button_texts_includes_languages(self):
+        """다국어 더보기 텍스트 포함 확인"""
+        from app.modules.instagram.services.crawler import InstagramCrawler
+
+        mock_page = MagicMock()
+        crawler = InstagramCrawler(mock_page)
+
+        texts = crawler.MORE_BUTTON_TEXTS
+
+        # 최소 5개 언어 지원
+        assert len(texts) >= 5
+
+        # 주요 언어 포함
+        assert '더 보기' in texts  # 한국어
+        assert 'more' in texts  # 영어
+        assert 'もっと見る' in texts  # 일본어
+        assert '顯示更多' in texts  # 번체 중국어
+        assert '显示更多' in texts  # 간체 중국어
+
+
+class TestCrawlOptionsDefaults:
+    """CrawlOptions 기본값 테스트 (경계값)"""
+
+    def test_all_default_values(self):
+        """모든 기본값 확인"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions()
+
+        # 기존 설정
+        assert options.max_posts == 20
+        assert options.scroll_count == 3
+        assert options.wait_after_more == 1.0
+        assert options.wait_after_scroll == 2.0
+        assert options.duplicate_stop_count == 5
+        assert options.max_refresh_count == 3
+        assert options.no_new_posts_refresh_threshold == 3
+
+        # 새 설정
+        assert options.scroll_behavior == "human"
+        assert options.min_scroll_delay == 1.5
+        assert options.max_scroll_delay == 3.5
+        assert options.read_pause_probability == 0.3
+
+    def test_custom_all_values(self):
+        """모든 값 커스텀 설정"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions(
+            max_posts=50,
+            scroll_count=10,
+            wait_after_more=2.0,
+            wait_after_scroll=3.0,
+            duplicate_stop_count=10,
+            max_refresh_count=5,
+            no_new_posts_refresh_threshold=5,
+            scroll_behavior="fast",
+            min_scroll_delay=1.0,
+            max_scroll_delay=2.0,
+            read_pause_probability=0.1
+        )
+
+        assert options.max_posts == 50
+        assert options.scroll_count == 10
+        assert options.scroll_behavior == "fast"
+        assert options.min_scroll_delay == 1.0
+
+
+class TestPostDataAdField:
+    """PostData is_ad 필드 테스트"""
+
+    def test_post_data_is_ad_default_false(self):
+        """is_ad 기본값은 False"""
+        from app.modules.instagram.services.crawler import PostData
+
+        post = PostData(index=0)
+        assert post.is_ad is False
+
+    def test_post_data_is_ad_can_be_true(self):
+        """is_ad를 True로 설정 가능"""
+        from app.modules.instagram.services.crawler import PostData
+
+        post = PostData(index=0, is_ad=True)
+        assert post.is_ad is True
+
+    def test_post_data_images_empty_by_default(self):
+        """images 기본값은 빈 리스트"""
+        from app.modules.instagram.services.crawler import PostData
+
+        post = PostData(index=0)
+        assert post.images == []
+
+    def test_post_data_images_with_alt(self):
+        """images에 alt 속성 포함"""
+        from app.modules.instagram.services.crawler import PostData
+
+        post = PostData(
+            index=0,
+            images=[
+                {"src": "https://scontent.com/img1.jpg", "alt": "Photo by user"},
+                {"src": "https://scontent.com/img2.jpg", "alt": "Photo shared by user"}
+            ]
+        )
+        assert len(post.images) == 2
+        assert post.images[0]["alt"] == "Photo by user"
