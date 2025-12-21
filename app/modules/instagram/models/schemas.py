@@ -11,6 +11,13 @@ class ImageInfo(BaseModel):
     alt: Optional[str] = None
 
 
+class TagInfoSchema(BaseModel):
+    """게시물에 연결된 태그 정보."""
+    name: str
+    display_name: str
+    color: str = "#6b7280"
+
+
 class PostSchema(BaseModel):
     """게시물 응답 스키마."""
     id: int
@@ -24,6 +31,7 @@ class PostSchema(BaseModel):
     is_ad: bool = False
     collected_at: datetime
     crawl_run_id: Optional[int] = None
+    tags: List[TagInfoSchema] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -238,3 +246,70 @@ class RunStatsSchema(BaseModel):
     avg_collected: float
     avg_duration_seconds: float
     daily_trend: List[DailyTrendItem] = []
+
+
+# ============== 분류 관련 스키마 ==============
+
+
+class TagSchema(BaseModel):
+    """태그 응답 스키마."""
+    id: int
+    name: str
+    display_name: str
+    description: Optional[str] = None
+    color: str = "#6b7280"
+    is_active: bool = True
+    keyword_count: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TagCreateSchema(BaseModel):
+    """태그 생성 스키마."""
+    name: str
+    display_name: str
+    description: Optional[str] = None
+    color: str = "#6b7280"
+
+
+class TagUpdateSchema(BaseModel):
+    """태그 수정 스키마."""
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    color: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class KeywordSchema(BaseModel):
+    """키워드 응답 스키마."""
+    id: int
+    keyword: str
+    is_regex: bool = False
+    is_case_sensitive: bool = False
+    is_active: bool = True
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class KeywordCreateSchema(BaseModel):
+    """키워드 생성 스키마."""
+    keyword: str
+    is_regex: bool = False
+    is_case_sensitive: bool = False
+
+
+class KeywordBulkCreateSchema(BaseModel):
+    """키워드 일괄 생성 스키마."""
+    keywords: List[str]
+
+
+class ClassifyRequestSchema(BaseModel):
+    """분류 요청 스키마."""
+    post_ids: List[int]
+
+
+class ClassifyResultSchema(BaseModel):
+    """분류 결과 스키마."""
+    total: int
+    classified: int
+    details: List[dict] = []

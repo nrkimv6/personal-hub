@@ -41,6 +41,7 @@ async def get_posts(
     date_from: Optional[date] = Query(None, description="시작 날짜"),
     date_to: Optional[date] = Query(None, description="종료 날짜"),
     is_ad: Optional[bool] = Query(None, description="광고 필터"),
+    tags: Optional[str] = Query(None, description="태그 필터 (쉼표 구분)"),
     page: int = Query(1, ge=1, description="페이지 번호"),
     limit: int = Query(20, ge=1, le=100, description="페이지당 개수"),
     db: Session = Depends(get_db),
@@ -49,11 +50,15 @@ async def get_posts(
     service = PostService(db)
     offset = (page - 1) * limit
 
+    # 태그 파라미터 파싱
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
+
     posts, total = service.get_posts(
         account=account,
         date_from=date_from,
         date_to=date_to,
         is_ad=is_ad,
+        tags=tag_list,
         limit=limit,
         offset=offset,
     )
@@ -404,13 +409,24 @@ def _config_to_schema(config) -> ScheduleConfigSchema:
 
 def _post_to_schema(post) -> PostSchema:
     """InstagramPost 모델을 PostSchema로 변환."""
-    from ..models.schemas import ImageInfo
+    from ..models.schemas import ImageInfo, TagInfoSchema
 
     images = []
     if post.images:
         for img in post.images:
             if isinstance(img, dict):
                 images.append(ImageInfo(src=img.get("src", ""), alt=img.get("alt")))
+
+    # 태그 정보 추출
+    tags = []
+    if hasattr(post, 'tag_relations') and post.tag_relations:
+        for rel in post.tag_relations:
+            if rel.tag:
+                tags.append(TagInfoSchema(
+                    name=rel.tag.name,
+                    display_name=rel.tag.display_name,
+                    color=rel.tag.color,
+                ))
 
     return PostSchema(
         id=post.id,
@@ -424,4 +440,5 @@ def _post_to_schema(post) -> PostSchema:
         is_ad=post.is_ad,
         collected_at=post.collected_at,
         crawl_run_id=post.crawl_run_id,
+        tags=tags,
     )
