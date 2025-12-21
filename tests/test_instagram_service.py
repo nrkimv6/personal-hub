@@ -890,3 +890,167 @@ class TestAccountRelationship:
         assert hasattr(Account, 'name')
         assert hasattr(Account, 'is_logged_in')
         assert hasattr(Account, 'profile_path')
+
+
+# ============================================================
+# TodayScheduleItem 스키마 테스트 (RIGHT-BICEP)
+# ============================================================
+
+class TestTodayScheduleItemSchema:
+    """TodayScheduleItem 스키마 테스트 (RIGHT-BICEP)"""
+
+    # Right: 올바른 필드 반환
+    def test_today_schedule_item_has_correct_fields(self):
+        """TodayScheduleItem이 올바른 필드를 가져야 함"""
+        from app.modules.instagram.models.schemas import TodayScheduleItem
+
+        # 프론트엔드와 일치하는 필드: scheduled_time, status, run_id
+        assert hasattr(TodayScheduleItem, 'model_fields')
+        fields = TodayScheduleItem.model_fields
+
+        assert 'scheduled_time' in fields, "scheduled_time 필드 필요"
+        assert 'status' in fields, "status 필드 필요"
+        assert 'run_id' in fields, "run_id 필드 필요"
+
+    def test_today_schedule_item_creation(self):
+        """TodayScheduleItem 인스턴스 생성"""
+        from app.modules.instagram.models.schemas import TodayScheduleItem
+
+        item = TodayScheduleItem(
+            scheduled_time="10:30",
+            status="pending",
+            run_id=None
+        )
+
+        assert item.scheduled_time == "10:30"
+        assert item.status == "pending"
+        assert item.run_id is None
+
+    def test_today_schedule_item_with_run_id(self):
+        """run_id가 있는 TodayScheduleItem"""
+        from app.modules.instagram.models.schemas import TodayScheduleItem
+
+        item = TodayScheduleItem(
+            scheduled_time="14:00",
+            status="completed",
+            run_id=123
+        )
+
+        assert item.status == "completed"
+        assert item.run_id == 123
+
+    # Boundary: 경계 조건
+    def test_today_schedule_item_all_statuses(self):
+        """모든 status 값 테스트"""
+        from app.modules.instagram.models.schemas import TodayScheduleItem
+
+        valid_statuses = ['pending', 'running', 'completed', 'missed']
+
+        for status in valid_statuses:
+            item = TodayScheduleItem(
+                scheduled_time="10:00",
+                status=status,
+                run_id=None
+            )
+            assert item.status == status
+
+
+class TestGetTodaySchedule:
+    """get_today_schedule() 메서드 테스트"""
+
+    @pytest.fixture
+    def mock_db_with_config(self):
+        """활성화된 설정이 있는 Mock DB"""
+        from app.models import InstagramScheduleConfig
+
+        mock_db = MagicMock()
+
+        # 활성화된 설정
+        mock_config = MagicMock(spec=InstagramScheduleConfig)
+        mock_config.enabled = True
+        mock_config.daily_runs = 3
+        mock_config.time_windows = [
+            {"start": "07:00", "end": "10:00"},
+            {"start": "12:00", "end": "15:00"},
+            {"start": "19:00", "end": "23:00"},
+        ]
+        mock_config.account_id = 1
+
+        mock_db.query.return_value.first.return_value = mock_config
+        mock_db.query.return_value.filter.return_value.all.return_value = []
+
+        return mock_db
+
+    # Right: 올바른 결과
+    def test_get_today_schedule_returns_list(self, mock_db_with_config):
+        """get_today_schedule이 리스트 반환"""
+        from app.modules.instagram.services.crawl_service import CrawlService
+
+        service = CrawlService(mock_db_with_config)
+        result = service.get_today_schedule()
+
+        assert isinstance(result, list)
+
+    def test_get_today_schedule_item_has_correct_fields(self, mock_db_with_config):
+        """반환된 항목이 올바른 필드 포함"""
+        from app.modules.instagram.services.crawl_service import CrawlService
+
+        service = CrawlService(mock_db_with_config)
+        result = service.get_today_schedule()
+
+        if result:  # 항목이 있으면
+            item = result[0]
+            assert hasattr(item, 'scheduled_time')
+            assert hasattr(item, 'status')
+            assert hasattr(item, 'run_id')
+
+    def test_get_today_schedule_returns_daily_runs_count(self, mock_db_with_config):
+        """daily_runs 수만큼 항목 반환"""
+        from app.modules.instagram.services.crawl_service import CrawlService
+
+        service = CrawlService(mock_db_with_config)
+        result = service.get_today_schedule()
+
+        # 설정에서 daily_runs=3
+        assert len(result) == 3
+
+    # Boundary: 경계 조건
+    def test_get_today_schedule_empty_when_disabled(self):
+        """비활성화 시 빈 리스트 반환"""
+        from app.modules.instagram.services.crawl_service import CrawlService
+        from app.models import InstagramScheduleConfig
+
+        mock_db = MagicMock()
+        mock_config = MagicMock(spec=InstagramScheduleConfig)
+        mock_config.enabled = False
+        mock_db.query.return_value.first.return_value = mock_config
+
+        service = CrawlService(mock_db)
+        result = service.get_today_schedule()
+
+        assert result == []
+
+    def test_get_today_schedule_empty_when_no_config(self):
+        """설정이 없으면 빈 리스트 반환"""
+        from app.modules.instagram.services.crawl_service import CrawlService
+
+        mock_db = MagicMock()
+        mock_db.query.return_value.first.return_value = None
+
+        service = CrawlService(mock_db)
+        result = service.get_today_schedule()
+
+        assert result == []
+
+    # Cross-check: 상태 결정 로직
+    def test_get_today_schedule_pending_status(self, mock_db_with_config):
+        """미래 시간은 pending 상태"""
+        from app.modules.instagram.services.crawl_service import CrawlService
+
+        service = CrawlService(mock_db_with_config)
+        result = service.get_today_schedule()
+
+        # 미래 시간이 있다면 pending
+        future_items = [item for item in result if item.status == "pending"]
+        for item in future_items:
+            assert item.run_id is None
