@@ -568,6 +568,42 @@ class InstagramCrawler:
             return False
 
 
+    async def crawl_single_post(self, post_url: str) -> Optional[PostData]:
+        """개별 게시물 URL로 직접 접근하여 정보 수집.
+
+        Args:
+            post_url: 게시물 URL (https://www.instagram.com/p/...)
+
+        Returns:
+            PostData | None: 수집된 게시물 데이터 또는 실패 시 None
+        """
+        try:
+            logger.info(f"Crawling single post: {post_url}")
+
+            # 게시물 페이지로 이동
+            await self.page.goto(post_url, wait_until="domcontentloaded")
+
+            # 페이지 로드 대기
+            await asyncio.sleep(2.0)
+
+            # article 요소 탐색 (개별 게시물 페이지에도 article 요소 존재)
+            article = await self.page.query_selector("article")
+            if not article:
+                logger.warning(f"No article element found for: {post_url}")
+                return None
+
+            # 기존 extract_post 로직 재사용
+            post = await self.extract_post(article, 1)
+            post.url = post_url  # URL 보장
+
+            logger.info(f"Successfully crawled single post: {post.account}")
+            return post
+
+        except Exception as e:
+            logger.error(f"Failed to crawl single post {post_url}: {e}")
+            return None
+
+
 class LoginRequiredError(Exception):
     """로그인이 필요한 경우 발생하는 예외."""
     pass
