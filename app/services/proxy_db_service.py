@@ -101,15 +101,17 @@ class ProxyDBService:
         ]
 
         # 오늘 검증 통계
-        today = datetime.now().date()
-        today_start = datetime.combine(today, datetime.min.time())
+        # DB는 UTC로 저장, 대시보드는 KST 기준 "오늘"을 보여줘야 함
+        # KST 오늘 00:00 = UTC 어제 15:00
+        kst_today = datetime.now().date()
+        kst_today_start_utc = datetime.combine(kst_today, datetime.min.time()) - timedelta(hours=9)
 
         today_history = (
             self.db.query(
                 func.count(ProxyCheckHistory.id),
                 func.sum(func.cast(ProxyCheckHistory.is_valid, Integer))
             )
-            .filter(ProxyCheckHistory.checked_at >= today_start)
+            .filter(ProxyCheckHistory.checked_at >= kst_today_start_utc)
             .first()
         )
         today_checks = today_history[0] or 0
