@@ -20,7 +20,7 @@ logger = logging.getLogger("instagram.llm_classifier")
 LLM_TRIGGER_TAGS = ["event"]
 
 # 프롬프트 템플릿
-CLASSIFICATION_PROMPT = """다음 Instagram 게시물을 분석하여 이벤트 정보를 추출해주세요.
+CLASSIFICATION_PROMPT = """다음 Instagram 게시물을 분석하여 정보를 추출해주세요.
 
 ## 게시물 내용
 {caption}
@@ -29,24 +29,33 @@ CLASSIFICATION_PROMPT = """다음 Instagram 게시물을 분석하여 이벤트 
 다음 JSON 형식으로 응답해주세요:
 ```json
 {{
-    "is_event": true,
+    "tag": "이벤트|팝업|홍보대사|기타",
+    "purchase_required": "예_전부|예_부분|아니오",
+    "prizes": ["경품1", "경품2"],
+    "winner_count": 100,
+    "event_period": {{
+        "start": "YYYY-MM-DD",
+        "end": "YYYY-MM-DD"
+    }},
+    "announcement_date": "YYYY-MM-DD",
+    "urls": ["https://...", "https://..."],
     "organizer": "주최사/브랜드명",
-    "event_url": "이벤트 URL (있는 경우, 없으면 null)",
-    "event_date": "이벤트 날짜 (YYYY-MM-DD 형식, 여러 날이면 시작일, 없으면 null)",
-    "event_time": "이벤트 시간 (HH:MM 형식, 없으면 null)",
-    "details": "이벤트 상세 내용 요약 (100자 이내)",
-    "confidence": 0.0~1.0 사이의 확신도
+    "summary": "이벤트 요약 (50자 이내)"
 }}
 ```
 
-이벤트가 아닌 경우:
-```json
-{{
-    "is_event": false,
-    "reason": "이벤트가 아닌 이유"
-}}
-```
+## 필드 설명
+- tag: 게시물 유형 (이벤트/팝업/홍보대사/기타)
+- purchase_required: 참여에 구매가 필요한지 (예_전부: 구매 필수, 예_부분: 구매 시 추가 혜택, 아니오: 구매 불필요)
+- prizes: 경품 목록 (배열)
+- winner_count: 당첨자 수 (숫자, 모르면 null)
+- event_period: 이벤트 기간 (시작일, 종료일)
+- announcement_date: 당첨 발표일
+- urls: 본문에 기재된 모든 URL 목록
+- organizer: 주최사/브랜드명
+- summary: 이벤트 핵심 내용 요약
 
+값을 알 수 없으면 null로 표시하세요.
 반드시 JSON 형식으로만 응답하세요."""
 
 
