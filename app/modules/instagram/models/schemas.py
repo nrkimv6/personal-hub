@@ -90,6 +90,12 @@ class CrawlRunSchema(BaseModel):
     retry_count: int = 0
     retry_of_run_id: Optional[int] = None
     failure_reason: Optional[str] = None
+    # 크롤링 상세 정보 (2025-12-21 추가)
+    stop_reason: Optional[str] = None
+    duplicate_count: int = 0
+    scroll_performed: int = 0
+    refresh_count: int = 0
+    config_snapshot: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -1413,6 +1413,134 @@ class TestCrawlerStopReasons:
         assert 'stop_reason' in source
 
 
+# ============================================================
+# CrawlResult 테스트 (Phase 1)
+# ============================================================
+
+class TestCrawlResult:
+    """CrawlResult dataclass 테스트"""
+
+    def test_crawl_result_exists(self):
+        """CrawlResult 클래스 존재"""
+        from app.modules.instagram.services.crawler import CrawlResult
+
+        assert CrawlResult is not None
+
+    def test_crawl_result_has_all_fields(self):
+        """CrawlResult에 모든 필드 존재"""
+        from app.modules.instagram.services.crawler import CrawlResult
+
+        # 필드 확인
+        from dataclasses import fields
+        field_names = [f.name for f in fields(CrawlResult)]
+
+        assert 'posts' in field_names
+        assert 'stop_reason' in field_names
+        assert 'duplicate_count' in field_names
+        assert 'scroll_performed' in field_names
+        assert 'refresh_count' in field_names
+        assert 'config_snapshot' in field_names
+
+    def test_crawl_result_creation(self):
+        """CrawlResult 인스턴스 생성"""
+        from app.modules.instagram.services.crawler import CrawlResult, PostData
+
+        result = CrawlResult(
+            posts=[PostData(index=0, account="test")],
+            stop_reason="max_posts_reached",
+            duplicate_count=3,
+            scroll_performed=5,
+            refresh_count=1,
+            config_snapshot={"max_posts": 20}
+        )
+
+        assert result.stop_reason == "max_posts_reached"
+        assert result.duplicate_count == 3
+        assert result.scroll_performed == 5
+        assert result.refresh_count == 1
+        assert len(result.posts) == 1
+
+    def test_crawl_feed_returns_crawl_result(self):
+        """crawl_feed 반환 타입이 CrawlResult임"""
+        from app.modules.instagram.services.crawler import InstagramCrawler, CrawlResult
+        import inspect
+
+        sig = inspect.signature(InstagramCrawler.crawl_feed)
+        return_annotation = sig.return_annotation
+
+        # 반환 타입이 CrawlResult
+        assert return_annotation == CrawlResult
+
+
+class TestInstagramCrawlRunModel:
+    """InstagramCrawlRun 모델 테스트 (Phase 1)"""
+
+    def test_model_has_new_columns(self):
+        """InstagramCrawlRun에 새 컬럼 존재"""
+        from app.models.instagram_crawl_run import InstagramCrawlRun
+
+        assert hasattr(InstagramCrawlRun, 'stop_reason')
+        assert hasattr(InstagramCrawlRun, 'duplicate_count')
+        assert hasattr(InstagramCrawlRun, 'scroll_performed')
+        assert hasattr(InstagramCrawlRun, 'refresh_count')
+        assert hasattr(InstagramCrawlRun, 'config_snapshot')
+
+
+class TestCrawlRunSchema:
+    """CrawlRunSchema 테스트 (Phase 1)"""
+
+    def test_schema_has_new_fields(self):
+        """CrawlRunSchema에 새 필드 존재"""
+        from app.modules.instagram.models.schemas import CrawlRunSchema
+
+        fields = CrawlRunSchema.model_fields
+        assert 'stop_reason' in fields
+        assert 'duplicate_count' in fields
+        assert 'scroll_performed' in fields
+        assert 'refresh_count' in fields
+        assert 'config_snapshot' in fields
+
+    def test_schema_default_values(self):
+        """CrawlRunSchema 기본값"""
+        from app.modules.instagram.models.schemas import CrawlRunSchema
+        from datetime import datetime
+
+        run = CrawlRunSchema(
+            id=1,
+            account_id=1,
+            started_at=datetime.now(),
+            success=True,
+            total_collected=10,
+            new_saved=5,
+        )
+
+        assert run.stop_reason is None
+        assert run.duplicate_count == 0
+        assert run.scroll_performed == 0
+        assert run.refresh_count == 0
+        assert run.config_snapshot is None
+
+
+class TestMigration033:
+    """033_crawl_run_details 마이그레이션 테스트"""
+
+    def test_migration_file_exists(self):
+        """033_crawl_run_details.sql 파일 존재"""
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "033_crawl_run_details.sql"
+        assert migration_path.exists(), "033_crawl_run_details.sql should exist"
+
+    def test_migration_contains_new_columns(self):
+        """마이그레이션에 새 컬럼 포함"""
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "033_crawl_run_details.sql"
+        content = migration_path.read_text(encoding="utf-8")
+
+        assert "stop_reason" in content
+        assert "duplicate_count" in content
+        assert "scroll_performed" in content
+        assert "refresh_count" in content
+        assert "config_snapshot" in content
+
+
 class TestPostDataAdField:
     """PostData is_ad 필드 테스트"""
 

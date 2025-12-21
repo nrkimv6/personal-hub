@@ -9,7 +9,7 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from app.models import InstagramCrawlRun, InstagramScheduleConfig, Account
-from .crawler import InstagramCrawler, CrawlOptions, PostData
+from .crawler import InstagramCrawler, CrawlOptions, PostData, CrawlResult
 from .post_service import PostService
 from .scheduler import InstagramScheduler
 from .classifier_service import ClassifierService
@@ -92,15 +92,22 @@ class CrawlService:
             crawler._db_duplicate_checker = lambda post_id: self.post_service.exists_by_post_id(post_id)
 
             # 크롤링 실행 (실시간 저장 콜백 전달)
-            posts = await crawler.crawl_feed(options, on_post_collected=on_post_collected)
+            result: CrawlResult = await crawler.crawl_feed(options, on_post_collected=on_post_collected)
 
-            # 실행 기록 업데이트
+            # 실행 기록 업데이트 (기본 정보)
             crawl_run.success = True
             crawl_run.total_collected = save_stats["total_collected"]
             crawl_run.new_saved = save_stats["new_saved"]
             crawl_run.finished_at = datetime.now()
 
-            logger.info(f"Crawl completed: {save_stats['total_collected']} collected, {save_stats['new_saved']} new (realtime saved)")
+            # 실행 기록 업데이트 (상세 정보)
+            crawl_run.stop_reason = result.stop_reason
+            crawl_run.duplicate_count = result.duplicate_count
+            crawl_run.scroll_performed = result.scroll_performed
+            crawl_run.refresh_count = result.refresh_count
+            crawl_run.config_snapshot = json.dumps(result.config_snapshot)
+
+            logger.info(f"Crawl completed: {save_stats['total_collected']} collected, {save_stats['new_saved']} new (stop_reason={result.stop_reason}, realtime saved)")
 
         except Exception as e:
             # 에러 발생해도 그때까지 저장된 데이터는 보존됨
@@ -112,6 +119,7 @@ class CrawlService:
                 crawl_run.total_collected = save_stats["total_collected"]
                 crawl_run.new_saved = save_stats["new_saved"]
                 crawl_run.finished_at = datetime.now()
+                crawl_run.stop_reason = "error"
             logger.error(f"Crawl failed after saving {save_stats['new_saved']} posts: {e}")
 
         try:

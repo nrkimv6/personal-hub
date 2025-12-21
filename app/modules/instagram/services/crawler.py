@@ -44,6 +44,20 @@ class PostData:
     is_ad: bool = False
 
 
+@dataclass
+class CrawlResult:
+    """크롤링 결과 데이터.
+
+    크롤링 완료 후 통계 및 상세 정보를 포함합니다.
+    """
+    posts: List[PostData]
+    stop_reason: str  # 'max_posts_reached', 'duplicate_stop', 'max_refresh_after_duplicates', etc.
+    duplicate_count: int  # 중단 시점의 연속 중복 개수
+    scroll_performed: int  # 실제 수행된 스크롤 횟수
+    refresh_count: int  # 새로고침 횟수
+    config_snapshot: Dict[str, Any]  # 수집 시점의 설정값
+
+
 class InstagramCrawler:
     """Instagram 피드 크롤러.
 
@@ -369,7 +383,7 @@ class InstagramCrawler:
         self,
         options: CrawlOptions = None,
         on_post_collected: Optional[Callable[[PostData], Awaitable[bool]]] = None,
-    ) -> List[PostData]:
+    ) -> CrawlResult:
         """피드 크롤링 메인 함수.
 
         Args:
@@ -378,7 +392,7 @@ class InstagramCrawler:
                               콜백이 True 반환하면 신규 저장, False면 중복.
 
         Returns:
-            수집된 게시물 목록
+            CrawlResult: 크롤링 결과 (게시물 목록, 통계 정보)
         """
         if options is None:
             options = CrawlOptions()
@@ -563,8 +577,27 @@ class InstagramCrawler:
         if stop_reason == "completed" and scroll_performed >= options.scroll_count:
             stop_reason = "scroll_exhausted"
 
+        # 설정 스냅샷 생성
+        config_snapshot = {
+            "max_posts": options.max_posts,
+            "scroll_count": options.scroll_count,
+            "duplicate_stop_count": options.duplicate_stop_count,
+            "max_refresh_count": options.max_refresh_count,
+            "duplicate_refresh_enabled": options.duplicate_refresh_enabled,
+            "no_new_posts_refresh_threshold": options.no_new_posts_refresh_threshold,
+            "scroll_behavior": options.scroll_behavior,
+        }
+
         logger.info(f"Crawl completed: {len(all_posts)} posts collected (stop_reason={stop_reason}, consecutive_duplicates={consecutive_duplicates}, refresh_count={refresh_count}, scroll_performed={scroll_performed})")
-        return all_posts
+
+        return CrawlResult(
+            posts=all_posts,
+            stop_reason=stop_reason,
+            duplicate_count=consecutive_duplicates,
+            scroll_performed=scroll_performed,
+            refresh_count=refresh_count,
+            config_snapshot=config_snapshot,
+        )
 
     async def navigate_to_feed(self) -> bool:
         """Instagram 피드로 이동.
