@@ -23,7 +23,7 @@ class PostService:
         """
         self.db = db
 
-    def create_post(
+    def create_or_update_post(
         self,
         post_id: str,
         account: Optional[str] = None,
@@ -35,8 +35,8 @@ class PostService:
         is_ad: bool = False,
         account_id: Optional[int] = None,
         crawl_run_id: Optional[int] = None,
-    ) -> Optional[InstagramPost]:
-        """게시물 생성.
+    ) -> Tuple[Optional[InstagramPost], bool]:
+        """게시물 생성 또는 업데이트 (upsert).
 
         Args:
             post_id: Instagram 게시물 ID
@@ -51,13 +51,24 @@ class PostService:
             crawl_run_id: 크롤링 실행 ID
 
         Returns:
-            생성된 게시물, 중복이면 None
+            (게시물, is_new) - is_new=True면 새로 생성됨, False면 이미 존재함
         """
-        # 중복 체크
-        if self.exists_by_post_id(post_id):
-            logger.debug(f"Post already exists: {post_id}")
-            return None
+        # 1. post_id로 중복 체크 (unknown_* 형태는 제외)
+        existing = None
+        if not post_id.startswith("unknown_"):
+            existing = self.get_post_by_instagram_id(post_id)
+            if existing:
+                logger.debug(f"Post already exists by post_id: {post_id}")
+                return existing, False
 
+        # 2. URL로 중복 체크 (URL이 있을 때)
+        if url:
+            existing = self.get_post_by_url(url)
+            if existing:
+                logger.debug(f"Post already exists by url: {url}")
+                return existing, False
+
+        # 새 게시물 생성
         post = InstagramPost(
             post_id=post_id,
             account=account or "",
@@ -77,7 +88,39 @@ class PostService:
         self.db.refresh(post)
 
         logger.info(f"Created post: {post_id} from @{account}")
-        return post
+        return post, True
+
+    def create_post(
+        self,
+        post_id: str,
+        account: Optional[str] = None,
+        url: Optional[str] = None,
+        caption: Optional[str] = None,
+        images: Optional[List[dict]] = None,
+        posted_at: Optional[datetime] = None,
+        display_time: Optional[str] = None,
+        is_ad: bool = False,
+        account_id: Optional[int] = None,
+        crawl_run_id: Optional[int] = None,
+    ) -> Optional[InstagramPost]:
+        """게시물 생성 (레거시 - create_or_update_post 사용 권장).
+
+        Returns:
+            생성된 게시물, 중복이면 None
+        """
+        post, is_new = self.create_or_update_post(
+            post_id=post_id,
+            account=account,
+            url=url,
+            caption=caption,
+            images=images,
+            posted_at=posted_at,
+            display_time=display_time,
+            is_ad=is_ad,
+            account_id=account_id,
+            crawl_run_id=crawl_run_id,
+        )
+        return post if is_new else None
 
     def get_posts(
         self,
@@ -142,6 +185,17 @@ class PostService:
             게시물 또는 None
         """
         return self.db.query(InstagramPost).filter(InstagramPost.post_id == instagram_post_id).first()
+
+    def get_post_by_url(self, url: str) -> Optional[InstagramPost]:
+        """URL로 게시물 조회.
+
+        Args:
+            url: 게시물 URL
+
+        Returns:
+            게시물 또는 None
+        """
+        return self.db.query(InstagramPost).filter(InstagramPost.url == url).first()
 
     def delete_post(self, post_id: int) -> bool:
         """게시물 삭제.
