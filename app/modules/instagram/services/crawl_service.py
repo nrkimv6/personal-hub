@@ -191,6 +191,151 @@ class CrawlService:
 
         return query.order_by(desc(InstagramCrawlRun.started_at)).limit(limit).all()
 
+    def get_crawl_runs_paginated(
+        self,
+        page: int = 1,
+        limit: int = 20,
+        period: Optional[str] = None,
+        status: Optional[str] = None,
+        account_id: Optional[int] = None,
+    ) -> tuple[List[InstagramCrawlRun], int]:
+        """크롤링 실행 기록 조회 (페이징 지원).
+
+        Args:
+            page: 페이지 번호 (1부터 시작)
+            limit: 페이지당 개수
+            period: 기간 필터 ('1d', '7d', '30d', 'all')
+            status: 상태 필터 ('success', 'failed', 'all')
+            account_id: 계정 필터
+
+        Returns:
+            (실행 기록 목록, 전체 개수)
+        """
+        from datetime import timedelta
+
+        query = self.db.query(InstagramCrawlRun)
+
+        # 기간 필터
+        if period and period != 'all':
+            days = {'1d': 1, '7d': 7, '30d': 30}.get(period, 7)
+            cutoff = datetime.now() - timedelta(days=days)
+            query = query.filter(InstagramCrawlRun.started_at >= cutoff)
+
+        # 상태 필터
+        if status and status != 'all':
+            if status == 'success':
+                query = query.filter(InstagramCrawlRun.success == True)
+            elif status == 'failed':
+                query = query.filter(InstagramCrawlRun.success == False)
+
+        # 계정 필터
+        if account_id:
+            query = query.filter(InstagramCrawlRun.account_id == account_id)
+
+        # 전체 개수
+        total = query.count()
+
+        # 페이징
+        offset = (page - 1) * limit
+        runs = query.order_by(desc(InstagramCrawlRun.started_at)).offset(offset).limit(limit).all()
+
+        return runs, total
+
+    def get_crawl_run_by_id(self, run_id: int) -> Optional[InstagramCrawlRun]:
+        """크롤링 실행 기록 상세 조회.
+
+        Args:
+            run_id: 실행 기록 ID
+
+        Returns:
+            실행 기록 (없으면 None)
+        """
+        return self.db.query(InstagramCrawlRun).filter(
+            InstagramCrawlRun.id == run_id
+        ).first()
+
+    def get_run_stats(self, days: int = 7) -> dict:
+        """실행 통계 조회.
+
+        Args:
+            days: 통계 기간 (일)
+
+        Returns:
+            통계 dict
+        """
+        from datetime import timedelta
+        from sqlalchemy import func
+
+        cutoff = datetime.now() - timedelta(days=days)
+
+        # 기본 통계
+        query = self.db.query(InstagramCrawlRun).filter(
+            InstagramCrawlRun.started_at >= cutoff
+        )
+
+        total_runs = query.count()
+        success_runs = query.filter(InstagramCrawlRun.success == True).count()
+        failed_runs = total_runs - success_runs
+        success_rate = success_runs / total_runs if total_runs > 0 else 0.0
+
+        # 평균 수집 수
+        avg_collected = self.db.query(func.avg(InstagramCrawlRun.new_saved)).filter(
+            InstagramCrawlRun.started_at >= cutoff,
+            InstagramCrawlRun.success == True
+        ).scalar() or 0.0
+
+        # 평균 소요 시간
+        runs_with_duration = query.filter(
+            InstagramCrawlRun.finished_at != None
+        ).all()
+
+        total_duration = 0
+        duration_count = 0
+        for run in runs_with_duration:
+            if run.finished_at and run.started_at:
+                duration = (run.finished_at - run.started_at).total_seconds()
+                total_duration += duration
+                duration_count += 1
+
+        avg_duration = total_duration / duration_count if duration_count > 0 else 0.0
+
+        # 일별 트렌드
+        daily_trend = []
+        for i in range(days):
+            day = (datetime.now() - timedelta(days=days - 1 - i)).date()
+            day_start = datetime.combine(day, datetime.min.time())
+            day_end = datetime.combine(day, datetime.max.time())
+
+            day_runs = self.db.query(InstagramCrawlRun).filter(
+                InstagramCrawlRun.started_at >= day_start,
+                InstagramCrawlRun.started_at <= day_end
+            ).all()
+
+            day_total = len(day_runs)
+            day_success = sum(1 for r in day_runs if r.success)
+            day_failed = day_total - day_success
+            day_collected = sum(r.total_collected for r in day_runs)
+            day_saved = sum(r.new_saved for r in day_runs)
+
+            daily_trend.append({
+                "date": day.isoformat(),
+                "total_runs": day_total,
+                "success_runs": day_success,
+                "failed_runs": day_failed,
+                "total_collected": day_collected,
+                "new_saved": day_saved,
+            })
+
+        return {
+            "total_runs": total_runs,
+            "success_runs": success_runs,
+            "failed_runs": failed_runs,
+            "success_rate": success_rate,
+            "avg_collected": float(avg_collected),
+            "avg_duration_seconds": avg_duration,
+            "daily_trend": daily_trend,
+        }
+
     def get_last_run(self, account_id: Optional[int] = None) -> Optional[InstagramCrawlRun]:
         """마지막 실행 기록."""
         query = self.db.query(InstagramCrawlRun)

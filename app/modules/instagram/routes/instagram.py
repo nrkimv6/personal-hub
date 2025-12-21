@@ -22,6 +22,9 @@ from ..models.schemas import (
     TodayScheduleItem,
     TimeWindow,
     CrawlRequestSchema,
+    RunListResponse,
+    RunStatsSchema,
+    DailyTrendItem,
 )
 from ..services import PostService, CrawlService, CrawlRequestService
 
@@ -163,32 +166,87 @@ async def run_crawl(
     )
 
 
-@router.get("/runs", response_model=List[CrawlRunSchema])
+@router.get("/runs", response_model=RunListResponse)
 async def get_crawl_runs(
-    limit: int = Query(10, ge=1, le=50, description="조회 개수"),
+    page: int = Query(1, ge=1, description="페이지 번호"),
+    limit: int = Query(20, ge=1, le=100, description="페이지당 개수"),
+    period: Optional[str] = Query(None, description="기간 필터 (1d, 7d, 30d, all)"),
+    status: Optional[str] = Query(None, description="상태 필터 (success, failed, all)"),
     account_id: Optional[int] = Query(None, description="계정 필터"),
     db: Session = Depends(get_db),
 ):
-    """크롤링 실행 기록 조회."""
+    """크롤링 실행 기록 조회 (페이징 지원)."""
     service = CrawlService(db)
-    runs = service.get_crawl_runs(limit=limit, account_id=account_id)
+    runs, total = service.get_crawl_runs_paginated(
+        page=page,
+        limit=limit,
+        period=period,
+        status=status,
+        account_id=account_id,
+    )
 
-    return [
-        CrawlRunSchema(
-            id=run.id,
-            account_id=run.account_id,
-            started_at=run.started_at,
-            finished_at=run.finished_at,
-            success=run.success,
-            total_collected=run.total_collected,
-            new_saved=run.new_saved,
-            error_message=run.error_message,
-            retry_count=getattr(run, 'retry_count', 0) or 0,
-            retry_of_run_id=getattr(run, 'retry_of_run_id', None),
-            failure_reason=getattr(run, 'failure_reason', None),
-        )
-        for run in runs
-    ]
+    return RunListResponse(
+        runs=[_run_to_schema(run) for run in runs],
+        total=total,
+        page=page,
+        limit=limit,
+    )
+
+
+@router.get("/runs/stats", response_model=RunStatsSchema)
+async def get_run_stats(
+    days: int = Query(7, ge=1, le=30, description="통계 기간 (일)"),
+    db: Session = Depends(get_db),
+):
+    """실행 통계 조회."""
+    service = CrawlService(db)
+    stats = service.get_run_stats(days=days)
+
+    return RunStatsSchema(
+        total_runs=stats["total_runs"],
+        success_runs=stats["success_runs"],
+        failed_runs=stats["failed_runs"],
+        success_rate=stats["success_rate"],
+        avg_collected=stats["avg_collected"],
+        avg_duration_seconds=stats["avg_duration_seconds"],
+        daily_trend=[DailyTrendItem(**item) for item in stats["daily_trend"]],
+    )
+
+
+@router.get("/runs/{run_id}", response_model=CrawlRunSchema)
+async def get_crawl_run(
+    run_id: int,
+    db: Session = Depends(get_db),
+):
+    """크롤링 실행 기록 상세 조회."""
+    service = CrawlService(db)
+    run = service.get_crawl_run_by_id(run_id)
+
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    return _run_to_schema(run)
+
+
+@router.get("/runs/{run_id}/posts", response_model=PostListResponse)
+async def get_run_posts(
+    run_id: int,
+    page: int = Query(1, ge=1, description="페이지 번호"),
+    limit: int = Query(20, ge=1, le=100, description="페이지당 개수"),
+    db: Session = Depends(get_db),
+):
+    """특정 실행에서 수집된 게시물 조회."""
+    service = PostService(db)
+    offset = (page - 1) * limit
+
+    posts, total = service.get_posts_by_run_id(run_id, limit=limit, offset=offset)
+
+    return PostListResponse(
+        posts=[_post_to_schema(p) for p in posts],
+        total=total,
+        page=page,
+        limit=limit,
+    )
 
 
 # ============== Stats ==============
@@ -307,6 +365,23 @@ async def check_login_status(
 
 
 # ============== Helpers ==============
+
+def _run_to_schema(run) -> CrawlRunSchema:
+    """InstagramCrawlRun 모델을 CrawlRunSchema로 변환."""
+    return CrawlRunSchema(
+        id=run.id,
+        account_id=run.account_id,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        success=run.success,
+        total_collected=run.total_collected,
+        new_saved=run.new_saved,
+        error_message=run.error_message,
+        retry_count=getattr(run, 'retry_count', 0) or 0,
+        retry_of_run_id=getattr(run, 'retry_of_run_id', None),
+        failure_reason=getattr(run, 'failure_reason', None),
+    )
+
 
 def _config_to_schema(config) -> ScheduleConfigSchema:
     """InstagramScheduleConfig 모델을 ScheduleConfigSchema로 변환."""
