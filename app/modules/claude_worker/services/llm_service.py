@@ -174,12 +174,17 @@ class LLMService:
             {"success": False, "error": "..."}
         """
         try:
+            import sys
+            # Windows에서는 shell=True 필요 (.cmd 파일 실행)
+            use_shell = sys.platform == "win32"
+
             result = subprocess.run(
                 ["claude", "-p", prompt],
                 capture_output=True,
                 text=True,
                 timeout=timeout,
                 encoding="utf-8",
+                shell=use_shell,
             )
 
             if result.returncode != 0:
