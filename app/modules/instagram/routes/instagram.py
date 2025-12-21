@@ -284,6 +284,28 @@ async def open_login_browser(
     }
 
 
+@router.post("/login/check")
+async def check_login_status(
+    account_id: int = Query(..., description="계정 ID"),
+    db: Session = Depends(get_db),
+):
+    """Instagram 로그인 상태 확인.
+
+    지정된 계정으로 Instagram에 접속하여 로그인 상태를 확인하고 DB를 업데이트합니다.
+    """
+    account = account_service.get_by_id(db, account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
+
+    browser_service = get_browser_service()
+    result = await browser_service.check_instagram_login_status(account_id)
+
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("message", "로그인 상태 확인 실패"))
+
+    return result
+
+
 # ============== Helpers ==============
 
 def _config_to_schema(config) -> ScheduleConfigSchema:

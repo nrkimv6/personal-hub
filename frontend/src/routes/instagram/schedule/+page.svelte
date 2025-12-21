@@ -17,6 +17,7 @@
 	let saving = false;
 	let requesting = false;
 	let openingBrowser = false;
+	let checkingLogin = false;
 	let error: string | null = null;
 	let successMessage: string | null = null;
 
@@ -129,6 +130,30 @@
 		}
 	}
 
+	async function checkLoginStatus() {
+		if (!editAccountId) {
+			error = '계정을 먼저 선택해주세요';
+			return;
+		}
+		checkingLogin = true;
+		successMessage = null;
+		error = null;
+		try {
+			const result = await instagramApi.checkLoginStatus(editAccountId);
+			if (result.is_logged_in) {
+				successMessage = `${result.account_name}: 로그인 확인됨`;
+			} else {
+				error = `${result.account_name}: 로그인 필요`;
+			}
+			// 계정 목록 새로고침
+			await fetchData();
+		} catch (e) {
+			error = e instanceof Error ? e.message : '로그인 상태 확인 실패';
+		} finally {
+			checkingLogin = false;
+		}
+	}
+
 	// 선택된 계정 정보
 	$: selectedAccount = accounts.find((a) => a.id === editAccountId);
 
@@ -233,6 +258,14 @@
 								class="btn btn-secondary btn-sm whitespace-nowrap"
 							>
 								{openingBrowser ? '열기...' : '로그인'}
+							</button>
+							<button
+								onclick={checkLoginStatus}
+								disabled={!editAccountId || checkingLogin}
+								class="btn btn-outline btn-sm whitespace-nowrap"
+								title="로그인 후 이 버튼을 눌러 상태를 확인하세요"
+							>
+								{checkingLogin ? '확인중...' : '확인'}
 							</button>
 						</div>
 						{#if !editAccountId}
