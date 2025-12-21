@@ -36,6 +36,8 @@ class PostService:
         posted_at: Optional[datetime] = None,
         display_time: Optional[str] = None,
         is_ad: bool = False,
+        likes: Optional[int] = None,
+        comments: Optional[int] = None,
         account_id: Optional[int] = None,
         crawl_run_id: Optional[int] = None,
     ) -> Tuple[Optional[InstagramPost], bool]:
@@ -50,6 +52,8 @@ class PostService:
             posted_at: 게시 시간
             display_time: 상대 시간
             is_ad: 광고 여부
+            likes: 좋아요 수
+            comments: 댓글 수
             account_id: 수집 계정 ID
             crawl_run_id: 크롤링 실행 ID
 
@@ -87,6 +91,8 @@ class PostService:
             posted_at=posted_at,
             display_time=display_time,
             is_ad=is_ad,
+            likes=likes,
+            comments=comments,
             account_id=account_id,
             crawl_run_id=crawl_run_id,
             collected_at=datetime.now(),
@@ -113,6 +119,8 @@ class PostService:
         posted_at: Optional[datetime] = None,
         display_time: Optional[str] = None,
         is_ad: bool = False,
+        likes: Optional[int] = None,
+        comments: Optional[int] = None,
         account_id: Optional[int] = None,
         crawl_run_id: Optional[int] = None,
     ) -> Optional[InstagramPost]:
@@ -130,6 +138,8 @@ class PostService:
             posted_at=posted_at,
             display_time=display_time,
             is_ad=is_ad,
+            likes=likes,
+            comments=comments,
             account_id=account_id,
             crawl_run_id=crawl_run_id,
         )

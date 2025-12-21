@@ -42,6 +42,8 @@ class PostData:
     caption: Optional[str] = None
     images: List[Dict[str, str]] = field(default_factory=list)
     is_ad: bool = False
+    likes: Optional[int] = None
+    comments: Optional[int] = None
 
 
 @dataclass
@@ -99,6 +101,8 @@ class InstagramCrawler:
             data.url = basic.get("url")
             data.images = basic.get("images", [])
             data.is_ad = basic.get("is_ad", False)
+            data.likes = basic.get("likes")
+            data.comments = basic.get("comments")
 
             # 더보기 버튼 클릭 (있으면) - 최대 2회 시도
             if basic.get("has_more_button"):
