@@ -142,13 +142,27 @@ class TodayScheduleItem(BaseModel):
     run_id: Optional[int] = None  # 실행 기록 ID (있는 경우)
 
 
+class RunningCrawlInfo(BaseModel):
+    """실행 중인 크롤러 정보."""
+    run_id: int
+    account_id: int
+    account_username: Optional[str] = None
+    started_at: datetime
+    total_collected: int = 0
+    new_saved: int = 0
+
+
 class StatsSchema(BaseModel):
     """통계 응답."""
     total_posts: int
-    today_collected: int
-    last_crawl_time: Optional[datetime] = None
+    today_posts: int  # 오늘 수집된 게시물 수
+    total_runs: int = 0  # 전체 실행 수
+    success_runs: int = 0  # 성공 실행 수
+    last_run_at: Optional[datetime] = None  # 마지막 실행 시간
     next_crawl_time: Optional[datetime] = None
-    accounts_active: int = 0
+    unique_accounts: int = 0  # 활성 계정 수
+    # 실행 중인 크롤러 정보
+    running_crawl: Optional[RunningCrawlInfo] = None
 
 
 class CrawlRequestSchema(BaseModel):

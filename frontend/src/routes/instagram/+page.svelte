@@ -154,6 +154,35 @@
 			</div>
 		</div>
 
+		<!-- 실행 중인 크롤러 정보 -->
+		{#if stats?.running_crawl}
+			<div class="card mb-6 border-l-4 border-blue-500 bg-blue-50">
+				<div class="flex items-center justify-between">
+					<div class="flex items-center gap-4">
+						<div class="flex items-center gap-2">
+							<div class="w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>
+							<h3 class="text-lg font-semibold text-blue-900">크롤링 실행 중</h3>
+						</div>
+						<div class="text-sm text-blue-700">
+							<span class="font-medium">{stats.running_crawl.account_username || `계정 #${stats.running_crawl.account_id}`}</span>
+							<span class="mx-2">|</span>
+							<span>시작: {formatTimeAgo(stats.running_crawl.started_at)}</span>
+						</div>
+					</div>
+					<div class="flex items-center gap-4">
+						<div class="text-right">
+							<p class="text-2xl font-bold text-blue-900">{stats.running_crawl.total_collected}</p>
+							<p class="text-xs text-blue-600">수집</p>
+						</div>
+						<div class="text-right">
+							<p class="text-2xl font-bold text-green-700">{stats.running_crawl.new_saved}</p>
+							<p class="text-xs text-green-600">신규</p>
+						</div>
+					</div>
+				</div>
+			</div>
+		{/if}
+
 		<!-- 마지막 수집 정보 -->
 		<div class="card mb-6">
 			<div class="flex items-center justify-between">

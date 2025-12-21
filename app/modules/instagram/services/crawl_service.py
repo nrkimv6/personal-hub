@@ -8,7 +8,7 @@ from typing import List, Optional
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from app.models import InstagramCrawlRun, InstagramScheduleConfig
+from app.models import InstagramCrawlRun, InstagramScheduleConfig, Account
 from .crawler import InstagramCrawler, CrawlOptions, PostData
 from .post_service import PostService
 from .scheduler import InstagramScheduler
@@ -18,6 +18,7 @@ from ..models.schemas import (
     ScheduleConfigSchema,
     StatsSchema,
     TodayScheduleItem,
+    RunningCrawlInfo,
 )
 
 logger = logging.getLogger("instagram.crawl_service")
@@ -427,10 +428,21 @@ class CrawlService:
     def get_stats(self) -> StatsSchema:
         """통계 조회."""
         total_posts = self.post_service.get_total_count()
-        today_collected = self.post_service.get_today_count()
+        today_posts = self.post_service.get_today_count()
 
+        # 오늘 실행 통계
+        today_start = datetime.combine(date.today(), datetime.min.time())
+        total_runs = self.db.query(InstagramCrawlRun).filter(
+            InstagramCrawlRun.started_at >= today_start
+        ).count()
+        success_runs = self.db.query(InstagramCrawlRun).filter(
+            InstagramCrawlRun.started_at >= today_start,
+            InstagramCrawlRun.success == True
+        ).count()
+
+        # 마지막 완료된 실행
         last_run = self.get_last_run()
-        last_crawl_time = last_run.started_at if last_run else None
+        last_run_at = last_run.started_at if last_run else None
 
         # 다음 실행 시간 계산
         config = self.get_schedule_config()
@@ -443,12 +455,39 @@ class CrawlService:
             )
             next_crawl_time = scheduler.get_next_run_time()
 
+        # 활성 계정 수 (오늘 실행된 고유 계정)
+        from sqlalchemy import func
+        unique_accounts = self.db.query(func.count(func.distinct(InstagramCrawlRun.account_id))).filter(
+            InstagramCrawlRun.started_at >= today_start
+        ).scalar() or 0
+
+        # 실행 중인 크롤러 정보 (finished_at이 None인 경우)
+        running_crawl = None
+        running_run = self.db.query(InstagramCrawlRun).filter(
+            InstagramCrawlRun.finished_at == None
+        ).order_by(desc(InstagramCrawlRun.started_at)).first()
+
+        if running_run:
+            # 계정 정보 조회
+            account = self.db.query(Account).filter(Account.id == running_run.account_id).first()
+            running_crawl = RunningCrawlInfo(
+                run_id=running_run.id,
+                account_id=running_run.account_id,
+                account_username=account.name if account else None,
+                started_at=running_run.started_at,
+                total_collected=running_run.total_collected or 0,
+                new_saved=running_run.new_saved or 0,
+            )
+
         return StatsSchema(
             total_posts=total_posts,
-            today_collected=today_collected,
-            last_crawl_time=last_crawl_time,
+            today_posts=today_posts,
+            total_runs=total_runs,
+            success_runs=success_runs,
+            last_run_at=last_run_at,
             next_crawl_time=next_crawl_time,
-            accounts_active=0,  # TODO: 활성 계정 수
+            unique_accounts=unique_accounts,
+            running_crawl=running_crawl,
         )
 
     def get_today_schedule(self) -> List[TodayScheduleItem]:
