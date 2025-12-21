@@ -1,5 +1,6 @@
 """Instagram Post Service - 게시물 CRUD 서비스."""
 
+import hashlib
 import logging
 import uuid
 from datetime import datetime, date
@@ -55,16 +56,19 @@ class PostService:
         Returns:
             (게시물, is_new) - is_new=True면 새로 생성됨, False면 이미 존재함
         """
-        # unknown_* 형태의 post_id를 고유한 UUID로 변경
+        # unknown_* 형태의 post_id를 콘텐츠 기반 해시 ID로 변경
         if post_id.startswith("unknown_"):
-            post_id = f"ad_{uuid.uuid4().hex[:12]}"
-            logger.debug(f"Generated unique post_id for ad: {post_id}")
-        else:
-            # post_id로 중복 체크
-            existing = self.get_post_by_instagram_id(post_id)
-            if existing:
-                logger.debug(f"Post already exists by post_id: {post_id}")
-                return existing, False
+            # 콘텐츠 기반 해시 생성 (account + caption 일부로 중복 체크)
+            content_key = f"{account or ''}:{(caption or '')[:100]}:{is_ad}"
+            hash_id = hashlib.md5(content_key.encode()).hexdigest()[:12]
+            post_id = f"ad_{hash_id}"
+            logger.debug(f"Generated content-based post_id: {post_id}")
+
+        # post_id로 중복 체크 (unknown_* → ad_* 변환 후에도 체크)
+        existing = self.get_post_by_instagram_id(post_id)
+        if existing:
+            logger.debug(f"Post already exists by post_id: {post_id}")
+            return existing, False
 
         # URL로 중복 체크 (URL이 있을 때)
         if url:
