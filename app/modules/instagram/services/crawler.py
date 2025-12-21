@@ -304,8 +304,14 @@ class InstagramCrawler:
                 logger.debug(f"Extracted post #{post.index}: {post.account}")
 
         # 스크롤하여 추가 게시물 로드
+        # NOTE: Instagram은 가상화(virtualization)를 사용하므로 DOM에는 항상
+        # 화면에 보이는 7-10개 article만 존재. 스크롤해도 이전 article은 DOM에서 제거됨.
+        # 따라서 매번 모든 article을 순회하고 URL 중복 체크로 이미 처리한 것을 skip.
+        no_new_posts_count = 0  # 연속으로 새 게시물이 없는 스크롤 횟수
+
         for scroll in range(options.scroll_count):
             if len(all_posts) >= options.max_posts:
+                logger.info(f"Reached max_posts limit: {options.max_posts}")
                 break
 
             # 연속 중복 체크로 중단
@@ -314,15 +320,15 @@ class InstagramCrawler:
                 break
 
             logger.debug(f"Scroll {scroll + 1}/{options.scroll_count}")
-            prev_count = len(all_posts)
+            posts_before_scroll = len(all_posts)
 
-            new_article_count = await self._scroll_page()
+            await self._scroll_page()
             articles = await self.page.query_selector_all("article")
 
-            logger.debug(f"Total articles after scroll: {len(articles)}")
+            logger.debug(f"Total articles in DOM: {len(articles)}, collected so far: {len(all_posts)}")
 
-            # 새로 로드된 게시물만 처리
-            for i in range(prev_count, len(articles)):
+            # 모든 article 순회 (가상화로 인해 새 article이 어디에든 있을 수 있음)
+            for article in articles:
                 if len(all_posts) >= options.max_posts:
                     break
 
@@ -330,8 +336,9 @@ class InstagramCrawler:
                 if options.duplicate_stop_count > 0 and consecutive_duplicates >= options.duplicate_stop_count:
                     break
 
-                post = await self.extract_post(articles[i], len(all_posts) + 1)
+                post = await self.extract_post(article, len(all_posts) + 1)
 
+                # 세션 내 URL 중복 체크 - 이미 처리한 게시물 skip
                 if post.url and post.url in self.processed_urls:
                     continue
 
@@ -355,6 +362,17 @@ class InstagramCrawler:
                         logger.debug(f"Scroll {scroll+1} - saved post #{post.index}: {post.account} (saved={saved})")
                     except Exception as e:
                         logger.error(f"Failed to save post #{post.index}: {e}")
+
+            # 이번 스크롤에서 새 게시물이 없으면 카운트 증가
+            if len(all_posts) == posts_before_scroll:
+                no_new_posts_count += 1
+                logger.debug(f"No new posts in this scroll (count: {no_new_posts_count})")
+                # 5회 연속 새 게시물이 없으면 중단
+                if no_new_posts_count >= 5:
+                    logger.info(f"Stopping: {no_new_posts_count} consecutive scrolls with no new posts")
+                    break
+            else:
+                no_new_posts_count = 0
 
         logger.info(f"Crawl completed: {len(all_posts)} posts collected (consecutive_duplicates={consecutive_duplicates})")
         return all_posts
