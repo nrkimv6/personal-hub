@@ -154,6 +154,11 @@ class ClassifierService:
                 )
 
         self.db.commit()
+
+        # LLM 분류 트리거 확인
+        if results:
+            self._trigger_llm_classification_if_needed(post.id, [r["tag"] for r in results])
+
         return results
 
     def classify_posts_batch(self, post_ids: list[int]) -> dict:
@@ -203,6 +208,22 @@ class ClassifierService:
     def clear_cache(self):
         """캐시 초기화 (키워드 변경 시 호출)."""
         self._keyword_cache.clear()
+
+    def _trigger_llm_classification_if_needed(self, post_id: int, matched_tags: list[str]) -> None:
+        """LLM 분류가 필요하면 큐에 추가.
+
+        Args:
+            post_id: 게시물 ID
+            matched_tags: 매칭된 태그 이름 목록
+        """
+        from app.modules.instagram.services.llm_classifier_service import LLMClassifierService
+
+        llm_service = LLMClassifierService(self.db)
+        if llm_service.should_trigger_llm(matched_tags):
+            trigger_tag = llm_service.get_trigger_tag(matched_tags)
+            if trigger_tag:
+                llm_service.create_request(post_id, trigger_tag)
+                logger.info(f"LLM classification queued for post {post_id} (trigger: {trigger_tag})")
 
     def get_post_tags(self, post_id: int) -> list[dict]:
         """게시물의 태그 목록 조회.
