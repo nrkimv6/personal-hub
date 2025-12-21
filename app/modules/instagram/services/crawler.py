@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import random
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -17,11 +18,16 @@ class CrawlOptions:
     """크롤링 옵션."""
     max_posts: int = 20
     scroll_count: int = 3
-    wait_after_more: float = 0.5
+    wait_after_more: float = 1.0  # 더보기 클릭 후 대기 (0.5 → 1.0초)
     wait_after_scroll: float = 2.0
     duplicate_stop_count: int = 5  # 연속 중복 N개 시 중단 (0이면 비활성화)
     max_refresh_count: int = 3  # 새 게시물 없을 때 최대 새로고침 횟수
     no_new_posts_refresh_threshold: int = 3  # N회 연속 새 게시물 없으면 새로고침
+    # 스크롤 동작 설정
+    scroll_behavior: str = "human"  # "human" | "fast"
+    min_scroll_delay: float = 1.5  # 최소 스크롤 대기 (초)
+    max_scroll_delay: float = 3.5  # 최대 스크롤 대기 (초)
+    read_pause_probability: float = 0.3  # 읽는 척 멈출 확률 (30%)
 
 
 @dataclass
@@ -127,14 +133,35 @@ class InstagramCrawler:
                 result.url = 'https://www.instagram.com' + href.split('?')[0];
             }
 
-            // 광고 여부: time이나 postLink 없으면 광고로 추정
-            result.is_ad = !time || !postLink;
+            // 광고 여부: "회원님을 위한 추천", "Sponsored" 등 텍스트 기반 판별
+            const adIndicators = ['회원님을 위한 추천', 'Sponsored', 'スポンサー', '赞助内容'];
+            const text = el.textContent || '';
+            result.is_ad = adIndicators.some(indicator => text.includes(indicator));
 
-            // 이미지: scontent URL, 프로필 이미지(s150x150) 제외
-            const imgs = Array.from(el.querySelectorAll('img[src*="scontent"]'));
-            result.images = imgs
-                .filter(img => !img.src.includes('s150x150'))
-                .map(img => ({ src: img.src, alt: img.alt || '' }));
+            // 이미지: alt="Photo by" 우선, scontent URL 폴백
+            // 프로필 이미지(s150x150, 44x44, 32x32 등 작은 크기) 제외
+            const photoByImgs = Array.from(el.querySelectorAll('img'))
+                .filter(img => {
+                    const alt = (img.alt || '').toLowerCase();
+                    return alt.startsWith('photo by') || alt.startsWith('photo shared by');
+                });
+
+            if (photoByImgs.length > 0) {
+                result.images = photoByImgs.map(img => ({ src: img.src, alt: img.alt || '' }));
+            } else {
+                // 폴백: scontent URL 이미지 (프로필 이미지 제외)
+                const scontentImgs = Array.from(el.querySelectorAll('img[src*="scontent"]'));
+                result.images = scontentImgs
+                    .filter(img => {
+                        const src = img.src || '';
+                        // 프로필 이미지 패턴 제외
+                        return !src.includes('s150x150') &&
+                               !src.includes('s44x44') &&
+                               !src.includes('s32x32') &&
+                               !src.includes('s64x64');
+                    })
+                    .map(img => ({ src: img.src, alt: img.alt || '' }));
+            }
 
             // 더보기 버튼 확인
             const allSpans = Array.from(el.querySelectorAll('span'));
@@ -143,19 +170,46 @@ class InstagramCrawler:
             return result;
         }""")
 
+    # 더보기 버튼 텍스트 (다국어 지원)
+    MORE_BUTTON_TEXTS = ['더 보기', 'more', 'もっと見る', '顯示更多', '显示更多']
+
     async def _click_more_button(self, article: ElementHandle) -> bool:
-        """더보기 버튼 클릭."""
+        """더보기 버튼 클릭 (Playwright 네이티브 + 다국어 지원)."""
         try:
+            # 다국어 더보기 버튼 찾기
+            for text in self.MORE_BUTTON_TEXTS:
+                # Playwright 네이티브 방식: query_selector로 찾고 클릭
+                more_button = await article.query_selector(f'span:has-text("{text}")')
+
+                if more_button:
+                    # 요소가 보이는지 확인
+                    is_visible = await more_button.is_visible()
+                    if is_visible:
+                        await more_button.click()
+                        logger.debug(f"Clicked more button: '{text}'")
+                        return True
+                    else:
+                        logger.debug(f"More button found but not visible: '{text}'")
+
+            # 폴백: JavaScript evaluate 방식
             clicked = await article.evaluate("""(el) => {
+                const moreTexts = ['더 보기', 'more', 'もっと見る', '顯示更多', '显示更多'];
                 const allSpans = Array.from(el.querySelectorAll('span'));
-                const moreSpan = allSpans.find(s => s.textContent.trim() === '더 보기');
-                if (moreSpan) {
-                    moreSpan.click();
-                    return true;
+                for (const text of moreTexts) {
+                    const moreSpan = allSpans.find(s => s.textContent.trim() === text);
+                    if (moreSpan) {
+                        moreSpan.click();
+                        return text;
+                    }
                 }
-                return false;
+                return null;
             }""")
-            return clicked
+
+            if clicked:
+                logger.debug(f"Clicked more button (fallback): '{clicked}'")
+                return True
+
+            return False
         except Exception as e:
             logger.warning(f"Failed to click more button: {e}")
             return False
@@ -208,13 +262,69 @@ class InstagramCrawler:
             logger.warning(f"Failed to extract caption: {e}")
             return None
 
-    async def _scroll_page(self) -> int:
-        """페이지 스크롤 후 현재 article 수 반환."""
-        await self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        await asyncio.sleep(CrawlOptions().wait_after_scroll)
+    async def _scroll_page(self, options: CrawlOptions = None) -> int:
+        """페이지 스크롤 후 현재 article 수 반환.
+
+        Args:
+            options: 크롤링 옵션 (스크롤 동작 설정 포함)
+
+        Returns:
+            현재 DOM의 article 수
+        """
+        if options is None:
+            options = CrawlOptions()
+
+        if options.scroll_behavior == "human":
+            await self._scroll_human_like(options)
+        else:
+            # 기존 빠른 스크롤
+            await self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            await asyncio.sleep(options.wait_after_scroll)
 
         articles = await self.page.query_selector_all("article")
         return len(articles)
+
+    async def _scroll_human_like(self, options: CrawlOptions) -> None:
+        """사람처럼 자연스럽게 스크롤.
+
+        - 점진적 스크롤 (viewport 기반)
+        - 랜덤 대기 시간
+        - 가끔 읽는 척 멈춤
+        - 가끔 약간 위로 스크롤
+        """
+        # 현재 뷰포트 높이와 스크롤 위치
+        viewport_height = await self.page.evaluate("window.innerHeight")
+        current_scroll = await self.page.evaluate("window.scrollY")
+
+        # 1-2 화면 높이만큼 스크롤 (랜덤)
+        scroll_distance = viewport_height * random.uniform(0.8, 1.5)
+        target_scroll = current_scroll + scroll_distance
+
+        # 부드러운 스크롤 애니메이션
+        await self.page.evaluate(f"""
+            window.scrollTo({{
+                top: {target_scroll},
+                behavior: 'smooth'
+            }})
+        """)
+
+        # 랜덤 대기 (min_scroll_delay ~ max_scroll_delay)
+        delay = random.uniform(options.min_scroll_delay, options.max_scroll_delay)
+        await asyncio.sleep(delay)
+
+        # 가끔 읽는 척 멈춤 (read_pause_probability 확률)
+        if random.random() < options.read_pause_probability:
+            pause_time = random.uniform(2.0, 4.0)
+            logger.debug(f"Pausing to read for {pause_time:.1f}s")
+            await asyncio.sleep(pause_time)
+
+        # 가끔 약간 위로 스크롤 (20% 확률)
+        if random.random() < 0.2:
+            scroll_up = random.randint(50, 150)
+            await self.page.evaluate(f"""
+                window.scrollBy({{top: -{scroll_up}, behavior: 'smooth'}})
+            """)
+            await asyncio.sleep(0.3)
 
     async def _refresh_feed(self) -> bool:
         """피드 페이지 새로고침.
@@ -341,7 +451,7 @@ class InstagramCrawler:
             logger.debug(f"Scroll {scroll + 1}/{options.scroll_count} (refreshed: {refresh_count})")
             posts_before_scroll = len(all_posts)
 
-            await self._scroll_page()
+            await self._scroll_page(options)
             articles = await self.page.query_selector_all("article")
 
             logger.debug(f"Total articles in DOM: {len(articles)}, collected so far: {len(all_posts)}")
