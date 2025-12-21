@@ -275,7 +275,13 @@ class CrawlService:
         )
 
     def get_today_schedule(self) -> List[TodayScheduleItem]:
-        """오늘 스케줄 조회."""
+        """오늘 스케줄 조회.
+
+        Returns:
+            오늘의 스케줄 항목 리스트.
+            각 항목은 scheduled_time, status, run_id를 포함.
+            status: 'pending' (미래), 'completed' (완료), 'missed' (놓침)
+        """
         config = self.get_schedule_config()
 
         if not config or not config.enabled:
@@ -292,17 +298,36 @@ class CrawlService:
             InstagramCrawlRun.started_at >= today_start
         ).all()
 
-        last_runs = [run.started_at for run in today_runs]
+        now = datetime.now()
+        schedule_times = scheduler.generate_daily_schedule(now.date())
 
-        schedule_status = scheduler.get_today_schedule_status(last_runs)
+        result = []
+        for run_time in schedule_times:
+            # 해당 시간대에 실행된 기록 찾기 (1시간 이내)
+            matching_run = None
+            for run in today_runs:
+                if abs((run.started_at - run_time).total_seconds()) < 3600:
+                    matching_run = run
+                    break
 
-        return [
-            TodayScheduleItem(
-                time=run_time.strftime("%H:%M"),
-                completed=completed,
-            )
-            for run_time, completed in schedule_status
-        ]
+            # 상태 결정
+            if matching_run:
+                status = "completed" if matching_run.success else "missed"
+                run_id = matching_run.id
+            elif run_time <= now:
+                status = "missed"
+                run_id = None
+            else:
+                status = "pending"
+                run_id = None
+
+            result.append(TodayScheduleItem(
+                scheduled_time=run_time.strftime("%H:%M"),
+                status=status,
+                run_id=run_id,
+            ))
+
+        return result
 
     def classify_failure(self, error: Exception) -> str:
         """실패 원인 분류.

@@ -125,9 +125,13 @@ class ScheduleConfigUpdateSchema(BaseModel):
 
 
 class TodayScheduleItem(BaseModel):
-    """오늘 스케줄 항목."""
-    time: str
-    completed: bool
+    """오늘 스케줄 항목.
+
+    프론트엔드 InstagramTodayScheduleItem과 일치해야 함.
+    """
+    scheduled_time: str  # HH:MM 형식
+    status: str  # 'pending' | 'running' | 'completed' | 'missed'
+    run_id: Optional[int] = None  # 실행 기록 ID (있는 경우)
 
 
 class StatsSchema(BaseModel):
