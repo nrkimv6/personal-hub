@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { instagramApi } from '$lib/api';
-	import type { InstagramPost, InstagramPostListResponse } from '$lib/types';
+	import { instagramApi, instagramTagApi } from '$lib/api';
+	import type { InstagramPost, InstagramTag } from '$lib/types';
 
 	let posts: InstagramPost[] = [];
 	let total = 0;
@@ -10,13 +10,25 @@
 	let loading = true;
 	let error: string | null = null;
 
+	// 태그 목록
+	let availableTags: InstagramTag[] = [];
+
 	// 필터
 	let filterAccount = '';
 	let filterIsAd: boolean | null = null;
+	let filterTags: string[] = [];
 
 	// 모달
 	let selectedPost: InstagramPost | null = null;
 	let showModal = false;
+
+	async function fetchTags() {
+		try {
+			availableTags = await instagramTagApi.getTags();
+		} catch (e) {
+			console.error('태그 목록 로드 실패:', e);
+		}
+	}
 
 	async function fetchPosts() {
 		loading = true;
@@ -24,6 +36,7 @@
 			const params: Record<string, unknown> = { page, limit };
 			if (filterAccount) params.account = filterAccount;
 			if (filterIsAd !== null) params.is_ad = filterIsAd;
+			if (filterTags.length > 0) params.tags = filterTags;
 
 			const response = await instagramApi.posts(params);
 			posts = response.posts;
@@ -33,6 +46,14 @@
 			error = e instanceof Error ? e.message : '데이터 로드 실패';
 		} finally {
 			loading = false;
+		}
+	}
+
+	function toggleTagFilter(tagName: string) {
+		if (filterTags.includes(tagName)) {
+			filterTags = filterTags.filter((t) => t !== tagName);
+		} else {
+			filterTags = [...filterTags, tagName];
 		}
 	}
 
@@ -98,6 +119,7 @@
 	}
 
 	onMount(() => {
+		fetchTags();
 		fetchPosts();
 	});
 </script>
@@ -123,6 +145,41 @@
 			<button onclick={handleFilter} class="btn btn-primary btn-sm"> 필터 적용 </button>
 		</div>
 	</div>
+
+	<!-- 태그 필터 -->
+	{#if availableTags.length > 0}
+		<div class="mb-4 flex flex-wrap gap-2 items-center">
+			<span class="text-sm text-gray-500">태그 필터:</span>
+			{#each availableTags as tag (tag.id)}
+				<button
+					onclick={() => {
+						toggleTagFilter(tag.name);
+						handleFilter();
+					}}
+					class="px-3 py-1 text-sm rounded-full transition-colors"
+					style="background-color: {filterTags.includes(tag.name)
+						? tag.color
+						: '#f3f4f6'}; color: {filterTags.includes(tag.name) ? 'white' : '#374151'};"
+				>
+					{tag.display_name}
+					{#if filterTags.includes(tag.name)}
+						<span class="ml-1">✓</span>
+					{/if}
+				</button>
+			{/each}
+			{#if filterTags.length > 0}
+				<button
+					onclick={() => {
+						filterTags = [];
+						handleFilter();
+					}}
+					class="text-sm text-gray-500 hover:text-gray-700 underline"
+				>
+					초기화
+				</button>
+			{/if}
+		</div>
+	{/if}
 
 	{#if loading}
 		<div class="flex justify-center items-center h-64">
@@ -176,6 +233,19 @@
 								>
 							{/if}
 						</div>
+						<!-- 태그 표시 -->
+						{#if post.tags && post.tags.length > 0}
+							<div class="flex flex-wrap gap-1">
+								{#each post.tags as tag}
+									<span
+										class="px-1.5 py-0.5 text-xs rounded-full text-white"
+										style="background-color: {tag.color};"
+									>
+										{tag.display_name}
+									</span>
+								{/each}
+							</div>
+						{/if}
 						<p class="text-xs text-gray-500">{truncate(post.caption, 50)}</p>
 						<p class="text-xs text-gray-400">
 							{post.display_time || formatDateTime(post.collected_at)}
@@ -247,6 +317,21 @@
 				{#if selectedPost.caption}
 					<div class="mb-4 p-3 bg-gray-50 rounded-lg">
 						<p class="text-sm text-gray-700 whitespace-pre-wrap">{selectedPost.caption}</p>
+					</div>
+				{/if}
+
+				<!-- 태그 -->
+				{#if selectedPost.tags && selectedPost.tags.length > 0}
+					<div class="mb-4">
+						<span class="text-sm text-gray-500 mr-2">태그:</span>
+						{#each selectedPost.tags as tag}
+							<span
+								class="inline-block px-2 py-0.5 text-xs rounded-full text-white mr-1"
+								style="background-color: {tag.color};"
+							>
+								{tag.display_name}
+							</span>
+						{/each}
 					</div>
 				{/if}
 
