@@ -187,9 +187,11 @@ class LLMService:
 
             try:
                 # 파일에서 프롬프트 읽어서 실행
+                # --tools "Read" 추가하여 이미지 파일 읽기 가능
+                tools_opt = '--tools "Read"'
                 if sys.platform == "win32":
                     # Windows: shell=True 필요
-                    cmd = f'type "{prompt_file}" | claude -p'
+                    cmd = f'type "{prompt_file}" | claude -p {tools_opt}'
                     result = subprocess.run(
                         cmd,
                         capture_output=True,
@@ -200,7 +202,7 @@ class LLMService:
                     )
                 else:
                     # Unix: cat으로 파이프
-                    cmd = f'cat "{prompt_file}" | claude -p'
+                    cmd = f'cat "{prompt_file}" | claude -p {tools_opt}'
                     result = subprocess.run(
                         cmd,
                         capture_output=True,
