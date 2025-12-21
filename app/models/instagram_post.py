@@ -39,6 +39,11 @@ class InstagramPost(Base):
         back_populates="post",
         cascade="all, delete-orphan",
     )
+    llm_requests = relationship(
+        "InstagramLLMClassificationRequest",
+        back_populates="post",
+        cascade="all, delete-orphan",
+    )
 
     @property
     def tags(self) -> list[str]:
