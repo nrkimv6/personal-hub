@@ -128,13 +128,16 @@ class ProxyUsageService:
         if schedule_id:
             filters.append(ProxyUsageLog.schedule_id == schedule_id)
 
-        base_query = db.query(ProxyUsageLog)
+        # 전체 통계 + 성공 카운트를 단일 쿼리로
+        stats_query = db.query(
+            func.count(ProxyUsageLog.id).label("total"),
+            func.sum(ProxyUsageLog.success).label("success"),
+        )
         if filters:
-            base_query = base_query.filter(and_(*filters))
-
-        # 전체 통계
-        total_attempts = base_query.count()
-        success_count = base_query.filter(ProxyUsageLog.success == 1).count()
+            stats_query = stats_query.filter(and_(*filters))
+        stats_result = stats_query.first()
+        total_attempts = stats_result.total or 0
+        success_count = int(stats_result.success or 0)
         overall_success_rate = (success_count / total_attempts * 100) if total_attempts > 0 else 0.0
 
         # 프록시별 통계
@@ -155,34 +158,43 @@ class ProxyUsageService:
             proxy_stats_query = proxy_stats_query.filter(and_(*filters))
 
         proxy_stats_query = proxy_stats_query.order_by(desc("total_attempts")).limit(100)
+        proxy_stats_rows = proxy_stats_query.all()
 
+        # 프록시 호스트 목록 수집
+        proxy_hosts = {row.proxy_host for row in proxy_stats_rows if row.proxy_host}
+
+        # [N+1 해결] 모든 프록시의 에러 유형을 단일 쿼리로 조회
+        error_by_proxy: Dict[str, Dict[str, int]] = {host: {} for host in proxy_hosts}
+        if proxy_hosts:
+            all_errors_query = db.query(
+                ProxyUsageLog.proxy_host,
+                ProxyUsageLog.error_type,
+                func.count(ProxyUsageLog.id).label("count")
+            ).filter(
+                ProxyUsageLog.proxy_host.in_(proxy_hosts),
+                ProxyUsageLog.success == 0,
+                ProxyUsageLog.error_type.isnot(None)
+            )
+            if filters:
+                all_errors_query = all_errors_query.filter(and_(*filters))
+
+            all_errors = all_errors_query.group_by(
+                ProxyUsageLog.proxy_host,
+                ProxyUsageLog.error_type
+            ).all()
+
+            for row in all_errors:
+                if row.proxy_host in error_by_proxy:
+                    error_by_proxy[row.proxy_host][row.error_type] = row.count
+
+        # 프록시별 통계 응답 생성
         by_proxy = []
-        proxy_hosts = set()
-
-        for row in proxy_stats_query.all():
+        for row in proxy_stats_rows:
             if row.proxy_host:
-                proxy_hosts.add(row.proxy_host)
                 total = row.total_attempts or 0
                 success = int(row.success_count or 0)
                 fail = total - success
                 success_rate = (success / total * 100) if total > 0 else 0.0
-
-                # 에러 유형별 카운트 조회
-                error_query = db.query(
-                    ProxyUsageLog.error_type,
-                    func.count(ProxyUsageLog.id).label("count")
-                ).filter(
-                    ProxyUsageLog.proxy_host == row.proxy_host,
-                    ProxyUsageLog.success == 0,
-                    ProxyUsageLog.error_type.isnot(None)
-                )
-                if filters:
-                    error_query = error_query.filter(and_(*filters))
-
-                error_types = {
-                    r.error_type: r.count
-                    for r in error_query.group_by(ProxyUsageLog.error_type).all()
-                }
 
                 by_proxy.append(ProxyUsageStatItem(
                     proxy_host=row.proxy_host,
@@ -192,7 +204,7 @@ class ProxyUsageService:
                     success_rate=round(success_rate, 1),
                     avg_response_time_ms=round(row.avg_response_time_ms, 1) if row.avg_response_time_ms else None,
                     last_used_at=row.last_used_at,
-                    error_types=error_types,
+                    error_types=error_by_proxy.get(row.proxy_host, {}),
                 ))
 
         # 전체 에러 유형별 분포
@@ -290,6 +302,8 @@ class ProxyUsageService:
         Returns:
             재시도 이력 목록
         """
+        from collections import defaultdict
+
         # request_id별 그룹 조회
         subquery = db.query(
             ProxyUsageLog.request_id,
@@ -318,26 +332,48 @@ class ProxyUsageService:
             desc("completed_at")
         ).limit(limit)
 
+        rows = subquery.all()
+        if not rows:
+            return []
+
+        # request_id, schedule_id 목록 수집
+        request_ids = [row.request_id for row in rows]
+        schedule_ids = {row.schedule_id for row in rows if row.schedule_id}
+
+        # [N+1 해결] 모든 request_id의 상세 시도 정보를 단일 쿼리로 조회
+        all_attempts = db.query(ProxyUsageLog).filter(
+            ProxyUsageLog.request_id.in_(request_ids)
+        ).order_by(
+            ProxyUsageLog.request_id,
+            ProxyUsageLog.attempt_number
+        ).all()
+
+        # request_id별로 그룹핑
+        attempts_by_request: Dict[str, List[ProxyUsageLog]] = defaultdict(list)
+        for log in all_attempts:
+            attempts_by_request[log.request_id].append(log)
+
+        # [N+1 해결] 모든 schedule의 정보를 단일 쿼리로 조회
+        schedule_info: Dict[int, tuple] = {}
+        if schedule_ids:
+            schedules = db.query(
+                MonitorSchedule.id,
+                BizItem.name.label("biz_item_name"),
+                Business.name.label("business_name"),
+            ).outerjoin(
+                BizItem, MonitorSchedule.biz_item_id == BizItem.id
+            ).outerjoin(
+                Business, BizItem.business_id == Business.id
+            ).filter(
+                MonitorSchedule.id.in_(schedule_ids)
+            ).all()
+
+            for s in schedules:
+                schedule_info[s.id] = (s.business_name, s.biz_item_name)
+
         results = []
-
-        for row in subquery.all():
-            # 상세 시도 정보 조회
-            attempts_query = db.query(ProxyUsageLog).filter(
-                ProxyUsageLog.request_id == row.request_id
-            ).order_by(ProxyUsageLog.attempt_number).all()
-
-            # 스케줄 정보 조회 (업체/상품명)
-            schedule = db.query(MonitorSchedule).filter(
-                MonitorSchedule.id == row.schedule_id
-            ).first()
-
-            business_name = None
-            biz_item_name = None
-
-            if schedule and schedule.biz_item:
-                biz_item_name = schedule.biz_item.name
-                if schedule.biz_item.business:
-                    business_name = schedule.biz_item.business.name
+        for row in rows:
+            business_name, biz_item_name = schedule_info.get(row.schedule_id, (None, None))
 
             # 소요 시간 계산
             duration_ms = 0
@@ -356,7 +392,7 @@ class ProxyUsageService:
                     response_time_ms=log.response_time_ms,
                     timestamp=log.timestamp,
                 )
-                for log in attempts_query
+                for log in attempts_by_request.get(row.request_id, [])
             ]
 
             results.append(RetryHistoryResponse(
@@ -391,7 +427,7 @@ class ProxyUsageService:
         Returns:
             실패 많은 프록시 통계 목록
         """
-        cutoff = datetime.utcnow() - timedelta(hours=hours)
+        cutoff = datetime.now() - timedelta(hours=hours)
 
         query = db.query(
             ProxyUsageLog.proxy_host,
@@ -416,26 +452,38 @@ class ProxyUsageService:
             desc("fail_count")
         ).limit(50)
 
-        results = []
+        rows = query.all()
 
-        for row in query.all():
+        # 프록시 호스트 목록 수집
+        proxy_hosts = {row.proxy_host for row in rows if row.proxy_host}
+
+        # [N+1 해결] 모든 프록시의 에러 유형을 단일 쿼리로 조회
+        error_by_proxy: Dict[str, Dict[str, int]] = {host: {} for host in proxy_hosts}
+        if proxy_hosts:
+            all_errors = db.query(
+                ProxyUsageLog.proxy_host,
+                ProxyUsageLog.error_type,
+                func.count(ProxyUsageLog.id).label("count")
+            ).filter(
+                ProxyUsageLog.proxy_host.in_(proxy_hosts),
+                ProxyUsageLog.success == 0,
+                ProxyUsageLog.error_type.isnot(None),
+                ProxyUsageLog.timestamp >= cutoff,
+            ).group_by(
+                ProxyUsageLog.proxy_host,
+                ProxyUsageLog.error_type
+            ).all()
+
+            for err_row in all_errors:
+                if err_row.proxy_host in error_by_proxy:
+                    error_by_proxy[err_row.proxy_host][err_row.error_type] = err_row.count
+
+        results = []
+        for row in rows:
             total = row.total_attempts or 0
             success = int(row.success_count or 0)
             fail = int(row.fail_count or 0)
             success_rate = (success / total * 100) if total > 0 else 0.0
-
-            # 에러 유형별 카운트
-            error_query = db.query(
-                ProxyUsageLog.error_type,
-                func.count(ProxyUsageLog.id).label("count")
-            ).filter(
-                ProxyUsageLog.proxy_host == row.proxy_host,
-                ProxyUsageLog.success == 0,
-                ProxyUsageLog.error_type.isnot(None),
-                ProxyUsageLog.timestamp >= cutoff,
-            ).group_by(ProxyUsageLog.error_type).all()
-
-            error_types = {r.error_type: r.count for r in error_query}
 
             results.append(ProxyUsageStatItem(
                 proxy_host=row.proxy_host,
@@ -445,7 +493,7 @@ class ProxyUsageService:
                 success_rate=round(success_rate, 1),
                 avg_response_time_ms=round(row.avg_response_time_ms, 1) if row.avg_response_time_ms else None,
                 last_used_at=row.last_used_at,
-                error_types=error_types,
+                error_types=error_by_proxy.get(row.proxy_host, {}),
             ))
 
         return results
@@ -465,7 +513,7 @@ class ProxyUsageService:
         Returns:
             정리 결과
         """
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now() - timedelta(days=days)
 
         before_count = db.query(func.count(ProxyUsageLog.id)).scalar() or 0
 
@@ -505,7 +553,7 @@ class ProxyUsageService:
         Returns:
             {proxy_host: timeout_count} 딕셔너리
         """
-        cutoff = datetime.utcnow() - timedelta(hours=hours)
+        cutoff = datetime.now() - timedelta(hours=hours)
 
         query = db.query(
             ProxyUsageLog.proxy_host,

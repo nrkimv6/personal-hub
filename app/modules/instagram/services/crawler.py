@@ -20,6 +20,8 @@ class CrawlOptions:
     wait_after_more: float = 0.5
     wait_after_scroll: float = 2.0
     duplicate_stop_count: int = 5  # 연속 중복 N개 시 중단 (0이면 비활성화)
+    max_refresh_count: int = 3  # 새 게시물 없을 때 최대 새로고침 횟수
+    no_new_posts_refresh_threshold: int = 3  # N회 연속 새 게시물 없으면 새로고침
 
 
 @dataclass
@@ -214,6 +216,22 @@ class InstagramCrawler:
         articles = await self.page.query_selector_all("article")
         return len(articles)
 
+    async def _refresh_feed(self) -> bool:
+        """피드 페이지 새로고침.
+
+        Returns:
+            성공 여부
+        """
+        try:
+            await self.page.reload(wait_until="domcontentloaded")
+            await asyncio.sleep(2.0)  # 페이지 로드 대기
+            await self.page.wait_for_selector("article", timeout=10000)
+            logger.debug("Feed refreshed successfully")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to refresh feed: {e}")
+            return False
+
     def _extract_post_id_from_url(self, url: Optional[str]) -> Optional[str]:
         """URL에서 게시물 ID 추출."""
         if not url:
@@ -308,6 +326,7 @@ class InstagramCrawler:
         # 화면에 보이는 7-10개 article만 존재. 스크롤해도 이전 article은 DOM에서 제거됨.
         # 따라서 매번 모든 article을 순회하고 URL 중복 체크로 이미 처리한 것을 skip.
         no_new_posts_count = 0  # 연속으로 새 게시물이 없는 스크롤 횟수
+        refresh_count = 0  # 새로고침 횟수
 
         for scroll in range(options.scroll_count):
             if len(all_posts) >= options.max_posts:
@@ -319,7 +338,7 @@ class InstagramCrawler:
                 logger.info(f"Stopping scroll: {consecutive_duplicates} consecutive DB duplicates")
                 break
 
-            logger.debug(f"Scroll {scroll + 1}/{options.scroll_count}")
+            logger.debug(f"Scroll {scroll + 1}/{options.scroll_count} (refreshed: {refresh_count})")
             posts_before_scroll = len(all_posts)
 
             await self._scroll_page()
@@ -367,10 +386,17 @@ class InstagramCrawler:
             if len(all_posts) == posts_before_scroll:
                 no_new_posts_count += 1
                 logger.debug(f"No new posts in this scroll (count: {no_new_posts_count})")
-                # 5회 연속 새 게시물이 없으면 중단
-                if no_new_posts_count >= 5:
-                    logger.info(f"Stopping: {no_new_posts_count} consecutive scrolls with no new posts")
-                    break
+
+                # N회 연속 새 게시물 없으면 새로고침 시도
+                if no_new_posts_count >= options.no_new_posts_refresh_threshold:
+                    if refresh_count < options.max_refresh_count:
+                        refresh_count += 1
+                        no_new_posts_count = 0
+                        logger.info(f"Refreshing page ({refresh_count}/{options.max_refresh_count}) - no new posts for {options.no_new_posts_refresh_threshold} scrolls")
+                        await self._refresh_feed()
+                    else:
+                        logger.info(f"Stopping: max refresh count ({options.max_refresh_count}) reached")
+                        break
             else:
                 no_new_posts_count = 0
 

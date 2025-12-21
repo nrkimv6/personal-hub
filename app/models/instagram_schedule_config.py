@@ -37,7 +37,7 @@ class InstagramScheduleConfig(Base):
     account = relationship("Account")
 
     # 메타
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     def __repr__(self):
         return f"<InstagramScheduleConfig(id={self.id}, enabled={self.enabled})>"

@@ -50,7 +50,7 @@ class ProxyUsageLog(Base):
     fetch_method = Column(Text)  # graphql_api, anonymous_api, html_scrape
 
     # 타임스탬프
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=datetime.now)
 
     # Relationships
     monitoring_event = relationship(

@@ -40,7 +40,7 @@ class Proxy(ProxyBase):
     # 우선순위 점수 (0~100)
     priority_score = Column(Float, default=0)
 
-    # 타임스탬프
+    # 타임스탬프 (로컬 시간)
     first_seen_at = Column(DateTime, default=datetime.now)
     last_seen_at = Column(DateTime)
     last_checked_at = Column(DateTime)

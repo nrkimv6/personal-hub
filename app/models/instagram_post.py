@@ -30,7 +30,7 @@ class InstagramPost(Base):
     # 수집 정보
     account_id = Column(Integer, ForeignKey("accounts.id", ondelete="SET NULL"))
     crawl_run_id = Column(Integer, ForeignKey("instagram_crawl_runs.id", ondelete="SET NULL"))
-    collected_at = Column(DateTime, default=datetime.utcnow, index=True)
+    collected_at = Column(DateTime, default=datetime.now, index=True)
 
     # 관계
     crawl_run = relationship("InstagramCrawlRun", back_populates="posts")

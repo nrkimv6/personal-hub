@@ -15,7 +15,7 @@ class InstagramCrawlRun(Base):
 
     # 실행 정보
     account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False)
-    started_at = Column(DateTime, default=datetime.utcnow, index=True)
+    started_at = Column(DateTime, default=datetime.now, index=True)
     finished_at = Column(DateTime)
 
     # 결과

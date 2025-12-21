@@ -55,7 +55,7 @@ class CrawlService:
         # 실행 기록 생성
         crawl_run = InstagramCrawlRun(
             account_id=account_id,
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(),
         )
         self.db.add(crawl_run)
         self.db.commit()
@@ -95,21 +95,28 @@ class CrawlService:
             crawl_run.success = True
             crawl_run.total_collected = save_stats["total_collected"]
             crawl_run.new_saved = save_stats["new_saved"]
-            crawl_run.finished_at = datetime.utcnow()
+            crawl_run.finished_at = datetime.now()
 
             logger.info(f"Crawl completed: {save_stats['total_collected']} collected, {save_stats['new_saved']} new (realtime saved)")
 
         except Exception as e:
             # 에러 발생해도 그때까지 저장된 데이터는 보존됨
-            crawl_run.success = False
-            crawl_run.error_message = str(e)
-            crawl_run.total_collected = save_stats["total_collected"]
-            crawl_run.new_saved = save_stats["new_saved"]
-            crawl_run.finished_at = datetime.utcnow()
+            self.db.rollback()  # 먼저 세션 복구
+            crawl_run = self.db.query(InstagramCrawlRun).get(crawl_run.id)  # 다시 조회
+            if crawl_run:
+                crawl_run.success = False
+                crawl_run.error_message = str(e)[:500]  # 에러 메시지 길이 제한
+                crawl_run.total_collected = save_stats["total_collected"]
+                crawl_run.new_saved = save_stats["new_saved"]
+                crawl_run.finished_at = datetime.now()
             logger.error(f"Crawl failed after saving {save_stats['new_saved']} posts: {e}")
 
-        self.db.commit()
-        self.db.refresh(crawl_run)
+        try:
+            self.db.commit()
+            self.db.refresh(crawl_run)
+        except Exception as commit_error:
+            logger.error(f"Failed to commit crawl_run update: {commit_error}")
+            self.db.rollback()
 
         return crawl_run
 
@@ -254,7 +261,7 @@ class CrawlService:
         if account_id is not None:
             config.account_id = account_id
 
-        config.updated_at = datetime.utcnow()
+        config.updated_at = datetime.now()
 
         self.db.commit()
         self.db.refresh(config)
@@ -423,7 +430,7 @@ class CrawlService:
         run.success = False
         run.error_message = str(error)
         run.failure_reason = self.classify_failure(error)
-        run.finished_at = datetime.utcnow()
+        run.finished_at = datetime.now()
 
         self.db.commit()
         self.db.refresh(run)

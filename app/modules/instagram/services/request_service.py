@@ -46,7 +46,7 @@ class CrawlRequestService:
             account_id=account_id,
             requested_by=requested_by,
             status="pending",
-            requested_at=datetime.utcnow(),
+            requested_at=datetime.now(),
         )
         self.db.add(request)
         self.db.commit()
@@ -104,7 +104,7 @@ class CrawlRequestService:
             return None
 
         request.status = "processing"
-        request.processed_at = datetime.utcnow()
+        request.processed_at = datetime.now()
         self.db.commit()
         self.db.refresh(request)
 

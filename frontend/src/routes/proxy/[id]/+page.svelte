@@ -60,12 +60,16 @@
 
   function formatDate(dateStr: string | null): string {
     if (!dateStr) return '-';
-    return new Date(dateStr).toLocaleString('ko-KR');
+    // 서버에서 UTC로 저장된 시간을 KST로 변환
+    const utcDate = dateStr.endsWith('Z') ? dateStr : dateStr + 'Z';
+    return new Date(utcDate).toLocaleString('ko-KR');
   }
 
   function formatDateShort(dateStr: string | null): string {
     if (!dateStr) return '-';
-    return new Date(dateStr).toLocaleString('ko-KR', {
+    // 서버에서 UTC로 저장된 시간을 KST로 변환
+    const utcDate = dateStr.endsWith('Z') ? dateStr : dateStr + 'Z';
+    return new Date(utcDate).toLocaleString('ko-KR', {
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
