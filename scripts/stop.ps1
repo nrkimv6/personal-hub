@@ -28,6 +28,7 @@ $ApiPidFile = Join-Path $PidDir "api.pid"
 $WorkerPidFile = Join-Path $PidDir "worker.pid"
 $InstagramWorkerPidFile = Join-Path $PidDir "instagram_worker.pid"
 $WatchdogPidFile = Join-Path $PidDir "watchdog.pid"
+$InstagramWatchdogPidFile = Join-Path $PidDir "instagram_watchdog.pid"
 $FrontendPidFile = Join-Path $PidDir "frontend.pid"
 
 Write-Host ""
@@ -37,9 +38,9 @@ Write-Host "========================================" -ForegroundColor Red
 Write-Host ""
 
 # ============================================================
-# STEP 0: Kill Worker Watchdog (PowerShell) if running
+# STEP 0: Kill All Watchdog Processes (PowerShell)
 # ============================================================
-Write-Host "[0] Killing Worker Watchdog process" -ForegroundColor Cyan
+Write-Host "[0] Killing Watchdog processes" -ForegroundColor Cyan
 Write-Host "----------------------------------------"
 
 $watchdogKilled = 0
@@ -48,9 +49,11 @@ $psProcs = Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -Erro
 if ($psProcs) {
     foreach ($proc in $psProcs) {
         $cmd = $proc.CommandLine
-        if ($cmd -and $cmd -match "worker-watchdog\.ps1") {
+        # Kill both worker-watchdog.ps1 and instagram-watchdog.ps1
+        if ($cmd -and ($cmd -match "worker-watchdog\.ps1" -or $cmd -match "instagram-watchdog\.ps1")) {
             $procId = $proc.ProcessId
-            Write-Host "  [*] Watchdog PID $procId" -ForegroundColor Yellow
+            $watchdogType = if ($cmd -match "instagram") { "Instagram" } else { "Worker" }
+            Write-Host "  [*] $watchdogType Watchdog PID $procId" -ForegroundColor Yellow
             try {
                 Stop-Process -Id $procId -Force -ErrorAction Stop
                 Write-Host "      -> Killed" -ForegroundColor Green
@@ -63,7 +66,7 @@ if ($psProcs) {
 }
 
 if ($watchdogKilled -eq 0) {
-    Write-Host "  (no watchdog process found)" -ForegroundColor Gray
+    Write-Host "  (no watchdog processes found)" -ForegroundColor Gray
 }
 
 Write-Host ""
@@ -191,7 +194,7 @@ Write-Host ""
 Write-Host "[4] Cleaning up PID files" -ForegroundColor Cyan
 Write-Host "----------------------------------------"
 
-foreach ($pidFile in @($ApiPidFile, $WorkerPidFile, $InstagramWorkerPidFile, $WatchdogPidFile, $FrontendPidFile)) {
+foreach ($pidFile in @($ApiPidFile, $WorkerPidFile, $InstagramWorkerPidFile, $WatchdogPidFile, $InstagramWatchdogPidFile, $FrontendPidFile)) {
     if (Test-Path $pidFile) {
         $name = Split-Path $pidFile -Leaf
         Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
