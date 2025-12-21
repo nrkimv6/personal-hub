@@ -4,8 +4,10 @@
 	import type {
 		InstagramStats,
 		InstagramCrawlRun,
-		InstagramTodayScheduleItem
+		InstagramTodayScheduleItem,
+		InstagramCrawlRequest
 	} from '$lib/types';
+	import WorkerStatusCard from '$lib/components/instagram/WorkerStatusCard.svelte';
 
 	let stats: InstagramStats | null = null;
 	let recentRuns: InstagramCrawlRun[] = [];
@@ -128,8 +130,12 @@
 			{error}
 		</div>
 	{:else}
-		<!-- 통계 카드 -->
-		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+		<!-- 워커 상태 및 통계 카드 -->
+		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+			<!-- 워커 상태 카드 -->
+			<WorkerStatusCard />
+
+			<!-- 통계 카드들 -->
 			<div class="card text-center">
 				<p class="text-3xl font-bold text-gray-900">{stats?.total_posts || 0}</p>
 				<p class="text-sm text-gray-500">전체 게시물</p>
@@ -190,7 +196,10 @@
 
 			<!-- 최근 실행 기록 -->
 			<div class="card">
-				<h3 class="text-lg font-semibold text-gray-900 mb-4">최근 실행 기록</h3>
+				<div class="flex items-center justify-between mb-4">
+					<h3 class="text-lg font-semibold text-gray-900">최근 실행 기록</h3>
+					<a href="/instagram/runs" class="text-sm text-blue-600 hover:text-blue-800">전체 보기</a>
+				</div>
 				{#if recentRuns.length === 0}
 					<p class="text-gray-500 text-center py-4">실행 기록 없음</p>
 				{:else}
