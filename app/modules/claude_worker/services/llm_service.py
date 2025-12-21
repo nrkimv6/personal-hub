@@ -185,6 +185,13 @@ class LLMService:
                 f.write(prompt)
                 prompt_file = f.name
 
+            # PATH에 npm bin 경로 추가 (Windows)
+            env = os.environ.copy()
+            if sys.platform == "win32":
+                npm_path = os.path.expanduser("~/AppData/Roaming/npm")
+                if npm_path not in env.get("PATH", ""):
+                    env["PATH"] = npm_path + ";" + env.get("PATH", "")
+
             try:
                 # 파일에서 프롬프트 읽어서 실행
                 # --tools "Read" 추가하여 이미지 파일 읽기 가능
@@ -199,6 +206,7 @@ class LLMService:
                         timeout=timeout,
                         encoding="utf-8",
                         shell=True,
+                        env=env,
                     )
                 else:
                     # Unix: cat으로 파이프
@@ -210,6 +218,7 @@ class LLMService:
                         timeout=timeout,
                         encoding="utf-8",
                         shell=True,
+                        env=env,
                     )
             finally:
                 # 임시 파일 삭제
