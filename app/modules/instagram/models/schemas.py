@@ -359,3 +359,82 @@ class ClassifyResultSchema(BaseModel):
     total: int
     classified: int
     details: List[dict] = []
+
+
+# ============== LLM 분류 관련 스키마 ==============
+
+
+class LLMResultSchema(BaseModel):
+    """LLM 분류 결과 스키마."""
+    is_event: bool = True
+    organizer: Optional[str] = None
+    event_url: Optional[str] = None
+    event_date: Optional[str] = None
+    event_time: Optional[str] = None
+    details: Optional[str] = None
+    confidence: float = 0.0
+    reason: Optional[str] = None  # is_event=False인 경우
+
+
+class LLMRequestSchema(BaseModel):
+    """LLM 분류 요청 스키마."""
+    id: int
+    post_id: int
+    requested_at: datetime
+    requested_by: str = "auto"
+    trigger_tag: Optional[str] = None
+    status: str = "pending"
+    processed_at: Optional[datetime] = None
+    llm_result: Optional[LLMResultSchema] = None
+    confidence_score: Optional[float] = None
+    error_message: Optional[str] = None
+    retry_count: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LLMRequestCreateSchema(BaseModel):
+    """LLM 분류 수동 요청 스키마."""
+    post_ids: List[int]
+
+
+class LLMRequestListResponse(BaseModel):
+    """LLM 분류 요청 목록 응답."""
+    requests: List[LLMRequestSchema]
+    total: int
+    page: int
+    limit: int
+
+
+class LLMWorkerStatusSchema(BaseModel):
+    """LLM 워커 상태 스키마."""
+    worker_id: str
+    pid: Optional[int] = None
+    started_at: datetime
+    last_heartbeat: datetime
+    current_state: str = "idle"
+    current_request_id: Optional[int] = None
+    is_alive: bool = True
+    processed_count: int = 0
+    error_count: int = 0
+    # 계산된 필드
+    uptime_seconds: int = 0
+    heartbeat_age_seconds: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LLMWorkerHealthSchema(BaseModel):
+    """LLM 워커 헬스체크 응답 스키마."""
+    status: str  # healthy, warning, dead, no_worker
+    message: str
+    worker: Optional[dict] = None
+
+
+class LLMStatsSchema(BaseModel):
+    """LLM 분류 통계 스키마."""
+    total: int = 0
+    pending: int = 0
+    processing: int = 0
+    completed: int = 0
+    failed: int = 0
