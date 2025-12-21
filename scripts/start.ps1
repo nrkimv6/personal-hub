@@ -29,6 +29,7 @@ if (-not (Test-Path $PidDir)) {
 $ApiPidFile = Join-Path $PidDir "api.pid"
 $WorkerPidFile = Join-Path $PidDir "worker.pid"
 $InstagramWorkerPidFile = Join-Path $PidDir "instagram_worker.pid"
+$ClaudeWorkerPidFile = Join-Path $PidDir "claude_worker.pid"
 $FrontendPidFile = Join-Path $PidDir "frontend.pid"
 
 # Check if process is running
@@ -101,6 +102,19 @@ if ($env:SKIP_INSTAGRAM_WORKER -eq "true") {
     $runInstagramWorker = $true
 }
 
+# Check Claude Worker (via Watchdog)
+$ClaudeWatchdogPidFile = Join-Path $PidDir "claude_watchdog.pid"
+if ($env:SKIP_CLAUDE_WORKER -eq "true") {
+    Write-Host "[!] Skipping Claude worker (SKIP_CLAUDE_WORKER=true)" -ForegroundColor Yellow
+    $runClaudeWorker = $false
+} elseif (Test-ProcessRunning $ClaudeWatchdogPidFile) {
+    $claudeWatchdogPid = Get-Content $ClaudeWatchdogPidFile
+    Write-Host "[!] Claude Watchdog already running (PID: $claudeWatchdogPid)" -ForegroundColor Yellow
+    $runClaudeWorker = $false
+} else {
+    $runClaudeWorker = $true
+}
+
 # Check Frontend
 if ($env:SKIP_FRONTEND -eq "true") {
     Write-Host "[!] Skipping frontend (SKIP_FRONTEND=true)" -ForegroundColor Yellow
@@ -114,7 +128,7 @@ if ($env:SKIP_FRONTEND -eq "true") {
 }
 
 # Exit if all processes are running
-if (-not $runApi -and -not $runWorker -and -not $runInstagramWorker -and -not $runFrontend) {
+if (-not $runApi -and -not $runWorker -and -not $runInstagramWorker -and -not $runClaudeWorker -and -not $runFrontend) {
     Write-Host "`nAll processes are already running." -ForegroundColor Green
     Write-Host "View logs: .\scripts\logs.ps1"
     Write-Host "Stop processes: .\scripts\stop.ps1"
@@ -230,6 +244,33 @@ if ($runInstagramWorker) {
     Write-Host "    Worker Log: $instagramWorkerLogFile"
     Write-Host "    Watchdog Log: $instagramWatchdogLogFile"
     Write-Host "    [!] Instagram Worker will auto-restart if it crashes" -ForegroundColor Yellow
+}
+
+# Start Claude Worker with Watchdog for auto-restart
+if ($runClaudeWorker) {
+    Write-Host "`n[*] Starting Claude Worker with Watchdog..." -ForegroundColor Cyan
+
+    $claudeWorkerLogFile = Join-Path $LogDir "claude_worker_$Timestamp.log"
+    $claudeWatchdogLogFile = Join-Path $LogDir "claude_watchdog.log"
+
+    # Start watchdog process which will manage the Claude worker
+    $claudeWatchdogProcess = Start-Process -FilePath "powershell.exe" `
+        -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\claude-watchdog.ps1" `
+        -WorkingDirectory $ProjectRoot `
+        -WindowStyle Hidden `
+        -PassThru
+
+    # Save Claude Watchdog PID
+    $ClaudeWatchdogPidFile = Join-Path $PidDir "claude_watchdog.pid"
+    $claudeWatchdogProcess.Id | Out-File $ClaudeWatchdogPidFile -Encoding ascii
+
+    # Wait for worker to actually start
+    Start-Sleep -Seconds 2
+
+    Write-Host "[+] Claude Watchdog started (PID: $($claudeWatchdogProcess.Id))" -ForegroundColor Green
+    Write-Host "    Worker Log: $claudeWorkerLogFile"
+    Write-Host "    Watchdog Log: $claudeWatchdogLogFile"
+    Write-Host "    [!] Claude Worker will auto-restart if it crashes" -ForegroundColor Yellow
 }
 
 # Start Frontend
