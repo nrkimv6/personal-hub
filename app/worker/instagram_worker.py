@@ -51,6 +51,7 @@ try:
     from app.modules.instagram.services.crawl_service import CrawlService
     from app.modules.instagram.services.scheduler import InstagramScheduler
     from app.modules.instagram.services.crawler import InstagramCrawler, CrawlOptions
+    from app.modules.instagram.services.worker_status_service import WorkerStatusService
     from app.modules.instagram.models.schemas import TimeWindow
     logger.debug("instagram services import 완료")
 
@@ -87,17 +88,77 @@ class InstagramWorker:
         self.check_interval = 30  # 30초마다 체크
         self.pid = os.getpid()
         self.start_time: datetime = None
+        self.worker_id: str = None  # 워커 상태 추적용
 
     async def start(self):
         """워커 시작."""
         logger.info(f"Instagram 워커 시작 (PID: {self.pid})")
         self.start_time = datetime.now()
 
+        # 워커 상태 등록
+        self._register_worker_status()
+
         try:
             await self._initialize()
             await self._main_loop()
         finally:
             await self._cleanup()
+
+    def _register_worker_status(self):
+        """워커 상태를 DB에 등록합니다."""
+        db = SessionLocal()
+        try:
+            service = WorkerStatusService(db)
+            status = service.register_worker()
+            self.worker_id = status.worker_id
+            logger.info(f"워커 상태 등록 완료: worker_id={self.worker_id}")
+        except Exception as e:
+            logger.error(f"워커 상태 등록 실패: {e}")
+        finally:
+            db.close()
+
+    def _update_heartbeat(self):
+        """워커 heartbeat를 업데이트합니다."""
+        if not self.worker_id:
+            return
+
+        db = SessionLocal()
+        try:
+            service = WorkerStatusService(db)
+            service.update_heartbeat(self.worker_id)
+        except Exception as e:
+            logger.warning(f"Heartbeat 업데이트 실패: {e}")
+        finally:
+            db.close()
+
+    def _update_worker_state(self, state: str, account: str = None, run_id: int = None):
+        """워커 상태를 업데이트합니다."""
+        if not self.worker_id:
+            return
+
+        db = SessionLocal()
+        try:
+            service = WorkerStatusService(db)
+            service.update_state(self.worker_id, state, account, run_id)
+        except Exception as e:
+            logger.warning(f"워커 상태 업데이트 실패: {e}")
+        finally:
+            db.close()
+
+    def _mark_worker_dead(self):
+        """워커를 종료 상태로 표시합니다."""
+        if not self.worker_id:
+            return
+
+        db = SessionLocal()
+        try:
+            service = WorkerStatusService(db)
+            service.mark_dead(self.worker_id)
+            logger.info(f"워커 종료 상태 표시 완료: worker_id={self.worker_id}")
+        except Exception as e:
+            logger.error(f"워커 종료 상태 표시 실패: {e}")
+        finally:
+            db.close()
 
     async def stop(self):
         """워커 종료."""
@@ -118,6 +179,9 @@ class InstagramWorker:
         """정리."""
         logger.info("Instagram 워커 정리 시작")
 
+        # 워커 상태를 종료로 표시
+        self._mark_worker_dead()
+
         if self.context_manager:
             try:
                 await self.context_manager.close_all_contexts()
@@ -133,6 +197,9 @@ class InstagramWorker:
 
         while not self.shutdown_event.is_set():
             try:
+                # Heartbeat 업데이트
+                self._update_heartbeat()
+
                 # 1. Pending 요청 처리
                 await self._process_pending_requests()
 
@@ -271,6 +338,9 @@ class InstagramWorker:
                 logger.warning(f"로그인 필요: account={account.name}")
                 return
 
+            # 워커 상태를 crawling으로 변경
+            self._update_worker_state("crawling", account.name)
+
             # 계정별 브라우저 페이지 가져오기
             page = await self._get_page_for_account(account.id)
 
@@ -289,6 +359,10 @@ class InstagramWorker:
                 crawler=crawler,
                 account_id=request.account_id,
             )
+
+            # 워커 상태 업데이트 (run_id 포함)
+            self._update_worker_state("crawling", account.name, crawl_run.id)
+
             logger.info(f"크롤링 완료: success={crawl_run.success}, collected={crawl_run.total_collected}, new={crawl_run.new_saved}")
 
             # 완료 처리
@@ -305,6 +379,9 @@ class InstagramWorker:
         except Exception as e:
             request_service.mark_failed(request.id, str(e))
             logger.error(f"크롤링 예외: {e}", exc_info=True)
+        finally:
+            # 워커 상태를 idle로 복원
+            self._update_worker_state("idle")
 
 
 # 전역 워커 인스턴스
