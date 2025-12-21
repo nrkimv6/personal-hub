@@ -8,7 +8,7 @@ from typing import List, Optional
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from app.models import InstagramCrawlRun, InstagramScheduleConfig, Account
+from app.models import InstagramCrawlRun, InstagramScheduleConfig, Account, InstagramPost
 from .crawler import InstagramCrawler, CrawlOptions, PostData
 from .post_service import PostService
 from .scheduler import InstagramScheduler
@@ -122,6 +122,65 @@ class CrawlService:
             self.db.rollback()
 
         return crawl_run
+
+    async def recrawl_single_post(
+        self,
+        crawler: InstagramCrawler,
+        post_id: int,
+    ) -> dict:
+        """개별 게시물 재크롤링 실행.
+
+        Args:
+            crawler: InstagramCrawler 인스턴스
+            post_id: DB 게시물 ID
+
+        Returns:
+            dict: {"success": bool, "message": str, "post": InstagramPost | None}
+        """
+        # 게시물 조회
+        post = self.db.query(InstagramPost).filter(InstagramPost.id == post_id).first()
+        if not post:
+            return {"success": False, "message": f"Post {post_id} not found", "post": None}
+
+        if not post.url:
+            return {"success": False, "message": f"Post {post_id} has no URL", "post": None}
+
+        logger.info(f"Starting single post recrawl for post {post_id}: {post.url}")
+
+        try:
+            # 크롤링 실행
+            crawled_data = await crawler.crawl_single_post(post.url)
+
+            if not crawled_data:
+                return {"success": False, "message": "Failed to crawl post - no data returned", "post": None}
+
+            # DB 업데이트
+            if crawled_data.caption:
+                post.caption = crawled_data.caption
+            if crawled_data.images:
+                post.images = crawled_data.images
+            if crawled_data.is_ad is not None:
+                post.is_ad = crawled_data.is_ad
+            if crawled_data.datetime_str:
+                try:
+                    post.posted_at = datetime.fromisoformat(crawled_data.datetime_str.replace("Z", "+00:00"))
+                except Exception:
+                    pass
+            if crawled_data.display_time:
+                post.display_time = crawled_data.display_time
+
+            post.collected_at = datetime.now()  # 재수집 시간 업데이트
+
+            self.db.commit()
+            self.db.refresh(post)
+
+            logger.info(f"Successfully recrawled post {post_id}")
+            return {"success": True, "message": "Post updated successfully", "post": post}
+
+        except Exception as e:
+            logger.error(f"Failed to recrawl post {post_id}: {e}")
+            self.db.rollback()
+            return {"success": False, "message": str(e), "post": None}
 
     def _save_post(
         self,

@@ -148,6 +148,9 @@
 	let editTagIds: number[] = [];
 	let savingTags = false;
 
+	// 재크롤링 상태
+	let isRecrawling = false;
+
 	function openModal(post: InstagramPost) {
 		selectedPost = post;
 		showModal = true;
@@ -202,6 +205,19 @@
 			await fetchPosts();
 		} catch (e) {
 			alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		}
+	}
+
+	async function recrawlPost(id: number) {
+		if (isRecrawling) return;
+		isRecrawling = true;
+		try {
+			await instagramApi.recrawlPost(id);
+			alert('재크롤링 요청이 등록되었습니다. 워커가 처리하면 게시물 정보가 업데이트됩니다.');
+		} catch (e) {
+			alert('재크롤링 요청 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		} finally {
+			isRecrawling = false;
 		}
 	}
 
@@ -703,7 +719,7 @@
 				</div>
 
 				<!-- 액션 버튼 -->
-				<div class="flex gap-2">
+				<div class="flex gap-2 flex-wrap">
 					{#if selectedPost.url}
 						<a
 							href={selectedPost.url}
@@ -713,6 +729,19 @@
 						>
 							원본 보기
 						</a>
+						<button
+							onclick={() => recrawlPost(selectedPost!.id)}
+							disabled={isRecrawling}
+							class="btn btn-secondary btn-sm disabled:opacity-50"
+							title="게시물 URL로 다시 크롤링하여 최신 정보를 가져옵니다"
+						>
+							{#if isRecrawling}
+								<span class="inline-block animate-spin mr-1">&#8635;</span>
+								재크롤링 중...
+							{:else}
+								&#8635; 재크롤링
+							{/if}
+						</button>
 					{/if}
 					<button
 						onclick={() => {

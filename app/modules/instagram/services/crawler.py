@@ -85,10 +85,20 @@ class InstagramCrawler:
             data.images = basic.get("images", [])
             data.is_ad = basic.get("is_ad", False)
 
-            # 더보기 버튼 클릭 (있으면)
+            # 더보기 버튼 클릭 (있으면) - 최대 2회 시도
             if basic.get("has_more_button"):
-                await self._click_more_button(article)
-                await asyncio.sleep(CrawlOptions().wait_after_more)
+                for attempt in range(2):
+                    clicked = await self._click_more_button(article)
+                    if clicked:
+                        await asyncio.sleep(CrawlOptions().wait_after_more)
+                        # 클릭 후 버튼이 사라졌는지 확인
+                        still_has_more = await self._has_more_button(article)
+                        if not still_has_more:
+                            break  # 성공적으로 확장됨
+                        logger.debug(f"More button still exists after click, attempt {attempt + 1}")
+                    else:
+                        logger.warning(f"Failed to click more button, attempt {attempt + 1}")
+                        await asyncio.sleep(0.5)
 
             # 본문 추출
             data.caption = await self._extract_caption(article, data.account)
@@ -173,42 +183,57 @@ class InstagramCrawler:
     # 더보기 버튼 텍스트 (다국어 지원)
     MORE_BUTTON_TEXTS = ['더 보기', 'more', 'もっと見る', '顯示更多', '显示更多']
 
-    async def _click_more_button(self, article: ElementHandle) -> bool:
-        """더보기 버튼 클릭 (Playwright 네이티브 + 다국어 지원)."""
+    async def _has_more_button(self, article: ElementHandle) -> bool:
+        """더보기 버튼이 존재하는지 확인."""
         try:
-            # 다국어 더보기 버튼 찾기
-            for text in self.MORE_BUTTON_TEXTS:
-                # Playwright 네이티브 방식: query_selector로 찾고 클릭
-                more_button = await article.query_selector(f'span:has-text("{text}")')
+            return await article.evaluate("""(el) => {
+                const moreTexts = ['더 보기', 'more', 'もっと見る', '顯示更多', '显示更多'];
+                const allSpans = Array.from(el.querySelectorAll('span'));
+                return allSpans.some(s => moreTexts.includes(s.textContent.trim()));
+            }""")
+        except Exception:
+            return False
 
-                if more_button:
-                    # 요소가 보이는지 확인
-                    is_visible = await more_button.is_visible()
-                    if is_visible:
-                        await more_button.click()
-                        logger.debug(f"Clicked more button: '{text}'")
-                        return True
-                    else:
-                        logger.debug(f"More button found but not visible: '{text}'")
-
-            # 폴백: JavaScript evaluate 방식
+    async def _click_more_button(self, article: ElementHandle) -> bool:
+        """더보기 버튼 클릭 (정확한 텍스트 매칭)."""
+        try:
+            # JavaScript로 정확히 매칭되는 버튼 찾아서 클릭
             clicked = await article.evaluate("""(el) => {
                 const moreTexts = ['더 보기', 'more', 'もっと見る', '顯示更多', '显示更多'];
                 const allSpans = Array.from(el.querySelectorAll('span'));
+
                 for (const text of moreTexts) {
+                    // 정확히 텍스트가 일치하는 span 찾기
                     const moreSpan = allSpans.find(s => s.textContent.trim() === text);
                     if (moreSpan) {
-                        moreSpan.click();
-                        return text;
+                        // 클릭 가능한지 확인 (보이는 요소)
+                        const rect = moreSpan.getBoundingClientRect();
+                        if (rect.width > 0 && rect.height > 0) {
+                            moreSpan.click();
+                            return { clicked: true, text: text };
+                        }
                     }
                 }
-                return null;
+                return { clicked: false, text: null };
             }""")
 
-            if clicked:
-                logger.debug(f"Clicked more button (fallback): '{clicked}'")
+            if clicked and clicked.get("clicked"):
+                logger.debug(f"Clicked more button: '{clicked.get('text')}'")
                 return True
 
+            # 폴백: Playwright 네이티브 클릭 (force 옵션)
+            for text in self.MORE_BUTTON_TEXTS:
+                # 정확한 텍스트 매칭을 위해 text= 셀렉터 사용
+                more_button = await article.query_selector(f'span:text-is("{text}")')
+                if more_button:
+                    try:
+                        await more_button.click(force=True)
+                        logger.debug(f"Clicked more button (native): '{text}'")
+                        return True
+                    except Exception as e:
+                        logger.debug(f"Native click failed for '{text}': {e}")
+
+            logger.debug("No more button found to click")
             return False
         except Exception as e:
             logger.warning(f"Failed to click more button: {e}")
@@ -566,6 +591,42 @@ class InstagramCrawler:
         except Exception as e:
             logger.error(f"Failed to check login status: {e}")
             return False
+
+
+    async def crawl_single_post(self, post_url: str) -> Optional[PostData]:
+        """개별 게시물 URL로 직접 접근하여 정보 수집.
+
+        Args:
+            post_url: 게시물 URL (https://www.instagram.com/p/...)
+
+        Returns:
+            PostData | None: 수집된 게시물 데이터 또는 실패 시 None
+        """
+        try:
+            logger.info(f"Crawling single post: {post_url}")
+
+            # 게시물 페이지로 이동
+            await self.page.goto(post_url, wait_until="domcontentloaded")
+
+            # 페이지 로드 대기
+            await asyncio.sleep(2.0)
+
+            # article 요소 탐색 (개별 게시물 페이지에도 article 요소 존재)
+            article = await self.page.query_selector("article")
+            if not article:
+                logger.warning(f"No article element found for: {post_url}")
+                return None
+
+            # 기존 extract_post 로직 재사용
+            post = await self.extract_post(article, 1)
+            post.url = post_url  # URL 보장
+
+            logger.info(f"Successfully crawled single post: {post.account}")
+            return post
+
+        except Exception as e:
+            logger.error(f"Failed to crawl single post {post_url}: {e}")
+            return None
 
 
 class LoginRequiredError(Exception):

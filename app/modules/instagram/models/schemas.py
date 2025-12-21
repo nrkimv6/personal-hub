@@ -176,6 +176,8 @@ class CrawlRequestSchema(BaseModel):
     account_id: int
     requested_at: datetime
     requested_by: str = "manual"
+    request_type: str = "feed"  # 'feed' | 'single_post'
+    target_post_id: Optional[int] = None  # single_post 타입일 때 대상 게시물 ID
     status: str = "pending"
     processed_at: Optional[datetime] = None
     crawl_run_id: Optional[int] = None

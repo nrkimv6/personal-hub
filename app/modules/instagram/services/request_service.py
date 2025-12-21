@@ -205,3 +205,59 @@ class CrawlRequestService:
             .first()
             is not None
         )
+
+    def create_single_post_request(
+        self,
+        post_id: int,
+        account_id: int,
+        requested_by: str = "manual",
+    ) -> InstagramCrawlRequest:
+        """개별 게시물 재크롤링 요청 생성.
+
+        Args:
+            post_id: 대상 게시물 ID (instagram_posts.id)
+            account_id: 계정 ID
+            requested_by: 요청 출처
+
+        Returns:
+            생성된 요청 객체
+        """
+        # 이미 대기 중인 동일 게시물 요청이 있는지 확인
+        existing = (
+            self.db.query(InstagramCrawlRequest)
+            .filter(
+                InstagramCrawlRequest.target_post_id == post_id,
+                InstagramCrawlRequest.request_type == "single_post",
+                InstagramCrawlRequest.status == "pending",
+            )
+            .first()
+        )
+        if existing:
+            logger.info(f"Pending single_post request already exists for post {post_id}")
+            return existing
+
+        request = InstagramCrawlRequest(
+            account_id=account_id,
+            requested_by=requested_by,
+            request_type="single_post",
+            target_post_id=post_id,
+            status="pending",
+            requested_at=datetime.now(),
+        )
+        self.db.add(request)
+        self.db.commit()
+        self.db.refresh(request)
+
+        logger.info(f"Created single_post request {request.id} for post {post_id}")
+        return request
+
+    def get_request_by_id(self, request_id: int) -> Optional[InstagramCrawlRequest]:
+        """요청 ID로 조회.
+
+        Args:
+            request_id: 요청 ID
+
+        Returns:
+            요청 객체 또는 None
+        """
+        return self.db.query(InstagramCrawlRequest).get(request_id)

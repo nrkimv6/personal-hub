@@ -323,8 +323,18 @@ class InstagramWorker:
 
         # 처리 중으로 변경
         request_service.mark_processing(request.id)
-        logger.info(f"크롤링 시작: request_id={request.id}")
 
+        # 요청 타입에 따라 분기
+        request_type = getattr(request, 'request_type', 'feed') or 'feed'
+        logger.info(f"크롤링 시작: request_id={request.id}, type={request_type}")
+
+        if request_type == "single_post":
+            await self._execute_single_post_recrawl(request, db, request_service, crawl_service)
+        else:
+            await self._execute_feed_crawl(request, db, request_service, crawl_service)
+
+    async def _execute_feed_crawl(self, request: InstagramCrawlRequest, db, request_service, crawl_service):
+        """피드 크롤링 실행."""
         try:
             # 로그인 상태 확인
             account = db.query(Account).filter(Account.id == request.account_id).first()
@@ -379,6 +389,61 @@ class InstagramWorker:
         except Exception as e:
             request_service.mark_failed(request.id, str(e))
             logger.error(f"크롤링 예외: {e}", exc_info=True)
+        finally:
+            # 워커 상태를 idle로 복원
+            self._update_worker_state("idle")
+
+    async def _execute_single_post_recrawl(self, request: InstagramCrawlRequest, db, request_service, crawl_service):
+        """개별 게시물 재크롤링 실행."""
+        try:
+            # 대상 게시물 ID 확인
+            target_post_id = getattr(request, 'target_post_id', None)
+            if not target_post_id:
+                request_service.mark_failed(request.id, "대상 게시물 ID 없음")
+                logger.warning(f"대상 게시물 ID 없음: request_id={request.id}")
+                return
+
+            # 로그인 상태 확인
+            account = db.query(Account).filter(Account.id == request.account_id).first()
+            if not account:
+                request_service.mark_failed(request.id, "계정을 찾을 수 없음")
+                logger.warning(f"계정 없음: account_id={request.account_id}")
+                return
+
+            if not account.is_logged_in:
+                request_service.mark_failed(request.id, "로그인 필요")
+                logger.warning(f"로그인 필요: account={account.name}")
+                return
+
+            # 워커 상태를 recrawling으로 변경
+            self._update_worker_state("recrawling", account.name)
+
+            # 계정별 브라우저 페이지 가져오기
+            page = await self._get_page_for_account(account.id)
+
+            # 크롤러 생성
+            crawler = InstagramCrawler(page)
+            logger.info(f"개별 게시물 재크롤링 시작: post_id={target_post_id}")
+
+            # 재크롤링 실행
+            result = await crawl_service.recrawl_single_post(
+                crawler=crawler,
+                post_id=target_post_id,
+            )
+
+            if result["success"]:
+                # 성공 시 완료 처리 (crawl_run_id는 없음)
+                request.status = "completed"
+                request.processed_at = datetime.now()
+                db.commit()
+                logger.info(f"재크롤링 완료: request_id={request.id}, post_id={target_post_id}")
+            else:
+                request_service.mark_failed(request.id, result["message"])
+                logger.warning(f"재크롤링 실패: {result['message']}")
+
+        except Exception as e:
+            request_service.mark_failed(request.id, str(e))
+            logger.error(f"재크롤링 예외: {e}", exc_info=True)
         finally:
             # 워커 상태를 idle로 복원
             self._update_worker_state("idle")
