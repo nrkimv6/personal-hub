@@ -41,6 +41,9 @@ class CrawlService:
     ) -> InstagramCrawlRun:
         """크롤링 실행.
 
+        게시물을 수집하면서 즉시 DB에 저장합니다 (실시간 저장).
+        크롤러가 중간에 죽어도 그때까지 수집한 데이터는 보존됩니다.
+
         Args:
             crawler: InstagramCrawler 인스턴스
             account_id: 수집 계정 ID
@@ -58,8 +61,22 @@ class CrawlService:
         self.db.commit()
         self.db.refresh(crawl_run)
 
+        # 실시간 저장 통계
+        save_stats = {"new_saved": 0, "total_collected": 0}
+
+        async def on_post_collected(post: PostData) -> bool:
+            """게시물 수집 즉시 저장 콜백."""
+            save_stats["total_collected"] += 1
+            saved = self._save_post(post, account_id, crawl_run.id)
+            if saved:
+                save_stats["new_saved"] += 1
+                # 10개마다 중간 통계 로깅
+                if save_stats["new_saved"] % 10 == 0:
+                    logger.info(f"[Progress] {save_stats['new_saved']} new posts saved so far")
+            return saved
+
         try:
-            # 크롤링 실행
+            # 크롤링 옵션 설정
             if options is None:
                 config = self.get_schedule_config()
                 options = CrawlOptions(
@@ -71,28 +88,25 @@ class CrawlService:
             # DB 중복 체크 콜백 설정
             crawler._db_duplicate_checker = lambda post_id: self.post_service.exists_by_post_id(post_id)
 
-            posts = await crawler.crawl_feed(options)
-
-            # 게시물 저장
-            new_saved = 0
-            for post in posts:
-                saved = self._save_post(post, account_id, crawl_run.id)
-                if saved:
-                    new_saved += 1
+            # 크롤링 실행 (실시간 저장 콜백 전달)
+            posts = await crawler.crawl_feed(options, on_post_collected=on_post_collected)
 
             # 실행 기록 업데이트
             crawl_run.success = True
-            crawl_run.total_collected = len(posts)
-            crawl_run.new_saved = new_saved
+            crawl_run.total_collected = save_stats["total_collected"]
+            crawl_run.new_saved = save_stats["new_saved"]
             crawl_run.finished_at = datetime.utcnow()
 
-            logger.info(f"Crawl completed: {len(posts)} collected, {new_saved} new")
+            logger.info(f"Crawl completed: {save_stats['total_collected']} collected, {save_stats['new_saved']} new (realtime saved)")
 
         except Exception as e:
+            # 에러 발생해도 그때까지 저장된 데이터는 보존됨
             crawl_run.success = False
             crawl_run.error_message = str(e)
+            crawl_run.total_collected = save_stats["total_collected"]
+            crawl_run.new_saved = save_stats["new_saved"]
             crawl_run.finished_at = datetime.utcnow()
-            logger.error(f"Crawl failed: {e}")
+            logger.error(f"Crawl failed after saving {save_stats['new_saved']} posts: {e}")
 
         self.db.commit()
         self.db.refresh(crawl_run)

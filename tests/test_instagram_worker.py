@@ -560,3 +560,170 @@ class TestInstagramWorkerIntegration:
         db_session.refresh(request)
         assert request.status == "failed"
         assert "로그인" in request.error_message
+
+
+# ============================================================
+# REALTIME SAVE: 실시간 저장 테스트
+# ============================================================
+
+class TestRealtimeSave:
+    """실시간 저장 기능 테스트.
+
+    크롤링 중 게시물이 수집될 때마다 즉시 DB에 저장되어야 합니다.
+    크롤러가 중간에 죽어도 그때까지 수집한 데이터는 보존됩니다.
+    """
+
+    @pytest.mark.asyncio
+    async def test_on_post_collected_callback_invoked(self):
+        """crawl_feed가 on_post_collected 콜백을 호출해야 한다."""
+        from app.modules.instagram.services.crawler import InstagramCrawler, CrawlOptions, PostData
+        from unittest.mock import AsyncMock, MagicMock
+
+        # Given: 모킹된 Page
+        mock_page = AsyncMock()
+        mock_article = AsyncMock()
+
+        # article.evaluate 모킹
+        mock_article.evaluate = AsyncMock(return_value={
+            "account": "test_user",
+            "datetime": "2025-01-01T12:00:00Z",
+            "display_time": "1시간 전",
+            "url": "https://www.instagram.com/p/TEST123/",
+            "images": [{"src": "http://example.com/img.jpg", "alt": "test"}],
+            "is_ad": False,
+            "has_more_button": False,
+        })
+
+        mock_page.query_selector_all = AsyncMock(return_value=[mock_article])
+        mock_page.evaluate = AsyncMock()
+
+        crawler = InstagramCrawler(mock_page)
+
+        # 콜백 추적
+        callback_calls = []
+
+        async def track_callback(post: PostData) -> bool:
+            callback_calls.append(post)
+            return True
+
+        # When
+        options = CrawlOptions(max_posts=10, scroll_count=0)
+        await crawler.crawl_feed(options, on_post_collected=track_callback)
+
+        # Then: 콜백이 호출되어야 함
+        assert len(callback_calls) >= 1
+        assert callback_calls[0].url == "https://www.instagram.com/p/TEST123/"
+
+    @pytest.mark.asyncio
+    async def test_crawl_service_realtime_save(self, db_session, sample_account):
+        """CrawlService.run_crawl이 실시간으로 저장해야 한다."""
+        from app.modules.instagram.services.crawl_service import CrawlService
+        from app.modules.instagram.services.crawler import InstagramCrawler, PostData
+        from app.models import InstagramPost
+        from unittest.mock import AsyncMock
+
+        # Given: 모킹된 crawler
+        mock_crawler = AsyncMock(spec=InstagramCrawler)
+        mock_crawler._db_duplicate_checker = None
+
+        posts_to_return = [
+            PostData(
+                index=1,
+                account="user1",
+                url="https://www.instagram.com/p/POST001/",
+                caption="First post",
+                images=[],
+                datetime_str="2025-01-01T10:00:00Z",
+                display_time="1시간 전",
+                is_ad=False,
+            ),
+            PostData(
+                index=2,
+                account="user2",
+                url="https://www.instagram.com/p/POST002/",
+                caption="Second post",
+                images=[],
+                datetime_str="2025-01-01T11:00:00Z",
+                display_time="30분 전",
+                is_ad=False,
+            ),
+        ]
+
+        # crawl_feed가 콜백을 호출하도록 구현
+        async def mock_crawl_feed(options, on_post_collected=None):
+            for post in posts_to_return:
+                if on_post_collected:
+                    await on_post_collected(post)
+            return posts_to_return
+
+        mock_crawler.crawl_feed = mock_crawl_feed
+
+        crawl_service = CrawlService(db_session)
+
+        # When
+        crawl_run = await crawl_service.run_crawl(
+            crawler=mock_crawler,
+            account_id=sample_account.id,
+        )
+
+        # Then: 실행 성공
+        assert crawl_run.success is True
+        assert crawl_run.total_collected == 2
+        assert crawl_run.new_saved == 2
+
+        # DB에 저장 확인
+        saved_posts = db_session.query(InstagramPost).filter(
+            InstagramPost.crawl_run_id == crawl_run.id
+        ).all()
+        assert len(saved_posts) == 2
+
+    @pytest.mark.asyncio
+    async def test_partial_save_on_crash(self, db_session, sample_account):
+        """크롤러 중간 크래시 시 그때까지 저장된 데이터 보존."""
+        from app.modules.instagram.services.crawl_service import CrawlService
+        from app.modules.instagram.services.crawler import InstagramCrawler, PostData
+        from app.models import InstagramPost
+        from unittest.mock import AsyncMock
+
+        # Given
+        mock_crawler = AsyncMock(spec=InstagramCrawler)
+        mock_crawler._db_duplicate_checker = None
+
+        posts_to_return = [
+            PostData(index=1, account="user1", url="https://www.instagram.com/p/SAVED1/",
+                     caption="Saved", images=[], datetime_str=None, display_time=None, is_ad=False),
+            PostData(index=2, account="user2", url="https://www.instagram.com/p/SAVED2/",
+                     caption="Also saved", images=[], datetime_str=None, display_time=None, is_ad=False),
+        ]
+
+        save_count = 0
+
+        async def mock_crawl_feed_with_crash(options, on_post_collected=None):
+            nonlocal save_count
+            for i, post in enumerate(posts_to_return):
+                if on_post_collected:
+                    await on_post_collected(post)
+                    save_count += 1
+            # 2개 저장 후 크래시 시뮬레이션
+            raise Exception("Browser crashed!")
+
+        mock_crawler.crawl_feed = mock_crawl_feed_with_crash
+
+        crawl_service = CrawlService(db_session)
+
+        # When
+        crawl_run = await crawl_service.run_crawl(
+            crawler=mock_crawler,
+            account_id=sample_account.id,
+        )
+
+        # Then: 실패했지만 저장된 데이터는 보존
+        assert crawl_run.success is False
+        assert "Browser crashed!" in crawl_run.error_message
+        assert crawl_run.new_saved == 2  # 크래시 전에 저장됨
+
+        # DB에서 확인
+        saved_posts = db_session.query(InstagramPost).filter(
+            InstagramPost.crawl_run_id == crawl_run.id
+        ).all()
+        assert len(saved_posts) == 2

@@ -5,7 +5,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, Callable, Awaitable
 
 from playwright.async_api import Page, ElementHandle
 
@@ -236,11 +236,17 @@ class InstagramCrawler:
             return False
         return self._db_duplicate_checker(post_id)
 
-    async def crawl_feed(self, options: CrawlOptions = None) -> List[PostData]:
+    async def crawl_feed(
+        self,
+        options: CrawlOptions = None,
+        on_post_collected: Optional[Callable[[PostData], Awaitable[bool]]] = None,
+    ) -> List[PostData]:
         """피드 크롤링 메인 함수.
 
         Args:
             options: 크롤링 옵션
+            on_post_collected: 게시물 수집 시 호출되는 콜백 (즉시 저장용).
+                              콜백이 True 반환하면 신규 저장, False면 중복.
 
         Returns:
             수집된 게시물 목록
@@ -252,7 +258,7 @@ class InstagramCrawler:
         self.processed_urls.clear()
         consecutive_duplicates = 0
 
-        logger.info(f"Starting Instagram feed crawl (max_posts={options.max_posts}, duplicate_stop={options.duplicate_stop_count})")
+        logger.info(f"Starting Instagram feed crawl (max_posts={options.max_posts}, duplicate_stop={options.duplicate_stop_count}, realtime_save={on_post_collected is not None})")
 
         # 초기 게시물 수집
         articles = await self.page.query_selector_all("article")
@@ -286,7 +292,16 @@ class InstagramCrawler:
                 consecutive_duplicates = 0
 
             all_posts.append(post)
-            logger.debug(f"Extracted post #{post.index}: {post.account}")
+
+            # 즉시 저장 콜백 호출
+            if on_post_collected:
+                try:
+                    saved = await on_post_collected(post)
+                    logger.debug(f"Extracted & saved post #{post.index}: {post.account} (saved={saved})")
+                except Exception as e:
+                    logger.error(f"Failed to save post #{post.index}: {e}")
+            else:
+                logger.debug(f"Extracted post #{post.index}: {post.account}")
 
         # 스크롤하여 추가 게시물 로드
         for scroll in range(options.scroll_count):
@@ -332,6 +347,14 @@ class InstagramCrawler:
                     consecutive_duplicates = 0
 
                 all_posts.append(post)
+
+                # 즉시 저장 콜백 호출
+                if on_post_collected:
+                    try:
+                        saved = await on_post_collected(post)
+                        logger.debug(f"Scroll {scroll+1} - saved post #{post.index}: {post.account} (saved={saved})")
+                    except Exception as e:
+                        logger.error(f"Failed to save post #{post.index}: {e}")
 
         logger.info(f"Crawl completed: {len(all_posts)} posts collected (consecutive_duplicates={consecutive_duplicates})")
         return all_posts
