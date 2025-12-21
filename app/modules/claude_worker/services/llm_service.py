@@ -174,13 +174,44 @@ class LLMService:
             {"success": False, "error": "..."}
         """
         try:
-            result = subprocess.run(
-                ["claude", "-p", prompt],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                encoding="utf-8",
-            )
+            import sys
+            import tempfile
+            import os
+
+            # 프롬프트를 임시 파일에 저장하여 전달 (긴 프롬프트 및 특수문자 처리)
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", delete=False, encoding="utf-8"
+            ) as f:
+                f.write(prompt)
+                prompt_file = f.name
+
+            try:
+                # 파일에서 프롬프트 읽어서 실행
+                if sys.platform == "win32":
+                    # Windows: shell=True 필요
+                    cmd = f'type "{prompt_file}" | claude -p'
+                    result = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                        encoding="utf-8",
+                        shell=True,
+                    )
+                else:
+                    # Unix: cat으로 파이프
+                    cmd = f'cat "{prompt_file}" | claude -p'
+                    result = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                        encoding="utf-8",
+                        shell=True,
+                    )
+            finally:
+                # 임시 파일 삭제
+                os.unlink(prompt_file)
 
             if result.returncode != 0:
                 return {
