@@ -34,6 +34,16 @@ class InstagramPost(Base):
 
     # 관계
     crawl_run = relationship("InstagramCrawlRun", back_populates="posts")
+    tag_relations = relationship(
+        "InstagramPostTagRelation",
+        back_populates="post",
+        cascade="all, delete-orphan",
+    )
+
+    @property
+    def tags(self) -> list[str]:
+        """태그 이름 목록 반환."""
+        return [rel.tag.name for rel in self.tag_relations if rel.tag]
 
     def __repr__(self):
         return f"<InstagramPost(id={self.id}, post_id={self.post_id}, account={self.account})>"
