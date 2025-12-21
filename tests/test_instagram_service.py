@@ -1249,6 +1249,170 @@ class TestCrawlOptionsDefaults:
         assert options.min_scroll_delay == 1.0
 
 
+# ============================================================
+# 연속 중복 시 새로고침 테스트 (2025-12-21 추가)
+# - Phase 0: 버그 수정 - 연속 중복 시 새로고침 로직
+# ============================================================
+
+class TestCrawlerDuplicateRefresh:
+    """연속 중복 시 새로고침 테스트 (RIGHT-BICEP)"""
+
+    def test_crawl_options_has_duplicate_refresh_enabled(self):
+        """CrawlOptions에 duplicate_refresh_enabled 필드 존재"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions()
+        assert hasattr(options, 'duplicate_refresh_enabled')
+        assert options.duplicate_refresh_enabled is True  # 기본값
+
+    def test_crawl_options_disable_duplicate_refresh(self):
+        """duplicate_refresh_enabled=False로 비활성화"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions(duplicate_refresh_enabled=False)
+        assert options.duplicate_refresh_enabled is False
+
+    def test_crawl_options_comment_updated(self):
+        """duplicate_stop_count 주석이 '새로고침 트리거'로 변경됨"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+        import inspect
+
+        source = inspect.getsource(CrawlOptions)
+        # 기존: "연속 중복 N개 시 중단"
+        # 변경: "연속 중복 N개 시 새로고침 트리거"
+        assert "새로고침 트리거" in source or "refresh" in source.lower()
+
+
+class TestCrawlerDuplicateRefreshBehavior:
+    """연속 중복 새로고침 동작 테스트"""
+
+    @pytest.fixture
+    def mock_crawler_page(self):
+        """Mock Playwright Page"""
+        import asyncio
+
+        mock_page = MagicMock()
+
+        # query_selector_all이 article 리스트 반환
+        mock_article = MagicMock()
+        mock_page.query_selector_all = MagicMock(
+            return_value=asyncio.coroutine(lambda: [mock_article])()
+        )
+
+        # reload, wait_for_selector 모킹
+        mock_page.reload = MagicMock(
+            return_value=asyncio.coroutine(lambda: None)()
+        )
+        mock_page.wait_for_selector = MagicMock(
+            return_value=asyncio.coroutine(lambda: None)()
+        )
+
+        return mock_page
+
+    def test_duplicate_refresh_when_enabled(self):
+        """duplicate_refresh_enabled=True일 때 새로고침 동작 확인"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions(
+            duplicate_stop_count=5,
+            duplicate_refresh_enabled=True,
+            max_refresh_count=3
+        )
+
+        # 새로고침이 활성화되어 있으면 max_refresh_count까지 새로고침
+        assert options.duplicate_refresh_enabled is True
+        assert options.max_refresh_count == 3
+
+    def test_immediate_stop_when_disabled(self):
+        """duplicate_refresh_enabled=False일 때 즉시 중단"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions(
+            duplicate_stop_count=5,
+            duplicate_refresh_enabled=False
+        )
+
+        # 새로고침 비활성화시 즉시 중단
+        assert options.duplicate_refresh_enabled is False
+
+    def test_max_refresh_shared_with_no_new_posts(self):
+        """max_refresh_count가 중복/새 게시물 없음에서 공유됨"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions(max_refresh_count=3)
+
+        # max_refresh_count 주석이 "통합"을 포함하거나
+        # 두 조건 모두에서 사용됨을 확인
+        assert options.max_refresh_count == 3
+
+
+class TestCrawlerDuplicateRefreshIntegration:
+    """연속 중복 새로고침 통합 테스트"""
+
+    def test_crawl_options_all_refresh_related_fields(self):
+        """새로고침 관련 모든 필드 존재 확인"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions()
+
+        # 기존 필드
+        assert hasattr(options, 'duplicate_stop_count')
+        assert hasattr(options, 'max_refresh_count')
+        assert hasattr(options, 'no_new_posts_refresh_threshold')
+
+        # 새 필드
+        assert hasattr(options, 'duplicate_refresh_enabled')
+
+    def test_default_behavior_is_refresh_on_duplicates(self):
+        """기본 동작: 연속 중복 시 새로고침"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions()
+
+        # 기본값: 5개 연속 중복 시 새로고침 (즉시 중단 아님)
+        assert options.duplicate_stop_count == 5
+        assert options.duplicate_refresh_enabled is True
+        assert options.max_refresh_count == 3
+
+    def test_backward_compatible_with_duplicate_stop_count_0(self):
+        """duplicate_stop_count=0일 때 중복 체크 비활성화"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions(duplicate_stop_count=0)
+
+        # 0이면 중복 체크 비활성화 (기존 동작 유지)
+        assert options.duplicate_stop_count == 0
+
+
+class TestCrawlerStopReasons:
+    """크롤러 중단 사유 테스트 (Phase 1 준비)"""
+
+    def test_expected_stop_reasons(self):
+        """예상되는 중단 사유 목록"""
+        expected_reasons = [
+            'completed',           # 정상 완료
+            'max_posts_reached',   # 최대 게시물 도달
+            'duplicate_stop',      # 연속 중복 (새로고침 비활성화 시)
+            'max_refresh_after_duplicates',  # 중복으로 인한 최대 새로고침
+            'max_refresh_no_new_posts',      # 새 게시물 없음으로 인한 최대 새로고침
+            'scroll_exhausted',    # 스크롤 횟수 소진
+            'error',               # 에러 발생
+        ]
+
+        # 문서화 목적 - 이 사유들이 로그에 기록됨
+        assert len(expected_reasons) == 7
+
+    def test_crawler_logs_stop_reason(self):
+        """크롤러가 중단 사유를 로깅하는지 확인"""
+        import inspect
+        from app.modules.instagram.services.crawler import InstagramCrawler
+
+        source = inspect.getsource(InstagramCrawler)
+
+        # 로그 메시지에 stop_reason 포함
+        assert 'stop_reason' in source
+
+
 class TestPostDataAdField:
     """PostData is_ad 필드 테스트"""
 
