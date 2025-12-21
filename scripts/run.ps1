@@ -50,8 +50,8 @@ try {
         $env:SKIP_FRONTEND = $null
         $env:SKIP_WORKER = $null
 
-        # Wait for log files to be created
-        Start-Sleep -Seconds 2
+        # Wait for log files to be created (watchdog starts worker after a delay)
+        Start-Sleep -Seconds 4
 
         # Find the most recent log files by filename (contains timestamp like worker_20251211_094846.log)
         # Using Name sort instead of LastWriteTime because old log files may be updated when processes stop
@@ -60,8 +60,10 @@ try {
         $apiLog = Get-ChildItem -Path $LogDir -Filter "api_*.log" -ErrorAction SilentlyContinue |
             Sort-Object Name -Descending | Select-Object -First 1
 
+        # Worker log may be created by watchdog with delay, so we track the latest one dynamically
         $workerLog = Get-ChildItem -Path $LogDir -Filter "worker_*.log" -ErrorAction SilentlyContinue |
             Sort-Object Name -Descending | Select-Object -First 1
+        $workerLogName = if ($workerLog) { $workerLog.Name } else { $null }
 
         Write-Host ""
         Write-Host "[Step 2] Starting frontend + tailing backend logs..." -ForegroundColor Cyan
@@ -88,6 +90,10 @@ try {
         # Track log file positions for tailing
         $apiPos = if ($apiLog) { (Get-Item $apiLog.FullName).Length } else { 0 }
         $workerPos = if ($workerLog) { (Get-Item $workerLog.FullName).Length } else { 0 }
+
+        # Watchdog log (if exists)
+        $watchdogLogFile = Join-Path $LogDir "watchdog.log"
+        $watchdogPos = if (Test-Path $watchdogLogFile) { (Get-Item $watchdogLogFile).Length } else { 0 }
 
         # Start frontend in background (so we can tail logs)
         $FrontendDir = Join-Path $ProjectRoot "frontend"
@@ -163,7 +169,32 @@ try {
                     }
                 }
 
-                # Tail Worker log
+                # Tail Watchdog log
+                if (Test-Path $watchdogLogFile) {
+                    $currentSize = (Get-Item $watchdogLogFile).Length
+                    if ($currentSize -gt $watchdogPos) {
+                        $stream = [System.IO.FileStream]::new($watchdogLogFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                        $stream.Seek($watchdogPos, [System.IO.SeekOrigin]::Begin) | Out-Null
+                        $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
+                        while ($null -ne ($line = $reader.ReadLine())) {
+                            Write-Host "[WATCHDOG] $line" -ForegroundColor DarkYellow
+                        }
+                        $watchdogPos = $stream.Position
+                        $reader.Close()
+                        $stream.Close()
+                    }
+                }
+
+                # Tail Worker log (check for new log file from watchdog restart)
+                $latestWorkerLog = Get-ChildItem -Path $LogDir -Filter "worker_*.log" -ErrorAction SilentlyContinue |
+                    Sort-Object Name -Descending | Select-Object -First 1
+                if ($latestWorkerLog -and $latestWorkerLog.Name -ne $workerLogName) {
+                    # New worker log file detected (worker restarted by watchdog)
+                    Write-Host "[WORKER] === New worker log: $($latestWorkerLog.Name) ===" -ForegroundColor Yellow
+                    $workerLog = $latestWorkerLog
+                    $workerLogName = $latestWorkerLog.Name
+                    $workerPos = 0
+                }
                 if ($workerLog -and (Test-Path $workerLog.FullName)) {
                     $currentSize = (Get-Item $workerLog.FullName).Length
                     if ($currentSize -gt $workerPos) {

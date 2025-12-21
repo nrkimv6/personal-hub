@@ -162,26 +162,32 @@ if ($runApi) {
 # Wait for API server initialization
 Start-Sleep -Seconds 2
 
-# Start Worker
+# Start Worker with Watchdog for auto-restart
 if ($runWorker) {
-    Write-Host "`n[*] Starting Worker..." -ForegroundColor Cyan
+    Write-Host "`n[*] Starting Worker with Watchdog..." -ForegroundColor Cyan
 
     $workerLogFile = Join-Path $LogDir "worker_$Timestamp.log"
+    $watchdogLogFile = Join-Path $LogDir "watchdog.log"
 
-    # Start worker in background
-    # stdout/stderr goes to separate file (stdout_worker_*.log), Python logging goes to worker_*.log
-    $stdoutLogFile = Join-Path $LogDir "stdout_worker_$Timestamp.log"
-    $workerProcess = Start-Process -FilePath "cmd.exe" `
-        -ArgumentList "/c", "set PYTHONIOENCODING=utf-8 && python -m app.worker.monitor_worker > `"$stdoutLogFile`" 2>&1" `
+    # Start watchdog process which will manage the worker
+    # Watchdog monitors worker and restarts it if it crashes
+    $watchdogProcess = Start-Process -FilePath "powershell.exe" `
+        -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\worker-watchdog.ps1" `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
         -PassThru
 
-    # Save PID
-    $workerProcess.Id | Out-File $WorkerPidFile -Encoding ascii
+    # Save Watchdog PID to separate file (worker PID will be managed by watchdog in worker.pid)
+    $WatchdogPidFile = Join-Path $PidDir "watchdog.pid"
+    $watchdogProcess.Id | Out-File $WatchdogPidFile -Encoding ascii
 
-    Write-Host "[+] Worker started (PID: $($workerProcess.Id))" -ForegroundColor Green
-    Write-Host "    Log: $workerLogFile"
+    # Wait for worker to actually start
+    Start-Sleep -Seconds 2
+
+    Write-Host "[+] Worker Watchdog started (PID: $($watchdogProcess.Id))" -ForegroundColor Green
+    Write-Host "    Worker Log: $workerLogFile"
+    Write-Host "    Watchdog Log: $watchdogLogFile"
+    Write-Host "    [!] Worker will auto-restart if it crashes" -ForegroundColor Yellow
 }
 
 # Start Frontend

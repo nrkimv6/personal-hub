@@ -12,9 +12,34 @@ import logging.handlers
 import queue
 import atexit
 import sys
+import io
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+
+
+class SafeStreamHandler(logging.StreamHandler):
+    """
+    Windows cp949 인코딩에서 이모지 등 유니코드 문자를 안전하게 처리하는 핸들러.
+    인코딩 에러 발생 시 문자를 대체하여 로그 출력 실패를 방지합니다.
+    """
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            stream = self.stream
+            # Windows 콘솔에서 인코딩 문제 처리
+            try:
+                stream.write(msg + self.terminator)
+            except UnicodeEncodeError:
+                # 이모지를 ASCII로 대체
+                safe_msg = msg.encode('ascii', errors='replace').decode('ascii')
+                stream.write(safe_msg + self.terminator)
+            self.flush()
+        except RecursionError:
+            raise
+        except Exception:
+            self.handleError(record)
 
 
 class AsyncLoggerManager:
@@ -109,9 +134,9 @@ class AsyncLoggerManager:
             file_handler.setFormatter(formatter)
             handlers.append(file_handler)
 
-        # 콘솔 핸들러
+        # 콘솔 핸들러 (Windows cp949 인코딩 문제 방지)
         if console_output:
-            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler = SafeStreamHandler(sys.stdout)
             console_handler.setLevel(console_level)
             console_handler.setFormatter(formatter)
             handlers.append(console_handler)

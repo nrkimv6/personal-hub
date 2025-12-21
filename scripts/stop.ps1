@@ -26,12 +26,45 @@ $FrontendPort = 5173
 $PidDir = Join-Path $ProjectRoot ".pids"
 $ApiPidFile = Join-Path $PidDir "api.pid"
 $WorkerPidFile = Join-Path $PidDir "worker.pid"
+$WatchdogPidFile = Join-Path $PidDir "watchdog.pid"
 $FrontendPidFile = Join-Path $PidDir "frontend.pid"
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Red
 Write-Host "  Monitor Page Process Stop" -ForegroundColor Red
 Write-Host "========================================" -ForegroundColor Red
+Write-Host ""
+
+# ============================================================
+# STEP 0: Kill Worker Watchdog (PowerShell) if running
+# ============================================================
+Write-Host "[0] Killing Worker Watchdog process" -ForegroundColor Cyan
+Write-Host "----------------------------------------"
+
+$watchdogKilled = 0
+$psProcs = Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue
+
+if ($psProcs) {
+    foreach ($proc in $psProcs) {
+        $cmd = $proc.CommandLine
+        if ($cmd -and $cmd -match "worker-watchdog\.ps1") {
+            $procId = $proc.ProcessId
+            Write-Host "  [*] Watchdog PID $procId" -ForegroundColor Yellow
+            try {
+                Stop-Process -Id $procId -Force -ErrorAction Stop
+                Write-Host "      -> Killed" -ForegroundColor Green
+                $watchdogKilled++
+            } catch {
+                Write-Host "      -> Failed: $($_.Exception.Message)" -ForegroundColor Red
+            }
+        }
+    }
+}
+
+if ($watchdogKilled -eq 0) {
+    Write-Host "  (no watchdog process found)" -ForegroundColor Gray
+}
+
 Write-Host ""
 
 # ============================================================
@@ -157,7 +190,7 @@ Write-Host ""
 Write-Host "[4] Cleaning up PID files" -ForegroundColor Cyan
 Write-Host "----------------------------------------"
 
-foreach ($pidFile in @($ApiPidFile, $WorkerPidFile, $FrontendPidFile)) {
+foreach ($pidFile in @($ApiPidFile, $WorkerPidFile, $WatchdogPidFile, $FrontendPidFile)) {
     if (Test-Path $pidFile) {
         $name = Split-Path $pidFile -Leaf
         Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
