@@ -389,14 +389,16 @@ class TestBackwardCompatibility:
     def test_feed_request_still_works(self, mock_db):
         """기존 feed 요청 생성이 정상 동작"""
         from app.modules.instagram.services.request_service import CrawlRequestService
-
-        mock_db.query.return_value.filter.return_value.first.return_value = None
+        from unittest.mock import patch
 
         service = CrawlRequestService(mock_db)
-        request = service.create_request(
-            account_id=1,
-            requested_by="manual"
-        )
+
+        # get_pending_request를 직접 mock하여 None 반환
+        with patch.object(service, 'get_pending_request', return_value=None):
+            request = service.create_request(
+                account_id=1,
+                requested_by="manual"
+            )
 
         mock_db.add.assert_called_once()
 

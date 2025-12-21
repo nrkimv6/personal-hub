@@ -8,7 +8,7 @@ import os
 
 from sqlalchemy.orm import Session
 
-from app.models import InstagramWorkerStatus
+from app.models import InstagramWorkerStatus, InstagramCrawlRun
 
 logger = logging.getLogger("instagram.worker_status")
 
@@ -31,6 +31,7 @@ class WorkerStatusService:
         """새 워커를 등록합니다.
 
         기존 alive 워커가 있으면 dead로 표시하고 새 워커를 등록합니다.
+        또한 이전 워커 크래시로 인해 '실행중' 상태로 남은 orphaned run들을 정리합니다.
 
         Args:
             worker_id: 워커 ID (없으면 UUID 생성)
@@ -48,6 +49,9 @@ class WorkerStatusService:
             InstagramWorkerStatus.is_alive == True
         ).update({"is_alive": False})
 
+        # Orphaned 실행 기록 정리 (finished_at이 NULL인 레코드)
+        orphaned_count = self._cleanup_orphaned_runs()
+
         # 새 워커 등록
         worker_status = InstagramWorkerStatus(
             worker_id=worker_id,
@@ -62,7 +66,35 @@ class WorkerStatusService:
         self.db.refresh(worker_status)
 
         logger.info(f"Worker registered: {worker_id} (PID: {worker_status.pid})")
+        if orphaned_count > 0:
+            logger.info(f"Cleaned up {orphaned_count} orphaned crawl runs")
+
         return worker_status
+
+    def _cleanup_orphaned_runs(self) -> int:
+        """이전 워커 크래시로 인해 '실행중' 상태로 남은 orphaned run들을 정리합니다.
+
+        finished_at이 NULL인 레코드들을 찾아 실패 처리합니다.
+
+        Returns:
+            정리된 레코드 수
+        """
+        now = datetime.now()
+
+        orphaned_runs = self.db.query(InstagramCrawlRun).filter(
+            InstagramCrawlRun.finished_at.is_(None)
+        ).all()
+
+        for run in orphaned_runs:
+            run.finished_at = now
+            run.success = False
+            run.error_message = "Worker crashed - marked as failed on restart"
+            run.failure_reason = "worker_crash"
+
+        if orphaned_runs:
+            self.db.flush()
+
+        return len(orphaned_runs)
 
     def update_heartbeat(self, worker_id: str) -> Optional[InstagramWorkerStatus]:
         """워커의 heartbeat를 업데이트합니다.

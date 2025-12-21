@@ -23,6 +23,7 @@ from app.models import Account, InstagramCrawlRequest, InstagramCrawlRun, Instag
 from app.modules.instagram.services.request_service import CrawlRequestService
 from app.modules.instagram.services.crawl_service import CrawlService
 from app.modules.instagram.services.scheduler import InstagramScheduler
+from app.modules.instagram.services.worker_status_service import WorkerStatusService
 from app.modules.instagram.models.schemas import TimeWindow
 
 
@@ -727,3 +728,166 @@ class TestRealtimeSave:
             InstagramPost.crawl_run_id == crawl_run.id
         ).all()
         assert len(saved_posts) == 2
+
+
+# ============================================================
+# ORPHANED RUN CLEANUP: 워커 크래시 후 정리 테스트
+# ============================================================
+
+class TestOrphanedRunCleanup:
+    """워커 크래시로 인한 orphaned run 정리 테스트.
+
+    워커가 비정상 종료되면 finished_at이 NULL인 상태로 남는 실행 기록이 생깁니다.
+    새 워커가 시작될 때 이런 orphaned run들을 자동으로 실패 처리해야 합니다.
+    """
+
+    def test_cleanup_single_orphaned_run(self, db_session, sample_account):
+        """단일 orphaned run이 정리되어야 한다."""
+        # Given: finished_at이 NULL인 실행 기록 (워커 크래시 시뮬레이션)
+        orphaned_run = InstagramCrawlRun(
+            account_id=sample_account.id,
+            started_at=datetime.utcnow() - timedelta(hours=1),
+            finished_at=None,  # 워커 크래시로 미완료
+            success=False,
+            total_collected=5,
+            new_saved=3,
+        )
+        db_session.add(orphaned_run)
+        db_session.commit()
+
+        # When: 새 워커 등록
+        service = WorkerStatusService(db_session)
+        service.register_worker()
+
+        # Then: orphaned run이 실패 처리됨
+        db_session.refresh(orphaned_run)
+        assert orphaned_run.finished_at is not None
+        assert orphaned_run.success is False
+        assert orphaned_run.failure_reason == "worker_crash"
+        assert "Worker crashed" in orphaned_run.error_message
+
+    def test_cleanup_multiple_orphaned_runs(self, db_session, sample_account):
+        """여러 orphaned run이 모두 정리되어야 한다."""
+        # Given: 여러 orphaned runs
+        orphaned_runs = []
+        for i in range(3):
+            run = InstagramCrawlRun(
+                account_id=sample_account.id,
+                started_at=datetime.utcnow() - timedelta(hours=i + 1),
+                finished_at=None,
+                success=False,
+                total_collected=i * 2,
+                new_saved=i,
+            )
+            db_session.add(run)
+            orphaned_runs.append(run)
+        db_session.commit()
+
+        # When: 새 워커 등록
+        service = WorkerStatusService(db_session)
+        service.register_worker()
+
+        # Then: 모든 orphaned runs가 정리됨
+        for run in orphaned_runs:
+            db_session.refresh(run)
+            assert run.finished_at is not None
+            assert run.failure_reason == "worker_crash"
+
+    def test_completed_runs_not_affected(self, db_session, sample_account):
+        """이미 완료된 실행 기록은 영향받지 않아야 한다."""
+        # Given: 정상 완료된 실행 기록
+        completed_run = InstagramCrawlRun(
+            account_id=sample_account.id,
+            started_at=datetime.utcnow() - timedelta(hours=2),
+            finished_at=datetime.utcnow() - timedelta(hours=1),
+            success=True,
+            total_collected=10,
+            new_saved=8,
+        )
+        db_session.add(completed_run)
+        db_session.commit()
+
+        original_finished_at = completed_run.finished_at
+        original_error_message = completed_run.error_message
+
+        # When: 새 워커 등록
+        service = WorkerStatusService(db_session)
+        service.register_worker()
+
+        # Then: 완료된 실행 기록은 변경되지 않음
+        db_session.refresh(completed_run)
+        assert completed_run.finished_at == original_finished_at
+        assert completed_run.success is True
+        assert completed_run.error_message == original_error_message
+        assert completed_run.failure_reason is None
+
+    def test_mixed_runs_only_orphaned_cleaned(self, db_session, sample_account):
+        """orphaned run만 정리되고 완료된 것은 유지되어야 한다."""
+        # Given: 완료된 것과 orphaned 혼합
+        completed_run = InstagramCrawlRun(
+            account_id=sample_account.id,
+            started_at=datetime.utcnow() - timedelta(hours=3),
+            finished_at=datetime.utcnow() - timedelta(hours=2),
+            success=True,
+            total_collected=15,
+            new_saved=10,
+        )
+        orphaned_run = InstagramCrawlRun(
+            account_id=sample_account.id,
+            started_at=datetime.utcnow() - timedelta(hours=1),
+            finished_at=None,
+            success=False,
+            total_collected=5,
+            new_saved=3,
+        )
+        db_session.add_all([completed_run, orphaned_run])
+        db_session.commit()
+
+        # When
+        service = WorkerStatusService(db_session)
+        service.register_worker()
+
+        # Then
+        db_session.refresh(completed_run)
+        db_session.refresh(orphaned_run)
+
+        # 완료된 것은 그대로
+        assert completed_run.success is True
+        assert completed_run.failure_reason is None
+
+        # orphaned만 정리됨
+        assert orphaned_run.finished_at is not None
+        assert orphaned_run.failure_reason == "worker_crash"
+
+    def test_no_orphaned_runs(self, db_session):
+        """orphaned run이 없으면 에러 없이 처리되어야 한다."""
+        # Given: orphaned run 없음
+        service = WorkerStatusService(db_session)
+
+        # When/Then: 에러 없이 워커 등록
+        worker = service.register_worker()
+        assert worker is not None
+        assert worker.is_alive is True
+
+    def test_cleanup_preserves_collected_counts(self, db_session, sample_account):
+        """정리 시 수집된 데이터 카운트는 보존되어야 한다."""
+        # Given
+        orphaned_run = InstagramCrawlRun(
+            account_id=sample_account.id,
+            started_at=datetime.utcnow() - timedelta(hours=1),
+            finished_at=None,
+            success=False,
+            total_collected=25,
+            new_saved=20,
+        )
+        db_session.add(orphaned_run)
+        db_session.commit()
+
+        # When
+        service = WorkerStatusService(db_session)
+        service.register_worker()
+
+        # Then: 카운트는 보존됨
+        db_session.refresh(orphaned_run)
+        assert orphaned_run.total_collected == 25
+        assert orphaned_run.new_saved == 20
