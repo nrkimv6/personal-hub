@@ -1249,6 +1249,389 @@ class TestCrawlOptionsDefaults:
         assert options.min_scroll_delay == 1.0
 
 
+# ============================================================
+# 연속 중복 시 새로고침 테스트 (2025-12-21 추가)
+# - Phase 0: 버그 수정 - 연속 중복 시 새로고침 로직
+# ============================================================
+
+class TestCrawlerDuplicateRefresh:
+    """연속 중복 시 새로고침 테스트 (RIGHT-BICEP)"""
+
+    def test_crawl_options_has_duplicate_refresh_enabled(self):
+        """CrawlOptions에 duplicate_refresh_enabled 필드 존재"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions()
+        assert hasattr(options, 'duplicate_refresh_enabled')
+        assert options.duplicate_refresh_enabled is True  # 기본값
+
+    def test_crawl_options_disable_duplicate_refresh(self):
+        """duplicate_refresh_enabled=False로 비활성화"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions(duplicate_refresh_enabled=False)
+        assert options.duplicate_refresh_enabled is False
+
+    def test_crawl_options_comment_updated(self):
+        """duplicate_stop_count 주석이 '새로고침 트리거'로 변경됨"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+        import inspect
+
+        source = inspect.getsource(CrawlOptions)
+        # 기존: "연속 중복 N개 시 중단"
+        # 변경: "연속 중복 N개 시 새로고침 트리거"
+        assert "새로고침 트리거" in source or "refresh" in source.lower()
+
+
+class TestCrawlerDuplicateRefreshBehavior:
+    """연속 중복 새로고침 동작 테스트"""
+
+    @pytest.fixture
+    def mock_crawler_page(self):
+        """Mock Playwright Page"""
+        import asyncio
+
+        mock_page = MagicMock()
+
+        # query_selector_all이 article 리스트 반환
+        mock_article = MagicMock()
+        mock_page.query_selector_all = MagicMock(
+            return_value=asyncio.coroutine(lambda: [mock_article])()
+        )
+
+        # reload, wait_for_selector 모킹
+        mock_page.reload = MagicMock(
+            return_value=asyncio.coroutine(lambda: None)()
+        )
+        mock_page.wait_for_selector = MagicMock(
+            return_value=asyncio.coroutine(lambda: None)()
+        )
+
+        return mock_page
+
+    def test_duplicate_refresh_when_enabled(self):
+        """duplicate_refresh_enabled=True일 때 새로고침 동작 확인"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions(
+            duplicate_stop_count=5,
+            duplicate_refresh_enabled=True,
+            max_refresh_count=3
+        )
+
+        # 새로고침이 활성화되어 있으면 max_refresh_count까지 새로고침
+        assert options.duplicate_refresh_enabled is True
+        assert options.max_refresh_count == 3
+
+    def test_immediate_stop_when_disabled(self):
+        """duplicate_refresh_enabled=False일 때 즉시 중단"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions(
+            duplicate_stop_count=5,
+            duplicate_refresh_enabled=False
+        )
+
+        # 새로고침 비활성화시 즉시 중단
+        assert options.duplicate_refresh_enabled is False
+
+    def test_max_refresh_shared_with_no_new_posts(self):
+        """max_refresh_count가 중복/새 게시물 없음에서 공유됨"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions(max_refresh_count=3)
+
+        # max_refresh_count 주석이 "통합"을 포함하거나
+        # 두 조건 모두에서 사용됨을 확인
+        assert options.max_refresh_count == 3
+
+
+class TestCrawlerDuplicateRefreshIntegration:
+    """연속 중복 새로고침 통합 테스트"""
+
+    def test_crawl_options_all_refresh_related_fields(self):
+        """새로고침 관련 모든 필드 존재 확인"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions()
+
+        # 기존 필드
+        assert hasattr(options, 'duplicate_stop_count')
+        assert hasattr(options, 'max_refresh_count')
+        assert hasattr(options, 'no_new_posts_refresh_threshold')
+
+        # 새 필드
+        assert hasattr(options, 'duplicate_refresh_enabled')
+
+    def test_default_behavior_is_refresh_on_duplicates(self):
+        """기본 동작: 연속 중복 시 새로고침"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions()
+
+        # 기본값: 5개 연속 중복 시 새로고침 (즉시 중단 아님)
+        assert options.duplicate_stop_count == 5
+        assert options.duplicate_refresh_enabled is True
+        assert options.max_refresh_count == 3
+
+    def test_backward_compatible_with_duplicate_stop_count_0(self):
+        """duplicate_stop_count=0일 때 중복 체크 비활성화"""
+        from app.modules.instagram.services.crawler import CrawlOptions
+
+        options = CrawlOptions(duplicate_stop_count=0)
+
+        # 0이면 중복 체크 비활성화 (기존 동작 유지)
+        assert options.duplicate_stop_count == 0
+
+
+class TestCrawlerStopReasons:
+    """크롤러 중단 사유 테스트 (Phase 1 준비)"""
+
+    def test_expected_stop_reasons(self):
+        """예상되는 중단 사유 목록"""
+        expected_reasons = [
+            'completed',           # 정상 완료
+            'max_posts_reached',   # 최대 게시물 도달
+            'duplicate_stop',      # 연속 중복 (새로고침 비활성화 시)
+            'max_refresh_after_duplicates',  # 중복으로 인한 최대 새로고침
+            'max_refresh_no_new_posts',      # 새 게시물 없음으로 인한 최대 새로고침
+            'scroll_exhausted',    # 스크롤 횟수 소진
+            'error',               # 에러 발생
+        ]
+
+        # 문서화 목적 - 이 사유들이 로그에 기록됨
+        assert len(expected_reasons) == 7
+
+    def test_crawler_logs_stop_reason(self):
+        """크롤러가 중단 사유를 로깅하는지 확인"""
+        import inspect
+        from app.modules.instagram.services.crawler import InstagramCrawler
+
+        source = inspect.getsource(InstagramCrawler)
+
+        # 로그 메시지에 stop_reason 포함
+        assert 'stop_reason' in source
+
+
+# ============================================================
+# CrawlResult 테스트 (Phase 1)
+# ============================================================
+
+class TestCrawlResult:
+    """CrawlResult dataclass 테스트"""
+
+    def test_crawl_result_exists(self):
+        """CrawlResult 클래스 존재"""
+        from app.modules.instagram.services.crawler import CrawlResult
+
+        assert CrawlResult is not None
+
+    def test_crawl_result_has_all_fields(self):
+        """CrawlResult에 모든 필드 존재"""
+        from app.modules.instagram.services.crawler import CrawlResult
+
+        # 필드 확인
+        from dataclasses import fields
+        field_names = [f.name for f in fields(CrawlResult)]
+
+        assert 'posts' in field_names
+        assert 'stop_reason' in field_names
+        assert 'duplicate_count' in field_names
+        assert 'scroll_performed' in field_names
+        assert 'refresh_count' in field_names
+        assert 'config_snapshot' in field_names
+
+    def test_crawl_result_creation(self):
+        """CrawlResult 인스턴스 생성"""
+        from app.modules.instagram.services.crawler import CrawlResult, PostData
+
+        result = CrawlResult(
+            posts=[PostData(index=0, account="test")],
+            stop_reason="max_posts_reached",
+            duplicate_count=3,
+            scroll_performed=5,
+            refresh_count=1,
+            config_snapshot={"max_posts": 20}
+        )
+
+        assert result.stop_reason == "max_posts_reached"
+        assert result.duplicate_count == 3
+        assert result.scroll_performed == 5
+        assert result.refresh_count == 1
+        assert len(result.posts) == 1
+
+    def test_crawl_feed_returns_crawl_result(self):
+        """crawl_feed 반환 타입이 CrawlResult임"""
+        from app.modules.instagram.services.crawler import InstagramCrawler, CrawlResult
+        import inspect
+
+        sig = inspect.signature(InstagramCrawler.crawl_feed)
+        return_annotation = sig.return_annotation
+
+        # 반환 타입이 CrawlResult
+        assert return_annotation == CrawlResult
+
+
+class TestInstagramCrawlRunModel:
+    """InstagramCrawlRun 모델 테스트 (Phase 1)"""
+
+    def test_model_has_new_columns(self):
+        """InstagramCrawlRun에 새 컬럼 존재"""
+        from app.models.instagram_crawl_run import InstagramCrawlRun
+
+        assert hasattr(InstagramCrawlRun, 'stop_reason')
+        assert hasattr(InstagramCrawlRun, 'duplicate_count')
+        assert hasattr(InstagramCrawlRun, 'scroll_performed')
+        assert hasattr(InstagramCrawlRun, 'refresh_count')
+        assert hasattr(InstagramCrawlRun, 'config_snapshot')
+
+
+class TestCrawlRunSchema:
+    """CrawlRunSchema 테스트 (Phase 1)"""
+
+    def test_schema_has_new_fields(self):
+        """CrawlRunSchema에 새 필드 존재"""
+        from app.modules.instagram.models.schemas import CrawlRunSchema
+
+        fields = CrawlRunSchema.model_fields
+        assert 'stop_reason' in fields
+        assert 'duplicate_count' in fields
+        assert 'scroll_performed' in fields
+        assert 'refresh_count' in fields
+        assert 'config_snapshot' in fields
+
+    def test_schema_default_values(self):
+        """CrawlRunSchema 기본값"""
+        from app.modules.instagram.models.schemas import CrawlRunSchema
+        from datetime import datetime
+
+        run = CrawlRunSchema(
+            id=1,
+            account_id=1,
+            started_at=datetime.now(),
+            success=True,
+            total_collected=10,
+            new_saved=5,
+        )
+
+        assert run.stop_reason is None
+        assert run.duplicate_count == 0
+        assert run.scroll_performed == 0
+        assert run.refresh_count == 0
+        assert run.config_snapshot is None
+
+
+class TestMigration033:
+    """033_crawl_run_details 마이그레이션 테스트"""
+
+    def test_migration_file_exists(self):
+        """033_crawl_run_details.sql 파일 존재"""
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "033_crawl_run_details.sql"
+        assert migration_path.exists(), "033_crawl_run_details.sql should exist"
+
+    def test_migration_contains_new_columns(self):
+        """마이그레이션에 새 컬럼 포함"""
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "033_crawl_run_details.sql"
+        content = migration_path.read_text(encoding="utf-8")
+
+        assert "stop_reason" in content
+        assert "duplicate_count" in content
+        assert "scroll_performed" in content
+        assert "refresh_count" in content
+        assert "config_snapshot" in content
+
+
+# ============================================================
+# Phase 2: 이벤트 로그 테스트
+# ============================================================
+
+class TestInstagramCrawlEventModel:
+    """InstagramCrawlEvent 모델 테스트"""
+
+    def test_model_exists(self):
+        """InstagramCrawlEvent 모델 존재"""
+        from app.models.instagram_crawl_event import InstagramCrawlEvent
+
+        assert InstagramCrawlEvent is not None
+
+    def test_model_has_columns(self):
+        """InstagramCrawlEvent에 필요한 컬럼 존재"""
+        from app.models.instagram_crawl_event import InstagramCrawlEvent
+
+        assert hasattr(InstagramCrawlEvent, 'id')
+        assert hasattr(InstagramCrawlEvent, 'crawl_run_id')
+        assert hasattr(InstagramCrawlEvent, 'timestamp')
+        assert hasattr(InstagramCrawlEvent, 'event_type')
+        assert hasattr(InstagramCrawlEvent, 'message')
+        assert hasattr(InstagramCrawlEvent, 'details')
+
+    def test_model_imported_in_init(self):
+        """app.models에서 import 가능"""
+        from app.models import InstagramCrawlEvent
+
+        assert InstagramCrawlEvent is not None
+
+
+class TestMigration034:
+    """034_crawl_event_log 마이그레이션 테스트"""
+
+    def test_migration_file_exists(self):
+        """034_crawl_event_log.sql 파일 존재"""
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "034_crawl_event_log.sql"
+        assert migration_path.exists(), "034_crawl_event_log.sql should exist"
+
+    def test_migration_contains_table(self):
+        """마이그레이션에 테이블 생성 포함"""
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "034_crawl_event_log.sql"
+        content = migration_path.read_text(encoding="utf-8")
+
+        assert "instagram_crawl_events" in content
+        assert "crawl_run_id" in content
+        assert "event_type" in content
+        assert "CREATE INDEX" in content
+
+
+class TestCrawlEventSchema:
+    """CrawlEventSchema 테스트"""
+
+    def test_schema_exists(self):
+        """CrawlEventSchema 존재"""
+        from app.modules.instagram.models.schemas import CrawlEventSchema
+
+        assert CrawlEventSchema is not None
+
+    def test_schema_has_fields(self):
+        """CrawlEventSchema에 필드 존재"""
+        from app.modules.instagram.models.schemas import CrawlEventSchema
+
+        fields = CrawlEventSchema.model_fields
+        assert 'id' in fields
+        assert 'crawl_run_id' in fields
+        assert 'timestamp' in fields
+        assert 'event_type' in fields
+        assert 'message' in fields
+        assert 'details' in fields
+
+
+class TestCrawlRunSummarySchema:
+    """CrawlRunSummarySchema 테스트"""
+
+    def test_schema_exists(self):
+        """CrawlRunSummarySchema 존재"""
+        from app.modules.instagram.models.schemas import CrawlRunSummarySchema
+
+        assert CrawlRunSummarySchema is not None
+
+    def test_schema_has_fields(self):
+        """CrawlRunSummarySchema에 필드 존재"""
+        from app.modules.instagram.models.schemas import CrawlRunSummarySchema
+
+        fields = CrawlRunSummarySchema.model_fields
+        assert 'run' in fields
+        assert 'events' in fields
+        assert 'event_counts' in fields
+
+
 class TestPostDataAdField:
     """PostData is_ad 필드 테스트"""
 

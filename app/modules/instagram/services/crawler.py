@@ -20,9 +20,10 @@ class CrawlOptions:
     scroll_count: int = 3
     wait_after_more: float = 1.0  # 더보기 클릭 후 대기 (0.5 → 1.0초)
     wait_after_scroll: float = 2.0
-    duplicate_stop_count: int = 5  # 연속 중복 N개 시 중단 (0이면 비활성화)
-    max_refresh_count: int = 3  # 새 게시물 없을 때 최대 새로고침 횟수
+    duplicate_stop_count: int = 5  # 연속 중복 N개 시 새로고침 트리거 (0이면 비활성화)
+    max_refresh_count: int = 3  # 최대 새로고침 횟수 (중복/새 게시물 없음 통합)
     no_new_posts_refresh_threshold: int = 3  # N회 연속 새 게시물 없으면 새로고침
+    duplicate_refresh_enabled: bool = True  # 연속 중복 시 새로고침 활성화 (False면 즉시 중단)
     # 스크롤 동작 설정
     scroll_behavior: str = "human"  # "human" | "fast"
     min_scroll_delay: float = 1.5  # 최소 스크롤 대기 (초)
@@ -41,6 +42,20 @@ class PostData:
     caption: Optional[str] = None
     images: List[Dict[str, str]] = field(default_factory=list)
     is_ad: bool = False
+
+
+@dataclass
+class CrawlResult:
+    """크롤링 결과 데이터.
+
+    크롤링 완료 후 통계 및 상세 정보를 포함합니다.
+    """
+    posts: List[PostData]
+    stop_reason: str  # 'max_posts_reached', 'duplicate_stop', 'max_refresh_after_duplicates', etc.
+    duplicate_count: int  # 중단 시점의 연속 중복 개수
+    scroll_performed: int  # 실제 수행된 스크롤 횟수
+    refresh_count: int  # 새로고침 횟수
+    config_snapshot: Dict[str, Any]  # 수집 시점의 설정값
 
 
 class InstagramCrawler:
@@ -393,7 +408,7 @@ class InstagramCrawler:
         self,
         options: CrawlOptions = None,
         on_post_collected: Optional[Callable[[PostData], Awaitable[bool]]] = None,
-    ) -> List[PostData]:
+    ) -> CrawlResult:
         """피드 크롤링 메인 함수.
 
         Args:
@@ -402,7 +417,7 @@ class InstagramCrawler:
                               콜백이 True 반환하면 신규 저장, False면 중복.
 
         Returns:
-            수집된 게시물 목록
+            CrawlResult: 크롤링 결과 (게시물 목록, 통계 정보)
         """
         if options is None:
             options = CrawlOptions()
@@ -410,21 +425,37 @@ class InstagramCrawler:
         all_posts: List[PostData] = []
         self.processed_urls.clear()
         consecutive_duplicates = 0
+        refresh_count = 0  # 새로고침 횟수 (초기 수집에서도 사용)
+        stop_reason = "completed"  # 종료 사유 추적
 
-        logger.info(f"Starting Instagram feed crawl (max_posts={options.max_posts}, duplicate_stop={options.duplicate_stop_count}, realtime_save={on_post_collected is not None})")
+        logger.info(f"Starting Instagram feed crawl (max_posts={options.max_posts}, duplicate_stop={options.duplicate_stop_count}, duplicate_refresh={options.duplicate_refresh_enabled}, realtime_save={on_post_collected is not None})")
 
         # 초기 게시물 수집
         articles = await self.page.query_selector_all("article")
         logger.debug(f"Found {len(articles)} initial articles")
 
+        initial_stop = False
         for i, article in enumerate(articles):
             if len(all_posts) >= options.max_posts:
+                stop_reason = "max_posts_reached"
                 break
 
-            # 연속 중복 체크로 중단
+            # 연속 중복 체크: 새로고침 또는 중단
             if options.duplicate_stop_count > 0 and consecutive_duplicates >= options.duplicate_stop_count:
-                logger.info(f"Stopping: {consecutive_duplicates} consecutive DB duplicates detected")
-                break
+                if options.duplicate_refresh_enabled and refresh_count < options.max_refresh_count:
+                    refresh_count += 1
+                    logger.info(f"Refreshing due to {consecutive_duplicates} consecutive duplicates ({refresh_count}/{options.max_refresh_count})")
+                    consecutive_duplicates = 0
+                    await self._refresh_feed()
+                    # 새로고침 후 초기 수집 재시작을 위해 break
+                    initial_stop = True
+                    break
+                else:
+                    reason = "max_refresh_after_duplicates" if refresh_count >= options.max_refresh_count else "duplicate_stop"
+                    logger.info(f"Stopping: {consecutive_duplicates} consecutive DB duplicates (reason={reason})")
+                    stop_reason = reason
+                    initial_stop = True
+                    break
 
             post = await self.extract_post(article, len(all_posts) + 1)
 
@@ -456,87 +487,142 @@ class InstagramCrawler:
             else:
                 logger.debug(f"Extracted post #{post.index}: {post.account}")
 
+        # 초기 수집에서 중단되지 않았다면 스크롤 진행
         # 스크롤하여 추가 게시물 로드
         # NOTE: Instagram은 가상화(virtualization)를 사용하므로 DOM에는 항상
         # 화면에 보이는 7-10개 article만 존재. 스크롤해도 이전 article은 DOM에서 제거됨.
         # 따라서 매번 모든 article을 순회하고 URL 중복 체크로 이미 처리한 것을 skip.
         no_new_posts_count = 0  # 연속으로 새 게시물이 없는 스크롤 횟수
-        refresh_count = 0  # 새로고침 횟수
+        scroll_performed = 0  # 실제 수행된 스크롤 횟수
 
-        for scroll in range(options.scroll_count):
-            if len(all_posts) >= options.max_posts:
-                logger.info(f"Reached max_posts limit: {options.max_posts}")
-                break
-
-            # 연속 중복 체크로 중단
-            if options.duplicate_stop_count > 0 and consecutive_duplicates >= options.duplicate_stop_count:
-                logger.info(f"Stopping scroll: {consecutive_duplicates} consecutive DB duplicates")
-                break
-
-            logger.debug(f"Scroll {scroll + 1}/{options.scroll_count} (refreshed: {refresh_count})")
-            posts_before_scroll = len(all_posts)
-
-            await self._scroll_page(options)
-            articles = await self.page.query_selector_all("article")
-
-            logger.debug(f"Total articles in DOM: {len(articles)}, collected so far: {len(all_posts)}")
-
-            # 모든 article 순회 (가상화로 인해 새 article이 어디에든 있을 수 있음)
-            for article in articles:
+        if not initial_stop or (initial_stop and stop_reason == "completed"):
+            for scroll in range(options.scroll_count):
                 if len(all_posts) >= options.max_posts:
+                    stop_reason = "max_posts_reached"
+                    logger.info(f"Reached max_posts limit: {options.max_posts}")
                     break
 
-                # 연속 중복 체크로 중단
+                # 연속 중복 체크: 새로고침 또는 중단
                 if options.duplicate_stop_count > 0 and consecutive_duplicates >= options.duplicate_stop_count:
+                    if options.duplicate_refresh_enabled and refresh_count < options.max_refresh_count:
+                        refresh_count += 1
+                        logger.info(f"Refreshing due to {consecutive_duplicates} consecutive duplicates ({refresh_count}/{options.max_refresh_count})")
+                        consecutive_duplicates = 0
+                        await self._refresh_feed()
+                        # 새로고침 후 계속 진행
+                    else:
+                        reason = "max_refresh_after_duplicates" if refresh_count >= options.max_refresh_count else "duplicate_stop"
+                        logger.info(f"Stopping scroll: {consecutive_duplicates} consecutive DB duplicates (reason={reason})")
+                        stop_reason = reason
+                        break
+
+                scroll_performed += 1
+                logger.debug(f"Scroll {scroll + 1}/{options.scroll_count} (refreshed: {refresh_count})")
+                posts_before_scroll = len(all_posts)
+
+                await self._scroll_page(options)
+                articles = await self.page.query_selector_all("article")
+
+                logger.debug(f"Total articles in DOM: {len(articles)}, collected so far: {len(all_posts)}")
+
+                # 모든 article 순회 (가상화로 인해 새 article이 어디에든 있을 수 있음)
+                should_break = False
+                for article in articles:
+                    if len(all_posts) >= options.max_posts:
+                        stop_reason = "max_posts_reached"
+                        break
+
+                    # 연속 중복 체크: 새로고침 또는 중단
+                    if options.duplicate_stop_count > 0 and consecutive_duplicates >= options.duplicate_stop_count:
+                        if options.duplicate_refresh_enabled and refresh_count < options.max_refresh_count:
+                            refresh_count += 1
+                            logger.info(f"Refreshing due to {consecutive_duplicates} consecutive duplicates ({refresh_count}/{options.max_refresh_count})")
+                            consecutive_duplicates = 0
+                            await self._refresh_feed()
+                            should_break = True  # 현재 article 순회 중단하고 새 스크롤 시작
+                            break
+                        else:
+                            reason = "max_refresh_after_duplicates" if refresh_count >= options.max_refresh_count else "duplicate_stop"
+                            logger.info(f"Stopping: {consecutive_duplicates} consecutive DB duplicates (reason={reason})")
+                            stop_reason = reason
+                            should_break = True
+                            break
+
+                    post = await self.extract_post(article, len(all_posts) + 1)
+
+                    # 세션 내 URL 중복 체크 - 이미 처리한 게시물 skip
+                    if post.url and post.url in self.processed_urls:
+                        continue
+
+                    if post.url:
+                        self.processed_urls.add(post.url)
+
+                    # DB 중복 체크
+                    if self._is_db_duplicate(post):
+                        consecutive_duplicates += 1
+                        logger.debug(f"DB duplicate #{consecutive_duplicates}: {post.url}")
+                        continue
+                    else:
+                        consecutive_duplicates = 0
+
+                    all_posts.append(post)
+
+                    # 즉시 저장 콜백 호출
+                    if on_post_collected:
+                        try:
+                            saved = await on_post_collected(post)
+                            logger.debug(f"Scroll {scroll+1} - saved post #{post.index}: {post.account} (saved={saved})")
+                        except Exception as e:
+                            logger.error(f"Failed to save post #{post.index}: {e}")
+
+                # 중단 조건 도달 시 스크롤 루프 종료
+                if should_break and stop_reason != "completed":
                     break
 
-                post = await self.extract_post(article, len(all_posts) + 1)
+                # 이번 스크롤에서 새 게시물이 없으면 카운트 증가
+                if len(all_posts) == posts_before_scroll:
+                    no_new_posts_count += 1
+                    logger.debug(f"No new posts in this scroll (count: {no_new_posts_count})")
 
-                # 세션 내 URL 중복 체크 - 이미 처리한 게시물 skip
-                if post.url and post.url in self.processed_urls:
-                    continue
-
-                if post.url:
-                    self.processed_urls.add(post.url)
-
-                # DB 중복 체크
-                if self._is_db_duplicate(post):
-                    consecutive_duplicates += 1
-                    logger.debug(f"DB duplicate #{consecutive_duplicates}: {post.url}")
-                    continue
+                    # N회 연속 새 게시물 없으면 새로고침 시도
+                    if no_new_posts_count >= options.no_new_posts_refresh_threshold:
+                        if refresh_count < options.max_refresh_count:
+                            refresh_count += 1
+                            no_new_posts_count = 0
+                            logger.info(f"Refreshing page ({refresh_count}/{options.max_refresh_count}) - no new posts for {options.no_new_posts_refresh_threshold} scrolls")
+                            await self._refresh_feed()
+                        else:
+                            stop_reason = "max_refresh_no_new_posts"
+                            logger.info(f"Stopping: max refresh count ({options.max_refresh_count}) reached")
+                            break
                 else:
-                    consecutive_duplicates = 0
+                    no_new_posts_count = 0
 
-                all_posts.append(post)
+        # 스크롤 루프가 정상 종료된 경우
+        if stop_reason == "completed" and scroll_performed >= options.scroll_count:
+            stop_reason = "scroll_exhausted"
 
-                # 즉시 저장 콜백 호출
-                if on_post_collected:
-                    try:
-                        saved = await on_post_collected(post)
-                        logger.debug(f"Scroll {scroll+1} - saved post #{post.index}: {post.account} (saved={saved})")
-                    except Exception as e:
-                        logger.error(f"Failed to save post #{post.index}: {e}")
+        # 설정 스냅샷 생성
+        config_snapshot = {
+            "max_posts": options.max_posts,
+            "scroll_count": options.scroll_count,
+            "duplicate_stop_count": options.duplicate_stop_count,
+            "max_refresh_count": options.max_refresh_count,
+            "duplicate_refresh_enabled": options.duplicate_refresh_enabled,
+            "no_new_posts_refresh_threshold": options.no_new_posts_refresh_threshold,
+            "scroll_behavior": options.scroll_behavior,
+        }
 
-            # 이번 스크롤에서 새 게시물이 없으면 카운트 증가
-            if len(all_posts) == posts_before_scroll:
-                no_new_posts_count += 1
-                logger.debug(f"No new posts in this scroll (count: {no_new_posts_count})")
+        logger.info(f"Crawl completed: {len(all_posts)} posts collected (stop_reason={stop_reason}, consecutive_duplicates={consecutive_duplicates}, refresh_count={refresh_count}, scroll_performed={scroll_performed})")
 
-                # N회 연속 새 게시물 없으면 새로고침 시도
-                if no_new_posts_count >= options.no_new_posts_refresh_threshold:
-                    if refresh_count < options.max_refresh_count:
-                        refresh_count += 1
-                        no_new_posts_count = 0
-                        logger.info(f"Refreshing page ({refresh_count}/{options.max_refresh_count}) - no new posts for {options.no_new_posts_refresh_threshold} scrolls")
-                        await self._refresh_feed()
-                    else:
-                        logger.info(f"Stopping: max refresh count ({options.max_refresh_count}) reached")
-                        break
-            else:
-                no_new_posts_count = 0
-
-        logger.info(f"Crawl completed: {len(all_posts)} posts collected (consecutive_duplicates={consecutive_duplicates})")
-        return all_posts
+        return CrawlResult(
+            posts=all_posts,
+            stop_reason=stop_reason,
+            duplicate_count=consecutive_duplicates,
+            scroll_performed=scroll_performed,
+            refresh_count=refresh_count,
+            config_snapshot=config_snapshot,
+        )
 
     async def navigate_to_feed(self) -> bool:
         """Instagram 피드로 이동.
