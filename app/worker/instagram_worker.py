@@ -54,8 +54,19 @@ try:
     from app.modules.instagram.models.schemas import TimeWindow
     logger.debug("instagram services import 완료")
 
-    from app.shared.browser.browser_service import BrowserService
+    from app.shared.browser.context_manager import ContextManager
     logger.debug("browser_service import 완료")
+
+    # Instagram 관련 로거들이 워커 로거와 같은 핸들러를 사용하도록 설정
+    # 이렇게 하면 크롤러/서비스의 로그도 워커 로그 파일에 기록됨
+    worker_handlers = logger.handlers
+    for logger_name in ['instagram.crawler', 'instagram.crawl_service', 'instagram.post_service']:
+        sub_logger = logging.getLogger(logger_name)
+        sub_logger.setLevel(logging.DEBUG)
+        for handler in worker_handlers:
+            sub_logger.addHandler(handler)
+        sub_logger.propagate = False  # 중복 로깅 방지
+    logger.debug("Instagram 서브 로거 설정 완료")
 
     logger.info("모든 모듈 import 완료")
 
@@ -72,7 +83,7 @@ class InstagramWorker:
 
     def __init__(self):
         self.shutdown_event = asyncio.Event()
-        self.browser_service: BrowserService = None
+        self.context_manager: ContextManager = None
         self.check_interval = 30  # 30초마다 체크
         self.pid = os.getpid()
         self.start_time: datetime = None
@@ -97,9 +108,9 @@ class InstagramWorker:
         """초기화."""
         logger.info("Instagram 워커 초기화 시작")
 
-        # 브라우저 서비스 초기화
-        self.browser_service = BrowserService()
-        await self.browser_service.initialize()
+        # 브라우저 컨텍스트 매니저는 크롤링 시 lazy 초기화
+        # (메인 워커와 같은 프로필 충돌 방지를 위해 계정별 프로필 사용)
+        self.context_manager = None
 
         logger.info("Instagram 워커 초기화 완료")
 
@@ -107,11 +118,11 @@ class InstagramWorker:
         """정리."""
         logger.info("Instagram 워커 정리 시작")
 
-        if self.browser_service:
+        if self.context_manager:
             try:
-                await self.browser_service.perform_global_cleanup()
+                await self.context_manager.close_all_contexts()
             except Exception as e:
-                logger.error(f"브라우저 서비스 정리 오류: {e}")
+                logger.error(f"브라우저 컨텍스트 정리 오류: {e}")
 
         logger.info("Instagram 워커 정리 완료")
         AsyncLoggerManager.shutdown()
@@ -213,6 +224,31 @@ class InstagramWorker:
         finally:
             db.close()
 
+    async def _get_page_for_account(self, account_id: int):
+        """계정별 브라우저 페이지 가져오기.
+
+        ContextManager를 사용하여 계정별 프로필로 브라우저를 생성합니다.
+        이렇게 하면 메인 워커와 프로필 충돌이 발생하지 않습니다.
+        """
+        if self.context_manager is None:
+            logger.info("ContextManager 초기화")
+            self.context_manager = ContextManager()
+
+        # 계정별 브라우저 컨텍스트 가져오기
+        logger.info(f"계정 {account_id}용 브라우저 컨텍스트 가져오기")
+        context = await self.context_manager.get_or_create_context(account_id)
+
+        # 페이지 가져오기 (없으면 새로 생성)
+        pages = context.pages
+        if pages:
+            page = pages[0]
+            logger.debug(f"기존 페이지 사용 (account_id={account_id})")
+        else:
+            page = await context.new_page()
+            logger.info(f"새 페이지 생성 (account_id={account_id})")
+
+        return page
+
     async def _execute_crawl(self, request: InstagramCrawlRequest, db):
         """크롤링 실행."""
         request_service = CrawlRequestService(db)
@@ -235,14 +271,25 @@ class InstagramWorker:
                 logger.warning(f"로그인 필요: account={account.name}")
                 return
 
-            # 크롤러 생성
-            crawler = InstagramCrawler(self.browser_service, account.id)
+            # 계정별 브라우저 페이지 가져오기
+            page = await self._get_page_for_account(account.id)
+
+            # 인스타그램 피드 페이지로 이동
+            logger.info("인스타그램 피드 페이지로 이동 중...")
+            await page.goto("https://www.instagram.com/", wait_until="domcontentloaded")
+            await page.wait_for_timeout(2000)  # 페이지 로드 대기
+            logger.info(f"인스타그램 페이지 로드 완료: {page.url}")
+
+            # 크롤러 생성 (Page 객체 전달)
+            crawler = InstagramCrawler(page)
+            logger.info("InstagramCrawler 생성 완료, 크롤링 시작...")
 
             # 크롤링 실행
             crawl_run = await crawl_service.run_crawl(
                 crawler=crawler,
                 account_id=request.account_id,
             )
+            logger.info(f"크롤링 완료: success={crawl_run.success}, collected={crawl_run.total_collected}, new={crawl_run.new_saved}")
 
             # 완료 처리
             if crawl_run.success:
