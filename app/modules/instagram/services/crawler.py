@@ -540,12 +540,14 @@ class InstagramCrawler:
 
                 scroll_performed += 1
                 logger.debug(f"Scroll {scroll + 1}/{options.scroll_count} (refreshed: {refresh_count})")
-                posts_before_scroll = len(all_posts)
+
+                # 스크롤 전 article 수 저장 (새 article 로드 여부 판단용)
+                articles_before_scroll = len(await self.page.query_selector_all("article"))
 
                 await self._scroll_page(options)
                 articles = await self.page.query_selector_all("article")
 
-                logger.debug(f"Total articles in DOM: {len(articles)}, collected so far: {len(all_posts)}")
+                logger.debug(f"Articles in DOM: {articles_before_scroll} -> {len(articles)}, collected: {len(all_posts)}")
 
                 # 모든 article 순회 (가상화로 인해 새 article이 어디에든 있을 수 있음)
                 should_break = False
@@ -601,10 +603,11 @@ class InstagramCrawler:
                 if should_break and stop_reason != "completed":
                     break
 
-                # 이번 스크롤에서 새 게시물이 없으면 카운트 증가
-                if len(all_posts) == posts_before_scroll:
+                # 스크롤 후 DOM에 새 article이 로드되지 않았으면 카운트 증가
+                # (중복 여부와 관계없이, 실제로 페이지가 더 로드되었는지 확인)
+                if len(articles) == articles_before_scroll:
                     no_new_posts_count += 1
-                    logger.debug(f"No new posts in this scroll (count: {no_new_posts_count})")
+                    logger.debug(f"No new articles loaded in this scroll (count: {no_new_posts_count})")
 
                     # N회 연속 새 게시물 없으면 새로고침 시도
                     if no_new_posts_count >= options.no_new_posts_refresh_threshold:
