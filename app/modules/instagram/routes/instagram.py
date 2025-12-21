@@ -122,6 +122,42 @@ async def update_post(
     return _post_to_schema(post)
 
 
+@router.post("/posts/{post_id}/recrawl", response_model=CrawlRequestSchema)
+async def recrawl_post(
+    post_id: int,
+    db: Session = Depends(get_db),
+):
+    """개별 게시물 재크롤링 요청.
+
+    지정된 게시물의 URL로 다시 크롤링하여 최신 정보를 수집합니다.
+    요청은 큐에 추가되며 워커가 처리합니다.
+    """
+    post_service = PostService(db)
+    request_service = CrawlRequestService(db)
+
+    # 게시물 존재 확인
+    post = post_service.get_post_by_id(post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    if not post.url:
+        raise HTTPException(status_code=400, detail="Post has no URL to recrawl")
+
+    # 게시물의 account_id 확인
+    account_id = post.account_id
+    if not account_id:
+        raise HTTPException(status_code=400, detail="Post has no associated account")
+
+    # 재크롤링 요청 생성
+    request = request_service.create_single_post_request(
+        post_id=post_id,
+        account_id=account_id,
+        requested_by="manual",
+    )
+
+    return CrawlRequestSchema.model_validate(request)
+
+
 # ============== Crawl ==============
 
 @router.post("/crawl/manual", response_model=CrawlRequestSchema)

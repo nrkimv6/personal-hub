@@ -253,10 +253,21 @@ class InstagramCrawler:
                 }
 
                 if (endIdx === -1) {
-                    return afterAccount.trim().substring(0, 1000);
+                    caption = afterAccount.trim().substring(0, 1000);
+                } else {
+                    caption = afterAccount.substring(0, endIdx).trim();
                 }
 
-                return afterAccount.substring(0, endIdx).trim();
+                // "더 보기" 및 관련 텍스트 제거
+                const moreTexts = ['더 보기', 'more', 'もっと見る', '顯示更多', '显示更多'];
+                for (const moreText of moreTexts) {
+                    if (caption.endsWith(moreText)) {
+                        caption = caption.slice(0, -moreText.length).trim();
+                        break;
+                    }
+                }
+
+                return caption;
             }""", account)
         except Exception as e:
             logger.warning(f"Failed to extract caption: {e}")
