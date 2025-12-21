@@ -182,3 +182,83 @@ Instagram Worker (subprocess)
 | `/api/v1/instagram/schedule` | GET/PUT | 스케줄 설정 |
 | `/api/v1/instagram/tags` | GET/POST | 태그 관리 |
 | `/api/v1/instagram/worker/status` | GET | 워커 상태 |
+| `/api/v1/instagram/llm/requests` | GET/POST | LLM 분류 요청 목록/생성 |
+| `/api/v1/instagram/llm/requests/{id}` | GET | LLM 요청 상세 |
+| `/api/v1/instagram/llm/requests/{id}/retry` | POST | LLM 요청 재시도 |
+| `/api/v1/instagram/llm/worker/status` | GET | Claude 워커 상태 |
+| `/api/v1/instagram/llm/stats` | GET | LLM 분류 통계 |
+
+---
+
+## 7. LLM 분류 시스템 (REQ-INSTA-012)
+
+### 7.1 데이터베이스 스키마
+
+```sql
+-- LLM 분류 요청
+CREATE TABLE instagram_llm_classification_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id INTEGER NOT NULL REFERENCES instagram_posts(id),
+    requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    requested_by TEXT DEFAULT 'auto',      -- auto/manual
+    trigger_tag TEXT,                       -- 트리거된 태그 (event 등)
+    status TEXT DEFAULT 'pending',          -- pending/processing/completed/failed
+    processed_at DATETIME,
+    llm_result TEXT,                        -- JSON 결과
+    confidence_score REAL,
+    error_message TEXT,
+    retry_count INTEGER DEFAULT 0,
+    prompt_used TEXT,
+    raw_response TEXT
+);
+
+-- Claude 워커 상태
+CREATE TABLE instagram_llm_worker_status (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    worker_id TEXT UNIQUE NOT NULL,
+    pid INTEGER,
+    started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_heartbeat DATETIME,
+    current_state TEXT DEFAULT 'idle',
+    current_request_id INTEGER,
+    is_alive INTEGER DEFAULT 1,
+    processed_count INTEGER DEFAULT 0
+);
+```
+
+### 7.2 추출 필드
+
+```json
+{
+    "is_event": true,
+    "organizer": "주최사/브랜드명",
+    "event_url": "이벤트 URL",
+    "event_date": "YYYY-MM-DD",
+    "event_time": "HH:MM",
+    "details": "상세 내용 요약",
+    "confidence": 0.9
+}
+```
+
+### 7.3 동작 흐름
+
+```
+[키워드 분류] → "event" 태그 매칭 → [LLM 분류 큐] → [Claude Worker] → [결과 저장]
+```
+
+1. ClassifierService에서 게시물 태그 매칭
+2. `LLM_TRIGGER_TAGS = ["event"]` 포함 시 분류 요청 생성
+3. Claude Worker가 10초 간격으로 pending 요청 확인
+4. Claude CLI subprocess 실행: `claude -p "프롬프트"`
+5. JSON 응답 파싱 후 결과 저장
+
+### 7.4 워커 프로세스
+
+```
+Claude Worker (subprocess)
+├── 10초마다 pending 요청 체크
+├── Claude CLI로 LLM 분류 실행
+├── heartbeat 업데이트 (30초 이내)
+├── Watchdog 자동 재시작
+└── logs/claude_worker_*.log
+```
