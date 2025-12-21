@@ -236,6 +236,44 @@ class PostService:
         logger.info(f"Deleted post: {post.post_id}")
         return True
 
+    def update_post_tags(self, post_id: int, tag_ids: List[int]) -> Optional[InstagramPost]:
+        """게시물 태그 업데이트 (전체 교체).
+
+        Args:
+            post_id: 게시물 DB ID
+            tag_ids: 새 태그 ID 목록
+
+        Returns:
+            업데이트된 게시물 또는 None
+        """
+        post = self.get_post_by_id(post_id)
+        if not post:
+            return None
+
+        # 기존 태그 관계 삭제
+        self.db.query(InstagramPostTagRelation).filter(
+            InstagramPostTagRelation.post_id == post_id
+        ).delete()
+
+        # 새 태그 관계 추가
+        for tag_id in tag_ids:
+            # 태그 존재 확인
+            tag = self.db.query(InstagramPostTag).filter(
+                InstagramPostTag.id == tag_id
+            ).first()
+            if tag:
+                relation = InstagramPostTagRelation(
+                    post_id=post_id,
+                    tag_id=tag_id
+                )
+                self.db.add(relation)
+
+        self.db.commit()
+        self.db.refresh(post)
+
+        logger.info(f"Updated tags for post {post_id}: {tag_ids}")
+        return post
+
     def exists_by_post_id(self, instagram_post_id: str) -> bool:
         """게시물 존재 여부 확인.
 

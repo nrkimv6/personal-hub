@@ -13,6 +13,7 @@ from app.services.account_service import account_service
 from ..models.schemas import (
     PostSchema,
     PostListResponse,
+    PostUpdateSchema,
     CrawlOptionsSchema,
     CrawlResponse,
     CrawlRunSchema,
@@ -98,6 +99,27 @@ async def delete_post(
         raise HTTPException(status_code=404, detail="Post not found")
 
     return {"message": "Post deleted successfully"}
+
+
+@router.put("/posts/{post_id}", response_model=PostSchema)
+async def update_post(
+    post_id: int,
+    update: PostUpdateSchema,
+    db: Session = Depends(get_db),
+):
+    """게시물 수정 (태그 변경)."""
+    service = PostService(db)
+
+    # 게시물 존재 확인
+    post = service.get_post_by_id(post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    # 태그 업데이트
+    if update.tag_ids is not None:
+        post = service.update_post_tags(post_id, update.tag_ids)
+
+    return _post_to_schema(post)
 
 
 # ============== Crawl ==============

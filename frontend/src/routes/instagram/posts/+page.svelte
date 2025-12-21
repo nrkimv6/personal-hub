@@ -143,14 +143,56 @@
 		return singleLine.slice(0, maxLength) + '...';
 	}
 
+	// 태그 편집 모드
+	let editingTags = false;
+	let editTagIds: number[] = [];
+	let savingTags = false;
+
 	function openModal(post: InstagramPost) {
 		selectedPost = post;
 		showModal = true;
+		editingTags = false;
+		editTagIds = post.tags?.map((t) => availableTags.find((at) => at.name === t.name)?.id).filter((id): id is number => id !== undefined) || [];
 	}
 
 	function closeModal() {
 		showModal = false;
 		selectedPost = null;
+		editingTags = false;
+	}
+
+	function startEditTags() {
+		if (!selectedPost) return;
+		editTagIds = selectedPost.tags?.map((t) => availableTags.find((at) => at.name === t.name)?.id).filter((id): id is number => id !== undefined) || [];
+		editingTags = true;
+	}
+
+	function cancelEditTags() {
+		editingTags = false;
+	}
+
+	function toggleEditTag(tagId: number) {
+		if (editTagIds.includes(tagId)) {
+			editTagIds = editTagIds.filter((id) => id !== tagId);
+		} else {
+			editTagIds = [...editTagIds, tagId];
+		}
+	}
+
+	async function saveTags() {
+		if (!selectedPost) return;
+		savingTags = true;
+		try {
+			const updated = await instagramApi.updatePost(selectedPost.id, { tag_ids: editTagIds });
+			// 목록에서 해당 게시물 업데이트
+			posts = posts.map((p) => (p.id === updated.id ? updated : p));
+			selectedPost = updated;
+			editingTags = false;
+		} catch (e) {
+			alert('태그 저장 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		} finally {
+			savingTags = false;
+		}
 	}
 
 	async function deletePost(id: number) {
@@ -589,19 +631,64 @@
 				{/if}
 
 				<!-- 태그 -->
-				{#if selectedPost.tags && selectedPost.tags.length > 0}
-					<div class="mb-4">
-						<span class="text-sm text-gray-500 mr-2">태그:</span>
-						{#each selectedPost.tags as tag}
-							<span
-								class="inline-block px-2 py-0.5 text-xs rounded-full text-white mr-1"
-								style="background-color: {tag.color};"
+				<div class="mb-4">
+					<div class="flex items-center gap-2 mb-2">
+						<span class="text-sm text-gray-500">태그:</span>
+						{#if !editingTags}
+							<button
+								onclick={startEditTags}
+								class="text-xs text-blue-600 hover:text-blue-800 underline"
 							>
-								{tag.display_name}
-							</span>
-						{/each}
+								편집
+							</button>
+						{/if}
 					</div>
-				{/if}
+					{#if editingTags}
+						<!-- 편집 모드 -->
+						<div class="flex flex-wrap gap-2 mb-2">
+							{#each availableTags as tag (tag.id)}
+								<button
+									onclick={() => toggleEditTag(tag.id)}
+									class="px-2 py-1 text-xs rounded-full transition-colors border"
+									style="background-color: {editTagIds.includes(tag.id) ? tag.color : 'white'};
+										   color: {editTagIds.includes(tag.id) ? 'white' : tag.color};
+										   border-color: {tag.color};"
+								>
+									{tag.display_name}
+									{#if editTagIds.includes(tag.id)}
+										<span class="ml-1">✓</span>
+									{/if}
+								</button>
+							{/each}
+						</div>
+						<div class="flex gap-2">
+							<button
+								onclick={saveTags}
+								disabled={savingTags}
+								class="btn btn-primary btn-sm disabled:opacity-50"
+							>
+								{savingTags ? '저장 중...' : '저장'}
+							</button>
+							<button onclick={cancelEditTags} class="btn btn-secondary btn-sm">
+								취소
+							</button>
+						</div>
+					{:else}
+						<!-- 보기 모드 -->
+						{#if selectedPost.tags && selectedPost.tags.length > 0}
+							{#each selectedPost.tags as tag}
+								<span
+									class="inline-block px-2 py-0.5 text-xs rounded-full text-white mr-1"
+									style="background-color: {tag.color};"
+								>
+									{tag.display_name}
+								</span>
+							{/each}
+						{:else}
+							<span class="text-gray-400 text-sm">태그 없음</span>
+						{/if}
+					{/if}
+				</div>
 
 				<!-- 메타 정보 -->
 				<div class="grid grid-cols-2 gap-2 text-sm mb-4">

@@ -48,6 +48,11 @@ class PostCreateSchema(BaseModel):
     is_ad: bool = False
 
 
+class PostUpdateSchema(BaseModel):
+    """게시물 수정 스키마."""
+    tag_ids: Optional[List[int]] = None  # 태그 ID 목록 (전체 교체)
+
+
 class PostListResponse(BaseModel):
     """게시물 목록 응답."""
     posts: List[PostSchema]
