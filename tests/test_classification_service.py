@@ -453,15 +453,34 @@ class TestTagServiceBulk:
         """키워드 일괄 추가"""
         from app.modules.instagram.services.tag_service import TagService
 
-        call_count = [0]
+        # mock 키워드
+        mock_kw = MagicMock()
+        mock_kw.id = 100
 
-        def side_effect(*args):
-            call_count[0] += 1
-            if call_count[0] % 2 == 1:  # get_tag_by_id
-                return mock_tag_event
-            return None  # 중복 없음
+        # side_effect 패턴:
+        # - 첫 번째 호출 (get_tag_by_id): tag 반환
+        # - 두 번째 호출 (중복 확인): None (새 키워드)
+        # - 세 번째 호출 (added 확인): 생성된 키워드
+        # 이 패턴이 3번 반복됨
+        def make_side_effect():
+            call_count = [0]
 
-        mock_db.query.return_value.filter.return_value.first.side_effect = side_effect
+            def side_effect(*args, **kwargs):
+                call_count[0] += 1
+                mod = call_count[0] % 3
+                if mod == 1:  # get_tag_by_id
+                    return mock_tag_event
+                elif mod == 2:  # 중복 확인
+                    return None
+                else:  # added 확인 (id 비교)
+                    return mock_kw
+
+            return side_effect
+
+        mock_db.query.return_value.filter.return_value.first.side_effect = make_side_effect()
+        mock_db.add.return_value = None
+        mock_db.commit.return_value = None
+        mock_db.refresh.side_effect = lambda obj: setattr(obj, "id", 100)
 
         service = TagService(mock_db)
         added = service.add_keywords_bulk(1, ["추첨", "당첨", "경품"])
@@ -600,28 +619,47 @@ class TestClassificationSchemas:
 class TestClassifierPerformance:
     """분류 성능 테스트"""
 
-    def test_batch_classify_many_posts(self, mock_db, mock_tag_event, mock_keyword_event):
+    def test_batch_classify_many_posts(self, mock_db):
         """대량 게시물 일괄 분류"""
+        from types import SimpleNamespace
+        from unittest.mock import patch
         from app.modules.instagram.services.classifier_service import ClassifierService
+
+        # 태그 fixture 직접 생성 (SimpleNamespace 사용)
+        mock_tag = SimpleNamespace(
+            id=1,
+            name="event",
+            display_name="이벤트",
+            color="#ef4444",
+            is_active=True,
+        )
+
+        # 키워드 fixture 직접 생성
+        mock_kw = SimpleNamespace(
+            id=1,
+            tag_id=1,
+            keyword="이벤트",
+            is_regex=False,
+            is_case_sensitive=False,
+            is_active=True,
+        )
 
         # 100개 게시물 생성
         posts = []
         for i in range(100):
-            post = MagicMock()
-            post.id = i
-            post.caption = f"테스트 이벤트 {i}"
+            post = SimpleNamespace(id=i, caption=f"테스트 이벤트 {i}")
             posts.append(post)
 
-        mock_db.query.return_value.filter.return_value.all.side_effect = [
-            [mock_tag_event],  # _get_active_tags
-            posts,  # classify_posts_batch query
-        ]
-        mock_db.query.return_value.filter.return_value.first.return_value = None
-
         service = ClassifierService(mock_db)
-        service._keyword_cache[mock_tag_event.id] = [mock_keyword_event]
 
-        result = service.classify_posts_batch([p.id for p in posts])
+        # 메서드 패치
+        with patch.object(service, "_get_active_tags", return_value=[mock_tag]):
+            with patch.object(service, "_load_keywords", return_value=[mock_kw]):
+                # posts 쿼리만 mock
+                mock_db.query.return_value.filter.return_value.all.return_value = posts
+                mock_db.query.return_value.filter.return_value.first.return_value = None
+
+                result = service.classify_posts_batch([p.id for p in posts])
 
         assert result["total"] == 100
 
