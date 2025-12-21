@@ -161,3 +161,80 @@ class CrawlRequestCreateSchema(BaseModel):
     """크롤링 요청 생성 스키마."""
     account_id: int
     requested_by: str = "manual"
+
+
+# Worker Status 스키마
+
+class WorkerStatusSchema(BaseModel):
+    """워커 상태 응답 스키마."""
+    worker_id: str
+    pid: Optional[int] = None
+    started_at: datetime
+    last_heartbeat: datetime
+    current_state: str = "idle"  # idle, crawling, processing
+    current_account: Optional[str] = None
+    current_run_id: Optional[int] = None
+    is_alive: bool = True
+    # 계산된 필드
+    uptime_seconds: int = 0
+    heartbeat_age_seconds: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WorkerHealthSchema(BaseModel):
+    """워커 헬스체크 응답 스키마."""
+    status: str  # healthy, warning, dead, no_worker
+    worker_id: Optional[str] = None
+    last_heartbeat: Optional[datetime] = None
+    heartbeat_age_seconds: Optional[int] = None
+    current_state: Optional[str] = None
+    message: str
+
+
+# Run 확장 스키마
+
+class RunListParams(BaseModel):
+    """실행 기록 조회 파라미터."""
+    page: int = 1
+    limit: int = 20
+    period: Optional[str] = None  # 1d, 7d, 30d, all
+    status: Optional[str] = None  # success, failed, all
+    account_id: Optional[int] = None
+
+
+class RunDetailSchema(CrawlRunSchema):
+    """실행 기록 상세 스키마."""
+    account_name: Optional[str] = None
+    duration_seconds: Optional[int] = None
+    # 재시도 체인 정보
+    retry_chain: List["RunDetailSchema"] = []
+
+
+class RunListResponse(BaseModel):
+    """실행 기록 목록 응답."""
+    runs: List[CrawlRunSchema]
+    total: int
+    page: int
+    limit: int
+
+
+class DailyTrendItem(BaseModel):
+    """일별 트렌드 항목."""
+    date: str  # YYYY-MM-DD
+    total_runs: int
+    success_runs: int
+    failed_runs: int
+    total_collected: int
+    new_saved: int
+
+
+class RunStatsSchema(BaseModel):
+    """실행 통계 스키마."""
+    total_runs: int
+    success_runs: int
+    failed_runs: int
+    success_rate: float  # 0.0 ~ 1.0
+    avg_collected: float
+    avg_duration_seconds: float
+    daily_trend: List[DailyTrendItem] = []
