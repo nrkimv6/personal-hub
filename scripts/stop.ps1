@@ -26,6 +26,7 @@ $FrontendPort = 5173
 $PidDir = Join-Path $ProjectRoot ".pids"
 $ApiPidFile = Join-Path $PidDir "api.pid"
 $WorkerPidFile = Join-Path $PidDir "worker.pid"
+$InstagramWorkerPidFile = Join-Path $PidDir "instagram_worker.pid"
 $WatchdogPidFile = Join-Path $PidDir "watchdog.pid"
 $FrontendPidFile = Join-Path $PidDir "frontend.pid"
 
@@ -190,7 +191,7 @@ Write-Host ""
 Write-Host "[4] Cleaning up PID files" -ForegroundColor Cyan
 Write-Host "----------------------------------------"
 
-foreach ($pidFile in @($ApiPidFile, $WorkerPidFile, $WatchdogPidFile, $FrontendPidFile)) {
+foreach ($pidFile in @($ApiPidFile, $WorkerPidFile, $InstagramWorkerPidFile, $WatchdogPidFile, $FrontendPidFile)) {
     if (Test-Path $pidFile) {
         $name = Split-Path $pidFile -Leaf
         Remove-Item $pidFile -Force -ErrorAction SilentlyContinue

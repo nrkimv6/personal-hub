@@ -28,6 +28,7 @@ if (-not (Test-Path $PidDir)) {
 
 $ApiPidFile = Join-Path $PidDir "api.pid"
 $WorkerPidFile = Join-Path $PidDir "worker.pid"
+$InstagramWorkerPidFile = Join-Path $PidDir "instagram_worker.pid"
 $FrontendPidFile = Join-Path $PidDir "frontend.pid"
 
 # Check if process is running
@@ -87,6 +88,18 @@ if ($env:SKIP_WORKER -eq "true") {
     $runWorker = $true
 }
 
+# Check Instagram Worker
+if ($env:SKIP_INSTAGRAM_WORKER -eq "true") {
+    Write-Host "[!] Skipping Instagram worker (SKIP_INSTAGRAM_WORKER=true)" -ForegroundColor Yellow
+    $runInstagramWorker = $false
+} elseif (Test-ProcessRunning $InstagramWorkerPidFile) {
+    $instagramWorkerPid = Get-Content $InstagramWorkerPidFile
+    Write-Host "[!] Instagram Worker already running (PID: $instagramWorkerPid)" -ForegroundColor Yellow
+    $runInstagramWorker = $false
+} else {
+    $runInstagramWorker = $true
+}
+
 # Check Frontend
 if ($env:SKIP_FRONTEND -eq "true") {
     Write-Host "[!] Skipping frontend (SKIP_FRONTEND=true)" -ForegroundColor Yellow
@@ -100,7 +113,7 @@ if ($env:SKIP_FRONTEND -eq "true") {
 }
 
 # Exit if all processes are running
-if (-not $runApi -and -not $runWorker -and -not $runFrontend) {
+if (-not $runApi -and -not $runWorker -and -not $runInstagramWorker -and -not $runFrontend) {
     Write-Host "`nAll processes are already running." -ForegroundColor Green
     Write-Host "View logs: .\scripts\logs.ps1"
     Write-Host "Stop processes: .\scripts\stop.ps1"
@@ -188,6 +201,27 @@ if ($runWorker) {
     Write-Host "    Worker Log: $workerLogFile"
     Write-Host "    Watchdog Log: $watchdogLogFile"
     Write-Host "    [!] Worker will auto-restart if it crashes" -ForegroundColor Yellow
+}
+
+# Start Instagram Worker
+if ($runInstagramWorker) {
+    Write-Host "`n[*] Starting Instagram Worker..." -ForegroundColor Cyan
+
+    $instagramWorkerLogFile = Join-Path $LogDir "instagram_worker_$Timestamp.log"
+    $stdoutInstagramLogFile = Join-Path $LogDir "stdout_instagram_$Timestamp.log"
+
+    # Start Instagram worker in background
+    $instagramWorkerProcess = Start-Process -FilePath "cmd.exe" `
+        -ArgumentList "/c", "set PYTHONIOENCODING=utf-8 && python -m app.worker.instagram_worker > `"$stdoutInstagramLogFile`" 2>&1" `
+        -WorkingDirectory $ProjectRoot `
+        -WindowStyle Hidden `
+        -PassThru
+
+    # Save PID
+    $instagramWorkerProcess.Id | Out-File $InstagramWorkerPidFile -Encoding ascii
+
+    Write-Host "[+] Instagram Worker started (PID: $($instagramWorkerProcess.Id))" -ForegroundColor Green
+    Write-Host "    Log: $instagramWorkerLogFile"
 }
 
 # Start Frontend
