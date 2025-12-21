@@ -274,6 +274,33 @@ class CrawlService:
             InstagramCrawlRun.id == run_id
         ).first()
 
+    def get_crawl_events(
+        self,
+        run_id: int,
+        event_type: Optional[str] = None,
+        limit: int = 100
+    ) -> List:
+        """크롤링 이벤트 로그 조회.
+
+        Args:
+            run_id: 실행 기록 ID
+            event_type: 이벤트 타입 필터 (선택)
+            limit: 최대 개수
+
+        Returns:
+            이벤트 목록
+        """
+        from app.models import InstagramCrawlEvent
+
+        query = self.db.query(InstagramCrawlEvent).filter(
+            InstagramCrawlEvent.crawl_run_id == run_id
+        )
+
+        if event_type:
+            query = query.filter(InstagramCrawlEvent.event_type == event_type)
+
+        return query.order_by(InstagramCrawlEvent.timestamp).limit(limit).all()
+
     def get_run_stats(self, days: int = 7) -> dict:
         """실행 통계 조회.
 

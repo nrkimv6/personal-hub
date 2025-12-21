@@ -100,6 +100,25 @@ class CrawlRunSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CrawlEventSchema(BaseModel):
+    """크롤링 이벤트 로그."""
+    id: int
+    crawl_run_id: int
+    timestamp: str
+    event_type: str  # 'scroll', 'post_saved', 'duplicate', 'refresh', 'stop'
+    message: Optional[str] = None
+    details: Optional[str] = None  # JSON
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CrawlRunSummarySchema(BaseModel):
+    """크롤링 실행 요약."""
+    run: CrawlRunSchema
+    events: List["CrawlEventSchema"] = []
+    event_counts: dict = {}  # {"scroll": 5, "duplicate": 3, ...}
+
+
 class TimeWindow(BaseModel):
     """시간대 설정."""
     start: str  # "HH:MM"

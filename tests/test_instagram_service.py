@@ -1541,6 +1541,97 @@ class TestMigration033:
         assert "config_snapshot" in content
 
 
+# ============================================================
+# Phase 2: 이벤트 로그 테스트
+# ============================================================
+
+class TestInstagramCrawlEventModel:
+    """InstagramCrawlEvent 모델 테스트"""
+
+    def test_model_exists(self):
+        """InstagramCrawlEvent 모델 존재"""
+        from app.models.instagram_crawl_event import InstagramCrawlEvent
+
+        assert InstagramCrawlEvent is not None
+
+    def test_model_has_columns(self):
+        """InstagramCrawlEvent에 필요한 컬럼 존재"""
+        from app.models.instagram_crawl_event import InstagramCrawlEvent
+
+        assert hasattr(InstagramCrawlEvent, 'id')
+        assert hasattr(InstagramCrawlEvent, 'crawl_run_id')
+        assert hasattr(InstagramCrawlEvent, 'timestamp')
+        assert hasattr(InstagramCrawlEvent, 'event_type')
+        assert hasattr(InstagramCrawlEvent, 'message')
+        assert hasattr(InstagramCrawlEvent, 'details')
+
+    def test_model_imported_in_init(self):
+        """app.models에서 import 가능"""
+        from app.models import InstagramCrawlEvent
+
+        assert InstagramCrawlEvent is not None
+
+
+class TestMigration034:
+    """034_crawl_event_log 마이그레이션 테스트"""
+
+    def test_migration_file_exists(self):
+        """034_crawl_event_log.sql 파일 존재"""
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "034_crawl_event_log.sql"
+        assert migration_path.exists(), "034_crawl_event_log.sql should exist"
+
+    def test_migration_contains_table(self):
+        """마이그레이션에 테이블 생성 포함"""
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "034_crawl_event_log.sql"
+        content = migration_path.read_text(encoding="utf-8")
+
+        assert "instagram_crawl_events" in content
+        assert "crawl_run_id" in content
+        assert "event_type" in content
+        assert "CREATE INDEX" in content
+
+
+class TestCrawlEventSchema:
+    """CrawlEventSchema 테스트"""
+
+    def test_schema_exists(self):
+        """CrawlEventSchema 존재"""
+        from app.modules.instagram.models.schemas import CrawlEventSchema
+
+        assert CrawlEventSchema is not None
+
+    def test_schema_has_fields(self):
+        """CrawlEventSchema에 필드 존재"""
+        from app.modules.instagram.models.schemas import CrawlEventSchema
+
+        fields = CrawlEventSchema.model_fields
+        assert 'id' in fields
+        assert 'crawl_run_id' in fields
+        assert 'timestamp' in fields
+        assert 'event_type' in fields
+        assert 'message' in fields
+        assert 'details' in fields
+
+
+class TestCrawlRunSummarySchema:
+    """CrawlRunSummarySchema 테스트"""
+
+    def test_schema_exists(self):
+        """CrawlRunSummarySchema 존재"""
+        from app.modules.instagram.models.schemas import CrawlRunSummarySchema
+
+        assert CrawlRunSummarySchema is not None
+
+    def test_schema_has_fields(self):
+        """CrawlRunSummarySchema에 필드 존재"""
+        from app.modules.instagram.models.schemas import CrawlRunSummarySchema
+
+        fields = CrawlRunSummarySchema.model_fields
+        assert 'run' in fields
+        assert 'events' in fields
+        assert 'event_counts' in fields
+
+
 class TestPostDataAdField:
     """PostData is_ad 필드 테스트"""
 

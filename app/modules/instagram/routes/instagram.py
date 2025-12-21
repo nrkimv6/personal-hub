@@ -26,6 +26,8 @@ from ..models.schemas import (
     RunListResponse,
     RunStatsSchema,
     DailyTrendItem,
+    CrawlEventSchema,
+    CrawlRunSummarySchema,
 )
 from ..services import PostService, CrawlService, CrawlRequestService
 
@@ -273,6 +275,51 @@ async def get_run_posts(
         total=total,
         page=page,
         limit=limit,
+    )
+
+
+@router.get("/runs/{run_id}/events", response_model=List[CrawlEventSchema])
+async def get_crawl_run_events(
+    run_id: int,
+    event_type: Optional[str] = Query(None, description="이벤트 타입 필터"),
+    limit: int = Query(100, ge=1, le=500, description="최대 개수"),
+    db: Session = Depends(get_db),
+):
+    """크롤링 실행의 이벤트 로그 조회."""
+    service = CrawlService(db)
+    run = service.get_crawl_run_by_id(run_id)
+
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    events = service.get_crawl_events(run_id, event_type=event_type, limit=limit)
+    return events
+
+
+@router.get("/runs/{run_id}/summary", response_model=CrawlRunSummarySchema)
+async def get_crawl_run_summary(
+    run_id: int,
+    db: Session = Depends(get_db),
+):
+    """크롤링 실행 요약 정보 조회."""
+    service = CrawlService(db)
+    run = service.get_crawl_run_by_id(run_id)
+
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    events = service.get_crawl_events(run_id, limit=500)
+
+    # 이벤트 타입별 개수 집계
+    event_counts = {}
+    for event in events:
+        event_type = event.event_type
+        event_counts[event_type] = event_counts.get(event_type, 0) + 1
+
+    return CrawlRunSummarySchema(
+        run=_run_to_schema(run),
+        events=[CrawlEventSchema.model_validate(e) for e in events],
+        event_counts=event_counts,
     )
 
 
