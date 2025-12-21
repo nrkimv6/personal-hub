@@ -106,7 +106,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "DEBUG"
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     LOG_DIR: str = "logs"  # 로그 디렉토리
-    LOG_RETENTION: int = 7  # 로그 보관 일수
+    LOG_RETENTION: int = 3  # 로그 보관 일수 (2025-12-22: 7일→3일로 변경)
     LOG_BACKUP_COUNT: int = 5  # 로그 백업 파일 수
     LOG_TO_CONSOLE: bool = True  # 콘솔에 로그 출력 여부
     LOG_ENCODING: str = "utf-8"  # 로그 파일 인코딩 방식
