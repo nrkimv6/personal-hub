@@ -217,13 +217,19 @@
 										수집: {run.total_collected} / 신규: {run.new_saved}
 									</span>
 								</div>
-								<span
-									class="px-2 py-0.5 text-xs rounded-full {run.success
-										? 'bg-green-100 text-green-800'
-										: 'bg-red-100 text-red-800'}"
-								>
-									{run.success ? '성공' : '실패'}
-								</span>
+								{#if !run.finished_at}
+									<span class="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-800 animate-pulse">
+										실행 중
+									</span>
+								{:else if run.success}
+									<span class="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-800">
+										성공
+									</span>
+								{:else}
+									<span class="px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-800">
+										실패
+									</span>
+								{/if}
 							</div>
 						{/each}
 					</div>
