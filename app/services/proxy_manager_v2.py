@@ -119,6 +119,12 @@ class ProxyManagerV2:
         self._session_blacklist: Dict[int, str] = {}  # proxy_id → 사유
         self._consecutive_fail_threshold: int = 3  # 연속 실패 임계값
 
+        # 실패율 기반 필터링 (2025-12-21)
+        self._high_failure_hosts: Set[str] = set()  # 실패율 높은 프록시 호스트 목록
+        self._session_failure_stats: Dict[int, Dict] = {}  # proxy_id → {success: int, fail: int}
+        self._cumulative_failure_threshold: float = 0.8  # 누적 실패율 임계값 (80%)
+        self._cumulative_failure_min_attempts: int = 5  # 최소 시도 횟수
+
     @property
     def is_available(self) -> bool:
         """프록시 사용 가능 여부
@@ -173,10 +179,16 @@ class ProxyManagerV2:
 
                 # 2. 새 풀 구성 - 70% fast + 30% normal
                 # 세션 블랙리스트 추가 (2025-12-20)
+                # 실패율 높은 프록시 ID 조회 (2025-12-21)
+                high_failure_ids = self._db_service.get_proxy_ids_by_hosts(
+                    list(self._high_failure_hosts)
+                ).values() if self._high_failure_hosts else []
+
                 exclude_ids = list(
                     self._previous_pool_ids |
                     self._slow_proxies |
-                    set(self._session_blacklist.keys())
+                    set(self._session_blacklist.keys()) |
+                    set(high_failure_ids)
                 )
 
                 # 목표 개수 계산
@@ -242,7 +254,7 @@ class ProxyManagerV2:
                 logger.info(
                     f"Pool refreshed: {len(proxies)} proxies "
                     f"(fast: {len(fast_proxies)}, normal: {len(normal_proxies)}, "
-                    f"excluded: {len(exclude_ids)})"
+                    f"excluded: {len(exclude_ids)}, high_failure: {len(list(high_failure_ids))})"
                 )
 
                 # 4. 종료된 풀 통계 → 별도 스레드에서 DB 쓰기
@@ -570,6 +582,9 @@ class ProxyManagerV2:
         stats = self._get_or_create_stats(proxy.id)
         stats.record_success(response_time)
 
+        # 세션 실패율 통계 기록 (2025-12-21)
+        self._record_session_result(proxy.id, is_success=True)
+
         # 느린 프록시 마킹 및 즉시 풀에서 제거
         if response_time > self._max_response_time:
             self._slow_proxies.add(proxy.id)
@@ -607,6 +622,14 @@ class ProxyManagerV2:
         # 메모리 통계 업데이트
         stats = self._get_or_create_stats(proxy.id)
         stats.record_failure(error_type, error_message)
+
+        # 세션 실패율 통계 기록 (2025-12-21)
+        self._record_session_result(proxy.id, is_success=False)
+
+        # 누적 실패율 기반 블랙리스트 체크 (2025-12-21)
+        if self._check_cumulative_failure(proxy.id):
+            # 풀에서 즉시 제거
+            self._active_pool = [p for p in self._active_pool if p.id != proxy.id]
 
         # 로컬 캐시 업데이트 및 필요시 풀에서 제거
         self._update_local_proxy(proxy.id, is_valid=False)
@@ -880,3 +903,85 @@ class ProxyManagerV2:
             logger.info(f"Flushing {len(self._usage_stats)} pending stats before shutdown")
             self._schedule_batch_db_write(self._usage_stats)
             self._usage_stats.clear()
+
+    def set_high_failure_hosts(self, hosts: List[str]) -> None:
+        """
+        실패율 높은 프록시 호스트 목록 설정 (2025-12-21)
+
+        ProxyUsageService.get_high_failure_proxy_hosts() 결과를 전달받아
+        풀 갱신 시 해당 프록시를 제외합니다.
+
+        Args:
+            hosts: 실패율 높은 프록시 호스트 목록
+        """
+        old_count = len(self._high_failure_hosts)
+        self._high_failure_hosts = set(hosts)
+        new_count = len(self._high_failure_hosts)
+
+        if new_count != old_count:
+            logger.info(
+                f"High failure hosts updated: {old_count} → {new_count} hosts"
+            )
+
+    def _record_session_result(self, proxy_id: int, is_success: bool) -> None:
+        """
+        세션 중 프록시 결과 기록 (누적 실패율 계산용) (2025-12-21)
+
+        Args:
+            proxy_id: 프록시 ID
+            is_success: 성공 여부
+        """
+        if proxy_id not in self._session_failure_stats:
+            self._session_failure_stats[proxy_id] = {"success": 0, "fail": 0}
+
+        if is_success:
+            self._session_failure_stats[proxy_id]["success"] += 1
+        else:
+            self._session_failure_stats[proxy_id]["fail"] += 1
+
+    def _check_cumulative_failure(self, proxy_id: int) -> bool:
+        """
+        누적 실패율 기반 블랙리스트 등록 여부 확인 (2025-12-21)
+
+        Args:
+            proxy_id: 프록시 ID
+
+        Returns:
+            True: 블랙리스트에 등록됨
+            False: 정상
+        """
+        if proxy_id not in self._session_failure_stats:
+            return False
+
+        stats = self._session_failure_stats[proxy_id]
+        total = stats["success"] + stats["fail"]
+
+        if total < self._cumulative_failure_min_attempts:
+            return False
+
+        failure_rate = stats["fail"] / total
+        if failure_rate >= self._cumulative_failure_threshold:
+            self._session_blacklist[proxy_id] = f"cumulative_failure_{failure_rate:.0%}"
+            logger.warning(
+                f"Proxy {proxy_id} session-blacklisted: cumulative failure rate "
+                f"{failure_rate:.0%} >= {self._cumulative_failure_threshold:.0%} "
+                f"(attempts: {total})"
+            )
+            return True
+
+        return False
+
+    def get_session_stats(self) -> dict:
+        """
+        세션 통계 반환 (디버깅용) (2025-12-21)
+
+        Returns:
+            세션 통계 dict
+        """
+        return {
+            "high_failure_hosts_count": len(self._high_failure_hosts),
+            "session_failure_stats_count": len(self._session_failure_stats),
+            "session_blacklist_count": len(self._session_blacklist),
+            "cumulative_failure_threshold": self._cumulative_failure_threshold,
+            "cumulative_failure_min_attempts": self._cumulative_failure_min_attempts,
+        }

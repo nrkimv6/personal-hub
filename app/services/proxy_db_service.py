@@ -881,6 +881,119 @@ class ProxyDBService:
 
         return updated_count
 
+    def get_proxy_ids_by_hosts(self, hosts: List[str]) -> Dict[str, int]:
+        """
+        프록시 호스트 목록으로 프록시 ID 매핑 조회
+
+        Args:
+            hosts: 프록시 호스트(IP) 목록
+
+        Returns:
+            {host: proxy_id} 딕셔너리
+        """
+        if not hosts:
+            return {}
+
+        proxies = (
+            self.db.query(Proxy.id, Proxy.host)
+            .filter(Proxy.host.in_(hosts))
+            .all()
+        )
+
+        return {p.host: p.id for p in proxies}
+
+    def sync_usage_stats_from_logs(
+        self,
+        usage_stats: List[Dict[str, Any]],
+    ) -> int:
+        """
+        proxy_usage_logs 통계를 proxies 테이블에 동기화
+
+        ProxyUsageService.get_proxy_usage_stats_for_sync() 결과를 받아서
+        proxies 테이블의 통계를 업데이트합니다.
+
+        Args:
+            usage_stats: 프록시별 사용 통계 목록
+                [{
+                    "proxy_host": "1.2.3.4",
+                    "success_count": 10,
+                    "fail_count": 5,
+                    "total_attempts": 15,
+                    "avg_response_time_ms": 500,
+                    "last_used_at": datetime
+                }, ...]
+
+        Returns:
+            업데이트된 프록시 수
+        """
+        if not usage_stats:
+            return 0
+
+        # 호스트 → ID 매핑 조회
+        hosts = [s["proxy_host"] for s in usage_stats]
+        host_to_id = self.get_proxy_ids_by_hosts(hosts)
+
+        updated_count = 0
+        now = datetime.now()
+
+        for stats in usage_stats:
+            proxy_host = stats.get("proxy_host")
+            if not proxy_host or proxy_host not in host_to_id:
+                continue
+
+            proxy_id = host_to_id[proxy_host]
+            proxy = self.get_by_id(proxy_id)
+            if not proxy:
+                continue
+
+            success_count = stats.get("success_count", 0)
+            fail_count = stats.get("fail_count", 0)
+            total_attempts = stats.get("total_attempts", 0)
+            avg_response_time_ms = stats.get("avg_response_time_ms")
+
+            # 통계 누적 (기존 값에 더하기)
+            proxy.success_count = (proxy.success_count or 0) + success_count
+            proxy.total_checks = (proxy.total_checks or 0) + total_attempts
+
+            # 실패 카운트: 성공이 있으면 리셋, 아니면 누적
+            if success_count > 0:
+                proxy.fail_count = fail_count  # 리셋 후 새 실패만
+                proxy.last_success_at = stats.get("last_used_at") or now
+            else:
+                proxy.fail_count = (proxy.fail_count or 0) + fail_count
+
+            # 응답시간 업데이트 (이동 평균, ms → s 변환)
+            if avg_response_time_ms is not None:
+                new_avg = avg_response_time_ms / 1000.0  # ms → s
+                if proxy.avg_response_time is not None:
+                    # 이동 평균: 기존 50% + 새로운 50%
+                    proxy.avg_response_time = proxy.avg_response_time * 0.5 + new_avg * 0.5
+                else:
+                    proxy.avg_response_time = new_avg
+
+            # 마지막 체크 시간
+            proxy.last_checked_at = stats.get("last_used_at") or now
+
+            # 우선순위 점수 재계산
+            proxy.priority_score = self.calculate_priority_score(proxy)
+
+            # 상태 업데이트 (연속 실패 7회 시 비활성화)
+            if proxy.fail_count >= 7:
+                proxy.status = "inactive"
+                logger.info(f"Proxy {proxy_host} marked inactive: {proxy.fail_count} consecutive failures")
+
+            updated_count += 1
+
+        try:
+            self.db.commit()
+            logger.info(f"Synced usage stats: {updated_count} proxies updated")
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Failed to sync usage stats: {e}")
+            raise
+
+        return updated_count
+
 
 # 의존성 주입을 위한 팩토리 함수
 def get_proxy_db_service(db: Session) -> ProxyDBService:

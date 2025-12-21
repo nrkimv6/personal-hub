@@ -570,6 +570,128 @@ class ProxyUsageService:
 
         return {row.proxy_host: row.timeout_count for row in query.all()}
 
+    def get_high_failure_proxy_hosts(
+        self,
+        db: Session,
+        hours: int = 6,
+        min_attempts: int = 3,
+        max_success_rate: float = 0.2,
+    ) -> List[str]:
+        """
+        최근 N시간 동안 실패율 높은 프록시 호스트 목록 조회
+
+        풀 갱신 시 제외할 프록시 필터링에 사용
+
+        Args:
+            db: 데이터베이스 세션
+            hours: 조회 기간 (시간)
+            min_attempts: 최소 시도 횟수 (신뢰도 확보)
+            max_success_rate: 최대 성공률 (이 값 이하면 실패로 간주, 0.0~1.0)
+
+        Returns:
+            실패율 높은 프록시 호스트 목록
+        """
+        cutoff = datetime.now() - timedelta(hours=hours)
+
+        # 프록시별 성공률 계산
+        query = db.query(
+            ProxyUsageLog.proxy_host,
+            func.count(ProxyUsageLog.id).label("total_attempts"),
+            func.sum(ProxyUsageLog.success).label("success_count"),
+        ).filter(
+            ProxyUsageLog.timestamp >= cutoff,
+            ProxyUsageLog.proxy_host.isnot(None),
+            # 특수 프록시 제외 (direct, socks4 프로토콜 표시 등)
+            ProxyUsageLog.proxy_host.notin_(["direct", "socks4", "socks5", "http", "https"]),
+        ).group_by(
+            ProxyUsageLog.proxy_host
+        ).having(
+            func.count(ProxyUsageLog.id) >= min_attempts
+        )
+
+        high_failure_hosts = []
+        for row in query.all():
+            total = row.total_attempts or 0
+            success = int(row.success_count or 0)
+            if total > 0:
+                success_rate = success / total
+                if success_rate <= max_success_rate:
+                    high_failure_hosts.append(row.proxy_host)
+                    logger.debug(
+                        f"High failure proxy: {row.proxy_host} "
+                        f"(success_rate={success_rate:.1%}, attempts={total})"
+                    )
+
+        if high_failure_hosts:
+            logger.info(
+                f"Found {len(high_failure_hosts)} high-failure proxies "
+                f"(last {hours}h, success_rate <= {max_success_rate:.0%})"
+            )
+
+        return high_failure_hosts
+
+    def get_proxy_usage_stats_for_sync(
+        self,
+        db: Session,
+        hours: int = 24,
+        min_attempts: int = 1,
+    ) -> List[Dict[str, Any]]:
+        """
+        proxies 테이블 동기화용 프록시별 사용 통계 조회
+
+        Args:
+            db: 데이터베이스 세션
+            hours: 조회 기간 (시간)
+            min_attempts: 최소 시도 횟수
+
+        Returns:
+            프록시별 통계 목록
+            [{
+                "proxy_host": "1.2.3.4",
+                "success_count": 10,
+                "fail_count": 5,
+                "total_attempts": 15,
+                "avg_response_time_ms": 500,
+                "last_used_at": datetime
+            }, ...]
+        """
+        cutoff = datetime.now() - timedelta(hours=hours)
+
+        query = db.query(
+            ProxyUsageLog.proxy_host,
+            func.count(ProxyUsageLog.id).label("total_attempts"),
+            func.sum(ProxyUsageLog.success).label("success_count"),
+            func.sum(case((ProxyUsageLog.success == 0, 1), else_=0)).label("fail_count"),
+            func.avg(
+                case(
+                    (ProxyUsageLog.success == 1, ProxyUsageLog.response_time_ms),
+                    else_=None
+                )
+            ).label("avg_response_time_ms"),
+            func.max(ProxyUsageLog.timestamp).label("last_used_at"),
+        ).filter(
+            ProxyUsageLog.timestamp >= cutoff,
+            ProxyUsageLog.proxy_host.isnot(None),
+            # 특수 프록시 제외
+            ProxyUsageLog.proxy_host.notin_(["direct", "socks4", "socks5", "http", "https"]),
+        ).group_by(
+            ProxyUsageLog.proxy_host
+        ).having(
+            func.count(ProxyUsageLog.id) >= min_attempts
+        )
+
+        return [
+            {
+                "proxy_host": row.proxy_host,
+                "success_count": int(row.success_count or 0),
+                "fail_count": int(row.fail_count or 0),
+                "total_attempts": row.total_attempts or 0,
+                "avg_response_time_ms": row.avg_response_time_ms,
+                "last_used_at": row.last_used_at,
+            }
+            for row in query.all()
+        ]
+
 
 # 싱글톤 인스턴스
 proxy_usage_service = ProxyUsageService()

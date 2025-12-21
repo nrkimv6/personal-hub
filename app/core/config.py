@@ -136,6 +136,9 @@ class Settings(BaseSettings):
     PROXY_WEIGHTED_SELECTION: bool = True  # 가중치 기반 선택 활성화
     PROXY_VALIDATOR_TYPE: str = "naver"  # 검증기 타입 ("naver" | "httpbin")
     PROXY_MAX_RESPONSE_TIME: float = 2.0  # 최대 허용 응답시간 (초) - 초과 시 다음 풀에서 제외
+    PROXY_COOLDOWN_SECONDS: float = 30.0  # 프록시 재사용 금지 시간 (초) - 2025-12-21 (10→30)
+    PROXY_HIGH_FAILURE_HOURS: int = 6  # 실패율 체크 기간 (시간) - 2025-12-21
+    PROXY_HIGH_FAILURE_MAX_RATE: float = 0.2  # 실패율 임계값 (이 값 이하면 제외) - 2025-12-21
 
     # 모니터링 설정
     INITIAL_CHECK_DELAY: int = 2  # 초기 검사 지연 (초)
