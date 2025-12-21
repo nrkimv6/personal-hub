@@ -29,8 +29,15 @@ class InstagramCrawlRun(Base):
     retry_of_run_id = Column(Integer, ForeignKey("instagram_crawl_runs.id"), nullable=True)
     failure_reason = Column(String(50), nullable=True)  # 'login_required', 'network_error', 'timeout', 'rate_limit', 'unknown'
 
+    # 크롤링 상세 정보 (2025-12-21 추가)
+    stop_reason = Column(String(50), nullable=True)  # 'max_posts_reached', 'duplicate_stop', 'max_refresh_after_duplicates', etc.
+    duplicate_count = Column(Integer, default=0)  # 중단 시점의 연속 중복 개수
+    scroll_performed = Column(Integer, default=0)  # 실제 수행된 스크롤 횟수
+    refresh_count = Column(Integer, default=0)  # 새로고침 횟수
+    config_snapshot = Column(Text, nullable=True)  # 수집 시점의 설정값 JSON
+
     # 관계
     posts = relationship("InstagramPost", back_populates="crawl_run")
 
     def __repr__(self):
-        return f"<InstagramCrawlRun(id={self.id}, account_id={self.account_id}, success={self.success})>"
+        return f"<InstagramCrawlRun(id={self.id}, account_id={self.account_id}, success={self.success}, stop_reason={self.stop_reason})>"

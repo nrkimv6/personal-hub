@@ -9,7 +9,7 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from app.models import InstagramCrawlRun, InstagramScheduleConfig, Account
-from .crawler import InstagramCrawler, CrawlOptions, PostData
+from .crawler import InstagramCrawler, CrawlOptions, PostData, CrawlResult
 from .post_service import PostService
 from .scheduler import InstagramScheduler
 from .classifier_service import ClassifierService
@@ -92,15 +92,22 @@ class CrawlService:
             crawler._db_duplicate_checker = lambda post_id: self.post_service.exists_by_post_id(post_id)
 
             # 크롤링 실행 (실시간 저장 콜백 전달)
-            posts = await crawler.crawl_feed(options, on_post_collected=on_post_collected)
+            result: CrawlResult = await crawler.crawl_feed(options, on_post_collected=on_post_collected)
 
-            # 실행 기록 업데이트
+            # 실행 기록 업데이트 (기본 정보)
             crawl_run.success = True
             crawl_run.total_collected = save_stats["total_collected"]
             crawl_run.new_saved = save_stats["new_saved"]
             crawl_run.finished_at = datetime.now()
 
-            logger.info(f"Crawl completed: {save_stats['total_collected']} collected, {save_stats['new_saved']} new (realtime saved)")
+            # 실행 기록 업데이트 (상세 정보)
+            crawl_run.stop_reason = result.stop_reason
+            crawl_run.duplicate_count = result.duplicate_count
+            crawl_run.scroll_performed = result.scroll_performed
+            crawl_run.refresh_count = result.refresh_count
+            crawl_run.config_snapshot = json.dumps(result.config_snapshot)
+
+            logger.info(f"Crawl completed: {save_stats['total_collected']} collected, {save_stats['new_saved']} new (stop_reason={result.stop_reason}, realtime saved)")
 
         except Exception as e:
             # 에러 발생해도 그때까지 저장된 데이터는 보존됨
@@ -112,6 +119,7 @@ class CrawlService:
                 crawl_run.total_collected = save_stats["total_collected"]
                 crawl_run.new_saved = save_stats["new_saved"]
                 crawl_run.finished_at = datetime.now()
+                crawl_run.stop_reason = "error"
             logger.error(f"Crawl failed after saving {save_stats['new_saved']} posts: {e}")
 
         try:
@@ -265,6 +273,33 @@ class CrawlService:
         return self.db.query(InstagramCrawlRun).filter(
             InstagramCrawlRun.id == run_id
         ).first()
+
+    def get_crawl_events(
+        self,
+        run_id: int,
+        event_type: Optional[str] = None,
+        limit: int = 100
+    ) -> List:
+        """크롤링 이벤트 로그 조회.
+
+        Args:
+            run_id: 실행 기록 ID
+            event_type: 이벤트 타입 필터 (선택)
+            limit: 최대 개수
+
+        Returns:
+            이벤트 목록
+        """
+        from app.models import InstagramCrawlEvent
+
+        query = self.db.query(InstagramCrawlEvent).filter(
+            InstagramCrawlEvent.crawl_run_id == run_id
+        )
+
+        if event_type:
+            query = query.filter(InstagramCrawlEvent.event_type == event_type)
+
+        return query.order_by(InstagramCrawlEvent.timestamp).limit(limit).all()
 
     def get_run_stats(self, days: int = 7) -> dict:
         """실행 통계 조회.

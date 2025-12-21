@@ -90,8 +90,33 @@ class CrawlRunSchema(BaseModel):
     retry_count: int = 0
     retry_of_run_id: Optional[int] = None
     failure_reason: Optional[str] = None
+    # 크롤링 상세 정보 (2025-12-21 추가)
+    stop_reason: Optional[str] = None
+    duplicate_count: int = 0
+    scroll_performed: int = 0
+    refresh_count: int = 0
+    config_snapshot: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CrawlEventSchema(BaseModel):
+    """크롤링 이벤트 로그."""
+    id: int
+    crawl_run_id: int
+    timestamp: str
+    event_type: str  # 'scroll', 'post_saved', 'duplicate', 'refresh', 'stop'
+    message: Optional[str] = None
+    details: Optional[str] = None  # JSON
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CrawlRunSummarySchema(BaseModel):
+    """크롤링 실행 요약."""
+    run: CrawlRunSchema
+    events: List["CrawlEventSchema"] = []
+    event_counts: dict = {}  # {"scroll": 5, "duplicate": 3, ...}
 
 
 class TimeWindow(BaseModel):
