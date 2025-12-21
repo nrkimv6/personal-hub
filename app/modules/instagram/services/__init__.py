@@ -4,6 +4,8 @@ from .crawler import InstagramCrawler, CrawlOptions, PostData, LoginRequiredErro
 from .post_service import PostService
 from .crawl_service import CrawlService
 from .request_service import CrawlRequestService
+from .classifier_service import ClassifierService
+from .tag_service import TagService
 
 __all__ = [
     "InstagramScheduler",
@@ -14,4 +16,6 @@ __all__ = [
     "PostService",
     "CrawlService",
     "CrawlRequestService",
+    "ClassifierService",
+    "TagService",
 ]

@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import InstagramPost, InstagramCrawlRun
+from app.models.instagram_post_tag import InstagramPostTag, InstagramPostTagRelation
 
 logger = logging.getLogger("instagram.post_service")
 
@@ -136,6 +137,7 @@ class PostService:
         date_from: Optional[date] = None,
         date_to: Optional[date] = None,
         is_ad: Optional[bool] = None,
+        tags: Optional[List[str]] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> Tuple[List[InstagramPost], int]:
@@ -146,6 +148,7 @@ class PostService:
             date_from: 시작 날짜
             date_to: 종료 날짜
             is_ad: 광고 필터
+            tags: 태그 필터 (태그 이름 목록)
             limit: 조회 개수
             offset: 시작 위치
 
@@ -165,6 +168,15 @@ class PostService:
 
         if is_ad is not None:
             query = query.filter(InstagramPost.is_ad == is_ad)
+
+        # 태그 필터
+        if tags:
+            query = (
+                query.join(InstagramPostTagRelation)
+                .join(InstagramPostTag)
+                .filter(InstagramPostTag.name.in_(tags))
+                .distinct()
+            )
 
         total = query.count()
 

@@ -12,6 +12,7 @@ from app.models import InstagramCrawlRun, InstagramScheduleConfig
 from .crawler import InstagramCrawler, CrawlOptions, PostData
 from .post_service import PostService
 from .scheduler import InstagramScheduler
+from .classifier_service import ClassifierService
 from ..models.schemas import (
     TimeWindow,
     ScheduleConfigSchema,
@@ -32,6 +33,7 @@ class CrawlService:
         """
         self.db = db
         self.post_service = PostService(db)
+        self.classifier_service = ClassifierService(db)
 
     async def run_crawl(
         self,
@@ -126,7 +128,7 @@ class CrawlService:
         account_id: int,
         crawl_run_id: int,
     ) -> bool:
-        """게시물 저장.
+        """게시물 저장 및 자동 분류.
 
         Returns:
             저장 성공 여부 (중복이면 False)
@@ -154,6 +156,15 @@ class CrawlService:
             account_id=account_id,
             crawl_run_id=crawl_run_id,
         )
+
+        # 신규 저장된 게시물 자동 분류
+        if result is not None:
+            try:
+                tags = self.classifier_service.classify_post(result)
+                if tags:
+                    logger.debug(f"Post {result.id} classified: {[t['tag'] for t in tags]}")
+            except Exception as e:
+                logger.warning(f"Failed to classify post {result.id}: {e}")
 
         return result is not None
 
