@@ -27,8 +27,10 @@ $PidDir = Join-Path $ProjectRoot ".pids"
 $ApiPidFile = Join-Path $PidDir "api.pid"
 $WorkerPidFile = Join-Path $PidDir "worker.pid"
 $InstagramWorkerPidFile = Join-Path $PidDir "instagram_worker.pid"
+$ClaudeWorkerPidFile = Join-Path $PidDir "claude_worker.pid"
 $WatchdogPidFile = Join-Path $PidDir "watchdog.pid"
 $InstagramWatchdogPidFile = Join-Path $PidDir "instagram_watchdog.pid"
+$ClaudeWatchdogPidFile = Join-Path $PidDir "claude_watchdog.pid"
 $FrontendPidFile = Join-Path $PidDir "frontend.pid"
 
 Write-Host ""
@@ -49,10 +51,10 @@ $psProcs = Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -Erro
 if ($psProcs) {
     foreach ($proc in $psProcs) {
         $cmd = $proc.CommandLine
-        # Kill both worker-watchdog.ps1 and instagram-watchdog.ps1
-        if ($cmd -and ($cmd -match "worker-watchdog\.ps1" -or $cmd -match "instagram-watchdog\.ps1")) {
+        # Kill worker-watchdog.ps1, instagram-watchdog.ps1, and claude-watchdog.ps1
+        if ($cmd -and ($cmd -match "worker-watchdog\.ps1" -or $cmd -match "instagram-watchdog\.ps1" -or $cmd -match "claude-watchdog\.ps1")) {
             $procId = $proc.ProcessId
-            $watchdogType = if ($cmd -match "instagram") { "Instagram" } else { "Worker" }
+            $watchdogType = if ($cmd -match "claude") { "Claude" } elseif ($cmd -match "instagram") { "Instagram" } else { "Worker" }
             Write-Host "  [*] $watchdogType Watchdog PID $procId" -ForegroundColor Yellow
             try {
                 Stop-Process -Id $procId -Force -ErrorAction Stop
@@ -194,7 +196,7 @@ Write-Host ""
 Write-Host "[4] Cleaning up PID files" -ForegroundColor Cyan
 Write-Host "----------------------------------------"
 
-foreach ($pidFile in @($ApiPidFile, $WorkerPidFile, $InstagramWorkerPidFile, $WatchdogPidFile, $InstagramWatchdogPidFile, $FrontendPidFile)) {
+foreach ($pidFile in @($ApiPidFile, $WorkerPidFile, $InstagramWorkerPidFile, $ClaudeWorkerPidFile, $WatchdogPidFile, $InstagramWatchdogPidFile, $ClaudeWatchdogPidFile, $FrontendPidFile)) {
     if (Test-Path $pidFile) {
         $name = Split-Path $pidFile -Leaf
         Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
