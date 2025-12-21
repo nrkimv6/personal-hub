@@ -192,6 +192,28 @@ class InstagramCrawler:
             const allSpans = Array.from(el.querySelectorAll('span'));
             result.has_more_button = allSpans.some(s => s.textContent.trim() === '더 보기');
 
+            // 좋아요/댓글 수: section 내 숫자 span
+            const section = el.querySelector('section');
+            if (section) {
+                const numberSpans = Array.from(section.querySelectorAll('span'));
+                const numbers = [];
+                for (const span of numberSpans) {
+                    const text = span.textContent.trim();
+                    // 숫자만 있거나, 천/만 단위 포함
+                    if (/^\d+$/.test(text)) {
+                        numbers.push(parseInt(text));
+                    } else if (/^[\d,.]+[천만]?$/.test(text)) {
+                        // 1.1천 -> 1100, 1.5만 -> 15000
+                        let num = parseFloat(text.replace(/,/g, ''));
+                        if (text.includes('천')) num *= 1000;
+                        if (text.includes('만')) num *= 10000;
+                        numbers.push(Math.floor(num));
+                    }
+                }
+                result.likes = numbers[0] || null;
+                result.comments = numbers[1] || null;
+            }
+
             return result;
         }""")
 
