@@ -1,19 +1,17 @@
-"""Instagram LLM Classifier Service - LLM 기반 이벤트 분류 서비스."""
+"""Instagram LLM Classifier Service - LLM 기반 이벤트 분류 서비스.
+
+claude_worker 모듈을 사용하여 LLM 분류를 수행합니다.
+Instagram 전용 로직(트리거 태그, 프롬프트)만 포함합니다.
+"""
 
 import json
 import logging
-import re
-import subprocess
-from datetime import datetime
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
 from app.models import InstagramPost
-from app.models.instagram_llm_request import (
-    InstagramLLMClassificationRequest,
-    InstagramLLMWorkerStatus,
-)
+from app.modules.claude_worker.services.llm_service import LLMService
 
 logger = logging.getLogger("instagram.llm_classifier")
 
@@ -55,15 +53,14 @@ CLASSIFICATION_PROMPT = """다음 Instagram 게시물을 분석하여 이벤트 
 class LLMClassifierService:
     """LLM 기반 게시물 분류 서비스.
 
-    Claude CLI를 subprocess로 호출하여 게시물을 분류합니다.
+    claude_worker 모듈의 LLMService를 사용하여 분류를 수행합니다.
     """
 
+    CALLER_TYPE = "instagram"
+
     def __init__(self, db: Session):
-        """
-        Args:
-            db: SQLAlchemy 세션
-        """
         self.db = db
+        self._llm_service = LLMService(db)
 
     def should_trigger_llm(self, matched_tags: list[str]) -> bool:
         """LLM 분류가 필요한지 확인.
@@ -95,8 +92,8 @@ class LLMClassifierService:
         post_id: int,
         trigger_tag: str,
         requested_by: str = "auto",
-    ) -> Optional[InstagramLLMClassificationRequest]:
-        """LLM 분류 요청 생성.
+    ) -> Optional[object]:
+        """LLM 분류 요청 생성 (claude_worker에 위임).
 
         Args:
             post_id: 게시물 ID
@@ -104,30 +101,23 @@ class LLMClassifierService:
             requested_by: 요청자 ('auto' 또는 'manual')
 
         Returns:
-            생성된 요청 또는 None (중복인 경우)
+            생성된 LLMRequest 또는 None
         """
-        # 중복 방지: pending 상태인 동일 post_id 요청이 있으면 스킵
-        existing = (
-            self.db.query(InstagramLLMClassificationRequest)
-            .filter(
-                InstagramLLMClassificationRequest.post_id == post_id,
-                InstagramLLMClassificationRequest.status == "pending",
-            )
-            .first()
-        )
+        # 게시물 조회
+        post = self.db.query(InstagramPost).filter(InstagramPost.id == post_id).first()
+        if not post or not post.caption:
+            logger.warning(f"Post {post_id} not found or has no caption")
+            return None
 
-        if existing:
-            logger.debug(f"LLM request already exists for post {post_id}")
-            return existing
+        # 프롬프트 생성
+        prompt = CLASSIFICATION_PROMPT.format(caption=post.caption)
 
-        request = InstagramLLMClassificationRequest(
-            post_id=post_id,
-            trigger_tag=trigger_tag,
-            requested_by=requested_by,
+        # claude_worker에 요청 생성
+        request = self._llm_service.enqueue(
+            caller_type=self.CALLER_TYPE,
+            caller_id=str(post_id),
+            prompt=prompt,
         )
-        self.db.add(request)
-        self.db.commit()
-        self.db.refresh(request)
 
         logger.info(f"LLM classification request created: post_id={post_id}, trigger_tag={trigger_tag}")
         return request
@@ -137,17 +127,8 @@ class LLMClassifierService:
         post_ids: list[int],
         trigger_tag: str = "manual",
         requested_by: str = "manual",
-    ) -> list[InstagramLLMClassificationRequest]:
-        """여러 게시물에 대해 LLM 분류 요청 생성.
-
-        Args:
-            post_ids: 게시물 ID 목록
-            trigger_tag: 트리거 태그
-            requested_by: 요청자
-
-        Returns:
-            생성된 요청 목록
-        """
+    ) -> list:
+        """여러 게시물에 대해 LLM 분류 요청 생성."""
         requests = []
         for post_id in post_ids:
             request = self.create_request(post_id, trigger_tag, requested_by)
@@ -155,396 +136,74 @@ class LLMClassifierService:
                 requests.append(request)
         return requests
 
-    def get_pending_request(self) -> Optional[InstagramLLMClassificationRequest]:
-        """처리 대기 중인 요청 조회 (FIFO).
+    def get_result(self, post_id: int) -> Optional[dict]:
+        """게시물의 LLM 분류 결과 조회.
+
+        Args:
+            post_id: 게시물 ID
 
         Returns:
-            가장 오래된 pending 요청 또는 None
+            분류 결과 또는 None
         """
-        return (
-            self.db.query(InstagramLLMClassificationRequest)
-            .filter(InstagramLLMClassificationRequest.status == "pending")
-            .order_by(InstagramLLMClassificationRequest.requested_at)
-            .first()
-        )
+        request = self._llm_service.get_result(self.CALLER_TYPE, str(post_id))
+        if not request:
+            return None
 
-    def get_pending_count(self) -> int:
-        """대기 중인 요청 수 조회.
-
-        Returns:
-            pending 상태의 요청 수
-        """
-        return (
-            self.db.query(InstagramLLMClassificationRequest)
-            .filter(InstagramLLMClassificationRequest.status == "pending")
-            .count()
-        )
-
-    def mark_processing(self, request_id: int) -> None:
-        """요청을 처리 중으로 표시.
-
-        Args:
-            request_id: 요청 ID
-        """
-        request = self.db.query(InstagramLLMClassificationRequest).get(request_id)
-        if request:
-            request.status = "processing"
-            self.db.commit()
-            logger.debug(f"LLM request {request_id} marked as processing")
-
-    def mark_completed(
-        self,
-        request_id: int,
-        result: dict,
-        confidence: float,
-        prompt: str,
-        raw_response: str,
-    ) -> None:
-        """요청 완료 처리.
-
-        Args:
-            request_id: 요청 ID
-            result: 분류 결과
-            confidence: 확신도
-            prompt: 사용된 프롬프트
-            raw_response: Claude 원본 응답
-        """
-        request = self.db.query(InstagramLLMClassificationRequest).get(request_id)
-        if request:
-            request.status = "completed"
-            request.processed_at = datetime.now()
-            request.llm_result = json.dumps(result, ensure_ascii=False)
-            request.confidence_score = confidence
-            request.prompt_used = prompt
-            request.raw_response = raw_response
-            self.db.commit()
-            logger.info(f"LLM request {request_id} completed with confidence {confidence}")
-
-    def mark_failed(self, request_id: int, error_message: str) -> None:
-        """요청 실패 처리.
-
-        Args:
-            request_id: 요청 ID
-            error_message: 에러 메시지
-        """
-        request = self.db.query(InstagramLLMClassificationRequest).get(request_id)
-        if request:
-            request.status = "failed"
-            request.processed_at = datetime.now()
-            request.error_message = error_message
-            request.retry_count += 1
-            self.db.commit()
-            logger.warning(f"LLM request {request_id} failed: {error_message}")
-
-    def reset_to_pending(self, request_id: int) -> bool:
-        """실패한 요청을 다시 pending 상태로 변경.
-
-        Args:
-            request_id: 요청 ID
-
-        Returns:
-            성공 여부
-        """
-        request = self.db.query(InstagramLLMClassificationRequest).get(request_id)
-        if request and request.status == "failed":
-            request.status = "pending"
-            request.error_message = None
-            self.db.commit()
-            logger.info(f"LLM request {request_id} reset to pending")
-            return True
-        return False
-
-    def execute_claude_classification(
-        self,
-        caption: str,
-        timeout: int = 120,
-    ) -> dict:
-        """Claude CLI로 분류 실행.
-
-        Args:
-            caption: 게시물 본문
-            timeout: 타임아웃 (초)
-
-        Returns:
-            {"success": bool, "result": dict, "raw_response": str, "prompt": str, "error": str}
-        """
-        prompt = CLASSIFICATION_PROMPT.format(caption=caption)
-
-        try:
-            result = subprocess.run(
-                ["claude", "-p", prompt],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=timeout,
-            )
-
-            if result.returncode != 0:
-                error_msg = result.stderr or f"Exit code: {result.returncode}"
-                return {
-                    "success": False,
-                    "error": f"Claude CLI error: {error_msg}",
-                    "prompt": prompt,
-                }
-
-            response_text = result.stdout.strip()
-            parsed = self._parse_json_response(response_text)
-
-            return {
-                "success": True,
-                "result": parsed,
-                "raw_response": response_text,
-                "prompt": prompt,
-            }
-
-        except subprocess.TimeoutExpired:
-            return {
-                "success": False,
-                "error": f"Timeout: {timeout}초 초과",
-                "prompt": prompt,
-            }
-        except FileNotFoundError:
-            return {
-                "success": False,
-                "error": "Claude CLI not found. Please install claude-code.",
-                "prompt": prompt,
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "prompt": prompt,
-            }
-
-    def _parse_json_response(self, text: str) -> dict:
-        """Claude 응답에서 JSON 추출.
-
-        Args:
-            text: Claude 응답 텍스트
-
-        Returns:
-            파싱된 JSON 객체
-
-        Raises:
-            ValueError: JSON 파싱 실패
-        """
-        # ```json ... ``` 블록 추출
-        json_match = re.search(r"```json\s*(.*?)\s*```", text, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group(1))
-
-        # 직접 JSON 파싱 시도 (응답이 순수 JSON인 경우)
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-
-        # { ... } 블록 추출 시도
-        brace_match = re.search(r"\{.*\}", text, re.DOTALL)
-        if brace_match:
-            return json.loads(brace_match.group(0))
-
-        raise ValueError(f"Could not parse JSON from response: {text[:200]}...")
-
-    # Worker Status Methods
-
-    def get_worker_status(self) -> Optional[InstagramLLMWorkerStatus]:
-        """활성 워커 상태 조회.
-
-        Returns:
-            활성 워커 상태 또는 None
-        """
-        return (
-            self.db.query(InstagramLLMWorkerStatus)
-            .filter(InstagramLLMWorkerStatus.is_alive == True)
-            .order_by(InstagramLLMWorkerStatus.last_heartbeat.desc())
-            .first()
-        )
-
-    def register_worker(self, worker_id: str, pid: int) -> InstagramLLMWorkerStatus:
-        """워커 등록.
-
-        Args:
-            worker_id: 워커 UUID
-            pid: 프로세스 ID
-
-        Returns:
-            워커 상태 객체
-        """
-        now = datetime.now()
-        status = InstagramLLMWorkerStatus(
-            worker_id=worker_id,
-            pid=pid,
-            started_at=now,
-            last_heartbeat=now,
-            current_state="idle",
-            is_alive=True,
-        )
-        self.db.add(status)
-        self.db.commit()
-        self.db.refresh(status)
-        logger.info(f"LLM Worker registered: {worker_id} (PID: {pid})")
-        return status
-
-    def update_heartbeat(self, worker_id: str) -> Optional[InstagramLLMWorkerStatus]:
-        """워커 하트비트 업데이트.
-
-        Args:
-            worker_id: 워커 UUID
-
-        Returns:
-            워커 상태 또는 None
-        """
-        status = (
-            self.db.query(InstagramLLMWorkerStatus)
-            .filter(InstagramLLMWorkerStatus.worker_id == worker_id)
-            .first()
-        )
-        if status:
-            status.last_heartbeat = datetime.now()
-            self.db.commit()
-        return status
-
-    def update_worker_state(
-        self,
-        worker_id: str,
-        state: str,
-        current_request_id: Optional[int] = None,
-    ) -> None:
-        """워커 상태 업데이트.
-
-        Args:
-            worker_id: 워커 UUID
-            state: 새 상태 ('idle', 'processing')
-            current_request_id: 현재 처리 중인 요청 ID
-        """
-        status = (
-            self.db.query(InstagramLLMWorkerStatus)
-            .filter(InstagramLLMWorkerStatus.worker_id == worker_id)
-            .first()
-        )
-        if status:
-            status.current_state = state
-            status.current_request_id = current_request_id
-            status.last_heartbeat = datetime.now()
-            self.db.commit()
-
-    def increment_processed(self, worker_id: str) -> None:
-        """처리 카운트 증가.
-
-        Args:
-            worker_id: 워커 UUID
-        """
-        status = (
-            self.db.query(InstagramLLMWorkerStatus)
-            .filter(InstagramLLMWorkerStatus.worker_id == worker_id)
-            .first()
-        )
-        if status:
-            status.processed_count += 1
-            self.db.commit()
-
-    def increment_error(self, worker_id: str) -> None:
-        """에러 카운트 증가.
-
-        Args:
-            worker_id: 워커 UUID
-        """
-        status = (
-            self.db.query(InstagramLLMWorkerStatus)
-            .filter(InstagramLLMWorkerStatus.worker_id == worker_id)
-            .first()
-        )
-        if status:
-            status.error_count += 1
-            self.db.commit()
-
-    def mark_worker_dead(self, worker_id: str) -> None:
-        """워커를 종료 상태로 표시.
-
-        Args:
-            worker_id: 워커 UUID
-        """
-        status = (
-            self.db.query(InstagramLLMWorkerStatus)
-            .filter(InstagramLLMWorkerStatus.worker_id == worker_id)
-            .first()
-        )
-        if status:
-            status.is_alive = False
-            status.current_state = "stopped"
-            self.db.commit()
-            logger.info(f"LLM Worker marked as dead: {worker_id}")
-
-    def check_worker_health(self) -> dict:
-        """워커 헬스 체크.
-
-        Returns:
-            {"status": "healthy/warning/dead/no_worker", "message": str, "worker": Optional[dict]}
-        """
-        worker = self.get_worker_status()
-
-        if not worker:
-            return {
-                "status": "no_worker",
-                "message": "No active LLM worker found",
-                "worker": None,
-            }
-
-        now = datetime.now()
-        seconds_since_heartbeat = (now - worker.last_heartbeat).total_seconds()
-
-        if seconds_since_heartbeat <= 60:
-            status = "healthy"
-            message = "Worker is responding normally"
-        elif seconds_since_heartbeat <= 120:
-            status = "warning"
-            message = f"Worker heartbeat delayed ({int(seconds_since_heartbeat)}s ago)"
-        else:
-            status = "dead"
-            message = f"Worker not responding ({int(seconds_since_heartbeat)}s since last heartbeat)"
+        result = None
+        if request.result:
+            try:
+                result = json.loads(request.result)
+            except json.JSONDecodeError:
+                pass
 
         return {
-            "status": status,
-            "message": message,
-            "worker": {
-                "worker_id": worker.worker_id,
-                "pid": worker.pid,
-                "state": worker.current_state,
-                "started_at": worker.started_at.isoformat(),
-                "last_heartbeat": worker.last_heartbeat.isoformat(),
-                "processed_count": worker.processed_count,
-                "error_count": worker.error_count,
-            },
+            "id": request.id,
+            "post_id": post_id,
+            "status": request.status,
+            "result": result,
+            "error_message": request.error_message,
+            "requested_at": request.requested_at,
+            "processed_at": request.processed_at,
         }
 
-    def get_stats(self) -> dict:
-        """LLM 분류 통계 조회.
+    def get_pending_count(self) -> int:
+        """Instagram 관련 대기 중인 요청 수."""
+        from app.modules.claude_worker.models.llm_request import LLMRequest
+        return (
+            self.db.query(LLMRequest)
+            .filter(
+                LLMRequest.caller_type == self.CALLER_TYPE,
+                LLMRequest.status == "pending",
+            )
+            .count()
+        )
 
-        Returns:
-            통계 정보
-        """
-        total = self.db.query(InstagramLLMClassificationRequest).count()
-        pending = (
-            self.db.query(InstagramLLMClassificationRequest)
-            .filter(InstagramLLMClassificationRequest.status == "pending")
-            .count()
+    def reset_to_pending(self, request_id: int) -> bool:
+        """실패한 요청을 다시 pending 상태로 변경."""
+        return self._llm_service.reset_to_pending(request_id)
+
+    # Worker status는 claude_worker 모듈에 위임
+    def get_worker_status(self):
+        """워커 상태 조회 (claude_worker에 위임)."""
+        return self._llm_service.get_worker_status()
+
+    def check_worker_health(self) -> dict:
+        """워커 헬스 체크 (claude_worker에 위임)."""
+        return self._llm_service.check_worker_health()
+
+    def get_stats(self) -> dict:
+        """Instagram LLM 분류 통계 조회."""
+        from app.modules.claude_worker.models.llm_request import LLMRequest
+
+        base_query = self.db.query(LLMRequest).filter(
+            LLMRequest.caller_type == self.CALLER_TYPE
         )
-        processing = (
-            self.db.query(InstagramLLMClassificationRequest)
-            .filter(InstagramLLMClassificationRequest.status == "processing")
-            .count()
-        )
-        completed = (
-            self.db.query(InstagramLLMClassificationRequest)
-            .filter(InstagramLLMClassificationRequest.status == "completed")
-            .count()
-        )
-        failed = (
-            self.db.query(InstagramLLMClassificationRequest)
-            .filter(InstagramLLMClassificationRequest.status == "failed")
-            .count()
-        )
+
+        total = base_query.count()
+        pending = base_query.filter(LLMRequest.status == "pending").count()
+        processing = base_query.filter(LLMRequest.status == "processing").count()
+        completed = base_query.filter(LLMRequest.status == "completed").count()
+        failed = base_query.filter(LLMRequest.status == "failed").count()
 
         return {
             "total": total,

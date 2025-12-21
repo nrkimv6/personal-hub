@@ -1,4 +1,7 @@
-"""Instagram LLM Classification API Routes."""
+"""Instagram LLM Classification API Routes.
+
+claude_worker 모듈을 사용하는 Instagram 전용 LLM 분류 API.
+"""
 
 import json
 import logging
@@ -6,50 +9,112 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.instagram_llm_request import InstagramLLMClassificationRequest
-from app.modules.instagram.models.schemas import (
-    LLMRequestCreateSchema,
-    LLMRequestListResponse,
-    LLMRequestSchema,
-    LLMResultSchema,
-    LLMStatsSchema,
-    LLMWorkerHealthSchema,
-    LLMWorkerStatusSchema,
-)
+from app.modules.claude_worker.models.llm_request import LLMRequest, LLMWorkerStatus
 from app.modules.instagram.services.llm_classifier_service import LLMClassifierService
 
 logger = logging.getLogger("instagram.llm_api")
 
 router = APIRouter(prefix="/api/v1/instagram/llm", tags=["instagram-llm"])
 
+CALLER_TYPE = "instagram"
 
-def _request_to_schema(request: InstagramLLMClassificationRequest) -> LLMRequestSchema:
-    """DB 모델을 스키마로 변환."""
-    llm_result = None
-    if request.llm_result:
+
+# ========== Schemas ==========
+
+class LLMResultSchema(BaseModel):
+    is_event: Optional[bool] = None
+    organizer: Optional[str] = None
+    event_url: Optional[str] = None
+    event_date: Optional[str] = None
+    event_time: Optional[str] = None
+    details: Optional[str] = None
+    confidence: Optional[float] = None
+    reason: Optional[str] = None
+
+
+class LLMRequestSchema(BaseModel):
+    id: int
+    post_id: int
+    status: str
+    requested_at: Optional[datetime] = None
+    processed_at: Optional[datetime] = None
+    result: Optional[LLMResultSchema] = None
+    error_message: Optional[str] = None
+    retry_count: int = 0
+
+
+class LLMRequestListResponse(BaseModel):
+    requests: list[LLMRequestSchema]
+    total: int
+    page: int
+    limit: int
+
+
+class LLMRequestCreateSchema(BaseModel):
+    post_ids: list[int]
+
+
+class LLMWorkerStatusSchema(BaseModel):
+    worker_id: str
+    pid: Optional[int] = None
+    started_at: Optional[datetime] = None
+    last_heartbeat: Optional[datetime] = None
+    current_state: str
+    is_alive: bool
+    processed_count: int = 0
+    error_count: int = 0
+    uptime_seconds: Optional[int] = None
+    heartbeat_age_seconds: Optional[int] = None
+
+
+class LLMWorkerHealthSchema(BaseModel):
+    status: str
+    message: Optional[str] = None
+    worker_id: Optional[str] = None
+    state: Optional[str] = None
+    processed_count: Optional[int] = None
+
+
+class LLMStatsSchema(BaseModel):
+    total: int
+    pending: int
+    processing: int
+    completed: int
+    failed: int
+
+
+# ========== Helper Functions ==========
+
+def _request_to_schema(request: LLMRequest) -> LLMRequestSchema:
+    """LLMRequest를 스키마로 변환."""
+    result = None
+    if request.result:
         try:
-            result_dict = json.loads(request.llm_result)
-            llm_result = LLMResultSchema(**result_dict)
+            result_dict = json.loads(request.result)
+            result = LLMResultSchema(**result_dict)
         except (json.JSONDecodeError, TypeError):
             pass
 
+    # caller_id에서 post_id 추출
+    post_id = int(request.caller_id) if request.caller_id.isdigit() else 0
+
     return LLMRequestSchema(
         id=request.id,
-        post_id=request.post_id,
-        requested_at=request.requested_at,
-        requested_by=request.requested_by,
-        trigger_tag=request.trigger_tag,
+        post_id=post_id,
         status=request.status,
+        requested_at=request.requested_at,
         processed_at=request.processed_at,
-        llm_result=llm_result,
-        confidence_score=request.confidence_score,
+        result=result,
         error_message=request.error_message,
         retry_count=request.retry_count,
     )
 
+
+# ========== Endpoints ==========
 
 @router.get("/requests", response_model=LLMRequestListResponse)
 async def get_llm_requests(
@@ -58,16 +123,16 @@ async def get_llm_requests(
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    """LLM 분류 요청 목록 조회."""
-    query = db.query(InstagramLLMClassificationRequest)
+    """LLM 분류 요청 목록 조회 (Instagram 관련만)."""
+    query = db.query(LLMRequest).filter(LLMRequest.caller_type == CALLER_TYPE)
 
     if status:
-        query = query.filter(InstagramLLMClassificationRequest.status == status)
+        query = query.filter(LLMRequest.status == status)
 
     total = query.count()
 
     requests = (
-        query.order_by(InstagramLLMClassificationRequest.requested_at.desc())
+        query.order_by(LLMRequest.requested_at.desc())
         .offset((page - 1) * limit)
         .limit(limit)
         .all()
@@ -87,8 +152,8 @@ async def get_llm_request(
     db: Session = Depends(get_db),
 ):
     """LLM 분류 요청 상세 조회."""
-    request = db.query(InstagramLLMClassificationRequest).get(request_id)
-    if not request:
+    request = db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+    if not request or request.caller_type != CALLER_TYPE:
         raise HTTPException(status_code=404, detail="요청을 찾을 수 없습니다")
 
     return _request_to_schema(request)
@@ -155,12 +220,11 @@ async def get_llm_worker_status(
         started_at=worker.started_at,
         last_heartbeat=worker.last_heartbeat,
         current_state=worker.current_state,
-        current_request_id=worker.current_request_id,
         is_alive=worker.is_alive,
         processed_count=worker.processed_count,
         error_count=worker.error_count,
-        uptime_seconds=int((now - worker.started_at).total_seconds()),
-        heartbeat_age_seconds=int((now - worker.last_heartbeat).total_seconds()),
+        uptime_seconds=int((now - worker.started_at).total_seconds()) if worker.started_at else None,
+        heartbeat_age_seconds=int((now - worker.last_heartbeat).total_seconds()) if worker.last_heartbeat else None,
     )
 
 
@@ -172,18 +236,14 @@ async def get_llm_worker_health(
     service = LLMClassifierService(db)
     health = service.check_worker_health()
 
-    return LLMWorkerHealthSchema(
-        status=health["status"],
-        message=health["message"],
-        worker=health.get("worker"),
-    )
+    return LLMWorkerHealthSchema(**health)
 
 
 @router.get("/stats", response_model=LLMStatsSchema)
 async def get_llm_stats(
     db: Session = Depends(get_db),
 ):
-    """LLM 분류 통계 조회."""
+    """LLM 분류 통계 조회 (Instagram 관련만)."""
     service = LLMClassifierService(db)
     stats = service.get_stats()
 
