@@ -46,7 +46,7 @@ function Write-Log {
 
 function Start-ClaudeWorker {
     $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $stdoutLogFile = Join-Path $LogDir "stdout_claude_$Timestamp.log"
+    $stdoutLogFile = Join-Path $LogDir "stdout_llm_worker_$Timestamp.log"
 
     Write-Log "Starting Claude worker process..."
 
@@ -63,7 +63,7 @@ function Start-ClaudeWorker {
     Write-Log "Using Python: $VenvPython"
 
     $workerProcess = Start-Process -FilePath "cmd.exe" `
-        -ArgumentList "/c", "set PYTHONIOENCODING=utf-8 && `"$VenvPython`" -m app.worker.claude_worker > `"$stdoutLogFile`" 2>&1" `
+        -ArgumentList "/c", "set PYTHONIOENCODING=utf-8 && `"$VenvPython`" -m app.modules.claude_worker.worker.worker > `"$stdoutLogFile`" 2>&1" `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
         -PassThru
