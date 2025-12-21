@@ -1,0 +1,249 @@
+"""Instagram Worker Status Service - 워커 상태 관리 서비스."""
+
+import logging
+from datetime import datetime, timedelta
+from typing import Optional
+import uuid
+import os
+
+from sqlalchemy.orm import Session
+
+from app.models import InstagramWorkerStatus
+
+logger = logging.getLogger("instagram.worker_status")
+
+# 헬스체크 기준 (초)
+HEALTHY_THRESHOLD = 60      # 60초 이내: healthy
+WARNING_THRESHOLD = 120     # 120초 이내: warning, 초과: dead
+
+
+class WorkerStatusService:
+    """Instagram 워커 상태 관리 서비스."""
+
+    def __init__(self, db: Session):
+        """
+        Args:
+            db: SQLAlchemy 세션
+        """
+        self.db = db
+
+    def register_worker(self, worker_id: Optional[str] = None) -> InstagramWorkerStatus:
+        """새 워커를 등록합니다.
+
+        기존 alive 워커가 있으면 dead로 표시하고 새 워커를 등록합니다.
+
+        Args:
+            worker_id: 워커 ID (없으면 UUID 생성)
+
+        Returns:
+            등록된 워커 상태
+        """
+        if worker_id is None:
+            worker_id = str(uuid.uuid4())
+
+        now = datetime.now()
+
+        # 기존 alive 워커들을 dead로 표시
+        self.db.query(InstagramWorkerStatus).filter(
+            InstagramWorkerStatus.is_alive == True
+        ).update({"is_alive": False})
+
+        # 새 워커 등록
+        worker_status = InstagramWorkerStatus(
+            worker_id=worker_id,
+            pid=os.getpid(),
+            started_at=now,
+            last_heartbeat=now,
+            current_state="idle",
+            is_alive=True,
+        )
+        self.db.add(worker_status)
+        self.db.commit()
+        self.db.refresh(worker_status)
+
+        logger.info(f"Worker registered: {worker_id} (PID: {worker_status.pid})")
+        return worker_status
+
+    def update_heartbeat(self, worker_id: str) -> Optional[InstagramWorkerStatus]:
+        """워커의 heartbeat를 업데이트합니다.
+
+        Args:
+            worker_id: 워커 ID
+
+        Returns:
+            업데이트된 워커 상태 (없으면 None)
+        """
+        worker = self.db.query(InstagramWorkerStatus).filter(
+            InstagramWorkerStatus.worker_id == worker_id
+        ).first()
+
+        if worker:
+            worker.last_heartbeat = datetime.now()
+            self.db.commit()
+
+        return worker
+
+    def update_state(
+        self,
+        worker_id: str,
+        state: str,
+        account: Optional[str] = None,
+        run_id: Optional[int] = None
+    ) -> Optional[InstagramWorkerStatus]:
+        """워커의 상태를 업데이트합니다.
+
+        Args:
+            worker_id: 워커 ID
+            state: 상태 ('idle', 'crawling', 'processing')
+            account: 현재 처리 중인 계정
+            run_id: 현재 실행 중인 crawl_run_id
+
+        Returns:
+            업데이트된 워커 상태 (없으면 None)
+        """
+        worker = self.db.query(InstagramWorkerStatus).filter(
+            InstagramWorkerStatus.worker_id == worker_id
+        ).first()
+
+        if worker:
+            worker.current_state = state
+            worker.current_account = account
+            worker.current_run_id = run_id
+            worker.last_heartbeat = datetime.now()
+            self.db.commit()
+            logger.debug(f"Worker state updated: {state}, account={account}")
+
+        return worker
+
+    def mark_dead(self, worker_id: str) -> Optional[InstagramWorkerStatus]:
+        """워커를 종료 상태로 표시합니다.
+
+        Args:
+            worker_id: 워커 ID
+
+        Returns:
+            업데이트된 워커 상태 (없으면 None)
+        """
+        worker = self.db.query(InstagramWorkerStatus).filter(
+            InstagramWorkerStatus.worker_id == worker_id
+        ).first()
+
+        if worker:
+            worker.is_alive = False
+            worker.current_state = "stopped"
+            worker.current_account = None
+            worker.current_run_id = None
+            self.db.commit()
+            logger.info(f"Worker marked as dead: {worker_id}")
+
+        return worker
+
+    def get_current_status(self) -> Optional[InstagramWorkerStatus]:
+        """현재 활성 워커의 상태를 조회합니다.
+
+        Returns:
+            현재 활성 워커 상태 (없으면 None)
+        """
+        return self.db.query(InstagramWorkerStatus).filter(
+            InstagramWorkerStatus.is_alive == True
+        ).order_by(InstagramWorkerStatus.last_heartbeat.desc()).first()
+
+    def check_health(self) -> dict:
+        """워커 헬스체크를 수행합니다.
+
+        Returns:
+            헬스체크 결과 dict:
+            - status: 'healthy', 'warning', 'dead', 'no_worker'
+            - worker_id: 워커 ID (있으면)
+            - last_heartbeat: 마지막 heartbeat 시간
+            - heartbeat_age_seconds: heartbeat 경과 시간 (초)
+            - current_state: 현재 상태
+            - message: 상태 메시지
+        """
+        worker = self.get_current_status()
+
+        if not worker:
+            return {
+                "status": "no_worker",
+                "worker_id": None,
+                "last_heartbeat": None,
+                "heartbeat_age_seconds": None,
+                "current_state": None,
+                "message": "No active worker found",
+            }
+
+        now = datetime.now()
+        age_seconds = int((now - worker.last_heartbeat).total_seconds())
+
+        if age_seconds <= HEALTHY_THRESHOLD:
+            status = "healthy"
+            message = "Worker is running normally"
+        elif age_seconds <= WARNING_THRESHOLD:
+            status = "warning"
+            message = f"Worker heartbeat delayed ({age_seconds}s ago)"
+        else:
+            status = "dead"
+            message = f"Worker appears to be dead (last heartbeat {age_seconds}s ago)"
+
+        return {
+            "status": status,
+            "worker_id": worker.worker_id,
+            "last_heartbeat": worker.last_heartbeat,
+            "heartbeat_age_seconds": age_seconds,
+            "current_state": worker.current_state,
+            "message": message,
+        }
+
+    def get_status_with_computed_fields(self) -> Optional[dict]:
+        """계산된 필드가 포함된 워커 상태를 조회합니다.
+
+        Returns:
+            워커 상태 dict (없으면 None):
+            - 기본 필드들
+            - uptime_seconds: 가동 시간 (초)
+            - heartbeat_age_seconds: heartbeat 경과 시간 (초)
+        """
+        worker = self.get_current_status()
+
+        if not worker:
+            return None
+
+        now = datetime.now()
+        uptime_seconds = int((now - worker.started_at).total_seconds())
+        heartbeat_age_seconds = int((now - worker.last_heartbeat).total_seconds())
+
+        return {
+            "worker_id": worker.worker_id,
+            "pid": worker.pid,
+            "started_at": worker.started_at,
+            "last_heartbeat": worker.last_heartbeat,
+            "current_state": worker.current_state,
+            "current_account": worker.current_account,
+            "current_run_id": worker.current_run_id,
+            "is_alive": worker.is_alive,
+            "uptime_seconds": uptime_seconds,
+            "heartbeat_age_seconds": heartbeat_age_seconds,
+        }
+
+    def cleanup_stale_workers(self, max_age_hours: int = 24) -> int:
+        """오래된 dead 워커 기록을 정리합니다.
+
+        Args:
+            max_age_hours: 정리 기준 시간 (기본 24시간)
+
+        Returns:
+            삭제된 레코드 수
+        """
+        cutoff = datetime.now() - timedelta(hours=max_age_hours)
+
+        deleted = self.db.query(InstagramWorkerStatus).filter(
+            InstagramWorkerStatus.is_alive == False,
+            InstagramWorkerStatus.last_heartbeat < cutoff
+        ).delete()
+
+        self.db.commit()
+
+        if deleted > 0:
+            logger.info(f"Cleaned up {deleted} stale worker records")
+
+        return deleted

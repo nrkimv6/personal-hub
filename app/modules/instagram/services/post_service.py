@@ -253,3 +253,28 @@ class PostService:
         return self.db.query(InstagramPost).order_by(
             desc(InstagramPost.collected_at)
         ).limit(limit).all()
+
+    def get_posts_by_run_id(
+        self,
+        run_id: int,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Tuple[List[InstagramPost], int]:
+        """특정 실행에서 수집된 게시물 조회.
+
+        Args:
+            run_id: 크롤링 실행 ID
+            limit: 조회 개수
+            offset: 시작 위치
+
+        Returns:
+            (게시물 목록, 전체 개수)
+        """
+        query = self.db.query(InstagramPost).filter(
+            InstagramPost.crawl_run_id == run_id
+        )
+
+        total = query.count()
+        posts = query.order_by(desc(InstagramPost.collected_at)).offset(offset).limit(limit).all()
+
+        return posts, total
