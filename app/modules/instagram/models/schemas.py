@@ -32,6 +32,19 @@ class PostSchema(BaseModel):
     collected_at: datetime
     crawl_run_id: Optional[int] = None
     tags: List[TagInfoSchema] = []
+    # LLM 분류 결과
+    llm_status: Optional[str] = None  # pending/processing/completed/failed
+    llm_tag: Optional[str] = None  # 이벤트/팝업/홍보대사/기타
+    llm_purchase_required: Optional[str] = None  # 예_전부/예_부분/아니오
+    llm_prizes: Optional[List[str]] = None  # 경품 목록
+    llm_winner_count: Optional[int] = None  # 당첨자 수
+    llm_event_start: Optional[str] = None  # YYYY-MM-DD
+    llm_event_end: Optional[str] = None  # YYYY-MM-DD
+    llm_announcement_date: Optional[str] = None  # YYYY-MM-DD
+    llm_urls: Optional[List[str]] = None  # 관련 URL 목록
+    llm_organizer: Optional[str] = None  # 주최사/브랜드
+    llm_summary: Optional[str] = None  # 이벤트 요약
+    llm_analyzed_at: Optional[datetime] = None  # 분석 완료 시간
 
     model_config = ConfigDict(from_attributes=True)
 

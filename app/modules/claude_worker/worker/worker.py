@@ -154,6 +154,9 @@ class LLMWorker:
         # 워커 상태 등록
         self._register_worker_status()
 
+        # Stale 요청 정리 (이전 워커가 비정상 종료된 경우)
+        self._cleanup_stale_requests()
+
         try:
             await self._main_loop()
         finally:
@@ -169,6 +172,22 @@ class LLMWorker:
             logger.info(f"워커 상태 등록 완료: worker_id={self.worker_id}")
         except Exception as e:
             logger.error(f"워커 상태 등록 실패: {e}")
+        finally:
+            db.close()
+
+    def _cleanup_stale_requests(self):
+        """Stale 요청 정리 (워커 시작 시 호출)."""
+        db = SessionLocal()
+        try:
+            service = LLMService(db)
+            result = service.run_cleanup()
+            if result["stale_processing"] > 0 or result["old_history"] > 0:
+                logger.info(
+                    f"Cleanup 완료: stale_processing={result['stale_processing']}, "
+                    f"old_history={result['old_history']}"
+                )
+        except Exception as e:
+            logger.error(f"Cleanup 실패: {e}")
         finally:
             db.close()
 

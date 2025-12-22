@@ -659,6 +659,106 @@ class LLMService:
 
         return stats
 
+    # ========== Cleanup ==========
+
+    # 상수 정의
+    STALE_PROCESSING_TIMEOUT_MINUTES = 10
+    HISTORY_RETENTION_DAYS = 7
+
+    def cleanup_stale_processing(self, timeout_minutes: int = None) -> int:
+        """Stale processing 요청을 failed로 변경.
+
+        워커가 비정상 종료되어 processing 상태로 stuck된 요청을 정리합니다.
+
+        Args:
+            timeout_minutes: 타임아웃 (분). 기본값: STALE_PROCESSING_TIMEOUT_MINUTES (10분)
+
+        Returns:
+            처리된 요청 수
+        """
+        if timeout_minutes is None:
+            timeout_minutes = self.STALE_PROCESSING_TIMEOUT_MINUTES
+
+        threshold = datetime.now() - timedelta(minutes=timeout_minutes)
+
+        # processing 상태이면서 requested_at이 threshold보다 오래된 요청
+        stale_requests = (
+            self.db.query(LLMRequest)
+            .filter(
+                LLMRequest.status == "processing",
+                LLMRequest.requested_at < threshold,
+                LLMRequest.deleted_at.is_(None),
+            )
+            .all()
+        )
+
+        count = 0
+        for request in stale_requests:
+            request.status = "failed"
+            request.processed_at = datetime.now()
+            request.error_message = f"Stale processing: timeout after {timeout_minutes} minutes"
+            request.retry_count += 1
+            count += 1
+            logger.info(f"Stale processing 정리: id={request.id}, caller={request.caller_type}:{request.caller_id}")
+
+        if count > 0:
+            self.db.commit()
+            logger.info(f"Stale processing 정리 완료: {count}개")
+
+        return count
+
+    def cleanup_old_history(self, days: int = None, hard_delete: bool = True) -> int:
+        """오래된 이력 삭제.
+
+        completed/failed/cancelled 상태인 요청 중 일정 기간이 지난 것을 삭제합니다.
+
+        Args:
+            days: 보관 기간 (일). 기본값: HISTORY_RETENTION_DAYS (7일)
+            hard_delete: True면 물리 삭제, False면 soft delete
+
+        Returns:
+            삭제된 요청 수
+        """
+        if days is None:
+            days = self.HISTORY_RETENTION_DAYS
+
+        threshold = datetime.now() - timedelta(days=days)
+
+        # completed/failed/cancelled 상태이면서 processed_at이 threshold보다 오래된 요청
+        old_requests = (
+            self.db.query(LLMRequest)
+            .filter(
+                LLMRequest.status.in_(["completed", "failed", "cancelled"]),
+                LLMRequest.processed_at < threshold,
+                LLMRequest.deleted_at.is_(None),
+            )
+            .all()
+        )
+
+        count = 0
+        for request in old_requests:
+            if hard_delete:
+                self.db.delete(request)
+            else:
+                request.deleted_at = datetime.now()
+            count += 1
+
+        if count > 0:
+            self.db.commit()
+            logger.info(f"오래된 이력 삭제 완료: {count}개 (days={days}, hard_delete={hard_delete})")
+
+        return count
+
+    def run_cleanup(self) -> dict:
+        """전체 cleanup 실행.
+
+        Returns:
+            {"stale_processing": n, "old_history": n}
+        """
+        stale = self.cleanup_stale_processing()
+        old = self.cleanup_old_history()
+        return {"stale_processing": stale, "old_history": old}
+
     # ========== 기본 통계 ==========
 
     def get_stats(self) -> dict:

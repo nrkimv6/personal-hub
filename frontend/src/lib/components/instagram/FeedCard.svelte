@@ -99,16 +99,27 @@
 						<span class="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded">광고</span>
 					{/if}
 				</div>
-				{#if post.tags && post.tags.length > 0}
+				{#if post.tags?.length || post.llm_status}
 					<div class="flex flex-wrap gap-1 mt-0.5">
-						{#each post.tags as tag}
-							<span
-								class="px-1.5 py-0.5 text-xs rounded-full text-white"
-								style="background-color: {tag.color};"
-							>
-								{tag.display_name}
+						{#if post.tags && post.tags.length > 0}
+							{#each post.tags as tag}
+								<span
+									class="px-1.5 py-0.5 text-xs rounded-full text-white"
+									style="background-color: {tag.color};"
+								>
+									{tag.display_name}
+								</span>
+							{/each}
+						{/if}
+						{#if post.llm_status === 'completed' && post.llm_tag}
+							<span class="px-1.5 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700" title="AI 분류">
+								{post.llm_tag}
 							</span>
-						{/each}
+						{:else if post.llm_status === 'pending' || post.llm_status === 'processing'}
+							<span class="px-1.5 py-0.5 text-xs rounded-full bg-gray-100 text-gray-500 animate-pulse" title="AI 분석 중">
+								AI
+							</span>
+						{/if}
 					</div>
 				{/if}
 			</div>

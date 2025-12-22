@@ -539,8 +539,8 @@
 									<p class="text-sm text-gray-600 truncate">{truncate(post.caption, 60)}</p>
 								</td>
 								<td class="px-4 py-3">
-									{#if post.tags && post.tags.length > 0}
-										<div class="flex flex-wrap gap-1">
+									<div class="flex flex-wrap gap-1">
+										{#if post.tags && post.tags.length > 0}
 											{#each post.tags as tag}
 												<span
 													class="px-1.5 py-0.5 text-xs rounded-full text-white"
@@ -549,10 +549,20 @@
 													{tag.display_name}
 												</span>
 											{/each}
-										</div>
-									{:else}
-										<span class="text-gray-400 text-sm">-</span>
-									{/if}
+										{/if}
+										{#if post.llm_status === 'completed' && post.llm_tag}
+											<span class="px-1.5 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700" title="AI 분류">
+												{post.llm_tag}
+											</span>
+										{:else if post.llm_status === 'pending' || post.llm_status === 'processing'}
+											<span class="px-1.5 py-0.5 text-xs rounded-full bg-gray-100 text-gray-500 animate-pulse" title="AI 분석 중">
+												AI
+											</span>
+										{/if}
+										{#if !post.tags?.length && !post.llm_status}
+											<span class="text-gray-400 text-sm">-</span>
+										{/if}
+									</div>
 								</td>
 								<td class="px-4 py-3 text-sm text-gray-500">
 									{post.display_time || formatDate(post.posted_at)}
@@ -632,16 +642,27 @@
 								{/if}
 							</div>
 							<!-- 태그 표시 -->
-							{#if post.tags && post.tags.length > 0}
+							{#if post.tags?.length || post.llm_status}
 								<div class="flex flex-wrap gap-1">
-									{#each post.tags as tag}
-										<span
-											class="px-1.5 py-0.5 text-xs rounded-full text-white"
-											style="background-color: {tag.color};"
-										>
-											{tag.display_name}
+									{#if post.tags && post.tags.length > 0}
+										{#each post.tags as tag}
+											<span
+												class="px-1.5 py-0.5 text-xs rounded-full text-white"
+												style="background-color: {tag.color};"
+											>
+												{tag.display_name}
+											</span>
+										{/each}
+									{/if}
+									{#if post.llm_status === 'completed' && post.llm_tag}
+										<span class="px-1.5 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700" title="AI 분류">
+											{post.llm_tag}
 										</span>
-									{/each}
+									{:else if post.llm_status === 'pending' || post.llm_status === 'processing'}
+										<span class="px-1.5 py-0.5 text-xs rounded-full bg-gray-100 text-gray-500 animate-pulse" title="AI 분석 중">
+											AI
+										</span>
+									{/if}
 								</div>
 							{/if}
 							<p class="text-xs text-gray-500">{truncate(post.caption, 50)}</p>
@@ -799,6 +820,153 @@
 						<span class="ml-1">{selectedPost.is_ad ? '예' : '아니오'}</span>
 					</div>
 				</div>
+
+				<!-- LLM 분류 결과 -->
+				{#if selectedPost.llm_status}
+					<div class="mb-4 p-4 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-200">
+						<div class="flex items-center justify-between mb-3">
+							<h4 class="font-semibold text-gray-900 flex items-center gap-2">
+								<svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+								</svg>
+								AI 분석 결과
+							</h4>
+							<span class="px-2 py-1 text-xs rounded-full {
+								selectedPost.llm_status === 'completed' ? 'bg-green-100 text-green-700' :
+								selectedPost.llm_status === 'processing' ? 'bg-yellow-100 text-yellow-700' :
+								selectedPost.llm_status === 'pending' ? 'bg-gray-100 text-gray-700' :
+								'bg-red-100 text-red-700'
+							}">
+								{selectedPost.llm_status === 'completed' ? '분석 완료' :
+								 selectedPost.llm_status === 'processing' ? '분석 중' :
+								 selectedPost.llm_status === 'pending' ? '대기 중' : '분석 실패'}
+							</span>
+						</div>
+
+						{#if selectedPost.llm_status === 'completed'}
+							<div class="space-y-3">
+								<!-- 분류 태그 -->
+								{#if selectedPost.llm_tag}
+									<div class="flex items-center gap-2">
+										<span class="text-sm text-gray-500 w-20">분류:</span>
+										<span class="px-3 py-1 text-sm font-medium rounded-full {
+											selectedPost.llm_tag === '이벤트' ? 'bg-purple-100 text-purple-700' :
+											selectedPost.llm_tag === '팝업' ? 'bg-blue-100 text-blue-700' :
+											selectedPost.llm_tag === '홍보대사' ? 'bg-pink-100 text-pink-700' :
+											'bg-gray-100 text-gray-700'
+										}">
+											{selectedPost.llm_tag}
+										</span>
+									</div>
+								{/if}
+
+								<!-- 주최사 -->
+								{#if selectedPost.llm_organizer}
+									<div class="flex items-center gap-2">
+										<span class="text-sm text-gray-500 w-20">주최:</span>
+										<span class="text-sm text-gray-900 font-medium">{selectedPost.llm_organizer}</span>
+									</div>
+								{/if}
+
+								<!-- 이벤트 기간 -->
+								{#if selectedPost.llm_event_start || selectedPost.llm_event_end}
+									<div class="flex items-center gap-2">
+										<span class="text-sm text-gray-500 w-20">기간:</span>
+										<span class="text-sm text-gray-900">
+											{selectedPost.llm_event_start || '?'} ~ {selectedPost.llm_event_end || '?'}
+										</span>
+									</div>
+								{/if}
+
+								<!-- 발표일 -->
+								{#if selectedPost.llm_announcement_date}
+									<div class="flex items-center gap-2">
+										<span class="text-sm text-gray-500 w-20">발표일:</span>
+										<span class="text-sm text-gray-900">{selectedPost.llm_announcement_date}</span>
+									</div>
+								{/if}
+
+								<!-- 구매 필요 여부 -->
+								{#if selectedPost.llm_purchase_required}
+									<div class="flex items-center gap-2">
+										<span class="text-sm text-gray-500 w-20">구매 조건:</span>
+										<span class="px-2 py-0.5 text-xs rounded {
+											selectedPost.llm_purchase_required === '아니오' ? 'bg-green-100 text-green-700' :
+											selectedPost.llm_purchase_required === '예_전부' ? 'bg-red-100 text-red-700' :
+											'bg-yellow-100 text-yellow-700'
+										}">
+											{selectedPost.llm_purchase_required === '아니오' ? '구매 불필요' :
+											 selectedPost.llm_purchase_required === '예_전부' ? '전체 구매 필요' : '부분 구매 필요'}
+										</span>
+									</div>
+								{/if}
+
+								<!-- 당첨자 수 -->
+								{#if selectedPost.llm_winner_count}
+									<div class="flex items-center gap-2">
+										<span class="text-sm text-gray-500 w-20">당첨자:</span>
+										<span class="text-sm text-gray-900">{selectedPost.llm_winner_count}명</span>
+									</div>
+								{/if}
+
+								<!-- 경품 목록 -->
+								{#if selectedPost.llm_prizes && selectedPost.llm_prizes.length > 0}
+									<div class="flex items-start gap-2">
+										<span class="text-sm text-gray-500 w-20 shrink-0">경품:</span>
+										<div class="flex flex-wrap gap-1">
+											{#each selectedPost.llm_prizes as prize}
+												<span class="px-2 py-0.5 text-xs bg-amber-100 text-amber-800 rounded">
+													{prize}
+												</span>
+											{/each}
+										</div>
+									</div>
+								{/if}
+
+								<!-- 요약 -->
+								{#if selectedPost.llm_summary}
+									<div class="flex items-start gap-2">
+										<span class="text-sm text-gray-500 w-20 shrink-0">요약:</span>
+										<p class="text-sm text-gray-700">{selectedPost.llm_summary}</p>
+									</div>
+								{/if}
+
+								<!-- 관련 URL -->
+								{#if selectedPost.llm_urls && selectedPost.llm_urls.length > 0}
+									<div class="flex items-start gap-2">
+										<span class="text-sm text-gray-500 w-20 shrink-0">링크:</span>
+										<div class="flex flex-col gap-1">
+											{#each selectedPost.llm_urls as url}
+												<a href={url} target="_blank" rel="noopener noreferrer"
+													class="text-sm text-blue-600 hover:text-blue-800 hover:underline truncate max-w-xs">
+													{url}
+												</a>
+											{/each}
+										</div>
+									</div>
+								{/if}
+
+								<!-- 분석 시간 -->
+								{#if selectedPost.llm_analyzed_at}
+									<div class="pt-2 border-t border-purple-200">
+										<span class="text-xs text-gray-400">
+											분석 완료: {formatDateTime(selectedPost.llm_analyzed_at)}
+										</span>
+									</div>
+								{/if}
+							</div>
+						{:else if selectedPost.llm_status === 'pending' || selectedPost.llm_status === 'processing'}
+							<div class="flex items-center gap-2 text-sm text-gray-600">
+								<div class="animate-spin w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full"></div>
+								<span>AI가 게시물을 분석하고 있습니다...</span>
+							</div>
+						{:else}
+							<div class="text-sm text-red-600">
+								분석에 실패했습니다. 나중에 다시 시도해주세요.
+							</div>
+						{/if}
+					</div>
+				{/if}
 
 				<!-- 액션 버튼 -->
 				<div class="flex gap-2 flex-wrap">

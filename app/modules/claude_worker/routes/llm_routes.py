@@ -277,3 +277,45 @@ def get_caller_stats(db: Session = Depends(get_db)):
     """호출자별 통계."""
     service = LLMService(db)
     return service.get_caller_stats()
+
+
+# ========== Cleanup ==========
+
+class CleanupResponse(BaseModel):
+    stale_processing: int
+    old_history: int
+
+
+@router.post("/cleanup", response_model=CleanupResponse)
+def run_cleanup(db: Session = Depends(get_db)):
+    """Stale 요청 및 오래된 이력 정리.
+
+    - stale_processing: 10분 이상 processing 상태인 요청을 failed로 변경
+    - old_history: 7일 이상 된 completed/failed 요청 삭제
+    """
+    service = LLMService(db)
+    result = service.run_cleanup()
+    return CleanupResponse(**result)
+
+
+@router.post("/cleanup/stale")
+def cleanup_stale_processing(
+    timeout_minutes: int = Query(10, ge=1, le=60, description="타임아웃 (분)"),
+    db: Session = Depends(get_db),
+):
+    """Stale processing 요청만 정리."""
+    service = LLMService(db)
+    count = service.cleanup_stale_processing(timeout_minutes=timeout_minutes)
+    return {"cleaned": count}
+
+
+@router.post("/cleanup/history")
+def cleanup_old_history(
+    days: int = Query(7, ge=1, le=30, description="보관 기간 (일)"),
+    hard_delete: bool = Query(True, description="물리 삭제 여부"),
+    db: Session = Depends(get_db),
+):
+    """오래된 이력만 정리."""
+    service = LLMService(db)
+    count = service.cleanup_old_history(days=days, hard_delete=hard_delete)
+    return {"deleted": count}
