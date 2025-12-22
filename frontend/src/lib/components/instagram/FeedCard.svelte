@@ -143,9 +143,7 @@
 				<div class="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1">
 					{#each post.images as _, idx}
 						<div
-							class="w-1.5 h-1.5 rounded-full transition-colors"
-							class:bg-white={idx === currentImageIndex}
-							class:bg-white/50={idx !== currentImageIndex}
+							class="w-1.5 h-1.5 rounded-full transition-colors {idx === currentImageIndex ? 'bg-white' : 'bg-white/50'}"
 						></div>
 					{/each}
 				</div>
