@@ -19,3 +19,4 @@ data/browser_profiles/
 *.db-journal
 *.db-shm
 *.db-wal
+data/llm_images/

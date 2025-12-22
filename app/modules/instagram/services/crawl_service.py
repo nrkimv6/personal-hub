@@ -213,6 +213,8 @@ class CrawlService:
             posted_at=posted_at,
             display_time=post.display_time,
             is_ad=post.is_ad,
+            likes=post.likes,
+            comments=post.comments,
             account_id=account_id,
             crawl_run_id=crawl_run_id,
         )

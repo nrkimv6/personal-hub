@@ -42,6 +42,8 @@ class PostData:
     caption: Optional[str] = None
     images: List[Dict[str, str]] = field(default_factory=list)
     is_ad: bool = False
+    likes: Optional[int] = None
+    comments: Optional[int] = None
 
 
 @dataclass
@@ -99,6 +101,8 @@ class InstagramCrawler:
             data.url = basic.get("url")
             data.images = basic.get("images", [])
             data.is_ad = basic.get("is_ad", False)
+            data.likes = basic.get("likes")
+            data.comments = basic.get("comments")
 
             # 더보기 버튼 클릭 (있으면) - 최대 2회 시도
             if basic.get("has_more_button"):
@@ -191,6 +195,28 @@ class InstagramCrawler:
             // 더보기 버튼 확인
             const allSpans = Array.from(el.querySelectorAll('span'));
             result.has_more_button = allSpans.some(s => s.textContent.trim() === '더 보기');
+
+            // 좋아요/댓글 수: section 내 숫자 span
+            const section = el.querySelector('section');
+            if (section) {
+                const numberSpans = Array.from(section.querySelectorAll('span'));
+                const numbers = [];
+                for (const span of numberSpans) {
+                    const text = span.textContent.trim();
+                    // 숫자만 있거나, 천/만 단위 포함
+                    if (/^\d+$/.test(text)) {
+                        numbers.push(parseInt(text));
+                    } else if (/^[\d,.]+[천만]?$/.test(text)) {
+                        // 1.1천 -> 1100, 1.5만 -> 15000
+                        let num = parseFloat(text.replace(/,/g, ''));
+                        if (text.includes('천')) num *= 1000;
+                        if (text.includes('만')) num *= 10000;
+                        numbers.push(Math.floor(num));
+                    }
+                }
+                result.likes = numbers[0] || null;
+                result.comments = numbers[1] || null;
+            }
 
             return result;
         }""")
@@ -518,12 +544,14 @@ class InstagramCrawler:
 
                 scroll_performed += 1
                 logger.debug(f"Scroll {scroll + 1}/{options.scroll_count} (refreshed: {refresh_count})")
-                posts_before_scroll = len(all_posts)
+
+                # 스크롤 전 article 수 저장 (새 article 로드 여부 판단용)
+                articles_before_scroll = len(await self.page.query_selector_all("article"))
 
                 await self._scroll_page(options)
                 articles = await self.page.query_selector_all("article")
 
-                logger.debug(f"Total articles in DOM: {len(articles)}, collected so far: {len(all_posts)}")
+                logger.debug(f"Articles in DOM: {articles_before_scroll} -> {len(articles)}, collected: {len(all_posts)}")
 
                 # 모든 article 순회 (가상화로 인해 새 article이 어디에든 있을 수 있음)
                 should_break = False
@@ -579,10 +607,11 @@ class InstagramCrawler:
                 if should_break and stop_reason != "completed":
                     break
 
-                # 이번 스크롤에서 새 게시물이 없으면 카운트 증가
-                if len(all_posts) == posts_before_scroll:
+                # 스크롤 후 DOM에 새 article이 로드되지 않았으면 카운트 증가
+                # (중복 여부와 관계없이, 실제로 페이지가 더 로드되었는지 확인)
+                if len(articles) == articles_before_scroll:
                     no_new_posts_count += 1
-                    logger.debug(f"No new posts in this scroll (count: {no_new_posts_count})")
+                    logger.debug(f"No new articles loaded in this scroll (count: {no_new_posts_count})")
 
                     # N회 연속 새 게시물 없으면 새로고침 시도
                     if no_new_posts_count >= options.no_new_posts_refresh_threshold:

@@ -65,6 +65,16 @@ try {
             Sort-Object Name -Descending | Select-Object -First 1
         $workerLogName = if ($workerLog) { $workerLog.Name } else { $null }
 
+        # Instagram worker log
+        $igWorkerLog = Get-ChildItem -Path $LogDir -Filter "instagram_worker_*.log" -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending | Select-Object -First 1
+        $igWorkerLogName = if ($igWorkerLog) { $igWorkerLog.Name } else { $null }
+
+        # Claude worker log (LLM worker)
+        $claudeWorkerLog = Get-ChildItem -Path $LogDir -Filter "llm_worker_*.log" -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending | Select-Object -First 1
+        $claudeWorkerLogName = if ($claudeWorkerLog) { $claudeWorkerLog.Name } else { $null }
+
         Write-Host ""
         Write-Host "[Step 2] Starting frontend + tailing backend logs..." -ForegroundColor Cyan
         Write-Host "----------------------------------------"
@@ -82,6 +92,18 @@ try {
                 Write-Host "[WORKER] $_" -ForegroundColor Magenta
             }
         }
+        if ($igWorkerLog) {
+            Write-Host "[IG-WORKER] === Log from start ===" -ForegroundColor DarkCyan
+            Get-Content $igWorkerLog.FullName -Encoding UTF8 -ErrorAction SilentlyContinue | ForEach-Object {
+                Write-Host "[IG-WORKER] $_" -ForegroundColor DarkCyan
+            }
+        }
+        if ($claudeWorkerLog) {
+            Write-Host "[CLAUDE] === Log from start ===" -ForegroundColor Blue
+            Get-Content $claudeWorkerLog.FullName -Encoding UTF8 -ErrorAction SilentlyContinue | ForEach-Object {
+                Write-Host "[CLAUDE] $_" -ForegroundColor Blue
+            }
+        }
 
         Write-Host ""
         Write-Host "--- Frontend starting (Ctrl+C to stop all) ---" -ForegroundColor Yellow
@@ -90,10 +112,16 @@ try {
         # Track log file positions for tailing
         $apiPos = if ($apiLog) { (Get-Item $apiLog.FullName).Length } else { 0 }
         $workerPos = if ($workerLog) { (Get-Item $workerLog.FullName).Length } else { 0 }
+        $igWorkerPos = if ($igWorkerLog) { (Get-Item $igWorkerLog.FullName).Length } else { 0 }
+        $claudeWorkerPos = if ($claudeWorkerLog) { (Get-Item $claudeWorkerLog.FullName).Length } else { 0 }
 
-        # Watchdog log (if exists)
+        # Watchdog logs (if exists)
         $watchdogLogFile = Join-Path $LogDir "watchdog.log"
         $watchdogPos = if (Test-Path $watchdogLogFile) { (Get-Item $watchdogLogFile).Length } else { 0 }
+        $igWatchdogLogFile = Join-Path $LogDir "instagram_watchdog.log"
+        $igWatchdogPos = if (Test-Path $igWatchdogLogFile) { (Get-Item $igWatchdogLogFile).Length } else { 0 }
+        $claudeWatchdogLogFile = Join-Path $LogDir "claude_watchdog.log"
+        $claudeWatchdogPos = if (Test-Path $claudeWatchdogLogFile) { (Get-Item $claudeWatchdogLogFile).Length } else { 0 }
 
         # Start frontend in background (so we can tail logs)
         $FrontendDir = Join-Path $ProjectRoot "frontend"
@@ -205,6 +233,86 @@ try {
                             Write-Host "[WORKER] $line" -ForegroundColor Magenta
                         }
                         $workerPos = $stream.Position
+                        $reader.Close()
+                        $stream.Close()
+                    }
+                }
+
+                # Tail Instagram Watchdog log
+                if (Test-Path $igWatchdogLogFile) {
+                    $currentSize = (Get-Item $igWatchdogLogFile).Length
+                    if ($currentSize -gt $igWatchdogPos) {
+                        $stream = [System.IO.FileStream]::new($igWatchdogLogFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                        $stream.Seek($igWatchdogPos, [System.IO.SeekOrigin]::Begin) | Out-Null
+                        $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
+                        while ($null -ne ($line = $reader.ReadLine())) {
+                            Write-Host "[IG-WATCHDOG] $line" -ForegroundColor DarkYellow
+                        }
+                        $igWatchdogPos = $stream.Position
+                        $reader.Close()
+                        $stream.Close()
+                    }
+                }
+
+                # Tail Instagram Worker log (check for new log file from watchdog restart)
+                $latestIgWorkerLog = Get-ChildItem -Path $LogDir -Filter "instagram_worker_*.log" -ErrorAction SilentlyContinue |
+                    Sort-Object Name -Descending | Select-Object -First 1
+                if ($latestIgWorkerLog -and $latestIgWorkerLog.Name -ne $igWorkerLogName) {
+                    Write-Host "[IG-WORKER] === New worker log: $($latestIgWorkerLog.Name) ===" -ForegroundColor Yellow
+                    $igWorkerLog = $latestIgWorkerLog
+                    $igWorkerLogName = $latestIgWorkerLog.Name
+                    $igWorkerPos = 0
+                }
+                if ($igWorkerLog -and (Test-Path $igWorkerLog.FullName)) {
+                    $currentSize = (Get-Item $igWorkerLog.FullName).Length
+                    if ($currentSize -gt $igWorkerPos) {
+                        $stream = [System.IO.FileStream]::new($igWorkerLog.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                        $stream.Seek($igWorkerPos, [System.IO.SeekOrigin]::Begin) | Out-Null
+                        $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
+                        while ($null -ne ($line = $reader.ReadLine())) {
+                            Write-Host "[IG-WORKER] $line" -ForegroundColor DarkCyan
+                        }
+                        $igWorkerPos = $stream.Position
+                        $reader.Close()
+                        $stream.Close()
+                    }
+                }
+
+                # Tail Claude Watchdog log
+                if (Test-Path $claudeWatchdogLogFile) {
+                    $currentSize = (Get-Item $claudeWatchdogLogFile).Length
+                    if ($currentSize -gt $claudeWatchdogPos) {
+                        $stream = [System.IO.FileStream]::new($claudeWatchdogLogFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                        $stream.Seek($claudeWatchdogPos, [System.IO.SeekOrigin]::Begin) | Out-Null
+                        $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
+                        while ($null -ne ($line = $reader.ReadLine())) {
+                            Write-Host "[CLAUDE-WATCHDOG] $line" -ForegroundColor DarkBlue
+                        }
+                        $claudeWatchdogPos = $stream.Position
+                        $reader.Close()
+                        $stream.Close()
+                    }
+                }
+
+                # Tail Claude Worker log (check for new log file from watchdog restart)
+                $latestClaudeWorkerLog = Get-ChildItem -Path $LogDir -Filter "llm_worker_*.log" -ErrorAction SilentlyContinue |
+                    Sort-Object Name -Descending | Select-Object -First 1
+                if ($latestClaudeWorkerLog -and $latestClaudeWorkerLog.Name -ne $claudeWorkerLogName) {
+                    Write-Host "[CLAUDE] === New worker log: $($latestClaudeWorkerLog.Name) ===" -ForegroundColor Yellow
+                    $claudeWorkerLog = $latestClaudeWorkerLog
+                    $claudeWorkerLogName = $latestClaudeWorkerLog.Name
+                    $claudeWorkerPos = 0
+                }
+                if ($claudeWorkerLog -and (Test-Path $claudeWorkerLog.FullName)) {
+                    $currentSize = (Get-Item $claudeWorkerLog.FullName).Length
+                    if ($currentSize -gt $claudeWorkerPos) {
+                        $stream = [System.IO.FileStream]::new($claudeWorkerLog.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                        $stream.Seek($claudeWorkerPos, [System.IO.SeekOrigin]::Begin) | Out-Null
+                        $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
+                        while ($null -ne ($line = $reader.ReadLine())) {
+                            Write-Host "[CLAUDE] $line" -ForegroundColor Blue
+                        }
+                        $claudeWorkerPos = $stream.Position
                         $reader.Close()
                         $stream.Close()
                     }

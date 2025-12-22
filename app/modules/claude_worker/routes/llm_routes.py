@@ -1,7 +1,9 @@
 """Claude Worker API Routes."""
 
+import json
 import logging
-from typing import Optional
+from datetime import date, datetime
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -21,6 +23,8 @@ class LLMRequestCreate(BaseModel):
     caller_type: str
     caller_id: str
     prompt: str
+    requested_by: str = "api"
+    request_source: Optional[str] = None
 
 
 class LLMRequestResponse(BaseModel):
@@ -28,11 +32,24 @@ class LLMRequestResponse(BaseModel):
     caller_type: str
     caller_id: str
     status: str
+    requested_by: Optional[str] = None
+    request_source: Optional[str] = None
+    requested_at: Optional[datetime] = None
+    processed_at: Optional[datetime] = None
     result: Optional[dict] = None
     error_message: Optional[str] = None
+    retry_count: int = 0
 
     class Config:
         from_attributes = True
+
+
+class LLMRequestListResponse(BaseModel):
+    items: List[LLMRequestResponse]
+    total: int
+    page: int
+    page_size: int
+    pages: int
 
 
 class LLMWorkerStatusResponse(BaseModel):
@@ -51,39 +68,26 @@ class LLMStatsResponse(BaseModel):
     failed: int
 
 
+class BatchRetryRequest(BaseModel):
+    request_ids: List[int]
+
+
+class BatchDeleteRequest(BaseModel):
+    request_ids: List[int]
+    hard_delete: bool = False
+
+
+class HistoryStatsResponse(BaseModel):
+    data: List[dict]
+    summary: dict
+
+
 # ========== Endpoints ==========
 
-@router.post("/requests", response_model=LLMRequestResponse)
-def create_request(
-    data: LLMRequestCreate,
-    db: Session = Depends(get_db),
-):
-    """LLM 요청 생성."""
-    service = LLMService(db)
-    request = service.enqueue(data.caller_type, data.caller_id, data.prompt)
-    return LLMRequestResponse(
-        id=request.id,
-        caller_type=request.caller_type,
-        caller_id=request.caller_id,
-        status=request.status,
-    )
-
-
-@router.get("/requests/{caller_type}/{caller_id}", response_model=Optional[LLMRequestResponse])
-def get_request(
-    caller_type: str,
-    caller_id: str,
-    db: Session = Depends(get_db),
-):
-    """LLM 요청 조회."""
-    service = LLMService(db)
-    request = service.get_result(caller_type, caller_id)
-    if not request:
-        return None
-
+def _to_response(request) -> LLMRequestResponse:
+    """LLMRequest를 LLMRequestResponse로 변환."""
     result = None
     if request.result:
-        import json
         try:
             result = json.loads(request.result)
         except json.JSONDecodeError:
@@ -94,9 +98,88 @@ def get_request(
         caller_type=request.caller_type,
         caller_id=request.caller_id,
         status=request.status,
+        requested_by=request.requested_by,
+        request_source=request.request_source,
+        requested_at=request.requested_at,
+        processed_at=request.processed_at,
         result=result,
         error_message=request.error_message,
+        retry_count=request.retry_count,
     )
+
+
+@router.get("/requests", response_model=LLMRequestListResponse)
+def list_requests(
+    status: Optional[str] = Query(None, description="상태 필터"),
+    caller_type: Optional[str] = Query(None, description="호출자 타입 필터"),
+    requested_by: Optional[str] = Query(None, description="요청자 필터"),
+    include_deleted: bool = Query(False, description="삭제된 요청 포함"),
+    page: int = Query(1, ge=1, description="페이지 번호"),
+    page_size: int = Query(20, ge=1, le=100, description="페이지 크기"),
+    db: Session = Depends(get_db),
+):
+    """요청 목록 조회."""
+    service = LLMService(db)
+    result = service.list_requests(
+        status=status,
+        caller_type=caller_type,
+        requested_by=requested_by,
+        include_deleted=include_deleted,
+        page=page,
+        page_size=page_size,
+    )
+
+    return LLMRequestListResponse(
+        items=[_to_response(r) for r in result["items"]],
+        total=result["total"],
+        page=result["page"],
+        page_size=result["page_size"],
+        pages=result["pages"],
+    )
+
+
+@router.post("/requests", response_model=LLMRequestResponse)
+def create_request(
+    data: LLMRequestCreate,
+    db: Session = Depends(get_db),
+):
+    """LLM 요청 생성."""
+    service = LLMService(db)
+    request = service.enqueue(
+        data.caller_type,
+        data.caller_id,
+        data.prompt,
+        requested_by=data.requested_by,
+        request_source=data.request_source,
+    )
+    return _to_response(request)
+
+
+@router.get("/requests/{request_id}", response_model=LLMRequestResponse)
+def get_request_by_id(
+    request_id: int,
+    db: Session = Depends(get_db),
+):
+    """단일 요청 조회 (ID로)."""
+    service = LLMService(db)
+    request = service.get_request_by_id(request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+    return _to_response(request)
+
+
+@router.get("/requests/by-caller/{caller_type}/{caller_id}", response_model=Optional[LLMRequestResponse])
+def get_request_by_caller(
+    caller_type: str,
+    caller_id: str,
+    db: Session = Depends(get_db),
+):
+    """요청 조회 (caller로)."""
+    service = LLMService(db)
+    request = service.get_result(caller_type, caller_id)
+    if not request:
+        return None
+    return _to_response(request)
 
 
 @router.post("/requests/{request_id}/retry")
@@ -110,6 +193,55 @@ def retry_request(
     if not success:
         raise HTTPException(status_code=400, detail="Cannot retry this request")
     return {"success": True, "message": "Request queued for retry"}
+
+
+@router.post("/requests/{request_id}/cancel")
+def cancel_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+):
+    """pending 요청 취소."""
+    service = LLMService(db)
+    success = service.cancel_request(request_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Cannot cancel this request (not pending)")
+    return {"success": True, "message": "Request cancelled"}
+
+
+@router.delete("/requests/{request_id}")
+def delete_request(
+    request_id: int,
+    hard_delete: bool = Query(False, description="물리 삭제 여부"),
+    db: Session = Depends(get_db),
+):
+    """요청 삭제."""
+    service = LLMService(db)
+    success = service.delete_request(request_id, hard_delete=hard_delete)
+    if not success:
+        raise HTTPException(status_code=404, detail="Request not found")
+    return {"success": True, "message": "Request deleted"}
+
+
+@router.post("/requests/batch/retry")
+def batch_retry_requests(
+    data: BatchRetryRequest,
+    db: Session = Depends(get_db),
+):
+    """일괄 재시도."""
+    service = LLMService(db)
+    result = service.batch_retry(data.request_ids)
+    return result
+
+
+@router.post("/requests/batch/delete")
+def batch_delete_requests(
+    data: BatchDeleteRequest,
+    db: Session = Depends(get_db),
+):
+    """일괄 삭제."""
+    service = LLMService(db)
+    result = service.batch_delete(data.request_ids, hard_delete=data.hard_delete)
+    return result
 
 
 @router.get("/worker/status", response_model=LLMWorkerStatusResponse)
@@ -126,3 +258,22 @@ def get_stats(db: Session = Depends(get_db)):
     service = LLMService(db)
     stats = service.get_stats()
     return LLMStatsResponse(**stats)
+
+
+@router.get("/history", response_model=HistoryStatsResponse)
+def get_history_stats(
+    start_date: Optional[date] = Query(None, description="시작일 (YYYY-MM-DD)"),
+    end_date: Optional[date] = Query(None, description="종료일 (YYYY-MM-DD)"),
+    db: Session = Depends(get_db),
+):
+    """기간별 이력 통계."""
+    service = LLMService(db)
+    result = service.get_history_stats(start_date=start_date, end_date=end_date)
+    return HistoryStatsResponse(**result)
+
+
+@router.get("/stats/by-caller")
+def get_caller_stats(db: Session = Depends(get_db)):
+    """호출자별 통계."""
+    service = LLMService(db)
+    return service.get_caller_stats()

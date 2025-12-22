@@ -4,9 +4,10 @@ import json
 import logging
 import re
 import subprocess
-from datetime import datetime
-from typing import Optional
+from datetime import date, datetime, timedelta
+from typing import List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.modules.claude_worker.models.llm_request import LLMRequest, LLMWorkerStatus
@@ -30,6 +31,8 @@ class LLMService:
         caller_type: str,
         caller_id: str,
         prompt: str,
+        requested_by: str = "unknown",
+        request_source: str = None,
     ) -> LLMRequest:
         """요청을 큐에 추가 (non-blocking).
 
@@ -37,6 +40,8 @@ class LLMService:
             caller_type: 호출자 타입 (예: 'instagram')
             caller_id: 호출자 측 ID (예: post_id)
             prompt: LLM에 전달할 프롬프트
+            requested_by: 요청자 (예: 'api', 'scheduler', 'manual')
+            request_source: 요청 출처 (예: 'instagram_crawl', 'manual_test')
 
         Returns:
             생성된 LLMRequest
@@ -48,6 +53,7 @@ class LLMService:
                 LLMRequest.caller_type == caller_type,
                 LLMRequest.caller_id == caller_id,
                 LLMRequest.status == "pending",
+                LLMRequest.deleted_at.is_(None),
             )
             .first()
         )
@@ -61,12 +67,14 @@ class LLMService:
             caller_id=caller_id,
             prompt=prompt,
             status="pending",
+            requested_by=requested_by,
+            request_source=request_source,
         )
         self.db.add(request)
         self.db.commit()
         self.db.refresh(request)
 
-        logger.info(f"LLM 요청 생성: id={request.id}, caller={caller_type}:{caller_id}")
+        logger.info(f"LLM 요청 생성: id={request.id}, caller={caller_type}:{caller_id}, by={requested_by}")
         return request
 
     def get_result(
@@ -101,7 +109,10 @@ class LLMService:
         """
         return (
             self.db.query(LLMRequest)
-            .filter(LLMRequest.status == "pending")
+            .filter(
+                LLMRequest.status == "pending",
+                LLMRequest.deleted_at.is_(None),
+            )
             .order_by(LLMRequest.requested_at.asc())
             .first()
         )
@@ -110,7 +121,10 @@ class LLMService:
         """Pending 요청 수 조회."""
         return (
             self.db.query(LLMRequest)
-            .filter(LLMRequest.status == "pending")
+            .filter(
+                LLMRequest.status == "pending",
+                LLMRequest.deleted_at.is_(None),
+            )
             .count()
         )
 
@@ -185,11 +199,20 @@ class LLMService:
                 f.write(prompt)
                 prompt_file = f.name
 
+            # PATH에 npm bin 경로 추가 (Windows)
+            env = os.environ.copy()
+            if sys.platform == "win32":
+                npm_path = os.path.expanduser("~/AppData/Roaming/npm")
+                if npm_path not in env.get("PATH", ""):
+                    env["PATH"] = npm_path + ";" + env.get("PATH", "")
+
             try:
                 # 파일에서 프롬프트 읽어서 실행
+                # --tools "Read" 추가하여 이미지 파일 읽기 가능
+                tools_opt = '--tools "Read"'
                 if sys.platform == "win32":
                     # Windows: shell=True 필요
-                    cmd = f'type "{prompt_file}" | claude -p'
+                    cmd = f'type "{prompt_file}" | claude -p {tools_opt}'
                     result = subprocess.run(
                         cmd,
                         capture_output=True,
@@ -197,10 +220,11 @@ class LLMService:
                         timeout=timeout,
                         encoding="utf-8",
                         shell=True,
+                        env=env,
                     )
                 else:
                     # Unix: cat으로 파이프
-                    cmd = f'cat "{prompt_file}" | claude -p'
+                    cmd = f'cat "{prompt_file}" | claude -p {tools_opt}'
                     result = subprocess.run(
                         cmd,
                         capture_output=True,
@@ -208,6 +232,7 @@ class LLMService:
                         timeout=timeout,
                         encoding="utf-8",
                         shell=True,
+                        env=env,
                     )
             finally:
                 # 임시 파일 삭제
@@ -394,7 +419,247 @@ class LLMService:
             "processed_count": status.processed_count,
         }
 
-    # ========== 통계 ==========
+    # ========== 요청 관리 ==========
+
+    def list_requests(
+        self,
+        status: str = None,
+        caller_type: str = None,
+        requested_by: str = None,
+        include_deleted: bool = False,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict:
+        """요청 목록 조회 (페이지네이션).
+
+        Args:
+            status: 상태 필터 (pending, processing, completed, failed, cancelled)
+            caller_type: 호출자 타입 필터
+            requested_by: 요청자 필터
+            include_deleted: 삭제된 요청 포함 여부
+            page: 페이지 번호 (1부터 시작)
+            page_size: 페이지 크기
+
+        Returns:
+            {"items": [...], "total": n, "page": n, "page_size": n, "pages": n}
+        """
+        query = self.db.query(LLMRequest)
+
+        if not include_deleted:
+            query = query.filter(LLMRequest.deleted_at.is_(None))
+        if status:
+            query = query.filter(LLMRequest.status == status)
+        if caller_type:
+            query = query.filter(LLMRequest.caller_type == caller_type)
+        if requested_by:
+            query = query.filter(LLMRequest.requested_by == requested_by)
+
+        total = query.count()
+        pages = (total + page_size - 1) // page_size
+
+        items = (
+            query.order_by(LLMRequest.requested_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "pages": pages,
+        }
+
+    def get_request_by_id(self, request_id: int) -> Optional[LLMRequest]:
+        """단일 요청 조회."""
+        return self.db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+
+    def cancel_request(self, request_id: int) -> bool:
+        """pending 요청 취소.
+
+        Returns:
+            True if cancelled, False if not found or not pending
+        """
+        request = self.db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+        if request and request.status == "pending":
+            request.status = "cancelled"
+            request.processed_at = datetime.now()
+            self.db.commit()
+            logger.info(f"LLM 요청 취소: id={request_id}")
+            return True
+        return False
+
+    def delete_request(self, request_id: int, hard_delete: bool = False) -> bool:
+        """요청 삭제.
+
+        Args:
+            request_id: 요청 ID
+            hard_delete: True면 물리 삭제, False면 soft delete
+
+        Returns:
+            True if deleted, False if not found
+        """
+        request = self.db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+        if not request:
+            return False
+
+        if hard_delete:
+            self.db.delete(request)
+        else:
+            request.deleted_at = datetime.now()
+        self.db.commit()
+        logger.info(f"LLM 요청 삭제: id={request_id}, hard={hard_delete}")
+        return True
+
+    def batch_retry(self, request_ids: List[int]) -> dict:
+        """일괄 재시도.
+
+        Args:
+            request_ids: 재시도할 요청 ID 목록
+
+        Returns:
+            {"success": n, "failed": n, "skipped": n}
+        """
+        success = 0
+        failed = 0
+        skipped = 0
+
+        for request_id in request_ids:
+            request = self.db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+            if not request:
+                skipped += 1
+                continue
+            if request.status != "failed":
+                skipped += 1
+                continue
+
+            request.status = "pending"
+            request.error_message = None
+            success += 1
+
+        self.db.commit()
+        return {"success": success, "failed": failed, "skipped": skipped}
+
+    def batch_delete(self, request_ids: List[int], hard_delete: bool = False) -> dict:
+        """일괄 삭제.
+
+        Args:
+            request_ids: 삭제할 요청 ID 목록
+            hard_delete: True면 물리 삭제
+
+        Returns:
+            {"deleted": n, "skipped": n}
+        """
+        deleted = 0
+        skipped = 0
+
+        for request_id in request_ids:
+            if self.delete_request(request_id, hard_delete):
+                deleted += 1
+            else:
+                skipped += 1
+
+        return {"deleted": deleted, "skipped": skipped}
+
+    # ========== 이력 및 통계 ==========
+
+    def get_history_stats(
+        self,
+        start_date: date = None,
+        end_date: date = None,
+        group_by: str = "day",
+    ) -> dict:
+        """기간별 통계.
+
+        Args:
+            start_date: 시작일 (기본: 7일 전)
+            end_date: 종료일 (기본: 오늘)
+            group_by: 그룹 단위 (day, week, month)
+
+        Returns:
+            {"data": [...], "summary": {...}}
+        """
+        if not end_date:
+            end_date = date.today()
+        if not start_date:
+            start_date = end_date - timedelta(days=7)
+
+        # 날짜 범위 필터
+        query = self.db.query(LLMRequest).filter(
+            LLMRequest.requested_at >= datetime.combine(start_date, datetime.min.time()),
+            LLMRequest.requested_at <= datetime.combine(end_date, datetime.max.time()),
+            LLMRequest.deleted_at.is_(None),
+        )
+
+        all_requests = query.all()
+
+        # 일별 그룹화
+        daily_data = {}
+        for req in all_requests:
+            day_key = req.requested_at.date().isoformat()
+            if day_key not in daily_data:
+                daily_data[day_key] = {"date": day_key, "total": 0, "completed": 0, "failed": 0, "pending": 0}
+            daily_data[day_key]["total"] += 1
+            if req.status == "completed":
+                daily_data[day_key]["completed"] += 1
+            elif req.status == "failed":
+                daily_data[day_key]["failed"] += 1
+            elif req.status in ("pending", "processing"):
+                daily_data[day_key]["pending"] += 1
+
+        # 정렬
+        data = sorted(daily_data.values(), key=lambda x: x["date"])
+
+        # 요약 통계
+        total = len(all_requests)
+        completed = sum(1 for r in all_requests if r.status == "completed")
+        failed = sum(1 for r in all_requests if r.status == "failed")
+
+        # 평균 처리 시간 (완료된 요청만)
+        processing_times = []
+        for req in all_requests:
+            if req.status == "completed" and req.processed_at and req.requested_at:
+                seconds = (req.processed_at - req.requested_at).total_seconds()
+                processing_times.append(seconds)
+
+        avg_processing_time = sum(processing_times) / len(processing_times) if processing_times else 0
+
+        return {
+            "data": data,
+            "summary": {
+                "total": total,
+                "completed": completed,
+                "failed": failed,
+                "success_rate": round(completed / total * 100, 1) if total > 0 else 0,
+                "avg_processing_time_seconds": round(avg_processing_time, 1),
+            },
+        }
+
+    def get_caller_stats(self) -> dict:
+        """호출자별 통계."""
+        results = (
+            self.db.query(
+                LLMRequest.caller_type,
+                LLMRequest.status,
+                func.count(LLMRequest.id).label("count"),
+            )
+            .filter(LLMRequest.deleted_at.is_(None))
+            .group_by(LLMRequest.caller_type, LLMRequest.status)
+            .all()
+        )
+
+        stats = {}
+        for caller_type, status, count in results:
+            if caller_type not in stats:
+                stats[caller_type] = {"total": 0, "pending": 0, "processing": 0, "completed": 0, "failed": 0}
+            stats[caller_type][status] = count
+            stats[caller_type]["total"] += count
+
+        return stats
+
+    # ========== 기본 통계 ==========
 
     def get_stats(self) -> dict:
         """통계 조회."""

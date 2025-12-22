@@ -270,24 +270,24 @@ class TestCrawlServiceRecrawl:
 # 마이그레이션 테스트 - Existence (존재 여부)
 # ============================================================
 
-class TestMigration033:
-    """033_add_single_post_recrawl 마이그레이션 테스트"""
+class TestMigration035:
+    """035_add_single_post_recrawl 마이그레이션 테스트"""
 
-    def test_migration_033_exists(self):
-        """033_add_single_post_recrawl.sql 파일 존재"""
-        migration_path = PROJECT_ROOT / "app" / "migrations" / "033_add_single_post_recrawl.sql"
-        assert migration_path.exists(), "033_add_single_post_recrawl.sql should exist"
+    def test_migration_035_exists(self):
+        """035_add_single_post_recrawl.sql 파일 존재"""
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "035_add_single_post_recrawl.sql"
+        assert migration_path.exists(), "035_add_single_post_recrawl.sql should exist"
 
-    def test_migration_033_contains_request_type(self):
+    def test_migration_035_contains_request_type(self):
         """마이그레이션에 request_type 컬럼 추가 포함"""
-        migration_path = PROJECT_ROOT / "app" / "migrations" / "033_add_single_post_recrawl.sql"
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "035_add_single_post_recrawl.sql"
         content = migration_path.read_text(encoding="utf-8")
 
         assert "request_type" in content
 
-    def test_migration_033_contains_target_post_id(self):
+    def test_migration_035_contains_target_post_id(self):
         """마이그레이션에 target_post_id 컬럼 추가 포함"""
-        migration_path = PROJECT_ROOT / "app" / "migrations" / "033_add_single_post_recrawl.sql"
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "035_add_single_post_recrawl.sql"
         content = migration_path.read_text(encoding="utf-8")
 
         assert "target_post_id" in content
@@ -460,7 +460,7 @@ class TestRecrawlReferences:
 
     def test_target_post_id_references_instagram_posts(self):
         """target_post_id가 instagram_posts 테이블 참조"""
-        migration_path = PROJECT_ROOT / "app" / "migrations" / "033_add_single_post_recrawl.sql"
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "035_add_single_post_recrawl.sql"
         content = migration_path.read_text(encoding="utf-8")
 
         assert "instagram_posts" in content

@@ -261,3 +261,43 @@ class CrawlRequestService:
             요청 객체 또는 None
         """
         return self.db.query(InstagramCrawlRequest).get(request_id)
+
+    def cleanup_stale_processing_requests(self, timeout_minutes: int = 30) -> int:
+        """오래된 processing 상태 요청을 timeout 처리.
+
+        워커가 크롤링 중 비정상 종료되면 요청이 processing 상태로 남을 수 있음.
+        워커 시작 시 이러한 좀비 요청을 정리합니다.
+
+        Args:
+            timeout_minutes: processing 상태 유지 시간 제한 (기본 30분)
+
+        Returns:
+            정리된 요청 수
+        """
+        from datetime import timedelta
+
+        cutoff_time = datetime.now() - timedelta(minutes=timeout_minutes)
+
+        stale_requests = (
+            self.db.query(InstagramCrawlRequest)
+            .filter(
+                InstagramCrawlRequest.status == "processing",
+                InstagramCrawlRequest.processed_at < cutoff_time,
+            )
+            .all()
+        )
+
+        count = 0
+        for request in stale_requests:
+            request.status = "failed"
+            request.error_message = f"Timeout: processing 상태가 {timeout_minutes}분 초과"
+            count += 1
+            logger.warning(
+                f"Stale request {request.id} marked as failed (processing since {request.processed_at})"
+            )
+
+        if count > 0:
+            self.db.commit()
+            logger.info(f"Cleaned up {count} stale processing request(s)")
+
+        return count

@@ -32,10 +32,14 @@ class LLMRequest(Base):
     prompt = Column(Text, nullable=False)
     requested_at = Column(DateTime, default=datetime.now, index=True)
 
+    # 요청자 정보
+    requested_by = Column(String(100), default="unknown")  # 'api', 'scheduler', 'manual', 'user:xxx'
+    request_source = Column(String(100))  # 'instagram_crawl', 'manual_test', etc.
+
     # 처리 상태
     status = Column(
         String(20), default="pending", nullable=False, index=True
-    )  # pending/processing/completed/failed
+    )  # pending/processing/completed/failed/cancelled
     processed_at = Column(DateTime)
 
     # 결과
@@ -43,6 +47,9 @@ class LLMRequest(Base):
     raw_response = Column(Text)  # Claude 원본 응답
     error_message = Column(Text)
     retry_count = Column(Integer, default=0)
+
+    # Soft delete
+    deleted_at = Column(DateTime)
 
     def __repr__(self) -> str:
         return f"<LLMRequest(id={self.id}, caller={self.caller_type}:{self.caller_id}, status={self.status})>"

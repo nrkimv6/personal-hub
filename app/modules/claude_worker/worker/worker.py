@@ -10,6 +10,7 @@ API 서버와 분리되어 독립적으로 LLM 작업을 수행합니다.
     - Pending LLM 요청 처리
     - Claude CLI subprocess 실행
     - 결과 파싱 및 저장
+    - caller_type별 결과 저장 (instagram -> instagram_posts)
 """
 import asyncio
 import sys
@@ -17,8 +18,9 @@ import os
 import signal
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
+from typing import Optional
 
 # 프로젝트 루트 경로 추가
 project_root = Path(__file__).parent.parent.parent.parent.parent
@@ -56,6 +58,82 @@ except Exception as e:
     logger.critical(f"Traceback:\n{traceback.format_exc()}")
     AsyncLoggerManager.shutdown()
     sys.exit(1)
+
+
+def parse_date(date_str: Optional[str]) -> Optional[date]:
+    """날짜 문자열을 date 객체로 변환."""
+    if not date_str:
+        return None
+    try:
+        return datetime.strptime(date_str, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+
+
+def save_instagram_result(db, post_id: int, llm_result: dict) -> bool:
+    """Instagram 게시물에 LLM 분류 결과 저장.
+
+    Args:
+        db: DB 세션
+        post_id: Instagram 게시물 ID
+        llm_result: LLM 분류 결과 dict
+
+    Returns:
+        성공 여부
+    """
+    from app.models import InstagramPost
+
+    try:
+        post = db.query(InstagramPost).filter(InstagramPost.id == post_id).first()
+        if not post:
+            logger.warning(f"Instagram post not found: {post_id}")
+            return False
+
+        # LLM 결과를 개별 컬럼에 저장
+        post.llm_status = "completed"
+        post.llm_tag = llm_result.get("tag")
+        post.llm_purchase_required = llm_result.get("purchase_required")
+        post.llm_prizes = llm_result.get("prizes")  # JSON 컬럼
+        post.llm_winner_count = llm_result.get("winner_count")
+        post.llm_urls = llm_result.get("urls")  # JSON 컬럼
+        post.llm_organizer = llm_result.get("organizer")
+        post.llm_summary = llm_result.get("summary")
+        post.llm_analyzed_at = datetime.now()
+
+        # 이벤트 기간 파싱
+        event_period = llm_result.get("event_period")
+        if event_period and isinstance(event_period, dict):
+            post.llm_event_start = parse_date(event_period.get("start"))
+            post.llm_event_end = parse_date(event_period.get("end"))
+
+        # 발표일 파싱
+        post.llm_announcement_date = parse_date(llm_result.get("announcement_date"))
+
+        db.commit()
+        logger.info(f"Instagram post {post_id} LLM result saved: tag={post.llm_tag}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to save Instagram result: {e}", exc_info=True)
+        db.rollback()
+        return False
+
+
+def mark_instagram_failed(db, post_id: int, error_message: str) -> bool:
+    """Instagram 게시물 LLM 분류 실패 표시."""
+    from app.models import InstagramPost
+
+    try:
+        post = db.query(InstagramPost).filter(InstagramPost.id == post_id).first()
+        if post:
+            post.llm_status = "failed"
+            db.commit()
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"Failed to mark Instagram post as failed: {e}")
+        db.rollback()
+        return False
 
 
 class LLMWorker:
@@ -250,10 +328,18 @@ class LLMWorker:
                 )
                 self._increment_processed()
                 logger.info(f"LLM 실행 완료: id={request.id}")
+
+                # caller_type별 결과 저장
+                if request.caller_type == "instagram":
+                    save_instagram_result(db, int(request.caller_id), result["result"])
             else:
                 service.mark_failed(request.id, result["error"])
                 self._increment_error()
                 logger.warning(f"LLM 실행 실패: {result['error']}")
+
+                # caller_type별 실패 표시
+                if request.caller_type == "instagram":
+                    mark_instagram_failed(db, int(request.caller_id), result["error"])
 
         except Exception as e:
             service.mark_failed(request.id, str(e))
