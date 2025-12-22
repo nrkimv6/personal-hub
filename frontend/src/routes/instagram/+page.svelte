@@ -194,6 +194,7 @@
 				</div>
 				<div class="flex gap-2">
 					<a href="/instagram/posts" class="btn btn-primary btn-sm"> 게시물 보기 </a>
+					<a href="/instagram/history" class="btn btn-secondary btn-sm"> 크롤링 이력 </a>
 					<a href="/instagram/tags" class="btn btn-secondary btn-sm"> 태그 관리 </a>
 					<a href="/instagram/schedule" class="btn btn-secondary btn-sm"> 설정 </a>
 				</div>

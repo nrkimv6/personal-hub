@@ -4,10 +4,11 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import desc
-from sqlalchemy.orm import Session
+from sqlalchemy import desc, func
+from sqlalchemy.orm import Session, joinedload
+from datetime import timedelta
 
-from app.models import InstagramCrawlRequest
+from app.models import InstagramCrawlRequest, InstagramCrawlRun
 
 logger = logging.getLogger("instagram.request_service")
 
@@ -319,8 +320,6 @@ class CrawlRequestService:
         Returns:
             정리된 요청 수
         """
-        from datetime import timedelta
-
         cutoff_time = datetime.now() - timedelta(minutes=timeout_minutes)
 
         stale_requests = (
@@ -346,3 +345,103 @@ class CrawlRequestService:
             logger.info(f"Cleaned up {count} stale processing request(s)")
 
         return count
+
+    def get_requests_paginated(
+        self,
+        page: int = 1,
+        limit: int = 20,
+        request_type: Optional[str] = None,
+        requested_by: Optional[str] = None,
+        status: Optional[str] = None,
+        period: Optional[str] = None,
+        account_id: Optional[int] = None,
+    ) -> tuple[List[InstagramCrawlRequest], int]:
+        """크롤링 요청 이력 페이징 조회.
+
+        Args:
+            page: 페이지 번호 (1부터 시작)
+            limit: 페이지당 개수
+            request_type: 요청 타입 필터 ('feed', 'single_post', 'single_post_url')
+            requested_by: 요청 출처 필터 ('manual', 'scheduler', 'retry')
+            status: 상태 필터 ('pending', 'processing', 'completed', 'failed')
+            period: 기간 필터 ('today', 'week', 'month')
+            account_id: 계정 필터
+
+        Returns:
+            (요청 목록, 전체 개수) 튜플
+        """
+        query = self.db.query(InstagramCrawlRequest)
+
+        # 필터 적용
+        if request_type:
+            query = query.filter(InstagramCrawlRequest.request_type == request_type)
+
+        if requested_by:
+            query = query.filter(InstagramCrawlRequest.requested_by == requested_by)
+
+        if status:
+            query = query.filter(InstagramCrawlRequest.status == status)
+
+        if account_id:
+            query = query.filter(InstagramCrawlRequest.account_id == account_id)
+
+        if period:
+            now = datetime.now()
+            if period == "today":
+                start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                query = query.filter(InstagramCrawlRequest.requested_at >= start_of_day)
+            elif period == "week":
+                week_ago = now - timedelta(days=7)
+                query = query.filter(InstagramCrawlRequest.requested_at >= week_ago)
+            elif period == "month":
+                month_ago = now - timedelta(days=30)
+                query = query.filter(InstagramCrawlRequest.requested_at >= month_ago)
+
+        # 전체 개수
+        total = query.count()
+
+        # 페이징 적용
+        offset = (page - 1) * limit
+        requests = (
+            query.order_by(desc(InstagramCrawlRequest.requested_at))
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+        return requests, total
+
+    def get_request_with_run(self, request_id: int) -> Optional[dict]:
+        """요청과 연결된 CrawlRun 정보를 함께 조회.
+
+        Args:
+            request_id: 요청 ID
+
+        Returns:
+            요청 정보와 CrawlRun 요약을 포함한 딕셔너리
+        """
+        request = self.db.query(InstagramCrawlRequest).get(request_id)
+        if not request:
+            return None
+
+        result = {
+            "request": request,
+            "crawl_run": None,
+        }
+
+        if request.crawl_run_id:
+            run = self.db.query(InstagramCrawlRun).get(request.crawl_run_id)
+            if run:
+                duration = None
+                if run.started_at and run.finished_at:
+                    duration = int((run.finished_at - run.started_at).total_seconds())
+
+                result["crawl_run"] = {
+                    "id": run.id,
+                    "total_collected": run.total_collected,
+                    "new_saved": run.new_saved,
+                    "duration_seconds": duration,
+                    "stop_reason": run.stop_reason,
+                }
+
+        return result

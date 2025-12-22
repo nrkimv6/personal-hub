@@ -458,3 +458,45 @@ class LLMStatsSchema(BaseModel):
     processing: int = 0
     completed: int = 0
     failed: int = 0
+
+
+# ============== 크롤링 이력 통합 조회 스키마 ==============
+
+
+class CrawlRunSummary(BaseModel):
+    """CrawlRun 요약 정보 (이력 조회용)."""
+    id: int
+    total_collected: int
+    new_saved: int
+    duration_seconds: Optional[int] = None
+    stop_reason: Optional[str] = None
+
+
+class CrawlHistoryItem(BaseModel):
+    """크롤링 이력 항목.
+
+    CrawlRequest 정보와 연결된 CrawlRun 요약을 포함.
+    """
+    id: int
+    account_id: int
+    requested_at: datetime
+    requested_by: str  # 'manual', 'scheduler', 'retry'
+    request_type: str  # 'feed', 'single_post', 'single_post_url'
+    target_url: Optional[str] = None  # single_post_url일 때
+    target_post_id: Optional[int] = None  # single_post일 때
+    status: str  # 'pending', 'processing', 'completed', 'failed'
+    processed_at: Optional[datetime] = None
+    crawl_run_id: Optional[int] = None
+    error_message: Optional[str] = None
+    # CrawlRun 요약 (feed 타입이고 completed일 때)
+    crawl_run: Optional[CrawlRunSummary] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CrawlHistoryResponse(BaseModel):
+    """크롤링 이력 목록 응답."""
+    items: List[CrawlHistoryItem]
+    total: int
+    page: int
+    limit: int
