@@ -1,7 +1,9 @@
 """Claude Worker API Routes."""
 
+import json
 import logging
-from typing import Optional
+from datetime import date, datetime
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -21,6 +23,8 @@ class LLMRequestCreate(BaseModel):
     caller_type: str
     caller_id: str
     prompt: str
+    requested_by: str = "api"
+    request_source: Optional[str] = None
 
 
 class LLMRequestResponse(BaseModel):
@@ -28,11 +32,24 @@ class LLMRequestResponse(BaseModel):
     caller_type: str
     caller_id: str
     status: str
+    requested_by: Optional[str] = None
+    request_source: Optional[str] = None
+    requested_at: Optional[datetime] = None
+    processed_at: Optional[datetime] = None
     result: Optional[dict] = None
     error_message: Optional[str] = None
+    retry_count: int = 0
 
     class Config:
         from_attributes = True
+
+
+class LLMRequestListResponse(BaseModel):
+    items: List[LLMRequestResponse]
+    total: int
+    page: int
+    page_size: int
+    pages: int
 
 
 class LLMWorkerStatusResponse(BaseModel):
@@ -49,6 +66,20 @@ class LLMStatsResponse(BaseModel):
     processing: int
     completed: int
     failed: int
+
+
+class BatchRetryRequest(BaseModel):
+    request_ids: List[int]
+
+
+class BatchDeleteRequest(BaseModel):
+    request_ids: List[int]
+    hard_delete: bool = False
+
+
+class HistoryStatsResponse(BaseModel):
+    data: List[dict]
+    summary: dict
 
 
 # ========== Endpoints ==========

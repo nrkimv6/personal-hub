@@ -53,8 +53,8 @@ class InstagramLLMClassificationRequest(Base):
     prompt_used = Column(Text)
     raw_response = Column(Text)
 
-    # Relationships
-    post = relationship("InstagramPost", back_populates="llm_requests")
+    # Relationships (deprecated - results now stored in instagram_posts columns)
+    post = relationship("InstagramPost")
 
     def __repr__(self) -> str:
         return f"<InstagramLLMRequest(id={self.id}, post_id={self.post_id}, status={self.status})>"

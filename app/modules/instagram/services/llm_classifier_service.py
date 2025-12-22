@@ -209,6 +209,10 @@ class LLMClassifierService:
             image_section=image_section,
         )
 
+        # instagram_posts에 pending 상태 설정
+        post.llm_status = "pending"
+        self.db.commit()
+
         # claude_worker에 요청 생성
         request = self._llm_service.enqueue(
             caller_type=self.CALLER_TYPE,
