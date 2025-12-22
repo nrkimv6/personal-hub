@@ -30,9 +30,8 @@
 	let filterDateTo = '';
 	let filterDateType: 'collected' | 'posted' = 'collected';
 
-	// 모달
+	// 상세보기 (FeedCard detailMode)
 	let selectedPost: InstagramPost | null = null;
-	let showModal = false;
 
 	// localStorage 키
 	const STORAGE_KEY_VIEW_MODE = 'instagram_posts_view_mode';
@@ -147,13 +146,6 @@
 		return singleLine.slice(0, maxLength) + '...';
 	}
 
-	// 태그 편집 모드
-	let editingTags = false;
-	let editTagIds: number[] = [];
-	let savingTags = false;
-
-	// 재크롤링 상태
-	let isRecrawling = false;
 
 	// URL 수집 모달 상태
 	let showUrlCrawlModal = false;
@@ -205,57 +197,19 @@
 		}
 	}
 
-	function openModal(post: InstagramPost) {
+	function openDetail(post: InstagramPost) {
 		selectedPost = post;
-		showModal = true;
-		editingTags = false;
-		editTagIds = post.tags?.map((t) => availableTags.find((at) => at.name === t.name)?.id).filter((id): id is number => id !== undefined) || [];
 	}
 
-	function closeModal() {
-		showModal = false;
+	function closeDetail() {
 		selectedPost = null;
-		editingTags = false;
-	}
-
-	function startEditTags() {
-		if (!selectedPost) return;
-		editTagIds = selectedPost.tags?.map((t) => availableTags.find((at) => at.name === t.name)?.id).filter((id): id is number => id !== undefined) || [];
-		editingTags = true;
-	}
-
-	function cancelEditTags() {
-		editingTags = false;
-	}
-
-	function toggleEditTag(tagId: number) {
-		if (editTagIds.includes(tagId)) {
-			editTagIds = editTagIds.filter((id) => id !== tagId);
-		} else {
-			editTagIds = [...editTagIds, tagId];
-		}
-	}
-
-	async function saveTags() {
-		if (!selectedPost) return;
-		savingTags = true;
-		try {
-			const updated = await instagramApi.updatePost(selectedPost.id, { tag_ids: editTagIds });
-			// 목록에서 해당 게시물 업데이트
-			posts = posts.map((p) => (p.id === updated.id ? updated : p));
-			selectedPost = updated;
-			editingTags = false;
-		} catch (e) {
-			alert('태그 저장 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
-		} finally {
-			savingTags = false;
-		}
 	}
 
 	async function deletePost(id: number) {
 		if (!confirm('이 게시물을 삭제하시겠습니까?')) return;
 		try {
 			await instagramApi.deletePost(id);
+			closeDetail();
 			await fetchPosts();
 		} catch (e) {
 			alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
@@ -263,15 +217,25 @@
 	}
 
 	async function recrawlPost(id: number) {
-		if (isRecrawling) return;
-		isRecrawling = true;
 		try {
 			await instagramApi.recrawlPost(id);
 			alert('재크롤링 요청이 등록되었습니다. 워커가 처리하면 게시물 정보가 업데이트됩니다.');
 		} catch (e) {
 			alert('재크롤링 요청 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
-		} finally {
-			isRecrawling = false;
+		}
+	}
+
+	async function handleTagsUpdate(postId: number, tagIds: number[]) {
+		try {
+			const updated = await instagramApi.updatePost(postId, { tag_ids: tagIds });
+			// 목록에서 해당 게시물 업데이트
+			posts = posts.map((p) => (p.id === updated.id ? updated : p));
+			if (selectedPost?.id === postId) {
+				selectedPost = updated;
+			}
+		} catch (e) {
+			alert('태그 저장 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+			throw e;
 		}
 	}
 
@@ -502,8 +466,8 @@
 						{#each posts as post (post.id)}
 							<tr
 								class="hover:bg-gray-50 cursor-pointer"
-								onclick={() => openModal(post)}
-								onkeydown={(e) => e.key === 'Enter' && openModal(post)}
+								onclick={() => openDetail(post)}
+								onkeydown={(e) => e.key === 'Enter' && openDetail(post)}
 								tabindex="0"
 							>
 								<td class="px-4 py-3">
@@ -594,8 +558,8 @@
 				{#each posts as post (post.id)}
 					<div
 						class="card cursor-pointer hover:shadow-lg transition-shadow"
-						onclick={() => openModal(post)}
-						onkeydown={(e) => e.key === 'Enter' && openModal(post)}
+						onclick={() => openDetail(post)}
+						onkeydown={(e) => e.key === 'Enter' && openDetail(post)}
 						role="button"
 						tabindex="0"
 					>
@@ -689,308 +653,25 @@
 	{/if}
 </div>
 
-<!-- 상세 모달 -->
-{#if showModal && selectedPost}
+<!-- 상세보기 (FeedCard detailMode) -->
+{#if selectedPost}
 	<div
 		class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-		onclick={closeModal}
-		onkeydown={(e) => e.key === 'Escape' && closeModal()}
+		onclick={closeDetail}
+		onkeydown={(e) => e.key === 'Escape' && closeDetail()}
 		role="dialog"
 		tabindex="-1"
 	>
-		<div
-			class="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-auto"
-			onclick={(e) => e.stopPropagation()}
-		>
-			<div class="p-6">
-				<div class="flex justify-between items-start mb-4">
-					<div>
-						<h3 class="text-lg font-bold text-gray-900">@{selectedPost.account}</h3>
-						<p class="text-sm text-gray-500">
-							{selectedPost.display_time || formatDateTime(selectedPost.posted_at)}
-						</p>
-					</div>
-					<button onclick={closeModal} class="text-gray-400 hover:text-gray-600 text-2xl">
-						&times;
-					</button>
-				</div>
-
-				<!-- 이미지 캐러셀 -->
-				{#if selectedPost.images && selectedPost.images.length > 0}
-					<div class="mb-4">
-						{#each selectedPost.images as img, idx}
-							<img
-								src={img.src}
-								alt={img.alt || `이미지 ${idx + 1}`}
-								class="w-full rounded-lg mb-2"
-							/>
-						{/each}
-					</div>
-				{/if}
-
-				<!-- 캡션 -->
-				{#if selectedPost.caption}
-					<div class="mb-4 p-3 bg-gray-50 rounded-lg">
-						<p class="text-sm text-gray-700 whitespace-pre-wrap break-words">{selectedPost.caption}</p>
-					</div>
-				{/if}
-
-				<!-- 태그 -->
-				<div class="mb-4">
-					<div class="flex items-center gap-2 mb-2">
-						<span class="text-sm text-gray-500">태그:</span>
-						{#if !editingTags}
-							<button
-								onclick={startEditTags}
-								class="text-xs text-blue-600 hover:text-blue-800 underline"
-							>
-								편집
-							</button>
-						{/if}
-					</div>
-					{#if editingTags}
-						<!-- 편집 모드 -->
-						<div class="flex flex-wrap gap-2 mb-2">
-							{#each availableTags as tag (tag.id)}
-								<button
-									onclick={() => toggleEditTag(tag.id)}
-									class="px-2 py-1 text-xs rounded-full transition-colors border"
-									style="background-color: {editTagIds.includes(tag.id) ? tag.color : 'white'};
-										   color: {editTagIds.includes(tag.id) ? 'white' : tag.color};
-										   border-color: {tag.color};"
-								>
-									{tag.display_name}
-									{#if editTagIds.includes(tag.id)}
-										<span class="ml-1">✓</span>
-									{/if}
-								</button>
-							{/each}
-						</div>
-						<div class="flex gap-2">
-							<button
-								onclick={saveTags}
-								disabled={savingTags}
-								class="btn btn-primary btn-sm disabled:opacity-50"
-							>
-								{savingTags ? '저장 중...' : '저장'}
-							</button>
-							<button onclick={cancelEditTags} class="btn btn-secondary btn-sm">
-								취소
-							</button>
-						</div>
-					{:else}
-						<!-- 보기 모드 -->
-						{#if selectedPost.tags && selectedPost.tags.length > 0}
-							{#each selectedPost.tags as tag}
-								<span
-									class="inline-block px-2 py-0.5 text-xs rounded-full text-white mr-1"
-									style="background-color: {tag.color};"
-								>
-									{tag.display_name}
-								</span>
-							{/each}
-						{:else}
-							<span class="text-gray-400 text-sm">태그 없음</span>
-						{/if}
-					{/if}
-				</div>
-
-				<!-- 메타 정보 -->
-				<div class="grid grid-cols-2 gap-2 text-sm mb-4">
-					<div>
-						<span class="text-gray-500">수집 시간:</span>
-						<span class="ml-1">{formatDateTime(selectedPost.collected_at)}</span>
-					</div>
-					<div>
-						<span class="text-gray-500">광고:</span>
-						<span class="ml-1">{selectedPost.is_ad ? '예' : '아니오'}</span>
-					</div>
-				</div>
-
-				<!-- LLM 분류 결과 -->
-				{#if selectedPost.llm_status}
-					<div class="mb-4 p-4 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border border-purple-200">
-						<div class="flex items-center justify-between mb-3">
-							<h4 class="font-semibold text-gray-900 flex items-center gap-2">
-								<svg class="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-								</svg>
-								AI 분석 결과
-							</h4>
-							<span class="px-2 py-1 text-xs rounded-full {
-								selectedPost.llm_status === 'completed' ? 'bg-green-100 text-green-700' :
-								selectedPost.llm_status === 'processing' ? 'bg-yellow-100 text-yellow-700' :
-								selectedPost.llm_status === 'pending' ? 'bg-gray-100 text-gray-700' :
-								'bg-red-100 text-red-700'
-							}">
-								{selectedPost.llm_status === 'completed' ? '분석 완료' :
-								 selectedPost.llm_status === 'processing' ? '분석 중' :
-								 selectedPost.llm_status === 'pending' ? '대기 중' : '분석 실패'}
-							</span>
-						</div>
-
-						{#if selectedPost.llm_status === 'completed'}
-							<div class="space-y-3">
-								<!-- 분류 태그 -->
-								{#if selectedPost.llm_tag}
-									<div class="flex items-center gap-2">
-										<span class="text-sm text-gray-500 w-20">분류:</span>
-										<span class="px-3 py-1 text-sm font-medium rounded-full {
-											selectedPost.llm_tag === '이벤트' ? 'bg-purple-100 text-purple-700' :
-											selectedPost.llm_tag === '팝업' ? 'bg-blue-100 text-blue-700' :
-											selectedPost.llm_tag === '홍보대사' ? 'bg-pink-100 text-pink-700' :
-											'bg-gray-100 text-gray-700'
-										}">
-											{selectedPost.llm_tag}
-										</span>
-									</div>
-								{/if}
-
-								<!-- 주최사 -->
-								{#if selectedPost.llm_organizer}
-									<div class="flex items-center gap-2">
-										<span class="text-sm text-gray-500 w-20">주최:</span>
-										<span class="text-sm text-gray-900 font-medium">{selectedPost.llm_organizer}</span>
-									</div>
-								{/if}
-
-								<!-- 이벤트 기간 -->
-								{#if selectedPost.llm_event_start || selectedPost.llm_event_end}
-									<div class="flex items-center gap-2">
-										<span class="text-sm text-gray-500 w-20">기간:</span>
-										<span class="text-sm text-gray-900">
-											{selectedPost.llm_event_start || '?'} ~ {selectedPost.llm_event_end || '?'}
-										</span>
-									</div>
-								{/if}
-
-								<!-- 발표일 -->
-								{#if selectedPost.llm_announcement_date}
-									<div class="flex items-center gap-2">
-										<span class="text-sm text-gray-500 w-20">발표일:</span>
-										<span class="text-sm text-gray-900">{selectedPost.llm_announcement_date}</span>
-									</div>
-								{/if}
-
-								<!-- 구매 필요 여부 -->
-								{#if selectedPost.llm_purchase_required}
-									<div class="flex items-center gap-2">
-										<span class="text-sm text-gray-500 w-20">구매 조건:</span>
-										<span class="px-2 py-0.5 text-xs rounded {
-											selectedPost.llm_purchase_required === '아니오' ? 'bg-green-100 text-green-700' :
-											selectedPost.llm_purchase_required === '예_전부' ? 'bg-red-100 text-red-700' :
-											'bg-yellow-100 text-yellow-700'
-										}">
-											{selectedPost.llm_purchase_required === '아니오' ? '구매 불필요' :
-											 selectedPost.llm_purchase_required === '예_전부' ? '전체 구매 필요' : '부분 구매 필요'}
-										</span>
-									</div>
-								{/if}
-
-								<!-- 당첨자 수 -->
-								{#if selectedPost.llm_winner_count}
-									<div class="flex items-center gap-2">
-										<span class="text-sm text-gray-500 w-20">당첨자:</span>
-										<span class="text-sm text-gray-900">{selectedPost.llm_winner_count}명</span>
-									</div>
-								{/if}
-
-								<!-- 경품 목록 -->
-								{#if selectedPost.llm_prizes && selectedPost.llm_prizes.length > 0}
-									<div class="flex items-start gap-2">
-										<span class="text-sm text-gray-500 w-20 shrink-0">경품:</span>
-										<div class="flex flex-wrap gap-1">
-											{#each selectedPost.llm_prizes as prize}
-												<span class="px-2 py-0.5 text-xs bg-amber-100 text-amber-800 rounded">
-													{prize}
-												</span>
-											{/each}
-										</div>
-									</div>
-								{/if}
-
-								<!-- 요약 -->
-								{#if selectedPost.llm_summary}
-									<div class="flex items-start gap-2">
-										<span class="text-sm text-gray-500 w-20 shrink-0">요약:</span>
-										<p class="text-sm text-gray-700">{selectedPost.llm_summary}</p>
-									</div>
-								{/if}
-
-								<!-- 관련 URL -->
-								{#if selectedPost.llm_urls && selectedPost.llm_urls.length > 0}
-									<div class="flex items-start gap-2">
-										<span class="text-sm text-gray-500 w-20 shrink-0">링크:</span>
-										<div class="flex flex-col gap-1">
-											{#each selectedPost.llm_urls as url}
-												<a href={url} target="_blank" rel="noopener noreferrer"
-													class="text-sm text-blue-600 hover:text-blue-800 hover:underline truncate max-w-xs">
-													{url}
-												</a>
-											{/each}
-										</div>
-									</div>
-								{/if}
-
-								<!-- 분석 시간 -->
-								{#if selectedPost.llm_analyzed_at}
-									<div class="pt-2 border-t border-purple-200">
-										<span class="text-xs text-gray-400">
-											분석 완료: {formatDateTime(selectedPost.llm_analyzed_at)}
-										</span>
-									</div>
-								{/if}
-							</div>
-						{:else if selectedPost.llm_status === 'pending' || selectedPost.llm_status === 'processing'}
-							<div class="flex items-center gap-2 text-sm text-gray-600">
-								<div class="animate-spin w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full"></div>
-								<span>AI가 게시물을 분석하고 있습니다...</span>
-							</div>
-						{:else}
-							<div class="text-sm text-red-600">
-								분석에 실패했습니다. 나중에 다시 시도해주세요.
-							</div>
-						{/if}
-					</div>
-				{/if}
-
-				<!-- 액션 버튼 -->
-				<div class="flex gap-2 flex-wrap">
-					{#if selectedPost.url}
-						<a
-							href={selectedPost.url}
-							target="_blank"
-							rel="noopener noreferrer"
-							class="btn btn-primary btn-sm"
-						>
-							원본 보기
-						</a>
-						<button
-							onclick={() => recrawlPost(selectedPost!.id)}
-							disabled={isRecrawling}
-							class="btn btn-secondary btn-sm disabled:opacity-50"
-							title="게시물 URL로 다시 크롤링하여 최신 정보를 가져옵니다"
-						>
-							{#if isRecrawling}
-								<span class="inline-block animate-spin mr-1">&#8635;</span>
-								재크롤링 중...
-							{:else}
-								&#8635; 재크롤링
-							{/if}
-						</button>
-					{/if}
-					<button
-						onclick={() => {
-							deletePost(selectedPost!.id);
-							closeModal();
-						}}
-						class="btn btn-danger btn-sm"
-					>
-						삭제
-					</button>
-					<button onclick={closeModal} class="btn btn-secondary btn-sm">닫기</button>
-				</div>
-			</div>
+		<div class="max-w-lg w-full max-h-[90vh] overflow-auto" onclick={(e) => e.stopPropagation()}>
+			<FeedCard
+				post={selectedPost}
+				detailMode={true}
+				onClose={closeDetail}
+				onDelete={deletePost}
+				onRecrawl={recrawlPost}
+				{availableTags}
+				onTagsUpdate={handleTagsUpdate}
+			/>
 		</div>
 	</div>
 {/if}
