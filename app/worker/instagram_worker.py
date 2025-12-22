@@ -169,11 +169,31 @@ class InstagramWorker:
         """초기화."""
         logger.info("Instagram 워커 초기화 시작")
 
+        # 오래된 processing 요청 정리 (좀비 요청 방지)
+        self._cleanup_stale_requests()
+
         # 브라우저 컨텍스트 매니저는 크롤링 시 lazy 초기화
         # (메인 워커와 같은 프로필 충돌 방지를 위해 계정별 프로필 사용)
         self.context_manager = None
 
         logger.info("Instagram 워커 초기화 완료")
+
+    def _cleanup_stale_requests(self):
+        """오래된 processing 상태 요청 정리.
+
+        워커가 크롤링 중 비정상 종료되면 요청이 processing 상태로 남을 수 있음.
+        이런 좀비 요청이 있으면 스케줄 실행이 차단되므로 시작 시 정리합니다.
+        """
+        db = SessionLocal()
+        try:
+            request_service = CrawlRequestService(db)
+            cleaned = request_service.cleanup_stale_processing_requests(timeout_minutes=30)
+            if cleaned > 0:
+                logger.info(f"시작 시 {cleaned}개의 오래된 processing 요청 정리 완료")
+        except Exception as e:
+            logger.error(f"Stale request 정리 오류: {e}")
+        finally:
+            db.close()
 
     async def _cleanup(self):
         """정리."""

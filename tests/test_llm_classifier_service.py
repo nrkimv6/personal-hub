@@ -459,3 +459,222 @@ class TestIntegration:
         stats = instagram_service.get_stats()
         assert stats["completed"] == 1
         assert stats["pending"] == 0
+
+
+# ==================== LLM Request Management Tests ====================
+
+class TestLLMServiceListRequests:
+    """LLMService.list_requests 메서드 테스트."""
+
+    def test_right_list_all_requests(self, llm_service):
+        """전체 요청 목록 조회."""
+        llm_service.enqueue("instagram", "1", "p1", requested_by="api")
+        llm_service.enqueue("instagram", "2", "p2", requested_by="scheduler")
+
+        result = llm_service.list_requests()
+
+        assert result["total"] == 2
+        assert len(result["items"]) == 2
+
+    def test_right_filter_by_status(self, llm_service):
+        """상태별 필터링."""
+        req1 = llm_service.enqueue("instagram", "1", "p1")
+        llm_service.enqueue("instagram", "2", "p2")
+        llm_service.mark_completed(req1.id, {}, "")
+
+        result = llm_service.list_requests(status="pending")
+
+        assert result["total"] == 1
+        assert result["items"][0].status == "pending"
+
+    def test_right_filter_by_caller_type(self, llm_service):
+        """caller_type 필터링."""
+        llm_service.enqueue("instagram", "1", "p1")
+        llm_service.enqueue("naver", "1", "p2")
+
+        result = llm_service.list_requests(caller_type="instagram")
+
+        assert result["total"] == 1
+        assert result["items"][0].caller_type == "instagram"
+
+    def test_right_filter_by_requested_by(self, llm_service):
+        """requested_by 필터링."""
+        llm_service.enqueue("instagram", "1", "p1", requested_by="api")
+        llm_service.enqueue("instagram", "2", "p2", requested_by="scheduler")
+
+        result = llm_service.list_requests(requested_by="api")
+
+        assert result["total"] == 1
+        assert result["items"][0].requested_by == "api"
+
+    def test_right_pagination(self, llm_service):
+        """페이지네이션."""
+        for i in range(5):
+            llm_service.enqueue("instagram", str(i), f"p{i}")
+
+        result = llm_service.list_requests(page=1, page_size=2)
+
+        assert result["total"] == 5
+        assert len(result["items"]) == 2
+        assert result["pages"] == 3
+
+
+class TestLLMServiceCancelRequest:
+    """LLMService.cancel_request 메서드 테스트."""
+
+    def test_right_cancel_pending_request(self, llm_service, test_session):
+        """pending 요청 취소."""
+        request = llm_service.enqueue("instagram", "123", "prompt")
+
+        result = llm_service.cancel_request(request.id)
+
+        test_session.refresh(request)
+        assert result is True
+        assert request.status == "cancelled"
+
+    def test_boundary_cannot_cancel_processing(self, llm_service):
+        """processing 상태 요청은 취소 불가."""
+        request = llm_service.enqueue("instagram", "123", "prompt")
+        llm_service.mark_processing(request.id)
+
+        result = llm_service.cancel_request(request.id)
+        assert result is False
+
+    def test_boundary_cannot_cancel_completed(self, llm_service):
+        """completed 상태 요청은 취소 불가."""
+        request = llm_service.enqueue("instagram", "123", "prompt")
+        llm_service.mark_completed(request.id, {}, "")
+
+        result = llm_service.cancel_request(request.id)
+        assert result is False
+
+
+class TestLLMServiceDeleteRequest:
+    """LLMService.delete_request 메서드 테스트."""
+
+    def test_right_soft_delete(self, llm_service, test_session):
+        """Soft delete."""
+        request = llm_service.enqueue("instagram", "123", "prompt")
+
+        result = llm_service.delete_request(request.id)
+
+        test_session.refresh(request)
+        assert result is True
+        assert request.deleted_at is not None
+
+    def test_right_hard_delete(self, llm_service, test_session):
+        """Hard delete."""
+        request = llm_service.enqueue("instagram", "123", "prompt")
+        request_id = request.id
+
+        result = llm_service.delete_request(request.id, hard_delete=True)
+
+        assert result is True
+        assert test_session.query(LLMRequest).filter(LLMRequest.id == request_id).first() is None
+
+    def test_right_deleted_not_in_list(self, llm_service):
+        """삭제된 요청은 목록에서 제외."""
+        llm_service.enqueue("instagram", "1", "p1")
+        req2 = llm_service.enqueue("instagram", "2", "p2")
+        llm_service.delete_request(req2.id)
+
+        result = llm_service.list_requests()
+        assert result["total"] == 1
+
+
+class TestLLMServiceBatchRetry:
+    """LLMService.batch_retry 메서드 테스트."""
+
+    def test_right_batch_retry_failed(self, llm_service, test_session):
+        """실패한 요청들 일괄 재시도."""
+        req1 = llm_service.enqueue("instagram", "1", "p1")
+        req2 = llm_service.enqueue("instagram", "2", "p2")
+        llm_service.mark_failed(req1.id, "Error 1")
+        llm_service.mark_failed(req2.id, "Error 2")
+
+        result = llm_service.batch_retry([req1.id, req2.id])
+
+        test_session.refresh(req1)
+        test_session.refresh(req2)
+        assert result["success"] == 2
+        assert req1.status == "pending"
+        assert req2.status == "pending"
+
+    def test_right_skip_non_failed(self, llm_service):
+        """실패하지 않은 요청은 스킵."""
+        req1 = llm_service.enqueue("instagram", "1", "p1")
+        req2 = llm_service.enqueue("instagram", "2", "p2")
+        llm_service.mark_failed(req1.id, "Error")
+
+        result = llm_service.batch_retry([req1.id, req2.id])
+
+        assert result["success"] == 1
+        assert result["skipped"] == 1
+
+
+class TestLLMServiceHistoryStats:
+    """LLMService.get_history_stats 메서드 테스트."""
+
+    def test_right_returns_daily_data(self, llm_service):
+        """일별 통계 반환."""
+        llm_service.enqueue("instagram", "1", "p1")
+        req2 = llm_service.enqueue("instagram", "2", "p2")
+        llm_service.mark_completed(req2.id, {}, "")
+
+        result = llm_service.get_history_stats()
+
+        assert "data" in result
+        assert "summary" in result
+        assert result["summary"]["total"] >= 2
+
+    def test_right_calculates_success_rate(self, llm_service):
+        """성공률 계산."""
+        req1 = llm_service.enqueue("instagram", "1", "p1")
+        req2 = llm_service.enqueue("instagram", "2", "p2")
+        llm_service.mark_completed(req1.id, {}, "")
+        llm_service.mark_failed(req2.id, "Error")
+
+        result = llm_service.get_history_stats()
+
+        assert result["summary"]["success_rate"] == 50.0
+
+
+class TestLLMServiceCallerStats:
+    """LLMService.get_caller_stats 메서드 테스트."""
+
+    def test_right_groups_by_caller_type(self, llm_service):
+        """caller_type별 그룹화."""
+        llm_service.enqueue("instagram", "1", "p1")
+        llm_service.enqueue("instagram", "2", "p2")
+        llm_service.enqueue("naver", "1", "p3")
+
+        result = llm_service.get_caller_stats()
+
+        assert "instagram" in result
+        assert result["instagram"]["total"] == 2
+        assert "naver" in result
+        assert result["naver"]["total"] == 1
+
+
+class TestLLMServiceRequestedBy:
+    """requested_by 및 request_source 필드 테스트."""
+
+    def test_right_stores_requested_by(self, llm_service, test_session):
+        """requested_by 저장."""
+        request = llm_service.enqueue(
+            "instagram", "123", "prompt",
+            requested_by="scheduler",
+            request_source="instagram_event",
+        )
+
+        test_session.refresh(request)
+        assert request.requested_by == "scheduler"
+        assert request.request_source == "instagram_event"
+
+    def test_right_default_values(self, llm_service, test_session):
+        """기본값 설정."""
+        request = llm_service.enqueue("instagram", "123", "prompt")
+
+        test_session.refresh(request)
+        assert request.requested_by == "unknown"
+        assert request.request_source is None
