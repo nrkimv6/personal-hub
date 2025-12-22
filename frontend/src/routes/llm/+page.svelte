@@ -17,8 +17,7 @@
 	let total = 0;
 	let pages = 0;
 
-	// 필터
-	let filterStatus = '';
+	// 필터 (탭에 따라 다르게 설정)
 	let filterCallerType = '';
 	let filterRequestedBy = '';
 
@@ -26,13 +25,33 @@
 	let selectedIds: number[] = [];
 	let selectAll = false;
 
-	// 탭
-	type Tab = 'queue' | 'history' | 'stats';
+	// 탭: queue(대기열), history(이력), create(수동생성)
+	type Tab = 'queue' | 'history' | 'create';
 	let activeTab: Tab = 'queue';
 
 	// 모달
 	let selectedRequest: LLMRequest | null = null;
 	let showModal = false;
+
+	// 수동 요청 생성 폼
+	let createForm = {
+		caller_type: 'test',
+		caller_id: '',
+		prompt: '',
+		requested_by: 'manual',
+		request_source: 'manual_test'
+	};
+	let createLoading = false;
+	let createError: string | null = null;
+	let createSuccess = false;
+
+	// 탭별 status 필터 (고정)
+	function getStatusFilter(): string | undefined {
+		// 대기열: pending, processing만
+		// 이력: completed, failed, cancelled만
+		// API가 단일 status만 지원하므로, 여러 상태는 클라이언트에서 필터링
+		return undefined;
+	}
 
 	async function fetchData() {
 		loading = true;
@@ -40,7 +59,7 @@
 		try {
 			const [listRes, statsRes, workerRes] = await Promise.all([
 				llmApi.list({
-					status: filterStatus || undefined,
+					status: getStatusFilter(),
 					caller_type: filterCallerType || undefined,
 					requested_by: filterRequestedBy || undefined,
 					page,
@@ -50,9 +69,17 @@
 				llmApi.getWorkerStatus()
 			]);
 
-			requests = listRes.items;
-			total = listRes.total;
-			pages = listRes.pages;
+			// 탭에 따라 필터링
+			let filteredItems = listRes.items;
+			if (activeTab === 'queue') {
+				filteredItems = listRes.items.filter(r => r.status === 'pending' || r.status === 'processing');
+			} else if (activeTab === 'history') {
+				filteredItems = listRes.items.filter(r => r.status === 'completed' || r.status === 'failed' || r.status === 'cancelled');
+			}
+
+			requests = filteredItems;
+			total = filteredItems.length;
+			pages = Math.ceil(total / pageSize) || 1;
 			stats = statsRes;
 			workerStatus = workerRes;
 		} catch (e) {
@@ -78,7 +105,6 @@
 	}
 
 	function clearFilters() {
-		filterStatus = '';
 		filterCallerType = '';
 		filterRequestedBy = '';
 		handleFilter();
@@ -170,6 +196,49 @@
 		}
 	}
 
+	async function runCleanup() {
+		if (!confirm('Stale 요청 정리 및 오래된 이력 삭제를 실행하시겠습니까?')) return;
+		try {
+			const result = await llmApi.cleanup();
+			alert(`정리 완료: stale ${result.stale_processing}개, 이력 ${result.old_history}개 삭제`);
+			await fetchData();
+		} catch (e) {
+			alert('정리 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		}
+	}
+
+	async function createRequest() {
+		if (!createForm.caller_id.trim() || !createForm.prompt.trim()) {
+			createError = '호출자 ID와 프롬프트를 입력해주세요.';
+			return;
+		}
+
+		createLoading = true;
+		createError = null;
+		createSuccess = false;
+
+		try {
+			await llmApi.create(createForm);
+			createSuccess = true;
+			createForm = {
+				caller_type: 'test',
+				caller_id: '',
+				prompt: '',
+				requested_by: 'manual',
+				request_source: 'manual_test'
+			};
+			// 대기열 탭으로 전환
+			setTimeout(() => {
+				activeTab = 'queue';
+				fetchData();
+			}, 1500);
+		} catch (e) {
+			createError = e instanceof Error ? e.message : '요청 생성 실패';
+		} finally {
+			createLoading = false;
+		}
+	}
+
 	function openModal(request: LLMRequest) {
 		selectedRequest = request;
 		showModal = true;
@@ -219,7 +288,13 @@
 
 	function switchTab(tab: Tab) {
 		activeTab = tab;
-		if (tab === 'history' && !historyStats) {
+		page = 1;
+		selectedIds = [];
+		selectAll = false;
+		if (tab === 'queue' || tab === 'history') {
+			fetchData();
+		}
+		if (tab === 'history') {
 			fetchHistoryStats();
 		}
 	}
@@ -233,9 +308,14 @@
 	<!-- 헤더 -->
 	<div class="mb-6 flex justify-between items-center">
 		<h2 class="text-2xl font-bold text-gray-900">LLM 요청 관리</h2>
-		<button onclick={() => fetchData()} class="btn btn-secondary btn-sm">
-			새로고침
-		</button>
+		<div class="flex gap-2">
+			<button onclick={runCleanup} class="btn btn-secondary btn-sm" title="Stale 정리 및 오래된 이력 삭제">
+				정리
+			</button>
+			<button onclick={() => fetchData()} class="btn btn-secondary btn-sm">
+				새로고침
+			</button>
+		</div>
 	</div>
 
 	<!-- 워커 상태 및 통계 카드 -->
@@ -258,19 +338,19 @@
 					<div class="text-sm text-gray-500">전체</div>
 					<div class="text-2xl font-bold text-gray-900">{stats.total}</div>
 				</div>
-				<div class="card p-4">
+				<div class="card p-4 cursor-pointer hover:bg-yellow-50" onclick={() => switchTab('queue')}>
 					<div class="text-sm text-gray-500">대기중</div>
 					<div class="text-2xl font-bold text-yellow-600">{stats.pending}</div>
 				</div>
-				<div class="card p-4">
+				<div class="card p-4 cursor-pointer hover:bg-blue-50" onclick={() => switchTab('queue')}>
 					<div class="text-sm text-gray-500">처리중</div>
 					<div class="text-2xl font-bold text-blue-600">{stats.processing}</div>
 				</div>
-				<div class="card p-4">
+				<div class="card p-4 cursor-pointer hover:bg-green-50" onclick={() => switchTab('history')}>
 					<div class="text-sm text-gray-500">완료</div>
 					<div class="text-2xl font-bold text-green-600">{stats.completed}</div>
 				</div>
-				<div class="card p-4">
+				<div class="card p-4 cursor-pointer hover:bg-red-50" onclick={() => switchTab('history')}>
 					<div class="text-sm text-gray-500">실패</div>
 					<div class="text-2xl font-bold text-red-600">{stats.failed}</div>
 				</div>
@@ -285,31 +365,33 @@
 				onclick={() => switchTab('queue')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'queue' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
 			>
-				대기열
+				대기열 (pending/processing)
 			</button>
 			<button
 				onclick={() => switchTab('history')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'history' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
 			>
-				이력 통계
+				이력 (completed/failed)
+			</button>
+			<button
+				onclick={() => switchTab('create')}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'create' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+			>
+				수동 요청 생성
 			</button>
 		</nav>
 	</div>
 
-	{#if activeTab === 'queue'}
+	{#if activeTab === 'queue' || activeTab === 'history'}
 		<!-- 필터 -->
 		<div class="mb-4 flex flex-wrap gap-2 items-center">
-			<select bind:value={filterStatus} class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
-				<option value="">전체 상태</option>
-				<option value="pending">대기</option>
-				<option value="processing">처리중</option>
-				<option value="completed">완료</option>
-				<option value="failed">실패</option>
-				<option value="cancelled">취소</option>
-			</select>
+			<span class="text-sm text-gray-500">
+				{activeTab === 'queue' ? '대기열: pending, processing' : '이력: completed, failed, cancelled'}
+			</span>
 			<select bind:value={filterCallerType} class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
 				<option value="">전체 타입</option>
 				<option value="instagram">Instagram</option>
+				<option value="test">Test</option>
 			</select>
 			<input
 				type="text"
@@ -325,7 +407,9 @@
 		{#if selectedIds.length > 0}
 			<div class="mb-4 flex gap-2 items-center">
 				<span class="text-sm text-gray-600">{selectedIds.length}개 선택</span>
-				<button onclick={batchRetry} class="btn btn-secondary btn-sm">일괄 재시도</button>
+				{#if activeTab === 'history'}
+					<button onclick={batchRetry} class="btn btn-secondary btn-sm">일괄 재시도</button>
+				{/if}
 				<button onclick={batchDelete} class="btn btn-danger btn-sm">일괄 삭제</button>
 			</div>
 		{/if}
@@ -338,7 +422,7 @@
 			<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">{error}</div>
 		{:else if requests.length === 0}
 			<div class="text-center py-12 text-gray-500">
-				<p class="text-lg">요청이 없습니다</p>
+				<p class="text-lg">{activeTab === 'queue' ? '대기열이 비어있습니다' : '이력이 없습니다'}</p>
 			</div>
 		{:else}
 			<!-- 요청 목록 테이블 -->
@@ -420,87 +504,135 @@
 			</div>
 
 			<!-- 페이지네이션 -->
-			<div class="flex justify-between items-center">
-				<span class="text-sm text-gray-500">
-					전체 {total}개 중 {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, total)}
-				</span>
-				<div class="flex gap-2">
-					<button
-						onclick={prevPage}
-						disabled={page === 1}
-						class="btn btn-secondary btn-sm disabled:opacity-50"
-					>
-						이전
-					</button>
-					<span class="px-3 py-1.5 text-sm">{page} / {pages}</span>
-					<button
-						onclick={nextPage}
-						disabled={page >= pages}
-						class="btn btn-secondary btn-sm disabled:opacity-50"
-					>
-						다음
-					</button>
-				</div>
-			</div>
-		{/if}
-	{:else if activeTab === 'history'}
-		<!-- 이력 통계 탭 -->
-		{#if historyStats}
-			<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-				<div class="card p-4">
-					<div class="text-sm text-gray-500">총 요청 (7일)</div>
-					<div class="text-2xl font-bold text-gray-900">{historyStats.summary.total}</div>
-				</div>
-				<div class="card p-4">
-					<div class="text-sm text-gray-500">성공률</div>
-					<div class="text-2xl font-bold text-green-600">{historyStats.summary.success_rate}%</div>
-				</div>
-				<div class="card p-4">
-					<div class="text-sm text-gray-500">완료</div>
-					<div class="text-2xl font-bold text-green-600">{historyStats.summary.completed}</div>
-				</div>
-				<div class="card p-4">
-					<div class="text-sm text-gray-500">평균 처리 시간</div>
-					<div class="text-2xl font-bold text-blue-600">{historyStats.summary.avg_processing_time_seconds}s</div>
-				</div>
-			</div>
-
-			<!-- 일별 데이터 테이블 -->
-			{#if historyStats.data.length > 0}
-				<div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
-					<table class="w-full">
-						<thead class="bg-gray-50 border-b border-gray-200">
-							<tr>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">날짜</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">전체</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">완료</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">실패</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">대기</th>
-							</tr>
-						</thead>
-						<tbody class="divide-y divide-gray-200">
-							{#each historyStats.data as day}
-								<tr>
-									<td class="px-4 py-3 text-sm text-gray-900">{day.date}</td>
-									<td class="px-4 py-3 text-sm text-gray-600">{day.total}</td>
-									<td class="px-4 py-3 text-sm text-green-600">{day.completed}</td>
-									<td class="px-4 py-3 text-sm text-red-600">{day.failed}</td>
-									<td class="px-4 py-3 text-sm text-yellow-600">{day.pending}</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-				</div>
-			{:else}
-				<div class="text-center py-12 text-gray-500">
-					<p>기간 내 데이터가 없습니다</p>
+			{#if pages > 1}
+				<div class="flex justify-between items-center">
+					<span class="text-sm text-gray-500">
+						전체 {total}개 중 {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, total)}
+					</span>
+					<div class="flex gap-2">
+						<button
+							onclick={prevPage}
+							disabled={page === 1}
+							class="btn btn-secondary btn-sm disabled:opacity-50"
+						>
+							이전
+						</button>
+						<span class="px-3 py-1.5 text-sm">{page} / {pages}</span>
+						<button
+							onclick={nextPage}
+							disabled={page >= pages}
+							class="btn btn-secondary btn-sm disabled:opacity-50"
+						>
+							다음
+						</button>
+					</div>
 				</div>
 			{/if}
-		{:else}
-			<div class="flex justify-center items-center h-64">
-				<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+		{/if}
+
+		<!-- 이력 탭의 통계 -->
+		{#if activeTab === 'history' && historyStats}
+			<div class="mt-8">
+				<h3 class="text-lg font-bold text-gray-900 mb-4">7일간 통계</h3>
+				<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+					<div class="card p-4">
+						<div class="text-sm text-gray-500">총 요청</div>
+						<div class="text-2xl font-bold text-gray-900">{historyStats.summary.total}</div>
+					</div>
+					<div class="card p-4">
+						<div class="text-sm text-gray-500">성공률</div>
+						<div class="text-2xl font-bold text-green-600">{historyStats.summary.success_rate}%</div>
+					</div>
+					<div class="card p-4">
+						<div class="text-sm text-gray-500">완료</div>
+						<div class="text-2xl font-bold text-green-600">{historyStats.summary.completed}</div>
+					</div>
+					<div class="card p-4">
+						<div class="text-sm text-gray-500">평균 처리 시간</div>
+						<div class="text-2xl font-bold text-blue-600">{historyStats.summary.avg_processing_time_seconds}s</div>
+					</div>
+				</div>
 			</div>
 		{/if}
+	{:else if activeTab === 'create'}
+		<!-- 수동 요청 생성 폼 -->
+		<div class="max-w-2xl">
+			<div class="bg-white rounded-lg border border-gray-200 p-6">
+				<h3 class="text-lg font-bold text-gray-900 mb-4">수동 LLM 요청 생성</h3>
+				<p class="text-sm text-gray-500 mb-6">테스트 또는 디버깅 목적으로 수동으로 LLM 요청을 생성합니다.</p>
+
+				{#if createSuccess}
+					<div class="mb-4 p-4 bg-green-50 border border-green-200 text-green-700 rounded-lg">
+						요청이 성공적으로 생성되었습니다. 대기열 탭으로 이동합니다...
+					</div>
+				{/if}
+
+				{#if createError}
+					<div class="mb-4 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
+						{createError}
+					</div>
+				{/if}
+
+				<div class="space-y-4">
+					<div>
+						<label class="block text-sm font-medium text-gray-700 mb-1">호출자 타입</label>
+						<select bind:value={createForm.caller_type} class="w-full px-3 py-2 border border-gray-300 rounded-lg">
+							<option value="test">test</option>
+							<option value="instagram">instagram</option>
+						</select>
+					</div>
+
+					<div>
+						<label class="block text-sm font-medium text-gray-700 mb-1">호출자 ID *</label>
+						<input
+							type="text"
+							bind:value={createForm.caller_id}
+							placeholder="예: 123"
+							class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+						/>
+					</div>
+
+					<div>
+						<label class="block text-sm font-medium text-gray-700 mb-1">프롬프트 *</label>
+						<textarea
+							bind:value={createForm.prompt}
+							rows="6"
+							placeholder="LLM에 전달할 프롬프트를 입력하세요..."
+							class="w-full px-3 py-2 border border-gray-300 rounded-lg resize-none"
+						></textarea>
+					</div>
+
+					<div class="grid grid-cols-2 gap-4">
+						<div>
+							<label class="block text-sm font-medium text-gray-700 mb-1">요청자</label>
+							<input
+								type="text"
+								bind:value={createForm.requested_by}
+								class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+							/>
+						</div>
+						<div>
+							<label class="block text-sm font-medium text-gray-700 mb-1">출처</label>
+							<input
+								type="text"
+								bind:value={createForm.request_source}
+								class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+							/>
+						</div>
+					</div>
+
+					<div class="pt-4">
+						<button
+							onclick={createRequest}
+							disabled={createLoading}
+							class="btn btn-primary w-full disabled:opacity-50"
+						>
+							{createLoading ? '생성 중...' : '요청 생성'}
+						</button>
+					</div>
+				</div>
+			</div>
+		</div>
 	{/if}
 </div>
 
