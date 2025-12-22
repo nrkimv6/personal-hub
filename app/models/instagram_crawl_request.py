@@ -18,10 +18,12 @@ class InstagramCrawlRequest(Base):
     requested_at = Column(DateTime, default=datetime.now, index=True)
     requested_by = Column(String(20), default="manual")  # 'manual', 'scheduler', 'retry'
 
-    # 요청 타입: 'feed' (피드 크롤링), 'single_post' (개별 게시물 재크롤링)
+    # 요청 타입: 'feed' (피드 크롤링), 'single_post' (개별 게시물 재크롤링), 'single_post_url' (URL로 단일 게시물 수집)
     request_type = Column(String(20), default="feed", nullable=False, index=True)
     # 재크롤링 대상 게시물 ID (single_post 타입일 때만 사용)
     target_post_id = Column(Integer, ForeignKey("instagram_posts.id", ondelete="SET NULL"), nullable=True)
+    # 크롤링 대상 URL (single_post_url 타입일 때 사용)
+    target_url = Column(String(500), nullable=True)
 
     # 처리 상태
     status = Column(String(20), default="pending", index=True)  # 'pending', 'processing', 'completed', 'failed'

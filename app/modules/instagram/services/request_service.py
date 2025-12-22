@@ -251,6 +251,51 @@ class CrawlRequestService:
         logger.info(f"Created single_post request {request.id} for post {post_id}")
         return request
 
+    def create_url_crawl_request(
+        self,
+        url: str,
+        account_id: int,
+        requested_by: str = "manual",
+    ) -> InstagramCrawlRequest:
+        """URL로 단일 게시물 수집 요청 생성.
+
+        Args:
+            url: Instagram 게시물 URL
+            account_id: 계정 ID
+            requested_by: 요청 출처
+
+        Returns:
+            생성된 요청 객체
+        """
+        # 이미 대기 중인 동일 URL 요청이 있는지 확인
+        existing = (
+            self.db.query(InstagramCrawlRequest)
+            .filter(
+                InstagramCrawlRequest.target_url == url,
+                InstagramCrawlRequest.request_type == "single_post_url",
+                InstagramCrawlRequest.status == "pending",
+            )
+            .first()
+        )
+        if existing:
+            logger.info(f"Pending url crawl request already exists for {url}")
+            return existing
+
+        request = InstagramCrawlRequest(
+            account_id=account_id,
+            requested_by=requested_by,
+            request_type="single_post_url",
+            target_url=url,
+            status="pending",
+            requested_at=datetime.now(),
+        )
+        self.db.add(request)
+        self.db.commit()
+        self.db.refresh(request)
+
+        logger.info(f"Created url crawl request {request.id} for {url}")
+        return request
+
     def get_request_by_id(self, request_id: int) -> Optional[InstagramCrawlRequest]:
         """요청 ID로 조회.
 
