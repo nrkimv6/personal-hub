@@ -350,6 +350,8 @@ class InstagramWorker:
 
         if request_type == "single_post":
             await self._execute_single_post_recrawl(request, db, request_service, crawl_service)
+        elif request_type == "single_post_url":
+            await self._execute_url_crawl(request, db, request_service, crawl_service)
         else:
             await self._execute_feed_crawl(request, db, request_service, crawl_service)
 
@@ -464,6 +466,69 @@ class InstagramWorker:
         except Exception as e:
             request_service.mark_failed(request.id, str(e))
             logger.error(f"재크롤링 예외: {e}", exc_info=True)
+        finally:
+            # 워커 상태를 idle로 복원
+            self._update_worker_state("idle")
+
+    async def _execute_url_crawl(self, request: InstagramCrawlRequest, db, request_service, crawl_service):
+        """URL로 단일 게시물 수집 실행."""
+        try:
+            # 대상 URL 확인
+            target_url = getattr(request, 'target_url', None)
+            if not target_url:
+                request_service.mark_failed(request.id, "대상 URL 없음")
+                logger.warning(f"대상 URL 없음: request_id={request.id}")
+                return
+
+            # 로그인 상태 확인
+            account = db.query(Account).filter(Account.id == request.account_id).first()
+            if not account:
+                request_service.mark_failed(request.id, "계정을 찾을 수 없음")
+                logger.warning(f"계정 없음: account_id={request.account_id}")
+                return
+
+            if not account.is_logged_in:
+                request_service.mark_failed(request.id, "로그인 필요")
+                logger.warning(f"로그인 필요: account={account.name}")
+                return
+
+            # 워커 상태를 crawling으로 변경
+            self._update_worker_state("crawling", account.name)
+
+            # 계정별 브라우저 페이지 가져오기
+            page = await self._get_page_for_account(account.id)
+
+            # 크롤러 생성
+            crawler = InstagramCrawler(page)
+            logger.info(f"URL 크롤링 시작: url={target_url}")
+
+            # URL 크롤링 실행
+            result = await crawl_service.crawl_by_url(
+                crawler=crawler,
+                url=target_url,
+                account_id=request.account_id,
+            )
+
+            if result["success"]:
+                # 성공 시 완료 처리
+                request.status = "completed"
+                request.processed_at = datetime.now()
+                db.commit()
+
+                is_new = result.get("is_new", False)
+                post = result.get("post")
+                post_id = post.id if post else None
+                logger.info(
+                    f"URL 크롤링 완료: request_id={request.id}, "
+                    f"post_id={post_id}, is_new={is_new}"
+                )
+            else:
+                request_service.mark_failed(request.id, result["message"])
+                logger.warning(f"URL 크롤링 실패: {result['message']}")
+
+        except Exception as e:
+            request_service.mark_failed(request.id, str(e))
+            logger.error(f"URL 크롤링 예외: {e}", exc_info=True)
         finally:
             # 워커 상태를 idle로 복원
             self._update_worker_state("idle")

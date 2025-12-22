@@ -23,6 +23,7 @@ from ..models.schemas import (
     TodayScheduleItem,
     TimeWindow,
     CrawlRequestSchema,
+    UrlCrawlRequestSchema,
     RunListResponse,
     RunStatsSchema,
     DailyTrendItem,
@@ -154,6 +155,44 @@ async def recrawl_post(
     request = request_service.create_single_post_request(
         post_id=post_id,
         account_id=account_id,
+        requested_by="manual",
+    )
+
+    return CrawlRequestSchema.model_validate(request)
+
+
+@router.post("/posts/crawl-url", response_model=CrawlRequestSchema)
+async def crawl_post_by_url(
+    body: UrlCrawlRequestSchema,
+    db: Session = Depends(get_db),
+):
+    """URL로 단일 게시물 수집 요청.
+
+    Instagram 게시물 URL을 입력받아 해당 게시물을 수집합니다.
+    - 새 게시물이면 DB에 추가
+    - 기존 게시물이면 정보 업데이트
+    """
+    import re
+
+    request_service = CrawlRequestService(db)
+
+    # URL 형식 검증
+    url = body.url.strip()
+    if not re.match(r'^https?://(www\.)?instagram\.com/p/[A-Za-z0-9_-]+/?', url):
+        raise HTTPException(status_code=400, detail="Invalid Instagram post URL. Must be in format: https://www.instagram.com/p/...")
+
+    # 계정 존재 확인
+    account = account_service.get_by_id(db, body.account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail=f"Account {body.account_id} not found")
+
+    if not account.is_logged_in:
+        raise HTTPException(status_code=400, detail="Account is not logged in")
+
+    # URL 크롤링 요청 생성
+    request = request_service.create_url_crawl_request(
+        url=url,
+        account_id=body.account_id,
         requested_by="manual",
     )
 

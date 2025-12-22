@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
-	import { instagramApi, instagramTagApi } from '$lib/api';
-	import type { InstagramPost, InstagramTag } from '$lib/types';
+	import { instagramApi, instagramTagApi, accountApi } from '$lib/api';
+	import type { InstagramPost, InstagramTag, Account } from '$lib/types';
 
 	let posts: InstagramPost[] = [];
 	let total = 0;
@@ -13,6 +13,9 @@
 
 	// 태그 목록
 	let availableTags: InstagramTag[] = [];
+
+	// 계정 목록 (URL 수집용)
+	let accounts: Account[] = [];
 
 	// 뷰 모드
 	type ViewMode = 'grid' | 'list';
@@ -151,6 +154,56 @@
 	// 재크롤링 상태
 	let isRecrawling = false;
 
+	// URL 수집 모달 상태
+	let showUrlCrawlModal = false;
+	let urlCrawlInput = '';
+	let urlCrawlAccountId: number | null = null;
+	let isUrlCrawling = false;
+
+	async function fetchAccounts() {
+		try {
+			const response = await accountApi.list();
+			accounts = response.filter(a => a.is_logged_in);
+			// 기본 계정 선택 (첫 번째 로그인된 계정)
+			if (accounts.length > 0 && !urlCrawlAccountId) {
+				urlCrawlAccountId = accounts[0].id;
+			}
+		} catch (e) {
+			console.error('계정 목록 로드 실패:', e);
+		}
+	}
+
+	function openUrlCrawlModal() {
+		showUrlCrawlModal = true;
+		urlCrawlInput = '';
+	}
+
+	function closeUrlCrawlModal() {
+		showUrlCrawlModal = false;
+		urlCrawlInput = '';
+	}
+
+	async function submitUrlCrawl() {
+		if (!urlCrawlInput.trim()) {
+			alert('URL을 입력해주세요.');
+			return;
+		}
+		if (!urlCrawlAccountId) {
+			alert('수집에 사용할 계정을 선택해주세요.');
+			return;
+		}
+		isUrlCrawling = true;
+		try {
+			await instagramApi.crawlByUrl(urlCrawlInput.trim(), urlCrawlAccountId);
+			alert('수집 요청이 등록되었습니다. 워커가 처리하면 게시물이 추가됩니다.');
+			closeUrlCrawlModal();
+		} catch (e) {
+			alert('수집 요청 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		} finally {
+			isUrlCrawling = false;
+		}
+	}
+
 	function openModal(post: InstagramPost) {
 		selectedPost = post;
 		showModal = true;
@@ -265,6 +318,7 @@
 				viewMode = savedMode;
 			}
 		}
+		fetchAccounts();
 		fetchTags().then(() => fetchPosts());
 	});
 </script>
@@ -272,7 +326,16 @@
 <div class="p-6">
 	<!-- 헤더 -->
 	<div class="mb-6 flex flex-wrap justify-between items-center gap-4">
-		<h2 class="text-2xl font-bold text-gray-900">게시물 목록</h2>
+		<div class="flex items-center gap-3">
+			<h2 class="text-2xl font-bold text-gray-900">게시물 목록</h2>
+			<button
+				onclick={openUrlCrawlModal}
+				class="btn btn-primary btn-sm"
+				title="Instagram 게시물 URL을 입력하여 단일 게시물 수집"
+			>
+				+ URL 수집
+			</button>
+		</div>
 		<div class="flex flex-wrap gap-2 items-center">
 			<!-- 뷰 모드 토글 -->
 			<div class="flex border border-gray-300 rounded-lg overflow-hidden">
@@ -753,6 +816,85 @@
 						삭제
 					</button>
 					<button onclick={closeModal} class="btn btn-secondary btn-sm">닫기</button>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- URL 수집 모달 -->
+{#if showUrlCrawlModal}
+	<div
+		class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+		onclick={closeUrlCrawlModal}
+		onkeydown={(e) => e.key === 'Escape' && closeUrlCrawlModal()}
+		role="dialog"
+		tabindex="-1"
+	>
+		<div
+			class="bg-white rounded-xl max-w-lg w-full"
+			onclick={(e) => e.stopPropagation()}
+		>
+			<div class="p-6">
+				<div class="flex justify-between items-start mb-4">
+					<h3 class="text-lg font-bold text-gray-900">URL로 게시물 수집</h3>
+					<button onclick={closeUrlCrawlModal} class="text-gray-400 hover:text-gray-600 text-2xl">
+						&times;
+					</button>
+				</div>
+
+				<div class="space-y-4">
+					<div>
+						<label for="url-input" class="block text-sm font-medium text-gray-700 mb-1">
+							Instagram 게시물 URL
+						</label>
+						<input
+							id="url-input"
+							type="text"
+							bind:value={urlCrawlInput}
+							placeholder="https://www.instagram.com/p/..."
+							class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+						/>
+						<p class="mt-1 text-xs text-gray-500">
+							예: https://www.instagram.com/p/ABC123/
+						</p>
+					</div>
+
+					<div>
+						<label for="account-select" class="block text-sm font-medium text-gray-700 mb-1">
+							수집에 사용할 계정
+						</label>
+						{#if accounts.length > 0}
+							<select
+								id="account-select"
+								bind:value={urlCrawlAccountId}
+								class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+							>
+								{#each accounts as account (account.id)}
+									<option value={account.id}>{account.name}</option>
+								{/each}
+							</select>
+						{:else}
+							<p class="text-sm text-red-600">로그인된 계정이 없습니다. 먼저 계정에 로그인해주세요.</p>
+						{/if}
+					</div>
+				</div>
+
+				<div class="mt-6 flex gap-2 justify-end">
+					<button onclick={closeUrlCrawlModal} class="btn btn-secondary btn-sm">
+						취소
+					</button>
+					<button
+						onclick={submitUrlCrawl}
+						disabled={isUrlCrawling || accounts.length === 0}
+						class="btn btn-primary btn-sm disabled:opacity-50"
+					>
+						{#if isUrlCrawling}
+							수집 중...
+						{:else}
+							수집 요청
+						{/if}
+					</button>
 				</div>
 			</div>
 		</div>

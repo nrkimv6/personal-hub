@@ -201,8 +201,9 @@ class CrawlRequestSchema(BaseModel):
     account_id: int
     requested_at: datetime
     requested_by: str = "manual"
-    request_type: str = "feed"  # 'feed' | 'single_post'
+    request_type: str = "feed"  # 'feed' | 'single_post' | 'single_post_url'
     target_post_id: Optional[int] = None  # single_post 타입일 때 대상 게시물 ID
+    target_url: Optional[str] = None  # single_post_url 타입일 때 크롤링할 URL
     status: str = "pending"
     processed_at: Optional[datetime] = None
     crawl_run_id: Optional[int] = None
@@ -215,6 +216,12 @@ class CrawlRequestCreateSchema(BaseModel):
     """크롤링 요청 생성 스키마."""
     account_id: int
     requested_by: str = "manual"
+
+
+class UrlCrawlRequestSchema(BaseModel):
+    """URL로 단일 게시물 수집 요청 스키마."""
+    url: str
+    account_id: int
 
 
 # Worker Status 스키마
