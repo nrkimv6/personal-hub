@@ -218,6 +218,8 @@ class LLMClassifierService:
             caller_type=self.CALLER_TYPE,
             caller_id=str(post_id),
             prompt=prompt,
+            requested_by=requested_by,
+            request_source=f"instagram_{trigger_tag}",
         )
 
         logger.info(
