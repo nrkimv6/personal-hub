@@ -18,8 +18,8 @@
 	// 계정 목록 (URL 수집용)
 	let accounts: Account[] = [];
 
-	// 뷰 모드
-	type ViewMode = 'grid' | 'list' | 'feed';
+	// 뷰 모드 (feed는 상세보기 전용으로 변경됨)
+	type ViewMode = 'grid' | 'list';
 	let viewMode: ViewMode = 'grid';
 
 	// 필터
@@ -312,11 +312,15 @@
 	}
 
 	onMount(() => {
-		// 저장된 뷰 모드 복원
+		// 저장된 뷰 모드 복원 (feed는 더 이상 목록 뷰 모드가 아니므로 grid로 폴백)
 		if (browser) {
 			const savedMode = localStorage.getItem(STORAGE_KEY_VIEW_MODE);
-			if (savedMode === 'grid' || savedMode === 'list' || savedMode === 'feed') {
+			if (savedMode === 'grid' || savedMode === 'list') {
 				viewMode = savedMode;
+			} else if (savedMode === 'feed') {
+				// 기존 feed 사용자는 grid로 마이그레이션
+				viewMode = 'grid';
+				localStorage.setItem(STORAGE_KEY_VIEW_MODE, 'grid');
 			}
 		}
 		fetchAccounts();
@@ -366,17 +370,6 @@
 							d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"
 							clip-rule="evenodd"
 						/>
-					</svg>
-				</button>
-				<button
-					onclick={() => setViewMode('feed')}
-					class="px-3 py-1.5 text-sm transition-colors {viewMode === 'feed'
-						? 'bg-blue-600 text-white'
-						: 'bg-white text-gray-600 hover:bg-gray-100'}"
-					title="피드 뷰"
-				>
-					<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-						<path d="M10 2a1 1 0 011 1v1.323l3.954 1.582 1.599-.8a1 1 0 01.894 1.79l-1.233.616 1.738 5.42a1 1 0 01-.285 1.05A3.989 3.989 0 0115 15a3.989 3.989 0 01-2.667-1.019 1 1 0 01-.285-1.05l1.715-5.349L11 6.477V16h2a1 1 0 110 2H7a1 1 0 110-2h2V6.477L6.237 7.582l1.715 5.349a1 1 0 01-.285 1.05A3.989 3.989 0 015 15a3.989 3.989 0 01-2.667-1.019 1 1 0 01-.285-1.05l1.738-5.42-1.233-.617a1 1 0 01.894-1.788l1.599.799L9 4.323V3a1 1 0 011-1z" />
 					</svg>
 				</button>
 			</div>
@@ -594,13 +587,6 @@
 						{/each}
 					</tbody>
 				</table>
-			</div>
-		{:else if viewMode === 'feed'}
-			<!-- 피드 뷰 -->
-			<div class="flex flex-col items-center gap-6 mb-6">
-				{#each posts as post (post.id)}
-					<FeedCard {post} onOpenDetail={openModal} />
-				{/each}
 			</div>
 		{:else}
 			<!-- 그리드 뷰 -->
