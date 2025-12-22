@@ -29,6 +29,9 @@ from ..models.schemas import (
     DailyTrendItem,
     CrawlEventSchema,
     CrawlRunSummarySchema,
+    CrawlHistoryItem,
+    CrawlHistoryResponse,
+    CrawlRunSummary,
 )
 from ..services import PostService, CrawlService, CrawlRequestService
 
@@ -245,6 +248,75 @@ async def get_pending_requests(
     request_service = CrawlRequestService(db)
     requests = request_service.get_pending_requests(limit=limit)
     return [CrawlRequestSchema.model_validate(r) for r in requests]
+
+
+@router.get("/crawl/history", response_model=CrawlHistoryResponse)
+async def get_crawl_history(
+    page: int = Query(1, ge=1, description="페이지 번호"),
+    limit: int = Query(20, ge=1, le=100, description="페이지당 개수"),
+    request_type: Optional[str] = Query(None, description="요청 타입 (feed, single_post, single_post_url)"),
+    requested_by: Optional[str] = Query(None, description="요청 출처 (manual, scheduler, retry)"),
+    status: Optional[str] = Query(None, description="상태 (pending, processing, completed, failed)"),
+    period: Optional[str] = Query(None, description="기간 (today, week, month)"),
+    account_id: Optional[int] = Query(None, description="계정 필터"),
+    db: Session = Depends(get_db),
+):
+    """크롤링 이력 통합 조회.
+
+    모든 크롤링 활동(피드 크롤링, URL 요청, 개별 게시물 재크롤링)을 한눈에 조회.
+    """
+    from app.models import InstagramCrawlRun
+
+    request_service = CrawlRequestService(db)
+    requests, total = request_service.get_requests_paginated(
+        page=page,
+        limit=limit,
+        request_type=request_type,
+        requested_by=requested_by,
+        status=status,
+        period=period,
+        account_id=account_id,
+    )
+
+    items = []
+    for req in requests:
+        # CrawlRun 정보 조회 (있는 경우)
+        crawl_run_summary = None
+        if req.crawl_run_id:
+            run = db.query(InstagramCrawlRun).get(req.crawl_run_id)
+            if run:
+                duration = None
+                if run.started_at and run.finished_at:
+                    duration = int((run.finished_at - run.started_at).total_seconds())
+                crawl_run_summary = CrawlRunSummary(
+                    id=run.id,
+                    total_collected=run.total_collected,
+                    new_saved=run.new_saved,
+                    duration_seconds=duration,
+                    stop_reason=run.stop_reason,
+                )
+
+        items.append(CrawlHistoryItem(
+            id=req.id,
+            account_id=req.account_id,
+            requested_at=req.requested_at,
+            requested_by=req.requested_by,
+            request_type=req.request_type,
+            target_url=req.target_url,
+            target_post_id=req.target_post_id,
+            status=req.status,
+            processed_at=req.processed_at,
+            crawl_run_id=req.crawl_run_id,
+            error_message=req.error_message,
+            crawl_run=crawl_run_summary,
+        ))
+
+    return CrawlHistoryResponse(
+        items=items,
+        total=total,
+        page=page,
+        limit=limit,
+    )
 
 
 @router.post("/crawl", response_model=CrawlResponse)
