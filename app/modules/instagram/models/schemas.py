@@ -237,6 +237,31 @@ class UrlCrawlRequestSchema(BaseModel):
     account_id: int
 
 
+class UrlParseRequestSchema(BaseModel):
+    """URL 파싱 요청 스키마."""
+    url: str
+
+
+class UrlParseResponseSchema(BaseModel):
+    """URL 파싱 응답 스키마."""
+    url_type: str  # main_feed, account_profile, single_post, etc.
+    url_type_description: str  # 메인 피드, 계정 프로필, etc.
+    is_supported: bool
+    username: Optional[str] = None
+    post_id: Optional[str] = None
+    reel_id: Optional[str] = None
+    hashtag: Optional[str] = None
+    original_url: str
+
+
+class GenericUrlCrawlRequestSchema(BaseModel):
+    """범용 URL 크롤링 요청 스키마."""
+    url: str
+    account_id: int
+    max_posts: int = 20
+    scroll_count: int = 3
+
+
 # Worker Status 스키마
 
 class WorkerStatusSchema(BaseModel):

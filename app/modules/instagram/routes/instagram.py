@@ -24,6 +24,9 @@ from ..models.schemas import (
     TimeWindow,
     CrawlRequestSchema,
     UrlCrawlRequestSchema,
+    UrlParseRequestSchema,
+    UrlParseResponseSchema,
+    GenericUrlCrawlRequestSchema,
     RunListResponse,
     RunStatsSchema,
     DailyTrendItem,
@@ -32,6 +35,11 @@ from ..models.schemas import (
     CrawlHistoryItem,
     CrawlHistoryResponse,
     CrawlRunSummary,
+)
+from ..services.url_parser import (
+    parse_instagram_url,
+    get_url_type_description,
+    InstagramUrlType,
 )
 from ..services import PostService, CrawlService, CrawlRequestService
 
@@ -162,6 +170,38 @@ async def recrawl_post(
     )
 
     return CrawlRequestSchema.model_validate(request)
+
+
+# ============== URL Parsing ==============
+
+@router.post("/url/parse", response_model=UrlParseResponseSchema)
+async def parse_url(body: UrlParseRequestSchema):
+    """Instagram URL 파싱.
+
+    URL을 분석하여 타입과 관련 정보를 반환합니다.
+
+    지원되는 URL 타입:
+    - main_feed: 메인 피드 (https://www.instagram.com/)
+    - account_profile: 계정 프로필 (https://www.instagram.com/{username}/)
+    - account_reels: 계정 릴스 (https://www.instagram.com/{username}/reels/)
+    - single_post: 개별 게시물 (https://www.instagram.com/p/{id}/)
+    - single_reel: 개별 릴스 (https://www.instagram.com/reel/{id}/)
+    - reels_explore: 릴스 탐색 (https://www.instagram.com/reels/)
+    - hashtag: 해시태그 (https://www.instagram.com/explore/tags/{tag}/)
+    - story: 스토리 (지원 불가)
+    """
+    parsed = parse_instagram_url(body.url)
+
+    return UrlParseResponseSchema(
+        url_type=parsed.url_type.value,
+        url_type_description=get_url_type_description(parsed.url_type),
+        is_supported=parsed.is_supported,
+        username=parsed.username,
+        post_id=parsed.post_id,
+        reel_id=parsed.reel_id,
+        hashtag=parsed.hashtag,
+        original_url=parsed.original_url,
+    )
 
 
 @router.post("/posts/crawl-url", response_model=CrawlRequestSchema)
