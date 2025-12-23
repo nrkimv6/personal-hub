@@ -79,7 +79,9 @@
 	}
 
 	function formatContent(text: string): string {
-		const lines = text.split('\n');
+		// 줄바꿈 문자 정규화 (\r\n -> \n, \r -> \n)
+		const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+		const lines = normalized.split('\n');
 		return lines
 			.map((line) => {
 				return line.replace(/([@#][\w\uAC00-\uD7AF]+)/g, (match) => {

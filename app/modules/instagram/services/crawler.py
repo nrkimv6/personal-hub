@@ -47,7 +47,9 @@ class PostData:
     url: Optional[str] = None
     caption: Optional[str] = None
     images: List[Dict[str, str]] = field(default_factory=list)
-    is_ad: bool = False
+    is_ad: bool = False  # 하위호환성 유지 (post_type == 'SPONSORED')
+    post_type: str = "NORMAL"  # 'NORMAL', 'SPONSORED', 'SUGGESTED'
+    cta_url: Optional[str] = None  # 광고 CTA 링크 ("더 알아보기" 버튼)
     likes: Optional[int] = None
     comments: Optional[int] = None
 
@@ -202,26 +204,56 @@ class InstagramCrawler:
             const allSpans = Array.from(el.querySelectorAll('span'));
             result.has_more_button = allSpans.some(s => s.textContent.trim() === '더 보기');
 
-            // 좋아요/댓글 수: section 내 숫자 span
-            const section = el.querySelector('section');
-            if (section) {
-                const numberSpans = Array.from(section.querySelectorAll('span'));
-                const numbers = [];
-                for (const span of numberSpans) {
-                    const text = span.textContent.trim();
-                    // 숫자만 있거나, 천/만 단위 포함
-                    if (/^\d+$/.test(text)) {
-                        numbers.push(parseInt(text));
-                    } else if (/^[\d,.]+[천만]?$/.test(text)) {
-                        // 1.1천 -> 1100, 1.5만 -> 15000
-                        let num = parseFloat(text.replace(/,/g, ''));
-                        if (text.includes('천')) num *= 1000;
-                        if (text.includes('만')) num *= 10000;
-                        numbers.push(Math.floor(num));
+            // 좋아요/댓글 수: 텍스트 패턴 우선, 숫자 폴백
+            // 광고/추천 게시물에서도 작동하도록 "좋아요 N개", "댓글 N개" 패턴 먼저 시도
+            const sections = el.querySelectorAll('section');
+            let likesFound = false;
+            let commentsFound = false;
+
+            for (const section of sections) {
+                const spans = section.querySelectorAll('span');
+                for (const span of spans) {
+                    const text = span.innerText;
+                    // 좋아요 패턴: "좋아요 N개"
+                    if (!likesFound) {
+                        const likesMatch = text.match(/좋아요\s*(\d+)개/);
+                        if (likesMatch) {
+                            result.likes = parseInt(likesMatch[1]);
+                            likesFound = true;
+                        }
+                    }
+                    // 댓글 패턴: "댓글 N개"
+                    if (!commentsFound) {
+                        const commentsMatch = text.match(/댓글\s*(\d+)개/);
+                        if (commentsMatch) {
+                            result.comments = parseInt(commentsMatch[1]);
+                            commentsFound = true;
+                        }
                     }
                 }
-                result.likes = numbers[0] || null;
-                result.comments = numbers[1] || null;
+                if (likesFound && commentsFound) break;
+            }
+
+            // 폴백: 숫자만 추출 (기존 방식)
+            if (!likesFound || !commentsFound) {
+                const section = el.querySelector('section');
+                if (section) {
+                    const numberSpans = Array.from(section.querySelectorAll('span'));
+                    const numbers = [];
+                    for (const span of numberSpans) {
+                        const text = span.textContent.trim();
+                        if (/^\d+$/.test(text)) {
+                            numbers.push(parseInt(text));
+                        } else if (/^[\d,.]+[천만]?$/.test(text)) {
+                            let num = parseFloat(text.replace(/,/g, ''));
+                            if (text.includes('천')) num *= 1000;
+                            if (text.includes('만')) num *= 10000;
+                            numbers.push(Math.floor(num));
+                        }
+                    }
+                    if (!likesFound && numbers[0]) result.likes = numbers[0];
+                    if (!commentsFound && numbers[1]) result.comments = numbers[1];
+                }
             }
 
             return result;
@@ -291,44 +323,65 @@ class InstagramCrawler:
         article: ElementHandle,
         account: Optional[str]
     ) -> Optional[str]:
-        """본문 추출."""
-        if not account:
-            return None
+        """본문 추출.
 
+        1차: 구조 기반 추출 ("저장" → 계정명 → "좋아요/댓글")
+        2차 폴백: 가장 긴 span 텍스트 (광고/추천 게시물용)
+        """
         try:
             return await article.evaluate("""(el, account) => {
-                if (!account) return null;
+                // 1차: 구조 기반 추출 (account가 있을 때)
+                if (account) {
+                    const text = el.textContent;
 
-                const text = el.textContent;
+                    // "저장" 이후 본문 영역 찾기
+                    const saveIdx = text.indexOf('저장');
+                    if (saveIdx !== -1) {
+                        const afterSave = text.substring(saveIdx + 2);
 
-                // "저장" 이후 본문 영역 찾기
-                const saveIdx = text.indexOf('저장');
-                if (saveIdx === -1) return null;
+                        // 계정명 이후부터 추출
+                        const accountIdx = afterSave.indexOf(account);
+                        if (accountIdx !== -1) {
+                            const afterAccount = afterSave.substring(accountIdx + account.length);
 
-                const afterSave = text.substring(saveIdx + 2);
+                            // "좋아요" 또는 "댓글"까지의 본문
+                            const endPatterns = ['좋아요', '댓글', 'Like', 'Comment'];
+                            let endIdx = -1;
 
-                // 계정명 이후부터 추출
-                const accountIdx = afterSave.indexOf(account);
-                if (accountIdx === -1) return null;
+                            for (const pattern of endPatterns) {
+                                const idx = afterAccount.indexOf(pattern);
+                                if (idx !== -1 && (endIdx === -1 || idx < endIdx)) {
+                                    endIdx = idx;
+                                }
+                            }
 
-                const afterAccount = afterSave.substring(accountIdx + account.length);
+                            const caption = endIdx === -1
+                                ? afterAccount.trim().substring(0, 1000)
+                                : afterAccount.substring(0, endIdx).trim();
 
-                // "좋아요" 또는 "댓글"까지의 본문
-                const endPatterns = ['좋아요', '댓글', 'Like', 'Comment'];
-                let endIdx = -1;
-
-                for (const pattern of endPatterns) {
-                    const idx = afterAccount.indexOf(pattern);
-                    if (idx !== -1 && (endIdx === -1 || idx < endIdx)) {
-                        endIdx = idx;
+                            // 유효한 본문이면 반환
+                            if (caption && caption.length > 10) {
+                                return caption;
+                            }
+                        }
                     }
                 }
 
-                if (endIdx === -1) {
-                    return afterAccount.trim().substring(0, 1000);
+                // 2차 폴백: 가장 긴 span 텍스트 (광고/추천 게시물용)
+                // 가이드 문서: 50자 이상이고, "팔로워" 등 메타 정보 제외
+                const allSpans = Array.from(el.querySelectorAll('span'));
+                let captionText = '';
+                let maxLength = 0;
+
+                for (const span of allSpans) {
+                    const text = span.innerText;
+                    if (text && text.length > maxLength && text.length > 50 && !text.includes('팔로워')) {
+                        maxLength = text.length;
+                        captionText = text;
+                    }
                 }
 
-                return afterAccount.substring(0, endIdx).trim();
+                return captionText || null;
             }""", account)
         except Exception as e:
             logger.warning(f"Failed to extract caption: {e}")
