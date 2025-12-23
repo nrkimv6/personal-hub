@@ -26,6 +26,6 @@
 	},
 	"dependencies": {
 		"@tailwindcss/postcss": "^4.1.17",
-		"html2canvas": "^1.4.1"
+		"html-to-image": "^1.11.13"
 	}
 }

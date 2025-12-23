@@ -291,6 +291,16 @@
 	async function handleCapture() {
 		if (!feedRef || isCapturing) return;
 		isCapturing = true;
+
+		// 캡처 제외 요소들을 숨기고 복원할 준비
+		const excludeElements = feedRef.querySelectorAll('[data-capture-exclude]');
+		const originalDisplays: string[] = [];
+		excludeElements.forEach((el, i) => {
+			const htmlEl = el as HTMLElement;
+			originalDisplays[i] = htmlEl.style.display;
+			htmlEl.style.display = 'none';
+		});
+
 		try {
 			const dataUrl = await toPng(feedRef, {
 				cacheBust: true,
@@ -298,18 +308,8 @@
 					mode: 'cors',
 					credentials: 'omit'
 				},
-				filter: (node) => {
-					// 스크립트나 불필요한 요소 제외
-					if (node instanceof Element) {
-						const tagName = node.tagName?.toLowerCase();
-						return tagName !== 'script' && tagName !== 'noscript';
-					}
-					return true;
-				},
 			});
 
-			// 이미지가 base64로 이미 변환되어 있지 않으면, DOM을 직접 수정 후 재시도
-			// html-to-image는 외부 이미지도 자동으로 fetch하여 인라인화 시도함
 			const link = document.createElement('a');
 			link.download = `${post.account}-${post.id}-${Date.now()}.png`;
 			link.href = dataUrl;
@@ -318,11 +318,9 @@
 			console.error('캡쳐 실패:', error);
 			// html-to-image 실패 시 대체 방법: 이미지를 먼저 교체하고 재시도
 			try {
-				// 원본 이미지 src 백업
 				const imgEl = feedRef?.querySelector('img') as HTMLImageElement | null;
 				const originalSrc = imgEl?.src;
 
-				// base64로 이미지 교체
 				if (imgEl && post.images?.[currentImageIndex]?.src) {
 					const base64 = await loadImageAsBase64(post.images[currentImageIndex].src);
 					if (base64.startsWith('data:')) {
@@ -330,10 +328,8 @@
 					}
 				}
 
-				// 재시도
 				const dataUrl = await toPng(feedRef!, { cacheBust: true });
 
-				// 원본 복원
 				if (imgEl && originalSrc) {
 					imgEl.src = originalSrc;
 				}
@@ -347,6 +343,10 @@
 				alert('캡쳐에 실패했습니다. 이미지 로딩 문제일 수 있습니다.');
 			}
 		} finally {
+			// 숨긴 요소들 복원
+			excludeElements.forEach((el, i) => {
+				(el as HTMLElement).style.display = originalDisplays[i];
+			});
 			isCapturing = false;
 		}
 	}
@@ -362,15 +362,6 @@
 	<!-- Header -->
 	<div class="flex items-center justify-between px-4 py-3">
 		<div class="flex items-center gap-3">
-			<div
-				class="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400 p-[2px]"
-			>
-				<div class="w-full h-full rounded-full bg-white flex items-center justify-center">
-					<span class="text-sm font-bold text-gray-700">
-						{post.account.charAt(0).toUpperCase()}
-					</span>
-				</div>
-			</div>
 			<div class="flex flex-col">
 				<div class="flex items-center gap-2">
 					<span class="font-semibold text-sm text-gray-900">@{post.account}</span>
@@ -554,7 +545,7 @@
 
 			<!-- 상세 모드: 내부 태그 (AI 분석 트리거용, 접히는 섹션) -->
 			{#if detailMode && availableTags.length > 0}
-				<details class="py-3 border-t border-gray-100">
+				<details class="py-3 border-t border-gray-100" data-capture-exclude>
 					<summary class="cursor-pointer text-xs text-gray-400 hover:text-gray-600">
 						내부 태그 (AI 분석 트리거용)
 					</summary>
@@ -622,6 +613,7 @@
 			{#if detailMode}
 				<div
 					class="py-3 border-t border-gray-100 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg px-3 my-2"
+					data-capture-exclude
 				>
 					<div class="flex items-center justify-between mb-2">
 						<h4 class="font-semibold text-sm text-gray-900 flex items-center gap-2">
@@ -875,7 +867,7 @@
 
 			<!-- 상세 모드: 액션 버튼 -->
 			{#if detailMode}
-				<div class="flex gap-2 flex-wrap pt-3 border-t border-gray-100 mt-3">
+				<div class="flex gap-2 flex-wrap pt-3 border-t border-gray-100 mt-3" data-capture-exclude>
 					{#if post.url}
 						<a
 							href={post.url}

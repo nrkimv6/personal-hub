@@ -850,6 +850,7 @@
 					<table class="w-full">
 						<thead class="bg-gray-50 border-b border-gray-200">
 							<tr>
+								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">PK</th>
 								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">이미지</th>
 								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">계정</th>
 								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">기간</th>
@@ -874,6 +875,10 @@
 									onkeydown={(e) => e.key === 'Enter' && openDetail(post)}
 									tabindex="0"
 								>
+									<!-- PK -->
+									<td class="px-3 py-3 text-xs text-gray-500 font-mono">
+										{post.id}
+									</td>
 									<!-- 이미지 -->
 									<td class="px-3 py-3">
 										{#if post.images && post.images.length > 0}
@@ -1015,6 +1020,7 @@
 				<table class="w-full min-w-[700px]">
 					<thead class="bg-gray-50 border-b border-gray-200">
 						<tr>
+							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">PK</th>
 							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">이미지</th>
 							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">계정</th>
 							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">내용</th>
@@ -1032,6 +1038,9 @@
 								onkeydown={(e) => e.key === 'Enter' && openDetail(post)}
 								tabindex="0"
 							>
+								<td class="px-4 py-3 text-xs text-gray-500 font-mono">
+									{post.id}
+								</td>
 								<td class="px-4 py-3">
 									{#if post.images && post.images.length > 0}
 										<img
