@@ -36,6 +36,11 @@
 	// LLM 필터
 	let filterLlmTag: string | null = null;
 	let filterLlmStatus: string | null = null;
+	// 이벤트/팝업 탭 전용 필터
+	let filterEventStatus: string | null = null;
+	let sortBy: string | null = null;
+	let sortOrder: string = 'asc';
+	let includeEnded: boolean = false;  // 종료된 항목 포함
 
 	// LLM 태그 옵션
 	const llmTagOptions = [
@@ -57,17 +62,63 @@
 	function switchTab(tab: TabMode) {
 		activeTab = tab;
 		page = 1;
+		includeEnded = false;  // 탭 전환 시 종료된 항목 숨김
 		if (tab === 'events') {
 			filterLlmTag = '이벤트';
 			filterLlmStatus = 'completed';
+			filterEventStatus = 'ongoing';  // 진행 중인 이벤트만
+			sortBy = 'event_end';  // 마감일 오름차순
+			sortOrder = 'asc';
 		} else if (tab === 'popup') {
 			filterLlmTag = '팝업';
 			filterLlmStatus = 'completed';
+			filterEventStatus = 'ongoing_or_upcoming';  // 진행 중 + 예정
+			sortBy = 'event_end';  // 마감일 오름차순
+			sortOrder = 'asc';
 		} else {
 			filterLlmTag = null;
 			filterLlmStatus = null;
+			filterEventStatus = null;
+			sortBy = null;
+			sortOrder = 'asc';
 		}
 		fetchPosts();
+	}
+
+	// 종료된 항목 포함 토글
+	function toggleIncludeEnded() {
+		includeEnded = !includeEnded;
+		if (includeEnded) {
+			filterEventStatus = null;  // 모든 항목
+		} else {
+			// 탭별 기본 필터 복원
+			if (activeTab === 'events') {
+				filterEventStatus = 'ongoing';
+			} else if (activeTab === 'popup') {
+				filterEventStatus = 'ongoing_or_upcoming';
+			}
+		}
+		fetchPosts();
+	}
+
+	// 오늘 날짜 기준 진행 중 여부 확인
+	function isOngoing(post: InstagramPost): boolean {
+		const today = new Date().toISOString().split('T')[0];
+		const start = post.llm_event_start;
+		const end = post.llm_event_end;
+
+		// 시작일이 없거나 오늘 이전이고, 종료일이 없거나 오늘 이후면 진행 중
+		const startOk = !start || start <= today;
+		const endOk = !end || end >= today;
+		return startOk && endOk;
+	}
+
+	// 위치 정보 포맷팅
+	function formatLocation(location: { venue_name?: string; address?: string } | null): string {
+		if (!location) return '-';
+		const { venue_name, address } = location;
+		if (venue_name && address) return `${venue_name} (${address})`;
+		return venue_name || address || '-';
 	}
 
 	// 상세보기 (FeedCard detailMode)
@@ -140,6 +191,10 @@
 			// LLM 필터
 			if (filterLlmTag) params.llm_tag = filterLlmTag;
 			if (filterLlmStatus) params.llm_status = filterLlmStatus;
+			// 이벤트/팝업 필터
+			if (filterEventStatus) params.event_status = filterEventStatus;
+			if (sortBy) params.sort_by = sortBy;
+			if (sortOrder) params.sort_order = sortOrder;
 
 			const response = await instagramApi.posts(params);
 			posts = response.posts;
@@ -738,6 +793,24 @@
 	{:else}
 		<!-- 이벤트/팝업 탭: LLM 결과 테이블 뷰 -->
 		{#if activeTab === 'events' || activeTab === 'popup'}
+			<!-- 종료된 항목 포함 토글 -->
+			<div class="flex items-center justify-between mb-4">
+				<div class="flex items-center gap-2 text-sm text-gray-600">
+					<span>총 {total}건</span>
+					{#if !includeEnded}
+						<span class="text-blue-600">(진행중{activeTab === 'popup' ? '+예정' : ''} 필터 적용)</span>
+					{/if}
+				</div>
+				<label class="flex items-center gap-2 cursor-pointer">
+					<input
+						type="checkbox"
+						checked={includeEnded}
+						onchange={toggleIncludeEnded}
+						class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+					/>
+					<span class="text-sm text-gray-600">종료된 {activeTab === 'events' ? '이벤트' : '팝업'} 포함</span>
+				</label>
+			</div>
 			<div class="bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
 				<div class="overflow-x-auto">
 					<table class="w-full">
@@ -751,6 +824,9 @@
 								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">당첨자</th>
 								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">조건</th>
 								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">주최</th>
+								{#if activeTab === 'popup'}
+									<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-xs">위치</th>
+								{/if}
 								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-xs">요약</th>
 								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">원본</th>
 							</tr>
@@ -758,7 +834,7 @@
 						<tbody class="divide-y divide-gray-200">
 							{#each posts as post (post.id)}
 								<tr
-									class="hover:bg-gray-50 cursor-pointer"
+									class="cursor-pointer transition-colors {isOngoing(post) ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50'}"
 									onclick={() => openDetail(post)}
 									onkeydown={(e) => e.key === 'Enter' && openDetail(post)}
 									tabindex="0"
@@ -845,6 +921,14 @@
 											{post.llm_organizer || '-'}
 										</span>
 									</td>
+									<!-- 위치 (팝업 탭만) -->
+									{#if activeTab === 'popup'}
+										<td class="px-3 py-3 text-sm text-gray-600 max-w-[200px]">
+											<span class="line-clamp-2" title={formatLocation(post.llm_location)}>
+												{formatLocation(post.llm_location)}
+											</span>
+										</td>
+									{/if}
 									<!-- 요약 -->
 									<td class="px-3 py-3 text-sm text-gray-600 max-w-[200px]">
 										<span class="line-clamp-2" title={post.llm_summary || ''}>

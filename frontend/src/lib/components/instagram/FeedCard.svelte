@@ -1,4 +1,5 @@
 <script lang="ts">
+	import html2canvas from 'html2canvas';
 	import type { InstagramPost, InstagramTag } from '$lib/types';
 
 	interface Props {
@@ -42,6 +43,10 @@
 
 	// LLM 분석 요청 상태
 	let isRequestingLlm = $state(false);
+
+	// 캡쳐 상태
+	let isCapturing = $state(false);
+	let feedRef: HTMLElement | null = $state(null);
 
 	function toggleExpand() {
 		isExpanded = !isExpanded;
@@ -166,9 +171,31 @@
 			isRecrawling = false;
 		}
 	}
+
+	// 캡쳐 다운로드
+	async function handleCapture() {
+		if (!feedRef || isCapturing) return;
+		isCapturing = true;
+		try {
+			const canvas = await html2canvas(feedRef, {
+				useCORS: true,
+				allowTaint: true
+			});
+			const link = document.createElement('a');
+			link.download = `${post.account}-${post.id}-${Date.now()}.png`;
+			link.href = canvas.toDataURL('image/png');
+			link.click();
+		} catch (error) {
+			console.error('캡쳐 실패:', error);
+			alert('캡쳐에 실패했습니다');
+		} finally {
+			isCapturing = false;
+		}
+	}
 </script>
 
 <article
+	bind:this={feedRef}
 	class="feed-card bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden"
 	class:hover:shadow-md={!detailMode}
 	class:transition-all={!detailMode}
@@ -631,6 +658,23 @@
 							{/if}
 						</button>
 					{/if}
+					<!-- 캡쳐 다운로드 버튼 -->
+					<button
+						onclick={handleCapture}
+						disabled={isCapturing}
+						class="btn btn-secondary btn-sm disabled:opacity-50"
+						title="피드 캡쳐 다운로드"
+					>
+						{#if isCapturing}
+							<span class="inline-block animate-spin mr-1">&#8635;</span>
+							캡쳐 중...
+						{:else}
+							<svg class="w-4 h-4 inline-block mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+							</svg>
+							캡쳐
+						{/if}
+					</button>
 					<button onclick={handleDelete} class="btn btn-danger btn-sm"> 삭제 </button>
 				</div>
 			{/if}

@@ -59,6 +59,9 @@ async def get_posts(
     tags: Optional[str] = Query(None, description="태그 필터 (쉼표 구분)"),
     llm_tag: Optional[str] = Query(None, description="LLM 분류 태그 필터 (이벤트/팝업/홍보대사/기타)"),
     llm_status: Optional[str] = Query(None, description="LLM 분석 상태 (pending/processing/completed/failed)"),
+    event_status: Optional[str] = Query(None, description="이벤트 진행상태 (ongoing/upcoming/ended)"),
+    sort_by: Optional[str] = Query(None, description="정렬 기준 (event_end/event_start/collected_at)"),
+    sort_order: Optional[str] = Query("asc", description="정렬 순서 (asc/desc)"),
     page: int = Query(1, ge=1, description="페이지 번호"),
     limit: int = Query(20, ge=1, le=100, description="페이지당 개수"),
     db: Session = Depends(get_db),
@@ -78,6 +81,9 @@ async def get_posts(
         tags=tag_list,
         llm_tag=llm_tag,
         llm_status=llm_status,
+        event_status=event_status,
+        sort_by=sort_by,
+        sort_order=sort_order,
         limit=limit,
         offset=offset,
     )
@@ -718,5 +724,6 @@ def _post_to_schema(post) -> PostSchema:
         llm_urls=post.llm_urls,
         llm_organizer=post.llm_organizer,
         llm_summary=post.llm_summary,
+        llm_location=post.llm_location,
         llm_analyzed_at=post.llm_analyzed_at,
     )

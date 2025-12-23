@@ -735,7 +735,27 @@ class InstagramCrawler:
             # article 요소 탐색 (개별 게시물 페이지에도 article 요소 존재)
             article = await self.page.query_selector("article")
             if not article:
+                # 디버깅: 실패 원인 파악을 위한 상세 로그
+                current_url = self.page.url
+                title = await self.page.title()
                 logger.warning(f"No article element found for: {post_url}")
+                logger.warning(f"  - Current URL: {current_url}")
+                logger.warning(f"  - Page title: {title}")
+
+                # 페이지 상태 확인
+                body_text = await self.page.inner_text("body")
+                body_preview = body_text[:500] if body_text else "(empty)"
+
+                # 특정 상태 감지
+                if "Log in" in body_text or "Log In" in body_text or "로그인" in body_text:
+                    logger.warning("  - Reason: Login required")
+                elif "Sorry, this page isn't available" in body_text or "페이지를 사용할 수 없습니다" in body_text:
+                    logger.warning("  - Reason: Post deleted or unavailable")
+                elif "This Account is Private" in body_text or "비공개 계정" in body_text:
+                    logger.warning("  - Reason: Private account")
+                else:
+                    logger.warning(f"  - Body preview: {body_preview}")
+
                 return None
 
             # 기존 extract_post 로직 재사용

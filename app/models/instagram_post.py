@@ -52,6 +52,7 @@ class InstagramPost(Base):
     llm_urls = Column(JSON)  # ["https://..."]
     llm_organizer = Column(String)
     llm_summary = Column(Text)
+    llm_location = Column(JSON)  # {"venue_name": "...", "address": "..."} - 팝업 전용
     llm_analyzed_at = Column(DateTime)
 
     # 관계

@@ -1669,3 +1669,466 @@ class TestPostDataAdField:
         )
         assert len(post.images) == 2
         assert post.images[0]["alt"] == "Photo by user"
+
+
+# ============================================================
+# 이벤트/팝업 탭 개선 테스트 (2025-12-23 추가)
+# - event_status 필터 (ongoing/upcoming/ended/ongoing_or_upcoming)
+# - sort_by/sort_order 파라미터
+# - llm_location 필드 (팝업 전용)
+# ============================================================
+
+class TestMigration042:
+    """042_add_llm_location 마이그레이션 테스트"""
+
+    def test_migration_file_exists(self):
+        """042_add_llm_location.sql 파일 존재"""
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "042_add_llm_location.sql"
+        assert migration_path.exists(), "042_add_llm_location.sql should exist"
+
+    def test_migration_contains_llm_location(self):
+        """마이그레이션에 llm_location 컬럼 포함"""
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "042_add_llm_location.sql"
+        content = migration_path.read_text(encoding="utf-8")
+
+        assert "llm_location" in content
+        assert "JSON" in content or "json" in content
+
+
+class TestInstagramPostLLMLocation:
+    """InstagramPost llm_location 필드 테스트 (RIGHT-BICEP)"""
+
+    # Right: 올바른 필드 존재
+    def test_model_has_llm_location_column(self):
+        """InstagramPost 모델에 llm_location 컬럼 존재"""
+        from app.models.instagram_post import InstagramPost
+
+        assert hasattr(InstagramPost, 'llm_location')
+
+    def test_schema_has_llm_location_field(self):
+        """PostSchema에 llm_location 필드 존재"""
+        from app.modules.instagram.models.schemas import PostSchema
+
+        fields = PostSchema.model_fields
+        assert 'llm_location' in fields
+
+    # Conformance: 형식 준수
+    def test_schema_llm_location_default_none(self):
+        """llm_location 기본값은 None"""
+        from app.modules.instagram.models.schemas import PostSchema
+        from datetime import datetime
+
+        post = PostSchema(
+            id=1,
+            post_id="test123",
+            account="testuser",
+            collected_at=datetime.now()
+        )
+        assert post.llm_location is None
+
+    def test_schema_llm_location_with_data(self):
+        """llm_location에 데이터 설정"""
+        from app.modules.instagram.models.schemas import PostSchema
+        from datetime import datetime
+
+        location_data = {
+            "venue_name": "XXX 플래그십 스토어",
+            "address": "서울시 강남구 가로수길 123"
+        }
+
+        post = PostSchema(
+            id=1,
+            post_id="test123",
+            account="testuser",
+            collected_at=datetime.now(),
+            llm_location=location_data
+        )
+        assert post.llm_location == location_data
+        assert post.llm_location["venue_name"] == "XXX 플래그십 스토어"
+        assert post.llm_location["address"] == "서울시 강남구 가로수길 123"
+
+
+class TestPostServiceEventStatusFilter:
+    """PostService event_status 필터 테스트 (RIGHT-BICEP, CORRECT)"""
+
+    # Right: 올바른 파라미터 지원
+    def test_get_posts_accepts_event_status(self):
+        """get_posts가 event_status 파라미터 받음"""
+        from app.modules.instagram.services.post_service import PostService
+        import inspect
+
+        sig = inspect.signature(PostService.get_posts)
+        params = list(sig.parameters.keys())
+
+        assert 'event_status' in params
+
+    def test_get_posts_accepts_sort_by(self):
+        """get_posts가 sort_by 파라미터 받음"""
+        from app.modules.instagram.services.post_service import PostService
+        import inspect
+
+        sig = inspect.signature(PostService.get_posts)
+        params = list(sig.parameters.keys())
+
+        assert 'sort_by' in params
+
+    def test_get_posts_accepts_sort_order(self):
+        """get_posts가 sort_order 파라미터 받음"""
+        from app.modules.instagram.services.post_service import PostService
+        import inspect
+
+        sig = inspect.signature(PostService.get_posts)
+        params = list(sig.parameters.keys())
+
+        assert 'sort_order' in params
+
+    # Boundary: 경계값 - event_status 옵션
+    def test_event_status_ongoing_option(self):
+        """event_status='ongoing' 옵션 지원"""
+        from app.modules.instagram.services.post_service import PostService
+
+        mock_db = MagicMock()
+        mock_query = MagicMock()
+        mock_db.query.return_value = mock_query
+        mock_query.filter.return_value = mock_query
+        mock_query.join.return_value = mock_query
+        mock_query.distinct.return_value = mock_query
+        mock_query.order_by.return_value = mock_query
+        mock_query.offset.return_value = mock_query
+        mock_query.limit.return_value = mock_query
+        mock_query.count.return_value = 0
+        mock_query.all.return_value = []
+
+        service = PostService(mock_db)
+        posts, total = service.get_posts(event_status="ongoing")
+
+        # 필터가 적용되었는지 확인 (filter가 호출됨)
+        assert mock_query.filter.called
+
+    def test_event_status_upcoming_option(self):
+        """event_status='upcoming' 옵션 지원"""
+        from app.modules.instagram.services.post_service import PostService
+
+        mock_db = MagicMock()
+        mock_query = MagicMock()
+        mock_db.query.return_value = mock_query
+        mock_query.filter.return_value = mock_query
+        mock_query.join.return_value = mock_query
+        mock_query.distinct.return_value = mock_query
+        mock_query.order_by.return_value = mock_query
+        mock_query.offset.return_value = mock_query
+        mock_query.limit.return_value = mock_query
+        mock_query.count.return_value = 0
+        mock_query.all.return_value = []
+
+        service = PostService(mock_db)
+        posts, total = service.get_posts(event_status="upcoming")
+
+        assert mock_query.filter.called
+
+    def test_event_status_ended_option(self):
+        """event_status='ended' 옵션 지원"""
+        from app.modules.instagram.services.post_service import PostService
+
+        mock_db = MagicMock()
+        mock_query = MagicMock()
+        mock_db.query.return_value = mock_query
+        mock_query.filter.return_value = mock_query
+        mock_query.join.return_value = mock_query
+        mock_query.distinct.return_value = mock_query
+        mock_query.order_by.return_value = mock_query
+        mock_query.offset.return_value = mock_query
+        mock_query.limit.return_value = mock_query
+        mock_query.count.return_value = 0
+        mock_query.all.return_value = []
+
+        service = PostService(mock_db)
+        posts, total = service.get_posts(event_status="ended")
+
+        assert mock_query.filter.called
+
+    def test_event_status_ongoing_or_upcoming_option(self):
+        """event_status='ongoing_or_upcoming' 옵션 지원"""
+        from app.modules.instagram.services.post_service import PostService
+
+        mock_db = MagicMock()
+        mock_query = MagicMock()
+        mock_db.query.return_value = mock_query
+        mock_query.filter.return_value = mock_query
+        mock_query.join.return_value = mock_query
+        mock_query.distinct.return_value = mock_query
+        mock_query.order_by.return_value = mock_query
+        mock_query.offset.return_value = mock_query
+        mock_query.limit.return_value = mock_query
+        mock_query.count.return_value = 0
+        mock_query.all.return_value = []
+
+        service = PostService(mock_db)
+        posts, total = service.get_posts(event_status="ongoing_or_upcoming")
+
+        assert mock_query.filter.called
+
+
+class TestPostServiceSortOptions:
+    """PostService 정렬 옵션 테스트 (CORRECT - Ordering)"""
+
+    def test_sort_by_event_end_asc(self):
+        """sort_by='event_end', sort_order='asc' 정렬"""
+        from app.modules.instagram.services.post_service import PostService
+
+        mock_db = MagicMock()
+        mock_query = MagicMock()
+        mock_db.query.return_value = mock_query
+        mock_query.filter.return_value = mock_query
+        mock_query.order_by.return_value = mock_query
+        mock_query.offset.return_value = mock_query
+        mock_query.limit.return_value = mock_query
+        mock_query.count.return_value = 0
+        mock_query.all.return_value = []
+
+        service = PostService(mock_db)
+        posts, total = service.get_posts(sort_by="event_end", sort_order="asc")
+
+        # order_by가 호출되었는지 확인
+        assert mock_query.order_by.called
+
+    def test_sort_by_event_end_desc(self):
+        """sort_by='event_end', sort_order='desc' 정렬"""
+        from app.modules.instagram.services.post_service import PostService
+
+        mock_db = MagicMock()
+        mock_query = MagicMock()
+        mock_db.query.return_value = mock_query
+        mock_query.filter.return_value = mock_query
+        mock_query.order_by.return_value = mock_query
+        mock_query.offset.return_value = mock_query
+        mock_query.limit.return_value = mock_query
+        mock_query.count.return_value = 0
+        mock_query.all.return_value = []
+
+        service = PostService(mock_db)
+        posts, total = service.get_posts(sort_by="event_end", sort_order="desc")
+
+        assert mock_query.order_by.called
+
+    def test_sort_by_event_start(self):
+        """sort_by='event_start' 정렬"""
+        from app.modules.instagram.services.post_service import PostService
+
+        mock_db = MagicMock()
+        mock_query = MagicMock()
+        mock_db.query.return_value = mock_query
+        mock_query.filter.return_value = mock_query
+        mock_query.order_by.return_value = mock_query
+        mock_query.offset.return_value = mock_query
+        mock_query.limit.return_value = mock_query
+        mock_query.count.return_value = 0
+        mock_query.all.return_value = []
+
+        service = PostService(mock_db)
+        posts, total = service.get_posts(sort_by="event_start", sort_order="asc")
+
+        assert mock_query.order_by.called
+
+    def test_sort_by_default_collected_at(self):
+        """기본 정렬은 collected_at desc"""
+        from app.modules.instagram.services.post_service import PostService
+
+        mock_db = MagicMock()
+        mock_query = MagicMock()
+        mock_db.query.return_value = mock_query
+        mock_query.filter.return_value = mock_query
+        mock_query.order_by.return_value = mock_query
+        mock_query.offset.return_value = mock_query
+        mock_query.limit.return_value = mock_query
+        mock_query.count.return_value = 0
+        mock_query.all.return_value = []
+
+        service = PostService(mock_db)
+        posts, total = service.get_posts()
+
+        # 기본 정렬 적용
+        assert mock_query.order_by.called
+
+
+class TestInstagramAPIEventStatusParams:
+    """Instagram API event_status 파라미터 테스트"""
+
+    def test_routes_has_event_status_param(self):
+        """instagram.py 라우트에 event_status 파라미터 존재"""
+        routes_path = PROJECT_ROOT / "app" / "modules" / "instagram" / "routes" / "instagram.py"
+        content = routes_path.read_text(encoding="utf-8")
+
+        assert "event_status" in content
+        assert "ongoing" in content or "upcoming" in content
+
+    def test_routes_has_sort_by_param(self):
+        """instagram.py 라우트에 sort_by 파라미터 존재"""
+        routes_path = PROJECT_ROOT / "app" / "modules" / "instagram" / "routes" / "instagram.py"
+        content = routes_path.read_text(encoding="utf-8")
+
+        assert "sort_by" in content
+
+    def test_routes_has_sort_order_param(self):
+        """instagram.py 라우트에 sort_order 파라미터 존재"""
+        routes_path = PROJECT_ROOT / "app" / "modules" / "instagram" / "routes" / "instagram.py"
+        content = routes_path.read_text(encoding="utf-8")
+
+        assert "sort_order" in content
+
+
+class TestLLMClassifierLocationField:
+    """LLM Classifier location 필드 테스트"""
+
+    def test_classifier_prompt_has_location(self):
+        """LLM 분류 프롬프트에 location 필드 포함"""
+        classifier_path = PROJECT_ROOT / "app" / "modules" / "instagram" / "services" / "llm_classifier_service.py"
+        content = classifier_path.read_text(encoding="utf-8")
+
+        assert "location" in content
+        assert "venue_name" in content or "address" in content
+
+    def test_classifier_prompt_has_winner_announcement_exclusion(self):
+        """LLM 분류 프롬프트에 당첨자 발표 제외 조건 포함"""
+        classifier_path = PROJECT_ROOT / "app" / "modules" / "instagram" / "services" / "llm_classifier_service.py"
+        content = classifier_path.read_text(encoding="utf-8")
+
+        # 당첨자 발표 관련 키워드
+        assert "당첨자" in content or "발표" in content
+
+
+class TestWorkerLLMLocationSave:
+    """Worker llm_location 저장 테스트"""
+
+    def test_worker_saves_llm_location(self):
+        """Worker가 llm_location을 저장하는지 확인"""
+        worker_path = PROJECT_ROOT / "app" / "modules" / "claude_worker" / "worker" / "worker.py"
+        content = worker_path.read_text(encoding="utf-8")
+
+        assert "llm_location" in content
+        assert 'llm_result.get("location")' in content or "llm_result.get('location')" in content
+
+
+# ============================================================
+# DB 의존 테스트 - 마이그레이션 검증 (실제 DB 연결)
+# 마이그레이션 적용 전 실패, 적용 후 성공해야 함
+# ============================================================
+
+class TestDBMigration042Integration:
+    """DB 마이그레이션 042 통합 테스트 (실제 DB 사용)"""
+
+    @pytest.fixture
+    def db_session(self):
+        """실제 DB 세션"""
+        from app.database import SessionLocal
+        db = SessionLocal()
+        yield db
+        db.close()
+
+    def test_instagram_posts_has_llm_location_column(self, db_session):
+        """instagram_posts 테이블에 llm_location 컬럼 존재 확인"""
+        from sqlalchemy import text
+
+        # 테이블 스키마 정보 조회 (SQLite)
+        result = db_session.execute(text("PRAGMA table_info(instagram_posts)"))
+        columns = [row[1] for row in result.fetchall()]
+
+        assert "llm_location" in columns, "llm_location 컬럼이 instagram_posts 테이블에 없습니다. 마이그레이션 042를 적용하세요."
+
+    def test_can_insert_llm_location(self, db_session):
+        """llm_location 컬럼에 데이터 삽입 가능 확인"""
+        from sqlalchemy import text
+        import json
+
+        location_data = json.dumps({"venue_name": "테스트 스토어", "address": "서울시 테스트구"})
+
+        # 테스트용 게시물 삽입 시도 (실제로 삽입하지 않고 쿼리만 테스트)
+        # llm_location 컬럼이 없으면 이 쿼리가 실패함
+        try:
+            result = db_session.execute(text(
+                "SELECT llm_location FROM instagram_posts LIMIT 1"
+            ))
+            # 쿼리 성공 = 컬럼 존재
+            assert True
+        except Exception as e:
+            pytest.fail(f"llm_location 컬럼 접근 실패: {e}. 마이그레이션 042를 적용하세요.")
+
+    def test_can_query_with_llm_location(self, db_session):
+        """llm_location 컬럼을 포함한 쿼리 가능 확인"""
+        from app.models import InstagramPost
+        from sqlalchemy import text
+
+        # 실제 ORM을 통한 쿼리 테스트
+        try:
+            # 컬럼이 없으면 오류 발생
+            query = db_session.query(
+                InstagramPost.id,
+                InstagramPost.llm_location
+            ).limit(1)
+            query.all()
+            assert True
+        except Exception as e:
+            pytest.fail(f"InstagramPost.llm_location 쿼리 실패: {e}. 마이그레이션 042를 적용하세요.")
+
+
+class TestPostServiceDBIntegration:
+    """PostService DB 통합 테스트"""
+
+    @pytest.fixture
+    def db_session(self):
+        """실제 DB 세션"""
+        from app.database import SessionLocal
+        db = SessionLocal()
+        yield db
+        db.close()
+
+    def test_get_posts_with_event_status_filter(self, db_session):
+        """실제 DB로 event_status 필터 동작 확인"""
+        from app.modules.instagram.services.post_service import PostService
+
+        service = PostService(db_session)
+
+        # event_status 필터로 조회 - 에러 없이 실행되어야 함
+        try:
+            posts, total = service.get_posts(event_status="ongoing", limit=5)
+            assert isinstance(posts, list)
+            assert isinstance(total, int)
+        except Exception as e:
+            pytest.fail(f"event_status='ongoing' 필터 실패: {e}")
+
+    def test_get_posts_with_sort_by_event_end(self, db_session):
+        """실제 DB로 sort_by 정렬 동작 확인"""
+        from app.modules.instagram.services.post_service import PostService
+
+        service = PostService(db_session)
+
+        # sort_by 정렬로 조회 - 에러 없이 실행되어야 함
+        try:
+            posts, total = service.get_posts(sort_by="event_end", sort_order="asc", limit=5)
+            assert isinstance(posts, list)
+        except Exception as e:
+            pytest.fail(f"sort_by='event_end' 정렬 실패: {e}")
+
+    def test_get_posts_with_sort_by_event_start(self, db_session):
+        """실제 DB로 event_start 정렬 동작 확인"""
+        from app.modules.instagram.services.post_service import PostService
+
+        service = PostService(db_session)
+
+        try:
+            posts, total = service.get_posts(sort_by="event_start", sort_order="desc", limit=5)
+            assert isinstance(posts, list)
+        except Exception as e:
+            pytest.fail(f"sort_by='event_start' 정렬 실패: {e}")
+
+    def test_get_posts_with_ongoing_or_upcoming(self, db_session):
+        """실제 DB로 ongoing_or_upcoming 필터 동작 확인"""
+        from app.modules.instagram.services.post_service import PostService
+
+        service = PostService(db_session)
+
+        try:
+            posts, total = service.get_posts(event_status="ongoing_or_upcoming", limit=5)
+            assert isinstance(posts, list)
+        except Exception as e:
+            pytest.fail(f"event_status='ongoing_or_upcoming' 필터 실패: {e}")
