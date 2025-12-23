@@ -116,7 +116,7 @@
       <p class="text-sm text-gray-500 mt-1">Windows 작업 스케줄러에 등록된 작업을 관리합니다</p>
     </div>
     <button
-      class="btn btn-secondary"
+      class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg transition-colors bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
       on:click={fetchData}
       disabled={loading}
     >
@@ -144,7 +144,7 @@
       {:else}
         <div class="space-y-4">
           {#each tasks as task}
-            <div class="card">
+            <div class="bg-white rounded-lg shadow p-4">
               <div class="flex items-start justify-between">
                 <div class="flex-1">
                   <div class="flex items-center gap-3 mb-2">
@@ -183,14 +183,14 @@
                 </div>
                 <div class="flex gap-2 ml-4">
                   <button
-                    class="btn btn-sm btn-primary"
+                    class="inline-flex items-center justify-center px-3 py-1.5 text-xs font-medium rounded-lg transition-colors bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
                     on:click={() => runTask(task.name)}
                     disabled={actionLoading[task.name]}
                   >
                     {actionLoading[task.name] ? '...' : '실행'}
                   </button>
                   <button
-                    class="btn btn-sm {task.enabled ? 'btn-warning' : 'btn-success'}"
+                    class="inline-flex items-center justify-center px-3 py-1.5 text-xs font-medium rounded-lg transition-colors disabled:opacity-50 {task.enabled ? 'bg-yellow-500 text-white hover:bg-yellow-600' : 'bg-green-600 text-white hover:bg-green-700'}"
                     on:click={() => toggleTask(task)}
                     disabled={actionLoading[task.name]}
                   >
@@ -258,26 +258,3 @@
   {/if}
 </div>
 
-<style>
-  .btn {
-    @apply inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg transition-colors;
-  }
-  .btn-sm {
-    @apply px-3 py-1.5 text-xs;
-  }
-  .btn-primary {
-    @apply bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50;
-  }
-  .btn-secondary {
-    @apply bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50;
-  }
-  .btn-success {
-    @apply bg-green-600 text-white hover:bg-green-700 disabled:opacity-50;
-  }
-  .btn-warning {
-    @apply bg-yellow-500 text-white hover:bg-yellow-600 disabled:opacity-50;
-  }
-  .card {
-    @apply bg-white rounded-lg shadow p-4;
-  }
-</style>
