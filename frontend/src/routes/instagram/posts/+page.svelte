@@ -73,6 +73,20 @@
 	// 상세보기 (FeedCard detailMode)
 	let selectedPost: InstagramPost | null = null;
 
+	// 모바일 필터 표시 상태
+	let showFilters = false;
+
+	// 활성 필터 카운트 계산
+	$: activeFilterCount = [
+		filterAccount,
+		filterIsAd !== null,
+		filterTags.length > 0,
+		filterDateFrom,
+		filterDateTo,
+		filterLlmTag,
+		filterLlmStatus
+	].filter(Boolean).length;
+
 	// localStorage 키
 	const STORAGE_KEY_VIEW_MODE = 'instagram_posts_view_mode';
 	const STORAGE_KEY_DEFAULT_TAGS = 'instagram_posts_default_tags';
@@ -357,11 +371,12 @@
 	});
 </script>
 
-<div class="p-6">
+<div class="p-4 md:p-6">
 	<!-- 헤더 -->
-	<div class="mb-4 flex flex-wrap justify-between items-center gap-4">
-		<div class="flex items-center gap-3">
-			<h2 class="text-2xl font-bold text-gray-900">게시물</h2>
+	<div class="mb-4 md:mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+		<!-- 제목 + URL 수집 버튼 -->
+		<div class="flex items-center justify-between sm:justify-start gap-3">
+			<h2 class="text-xl md:text-2xl font-bold text-gray-900">게시물</h2>
 			<button
 				onclick={openUrlCrawlModal}
 				class="btn btn-primary btn-sm"
@@ -370,53 +385,75 @@
 				+ URL 수집
 			</button>
 		</div>
-		<div class="flex flex-wrap gap-2 items-center">
-			<!-- 뷰 모드 토글 -->
-			<div class="flex border border-gray-300 rounded-lg overflow-hidden">
-				<button
-					onclick={() => setViewMode('grid')}
-					class="px-3 py-1.5 text-sm transition-colors {viewMode === 'grid'
-						? 'bg-blue-600 text-white'
-						: 'bg-white text-gray-600 hover:bg-gray-100'}"
-					title="그리드 뷰"
-				>
-					<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-						<path
-							d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"
-						/>
-					</svg>
-				</button>
-				<button
-					onclick={() => setViewMode('list')}
-					class="px-3 py-1.5 text-sm transition-colors {viewMode === 'list'
-						? 'bg-blue-600 text-white'
-						: 'bg-white text-gray-600 hover:bg-gray-100'}"
-					title="리스트 뷰"
-				>
-					<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-						<path
-							fill-rule="evenodd"
-							d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"
-							clip-rule="evenodd"
-						/>
-					</svg>
-				</button>
-			</div>
-			<input
-				type="text"
-				placeholder="계정명 필터"
-				bind:value={filterAccount}
-				class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-			/>
-			<select
-				bind:value={filterIsAd}
-				class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+
+		<!-- 뷰 모드 토글 + 필터 토글 -->
+		<div class="flex items-center gap-2">
+			<!-- 모바일 필터 토글 버튼 -->
+			<button
+				onclick={() => showFilters = !showFilters}
+				class="md:hidden btn btn-secondary btn-sm flex items-center gap-1"
 			>
-				<option value={null}>전체</option>
-				<option value={true}>광고만</option>
-				<option value={false}>일반만</option>
-			</select>
-			<button onclick={handleFilter} class="btn btn-primary btn-sm">필터 적용</button>
+				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+				</svg>
+				필터
+				{#if activeFilterCount > 0}
+					<span class="px-1.5 py-0.5 text-xs bg-blue-600 text-white rounded-full">{activeFilterCount}</span>
+				{/if}
+			</button>
+
+			<!-- 뷰 모드 토글 (전체 탭에서만) -->
+			{#if activeTab === 'all'}
+				<div class="flex border border-gray-300 rounded-lg overflow-hidden">
+					<button
+						onclick={() => setViewMode('grid')}
+						class="px-3 py-1.5 text-sm transition-colors {viewMode === 'grid'
+							? 'bg-blue-600 text-white'
+							: 'bg-white text-gray-600 hover:bg-gray-100'}"
+						title="그리드 뷰"
+					>
+						<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+							<path
+								d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"
+							/>
+						</svg>
+					</button>
+					<button
+						onclick={() => setViewMode('list')}
+						class="px-3 py-1.5 text-sm transition-colors {viewMode === 'list'
+							? 'bg-blue-600 text-white'
+							: 'bg-white text-gray-600 hover:bg-gray-100'}"
+						title="리스트 뷰"
+					>
+						<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+							<path
+								fill-rule="evenodd"
+								d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"
+								clip-rule="evenodd"
+							/>
+						</svg>
+					</button>
+				</div>
+			{/if}
+
+			<!-- 데스크톱용 기본 필터 (인라인) -->
+			<div class="hidden md:flex items-center gap-2">
+				<input
+					type="text"
+					placeholder="계정명 필터"
+					bind:value={filterAccount}
+					class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm w-32"
+				/>
+				<select
+					bind:value={filterIsAd}
+					class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+				>
+					<option value={null}>전체</option>
+					<option value={true}>광고만</option>
+					<option value={false}>일반만</option>
+				</select>
+				<button onclick={handleFilter} class="btn btn-primary btn-sm">필터 적용</button>
+			</div>
 		</div>
 	</div>
 
@@ -433,134 +470,251 @@
 				onclick={() => switchTab('events')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'events' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
 			>
-				🎁 이벤트
+				이벤트
 			</button>
 			<button
 				onclick={() => switchTab('popup')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'popup' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
 			>
-				🏪 팝업
+				팝업
 			</button>
 		</nav>
 	</div>
 
-	<!-- 날짜 필터 (전체 탭에서만) -->
-	{#if activeTab === 'all'}
-	<div class="mb-4 flex flex-wrap gap-2 items-center">
-		<span class="text-sm text-gray-500">날짜 필터:</span>
-		<select
-			bind:value={filterDateType}
-			class="px-2 py-1 border border-gray-300 rounded text-sm"
-		>
-			<option value="collected">수집일</option>
-			<option value="posted">업로드일</option>
-		</select>
-		<input
-			type="date"
-			bind:value={filterDateFrom}
-			class="px-2 py-1 border border-gray-300 rounded text-sm"
-		/>
-		<span class="text-gray-400">~</span>
-		<input
-			type="date"
-			bind:value={filterDateTo}
-			class="px-2 py-1 border border-gray-300 rounded text-sm"
-		/>
-		{#if filterDateFrom || filterDateTo}
-			<button
-				onclick={() => {
-					filterDateFrom = '';
-					filterDateTo = '';
-					handleFilter();
-				}}
-				class="text-sm text-gray-500 hover:text-gray-700 underline"
-			>
-				날짜 초기화
-			</button>
-		{/if}
+	<!-- 모바일 필터 패널 (접이식) -->
+	<div
+		class="md:hidden mb-4 bg-white rounded-lg border border-gray-200 overflow-hidden transition-all duration-300"
+		class:hidden={!showFilters}
+	>
+		<div class="p-4 space-y-4">
+			<!-- 계정/광고 필터 -->
+			<div class="flex flex-col gap-2">
+				<label class="text-sm font-medium text-gray-700">기본 필터</label>
+				<input
+					type="text"
+					placeholder="계정명 필터"
+					bind:value={filterAccount}
+					class="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+				/>
+				<select
+					bind:value={filterIsAd}
+					class="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+				>
+					<option value={null}>전체</option>
+					<option value={true}>광고만</option>
+					<option value={false}>일반만</option>
+				</select>
+			</div>
+
+			<!-- 날짜 필터 -->
+			<div class="flex flex-col gap-2">
+				<label class="text-sm font-medium text-gray-700">날짜 필터</label>
+				<select
+					bind:value={filterDateType}
+					class="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+				>
+					<option value="collected">수집일</option>
+					<option value="posted">업로드일</option>
+				</select>
+				<div class="flex items-center gap-2">
+					<input
+						type="date"
+						bind:value={filterDateFrom}
+						class="flex-1 px-2 py-2 border border-gray-300 rounded-lg text-sm"
+					/>
+					<span class="text-gray-400">~</span>
+					<input
+						type="date"
+						bind:value={filterDateTo}
+						class="flex-1 px-2 py-2 border border-gray-300 rounded-lg text-sm"
+					/>
+				</div>
+			</div>
+
+			<!-- 태그 필터 -->
+			{#if availableTags.length > 0}
+				<div class="flex flex-col gap-2">
+					<label class="text-sm font-medium text-gray-700">태그 필터</label>
+					<div class="flex flex-wrap gap-2">
+						{#each availableTags as tag (tag.id)}
+							<button
+								onclick={() => {
+									toggleTagFilter(tag.name);
+								}}
+								class="px-3 py-1.5 text-sm rounded-full transition-colors"
+								style="background-color: {filterTags.includes(tag.name)
+									? tag.color
+									: '#f3f4f6'}; color: {filterTags.includes(tag.name) ? 'white' : '#374151'};"
+							>
+								{tag.display_name}
+								{#if filterTags.includes(tag.name)}
+									<span class="ml-1">✓</span>
+								{/if}
+							</button>
+						{/each}
+					</div>
+				</div>
+			{/if}
+
+			<!-- AI 분류 필터 -->
+			<div class="flex flex-col gap-2">
+				<label class="text-sm font-medium text-gray-700">AI 분류</label>
+				<div class="flex flex-wrap gap-2">
+					{#each llmTagOptions as opt}
+						<button
+							onclick={() => {
+								filterLlmTag = filterLlmTag === opt.value ? null : opt.value;
+							}}
+							class="px-3 py-1.5 text-sm rounded-full transition-colors {filterLlmTag === opt.value ? opt.color + ' ring-2 ring-offset-1 ring-purple-400' : 'bg-gray-100 text-gray-600'}"
+						>
+							{opt.label}
+						</button>
+					{/each}
+				</div>
+				<div class="flex flex-wrap gap-2">
+					{#each llmStatusOptions as opt}
+						<button
+							onclick={() => {
+								filterLlmStatus = filterLlmStatus === opt.value ? null : opt.value;
+							}}
+							class="px-2 py-1 text-xs rounded-full transition-colors {filterLlmStatus === opt.value ? opt.color + ' ring-2 ring-offset-1 ring-gray-400' : 'bg-gray-100 text-gray-600'}"
+						>
+							{opt.label}
+						</button>
+					{/each}
+				</div>
+			</div>
+
+			<!-- 필터 액션 버튼 -->
+			<div class="flex gap-2 pt-2 border-t border-gray-100">
+				<button onclick={handleFilter} class="flex-1 btn btn-primary btn-sm">
+					필터 적용
+				</button>
+				<button onclick={clearFilters} class="btn btn-secondary btn-sm">
+					초기화
+				</button>
+			</div>
+		</div>
 	</div>
 
-	<!-- 태그 필터 -->
-	{#if availableTags.length > 0}
-		<div class="mb-4 flex flex-wrap gap-2 items-center">
-			<span class="text-sm text-gray-500">태그 필터:</span>
-			{#each availableTags as tag (tag.id)}
+	<!-- 데스크톱 필터 영역 (전체 탭에서만) -->
+	{#if activeTab === 'all'}
+		<!-- 날짜 필터 -->
+		<div class="hidden md:flex mb-4 flex-wrap gap-2 items-center">
+			<span class="text-sm text-gray-500">날짜 필터:</span>
+			<select
+				bind:value={filterDateType}
+				class="px-2 py-1 border border-gray-300 rounded text-sm"
+			>
+				<option value="collected">수집일</option>
+				<option value="posted">업로드일</option>
+			</select>
+			<input
+				type="date"
+				bind:value={filterDateFrom}
+				class="px-2 py-1 border border-gray-300 rounded text-sm"
+			/>
+			<span class="text-gray-400">~</span>
+			<input
+				type="date"
+				bind:value={filterDateTo}
+				class="px-2 py-1 border border-gray-300 rounded text-sm"
+			/>
+			{#if filterDateFrom || filterDateTo}
 				<button
 					onclick={() => {
-						toggleTagFilter(tag.name);
-						handleFilter();
-					}}
-					class="px-3 py-1 text-sm rounded-full transition-colors"
-					style="background-color: {filterTags.includes(tag.name)
-						? tag.color
-						: '#f3f4f6'}; color: {filterTags.includes(tag.name) ? 'white' : '#374151'};"
-				>
-					{tag.display_name}
-					{#if filterTags.includes(tag.name)}
-						<span class="ml-1">✓</span>
-					{/if}
-				</button>
-			{/each}
-			{#if filterTags.length > 0}
-				<button
-					onclick={() => {
-						filterTags = [];
+						filterDateFrom = '';
+						filterDateTo = '';
 						handleFilter();
 					}}
 					class="text-sm text-gray-500 hover:text-gray-700 underline"
 				>
-					초기화
-				</button>
-				<button onclick={saveDefaultTags} class="text-sm text-blue-600 hover:text-blue-800 underline">
-					기본값 저장
+					날짜 초기화
 				</button>
 			{/if}
 		</div>
-	{/if}
 
-	<!-- LLM 분류 필터 -->
-	<div class="mb-4 flex flex-wrap gap-2 items-center">
-		<span class="text-sm text-gray-500">AI 분류:</span>
-		{#each llmTagOptions as opt}
-			<button
-				onclick={() => {
-					filterLlmTag = filterLlmTag === opt.value ? null : opt.value;
-					handleFilter();
-				}}
-				class="px-3 py-1 text-sm rounded-full transition-colors {filterLlmTag === opt.value ? opt.color + ' ring-2 ring-offset-1 ring-purple-400' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
-			>
-				{opt.label}
-				{#if filterLlmTag === opt.value}
-					<span class="ml-1">✓</span>
+		<!-- 태그 필터 -->
+		{#if availableTags.length > 0}
+			<div class="hidden md:flex mb-4 flex-wrap gap-2 items-center">
+				<span class="text-sm text-gray-500">태그 필터:</span>
+				{#each availableTags as tag (tag.id)}
+					<button
+						onclick={() => {
+							toggleTagFilter(tag.name);
+							handleFilter();
+						}}
+						class="px-3 py-1 text-sm rounded-full transition-colors"
+						style="background-color: {filterTags.includes(tag.name)
+							? tag.color
+							: '#f3f4f6'}; color: {filterTags.includes(tag.name) ? 'white' : '#374151'};"
+					>
+						{tag.display_name}
+						{#if filterTags.includes(tag.name)}
+							<span class="ml-1">✓</span>
+						{/if}
+					</button>
+				{/each}
+				{#if filterTags.length > 0}
+					<button
+						onclick={() => {
+							filterTags = [];
+							handleFilter();
+						}}
+						class="text-sm text-gray-500 hover:text-gray-700 underline"
+					>
+						초기화
+					</button>
+					<button onclick={saveDefaultTags} class="text-sm text-blue-600 hover:text-blue-800 underline">
+						기본값 저장
+					</button>
 				{/if}
-			</button>
-		{/each}
-		<span class="text-gray-300 mx-1">|</span>
-		<span class="text-sm text-gray-500">상태:</span>
-		{#each llmStatusOptions as opt}
-			<button
-				onclick={() => {
-					filterLlmStatus = filterLlmStatus === opt.value ? null : opt.value;
-					handleFilter();
-				}}
-				class="px-2 py-1 text-xs rounded-full transition-colors {filterLlmStatus === opt.value ? opt.color + ' ring-2 ring-offset-1 ring-gray-400' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
-			>
-				{opt.label}
-			</button>
-		{/each}
-		{#if filterLlmTag || filterLlmStatus}
-			<button
-				onclick={() => {
-					filterLlmTag = null;
-					filterLlmStatus = null;
-					handleFilter();
-				}}
-				class="text-sm text-gray-500 hover:text-gray-700 underline"
-			>
-				AI 필터 초기화
-			</button>
+			</div>
 		{/if}
-	</div>
+
+		<!-- LLM 분류 필터 -->
+		<div class="hidden md:flex mb-4 flex-wrap gap-2 items-center">
+			<span class="text-sm text-gray-500">AI 분류:</span>
+			{#each llmTagOptions as opt}
+				<button
+					onclick={() => {
+						filterLlmTag = filterLlmTag === opt.value ? null : opt.value;
+						handleFilter();
+					}}
+					class="px-3 py-1 text-sm rounded-full transition-colors {filterLlmTag === opt.value ? opt.color + ' ring-2 ring-offset-1 ring-purple-400' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+				>
+					{opt.label}
+					{#if filterLlmTag === opt.value}
+						<span class="ml-1">✓</span>
+					{/if}
+				</button>
+			{/each}
+			<span class="text-gray-300 mx-1">|</span>
+			<span class="text-sm text-gray-500">상태:</span>
+			{#each llmStatusOptions as opt}
+				<button
+					onclick={() => {
+						filterLlmStatus = filterLlmStatus === opt.value ? null : opt.value;
+						handleFilter();
+					}}
+					class="px-2 py-1 text-xs rounded-full transition-colors {filterLlmStatus === opt.value ? opt.color + ' ring-2 ring-offset-1 ring-gray-400' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+				>
+					{opt.label}
+				</button>
+			{/each}
+			{#if filterLlmTag || filterLlmStatus}
+				<button
+					onclick={() => {
+						filterLlmTag = null;
+						filterLlmStatus = null;
+						handleFilter();
+					}}
+					class="text-sm text-gray-500 hover:text-gray-700 underline"
+				>
+					AI 필터 초기화
+				</button>
+			{/if}
+		</div>
 	{/if}
 
 	{#if loading}
@@ -720,8 +874,9 @@
 			</div>
 		<!-- 전체 탭: 기존 리스트/그리드 뷰 -->
 		{:else if viewMode === 'list'}
-			<div class="bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
-				<table class="w-full">
+			<!-- 리스트 뷰 (데스크톱) -->
+			<div class="hidden md:block bg-white rounded-lg border border-gray-200 overflow-x-auto mb-6">
+				<table class="w-full min-w-[700px]">
 					<thead class="bg-gray-50 border-b border-gray-200">
 						<tr>
 							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">이미지</th>
@@ -823,9 +978,68 @@
 					</tbody>
 				</table>
 			</div>
+			<!-- 리스트 뷰 (모바일용 카드 리스트) -->
+			<div class="md:hidden space-y-3 mb-6">
+				{#each posts as post (post.id)}
+					<div
+						class="bg-white rounded-lg border border-gray-200 p-3 flex gap-3 cursor-pointer hover:shadow-md transition-shadow"
+						onclick={() => openDetail(post)}
+						onkeydown={(e) => e.key === 'Enter' && openDetail(post)}
+						role="button"
+						tabindex="0"
+					>
+						<!-- 썸네일 -->
+						<div class="w-16 h-16 flex-shrink-0">
+							{#if post.images && post.images.length > 0}
+								<img
+									src={post.images[0].src}
+									alt={post.images[0].alt || '게시물 이미지'}
+									class="w-full h-full object-cover rounded"
+									loading="lazy"
+								/>
+							{:else}
+								<div class="w-full h-full bg-gray-200 rounded flex items-center justify-center">
+									<span class="text-gray-400">?</span>
+								</div>
+							{/if}
+						</div>
+						<!-- 정보 -->
+						<div class="flex-1 min-w-0">
+							<div class="flex items-center gap-2 mb-1">
+								<span class="font-medium text-sm text-gray-900">@{post.account}</span>
+								{#if post.is_ad}
+									<span class="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded">광고</span>
+								{/if}
+							</div>
+							<p class="text-xs text-gray-600 truncate">{truncate(post.caption, 40)}</p>
+							<div class="flex items-center gap-1 mt-1 flex-wrap">
+								{#if post.tags && post.tags.length > 0}
+									{#each post.tags.slice(0, 2) as tag}
+										<span
+											class="px-1.5 py-0.5 text-xs rounded-full text-white"
+											style="background-color: {tag.color};"
+										>
+											{tag.display_name}
+										</span>
+									{/each}
+									{#if post.tags.length > 2}
+										<span class="text-xs text-gray-400">+{post.tags.length - 2}</span>
+									{/if}
+								{/if}
+								{#if post.llm_status === 'completed' && post.llm_tag}
+									<span class="px-1.5 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700">
+										{post.llm_tag}
+									</span>
+								{/if}
+								<span class="text-xs text-gray-400 ml-auto">{formatDate(post.collected_at)}</span>
+							</div>
+						</div>
+					</div>
+				{/each}
+			</div>
 		{:else}
 			<!-- 그리드 뷰 -->
-			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-6">
+			<div class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4 mb-6">
 				{#each posts as post (post.id)}
 					<div
 						class="card cursor-pointer hover:shadow-lg transition-shadow"
@@ -836,7 +1050,7 @@
 					>
 						<!-- 이미지 -->
 						{#if post.images && post.images.length > 0}
-							<div class="aspect-square bg-gray-100 rounded-lg mb-3 overflow-hidden">
+							<div class="aspect-square bg-gray-100 rounded-lg mb-2 md:mb-3 overflow-hidden">
 								<img
 									src={post.images[0].src}
 									alt={post.images[0].alt || '게시물 이미지'}
@@ -846,18 +1060,18 @@
 							</div>
 						{:else}
 							<div
-								class="aspect-square bg-gray-200 rounded-lg mb-3 flex items-center justify-center"
+								class="aspect-square bg-gray-200 rounded-lg mb-2 md:mb-3 flex items-center justify-center"
 							>
-								<span class="text-gray-400 text-4xl">?</span>
+								<span class="text-gray-400 text-2xl md:text-4xl">?</span>
 							</div>
 						{/if}
 
 						<!-- 정보 -->
 						<div class="space-y-1">
 							<div class="flex items-center justify-between">
-								<span class="font-medium text-sm text-gray-900">@{post.account}</span>
+								<span class="font-medium text-xs md:text-sm text-gray-900 truncate">@{post.account}</span>
 								{#if post.is_ad}
-									<span class="px-2 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded-full"
+									<span class="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded-full flex-shrink-0"
 										>광고</span
 									>
 								{/if}
@@ -866,7 +1080,7 @@
 							{#if post.tags?.length || post.llm_status}
 								<div class="flex flex-wrap gap-1">
 									{#if post.tags && post.tags.length > 0}
-										{#each post.tags as tag}
+										{#each post.tags.slice(0, 2) as tag}
 											<span
 												class="px-1.5 py-0.5 text-xs rounded-full text-white"
 												style="background-color: {tag.color};"
@@ -874,6 +1088,9 @@
 												{tag.display_name}
 											</span>
 										{/each}
+										{#if post.tags.length > 2}
+											<span class="text-xs text-gray-400">+{post.tags.length - 2}</span>
+										{/if}
 									{/if}
 									{#if post.llm_status === 'completed' && post.llm_tag}
 										<span class="px-1.5 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700" title="AI 분류">
@@ -886,7 +1103,7 @@
 									{/if}
 								</div>
 							{/if}
-							<p class="text-xs text-gray-500">{truncate(post.caption, 50)}</p>
+							<p class="text-xs text-gray-500 line-clamp-2 hidden md:block">{truncate(post.caption, 50)}</p>
 							<p class="text-xs text-gray-400">
 								{post.display_time || formatDateTime(post.collected_at)}
 							</p>
@@ -897,7 +1114,7 @@
 		{/if}
 
 		<!-- 페이지네이션 -->
-		<div class="flex justify-between items-center">
+		<div class="flex flex-col sm:flex-row justify-between items-center gap-3">
 			<span class="text-sm text-gray-500">
 				전체 {total}개 중 {(page - 1) * limit + 1} - {Math.min(page * limit, total)}
 			</span>
@@ -926,14 +1143,20 @@
 
 <!-- 상세보기 (FeedCard detailMode) -->
 {#if selectedPost}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
-		class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+		class="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center sm:p-4"
 		onclick={closeDetail}
 		onkeydown={(e) => e.key === 'Escape' && closeDetail()}
 		role="dialog"
 		tabindex="-1"
 	>
-		<div class="max-w-lg w-full max-h-[90vh] overflow-auto" onclick={(e) => e.stopPropagation()}>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<div
+			class="w-full sm:max-w-lg max-h-[95vh] sm:max-h-[90vh] overflow-auto rounded-t-xl sm:rounded-xl"
+			onclick={(e) => e.stopPropagation()}
+		>
 			<FeedCard
 				post={selectedPost}
 				detailMode={true}
@@ -950,15 +1173,18 @@
 
 <!-- URL 수집 모달 -->
 {#if showUrlCrawlModal}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
-		class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+		class="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center sm:p-4"
 		onclick={closeUrlCrawlModal}
 		onkeydown={(e) => e.key === 'Escape' && closeUrlCrawlModal()}
 		role="dialog"
 		tabindex="-1"
 	>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<div
-			class="bg-white rounded-xl max-w-lg w-full"
+			class="bg-white rounded-t-xl sm:rounded-xl w-full sm:max-w-lg"
 			onclick={(e) => e.stopPropagation()}
 		>
 			<div class="p-6">

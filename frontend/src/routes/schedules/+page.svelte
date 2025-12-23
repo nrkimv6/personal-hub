@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { scheduleApi, businessApi, accountApi, itemApi, scheduleRecurringApi } from '$lib/api';
   import type { ScheduleWithContext, Business, BusinessWithItems, BizItem, Account, MonitorScheduleUpdate, MonitorScheduleCreate, RecurringRuleWithContext, RecurringRuleCreate, TargetPattern } from '$lib/types';
+  import AutoBookingList from '$lib/components/schedules/AutoBookingList.svelte';
 
   let schedules: ScheduleWithContext[] = [];
   let businesses: Business[] = [];
@@ -62,7 +63,18 @@
   }
 
   // 탭 상태
-  let activeTab: 'schedules' | 'recurring' = 'schedules';
+  let activeTab: 'schedules' | 'booking' | 'recurring' = 'schedules';
+
+  // URL 쿼리 파라미터로 탭 제어
+  import { page } from '$app/stores';
+
+  // URL 파라미터에서 탭 초기화
+  $: {
+    const tab = $page.url.searchParams.get('tab');
+    if (tab === 'booking' || tab === 'recurring') {
+      activeTab = tab;
+    }
+  }
 
   // 반복 규칙 관련 상태
   let recurringRules: RecurringRuleWithContext[] = [];
@@ -829,8 +841,11 @@
 
 <div class="p-6">
   <div class="mb-6 flex justify-between items-center">
-    <h2 class="text-2xl font-bold text-gray-900">일정 관리</h2>
+    <h2 class="text-2xl font-bold text-gray-900">모니터링 관리</h2>
     <div class="flex gap-2">
+      <a href="/businesses" class="btn btn-secondary btn-sm">
+        업체/상품 관리
+      </a>
       {#if activeTab === 'schedules'}
         <button class="btn btn-primary btn-sm" on:click={openCreateModal}>
           일정 등록
@@ -838,7 +853,7 @@
         <button class="btn btn-secondary btn-sm" on:click={fetchSchedules}>
           새로고침
         </button>
-      {:else}
+      {:else if activeTab === 'recurring'}
         <button class="btn btn-secondary btn-sm" on:click={fetchRecurringRules}>
           새로고침
         </button>
@@ -856,8 +871,14 @@
         class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'schedules' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}"
         on:click={() => activeTab = 'schedules'}
       >
-        일정 목록
+        전체 일정
         <span class="ml-2 px-2 py-0.5 text-xs rounded-full {activeTab === 'schedules' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'}">{schedules.length}</span>
+      </button>
+      <button
+        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'booking' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}"
+        on:click={() => activeTab = 'booking'}
+      >
+        자동 예약
       </button>
       <button
         class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'recurring' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}"
@@ -1155,6 +1176,11 @@
       </div>
     </div>
   {/if}
+  {/if}
+
+  <!-- 자동 예약 탭 -->
+  {#if activeTab === 'booking'}
+    <AutoBookingList />
   {/if}
 
   <!-- 반복 규칙 탭 -->
