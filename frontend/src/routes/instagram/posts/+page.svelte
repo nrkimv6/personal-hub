@@ -634,32 +634,7 @@
 				</div>
 			</div>
 
-			<!-- 태그 필터 -->
-			{#if availableTags.length > 0}
-				<div class="flex flex-col gap-2">
-					<label class="text-sm font-medium text-gray-700">태그 필터</label>
-					<div class="flex flex-wrap gap-2">
-						{#each availableTags as tag (tag.id)}
-							<button
-								onclick={() => {
-									toggleTagFilter(tag.name);
-								}}
-								class="px-3 py-1.5 text-sm rounded-full transition-colors"
-								style="background-color: {filterTags.includes(tag.name)
-									? tag.color
-									: '#f3f4f6'}; color: {filterTags.includes(tag.name) ? 'white' : '#374151'};"
-							>
-								{tag.display_name}
-								{#if filterTags.includes(tag.name)}
-									<span class="ml-1">✓</span>
-								{/if}
-							</button>
-						{/each}
-					</div>
-				</div>
-			{/if}
-
-			<!-- AI 분류 필터 -->
+				<!-- AI 분류 필터 -->
 			<div class="flex flex-col gap-2">
 				<label class="text-sm font-medium text-gray-700">AI 분류</label>
 				<div class="flex flex-wrap gap-2">
@@ -736,44 +711,6 @@
 				</button>
 			{/if}
 		</div>
-
-		<!-- 태그 필터 -->
-		{#if availableTags.length > 0}
-			<div class="hidden md:flex mb-4 flex-wrap gap-2 items-center">
-				<span class="text-sm text-gray-500">태그 필터:</span>
-				{#each availableTags as tag (tag.id)}
-					<button
-						onclick={() => {
-							toggleTagFilter(tag.name);
-							handleFilter();
-						}}
-						class="px-3 py-1 text-sm rounded-full transition-colors"
-						style="background-color: {filterTags.includes(tag.name)
-							? tag.color
-							: '#f3f4f6'}; color: {filterTags.includes(tag.name) ? 'white' : '#374151'};"
-					>
-						{tag.display_name}
-						{#if filterTags.includes(tag.name)}
-							<span class="ml-1">✓</span>
-						{/if}
-					</button>
-				{/each}
-				{#if filterTags.length > 0}
-					<button
-						onclick={() => {
-							filterTags = [];
-							handleFilter();
-						}}
-						class="text-sm text-gray-500 hover:text-gray-700 underline"
-					>
-						초기화
-					</button>
-					<button onclick={saveDefaultTags} class="text-sm text-blue-600 hover:text-blue-800 underline">
-						기본값 저장
-					</button>
-				{/if}
-			</div>
-		{/if}
 
 		<!-- LLM 분류 필터 -->
 		<div class="hidden md:flex mb-4 flex-wrap gap-2 items-center">
@@ -1043,7 +980,7 @@
 							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">이미지</th>
 							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">계정</th>
 							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">내용</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">태그</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">AI 분류</th>
 							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">업로드일</th>
 							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">수집일</th>
 							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">액션</th>
@@ -1084,16 +1021,6 @@
 								</td>
 								<td class="px-4 py-3">
 									<div class="flex flex-wrap gap-1">
-										{#if post.tags && post.tags.length > 0}
-											{#each post.tags as tag}
-												<span
-													class="px-1.5 py-0.5 text-xs rounded-full text-white"
-													style="background-color: {tag.color};"
-												>
-													{tag.display_name}
-												</span>
-											{/each}
-										{/if}
 										{#if post.llm_status === 'completed' && post.llm_tag}
 											<span class="px-1.5 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700" title="AI 분류">
 												{post.llm_tag}
@@ -1102,8 +1029,7 @@
 											<span class="px-1.5 py-0.5 text-xs rounded-full bg-gray-100 text-gray-500 animate-pulse" title="AI 분석 중">
 												AI
 											</span>
-										{/if}
-										{#if !post.tags?.length && !post.llm_status}
+										{:else}
 											<span class="text-gray-400 text-sm">-</span>
 										{/if}
 									</div>
@@ -1174,22 +1100,13 @@
 							</div>
 							<p class="text-xs text-gray-600 truncate">{truncate(post.caption, 40)}</p>
 							<div class="flex items-center gap-1 mt-1 flex-wrap">
-								{#if post.tags && post.tags.length > 0}
-									{#each post.tags.slice(0, 2) as tag}
-										<span
-											class="px-1.5 py-0.5 text-xs rounded-full text-white"
-											style="background-color: {tag.color};"
-										>
-											{tag.display_name}
-										</span>
-									{/each}
-									{#if post.tags.length > 2}
-										<span class="text-xs text-gray-400">+{post.tags.length - 2}</span>
-									{/if}
-								{/if}
 								{#if post.llm_status === 'completed' && post.llm_tag}
 									<span class="px-1.5 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700">
 										{post.llm_tag}
+									</span>
+								{:else if post.llm_status === 'pending' || post.llm_status === 'processing'}
+									<span class="px-1.5 py-0.5 text-xs rounded-full bg-gray-100 text-gray-500 animate-pulse">
+										AI
 									</span>
 								{/if}
 								<span class="text-xs text-gray-400 ml-auto">{formatDate(post.collected_at)}</span>
@@ -1237,22 +1154,9 @@
 									>
 								{/if}
 							</div>
-							<!-- 태그 표시 -->
-							{#if post.tags?.length || post.llm_status}
+							<!-- AI 분류 표시 -->
+							{#if post.llm_status}
 								<div class="flex flex-wrap gap-1">
-									{#if post.tags && post.tags.length > 0}
-										{#each post.tags.slice(0, 2) as tag}
-											<span
-												class="px-1.5 py-0.5 text-xs rounded-full text-white"
-												style="background-color: {tag.color};"
-											>
-												{tag.display_name}
-											</span>
-										{/each}
-										{#if post.tags.length > 2}
-											<span class="text-xs text-gray-400">+{post.tags.length - 2}</span>
-										{/if}
-									{/if}
 									{#if post.llm_status === 'completed' && post.llm_tag}
 										<span class="px-1.5 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700" title="AI 분류">
 											{post.llm_tag}

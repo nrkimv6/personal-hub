@@ -247,18 +247,8 @@
 						<span class="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded">광고</span>
 					{/if}
 				</div>
-				{#if post.tags?.length || post.llm_status}
+				{#if post.llm_status}
 					<div class="flex flex-wrap gap-1 mt-0.5">
-						{#if post.tags && post.tags.length > 0}
-							{#each post.tags as tag}
-								<span
-									class="px-1.5 py-0.5 text-xs rounded-full text-white"
-									style="background-color: {tag.color};"
-								>
-									{tag.display_name}
-								</span>
-							{/each}
-						{/if}
 						{#if post.llm_status === 'completed' && post.llm_tag}
 							<span
 								class="px-1.5 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700"
@@ -429,66 +419,70 @@
 				</div>
 			{/if}
 
-			<!-- 상세 모드: 태그 편집 -->
+			<!-- 상세 모드: 내부 태그 (AI 분석 트리거용, 접히는 섹션) -->
 			{#if detailMode && availableTags.length > 0}
-				<div class="py-3 border-t border-gray-100">
-					<div class="flex items-center gap-2 mb-2">
-						<span class="text-sm text-gray-500">태그:</span>
-						{#if !editingTags}
-							<button
-								onclick={startEditTags}
-								class="text-xs text-blue-600 hover:text-blue-800 underline"
-							>
-								편집
-							</button>
+				<details class="py-3 border-t border-gray-100">
+					<summary class="cursor-pointer text-xs text-gray-400 hover:text-gray-600">
+						내부 태그 (AI 분석 트리거용)
+					</summary>
+					<div class="mt-2">
+						<div class="flex items-center gap-2 mb-2">
+							{#if !editingTags}
+								<button
+									onclick={startEditTags}
+									class="text-xs text-blue-600 hover:text-blue-800 underline"
+								>
+									편집
+								</button>
+							{/if}
+						</div>
+						{#if editingTags}
+							<!-- 편집 모드 -->
+							<div class="flex flex-wrap gap-2 mb-2">
+								{#each availableTags as tag (tag.id)}
+									<button
+										onclick={() => toggleEditTag(tag.id)}
+										class="px-2 py-1 text-xs rounded-full transition-colors border"
+										style="background-color: {editTagIds.includes(tag.id)
+											? tag.color
+											: 'white'}; color: {editTagIds.includes(tag.id)
+											? 'white'
+											: tag.color}; border-color: {tag.color};"
+									>
+										{tag.display_name}
+										{#if editTagIds.includes(tag.id)}
+											<span class="ml-1">✓</span>
+										{/if}
+									</button>
+								{/each}
+							</div>
+							<div class="flex gap-2">
+								<button
+									onclick={saveTags}
+									disabled={savingTags}
+									class="btn btn-primary btn-sm disabled:opacity-50"
+								>
+									{savingTags ? '저장 중...' : '저장'}
+								</button>
+								<button onclick={cancelEditTags} class="btn btn-secondary btn-sm"> 취소 </button>
+							</div>
+						{:else}
+							<!-- 보기 모드 -->
+							{#if post.tags && post.tags.length > 0}
+								{#each post.tags as tag}
+									<span
+										class="inline-block px-2 py-0.5 text-xs rounded-full text-white mr-1"
+										style="background-color: {tag.color};"
+									>
+										{tag.display_name}
+									</span>
+								{/each}
+							{:else}
+								<span class="text-gray-400 text-sm">태그 없음</span>
+							{/if}
 						{/if}
 					</div>
-					{#if editingTags}
-						<!-- 편집 모드 -->
-						<div class="flex flex-wrap gap-2 mb-2">
-							{#each availableTags as tag (tag.id)}
-								<button
-									onclick={() => toggleEditTag(tag.id)}
-									class="px-2 py-1 text-xs rounded-full transition-colors border"
-									style="background-color: {editTagIds.includes(tag.id)
-										? tag.color
-										: 'white'}; color: {editTagIds.includes(tag.id)
-										? 'white'
-										: tag.color}; border-color: {tag.color};"
-								>
-									{tag.display_name}
-									{#if editTagIds.includes(tag.id)}
-										<span class="ml-1">✓</span>
-									{/if}
-								</button>
-							{/each}
-						</div>
-						<div class="flex gap-2">
-							<button
-								onclick={saveTags}
-								disabled={savingTags}
-								class="btn btn-primary btn-sm disabled:opacity-50"
-							>
-								{savingTags ? '저장 중...' : '저장'}
-							</button>
-							<button onclick={cancelEditTags} class="btn btn-secondary btn-sm"> 취소 </button>
-						</div>
-					{:else}
-						<!-- 보기 모드 -->
-						{#if post.tags && post.tags.length > 0}
-							{#each post.tags as tag}
-								<span
-									class="inline-block px-2 py-0.5 text-xs rounded-full text-white mr-1"
-									style="background-color: {tag.color};"
-								>
-									{tag.display_name}
-								</span>
-							{/each}
-						{:else}
-							<span class="text-gray-400 text-sm">태그 없음</span>
-						{/if}
-					{/if}
-				</div>
+				</details>
 			{/if}
 
 			<!-- 상세 모드: LLM 분류 결과 -->
