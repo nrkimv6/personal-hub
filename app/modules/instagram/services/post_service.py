@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, date
 from typing import List, Optional, Tuple
 
-from sqlalchemy import func, desc
+from sqlalchemy import func, desc, asc, or_, and_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -154,6 +154,9 @@ class PostService:
         tags: Optional[List[str]] = None,
         llm_tag: Optional[str] = None,
         llm_status: Optional[str] = None,
+        event_status: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = "asc",
         limit: int = 50,
         offset: int = 0,
     ) -> Tuple[List[InstagramPost], int]:
@@ -167,6 +170,9 @@ class PostService:
             tags: 태그 필터 (태그 이름 목록)
             llm_tag: LLM 분류 태그 필터 (이벤트/팝업/홍보대사/기타)
             llm_status: LLM 분석 상태 필터 (pending/processing/completed/failed)
+            event_status: 이벤트 진행상태 필터 (ongoing/upcoming/ended)
+            sort_by: 정렬 기준 (event_end/event_start/collected_at)
+            sort_order: 정렬 순서 (asc/desc)
             limit: 조회 개수
             offset: 시작 위치
 
@@ -204,9 +210,72 @@ class PostService:
         if llm_status:
             query = query.filter(InstagramPost.llm_status == llm_status)
 
+        # 이벤트 진행상태 필터
+        if event_status:
+            today = date.today()
+            if event_status == "ongoing":
+                # 진행 중: 시작일 <= 오늘 AND (종료일 >= 오늘 OR 종료일 없음)
+                query = query.filter(
+                    and_(
+                        or_(
+                            InstagramPost.llm_event_start <= today,
+                            InstagramPost.llm_event_start.is_(None)
+                        ),
+                        or_(
+                            InstagramPost.llm_event_end >= today,
+                            InstagramPost.llm_event_end.is_(None)
+                        )
+                    )
+                )
+            elif event_status == "upcoming":
+                # 예정: 시작일 > 오늘
+                query = query.filter(InstagramPost.llm_event_start > today)
+            elif event_status == "ended":
+                # 종료: 종료일 < 오늘
+                query = query.filter(InstagramPost.llm_event_end < today)
+            elif event_status == "ongoing_or_upcoming":
+                # 진행 중 + 예정: 종료일이 오늘 이후이거나 없음
+                query = query.filter(
+                    or_(
+                        InstagramPost.llm_event_end >= today,
+                        InstagramPost.llm_event_end.is_(None)
+                    )
+                )
+
         total = query.count()
 
-        posts = query.order_by(desc(InstagramPost.collected_at)).offset(offset).limit(limit).all()
+        # 정렬 적용
+        order_func = asc if sort_order == "asc" else desc
+        if sort_by == "event_end":
+            # NULL을 마지막으로
+            if sort_order == "asc":
+                query = query.order_by(
+                    InstagramPost.llm_event_end.is_(None),
+                    asc(InstagramPost.llm_event_end),
+                    asc(InstagramPost.llm_event_start)
+                )
+            else:
+                query = query.order_by(
+                    InstagramPost.llm_event_end.is_(None),
+                    desc(InstagramPost.llm_event_end),
+                    desc(InstagramPost.llm_event_start)
+                )
+        elif sort_by == "event_start":
+            if sort_order == "asc":
+                query = query.order_by(
+                    InstagramPost.llm_event_start.is_(None),
+                    asc(InstagramPost.llm_event_start)
+                )
+            else:
+                query = query.order_by(
+                    InstagramPost.llm_event_start.is_(None),
+                    desc(InstagramPost.llm_event_start)
+                )
+        else:
+            # 기본: 수집일 내림차순
+            query = query.order_by(desc(InstagramPost.collected_at))
+
+        posts = query.offset(offset).limit(limit).all()
 
         return posts, total
 
