@@ -235,12 +235,14 @@ class TestEventImportFromInstagramAPI:
     """POST /api/v1/events/import-from-instagram 테스트"""
 
     @pytest.fixture
-    def instagram_post(self, test_db_session):
-        """테스트용 Instagram 게시물"""
+    def instagram_post(self, test_db_session, request):
+        """테스트용 Instagram 게시물 (테스트별 고유 ID)"""
+        import uuid
+        unique_id = f"api_test_{uuid.uuid4().hex[:8]}"
         post = InstagramPost(
-            post_id="api_test_post",
+            post_id=unique_id,
             account="api_test_account",
-            url="https://instagram.com/p/apitest",
+            url=f"https://instagram.com/p/{unique_id}",
             llm_status="completed",
             llm_tag="팝업",
             llm_summary="API 테스트 팝업",

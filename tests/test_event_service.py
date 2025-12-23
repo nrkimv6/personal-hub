@@ -331,12 +331,14 @@ class TestEventServiceImportFromInstagram:
         return EventService()
 
     @pytest.fixture
-    def instagram_post(self, test_db_session):
-        """테스트용 Instagram 게시물 생성"""
+    def instagram_post(self, test_db_session, request):
+        """테스트용 Instagram 게시물 생성 (테스트별 고유 ID)"""
+        import uuid
+        unique_id = f"test_post_{uuid.uuid4().hex[:8]}"
         post = InstagramPost(
-            post_id="test_post_123",
+            post_id=unique_id,
             account="test_account",
-            url="https://instagram.com/p/test123",
+            url=f"https://instagram.com/p/{unique_id}",
             caption="테스트 게시물",
             llm_status="completed",
             llm_tag="이벤트",
