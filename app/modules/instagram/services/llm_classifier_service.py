@@ -37,6 +37,7 @@ CLASSIFICATION_PROMPT = """다음 Instagram 게시물을 분석하여 정보를 
 다음은 "이벤트"가 아니므로 tag를 "기타"로 분류하세요:
 - **협찬 게시물**: 제품/서비스를 협찬받아 작성한 후기, 광고성 게시물
 - **후기 이벤트**: 구매 후기 작성 시 추첨하는 이벤트 (예: "구매 후기 남기면 추첨")
+- **당첨자 발표 게시물**: 이벤트 결과 발표, 당첨자 명단 공개 게시물 (예: "당첨자 발표", "당첨 축하", "이벤트 결과")
 
 ## 추출할 정보
 다음 JSON 형식으로 응답해주세요:
@@ -53,7 +54,11 @@ CLASSIFICATION_PROMPT = """다음 Instagram 게시물을 분석하여 정보를 
     "announcement_date": "YYYY-MM-DD",
     "urls": ["https://...", "https://..."],
     "organizer": "주최사/브랜드명",
-    "summary": "이벤트 요약 (50자 이내)"
+    "summary": "이벤트 요약 (50자 이내)",
+    "location": {{
+        "venue_name": "장소명 (예: XXX 플래그십 스토어)",
+        "address": "주소 (예: 서울시 강남구 가로수길 123)"
+    }}
 }}
 ```
 
@@ -67,6 +72,7 @@ CLASSIFICATION_PROMPT = """다음 Instagram 게시물을 분석하여 정보를 
 - urls: 본문에 기재된 모든 URL 목록
 - organizer: 주최사/브랜드명
 - summary: 이벤트 핵심 내용 요약
+- location: **팝업 태그인 경우에만** 장소명과 주소 추출 (팝업이 아니면 null)
 
 값을 알 수 없으면 null로 표시하세요.
 반드시 JSON 형식으로만 응답하세요."""
