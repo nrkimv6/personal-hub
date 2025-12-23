@@ -261,6 +261,26 @@
 		}
 	}
 
+	async function handleRequestLlmAnalysis(postId: number) {
+		try {
+			const result = await instagramApi.requestLlmAnalysis([postId]);
+			if (result.created_count > 0) {
+				alert('AI 분석 요청이 등록되었습니다. 워커가 처리하면 분석 결과가 업데이트됩니다.');
+				// 게시물 상태 업데이트 (pending으로)
+				posts = posts.map((p) =>
+					p.id === postId ? { ...p, llm_status: 'pending' as const } : p
+				);
+				if (selectedPost?.id === postId) {
+					selectedPost = { ...selectedPost, llm_status: 'pending' };
+				}
+			} else {
+				alert('이미 분석 요청이 존재하거나 처리 중입니다.');
+			}
+		} catch (e) {
+			alert('AI 분석 요청 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		}
+	}
+
 	function handleFilter() {
 		page = 1;
 		fetchPosts();
@@ -737,6 +757,7 @@
 				onClose={closeDetail}
 				onDelete={deletePost}
 				onRecrawl={recrawlPost}
+				onRequestLlmAnalysis={handleRequestLlmAnalysis}
 				{availableTags}
 				onTagsUpdate={handleTagsUpdate}
 			/>
