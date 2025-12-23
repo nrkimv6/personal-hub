@@ -155,6 +155,7 @@ class PostService:
         llm_tag: Optional[str] = None,
         llm_status: Optional[str] = None,
         event_status: Optional[str] = None,
+        include_unknown_period: bool = False,
         sort_by: Optional[str] = None,
         sort_order: Optional[str] = "asc",
         is_active: Optional[bool] = None,
@@ -172,6 +173,7 @@ class PostService:
             llm_tag: LLM 분류 태그 필터 (이벤트/팝업/홍보대사/기타)
             llm_status: LLM 분석 상태 필터 (pending/processing/completed/failed)
             event_status: 이벤트 진행상태 필터 (ongoing/upcoming/ended)
+            include_unknown_period: 기간 미정(종료일 NULL) 항목 포함 여부
             sort_by: 정렬 기준 (event_end/event_start/collected_at)
             sort_order: 정렬 순서 (asc/desc)
             is_active: 활성화 상태 필터 (True/False/None)
@@ -220,19 +222,22 @@ class PostService:
         if event_status:
             today = date.today()
             if event_status == "ongoing":
-                # 진행 중: 시작일 <= 오늘 AND (종료일 >= 오늘 OR 종료일 없음)
-                query = query.filter(
-                    and_(
-                        or_(
-                            InstagramPost.llm_event_start <= today,
-                            InstagramPost.llm_event_start.is_(None)
-                        ),
-                        or_(
-                            InstagramPost.llm_event_end >= today,
-                            InstagramPost.llm_event_end.is_(None)
-                        )
-                    )
+                # 진행 중: 시작일 <= 오늘 AND 종료일 >= 오늘
+                base_condition = and_(
+                    or_(
+                        InstagramPost.llm_event_start <= today,
+                        InstagramPost.llm_event_start.is_(None)
+                    ),
+                    InstagramPost.llm_event_end >= today,
+                    InstagramPost.llm_event_end.isnot(None)
                 )
+                if include_unknown_period:
+                    # 기간 미정도 포함
+                    query = query.filter(
+                        or_(base_condition, InstagramPost.llm_event_end.is_(None))
+                    )
+                else:
+                    query = query.filter(base_condition)
             elif event_status == "upcoming":
                 # 예정: 시작일 > 오늘
                 query = query.filter(InstagramPost.llm_event_start > today)
@@ -240,13 +245,20 @@ class PostService:
                 # 종료: 종료일 < 오늘
                 query = query.filter(InstagramPost.llm_event_end < today)
             elif event_status == "ongoing_or_upcoming":
-                # 진행 중 + 예정: 종료일이 오늘 이후이거나 없음
-                query = query.filter(
-                    or_(
-                        InstagramPost.llm_event_end >= today,
-                        InstagramPost.llm_event_end.is_(None)
-                    )
+                # 진행 중 + 예정: 종료일이 오늘 이후
+                base_condition = and_(
+                    InstagramPost.llm_event_end >= today,
+                    InstagramPost.llm_event_end.isnot(None)
                 )
+                if include_unknown_period:
+                    query = query.filter(
+                        or_(base_condition, InstagramPost.llm_event_end.is_(None))
+                    )
+                else:
+                    query = query.filter(base_condition)
+            elif event_status == "unknown_period":
+                # 기간 미정: 종료일이 NULL
+                query = query.filter(InstagramPost.llm_event_end.is_(None))
 
         total = query.count()
 

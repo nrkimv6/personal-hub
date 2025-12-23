@@ -269,39 +269,100 @@
 		}
 	}
 
+	// 이미지를 프록시를 통해 base64로 변환
+	async function loadImageAsBase64(url: string): Promise<string> {
+		try {
+			const proxyUrl = `/api/v1/instagram/proxy-image?url=${encodeURIComponent(url)}`;
+			const response = await fetch(proxyUrl);
+			if (!response.ok) throw new Error('Proxy fetch failed');
+			const blob = await response.blob();
+			return new Promise((resolve, reject) => {
+				const reader = new FileReader();
+				reader.onloadend = () => resolve(reader.result as string);
+				reader.onerror = reject;
+				reader.readAsDataURL(blob);
+			});
+		} catch {
+			return url; // 실패 시 원본 URL 반환
+		}
+	}
+
 	// 캡쳐 다운로드
 	async function handleCapture() {
 		if (!feedRef || isCapturing) return;
 		isCapturing = true;
 		try {
+			// 이미지들을 미리 base64로 변환
+			const imageMap = new Map<string, string>();
+			if (post.images && post.images.length > 0) {
+				const currentImg = post.images[currentImageIndex];
+				if (currentImg?.src) {
+					const base64 = await loadImageAsBase64(currentImg.src);
+					imageMap.set(currentImg.src, base64);
+				}
+			}
+
 			const canvas = await html2canvas(feedRef, {
 				useCORS: true,
-				allowTaint: false,
-				proxy: '/api/v1/instagram/proxy-image',
-				onclone: (clonedDoc: Document) => {
-					// oklch 색상을 rgb로 변환 (html2canvas가 oklch 미지원)
-					const allElements = clonedDoc.querySelectorAll('*');
-					allElements.forEach((el) => {
-						const computed = window.getComputedStyle(el as Element);
+				allowTaint: true, // base64로 변환했으므로 허용
+				logging: false,
+				onclone: (clonedDoc: Document, clonedEl: HTMLElement) => {
+					// 1. 먼저 computed style 수집 (스타일시트 제거 전)
+					const styleMap = new Map<Element, Record<string, string>>();
+					const styleProps = [
+						'color', 'background-color', 'background-image',
+						'border', 'border-color', 'border-radius', 'border-width', 'border-style',
+						'font-family', 'font-size', 'font-weight', 'line-height', 'text-decoration',
+						'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+						'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+						'width', 'height', 'max-width', 'max-height', 'min-width', 'min-height',
+						'display', 'flex-direction', 'align-items', 'justify-content', 'gap', 'flex-wrap',
+						'position', 'top', 'right', 'bottom', 'left', 'z-index',
+						'overflow', 'opacity', 'box-shadow', 'text-align', 'vertical-align',
+						'transform', 'transition', 'visibility'
+					];
+
+					const allElements = clonedEl.querySelectorAll('*');
+					[clonedEl, ...allElements].forEach((el) => {
+						const computed = clonedDoc.defaultView?.getComputedStyle(el) || window.getComputedStyle(el);
+						const styles: Record<string, string> = {};
+						styleProps.forEach((prop) => {
+							try {
+								const value = computed.getPropertyValue(prop);
+								if (value) styles[prop] = value;
+							} catch { /* ignore */ }
+						});
+						styleMap.set(el, styles);
+					});
+
+					// 2. 외부 스타일시트 제거 (oklch 파싱 에러 방지)
+					const styleSheets = clonedDoc.querySelectorAll('link[rel="stylesheet"], style');
+					styleSheets.forEach((sheet) => sheet.remove());
+
+					// 3. 수집한 스타일을 인라인으로 적용
+					styleMap.forEach((styles, el) => {
 						const htmlEl = el as HTMLElement;
-
-						// 주요 색상 속성들을 computed value (rgb)로 덮어쓰기
-						const colorProps = [
-							'color',
-							'background-color',
-							'border-color',
-							'border-top-color',
-							'border-right-color',
-							'border-bottom-color',
-							'border-left-color'
-						];
-
-						colorProps.forEach((prop) => {
-							const value = computed.getPropertyValue(prop);
-							if (value && value !== 'rgba(0, 0, 0, 0)') {
+						Object.entries(styles).forEach(([prop, value]) => {
+							if (value && value !== 'none' && value !== 'normal' && value !== 'auto') {
 								htmlEl.style.setProperty(prop, value, 'important');
 							}
 						});
+					});
+
+					// 4. 이미지 src를 base64로 교체
+					const images = clonedEl.querySelectorAll('img');
+					images.forEach((img) => {
+						const originalSrc = img.getAttribute('src') || img.src;
+						for (const [origUrl, base64] of imageMap.entries()) {
+							// 다양한 매칭 시도
+							if (originalSrc === origUrl ||
+								originalSrc.includes(origUrl) ||
+								origUrl.includes(originalSrc) ||
+								img.src.endsWith(origUrl.split('/').pop() || '')) {
+								img.src = base64;
+								return;
+							}
+						}
 					});
 				}
 			});

@@ -41,6 +41,7 @@
 	let sortBy: string | null = null;
 	let sortOrder: string = 'asc';
 	let includeEnded: boolean = false;  // 종료된 항목 포함
+	let includeUnknownPeriod: boolean = false;  // 기간 미정 항목 포함
 	let filterIsActive: boolean = true;  // 활성화된 항목만 보기 (기본값)
 
 	// LLM 태그 옵션
@@ -109,6 +110,13 @@
 		fetchPosts();
 	}
 
+	// 기간 미정 포함 토글
+	function toggleIncludeUnknownPeriod() {
+		includeUnknownPeriod = !includeUnknownPeriod;
+		page = 1;
+		fetchPosts();
+	}
+
 	// 게시물 활성화/비활성화 토글
 	async function togglePostActive(post: InstagramPost, event: Event) {
 		event.stopPropagation();  // 행 클릭 이벤트 방지
@@ -134,10 +142,18 @@
 		const start = post.llm_event_start;
 		const end = post.llm_event_end;
 
-		// 시작일이 없거나 오늘 이전이고, 종료일이 없거나 오늘 이후면 진행 중
+		// 종료일이 없으면 "기간 미정" → 진행 중 아님
+		if (!end) return false;
+
+		// 시작일이 없거나 오늘 이전이고, 종료일이 오늘 이후면 진행 중
 		const startOk = !start || start <= today;
-		const endOk = !end || end >= today;
+		const endOk = end >= today;
 		return startOk && endOk;
+	}
+
+	// 기간 미정 여부 확인
+	function isUnknownPeriod(post: InstagramPost): boolean {
+		return !post.llm_event_end;
 	}
 
 	// 오늘 마감 여부 확인
@@ -239,6 +255,7 @@
 			if (filterLlmStatus) params.llm_status = filterLlmStatus;
 			// 이벤트/팝업 필터
 			if (filterEventStatus) params.event_status = filterEventStatus;
+			if (includeUnknownPeriod) params.include_unknown_period = true;
 			if (sortBy) params.sort_by = sortBy;
 			if (sortOrder) params.sort_order = sortOrder;
 			// 활성화 상태 필터
@@ -790,8 +807,10 @@
 			<div class="flex items-center justify-between mb-4">
 				<div class="flex items-center gap-2 text-sm text-gray-600">
 					<span>총 {total}건</span>
-					{#if !includeEnded}
-						<span class="text-blue-600">(진행중{activeTab === 'popup' ? '+예정' : ''} 필터 적용)</span>
+					{#if !includeEnded && !includeUnknownPeriod}
+						<span class="text-blue-600">(진행중{activeTab === 'popup' ? '+예정' : ''} 필터)</span>
+					{:else if !includeEnded && includeUnknownPeriod}
+						<span class="text-blue-600">(진행중+기간미정)</span>
 					{/if}
 					{#if filterIsActive}
 						<span class="text-green-600">(활성화만)</span>
@@ -805,7 +824,16 @@
 							onchange={toggleIsActiveFilter}
 							class="w-4 h-4 text-gray-600 rounded border-gray-300 focus:ring-gray-500"
 						/>
-						<span class="text-sm text-gray-600">비활성화 항목 포함</span>
+						<span class="text-sm text-gray-600">비활성화 포함</span>
+					</label>
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input
+							type="checkbox"
+							checked={includeUnknownPeriod}
+							onchange={toggleIncludeUnknownPeriod}
+							class="w-4 h-4 text-amber-600 rounded border-gray-300 focus:ring-amber-500"
+						/>
+						<span class="text-sm text-gray-600">기간 미정 포함</span>
 					</label>
 					<label class="flex items-center gap-2 cursor-pointer">
 						<input
@@ -814,7 +842,7 @@
 							onchange={toggleIncludeEnded}
 							class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
 						/>
-						<span class="text-sm text-gray-600">종료된 {activeTab === 'events' ? '이벤트' : '팝업'} 포함</span>
+						<span class="text-sm text-gray-600">종료된 항목 포함</span>
 					</label>
 				</div>
 			</div>
@@ -842,7 +870,7 @@
 						<tbody class="divide-y divide-gray-200">
 							{#each sortedPosts as post (post.id)}
 								<tr
-									class="cursor-pointer transition-colors {isEndingToday(post) ? 'bg-orange-100 hover:bg-orange-200 font-semibold' : isOngoing(post) ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50'}"
+									class="cursor-pointer transition-colors {isEndingToday(post) ? 'bg-orange-100 hover:bg-orange-200 font-semibold' : isUnknownPeriod(post) ? 'bg-amber-50 hover:bg-amber-100' : isOngoing(post) ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50'}"
 									onclick={() => openDetail(post)}
 									onkeydown={(e) => e.key === 'Enter' && openDetail(post)}
 									tabindex="0"
@@ -873,21 +901,24 @@
 									</td>
 									<!-- 기간 -->
 									<td class="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">
-										{#if post.llm_event_start || post.llm_event_end}
+										{#if post.llm_event_end}
 											<div class="flex flex-col gap-0.5">
 												{#if post.llm_event_start}
 													<span class="text-xs text-gray-500">시작: {post.llm_event_start}</span>
 												{/if}
-												{#if post.llm_event_end}
-													{#if isEndingToday(post)}
-														<span class="text-xs font-bold text-orange-600 bg-orange-50 px-1 rounded">오늘 마감!</span>
-													{:else}
-														<span class="text-xs text-gray-500">종료: {post.llm_event_end}</span>
-													{/if}
+												{#if isEndingToday(post)}
+													<span class="text-xs font-bold text-orange-600 bg-orange-50 px-1 rounded">오늘 마감!</span>
+												{:else}
+													<span class="text-xs text-gray-500">종료: {post.llm_event_end}</span>
 												{/if}
 											</div>
+										{:else if post.llm_event_start}
+											<div class="flex flex-col gap-0.5">
+												<span class="text-xs text-gray-500">시작: {post.llm_event_start}</span>
+												<span class="text-xs text-amber-600 bg-amber-50 px-1 rounded">기간 미정</span>
+											</div>
 										{:else}
-											<span class="text-gray-400">-</span>
+											<span class="text-xs text-amber-600 bg-amber-50 px-1 rounded">기간 미정</span>
 										{/if}
 									</td>
 									<!-- 발표일 -->
