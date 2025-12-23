@@ -1,6 +1,7 @@
 <script lang="ts">
 	import html2canvas from 'html2canvas';
 	import type { InstagramPost, InstagramTag } from '$lib/types';
+	import { instagramApi } from '$lib/api';
 
 	interface Props {
 		post: InstagramPost;
@@ -14,6 +15,7 @@
 		onRequestLlmAnalysis?: (id: number) => Promise<void>;
 		availableTags?: InstagramTag[];
 		onTagsUpdate?: (postId: number, tagIds: number[]) => void;
+		onLlmUpdate?: (updatedPost: InstagramPost) => void;
 	}
 
 	let {
@@ -25,7 +27,8 @@
 		onRecrawl,
 		onRequestLlmAnalysis,
 		availableTags = [],
-		onTagsUpdate
+		onTagsUpdate,
+		onLlmUpdate
 	}: Props = $props();
 
 	// 상세 모드에서는 캡션 기본 펼침
@@ -43,6 +46,100 @@
 
 	// LLM 분석 요청 상태
 	let isRequestingLlm = $state(false);
+
+	// LLM 편집 상태
+	let editingLlm = $state(false);
+	let savingLlm = $state(false);
+	let llmForm = $state({
+		llm_tag: '',
+		llm_event_start: '',
+		llm_event_end: '',
+		llm_announcement_date: '',
+		llm_prizes: '',  // 줄바꿈으로 구분
+		llm_winner_count: '',
+		llm_purchase_required: '',
+		llm_organizer: '',
+		llm_summary: '',
+		llm_location_venue: '',
+		llm_location_address: ''
+	});
+
+	const llmTagOptions = ['이벤트', '팝업', '홍보대사', '리그램', '기타'];
+	const llmPurchaseOptions = [
+		{ value: '', label: '선택안함' },
+		{ value: '아니오', label: '불필요' },
+		{ value: '예_부분', label: '부분 필요' },
+		{ value: '예_전부', label: '전체 필요' }
+	];
+
+	function startEditLlm() {
+		llmForm = {
+			llm_tag: post.llm_tag || '',
+			llm_event_start: post.llm_event_start || '',
+			llm_event_end: post.llm_event_end || '',
+			llm_announcement_date: post.llm_announcement_date || '',
+			llm_prizes: post.llm_prizes?.join('\n') || '',
+			llm_winner_count: post.llm_winner_count?.toString() || '',
+			llm_purchase_required: post.llm_purchase_required || '',
+			llm_organizer: post.llm_organizer || '',
+			llm_summary: post.llm_summary || '',
+			llm_location_venue: (post.llm_location as { venue_name?: string })?.venue_name || '',
+			llm_location_address: (post.llm_location as { address?: string })?.address || ''
+		};
+		editingLlm = true;
+	}
+
+	function cancelEditLlm() {
+		editingLlm = false;
+	}
+
+	async function saveLlm() {
+		savingLlm = true;
+		try {
+			const data: Record<string, unknown> = {};
+
+			// 변경된 필드만 전송
+			if (llmForm.llm_tag) data.llm_tag = llmForm.llm_tag;
+			data.llm_event_start = llmForm.llm_event_start || '';
+			data.llm_event_end = llmForm.llm_event_end || '';
+			data.llm_announcement_date = llmForm.llm_announcement_date || '';
+
+			// 경품: 줄바꿈으로 분리하여 배열로
+			const prizes = llmForm.llm_prizes.split('\n').map(s => s.trim()).filter(Boolean);
+			data.llm_prizes = prizes;
+
+			// 당첨자 수: 숫자로 변환
+			data.llm_winner_count = llmForm.llm_winner_count ? parseInt(llmForm.llm_winner_count) : 0;
+
+			data.llm_purchase_required = llmForm.llm_purchase_required || '';
+			data.llm_organizer = llmForm.llm_organizer || '';
+			data.llm_summary = llmForm.llm_summary || '';
+
+			// 위치 정보
+			if (llmForm.llm_location_venue || llmForm.llm_location_address) {
+				data.llm_location = {
+					venue_name: llmForm.llm_location_venue || '',
+					address: llmForm.llm_location_address || ''
+				};
+			} else {
+				data.llm_location = { venue_name: '', address: '' };
+			}
+
+			const updated = await instagramApi.updateLlmClassification(post.id, data as Parameters<typeof instagramApi.updateLlmClassification>[1]);
+
+			// 부모에게 업데이트 알림
+			if (onLlmUpdate) {
+				onLlmUpdate(updated);
+			}
+
+			editingLlm = false;
+		} catch (e) {
+			console.error('LLM 분류 저장 실패:', e);
+			alert('저장에 실패했습니다: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		} finally {
+			savingLlm = false;
+		}
+	}
 
 	// 캡쳐 상태
 	let isCapturing = $state(false);
@@ -486,7 +583,7 @@
 			{/if}
 
 			<!-- 상세 모드: LLM 분류 결과 -->
-			{#if detailMode && post.llm_status}
+			{#if detailMode}
 				<div
 					class="py-3 border-t border-gray-100 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg px-3 my-2"
 				>
@@ -505,28 +602,129 @@
 									d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
 								/>
 							</svg>
-							AI 분석
+							AI 분류
 						</h4>
-						<span
-							class="px-2 py-0.5 text-xs rounded-full {post.llm_status === 'completed'
-								? 'bg-green-100 text-green-700'
-								: post.llm_status === 'processing'
-									? 'bg-yellow-100 text-yellow-700'
-									: post.llm_status === 'pending'
-										? 'bg-gray-100 text-gray-700'
-										: 'bg-red-100 text-red-700'}"
-						>
-							{post.llm_status === 'completed'
-								? '완료'
-								: post.llm_status === 'processing'
-									? '분석 중'
-									: post.llm_status === 'pending'
-										? '대기'
-										: '실패'}
-						</span>
+						<div class="flex items-center gap-2">
+							{#if !editingLlm}
+								<button
+									onclick={startEditLlm}
+									class="text-xs text-purple-600 hover:text-purple-800 underline"
+								>
+									수정
+								</button>
+							{/if}
+							{#if post.llm_status}
+								<span
+									class="px-2 py-0.5 text-xs rounded-full {post.llm_status === 'completed'
+										? 'bg-green-100 text-green-700'
+										: post.llm_status === 'processing'
+											? 'bg-yellow-100 text-yellow-700'
+											: post.llm_status === 'pending'
+												? 'bg-gray-100 text-gray-700'
+												: 'bg-red-100 text-red-700'}"
+								>
+									{post.llm_status === 'completed'
+										? '완료'
+										: post.llm_status === 'processing'
+											? '분석 중'
+											: post.llm_status === 'pending'
+												? '대기'
+												: '실패'}
+								</span>
+							{/if}
+						</div>
 					</div>
 
-					{#if post.llm_status === 'completed'}
+					{#if editingLlm}
+						<!-- 편집 모드 -->
+						<div class="space-y-3 text-xs">
+							<!-- 분류 -->
+							<div class="flex items-center gap-2">
+								<label class="text-gray-500 w-14 shrink-0">분류:</label>
+								<div class="flex flex-wrap gap-1">
+									{#each llmTagOptions as tag}
+										<button
+											type="button"
+											onclick={() => llmForm.llm_tag = tag}
+											class="px-2 py-1 rounded-full text-xs transition-colors {llmForm.llm_tag === tag
+												? 'bg-purple-600 text-white'
+												: 'bg-gray-200 text-gray-700 hover:bg-gray-300'}"
+										>
+											{tag}
+										</button>
+									{/each}
+								</div>
+							</div>
+							<!-- 기간 -->
+							<div class="flex items-center gap-2">
+								<label class="text-gray-500 w-14 shrink-0">기간:</label>
+								<input type="date" bind:value={llmForm.llm_event_start} class="px-2 py-1 border rounded text-xs" />
+								<span>~</span>
+								<input type="date" bind:value={llmForm.llm_event_end} class="px-2 py-1 border rounded text-xs" />
+							</div>
+							<!-- 발표일 -->
+							<div class="flex items-center gap-2">
+								<label class="text-gray-500 w-14 shrink-0">발표일:</label>
+								<input type="date" bind:value={llmForm.llm_announcement_date} class="px-2 py-1 border rounded text-xs" />
+							</div>
+							<!-- 주최 -->
+							<div class="flex items-center gap-2">
+								<label class="text-gray-500 w-14 shrink-0">주최:</label>
+								<input type="text" bind:value={llmForm.llm_organizer} placeholder="주최사/브랜드" class="flex-1 px-2 py-1 border rounded text-xs" />
+							</div>
+							<!-- 구매조건 -->
+							<div class="flex items-center gap-2">
+								<label class="text-gray-500 w-14 shrink-0">구매:</label>
+								<select bind:value={llmForm.llm_purchase_required} class="px-2 py-1 border rounded text-xs">
+									{#each llmPurchaseOptions as opt}
+										<option value={opt.value}>{opt.label}</option>
+									{/each}
+								</select>
+							</div>
+							<!-- 당첨자 -->
+							<div class="flex items-center gap-2">
+								<label class="text-gray-500 w-14 shrink-0">당첨자:</label>
+								<input type="number" bind:value={llmForm.llm_winner_count} placeholder="0" min="0" class="w-20 px-2 py-1 border rounded text-xs" />
+								<span class="text-gray-500">명</span>
+							</div>
+							<!-- 경품 -->
+							<div class="flex items-start gap-2">
+								<label class="text-gray-500 w-14 shrink-0 pt-1">경품:</label>
+								<textarea bind:value={llmForm.llm_prizes} placeholder="줄바꿈으로 구분" rows="2" class="flex-1 px-2 py-1 border rounded text-xs resize-none"></textarea>
+							</div>
+							<!-- 요약 -->
+							<div class="flex items-start gap-2">
+								<label class="text-gray-500 w-14 shrink-0 pt-1">요약:</label>
+								<textarea bind:value={llmForm.llm_summary} placeholder="이벤트 요약" rows="2" class="flex-1 px-2 py-1 border rounded text-xs resize-none"></textarea>
+							</div>
+							<!-- 위치 (팝업) -->
+							<details class="group">
+								<summary class="text-gray-400 text-xs cursor-pointer">위치 정보 (팝업용)</summary>
+								<div class="mt-2 space-y-2 pl-4">
+									<div class="flex items-center gap-2">
+										<label class="text-gray-500 w-14 shrink-0">장소명:</label>
+										<input type="text" bind:value={llmForm.llm_location_venue} placeholder="팝업스토어명" class="flex-1 px-2 py-1 border rounded text-xs" />
+									</div>
+									<div class="flex items-center gap-2">
+										<label class="text-gray-500 w-14 shrink-0">주소:</label>
+										<input type="text" bind:value={llmForm.llm_location_address} placeholder="주소" class="flex-1 px-2 py-1 border rounded text-xs" />
+									</div>
+								</div>
+							</details>
+							<!-- 버튼 -->
+							<div class="flex gap-2 pt-2">
+								<button
+									onclick={saveLlm}
+									disabled={savingLlm}
+									class="btn btn-primary btn-sm disabled:opacity-50"
+								>
+									{savingLlm ? '저장 중...' : '저장'}
+								</button>
+								<button onclick={cancelEditLlm} class="btn btn-secondary btn-sm">취소</button>
+							</div>
+						</div>
+					{:else if post.llm_status === 'completed'}
+						<!-- 보기 모드 -->
 						<div class="space-y-1.5 text-xs">
 							{#if post.llm_tag}
 								<div class="flex items-center gap-2">
@@ -625,6 +823,8 @@
 							></div>
 							<span>분석 중...</span>
 						</div>
+					{:else}
+						<p class="text-xs text-gray-500">분류 정보가 없습니다. "수정" 버튼으로 직접 입력할 수 있습니다.</p>
 					{/if}
 				</div>
 			{/if}

@@ -419,6 +419,14 @@
 		}
 	}
 
+	function handleLlmUpdate(updatedPost: InstagramPost) {
+		// 목록에서 해당 게시물 업데이트
+		posts = posts.map((p) => (p.id === updatedPost.id ? updatedPost : p));
+		if (selectedPost?.id === updatedPost.id) {
+			selectedPost = updatedPost;
+		}
+	}
+
 	function handleFilter() {
 		page = 1;
 		fetchPosts();
@@ -1231,6 +1239,7 @@
 				onRequestLlmAnalysis={handleRequestLlmAnalysis}
 				{availableTags}
 				onTagsUpdate={handleTagsUpdate}
+				onLlmUpdate={handleLlmUpdate}
 			/>
 		</div>
 	</div>
