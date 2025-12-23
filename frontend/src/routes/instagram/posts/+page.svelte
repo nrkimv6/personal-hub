@@ -162,17 +162,14 @@
 		return post.llm_event_end === today;
 	}
 
-	// 이벤트/팝업 탭용 정렬된 posts (오늘 마감 우선)
+	// 이벤트/팝업 탭용 정렬된 posts (오늘 마감 우선, 백엔드 정렬 순서 유지)
 	$: sortedPosts = (activeTab === 'events' || activeTab === 'popup')
-		? [...posts].sort((a, b) => {
-			const aEndingToday = isEndingToday(a);
-			const bEndingToday = isEndingToday(b);
-			// 오늘 마감인 항목 우선
-			if (aEndingToday && !bEndingToday) return -1;
-			if (!aEndingToday && bEndingToday) return 1;
-			// 나머지는 기존 순서 유지 (백엔드에서 이미 정렬됨)
-			return 0;
-		})
+		? (() => {
+			// 오늘 마감 항목과 나머지를 분리 후 합침 (각각 백엔드 순서 유지)
+			const endingToday = posts.filter(p => isEndingToday(p));
+			const others = posts.filter(p => !isEndingToday(p));
+			return [...endingToday, ...others];
+		})()
 		: posts;
 
 	// 위치 정보 포맷팅
@@ -573,12 +570,13 @@
 					class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm w-32"
 				/>
 				<select
-					bind:value={filterIsAd}
+					bind:value={filterPostType}
 					class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
 				>
 					<option value={null}>전체</option>
-					<option value={true}>광고만</option>
-					<option value={false}>일반만</option>
+					<option value="SPONSORED">광고</option>
+					<option value="SUGGESTED">추천</option>
+					<option value="NORMAL">일반</option>
 				</select>
 				<button onclick={handleFilter} class="btn btn-primary btn-sm">필터 적용</button>
 			</div>
@@ -625,12 +623,13 @@
 					class="px-3 py-2 border border-gray-300 rounded-lg text-sm"
 				/>
 				<select
-					bind:value={filterIsAd}
+					bind:value={filterPostType}
 					class="px-3 py-2 border border-gray-300 rounded-lg text-sm"
 				>
 					<option value={null}>전체</option>
-					<option value={true}>광고만</option>
-					<option value={false}>일반만</option>
+					<option value="SPONSORED">광고</option>
+					<option value="SUGGESTED">추천</option>
+					<option value="NORMAL">일반</option>
 				</select>
 			</div>
 
@@ -794,7 +793,7 @@
 		<div class="text-center py-12 text-gray-500">
 			<p class="text-lg">수집된 게시물이 없습니다</p>
 			<p class="text-sm mt-2">Instagram 수집을 시작하면 여기에 게시물이 표시됩니다</p>
-			{#if filterTags.length > 0 || filterAccount || filterIsAd !== null || filterDateFrom || filterDateTo}
+			{#if filterTags.length > 0 || filterAccount || filterPostType !== null || filterDateFrom || filterDateTo}
 				<button onclick={clearFilters} class="mt-4 btn btn-secondary btn-sm">
 					필터 초기화
 				</button>

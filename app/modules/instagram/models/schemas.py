@@ -29,6 +29,7 @@ class PostSchema(BaseModel):
     posted_at: Optional[datetime] = None
     display_time: Optional[str] = None
     is_ad: bool = False
+    post_type: str = "NORMAL"  # NORMAL, SPONSORED, SUGGESTED
     collected_at: datetime
     crawl_run_id: Optional[int] = None
     tags: List[TagInfoSchema] = []

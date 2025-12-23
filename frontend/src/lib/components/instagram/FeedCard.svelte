@@ -1,5 +1,5 @@
 <script lang="ts">
-	import html2canvas from 'html2canvas';
+	import { toPng } from 'html-to-image';
 	import type { InstagramPost, InstagramTag } from '$lib/types';
 	import { instagramApi } from '$lib/api';
 
@@ -292,87 +292,60 @@
 		if (!feedRef || isCapturing) return;
 		isCapturing = true;
 		try {
-			// 이미지들을 미리 base64로 변환
-			const imageMap = new Map<string, string>();
-			if (post.images && post.images.length > 0) {
-				const currentImg = post.images[currentImageIndex];
-				if (currentImg?.src) {
-					const base64 = await loadImageAsBase64(currentImg.src);
-					imageMap.set(currentImg.src, base64);
-				}
-			}
-
-			const canvas = await html2canvas(feedRef, {
-				useCORS: true,
-				allowTaint: true, // base64로 변환했으므로 허용
-				logging: false,
-				onclone: (clonedDoc: Document, clonedEl: HTMLElement) => {
-					// 1. 먼저 computed style 수집 (스타일시트 제거 전)
-					const styleMap = new Map<Element, Record<string, string>>();
-					const styleProps = [
-						'color', 'background-color', 'background-image',
-						'border', 'border-color', 'border-radius', 'border-width', 'border-style',
-						'font-family', 'font-size', 'font-weight', 'line-height', 'text-decoration',
-						'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
-						'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
-						'width', 'height', 'max-width', 'max-height', 'min-width', 'min-height',
-						'display', 'flex-direction', 'align-items', 'justify-content', 'gap', 'flex-wrap',
-						'position', 'top', 'right', 'bottom', 'left', 'z-index',
-						'overflow', 'opacity', 'box-shadow', 'text-align', 'vertical-align',
-						'transform', 'transition', 'visibility'
-					];
-
-					const allElements = clonedEl.querySelectorAll('*');
-					[clonedEl, ...allElements].forEach((el) => {
-						const computed = clonedDoc.defaultView?.getComputedStyle(el) || window.getComputedStyle(el);
-						const styles: Record<string, string> = {};
-						styleProps.forEach((prop) => {
-							try {
-								const value = computed.getPropertyValue(prop);
-								if (value) styles[prop] = value;
-							} catch { /* ignore */ }
-						});
-						styleMap.set(el, styles);
-					});
-
-					// 2. 외부 스타일시트 제거 (oklch 파싱 에러 방지)
-					const styleSheets = clonedDoc.querySelectorAll('link[rel="stylesheet"], style');
-					styleSheets.forEach((sheet) => sheet.remove());
-
-					// 3. 수집한 스타일을 인라인으로 적용
-					styleMap.forEach((styles, el) => {
-						const htmlEl = el as HTMLElement;
-						Object.entries(styles).forEach(([prop, value]) => {
-							if (value && value !== 'none' && value !== 'normal' && value !== 'auto') {
-								htmlEl.style.setProperty(prop, value, 'important');
-							}
-						});
-					});
-
-					// 4. 이미지 src를 base64로 교체
-					const images = clonedEl.querySelectorAll('img');
-					images.forEach((img) => {
-						const originalSrc = img.getAttribute('src') || img.src;
-						for (const [origUrl, base64] of imageMap.entries()) {
-							// 다양한 매칭 시도
-							if (originalSrc === origUrl ||
-								originalSrc.includes(origUrl) ||
-								origUrl.includes(originalSrc) ||
-								img.src.endsWith(origUrl.split('/').pop() || '')) {
-								img.src = base64;
-								return;
-							}
-						}
-					});
-				}
+			const dataUrl = await toPng(feedRef, {
+				cacheBust: true,
+				fetchRequestInit: {
+					mode: 'cors',
+					credentials: 'omit'
+				},
+				filter: (node) => {
+					// 스크립트나 불필요한 요소 제외
+					if (node instanceof Element) {
+						const tagName = node.tagName?.toLowerCase();
+						return tagName !== 'script' && tagName !== 'noscript';
+					}
+					return true;
+				},
 			});
+
+			// 이미지가 base64로 이미 변환되어 있지 않으면, DOM을 직접 수정 후 재시도
+			// html-to-image는 외부 이미지도 자동으로 fetch하여 인라인화 시도함
 			const link = document.createElement('a');
 			link.download = `${post.account}-${post.id}-${Date.now()}.png`;
-			link.href = canvas.toDataURL('image/png');
+			link.href = dataUrl;
 			link.click();
 		} catch (error) {
 			console.error('캡쳐 실패:', error);
-			alert('캡쳐에 실패했습니다');
+			// html-to-image 실패 시 대체 방법: 이미지를 먼저 교체하고 재시도
+			try {
+				// 원본 이미지 src 백업
+				const imgEl = feedRef?.querySelector('img') as HTMLImageElement | null;
+				const originalSrc = imgEl?.src;
+
+				// base64로 이미지 교체
+				if (imgEl && post.images?.[currentImageIndex]?.src) {
+					const base64 = await loadImageAsBase64(post.images[currentImageIndex].src);
+					if (base64.startsWith('data:')) {
+						imgEl.src = base64;
+					}
+				}
+
+				// 재시도
+				const dataUrl = await toPng(feedRef!, { cacheBust: true });
+
+				// 원본 복원
+				if (imgEl && originalSrc) {
+					imgEl.src = originalSrc;
+				}
+
+				const link = document.createElement('a');
+				link.download = `${post.account}-${post.id}-${Date.now()}.png`;
+				link.href = dataUrl;
+				link.click();
+			} catch (retryError) {
+				console.error('캡쳐 재시도 실패:', retryError);
+				alert('캡쳐에 실패했습니다. 이미지 로딩 문제일 수 있습니다.');
+			}
 		} finally {
 			isCapturing = false;
 		}
