@@ -102,6 +102,9 @@
 					params.posted_to = filterDateTo;
 				}
 			}
+			// LLM 필터
+			if (filterLlmTag) params.llm_tag = filterLlmTag;
+			if (filterLlmStatus) params.llm_status = filterLlmStatus;
 
 			const response = await instagramApi.posts(params);
 			posts = response.posts;
@@ -269,6 +272,8 @@
 		filterTags = [];
 		filterDateFrom = '';
 		filterDateTo = '';
+		filterLlmTag = null;
+		filterLlmStatus = null;
 		page = 1;
 		fetchPosts();
 	}
@@ -446,6 +451,50 @@
 			{/if}
 		</div>
 	{/if}
+
+	<!-- LLM 분류 필터 -->
+	<div class="mb-4 flex flex-wrap gap-2 items-center">
+		<span class="text-sm text-gray-500">AI 분류:</span>
+		{#each llmTagOptions as opt}
+			<button
+				onclick={() => {
+					filterLlmTag = filterLlmTag === opt.value ? null : opt.value;
+					handleFilter();
+				}}
+				class="px-3 py-1 text-sm rounded-full transition-colors {filterLlmTag === opt.value ? opt.color + ' ring-2 ring-offset-1 ring-purple-400' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+			>
+				{opt.label}
+				{#if filterLlmTag === opt.value}
+					<span class="ml-1">✓</span>
+				{/if}
+			</button>
+		{/each}
+		<span class="text-gray-300 mx-1">|</span>
+		<span class="text-sm text-gray-500">상태:</span>
+		{#each llmStatusOptions as opt}
+			<button
+				onclick={() => {
+					filterLlmStatus = filterLlmStatus === opt.value ? null : opt.value;
+					handleFilter();
+				}}
+				class="px-2 py-1 text-xs rounded-full transition-colors {filterLlmStatus === opt.value ? opt.color + ' ring-2 ring-offset-1 ring-gray-400' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+			>
+				{opt.label}
+			</button>
+		{/each}
+		{#if filterLlmTag || filterLlmStatus}
+			<button
+				onclick={() => {
+					filterLlmTag = null;
+					filterLlmStatus = null;
+					handleFilter();
+				}}
+				class="text-sm text-gray-500 hover:text-gray-700 underline"
+			>
+				AI 필터 초기화
+			</button>
+		{/if}
+	</div>
 
 	{#if loading}
 		<div class="flex justify-center items-center h-64">

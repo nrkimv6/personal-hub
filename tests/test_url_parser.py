@@ -352,3 +352,154 @@ class TestParseInstagramUrlIntegration:
         assert "reels" in INSTAGRAM_RESERVED_PATHS
         assert "p" in INSTAGRAM_RESERVED_PATHS
         assert "reel" in INSTAGRAM_RESERVED_PATHS
+
+
+# ============================================================
+# 마이그레이션 테스트
+# ============================================================
+
+
+class TestMigration041:
+    """마이그레이션 041 테스트"""
+
+    def test_migration_file_exists(self):
+        """마이그레이션 파일 존재 확인"""
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "041_add_url_crawl_fields.sql"
+        assert migration_path.exists(), "마이그레이션 파일이 존재해야 함"
+
+    def test_migration_contains_url_type(self):
+        """마이그레이션에 url_type 컬럼이 있어야 함"""
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "041_add_url_crawl_fields.sql"
+        content = migration_path.read_text(encoding="utf-8")
+        assert "url_type" in content
+
+    def test_migration_contains_reel_fields(self):
+        """마이그레이션에 릴스 필드가 있어야 함"""
+        migration_path = PROJECT_ROOT / "app" / "migrations" / "041_add_url_crawl_fields.sql"
+        content = migration_path.read_text(encoding="utf-8")
+        assert "is_reel" in content
+        assert "duration" in content
+        assert "music_title" in content
+        assert "music_artist" in content
+
+
+class TestInstagramCrawlRequestUrlType:
+    """InstagramCrawlRequest url_type 필드 테스트"""
+
+    def test_model_has_url_type_column(self):
+        """모델에 url_type 컬럼이 있어야 함"""
+        from app.models.instagram_crawl_request import InstagramCrawlRequest
+
+        assert hasattr(InstagramCrawlRequest, "url_type")
+
+    def test_url_type_is_nullable(self):
+        """url_type은 nullable"""
+        from app.models.instagram_crawl_request import InstagramCrawlRequest
+
+        column = InstagramCrawlRequest.__table__.columns["url_type"]
+        assert column.nullable is True
+
+
+class TestInstagramPostReelFields:
+    """InstagramPost 릴스 필드 테스트"""
+
+    def test_model_has_is_reel_column(self):
+        """모델에 is_reel 컬럼이 있어야 함"""
+        from app.models.instagram_post import InstagramPost
+
+        assert hasattr(InstagramPost, "is_reel")
+
+    def test_model_has_duration_column(self):
+        """모델에 duration 컬럼이 있어야 함"""
+        from app.models.instagram_post import InstagramPost
+
+        assert hasattr(InstagramPost, "duration")
+
+    def test_model_has_music_fields(self):
+        """모델에 music 관련 컬럼이 있어야 함"""
+        from app.models.instagram_post import InstagramPost
+
+        assert hasattr(InstagramPost, "music_title")
+        assert hasattr(InstagramPost, "music_artist")
+
+
+class TestInstagramUrlCrawler:
+    """InstagramUrlCrawler 클래스 테스트"""
+
+    def test_crawler_class_exists(self):
+        """InstagramUrlCrawler 클래스가 존재해야 함"""
+        from app.modules.instagram.services.crawler import InstagramUrlCrawler
+
+        assert InstagramUrlCrawler is not None
+
+    def test_crawler_has_crawl_url_method(self):
+        """crawl_url 메서드가 있어야 함"""
+        from app.modules.instagram.services.crawler import InstagramUrlCrawler
+
+        assert hasattr(InstagramUrlCrawler, "crawl_url")
+
+    def test_crawler_has_crawl_account_feed_method(self):
+        """crawl_account_feed 메서드가 있어야 함"""
+        from app.modules.instagram.services.crawler import InstagramUrlCrawler
+
+        assert hasattr(InstagramUrlCrawler, "crawl_account_feed")
+
+    def test_crawler_has_crawl_hashtag_method(self):
+        """crawl_hashtag 메서드가 있어야 함"""
+        from app.modules.instagram.services.crawler import InstagramUrlCrawler
+
+        assert hasattr(InstagramUrlCrawler, "crawl_hashtag")
+
+    def test_crawler_has_private_account_check(self):
+        """_is_private_account 메서드가 있어야 함"""
+        from app.modules.instagram.services.crawler import InstagramUrlCrawler
+
+        assert hasattr(InstagramUrlCrawler, "_is_private_account")
+
+
+class TestAccountCrawlResult:
+    """AccountCrawlResult 클래스 테스트"""
+
+    def test_result_class_exists(self):
+        """AccountCrawlResult 클래스가 존재해야 함"""
+        from app.modules.instagram.services.crawler import AccountCrawlResult
+
+        assert AccountCrawlResult is not None
+
+    def test_result_has_required_fields(self):
+        """필수 필드가 있어야 함"""
+        from app.modules.instagram.services.crawler import AccountCrawlResult
+
+        result = AccountCrawlResult(posts=[], total=0)
+        assert hasattr(result, "posts")
+        assert hasattr(result, "total")
+        assert hasattr(result, "username")
+        assert hasattr(result, "hashtag")
+        assert hasattr(result, "is_private")
+        assert hasattr(result, "error")
+
+    def test_result_default_values(self):
+        """기본값 확인"""
+        from app.modules.instagram.services.crawler import AccountCrawlResult
+
+        result = AccountCrawlResult(posts=[], total=0)
+        assert result.username is None
+        assert result.hashtag is None
+        assert result.is_private is False
+        assert result.error is None
+
+
+class TestNotSupportedError:
+    """NotSupportedError 예외 테스트"""
+
+    def test_exception_exists(self):
+        """NotSupportedError 예외가 존재해야 함"""
+        from app.modules.instagram.services.crawler import NotSupportedError
+
+        assert NotSupportedError is not None
+
+    def test_exception_inherits_from_exception(self):
+        """Exception을 상속해야 함"""
+        from app.modules.instagram.services.crawler import NotSupportedError
+
+        assert issubclass(NotSupportedError, Exception)

@@ -1,6 +1,6 @@
 """Instagram Post SQLAlchemy Model."""
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, JSON, Date
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, JSON, Date, Float
 from sqlalchemy.orm import relationship
 from datetime import datetime
 
@@ -28,6 +28,12 @@ class InstagramPost(Base):
     is_ad = Column(Boolean, default=False)
     likes = Column(Integer)  # 좋아요 수
     comments = Column(Integer)  # 댓글 수
+
+    # 릴스 메타데이터
+    is_reel = Column(Boolean, default=False, index=True)  # 릴스 여부
+    duration = Column(Float)  # 재생 시간 (초)
+    music_title = Column(Text)  # 사용된 음악 제목
+    music_artist = Column(Text)  # 음악 아티스트
 
     # 수집 정보
     account_id = Column(Integer, ForeignKey("accounts.id", ondelete="SET NULL"))
