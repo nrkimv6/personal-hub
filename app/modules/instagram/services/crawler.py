@@ -714,6 +714,133 @@ class InstagramCrawler:
             return False
 
 
+    async def _click_more_button_on_page(self) -> bool:
+        """페이지 전체에서 더보기 버튼 클릭 (개별 게시물 페이지용)."""
+        try:
+            clicked = await self.page.evaluate("""() => {
+                const moreTexts = ['더 보기', 'more', 'もっと見る', '顯示更多', '显示更多'];
+                const allSpans = Array.from(document.querySelectorAll('span'));
+
+                for (const text of moreTexts) {
+                    const moreSpan = allSpans.find(s => s.textContent.trim() === text);
+                    if (moreSpan) {
+                        const rect = moreSpan.getBoundingClientRect();
+                        if (rect.width > 0 && rect.height > 0) {
+                            moreSpan.click();
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }""")
+
+            if clicked:
+                await asyncio.sleep(1.0)
+            return clicked
+        except Exception:
+            return False
+
+    async def _extract_single_post_data(self) -> Dict[str, Any]:
+        """개별 게시물 페이지에서 데이터 추출 (가이드 문서 기반).
+
+        Returns:
+            추출된 데이터 딕셔너리
+        """
+        return await self.page.evaluate("""() => {
+            const data = {};
+
+            // 1. 작성자 - href에서 계정명 추출
+            const links = Array.from(document.querySelectorAll('a[href^="/"]'));
+            const accountLinks = links.filter(a => {
+                const href = a.getAttribute('href');
+                if (!href || href.includes('/explore/') || href.includes('/p/') || href.includes('/reel/')) return false;
+                const path = href.split('?')[0];
+                return path.match(/^\\/[a-z0-9_.]+\\/?$/);
+            });
+            if (accountLinks.length > 0) {
+                const href = accountLinks[0].getAttribute('href');
+                const path = href.split('?')[0];
+                const match = path.match(/^\\/([^\\/]+)\\/?$/);
+                data.account = match ? match[1] : null;
+            }
+
+            // 2. 게시 시간
+            const timeElement = document.querySelector('time');
+            if (timeElement) {
+                data.datetime = timeElement.getAttribute('datetime');
+                data.display_time = timeElement.innerText;
+            }
+
+            // 3. 좋아요 수 - "좋아요 N개" 패턴 매칭
+            const allText = document.body.innerText || '';
+            const likesMatch = allText.match(/좋아요\\s*([\\d,]+)개/);
+            if (likesMatch) {
+                data.likes = parseInt(likesMatch[1].replace(/,/g, ''));
+            } else {
+                // 영어 패턴: "N likes"
+                const likesMatchEn = allText.match(/([\\d,]+)\\s*likes?/i);
+                if (likesMatchEn) {
+                    data.likes = parseInt(likesMatchEn[1].replace(/,/g, ''));
+                }
+            }
+
+            // 4. 댓글 수 - "댓글 N개" 패턴 매칭
+            const commentsMatch = allText.match(/댓글\\s*([\\d,]+)개/);
+            if (commentsMatch) {
+                data.comments = parseInt(commentsMatch[1].replace(/,/g, ''));
+            } else {
+                // 영어 패턴: "N comments" 또는 "View all N comments"
+                const commentsMatchEn = allText.match(/(?:View all\\s+)?([\\d,]+)\\s*comments?/i);
+                if (commentsMatchEn) {
+                    data.comments = parseInt(commentsMatchEn[1].replace(/,/g, ''));
+                }
+            }
+
+            // 5. 본문 - 가장 긴 span 텍스트 (50자 이상)
+            const allSpans = Array.from(document.querySelectorAll('span'));
+            let maxLength = 0;
+            const excludePatterns = ['팔로워', 'follower', '좋아요', 'likes', '댓글', 'comments'];
+
+            for (const span of allSpans) {
+                const text = span.innerText || '';
+                if (text.length > maxLength && text.length > 50) {
+                    const lowerText = text.toLowerCase();
+                    const isExcluded = excludePatterns.some(p => lowerText.includes(p.toLowerCase()));
+                    if (!isExcluded) {
+                        maxLength = text.length;
+                        data.caption = text;
+                    }
+                }
+            }
+
+            // 6. 해시태그
+            const hashtagLinks = document.querySelectorAll('a[href*="/explore/tags/"]');
+            data.hashtags = Array.from(hashtagLinks).map(link => link.innerText);
+
+            // 7. 이미지 - cdninstagram 또는 scontent URL
+            const postImages = document.querySelectorAll('img[src*="cdninstagram"], img[src*="scontent"]');
+            data.images = Array.from(postImages)
+                .filter(img => {
+                    const src = img.src || '';
+                    // 프로필 이미지 제외 (작은 크기)
+                    return !src.includes('s150x150') &&
+                           !src.includes('s44x44') &&
+                           !src.includes('s32x32') &&
+                           !src.includes('s64x64') &&
+                           !src.includes('s320x320');
+                })
+                .map(img => ({ src: img.src, alt: img.alt || '' }));
+
+            // 8. 비디오 확인
+            const videos = document.querySelectorAll('video');
+            data.hasVideo = videos.length > 0;
+            if (data.hasVideo) {
+                data.videoUrls = Array.from(videos).map(v => v.src).filter(s => s);
+            }
+
+            return data;
+        }""")
+
     async def crawl_single_post(self, post_url: str) -> Optional[PostData]:
         """개별 게시물 URL로 직접 접근하여 정보 수집.
 
@@ -732,37 +859,44 @@ class InstagramCrawler:
             # 페이지 로드 대기
             await asyncio.sleep(2.0)
 
-            # article 요소 탐색 (개별 게시물 페이지에도 article 요소 존재)
-            article = await self.page.query_selector("article")
-            if not article:
-                # 디버깅: 실패 원인 파악을 위한 상세 로그
-                current_url = self.page.url
-                title = await self.page.title()
-                logger.warning(f"No article element found for: {post_url}")
-                logger.warning(f"  - Current URL: {current_url}")
-                logger.warning(f"  - Page title: {title}")
+            # 페이지 상태 확인
+            body_text = await self.page.inner_text("body")
 
-                # 페이지 상태 확인
-                body_text = await self.page.inner_text("body")
-                body_preview = body_text[:500] if body_text else "(empty)"
-
-                # 특정 상태 감지
-                if "Log in" in body_text or "Log In" in body_text or "로그인" in body_text:
-                    logger.warning("  - Reason: Login required")
-                elif "Sorry, this page isn't available" in body_text or "페이지를 사용할 수 없습니다" in body_text:
-                    logger.warning("  - Reason: Post deleted or unavailable")
-                elif "This Account is Private" in body_text or "비공개 계정" in body_text:
-                    logger.warning("  - Reason: Private account")
-                else:
-                    logger.warning(f"  - Body preview: {body_preview}")
-
+            # 로그인 필요 체크
+            if "Log in" in body_text or "Log In" in body_text or "로그인" in body_text:
+                logger.warning(f"Login required for: {post_url}")
                 return None
 
-            # 기존 extract_post 로직 재사용
-            post = await self.extract_post(article, 1)
-            post.url = post_url  # URL 보장
+            # 삭제/비공개 체크
+            if "Sorry, this page isn't available" in body_text or "페이지를 사용할 수 없습니다" in body_text:
+                logger.warning(f"Post unavailable: {post_url}")
+                return None
 
-            logger.info(f"Successfully crawled single post: {post.account}")
+            if "This Account is Private" in body_text or "비공개 계정" in body_text:
+                logger.warning(f"Private account: {post_url}")
+                return None
+
+            # 더보기 버튼 클릭 (본문 확장)
+            await self._click_more_button_on_page()
+
+            # 개별 게시물 전용 추출 로직
+            data = await self._extract_single_post_data()
+
+            # PostData 객체 생성
+            post = PostData(
+                index=1,
+                account=data.get("account"),
+                datetime_str=data.get("datetime"),
+                display_time=data.get("display_time"),
+                url=post_url,
+                caption=data.get("caption"),
+                images=data.get("images", []),
+                is_ad=False,
+                likes=data.get("likes"),
+                comments=data.get("comments"),
+            )
+
+            logger.info(f"Successfully crawled single post: {post.account}, likes={post.likes}, comments={post.comments}")
             return post
 
         except Exception as e:
