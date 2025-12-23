@@ -24,6 +24,8 @@ class InstagramCrawlRequest(Base):
     target_post_id = Column(Integer, ForeignKey("instagram_posts.id", ondelete="SET NULL"), nullable=True)
     # 크롤링 대상 URL (single_post_url 타입일 때 사용)
     target_url = Column(String(500), nullable=True)
+    # URL 타입 (URL 기반 크롤링 시): main_feed, account_profile, account_reels, single_post, single_reel, reels_explore, hashtag
+    url_type = Column(String(50), nullable=True, index=True)
 
     # 처리 상태
     status = Column(String(20), default="pending", index=True)  # 'pending', 'processing', 'completed', 'failed'

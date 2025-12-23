@@ -29,6 +29,25 @@
 	let filterDateFrom = '';
 	let filterDateTo = '';
 	let filterDateType: 'collected' | 'posted' = 'collected';
+	// LLM 필터
+	let filterLlmTag: string | null = null;
+	let filterLlmStatus: string | null = null;
+
+	// LLM 태그 옵션
+	const llmTagOptions = [
+		{ value: '이벤트', label: '이벤트', color: 'bg-purple-100 text-purple-700' },
+		{ value: '팝업', label: '팝업', color: 'bg-blue-100 text-blue-700' },
+		{ value: '홍보대사', label: '홍보대사', color: 'bg-pink-100 text-pink-700' },
+		{ value: '기타', label: '기타', color: 'bg-gray-100 text-gray-700' }
+	];
+
+	// LLM 상태 옵션
+	const llmStatusOptions = [
+		{ value: 'completed', label: '분석 완료', color: 'bg-green-100 text-green-700' },
+		{ value: 'pending', label: '대기중', color: 'bg-yellow-100 text-yellow-700' },
+		{ value: 'processing', label: '분석중', color: 'bg-blue-100 text-blue-700' },
+		{ value: 'failed', label: '실패', color: 'bg-red-100 text-red-700' }
+	];
 
 	// 상세보기 (FeedCard detailMode)
 	let selectedPost: InstagramPost | null = null;
@@ -83,6 +102,9 @@
 					params.posted_to = filterDateTo;
 				}
 			}
+			// LLM 필터
+			if (filterLlmTag) params.llm_tag = filterLlmTag;
+			if (filterLlmStatus) params.llm_status = filterLlmStatus;
 
 			const response = await instagramApi.posts(params);
 			posts = response.posts;
@@ -239,6 +261,26 @@
 		}
 	}
 
+	async function handleRequestLlmAnalysis(postId: number) {
+		try {
+			const result = await instagramApi.requestLlmAnalysis([postId]);
+			if (result.created_count > 0) {
+				alert('AI 분석 요청이 등록되었습니다. 워커가 처리하면 분석 결과가 업데이트됩니다.');
+				// 게시물 상태 업데이트 (pending으로)
+				posts = posts.map((p) =>
+					p.id === postId ? { ...p, llm_status: 'pending' as const } : p
+				);
+				if (selectedPost?.id === postId) {
+					selectedPost = { ...selectedPost, llm_status: 'pending' };
+				}
+			} else {
+				alert('이미 분석 요청이 존재하거나 처리 중입니다.');
+			}
+		} catch (e) {
+			alert('AI 분석 요청 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		}
+	}
+
 	function handleFilter() {
 		page = 1;
 		fetchPosts();
@@ -250,6 +292,8 @@
 		filterTags = [];
 		filterDateFrom = '';
 		filterDateTo = '';
+		filterLlmTag = null;
+		filterLlmStatus = null;
 		page = 1;
 		fetchPosts();
 	}
@@ -427,6 +471,50 @@
 			{/if}
 		</div>
 	{/if}
+
+	<!-- LLM 분류 필터 -->
+	<div class="mb-4 flex flex-wrap gap-2 items-center">
+		<span class="text-sm text-gray-500">AI 분류:</span>
+		{#each llmTagOptions as opt}
+			<button
+				onclick={() => {
+					filterLlmTag = filterLlmTag === opt.value ? null : opt.value;
+					handleFilter();
+				}}
+				class="px-3 py-1 text-sm rounded-full transition-colors {filterLlmTag === opt.value ? opt.color + ' ring-2 ring-offset-1 ring-purple-400' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+			>
+				{opt.label}
+				{#if filterLlmTag === opt.value}
+					<span class="ml-1">✓</span>
+				{/if}
+			</button>
+		{/each}
+		<span class="text-gray-300 mx-1">|</span>
+		<span class="text-sm text-gray-500">상태:</span>
+		{#each llmStatusOptions as opt}
+			<button
+				onclick={() => {
+					filterLlmStatus = filterLlmStatus === opt.value ? null : opt.value;
+					handleFilter();
+				}}
+				class="px-2 py-1 text-xs rounded-full transition-colors {filterLlmStatus === opt.value ? opt.color + ' ring-2 ring-offset-1 ring-gray-400' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+			>
+				{opt.label}
+			</button>
+		{/each}
+		{#if filterLlmTag || filterLlmStatus}
+			<button
+				onclick={() => {
+					filterLlmTag = null;
+					filterLlmStatus = null;
+					handleFilter();
+				}}
+				class="text-sm text-gray-500 hover:text-gray-700 underline"
+			>
+				AI 필터 초기화
+			</button>
+		{/if}
+	</div>
 
 	{#if loading}
 		<div class="flex justify-center items-center h-64">
@@ -669,6 +757,7 @@
 				onClose={closeDetail}
 				onDelete={deletePost}
 				onRecrawl={recrawlPost}
+				onRequestLlmAnalysis={handleRequestLlmAnalysis}
 				{availableTags}
 				onTagsUpdate={handleTagsUpdate}
 			/>

@@ -10,6 +10,7 @@
 		onClose?: () => void;
 		onDelete?: (id: number) => void;
 		onRecrawl?: (id: number) => void;
+		onRequestLlmAnalysis?: (id: number) => Promise<void>;
 		availableTags?: InstagramTag[];
 		onTagsUpdate?: (postId: number, tagIds: number[]) => void;
 	}
@@ -21,6 +22,7 @@
 		onClose,
 		onDelete,
 		onRecrawl,
+		onRequestLlmAnalysis,
 		availableTags = [],
 		onTagsUpdate
 	}: Props = $props();
@@ -37,6 +39,9 @@
 
 	// 재크롤링 상태
 	let isRecrawling = $state(false);
+
+	// LLM 분석 요청 상태
+	let isRequestingLlm = $state(false);
 
 	function toggleExpand() {
 		isExpanded = !isExpanded;
@@ -130,6 +135,17 @@
 			editingTags = false;
 		} finally {
 			savingTags = false;
+		}
+	}
+
+	// LLM 분석 요청
+	async function handleRequestLlmAnalysis() {
+		if (!onRequestLlmAnalysis || isRequestingLlm) return;
+		isRequestingLlm = true;
+		try {
+			await onRequestLlmAnalysis(post.id);
+		} finally {
+			isRequestingLlm = false;
 		}
 	}
 
@@ -596,6 +612,22 @@
 								재크롤링 중...
 							{:else}
 								&#8635; 재크롤링
+							{/if}
+						</button>
+					{/if}
+					<!-- AI 분석 요청 버튼 (미분석/실패 상태만) -->
+					{#if onRequestLlmAnalysis && (!post.llm_status || post.llm_status === 'failed')}
+						<button
+							onclick={handleRequestLlmAnalysis}
+							disabled={isRequestingLlm}
+							class="btn btn-sm bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
+							title="AI로 게시물 분류 요청"
+						>
+							{#if isRequestingLlm}
+								<span class="inline-block animate-spin mr-1">&#8635;</span>
+								요청 중...
+							{:else}
+								🤖 AI 분석 요청
 							{/if}
 						</button>
 					{/if}
