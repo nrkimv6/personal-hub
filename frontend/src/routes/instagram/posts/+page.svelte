@@ -28,7 +28,7 @@
 
 	// 필터
 	let filterAccount = '';
-	let filterIsAd: boolean | null = null;
+	let filterPostType: string | null = null;  // NORMAL, SPONSORED, SUGGESTED
 	let filterTags: string[] = [];
 	let filterDateFrom = '';
 	let filterDateTo = '';
@@ -192,7 +192,7 @@
 	// 활성 필터 카운트 계산
 	$: activeFilterCount = [
 		filterAccount,
-		filterIsAd !== null,
+		filterPostType !== null,
 		filterTags.length > 0,
 		filterDateFrom,
 		filterDateTo,
@@ -234,7 +234,7 @@
 		try {
 			const params: Record<string, unknown> = { page, limit };
 			if (filterAccount) params.account = filterAccount;
-			if (filterIsAd !== null) params.is_ad = filterIsAd;
+			if (filterPostType !== null) params.post_type = filterPostType;
 			if (filterTags.length > 0) params.tags = filterTags;
 			if (filterDateFrom) {
 				if (filterDateType === 'collected') {
@@ -451,7 +451,7 @@
 
 	function clearFilters() {
 		filterAccount = '';
-		filterIsAd = null;
+		filterPostType = null;
 		filterTags = [];
 		filterDateFrom = '';
 		filterDateTo = '';
