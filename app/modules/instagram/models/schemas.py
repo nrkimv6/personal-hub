@@ -46,6 +46,8 @@ class PostSchema(BaseModel):
     llm_summary: Optional[str] = None  # 이벤트 요약
     llm_location: Optional[dict] = None  # {"venue_name": str, "address": str} - 팝업 전용
     llm_analyzed_at: Optional[datetime] = None  # 분석 완료 시간
+    # 활성화 상태
+    is_active: bool = True
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -526,3 +528,30 @@ class CrawlHistoryResponse(BaseModel):
     total: int
     page: int
     limit: int
+
+
+# ============== LLM 분류 수정 스키마 ==============
+
+
+class LocationSchema(BaseModel):
+    """위치 정보 스키마 (팝업 전용)."""
+    venue_name: Optional[str] = None
+    address: Optional[str] = None
+
+
+class LlmClassificationUpdateSchema(BaseModel):
+    """LLM 분류 결과 수동 수정 스키마.
+
+    모든 필드는 Optional이며, 제공된 필드만 업데이트됩니다.
+    """
+    llm_tag: Optional[str] = None  # 이벤트/팝업/홍보대사/리그램/기타
+    llm_event_start: Optional[str] = None  # YYYY-MM-DD 또는 빈 문자열(삭제)
+    llm_event_end: Optional[str] = None  # YYYY-MM-DD 또는 빈 문자열(삭제)
+    llm_announcement_date: Optional[str] = None  # YYYY-MM-DD 또는 빈 문자열(삭제)
+    llm_prizes: Optional[List[str]] = None  # 경품 목록
+    llm_winner_count: Optional[int] = None  # 당첨자 수 (0이면 null로 저장)
+    llm_purchase_required: Optional[str] = None  # 예_전부/예_부분/아니오
+    llm_organizer: Optional[str] = None  # 주최사/브랜드
+    llm_summary: Optional[str] = None  # 이벤트 요약
+    llm_location: Optional[LocationSchema] = None  # 위치 정보 (팝업 전용)
+    llm_urls: Optional[List[str]] = None  # 관련 URL 목록

@@ -28,7 +28,7 @@
 
 	// 필터
 	let filterAccount = '';
-	let filterIsAd: boolean | null = null;
+	let filterPostType: string | null = null;  // NORMAL, SPONSORED, SUGGESTED
 	let filterTags: string[] = [];
 	let filterDateFrom = '';
 	let filterDateTo = '';
@@ -41,6 +41,8 @@
 	let sortBy: string | null = null;
 	let sortOrder: string = 'asc';
 	let includeEnded: boolean = false;  // 종료된 항목 포함
+	let includeUnknownPeriod: boolean = false;  // 기간 미정 항목 포함
+	let filterIsActive: boolean = true;  // 활성화된 항목만 보기 (기본값)
 
 	// LLM 태그 옵션
 	const llmTagOptions = [
@@ -101,17 +103,77 @@
 		fetchPosts();
 	}
 
+	// 활성화 필터 토글
+	function toggleIsActiveFilter() {
+		filterIsActive = !filterIsActive;
+		page = 1;
+		fetchPosts();
+	}
+
+	// 기간 미정 포함 토글
+	function toggleIncludeUnknownPeriod() {
+		includeUnknownPeriod = !includeUnknownPeriod;
+		page = 1;
+		fetchPosts();
+	}
+
+	// 게시물 활성화/비활성화 토글
+	async function togglePostActive(post: InstagramPost, event: Event) {
+		event.stopPropagation();  // 행 클릭 이벤트 방지
+		try {
+			await instagramApi.toggleActive(post.id, !post.is_active);
+			// 비활성화한 경우 filterIsActive가 true면 목록에서 제거됨
+			if (filterIsActive && post.is_active) {
+				posts = posts.filter(p => p.id !== post.id);
+				total--;
+			} else {
+				post.is_active = !post.is_active;
+				posts = [...posts];  // 반응형 업데이트
+			}
+		} catch (e) {
+			console.error('활성화 상태 변경 실패:', e);
+			alert('활성화 상태 변경에 실패했습니다.');
+		}
+	}
+
 	// 오늘 날짜 기준 진행 중 여부 확인
 	function isOngoing(post: InstagramPost): boolean {
 		const today = new Date().toISOString().split('T')[0];
 		const start = post.llm_event_start;
 		const end = post.llm_event_end;
 
-		// 시작일이 없거나 오늘 이전이고, 종료일이 없거나 오늘 이후면 진행 중
+		// 종료일이 없으면 "기간 미정" → 진행 중 아님
+		if (!end) return false;
+
+		// 시작일이 없거나 오늘 이전이고, 종료일이 오늘 이후면 진행 중
 		const startOk = !start || start <= today;
-		const endOk = !end || end >= today;
+		const endOk = end >= today;
 		return startOk && endOk;
 	}
+
+	// 기간 미정 여부 확인
+	function isUnknownPeriod(post: InstagramPost): boolean {
+		return !post.llm_event_end;
+	}
+
+	// 오늘 마감 여부 확인
+	function isEndingToday(post: InstagramPost): boolean {
+		const today = new Date().toISOString().split('T')[0];
+		return post.llm_event_end === today;
+	}
+
+	// 이벤트/팝업 탭용 정렬된 posts (오늘 마감 우선)
+	$: sortedPosts = (activeTab === 'events' || activeTab === 'popup')
+		? [...posts].sort((a, b) => {
+			const aEndingToday = isEndingToday(a);
+			const bEndingToday = isEndingToday(b);
+			// 오늘 마감인 항목 우선
+			if (aEndingToday && !bEndingToday) return -1;
+			if (!aEndingToday && bEndingToday) return 1;
+			// 나머지는 기존 순서 유지 (백엔드에서 이미 정렬됨)
+			return 0;
+		})
+		: posts;
 
 	// 위치 정보 포맷팅
 	function formatLocation(location: { venue_name?: string; address?: string } | null): string {
@@ -130,7 +192,7 @@
 	// 활성 필터 카운트 계산
 	$: activeFilterCount = [
 		filterAccount,
-		filterIsAd !== null,
+		filterPostType !== null,
 		filterTags.length > 0,
 		filterDateFrom,
 		filterDateTo,
@@ -172,7 +234,7 @@
 		try {
 			const params: Record<string, unknown> = { page, limit };
 			if (filterAccount) params.account = filterAccount;
-			if (filterIsAd !== null) params.is_ad = filterIsAd;
+			if (filterPostType !== null) params.post_type = filterPostType;
 			if (filterTags.length > 0) params.tags = filterTags;
 			if (filterDateFrom) {
 				if (filterDateType === 'collected') {
@@ -193,8 +255,11 @@
 			if (filterLlmStatus) params.llm_status = filterLlmStatus;
 			// 이벤트/팝업 필터
 			if (filterEventStatus) params.event_status = filterEventStatus;
+			if (includeUnknownPeriod) params.include_unknown_period = true;
 			if (sortBy) params.sort_by = sortBy;
 			if (sortOrder) params.sort_order = sortOrder;
+			// 활성화 상태 필터
+			if (filterIsActive) params.is_active = true;
 
 			const response = await instagramApi.posts(params);
 			posts = response.posts;
@@ -371,6 +436,14 @@
 		}
 	}
 
+	function handleLlmUpdate(updatedPost: InstagramPost) {
+		// 목록에서 해당 게시물 업데이트
+		posts = posts.map((p) => (p.id === updatedPost.id ? updatedPost : p));
+		if (selectedPost?.id === updatedPost.id) {
+			selectedPost = updatedPost;
+		}
+	}
+
 	function handleFilter() {
 		page = 1;
 		fetchPosts();
@@ -378,7 +451,7 @@
 
 	function clearFilters() {
 		filterAccount = '';
-		filterIsAd = null;
+		filterPostType = null;
 		filterTags = [];
 		filterDateFrom = '';
 		filterDateTo = '';
@@ -586,32 +659,7 @@
 				</div>
 			</div>
 
-			<!-- 태그 필터 -->
-			{#if availableTags.length > 0}
-				<div class="flex flex-col gap-2">
-					<label class="text-sm font-medium text-gray-700">태그 필터</label>
-					<div class="flex flex-wrap gap-2">
-						{#each availableTags as tag (tag.id)}
-							<button
-								onclick={() => {
-									toggleTagFilter(tag.name);
-								}}
-								class="px-3 py-1.5 text-sm rounded-full transition-colors"
-								style="background-color: {filterTags.includes(tag.name)
-									? tag.color
-									: '#f3f4f6'}; color: {filterTags.includes(tag.name) ? 'white' : '#374151'};"
-							>
-								{tag.display_name}
-								{#if filterTags.includes(tag.name)}
-									<span class="ml-1">✓</span>
-								{/if}
-							</button>
-						{/each}
-					</div>
-				</div>
-			{/if}
-
-			<!-- AI 분류 필터 -->
+				<!-- AI 분류 필터 -->
 			<div class="flex flex-col gap-2">
 				<label class="text-sm font-medium text-gray-700">AI 분류</label>
 				<div class="flex flex-wrap gap-2">
@@ -689,44 +737,6 @@
 			{/if}
 		</div>
 
-		<!-- 태그 필터 -->
-		{#if availableTags.length > 0}
-			<div class="hidden md:flex mb-4 flex-wrap gap-2 items-center">
-				<span class="text-sm text-gray-500">태그 필터:</span>
-				{#each availableTags as tag (tag.id)}
-					<button
-						onclick={() => {
-							toggleTagFilter(tag.name);
-							handleFilter();
-						}}
-						class="px-3 py-1 text-sm rounded-full transition-colors"
-						style="background-color: {filterTags.includes(tag.name)
-							? tag.color
-							: '#f3f4f6'}; color: {filterTags.includes(tag.name) ? 'white' : '#374151'};"
-					>
-						{tag.display_name}
-						{#if filterTags.includes(tag.name)}
-							<span class="ml-1">✓</span>
-						{/if}
-					</button>
-				{/each}
-				{#if filterTags.length > 0}
-					<button
-						onclick={() => {
-							filterTags = [];
-							handleFilter();
-						}}
-						class="text-sm text-gray-500 hover:text-gray-700 underline"
-					>
-						초기화
-					</button>
-					<button onclick={saveDefaultTags} class="text-sm text-blue-600 hover:text-blue-800 underline">
-						기본값 저장
-					</button>
-				{/if}
-			</div>
-		{/if}
-
 		<!-- LLM 분류 필터 -->
 		<div class="hidden md:flex mb-4 flex-wrap gap-2 items-center">
 			<span class="text-sm text-gray-500">AI 분류:</span>
@@ -793,23 +803,48 @@
 	{:else}
 		<!-- 이벤트/팝업 탭: LLM 결과 테이블 뷰 -->
 		{#if activeTab === 'events' || activeTab === 'popup'}
-			<!-- 종료된 항목 포함 토글 -->
+			<!-- 필터 옵션 -->
 			<div class="flex items-center justify-between mb-4">
 				<div class="flex items-center gap-2 text-sm text-gray-600">
 					<span>총 {total}건</span>
-					{#if !includeEnded}
-						<span class="text-blue-600">(진행중{activeTab === 'popup' ? '+예정' : ''} 필터 적용)</span>
+					{#if !includeEnded && !includeUnknownPeriod}
+						<span class="text-blue-600">(진행중{activeTab === 'popup' ? '+예정' : ''} 필터)</span>
+					{:else if !includeEnded && includeUnknownPeriod}
+						<span class="text-blue-600">(진행중+기간미정)</span>
+					{/if}
+					{#if filterIsActive}
+						<span class="text-green-600">(활성화만)</span>
 					{/if}
 				</div>
-				<label class="flex items-center gap-2 cursor-pointer">
-					<input
-						type="checkbox"
-						checked={includeEnded}
-						onchange={toggleIncludeEnded}
-						class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-					/>
-					<span class="text-sm text-gray-600">종료된 {activeTab === 'events' ? '이벤트' : '팝업'} 포함</span>
-				</label>
+				<div class="flex items-center gap-4">
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input
+							type="checkbox"
+							checked={!filterIsActive}
+							onchange={toggleIsActiveFilter}
+							class="w-4 h-4 text-gray-600 rounded border-gray-300 focus:ring-gray-500"
+						/>
+						<span class="text-sm text-gray-600">비활성화 포함</span>
+					</label>
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input
+							type="checkbox"
+							checked={includeUnknownPeriod}
+							onchange={toggleIncludeUnknownPeriod}
+							class="w-4 h-4 text-amber-600 rounded border-gray-300 focus:ring-amber-500"
+						/>
+						<span class="text-sm text-gray-600">기간 미정 포함</span>
+					</label>
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input
+							type="checkbox"
+							checked={includeEnded}
+							onchange={toggleIncludeEnded}
+							class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+						/>
+						<span class="text-sm text-gray-600">종료된 항목 포함</span>
+					</label>
+				</div>
 			</div>
 			<div class="bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
 				<div class="overflow-x-auto">
@@ -829,12 +864,13 @@
 								{/if}
 								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-xs">요약</th>
 								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">원본</th>
+								<th class="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">관리</th>
 							</tr>
 						</thead>
 						<tbody class="divide-y divide-gray-200">
-							{#each posts as post (post.id)}
+							{#each sortedPosts as post (post.id)}
 								<tr
-									class="cursor-pointer transition-colors {isOngoing(post) ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50'}"
+									class="cursor-pointer transition-colors {isEndingToday(post) ? 'bg-orange-100 hover:bg-orange-200 font-semibold' : isUnknownPeriod(post) ? 'bg-amber-50 hover:bg-amber-100' : isOngoing(post) ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50'}"
 									onclick={() => openDetail(post)}
 									onkeydown={(e) => e.key === 'Enter' && openDetail(post)}
 									tabindex="0"
@@ -845,11 +881,11 @@
 											<img
 												src={post.images[0].src}
 												alt={post.images[0].alt || '게시물 이미지'}
-												class="w-14 h-14 object-cover rounded"
+												class="w-14 h-14 object-cover rounded {isEndingToday(post) ? 'ring-2 ring-orange-400' : ''}"
 												loading="lazy"
 											/>
 										{:else}
-											<div class="w-14 h-14 bg-gray-200 rounded flex items-center justify-center">
+											<div class="w-14 h-14 bg-gray-200 rounded flex items-center justify-center {isEndingToday(post) ? 'ring-2 ring-orange-400' : ''}">
 												<span class="text-gray-400">?</span>
 											</div>
 										{/if}
@@ -865,17 +901,24 @@
 									</td>
 									<!-- 기간 -->
 									<td class="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">
-										{#if post.llm_event_start || post.llm_event_end}
+										{#if post.llm_event_end}
 											<div class="flex flex-col gap-0.5">
 												{#if post.llm_event_start}
 													<span class="text-xs text-gray-500">시작: {post.llm_event_start}</span>
 												{/if}
-												{#if post.llm_event_end}
+												{#if isEndingToday(post)}
+													<span class="text-xs font-bold text-orange-600 bg-orange-50 px-1 rounded">오늘 마감!</span>
+												{:else}
 													<span class="text-xs text-gray-500">종료: {post.llm_event_end}</span>
 												{/if}
 											</div>
+										{:else if post.llm_event_start}
+											<div class="flex flex-col gap-0.5">
+												<span class="text-xs text-gray-500">시작: {post.llm_event_start}</span>
+												<span class="text-xs text-amber-600 bg-amber-50 px-1 rounded">기간 미정</span>
+											</div>
 										{:else}
-											<span class="text-gray-400">-</span>
+											<span class="text-xs text-amber-600 bg-amber-50 px-1 rounded">기간 미정</span>
 										{/if}
 									</td>
 									<!-- 발표일 -->
@@ -950,6 +993,16 @@
 											<span class="text-gray-400">-</span>
 										{/if}
 									</td>
+									<!-- 관리 (활성화/비활성화 토글) -->
+									<td class="px-3 py-3 text-center">
+										<button
+											onclick={(e) => togglePostActive(post, e)}
+											class="px-2 py-1 text-xs rounded transition-colors {post.is_active ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}"
+											title={post.is_active ? '비활성화' : '활성화'}
+										>
+											{post.is_active ? '숨기기' : '보이기'}
+										</button>
+									</td>
 								</tr>
 							{/each}
 						</tbody>
@@ -966,7 +1019,7 @@
 							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">이미지</th>
 							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">계정</th>
 							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">내용</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">태그</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">AI 분류</th>
 							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">업로드일</th>
 							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">수집일</th>
 							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">액션</th>
@@ -1007,16 +1060,6 @@
 								</td>
 								<td class="px-4 py-3">
 									<div class="flex flex-wrap gap-1">
-										{#if post.tags && post.tags.length > 0}
-											{#each post.tags as tag}
-												<span
-													class="px-1.5 py-0.5 text-xs rounded-full text-white"
-													style="background-color: {tag.color};"
-												>
-													{tag.display_name}
-												</span>
-											{/each}
-										{/if}
 										{#if post.llm_status === 'completed' && post.llm_tag}
 											<span class="px-1.5 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700" title="AI 분류">
 												{post.llm_tag}
@@ -1025,8 +1068,7 @@
 											<span class="px-1.5 py-0.5 text-xs rounded-full bg-gray-100 text-gray-500 animate-pulse" title="AI 분석 중">
 												AI
 											</span>
-										{/if}
-										{#if !post.tags?.length && !post.llm_status}
+										{:else}
 											<span class="text-gray-400 text-sm">-</span>
 										{/if}
 									</div>
@@ -1097,22 +1139,13 @@
 							</div>
 							<p class="text-xs text-gray-600 truncate">{truncate(post.caption, 40)}</p>
 							<div class="flex items-center gap-1 mt-1 flex-wrap">
-								{#if post.tags && post.tags.length > 0}
-									{#each post.tags.slice(0, 2) as tag}
-										<span
-											class="px-1.5 py-0.5 text-xs rounded-full text-white"
-											style="background-color: {tag.color};"
-										>
-											{tag.display_name}
-										</span>
-									{/each}
-									{#if post.tags.length > 2}
-										<span class="text-xs text-gray-400">+{post.tags.length - 2}</span>
-									{/if}
-								{/if}
 								{#if post.llm_status === 'completed' && post.llm_tag}
 									<span class="px-1.5 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700">
 										{post.llm_tag}
+									</span>
+								{:else if post.llm_status === 'pending' || post.llm_status === 'processing'}
+									<span class="px-1.5 py-0.5 text-xs rounded-full bg-gray-100 text-gray-500 animate-pulse">
+										AI
 									</span>
 								{/if}
 								<span class="text-xs text-gray-400 ml-auto">{formatDate(post.collected_at)}</span>
@@ -1160,22 +1193,9 @@
 									>
 								{/if}
 							</div>
-							<!-- 태그 표시 -->
-							{#if post.tags?.length || post.llm_status}
+							<!-- AI 분류 표시 -->
+							{#if post.llm_status}
 								<div class="flex flex-wrap gap-1">
-									{#if post.tags && post.tags.length > 0}
-										{#each post.tags.slice(0, 2) as tag}
-											<span
-												class="px-1.5 py-0.5 text-xs rounded-full text-white"
-												style="background-color: {tag.color};"
-											>
-												{tag.display_name}
-											</span>
-										{/each}
-										{#if post.tags.length > 2}
-											<span class="text-xs text-gray-400">+{post.tags.length - 2}</span>
-										{/if}
-									{/if}
 									{#if post.llm_status === 'completed' && post.llm_tag}
 										<span class="px-1.5 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700" title="AI 분류">
 											{post.llm_tag}
@@ -1250,6 +1270,7 @@
 				onRequestLlmAnalysis={handleRequestLlmAnalysis}
 				{availableTags}
 				onTagsUpdate={handleTagsUpdate}
+				onLlmUpdate={handleLlmUpdate}
 			/>
 		</div>
 	</div>

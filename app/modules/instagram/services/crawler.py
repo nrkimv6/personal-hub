@@ -47,7 +47,9 @@ class PostData:
     url: Optional[str] = None
     caption: Optional[str] = None
     images: List[Dict[str, str]] = field(default_factory=list)
-    is_ad: bool = False
+    is_ad: bool = False  # 하위호환성 유지 (post_type == 'SPONSORED')
+    post_type: str = "NORMAL"  # 'NORMAL', 'SPONSORED', 'SUGGESTED'
+    cta_url: Optional[str] = None  # 광고 CTA 링크 ("더 알아보기" 버튼)
     likes: Optional[int] = None
     comments: Optional[int] = None
 
@@ -107,26 +109,47 @@ class InstagramCrawler:
             data.url = basic.get("url")
             data.images = basic.get("images", [])
             data.is_ad = basic.get("is_ad", False)
+            data.post_type = basic.get("post_type", "NORMAL")
+            data.cta_url = basic.get("cta_url")
             data.likes = basic.get("likes")
             data.comments = basic.get("comments")
 
-            # 더보기 버튼 클릭 (있으면) - 최대 2회 시도
-            if basic.get("has_more_button"):
-                for attempt in range(2):
-                    clicked = await self._click_more_button(article)
-                    if clicked:
-                        await asyncio.sleep(CrawlOptions().wait_after_more)
-                        # 클릭 후 버튼이 사라졌는지 확인
-                        still_has_more = await self._has_more_button(article)
-                        if not still_has_more:
-                            break  # 성공적으로 확장됨
-                        logger.debug(f"More button still exists after click, attempt {attempt + 1}")
-                    else:
-                        logger.warning(f"Failed to click more button, attempt {attempt + 1}")
-                        await asyncio.sleep(0.5)
+            # 본문 추출 (더보기 버튼 클릭 포함)
+            # 클릭 전 본문 미리 추출
+            caption_before = await self._extract_caption(article, data.account)
+            len_before = len(caption_before) if caption_before else 0
 
-            # 본문 추출
-            data.caption = await self._extract_caption(article, data.account)
+            if basic.get("has_more_button"):
+                clicked = await self._click_more_button(article)
+                if clicked:
+                    # 본문 길이가 늘어날 때까지 폴링 (최대 2초, 0.2초 간격)
+                    caption_expanded = False
+                    for poll in range(10):
+                        await asyncio.sleep(0.2)
+                        caption_after = await self._extract_caption(article, data.account)
+                        len_after = len(caption_after) if caption_after else 0
+                        if len_after > len_before:
+                            data.caption = caption_after
+                            caption_expanded = True
+                            logger.debug(
+                                f"Caption expanded: {len_before} -> {len_after} chars "
+                                f"(+{len_after - len_before}, poll={poll + 1})"
+                            )
+                            break
+                    if not caption_expanded:
+                        # 타임아웃: 클릭 전 본문 사용
+                        data.caption = caption_before
+                        logger.warning(
+                            f"Caption expansion timeout: stayed at {len_before} chars "
+                            f"(account={data.account})"
+                        )
+                else:
+                    # 클릭 실패: 클릭 전 본문 사용
+                    data.caption = caption_before
+                    logger.warning(f"Failed to click more button (account={data.account})")
+            else:
+                # 더보기 버튼 없음: 클릭 전 본문 그대로 사용
+                data.caption = caption_before
 
         except Exception as e:
             logger.error(f"Failed to extract post #{index}: {e}")
@@ -168,10 +191,45 @@ class InstagramCrawler:
                 result.url = 'https://www.instagram.com' + href.split('?')[0];
             }
 
-            // 광고 여부: "회원님을 위한 추천", "Sponsored" 등 텍스트 기반 판별
-            const adIndicators = ['회원님을 위한 추천', 'Sponsored', 'スポンサー', '赞助内容'];
+            // 게시물 유형 판별: NORMAL, SPONSORED, SUGGESTED
             const text = el.textContent || '';
-            result.is_ad = adIndicators.some(indicator => text.includes(indicator));
+
+            // 광고 체크 (유료 프로모션) - "광고", "Sponsored"
+            const sponsoredIndicators = ['광고', 'Sponsored', 'スポンサー', '赞助内容'];
+            const isSponsored = sponsoredIndicators.some(indicator => text.includes(indicator));
+
+            // 추천 체크 (알고리즘 추천) - "회원님을 위한 추천", "Suggested for you"
+            const suggestedIndicators = ['회원님을 위한 추천', 'Suggested for you', 'おすすめ', '推荐'];
+            const isSuggested = suggestedIndicators.some(indicator => text.includes(indicator));
+
+            // 게시물 유형 결정 (광고가 추천보다 우선)
+            if (isSponsored) {
+                result.post_type = 'SPONSORED';
+                result.is_ad = true;
+            } else if (isSuggested) {
+                result.post_type = 'SUGGESTED';
+                result.is_ad = false;
+            } else {
+                result.post_type = 'NORMAL';
+                result.is_ad = false;
+            }
+
+            // CTA 링크 추출 (광고만 해당) - "더 알아보기", "Learn More" 등
+            result.cta_url = null;
+            if (isSponsored) {
+                const links = Array.from(el.querySelectorAll('a'));
+                const ctaLink = links.find(link => {
+                    const linkText = link.innerText.trim();
+                    const ariaLabel = link.getAttribute('aria-label') || '';
+                    return linkText.includes('더 알아보기') ||
+                           linkText.includes('Learn More') ||
+                           linkText.includes('자세히 보기') ||
+                           linkText.includes('Shop now') ||
+                           linkText.includes('지금 쇼핑하기') ||
+                           ariaLabel.includes('더 알아보기');
+                });
+                result.cta_url = ctaLink ? ctaLink.href : null;
+            }
 
             // 이미지: alt="Photo by" 우선, scontent URL 폴백
             // 프로필 이미지(s150x150, 44x44, 32x32 등 작은 크기) 제외
@@ -202,26 +260,56 @@ class InstagramCrawler:
             const allSpans = Array.from(el.querySelectorAll('span'));
             result.has_more_button = allSpans.some(s => s.textContent.trim() === '더 보기');
 
-            // 좋아요/댓글 수: section 내 숫자 span
-            const section = el.querySelector('section');
-            if (section) {
-                const numberSpans = Array.from(section.querySelectorAll('span'));
-                const numbers = [];
-                for (const span of numberSpans) {
-                    const text = span.textContent.trim();
-                    // 숫자만 있거나, 천/만 단위 포함
-                    if (/^\d+$/.test(text)) {
-                        numbers.push(parseInt(text));
-                    } else if (/^[\d,.]+[천만]?$/.test(text)) {
-                        // 1.1천 -> 1100, 1.5만 -> 15000
-                        let num = parseFloat(text.replace(/,/g, ''));
-                        if (text.includes('천')) num *= 1000;
-                        if (text.includes('만')) num *= 10000;
-                        numbers.push(Math.floor(num));
+            // 좋아요/댓글 수: 텍스트 패턴 우선, 숫자 폴백
+            // 광고/추천 게시물에서도 작동하도록 "좋아요 N개", "댓글 N개" 패턴 먼저 시도
+            const sections = el.querySelectorAll('section');
+            let likesFound = false;
+            let commentsFound = false;
+
+            for (const section of sections) {
+                const spans = section.querySelectorAll('span');
+                for (const span of spans) {
+                    const text = span.innerText;
+                    // 좋아요 패턴: "좋아요 N개"
+                    if (!likesFound) {
+                        const likesMatch = text.match(/좋아요\s*(\d+)개/);
+                        if (likesMatch) {
+                            result.likes = parseInt(likesMatch[1]);
+                            likesFound = true;
+                        }
+                    }
+                    // 댓글 패턴: "댓글 N개"
+                    if (!commentsFound) {
+                        const commentsMatch = text.match(/댓글\s*(\d+)개/);
+                        if (commentsMatch) {
+                            result.comments = parseInt(commentsMatch[1]);
+                            commentsFound = true;
+                        }
                     }
                 }
-                result.likes = numbers[0] || null;
-                result.comments = numbers[1] || null;
+                if (likesFound && commentsFound) break;
+            }
+
+            // 폴백: 숫자만 추출 (기존 방식)
+            if (!likesFound || !commentsFound) {
+                const section = el.querySelector('section');
+                if (section) {
+                    const numberSpans = Array.from(section.querySelectorAll('span'));
+                    const numbers = [];
+                    for (const span of numberSpans) {
+                        const text = span.textContent.trim();
+                        if (/^\d+$/.test(text)) {
+                            numbers.push(parseInt(text));
+                        } else if (/^[\d,.]+[천만]?$/.test(text)) {
+                            let num = parseFloat(text.replace(/,/g, ''));
+                            if (text.includes('천')) num *= 1000;
+                            if (text.includes('만')) num *= 10000;
+                            numbers.push(Math.floor(num));
+                        }
+                    }
+                    if (!likesFound && numbers[0]) result.likes = numbers[0];
+                    if (!commentsFound && numbers[1]) result.comments = numbers[1];
+                }
             }
 
             return result;
@@ -291,44 +379,85 @@ class InstagramCrawler:
         article: ElementHandle,
         account: Optional[str]
     ) -> Optional[str]:
-        """본문 추출."""
-        if not account:
-            return None
+        """본문 추출.
 
+        1차: 해시태그 기반 추출 (innerText로 줄바꿈 유지)
+        2차: 구조 기반 추출 ("저장" → 계정명 → "좋아요/댓글")
+        3차 폴백: 가장 긴 span 텍스트 (광고/추천 게시물용)
+        """
         try:
             return await article.evaluate("""(el, account) => {
-                if (!account) return null;
+                // 1차: 해시태그 기반 추출 (innerText로 줄바꿈 유지)
+                const hashtagLinks = el.querySelectorAll('a[href*="/explore/tags/"]');
+                if (hashtagLinks.length > 0) {
+                    const firstHashtag = hashtagLinks[0];
+                    let currentElement = firstHashtag;
 
-                const text = el.textContent;
+                    // 해시태그를 포함하는 span까지 올라가기
+                    while (currentElement && currentElement.tagName !== 'SPAN') {
+                        currentElement = currentElement.parentElement;
+                    }
 
-                // "저장" 이후 본문 영역 찾기
-                const saveIdx = text.indexOf('저장');
-                if (saveIdx === -1) return null;
-
-                const afterSave = text.substring(saveIdx + 2);
-
-                // 계정명 이후부터 추출
-                const accountIdx = afterSave.indexOf(account);
-                if (accountIdx === -1) return null;
-
-                const afterAccount = afterSave.substring(accountIdx + account.length);
-
-                // "좋아요" 또는 "댓글"까지의 본문
-                const endPatterns = ['좋아요', '댓글', 'Like', 'Comment'];
-                let endIdx = -1;
-
-                for (const pattern of endPatterns) {
-                    const idx = afterAccount.indexOf(pattern);
-                    if (idx !== -1 && (endIdx === -1 || idx < endIdx)) {
-                        endIdx = idx;
+                    if (currentElement) {
+                        const caption = currentElement.innerText;
+                        if (caption && caption.length > 10) {
+                            return caption;
+                        }
                     }
                 }
 
-                if (endIdx === -1) {
-                    return afterAccount.trim().substring(0, 1000);
+                // 2차: 구조 기반 추출 (account가 있을 때)
+                if (account) {
+                    const text = el.textContent;
+
+                    // "저장" 이후 본문 영역 찾기
+                    const saveIdx = text.indexOf('저장');
+                    if (saveIdx !== -1) {
+                        const afterSave = text.substring(saveIdx + 2);
+
+                        // 계정명 이후부터 추출
+                        const accountIdx = afterSave.indexOf(account);
+                        if (accountIdx !== -1) {
+                            const afterAccount = afterSave.substring(accountIdx + account.length);
+
+                            // "좋아요" 또는 "댓글"까지의 본문
+                            const endPatterns = ['좋아요', '댓글', 'Like', 'Comment'];
+                            let endIdx = -1;
+
+                            for (const pattern of endPatterns) {
+                                const idx = afterAccount.indexOf(pattern);
+                                if (idx !== -1 && (endIdx === -1 || idx < endIdx)) {
+                                    endIdx = idx;
+                                }
+                            }
+
+                            const caption = endIdx === -1
+                                ? afterAccount.trim().substring(0, 1000)
+                                : afterAccount.substring(0, endIdx).trim();
+
+                            // 유효한 본문이면 반환
+                            if (caption && caption.length > 10) {
+                                return caption;
+                            }
+                        }
+                    }
                 }
 
-                return afterAccount.substring(0, endIdx).trim();
+                // 3차 폴백: 가장 긴 span 텍스트 (광고/추천 게시물용)
+                // 가이드 문서: 50자 이상이고, "팔로워" 등 메타 정보 제외
+                const allSpans = Array.from(el.querySelectorAll('span'));
+                let captionText = '';
+                let maxLength = 0;
+
+                for (const span of allSpans) {
+                    const text = span.innerText;
+                    if (text && text.length > maxLength && text.length > 50 && !text.includes('팔로워')) {
+                        maxLength = text.length;
+                        captionText = text;
+                    }
+                }
+
+                return captionText || null;
             }""", account)
         except Exception as e:
             logger.warning(f"Failed to extract caption: {e}")
@@ -796,67 +925,86 @@ class InstagramCrawler:
                 }
             }
 
-            // 5. 본문 - [role="main"] 내부에서 조건에 맞는 span 찾기
-            const main = document.querySelector('[role="main"]');
-            if (main) {
-                const spans = main.querySelectorAll('span');
+            // 5. 본문 - 가이드 문서 방식 (1순위: 해시태그 기반, 2순위: fallback)
+            const hashtagLinks = document.querySelectorAll('a[href*="/explore/tags/"]');
 
-                for (const span of spans) {
-                    const text = span.innerText || '';
+            // 1순위: 해시태그 기반 방법 (가장 정확)
+            if (hashtagLinks.length > 0) {
+                let currentElement = hashtagLinks[0];
 
-                    // 본문 조건:
-                    // 1. 길이가 100~600자
-                    // 2. 해시태그 포함 (#)
-                    // 3. 언어 목록이나 댓글이 아님
-                    if (text.length > 100 &&
-                        text.length < 600 &&
-                        text.includes('#') &&
-                        !text.includes('Afrikaans') &&
-                        !text.includes('Português') &&
-                        !text.includes('답글') &&
-                        !text.includes('팔로워') &&
-                        !text.includes('follower')) {
-
-                        // 작성자명과 시간 정보 제거 (처음 3줄)
-                        const lines = text.split('\\n');
-                        if (lines.length > 3) {
-                            data.caption = lines.slice(3).join('\\n').trim();
-                        } else {
-                            data.caption = text;
-                        }
-                        break; // 첫 번째로 조건을 만족하는 것이 본문
-                    }
+                // 해시태그를 포함하는 span까지 올라가기
+                while (currentElement && currentElement.tagName !== 'SPAN') {
+                    currentElement = currentElement.parentElement;
                 }
 
-                // 해시태그 없는 본문 폴백 (100~600자, 제외 패턴 없음)
-                if (!data.caption) {
+                if (currentElement) {
+                    data.caption = currentElement.innerText;
+                }
+            }
+
+            // 2순위: 해시태그가 없는 경우 (대체 방법)
+            if (!data.caption) {
+                const main = document.querySelector('[role="main"]') || document.querySelector('article') || document.body;
+
+                if (main) {
+                    const spans = main.querySelectorAll('span');
+                    let bestCaption = '';
+                    let bestLength = 0;
+
+                    const excludePatterns = [
+                        'Afrikaans', 'Português', 'Deutsch', 'English', 'Español',
+                        '답글', '팔로워', 'follower', '게시물', 'posts'
+                    ];
+
                     for (const span of spans) {
                         const text = span.innerText || '';
 
-                        if (text.length > 100 &&
-                            text.length < 600 &&
-                            !text.includes('Afrikaans') &&
-                            !text.includes('Português') &&
-                            !text.includes('답글') &&
-                            !text.includes('팔로워') &&
-                            !text.includes('follower') &&
-                            !text.includes('좋아요') &&
-                            !text.includes('댓글')) {
+                        // 최소 20자 이상
+                        if (text.length < 20) continue;
 
-                            const lines = text.split('\\n');
-                            if (lines.length > 3) {
-                                data.caption = lines.slice(3).join('\\n').trim();
-                            } else {
-                                data.caption = text;
+                        // 제외 패턴 확인
+                        const hasExcludePattern = excludePatterns.some(p => text.includes(p));
+                        if (hasExcludePattern) continue;
+
+                        // 가장 긴 텍스트 선택
+                        if (text.length > bestLength) {
+                            bestLength = text.length;
+                            bestCaption = text;
+                        }
+                    }
+
+                    // 작성자명/시간 제거
+                    if (bestCaption) {
+                        const lines = bestCaption.split('\\n');
+
+                        // 첫 줄이 사용자명인지 확인
+                        if (lines.length > 0 && lines[0].match(/^[a-z0-9._]+$/i)) {
+                            let startIndex = 1;
+
+                            // 빈 줄, "수정됨", "•", 시간 표시 건너뛰기
+                            while (startIndex < lines.length) {
+                                const line = lines[startIndex].trim();
+
+                                if (line === '' ||
+                                    line === '수정됨' ||
+                                    line === '•' ||
+                                    line.match(/^\\d+[년월주일시분초]$/) ||
+                                    line.match(/^\\d+[mhdwy]$/i)) {
+                                    startIndex++;
+                                } else {
+                                    break;
+                                }
                             }
-                            break;
+
+                            data.caption = lines.slice(startIndex).join('\\n').trim();
+                        } else {
+                            data.caption = bestCaption;
                         }
                     }
                 }
             }
 
-            // 6. 해시태그
-            const hashtagLinks = document.querySelectorAll('a[href*="/explore/tags/"]');
+            // 6. 해시태그 (위에서 이미 hashtagLinks 조회함)
             data.hashtags = Array.from(hashtagLinks).map(link => link.innerText);
 
             // 7. 이미지 - cdninstagram 또는 scontent URL

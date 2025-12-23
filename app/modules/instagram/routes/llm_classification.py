@@ -189,14 +189,14 @@ async def retry_llm_request(
     request_id: int,
     db: Session = Depends(get_db),
 ):
-    """실패한 요청 재시도."""
+    """완료되었거나 실패한 요청 재시도."""
     service = LLMClassifierService(db)
 
     success = service.reset_to_pending(request_id)
     if not success:
         raise HTTPException(
             status_code=400,
-            detail="재시도할 수 없는 상태입니다 (failed 상태만 재시도 가능)",
+            detail="재시도할 수 없는 상태입니다 (completed 또는 failed 상태만 재시도 가능)",
         )
 
     return {"success": True, "message": "요청이 재시도 대기열에 추가되었습니다"}

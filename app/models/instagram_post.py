@@ -26,6 +26,7 @@ class InstagramPost(Base):
     posted_at = Column(DateTime, index=True)
     display_time = Column(String)
     is_ad = Column(Boolean, default=False)
+    post_type = Column(String, default="NORMAL", index=True)  # NORMAL, SPONSORED, SUGGESTED
     likes = Column(Integer)  # 좋아요 수
     comments = Column(Integer)  # 댓글 수
 
@@ -54,6 +55,9 @@ class InstagramPost(Base):
     llm_summary = Column(Text)
     llm_location = Column(JSON)  # {"venue_name": "...", "address": "..."} - 팝업 전용
     llm_analyzed_at = Column(DateTime)
+
+    # 활성화 상태
+    is_active = Column(Boolean, default=True, index=True)
 
     # 관계
     crawl_run = relationship("InstagramCrawlRun", back_populates="posts")

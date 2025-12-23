@@ -35,15 +35,27 @@ CLASSIFICATION_PROMPT = """다음 Instagram 게시물을 분석하여 정보를 
 {image_section}
 ## 이벤트가 아닌 것 (중요!)
 다음은 "이벤트"가 아니므로 tag를 "기타"로 분류하세요:
-- **협찬 게시물**: 제품/서비스를 협찬받아 작성한 후기, 광고성 게시물
+- **협찬/광고 게시물**: 제품/서비스를 협찬받아 작성한 광고성 게시물 (예: "협찬", "광고", "유료광고포함")
 - **후기 이벤트**: 구매 후기 작성 시 추첨하는 이벤트 (예: "구매 후기 남기면 추첨")
 - **당첨자 발표 게시물**: 이벤트 결과 발표, 당첨자 명단 공개 게시물 (예: "당첨자 발표", "당첨 축하", "이벤트 결과")
+
+## 리그램 분류 (중요!)
+다른 계정의 게시물을 재공유한 경우 tag를 "리그램"으로 분류하세요:
+- **리그램 표시**: 본문에 "repost", "리포스트", "regram", "리그램", "rp @", "📷 @" 등 재공유 표시가 있는 경우
+- **리그램은 배타적**: 리그램으로 분류된 게시물은 이벤트, 팝업, 홍보대사, 후기로 분류할 수 없음
+
+## 후기 분류
+이벤트/팝업/홍보대사 등에 참여한 경험을 공유하는 게시물은 tag를 "후기"로 분류하세요:
+- **행사 후기**: 팝업, 전시회, 페스티벌 등 행사에 참여한 후기
+- **이벤트 후기**: 이벤트 당첨 후 상품/경험 후기
+- **체험 후기**: 브랜드 체험단, 방문 후기 등
+- **후기는 과거형**: 이미 참여/체험한 내용을 공유하는 게시물 (모집 중인 이벤트와 구분)
 
 ## 추출할 정보
 다음 JSON 형식으로 응답해주세요:
 ```json
 {{
-    "tag": "이벤트|팝업|홍보대사|기타",
+    "tag": "이벤트|팝업|홍보대사|리그램|후기|기타",
     "purchase_required": "예_전부|예_부분|아니오",
     "prizes": ["경품1", "경품2"],
     "winner_count": 100,
@@ -63,7 +75,7 @@ CLASSIFICATION_PROMPT = """다음 Instagram 게시물을 분석하여 정보를 
 ```
 
 ## 필드 설명
-- tag: 게시물 유형 (이벤트/팝업/홍보대사/기타)
+- tag: 게시물 유형 (이벤트/팝업/홍보대사/리그램/후기/기타). 리그램은 다른 카테고리와 중복 불가
 - purchase_required: 참여에 구매가 필요한지 (예_전부: 구매 필수, 예_부분: 구매 시 추가 혜택, 아니오: 구매 불필요)
 - prizes: 경품 목록 (배열)
 - winner_count: 당첨자 수 (숫자, 모르면 null)
@@ -296,8 +308,40 @@ class LLMClassifierService:
         )
 
     def reset_to_pending(self, request_id: int) -> bool:
-        """실패한 요청을 다시 pending 상태로 변경."""
-        return self._llm_service.reset_to_pending(request_id)
+        """완료되었거나 실패한 요청을 다시 pending 상태로 변경."""
+        from app.modules.claude_worker.models.llm_request import LLMRequest
+
+        # 요청 조회
+        request = (
+            self.db.query(LLMRequest)
+            .filter(LLMRequest.id == request_id)
+            .first()
+        )
+        if not request:
+            return False
+
+        # LLMRequest reset
+        success = self._llm_service.reset_to_pending(request_id)
+        if not success:
+            return False
+
+        # Instagram 게시물의 llm_status도 pending으로 업데이트
+        if request.caller_type == self.CALLER_TYPE and request.caller_id:
+            try:
+                post_id = int(request.caller_id)
+                post = (
+                    self.db.query(InstagramPost)
+                    .filter(InstagramPost.id == post_id)
+                    .first()
+                )
+                if post:
+                    post.llm_status = "pending"
+                    self.db.commit()
+                    logger.info(f"Post {post_id} llm_status reset to pending")
+            except (ValueError, TypeError):
+                pass
+
+        return True
 
     # Worker status는 claude_worker 모듈에 위임
     def get_worker_status(self):
@@ -329,3 +373,78 @@ class LLMClassifierService:
             "completed": completed,
             "failed": failed,
         }
+
+    def sync_post_llm_status(self) -> int:
+        """instagram_posts의 llm_status를 LLM 요청 상태와 동기화.
+
+        pending/processing 상태인 게시물 중 유효한 LLM 요청이 없거나
+        삭제된 경우 실제 상태로 업데이트합니다.
+
+        Returns:
+            업데이트된 게시물 수
+        """
+        from sqlalchemy import text
+
+        # pending/processing 상태인 게시물의 llm_status를
+        # 유효한(삭제되지 않은) LLM 요청의 최신 상태로 업데이트
+        # 유효한 요청이 없으면 NULL로 설정
+        result = self.db.execute(text("""
+            UPDATE instagram_posts SET llm_status = (
+                SELECT COALESCE(
+                    (SELECT status FROM llm_requests
+                     WHERE caller_type = 'instagram'
+                     AND caller_id = CAST(instagram_posts.id AS TEXT)
+                     AND deleted_at IS NULL
+                     ORDER BY requested_at DESC
+                     LIMIT 1),
+                    NULL
+                )
+            )
+            WHERE llm_status IN ('pending', 'processing')
+        """))
+
+        count = result.rowcount
+        if count > 0:
+            self.db.commit()
+            logger.info(f"instagram_posts llm_status 동기화: {count}개")
+
+        return count
+
+    def clear_post_llm_status(self, post_id: int) -> bool:
+        """특정 게시물의 llm_status를 NULL로 초기화.
+
+        LLM 요청이 삭제될 때 호출됩니다.
+
+        Args:
+            post_id: 게시물 ID
+
+        Returns:
+            성공 여부
+        """
+        post = self.db.query(InstagramPost).filter(InstagramPost.id == post_id).first()
+        if not post:
+            return False
+
+        # 해당 게시물에 유효한 LLM 요청이 남아있는지 확인
+        from app.modules.claude_worker.models.llm_request import LLMRequest
+        remaining = (
+            self.db.query(LLMRequest)
+            .filter(
+                LLMRequest.caller_type == self.CALLER_TYPE,
+                LLMRequest.caller_id == str(post_id),
+                LLMRequest.deleted_at.is_(None),
+            )
+            .order_by(LLMRequest.requested_at.desc())
+            .first()
+        )
+
+        if remaining:
+            # 남은 요청이 있으면 그 상태로 업데이트
+            post.llm_status = remaining.status
+        else:
+            # 남은 요청이 없으면 NULL로 초기화
+            post.llm_status = None
+
+        self.db.commit()
+        logger.info(f"Post {post_id} llm_status updated to: {post.llm_status}")
+        return True

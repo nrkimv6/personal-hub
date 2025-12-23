@@ -216,9 +216,29 @@ def delete_request(
 ):
     """요청 삭제."""
     service = LLMService(db)
+
+    # 삭제 전에 요청 정보 조회 (instagram 후처리용)
+    request = service.get_request_by_id(request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    caller_type = request.caller_type
+    caller_id = request.caller_id
+
+    # 삭제 실행
     success = service.delete_request(request_id, hard_delete=hard_delete)
     if not success:
         raise HTTPException(status_code=404, detail="Request not found")
+
+    # instagram 타입이면 게시물 llm_status 동기화
+    if caller_type == "instagram" and caller_id:
+        try:
+            from app.modules.instagram.services.llm_classifier_service import LLMClassifierService
+            llm_classifier = LLMClassifierService(db)
+            llm_classifier.clear_post_llm_status(int(caller_id))
+        except (ValueError, TypeError):
+            pass
+
     return {"success": True, "message": "Request deleted"}
 
 
@@ -240,7 +260,27 @@ def batch_delete_requests(
 ):
     """일괄 삭제."""
     service = LLMService(db)
+
+    # 삭제 전에 instagram 요청들의 post_id 수집
+    instagram_post_ids = []
+    for request_id in data.request_ids:
+        request = service.get_request_by_id(request_id)
+        if request and request.caller_type == "instagram" and request.caller_id:
+            try:
+                instagram_post_ids.append(int(request.caller_id))
+            except (ValueError, TypeError):
+                pass
+
+    # 삭제 실행
     result = service.batch_delete(data.request_ids, hard_delete=data.hard_delete)
+
+    # instagram 게시물들 llm_status 동기화
+    if instagram_post_ids:
+        from app.modules.instagram.services.llm_classifier_service import LLMClassifierService
+        llm_classifier = LLMClassifierService(db)
+        for post_id in instagram_post_ids:
+            llm_classifier.clear_post_llm_status(post_id)
+
     return result
 
 
