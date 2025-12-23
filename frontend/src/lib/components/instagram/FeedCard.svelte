@@ -179,7 +179,34 @@
 		try {
 			const canvas = await html2canvas(feedRef, {
 				useCORS: true,
-				allowTaint: true
+				allowTaint: false,
+				proxy: '/api/v1/instagram/proxy-image',
+				onclone: (clonedDoc: Document) => {
+					// oklch 색상을 rgb로 변환 (html2canvas가 oklch 미지원)
+					const allElements = clonedDoc.querySelectorAll('*');
+					allElements.forEach((el) => {
+						const computed = window.getComputedStyle(el as Element);
+						const htmlEl = el as HTMLElement;
+
+						// 주요 색상 속성들을 computed value (rgb)로 덮어쓰기
+						const colorProps = [
+							'color',
+							'background-color',
+							'border-color',
+							'border-top-color',
+							'border-right-color',
+							'border-bottom-color',
+							'border-left-color'
+						];
+
+						colorProps.forEach((prop) => {
+							const value = computed.getPropertyValue(prop);
+							if (value && value !== 'rgba(0, 0, 0, 0)') {
+								htmlEl.style.setProperty(prop, value, 'important');
+							}
+						});
+					});
+				}
 			});
 			const link = document.createElement('a');
 			link.download = `${post.account}-${post.id}-${Date.now()}.png`;
@@ -642,7 +669,7 @@
 							{/if}
 						</button>
 					{/if}
-					<!-- AI 분석 요청 버튼 (미분석/실패 상태만) -->
+					<!-- AI 분석 요청 버튼 (미분석/실패 상태) -->
 					{#if onRequestLlmAnalysis && (!post.llm_status || post.llm_status === 'failed')}
 						<button
 							onclick={handleRequestLlmAnalysis}
@@ -655,6 +682,22 @@
 								요청 중...
 							{:else}
 								🤖 AI 분석 요청
+							{/if}
+						</button>
+					{/if}
+					<!-- AI 재분석 버튼 (완료 상태) -->
+					{#if onRequestLlmAnalysis && post.llm_status === 'completed'}
+						<button
+							onclick={handleRequestLlmAnalysis}
+							disabled={isRequestingLlm}
+							class="btn btn-sm bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:opacity-50"
+							title="AI로 게시물 다시 분류"
+						>
+							{#if isRequestingLlm}
+								<span class="inline-block animate-spin mr-1">&#8635;</span>
+								요청 중...
+							{:else}
+								🔄 AI 재분석
 							{/if}
 						</button>
 					{/if}

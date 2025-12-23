@@ -41,6 +41,7 @@
 	let sortBy: string | null = null;
 	let sortOrder: string = 'asc';
 	let includeEnded: boolean = false;  // 종료된 항목 포함
+	let filterIsActive: boolean = true;  // 활성화된 항목만 보기 (기본값)
 
 	// LLM 태그 옵션
 	const llmTagOptions = [
@@ -101,6 +102,32 @@
 		fetchPosts();
 	}
 
+	// 활성화 필터 토글
+	function toggleIsActiveFilter() {
+		filterIsActive = !filterIsActive;
+		page = 1;
+		fetchPosts();
+	}
+
+	// 게시물 활성화/비활성화 토글
+	async function togglePostActive(post: InstagramPost, event: Event) {
+		event.stopPropagation();  // 행 클릭 이벤트 방지
+		try {
+			await instagramApi.toggleActive(post.id, !post.is_active);
+			// 비활성화한 경우 filterIsActive가 true면 목록에서 제거됨
+			if (filterIsActive && post.is_active) {
+				posts = posts.filter(p => p.id !== post.id);
+				total--;
+			} else {
+				post.is_active = !post.is_active;
+				posts = [...posts];  // 반응형 업데이트
+			}
+		} catch (e) {
+			console.error('활성화 상태 변경 실패:', e);
+			alert('활성화 상태 변경에 실패했습니다.');
+		}
+	}
+
 	// 오늘 날짜 기준 진행 중 여부 확인
 	function isOngoing(post: InstagramPost): boolean {
 		const today = new Date().toISOString().split('T')[0];
@@ -112,6 +139,25 @@
 		const endOk = !end || end >= today;
 		return startOk && endOk;
 	}
+
+	// 오늘 마감 여부 확인
+	function isEndingToday(post: InstagramPost): boolean {
+		const today = new Date().toISOString().split('T')[0];
+		return post.llm_event_end === today;
+	}
+
+	// 이벤트/팝업 탭용 정렬된 posts (오늘 마감 우선)
+	$: sortedPosts = (activeTab === 'events' || activeTab === 'popup')
+		? [...posts].sort((a, b) => {
+			const aEndingToday = isEndingToday(a);
+			const bEndingToday = isEndingToday(b);
+			// 오늘 마감인 항목 우선
+			if (aEndingToday && !bEndingToday) return -1;
+			if (!aEndingToday && bEndingToday) return 1;
+			// 나머지는 기존 순서 유지 (백엔드에서 이미 정렬됨)
+			return 0;
+		})
+		: posts;
 
 	// 위치 정보 포맷팅
 	function formatLocation(location: { venue_name?: string; address?: string } | null): string {
@@ -195,6 +241,8 @@
 			if (filterEventStatus) params.event_status = filterEventStatus;
 			if (sortBy) params.sort_by = sortBy;
 			if (sortOrder) params.sort_order = sortOrder;
+			// 활성화 상태 필터
+			if (filterIsActive) params.is_active = true;
 
 			const response = await instagramApi.posts(params);
 			posts = response.posts;
@@ -793,23 +841,37 @@
 	{:else}
 		<!-- 이벤트/팝업 탭: LLM 결과 테이블 뷰 -->
 		{#if activeTab === 'events' || activeTab === 'popup'}
-			<!-- 종료된 항목 포함 토글 -->
+			<!-- 필터 옵션 -->
 			<div class="flex items-center justify-between mb-4">
 				<div class="flex items-center gap-2 text-sm text-gray-600">
 					<span>총 {total}건</span>
 					{#if !includeEnded}
 						<span class="text-blue-600">(진행중{activeTab === 'popup' ? '+예정' : ''} 필터 적용)</span>
 					{/if}
+					{#if filterIsActive}
+						<span class="text-green-600">(활성화만)</span>
+					{/if}
 				</div>
-				<label class="flex items-center gap-2 cursor-pointer">
-					<input
-						type="checkbox"
-						checked={includeEnded}
-						onchange={toggleIncludeEnded}
-						class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-					/>
-					<span class="text-sm text-gray-600">종료된 {activeTab === 'events' ? '이벤트' : '팝업'} 포함</span>
-				</label>
+				<div class="flex items-center gap-4">
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input
+							type="checkbox"
+							checked={!filterIsActive}
+							onchange={toggleIsActiveFilter}
+							class="w-4 h-4 text-gray-600 rounded border-gray-300 focus:ring-gray-500"
+						/>
+						<span class="text-sm text-gray-600">비활성화 항목 포함</span>
+					</label>
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input
+							type="checkbox"
+							checked={includeEnded}
+							onchange={toggleIncludeEnded}
+							class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+						/>
+						<span class="text-sm text-gray-600">종료된 {activeTab === 'events' ? '이벤트' : '팝업'} 포함</span>
+					</label>
+				</div>
 			</div>
 			<div class="bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
 				<div class="overflow-x-auto">
@@ -829,12 +891,13 @@
 								{/if}
 								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-xs">요약</th>
 								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">원본</th>
+								<th class="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">관리</th>
 							</tr>
 						</thead>
 						<tbody class="divide-y divide-gray-200">
-							{#each posts as post (post.id)}
+							{#each sortedPosts as post (post.id)}
 								<tr
-									class="cursor-pointer transition-colors {isOngoing(post) ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50'}"
+									class="cursor-pointer transition-colors {isEndingToday(post) ? 'bg-orange-100 hover:bg-orange-200 font-semibold' : isOngoing(post) ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50'}"
 									onclick={() => openDetail(post)}
 									onkeydown={(e) => e.key === 'Enter' && openDetail(post)}
 									tabindex="0"
@@ -845,11 +908,11 @@
 											<img
 												src={post.images[0].src}
 												alt={post.images[0].alt || '게시물 이미지'}
-												class="w-14 h-14 object-cover rounded"
+												class="w-14 h-14 object-cover rounded {isEndingToday(post) ? 'ring-2 ring-orange-400' : ''}"
 												loading="lazy"
 											/>
 										{:else}
-											<div class="w-14 h-14 bg-gray-200 rounded flex items-center justify-center">
+											<div class="w-14 h-14 bg-gray-200 rounded flex items-center justify-center {isEndingToday(post) ? 'ring-2 ring-orange-400' : ''}">
 												<span class="text-gray-400">?</span>
 											</div>
 										{/if}
@@ -871,7 +934,11 @@
 													<span class="text-xs text-gray-500">시작: {post.llm_event_start}</span>
 												{/if}
 												{#if post.llm_event_end}
-													<span class="text-xs text-gray-500">종료: {post.llm_event_end}</span>
+													{#if isEndingToday(post)}
+														<span class="text-xs font-bold text-orange-600 bg-orange-50 px-1 rounded">오늘 마감!</span>
+													{:else}
+														<span class="text-xs text-gray-500">종료: {post.llm_event_end}</span>
+													{/if}
 												{/if}
 											</div>
 										{:else}
@@ -949,6 +1016,16 @@
 										{:else}
 											<span class="text-gray-400">-</span>
 										{/if}
+									</td>
+									<!-- 관리 (활성화/비활성화 토글) -->
+									<td class="px-3 py-3 text-center">
+										<button
+											onclick={(e) => togglePostActive(post, e)}
+											class="px-2 py-1 text-xs rounded transition-colors {post.is_active ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}"
+											title={post.is_active ? '비활성화' : '활성화'}
+										>
+											{post.is_active ? '숨기기' : '보이기'}
+										</button>
 									</td>
 								</tr>
 							{/each}

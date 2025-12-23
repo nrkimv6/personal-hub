@@ -481,12 +481,12 @@
 												취소
 											</button>
 										{/if}
-										{#if request.status === 'failed'}
+										{#if request.status === 'failed' || request.status === 'completed'}
 											<button
 												onclick={() => retryRequest(request.id)}
 												class="text-blue-600 hover:text-blue-800 text-sm"
 											>
-												재시도
+												{request.status === 'completed' ? '재분석' : '재시도'}
 											</button>
 										{/if}
 										<button
@@ -716,12 +716,12 @@
 							취소
 						</button>
 					{/if}
-					{#if selectedRequest.status === 'failed'}
+					{#if selectedRequest.status === 'failed' || selectedRequest.status === 'completed'}
 						<button
 							onclick={() => { retryRequest(selectedRequest!.id); closeModal(); }}
 							class="btn btn-primary btn-sm"
 						>
-							재시도
+							{selectedRequest.status === 'completed' ? '재분석' : '재시도'}
 						</button>
 					{/if}
 					<button

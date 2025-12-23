@@ -46,6 +46,8 @@ class PostSchema(BaseModel):
     llm_summary: Optional[str] = None  # 이벤트 요약
     llm_location: Optional[dict] = None  # {"venue_name": str, "address": str} - 팝업 전용
     llm_analyzed_at: Optional[datetime] = None  # 분석 완료 시간
+    # 활성화 상태
+    is_active: bool = True
 
     model_config = ConfigDict(from_attributes=True)
 

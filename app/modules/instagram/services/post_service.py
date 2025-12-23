@@ -157,6 +157,7 @@ class PostService:
         event_status: Optional[str] = None,
         sort_by: Optional[str] = None,
         sort_order: Optional[str] = "asc",
+        is_active: Optional[bool] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> Tuple[List[InstagramPost], int]:
@@ -173,6 +174,7 @@ class PostService:
             event_status: 이벤트 진행상태 필터 (ongoing/upcoming/ended)
             sort_by: 정렬 기준 (event_end/event_start/collected_at)
             sort_order: 정렬 순서 (asc/desc)
+            is_active: 활성화 상태 필터 (True/False/None)
             limit: 조회 개수
             offset: 시작 위치
 
@@ -180,6 +182,10 @@ class PostService:
             (게시물 목록, 전체 개수)
         """
         query = self.db.query(InstagramPost)
+
+        # 활성화 상태 필터
+        if is_active is not None:
+            query = query.filter(InstagramPost.is_active == is_active)
 
         if account:
             query = query.filter(InstagramPost.account.ilike(f"%{account}%"))
@@ -423,3 +429,24 @@ class PostService:
         posts = query.order_by(desc(InstagramPost.collected_at)).offset(offset).limit(limit).all()
 
         return posts, total
+
+    def update_post_active_status(self, post_id: int, is_active: bool) -> Optional[InstagramPost]:
+        """게시물 활성화 상태 업데이트.
+
+        Args:
+            post_id: 게시물 DB ID
+            is_active: 활성화 상태
+
+        Returns:
+            업데이트된 게시물 또는 None
+        """
+        post = self.get_post_by_id(post_id)
+        if not post:
+            return None
+
+        post.is_active = is_active
+        self.db.commit()
+        self.db.refresh(post)
+
+        logger.info(f"Updated post {post_id} is_active={is_active}")
+        return post

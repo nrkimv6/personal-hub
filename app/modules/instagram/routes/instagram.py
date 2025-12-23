@@ -3,8 +3,11 @@
 import logging
 from datetime import date
 from typing import Optional, List
+from urllib.parse import urlparse
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -62,6 +65,7 @@ async def get_posts(
     event_status: Optional[str] = Query(None, description="이벤트 진행상태 (ongoing/upcoming/ended)"),
     sort_by: Optional[str] = Query(None, description="정렬 기준 (event_end/event_start/collected_at)"),
     sort_order: Optional[str] = Query("asc", description="정렬 순서 (asc/desc)"),
+    is_active: Optional[bool] = Query(None, description="활성화 상태 필터 (true/false/null)"),
     page: int = Query(1, ge=1, description="페이지 번호"),
     limit: int = Query(20, ge=1, le=100, description="페이지당 개수"),
     db: Session = Depends(get_db),
@@ -84,6 +88,7 @@ async def get_posts(
         event_status=event_status,
         sort_by=sort_by,
         sort_order=sort_order,
+        is_active=is_active,
         limit=limit,
         offset=offset,
     )
@@ -123,6 +128,22 @@ async def delete_post(
         raise HTTPException(status_code=404, detail="Post not found")
 
     return {"message": "Post deleted successfully"}
+
+
+@router.patch("/posts/{post_id}/active", response_model=PostSchema)
+async def toggle_post_active(
+    post_id: int,
+    is_active: bool = Query(..., description="활성화 상태"),
+    db: Session = Depends(get_db),
+):
+    """게시물 활성화/비활성화 토글."""
+    service = PostService(db)
+
+    post = service.update_post_active_status(post_id, is_active)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    return _post_to_schema(post)
 
 
 @router.put("/posts/{post_id}", response_model=PostSchema)
@@ -635,6 +656,61 @@ async def check_login_status(
     return result
 
 
+# ============== Image Proxy ==============
+
+ALLOWED_IMAGE_HOSTS = [
+    "scontent.cdninstagram.com",
+    "instagram.com",
+]
+
+
+@router.get("/proxy-image")
+async def proxy_image(
+    url: str = Query(..., description="이미지 URL"),
+):
+    """Instagram CDN 이미지 프록시.
+
+    CORS 문제를 우회하여 Instagram 이미지를 가져옵니다.
+    html2canvas 캡쳐 시 사용됩니다.
+    """
+    # URL 검증 (Instagram CDN만 허용)
+    parsed = urlparse(url)
+    if not any(host in parsed.netloc for host in ALLOWED_IMAGE_HOSTS):
+        # scontent-xxx-x.cdninstagram.com 형태도 허용
+        if not (parsed.netloc.startswith("scontent") and "cdninstagram.com" in parsed.netloc):
+            raise HTTPException(status_code=400, detail="허용되지 않은 이미지 호스트입니다")
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Referer": "https://www.instagram.com/",
+                },
+                follow_redirects=True,
+            )
+            response.raise_for_status()
+
+            content_type = response.headers.get("content-type", "image/jpeg")
+
+            return Response(
+                content=response.content,
+                media_type=content_type,
+                headers={
+                    "Cache-Control": "public, max-age=3600",
+                    "Access-Control-Allow-Origin": "*",
+                },
+            )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="이미지 요청 시간 초과")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail="이미지를 가져올 수 없습니다")
+    except Exception as e:
+        logger.error(f"Image proxy error: {e}")
+        raise HTTPException(status_code=500, detail="이미지 프록시 오류")
+
+
 # ============== Helpers ==============
 
 def _run_to_schema(run) -> CrawlRunSchema:
@@ -726,4 +802,5 @@ def _post_to_schema(post) -> PostSchema:
         llm_summary=post.llm_summary,
         llm_location=post.llm_location,
         llm_analyzed_at=post.llm_analyzed_at,
+        is_active=post.is_active if post.is_active is not None else True,
     )
