@@ -73,9 +73,17 @@ class CrawlService:
             saved = self._save_post(post, account_id, crawl_run.id)
             if saved:
                 save_stats["new_saved"] += 1
-                # 10개마다 중간 통계 로깅
-                if save_stats["new_saved"] % 10 == 0:
-                    logger.info(f"[Progress] {save_stats['new_saved']} new posts saved so far")
+
+            # 10개마다 DB에 중간 통계 업데이트 (실시간 진행 상황 조회용)
+            if save_stats["total_collected"] % 10 == 0:
+                try:
+                    crawl_run.total_collected = save_stats["total_collected"]
+                    crawl_run.new_saved = save_stats["new_saved"]
+                    self.db.commit()
+                    logger.info(f"[Progress] {save_stats['total_collected']} collected, {save_stats['new_saved']} new")
+                except Exception as e:
+                    logger.warning(f"Failed to update progress: {e}")
+
             return saved
 
         try:

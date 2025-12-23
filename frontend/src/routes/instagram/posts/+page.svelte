@@ -22,6 +22,10 @@
 	type ViewMode = 'grid' | 'list';
 	let viewMode: ViewMode = 'grid';
 
+	// 탭 모드: 전체 / 이벤트 / 팝업
+	type TabMode = 'all' | 'events' | 'popup';
+	let activeTab: TabMode = 'all';
+
 	// 필터
 	let filterAccount = '';
 	let filterIsAd: boolean | null = null;
@@ -48,6 +52,23 @@
 		{ value: 'processing', label: '분석중', color: 'bg-blue-100 text-blue-700' },
 		{ value: 'failed', label: '실패', color: 'bg-red-100 text-red-700' }
 	];
+
+	// 탭 변경 시 필터 적용
+	function switchTab(tab: TabMode) {
+		activeTab = tab;
+		page = 1;
+		if (tab === 'events') {
+			filterLlmTag = '이벤트';
+			filterLlmStatus = 'completed';
+		} else if (tab === 'popup') {
+			filterLlmTag = '팝업';
+			filterLlmStatus = 'completed';
+		} else {
+			filterLlmTag = null;
+			filterLlmStatus = null;
+		}
+		fetchPosts();
+	}
 
 	// 상세보기 (FeedCard detailMode)
 	let selectedPost: InstagramPost | null = null;
@@ -338,9 +359,9 @@
 
 <div class="p-6">
 	<!-- 헤더 -->
-	<div class="mb-6 flex flex-wrap justify-between items-center gap-4">
+	<div class="mb-4 flex flex-wrap justify-between items-center gap-4">
 		<div class="flex items-center gap-3">
-			<h2 class="text-2xl font-bold text-gray-900">게시물 목록</h2>
+			<h2 class="text-2xl font-bold text-gray-900">게시물</h2>
 			<button
 				onclick={openUrlCrawlModal}
 				class="btn btn-primary btn-sm"
@@ -399,7 +420,32 @@
 		</div>
 	</div>
 
-	<!-- 날짜 필터 -->
+	<!-- 탭: 전체 / 이벤트 / 팝업 -->
+	<div class="mb-4 border-b border-gray-200">
+		<nav class="flex gap-4">
+			<button
+				onclick={() => switchTab('all')}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'all' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+			>
+				전체
+			</button>
+			<button
+				onclick={() => switchTab('events')}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'events' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+			>
+				🎁 이벤트
+			</button>
+			<button
+				onclick={() => switchTab('popup')}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'popup' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+			>
+				🏪 팝업
+			</button>
+		</nav>
+	</div>
+
+	<!-- 날짜 필터 (전체 탭에서만) -->
+	{#if activeTab === 'all'}
 	<div class="mb-4 flex flex-wrap gap-2 items-center">
 		<span class="text-sm text-gray-500">날짜 필터:</span>
 		<select
@@ -515,6 +561,7 @@
 			</button>
 		{/if}
 	</div>
+	{/if}
 
 	{#if loading}
 		<div class="flex justify-center items-center h-64">
@@ -535,8 +582,144 @@
 			{/if}
 		</div>
 	{:else}
-		<!-- 리스트 뷰 -->
-		{#if viewMode === 'list'}
+		<!-- 이벤트/팝업 탭: LLM 결과 테이블 뷰 -->
+		{#if activeTab === 'events' || activeTab === 'popup'}
+			<div class="bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
+				<div class="overflow-x-auto">
+					<table class="w-full">
+						<thead class="bg-gray-50 border-b border-gray-200">
+							<tr>
+								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">이미지</th>
+								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">계정</th>
+								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">기간</th>
+								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">발표일</th>
+								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">경품</th>
+								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">당첨자</th>
+								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">조건</th>
+								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">주최</th>
+								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-xs">요약</th>
+								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">원본</th>
+							</tr>
+						</thead>
+						<tbody class="divide-y divide-gray-200">
+							{#each posts as post (post.id)}
+								<tr
+									class="hover:bg-gray-50 cursor-pointer"
+									onclick={() => openDetail(post)}
+									onkeydown={(e) => e.key === 'Enter' && openDetail(post)}
+									tabindex="0"
+								>
+									<!-- 이미지 -->
+									<td class="px-3 py-3">
+										{#if post.images && post.images.length > 0}
+											<img
+												src={post.images[0].src}
+												alt={post.images[0].alt || '게시물 이미지'}
+												class="w-14 h-14 object-cover rounded"
+												loading="lazy"
+											/>
+										{:else}
+											<div class="w-14 h-14 bg-gray-200 rounded flex items-center justify-center">
+												<span class="text-gray-400">?</span>
+											</div>
+										{/if}
+									</td>
+									<!-- 계정 -->
+									<td class="px-3 py-3">
+										<div class="flex flex-col gap-1">
+											<span class="font-medium text-sm text-gray-900">@{post.account}</span>
+											{#if post.is_ad}
+												<span class="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded w-fit">광고</span>
+											{/if}
+										</div>
+									</td>
+									<!-- 기간 -->
+									<td class="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">
+										{#if post.llm_event_start || post.llm_event_end}
+											<div class="flex flex-col gap-0.5">
+												{#if post.llm_event_start}
+													<span class="text-xs text-gray-500">시작: {post.llm_event_start}</span>
+												{/if}
+												{#if post.llm_event_end}
+													<span class="text-xs text-gray-500">종료: {post.llm_event_end}</span>
+												{/if}
+											</div>
+										{:else}
+											<span class="text-gray-400">-</span>
+										{/if}
+									</td>
+									<!-- 발표일 -->
+									<td class="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">
+										{post.llm_announcement_date || '-'}
+									</td>
+									<!-- 경품 -->
+									<td class="px-3 py-3 text-sm text-gray-600 max-w-[150px]">
+										{#if post.llm_prizes && post.llm_prizes.length > 0}
+											<div class="flex flex-col gap-0.5">
+												{#each post.llm_prizes.slice(0, 2) as prize}
+													<span class="text-xs truncate" title={prize}>{prize}</span>
+												{/each}
+												{#if post.llm_prizes.length > 2}
+													<span class="text-xs text-gray-400">+{post.llm_prizes.length - 2}개</span>
+												{/if}
+											</div>
+										{:else}
+											<span class="text-gray-400">-</span>
+										{/if}
+									</td>
+									<!-- 당첨자 수 -->
+									<td class="px-3 py-3 text-sm text-gray-600 text-center">
+										{#if post.llm_winner_count}
+											<span class="font-medium text-purple-600">{post.llm_winner_count}명</span>
+										{:else}
+											<span class="text-gray-400">-</span>
+										{/if}
+									</td>
+									<!-- 구매조건 -->
+									<td class="px-3 py-3 text-center">
+										{#if post.llm_purchase_required === true}
+											<span class="px-2 py-1 text-xs bg-red-100 text-red-700 rounded-full">구매필수</span>
+										{:else if post.llm_purchase_required === false}
+											<span class="px-2 py-1 text-xs bg-green-100 text-green-700 rounded-full">무료</span>
+										{:else}
+											<span class="text-gray-400">-</span>
+										{/if}
+									</td>
+									<!-- 주최 -->
+									<td class="px-3 py-3 text-sm text-gray-600 max-w-[100px]">
+										<span class="truncate block" title={post.llm_organizer || ''}>
+											{post.llm_organizer || '-'}
+										</span>
+									</td>
+									<!-- 요약 -->
+									<td class="px-3 py-3 text-sm text-gray-600 max-w-[200px]">
+										<span class="line-clamp-2" title={post.llm_summary || ''}>
+											{truncate(post.llm_summary, 60) || '-'}
+										</span>
+									</td>
+									<!-- 원본 링크 -->
+									<td class="px-3 py-3" onclick={(e) => e.stopPropagation()}>
+										{#if post.url}
+											<a
+												href={post.url}
+												target="_blank"
+												rel="noopener noreferrer"
+												class="text-blue-600 hover:text-blue-800 text-sm whitespace-nowrap"
+											>
+												보기
+											</a>
+										{:else}
+											<span class="text-gray-400">-</span>
+										{/if}
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			</div>
+		<!-- 전체 탭: 기존 리스트/그리드 뷰 -->
+		{:else if viewMode === 'list'}
 			<div class="bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
 				<table class="w-full">
 					<thead class="bg-gray-50 border-b border-gray-200">

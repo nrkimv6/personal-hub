@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { instagramApi } from '$lib/api';
 	import type { CrawlHistoryItem } from '$lib/types';
 
@@ -18,11 +18,28 @@
 	let status: 'all' | 'pending' | 'processing' | 'completed' | 'failed' = 'all';
 	let period: 'all' | 'today' | 'week' | 'month' = 'week';
 
+	// 자동 새로고침
+	let refreshInterval: ReturnType<typeof setInterval> | null = null;
+	let hasProcessingItems = false;
+
 	$: totalPages = Math.ceil(total / limit);
 
-	async function fetchHistory() {
+	// 처리 중인 항목이 있으면 자동 새로고침
+	$: {
+		hasProcessingItems = items.some(i => i.status === 'pending' || i.status === 'processing');
+		if (hasProcessingItems && !refreshInterval) {
+			refreshInterval = setInterval(() => {
+				fetchHistory(true); // silent refresh
+			}, 5000);
+		} else if (!hasProcessingItems && refreshInterval) {
+			clearInterval(refreshInterval);
+			refreshInterval = null;
+		}
+	}
+
+	async function fetchHistory(silent = false) {
 		try {
-			loading = true;
+			if (!silent) loading = true;
 			const response = await instagramApi.getCrawlHistory({
 				page,
 				limit,
@@ -35,9 +52,9 @@
 			total = response.total;
 			error = null;
 		} catch (e) {
-			error = e instanceof Error ? e.message : '데이터 로드 실패';
+			if (!silent) error = e instanceof Error ? e.message : '데이터 로드 실패';
 		} finally {
-			loading = false;
+			if (!silent) loading = false;
 		}
 	}
 
@@ -113,7 +130,13 @@
 
 	function getResultSummary(item: CrawlHistoryItem): string {
 		if (item.status === 'pending') return '대기 중...';
-		if (item.status === 'processing') return '처리 중...';
+		if (item.status === 'processing') {
+			// 처리 중이어도 진행 상황이 있으면 표시
+			if (item.crawl_run && (item.crawl_run.total_collected > 0 || item.crawl_run.new_saved > 0)) {
+				return `${item.crawl_run.total_collected}개 수집 / ${item.crawl_run.new_saved}개 신규`;
+			}
+			return '처리 중...';
+		}
 		if (item.status === 'failed') return item.error_message || '실패';
 
 		// completed
@@ -138,6 +161,13 @@
 	onMount(() => {
 		fetchHistory();
 	});
+
+	onDestroy(() => {
+		if (refreshInterval) {
+			clearInterval(refreshInterval);
+			refreshInterval = null;
+		}
+	});
 </script>
 
 <div class="p-6">
@@ -146,7 +176,13 @@
 			<h2 class="text-2xl font-bold text-gray-900">크롤링 이력</h2>
 			<p class="text-sm text-gray-500 mt-1">모든 크롤링 활동 통합 조회</p>
 		</div>
-		<div class="flex gap-2">
+		<div class="flex gap-2 items-center">
+			{#if hasProcessingItems}
+				<span class="text-xs text-yellow-600 flex items-center gap-1">
+					<span class="inline-block w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></span>
+					자동 새로고침 중
+				</span>
+			{/if}
 			<button onclick={() => fetchHistory()} class="btn btn-secondary btn-sm">
 				새로고침
 			</button>
