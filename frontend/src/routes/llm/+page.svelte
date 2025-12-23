@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { llmApi, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats } from '$lib/api';
+	import LLMPerformance from '$lib/components/LLMPerformance.svelte';
 
 	// 상태
 	let requests: LLMRequest[] = [];
@@ -25,9 +28,19 @@
 	let selectedIds: number[] = [];
 	let selectAll = false;
 
-	// 탭: queue(대기열), history(이력), create(수동생성)
-	type Tab = 'queue' | 'history' | 'create';
+	// 탭: queue(대기열), history(이력), create(수동생성), performance(성능)
+	type Tab = 'queue' | 'history' | 'create' | 'performance';
 	let activeTab: Tab = 'queue';
+
+	// URL 쿼리에서 탭 읽기
+	$: {
+		const tabParam = $page.url.searchParams.get('tab');
+		if (tabParam === 'performance' || tabParam === 'queue' || tabParam === 'history' || tabParam === 'create') {
+			if (activeTab !== tabParam) {
+				activeTab = tabParam;
+			}
+		}
+	}
 
 	// 모달
 	let selectedRequest: LLMRequest | null = null;
@@ -288,10 +301,19 @@
 
 	function switchTab(tab: Tab) {
 		activeTab = tab;
-		page = 1;
-		selectedIds = [];
-		selectAll = false;
+		// URL 쿼리 업데이트
+		const url = new URL(window.location.href);
+		if (tab === 'queue') {
+			url.searchParams.delete('tab');
+		} else {
+			url.searchParams.set('tab', tab);
+		}
+		goto(url.pathname + url.search, { replaceState: true, keepFocus: true });
+
 		if (tab === 'queue' || tab === 'history') {
+			page = 1;
+			selectedIds = [];
+			selectAll = false;
 			fetchData();
 		}
 		if (tab === 'history') {
@@ -378,6 +400,12 @@
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'create' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
 			>
 				수동 요청 생성
+			</button>
+			<button
+				onclick={() => switchTab('performance')}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'performance' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+			>
+				성능 분석
 			</button>
 		</nav>
 	</div>
@@ -633,6 +661,8 @@
 				</div>
 			</div>
 		</div>
+	{:else if activeTab === 'performance'}
+		<LLMPerformance />
 	{/if}
 </div>
 
