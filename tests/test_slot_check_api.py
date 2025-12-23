@@ -35,7 +35,13 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
 from app.main import app
+from app.database import get_db
+from app.models.base import Base
 from app.modules.naver_booking.routes.slot_check import parse_naver_url, build_response, DAY_OF_WEEK_KR
 from app.modules.naver_booking.services.graphql_client import (
     BusinessInfo, BizItemInfo, ScheduleInfo, ScheduleSlot
@@ -43,10 +49,37 @@ from app.modules.naver_booking.services.graphql_client import (
 
 
 # ============================================================
-# 테스트 클라이언트
+# 테스트 DB 설정 (프로덕션 DB 격리)
 # ============================================================
 
-client = TestClient(app)
+SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
+
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def override_get_db():
+    """테스트용 DB 세션"""
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@pytest.fixture(scope="function")
+def client():
+    """프로덕션 DB와 격리된 테스트 클라이언트"""
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
+    Base.metadata.drop_all(bind=engine)
 
 
 # ============================================================
@@ -232,7 +265,7 @@ class TestRight:
         assert slot.is_available is True
 
     @patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client')
-    def test_check_slots_by_url(self, mock_get_client):
+    def test_check_slots_by_url(self, mock_get_client, client):
         """URL로 슬롯 조회"""
         # Mock 설정
         mock_client = AsyncMock()
@@ -252,7 +285,7 @@ class TestRight:
         assert data["biz_item"]["biz_item_id"] == "6309738"
 
     @patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client')
-    def test_check_slots_by_ids(self, mock_get_client):
+    def test_check_slots_by_ids(self, mock_get_client, client):
         """ID로 슬롯 조회"""
         mock_client = AsyncMock()
         mock_get_client.return_value = mock_client
@@ -273,7 +306,7 @@ class TestRight:
 class TestBoundary:
     """Boundary: 경계값 테스트"""
 
-    def test_days_ahead_min(self):
+    def test_days_ahead_min(self, client):
         """days_ahead 최소값 (1)"""
         with patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client') as mock_get_client:
             mock_client = AsyncMock()
@@ -293,7 +326,7 @@ class TestBoundary:
             call_kwargs = mock_client.fetch_schedule.call_args.kwargs
             assert call_kwargs["days_ahead"] == 1
 
-    def test_days_ahead_max(self):
+    def test_days_ahead_max(self, client):
         """days_ahead 최대값 (35)"""
         with patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client') as mock_get_client:
             mock_client = AsyncMock()
@@ -309,7 +342,7 @@ class TestBoundary:
 
             assert response.status_code == 200
 
-    def test_days_ahead_over_max(self):
+    def test_days_ahead_over_max(self, client):
         """days_ahead 최대값 초과 (36)"""
         response = client.get(
             "/api/v1/slots/check",
@@ -318,7 +351,7 @@ class TestBoundary:
 
         assert response.status_code == 422  # Validation Error
 
-    def test_days_ahead_zero(self):
+    def test_days_ahead_zero(self, client):
         """days_ahead 0 (최소값 미만)"""
         response = client.get(
             "/api/v1/slots/check",
@@ -331,7 +364,7 @@ class TestBoundary:
 class TestError:
     """Error: 에러 조건 테스트"""
 
-    def test_missing_params(self):
+    def test_missing_params(self, client):
         """필수 파라미터 누락"""
         response = client.get("/api/v1/slots/check")
 
@@ -339,7 +372,7 @@ class TestError:
         data = response.json()
         assert data["detail"]["code"] == "MISSING_PARAMS"
 
-    def test_invalid_url_format(self):
+    def test_invalid_url_format(self, client):
         """잘못된 URL 형식"""
         response = client.get(
             "/api/v1/slots/check",
@@ -351,7 +384,7 @@ class TestError:
         assert data["detail"]["code"] == "INVALID_URL"
 
     @patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client')
-    def test_business_not_registered(self, mock_get_client):
+    def test_business_not_registered(self, mock_get_client, client):
         """미등록 업체 조회 시 기본값 사용"""
         mock_client = AsyncMock()
         mock_get_client.return_value = mock_client
@@ -370,7 +403,7 @@ class TestError:
         assert data["business"]["name"] == "(미등록 업체)"
 
     @patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client')
-    def test_item_not_registered(self, mock_get_client):
+    def test_item_not_registered(self, mock_get_client, client):
         """미등록 상품 조회 시 기본값 사용"""
         mock_client = AsyncMock()
         mock_get_client.return_value = mock_client
@@ -389,7 +422,7 @@ class TestError:
         assert data["biz_item"]["name"] == "(미등록 상품)"
 
     @patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client')
-    def test_schedule_fetch_error(self, mock_get_client):
+    def test_schedule_fetch_error(self, mock_get_client, client):
         """스케줄 조회 실패"""
         mock_client = AsyncMock()
         mock_get_client.return_value = mock_client
@@ -549,7 +582,7 @@ class TestExistence:
     """Existence: 존재 여부"""
 
     @patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client')
-    def test_empty_schedule(self, mock_get_client):
+    def test_empty_schedule(self, mock_get_client, client):
         """슬롯이 없는 경우"""
         mock_client = AsyncMock()
         mock_get_client.return_value = mock_client
@@ -619,7 +652,7 @@ class TestTime:
     """Time: 시간 관련 테스트"""
 
     @patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client')
-    def test_target_date_parameter(self, mock_get_client):
+    def test_target_date_parameter(self, mock_get_client, client):
         """target_date 파라미터 전달"""
         mock_client = AsyncMock()
         mock_get_client.return_value = mock_client
@@ -942,7 +975,7 @@ class TestIntegration:
     """통합 테스트"""
 
     @patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client')
-    def test_full_flow_with_url(self, mock_get_client):
+    def test_full_flow_with_url(self, mock_get_client, client):
         """URL -> 파싱 -> API 호출 -> 응답 전체 흐름"""
         mock_client = AsyncMock()
         mock_get_client.return_value = mock_client
@@ -981,7 +1014,7 @@ class TestIntegration:
         mock_client.fetch_schedule.assert_called_once()
 
     @patch('app.modules.naver_booking.routes.slot_check.get_naver_graphql_client')
-    def test_response_json_serializable(self, mock_get_client):
+    def test_response_json_serializable(self, mock_get_client, client):
         """응답이 JSON 직렬화 가능"""
         mock_client = AsyncMock()
         mock_get_client.return_value = mock_client
