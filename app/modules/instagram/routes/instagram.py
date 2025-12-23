@@ -369,6 +369,54 @@ async def get_pending_requests(
     return [CrawlRequestSchema.model_validate(r) for r in requests]
 
 
+@router.post("/crawl/history/{request_id}/retry", response_model=CrawlRequestSchema)
+async def retry_crawl_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+):
+    """크롤링 요청 재시도.
+
+    실패한 크롤링 요청을 다시 시도합니다.
+    원본 요청의 타입에 따라 적절한 새 요청을 생성합니다.
+    """
+    request_service = CrawlRequestService(db)
+
+    # 원본 요청 조회
+    original = request_service.get_request_by_id(request_id)
+    if not original:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    # 재시도 요청 생성
+    if original.request_type == "feed":
+        # 피드 크롤링 재시도
+        new_request = request_service.create_request(
+            account_id=original.account_id,
+            requested_by="retry",
+        )
+    elif original.request_type == "single_post":
+        # 개별 게시물 재크롤링 재시도
+        if not original.target_post_id:
+            raise HTTPException(status_code=400, detail="Original request has no target post")
+        new_request = request_service.create_single_post_request(
+            post_id=original.target_post_id,
+            account_id=original.account_id,
+            requested_by="retry",
+        )
+    elif original.request_type == "single_post_url":
+        # URL 크롤링 재시도
+        if not original.target_url:
+            raise HTTPException(status_code=400, detail="Original request has no target URL")
+        new_request = request_service.create_url_crawl_request(
+            url=original.target_url,
+            account_id=original.account_id,
+            requested_by="retry",
+        )
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown request type: {original.request_type}")
+
+    return CrawlRequestSchema.model_validate(new_request)
+
+
 @router.get("/crawl/history", response_model=CrawlHistoryResponse)
 async def get_crawl_history(
     page: int = Query(1, ge=1, description="페이지 번호"),

@@ -785,3 +785,118 @@ class LLMService:
             "completed": completed,
             "failed": failed,
         }
+
+    # ========== 성능 분석 ==========
+
+    def get_performance_stats(self, hours: int = 24) -> dict:
+        """성능 분석 통계.
+
+        Args:
+            hours: 분석 기간 (시간)
+
+        Returns:
+            LLM 처리 시간 통계, 시간대별 분포 등
+        """
+        threshold = datetime.now() - timedelta(hours=hours)
+
+        # 완료된 요청만 조회
+        completed_requests = (
+            self.db.query(LLMRequest)
+            .filter(
+                LLMRequest.status == "completed",
+                LLMRequest.requested_at >= threshold,
+                LLMRequest.processed_at.isnot(None),
+                LLMRequest.deleted_at.is_(None),
+            )
+            .all()
+        )
+
+        # 실패한 요청 수
+        failed_count = (
+            self.db.query(LLMRequest)
+            .filter(
+                LLMRequest.status == "failed",
+                LLMRequest.requested_at >= threshold,
+                LLMRequest.deleted_at.is_(None),
+            )
+            .count()
+        )
+
+        # 처리 시간 계산
+        processing_times = []
+        for req in completed_requests:
+            if req.processed_at and req.requested_at:
+                seconds = (req.processed_at - req.requested_at).total_seconds()
+                processing_times.append(seconds)
+
+        # 통계 계산
+        if processing_times:
+            processing_times.sort()
+            total_requests = len(processing_times)
+            avg_time = sum(processing_times) / total_requests
+            min_time = processing_times[0]
+            max_time = processing_times[-1]
+            p50 = processing_times[int(total_requests * 0.5)]
+            p95 = processing_times[int(total_requests * 0.95)] if total_requests >= 20 else max_time
+        else:
+            total_requests = 0
+            avg_time = min_time = max_time = p50 = p95 = 0
+
+        # 시간대별 분포 (최근 24시간)
+        by_hour = []
+        for i in range(min(hours, 24)):
+            hour_start = datetime.now().replace(minute=0, second=0, microsecond=0) - timedelta(hours=i)
+            hour_end = hour_start + timedelta(hours=1)
+
+            hour_requests = [
+                r for r in completed_requests
+                if r.processed_at and hour_start <= r.processed_at < hour_end
+            ]
+
+            hour_times = []
+            for req in hour_requests:
+                if req.processed_at and req.requested_at:
+                    seconds = (req.processed_at - req.requested_at).total_seconds()
+                    hour_times.append(seconds)
+
+            by_hour.append({
+                "hour": hour_start.strftime("%H:00"),
+                "count": len(hour_requests),
+                "avg_time": round(sum(hour_times) / len(hour_times), 1) if hour_times else 0,
+            })
+
+        by_hour.reverse()  # 시간순 정렬
+
+        # 최근 느린 요청 (처리 시간 상위 10개)
+        slow_requests = []
+        if completed_requests:
+            sorted_by_time = sorted(
+                completed_requests,
+                key=lambda r: (r.processed_at - r.requested_at).total_seconds() if r.processed_at and r.requested_at else 0,
+                reverse=True
+            )[:10]
+
+            for req in sorted_by_time:
+                if req.processed_at and req.requested_at:
+                    slow_requests.append({
+                        "id": req.id,
+                        "caller_type": req.caller_type,
+                        "caller_id": req.caller_id,
+                        "processing_time": round((req.processed_at - req.requested_at).total_seconds(), 1),
+                        "requested_at": req.requested_at.isoformat(),
+                    })
+
+        return {
+            "period_hours": hours,
+            "llm_stats": {
+                "total_requests": total_requests,
+                "failed_count": failed_count,
+                "avg_processing_time": round(avg_time, 1),
+                "min_time": round(min_time, 1),
+                "max_time": round(max_time, 1),
+                "p50": round(p50, 1),
+                "p95": round(p95, 1),
+            },
+            "by_hour": by_hour,
+            "slow_requests": slow_requests,
+        }

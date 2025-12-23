@@ -319,6 +319,19 @@ def get_caller_stats(db: Session = Depends(get_db)):
     return service.get_caller_stats()
 
 
+@router.get("/performance")
+def get_performance_stats(
+    hours: int = Query(24, ge=1, le=168, description="분석 기간 (시간, 최대 7일)"),
+    db: Session = Depends(get_db),
+):
+    """성능 분석 통계.
+
+    LLM 처리 시간 분석, 시간대별 분포, 느린 요청 목록을 제공합니다.
+    """
+    service = LLMService(db)
+    return service.get_performance_stats(hours=hours)
+
+
 # ========== Cleanup ==========
 
 class CleanupResponse(BaseModel):

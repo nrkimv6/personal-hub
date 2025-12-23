@@ -8,9 +8,10 @@ import hashlib
 import json
 import logging
 import os
+import time
 import urllib.request
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -90,7 +91,7 @@ CLASSIFICATION_PROMPT = """다음 Instagram 게시물을 분석하여 정보를 
 반드시 JSON 형식으로만 응답하세요."""
 
 
-def download_image(url: str, post_id: str) -> Optional[str]:
+def download_image(url: str, post_id: str) -> Tuple[Optional[str], float]:
     """이미지 URL을 로컬 파일로 다운로드.
 
     Args:
@@ -98,8 +99,9 @@ def download_image(url: str, post_id: str) -> Optional[str]:
         post_id: 게시물 ID (캐시 키로 사용)
 
     Returns:
-        로컬 파일 경로 또는 None (실패 시)
+        (로컬 파일 경로 또는 None, 다운로드 시간 초)
     """
+    start_time = time.time()
     try:
         # URL 해시로 파일명 생성
         url_hash = hashlib.md5(url.encode()).hexdigest()[:12]
@@ -112,7 +114,9 @@ def download_image(url: str, post_id: str) -> Optional[str]:
 
         # 이미 다운로드된 경우 스킵
         if filepath.exists():
-            return str(filepath.absolute())
+            elapsed = time.time() - start_time
+            logger.debug(f"Image cache hit: {filepath} ({elapsed:.2f}s)")
+            return str(filepath.absolute()), elapsed
 
         # 다운로드
         headers = {
@@ -123,15 +127,17 @@ def download_image(url: str, post_id: str) -> Optional[str]:
             with open(filepath, "wb") as f:
                 f.write(response.read())
 
-        logger.debug(f"Downloaded image: {url} -> {filepath}")
-        return str(filepath.absolute())
+        elapsed = time.time() - start_time
+        logger.info(f"Downloaded image: {url} -> {filepath} ({elapsed:.2f}s)")
+        return str(filepath.absolute()), elapsed
 
     except Exception as e:
-        logger.warning(f"Failed to download image {url}: {e}")
-        return None
+        elapsed = time.time() - start_time
+        logger.warning(f"Failed to download image {url}: {e} ({elapsed:.2f}s)")
+        return None, elapsed
 
 
-def download_post_images(post: "InstagramPost", max_images: int = 3) -> list[str]:
+def download_post_images(post: "InstagramPost", max_images: int = 3) -> Tuple[list[str], float]:
     """게시물의 이미지들을 다운로드.
 
     Args:
@@ -139,20 +145,25 @@ def download_post_images(post: "InstagramPost", max_images: int = 3) -> list[str
         max_images: 최대 다운로드할 이미지 수
 
     Returns:
-        다운로드된 이미지 경로 목록
+        (다운로드된 이미지 경로 목록, 총 다운로드 시간 초)
     """
     if not post.images:
-        return []
+        return [], 0.0
 
     downloaded = []
+    total_time = 0.0
     for i, img in enumerate(post.images[:max_images]):
         src = img.get("src") if isinstance(img, dict) else img
         if src:
-            path = download_image(src, f"{post.id}_{i}")
+            path, elapsed = download_image(src, f"{post.id}_{i}")
+            total_time += elapsed
             if path:
                 downloaded.append(path)
 
-    return downloaded
+    if downloaded:
+        logger.info(f"Downloaded {len(downloaded)} images for post {post.id} (total: {total_time:.2f}s)")
+
+    return downloaded, total_time
 
 
 class LLMClassifierService:
@@ -215,7 +226,7 @@ class LLMClassifierService:
             return None
 
         # 이미지 다운로드 (최대 3장)
-        image_paths = download_post_images(post, max_images=3)
+        image_paths, download_time = download_post_images(post, max_images=3)
 
         # 이미지 섹션 생성
         if image_paths:
@@ -247,7 +258,7 @@ class LLMClassifierService:
 
         logger.info(
             f"LLM classification request created: post_id={post_id}, "
-            f"trigger_tag={trigger_tag}, images={len(image_paths)}"
+            f"trigger_tag={trigger_tag}, images={len(image_paths)}, download_time={download_time:.2f}s"
         )
         return request
 

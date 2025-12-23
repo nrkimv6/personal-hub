@@ -388,20 +388,31 @@ class InstagramCrawler:
         try:
             return await article.evaluate("""(el, account) => {
                 // 1차: 해시태그 기반 추출 (innerText로 줄바꿈 유지)
+                // 댓글 영역(ul)에 있지 않은 해시태그만 사용
                 const hashtagLinks = el.querySelectorAll('a[href*="/explore/tags/"]');
                 if (hashtagLinks.length > 0) {
-                    const firstHashtag = hashtagLinks[0];
-                    let currentElement = firstHashtag;
+                    let captionHashtag = null;
 
-                    // 해시태그를 포함하는 span까지 올라가기
-                    while (currentElement && currentElement.tagName !== 'SPAN') {
-                        currentElement = currentElement.parentElement;
+                    for (const link of hashtagLinks) {
+                        // ul 안에 있으면 댓글 영역이므로 스킵
+                        if (link.closest('ul')) continue;
+                        captionHashtag = link;
+                        break;
                     }
 
-                    if (currentElement) {
-                        const caption = currentElement.innerText;
-                        if (caption && caption.length > 10) {
-                            return caption;
+                    if (captionHashtag) {
+                        let currentElement = captionHashtag;
+
+                        // 해시태그를 포함하는 span까지 올라가기
+                        while (currentElement && currentElement.tagName !== 'SPAN') {
+                            currentElement = currentElement.parentElement;
+                        }
+
+                        if (currentElement) {
+                            const caption = currentElement.innerText;
+                            if (caption && caption.length > 10) {
+                                return caption;
+                            }
                         }
                     }
                 }
@@ -926,19 +937,31 @@ class InstagramCrawler:
             }
 
             // 5. 본문 - 가이드 문서 방식 (1순위: 해시태그 기반, 2순위: fallback)
+            // 댓글 영역(ul)에 있지 않은 해시태그만 사용
             const hashtagLinks = document.querySelectorAll('a[href*="/explore/tags/"]');
 
             // 1순위: 해시태그 기반 방법 (가장 정확)
             if (hashtagLinks.length > 0) {
-                let currentElement = hashtagLinks[0];
+                let captionHashtag = null;
 
-                // 해시태그를 포함하는 span까지 올라가기
-                while (currentElement && currentElement.tagName !== 'SPAN') {
-                    currentElement = currentElement.parentElement;
+                for (const link of hashtagLinks) {
+                    // ul 안에 있으면 댓글 영역이므로 스킵
+                    if (link.closest('ul')) continue;
+                    captionHashtag = link;
+                    break;
                 }
 
-                if (currentElement) {
-                    data.caption = currentElement.innerText;
+                if (captionHashtag) {
+                    let currentElement = captionHashtag;
+
+                    // 해시태그를 포함하는 span까지 올라가기
+                    while (currentElement && currentElement.tagName !== 'SPAN') {
+                        currentElement = currentElement.parentElement;
+                    }
+
+                    if (currentElement) {
+                        data.caption = currentElement.innerText;
+                    }
                 }
             }
 

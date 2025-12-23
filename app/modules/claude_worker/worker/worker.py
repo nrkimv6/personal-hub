@@ -142,6 +142,7 @@ class LLMWorker:
 
     def __init__(self):
         self.shutdown_event = asyncio.Event()
+        self.continue_event = asyncio.Event()  # 작업 완료 시 즉시 깨우기용
         self.check_interval = 10  # 10초마다 체크
         self.pid = os.getpid()
         self.start_time: datetime = None
@@ -287,12 +288,25 @@ class LLMWorker:
                 # Pending 요청 처리
                 await self._process_pending_requests()
 
-                # 대기
+                # 대기 (continue_event 또는 shutdown_event 발생 시 즉시 깨어남)
+                self.continue_event.clear()
+                shutdown_task = asyncio.create_task(self.shutdown_event.wait())
+                continue_task = asyncio.create_task(self.continue_event.wait())
                 try:
-                    await asyncio.wait_for(
-                        self.shutdown_event.wait(),
-                        timeout=self.check_interval
+                    done, pending = await asyncio.wait(
+                        [shutdown_task, continue_task],
+                        timeout=self.check_interval,
+                        return_when=asyncio.FIRST_COMPLETED
                     )
+                    for task in pending:
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+
+                    if continue_task in done:
+                        logger.debug("continue_event로 즉시 깨어남 - 다음 요청 처리")
                 except asyncio.TimeoutError:
                     pass
 
@@ -367,6 +381,8 @@ class LLMWorker:
             logger.error(f"LLM 실행 예외: {e}", exc_info=True)
         finally:
             self._update_worker_state("idle")
+            # 대기 중인 요청이 있으면 즉시 처리하도록 이벤트 설정
+            self.continue_event.set()
 
 
 # 전역 워커 인스턴스
