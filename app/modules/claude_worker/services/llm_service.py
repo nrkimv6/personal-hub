@@ -164,11 +164,17 @@ class LLMService:
             self.db.commit()
 
     def reset_to_pending(self, request_id: int) -> bool:
-        """요청을 pending으로 리셋 (재시도용)."""
+        """요청을 pending으로 리셋 (재시도용).
+
+        failed 또는 completed 상태인 요청을 pending으로 변경합니다.
+        """
         request = self.db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
-        if request and request.status == "failed":
+        if request and request.status in ("failed", "completed"):
             request.status = "pending"
             request.error_message = None
+            request.result = None
+            request.raw_response = None
+            request.processed_at = None
             self.db.commit()
             return True
         return False
@@ -531,12 +537,15 @@ class LLMService:
             if not request:
                 skipped += 1
                 continue
-            if request.status != "failed":
+            if request.status not in ("failed", "completed"):
                 skipped += 1
                 continue
 
             request.status = "pending"
             request.error_message = None
+            request.result = None
+            request.raw_response = None
+            request.processed_at = None
             success += 1
 
         self.db.commit()

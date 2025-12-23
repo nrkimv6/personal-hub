@@ -109,6 +109,8 @@ class InstagramCrawler:
             data.url = basic.get("url")
             data.images = basic.get("images", [])
             data.is_ad = basic.get("is_ad", False)
+            data.post_type = basic.get("post_type", "NORMAL")
+            data.cta_url = basic.get("cta_url")
             data.likes = basic.get("likes")
             data.comments = basic.get("comments")
 
@@ -170,10 +172,45 @@ class InstagramCrawler:
                 result.url = 'https://www.instagram.com' + href.split('?')[0];
             }
 
-            // 광고 여부: "회원님을 위한 추천", "Sponsored" 등 텍스트 기반 판별
-            const adIndicators = ['회원님을 위한 추천', 'Sponsored', 'スポンサー', '赞助内容'];
+            // 게시물 유형 판별: NORMAL, SPONSORED, SUGGESTED
             const text = el.textContent || '';
-            result.is_ad = adIndicators.some(indicator => text.includes(indicator));
+
+            // 광고 체크 (유료 프로모션) - "광고", "Sponsored"
+            const sponsoredIndicators = ['광고', 'Sponsored', 'スポンサー', '赞助内容'];
+            const isSponsored = sponsoredIndicators.some(indicator => text.includes(indicator));
+
+            // 추천 체크 (알고리즘 추천) - "회원님을 위한 추천", "Suggested for you"
+            const suggestedIndicators = ['회원님을 위한 추천', 'Suggested for you', 'おすすめ', '推荐'];
+            const isSuggested = suggestedIndicators.some(indicator => text.includes(indicator));
+
+            // 게시물 유형 결정 (광고가 추천보다 우선)
+            if (isSponsored) {
+                result.post_type = 'SPONSORED';
+                result.is_ad = true;
+            } else if (isSuggested) {
+                result.post_type = 'SUGGESTED';
+                result.is_ad = false;
+            } else {
+                result.post_type = 'NORMAL';
+                result.is_ad = false;
+            }
+
+            // CTA 링크 추출 (광고만 해당) - "더 알아보기", "Learn More" 등
+            result.cta_url = null;
+            if (isSponsored) {
+                const links = Array.from(el.querySelectorAll('a'));
+                const ctaLink = links.find(link => {
+                    const linkText = link.innerText.trim();
+                    const ariaLabel = link.getAttribute('aria-label') || '';
+                    return linkText.includes('더 알아보기') ||
+                           linkText.includes('Learn More') ||
+                           linkText.includes('자세히 보기') ||
+                           linkText.includes('Shop now') ||
+                           linkText.includes('지금 쇼핑하기') ||
+                           ariaLabel.includes('더 알아보기');
+                });
+                result.cta_url = ctaLink ? ctaLink.href : null;
+            }
 
             // 이미지: alt="Photo by" 우선, scontent URL 폴백
             // 프로필 이미지(s150x150, 44x44, 32x32 등 작은 크기) 제외
@@ -325,12 +362,32 @@ class InstagramCrawler:
     ) -> Optional[str]:
         """본문 추출.
 
-        1차: 구조 기반 추출 ("저장" → 계정명 → "좋아요/댓글")
-        2차 폴백: 가장 긴 span 텍스트 (광고/추천 게시물용)
+        1차: 해시태그 기반 추출 (innerText로 줄바꿈 유지)
+        2차: 구조 기반 추출 ("저장" → 계정명 → "좋아요/댓글")
+        3차 폴백: 가장 긴 span 텍스트 (광고/추천 게시물용)
         """
         try:
             return await article.evaluate("""(el, account) => {
-                // 1차: 구조 기반 추출 (account가 있을 때)
+                // 1차: 해시태그 기반 추출 (innerText로 줄바꿈 유지)
+                const hashtagLinks = el.querySelectorAll('a[href*="/explore/tags/"]');
+                if (hashtagLinks.length > 0) {
+                    const firstHashtag = hashtagLinks[0];
+                    let currentElement = firstHashtag;
+
+                    // 해시태그를 포함하는 span까지 올라가기
+                    while (currentElement && currentElement.tagName !== 'SPAN') {
+                        currentElement = currentElement.parentElement;
+                    }
+
+                    if (currentElement) {
+                        const caption = currentElement.innerText;
+                        if (caption && caption.length > 10) {
+                            return caption;
+                        }
+                    }
+                }
+
+                // 2차: 구조 기반 추출 (account가 있을 때)
                 if (account) {
                     const text = el.textContent;
 
@@ -367,7 +424,7 @@ class InstagramCrawler:
                     }
                 }
 
-                // 2차 폴백: 가장 긴 span 텍스트 (광고/추천 게시물용)
+                // 3차 폴백: 가장 긴 span 텍스트 (광고/추천 게시물용)
                 // 가이드 문서: 50자 이상이고, "팔로워" 등 메타 정보 제외
                 const allSpans = Array.from(el.querySelectorAll('span'));
                 let captionText = '';
@@ -849,49 +906,86 @@ class InstagramCrawler:
                 }
             }
 
-            // 5. 본문 - [role="main"] 내부에서 가장 긴 적합한 span 찾기
-            const main = document.querySelector('[role="main"]');
-            if (main) {
-                const spans = main.querySelectorAll('span');
-                let bestCaption = '';
-                let bestLength = 0;
+            // 5. 본문 - 가이드 문서 방식 (1순위: 해시태그 기반, 2순위: fallback)
+            const hashtagLinks = document.querySelectorAll('a[href*="/explore/tags/"]');
 
-                // 제외할 패턴들 (언어 목록, 메타 정보)
-                const excludePatterns = [
-                    'Afrikaans', 'Português', 'Deutsch', 'English', 'Español',
-                    '답글', '팔로워', 'follower', '게시물', 'posts'
-                ];
+            // 1순위: 해시태그 기반 방법 (가장 정확)
+            if (hashtagLinks.length > 0) {
+                let currentElement = hashtagLinks[0];
 
-                for (const span of spans) {
-                    const text = span.innerText || '';
-
-                    // 최소 100자 이상
-                    if (text.length < 100) continue;
-
-                    // 제외 패턴 체크
-                    const hasExcludePattern = excludePatterns.some(p => text.includes(p));
-                    if (hasExcludePattern) continue;
-
-                    // 가장 긴 텍스트 선택
-                    if (text.length > bestLength) {
-                        bestLength = text.length;
-                        bestCaption = text;
-                    }
+                // 해시태그를 포함하는 span까지 올라가기
+                while (currentElement && currentElement.tagName !== 'SPAN') {
+                    currentElement = currentElement.parentElement;
                 }
 
-                // 본문 정제: 처음 3줄(작성자, 공백, 시간) 제거
-                if (bestCaption) {
-                    const lines = bestCaption.split('\\n');
-                    if (lines.length > 3) {
-                        data.caption = lines.slice(3).join('\\n').trim();
-                    } else {
-                        data.caption = bestCaption;
+                if (currentElement) {
+                    data.caption = currentElement.innerText;
+                }
+            }
+
+            // 2순위: 해시태그가 없는 경우 (대체 방법)
+            if (!data.caption) {
+                const main = document.querySelector('[role="main"]') || document.querySelector('article') || document.body;
+
+                if (main) {
+                    const spans = main.querySelectorAll('span');
+                    let bestCaption = '';
+                    let bestLength = 0;
+
+                    const excludePatterns = [
+                        'Afrikaans', 'Português', 'Deutsch', 'English', 'Español',
+                        '답글', '팔로워', 'follower', '게시물', 'posts'
+                    ];
+
+                    for (const span of spans) {
+                        const text = span.innerText || '';
+
+                        // 최소 20자 이상
+                        if (text.length < 20) continue;
+
+                        // 제외 패턴 확인
+                        const hasExcludePattern = excludePatterns.some(p => text.includes(p));
+                        if (hasExcludePattern) continue;
+
+                        // 가장 긴 텍스트 선택
+                        if (text.length > bestLength) {
+                            bestLength = text.length;
+                            bestCaption = text;
+                        }
+                    }
+
+                    // 작성자명/시간 제거
+                    if (bestCaption) {
+                        const lines = bestCaption.split('\\n');
+
+                        // 첫 줄이 사용자명인지 확인
+                        if (lines.length > 0 && lines[0].match(/^[a-z0-9._]+$/i)) {
+                            let startIndex = 1;
+
+                            // 빈 줄, "수정됨", "•", 시간 표시 건너뛰기
+                            while (startIndex < lines.length) {
+                                const line = lines[startIndex].trim();
+
+                                if (line === '' ||
+                                    line === '수정됨' ||
+                                    line === '•' ||
+                                    line.match(/^\\d+[년월주일시분초]$/) ||
+                                    line.match(/^\\d+[mhdwy]$/i)) {
+                                    startIndex++;
+                                } else {
+                                    break;
+                                }
+                            }
+
+                            data.caption = lines.slice(startIndex).join('\\n').trim();
+                        } else {
+                            data.caption = bestCaption;
+                        }
                     }
                 }
             }
 
-            // 6. 해시태그
-            const hashtagLinks = document.querySelectorAll('a[href*="/explore/tags/"]');
+            // 6. 해시태그 (위에서 이미 hashtagLinks 조회함)
             data.hashtags = Array.from(hashtagLinks).map(link => link.innerText);
 
             // 7. 이미지 - cdninstagram 또는 scontent URL

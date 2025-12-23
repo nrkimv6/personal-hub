@@ -55,6 +55,9 @@ class InstagramPost(Base):
     llm_location = Column(JSON)  # {"venue_name": "...", "address": "..."} - 팝업 전용
     llm_analyzed_at = Column(DateTime)
 
+    # 활성화 상태
+    is_active = Column(Boolean, default=True, index=True)
+
     # 관계
     crawl_run = relationship("InstagramCrawlRun", back_populates="posts")
     tag_relations = relationship(
