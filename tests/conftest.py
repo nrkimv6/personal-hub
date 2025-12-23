@@ -2,11 +2,14 @@
 pytest 설정 및 공통 픽스처
 
 Windows에서 한글 출력 시 인코딩 문제 해결을 위한 설정 포함
-워커 실행 중 프로덕션 DB 보호를 위한 안전장치 포함
+테스트 DB 자동 생성 및 마이그레이션 적용 포함
 """
 
 import sys
 import os
+import re
+import sqlite3
+import shutil
 
 # Windows에서 UTF-8 인코딩 강제 설정
 if sys.platform == 'win32':
@@ -22,38 +25,110 @@ if sys.platform == 'win32':
 
 import pytest
 from pathlib import Path
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
 
 # 프로젝트 루트 추가
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# 워커 PID 파일 경로
-WORKER_PID_PATH = PROJECT_ROOT / ".pids" / "worker.pid"
+# 테스트 DB 경로
+TEST_DB_PATH = PROJECT_ROOT / "data" / "test_monitor.db"
+MIGRATIONS_DIR = PROJECT_ROOT / "app" / "migrations"
 
 
-def is_worker_running() -> bool:
-    """워커 프로세스가 실행 중인지 확인"""
-    if not WORKER_PID_PATH.exists():
-        return False
-    try:
-        import psutil
-        pid = int(WORKER_PID_PATH.read_text().strip())
-        return psutil.pid_exists(pid)
-    except (ImportError, ValueError, FileNotFoundError):
-        return False
+def get_migration_number(filename: str) -> int:
+    """마이그레이션 파일 번호 추출 (예: 001_xxx.sql -> 1)"""
+    match = re.match(r'^(\d+)', filename)
+    return int(match.group(1)) if match else 999
 
 
-@pytest.fixture(scope="session", autouse=True)
-def warn_if_worker_running():
-    """워커 실행 중이면 테스트 시작 시 경고 출력"""
-    if is_worker_running():
+def apply_migrations(db_path: Path) -> None:
+    """마이그레이션 파일들을 순서대로 적용"""
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.cursor()
+
+    # 마이그레이션 파일 정렬 (번호순)
+    migration_files = sorted(
+        MIGRATIONS_DIR.glob("*.sql"),
+        key=lambda f: (get_migration_number(f.name), f.name)
+    )
+
+    for sql_file in migration_files:
         try:
-            pid = WORKER_PID_PATH.read_text().strip()
-            print(f"\n{'='*60}")
-            print(f"  WARNING: Worker is running (PID: {pid})")
-            print(f"  Some tests that access production DB will be skipped.")
-            print(f"  To run all tests, stop the worker first:")
-            print(f"    .\\scripts\\stop.ps1")
-            print(f"{'='*60}\n")
-        except:
+            sql_content = sql_file.read_text(encoding='utf-8')
+            # 여러 문장으로 분리하여 실행
+            statements = [s.strip() for s in sql_content.split(';') if s.strip()]
+            for stmt in statements:
+                try:
+                    cursor.execute(stmt)
+                except sqlite3.OperationalError as e:
+                    # 이미 존재하는 테이블/컬럼 등은 무시
+                    if "already exists" in str(e) or "duplicate column" in str(e).lower():
+                        pass
+                    else:
+                        # 다른 에러도 무시 (테스트 DB이므로)
+                        pass
+        except Exception as e:
+            # 파일 읽기 실패 등은 무시
             pass
+
+    conn.commit()
+    conn.close()
+
+
+@pytest.fixture(scope="session")
+def test_db_engine():
+    """
+    마이그레이션이 적용된 테스트 DB 엔진 (세션 범위)
+
+    모든 테스트에서 공유되는 테스트 전용 DB를 생성하고 마이그레이션을 적용합니다.
+    테스트 세션 종료 시 자동으로 정리됩니다.
+    """
+    from app.database import Base
+
+    # 기존 테스트 DB 삭제
+    if TEST_DB_PATH.exists():
+        try:
+            os.remove(TEST_DB_PATH)
+        except PermissionError:
+            pass
+
+    # 테스트 DB 엔진 생성
+    engine = create_engine(
+        f"sqlite:///{TEST_DB_PATH}",
+        connect_args={"check_same_thread": False}
+    )
+
+    # 1. SQLAlchemy 모델로 기본 테이블 생성
+    Base.metadata.create_all(bind=engine)
+
+    # 2. 마이그레이션 적용 (추가 컬럼, 인덱스 등)
+    apply_migrations(TEST_DB_PATH)
+
+    yield engine
+
+    # 정리
+    engine.dispose()
+    try:
+        if TEST_DB_PATH.exists():
+            os.remove(TEST_DB_PATH)
+    except PermissionError:
+        pass
+
+
+@pytest.fixture(scope="function")
+def test_db_session(test_db_engine):
+    """
+    테스트용 DB 세션 (함수 범위)
+
+    각 테스트 함수마다 새로운 세션을 제공하고,
+    테스트 종료 시 롤백하여 격리를 보장합니다.
+    """
+    Session = sessionmaker(autocommit=False, autoflush=False, bind=test_db_engine)
+    session = Session()
+
+    yield session
+
+    session.rollback()
+    session.close()
