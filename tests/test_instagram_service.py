@@ -2132,3 +2132,360 @@ class TestPostServiceDBIntegration:
             assert isinstance(posts, list)
         except Exception as e:
             pytest.fail(f"event_status='ongoing_or_upcoming' 필터 실패: {e}")
+
+
+# ============================================================
+# LLM 분류 수정 API 테스트 (2025-12-23 추가)
+# - LlmClassificationUpdateSchema
+# - PostService.update_llm_classification()
+# - PATCH /posts/{id}/llm-classification
+# ============================================================
+
+class TestLlmClassificationUpdateSchema:
+    """LlmClassificationUpdateSchema 테스트 (RIGHT-BICEP)"""
+
+    # Right: 올바른 필드 존재
+    def test_schema_exists(self):
+        """LlmClassificationUpdateSchema 존재"""
+        from app.modules.instagram.models.schemas import LlmClassificationUpdateSchema
+
+        assert LlmClassificationUpdateSchema is not None
+
+    def test_schema_has_all_llm_fields(self):
+        """스키마에 모든 LLM 필드 존재"""
+        from app.modules.instagram.models.schemas import LlmClassificationUpdateSchema
+
+        fields = LlmClassificationUpdateSchema.model_fields
+        assert 'llm_tag' in fields
+        assert 'llm_event_start' in fields
+        assert 'llm_event_end' in fields
+        assert 'llm_announcement_date' in fields
+        assert 'llm_prizes' in fields
+        assert 'llm_winner_count' in fields
+        assert 'llm_purchase_required' in fields
+        assert 'llm_organizer' in fields
+        assert 'llm_summary' in fields
+        assert 'llm_location' in fields
+        assert 'llm_urls' in fields
+
+    # Boundary: 모든 필드가 Optional
+    def test_all_fields_optional(self):
+        """모든 필드가 Optional (빈 객체 생성 가능)"""
+        from app.modules.instagram.models.schemas import LlmClassificationUpdateSchema
+
+        # 빈 객체 생성 가능해야 함
+        schema = LlmClassificationUpdateSchema()
+        assert schema.llm_tag is None
+        assert schema.llm_event_start is None
+        assert schema.llm_event_end is None
+
+    def test_partial_update(self):
+        """일부 필드만 업데이트 가능"""
+        from app.modules.instagram.models.schemas import LlmClassificationUpdateSchema
+
+        schema = LlmClassificationUpdateSchema(
+            llm_tag="이벤트",
+            llm_event_end="2025-01-31"
+        )
+
+        assert schema.llm_tag == "이벤트"
+        assert schema.llm_event_end == "2025-01-31"
+        assert schema.llm_event_start is None  # 미지정 필드는 None
+
+    def test_full_update(self):
+        """모든 필드 업데이트"""
+        from app.modules.instagram.models.schemas import LlmClassificationUpdateSchema, LocationSchema
+
+        schema = LlmClassificationUpdateSchema(
+            llm_tag="팝업",
+            llm_event_start="2025-01-01",
+            llm_event_end="2025-01-31",
+            llm_announcement_date="2025-02-01",
+            llm_prizes=["상품권", "기프티콘"],
+            llm_winner_count=10,
+            llm_purchase_required="아니오",
+            llm_organizer="테스트 브랜드",
+            llm_summary="테스트 이벤트입니다",
+            llm_location=LocationSchema(venue_name="테스트 스토어", address="서울시 강남구"),
+            llm_urls=["https://example.com"]
+        )
+
+        assert schema.llm_tag == "팝업"
+        assert schema.llm_prizes == ["상품권", "기프티콘"]
+        assert schema.llm_location.venue_name == "테스트 스토어"
+
+
+class TestLocationSchema:
+    """LocationSchema 테스트"""
+
+    def test_schema_exists(self):
+        """LocationSchema 존재"""
+        from app.modules.instagram.models.schemas import LocationSchema
+
+        assert LocationSchema is not None
+
+    def test_schema_fields(self):
+        """LocationSchema 필드 확인"""
+        from app.modules.instagram.models.schemas import LocationSchema
+
+        fields = LocationSchema.model_fields
+        assert 'venue_name' in fields
+        assert 'address' in fields
+
+    def test_all_fields_optional(self):
+        """모든 필드 Optional"""
+        from app.modules.instagram.models.schemas import LocationSchema
+
+        loc = LocationSchema()
+        assert loc.venue_name is None
+        assert loc.address is None
+
+    def test_partial_data(self):
+        """일부 필드만 설정"""
+        from app.modules.instagram.models.schemas import LocationSchema
+
+        loc = LocationSchema(venue_name="XXX 스토어")
+        assert loc.venue_name == "XXX 스토어"
+        assert loc.address is None
+
+
+class TestPostServiceUpdateLlmClassification:
+    """PostService.update_llm_classification() 테스트 (RIGHT-BICEP, CORRECT)"""
+
+    # Right: 올바른 메서드 존재
+    def test_method_exists(self):
+        """update_llm_classification 메서드 존재"""
+        from app.modules.instagram.services.post_service import PostService
+
+        assert hasattr(PostService, 'update_llm_classification')
+        assert callable(getattr(PostService, 'update_llm_classification'))
+
+    def test_method_signature(self):
+        """메서드 시그니처 확인"""
+        from app.modules.instagram.services.post_service import PostService
+        import inspect
+
+        sig = inspect.signature(PostService.update_llm_classification)
+        params = list(sig.parameters.keys())
+
+        assert 'post_id' in params
+        assert 'llm_tag' in params
+        assert 'llm_event_start' in params
+        assert 'llm_event_end' in params
+        assert 'llm_prizes' in params
+        assert 'llm_location' in params
+
+    # Error: 존재하지 않는 게시물
+    def test_update_nonexistent_post_returns_none(self, mock_db):
+        """존재하지 않는 게시물 업데이트 시 None 반환"""
+        from app.modules.instagram.services.post_service import PostService
+
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+
+        service = PostService(mock_db)
+        result = service.update_llm_classification(post_id=999, llm_tag="이벤트")
+
+        assert result is None
+
+    # Right: 정상 업데이트
+    def test_update_llm_tag(self, mock_db):
+        """llm_tag 업데이트"""
+        from app.modules.instagram.services.post_service import PostService
+
+        mock_post = MagicMock()
+        mock_post.id = 1
+        mock_post.llm_status = None
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_post
+
+        service = PostService(mock_db)
+        result = service.update_llm_classification(post_id=1, llm_tag="이벤트")
+
+        assert mock_post.llm_tag == "이벤트"
+        assert mock_post.llm_status == "completed"  # 자동 설정
+        mock_db.commit.assert_called()
+
+    def test_update_event_dates(self, mock_db):
+        """이벤트 날짜 업데이트"""
+        from app.modules.instagram.services.post_service import PostService
+
+        mock_post = MagicMock()
+        mock_post.id = 1
+        mock_post.llm_status = "completed"
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_post
+
+        service = PostService(mock_db)
+        result = service.update_llm_classification(
+            post_id=1,
+            llm_event_start="2025-01-01",
+            llm_event_end="2025-01-31"
+        )
+
+        assert mock_post.llm_event_start == "2025-01-01"
+        assert mock_post.llm_event_end == "2025-01-31"
+
+    # Boundary: 빈 문자열로 삭제
+    def test_empty_string_clears_date(self, mock_db):
+        """빈 문자열은 해당 필드를 None으로 설정"""
+        from app.modules.instagram.services.post_service import PostService
+
+        mock_post = MagicMock()
+        mock_post.id = 1
+        mock_post.llm_event_end = "2025-01-31"
+        mock_post.llm_status = "completed"
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_post
+
+        service = PostService(mock_db)
+        result = service.update_llm_classification(post_id=1, llm_event_end="")
+
+        assert mock_post.llm_event_end is None
+
+    def test_zero_winner_count_becomes_none(self, mock_db):
+        """당첨자 수 0은 None으로 저장"""
+        from app.modules.instagram.services.post_service import PostService
+
+        mock_post = MagicMock()
+        mock_post.id = 1
+        mock_post.llm_winner_count = 10
+        mock_post.llm_status = "completed"
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_post
+
+        service = PostService(mock_db)
+        result = service.update_llm_classification(post_id=1, llm_winner_count=0)
+
+        assert mock_post.llm_winner_count is None
+
+    def test_update_prizes_list(self, mock_db):
+        """경품 목록 업데이트"""
+        from app.modules.instagram.services.post_service import PostService
+
+        mock_post = MagicMock()
+        mock_post.id = 1
+        mock_post.llm_status = "completed"
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_post
+
+        service = PostService(mock_db)
+        result = service.update_llm_classification(
+            post_id=1,
+            llm_prizes=["상품권 1만원", "커피 기프티콘"]
+        )
+
+        assert mock_post.llm_prizes == ["상품권 1만원", "커피 기프티콘"]
+
+    def test_update_location(self, mock_db):
+        """위치 정보 업데이트"""
+        from app.modules.instagram.services.post_service import PostService
+
+        mock_post = MagicMock()
+        mock_post.id = 1
+        mock_post.llm_status = "completed"
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_post
+
+        service = PostService(mock_db)
+        result = service.update_llm_classification(
+            post_id=1,
+            llm_location={"venue_name": "테스트 스토어", "address": "서울시 강남구"}
+        )
+
+        assert mock_post.llm_location == {"venue_name": "테스트 스토어", "address": "서울시 강남구"}
+
+    def test_empty_location_becomes_none(self, mock_db):
+        """빈 위치 정보는 None으로 저장"""
+        from app.modules.instagram.services.post_service import PostService
+
+        mock_post = MagicMock()
+        mock_post.id = 1
+        mock_post.llm_location = {"venue_name": "기존 스토어"}
+        mock_post.llm_status = "completed"
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_post
+
+        service = PostService(mock_db)
+        result = service.update_llm_classification(
+            post_id=1,
+            llm_location={"venue_name": "", "address": ""}
+        )
+
+        assert mock_post.llm_location is None
+
+    # Time: 분석 시간 업데이트
+    def test_updates_analyzed_at(self, mock_db):
+        """llm_analyzed_at 시간 업데이트"""
+        from app.modules.instagram.services.post_service import PostService
+        from datetime import datetime
+
+        mock_post = MagicMock()
+        mock_post.id = 1
+        mock_post.llm_analyzed_at = None
+        mock_post.llm_status = "completed"
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_post
+
+        service = PostService(mock_db)
+        before = datetime.now()
+        result = service.update_llm_classification(post_id=1, llm_tag="이벤트")
+
+        # llm_analyzed_at이 설정되었는지 확인
+        assert mock_post.llm_analyzed_at is not None
+
+
+class TestLlmClassificationRouteExists:
+    """LLM 분류 수정 라우트 존재 테스트"""
+
+    def test_route_exists_in_file(self):
+        """instagram.py에 llm-classification 라우트 존재"""
+        routes_path = PROJECT_ROOT / "app" / "modules" / "instagram" / "routes" / "instagram.py"
+        content = routes_path.read_text(encoding="utf-8")
+
+        assert "llm-classification" in content
+        assert "PATCH" in content or "@router.patch" in content
+
+    def test_schema_imported_in_routes(self):
+        """라우트에서 LlmClassificationUpdateSchema import"""
+        routes_path = PROJECT_ROOT / "app" / "modules" / "instagram" / "routes" / "instagram.py"
+        content = routes_path.read_text(encoding="utf-8")
+
+        assert "LlmClassificationUpdateSchema" in content
+
+
+class TestLlmClassificationDBIntegration:
+    """LLM 분류 수정 DB 통합 테스트"""
+
+    @pytest.fixture
+    def db_session(self):
+        """실제 DB 세션"""
+        from app.database import SessionLocal
+        db = SessionLocal()
+        yield db
+        db.close()
+
+    def test_update_llm_classification_db(self, db_session):
+        """실제 DB로 LLM 분류 업데이트 동작 확인"""
+        from app.modules.instagram.services.post_service import PostService
+
+        service = PostService(db_session)
+
+        # 첫 번째 게시물 조회
+        posts, total = service.get_posts(limit=1)
+
+        if posts:
+            post = posts[0]
+            original_tag = post.llm_tag
+
+            # 업데이트 시도
+            try:
+                # 테스트 후 원복을 위해 기존 값 저장
+                updated = service.update_llm_classification(
+                    post_id=post.id,
+                    llm_tag="테스트"
+                )
+                assert updated is not None
+                assert updated.llm_tag == "테스트"
+
+                # 원복
+                service.update_llm_classification(
+                    post_id=post.id,
+                    llm_tag=original_tag if original_tag else None
+                )
+            except Exception as e:
+                pytest.fail(f"LLM 분류 업데이트 실패: {e}")
+        else:
+            # 게시물이 없으면 스킵
+            pytest.skip("테스트할 게시물이 없습니다")

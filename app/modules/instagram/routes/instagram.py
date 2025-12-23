@@ -38,6 +38,7 @@ from ..models.schemas import (
     CrawlHistoryItem,
     CrawlHistoryResponse,
     CrawlRunSummary,
+    LlmClassificationUpdateSchema,
 )
 from ..services.url_parser import (
     parse_instagram_url,
@@ -140,6 +141,49 @@ async def toggle_post_active(
     service = PostService(db)
 
     post = service.update_post_active_status(post_id, is_active)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    return _post_to_schema(post)
+
+
+@router.patch("/posts/{post_id}/llm-classification", response_model=PostSchema)
+async def update_llm_classification(
+    post_id: int,
+    update: LlmClassificationUpdateSchema,
+    db: Session = Depends(get_db),
+):
+    """LLM 분류 결과 수동 수정.
+
+    게시물의 LLM 분류 결과를 수동으로 수정합니다.
+    제공된 필드만 업데이트되며, None인 필드는 변경되지 않습니다.
+    빈 문자열("")은 해당 필드를 삭제(None)합니다.
+    """
+    service = PostService(db)
+
+    # 위치 정보를 dict로 변환
+    location_dict = None
+    if update.llm_location is not None:
+        location_dict = {
+            "venue_name": update.llm_location.venue_name,
+            "address": update.llm_location.address,
+        }
+
+    post = service.update_llm_classification(
+        post_id=post_id,
+        llm_tag=update.llm_tag,
+        llm_event_start=update.llm_event_start,
+        llm_event_end=update.llm_event_end,
+        llm_announcement_date=update.llm_announcement_date,
+        llm_prizes=update.llm_prizes,
+        llm_winner_count=update.llm_winner_count,
+        llm_purchase_required=update.llm_purchase_required,
+        llm_organizer=update.llm_organizer,
+        llm_summary=update.llm_summary,
+        llm_location=location_dict,
+        llm_urls=update.llm_urls,
+    )
+
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
 

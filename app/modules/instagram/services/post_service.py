@@ -450,3 +450,93 @@ class PostService:
 
         logger.info(f"Updated post {post_id} is_active={is_active}")
         return post
+
+    def update_llm_classification(
+        self,
+        post_id: int,
+        llm_tag: Optional[str] = None,
+        llm_event_start: Optional[str] = None,
+        llm_event_end: Optional[str] = None,
+        llm_announcement_date: Optional[str] = None,
+        llm_prizes: Optional[List[str]] = None,
+        llm_winner_count: Optional[int] = None,
+        llm_purchase_required: Optional[str] = None,
+        llm_organizer: Optional[str] = None,
+        llm_summary: Optional[str] = None,
+        llm_location: Optional[dict] = None,
+        llm_urls: Optional[List[str]] = None,
+    ) -> Optional[InstagramPost]:
+        """LLM 분류 결과 수동 수정.
+
+        Args:
+            post_id: 게시물 DB ID
+            llm_tag: 분류 태그 (이벤트/팝업/홍보대사/리그램/기타)
+            llm_event_start: 이벤트 시작일 (YYYY-MM-DD, 빈 문자열이면 삭제)
+            llm_event_end: 이벤트 종료일 (YYYY-MM-DD, 빈 문자열이면 삭제)
+            llm_announcement_date: 발표일 (YYYY-MM-DD, 빈 문자열이면 삭제)
+            llm_prizes: 경품 목록
+            llm_winner_count: 당첨자 수 (0이면 None으로 저장)
+            llm_purchase_required: 구매 필수 여부
+            llm_organizer: 주최사
+            llm_summary: 요약
+            llm_location: 위치 정보 (팝업 전용)
+            llm_urls: 관련 URL 목록
+
+        Returns:
+            업데이트된 게시물 또는 None
+        """
+        post = self.get_post_by_id(post_id)
+        if not post:
+            return None
+
+        # 각 필드 업데이트 (None이 아닌 경우에만)
+        if llm_tag is not None:
+            post.llm_tag = llm_tag
+            # llm_status가 없으면 completed로 설정
+            if not post.llm_status:
+                post.llm_status = "completed"
+
+        if llm_event_start is not None:
+            # 빈 문자열이면 None으로 설정
+            post.llm_event_start = llm_event_start if llm_event_start else None
+
+        if llm_event_end is not None:
+            post.llm_event_end = llm_event_end if llm_event_end else None
+
+        if llm_announcement_date is not None:
+            post.llm_announcement_date = llm_announcement_date if llm_announcement_date else None
+
+        if llm_prizes is not None:
+            post.llm_prizes = llm_prizes if llm_prizes else None
+
+        if llm_winner_count is not None:
+            # 0이면 None으로 저장
+            post.llm_winner_count = llm_winner_count if llm_winner_count > 0 else None
+
+        if llm_purchase_required is not None:
+            post.llm_purchase_required = llm_purchase_required if llm_purchase_required else None
+
+        if llm_organizer is not None:
+            post.llm_organizer = llm_organizer if llm_organizer else None
+
+        if llm_summary is not None:
+            post.llm_summary = llm_summary if llm_summary else None
+
+        if llm_location is not None:
+            # 빈 dict이거나 모든 값이 비어있으면 None
+            if llm_location and any(v for v in llm_location.values()):
+                post.llm_location = llm_location
+            else:
+                post.llm_location = None
+
+        if llm_urls is not None:
+            post.llm_urls = llm_urls if llm_urls else None
+
+        # 수정 시간 업데이트
+        post.llm_analyzed_at = datetime.now()
+
+        self.db.commit()
+        self.db.refresh(post)
+
+        logger.info(f"Updated LLM classification for post {post_id}: tag={llm_tag}")
+        return post
