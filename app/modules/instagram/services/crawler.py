@@ -796,19 +796,61 @@ class InstagramCrawler:
                 }
             }
 
-            // 5. 본문 - 가장 긴 span 텍스트 (50자 이상)
-            const allSpans = Array.from(document.querySelectorAll('span'));
-            let maxLength = 0;
-            const excludePatterns = ['팔로워', 'follower', '좋아요', 'likes', '댓글', 'comments'];
+            // 5. 본문 - [role="main"] 내부에서 조건에 맞는 span 찾기
+            const main = document.querySelector('[role="main"]');
+            if (main) {
+                const spans = main.querySelectorAll('span');
 
-            for (const span of allSpans) {
-                const text = span.innerText || '';
-                if (text.length > maxLength && text.length > 50) {
-                    const lowerText = text.toLowerCase();
-                    const isExcluded = excludePatterns.some(p => lowerText.includes(p.toLowerCase()));
-                    if (!isExcluded) {
-                        maxLength = text.length;
-                        data.caption = text;
+                for (const span of spans) {
+                    const text = span.innerText || '';
+
+                    // 본문 조건:
+                    // 1. 길이가 100~600자
+                    // 2. 해시태그 포함 (#)
+                    // 3. 언어 목록이나 댓글이 아님
+                    if (text.length > 100 &&
+                        text.length < 600 &&
+                        text.includes('#') &&
+                        !text.includes('Afrikaans') &&
+                        !text.includes('Português') &&
+                        !text.includes('답글') &&
+                        !text.includes('팔로워') &&
+                        !text.includes('follower')) {
+
+                        // 작성자명과 시간 정보 제거 (처음 3줄)
+                        const lines = text.split('\\n');
+                        if (lines.length > 3) {
+                            data.caption = lines.slice(3).join('\\n').trim();
+                        } else {
+                            data.caption = text;
+                        }
+                        break; // 첫 번째로 조건을 만족하는 것이 본문
+                    }
+                }
+
+                // 해시태그 없는 본문 폴백 (100~600자, 제외 패턴 없음)
+                if (!data.caption) {
+                    for (const span of spans) {
+                        const text = span.innerText || '';
+
+                        if (text.length > 100 &&
+                            text.length < 600 &&
+                            !text.includes('Afrikaans') &&
+                            !text.includes('Português') &&
+                            !text.includes('답글') &&
+                            !text.includes('팔로워') &&
+                            !text.includes('follower') &&
+                            !text.includes('좋아요') &&
+                            !text.includes('댓글')) {
+
+                            const lines = text.split('\\n');
+                            if (lines.length > 3) {
+                                data.caption = lines.slice(3).join('\\n').trim();
+                            } else {
+                                data.caption = text;
+                            }
+                            break;
+                        }
                     }
                 }
             }
