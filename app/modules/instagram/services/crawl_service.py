@@ -223,7 +223,7 @@ class CrawlService:
                 return {"success": False, "message": "Failed to crawl post - no data returned", "post": None, "is_new": False}
 
             # 기존 게시물 확인
-            existing_post = self.post_service.get_by_post_id(post_id)
+            existing_post = self.post_service.get_post_by_instagram_id(post_id)
 
             if existing_post:
                 # 기존 게시물 업데이트
