@@ -26,6 +26,7 @@ class InstagramPost(Base):
     posted_at = Column(DateTime, index=True)
     display_time = Column(String)
     is_ad = Column(Boolean, default=False)
+    post_type = Column(String, default="NORMAL", index=True)  # NORMAL, SPONSORED, SUGGESTED
     likes = Column(Integer)  # 좋아요 수
     comments = Column(Integer)  # 댓글 수
 

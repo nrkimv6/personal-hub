@@ -114,23 +114,42 @@ class InstagramCrawler:
             data.likes = basic.get("likes")
             data.comments = basic.get("comments")
 
-            # 더보기 버튼 클릭 (있으면) - 최대 2회 시도
-            if basic.get("has_more_button"):
-                for attempt in range(2):
-                    clicked = await self._click_more_button(article)
-                    if clicked:
-                        await asyncio.sleep(CrawlOptions().wait_after_more)
-                        # 클릭 후 버튼이 사라졌는지 확인
-                        still_has_more = await self._has_more_button(article)
-                        if not still_has_more:
-                            break  # 성공적으로 확장됨
-                        logger.debug(f"More button still exists after click, attempt {attempt + 1}")
-                    else:
-                        logger.warning(f"Failed to click more button, attempt {attempt + 1}")
-                        await asyncio.sleep(0.5)
+            # 본문 추출 (더보기 버튼 클릭 포함)
+            # 클릭 전 본문 미리 추출
+            caption_before = await self._extract_caption(article, data.account)
+            len_before = len(caption_before) if caption_before else 0
 
-            # 본문 추출
-            data.caption = await self._extract_caption(article, data.account)
+            if basic.get("has_more_button"):
+                clicked = await self._click_more_button(article)
+                if clicked:
+                    # 본문 길이가 늘어날 때까지 폴링 (최대 2초, 0.2초 간격)
+                    caption_expanded = False
+                    for poll in range(10):
+                        await asyncio.sleep(0.2)
+                        caption_after = await self._extract_caption(article, data.account)
+                        len_after = len(caption_after) if caption_after else 0
+                        if len_after > len_before:
+                            data.caption = caption_after
+                            caption_expanded = True
+                            logger.debug(
+                                f"Caption expanded: {len_before} -> {len_after} chars "
+                                f"(+{len_after - len_before}, poll={poll + 1})"
+                            )
+                            break
+                    if not caption_expanded:
+                        # 타임아웃: 클릭 전 본문 사용
+                        data.caption = caption_before
+                        logger.warning(
+                            f"Caption expansion timeout: stayed at {len_before} chars "
+                            f"(account={data.account})"
+                        )
+                else:
+                    # 클릭 실패: 클릭 전 본문 사용
+                    data.caption = caption_before
+                    logger.warning(f"Failed to click more button (account={data.account})")
+            else:
+                # 더보기 버튼 없음: 클릭 전 본문 그대로 사용
+                data.caption = caption_before
 
         except Exception as e:
             logger.error(f"Failed to extract post #{index}: {e}")

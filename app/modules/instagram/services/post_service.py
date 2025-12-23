@@ -36,6 +36,7 @@ class PostService:
         posted_at: Optional[datetime] = None,
         display_time: Optional[str] = None,
         is_ad: bool = False,
+        post_type: str = "NORMAL",
         likes: Optional[int] = None,
         comments: Optional[int] = None,
         account_id: Optional[int] = None,
@@ -52,6 +53,7 @@ class PostService:
             posted_at: 게시 시간
             display_time: 상대 시간
             is_ad: 광고 여부
+            post_type: 게시물 유형 (NORMAL/SPONSORED/SUGGESTED)
             likes: 좋아요 수
             comments: 댓글 수
             account_id: 수집 계정 ID
@@ -91,6 +93,7 @@ class PostService:
             posted_at=posted_at,
             display_time=display_time,
             is_ad=is_ad,
+            post_type=post_type,
             likes=likes,
             comments=comments,
             account_id=account_id,
@@ -119,6 +122,7 @@ class PostService:
         posted_at: Optional[datetime] = None,
         display_time: Optional[str] = None,
         is_ad: bool = False,
+        post_type: str = "NORMAL",
         likes: Optional[int] = None,
         comments: Optional[int] = None,
         account_id: Optional[int] = None,
@@ -138,6 +142,7 @@ class PostService:
             posted_at=posted_at,
             display_time=display_time,
             is_ad=is_ad,
+            post_type=post_type,
             likes=likes,
             comments=comments,
             account_id=account_id,
@@ -151,6 +156,7 @@ class PostService:
         date_from: Optional[date] = None,
         date_to: Optional[date] = None,
         is_ad: Optional[bool] = None,
+        post_type: Optional[str] = None,
         tags: Optional[List[str]] = None,
         llm_tag: Optional[str] = None,
         llm_status: Optional[str] = None,
@@ -168,7 +174,8 @@ class PostService:
             account: 계정명 필터
             date_from: 시작 날짜
             date_to: 종료 날짜
-            is_ad: 광고 필터
+            is_ad: 광고 필터 (레거시, post_type 권장)
+            post_type: 게시물 유형 필터 (NORMAL/SPONSORED/SUGGESTED)
             tags: 태그 필터 (태그 이름 목록)
             llm_tag: LLM 분류 태그 필터 (이벤트/팝업/홍보대사/기타)
             llm_status: LLM 분석 상태 필터 (pending/processing/completed/failed)
@@ -200,6 +207,10 @@ class PostService:
 
         if is_ad is not None:
             query = query.filter(InstagramPost.is_ad == is_ad)
+
+        # 게시물 유형 필터
+        if post_type:
+            query = query.filter(InstagramPost.post_type == post_type)
 
         # 태그 필터
         if tags:

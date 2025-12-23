@@ -401,8 +401,10 @@
 			<div class="flex flex-col">
 				<div class="flex items-center gap-2">
 					<span class="font-semibold text-sm text-gray-900">@{post.account}</span>
-					{#if post.is_ad}
+					{#if post.post_type === 'SPONSORED' || (post.is_ad && !post.post_type)}
 						<span class="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded">광고</span>
+					{:else if post.post_type === 'SUGGESTED'}
+						<span class="px-1.5 py-0.5 text-xs bg-violet-100 text-violet-800 rounded">추천</span>
 					{/if}
 				</div>
 				{#if post.llm_status}
