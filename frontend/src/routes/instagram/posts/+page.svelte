@@ -350,11 +350,12 @@
 	});
 </script>
 
-<div class="p-6">
+<div class="p-4 md:p-6">
 	<!-- 헤더 -->
-	<div class="mb-6 flex flex-wrap justify-between items-center gap-4">
-		<div class="flex items-center gap-3">
-			<h2 class="text-2xl font-bold text-gray-900">게시물 목록</h2>
+	<div class="mb-4 md:mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+		<!-- 제목 + URL 수집 버튼 -->
+		<div class="flex items-center justify-between sm:justify-start gap-3">
+			<h2 class="text-xl md:text-2xl font-bold text-gray-900">게시물 목록</h2>
 			<button
 				onclick={openUrlCrawlModal}
 				class="btn btn-primary btn-sm"
@@ -363,7 +364,23 @@
 				+ URL 수집
 			</button>
 		</div>
-		<div class="flex flex-wrap gap-2 items-center">
+
+		<!-- 뷰 모드 토글 + 필터 토글 -->
+		<div class="flex items-center gap-2">
+			<!-- 모바일 필터 토글 버튼 -->
+			<button
+				onclick={() => showFilters = !showFilters}
+				class="md:hidden btn btn-secondary btn-sm flex items-center gap-1"
+			>
+				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+				</svg>
+				필터
+				{#if activeFilterCount > 0}
+					<span class="px-1.5 py-0.5 text-xs bg-blue-600 text-white rounded-full">{activeFilterCount}</span>
+				{/if}
+			</button>
+
 			<!-- 뷰 모드 토글 -->
 			<div class="flex border border-gray-300 rounded-lg overflow-hidden">
 				<button
@@ -395,26 +412,147 @@
 					</svg>
 				</button>
 			</div>
-			<input
-				type="text"
-				placeholder="계정명 필터"
-				bind:value={filterAccount}
-				class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-			/>
-			<select
-				bind:value={filterIsAd}
-				class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-			>
-				<option value={null}>전체</option>
-				<option value={true}>광고만</option>
-				<option value={false}>일반만</option>
-			</select>
-			<button onclick={handleFilter} class="btn btn-primary btn-sm">필터 적용</button>
+
+			<!-- 데스크톱용 기본 필터 (인라인) -->
+			<div class="hidden md:flex items-center gap-2">
+				<input
+					type="text"
+					placeholder="계정명 필터"
+					bind:value={filterAccount}
+					class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm w-32"
+				/>
+				<select
+					bind:value={filterIsAd}
+					class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+				>
+					<option value={null}>전체</option>
+					<option value={true}>광고만</option>
+					<option value={false}>일반만</option>
+				</select>
+				<button onclick={handleFilter} class="btn btn-primary btn-sm">필터 적용</button>
+			</div>
 		</div>
 	</div>
 
+	<!-- 모바일 필터 패널 (접이식) -->
+	<div
+		class="md:hidden mb-4 bg-white rounded-lg border border-gray-200 overflow-hidden transition-all duration-300"
+		class:hidden={!showFilters}
+	>
+		<div class="p-4 space-y-4">
+			<!-- 계정/광고 필터 -->
+			<div class="flex flex-col gap-2">
+				<label class="text-sm font-medium text-gray-700">기본 필터</label>
+				<input
+					type="text"
+					placeholder="계정명 필터"
+					bind:value={filterAccount}
+					class="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+				/>
+				<select
+					bind:value={filterIsAd}
+					class="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+				>
+					<option value={null}>전체</option>
+					<option value={true}>광고만</option>
+					<option value={false}>일반만</option>
+				</select>
+			</div>
+
+			<!-- 날짜 필터 -->
+			<div class="flex flex-col gap-2">
+				<label class="text-sm font-medium text-gray-700">날짜 필터</label>
+				<select
+					bind:value={filterDateType}
+					class="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+				>
+					<option value="collected">수집일</option>
+					<option value="posted">업로드일</option>
+				</select>
+				<div class="flex items-center gap-2">
+					<input
+						type="date"
+						bind:value={filterDateFrom}
+						class="flex-1 px-2 py-2 border border-gray-300 rounded-lg text-sm"
+					/>
+					<span class="text-gray-400">~</span>
+					<input
+						type="date"
+						bind:value={filterDateTo}
+						class="flex-1 px-2 py-2 border border-gray-300 rounded-lg text-sm"
+					/>
+				</div>
+			</div>
+
+			<!-- 태그 필터 -->
+			{#if availableTags.length > 0}
+				<div class="flex flex-col gap-2">
+					<label class="text-sm font-medium text-gray-700">태그 필터</label>
+					<div class="flex flex-wrap gap-2">
+						{#each availableTags as tag (tag.id)}
+							<button
+								onclick={() => {
+									toggleTagFilter(tag.name);
+								}}
+								class="px-3 py-1.5 text-sm rounded-full transition-colors"
+								style="background-color: {filterTags.includes(tag.name)
+									? tag.color
+									: '#f3f4f6'}; color: {filterTags.includes(tag.name) ? 'white' : '#374151'};"
+							>
+								{tag.display_name}
+								{#if filterTags.includes(tag.name)}
+									<span class="ml-1">✓</span>
+								{/if}
+							</button>
+						{/each}
+					</div>
+				</div>
+			{/if}
+
+			<!-- AI 분류 필터 -->
+			<div class="flex flex-col gap-2">
+				<label class="text-sm font-medium text-gray-700">AI 분류</label>
+				<div class="flex flex-wrap gap-2">
+					{#each llmTagOptions as opt}
+						<button
+							onclick={() => {
+								filterLlmTag = filterLlmTag === opt.value ? null : opt.value;
+							}}
+							class="px-3 py-1.5 text-sm rounded-full transition-colors {filterLlmTag === opt.value ? opt.color + ' ring-2 ring-offset-1 ring-purple-400' : 'bg-gray-100 text-gray-600'}"
+						>
+							{opt.label}
+						</button>
+					{/each}
+				</div>
+				<div class="flex flex-wrap gap-2">
+					{#each llmStatusOptions as opt}
+						<button
+							onclick={() => {
+								filterLlmStatus = filterLlmStatus === opt.value ? null : opt.value;
+							}}
+							class="px-2 py-1 text-xs rounded-full transition-colors {filterLlmStatus === opt.value ? opt.color + ' ring-2 ring-offset-1 ring-gray-400' : 'bg-gray-100 text-gray-600'}"
+						>
+							{opt.label}
+						</button>
+					{/each}
+				</div>
+			</div>
+
+			<!-- 필터 액션 버튼 -->
+			<div class="flex gap-2 pt-2 border-t border-gray-100">
+				<button onclick={handleFilter} class="flex-1 btn btn-primary btn-sm">
+					필터 적용
+				</button>
+				<button onclick={clearFilters} class="btn btn-secondary btn-sm">
+					초기화
+				</button>
+			</div>
+		</div>
+	</div>
+
+	<!-- 데스크톱 필터 영역 -->
 	<!-- 날짜 필터 -->
-	<div class="mb-4 flex flex-wrap gap-2 items-center">
+	<div class="hidden md:flex mb-4 flex-wrap gap-2 items-center">
 		<span class="text-sm text-gray-500">날짜 필터:</span>
 		<select
 			bind:value={filterDateType}
@@ -450,7 +588,7 @@
 
 	<!-- 태그 필터 -->
 	{#if availableTags.length > 0}
-		<div class="mb-4 flex flex-wrap gap-2 items-center">
+		<div class="hidden md:flex mb-4 flex-wrap gap-2 items-center">
 			<span class="text-sm text-gray-500">태그 필터:</span>
 			{#each availableTags as tag (tag.id)}
 				<button
@@ -487,7 +625,7 @@
 	{/if}
 
 	<!-- LLM 분류 필터 -->
-	<div class="mb-4 flex flex-wrap gap-2 items-center">
+	<div class="hidden md:flex mb-4 flex-wrap gap-2 items-center">
 		<span class="text-sm text-gray-500">AI 분류:</span>
 		{#each llmTagOptions as opt}
 			<button
@@ -816,14 +954,20 @@
 
 <!-- 상세보기 (FeedCard detailMode) -->
 {#if selectedPost}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
-		class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+		class="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center sm:p-4"
 		onclick={closeDetail}
 		onkeydown={(e) => e.key === 'Escape' && closeDetail()}
 		role="dialog"
 		tabindex="-1"
 	>
-		<div class="max-w-lg w-full max-h-[90vh] overflow-auto" onclick={(e) => e.stopPropagation()}>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<div
+			class="w-full sm:max-w-lg max-h-[95vh] sm:max-h-[90vh] overflow-auto rounded-t-xl sm:rounded-xl"
+			onclick={(e) => e.stopPropagation()}
+		>
 			<FeedCard
 				post={selectedPost}
 				detailMode={true}
@@ -840,15 +984,18 @@
 
 <!-- URL 수집 모달 -->
 {#if showUrlCrawlModal}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
-		class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+		class="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center sm:p-4"
 		onclick={closeUrlCrawlModal}
 		onkeydown={(e) => e.key === 'Escape' && closeUrlCrawlModal()}
 		role="dialog"
 		tabindex="-1"
 	>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<div
-			class="bg-white rounded-xl max-w-lg w-full"
+			class="bg-white rounded-t-xl sm:rounded-xl w-full sm:max-w-lg"
 			onclick={(e) => e.stopPropagation()}
 		>
 			<div class="p-6">
