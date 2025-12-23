@@ -3,7 +3,7 @@
 # 사용법: .\scripts\cleanup-logs.ps1 [-RetentionDays 3] [-DryRun] [-Verbose]
 
 param(
-    [int]$RetentionDays = 3,      # 보관 일수 (기본: 3일)
+    [int]$RetentionDays = 2,      # 보관 일수 (기본: 3일)
     [switch]$DryRun,              # 테스트 모드 (실제 삭제 안함)
     [switch]$Verbose              # 상세 출력
 )

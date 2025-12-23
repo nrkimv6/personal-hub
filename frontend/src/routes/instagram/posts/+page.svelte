@@ -52,6 +52,20 @@
 	// 상세보기 (FeedCard detailMode)
 	let selectedPost: InstagramPost | null = null;
 
+	// 모바일 필터 표시 상태
+	let showFilters = false;
+
+	// 활성 필터 카운트 계산
+	$: activeFilterCount = [
+		filterAccount,
+		filterIsAd !== null,
+		filterTags.length > 0,
+		filterDateFrom,
+		filterDateTo,
+		filterLlmTag,
+		filterLlmStatus
+	].filter(Boolean).length;
+
 	// localStorage 키
 	const STORAGE_KEY_VIEW_MODE = 'instagram_posts_view_mode';
 	const STORAGE_KEY_DEFAULT_TAGS = 'instagram_posts_default_tags';
@@ -535,10 +549,10 @@
 			{/if}
 		</div>
 	{:else}
-		<!-- 리스트 뷰 -->
+		<!-- 리스트 뷰 (데스크톱) -->
 		{#if viewMode === 'list'}
-			<div class="bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
-				<table class="w-full">
+			<div class="hidden md:block bg-white rounded-lg border border-gray-200 overflow-x-auto mb-6">
+				<table class="w-full min-w-[700px]">
 					<thead class="bg-gray-50 border-b border-gray-200">
 						<tr>
 							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">이미지</th>
@@ -639,6 +653,65 @@
 						{/each}
 					</tbody>
 				</table>
+			</div>
+			<!-- 리스트 뷰 (모바일용 카드 리스트) -->
+			<div class="md:hidden space-y-3 mb-6">
+				{#each posts as post (post.id)}
+					<div
+						class="bg-white rounded-lg border border-gray-200 p-3 flex gap-3 cursor-pointer hover:shadow-md transition-shadow"
+						onclick={() => openDetail(post)}
+						onkeydown={(e) => e.key === 'Enter' && openDetail(post)}
+						role="button"
+						tabindex="0"
+					>
+						<!-- 썸네일 -->
+						<div class="w-16 h-16 flex-shrink-0">
+							{#if post.images && post.images.length > 0}
+								<img
+									src={post.images[0].src}
+									alt={post.images[0].alt || '게시물 이미지'}
+									class="w-full h-full object-cover rounded"
+									loading="lazy"
+								/>
+							{:else}
+								<div class="w-full h-full bg-gray-200 rounded flex items-center justify-center">
+									<span class="text-gray-400">?</span>
+								</div>
+							{/if}
+						</div>
+						<!-- 정보 -->
+						<div class="flex-1 min-w-0">
+							<div class="flex items-center gap-2 mb-1">
+								<span class="font-medium text-sm text-gray-900">@{post.account}</span>
+								{#if post.is_ad}
+									<span class="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded">광고</span>
+								{/if}
+							</div>
+							<p class="text-xs text-gray-600 truncate">{truncate(post.caption, 40)}</p>
+							<div class="flex items-center gap-1 mt-1 flex-wrap">
+								{#if post.tags && post.tags.length > 0}
+									{#each post.tags.slice(0, 2) as tag}
+										<span
+											class="px-1.5 py-0.5 text-xs rounded-full text-white"
+											style="background-color: {tag.color};"
+										>
+											{tag.display_name}
+										</span>
+									{/each}
+									{#if post.tags.length > 2}
+										<span class="text-xs text-gray-400">+{post.tags.length - 2}</span>
+									{/if}
+								{/if}
+								{#if post.llm_status === 'completed' && post.llm_tag}
+									<span class="px-1.5 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700">
+										{post.llm_tag}
+									</span>
+								{/if}
+								<span class="text-xs text-gray-400 ml-auto">{formatDate(post.collected_at)}</span>
+							</div>
+						</div>
+					</div>
+				{/each}
 			</div>
 		{:else}
 			<!-- 그리드 뷰 -->
