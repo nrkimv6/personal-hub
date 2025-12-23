@@ -98,6 +98,7 @@ def save_instagram_result(db, post_id: int, llm_result: dict) -> bool:
         post.llm_urls = llm_result.get("urls")  # JSON 컬럼
         post.llm_organizer = llm_result.get("organizer")
         post.llm_summary = llm_result.get("summary")
+        post.llm_location = llm_result.get("location")  # JSON 컬럼 - 팝업 전용
         post.llm_analyzed_at = datetime.now()
 
         # 이벤트 기간 파싱
