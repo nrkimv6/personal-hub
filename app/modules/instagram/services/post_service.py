@@ -152,6 +152,8 @@ class PostService:
         date_to: Optional[date] = None,
         is_ad: Optional[bool] = None,
         tags: Optional[List[str]] = None,
+        llm_tag: Optional[str] = None,
+        llm_status: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> Tuple[List[InstagramPost], int]:
@@ -163,6 +165,8 @@ class PostService:
             date_to: 종료 날짜
             is_ad: 광고 필터
             tags: 태그 필터 (태그 이름 목록)
+            llm_tag: LLM 분류 태그 필터 (이벤트/팝업/홍보대사/기타)
+            llm_status: LLM 분석 상태 필터 (pending/processing/completed/failed)
             limit: 조회 개수
             offset: 시작 위치
 
@@ -191,6 +195,14 @@ class PostService:
                 .filter(InstagramPostTag.name.in_(tags))
                 .distinct()
             )
+
+        # LLM 분류 태그 필터
+        if llm_tag:
+            query = query.filter(InstagramPost.llm_tag == llm_tag)
+
+        # LLM 분석 상태 필터
+        if llm_status:
+            query = query.filter(InstagramPost.llm_status == llm_status)
 
         total = query.count()
 

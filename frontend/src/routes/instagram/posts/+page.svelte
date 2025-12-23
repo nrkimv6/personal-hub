@@ -29,6 +29,25 @@
 	let filterDateFrom = '';
 	let filterDateTo = '';
 	let filterDateType: 'collected' | 'posted' = 'collected';
+	// LLM 필터
+	let filterLlmTag: string | null = null;
+	let filterLlmStatus: string | null = null;
+
+	// LLM 태그 옵션
+	const llmTagOptions = [
+		{ value: '이벤트', label: '이벤트', color: 'bg-purple-100 text-purple-700' },
+		{ value: '팝업', label: '팝업', color: 'bg-blue-100 text-blue-700' },
+		{ value: '홍보대사', label: '홍보대사', color: 'bg-pink-100 text-pink-700' },
+		{ value: '기타', label: '기타', color: 'bg-gray-100 text-gray-700' }
+	];
+
+	// LLM 상태 옵션
+	const llmStatusOptions = [
+		{ value: 'completed', label: '분석 완료', color: 'bg-green-100 text-green-700' },
+		{ value: 'pending', label: '대기중', color: 'bg-yellow-100 text-yellow-700' },
+		{ value: 'processing', label: '분석중', color: 'bg-blue-100 text-blue-700' },
+		{ value: 'failed', label: '실패', color: 'bg-red-100 text-red-700' }
+	];
 
 	// 상세보기 (FeedCard detailMode)
 	let selectedPost: InstagramPost | null = null;

@@ -57,6 +57,8 @@ async def get_posts(
     date_to: Optional[date] = Query(None, description="종료 날짜"),
     is_ad: Optional[bool] = Query(None, description="광고 필터"),
     tags: Optional[str] = Query(None, description="태그 필터 (쉼표 구분)"),
+    llm_tag: Optional[str] = Query(None, description="LLM 분류 태그 필터 (이벤트/팝업/홍보대사/기타)"),
+    llm_status: Optional[str] = Query(None, description="LLM 분석 상태 (pending/processing/completed/failed)"),
     page: int = Query(1, ge=1, description="페이지 번호"),
     limit: int = Query(20, ge=1, le=100, description="페이지당 개수"),
     db: Session = Depends(get_db),
@@ -74,6 +76,8 @@ async def get_posts(
         date_to=date_to,
         is_ad=is_ad,
         tags=tag_list,
+        llm_tag=llm_tag,
+        llm_status=llm_status,
         limit=limit,
         offset=offset,
     )
@@ -684,6 +688,11 @@ def _post_to_schema(post) -> PostSchema:
                     color=rel.tag.color,
                 ))
 
+    # LLM 날짜 필드를 문자열로 변환
+    llm_event_start = post.llm_event_start.isoformat() if post.llm_event_start else None
+    llm_event_end = post.llm_event_end.isoformat() if post.llm_event_end else None
+    llm_announcement_date = post.llm_announcement_date.isoformat() if post.llm_announcement_date else None
+
     return PostSchema(
         id=post.id,
         post_id=post.post_id,
@@ -697,4 +706,17 @@ def _post_to_schema(post) -> PostSchema:
         collected_at=post.collected_at,
         crawl_run_id=post.crawl_run_id,
         tags=tags,
+        # LLM 분류 결과
+        llm_status=post.llm_status,
+        llm_tag=post.llm_tag,
+        llm_purchase_required=post.llm_purchase_required,
+        llm_prizes=post.llm_prizes,
+        llm_winner_count=post.llm_winner_count,
+        llm_event_start=llm_event_start,
+        llm_event_end=llm_event_end,
+        llm_announcement_date=llm_announcement_date,
+        llm_urls=post.llm_urls,
+        llm_organizer=post.llm_organizer,
+        llm_summary=post.llm_summary,
+        llm_analyzed_at=post.llm_analyzed_at,
     )

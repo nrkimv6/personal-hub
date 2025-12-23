@@ -10,6 +10,12 @@ from typing import List, Dict, Any, Optional, Set, Callable, Awaitable
 
 from playwright.async_api import Page, ElementHandle
 
+from .url_parser import (
+    parse_instagram_url,
+    InstagramUrlType,
+    ParsedInstagramUrl,
+)
+
 logger = logging.getLogger("instagram.crawler")
 
 
@@ -747,3 +753,436 @@ class InstagramCrawler:
 class LoginRequiredError(Exception):
     """로그인이 필요한 경우 발생하는 예외."""
     pass
+
+
+class NotSupportedError(Exception):
+    """지원되지 않는 URL 타입 예외."""
+    pass
+
+
+@dataclass
+class AccountCrawlResult:
+    """계정/해시태그 크롤링 결과."""
+    posts: List[PostData]
+    total: int
+    username: Optional[str] = None
+    hashtag: Optional[str] = None
+    is_private: bool = False
+    error: Optional[str] = None
+
+
+class InstagramUrlCrawler(InstagramCrawler):
+    """URL 기반 Instagram 크롤러.
+
+    다양한 Instagram URL 타입을 파싱하고 적절한 크롤링 메서드를 호출합니다.
+    """
+
+    async def crawl_url(
+        self,
+        url: str,
+        options: CrawlOptions = None,
+        on_post_collected: Optional[Callable[[PostData], Awaitable[bool]]] = None,
+    ) -> AccountCrawlResult:
+        """URL을 파싱하고 적절한 크롤링 메서드 호출.
+
+        Args:
+            url: Instagram URL
+            options: 크롤링 옵션
+            on_post_collected: 게시물 수집 시 호출되는 콜백
+
+        Returns:
+            AccountCrawlResult: 크롤링 결과
+
+        Raises:
+            NotSupportedError: 지원하지 않는 URL 타입
+            ValueError: 잘못된 URL 형식
+        """
+        parsed = parse_instagram_url(url)
+        options = options or CrawlOptions()
+
+        match parsed.url_type:
+            case InstagramUrlType.MAIN_FEED:
+                result = await self.crawl_feed(options, on_post_collected)
+                return AccountCrawlResult(
+                    posts=result.posts,
+                    total=len(result.posts),
+                )
+
+            case InstagramUrlType.ACCOUNT_PROFILE:
+                return await self.crawl_account_feed(
+                    parsed.username, options, on_post_collected
+                )
+
+            case InstagramUrlType.ACCOUNT_REELS:
+                return await self.crawl_account_reels(
+                    parsed.username, options, on_post_collected
+                )
+
+            case InstagramUrlType.SINGLE_POST:
+                post = await self.crawl_single_post(url)
+                return AccountCrawlResult(
+                    posts=[post] if post else [],
+                    total=1 if post else 0,
+                )
+
+            case InstagramUrlType.SINGLE_REEL:
+                post = await self.crawl_single_post(url)
+                return AccountCrawlResult(
+                    posts=[post] if post else [],
+                    total=1 if post else 0,
+                )
+
+            case InstagramUrlType.REELS_EXPLORE:
+                return await self.crawl_reels_explore(options, on_post_collected)
+
+            case InstagramUrlType.HASHTAG:
+                return await self.crawl_hashtag(
+                    parsed.hashtag, options, on_post_collected
+                )
+
+            case InstagramUrlType.STORY:
+                raise NotSupportedError("스토리 크롤링은 지원되지 않습니다.")
+
+            case _:
+                raise ValueError(f"지원하지 않는 URL 형식: {url}")
+
+    async def crawl_account_feed(
+        self,
+        username: str,
+        options: CrawlOptions = None,
+        on_post_collected: Optional[Callable[[PostData], Awaitable[bool]]] = None,
+    ) -> AccountCrawlResult:
+        """특정 계정의 게시물 피드 크롤링.
+
+        Args:
+            username: Instagram 사용자명
+            options: 크롤링 옵션
+            on_post_collected: 게시물 수집 시 호출되는 콜백
+
+        Returns:
+            AccountCrawlResult: 크롤링 결과
+        """
+        options = options or CrawlOptions()
+        logger.info(f"Crawling account feed: @{username} (max_posts={options.max_posts})")
+
+        try:
+            # 프로필 페이지로 이동
+            await self.page.goto(
+                f"https://www.instagram.com/{username}/",
+                wait_until="domcontentloaded"
+            )
+            await asyncio.sleep(2.0)
+
+            # 비공개 계정 체크
+            if await self._is_private_account():
+                logger.warning(f"Account @{username} is private")
+                return AccountCrawlResult(
+                    posts=[],
+                    total=0,
+                    username=username,
+                    is_private=True,
+                    error="비공개 계정입니다.",
+                )
+
+            # 그리드에서 게시물 URL 수집
+            post_urls = await self._extract_grid_post_urls(options.max_posts)
+            logger.info(f"Found {len(post_urls)} post URLs from @{username}")
+
+            # 각 게시물 상세 크롤링
+            posts = []
+            for i, post_url in enumerate(post_urls):
+                post = await self.crawl_single_post(post_url)
+                if post:
+                    post.index = i + 1
+                    posts.append(post)
+
+                    # 콜백 호출
+                    if on_post_collected:
+                        try:
+                            await on_post_collected(post)
+                        except Exception as e:
+                            logger.error(f"Failed to save post: {e}")
+
+                    # Human-like 대기
+                    await asyncio.sleep(random.uniform(1.0, 2.5))
+
+            return AccountCrawlResult(
+                posts=posts,
+                total=len(posts),
+                username=username,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to crawl account @{username}: {e}")
+            return AccountCrawlResult(
+                posts=[],
+                total=0,
+                username=username,
+                error=str(e),
+            )
+
+    async def crawl_account_reels(
+        self,
+        username: str,
+        options: CrawlOptions = None,
+        on_post_collected: Optional[Callable[[PostData], Awaitable[bool]]] = None,
+    ) -> AccountCrawlResult:
+        """특정 계정의 릴스 크롤링.
+
+        Args:
+            username: Instagram 사용자명
+            options: 크롤링 옵션
+            on_post_collected: 게시물 수집 시 호출되는 콜백
+
+        Returns:
+            AccountCrawlResult: 크롤링 결과
+        """
+        options = options or CrawlOptions()
+        logger.info(f"Crawling account reels: @{username}/reels")
+
+        try:
+            # 릴스 페이지로 이동
+            await self.page.goto(
+                f"https://www.instagram.com/{username}/reels/",
+                wait_until="domcontentloaded"
+            )
+            await asyncio.sleep(2.0)
+
+            # 비공개 계정 체크
+            if await self._is_private_account():
+                return AccountCrawlResult(
+                    posts=[],
+                    total=0,
+                    username=username,
+                    is_private=True,
+                    error="비공개 계정입니다.",
+                )
+
+            # 릴스 그리드에서 URL 수집 (/reel/ 패턴)
+            post_urls = await self._extract_grid_post_urls(
+                options.max_posts, url_pattern="/reel/"
+            )
+            logger.info(f"Found {len(post_urls)} reel URLs from @{username}")
+
+            # 각 릴스 상세 크롤링
+            posts = []
+            for i, post_url in enumerate(post_urls):
+                post = await self.crawl_single_post(post_url)
+                if post:
+                    post.index = i + 1
+                    posts.append(post)
+
+                    if on_post_collected:
+                        try:
+                            await on_post_collected(post)
+                        except Exception as e:
+                            logger.error(f"Failed to save reel: {e}")
+
+                    await asyncio.sleep(random.uniform(1.0, 2.5))
+
+            return AccountCrawlResult(
+                posts=posts,
+                total=len(posts),
+                username=username,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to crawl account reels @{username}: {e}")
+            return AccountCrawlResult(
+                posts=[],
+                total=0,
+                username=username,
+                error=str(e),
+            )
+
+    async def crawl_reels_explore(
+        self,
+        options: CrawlOptions = None,
+        on_post_collected: Optional[Callable[[PostData], Awaitable[bool]]] = None,
+    ) -> AccountCrawlResult:
+        """릴스 탐색 피드 크롤링.
+
+        Args:
+            options: 크롤링 옵션
+            on_post_collected: 게시물 수집 시 호출되는 콜백
+
+        Returns:
+            AccountCrawlResult: 크롤링 결과
+        """
+        options = options or CrawlOptions()
+        logger.info(f"Crawling reels explore feed (max_posts={options.max_posts})")
+
+        try:
+            await self.page.goto(
+                "https://www.instagram.com/reels/",
+                wait_until="domcontentloaded"
+            )
+            await asyncio.sleep(2.0)
+
+            # 메인 피드와 유사한 방식으로 크롤링
+            result = await self.crawl_feed(options, on_post_collected)
+
+            return AccountCrawlResult(
+                posts=result.posts,
+                total=len(result.posts),
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to crawl reels explore: {e}")
+            return AccountCrawlResult(
+                posts=[],
+                total=0,
+                error=str(e),
+            )
+
+    async def crawl_hashtag(
+        self,
+        hashtag: str,
+        options: CrawlOptions = None,
+        on_post_collected: Optional[Callable[[PostData], Awaitable[bool]]] = None,
+    ) -> AccountCrawlResult:
+        """해시태그 피드 크롤링.
+
+        Args:
+            hashtag: 해시태그 (# 없이)
+            options: 크롤링 옵션
+            on_post_collected: 게시물 수집 시 호출되는 콜백
+
+        Returns:
+            AccountCrawlResult: 크롤링 결과
+        """
+        options = options or CrawlOptions()
+        logger.info(f"Crawling hashtag: #{hashtag} (max_posts={options.max_posts})")
+
+        try:
+            await self.page.goto(
+                f"https://www.instagram.com/explore/tags/{hashtag}/",
+                wait_until="domcontentloaded"
+            )
+            await asyncio.sleep(2.0)
+
+            # 그리드에서 게시물 URL 수집
+            post_urls = await self._extract_grid_post_urls(options.max_posts)
+            logger.info(f"Found {len(post_urls)} post URLs for #{hashtag}")
+
+            # 각 게시물 상세 크롤링
+            posts = []
+            for i, post_url in enumerate(post_urls):
+                post = await self.crawl_single_post(post_url)
+                if post:
+                    post.index = i + 1
+                    posts.append(post)
+
+                    if on_post_collected:
+                        try:
+                            await on_post_collected(post)
+                        except Exception as e:
+                            logger.error(f"Failed to save post: {e}")
+
+                    await asyncio.sleep(random.uniform(1.0, 2.5))
+
+            return AccountCrawlResult(
+                posts=posts,
+                total=len(posts),
+                hashtag=hashtag,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to crawl hashtag #{hashtag}: {e}")
+            return AccountCrawlResult(
+                posts=[],
+                total=0,
+                hashtag=hashtag,
+                error=str(e),
+            )
+
+    async def _is_private_account(self) -> bool:
+        """비공개 계정인지 확인.
+
+        Returns:
+            bool: 비공개 계정이면 True
+        """
+        try:
+            # 비공개 계정 텍스트 확인 (한국어/영어)
+            private_selectors = [
+                "text='비공개 계정입니다'",
+                "text='This account is private'",
+                "text='This Account is Private'",
+            ]
+
+            for selector in private_selectors:
+                element = await self.page.query_selector(selector)
+                if element:
+                    return True
+
+            # 팔로우 버튼만 있고 게시물 그리드가 없는 경우도 체크
+            grid = await self.page.query_selector("article")
+            if not grid:
+                # main 영역에서 비공개 관련 요소 탐색
+                main = await self.page.query_selector("main")
+                if main:
+                    text = await main.inner_text()
+                    if "비공개" in text or "private" in text.lower():
+                        return True
+
+            return False
+
+        except Exception as e:
+            logger.warning(f"Failed to check private status: {e}")
+            return False
+
+    async def _extract_grid_post_urls(
+        self,
+        limit: int = 50,
+        url_pattern: str = "/p/",
+    ) -> List[str]:
+        """게시물 그리드에서 URL 목록 추출.
+
+        Instagram 프로필/해시태그 페이지의 그리드에서 게시물 URL을 추출합니다.
+        가상화(virtualization)를 고려하여 스크롤하면서 수집합니다.
+
+        Args:
+            limit: 최대 수집할 게시물 수
+            url_pattern: URL에 포함되어야 하는 패턴 ("/p/" 또는 "/reel/")
+
+        Returns:
+            List[str]: 게시물 URL 목록
+        """
+        urls = []
+        seen = set()
+        scroll_count = 0
+        max_scrolls = limit // 3 + 5  # 대략적인 스크롤 횟수 계산
+
+        while len(urls) < limit and scroll_count < max_scrolls:
+            # 현재 그리드의 링크들 추출
+            # 프로필 그리드: main 내의 a[href*="/p/"] 또는 a[href*="/reel/"]
+            links = await self.page.query_selector_all(f'main a[href*="{url_pattern}"]')
+
+            for link in links:
+                href = await link.get_attribute("href")
+                if href and href not in seen:
+                    seen.add(href)
+                    # 절대 URL로 변환
+                    if href.startswith("/"):
+                        href = f"https://www.instagram.com{href}"
+                    urls.append(href)
+
+                    if len(urls) >= limit:
+                        break
+
+            if len(urls) >= limit:
+                break
+
+            # 스크롤하여 더 많은 게시물 로드
+            prev_count = len(urls)
+            await self.page.evaluate("window.scrollBy(0, window.innerHeight)")
+            await asyncio.sleep(random.uniform(1.0, 2.0))
+            scroll_count += 1
+
+            # 새 URL이 추가되지 않으면 중단 (페이지 끝)
+            new_links = await self.page.query_selector_all(f'main a[href*="{url_pattern}"]')
+            if len(new_links) == len(links) and len(urls) == prev_count:
+                logger.debug(f"No new posts found after scroll {scroll_count}")
+                break
+
+        return urls[:limit]
