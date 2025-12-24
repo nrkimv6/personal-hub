@@ -8,12 +8,13 @@
 	interface Props {
 		show: boolean;
 		editingEvent: Event | null;
+		importedData?: EventCreate | null;  // URL 가져오기로 추출된 데이터
 		activeTab?: 'event' | 'popup';
 		onClose: () => void;
 		onSave: (data: EventCreate | EventUpdate, isEdit: boolean) => Promise<void>;
 	}
 
-	let { show, editingEvent, activeTab = 'event', onClose, onSave }: Props = $props();
+	let { show, editingEvent, importedData = null, activeTab = 'event', onClose, onSave }: Props = $props();
 
 	// 폼 상태
 	let eventForm: EventCreate = $state({
@@ -23,10 +24,11 @@
 	let prizesText = $state('');
 	let isSaving = $state(false);
 
-	// editingEvent가 변경되면 폼 초기화
+	// editingEvent 또는 importedData가 변경되면 폼 초기화
 	$effect(() => {
 		if (show) {
 			if (editingEvent) {
+				// 수정 모드: 기존 이벤트 데이터로 초기화
 				eventForm = {
 					title: editingEvent.title,
 					event_type: editingEvent.event_type,
@@ -44,7 +46,29 @@
 					user_note: editingEvent.user_note || ''
 				};
 				prizesText = prizesToText(editingEvent.prizes);
+			} else if (importedData) {
+				// URL 가져오기 모드: 추출된 데이터로 초기화
+				eventForm = {
+					title: importedData.title || '',
+					event_type: importedData.event_type || 'event',
+					event_url: importedData.event_url || '',
+					event_start: importedData.event_start || '',
+					event_end: importedData.event_end || '',
+					organizer: importedData.organizer || '',
+					summary: importedData.summary || '',
+					location_venue: importedData.location_venue || '',
+					location_address: importedData.location_address || '',
+					announcement_date: importedData.announcement_date || '',
+					prizes: importedData.prizes || [],
+					winner_count: importedData.winner_count,
+					purchase_required: importedData.purchase_required,
+					source_type: importedData.source_type,
+					source_url: importedData.source_url,
+					input_source: importedData.input_source
+				};
+				prizesText = prizesToText(importedData.prizes);
 			} else {
+				// 새 이벤트 모드: 빈 폼으로 초기화
 				eventForm = {
 					title: '',
 					event_type: activeTab === 'popup' ? 'popup' : 'event',
@@ -105,7 +129,7 @@
 				<div class="flex justify-between items-start mb-4">
 					<div class="flex items-center gap-2">
 						<h3 class="text-lg font-bold text-gray-900">
-							{editingEvent ? '이벤트 수정' : '새 이벤트'}
+							{editingEvent ? '이벤트 수정' : importedData ? 'URL에서 가져온 이벤트' : '새 이벤트'}
 						</h3>
 						{#if editingEvent}
 							{@const inputSource = editingEvent.input_source || 'human'}
@@ -117,6 +141,10 @@
 										: 'bg-gray-100 text-gray-600'}"
 							>
 								{inputSource === 'ai' ? 'AI 분석' : inputSource === 'ai_edited' ? 'AI+수정' : '수동 입력'}
+							</span>
+						{:else if importedData}
+							<span class="px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700">
+								AI 분석
 							</span>
 						{/if}
 					</div>

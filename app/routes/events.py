@@ -15,6 +15,8 @@ from app.schemas.event import (
     EventResponse,
     EventList,
     EventImportFromInstagram,
+    EventImportFromUrl,
+    EventImportFromUrlResponse,
 )
 from app.core.auth import require_admin, UserInfo
 
@@ -172,6 +174,30 @@ def import_from_instagram(
     if not event:
         raise HTTPException(status_code=404, detail="Instagram post not found")
     return event
+
+
+@router.post("/import-from-url", response_model=EventImportFromUrlResponse)
+def import_from_url(
+    data: EventImportFromUrl,
+    db: Session = Depends(get_db),
+    admin: UserInfo = Depends(require_admin),
+):
+    """
+    URL에서 이벤트 정보를 추출합니다. (관리자 전용)
+
+    - Playwright로 페이지 로드
+    - 페이지 유형별 최적화된 추출기 사용 (Google Forms, Naver Form, Naver Blog 등)
+    - LLM으로 이벤트 정보 분석
+    - auto_save=True면 Event 자동 생성
+
+    지원 페이지 유형:
+    - google_forms: Google Forms 설문
+    - naver_form: Naver Form 설문
+    - naver_blog_pc: Naver Blog PC 버전
+    - naver_blog_mobile: Naver Blog 모바일 버전
+    - generic: 기타 일반 웹페이지 (시맨틱 태그/OG 메타데이터 기반)
+    """
+    return event_service.import_from_url(db, data)
 
 
 @router.get("/check-duplicate-url", response_model=Optional[EventResponse])

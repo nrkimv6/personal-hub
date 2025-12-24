@@ -19,6 +19,7 @@
 	import EventFilterPanel from '$lib/components/events/EventFilterPanel.svelte';
 	import EventFormModal from '$lib/components/events/EventFormModal.svelte';
 	import EventFeedViewerModal from '$lib/components/events/EventFeedViewerModal.svelte';
+	import EventUrlImportModal from '$lib/components/events/EventUrlImportModal.svelte';
 
 	// 로컬 참여 상태 스토어 반응형 구독
 	const participatedMap = $derived($localParticipation);
@@ -65,6 +66,8 @@
 	// 모달 상태
 	let showEventModal = $state(false);
 	let editingEvent: Event | null = $state(null);
+	let showUrlImportModal = $state(false);
+	let importedEventData: EventCreate | null = $state(null);
 
 	// 피드 뷰어 상태
 	let showFeedViewer = $state(false);
@@ -213,11 +216,24 @@
 
 	function openCreateModal() {
 		editingEvent = null;
+		importedEventData = null;
 		showEventModal = true;
 	}
 
 	function openEditModal(event: Event) {
 		editingEvent = event;
+		importedEventData = null;
+		showEventModal = true;
+	}
+
+	function openUrlImportModal() {
+		showUrlImportModal = true;
+	}
+
+	function handleUrlImportComplete(eventData: EventCreate) {
+		// URL에서 추출된 데이터로 이벤트 생성 모달 열기
+		importedEventData = eventData;
+		editingEvent = null;
 		showEventModal = true;
 	}
 
@@ -476,7 +492,12 @@
 		<div class="flex items-center justify-between sm:justify-start gap-3">
 			<h2 class="text-xl md:text-2xl font-bold text-gray-900">이벤트 관리</h2>
 			{#if $isAdmin}
-				<button onclick={openCreateModal} class="btn btn-primary btn-sm"> + 새 이벤트 </button>
+				<div class="flex gap-2">
+					<button onclick={openCreateModal} class="btn btn-primary btn-sm"> + 새 이벤트 </button>
+					<button onclick={openUrlImportModal} class="btn btn-outline btn-sm" title="URL에서 이벤트 가져오기">
+						🔗 URL 가져오기
+					</button>
+				</div>
 			{/if}
 		</div>
 
@@ -661,9 +682,20 @@
 <EventFormModal
 	show={showEventModal}
 	{editingEvent}
+	importedData={importedEventData}
 	{activeTab}
-	onClose={() => (showEventModal = false)}
+	onClose={() => {
+		showEventModal = false;
+		importedEventData = null;
+	}}
 	onSave={handleSaveEvent}
+/>
+
+<!-- URL 가져오기 모달 -->
+<EventUrlImportModal
+	show={showUrlImportModal}
+	onClose={() => (showUrlImportModal = false)}
+	onImportComplete={handleUrlImportComplete}
 />
 {/if}
 
