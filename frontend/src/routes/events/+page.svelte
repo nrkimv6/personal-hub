@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
-	import { page } from '$app/stores';
+	import { page as pageStore } from '$app/stores';
 	import { eventApi } from '$lib/api';
 	import type { Event, EventCreate, EventUpdate } from '$lib/types';
 
 	let events: Event[] = [];
 	let total = 0;
-	let page = 1;
+	let currentPage = 1;
 	let pageSize = 20;
 	let loading = true;
 	let error: string | null = null;
@@ -55,7 +55,7 @@
 	// 탭 변경
 	function switchTab(tab: TabMode) {
 		activeTab = tab;
-		page = 1;
+		currentPage = 1;
 		if (tab === 'event') {
 			filterEventStatus = 'ongoing';
 		} else if (tab === 'popup') {
@@ -71,7 +71,7 @@
 		loading = true;
 		try {
 			const params: Record<string, unknown> = {
-				page,
+				page: currentPage,
 				page_size: pageSize,
 				sort_by: sortBy,
 				sort_order: sortOrder
@@ -105,35 +105,35 @@
 	// 이벤트 상태 필터 변경
 	function setEventStatusFilter(status: string | null) {
 		filterEventStatus = filterEventStatus === status ? null : status;
-		page = 1;
+		currentPage = 1;
 		fetchEvents();
 	}
 
 	// 기간 미정 포함 토글
 	function toggleIncludeUnknownPeriod() {
 		includeUnknownPeriod = !includeUnknownPeriod;
-		page = 1;
+		currentPage = 1;
 		fetchEvents();
 	}
 
 	// 북마크만 보기 토글
 	function toggleBookmarkedFilter() {
 		filterBookmarked = filterBookmarked === true ? null : true;
-		page = 1;
+		currentPage = 1;
 		fetchEvents();
 	}
 
 	// 페이지 이동
 	function prevPage() {
-		if (page > 1) {
-			page--;
+		if (currentPage > 1) {
+			currentPage--;
 			fetchEvents();
 		}
 	}
 
 	function nextPage() {
-		if (page * pageSize < total) {
-			page++;
+		if (currentPage * pageSize < total) {
+			currentPage++;
 			fetchEvents();
 		}
 	}
@@ -301,6 +301,20 @@
 	}
 
 	onMount(() => {
+		// PWA Share Target에서 전달된 URL 처리
+		const action = $pageStore.url.searchParams.get('action');
+		const sharedUrl = $pageStore.url.searchParams.get('url');
+
+		if (action === 'add' && sharedUrl) {
+			// 이벤트 생성 모달 열기 + URL 자동 입력
+			eventForm = {
+				title: '',
+				event_type: 'event',
+				event_url: sharedUrl
+			};
+			showEventModal = true;
+		}
+
 		fetchEvents();
 	});
 </script>
@@ -568,22 +582,22 @@
 		<!-- 페이지네이션 -->
 		<div class="flex flex-col sm:flex-row justify-between items-center gap-3">
 			<span class="text-sm text-gray-500">
-				전체 {total}개 중 {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, total)}
+				전체 {total}개 중 {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, total)}
 			</span>
 			<div class="flex gap-2">
 				<button
 					onclick={prevPage}
-					disabled={page === 1}
+					disabled={currentPage === 1}
 					class="btn btn-secondary btn-sm disabled:opacity-50"
 				>
 					이전
 				</button>
 				<span class="px-3 py-1.5 text-sm">
-					{page} / {Math.ceil(total / pageSize)}
+					{currentPage} / {Math.ceil(total / pageSize)}
 				</span>
 				<button
 					onclick={nextPage}
-					disabled={page * pageSize >= total}
+					disabled={currentPage * pageSize >= total}
 					class="btn btn-secondary btn-sm disabled:opacity-50"
 				>
 					다음
