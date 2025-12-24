@@ -424,14 +424,14 @@
 		{/if}
 	</div>
 
-	<!-- Image -->
-	<div class="relative w-full aspect-square bg-gray-100 overflow-hidden">
-		{#if imageLoading}
-			<div
-				class="absolute inset-0 bg-gradient-to-r from-gray-200 via-gray-100 to-gray-200 animate-pulse"
-			></div>
-		{/if}
-		{#if post.images && post.images.length > 0}
+	<!-- Image (이미지가 있을 때만 표시) -->
+	{#if post.images && post.images.length > 0}
+		<div class="relative w-full aspect-square bg-gray-100 overflow-hidden">
+			{#if imageLoading}
+				<div
+					class="absolute inset-0 bg-gradient-to-r from-gray-200 via-gray-100 to-gray-200 animate-pulse"
+				></div>
+			{/if}
 			<img
 				src={post.images[currentImageIndex].src}
 				alt={post.images[currentImageIndex].alt || `${post.account}의 게시물`}
@@ -484,12 +484,8 @@
 					</button>
 				{/if}
 			{/if}
-		{:else}
-			<div class="absolute inset-0 flex items-center justify-center">
-				<span class="text-gray-400 text-4xl">?</span>
-			</div>
-		{/if}
-	</div>
+		</div>
+	{/if}
 
 	<!-- Content -->
 	<div class="px-4 pb-4">
