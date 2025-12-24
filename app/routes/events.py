@@ -1,5 +1,7 @@
 """
 이벤트 API 라우트 - 독립 이벤트 관리
+
+GET 엔드포인트는 공개, CUD 엔드포인트는 관리자 인증 필요
 """
 from typing import Optional
 from fastapi import APIRouter, Depends, Query, HTTPException
@@ -14,6 +16,7 @@ from app.schemas.event import (
     EventList,
     EventImportFromInstagram,
 )
+from app.core.auth import require_admin, UserInfo
 
 router = APIRouter(prefix="/api/v1/events", tags=["events"])
 
@@ -71,9 +74,13 @@ def get_event(event_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=EventResponse, status_code=201)
-def create_event(data: EventCreate, db: Session = Depends(get_db)):
+def create_event(
+    data: EventCreate,
+    db: Session = Depends(get_db),
+    admin: UserInfo = Depends(require_admin),
+):
     """
-    새 이벤트를 생성합니다.
+    새 이벤트를 생성합니다. (관리자 전용)
     """
     # URL 중복 체크 (경고만)
     if data.event_url:
@@ -86,9 +93,14 @@ def create_event(data: EventCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{event_id}", response_model=EventResponse)
-def update_event(event_id: int, data: EventUpdate, db: Session = Depends(get_db)):
+def update_event(
+    event_id: int,
+    data: EventUpdate,
+    db: Session = Depends(get_db),
+    admin: UserInfo = Depends(require_admin),
+):
     """
-    이벤트를 수정합니다.
+    이벤트를 수정합니다. (관리자 전용)
     """
     event = event_service.update_event(db, event_id, data)
     if not event:
@@ -97,9 +109,13 @@ def update_event(event_id: int, data: EventUpdate, db: Session = Depends(get_db)
 
 
 @router.delete("/{event_id}", status_code=204)
-def delete_event(event_id: int, db: Session = Depends(get_db)):
+def delete_event(
+    event_id: int,
+    db: Session = Depends(get_db),
+    admin: UserInfo = Depends(require_admin),
+):
     """
-    이벤트를 삭제합니다.
+    이벤트를 삭제합니다. (관리자 전용)
     """
     success = event_service.delete_event(db, event_id)
     if not success:
@@ -108,9 +124,13 @@ def delete_event(event_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{event_id}/bookmark", response_model=EventResponse)
-def toggle_bookmark(event_id: int, db: Session = Depends(get_db)):
+def toggle_bookmark(
+    event_id: int,
+    db: Session = Depends(get_db),
+    admin: UserInfo = Depends(require_admin),
+):
     """
-    이벤트 북마크를 토글합니다.
+    이벤트 북마크를 토글합니다. (관리자 전용)
     """
     event = event_service.toggle_bookmark(db, event_id)
     if not event:
@@ -119,9 +139,13 @@ def toggle_bookmark(event_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{event_id}/participate", response_model=EventResponse)
-def toggle_participate(event_id: int, db: Session = Depends(get_db)):
+def toggle_participate(
+    event_id: int,
+    db: Session = Depends(get_db),
+    admin: UserInfo = Depends(require_admin),
+):
     """
-    이벤트 참여 완료 상태를 토글합니다.
+    이벤트 참여 완료 상태를 토글합니다. (관리자 전용)
     """
     event = event_service.toggle_participated(db, event_id)
     if not event:
@@ -130,9 +154,13 @@ def toggle_participate(event_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/import-from-instagram", response_model=EventResponse, status_code=201)
-def import_from_instagram(data: EventImportFromInstagram, db: Session = Depends(get_db)):
+def import_from_instagram(
+    data: EventImportFromInstagram,
+    db: Session = Depends(get_db),
+    admin: UserInfo = Depends(require_admin),
+):
     """
-    Instagram 게시물에서 이벤트를 생성합니다.
+    Instagram 게시물에서 이벤트를 생성합니다. (관리자 전용)
 
     - LLM 분류 결과(llm_tag, llm_urls, llm_event_* 등)를 기반으로 이벤트 자동 생성
     - 이미 연결된 이벤트가 있으면 해당 이벤트 반환
