@@ -150,6 +150,32 @@ $apiLogFile = Get-LatestLogFile "api_"
 $workerLogFile = Get-LatestLogFile "worker_"
 $frontendLogFile = Get-LatestLogFile "frontend_"
 
+# Check if log files are stale (created more than 1 hour before the latest API log)
+function Test-StaleLogFile {
+    param([string]$FilePath, [string]$ReferenceFile)
+
+    if (-not $FilePath -or -not $ReferenceFile) { return $false }
+    if (-not (Test-Path $FilePath) -or -not (Test-Path $ReferenceFile)) { return $false }
+
+    $fileTime = (Get-Item $FilePath).LastWriteTime
+    $refTime = (Get-Item $ReferenceFile).LastWriteTime
+
+    # If the file was last modified more than 1 hour before the reference file, it's stale
+    return ($refTime - $fileTime).TotalHours -gt 1
+}
+
+# Warn about potentially stale log files
+if ($apiLogFile) {
+    if ($workerLogFile -and (Test-StaleLogFile $workerLogFile $apiLogFile)) {
+        Write-Host "[!] Worker log may be stale (from previous session)" -ForegroundColor Yellow
+        $workerLogFile = $null  # Don't show stale logs
+    }
+    if ($frontendLogFile -and (Test-StaleLogFile $frontendLogFile $apiLogFile)) {
+        Write-Host "[!] Frontend log may be stale (from previous session)" -ForegroundColor Yellow
+        $frontendLogFile = $null  # Don't show stale logs
+    }
+}
+
 # Show log content function
 function Show-LogContent {
     param(

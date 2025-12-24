@@ -2,6 +2,7 @@
 	import { page } from '$app/stores';
 	import { navGroups, isActive, getActiveGroupId, type NavGroup, type NavItem } from '$lib/navigation';
 	import { authStore, isAdmin, isLoggedIn, isAuthLoading } from '$lib/stores/auth';
+	import { isDevMode } from '$lib/stores/appMode';
 
 	// Props
 	let {
@@ -39,12 +40,15 @@
 		await authStore.logout();
 	}
 
-	// 관리자 여부에 따라 메뉴 필터링
-	function getVisibleGroups(groups: NavGroup[], admin: boolean): NavGroup[] {
-		if (admin) {
+	// 관리자 여부 및 앱 모드에 따라 메뉴 필터링
+	// - development 모드 + 관리자: 모든 메뉴 표시
+	// - production 모드 또는 비관리자: public 아이템만 표시
+	function getVisibleGroups(groups: NavGroup[], admin: boolean, devMode: boolean): NavGroup[] {
+		// 개발 모드이고 관리자인 경우에만 모든 메뉴 표시
+		if (devMode && admin) {
 			return groups;
 		}
-		// 비관리자: public 아이템만 보여줌
+		// 운영 모드 또는 비관리자: public 아이템만 보여줌
 		return groups
 			.map((group) => ({
 				...group,
@@ -54,7 +58,7 @@
 	}
 
 	// 필터링된 네비게이션 그룹
-	let visibleGroups = $derived(getVisibleGroups(navGroups, $isAdmin));
+	let visibleGroups = $derived(getVisibleGroups(navGroups, $isAdmin, $isDevMode));
 </script>
 
 <!-- 헤더 -->
