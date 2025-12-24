@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, date
 from typing import List, Optional, Tuple
 
-from sqlalchemy import func, desc, asc, or_, and_
+from sqlalchemy import func, desc, asc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -158,10 +158,6 @@ class PostService:
         is_ad: Optional[bool] = None,
         post_type: Optional[str] = None,
         tags: Optional[List[str]] = None,
-        llm_tag: Optional[str] = None,
-        llm_status: Optional[str] = None,
-        event_status: Optional[str] = None,
-        include_unknown_period: bool = False,
         sort_by: Optional[str] = None,
         sort_order: Optional[str] = "asc",
         is_active: Optional[bool] = None,
@@ -177,11 +173,7 @@ class PostService:
             is_ad: 광고 필터 (레거시, post_type 권장)
             post_type: 게시물 유형 필터 (NORMAL/SPONSORED/SUGGESTED)
             tags: 태그 필터 (태그 이름 목록)
-            llm_tag: LLM 분류 태그 필터 (이벤트/팝업/홍보대사/기타)
-            llm_status: LLM 분석 상태 필터 (pending/processing/completed/failed)
-            event_status: 이벤트 진행상태 필터 (ongoing/upcoming/ended)
-            include_unknown_period: 기간 미정(종료일 NULL) 항목 포함 여부
-            sort_by: 정렬 기준 (event_end/event_start/collected_at)
+            sort_by: 정렬 기준 (collected_at)
             sort_order: 정렬 순서 (asc/desc)
             is_active: 활성화 상태 필터 (True/False/None)
             limit: 조회 개수
@@ -221,88 +213,11 @@ class PostService:
                 .distinct()
             )
 
-        # LLM 분류 태그 필터
-        if llm_tag:
-            query = query.filter(InstagramPost.llm_tag == llm_tag)
-
-        # LLM 분석 상태 필터
-        if llm_status:
-            query = query.filter(InstagramPost.llm_status == llm_status)
-
-        # 이벤트 진행상태 필터
-        if event_status:
-            today = date.today()
-            if event_status == "ongoing":
-                # 진행 중: 시작일 <= 오늘 AND 종료일 >= 오늘
-                base_condition = and_(
-                    or_(
-                        InstagramPost.llm_event_start <= today,
-                        InstagramPost.llm_event_start.is_(None)
-                    ),
-                    InstagramPost.llm_event_end >= today,
-                    InstagramPost.llm_event_end.isnot(None)
-                )
-                if include_unknown_period:
-                    # 기간 미정도 포함
-                    query = query.filter(
-                        or_(base_condition, InstagramPost.llm_event_end.is_(None))
-                    )
-                else:
-                    query = query.filter(base_condition)
-            elif event_status == "upcoming":
-                # 예정: 시작일 > 오늘
-                query = query.filter(InstagramPost.llm_event_start > today)
-            elif event_status == "ended":
-                # 종료: 종료일 < 오늘
-                query = query.filter(InstagramPost.llm_event_end < today)
-            elif event_status == "ongoing_or_upcoming":
-                # 진행 중 + 예정: 종료일이 오늘 이후
-                base_condition = and_(
-                    InstagramPost.llm_event_end >= today,
-                    InstagramPost.llm_event_end.isnot(None)
-                )
-                if include_unknown_period:
-                    query = query.filter(
-                        or_(base_condition, InstagramPost.llm_event_end.is_(None))
-                    )
-                else:
-                    query = query.filter(base_condition)
-            elif event_status == "unknown_period":
-                # 기간 미정: 종료일이 NULL
-                query = query.filter(InstagramPost.llm_event_end.is_(None))
-
         total = query.count()
 
-        # 정렬 적용
+        # 정렬 적용 (기본: 수집일 내림차순)
         order_func = asc if sort_order == "asc" else desc
-        if sort_by == "event_end":
-            # NULL을 마지막으로
-            if sort_order == "asc":
-                query = query.order_by(
-                    InstagramPost.llm_event_end.is_(None),
-                    asc(InstagramPost.llm_event_end),
-                    asc(InstagramPost.llm_event_start)
-                )
-            else:
-                query = query.order_by(
-                    InstagramPost.llm_event_end.is_(None),
-                    desc(InstagramPost.llm_event_end),
-                    desc(InstagramPost.llm_event_start)
-                )
-        elif sort_by == "event_start":
-            if sort_order == "asc":
-                query = query.order_by(
-                    InstagramPost.llm_event_start.is_(None),
-                    asc(InstagramPost.llm_event_start)
-                )
-            else:
-                query = query.order_by(
-                    InstagramPost.llm_event_start.is_(None),
-                    desc(InstagramPost.llm_event_start)
-                )
-        else:
-            # 기본: 수집일 내림차순
-            query = query.order_by(desc(InstagramPost.collected_at))
+        query = query.order_by(order_func(InstagramPost.collected_at))
 
         posts = query.offset(offset).limit(limit).all()
 
@@ -474,92 +389,3 @@ class PostService:
         logger.info(f"Updated post {post_id} is_active={is_active}")
         return post
 
-    def update_llm_classification(
-        self,
-        post_id: int,
-        llm_tag: Optional[str] = None,
-        llm_event_start: Optional[str] = None,
-        llm_event_end: Optional[str] = None,
-        llm_announcement_date: Optional[str] = None,
-        llm_prizes: Optional[List[str]] = None,
-        llm_winner_count: Optional[int] = None,
-        llm_purchase_required: Optional[str] = None,
-        llm_organizer: Optional[str] = None,
-        llm_summary: Optional[str] = None,
-        llm_location: Optional[dict] = None,
-        llm_urls: Optional[List[str]] = None,
-    ) -> Optional[InstagramPost]:
-        """LLM 분류 결과 수동 수정.
-
-        Args:
-            post_id: 게시물 DB ID
-            llm_tag: 분류 태그 (이벤트/팝업/홍보대사/리그램/기타)
-            llm_event_start: 이벤트 시작일 (YYYY-MM-DD, 빈 문자열이면 삭제)
-            llm_event_end: 이벤트 종료일 (YYYY-MM-DD, 빈 문자열이면 삭제)
-            llm_announcement_date: 발표일 (YYYY-MM-DD, 빈 문자열이면 삭제)
-            llm_prizes: 경품 목록
-            llm_winner_count: 당첨자 수 (0이면 None으로 저장)
-            llm_purchase_required: 구매 필수 여부
-            llm_organizer: 주최사
-            llm_summary: 요약
-            llm_location: 위치 정보 (팝업 전용)
-            llm_urls: 관련 URL 목록
-
-        Returns:
-            업데이트된 게시물 또는 None
-        """
-        post = self.get_post_by_id(post_id)
-        if not post:
-            return None
-
-        # 각 필드 업데이트 (None이 아닌 경우에만)
-        if llm_tag is not None:
-            post.llm_tag = llm_tag
-            # llm_status가 없으면 completed로 설정
-            if not post.llm_status:
-                post.llm_status = "completed"
-
-        if llm_event_start is not None:
-            # 빈 문자열이면 None으로 설정
-            post.llm_event_start = llm_event_start if llm_event_start else None
-
-        if llm_event_end is not None:
-            post.llm_event_end = llm_event_end if llm_event_end else None
-
-        if llm_announcement_date is not None:
-            post.llm_announcement_date = llm_announcement_date if llm_announcement_date else None
-
-        if llm_prizes is not None:
-            post.llm_prizes = llm_prizes if llm_prizes else None
-
-        if llm_winner_count is not None:
-            # 0이면 None으로 저장
-            post.llm_winner_count = llm_winner_count if llm_winner_count > 0 else None
-
-        if llm_purchase_required is not None:
-            post.llm_purchase_required = llm_purchase_required if llm_purchase_required else None
-
-        if llm_organizer is not None:
-            post.llm_organizer = llm_organizer if llm_organizer else None
-
-        if llm_summary is not None:
-            post.llm_summary = llm_summary if llm_summary else None
-
-        if llm_location is not None:
-            # 빈 dict이거나 모든 값이 비어있으면 None
-            if llm_location and any(v for v in llm_location.values()):
-                post.llm_location = llm_location
-            else:
-                post.llm_location = None
-
-        if llm_urls is not None:
-            post.llm_urls = llm_urls if llm_urls else None
-
-        # 수정 시간 업데이트
-        post.llm_analyzed_at = datetime.now()
-
-        self.db.commit()
-        self.db.refresh(post)
-
-        logger.info(f"Updated LLM classification for post {post_id}: tag={llm_tag}")
-        return post

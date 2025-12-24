@@ -243,10 +243,6 @@ class LLMClassifierService:
             image_section=image_section,
         )
 
-        # instagram_posts에 pending 상태 설정
-        post.llm_status = "pending"
-        self.db.commit()
-
         # claude_worker에 요청 생성
         request = self._llm_service.enqueue(
             caller_type=self.CALLER_TYPE,
@@ -333,26 +329,7 @@ class LLMClassifierService:
 
         # LLMRequest reset
         success = self._llm_service.reset_to_pending(request_id)
-        if not success:
-            return False
-
-        # Instagram 게시물의 llm_status도 pending으로 업데이트
-        if request.caller_type == self.CALLER_TYPE and request.caller_id:
-            try:
-                post_id = int(request.caller_id)
-                post = (
-                    self.db.query(InstagramPost)
-                    .filter(InstagramPost.id == post_id)
-                    .first()
-                )
-                if post:
-                    post.llm_status = "pending"
-                    self.db.commit()
-                    logger.info(f"Post {post_id} llm_status reset to pending")
-            except (ValueError, TypeError):
-                pass
-
-        return True
+        return success
 
     # Worker status는 claude_worker 모듈에 위임
     def get_worker_status(self):
@@ -385,77 +362,3 @@ class LLMClassifierService:
             "failed": failed,
         }
 
-    def sync_post_llm_status(self) -> int:
-        """instagram_posts의 llm_status를 LLM 요청 상태와 동기화.
-
-        pending/processing 상태인 게시물 중 유효한 LLM 요청이 없거나
-        삭제된 경우 실제 상태로 업데이트합니다.
-
-        Returns:
-            업데이트된 게시물 수
-        """
-        from sqlalchemy import text
-
-        # pending/processing 상태인 게시물의 llm_status를
-        # 유효한(삭제되지 않은) LLM 요청의 최신 상태로 업데이트
-        # 유효한 요청이 없으면 NULL로 설정
-        result = self.db.execute(text("""
-            UPDATE instagram_posts SET llm_status = (
-                SELECT COALESCE(
-                    (SELECT status FROM llm_requests
-                     WHERE caller_type = 'instagram'
-                     AND caller_id = CAST(instagram_posts.id AS TEXT)
-                     AND deleted_at IS NULL
-                     ORDER BY requested_at DESC
-                     LIMIT 1),
-                    NULL
-                )
-            )
-            WHERE llm_status IN ('pending', 'processing')
-        """))
-
-        count = result.rowcount
-        if count > 0:
-            self.db.commit()
-            logger.info(f"instagram_posts llm_status 동기화: {count}개")
-
-        return count
-
-    def clear_post_llm_status(self, post_id: int) -> bool:
-        """특정 게시물의 llm_status를 NULL로 초기화.
-
-        LLM 요청이 삭제될 때 호출됩니다.
-
-        Args:
-            post_id: 게시물 ID
-
-        Returns:
-            성공 여부
-        """
-        post = self.db.query(InstagramPost).filter(InstagramPost.id == post_id).first()
-        if not post:
-            return False
-
-        # 해당 게시물에 유효한 LLM 요청이 남아있는지 확인
-        from app.modules.claude_worker.models.llm_request import LLMRequest
-        remaining = (
-            self.db.query(LLMRequest)
-            .filter(
-                LLMRequest.caller_type == self.CALLER_TYPE,
-                LLMRequest.caller_id == str(post_id),
-                LLMRequest.deleted_at.is_(None),
-            )
-            .order_by(LLMRequest.requested_at.desc())
-            .first()
-        )
-
-        if remaining:
-            # 남은 요청이 있으면 그 상태로 업데이트
-            post.llm_status = remaining.status
-        else:
-            # 남은 요청이 없으면 NULL로 초기화
-            post.llm_status = None
-
-        self.db.commit()
-        logger.info(f"Post {post_id} llm_status updated to: {post.llm_status}")
-        return True

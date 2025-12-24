@@ -92,18 +92,6 @@ def save_instagram_result(db, post_id: int, llm_result: dict) -> bool:
             logger.warning(f"Instagram post not found: {post_id}")
             return False
 
-        # LLM 결과를 개별 컬럼에 저장
-        post.llm_status = "completed"
-        post.llm_tag = llm_result.get("tag")
-        post.llm_purchase_required = llm_result.get("purchase_required")
-        post.llm_prizes = llm_result.get("prizes")  # JSON 컬럼
-        post.llm_winner_count = llm_result.get("winner_count")
-        post.llm_urls = llm_result.get("urls")  # JSON 컬럼
-        post.llm_organizer = llm_result.get("organizer")
-        post.llm_summary = llm_result.get("summary")
-        post.llm_location = llm_result.get("location")  # JSON 컬럼 - 팝업 전용
-        post.llm_analyzed_at = datetime.now()
-
         # 이벤트 기간 파싱
         event_period = llm_result.get("event_period")
         event_start = None
@@ -111,12 +99,9 @@ def save_instagram_result(db, post_id: int, llm_result: dict) -> bool:
         if event_period and isinstance(event_period, dict):
             event_start = parse_date(event_period.get("start"))
             event_end = parse_date(event_period.get("end"))
-            post.llm_event_start = event_start
-            post.llm_event_end = event_end
 
         # 발표일 파싱
         announcement_date = parse_date(llm_result.get("announcement_date"))
-        post.llm_announcement_date = announcement_date
 
         # 분류 태그에 따라 적절한 테이블에 레코드 생성
         tag = llm_result.get("tag")
@@ -205,10 +190,10 @@ def save_instagram_result(db, post_id: int, llm_result: dict) -> bool:
             post.classified_id = uncategorized.id
             logger.info(f"Created UncategorizedPost {uncategorized.id} from Instagram post {post_id}")
 
-        # 리그램/후기는 별도 테이블 생성 없이 InstagramPost에만 저장
+        # 리그램/후기 등 분류 테이블 생성이 필요없는 태그는 classified_type/id가 NULL로 유지됨
 
         db.commit()
-        logger.info(f"Instagram post {post_id} LLM result saved: tag={post.llm_tag}")
+        logger.info(f"Instagram post {post_id} LLM result saved: tag={tag}")
         return True
 
     except Exception as e:
@@ -218,20 +203,13 @@ def save_instagram_result(db, post_id: int, llm_result: dict) -> bool:
 
 
 def mark_instagram_failed(db, post_id: int, error_message: str) -> bool:
-    """Instagram 게시물 LLM 분류 실패 표시."""
-    from app.models import InstagramPost
+    """Instagram 게시물 LLM 분류 실패 표시.
 
-    try:
-        post = db.query(InstagramPost).filter(InstagramPost.id == post_id).first()
-        if post:
-            post.llm_status = "failed"
-            db.commit()
-            return True
-        return False
-    except Exception as e:
-        logger.error(f"Failed to mark Instagram post as failed: {e}")
-        db.rollback()
-        return False
+    Note: llm_* 필드가 제거되어 InstagramPost 직접 업데이트는 하지 않음.
+    LLM 요청 상태는 llm_requests 테이블에서 관리됨.
+    """
+    logger.warning(f"Instagram post {post_id} LLM classification failed: {error_message}")
+    return True
 
 
 class LLMWorker:

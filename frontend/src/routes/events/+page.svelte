@@ -325,26 +325,6 @@
 		}
 	}
 
-	// AI 분석 요청 (이벤트용)
-	async function handleRequestLlmAnalysis(postId: number): Promise<void> {
-		try {
-			await instagramApi.requestLlmAnalysis([postId]);
-			// 게시물 다시 로드하여 상태 업데이트
-			if (instagramPost && instagramPost.id === postId) {
-				instagramPost = await instagramApi.getPost(postId);
-			}
-			alert('AI 분석이 요청되었습니다. 잠시 후 결과가 반영됩니다.');
-		} catch (e) {
-			console.error('AI 분석 요청 실패:', e);
-			alert('AI 분석 요청에 실패했습니다.');
-		}
-	}
-
-	// AI 분류 업데이트 콜백 (이벤트용)
-	function handleLlmUpdate(updatedPost: InstagramPost) {
-		instagramPost = updatedPost;
-	}
-
 	// 재크롤링 핸들러 (FeedCard용)
 	async function handleRecrawl(postId: number): Promise<void> {
 		try {
@@ -1695,10 +1675,8 @@
 							onClose={closeFeedViewer}
 							onDelete={handleDeletePost}
 							onRecrawl={handleRecrawl}
-							onRequestLlmAnalysis={handleRequestLlmAnalysis}
 							{availableTags}
 							onTagsUpdate={handleTagsUpdate}
-							onLlmUpdate={handleLlmUpdate}
 						/>
 					{:else}
 						<div class="bg-white rounded-xl p-8 text-center w-[468px]">
@@ -2052,10 +2030,8 @@
 							onClose={closePopupFeedViewer}
 							onDelete={handleDeletePost}
 							onRecrawl={handleRecrawl}
-							onRequestLlmAnalysis={handleRequestLlmAnalysis}
 							{availableTags}
 							onTagsUpdate={handleTagsUpdate}
-							onLlmUpdate={handleLlmUpdate}
 						/>
 					{:else}
 						<div class="bg-white rounded-xl p-8 text-center w-[468px]">
