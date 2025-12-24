@@ -25,8 +25,8 @@
 	let filterUrlType: string | null = null;
 	let filterSourceType: string | null = null;
 	let filterSearch = '';  // 검색어
-	let sortBy = 'event_end';
-	let sortOrder = 'asc';
+	let sortBy = 'winner_count';
+	let sortOrder = 'desc';
 	let includeUnknownPeriod = false;
 
 	// 이벤트 상태 옵션

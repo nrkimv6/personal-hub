@@ -140,6 +140,7 @@ def save_instagram_result(db, post_id: int, llm_result: dict) -> bool:
             db.flush()  # ID 생성
             post.classified_type = "event"
             post.classified_id = event.id
+            post.classified_at = datetime.now()
             logger.info(f"Created Event {event.id} from Instagram post {post_id}")
 
         elif tag == "팝업":
@@ -164,6 +165,7 @@ def save_instagram_result(db, post_id: int, llm_result: dict) -> bool:
             db.flush()  # ID 생성
             post.classified_type = "popup"
             post.classified_id = popup.id
+            post.classified_at = datetime.now()
             logger.info(f"Created Popup {popup.id} from Instagram post {post_id}")
 
         elif tag in ("홍보대사", "기타"):

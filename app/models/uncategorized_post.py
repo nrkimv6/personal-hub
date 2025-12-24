@@ -22,9 +22,15 @@ class UncategorizedPost(Base):
     summary = Column(Text)  # 상세 요약
     organizer = Column(String)  # 브랜드/주최
 
-    # 기간 (있는 경우)
-    start_date = Column(Date)
-    end_date = Column(Date)
+    # 기간 (Event와 동일한 필드명)
+    event_start = Column(Date)
+    event_end = Column(Date)
+    announcement_date = Column(Date)  # 당첨자 발표일
+
+    # 이벤트 상세 (Event와 동일)
+    prizes = Column(JSON, default=list)  # ["경품1", "경품2"]
+    winner_count = Column(Integer)
+    purchase_required = Column(String)  # yes_all/yes_partial/no
 
     # URL
     urls = Column(JSON, default=list)  # 관련 URL들
