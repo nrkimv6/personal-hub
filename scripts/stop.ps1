@@ -275,5 +275,9 @@ Write-Host "========================================" -ForegroundColor Green
 Write-Host "  Stop complete" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "Press any key to exit..." -ForegroundColor Gray
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+
+# Only wait for key press if not in Force mode (interactive use)
+if (-not $Force) {
+    Write-Host "Press any key to exit..." -ForegroundColor Gray
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+}

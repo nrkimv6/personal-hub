@@ -24,6 +24,26 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Monitor Page - Integrated Runner" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
+
+# Clean up ports before starting (kill any zombie processes from previous runs)
+Write-Host "[*] Cleaning up ports..." -ForegroundColor Yellow
+$portsToClean = @($ApiPort, $FrontendPort)
+foreach ($port in $portsToClean) {
+    $conn = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
+    if ($conn) {
+        $pids = $conn | Select-Object -ExpandProperty OwningProcess -Unique
+        foreach ($procId in $pids) {
+            $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
+            if ($proc) {
+                Write-Host "    [!] Killing zombie process on port ${port}: $($proc.ProcessName) (PID: $procId)" -ForegroundColor Yellow
+                Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Milliseconds 300
+            }
+        }
+    }
+}
+Write-Host ""
+
 Write-Host "This script will:" -ForegroundColor Yellow
 Write-Host "  1. Start all processes (API, Worker, Frontend)"
 Write-Host "  2. Show real-time logs"
@@ -380,7 +400,28 @@ try {
     Write-Host "[Step 3] Stopping all processes..." -ForegroundColor Yellow
     Write-Host "----------------------------------------"
 
-    # Stop the appropriate environment (dev or prod)
+    # Kill frontend process directly by port first (more reliable than stop.ps1)
+    # This ensures frontend is killed even if stop.ps1 fails or is interrupted
+    $conn = Get-NetTCPConnection -LocalPort $FrontendPort -ErrorAction SilentlyContinue
+    if ($conn) {
+        $pids = $conn | Select-Object -ExpandProperty OwningProcess -Unique
+        foreach ($procId in $pids) {
+            Write-Host "[*] Killing frontend on port $FrontendPort (PID: $procId)" -ForegroundColor Yellow
+            Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    # Kill API process directly by port
+    $conn = Get-NetTCPConnection -LocalPort $ApiPort -ErrorAction SilentlyContinue
+    if ($conn) {
+        $pids = $conn | Select-Object -ExpandProperty OwningProcess -Unique
+        foreach ($procId in $pids) {
+            Write-Host "[*] Killing API on port $ApiPort (PID: $procId)" -ForegroundColor Yellow
+            Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    # Stop the rest (workers, watchdogs, etc.) via stop.ps1
     if ($Dev) {
         & $stopScript -Force -Dev
     } else {

@@ -567,6 +567,20 @@ class InstagramCrawler:
                 return post_id
         return None
 
+    def _normalize_post_url(self, url: str) -> str:
+        """게시물 URL 정규화 - 쿼리 파라미터와 trailing slash 제거.
+
+        예) https://www.instagram.com/p/ABC123/?igsh=xxx -> https://www.instagram.com/p/ABC123
+            https://www.instagram.com/p/ABC123/ -> https://www.instagram.com/p/ABC123
+        """
+        if not url:
+            return url
+        # 쿼리 파라미터 제거
+        url = url.split("?")[0]
+        # trailing slash 제거
+        url = url.rstrip("/")
+        return url
+
     def _is_db_duplicate(self, post: PostData) -> bool:
         """DB에서 중복 체크."""
         if not self._db_duplicate_checker:
@@ -1064,6 +1078,8 @@ class InstagramCrawler:
             PostData | None: 수집된 게시물 데이터 또는 실패 시 None
         """
         try:
+            # URL 정규화: 쿼리 파라미터와 trailing slash 제거
+            post_url = self._normalize_post_url(post_url)
             logger.info(f"Crawling single post: {post_url}")
 
             # 게시물 페이지로 이동
@@ -1527,12 +1543,15 @@ class InstagramUrlCrawler(InstagramCrawler):
 
             for link in links:
                 href = await link.get_attribute("href")
-                if href and href not in seen:
-                    seen.add(href)
+                if href:
                     # 절대 URL로 변환
                     if href.startswith("/"):
                         href = f"https://www.instagram.com{href}"
-                    urls.append(href)
+                    # URL 정규화: 쿼리 파라미터와 trailing slash 제거
+                    href = self._normalize_post_url(href)
+                    if href not in seen:
+                        seen.add(href)
+                        urls.append(href)
 
                     if len(urls) >= limit:
                         break
