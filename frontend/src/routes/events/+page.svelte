@@ -634,19 +634,26 @@
 
 		<!-- 필터 요약 + 모바일 필터 토글 -->
 		<div class="flex items-center gap-2">
-			<!-- 모바일 필터 토글 버튼 -->
-			<button
-				onclick={() => showFilters = !showFilters}
-				class="md:hidden btn btn-secondary btn-sm flex items-center gap-1"
-			>
-				<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-				</svg>
-				필터
-				{#if activeFilterCount > 0}
-					<span class="px-1.5 py-0.5 text-xs bg-blue-600 text-white rounded-full">{activeFilterCount}</span>
-				{/if}
-			</button>
+			{#if isMobileEventTab}
+				<!-- 모바일 이벤트 탭: 오늘 마감 고정 배지 -->
+				<span class="md:hidden px-2 py-1 text-xs font-medium bg-orange-100 text-orange-700 rounded-full">
+					오늘 마감
+				</span>
+			{:else}
+				<!-- 모바일 필터 토글 버튼 -->
+				<button
+					onclick={() => showFilters = !showFilters}
+					class="md:hidden btn btn-secondary btn-sm flex items-center gap-1"
+				>
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+					</svg>
+					필터
+					{#if activeFilterCount > 0}
+						<span class="px-1.5 py-0.5 text-xs bg-blue-600 text-white rounded-full">{activeFilterCount}</span>
+					{/if}
+				</button>
+			{/if}
 
 			<span class="text-sm text-gray-600">총 {total}건</span>
 			{#if filterBookmarked}
