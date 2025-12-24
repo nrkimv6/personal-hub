@@ -21,7 +21,7 @@
 
 	// 필터
 	let filterEventStatus: string | null = 'ongoing';  // 기본: 진행 중
-	let filterBookmarked: boolean | null = null;
+	let filterBookmarked: boolean | null = null;  // 북마크 기능 임시 비활성화 (변수는 유지)
 	let filterUrlType: string | null = null;
 	let filterSourceType: string | null = null;
 	let filterSearch = '';  // 검색어
@@ -83,7 +83,7 @@
 	// 활성 필터 카운트 계산
 	$: activeFilterCount = [
 		filterEventStatus,
-		filterBookmarked !== null,
+		// filterBookmarked !== null,  // 북마크 기능 임시 비활성화
 		filterUrlType,
 		filterSourceType,
 		filterSearch,
@@ -155,7 +155,7 @@
 
 				// 팝업 필터
 				if (filterEventStatus) params.popup_status = filterEventStatus;
-				if (filterBookmarked !== null) params.is_bookmarked = filterBookmarked;
+				// if (filterBookmarked !== null) params.is_bookmarked = filterBookmarked;  // 북마크 기능 임시 비활성화
 				if (filterSourceType) params.source_type = filterSourceType;
 				if (filterSearch) params.search = filterSearch;
 				if (includeUnknownPeriod) params.include_unknown_period = true;
@@ -177,7 +177,7 @@
 
 				// 추가 필터
 				if (filterEventStatus) params.event_status = filterEventStatus;
-				if (filterBookmarked !== null) params.is_bookmarked = filterBookmarked;
+				// if (filterBookmarked !== null) params.is_bookmarked = filterBookmarked;  // 북마크 기능 임시 비활성화
 				if (filterUrlType) params.url_type = filterUrlType;
 				if (filterSourceType) params.source_type = filterSourceType;
 				if (filterSearch) params.search = filterSearch;
@@ -210,12 +210,12 @@
 		fetchEvents();
 	}
 
-	// 북마크만 보기 토글
-	function toggleBookmarkedFilter() {
-		filterBookmarked = filterBookmarked === true ? null : true;
-		currentPage = 1;
-		fetchEvents();
-	}
+	// 북마크만 보기 토글 - 북마크 기능 임시 비활성화
+	// function toggleBookmarkedFilter() {
+	// 	filterBookmarked = filterBookmarked === true ? null : true;
+	// 	currentPage = 1;
+	// 	fetchEvents();
+	// }
 
 	// 검색 실행
 	function handleSearch() {
@@ -450,17 +450,17 @@
 		}
 	}
 
-	// 북마크 토글
-	async function toggleBookmark(event: Event, e: MouseEvent) {
-		e.stopPropagation();
-		try {
-			const result = await eventApi.toggleBookmark(event.id);
-			event.is_bookmarked = result.is_bookmarked;
-			events = [...events];
-		} catch (err) {
-			console.error('북마크 토글 실패:', err);
-		}
-	}
+	// 북마크 토글 - 북마크 기능 임시 비활성화
+	// async function toggleBookmark(event: Event, e: MouseEvent) {
+	// 	e.stopPropagation();
+	// 	try {
+	// 		const result = await eventApi.toggleBookmark(event.id);
+	// 		event.is_bookmarked = result.is_bookmarked;
+	// 		events = [...events];
+	// 	} catch (err) {
+	// 		console.error('북마크 토글 실패:', err);
+	// 	}
+	// }
 
 	// 참여 완료 토글 (로컬스토리지 기반)
 	function toggleParticipate(event: Event, e: MouseEvent) {
@@ -551,17 +551,17 @@
 		instagramPost = null;
 	}
 
-	// 팝업 북마크 토글
-	async function togglePopupBookmark(popup: Popup, e: MouseEvent) {
-		e.stopPropagation();
-		try {
-			const result = await popupApi.toggleBookmark(popup.id);
-			popup.is_bookmarked = result.is_bookmarked;
-			popups = [...popups];
-		} catch (err) {
-			console.error('북마크 토글 실패:', err);
-		}
-	}
+	// 팝업 북마크 토글 - 북마크 기능 임시 비활성화
+	// async function togglePopupBookmark(popup: Popup, e: MouseEvent) {
+	// 	e.stopPropagation();
+	// 	try {
+	// 		const result = await popupApi.toggleBookmark(popup.id);
+	// 		popup.is_bookmarked = result.is_bookmarked;
+	// 		popups = [...popups];
+	// 	} catch (err) {
+	// 		console.error('북마크 토글 실패:', err);
+	// 	}
+	// }
 
 	// 팝업 방문 완료 토글
 	async function togglePopupVisited(popup: Popup, e: MouseEvent) {
@@ -691,9 +691,10 @@
 			{/if}
 
 			<span class="text-sm text-gray-600">총 {total}건</span>
+			<!-- 북마크 기능 임시 비활성화
 			{#if filterBookmarked}
 				<span class="hidden sm:inline text-sm text-yellow-600">(북마크만)</span>
-			{/if}
+			{/if} -->
 			{#if includeUnknownPeriod}
 				<span class="hidden sm:inline text-sm text-amber-600">(기간미정 포함)</span>
 			{/if}
@@ -802,6 +803,7 @@
 					/>
 					<span class="text-sm text-gray-600">기간 미정 포함</span>
 				</label>
+				<!-- 북마크 기능 임시 비활성화
 				<label class="flex items-center gap-2 cursor-pointer">
 					<input
 						type="checkbox"
@@ -810,7 +812,7 @@
 						class="w-4 h-4 text-yellow-600 rounded border-gray-300 focus:ring-yellow-500"
 					/>
 					<span class="text-sm text-gray-600">북마크만</span>
-				</label>
+				</label> -->
 			</div>
 
 			<!-- 닫기 버튼 -->
@@ -895,8 +897,8 @@
 			<span class="text-sm text-gray-600">기간 미정 포함</span>
 		</label>
 
-		<!-- 북마크만 -->
-		<label class="flex items-center gap-2 cursor-pointer">
+		<!-- 북마크만 - 북마크 기능 임시 비활성화 -->
+		<!-- <label class="flex items-center gap-2 cursor-pointer">
 			<input
 				type="checkbox"
 				checked={filterBookmarked === true}
@@ -904,7 +906,7 @@
 				class="w-4 h-4 text-yellow-600 rounded border-gray-300 focus:ring-yellow-500"
 			/>
 			<span class="text-sm text-gray-600">북마크만</span>
-		</label>
+		</label> -->
 	</div>
 	{/if}
 
@@ -954,15 +956,15 @@
 								<p class="text-sm text-blue-600 truncate">{popup.brand || popup.organizer}</p>
 							{/if}
 						</div>
-						<!-- 북마크/방문 버튼 -->
-						<div class="flex items-center gap-1" onclick={(e) => e.stopPropagation()}>
+						<!-- 북마크/방문 버튼 - 북마크 기능 임시 비활성화 -->
+					<!-- <div class="flex items-center gap-1" onclick={(e) => e.stopPropagation()}>
 							<button
 								onclick={(e) => togglePopupBookmark(popup, e)}
 								class="text-xl transition-colors {popup.is_bookmarked ? 'text-yellow-500' : 'text-gray-300'}"
 							>
 								{popup.is_bookmarked ? '★' : '☆'}
 							</button>
-						</div>
+						</div> -->
 					</div>
 					<div class="flex flex-wrap items-center gap-2 text-xs text-gray-500">
 						<!-- 기간 -->
@@ -1111,16 +1113,16 @@
 										{/if}
 									</div>
 								</td>
-								<!-- 관리 (북마크/방문) -->
+								<!-- 관리 (북마크/방문) - 북마크 기능 임시 비활성화 -->
 								<td class="px-2 py-2" onclick={(e) => e.stopPropagation()}>
 									<div class="flex items-center gap-1 justify-center">
-										<button
+										<!-- <button
 											onclick={(e) => togglePopupBookmark(popup, e)}
 											class="text-lg transition-colors {popup.is_bookmarked ? 'text-yellow-500' : 'text-gray-300 hover:text-yellow-400'}"
 											title={popup.is_bookmarked ? '북마크 해제' : '북마크'}
 										>
 											{popup.is_bookmarked ? '★' : '☆'}
-										</button>
+										</button> -->
 										<button
 											onclick={(e) => togglePopupVisited(popup, e)}
 											class="px-1.5 py-0.5 text-xs rounded transition-colors {popup.is_visited ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}"
@@ -1168,15 +1170,15 @@
 								<p class="text-sm text-blue-600 truncate">{event.organizer}</p>
 							{/if}
 						</div>
-						<!-- 북마크/참여 버튼 -->
-						<div class="flex items-center gap-1" onclick={(e) => e.stopPropagation()}>
+						<!-- 북마크/참여 버튼 - 북마크 기능 임시 비활성화 -->
+					<!-- <div class="flex items-center gap-1" onclick={(e) => e.stopPropagation()}>
 							<button
 								onclick={(e) => toggleBookmark(event, e)}
 								class="text-xl transition-colors {event.is_bookmarked ? 'text-yellow-500' : 'text-gray-300'}"
 							>
 								{event.is_bookmarked ? '★' : '☆'}
 							</button>
-						</div>
+						</div> -->
 					</div>
 					<div class="flex items-center gap-2 text-xs text-gray-500">
 						<div class="flex flex-wrap items-center gap-2 flex-1">
@@ -1420,16 +1422,16 @@
 										{/if}
 									</div>
 								</td>
-								<!-- 관리 (북마크/참여/삭제) -->
+								<!-- 관리 (북마크/참여/삭제) - 북마크 기능 임시 비활성화 -->
 								<td class="px-2 py-2" onclick={(e) => e.stopPropagation()}>
 									<div class="flex items-center gap-1 justify-center">
-										<button
+										<!-- <button
 											onclick={(e) => toggleBookmark(event, e)}
 											class="text-lg transition-colors {event.is_bookmarked ? 'text-yellow-500' : 'text-gray-300 hover:text-yellow-400'}"
 											title={event.is_bookmarked ? '북마크 해제' : '북마크'}
 										>
 											{event.is_bookmarked ? '★' : '☆'}
-										</button>
+										</button> -->
 										<button
 											onclick={(e) => toggleParticipate(event, e)}
 											class="px-1.5 py-0.5 text-xs rounded transition-colors {isParticipated(event) ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}"
@@ -1723,7 +1725,7 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="fixed inset-0 bg-black/60 z-50 overflow-y-auto p-4"
-		onclick={closeFeedViewer}
+		onclick={(e) => { e.stopPropagation(); closeFeedViewer(); }}
 		onkeydown={(e) => e.key === 'Escape' && closeFeedViewer()}
 		role="dialog"
 		tabindex="-1"
@@ -1753,7 +1755,7 @@
 								수정
 							</button>
 							<button
-								onclick={closeFeedViewer}
+								onclick={(e) => { e.stopPropagation(); closeFeedViewer(); }}
 								class="p-1 hover:bg-gray-100 rounded-full"
 								aria-label="닫기"
 							>
@@ -1856,14 +1858,14 @@
 						</div>
 					{/if}
 
-					<!-- 북마크/참여 -->
+					<!-- 북마크/참여 - 북마크 기능 임시 비활성화 -->
 					<div class="mt-3 pt-3 border-t border-gray-100 flex gap-2">
-						<button
+						<!-- <button
 							onclick={(e) => { e.stopPropagation(); toggleBookmark(viewingEvent!, e); }}
 							class="flex-1 py-2 text-xs rounded transition-colors {viewingEvent.is_bookmarked ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
 						>
 							{viewingEvent.is_bookmarked ? '★ 북마크됨' : '☆ 북마크'}
-						</button>
+						</button> -->
 						<button
 							onclick={(e) => { e.stopPropagation(); toggleParticipate(viewingEvent!, e); }}
 							class="flex-1 py-2 text-xs rounded transition-colors {isParticipated(viewingEvent) ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
@@ -1920,19 +1922,19 @@
 				<!-- 탭 헤더 -->
 				<div class="flex bg-white rounded-t-xl border-b border-gray-200">
 					<button
-						onclick={() => mobileViewerTab = 'info'}
+						onclick={(e) => { e.stopPropagation(); mobileViewerTab = 'info'; }}
 						class="flex-1 py-3 text-sm font-medium transition-colors {mobileViewerTab === 'info' ? 'border-b-2 border-purple-600 text-purple-600' : 'text-gray-500'}"
 					>
 						AI 분석
 					</button>
 					<button
-						onclick={() => mobileViewerTab = 'feed'}
+						onclick={(e) => { e.stopPropagation(); mobileViewerTab = 'feed'; }}
 						class="flex-1 py-3 text-sm font-medium transition-colors {mobileViewerTab === 'feed' ? 'border-b-2 border-purple-600 text-purple-600' : 'text-gray-500'}"
 					>
 						원본 피드
 					</button>
 					<button
-						onclick={closeFeedViewer}
+						onclick={(e) => { e.stopPropagation(); closeFeedViewer(); }}
 						class="px-4 py-3 text-gray-500 hover:text-gray-700"
 						aria-label="닫기"
 					>
@@ -2037,30 +2039,45 @@
 						</div>
 
 						<!-- 링크 -->
-						{#if viewingEvent.event_url}
-							<div class="mt-3 pt-3 border-t border-gray-100">
-								<a
-									href={viewingEvent.event_url}
-									target="_blank"
-									rel="noopener noreferrer"
-									class="flex items-center gap-2 text-sm text-blue-600 hover:underline"
-								>
-									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-									</svg>
-									이벤트 참여
-								</a>
+						{#if viewingEvent.event_url || viewingEvent.source_instagram_url}
+							<div class="mt-3 pt-3 border-t border-gray-100 space-y-2">
+								{#if viewingEvent.event_url}
+									<a
+										href={viewingEvent.event_url}
+										target="_blank"
+										rel="noopener noreferrer"
+										class="flex items-center gap-2 text-sm text-blue-600 hover:underline"
+									>
+										<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+										</svg>
+										이벤트 참여
+									</a>
+								{/if}
+								{#if viewingEvent.source_instagram_url}
+									<a
+										href={viewingEvent.source_instagram_url}
+										target="_blank"
+										rel="noopener noreferrer"
+										class="flex items-center gap-2 text-sm text-pink-600 hover:underline"
+									>
+										<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+											<path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+										</svg>
+										원본 피드
+									</a>
+								{/if}
 							</div>
 						{/if}
 
-						<!-- 북마크/참여 -->
+						<!-- 북마크/참여 - 북마크 기능 임시 비활성화 -->
 						<div class="mt-3 pt-3 border-t border-gray-100 flex gap-2">
-							<button
+							<!-- <button
 								onclick={(e) => { e.stopPropagation(); toggleBookmark(viewingEvent!, e); }}
 								class="flex-1 py-2 text-sm rounded transition-colors {viewingEvent.is_bookmarked ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
 							>
 								{viewingEvent.is_bookmarked ? '★ 북마크됨' : '☆ 북마크'}
-							</button>
+							</button> -->
 							<button
 								onclick={(e) => { e.stopPropagation(); toggleParticipate(viewingEvent!, e); }}
 								class="flex-1 py-2 text-sm rounded transition-colors {isParticipated(viewingEvent) ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
@@ -2123,7 +2140,7 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		class="fixed inset-0 bg-black/60 z-50 overflow-y-auto p-4"
-		onclick={closePopupFeedViewer}
+		onclick={(e) => { e.stopPropagation(); closePopupFeedViewer(); }}
 		onkeydown={(e) => e.key === 'Escape' && closePopupFeedViewer()}
 		role="dialog"
 		tabindex="-1"
@@ -2146,7 +2163,7 @@
 							AI 분석
 						</h4>
 						<button
-							onclick={closePopupFeedViewer}
+							onclick={(e) => { e.stopPropagation(); closePopupFeedViewer(); }}
 							class="p-1 hover:bg-gray-100 rounded-full"
 							aria-label="닫기"
 						>
@@ -2219,14 +2236,14 @@
 						</div>
 					{/if}
 
-					<!-- 북마크/방문 -->
+					<!-- 북마크/방문 - 북마크 기능 임시 비활성화 -->
 					<div class="mt-3 pt-3 border-t border-gray-100 flex gap-2">
-						<button
+						<!-- <button
 							onclick={(e) => { e.stopPropagation(); togglePopupBookmark(viewingPopup!, e); }}
 							class="flex-1 py-2 text-xs rounded transition-colors {viewingPopup.is_bookmarked ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
 						>
 							{viewingPopup.is_bookmarked ? '★ 북마크됨' : '☆ 북마크'}
-						</button>
+						</button> -->
 						<button
 							onclick={(e) => { e.stopPropagation(); togglePopupVisited(viewingPopup!, e); }}
 							class="flex-1 py-2 text-xs rounded transition-colors {viewingPopup.is_visited ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
@@ -2275,19 +2292,19 @@
 				<!-- 탭 헤더 -->
 				<div class="flex bg-white rounded-t-xl border-b border-gray-200">
 					<button
-						onclick={() => mobileViewerTab = 'info'}
+						onclick={(e) => { e.stopPropagation(); mobileViewerTab = 'info'; }}
 						class="flex-1 py-3 text-sm font-medium transition-colors {mobileViewerTab === 'info' ? 'border-b-2 border-pink-600 text-pink-600' : 'text-gray-500'}"
 					>
 						AI 분석
 					</button>
 					<button
-						onclick={() => mobileViewerTab = 'feed'}
+						onclick={(e) => { e.stopPropagation(); mobileViewerTab = 'feed'; }}
 						class="flex-1 py-3 text-sm font-medium transition-colors {mobileViewerTab === 'feed' ? 'border-b-2 border-pink-600 text-pink-600' : 'text-gray-500'}"
 					>
 						원본 피드
 					</button>
 					<button
-						onclick={closePopupFeedViewer}
+						onclick={(e) => { e.stopPropagation(); closePopupFeedViewer(); }}
 						class="px-4 py-3 text-gray-500 hover:text-gray-700"
 						aria-label="닫기"
 					>
@@ -2357,30 +2374,45 @@
 						</div>
 
 						<!-- 링크 -->
-						{#if viewingPopup.official_url}
-							<div class="mt-3 pt-3 border-t border-gray-100">
-								<a
-									href={viewingPopup.official_url}
-									target="_blank"
-									rel="noopener noreferrer"
-									class="flex items-center gap-2 text-sm text-blue-600 hover:underline"
-								>
-									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-									</svg>
-									공식 사이트
-								</a>
+						{#if viewingPopup.official_url || viewingPopup.source_instagram_url}
+							<div class="mt-3 pt-3 border-t border-gray-100 space-y-2">
+								{#if viewingPopup.official_url}
+									<a
+										href={viewingPopup.official_url}
+										target="_blank"
+										rel="noopener noreferrer"
+										class="flex items-center gap-2 text-sm text-blue-600 hover:underline"
+									>
+										<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+										</svg>
+										공식 사이트
+									</a>
+								{/if}
+								{#if viewingPopup.source_instagram_url}
+									<a
+										href={viewingPopup.source_instagram_url}
+										target="_blank"
+										rel="noopener noreferrer"
+										class="flex items-center gap-2 text-sm text-pink-600 hover:underline"
+									>
+										<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+											<path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+										</svg>
+										원본 피드
+									</a>
+								{/if}
 							</div>
 						{/if}
 
-						<!-- 북마크/방문 -->
+						<!-- 북마크/방문 - 북마크 기능 임시 비활성화 -->
 						<div class="mt-3 pt-3 border-t border-gray-100 flex gap-2">
-							<button
+							<!-- <button
 								onclick={(e) => { e.stopPropagation(); togglePopupBookmark(viewingPopup!, e); }}
 								class="flex-1 py-2 text-sm rounded transition-colors {viewingPopup.is_bookmarked ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
 							>
 								{viewingPopup.is_bookmarked ? '★ 북마크됨' : '☆ 북마크'}
-							</button>
+							</button> -->
 							<button
 								onclick={(e) => { e.stopPropagation(); togglePopupVisited(viewingPopup!, e); }}
 								class="flex-1 py-2 text-sm rounded transition-colors {viewingPopup.is_visited ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"

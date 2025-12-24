@@ -134,6 +134,7 @@ class UncategorizedService:
             if post:
                 post.classified_type = "event"
                 post.classified_id = event.id
+                post.classified_at = datetime.now()
 
             db.commit()
 
@@ -172,6 +173,7 @@ class UncategorizedService:
             if post:
                 post.classified_type = "popup"
                 post.classified_id = popup.id
+                post.classified_at = datetime.now()
 
             db.commit()
 

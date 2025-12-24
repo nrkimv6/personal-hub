@@ -190,6 +190,7 @@ def save_instagram_result(db, post_id: int, llm_result: dict) -> bool:
             db.flush()  # ID 생성
             post.classified_type = "uncategorized"
             post.classified_id = uncategorized.id
+            post.classified_at = datetime.now()
             logger.info(f"Created UncategorizedPost {uncategorized.id} from Instagram post {post_id}")
 
         # 리그램/후기 등 분류 테이블 생성이 필요없는 태그는 classified_type/id가 NULL로 유지됨

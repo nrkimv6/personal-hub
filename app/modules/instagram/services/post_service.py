@@ -221,15 +221,19 @@ class PostService:
 
         total = query.count()
 
-        # 정렬 적용 (기본: 수집일 내림차순)
+        # 정렬 적용
+        # 기본: 수집일 내림차순 + AI분류시간 내림차순 (NULLS LAST)
         order_func = asc if sort_order == "asc" else desc
 
         # sort_by 필드에 따른 정렬
         if sort_by == "posted_at":
             query = query.order_by(order_func(InstagramPost.posted_at))
         else:
-            # 기본값: collected_at
-            query = query.order_by(order_func(InstagramPost.collected_at))
+            # 기본값: collected_at DESC, classified_at DESC (NULLS LAST)
+            query = query.order_by(
+                order_func(InstagramPost.collected_at),
+                desc(InstagramPost.classified_at).nulls_last(),
+            )
 
         posts = query.offset(offset).limit(limit).all()
 
