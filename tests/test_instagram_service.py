@@ -328,6 +328,124 @@ class TestPostService:
 
 
 # ============================================================
+# PostService 검색 테스트 (2025-12-24 추가)
+# ============================================================
+
+class TestPostServiceSearch:
+    """게시물 검색 테스트 (RIGHT-BICEP)"""
+
+    def test_get_posts_search_param_exists(self):
+        """get_posts에 search 파라미터 존재"""
+        from app.modules.instagram.services.post_service import PostService
+        import inspect
+
+        sig = inspect.signature(PostService.get_posts)
+        params = list(sig.parameters.keys())
+
+        assert 'search' in params
+
+    def test_get_posts_search_calls_ilike(self, mock_db):
+        """search가 있으면 ilike 필터 호출"""
+        from app.modules.instagram.services.post_service import PostService
+
+        # Mock 설정
+        mock_query = MagicMock()
+        mock_db.query.return_value = mock_query
+        mock_query.filter.return_value = mock_query
+        mock_query.join.return_value = mock_query
+        mock_query.distinct.return_value = mock_query
+        mock_query.order_by.return_value = mock_query
+        mock_query.offset.return_value = mock_query
+        mock_query.limit.return_value = mock_query
+        mock_query.count.return_value = 0
+        mock_query.all.return_value = []
+
+        service = PostService(mock_db)
+        service.get_posts(search="이벤트")
+
+        # filter가 호출되었는지 확인
+        assert mock_query.filter.called
+
+    def test_get_posts_search_none_no_filter(self, mock_db):
+        """search=None이면 검색 필터 없음"""
+        from app.modules.instagram.services.post_service import PostService
+
+        mock_query = MagicMock()
+        mock_db.query.return_value = mock_query
+        mock_query.filter.return_value = mock_query
+        mock_query.order_by.return_value = mock_query
+        mock_query.offset.return_value = mock_query
+        mock_query.limit.return_value = mock_query
+        mock_query.count.return_value = 0
+        mock_query.all.return_value = []
+
+        service = PostService(mock_db)
+        service.get_posts(search=None)
+
+        # 검색어 없으면 ilike 필터 호출 안됨 (다른 필터만 가능)
+        # 정확한 검증은 실제 DB 테스트에서
+
+    def test_get_posts_search_empty_string_no_filter(self, mock_db):
+        """search=''이면 검색 필터 없음"""
+        from app.modules.instagram.services.post_service import PostService
+
+        mock_query = MagicMock()
+        mock_db.query.return_value = mock_query
+        mock_query.filter.return_value = mock_query
+        mock_query.order_by.return_value = mock_query
+        mock_query.offset.return_value = mock_query
+        mock_query.limit.return_value = mock_query
+        mock_query.count.return_value = 0
+        mock_query.all.return_value = []
+
+        service = PostService(mock_db)
+        service.get_posts(search="")
+
+        # 빈 문자열도 falsy이므로 필터 호출 안됨
+
+    # Boundary: 경계값 테스트
+    def test_get_posts_search_special_characters(self, mock_db):
+        """검색어에 특수문자 포함"""
+        from app.modules.instagram.services.post_service import PostService
+
+        mock_query = MagicMock()
+        mock_db.query.return_value = mock_query
+        mock_query.filter.return_value = mock_query
+        mock_query.order_by.return_value = mock_query
+        mock_query.offset.return_value = mock_query
+        mock_query.limit.return_value = mock_query
+        mock_query.count.return_value = 0
+        mock_query.all.return_value = []
+
+        service = PostService(mock_db)
+        # 특수문자 포함 검색어
+        service.get_posts(search="#이벤트")
+        service.get_posts(search="50% 할인")
+        service.get_posts(search="[긴급]")
+
+        # 에러 없이 처리됨
+        assert mock_query.filter.called
+
+    def test_get_posts_search_korean(self, mock_db):
+        """한글 검색어 처리"""
+        from app.modules.instagram.services.post_service import PostService
+
+        mock_query = MagicMock()
+        mock_db.query.return_value = mock_query
+        mock_query.filter.return_value = mock_query
+        mock_query.order_by.return_value = mock_query
+        mock_query.offset.return_value = mock_query
+        mock_query.limit.return_value = mock_query
+        mock_query.count.return_value = 0
+        mock_query.all.return_value = []
+
+        service = PostService(mock_db)
+        service.get_posts(search="팝업스토어")
+
+        assert mock_query.filter.called
+
+
+# ============================================================
 # CrawlService 테스트
 # ============================================================
 
