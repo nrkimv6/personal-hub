@@ -663,13 +663,19 @@
 
 		<!-- 필터 요약 + 모바일 필터 토글 -->
 		<div class="flex items-center gap-2">
-			{#if isAnonymous && activeTab === 'event'}
-				<!-- 익명 사용자 이벤트 탭: 오늘 마감 고정 배지 -->
-				<span class="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-700 rounded-full">
-					오늘 마감
-				</span>
-			{:else if !isAnonymous}
-				<!-- 모바일 필터 토글 버튼 -->
+			{#if isAnonymous}
+				<!-- 익명 사용자: 필터 비활성화, 고정 배지만 표시 -->
+				{#if activeTab === 'event'}
+					<span class="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-700 rounded-full">
+						오늘 마감
+					</span>
+				{:else}
+					<span class="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded-full">
+						전체
+					</span>
+				{/if}
+			{:else}
+				<!-- 모바일 필터 토글 버튼 (로그인 사용자만) -->
 				<button
 					onclick={() => showFilters = !showFilters}
 					class="md:hidden btn btn-secondary btn-sm flex items-center gap-1"
@@ -820,8 +826,24 @@
 	</div>
 	{/if}
 
-	<!-- 데스크톱 필터 영역 - 로그인 사용자만 -->
-	{#if !isAnonymous}
+	<!-- 데스크톱 필터 영역 -->
+	{#if isAnonymous}
+	<!-- 익명 사용자: 고정 배지만 표시 -->
+	<div class="hidden md:flex mb-4 flex-wrap gap-2 items-center">
+		<span class="text-sm text-gray-500">필터:</span>
+		{#if activeTab === 'event'}
+			<span class="px-3 py-1 text-sm font-medium bg-orange-100 text-orange-700 rounded-full">
+				오늘 마감
+			</span>
+		{:else}
+			<span class="px-3 py-1 text-sm font-medium bg-gray-100 text-gray-600 rounded-full">
+				전체
+			</span>
+		{/if}
+		<span class="text-xs text-gray-400 ml-2">(로그인하면 필터 사용 가능)</span>
+	</div>
+	{:else}
+	<!-- 로그인 사용자: 전체 필터 -->
 	<div class="hidden md:flex mb-4 flex-wrap gap-2 items-center">
 		<!-- 검색 입력 -->
 		<div class="relative">

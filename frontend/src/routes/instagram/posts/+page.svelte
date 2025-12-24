@@ -31,8 +31,8 @@
 	let filterDateFrom = '';
 	let filterDateTo = '';
 	let filterDateType: 'collected' | 'posted' = 'collected';
-	let sortBy: string | null = null;
-	let sortOrder: string = 'asc';
+	let sortBy: string | null = 'collected_at';
+	let sortOrder: string = 'desc';
 	let filterIsActive: boolean = true;  // 활성화된 항목만 보기 (기본값)
 
 	// 선택 모드 상태
