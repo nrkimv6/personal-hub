@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
-	import { page } from '$app/stores';
+	import { page as pageStore } from '$app/stores';
 	import { instagramApi, instagramTagApi, accountApi } from '$lib/api';
 	import type { InstagramPost, InstagramTag, Account } from '$lib/types';
 	import FeedCard from '$lib/components/instagram/FeedCard.svelte';
 
 	let posts: InstagramPost[] = [];
 	let total = 0;
-	let page = 1;
+	let currentPage = 1;
 	let limit = 20;
 	let loading = true;
 	let error: string | null = null;
@@ -64,7 +64,7 @@
 	// 탭 변경 시 필터 적용
 	function switchTab(tab: TabMode) {
 		activeTab = tab;
-		page = 1;
+		currentPage = 1;
 		includeEnded = false;  // 탭 전환 시 종료된 항목 숨김
 		if (tab === 'events') {
 			filterLlmTag = '이벤트';
@@ -107,14 +107,14 @@
 	// 활성화 필터 토글
 	function toggleIsActiveFilter() {
 		filterIsActive = !filterIsActive;
-		page = 1;
+		currentPage = 1;
 		fetchPosts();
 	}
 
 	// 기간 미정 포함 토글
 	function toggleIncludeUnknownPeriod() {
 		includeUnknownPeriod = !includeUnknownPeriod;
-		page = 1;
+		currentPage = 1;
 		fetchPosts();
 	}
 
@@ -230,7 +230,7 @@
 	async function fetchPosts() {
 		loading = true;
 		try {
-			const params: Record<string, unknown> = { page, limit };
+			const params: Record<string, unknown> = { page: currentPage, limit };
 			if (filterAccount) params.account = filterAccount;
 			if (filterPostType !== null) params.post_type = filterPostType;
 			if (filterTags.length > 0) params.tags = filterTags;
@@ -512,7 +512,7 @@
 	}
 
 	function handleFilter() {
-		page = 1;
+		currentPage = 1;
 		fetchPosts();
 	}
 
@@ -524,20 +524,20 @@
 		filterDateTo = '';
 		filterLlmTag = null;
 		filterLlmStatus = null;
-		page = 1;
+		currentPage = 1;
 		fetchPosts();
 	}
 
 	function prevPage() {
-		if (page > 1) {
-			page--;
+		if (currentPage > 1) {
+			currentPage--;
 			fetchPosts();
 		}
 	}
 
 	function nextPage() {
-		if (page * limit < total) {
-			page++;
+		if (currentPage * limit < total) {
+			currentPage++;
 			fetchPosts();
 		}
 	}
@@ -563,7 +563,7 @@
 		}
 
 		// PWA Share Target에서 전달된 URL 처리
-		const sharedUrl = $page.url.searchParams.get('shared_url');
+		const sharedUrl = $pageStore.url.searchParams.get('shared_url');
 		if (sharedUrl) {
 			// URL 수집 모달 열고 URL 자동 입력
 			showUrlCrawlModal = true;
@@ -1309,22 +1309,22 @@
 		<!-- 페이지네이션 -->
 		<div class="flex flex-col sm:flex-row justify-between items-center gap-3">
 			<span class="text-sm text-gray-500">
-				전체 {total}개 중 {(page - 1) * limit + 1} - {Math.min(page * limit, total)}
+				전체 {total}개 중 {(currentPage - 1) * limit + 1} - {Math.min(currentPage * limit, total)}
 			</span>
 			<div class="flex gap-2">
 				<button
 					onclick={prevPage}
-					disabled={page === 1}
+					disabled={currentPage === 1}
 					class="btn btn-secondary btn-sm disabled:opacity-50"
 				>
 					이전
 				</button>
 				<span class="px-3 py-1.5 text-sm">
-					{page} / {Math.ceil(total / limit)}
+					{currentPage} / {Math.ceil(total / limit)}
 				</span>
 				<button
 					onclick={nextPage}
-					disabled={page * limit >= total}
+					disabled={currentPage * limit >= total}
 					class="btn btn-secondary btn-sm disabled:opacity-50"
 				>
 					다음
