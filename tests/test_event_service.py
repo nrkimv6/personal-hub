@@ -12,11 +12,18 @@ RIGHT-BICEP 테스트 원칙:
 
 import pytest
 from datetime import date, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.event_service import EventService, detect_url_type
-from app.schemas.event import EventCreate, EventUpdate, EventImportFromInstagram
+from app.schemas.event import (
+    EventCreate,
+    EventUpdate,
+    EventImportFromInstagram,
+    EventImportFromUrl,
+)
 from app.models.event import Event
 from app.models.instagram_post import InstagramPost
+from app.services.page_extractor.base import ExtractedContent
 
 
 class TestDetectUrlType:
@@ -533,3 +540,189 @@ class TestDuplicateUrlCheck:
             test_db_session, "https://forms.gle/test456", exclude_id=created.id
         )
         assert result is None
+
+
+class TestEventServiceImportFromUrl:
+    """URL에서 이벤트 가져오기 테스트"""
+
+    @pytest.fixture
+    def event_service(self):
+        return EventService()
+
+    def test_import_from_url_duplicate_check(self, test_db_session, event_service):
+        """Right: 중복 URL 확인"""
+        # 먼저 이벤트 생성
+        data = EventCreate(
+            title="기존 이벤트",
+            event_url="https://docs.google.com/forms/d/e/test123/viewform",
+        )
+        event_service.create_event(test_db_session, data)
+
+        # 같은 URL로 import 시도
+        import_data = EventImportFromUrl(
+            url="https://docs.google.com/forms/d/e/test123/viewform",
+            auto_save=False,
+        )
+        result = event_service.import_from_url(test_db_session, import_data)
+
+        assert result.success is False
+        assert "동일 URL" in result.error
+
+    @patch("app.services.event_service.EventService._extract_page_content")
+    @patch("app.modules.claude_worker.services.llm_service.LLMService.execute_claude")
+    def test_import_from_url_success(
+        self, mock_execute_claude, mock_extract, test_db_session, event_service
+    ):
+        """Right: URL에서 이벤트 추출 성공"""
+        # Mock 페이지 추출 결과
+        mock_extracted = ExtractedContent(
+            url="https://docs.google.com/forms/d/e/new123/viewform",
+            page_type="google_forms",
+            extraction_method="structured",
+            title="크리스마스 이벤트",
+            content="12월 이벤트 참여하기...",
+            success=True,
+        )
+
+        # asyncio.run을 우회하여 직접 결과 반환
+        async def mock_extract_coro(url):
+            return mock_extracted
+
+        mock_extract.return_value = mock_extract_coro("test")
+
+        # Mock LLM 응답
+        mock_execute_claude.return_value = {
+            "success": True,
+            "result": {
+                "title": "크리스마스 이벤트",
+                "event_type": "event",
+                "event_start": "2024-12-01",
+                "event_end": "2024-12-25",
+                "organizer": "테스트 브랜드",
+                "prizes": ["상품권"],
+                "winner_count": 10,
+            },
+            "raw_response": '{"title": "크리스마스 이벤트"}',
+        }
+
+        import_data = EventImportFromUrl(
+            url="https://docs.google.com/forms/d/e/new123/viewform",
+            auto_save=False,
+        )
+
+        # _extract_page_content를 직접 패치
+        with patch.object(
+            event_service, "_extract_page_content", return_value=mock_extracted
+        ):
+            # asyncio.run을 우회
+            with patch("asyncio.run", return_value=mock_extracted):
+                with patch("asyncio.get_event_loop") as mock_loop:
+                    mock_loop.return_value.run_until_complete.return_value = mock_extracted
+                    result = event_service.import_from_url(test_db_session, import_data)
+
+        assert result.success is True
+        assert result.page_type == "google_forms"
+        assert result.extracted_event is not None
+        assert result.extracted_event["title"] == "크리스마스 이벤트"
+
+    @patch("app.services.event_service.EventService._extract_page_content")
+    def test_import_from_url_extraction_failure(
+        self, mock_extract, test_db_session, event_service
+    ):
+        """Error: 페이지 추출 실패"""
+        mock_extracted = ExtractedContent(
+            url="https://example.com/broken",
+            page_type="generic",
+            extraction_method="failed",
+            success=False,
+            error="페이지 로드 타임아웃",
+        )
+
+        import_data = EventImportFromUrl(
+            url="https://example.com/broken",
+            auto_save=False,
+        )
+
+        with patch("asyncio.run", return_value=mock_extracted):
+            with patch("asyncio.get_event_loop") as mock_loop:
+                mock_loop.return_value.run_until_complete.return_value = mock_extracted
+                result = event_service.import_from_url(test_db_session, import_data)
+
+        assert result.success is False
+        assert "페이지 로드 타임아웃" in result.error
+
+    @patch("app.services.event_service.EventService._extract_page_content")
+    @patch("app.modules.claude_worker.services.llm_service.LLMService.execute_claude")
+    def test_import_from_url_llm_failure(
+        self, mock_execute_claude, mock_extract, test_db_session, event_service
+    ):
+        """Error: LLM 분석 실패"""
+        mock_extracted = ExtractedContent(
+            url="https://example.com/test",
+            page_type="generic",
+            extraction_method="fallback",
+            title="테스트 페이지",
+            content="내용...",
+            success=True,
+        )
+
+        mock_execute_claude.return_value = {
+            "success": False,
+            "error": "Claude CLI timeout",
+        }
+
+        import_data = EventImportFromUrl(
+            url="https://example.com/test",
+            auto_save=False,
+        )
+
+        with patch("asyncio.run", return_value=mock_extracted):
+            with patch("asyncio.get_event_loop") as mock_loop:
+                mock_loop.return_value.run_until_complete.return_value = mock_extracted
+                result = event_service.import_from_url(test_db_session, import_data)
+
+        assert result.success is False
+        assert "LLM 분석 실패" in result.error
+
+    def test_parse_event_dates(self, event_service):
+        """Right: 날짜 문자열 파싱"""
+        data = {
+            "title": "테스트",
+            "event_start": "2024-12-01",
+            "event_end": "2024-12-25",
+            "announcement_date": "2024-12-27",
+        }
+
+        result = event_service._parse_event_dates(data)
+
+        assert result["event_start"] == date(2024, 12, 1)
+        assert result["event_end"] == date(2024, 12, 25)
+        assert result["announcement_date"] == date(2024, 12, 27)
+
+    def test_parse_event_dates_invalid(self, event_service):
+        """Boundary: 잘못된 날짜 형식 처리"""
+        data = {
+            "title": "테스트",
+            "event_start": "invalid-date",
+            "event_end": None,
+            "announcement_date": "",
+        }
+
+        result = event_service._parse_event_dates(data)
+
+        assert result["event_start"] is None
+        assert result["event_end"] is None
+        assert result["announcement_date"] is None
+
+    def test_parse_event_dates_already_date(self, event_service):
+        """Right: 이미 date 객체인 경우"""
+        data = {
+            "title": "테스트",
+            "event_start": date(2024, 12, 1),  # 이미 date 객체
+            "event_end": "2024-12-25",
+        }
+
+        result = event_service._parse_event_dates(data)
+
+        assert result["event_start"] == date(2024, 12, 1)
+        assert result["event_end"] == date(2024, 12, 25)
