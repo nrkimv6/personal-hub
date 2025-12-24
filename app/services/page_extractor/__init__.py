@@ -10,12 +10,20 @@ URL 유형에 따라 적절한 추출기를 선택하여 페이지 내용을 구
 """
 
 from .base import BaseExtractor, ExtractedContent
-from .factory import ExtractorFactory
+from .factory import ExtractorFactory, get_extractor_factory
 from .generic import GenericExtractor
+from .google_forms import GoogleFormsExtractor
+from .naver_blog import NaverBlogMobileExtractor, NaverBlogPCExtractor
+from .naver_form import NaverFormExtractor
 
 __all__ = [
     "BaseExtractor",
     "ExtractedContent",
     "ExtractorFactory",
+    "get_extractor_factory",
     "GenericExtractor",
+    "GoogleFormsExtractor",
+    "NaverFormExtractor",
+    "NaverBlogPCExtractor",
+    "NaverBlogMobileExtractor",
 ]

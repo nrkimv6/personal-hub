@@ -4,6 +4,9 @@ from typing import List
 
 from .base import BaseExtractor
 from .generic import GenericExtractor
+from .google_forms import GoogleFormsExtractor
+from .naver_blog import NaverBlogMobileExtractor, NaverBlogPCExtractor
+from .naver_form import NaverFormExtractor
 
 
 class ExtractorFactory:
@@ -17,12 +20,12 @@ class ExtractorFactory:
     def __init__(self):
         """추출기 목록 초기화."""
         # 우선순위 순서대로 등록
-        # 페이지별 추출기는 Phase 2에서 추가됨
+        # 더 구체적인 패턴이 먼저 오도록 정렬
         self._extractors: List[BaseExtractor] = [
-            # GoogleFormsExtractor(),  # Phase 2
-            # NaverFormExtractor(),    # Phase 2
-            # NaverBlogMobileExtractor(),  # Phase 2 (Mobile 먼저 - 더 구체적)
-            # NaverBlogPCExtractor(),  # Phase 2
+            GoogleFormsExtractor(),
+            NaverFormExtractor(),
+            NaverBlogMobileExtractor(),  # Mobile 먼저 (더 구체적인 URL 패턴)
+            NaverBlogPCExtractor(),
             GenericExtractor(),  # 항상 마지막 (Fallback)
         ]
 
