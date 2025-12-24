@@ -395,3 +395,44 @@ class PostService:
         logger.info(f"Updated post {post_id} is_active={is_active}")
         return post
 
+    def batch_delete(self, post_ids: List[int]) -> int:
+        """게시물 일괄 삭제.
+
+        Args:
+            post_ids: 삭제할 게시물 ID 목록
+
+        Returns:
+            삭제된 게시물 수
+        """
+        if not post_ids:
+            return 0
+
+        deleted = self.db.query(InstagramPost).filter(
+            InstagramPost.id.in_(post_ids)
+        ).delete(synchronize_session=False)
+
+        self.db.commit()
+        logger.info(f"Batch deleted {deleted} posts")
+        return deleted
+
+    def batch_update_active(self, post_ids: List[int], is_active: bool) -> int:
+        """게시물 일괄 활성화/비활성화.
+
+        Args:
+            post_ids: 업데이트할 게시물 ID 목록
+            is_active: 활성화 상태
+
+        Returns:
+            업데이트된 게시물 수
+        """
+        if not post_ids:
+            return 0
+
+        updated = self.db.query(InstagramPost).filter(
+            InstagramPost.id.in_(post_ids)
+        ).update({"is_active": is_active}, synchronize_session=False)
+
+        self.db.commit()
+        logger.info(f"Batch updated {updated} posts is_active={is_active}")
+        return updated
+

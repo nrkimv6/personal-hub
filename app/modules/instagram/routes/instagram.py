@@ -38,6 +38,7 @@ from ..models.schemas import (
     CrawlHistoryItem,
     CrawlHistoryResponse,
     CrawlRunSummary,
+    BatchPostIdsRequest,
 )
 from ..services.url_parser import (
     parse_instagram_url,
@@ -163,6 +164,38 @@ async def update_post(
         post = service.update_post_tags(post_id, update.tag_ids)
 
     return _post_to_schema(post)
+
+
+@router.post("/posts/batch/delete")
+async def batch_delete_posts(
+    request: BatchPostIdsRequest,
+    db: Session = Depends(get_db),
+):
+    """게시물 일괄 삭제."""
+    service = PostService(db)
+    deleted = service.batch_delete(request.post_ids)
+
+    return {
+        "success": True,
+        "deleted": deleted,
+        "total": len(request.post_ids),
+    }
+
+
+@router.post("/posts/batch/deactivate")
+async def batch_deactivate_posts(
+    request: BatchPostIdsRequest,
+    db: Session = Depends(get_db),
+):
+    """게시물 일괄 비활성화."""
+    service = PostService(db)
+    updated = service.batch_update_active(request.post_ids, is_active=False)
+
+    return {
+        "success": True,
+        "updated": updated,
+        "total": len(request.post_ids),
+    }
 
 
 @router.post("/posts/{post_id}/recrawl", response_model=CrawlRequestSchema)
