@@ -1216,6 +1216,10 @@
 										<span class="text-xs text-gray-400">-</span>
 									{/if}
 								</td>
+								<!-- 수집일 -->
+								<td class="px-2 py-2 text-center text-xs text-gray-500 whitespace-nowrap">
+									{formatDate(event.created_at)}
+								</td>
 								<!-- 출처 -->
 								<td class="px-2 py-2 text-center">
 									<span class="px-1.5 py-0.5 text-xs rounded {event.source_type === 'instagram' ? 'bg-pink-100 text-pink-600' : 'bg-gray-100 text-gray-600'}">
