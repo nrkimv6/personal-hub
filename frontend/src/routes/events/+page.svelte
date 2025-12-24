@@ -605,6 +605,7 @@
 		<!-- 이벤트 목록 -->
 		<EventListCard
 			{events}
+			isAdmin={$isAdmin}
 			isParticipated={isEventParticipated}
 			onEventClick={handleEventClick}
 			onBookmarkToggle={handleEventBookmarkToggle}
@@ -614,6 +615,7 @@
 			{events}
 			{sortBy}
 			{sortOrder}
+			isAdmin={$isAdmin}
 			isParticipated={isEventParticipated}
 			onSort={handleSort}
 			onEventClick={handleEventClick}
@@ -674,6 +676,7 @@
 	{instagramPost}
 	{loadingPost}
 	{availableTags}
+	isAdmin={$isAdmin}
 	isParticipated={viewingEvent ? isEventParticipated(viewingEvent) : false}
 	onClose={closeFeedViewer}
 	onEdit={$isAdmin ? handleViewerEdit : undefined}

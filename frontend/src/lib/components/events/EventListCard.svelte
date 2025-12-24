@@ -15,14 +15,32 @@
 
 	interface Props {
 		events: Event[];
+		isAdmin?: boolean;
 		isParticipated: (event: Event) => boolean;
 		onEventClick: (event: Event) => void;
 		onBookmarkToggle: (event: Event, e: MouseEvent) => void;
 		onParticipateToggle: (event: Event, e: MouseEvent) => void;
 	}
 
-	let { events, isParticipated, onEventClick, onBookmarkToggle, onParticipateToggle }: Props =
+	let { events, isAdmin = false, isParticipated, onEventClick, onBookmarkToggle, onParticipateToggle }: Props =
 		$props();
+
+	let copiedEventId: number | null = $state(null);
+
+	async function copyEventUrl(event: Event, e: MouseEvent) {
+		e.stopPropagation();
+		if (!event.event_url) return;
+
+		try {
+			await navigator.clipboard.writeText(event.event_url);
+			copiedEventId = event.id;
+			setTimeout(() => {
+				copiedEventId = null;
+			}, 2000);
+		} catch (err) {
+			console.error('Failed to copy URL:', err);
+		}
+	}
 </script>
 
 <div class="md:hidden space-y-3 mb-6">
@@ -60,8 +78,27 @@
 						<p class="text-sm text-blue-600 truncate">{event.organizer}</p>
 					{/if}
 				</div>
-				<!-- 북마크 버튼 -->
+				<!-- 북마크/복사 버튼 -->
 				<div class="flex items-center gap-1" onclick={(e) => e.stopPropagation()}>
+					{#if isAdmin && event.event_url}
+						<button
+							onclick={(e) => copyEventUrl(event, e)}
+							class="p-1.5 rounded-lg transition-colors {copiedEventId === event.id
+								? 'bg-green-100 text-green-600'
+								: 'bg-gray-100 text-gray-500 hover:bg-gray-200'}"
+							title={copiedEventId === event.id ? '복사됨!' : '참여 링크 복사'}
+						>
+							{#if copiedEventId === event.id}
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+								</svg>
+							{:else}
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+								</svg>
+							{/if}
+						</button>
+					{/if}
 					<button
 						onclick={(e) => onBookmarkToggle(event, e)}
 						class="text-xl transition-colors {event.is_bookmarked

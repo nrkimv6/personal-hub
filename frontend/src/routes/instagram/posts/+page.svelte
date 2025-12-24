@@ -59,6 +59,7 @@
 
 	// LLM 상태 옵션
 	const llmStatusOptions = [
+		{ label: '미분석', value: 'none', color: 'bg-slate-100 text-slate-700' },
 		{ label: '대기', value: 'pending', color: 'bg-yellow-100 text-yellow-700' },
 		{ label: '분류됨', value: 'classified', color: 'bg-green-100 text-green-700' },
 		{ label: '오류', value: 'error', color: 'bg-red-100 text-red-700' }
@@ -261,6 +262,8 @@
 			if (sortOrder) params.sort_order = sortOrder;
 			// 활성화 상태 필터
 			if (filterIsActive) params.is_active = true;
+			// LLM 상태 필터
+			if (filterLlmStatus) params.llm_status = filterLlmStatus;
 
 			const response = await instagramApi.posts(params);
 			posts = response.posts;

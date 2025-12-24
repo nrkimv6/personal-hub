@@ -67,18 +67,72 @@ async def get_posts(
     sort_order: Optional[str] = Query("asc", description="정렬 순서 (asc/desc)"),
     is_active: Optional[bool] = Query(None, description="활성화 상태 필터 (true/false/null)"),
     search: Optional[str] = Query(None, description="캡션 검색어"),
+    llm_status: Optional[str] = Query(None, description="LLM 분석 상태 필터 (none/pending/processing/completed/failed)"),
     page: int = Query(1, ge=1, description="페이지 번호"),
     limit: int = Query(20, ge=1, le=100, description="페이지당 개수"),
     db: Session = Depends(get_db),
 ):
     """수집된 게시물 목록 조회."""
     from app.modules.claude_worker.models.llm_request import LLMRequest
+    from sqlalchemy import func
 
     service = PostService(db)
     offset = (page - 1) * limit
 
     # 태그 파라미터 파싱
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
+
+    # LLM 상태 필터를 위한 post_id 목록 계산
+    include_post_ids = None
+    exclude_post_ids = None
+
+    if llm_status:
+        if llm_status == "none":
+            # LLMRequest가 없는 게시물만 조회
+            llm_post_ids = (
+                db.query(LLMRequest.caller_id)
+                .filter(LLMRequest.caller_type == "instagram")
+                .distinct()
+                .all()
+            )
+            exclude_post_ids = [int(row[0]) for row in llm_post_ids if row[0] and row[0].isdigit()]
+        else:
+            # 해당 상태의 최신 LLMRequest가 있는 게시물만 조회
+            subquery = (
+                db.query(
+                    LLMRequest.caller_id,
+                    func.max(LLMRequest.requested_at).label("max_requested_at")
+                )
+                .filter(LLMRequest.caller_type == "instagram")
+                .group_by(LLMRequest.caller_id)
+                .subquery()
+            )
+
+            # 프론트엔드에서 보내는 값 매핑 (classified -> completed)
+            status_mapping = {
+                "pending": ["pending"],
+                "processing": ["processing"],
+                "classified": ["completed"],
+                "completed": ["completed"],
+                "error": ["failed"],
+                "failed": ["failed"],
+            }
+            target_statuses = status_mapping.get(llm_status, [llm_status])
+
+            latest_requests = (
+                db.query(LLMRequest.caller_id)
+                .join(
+                    subquery,
+                    (LLMRequest.caller_id == subquery.c.caller_id) &
+                    (LLMRequest.requested_at == subquery.c.max_requested_at)
+                )
+                .filter(
+                    LLMRequest.caller_type == "instagram",
+                    LLMRequest.status.in_(target_statuses)
+                )
+                .all()
+            )
+            include_post_ids = [int(row[0]) for row in latest_requests if row[0] and row[0].isdigit()]
 
     posts, total = service.get_posts(
         account=account,
@@ -91,6 +145,8 @@ async def get_posts(
         sort_order=sort_order,
         is_active=is_active,
         search=search,
+        include_post_ids=include_post_ids,
+        exclude_post_ids=exclude_post_ids,
         limit=limit,
         offset=offset,
     )

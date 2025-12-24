@@ -162,6 +162,8 @@ class PostService:
         sort_order: Optional[str] = "asc",
         is_active: Optional[bool] = None,
         search: Optional[str] = None,
+        include_post_ids: Optional[List[int]] = None,
+        exclude_post_ids: Optional[List[int]] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> Tuple[List[InstagramPost], int]:
@@ -178,6 +180,8 @@ class PostService:
             sort_order: 정렬 순서 (asc/desc)
             is_active: 활성화 상태 필터 (True/False/None)
             search: 캡션 검색어 (LIKE 검색)
+            include_post_ids: 포함할 게시물 ID 목록 (있으면 해당 ID만 조회)
+            exclude_post_ids: 제외할 게시물 ID 목록
             limit: 조회 개수
             offset: 시작 위치
 
@@ -222,6 +226,16 @@ class PostService:
                 .filter(InstagramPostTag.name.in_(tags))
                 .distinct()
             )
+
+        # 게시물 ID 필터 (include/exclude)
+        if include_post_ids is not None:
+            if len(include_post_ids) == 0:
+                # 빈 목록이면 결과 없음
+                return [], 0
+            query = query.filter(InstagramPost.id.in_(include_post_ids))
+
+        if exclude_post_ids:
+            query = query.filter(~InstagramPost.id.in_(exclude_post_ids))
 
         total = query.count()
 
