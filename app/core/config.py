@@ -180,7 +180,8 @@ class Settings(BaseSettings):
 
     model_config = {
         "env_file": ".env",
-        "case_sensitive": True
+        "case_sensitive": True,
+        "extra": "ignore"  # 알 수 없는 환경변수 무시 (다른 기능의 환경변수 등)
     }
 
 settings = Settings()
