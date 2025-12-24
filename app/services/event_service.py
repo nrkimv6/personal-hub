@@ -130,12 +130,18 @@ class EventService:
         # 총 개수
         total = query.count()
 
-        # 정렬
+        # 정렬 (1순위: sort_by, 2순위: event_end일 경우 winner_count desc)
         sort_column = getattr(Event, sort_by, Event.event_end)
         if sort_order == "desc":
-            query = query.order_by(sort_column.desc().nullslast())
+            primary_order = sort_column.desc().nullslast()
         else:
-            query = query.order_by(sort_column.asc().nullslast())
+            primary_order = sort_column.asc().nullslast()
+
+        # 2차 정렬: 마감일 기준일 때 당첨자수 내림차순 추가
+        if sort_by == "event_end":
+            query = query.order_by(primary_order, Event.winner_count.desc().nullslast())
+        else:
+            query = query.order_by(primary_order)
 
         # 페이지네이션
         offset = (page - 1) * page_size

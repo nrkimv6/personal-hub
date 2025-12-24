@@ -3,7 +3,7 @@
 	import { browser } from '$app/environment';
 	import { page as pageStore } from '$app/stores';
 	import { instagramApi, instagramTagApi, accountApi } from '$lib/api';
-	import type { InstagramPost, InstagramTag, Account } from '$lib/types';
+	import type { InstagramPost, InstagramTag, Account, LLMRequest } from '$lib/types';
 	import FeedCard from '$lib/components/instagram/FeedCard.svelte';
 	import { isAdmin } from '$lib/stores/auth';
 
@@ -188,6 +188,8 @@
 
 	// 상세보기 (FeedCard detailMode)
 	let selectedPost: InstagramPost | null = null;
+	let selectedPostLlmResult: LLMRequest | null = null;
+	let loadingLlm = false;
 
 	// 모바일 필터 표시 상태
 	let showFilters = false;
@@ -442,12 +444,22 @@
 		}
 	}
 
-	function openDetail(post: InstagramPost) {
+	async function openDetail(post: InstagramPost) {
 		selectedPost = post;
+		selectedPostLlmResult = null;
+		loadingLlm = true;
+		try {
+			selectedPostLlmResult = await instagramApi.getLlmResult(post.id);
+		} catch (e) {
+			console.error('LLM 결과 조회 실패:', e);
+		} finally {
+			loadingLlm = false;
+		}
 	}
 
 	function closeDetail() {
 		selectedPost = null;
+		selectedPostLlmResult = null;
 	}
 
 	async function deletePost(id: number) {
@@ -1009,6 +1021,15 @@
 										{#if post.is_ad}
 											<span class="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded">광고</span>
 										{/if}
+										{#if post.llm_status}
+											{#if post.llm_status === 'completed'}
+												<span class="px-1.5 py-0.5 text-xs bg-green-100 text-green-700 rounded" title="AI 분석 완료">AI</span>
+											{:else if post.llm_status === 'pending' || post.llm_status === 'processing'}
+												<span class="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded animate-pulse" title="AI 분석 대기중">AI</span>
+											{:else if post.llm_status === 'failed'}
+												<span class="px-1.5 py-0.5 text-xs bg-red-100 text-red-700 rounded" title="AI 분석 실패">AI</span>
+											{/if}
+										{/if}
 									</div>
 								</td>
 								<td class="px-4 py-3 max-w-xs">
@@ -1090,6 +1111,15 @@
 								{#if post.is_ad}
 									<span class="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded">광고</span>
 								{/if}
+								{#if post.llm_status}
+									{#if post.llm_status === 'completed'}
+										<span class="px-1.5 py-0.5 text-xs bg-green-100 text-green-700 rounded" title="AI 분석 완료">AI</span>
+									{:else if post.llm_status === 'pending' || post.llm_status === 'processing'}
+										<span class="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded animate-pulse" title="AI 분석 대기중">AI</span>
+									{:else if post.llm_status === 'failed'}
+										<span class="px-1.5 py-0.5 text-xs bg-red-100 text-red-700 rounded" title="AI 분석 실패">AI</span>
+									{/if}
+								{/if}
 							</div>
 							<p class="text-xs text-gray-600 truncate">{truncate(post.caption, 40)}</p>
 							<div class="flex items-center gap-1 mt-1 flex-wrap">
@@ -1123,19 +1153,43 @@
 						{/if}
 						<!-- 이미지 -->
 						{#if post.images && post.images.length > 0}
-							<div class="aspect-square bg-gray-100 rounded-lg mb-2 md:mb-3 overflow-hidden">
+							<div class="aspect-square bg-gray-100 rounded-lg mb-2 md:mb-3 overflow-hidden relative">
 								<img
 									src={post.images[0].src}
 									alt={post.images[0].alt || '게시물 이미지'}
 									class="w-full h-full object-cover"
 									loading="lazy"
 								/>
+								<!-- AI 분석 상태 배지 -->
+								{#if post.llm_status}
+									<div class="absolute top-1 right-1">
+										{#if post.llm_status === 'completed'}
+											<span class="px-1.5 py-0.5 text-xs bg-green-500 text-white rounded-full shadow" title="AI 분석 완료">AI</span>
+										{:else if post.llm_status === 'pending' || post.llm_status === 'processing'}
+											<span class="px-1.5 py-0.5 text-xs bg-yellow-500 text-white rounded-full shadow animate-pulse" title="AI 분석 대기중">AI</span>
+										{:else if post.llm_status === 'failed'}
+											<span class="px-1.5 py-0.5 text-xs bg-red-500 text-white rounded-full shadow" title="AI 분석 실패">AI</span>
+										{/if}
+									</div>
+								{/if}
 							</div>
 						{:else}
 							<div
-								class="aspect-square bg-gray-200 rounded-lg mb-2 md:mb-3 flex items-center justify-center"
+								class="aspect-square bg-gray-200 rounded-lg mb-2 md:mb-3 flex items-center justify-center relative"
 							>
 								<span class="text-gray-400 text-2xl md:text-4xl">?</span>
+								<!-- AI 분석 상태 배지 (이미지 없는 경우) -->
+								{#if post.llm_status}
+									<div class="absolute top-1 right-1">
+										{#if post.llm_status === 'completed'}
+											<span class="px-1.5 py-0.5 text-xs bg-green-500 text-white rounded-full shadow" title="AI 분석 완료">AI</span>
+										{:else if post.llm_status === 'pending' || post.llm_status === 'processing'}
+											<span class="px-1.5 py-0.5 text-xs bg-yellow-500 text-white rounded-full shadow animate-pulse" title="AI 분석 대기중">AI</span>
+										{:else if post.llm_status === 'failed'}
+											<span class="px-1.5 py-0.5 text-xs bg-red-500 text-white rounded-full shadow" title="AI 분석 실패">AI</span>
+										{/if}
+									</div>
+								{/if}
 							</div>
 						{/if}
 
@@ -1212,6 +1266,8 @@
 				onRequestLlmAnalysis={$isAdmin ? requestLlmAnalysis : undefined}
 				{availableTags}
 				onTagsUpdate={$isAdmin ? handleTagsUpdate : undefined}
+				llmResult={selectedPostLlmResult}
+				{loadingLlm}
 			/>
 		</div>
 	</div>

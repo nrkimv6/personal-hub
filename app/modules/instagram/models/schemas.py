@@ -35,6 +35,8 @@ class PostSchema(BaseModel):
     tags: List[TagInfoSchema] = []
     # 활성화 상태
     is_active: bool = True
+    # AI 분석 상태 (pending, processing, completed, failed, null)
+    llm_status: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

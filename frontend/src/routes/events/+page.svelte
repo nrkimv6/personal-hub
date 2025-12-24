@@ -42,8 +42,8 @@
 	let filterUrlType: string | null = $state(null);
 	let filterSourceType: string | null = $state(null);
 	let filterSearch = $state('');  // 검색어
-	let sortBy = $state('winner_count');
-	let sortOrder = $state('desc');
+	let sortBy = $state('event_end');
+	let sortOrder = $state('asc');
 	let includeUnknownPeriod = $state(false);
 	let showFilters = $state(false);
 
@@ -265,6 +265,8 @@
 		e.stopPropagation();
 		const currentState = isEventParticipated(event);
 		localParticipation.toggle(event.id, currentState);
+		// events 배열 재할당하여 UI 즉시 반영
+		events = [...events];
 	}
 
 	async function handlePopupBookmarkToggle(popup: Popup, e: MouseEvent) {

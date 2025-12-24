@@ -159,6 +159,32 @@ async def get_llm_request(
     return _request_to_schema(request)
 
 
+@router.get("/posts/{post_id}", response_model=Optional[LLMRequestSchema])
+async def get_llm_result_by_post(
+    post_id: int,
+    db: Session = Depends(get_db),
+):
+    """게시물의 최신 LLM 분석 결과 조회.
+
+    해당 게시물에 대한 가장 최근 LLM 분류 요청과 결과를 반환합니다.
+    분류 요청이 없는 경우 null을 반환합니다.
+    """
+    request = (
+        db.query(LLMRequest)
+        .filter(
+            LLMRequest.caller_type == CALLER_TYPE,
+            LLMRequest.caller_id == str(post_id),
+        )
+        .order_by(LLMRequest.requested_at.desc())
+        .first()
+    )
+
+    if not request:
+        return None
+
+    return _request_to_schema(request)
+
+
 @router.post("/requests")
 async def create_llm_requests(
     data: LLMRequestCreateSchema,

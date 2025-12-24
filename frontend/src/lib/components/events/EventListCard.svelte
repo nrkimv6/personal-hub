@@ -28,13 +28,13 @@
 <div class="md:hidden space-y-3 mb-6">
 	{#each events as event (event.id)}
 		<div
-			class="bg-white rounded-lg border border-gray-200 p-3 cursor-pointer hover:shadow-md transition-shadow {isEndingToday(
-				event
-			)
-				? 'border-orange-300 bg-orange-50'
-				: isUnknownPeriod(event)
-					? 'border-amber-200 bg-amber-50'
-					: ''}"
+			class="rounded-lg border p-3 cursor-pointer hover:shadow-md transition-all {isParticipated(event)
+				? 'bg-gray-100 border-gray-200 opacity-60'
+				: isEndingToday(event)
+					? 'bg-orange-50 border-orange-300'
+					: isUnknownPeriod(event)
+						? 'bg-amber-50 border-amber-200'
+						: 'bg-white border-gray-200'}"
 			onclick={() => onEventClick(event)}
 			onkeydown={(e) => e.key === 'Enter' && onEventClick(event)}
 			role="button"

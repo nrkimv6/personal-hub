@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { toPng } from 'html-to-image';
-	import type { InstagramPost, InstagramTag } from '$lib/types';
+	import type { InstagramPost, InstagramTag, LLMRequest } from '$lib/types';
 
 	interface Props {
 		post: InstagramPost;
@@ -14,6 +14,9 @@
 		onRequestLlmAnalysis?: (id: number) => void;
 		availableTags?: InstagramTag[];
 		onTagsUpdate?: (postId: number, tagIds: number[]) => void;
+		// AI 분석 결과 (인스타그램 게시물 페이지용)
+		llmResult?: LLMRequest | null;
+		loadingLlm?: boolean;
 	}
 
 	let {
@@ -26,7 +29,14 @@
 		onRequestLlmAnalysis,
 		availableTags = [],
 		onTagsUpdate,
+		llmResult,
+		loadingLlm = false,
 	}: Props = $props();
+
+	// 상세 모드 내부 탭 (llmResult가 전달된 경우에만 탭 모드)
+	const showTabs = $derived(llmResult !== undefined);
+	type DetailTab = 'caption' | 'ai';
+	let detailTab: DetailTab = $state('caption');
 
 	// 상세 모드에서는 캡션 기본 펼침
 	let isExpanded = $state(detailMode);
@@ -404,8 +414,33 @@
 					{/if}
 				</span>
 			</button>
+		{:else if showTabs}
+			<!-- 상세 모드 + 탭 UI (llmResult가 전달된 경우) -->
+			<div class="flex border-b border-gray-200 mb-3">
+				<button
+					onclick={() => (detailTab = 'caption')}
+					class="flex-1 py-2 text-sm font-medium transition-colors {detailTab === 'caption'
+						? 'border-b-2 border-blue-600 text-blue-600'
+						: 'text-gray-500 hover:text-gray-700'}"
+				>
+					원본 캡션
+				</button>
+				<button
+					onclick={() => (detailTab = 'ai')}
+					class="flex-1 py-2 text-sm font-medium transition-colors {detailTab === 'ai'
+						? 'border-b-2 border-purple-600 text-purple-600'
+						: 'text-gray-500 hover:text-gray-700'}"
+				>
+					AI 분석
+					{#if llmResult?.status === 'completed'}
+						<span class="ml-1 px-1 text-xs bg-green-100 text-green-600 rounded">완료</span>
+					{:else if llmResult?.status === 'pending' || llmResult?.status === 'processing'}
+						<span class="ml-1 px-1 text-xs bg-yellow-100 text-yellow-600 rounded">대기</span>
+					{/if}
+				</button>
+			</div>
 		{:else}
-			<!-- 상세 모드: 항상 표시 -->
+			<!-- 상세 모드: 기본 (탭 없음) -->
 			<div class="py-3"></div>
 		{/if}
 
@@ -416,11 +451,151 @@
 			class:max-h-[2000px]={isExpanded}
 			class:opacity-100={isExpanded}
 		>
-			<!-- 캡션 -->
-			{#if post.caption}
-				<div class="text-sm text-gray-700 leading-relaxed pb-3">
-					{@html formatContent(post.caption)}
+			<!-- AI 분석 탭 내용 -->
+			{#if detailMode && showTabs && detailTab === 'ai'}
+				<div class="py-2">
+					{#if loadingLlm}
+						<div class="flex justify-center py-4">
+							<div class="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-600"></div>
+						</div>
+					{:else if llmResult && llmResult.result}
+						{@const r = llmResult.result}
+						<div class="space-y-2 text-sm">
+							<!-- 분석 상태 + 분류 태그 -->
+							<div class="flex items-center gap-2 mb-3 flex-wrap">
+								<span class="text-xs px-2 py-0.5 rounded-full {llmResult.status === 'completed' ? 'bg-green-100 text-green-700' : llmResult.status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}">
+									{llmResult.status === 'completed' ? '분석 완료' : llmResult.status === 'failed' ? '분석 실패' : '분석 중'}
+								</span>
+								{#if r.tag}
+									<span class="px-2 py-0.5 text-xs rounded-full
+										{r.tag === '이벤트' ? 'bg-purple-100 text-purple-700' :
+										 r.tag === '팝업' ? 'bg-pink-100 text-pink-700' :
+										 r.tag === '홍보대사' ? 'bg-blue-100 text-blue-700' :
+										 r.tag === '리그램' ? 'bg-orange-100 text-orange-700' :
+										 r.tag === '후기' ? 'bg-teal-100 text-teal-700' :
+										 'bg-gray-100 text-gray-600'}">
+										{r.tag}
+									</span>
+								{/if}
+							</div>
+							<!-- 주최/브랜드 -->
+							{#if r.organizer}
+								<div class="flex items-center gap-2">
+									<span class="text-gray-500 text-xs w-20 shrink-0">주최:</span>
+									<span class="text-gray-900">{r.organizer}</span>
+								</div>
+							{/if}
+							<!-- 요약 -->
+							{#if r.summary}
+								<div class="flex items-start gap-2">
+									<span class="text-gray-500 text-xs w-20 shrink-0">요약:</span>
+									<p class="text-gray-900">{r.summary}</p>
+								</div>
+							{/if}
+							<!-- 이벤트 기간 -->
+							{#if r.event_period?.start || r.event_period?.end}
+								<div class="flex items-center gap-2">
+									<span class="text-gray-500 text-xs w-20 shrink-0">기간:</span>
+									<span class="text-gray-900">
+										{r.event_period?.start || '?'} ~ {r.event_period?.end || '?'}
+									</span>
+								</div>
+							{/if}
+							<!-- 발표일 -->
+							{#if r.announcement_date}
+								<div class="flex items-center gap-2">
+									<span class="text-gray-500 text-xs w-20 shrink-0">발표일:</span>
+									<span class="text-gray-900">{r.announcement_date}</span>
+								</div>
+							{/if}
+							<!-- 경품 -->
+							{#if r.prizes && r.prizes.length > 0}
+								<div class="flex items-start gap-2">
+									<span class="text-gray-500 text-xs w-20 shrink-0">경품:</span>
+									<span class="text-gray-900">{r.prizes.join(', ')}</span>
+								</div>
+							{/if}
+							<!-- 당첨자 수 -->
+							{#if r.winner_count}
+								<div class="flex items-center gap-2">
+									<span class="text-gray-500 text-xs w-20 shrink-0">당첨자:</span>
+									<span class="text-gray-900">{r.winner_count}명</span>
+								</div>
+							{/if}
+							<!-- 구매 필요 -->
+							{#if r.purchase_required}
+								<div class="flex items-center gap-2">
+									<span class="text-gray-500 text-xs w-20 shrink-0">구매필요:</span>
+									<span class="px-2 py-0.5 text-xs rounded-full
+										{r.purchase_required === '아니오' ? 'bg-green-100 text-green-700' :
+										 r.purchase_required === '예_부분' ? 'bg-yellow-100 text-yellow-700' :
+										 'bg-red-100 text-red-700'}">
+										{r.purchase_required === '예_전부' ? '필수' :
+										 r.purchase_required === '예_부분' ? '부분' : '불필요'}
+									</span>
+								</div>
+							{/if}
+							<!-- 장소 (팝업) -->
+							{#if r.location?.venue_name || r.location?.address}
+								<div class="flex items-start gap-2">
+									<span class="text-gray-500 text-xs w-20 shrink-0">장소:</span>
+									<div class="text-gray-900">
+										{#if r.location?.venue_name}
+											<div>{r.location.venue_name}</div>
+										{/if}
+										{#if r.location?.address}
+											<div class="text-xs text-gray-500">{r.location.address}</div>
+										{/if}
+									</div>
+								</div>
+							{/if}
+							<!-- URL 목록 -->
+							{#if r.urls && r.urls.length > 0}
+								<div class="flex items-start gap-2">
+									<span class="text-gray-500 text-xs w-20 shrink-0">링크:</span>
+									<div class="flex flex-col gap-1">
+										{#each r.urls as url}
+											<a href={url} target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline break-all text-xs">
+												{url}
+											</a>
+										{/each}
+									</div>
+								</div>
+							{/if}
+						</div>
+					{:else if llmResult && llmResult.status === 'failed'}
+						<div class="text-center py-4">
+							<p class="text-sm text-red-600 mb-2">분석 실패</p>
+							{#if llmResult.error_message}
+								<p class="text-xs text-gray-500">{llmResult.error_message}</p>
+							{/if}
+						</div>
+					{:else if llmResult && (llmResult.status === 'pending' || llmResult.status === 'processing')}
+						<div class="text-center py-4">
+							<div class="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-600 mx-auto mb-2"></div>
+							<p class="text-sm text-gray-600">AI 분석 진행 중...</p>
+						</div>
+					{:else}
+						<div class="text-center py-4">
+							<p class="text-sm text-gray-500 mb-3">AI 분석 결과가 없습니다.</p>
+							{#if onRequestLlmAnalysis}
+								<button
+									onclick={() => onRequestLlmAnalysis && onRequestLlmAnalysis(post.id)}
+									class="btn btn-primary btn-sm"
+								>
+									AI 분석 요청
+								</button>
+							{/if}
+						</div>
+					{/if}
 				</div>
+			{:else}
+				<!-- 캡션 탭 (기본) -->
+				{#if post.caption}
+					<div class="text-sm text-gray-700 leading-relaxed pb-3">
+						{@html formatContent(post.caption)}
+					</div>
+				{/if}
 			{/if}
 
 			<!-- 상세 모드: 내부 태그 (AI 분석 트리거용, 접히는 섹션) -->
@@ -490,7 +665,7 @@
 			{/if}
 
 			<!-- 메타 정보 -->
-			<div class="text-xs text-gray-400 pt-2 border-t border-gray-100">
+			<div class="text-xs text-gray-400 pt-2 border-t border-gray-100" data-capture-exclude>
 				<div class="flex justify-between">
 					<span>업로드: {post.display_time || formatDateTime(post.posted_at)}</span>
 					<span>수집: {formatDateTime(post.collected_at)}</span>

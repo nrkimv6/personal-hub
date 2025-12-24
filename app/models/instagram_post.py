@@ -56,6 +56,12 @@ class InstagramPost(Base):
         back_populates="post",
         cascade="all, delete-orphan",
     )
+    # LLM 분류 요청 (최신순)
+    llm_requests = relationship(
+        "InstagramLLMClassificationRequest",
+        back_populates="post",
+        order_by="desc(InstagramLLMClassificationRequest.requested_at)",
+    )
 
     @property
     def tags(self) -> list[str]:

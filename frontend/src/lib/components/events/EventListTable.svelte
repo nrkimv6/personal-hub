@@ -119,11 +119,13 @@
 			<tbody class="divide-y divide-gray-200">
 				{#each events as event (event.id)}
 					<tr
-						class="cursor-pointer transition-colors {isEndingToday(event)
-							? 'bg-orange-100 hover:bg-orange-200 font-semibold'
-							: isUnknownPeriod(event)
-								? 'bg-amber-50 hover:bg-amber-100'
-								: 'hover:bg-gray-50'}"
+						class="cursor-pointer transition-all {isParticipated(event)
+							? 'bg-gray-100 opacity-50 hover:opacity-70'
+							: isEndingToday(event)
+								? 'bg-orange-100 hover:bg-orange-200 font-semibold'
+								: isUnknownPeriod(event)
+									? 'bg-amber-50 hover:bg-amber-100'
+									: 'hover:bg-gray-50'}"
 						onclick={() => onEventClick(event)}
 					>
 						<!-- 상태 -->

@@ -8,7 +8,7 @@ from typing import List, Optional, Tuple
 
 from sqlalchemy import func, desc, asc
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.models import InstagramPost, InstagramCrawlRun
 from app.models.instagram_post_tag import InstagramPostTag, InstagramPostTagRelation
@@ -184,7 +184,11 @@ class PostService:
         Returns:
             (게시물 목록, 전체 개수)
         """
-        query = self.db.query(InstagramPost)
+        from app.models.instagram_llm_request import InstagramLLMClassificationRequest
+
+        query = self.db.query(InstagramPost).options(
+            selectinload(InstagramPost.llm_requests)
+        )
 
         # 캡션 검색어 필터 (LIKE)
         if search:
@@ -248,7 +252,12 @@ class PostService:
         Returns:
             게시물 또는 None
         """
-        return self.db.query(InstagramPost).filter(InstagramPost.id == post_id).first()
+        return (
+            self.db.query(InstagramPost)
+            .options(selectinload(InstagramPost.llm_requests))
+            .filter(InstagramPost.id == post_id)
+            .first()
+        )
 
     def get_post_by_instagram_id(self, instagram_post_id: str) -> Optional[InstagramPost]:
         """Instagram 게시물 ID로 조회.

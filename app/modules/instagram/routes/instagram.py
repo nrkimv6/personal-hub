@@ -971,6 +971,11 @@ def _post_to_schema(post) -> PostSchema:
                     color=rel.tag.color,
                 ))
 
+    # LLM 분석 상태 추출 (최신 요청 기준)
+    llm_status = None
+    if hasattr(post, 'llm_requests') and post.llm_requests:
+        llm_status = post.llm_requests[0].status
+
     return PostSchema(
         id=post.id,
         post_id=post.post_id,
@@ -985,4 +990,5 @@ def _post_to_schema(post) -> PostSchema:
         crawl_run_id=post.crawl_run_id,
         tags=tags,
         is_active=post.is_active if post.is_active is not None else True,
+        llm_status=llm_status,
     )
