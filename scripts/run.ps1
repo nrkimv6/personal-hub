@@ -1,28 +1,48 @@
 # Monitor Page - Integrated Run Script
 # Starts all processes, shows logs, and stops on exit (Ctrl+C)
+#
+# Production mode (default): API + Frontend only, workers disabled
+# Development mode (-Dev): All features enabled including workers
 
 param(
-    [switch]$Dev,        # Dev mode: use different ports (API: 8001, Frontend: 5174)
-    [switch]$SkipWorker  # Skip worker (run it separately in PyCharm debugger)
+    [switch]$Dev,        # Dev mode: use different ports (API: 8001, Frontend: 5174) + workers
+    [switch]$SkipWorker  # Skip worker even in Dev mode (for PyCharm debugger)
 )
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 
-# Port settings - Dev mode uses different ports to avoid affecting production
+# Mode and port settings
 if ($Dev) {
     $ApiPort = 8001
     $FrontendPort = 5174
+    $AppMode = "development"
+    $RunWorkers = -not $SkipWorker  # Run workers unless explicitly skipped
 } else {
     $ApiPort = 8000
     $FrontendPort = 5173
+    $AppMode = "production"
+    $RunWorkers = $false  # Production mode: no workers
 }
+
+# Set APP_MODE environment variable for backend
+$env:APP_MODE = $AppMode
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Monitor Page - Integrated Runner" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+
+# Show mode info
+if ($Dev) {
+    Write-Host "[MODE] Development - All features enabled" -ForegroundColor Green
+    Write-Host "       API: $ApiPort, Frontend: $FrontendPort, Workers: $(if ($RunWorkers) { 'ON' } else { 'OFF' })" -ForegroundColor Green
+} else {
+    Write-Host "[MODE] Production - View only (workers disabled)" -ForegroundColor Yellow
+    Write-Host "       API: $ApiPort, Frontend: $FrontendPort, Workers: OFF" -ForegroundColor Yellow
+}
 Write-Host ""
 
 # Clean up ports before starting (kill any zombie processes from previous runs)
@@ -72,12 +92,16 @@ try {
 
         # Start API and Worker only (not frontend) with Dev flag
         $env:SKIP_FRONTEND = "true"
-        if ($SkipWorker) {
+        if (-not $RunWorkers) {
             $env:SKIP_WORKER = "true"
+            $env:SKIP_INSTAGRAM_WORKER = "true"
+            $env:SKIP_CLAUDE_WORKER = "true"
         }
         & $startScript -Dev
         $env:SKIP_FRONTEND = $null
         $env:SKIP_WORKER = $null
+        $env:SKIP_INSTAGRAM_WORKER = $null
+        $env:SKIP_CLAUDE_WORKER = $null
 
         # Wait for log files to be created (watchdog starts worker after a delay)
         Start-Sleep -Seconds 4
@@ -377,8 +401,18 @@ try {
             Remove-Item $FrontendPidFile -Force -ErrorAction SilentlyContinue
         }
     } else {
-        # Normal mode: all background, then follow logs
+        # Normal (Production) mode: all background, workers disabled
+        # Set environment variables to skip all workers
+        $env:SKIP_WORKER = "true"
+        $env:SKIP_INSTAGRAM_WORKER = "true"
+        $env:SKIP_CLAUDE_WORKER = "true"
+
         & $startScript
+
+        # Clean up environment variables
+        $env:SKIP_WORKER = $null
+        $env:SKIP_INSTAGRAM_WORKER = $null
+        $env:SKIP_CLAUDE_WORKER = $null
 
         if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null) {
             Write-Host "[!] Start script returned non-zero exit code" -ForegroundColor Yellow
