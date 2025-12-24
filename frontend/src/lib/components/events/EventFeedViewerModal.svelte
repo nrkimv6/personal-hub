@@ -141,6 +141,16 @@
 							AI 분석
 						</h4>
 						<div class="flex items-center gap-2">
+							{#if getInstagramUrl()}
+								<a
+									href={getInstagramUrl()}
+									target="_blank"
+									rel="noopener noreferrer"
+									class="text-xs text-pink-600 hover:text-pink-800 underline"
+								>
+									원본 링크
+								</a>
+							{/if}
 							{#if type === 'event' && onEdit}
 								<button
 									onclick={onEdit}
@@ -441,6 +451,17 @@
 								</svg>
 								AI 분석
 							</h4>
+							<div class="flex items-center gap-2">
+							{#if getInstagramUrl()}
+								<a
+									href={getInstagramUrl()}
+									target="_blank"
+									rel="noopener noreferrer"
+									class="text-xs text-pink-600 hover:text-pink-800 underline"
+								>
+									원본 링크
+								</a>
+							{/if}
 							{#if type === 'event' && onEdit}
 								<button
 									onclick={onEdit}
@@ -449,6 +470,7 @@
 									수정
 								</button>
 							{/if}
+						</div>
 						</div>
 
 						<div

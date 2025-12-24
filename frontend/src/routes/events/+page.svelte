@@ -20,6 +20,9 @@
 	import EventFormModal from '$lib/components/events/EventFormModal.svelte';
 	import EventFeedViewerModal from '$lib/components/events/EventFeedViewerModal.svelte';
 
+	// 로컬 참여 상태 스토어 반응형 구독
+	const participatedMap = $derived($localParticipation);
+
 	// 상태 변수
 	let events: Event[] = $state([]);
 	let popups: Popup[] = $state([]);
@@ -260,7 +263,7 @@
 
 	function handleEventParticipateToggle(event: Event, e: MouseEvent) {
 		e.stopPropagation();
-		const currentState = localParticipation.isParticipated(event);
+		const currentState = isEventParticipated(event);
 		localParticipation.toggle(event.id, currentState);
 	}
 
@@ -425,7 +428,11 @@
 	// =========================================================
 
 	function isEventParticipated(event: Event): boolean {
-		return localParticipation.isParticipated(event);
+		// 반응형 participatedMap 사용
+		if (event.id in participatedMap) {
+			return participatedMap[event.id];
+		}
+		return event.is_participated;
 	}
 
 	// =========================================================
