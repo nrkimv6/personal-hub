@@ -469,6 +469,15 @@
 		}
 	}
 
+	async function requestLlmAnalysis(id: number) {
+		try {
+			await instagramApi.requestLlmAnalysisSingle(id);
+			alert('AI 분석 요청이 등록되었습니다. 워커가 처리하면 Event/Popup으로 분류됩니다.');
+		} catch (e) {
+			alert('AI 분석 요청 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		}
+	}
+
 	async function handleTagsUpdate(postId: number, tagIds: number[]) {
 		try {
 			const updated = await instagramApi.updatePost(postId, { tag_ids: tagIds });
@@ -1195,6 +1204,7 @@
 				onClose={closeDetail}
 				onDelete={deletePost}
 				onRecrawl={recrawlPost}
+				onRequestLlmAnalysis={requestLlmAnalysis}
 				{availableTags}
 				onTagsUpdate={handleTagsUpdate}
 			/>

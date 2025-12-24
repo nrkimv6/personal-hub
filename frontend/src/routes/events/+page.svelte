@@ -24,6 +24,7 @@
 	let filterBookmarked: boolean | null = null;
 	let filterUrlType: string | null = null;
 	let filterSourceType: string | null = null;
+	let filterSearch = '';  // 검색어
 	let sortBy = 'event_end';
 	let sortOrder = 'asc';
 	let includeUnknownPeriod = false;
@@ -85,6 +86,7 @@
 		filterBookmarked !== null,
 		filterUrlType,
 		filterSourceType,
+		filterSearch,
 		includeUnknownPeriod
 	].filter(Boolean).length;
 
@@ -155,6 +157,7 @@
 				if (filterEventStatus) params.popup_status = filterEventStatus;
 				if (filterBookmarked !== null) params.is_bookmarked = filterBookmarked;
 				if (filterSourceType) params.source_type = filterSourceType;
+				if (filterSearch) params.search = filterSearch;
 				if (includeUnknownPeriod) params.include_unknown_period = true;
 
 				const response = await popupApi.list(params);
@@ -221,7 +224,7 @@
 		} else {
 			// 다른 컬럼 클릭 시 해당 컬럼으로 변경, 기본 오름차순 (날짜는 내림차순)
 			sortBy = column;
-			sortOrder = ['created_at', 'event_end', 'event_start', 'announcement_date'].includes(column) ? 'desc' : 'asc';
+			sortOrder = ['created_at', 'event_end', 'event_start', 'announcement_date', 'winner_count'].includes(column) ? 'desc' : 'asc';
 		}
 		currentPage = 1;
 		fetchEvents();
@@ -1136,7 +1139,12 @@
 								발표일 <span class="text-gray-400">{getSortIcon('announcement_date')}</span>
 							</th>
 							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-[120px]">경품</th>
-							<th class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">당첨자</th>
+							<th
+								class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:bg-gray-100 select-none"
+								onclick={() => toggleSort('winner_count')}
+							>
+								당첨자 <span class="text-gray-400">{getSortIcon('winner_count')}</span>
+							</th>
 							<th class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">조건</th>
 							<th
 								class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:bg-gray-100 select-none"

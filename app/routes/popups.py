@@ -29,6 +29,7 @@ def get_popups(
     is_bookmarked: Optional[bool] = Query(None, description="북마크 여부"),
     is_visited: Optional[bool] = Query(None, description="방문 완료 여부"),
     include_unknown_period: bool = Query(True, description="기간 미정 항목 포함 여부"),
+    search: Optional[str] = Query(None, description="제목/장소/주소 검색"),
     sort_by: str = Query("end_date", description="정렬 기준 (end_date/start_date/created_at)"),
     sort_order: str = Query("asc", description="정렬 순서 (asc/desc)"),
     page: int = Query(1, ge=1, description="페이지 번호"),
@@ -41,6 +42,7 @@ def get_popups(
     - 상태, 출처별 필터링 지원
     - 진행 상태(ongoing/upcoming/ended) 기반 필터링
     - 북마크, 방문 완료 필터링
+    - 제목/장소/주소 검색 지원
     - 정렬 및 페이지네이션 지원
     """
     return popup_service.get_popups(
@@ -51,6 +53,7 @@ def get_popups(
         is_bookmarked=is_bookmarked,
         is_visited=is_visited,
         include_unknown_period=include_unknown_period,
+        search=search,
         sort_by=sort_by,
         sort_order=sort_order,
         page=page,

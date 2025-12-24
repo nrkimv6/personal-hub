@@ -11,6 +11,7 @@
 		onClose?: () => void;
 		onDelete?: (id: number) => void;
 		onRecrawl?: (id: number) => void;
+		onRequestLlmAnalysis?: (id: number) => void;
 		availableTags?: InstagramTag[];
 		onTagsUpdate?: (postId: number, tagIds: number[]) => void;
 	}
@@ -22,6 +23,7 @@
 		onClose,
 		onDelete,
 		onRecrawl,
+		onRequestLlmAnalysis,
 		availableTags = [],
 		onTagsUpdate,
 	}: Props = $props();
@@ -38,6 +40,9 @@
 
 	// 재크롤링 상태
 	let isRecrawling = $state(false);
+
+	// AI 분석 요청 상태
+	let isRequestingAnalysis = $state(false);
 
 	// 캡쳐 상태
 	let isCapturing = $state(false);
@@ -153,6 +158,17 @@
 			await onRecrawl(post.id);
 		} finally {
 			isRecrawling = false;
+		}
+	}
+
+	// AI 분석 요청
+	async function handleRequestLlmAnalysis() {
+		if (isRequestingAnalysis || !onRequestLlmAnalysis) return;
+		isRequestingAnalysis = true;
+		try {
+			await onRequestLlmAnalysis(post.id);
+		} finally {
+			isRequestingAnalysis = false;
 		}
 	}
 
@@ -504,6 +520,25 @@
 								재크롤링 중...
 							{:else}
 								&#8635; 재크롤링
+							{/if}
+						</button>
+					{/if}
+					<!-- AI 분석 요청 버튼 -->
+					{#if onRequestLlmAnalysis}
+						<button
+							onclick={handleRequestLlmAnalysis}
+							disabled={isRequestingAnalysis}
+							class="btn btn-secondary btn-sm disabled:opacity-50"
+							title="AI 분석 요청 (Event/Popup 분류)"
+						>
+							{#if isRequestingAnalysis}
+								<span class="inline-block animate-spin mr-1">&#8635;</span>
+								요청 중...
+							{:else}
+								<svg class="w-4 h-4 inline-block mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+								</svg>
+								AI 분석
 							{/if}
 						</button>
 					{/if}

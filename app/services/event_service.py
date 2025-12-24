@@ -57,6 +57,7 @@ class EventService:
         is_bookmarked: Optional[bool] = None,
         is_participated: Optional[bool] = None,
         include_unknown_period: bool = True,
+        search: Optional[str] = None,
         sort_by: str = "event_end",
         sort_order: str = "asc",
         page: int = 1,
@@ -64,6 +65,17 @@ class EventService:
     ) -> EventList:
         """이벤트 목록 조회 (필터/정렬/페이지네이션)"""
         query = db.query(Event)
+
+        # 검색어 필터 (LIKE)
+        if search:
+            search_pattern = f"%{search}%"
+            query = query.filter(
+                or_(
+                    Event.title.ilike(search_pattern),
+                    Event.summary.ilike(search_pattern),
+                    Event.organizer.ilike(search_pattern),
+                )
+            )
 
         # 기본 필터
         if event_type:
