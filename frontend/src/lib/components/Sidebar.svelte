@@ -57,8 +57,15 @@
 			.filter((group) => group.items.length > 0);
 	}
 
-	// 필터링된 네비게이션 그룹
-	let visibleGroups = $derived(getVisibleGroups(navGroups, $isAdmin, $isDevMode));
+	// 필터링된 네비게이션 그룹 - Svelte 5 runes와 스토어 호환을 위해 $effect 사용
+	// 초기값: public 아이템만 (운영 모드 기본값)
+	let visibleGroups = $state<NavGroup[]>(getVisibleGroups(navGroups, false, false));
+
+	$effect(() => {
+		const admin = $isAdmin;
+		const devMode = $isDevMode;
+		visibleGroups = getVisibleGroups(navGroups, admin, devMode);
+	});
 </script>
 
 <!-- 헤더 -->
