@@ -18,6 +18,7 @@ from app.core.auth import (
     create_access_token,
     get_current_user,
     is_admin_email,
+    is_localhost_request,
     UserInfo,
 )
 
@@ -166,14 +167,26 @@ async def auth_callback(
 
 @router.get("/me")
 async def auth_me(
+    request: Request,
     user: Optional[UserInfo] = Depends(get_current_user)
 ):
     """
     현재 로그인한 사용자 정보 조회
 
+    localhost 요청의 경우 자동으로 관리자로 처리됩니다.
+
     Returns:
         사용자 정보 또는 null (비로그인 시)
     """
+    # localhost 요청은 자동 관리자 처리
+    if user is None and is_localhost_request(request):
+        return {
+            "user": {
+                "email": "localhost@admin",
+                "isAdmin": True,
+            }
+        }
+
     if user is None:
         return {"user": None}
 

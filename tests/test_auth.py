@@ -218,3 +218,92 @@ class TestRequireAdminDependency:
         # 실제 관리자 전용 API가 있을 때 테스트
         # 현재는 API 보호가 아직 적용되지 않았으므로 skip
         pass
+
+
+class TestLocalhostException:
+    """localhost 예외 처리 테스트
+
+    이 테스트는 DB fixture를 사용하는 test_event_api.py에서 테스트됩니다.
+    여기서는 is_localhost_request 함수만 단위 테스트합니다.
+    """
+
+    def test_is_localhost_127_0_0_1(self):
+        """127.0.0.1은 localhost로 인식"""
+        from app.core.auth import is_localhost_request
+
+        class MockClient:
+            host = "127.0.0.1"
+
+        class MockRequest:
+            client = MockClient()
+
+        assert is_localhost_request(MockRequest()) is True
+
+    def test_is_localhost_localhost(self):
+        """localhost는 localhost로 인식"""
+        from app.core.auth import is_localhost_request
+
+        class MockClient:
+            host = "localhost"
+
+        class MockRequest:
+            client = MockClient()
+
+        assert is_localhost_request(MockRequest()) is True
+
+    def test_is_localhost_ipv6(self):
+        """::1 (IPv6 localhost)은 localhost로 인식"""
+        from app.core.auth import is_localhost_request
+
+        class MockClient:
+            host = "::1"
+
+        class MockRequest:
+            client = MockClient()
+
+        assert is_localhost_request(MockRequest()) is True
+
+    def test_is_localhost_testclient(self):
+        """testclient는 localhost로 인식"""
+        from app.core.auth import is_localhost_request
+
+        class MockClient:
+            host = "testclient"
+
+        class MockRequest:
+            client = MockClient()
+
+        assert is_localhost_request(MockRequest()) is True
+
+    def test_is_localhost_none_client(self):
+        """client가 None인 경우 localhost로 인식 (TestClient 등)"""
+        from app.core.auth import is_localhost_request
+
+        class MockRequest:
+            client = None
+
+        assert is_localhost_request(MockRequest()) is True
+
+    def test_is_not_localhost_external_ip(self):
+        """외부 IP는 localhost가 아님"""
+        from app.core.auth import is_localhost_request
+
+        class MockClient:
+            host = "116.42.248.226"
+
+        class MockRequest:
+            client = MockClient()
+
+        assert is_localhost_request(MockRequest()) is False
+
+    def test_is_not_localhost_domain(self):
+        """도메인은 localhost가 아님"""
+        from app.core.auth import is_localhost_request
+
+        class MockClient:
+            host = "monitor.woory.day"
+
+        class MockRequest:
+            client = MockClient()
+
+        assert is_localhost_request(MockRequest()) is False

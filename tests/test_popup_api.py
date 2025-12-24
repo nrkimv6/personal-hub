@@ -137,8 +137,8 @@ class TestPopupCreateAPI:
         response = client.post("/api/v1/popups", json={}, headers=admin_headers)
         assert response.status_code == 422  # Validation Error
 
-    def test_create_popup_unauthorized(self, client):
-        """인증 없이 팝업 생성 시도"""
+    def test_create_popup_unauthorized(self, client, mock_external_request):
+        """인증 없이 팝업 생성 시도 (외부 요청)"""
         response = client.post("/api/v1/popups", json={
             "title": "새 팝업",
         })
@@ -177,8 +177,8 @@ class TestPopupUpdateAPI:
         }, headers=admin_headers)
         assert response.status_code == 404
 
-    def test_update_popup_unauthorized(self, client, sample_popup):
-        """인증 없이 팝업 수정 시도"""
+    def test_update_popup_unauthorized(self, client, sample_popup, mock_external_request):
+        """인증 없이 팝업 수정 시도 (외부 요청)"""
         response = client.put(f"/api/v1/popups/{sample_popup.id}", json={
             "title": "수정",
         })
@@ -202,8 +202,8 @@ class TestPopupDeleteAPI:
         response = client.delete("/api/v1/popups/99999", headers=admin_headers)
         assert response.status_code == 404
 
-    def test_delete_popup_unauthorized(self, client, sample_popup):
-        """인증 없이 팝업 삭제 시도"""
+    def test_delete_popup_unauthorized(self, client, sample_popup, mock_external_request):
+        """인증 없이 팝업 삭제 시도 (외부 요청)"""
         response = client.delete(f"/api/v1/popups/{sample_popup.id}")
         assert response.status_code == 401
 
@@ -223,8 +223,8 @@ class TestPopupBookmarkAPI:
         assert response.status_code == 200
         assert response.json()["is_bookmarked"] is False
 
-    def test_toggle_bookmark_unauthorized(self, client, sample_popup):
-        """인증 없이 북마크 시도"""
+    def test_toggle_bookmark_unauthorized(self, client, sample_popup, mock_external_request):
+        """인증 없이 북마크 시도 (외부 요청)"""
         response = client.post(f"/api/v1/popups/{sample_popup.id}/bookmark")
         assert response.status_code == 401
 
@@ -244,8 +244,8 @@ class TestPopupVisitedAPI:
         assert response.status_code == 200
         assert response.json()["is_visited"] is False
 
-    def test_toggle_visited_unauthorized(self, client, sample_popup):
-        """인증 없이 방문 완료 시도"""
+    def test_toggle_visited_unauthorized(self, client, sample_popup, mock_external_request):
+        """인증 없이 방문 완료 시도 (외부 요청)"""
         response = client.post(f"/api/v1/popups/{sample_popup.id}/visited")
         assert response.status_code == 401
 
@@ -295,8 +295,8 @@ class TestPopupImportFromInstagramAPI:
         }, headers=admin_headers)
         assert response.status_code == 404
 
-    def test_import_from_instagram_unauthorized(self, client):
-        """인증 없이 가져오기 시도"""
+    def test_import_from_instagram_unauthorized(self, client, mock_external_request):
+        """인증 없이 가져오기 시도 (외부 요청)"""
         response = client.post("/api/v1/popups/import-from-instagram", json={
             "instagram_post_id": 1,
         })

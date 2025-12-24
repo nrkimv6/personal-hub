@@ -150,8 +150,8 @@ class TestEventCreateAPI:
         response = client.post("/api/v1/events", json={}, headers=admin_headers)
         assert response.status_code == 422  # Validation Error
 
-    def test_create_event_unauthorized(self, client):
-        """인증 없이 이벤트 생성 시도"""
+    def test_create_event_unauthorized(self, client, mock_external_request):
+        """인증 없이 이벤트 생성 시도 (외부 요청)"""
         response = client.post("/api/v1/events", json={
             "title": "새 이벤트",
         })
@@ -190,8 +190,8 @@ class TestEventUpdateAPI:
         }, headers=admin_headers)
         assert response.status_code == 404
 
-    def test_update_event_unauthorized(self, client, sample_event):
-        """인증 없이 이벤트 수정 시도"""
+    def test_update_event_unauthorized(self, client, sample_event, mock_external_request):
+        """인증 없이 이벤트 수정 시도 (외부 요청)"""
         response = client.put(f"/api/v1/events/{sample_event.id}", json={
             "title": "수정",
         })
@@ -215,8 +215,8 @@ class TestEventDeleteAPI:
         response = client.delete("/api/v1/events/99999", headers=admin_headers)
         assert response.status_code == 404
 
-    def test_delete_event_unauthorized(self, client, sample_event):
-        """인증 없이 이벤트 삭제 시도"""
+    def test_delete_event_unauthorized(self, client, sample_event, mock_external_request):
+        """인증 없이 이벤트 삭제 시도 (외부 요청)"""
         response = client.delete(f"/api/v1/events/{sample_event.id}")
         assert response.status_code == 401
 
@@ -241,8 +241,8 @@ class TestEventBookmarkAPI:
         response = client.post("/api/v1/events/99999/bookmark", headers=admin_headers)
         assert response.status_code == 404
 
-    def test_toggle_bookmark_unauthorized(self, client, sample_event):
-        """인증 없이 북마크 시도"""
+    def test_toggle_bookmark_unauthorized(self, client, sample_event, mock_external_request):
+        """인증 없이 북마크 시도 (외부 요청)"""
         response = client.post(f"/api/v1/events/{sample_event.id}/bookmark")
         assert response.status_code == 401
 
@@ -262,8 +262,8 @@ class TestEventParticipateAPI:
         assert response.status_code == 200
         assert response.json()["is_participated"] is False
 
-    def test_toggle_participate_unauthorized(self, client, sample_event):
-        """인증 없이 참여 완료 시도"""
+    def test_toggle_participate_unauthorized(self, client, sample_event, mock_external_request):
+        """인증 없이 참여 완료 시도 (외부 요청)"""
         response = client.post(f"/api/v1/events/{sample_event.id}/participate")
         assert response.status_code == 401
 
@@ -323,8 +323,8 @@ class TestEventImportFromInstagramAPI:
         }, headers=admin_headers)
         assert response.status_code == 404
 
-    def test_import_from_instagram_unauthorized(self, client):
-        """인증 없이 가져오기 시도"""
+    def test_import_from_instagram_unauthorized(self, client, mock_external_request):
+        """인증 없이 가져오기 시도 (외부 요청)"""
         response = client.post("/api/v1/events/import-from-instagram", json={
             "instagram_post_id": 1,
         })

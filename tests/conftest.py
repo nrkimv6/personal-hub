@@ -132,3 +132,17 @@ def test_db_session(test_db_engine):
 
     session.rollback()
     session.close()
+
+
+@pytest.fixture
+def mock_external_request():
+    """
+    외부 요청을 시뮬레이션하는 fixture
+
+    is_localhost_request가 False를 반환하도록 mock하여
+    외부 IP에서의 요청처럼 동작하게 합니다.
+    """
+    from unittest.mock import patch
+
+    with patch('app.core.auth.is_localhost_request', return_value=False):
+        yield
