@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 
 	let sharedUrl = $state('');
@@ -56,20 +55,21 @@
 		processing = false;
 	});
 
+	// PWA standalone 모드에서는 goto()가 동작하지 않을 수 있으므로 window.location 사용
 	function handleInstagram() {
-		goto(`/instagram/posts?shared_url=${encodeURIComponent(sharedUrl)}`);
+		window.location.href = `/instagram/posts?shared_url=${encodeURIComponent(sharedUrl)}`;
 	}
 
 	function handleEventForm() {
-		goto(`/events?action=add&url=${encodeURIComponent(sharedUrl)}`);
+		window.location.href = `/events?action=add&url=${encodeURIComponent(sharedUrl)}`;
 	}
 
 	function handleOther() {
-		goto(`/events?action=add&url=${encodeURIComponent(sharedUrl)}`);
+		window.location.href = `/events?action=add&url=${encodeURIComponent(sharedUrl)}`;
 	}
 
 	function handleCancel() {
-		goto('/');
+		window.location.href = '/';
 	}
 </script>
 
