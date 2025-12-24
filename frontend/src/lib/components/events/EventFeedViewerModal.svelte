@@ -496,7 +496,7 @@
 				<!-- 탭 내용 -->
 				{#if mobileViewerTab === 'info'}
 					<!-- AI 분석 탭 -->
-					<div class="bg-white rounded-b-xl p-4">
+					<div class="bg-white rounded-b-xl p-4 max-h-[70vh] overflow-y-auto">
 						<div class="flex items-center justify-between mb-3">
 							<h4 class="font-semibold text-sm text-gray-900 flex items-center gap-2">
 								<svg
