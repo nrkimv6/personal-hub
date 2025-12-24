@@ -10,6 +10,14 @@ from app.main import app
 from app.database import get_db
 from app.models.popup import Popup
 from app.models.instagram_post import InstagramPost
+from app.core.auth import create_access_token
+
+
+@pytest.fixture
+def admin_headers():
+    """관리자 인증 헤더"""
+    token = create_access_token(email="admin@test.com", is_admin=True)
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture
@@ -102,115 +110,144 @@ class TestPopupDetailAPI:
 class TestPopupCreateAPI:
     """POST /api/v1/popups 테스트"""
 
-    def test_create_popup(self, client):
+    def test_create_popup(self, client, admin_headers):
         """팝업 생성"""
         response = client.post("/api/v1/popups", json={
             "title": "새 팝업",
             "venue_name": "코엑스",
             "address": "서울시 강남구",
-        })
+        }, headers=admin_headers)
         assert response.status_code == 201
         data = response.json()
         assert data["title"] == "새 팝업"
         assert data["venue_name"] == "코엑스"
 
-    def test_create_popup_minimal(self, client):
+    def test_create_popup_minimal(self, client, admin_headers):
         """최소 필드로 팝업 생성"""
         response = client.post("/api/v1/popups", json={
             "title": "간단한 팝업",
-        })
+        }, headers=admin_headers)
         assert response.status_code == 201
         data = response.json()
         assert data["title"] == "간단한 팝업"
         assert data["source_type"] == "manual"  # 기본값
 
-    def test_create_popup_validation_error(self, client):
+    def test_create_popup_validation_error(self, client, admin_headers):
         """필수 필드 누락"""
-        response = client.post("/api/v1/popups", json={})
+        response = client.post("/api/v1/popups", json={}, headers=admin_headers)
         assert response.status_code == 422  # Validation Error
+
+    def test_create_popup_unauthorized(self, client):
+        """인증 없이 팝업 생성 시도"""
+        response = client.post("/api/v1/popups", json={
+            "title": "새 팝업",
+        })
+        assert response.status_code == 401
 
 
 class TestPopupUpdateAPI:
     """PUT /api/v1/popups/{id} 테스트"""
 
-    def test_update_popup(self, client, sample_popup):
+    def test_update_popup(self, client, sample_popup, admin_headers):
         """팝업 수정"""
         response = client.put(f"/api/v1/popups/{sample_popup.id}", json={
             "title": "수정된 제목",
             "status": "cancelled",
-        })
+        }, headers=admin_headers)
         assert response.status_code == 200
         data = response.json()
         assert data["title"] == "수정된 제목"
         assert data["status"] == "cancelled"
 
-    def test_update_popup_partial(self, client, sample_popup):
+    def test_update_popup_partial(self, client, sample_popup, admin_headers):
         """부분 수정 (다른 필드 유지)"""
         original_venue = sample_popup.venue_name
         response = client.put(f"/api/v1/popups/{sample_popup.id}", json={
             "title": "제목만 수정",
-        })
+        }, headers=admin_headers)
         assert response.status_code == 200
         data = response.json()
         assert data["title"] == "제목만 수정"
         assert data["venue_name"] == original_venue
 
-    def test_update_popup_not_found(self, client):
+    def test_update_popup_not_found(self, client, admin_headers):
         """존재하지 않는 팝업 수정"""
         response = client.put("/api/v1/popups/99999", json={
             "title": "수정",
-        })
+        }, headers=admin_headers)
         assert response.status_code == 404
+
+    def test_update_popup_unauthorized(self, client, sample_popup):
+        """인증 없이 팝업 수정 시도"""
+        response = client.put(f"/api/v1/popups/{sample_popup.id}", json={
+            "title": "수정",
+        })
+        assert response.status_code == 401
 
 
 class TestPopupDeleteAPI:
     """DELETE /api/v1/popups/{id} 테스트"""
 
-    def test_delete_popup(self, client, sample_popup):
+    def test_delete_popup(self, client, sample_popup, admin_headers):
         """팝업 삭제"""
-        response = client.delete(f"/api/v1/popups/{sample_popup.id}")
+        response = client.delete(f"/api/v1/popups/{sample_popup.id}", headers=admin_headers)
         assert response.status_code == 204
 
         # 삭제 확인
         response = client.get(f"/api/v1/popups/{sample_popup.id}")
         assert response.status_code == 404
 
-    def test_delete_popup_not_found(self, client):
+    def test_delete_popup_not_found(self, client, admin_headers):
         """존재하지 않는 팝업 삭제"""
-        response = client.delete("/api/v1/popups/99999")
+        response = client.delete("/api/v1/popups/99999", headers=admin_headers)
         assert response.status_code == 404
+
+    def test_delete_popup_unauthorized(self, client, sample_popup):
+        """인증 없이 팝업 삭제 시도"""
+        response = client.delete(f"/api/v1/popups/{sample_popup.id}")
+        assert response.status_code == 401
 
 
 class TestPopupBookmarkAPI:
     """POST /api/v1/popups/{id}/bookmark 테스트"""
 
-    def test_toggle_bookmark(self, client, sample_popup):
+    def test_toggle_bookmark(self, client, sample_popup, admin_headers):
         """북마크 토글"""
         # OFF -> ON
-        response = client.post(f"/api/v1/popups/{sample_popup.id}/bookmark")
+        response = client.post(f"/api/v1/popups/{sample_popup.id}/bookmark", headers=admin_headers)
         assert response.status_code == 200
         assert response.json()["is_bookmarked"] is True
 
         # ON -> OFF
-        response = client.post(f"/api/v1/popups/{sample_popup.id}/bookmark")
+        response = client.post(f"/api/v1/popups/{sample_popup.id}/bookmark", headers=admin_headers)
         assert response.status_code == 200
         assert response.json()["is_bookmarked"] is False
+
+    def test_toggle_bookmark_unauthorized(self, client, sample_popup):
+        """인증 없이 북마크 시도"""
+        response = client.post(f"/api/v1/popups/{sample_popup.id}/bookmark")
+        assert response.status_code == 401
 
 
 class TestPopupVisitedAPI:
     """POST /api/v1/popups/{id}/visited 테스트"""
 
-    def test_toggle_visited(self, client, sample_popup):
+    def test_toggle_visited(self, client, sample_popup, admin_headers):
         """방문 완료 토글"""
         # OFF -> ON
-        response = client.post(f"/api/v1/popups/{sample_popup.id}/visited")
+        response = client.post(f"/api/v1/popups/{sample_popup.id}/visited", headers=admin_headers)
         assert response.status_code == 200
         assert response.json()["is_visited"] is True
 
         # ON -> OFF
-        response = client.post(f"/api/v1/popups/{sample_popup.id}/visited")
+        response = client.post(f"/api/v1/popups/{sample_popup.id}/visited", headers=admin_headers)
         assert response.status_code == 200
         assert response.json()["is_visited"] is False
+
+    def test_toggle_visited_unauthorized(self, client, sample_popup):
+        """인증 없이 방문 완료 시도"""
+        response = client.post(f"/api/v1/popups/{sample_popup.id}/visited")
+        assert response.status_code == 401
 
 
 class TestPopupImportFromInstagramAPI:
@@ -239,11 +276,11 @@ class TestPopupImportFromInstagramAPI:
         test_db_session.refresh(post)
         return post
 
-    def test_import_from_instagram(self, client, instagram_post):
+    def test_import_from_instagram(self, client, instagram_post, admin_headers):
         """Instagram에서 팝업 가져오기"""
         response = client.post("/api/v1/popups/import-from-instagram", json={
             "instagram_post_id": instagram_post.id,
-        })
+        }, headers=admin_headers)
         assert response.status_code == 201
         data = response.json()
         assert data["source_type"] == "instagram"
@@ -251,12 +288,19 @@ class TestPopupImportFromInstagramAPI:
         assert data["venue_name"] == "테스트 장소"
         assert data["address"] == "서울시 강남구"
 
-    def test_import_from_instagram_not_found(self, client):
+    def test_import_from_instagram_not_found(self, client, admin_headers):
         """존재하지 않는 게시물"""
         response = client.post("/api/v1/popups/import-from-instagram", json={
             "instagram_post_id": 99999,
-        })
+        }, headers=admin_headers)
         assert response.status_code == 404
+
+    def test_import_from_instagram_unauthorized(self, client):
+        """인증 없이 가져오기 시도"""
+        response = client.post("/api/v1/popups/import-from-instagram", json={
+            "instagram_post_id": 1,
+        })
+        assert response.status_code == 401
 
 
 class TestPopupComputedFields:
