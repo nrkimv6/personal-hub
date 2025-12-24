@@ -35,6 +35,13 @@
 	let sortOrder: string = 'asc';
 	let filterIsActive: boolean = true;  // 활성화된 항목만 보기 (기본값)
 
+	// 선택 모드 상태
+	let selectedPostIds: Set<number> = new Set();
+	let isSelectMode = false;
+	let isBatchProcessing = false;
+	let showBatchActionMenu = false;
+	let showDeleteConfirmModal = false;
+
 	// LLM 분류 필터
 	let filterLlmTag: string | null = null;
 	let filterLlmStatus: string | null = null;
@@ -79,6 +86,102 @@
 		} catch (e) {
 			console.error('활성화 상태 변경 실패:', e);
 			alert('활성화 상태 변경에 실패했습니다.');
+		}
+	}
+
+	// ============== 선택 모드 함수 ==============
+
+	// 선택 모드 토글
+	function toggleSelectMode() {
+		isSelectMode = !isSelectMode;
+		if (!isSelectMode) {
+			selectedPostIds = new Set();
+			showBatchActionMenu = false;
+		}
+	}
+
+	// 개별 게시물 선택 토글
+	function togglePostSelection(postId: number, event?: Event) {
+		if (event) event.stopPropagation();
+		if (selectedPostIds.has(postId)) {
+			selectedPostIds.delete(postId);
+		} else {
+			selectedPostIds.add(postId);
+		}
+		selectedPostIds = selectedPostIds;  // 반응형 트리거
+	}
+
+	// 전체 선택/해제
+	function toggleSelectAll() {
+		if (selectedPostIds.size === posts.length) {
+			selectedPostIds = new Set();
+		} else {
+			selectedPostIds = new Set(posts.map(p => p.id));
+		}
+	}
+
+	// 일괄 AI 분석 실행
+	async function runBatchAnalysis() {
+		if (selectedPostIds.size === 0) return;
+		isBatchProcessing = true;
+		showBatchActionMenu = false;
+		try {
+			const result = await instagramApi.requestLlmAnalysis([...selectedPostIds]);
+			alert(`${result.created_count}개 게시물 AI 분석 요청 완료`);
+			toggleSelectMode();
+		} catch (e) {
+			console.error('일괄 AI 분석 실패:', e);
+			alert('AI 분석 요청에 실패했습니다.');
+		} finally {
+			isBatchProcessing = false;
+		}
+	}
+
+	// 일괄 비활성화 실행
+	async function runBatchDeactivate() {
+		if (selectedPostIds.size === 0) return;
+		isBatchProcessing = true;
+		showBatchActionMenu = false;
+		try {
+			const result = await instagramApi.batchDeactivate([...selectedPostIds]);
+			alert(`${result.updated}개 게시물 비활성화 완료`);
+			// 목록 새로고침
+			if (filterIsActive) {
+				posts = posts.filter(p => !selectedPostIds.has(p.id));
+				total -= result.updated;
+			}
+			toggleSelectMode();
+		} catch (e) {
+			console.error('일괄 비활성화 실패:', e);
+			alert('비활성화에 실패했습니다.');
+		} finally {
+			isBatchProcessing = false;
+		}
+	}
+
+	// 일괄 삭제 확인
+	function confirmBatchDelete() {
+		showBatchActionMenu = false;
+		showDeleteConfirmModal = true;
+	}
+
+	// 일괄 삭제 실행
+	async function runBatchDelete() {
+		if (selectedPostIds.size === 0) return;
+		isBatchProcessing = true;
+		showDeleteConfirmModal = false;
+		try {
+			const result = await instagramApi.batchDelete([...selectedPostIds]);
+			alert(`${result.deleted}개 게시물 삭제 완료`);
+			// 목록에서 제거
+			posts = posts.filter(p => !selectedPostIds.has(p.id));
+			total -= result.deleted;
+			toggleSelectMode();
+		} catch (e) {
+			console.error('일괄 삭제 실패:', e);
+			alert('삭제에 실패했습니다.');
+		} finally {
+			isBatchProcessing = false;
 		}
 	}
 
@@ -450,16 +553,83 @@
 <div class="p-4 md:p-6">
 	<!-- 헤더 -->
 	<div class="mb-4 md:mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-		<!-- 제목 + URL 수집 버튼 -->
+		<!-- 제목 + URL 수집 버튼 + 선택 모드 -->
 		<div class="flex items-center justify-between sm:justify-start gap-3">
 			<h2 class="text-xl md:text-2xl font-bold text-gray-900">게시물</h2>
-			<button
-				onclick={openUrlCrawlModal}
-				class="btn btn-primary btn-sm"
-				title="Instagram 게시물 URL을 입력하여 단일 게시물 수집"
-			>
-				+ URL 수집
-			</button>
+			{#if !isSelectMode}
+				<button
+					onclick={openUrlCrawlModal}
+					class="btn btn-primary btn-sm"
+					title="Instagram 게시물 URL을 입력하여 단일 게시물 수집"
+				>
+					+ URL 수집
+				</button>
+				<button
+					onclick={toggleSelectMode}
+					class="btn btn-secondary btn-sm"
+					title="게시물 선택 모드"
+				>
+					선택
+				</button>
+			{:else}
+				<!-- 선택 모드 UI -->
+				<label class="flex items-center gap-2 cursor-pointer">
+					<input
+						type="checkbox"
+						checked={selectedPostIds.size === posts.length && posts.length > 0}
+						onchange={toggleSelectAll}
+						class="w-4 h-4 rounded border-gray-300"
+					/>
+					<span class="text-sm text-gray-700">전체</span>
+				</label>
+				<span class="text-sm text-gray-600">
+					{selectedPostIds.size}개 선택됨
+				</span>
+				<!-- 액션 드롭다운 -->
+				<div class="relative">
+					<button
+						onclick={() => showBatchActionMenu = !showBatchActionMenu}
+						disabled={selectedPostIds.size === 0 || isBatchProcessing}
+						class="btn btn-primary btn-sm flex items-center gap-1 disabled:opacity-50"
+					>
+						{#if isBatchProcessing}
+							<span class="loading loading-spinner loading-xs"></span>
+						{/if}
+						액션
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+						</svg>
+					</button>
+					{#if showBatchActionMenu}
+						<div class="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+							<button
+								onclick={runBatchAnalysis}
+								class="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2"
+							>
+								<span>🤖</span> AI 분석
+							</button>
+							<button
+								onclick={runBatchDeactivate}
+								class="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2"
+							>
+								<span>🚫</span> 비활성화
+							</button>
+							<button
+								onclick={confirmBatchDelete}
+								class="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+							>
+								<span>🗑️</span> 삭제
+							</button>
+						</div>
+					{/if}
+				</div>
+				<button
+					onclick={toggleSelectMode}
+					class="btn btn-secondary btn-sm"
+				>
+					취소
+				</button>
+			{/if}
 		</div>
 
 		<!-- 뷰 모드 토글 + 필터 토글 -->
@@ -767,6 +937,16 @@
 				<table class="w-full min-w-[700px]">
 					<thead class="bg-gray-50 border-b border-gray-200">
 						<tr>
+							{#if isSelectMode}
+								<th class="px-4 py-3 text-center w-12">
+									<input
+										type="checkbox"
+										checked={selectedPostIds.size === posts.length && posts.length > 0}
+										onchange={toggleSelectAll}
+										class="w-4 h-4 rounded border-gray-300"
+									/>
+								</th>
+							{/if}
 							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">PK</th>
 							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">이미지</th>
 							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">계정</th>
@@ -779,11 +959,21 @@
 					<tbody class="divide-y divide-gray-200">
 						{#each posts as post (post.id)}
 							<tr
-								class="hover:bg-gray-50 cursor-pointer"
-								onclick={() => openDetail(post)}
-								onkeydown={(e) => e.key === 'Enter' && openDetail(post)}
+								class="hover:bg-gray-50 cursor-pointer {isSelectMode && selectedPostIds.has(post.id) ? 'bg-blue-50' : ''}"
+								onclick={() => isSelectMode ? togglePostSelection(post.id) : openDetail(post)}
+								onkeydown={(e) => e.key === 'Enter' && (isSelectMode ? togglePostSelection(post.id) : openDetail(post))}
 								tabindex="0"
 							>
+								{#if isSelectMode}
+									<td class="px-4 py-3 text-center" onclick={(e) => e.stopPropagation()}>
+										<input
+											type="checkbox"
+											checked={selectedPostIds.has(post.id)}
+											onchange={() => togglePostSelection(post.id)}
+											class="w-4 h-4 rounded border-gray-300"
+										/>
+									</td>
+								{/if}
 								<td class="px-4 py-3 text-xs text-gray-500 font-mono">
 									{post.id}
 								</td>
@@ -847,12 +1037,23 @@
 			<div class="md:hidden space-y-3 mb-6">
 				{#each posts as post (post.id)}
 					<div
-						class="bg-white rounded-lg border border-gray-200 p-3 flex gap-3 cursor-pointer hover:shadow-md transition-shadow"
-						onclick={() => openDetail(post)}
-						onkeydown={(e) => e.key === 'Enter' && openDetail(post)}
+						class="bg-white rounded-lg border border-gray-200 p-3 flex gap-3 cursor-pointer hover:shadow-md transition-shadow {isSelectMode && selectedPostIds.has(post.id) ? 'ring-2 ring-blue-500' : ''}"
+						onclick={() => isSelectMode ? togglePostSelection(post.id) : openDetail(post)}
+						onkeydown={(e) => e.key === 'Enter' && (isSelectMode ? togglePostSelection(post.id) : openDetail(post))}
 						role="button"
 						tabindex="0"
 					>
+						<!-- 선택 모드 체크박스 -->
+						{#if isSelectMode}
+							<div class="flex items-center" onclick={(e) => e.stopPropagation()}>
+								<input
+									type="checkbox"
+									checked={selectedPostIds.has(post.id)}
+									onchange={() => togglePostSelection(post.id)}
+									class="w-5 h-5 rounded border-gray-300"
+								/>
+							</div>
+						{/if}
 						<!-- 썸네일 -->
 						<div class="w-16 h-16 flex-shrink-0">
 							{#if post.images && post.images.length > 0}
@@ -889,12 +1090,23 @@
 			<div class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4 mb-6">
 				{#each posts as post (post.id)}
 					<div
-						class="card cursor-pointer hover:shadow-lg transition-shadow"
-						onclick={() => openDetail(post)}
-						onkeydown={(e) => e.key === 'Enter' && openDetail(post)}
+						class="card cursor-pointer hover:shadow-lg transition-shadow relative {isSelectMode && selectedPostIds.has(post.id) ? 'ring-2 ring-blue-500' : ''}"
+						onclick={() => isSelectMode ? togglePostSelection(post.id) : openDetail(post)}
+						onkeydown={(e) => e.key === 'Enter' && (isSelectMode ? togglePostSelection(post.id) : openDetail(post))}
 						role="button"
 						tabindex="0"
 					>
+						<!-- 선택 모드 체크박스 -->
+						{#if isSelectMode}
+							<div class="absolute top-2 left-2 z-10">
+								<input
+									type="checkbox"
+									checked={selectedPostIds.has(post.id)}
+									onclick={(e) => { e.stopPropagation(); togglePostSelection(post.id); }}
+									class="w-5 h-5 rounded border-gray-300 text-blue-600 shadow-sm"
+								/>
+							</div>
+						{/if}
 						<!-- 이미지 -->
 						{#if post.images && post.images.length > 0}
 							<div class="aspect-square bg-gray-100 rounded-lg mb-2 md:mb-3 overflow-hidden">
@@ -1135,6 +1347,40 @@
 						{/if}
 					</button>
 				</div>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- 삭제 확인 모달 -->
+{#if showDeleteConfirmModal}
+	<div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+		<div class="bg-white rounded-lg max-w-md w-full p-6">
+			<h3 class="text-lg font-semibold text-gray-900 mb-4">게시물 삭제 확인</h3>
+			<p class="text-gray-600 mb-6">
+				선택한 <span class="font-semibold text-red-600">{selectedPostIds.size}개</span> 게시물을 삭제하시겠습니까?
+				<br />
+				<span class="text-sm text-gray-500">이 작업은 되돌릴 수 없습니다.</span>
+			</p>
+			<div class="flex gap-2 justify-end">
+				<button
+					onclick={() => showDeleteConfirmModal = false}
+					class="btn btn-secondary btn-sm"
+					disabled={isBatchProcessing}
+				>
+					취소
+				</button>
+				<button
+					onclick={runBatchDelete}
+					class="btn btn-sm bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+					disabled={isBatchProcessing}
+				>
+					{#if isBatchProcessing}
+						삭제 중...
+					{:else}
+						삭제
+					{/if}
+				</button>
 			</div>
 		</div>
 	</div>
