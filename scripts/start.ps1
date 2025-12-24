@@ -2,7 +2,7 @@
 # Starts FastAPI server, monitoring worker, and Frontend in background
 
 param(
-    [switch]$Dev  # Use 'npm run dev' instead of background mode for frontend
+    [switch]$Dev  # Dev mode: use different ports (8001, 5174) for development
 )
 
 $ErrorActionPreference = "Stop"
@@ -10,9 +10,15 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 $FrontendDir = Join-Path $ProjectRoot "frontend"
 
-# Port settings
-$ApiPort = 8000
-$FrontendPort = 5173
+# Port settings - Dev mode uses different ports to avoid affecting production
+if ($Dev) {
+    $ApiPort = 8001
+    $FrontendPort = 5174
+    Write-Host "[DEV MODE] Using development ports (API: $ApiPort, Frontend: $FrontendPort)" -ForegroundColor Yellow
+} else {
+    $ApiPort = 8000
+    $FrontendPort = 5173
+}
 
 # Create log directory
 $LogDir = Join-Path $ProjectRoot "logs"
@@ -26,11 +32,13 @@ if (-not (Test-Path $PidDir)) {
     New-Item -ItemType Directory -Path $PidDir -Force | Out-Null
 }
 
-$ApiPidFile = Join-Path $PidDir "api.pid"
-$WorkerPidFile = Join-Path $PidDir "worker.pid"
-$InstagramWorkerPidFile = Join-Path $PidDir "instagram_worker.pid"
-$ClaudeWorkerPidFile = Join-Path $PidDir "claude_worker.pid"
-$FrontendPidFile = Join-Path $PidDir "frontend.pid"
+# PID files - Dev mode uses separate files to allow both environments to run
+$PidSuffix = if ($Dev) { "_dev" } else { "" }
+$ApiPidFile = Join-Path $PidDir "api$PidSuffix.pid"
+$WorkerPidFile = Join-Path $PidDir "worker$PidSuffix.pid"
+$InstagramWorkerPidFile = Join-Path $PidDir "instagram_worker$PidSuffix.pid"
+$ClaudeWorkerPidFile = Join-Path $PidDir "claude_worker$PidSuffix.pid"
+$FrontendPidFile = Join-Path $PidDir "frontend$PidSuffix.pid"
 
 # Check if process is running
 function Test-ProcessRunning {
@@ -90,7 +98,7 @@ if ($env:SKIP_WORKER -eq "true") {
 }
 
 # Check Instagram Worker (via Watchdog)
-$InstagramWatchdogPidFile = Join-Path $PidDir "instagram_watchdog.pid"
+$InstagramWatchdogPidFile = Join-Path $PidDir "instagram_watchdog$PidSuffix.pid"
 if ($env:SKIP_INSTAGRAM_WORKER -eq "true") {
     Write-Host "[!] Skipping Instagram worker (SKIP_INSTAGRAM_WORKER=true)" -ForegroundColor Yellow
     $runInstagramWorker = $false
@@ -103,7 +111,7 @@ if ($env:SKIP_INSTAGRAM_WORKER -eq "true") {
 }
 
 # Check Claude Worker (via Watchdog)
-$ClaudeWatchdogPidFile = Join-Path $PidDir "claude_watchdog.pid"
+$ClaudeWatchdogPidFile = Join-Path $PidDir "claude_watchdog$PidSuffix.pid"
 if ($env:SKIP_CLAUDE_WORKER -eq "true") {
     Write-Host "[!] Skipping Claude worker (SKIP_CLAUDE_WORKER=true)" -ForegroundColor Yellow
     $runClaudeWorker = $false
@@ -206,7 +214,7 @@ if ($runWorker) {
         -PassThru
 
     # Save Watchdog PID to separate file (worker PID will be managed by watchdog in worker.pid)
-    $WatchdogPidFile = Join-Path $PidDir "watchdog.pid"
+    $WatchdogPidFile = Join-Path $PidDir "watchdog$PidSuffix.pid"
     $watchdogProcess.Id | Out-File $WatchdogPidFile -Encoding ascii
 
     # Wait for worker to actually start
@@ -234,7 +242,7 @@ if ($runInstagramWorker) {
         -PassThru
 
     # Save Instagram Watchdog PID (worker PID will be managed by watchdog in instagram_worker.pid)
-    $InstagramWatchdogPidFile = Join-Path $PidDir "instagram_watchdog.pid"
+    $InstagramWatchdogPidFile = Join-Path $PidDir "instagram_watchdog$PidSuffix.pid"
     $instagramWatchdogProcess.Id | Out-File $InstagramWatchdogPidFile -Encoding ascii
 
     # Wait for worker to actually start
@@ -261,7 +269,7 @@ if ($runClaudeWorker) {
         -PassThru
 
     # Save Claude Watchdog PID
-    $ClaudeWatchdogPidFile = Join-Path $PidDir "claude_watchdog.pid"
+    $ClaudeWatchdogPidFile = Join-Path $PidDir "claude_watchdog$PidSuffix.pid"
     $claudeWatchdogProcess.Id | Out-File $ClaudeWatchdogPidFile -Encoding ascii
 
     # Wait for worker to actually start
@@ -298,25 +306,32 @@ if ($runFrontend) {
         # Dev mode: Run npm run dev in foreground (interactive)
         Write-Host "[+] Frontend starting in DEV mode (foreground)..." -ForegroundColor Green
         Write-Host "    Port: $FrontendPort"
+        Write-Host "    API Port: $ApiPort"
         Write-Host "    Exit: Ctrl+C" -ForegroundColor Yellow
         Write-Host ""
 
         # Store info that frontend is running in dev mode
         "DEV_MODE" | Out-File $FrontendPidFile -Encoding ascii
 
+        # Set API port for vite proxy
+        $env:VITE_API_PORT = $ApiPort
+
         # Save current location and restore after
         Push-Location $FrontendDir
         try {
             npm run dev -- --port $FrontendPort
-        } finally {/
+        } finally {
             Pop-Location
             # When npm run dev exits, clean up
             Remove-Item $FrontendPidFile -Force -ErrorAction SilentlyContinue
+            $env:VITE_API_PORT = $null
         }
     } else {
         # Background mode: Start Frontend in background using cmd to redirect both stdout and stderr
+        # Set VITE_API_PORT for non-dev mode only if using non-standard port
+        $envPrefix = if ($ApiPort -ne 8000) { "set VITE_API_PORT=$ApiPort && " } else { "" }
         $frontendProcess = Start-Process -FilePath "cmd.exe" `
-            -ArgumentList "/c", "npm run dev -- --port $FrontendPort > `"$frontendLogFile`" 2>&1" `
+            -ArgumentList "/c", "${envPrefix}npm run dev -- --port $FrontendPort > `"$frontendLogFile`" 2>&1" `
             -WorkingDirectory $FrontendDir `
             -WindowStyle Hidden `
             -PassThru

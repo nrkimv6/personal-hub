@@ -2,7 +2,9 @@
 # Stops FastAPI server, monitoring worker, and Frontend (including zombie processes)
 
 param(
-    [switch]$Force  # Skip confirmations
+    [switch]$Force,  # Skip confirmations
+    [switch]$Dev,    # Stop dev environment (ports 8001, 5174)
+    [switch]$All     # Stop both dev and production environments
 )
 
 # Trap all errors and wait for key before exit
@@ -18,20 +20,37 @@ trap {
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 
-# Port settings
-$ApiPort = 8000
-$FrontendPort = 5173
+# Port settings based on mode
+if ($All) {
+    $ApiPorts = @(8000, 8001)
+    $FrontendPorts = @(5173, 5174)
+    $PidSuffixes = @("", "_dev")
+    Write-Host "[MODE] Stopping ALL environments (production + dev)" -ForegroundColor Yellow
+} elseif ($Dev) {
+    $ApiPorts = @(8001)
+    $FrontendPorts = @(5174)
+    $PidSuffixes = @("_dev")
+    Write-Host "[MODE] Stopping DEV environment only" -ForegroundColor Yellow
+} else {
+    $ApiPorts = @(8000)
+    $FrontendPorts = @(5173)
+    $PidSuffixes = @("")
+    Write-Host "[MODE] Stopping PRODUCTION environment only" -ForegroundColor Yellow
+}
 
-# PID file paths
+# PID file paths (collect all based on mode)
 $PidDir = Join-Path $ProjectRoot ".pids"
-$ApiPidFile = Join-Path $PidDir "api.pid"
-$WorkerPidFile = Join-Path $PidDir "worker.pid"
-$InstagramWorkerPidFile = Join-Path $PidDir "instagram_worker.pid"
-$ClaudeWorkerPidFile = Join-Path $PidDir "claude_worker.pid"
-$WatchdogPidFile = Join-Path $PidDir "watchdog.pid"
-$InstagramWatchdogPidFile = Join-Path $PidDir "instagram_watchdog.pid"
-$ClaudeWatchdogPidFile = Join-Path $PidDir "claude_watchdog.pid"
-$FrontendPidFile = Join-Path $PidDir "frontend.pid"
+$PidFiles = @()
+foreach ($suffix in $PidSuffixes) {
+    $PidFiles += Join-Path $PidDir "api$suffix.pid"
+    $PidFiles += Join-Path $PidDir "worker$suffix.pid"
+    $PidFiles += Join-Path $PidDir "instagram_worker$suffix.pid"
+    $PidFiles += Join-Path $PidDir "claude_worker$suffix.pid"
+    $PidFiles += Join-Path $PidDir "watchdog$suffix.pid"
+    $PidFiles += Join-Path $PidDir "instagram_watchdog$suffix.pid"
+    $PidFiles += Join-Path $PidDir "claude_watchdog$suffix.pid"
+    $PidFiles += Join-Path $PidDir "frontend$suffix.pid"
+}
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Red
@@ -124,13 +143,14 @@ if ($pythonKilled -eq 0) {
 # STEP 2: Kill processes on our ports
 # ============================================================
 Write-Host ""
-Write-Host "[2] Killing processes on ports $ApiPort, $FrontendPort" -ForegroundColor Cyan
+$allPorts = $ApiPorts + $FrontendPorts
+Write-Host "[2] Killing processes on ports $($allPorts -join ', ')" -ForegroundColor Cyan
 Write-Host "----------------------------------------"
 
 $portKilled = 0
 $killedPids = @{}  # Track already killed PIDs to avoid duplicate attempts
 
-foreach ($port in @($ApiPort, $FrontendPort)) {
+foreach ($port in $allPorts) {
     $conns = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
     if ($conns) {
         foreach ($conn in $conns) {
@@ -196,7 +216,7 @@ Write-Host ""
 Write-Host "[4] Cleaning up PID files" -ForegroundColor Cyan
 Write-Host "----------------------------------------"
 
-foreach ($pidFile in @($ApiPidFile, $WorkerPidFile, $InstagramWorkerPidFile, $ClaudeWorkerPidFile, $WatchdogPidFile, $InstagramWatchdogPidFile, $ClaudeWatchdogPidFile, $FrontendPidFile)) {
+foreach ($pidFile in $PidFiles) {
     if (Test-Path $pidFile) {
         $name = Split-Path $pidFile -Leaf
         Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
