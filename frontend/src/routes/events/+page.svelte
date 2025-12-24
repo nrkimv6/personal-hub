@@ -5,7 +5,7 @@
 	import { eventApi, popupApi, instagramApi, instagramTagApi } from '$lib/api';
 	import type { Event, EventCreate, EventUpdate, InstagramPost, Popup, InstagramTag } from '$lib/types';
 	import FeedCard from '$lib/components/instagram/FeedCard.svelte';
-	import { isAdmin } from '$lib/stores/auth';
+	import { isAdmin, isLoggedIn } from '$lib/stores/auth';
 
 	let events: Event[] = [];
 	let popups: Popup[] = [];
@@ -37,8 +37,8 @@
 		{ value: 'cancelled', label: '취소됨', color: 'bg-red-100 text-red-600' }
 	];
 
-	// 모바일 이벤트 탭 전용 필터 (오늘 마감만)
-	$: isMobileEventTab = isMobile && activeTab === 'event';
+	// 익명 사용자 여부 - 오늘 마감 필터 강제
+	$: isAnonymous = !$isLoggedIn;
 
 	// URL 타입 옵션
 	const urlTypeOptions = [
@@ -135,9 +135,11 @@
 	function switchTab(tab: TabMode) {
 		activeTab = tab;
 		currentPage = 1;
-		if (tab === 'event') {
-			// 모바일에서는 '오늘 마감' 필터 고정
-			filterEventStatus = isMobile ? 'ending_today' : 'ongoing';
+		// 익명 사용자: 이벤트 탭은 '오늘 마감' 고정, 팝업 탭은 필터 없음
+		if (isAnonymous) {
+			filterEventStatus = tab === 'event' ? 'ending_today' : null;
+		} else if (tab === 'event') {
+			filterEventStatus = 'ongoing';
 		} else if (tab === 'popup') {
 			filterEventStatus = 'ongoing_or_upcoming';
 		}
@@ -604,9 +606,9 @@
 			showEventModal = true;
 		}
 
-		// 모바일 + 이벤트 탭에서는 '오늘 마감' 필터 고정
-		if (isMobile && activeTab === 'event') {
-			filterEventStatus = 'ending_today';
+		// 익명 사용자: 이벤트 탭은 '오늘 마감' 고정, 팝업 탭은 필터 없음
+		if (!$isLoggedIn) {
+			filterEventStatus = activeTab === 'event' ? 'ending_today' : null;
 		}
 
 		fetchEvents();
@@ -634,12 +636,12 @@
 
 		<!-- 필터 요약 + 모바일 필터 토글 -->
 		<div class="flex items-center gap-2">
-			{#if isMobileEventTab}
-				<!-- 모바일 이벤트 탭: 오늘 마감 고정 배지 -->
-				<span class="md:hidden px-2 py-1 text-xs font-medium bg-orange-100 text-orange-700 rounded-full">
+			{#if isAnonymous && activeTab === 'event'}
+				<!-- 익명 사용자 이벤트 탭: 오늘 마감 고정 배지 -->
+				<span class="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-700 rounded-full">
 					오늘 마감
 				</span>
-			{:else}
+			{:else if !isAnonymous}
 				<!-- 모바일 필터 토글 버튼 -->
 				<button
 					onclick={() => showFilters = !showFilters}
