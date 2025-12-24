@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { toPng } from 'html-to-image';
 	import type { InstagramPost, InstagramTag, LLMRequest } from '$lib/types';
+	import { shareWithFallback, isKakaoAvailable } from '$lib/utils/kakao';
 
 	interface Props {
 		post: InstagramPost;
@@ -57,6 +58,9 @@
 	// 캡쳐 상태
 	let isCapturing = $state(false);
 	let feedRef: HTMLElement | null = $state(null);
+
+	// 공유 상태
+	let isSharing = $state(false);
 
 	function toggleExpand() {
 		isExpanded = !isExpanded;
@@ -261,6 +265,32 @@
 				(el as HTMLElement).style.display = originalDisplays[i];
 			});
 			isCapturing = false;
+		}
+	}
+
+	// 카카오톡/공유
+	async function handleShare() {
+		if (isSharing || !post.images?.[currentImageIndex]) return;
+		isSharing = true;
+
+		try {
+			const result = await shareWithFallback({
+				imageUrl: post.images[currentImageIndex].src,
+				title: `@${post.account}`,
+				description: post.caption?.slice(0, 100),
+				linkUrl: post.url || `https://instagram.com/${post.account}`
+			});
+
+			if (result === 'clipboard') {
+				alert('링크가 복사되었습니다!');
+			}
+		} catch (error) {
+			// 사용자 취소는 무시
+			if ((error as Error).name === 'AbortError') return;
+			console.error('공유 실패:', error);
+			alert('공유에 실패했습니다.');
+		} finally {
+			isSharing = false;
 		}
 	}
 </script>
@@ -734,6 +764,23 @@
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
 							</svg>
 							캡쳐
+						{/if}
+					</button>
+					<!-- 공유 버튼 -->
+					<button
+						onclick={handleShare}
+						disabled={isSharing}
+						class="btn btn-secondary btn-sm disabled:opacity-50"
+						title={isKakaoAvailable() ? '카카오톡으로 공유' : '공유하기'}
+					>
+						{#if isSharing}
+							<span class="inline-block animate-spin mr-1">&#8635;</span>
+							공유 중...
+						{:else}
+							<svg class="w-4 h-4 inline-block mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+							</svg>
+							공유
 						{/if}
 					</button>
 					{#if onDelete}
