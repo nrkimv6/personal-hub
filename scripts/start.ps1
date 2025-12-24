@@ -10,18 +10,24 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 $FrontendDir = Join-Path $ProjectRoot "frontend"
 
-# Port settings - Dev mode uses different ports to avoid affecting production
+# Port and mode settings - Dev mode uses different ports to avoid affecting production
 if ($Dev) {
     $ApiPort = 8001
     $FrontendPort = 5174
+    $AppMode = "development"
+    $LogDir = Join-Path $ProjectRoot "logs\dev"
     Write-Host "[DEV MODE] Using development ports (API: $ApiPort, Frontend: $FrontendPort)" -ForegroundColor Yellow
 } else {
     $ApiPort = 8000
     $FrontendPort = 5173
+    $AppMode = "production"
+    $LogDir = Join-Path $ProjectRoot "logs"
 }
 
+# Set APP_MODE environment variable (will be inherited by child processes)
+$env:APP_MODE = $AppMode
+
 # Create log directory
-$LogDir = Join-Path $ProjectRoot "logs"
 if (-not (Test-Path $LogDir)) {
     New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
 }
@@ -182,7 +188,7 @@ if ($runApi) {
     # stdout/stderr goes to separate file (stdout_api_*.log), Python logging goes to api_*.log
     $stdoutLogFile = Join-Path $LogDir "stdout_api_$Timestamp.log"
     $apiProcess = Start-Process -FilePath "cmd.exe" `
-        -ArgumentList "/c", "set PYTHONIOENCODING=utf-8 && python -m uvicorn app.main:app --host 0.0.0.0 --port $ApiPort > `"$stdoutLogFile`" 2>&1" `
+        -ArgumentList "/c", "set PYTHONIOENCODING=utf-8 && set APP_MODE=$AppMode && python -m uvicorn app.main:app --host 0.0.0.0 --port $ApiPort > `"$stdoutLogFile`" 2>&1" `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
         -PassThru

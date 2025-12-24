@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     # 기본 설정
     APP_NAME: str = "모니터링 시스템 API"
     DEBUG: bool = True
+    APP_MODE: str = "production"  # "production" | "development"
     
     # 데이터베이스 설정
     DATABASE_URL: str = "sqlite:///./data/monitor.db"  # database 이동
@@ -179,7 +180,8 @@ class Settings(BaseSettings):
 
     model_config = {
         "env_file": ".env",
-        "case_sensitive": True
+        "case_sensitive": True,
+        "extra": "ignore"  # 알 수 없는 환경변수 무시 (다른 기능의 환경변수 등)
     }
 
 settings = Settings()

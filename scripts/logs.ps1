@@ -16,6 +16,9 @@ param(
     [switch]$FromStart,  # Show logs from beginning of file (not just tail)
 
     [Parameter()]
+    [switch]$Dev,  # Use development log directory (logs/dev/)
+
+    [Parameter()]
     [switch]$Help
 )
 
@@ -25,7 +28,17 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
-$LogDir = Join-Path $ProjectRoot "logs"
+
+# Log directory based on mode
+if ($Dev) {
+    $LogDir = Join-Path $ProjectRoot "logs\dev"
+    # Create dev log directory if it doesn't exist
+    if (-not (Test-Path $LogDir)) {
+        New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+    }
+} else {
+    $LogDir = Join-Path $ProjectRoot "logs"
+}
 
 # Show help
 if ($Help) {
