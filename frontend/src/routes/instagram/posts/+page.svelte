@@ -5,6 +5,7 @@
 	import { instagramApi, instagramTagApi, accountApi } from '$lib/api';
 	import type { InstagramPost, InstagramTag, Account } from '$lib/types';
 	import FeedCard from '$lib/components/instagram/FeedCard.svelte';
+	import { isAdmin } from '$lib/stores/auth';
 
 	let posts: InstagramPost[] = [];
 	let total = 0;
@@ -566,6 +567,7 @@
 		<div class="flex items-center justify-between sm:justify-start gap-3">
 			<h2 class="text-xl md:text-2xl font-bold text-gray-900">게시물</h2>
 			{#if !isSelectMode}
+				{#if $isAdmin}
 				<button
 					onclick={openUrlCrawlModal}
 					class="btn btn-primary btn-sm"
@@ -580,7 +582,8 @@
 				>
 					선택
 				</button>
-			{:else}
+				{/if}
+			{:else if $isAdmin}
 				<!-- 선택 모드 UI -->
 				<label class="flex items-center gap-2 cursor-pointer">
 					<input
@@ -1029,12 +1032,14 @@
 												원본
 											</a>
 										{/if}
+										{#if $isAdmin}
 										<button
 											onclick={() => deletePost(post.id)}
 											class="text-red-600 hover:text-red-800 text-sm ml-2"
 										>
 											삭제
 										</button>
+										{/if}
 									</div>
 								</td>
 							</tr>
@@ -1202,11 +1207,11 @@
 				post={selectedPost}
 				detailMode={true}
 				onClose={closeDetail}
-				onDelete={deletePost}
-				onRecrawl={recrawlPost}
-				onRequestLlmAnalysis={requestLlmAnalysis}
+				onDelete={$isAdmin ? deletePost : undefined}
+				onRecrawl={$isAdmin ? recrawlPost : undefined}
+				onRequestLlmAnalysis={$isAdmin ? requestLlmAnalysis : undefined}
 				{availableTags}
-				onTagsUpdate={handleTagsUpdate}
+				onTagsUpdate={$isAdmin ? handleTagsUpdate : undefined}
 			/>
 		</div>
 	</div>

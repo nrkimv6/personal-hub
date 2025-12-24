@@ -645,7 +645,8 @@
 	{/if}
 </div>
 
-<!-- 이벤트 생성/수정 모달 -->
+<!-- 이벤트 생성/수정 모달 (관리자 전용) -->
+{#if $isAdmin}
 <EventFormModal
 	show={showEventModal}
 	{editingEvent}
@@ -653,6 +654,7 @@
 	onClose={() => (showEventModal = false)}
 	onSave={handleSaveEvent}
 />
+{/if}
 
 <!-- 피드 뷰어 모달 -->
 <EventFeedViewerModal
@@ -665,13 +667,13 @@
 	{availableTags}
 	isParticipated={viewingEvent ? isEventParticipated(viewingEvent) : false}
 	onClose={closeFeedViewer}
-	onEdit={handleViewerEdit}
-	onDelete={handleDeleteEvent}
+	onEdit={$isAdmin ? handleViewerEdit : undefined}
+	onDelete={$isAdmin ? handleDeleteEvent : undefined}
 	onBookmarkToggle={handleViewerBookmarkToggle}
 	onParticipateToggle={handleViewerParticipateToggle}
 	onVisitToggle={handleViewerVisitToggle}
-	onRecrawl={handleRecrawl}
-	onTagsUpdate={handleTagsUpdate}
-	onDeletePost={handleDeletePost}
-	onRequestLlmAnalysis={handleRequestLlmAnalysis}
+	onRecrawl={$isAdmin ? handleRecrawl : undefined}
+	onTagsUpdate={$isAdmin ? handleTagsUpdate : undefined}
+	onDeletePost={$isAdmin ? handleDeletePost : undefined}
+	onRequestLlmAnalysis={$isAdmin ? handleRequestLlmAnalysis : undefined}
 />

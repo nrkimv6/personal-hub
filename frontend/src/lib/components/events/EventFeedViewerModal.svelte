@@ -22,15 +22,15 @@
 		loadingPost: boolean;
 		availableTags: InstagramTag[];
 		onClose: () => void;
-		onEdit?: () => void;
-		onDelete?: () => void;
+		onEdit?: () => void;  // 관리자 전용
+		onDelete?: () => void;  // 관리자 전용
 		onBookmarkToggle: (e: MouseEvent) => void;
 		onParticipateToggle?: (e: MouseEvent) => void; // 이벤트용
 		onVisitToggle?: (e: MouseEvent) => void; // 팝업용
-		onRecrawl: (postId: number) => Promise<void>;
-		onTagsUpdate: (postId: number, tagIds: number[]) => Promise<void>;
-		onDeletePost: (postId: number) => Promise<void>;
-		onRequestLlmAnalysis?: (postId: number) => Promise<void>;
+		onRecrawl?: (postId: number) => Promise<void>;  // 관리자 전용
+		onTagsUpdate?: (postId: number, tagIds: number[]) => Promise<void>;  // 관리자 전용
+		onDeletePost?: (postId: number) => Promise<void>;  // 관리자 전용
+		onRequestLlmAnalysis?: (postId: number) => Promise<void>;  // 관리자 전용
 		isParticipated?: boolean;
 	}
 

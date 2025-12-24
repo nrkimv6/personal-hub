@@ -431,7 +431,7 @@
 					</summary>
 					<div class="mt-2">
 						<div class="flex items-center gap-2 mb-2">
-							{#if !editingTags}
+							{#if !editingTags && onTagsUpdate}
 								<button
 									onclick={startEditTags}
 									class="text-xs text-blue-600 hover:text-blue-800 underline"
@@ -509,6 +509,7 @@
 						>
 							원본 보기
 						</a>
+						{#if onRecrawl}
 						<button
 							onclick={handleRecrawl}
 							disabled={isRecrawling}
@@ -522,6 +523,7 @@
 								&#8635; 재크롤링
 							{/if}
 						</button>
+						{/if}
 					{/if}
 					<!-- AI 분석 요청 버튼 -->
 					{#if onRequestLlmAnalysis}
@@ -559,7 +561,9 @@
 							캡쳐
 						{/if}
 					</button>
+					{#if onDelete}
 					<button onclick={handleDelete} class="btn btn-danger btn-sm"> 삭제 </button>
+					{/if}
 				</div>
 			{/if}
 		</div>
