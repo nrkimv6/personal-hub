@@ -71,7 +71,7 @@ def parse_date(date_str: Optional[str]) -> Optional[date]:
 
 
 def save_instagram_result(db, post_id: int, llm_result: dict) -> bool:
-    """Instagram 게시물에 LLM 분류 결과 저장.
+    """Instagram 게시물에 LLM 분류 결과 저장 및 분류 테이블에 레코드 생성.
 
     Args:
         db: DB 세션
@@ -82,6 +82,9 @@ def save_instagram_result(db, post_id: int, llm_result: dict) -> bool:
         성공 여부
     """
     from app.models import InstagramPost
+    from app.models.event import Event
+    from app.models.popup import Popup
+    from app.models.uncategorized_post import UncategorizedPost
 
     try:
         post = db.query(InstagramPost).filter(InstagramPost.id == post_id).first()
@@ -103,12 +106,106 @@ def save_instagram_result(db, post_id: int, llm_result: dict) -> bool:
 
         # 이벤트 기간 파싱
         event_period = llm_result.get("event_period")
+        event_start = None
+        event_end = None
         if event_period and isinstance(event_period, dict):
-            post.llm_event_start = parse_date(event_period.get("start"))
-            post.llm_event_end = parse_date(event_period.get("end"))
+            event_start = parse_date(event_period.get("start"))
+            event_end = parse_date(event_period.get("end"))
+            post.llm_event_start = event_start
+            post.llm_event_end = event_end
 
         # 발표일 파싱
-        post.llm_announcement_date = parse_date(llm_result.get("announcement_date"))
+        announcement_date = parse_date(llm_result.get("announcement_date"))
+        post.llm_announcement_date = announcement_date
+
+        # 분류 태그에 따라 적절한 테이블에 레코드 생성
+        tag = llm_result.get("tag")
+        llm_urls = llm_result.get("urls") or []
+        location = llm_result.get("location") or {}
+
+        # 썸네일 URL 추출
+        thumbnail_url = None
+        if post.images:
+            images = post.images or []
+            if images:
+                thumbnail_url = images[0].get("src") if isinstance(images[0], dict) else images[0]
+
+        if tag == "이벤트":
+            # Event 테이블에 생성
+            event = Event(
+                title=llm_result.get("summary") or f"{post.account}의 이벤트",
+                thumbnail_url=thumbnail_url,
+                event_type="event",
+                event_url=llm_urls[0] if llm_urls else None,
+                additional_urls=llm_urls[1:] if len(llm_urls) > 1 else [],
+                event_start=event_start,
+                event_end=event_end,
+                announcement_date=announcement_date,
+                organizer=llm_result.get("organizer"),
+                summary=llm_result.get("summary"),
+                prizes=llm_result.get("prizes") or [],
+                winner_count=llm_result.get("winner_count"),
+                purchase_required=llm_result.get("purchase_required"),
+                source_type="instagram",
+                source_instagram_post_id=post.id,
+                source_instagram_url=post.url,
+                source_instagram_account=post.account,
+            )
+            db.add(event)
+            db.flush()  # ID 생성
+            post.classified_type = "event"
+            post.classified_id = event.id
+            logger.info(f"Created Event {event.id} from Instagram post {post_id}")
+
+        elif tag == "팝업":
+            # Popup 테이블에 생성
+            popup = Popup(
+                title=llm_result.get("summary") or f"{post.account}의 팝업",
+                thumbnail_url=thumbnail_url,
+                venue_name=location.get("venue_name"),
+                address=location.get("address"),
+                start_date=event_start,
+                end_date=event_end,
+                organizer=llm_result.get("organizer"),
+                summary=llm_result.get("summary"),
+                official_url=llm_urls[0] if llm_urls else None,
+                additional_urls=llm_urls[1:] if len(llm_urls) > 1 else [],
+                source_type="instagram",
+                source_instagram_post_id=post.id,
+                source_instagram_url=post.url,
+                source_instagram_account=post.account,
+            )
+            db.add(popup)
+            db.flush()  # ID 생성
+            post.classified_type = "popup"
+            post.classified_id = popup.id
+            logger.info(f"Created Popup {popup.id} from Instagram post {post_id}")
+
+        elif tag in ("홍보대사", "기타"):
+            # UncategorizedPost 테이블에 생성
+            uncategorized = UncategorizedPost(
+                original_tag=tag,
+                title=llm_result.get("summary") or f"{post.account}의 게시물",
+                summary=llm_result.get("summary"),
+                organizer=llm_result.get("organizer"),
+                event_start=event_start,
+                event_end=event_end,
+                announcement_date=announcement_date,
+                prizes=llm_result.get("prizes") or [],
+                winner_count=llm_result.get("winner_count"),
+                purchase_required=llm_result.get("purchase_required"),
+                urls=llm_urls,
+                source_instagram_post_id=post.id,
+                source_instagram_url=post.url,
+                source_instagram_account=post.account,
+            )
+            db.add(uncategorized)
+            db.flush()  # ID 생성
+            post.classified_type = "uncategorized"
+            post.classified_id = uncategorized.id
+            logger.info(f"Created UncategorizedPost {uncategorized.id} from Instagram post {post_id}")
+
+        # 리그램/후기는 별도 테이블 생성 없이 InstagramPost에만 저장
 
         db.commit()
         logger.info(f"Instagram post {post_id} LLM result saved: tag={post.llm_tag}")
