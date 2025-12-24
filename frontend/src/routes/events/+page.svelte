@@ -1050,29 +1050,43 @@
 							</button>
 						</div>
 					</div>
-					<div class="flex flex-wrap items-center gap-2 text-xs text-gray-500">
-						<!-- 기간 -->
-						{#if event.event_end}
-							{#if isEndingToday(event)}
-								<span class="font-bold text-orange-600 bg-orange-100 px-1.5 py-0.5 rounded">오늘 마감!</span>
+					<div class="flex items-center gap-2 text-xs text-gray-500">
+						<div class="flex flex-wrap items-center gap-2 flex-1">
+							<!-- 기간 -->
+							{#if event.event_end}
+								{#if isEndingToday(event)}
+									<span class="font-bold text-orange-600 bg-orange-100 px-1.5 py-0.5 rounded">오늘 마감!</span>
+								{:else}
+									<span>~ {formatDate(event.event_end)}</span>
+								{/if}
 							{:else}
-								<span>~ {formatDate(event.event_end)}</span>
+								<span class="text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">기간 미정</span>
 							{/if}
-						{:else}
-							<span class="text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">기간 미정</span>
-						{/if}
-						<!-- 경품 -->
-						{#if event.prizes && event.prizes.length > 0}
-							<span class="text-yellow-700 bg-yellow-50 px-1.5 py-0.5 rounded truncate max-w-[100px]">{event.prizes[0]}</span>
-						{/if}
-						<!-- 당첨자 수 -->
-						{#if event.winner_count}
-							<span class="text-purple-600">{event.winner_count}명</span>
-						{/if}
-						<!-- 참여 상태 -->
-						<span class="ml-auto px-1.5 py-0.5 rounded {isParticipated(event) ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}">
-							{isParticipated(event) ? '참여' : '미참여'}
-						</span>
+							<!-- 경품 -->
+							{#if event.prizes && event.prizes.length > 0}
+								<span class="text-yellow-700 bg-yellow-50 px-1.5 py-0.5 rounded truncate max-w-[100px]">{event.prizes[0]}</span>
+							{/if}
+							<!-- 당첨자 수 -->
+							{#if event.winner_count}
+								<span class="text-purple-600">{event.winner_count}명</span>
+							{/if}
+						</div>
+						<!-- 참여 체크박스 (큰 사이즈) -->
+						<button
+							onclick={(e) => toggleParticipate(event, e)}
+							class="flex items-center justify-center w-10 h-10 rounded-lg border-2 transition-all {isParticipated(event) ? 'bg-green-500 border-green-500 text-white' : 'bg-white border-gray-300 text-gray-400 hover:border-green-400'}"
+							title={isParticipated(event) ? '참여 취소' : '참여 완료'}
+						>
+							{#if isParticipated(event)}
+								<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
+								</svg>
+							{:else}
+								<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+								</svg>
+							{/if}
+						</button>
 					</div>
 				</div>
 			{/each}
