@@ -46,6 +46,7 @@ from ..services.url_parser import (
     InstagramUrlType,
 )
 from ..services import PostService, CrawlService, CrawlRequestService
+from ..services.llm_classifier_service import LLMClassifierService
 
 logger = logging.getLogger("instagram.api")
 
@@ -194,6 +195,73 @@ async def batch_deactivate_posts(
     return {
         "success": True,
         "updated": updated,
+        "total": len(request.post_ids),
+    }
+
+
+@router.post("/posts/{post_id}/analyze")
+async def request_llm_analysis(
+    post_id: int,
+    db: Session = Depends(get_db),
+):
+    """게시물 AI 분석 요청.
+
+    지정된 게시물에 대해 LLM 분류 요청을 생성합니다.
+    분류 결과는 Event/Popup/Uncategorized 테이블에 저장됩니다.
+    """
+    post_service = PostService(db)
+    llm_service = LLMClassifierService(db)
+
+    # 게시물 존재 확인
+    post = post_service.get_post_by_id(post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    # LLM 분류 요청 생성
+    request = llm_service.create_request(
+        post_id=post_id,
+        trigger_tag="manual",
+        requested_by="manual",
+    )
+
+    return {
+        "success": True,
+        "request_id": request.id,
+        "post_id": post_id,
+        "message": "LLM 분류 요청이 생성되었습니다.",
+    }
+
+
+@router.post("/posts/batch/analyze")
+async def batch_request_llm_analysis(
+    request: BatchPostIdsRequest,
+    db: Session = Depends(get_db),
+):
+    """게시물 일괄 AI 분석 요청.
+
+    여러 게시물에 대해 LLM 분류 요청을 생성합니다.
+    """
+    post_service = PostService(db)
+    llm_service = LLMClassifierService(db)
+
+    created_count = 0
+    request_ids = []
+
+    for post_id in request.post_ids:
+        post = post_service.get_post_by_id(post_id)
+        if post:
+            llm_request = llm_service.create_request(
+                post_id=post_id,
+                trigger_tag="manual",
+                requested_by="manual",
+            )
+            created_count += 1
+            request_ids.append(llm_request.id)
+
+    return {
+        "success": True,
+        "created_count": created_count,
+        "request_ids": request_ids,
         "total": len(request.post_ids),
     }
 
