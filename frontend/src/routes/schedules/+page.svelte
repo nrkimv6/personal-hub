@@ -3,6 +3,7 @@
   import { scheduleApi, businessApi, accountApi, itemApi, scheduleRecurringApi } from '$lib/api';
   import type { ScheduleWithContext, Business, BusinessWithItems, BizItem, Account, MonitorScheduleUpdate, MonitorScheduleCreate, RecurringRuleWithContext, RecurringRuleCreate, TargetPattern } from '$lib/types';
   import AutoBookingList from '$lib/components/schedules/AutoBookingList.svelte';
+  import MonitoringHistory from '$lib/components/MonitoringHistory.svelte';
 
   let schedules: ScheduleWithContext[] = [];
   let businesses: Business[] = [];
@@ -63,7 +64,7 @@
   }
 
   // 탭 상태
-  let activeTab: 'schedules' | 'booking' | 'recurring' = 'schedules';
+  let activeTab: 'schedules' | 'booking' | 'recurring' | 'history' = 'schedules';
 
   // URL 쿼리 파라미터로 탭 제어
   import { page } from '$app/stores';
@@ -71,7 +72,7 @@
   // URL 파라미터에서 탭 초기화
   $: {
     const tab = $page.url.searchParams.get('tab');
-    if (tab === 'booking' || tab === 'recurring') {
+    if (tab === 'booking' || tab === 'recurring' || tab === 'history') {
       activeTab = tab;
     }
   }
@@ -887,6 +888,12 @@
         반복 규칙
         <span class="ml-2 px-2 py-0.5 text-xs rounded-full {activeTab === 'recurring' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'}">{recurringRules.length}</span>
       </button>
+      <button
+        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'history' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}"
+        on:click={() => activeTab = 'history'}
+      >
+        실행 내역
+      </button>
     </nav>
   </div>
 
@@ -1307,6 +1314,11 @@
         </div>
       </div>
     {/if}
+  {/if}
+
+  <!-- 실행 내역 탭 -->
+  {#if activeTab === 'history'}
+    <MonitoringHistory />
   {/if}
 </div>
 
