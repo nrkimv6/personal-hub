@@ -297,6 +297,78 @@ class CrawlRequestService:
         logger.info(f"Created url crawl request {request.id} for {url}")
         return request
 
+    def create_generic_url_crawl_request(
+        self,
+        url: str,
+        url_type: str,
+        account_id: int,
+        max_posts: int = 20,
+        scroll_count: int = 3,
+        requested_by: str = "manual",
+    ) -> InstagramCrawlRequest:
+        """범용 URL 크롤링 요청 생성.
+
+        계정 피드, 해시태그, 릴스 탐색 등 다양한 URL 타입을 지원합니다.
+
+        Args:
+            url: Instagram URL
+            url_type: URL 타입 (account_profile, account_reels, hashtag 등)
+            account_id: 계정 ID
+            max_posts: 최대 수집 게시물 수
+            scroll_count: 스크롤 횟수
+            requested_by: 요청 출처
+
+        Returns:
+            생성된 요청 객체
+        """
+        # 이미 대기 중인 동일 URL 요청이 있는지 확인
+        existing = (
+            self.db.query(InstagramCrawlRequest)
+            .filter(
+                InstagramCrawlRequest.target_url == url,
+                InstagramCrawlRequest.status == "pending",
+            )
+            .first()
+        )
+        if existing:
+            logger.info(f"Pending url crawl request already exists for {url}")
+            return existing
+
+        # request_type 결정 (url_type 기반)
+        request_type_map = {
+            "single_post": "single_post_url",
+            "single_reel": "single_post_url",
+            "account_profile": "account_feed",
+            "account_reels": "account_reels",
+            "hashtag": "hashtag",
+            "reels_explore": "reels_explore",
+        }
+        request_type = request_type_map.get(url_type, "single_post_url")
+
+        # 옵션을 config_snapshot에 저장
+        import json
+        config = {
+            "max_posts": max_posts,
+            "scroll_count": scroll_count,
+            "url_type": url_type,
+        }
+
+        request = InstagramCrawlRequest(
+            account_id=account_id,
+            requested_by=requested_by,
+            request_type=request_type,
+            target_url=url,
+            url_type=url_type,
+            status="pending",
+            requested_at=datetime.now(),
+        )
+        self.db.add(request)
+        self.db.commit()
+        self.db.refresh(request)
+
+        logger.info(f"Created generic url crawl request {request.id} for {url} (type={url_type})")
+        return request
+
     def get_request_by_id(self, request_id: int) -> Optional[InstagramCrawlRequest]:
         """요청 ID로 조회.
 

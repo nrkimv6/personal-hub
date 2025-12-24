@@ -1,13 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
+	import { page as pageStore } from '$app/stores';
 	import { instagramApi, instagramTagApi, accountApi } from '$lib/api';
 	import type { InstagramPost, InstagramTag, Account } from '$lib/types';
 	import FeedCard from '$lib/components/instagram/FeedCard.svelte';
 
 	let posts: InstagramPost[] = [];
 	let total = 0;
-	let page = 1;
+	let currentPage = 1;
 	let limit = 20;
 	let loading = true;
 	let error: string | null = null;
@@ -63,7 +64,7 @@
 	// 탭 변경 시 필터 적용
 	function switchTab(tab: TabMode) {
 		activeTab = tab;
-		page = 1;
+		currentPage = 1;
 		includeEnded = false;  // 탭 전환 시 종료된 항목 숨김
 		if (tab === 'events') {
 			filterLlmTag = '이벤트';
@@ -106,14 +107,14 @@
 	// 활성화 필터 토글
 	function toggleIsActiveFilter() {
 		filterIsActive = !filterIsActive;
-		page = 1;
+		currentPage = 1;
 		fetchPosts();
 	}
 
 	// 기간 미정 포함 토글
 	function toggleIncludeUnknownPeriod() {
 		includeUnknownPeriod = !includeUnknownPeriod;
-		page = 1;
+		currentPage = 1;
 		fetchPosts();
 	}
 
@@ -229,7 +230,7 @@
 	async function fetchPosts() {
 		loading = true;
 		try {
-			const params: Record<string, unknown> = { page, limit };
+			const params: Record<string, unknown> = { page: currentPage, limit };
 			if (filterAccount) params.account = filterAccount;
 			if (filterPostType !== null) params.post_type = filterPostType;
 			if (filterTags.length > 0) params.tags = filterTags;
@@ -326,6 +327,35 @@
 	let urlCrawlInput = '';
 	let urlCrawlAccountId: number | null = null;
 	let isUrlCrawling = false;
+	let isUrlParsing = false;
+
+	// URL 파싱 결과
+	let parsedUrl: {
+		url_type: string;
+		url_type_description: string;
+		is_supported: boolean;
+		username: string | null;
+		hashtag: string | null;
+	} | null = null;
+
+	// 피드 수집 옵션 (계정/해시태그/릴스용)
+	let urlCrawlMaxPosts = 20;
+	let urlCrawlScrollCount = 3;
+
+	// URL 타입별 아이콘/스타일
+	const urlTypeStyles: Record<string, { icon: string; color: string; bgColor: string }> = {
+		single_post: { icon: '📷', color: 'text-blue-700', bgColor: 'bg-blue-100' },
+		single_reel: { icon: '🎬', color: 'text-purple-700', bgColor: 'bg-purple-100' },
+		account_profile: { icon: '👤', color: 'text-green-700', bgColor: 'bg-green-100' },
+		account_reels: { icon: '🎥', color: 'text-pink-700', bgColor: 'bg-pink-100' },
+		hashtag: { icon: '#', color: 'text-orange-700', bgColor: 'bg-orange-100' },
+		reels_explore: { icon: '🔥', color: 'text-red-700', bgColor: 'bg-red-100' },
+		story: { icon: '⏰', color: 'text-gray-700', bgColor: 'bg-gray-100' },
+		unknown: { icon: '❓', color: 'text-gray-700', bgColor: 'bg-gray-100' },
+	};
+
+	// 피드 타입인지 (추가 옵션 표시용)
+	$: isFeedType = parsedUrl && ['account_profile', 'account_reels', 'hashtag', 'reels_explore'].includes(parsedUrl.url_type);
 
 	async function fetchAccounts() {
 		try {
@@ -343,11 +373,36 @@
 	function openUrlCrawlModal() {
 		showUrlCrawlModal = true;
 		urlCrawlInput = '';
+		parsedUrl = null;
+		urlCrawlMaxPosts = 20;
+		urlCrawlScrollCount = 3;
 	}
 
 	function closeUrlCrawlModal() {
 		showUrlCrawlModal = false;
 		urlCrawlInput = '';
+		parsedUrl = null;
+	}
+
+	// URL 입력 시 자동 파싱 (디바운스)
+	let parseTimeout: ReturnType<typeof setTimeout> | null = null;
+	async function onUrlInput() {
+		if (parseTimeout) clearTimeout(parseTimeout);
+		parsedUrl = null;
+
+		const url = urlCrawlInput.trim();
+		if (!url || !url.includes('instagram.com')) return;
+
+		parseTimeout = setTimeout(async () => {
+			isUrlParsing = true;
+			try {
+				parsedUrl = await instagramApi.parseUrl(url);
+			} catch {
+				parsedUrl = null;
+			} finally {
+				isUrlParsing = false;
+			}
+		}, 300);
 	}
 
 	async function submitUrlCrawl() {
@@ -359,9 +414,24 @@
 			alert('수집에 사용할 계정을 선택해주세요.');
 			return;
 		}
+
+		// 스토리는 지원 불가
+		if (parsedUrl?.url_type === 'story') {
+			alert('스토리 크롤링은 지원되지 않습니다.\nInstagram 정책상 스토리는 24시간 후 삭제되며 API 접근이 불가합니다.');
+			return;
+		}
+
 		isUrlCrawling = true;
 		try {
-			await instagramApi.crawlByUrl(urlCrawlInput.trim(), urlCrawlAccountId);
+			// 피드 타입은 범용 API, 단일 게시물은 기존 API 사용
+			if (isFeedType) {
+				await instagramApi.crawlByGenericUrl(urlCrawlInput.trim(), urlCrawlAccountId, {
+					maxPosts: urlCrawlMaxPosts,
+					scrollCount: urlCrawlScrollCount
+				});
+			} else {
+				await instagramApi.crawlByGenericUrl(urlCrawlInput.trim(), urlCrawlAccountId);
+			}
 			alert('수집 요청이 등록되었습니다. 워커가 처리하면 게시물이 추가됩니다.');
 			closeUrlCrawlModal();
 		} catch (e) {
@@ -442,7 +512,7 @@
 	}
 
 	function handleFilter() {
-		page = 1;
+		currentPage = 1;
 		fetchPosts();
 	}
 
@@ -454,20 +524,20 @@
 		filterDateTo = '';
 		filterLlmTag = null;
 		filterLlmStatus = null;
-		page = 1;
+		currentPage = 1;
 		fetchPosts();
 	}
 
 	function prevPage() {
-		if (page > 1) {
-			page--;
+		if (currentPage > 1) {
+			currentPage--;
 			fetchPosts();
 		}
 	}
 
 	function nextPage() {
-		if (page * limit < total) {
-			page++;
+		if (currentPage * limit < total) {
+			currentPage++;
 			fetchPosts();
 		}
 	}
@@ -491,6 +561,17 @@
 				localStorage.setItem(STORAGE_KEY_VIEW_MODE, 'grid');
 			}
 		}
+
+		// PWA Share Target에서 전달된 URL 처리
+		const sharedUrl = $pageStore.url.searchParams.get('shared_url');
+		if (sharedUrl) {
+			// URL 수집 모달 열고 URL 자동 입력
+			showUrlCrawlModal = true;
+			urlCrawlInput = sharedUrl;
+			// URL 파싱 트리거
+			onUrlInput();
+		}
+
 		fetchAccounts();
 		fetchTags().then(() => fetchPosts());
 	});
@@ -1228,22 +1309,22 @@
 		<!-- 페이지네이션 -->
 		<div class="flex flex-col sm:flex-row justify-between items-center gap-3">
 			<span class="text-sm text-gray-500">
-				전체 {total}개 중 {(page - 1) * limit + 1} - {Math.min(page * limit, total)}
+				전체 {total}개 중 {(currentPage - 1) * limit + 1} - {Math.min(currentPage * limit, total)}
 			</span>
 			<div class="flex gap-2">
 				<button
 					onclick={prevPage}
-					disabled={page === 1}
+					disabled={currentPage === 1}
 					class="btn btn-secondary btn-sm disabled:opacity-50"
 				>
 					이전
 				</button>
 				<span class="px-3 py-1.5 text-sm">
-					{page} / {Math.ceil(total / limit)}
+					{currentPage} / {Math.ceil(total / limit)}
 				</span>
 				<button
 					onclick={nextPage}
-					disabled={page * limit >= total}
+					disabled={currentPage * limit >= total}
 					class="btn btn-secondary btn-sm disabled:opacity-50"
 				>
 					다음
@@ -1302,7 +1383,7 @@
 		>
 			<div class="p-6">
 				<div class="flex justify-between items-start mb-4">
-					<h3 class="text-lg font-bold text-gray-900">URL로 게시물 수집</h3>
+					<h3 class="text-lg font-bold text-gray-900">URL로 수집</h3>
 					<button onclick={closeUrlCrawlModal} class="text-gray-400 hover:text-gray-600 text-2xl">
 						&times;
 					</button>
@@ -1311,19 +1392,87 @@
 				<div class="space-y-4">
 					<div>
 						<label for="url-input" class="block text-sm font-medium text-gray-700 mb-1">
-							Instagram 게시물 URL
+							Instagram URL
 						</label>
 						<input
 							id="url-input"
 							type="text"
 							bind:value={urlCrawlInput}
-							placeholder="https://www.instagram.com/p/..."
+							oninput={onUrlInput}
+							placeholder="https://www.instagram.com/..."
 							class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 						/>
-						<p class="mt-1 text-xs text-gray-500">
-							예: https://www.instagram.com/p/ABC123/
-						</p>
+
+						<!-- URL 파싱 결과 표시 -->
+						{#if isUrlParsing}
+							<p class="mt-2 text-xs text-gray-500 flex items-center gap-1">
+								<span class="animate-spin inline-block w-3 h-3 border border-gray-400 border-t-transparent rounded-full"></span>
+								URL 분석 중...
+							</p>
+						{:else if parsedUrl}
+							{@const style = urlTypeStyles[parsedUrl.url_type] || urlTypeStyles.unknown}
+							<div class="mt-2 p-2 rounded-lg {style.bgColor}">
+								<div class="flex items-center gap-2">
+									<span class="text-lg">{style.icon}</span>
+									<span class="text-sm font-medium {style.color}">{parsedUrl.url_type_description}</span>
+									{#if !parsedUrl.is_supported}
+										<span class="px-1.5 py-0.5 text-xs bg-red-100 text-red-700 rounded">지원 불가</span>
+									{/if}
+								</div>
+								{#if parsedUrl.username}
+									<p class="mt-1 text-xs {style.color}">계정: @{parsedUrl.username}</p>
+								{/if}
+								{#if parsedUrl.hashtag}
+									<p class="mt-1 text-xs {style.color}">해시태그: #{parsedUrl.hashtag}</p>
+								{/if}
+								{#if parsedUrl.url_type === 'story'}
+									<p class="mt-1 text-xs text-red-600">스토리는 24시간 후 삭제되며 API 접근이 불가합니다.</p>
+								{/if}
+							</div>
+						{:else if urlCrawlInput.trim()}
+							<p class="mt-1 text-xs text-gray-500">
+								지원: 게시물, 릴스, 계정 피드, 해시태그
+							</p>
+						{:else}
+							<p class="mt-1 text-xs text-gray-500">
+								예: instagram.com/p/..., instagram.com/username/, instagram.com/explore/tags/...
+							</p>
+						{/if}
 					</div>
+
+					<!-- 피드 수집 옵션 (계정/해시태그/릴스용) -->
+					{#if isFeedType}
+						<div class="p-3 bg-gray-50 rounded-lg space-y-3">
+							<p class="text-sm font-medium text-gray-700">피드 수집 옵션</p>
+							<div class="grid grid-cols-2 gap-3">
+								<div>
+									<label for="max-posts" class="block text-xs text-gray-600 mb-1">최대 게시물 수</label>
+									<input
+										id="max-posts"
+										type="number"
+										min="1"
+										max="100"
+										bind:value={urlCrawlMaxPosts}
+										class="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+									/>
+								</div>
+								<div>
+									<label for="scroll-count" class="block text-xs text-gray-600 mb-1">스크롤 횟수</label>
+									<input
+										id="scroll-count"
+										type="number"
+										min="1"
+										max="20"
+										bind:value={urlCrawlScrollCount}
+										class="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+									/>
+								</div>
+							</div>
+							<p class="text-xs text-gray-500">
+								계정/해시태그 피드는 스크롤하며 게시물을 수집합니다.
+							</p>
+						</div>
+					{/if}
 
 					<div>
 						<label for="account-select" class="block text-sm font-medium text-gray-700 mb-1">
@@ -1351,7 +1500,7 @@
 					</button>
 					<button
 						onclick={submitUrlCrawl}
-						disabled={isUrlCrawling || accounts.length === 0}
+						disabled={isUrlCrawling || accounts.length === 0 || (parsedUrl && !parsedUrl.is_supported)}
 						class="btn btn-primary btn-sm disabled:opacity-50"
 					>
 						{#if isUrlCrawling}

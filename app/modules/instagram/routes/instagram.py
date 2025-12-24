@@ -321,6 +321,60 @@ async def crawl_post_by_url(
     return CrawlRequestSchema.model_validate(request)
 
 
+@router.post("/crawl/url", response_model=CrawlRequestSchema)
+async def crawl_by_generic_url(
+    body: GenericUrlCrawlRequestSchema,
+    db: Session = Depends(get_db),
+):
+    """범용 URL 기반 크롤링 요청.
+
+    다양한 Instagram URL 타입을 지원합니다:
+    - 계정 프로필: https://www.instagram.com/{username}/
+    - 계정 릴스: https://www.instagram.com/{username}/reels/
+    - 개별 게시물: https://www.instagram.com/p/{id}/
+    - 개별 릴스: https://www.instagram.com/reel/{id}/
+    - 릴스 탐색: https://www.instagram.com/reels/
+    - 해시태그: https://www.instagram.com/explore/tags/{tag}/
+
+    스토리는 지원되지 않습니다.
+    """
+    request_service = CrawlRequestService(db)
+
+    # URL 파싱
+    parsed = parse_instagram_url(body.url)
+
+    if not parsed.is_supported:
+        if parsed.url_type == InstagramUrlType.STORY:
+            raise HTTPException(
+                status_code=400,
+                detail="스토리 크롤링은 지원되지 않습니다. Instagram 정책상 스토리는 24시간 후 삭제되며 API 접근이 불가합니다."
+            )
+        raise HTTPException(
+            status_code=400,
+            detail=f"지원하지 않는 URL 형식입니다: {body.url}"
+        )
+
+    # 계정 존재 확인
+    account = account_service.get_by_id(db, body.account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail=f"Account {body.account_id} not found")
+
+    if not account.is_logged_in:
+        raise HTTPException(status_code=400, detail="Account is not logged in")
+
+    # 크롤링 요청 생성
+    request = request_service.create_generic_url_crawl_request(
+        url=body.url,
+        url_type=parsed.url_type.value,
+        account_id=body.account_id,
+        max_posts=body.max_posts,
+        scroll_count=body.scroll_count,
+        requested_by="manual",
+    )
+
+    return CrawlRequestSchema.model_validate(request)
+
+
 # ============== Crawl ==============
 
 @router.post("/crawl/manual", response_model=CrawlRequestSchema)
