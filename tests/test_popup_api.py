@@ -89,6 +89,40 @@ class TestPopupListAPI:
         response = client.get("/api/v1/popups?sort_by=end_date&sort_order=desc")
         assert response.status_code == 200
 
+    def test_get_popups_search_by_title(self, client, admin_headers):
+        """제목 검색"""
+        # 검색할 팝업 생성
+        client.post("/api/v1/popups", json={
+            "title": "강남 팝업스토어",
+            "venue_name": "강남역 코엑스",
+        }, headers=admin_headers)
+
+        response = client.get("/api/v1/popups?search=강남")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] >= 1
+        assert any("강남" in item["title"] or "강남" in (item.get("venue_name") or "") for item in data["items"])
+
+    def test_get_popups_search_by_venue(self, client, admin_headers):
+        """장소명 검색"""
+        client.post("/api/v1/popups", json={
+            "title": "브랜드 팝업",
+            "venue_name": "더현대서울",
+            "address": "여의도",
+        }, headers=admin_headers)
+
+        response = client.get("/api/v1/popups?search=더현대")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] >= 1
+
+    def test_get_popups_search_no_result(self, client, sample_popup):
+        """검색 결과 없음"""
+        response = client.get("/api/v1/popups?search=존재하지않는검색어xyz")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 0
+
 
 class TestPopupDetailAPI:
     """GET /api/v1/popups/{id} 테스트"""

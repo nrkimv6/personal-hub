@@ -98,6 +98,54 @@ class TestEventListAPI:
         response = client.get("/api/v1/events?sort_by=event_end&sort_order=desc")
         assert response.status_code == 200
 
+    def test_get_events_search_by_title(self, client, admin_headers):
+        """제목 검색"""
+        # 검색할 이벤트 생성
+        client.post("/api/v1/events", json={
+            "title": "크리스마스 이벤트",
+            "event_type": "event",
+            "summary": "특별 경품 제공",
+        }, headers=admin_headers)
+
+        response = client.get("/api/v1/events?search=크리스마스")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] >= 1
+        assert any("크리스마스" in item["title"] for item in data["items"])
+
+    def test_get_events_search_by_summary(self, client, admin_headers):
+        """요약 검색"""
+        client.post("/api/v1/events", json={
+            "title": "신년 이벤트",
+            "event_type": "event",
+            "summary": "스타벅스 기프티콘 증정",
+        }, headers=admin_headers)
+
+        response = client.get("/api/v1/events?search=스타벅스")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] >= 1
+
+    def test_get_events_search_by_organizer(self, client, admin_headers):
+        """주최자 검색"""
+        client.post("/api/v1/events", json={
+            "title": "브랜드 이벤트",
+            "event_type": "event",
+            "organizer": "삼성전자",
+        }, headers=admin_headers)
+
+        response = client.get("/api/v1/events?search=삼성전자")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] >= 1
+
+    def test_get_events_search_no_result(self, client, sample_event):
+        """검색 결과 없음"""
+        response = client.get("/api/v1/events?search=존재하지않는검색어xyz")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 0
+
 
 class TestEventDetailAPI:
     """GET /api/v1/events/{id} 테스트"""

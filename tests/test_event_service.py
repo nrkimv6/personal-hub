@@ -322,6 +322,59 @@ class TestEventServiceFilter:
         assert result.page_size == 2
         assert result.total >= 4  # sample_events에서 4개 생성
 
+    def test_search_by_title(self, test_db_session, event_service, sample_events):
+        """Right: 제목 검색"""
+        result = event_service.get_events(test_db_session, search="진행 중")
+        assert result.total >= 1
+        assert any("진행 중" in item.title for item in result.items)
+
+    def test_search_by_title_partial(self, test_db_session, event_service, sample_events):
+        """Right: 제목 부분 검색"""
+        result = event_service.get_events(test_db_session, search="팝업")
+        assert result.total >= 1
+        assert any("팝업" in item.title for item in result.items)
+
+    def test_search_case_insensitive(self, test_db_session, event_service):
+        """Right: 대소문자 무관 검색"""
+        # 영문 제목으로 이벤트 생성
+        event_service.create_event(test_db_session, EventCreate(
+            title="Summer Event",
+            event_type="event",
+            summary="This is a test event",
+        ))
+
+        result = event_service.get_events(test_db_session, search="summer")
+        assert result.total >= 1
+        assert any("Summer" in item.title for item in result.items)
+
+    def test_search_no_result(self, test_db_session, event_service, sample_events):
+        """Boundary: 검색 결과 없음"""
+        result = event_service.get_events(test_db_session, search="존재하지않는검색어xyz")
+        assert result.total == 0
+        assert len(result.items) == 0
+
+    def test_search_by_summary(self, test_db_session, event_service):
+        """Right: 요약 검색"""
+        event_service.create_event(test_db_session, EventCreate(
+            title="테스트 이벤트",
+            event_type="event",
+            summary="특별한 경품 이벤트입니다",
+        ))
+
+        result = event_service.get_events(test_db_session, search="특별한 경품")
+        assert result.total >= 1
+
+    def test_search_by_organizer(self, test_db_session, event_service):
+        """Right: 주최자 검색"""
+        event_service.create_event(test_db_session, EventCreate(
+            title="이벤트 제목",
+            event_type="event",
+            organizer="ABC컴퍼니",
+        ))
+
+        result = event_service.get_events(test_db_session, search="ABC컴퍼니")
+        assert result.total >= 1
+
 
 class TestEventServiceImportFromInstagram:
     """Instagram에서 이벤트 가져오기 테스트"""
