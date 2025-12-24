@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { businessApi, itemApi, scheduleApi, accountApi } from '$lib/api';
   import type { Business, BusinessWithItems, BizItem, MonitorSchedule, Account } from '$lib/types';
+  import SlotCheckModal from '$lib/components/SlotCheckModal.svelte';
 
   let businesses: Business[] = [];
   let accounts: Account[] = [];
@@ -22,6 +23,9 @@
   let showEditItemModal = false;
   let showAddScheduleModal = false;
   let showUrlImportModal = false;
+  let showSlotCheckModal = false;
+  let slotCheckBusiness: Business | null = null;
+  let slotCheckItem: BizItem | null = null;
 
   // URL 임포트 폼
   let urlImport = {
@@ -500,6 +504,17 @@
                       <div class="flex gap-1">
                         <button
                           class="btn btn-secondary btn-xs"
+                          on:click|stopPropagation={() => {
+                            slotCheckBusiness = selectedBusiness;
+                            slotCheckItem = item;
+                            showSlotCheckModal = true;
+                          }}
+                          title="슬롯 조회"
+                        >
+                          🔍
+                        </button>
+                        <button
+                          class="btn btn-secondary btn-xs"
                           on:click|stopPropagation={() => { editItem = {...item}; showEditItemModal = true; }}
                           title="수정"
                         >
@@ -941,6 +956,14 @@
     </div>
   </div>
 {/if}
+
+<!-- 슬롯 조회 모달 -->
+<SlotCheckModal
+  show={showSlotCheckModal}
+  business={slotCheckBusiness}
+  item={slotCheckItem}
+  onClose={() => { showSlotCheckModal = false; slotCheckBusiness = null; slotCheckItem = null; }}
+/>
 
 <style>
   .badge {
