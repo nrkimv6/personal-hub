@@ -1517,7 +1517,7 @@
 {#if showFeedViewer && viewingEvent}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
-		class="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center sm:p-4"
+		class="fixed inset-0 bg-black/60 z-50 overflow-y-auto p-4"
 		onclick={closeFeedViewer}
 		onkeydown={(e) => e.key === 'Escape' && closeFeedViewer()}
 		role="dialog"
@@ -1526,11 +1526,11 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<div
-			class="flex flex-col lg:flex-row gap-4 max-w-5xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-hidden"
+			class="flex flex-col lg:flex-row gap-4 max-w-5xl w-full mx-auto my-4"
 			onclick={(e) => e.stopPropagation()}
 		>
-			<!-- 왼쪽: FeedCard (스크롤 가능) -->
-			<div class="flex-shrink-0 flex justify-center overflow-y-auto max-h-[60vh] lg:max-h-[90vh] rounded-t-xl sm:rounded-xl">
+			<!-- 왼쪽: FeedCard -->
+			<div class="flex-shrink-0 flex justify-center">
 				{#if loadingPost}
 					<div class="bg-white rounded-xl p-8 flex items-center justify-center w-full sm:w-[468px] h-[300px]">
 						<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
@@ -1565,7 +1565,7 @@
 			</div>
 
 			<!-- 오른쪽: 이벤트 정보 패널 -->
-			<div class="bg-white rounded-b-xl sm:rounded-xl p-4 flex-1 overflow-y-auto max-h-[35vh] lg:max-h-[90vh] lg:max-w-sm">
+			<div class="bg-white rounded-xl p-4 flex-1 lg:max-w-sm">
 				<div class="flex items-center justify-between mb-4">
 					<h3 class="text-lg font-bold text-gray-900">이벤트 정보</h3>
 					<button
@@ -1740,7 +1740,7 @@
 {#if showPopupFeedViewer && viewingPopup}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
-		class="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center sm:p-4"
+		class="fixed inset-0 bg-black/60 z-50 overflow-y-auto p-4"
 		onclick={closePopupFeedViewer}
 		onkeydown={(e) => e.key === 'Escape' && closePopupFeedViewer()}
 		role="dialog"
@@ -1749,11 +1749,11 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<div
-			class="flex flex-col lg:flex-row gap-4 max-w-5xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-hidden"
+			class="flex flex-col lg:flex-row gap-4 max-w-5xl w-full mx-auto my-4"
 			onclick={(e) => e.stopPropagation()}
 		>
-			<!-- 왼쪽: FeedCard (스크롤 가능) -->
-			<div class="flex-shrink-0 flex justify-center overflow-y-auto max-h-[60vh] lg:max-h-[90vh] rounded-t-xl sm:rounded-xl">
+			<!-- 왼쪽: FeedCard -->
+			<div class="flex-shrink-0 flex justify-center">
 				{#if loadingPost}
 					<div class="bg-white rounded-xl p-8 flex items-center justify-center w-full sm:w-[468px] h-[300px]">
 						<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
@@ -1788,7 +1788,7 @@
 			</div>
 
 			<!-- 오른쪽: 팝업 정보 패널 -->
-			<div class="bg-white rounded-b-xl sm:rounded-xl p-4 flex-1 overflow-y-auto max-h-[35vh] lg:max-h-[90vh] lg:max-w-sm">
+			<div class="bg-white rounded-xl p-4 flex-1 lg:max-w-sm">
 				<div class="flex items-center justify-between mb-4">
 					<h3 class="text-lg font-bold text-gray-900">팝업 정보</h3>
 				</div>
