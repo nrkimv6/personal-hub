@@ -15,7 +15,8 @@ class Event(Base):
 
     # 기본 정보
     title = Column(Text, nullable=False)
-    event_type = Column(String, nullable=False, default="event", index=True)  # event/popup/ambassador/other
+    thumbnail_url = Column(Text)  # Instagram 첫 번째 이미지
+    event_type = Column(String, nullable=False, default="event", index=True)  # event (popup/ambassador/other → 별도 테이블로 이동 예정)
     status = Column(String, default="active", index=True)  # active/ended/cancelled
 
     # 참여 URL (핵심)
@@ -42,6 +43,8 @@ class Event(Base):
     # 출처 정보
     source_type = Column(String, nullable=False, default="manual", index=True)  # instagram/manual/web/other
     source_instagram_post_id = Column(Integer, ForeignKey("instagram_posts.id", ondelete="SET NULL"), index=True)
+    source_instagram_url = Column(Text)  # Instagram 원본 URL
+    source_instagram_account = Column(String)  # Instagram 계정명
     source_url = Column(Text)  # 기타 출처 URL
     source_note = Column(Text)  # 출처 메모
 

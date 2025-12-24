@@ -59,6 +59,10 @@ class InstagramPost(Base):
     # 활성화 상태
     is_active = Column(Boolean, default=True, index=True)
 
+    # 분류 결과 참조 (Event/Popup/Uncategorized)
+    classified_type = Column(String, index=True)  # 'event' | 'popup' | 'uncategorized' | NULL
+    classified_id = Column(Integer)  # 각 테이블의 ID
+
     # 관계
     crawl_run = relationship("InstagramCrawlRun", back_populates="posts")
     tag_relations = relationship(
