@@ -1,7 +1,9 @@
 """
 Event 서비스 - 독립 이벤트 CRUD 및 관리
 """
-from typing import List, Optional, Tuple
+import asyncio
+import logging
+from typing import List, Optional, Tuple, Dict, Any
 from datetime import date
 
 from sqlalchemy.orm import Session
@@ -15,7 +17,11 @@ from app.schemas.event import (
     EventResponse,
     EventList,
     EventImportFromInstagram,
+    EventImportFromUrl,
+    EventImportFromUrlResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def detect_url_type(url: str) -> str:
@@ -308,6 +314,201 @@ class EventService:
         if exclude_id:
             query = query.filter(Event.id != exclude_id)
         return query.first()
+
+    def import_from_url(
+        self, db: Session, data: EventImportFromUrl
+    ) -> EventImportFromUrlResponse:
+        """URL에서 이벤트 정보를 추출.
+
+        1. Playwright로 페이지 로드
+        2. ExtractorFactory로 적절한 추출기 선택
+        3. 페이지 내용 추출
+        4. LLM으로 이벤트 정보 분석
+        5. auto_save=True면 Event 생성
+
+        Args:
+            db: DB 세션
+            data: EventImportFromUrl 스키마
+
+        Returns:
+            EventImportFromUrlResponse
+        """
+        from app.services.page_extractor import get_extractor_factory
+        from app.modules.claude_worker.prompts.event_extract import (
+            build_event_extract_prompt,
+            parse_event_from_llm_response,
+        )
+        from app.modules.claude_worker.services.llm_service import LLMService
+
+        url = data.url
+
+        # 중복 URL 확인
+        existing = self.check_duplicate_url(db, url)
+        if existing:
+            return EventImportFromUrlResponse(
+                success=False,
+                page_type="unknown",
+                extraction_method="skipped",
+                error=f"동일 URL로 등록된 이벤트가 있습니다 (ID: {existing.id})",
+            )
+
+        try:
+            # 비동기 추출 작업 실행
+            extracted = asyncio.get_event_loop().run_until_complete(
+                self._extract_page_content(url)
+            )
+        except RuntimeError:
+            # 이벤트 루프가 없는 경우 (동기 컨텍스트)
+            extracted = asyncio.run(self._extract_page_content(url))
+
+        if not extracted.success:
+            return EventImportFromUrlResponse(
+                success=False,
+                page_type=extracted.page_type,
+                extraction_method=extracted.extraction_method,
+                error=extracted.error or "페이지 추출 실패",
+            )
+
+        # LLM 프롬프트 생성
+        prompt = build_event_extract_prompt(extracted)
+
+        # LLM 실행 (동기)
+        llm_service = LLMService(db)
+        llm_result = llm_service.execute_claude(prompt, timeout=120)
+
+        if not llm_result.get("success"):
+            return EventImportFromUrlResponse(
+                success=False,
+                page_type=extracted.page_type,
+                extraction_method=extracted.extraction_method,
+                raw_content=extracted.content[:1000] if extracted.content else None,
+                error=f"LLM 분석 실패: {llm_result.get('error', 'Unknown error')}",
+            )
+
+        # LLM 응답 파싱
+        raw_response = llm_result.get("raw_response", "")
+        parsed_event = llm_result.get("result")
+
+        if not parsed_event:
+            # result가 없으면 raw_response에서 직접 파싱 시도
+            parsed_event = parse_event_from_llm_response(raw_response)
+
+        if not parsed_event:
+            return EventImportFromUrlResponse(
+                success=False,
+                page_type=extracted.page_type,
+                extraction_method=extracted.extraction_method,
+                raw_content=extracted.content[:1000] if extracted.content else None,
+                error="LLM 응답에서 이벤트 정보를 추출할 수 없습니다",
+            )
+
+        # 날짜 문자열을 date 객체로 변환
+        parsed_event = self._parse_event_dates(parsed_event)
+
+        # URL 정보 추가
+        parsed_event["event_url"] = url
+        parsed_event["url_type"] = detect_url_type(url)
+        parsed_event["source_type"] = "web"
+        parsed_event["source_url"] = url
+        parsed_event["input_source"] = "ai"
+
+        # auto_save 처리
+        created_event = None
+        if data.auto_save:
+            try:
+                event_create = EventCreate(**parsed_event)
+                created_event = self.create_event(db, event_create)
+            except Exception as e:
+                logger.error(f"Event 생성 실패: {e}")
+                return EventImportFromUrlResponse(
+                    success=True,  # 추출은 성공
+                    page_type=extracted.page_type,
+                    extraction_method=extracted.extraction_method,
+                    extracted_event=parsed_event,
+                    raw_content=extracted.content[:1000] if extracted.content else None,
+                    error=f"Event 생성 실패: {str(e)}",
+                )
+
+        return EventImportFromUrlResponse(
+            success=True,
+            page_type=extracted.page_type,
+            extraction_method=extracted.extraction_method,
+            extracted_event=parsed_event,
+            raw_content=extracted.content[:1000] if extracted.content else None,
+            created_event=created_event,
+        )
+
+    async def _extract_page_content(self, url: str):
+        """Playwright로 페이지 내용 추출 (비동기).
+
+        Args:
+            url: 추출할 페이지 URL
+
+        Returns:
+            ExtractedContent 객체
+        """
+        from playwright.async_api import async_playwright
+        from app.services.page_extractor import get_extractor_factory
+        from app.services.page_extractor.base import ExtractedContent
+
+        factory = get_extractor_factory()
+        extractor = factory.get_extractor(url)
+
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                context = await browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    viewport={"width": 1280, "height": 800},
+                )
+                page = await context.new_page()
+
+                try:
+                    await page.goto(url, wait_until="networkidle", timeout=30000)
+                    extracted = await extractor.extract(page, url)
+                    return extracted
+                finally:
+                    await page.close()
+                    await context.close()
+                    await browser.close()
+
+        except Exception as e:
+            logger.error(f"페이지 추출 실패 ({url}): {e}")
+            return ExtractedContent(
+                url=url,
+                page_type=extractor.page_type,
+                extraction_method="failed",
+                success=False,
+                error=str(e),
+            )
+
+    def _parse_event_dates(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
+        """이벤트 날짜 문자열을 date 객체로 변환.
+
+        Args:
+            event_data: 이벤트 데이터 딕셔너리
+
+        Returns:
+            날짜가 변환된 이벤트 데이터
+        """
+        from datetime import datetime
+
+        date_fields = ["event_start", "event_end", "announcement_date"]
+
+        for field in date_fields:
+            value = event_data.get(field)
+            if value and isinstance(value, str):
+                try:
+                    # YYYY-MM-DD 형식 파싱
+                    parsed = datetime.strptime(value, "%Y-%m-%d").date()
+                    event_data[field] = parsed
+                except ValueError:
+                    # 파싱 실패 시 None으로 설정
+                    event_data[field] = None
+            elif not value:
+                event_data[field] = None
+
+        return event_data
 
     def _to_response(self, db: Session, event: Event) -> EventResponse:
         """Event 모델을 EventResponse로 변환"""

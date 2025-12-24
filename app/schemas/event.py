@@ -141,3 +141,20 @@ class EventImportFromInstagram(BaseModel):
     """Instagram에서 이벤트 가져오기 요청"""
     instagram_post_id: int
     title: Optional[str] = None  # 제목 재정의 (없으면 llm_summary 사용)
+
+
+class EventImportFromUrl(BaseModel):
+    """URL에서 이벤트 가져오기 요청"""
+    url: str  # 이벤트 정보가 있는 URL
+    auto_save: bool = False  # True면 Event 자동 생성, False면 추출 결과만 반환
+
+
+class EventImportFromUrlResponse(BaseModel):
+    """URL에서 이벤트 가져오기 응답"""
+    success: bool
+    page_type: str  # google_forms, naver_form, naver_blog_pc, naver_blog_mobile, generic
+    extraction_method: str  # structured, generic, fallback, failed
+    extracted_event: Optional[dict] = None  # LLM 분석 결과 (이벤트 정보)
+    raw_content: Optional[str] = None  # 추출된 원본 텍스트 (디버깅용)
+    created_event: Optional[EventResponse] = None  # auto_save=True일 때 생성된 Event
+    error: Optional[str] = None
