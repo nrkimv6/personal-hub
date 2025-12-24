@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
+	import { page } from '$app/stores';
 	import { instagramApi, instagramTagApi, accountApi } from '$lib/api';
 	import type { InstagramPost, InstagramTag, Account } from '$lib/types';
 	import FeedCard from '$lib/components/instagram/FeedCard.svelte';
@@ -560,6 +561,17 @@
 				localStorage.setItem(STORAGE_KEY_VIEW_MODE, 'grid');
 			}
 		}
+
+		// PWA Share Target에서 전달된 URL 처리
+		const sharedUrl = $page.url.searchParams.get('shared_url');
+		if (sharedUrl) {
+			// URL 수집 모달 열고 URL 자동 입력
+			showUrlCrawlModal = true;
+			urlCrawlInput = sharedUrl;
+			// URL 파싱 트리거
+			onUrlInput();
+		}
+
 		fetchAccounts();
 		fetchTags().then(() => fetchPosts());
 	});

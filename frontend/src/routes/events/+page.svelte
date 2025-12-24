@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
+	import { page } from '$app/stores';
 	import { eventApi } from '$lib/api';
 	import type { Event, EventCreate, EventUpdate } from '$lib/types';
 
