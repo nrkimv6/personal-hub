@@ -137,20 +137,68 @@ async def get_current_user_required(
     return UserInfo(email=token_data.email, is_admin=token_data.is_admin)
 
 
+def is_localhost_request(request: Request) -> bool:
+    """
+    요청이 localhost에서 온 것인지 확인
+
+    Args:
+        request: FastAPI Request 객체
+
+    Returns:
+        localhost 요청 여부
+    """
+    client = request.client
+    if client is None:
+        return False
+
+    host = client.host
+    # IPv4 localhost
+    if host in ("127.0.0.1", "localhost"):
+        return True
+    # IPv6 localhost
+    if host == "::1":
+        return True
+    return False
+
+
 async def require_admin(
-    user: UserInfo = Depends(get_current_user_required)
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> UserInfo:
     """
     관리자 권한이 필요한 API에서 사용하는 의존성
 
-    관리자가 아닌 경우 403 에러 발생
+    localhost 요청의 경우 인증 없이 관리자로 처리
+    외부 요청의 경우 JWT 토큰 검증 필요
 
     Returns:
         UserInfo (관리자인 경우)
 
     Raises:
-        HTTPException: 관리자가 아닌 경우 403
+        HTTPException: 인증 실패 또는 관리자가 아닌 경우
     """
+    # localhost 요청은 인증 우회
+    if is_localhost_request(request):
+        return UserInfo(email="localhost@admin", is_admin=True)
+
+    # 외부 요청: 인증 필수
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="인증이 필요합니다",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token_data = verify_token(credentials.credentials)
+    if token_data is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="유효하지 않은 토큰입니다",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = UserInfo(email=token_data.email, is_admin=token_data.is_admin)
+
     if not user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
