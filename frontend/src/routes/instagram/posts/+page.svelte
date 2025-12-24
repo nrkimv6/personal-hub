@@ -710,7 +710,7 @@
 			<div class="hidden md:flex items-center gap-2">
 				<input
 					type="text"
-					placeholder="캡션 검색"
+					placeholder="본문 검색"
 					bind:value={filterSearch}
 					class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm w-36"
 				/>
@@ -766,7 +766,7 @@
 				<label class="text-sm font-medium text-gray-700">기본 필터</label>
 				<input
 					type="text"
-					placeholder="캡션 검색"
+					placeholder="본문 검색"
 					bind:value={filterSearch}
 					class="px-3 py-2 border border-gray-300 rounded-lg text-sm"
 				/>

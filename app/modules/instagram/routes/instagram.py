@@ -72,6 +72,8 @@ async def get_posts(
     db: Session = Depends(get_db),
 ):
     """수집된 게시물 목록 조회."""
+    from app.modules.claude_worker.models.llm_request import LLMRequest
+
     service = PostService(db)
     offset = (page - 1) * limit
 
@@ -93,8 +95,45 @@ async def get_posts(
         offset=offset,
     )
 
+    # LLM 상태 조회 (LLMRequest 테이블에서 가져옴)
+    post_ids = [p.id for p in posts]
+    llm_status_map = {}
+    if post_ids:
+        # 각 게시물의 최신 LLM 요청 상태 조회
+        from sqlalchemy import func
+        subquery = (
+            db.query(
+                LLMRequest.caller_id,
+                func.max(LLMRequest.requested_at).label("max_requested_at")
+            )
+            .filter(
+                LLMRequest.caller_type == "instagram",
+                LLMRequest.caller_id.in_([str(pid) for pid in post_ids])
+            )
+            .group_by(LLMRequest.caller_id)
+            .subquery()
+        )
+
+        latest_requests = (
+            db.query(LLMRequest)
+            .join(
+                subquery,
+                (LLMRequest.caller_id == subquery.c.caller_id) &
+                (LLMRequest.requested_at == subquery.c.max_requested_at)
+            )
+            .filter(LLMRequest.caller_type == "instagram")
+            .all()
+        )
+
+        for req in latest_requests:
+            try:
+                pid = int(req.caller_id)
+                llm_status_map[pid] = req.status
+            except (ValueError, TypeError):
+                pass
+
     return PostListResponse(
-        posts=[_post_to_schema(p) for p in posts],
+        posts=[_post_to_schema(p, llm_status_map.get(p.id)) for p in posts],
         total=total,
         page=page,
         limit=limit,
@@ -113,7 +152,8 @@ async def get_post(
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
 
-    return _post_to_schema(post)
+    llm_status = _get_llm_status_for_post(db, post_id)
+    return _post_to_schema(post, llm_status)
 
 
 @router.delete("/posts/{post_id}")
@@ -143,7 +183,8 @@ async def toggle_post_active(
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
 
-    return _post_to_schema(post)
+    llm_status = _get_llm_status_for_post(db, post_id)
+    return _post_to_schema(post, llm_status)
 
 
 @router.put("/posts/{post_id}", response_model=PostSchema)
@@ -164,7 +205,8 @@ async def update_post(
     if update.tag_ids is not None:
         post = service.update_post_tags(post_id, update.tag_ids)
 
-    return _post_to_schema(post)
+    llm_status = _get_llm_status_for_post(db, post_id)
+    return _post_to_schema(post, llm_status)
 
 
 @router.post("/posts/batch/delete")
@@ -950,8 +992,30 @@ def _config_to_schema(config) -> ScheduleConfigSchema:
     )
 
 
-def _post_to_schema(post) -> PostSchema:
-    """InstagramPost 모델을 PostSchema로 변환."""
+def _get_llm_status_for_post(db: Session, post_id: int) -> Optional[str]:
+    """단일 게시물의 LLM 분석 상태 조회."""
+    from app.modules.claude_worker.models.llm_request import LLMRequest
+
+    request = (
+        db.query(LLMRequest)
+        .filter(
+            LLMRequest.caller_type == "instagram",
+            LLMRequest.caller_id == str(post_id),
+        )
+        .order_by(LLMRequest.requested_at.desc())
+        .first()
+    )
+
+    return request.status if request else None
+
+
+def _post_to_schema(post, llm_status: Optional[str] = None) -> PostSchema:
+    """InstagramPost 모델을 PostSchema로 변환.
+
+    Args:
+        post: InstagramPost 모델 객체
+        llm_status: LLM 분석 상태 (외부에서 조회하여 전달)
+    """
     from ..models.schemas import ImageInfo, TagInfoSchema
 
     images = []
@@ -970,11 +1034,6 @@ def _post_to_schema(post) -> PostSchema:
                     display_name=rel.tag.display_name,
                     color=rel.tag.color,
                 ))
-
-    # LLM 분석 상태 추출 (최신 요청 기준)
-    llm_status = None
-    if hasattr(post, 'llm_requests') and post.llm_requests:
-        llm_status = post.llm_requests[0].status
 
     return PostSchema(
         id=post.id,

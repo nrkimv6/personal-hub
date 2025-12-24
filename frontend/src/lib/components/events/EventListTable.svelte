@@ -20,6 +20,7 @@
 		sortBy: string;
 		sortOrder: string;
 		showTypeColumn?: boolean; // 'all' 탭에서만 true
+		isAdmin?: boolean;
 		isParticipated: (event: Event) => boolean;
 		onSort: (column: string) => void;
 		onEventClick: (event: Event) => void;
@@ -32,12 +33,30 @@
 		sortBy,
 		sortOrder,
 		showTypeColumn = false,
+		isAdmin = false,
 		isParticipated,
 		onSort,
 		onEventClick,
 		onBookmarkToggle,
 		onParticipateToggle
 	}: Props = $props();
+
+	let copiedEventId: number | null = $state(null);
+
+	async function copyEventUrl(event: Event, e: MouseEvent) {
+		e.stopPropagation();
+		if (!event.event_url) return;
+
+		try {
+			await navigator.clipboard.writeText(event.event_url);
+			copiedEventId = event.id;
+			setTimeout(() => {
+				copiedEventId = null;
+			}, 2000);
+		} catch (err) {
+			console.error('Failed to copy URL:', err);
+		}
+	}
 
 	function getSortIcon(column: string): string {
 		if (sortBy !== column) return '↕';
