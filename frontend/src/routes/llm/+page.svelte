@@ -15,7 +15,7 @@
 	let error: string | null = null;
 
 	// 페이지네이션
-	let page = 1;
+	let currentPage = 1;
 	let pageSize = 20;
 	let total = 0;
 	let pages = 0;
@@ -75,7 +75,7 @@
 					status: getStatusFilter(),
 					caller_type: filterCallerType || undefined,
 					requested_by: filterRequestedBy || undefined,
-					page,
+					page: currentPage,
 					page_size: pageSize
 				}),
 				llmApi.getStats(),
@@ -111,7 +111,7 @@
 	}
 
 	function handleFilter() {
-		page = 1;
+		currentPage = 1;
 		selectedIds = [];
 		selectAll = false;
 		fetchData();
@@ -124,15 +124,15 @@
 	}
 
 	function prevPage() {
-		if (page > 1) {
-			page--;
+		if (currentPage > 1) {
+			currentPage--;
 			fetchData();
 		}
 	}
 
 	function nextPage() {
-		if (page < pages) {
-			page++;
+		if (currentPage < pages) {
+			currentPage++;
 			fetchData();
 		}
 	}
@@ -311,7 +311,7 @@
 		goto(url.pathname + url.search, { replaceState: true, keepFocus: true });
 
 		if (tab === 'queue' || tab === 'history') {
-			page = 1;
+			currentPage = 1;
 			selectedIds = [];
 			selectAll = false;
 			fetchData();
@@ -535,20 +535,20 @@
 			{#if pages > 1}
 				<div class="flex justify-between items-center">
 					<span class="text-sm text-gray-500">
-						전체 {total}개 중 {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, total)}
+						전체 {total}개 중 {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, total)}
 					</span>
 					<div class="flex gap-2">
 						<button
 							onclick={prevPage}
-							disabled={page === 1}
+							disabled={currentPage === 1}
 							class="btn btn-secondary btn-sm disabled:opacity-50"
 						>
 							이전
 						</button>
-						<span class="px-3 py-1.5 text-sm">{page} / {pages}</span>
+						<span class="px-3 py-1.5 text-sm">{currentPage} / {pages}</span>
 						<button
 							onclick={nextPage}
-							disabled={page >= pages}
+							disabled={currentPage >= pages}
 							class="btn btn-secondary btn-sm disabled:opacity-50"
 						>
 							다음

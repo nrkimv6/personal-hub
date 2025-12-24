@@ -11,8 +11,8 @@
 
 	interface Props {
 		show: boolean;
-		business?: Business;
-		item?: BizItem;
+		business: Business | null;
+		item: BizItem | null;
 		onClose: () => void;
 	}
 
