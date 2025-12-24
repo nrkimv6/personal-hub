@@ -171,6 +171,9 @@ class Settings(BaseSettings):
     # 프론트엔드 URL (OAuth 콜백 후 리디렉트)
     FRONTEND_URL: str = "http://localhost:5173"
 
+    # Cloudflare Tunnel 설정 (선택)
+    TUNNEL_ID: Optional[str] = None
+
     model_config = {
         "env_file": ".env",
         "case_sensitive": True

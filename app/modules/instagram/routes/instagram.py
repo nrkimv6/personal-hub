@@ -64,6 +64,7 @@ async def get_posts(
     sort_by: Optional[str] = Query(None, description="정렬 기준 (collected_at)"),
     sort_order: Optional[str] = Query("asc", description="정렬 순서 (asc/desc)"),
     is_active: Optional[bool] = Query(None, description="활성화 상태 필터 (true/false/null)"),
+    search: Optional[str] = Query(None, description="캡션 검색어"),
     page: int = Query(1, ge=1, description="페이지 번호"),
     limit: int = Query(20, ge=1, le=100, description="페이지당 개수"),
     db: Session = Depends(get_db),
@@ -85,6 +86,7 @@ async def get_posts(
         sort_by=sort_by,
         sort_order=sort_order,
         is_active=is_active,
+        search=search,
         limit=limit,
         offset=offset,
     )

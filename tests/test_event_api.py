@@ -280,13 +280,6 @@ class TestEventImportFromInstagramAPI:
             post_id=unique_id,
             account="api_test_account",
             url=f"https://instagram.com/p/{unique_id}",
-            llm_status="completed",
-            llm_tag="팝업",
-            llm_summary="API 테스트 팝업",
-            llm_event_start=date.today(),
-            llm_event_end=date.today() + timedelta(days=14),
-            llm_urls=["https://example.com/popup"],
-            llm_location={"venue_name": "테스트 장소", "address": "서울시 강남구"},
         )
         test_db_session.add(post)
         test_db_session.commit()
@@ -300,12 +293,10 @@ class TestEventImportFromInstagramAPI:
         }, headers=admin_headers)
         assert response.status_code == 201
         data = response.json()
-        assert data["title"] == "API 테스트 팝업"
-        assert data["event_type"] == "popup"
+        assert data["title"] == "api_test_account의 이벤트"  # llm_* 필드 제거로 기본 제목 사용
+        assert data["event_type"] == "event"  # 기본값
         assert data["source_type"] == "instagram"
         assert data["source_instagram_post_id"] == instagram_post.id
-        assert data["location_venue"] == "테스트 장소"
-        assert data["location_address"] == "서울시 강남구"
 
     def test_import_from_instagram_with_title(self, client, instagram_post, admin_headers):
         """커스텀 제목으로 가져오기"""
