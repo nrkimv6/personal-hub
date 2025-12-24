@@ -141,8 +141,11 @@ def mock_external_request():
 
     is_localhost_request가 False를 반환하도록 mock하여
     외부 IP에서의 요청처럼 동작하게 합니다.
+
+    여러 모듈에서 import된 함수를 모두 mock해야 합니다.
     """
     from unittest.mock import patch
 
-    with patch('app.core.auth.is_localhost_request', return_value=False):
+    with patch('app.core.auth.is_localhost_request', return_value=False), \
+         patch('app.routes.auth.is_localhost_request', return_value=False):
         yield

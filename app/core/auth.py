@@ -141,12 +141,21 @@ def is_localhost_request(request: Request) -> bool:
     """
     요청이 localhost에서 온 것인지 확인
 
+    Cloudflare Tunnel을 통해 들어오는 요청은 CF-Connecting-IP 헤더로 구분.
+    CF-Connecting-IP가 있으면 외부 요청으로 판단.
+
     Args:
         request: FastAPI Request 객체
 
     Returns:
         localhost 요청 여부
     """
+    # Cloudflare Tunnel을 통해 들어오면 CF-Connecting-IP 헤더가 있음
+    # 이 경우 실제 클라이언트 IP가 있으므로 localhost가 아님
+    cf_connecting_ip = request.headers.get("CF-Connecting-IP")
+    if cf_connecting_ip:
+        return False
+
     client = request.client
     if client is None:
         # TestClient 등 client가 None인 경우 localhost로 간주

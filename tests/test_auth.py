@@ -131,8 +131,17 @@ class TestAdminEmail:
 class TestAuthMeEndpoint:
     """GET /api/v1/auth/me 엔드포인트 테스트"""
 
-    def test_auth_me_not_logged_in(self):
-        """비로그인 상태 테스트"""
+    def test_auth_me_localhost_auto_admin(self):
+        """localhost에서는 토큰 없이도 자동 관리자 처리"""
+        # TestClient는 localhost로 인식되므로 자동 관리자
+        response = client.get("/api/v1/auth/me")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["user"]["email"] == "localhost@admin"
+        assert data["user"]["isAdmin"] is True
+
+    def test_auth_me_not_logged_in_external(self, mock_external_request):
+        """외부 요청 비로그인 상태 테스트"""
         response = client.get("/api/v1/auth/me")
         assert response.status_code == 200
         data = response.json()
@@ -162,8 +171,21 @@ class TestAuthMeEndpoint:
         assert data["user"]["email"] == "admin@example.com"
         assert data["user"]["isAdmin"] is True
 
-    def test_auth_me_invalid_token(self):
-        """유효하지 않은 토큰으로 조회"""
+    def test_auth_me_invalid_token_localhost(self):
+        """localhost에서 유효하지 않은 토큰 - 자동 관리자 처리"""
+        response = client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": "Bearer invalid.token.here"}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        # get_current_user는 유효한 토큰이면 user 반환, 아니면 None
+        # localhost이고 user가 None이면 자동 관리자 처리
+        assert data["user"]["email"] == "localhost@admin"
+        assert data["user"]["isAdmin"] is True
+
+    def test_auth_me_invalid_token_external(self, mock_external_request):
+        """외부 요청에서 유효하지 않은 토큰 - None 반환"""
         response = client.get(
             "/api/v1/auth/me",
             headers={"Authorization": "Bearer invalid.token.here"}
@@ -236,6 +258,7 @@ class TestLocalhostException:
 
         class MockRequest:
             client = MockClient()
+            headers = {}
 
         assert is_localhost_request(MockRequest()) is True
 
@@ -248,6 +271,7 @@ class TestLocalhostException:
 
         class MockRequest:
             client = MockClient()
+            headers = {}
 
         assert is_localhost_request(MockRequest()) is True
 
@@ -260,6 +284,7 @@ class TestLocalhostException:
 
         class MockRequest:
             client = MockClient()
+            headers = {}
 
         assert is_localhost_request(MockRequest()) is True
 
@@ -272,6 +297,7 @@ class TestLocalhostException:
 
         class MockRequest:
             client = MockClient()
+            headers = {}
 
         assert is_localhost_request(MockRequest()) is True
 
@@ -281,6 +307,7 @@ class TestLocalhostException:
 
         class MockRequest:
             client = None
+            headers = {}
 
         assert is_localhost_request(MockRequest()) is True
 
@@ -293,6 +320,7 @@ class TestLocalhostException:
 
         class MockRequest:
             client = MockClient()
+            headers = {}
 
         assert is_localhost_request(MockRequest()) is False
 
@@ -305,5 +333,32 @@ class TestLocalhostException:
 
         class MockRequest:
             client = MockClient()
+            headers = {}
 
         assert is_localhost_request(MockRequest()) is False
+
+    def test_is_not_localhost_cloudflare_tunnel(self):
+        """Cloudflare Tunnel을 통한 요청은 localhost가 아님"""
+        from app.core.auth import is_localhost_request
+
+        class MockClient:
+            host = "127.0.0.1"  # Tunnel은 localhost로 연결되지만
+
+        class MockRequest:
+            client = MockClient()
+            headers = {"CF-Connecting-IP": "116.42.248.226"}  # 실제 클라이언트 IP
+
+        assert is_localhost_request(MockRequest()) is False
+
+    def test_is_localhost_without_cf_header(self):
+        """CF-Connecting-IP 헤더 없는 localhost 요청"""
+        from app.core.auth import is_localhost_request
+
+        class MockClient:
+            host = "127.0.0.1"
+
+        class MockRequest:
+            client = MockClient()
+            headers = {}
+
+        assert is_localhost_request(MockRequest()) is True
