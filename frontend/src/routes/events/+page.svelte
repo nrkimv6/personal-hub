@@ -30,11 +30,15 @@
 
 	// 이벤트 상태 옵션
 	const eventStatusOptions = [
+		{ value: 'ending_today', label: '오늘 마감', color: 'bg-orange-100 text-orange-700' },
 		{ value: 'ongoing', label: '진행 중', color: 'bg-green-100 text-green-700' },
 		{ value: 'upcoming', label: '예정', color: 'bg-blue-100 text-blue-700' },
 		{ value: 'ended', label: '종료', color: 'bg-gray-100 text-gray-600' },
 		{ value: 'cancelled', label: '취소됨', color: 'bg-red-100 text-red-600' }
 	];
+
+	// 모바일 이벤트 탭 전용 필터 (오늘 마감만)
+	$: isMobileEventTab = isMobile && activeTab === 'event';
 
 	// URL 타입 옵션
 	const urlTypeOptions = [
@@ -74,6 +78,14 @@
 
 	// 모바일 필터 표시 상태
 	let showFilters = false;
+
+	// 모바일 감지
+	let isMobile = false;
+	function checkMobile() {
+		if (browser) {
+			isMobile = window.innerWidth < 768;
+		}
+	}
 
 	// 활성 필터 카운트 계산
 	$: activeFilterCount = [
@@ -124,7 +136,8 @@
 		activeTab = tab;
 		currentPage = 1;
 		if (tab === 'event') {
-			filterEventStatus = 'ongoing';
+			// 모바일에서는 '오늘 마감' 필터 고정
+			filterEventStatus = isMobile ? 'ending_today' : 'ongoing';
 		} else if (tab === 'popup') {
 			filterEventStatus = 'ongoing_or_upcoming';
 		}
@@ -566,6 +579,10 @@
 		// 로컬 참여 상태 로드
 		loadLocalParticipated();
 
+		// 모바일 감지 및 리사이즈 이벤트 등록
+		checkMobile();
+		window.addEventListener('resize', checkMobile);
+
 		// FeedCard용 태그 목록 로드
 		try {
 			availableTags = await instagramTagApi.getTags();
@@ -587,7 +604,16 @@
 			showEventModal = true;
 		}
 
+		// 모바일 + 이벤트 탭에서는 '오늘 마감' 필터 고정
+		if (isMobile && activeTab === 'event') {
+			filterEventStatus = 'ending_today';
+		}
+
 		fetchEvents();
+
+		return () => {
+			window.removeEventListener('resize', checkMobile);
+		};
 	});
 </script>
 
@@ -656,42 +682,53 @@
 		class:hidden={!showFilters}
 	>
 		<div class="p-4 space-y-4">
-			<!-- 이벤트 상태 필터 -->
-			<div class="flex flex-col gap-2">
-				<label class="text-sm font-medium text-gray-700">상태</label>
-				<div class="flex flex-wrap gap-2">
-					{#each eventStatusOptions as opt}
-						<button
-							onclick={() => setEventStatusFilter(opt.value)}
-							class="px-3 py-1.5 text-sm rounded-full transition-colors {filterEventStatus === opt.value ? opt.color + ' ring-2 ring-offset-1 ring-gray-400' : 'bg-gray-100 text-gray-600'}"
-						>
-							{opt.label}
-						</button>
-					{/each}
+			{#if isMobileEventTab}
+				<!-- 모바일 이벤트 탭: 오늘 마감 필터 고정 안내 -->
+				<div class="flex items-center gap-2 p-3 bg-orange-50 rounded-lg border border-orange-200">
+					<span class="text-orange-600 text-lg">📅</span>
+					<div>
+						<p class="text-sm font-medium text-orange-700">오늘 마감 이벤트만 표시</p>
+						<p class="text-xs text-orange-600">모바일에서는 오늘 마감 이벤트만 볼 수 있습니다</p>
+					</div>
 				</div>
-			</div>
+			{:else}
+				<!-- 이벤트 상태 필터 -->
+				<div class="flex flex-col gap-2">
+					<label class="text-sm font-medium text-gray-700">상태</label>
+					<div class="flex flex-wrap gap-2">
+						{#each eventStatusOptions as opt}
+							<button
+								onclick={() => setEventStatusFilter(opt.value)}
+								class="px-3 py-1.5 text-sm rounded-full transition-colors {filterEventStatus === opt.value ? opt.color + ' ring-2 ring-offset-1 ring-gray-400' : 'bg-gray-100 text-gray-600'}"
+							>
+								{opt.label}
+							</button>
+						{/each}
+					</div>
+				</div>
 
-			<!-- 옵션 체크박스 -->
-			<div class="flex flex-col gap-3">
-				<label class="flex items-center gap-2 cursor-pointer">
-					<input
-						type="checkbox"
-						checked={includeUnknownPeriod}
-						onchange={toggleIncludeUnknownPeriod}
-						class="w-4 h-4 text-amber-600 rounded border-gray-300 focus:ring-amber-500"
-					/>
-					<span class="text-sm text-gray-600">기간 미정 포함</span>
-				</label>
-				<label class="flex items-center gap-2 cursor-pointer">
-					<input
-						type="checkbox"
-						checked={filterBookmarked === true}
-						onchange={toggleBookmarkedFilter}
-						class="w-4 h-4 text-yellow-600 rounded border-gray-300 focus:ring-yellow-500"
-					/>
-					<span class="text-sm text-gray-600">북마크만</span>
-				</label>
-			</div>
+				<!-- 옵션 체크박스 -->
+				<div class="flex flex-col gap-3">
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input
+							type="checkbox"
+							checked={includeUnknownPeriod}
+							onchange={toggleIncludeUnknownPeriod}
+							class="w-4 h-4 text-amber-600 rounded border-gray-300 focus:ring-amber-500"
+						/>
+						<span class="text-sm text-gray-600">기간 미정 포함</span>
+					</label>
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input
+							type="checkbox"
+							checked={filterBookmarked === true}
+							onchange={toggleBookmarkedFilter}
+							class="w-4 h-4 text-yellow-600 rounded border-gray-300 focus:ring-yellow-500"
+						/>
+						<span class="text-sm text-gray-600">북마크만</span>
+					</label>
+				</div>
+			{/if}
 
 			<!-- 닫기 버튼 -->
 			<div class="pt-2 border-t border-gray-100">

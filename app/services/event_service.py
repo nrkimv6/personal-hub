@@ -111,6 +111,10 @@ class EventService:
                     conditions.append(Event.event_end.is_(None))
                 query = query.filter(or_(*conditions))
 
+            elif event_status == "ending_today":
+                # 오늘 마감: 종료일 == 오늘
+                query = query.filter(Event.event_end == today)
+
         # 총 개수
         total = query.count()
 
