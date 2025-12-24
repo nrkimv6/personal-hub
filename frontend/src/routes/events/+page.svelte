@@ -180,6 +180,7 @@
 				if (filterBookmarked !== null) params.is_bookmarked = filterBookmarked;
 				if (filterUrlType) params.url_type = filterUrlType;
 				if (filterSourceType) params.source_type = filterSourceType;
+				if (filterSearch) params.search = filterSearch;
 				if (includeUnknownPeriod) params.include_unknown_period = true;
 
 				const response = await eventApi.list(params);
@@ -212,6 +213,19 @@
 	// 북마크만 보기 토글
 	function toggleBookmarkedFilter() {
 		filterBookmarked = filterBookmarked === true ? null : true;
+		currentPage = 1;
+		fetchEvents();
+	}
+
+	// 검색 실행
+	function handleSearch() {
+		currentPage = 1;
+		fetchEvents();
+	}
+
+	// 검색어 초기화
+	function clearSearch() {
+		filterSearch = '';
 		currentPage = 1;
 		fetchEvents();
 	}
@@ -456,6 +470,8 @@
 		saveLocalParticipated();
 		// 뷰 업데이트를 위해 재할당
 		localParticipated = { ...localParticipated };
+		// events 배열도 재할당하여 UI 즉시 반영
+		events = [...events];
 	}
 
 	// 날짜 포맷팅
@@ -703,6 +719,33 @@
 		class:hidden={!showFilters}
 	>
 		<div class="p-4 space-y-4">
+			<!-- 검색 입력 -->
+			<div class="flex flex-col gap-2">
+				<label class="text-sm font-medium text-gray-700">검색</label>
+				<div class="relative">
+					<input
+						type="text"
+						bind:value={filterSearch}
+						onkeydown={(e) => e.key === 'Enter' && handleSearch()}
+						placeholder="제목, 요약, 주최자 검색..."
+						class="w-full pl-8 pr-8 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+					/>
+					<svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+					</svg>
+					{#if filterSearch}
+						<button
+							onclick={clearSearch}
+							class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+						>
+							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+							</svg>
+						</button>
+					{/if}
+				</div>
+			</div>
+
 			<!-- 이벤트 상태 필터 -->
 			<div class="flex flex-col gap-2">
 				<label class="text-sm font-medium text-gray-700">상태</label>
@@ -715,6 +758,30 @@
 							{opt.label}
 						</button>
 					{/each}
+				</div>
+			</div>
+
+			<!-- 정렬 옵션 -->
+			<div class="flex flex-col gap-2">
+				<label class="text-sm font-medium text-gray-700">정렬</label>
+				<div class="flex gap-2">
+					<select
+						bind:value={sortBy}
+						onchange={() => { currentPage = 1; fetchEvents(); }}
+						class="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+					>
+						<option value="event_end">마감일</option>
+						<option value="event_start">시작일</option>
+						<option value="announcement_date">발표일</option>
+						<option value="winner_count">당첨자수</option>
+						<option value="created_at">등록일</option>
+					</select>
+					<button
+						onclick={() => { sortOrder = sortOrder === 'asc' ? 'desc' : 'asc'; currentPage = 1; fetchEvents(); }}
+						class="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+					>
+						{sortOrder === 'asc' ? '↑ 오름차순' : '↓ 내림차순'}
+					</button>
 				</div>
 			</div>
 
@@ -756,6 +823,32 @@
 	<!-- 데스크톱 필터 영역 - 로그인 사용자만 -->
 	{#if !isAnonymous}
 	<div class="hidden md:flex mb-4 flex-wrap gap-2 items-center">
+		<!-- 검색 입력 -->
+		<div class="relative">
+			<input
+				type="text"
+				bind:value={filterSearch}
+				onkeydown={(e) => e.key === 'Enter' && handleSearch()}
+				placeholder="검색..."
+				class="w-48 pl-8 pr-8 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+			/>
+			<svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+			</svg>
+			{#if filterSearch}
+				<button
+					onclick={clearSearch}
+					class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+				>
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+					</svg>
+				</button>
+			{/if}
+		</div>
+
+		<span class="text-gray-300 mx-1">|</span>
+
 		<!-- 이벤트 상태 필터 -->
 		<span class="text-sm text-gray-500">상태:</span>
 		{#each eventStatusOptions as opt}
