@@ -39,12 +39,12 @@
 		await authStore.logout();
 	}
 
-	// 비로그인 사용자에게 보여줄 메뉴 필터링
-	function getVisibleGroups(groups: NavGroup[], loggedIn: boolean): NavGroup[] {
-		if (loggedIn) {
+	// 관리자 여부에 따라 메뉴 필터링
+	function getVisibleGroups(groups: NavGroup[], admin: boolean): NavGroup[] {
+		if (admin) {
 			return groups;
 		}
-		// 비로그인: public 아이템만 보여줌
+		// 비관리자: public 아이템만 보여줌
 		return groups
 			.map((group) => ({
 				...group,
@@ -54,7 +54,7 @@
 	}
 
 	// 필터링된 네비게이션 그룹
-	let visibleGroups = $derived(getVisibleGroups(navGroups, $isLoggedIn));
+	let visibleGroups = $derived(getVisibleGroups(navGroups, $isAdmin));
 </script>
 
 <!-- 헤더 -->

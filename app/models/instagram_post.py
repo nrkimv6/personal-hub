@@ -47,6 +47,7 @@ class InstagramPost(Base):
     # 분류 결과 참조 (Event/Popup/Uncategorized)
     classified_type = Column(String, index=True)  # 'event' | 'popup' | 'uncategorized' | NULL
     classified_id = Column(Integer)  # 각 테이블의 ID
+    classified_at = Column(DateTime, index=True)  # AI 분류 완료 시각
 
     # 관계
     crawl_run = relationship("InstagramCrawlRun", back_populates="posts")
