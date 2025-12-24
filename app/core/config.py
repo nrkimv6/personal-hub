@@ -174,6 +174,9 @@ class Settings(BaseSettings):
     # 백엔드 API URL (OAuth redirect_uri 생성용, Cloudflare Tunnel 사용 시 필수)
     API_BASE_URL: str = ""  # 예: "https://monitor.woory.day/api/v1"
 
+    # Cloudflare Tunnel 설정 (선택)
+    TUNNEL_ID: Optional[str] = None
+
     model_config = {
         "env_file": ".env",
         "case_sensitive": True

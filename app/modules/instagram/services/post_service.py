@@ -161,6 +161,7 @@ class PostService:
         sort_by: Optional[str] = None,
         sort_order: Optional[str] = "asc",
         is_active: Optional[bool] = None,
+        search: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> Tuple[List[InstagramPost], int]:
@@ -176,6 +177,7 @@ class PostService:
             sort_by: 정렬 기준 (collected_at)
             sort_order: 정렬 순서 (asc/desc)
             is_active: 활성화 상태 필터 (True/False/None)
+            search: 캡션 검색어 (LIKE 검색)
             limit: 조회 개수
             offset: 시작 위치
 
@@ -183,6 +185,10 @@ class PostService:
             (게시물 목록, 전체 개수)
         """
         query = self.db.query(InstagramPost)
+
+        # 캡션 검색어 필터 (LIKE)
+        if search:
+            query = query.filter(InstagramPost.caption.ilike(f"%{search}%"))
 
         # 활성화 상태 필터
         if is_active is not None:
