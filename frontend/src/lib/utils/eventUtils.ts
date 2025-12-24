@@ -76,12 +76,18 @@ export function truncate(text: string | null, maxLength: number): string {
 }
 
 /**
- * 이벤트가 오늘 마감인지 확인
+ * 한국 시간 기준 오늘 날짜 반환 (YYYY-MM-DD)
+ */
+function getTodayKST(): string {
+	return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' });
+}
+
+/**
+ * 이벤트가 오늘 마감인지 확인 (한국 시간 기준)
  */
 export function isEndingToday(event: Event): boolean {
 	if (!event.event_end) return false;
-	const today = new Date().toISOString().split('T')[0];
-	return event.event_end === today;
+	return event.event_end === getTodayKST();
 }
 
 /**
@@ -92,12 +98,11 @@ export function isUnknownPeriod(event: Event): boolean {
 }
 
 /**
- * 팝업이 오늘 마감인지 확인
+ * 팝업이 오늘 마감인지 확인 (한국 시간 기준)
  */
 export function isPopupEndingToday(popup: Popup): boolean {
 	if (!popup.end_date) return false;
-	const today = new Date().toISOString().split('T')[0];
-	return popup.end_date === today;
+	return popup.end_date === getTodayKST();
 }
 
 /**
