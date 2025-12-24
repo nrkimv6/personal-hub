@@ -65,6 +65,7 @@ class EventUpdate(BaseModel):
 class EventResponse(EventBase):
     """Event 응답 스키마"""
     id: int
+    thumbnail_url: Optional[str] = None  # Instagram 이미지 썸네일
     status: str
     is_bookmarked: bool
     is_participated: bool

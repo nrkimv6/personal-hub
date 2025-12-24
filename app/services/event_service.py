@@ -311,6 +311,7 @@ class EventService:
         response_data = {
             "id": event.id,
             "title": event.title,
+            "thumbnail_url": event.thumbnail_url,
             "event_type": event.event_type,
             "status": event.status,
             "event_url": event.event_url,
@@ -335,18 +336,22 @@ class EventService:
             "is_participated": event.is_participated,
             "created_at": event.created_at,
             "updated_at": event.updated_at,
-            "source_instagram_url": None,
-            "source_instagram_account": None,
+            "source_instagram_url": event.source_instagram_url,
+            "source_instagram_account": event.source_instagram_account,
         }
 
-        # Instagram 출처 정보 추가
-        if event.source_instagram_post_id:
+        # Instagram 출처 정보 추가 (이전 데이터 호환성)
+        if event.source_instagram_post_id and not response_data["source_instagram_url"]:
             post = db.query(InstagramPost).filter(
                 InstagramPost.id == event.source_instagram_post_id
             ).first()
             if post:
                 response_data["source_instagram_url"] = post.url
                 response_data["source_instagram_account"] = post.account
+                # 썸네일도 가져오기 (없는 경우)
+                if not response_data["thumbnail_url"] and post.images:
+                    images = post.images or []
+                    response_data["thumbnail_url"] = images[0].get("src") if images else None
 
         return EventResponse(**response_data)
 
