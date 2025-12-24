@@ -25,6 +25,7 @@
 
 	// 필터
 	let filterAccount = '';
+	let filterSearch = '';  // 캡션 검색어
 	let filterPostType: string | null = null;  // NORMAL, SPONSORED, SUGGESTED
 	let filterTags: string[] = [];
 	let filterDateFrom = '';
@@ -69,6 +70,7 @@
 	// 활성 필터 카운트 계산
 	$: activeFilterCount = [
 		filterAccount,
+		filterSearch,
 		filterPostType !== null,
 		filterTags.length > 0,
 		filterDateFrom,
@@ -111,6 +113,7 @@
 		try {
 			const params: Record<string, unknown> = { page: currentPage, limit };
 			if (filterAccount) params.account = filterAccount;
+			if (filterSearch) params.search = filterSearch;
 			if (filterPostType !== null) params.post_type = filterPostType;
 			if (filterTags.length > 0) params.tags = filterTags;
 			if (filterDateFrom) {
@@ -363,6 +366,7 @@
 
 	function clearFilters() {
 		filterAccount = '';
+		filterSearch = '';
 		filterPostType = null;
 		filterTags = [];
 		filterDateFrom = '';
@@ -491,9 +495,15 @@
 			<div class="hidden md:flex items-center gap-2">
 				<input
 					type="text"
-					placeholder="계정명 필터"
+					placeholder="캡션 검색"
+					bind:value={filterSearch}
+					class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm w-36"
+				/>
+				<input
+					type="text"
+					placeholder="계정명"
 					bind:value={filterAccount}
-					class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm w-32"
+					class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm w-28"
 				/>
 				<select
 					bind:value={filterPostType}
@@ -536,9 +546,15 @@
 		class:hidden={!showFilters}
 	>
 		<div class="p-4 space-y-4">
-			<!-- 계정/광고 필터 -->
+			<!-- 검색/계정/광고 필터 -->
 			<div class="flex flex-col gap-2">
 				<label class="text-sm font-medium text-gray-700">기본 필터</label>
+				<input
+					type="text"
+					placeholder="캡션 검색"
+					bind:value={filterSearch}
+					class="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+				/>
 				<input
 					type="text"
 					placeholder="계정명 필터"
