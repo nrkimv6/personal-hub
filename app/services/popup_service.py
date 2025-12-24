@@ -205,7 +205,11 @@ class PopupService:
     def import_from_instagram(
         self, db: Session, data: PopupImportFromInstagram
     ) -> Optional[PopupResponse]:
-        """Instagram 게시물에서 팝업 생성"""
+        """Instagram 게시물에서 팝업 생성.
+
+        Note: llm_* 필드가 제거되었으므로 기본 정보만으로 팝업을 생성합니다.
+        LLM 분석 결과는 claude_worker가 직접 Popup 테이블에 저장합니다.
+        """
         post = db.query(InstagramPost).filter(InstagramPost.id == data.instagram_post_id).first()
         if not post:
             return None
@@ -217,32 +221,15 @@ class PopupService:
         if existing:
             return self._to_response(existing)
 
-        # llm_urls에서 첫 번째 URL을 메인으로
-        llm_urls = post.llm_urls or []
-        official_url = llm_urls[0] if llm_urls else None
-        additional_urls = llm_urls[1:] if len(llm_urls) > 1 else []
-
-        # llm_location에서 위치 정보 추출
-        location = post.llm_location or {}
-        venue_name = location.get("venue_name")
-        address = location.get("address")
-
         # 썸네일 추출
         images = post.images or []
         thumbnail_url = images[0].get("src") if images else None
 
-        # 팝업 생성
+        # 기본 팝업 생성 (LLM 분석 데이터는 별도로 업데이트됨)
         popup = Popup(
-            title=data.title or f"{post.llm_organizer or post.account} 팝업" if post.llm_organizer else post.llm_summary or f"{post.account}의 팝업",
+            title=data.title or f"{post.account}의 팝업",
             thumbnail_url=thumbnail_url,
-            start_date=post.llm_event_start,
-            end_date=post.llm_event_end,
-            venue_name=venue_name,
-            address=address,
-            organizer=post.llm_organizer,
-            summary=post.llm_summary,
-            official_url=official_url,
-            additional_urls=additional_urls,
+            additional_urls=[],
             source_type="instagram",
             source_instagram_post_id=post.id,
             source_instagram_url=post.url,
@@ -252,11 +239,6 @@ class PopupService:
         db.add(popup)
         db.commit()
         db.refresh(popup)
-
-        # InstagramPost에 분류 정보 업데이트
-        post.classified_type = "popup"
-        post.classified_id = popup.id
-        db.commit()
 
         return self._to_response(popup)
 

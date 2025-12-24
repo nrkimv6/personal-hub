@@ -241,7 +241,11 @@ class EventService:
     def import_from_instagram(
         self, db: Session, data: EventImportFromInstagram
     ) -> Optional[EventResponse]:
-        """Instagram 게시물에서 이벤트 생성"""
+        """Instagram 게시물에서 이벤트 생성.
+
+        Note: llm_* 필드가 제거되었으므로 기본 정보만으로 이벤트를 생성합니다.
+        LLM 분석 결과는 claude_worker가 직접 Event 테이블에 저장합니다.
+        """
         post = db.query(InstagramPost).filter(InstagramPost.id == data.instagram_post_id).first()
         if not post:
             return None
@@ -253,41 +257,13 @@ class EventService:
         if existing:
             return self._to_response(db, existing)
 
-        # LLM 분류 결과에서 이벤트 정보 추출
-        event_type_map = {
-            "이벤트": "event",
-            "팝업": "popup",
-            "홍보대사": "ambassador",
-        }
-        event_type = event_type_map.get(post.llm_tag, "other")
-
-        # llm_urls에서 첫 번째 URL을 메인으로
-        llm_urls = post.llm_urls or []
-        event_url = llm_urls[0] if llm_urls else None
-        additional_urls = llm_urls[1:] if len(llm_urls) > 1 else []
-
-        # llm_location에서 위치 정보 추출
-        location = post.llm_location or {}
-        location_venue = location.get("venue_name")
-        location_address = location.get("address")
-
-        # 이벤트 생성
+        # 기본 이벤트 생성 (LLM 분석 데이터는 별도로 업데이트됨)
         event = Event(
-            title=data.title or post.llm_summary or f"{post.account}의 이벤트",
-            event_type=event_type,
-            event_url=event_url,
-            url_type=detect_url_type(event_url) if event_url else "other",
-            additional_urls=additional_urls,
-            event_start=post.llm_event_start,
-            event_end=post.llm_event_end,
-            announcement_date=post.llm_announcement_date,
-            organizer=post.llm_organizer,
-            summary=post.llm_summary,
-            prizes=post.llm_prizes or [],
-            winner_count=post.llm_winner_count,
-            purchase_required=post.llm_purchase_required,
-            location_venue=location_venue,
-            location_address=location_address,
+            title=data.title or f"{post.account}의 이벤트",
+            event_type="event",
+            url_type="other",
+            additional_urls=[],
+            prizes=[],
             source_type="instagram",
             source_instagram_post_id=post.id,
             source_url=post.url,
