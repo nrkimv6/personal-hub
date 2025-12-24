@@ -38,6 +38,7 @@ class PopupBase(BaseModel):
     # 출처
     source_type: Literal["instagram", "manual", "web"] = "manual"
     user_note: Optional[str] = None
+    input_source: Literal["ai", "human", "ai_edited"] = "human"  # 입력 출처
 
 
 class PopupCreate(PopupBase):
@@ -78,6 +79,7 @@ class PopupUpdate(BaseModel):
     status: Optional[Literal["active", "ended", "cancelled"]] = None
     is_bookmarked: Optional[bool] = None
     is_visited: Optional[bool] = None
+    input_source: Optional[Literal["ai", "human", "ai_edited"]] = None
 
 
 class PopupResponse(PopupBase):

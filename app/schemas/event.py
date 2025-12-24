@@ -28,6 +28,7 @@ class EventBase(BaseModel):
     source_url: Optional[str] = None
     source_note: Optional[str] = None
     user_note: Optional[str] = None
+    input_source: Literal["ai", "human", "ai_edited"] = "human"  # 입력 출처
 
 
 class EventCreate(EventBase):
@@ -60,6 +61,7 @@ class EventUpdate(BaseModel):
     user_note: Optional[str] = None
     is_bookmarked: Optional[bool] = None
     is_participated: Optional[bool] = None
+    input_source: Optional[Literal["ai", "human", "ai_edited"]] = None
 
 
 class EventResponse(EventBase):

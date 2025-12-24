@@ -103,9 +103,23 @@
 		>
 			<div class="p-6">
 				<div class="flex justify-between items-start mb-4">
-					<h3 class="text-lg font-bold text-gray-900">
-						{editingEvent ? '이벤트 수정' : '새 이벤트'}
-					</h3>
+					<div class="flex items-center gap-2">
+						<h3 class="text-lg font-bold text-gray-900">
+							{editingEvent ? '이벤트 수정' : '새 이벤트'}
+						</h3>
+						{#if editingEvent}
+							{@const inputSource = editingEvent.input_source || 'human'}
+							<span
+								class="px-2 py-0.5 text-xs rounded-full {inputSource === 'ai'
+									? 'bg-purple-100 text-purple-700'
+									: inputSource === 'ai_edited'
+										? 'bg-blue-100 text-blue-700'
+										: 'bg-gray-100 text-gray-600'}"
+							>
+								{inputSource === 'ai' ? 'AI 분석' : inputSource === 'ai_edited' ? 'AI+수정' : '수동 입력'}
+							</span>
+						{/if}
+					</div>
 					<button onclick={onClose} class="text-gray-400 hover:text-gray-600 text-2xl">
 						&times;
 					</button>

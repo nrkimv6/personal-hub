@@ -146,6 +146,7 @@ class PopupService:
             source_instagram_url=data.source_instagram_url,
             source_instagram_account=data.source_instagram_account,
             user_note=data.user_note,
+            input_source=data.input_source,
         )
 
         db.add(popup)
@@ -163,6 +164,11 @@ class PopupService:
             return None
 
         update_data = data.model_dump(exclude_unset=True)
+
+        # AI가 생성한 팝업을 수정하면 'ai_edited'로 변경
+        if popup.input_source == "ai" and "input_source" not in update_data:
+            update_data["input_source"] = "ai_edited"
+
         for field, value in update_data.items():
             setattr(popup, field, value)
 
@@ -281,6 +287,7 @@ class PopupService:
             source_instagram_url=popup.source_instagram_url,
             source_instagram_account=popup.source_instagram_account,
             user_note=popup.user_note,
+            input_source=popup.input_source or "human",
             status=popup.status,
             is_bookmarked=popup.is_bookmarked or False,
             is_visited=popup.is_visited or False,

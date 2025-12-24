@@ -196,6 +196,7 @@ class EventService:
             source_url=data.source_url,
             source_note=data.source_note,
             user_note=data.user_note,
+            input_source=data.input_source,
         )
 
         db.add(event)
@@ -217,6 +218,10 @@ class EventService:
         # URL이 변경되면 url_type 재분류
         if "event_url" in update_data and "url_type" not in update_data:
             update_data["url_type"] = detect_url_type(update_data["event_url"])
+
+        # AI가 생성한 이벤트를 수정하면 'ai_edited'로 변경
+        if event.input_source == "ai" and "input_source" not in update_data:
+            update_data["input_source"] = "ai_edited"
 
         for field, value in update_data.items():
             setattr(event, field, value)
@@ -332,6 +337,7 @@ class EventService:
             "user_note": event.user_note,
             "is_bookmarked": event.is_bookmarked,
             "is_participated": event.is_participated,
+            "input_source": event.input_source or "human",
             "created_at": event.created_at,
             "updated_at": event.updated_at,
             "source_instagram_url": event.source_instagram_url,

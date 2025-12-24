@@ -54,6 +54,9 @@ class Popup(Base):
     is_visited = Column(Boolean, default=False)  # 방문 완료
     user_note = Column(Text)
 
+    # 입력 출처 (AI/사람/AI수정)
+    input_source = Column(String, default="human", index=True)  # 'ai', 'human', 'ai_edited'
+
     # 상태
     status = Column(String, default="active", index=True)  # active/ended/cancelled
 

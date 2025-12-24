@@ -105,6 +105,26 @@
 		if (type === 'popup' && popup) return popup.is_visited;
 		return false;
 	}
+
+	function getInputSource(): 'ai' | 'human' | 'ai_edited' {
+		if (type === 'event' && event) return event.input_source || 'human';
+		if (type === 'popup' && popup) return popup.input_source || 'human';
+		return 'human';
+	}
+
+	function getInputSourceLabel(): string {
+		const source = getInputSource();
+		if (source === 'ai') return 'AI';
+		if (source === 'ai_edited') return 'AI+수정';
+		return '수동';
+	}
+
+	function getInputSourceColor(): string {
+		const source = getInputSource();
+		if (source === 'ai') return 'bg-purple-100 text-purple-700';
+		if (source === 'ai_edited') return 'bg-blue-100 text-blue-700';
+		return 'bg-gray-100 text-gray-600';
+	}
 </script>
 
 {#if show && item}
@@ -188,6 +208,9 @@
 							</span>
 							<span class="px-2 py-0.5 rounded-full {getEventStatusColor(getStatus())}">
 								{getEventStatusLabel(getStatus())}
+							</span>
+							<span class="px-2 py-0.5 rounded-full {getInputSourceColor()}">
+								{getInputSourceLabel()}
 							</span>
 						</div>
 						<!-- 주최/브랜드 -->
@@ -331,7 +354,7 @@
 									? 'bg-green-100 text-green-700'
 									: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
 							>
-								{isParticipated ? '✓ 참여완료' : '참여하기'}
+								{isParticipated ? '✓ 참여완료' : '참여체크'}
 							</button>
 						{:else if type === 'popup' && onVisitToggle}
 							<button
@@ -485,6 +508,9 @@
 								<span class="px-2 py-0.5 rounded-full {getEventStatusColor(getStatus())}">
 									{getEventStatusLabel(getStatus())}
 								</span>
+								<span class="px-2 py-0.5 rounded-full {getInputSourceColor()}">
+									{getInputSourceLabel()}
+								</span>
 							</div>
 							<!-- 주최/브랜드 -->
 							{#if getOrganizer()}
@@ -625,7 +651,7 @@
 										? 'bg-green-100 text-green-700'
 										: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
 								>
-									{isParticipated ? '✓ 참여완료' : '참여하기'}
+									{isParticipated ? '✓ 참여완료' : '참여체크'}
 								</button>
 							{:else if type === 'popup' && onVisitToggle}
 								<button
