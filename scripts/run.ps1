@@ -2,13 +2,22 @@
 # Starts all processes, shows logs, and stops on exit (Ctrl+C)
 
 param(
-    [switch]$Dev,        # Pass -Dev to start.ps1 for frontend foreground mode
+    [switch]$Dev,        # Dev mode: use different ports (API: 8001, Frontend: 5174)
     [switch]$SkipWorker  # Skip worker (run it separately in PyCharm debugger)
 )
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
+
+# Port settings - Dev mode uses different ports to avoid affecting production
+if ($Dev) {
+    $ApiPort = 8001
+    $FrontendPort = 5174
+} else {
+    $ApiPort = 8000
+    $FrontendPort = 5173
+}
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
@@ -41,12 +50,12 @@ try {
         Write-Host "[!] Dev mode: Frontend in foreground + backend logs" -ForegroundColor Yellow
         Write-Host ""
 
-        # Start API and Worker only (not frontend)
+        # Start API and Worker only (not frontend) with Dev flag
         $env:SKIP_FRONTEND = "true"
         if ($SkipWorker) {
             $env:SKIP_WORKER = "true"
         }
-        & $startScript
+        & $startScript -Dev
         $env:SKIP_FRONTEND = $null
         $env:SKIP_WORKER = $null
 
@@ -128,23 +137,23 @@ try {
         $frontendLogFile = Join-Path $LogDir "frontend_dev.log"
 
         # Start frontend and capture its actual PID via port
-        $FrontendPidFile = Join-Path $ProjectRoot ".pids\frontend.pid"
+        $FrontendPidFile = Join-Path $ProjectRoot ".pids\frontend_dev.pid"
         "DEV_MODE" | Out-File $FrontendPidFile -Encoding ascii
         $frontendPos = 0
 
-        # Start frontend in background
+        # Start frontend in background with VITE_API_PORT for proxy
         Start-Process -FilePath "cmd.exe" `
-            -ArgumentList "/c", "cd /d `"$FrontendDir`" && npm run dev -- --host --port 5173 > `"$frontendLogFile`" 2>&1" `
+            -ArgumentList "/c", "cd /d `"$FrontendDir`" && set VITE_API_PORT=$ApiPort && npm run dev -- --host --port $FrontendPort > `"$frontendLogFile`" 2>&1" `
             -WindowStyle Hidden
 
         # Wait for vite to start (check port with timeout)
-        Write-Host "[*] Waiting for frontend to start on port 5173..." -ForegroundColor Gray
+        Write-Host "[*] Waiting for frontend to start on port $FrontendPort..." -ForegroundColor Gray
         $maxWait = 30  # 30 seconds max
         $waited = 0
         while ($waited -lt $maxWait) {
-            $conn = Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue
+            $conn = Get-NetTCPConnection -LocalPort $FrontendPort -ErrorAction SilentlyContinue
             if ($conn) {
-                Write-Host "[+] Frontend is running on port 5173" -ForegroundColor Green
+                Write-Host "[+] Frontend is running on port $FrontendPort" -ForegroundColor Green
                 break
             }
             Start-Sleep -Seconds 1
@@ -176,7 +185,7 @@ try {
             # Tail all logs while frontend runs (check port)
             while ($true) {
                 # Check if frontend is still running via port
-                $conn = Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue
+                $conn = Get-NetTCPConnection -LocalPort $FrontendPort -ErrorAction SilentlyContinue
                 if (-not $conn) {
                     Write-Host "[!] Frontend stopped" -ForegroundColor Yellow
                     break
@@ -338,7 +347,7 @@ try {
             }
         } finally {
             # Cleanup - kill frontend via port
-            $conn = Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue
+            $conn = Get-NetTCPConnection -LocalPort $FrontendPort -ErrorAction SilentlyContinue
             if ($conn) {
                 $pids = $conn | Select-Object -ExpandProperty OwningProcess -Unique
                 foreach ($pid in $pids) {
@@ -371,7 +380,12 @@ try {
     Write-Host "[Step 3] Stopping all processes..." -ForegroundColor Yellow
     Write-Host "----------------------------------------"
 
-    & $stopScript -Force
+    # Stop the appropriate environment (dev or prod)
+    if ($Dev) {
+        & $stopScript -Force -Dev
+    } else {
+        & $stopScript -Force
+    }
 
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Green
