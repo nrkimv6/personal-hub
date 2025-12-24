@@ -8,21 +8,21 @@ import { build, files, version } from '$service-worker';
 const CACHE_NAME = `cache-${version}`;
 const ASSETS = [...build, ...files];
 
-// 설치 시 정적 자산 캐시
+// 설치 시 정적 자산 캐시 + 즉시 활성화
 self.addEventListener('install', (event) => {
 	event.waitUntil(
-		caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+		caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())
 	);
 });
 
-// 활성화 시 이전 캐시 정리
+// 활성화 시 이전 캐시 정리 + 즉시 제어권 획득
 self.addEventListener('activate', (event) => {
 	event.waitUntil(
 		caches.keys().then((keys) =>
 			Promise.all(
 				keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
 			)
-		)
+		).then(() => self.clients.claim())
 	);
 });
 

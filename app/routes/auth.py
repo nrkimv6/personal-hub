@@ -36,7 +36,10 @@ GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 
 def _get_callback_url(request: Request) -> str:
     """OAuth 콜백 URL 생성"""
-    # 실제 요청의 스킴과 호스트 사용
+    # API_BASE_URL이 설정되어 있으면 사용 (Cloudflare Tunnel 등 외부 접속용)
+    if settings.API_BASE_URL:
+        return f"{settings.API_BASE_URL.rstrip('/')}/auth/callback"
+    # 그렇지 않으면 요청 기반으로 생성 (로컬 개발용)
     return str(request.url_for("auth_callback"))
 
 

@@ -171,6 +171,9 @@ class Settings(BaseSettings):
     # 프론트엔드 URL (OAuth 콜백 후 리디렉트)
     FRONTEND_URL: str = "http://localhost:5173"
 
+    # 백엔드 API URL (OAuth redirect_uri 생성용, Cloudflare Tunnel 사용 시 필수)
+    API_BASE_URL: str = ""  # 예: "https://monitor.woory.day/api/v1"
+
     model_config = {
         "env_file": ".env",
         "case_sensitive": True
