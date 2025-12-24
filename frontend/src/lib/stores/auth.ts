@@ -33,23 +33,22 @@ function createAuthStore() {
 		subscribe,
 
 		/**
-		 * 저장된 토큰으로 인증 상태 확인
+		 * 인증 상태 확인
+		 *
+		 * localhost에서는 토큰 없이도 API를 호출하여 자동 관리자 처리
 		 */
 		async checkAuth(): Promise<void> {
 			if (!browser) return;
 
 			const token = localStorage.getItem(TOKEN_KEY);
-			if (!token) {
-				set({ ...initialState, isLoading: false });
-				return;
-			}
 
 			try {
-				const response = await fetch(`${API_BASE}/auth/me`, {
-					headers: {
-						Authorization: `Bearer ${token}`
-					}
-				});
+				const headers: HeadersInit = {};
+				if (token) {
+					headers.Authorization = `Bearer ${token}`;
+				}
+
+				const response = await fetch(`${API_BASE}/auth/me`, { headers });
 
 				if (!response.ok) {
 					throw new Error('인증 실패');
@@ -65,13 +64,17 @@ function createAuthStore() {
 						isLoading: false
 					});
 				} else {
-					// 유효하지 않은 토큰
-					localStorage.removeItem(TOKEN_KEY);
+					// 비로그인 상태
+					if (token) {
+						localStorage.removeItem(TOKEN_KEY);
+					}
 					set({ ...initialState, isLoading: false });
 				}
 			} catch {
 				// 에러 시 토큰 삭제
-				localStorage.removeItem(TOKEN_KEY);
+				if (token) {
+					localStorage.removeItem(TOKEN_KEY);
+				}
 				set({ ...initialState, isLoading: false });
 			}
 		},
