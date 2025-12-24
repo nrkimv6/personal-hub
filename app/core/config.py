@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     # 기본 설정
     APP_NAME: str = "모니터링 시스템 API"
     DEBUG: bool = True
+    APP_MODE: str = "production"  # "production" | "development"
     
     # 데이터베이스 설정
     DATABASE_URL: str = "sqlite:///./data/monitor.db"  # database 이동
