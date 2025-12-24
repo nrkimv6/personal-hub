@@ -67,6 +67,10 @@
 	// FeedCard용 태그 목록
 	let availableTags: InstagramTag[] = [];
 
+	// 모바일 피드 뷰어 탭 상태
+	type MobileViewerTab = 'info' | 'feed';
+	let mobileViewerTab: MobileViewerTab = 'info';
+
 	// 모바일 필터 표시 상태
 	let showFilters = false;
 
@@ -293,6 +297,7 @@
 		showFeedViewer = true;
 		loadingPost = true;
 		instagramPost = null;
+		mobileViewerTab = 'info';  // 탭 초기화
 
 		try {
 			if (event.source_instagram_post_id) {
@@ -499,6 +504,7 @@
 		showPopupFeedViewer = true;
 		loadingPost = true;
 		instagramPost = null;
+		mobileViewerTab = 'info';  // 탭 초기화
 
 		try {
 			if (popup.source_instagram_post_id) {
@@ -1526,198 +1532,142 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<div
-			class="flex flex-col lg:flex-row gap-4 max-w-5xl w-full mx-auto my-4"
+			class="max-w-5xl w-full mx-auto my-4"
 			onclick={(e) => e.stopPropagation()}
 		>
-			<!-- 왼쪽: FeedCard -->
-			<div class="flex-shrink-0 flex justify-center">
-				{#if loadingPost}
-					<div class="bg-white rounded-xl p-8 flex items-center justify-center w-full sm:w-[468px] h-[300px]">
-						<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
-					</div>
-				{:else if instagramPost}
-					<FeedCard
-						post={instagramPost}
-						detailMode={true}
-						onClose={closeFeedViewer}
-						onDelete={handleDeletePost}
-						onRecrawl={handleRecrawl}
-						onRequestLlmAnalysis={handleRequestLlmAnalysis}
-						{availableTags}
-						onTagsUpdate={handleTagsUpdate}
-						onLlmUpdate={handleLlmUpdate}
-					/>
-				{:else}
-					<div class="bg-white rounded-xl p-8 text-center w-full sm:w-[468px]">
-						<p class="text-gray-500 mb-4">Instagram 게시물을 불러올 수 없습니다.</p>
-						{#if viewingEvent.source_instagram_url}
-							<a
-								href={viewingEvent.source_instagram_url}
-								target="_blank"
-								rel="noopener noreferrer"
-								class="btn btn-primary btn-sm"
+			<!-- 데스크톱 레이아웃: lg 이상 -->
+			<div class="hidden lg:flex gap-4">
+				<!-- 왼쪽: AI 분석 (이벤트 정보) -->
+				<div class="bg-white rounded-xl p-4 w-80 shrink-0 max-h-[85vh] overflow-y-auto">
+					<div class="flex items-center justify-between mb-3">
+						<h4 class="font-semibold text-sm text-gray-900 flex items-center gap-2">
+							<svg class="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+							</svg>
+							AI 분석
+						</h4>
+						<div class="flex items-center gap-2">
+							<button
+								onclick={openEditFromViewer}
+								class="text-xs text-purple-600 hover:text-purple-800 underline"
 							>
-								Instagram에서 보기
-							</a>
-						{/if}
-					</div>
-				{/if}
-			</div>
-
-			<!-- 오른쪽: 이벤트 정보 패널 -->
-			<div class="bg-white rounded-xl p-4 flex-1 lg:max-w-sm">
-				<div class="flex items-center justify-between mb-4">
-					<h3 class="text-lg font-bold text-gray-900">이벤트 정보</h3>
-					<button
-						onclick={openEditFromViewer}
-						class="text-sm text-blue-600 hover:text-blue-800 underline"
-					>
-						수정
-					</button>
-				</div>
-
-				<div class="space-y-3 text-sm">
-					<!-- 제목 -->
-					<div>
-						<span class="text-gray-500 text-xs">제목</span>
-						<p class="font-medium text-gray-900">{viewingEvent.title}</p>
+								수정
+							</button>
+							<button
+								onclick={closeFeedViewer}
+								class="p-1 hover:bg-gray-100 rounded-full"
+								aria-label="닫기"
+							>
+								<svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+								</svg>
+							</button>
+						</div>
 					</div>
 
-					<!-- 유형/상태 -->
-					<div class="flex gap-2">
-						<span class="px-2 py-0.5 text-xs rounded {viewingEvent.event_type === 'popup' ? 'bg-pink-100 text-pink-700' : 'bg-purple-100 text-purple-700'}">
-							{viewingEvent.event_type === 'popup' ? '팝업' : '이벤트'}
-						</span>
-						<span class="px-2 py-0.5 text-xs rounded-full {getEventStatusColor(viewingEvent.event_status)}">
-							{eventStatusOptions.find(o => o.value === viewingEvent.event_status)?.label}
-						</span>
-					</div>
-
-					<!-- 기간 -->
-					{#if viewingEvent.event_start || viewingEvent.event_end}
-						<div>
-							<span class="text-gray-500 text-xs">기간</span>
-							<p class="text-gray-900">
-								{viewingEvent.event_start || '?'} ~ {viewingEvent.event_end || '?'}
-								{#if viewingEvent.days_remaining !== null}
-									<span class="ml-2 text-xs {viewingEvent.days_remaining === 0 ? 'text-orange-600 font-bold' : viewingEvent.days_remaining > 0 ? 'text-blue-600' : 'text-gray-400'}">
-										({getDaysRemaining(viewingEvent)})
-									</span>
-								{/if}
-							</p>
+					<div class="space-y-2 text-xs bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-3">
+						<!-- 분류 -->
+						<div class="flex items-center gap-2">
+							<span class="text-gray-500 w-12">분류:</span>
+							<span class="px-2 py-0.5 font-medium rounded-full bg-purple-100 text-purple-700">
+								{viewingEvent.event_type === 'popup' ? '팝업' : '이벤트'}
+							</span>
+							<span class="px-2 py-0.5 rounded-full {getEventStatusColor(viewingEvent.event_status)}">
+								{eventStatusOptions.find(o => o.value === viewingEvent.event_status)?.label}
+							</span>
 						</div>
-					{/if}
-
-					<!-- 발표일 -->
-					{#if viewingEvent.announcement_date}
-						<div>
-							<span class="text-gray-500 text-xs">발표일</span>
-							<p class="text-gray-900">{viewingEvent.announcement_date}</p>
-						</div>
-					{/if}
-
-					<!-- 주최 -->
-					{#if viewingEvent.organizer}
-						<div>
-							<span class="text-gray-500 text-xs">주최</span>
-							<p class="font-medium text-blue-600">{viewingEvent.organizer}</p>
-						</div>
-					{/if}
-
-					<!-- 경품 -->
-					{#if viewingEvent.prizes && viewingEvent.prizes.length > 0}
-						<div>
-							<span class="text-gray-500 text-xs">경품</span>
-							<div class="flex flex-wrap gap-1 mt-1">
-								{#each viewingEvent.prizes as prize}
-									<span class="px-2 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded">{prize}</span>
-								{/each}
-							</div>
-						</div>
-					{/if}
-
-					<!-- 당첨자/조건 -->
-					<div class="flex gap-4">
-						{#if viewingEvent.winner_count}
-							<div>
-								<span class="text-gray-500 text-xs">당첨자</span>
-								<p class="font-medium text-purple-600">{viewingEvent.winner_count}명</p>
+						<!-- 주최 -->
+						{#if viewingEvent.organizer}
+							<div class="flex items-center gap-2">
+								<span class="text-gray-500 w-12">주최:</span>
+								<span class="text-gray-900">{viewingEvent.organizer}</span>
 							</div>
 						{/if}
-						{#if viewingEvent.purchase_required}
-							<div>
-								<span class="text-gray-500 text-xs">조건</span>
-								<p>
-									{#if viewingEvent.purchase_required === 'yes_all'}
-										<span class="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded">구매필수</span>
-									{:else if viewingEvent.purchase_required === 'yes_partial'}
-										<span class="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded">부분구매</span>
-									{:else}
-										<span class="text-xs bg-green-100 text-green-600 px-1.5 py-0.5 rounded">무료</span>
+						<!-- 기간 -->
+						{#if viewingEvent.event_start || viewingEvent.event_end}
+							<div class="flex items-center gap-2">
+								<span class="text-gray-500 w-12">기간:</span>
+								<span class="text-gray-900">
+									{viewingEvent.event_start || '?'} ~ {viewingEvent.event_end || '?'}
+									{#if viewingEvent.days_remaining !== null}
+										<span class="ml-1 {viewingEvent.days_remaining === 0 ? 'text-orange-600 font-bold' : viewingEvent.days_remaining > 0 ? 'text-blue-600' : 'text-gray-400'}">
+											({getDaysRemaining(viewingEvent)})
+										</span>
 									{/if}
-								</p>
+								</span>
+							</div>
+						{/if}
+						<!-- 발표일 -->
+						{#if viewingEvent.announcement_date}
+							<div class="flex items-center gap-2">
+								<span class="text-gray-500 w-12">발표일:</span>
+								<span class="text-gray-900">{viewingEvent.announcement_date}</span>
+							</div>
+						{/if}
+						<!-- 구매조건 -->
+						{#if viewingEvent.purchase_required}
+							<div class="flex items-center gap-2">
+								<span class="text-gray-500 w-12">구매:</span>
+								<span class="px-1.5 py-0.5 rounded {viewingEvent.purchase_required === 'no' ? 'bg-green-100 text-green-700' : viewingEvent.purchase_required === 'yes_all' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}">
+									{viewingEvent.purchase_required === 'no' ? '불필요' : viewingEvent.purchase_required === 'yes_all' ? '전체 필요' : '부분 필요'}
+								</span>
+							</div>
+						{/if}
+						<!-- 당첨자 -->
+						{#if viewingEvent.winner_count}
+							<div class="flex items-center gap-2">
+								<span class="text-gray-500 w-12">당첨자:</span>
+								<span class="text-gray-900">{viewingEvent.winner_count}명</span>
+							</div>
+						{/if}
+						<!-- 경품 -->
+						{#if viewingEvent.prizes && viewingEvent.prizes.length > 0}
+							<div class="flex items-start gap-2">
+								<span class="text-gray-500 w-12 shrink-0">경품:</span>
+								<div class="flex flex-wrap gap-1">
+									{#each viewingEvent.prizes as prize}
+										<span class="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded">{prize}</span>
+									{/each}
+								</div>
+							</div>
+						{/if}
+						<!-- 요약 -->
+						{#if viewingEvent.summary}
+							<div class="flex items-start gap-2">
+								<span class="text-gray-500 w-12 shrink-0">요약:</span>
+								<p class="text-gray-700">{viewingEvent.summary}</p>
 							</div>
 						{/if}
 					</div>
 
-					<!-- 위치 (팝업) -->
-					{#if viewingEvent.event_type === 'popup' && (viewingEvent.location_venue || viewingEvent.location_address)}
-						<div>
-							<span class="text-gray-500 text-xs">위치</span>
-							<p class="text-gray-900">
-								{#if viewingEvent.location_venue}
-									<span class="font-medium">{viewingEvent.location_venue}</span>
-								{/if}
-								{#if viewingEvent.location_address}
-									<span class="text-gray-600 text-xs block">{viewingEvent.location_address}</span>
-								{/if}
-							</p>
-						</div>
-					{/if}
-
-					<!-- 요약 -->
-					{#if viewingEvent.summary}
-						<div>
-							<span class="text-gray-500 text-xs">요약</span>
-							<p class="text-gray-700 text-xs leading-relaxed">{viewingEvent.summary}</p>
-						</div>
-					{/if}
-
-					<!-- 링크들 -->
-					<div class="pt-3 border-t border-gray-100 space-y-2">
-						{#if viewingEvent.event_url}
+					<!-- 링크 -->
+					{#if viewingEvent.event_url}
+						<div class="mt-3 pt-3 border-t border-gray-100">
 							<a
 								href={viewingEvent.event_url}
 								target="_blank"
 								rel="noopener noreferrer"
-								class="block text-sm text-blue-600 hover:underline truncate"
+								class="flex items-center gap-2 text-sm text-blue-600 hover:underline"
 							>
-								이벤트 참여 링크
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+								</svg>
+								이벤트 참여
 							</a>
-						{/if}
-						{#if viewingEvent.source_instagram_url}
-							<a
-								href={viewingEvent.source_instagram_url}
-								target="_blank"
-								rel="noopener noreferrer"
-								class="block text-sm text-pink-600 hover:underline"
-							>
-								Instagram 원본 보기
-							</a>
-						{/if}
-					</div>
+						</div>
+					{/if}
 
 					<!-- 북마크/참여 -->
-					<div class="pt-3 border-t border-gray-100 flex gap-2">
+					<div class="mt-3 pt-3 border-t border-gray-100 flex gap-2">
 						<button
 							onclick={(e) => { e.stopPropagation(); toggleBookmark(viewingEvent!, e); }}
-							class="flex-1 py-2 text-sm rounded transition-colors {viewingEvent.is_bookmarked ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+							class="flex-1 py-2 text-xs rounded transition-colors {viewingEvent.is_bookmarked ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
 						>
 							{viewingEvent.is_bookmarked ? '★ 북마크됨' : '☆ 북마크'}
 						</button>
 						<button
 							onclick={(e) => { e.stopPropagation(); toggleParticipate(viewingEvent!, e); }}
-							class="flex-1 py-2 text-sm rounded transition-colors {isParticipated(viewingEvent) ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+							class="flex-1 py-2 text-xs rounded transition-colors {isParticipated(viewingEvent) ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
 						>
 							{isParticipated(viewingEvent) ? '✓ 참여완료' : '참여하기'}
 						</button>
@@ -1726,11 +1676,246 @@
 					<!-- 삭제 -->
 					<button
 						onclick={() => { deleteEvent(viewingEvent!.id); closeFeedViewer(); }}
-						class="w-full py-2 text-sm text-red-600 hover:bg-red-50 rounded transition-colors"
+						class="w-full mt-2 py-2 text-xs text-red-600 hover:bg-red-50 rounded transition-colors"
 					>
 						이벤트 삭제
 					</button>
 				</div>
+
+				<!-- 오른쪽: FeedCard -->
+				<div class="flex-shrink-0 flex justify-center">
+					{#if loadingPost}
+						<div class="bg-white rounded-xl p-8 flex items-center justify-center w-[468px] h-[300px]">
+							<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
+						</div>
+					{:else if instagramPost}
+						<FeedCard
+							post={instagramPost}
+							detailMode={true}
+							onClose={closeFeedViewer}
+							onDelete={handleDeletePost}
+							onRecrawl={handleRecrawl}
+							onRequestLlmAnalysis={handleRequestLlmAnalysis}
+							{availableTags}
+							onTagsUpdate={handleTagsUpdate}
+							onLlmUpdate={handleLlmUpdate}
+						/>
+					{:else}
+						<div class="bg-white rounded-xl p-8 text-center w-[468px]">
+							<p class="text-gray-500 mb-4">Instagram 게시물을 불러올 수 없습니다.</p>
+							{#if viewingEvent.source_instagram_url}
+								<a
+									href={viewingEvent.source_instagram_url}
+									target="_blank"
+									rel="noopener noreferrer"
+									class="btn btn-primary btn-sm"
+								>
+									Instagram에서 보기
+								</a>
+							{/if}
+						</div>
+					{/if}
+				</div>
+			</div>
+
+			<!-- 모바일 레이아웃: lg 미만 -->
+			<div class="lg:hidden">
+				<!-- 탭 헤더 -->
+				<div class="flex bg-white rounded-t-xl border-b border-gray-200">
+					<button
+						onclick={() => mobileViewerTab = 'info'}
+						class="flex-1 py-3 text-sm font-medium transition-colors {mobileViewerTab === 'info' ? 'border-b-2 border-purple-600 text-purple-600' : 'text-gray-500'}"
+					>
+						AI 분석
+					</button>
+					<button
+						onclick={() => mobileViewerTab = 'feed'}
+						class="flex-1 py-3 text-sm font-medium transition-colors {mobileViewerTab === 'feed' ? 'border-b-2 border-purple-600 text-purple-600' : 'text-gray-500'}"
+					>
+						원본 피드
+					</button>
+					<button
+						onclick={closeFeedViewer}
+						class="px-4 py-3 text-gray-500 hover:text-gray-700"
+						aria-label="닫기"
+					>
+						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+						</svg>
+					</button>
+				</div>
+
+				<!-- 탭 내용 -->
+				{#if mobileViewerTab === 'info'}
+					<!-- AI 분석 탭 -->
+					<div class="bg-white rounded-b-xl p-4">
+						<div class="flex items-center justify-between mb-3">
+							<h4 class="font-semibold text-sm text-gray-900 flex items-center gap-2">
+								<svg class="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+								</svg>
+								AI 분석
+							</h4>
+							<button
+								onclick={openEditFromViewer}
+								class="text-xs text-purple-600 hover:text-purple-800 underline"
+							>
+								수정
+							</button>
+						</div>
+
+						<div class="space-y-2 text-xs bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-3">
+							<!-- 분류 -->
+							<div class="flex items-center gap-2">
+								<span class="text-gray-500 w-12">분류:</span>
+								<span class="px-2 py-0.5 font-medium rounded-full bg-purple-100 text-purple-700">
+									{viewingEvent.event_type === 'popup' ? '팝업' : '이벤트'}
+								</span>
+								<span class="px-2 py-0.5 rounded-full {getEventStatusColor(viewingEvent.event_status)}">
+									{eventStatusOptions.find(o => o.value === viewingEvent.event_status)?.label}
+								</span>
+							</div>
+							<!-- 주최 -->
+							{#if viewingEvent.organizer}
+								<div class="flex items-center gap-2">
+									<span class="text-gray-500 w-12">주최:</span>
+									<span class="text-gray-900">{viewingEvent.organizer}</span>
+								</div>
+							{/if}
+							<!-- 기간 -->
+							{#if viewingEvent.event_start || viewingEvent.event_end}
+								<div class="flex items-center gap-2">
+									<span class="text-gray-500 w-12">기간:</span>
+									<span class="text-gray-900">
+										{viewingEvent.event_start || '?'} ~ {viewingEvent.event_end || '?'}
+										{#if viewingEvent.days_remaining !== null}
+											<span class="ml-1 {viewingEvent.days_remaining === 0 ? 'text-orange-600 font-bold' : viewingEvent.days_remaining > 0 ? 'text-blue-600' : 'text-gray-400'}">
+												({getDaysRemaining(viewingEvent)})
+											</span>
+										{/if}
+									</span>
+								</div>
+							{/if}
+							<!-- 발표일 -->
+							{#if viewingEvent.announcement_date}
+								<div class="flex items-center gap-2">
+									<span class="text-gray-500 w-12">발표일:</span>
+									<span class="text-gray-900">{viewingEvent.announcement_date}</span>
+								</div>
+							{/if}
+							<!-- 구매조건 -->
+							{#if viewingEvent.purchase_required}
+								<div class="flex items-center gap-2">
+									<span class="text-gray-500 w-12">구매:</span>
+									<span class="px-1.5 py-0.5 rounded {viewingEvent.purchase_required === 'no' ? 'bg-green-100 text-green-700' : viewingEvent.purchase_required === 'yes_all' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}">
+										{viewingEvent.purchase_required === 'no' ? '불필요' : viewingEvent.purchase_required === 'yes_all' ? '전체 필요' : '부분 필요'}
+									</span>
+								</div>
+							{/if}
+							<!-- 당첨자 -->
+							{#if viewingEvent.winner_count}
+								<div class="flex items-center gap-2">
+									<span class="text-gray-500 w-12">당첨자:</span>
+									<span class="text-gray-900">{viewingEvent.winner_count}명</span>
+								</div>
+							{/if}
+							<!-- 경품 -->
+							{#if viewingEvent.prizes && viewingEvent.prizes.length > 0}
+								<div class="flex items-start gap-2">
+									<span class="text-gray-500 w-12 shrink-0">경품:</span>
+									<div class="flex flex-wrap gap-1">
+										{#each viewingEvent.prizes as prize}
+											<span class="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded">{prize}</span>
+										{/each}
+									</div>
+								</div>
+							{/if}
+							<!-- 요약 -->
+							{#if viewingEvent.summary}
+								<div class="flex items-start gap-2">
+									<span class="text-gray-500 w-12 shrink-0">요약:</span>
+									<p class="text-gray-700">{viewingEvent.summary}</p>
+								</div>
+							{/if}
+						</div>
+
+						<!-- 링크 -->
+						{#if viewingEvent.event_url}
+							<div class="mt-3 pt-3 border-t border-gray-100">
+								<a
+									href={viewingEvent.event_url}
+									target="_blank"
+									rel="noopener noreferrer"
+									class="flex items-center gap-2 text-sm text-blue-600 hover:underline"
+								>
+									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+									</svg>
+									이벤트 참여
+								</a>
+							</div>
+						{/if}
+
+						<!-- 북마크/참여 -->
+						<div class="mt-3 pt-3 border-t border-gray-100 flex gap-2">
+							<button
+								onclick={(e) => { e.stopPropagation(); toggleBookmark(viewingEvent!, e); }}
+								class="flex-1 py-2 text-sm rounded transition-colors {viewingEvent.is_bookmarked ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+							>
+								{viewingEvent.is_bookmarked ? '★ 북마크됨' : '☆ 북마크'}
+							</button>
+							<button
+								onclick={(e) => { e.stopPropagation(); toggleParticipate(viewingEvent!, e); }}
+								class="flex-1 py-2 text-sm rounded transition-colors {isParticipated(viewingEvent) ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+							>
+								{isParticipated(viewingEvent) ? '✓ 참여완료' : '참여하기'}
+							</button>
+						</div>
+
+						<!-- 삭제 -->
+						<button
+							onclick={() => { deleteEvent(viewingEvent!.id); closeFeedViewer(); }}
+							class="w-full mt-2 py-2 text-sm text-red-600 hover:bg-red-50 rounded transition-colors"
+						>
+							이벤트 삭제
+						</button>
+					</div>
+				{:else}
+					<!-- 원본 피드 탭 -->
+					<div class="flex justify-center py-4">
+						{#if loadingPost}
+							<div class="bg-white rounded-xl p-8 flex items-center justify-center w-full max-w-[468px] h-[300px]">
+								<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
+							</div>
+						{:else if instagramPost}
+							<FeedCard
+								post={instagramPost}
+								detailMode={true}
+								onClose={closeFeedViewer}
+								onDelete={handleDeletePost}
+								onRecrawl={handleRecrawl}
+								onRequestLlmAnalysis={handleRequestLlmAnalysis}
+								{availableTags}
+								onTagsUpdate={handleTagsUpdate}
+								onLlmUpdate={handleLlmUpdate}
+							/>
+						{:else}
+							<div class="bg-white rounded-xl p-8 text-center w-full max-w-[468px]">
+								<p class="text-gray-500 mb-4">Instagram 게시물을 불러올 수 없습니다.</p>
+								{#if viewingEvent.source_instagram_url}
+									<a
+										href={viewingEvent.source_instagram_url}
+										target="_blank"
+										rel="noopener noreferrer"
+										class="btn btn-primary btn-sm"
+									>
+										Instagram에서 보기
+									</a>
+								{/if}
+							</div>
+						{/if}
+					</div>
+				{/if}
 			</div>
 		</div>
 	</div>
@@ -1749,148 +1934,302 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<div
-			class="flex flex-col lg:flex-row gap-4 max-w-5xl w-full mx-auto my-4"
+			class="max-w-5xl w-full mx-auto my-4"
 			onclick={(e) => e.stopPropagation()}
 		>
-			<!-- 왼쪽: FeedCard -->
-			<div class="flex-shrink-0 flex justify-center">
-				{#if loadingPost}
-					<div class="bg-white rounded-xl p-8 flex items-center justify-center w-full sm:w-[468px] h-[300px]">
-						<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
+			<!-- 데스크톱 레이아웃: lg 이상 -->
+			<div class="hidden lg:flex gap-4">
+				<!-- 왼쪽: AI 분석 (팝업 정보) -->
+				<div class="bg-white rounded-xl p-4 w-80 shrink-0 max-h-[85vh] overflow-y-auto">
+					<div class="flex items-center justify-between mb-3">
+						<h4 class="font-semibold text-sm text-gray-900 flex items-center gap-2">
+							<svg class="w-4 h-4 text-pink-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+							</svg>
+							AI 분석
+						</h4>
+						<button
+							onclick={closePopupFeedViewer}
+							class="p-1 hover:bg-gray-100 rounded-full"
+							aria-label="닫기"
+						>
+							<svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+							</svg>
+						</button>
 					</div>
-				{:else if instagramPost}
-					<FeedCard
-						post={instagramPost}
-						detailMode={true}
-						onClose={closePopupFeedViewer}
-						onDelete={handleDeletePost}
-						onRecrawl={handleRecrawl}
-						onRequestLlmAnalysis={handleRequestLlmAnalysis}
-						{availableTags}
-						onTagsUpdate={handleTagsUpdate}
-						onLlmUpdate={handleLlmUpdate}
-					/>
-				{:else}
-					<div class="bg-white rounded-xl p-8 text-center w-full sm:w-[468px]">
-						<p class="text-gray-500 mb-4">Instagram 게시물을 불러올 수 없습니다.</p>
-						{#if viewingPopup.source_instagram_url}
-							<a
-								href={viewingPopup.source_instagram_url}
-								target="_blank"
-								rel="noopener noreferrer"
-								class="btn btn-primary btn-sm"
-							>
-								Instagram에서 보기
-							</a>
+
+					<div class="space-y-2 text-xs bg-gradient-to-r from-pink-50 to-purple-50 rounded-lg p-3">
+						<!-- 분류 -->
+						<div class="flex items-center gap-2">
+							<span class="text-gray-500 w-12">분류:</span>
+							<span class="px-2 py-0.5 font-medium rounded-full bg-pink-100 text-pink-700">팝업</span>
+							<span class="px-2 py-0.5 rounded-full {getEventStatusColor(viewingPopup.popup_status)}">
+								{eventStatusOptions.find(o => o.value === viewingPopup.popup_status)?.label}
+							</span>
+						</div>
+						<!-- 브랜드/주최 -->
+						{#if viewingPopup.brand || viewingPopup.organizer}
+							<div class="flex items-center gap-2">
+								<span class="text-gray-500 w-12">브랜드:</span>
+								<span class="text-gray-900">{viewingPopup.brand || viewingPopup.organizer}</span>
+							</div>
+						{/if}
+						<!-- 기간 -->
+						{#if viewingPopup.start_date || viewingPopup.end_date}
+							<div class="flex items-center gap-2">
+								<span class="text-gray-500 w-12">기간:</span>
+								<span class="text-gray-900">{viewingPopup.start_date || '?'} ~ {viewingPopup.end_date || '?'}</span>
+							</div>
+						{/if}
+						<!-- 위치 -->
+						{#if viewingPopup.venue_name || viewingPopup.address}
+							<div class="flex items-start gap-2">
+								<span class="text-gray-500 w-12 shrink-0">위치:</span>
+								<div>
+									{#if viewingPopup.venue_name}
+										<span class="text-gray-900 font-medium">{viewingPopup.venue_name}</span>
+									{/if}
+									{#if viewingPopup.address}
+										<span class="text-gray-600 block">{viewingPopup.address}</span>
+									{/if}
+								</div>
+							</div>
+						{/if}
+						<!-- 요약 -->
+						{#if viewingPopup.summary}
+							<div class="flex items-start gap-2">
+								<span class="text-gray-500 w-12 shrink-0">요약:</span>
+								<p class="text-gray-700">{viewingPopup.summary}</p>
+							</div>
 						{/if}
 					</div>
-				{/if}
-			</div>
 
-			<!-- 오른쪽: 팝업 정보 패널 -->
-			<div class="bg-white rounded-xl p-4 flex-1 lg:max-w-sm">
-				<div class="flex items-center justify-between mb-4">
-					<h3 class="text-lg font-bold text-gray-900">팝업 정보</h3>
-				</div>
-
-				<div class="space-y-3 text-sm">
-					<!-- 제목 -->
-					<div>
-						<span class="text-gray-500 text-xs">제목</span>
-						<p class="font-medium text-gray-900">{viewingPopup.title}</p>
-					</div>
-
-					<!-- 상태 -->
-					<div class="flex gap-2">
-						<span class="px-2 py-0.5 text-xs rounded bg-pink-100 text-pink-700">
-							팝업
-						</span>
-						<span class="px-2 py-0.5 text-xs rounded-full {getEventStatusColor(viewingPopup.popup_status)}">
-							{eventStatusOptions.find(o => o.value === viewingPopup.popup_status)?.label}
-						</span>
-					</div>
-
-					<!-- 기간 -->
-					{#if viewingPopup.start_date || viewingPopup.end_date}
-						<div>
-							<span class="text-gray-500 text-xs">기간</span>
-							<p class="text-gray-900">
-								{viewingPopup.start_date || '?'} ~ {viewingPopup.end_date || '?'}
-							</p>
-						</div>
-					{/if}
-
-					<!-- 브랜드/주최 -->
-					{#if viewingPopup.brand || viewingPopup.organizer}
-						<div>
-							<span class="text-gray-500 text-xs">브랜드/주최</span>
-							<p class="font-medium text-blue-600">{viewingPopup.brand || viewingPopup.organizer}</p>
-						</div>
-					{/if}
-
-					<!-- 위치 -->
-					{#if viewingPopup.venue_name || viewingPopup.address}
-						<div>
-							<span class="text-gray-500 text-xs">위치</span>
-							<p class="text-gray-900">
-								{#if viewingPopup.venue_name}
-									<span class="font-medium">{viewingPopup.venue_name}</span>
-								{/if}
-								{#if viewingPopup.address}
-									<span class="text-gray-600 text-xs block">{viewingPopup.address}</span>
-								{/if}
-							</p>
-						</div>
-					{/if}
-
-					<!-- 요약 -->
-					{#if viewingPopup.summary}
-						<div>
-							<span class="text-gray-500 text-xs">요약</span>
-							<p class="text-gray-700 text-xs leading-relaxed">{viewingPopup.summary}</p>
-						</div>
-					{/if}
-
-					<!-- 링크들 -->
-					<div class="pt-3 border-t border-gray-100 space-y-2">
-						{#if viewingPopup.official_url}
+					<!-- 링크 -->
+					{#if viewingPopup.official_url}
+						<div class="mt-3 pt-3 border-t border-gray-100">
 							<a
 								href={viewingPopup.official_url}
 								target="_blank"
 								rel="noopener noreferrer"
-								class="block text-sm text-blue-600 hover:underline truncate"
+								class="flex items-center gap-2 text-sm text-blue-600 hover:underline"
 							>
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+								</svg>
 								공식 사이트
 							</a>
-						{/if}
-						{#if viewingPopup.source_instagram_url}
-							<a
-								href={viewingPopup.source_instagram_url}
-								target="_blank"
-								rel="noopener noreferrer"
-								class="block text-sm text-pink-600 hover:underline"
-							>
-								Instagram 원본 보기
-							</a>
-						{/if}
-					</div>
+						</div>
+					{/if}
 
 					<!-- 북마크/방문 -->
-					<div class="pt-3 border-t border-gray-100 flex gap-2">
+					<div class="mt-3 pt-3 border-t border-gray-100 flex gap-2">
 						<button
 							onclick={(e) => { e.stopPropagation(); togglePopupBookmark(viewingPopup!, e); }}
-							class="flex-1 py-2 text-sm rounded transition-colors {viewingPopup.is_bookmarked ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+							class="flex-1 py-2 text-xs rounded transition-colors {viewingPopup.is_bookmarked ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
 						>
 							{viewingPopup.is_bookmarked ? '★ 북마크됨' : '☆ 북마크'}
 						</button>
 						<button
 							onclick={(e) => { e.stopPropagation(); togglePopupVisited(viewingPopup!, e); }}
-							class="flex-1 py-2 text-sm rounded transition-colors {viewingPopup.is_visited ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+							class="flex-1 py-2 text-xs rounded transition-colors {viewingPopup.is_visited ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
 						>
 							{viewingPopup.is_visited ? '✓ 방문완료' : '방문하기'}
 						</button>
 					</div>
 				</div>
+
+				<!-- 오른쪽: FeedCard -->
+				<div class="flex-shrink-0 flex justify-center">
+					{#if loadingPost}
+						<div class="bg-white rounded-xl p-8 flex items-center justify-center w-[468px] h-[300px]">
+							<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-pink-600"></div>
+						</div>
+					{:else if instagramPost}
+						<FeedCard
+							post={instagramPost}
+							detailMode={true}
+							onClose={closePopupFeedViewer}
+							onDelete={handleDeletePost}
+							onRecrawl={handleRecrawl}
+							onRequestLlmAnalysis={handleRequestLlmAnalysis}
+							{availableTags}
+							onTagsUpdate={handleTagsUpdate}
+							onLlmUpdate={handleLlmUpdate}
+						/>
+					{:else}
+						<div class="bg-white rounded-xl p-8 text-center w-[468px]">
+							<p class="text-gray-500 mb-4">Instagram 게시물을 불러올 수 없습니다.</p>
+							{#if viewingPopup.source_instagram_url}
+								<a
+									href={viewingPopup.source_instagram_url}
+									target="_blank"
+									rel="noopener noreferrer"
+									class="btn btn-primary btn-sm"
+								>
+									Instagram에서 보기
+								</a>
+							{/if}
+						</div>
+					{/if}
+				</div>
+			</div>
+
+			<!-- 모바일 레이아웃: lg 미만 -->
+			<div class="lg:hidden">
+				<!-- 탭 헤더 -->
+				<div class="flex bg-white rounded-t-xl border-b border-gray-200">
+					<button
+						onclick={() => mobileViewerTab = 'info'}
+						class="flex-1 py-3 text-sm font-medium transition-colors {mobileViewerTab === 'info' ? 'border-b-2 border-pink-600 text-pink-600' : 'text-gray-500'}"
+					>
+						AI 분석
+					</button>
+					<button
+						onclick={() => mobileViewerTab = 'feed'}
+						class="flex-1 py-3 text-sm font-medium transition-colors {mobileViewerTab === 'feed' ? 'border-b-2 border-pink-600 text-pink-600' : 'text-gray-500'}"
+					>
+						원본 피드
+					</button>
+					<button
+						onclick={closePopupFeedViewer}
+						class="px-4 py-3 text-gray-500 hover:text-gray-700"
+						aria-label="닫기"
+					>
+						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+						</svg>
+					</button>
+				</div>
+
+				<!-- 탭 내용 -->
+				{#if mobileViewerTab === 'info'}
+					<!-- AI 분석 탭 -->
+					<div class="bg-white rounded-b-xl p-4">
+						<div class="flex items-center justify-between mb-3">
+							<h4 class="font-semibold text-sm text-gray-900 flex items-center gap-2">
+								<svg class="w-4 h-4 text-pink-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+								</svg>
+								AI 분석
+							</h4>
+						</div>
+
+						<div class="space-y-2 text-xs bg-gradient-to-r from-pink-50 to-purple-50 rounded-lg p-3">
+							<!-- 분류 -->
+							<div class="flex items-center gap-2">
+								<span class="text-gray-500 w-12">분류:</span>
+								<span class="px-2 py-0.5 font-medium rounded-full bg-pink-100 text-pink-700">팝업</span>
+								<span class="px-2 py-0.5 rounded-full {getEventStatusColor(viewingPopup.popup_status)}">
+									{eventStatusOptions.find(o => o.value === viewingPopup.popup_status)?.label}
+								</span>
+							</div>
+							<!-- 브랜드/주최 -->
+							{#if viewingPopup.brand || viewingPopup.organizer}
+								<div class="flex items-center gap-2">
+									<span class="text-gray-500 w-12">브랜드:</span>
+									<span class="text-gray-900">{viewingPopup.brand || viewingPopup.organizer}</span>
+								</div>
+							{/if}
+							<!-- 기간 -->
+							{#if viewingPopup.start_date || viewingPopup.end_date}
+								<div class="flex items-center gap-2">
+									<span class="text-gray-500 w-12">기간:</span>
+									<span class="text-gray-900">{viewingPopup.start_date || '?'} ~ {viewingPopup.end_date || '?'}</span>
+								</div>
+							{/if}
+							<!-- 위치 -->
+							{#if viewingPopup.venue_name || viewingPopup.address}
+								<div class="flex items-start gap-2">
+									<span class="text-gray-500 w-12 shrink-0">위치:</span>
+									<div>
+										{#if viewingPopup.venue_name}
+											<span class="text-gray-900 font-medium">{viewingPopup.venue_name}</span>
+										{/if}
+										{#if viewingPopup.address}
+											<span class="text-gray-600 block">{viewingPopup.address}</span>
+										{/if}
+									</div>
+								</div>
+							{/if}
+							<!-- 요약 -->
+							{#if viewingPopup.summary}
+								<div class="flex items-start gap-2">
+									<span class="text-gray-500 w-12 shrink-0">요약:</span>
+									<p class="text-gray-700">{viewingPopup.summary}</p>
+								</div>
+							{/if}
+						</div>
+
+						<!-- 링크 -->
+						{#if viewingPopup.official_url}
+							<div class="mt-3 pt-3 border-t border-gray-100">
+								<a
+									href={viewingPopup.official_url}
+									target="_blank"
+									rel="noopener noreferrer"
+									class="flex items-center gap-2 text-sm text-blue-600 hover:underline"
+								>
+									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+									</svg>
+									공식 사이트
+								</a>
+							</div>
+						{/if}
+
+						<!-- 북마크/방문 -->
+						<div class="mt-3 pt-3 border-t border-gray-100 flex gap-2">
+							<button
+								onclick={(e) => { e.stopPropagation(); togglePopupBookmark(viewingPopup!, e); }}
+								class="flex-1 py-2 text-sm rounded transition-colors {viewingPopup.is_bookmarked ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+							>
+								{viewingPopup.is_bookmarked ? '★ 북마크됨' : '☆ 북마크'}
+							</button>
+							<button
+								onclick={(e) => { e.stopPropagation(); togglePopupVisited(viewingPopup!, e); }}
+								class="flex-1 py-2 text-sm rounded transition-colors {viewingPopup.is_visited ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+							>
+								{viewingPopup.is_visited ? '✓ 방문완료' : '방문하기'}
+							</button>
+						</div>
+					</div>
+				{:else}
+					<!-- 원본 피드 탭 -->
+					<div class="flex justify-center py-4">
+						{#if loadingPost}
+							<div class="bg-white rounded-xl p-8 flex items-center justify-center w-full max-w-[468px] h-[300px]">
+								<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-pink-600"></div>
+							</div>
+						{:else if instagramPost}
+							<FeedCard
+								post={instagramPost}
+								detailMode={true}
+								onClose={closePopupFeedViewer}
+								onDelete={handleDeletePost}
+								onRecrawl={handleRecrawl}
+								onRequestLlmAnalysis={handleRequestLlmAnalysis}
+								{availableTags}
+								onTagsUpdate={handleTagsUpdate}
+								onLlmUpdate={handleLlmUpdate}
+							/>
+						{:else}
+							<div class="bg-white rounded-xl p-8 text-center w-full max-w-[468px]">
+								<p class="text-gray-500 mb-4">Instagram 게시물을 불러올 수 없습니다.</p>
+								{#if viewingPopup.source_instagram_url}
+									<a
+										href={viewingPopup.source_instagram_url}
+										target="_blank"
+										rel="noopener noreferrer"
+										class="btn btn-primary btn-sm"
+									>
+										Instagram에서 보기
+									</a>
+								{/if}
+							</div>
+						{/if}
+					</div>
+				{/if}
 			</div>
 		</div>
 	</div>
