@@ -35,6 +35,27 @@
 	let sortOrder: string = 'asc';
 	let filterIsActive: boolean = true;  // 활성화된 항목만 보기 (기본값)
 
+	// LLM 분류 필터
+	let filterLlmTag: string | null = null;
+	let filterLlmStatus: string | null = null;
+
+	// 탭 (현재 페이지는 단일 탭이므로 항상 'all')
+	let activeTab: 'all' = 'all';
+
+	// LLM 태그 옵션
+	const llmTagOptions = [
+		{ label: '이벤트', value: 'event', color: 'bg-blue-100 text-blue-700' },
+		{ label: '팝업', value: 'popup', color: 'bg-pink-100 text-pink-700' },
+		{ label: '일반', value: 'normal', color: 'bg-gray-100 text-gray-700' }
+	];
+
+	// LLM 상태 옵션
+	const llmStatusOptions = [
+		{ label: '대기', value: 'pending', color: 'bg-yellow-100 text-yellow-700' },
+		{ label: '분류됨', value: 'classified', color: 'bg-green-100 text-green-700' },
+		{ label: '오류', value: 'error', color: 'bg-red-100 text-red-700' }
+	];
+
 	// 활성화 필터 토글
 	function toggleIsActiveFilter() {
 		filterIsActive = !filterIsActive;
