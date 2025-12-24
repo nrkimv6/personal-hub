@@ -152,11 +152,24 @@ class Settings(BaseSettings):
         "에러발생",       # 에러 발생 시
         "에러해결"        # 에러 해결 시
     }
-    
+
     # 항상 알림을 보낼 상태 (변화가 없어도 보냄)
     ALWAYS_NOTIFY_STATES: Set[str] = {
         "예약가능"        # 예약 가능 상태는 항상 알림
     }
+
+    # Google OAuth 설정
+    GOOGLE_CLIENT_ID: str = ""  # Google Cloud Console에서 발급
+    GOOGLE_CLIENT_SECRET: str = ""  # Google Cloud Console에서 발급
+    ADMIN_EMAIL: str = ""  # 관리자 이메일 (이 이메일만 관리자 권한)
+
+    # JWT 설정
+    JWT_SECRET: str = "change-me-in-production-use-random-string"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7일
+
+    # 프론트엔드 URL (OAuth 콜백 후 리디렉트)
+    FRONTEND_URL: str = "http://localhost:5173"
 
     model_config = {
         "env_file": ".env",

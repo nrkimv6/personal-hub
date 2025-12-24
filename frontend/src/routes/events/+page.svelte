@@ -5,6 +5,7 @@
 	import { eventApi, popupApi, instagramApi } from '$lib/api';
 	import type { Event, EventCreate, EventUpdate, InstagramPost, Popup } from '$lib/types';
 	import FeedCard from '$lib/components/instagram/FeedCard.svelte';
+	import { isAdmin } from '$lib/stores/auth';
 
 	let events: Event[] = [];
 	let popups: Popup[] = [];
@@ -546,12 +547,14 @@
 	<div class="mb-4 md:mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
 		<div class="flex items-center justify-between sm:justify-start gap-3">
 			<h2 class="text-xl md:text-2xl font-bold text-gray-900">이벤트 관리</h2>
-			<button
-				onclick={openCreateModal}
-				class="btn btn-primary btn-sm"
-			>
-				+ 새 이벤트
-			</button>
+			{#if $isAdmin}
+				<button
+					onclick={openCreateModal}
+					class="btn btn-primary btn-sm"
+				>
+					+ 새 이벤트
+				</button>
+			{/if}
 		</div>
 
 		<!-- 필터 요약 -->
@@ -634,9 +637,11 @@
 		<div class="text-center py-12 text-gray-500">
 			<p class="text-lg">{activeTab === 'popup' ? '등록된 팝업이 없습니다' : '등록된 이벤트가 없습니다'}</p>
 			<p class="text-sm mt-2">{activeTab === 'popup' ? '새 팝업을 등록하면 여기에 표시됩니다' : '새 이벤트를 등록하면 여기에 표시됩니다'}</p>
-			<button onclick={openCreateModal} class="mt-4 btn btn-primary btn-sm">
-				+ {activeTab === 'popup' ? '새 팝업 등록' : '새 이벤트 등록'}
-			</button>
+			{#if $isAdmin}
+				<button onclick={openCreateModal} class="mt-4 btn btn-primary btn-sm">
+					+ {activeTab === 'popup' ? '새 팝업 등록' : '새 이벤트 등록'}
+				</button>
+			{/if}
 		</div>
 	{:else}
 		<!-- 팝업 테이블 -->

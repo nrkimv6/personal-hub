@@ -1,5 +1,7 @@
 """
 팝업 API 라우트 - 팝업스토어 관리
+
+GET 엔드포인트는 공개, CUD 엔드포인트는 관리자 인증 필요
 """
 from typing import Optional
 from fastapi import APIRouter, Depends, Query, HTTPException
@@ -14,6 +16,7 @@ from app.schemas.popup import (
     PopupList,
     PopupImportFromInstagram,
 )
+from app.core.auth import require_admin, UserInfo
 
 router = APIRouter(prefix="/api/v1/popups", tags=["popups"])
 
@@ -67,17 +70,26 @@ def get_popup(popup_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=PopupResponse, status_code=201)
-def create_popup(data: PopupCreate, db: Session = Depends(get_db)):
+def create_popup(
+    data: PopupCreate,
+    db: Session = Depends(get_db),
+    admin: UserInfo = Depends(require_admin),
+):
     """
-    새 팝업을 생성합니다.
+    새 팝업을 생성합니다. (관리자 전용)
     """
     return popup_service.create_popup(db, data)
 
 
 @router.put("/{popup_id}", response_model=PopupResponse)
-def update_popup(popup_id: int, data: PopupUpdate, db: Session = Depends(get_db)):
+def update_popup(
+    popup_id: int,
+    data: PopupUpdate,
+    db: Session = Depends(get_db),
+    admin: UserInfo = Depends(require_admin),
+):
     """
-    팝업을 수정합니다.
+    팝업을 수정합니다. (관리자 전용)
     """
     popup = popup_service.update_popup(db, popup_id, data)
     if not popup:
@@ -86,9 +98,13 @@ def update_popup(popup_id: int, data: PopupUpdate, db: Session = Depends(get_db)
 
 
 @router.delete("/{popup_id}", status_code=204)
-def delete_popup(popup_id: int, db: Session = Depends(get_db)):
+def delete_popup(
+    popup_id: int,
+    db: Session = Depends(get_db),
+    admin: UserInfo = Depends(require_admin),
+):
     """
-    팝업을 삭제합니다.
+    팝업을 삭제합니다. (관리자 전용)
     """
     success = popup_service.delete_popup(db, popup_id)
     if not success:
@@ -97,9 +113,13 @@ def delete_popup(popup_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{popup_id}/bookmark", response_model=PopupResponse)
-def toggle_bookmark(popup_id: int, db: Session = Depends(get_db)):
+def toggle_bookmark(
+    popup_id: int,
+    db: Session = Depends(get_db),
+    admin: UserInfo = Depends(require_admin),
+):
     """
-    팝업 북마크를 토글합니다.
+    팝업 북마크를 토글합니다. (관리자 전용)
     """
     popup = popup_service.toggle_bookmark(db, popup_id)
     if not popup:
@@ -108,9 +128,13 @@ def toggle_bookmark(popup_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{popup_id}/visited", response_model=PopupResponse)
-def toggle_visited(popup_id: int, db: Session = Depends(get_db)):
+def toggle_visited(
+    popup_id: int,
+    db: Session = Depends(get_db),
+    admin: UserInfo = Depends(require_admin),
+):
     """
-    팝업 방문 완료 상태를 토글합니다.
+    팝업 방문 완료 상태를 토글합니다. (관리자 전용)
     """
     popup = popup_service.toggle_visited(db, popup_id)
     if not popup:
@@ -119,9 +143,13 @@ def toggle_visited(popup_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/import-from-instagram", response_model=PopupResponse, status_code=201)
-def import_from_instagram(data: PopupImportFromInstagram, db: Session = Depends(get_db)):
+def import_from_instagram(
+    data: PopupImportFromInstagram,
+    db: Session = Depends(get_db),
+    admin: UserInfo = Depends(require_admin),
+):
     """
-    Instagram 게시물에서 팝업을 생성합니다.
+    Instagram 게시물에서 팝업을 생성합니다. (관리자 전용)
 
     - LLM 분류 결과를 기반으로 팝업 자동 생성
     - 이미 연결된 팝업이 있으면 해당 팝업 반환
