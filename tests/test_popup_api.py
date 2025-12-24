@@ -263,13 +263,6 @@ class TestPopupImportFromInstagramAPI:
             account="popup_test_account",
             url=f"https://instagram.com/p/{unique_id}",
             images=[{"src": "https://example.com/image.jpg"}],
-            llm_status="completed",
-            llm_tag="팝업",
-            llm_summary="테스트 팝업 요약",
-            llm_event_start=date.today(),
-            llm_event_end=date.today() + timedelta(days=14),
-            llm_urls=["https://example.com/popup"],
-            llm_location={"venue_name": "테스트 장소", "address": "서울시 강남구"},
         )
         test_db_session.add(post)
         test_db_session.commit()
@@ -283,10 +276,9 @@ class TestPopupImportFromInstagramAPI:
         }, headers=admin_headers)
         assert response.status_code == 201
         data = response.json()
+        assert data["title"] == "popup_test_account의 팝업"  # llm_* 필드 제거로 기본 제목 사용
         assert data["source_type"] == "instagram"
         assert data["source_instagram_post_id"] == instagram_post.id
-        assert data["venue_name"] == "테스트 장소"
-        assert data["address"] == "서울시 강남구"
 
     def test_import_from_instagram_not_found(self, client, admin_headers):
         """존재하지 않는 게시물"""

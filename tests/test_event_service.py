@@ -340,15 +340,6 @@ class TestEventServiceImportFromInstagram:
             account="test_account",
             url=f"https://instagram.com/p/{unique_id}",
             caption="테스트 게시물",
-            llm_status="completed",
-            llm_tag="이벤트",
-            llm_summary="테스트 이벤트 요약",
-            llm_event_start=date.today(),
-            llm_event_end=date.today() + timedelta(days=7),
-            llm_organizer="테스트 브랜드",
-            llm_urls=["https://forms.gle/test", "https://naver.me/test"],
-            llm_prizes=["경품1", "경품2"],
-            llm_winner_count=5,
         )
         test_db_session.add(post)
         test_db_session.commit()
@@ -361,13 +352,10 @@ class TestEventServiceImportFromInstagram:
         event = event_service.import_from_instagram(test_db_session, data)
 
         assert event is not None
-        assert event.title == "테스트 이벤트 요약"
+        assert event.title == "test_account의 이벤트"  # llm_* 필드 제거로 기본 제목 사용
         assert event.event_type == "event"
         assert event.source_type == "instagram"
         assert event.source_instagram_post_id == instagram_post.id
-        assert event.event_url == "https://forms.gle/test"
-        assert event.additional_urls == ["https://naver.me/test"]
-        assert event.organizer == "테스트 브랜드"
 
     def test_import_with_custom_title(self, test_db_session, event_service, instagram_post):
         """Right: 커스텀 제목으로 가져오기"""

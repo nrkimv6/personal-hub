@@ -38,8 +38,6 @@ def instagram_post(test_db_session):
         account="uncategorized_test_account",
         url=f"https://instagram.com/p/{unique_id}",
         images=[{"src": "https://example.com/image.jpg"}],
-        llm_status="completed",
-        llm_tag="홍보대사",
     )
     test_db_session.add(post)
     test_db_session.commit()
@@ -107,7 +105,6 @@ class TestUncategorizedListAPI:
         post = InstagramPost(
             post_id=unique_id,
             account="test",
-            llm_status="completed",
         )
         test_db_session.add(post)
         test_db_session.commit()
