@@ -14,9 +14,9 @@
 	let loading = true;
 	let error: string | null = null;
 
-	// 탭 모드: 전체 / 이벤트 / 팝업
-	type TabMode = 'all' | 'event' | 'popup';
-	let activeTab: TabMode = 'all';
+	// 탭 모드: 온라인 이벤트 / 팝업
+	type TabMode = 'event' | 'popup';
+	let activeTab: TabMode = 'event';
 
 	// 필터
 	let filterEventStatus: string | null = 'ongoing';  // 기본: 진행 중
@@ -64,6 +64,7 @@
 	let showPopupFeedViewer = false;
 	let viewingPopup: Popup | null = null;
 
+
 	// 로컬 참여 상태 관리 (로컬스토리지)
 	const PARTICIPATED_STORAGE_KEY = 'events_participated';
 	let localParticipated: Record<number, boolean> = {};
@@ -106,8 +107,6 @@
 			filterEventStatus = 'ongoing';
 		} else if (tab === 'popup') {
 			filterEventStatus = 'ongoing_or_upcoming';
-		} else {
-			filterEventStatus = null;
 		}
 		fetchEvents();
 	}
@@ -133,22 +132,18 @@
 
 				const response = await popupApi.list(params);
 				popups = response.items;
-				events = [];  // 팝업 탭에서는 events 비움
+				events = [];
 				total = response.total;
 				error = null;
 			} else {
-				// 이벤트/전체 탭인 경우 eventApi 호출
+				// 이벤트 탭인 경우 eventApi 호출
 				const params: Record<string, unknown> = {
 					page: currentPage,
 					page_size: pageSize,
 					sort_by: sortBy,
-					sort_order: sortOrder
+					sort_order: sortOrder,
+					event_type: 'event'
 				};
-
-				// 탭에 따른 event_type 필터
-				if (activeTab === 'event') {
-					params.event_type = 'event';
-				}
 
 				// 추가 필터
 				if (filterEventStatus) params.event_status = filterEventStatus;
@@ -159,7 +154,7 @@
 
 				const response = await eventApi.list(params);
 				events = response.items;
-				popups = [];  // 이벤트 탭에서는 popups 비움
+				popups = [];
 				total = response.total;
 				error = null;
 			}
@@ -575,16 +570,10 @@
 	<div class="mb-4 border-b border-gray-200">
 		<nav class="flex gap-4">
 			<button
-				onclick={() => switchTab('all')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'all' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
-			>
-				전체
-			</button>
-			<button
 				onclick={() => switchTab('event')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'event' ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
 			>
-				이벤트
+				온라인 이벤트
 			</button>
 			<button
 				onclick={() => switchTab('popup')}
@@ -793,6 +782,119 @@
 											{popup.is_visited ? '방문' : '미방문'}
 										</button>
 									</div>
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		</div>
+		{:else if activeTab === 'uncategorized'}
+		<!-- 미분류 테이블 -->
+		<div class="bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
+			<div class="overflow-x-auto">
+				<table class="w-full">
+					<thead class="bg-gray-50 border-b border-gray-200">
+						<tr>
+							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">유형</th>
+							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">주최</th>
+							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-[200px]">제목</th>
+							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">기간</th>
+							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-[120px]">경품</th>
+							<th class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">출처</th>
+							<th class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">원본</th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-gray-200">
+						{#each uncategorizedPosts as post (post.id)}
+							<tr
+								class="cursor-pointer transition-colors hover:bg-gray-50"
+								onclick={() => handleUncategorizedClick(post)}
+							>
+								<!-- 유형 (홍보대사/기타) -->
+								<td class="px-2 py-2">
+									<span class="px-2 py-0.5 text-xs rounded {post.original_tag === '홍보대사' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600'}">
+										{post.original_tag}
+									</span>
+								</td>
+								<!-- 주최 -->
+								<td class="px-2 py-2 max-w-[100px]">
+									{#if post.organizer}
+										<span class="text-sm font-medium text-blue-600 truncate block" title={post.organizer}>
+											{post.organizer}
+										</span>
+									{:else}
+										<span class="text-xs text-gray-400">-</span>
+									{/if}
+								</td>
+								<!-- 제목 -->
+								<td class="px-2 py-2 max-w-[200px]">
+									{#if post.title}
+										<span class="block truncate text-sm font-medium text-gray-900" title={post.title}>
+											{post.title}
+										</span>
+									{:else}
+										<span class="text-xs text-gray-400">제목 없음</span>
+									{/if}
+									{#if post.summary}
+										<span class="block truncate text-xs text-gray-500 line-clamp-2" title={post.summary}>
+											{truncate(post.summary, 50)}
+										</span>
+									{/if}
+								</td>
+								<!-- 기간 -->
+								<td class="px-2 py-2 text-sm text-gray-600 whitespace-nowrap">
+									{#if post.event_end}
+										<div class="flex flex-col gap-0.5">
+											{#if post.event_start}
+												<span class="text-xs text-gray-500">{formatDate(post.event_start)}</span>
+											{/if}
+											<span class="text-xs text-gray-500">~ {formatDate(post.event_end)}</span>
+										</div>
+									{:else if post.event_start}
+										<span class="text-xs text-gray-500">{formatDate(post.event_start)} ~</span>
+									{:else}
+										<span class="text-xs text-gray-400">-</span>
+									{/if}
+								</td>
+								<!-- 경품 -->
+								<td class="px-2 py-2 max-w-[120px]">
+									{#if post.prizes && post.prizes.length > 0}
+										<div class="flex flex-wrap gap-0.5">
+											{#each post.prizes.slice(0, 2) as prize}
+												<span class="text-xs bg-yellow-50 text-yellow-700 px-1 rounded truncate max-w-[100px]" title={prize}>
+													{truncate(prize, 12)}
+												</span>
+											{/each}
+											{#if post.prizes.length > 2}
+												<span class="text-xs text-gray-500">+{post.prizes.length - 2}개</span>
+											{/if}
+										</div>
+									{:else}
+										<span class="text-xs text-gray-400">-</span>
+									{/if}
+								</td>
+								<!-- 출처 -->
+								<td class="px-2 py-2 text-center">
+									<span class="px-1.5 py-0.5 text-xs rounded bg-pink-100 text-pink-600">
+										IG
+									</span>
+								</td>
+								<!-- 원본 링크 -->
+								<td class="px-2 py-2 text-center" onclick={(e) => e.stopPropagation()}>
+									{#if post.source_instagram_url}
+										<a
+											href={post.source_instagram_url}
+											target="_blank"
+											rel="noopener noreferrer"
+											class="text-xs text-pink-600 hover:text-pink-800 hover:underline font-medium"
+											title="Instagram 원본"
+										>
+											IG
+										</a>
+									{:else}
+										<span class="text-xs text-gray-400">-</span>
+									{/if}
 								</td>
 							</tr>
 						{/each}
@@ -1634,6 +1736,164 @@
 							{viewingPopup.is_visited ? '✓ 방문완료' : '방문하기'}
 						</button>
 					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- 미분류 Instagram 피드 뷰어 모달 -->
+{#if showUncategorizedFeedViewer && viewingUncategorized}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto"
+		onclick={closeUncategorizedFeedViewer}
+		onkeydown={(e) => e.key === 'Escape' && closeUncategorizedFeedViewer()}
+		role="dialog"
+		tabindex="-1"
+	>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<div
+			class="flex flex-col lg:flex-row gap-4 max-w-5xl w-full max-h-[90vh]"
+			onclick={(e) => e.stopPropagation()}
+		>
+			<!-- 왼쪽: FeedCard -->
+			<div class="flex-shrink-0 flex justify-center">
+				{#if loadingPost}
+					<div class="bg-white rounded-xl p-8 flex items-center justify-center" style="width: 468px; height: 600px;">
+						<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
+					</div>
+				{:else if instagramPost}
+					<FeedCard
+						post={instagramPost}
+						detailMode={true}
+						onClose={closeUncategorizedFeedViewer}
+						onRequestLlmAnalysis={handleRequestLlmAnalysis}
+						onLlmUpdate={handleLlmUpdate}
+					/>
+				{:else}
+					<div class="bg-white rounded-xl p-8 text-center" style="width: 468px;">
+						<p class="text-gray-500 mb-4">Instagram 게시물을 불러올 수 없습니다.</p>
+						{#if viewingUncategorized.source_instagram_url}
+							<a
+								href={viewingUncategorized.source_instagram_url}
+								target="_blank"
+								rel="noopener noreferrer"
+								class="btn btn-primary btn-sm"
+							>
+								Instagram에서 보기
+							</a>
+						{/if}
+					</div>
+				{/if}
+			</div>
+
+			<!-- 오른쪽: 미분류 정보 패널 -->
+			<div class="bg-white rounded-xl p-4 flex-1 overflow-y-auto max-h-[90vh] lg:max-w-sm">
+				<div class="flex items-center justify-between mb-4">
+					<h3 class="text-lg font-bold text-gray-900">미분류 정보</h3>
+				</div>
+
+				<div class="space-y-3 text-sm">
+					<!-- 유형 -->
+					<div class="flex gap-2">
+						<span class="px-2 py-0.5 text-xs rounded {viewingUncategorized.original_tag === '홍보대사' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600'}">
+							{viewingUncategorized.original_tag}
+						</span>
+					</div>
+
+					<!-- 제목 -->
+					{#if viewingUncategorized.title}
+						<div>
+							<span class="text-gray-500 text-xs">제목</span>
+							<p class="font-medium text-gray-900">{viewingUncategorized.title}</p>
+						</div>
+					{/if}
+
+					<!-- 기간 -->
+					{#if viewingUncategorized.event_start || viewingUncategorized.event_end}
+						<div>
+							<span class="text-gray-500 text-xs">기간</span>
+							<p class="text-gray-900">
+								{viewingUncategorized.event_start || '?'} ~ {viewingUncategorized.event_end || '?'}
+							</p>
+						</div>
+					{/if}
+
+					<!-- 발표일 -->
+					{#if viewingUncategorized.announcement_date}
+						<div>
+							<span class="text-gray-500 text-xs">발표일</span>
+							<p class="text-gray-900">{viewingUncategorized.announcement_date}</p>
+						</div>
+					{/if}
+
+					<!-- 주최 -->
+					{#if viewingUncategorized.organizer}
+						<div>
+							<span class="text-gray-500 text-xs">주최</span>
+							<p class="font-medium text-blue-600">{viewingUncategorized.organizer}</p>
+						</div>
+					{/if}
+
+					<!-- 경품 -->
+					{#if viewingUncategorized.prizes && viewingUncategorized.prizes.length > 0}
+						<div>
+							<span class="text-gray-500 text-xs">경품</span>
+							<div class="flex flex-wrap gap-1 mt-1">
+								{#each viewingUncategorized.prizes as prize}
+									<span class="px-2 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded">{prize}</span>
+								{/each}
+							</div>
+						</div>
+					{/if}
+
+					<!-- 당첨자/조건 -->
+					<div class="flex gap-4">
+						{#if viewingUncategorized.winner_count}
+							<div>
+								<span class="text-gray-500 text-xs">당첨자</span>
+								<p class="font-medium text-purple-600">{viewingUncategorized.winner_count}명</p>
+							</div>
+						{/if}
+						{#if viewingUncategorized.purchase_required}
+							<div>
+								<span class="text-gray-500 text-xs">조건</span>
+								<p>
+									{#if viewingUncategorized.purchase_required === 'yes_all'}
+										<span class="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded">구매필수</span>
+									{:else if viewingUncategorized.purchase_required === 'yes_partial'}
+										<span class="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded">부분구매</span>
+									{:else}
+										<span class="text-xs bg-green-100 text-green-600 px-1.5 py-0.5 rounded">무료</span>
+									{/if}
+								</p>
+							</div>
+						{/if}
+					</div>
+
+					<!-- 요약 -->
+					{#if viewingUncategorized.summary}
+						<div>
+							<span class="text-gray-500 text-xs">요약</span>
+							<p class="text-gray-700 text-xs leading-relaxed">{viewingUncategorized.summary}</p>
+						</div>
+					{/if}
+
+					<!-- 링크 -->
+					{#if viewingUncategorized.source_instagram_url}
+						<div class="pt-3 border-t border-gray-100">
+							<a
+								href={viewingUncategorized.source_instagram_url}
+								target="_blank"
+								rel="noopener noreferrer"
+								class="block text-sm text-pink-600 hover:underline"
+							>
+								Instagram 원본 보기
+							</a>
+						</div>
+					{/if}
 				</div>
 			</div>
 		</div>
