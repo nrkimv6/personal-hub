@@ -1,0 +1,332 @@
+<script lang="ts">
+	/**
+	 * 이벤트 데스크톱 테이블 컴포넌트
+	 *
+	 * 데스크톱 환경에서 이벤트 목록을 테이블 형식으로 표시
+	 * 이벤트 전용 컬럼: 발표일, 경품, 당첨자, 조건, 수집일
+	 */
+	import type { Event } from '$lib/types';
+	import {
+		formatDate,
+		getEventStatusColor,
+		getEventStatusLabel,
+		isEndingToday,
+		isUnknownPeriod,
+		truncate
+	} from '$lib/utils/eventUtils';
+
+	interface Props {
+		events: Event[];
+		sortBy: string;
+		sortOrder: string;
+		showTypeColumn?: boolean; // 'all' 탭에서만 true
+		isParticipated: (event: Event) => boolean;
+		onSort: (column: string) => void;
+		onEventClick: (event: Event) => void;
+		onBookmarkToggle: (event: Event, e: MouseEvent) => void;
+		onParticipateToggle: (event: Event, e: MouseEvent) => void;
+	}
+
+	let {
+		events,
+		sortBy,
+		sortOrder,
+		showTypeColumn = false,
+		isParticipated,
+		onSort,
+		onEventClick,
+		onBookmarkToggle,
+		onParticipateToggle
+	}: Props = $props();
+
+	function getSortIcon(column: string): string {
+		if (sortBy !== column) return '↕';
+		return sortOrder === 'asc' ? '↑' : '↓';
+	}
+</script>
+
+<div class="hidden md:block bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
+	<div class="overflow-x-auto">
+		<table class="w-full">
+			<thead class="bg-gray-50 border-b border-gray-200">
+				<tr>
+					<th
+						class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+						>상태</th
+					>
+					{#if showTypeColumn}
+						<th
+							class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+							>유형</th
+						>
+					{/if}
+					<th
+						class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:bg-gray-100 select-none"
+						onclick={() => onSort('organizer')}
+					>
+						주최 <span class="text-gray-400">{getSortIcon('organizer')}</span>
+					</th>
+					<th
+						class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-[180px] cursor-pointer hover:bg-gray-100 select-none"
+						onclick={() => onSort('title')}
+					>
+						제목 <span class="text-gray-400">{getSortIcon('title')}</span>
+					</th>
+					<th
+						class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:bg-gray-100 select-none"
+						onclick={() => onSort('event_end')}
+					>
+						기간 <span class="text-gray-400">{getSortIcon('event_end')}</span>
+					</th>
+					<th
+						class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:bg-gray-100 select-none"
+						onclick={() => onSort('announcement_date')}
+					>
+						발표일 <span class="text-gray-400">{getSortIcon('announcement_date')}</span>
+					</th>
+					<th
+						class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-[120px]"
+						>경품</th
+					>
+					<th
+						class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+						>당첨자</th
+					>
+					<th
+						class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+						>조건</th
+					>
+					<th
+						class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:bg-gray-100 select-none"
+						onclick={() => onSort('created_at')}
+					>
+						수집일 <span class="text-gray-400">{getSortIcon('created_at')}</span>
+					</th>
+					<th
+						class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+						>출처</th
+					>
+					<th
+						class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+						>원본</th
+					>
+					<th
+						class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+						>관리</th
+					>
+				</tr>
+			</thead>
+			<tbody class="divide-y divide-gray-200">
+				{#each events as event (event.id)}
+					<tr
+						class="cursor-pointer transition-colors {isEndingToday(event)
+							? 'bg-orange-100 hover:bg-orange-200 font-semibold'
+							: isUnknownPeriod(event)
+								? 'bg-amber-50 hover:bg-amber-100'
+								: 'hover:bg-gray-50'}"
+						onclick={() => onEventClick(event)}
+					>
+						<!-- 상태 -->
+						<td class="px-2 py-2">
+							<span
+								class="px-2 py-0.5 text-xs rounded-full {getEventStatusColor(event.event_status)}"
+							>
+								{getEventStatusLabel(event.event_status)}
+							</span>
+						</td>
+						<!-- 유형 (all 탭만) -->
+						{#if showTypeColumn}
+							<td class="px-2 py-2">
+								<span
+									class="px-2 py-0.5 text-xs rounded {event.event_type === 'popup'
+										? 'bg-pink-100 text-pink-700'
+										: event.event_type === 'event'
+											? 'bg-purple-100 text-purple-700'
+											: 'bg-gray-100 text-gray-600'}"
+								>
+									{event.event_type === 'popup'
+										? '팝업'
+										: event.event_type === 'event'
+											? '이벤트'
+											: event.event_type}
+								</span>
+							</td>
+						{/if}
+						<!-- 주최 -->
+						<td class="px-2 py-2 max-w-[100px]">
+							{#if event.organizer}
+								<span
+									class="text-sm font-medium text-blue-600 truncate block"
+									title={event.organizer}
+								>
+									{event.organizer}
+								</span>
+							{:else}
+								<span class="text-xs text-gray-400">-</span>
+							{/if}
+						</td>
+						<!-- 제목 -->
+						<td class="px-2 py-2 max-w-[180px]">
+							<span class="block truncate text-sm font-medium text-gray-900" title={event.title}>
+								{event.title}
+							</span>
+							{#if event.summary}
+								<span
+									class="block truncate text-xs text-gray-500 line-clamp-2"
+									title={event.summary}
+								>
+									{truncate(event.summary, 40)}
+								</span>
+							{/if}
+						</td>
+						<!-- 기간 -->
+						<td class="px-2 py-2 text-sm text-gray-600 whitespace-nowrap">
+							{#if event.event_end}
+								<div class="flex flex-col gap-0.5">
+									{#if event.event_start}
+										<span class="text-xs text-gray-500">{formatDate(event.event_start)}</span>
+									{/if}
+									{#if isEndingToday(event)}
+										<span class="text-xs font-bold text-orange-600 bg-orange-50 px-1 rounded"
+											>오늘 마감!</span
+										>
+									{:else}
+										<span class="text-xs text-gray-500">~ {formatDate(event.event_end)}</span>
+									{/if}
+								</div>
+							{:else if event.event_start}
+								<div class="flex flex-col gap-0.5">
+									<span class="text-xs text-gray-500">{formatDate(event.event_start)} ~</span>
+									<span class="text-xs text-amber-600 bg-amber-50 px-1 rounded">기간 미정</span>
+								</div>
+							{:else}
+								<span class="text-xs text-amber-600 bg-amber-50 px-1 rounded">기간 미정</span>
+							{/if}
+						</td>
+						<!-- 발표일 -->
+						<td class="px-2 py-2 text-xs text-gray-600 whitespace-nowrap">
+							{#if event.announcement_date}
+								<span class="text-gray-700">{formatDate(event.announcement_date)}</span>
+							{:else}
+								<span class="text-gray-400">-</span>
+							{/if}
+						</td>
+						<!-- 경품 -->
+						<td class="px-2 py-2 max-w-[120px]">
+							{#if event.prizes && event.prizes.length > 0}
+								<div class="flex flex-wrap gap-0.5">
+									{#each event.prizes.slice(0, 2) as prize}
+										<span
+											class="text-xs bg-yellow-50 text-yellow-700 px-1 rounded truncate max-w-[100px]"
+											title={prize}
+										>
+											{truncate(prize, 12)}
+										</span>
+									{/each}
+									{#if event.prizes.length > 2}
+										<span class="text-xs text-gray-500">+{event.prizes.length - 2}개</span>
+									{/if}
+								</div>
+							{:else}
+								<span class="text-xs text-gray-400">-</span>
+							{/if}
+						</td>
+						<!-- 당첨자 -->
+						<td class="px-2 py-2 text-center">
+							{#if event.winner_count}
+								<span class="text-sm font-medium text-purple-600">{event.winner_count}명</span>
+							{:else}
+								<span class="text-xs text-gray-400">-</span>
+							{/if}
+						</td>
+						<!-- 조건 -->
+						<td class="px-2 py-2 text-center">
+							{#if event.purchase_required === 'yes_all'}
+								<span class="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded">구매필수</span>
+							{:else if event.purchase_required === 'yes_partial'}
+								<span class="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded"
+									>부분구매</span
+								>
+							{:else if event.purchase_required === 'no'}
+								<span class="text-xs bg-green-100 text-green-600 px-1.5 py-0.5 rounded">무료</span>
+							{:else}
+								<span class="text-xs text-gray-400">-</span>
+							{/if}
+						</td>
+						<!-- 수집일 -->
+						<td class="px-2 py-2 text-center text-xs text-gray-500 whitespace-nowrap">
+							{formatDate(event.created_at)}
+						</td>
+						<!-- 출처 -->
+						<td class="px-2 py-2 text-center">
+							<span
+								class="px-1.5 py-0.5 text-xs rounded {event.source_type === 'instagram'
+									? 'bg-pink-100 text-pink-600'
+									: 'bg-gray-100 text-gray-600'}"
+							>
+								{event.source_type === 'instagram'
+									? 'IG'
+									: event.source_type === 'manual'
+										? '수동'
+										: event.source_type}
+							</span>
+						</td>
+						<!-- 원본 링크 -->
+						<td class="px-2 py-2 text-center" onclick={(e) => e.stopPropagation()}>
+							<div class="flex gap-1 justify-center">
+								{#if event.event_url}
+									<a
+										href={event.event_url}
+										target="_blank"
+										rel="noopener noreferrer"
+										class="text-xs text-blue-600 hover:text-blue-800 hover:underline"
+										title="이벤트 참여"
+									>
+										참여
+									</a>
+								{/if}
+								{#if event.source_type === 'instagram' && event.source_instagram_url}
+									<a
+										href={event.source_instagram_url}
+										target="_blank"
+										rel="noopener noreferrer"
+										class="text-xs text-pink-600 hover:text-pink-800 hover:underline font-medium"
+										title="Instagram 원본"
+									>
+										IG
+									</a>
+								{/if}
+								{#if !event.event_url && !(event.source_type === 'instagram' && event.source_instagram_url)}
+									<span class="text-xs text-gray-400">-</span>
+								{/if}
+							</div>
+						</td>
+						<!-- 관리 (북마크/참여) -->
+						<td class="px-2 py-2" onclick={(e) => e.stopPropagation()}>
+							<div class="flex items-center gap-1 justify-center">
+								<button
+									onclick={(e) => onBookmarkToggle(event, e)}
+									class="text-lg transition-colors {event.is_bookmarked
+										? 'text-yellow-500'
+										: 'text-gray-300 hover:text-yellow-400'}"
+									title={event.is_bookmarked ? '북마크 해제' : '북마크'}
+								>
+									{event.is_bookmarked ? '★' : '☆'}
+								</button>
+								<button
+									onclick={(e) => onParticipateToggle(event, e)}
+									class="px-1.5 py-0.5 text-xs rounded transition-colors {isParticipated(event)
+										? 'bg-green-100 text-green-700'
+										: 'bg-gray-100 text-gray-500 hover:bg-gray-200'}"
+									title={isParticipated(event) ? '참여 취소' : '참여 완료'}
+								>
+									{isParticipated(event) ? '참여' : '미참여'}
+								</button>
+							</div>
+						</td>
+					</tr>
+				{/each}
+			</tbody>
+		</table>
+	</div>
+</div>
