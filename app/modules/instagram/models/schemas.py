@@ -389,6 +389,11 @@ class ClassifyRequestSchema(BaseModel):
     post_ids: List[int]
 
 
+class BatchPostIdsRequest(BaseModel):
+    """일괄 게시물 ID 요청 스키마."""
+    post_ids: List[int]
+
+
 class ClassifyResultSchema(BaseModel):
     """분류 결과 스키마."""
     total: int

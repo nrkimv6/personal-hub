@@ -213,6 +213,26 @@
 		fetchEvents();
 	}
 
+	// 헤더 클릭 시 정렬 토글
+	function toggleSort(column: string) {
+		if (sortBy === column) {
+			// 같은 컬럼 클릭 시 정렬 순서 토글
+			sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+		} else {
+			// 다른 컬럼 클릭 시 해당 컬럼으로 변경, 기본 오름차순 (날짜는 내림차순)
+			sortBy = column;
+			sortOrder = ['created_at', 'event_end', 'event_start', 'announcement_date'].includes(column) ? 'desc' : 'asc';
+		}
+		currentPage = 1;
+		fetchEvents();
+	}
+
+	// 정렬 화살표 표시
+	function getSortIcon(column: string): string {
+		if (sortBy !== column) return '↕';
+		return sortOrder === 'asc' ? '↑' : '↓';
+	}
+
 	// 페이지 이동
 	function prevPage() {
 		if (currentPage > 1) {
@@ -1087,13 +1107,39 @@
 							{#if activeTab === 'all'}
 								<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">유형</th>
 							{/if}
-							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">주최</th>
-							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-[180px]">제목</th>
-							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">기간</th>
-							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">발표일</th>
+							<th
+								class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:bg-gray-100 select-none"
+								onclick={() => toggleSort('organizer')}
+							>
+								주최 <span class="text-gray-400">{getSortIcon('organizer')}</span>
+							</th>
+							<th
+								class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-[180px] cursor-pointer hover:bg-gray-100 select-none"
+								onclick={() => toggleSort('title')}
+							>
+								제목 <span class="text-gray-400">{getSortIcon('title')}</span>
+							</th>
+							<th
+								class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:bg-gray-100 select-none"
+								onclick={() => toggleSort('event_end')}
+							>
+								기간 <span class="text-gray-400">{getSortIcon('event_end')}</span>
+							</th>
+							<th
+								class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:bg-gray-100 select-none"
+								onclick={() => toggleSort('announcement_date')}
+							>
+								발표일 <span class="text-gray-400">{getSortIcon('announcement_date')}</span>
+							</th>
 							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-[120px]">경품</th>
 							<th class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">당첨자</th>
 							<th class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">조건</th>
+							<th
+								class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:bg-gray-100 select-none"
+								onclick={() => toggleSort('created_at')}
+							>
+								수집일 <span class="text-gray-400">{getSortIcon('created_at')}</span>
+							</th>
 							<th class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">출처</th>
 							<th class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">원본</th>
 							<th class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">관리</th>
@@ -1206,6 +1252,10 @@
 									{:else}
 										<span class="text-xs text-gray-400">-</span>
 									{/if}
+								</td>
+								<!-- 수집일 -->
+								<td class="px-2 py-2 text-center text-xs text-gray-500 whitespace-nowrap">
+									{formatDate(event.created_at)}
 								</td>
 								<!-- 출처 -->
 								<td class="px-2 py-2 text-center">

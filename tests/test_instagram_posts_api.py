@@ -218,3 +218,95 @@ class TestInstagramPostsAPIFilters:
         response = client.get("/api/v1/instagram/posts?sort_order=desc")
         assert response.status_code == 200
         # 에러 없이 응답
+
+
+class TestInstagramPostsBatchAPI:
+    """일괄 처리 API 테스트"""
+
+    def test_batch_delete_posts(self, client, sample_posts):
+        """일괄 삭제"""
+        posts, unique_id = sample_posts
+        post_ids = [posts[0].id, posts[1].id]
+
+        response = client.post(
+            "/api/v1/instagram/posts/batch/delete",
+            json={"post_ids": post_ids}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["deleted"] == 2
+        assert data["total"] == 2
+
+        # 삭제 확인
+        check_response = client.get(f"/api/v1/instagram/posts?search=SEARCHTEST_{unique_id}")
+        assert check_response.json()["total"] == 2  # 4 - 2 = 2
+
+    def test_batch_delete_empty_list(self, client, sample_posts):
+        """빈 리스트로 삭제 요청"""
+        posts, unique_id = sample_posts
+
+        response = client.post(
+            "/api/v1/instagram/posts/batch/delete",
+            json={"post_ids": []}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted"] == 0
+
+    def test_batch_delete_nonexistent_ids(self, client, sample_posts):
+        """존재하지 않는 ID로 삭제"""
+        posts, unique_id = sample_posts
+
+        response = client.post(
+            "/api/v1/instagram/posts/batch/delete",
+            json={"post_ids": [999999, 999998]}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted"] == 0
+
+    def test_batch_deactivate_posts(self, client, sample_posts):
+        """일괄 비활성화"""
+        posts, unique_id = sample_posts
+        post_ids = [posts[0].id, posts[1].id]
+
+        response = client.post(
+            "/api/v1/instagram/posts/batch/deactivate",
+            json={"post_ids": post_ids}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["updated"] == 2
+        assert data["total"] == 2
+
+        # 비활성화 확인 (is_active=true 필터로 조회)
+        check_response = client.get(
+            f"/api/v1/instagram/posts?search=SEARCHTEST_{unique_id}&is_active=true"
+        )
+        assert check_response.json()["total"] == 2  # 4 - 2 = 2
+
+    def test_batch_deactivate_empty_list(self, client, sample_posts):
+        """빈 리스트로 비활성화 요청"""
+        posts, unique_id = sample_posts
+
+        response = client.post(
+            "/api/v1/instagram/posts/batch/deactivate",
+            json={"post_ids": []}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["updated"] == 0
+
+    def test_batch_deactivate_nonexistent_ids(self, client, sample_posts):
+        """존재하지 않는 ID로 비활성화"""
+        posts, unique_id = sample_posts
+
+        response = client.post(
+            "/api/v1/instagram/posts/batch/deactivate",
+            json={"post_ids": [999999, 999998]}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["updated"] == 0
