@@ -2,10 +2,12 @@
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
 	import { page as pageStore } from '$app/stores';
-	import { eventApi } from '$lib/api';
-	import type { Event, EventCreate, EventUpdate } from '$lib/types';
+	import { eventApi, popupApi, instagramApi } from '$lib/api';
+	import type { Event, EventCreate, EventUpdate, InstagramPost, Popup } from '$lib/types';
+	import FeedCard from '$lib/components/instagram/FeedCard.svelte';
 
 	let events: Event[] = [];
+	let popups: Popup[] = [];
 	let total = 0;
 	let currentPage = 1;
 	let pageSize = 20;
@@ -52,6 +54,50 @@
 	};
 	let isSaving = false;
 
+	// Instagram 피드 뷰어 상태
+	let showFeedViewer = false;
+	let viewingEvent: Event | null = null;
+	let instagramPost: InstagramPost | null = null;
+	let loadingPost = false;
+
+	// 팝업 피드 뷰어 상태
+	let showPopupFeedViewer = false;
+	let viewingPopup: Popup | null = null;
+
+	// 로컬 참여 상태 관리 (로컬스토리지)
+	const PARTICIPATED_STORAGE_KEY = 'events_participated';
+	let localParticipated: Record<number, boolean> = {};
+
+	function loadLocalParticipated() {
+		if (!browser) return;
+		try {
+			const stored = localStorage.getItem(PARTICIPATED_STORAGE_KEY);
+			if (stored) {
+				localParticipated = JSON.parse(stored);
+			}
+		} catch (e) {
+			console.error('로컬 참여 상태 로드 실패:', e);
+			localParticipated = {};
+		}
+	}
+
+	function saveLocalParticipated() {
+		if (!browser) return;
+		try {
+			localStorage.setItem(PARTICIPATED_STORAGE_KEY, JSON.stringify(localParticipated));
+		} catch (e) {
+			console.error('로컬 참여 상태 저장 실패:', e);
+		}
+	}
+
+	function isParticipated(event: Event): boolean {
+		// 로컬스토리지에 저장된 값이 있으면 사용, 없으면 서버 값 사용
+		if (event.id in localParticipated) {
+			return localParticipated[event.id];
+		}
+		return event.is_participated;
+	}
+
 	// 탭 변경
 	function switchTab(tab: TabMode) {
 		activeTab = tab;
@@ -66,35 +112,57 @@
 		fetchEvents();
 	}
 
-	// 이벤트 목록 조회
+	// 이벤트/팝업 목록 조회
 	async function fetchEvents() {
 		loading = true;
 		try {
-			const params: Record<string, unknown> = {
-				page: currentPage,
-				page_size: pageSize,
-				sort_by: sortBy,
-				sort_order: sortOrder
-			};
+			// 팝업 탭인 경우 popupApi 호출
+			if (activeTab === 'popup') {
+				const params: Record<string, unknown> = {
+					page: currentPage,
+					page_size: pageSize,
+					sort_by: sortBy === 'event_end' ? 'end_date' : sortBy === 'event_start' ? 'start_date' : sortBy,
+					sort_order: sortOrder
+				};
 
-			// 탭에 따른 event_type 필터
-			if (activeTab === 'event') {
-				params.event_type = 'event';
-			} else if (activeTab === 'popup') {
-				params.event_type = 'popup';
+				// 팝업 필터
+				if (filterEventStatus) params.popup_status = filterEventStatus;
+				if (filterBookmarked !== null) params.is_bookmarked = filterBookmarked;
+				if (filterSourceType) params.source_type = filterSourceType;
+				if (includeUnknownPeriod) params.include_unknown_period = true;
+
+				const response = await popupApi.list(params);
+				popups = response.items;
+				events = [];  // 팝업 탭에서는 events 비움
+				total = response.total;
+				error = null;
+			} else {
+				// 이벤트/전체 탭인 경우 eventApi 호출
+				const params: Record<string, unknown> = {
+					page: currentPage,
+					page_size: pageSize,
+					sort_by: sortBy,
+					sort_order: sortOrder
+				};
+
+				// 탭에 따른 event_type 필터
+				if (activeTab === 'event') {
+					params.event_type = 'event';
+				}
+
+				// 추가 필터
+				if (filterEventStatus) params.event_status = filterEventStatus;
+				if (filterBookmarked !== null) params.is_bookmarked = filterBookmarked;
+				if (filterUrlType) params.url_type = filterUrlType;
+				if (filterSourceType) params.source_type = filterSourceType;
+				if (includeUnknownPeriod) params.include_unknown_period = true;
+
+				const response = await eventApi.list(params);
+				events = response.items;
+				popups = [];  // 이벤트 탭에서는 popups 비움
+				total = response.total;
+				error = null;
 			}
-
-			// 추가 필터
-			if (filterEventStatus) params.event_status = filterEventStatus;
-			if (filterBookmarked !== null) params.is_bookmarked = filterBookmarked;
-			if (filterUrlType) params.url_type = filterUrlType;
-			if (filterSourceType) params.source_type = filterSourceType;
-			if (includeUnknownPeriod) params.include_unknown_period = true;
-
-			const response = await eventApi.list(params);
-			events = response.items;
-			total = response.total;
-			error = null;
 		} catch (e) {
 			error = e instanceof Error ? e.message : '데이터 로드 실패';
 		} finally {
@@ -138,6 +206,15 @@
 		}
 	}
 
+	// 경품 배열 <-> 문자열 변환
+	let prizesText = '';
+	function prizesToText(prizes: string[] | undefined): string {
+		return (prizes || []).join('\n');
+	}
+	function textToPrizes(text: string): string[] {
+		return text.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+	}
+
 	// 새 이벤트 생성 모달 열기
 	function openCreateModal() {
 		editingEvent = null;
@@ -150,8 +227,13 @@
 			organizer: '',
 			summary: '',
 			location_venue: '',
-			location_address: ''
+			location_address: '',
+			announcement_date: '',
+			prizes: [],
+			winner_count: undefined,
+			purchase_required: undefined
 		};
+		prizesText = '';
 		showEventModal = true;
 	}
 
@@ -174,6 +256,7 @@
 			purchase_required: event.purchase_required,
 			user_note: event.user_note || ''
 		};
+		prizesText = prizesToText(event.prizes);
 		showEventModal = true;
 	}
 
@@ -181,6 +264,70 @@
 	function closeModal() {
 		showEventModal = false;
 		editingEvent = null;
+	}
+
+	// 이벤트 행 클릭 핸들러
+	async function handleEventClick(event: Event) {
+		// Instagram 출처인 경우 FeedCard 뷰어로 열기
+		if (event.source_type === 'instagram' && event.source_instagram_post_id) {
+			await openFeedViewer(event);
+		} else {
+			// 그 외는 기존 수정 모달
+			openEditModal(event);
+		}
+	}
+
+	// Instagram 피드 뷰어 열기
+	async function openFeedViewer(event: Event) {
+		viewingEvent = event;
+		showFeedViewer = true;
+		loadingPost = true;
+		instagramPost = null;
+
+		try {
+			if (event.source_instagram_post_id) {
+				instagramPost = await instagramApi.getPost(event.source_instagram_post_id);
+			}
+		} catch (e) {
+			console.error('Instagram 게시물 로드 실패:', e);
+		} finally {
+			loadingPost = false;
+		}
+	}
+
+	// 피드 뷰어 닫기
+	function closeFeedViewer() {
+		showFeedViewer = false;
+		viewingEvent = null;
+		instagramPost = null;
+	}
+
+	// 피드 뷰어에서 이벤트 수정 모달 열기
+	function openEditFromViewer() {
+		if (viewingEvent) {
+			closeFeedViewer();
+			openEditModal(viewingEvent);
+		}
+	}
+
+	// AI 분석 요청 (이벤트용)
+	async function handleRequestLlmAnalysis(postId: number): Promise<void> {
+		try {
+			await instagramApi.requestLlmAnalysis([postId]);
+			// 게시물 다시 로드하여 상태 업데이트
+			if (instagramPost && instagramPost.id === postId) {
+				instagramPost = await instagramApi.getPost(postId);
+			}
+			alert('AI 분석이 요청되었습니다. 잠시 후 결과가 반영됩니다.');
+		} catch (e) {
+			console.error('AI 분석 요청 실패:', e);
+			alert('AI 분석 요청에 실패했습니다.');
+		}
+	}
+
+	// AI 분류 업데이트 콜백 (이벤트용)
+	function handleLlmUpdate(updatedPost: InstagramPost) {
+		instagramPost = updatedPost;
 	}
 
 	// 이벤트 저장
@@ -191,11 +338,16 @@
 		}
 		isSaving = true;
 		try {
+			// prizesText를 배열로 변환
+			const formData = {
+				...eventForm,
+				prizes: textToPrizes(prizesText)
+			};
 			if (editingEvent) {
-				const updateData: EventUpdate = { ...eventForm };
+				const updateData: EventUpdate = { ...formData };
 				await eventApi.update(editingEvent.id, updateData);
 			} else {
-				await eventApi.create(eventForm);
+				await eventApi.create(formData);
 			}
 			closeModal();
 			await fetchEvents();
@@ -229,16 +381,14 @@
 		}
 	}
 
-	// 참여 완료 토글
-	async function toggleParticipate(event: Event, e: MouseEvent) {
+	// 참여 완료 토글 (로컬스토리지 기반)
+	function toggleParticipate(event: Event, e: MouseEvent) {
 		e.stopPropagation();
-		try {
-			const result = await eventApi.toggleParticipate(event.id);
-			event.is_participated = result.is_participated;
-			events = [...events];
-		} catch (err) {
-			console.error('참여 완료 토글 실패:', err);
-		}
+		const currentState = isParticipated(event);
+		localParticipated[event.id] = !currentState;
+		saveLocalParticipated();
+		// 뷰 업데이트를 위해 재할당
+		localParticipated = { ...localParticipated };
 	}
 
 	// 날짜 포맷팅
@@ -265,6 +415,80 @@
 	// 기간 미정 여부
 	function isUnknownPeriod(event: Event): boolean {
 		return !event.event_end;
+	}
+
+	// 팝업 오늘 마감 여부
+	function isPopupEndingToday(popup: Popup): boolean {
+		if (!popup.end_date) return false;
+		const today = new Date().toISOString().split('T')[0];
+		return popup.end_date === today;
+	}
+
+	// 팝업 기간 미정 여부
+	function isPopupUnknownPeriod(popup: Popup): boolean {
+		return !popup.end_date;
+	}
+
+	// 팝업 행 클릭 핸들러
+	async function handlePopupClick(popup: Popup) {
+		// Instagram 출처인 경우 FeedCard 뷰어로 열기
+		if (popup.source_type === 'instagram' && popup.source_instagram_post_id) {
+			await openPopupFeedViewer(popup);
+		} else {
+			// 그 외는 Instagram 링크로 이동
+			if (popup.source_instagram_url) {
+				window.open(popup.source_instagram_url, '_blank');
+			}
+		}
+	}
+
+	// 팝업 Instagram 피드 뷰어 열기
+	async function openPopupFeedViewer(popup: Popup) {
+		viewingPopup = popup;
+		showPopupFeedViewer = true;
+		loadingPost = true;
+		instagramPost = null;
+
+		try {
+			if (popup.source_instagram_post_id) {
+				instagramPost = await instagramApi.getPost(popup.source_instagram_post_id);
+			}
+		} catch (e) {
+			console.error('Instagram 게시물 로드 실패:', e);
+		} finally {
+			loadingPost = false;
+		}
+	}
+
+	// 팝업 피드 뷰어 닫기
+	function closePopupFeedViewer() {
+		showPopupFeedViewer = false;
+		viewingPopup = null;
+		instagramPost = null;
+	}
+
+	// 팝업 북마크 토글
+	async function togglePopupBookmark(popup: Popup, e: MouseEvent) {
+		e.stopPropagation();
+		try {
+			const result = await popupApi.toggleBookmark(popup.id);
+			popup.is_bookmarked = result.is_bookmarked;
+			popups = [...popups];
+		} catch (err) {
+			console.error('북마크 토글 실패:', err);
+		}
+	}
+
+	// 팝업 방문 완료 토글
+	async function togglePopupVisited(popup: Popup, e: MouseEvent) {
+		e.stopPropagation();
+		try {
+			const result = await popupApi.toggleVisited(popup.id);
+			popup.is_visited = result.is_visited;
+			popups = [...popups];
+		} catch (err) {
+			console.error('방문 토글 실패:', err);
+		}
 	}
 
 	// D-Day 계산
@@ -301,6 +525,9 @@
 	}
 
 	onMount(() => {
+		// 로컬 참여 상태 로드
+		loadLocalParticipated();
+
 		// PWA Share Target에서 전달된 URL 처리
 		const action = $pageStore.url.searchParams.get('action');
 		const sharedUrl = $pageStore.url.searchParams.get('url');
@@ -414,68 +641,231 @@
 		<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
 			{error}
 		</div>
-	{:else if events.length === 0}
+	{:else if (activeTab === 'popup' ? popups.length : events.length) === 0}
 		<div class="text-center py-12 text-gray-500">
-			<p class="text-lg">등록된 이벤트가 없습니다</p>
-			<p class="text-sm mt-2">새 이벤트를 등록하면 여기에 표시됩니다</p>
+			<p class="text-lg">{activeTab === 'popup' ? '등록된 팝업이 없습니다' : '등록된 이벤트가 없습니다'}</p>
+			<p class="text-sm mt-2">{activeTab === 'popup' ? '새 팝업을 등록하면 여기에 표시됩니다' : '새 이벤트를 등록하면 여기에 표시됩니다'}</p>
 			<button onclick={openCreateModal} class="mt-4 btn btn-primary btn-sm">
-				+ 새 이벤트 등록
+				+ {activeTab === 'popup' ? '새 팝업 등록' : '새 이벤트 등록'}
 			</button>
 		</div>
 	{:else}
+		<!-- 팝업 테이블 -->
+		{#if activeTab === 'popup'}
+		<div class="bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
+			<div class="overflow-x-auto">
+				<table class="w-full">
+					<thead class="bg-gray-50 border-b border-gray-200">
+						<tr>
+							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">상태</th>
+							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">브랜드</th>
+							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-[180px]">제목</th>
+							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">기간</th>
+							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-[150px]">위치</th>
+							<th class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">출처</th>
+							<th class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">원본</th>
+							<th class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">관리</th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-gray-200">
+						{#each popups as popup (popup.id)}
+							<tr
+								class="cursor-pointer transition-colors {isPopupEndingToday(popup) ? 'bg-orange-100 hover:bg-orange-200 font-semibold' : isPopupUnknownPeriod(popup) ? 'bg-amber-50 hover:bg-amber-100' : 'hover:bg-gray-50'}"
+								onclick={() => handlePopupClick(popup)}
+							>
+								<!-- 상태 -->
+								<td class="px-2 py-2">
+									<span class="px-2 py-0.5 text-xs rounded-full {getEventStatusColor(popup.popup_status)}">
+										{eventStatusOptions.find(o => o.value === popup.popup_status)?.label || popup.popup_status}
+									</span>
+								</td>
+								<!-- 브랜드/주최 -->
+								<td class="px-2 py-2 max-w-[100px]">
+									{#if popup.brand || popup.organizer}
+										<span class="text-sm font-medium text-blue-600 truncate block" title={popup.brand || popup.organizer}>
+											{popup.brand || popup.organizer}
+										</span>
+									{:else}
+										<span class="text-xs text-gray-400">-</span>
+									{/if}
+								</td>
+								<!-- 제목 -->
+								<td class="px-2 py-2 max-w-[180px]">
+									<span class="block truncate text-sm font-medium text-gray-900" title={popup.title}>
+										{popup.title}
+									</span>
+									{#if popup.summary}
+										<span class="block truncate text-xs text-gray-500 line-clamp-2" title={popup.summary}>
+											{truncate(popup.summary, 40)}
+										</span>
+									{/if}
+								</td>
+								<!-- 기간 -->
+								<td class="px-2 py-2 text-sm text-gray-600 whitespace-nowrap">
+									{#if popup.end_date}
+										<div class="flex flex-col gap-0.5">
+											{#if popup.start_date}
+												<span class="text-xs text-gray-500">{formatDate(popup.start_date)}</span>
+											{/if}
+											{#if isPopupEndingToday(popup)}
+												<span class="text-xs font-bold text-orange-600 bg-orange-50 px-1 rounded">오늘 마감!</span>
+											{:else}
+												<span class="text-xs text-gray-500">~ {formatDate(popup.end_date)}</span>
+											{/if}
+										</div>
+									{:else if popup.start_date}
+										<div class="flex flex-col gap-0.5">
+											<span class="text-xs text-gray-500">{formatDate(popup.start_date)} ~</span>
+											<span class="text-xs text-amber-600 bg-amber-50 px-1 rounded">기간 미정</span>
+										</div>
+									{:else}
+										<span class="text-xs text-amber-600 bg-amber-50 px-1 rounded">기간 미정</span>
+									{/if}
+								</td>
+								<!-- 위치 -->
+								<td class="px-2 py-2 max-w-[150px]">
+									{#if popup.venue_name}
+										<div class="flex flex-col">
+											<span class="text-xs font-medium text-gray-700 truncate" title={popup.venue_name}>
+												{popup.venue_name}
+											</span>
+											{#if popup.address}
+												<span class="text-xs text-gray-500 truncate" title={popup.address}>
+													{truncate(popup.address, 20)}
+												</span>
+											{/if}
+										</div>
+									{:else}
+										<span class="text-xs text-gray-400">-</span>
+									{/if}
+								</td>
+								<!-- 출처 -->
+								<td class="px-2 py-2 text-center">
+									<span class="px-1.5 py-0.5 text-xs rounded {popup.source_type === 'instagram' ? 'bg-pink-100 text-pink-600' : 'bg-gray-100 text-gray-600'}">
+										{popup.source_type === 'instagram' ? 'IG' : popup.source_type === 'manual' ? '수동' : popup.source_type}
+									</span>
+								</td>
+								<!-- 원본 링크 -->
+								<td class="px-2 py-2 text-center" onclick={(e) => e.stopPropagation()}>
+									<div class="flex gap-1 justify-center">
+										{#if popup.official_url}
+											<a
+												href={popup.official_url}
+												target="_blank"
+												rel="noopener noreferrer"
+												class="text-xs text-blue-600 hover:text-blue-800 hover:underline"
+												title="공식 사이트"
+											>
+												공식
+											</a>
+										{/if}
+										{#if popup.source_type === 'instagram' && popup.source_instagram_url}
+											<a
+												href={popup.source_instagram_url}
+												target="_blank"
+												rel="noopener noreferrer"
+												class="text-xs text-pink-600 hover:text-pink-800 hover:underline font-medium"
+												title="Instagram 원본"
+											>
+												IG
+											</a>
+										{/if}
+										{#if !popup.official_url && !(popup.source_type === 'instagram' && popup.source_instagram_url)}
+											<span class="text-xs text-gray-400">-</span>
+										{/if}
+									</div>
+								</td>
+								<!-- 관리 (북마크/방문) -->
+								<td class="px-2 py-2" onclick={(e) => e.stopPropagation()}>
+									<div class="flex items-center gap-1 justify-center">
+										<button
+											onclick={(e) => togglePopupBookmark(popup, e)}
+											class="text-lg transition-colors {popup.is_bookmarked ? 'text-yellow-500' : 'text-gray-300 hover:text-yellow-400'}"
+											title={popup.is_bookmarked ? '북마크 해제' : '북마크'}
+										>
+											{popup.is_bookmarked ? '★' : '☆'}
+										</button>
+										<button
+											onclick={(e) => togglePopupVisited(popup, e)}
+											class="px-1.5 py-0.5 text-xs rounded transition-colors {popup.is_visited ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}"
+											title={popup.is_visited ? '방문 취소' : '방문 완료'}
+										>
+											{popup.is_visited ? '방문' : '미방문'}
+										</button>
+									</div>
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		</div>
+		{:else}
 		<!-- 이벤트 테이블 -->
 		<div class="bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
 			<div class="overflow-x-auto">
 				<table class="w-full">
 					<thead class="bg-gray-50 border-b border-gray-200">
 						<tr>
-							<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">상태</th>
-							<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">유형</th>
-							<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-[200px]">제목</th>
-							<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">기간</th>
-							<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">D-Day</th>
-							<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">주최</th>
-							<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">URL 타입</th>
-							{#if activeTab === 'popup'}
-								<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-[150px]">위치</th>
+							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">상태</th>
+							{#if activeTab === 'all'}
+								<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">유형</th>
 							{/if}
-							<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">출처</th>
-							<th class="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">북마크</th>
-							<th class="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">참여</th>
-							<th class="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">액션</th>
+							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">주최</th>
+							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-[180px]">제목</th>
+							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">기간</th>
+							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">발표일</th>
+							<th class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-[120px]">경품</th>
+							<th class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">당첨자</th>
+							<th class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">조건</th>
+							<th class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">출처</th>
+							<th class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">원본</th>
+							<th class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap">관리</th>
 						</tr>
 					</thead>
 					<tbody class="divide-y divide-gray-200">
 						{#each events as event (event.id)}
 							<tr
 								class="cursor-pointer transition-colors {isEndingToday(event) ? 'bg-orange-100 hover:bg-orange-200 font-semibold' : isUnknownPeriod(event) ? 'bg-amber-50 hover:bg-amber-100' : 'hover:bg-gray-50'}"
-								onclick={() => openEditModal(event)}
+								onclick={() => handleEventClick(event)}
 							>
 								<!-- 상태 -->
-								<td class="px-3 py-3">
-									<span class="px-2 py-1 text-xs rounded-full {getEventStatusColor(event.event_status)}">
+								<td class="px-2 py-2">
+									<span class="px-2 py-0.5 text-xs rounded-full {getEventStatusColor(event.event_status)}">
 										{eventStatusOptions.find(o => o.value === event.event_status)?.label || event.event_status}
 									</span>
 								</td>
-								<!-- 유형 -->
-								<td class="px-3 py-3">
-									<span class="px-2 py-1 text-xs rounded {event.event_type === 'popup' ? 'bg-pink-100 text-pink-700' : event.event_type === 'event' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}">
-										{event.event_type === 'popup' ? '팝업' : event.event_type === 'event' ? '이벤트' : event.event_type}
-									</span>
+								<!-- 유형 (전체 탭만) -->
+								{#if activeTab === 'all'}
+									<td class="px-2 py-2">
+										<span class="px-2 py-0.5 text-xs rounded {event.event_type === 'popup' ? 'bg-pink-100 text-pink-700' : event.event_type === 'event' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}">
+											{event.event_type === 'popup' ? '팝업' : event.event_type === 'event' ? '이벤트' : event.event_type}
+										</span>
+									</td>
+								{/if}
+								<!-- 주최 -->
+								<td class="px-2 py-2 max-w-[100px]">
+									{#if event.organizer}
+										<span class="text-sm font-medium text-blue-600 truncate block" title={event.organizer}>
+											{event.organizer}
+										</span>
+									{:else}
+										<span class="text-xs text-gray-400">-</span>
+									{/if}
 								</td>
 								<!-- 제목 -->
-								<td class="px-3 py-3 max-w-[200px]">
+								<td class="px-2 py-2 max-w-[180px]">
 									<span class="block truncate text-sm font-medium text-gray-900" title={event.title}>
 										{event.title}
 									</span>
 									{#if event.summary}
-										<span class="block truncate text-xs text-gray-500" title={event.summary}>
-											{truncate(event.summary, 30)}
+										<span class="block truncate text-xs text-gray-500 line-clamp-2" title={event.summary}>
+											{truncate(event.summary, 40)}
 										</span>
 									{/if}
 								</td>
 								<!-- 기간 -->
-								<td class="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">
+								<td class="px-2 py-2 text-sm text-gray-600 whitespace-nowrap">
 									{#if event.event_end}
 										<div class="flex flex-col gap-0.5">
 											{#if event.event_start}
@@ -496,79 +886,103 @@
 										<span class="text-xs text-amber-600 bg-amber-50 px-1 rounded">기간 미정</span>
 									{/if}
 								</td>
-								<!-- D-Day -->
-								<td class="px-3 py-3 text-center">
-									{#if event.days_remaining !== null && event.days_remaining !== undefined}
-										<span class="text-sm font-medium {event.days_remaining === 0 ? 'text-orange-600' : event.days_remaining > 0 ? 'text-blue-600' : 'text-gray-400'}">
-											{getDaysRemaining(event)}
-										</span>
+								<!-- 발표일 -->
+								<td class="px-2 py-2 text-xs text-gray-600 whitespace-nowrap">
+									{#if event.announcement_date}
+										<span class="text-gray-700">{formatDate(event.announcement_date)}</span>
 									{:else}
 										<span class="text-gray-400">-</span>
 									{/if}
 								</td>
-								<!-- 주최 -->
-								<td class="px-3 py-3 text-sm text-gray-600 max-w-[100px]">
-									<span class="truncate block" title={event.organizer || ''}>
-										{event.organizer || '-'}
-									</span>
+								<!-- 경품 -->
+								<td class="px-2 py-2 max-w-[120px]">
+									{#if event.prizes && event.prizes.length > 0}
+										<div class="flex flex-wrap gap-0.5">
+											{#each event.prizes.slice(0, 2) as prize}
+												<span class="text-xs bg-yellow-50 text-yellow-700 px-1 rounded truncate max-w-[100px]" title={prize}>
+													{truncate(prize, 12)}
+												</span>
+											{/each}
+											{#if event.prizes.length > 2}
+												<span class="text-xs text-gray-500">+{event.prizes.length - 2}개</span>
+											{/if}
+										</div>
+									{:else}
+										<span class="text-xs text-gray-400">-</span>
+									{/if}
 								</td>
-								<!-- URL 타입 -->
-								<td class="px-3 py-3 text-sm text-gray-600">
-									{getUrlTypeLabel(event.url_type)}
+								<!-- 당첨자 -->
+								<td class="px-2 py-2 text-center">
+									{#if event.winner_count}
+										<span class="text-sm font-medium text-purple-600">{event.winner_count}명</span>
+									{:else}
+										<span class="text-xs text-gray-400">-</span>
+									{/if}
 								</td>
-								<!-- 위치 (팝업 탭만) -->
-								{#if activeTab === 'popup'}
-									<td class="px-3 py-3 text-sm text-gray-600 max-w-[150px]">
-										<span class="truncate block" title={event.location_venue || ''}>
-											{event.location_venue || '-'}
-										</span>
-									</td>
-								{/if}
+								<!-- 조건 -->
+								<td class="px-2 py-2 text-center">
+									{#if event.purchase_required === 'yes_all'}
+										<span class="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded">구매필수</span>
+									{:else if event.purchase_required === 'yes_partial'}
+										<span class="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded">부분구매</span>
+									{:else if event.purchase_required === 'no'}
+										<span class="text-xs bg-green-100 text-green-600 px-1.5 py-0.5 rounded">무료</span>
+									{:else}
+										<span class="text-xs text-gray-400">-</span>
+									{/if}
+								</td>
 								<!-- 출처 -->
-								<td class="px-3 py-3 text-sm text-gray-600">
-									<span class="px-2 py-0.5 text-xs rounded {event.source_type === 'instagram' ? 'bg-pink-100 text-pink-600' : 'bg-gray-100 text-gray-600'}">
+								<td class="px-2 py-2 text-center">
+									<span class="px-1.5 py-0.5 text-xs rounded {event.source_type === 'instagram' ? 'bg-pink-100 text-pink-600' : 'bg-gray-100 text-gray-600'}">
 										{event.source_type === 'instagram' ? 'IG' : event.source_type === 'manual' ? '수동' : event.source_type}
 									</span>
 								</td>
-								<!-- 북마크 -->
-								<td class="px-3 py-3 text-center" onclick={(e) => e.stopPropagation()}>
-									<button
-										onclick={(e) => toggleBookmark(event, e)}
-										class="text-xl transition-colors {event.is_bookmarked ? 'text-yellow-500' : 'text-gray-300 hover:text-yellow-400'}"
-										title={event.is_bookmarked ? '북마크 해제' : '북마크'}
-									>
-										{event.is_bookmarked ? '★' : '☆'}
-									</button>
-								</td>
-								<!-- 참여 완료 -->
-								<td class="px-3 py-3 text-center" onclick={(e) => e.stopPropagation()}>
-									<button
-										onclick={(e) => toggleParticipate(event, e)}
-										class="px-2 py-1 text-xs rounded transition-colors {event.is_participated ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}"
-										title={event.is_participated ? '참여 취소' : '참여 완료'}
-									>
-										{event.is_participated ? '참여함' : '미참여'}
-									</button>
-								</td>
-								<!-- 액션 -->
-								<td class="px-3 py-3 text-center" onclick={(e) => e.stopPropagation()}>
-									<div class="flex gap-2 justify-center">
+								<!-- 원본 링크 -->
+								<td class="px-2 py-2 text-center" onclick={(e) => e.stopPropagation()}>
+									<div class="flex gap-1 justify-center">
 										{#if event.event_url}
 											<a
 												href={event.event_url}
 												target="_blank"
 												rel="noopener noreferrer"
-												class="text-blue-600 hover:text-blue-800 text-sm"
-												title="이벤트 URL 열기"
+												class="text-xs text-blue-600 hover:text-blue-800 hover:underline"
+												title="이벤트 참여"
 											>
-												링크
+												참여
 											</a>
 										{/if}
+										{#if event.source_type === 'instagram' && event.source_instagram_url}
+											<a
+												href={event.source_instagram_url}
+												target="_blank"
+												rel="noopener noreferrer"
+												class="text-xs text-pink-600 hover:text-pink-800 hover:underline font-medium"
+												title="Instagram 원본"
+											>
+												IG
+											</a>
+										{/if}
+										{#if !event.event_url && !(event.source_type === 'instagram' && event.source_instagram_url)}
+											<span class="text-xs text-gray-400">-</span>
+										{/if}
+									</div>
+								</td>
+								<!-- 관리 (북마크/참여/삭제) -->
+								<td class="px-2 py-2" onclick={(e) => e.stopPropagation()}>
+									<div class="flex items-center gap-1 justify-center">
 										<button
-											onclick={() => deleteEvent(event.id)}
-											class="text-red-600 hover:text-red-800 text-sm"
+											onclick={(e) => toggleBookmark(event, e)}
+											class="text-lg transition-colors {event.is_bookmarked ? 'text-yellow-500' : 'text-gray-300 hover:text-yellow-400'}"
+											title={event.is_bookmarked ? '북마크 해제' : '북마크'}
 										>
-											삭제
+											{event.is_bookmarked ? '★' : '☆'}
+										</button>
+										<button
+											onclick={(e) => toggleParticipate(event, e)}
+											class="px-1.5 py-0.5 text-xs rounded transition-colors {isParticipated(event) ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}"
+											title={isParticipated(event) ? '참여 취소' : '참여 완료'}
+										>
+											{isParticipated(event) ? '참여' : '미참여'}
 										</button>
 									</div>
 								</td>
@@ -578,6 +992,7 @@
 				</table>
 			</div>
 		</div>
+		{/if}
 
 		<!-- 페이지네이션 -->
 		<div class="flex flex-col sm:flex-row justify-between items-center gap-3">
@@ -763,6 +1178,47 @@
 						</div>
 					{/if}
 
+					<!-- 경품 -->
+					<div>
+						<label for="event-prizes" class="block text-sm font-medium text-gray-700 mb-1">경품</label>
+						<textarea
+							id="event-prizes"
+							bind:value={prizesText}
+							placeholder="경품을 한 줄에 하나씩 입력&#10;예: 아이패드 프로&#10;에어팟 프로"
+							rows="3"
+							class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+						></textarea>
+						<p class="mt-1 text-xs text-gray-500">한 줄에 하나의 경품 입력</p>
+					</div>
+
+					<!-- 당첨자 수 + 조건 -->
+					<div class="grid grid-cols-2 gap-4">
+						<div>
+							<label for="event-winner-count" class="block text-sm font-medium text-gray-700 mb-1">당첨자 수</label>
+							<input
+								id="event-winner-count"
+								type="number"
+								min="0"
+								bind:value={eventForm.winner_count}
+								placeholder="예: 10"
+								class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+							/>
+						</div>
+						<div>
+							<label for="event-purchase" class="block text-sm font-medium text-gray-700 mb-1">구매 조건</label>
+							<select
+								id="event-purchase"
+								bind:value={eventForm.purchase_required}
+								class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+							>
+								<option value={undefined}>선택 안함</option>
+								<option value="no">무료 (구매 불필요)</option>
+								<option value="yes_partial">부분 구매 필요</option>
+								<option value="yes_all">구매 필수</option>
+							</select>
+						</div>
+					</div>
+
 					<!-- 요약 -->
 					<div>
 						<label for="event-summary" class="block text-sm font-medium text-gray-700 mb-1">요약</label>
@@ -803,6 +1259,381 @@
 							{editingEvent ? '수정' : '등록'}
 						{/if}
 					</button>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Instagram 피드 뷰어 모달 -->
+{#if showFeedViewer && viewingEvent}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto"
+		onclick={closeFeedViewer}
+		onkeydown={(e) => e.key === 'Escape' && closeFeedViewer()}
+		role="dialog"
+		tabindex="-1"
+	>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<div
+			class="flex flex-col lg:flex-row gap-4 max-w-5xl w-full max-h-[90vh]"
+			onclick={(e) => e.stopPropagation()}
+		>
+			<!-- 왼쪽: FeedCard -->
+			<div class="flex-shrink-0 flex justify-center">
+				{#if loadingPost}
+					<div class="bg-white rounded-xl p-8 flex items-center justify-center" style="width: 468px; height: 600px;">
+						<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
+					</div>
+				{:else if instagramPost}
+					<FeedCard
+						post={instagramPost}
+						detailMode={true}
+						onClose={closeFeedViewer}
+						onRequestLlmAnalysis={handleRequestLlmAnalysis}
+						onLlmUpdate={handleLlmUpdate}
+					/>
+				{:else}
+					<div class="bg-white rounded-xl p-8 text-center" style="width: 468px;">
+						<p class="text-gray-500 mb-4">Instagram 게시물을 불러올 수 없습니다.</p>
+						{#if viewingEvent.source_instagram_url}
+							<a
+								href={viewingEvent.source_instagram_url}
+								target="_blank"
+								rel="noopener noreferrer"
+								class="btn btn-primary btn-sm"
+							>
+								Instagram에서 보기
+							</a>
+						{/if}
+					</div>
+				{/if}
+			</div>
+
+			<!-- 오른쪽: 이벤트 정보 패널 -->
+			<div class="bg-white rounded-xl p-4 flex-1 overflow-y-auto max-h-[90vh] lg:max-w-sm">
+				<div class="flex items-center justify-between mb-4">
+					<h3 class="text-lg font-bold text-gray-900">이벤트 정보</h3>
+					<button
+						onclick={openEditFromViewer}
+						class="text-sm text-blue-600 hover:text-blue-800 underline"
+					>
+						수정
+					</button>
+				</div>
+
+				<div class="space-y-3 text-sm">
+					<!-- 제목 -->
+					<div>
+						<span class="text-gray-500 text-xs">제목</span>
+						<p class="font-medium text-gray-900">{viewingEvent.title}</p>
+					</div>
+
+					<!-- 유형/상태 -->
+					<div class="flex gap-2">
+						<span class="px-2 py-0.5 text-xs rounded {viewingEvent.event_type === 'popup' ? 'bg-pink-100 text-pink-700' : 'bg-purple-100 text-purple-700'}">
+							{viewingEvent.event_type === 'popup' ? '팝업' : '이벤트'}
+						</span>
+						<span class="px-2 py-0.5 text-xs rounded-full {getEventStatusColor(viewingEvent.event_status)}">
+							{eventStatusOptions.find(o => o.value === viewingEvent.event_status)?.label}
+						</span>
+					</div>
+
+					<!-- 기간 -->
+					{#if viewingEvent.event_start || viewingEvent.event_end}
+						<div>
+							<span class="text-gray-500 text-xs">기간</span>
+							<p class="text-gray-900">
+								{viewingEvent.event_start || '?'} ~ {viewingEvent.event_end || '?'}
+								{#if viewingEvent.days_remaining !== null}
+									<span class="ml-2 text-xs {viewingEvent.days_remaining === 0 ? 'text-orange-600 font-bold' : viewingEvent.days_remaining > 0 ? 'text-blue-600' : 'text-gray-400'}">
+										({getDaysRemaining(viewingEvent)})
+									</span>
+								{/if}
+							</p>
+						</div>
+					{/if}
+
+					<!-- 발표일 -->
+					{#if viewingEvent.announcement_date}
+						<div>
+							<span class="text-gray-500 text-xs">발표일</span>
+							<p class="text-gray-900">{viewingEvent.announcement_date}</p>
+						</div>
+					{/if}
+
+					<!-- 주최 -->
+					{#if viewingEvent.organizer}
+						<div>
+							<span class="text-gray-500 text-xs">주최</span>
+							<p class="font-medium text-blue-600">{viewingEvent.organizer}</p>
+						</div>
+					{/if}
+
+					<!-- 경품 -->
+					{#if viewingEvent.prizes && viewingEvent.prizes.length > 0}
+						<div>
+							<span class="text-gray-500 text-xs">경품</span>
+							<div class="flex flex-wrap gap-1 mt-1">
+								{#each viewingEvent.prizes as prize}
+									<span class="px-2 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded">{prize}</span>
+								{/each}
+							</div>
+						</div>
+					{/if}
+
+					<!-- 당첨자/조건 -->
+					<div class="flex gap-4">
+						{#if viewingEvent.winner_count}
+							<div>
+								<span class="text-gray-500 text-xs">당첨자</span>
+								<p class="font-medium text-purple-600">{viewingEvent.winner_count}명</p>
+							</div>
+						{/if}
+						{#if viewingEvent.purchase_required}
+							<div>
+								<span class="text-gray-500 text-xs">조건</span>
+								<p>
+									{#if viewingEvent.purchase_required === 'yes_all'}
+										<span class="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded">구매필수</span>
+									{:else if viewingEvent.purchase_required === 'yes_partial'}
+										<span class="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded">부분구매</span>
+									{:else}
+										<span class="text-xs bg-green-100 text-green-600 px-1.5 py-0.5 rounded">무료</span>
+									{/if}
+								</p>
+							</div>
+						{/if}
+					</div>
+
+					<!-- 위치 (팝업) -->
+					{#if viewingEvent.event_type === 'popup' && (viewingEvent.location_venue || viewingEvent.location_address)}
+						<div>
+							<span class="text-gray-500 text-xs">위치</span>
+							<p class="text-gray-900">
+								{#if viewingEvent.location_venue}
+									<span class="font-medium">{viewingEvent.location_venue}</span>
+								{/if}
+								{#if viewingEvent.location_address}
+									<span class="text-gray-600 text-xs block">{viewingEvent.location_address}</span>
+								{/if}
+							</p>
+						</div>
+					{/if}
+
+					<!-- 요약 -->
+					{#if viewingEvent.summary}
+						<div>
+							<span class="text-gray-500 text-xs">요약</span>
+							<p class="text-gray-700 text-xs leading-relaxed">{viewingEvent.summary}</p>
+						</div>
+					{/if}
+
+					<!-- 링크들 -->
+					<div class="pt-3 border-t border-gray-100 space-y-2">
+						{#if viewingEvent.event_url}
+							<a
+								href={viewingEvent.event_url}
+								target="_blank"
+								rel="noopener noreferrer"
+								class="block text-sm text-blue-600 hover:underline truncate"
+							>
+								이벤트 참여 링크
+							</a>
+						{/if}
+						{#if viewingEvent.source_instagram_url}
+							<a
+								href={viewingEvent.source_instagram_url}
+								target="_blank"
+								rel="noopener noreferrer"
+								class="block text-sm text-pink-600 hover:underline"
+							>
+								Instagram 원본 보기
+							</a>
+						{/if}
+					</div>
+
+					<!-- 북마크/참여 -->
+					<div class="pt-3 border-t border-gray-100 flex gap-2">
+						<button
+							onclick={(e) => { e.stopPropagation(); toggleBookmark(viewingEvent!, e); }}
+							class="flex-1 py-2 text-sm rounded transition-colors {viewingEvent.is_bookmarked ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+						>
+							{viewingEvent.is_bookmarked ? '★ 북마크됨' : '☆ 북마크'}
+						</button>
+						<button
+							onclick={(e) => { e.stopPropagation(); toggleParticipate(viewingEvent!, e); }}
+							class="flex-1 py-2 text-sm rounded transition-colors {isParticipated(viewingEvent) ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+						>
+							{isParticipated(viewingEvent) ? '✓ 참여완료' : '참여하기'}
+						</button>
+					</div>
+
+					<!-- 삭제 -->
+					<button
+						onclick={() => { deleteEvent(viewingEvent!.id); closeFeedViewer(); }}
+						class="w-full py-2 text-sm text-red-600 hover:bg-red-50 rounded transition-colors"
+					>
+						이벤트 삭제
+					</button>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- 팝업 Instagram 피드 뷰어 모달 -->
+{#if showPopupFeedViewer && viewingPopup}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto"
+		onclick={closePopupFeedViewer}
+		onkeydown={(e) => e.key === 'Escape' && closePopupFeedViewer()}
+		role="dialog"
+		tabindex="-1"
+	>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<div
+			class="flex flex-col lg:flex-row gap-4 max-w-5xl w-full max-h-[90vh]"
+			onclick={(e) => e.stopPropagation()}
+		>
+			<!-- 왼쪽: FeedCard -->
+			<div class="flex-shrink-0 flex justify-center">
+				{#if loadingPost}
+					<div class="bg-white rounded-xl p-8 flex items-center justify-center" style="width: 468px; height: 600px;">
+						<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
+					</div>
+				{:else if instagramPost}
+					<FeedCard
+						post={instagramPost}
+						detailMode={true}
+						onClose={closePopupFeedViewer}
+						onRequestLlmAnalysis={handleRequestLlmAnalysis}
+						onLlmUpdate={handleLlmUpdate}
+					/>
+				{:else}
+					<div class="bg-white rounded-xl p-8 text-center" style="width: 468px;">
+						<p class="text-gray-500 mb-4">Instagram 게시물을 불러올 수 없습니다.</p>
+						{#if viewingPopup.source_instagram_url}
+							<a
+								href={viewingPopup.source_instagram_url}
+								target="_blank"
+								rel="noopener noreferrer"
+								class="btn btn-primary btn-sm"
+							>
+								Instagram에서 보기
+							</a>
+						{/if}
+					</div>
+				{/if}
+			</div>
+
+			<!-- 오른쪽: 팝업 정보 패널 -->
+			<div class="bg-white rounded-xl p-4 flex-1 overflow-y-auto max-h-[90vh] lg:max-w-sm">
+				<div class="flex items-center justify-between mb-4">
+					<h3 class="text-lg font-bold text-gray-900">팝업 정보</h3>
+				</div>
+
+				<div class="space-y-3 text-sm">
+					<!-- 제목 -->
+					<div>
+						<span class="text-gray-500 text-xs">제목</span>
+						<p class="font-medium text-gray-900">{viewingPopup.title}</p>
+					</div>
+
+					<!-- 상태 -->
+					<div class="flex gap-2">
+						<span class="px-2 py-0.5 text-xs rounded bg-pink-100 text-pink-700">
+							팝업
+						</span>
+						<span class="px-2 py-0.5 text-xs rounded-full {getEventStatusColor(viewingPopup.popup_status)}">
+							{eventStatusOptions.find(o => o.value === viewingPopup.popup_status)?.label}
+						</span>
+					</div>
+
+					<!-- 기간 -->
+					{#if viewingPopup.start_date || viewingPopup.end_date}
+						<div>
+							<span class="text-gray-500 text-xs">기간</span>
+							<p class="text-gray-900">
+								{viewingPopup.start_date || '?'} ~ {viewingPopup.end_date || '?'}
+							</p>
+						</div>
+					{/if}
+
+					<!-- 브랜드/주최 -->
+					{#if viewingPopup.brand || viewingPopup.organizer}
+						<div>
+							<span class="text-gray-500 text-xs">브랜드/주최</span>
+							<p class="font-medium text-blue-600">{viewingPopup.brand || viewingPopup.organizer}</p>
+						</div>
+					{/if}
+
+					<!-- 위치 -->
+					{#if viewingPopup.venue_name || viewingPopup.address}
+						<div>
+							<span class="text-gray-500 text-xs">위치</span>
+							<p class="text-gray-900">
+								{#if viewingPopup.venue_name}
+									<span class="font-medium">{viewingPopup.venue_name}</span>
+								{/if}
+								{#if viewingPopup.address}
+									<span class="text-gray-600 text-xs block">{viewingPopup.address}</span>
+								{/if}
+							</p>
+						</div>
+					{/if}
+
+					<!-- 요약 -->
+					{#if viewingPopup.summary}
+						<div>
+							<span class="text-gray-500 text-xs">요약</span>
+							<p class="text-gray-700 text-xs leading-relaxed">{viewingPopup.summary}</p>
+						</div>
+					{/if}
+
+					<!-- 링크들 -->
+					<div class="pt-3 border-t border-gray-100 space-y-2">
+						{#if viewingPopup.official_url}
+							<a
+								href={viewingPopup.official_url}
+								target="_blank"
+								rel="noopener noreferrer"
+								class="block text-sm text-blue-600 hover:underline truncate"
+							>
+								공식 사이트
+							</a>
+						{/if}
+						{#if viewingPopup.source_instagram_url}
+							<a
+								href={viewingPopup.source_instagram_url}
+								target="_blank"
+								rel="noopener noreferrer"
+								class="block text-sm text-pink-600 hover:underline"
+							>
+								Instagram 원본 보기
+							</a>
+						{/if}
+					</div>
+
+					<!-- 북마크/방문 -->
+					<div class="pt-3 border-t border-gray-100 flex gap-2">
+						<button
+							onclick={(e) => { e.stopPropagation(); togglePopupBookmark(viewingPopup!, e); }}
+							class="flex-1 py-2 text-sm rounded transition-colors {viewingPopup.is_bookmarked ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+						>
+							{viewingPopup.is_bookmarked ? '★ 북마크됨' : '☆ 북마크'}
+						</button>
+						<button
+							onclick={(e) => { e.stopPropagation(); togglePopupVisited(viewingPopup!, e); }}
+							class="flex-1 py-2 text-sm rounded transition-colors {viewingPopup.is_visited ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+						>
+							{viewingPopup.is_visited ? '✓ 방문완료' : '방문하기'}
+						</button>
+					</div>
 				</div>
 			</div>
 		</div>
