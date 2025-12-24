@@ -623,6 +623,10 @@
 	});
 </script>
 
+<svelte:head>
+	<title>이벤트 · 팝업 관리</title>
+</svelte:head>
+
 <div class="p-4 md:p-6">
 	<!-- 헤더 -->
 	<div class="mb-4 md:mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
