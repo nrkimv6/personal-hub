@@ -153,6 +153,17 @@
 		}
 	}
 
+	function getAnalysisResult(req: UniversalCrawlRequest) {
+		if (!req.crawled_page) return { text: '-', badge: 'text-gray-400' };
+		if (req.crawled_page.is_event === null || req.crawled_page.is_event === undefined) {
+			return { text: '미분석', badge: 'bg-gray-100 text-gray-600' };
+		}
+		if (req.crawled_page.is_event) {
+			return { text: '이벤트', badge: 'bg-purple-100 text-purple-700' };
+		}
+		return { text: '미분류', badge: 'bg-yellow-100 text-yellow-700' };
+	}
+
 	function formatDate(dateStr: string) {
 		const date = new Date(dateStr);
 		return date.toLocaleString('ko-KR', {
@@ -267,17 +278,23 @@
 					class="w-full text-left bg-white border rounded-lg p-4 hover:shadow-md transition-shadow"
 				>
 					<div class="flex items-start justify-between gap-2 mb-2">
-						<span class="px-2 py-0.5 text-xs rounded-full {getStatusBadge(req.status)}">
-							{getStatusText(req.status)}
-						</span>
-						<span class="px-2 py-0.5 text-xs rounded-full {getUrlTypeBadge(req.url_type)}">
-							{req.url_type}
-						</span>
+						<div class="flex gap-1">
+							<span class="px-2 py-0.5 text-xs rounded-full {getStatusBadge(req.status)}">
+								{getStatusText(req.status)}
+							</span>
+							<span class="px-2 py-0.5 text-xs rounded-full {getUrlTypeBadge(req.url_type)}">
+								{req.url_type}
+							</span>
+						</div>
+						{@const result = getAnalysisResult(req)}
+						{#if result.text !== '-'}
+							<span class="px-2 py-0.5 text-xs rounded-full {result.badge}">{result.text}</span>
+						{/if}
 					</div>
 					<p class="text-sm text-gray-900 break-all line-clamp-2 mb-2">{req.url}</p>
 					<div class="flex justify-between text-xs text-gray-500">
 						<span>{formatDate(req.requested_at)}</span>
-						{#if req.status === 'failed' && $isAdmin}
+						{#if (req.status === 'failed' || req.status === 'completed') && $isAdmin}
 							<button
 								onclick={(e) => {
 									e.stopPropagation();
@@ -301,6 +318,7 @@
 						<th class="pb-3 font-medium">상태</th>
 						<th class="pb-3 font-medium">타입</th>
 						<th class="pb-3 font-medium">URL</th>
+						<th class="pb-3 font-medium">분석결과</th>
 						<th class="pb-3 font-medium">요청 시간</th>
 						<th class="pb-3 font-medium">완료 시간</th>
 						<th class="pb-3 font-medium"></th>
@@ -322,12 +340,20 @@
 							<td class="py-3 max-w-md">
 								<span class="text-sm text-gray-700 break-all line-clamp-1">{req.url}</span>
 							</td>
+							<td class="py-3">
+								{@const result = getAnalysisResult(req)}
+								{#if result.text === '-'}
+									<span class="{result.badge}">{result.text}</span>
+								{:else}
+									<span class="px-2 py-1 text-xs rounded-full {result.badge}">{result.text}</span>
+								{/if}
+							</td>
 							<td class="py-3 text-sm text-gray-600">{formatDate(req.requested_at)}</td>
 							<td class="py-3 text-sm text-gray-600">
 								{req.completed_at ? formatDate(req.completed_at) : '-'}
 							</td>
 							<td class="py-3">
-								{#if req.status === 'failed' && $isAdmin}
+								{#if (req.status === 'failed' || req.status === 'completed') && $isAdmin}
 									<button
 										onclick={(e) => {
 											e.stopPropagation();
@@ -531,7 +557,7 @@
 			</div>
 
 			<div class="mt-6 flex gap-2 justify-end">
-				{#if selectedRequest.status === 'failed' && $isAdmin}
+				{#if (selectedRequest.status === 'failed' || selectedRequest.status === 'completed') && $isAdmin}
 					<button onclick={() => handleRetry(selectedRequest.id)} class="btn btn-outline btn-sm">
 						재시도
 					</button>

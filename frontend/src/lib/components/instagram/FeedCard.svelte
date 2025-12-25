@@ -496,66 +496,56 @@
 								<span class="text-xs px-2 py-0.5 rounded-full {llmResult.status === 'completed' ? 'bg-green-100 text-green-700' : llmResult.status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}">
 									{llmResult.status === 'completed' ? '분석 완료' : llmResult.status === 'failed' ? '분석 실패' : '분석 중'}
 								</span>
-								{#if r.tag}
-									<span class="px-2 py-0.5 text-xs rounded-full
-										{r.tag === '이벤트' ? 'bg-purple-100 text-purple-700' :
-										 r.tag === '팝업' ? 'bg-pink-100 text-pink-700' :
-										 r.tag === '홍보대사' ? 'bg-blue-100 text-blue-700' :
-										 r.tag === '리그램' ? 'bg-orange-100 text-orange-700' :
-										 r.tag === '후기' ? 'bg-teal-100 text-teal-700' :
-										 'bg-gray-100 text-gray-600'}">
-										{r.tag}
-									</span>
-								{/if}
+								<span class="px-2 py-0.5 text-xs rounded-full
+									{r.tag === '이벤트' ? 'bg-purple-100 text-purple-700' :
+									 r.tag === '팝업' ? 'bg-pink-100 text-pink-700' :
+									 r.tag === '홍보대사' ? 'bg-blue-100 text-blue-700' :
+									 r.tag === '리그램' ? 'bg-orange-100 text-orange-700' :
+									 r.tag === '후기' ? 'bg-teal-100 text-teal-700' :
+									 'bg-gray-100 text-gray-600'}">
+									{r.tag || '-'}
+								</span>
 							</div>
 							<!-- 주최/브랜드 -->
-							{#if r.organizer}
-								<div class="flex items-center gap-2">
-									<span class="text-gray-500 text-xs w-20 shrink-0">주최:</span>
-									<span class="text-gray-900">{r.organizer}</span>
-								</div>
-							{/if}
+							<div class="flex items-center gap-2">
+								<span class="text-gray-500 text-xs w-20 shrink-0">주최:</span>
+								<span class="text-gray-900">{r.organizer || '-'}</span>
+							</div>
 							<!-- 요약 -->
-							{#if r.summary}
-								<div class="flex items-start gap-2">
-									<span class="text-gray-500 text-xs w-20 shrink-0">요약:</span>
-									<p class="text-gray-900">{r.summary}</p>
-								</div>
-							{/if}
+							<div class="flex items-start gap-2">
+								<span class="text-gray-500 text-xs w-20 shrink-0">요약:</span>
+								<p class="text-gray-900">{r.summary || '-'}</p>
+							</div>
 							<!-- 이벤트 기간 -->
-							{#if r.event_period?.start || r.event_period?.end}
-								<div class="flex items-center gap-2">
-									<span class="text-gray-500 text-xs w-20 shrink-0">기간:</span>
-									<span class="text-gray-900">
+							<div class="flex items-center gap-2">
+								<span class="text-gray-500 text-xs w-20 shrink-0">기간:</span>
+								<span class="text-gray-900">
+									{#if r.event_period?.start || r.event_period?.end}
 										{r.event_period?.start || '?'} ~ {r.event_period?.end || '?'}
-									</span>
-								</div>
-							{/if}
+									{:else}
+										-
+									{/if}
+								</span>
+							</div>
 							<!-- 발표일 -->
-							{#if r.announcement_date}
-								<div class="flex items-center gap-2">
-									<span class="text-gray-500 text-xs w-20 shrink-0">발표일:</span>
-									<span class="text-gray-900">{r.announcement_date}</span>
-								</div>
-							{/if}
+							<div class="flex items-center gap-2">
+								<span class="text-gray-500 text-xs w-20 shrink-0">발표일:</span>
+								<span class="text-gray-900">{r.announcement_date || '-'}</span>
+							</div>
 							<!-- 경품 -->
-							{#if r.prizes && r.prizes.length > 0}
-								<div class="flex items-start gap-2">
-									<span class="text-gray-500 text-xs w-20 shrink-0">경품:</span>
-									<span class="text-gray-900">{r.prizes.join(', ')}</span>
-								</div>
-							{/if}
+							<div class="flex items-start gap-2">
+								<span class="text-gray-500 text-xs w-20 shrink-0">경품:</span>
+								<span class="text-gray-900">{r.prizes && r.prizes.length > 0 ? r.prizes.join(', ') : '-'}</span>
+							</div>
 							<!-- 당첨자 수 -->
-							{#if r.winner_count}
-								<div class="flex items-center gap-2">
-									<span class="text-gray-500 text-xs w-20 shrink-0">당첨자:</span>
-									<span class="text-gray-900">{r.winner_count}명</span>
-								</div>
-							{/if}
+							<div class="flex items-center gap-2">
+								<span class="text-gray-500 text-xs w-20 shrink-0">당첨자:</span>
+								<span class="text-gray-900">{r.winner_count != null ? `${r.winner_count}명` : '-'}</span>
+							</div>
 							<!-- 구매 필요 -->
-							{#if r.purchase_required}
-								<div class="flex items-center gap-2">
-									<span class="text-gray-500 text-xs w-20 shrink-0">구매필요:</span>
+							<div class="flex items-center gap-2">
+								<span class="text-gray-500 text-xs w-20 shrink-0">구매필요:</span>
+								{#if r.purchase_required}
 									<span class="px-2 py-0.5 text-xs rounded-full
 										{r.purchase_required === '아니오' ? 'bg-green-100 text-green-700' :
 										 r.purchase_required === '예_부분' ? 'bg-yellow-100 text-yellow-700' :
@@ -563,26 +553,30 @@
 										{r.purchase_required === '예_전부' ? '필수' :
 										 r.purchase_required === '예_부분' ? '부분' : '불필요'}
 									</span>
-								</div>
-							{/if}
+								{:else}
+									<span class="text-gray-900">-</span>
+								{/if}
+							</div>
 							<!-- 장소 (팝업) -->
-							{#if r.location?.venue_name || r.location?.address}
-								<div class="flex items-start gap-2">
-									<span class="text-gray-500 text-xs w-20 shrink-0">장소:</span>
-									<div class="text-gray-900">
+							<div class="flex items-start gap-2">
+								<span class="text-gray-500 text-xs w-20 shrink-0">장소:</span>
+								<div class="text-gray-900">
+									{#if r.location?.venue_name || r.location?.address}
 										{#if r.location?.venue_name}
 											<div>{r.location.venue_name}</div>
 										{/if}
 										{#if r.location?.address}
 											<div class="text-xs text-gray-500">{r.location.address}</div>
 										{/if}
-									</div>
+									{:else}
+										-
+									{/if}
 								</div>
-							{/if}
+							</div>
 							<!-- URL 목록 -->
-							{#if r.urls && r.urls.length > 0}
-								<div class="flex items-start gap-2">
-									<span class="text-gray-500 text-xs w-20 shrink-0">링크:</span>
+							<div class="flex items-start gap-2">
+								<span class="text-gray-500 text-xs w-20 shrink-0">링크:</span>
+								{#if r.urls && r.urls.length > 0}
 									<div class="flex flex-col gap-1">
 										{#each r.urls as url}
 											<a href={url} target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:underline break-all text-xs">
@@ -590,8 +584,10 @@
 											</a>
 										{/each}
 									</div>
-								</div>
-							{/if}
+								{:else}
+									<span class="text-gray-900">-</span>
+								{/if}
+							</div>
 						</div>
 					{:else if llmResult && llmResult.status === 'failed'}
 						<div class="text-center py-4">

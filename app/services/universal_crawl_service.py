@@ -7,7 +7,7 @@ import logging
 from typing import List, Optional, Tuple
 from datetime import datetime
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc
 
 from app.models.universal_crawl import UniversalCrawlRequest, CrawledPage
@@ -124,7 +124,9 @@ class UniversalCrawlService:
         page_size: int = 50,
     ) -> UniversalCrawlRequestList:
         """요청 목록 조회"""
-        query = db.query(UniversalCrawlRequest)
+        query = db.query(UniversalCrawlRequest).options(
+            joinedload(UniversalCrawlRequest.crawled_page)
+        )
 
         if status:
             query = query.filter(UniversalCrawlRequest.status == status)
@@ -218,17 +220,18 @@ class UniversalCrawlService:
         db: Session,
         request_id: int,
     ) -> Optional[UniversalCrawlRequest]:
-        """실패한 요청 재시도"""
+        """요청 재시도 (실패/완료 상태 모두 가능)"""
         request = self.get_request(db, request_id)
         if not request:
             return None
-        if request.status != "failed":
-            raise ValueError("실패한 요청만 재시도할 수 있습니다.")
+        if request.status not in ("failed", "completed"):
+            raise ValueError("실패 또는 완료된 요청만 재시도할 수 있습니다.")
 
         request.status = "pending"
         request.error_message = None
         request.started_at = None
         request.completed_at = None
+        request.requested_at = datetime.now()  # 재시도 시간으로 갱신
 
         db.commit()
         db.refresh(request)

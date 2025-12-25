@@ -25,15 +25,27 @@ CALLER_TYPE = "instagram"
 
 # ========== Schemas ==========
 
+class LLMEventPeriodSchema(BaseModel):
+    start: Optional[str] = None
+    end: Optional[str] = None
+
+
+class LLMLocationSchema(BaseModel):
+    venue_name: Optional[str] = None
+    address: Optional[str] = None
+
+
 class LLMResultSchema(BaseModel):
-    is_event: Optional[bool] = None
+    tag: Optional[str] = None  # 이벤트|팝업|홍보대사|리그램|후기|기타
     organizer: Optional[str] = None
-    event_url: Optional[str] = None
-    event_date: Optional[str] = None
-    event_time: Optional[str] = None
-    details: Optional[str] = None
-    confidence: Optional[float] = None
-    reason: Optional[str] = None
+    summary: Optional[str] = None
+    prizes: Optional[list[str]] = None
+    winner_count: Optional[int] = None
+    purchase_required: Optional[str] = None  # 예_전부|예_부분|아니오
+    event_period: Optional[LLMEventPeriodSchema] = None
+    announcement_date: Optional[str] = None
+    urls: Optional[list[str]] = None
+    location: Optional[LLMLocationSchema] = None
 
 
 class LLMRequestSchema(BaseModel):
