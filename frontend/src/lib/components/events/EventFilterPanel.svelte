@@ -44,7 +44,7 @@
 		onDeadlineDateChange(filterDeadlineDate === dateStr ? null : dateStr);
 	}
 
-	// 오늘부터 6일간 날짜 배열 생성
+	// 오늘부터 6일간 날짜 배열 생성 (로컬 타임존 기준)
 	function getDeadlineDates(): { dateStr: string; label: string; dayLabel: string }[] {
 		const dates: { dateStr: string; label: string; dayLabel: string }[] = [];
 		const today = new Date();
@@ -53,9 +53,11 @@
 		for (let i = 0; i < 6; i++) {
 			const d = new Date(today);
 			d.setDate(today.getDate() + i);
-			const dateStr = d.toISOString().split('T')[0]; // YYYY-MM-DD
+			// 로컬 타임존 기준 YYYY-MM-DD (toISOString()은 UTC 기준이라 하루 밀림)
+			const year = d.getFullYear();
 			const month = d.getMonth() + 1;
 			const day = d.getDate();
+			const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 			const dayOfWeek = dayNames[d.getDay()];
 
 			let dayLabel: string;
