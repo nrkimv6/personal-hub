@@ -1,8 +1,11 @@
 <script lang="ts">
 	/**
 	 * URL에서 이벤트 정보 추출 모달 컴포넌트
+	 * - 즉시 추출: AI가 바로 이벤트 정보를 추출하여 편집 가능
+	 * - 백그라운드 크롤링: 크롤링 큐에 등록 후 이력 페이지로 이동
 	 */
-	import { eventApi } from '$lib/api';
+	import { eventApi, crawlApi } from '$lib/api';
+	import { toast } from '$lib/stores/toast';
 	import type { EventImportFromUrlResponse, EventCreate } from '$lib/types';
 
 	interface Props {
@@ -13,11 +16,15 @@
 
 	let { show, onClose, onImportComplete }: Props = $props();
 
+	// 모드 타입
+	type ImportMode = 'instant' | 'background';
+
 	// 상태
 	let url = $state('');
 	let loading = $state(false);
 	let error: string | null = $state(null);
 	let result: EventImportFromUrlResponse | null = $state(null);
+	let mode: ImportMode = $state('instant');
 
 	// 페이지 타입 라벨
 	const pageTypeLabels: Record<string, string> = {
@@ -43,6 +50,48 @@
 			return true;
 		} catch {
 			return false;
+		}
+	}
+
+	// 백그라운드 크롤링 요청
+	async function handleBackgroundCrawl() {
+		if (!url.trim()) {
+			error = 'URL을 입력해주세요.';
+			return;
+		}
+
+		if (!isValidUrl(url.trim())) {
+			error = '유효한 URL을 입력해주세요.';
+			return;
+		}
+
+		loading = true;
+		error = null;
+
+		try {
+			const response = await crawlApi.createRequest({
+				url: url.trim(),
+				auto_analyze: true,
+				priority: 0
+			});
+
+			if (response.success) {
+				toast.success(`크롤링 요청 등록 완료 (${response.url_type})`);
+				handleClose();
+				// 크롤링 이력 페이지로 이동
+				window.location.href = '/crawl';
+			}
+		} catch (e) {
+			const message = e instanceof Error ? e.message : '알 수 없는 오류';
+			if (message.includes('Instagram')) {
+				toast.warning('Instagram URL은 Instagram 크롤러를 사용하세요.');
+				handleClose();
+				window.location.href = `/instagram/posts?shared_url=${encodeURIComponent(url.trim())}`;
+			} else {
+				error = message;
+			}
+		} finally {
+			loading = false;
 		}
 	}
 
@@ -108,6 +157,7 @@
 		error = null;
 		result = null;
 		loading = false;
+		mode = 'instant';
 		onClose();
 	}
 
@@ -116,7 +166,11 @@
 		if (e.key === 'Escape') {
 			handleClose();
 		} else if (e.key === 'Enter' && !loading && !result) {
-			handleExtract();
+			if (mode === 'instant') {
+				handleExtract();
+			} else {
+				handleBackgroundCrawl();
+			}
 		}
 	}
 </script>
@@ -150,6 +204,28 @@
 					</button>
 				</div>
 
+				<!-- 모드 선택 -->
+				<div class="mb-4 flex gap-2">
+					<button
+						onclick={() => { mode = 'instant'; result = null; error = null; }}
+						class="flex-1 px-3 py-2 text-sm rounded-lg border transition-colors {mode === 'instant'
+							? 'bg-blue-50 border-blue-500 text-blue-700'
+							: 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}"
+					>
+						<div class="font-medium">즉시 추출</div>
+						<div class="text-xs opacity-75 mt-0.5">바로 편집 가능</div>
+					</button>
+					<button
+						onclick={() => { mode = 'background'; result = null; error = null; }}
+						class="flex-1 px-3 py-2 text-sm rounded-lg border transition-colors {mode === 'background'
+							? 'bg-green-50 border-green-500 text-green-700'
+							: 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}"
+					>
+						<div class="font-medium">백그라운드 크롤링</div>
+						<div class="text-xs opacity-75 mt-0.5">큐에 등록 후 이력 확인</div>
+					</button>
+				</div>
+
 				<!-- URL 입력 -->
 				<div class="space-y-4">
 					<div>
@@ -165,18 +241,33 @@
 								class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 								disabled={loading}
 							/>
-							<button
-								onclick={handleExtract}
-								disabled={loading || !url.trim()}
-								class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
-							>
-								{#if loading}
-									<span class="animate-spin">⏳</span>
-									추출 중...
-								{:else}
-									추출
-								{/if}
-							</button>
+							{#if mode === 'instant'}
+								<button
+									onclick={handleExtract}
+									disabled={loading || !url.trim()}
+									class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+								>
+									{#if loading}
+										<span class="animate-spin">⏳</span>
+										추출 중...
+									{:else}
+										추출
+									{/if}
+								</button>
+							{:else}
+								<button
+									onclick={handleBackgroundCrawl}
+									disabled={loading || !url.trim()}
+									class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+								>
+									{#if loading}
+										<span class="animate-spin">⏳</span>
+										등록 중...
+									{:else}
+										큐에 등록
+									{/if}
+								</button>
+							{/if}
 						</div>
 						<p class="text-xs text-gray-500 mt-1">
 							지원: Google Forms, Naver Form, Naver Blog, 일반 웹페이지
@@ -190,8 +281,8 @@
 						</div>
 					{/if}
 
-					<!-- 추출 결과: 이벤트가 아닌 경우 -->
-					{#if result?.success && !result.is_event}
+					<!-- 추출 결과: 이벤트가 아닌 경우 (즉시 추출 모드에서만) -->
+					{#if mode === 'instant' && result?.success && !result.is_event}
 						<div class="p-4 bg-yellow-50 border border-yellow-200 rounded-lg space-y-3">
 							<!-- 추출 정보 -->
 							<div class="flex items-center gap-2 text-sm">
@@ -247,8 +338,8 @@
 						</div>
 					{/if}
 
-					<!-- 추출 결과: 이벤트인 경우 -->
-					{#if result?.success && result.is_event && result.extracted_event}
+					<!-- 추출 결과: 이벤트인 경우 (즉시 추출 모드에서만) -->
+					{#if mode === 'instant' && result?.success && result.is_event && result.extracted_event}
 						<div class="p-4 bg-green-50 border border-green-200 rounded-lg space-y-3">
 							<!-- 추출 정보 -->
 							<div class="flex items-center gap-2 text-sm">
