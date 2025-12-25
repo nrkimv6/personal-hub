@@ -13,6 +13,7 @@
 
 	// 컴포넌트 import
 	import EventListCard from '$lib/components/events/EventListCard.svelte';
+	import CrawlTab from '$lib/components/events/CrawlTab.svelte';
 	import EventListTable from '$lib/components/events/EventListTable.svelte';
 	import PopupListCard from '$lib/components/events/PopupListCard.svelte';
 	import PopupListTable from '$lib/components/events/PopupListTable.svelte';
@@ -34,11 +35,15 @@
 	let error: string | null = $state(null);
 
 	// 탭 모드
-	type TabMode = 'event' | 'popup' | 'uncategorized';
+	type TabMode = 'event' | 'popup' | 'uncategorized' | 'crawl';
 	let activeTab: TabMode = $state('event');
 
 	// 미분류 목록
 	let uncategorizedPosts: UncategorizedPost[] = $state([]);
+
+	// 크롤링 탭 참조
+	let crawlTabRef: CrawlTab | null = $state(null);
+	let crawlTotal = $state(0);
 
 	// 필터
 	let filterEventStatus: string | null = $state('ongoing');
@@ -90,6 +95,10 @@
 	function switchTab(tab: TabMode) {
 		activeTab = tab;
 		currentPage = 1;
+		if (tab === 'crawl') {
+			// CrawlTab 컴포넌트가 자체적으로 데이터를 로드함
+			return;
+		}
 		if (isAnonymous) {
 			filterEventStatus = tab === 'event' ? 'ending_today' : null;
 		} else if (tab === 'event') {
@@ -529,12 +538,18 @@
 		<div class="flex items-center justify-between sm:justify-start gap-3">
 			<h2 class="text-xl md:text-2xl font-bold text-gray-900">이벤트 관리</h2>
 			{#if $isAdmin}
-				<div class="flex gap-2">
-					<button onclick={openCreateModal} class="btn btn-primary btn-sm"> + 새 이벤트 </button>
-					<button onclick={openUrlImportModal} class="btn btn-outline btn-sm" title="URL에서 이벤트 가져오기">
-						🔗 URL 가져오기
+				{#if activeTab === 'crawl'}
+					<button onclick={() => crawlTabRef?.openAddModal()} class="btn btn-primary btn-sm">
+						+ URL 크롤링 요청
 					</button>
-				</div>
+				{:else}
+					<div class="flex gap-2">
+						<button onclick={openCreateModal} class="btn btn-primary btn-sm"> + 새 이벤트 </button>
+						<button onclick={openUrlImportModal} class="btn btn-outline btn-sm" title="URL에서 이벤트 가져오기">
+							🔗 URL 가져오기
+						</button>
+					</div>
+				{/if}
 			{/if}
 		</div>
 
@@ -612,11 +627,26 @@
 			>
 				미분류
 			</button>
+			<button
+				onclick={() => switchTab('crawl')}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'crawl'
+					? 'border-blue-600 text-blue-600'
+					: 'border-transparent text-gray-500 hover:text-gray-700'}"
+			>
+				크롤링 이력
+			</button>
 		</nav>
 	</div>
 
-	<!-- 필터 패널 (로그인 사용자만) -->
-	{#if !isAnonymous}
+	<!-- 크롤링 탭 또는 필터 패널 -->
+	{#if activeTab === 'crawl'}
+		<CrawlTab
+			bind:this={crawlTabRef}
+			bind:currentPage
+			{pageSize}
+			onTotalChange={(t) => (crawlTotal = t)}
+		/>
+	{:else if !isAnonymous}
 		<EventFilterPanel
 			{filterEventStatus}
 			{filterBookmarked}
@@ -629,34 +659,28 @@
 		/>
 	{/if}
 
-	<!-- 목록 -->
-	{#if loading}
-		<div class="flex justify-center items-center h-64">
-			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-		</div>
-	{:else if error}
-		<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-			{error}
-		</div>
-	{:else if (activeTab === 'popup' ? popups.length : activeTab === 'uncategorized' ? uncategorizedPosts.length : events.length) === 0}
-		<div class="text-center py-12 text-gray-500">
-			<p class="text-lg">
-				{activeTab === 'popup' ? '등록된 팝업이 없습니다' : activeTab === 'uncategorized' ? '미분류 항목이 없습니다' : '등록된 이벤트가 없습니다'}
-			</p>
-			<p class="text-sm mt-2">
-				{activeTab === 'popup'
-					? '새 팝업을 등록하면 여기에 표시됩니다'
-					: activeTab === 'uncategorized'
-						? 'Instagram 크롤링에서 분류되지 않은 항목이 여기에 표시됩니다'
-						: '새 이벤트를 등록하면 여기에 표시됩니다'}
-			</p>
-			{#if $isAdmin && activeTab !== 'uncategorized'}
-				<button onclick={openCreateModal} class="mt-4 btn btn-primary btn-sm">
-					+ {activeTab === 'popup' ? '새 팝업 등록' : '새 이벤트 등록'}
-				</button>
-			{/if}
-		</div>
-	{:else if activeTab === 'uncategorized'}
+	<!-- 목록 (크롤링 탭은 CrawlTab 컴포넌트에서 렌더링) -->
+	{#if activeTab !== 'crawl'}
+		{#if loading}
+			<div class="flex justify-center items-center h-64">
+				<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+			</div>
+		{:else if error}
+			<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+				{error}
+			</div>
+		{:else if (activeTab === 'popup' ? popups.length : activeTab === 'uncategorized' ? uncategorizedPosts.length : events.length) === 0}
+			<div class="text-center py-12 text-gray-500">
+				<p class="text-lg">
+					{activeTab === 'popup' ? '등록된 팝업이 없습니다' : activeTab === 'uncategorized' ? '미분류 항목이 없습니다' : '등록된 이벤트가 없습니다'}
+				</p>
+				{#if $isAdmin && activeTab !== 'uncategorized'}
+					<button onclick={openCreateModal} class="mt-4 btn btn-primary btn-sm">
+						+ {activeTab === 'popup' ? '새 팝업 등록' : '새 이벤트 등록'}
+					</button>
+				{/if}
+			</div>
+		{:else if activeTab === 'uncategorized'}
 		<!-- 미분류 목록 -->
 		<div class="space-y-3">
 			{#each uncategorizedPosts as post}
@@ -738,10 +762,10 @@
 			onBookmarkToggle={handleEventBookmarkToggle}
 			onParticipateToggle={handleEventParticipateToggle}
 		/>
-	{/if}
+		{/if}
 
-	<!-- 페이지네이션 -->
-	{#if !loading && !error && (activeTab === 'popup' ? popups.length : activeTab === 'uncategorized' ? uncategorizedPosts.length : events.length) > 0}
+		<!-- 페이지네이션 -->
+		{#if !loading && !error && (activeTab === 'popup' ? popups.length : activeTab === 'uncategorized' ? uncategorizedPosts.length : events.length) > 0}
 		<div class="flex flex-col sm:flex-row justify-between items-center gap-3 mt-6">
 			<span class="text-sm text-gray-500">
 				전체 {total}개 중 {(currentPage - 1) * pageSize + 1} - {Math.min(
@@ -769,6 +793,7 @@
 				</button>
 			</div>
 		</div>
+		{/if}
 	{/if}
 </div>
 
@@ -816,3 +841,4 @@
 	onDeletePost={$isAdmin ? handleDeletePost : undefined}
 	onRequestLlmAnalysis={$isAdmin ? handleRequestLlmAnalysis : undefined}
 />
+

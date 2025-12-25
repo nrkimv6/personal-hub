@@ -23,6 +23,25 @@
 	}
 
 	let { popups, onPopupClick, onBookmarkToggle, onVisitedToggle }: Props = $props();
+
+	async function openInstagramSource(popup: Popup, e: MouseEvent) {
+		e.stopPropagation();
+
+		if (popup.source_instagram_url) {
+			window.open(popup.source_instagram_url, '_blank');
+			return;
+		}
+
+		try {
+			const res = await fetch(`/api/v1/popups/${popup.id}/instagram-source`);
+			const data = await res.json();
+			if (data.url) {
+				window.open(data.url, '_blank');
+			}
+		} catch (err) {
+			console.error('Failed to fetch Instagram source:', err);
+		}
+	}
 </script>
 
 <div class="hidden md:block bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
@@ -178,18 +197,16 @@
 										공식
 									</a>
 								{/if}
-								{#if popup.source_type === 'instagram' && popup.source_instagram_url}
-									<a
-										href={popup.source_instagram_url}
-										target="_blank"
-										rel="noopener noreferrer"
+								{#if popup.source_type === 'instagram' && (popup.source_instagram_url || popup.source_instagram_post_id)}
+									<button
+										onclick={(e) => openInstagramSource(popup, e)}
 										class="text-xs text-pink-600 hover:text-pink-800 hover:underline font-medium"
 										title="Instagram 원본"
 									>
 										IG
-									</a>
+									</button>
 								{/if}
-								{#if !popup.official_url && !(popup.source_type === 'instagram' && popup.source_instagram_url)}
+								{#if !popup.official_url && !(popup.source_type === 'instagram' && (popup.source_instagram_url || popup.source_instagram_post_id))}
 									<span class="text-xs text-gray-400">-</span>
 								{/if}
 							</div>

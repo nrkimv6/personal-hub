@@ -58,6 +58,27 @@
 		}
 	}
 
+	async function openInstagramSource(event: Event, e: MouseEvent) {
+		e.stopPropagation();
+
+		// 이미 URL이 있으면 바로 열기
+		if (event.source_instagram_url) {
+			window.open(event.source_instagram_url, '_blank');
+			return;
+		}
+
+		// API로 가져오기
+		try {
+			const res = await fetch(`/api/v1/events/${event.id}/instagram-source`);
+			const data = await res.json();
+			if (data.url) {
+				window.open(data.url, '_blank');
+			}
+		} catch (err) {
+			console.error('Failed to fetch Instagram source:', err);
+		}
+	}
+
 	function getSortIcon(column: string): string {
 		if (sortBy !== column) return '↕';
 		return sortOrder === 'asc' ? '↑' : '↓';
@@ -323,18 +344,16 @@
 										</button>
 									{/if}
 								{/if}
-								{#if event.source_type === 'instagram' && event.source_instagram_url}
-									<a
-										href={event.source_instagram_url}
-										target="_blank"
-										rel="noopener noreferrer"
+								{#if event.source_type === 'instagram' && (event.source_instagram_url || event.source_instagram_post_id)}
+									<button
+										onclick={(e) => openInstagramSource(event, e)}
 										class="text-xs text-pink-600 hover:text-pink-800 hover:underline font-medium"
 										title="Instagram 원본"
 									>
 										IG
-									</a>
+									</button>
 								{/if}
-								{#if !event.event_url && !(event.source_type === 'instagram' && event.source_instagram_url)}
+								{#if !event.event_url && !(event.source_type === 'instagram' && (event.source_instagram_url || event.source_instagram_post_id))}
 									<span class="text-xs text-gray-400">-</span>
 								{/if}
 							</div>
