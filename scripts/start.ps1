@@ -200,8 +200,15 @@ if ($runApi) {
     }
 
     # Start python directly (NOT via cmd.exe) to get correct PID
+    # Dev mode: add --reload for hot reload (auto-restart on file changes)
+    $uvicornArgs = @("-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "$ApiPort")
+    if ($Dev) {
+        $uvicornArgs += @("--reload", "--reload-dir", "app")
+        Write-Host "    [*] Hot reload enabled (--reload)" -ForegroundColor Yellow
+    }
+
     $apiProcess = Start-Process -FilePath $VenvPython `
-        -ArgumentList "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "$ApiPort" `
+        -ArgumentList $uvicornArgs `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
         -RedirectStandardOutput $stdoutLogFile `
