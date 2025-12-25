@@ -351,15 +351,28 @@ class CrawlService:
         return result is not None
 
     def _extract_post_id(self, url: Optional[str]) -> Optional[str]:
-        """URL에서 게시물 ID 추출."""
+        """URL에서 게시물 ID 추출.
+
+        /p/ (일반 게시물) 및 /reel/ (릴스) 패턴 모두 지원합니다.
+        쿼리 파라미터와 trailing slash는 자동 제거됩니다.
+        """
         if not url:
             return None
 
+        # 쿼리 파라미터 먼저 제거
+        url_clean = url.split("?")[0]
+
         # https://www.instagram.com/p/ABC123/
-        if "/p/" in url:
-            parts = url.split("/p/")
+        if "/p/" in url_clean:
+            parts = url_clean.split("/p/")
             if len(parts) > 1:
-                return parts[1].rstrip("/").split("?")[0]
+                return parts[1].rstrip("/")
+
+        # https://www.instagram.com/reel/ABC123/
+        if "/reel/" in url_clean:
+            parts = url_clean.split("/reel/")
+            if len(parts) > 1:
+                return parts[1].rstrip("/")
 
         return None
 

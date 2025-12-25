@@ -185,15 +185,30 @@ if ($runApi) {
     $apiLogFile = Join-Path $LogDir "api_$Timestamp.log"
 
     # Start API server in background
-    # stdout/stderr goes to separate file (stdout_api_*.log), Python logging goes to api_*.log
+    # stdout/stderr goes to separate files, Python logging goes to api_*.log
     $stdoutLogFile = Join-Path $LogDir "stdout_api_$Timestamp.log"
-    $apiProcess = Start-Process -FilePath "cmd.exe" `
-        -ArgumentList "/c", "set PYTHONIOENCODING=utf-8 && set APP_MODE=$AppMode && python -m uvicorn app.main:app --host 0.0.0.0 --port $ApiPort > `"$stdoutLogFile`" 2>&1" `
+    $stderrLogFile = Join-Path $LogDir "stderr_api_$Timestamp.log"
+
+    # Set environment variables
+    $env:PYTHONIOENCODING = "utf-8"
+    $env:APP_MODE = $AppMode
+
+    # Use venv python explicitly
+    $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+    if (-not (Test-Path $VenvPython)) {
+        $VenvPython = Join-Path $ProjectRoot "venv\Scripts\python.exe"
+    }
+
+    # Start python directly (NOT via cmd.exe) to get correct PID
+    $apiProcess = Start-Process -FilePath $VenvPython `
+        -ArgumentList "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "$ApiPort" `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
+        -RedirectStandardOutput $stdoutLogFile `
+        -RedirectStandardError $stderrLogFile `
         -PassThru
 
-    # Save PID
+    # Save PID - this is now the actual python process PID
     $apiProcess.Id | Out-File $ApiPidFile -Encoding ascii
 
     Write-Host "[+] API server started (PID: $($apiProcess.Id))" -ForegroundColor Green

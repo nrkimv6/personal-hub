@@ -268,46 +268,67 @@ foreach ($pidFile in $PidFiles) {
 }
 
 # ============================================================
-# STEP 5: Browser cleanup (optional)
+# STEP 5: Playwright Browser Cleanup (Kill + Wait + Clean LOCK)
 # ============================================================
 Write-Host ""
-Write-Host "[5] Checking Chrome processes" -ForegroundColor Cyan
+Write-Host "[5] Cleaning up Playwright browsers" -ForegroundColor Cyan
 Write-Host "----------------------------------------"
 
-$browserDataPath = Join-Path $ProjectRoot "browser_data"
-$chromeProcs = Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'" -ErrorAction SilentlyContinue | Where-Object {
-    $_.CommandLine -and $_.CommandLine -like "*$browserDataPath*"
+$browserProfilesPath = Join-Path $ProjectRoot "data\browser_profiles"
+
+# 5-1: Kill Playwright Chromium processes (identified by ms-playwright path)
+$playwrightKilled = 0
+$chromeProcs = Get-Process -Name "chrome" -ErrorAction SilentlyContinue
+foreach ($proc in $chromeProcs) {
+    try {
+        $procPath = $proc.Path
+        if ($procPath -and $procPath -like "*ms-playwright*") {
+            Write-Host "  [*] Killing Playwright browser (PID: $($proc.Id))" -ForegroundColor Yellow
+            Stop-Process -Id $proc.Id -Force -ErrorAction Stop
+            $playwrightKilled++
+        }
+    } catch {
+        # Ignore access denied errors
+    }
 }
 
-if ($chromeProcs) {
-    $count = @($chromeProcs).Count
-    Write-Host "  Found $count Chrome process(es) for monitoring" -ForegroundColor Yellow
+if ($playwrightKilled -gt 0) {
+    Write-Host "  [+] Killed $playwrightKilled Playwright browser process(es)" -ForegroundColor Green
+    # Wait for processes to fully terminate
+    Write-Host "  [*] Waiting for processes to terminate..." -ForegroundColor Gray
+    Start-Sleep -Milliseconds 1000
+} else {
+    Write-Host "  (no Playwright browser processes)" -ForegroundColor Gray
+}
 
-    $doKill = $Force
-    if (-not $Force) {
-        $response = Read-Host "  Kill them? (y/N)"
-        $doKill = ($response -eq "y" -or $response -eq "Y")
-    }
-
-    if ($doKill) {
-        foreach ($chrome in $chromeProcs) {
+# 5-2: Clean up LOCK files in browser profiles
+if (Test-Path $browserProfilesPath) {
+    $lockFiles = Get-ChildItem -Path $browserProfilesPath -Filter "LOCK" -Recurse -ErrorAction SilentlyContinue
+    if ($lockFiles) {
+        $lockCount = 0
+        foreach ($lockFile in $lockFiles) {
             try {
-                Stop-Process -Id $chrome.ProcessId -Force -ErrorAction Stop
-                Write-Host "  [+] Killed Chrome PID $($chrome.ProcessId)" -ForegroundColor Green
+                Remove-Item $lockFile.FullName -Force -ErrorAction Stop
+                $lockCount++
             } catch {
-                Write-Host "  [-] Failed to kill Chrome PID $($chrome.ProcessId)" -ForegroundColor Red
+                Write-Host "  [-] Failed to delete: $($lockFile.FullName)" -ForegroundColor Red
             }
         }
+        if ($lockCount -gt 0) {
+            Write-Host "  [+] Deleted $lockCount LOCK file(s)" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "  (no LOCK files found)" -ForegroundColor Gray
     }
-} else {
-    Write-Host "  (no monitoring Chrome processes)" -ForegroundColor Gray
-}
 
-# Clean browser lock file
-$lockFile = Join-Path $browserDataPath "browser_profile\lockfile"
-if (Test-Path $lockFile) {
-    Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
-    Write-Host "  [+] Deleted browser lockfile" -ForegroundColor Green
+    # 5-3: Clean up Crashpad data (can cause issues on restart)
+    $crashpadDirs = Get-ChildItem -Path $browserProfilesPath -Directory -Filter "Crashpad" -Recurse -ErrorAction SilentlyContinue
+    foreach ($crashpad in $crashpadDirs) {
+        Remove-Item -Path "$($crashpad.FullName)\*" -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if ($crashpadDirs) {
+        Write-Host "  [+] Cleaned up Crashpad data" -ForegroundColor Green
+    }
 }
 
 # ============================================================

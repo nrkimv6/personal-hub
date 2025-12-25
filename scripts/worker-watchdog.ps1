@@ -56,6 +56,7 @@ function Write-Log {
 function Start-WorkerProcess {
     $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $stdoutLogFile = Join-Path $LogDir "stdout_worker_$Timestamp.log"
+    $stderrLogFile = Join-Path $LogDir "stderr_worker_$Timestamp.log"
 
     Write-Log "Starting worker process..."
 
@@ -71,13 +72,20 @@ function Start-WorkerProcess {
 
     Write-Log "Using Python: $VenvPython"
 
-    $workerProcess = Start-Process -FilePath "cmd.exe" `
-        -ArgumentList "/c", "set PYTHONIOENCODING=utf-8 && `"$VenvPython`" -m app.worker.monitor_worker > `"$stdoutLogFile`" 2>&1" `
+    # Set environment variables
+    $env:PYTHONIOENCODING = "utf-8"
+    $env:APP_MODE = if ($isDev) { "development" } else { "production" }
+
+    # Start python directly (NOT via cmd.exe) to get correct PID
+    $workerProcess = Start-Process -FilePath $VenvPython `
+        -ArgumentList "-m", "app.worker.monitor_worker" `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
+        -RedirectStandardOutput $stdoutLogFile `
+        -RedirectStandardError $stderrLogFile `
         -PassThru
 
-    # Save PID
+    # Save PID - this is now the actual python process PID
     $workerProcess.Id | Out-File $WorkerPidFile -Encoding ascii
 
     Write-Log "Worker started with PID: $($workerProcess.Id)"

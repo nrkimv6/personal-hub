@@ -88,6 +88,15 @@ except Exception as e:
 class InstagramWorker:
     """Instagram 크롤링 워커."""
 
+    # 브라우저 closed 에러 키워드들
+    BROWSER_CLOSED_KEYWORDS = [
+        "Target page, context or browser has been closed",
+        "browser has been closed",
+        "context has been closed",
+        "page has been closed",
+        "Target closed",
+    ]
+
     def __init__(self):
         self.shutdown_event = asyncio.Event()
         self.continue_event = asyncio.Event()  # 크롤링 완료 시 즉시 깨우기용
@@ -96,6 +105,10 @@ class InstagramWorker:
         self.pid = os.getpid()
         self.start_time: datetime = None
         self.worker_id: str = None  # 워커 상태 추적용
+
+        # 계정별 페이지 사용 Lock (동시 크롤링 방지)
+        self._page_locks: dict[int, asyncio.Lock] = {}
+        self._page_locks_lock = asyncio.Lock()  # Lock 딕셔너리 접근용
 
     async def start(self):
         """워커 시작."""
@@ -339,7 +352,7 @@ class InstagramWorker:
         """계정별 브라우저 페이지 가져오기.
 
         ContextManager를 사용하여 계정별 프로필로 브라우저를 생성합니다.
-        이렇게 하면 메인 워커와 프로필 충돌이 발생하지 않습니다.
+        탭을 재사용하여 about:blank 탭이 누적되는 것을 방지합니다.
 
         Args:
             account_id: 계정 ID (None이면 기본 계정 사용)
@@ -352,16 +365,80 @@ class InstagramWorker:
         logger.info(f"계정 {account_id}용 브라우저 컨텍스트 가져오기")
         context = await self.context_manager.get_or_create_context(account_id)
 
-        # 페이지 가져오기 (없으면 새로 생성)
+        # 페이지 가져오기 - 기존 페이지 재사용 우선
         pages = context.pages
+        page = None
+
         if pages:
-            page = pages[0]
-            logger.debug(f"기존 페이지 사용 (account_id={account_id})")
-        else:
+            # 유효한 페이지 찾기 (닫히지 않은 페이지)
+            for p in pages:
+                try:
+                    if not p.is_closed():
+                        page = p
+                        logger.debug(f"기존 페이지 재사용 (account_id={account_id}, url={p.url[:50] if p.url else 'blank'}...)")
+                        break
+                except Exception:
+                    continue
+
+            # 불필요한 추가 탭 정리 (about:blank 상태인 탭)
+            if len(pages) > 1:
+                for p in pages[1:]:
+                    try:
+                        if not p.is_closed() and p.url == "about:blank":
+                            await p.close()
+                            logger.info(f"불필요한 about:blank 탭 정리 (account_id={account_id})")
+                    except Exception as e:
+                        logger.debug(f"탭 정리 중 오류 (무시): {e}")
+
+        # 유효한 페이지가 없으면 새로 생성
+        if page is None:
             page = await context.new_page()
             logger.info(f"새 페이지 생성 (account_id={account_id})")
 
         return page
+
+    async def _get_page_lock(self, account_id: int) -> asyncio.Lock:
+        """계정별 페이지 Lock을 가져오거나 생성합니다."""
+        async with self._page_locks_lock:
+            if account_id not in self._page_locks:
+                self._page_locks[account_id] = asyncio.Lock()
+            return self._page_locks[account_id]
+
+    def _is_browser_closed_error(self, error: Exception) -> bool:
+        """브라우저 closed 에러인지 확인.
+
+        Args:
+            error: 발생한 예외
+
+        Returns:
+            브라우저 closed 에러면 True
+        """
+        error_msg = str(error).lower()
+        return any(keyword.lower() in error_msg for keyword in self.BROWSER_CLOSED_KEYWORDS)
+
+    async def _recreate_browser_context(self, account_id: int = None):
+        """브라우저 컨텍스트 재생성.
+
+        기존 컨텍스트를 닫고 새로 생성합니다.
+
+        Args:
+            account_id: 계정 ID
+        """
+        logger.info(f"브라우저 컨텍스트 재생성 시작 (account_id={account_id})")
+
+        if self.context_manager:
+            try:
+                # 기존 컨텍스트 닫기
+                await self.context_manager.close_context(account_id)
+                logger.info(f"기존 컨텍스트 닫기 완료 (account_id={account_id})")
+            except Exception as e:
+                logger.warning(f"기존 컨텍스트 닫기 실패 (무시): {e}")
+
+        # 잠시 대기 후 새 컨텍스트 생성
+        await asyncio.sleep(1)
+
+        # 새 컨텍스트는 _get_page_for_account에서 자동 생성됨
+        logger.info(f"브라우저 컨텍스트 재생성 준비 완료 (account_id={account_id})")
 
     async def _execute_crawl(self, request: InstagramCrawlRequest, db):
         """크롤링 실행."""
@@ -384,187 +461,250 @@ class InstagramWorker:
 
     async def _execute_feed_crawl(self, request: InstagramCrawlRequest, db, request_service, crawl_service):
         """피드 크롤링 실행."""
-        try:
-            # 로그인 상태 확인
-            account = db.query(Account).filter(Account.id == request.account_id).first()
-            if not account:
-                request_service.mark_failed(request.id, "계정을 찾을 수 없음")
-                logger.warning(f"계정 없음: account_id={request.account_id}")
-                return
+        max_retries = 1  # 브라우저 에러 시 재시도 횟수
+        retry_count = 0
 
-            if not account.is_logged_in:
-                request_service.mark_failed(request.id, "로그인 필요")
-                logger.warning(f"로그인 필요: account={account.name}")
-                return
+        # 계정별 Lock 획득 (동시 크롤링 방지)
+        page_lock = await self._get_page_lock(request.account_id)
 
-            # 워커 상태를 crawling으로 변경
-            self._update_worker_state("crawling", account.name)
+        async with page_lock:
+            logger.debug(f"페이지 Lock 획득 (account_id={request.account_id}, type=feed)")
 
-            # 계정별 브라우저 페이지 가져오기
-            page = await self._get_page_for_account(account.id)
+            while retry_count <= max_retries:
+                try:
+                    # 로그인 상태 확인
+                    account = db.query(Account).filter(Account.id == request.account_id).first()
+                    if not account:
+                        request_service.mark_failed(request.id, "계정을 찾을 수 없음")
+                        logger.warning(f"계정 없음: account_id={request.account_id}")
+                        return
 
-            # 인스타그램 피드 페이지로 이동
-            logger.info("인스타그램 피드 페이지로 이동 중...")
-            await page.goto("https://www.instagram.com/", wait_until="domcontentloaded")
-            await page.wait_for_timeout(2000)  # 페이지 로드 대기
-            logger.info(f"인스타그램 페이지 로드 완료: {page.url}")
+                    if not account.is_logged_in:
+                        request_service.mark_failed(request.id, "로그인 필요")
+                        logger.warning(f"로그인 필요: account={account.name}")
+                        return
 
-            # 크롤러 생성 (Page 객체 전달)
-            crawler = InstagramCrawler(page)
-            logger.info("InstagramCrawler 생성 완료, 크롤링 시작...")
+                    # 워커 상태를 crawling으로 변경
+                    self._update_worker_state("crawling", account.name)
 
-            # 크롤링 실행
-            crawl_run = await crawl_service.run_crawl(
-                crawler=crawler,
-                account_id=request.account_id,
-            )
+                    # 계정별 브라우저 페이지 가져오기
+                    page = await self._get_page_for_account(account.id)
 
-            # 워커 상태 업데이트 (run_id 포함)
-            self._update_worker_state("crawling", account.name, crawl_run.id)
+                    # 인스타그램 피드 페이지로 이동
+                    logger.info("인스타그램 피드 페이지로 이동 중...")
+                    await page.goto("https://www.instagram.com/", wait_until="domcontentloaded")
+                    await page.wait_for_timeout(2000)  # 페이지 로드 대기
+                    logger.info(f"인스타그램 페이지 로드 완료: {page.url}")
 
-            logger.info(f"크롤링 완료: success={crawl_run.success}, collected={crawl_run.total_collected}, new={crawl_run.new_saved}")
+                    # 크롤러 생성 (Page 객체 전달)
+                    crawler = InstagramCrawler(page)
+                    logger.info("InstagramCrawler 생성 완료, 크롤링 시작...")
 
-            # 완료 처리
-            if crawl_run.success:
-                request_service.mark_completed(request.id, crawl_run.id)
-                logger.info(
-                    f"크롤링 완료: request_id={request.id}, "
-                    f"collected={crawl_run.total_collected}, new={crawl_run.new_saved}"
-                )
-            else:
-                request_service.mark_failed(request.id, crawl_run.error_message or "크롤링 실패")
-                logger.warning(f"크롤링 실패: {crawl_run.error_message}")
+                    # 크롤링 실행
+                    crawl_run = await crawl_service.run_crawl(
+                        crawler=crawler,
+                        account_id=request.account_id,
+                    )
 
-        except Exception as e:
-            request_service.mark_failed(request.id, str(e))
-            logger.error(f"크롤링 예외: {e}", exc_info=True)
-        finally:
-            # 워커 상태를 idle로 복원
-            self._update_worker_state("idle")
-            # 대기 중인 요청이 있으면 즉시 처리하도록 이벤트 설정
-            self.continue_event.set()
+                    # 워커 상태 업데이트 (run_id 포함)
+                    self._update_worker_state("crawling", account.name, crawl_run.id)
+
+                    logger.info(f"크롤링 완료: success={crawl_run.success}, collected={crawl_run.total_collected}, new={crawl_run.new_saved}")
+
+                    # 완료 처리
+                    if crawl_run.success:
+                        request_service.mark_completed(request.id, crawl_run.id)
+                        logger.info(
+                            f"크롤링 완료: request_id={request.id}, "
+                            f"collected={crawl_run.total_collected}, new={crawl_run.new_saved}"
+                        )
+                    else:
+                        request_service.mark_failed(request.id, crawl_run.error_message or "크롤링 실패")
+                        logger.warning(f"크롤링 실패: {crawl_run.error_message}")
+
+                    # 성공 시 루프 종료
+                    return
+
+                except Exception as e:
+                    # 브라우저 closed 에러면 재시도
+                    if self._is_browser_closed_error(e) and retry_count < max_retries:
+                        retry_count += 1
+                        logger.warning(f"브라우저 closed 에러 감지, 브라우저 재생성 후 재시도 ({retry_count}/{max_retries}): {e}")
+                        await self._recreate_browser_context(request.account_id)
+                        continue
+
+                    request_service.mark_failed(request.id, str(e))
+                    logger.error(f"크롤링 예외: {e}", exc_info=True)
+                    return
+                finally:
+                    # 워커 상태를 idle로 복원
+                    self._update_worker_state("idle")
+                    # 대기 중인 요청이 있으면 즉시 처리하도록 이벤트 설정
+                    self.continue_event.set()
 
     async def _execute_single_post_recrawl(self, request: InstagramCrawlRequest, db, request_service, crawl_service):
         """개별 게시물 재크롤링 실행."""
-        try:
-            # 대상 게시물 ID 확인
-            target_post_id = getattr(request, 'target_post_id', None)
-            if not target_post_id:
-                request_service.mark_failed(request.id, "대상 게시물 ID 없음")
-                logger.warning(f"대상 게시물 ID 없음: request_id={request.id}")
-                return
+        max_retries = 1  # 브라우저 에러 시 재시도 횟수
+        retry_count = 0
 
-            # 로그인 상태 확인
-            account = db.query(Account).filter(Account.id == request.account_id).first()
-            if not account:
-                request_service.mark_failed(request.id, "계정을 찾을 수 없음")
-                logger.warning(f"계정 없음: account_id={request.account_id}")
-                return
+        # 계정별 Lock 획득 (동시 크롤링 방지)
+        page_lock = await self._get_page_lock(request.account_id)
 
-            if not account.is_logged_in:
-                request_service.mark_failed(request.id, "로그인 필요")
-                logger.warning(f"로그인 필요: account={account.name}")
-                return
+        async with page_lock:
+            logger.debug(f"페이지 Lock 획득 (account_id={request.account_id}, type=single_post)")
 
-            # 워커 상태를 recrawling으로 변경
-            self._update_worker_state("recrawling", account.name)
+            while retry_count <= max_retries:
+                try:
+                    # 대상 게시물 ID 확인
+                    target_post_id = getattr(request, 'target_post_id', None)
+                    if not target_post_id:
+                        request_service.mark_failed(request.id, "대상 게시물 ID 없음")
+                        logger.warning(f"대상 게시물 ID 없음: request_id={request.id}")
+                        return
 
-            # 계정별 브라우저 페이지 가져오기
-            page = await self._get_page_for_account(account.id)
+                    # 로그인 상태 확인
+                    account = db.query(Account).filter(Account.id == request.account_id).first()
+                    if not account:
+                        request_service.mark_failed(request.id, "계정을 찾을 수 없음")
+                        logger.warning(f"계정 없음: account_id={request.account_id}")
+                        return
 
-            # 크롤러 생성
-            crawler = InstagramCrawler(page)
-            logger.info(f"개별 게시물 재크롤링 시작: post_id={target_post_id}")
+                    if not account.is_logged_in:
+                        request_service.mark_failed(request.id, "로그인 필요")
+                        logger.warning(f"로그인 필요: account={account.name}")
+                        return
 
-            # 재크롤링 실행
-            result = await crawl_service.recrawl_single_post(
-                crawler=crawler,
-                post_id=target_post_id,
-            )
+                    # 워커 상태를 recrawling으로 변경
+                    self._update_worker_state("recrawling", account.name)
 
-            if result["success"]:
-                # 성공 시 완료 처리 (crawl_run_id는 없음)
-                request.status = "completed"
-                request.processed_at = datetime.now()
-                db.commit()
-                logger.info(f"재크롤링 완료: request_id={request.id}, post_id={target_post_id}")
-            else:
-                request_service.mark_failed(request.id, result["message"])
-                logger.warning(f"재크롤링 실패: {result['message']}")
+                    # 계정별 브라우저 페이지 가져오기
+                    page = await self._get_page_for_account(account.id)
 
-        except Exception as e:
-            request_service.mark_failed(request.id, str(e))
-            logger.error(f"재크롤링 예외: {e}", exc_info=True)
-        finally:
-            # 워커 상태를 idle로 복원
-            self._update_worker_state("idle")
-            # 대기 중인 요청이 있으면 즉시 처리하도록 이벤트 설정
-            self.continue_event.set()
+                    # 크롤러 생성
+                    crawler = InstagramCrawler(page)
+                    logger.info(f"개별 게시물 재크롤링 시작: post_id={target_post_id}")
+
+                    # 재크롤링 실행
+                    result = await crawl_service.recrawl_single_post(
+                        crawler=crawler,
+                        post_id=target_post_id,
+                    )
+
+                    if result["success"]:
+                        # 성공 시 완료 처리 (crawl_run_id는 없음)
+                        request.status = "completed"
+                        request.processed_at = datetime.now()
+                        db.commit()
+                        logger.info(f"재크롤링 완료: request_id={request.id}, post_id={target_post_id}")
+                    else:
+                        request_service.mark_failed(request.id, result["message"])
+                        logger.warning(f"재크롤링 실패: {result['message']}")
+
+                    # 성공 시 루프 종료
+                    return
+
+                except Exception as e:
+                    # 브라우저 closed 에러면 재시도
+                    if self._is_browser_closed_error(e) and retry_count < max_retries:
+                        retry_count += 1
+                        logger.warning(f"브라우저 closed 에러 감지, 브라우저 재생성 후 재시도 ({retry_count}/{max_retries}): {e}")
+                        await self._recreate_browser_context(request.account_id)
+                        continue
+
+                    request_service.mark_failed(request.id, str(e))
+                    logger.error(f"재크롤링 예외: {e}", exc_info=True)
+                    return
+                finally:
+                    # 워커 상태를 idle로 복원
+                    self._update_worker_state("idle")
+                    # 대기 중인 요청이 있으면 즉시 처리하도록 이벤트 설정
+                    self.continue_event.set()
 
     async def _execute_url_crawl(self, request: InstagramCrawlRequest, db, request_service, crawl_service):
         """URL로 단일 게시물 수집 실행."""
-        try:
-            # 대상 URL 확인
-            target_url = getattr(request, 'target_url', None)
-            if not target_url:
-                request_service.mark_failed(request.id, "대상 URL 없음")
-                logger.warning(f"대상 URL 없음: request_id={request.id}")
-                return
+        max_retries = 1  # 브라우저 에러 시 재시도 횟수
+        retry_count = 0
 
-            # 로그인 상태 확인
-            account = db.query(Account).filter(Account.id == request.account_id).first()
-            if not account:
-                request_service.mark_failed(request.id, "계정을 찾을 수 없음")
-                logger.warning(f"계정 없음: account_id={request.account_id}")
-                return
+        # 계정별 Lock 획득 (동시 크롤링 방지)
+        page_lock = await self._get_page_lock(request.account_id)
 
-            if not account.is_logged_in:
-                request_service.mark_failed(request.id, "로그인 필요")
-                logger.warning(f"로그인 필요: account={account.name}")
-                return
+        async with page_lock:
+            logger.debug(f"페이지 Lock 획득 (account_id={request.account_id}, type=url_crawl)")
 
-            # 워커 상태를 crawling으로 변경
-            self._update_worker_state("crawling", account.name)
+            while retry_count <= max_retries:
+                try:
+                    # 대상 URL 확인
+                    target_url = getattr(request, 'target_url', None)
+                    if not target_url:
+                        request_service.mark_failed(request.id, "대상 URL 없음")
+                        logger.warning(f"대상 URL 없음: request_id={request.id}")
+                        return
 
-            # 계정별 브라우저 페이지 가져오기
-            page = await self._get_page_for_account(account.id)
+                    # 로그인 상태 확인
+                    account = db.query(Account).filter(Account.id == request.account_id).first()
+                    if not account:
+                        request_service.mark_failed(request.id, "계정을 찾을 수 없음")
+                        logger.warning(f"계정 없음: account_id={request.account_id}")
+                        return
 
-            # 크롤러 생성
-            crawler = InstagramCrawler(page)
-            logger.info(f"URL 크롤링 시작: url={target_url}")
+                    if not account.is_logged_in:
+                        request_service.mark_failed(request.id, "로그인 필요")
+                        logger.warning(f"로그인 필요: account={account.name}")
+                        return
 
-            # URL 크롤링 실행
-            result = await crawl_service.crawl_by_url(
-                crawler=crawler,
-                url=target_url,
-                account_id=request.account_id,
-            )
+                    # 워커 상태를 crawling으로 변경
+                    self._update_worker_state("crawling", account.name)
 
-            if result["success"]:
-                # 성공 시 완료 처리
-                request.status = "completed"
-                request.processed_at = datetime.now()
-                db.commit()
+                    # 계정별 브라우저 페이지 가져오기
+                    page = await self._get_page_for_account(account.id)
 
-                is_new = result.get("is_new", False)
-                post = result.get("post")
-                post_id = post.id if post else None
-                logger.info(
-                    f"URL 크롤링 완료: request_id={request.id}, "
-                    f"post_id={post_id}, is_new={is_new}"
-                )
-            else:
-                request_service.mark_failed(request.id, result["message"])
-                logger.warning(f"URL 크롤링 실패: {result['message']}")
+                    # 크롤러 생성
+                    crawler = InstagramCrawler(page)
+                    logger.info(f"URL 크롤링 시작: url={target_url}")
 
-        except Exception as e:
-            request_service.mark_failed(request.id, str(e))
-            logger.error(f"URL 크롤링 예외: {e}", exc_info=True)
-        finally:
-            # 워커 상태를 idle로 복원
-            self._update_worker_state("idle")
-            # 대기 중인 요청이 있으면 즉시 처리하도록 이벤트 설정
-            self.continue_event.set()
+                    # URL 크롤링 실행
+                    result = await crawl_service.crawl_by_url(
+                        crawler=crawler,
+                        url=target_url,
+                        account_id=request.account_id,
+                    )
+
+                    if result["success"]:
+                        # 성공 시 완료 처리
+                        request.status = "completed"
+                        request.processed_at = datetime.now()
+                        db.commit()
+
+                        is_new = result.get("is_new", False)
+                        post = result.get("post")
+                        post_id = post.id if post else None
+                        logger.info(
+                            f"URL 크롤링 완료: request_id={request.id}, "
+                            f"post_id={post_id}, is_new={is_new}"
+                        )
+                    else:
+                        request_service.mark_failed(request.id, result["message"])
+                        logger.warning(f"URL 크롤링 실패: {result['message']}")
+
+                    # 성공 시 루프 종료
+                    return
+
+                except Exception as e:
+                    # 브라우저 closed 에러면 재시도
+                    if self._is_browser_closed_error(e) and retry_count < max_retries:
+                        retry_count += 1
+                        logger.warning(f"브라우저 closed 에러 감지, 브라우저 재생성 후 재시도 ({retry_count}/{max_retries}): {e}")
+                        await self._recreate_browser_context(request.account_id)
+                        continue
+
+                    request_service.mark_failed(request.id, str(e))
+                    logger.error(f"URL 크롤링 예외: {e}", exc_info=True)
+                    return
+                finally:
+                    # 워커 상태를 idle로 복원
+                    self._update_worker_state("idle")
+                    # 대기 중인 요청이 있으면 즉시 처리하도록 이벤트 설정
+                    self.continue_event.set()
 
     # ========================================
     # Universal 크롤링 관련 메서드

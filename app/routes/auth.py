@@ -164,7 +164,11 @@ async def auth_callback(
     jwt_token = create_access_token(email=email, is_admin=is_admin)
 
     # 프론트엔드로 리디렉트 (토큰을 쿼리 파라미터로 전달)
-    redirect_url = f"{settings.FRONTEND_URL}/auth/callback?token={jwt_token}"
+    # 관리자인 경우 dev 환경으로 리다이렉트
+    if is_admin:
+        redirect_url = f"https://dev-monitor.woory.day/auth/callback?token={jwt_token}"
+    else:
+        redirect_url = f"{settings.FRONTEND_URL}/auth/callback?token={jwt_token}"
     return RedirectResponse(url=redirect_url)
 
 

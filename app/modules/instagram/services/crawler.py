@@ -1082,8 +1082,15 @@ class InstagramCrawler:
             post_url = self._normalize_post_url(post_url)
             logger.info(f"Crawling single post: {post_url}")
 
+            # 페이지 상태 확인
+            if self.page.is_closed():
+                logger.error(f"Page is closed, cannot crawl: {post_url}")
+                return None
+
             # 게시물 페이지로 이동
+            logger.debug(f"Navigating to: {post_url}")
             await self.page.goto(post_url, wait_until="domcontentloaded")
+            logger.debug(f"Navigation completed, current URL: {self.page.url}")
 
             # 페이지 로드 대기
             await asyncio.sleep(2.0)
@@ -1129,7 +1136,9 @@ class InstagramCrawler:
             return post
 
         except Exception as e:
+            import traceback
             logger.error(f"Failed to crawl single post {post_url}: {e}")
+            logger.debug(f"Traceback: {traceback.format_exc()}")
             return None
 
 

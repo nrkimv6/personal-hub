@@ -286,9 +286,8 @@
 								{req.url_type}
 							</span>
 						</div>
-						{@const result = getAnalysisResult(req)}
-						{#if result.text !== '-'}
-							<span class="px-2 py-0.5 text-xs rounded-full {result.badge}">{result.text}</span>
+						{#if getAnalysisResult(req).text !== '-'}
+							<span class="px-2 py-0.5 text-xs rounded-full {getAnalysisResult(req).badge}">{getAnalysisResult(req).text}</span>
 						{/if}
 					</div>
 					<p class="text-sm text-gray-900 break-all line-clamp-2 mb-2">{req.url}</p>
