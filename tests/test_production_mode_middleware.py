@@ -1,12 +1,13 @@
 """
-Production Mode Middleware Tests
+API Access Control Middleware Tests
 
-운영 모드에서 권한에 따른 API 접근 제어 테스트.
+모든 모드에서 권한에 따른 API 접근 제어 테스트.
 
 권한 매트릭스:
-- 운영 + 비관리자: 이벤트 관리, 인증, GET만 허용
-- 운영 + 관리자: 모든 API 허용
-- 개발: 모든 API 허용
+- GET/HEAD/OPTIONS: 항상 허용
+- localhost: 자동 관리자로 모든 API 허용
+- 관리자 로그인: 모든 API 허용
+- 비관리자: 이벤트 관리, 인증만 허용 (모드 무관)
 """
 import pytest
 from unittest.mock import patch, MagicMock
@@ -148,14 +149,43 @@ class TestProductionModeMiddleware:
         assert response.status_code != 403
 
     @patch("app.core.middleware.settings")
-    def test_development_all_allowed(self, mock_settings, client):
-        """개발 모드에서는 모든 API 허용"""
+    def test_development_anonymous_blocked(self, mock_settings, client):
+        """개발 모드에서도 비관리자는 차단"""
         mock_settings.APP_MODE = "development"
 
         response = client.post(
             "/api/v1/naver/businesses",
             json={},
-            headers={"CF-Connecting-IP": "1.2.3.4"}
+            headers={"CF-Connecting-IP": "1.2.3.4"}  # 외부 IP로 가장
+        )
+        # 비관리자는 403
+        assert response.status_code == 403
+
+    @patch("app.core.middleware.settings")
+    def test_development_localhost_allowed(self, mock_settings, client):
+        """개발 모드에서 localhost는 자동 관리자"""
+        mock_settings.APP_MODE = "development"
+
+        # localhost 요청 (CF-Connecting-IP 없음)
+        response = client.post(
+            "/api/v1/naver/businesses",
+            json={}
+        )
+        # 403이 아니면 됨
+        assert response.status_code != 403
+
+    @patch("app.core.middleware.settings")
+    def test_development_admin_allowed(self, mock_settings, client, admin_token):
+        """개발 모드에서 관리자는 모든 API 허용"""
+        mock_settings.APP_MODE = "development"
+
+        response = client.post(
+            "/api/v1/naver/businesses",
+            json={},
+            headers={
+                "Authorization": f"Bearer {admin_token}",
+                "CF-Connecting-IP": "1.2.3.4"
+            }
         )
         # 403이 아니면 됨
         assert response.status_code != 403

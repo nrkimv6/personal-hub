@@ -1,13 +1,17 @@
 """
-Production Mode Middleware
+API Access Control Middleware
 
-운영 모드에서 비관리자의 쓰기 작업을 제한하는 미들웨어.
+모든 모드(운영/개발)에서 비관리자의 쓰기 작업을 제한하는 미들웨어.
 
 권한 매트릭스:
-- 운영 + 비관리자: 이벤트 관리, 인증, GET만 허용
-- 운영 + 관리자: 모든 API 허용 (워커는 별도로 비활성화)
-- 개발 + localhost: 자동 관리자로 모든 API 허용
-- 개발 + 비-localhost: 로그인에 따름
+- GET/HEAD/OPTIONS: 항상 허용
+- localhost: 자동 관리자로 모든 API 허용
+- 관리자 로그인: 모든 API 허용
+- 비관리자: 이벤트 관리, 인증만 허용
+
+워커 동작:
+- 운영 모드: 워커 비활성화 (main.py에서 처리)
+- 개발 모드: 워커 활성화, 운영에서 등록된 작업도 DB 폴링하여 실행
 """
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -32,24 +36,23 @@ ALWAYS_ALLOWED_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 class ProductionModeMiddleware(BaseHTTPMiddleware):
     """
-    운영 모드에서 비관리자의 쓰기 작업을 제한하는 미들웨어.
+    비관리자의 쓰기 작업을 제한하는 미들웨어.
 
     정책:
-    - 개발 모드: 모든 기능 허용
-    - 운영 모드 + 관리자: 모든 API 허용
-    - 운영 모드 + 비관리자: 이벤트 관리, 인증, GET만 허용
+    - 읽기 전용(GET/HEAD/OPTIONS): 항상 허용
+    - localhost: 자동 관리자로 모든 API 허용
+    - 관리자 로그인: 모든 API 허용
+    - 비관리자:
+      - 운영 모드: 이벤트 관리, 인증만 허용
+      - 개발 모드: 이벤트 관리, 인증만 허용 (관리자 로그인 필요)
     """
 
     async def dispatch(self, request: Request, call_next):
-        # 개발 모드에서는 모든 기능 허용
-        if settings.APP_MODE == "development":
-            return await call_next(request)
-
         # 읽기 전용 메서드는 항상 허용
         if request.method in ALWAYS_ALLOWED_METHODS:
             return await call_next(request)
 
-        # 관리자 여부 확인
+        # 관리자 여부 확인 (localhost 포함)
         if self._is_admin(request):
             return await call_next(request)
 
@@ -61,10 +64,10 @@ class ProductionModeMiddleware(BaseHTTPMiddleware):
         return JSONResponse(
             status_code=403,
             content={
-                "detail": "운영 모드에서는 관리자 로그인이 필요합니다.",
+                "detail": "관리자 로그인이 필요합니다.",
                 "mode": settings.APP_MODE,
                 "blocked_action": f"{request.method} {request.url.path}",
-                "hint": "관리자로 로그인하거나 개발 모드(-Dev)에서 실행하세요."
+                "hint": "관리자로 로그인하세요."
             }
         )
 
