@@ -106,6 +106,36 @@ function Test-WorkerRunning {
     return ($null -ne $process)
 }
 
+# Kill any orphaned worker processes before starting
+function Stop-OrphanedWorkers {
+    Write-Log "Checking for orphaned monitor worker processes..."
+    $killedCount = 0
+
+    # Find all python processes running monitor_worker
+    $pythonProcs = Get-Process -Name "python*" -ErrorAction SilentlyContinue
+    foreach ($proc in $pythonProcs) {
+        try {
+            $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($proc.Id)" -ErrorAction SilentlyContinue).CommandLine
+            if ($cmdLine -and $cmdLine -like "*app.worker.monitor_worker*") {
+                # Check if this is our managed worker
+                $savedPid = if (Test-Path $WorkerPidFile) { Get-Content $WorkerPidFile -ErrorAction SilentlyContinue } else { $null }
+                if ($proc.Id -ne $savedPid) {
+                    Write-Log "Killing orphaned monitor worker (PID: $($proc.Id))" "WARN"
+                    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+                    $killedCount++
+                }
+            }
+        } catch {
+            # Ignore errors
+        }
+    }
+
+    if ($killedCount -gt 0) {
+        Write-Log "Killed $killedCount orphaned monitor worker(s)"
+        Start-Sleep -Seconds 2  # Wait for processes to fully terminate
+    }
+}
+
 # Main watchdog loop
 Write-Log "=" * 50
 Write-Log "Worker Watchdog Started"
@@ -115,6 +145,9 @@ Write-Log "=" * 50
 
 # Set working directory
 Set-Location $ProjectRoot
+
+# Kill orphaned workers before starting
+Stop-OrphanedWorkers
 
 # Initial check
 if (-not (Test-WorkerRunning)) {
