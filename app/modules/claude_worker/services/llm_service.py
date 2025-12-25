@@ -440,7 +440,8 @@ class LLMService:
         """요청 목록 조회 (페이지네이션).
 
         Args:
-            status: 상태 필터 (pending, processing, completed, failed, cancelled)
+            status: 상태 필터. 콤마로 구분하여 여러 상태 지정 가능
+                    (예: "completed,failed,cancelled")
             caller_type: 호출자 타입 필터
             requested_by: 요청자 필터
             include_deleted: 삭제된 요청 포함 여부
@@ -455,7 +456,12 @@ class LLMService:
         if not include_deleted:
             query = query.filter(LLMRequest.deleted_at.is_(None))
         if status:
-            query = query.filter(LLMRequest.status == status)
+            # 콤마로 구분된 여러 상태 지원
+            statuses = [s.strip() for s in status.split(",") if s.strip()]
+            if len(statuses) == 1:
+                query = query.filter(LLMRequest.status == statuses[0])
+            elif len(statuses) > 1:
+                query = query.filter(LLMRequest.status.in_(statuses))
         if caller_type:
             query = query.filter(LLMRequest.caller_type == caller_type)
         if requested_by:
