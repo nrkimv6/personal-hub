@@ -48,6 +48,7 @@ def get_events(
     url_type: Optional[str] = Query(None, description="URL 유형 (google_form/naver_form/shop/survey/other)"),
     is_bookmarked: Optional[bool] = Query(None, description="북마크 여부"),
     is_participated: Optional[bool] = Query(None, description="참여 완료 여부"),
+    is_offline: Optional[bool] = Query(None, description="오프라인 이벤트 여부"),
     include_unknown_period: bool = Query(True, description="기간 미정 항목 포함 여부"),
     search: Optional[str] = Query(None, description="제목/요약/주최자 검색"),
     sort_by: str = Query("event_end", description="정렬 기준 (event_end/event_start/created_at)"),
@@ -62,6 +63,7 @@ def get_events(
     - 이벤트 유형, 상태, 출처별 필터링 지원
     - 진행 상태(ongoing/upcoming/ended) 기반 필터링
     - 북마크, 참여 완료 필터링
+    - 온라인/오프라인 이벤트 필터링
     - 제목/요약/주최자 검색 지원
     - 정렬 및 페이지네이션 지원
     """
@@ -75,6 +77,7 @@ def get_events(
         url_type=url_type,
         is_bookmarked=is_bookmarked,
         is_participated=is_participated,
+        is_offline=is_offline,
         include_unknown_period=include_unknown_period,
         search=search,
         sort_by=sort_by,
@@ -173,6 +176,21 @@ def toggle_participate(
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
     return event
+
+
+@router.post("/{event_id}/toggle-offline")
+def toggle_offline(
+    event_id: int,
+    db: Session = Depends(get_db),
+    admin: UserInfo = Depends(require_admin),
+):
+    """
+    이벤트의 온라인/오프라인 상태를 토글합니다. (관리자 전용)
+    """
+    result = event_service.toggle_offline(db, event_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Event not found")
+    return result
 
 
 @router.post("/import-from-instagram", response_model=EventResponse, status_code=201)

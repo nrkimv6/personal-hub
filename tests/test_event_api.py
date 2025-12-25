@@ -389,3 +389,102 @@ class TestEventComputedFields:
         assert "days_remaining" in data
         # sample_event는 7일 후 종료
         assert data["days_remaining"] == 7
+
+
+class TestEventOfflineAPI:
+    """오프라인 이벤트 관련 테스트"""
+
+    def test_create_offline_event(self, client, admin_headers):
+        """오프라인 이벤트 생성"""
+        response = client.post("/api/v1/events", json={
+            "title": "오프라인 이벤트",
+            "event_type": "event",
+            "is_offline": True,
+            "location_venue": "강남역 1번 출구",
+        }, headers=admin_headers)
+        assert response.status_code == 201
+        data = response.json()
+        assert data["is_offline"] is True
+        assert data["location_venue"] == "강남역 1번 출구"
+
+    def test_create_online_event_default(self, client, admin_headers):
+        """온라인 이벤트 생성 (기본값)"""
+        response = client.post("/api/v1/events", json={
+            "title": "온라인 이벤트",
+            "event_type": "event",
+        }, headers=admin_headers)
+        assert response.status_code == 201
+        data = response.json()
+        assert data["is_offline"] is False
+
+    def test_filter_online_events(self, client, admin_headers):
+        """온라인 이벤트만 필터링"""
+        # 온라인 이벤트 생성
+        client.post("/api/v1/events", json={
+            "title": "온라인 필터 테스트",
+            "is_offline": False,
+        }, headers=admin_headers)
+
+        # 오프라인 이벤트 생성
+        client.post("/api/v1/events", json={
+            "title": "오프라인 필터 테스트",
+            "is_offline": True,
+        }, headers=admin_headers)
+
+        # 온라인만 조회
+        response = client.get("/api/v1/events?is_offline=false")
+        assert response.status_code == 200
+        data = response.json()
+        for item in data["items"]:
+            assert item["is_offline"] is False
+
+    def test_filter_offline_events(self, client, admin_headers):
+        """오프라인 이벤트만 필터링"""
+        # 오프라인 이벤트 생성
+        client.post("/api/v1/events", json={
+            "title": "오프라인 필터 테스트2",
+            "is_offline": True,
+        }, headers=admin_headers)
+
+        # 오프라인만 조회
+        response = client.get("/api/v1/events?is_offline=true")
+        assert response.status_code == 200
+        data = response.json()
+        for item in data["items"]:
+            assert item["is_offline"] is True
+
+    def test_toggle_offline(self, client, sample_event, admin_headers):
+        """오프라인 상태 토글"""
+        # sample_event는 기본적으로 is_offline=False
+
+        # OFF -> ON
+        response = client.post(f"/api/v1/events/{sample_event.id}/toggle-offline", headers=admin_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["is_offline"] is True
+        assert data["message"] == "오프라인 이벤트로 변경되었습니다"
+
+        # ON -> OFF
+        response = client.post(f"/api/v1/events/{sample_event.id}/toggle-offline", headers=admin_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["is_offline"] is False
+        assert data["message"] == "온라인 이벤트로 변경되었습니다"
+
+    def test_toggle_offline_not_found(self, client, admin_headers):
+        """존재하지 않는 이벤트 토글"""
+        response = client.post("/api/v1/events/99999/toggle-offline", headers=admin_headers)
+        assert response.status_code == 404
+
+    def test_toggle_offline_unauthorized(self, client, sample_event, mock_external_request):
+        """인증 없이 토글 시도 (외부 요청)"""
+        response = client.post(f"/api/v1/events/{sample_event.id}/toggle-offline")
+        assert response.status_code == 401
+
+    def test_update_is_offline(self, client, sample_event, admin_headers):
+        """PUT으로 is_offline 수정"""
+        response = client.put(f"/api/v1/events/{sample_event.id}", json={
+            "is_offline": True,
+        }, headers=admin_headers)
+        assert response.status_code == 200
+        assert response.json()["is_offline"] is True

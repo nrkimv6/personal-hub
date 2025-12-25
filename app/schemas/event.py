@@ -29,6 +29,7 @@ class EventBase(BaseModel):
     source_note: Optional[str] = None
     user_note: Optional[str] = None
     input_source: Literal["ai", "human", "ai_edited"] = "human"  # 입력 출처
+    is_offline: bool = False  # 오프라인 이벤트 여부
 
 
 class EventCreate(EventBase):
@@ -62,6 +63,7 @@ class EventUpdate(BaseModel):
     is_bookmarked: Optional[bool] = None
     is_participated: Optional[bool] = None
     input_source: Optional[Literal["ai", "human", "ai_edited"]] = None
+    is_offline: Optional[bool] = None  # 오프라인 이벤트 여부
 
 
 class EventResponse(EventBase):
