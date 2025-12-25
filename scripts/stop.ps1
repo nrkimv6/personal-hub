@@ -59,22 +59,30 @@ Write-Host "========================================" -ForegroundColor Red
 Write-Host ""
 
 # ============================================================
-# STEP 0: Kill All Watchdog Processes (PowerShell)
+# STEP 0: Kill Watchdog Processes (only for target environment)
 # ============================================================
-Write-Host "[0] Killing Watchdog processes" -ForegroundColor Cyan
+$envLabel = if ($All) { "all environments" } elseif ($Dev) { "dev" } else { "production" }
+Write-Host "[0] Killing Watchdog processes ($envLabel)" -ForegroundColor Cyan
 Write-Host "----------------------------------------"
 
 $watchdogKilled = 0
-$psProcs = Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue
 
-if ($psProcs) {
-    foreach ($proc in $psProcs) {
-        $cmd = $proc.CommandLine
-        # Kill worker-watchdog.ps1, instagram-watchdog.ps1, and claude-watchdog.ps1
-        if ($cmd -and ($cmd -match "worker-watchdog\.ps1" -or $cmd -match "instagram-watchdog\.ps1" -or $cmd -match "claude-watchdog\.ps1")) {
-            $procId = $proc.ProcessId
-            $watchdogType = if ($cmd -match "claude") { "Claude" } elseif ($cmd -match "instagram") { "Instagram" } else { "Worker" }
-            Write-Host "  [*] $watchdogType Watchdog PID $procId" -ForegroundColor Yellow
+# Get target watchdog PIDs from PID files
+$targetWatchdogPids = @()
+foreach ($pidFile in $PidFiles) {
+    if ((Test-Path $pidFile) -and $pidFile -match "watchdog") {
+        $savedPid = Get-Content $pidFile -ErrorAction SilentlyContinue
+        if ($savedPid) {
+            $targetWatchdogPids += [int]$savedPid
+        }
+    }
+}
+
+if ($targetWatchdogPids.Count -gt 0) {
+    foreach ($procId in $targetWatchdogPids) {
+        $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
+        if ($proc) {
+            Write-Host "  [*] Watchdog PID $procId" -ForegroundColor Yellow
             try {
                 Stop-Process -Id $procId -Force -ErrorAction Stop
                 Write-Host "      -> Killed" -ForegroundColor Green
@@ -87,15 +95,15 @@ if ($psProcs) {
 }
 
 if ($watchdogKilled -eq 0) {
-    Write-Host "  (no watchdog processes found)" -ForegroundColor Gray
+    Write-Host "  (no watchdog processes found for $envLabel)" -ForegroundColor Gray
 }
 
 Write-Host ""
 
 # ============================================================
-# STEP 1: Kill all Python processes matching our patterns
+# STEP 1: Kill Python processes matching our patterns AND ports
 # ============================================================
-Write-Host "[1] Killing all monitor-page Python processes" -ForegroundColor Cyan
+Write-Host "[1] Killing monitor-page Python processes (ports: $($ApiPorts -join ', '))" -ForegroundColor Cyan
 Write-Host "----------------------------------------"
 
 $pythonKilled = 0
@@ -118,16 +126,40 @@ if ($pythonProcs) {
         }
 
         if ($isOurs) {
-            $procId = $proc.ProcessId
-            $cmdShort = if ($cmd.Length -gt 70) { $cmd.Substring(0, 70) + "..." } else { $cmd }
-            Write-Host "  [*] PID $procId : $cmdShort" -ForegroundColor Yellow
+            # Check if this process belongs to the target environment (by port)
+            $isTargetEnv = $false
+            foreach ($port in $ApiPorts) {
+                if ($cmd -match "--port\s+$port" -or $cmd -match "--port=$port") {
+                    $isTargetEnv = $true
+                    break
+                }
+            }
+            # Worker processes don't have port in command line, check PID files
+            if (-not $isTargetEnv -and ($cmd -match "app\.worker" -or $cmd -match "worker\.py")) {
+                # Check if this worker's PID matches our PID files
+                foreach ($pidFile in $PidFiles) {
+                    if ((Test-Path $pidFile) -and $pidFile -match "worker") {
+                        $savedPid = Get-Content $pidFile -ErrorAction SilentlyContinue
+                        if ($savedPid -eq $proc.ProcessId) {
+                            $isTargetEnv = $true
+                            break
+                        }
+                    }
+                }
+            }
 
-            try {
-                Stop-Process -Id $procId -Force -ErrorAction Stop
-                Write-Host "      -> Killed" -ForegroundColor Green
-                $pythonKilled++
-            } catch {
-                Write-Host "      -> Failed: $($_.Exception.Message)" -ForegroundColor Red
+            if ($isTargetEnv) {
+                $procId = $proc.ProcessId
+                $cmdShort = if ($cmd.Length -gt 70) { $cmd.Substring(0, 70) + "..." } else { $cmd }
+                Write-Host "  [*] PID $procId : $cmdShort" -ForegroundColor Yellow
+
+                try {
+                    Stop-Process -Id $procId -Force -ErrorAction Stop
+                    Write-Host "      -> Killed" -ForegroundColor Green
+                    $pythonKilled++
+                } catch {
+                    Write-Host "      -> Failed: $($_.Exception.Message)" -ForegroundColor Red
+                }
             }
         }
     }
@@ -179,10 +211,10 @@ if ($portKilled -eq 0) {
 }
 
 # ============================================================
-# STEP 3: Kill Node/Vite processes
+# STEP 3: Kill Node/Vite processes (only for target ports)
 # ============================================================
 Write-Host ""
-Write-Host "[3] Killing Vite/Node processes" -ForegroundColor Cyan
+Write-Host "[3] Killing Vite/Node processes (ports: $($FrontendPorts -join ', '))" -ForegroundColor Cyan
 Write-Host "----------------------------------------"
 
 $nodeKilled = 0
@@ -192,21 +224,32 @@ if ($nodeProcs) {
     foreach ($proc in $nodeProcs) {
         $cmd = $proc.CommandLine
         if ($cmd -and $cmd -match "vite") {
-            $procId = $proc.ProcessId
-            Write-Host "  [*] PID $procId : vite dev server" -ForegroundColor Yellow
-            try {
-                Stop-Process -Id $procId -Force -ErrorAction Stop
-                Write-Host "      -> Killed" -ForegroundColor Green
-                $nodeKilled++
-            } catch {
-                Write-Host "      -> Failed: $($_.Exception.Message)" -ForegroundColor Red
+            # Check if this vite process belongs to the target environment (by port)
+            $isTargetEnv = $false
+            foreach ($port in $FrontendPorts) {
+                if ($cmd -match "--port\s+$port" -or $cmd -match "--port=$port" -or $cmd -match "--port `"$port`"") {
+                    $isTargetEnv = $true
+                    break
+                }
+            }
+
+            if ($isTargetEnv) {
+                $procId = $proc.ProcessId
+                Write-Host "  [*] PID $procId : vite dev server" -ForegroundColor Yellow
+                try {
+                    Stop-Process -Id $procId -Force -ErrorAction Stop
+                    Write-Host "      -> Killed" -ForegroundColor Green
+                    $nodeKilled++
+                } catch {
+                    Write-Host "      -> Failed: $($_.Exception.Message)" -ForegroundColor Red
+                }
             }
         }
     }
 }
 
 if ($nodeKilled -eq 0) {
-    Write-Host "  (no vite processes found)" -ForegroundColor Gray
+    Write-Host "  (no vite processes found for target ports)" -ForegroundColor Gray
 }
 
 # ============================================================
