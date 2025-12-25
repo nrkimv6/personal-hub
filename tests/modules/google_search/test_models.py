@@ -173,8 +173,9 @@ class TestGoogleSearchResult:
     @pytest.fixture
     def sample_history(self, test_db_session):
         """테스트용 검색 히스토리"""
+        import uuid
         history = GoogleSearchHistory(
-            search_id="result-test-uuid",
+            search_id=f"result-test-{uuid.uuid4().hex[:8]}",
             query="sample query",
             status="completed",
             total_results=10,
