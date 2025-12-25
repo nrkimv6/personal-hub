@@ -111,8 +111,8 @@ class UncategorizedService:
                 title=data.title or item.title or "제목 없음",
                 thumbnail_url=thumbnail_url,
                 event_type="event",
-                event_start=item.start_date,
-                event_end=item.end_date,
+                event_start=item.event_start,  # 모델은 event_start 사용
+                event_end=item.event_end,  # 모델은 event_end 사용
                 organizer=item.organizer,
                 summary=item.summary,
                 additional_urls=item.urls or [],
@@ -150,8 +150,8 @@ class UncategorizedService:
             popup = Popup(
                 title=data.title or item.title or "제목 없음",
                 thumbnail_url=thumbnail_url,
-                start_date=item.start_date,
-                end_date=item.end_date,
+                start_date=item.event_start,  # 모델은 event_start 사용
+                end_date=item.event_end,  # 모델은 event_end 사용
                 organizer=item.organizer,
                 summary=item.summary,
                 additional_urls=item.urls or [],
@@ -214,8 +214,8 @@ class UncategorizedService:
             thumbnail_url=item.thumbnail_url,
             summary=item.summary,
             organizer=item.organizer,
-            start_date=item.start_date,
-            end_date=item.end_date,
+            start_date=item.event_start,  # 모델은 event_start 사용
+            end_date=item.event_end,  # 모델은 event_end 사용
             urls=item.urls or [],
             source_instagram_post_id=item.source_instagram_post_id,
             source_instagram_url=item.source_instagram_url,

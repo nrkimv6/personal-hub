@@ -108,7 +108,7 @@ try {
 
         # Find the most recent log files by filename (contains timestamp like worker_20251211_094846.log)
         # Using Name sort instead of LastWriteTime because old log files may be updated when processes stop
-        $LogDir = Join-Path $ProjectRoot "logs"
+        $LogDir = Join-Path $ProjectRoot "logs\dev"
 
         $apiLog = Get-ChildItem -Path $LogDir -Filter "api_*.log" -ErrorAction SilentlyContinue |
             Sort-Object Name -Descending | Select-Object -First 1
