@@ -59,6 +59,7 @@ try:
     logger.debug("instagram services import 완료")
 
     from app.shared.browser.context_manager import ContextManager
+    from app.shared.browser.tab_pool_manager import TabPoolManager
     logger.debug("browser_service import 완료")
 
     from app.models.universal_crawl import UniversalCrawlRequest
@@ -103,6 +104,7 @@ class InstagramWorker:
         self.shutdown_event = asyncio.Event()
         self.continue_event = asyncio.Event()  # 크롤링 완료 시 즉시 깨우기용
         self.context_manager: ContextManager = None
+        self.tab_pool_manager: TabPoolManager = None
         self.check_interval = 30  # 30초마다 체크
         self.pid = os.getpid()
         self.start_time: datetime = None
