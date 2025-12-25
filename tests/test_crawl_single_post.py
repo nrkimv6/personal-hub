@@ -86,7 +86,8 @@ class TestCrawlSinglePostRight:
         assert result.account == "testuser"
         assert result.likes == 100
         assert result.comments == 10
-        assert result.url == "https://www.instagram.com/p/ABC123/"
+        # URL is normalized (trailing slash removed)
+        assert result.url == "https://www.instagram.com/p/ABC123"
 
     @pytest.mark.asyncio
     async def test_crawl_single_post_likes_int_type(self):

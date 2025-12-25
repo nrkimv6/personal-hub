@@ -319,7 +319,8 @@ class TestPostService:
         """존재하지 않는 게시물 삭제"""
         from app.modules.instagram.services.post_service import PostService
 
-        mock_db.query.return_value.filter.return_value.first.return_value = None
+        # get_post_by_id uses options(selectinload).filter().first()
+        mock_db.query.return_value.options.return_value.filter.return_value.first.return_value = None
 
         service = PostService(mock_db)
         result = service.delete_post(999)
@@ -348,9 +349,9 @@ class TestPostServiceSearch:
         """search가 있으면 ilike 필터 호출"""
         from app.modules.instagram.services.post_service import PostService
 
-        # Mock 설정
+        # Mock 설정 - get_posts uses options(selectinload) first
         mock_query = MagicMock()
-        mock_db.query.return_value = mock_query
+        mock_db.query.return_value.options.return_value = mock_query
         mock_query.filter.return_value = mock_query
         mock_query.join.return_value = mock_query
         mock_query.distinct.return_value = mock_query
@@ -371,7 +372,7 @@ class TestPostServiceSearch:
         from app.modules.instagram.services.post_service import PostService
 
         mock_query = MagicMock()
-        mock_db.query.return_value = mock_query
+        mock_db.query.return_value.options.return_value = mock_query
         mock_query.filter.return_value = mock_query
         mock_query.order_by.return_value = mock_query
         mock_query.offset.return_value = mock_query
@@ -390,7 +391,7 @@ class TestPostServiceSearch:
         from app.modules.instagram.services.post_service import PostService
 
         mock_query = MagicMock()
-        mock_db.query.return_value = mock_query
+        mock_db.query.return_value.options.return_value = mock_query
         mock_query.filter.return_value = mock_query
         mock_query.order_by.return_value = mock_query
         mock_query.offset.return_value = mock_query
@@ -409,7 +410,7 @@ class TestPostServiceSearch:
         from app.modules.instagram.services.post_service import PostService
 
         mock_query = MagicMock()
-        mock_db.query.return_value = mock_query
+        mock_db.query.return_value.options.return_value = mock_query
         mock_query.filter.return_value = mock_query
         mock_query.order_by.return_value = mock_query
         mock_query.offset.return_value = mock_query
@@ -431,7 +432,7 @@ class TestPostServiceSearch:
         from app.modules.instagram.services.post_service import PostService
 
         mock_query = MagicMock()
-        mock_db.query.return_value = mock_query
+        mock_db.query.return_value.options.return_value = mock_query
         mock_query.filter.return_value = mock_query
         mock_query.order_by.return_value = mock_query
         mock_query.offset.return_value = mock_query

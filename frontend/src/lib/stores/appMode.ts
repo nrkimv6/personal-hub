@@ -47,16 +47,19 @@ export async function loadAppMode(): Promise<void> {
 		const res = await fetch('/api/v1/system/mode');
 		if (res.ok) {
 			const data = await res.json();
+			console.log('[appMode] API response:', data);
 			appModeStore.set({
 				mode: data.mode,
 				isLoaded: true,
 				features: data.features || initialState.features
 			});
 		} else {
+			console.warn('[appMode] API failed:', res.status);
 			// API 실패 시 production으로 기본 설정
 			appModeStore.update((state) => ({ ...state, isLoaded: true }));
 		}
-	} catch {
+	} catch (e) {
+		console.error('[appMode] Network error:', e);
 		// 네트워크 오류 시 production으로 기본 설정
 		appModeStore.update((state) => ({ ...state, isLoaded: true }));
 	}

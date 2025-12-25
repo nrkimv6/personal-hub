@@ -395,8 +395,7 @@ class GoogleSearchService:
         # 페이지 수 제한
         max_pages = min(max(1, max_pages), 10)
 
-        # 브라우저 컨텍스트 획득
-        account_id = account_id or 0
+        # 브라우저 컨텍스트 획득 (account_id가 None이면 기본 계정 사용)
         context = await self.context_manager.get_or_create_context(account_id)
         page = await context.new_page()
 
