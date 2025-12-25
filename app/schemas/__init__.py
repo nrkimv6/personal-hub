@@ -51,6 +51,18 @@ from app.schemas.proxy import (
     ProxyListResponse,
     ProxyImportResult,
 )
+from app.schemas.universal_crawl import (
+    CrawledPageBase,
+    CrawledPageCreate,
+    CrawledPageResponse,
+    CrawledPageList,
+    UniversalCrawlRequestCreate,
+    UniversalCrawlRequestUpdate,
+    UniversalCrawlRequestResponse,
+    UniversalCrawlRequestList,
+    CrawlUrlRequest,
+    CrawlUrlResponse,
+)
 
 __all__ = [
     # account
@@ -98,4 +110,15 @@ __all__ = [
     "ProxyListParams",
     "ProxyListResponse",
     "ProxyImportResult",
+    # universal_crawl
+    "CrawledPageBase",
+    "CrawledPageCreate",
+    "CrawledPageResponse",
+    "CrawledPageList",
+    "UniversalCrawlRequestCreate",
+    "UniversalCrawlRequestUpdate",
+    "UniversalCrawlRequestResponse",
+    "UniversalCrawlRequestList",
+    "CrawlUrlRequest",
+    "CrawlUrlResponse",
 ]
