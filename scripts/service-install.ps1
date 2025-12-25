@@ -2,13 +2,13 @@
 # Uses NSSM (Non-Sucking Service Manager) for service installation
 #
 # Usage:
-#   .\service-install.ps1 -Action install       # Install production service
-#   .\service-install.ps1 -Action install -IncludeDev  # Install both prod and dev services
-#   .\service-install.ps1 -Action start -WithLogs      # Start service and open log window
-#   .\service-install.ps1 -Action status        # Show service status
-#   .\service-install.ps1 -Action stop          # Stop service
-#   .\service-install.ps1 -Action restart -WithLogs    # Restart and open log window
-#   .\service-install.ps1 -Action uninstall     # Uninstall service
+#   .\service-install.ps1 -Action install           # Install production service
+#   .\service-install.ps1 -Action install -IncludeDev  # Install prod + dev services
+#   .\service-install.ps1 -Action start -WithLogs   # Start service and open log window
+#   .\service-install.ps1 -Action status            # Show service status
+#   .\service-install.ps1 -Action stop              # Stop service
+#   .\service-install.ps1 -Action restart -WithLogs # Restart and open log window
+#   .\service-install.ps1 -Action uninstall         # Uninstall service
 
 param(
     [Parameter(Mandatory=$true)]
@@ -25,18 +25,43 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 
 # Service configuration
-$ProdServiceName = "MonitorPage"
-$DevServiceName = "MonitorPageDev"
-$ProdDisplayName = "Monitor Page (Production)"
-$DevDisplayName = "Monitor Page (Development)"
+# Each service runs run.ps1 which starts API + Frontend + Workers (if Dev mode)
+$services = @(
+    @{
+        Name = "MonitorPage"
+        DisplayName = "Monitor Page (Production)"
+        Description = "Monitor Page Production Server - API(8000) + Frontend(5173)"
+        Script = "$ScriptDir\run.ps1"
+        Args = ""
+        LogDir = Join-Path $ProjectRoot "logs"
+    }
+)
 
-# Determine target service
-if ($Dev) {
-    $TargetServices = @($DevServiceName)
-} elseif ($IncludeDev -and ($Action -eq "install" -or $Action -eq "uninstall")) {
-    $TargetServices = @($ProdServiceName, $DevServiceName)
+if ($IncludeDev -and ($Action -eq "install" -or $Action -eq "uninstall")) {
+    $services += @{
+        Name = "MonitorPage-Dev"
+        DisplayName = "Monitor Page (Development)"
+        Description = "Monitor Page Development Server - API(8001) + Frontend(5174) + Workers"
+        Script = "$ScriptDir\run.ps1"
+        Args = "-Dev"
+        LogDir = Join-Path $ProjectRoot "logs\dev"
+    }
+}
+
+# Determine target services for start/stop/restart
+if ($Dev -and ($Action -in @("start", "stop", "restart"))) {
+    $targetServices = @(
+        @{
+            Name = "MonitorPage-Dev"
+            DisplayName = "Monitor Page (Development)"
+            Description = "Monitor Page Development Server - API(8001) + Frontend(5174) + Workers"
+            Script = "$ScriptDir\run.ps1"
+            Args = "-Dev"
+            LogDir = Join-Path $ProjectRoot "logs\dev"
+        }
+    )
 } else {
-    $TargetServices = @($ProdServiceName)
+    $targetServices = $services
 }
 
 # Check for NSSM
@@ -52,128 +77,86 @@ function Test-Administrator {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# Get service configuration
-function Get-ServiceConfig {
-    param([string]$ServiceName)
-
-    $isDev = $ServiceName -eq $DevServiceName
-
-    return @{
-        Name = $ServiceName
-        DisplayName = if ($isDev) { $DevDisplayName } else { $ProdDisplayName }
-        Description = if ($isDev) { "Monitor Page Development Server (API + Workers)" } else { "Monitor Page Production Server (API only, workers disabled)" }
-        AppMode = if ($isDev) { "development" } else { "production" }
-        ApiPort = if ($isDev) { 8001 } else { 8000 }
-        LogDir = if ($isDev) { Join-Path $ProjectRoot "logs\dev" } else { Join-Path $ProjectRoot "logs" }
-        StdoutLog = if ($isDev) { Join-Path $ProjectRoot "logs\dev\service_${ServiceName}.log" } else { Join-Path $ProjectRoot "logs\service_${ServiceName}.log" }
-        StderrLog = if ($isDev) { Join-Path $ProjectRoot "logs\dev\service_${ServiceName}_err.log" } else { Join-Path $ProjectRoot "logs\service_${ServiceName}_err.log" }
-    }
-}
-
 # Install service
 function Install-MonitorService {
-    param([string]$ServiceName)
+    param($svc)
 
-    $config = Get-ServiceConfig $ServiceName
-
-    Write-Host "[*] Installing service: $($config.DisplayName)" -ForegroundColor Cyan
+    Write-Host "[*] Installing service: $($svc.Name)" -ForegroundColor Cyan
 
     # Create log directory if not exists
-    if (-not (Test-Path $config.LogDir)) {
-        New-Item -ItemType Directory -Path $config.LogDir -Force | Out-Null
+    if (-not (Test-Path $svc.LogDir)) {
+        New-Item -ItemType Directory -Path $svc.LogDir -Force | Out-Null
     }
 
-    # Find Python executable
-    $pythonPath = $null
-    $venvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
-    $venvPython2 = Join-Path $ProjectRoot "venv\Scripts\python.exe"
-
-    if (Test-Path $venvPython) {
-        $pythonPath = $venvPython
-    } elseif (Test-Path $venvPython2) {
-        $pythonPath = $venvPython2
-    } else {
-        $pythonPath = (Get-Command python -ErrorAction SilentlyContinue).Source
+    # Remove existing service if exists
+    $existing = Get-Service -Name $svc.Name -ErrorAction SilentlyContinue
+    if ($existing) {
+        Write-Host "    Removing existing service..." -ForegroundColor Yellow
+        nssm stop $svc.Name confirm 2>$null
+        nssm remove $svc.Name confirm
     }
 
-    if (-not $pythonPath) {
-        Write-Host "[!] Python not found" -ForegroundColor Red
-        return $false
-    }
-
-    Write-Host "    Python: $pythonPath" -ForegroundColor Gray
-
-    # Install service with NSSM
-    $arguments = "-m uvicorn app.main:app --host 0.0.0.0 --port $($config.ApiPort)"
-
-    # Install
-    nssm install $ServiceName $pythonPath $arguments
-
-    # Set application directory
-    nssm set $ServiceName AppDirectory $ProjectRoot
+    # Install service - run.ps1 via PowerShell
+    nssm install $svc.Name powershell.exe
+    nssm set $svc.Name AppParameters "-ExecutionPolicy Bypass -File `"$($svc.Script)`" $($svc.Args)"
+    nssm set $svc.Name AppDirectory $ProjectRoot
 
     # Set display name and description
-    nssm set $ServiceName DisplayName $config.DisplayName
-    nssm set $ServiceName Description $config.Description
+    nssm set $svc.Name DisplayName $svc.DisplayName
+    nssm set $svc.Name Description $svc.Description
 
-    # Set environment variables
-    $envVars = "APP_MODE=$($config.AppMode)", "PYTHONIOENCODING=utf-8"
-    nssm set $ServiceName AppEnvironmentExtra $envVars
+    # Set startup type to Delayed Auto Start (start after boot completes)
+    nssm set $svc.Name Start SERVICE_DELAYED_AUTO_START
 
-    # Set stdout/stderr log files
-    nssm set $ServiceName AppStdout $config.StdoutLog
-    nssm set $ServiceName AppStderr $config.StderrLog
-    nssm set $ServiceName AppStdoutCreationDisposition 4  # Append
-    nssm set $ServiceName AppStderrCreationDisposition 4  # Append
+    # Set log files
+    $stdoutLog = Join-Path $svc.LogDir "service_$($svc.Name).log"
+    $stderrLog = Join-Path $svc.LogDir "service_$($svc.Name)_err.log"
+    nssm set $svc.Name AppStdout $stdoutLog
+    nssm set $svc.Name AppStderr $stderrLog
+    nssm set $svc.Name AppStdoutCreationDisposition 4  # Append
+    nssm set $svc.Name AppStderrCreationDisposition 4  # Append
 
-    # Set restart options
-    nssm set $ServiceName AppRestartDelay 5000  # 5 seconds delay before restart
-    nssm set $ServiceName AppThrottle 10000     # Minimum 10 seconds between restarts
+    # Log rotation (10MB)
+    nssm set $svc.Name AppRotateFiles 1
+    nssm set $svc.Name AppRotateBytes 10485760
 
-    # Set startup type to Automatic
-    nssm set $ServiceName Start SERVICE_AUTO_START
-
-    Write-Host "[+] Service installed: $ServiceName" -ForegroundColor Green
-    Write-Host "    Stdout: $($config.StdoutLog)" -ForegroundColor Gray
-    Write-Host "    Stderr: $($config.StderrLog)" -ForegroundColor Gray
+    Write-Host "[+] Service installed: $($svc.Name)" -ForegroundColor Green
+    Write-Host "    Stdout: $stdoutLog" -ForegroundColor Gray
+    Write-Host "    Stderr: $stderrLog" -ForegroundColor Gray
 
     return $true
 }
 
 # Uninstall service
 function Uninstall-MonitorService {
-    param([string]$ServiceName)
+    param($svc)
 
-    $config = Get-ServiceConfig $ServiceName
-
-    Write-Host "[*] Uninstalling service: $($config.DisplayName)" -ForegroundColor Cyan
+    Write-Host "[*] Uninstalling service: $($svc.Name)" -ForegroundColor Cyan
 
     # Stop service first if running
-    $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    $service = Get-Service -Name $svc.Name -ErrorAction SilentlyContinue
     if ($service -and $service.Status -eq "Running") {
         Write-Host "    [*] Stopping service..." -ForegroundColor Yellow
-        nssm stop $ServiceName
+        nssm stop $svc.Name
         Start-Sleep -Seconds 2
     }
 
     # Remove service
-    nssm remove $ServiceName confirm
+    nssm remove $svc.Name confirm
 
-    Write-Host "[+] Service uninstalled: $ServiceName" -ForegroundColor Green
+    Write-Host "[+] Service uninstalled: $($svc.Name)" -ForegroundColor Green
     return $true
 }
 
 # Start service
 function Start-MonitorService {
-    param([string]$ServiceName, [switch]$OpenLogs)
+    param($svc, [switch]$OpenLogs)
 
-    $config = Get-ServiceConfig $ServiceName
+    Write-Host "[*] Starting service: $($svc.DisplayName)" -ForegroundColor Cyan
 
-    Write-Host "[*] Starting service: $($config.DisplayName)" -ForegroundColor Cyan
-
-    $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    $service = Get-Service -Name $svc.Name -ErrorAction SilentlyContinue
     if (-not $service) {
-        Write-Host "[!] Service not found: $ServiceName" -ForegroundColor Red
+        Write-Host "[!] Service not found: $($svc.Name)" -ForegroundColor Red
         Write-Host "    Run: .\service-install.ps1 -Action install" -ForegroundColor Yellow
         return $false
     }
@@ -181,14 +164,14 @@ function Start-MonitorService {
     if ($service.Status -eq "Running") {
         Write-Host "[!] Service already running" -ForegroundColor Yellow
     } else {
-        nssm start $ServiceName
-        Write-Host "[+] Service started: $ServiceName" -ForegroundColor Green
+        nssm start $svc.Name
+        Write-Host "[+] Service started: $($svc.Name)" -ForegroundColor Green
     }
 
     # Open logs if requested
     if ($OpenLogs) {
         Start-Sleep -Seconds 2
-        Open-ServiceLogs -ServiceName $ServiceName
+        Open-ServiceLogs -svc $svc
     }
 
     return $true
@@ -196,23 +179,21 @@ function Start-MonitorService {
 
 # Stop service
 function Stop-MonitorService {
-    param([string]$ServiceName)
+    param($svc)
 
-    $config = Get-ServiceConfig $ServiceName
+    Write-Host "[*] Stopping service: $($svc.DisplayName)" -ForegroundColor Cyan
 
-    Write-Host "[*] Stopping service: $($config.DisplayName)" -ForegroundColor Cyan
-
-    $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    $service = Get-Service -Name $svc.Name -ErrorAction SilentlyContinue
     if (-not $service) {
-        Write-Host "[!] Service not found: $ServiceName" -ForegroundColor Red
+        Write-Host "[!] Service not found: $($svc.Name)" -ForegroundColor Red
         return $false
     }
 
     if ($service.Status -eq "Stopped") {
         Write-Host "[!] Service already stopped" -ForegroundColor Yellow
     } else {
-        nssm stop $ServiceName
-        Write-Host "[+] Service stopped: $ServiceName" -ForegroundColor Green
+        nssm stop $svc.Name
+        Write-Host "[+] Service stopped: $($svc.Name)" -ForegroundColor Green
     }
 
     return $true
@@ -220,26 +201,24 @@ function Stop-MonitorService {
 
 # Restart service
 function Restart-MonitorService {
-    param([string]$ServiceName, [switch]$OpenLogs)
+    param($svc, [switch]$OpenLogs)
 
-    $config = Get-ServiceConfig $ServiceName
+    Write-Host "[*] Restarting service: $($svc.DisplayName)" -ForegroundColor Cyan
 
-    Write-Host "[*] Restarting service: $($config.DisplayName)" -ForegroundColor Cyan
-
-    $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    $service = Get-Service -Name $svc.Name -ErrorAction SilentlyContinue
     if (-not $service) {
-        Write-Host "[!] Service not found: $ServiceName" -ForegroundColor Red
+        Write-Host "[!] Service not found: $($svc.Name)" -ForegroundColor Red
         Write-Host "    Run: .\service-install.ps1 -Action install" -ForegroundColor Yellow
         return $false
     }
 
-    nssm restart $ServiceName
-    Write-Host "[+] Service restarted: $ServiceName" -ForegroundColor Green
+    nssm restart $svc.Name
+    Write-Host "[+] Service restarted: $($svc.Name)" -ForegroundColor Green
 
     # Open logs if requested
     if ($OpenLogs) {
         Start-Sleep -Seconds 2
-        Open-ServiceLogs -ServiceName $ServiceName
+        Open-ServiceLogs -svc $svc
     }
 
     return $true
@@ -247,14 +226,12 @@ function Restart-MonitorService {
 
 # Show service status
 function Show-ServiceStatus {
-    param([string]$ServiceName)
-
-    $config = Get-ServiceConfig $ServiceName
+    param($svc)
 
     Write-Host ""
-    Write-Host "[$($config.DisplayName)]" -ForegroundColor Cyan
+    Write-Host "[$($svc.DisplayName)]" -ForegroundColor Cyan
 
-    $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    $service = Get-Service -Name $svc.Name -ErrorAction SilentlyContinue
     if (-not $service) {
         Write-Host "  Status: NOT INSTALLED" -ForegroundColor Gray
         return
@@ -267,26 +244,23 @@ function Show-ServiceStatus {
     }
 
     Write-Host "  Status: $($service.Status)" -ForegroundColor $statusColor
-    Write-Host "  Port: $($config.ApiPort)" -ForegroundColor Gray
-    Write-Host "  Mode: $($config.AppMode)" -ForegroundColor Gray
 
     # Check if log files exist
-    if (Test-Path $config.StdoutLog) {
-        $logSize = "{0:N2} KB" -f ((Get-Item $config.StdoutLog).Length / 1KB)
+    $stdoutLog = Join-Path $svc.LogDir "service_$($svc.Name).log"
+    if (Test-Path $stdoutLog) {
+        $logSize = "{0:N2} KB" -f ((Get-Item $stdoutLog).Length / 1KB)
         Write-Host "  Log: $logSize" -ForegroundColor Gray
     }
 }
 
 # Open log windows
 function Open-ServiceLogs {
-    param([string]$ServiceName)
-
-    $config = Get-ServiceConfig $ServiceName
+    param($svc)
 
     Write-Host "[*] Opening log windows..." -ForegroundColor Cyan
 
-    $stdoutLog = $config.StdoutLog
-    $stderrLog = $config.StderrLog
+    $stdoutLog = Join-Path $svc.LogDir "service_$($svc.Name).log"
+    $stderrLog = Join-Path $svc.LogDir "service_$($svc.Name)_err.log"
 
     # Check if Windows Terminal is available
     $wtPath = Get-Command wt -ErrorAction SilentlyContinue
@@ -299,7 +273,7 @@ function Open-ServiceLogs {
         # Left: stdout, Right: stderr
         $wtArgs = @(
             "new-tab",
-            "--title", "Service Logs: $ServiceName",
+            "--title", "Service Logs: $($svc.Name)",
             "powershell", "-NoExit", "-Command", "Write-Host 'STDOUT Log' -ForegroundColor Cyan; Get-Content '$stdoutLog' -Wait -Tail 50 -Encoding UTF8",
             ";",
             "split-pane", "-H",
@@ -313,7 +287,7 @@ function Open-ServiceLogs {
         Write-Host "    Using PowerShell (Windows Terminal not available)" -ForegroundColor Gray
 
         # Open just stdout log in new window
-        Start-Process powershell -ArgumentList "-NoExit", "-Command", "Write-Host 'Service Log: $ServiceName' -ForegroundColor Cyan; Get-Content '$stdoutLog' -Wait -Tail 50 -Encoding UTF8"
+        Start-Process powershell -ArgumentList "-NoExit", "-Command", "Write-Host 'Service Log: $($svc.Name)' -ForegroundColor Cyan; Get-Content '$stdoutLog' -Wait -Tail 50 -Encoding UTF8"
     }
 
     Write-Host "[+] Log window opened" -ForegroundColor Green
@@ -344,8 +318,8 @@ if ($Action -ne "status" -and -not (Test-NssmInstalled)) {
 # Execute action
 switch ($Action) {
     "install" {
-        foreach ($svc in $TargetServices) {
-            Install-MonitorService -ServiceName $svc
+        foreach ($svc in $services) {
+            Install-MonitorService $svc
             Write-Host ""
         }
         Write-Host "Installation complete." -ForegroundColor Green
@@ -355,29 +329,42 @@ switch ($Action) {
         Write-Host "  .\service-install.ps1 -Action start -WithLogs  # Start with log window"
     }
     "uninstall" {
-        foreach ($svc in $TargetServices) {
-            Uninstall-MonitorService -ServiceName $svc
+        foreach ($svc in $services) {
+            Uninstall-MonitorService $svc
             Write-Host ""
         }
     }
     "start" {
-        foreach ($svc in $TargetServices) {
-            Start-MonitorService -ServiceName $svc -OpenLogs:$WithLogs
+        foreach ($svc in $targetServices) {
+            Start-MonitorService $svc -OpenLogs:$WithLogs
         }
     }
     "stop" {
-        foreach ($svc in $TargetServices) {
-            Stop-MonitorService -ServiceName $svc
+        foreach ($svc in $targetServices) {
+            Stop-MonitorService $svc
         }
     }
     "restart" {
-        foreach ($svc in $TargetServices) {
-            Restart-MonitorService -ServiceName $svc -OpenLogs:$WithLogs
+        foreach ($svc in $targetServices) {
+            Restart-MonitorService $svc -OpenLogs:$WithLogs
         }
     }
     "status" {
-        foreach ($svc in @($ProdServiceName, $DevServiceName)) {
-            Show-ServiceStatus -ServiceName $svc
+        # Always show both services for status
+        $allServices = @(
+            @{
+                Name = "MonitorPage"
+                DisplayName = "Monitor Page (Production)"
+                LogDir = Join-Path $ProjectRoot "logs"
+            },
+            @{
+                Name = "MonitorPage-Dev"
+                DisplayName = "Monitor Page (Development)"
+                LogDir = Join-Path $ProjectRoot "logs\dev"
+            }
+        )
+        foreach ($svc in $allServices) {
+            Show-ServiceStatus $svc
         }
         Write-Host ""
     }
