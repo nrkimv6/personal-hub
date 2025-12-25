@@ -96,6 +96,7 @@ class EventService:
         url_type: Optional[str] = None,
         is_bookmarked: Optional[bool] = None,
         is_participated: Optional[bool] = None,
+        is_offline: Optional[bool] = None,  # 오프라인 이벤트 필터
         include_unknown_period: bool = True,
         search: Optional[str] = None,
         sort_by: str = "event_end",
@@ -130,6 +131,8 @@ class EventService:
             query = query.filter(Event.is_bookmarked == is_bookmarked)
         if is_participated is not None:
             query = query.filter(Event.is_participated == is_participated)
+        if is_offline is not None:
+            query = query.filter(Event.is_offline == is_offline)
 
         # event_status 필터 (기간 기반)
         today = date.today()
@@ -246,6 +249,7 @@ class EventService:
             source_note=data.source_note,
             user_note=data.user_note,
             input_source=data.input_source,
+            is_offline=data.is_offline,
         )
 
         db.add(event)
@@ -313,6 +317,22 @@ class EventService:
         db.refresh(event)
 
         return self._to_response(db, event)
+
+    def toggle_offline(self, db: Session, event_id: int) -> Optional[dict]:
+        """오프라인 상태 토글"""
+        event = db.query(Event).filter(Event.id == event_id).first()
+        if not event:
+            return None
+
+        event.is_offline = not event.is_offline
+        db.commit()
+        db.refresh(event)
+
+        return {
+            "id": event.id,
+            "is_offline": event.is_offline,
+            "message": f"{'오프라인' if event.is_offline else '온라인'} 이벤트로 변경되었습니다"
+        }
 
     def import_from_instagram(
         self, db: Session, data: EventImportFromInstagram
@@ -623,6 +643,7 @@ class EventService:
             "user_note": event.user_note,
             "is_bookmarked": event.is_bookmarked,
             "is_participated": event.is_participated,
+            "is_offline": event.is_offline,
             "input_source": event.input_source or "human",
             "created_at": event.created_at,
             "updated_at": event.updated_at,

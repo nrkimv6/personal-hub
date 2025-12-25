@@ -34,9 +34,9 @@
 	let loading = $state(true);
 	let error: string | null = $state(null);
 
-	// 탭 모드
-	type TabMode = 'event' | 'popup' | 'uncategorized' | 'crawl';
-	let activeTab: TabMode = $state('event');
+	// 탭 모드: online(온라인 이벤트), offline(오프라인 이벤트), popup, uncategorized, crawl
+	type TabMode = 'online' | 'offline' | 'popup' | 'uncategorized' | 'crawl';
+	let activeTab: TabMode = $state('online');
 
 	// 미분류 목록
 	let uncategorizedPosts: UncategorizedPost[] = $state([]);
@@ -103,8 +103,8 @@
 			return;
 		}
 		if (isAnonymous) {
-			filterEventStatus = tab === 'event' ? 'ending_today' : null;
-		} else if (tab === 'event') {
+			filterEventStatus = (tab === 'online' || tab === 'offline') ? 'ending_today' : null;
+		} else if (tab === 'online' || tab === 'offline') {
 			filterEventStatus = 'ongoing';
 		} else if (tab === 'popup') {
 			filterEventStatus = 'ongoing_or_upcoming';
@@ -222,12 +222,14 @@
 				total = response.total;
 				error = null;
 			} else {
+				// online 또는 offline 탭: 이벤트 목록 조회
 				const params: Record<string, unknown> = {
 					page: currentPage,
 					page_size: pageSize,
 					sort_by: sortBy,
 					sort_order: sortOrder,
-					event_type: 'event'
+					event_type: 'event',
+					is_offline: activeTab === 'offline'  // 탭에 따라 온라인/오프라인 필터
 				};
 				// deadline_date가 설정되면 event_status를 무시
 				if (filterDeadlineDate) {
@@ -374,6 +376,27 @@
 		}
 	}
 
+	async function handleEventOfflineToggle(event: Event, e: MouseEvent) {
+		e.stopPropagation();
+		try {
+			const result = await eventApi.toggleOffline(event.id);
+			// 목록 업데이트
+			const eventIndex = events.findIndex(ev => ev.id === event.id);
+			if (eventIndex !== -1) {
+				events[eventIndex].is_offline = result.is_offline;
+				events = [...events];
+			}
+			// 뷰어에서도 업데이트
+			if (viewingEvent?.id === event.id) {
+				viewingEvent = { ...viewingEvent, is_offline: result.is_offline };
+			}
+			// 탭에 따라 목록 새로고침 (토글 후 다른 탭으로 이동해야 하므로)
+			await fetchEvents();
+		} catch (err) {
+			console.error('오프라인 토글 실패:', err);
+		}
+	}
+
 	// =========================================================
 	// 피드 뷰어
 	// =========================================================
@@ -425,6 +448,13 @@
 		e.stopPropagation();
 		if (viewingPopup) {
 			handlePopupVisitedToggle(viewingPopup, e);
+		}
+	}
+
+	function handleViewerOfflineToggle(e: MouseEvent) {
+		e.stopPropagation();
+		if (viewingEvent) {
+			handleEventOfflineToggle(viewingEvent, e);
 		}
 	}
 
@@ -554,7 +584,7 @@
 
 		// 익명 사용자 필터 설정
 		if (!$isLoggedIn) {
-			filterEventStatus = activeTab === 'event' ? 'ending_today' : null;
+			filterEventStatus = (activeTab === 'online' || activeTab === 'offline') ? 'ending_today' : null;
 		}
 
 		fetchEvents();
@@ -590,7 +620,7 @@
 		<div class="flex items-center gap-2">
 			{#if isAnonymous}
 				<!-- 익명 사용자: 필터 비활성화, 고정 배지만 표시 -->
-				{#if activeTab === 'event'}
+				{#if activeTab === 'online' || activeTab === 'offline'}
 					<span class="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-700 rounded-full">
 						오늘 마감
 					</span>
@@ -637,12 +667,20 @@
 	<div class="mb-4 border-b border-gray-200">
 		<nav class="flex gap-4">
 			<button
-				onclick={() => switchTab('event')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'event'
+				onclick={() => switchTab('online')}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'online'
 					? 'border-purple-600 text-purple-600'
 					: 'border-transparent text-gray-500 hover:text-gray-700'}"
 			>
 				온라인 이벤트
+			</button>
+			<button
+				onclick={() => switchTab('offline')}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'offline'
+					? 'border-green-600 text-green-600'
+					: 'border-transparent text-gray-500 hover:text-gray-700'}"
+			>
+				오프라인 이벤트
 			</button>
 			<button
 				onclick={() => switchTab('popup')}
@@ -708,7 +746,7 @@
 		{:else if (activeTab === 'popup' ? popups.length : activeTab === 'uncategorized' ? uncategorizedPosts.length : events.length) === 0}
 			<div class="text-center py-12 text-gray-500">
 				<p class="text-lg">
-					{activeTab === 'popup' ? '등록된 팝업이 없습니다' : activeTab === 'uncategorized' ? '미분류 항목이 없습니다' : '등록된 이벤트가 없습니다'}
+					{activeTab === 'popup' ? '등록된 팝업이 없습니다' : activeTab === 'uncategorized' ? '미분류 항목이 없습니다' : activeTab === 'offline' ? '등록된 오프라인 이벤트가 없습니다' : '등록된 온라인 이벤트가 없습니다'}
 				</p>
 				{#if $isAdmin && activeTab !== 'uncategorized'}
 					<button onclick={openCreateModal} class="mt-4 btn btn-primary btn-sm">
@@ -872,6 +910,7 @@
 	onBookmarkToggle={handleViewerBookmarkToggle}
 	onParticipateToggle={handleViewerParticipateToggle}
 	onVisitToggle={handleViewerVisitToggle}
+	onOfflineToggle={$isAdmin ? handleViewerOfflineToggle : undefined}
 	onRecrawl={$isAdmin ? handleRecrawl : undefined}
 	onTagsUpdate={$isAdmin ? handleTagsUpdate : undefined}
 	onDeletePost={$isAdmin ? handleDeletePost : undefined}

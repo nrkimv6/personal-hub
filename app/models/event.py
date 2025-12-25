@@ -53,6 +53,9 @@ class Event(Base):
     is_participated = Column(Boolean, default=False)
     user_note = Column(Text)
 
+    # 오프라인 이벤트 여부
+    is_offline = Column(Boolean, nullable=False, default=False, index=True)
+
     # 입력 출처 (AI/사람/AI수정)
     input_source = Column(String, default="human", index=True)  # 'ai', 'human', 'ai_edited'
 

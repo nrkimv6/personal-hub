@@ -28,6 +28,7 @@
 		onBookmarkToggle: (e: MouseEvent) => void;
 		onParticipateToggle?: (e: MouseEvent) => void; // 이벤트용
 		onVisitToggle?: (e: MouseEvent) => void; // 팝업용
+		onOfflineToggle?: (e: MouseEvent) => void; // 이벤트 온라인/오프라인 토글
 		onRecrawl?: (postId: number) => Promise<void>;  // 관리자 전용
 		onTagsUpdate?: (postId: number, tagIds: number[]) => Promise<void>;  // 관리자 전용
 		onDeletePost?: (postId: number) => Promise<void>;  // 관리자 전용
@@ -50,6 +51,7 @@
 		onBookmarkToggle,
 		onParticipateToggle,
 		onVisitToggle,
+		onOfflineToggle,
 		onRecrawl,
 		onTagsUpdate,
 		onDeletePost,
@@ -408,6 +410,18 @@
 						{/if}
 					</div>
 
+					<!-- 오프라인 토글 (이벤트, 관리자 전용) -->
+					{#if type === 'event' && isAdmin && onOfflineToggle && event}
+						<button
+							onclick={onOfflineToggle}
+							class="w-full mt-2 py-2 text-xs rounded transition-colors {event.is_offline
+								? 'bg-green-100 text-green-700 hover:bg-green-200'
+								: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+						>
+							{event.is_offline ? '📍 오프라인 이벤트' : '🌐 온라인 이벤트'} (클릭하여 변경)
+						</button>
+					{/if}
+
 					<!-- 삭제 (이벤트만) -->
 					{#if type === 'event' && onDelete}
 						<button
@@ -725,6 +739,18 @@
 								</button>
 							{/if}
 						</div>
+
+						<!-- 오프라인 토글 (이벤트, 관리자 전용) -->
+						{#if type === 'event' && isAdmin && onOfflineToggle && event}
+							<button
+								onclick={onOfflineToggle}
+								class="w-full mt-2 py-2 text-sm rounded transition-colors {event.is_offline
+									? 'bg-green-100 text-green-700 hover:bg-green-200'
+									: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+							>
+								{event.is_offline ? '📍 오프라인 이벤트' : '🌐 온라인 이벤트'} (클릭하여 변경)
+							</button>
+						{/if}
 
 						<!-- 삭제 (이벤트만) -->
 						{#if type === 'event' && onDelete}
