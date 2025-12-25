@@ -3,7 +3,7 @@
 	 * 크롤링 이력 탭 컴포넌트
 	 */
 	import { onMount } from 'svelte';
-	import { crawlApi, type UniversalCrawlRequest, type CrawledPage } from '$lib/api';
+	import { crawlApi, type UniversalCrawlRequest, type CrawledPage, type CrawlRequestListParams } from '$lib/api';
 	import { toast } from '$lib/stores/toast';
 	import { isAdmin } from '$lib/stores/auth';
 
@@ -19,11 +19,16 @@
 	// 상태
 	let requests: UniversalCrawlRequest[] = $state([]);
 	let total = $state(0);
+	let totalPages = $state(1);
 	let loading = $state(true);
 	let error: string | null = $state(null);
 
 	// 필터
 	let filterStatus: string | null = $state(null);
+	let filterAnalysis: string | null = $state(null);
+
+	// AI 분석 중인 페이지 ID 세트
+	let analyzingPages: Set<number> = $state(new Set());
 
 	// 크롤링 요청 모달
 	let showAddModal = $state(false);
@@ -51,15 +56,17 @@
 	export async function fetchRequests() {
 		loading = true;
 		try {
-			const params: Record<string, unknown> = {
+			const params: CrawlRequestListParams = {
 				page: currentPage,
 				page_size: pageSize
 			};
 			if (filterStatus) params.status = filterStatus;
+			if (filterAnalysis) params.analysis_status = filterAnalysis;
 
 			const response = await crawlApi.listRequests(params);
 			requests = response.items;
 			total = response.total;
+			totalPages = response.total_pages || Math.ceil(total / pageSize);
 			error = null;
 		} catch (e) {
 			error = e instanceof Error ? e.message : '데이터 로드 실패';
@@ -183,6 +190,54 @@
 		fetchRequests();
 	}
 
+	function handleAnalysisFilter(analysis: string | null) {
+		filterAnalysis = analysis;
+		currentPage = 1;
+		fetchRequests();
+	}
+
+	// AI 분석 요청
+	async function handleAnalyze(req: UniversalCrawlRequest) {
+		if (!req.crawled_page_id) {
+			toast.warning('크롤링이 완료되지 않은 페이지입니다.');
+			return;
+		}
+
+		const pageId = req.crawled_page_id;
+		analyzingPages = new Set([...analyzingPages, pageId]);
+
+		try {
+			const response = await crawlApi.analyzePage(pageId);
+			if (response.success) {
+				toast.success(response.message);
+				// 목록 새로고침
+				await fetchRequests();
+			}
+		} catch (e) {
+			toast.error('AI 분석 요청 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		} finally {
+			const newSet = new Set(analyzingPages);
+			newSet.delete(pageId);
+			analyzingPages = newSet;
+		}
+	}
+
+	// 페이지네이션
+	function goToPage(page: number) {
+		if (page >= 1 && page <= totalPages) {
+			currentPage = page;
+		}
+	}
+
+	// AI 분석 가능 여부 확인
+	function canAnalyze(req: UniversalCrawlRequest): boolean {
+		// 크롤링 완료 + 미분석 상태에서만 활성화
+		if (req.status !== 'completed') return false;
+		if (!req.crawled_page_id) return false;
+		if (req.crawled_page?.is_event !== null && req.crawled_page?.is_event !== undefined) return false;
+		return true;
+	}
+
 	// 외부에서 접근 가능한 함수들
 	export function openAddModal() {
 		showAddModal = true;
@@ -210,47 +265,87 @@
 </script>
 
 <!-- 필터 -->
-<div class="mb-4 flex flex-wrap gap-2">
-	<button
-		onclick={() => handleStatusFilter(null)}
-		class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === null
-			? 'bg-gray-800 text-white'
-			: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
-	>
-		전체
-	</button>
-	<button
-		onclick={() => handleStatusFilter('pending')}
-		class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'pending'
-			? 'bg-yellow-600 text-white'
-			: 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'}"
-	>
-		대기
-	</button>
-	<button
-		onclick={() => handleStatusFilter('processing')}
-		class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'processing'
-			? 'bg-blue-600 text-white'
-			: 'bg-blue-100 text-blue-700 hover:bg-blue-200'}"
-	>
-		처리 중
-	</button>
-	<button
-		onclick={() => handleStatusFilter('completed')}
-		class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'completed'
-			? 'bg-green-600 text-white'
-			: 'bg-green-100 text-green-700 hover:bg-green-200'}"
-	>
-		완료
-	</button>
-	<button
-		onclick={() => handleStatusFilter('failed')}
-		class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'failed'
-			? 'bg-red-600 text-white'
-			: 'bg-red-100 text-red-700 hover:bg-red-200'}"
-	>
-		실패
-	</button>
+<div class="mb-4 space-y-2">
+	<!-- 상태 필터 -->
+	<div class="flex flex-wrap gap-2">
+		<span class="text-sm text-gray-500 py-1.5">상태:</span>
+		<button
+			onclick={() => handleStatusFilter(null)}
+			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === null
+				? 'bg-gray-800 text-white'
+				: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+		>
+			전체
+		</button>
+		<button
+			onclick={() => handleStatusFilter('pending')}
+			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'pending'
+				? 'bg-yellow-600 text-white'
+				: 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'}"
+		>
+			대기
+		</button>
+		<button
+			onclick={() => handleStatusFilter('processing')}
+			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'processing'
+				? 'bg-blue-600 text-white'
+				: 'bg-blue-100 text-blue-700 hover:bg-blue-200'}"
+		>
+			처리 중
+		</button>
+		<button
+			onclick={() => handleStatusFilter('completed')}
+			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'completed'
+				? 'bg-green-600 text-white'
+				: 'bg-green-100 text-green-700 hover:bg-green-200'}"
+		>
+			완료
+		</button>
+		<button
+			onclick={() => handleStatusFilter('failed')}
+			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'failed'
+				? 'bg-red-600 text-white'
+				: 'bg-red-100 text-red-700 hover:bg-red-200'}"
+		>
+			실패
+		</button>
+	</div>
+	<!-- 분석 상태 필터 -->
+	<div class="flex flex-wrap gap-2">
+		<span class="text-sm text-gray-500 py-1.5">분석:</span>
+		<button
+			onclick={() => handleAnalysisFilter(null)}
+			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterAnalysis === null
+				? 'bg-gray-800 text-white'
+				: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+		>
+			전체
+		</button>
+		<button
+			onclick={() => handleAnalysisFilter('event')}
+			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterAnalysis === 'event'
+				? 'bg-purple-600 text-white'
+				: 'bg-purple-100 text-purple-700 hover:bg-purple-200'}"
+		>
+			이벤트
+		</button>
+		<button
+			onclick={() => handleAnalysisFilter('uncategorized')}
+			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterAnalysis === 'uncategorized'
+				? 'bg-orange-600 text-white'
+				: 'bg-orange-100 text-orange-700 hover:bg-orange-200'}"
+		>
+			미분류
+		</button>
+		<button
+			onclick={() => handleAnalysisFilter('unanalyzed')}
+			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterAnalysis === 'unanalyzed'
+				? 'bg-gray-600 text-white'
+				: 'bg-gray-200 text-gray-600 hover:bg-gray-300'}"
+		>
+			미분석
+		</button>
+	</div>
 </div>
 
 <!-- 목록 -->
@@ -275,9 +370,12 @@
 	<!-- 모바일 카드 뷰 -->
 	<div class="md:hidden space-y-3">
 		{#each requests as req}
-			<button
+			<div
 				onclick={() => openDetail(req)}
-				class="w-full text-left bg-white border rounded-lg p-4 hover:shadow-md transition-shadow"
+				onkeydown={(e) => e.key === 'Enter' && openDetail(req)}
+				role="button"
+				tabindex="0"
+				class="w-full text-left bg-white border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
 			>
 				<div class="flex items-start justify-between gap-2 mb-2">
 					<div class="flex gap-1">
@@ -293,21 +391,39 @@
 					{/if}
 				</div>
 				<p class="text-sm text-gray-900 break-all line-clamp-2 mb-2">{req.url}</p>
-				<div class="flex justify-between text-xs text-gray-500">
+				<div class="flex justify-between items-center text-xs text-gray-500">
 					<span>{formatDate(req.requested_at)}</span>
-					{#if (req.status === 'failed' || req.status === 'completed') && $isAdmin}
-						<button
-							onclick={(e) => {
-								e.stopPropagation();
-								handleRetry(req.id);
-							}}
-							class="text-blue-600 hover:underline"
-						>
-							재시도
-						</button>
-					{/if}
+					<div class="flex gap-2">
+						{#if canAnalyze(req) && $isAdmin}
+							<button
+								onclick={(e) => {
+									e.stopPropagation();
+									handleAnalyze(req);
+								}}
+								disabled={Boolean(req.crawled_page_id && analyzingPages.has(req.crawled_page_id))}
+								class="text-purple-600 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+							>
+								{#if req.crawled_page_id && analyzingPages.has(req.crawled_page_id)}
+									분석 중...
+								{:else}
+									AI 분석
+								{/if}
+							</button>
+						{/if}
+						{#if (req.status === 'failed' || req.status === 'completed') && $isAdmin}
+							<button
+								onclick={(e) => {
+									e.stopPropagation();
+									handleRetry(req.id);
+								}}
+								class="text-blue-600 hover:underline"
+							>
+								재시도
+							</button>
+						{/if}
+					</div>
 				</div>
-			</button>
+			</div>
 		{/each}
 	</div>
 
@@ -356,23 +472,69 @@
 							{req.completed_at ? formatDate(req.completed_at) : '-'}
 						</td>
 						<td class="py-3">
-							{#if (req.status === 'failed' || req.status === 'completed') && $isAdmin}
-								<button
-									onclick={(e) => {
-										e.stopPropagation();
-										handleRetry(req.id);
-									}}
-									class="text-sm text-blue-600 hover:underline"
-								>
-									재시도
-								</button>
-							{/if}
+							<div class="flex gap-2">
+								{#if canAnalyze(req) && $isAdmin}
+									<button
+										onclick={(e) => {
+											e.stopPropagation();
+											handleAnalyze(req);
+										}}
+										disabled={Boolean(req.crawled_page_id && analyzingPages.has(req.crawled_page_id))}
+										class="text-sm text-purple-600 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+									>
+										{#if req.crawled_page_id && analyzingPages.has(req.crawled_page_id)}
+											분석 중...
+										{:else}
+											AI 분석
+										{/if}
+									</button>
+								{/if}
+								{#if (req.status === 'failed' || req.status === 'completed') && $isAdmin}
+									<button
+										onclick={(e) => {
+											e.stopPropagation();
+											handleRetry(req.id);
+										}}
+										class="text-sm text-blue-600 hover:underline"
+									>
+										재시도
+									</button>
+								{/if}
+							</div>
 						</td>
 					</tr>
 				{/each}
 			</tbody>
 		</table>
 	</div>
+
+	<!-- 페이지네이션 -->
+	{#if totalPages > 1}
+		<div class="flex justify-between items-center mt-6 pt-4 border-t">
+			<span class="text-sm text-gray-500">
+				전체 {total}건 중 {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, total)}
+			</span>
+			<div class="flex gap-2 items-center">
+				<button
+					onclick={() => goToPage(currentPage - 1)}
+					disabled={currentPage === 1}
+					class="px-3 py-1.5 text-sm rounded border disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+				>
+					이전
+				</button>
+				<span class="text-sm text-gray-600">
+					{currentPage} / {totalPages}
+				</span>
+				<button
+					onclick={() => goToPage(currentPage + 1)}
+					disabled={currentPage >= totalPages}
+					class="px-3 py-1.5 text-sm rounded border disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+				>
+					다음
+				</button>
+			</div>
+		</div>
+	{/if}
 {/if}
 
 <!-- 크롤링 요청 모달 -->
@@ -524,12 +686,68 @@
 							{/if}
 						</dl>
 					</div>
+
+					<!-- AI 분석 결과 -->
+					{#if selectedPage.is_event !== null && selectedPage.is_event !== undefined}
+						<div class="bg-purple-50 rounded-lg p-4">
+							<h4 class="text-sm font-medium text-gray-700 mb-2">AI 분석 결과</h4>
+							<dl class="space-y-2 text-sm">
+								<div class="flex">
+									<dt class="w-24 text-gray-500">분류</dt>
+									<dd>
+										{#if selectedPage.is_event}
+											<span class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-700">이벤트</span>
+										{:else}
+											<span class="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-700">미분류</span>
+										{/if}
+									</dd>
+								</div>
+								{#if selectedPage.analysis_result}
+									{@const result = selectedPage.analysis_result as Record<string, string>}
+									{#if result.reason}
+										<div class="flex">
+											<dt class="w-24 text-gray-500">판단 근거</dt>
+											<dd class="text-gray-700">{result.reason}</dd>
+										</div>
+									{/if}
+									{#if result.event_type}
+										<div class="flex">
+											<dt class="w-24 text-gray-500">이벤트 유형</dt>
+											<dd class="text-gray-700">{result.event_type}</dd>
+										</div>
+									{/if}
+									{#if result.summary}
+										<div>
+											<dt class="text-gray-500 mb-1">요약</dt>
+											<dd class="bg-white rounded p-2 text-xs text-gray-600">{result.summary}</dd>
+										</div>
+									{/if}
+								{/if}
+							</dl>
+						</div>
+					{/if}
 				{/if}
 			</div>
 
 			<div class="mt-6 flex gap-2 justify-end">
+				{#if selectedRequest && canAnalyze(selectedRequest) && $isAdmin}
+					<button
+						onclick={() => selectedRequest && handleAnalyze(selectedRequest)}
+						disabled={Boolean(selectedRequest.crawled_page_id && analyzingPages.has(selectedRequest.crawled_page_id))}
+						class="btn btn-outline btn-sm text-purple-600 border-purple-300 hover:bg-purple-50 disabled:opacity-50"
+					>
+						{#if selectedRequest.crawled_page_id && analyzingPages.has(selectedRequest.crawled_page_id)}
+							<span class="flex items-center gap-2">
+								<span class="animate-spin h-4 w-4 border-2 border-purple-600 border-t-transparent rounded-full"></span>
+								분석 중...
+							</span>
+						{:else}
+							AI 분석
+						{/if}
+					</button>
+				{/if}
 				{#if (selectedRequest.status === 'failed' || selectedRequest.status === 'completed') && $isAdmin}
-					<button onclick={() => handleRetry(selectedRequest.id)} class="btn btn-outline btn-sm">
+					<button onclick={() => selectedRequest && handleRetry(selectedRequest.id)} class="btn btn-outline btn-sm">
 						재시도
 					</button>
 				{/if}
