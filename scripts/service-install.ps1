@@ -25,13 +25,13 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 
 # Service configuration
-# Each service runs run.ps1 which starts API + Frontend + Workers (if Dev mode)
+# Each service runs service-run.ps1 which starts API (foreground) + Frontend + Workers (background)
 $services = @(
     @{
         Name = "MonitorPage"
         DisplayName = "Monitor Page (Production)"
         Description = "Monitor Page Production Server - API(8000) + Frontend(5173)"
-        Script = "$ScriptDir\run.ps1"
+        Script = "$ScriptDir\service-run.ps1"
         Args = ""
         LogDir = Join-Path $ProjectRoot "logs"
     }
@@ -42,7 +42,7 @@ if ($IncludeDev -and ($Action -eq "install" -or $Action -eq "uninstall")) {
         Name = "MonitorPage-Dev"
         DisplayName = "Monitor Page (Development)"
         Description = "Monitor Page Development Server - API(8001) + Frontend(5174) + Workers"
-        Script = "$ScriptDir\run.ps1"
+        Script = "$ScriptDir\service-run.ps1"
         Args = "-Dev"
         LogDir = Join-Path $ProjectRoot "logs\dev"
     }
@@ -55,7 +55,7 @@ if ($Dev -and ($Action -in @("start", "stop", "restart"))) {
             Name = "MonitorPage-Dev"
             DisplayName = "Monitor Page (Development)"
             Description = "Monitor Page Development Server - API(8001) + Frontend(5174) + Workers"
-            Script = "$ScriptDir\run.ps1"
+            Script = "$ScriptDir\service-run.ps1"
             Args = "-Dev"
             LogDir = Join-Path $ProjectRoot "logs\dev"
         }
@@ -259,25 +259,49 @@ function Open-ServiceLogs {
 
     Write-Host "[*] Opening log windows..." -ForegroundColor Cyan
 
-    $stdoutLog = Join-Path $svc.LogDir "service_$($svc.Name).log"
-    $stderrLog = Join-Path $svc.LogDir "service_$($svc.Name)_err.log"
+    # Primary log files
+    $serviceRunnerLog = Join-Path $svc.LogDir "service_runner.log"
+    $nssmStdoutLog = Join-Path $svc.LogDir "service_$($svc.Name).log"
+    $nssmStderrLog = Join-Path $svc.LogDir "service_$($svc.Name)_err.log"
 
     # Check if Windows Terminal is available
     $wtPath = Get-Command wt -ErrorAction SilentlyContinue
 
-    if ($wtPath) {
-        # Windows Terminal - open split panes
-        Write-Host "    Using Windows Terminal (split view)" -ForegroundColor Gray
+    # Helper function to create a log tail command that waits for file to exist
+    function Get-TailCommand {
+        param([string]$LogFile, [string]$Label, [string]$Color)
+        @"
+Write-Host '$Label' -ForegroundColor $Color
+Write-Host 'Log file: $LogFile' -ForegroundColor Gray
+if (-not (Test-Path '$LogFile')) {
+    Write-Host 'Waiting for log file to be created...' -ForegroundColor Yellow
+    while (-not (Test-Path '$LogFile')) { Start-Sleep -Seconds 1 }
+}
+Get-Content '$LogFile' -Wait -Tail 100 -Encoding UTF8
+"@
+    }
 
-        # Build command for split panes
-        # Left: stdout, Right: stderr
+    if ($wtPath) {
+        # Windows Terminal - open multiple tabs
+        Write-Host "    Using Windows Terminal" -ForegroundColor Gray
+
+        # Build command for tabs: Service Runner Log + NSSM stdout + NSSM stderr
+        $serviceRunnerCmd = Get-TailCommand $serviceRunnerLog "Service Runner Log" "Cyan"
+        $stdoutCmd = Get-TailCommand $nssmStdoutLog "NSSM STDOUT" "Green"
+        $stderrCmd = Get-TailCommand $nssmStderrLog "NSSM STDERR" "Red"
+
         $wtArgs = @(
             "new-tab",
-            "--title", "Service Logs: $($svc.Name)",
-            "powershell", "-NoExit", "-Command", "Write-Host 'STDOUT Log' -ForegroundColor Cyan; Get-Content '$stdoutLog' -Wait -Tail 50 -Encoding UTF8",
+            "--title", "[$($svc.Name)] Service Runner",
+            "powershell", "-NoExit", "-Command", $serviceRunnerCmd,
             ";",
-            "split-pane", "-H",
-            "powershell", "-NoExit", "-Command", "Write-Host 'STDERR Log' -ForegroundColor Red; Get-Content '$stderrLog' -Wait -Tail 50 -Encoding UTF8"
+            "new-tab",
+            "--title", "[$($svc.Name)] STDOUT",
+            "powershell", "-NoExit", "-Command", $stdoutCmd,
+            ";",
+            "new-tab",
+            "--title", "[$($svc.Name)] STDERR",
+            "powershell", "-NoExit", "-Command", $stderrCmd
         )
 
         Start-Process wt -ArgumentList $wtArgs
@@ -286,8 +310,8 @@ function Open-ServiceLogs {
         # Fallback to regular PowerShell window
         Write-Host "    Using PowerShell (Windows Terminal not available)" -ForegroundColor Gray
 
-        # Open just stdout log in new window
-        Start-Process powershell -ArgumentList "-NoExit", "-Command", "Write-Host 'Service Log: $($svc.Name)' -ForegroundColor Cyan; Get-Content '$stdoutLog' -Wait -Tail 50 -Encoding UTF8"
+        $serviceRunnerCmd = Get-TailCommand $serviceRunnerLog "Service Runner Log" "Cyan"
+        Start-Process powershell -ArgumentList "-NoExit", "-Command", $serviceRunnerCmd
     }
 
     Write-Host "[+] Log window opened" -ForegroundColor Green
