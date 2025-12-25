@@ -100,7 +100,7 @@ if ($Target -eq "list") {
 
     # API logs
     Write-Host "[API Server Logs]" -ForegroundColor Yellow
-    $apiLogs = Get-ChildItem (Join-Path $LogDir "api_*.log") -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+    $apiLogs = Get-ChildItem (Join-Path $LogDir "stdout_api_*.log") -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
     if ($apiLogs) {
         foreach ($log in $apiLogs) {
             $size = "{0:N2} KB" -f ($log.Length / 1KB)
@@ -115,7 +115,7 @@ if ($Target -eq "list") {
 
     # Worker logs
     Write-Host "[Worker Logs]" -ForegroundColor Yellow
-    $workerLogs = Get-ChildItem (Join-Path $LogDir "worker_*.log") -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+    $workerLogs = Get-ChildItem (Join-Path $LogDir "stdout_worker_*.log") -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
     if ($workerLogs) {
         foreach ($log in $workerLogs) {
             $size = "{0:N2} KB" -f ($log.Length / 1KB)
@@ -145,9 +145,9 @@ if ($Target -eq "list") {
     exit 0
 }
 
-# Get log files
-$apiLogFile = Get-LatestLogFile "api_"
-$workerLogFile = Get-LatestLogFile "worker_"
+# Get log files (stdout_* prefix is used by run.ps1)
+$apiLogFile = Get-LatestLogFile "stdout_api_"
+$workerLogFile = Get-LatestLogFile "stdout_worker_"
 $frontendLogFile = Get-LatestLogFile "frontend_"
 
 # Check if log files are stale (created more than 1 hour before the latest API log)

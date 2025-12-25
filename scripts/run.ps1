@@ -156,21 +156,21 @@ try {
         # Using Name sort instead of LastWriteTime because old log files may be updated when processes stop
         $LogDir = Join-Path $ProjectRoot "logs\dev"
 
-        $apiLog = Get-ChildItem -Path $LogDir -Filter "api_*.log" -ErrorAction SilentlyContinue |
+        $apiLog = Get-ChildItem -Path $LogDir -Filter "stdout_api_*.log" -ErrorAction SilentlyContinue |
             Sort-Object Name -Descending | Select-Object -First 1
 
         # Worker log may be created by watchdog with delay, so we track the latest one dynamically
-        $workerLog = Get-ChildItem -Path $LogDir -Filter "worker_*.log" -ErrorAction SilentlyContinue |
+        $workerLog = Get-ChildItem -Path $LogDir -Filter "stdout_worker_*.log" -ErrorAction SilentlyContinue |
             Sort-Object Name -Descending | Select-Object -First 1
         $workerLogName = if ($workerLog) { $workerLog.Name } else { $null }
 
         # Instagram worker log
-        $igWorkerLog = Get-ChildItem -Path $LogDir -Filter "instagram_worker_*.log" -ErrorAction SilentlyContinue |
+        $igWorkerLog = Get-ChildItem -Path $LogDir -Filter "stdout_instagram_*.log" -ErrorAction SilentlyContinue |
             Sort-Object Name -Descending | Select-Object -First 1
         $igWorkerLogName = if ($igWorkerLog) { $igWorkerLog.Name } else { $null }
 
         # Claude worker log (LLM worker)
-        $claudeWorkerLog = Get-ChildItem -Path $LogDir -Filter "llm_worker_*.log" -ErrorAction SilentlyContinue |
+        $claudeWorkerLog = Get-ChildItem -Path $LogDir -Filter "stdout_llm_worker_*.log" -ErrorAction SilentlyContinue |
             Sort-Object Name -Descending | Select-Object -First 1
         $claudeWorkerLogName = if ($claudeWorkerLog) { $claudeWorkerLog.Name } else { $null }
 
@@ -313,7 +313,7 @@ try {
                 }
 
                 # Tail Worker log (check for new log file from watchdog restart)
-                $latestWorkerLog = Get-ChildItem -Path $LogDir -Filter "worker_*.log" -ErrorAction SilentlyContinue |
+                $latestWorkerLog = Get-ChildItem -Path $LogDir -Filter "stdout_worker_*.log" -ErrorAction SilentlyContinue |
                     Sort-Object Name -Descending | Select-Object -First 1
                 if ($latestWorkerLog -and $latestWorkerLog.Name -ne $workerLogName) {
                     # New worker log file detected (worker restarted by watchdog)
@@ -354,7 +354,7 @@ try {
                 }
 
                 # Tail Instagram Worker log (check for new log file from watchdog restart)
-                $latestIgWorkerLog = Get-ChildItem -Path $LogDir -Filter "instagram_worker_*.log" -ErrorAction SilentlyContinue |
+                $latestIgWorkerLog = Get-ChildItem -Path $LogDir -Filter "stdout_instagram_*.log" -ErrorAction SilentlyContinue |
                     Sort-Object Name -Descending | Select-Object -First 1
                 if ($latestIgWorkerLog -and $latestIgWorkerLog.Name -ne $igWorkerLogName) {
                     Write-Host "[IG-WORKER] === New worker log: $($latestIgWorkerLog.Name) ===" -ForegroundColor Yellow
@@ -394,7 +394,7 @@ try {
                 }
 
                 # Tail Claude Worker log (check for new log file from watchdog restart)
-                $latestClaudeWorkerLog = Get-ChildItem -Path $LogDir -Filter "llm_worker_*.log" -ErrorAction SilentlyContinue |
+                $latestClaudeWorkerLog = Get-ChildItem -Path $LogDir -Filter "stdout_llm_worker_*.log" -ErrorAction SilentlyContinue |
                     Sort-Object Name -Descending | Select-Object -First 1
                 if ($latestClaudeWorkerLog -and $latestClaudeWorkerLog.Name -ne $claudeWorkerLogName) {
                     Write-Host "[CLAUDE] === New worker log: $($latestClaudeWorkerLog.Name) ===" -ForegroundColor Yellow

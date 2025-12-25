@@ -335,11 +335,14 @@ class InstagramWorker:
         finally:
             db.close()
 
-    async def _get_page_for_account(self, account_id: int):
+    async def _get_page_for_account(self, account_id: int = None):
         """계정별 브라우저 페이지 가져오기.
 
         ContextManager를 사용하여 계정별 프로필로 브라우저를 생성합니다.
         이렇게 하면 메인 워커와 프로필 충돌이 발생하지 않습니다.
+
+        Args:
+            account_id: 계정 ID (None이면 기본 계정 사용)
         """
         if self.context_manager is None:
             logger.info("ContextManager 초기화")
@@ -594,8 +597,9 @@ class InstagramWorker:
             self._update_worker_state("universal_crawl")
 
             # 브라우저 페이지 가져오기
-            # account_id가 있으면 해당 프로필 사용, 없으면 기본 프로필(account_id=0)
-            account_id = request.account_id or 0
+            # account_id가 있으면 해당 프로필 사용, 없으면 기본 계정 사용
+            # None을 전달하면 context_manager가 기본 계정을 자동 선택
+            account_id = request.account_id if request.account_id else None
             page = await self._get_page_for_account(account_id)
 
             # ExtractorFactory로 적절한 추출기 선택

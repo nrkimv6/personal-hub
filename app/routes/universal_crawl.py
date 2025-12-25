@@ -20,7 +20,7 @@ from app.schemas.universal_crawl import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/crawl", tags=["universal-crawl"])
+router = APIRouter(prefix="/api/v1/crawl", tags=["universal-crawl"])
 
 
 @router.post("/url", response_model=CrawlUrlResponse)
