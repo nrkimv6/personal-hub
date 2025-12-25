@@ -11,9 +11,18 @@ param(
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
-$LogDir = Join-Path $ProjectRoot "logs"
+
+# Use APP_MODE environment variable to determine log directory
+$isDev = $env:APP_MODE -eq "development"
+if ($isDev) {
+    $LogDir = Join-Path $ProjectRoot "logs\dev"
+    $PidSuffix = "_dev"
+} else {
+    $LogDir = Join-Path $ProjectRoot "logs"
+    $PidSuffix = ""
+}
 $PidDir = Join-Path $ProjectRoot ".pids"
-$WorkerPidFile = Join-Path $PidDir "claude_worker.pid"
+$WorkerPidFile = Join-Path $PidDir "claude_worker$PidSuffix.pid"
 
 # Ensure directories exist
 if (-not (Test-Path $LogDir)) {
