@@ -6,8 +6,8 @@
 	 */
 	import { onMount } from 'svelte';
 	import { page as pageStore } from '$app/stores';
-	import { eventApi, popupApi, instagramApi, instagramTagApi } from '$lib/api';
-	import type { Event, EventCreate, EventUpdate, InstagramPost, Popup, InstagramTag } from '$lib/types';
+	import { eventApi, popupApi, uncategorizedApi, instagramApi, instagramTagApi } from '$lib/api';
+	import type { Event, EventCreate, EventUpdate, InstagramPost, Popup, UncategorizedPost, InstagramTag } from '$lib/types';
 	import { isAdmin, isLoggedIn } from '$lib/stores/auth';
 	import { localParticipation } from '$lib/stores/localParticipation';
 
@@ -34,8 +34,11 @@
 	let error: string | null = $state(null);
 
 	// 탭 모드
-	type TabMode = 'event' | 'popup';
+	type TabMode = 'event' | 'popup' | 'uncategorized';
 	let activeTab: TabMode = $state('event');
+
+	// 미분류 목록
+	let uncategorizedPosts: UncategorizedPost[] = $state([]);
 
 	// 필터
 	let filterEventStatus: string | null = $state('ongoing');
@@ -93,6 +96,8 @@
 			filterEventStatus = 'ongoing';
 		} else if (tab === 'popup') {
 			filterEventStatus = 'ongoing_or_upcoming';
+		} else if (tab === 'uncategorized') {
+			filterEventStatus = null;
 		}
 		fetchEvents();
 	}
@@ -164,6 +169,22 @@
 				const response = await popupApi.list(params);
 				popups = response.items;
 				events = [];
+				uncategorizedPosts = [];
+				total = response.total;
+				error = null;
+			} else if (activeTab === 'uncategorized') {
+				const params: Record<string, unknown> = {
+					page: currentPage,
+					page_size: pageSize,
+					sort_by: sortBy === 'event_end' ? 'created_at' : sortBy,
+					sort_order: sortOrder,
+					include_reclassified: false
+				};
+
+				const response = await uncategorizedApi.list(params);
+				uncategorizedPosts = response.items;
+				events = [];
+				popups = [];
 				total = response.total;
 				error = null;
 			} else {
@@ -184,6 +205,7 @@
 				const response = await eventApi.list(params);
 				events = response.items;
 				popups = [];
+				uncategorizedPosts = [];
 				total = response.total;
 				error = null;
 			}
@@ -424,6 +446,21 @@
 	}
 
 	// =========================================================
+	// 미분류 재분류
+	// =========================================================
+
+	async function handleReclassify(post: UncategorizedPost, target: 'event' | 'popup') {
+		try {
+			await uncategorizedApi.reclassify(post.id, { target, title: post.title || undefined });
+			alert(`${target === 'event' ? '이벤트' : '팝업'}로 재분류되었습니다.`);
+			await fetchEvents();
+		} catch (e) {
+			console.error('재분류 실패:', e);
+			alert('재분류 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		}
+	}
+
+	// =========================================================
 	// 페이지네이션
 	// =========================================================
 
@@ -567,6 +604,14 @@
 			>
 				팝업
 			</button>
+			<button
+				onclick={() => switchTab('uncategorized')}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'uncategorized'
+					? 'border-gray-600 text-gray-600'
+					: 'border-transparent text-gray-500 hover:text-gray-700'}"
+			>
+				미분류
+			</button>
 		</nav>
 	</div>
 
@@ -593,21 +638,71 @@
 		<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
 			{error}
 		</div>
-	{:else if (activeTab === 'popup' ? popups.length : events.length) === 0}
+	{:else if (activeTab === 'popup' ? popups.length : activeTab === 'uncategorized' ? uncategorizedPosts.length : events.length) === 0}
 		<div class="text-center py-12 text-gray-500">
 			<p class="text-lg">
-				{activeTab === 'popup' ? '등록된 팝업이 없습니다' : '등록된 이벤트가 없습니다'}
+				{activeTab === 'popup' ? '등록된 팝업이 없습니다' : activeTab === 'uncategorized' ? '미분류 항목이 없습니다' : '등록된 이벤트가 없습니다'}
 			</p>
 			<p class="text-sm mt-2">
 				{activeTab === 'popup'
 					? '새 팝업을 등록하면 여기에 표시됩니다'
-					: '새 이벤트를 등록하면 여기에 표시됩니다'}
+					: activeTab === 'uncategorized'
+						? 'Instagram 크롤링에서 분류되지 않은 항목이 여기에 표시됩니다'
+						: '새 이벤트를 등록하면 여기에 표시됩니다'}
 			</p>
-			{#if $isAdmin}
+			{#if $isAdmin && activeTab !== 'uncategorized'}
 				<button onclick={openCreateModal} class="mt-4 btn btn-primary btn-sm">
 					+ {activeTab === 'popup' ? '새 팝업 등록' : '새 이벤트 등록'}
 				</button>
 			{/if}
+		</div>
+	{:else if activeTab === 'uncategorized'}
+		<!-- 미분류 목록 -->
+		<div class="space-y-3">
+			{#each uncategorizedPosts as post}
+				<div
+					class="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
+					onclick={() => post.source_instagram_url && window.open(post.source_instagram_url, '_blank')}
+				>
+					<div class="flex items-start gap-4">
+						<div class="flex-1 min-w-0">
+							<div class="flex items-center gap-2 mb-1">
+								<span class="px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-600">
+									{post.original_tag || '미분류'}
+								</span>
+								{#if post.source_instagram_account}
+									<span class="text-xs text-gray-500">@{post.source_instagram_account}</span>
+								{/if}
+							</div>
+							<h3 class="font-medium text-gray-900 truncate">
+								{post.title || '제목 없음'}
+							</h3>
+							{#if post.summary}
+								<p class="text-sm text-gray-600 mt-1 line-clamp-2">{post.summary}</p>
+							{/if}
+							{#if post.organizer}
+								<p class="text-xs text-gray-500 mt-1">{post.organizer}</p>
+							{/if}
+						</div>
+						{#if $isAdmin}
+							<div class="flex gap-2" onclick={(e) => e.stopPropagation()}>
+								<button
+									onclick={() => handleReclassify(post, 'event')}
+									class="px-2 py-1 text-xs bg-purple-100 text-purple-700 rounded hover:bg-purple-200"
+								>
+									이벤트로
+								</button>
+								<button
+									onclick={() => handleReclassify(post, 'popup')}
+									class="px-2 py-1 text-xs bg-pink-100 text-pink-700 rounded hover:bg-pink-200"
+								>
+									팝업으로
+								</button>
+							</div>
+						{/if}
+					</div>
+				</div>
+			{/each}
 		</div>
 	{:else if activeTab === 'popup'}
 		<!-- 팝업 목록 -->
@@ -646,7 +741,7 @@
 	{/if}
 
 	<!-- 페이지네이션 -->
-	{#if !loading && !error && (activeTab === 'popup' ? popups.length : events.length) > 0}
+	{#if !loading && !error && (activeTab === 'popup' ? popups.length : activeTab === 'uncategorized' ? uncategorizedPosts.length : events.length) > 0}
 		<div class="flex flex-col sm:flex-row justify-between items-center gap-3 mt-6">
 			<span class="text-sm text-gray-500">
 				전체 {total}개 중 {(currentPage - 1) * pageSize + 1} - {Math.min(
