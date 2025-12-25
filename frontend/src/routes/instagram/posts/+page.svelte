@@ -5,7 +5,23 @@
 	import { instagramApi, instagramTagApi, accountApi } from '$lib/api';
 	import type { InstagramPost, InstagramTag, Account, LLMRequest } from '$lib/types';
 	import FeedCard from '$lib/components/instagram/FeedCard.svelte';
+	import InstagramCrawlSettings from '$lib/components/InstagramCrawlSettings.svelte';
+	import InstagramCrawlHistory from '$lib/components/InstagramCrawlHistory.svelte';
 	import { isAdmin } from '$lib/stores/auth';
+
+	// 페이지 탭 상태
+	type PageTab = 'posts' | 'settings' | 'history';
+	let pageTab: PageTab = 'posts';
+
+	// URL 파라미터에서 탭 초기화
+	$: {
+		const tab = $pageStore.url.searchParams.get('tab');
+		if (tab === 'settings' || tab === 'history') {
+			pageTab = tab;
+		} else {
+			pageTab = 'posts';
+		}
+	}
 
 	let posts: InstagramPost[] = [];
 	let total = 0;
@@ -737,27 +753,37 @@
 		</div>
 	</div>
 
-	<!-- 탭: 게시물 / 이벤트(링크) / 팝업(링크) -->
+	<!-- 탭 네비게이션: 게시물 / 수집설정 / 수집이력 -->
 	<div class="mb-4 border-b border-gray-200">
 		<nav class="flex gap-4">
-			<span class="pb-2 px-1 text-sm font-medium border-b-2 border-blue-600 text-blue-600">
+			<button
+				onclick={() => pageTab = 'posts'}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {pageTab === 'posts'
+					? 'border-blue-600 text-blue-600'
+					: 'border-transparent text-gray-500 hover:text-gray-700'}"
+			>
 				게시물
-			</span>
-			<a
-				href="/events"
-				class="pb-2 px-1 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700"
+			</button>
+			<button
+				onclick={() => pageTab = 'settings'}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {pageTab === 'settings'
+					? 'border-blue-600 text-blue-600'
+					: 'border-transparent text-gray-500 hover:text-gray-700'}"
 			>
-				이벤트 →
-			</a>
-			<a
-				href="/popups"
-				class="pb-2 px-1 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700"
+				수집 설정
+			</button>
+			<button
+				onclick={() => pageTab = 'history'}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {pageTab === 'history'
+					? 'border-blue-600 text-blue-600'
+					: 'border-transparent text-gray-500 hover:text-gray-700'}"
 			>
-				팝업 →
-			</a>
+				수집 이력
+			</button>
 		</nav>
 	</div>
 
+	{#if pageTab === 'posts'}
 	<!-- 모바일 필터 패널 (접이식) -->
 	<div
 		class="md:hidden mb-4 bg-white rounded-lg border border-gray-200 overflow-hidden transition-all duration-300"
@@ -1241,6 +1267,15 @@
 				</button>
 			</div>
 		</div>
+	{/if}
+	{/if}
+
+	{#if pageTab === 'settings'}
+		<InstagramCrawlSettings />
+	{/if}
+
+	{#if pageTab === 'history'}
+		<InstagramCrawlHistory />
 	{/if}
 </div>
 
