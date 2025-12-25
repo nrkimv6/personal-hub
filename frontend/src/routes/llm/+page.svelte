@@ -58,11 +58,13 @@
 	let createError: string | null = null;
 	let createSuccess = false;
 
-	// 탭별 status 필터 (고정)
+	// 탭별 status 필터
 	function getStatusFilter(): string | undefined {
-		// 대기열: pending, processing만
-		// 이력: completed, failed, cancelled만
-		// API가 단일 status만 지원하므로, 여러 상태는 클라이언트에서 필터링
+		if (activeTab === 'queue') {
+			return 'pending,processing';
+		} else if (activeTab === 'history') {
+			return 'completed,failed,cancelled';
+		}
 		return undefined;
 	}
 
@@ -82,17 +84,10 @@
 				llmApi.getWorkerStatus()
 			]);
 
-			// 탭에 따라 필터링
-			let filteredItems = listRes.items;
-			if (activeTab === 'queue') {
-				filteredItems = listRes.items.filter(r => r.status === 'pending' || r.status === 'processing');
-			} else if (activeTab === 'history') {
-				filteredItems = listRes.items.filter(r => r.status === 'completed' || r.status === 'failed' || r.status === 'cancelled');
-			}
-
-			requests = filteredItems;
-			total = filteredItems.length;
-			pages = Math.ceil(total / pageSize) || 1;
+			// 서버에서 이미 status 필터링된 결과 사용
+			requests = listRes.items;
+			total = listRes.total;
+			pages = listRes.pages || 1;
 			stats = statsRes;
 			workerStatus = workerRes;
 		} catch (e) {

@@ -268,67 +268,74 @@ foreach ($pidFile in $PidFiles) {
 }
 
 # ============================================================
-# STEP 5: Playwright Browser Cleanup (Kill + Wait + Clean LOCK)
+# STEP 5: Playwright Browser Cleanup (Dev mode only)
+# Production mode doesn't use browsers (workers disabled)
 # ============================================================
 Write-Host ""
 Write-Host "[5] Cleaning up Playwright browsers" -ForegroundColor Cyan
 Write-Host "----------------------------------------"
 
-$browserProfilesPath = Join-Path $ProjectRoot "data\browser_profiles"
+# Only clean up browsers in Dev mode or when stopping All
+# Production mode doesn't run workers, so no browsers to clean
+if ($Dev -or $All) {
+    $browserProfilesPath = Join-Path $ProjectRoot "data\browser_profiles"
 
-# 5-1: Kill Playwright Chromium processes (identified by ms-playwright path)
-$playwrightKilled = 0
-$chromeProcs = Get-Process -Name "chrome" -ErrorAction SilentlyContinue
-foreach ($proc in $chromeProcs) {
-    try {
-        $procPath = $proc.Path
-        if ($procPath -and $procPath -like "*ms-playwright*") {
-            Write-Host "  [*] Killing Playwright browser (PID: $($proc.Id))" -ForegroundColor Yellow
-            Stop-Process -Id $proc.Id -Force -ErrorAction Stop
-            $playwrightKilled++
-        }
-    } catch {
-        # Ignore access denied errors
-    }
-}
-
-if ($playwrightKilled -gt 0) {
-    Write-Host "  [+] Killed $playwrightKilled Playwright browser process(es)" -ForegroundColor Green
-    # Wait for processes to fully terminate
-    Write-Host "  [*] Waiting for processes to terminate..." -ForegroundColor Gray
-    Start-Sleep -Milliseconds 1000
-} else {
-    Write-Host "  (no Playwright browser processes)" -ForegroundColor Gray
-}
-
-# 5-2: Clean up LOCK files in browser profiles
-if (Test-Path $browserProfilesPath) {
-    $lockFiles = Get-ChildItem -Path $browserProfilesPath -Filter "LOCK" -Recurse -ErrorAction SilentlyContinue
-    if ($lockFiles) {
-        $lockCount = 0
-        foreach ($lockFile in $lockFiles) {
-            try {
-                Remove-Item $lockFile.FullName -Force -ErrorAction Stop
-                $lockCount++
-            } catch {
-                Write-Host "  [-] Failed to delete: $($lockFile.FullName)" -ForegroundColor Red
+    # 5-1: Kill Playwright Chromium processes (identified by ms-playwright path)
+    $playwrightKilled = 0
+    $chromeProcs = Get-Process -Name "chrome" -ErrorAction SilentlyContinue
+    foreach ($proc in $chromeProcs) {
+        try {
+            $procPath = $proc.Path
+            if ($procPath -and $procPath -like "*ms-playwright*") {
+                Write-Host "  [*] Killing Playwright browser (PID: $($proc.Id))" -ForegroundColor Yellow
+                Stop-Process -Id $proc.Id -Force -ErrorAction Stop
+                $playwrightKilled++
             }
+        } catch {
+            # Ignore access denied errors
         }
-        if ($lockCount -gt 0) {
-            Write-Host "  [+] Deleted $lockCount LOCK file(s)" -ForegroundColor Green
-        }
-    } else {
-        Write-Host "  (no LOCK files found)" -ForegroundColor Gray
     }
 
-    # 5-3: Clean up Crashpad data (can cause issues on restart)
-    $crashpadDirs = Get-ChildItem -Path $browserProfilesPath -Directory -Filter "Crashpad" -Recurse -ErrorAction SilentlyContinue
-    foreach ($crashpad in $crashpadDirs) {
-        Remove-Item -Path "$($crashpad.FullName)\*" -Recurse -Force -ErrorAction SilentlyContinue
+    if ($playwrightKilled -gt 0) {
+        Write-Host "  [+] Killed $playwrightKilled Playwright browser process(es)" -ForegroundColor Green
+        # Wait for processes to fully terminate
+        Write-Host "  [*] Waiting for processes to terminate..." -ForegroundColor Gray
+        Start-Sleep -Milliseconds 1000
+    } else {
+        Write-Host "  (no Playwright browser processes)" -ForegroundColor Gray
     }
-    if ($crashpadDirs) {
-        Write-Host "  [+] Cleaned up Crashpad data" -ForegroundColor Green
+
+    # 5-2: Clean up LOCK files in browser profiles
+    if (Test-Path $browserProfilesPath) {
+        $lockFiles = Get-ChildItem -Path $browserProfilesPath -Filter "LOCK" -Recurse -ErrorAction SilentlyContinue
+        if ($lockFiles) {
+            $lockCount = 0
+            foreach ($lockFile in $lockFiles) {
+                try {
+                    Remove-Item $lockFile.FullName -Force -ErrorAction Stop
+                    $lockCount++
+                } catch {
+                    Write-Host "  [-] Failed to delete: $($lockFile.FullName)" -ForegroundColor Red
+                }
+            }
+            if ($lockCount -gt 0) {
+                Write-Host "  [+] Deleted $lockCount LOCK file(s)" -ForegroundColor Green
+            }
+        } else {
+            Write-Host "  (no LOCK files found)" -ForegroundColor Gray
+        }
+
+        # 5-3: Clean up Crashpad data (can cause issues on restart)
+        $crashpadDirs = Get-ChildItem -Path $browserProfilesPath -Directory -Filter "Crashpad" -Recurse -ErrorAction SilentlyContinue
+        foreach ($crashpad in $crashpadDirs) {
+            Remove-Item -Path "$($crashpad.FullName)\*" -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        if ($crashpadDirs) {
+            Write-Host "  [+] Cleaned up Crashpad data" -ForegroundColor Green
+        }
     }
+} else {
+    Write-Host "  (skipped - production mode doesn't use browsers)" -ForegroundColor Gray
 }
 
 # ============================================================

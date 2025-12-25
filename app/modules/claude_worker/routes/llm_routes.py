@@ -110,7 +110,7 @@ def _to_response(request) -> LLMRequestResponse:
 
 @router.get("/requests", response_model=LLMRequestListResponse)
 def list_requests(
-    status: Optional[str] = Query(None, description="상태 필터"),
+    status: Optional[str] = Query(None, description="상태 필터 (콤마로 구분하여 여러 상태 지정 가능, 예: completed,failed,cancelled)"),
     caller_type: Optional[str] = Query(None, description="호출자 타입 필터"),
     requested_by: Optional[str] = Query(None, description="요청자 필터"),
     include_deleted: bool = Query(False, description="삭제된 요청 포함"),
