@@ -11,6 +11,7 @@ from app.main import app
 from app.database import get_db
 from app.models.universal_crawl import UniversalCrawlRequest, CrawledPage
 from app.core.auth import create_access_token
+from app.services.universal_crawl_service import universal_crawl_service
 
 
 @pytest.fixture
@@ -201,3 +202,155 @@ class TestCrawlRequestRelationship:
         assert saved.crawled_page_id == sample_crawled_page.id
         assert saved.crawled_page is not None
         assert saved.crawled_page.title == "테스트 구글폼"
+
+
+class TestUniversalCrawlService:
+    """UniversalCrawlService 테스트"""
+
+    def test_is_instagram_url(self):
+        """Instagram URL 감지"""
+        assert universal_crawl_service.is_instagram_url("https://www.instagram.com/p/ABC123/")
+        assert universal_crawl_service.is_instagram_url("https://instagram.com/reel/XYZ789/")
+        assert not universal_crawl_service.is_instagram_url("https://forms.gle/test")
+        assert not universal_crawl_service.is_instagram_url("https://blog.naver.com/test")
+
+    def test_create_request_success(self, test_db_session):
+        """요청 생성 성공"""
+        import uuid
+        unique_id = uuid.uuid4().hex[:8]
+        url = f"https://forms.gle/test_{unique_id}"
+
+        request, message = universal_crawl_service.create_request(
+            db=test_db_session,
+            url=url,
+            auto_analyze=True,
+        )
+
+        assert request.id is not None
+        assert request.status == "pending"
+        assert request.url_type == "google_form"
+        assert "등록되었습니다" in message
+
+    def test_create_request_instagram_rejected(self, test_db_session):
+        """Instagram URL 거부"""
+        with pytest.raises(ValueError) as exc_info:
+            universal_crawl_service.create_request(
+                db=test_db_session,
+                url="https://www.instagram.com/p/ABC123/",
+            )
+        assert "Instagram" in str(exc_info.value)
+
+    def test_get_pending_requests(self, test_db_session):
+        """대기 중인 요청 조회"""
+        import uuid
+
+        # 여러 요청 생성
+        for i in range(3):
+            unique_id = uuid.uuid4().hex[:8]
+            universal_crawl_service.create_request(
+                db=test_db_session,
+                url=f"https://forms.gle/pending_{unique_id}",
+                priority=i,
+            )
+
+        pending = universal_crawl_service.get_pending_requests(test_db_session, limit=10)
+        assert len(pending) >= 3
+
+        # 우선순위 순 정렬 확인
+        priorities = [r.priority for r in pending[:3]]
+        assert priorities == sorted(priorities, reverse=True)
+
+    def test_update_request_status(self, test_db_session, sample_crawl_request):
+        """요청 상태 업데이트"""
+        request_id = sample_crawl_request.id
+
+        # pending -> processing
+        updated = universal_crawl_service.mark_processing(test_db_session, request_id)
+        assert updated.status == "processing"
+        assert updated.started_at is not None
+
+    def test_retry_request(self, test_db_session):
+        """실패한 요청 재시도"""
+        import uuid
+        unique_id = uuid.uuid4().hex[:8]
+
+        request, _ = universal_crawl_service.create_request(
+            db=test_db_session,
+            url=f"https://forms.gle/retry_{unique_id}",
+        )
+
+        # 실패 처리
+        universal_crawl_service.mark_failed(
+            test_db_session, request.id, "테스트 실패"
+        )
+
+        # 재시도
+        retried = universal_crawl_service.retry_request(test_db_session, request.id)
+        assert retried.status == "pending"
+        assert retried.error_message is None
+
+
+class TestUniversalCrawlAPI:
+    """Universal Crawl API 테스트"""
+
+    def test_create_crawl_request_api(self, client):
+        """POST /api/crawl/url - 요청 생성"""
+        import uuid
+        unique_id = uuid.uuid4().hex[:8]
+
+        response = client.post(
+            "/api/crawl/url",
+            json={
+                "url": f"https://docs.google.com/forms/d/e/{unique_id}",
+                "auto_analyze": True,
+            }
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["url_type"] == "google_form"
+        assert data["status"] == "pending"
+
+    def test_create_crawl_request_instagram_rejected(self, client):
+        """POST /api/crawl/url - Instagram URL 거부"""
+        response = client.post(
+            "/api/crawl/url",
+            json={"url": "https://www.instagram.com/p/ABC123/"}
+        )
+
+        assert response.status_code == 400
+        assert "Instagram" in response.json()["detail"]
+
+    def test_list_crawl_requests(self, client, sample_crawl_request):
+        """GET /api/crawl/requests - 목록 조회"""
+        response = client.get("/api/crawl/requests")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "items" in data
+        assert "total" in data
+
+    def test_get_crawl_request(self, client, sample_crawl_request):
+        """GET /api/crawl/requests/{id} - 상세 조회"""
+        response = client.get(f"/api/crawl/requests/{sample_crawl_request.id}")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == sample_crawl_request.id
+
+    def test_list_crawled_pages(self, client, sample_crawled_page):
+        """GET /api/crawl/pages - 목록 조회"""
+        response = client.get("/api/crawl/pages")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "items" in data
+
+    def test_get_crawled_page(self, client, sample_crawled_page):
+        """GET /api/crawl/pages/{id} - 상세 조회"""
+        response = client.get(f"/api/crawl/pages/{sample_crawled_page.id}")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == sample_crawled_page.id
