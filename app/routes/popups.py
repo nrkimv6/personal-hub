@@ -161,3 +161,11 @@ def import_from_instagram(
     if not popup:
         raise HTTPException(status_code=404, detail="Instagram post not found")
     return popup
+
+
+@router.get("/{popup_id}/instagram-source")
+def get_instagram_source(popup_id: int, db: Session = Depends(get_db)):
+    """
+    팝업의 Instagram 출처 정보를 조회합니다. (lazy loading용)
+    """
+    return popup_service.get_instagram_source(db, popup_id)

@@ -340,11 +340,13 @@
 								<span class="text-sm text-gray-700 break-all line-clamp-1">{req.url}</span>
 							</td>
 							<td class="py-3">
-								{@const result = getAnalysisResult(req)}
-								{#if result.text === '-'}
-									<span class="{result.badge}">{result.text}</span>
-								{:else}
-									<span class="px-2 py-1 text-xs rounded-full {result.badge}">{result.text}</span>
+								{#if true}
+									{@const result = getAnalysisResult(req)}
+									{#if result.text === '-'}
+										<span class="{result.badge}">{result.text}</span>
+									{:else}
+										<span class="px-2 py-1 text-xs rounded-full {result.badge}">{result.text}</span>
+									{/if}
 								{/if}
 							</td>
 							<td class="py-3 text-sm text-gray-600">{formatDate(req.requested_at)}</td>

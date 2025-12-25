@@ -315,6 +315,29 @@ class EventService:
             query = query.filter(Event.id != exclude_id)
         return query.first()
 
+    def get_instagram_source(self, db: Session, event_id: int) -> dict:
+        """이벤트의 Instagram 출처 정보 조회 (lazy loading용)"""
+        event = db.query(Event).filter(Event.id == event_id).first()
+        if not event:
+            return {"url": None, "account": None}
+
+        # 이미 저장된 값이 있으면 반환
+        if event.source_instagram_url:
+            return {
+                "url": event.source_instagram_url,
+                "account": event.source_instagram_account,
+            }
+
+        # InstagramPost에서 조회
+        if event.source_instagram_post_id:
+            post = db.query(InstagramPost).filter(
+                InstagramPost.id == event.source_instagram_post_id
+            ).first()
+            if post:
+                return {"url": post.url, "account": post.account}
+
+        return {"url": None, "account": None}
+
     def import_from_url(
         self, db: Session, data: EventImportFromUrl
     ) -> EventImportFromUrlResponse:
@@ -563,19 +586,6 @@ class EventService:
             "source_instagram_url": event.source_instagram_url,
             "source_instagram_account": event.source_instagram_account,
         }
-
-        # Instagram 출처 정보 추가 (이전 데이터 호환성)
-        if event.source_instagram_post_id and not response_data["source_instagram_url"]:
-            post = db.query(InstagramPost).filter(
-                InstagramPost.id == event.source_instagram_post_id
-            ).first()
-            if post:
-                response_data["source_instagram_url"] = post.url
-                response_data["source_instagram_account"] = post.account
-                # 썸네일도 가져오기 (없는 경우)
-                if not response_data["thumbnail_url"] and post.images:
-                    images = post.images or []
-                    response_data["thumbnail_url"] = images[0].get("src") if images else None
 
         return EventResponse(**response_data)
 

@@ -213,3 +213,11 @@ def check_duplicate_url(
     if not existing:
         return None
     return event_service._to_response(db, existing)
+
+
+@router.get("/{event_id}/instagram-source")
+def get_instagram_source(event_id: int, db: Session = Depends(get_db)):
+    """
+    이벤트의 Instagram 출처 정보를 조회합니다. (lazy loading용)
+    """
+    return event_service.get_instagram_source(db, event_id)

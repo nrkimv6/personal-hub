@@ -260,6 +260,27 @@ class PopupService:
 
         return self._to_response(popup)
 
+    def get_instagram_source(self, db: Session, popup_id: int) -> dict:
+        """팝업의 Instagram 출처 정보 조회 (lazy loading용)"""
+        popup = db.query(Popup).filter(Popup.id == popup_id).first()
+        if not popup:
+            return {"url": None, "account": None}
+
+        if popup.source_instagram_url:
+            return {
+                "url": popup.source_instagram_url,
+                "account": popup.source_instagram_account,
+            }
+
+        if popup.source_instagram_post_id:
+            post = db.query(InstagramPost).filter(
+                InstagramPost.id == popup.source_instagram_post_id
+            ).first()
+            if post:
+                return {"url": post.url, "account": post.account}
+
+        return {"url": None, "account": None}
+
     def _to_response(self, popup: Popup) -> PopupResponse:
         """Popup 모델을 PopupResponse로 변환"""
         return PopupResponse(
