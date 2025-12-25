@@ -215,6 +215,50 @@ def mark_instagram_failed(db, post_id: int, error_message: str) -> bool:
     return True
 
 
+def save_universal_crawl_result(db, page_id: int, llm_result: dict) -> bool:
+    """Universal Crawl 페이지에 LLM 분석 결과 저장.
+
+    Args:
+        db: DB 세션
+        page_id: CrawledPage ID
+        llm_result: LLM 분석 결과 dict
+
+    Returns:
+        성공 여부
+    """
+    from app.models.universal_crawl import CrawledPage
+    import json
+
+    try:
+        page = db.query(CrawledPage).filter(CrawledPage.id == page_id).first()
+        if not page:
+            logger.warning(f"CrawledPage not found: {page_id}")
+            return False
+
+        # 분석 결과 저장
+        is_event = llm_result.get("is_event", False)
+        page.is_event = is_event
+        page.analysis_result = json.dumps(llm_result, ensure_ascii=False)
+
+        db.commit()
+        logger.info(f"CrawledPage {page_id} LLM result saved: is_event={is_event}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to save universal crawl result: {e}", exc_info=True)
+        db.rollback()
+        return False
+
+
+def mark_universal_crawl_failed(db, page_id: int, error_message: str) -> bool:
+    """Universal Crawl 페이지 LLM 분석 실패 표시.
+
+    Note: LLM 요청 상태는 llm_requests 테이블에서 관리됨.
+    """
+    logger.warning(f"CrawledPage {page_id} LLM analysis failed: {error_message}")
+    return True
+
+
 class LLMWorker:
     """Claude LLM 워커."""
 
@@ -444,6 +488,8 @@ class LLMWorker:
                 # caller_type별 결과 저장
                 if request.caller_type == "instagram":
                     save_instagram_result(db, int(request.caller_id), result["result"])
+                elif request.caller_type == "universal_crawl":
+                    save_universal_crawl_result(db, int(request.caller_id), result["result"])
             else:
                 service.mark_failed(request.id, result["error"])
                 self._increment_error()
@@ -452,6 +498,8 @@ class LLMWorker:
                 # caller_type별 실패 표시
                 if request.caller_type == "instagram":
                     mark_instagram_failed(db, int(request.caller_id), result["error"])
+                elif request.caller_type == "universal_crawl":
+                    mark_universal_crawl_failed(db, int(request.caller_id), result["error"])
 
         except Exception as e:
             service.mark_failed(request.id, str(e))

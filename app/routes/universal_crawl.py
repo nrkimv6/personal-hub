@@ -2,6 +2,7 @@
 Universal Crawl API 라우트 - 범용 URL 크롤링 요청 관리
 """
 import logging
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.services.universal_crawl_service import universal_crawl_service
+from app.services.universal_crawl_analyzer import UniversalCrawlAnalyzerService
 from app.schemas.universal_crawl import (
     CrawlUrlRequest,
     CrawlUrlResponse,
@@ -16,6 +18,8 @@ from app.schemas.universal_crawl import (
     UniversalCrawlRequestList,
     CrawledPageResponse,
     CrawledPageList,
+    AnalyzePageResponse,
+    AnalysisStatusResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,16 +67,30 @@ async def create_crawl_request(
 @router.get("/requests", response_model=UniversalCrawlRequestList)
 async def list_crawl_requests(
     status: Optional[str] = Query(None, description="상태 필터 (pending/processing/completed/failed)"),
-    url_type: Optional[str] = Query(None, description="URL 타입 필터"),
+    url_type: Optional[str] = Query(None, description="URL 타입 필터 (google_form/naver_form/naver_blog/other)"),
+    analysis_status: Optional[str] = Query(None, description="분석 상태 필터 (event/uncategorized/unanalyzed)"),
+    url_search: Optional[str] = Query(None, description="URL 검색 (부분 일치)"),
+    content_search: Optional[str] = Query(None, description="본문 검색 (부분 일치)"),
+    date_from: Optional[date] = Query(None, description="요청일 시작 (YYYY-MM-DD)"),
+    date_to: Optional[date] = Query(None, description="요청일 종료 (YYYY-MM-DD)"),
+    sort_by: Optional[str] = Query("requested_at", description="정렬 컬럼 (requested_at/completed_at/url_type)"),
+    sort_order: Optional[str] = Query("desc", description="정렬 순서 (asc/desc)"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    """크롤링 요청 목록 조회"""
+    """크롤링 요청 목록 조회 (필터/정렬 지원)"""
     return universal_crawl_service.get_requests(
         db=db,
         status=status,
         url_type=url_type,
+        analysis_status=analysis_status,
+        url_search=url_search,
+        content_search=content_search,
+        date_from=date_from,
+        date_to=date_to,
+        sort_by=sort_by,
+        sort_order=sort_order,
         page=page,
         page_size=page_size,
     )
@@ -136,3 +154,73 @@ async def get_crawled_page(
         raise HTTPException(status_code=404, detail="페이지를 찾을 수 없습니다.")
 
     return CrawledPageResponse.model_validate(page)
+
+
+@router.post("/pages/{page_id}/analyze", response_model=AnalyzePageResponse)
+async def analyze_page(
+    page_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    크롤링된 페이지에 대해 AI 분석 요청
+
+    - 페이지가 존재해야 함
+    - 이미 pending/processing 상태인 요청이 있으면 기존 요청 정보 반환
+    - LLM Worker가 요청을 처리하며 결과는 crawled_pages.analysis_result에 저장됨
+    """
+    # 페이지 존재 확인
+    page = universal_crawl_service.get_crawled_page(db, page_id)
+    if not page:
+        raise HTTPException(status_code=404, detail="페이지를 찾을 수 없습니다.")
+
+    # AI 분석 요청 생성
+    analyzer = UniversalCrawlAnalyzerService(db)
+    request = analyzer.create_analysis_request(page_id, requested_by="api")
+
+    if not request:
+        raise HTTPException(status_code=500, detail="AI 분석 요청 생성에 실패했습니다.")
+
+    return AnalyzePageResponse(
+        success=True,
+        page_id=page_id,
+        request_id=request.id,
+        status=request.status,
+        message="AI 분석 요청이 등록되었습니다." if request.status == "pending" else "이미 분석 요청이 진행 중입니다.",
+    )
+
+
+@router.get("/pages/{page_id}/analysis", response_model=AnalysisStatusResponse)
+async def get_analysis_status(
+    page_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    페이지의 AI 분석 상태 조회
+
+    - 분석 요청이 없으면 status='not_requested' 반환
+    - 분석 완료 시 result에 분석 결과 포함
+    """
+    # 페이지 존재 확인
+    page = universal_crawl_service.get_crawled_page(db, page_id)
+    if not page:
+        raise HTTPException(status_code=404, detail="페이지를 찾을 수 없습니다.")
+
+    # AI 분석 결과 조회
+    analyzer = UniversalCrawlAnalyzerService(db)
+    result = analyzer.get_result(page_id)
+
+    if not result:
+        return AnalysisStatusResponse(
+            page_id=page_id,
+            status="not_requested",
+        )
+
+    return AnalysisStatusResponse(
+        page_id=page_id,
+        status=result["status"],
+        request_id=result["id"],
+        result=result["result"],
+        error_message=result["error_message"],
+        requested_at=result["requested_at"],
+        processed_at=result["processed_at"],
+    )

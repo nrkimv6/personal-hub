@@ -161,3 +161,28 @@ class CrawlUrlResponse(BaseModel):
     url_type: str
     status: CrawlStatus
     message: str
+
+
+class AnalyzePageRequest(BaseModel):
+    """페이지 AI 분석 요청 (선택적 바디)"""
+    pass  # 현재는 바디 없이 page_id만 사용
+
+
+class AnalyzePageResponse(BaseModel):
+    """페이지 AI 분석 응답"""
+    success: bool
+    page_id: int
+    request_id: int
+    status: str
+    message: str
+
+
+class AnalysisStatusResponse(BaseModel):
+    """AI 분석 상태 응답"""
+    page_id: int
+    status: str  # pending, processing, completed, failed, not_requested
+    request_id: Optional[int] = None
+    result: Optional[dict] = None
+    error_message: Optional[str] = None
+    requested_at: Optional[datetime] = None
+    processed_at: Optional[datetime] = None

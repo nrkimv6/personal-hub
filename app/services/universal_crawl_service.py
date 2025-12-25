@@ -5,10 +5,10 @@ import hashlib
 import json
 import logging
 from typing import List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, date
 
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import desc
+from sqlalchemy import desc, asc, or_, and_
 
 from app.models.universal_crawl import UniversalCrawlRequest, CrawledPage
 from app.schemas.universal_crawl import (
@@ -120,25 +120,89 @@ class UniversalCrawlService:
         db: Session,
         status: Optional[str] = None,
         url_type: Optional[str] = None,
+        analysis_status: Optional[str] = None,
+        url_search: Optional[str] = None,
+        content_search: Optional[str] = None,
+        date_from: Optional[date] = None,
+        date_to: Optional[date] = None,
+        sort_by: Optional[str] = "requested_at",
+        sort_order: Optional[str] = "desc",
         page: int = 1,
         page_size: int = 50,
     ) -> UniversalCrawlRequestList:
-        """요청 목록 조회"""
+        """요청 목록 조회 (필터/정렬 지원)
+
+        Args:
+            status: 상태 필터 (pending/processing/completed/failed)
+            url_type: URL 타입 필터
+            analysis_status: 분석 상태 (event/uncategorized/unanalyzed)
+            url_search: URL 검색 (부분 일치)
+            content_search: 본문 검색 (부분 일치)
+            date_from: 요청일 시작
+            date_to: 요청일 종료
+            sort_by: 정렬 컬럼
+            sort_order: 정렬 순서 (asc/desc)
+        """
         query = db.query(UniversalCrawlRequest).options(
             joinedload(UniversalCrawlRequest.crawled_page)
         )
 
+        # 기본 필터
         if status:
             query = query.filter(UniversalCrawlRequest.status == status)
         if url_type:
             query = query.filter(UniversalCrawlRequest.url_type == url_type)
 
+        # URL 검색
+        if url_search:
+            query = query.filter(UniversalCrawlRequest.url.ilike(f"%{url_search}%"))
+
+        # 날짜 범위 필터
+        if date_from:
+            query = query.filter(UniversalCrawlRequest.requested_at >= datetime.combine(date_from, datetime.min.time()))
+        if date_to:
+            query = query.filter(UniversalCrawlRequest.requested_at <= datetime.combine(date_to, datetime.max.time()))
+
+        # 본문 검색 (crawled_page 조인 필요)
+        if content_search:
+            query = query.join(CrawledPage, UniversalCrawlRequest.crawled_page_id == CrawledPage.id, isouter=True)
+            query = query.filter(
+                or_(
+                    CrawledPage.content.ilike(f"%{content_search}%"),
+                    CrawledPage.title.ilike(f"%{content_search}%"),
+                    CrawledPage.description.ilike(f"%{content_search}%"),
+                )
+            )
+
+        # 분석 상태 필터
+        if analysis_status:
+            if not content_search:
+                query = query.join(CrawledPage, UniversalCrawlRequest.crawled_page_id == CrawledPage.id, isouter=True)
+
+            if analysis_status == "event":
+                query = query.filter(CrawledPage.is_event == True)
+            elif analysis_status == "uncategorized":
+                query = query.filter(CrawledPage.is_event == False)
+            elif analysis_status == "unanalyzed":
+                query = query.filter(
+                    or_(
+                        CrawledPage.is_event.is_(None),
+                        UniversalCrawlRequest.crawled_page_id.is_(None),
+                    )
+                )
+
         total = query.count()
         total_pages = (total + page_size - 1) // page_size
 
+        # 정렬
+        sort_column = getattr(UniversalCrawlRequest, sort_by, UniversalCrawlRequest.requested_at)
+        if sort_order == "asc":
+            query = query.order_by(asc(sort_column))
+        else:
+            query = query.order_by(desc(sort_column))
+
         items = (
-            query.order_by(desc(UniversalCrawlRequest.requested_at))
-            .offset((page - 1) * page_size)
+            query.offset((page - 1) * page_size)
             .limit(page_size)
             .all()
         )
