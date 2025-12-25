@@ -347,6 +347,7 @@ class EventService:
         if existing:
             return EventImportFromUrlResponse(
                 success=False,
+                is_event=True,
                 page_type="unknown",
                 extraction_method="skipped",
                 error=f"동일 URL로 등록된 이벤트가 있습니다 (ID: {existing.id})",
@@ -364,6 +365,7 @@ class EventService:
         if not extracted.success:
             return EventImportFromUrlResponse(
                 success=False,
+                is_event=True,
                 page_type=extracted.page_type,
                 extraction_method=extracted.extraction_method,
                 error=extracted.error or "페이지 추출 실패",
@@ -379,6 +381,7 @@ class EventService:
         if not llm_result.get("success"):
             return EventImportFromUrlResponse(
                 success=False,
+                is_event=True,
                 page_type=extracted.page_type,
                 extraction_method=extracted.extraction_method,
                 raw_content=extracted.content[:1000] if extracted.content else None,
@@ -396,10 +399,24 @@ class EventService:
         if not parsed_event:
             return EventImportFromUrlResponse(
                 success=False,
+                is_event=True,
                 page_type=extracted.page_type,
                 extraction_method=extracted.extraction_method,
                 raw_content=extracted.content[:1000] if extracted.content else None,
                 error="LLM 응답에서 이벤트 정보를 추출할 수 없습니다",
+            )
+
+        # 비이벤트 처리: is_event=False인 경우
+        if not parsed_event.get("is_event", True):
+            not_event_reason = parsed_event.get("not_event_reason", "이벤트가 아닙니다")
+            return EventImportFromUrlResponse(
+                success=True,  # 추출 자체는 성공
+                is_event=False,
+                page_type=extracted.page_type,
+                extraction_method=extracted.extraction_method,
+                extracted_event=parsed_event,  # 비이벤트 정보도 포함 (title, summary 등)
+                raw_content=extracted.content[:1000] if extracted.content else None,
+                not_event_reason=not_event_reason,
             )
 
         # 날짜 문자열을 date 객체로 변환
@@ -422,6 +439,7 @@ class EventService:
                 logger.error(f"Event 생성 실패: {e}")
                 return EventImportFromUrlResponse(
                     success=True,  # 추출은 성공
+                    is_event=True,
                     page_type=extracted.page_type,
                     extraction_method=extracted.extraction_method,
                     extracted_event=parsed_event,
@@ -431,6 +449,7 @@ class EventService:
 
         return EventImportFromUrlResponse(
             success=True,
+            is_event=True,
             page_type=extracted.page_type,
             extraction_method=extracted.extraction_method,
             extracted_event=parsed_event,

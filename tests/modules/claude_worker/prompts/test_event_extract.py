@@ -116,6 +116,7 @@ class TestParseEventFromLlmResponse:
 
 ```json
 {
+    "is_event": true,
     "title": "크리스마스 이벤트",
     "event_type": "event",
     "event_start": "2024-12-01",
@@ -131,6 +132,7 @@ class TestParseEventFromLlmResponse:
         result = parse_event_from_llm_response(response)
 
         assert result is not None
+        assert result["is_event"] is True
         assert result["title"] == "크리스마스 이벤트"
         assert result["event_type"] == "event"
         assert result["event_start"] == "2024-12-01"
@@ -156,6 +158,7 @@ class TestParseEventFromLlmResponse:
         """Right: 기본값 설정."""
         response = """```json
 {
+    "is_event": true,
     "title": "간단한 이벤트"
 }
 ```"""
@@ -163,14 +166,80 @@ class TestParseEventFromLlmResponse:
         result = parse_event_from_llm_response(response)
 
         assert result is not None
+        assert result["is_event"] is True
         assert result["event_type"] == "event"  # 기본값
         assert result["prizes"] == []  # 기본값
         assert result["purchase_required"] == "no"  # 기본값
 
-    def test_returns_none_for_missing_title(self):
-        """Boundary: title이 없으면 None 반환."""
+    def test_is_event_false(self):
+        """Right: is_event=false인 경우 비이벤트 정보 반환."""
         response = """```json
 {
+    "is_event": false,
+    "title": "일반 회사 소개 페이지",
+    "summary": "회사 정보를 소개하는 페이지입니다.",
+    "not_event_reason": "이벤트/행사/프로모션 정보가 없는 회사 소개 페이지입니다."
+}
+```"""
+
+        result = parse_event_from_llm_response(response)
+
+        assert result is not None
+        assert result["is_event"] is False
+        assert result["title"] == "일반 회사 소개 페이지"
+        assert result["not_event_reason"] == "이벤트/행사/프로모션 정보가 없는 회사 소개 페이지입니다."
+        assert result["event_type"] == "other"  # 비이벤트는 other
+        assert result["prizes"] == []
+
+    def test_is_event_false_without_title(self):
+        """Right: is_event=false이면 title 없어도 반환."""
+        response = """```json
+{
+    "is_event": false,
+    "not_event_reason": "404 오류 페이지입니다."
+}
+```"""
+
+        result = parse_event_from_llm_response(response)
+
+        assert result is not None
+        assert result["is_event"] is False
+        assert result["title"] == ""  # 기본값 빈 문자열
+        assert result["not_event_reason"] == "404 오류 페이지입니다."
+
+    def test_is_event_string_true(self):
+        """Boundary: is_event가 문자열 'true'인 경우."""
+        response = """```json
+{
+    "is_event": "true",
+    "title": "이벤트 테스트"
+}
+```"""
+
+        result = parse_event_from_llm_response(response)
+
+        assert result is not None
+        assert result["is_event"] is True
+
+    def test_is_event_string_false(self):
+        """Boundary: is_event가 문자열 'false'인 경우."""
+        response = """```json
+{
+    "is_event": "false",
+    "not_event_reason": "이벤트가 아닙니다."
+}
+```"""
+
+        result = parse_event_from_llm_response(response)
+
+        assert result is not None
+        assert result["is_event"] is False
+
+    def test_returns_none_for_missing_title_when_is_event_true(self):
+        """Boundary: is_event=true인데 title이 없으면 None 반환."""
+        response = """```json
+{
+    "is_event": true,
     "event_type": "event",
     "prizes": ["상품"]
 }
@@ -178,7 +247,22 @@ class TestParseEventFromLlmResponse:
 
         result = parse_event_from_llm_response(response)
 
-        assert result is None  # title 필수
+        assert result is None  # is_event=true이면 title 필수
+
+    def test_backward_compatibility_no_is_event_field(self):
+        """Backward: is_event 필드가 없으면 기본값 True."""
+        response = """```json
+{
+    "title": "기존 방식 이벤트",
+    "event_type": "event"
+}
+```"""
+
+        result = parse_event_from_llm_response(response)
+
+        assert result is not None
+        assert result["is_event"] is True  # 기본값
+        assert result["title"] == "기존 방식 이벤트"
 
     def test_returns_none_for_invalid_json(self):
         """Boundary: 잘못된 JSON이면 None 반환."""
@@ -212,6 +296,7 @@ class TestEventJsonSchema:
 
     def test_contains_required_fields(self):
         """Right: 필수 필드 포함 확인."""
+        assert "is_event" in EVENT_JSON_SCHEMA
         assert "title" in EVENT_JSON_SCHEMA
         assert "event_type" in EVENT_JSON_SCHEMA
         assert "event_start" in EVENT_JSON_SCHEMA
@@ -224,3 +309,4 @@ class TestEventJsonSchema:
         assert "winner_count" in EVENT_JSON_SCHEMA
         assert "purchase_required" in EVENT_JSON_SCHEMA
         assert "location_venue" in EVENT_JSON_SCHEMA
+        assert "not_event_reason" in EVENT_JSON_SCHEMA

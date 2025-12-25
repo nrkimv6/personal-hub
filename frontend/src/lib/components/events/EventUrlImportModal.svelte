@@ -190,8 +190,65 @@
 						</div>
 					{/if}
 
-					<!-- 추출 결과 -->
-					{#if result?.success && result.extracted_event}
+					<!-- 추출 결과: 이벤트가 아닌 경우 -->
+					{#if result?.success && !result.is_event}
+						<div class="p-4 bg-yellow-50 border border-yellow-200 rounded-lg space-y-3">
+							<!-- 추출 정보 -->
+							<div class="flex items-center gap-2 text-sm">
+								<span class="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full text-xs">
+									이벤트 아님
+								</span>
+								<span class="px-2 py-0.5 bg-gray-100 text-gray-700 rounded-full text-xs">
+									{pageTypeLabels[result.page_type] || result.page_type}
+								</span>
+							</div>
+
+							<!-- 분석 결과 -->
+							<div class="space-y-2 text-sm">
+								{#if result.extracted_event?.title}
+									<div>
+										<span class="font-medium text-gray-700">페이지 제목:</span>
+										<span class="ml-2 text-gray-900">{result.extracted_event.title}</span>
+									</div>
+								{/if}
+
+								<div>
+									<span class="font-medium text-gray-700">분석 결과:</span>
+									<p class="mt-1 text-yellow-700 text-sm bg-white p-2 rounded border border-yellow-200">
+										{result.not_event_reason || '이 페이지는 이벤트/행사/프로모션 페이지가 아닙니다.'}
+									</p>
+								</div>
+
+								{#if result.extracted_event?.summary}
+									<div>
+										<span class="font-medium text-gray-700">요약:</span>
+										<p class="mt-1 text-gray-600 text-xs bg-white p-2 rounded border">
+											{result.extracted_event.summary}
+										</p>
+									</div>
+								{/if}
+							</div>
+
+							<!-- 액션 버튼 -->
+							<div class="flex justify-end gap-2 pt-2 border-t border-yellow-200">
+								<button
+									onclick={handleClose}
+									class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800"
+								>
+									닫기
+								</button>
+								<button
+									onclick={handleUseExtractedData}
+									class="px-4 py-1.5 text-sm bg-yellow-600 text-white rounded-lg hover:bg-yellow-700"
+								>
+									그래도 이벤트로 등록
+								</button>
+							</div>
+						</div>
+					{/if}
+
+					<!-- 추출 결과: 이벤트인 경우 -->
+					{#if result?.success && result.is_event && result.extracted_event}
 						<div class="p-4 bg-green-50 border border-green-200 rounded-lg space-y-3">
 							<!-- 추출 정보 -->
 							<div class="flex items-center gap-2 text-sm">
