@@ -392,45 +392,32 @@ class InstagramWorker:
         AsyncLoggerManager.shutdown()
 
     async def _main_loop(self):
-        """메인 루프."""
-        logger.info(f"메인 루프 시작 (체크 간격: {self.check_interval}초)")
+        """메인 루프 (비블로킹 방식).
+
+        크롤링 요청을 백그라운드 태스크로 디스패치하여
+        피드 크롤링 중에도 단일 포스트 재시도가 가능합니다.
+        """
+        logger.info(f"메인 루프 시작 (비블로킹 모드, 체크 간격: 1초)")
 
         while not self.shutdown_event.is_set():
             try:
                 # Heartbeat 업데이트
                 self._update_heartbeat()
 
-                # 1. Instagram Pending 요청 처리
-                await self._process_pending_requests()
+                # 완료된 태스크 정리
+                self._cleanup_completed_tasks()
 
-                # 2. Universal Pending 요청 처리
+                # 1. Instagram Pending 요청 디스패치 (백그라운드)
+                await self._dispatch_pending_requests()
+
+                # 2. Universal Pending 요청 처리 (기존 방식 유지 - 간단한 작업)
                 await self._process_universal_requests()
 
-                # 3. 스케줄 기반 실행 (Instagram)
-                await self._check_scheduled_runs()
+                # 3. 스케줄 기반 실행 디스패치 (백그라운드)
+                await self._dispatch_scheduled_runs()
 
-                # 4. 대기 (continue_event 또는 shutdown_event 발생 시 즉시 깨어남)
-                self.continue_event.clear()
-                shutdown_task = asyncio.create_task(self.shutdown_event.wait())
-                continue_task = asyncio.create_task(self.continue_event.wait())
-                try:
-                    done, pending = await asyncio.wait(
-                        [shutdown_task, continue_task],
-                        timeout=self.check_interval,
-                        return_when=asyncio.FIRST_COMPLETED
-                    )
-                    # 완료되지 않은 태스크 취소
-                    for task in pending:
-                        task.cancel()
-                        try:
-                            await task
-                        except asyncio.CancelledError:
-                            pass
-
-                    if continue_task in done:
-                        logger.debug("continue_event로 즉시 깨어남 - 다음 요청 처리")
-                except asyncio.TimeoutError:
-                    pass  # 타임아웃 = 계속 실행
+                # 4. 짧은 대기 (새 요청 빠르게 체크)
+                await asyncio.sleep(1)
 
             except asyncio.CancelledError:
                 logger.info("메인 루프 취소됨")
@@ -439,24 +426,62 @@ class InstagramWorker:
                 logger.error(f"메인 루프 오류: {e}", exc_info=True)
                 await asyncio.sleep(5)
 
-    async def _process_pending_requests(self):
-        """Pending 요청 처리."""
+    def _cleanup_completed_tasks(self):
+        """완료된 백그라운드 태스크 정리."""
+        completed = {t for t in self._running_tasks if t.done()}
+        for task in completed:
+            try:
+                exc = task.exception()
+                if exc:
+                    logger.error(f"태스크 예외: {task.get_name()} - {exc}")
+            except asyncio.CancelledError:
+                pass
+            except asyncio.InvalidStateError:
+                pass
+        self._running_tasks -= completed
+
+    def _is_request_running(self, request_id: int) -> bool:
+        """요청이 이미 실행 중인지 확인."""
+        for task in self._running_tasks:
+            if task.get_name() == f"crawl_{request_id}":
+                return True
+        return False
+
+    async def _dispatch_pending_requests(self):
+        """Pending 요청을 백그라운드 태스크로 디스패치."""
         db = SessionLocal()
         try:
             request_service = CrawlRequestService(db)
-            pending = request_service.get_pending_request()
 
-            if pending:
-                logger.info(f"Pending 요청 발견: id={pending.id}, account_id={pending.account_id}")
-                await self._execute_crawl(pending, db)
+            # 여러 pending 요청 가져오기 (최대 5개)
+            pending_list = request_service.get_pending_requests(limit=5) if hasattr(request_service, 'get_pending_requests') else []
+
+            # 단일 요청 fallback
+            if not pending_list:
+                pending = request_service.get_pending_request()
+                if pending:
+                    pending_list = [pending]
+
+            for pending in pending_list:
+                # 이미 처리 중인지 확인
+                if self._is_request_running(pending.id):
+                    continue
+
+                # 백그라운드로 실행
+                task = asyncio.create_task(
+                    self._execute_crawl_safe(pending),
+                    name=f"crawl_{pending.id}"
+                )
+                self._running_tasks.add(task)
+                logger.info(f"크롤링 태스크 시작: request_id={pending.id}, type={getattr(pending, 'request_type', 'feed')}")
 
         except Exception as e:
-            logger.error(f"Pending 요청 처리 오류: {e}", exc_info=True)
+            logger.error(f"Pending 요청 디스패치 오류: {e}", exc_info=True)
         finally:
             db.close()
 
-    async def _check_scheduled_runs(self):
-        """스케줄 기반 실행 확인."""
+    async def _dispatch_scheduled_runs(self):
+        """스케줄 기반 실행을 백그라운드로 디스패치."""
         db = SessionLocal()
         try:
             crawl_service = CrawlService(db)
@@ -466,7 +491,6 @@ class InstagramWorker:
                 return
 
             if not config.account_id:
-                logger.debug("스케줄 config에 account_id 미설정")
                 return
 
             # 스케줄러 생성
@@ -496,23 +520,102 @@ class InstagramWorker:
                     logger.info("이미 활성 요청 존재, 스킵")
                     return
 
-                # 요청 생성 후 실행
+                # 요청 생성
                 request = request_service.create_request(
                     account_id=config.account_id,
                     requested_by="scheduler",
                 )
-                await self._execute_crawl(request, db)
+
+                # 이미 실행 중이 아니면 백그라운드로 디스패치
+                if not self._is_request_running(request.id):
+                    task = asyncio.create_task(
+                        self._execute_crawl_safe(request),
+                        name=f"crawl_{request.id}"
+                    )
+                    self._running_tasks.add(task)
+                    logger.info(f"스케줄 크롤링 태스크 시작: request_id={request.id}")
 
         except Exception as e:
-            logger.error(f"스케줄 체크 오류: {e}", exc_info=True)
+            logger.error(f"스케줄 디스패치 오류: {e}", exc_info=True)
         finally:
             db.close()
 
-    async def _get_page_for_account(self, account_id: int = None):
-        """계정별 브라우저 페이지 가져오기.
+    async def _execute_crawl_safe(self, request: InstagramCrawlRequest):
+        """안전한 크롤링 실행 (예외 처리 포함).
 
-        ContextManager를 사용하여 계정별 프로필로 브라우저를 생성합니다.
-        탭을 재사용하여 about:blank 탭이 누적되는 것을 방지합니다.
+        각 크롤링 요청을 독립적인 DB 세션으로 처리합니다.
+        """
+        db = SessionLocal()
+        try:
+            request_service = CrawlRequestService(db)
+            crawl_service = CrawlService(db)
+
+            # 처리 중으로 변경
+            request_service.mark_processing(request.id)
+
+            # 요청 타입에 따라 분기
+            request_type = getattr(request, 'request_type', 'feed') or 'feed'
+            logger.info(f"크롤링 시작: request_id={request.id}, type={request_type}")
+
+            if request_type == "single_post":
+                await self._execute_single_post_recrawl(request, db, request_service, crawl_service)
+            elif request_type == "single_post_url":
+                await self._execute_url_crawl(request, db, request_service, crawl_service)
+            else:
+                await self._execute_feed_crawl(request, db, request_service, crawl_service)
+
+        except Exception as e:
+            logger.error(f"크롤링 실패: request_id={request.id}, error={e}", exc_info=True)
+            try:
+                request_service = CrawlRequestService(db)
+                request_service.mark_failed(request.id, str(e))
+            except Exception:
+                pass
+        finally:
+            db.close()
+
+    async def _get_tab_for_request(self, request_id: int, account_id: int = None):
+        """TabPoolManager를 통해 탭 획득.
+
+        Args:
+            request_id: 크롤링 요청 ID (탭 추적용)
+            account_id: 계정 ID (None이면 기본 계정 사용)
+
+        Returns:
+            Page: 사용 가능한 브라우저 탭
+        """
+        # ContextManager 초기화 (lazy)
+        if self.context_manager is None:
+            logger.info("ContextManager 초기화")
+            self.context_manager = ContextManager()
+
+        # TabPoolManager 초기화 (lazy)
+        if self.tab_pool_manager is None:
+            logger.info("TabPoolManager 초기화")
+            self.tab_pool_manager = TabPoolManager(self.context_manager)
+
+        # TabPoolManager를 통해 탭 획득
+        tab = await self.tab_pool_manager.get_tab(
+            target_id=request_id,
+            account_id=account_id
+        )
+        logger.info(f"탭 획득 완료: request_id={request_id}, account_id={account_id}")
+        return tab
+
+    async def _release_tab(self, tab):
+        """사용 완료된 탭 반환.
+
+        Args:
+            tab: 반환할 브라우저 탭
+        """
+        if self.tab_pool_manager and tab:
+            await self.tab_pool_manager.release_tab(tab)
+
+    async def _get_page_for_account(self, account_id: int = None):
+        """계정별 브라우저 페이지 가져오기 (하위 호환성 유지).
+
+        Universal 크롤링 등 기존 코드에서 사용.
+        TabPoolManager가 아닌 직접 ContextManager 사용.
 
         Args:
             account_id: 계정 ID (None이면 기본 계정 사용)
@@ -522,7 +625,6 @@ class InstagramWorker:
             self.context_manager = ContextManager()
 
         # 계정별 브라우저 컨텍스트 가져오기
-        logger.info(f"계정 {account_id}용 브라우저 컨텍스트 가져오기")
         context = await self.context_manager.get_or_create_context(account_id)
 
         # 페이지 가져오기 - 기존 페이지 재사용 우선
@@ -530,30 +632,17 @@ class InstagramWorker:
         page = None
 
         if pages:
-            # 유효한 페이지 찾기 (닫히지 않은 페이지)
             for p in pages:
                 try:
                     if not p.is_closed():
                         page = p
-                        logger.debug(f"기존 페이지 재사용 (account_id={account_id}, url={p.url[:50] if p.url else 'blank'}...)")
                         break
                 except Exception:
                     continue
 
-            # 불필요한 추가 탭 정리 (about:blank 상태인 탭)
-            if len(pages) > 1:
-                for p in pages[1:]:
-                    try:
-                        if not p.is_closed() and p.url == "about:blank":
-                            await p.close()
-                            logger.info(f"불필요한 about:blank 탭 정리 (account_id={account_id})")
-                    except Exception as e:
-                        logger.debug(f"탭 정리 중 오류 (무시): {e}")
-
         # 유효한 페이지가 없으면 새로 생성
         if page is None:
             page = await context.new_page()
-            logger.info(f"새 페이지 생성 (account_id={account_id})")
 
         return page
 
@@ -613,29 +702,11 @@ class InstagramWorker:
 
         logger.info(f"브라우저 컨텍스트 재생성 준비 완료 (account_id={account_id})")
 
-    async def _execute_crawl(self, request: InstagramCrawlRequest, db):
-        """크롤링 실행."""
-        request_service = CrawlRequestService(db)
-        crawl_service = CrawlService(db)
-
-        # 처리 중으로 변경
-        request_service.mark_processing(request.id)
-
-        # 요청 타입에 따라 분기
-        request_type = getattr(request, 'request_type', 'feed') or 'feed'
-        logger.info(f"크롤링 시작: request_id={request.id}, type={request_type}")
-
-        if request_type == "single_post":
-            await self._execute_single_post_recrawl(request, db, request_service, crawl_service)
-        elif request_type == "single_post_url":
-            await self._execute_url_crawl(request, db, request_service, crawl_service)
-        else:
-            await self._execute_feed_crawl(request, db, request_service, crawl_service)
-
     async def _execute_feed_crawl(self, request: InstagramCrawlRequest, db, request_service, crawl_service):
         """피드 크롤링 실행 (TabPoolManager 사용으로 병렬 처리 가능)."""
         max_retries = 3
         retry_count = 0
+        tab = None
 
         while retry_count <= max_retries:
             try:
@@ -654,17 +725,17 @@ class InstagramWorker:
                 # 워커 상태를 crawling으로 변경
                 self._update_worker_state("crawling", account.name)
 
-                # 계정별 브라우저 페이지 가져오기
-                page = await self._get_page_for_account(account.id)
+                # TabPoolManager를 통해 탭 획득
+                tab = await self._get_tab_for_request(request.id, account.id)
 
                 # 인스타그램 피드 페이지로 이동
                 logger.info("인스타그램 피드 페이지로 이동 중...")
-                await page.goto("https://www.instagram.com/", wait_until="domcontentloaded")
-                await page.wait_for_timeout(2000)
-                logger.info(f"인스타그램 페이지 로드 완료: {page.url}")
+                await tab.goto("https://www.instagram.com/", wait_until="domcontentloaded")
+                await tab.wait_for_timeout(2000)
+                logger.info(f"인스타그램 페이지 로드 완료: {tab.url}")
 
                 # 크롤러 생성 (Page 객체 전달)
-                crawler = InstagramCrawler(page)
+                crawler = InstagramCrawler(tab)
                 logger.info("InstagramCrawler 생성 완료, 크롤링 시작...")
 
                 # 크롤링 실행
@@ -695,6 +766,10 @@ class InstagramWorker:
                 if self._is_browser_closed_error(e) and retry_count < max_retries:
                     retry_count += 1
                     logger.warning(f"브라우저 closed 에러 감지, 재시도 ({retry_count}/{max_retries}): {e}")
+                    # 탭 반환 후 재시도
+                    if tab:
+                        await self._release_tab(tab)
+                        tab = None
                     await self._recreate_browser_context(request.account_id)
                     continue
 
@@ -702,13 +777,16 @@ class InstagramWorker:
                 logger.error(f"크롤링 예외: {e}", exc_info=True)
                 return
             finally:
+                # 탭 반환 (필수!)
+                if tab:
+                    await self._release_tab(tab)
                 self._update_worker_state("idle")
-                self.continue_event.set()
 
     async def _execute_single_post_recrawl(self, request: InstagramCrawlRequest, db, request_service, crawl_service):
-        """개별 게시물 재크롤링 실행 (병렬 처리 가능)."""
+        """개별 게시물 재크롤링 실행 (TabPoolManager 사용, 병렬 처리 가능)."""
         max_retries = 3
         retry_count = 0
+        tab = None
 
         while retry_count <= max_retries:
             try:
@@ -734,11 +812,11 @@ class InstagramWorker:
                 # 워커 상태를 recrawling으로 변경
                 self._update_worker_state("recrawling", account.name)
 
-                # 계정별 브라우저 페이지 가져오기
-                page = await self._get_page_for_account(account.id)
+                # TabPoolManager를 통해 탭 획득
+                tab = await self._get_tab_for_request(request.id, account.id)
 
                 # 크롤러 생성
-                crawler = InstagramCrawler(page)
+                crawler = InstagramCrawler(tab)
                 logger.info(f"개별 게시물 재크롤링 시작: post_id={target_post_id}")
 
                 # 재크롤링 실행
@@ -762,6 +840,9 @@ class InstagramWorker:
                 if self._is_browser_closed_error(e) and retry_count < max_retries:
                     retry_count += 1
                     logger.warning(f"브라우저 closed 에러 감지, 재시도 ({retry_count}/{max_retries}): {e}")
+                    if tab:
+                        await self._release_tab(tab)
+                        tab = None
                     await self._recreate_browser_context(request.account_id)
                     continue
 
@@ -769,13 +850,15 @@ class InstagramWorker:
                 logger.error(f"재크롤링 예외: {e}", exc_info=True)
                 return
             finally:
+                if tab:
+                    await self._release_tab(tab)
                 self._update_worker_state("idle")
-                self.continue_event.set()
 
     async def _execute_url_crawl(self, request: InstagramCrawlRequest, db, request_service, crawl_service):
-        """URL로 단일 게시물 수집 실행 (병렬 처리 가능)."""
+        """URL로 단일 게시물 수집 실행 (TabPoolManager 사용, 병렬 처리 가능)."""
         max_retries = 3
         retry_count = 0
+        tab = None
 
         while retry_count <= max_retries:
             try:
@@ -801,11 +884,11 @@ class InstagramWorker:
                 # 워커 상태를 crawling으로 변경
                 self._update_worker_state("crawling", account.name)
 
-                # 계정별 브라우저 페이지 가져오기
-                page = await self._get_page_for_account(account.id)
+                # TabPoolManager를 통해 탭 획득
+                tab = await self._get_tab_for_request(request.id, account.id)
 
                 # 크롤러 생성
-                crawler = InstagramCrawler(page)
+                crawler = InstagramCrawler(tab)
                 logger.info(f"URL 크롤링 시작: url={target_url}")
 
                 # URL 크롤링 실행
@@ -837,6 +920,9 @@ class InstagramWorker:
                 if self._is_browser_closed_error(e) and retry_count < max_retries:
                     retry_count += 1
                     logger.warning(f"브라우저 closed 에러 감지, 재시도 ({retry_count}/{max_retries}): {e}")
+                    if tab:
+                        await self._release_tab(tab)
+                        tab = None
                     await self._recreate_browser_context(request.account_id)
                     continue
 
@@ -844,8 +930,9 @@ class InstagramWorker:
                 logger.error(f"URL 크롤링 예외: {e}", exc_info=True)
                 return
             finally:
+                if tab:
+                    await self._release_tab(tab)
                 self._update_worker_state("idle")
-                self.continue_event.set()
 
     # ========================================
     # Universal 크롤링 관련 메서드
