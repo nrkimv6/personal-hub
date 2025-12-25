@@ -4,7 +4,7 @@ Event 서비스 - 독립 이벤트 CRUD 및 관리
 import asyncio
 import logging
 from typing import List, Optional, Tuple, Dict, Any
-from datetime import date
+from datetime import date, datetime, timedelta
 
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, func
@@ -52,12 +52,46 @@ def detect_url_type(url: str) -> str:
 class EventService:
     """이벤트 서비스"""
 
+    def get_deadline_counts(
+        self,
+        db: Session,
+        days: int = 6,
+        event_type: Optional[str] = None,
+    ) -> Dict[str, int]:
+        """오늘부터 N일간 각 날짜별 마감 이벤트 개수 조회.
+
+        Args:
+            db: DB 세션
+            days: 조회할 일수 (기본 6일)
+            event_type: 이벤트 유형 필터 (optional)
+
+        Returns:
+            { "2025-12-25": 3, "2025-12-26": 5, ... }
+        """
+        today = date.today()
+        result = {}
+
+        for i in range(days):
+            target_date = today + timedelta(days=i)
+            date_str = target_date.strftime("%Y-%m-%d")
+
+            query = db.query(func.count(Event.id)).filter(Event.event_end == target_date)
+
+            if event_type:
+                query = query.filter(Event.event_type == event_type)
+
+            count = query.scalar() or 0
+            result[date_str] = count
+
+        return result
+
     def get_events(
         self,
         db: Session,
         event_type: Optional[str] = None,
         status: Optional[str] = None,
         event_status: Optional[str] = None,  # ongoing/upcoming/ended
+        deadline_date: Optional[str] = None,  # YYYY-MM-DD 형식, 특정 마감일
         source_type: Optional[str] = None,
         url_type: Optional[str] = None,
         is_bookmarked: Optional[bool] = None,
@@ -132,6 +166,15 @@ class EventService:
             elif event_status == "ending_today":
                 # 오늘 마감: 종료일 == 오늘
                 query = query.filter(Event.event_end == today)
+
+        # deadline_date 필터 (특정 날짜 마감)
+        if deadline_date:
+            from datetime import datetime
+            try:
+                target_date = datetime.strptime(deadline_date, "%Y-%m-%d").date()
+                query = query.filter(Event.event_end == target_date)
+            except ValueError:
+                logger.warning(f"Invalid deadline_date format: {deadline_date}")
 
         # 총 개수
         total = query.count()

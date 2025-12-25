@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { llmApi, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats } from '$lib/api';
+	import { llmApi, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMCallerGroup, type LLMGroupedListResponse } from '$lib/api';
 	import LLMPerformance from '$lib/components/LLMPerformance.svelte';
 
 	// 상태
@@ -10,6 +10,12 @@
 	let stats: LLMStats | null = null;
 	let workerStatus: LLMWorkerStatus | null = null;
 	let historyStats: LLMHistoryStats | null = null;
+
+	// 그룹 뷰 상태
+	let callerGroups: LLMCallerGroup[] = [];
+	let groupedResponse: LLMGroupedListResponse | null = null;
+	let viewMode: 'individual' | 'grouped' = 'individual';
+	let onlyWithoutSuccess = false;
 
 	let loading = true;
 	let error: string | null = null;
@@ -19,6 +25,12 @@
 	let pageSize = 20;
 	let total = 0;
 	let pages = 0;
+
+	// 그룹 뷰 페이지네이션
+	let groupCurrentPage = 1;
+	let groupPageSize = 50;
+	let groupTotal = 0;
+	let groupPages = 0;
 
 	// 필터 (탭에 따라 다르게 설정)
 	let filterCallerType = '';
@@ -105,6 +117,75 @@
 		}
 	}
 
+	async function fetchGroupedData() {
+		loading = true;
+		error = null;
+		try {
+			const [res, statsRes, workerRes] = await Promise.all([
+				llmApi.listGroupedByCaller({
+					caller_type: filterCallerType || undefined,
+					only_without_success: onlyWithoutSuccess,
+					page: groupCurrentPage,
+					page_size: groupPageSize
+				}),
+				llmApi.getStats(),
+				llmApi.getWorkerStatus()
+			]);
+
+			callerGroups = res.items;
+			groupedResponse = res;
+			groupTotal = res.total;
+			groupPages = res.pages;
+			stats = statsRes;
+			workerStatus = workerRes;
+		} catch (e) {
+			error = e instanceof Error ? e.message : '데이터 로드 실패';
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function retryAllFailedWithoutSuccess() {
+		if (!confirm(`성공한 적 없는 모든 caller의 실패 요청을 재시도하시겠습니까?`)) return;
+		try {
+			const result = await llmApi.retryFailedCallersWithoutSuccess(filterCallerType || undefined);
+			alert(`재시도 완료: ${result.retried}개 요청 (${result.callers}개 caller)`);
+			await fetchGroupedData();
+		} catch (e) {
+			alert('재시도 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		}
+	}
+
+	function toggleViewMode() {
+		viewMode = viewMode === 'individual' ? 'grouped' : 'individual';
+		if (viewMode === 'grouped') {
+			groupCurrentPage = 1;
+			fetchGroupedData();
+		} else {
+			currentPage = 1;
+			fetchData();
+		}
+	}
+
+	function handleGroupFilter() {
+		groupCurrentPage = 1;
+		fetchGroupedData();
+	}
+
+	function groupPrevPage() {
+		if (groupCurrentPage > 1) {
+			groupCurrentPage--;
+			fetchGroupedData();
+		}
+	}
+
+	function groupNextPage() {
+		if (groupCurrentPage < groupPages) {
+			groupCurrentPage++;
+			fetchGroupedData();
+		}
+	}
+
 	function handleFilter() {
 		currentPage = 1;
 		selectedIds = [];
@@ -115,7 +196,12 @@
 	function clearFilters() {
 		filterCallerType = '';
 		filterRequestedBy = '';
-		handleFilter();
+		onlyWithoutSuccess = false;
+		if (viewMode === 'grouped') {
+			handleGroupFilter();
+		} else {
+			handleFilter();
+		}
 	}
 
 	function prevPage() {
@@ -416,18 +502,73 @@
 				<option value="instagram">Instagram</option>
 				<option value="test">Test</option>
 			</select>
-			<input
-				type="text"
-				placeholder="요청자"
-				bind:value={filterRequestedBy}
-				class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-			/>
-			<button onclick={handleFilter} class="btn btn-primary btn-sm">필터</button>
+			{#if activeTab === 'history' && viewMode === 'individual'}
+				<input
+					type="text"
+					placeholder="요청자"
+					bind:value={filterRequestedBy}
+					class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+				/>
+			{/if}
+			{#if activeTab === 'queue'}
+				<input
+					type="text"
+					placeholder="요청자"
+					bind:value={filterRequestedBy}
+					class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+				/>
+			{/if}
+			{#if activeTab === 'history' && viewMode === 'grouped'}
+				<label class="flex items-center gap-1 text-sm">
+					<input
+						type="checkbox"
+						bind:checked={onlyWithoutSuccess}
+						onchange={handleGroupFilter}
+						class="rounded"
+					/>
+					성공 없는 것만
+				</label>
+			{/if}
+			<button onclick={viewMode === 'grouped' ? handleGroupFilter : handleFilter} class="btn btn-primary btn-sm">필터</button>
 			<button onclick={clearFilters} class="btn btn-secondary btn-sm">초기화</button>
+
+			{#if activeTab === 'history'}
+				<div class="ml-auto flex items-center gap-2">
+					<button
+						onclick={toggleViewMode}
+						class="btn btn-sm {viewMode === 'grouped' ? 'btn-primary' : 'btn-secondary'}"
+					>
+						{viewMode === 'individual' ? '그룹 뷰' : '개별 뷰'}
+					</button>
+				</div>
+			{/if}
 		</div>
 
-		<!-- 일괄 작업 버튼 -->
-		{#if selectedIds.length > 0}
+		<!-- 그룹 뷰 요약 및 일괄 재시도 버튼 -->
+		{#if activeTab === 'history' && viewMode === 'grouped' && groupedResponse}
+			<div class="mb-4 flex gap-4 items-center p-3 bg-gray-50 rounded-lg">
+				<div class="text-sm">
+					<span class="text-gray-600">전체:</span>
+					<span class="font-bold text-gray-900">{groupedResponse.summary.total_callers}</span>
+				</div>
+				<div class="text-sm">
+					<span class="text-green-600">성공 있음:</span>
+					<span class="font-bold text-green-700">{groupedResponse.summary.callers_with_success}</span>
+				</div>
+				<div class="text-sm">
+					<span class="text-red-600">성공 없음:</span>
+					<span class="font-bold text-red-700">{groupedResponse.summary.callers_without_success}</span>
+				</div>
+				{#if groupedResponse.summary.callers_without_success > 0}
+					<button onclick={retryAllFailedWithoutSuccess} class="btn btn-primary btn-sm ml-auto">
+						성공 없는 것 일괄 재시도
+					</button>
+				{/if}
+			</div>
+		{/if}
+
+		<!-- 일괄 작업 버튼 (개별 뷰) -->
+		{#if viewMode === 'individual' && selectedIds.length > 0}
 			<div class="mb-4 flex gap-2 items-center">
 				<span class="text-sm text-gray-600">{selectedIds.length}개 선택</span>
 				{#if activeTab === 'history'}
@@ -443,12 +584,88 @@
 			</div>
 		{:else if error}
 			<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">{error}</div>
+		{:else if activeTab === 'history' && viewMode === 'grouped'}
+			<!-- 그룹 뷰 테이블 -->
+			{#if callerGroups.length === 0}
+				<div class="text-center py-12 text-gray-500">
+					<p class="text-lg">그룹화된 이력이 없습니다</p>
+				</div>
+			{:else}
+				<div class="bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
+					<table class="w-full">
+						<thead class="bg-gray-50 border-b border-gray-200">
+							<tr>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">타입</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">호출자 ID</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">요청 수</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">성공</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">실패</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">대기</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">성공 여부</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">최근 상태</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">마지막 요청</th>
+							</tr>
+						</thead>
+						<tbody class="divide-y divide-gray-200">
+							{#each callerGroups as group}
+								<tr class="hover:bg-gray-50 {group.has_success ? '' : 'bg-red-50'}">
+									<td class="px-4 py-3 text-sm text-gray-600">{group.caller_type}</td>
+									<td class="px-4 py-3 text-sm text-gray-900 font-mono">{group.caller_id}</td>
+									<td class="px-4 py-3 text-sm text-gray-900 font-bold">{group.total_count}</td>
+									<td class="px-4 py-3 text-sm text-green-600 font-bold">{group.completed_count}</td>
+									<td class="px-4 py-3 text-sm text-red-600 font-bold">{group.failed_count}</td>
+									<td class="px-4 py-3 text-sm text-yellow-600">{group.pending_count}</td>
+									<td class="px-4 py-3">
+										{#if group.has_success}
+											<span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">있음</span>
+										{:else}
+											<span class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800">없음</span>
+										{/if}
+									</td>
+									<td class="px-4 py-3">
+										<span class="px-2 py-1 text-xs rounded-full {getStatusColor(group.last_status)}">
+											{getStatusLabel(group.last_status)}
+										</span>
+									</td>
+									<td class="px-4 py-3 text-sm text-gray-500">{formatDateTime(group.last_requested_at)}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+
+				<!-- 그룹 뷰 페이지네이션 -->
+				{#if groupPages > 1}
+					<div class="flex justify-between items-center">
+						<span class="text-sm text-gray-500">
+							전체 {groupTotal}개 중 {(groupCurrentPage - 1) * groupPageSize + 1} - {Math.min(groupCurrentPage * groupPageSize, groupTotal)}
+						</span>
+						<div class="flex gap-2">
+							<button
+								onclick={groupPrevPage}
+								disabled={groupCurrentPage === 1}
+								class="btn btn-secondary btn-sm disabled:opacity-50"
+							>
+								이전
+							</button>
+							<span class="px-3 py-1.5 text-sm">{groupCurrentPage} / {groupPages}</span>
+							<button
+								onclick={groupNextPage}
+								disabled={groupCurrentPage >= groupPages}
+								class="btn btn-secondary btn-sm disabled:opacity-50"
+							>
+								다음
+							</button>
+						</div>
+					</div>
+				{/if}
+			{/if}
 		{:else if requests.length === 0}
 			<div class="text-center py-12 text-gray-500">
 				<p class="text-lg">{activeTab === 'queue' ? '대기열이 비어있습니다' : '이력이 없습니다'}</p>
 			</div>
 		{:else}
-			<!-- 요청 목록 테이블 -->
+			<!-- 개별 요청 목록 테이블 -->
 			<div class="bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
 				<table class="w-full">
 					<thead class="bg-gray-50 border-b border-gray-200">

@@ -51,6 +51,8 @@
 	let filterUrlType: string | null = $state(null);
 	let filterSourceType: string | null = $state(null);
 	let filterSearch = $state('');  // 검색어
+	let filterDeadlineDate: string | null = $state(null);  // 마감일 날짜 필터
+	let deadlineCounts: Record<string, number> = $state({});  // 날짜별 마감 이벤트 개수
 	let sortBy = $state('event_end');
 	let sortOrder = $state('asc');
 	let includeUnknownPeriod = $state(false);
@@ -64,6 +66,7 @@
 			filterUrlType,
 			filterSourceType,
 			filterSearch,
+			filterDeadlineDate,
 			includeUnknownPeriod
 		].filter(Boolean).length
 	);
@@ -113,6 +116,10 @@
 
 	function handleStatusFilterChange(status: string | null) {
 		filterEventStatus = status;
+		// 상태 필터 선택 시 날짜 필터 초기화
+		if (status) {
+			filterDeadlineDate = null;
+		}
 		currentPage = 1;
 		fetchEvents();
 	}
@@ -125,6 +132,16 @@
 
 	function handleUnknownPeriodToggle() {
 		includeUnknownPeriod = !includeUnknownPeriod;
+		currentPage = 1;
+		fetchEvents();
+	}
+
+	function handleDeadlineDateChange(date: string | null) {
+		filterDeadlineDate = date;
+		// 날짜 필터 선택 시 상태 필터 초기화
+		if (date) {
+			filterEventStatus = null;
+		}
 		currentPage = 1;
 		fetchEvents();
 	}
@@ -158,6 +175,14 @@
 	// =========================================================
 	// API 호출
 	// =========================================================
+
+	async function fetchDeadlineCounts() {
+		try {
+			deadlineCounts = await eventApi.getDeadlineCounts(6, 'event');
+		} catch (e) {
+			console.error('날짜별 카운트 로드 실패:', e);
+		}
+	}
 
 	async function fetchEvents() {
 		loading = true;
@@ -204,7 +229,12 @@
 					sort_order: sortOrder,
 					event_type: 'event'
 				};
-				if (filterEventStatus) params.event_status = filterEventStatus;
+				// deadline_date가 설정되면 event_status를 무시
+				if (filterDeadlineDate) {
+					params.deadline_date = filterDeadlineDate;
+				} else if (filterEventStatus) {
+					params.event_status = filterEventStatus;
+				}
 				// if (filterBookmarked !== null) params.is_bookmarked = filterBookmarked;  // 북마크 기능 임시 비활성화
 				if (filterUrlType) params.url_type = filterUrlType;
 				if (filterSourceType) params.source_type = filterSourceType;
@@ -512,6 +542,9 @@
 			console.error('태그 목록 로드 실패:', e);
 		}
 
+		// 날짜별 마감 카운트 로드
+		fetchDeadlineCounts();
+
 		// PWA Share Target 처리
 		const action = $pageStore.url.searchParams.get('action');
 		const sharedUrl = $pageStore.url.searchParams.get('url');
@@ -652,10 +685,13 @@
 			{filterBookmarked}
 			{includeUnknownPeriod}
 			{showFilters}
+			{filterDeadlineDate}
+			{deadlineCounts}
 			onStatusFilterChange={handleStatusFilterChange}
 			onBookmarkedFilterToggle={handleBookmarkedFilterToggle}
 			onUnknownPeriodToggle={handleUnknownPeriodToggle}
 			onShowFiltersChange={(v) => (showFilters = v)}
+			onDeadlineDateChange={handleDeadlineDateChange}
 		/>
 	{/if}
 

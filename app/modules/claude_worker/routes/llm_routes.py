@@ -290,6 +290,46 @@ def get_caller_stats(db: Session = Depends(get_db)):
     return service.get_caller_stats()
 
 
+@router.get("/requests/grouped-by-caller")
+def list_requests_grouped_by_caller(
+    caller_type: Optional[str] = Query(None, description="호출자 타입 필터"),
+    only_without_success: bool = Query(False, description="성공한 적 없는 caller만 조회"),
+    page: int = Query(1, ge=1, description="페이지 번호"),
+    page_size: int = Query(50, ge=1, le=100, description="페이지 크기"),
+    db: Session = Depends(get_db),
+):
+    """caller_id별로 그룹화된 요청 목록 조회.
+
+    각 caller별로 총 요청 수, 성공/실패 수, 성공 여부 등을 반환합니다.
+    """
+    service = LLMService(db)
+    return service.list_requests_grouped_by_caller(
+        caller_type=caller_type,
+        only_without_success=only_without_success,
+        page=page,
+        page_size=page_size,
+    )
+
+
+class RetryFailedCallersRequest(BaseModel):
+    caller_type: Optional[str] = None
+
+
+@router.post("/requests/batch/retry-failed-callers")
+def retry_failed_callers_without_success(
+    data: RetryFailedCallersRequest = None,
+    db: Session = Depends(get_db),
+):
+    """성공한 적 없는 caller들의 실패 요청을 일괄 재시도.
+
+    1번이라도 성공한 caller_id는 무시하고, 성공한 적 없는 caller의
+    모든 실패 요청을 pending으로 재설정합니다.
+    """
+    service = LLMService(db)
+    caller_type = data.caller_type if data else None
+    return service.retry_failed_callers_without_success(caller_type=caller_type)
+
+
 @router.get("/performance")
 def get_performance_stats(
     hours: int = Query(24, ge=1, le=168, description="분석 기간 (시간, 최대 7일)"),

@@ -775,6 +775,182 @@ class LLMService:
         old = self.cleanup_old_history()
         return {"stale_processing": stale, "old_history": old}
 
+    # ========== 호출자별 그룹화 ==========
+
+    def list_requests_grouped_by_caller(
+        self,
+        caller_type: str = None,
+        only_without_success: bool = False,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> dict:
+        """caller_id별로 그룹화된 요청 목록 조회.
+
+        Args:
+            caller_type: 호출자 타입 필터
+            only_without_success: True면 성공한 적 없는 caller만 조회
+            page: 페이지 번호
+            page_size: 페이지 크기
+
+        Returns:
+            {
+                "items": [
+                    {
+                        "caller_type": str,
+                        "caller_id": str,
+                        "total_count": int,
+                        "completed_count": int,
+                        "failed_count": int,
+                        "pending_count": int,
+                        "has_success": bool,
+                        "last_status": str,
+                        "last_requested_at": datetime,
+                        "last_error": str | None,
+                        "request_ids": list[int]  # 실패한 요청 ID들
+                    }
+                ],
+                "total": int,
+                "page": int,
+                "page_size": int,
+                "pages": int,
+                "summary": {
+                    "total_callers": int,
+                    "callers_with_success": int,
+                    "callers_without_success": int
+                }
+            }
+        """
+        from sqlalchemy import case, and_
+
+        # 기본 쿼리: caller_type + caller_id로 그룹화
+        base_query = self.db.query(LLMRequest).filter(
+            LLMRequest.deleted_at.is_(None)
+        )
+        if caller_type:
+            base_query = base_query.filter(LLMRequest.caller_type == caller_type)
+
+        # 모든 caller_id별 요청 조회
+        all_requests = base_query.all()
+
+        # caller별 그룹화
+        caller_groups = {}
+        for req in all_requests:
+            key = (req.caller_type, req.caller_id)
+            if key not in caller_groups:
+                caller_groups[key] = {
+                    "caller_type": req.caller_type,
+                    "caller_id": req.caller_id,
+                    "total_count": 0,
+                    "completed_count": 0,
+                    "failed_count": 0,
+                    "pending_count": 0,
+                    "has_success": False,
+                    "last_status": None,
+                    "last_requested_at": None,
+                    "last_error": None,
+                    "request_ids": [],  # 실패한 요청 ID들
+                }
+
+            group = caller_groups[key]
+            group["total_count"] += 1
+
+            if req.status == "completed":
+                group["completed_count"] += 1
+                group["has_success"] = True
+            elif req.status == "failed":
+                group["failed_count"] += 1
+                group["request_ids"].append(req.id)
+                if req.error_message:
+                    group["last_error"] = req.error_message
+            elif req.status in ("pending", "processing"):
+                group["pending_count"] += 1
+
+            # 최신 요청 추적
+            if group["last_requested_at"] is None or req.requested_at > group["last_requested_at"]:
+                group["last_requested_at"] = req.requested_at
+                group["last_status"] = req.status
+
+        # 리스트로 변환 및 정렬
+        items = list(caller_groups.values())
+
+        # 성공 없는 것만 필터링
+        if only_without_success:
+            items = [g for g in items if not g["has_success"]]
+
+        # 최신순 정렬
+        items.sort(key=lambda x: x["last_requested_at"] or datetime.min, reverse=True)
+
+        # 요약 통계
+        total_callers = len(caller_groups)
+        callers_with_success = sum(1 for g in caller_groups.values() if g["has_success"])
+        callers_without_success = total_callers - callers_with_success
+
+        # 페이지네이션
+        total = len(items)
+        pages = (total + page_size - 1) // page_size if total > 0 else 1
+        start = (page - 1) * page_size
+        end = start + page_size
+        paginated_items = items[start:end]
+
+        # datetime을 ISO string으로 변환
+        for item in paginated_items:
+            if item["last_requested_at"]:
+                item["last_requested_at"] = item["last_requested_at"].isoformat()
+
+        return {
+            "items": paginated_items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "pages": pages,
+            "summary": {
+                "total_callers": total_callers,
+                "callers_with_success": callers_with_success,
+                "callers_without_success": callers_without_success,
+            }
+        }
+
+    def retry_failed_callers_without_success(self, caller_type: str = None) -> dict:
+        """성공한 적 없는 caller들의 실패 요청을 일괄 재시도.
+
+        Args:
+            caller_type: 호출자 타입 필터 (선택)
+
+        Returns:
+            {"retried": n, "callers": n}
+        """
+        # 그룹화된 데이터 조회
+        grouped = self.list_requests_grouped_by_caller(
+            caller_type=caller_type,
+            only_without_success=True,
+            page=1,
+            page_size=10000,  # 전체 조회
+        )
+
+        retried = 0
+        callers = 0
+
+        for group in grouped["items"]:
+            if group["request_ids"]:
+                callers += 1
+                for request_id in group["request_ids"]:
+                    request = self.db.query(LLMRequest).filter(
+                        LLMRequest.id == request_id
+                    ).first()
+                    if request and request.status == "failed":
+                        request.status = "pending"
+                        request.error_message = None
+                        request.result = None
+                        request.raw_response = None
+                        request.processed_at = None
+                        retried += 1
+
+        if retried > 0:
+            self.db.commit()
+            logger.info(f"성공 없는 caller 일괄 재시도: {retried}개 요청, {callers}개 caller")
+
+        return {"retried": retried, "callers": callers}
+
     # ========== 기본 통계 ==========
 
     def get_stats(self) -> dict:

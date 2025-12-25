@@ -23,11 +23,27 @@ from app.core.auth import require_admin, UserInfo
 router = APIRouter(prefix="/api/v1/events", tags=["events"])
 
 
+@router.get("/deadline-counts")
+def get_deadline_counts(
+    days: int = Query(6, ge=1, le=30, description="오늘부터 조회할 일수"),
+    event_type: Optional[str] = Query(None, description="이벤트 유형 필터"),
+    db: Session = Depends(get_db),
+):
+    """
+    오늘부터 N일간 각 날짜별 마감 이벤트 개수를 조회합니다.
+
+    Returns:
+        dict: { "2025-12-25": 3, "2025-12-26": 5, ... }
+    """
+    return event_service.get_deadline_counts(db=db, days=days, event_type=event_type)
+
+
 @router.get("", response_model=EventList)
 def get_events(
     event_type: Optional[str] = Query(None, description="이벤트 유형 (event/popup/ambassador/other)"),
     status: Optional[str] = Query(None, description="상태 (active/ended/cancelled)"),
     event_status: Optional[str] = Query(None, description="진행 상태 (ongoing/upcoming/ended/ongoing_or_upcoming)"),
+    deadline_date: Optional[str] = Query(None, description="마감일 (YYYY-MM-DD 형식, 해당 날짜에 마감되는 이벤트)"),
     source_type: Optional[str] = Query(None, description="출처 유형 (instagram/manual/web/other)"),
     url_type: Optional[str] = Query(None, description="URL 유형 (google_form/naver_form/shop/survey/other)"),
     is_bookmarked: Optional[bool] = Query(None, description="북마크 여부"),
@@ -54,6 +70,7 @@ def get_events(
         event_type=event_type,
         status=status,
         event_status=event_status,
+        deadline_date=deadline_date,
         source_type=source_type,
         url_type=url_type,
         is_bookmarked=is_bookmarked,
