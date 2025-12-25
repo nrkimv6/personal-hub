@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
 	import { page as pageStore } from '$app/stores';
-	import { instagramApi, instagramTagApi, accountApi } from '$lib/api';
+	import { instagramApi, instagramTagApi } from '$lib/api';
 	import type { InstagramPost, InstagramTag, Account, LLMRequest } from '$lib/types';
 	import FeedCard from '$lib/components/instagram/FeedCard.svelte';
 	import InstagramCrawlSettings from '$lib/components/InstagramCrawlSettings.svelte';
@@ -381,7 +381,8 @@
 
 	async function fetchAccounts() {
 		try {
-			const response = await accountApi.list();
+			// Instagram 전용 계정만 조회
+			const response = await instagramApi.getAccounts();
 			accounts = response.filter(a => a.is_logged_in);
 			// 기본 계정 선택 (첫 번째 로그인된 계정)
 			if (accounts.length > 0 && !urlCrawlAccountId) {

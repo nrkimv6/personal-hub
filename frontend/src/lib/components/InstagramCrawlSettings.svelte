@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { instagramApi, accountApi } from '$lib/api';
+	import { instagramApi } from '$lib/api';
 	import type {
 		InstagramScheduleConfig,
 		InstagramTimeWindow,
@@ -42,7 +42,7 @@
 				instagramApi.getSchedule(),
 				instagramApi.todaySchedule(),
 				instagramApi.getPendingRequests(5),
-				accountApi.listActive()
+				instagramApi.getAccounts()
 			]);
 			config = configData;
 			todaySchedule = scheduleData;

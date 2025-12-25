@@ -17,6 +17,8 @@ import sys
 import os
 import signal
 import logging
+import subprocess
+import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -192,11 +194,168 @@ class InstagramWorker:
         # 오래된 processing 요청 정리 (좀비 요청 방지)
         self._cleanup_stale_requests()
 
+        # 기존 브라우저 프로필 Lock 정리 (비정상 종료 후 재시작 시)
+        self._cleanup_stale_browser_locks()
+
         # 브라우저 컨텍스트 매니저는 크롤링 시 lazy 초기화
         # (메인 워커와 같은 프로필 충돌 방지를 위해 계정별 프로필 사용)
         self.context_manager = None
 
         logger.info("Instagram 워커 초기화 완료")
+
+    def _cleanup_stale_browser_locks(self):
+        """비정상 종료된 브라우저의 Lock 파일 및 프로세스 정리.
+
+        이전 워커가 비정상 종료되면 브라우저 프로세스가 남아있거나
+        Lock 파일이 남아서 새 브라우저를 열지 못하는 문제 해결.
+
+        강제 종료: 해당 프로필을 사용하는 Chromium 프로세스를 직접 종료합니다.
+        """
+        from app.config import settings
+
+        profile_base = Path(settings.DATA_DIR) / settings.BROWSER_PROFILES_DIR
+
+        if not profile_base.exists():
+            return
+
+        try:
+            # 1. 먼저 해당 프로필을 사용하는 모든 Chromium 프로세스 종료
+            killed_count = self._kill_chromium_for_profiles(profile_base)
+            if killed_count > 0:
+                logger.info(f"기존 Chromium 프로세스 {killed_count}개 종료됨")
+                # 프로세스 종료 후 잠시 대기
+                import time
+                time.sleep(1)
+
+            # 2. Lock 파일 정리
+            for profile_dir in profile_base.iterdir():
+                if not profile_dir.is_dir():
+                    continue
+
+                self._remove_lock_files(profile_dir)
+
+        except Exception as e:
+            logger.warning(f"브라우저 정리 중 오류 (무시): {e}")
+
+    def _kill_chromium_for_profiles(self, profile_base: Path) -> int:
+        """프로필 디렉토리를 사용하는 Chromium 프로세스 종료.
+
+        Args:
+            profile_base: 브라우저 프로필 기본 디렉토리
+
+        Returns:
+            종료된 프로세스 수
+        """
+        killed_count = 0
+
+        try:
+            if sys.platform == "win32":
+                # Windows: tasklist + taskkill 사용
+                # ms-playwright chromium 프로세스 중 browser_profiles를 사용하는 것만 종료
+                result = subprocess.run(
+                    ["tasklist", "/FI", "IMAGENAME eq chrome.exe", "/FO", "CSV", "/V"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if 'chrome.exe' in line.lower():
+                            try:
+                                # PID 추출 (CSV 형식: "이미지 이름","PID","세션 이름",...)
+                                parts = line.split(',')
+                                if len(parts) > 1:
+                                    pid_str = parts[1].strip('"')
+                                    if pid_str.isdigit():
+                                        pid = int(pid_str)
+                                        # 해당 PID가 browser_profiles를 사용하는지 확인
+                                        if self._is_chromium_using_profile(pid, profile_base):
+                                            logger.info(f"Chromium 프로세스 종료: PID {pid}")
+                                            subprocess.run(
+                                                ["taskkill", "/F", "/PID", str(pid)],
+                                                capture_output=True,
+                                                timeout=5
+                                            )
+                                            killed_count += 1
+                            except (ValueError, IndexError):
+                                continue
+            else:
+                # Linux/Mac: pkill 사용
+                subprocess.run(
+                    ["pkill", "-f", str(profile_base)],
+                    capture_output=True,
+                    timeout=5
+                )
+                killed_count = 1  # 정확한 수를 알 수 없음
+
+        except subprocess.TimeoutExpired:
+            logger.warning("Chromium 종료 타임아웃")
+        except Exception as e:
+            logger.warning(f"Chromium 종료 오류: {e}")
+
+        return killed_count
+
+    def _is_chromium_using_profile(self, pid: int, profile_base: Path) -> bool:
+        """특정 PID의 Chromium이 해당 프로필 경로를 사용하는지 확인.
+
+        Args:
+            pid: 프로세스 ID
+            profile_base: 프로필 기본 디렉토리
+
+        Returns:
+            사용 중이면 True
+        """
+        try:
+            if sys.platform == "win32":
+                result = subprocess.run(
+                    ["wmic", "process", "where", f"ProcessId={pid}", "get", "CommandLine"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    cmd_line = result.stdout.lower()
+                    # browser_profiles 디렉토리 또는 ms-playwright를 사용하는 경우
+                    profile_str = str(profile_base).lower().replace('\\', '/')
+                    return 'browser_profiles' in cmd_line or 'ms-playwright' in cmd_line
+            else:
+                result = subprocess.run(
+                    ["ps", "-p", str(pid), "-o", "command="],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    return str(profile_base) in result.stdout
+        except Exception:
+            pass
+
+        return False
+
+    def _remove_lock_files(self, profile_dir: Path):
+        """프로필 디렉토리의 Lock 파일들 제거.
+
+        Args:
+            profile_dir: 브라우저 프로필 디렉토리
+        """
+        lock_files = [
+            "SingletonLock",
+            "SingletonSocket",
+            "SingletonCookie",
+        ]
+
+        for lock_name in lock_files:
+            lock_path = profile_dir / lock_name
+            if lock_path.exists():
+                try:
+                    if lock_path.is_file() or lock_path.is_symlink():
+                        lock_path.unlink()
+                    else:
+                        shutil.rmtree(lock_path, ignore_errors=True)
+                    logger.debug(f"Lock 파일 삭제: {lock_path}")
+                except Exception as e:
+                    logger.warning(f"Lock 파일 삭제 실패 ({lock_path}): {e}")
 
     def _cleanup_stale_requests(self):
         """오래된 processing 상태 요청 정리.
@@ -419,25 +578,45 @@ class InstagramWorker:
     async def _recreate_browser_context(self, account_id: int = None):
         """브라우저 컨텍스트 재생성.
 
-        기존 컨텍스트를 닫고 새로 생성합니다.
+        기존 컨텍스트와 Chromium 프로세스를 정리하고 새로 생성합니다.
 
         Args:
             account_id: 계정 ID
         """
         logger.info(f"브라우저 컨텍스트 재생성 시작 (account_id={account_id})")
 
+        # 1. 기존 컨텍스트 닫기
         if self.context_manager:
             try:
-                # 기존 컨텍스트 닫기
                 await self.context_manager.close_context(account_id)
                 logger.info(f"기존 컨텍스트 닫기 완료 (account_id={account_id})")
             except Exception as e:
                 logger.warning(f"기존 컨텍스트 닫기 실패 (무시): {e}")
 
-        # 잠시 대기 후 새 컨텍스트 생성
-        await asyncio.sleep(1)
+            # ContextManager 자체도 초기화 (Playwright 인스턴스 재생성 유도)
+            try:
+                await self.context_manager.close_all_contexts()
+                self.context_manager = None
+                logger.info("ContextManager 초기화 완료")
+            except Exception as e:
+                logger.warning(f"ContextManager 초기화 실패 (무시): {e}")
+                self.context_manager = None
 
-        # 새 컨텍스트는 _get_page_for_account에서 자동 생성됨
+        # 2. 잔여 Chromium 프로세스 정리
+        from app.config import settings
+        profile_base = Path(settings.DATA_DIR) / settings.BROWSER_PROFILES_DIR
+        killed = self._kill_chromium_for_profiles(profile_base)
+        if killed > 0:
+            logger.info(f"잔여 Chromium 프로세스 {killed}개 종료")
+
+        # 3. Lock 파일 정리
+        for profile_dir in profile_base.iterdir():
+            if profile_dir.is_dir():
+                self._remove_lock_files(profile_dir)
+
+        # 4. 충분히 대기 (Chromium 프로세스 종료 및 Lock 해제 대기)
+        await asyncio.sleep(3)
+
         logger.info(f"브라우저 컨텍스트 재생성 준비 완료 (account_id={account_id})")
 
     async def _execute_crawl(self, request: InstagramCrawlRequest, db):
@@ -461,7 +640,7 @@ class InstagramWorker:
 
     async def _execute_feed_crawl(self, request: InstagramCrawlRequest, db, request_service, crawl_service):
         """피드 크롤링 실행."""
-        max_retries = 1  # 브라우저 에러 시 재시도 횟수
+        max_retries = 3  # 브라우저 에러 시 재시도 횟수 (복구 기회 충분히 제공)
         retry_count = 0
 
         # 계정별 Lock 획득 (동시 크롤링 방지)
@@ -544,7 +723,7 @@ class InstagramWorker:
 
     async def _execute_single_post_recrawl(self, request: InstagramCrawlRequest, db, request_service, crawl_service):
         """개별 게시물 재크롤링 실행."""
-        max_retries = 1  # 브라우저 에러 시 재시도 횟수
+        max_retries = 3  # 브라우저 에러 시 재시도 횟수 (복구 기회 충분히 제공)
         retry_count = 0
 
         # 계정별 Lock 획득 (동시 크롤링 방지)
@@ -622,7 +801,7 @@ class InstagramWorker:
 
     async def _execute_url_crawl(self, request: InstagramCrawlRequest, db, request_service, crawl_service):
         """URL로 단일 게시물 수집 실행."""
-        max_retries = 1  # 브라우저 에러 시 재시도 횟수
+        max_retries = 3  # 브라우저 에러 시 재시도 횟수 (복구 기회 충분히 제공)
         retry_count = 0
 
         # 계정별 Lock 획득 (동시 크롤링 방지)

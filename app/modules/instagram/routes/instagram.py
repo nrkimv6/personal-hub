@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.services.browser_service import get_browser_service
 from app.services.account_service import account_service
+from app.core.config import settings
+from app.schemas.account import AccountSchema
 from ..models.schemas import (
     PostSchema,
     PostListResponse,
@@ -1008,6 +1010,32 @@ async def proxy_image(
     except Exception as e:
         logger.error(f"Image proxy error: {e}")
         raise HTTPException(status_code=500, detail="이미지 프록시 오류")
+
+
+# ============== Accounts ==============
+
+@router.get("/accounts", response_model=List[AccountSchema])
+async def get_instagram_accounts(
+    db: Session = Depends(get_db),
+):
+    """Instagram 크롤링 전용 계정 목록 조회.
+
+    설정된 INSTAGRAM_ACCOUNT_ID에 해당하는 계정만 반환합니다.
+    """
+    from app.models import Account
+
+    # Instagram 전용 계정 ID
+    instagram_account_id = settings.INSTAGRAM_ACCOUNT_ID
+
+    account = db.query(Account).filter(
+        Account.id == instagram_account_id,
+        Account.is_active == True
+    ).first()
+
+    if not account:
+        return []
+
+    return [AccountSchema.model_validate(account)]
 
 
 # ============== Helpers ==============
