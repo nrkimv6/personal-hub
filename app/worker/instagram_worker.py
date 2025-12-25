@@ -376,15 +376,40 @@ class InstagramWorker:
             db.close()
 
     async def _cleanup(self):
-        """정리."""
+        """워커 종료 시 정리."""
         logger.info("Instagram 워커 정리 시작")
 
-        # 워커 상태를 종료로 표시
+        # 1. 실행 중인 태스크 취소
+        if self._running_tasks:
+            logger.info(f"실행 중인 태스크 {len(self._running_tasks)}개 취소 중...")
+            for task in self._running_tasks:
+                if not task.done():
+                    task.cancel()
+
+            # 태스크 완료 대기 (취소 포함)
+            try:
+                await asyncio.gather(*self._running_tasks, return_exceptions=True)
+            except Exception as e:
+                logger.warning(f"태스크 대기 중 오류 (무시): {e}")
+
+            self._running_tasks.clear()
+
+        # 2. 워커 상태를 종료로 표시
         self._mark_worker_dead()
 
+        # 3. 탭 풀 정리
+        if self.tab_pool_manager:
+            try:
+                await self.tab_pool_manager.close_all_tabs()
+                logger.info("탭 풀 정리 완료")
+            except Exception as e:
+                logger.error(f"탭 풀 정리 오류: {e}")
+
+        # 4. 브라우저 컨텍스트 정리
         if self.context_manager:
             try:
                 await self.context_manager.close_all_contexts()
+                logger.info("브라우저 컨텍스트 정리 완료")
             except Exception as e:
                 logger.error(f"브라우저 컨텍스트 정리 오류: {e}")
 
