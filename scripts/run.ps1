@@ -62,7 +62,53 @@ foreach ($port in $portsToClean) {
         }
     }
 }
-Write-Host ""
+
+# Clean up orphaned Playwright browser processes and LOCK files (Dev mode only)
+# Production mode doesn't use browsers (workers disabled), so skip cleanup to avoid
+# interfering with a running dev server's browser
+if ($Dev) {
+    Write-Host "[*] Cleaning up Playwright browsers..." -ForegroundColor Yellow
+    $browserProfilesPath = Join-Path $ProjectRoot "data\browser_profiles"
+
+    # Kill orphaned Playwright chromium processes (not regular Chrome)
+    $chromeProcs = Get-Process -Name "chrome" -ErrorAction SilentlyContinue
+    $killedCount = 0
+    foreach ($proc in $chromeProcs) {
+        try {
+            $procPath = $proc.Path
+            if ($procPath -and $procPath -like "*ms-playwright*") {
+                Write-Host "    [!] Killing orphaned Playwright browser (PID: $($proc.Id))" -ForegroundColor Yellow
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+                $killedCount++
+            }
+        } catch {
+            # Ignore access denied errors for system processes
+        }
+    }
+    if ($killedCount -gt 0) {
+        Write-Host "    [+] Killed $killedCount Playwright browser process(es)" -ForegroundColor Green
+        Start-Sleep -Milliseconds 500
+    }
+
+    # Clean up LOCK files in browser profiles
+    if (Test-Path $browserProfilesPath) {
+        $lockFiles = Get-ChildItem -Path $browserProfilesPath -Filter "LOCK" -Recurse -ErrorAction SilentlyContinue
+        if ($lockFiles) {
+            foreach ($lockFile in $lockFiles) {
+                Remove-Item $lockFile.FullName -Force -ErrorAction SilentlyContinue
+            }
+            Write-Host "    [+] Cleaned up $($lockFiles.Count) LOCK file(s)" -ForegroundColor Green
+        }
+
+        # Also clean Crashpad data (can cause issues)
+        $crashpadPath = Join-Path $browserProfilesPath "default\Crashpad"
+        if (Test-Path $crashpadPath) {
+            Remove-Item -Path "$crashpadPath\*" -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "    [+] Cleaned up Crashpad data" -ForegroundColor Green
+        }
+    }
+    Write-Host ""
+}
 
 Write-Host "This script will:" -ForegroundColor Yellow
 Write-Host "  1. Start all processes (API, Worker, Frontend)"
