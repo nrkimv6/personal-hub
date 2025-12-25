@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     APP_NAME: str = "모니터링 시스템 API"
     DEBUG: bool = True
     APP_MODE: str = "production"  # "production" | "development"
+
+    @validator("APP_MODE", pre=True)
+    def strip_app_mode(cls, v):
+        """환경변수에서 공백 제거"""
+        if isinstance(v, str):
+            return v.strip()
+        return v
     
     # 데이터베이스 설정
     DATABASE_URL: str = "sqlite:///./data/monitor.db"  # database 이동

@@ -56,8 +56,9 @@ def sample_saved_search(test_db_session):
 @pytest.fixture
 def sample_history_with_results(test_db_session):
     """테스트용 검색 히스토리 및 결과"""
+    import uuid
     history = GoogleSearchHistory(
-        search_id="test-history-uuid",
+        search_id=f"test-history-{uuid.uuid4().hex[:8]}",
         query="sample query",
         date_filter="24h",
         status="completed",
@@ -88,8 +89,12 @@ def sample_history_with_results(test_db_session):
 class TestSavedSearchListAPI:
     """GET /api/google/saved 테스트"""
 
-    def test_list_saved_searches_empty(self, client):
+    def test_list_saved_searches_empty(self, client, test_db_session):
         """Right: 빈 목록 조회"""
+        # 테스트 격리를 위해 먼저 정리
+        test_db_session.query(GoogleSavedSearch).delete()
+        test_db_session.commit()
+
         response = client.get("/api/google/saved")
         assert response.status_code == 200
         assert response.json() == []
@@ -268,8 +273,12 @@ class TestSearchResultsAPI:
 class TestSearchHistoryAPI:
     """GET /api/google/history 테스트"""
 
-    def test_get_history_empty(self, client):
+    def test_get_history_empty(self, client, test_db_session):
         """Right: 빈 히스토리"""
+        # 테스트 격리를 위해 먼저 정리
+        test_db_session.query(GoogleSearchHistory).delete()
+        test_db_session.commit()
+
         response = client.get("/api/google/history")
         assert response.status_code == 200
         assert response.json() == []
