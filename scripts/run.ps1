@@ -63,12 +63,11 @@ foreach ($port in $portsToClean) {
     }
 }
 
-# Clean up browser profiles before starting
-# Dev mode: Kill orphaned Playwright processes + clean LOCK files
-# Production mode: Only clean LOCK files (don't kill processes - Dev may be running)
-$browserProfilesPath = Join-Path $ProjectRoot "data\browser_profiles"
-
+# Clean up browser profiles before starting (Dev mode only)
+# Production mode doesn't use browsers - don't touch anything
 if ($Dev) {
+    $browserProfilesPath = Join-Path $ProjectRoot "data\browser_profiles"
+
     Write-Host "[*] Cleaning up Playwright browsers..." -ForegroundColor Yellow
 
     # Kill orphaned Playwright chromium processes (not regular Chrome)
@@ -90,28 +89,26 @@ if ($Dev) {
         Write-Host "    [+] Killed $killedCount Playwright browser process(es)" -ForegroundColor Green
         Start-Sleep -Milliseconds 500
     }
-}
 
-# Clean up LOCK files (both Dev and Production - for recovery from abnormal shutdown)
-if (Test-Path $browserProfilesPath) {
-    $lockFiles = Get-ChildItem -Path $browserProfilesPath -Filter "LOCK" -Recurse -ErrorAction SilentlyContinue
-    if ($lockFiles) {
-        $cleanedCount = 0
-        foreach ($lockFile in $lockFiles) {
-            try {
-                Remove-Item $lockFile.FullName -Force -ErrorAction Stop
-                $cleanedCount++
-            } catch {
-                # File may be in use by running Dev server
+    # Clean up LOCK files
+    if (Test-Path $browserProfilesPath) {
+        $lockFiles = Get-ChildItem -Path $browserProfilesPath -Filter "LOCK" -Recurse -ErrorAction SilentlyContinue
+        if ($lockFiles) {
+            $cleanedCount = 0
+            foreach ($lockFile in $lockFiles) {
+                try {
+                    Remove-Item $lockFile.FullName -Force -ErrorAction Stop
+                    $cleanedCount++
+                } catch {
+                    # File may be in use
+                }
+            }
+            if ($cleanedCount -gt 0) {
+                Write-Host "    [+] Cleaned up $cleanedCount LOCK file(s)" -ForegroundColor Green
             }
         }
-        if ($cleanedCount -gt 0) {
-            Write-Host "[*] Cleaned up $cleanedCount LOCK file(s)" -ForegroundColor Yellow
-        }
-    }
 
-    # Also clean Crashpad data (can cause issues) - Dev mode only
-    if ($Dev) {
+        # Clean Crashpad data (can cause issues)
         $crashpadDirs = Get-ChildItem -Path $browserProfilesPath -Directory -Filter "Crashpad" -Recurse -ErrorAction SilentlyContinue
         foreach ($crashpad in $crashpadDirs) {
             Remove-Item -Path "$($crashpad.FullName)\*" -Recurse -Force -ErrorAction SilentlyContinue
@@ -120,9 +117,7 @@ if (Test-Path $browserProfilesPath) {
             Write-Host "    [+] Cleaned up Crashpad data" -ForegroundColor Green
         }
     }
-}
 
-if ($Dev) {
     Write-Host ""
 }
 
