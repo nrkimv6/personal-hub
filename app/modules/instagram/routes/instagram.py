@@ -14,7 +14,7 @@ from app.database import get_db
 from app.services.browser_service import get_browser_service
 from app.services.account_service import account_service
 from app.core.config import settings
-from app.schemas.account import AccountSchema
+from app.schemas.account import Account as AccountSchema
 from ..models.schemas import (
     PostSchema,
     PostListResponse,
