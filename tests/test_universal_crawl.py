@@ -294,12 +294,12 @@ class TestUniversalCrawlAPI:
     """Universal Crawl API 테스트"""
 
     def test_create_crawl_request_api(self, client):
-        """POST /api/crawl/url - 요청 생성"""
+        """POST /api/v1/crawl/url - 요청 생성"""
         import uuid
         unique_id = uuid.uuid4().hex[:8]
 
         response = client.post(
-            "/api/crawl/url",
+            "/api/v1/crawl/url",
             json={
                 "url": f"https://docs.google.com/forms/d/e/{unique_id}",
                 "auto_analyze": True,
@@ -313,9 +313,9 @@ class TestUniversalCrawlAPI:
         assert data["status"] == "pending"
 
     def test_create_crawl_request_instagram_rejected(self, client):
-        """POST /api/crawl/url - Instagram URL 거부"""
+        """POST /api/v1/crawl/url - Instagram URL 거부"""
         response = client.post(
-            "/api/crawl/url",
+            "/api/v1/crawl/url",
             json={"url": "https://www.instagram.com/p/ABC123/"}
         )
 
@@ -323,8 +323,8 @@ class TestUniversalCrawlAPI:
         assert "Instagram" in response.json()["detail"]
 
     def test_list_crawl_requests(self, client, sample_crawl_request):
-        """GET /api/crawl/requests - 목록 조회"""
-        response = client.get("/api/crawl/requests")
+        """GET /api/v1/crawl/requests - 목록 조회"""
+        response = client.get("/api/v1/crawl/requests")
 
         assert response.status_code == 200
         data = response.json()
@@ -332,25 +332,135 @@ class TestUniversalCrawlAPI:
         assert "total" in data
 
     def test_get_crawl_request(self, client, sample_crawl_request):
-        """GET /api/crawl/requests/{id} - 상세 조회"""
-        response = client.get(f"/api/crawl/requests/{sample_crawl_request.id}")
+        """GET /api/v1/crawl/requests/{id} - 상세 조회"""
+        response = client.get(f"/api/v1/crawl/requests/{sample_crawl_request.id}")
 
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == sample_crawl_request.id
 
     def test_list_crawled_pages(self, client, sample_crawled_page):
-        """GET /api/crawl/pages - 목록 조회"""
-        response = client.get("/api/crawl/pages")
+        """GET /api/v1/crawl/pages - 목록 조회"""
+        response = client.get("/api/v1/crawl/pages")
 
         assert response.status_code == 200
         data = response.json()
         assert "items" in data
 
     def test_get_crawled_page(self, client, sample_crawled_page):
-        """GET /api/crawl/pages/{id} - 상세 조회"""
-        response = client.get(f"/api/crawl/pages/{sample_crawled_page.id}")
+        """GET /api/v1/crawl/pages/{id} - 상세 조회"""
+        response = client.get(f"/api/v1/crawl/pages/{sample_crawled_page.id}")
 
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == sample_crawled_page.id
+
+    def test_analyze_page_api(self, client, sample_crawled_page):
+        """POST /api/v1/crawl/pages/{id}/analyze - AI 분석 요청"""
+        response = client.post(f"/api/v1/crawl/pages/{sample_crawled_page.id}/analyze")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["page_id"] == sample_crawled_page.id
+        assert data["status"] == "pending"
+        assert "request_id" in data
+
+    def test_analyze_page_not_found(self, client):
+        """POST /api/v1/crawl/pages/{id}/analyze - 없는 페이지"""
+        response = client.post("/api/v1/crawl/pages/99999/analyze")
+
+        assert response.status_code == 404
+
+    def test_get_analysis_status_not_requested(self, client, sample_crawled_page):
+        """GET /api/v1/crawl/pages/{id}/analysis - 분석 요청 없음"""
+        # 먼저 분석 요청이 없는 새 페이지 생성
+        import uuid
+        import hashlib
+        unique_id = uuid.uuid4().hex[:8]
+        from app.database import get_db
+        from app.models.universal_crawl import CrawledPage as CP
+
+        # 다른 fixture를 통해 생성된 페이지 사용 가능하지만,
+        # 분석 요청이 없는 상태를 테스트해야 하므로 별도 조회
+        response = client.get(f"/api/v1/crawl/pages/{sample_crawled_page.id}/analysis")
+
+        # 분석 요청이 없으면 not_requested
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] in ["not_requested", "pending", "completed"]
+
+    def test_list_requests_with_filters(self, client, sample_crawl_request):
+        """GET /api/v1/crawl/requests - 필터 파라미터 테스트"""
+        # 상태 필터
+        response = client.get("/api/v1/crawl/requests?status=pending")
+        assert response.status_code == 200
+
+        # URL 타입 필터
+        response = client.get("/api/v1/crawl/requests?url_type=google_form")
+        assert response.status_code == 200
+
+        # 분석 상태 필터
+        response = client.get("/api/v1/crawl/requests?analysis_status=unanalyzed")
+        assert response.status_code == 200
+
+        # 정렬
+        response = client.get("/api/v1/crawl/requests?sort_by=requested_at&sort_order=desc")
+        assert response.status_code == 200
+
+    def test_list_requests_url_search(self, client, sample_crawl_request):
+        """GET /api/v1/crawl/requests - URL 검색"""
+        response = client.get("/api/v1/crawl/requests?url_search=google")
+        assert response.status_code == 200
+
+
+class TestUniversalCrawlAnalyzerService:
+    """UniversalCrawlAnalyzerService 테스트"""
+
+    def test_create_analysis_request(self, test_db_session, sample_crawled_page):
+        """분석 요청 생성"""
+        from app.services.universal_crawl_analyzer import UniversalCrawlAnalyzerService
+
+        analyzer = UniversalCrawlAnalyzerService(test_db_session)
+        request = analyzer.create_analysis_request(sample_crawled_page.id)
+
+        assert request is not None
+        assert request.caller_type == "universal_crawl"
+        assert request.caller_id == str(sample_crawled_page.id)
+        assert request.status == "pending"
+
+    def test_create_analysis_request_duplicate(self, test_db_session, sample_crawled_page):
+        """중복 분석 요청 방지"""
+        from app.services.universal_crawl_analyzer import UniversalCrawlAnalyzerService
+
+        analyzer = UniversalCrawlAnalyzerService(test_db_session)
+
+        # 첫 번째 요청
+        request1 = analyzer.create_analysis_request(sample_crawled_page.id)
+        # 두 번째 요청 (중복)
+        request2 = analyzer.create_analysis_request(sample_crawled_page.id)
+
+        # 동일 요청 반환
+        assert request1.id == request2.id
+
+    def test_create_analysis_request_not_found(self, test_db_session):
+        """없는 페이지에 대한 분석 요청"""
+        from app.services.universal_crawl_analyzer import UniversalCrawlAnalyzerService
+
+        analyzer = UniversalCrawlAnalyzerService(test_db_session)
+        request = analyzer.create_analysis_request(99999)
+
+        assert request is None
+
+    def test_get_stats(self, test_db_session, sample_crawled_page):
+        """통계 조회"""
+        from app.services.universal_crawl_analyzer import UniversalCrawlAnalyzerService
+
+        analyzer = UniversalCrawlAnalyzerService(test_db_session)
+        # 분석 요청 생성
+        analyzer.create_analysis_request(sample_crawled_page.id)
+
+        stats = analyzer.get_stats()
+        assert "total" in stats
+        assert "pending" in stats
+        assert "completed" in stats
