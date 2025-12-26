@@ -628,9 +628,8 @@ class InstagramWorker:
             await self.tab_pool_manager.release_tab(tab)
 
     async def _get_page_for_account(self, account_id: int = None):
-        """계정별 브라우저 페이지 가져오기 (하위 호환성 유지).
+        """계정별 브라우저 페이지 가져오기.
 
-        Universal 크롤링 등 기존 코드에서 사용.
         TabPoolManager가 아닌 직접 ContextManager 사용.
 
         Args:
