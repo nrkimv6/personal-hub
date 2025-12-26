@@ -310,9 +310,16 @@ $stderrLogFile = Join-Path $LogDir "stderr_api_$Timestamp.log"
 $env:WORKER_AUTO_START = "false"
 
 try {
+    # Build uvicorn arguments
+    $uvicornArgs = @("-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", $ApiPort)
+    if ($Dev) {
+        $uvicornArgs += "--reload"
+        Write-ServiceLog "Hot reload enabled for development mode"
+    }
+
     # Start API and wait for it (this is the main process NSSM watches)
     $apiProcess = Start-Process -FilePath $VenvPython `
-        -ArgumentList "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", $ApiPort `
+        -ArgumentList $uvicornArgs `
         -WorkingDirectory $ProjectRoot `
         -NoNewWindow `
         -RedirectStandardOutput $stdoutLogFile `
