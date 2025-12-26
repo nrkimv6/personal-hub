@@ -58,7 +58,7 @@ class ScheduleMonitorService:
                     COALESCE(ms.time_range, bi.time_range) as time_range,
                     COALESCE(ms.auto_booking_enabled, bi.auto_booking_enabled) as auto_booking_enabled,
                     bi.max_bookings_per_schedule,
-                    COALESCE(ms.account_id, bi.account_id) as account_id,
+                    COALESCE(ms.service_account_id, bi.service_account_id) as service_account_id,
                     b.id as business_id,
                     b.business_id as naver_business_id,
                     b.business_type_id,

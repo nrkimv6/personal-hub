@@ -78,10 +78,10 @@ def get_item_schedules(item_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Item not found")
 
     schedules = schedule_service.get_by_item(db, item_id)
-    # account_name 채우기
+    # service_account_name 채우기
     for schedule in schedules:
-        if schedule.account:
-            schedule.account_name = schedule.account.name
+        if schedule.service_account:
+            schedule.service_account_name = schedule.service_account.identifier
     return schedules
 
 
@@ -97,16 +97,16 @@ def create_schedule(item_id: int, data: MonitorScheduleCreate, db: Session = Dep
 
     # 중복 체크 (같은 날짜, 같은 계정의 일정만 중복으로 처리)
     existing = schedule_service.get_by_date(db, item_id, data.date)
-    if existing and existing.account_id == data.account_id:
+    if existing and existing.service_account_id == data.service_account_id:
         raise HTTPException(
             status_code=400,
-            detail=f"Schedule for date '{data.date}' with this account already exists"
+            detail=f"Schedule for date '{data.date}' with this service account already exists"
         )
 
     schedule = schedule_service.create(db, data)
-    # account_name 채우기
-    if schedule.account:
-        schedule.account_name = schedule.account.name
+    # service_account_name 채우기
+    if schedule.service_account:
+        schedule.service_account_name = schedule.service_account.identifier
     return schedule
 
 
@@ -121,8 +121,8 @@ def create_bulk_schedules(item_id: int, data: BulkScheduleCreate, db: Session = 
     data.biz_item_id = item_id
 
     schedules = schedule_service.create_bulk(db, data)
-    # account_name 채우기
+    # service_account_name 채우기
     for schedule in schedules:
-        if schedule.account:
-            schedule.account_name = schedule.account.name
+        if schedule.service_account:
+            schedule.service_account_name = schedule.service_account.identifier
     return schedules
