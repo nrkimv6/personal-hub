@@ -34,6 +34,20 @@ class WorkerStatusResponse(BaseModel):
     memory_usage_mb: Optional[float] = None
     global_pause: bool = False
     paused_at: Optional[str] = None
+    # 브라우저 상태 (graceful degradation)
+    browser_available: bool = False
+    browser_error: Optional[str] = None
+    browser_recovery_attempts: int = 0
+    browser_permanently_failed: bool = False
+
+
+class BrowserStatusResponse(BaseModel):
+    """워커 브라우저 상태 응답"""
+    available: bool
+    error: Optional[str] = None
+    recovery_attempts: int = 0
+    permanently_failed: bool = False
+    last_heartbeat: Optional[str] = None
 
 
 class WorkerActionResponse(BaseModel):
@@ -58,7 +72,8 @@ def get_worker_status_from_db() -> dict:
     try:
         result = db.execute(text("""
             SELECT pid, status, start_time, last_heartbeat, active_tasks, error_message,
-                   global_pause, paused_at
+                   global_pause, paused_at,
+                   browser_available, browser_error, browser_recovery_attempts, browser_permanently_failed
             FROM worker_status
             WHERE id = 1
         """)).fetchone()
@@ -72,7 +87,12 @@ def get_worker_status_from_db() -> dict:
                 "active_tasks": result[4],
                 "error_message": result[5],
                 "global_pause": bool(result[6]) if result[6] is not None else False,
-                "paused_at": result[7]
+                "paused_at": result[7],
+                # 브라우저 상태
+                "browser_available": bool(result[8]) if result[8] is not None else False,
+                "browser_error": result[9],
+                "browser_recovery_attempts": result[10] or 0,
+                "browser_permanently_failed": bool(result[11]) if result[11] is not None else False
             }
         return {
             "pid": None,
@@ -82,7 +102,11 @@ def get_worker_status_from_db() -> dict:
             "active_tasks": 0,
             "error_message": None,
             "global_pause": False,
-            "paused_at": None
+            "paused_at": None,
+            "browser_available": False,
+            "browser_error": None,
+            "browser_recovery_attempts": 0,
+            "browser_permanently_failed": False
         }
     except Exception as e:
         logger.error(f"워커 상태 조회 실패: {str(e)}")
@@ -94,7 +118,11 @@ def get_worker_status_from_db() -> dict:
             "active_tasks": 0,
             "error_message": str(e),
             "global_pause": False,
-            "paused_at": None
+            "paused_at": None,
+            "browser_available": False,
+            "browser_error": None,
+            "browser_recovery_attempts": 0,
+            "browser_permanently_failed": False
         }
     finally:
         db.close()
@@ -480,6 +508,50 @@ async def resume_monitoring():
             success=False,
             message=f"재개 실패: {str(e)}",
             pid=None
+        )
+    finally:
+        db.close()
+
+
+@router.get("/browser-status", response_model=BrowserStatusResponse)
+async def get_browser_status():
+    """워커의 브라우저 서비스 상태를 조회합니다.
+
+    브라우저 서비스가 사용 가능한지, 오류가 있는지,
+    복구 시도 횟수와 복구 포기 상태를 반환합니다.
+    """
+    db = SessionLocal()
+    try:
+        result = db.execute(text("""
+            SELECT browser_available, browser_error, browser_recovery_attempts,
+                   browser_permanently_failed, last_heartbeat
+            FROM worker_status WHERE id = 1
+        """)).fetchone()
+
+        if not result:
+            return BrowserStatusResponse(
+                available=False,
+                error="워커 상태 정보 없음",
+                recovery_attempts=0,
+                permanently_failed=False,
+                last_heartbeat=None
+            )
+
+        return BrowserStatusResponse(
+            available=bool(result[0]) if result[0] is not None else False,
+            error=result[1],
+            recovery_attempts=result[2] or 0,
+            permanently_failed=bool(result[3]) if result[3] is not None else False,
+            last_heartbeat=result[4]
+        )
+    except Exception as e:
+        logger.error(f"브라우저 상태 조회 실패: {str(e)}")
+        return BrowserStatusResponse(
+            available=False,
+            error=f"조회 실패: {str(e)}",
+            recovery_attempts=0,
+            permanently_failed=False,
+            last_heartbeat=None
         )
     finally:
         db.close()
