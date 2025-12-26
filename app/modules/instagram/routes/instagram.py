@@ -459,9 +459,6 @@ async def crawl_post_by_url(
     if not account:
         raise HTTPException(status_code=404, detail=f"Account {body.account_id} not found")
 
-    if not account.is_logged_in:
-        raise HTTPException(status_code=400, detail="Account is not logged in")
-
     # URL 크롤링 요청 생성
     request = request_service.create_url_crawl_request(
         url=url,
@@ -509,9 +506,6 @@ async def crawl_by_generic_url(
     account = account_service.get_by_id(db, body.account_id)
     if not account:
         raise HTTPException(status_code=404, detail=f"Account {body.account_id} not found")
-
-    if not account.is_logged_in:
-        raise HTTPException(status_code=400, detail="Account is not logged in")
 
     # 크롤링 요청 생성
     request = request_service.create_generic_url_crawl_request(

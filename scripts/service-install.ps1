@@ -126,6 +126,16 @@ function Install-MonitorService {
     # Prevents port conflict when service restarts too quickly
     nssm set $svc.Name AppThrottle 10000
 
+    # Set Playwright browsers path to project-local directory
+    # This allows SYSTEM account to find browsers (user AppData is not accessible)
+    $PlaywrightBrowsersPath = Join-Path $ProjectRoot ".playwright"
+    if (-not (Test-Path $PlaywrightBrowsersPath)) {
+        Write-Host "    [!] Playwright browsers not found at: $PlaywrightBrowsersPath" -ForegroundColor Yellow
+        Write-Host "    Run: `$env:PLAYWRIGHT_BROWSERS_PATH='$PlaywrightBrowsersPath'; playwright install chromium" -ForegroundColor Yellow
+    }
+    nssm set $svc.Name AppEnvironmentExtra "PLAYWRIGHT_BROWSERS_PATH=$PlaywrightBrowsersPath"
+    Write-Host "    Playwright: $PlaywrightBrowsersPath" -ForegroundColor Gray
+
     # Set service account if provided
     if ($ServiceUser -and $ServicePass) {
         nssm set $svc.Name ObjectName $ServiceUser $ServicePass
