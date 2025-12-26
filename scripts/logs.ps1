@@ -327,8 +327,52 @@ function Start-CombinedLogTail {
 
     Write-Host "`n--- Following $($logFiles.Count) log sources... ---`n" -ForegroundColor DarkGray
 
+    # Track current log file names for detecting new files
+    $logFileNames = @{}
+    foreach ($source in $logFiles.Keys) {
+        $logFileNames[$source] = Split-Path $logFiles[$source] -Leaf
+    }
+
+    # Define timestamped log patterns for auto-refresh
+    $timestampedLogs = @{
+        "API"         = "stdout_api_*.log"
+        "WORKER"      = "stdout_worker_*.log"
+        "IG-WORKER"   = "stdout_instagram_*.log"
+        "CLAUDE"      = "stdout_llm_worker_*.log"
+        "FRONTEND"    = "frontend_*.log"
+    }
+
     try {
         while ($true) {
+            # Check for new log files (service restart detection)
+            foreach ($source in $timestampedLogs.Keys) {
+                $pattern = $timestampedLogs[$source]
+                $latestLog = Get-ChildItem -Path $LogDir -Filter $pattern -ErrorAction SilentlyContinue |
+                    Sort-Object Name -Descending | Select-Object -First 1
+
+                if ($latestLog) {
+                    $currentName = $logFileNames[$source]
+                    if ($latestLog.Name -ne $currentName) {
+                        # New log file detected
+                        Write-Host "[$source] === Switched to new log: $($latestLog.Name) ===" -ForegroundColor Yellow
+                        $logFiles[$source] = $latestLog.FullName
+                        $logFileNames[$source] = $latestLog.Name
+                        $filePositions[$source] = 0
+                    }
+                } elseif (-not $logFiles.ContainsKey($source)) {
+                    # Log file appeared for the first time
+                    $latestLog = Get-ChildItem -Path $LogDir -Filter $pattern -ErrorAction SilentlyContinue |
+                        Sort-Object Name -Descending | Select-Object -First 1
+                    if ($latestLog) {
+                        Write-Host "[$source] === New log detected: $($latestLog.Name) ===" -ForegroundColor Green
+                        $logFiles[$source] = $latestLog.FullName
+                        $logFileNames[$source] = $latestLog.Name
+                        $logColors[$source] = $logConfig[$source].Color
+                        $filePositions[$source] = 0
+                    }
+                }
+            }
+
             foreach ($source in $logFiles.Keys) {
                 $filePath = $logFiles[$source]
                 $item = Get-Item $filePath -ErrorAction SilentlyContinue
