@@ -149,6 +149,15 @@ if ($Target -eq "list") {
 $apiLogFile = Get-LatestLogFile "stdout_api_"
 $workerLogFile = Get-LatestLogFile "stdout_worker_"
 $frontendLogFile = Get-LatestLogFile "frontend_"
+$igWorkerLogFile = Get-LatestLogFile "stdout_instagram_"
+$claudeWorkerLogFile = Get-LatestLogFile "stdout_llm_worker_"
+
+# Static log files (not timestamped)
+$serviceRunnerLogFile = Join-Path $LogDir "service_runner.log"
+$watchdogLogFile = Join-Path $LogDir "watchdog.log"
+$igWatchdogLogFile = Join-Path $LogDir "instagram_watchdog.log"
+$claudeWatchdogLogFile = Join-Path $LogDir "claude_watchdog.log"
+$cloudflaredLogFile = Join-Path $ProjectRoot "logs" "cloudflared.log"
 
 # Check if log files are stale (created more than 1 hour before the latest API log)
 function Test-StaleLogFile {
@@ -259,7 +268,14 @@ function Start-CombinedLogTail {
     param(
         [string]$ApiLog,
         [string]$WorkerLog,
-        [string]$FrontendLog
+        [string]$FrontendLog,
+        [string]$IgWorkerLog,
+        [string]$ClaudeWorkerLog,
+        [string]$ServiceRunnerLog,
+        [string]$WatchdogLog,
+        [string]$IgWatchdogLog,
+        [string]$ClaudeWatchdogLog,
+        [string]$CloudflaredLog
     )
 
     Write-Host "`n========================================" -ForegroundColor Cyan
@@ -268,37 +284,39 @@ function Start-CombinedLogTail {
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host ""
 
+    # Log source configuration: Name -> (FilePath, Color, InitialTailLines)
+    $logConfig = [ordered]@{
+        "SERVICE"     = @{ Path = $ServiceRunnerLog;  Color = "DarkCyan";    Tail = 3 }
+        "TUNNEL"      = @{ Path = $CloudflaredLog;    Color = "DarkGray";    Tail = 3 }
+        "API"         = @{ Path = $ApiLog;            Color = "Cyan";        Tail = 5 }
+        "WORKER"      = @{ Path = $WorkerLog;         Color = "Magenta";     Tail = 5 }
+        "IG-WORKER"   = @{ Path = $IgWorkerLog;       Color = "DarkMagenta"; Tail = 3 }
+        "CLAUDE"      = @{ Path = $ClaudeWorkerLog;   Color = "Blue";        Tail = 3 }
+        "FRONTEND"    = @{ Path = $FrontendLog;       Color = "Green";       Tail = 3 }
+        "WATCHDOG"    = @{ Path = $WatchdogLog;       Color = "DarkYellow";  Tail = 2 }
+        "IG-WD"       = @{ Path = $IgWatchdogLog;     Color = "DarkYellow";  Tail = 2 }
+        "CLAUDE-WD"   = @{ Path = $ClaudeWatchdogLog; Color = "DarkYellow";  Tail = 2 }
+    }
+
     # Track file positions
     $filePositions = @{}
     $logFiles = @{}
+    $logColors = @{}
 
-    if ($ApiLog -and (Test-Path $ApiLog)) {
-        $logFiles["API"] = $ApiLog
-        $filePositions["API"] = (Get-Item $ApiLog).Length
-        # Show last 5 lines initially
-        $initLines = Get-Content $ApiLog -Tail 5 -Encoding UTF8 -ErrorAction SilentlyContinue
-        foreach ($line in $initLines) {
-            Write-Host "[API] $line" -ForegroundColor Cyan
-        }
-    }
+    foreach ($source in $logConfig.Keys) {
+        $config = $logConfig[$source]
+        $filePath = $config.Path
 
-    if ($WorkerLog -and (Test-Path $WorkerLog)) {
-        $logFiles["WORKER"] = $WorkerLog
-        $filePositions["WORKER"] = (Get-Item $WorkerLog).Length
-        # Show last 5 lines initially
-        $initLines = Get-Content $WorkerLog -Tail 5 -Encoding UTF8 -ErrorAction SilentlyContinue
-        foreach ($line in $initLines) {
-            Write-Host "[WORKER] $line" -ForegroundColor Magenta
-        }
-    }
+        if ($filePath -and (Test-Path $filePath)) {
+            $logFiles[$source] = $filePath
+            $logColors[$source] = $config.Color
+            $filePositions[$source] = (Get-Item $filePath).Length
 
-    if ($FrontendLog -and (Test-Path $FrontendLog)) {
-        $logFiles["FRONTEND"] = $FrontendLog
-        $filePositions["FRONTEND"] = (Get-Item $FrontendLog).Length
-        # Show last 5 lines initially
-        $initLines = Get-Content $FrontendLog -Tail 5 -Encoding UTF8 -ErrorAction SilentlyContinue
-        foreach ($line in $initLines) {
-            Write-Host "[FRONTEND] $line" -ForegroundColor Green
+            # Show last N lines initially
+            $initLines = Get-Content $filePath -Tail $config.Tail -Encoding UTF8 -ErrorAction SilentlyContinue
+            foreach ($line in $initLines) {
+                Write-Host "[$source] $line" -ForegroundColor $config.Color
+            }
         }
     }
 
@@ -307,13 +325,16 @@ function Start-CombinedLogTail {
         return
     }
 
-    Write-Host "`n--- Following logs... ---`n" -ForegroundColor DarkGray
+    Write-Host "`n--- Following $($logFiles.Count) log sources... ---`n" -ForegroundColor DarkGray
 
     try {
         while ($true) {
             foreach ($source in $logFiles.Keys) {
                 $filePath = $logFiles[$source]
-                $currentSize = (Get-Item $filePath -ErrorAction SilentlyContinue).Length
+                $item = Get-Item $filePath -ErrorAction SilentlyContinue
+                if (-not $item) { continue }
+
+                $currentSize = $item.Length
 
                 if ($currentSize -gt $filePositions[$source]) {
                     # Read new content using StreamReader for proper UTF-8
@@ -322,18 +343,13 @@ function Start-CombinedLogTail {
                     $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
 
                     while ($null -ne ($line = $reader.ReadLine())) {
-                        # Determine color based on source
-                        $sourceColor = switch ($source) {
-                            "API" { "Cyan" }
-                            "WORKER" { "Magenta" }
-                            "FRONTEND" { "Green" }
-                            default { "White" }
-                        }
+                        # Get base color for this source
+                        $sourceColor = $logColors[$source]
 
                         # Override color for errors/warnings
-                        if ($line -match "ERROR|CRITICAL") {
+                        if ($line -match "ERROR|CRITICAL|Exception") {
                             $sourceColor = "Red"
-                        } elseif ($line -match "WARNING") {
+                        } elseif ($line -match "WARNING|WARN") {
                             $sourceColor = "Yellow"
                         }
 
@@ -370,7 +386,17 @@ if ($Follow) {
             Start-LogTail -FilePath $frontendLogFile -Prefix "Frontend"
         }
         default {
-            Start-CombinedLogTail -ApiLog $apiLogFile -WorkerLog $workerLogFile -FrontendLog $frontendLogFile
+            Start-CombinedLogTail `
+                -ApiLog $apiLogFile `
+                -WorkerLog $workerLogFile `
+                -FrontendLog $frontendLogFile `
+                -IgWorkerLog $igWorkerLogFile `
+                -ClaudeWorkerLog $claudeWorkerLogFile `
+                -ServiceRunnerLog $serviceRunnerLogFile `
+                -WatchdogLog $watchdogLogFile `
+                -IgWatchdogLog $igWatchdogLogFile `
+                -ClaudeWatchdogLog $claudeWatchdogLogFile `
+                -CloudflaredLog $cloudflaredLogFile
         }
     }
 } else {

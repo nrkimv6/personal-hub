@@ -383,10 +383,12 @@
 		try {
 			// Instagram 전용 계정만 조회
 			const response = await instagramApi.getAccounts();
-			accounts = response.filter(a => a.is_logged_in);
-			// 기본 계정 선택 (첫 번째 로그인된 계정)
-			if (accounts.length > 0 && !urlCrawlAccountId) {
-				urlCrawlAccountId = accounts[0].id;
+			// 로그인 상태와 관계없이 모든 계정 사용 가능
+			accounts = response;
+			// 기본 계정 선택: ID=4 우선, 없으면 첫 번째 계정
+			if (!urlCrawlAccountId) {
+				const defaultAccount = accounts.find(a => a.id === 4);
+				urlCrawlAccountId = defaultAccount?.id ?? accounts[0]?.id ?? null;
 			}
 		} catch (e) {
 			console.error('계정 목록 로드 실패:', e);

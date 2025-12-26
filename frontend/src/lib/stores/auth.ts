@@ -35,10 +35,15 @@ function createAuthStore() {
 		/**
 		 * 인증 상태 확인
 		 *
-		 * localhost에서는 토큰 없이도 API를 호출하여 자동 관리자 처리
+		 * localhost에서는 토큰 없이도 자동 관리자 처리
 		 */
 		async checkAuth(): Promise<void> {
 			if (!browser) return;
+
+			// localhost 체크 - 프론트엔드에서도 직접 확인
+			const isLocalhost = window.location.hostname === 'localhost' ||
+				window.location.hostname === '127.0.0.1' ||
+				window.location.hostname === '::1';
 
 			const token = localStorage.getItem(TOKEN_KEY);
 
@@ -63,6 +68,14 @@ function createAuthStore() {
 						email: data.user.email,
 						isLoading: false
 					});
+				} else if (isLocalhost) {
+					// 백엔드가 user를 반환하지 않아도 localhost면 관리자 처리
+					set({
+						isLoggedIn: true,
+						isAdmin: true,
+						email: 'localhost@admin',
+						isLoading: false
+					});
 				} else {
 					// 비로그인 상태
 					if (token) {
@@ -71,11 +84,20 @@ function createAuthStore() {
 					set({ ...initialState, isLoading: false });
 				}
 			} catch {
-				// 에러 시 토큰 삭제
-				if (token) {
-					localStorage.removeItem(TOKEN_KEY);
+				// 에러 시에도 localhost면 관리자 처리
+				if (isLocalhost) {
+					set({
+						isLoggedIn: true,
+						isAdmin: true,
+						email: 'localhost@admin',
+						isLoading: false
+					});
+				} else {
+					if (token) {
+						localStorage.removeItem(TOKEN_KEY);
+					}
+					set({ ...initialState, isLoading: false });
 				}
-				set({ ...initialState, isLoading: false });
 			}
 		},
 

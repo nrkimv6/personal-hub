@@ -261,65 +261,37 @@ function Show-ServiceStatus {
     }
 }
 
-# Open log windows
+# Open log windows - uses logs.ps1 for unified log view
 function Open-ServiceLogs {
     param($svc)
 
-    Write-Host "[*] Opening log windows..." -ForegroundColor Cyan
+    Write-Host "[*] Opening unified log window..." -ForegroundColor Cyan
 
-    # Primary log files
-    $serviceRunnerLog = Join-Path $svc.LogDir "service_runner.log"
-    $nssmStdoutLog = Join-Path $svc.LogDir "service_$($svc.Name).log"
-    $nssmStderrLog = Join-Path $svc.LogDir "service_$($svc.Name)_err.log"
+    # Determine if this is Dev service
+    $isDev = $svc.Args -like "*-Dev*"
+    $devFlag = if ($isDev) { "-Dev" } else { "" }
+    $modeLabel = if ($isDev) { "DEV" } else { "PROD" }
+
+    # Build the logs.ps1 command
+    $logsScript = Join-Path $ScriptDir "logs.ps1"
+    $logsCmd = @"
+Write-Host '[$modeLabel] Monitor Page - Unified Log Viewer' -ForegroundColor Cyan
+Write-Host 'Waiting for services to initialize...' -ForegroundColor Yellow
+Start-Sleep -Seconds 3
+& '$logsScript' -Follow $devFlag
+"@
 
     # Check if Windows Terminal is available
     $wtPath = Get-Command wt -ErrorAction SilentlyContinue
 
-    # Helper function to create a log tail command that waits for file to exist
-    function Get-TailCommand {
-        param([string]$LogFile, [string]$Label, [string]$Color)
-        @"
-Write-Host '$Label' -ForegroundColor $Color
-Write-Host 'Log file: $LogFile' -ForegroundColor Gray
-if (-not (Test-Path '$LogFile')) {
-    Write-Host 'Waiting for log file to be created...' -ForegroundColor Yellow
-    while (-not (Test-Path '$LogFile')) { Start-Sleep -Seconds 1 }
-}
-Get-Content '$LogFile' -Wait -Tail 100 -Encoding UTF8
-"@
-    }
-
     if ($wtPath) {
-        # Windows Terminal - open multiple tabs
+        # Windows Terminal - single tab with all logs
         Write-Host "    Using Windows Terminal" -ForegroundColor Gray
-
-        # Build command for tabs: Service Runner Log + NSSM stdout + NSSM stderr
-        $serviceRunnerCmd = Get-TailCommand $serviceRunnerLog "Service Runner Log" "Cyan"
-        $stdoutCmd = Get-TailCommand $nssmStdoutLog "NSSM STDOUT" "Green"
-        $stderrCmd = Get-TailCommand $nssmStderrLog "NSSM STDERR" "Red"
-
-        $wtArgs = @(
-            "new-tab",
-            "--title", "[$($svc.Name)] Service Runner",
-            "powershell", "-NoExit", "-Command", $serviceRunnerCmd,
-            ";",
-            "new-tab",
-            "--title", "[$($svc.Name)] STDOUT",
-            "powershell", "-NoExit", "-Command", $stdoutCmd,
-            ";",
-            "new-tab",
-            "--title", "[$($svc.Name)] STDERR",
-            "powershell", "-NoExit", "-Command", $stderrCmd
-        )
-
-        Start-Process wt -ArgumentList $wtArgs
-
+        Start-Process wt -ArgumentList "new-tab", "--title", "[$modeLabel] Monitor Page Logs", "powershell", "-NoExit", "-Command", $logsCmd
     } else {
         # Fallback to regular PowerShell window
-        Write-Host "    Using PowerShell (Windows Terminal not available)" -ForegroundColor Gray
-
-        $serviceRunnerCmd = Get-TailCommand $serviceRunnerLog "Service Runner Log" "Cyan"
-        Start-Process powershell -ArgumentList "-NoExit", "-Command", $serviceRunnerCmd
+        Write-Host "    Using PowerShell" -ForegroundColor Gray
+        Start-Process powershell -ArgumentList "-NoExit", "-Command", $logsCmd
     }
 
     Write-Host "[+] Log window opened" -ForegroundColor Green
