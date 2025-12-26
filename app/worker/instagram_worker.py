@@ -1,14 +1,13 @@
 """
-통합 크롤링 워커 프로세스
+Instagram 크롤링 워커 프로세스
 
-API 서버와 분리되어 독립적으로 크롤링 작업을 수행합니다.
+API 서버와 분리되어 독립적으로 Instagram 크롤링 작업을 수행합니다.
 
 실행 방법:
     python -m app.worker.instagram_worker
 
 주요 기능:
-    - Instagram Pending 크롤링 요청 처리 (InstagramCrawlRequest)
-    - Universal Pending 크롤링 요청 처리 (UniversalCrawlRequest)
+    - Pending 크롤링 요청 처리 (InstagramCrawlRequest)
     - 스케줄 기반 자동 크롤링 실행 (InstagramScheduler)
     - 로그인 상태 확인 및 실패 처리
 """
@@ -61,11 +60,6 @@ try:
     from app.shared.browser.context_manager import ContextManager
     from app.shared.browser.tab_pool_manager import TabPoolManager
     logger.debug("browser_service import 완료")
-
-    from app.models.universal_crawl import UniversalCrawlRequest
-    from app.services.universal_crawl_service import universal_crawl_service
-    from app.services.extractors import ExtractorFactory
-    logger.debug("universal_crawl import 완료")
 
     # Instagram 관련 로거들이 워커 로거와 같은 핸들러를 사용하도록 설정
     # 이렇게 하면 크롤러/서비스의 로그도 워커 로그 파일에 기록됨
@@ -435,13 +429,10 @@ class InstagramWorker:
                 # 1. Instagram Pending 요청 디스패치 (백그라운드)
                 await self._dispatch_pending_requests()
 
-                # 2. Universal Pending 요청 처리 (기존 방식 유지 - 간단한 작업)
-                await self._process_universal_requests()
-
-                # 3. 스케줄 기반 실행 디스패치 (백그라운드)
+                # 2. 스케줄 기반 실행 디스패치 (백그라운드)
                 await self._dispatch_scheduled_runs()
 
-                # 4. 짧은 대기 (새 요청 빠르게 체크)
+                # 3. 짧은 대기 (새 요청 빠르게 체크)
                 await asyncio.sleep(1)
 
             except asyncio.CancelledError:
@@ -958,100 +949,6 @@ class InstagramWorker:
                 if tab:
                     await self._release_tab(tab)
                 self._update_worker_state("idle")
-
-    # ========================================
-    # Universal 크롤링 관련 메서드
-    # ========================================
-
-    async def _process_universal_requests(self):
-        """Universal Pending 요청 처리."""
-        db = SessionLocal()
-        try:
-            pending_list = universal_crawl_service.get_pending_requests(db, limit=1)
-
-            if pending_list:
-                pending = pending_list[0]
-                logger.info(f"Universal 요청 발견: id={pending.id}, url={pending.url}")
-                await self._execute_universal_crawl(pending, db)
-
-        except Exception as e:
-            logger.error(f"Universal 요청 처리 오류: {e}", exc_info=True)
-        finally:
-            db.close()
-
-    async def _execute_universal_crawl(self, request: UniversalCrawlRequest, db):
-        """Universal URL 크롤링 실행."""
-        try:
-            # 처리 중으로 변경
-            universal_crawl_service.mark_processing(db, request.id)
-            logger.info(f"Universal 크롤링 시작: request_id={request.id}, url={request.url}")
-
-            # 워커 상태를 crawling으로 변경
-            self._update_worker_state("universal_crawl")
-
-            # 브라우저 페이지 가져오기
-            # account_id가 있으면 해당 프로필 사용, 없으면 기본 계정 사용
-            # None을 전달하면 context_manager가 기본 계정을 자동 선택
-            account_id = request.account_id if request.account_id else None
-            page = await self._get_page_for_account(account_id)
-
-            # ExtractorFactory로 적절한 추출기 선택
-            extractor = ExtractorFactory.get_extractor(request.url_type)
-            logger.info(f"추출기 선택: {extractor.name} for url_type={request.url_type}")
-
-            # 콘텐츠 추출
-            extracted = await extractor.extract(page, request.url)
-
-            if extracted.error:
-                # 추출 실패
-                universal_crawl_service.mark_failed(db, request.id, extracted.error)
-                logger.warning(f"Universal 크롤링 실패: {extracted.error}")
-                return
-
-            # CrawledPage 저장
-            crawled_page = universal_crawl_service.create_crawled_page(
-                db=db,
-                url=extracted.url,
-                url_type=extracted.url_type,
-                title=extracted.title,
-                description=extracted.description,
-                content=extracted.content,
-                extracted_data=extracted.extracted_data,
-                og_title=extracted.og_title,
-                og_description=extracted.og_description,
-                og_image=extracted.og_image,
-                extractor_used=extracted.extractor_used,
-            )
-
-            # 요청 완료 처리
-            universal_crawl_service.mark_completed(db, request.id, crawled_page.id)
-            logger.info(
-                f"Universal 크롤링 완료: request_id={request.id}, "
-                f"page_id={crawled_page.id}, title={crawled_page.title}"
-            )
-
-            # AI 분석 요청 생성 (auto_analyze가 True일 때)
-            if request.auto_analyze:
-                from app.services.universal_crawl_analyzer import UniversalCrawlAnalyzerService
-                analyzer = UniversalCrawlAnalyzerService(db)
-                llm_request = analyzer.create_analysis_request(
-                    page_id=crawled_page.id,
-                    requested_by="auto",
-                )
-                if llm_request:
-                    logger.info(
-                        f"AI 분석 요청 생성: page_id={crawled_page.id}, "
-                        f"llm_request_id={llm_request.id}"
-                    )
-
-        except Exception as e:
-            universal_crawl_service.mark_failed(db, request.id, str(e))
-            logger.error(f"Universal 크롤링 예외: {e}", exc_info=True)
-        finally:
-            # 워커 상태를 idle로 복원
-            self._update_worker_state("idle")
-            # 대기 중인 요청이 있으면 즉시 처리하도록 이벤트 설정
-            self.continue_event.set()
 
 
 # 전역 워커 인스턴스
