@@ -8,6 +8,7 @@
 	 */
 	import type { Event, Popup, InstagramPost, InstagramTag } from '$lib/types';
 	import FeedCard from '$lib/components/instagram/FeedCard.svelte';
+	import SourcesList from '$lib/components/events/SourcesList.svelte';
 	import { getEventStatusColor, getEventStatusLabel, getDaysRemaining } from '$lib/utils/eventUtils';
 	
 	type ViewerType = 'event' | 'popup';
@@ -422,6 +423,17 @@
 						</button>
 					{/if}
 
+					<!-- 출처 목록 -->
+					{#if item?.id}
+						<div class="mt-3 pt-3 border-t border-gray-100">
+							<SourcesList
+								entityType={type === 'event' ? 'events' : 'popups'}
+								entityId={item.id}
+								{isAdmin}
+							/>
+						</div>
+					{/if}
+
 					<!-- 삭제 (이벤트만) -->
 					{#if type === 'event' && onDelete}
 						<button
@@ -750,6 +762,17 @@
 							>
 								{event.is_offline ? '📍 오프라인 이벤트' : '🌐 온라인 이벤트'} (클릭하여 변경)
 							</button>
+						{/if}
+
+						<!-- 출처 목록 -->
+						{#if item?.id}
+							<div class="mt-3 pt-3 border-t border-gray-100">
+								<SourcesList
+									entityType={type === 'event' ? 'events' : 'popups'}
+									entityId={item.id}
+									{isAdmin}
+								/>
+							</div>
 						{/if}
 
 						<!-- 삭제 (이벤트만) -->
