@@ -76,7 +76,7 @@ class ScheduleMonitorService:
                 return None
 
             # URL 생성
-            # 컬럼 인덱스: 0-12: schedule 필드, 13-19: biz_item 필드, 20-27: business 필드
+            # 컬럼 인덱스: 0-12: schedule 필드, 13-19: biz_item 필드 (19=service_account_id), 20-26: business 필드
             url = build_naver_booking_url(
                 business_type_id=result[23],  # business_type_id
                 business_id=result[22],       # naver_business_id
