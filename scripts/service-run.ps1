@@ -203,12 +203,12 @@ $stopScript = Join-Path $ScriptDir "stop.ps1"
 if ($RunWorkers) {
     # Dev mode: start everything except API
     $env:SKIP_WORKER = $null
-    $env:SKIP_INSTAGRAM_WORKER = $null
+    $env:SKIP_CRAWL_WORKER = $null
     $env:SKIP_CLAUDE_WORKER = $null
 } else {
     # Production mode: skip all workers
     $env:SKIP_WORKER = "true"
-    $env:SKIP_INSTAGRAM_WORKER = "true"
+    $env:SKIP_CRAWL_WORKER = "true"
     $env:SKIP_CLAUDE_WORKER = "true"
 }
 
@@ -266,16 +266,16 @@ if ($RunWorkers) {
     $watchdogProcess.Id | Out-File $WatchdogPidFile -Encoding ascii
     Write-ServiceLog "Worker Watchdog started (PID: $($watchdogProcess.Id))"
 
-    # Instagram Worker Watchdog
-    Write-ServiceLog "Starting Instagram Watchdog..."
-    $InstagramWatchdogPidFile = Join-Path $PidDir "instagram_watchdog$PidSuffix.pid"
-    $igWatchdogProcess = Start-Process -FilePath "powershell.exe" `
-        -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\instagram-watchdog.ps1" `
+    # Crawl Worker Watchdog (Instagram + Universal)
+    Write-ServiceLog "Starting Crawl Watchdog..."
+    $CrawlWatchdogPidFile = Join-Path $PidDir "crawl_watchdog$PidSuffix.pid"
+    $crawlWatchdogProcess = Start-Process -FilePath "powershell.exe" `
+        -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\crawl-watchdog.ps1" `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
         -PassThru
-    $igWatchdogProcess.Id | Out-File $InstagramWatchdogPidFile -Encoding ascii
-    Write-ServiceLog "Instagram Watchdog started (PID: $($igWatchdogProcess.Id))"
+    $crawlWatchdogProcess.Id | Out-File $CrawlWatchdogPidFile -Encoding ascii
+    Write-ServiceLog "Crawl Watchdog started (PID: $($crawlWatchdogProcess.Id))"
 
     # Claude Worker Watchdog
     Write-ServiceLog "Starting Claude Watchdog..."

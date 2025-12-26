@@ -42,7 +42,6 @@ if (-not (Test-Path $PidDir)) {
 $PidSuffix = if ($Dev) { "_dev" } else { "" }
 $ApiPidFile = Join-Path $PidDir "api$PidSuffix.pid"
 $WorkerPidFile = Join-Path $PidDir "worker$PidSuffix.pid"
-$InstagramWorkerPidFile = Join-Path $PidDir "instagram_worker$PidSuffix.pid"
 $ClaudeWorkerPidFile = Join-Path $PidDir "claude_worker$PidSuffix.pid"
 $FrontendPidFile = Join-Path $PidDir "frontend$PidSuffix.pid"
 
@@ -103,17 +102,17 @@ if ($env:SKIP_WORKER -eq "true") {
     $runWorker = $true
 }
 
-# Check Instagram Worker (via Watchdog)
-$InstagramWatchdogPidFile = Join-Path $PidDir "instagram_watchdog$PidSuffix.pid"
-if ($env:SKIP_INSTAGRAM_WORKER -eq "true") {
-    Write-Host "[!] Skipping Instagram worker (SKIP_INSTAGRAM_WORKER=true)" -ForegroundColor Yellow
-    $runInstagramWorker = $false
-} elseif (Test-ProcessRunning $InstagramWatchdogPidFile) {
-    $instagramWatchdogPid = Get-Content $InstagramWatchdogPidFile
-    Write-Host "[!] Instagram Watchdog already running (PID: $instagramWatchdogPid)" -ForegroundColor Yellow
-    $runInstagramWorker = $false
+# Check Crawl Worker (via Watchdog)
+$CrawlWatchdogPidFile = Join-Path $PidDir "crawl_watchdog$PidSuffix.pid"
+if ($env:SKIP_CRAWL_WORKER -eq "true") {
+    Write-Host "[!] Skipping Crawl worker (SKIP_CRAWL_WORKER=true)" -ForegroundColor Yellow
+    $runCrawlWorker = $false
+} elseif (Test-ProcessRunning $CrawlWatchdogPidFile) {
+    $crawlWatchdogPid = Get-Content $CrawlWatchdogPidFile
+    Write-Host "[!] Crawl Watchdog already running (PID: $crawlWatchdogPid)" -ForegroundColor Yellow
+    $runCrawlWorker = $false
 } else {
-    $runInstagramWorker = $true
+    $runCrawlWorker = $true
 }
 
 # Check Claude Worker (via Watchdog)
@@ -142,7 +141,7 @@ if ($env:SKIP_FRONTEND -eq "true") {
 }
 
 # Exit if all processes are running
-if (-not $runApi -and -not $runWorker -and -not $runInstagramWorker -and -not $runClaudeWorker -and -not $runFrontend) {
+if (-not $runApi -and -not $runWorker -and -not $runCrawlWorker -and -not $runClaudeWorker -and -not $runFrontend) {
     Write-Host "`nAll processes are already running." -ForegroundColor Green
     Write-Host "View logs: .\scripts\logs.ps1"
     Write-Host "Stop processes: .\scripts\stop.ps1"
@@ -254,32 +253,31 @@ if ($runWorker) {
     Write-Host "    [!] Worker will auto-restart if it crashes" -ForegroundColor Yellow
 }
 
-# Start Instagram Worker with Watchdog for auto-restart
-if ($runInstagramWorker) {
-    Write-Host "`n[*] Starting Instagram Worker with Watchdog..." -ForegroundColor Cyan
+# Start Crawl Worker with Watchdog for auto-restart
+if ($runCrawlWorker) {
+    Write-Host "`n[*] Starting Crawl Worker with Watchdog..." -ForegroundColor Cyan
 
-    $instagramWorkerLogFile = Join-Path $LogDir "instagram_worker_$Timestamp.log"
-    $instagramWatchdogLogFile = Join-Path $LogDir "instagram_watchdog.log"
+    $crawlWorkerLogFile = Join-Path $LogDir "crawl_worker_$Timestamp.log"
+    $crawlWatchdogLogFile = Join-Path $LogDir "crawl_watchdog.log"
 
-    # Start watchdog process which will manage the Instagram worker
+    # Start watchdog process which will manage the Crawl worker
     # Watchdog monitors worker and restarts it if it crashes
-    $instagramWatchdogProcess = Start-Process -FilePath "powershell.exe" `
-        -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\instagram-watchdog.ps1" `
+    $crawlWatchdogProcess = Start-Process -FilePath "powershell.exe" `
+        -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\crawl-watchdog.ps1" `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
         -PassThru
 
-    # Save Instagram Watchdog PID (worker PID will be managed by watchdog in instagram_worker.pid)
-    $InstagramWatchdogPidFile = Join-Path $PidDir "instagram_watchdog$PidSuffix.pid"
-    $instagramWatchdogProcess.Id | Out-File $InstagramWatchdogPidFile -Encoding ascii
+    # Save Crawl Watchdog PID (worker PID will be managed by watchdog in crawl_worker.pid)
+    $crawlWatchdogProcess.Id | Out-File $CrawlWatchdogPidFile -Encoding ascii
 
     # Wait for worker to actually start
     Start-Sleep -Seconds 2
 
-    Write-Host "[+] Instagram Watchdog started (PID: $($instagramWatchdogProcess.Id))" -ForegroundColor Green
-    Write-Host "    Worker Log: $instagramWorkerLogFile"
-    Write-Host "    Watchdog Log: $instagramWatchdogLogFile"
-    Write-Host "    [!] Instagram Worker will auto-restart if it crashes" -ForegroundColor Yellow
+    Write-Host "[+] Crawl Watchdog started (PID: $($crawlWatchdogProcess.Id))" -ForegroundColor Green
+    Write-Host "    Worker Log: $crawlWorkerLogFile"
+    Write-Host "    Watchdog Log: $crawlWatchdogLogFile"
+    Write-Host "    [!] Crawl Worker will auto-restart if it crashes" -ForegroundColor Yellow
 }
 
 # Start Claude Worker with Watchdog for auto-restart
