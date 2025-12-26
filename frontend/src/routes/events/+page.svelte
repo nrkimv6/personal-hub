@@ -460,8 +460,9 @@
 
 	function handleViewerEdit() {
 		if (viewingEvent) {
+			const event = viewingEvent;  // closeFeedViewer에서 null로 설정되기 전에 저장
 			closeFeedViewer();
-			openEditModal(viewingEvent);
+			openEditModal(event);
 		}
 	}
 
