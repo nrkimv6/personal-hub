@@ -29,6 +29,11 @@ if ($Dev) {
 # Set APP_MODE environment variable for backend
 $env:APP_MODE = $AppMode
 
+# Set Playwright browsers path to project-local directory
+# This allows consistent browser path across all execution modes
+$PlaywrightBrowsersPath = Join-Path $ProjectRoot ".playwright"
+$env:PLAYWRIGHT_BROWSERS_PATH = $PlaywrightBrowsersPath
+
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Monitor Page - Integrated Runner" -ForegroundColor Cyan
