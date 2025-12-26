@@ -307,7 +307,13 @@
 		<div class="flex items-center gap-3">
 			<div class="flex flex-col">
 				<div class="flex items-center gap-2">
-					<span class="font-semibold text-sm text-gray-900">@{post.account}</span>
+					<a
+						href="https://www.instagram.com/{post.account}/"
+						target="_blank"
+						rel="noopener noreferrer"
+						class="font-semibold text-sm text-gray-900 hover:text-blue-600 hover:underline transition-colors"
+						onclick={(e) => e.stopPropagation()}
+					>@{post.account}</a>
 					{#if post.post_type === 'SPONSORED' || (post.is_ad && !post.post_type)}
 						<span class="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-800 rounded">광고</span>
 					{:else if post.post_type === 'SUGGESTED'}
