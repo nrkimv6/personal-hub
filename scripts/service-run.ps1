@@ -253,31 +253,16 @@ $frontendProcess = Start-Process -FilePath "npm.cmd" `
 $frontendProcess.Id | Out-File $FrontendPidFile -Encoding ascii
 Write-ServiceLog "Frontend started (PID: $($frontendProcess.Id))"
 
-# ---- Start Workers (Dev mode only, via Watchdog) ----
+# ---- Start Workers (Dev mode only) ----
 if ($RunWorkers) {
-    # Worker Watchdog
-    Write-ServiceLog "Starting Worker Watchdog..."
-    $WatchdogPidFile = Join-Path $PidDir "watchdog$PidSuffix.pid"
-    $watchdogProcess = Start-Process -FilePath "powershell.exe" `
-        -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\worker-watchdog.ps1" `
-        -WorkingDirectory $ProjectRoot `
-        -WindowStyle Hidden `
-        -PassThru
-    $watchdogProcess.Id | Out-File $WatchdogPidFile -Encoding ascii
-    Write-ServiceLog "Worker Watchdog started (PID: $($watchdogProcess.Id))"
+    # Note: Browser-based workers (monitor_worker, instagram_worker) are NOT started here.
+    # They require user session (headed browser) and are started via:
+    #   - Startup program: startup-browser-workers.ps1 (auto on login)
+    #   - Manual: browser-workers.ps1 -Action start
+    # See: docs/auto-start/2025-12-27-browser-worker-separation.md
+    Write-ServiceLog "Browser workers (monitor, instagram) will be started via startup program"
 
-    # Instagram Worker Watchdog
-    Write-ServiceLog "Starting Instagram Watchdog..."
-    $InstagramWatchdogPidFile = Join-Path $PidDir "instagram_watchdog$PidSuffix.pid"
-    $igWatchdogProcess = Start-Process -FilePath "powershell.exe" `
-        -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\instagram-watchdog.ps1" `
-        -WorkingDirectory $ProjectRoot `
-        -WindowStyle Hidden `
-        -PassThru
-    $igWatchdogProcess.Id | Out-File $InstagramWatchdogPidFile -Encoding ascii
-    Write-ServiceLog "Instagram Watchdog started (PID: $($igWatchdogProcess.Id))"
-
-    # Claude Worker Watchdog
+    # Claude Worker Watchdog (no browser needed - uses CLI subprocess)
     Write-ServiceLog "Starting Claude Watchdog..."
     $ClaudeWatchdogPidFile = Join-Path $PidDir "claude_watchdog$PidSuffix.pid"
     $claudeWatchdogProcess = Start-Process -FilePath "powershell.exe" `
