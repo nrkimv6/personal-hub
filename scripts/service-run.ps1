@@ -79,7 +79,7 @@ foreach ($port in $portsToClean) {
         $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
 
         if (-not $conn) {
-            Write-ServiceLog "  Port $port: available"
+            Write-ServiceLog "  Port ${port}: available"
             break
         }
 
@@ -87,7 +87,7 @@ foreach ($port in $portsToClean) {
         $pids = $conn | Select-Object -ExpandProperty OwningProcess -Unique | Where-Object { $_ -ne 0 }
 
         if ($pids.Count -eq 0) {
-            Write-ServiceLog "  Port $port: in use by system (waiting...)"
+            Write-ServiceLog "  Port ${port}: in use by system (waiting...)"
             Start-Sleep -Milliseconds $retryDelayMs
             continue
         }
@@ -95,7 +95,7 @@ foreach ($port in $portsToClean) {
         foreach ($procId in $pids) {
             $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
             if ($proc) {
-                Write-ServiceLog "  Port $port: stopping $($proc.ProcessName) (PID: $procId) gracefully..."
+                Write-ServiceLog "  Port ${port}: stopping $($proc.ProcessName) (PID: $procId) gracefully..."
 
                 # Graceful shutdown 시도 (CloseMainWindow)
                 try {
@@ -121,14 +121,14 @@ foreach ($port in $portsToClean) {
         Start-Sleep -Milliseconds $retryDelayMs
 
         if ($retry -lt $maxRetries - 1) {
-            Write-ServiceLog "  Port $port: retry $($retry + 1)/$maxRetries"
+            Write-ServiceLog "  Port ${port}: retry $($retry + 1)/$maxRetries"
         }
     }
 
     # 최종 확인
     $stillUsed = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
     if ($stillUsed) {
-        Write-ServiceLog "  WARNING: Port $port still in use after cleanup"
+        Write-ServiceLog "  WARNING: Port ${port} still in use after cleanup"
     }
 }
 
