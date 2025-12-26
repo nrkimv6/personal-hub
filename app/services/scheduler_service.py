@@ -22,6 +22,7 @@ class SchedulerService:
         "InstagramWatchdog",
         "DailyMaintenance",
         "WeeklyVacuum",
+        "LogCleanup",
     ])
 
     def _validate_task_name(self, name: str) -> None:
