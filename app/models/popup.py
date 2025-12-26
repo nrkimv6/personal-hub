@@ -57,6 +57,12 @@ class Popup(Base):
     # 입력 출처 (AI/사람/AI수정)
     input_source = Column(String, default="human", index=True)  # 'ai', 'human', 'ai_edited'
 
+    # 다중 출처 통합 (entity_sources 테이블과 연계)
+    source_count = Column(Integer, default=1)  # 연결된 출처 수
+    primary_source_id = Column(Integer)  # entity_sources.id (대표 출처)
+    confidence_score = Column(Integer, default=50)  # 정보 신뢰도 (0-100)
+    merged_from = Column(Text)  # JSON: 병합된 팝업 ID 목록
+
     # 상태
     status = Column(String, default="active", index=True)  # active/ended/cancelled
 
