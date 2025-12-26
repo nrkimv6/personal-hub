@@ -661,6 +661,38 @@ class InstagramWorker:
 
         return page
 
+    async def _check_instagram_login(self, page) -> bool:
+        """Instagram 로그인 상태 확인.
+
+        Args:
+            page: Playwright Page 객체 (Instagram 메인 페이지가 로드된 상태)
+
+        Returns:
+            로그인 되어있으면 True, 아니면 False
+        """
+        try:
+            # 로그인 버튼이 있으면 로그아웃 상태
+            login_button = await page.query_selector('a[href="/accounts/login/"]')
+            if login_button:
+                return False
+
+            # 로그인 상태 확인 셀렉터들
+            login_indicators = [
+                'a[href*="/direct/inbox/"]',  # DM 링크
+                'svg[aria-label="홈"]',  # 홈 아이콘 (한글)
+                'svg[aria-label="Home"]',  # 홈 아이콘 (영문)
+                'article',  # 피드 콘텐츠
+            ]
+            for selector in login_indicators:
+                elem = await page.query_selector(selector)
+                if elem:
+                    return True
+
+            return False
+        except Exception as e:
+            logger.warning(f"Instagram 로그인 상태 확인 실패: {e}")
+            return False
+
     def _is_browser_closed_error(self, error: Exception) -> bool:
         """브라우저 closed 에러인지 확인.
 
@@ -725,16 +757,11 @@ class InstagramWorker:
 
         while retry_count <= max_retries:
             try:
-                # 로그인 상태 확인
+                # 계정 확인
                 account = db.query(Account).filter(Account.id == request.account_id).first()
                 if not account:
                     request_service.mark_failed(request.id, "계정을 찾을 수 없음")
                     logger.warning(f"계정 없음: account_id={request.account_id}")
-                    return
-
-                if not account.is_logged_in:
-                    request_service.mark_failed(request.id, "로그인 필요")
-                    logger.warning(f"로그인 필요: account={account.name}")
                     return
 
                 # 워커 상태를 crawling으로 변경
@@ -748,6 +775,20 @@ class InstagramWorker:
                 await tab.goto("https://www.instagram.com/", wait_until="domcontentloaded")
                 await tab.wait_for_timeout(2000)
                 logger.info(f"인스타그램 페이지 로드 완료: {tab.url}")
+
+                # 실제 로그인 상태 확인 (브라우저에서)
+                is_logged_in = await self._check_instagram_login(tab)
+                if not is_logged_in:
+                    # DB 업데이트
+                    account.is_logged_in = False
+                    db.commit()
+                    request_service.mark_failed(request.id, "Instagram 로그인 필요")
+                    logger.warning(f"Instagram 로그인 필요: account={account.name}")
+                    return
+                else:
+                    # 로그인 상태 업데이트
+                    account.is_logged_in = True
+                    db.commit()
 
                 # 크롤러 생성 (Page 객체 전달)
                 crawler = InstagramCrawler(tab)
@@ -812,16 +853,11 @@ class InstagramWorker:
                     logger.warning(f"대상 게시물 ID 없음: request_id={request.id}")
                     return
 
-                # 로그인 상태 확인
+                # 계정 확인
                 account = db.query(Account).filter(Account.id == request.account_id).first()
                 if not account:
                     request_service.mark_failed(request.id, "계정을 찾을 수 없음")
                     logger.warning(f"계정 없음: account_id={request.account_id}")
-                    return
-
-                if not account.is_logged_in:
-                    request_service.mark_failed(request.id, "로그인 필요")
-                    logger.warning(f"로그인 필요: account={account.name}")
                     return
 
                 # 워커 상태를 recrawling으로 변경
@@ -829,6 +865,20 @@ class InstagramWorker:
 
                 # TabPoolManager를 통해 탭 획득
                 tab = await self._get_tab_for_request(request.id, account.id)
+
+                # 실제 로그인 상태 확인 (브라우저에서)
+                await tab.goto("https://www.instagram.com/", wait_until="domcontentloaded")
+                await tab.wait_for_timeout(1000)
+                is_logged_in = await self._check_instagram_login(tab)
+                if not is_logged_in:
+                    account.is_logged_in = False
+                    db.commit()
+                    request_service.mark_failed(request.id, "Instagram 로그인 필요")
+                    logger.warning(f"Instagram 로그인 필요: account={account.name}")
+                    return
+                else:
+                    account.is_logged_in = True
+                    db.commit()
 
                 # 크롤러 생성
                 crawler = InstagramCrawler(tab)
@@ -884,16 +934,11 @@ class InstagramWorker:
                     logger.warning(f"대상 URL 없음: request_id={request.id}")
                     return
 
-                # 로그인 상태 확인
+                # 계정 확인
                 account = db.query(Account).filter(Account.id == request.account_id).first()
                 if not account:
                     request_service.mark_failed(request.id, "계정을 찾을 수 없음")
                     logger.warning(f"계정 없음: account_id={request.account_id}")
-                    return
-
-                if not account.is_logged_in:
-                    request_service.mark_failed(request.id, "로그인 필요")
-                    logger.warning(f"로그인 필요: account={account.name}")
                     return
 
                 # 워커 상태를 crawling으로 변경
@@ -901,6 +946,20 @@ class InstagramWorker:
 
                 # TabPoolManager를 통해 탭 획득
                 tab = await self._get_tab_for_request(request.id, account.id)
+
+                # 실제 로그인 상태 확인 (브라우저에서)
+                await tab.goto("https://www.instagram.com/", wait_until="domcontentloaded")
+                await tab.wait_for_timeout(1000)
+                is_logged_in = await self._check_instagram_login(tab)
+                if not is_logged_in:
+                    account.is_logged_in = False
+                    db.commit()
+                    request_service.mark_failed(request.id, "Instagram 로그인 필요")
+                    logger.warning(f"Instagram 로그인 필요: account={account.name}")
+                    return
+                else:
+                    account.is_logged_in = True
+                    db.commit()
 
                 # 크롤러 생성
                 crawler = InstagramCrawler(tab)

@@ -1,18 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-
-  interface Account {
-    id: number;
-    name: string;
-    email: string | null;
-    profile_dir: string;
-    is_active: boolean;
-    is_logged_in: boolean;
-    last_used_at: string | null;
-    description: string | null;
-    created_at: string;
-    updated_at: string;
-  }
+  import { accountApi } from '$lib/api';
+  import type { Account } from '$lib/types';
 
   let accounts: Account[] = [];
   let loading = true;
@@ -36,9 +25,7 @@
   async function loadAccounts() {
     try {
       loading = true;
-      const res = await fetch('/api/v1/accounts/');
-      if (!res.ok) throw new Error('계정 목록을 불러올 수 없습니다');
-      accounts = await res.json();
+      accounts = await accountApi.list(true);  // include inactive
       error = '';
     } catch (e) {
       error = e instanceof Error ? e.message : '알 수 없는 오류';
@@ -83,21 +70,10 @@
         return;
       }
 
-      const url = editingAccount
-        ? `/api/v1/accounts/${editingAccount.id}`
-        : '/api/v1/accounts/';
-
-      const method = editingAccount ? 'PUT' : 'POST';
-
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || '저장 실패');
+      if (editingAccount) {
+        await accountApi.update(editingAccount.id, formData);
+      } else {
+        await accountApi.create(formData);
       }
 
       await loadAccounts();
@@ -113,11 +89,7 @@
     }
 
     try {
-      const res = await fetch(`/api/v1/accounts/${id}`, {
-        method: 'DELETE'
-      });
-
-      if (!res.ok) throw new Error('삭제 실패');
+      await accountApi.delete(id);
       await loadAccounts();
     } catch (e) {
       alert(e instanceof Error ? e.message : '알 수 없는 오류');
@@ -126,13 +98,7 @@
 
   async function toggleActive(account: Account) {
     try {
-      const res = await fetch(`/api/v1/accounts/${account.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ is_active: !account.is_active })
-      });
-
-      if (!res.ok) throw new Error('상태 변경 실패');
+      await accountApi.update(account.id, { is_active: !account.is_active });
       await loadAccounts();
     } catch (e) {
       alert(e instanceof Error ? e.message : '알 수 없는 오류');
@@ -150,14 +116,7 @@
   async function openBrowser(account: Account) {
     browserLoading[account.id] = 'open';
     try {
-      const res = await fetch(`/api/v1/accounts/${account.id}/browser/open`, {
-        method: 'POST'
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || '브라우저 열기 실패');
-      }
-      const result = await res.json();
+      const result = await accountApi.openBrowser(account.id);
       alert(`브라우저가 열렸습니다: ${result.message}`);
     } catch (e) {
       alert(e instanceof Error ? e.message : '알 수 없는 오류');
@@ -170,13 +129,7 @@
   async function openNaverLogin(account: Account) {
     browserLoading[account.id] = 'login';
     try {
-      const res = await fetch(`/api/v1/accounts/${account.id}/browser/naver-login`, {
-        method: 'POST'
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || '네이버 로그인 페이지 열기 실패');
-      }
+      await accountApi.openNaverLogin(account.id);
       alert('네이버 로그인 페이지가 열렸습니다.\n브라우저에서 로그인 후 "상태 확인" 버튼을 눌러주세요.');
     } catch (e) {
       alert(e instanceof Error ? e.message : '알 수 없는 오류');
@@ -189,14 +142,7 @@
   async function checkLoginStatus(account: Account) {
     browserLoading[account.id] = 'check';
     try {
-      const res = await fetch(`/api/v1/accounts/${account.id}/browser/check-login`, {
-        method: 'POST'
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || '상태 확인 실패');
-      }
-      const result = await res.json();
+      const result = await accountApi.checkLogin(account.id);
       await loadAccounts();
       alert(result.is_logged_in ? '로그인 확인됨' : '로그인 필요');
     } catch (e) {
@@ -210,14 +156,7 @@
   async function closeBrowser(account: Account) {
     browserLoading[account.id] = 'close';
     try {
-      const res = await fetch(`/api/v1/accounts/${account.id}/browser/close`, {
-        method: 'POST'
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || '브라우저 종료 실패');
-      }
-      const result = await res.json();
+      const result = await accountApi.closeBrowser(account.id);
       alert(result.message);
     } catch (e) {
       alert(e instanceof Error ? e.message : '알 수 없는 오류');
