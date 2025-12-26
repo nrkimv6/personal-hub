@@ -32,9 +32,9 @@ class InstagramScheduleConfig(Base):
     max_retries = Column(Integer, default=3)
     retry_interval_minutes = Column(Integer, default=5)
 
-    # 계정 지정 (2025-12-21 추가)
-    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
-    account = relationship("Account")
+    # 서비스 계정 지정 (2025-12-21 추가, 2025-12-27 service_account로 변경)
+    service_account_id = Column(Integer, ForeignKey("service_accounts.id"), nullable=True)
+    service_account = relationship("ServiceAccount")
 
     # 메타
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)

@@ -14,7 +14,7 @@ class InstagramCrawlRun(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
 
     # 실행 정보
-    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False)
+    service_account_id = Column(Integer, ForeignKey("service_accounts.id", ondelete="CASCADE"), nullable=False)
     started_at = Column(DateTime, default=datetime.now, index=True)
     finished_at = Column(DateTime)
 
@@ -37,7 +37,8 @@ class InstagramCrawlRun(Base):
     config_snapshot = Column(Text, nullable=True)  # 수집 시점의 설정값 JSON
 
     # 관계
+    service_account = relationship("ServiceAccount", backref="crawl_runs")
     posts = relationship("InstagramPost", back_populates="crawl_run")
 
     def __repr__(self):
-        return f"<InstagramCrawlRun(id={self.id}, account_id={self.account_id}, success={self.success}, stop_reason={self.stop_reason})>"
+        return f"<InstagramCrawlRun(id={self.id}, service_account_id={self.service_account_id}, success={self.success}, stop_reason={self.stop_reason})>"

@@ -39,7 +39,7 @@ class PostService:
         post_type: str = "NORMAL",
         likes: Optional[int] = None,
         comments: Optional[int] = None,
-        account_id: Optional[int] = None,
+        service_account_id: Optional[int] = None,
         crawl_run_id: Optional[int] = None,
     ) -> Tuple[Optional[InstagramPost], bool]:
         """게시물 생성 또는 업데이트 (upsert).
@@ -56,7 +56,7 @@ class PostService:
             post_type: 게시물 유형 (NORMAL/SPONSORED/SUGGESTED)
             likes: 좋아요 수
             comments: 댓글 수
-            account_id: 수집 계정 ID
+            service_account_id: 수집 서비스 계정 ID
             crawl_run_id: 크롤링 실행 ID
 
         Returns:
@@ -96,7 +96,7 @@ class PostService:
             post_type=post_type,
             likes=likes,
             comments=comments,
-            account_id=account_id,
+            service_account_id=service_account_id,
             crawl_run_id=crawl_run_id,
             collected_at=datetime.now(),
         )
@@ -125,7 +125,7 @@ class PostService:
         post_type: str = "NORMAL",
         likes: Optional[int] = None,
         comments: Optional[int] = None,
-        account_id: Optional[int] = None,
+        service_account_id: Optional[int] = None,
         crawl_run_id: Optional[int] = None,
     ) -> Optional[InstagramPost]:
         """게시물 생성 (레거시 - create_or_update_post 사용 권장).
@@ -145,7 +145,7 @@ class PostService:
             post_type=post_type,
             likes=likes,
             comments=comments,
-            account_id=account_id,
+            service_account_id=service_account_id,
             crawl_run_id=crawl_run_id,
         )
         return post if is_new else None
