@@ -60,6 +60,31 @@ Write-ServiceLog "API Port: $ApiPort, Frontend Port: $FrontendPort"
 Write-ServiceLog "Workers: $(if ($RunWorkers) { 'ON' } else { 'OFF' })"
 Write-ServiceLog "=========================================="
 
+# ============================================================
+# STEP 0: Start Cloudflare Tunnel (Production only)
+# ============================================================
+$CloudflaredPidFile = Join-Path $PidDir "cloudflared$PidSuffix.pid"
+if (-not $Dev) {
+    $cloudflaredPath = Get-Command cloudflared -ErrorAction SilentlyContinue
+    if ($cloudflaredPath) {
+        Write-ServiceLog "Starting Cloudflare Tunnel..."
+        $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+        $tunnelLogFile = Join-Path $LogDir "cloudflared_$Timestamp.log"
+
+        # Start cloudflared via cmd to redirect output to log file
+        $tunnelProcess = Start-Process -FilePath "cmd.exe" `
+            -ArgumentList "/c", "cloudflared tunnel run monitor-app > `"$tunnelLogFile`" 2>&1" `
+            -WindowStyle Hidden `
+            -PassThru
+
+        $tunnelProcess.Id | Out-File $CloudflaredPidFile -Encoding ascii
+        Write-ServiceLog "Cloudflare Tunnel started (PID: $($tunnelProcess.Id))"
+        Write-ServiceLog "Tunnel log: $tunnelLogFile"
+    } else {
+        Write-ServiceLog "WARNING: cloudflared not found, skipping tunnel"
+    }
+}
+
 # Set environment variables
 $env:APP_MODE = $AppMode
 $env:PYTHONIOENCODING = "utf-8"

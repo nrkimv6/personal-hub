@@ -17,7 +17,9 @@ param(
 
     [switch]$IncludeDev,   # Include development service (for install/uninstall)
     [switch]$WithLogs,     # Open log window after start/restart
-    [switch]$Dev           # Target development service instead of production
+    [switch]$Dev,          # Target development service instead of production
+    [string]$ServiceUser,  # Service account username (e.g., ".\Narang")
+    [string]$ServicePass   # Service account password
 )
 
 $ErrorActionPreference = "Stop"
@@ -92,8 +94,8 @@ function Install-MonitorService {
     $existing = Get-Service -Name $svc.Name -ErrorAction SilentlyContinue
     if ($existing) {
         Write-Host "    Removing existing service..." -ForegroundColor Yellow
-        nssm stop $svc.Name confirm 2>$null
-        nssm remove $svc.Name confirm
+        $null = nssm stop $svc.Name confirm 2>&1
+        $null = nssm remove $svc.Name confirm 2>&1
     }
 
     # Install service - run.ps1 via PowerShell
@@ -119,6 +121,12 @@ function Install-MonitorService {
     # Log rotation (10MB)
     nssm set $svc.Name AppRotateFiles 1
     nssm set $svc.Name AppRotateBytes 10485760
+
+    # Set service account if provided
+    if ($ServiceUser -and $ServicePass) {
+        nssm set $svc.Name ObjectName $ServiceUser $ServicePass
+        Write-Host "    Account: $ServiceUser" -ForegroundColor Gray
+    }
 
     Write-Host "[+] Service installed: $($svc.Name)" -ForegroundColor Green
     Write-Host "    Stdout: $stdoutLog" -ForegroundColor Gray
