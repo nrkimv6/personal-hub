@@ -118,16 +118,16 @@ switch ($Action) {
 
         Write-Host "  Monitor Worker Watchdog:" -ForegroundColor White
         if ((Test-Path $watchdogPid) -and (Get-Process -Id (Get-Content $watchdogPid -ErrorAction SilentlyContinue) -ErrorAction SilentlyContinue)) {
-            $pid = Get-Content $watchdogPid
-            Write-Host "    [+] Running (PID: $pid)" -ForegroundColor Green
+            $savedPid = Get-Content $watchdogPid
+            Write-Host "    [+] Running (PID: $savedPid)" -ForegroundColor Green
         } else {
             Write-Host "    [-] Not running" -ForegroundColor Yellow
         }
 
         Write-Host "  Instagram Worker Watchdog:" -ForegroundColor White
         if ((Test-Path $igWatchdogPid) -and (Get-Process -Id (Get-Content $igWatchdogPid -ErrorAction SilentlyContinue) -ErrorAction SilentlyContinue)) {
-            $pid = Get-Content $igWatchdogPid
-            Write-Host "    [+] Running (PID: $pid)" -ForegroundColor Green
+            $savedPid = Get-Content $igWatchdogPid
+            Write-Host "    [+] Running (PID: $savedPid)" -ForegroundColor Green
         } else {
             Write-Host "    [-] Not running" -ForegroundColor Yellow
         }

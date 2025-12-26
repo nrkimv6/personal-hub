@@ -190,8 +190,8 @@ function Show-Status {
     # Monitor Worker Watchdog
     Write-Host "Monitor Worker Watchdog:" -ForegroundColor White
     if (Test-ProcessRunning $WatchdogPidFile) {
-        $pid = Get-Content $WatchdogPidFile
-        Write-Host "  [+] Running (PID: $pid)" -ForegroundColor Green
+        $savedPid = Get-Content $WatchdogPidFile
+        Write-Host "  [+] Running (PID: $savedPid)" -ForegroundColor Green
     } else {
         Write-Host "  [-] Not running" -ForegroundColor Yellow
     }
@@ -199,8 +199,8 @@ function Show-Status {
     # Instagram Worker Watchdog
     Write-Host "Instagram Worker Watchdog:" -ForegroundColor White
     if (Test-ProcessRunning $InstagramWatchdogPidFile) {
-        $pid = Get-Content $InstagramWatchdogPidFile
-        Write-Host "  [+] Running (PID: $pid)" -ForegroundColor Green
+        $savedPid = Get-Content $InstagramWatchdogPidFile
+        Write-Host "  [+] Running (PID: $savedPid)" -ForegroundColor Green
     } else {
         Write-Host "  [-] Not running" -ForegroundColor Yellow
     }
@@ -214,16 +214,16 @@ function Show-Status {
 
     Write-Host "  Monitor Worker:" -ForegroundColor Gray
     if (Test-ProcessRunning $WorkerPidFile) {
-        $pid = Get-Content $WorkerPidFile
-        Write-Host "    [+] Running (PID: $pid)" -ForegroundColor Green
+        $savedPid = Get-Content $WorkerPidFile
+        Write-Host "    [+] Running (PID: $savedPid)" -ForegroundColor Green
     } else {
         Write-Host "    [-] Not running" -ForegroundColor Yellow
     }
 
     Write-Host "  Instagram Worker:" -ForegroundColor Gray
     if (Test-ProcessRunning $InstagramWorkerPidFile) {
-        $pid = Get-Content $InstagramWorkerPidFile
-        Write-Host "    [+] Running (PID: $pid)" -ForegroundColor Green
+        $savedPid = Get-Content $InstagramWorkerPidFile
+        Write-Host "    [+] Running (PID: $savedPid)" -ForegroundColor Green
     } else {
         Write-Host "    [-] Not running" -ForegroundColor Yellow
     }
