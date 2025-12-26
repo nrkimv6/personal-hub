@@ -50,7 +50,6 @@ foreach ($suffix in $PidSuffixes) {
     $PidFiles += Join-Path $PidDir "instagram_watchdog$suffix.pid"
     $PidFiles += Join-Path $PidDir "claude_watchdog$suffix.pid"
     $PidFiles += Join-Path $PidDir "frontend$suffix.pid"
-    $PidFiles += Join-Path $PidDir "cloudflared$suffix.pid"
 }
 
 Write-Host ""
@@ -100,40 +99,6 @@ if ($watchdogKilled -eq 0) {
 }
 
 Write-Host ""
-
-# ============================================================
-# STEP 0.5: Kill Cloudflare Tunnel (Production only)
-# ============================================================
-if (-not $Dev) {
-    Write-Host "[0.5] Killing Cloudflare Tunnel" -ForegroundColor Cyan
-    Write-Host "----------------------------------------"
-
-    $cloudflaredPidFile = Join-Path $PidDir "cloudflared.pid"
-    $cloudflaredKilled = $false
-
-    if (Test-Path $cloudflaredPidFile) {
-        $savedPid = Get-Content $cloudflaredPidFile -ErrorAction SilentlyContinue
-        if ($savedPid) {
-            $proc = Get-Process -Id $savedPid -ErrorAction SilentlyContinue
-            if ($proc -and $proc.ProcessName -eq "cloudflared") {
-                Write-Host "  [*] Cloudflared PID $savedPid" -ForegroundColor Yellow
-                try {
-                    Stop-Process -Id $savedPid -Force -ErrorAction Stop
-                    Write-Host "      -> Killed" -ForegroundColor Green
-                    $cloudflaredKilled = $true
-                } catch {
-                    Write-Host "      -> Failed: $($_.Exception.Message)" -ForegroundColor Red
-                }
-            }
-        }
-    }
-
-    if (-not $cloudflaredKilled) {
-        Write-Host "  (no cloudflared process from PID file)" -ForegroundColor Gray
-    }
-
-    Write-Host ""
-}
 
 # ============================================================
 # STEP 1: Kill Python processes matching our patterns AND ports

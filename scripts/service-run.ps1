@@ -60,37 +60,12 @@ Write-ServiceLog "API Port: $ApiPort, Frontend Port: $FrontendPort"
 Write-ServiceLog "Workers: $(if ($RunWorkers) { 'ON' } else { 'OFF' })"
 Write-ServiceLog "=========================================="
 
-# ============================================================
-# STEP 0: Start Cloudflare Tunnel (Production only)
-# ============================================================
-$CloudflaredPidFile = Join-Path $PidDir "cloudflared$PidSuffix.pid"
-if (-not $Dev) {
-    $cloudflaredPath = Get-Command cloudflared -ErrorAction SilentlyContinue
-    if ($cloudflaredPath) {
-        Write-ServiceLog "Starting Cloudflare Tunnel..."
-        $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-        $tunnelLogFile = Join-Path $LogDir "cloudflared_$Timestamp.log"
-
-        # Start cloudflared via cmd to redirect output to log file
-        $tunnelProcess = Start-Process -FilePath "cmd.exe" `
-            -ArgumentList "/c", "cloudflared tunnel run monitor-app > `"$tunnelLogFile`" 2>&1" `
-            -WindowStyle Hidden `
-            -PassThru
-
-        $tunnelProcess.Id | Out-File $CloudflaredPidFile -Encoding ascii
-        Write-ServiceLog "Cloudflare Tunnel started (PID: $($tunnelProcess.Id))"
-        Write-ServiceLog "Tunnel log: $tunnelLogFile"
-    } else {
-        Write-ServiceLog "WARNING: cloudflared not found, skipping tunnel"
-    }
-}
-
 # Set environment variables
 $env:APP_MODE = $AppMode
 $env:PYTHONIOENCODING = "utf-8"
 
 # ============================================================
-# STEP 1: Port Cleanup (from run.ps1)
+# STEP 0: Port Cleanup (from run.ps1)
 # ============================================================
 Write-ServiceLog "Cleaning up ports..."
 $portsToClean = @($ApiPort, $FrontendPort)
@@ -110,7 +85,7 @@ foreach ($port in $portsToClean) {
 }
 
 # ============================================================
-# STEP 2: Playwright Browser Cleanup (Dev mode only, from run.ps1)
+# STEP 1: Playwright Browser Cleanup (Dev mode only, from run.ps1)
 # ============================================================
 if ($RunWorkers) {
     $browserProfilesPath = Join-Path $ProjectRoot "data\browser_profiles"
@@ -167,7 +142,7 @@ if ($RunWorkers) {
 }
 
 # ============================================================
-# STEP 3: Start Background Processes (Frontend, Workers via Watchdog)
+# STEP 2: Start Background Processes (Frontend, Workers via Watchdog)
 # ============================================================
 Write-ServiceLog "Starting background processes..."
 
@@ -261,7 +236,7 @@ if ($RunWorkers) {
 }
 
 # ============================================================
-# STEP 4: Run API Server in Foreground (NSSM monitors this)
+# STEP 3: Run API Server in Foreground (NSSM monitors this)
 # ============================================================
 Write-ServiceLog "Starting API Server in foreground..."
 
@@ -304,7 +279,7 @@ try {
     $exitCode = 1
 } finally {
     # ============================================================
-    # STEP 5: Cleanup on Exit (via stop.ps1)
+    # STEP 4: Cleanup on Exit (via stop.ps1)
     # ============================================================
     Write-ServiceLog "Service stopping, running cleanup..."
 
