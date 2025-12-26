@@ -1030,9 +1030,19 @@ class InstagramWorker:
                 f"page_id={crawled_page.id}, title={crawled_page.title}"
             )
 
-            # TODO: auto_analyze가 True면 LLM 분석 수행
+            # AI 분석 요청 생성 (auto_analyze가 True일 때)
             if request.auto_analyze:
-                logger.debug(f"auto_analyze 활성화, 추후 LLM 분석 예정: page_id={crawled_page.id}")
+                from app.services.universal_crawl_analyzer import UniversalCrawlAnalyzerService
+                analyzer = UniversalCrawlAnalyzerService(db)
+                llm_request = analyzer.create_analysis_request(
+                    page_id=crawled_page.id,
+                    requested_by="auto",
+                )
+                if llm_request:
+                    logger.info(
+                        f"AI 분석 요청 생성: page_id={crawled_page.id}, "
+                        f"llm_request_id={llm_request.id}"
+                    )
 
         except Exception as e:
             universal_crawl_service.mark_failed(db, request.id, str(e))
