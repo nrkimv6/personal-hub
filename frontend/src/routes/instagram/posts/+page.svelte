@@ -1434,11 +1434,11 @@
 								class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 							>
 								{#each accounts as account (account.id)}
-									<option value={account.id}>{account.name}</option>
+									<option value={account.id}>{account.name} {account.is_logged_in ? '' : '(미로그인)'}</option>
 								{/each}
 							</select>
 						{:else}
-							<p class="text-sm text-red-600">로그인된 계정이 없습니다. 먼저 계정에 로그인해주세요.</p>
+							<p class="text-sm text-red-600">등록된 계정이 없습니다. 먼저 계정을 등록해주세요.</p>
 						{/if}
 					</div>
 				</div>
