@@ -122,6 +122,10 @@ function Install-MonitorService {
     nssm set $svc.Name AppRotateFiles 1
     nssm set $svc.Name AppRotateBytes 10485760
 
+    # Set restart throttle (10 seconds delay between restarts)
+    # Prevents port conflict when service restarts too quickly
+    nssm set $svc.Name AppThrottle 10000
+
     # Set service account if provided
     if ($ServiceUser -and $ServicePass) {
         nssm set $svc.Name ObjectName $ServiceUser $ServicePass

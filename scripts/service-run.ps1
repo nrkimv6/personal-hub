@@ -65,22 +65,70 @@ $env:APP_MODE = $AppMode
 $env:PYTHONIOENCODING = "utf-8"
 
 # ============================================================
-# STEP 0: Port Cleanup (from run.ps1)
+# STEP 0: Port Cleanup (improved with graceful shutdown)
 # ============================================================
 Write-ServiceLog "Cleaning up ports..."
 $portsToClean = @($ApiPort, $FrontendPort)
+$maxRetries = 3
+$retryDelayMs = 500
+$gracefulTimeoutMs = 2000
+
 foreach ($port in $portsToClean) {
-    $conn = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
-    if ($conn) {
-        $pids = $conn | Select-Object -ExpandProperty OwningProcess -Unique
+    for ($retry = 0; $retry -lt $maxRetries; $retry++) {
+        # Listen 상태인 연결만 필터링
+        $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+
+        if (-not $conn) {
+            Write-ServiceLog "  Port $port: available"
+            break
+        }
+
+        # PID 0 제외 (커널/시스템)
+        $pids = $conn | Select-Object -ExpandProperty OwningProcess -Unique | Where-Object { $_ -ne 0 }
+
+        if ($pids.Count -eq 0) {
+            Write-ServiceLog "  Port $port: in use by system (waiting...)"
+            Start-Sleep -Milliseconds $retryDelayMs
+            continue
+        }
+
         foreach ($procId in $pids) {
             $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
             if ($proc) {
-                Write-ServiceLog "Killing zombie process on port ${port}: $($proc.ProcessName) (PID: $procId)"
+                Write-ServiceLog "  Port $port: stopping $($proc.ProcessName) (PID: $procId) gracefully..."
+
+                # Graceful shutdown 시도 (CloseMainWindow)
+                try {
+                    $closed = $proc.CloseMainWindow()
+                    if ($closed) {
+                        # 프로세스가 종료될 때까지 대기 (최대 2초)
+                        $exited = $proc.WaitForExit($gracefulTimeoutMs)
+                        if ($exited) {
+                            Write-ServiceLog "    -> Gracefully stopped"
+                            continue
+                        }
+                    }
+                } catch {
+                    # CloseMainWindow 실패 시 무시
+                }
+
+                # Graceful 실패 시 Force 사용
+                Write-ServiceLog "    -> Graceful failed, forcing..."
                 Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
-                Start-Sleep -Milliseconds 300
             }
         }
+
+        Start-Sleep -Milliseconds $retryDelayMs
+
+        if ($retry -lt $maxRetries - 1) {
+            Write-ServiceLog "  Port $port: retry $($retry + 1)/$maxRetries"
+        }
+    }
+
+    # 최종 확인
+    $stillUsed = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+    if ($stillUsed) {
+        Write-ServiceLog "  WARNING: Port $port still in use after cleanup"
     }
 }
 
@@ -175,6 +223,7 @@ Write-ServiceLog "Starting Frontend..."
 $FrontendDir = Join-Path $ProjectRoot "frontend"
 $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $frontendLogFile = Join-Path $LogDir "frontend_$Timestamp.log"
+$frontendErrLogFile = Join-Path $LogDir "frontend_err_$Timestamp.log"
 $FrontendPidFile = Join-Path $PidDir "frontend$PidSuffix.pid"
 
 # Check node_modules
@@ -187,11 +236,18 @@ if (-not (Test-Path $nodeModules)) {
     }
 }
 
-$envPrefix = if ($ApiPort -ne 8000) { "set VITE_API_PORT=$ApiPort && " } else { "" }
-$frontendProcess = Start-Process -FilePath "cmd.exe" `
-    -ArgumentList "/c", "${envPrefix}npm run dev -- --host --port $FrontendPort > `"$frontendLogFile`" 2>&1" `
+# Set environment variable for Vite (non-default API port)
+if ($ApiPort -ne 8000) {
+    $env:VITE_API_PORT = $ApiPort
+}
+
+# Start frontend using npm.cmd directly (avoid cmd.exe socket inheritance issue)
+$frontendProcess = Start-Process -FilePath "npm.cmd" `
+    -ArgumentList "run", "dev", "--", "--host", "--port", $FrontendPort `
     -WorkingDirectory $FrontendDir `
     -WindowStyle Hidden `
+    -RedirectStandardOutput $frontendLogFile `
+    -RedirectStandardError $frontendErrLogFile `
     -PassThru
 
 $frontendProcess.Id | Out-File $FrontendPidFile -Encoding ascii
