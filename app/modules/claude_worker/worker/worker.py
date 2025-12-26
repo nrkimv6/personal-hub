@@ -216,7 +216,7 @@ def mark_instagram_failed(db, post_id: int, error_message: str) -> bool:
 
 
 def save_universal_crawl_result(db, page_id: int, llm_result: dict) -> bool:
-    """Universal Crawl 페이지에 LLM 분석 결과 저장.
+    """Universal Crawl 페이지에 LLM 분석 결과 저장 및 Event/Popup 자동 생성.
 
     Args:
         db: DB 세션
@@ -227,6 +227,12 @@ def save_universal_crawl_result(db, page_id: int, llm_result: dict) -> bool:
         성공 여부
     """
     from app.models.universal_crawl import CrawledPage
+    from app.models.event import Event
+    from app.models.popup import Popup
+    from app.models.entity_source import EntitySource
+    from app.services.duplicate_detection_service import duplicate_detection_service
+    from app.schemas.entity_source import EntitySourceCreate
+    from app.services.entity_source_service import entity_source_service
     import json
 
     try:
@@ -237,17 +243,191 @@ def save_universal_crawl_result(db, page_id: int, llm_result: dict) -> bool:
 
         # 분석 결과 저장
         is_event = llm_result.get("is_event", False)
-        page.is_event = is_event
+        is_popup = llm_result.get("is_popup", False)
+        confidence = llm_result.get("confidence", 0)
+
+        page.is_event = is_event or is_popup
         page.analysis_result = json.dumps(llm_result, ensure_ascii=False)
 
+        # 이벤트 자동 생성 (confidence >= 0.7)
+        if is_event and confidence >= 0.7:
+            event_data = _extract_event_data_from_llm(llm_result, page.url)
+            duplicate_result = duplicate_detection_service.find_duplicate_event(db, event_data)
+
+            if duplicate_result:
+                # 기존 이벤트에 출처 추가
+                existing_event, similarity = duplicate_result
+                _add_source_to_event(db, existing_event, page, llm_result)
+                page.event_id = existing_event.id
+                logger.info(f"CrawledPage {page_id}: added source to Event {existing_event.id} (similarity={similarity:.2f})")
+            else:
+                # 새 이벤트 생성
+                event = _create_event_from_crawl(db, page, llm_result, event_data)
+                _add_source_to_event(db, event, page, llm_result, is_primary=True)
+                page.event_id = event.id
+                logger.info(f"CrawledPage {page_id}: created Event {event.id}")
+
+        # 팝업 자동 생성 (confidence >= 0.7)
+        elif is_popup and confidence >= 0.7:
+            popup_data = _extract_popup_data_from_llm(llm_result, page.url)
+            duplicate_result = duplicate_detection_service.find_duplicate_popup(db, popup_data)
+
+            if duplicate_result:
+                # 기존 팝업에 출처 추가
+                existing_popup, similarity = duplicate_result
+                _add_source_to_popup(db, existing_popup, page, llm_result)
+                page.popup_id = existing_popup.id
+                logger.info(f"CrawledPage {page_id}: added source to Popup {existing_popup.id} (similarity={similarity:.2f})")
+            else:
+                # 새 팝업 생성
+                popup = _create_popup_from_crawl(db, page, llm_result, popup_data)
+                _add_source_to_popup(db, popup, page, llm_result, is_primary=True)
+                page.popup_id = popup.id
+                logger.info(f"CrawledPage {page_id}: created Popup {popup.id}")
+
         db.commit()
-        logger.info(f"CrawledPage {page_id} LLM result saved: is_event={is_event}")
+        logger.info(f"CrawledPage {page_id} LLM result saved: is_event={is_event}, is_popup={is_popup}")
         return True
 
     except Exception as e:
         logger.error(f"Failed to save universal crawl result: {e}", exc_info=True)
         db.rollback()
         return False
+
+
+def _extract_event_data_from_llm(llm_result: dict, source_url: str) -> dict:
+    """LLM 결과에서 이벤트 데이터 추출."""
+    event_period = llm_result.get("event_period") or {}
+    return {
+        "title": llm_result.get("title") or llm_result.get("summary"),
+        "event_url": llm_result.get("event_url") or llm_result.get("participation_url"),
+        "event_start": parse_date(event_period.get("start")),
+        "event_end": parse_date(event_period.get("end")),
+        "organizer": llm_result.get("organizer"),
+        "prizes": llm_result.get("prizes") or [],
+        "source_url": source_url,
+    }
+
+
+def _extract_popup_data_from_llm(llm_result: dict, source_url: str) -> dict:
+    """LLM 결과에서 팝업 데이터 추출."""
+    event_period = llm_result.get("event_period") or {}
+    location = llm_result.get("location") or {}
+    return {
+        "title": llm_result.get("title") or llm_result.get("summary"),
+        "brand": llm_result.get("brand") or llm_result.get("organizer"),
+        "venue_name": location.get("venue_name"),
+        "address": location.get("address"),
+        "start_date": parse_date(event_period.get("start")),
+        "end_date": parse_date(event_period.get("end")),
+        "source_url": source_url,
+    }
+
+
+def _create_event_from_crawl(db, page, llm_result: dict, event_data: dict):
+    """CrawledPage에서 Event 생성."""
+    from app.models.event import Event
+    import json
+
+    urls = llm_result.get("urls") or []
+
+    event = Event(
+        title=event_data.get("title") or "제목 없음",
+        event_type="event",
+        event_url=event_data.get("event_url") or (urls[0] if urls else None),
+        additional_urls=urls[1:] if len(urls) > 1 else [],
+        event_start=event_data.get("event_start"),
+        event_end=event_data.get("event_end"),
+        announcement_date=parse_date(llm_result.get("announcement_date")),
+        organizer=event_data.get("organizer"),
+        summary=llm_result.get("summary"),
+        prizes=event_data.get("prizes") or [],
+        winner_count=llm_result.get("winner_count"),
+        purchase_required=llm_result.get("purchase_required"),
+        source_type="web",
+        source_url=page.url,
+        input_source="ai",
+        source_count=1,
+        confidence_score=int((llm_result.get("confidence") or 0.5) * 100),
+    )
+    db.add(event)
+    db.flush()
+    return event
+
+
+def _create_popup_from_crawl(db, page, llm_result: dict, popup_data: dict):
+    """CrawledPage에서 Popup 생성."""
+    from app.models.popup import Popup
+
+    urls = llm_result.get("urls") or []
+
+    popup = Popup(
+        title=popup_data.get("title") or "제목 없음",
+        brand=popup_data.get("brand"),
+        venue_name=popup_data.get("venue_name"),
+        address=popup_data.get("address"),
+        start_date=popup_data.get("start_date"),
+        end_date=popup_data.get("end_date"),
+        organizer=llm_result.get("organizer"),
+        summary=llm_result.get("summary"),
+        official_url=urls[0] if urls else None,
+        additional_urls=urls[1:] if len(urls) > 1 else [],
+        source_type="web",
+        source_url=page.url,
+        input_source="ai",
+        source_count=1,
+        confidence_score=int((llm_result.get("confidence") or 0.5) * 100),
+    )
+    db.add(popup)
+    db.flush()
+    return popup
+
+
+def _add_source_to_event(db, event, page, llm_result: dict, is_primary: bool = False):
+    """Event에 출처 추가."""
+    from app.models.entity_source import EntitySource
+    import json
+
+    source = EntitySource(
+        entity_type="event",
+        entity_id=event.id,
+        source_type="web",
+        source_id=page.id,
+        source_url=page.url,
+        priority=60,  # web source default priority
+        is_primary=1 if is_primary else 0,
+        extracted_data=json.dumps(llm_result, ensure_ascii=False),
+    )
+    db.add(source)
+    db.flush()
+
+    # source_count 및 primary_source_id 업데이트
+    if is_primary:
+        event.primary_source_id = source.id
+    event.source_count = (event.source_count or 0) + 1
+
+
+def _add_source_to_popup(db, popup, page, llm_result: dict, is_primary: bool = False):
+    """Popup에 출처 추가."""
+    from app.models.entity_source import EntitySource
+    import json
+
+    source = EntitySource(
+        entity_type="popup",
+        entity_id=popup.id,
+        source_type="web",
+        source_id=page.id,
+        source_url=page.url,
+        priority=60,
+        is_primary=1 if is_primary else 0,
+        extracted_data=json.dumps(llm_result, ensure_ascii=False),
+    )
+    db.add(source)
+    db.flush()
+
+    if is_primary:
+        popup.primary_source_id = source.id
+    popup.source_count = (popup.source_count or 0) + 1
 
 
 def mark_universal_crawl_failed(db, page_id: int, error_message: str) -> bool:

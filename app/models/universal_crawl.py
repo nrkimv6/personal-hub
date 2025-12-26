@@ -36,6 +36,7 @@ class CrawledPage(Base):
     # AI 분석 결과
     is_event = Column(Boolean)
     event_id = Column(Integer, ForeignKey("events.id", ondelete="SET NULL"))
+    popup_id = Column(Integer, ForeignKey("popups.id", ondelete="SET NULL"))
     analysis_result = Column(Text)  # JSON
 
     # 중복 방지
@@ -43,6 +44,7 @@ class CrawledPage(Base):
 
     # Relationships
     event = relationship("Event", foreign_keys=[event_id])
+    popup = relationship("Popup", foreign_keys=[popup_id])
     crawl_requests = relationship("UniversalCrawlRequest", back_populates="crawled_page")
 
     def __repr__(self):
