@@ -48,7 +48,7 @@ class UniversalCrawlService:
         self,
         db: Session,
         url: str,
-        account_id: Optional[int] = None,
+        service_account_id: Optional[int] = None,
         auto_analyze: bool = True,
         priority: int = 0,
         requested_by: str = "manual",
@@ -73,7 +73,7 @@ class UniversalCrawlService:
         request = UniversalCrawlRequest(
             url=url,
             url_type=url_type,
-            account_id=account_id,
+            service_account_id=service_account_id,
             status="pending",
             requested_by=requested_by,
             auto_analyze=auto_analyze,
