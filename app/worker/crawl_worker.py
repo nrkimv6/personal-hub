@@ -1,11 +1,22 @@
 """
-통합 크롤링 워커 프로세스
+통합 크롤링 워커 프로세스 (DEPRECATED)
+
+.. deprecated::
+    이 파일은 더 이상 사용되지 않습니다.
+    대신 `python -m app.worker.main`을 사용하세요.
+
+    새로운 구조:
+    - app/worker/main.py: 통합 진입점
+    - app/worker/scheduled_worker.py: 스케줄 기반 피드 크롤링
+    - app/worker/ondemand_worker.py: 온디맨드 (Instagram 개별 + Universal) 크롤링
+    - app/worker/crawl_worker_base.py: 공통 크롤링 워커 기반 클래스
 
 API 서버와 분리되어 독립적으로 크롤링 작업을 수행합니다.
 Instagram 크롤링과 Universal URL 크롤링을 모두 처리합니다.
 
 실행 방법:
-    python -m app.worker.crawl_worker
+    python -m app.worker.crawl_worker  (DEPRECATED, 호환성 유지용)
+    python -m app.worker.main          (신규, 권장)
 
 주요 기능:
     - Instagram Pending 크롤링 요청 처리 (InstagramCrawlRequest)
@@ -13,8 +24,8 @@ Instagram 크롤링과 Universal URL 크롤링을 모두 처리합니다.
     - Instagram 스케줄 기반 자동 크롤링 실행 (InstagramScheduler)
     - 로그인 상태 확인 및 실패 처리
 
-삭제 예정 파일:
-    - app/worker/instagram_worker.py (이 파일로 대체, 안정화 후 삭제)
+삭제 예정:
+    - 이 파일은 새 워커 구조가 안정화된 후 삭제될 예정입니다.
 """
 import asyncio
 import sys

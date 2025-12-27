@@ -77,8 +77,9 @@ function Start-CrawlWorker {
     $env:APP_MODE = if ($isDev) { "development" } else { "production" }
 
     # Start python directly (NOT via cmd.exe) to get correct PID
+    # Using new unified main entry point that runs both ScheduledCrawlWorker and OnDemandCrawlWorker
     $workerProcess = Start-Process -FilePath $VenvPython `
-        -ArgumentList "-m", "app.worker.crawl_worker" `
+        -ArgumentList "-m", "app.worker.main" `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
         -RedirectStandardOutput $stdoutLogFile `
@@ -111,12 +112,12 @@ function Stop-OrphanedCrawlWorkers {
     Write-Log "Checking for orphaned crawl worker processes..."
     $killedCount = 0
 
-    # Find all python processes running crawl_worker or instagram_worker (legacy)
+    # Find all python processes running crawl workers (main, crawl_worker, instagram_worker legacy)
     $pythonProcs = Get-Process -Name "python*" -ErrorAction SilentlyContinue
     foreach ($proc in $pythonProcs) {
         try {
             $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($proc.Id)" -ErrorAction SilentlyContinue).CommandLine
-            if ($cmdLine -and ($cmdLine -like "*app.worker.crawl_worker*" -or $cmdLine -like "*app.worker.instagram_worker*")) {
+            if ($cmdLine -and ($cmdLine -like "*app.worker.main*" -or $cmdLine -like "*app.worker.crawl_worker*" -or $cmdLine -like "*app.worker.instagram_worker*")) {
                 # Check if this is our managed worker
                 $savedPid = if (Test-Path $WorkerPidFile) { Get-Content $WorkerPidFile -ErrorAction SilentlyContinue } else { $null }
                 if ($proc.Id -ne $savedPid) {
