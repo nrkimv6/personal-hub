@@ -55,9 +55,9 @@
 
 			if (response.success) {
 				toast.success(`크롤링 요청 등록 완료 (${response.url_type})`);
-				// 1.5초 후 홈으로 이동
+				// 1.5초 후 홈으로 이동 (replace로 히스토리에서 /share 제거)
 				setTimeout(() => {
-					window.location.href = '/';
+					window.location.replace('/');
 				}, 1500);
 			} else {
 				toast.error('크롤링 요청 등록 실패');
@@ -67,8 +67,8 @@
 			// Instagram URL인 경우 특별 처리
 			if (message.includes('Instagram')) {
 				toast.warning('Instagram URL은 Instagram 크롤러를 사용하세요.');
-				// Instagram 페이지로 이동
-				window.location.href = `/instagram/posts?shared_url=${encodeURIComponent(sharedUrl)}`;
+				// Instagram 페이지로 이동 (replace로 히스토리에서 /share 제거)
+				window.location.replace(`/instagram/posts?shared_url=${encodeURIComponent(sharedUrl)}`);
 				return;
 			}
 			toast.error(`오류: ${message}`);
@@ -91,9 +91,9 @@
 		if (sharedUrl) {
 			urlType = detectUrlType(sharedUrl);
 
-			// Instagram이면 바로 Instagram 페이지로 이동
+			// Instagram이면 바로 Instagram 페이지로 이동 (replace로 히스토리에서 /share 제거)
 			if (urlType === 'instagram') {
-				window.location.href = `/instagram/posts?shared_url=${encodeURIComponent(sharedUrl)}`;
+				window.location.replace(`/instagram/posts?shared_url=${encodeURIComponent(sharedUrl)}`);
 				return;
 			}
 
@@ -108,12 +108,13 @@
 	});
 
 	// PWA standalone 모드에서는 goto()가 동작하지 않을 수 있으므로 window.location 사용
+	// replace()를 사용하여 /share 페이지를 히스토리에서 제거 (뒤로가기 시 건너뜀)
 	function handleInstagram() {
-		window.location.href = `/instagram/posts?shared_url=${encodeURIComponent(sharedUrl)}`;
+		window.location.replace(`/instagram/posts?shared_url=${encodeURIComponent(sharedUrl)}`);
 	}
 
 	function handleEventForm() {
-		window.location.href = `/events?action=add&url=${encodeURIComponent(sharedUrl)}`;
+		window.location.replace(`/events?action=add&url=${encodeURIComponent(sharedUrl)}`);
 	}
 
 	function handleManualSubmit() {
@@ -121,7 +122,7 @@
 	}
 
 	function handleCancel() {
-		window.location.href = '/';
+		window.location.replace('/');
 	}
 </script>
 

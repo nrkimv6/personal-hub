@@ -44,10 +44,10 @@ $PidFiles = @()
 foreach ($suffix in $PidSuffixes) {
     $PidFiles += Join-Path $PidDir "api$suffix.pid"
     $PidFiles += Join-Path $PidDir "worker$suffix.pid"
-    $PidFiles += Join-Path $PidDir "instagram_worker$suffix.pid"
+    $PidFiles += Join-Path $PidDir "crawl_worker$suffix.pid"
     $PidFiles += Join-Path $PidDir "claude_worker$suffix.pid"
     $PidFiles += Join-Path $PidDir "watchdog$suffix.pid"
-    $PidFiles += Join-Path $PidDir "instagram_watchdog$suffix.pid"
+    $PidFiles += Join-Path $PidDir "crawl_watchdog$suffix.pid"
     $PidFiles += Join-Path $PidDir "claude_watchdog$suffix.pid"
     $PidFiles += Join-Path $PidDir "frontend$suffix.pid"
 }

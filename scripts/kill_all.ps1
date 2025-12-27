@@ -12,7 +12,7 @@ $pythonProcs = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -Erro
 $pythonKilled = 0
 foreach ($proc in $pythonProcs) {
     $cmd = $proc.CommandLine
-    if ($cmd -and ($cmd -like "*monitor-page*" -or $cmd -like "*app.worker*" -or $cmd -like "*instagram_worker*" -or $cmd -like "*llm_worker*" -or $cmd -like "*uvicorn*" -or $cmd -like "*app.main*")) {
+    if ($cmd -and ($cmd -like "*monitor-page*" -or $cmd -like "*app.worker*" -or $cmd -like "*crawl_worker*" -or $cmd -like "*llm_worker*" -or $cmd -like "*uvicorn*" -or $cmd -like "*app.main*")) {
         Write-Host "  Killing PID $($proc.ProcessId)" -ForegroundColor Yellow
         Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
         $pythonKilled++

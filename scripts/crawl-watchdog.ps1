@@ -1,6 +1,6 @@
-# Instagram Worker Watchdog Script
-# Monitors the Instagram worker process and automatically restarts it if it crashes
-# Usage: .\scripts\instagram-watchdog.ps1
+# Crawl Worker Watchdog Script
+# Monitors the crawl worker process (Instagram + Universal) and automatically restarts it if it crashes
+# Usage: .\scripts\crawl-watchdog.ps1
 
 param(
     [int]$CheckInterval = 10,     # Check every 10 seconds
@@ -22,7 +22,7 @@ if ($isDev) {
     $PidSuffix = ""
 }
 $PidDir = Join-Path $ProjectRoot ".pids"
-$WorkerPidFile = Join-Path $PidDir "instagram_worker$PidSuffix.pid"
+$WorkerPidFile = Join-Path $PidDir "crawl_worker$PidSuffix.pid"
 
 # Ensure directories exist
 if (-not (Test-Path $LogDir)) {
@@ -49,16 +49,16 @@ function Write-Log {
         }
     )
     # Also log to file
-    $logFile = Join-Path $LogDir "instagram_watchdog.log"
+    $logFile = Join-Path $LogDir "crawl_watchdog.log"
     Add-Content -Path $logFile -Value $logMessage -Encoding UTF8
 }
 
-function Start-InstagramWorker {
+function Start-CrawlWorker {
     $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $stdoutLogFile = Join-Path $LogDir "stdout_instagram_$Timestamp.log"
-    $stderrLogFile = Join-Path $LogDir "stderr_instagram_$Timestamp.log"
+    $stdoutLogFile = Join-Path $LogDir "stdout_crawl_$Timestamp.log"
+    $stderrLogFile = Join-Path $LogDir "stderr_crawl_$Timestamp.log"
 
-    Write-Log "Starting Instagram worker process..."
+    Write-Log "Starting Crawl worker process (Instagram + Universal)..."
 
     # Use venv python explicitly
     $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
@@ -78,21 +78,21 @@ function Start-InstagramWorker {
 
     # Start python directly (NOT via cmd.exe) to get correct PID
     $workerProcess = Start-Process -FilePath $VenvPython `
-        -ArgumentList "-m", "app.worker.instagram_worker" `
+        -ArgumentList "-m", "app.worker.crawl_worker" `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
         -RedirectStandardOutput $stdoutLogFile `
         -RedirectStandardError $stderrLogFile `
         -PassThru
 
-    # Save PID - this is now the actual python process PID
+    # Save PID
     $workerProcess.Id | Out-File $WorkerPidFile -Encoding ascii
 
-    Write-Log "Instagram worker started with PID: $($workerProcess.Id)"
+    Write-Log "Crawl worker started with PID: $($workerProcess.Id)"
     return $workerProcess.Id
 }
 
-function Test-InstagramWorkerRunning {
+function Test-CrawlWorkerRunning {
     if (-not (Test-Path $WorkerPidFile)) {
         return $false
     }
@@ -106,21 +106,21 @@ function Test-InstagramWorkerRunning {
     return ($null -ne $process)
 }
 
-# Kill any orphaned Instagram worker processes before starting
-function Stop-OrphanedInstagramWorkers {
-    Write-Log "Checking for orphaned Instagram worker processes..."
+# Kill any orphaned crawl worker processes before starting
+function Stop-OrphanedCrawlWorkers {
+    Write-Log "Checking for orphaned crawl worker processes..."
     $killedCount = 0
 
-    # Find all python processes running instagram_worker
+    # Find all python processes running crawl_worker or instagram_worker (legacy)
     $pythonProcs = Get-Process -Name "python*" -ErrorAction SilentlyContinue
     foreach ($proc in $pythonProcs) {
         try {
             $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($proc.Id)" -ErrorAction SilentlyContinue).CommandLine
-            if ($cmdLine -and $cmdLine -like "*app.worker.instagram_worker*") {
+            if ($cmdLine -and ($cmdLine -like "*app.worker.crawl_worker*" -or $cmdLine -like "*app.worker.instagram_worker*")) {
                 # Check if this is our managed worker
                 $savedPid = if (Test-Path $WorkerPidFile) { Get-Content $WorkerPidFile -ErrorAction SilentlyContinue } else { $null }
                 if ($proc.Id -ne $savedPid) {
-                    Write-Log "Killing orphaned Instagram worker (PID: $($proc.Id))" "WARN"
+                    Write-Log "Killing orphaned crawl worker (PID: $($proc.Id))" "WARN"
                     Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
                     $killedCount++
                 }
@@ -131,14 +131,14 @@ function Stop-OrphanedInstagramWorkers {
     }
 
     if ($killedCount -gt 0) {
-        Write-Log "Killed $killedCount orphaned Instagram worker(s)"
+        Write-Log "Killed $killedCount orphaned crawl worker(s)"
         Start-Sleep -Seconds 2  # Wait for processes to fully terminate
     }
 }
 
 # Main watchdog loop
 Write-Log "=" * 50
-Write-Log "Instagram Worker Watchdog Started"
+Write-Log "Crawl Worker Watchdog Started (Instagram + Universal)"
 Write-Log "Check interval: ${CheckInterval}s"
 Write-Log "Max restarts: $MaxRestarts in ${RestartWindow}s"
 Write-Log "=" * 50
@@ -147,12 +147,12 @@ Write-Log "=" * 50
 Set-Location $ProjectRoot
 
 # Kill orphaned workers before starting
-Stop-OrphanedInstagramWorkers
+Stop-OrphanedCrawlWorkers
 
 # Initial check
-if (-not (Test-InstagramWorkerRunning)) {
-    Write-Log "Instagram worker not running, starting..." "WARN"
-    Start-InstagramWorker
+if (-not (Test-CrawlWorkerRunning)) {
+    Write-Log "Crawl worker not running, starting..." "WARN"
+    Start-CrawlWorker
     $restartCount++
     $lastRestartTime = Get-Date
 }
@@ -171,28 +171,28 @@ try {
         }
 
         # Check if worker is running
-        if (-not (Test-InstagramWorkerRunning)) {
-            Write-Log "Instagram worker process died!" "ERROR"
+        if (-not (Test-CrawlWorkerRunning)) {
+            Write-Log "Crawl worker process died!" "ERROR"
 
             # Check restart limit
             if ($restartCount -ge $MaxRestarts) {
                 Write-Log "Maximum restart limit ($MaxRestarts) reached in ${RestartWindow}s window!" "ERROR"
-                Write-Log "Please check the Instagram worker logs for the root cause." "ERROR"
+                Write-Log "Please check the crawl worker logs for the root cause." "ERROR"
                 Write-Log "Watchdog stopping to prevent restart loop." "ERROR"
                 break
             }
 
             # Restart
-            Write-Log "Restarting Instagram worker (attempt $($restartCount + 1)/$MaxRestarts)..." "WARN"
-            Start-InstagramWorker
+            Write-Log "Restarting crawl worker (attempt $($restartCount + 1)/$MaxRestarts)..." "WARN"
+            Start-CrawlWorker
             $restartCount++
             $lastRestartTime = Get-Date
         }
     }
 }
 catch {
-    Write-Log "Instagram Watchdog error: $_" "ERROR"
+    Write-Log "Crawl Watchdog error: $_" "ERROR"
 }
 finally {
-    Write-Log "Instagram Watchdog stopped"
+    Write-Log "Crawl Watchdog stopped"
 }

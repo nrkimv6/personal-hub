@@ -156,13 +156,13 @@ try {
         $env:SKIP_FRONTEND = "true"
         if (-not $RunWorkers) {
             $env:SKIP_WORKER = "true"
-            $env:SKIP_INSTAGRAM_WORKER = "true"
+            $env:SKIP_CRAWL_WORKER = "true"
             $env:SKIP_CLAUDE_WORKER = "true"
         }
         & $startScript -Dev
         $env:SKIP_FRONTEND = $null
         $env:SKIP_WORKER = $null
-        $env:SKIP_INSTAGRAM_WORKER = $null
+        $env:SKIP_CRAWL_WORKER = $null
         $env:SKIP_CLAUDE_WORKER = $null
 
         # Wait for log files to be created (watchdog starts worker after a delay)
@@ -180,10 +180,10 @@ try {
             Sort-Object Name -Descending | Select-Object -First 1
         $workerLogName = if ($workerLog) { $workerLog.Name } else { $null }
 
-        # Instagram worker log
-        $igWorkerLog = Get-ChildItem -Path $LogDir -Filter "stdout_instagram_*.log" -ErrorAction SilentlyContinue |
+        # Crawl worker log (Instagram + Universal)
+        $crawlWorkerLog = Get-ChildItem -Path $LogDir -Filter "stdout_crawl_*.log" -ErrorAction SilentlyContinue |
             Sort-Object Name -Descending | Select-Object -First 1
-        $igWorkerLogName = if ($igWorkerLog) { $igWorkerLog.Name } else { $null }
+        $crawlWorkerLogName = if ($crawlWorkerLog) { $crawlWorkerLog.Name } else { $null }
 
         # Claude worker log (LLM worker)
         $claudeWorkerLog = Get-ChildItem -Path $LogDir -Filter "stdout_llm_worker_*.log" -ErrorAction SilentlyContinue |
@@ -207,10 +207,10 @@ try {
                 Write-Host "[WORKER] $_" -ForegroundColor Magenta
             }
         }
-        if ($igWorkerLog) {
-            Write-Host "[IG-WORKER] === Log from start ===" -ForegroundColor DarkCyan
-            Get-Content $igWorkerLog.FullName -Encoding UTF8 -ErrorAction SilentlyContinue | ForEach-Object {
-                Write-Host "[IG-WORKER] $_" -ForegroundColor DarkCyan
+        if ($crawlWorkerLog) {
+            Write-Host "[CRAWL] === Log from start ===" -ForegroundColor DarkCyan
+            Get-Content $crawlWorkerLog.FullName -Encoding UTF8 -ErrorAction SilentlyContinue | ForEach-Object {
+                Write-Host "[CRAWL] $_" -ForegroundColor DarkCyan
             }
         }
         if ($claudeWorkerLog) {
@@ -227,14 +227,14 @@ try {
         # Track log file positions for tailing
         $apiPos = if ($apiLog) { (Get-Item $apiLog.FullName).Length } else { 0 }
         $workerPos = if ($workerLog) { (Get-Item $workerLog.FullName).Length } else { 0 }
-        $igWorkerPos = if ($igWorkerLog) { (Get-Item $igWorkerLog.FullName).Length } else { 0 }
+        $crawlWorkerPos = if ($crawlWorkerLog) { (Get-Item $crawlWorkerLog.FullName).Length } else { 0 }
         $claudeWorkerPos = if ($claudeWorkerLog) { (Get-Item $claudeWorkerLog.FullName).Length } else { 0 }
 
         # Watchdog logs (if exists)
         $watchdogLogFile = Join-Path $LogDir "watchdog.log"
         $watchdogPos = if (Test-Path $watchdogLogFile) { (Get-Item $watchdogLogFile).Length } else { 0 }
-        $igWatchdogLogFile = Join-Path $LogDir "instagram_watchdog.log"
-        $igWatchdogPos = if (Test-Path $igWatchdogLogFile) { (Get-Item $igWatchdogLogFile).Length } else { 0 }
+        $crawlWatchdogLogFile = Join-Path $LogDir "crawl_watchdog.log"
+        $crawlWatchdogPos = if (Test-Path $crawlWatchdogLogFile) { (Get-Item $crawlWatchdogLogFile).Length } else { 0 }
         $claudeWatchdogLogFile = Join-Path $LogDir "claude_watchdog.log"
         $claudeWatchdogPos = if (Test-Path $claudeWatchdogLogFile) { (Get-Item $claudeWatchdogLogFile).Length } else { 0 }
 
@@ -353,41 +353,41 @@ try {
                     }
                 }
 
-                # Tail Instagram Watchdog log
-                if (Test-Path $igWatchdogLogFile) {
-                    $currentSize = (Get-Item $igWatchdogLogFile).Length
-                    if ($currentSize -gt $igWatchdogPos) {
-                        $stream = [System.IO.FileStream]::new($igWatchdogLogFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
-                        $stream.Seek($igWatchdogPos, [System.IO.SeekOrigin]::Begin) | Out-Null
+                # Tail Crawl Watchdog log
+                if (Test-Path $crawlWatchdogLogFile) {
+                    $currentSize = (Get-Item $crawlWatchdogLogFile).Length
+                    if ($currentSize -gt $crawlWatchdogPos) {
+                        $stream = [System.IO.FileStream]::new($crawlWatchdogLogFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                        $stream.Seek($crawlWatchdogPos, [System.IO.SeekOrigin]::Begin) | Out-Null
                         $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
                         while ($null -ne ($line = $reader.ReadLine())) {
-                            Write-Host "[IG-WATCHDOG] $line" -ForegroundColor DarkYellow
+                            Write-Host "[CRAWL-WATCHDOG] $line" -ForegroundColor DarkYellow
                         }
-                        $igWatchdogPos = $stream.Position
+                        $crawlWatchdogPos = $stream.Position
                         $reader.Close()
                         $stream.Close()
                     }
                 }
 
-                # Tail Instagram Worker log (check for new log file from watchdog restart)
-                $latestIgWorkerLog = Get-ChildItem -Path $LogDir -Filter "stdout_instagram_*.log" -ErrorAction SilentlyContinue |
+                # Tail Crawl Worker log (check for new log file from watchdog restart)
+                $latestCrawlWorkerLog = Get-ChildItem -Path $LogDir -Filter "stdout_crawl_*.log" -ErrorAction SilentlyContinue |
                     Sort-Object Name -Descending | Select-Object -First 1
-                if ($latestIgWorkerLog -and $latestIgWorkerLog.Name -ne $igWorkerLogName) {
-                    Write-Host "[IG-WORKER] === New worker log: $($latestIgWorkerLog.Name) ===" -ForegroundColor Yellow
-                    $igWorkerLog = $latestIgWorkerLog
-                    $igWorkerLogName = $latestIgWorkerLog.Name
-                    $igWorkerPos = 0
+                if ($latestCrawlWorkerLog -and $latestCrawlWorkerLog.Name -ne $crawlWorkerLogName) {
+                    Write-Host "[CRAWL] === New worker log: $($latestCrawlWorkerLog.Name) ===" -ForegroundColor Yellow
+                    $crawlWorkerLog = $latestCrawlWorkerLog
+                    $crawlWorkerLogName = $latestCrawlWorkerLog.Name
+                    $crawlWorkerPos = 0
                 }
-                if ($igWorkerLog -and (Test-Path $igWorkerLog.FullName)) {
-                    $currentSize = (Get-Item $igWorkerLog.FullName).Length
-                    if ($currentSize -gt $igWorkerPos) {
-                        $stream = [System.IO.FileStream]::new($igWorkerLog.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
-                        $stream.Seek($igWorkerPos, [System.IO.SeekOrigin]::Begin) | Out-Null
+                if ($crawlWorkerLog -and (Test-Path $crawlWorkerLog.FullName)) {
+                    $currentSize = (Get-Item $crawlWorkerLog.FullName).Length
+                    if ($currentSize -gt $crawlWorkerPos) {
+                        $stream = [System.IO.FileStream]::new($crawlWorkerLog.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                        $stream.Seek($crawlWorkerPos, [System.IO.SeekOrigin]::Begin) | Out-Null
                         $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
                         while ($null -ne ($line = $reader.ReadLine())) {
-                            Write-Host "[IG-WORKER] $line" -ForegroundColor DarkCyan
+                            Write-Host "[CRAWL] $line" -ForegroundColor DarkCyan
                         }
-                        $igWorkerPos = $stream.Position
+                        $crawlWorkerPos = $stream.Position
                         $reader.Close()
                         $stream.Close()
                     }
@@ -466,14 +466,14 @@ try {
         # Normal (Production) mode: all background, workers disabled
         # Set environment variables to skip all workers
         $env:SKIP_WORKER = "true"
-        $env:SKIP_INSTAGRAM_WORKER = "true"
+        $env:SKIP_CRAWL_WORKER = "true"
         $env:SKIP_CLAUDE_WORKER = "true"
 
         & $startScript
 
         # Clean up environment variables
         $env:SKIP_WORKER = $null
-        $env:SKIP_INSTAGRAM_WORKER = $null
+        $env:SKIP_CRAWL_WORKER = $null
         $env:SKIP_CLAUDE_WORKER = $null
 
         if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null) {

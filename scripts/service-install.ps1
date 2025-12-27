@@ -283,29 +283,24 @@ function Open-ServiceLogs {
 
     # Determine if this is Dev service
     $isDev = $svc.Args -like "*-Dev*"
-    $devFlag = if ($isDev) { "-Dev" } else { "" }
     $modeLabel = if ($isDev) { "DEV" } else { "PROD" }
-
-    # Build the logs.ps1 command
     $logsScript = Join-Path $ScriptDir "logs.ps1"
-    $logsCmd = @"
-Write-Host '[$modeLabel] Monitor Page - Unified Log Viewer' -ForegroundColor Cyan
-Write-Host 'Waiting for services to initialize...' -ForegroundColor Yellow
-Start-Sleep -Seconds 3
-& '$logsScript' -Follow $devFlag
-"@
+
+    # Build command string for wt (needs proper quoting)
+    $devFlag = if ($isDev) { " -Dev" } else { "" }
+    $psCmd = "& '$logsScript' -Follow$devFlag"
 
     # Check if Windows Terminal is available
     $wtPath = Get-Command wt -ErrorAction SilentlyContinue
 
     if ($wtPath) {
-        # Windows Terminal - single tab with all logs
+        # Windows Terminal - use cmd /c to properly pass the command
         Write-Host "    Using Windows Terminal" -ForegroundColor Gray
-        Start-Process wt -ArgumentList "new-tab", "--title", "[$modeLabel] Monitor Page Logs", "powershell", "-NoExit", "-Command", $logsCmd
+        Start-Process cmd -ArgumentList "/c", "wt", "new-tab", "--title", "`"[$modeLabel] Logs`"", "powershell", "-NoExit", "-Command", "`"$psCmd`""
     } else {
         # Fallback to regular PowerShell window
         Write-Host "    Using PowerShell" -ForegroundColor Gray
-        Start-Process powershell -ArgumentList "-NoExit", "-Command", $logsCmd
+        Start-Process powershell -ArgumentList "-NoExit", "-Command", $psCmd
     }
 
     Write-Host "[+] Log window opened" -ForegroundColor Green
