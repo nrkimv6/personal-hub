@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { crawlApi } from '$lib/api';
+	import { crawlApi, instagramApi } from '$lib/api';
 	import { toast } from '$lib/stores/toast';
 
 	let sharedUrl = $state('');
@@ -11,9 +11,10 @@
 	let processing = $state(true);
 	let submitting = $state(false);
 	let autoSubmitDone = $state(false);
+	let shareCompleted = $state(false);  // 공유 완료 상태 (창 닫기 실패 시 표시)
 
 	const URL_PATTERNS = {
-		instagram: [/instagram\.com\/(p|reel|stories)\//, /instagr\.am\//],
+		instagram: [/instagram\.com\/(p|reel|stories|reels)\//, /instagram\.com\/[^/]+\/?$/, /instagr\.am\//],
 		event_form: [
 			/forms\.gle\//,
 			/docs\.google\.com\/forms/,
@@ -42,6 +43,57 @@
 		return matches ? matches[0] : null;
 	}
 
+	// PWA 공유 창 닫기 시도
+	function tryCloseWindow() {
+		// window.close()는 스크립트로 열린 창만 닫을 수 있음
+		// PWA share target의 경우 실패할 수 있으므로 완료 화면 표시
+		try {
+			window.close();
+		} catch {
+			// ignore
+		}
+		// 창이 안 닫히면 완료 상태 표시
+		setTimeout(() => {
+			shareCompleted = true;
+			processing = false;
+		}, 300);
+	}
+
+	// Instagram URL 자동 크롤링 요청
+	async function submitInstagramCrawl() {
+		if (!sharedUrl || submitting) return;
+
+		submitting = true;
+		try {
+			// Instagram 계정 목록 가져오기
+			const accounts = await instagramApi.getAccounts();
+			if (accounts.length === 0) {
+				toast.error('등록된 Instagram 계정이 없습니다.');
+				// 계정이 없으면 Instagram 페이지로 이동
+				window.location.replace(`/instagram/posts?shared_url=${encodeURIComponent(sharedUrl)}`);
+				return;
+			}
+
+			// 기본 계정 선택 (ID=4 우선, 없으면 첫 번째)
+			const defaultAccount = accounts.find(a => a.id === 4);
+			const accountId = defaultAccount?.id ?? accounts[0].id;
+
+			// 크롤링 요청
+			await instagramApi.crawlByGenericUrl(sharedUrl, accountId);
+			toast.success('Instagram 수집 요청 완료');
+
+			// 창 닫기 시도
+			tryCloseWindow();
+		} catch (error) {
+			const message = error instanceof Error ? error.message : '알 수 없는 오류';
+			toast.error(`오류: ${message}`);
+			// 실패 시 Instagram 페이지로 이동
+			window.location.replace(`/instagram/posts?shared_url=${encodeURIComponent(sharedUrl)}`);
+		} finally {
+			submitting = false;
+		}
+	}
+
 	async function submitCrawlRequest() {
 		if (!sharedUrl || submitting) return;
 
@@ -55,10 +107,8 @@
 
 			if (response.success) {
 				toast.success(`크롤링 요청 등록 완료 (${response.url_type})`);
-				// 1.5초 후 홈으로 이동 (replace로 히스토리에서 /share 제거)
-				setTimeout(() => {
-					window.location.replace('/');
-				}, 1500);
+				// 창 닫기 시도
+				tryCloseWindow();
 			} else {
 				toast.error('크롤링 요청 등록 실패');
 			}
@@ -91,9 +141,9 @@
 		if (sharedUrl) {
 			urlType = detectUrlType(sharedUrl);
 
-			// Instagram이면 바로 Instagram 페이지로 이동 (replace로 히스토리에서 /share 제거)
+			// Instagram이면 바로 크롤링 요청 후 창 닫기
 			if (urlType === 'instagram') {
-				window.location.replace(`/instagram/posts?shared_url=${encodeURIComponent(sharedUrl)}`);
+				await submitInstagramCrawl();
 				return;
 			}
 
@@ -124,6 +174,11 @@
 	function handleCancel() {
 		window.location.replace('/');
 	}
+
+	function handleGoBack() {
+		// 이전 앱으로 돌아가기 (히스토리 뒤로가기)
+		window.history.back();
+	}
 </script>
 
 <svelte:head>
@@ -133,7 +188,20 @@
 <div class="p-4 max-w-lg mx-auto">
 	<h1 class="text-2xl font-bold mb-6">공유 받은 URL</h1>
 
-	{#if processing || submitting}
+	{#if shareCompleted}
+		<!-- 공유 완료 (창 닫기 실패 시) -->
+		<div class="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
+			<div class="text-green-600 text-4xl mb-3">✓</div>
+			<p class="text-green-800 font-medium text-lg mb-2">수집 요청 완료</p>
+			<p class="text-sm text-green-700 mb-4">이전 앱으로 돌아가세요</p>
+			<button
+				onclick={handleGoBack}
+				class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
+			>
+				뒤로가기
+			</button>
+		</div>
+	{:else if processing || submitting}
 		<div class="flex items-center justify-center py-8">
 			<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
 			<span class="ml-3 text-gray-600">

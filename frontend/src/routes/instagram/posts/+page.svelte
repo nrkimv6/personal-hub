@@ -587,6 +587,13 @@
 			urlCrawlInput = sharedUrl;
 			// URL 파싱 트리거
 			onUrlInput();
+
+			// URL에서 shared_url 파라미터 제거 (새로고침/뒤로가기 시 모달이 다시 뜨지 않도록)
+			if (browser) {
+				const newUrl = new URL(window.location.href);
+				newUrl.searchParams.delete('shared_url');
+				window.history.replaceState(null, '', newUrl.pathname + newUrl.search);
+			}
 		}
 
 		fetchAccounts();
