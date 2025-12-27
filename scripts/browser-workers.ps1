@@ -80,8 +80,10 @@ function Start-BrowserWorkers {
         Write-Log "Monitor Worker Watchdog already running" "WARN"
     } else {
         Write-Log "Starting Monitor Worker Watchdog..."
+        # Pass APP_MODE via command to ensure it's set in child process
+        $watchdogCmd = "`$env:APP_MODE='development'; & '$ScriptDir\worker-watchdog.ps1'"
         $watchdogProcess = Start-Process -FilePath "powershell.exe" `
-            -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\worker-watchdog.ps1" `
+            -ArgumentList "-ExecutionPolicy", "Bypass", "-Command", $watchdogCmd `
             -WorkingDirectory $ProjectRoot `
             -WindowStyle Hidden `
             -PassThru
@@ -95,8 +97,10 @@ function Start-BrowserWorkers {
         Write-Log "Crawl Worker Watchdog already running" "WARN"
     } else {
         Write-Log "Starting Crawl Worker Watchdog..."
+        # Pass APP_MODE via command to ensure it's set in child process
+        $crawlWatchdogCmd = "`$env:APP_MODE='development'; & '$ScriptDir\crawl-watchdog.ps1'"
         $crawlWatchdogProcess = Start-Process -FilePath "powershell.exe" `
-            -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\crawl-watchdog.ps1" `
+            -ArgumentList "-ExecutionPolicy", "Bypass", "-Command", $crawlWatchdogCmd `
             -WorkingDirectory $ProjectRoot `
             -WindowStyle Hidden `
             -PassThru
