@@ -367,7 +367,9 @@ function Start-CombinedLogTail {
                         Write-Host "[$source] === New log detected: $($latestLog.Name) ===" -ForegroundColor Green
                         $logFiles[$source] = $latestLog.FullName
                         $logFileNames[$source] = $latestLog.Name
-                        $logColors[$source] = $logConfig[$source].Color
+                        # Null-safe color assignment
+                        $color = $logConfig[$source].Color
+                        $logColors[$source] = if ($null -ne $color) { $color } else { "White" }
                         $filePositions[$source] = 0
                     }
                 }
@@ -387,8 +389,8 @@ function Start-CombinedLogTail {
                     $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
 
                     while ($null -ne ($line = $reader.ReadLine())) {
-                        # Get base color for this source
-                        $sourceColor = $logColors[$source]
+                        # Get base color for this source (null-safe)
+                        $sourceColor = if ($null -ne $logColors[$source]) { $logColors[$source] } else { "White" }
 
                         # Override color for errors/warnings
                         if ($line -match "ERROR|CRITICAL|Exception") {
