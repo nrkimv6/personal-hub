@@ -239,6 +239,10 @@ if (-not (Test-Path $nodeModules)) {
 # Set environment variable for Vite (non-default API port)
 if ($ApiPort -ne 8000) {
     $env:VITE_API_PORT = $ApiPort
+    # Also write to .env.local for Vite to pick up (Start-Process may not inherit env vars)
+    $envLocalFile = Join-Path $FrontendDir ".env.local"
+    "VITE_API_PORT=$ApiPort" | Out-File $envLocalFile -Encoding utf8
+    Write-ServiceLog "Created .env.local with VITE_API_PORT=$ApiPort"
 }
 
 # Start frontend using npm.cmd directly (avoid cmd.exe socket inheritance issue)

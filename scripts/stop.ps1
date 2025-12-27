@@ -101,9 +101,43 @@ if ($watchdogKilled -eq 0) {
 Write-Host ""
 
 # ============================================================
-# STEP 1: Kill Python processes matching our patterns AND ports
+# STEP 1: Kill worker processes by PID files first (handles Session 0 processes)
 # ============================================================
-Write-Host "[1] Killing monitor-page Python processes (ports: $($ApiPorts -join ', '))" -ForegroundColor Cyan
+Write-Host "[1] Killing worker processes by PID files" -ForegroundColor Cyan
+Write-Host "----------------------------------------"
+
+$pidKilled = 0
+
+# Kill workers by PID file - this catches Session 0 processes that have no visible CommandLine
+foreach ($pidFile in $PidFiles) {
+    if ((Test-Path $pidFile) -and $pidFile -match "worker") {
+        $savedPid = Get-Content $pidFile -ErrorAction SilentlyContinue
+        if ($savedPid) {
+            $proc = Get-Process -Id $savedPid -ErrorAction SilentlyContinue
+            if ($proc) {
+                $pidFileName = Split-Path $pidFile -Leaf
+                Write-Host "  [*] $pidFileName -> PID $savedPid ($($proc.ProcessName))" -ForegroundColor Yellow
+                try {
+                    Stop-Process -Id $savedPid -Force -ErrorAction Stop
+                    Write-Host "      -> Killed" -ForegroundColor Green
+                    $pidKilled++
+                } catch {
+                    Write-Host "      -> Failed: $($_.Exception.Message)" -ForegroundColor Red
+                }
+            }
+        }
+    }
+}
+
+if ($pidKilled -eq 0) {
+    Write-Host "  (no worker processes from PID files)" -ForegroundColor Gray
+}
+
+# ============================================================
+# STEP 1b: Kill Python processes matching our patterns AND ports
+# ============================================================
+Write-Host ""
+Write-Host "[1b] Killing remaining monitor-page Python processes" -ForegroundColor Cyan
 Write-Host "----------------------------------------"
 
 $pythonKilled = 0
@@ -114,12 +148,16 @@ $pythonProcs = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -Erro
 if ($pythonProcs) {
     foreach ($proc in $pythonProcs) {
         $cmd = $proc.CommandLine
+
+        # For processes with no visible CommandLine (Session 0), skip pattern matching
+        # They should have been caught by PID file check above
         if (-not $cmd) { continue }
 
         # Check if this is a monitor-page related process
         $isOurs = $false
         if ($cmd -match "app\.main" -or
             $cmd -match "app\.worker" -or
+            $cmd -match "app\.modules\.claude_worker" -or
             $cmd -match "uvicorn" -or
             $cmd -match "monitor-page") {
             $isOurs = $true
@@ -134,17 +172,11 @@ if ($pythonProcs) {
                     break
                 }
             }
-            # Worker processes don't have port in command line, check PID files
-            if (-not $isTargetEnv -and ($cmd -match "app\.worker" -or $cmd -match "worker\.py")) {
-                # Check if this worker's PID matches our PID files
-                foreach ($pidFile in $PidFiles) {
-                    if ((Test-Path $pidFile) -and $pidFile -match "worker") {
-                        $savedPid = Get-Content $pidFile -ErrorAction SilentlyContinue
-                        if ($savedPid -eq $proc.ProcessId) {
-                            $isTargetEnv = $true
-                            break
-                        }
-                    }
+            # Worker processes don't have port in command line, check by path pattern
+            if (-not $isTargetEnv -and ($cmd -match "app\.worker" -or $cmd -match "claude_worker" -or $cmd -match "instagram_worker")) {
+                # For dev mode, include if path contains monitor-page
+                if ($cmd -match "monitor-page") {
+                    $isTargetEnv = $true
                 }
             }
 
