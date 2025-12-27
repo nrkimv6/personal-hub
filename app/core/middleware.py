@@ -17,7 +17,7 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 import re
-from app.core.config import settings
+from app.core.config import settings, logger
 from app.core.auth import verify_token, is_localhost_request
 
 # 운영 모드에서 비관리자에게 허용할 API 패턴 (화이트리스트)
@@ -77,17 +77,39 @@ class ProductionModeMiddleware(BaseHTTPMiddleware):
 
         - localhost 요청은 자동 관리자 (개발 편의)
         - JWT 토큰에서 is_admin=True면 관리자
+        - Authorization 헤더 또는 Cookie에서 토큰 확인
         """
         # localhost는 자동 관리자
         if is_localhost_request(request):
             return True
 
-        # Authorization 헤더에서 토큰 추출
+        token = None
+        token_source = None
+
+        # 1. Authorization 헤더에서 토큰 추출 (우선)
         auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header[7:]  # "Bearer " 이후
+            token_source = "header"
+
+        # 2. 헤더에 없으면 Cookie에서 토큰 추출 (PWA 공유 기능 등)
+        if not token:
+            token = request.cookies.get("auth_token")
+            if token:
+                token_source = "cookie"
+
+        # 디버깅 로그 (POST/PUT/DELETE 요청만)
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            logger.info(
+                f"[Auth] {request.method} {request.url.path} | "
+                f"token_source={token_source} | "
+                f"has_auth_header={bool(auth_header)} | "
+                f"cookies={list(request.cookies.keys())}"
+            )
+
+        if not token:
             return False
 
-        token = auth_header[7:]  # "Bearer " 이후
         token_data = verify_token(token)
 
         if token_data and token_data.is_admin:

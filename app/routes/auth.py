@@ -169,7 +169,24 @@ async def auth_callback(
         redirect_url = f"https://dev-monitor.woory.day/auth/callback?token={jwt_token}"
     else:
         redirect_url = f"{settings.FRONTEND_URL}/auth/callback?token={jwt_token}"
-    return RedirectResponse(url=redirect_url)
+
+    response = RedirectResponse(url=redirect_url)
+
+    # PWA 공유 기능 등에서 localStorage 접근 불가 시를 위해 Cookie에도 토큰 저장
+    # SameSite=Lax: CSRF 방지하면서 top-level navigation에서는 전송
+    # domain=.woory.day: 모든 서브도메인에서 Cookie 공유 (dev-monitor, monitor 등)
+    response.set_cookie(
+        key="auth_token",
+        value=jwt_token,
+        max_age=settings.JWT_EXPIRE_MINUTES * 60,
+        httponly=True,
+        samesite="lax",
+        secure=True,  # HTTPS에서만 전송
+        path="/",  # 모든 경로에서 전송 (프록시 경유 시에도)
+        domain=".woory.day",  # 서브도메인 공유
+    )
+
+    return response
 
 
 @router.get("/me")
@@ -206,11 +223,19 @@ async def auth_me(
 
 
 @router.post("/logout")
-async def auth_logout():
+async def auth_logout(response: Response):
     """
     로그아웃
 
-    클라이언트 측에서 토큰을 삭제해야 합니다.
-    서버 측에서는 별도의 처리가 필요하지 않습니다.
+    Cookie에 저장된 토큰을 삭제합니다.
+    클라이언트 측에서는 localStorage의 토큰도 삭제해야 합니다.
     """
+    response.delete_cookie(
+        key="auth_token",
+        path="/",
+        domain=".woory.day",
+        secure=True,
+        httponly=True,
+        samesite="lax",
+    )
     return {"message": "로그아웃되었습니다"}
