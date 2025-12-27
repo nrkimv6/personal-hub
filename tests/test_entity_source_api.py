@@ -2,9 +2,11 @@
 EntitySource API 테스트
 """
 import pytest
+import os
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 from datetime import datetime
 
 from app.main import app
@@ -15,10 +17,12 @@ from app.models.popup import Popup
 from app.models.entity_source import EntitySource
 
 
-# 테스트용 DB 설정
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test_entity_source_api.db"
+# 테스트용 인메모리 DB 설정 (연결 공유로 격리 보장)
+SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,  # 연결 공유
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -31,25 +35,32 @@ def override_get_db():
         db.close()
 
 
-app.dependency_overrides[get_db] = override_get_db
-
-
-@pytest.fixture(scope="module")
-def client():
-    """테스트 클라이언트 생성"""
-    Base.metadata.create_all(bind=engine)
-    with TestClient(app) as c:
-        yield c
-    Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="function")
 def db():
-    """테스트 DB 세션"""
+    """테스트 DB 세션 (가장 먼저 실행되어 테이블 생성)"""
+    # 테스트마다 새로운 테이블 생성
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+
     session = TestingSessionLocal()
     yield session
+    # 에러 상태여도 안전하게 정리
+    try:
+        session.rollback()
+    except Exception:
+        pass
     session.close()
+
+
+@pytest.fixture(scope="function")
+def client(db):
+    """테스트 클라이언트 생성 (db fixture에 의존)"""
+    # 이 테스트에서만 override 적용
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as c:
+        yield c
+    # 테스트 후 override 해제
+    app.dependency_overrides.pop(get_db, None)
 
 
 @pytest.fixture
@@ -63,14 +74,20 @@ def test_event(db):
     db.add(event)
     db.commit()
     db.refresh(event)
+
     yield event
-    # 정리
-    db.query(EntitySource).filter(
-        EntitySource.entity_type == "event",
-        EntitySource.entity_id == event.id
-    ).delete()
-    db.delete(event)
-    db.commit()
+
+    # 테스트 후 정리
+    try:
+        db.rollback()  # 에러 상태 해제
+        db.query(EntitySource).filter(
+            EntitySource.entity_type == "event",
+            EntitySource.entity_id == event.id
+        ).delete()
+        db.delete(event)
+        db.commit()
+    except Exception:
+        db.rollback()
 
 
 @pytest.fixture
@@ -84,14 +101,20 @@ def test_popup(db):
     db.add(popup)
     db.commit()
     db.refresh(popup)
+
     yield popup
-    # 정리
-    db.query(EntitySource).filter(
-        EntitySource.entity_type == "popup",
-        EntitySource.entity_id == popup.id
-    ).delete()
-    db.delete(popup)
-    db.commit()
+
+    # 테스트 후 정리
+    try:
+        db.rollback()  # 에러 상태 해제
+        db.query(EntitySource).filter(
+            EntitySource.entity_type == "popup",
+            EntitySource.entity_id == popup.id
+        ).delete()
+        db.delete(popup)
+        db.commit()
+    except Exception:
+        db.rollback()
 
 
 class TestEntitySourceAPI:

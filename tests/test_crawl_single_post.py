@@ -64,6 +64,7 @@ class TestCrawlSinglePostRight:
         from app.modules.instagram.services.crawler import InstagramCrawler, PostData
 
         mock_page = AsyncMock()
+        mock_page.is_closed = MagicMock(return_value=False)  # 동기 메서드
         mock_page.goto = AsyncMock()
         mock_page.inner_text = AsyncMock(return_value="Test content without login")
         mock_page.evaluate = AsyncMock(return_value={
@@ -95,6 +96,7 @@ class TestCrawlSinglePostRight:
         from app.modules.instagram.services.crawler import InstagramCrawler
 
         mock_page = AsyncMock()
+        mock_page.is_closed = MagicMock(return_value=False)  # 동기 메서드
         mock_page.goto = AsyncMock()
         mock_page.inner_text = AsyncMock(return_value="Normal content")
         mock_page.evaluate = AsyncMock(return_value={
@@ -125,6 +127,7 @@ class TestCrawlSinglePostBoundary:
         from app.modules.instagram.services.crawler import InstagramCrawler
 
         mock_page = AsyncMock()
+        mock_page.is_closed = MagicMock(return_value=False)  # 동기 메서드
         mock_page.goto = AsyncMock()
         mock_page.inner_text = AsyncMock(return_value="Normal content")
         mock_page.evaluate = AsyncMock(return_value={
@@ -146,6 +149,7 @@ class TestCrawlSinglePostBoundary:
         from app.modules.instagram.services.crawler import InstagramCrawler
 
         mock_page = AsyncMock()
+        mock_page.is_closed = MagicMock(return_value=False)  # 동기 메서드
         mock_page.goto = AsyncMock()
         mock_page.inner_text = AsyncMock(return_value="Normal content")
         mock_page.evaluate = AsyncMock(return_value={
@@ -167,6 +171,7 @@ class TestCrawlSinglePostBoundary:
         from app.modules.instagram.services.crawler import InstagramCrawler
 
         mock_page = AsyncMock()
+        mock_page.is_closed = MagicMock(return_value=False)  # 동기 메서드
         mock_page.goto = AsyncMock()
         mock_page.inner_text = AsyncMock(return_value="Normal content")
         mock_page.evaluate = AsyncMock(return_value={
@@ -190,6 +195,7 @@ class TestCrawlSinglePostBoundary:
         from app.modules.instagram.services.crawler import InstagramCrawler
 
         mock_page = AsyncMock()
+        mock_page.is_closed = MagicMock(return_value=False)  # 동기 메서드
         mock_page.goto = AsyncMock()
         mock_page.inner_text = AsyncMock(return_value="Normal content")
         mock_page.evaluate = AsyncMock(return_value={
@@ -213,6 +219,7 @@ class TestCrawlSinglePostBoundary:
         from app.modules.instagram.services.crawler import InstagramCrawler
 
         mock_page = AsyncMock()
+        mock_page.is_closed = MagicMock(return_value=False)  # 동기 메서드
         mock_page.goto = AsyncMock()
         mock_page.inner_text = AsyncMock(return_value="Normal content")
         mock_page.evaluate = AsyncMock(return_value={
@@ -343,6 +350,7 @@ class TestCrawlSinglePostInverse:
         }
 
         mock_page = AsyncMock()
+        mock_page.is_closed = MagicMock(return_value=False)  # 동기 메서드
         mock_page.goto = AsyncMock()
         mock_page.inner_text = AsyncMock(return_value="Normal content")
         mock_page.evaluate = AsyncMock(return_value=extracted_data)
