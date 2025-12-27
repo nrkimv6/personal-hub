@@ -36,6 +36,7 @@ function createAuthStore() {
 		 * 인증 상태 확인
 		 *
 		 * localhost에서는 토큰 없이도 자동 관리자 처리
+		 * Cookie fallback: localStorage 토큰이 없어도 Cookie로 인증 가능
 		 */
 		async checkAuth(): Promise<void> {
 			if (!browser) return;
@@ -53,10 +54,24 @@ function createAuthStore() {
 					headers.Authorization = `Bearer ${token}`;
 				}
 
-				const response = await fetch(`${API_BASE}/auth/me`, { headers });
+				// credentials: 'include'로 Cookie도 전송 (PWA 공유 기능 등)
+				// 백엔드는 Authorization 헤더가 없으면 Cookie에서 토큰 확인
+				const response = await fetch(`${API_BASE}/auth/me`, { headers, credentials: 'include' });
 
+				// 401 Unauthorized: 토큰이 유효하지 않음 (만료 등)
+				if (response.status === 401) {
+					if (token) {
+						localStorage.removeItem(TOKEN_KEY);
+					}
+					set({ ...initialState, isLoading: false });
+					return;
+				}
+
+				// 다른 HTTP 오류는 네트워크 문제로 간주 - 토큰 유지
 				if (!response.ok) {
-					throw new Error('인증 실패');
+					console.warn('[auth] API error, keeping token:', response.status);
+					set({ ...initialState, isLoading: false });
+					return;
 				}
 
 				const data = await response.json();
@@ -77,13 +92,14 @@ function createAuthStore() {
 						isLoading: false
 					});
 				} else {
-					// 비로그인 상태
-					if (token) {
-						localStorage.removeItem(TOKEN_KEY);
-					}
+					// 비로그인 상태 (토큰도 없고 Cookie도 없음)
+					// 토큰은 삭제하지 않음 - 백엔드가 이미 확인함
 					set({ ...initialState, isLoading: false });
 				}
-			} catch {
+			} catch (error) {
+				// 네트워크 오류 시 토큰 삭제하지 않음 (일시적 오류 가능성)
+				console.warn('[auth] Network error, keeping token:', error);
+
 				// 에러 시에도 localhost면 관리자 처리
 				if (isLocalhost) {
 					set({
@@ -93,9 +109,7 @@ function createAuthStore() {
 						isLoading: false
 					});
 				} else {
-					if (token) {
-						localStorage.removeItem(TOKEN_KEY);
-					}
+					// 토큰 삭제하지 않음 - 다음 요청에서 재시도
 					set({ ...initialState, isLoading: false });
 				}
 			}
@@ -133,14 +147,11 @@ function createAuthStore() {
 
 			try {
 				const token = localStorage.getItem(TOKEN_KEY);
-				if (token) {
-					await fetch(`${API_BASE}/auth/logout`, {
-						method: 'POST',
-						headers: {
-							Authorization: `Bearer ${token}`
-						}
-					});
-				}
+				await fetch(`${API_BASE}/auth/logout`, {
+					method: 'POST',
+					headers: token ? { Authorization: `Bearer ${token}` } : {},
+					credentials: 'include'  // Cookie 삭제를 위해
+				});
 			} catch {
 				// 로그아웃 API 실패해도 클라이언트 측은 처리
 			}

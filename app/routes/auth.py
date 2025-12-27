@@ -19,6 +19,7 @@ from app.core.auth import (
     get_current_user,
     is_admin_email,
     is_localhost_request,
+    verify_token,
     UserInfo,
 )
 
@@ -198,6 +199,7 @@ async def auth_me(
     현재 로그인한 사용자 정보 조회
 
     localhost 요청의 경우 자동으로 관리자로 처리됩니다.
+    Authorization 헤더 또는 Cookie에서 토큰을 확인합니다.
 
     Returns:
         사용자 정보 또는 null (비로그인 시)
@@ -210,6 +212,14 @@ async def auth_me(
                 "isAdmin": True,
             }
         }
+
+    # Authorization 헤더에 토큰이 없으면 Cookie에서 확인 (PWA 공유 기능 등)
+    if user is None:
+        cookie_token = request.cookies.get("auth_token")
+        if cookie_token:
+            token_data = verify_token(cookie_token)
+            if token_data:
+                user = UserInfo(email=token_data.email, is_admin=token_data.is_admin)
 
     if user is None:
         return {"user": None}

@@ -362,3 +362,99 @@ class TestLocalhostException:
             headers = {}
 
         assert is_localhost_request(MockRequest()) is True
+
+
+class TestCookieAuthentication:
+    """Cookie 기반 인증 테스트
+
+    PWA Share Target 등에서 localStorage 접근이 불가할 때
+    Cookie를 통한 인증 fallback 동작을 테스트합니다.
+    """
+
+    def test_auth_me_cookie_only(self, mock_external_request):
+        """Cookie만으로 인증 (Authorization 헤더 없음)"""
+        token = create_access_token(email="cookie@example.com", is_admin=False)
+        response = client.get(
+            "/api/v1/auth/me",
+            cookies={"auth_token": token}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["user"]["email"] == "cookie@example.com"
+        assert data["user"]["isAdmin"] is False
+
+    def test_auth_me_cookie_admin(self, mock_external_request):
+        """Cookie로 관리자 인증"""
+        token = create_access_token(email="admin@example.com", is_admin=True)
+        response = client.get(
+            "/api/v1/auth/me",
+            cookies={"auth_token": token}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["user"]["email"] == "admin@example.com"
+        assert data["user"]["isAdmin"] is True
+
+    def test_auth_me_header_priority_over_cookie(self, mock_external_request):
+        """Authorization 헤더가 Cookie보다 우선"""
+        header_token = create_access_token(email="header@example.com", is_admin=True)
+        cookie_token = create_access_token(email="cookie@example.com", is_admin=False)
+
+        response = client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {header_token}"},
+            cookies={"auth_token": cookie_token}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        # Authorization 헤더의 토큰이 사용됨
+        assert data["user"]["email"] == "header@example.com"
+        assert data["user"]["isAdmin"] is True
+
+    def test_auth_me_invalid_cookie(self, mock_external_request):
+        """유효하지 않은 Cookie - 인증 실패"""
+        response = client.get(
+            "/api/v1/auth/me",
+            cookies={"auth_token": "invalid.token.here"}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["user"] is None
+
+    def test_auth_me_expired_cookie(self, mock_external_request):
+        """만료된 Cookie 토큰 - 인증 실패"""
+        # 만료된 토큰 생성
+        expire = datetime.utcnow() - timedelta(hours=1)
+        to_encode = {
+            "sub": "expired@example.com",
+            "is_admin": False,
+            "exp": expire
+        }
+        expired_token = jwt.encode(
+            to_encode,
+            settings.JWT_SECRET,
+            algorithm=settings.JWT_ALGORITHM
+        )
+
+        response = client.get(
+            "/api/v1/auth/me",
+            cookies={"auth_token": expired_token}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["user"] is None
+
+    def test_auth_me_fallback_to_cookie_when_header_invalid(self, mock_external_request):
+        """Authorization 헤더가 유효하지 않으면 Cookie fallback"""
+        cookie_token = create_access_token(email="cookie@example.com", is_admin=True)
+
+        response = client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": "Bearer invalid.header.token"},
+            cookies={"auth_token": cookie_token}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        # 헤더가 유효하지 않으면 Cookie 사용
+        assert data["user"]["email"] == "cookie@example.com"
+        assert data["user"]["isAdmin"] is True
