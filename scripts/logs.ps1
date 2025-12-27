@@ -173,15 +173,38 @@ function Test-StaleLogFile {
     return ($refTime - $fileTime).TotalHours -gt 1
 }
 
-# Warn about potentially stale log files
+# Warn about potentially stale log files and exclude them
 if ($apiLogFile) {
-    if ($workerLogFile -and (Test-StaleLogFile $workerLogFile $apiLogFile)) {
-        Write-Host "[!] Worker log may be stale (from previous session)" -ForegroundColor Yellow
-        $workerLogFile = $null  # Don't show stale logs
+    # Timestamped log files (worker, frontend, ig-worker, claude)
+    $timestampedLogs = @(
+        @{ Name = "Worker"; Var = "workerLogFile" },
+        @{ Name = "Frontend"; Var = "frontendLogFile" },
+        @{ Name = "IG-Worker"; Var = "igWorkerLogFile" },
+        @{ Name = "Claude Worker"; Var = "claudeWorkerLogFile" }
+    )
+
+    foreach ($log in $timestampedLogs) {
+        $logFile = Get-Variable -Name $log.Var -ValueOnly -ErrorAction SilentlyContinue
+        if ($logFile -and (Test-StaleLogFile $logFile $apiLogFile)) {
+            Write-Host "[!] $($log.Name) log may be stale (from previous session)" -ForegroundColor Yellow
+            Set-Variable -Name $log.Var -Value $null
+        }
     }
-    if ($frontendLogFile -and (Test-StaleLogFile $frontendLogFile $apiLogFile)) {
-        Write-Host "[!] Frontend log may be stale (from previous session)" -ForegroundColor Yellow
-        $frontendLogFile = $null  # Don't show stale logs
+
+    # Static log files (watchdog, service_runner) - check LastWriteTime directly
+    $staticLogs = @(
+        @{ Name = "Watchdog"; Var = "watchdogLogFile" },
+        @{ Name = "IG-Watchdog"; Var = "igWatchdogLogFile" },
+        @{ Name = "Claude-Watchdog"; Var = "claudeWatchdogLogFile" },
+        @{ Name = "Service Runner"; Var = "serviceRunnerLogFile" }
+    )
+
+    foreach ($log in $staticLogs) {
+        $logFile = Get-Variable -Name $log.Var -ValueOnly -ErrorAction SilentlyContinue
+        if ($logFile -and (Test-StaleLogFile $logFile $apiLogFile)) {
+            Write-Host "[!] $($log.Name) log may be stale (from previous session)" -ForegroundColor Yellow
+            Set-Variable -Name $log.Var -Value $null
+        }
     }
 }
 
