@@ -53,7 +53,8 @@ function createAuthStore() {
 					headers.Authorization = `Bearer ${token}`;
 				}
 
-				const response = await fetch(`${API_BASE}/auth/me`, { headers });
+				// credentials: 'include'로 Cookie도 전송 (PWA 공유 기능 등)
+				const response = await fetch(`${API_BASE}/auth/me`, { headers, credentials: 'include' });
 
 				if (!response.ok) {
 					throw new Error('인증 실패');
@@ -133,14 +134,11 @@ function createAuthStore() {
 
 			try {
 				const token = localStorage.getItem(TOKEN_KEY);
-				if (token) {
-					await fetch(`${API_BASE}/auth/logout`, {
-						method: 'POST',
-						headers: {
-							Authorization: `Bearer ${token}`
-						}
-					});
-				}
+				await fetch(`${API_BASE}/auth/logout`, {
+					method: 'POST',
+					headers: token ? { Authorization: `Bearer ${token}` } : {},
+					credentials: 'include'  // Cookie 삭제를 위해
+				});
 			} catch {
 				// 로그아웃 API 실패해도 클라이언트 측은 처리
 			}
