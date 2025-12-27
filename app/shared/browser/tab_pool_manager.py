@@ -170,7 +170,20 @@ class TabPoolManager:
             total_tabs = sum(len(pool) for pool in self.tab_pools.values())
             if total_tabs < self.TOTAL_MAX_TABS:
                 # 해당 계정의 컨텍스트에서 새 탭 생성
-                tab = await context.new_page()
+                try:
+                    tab = await context.new_page()
+                except Exception as e:
+                    logger.warning(f"탭 생성 실패, 브라우저 컨텍스트 재생성 시도 (account_id={account_id}): {e}")
+                    # 브라우저 컨텍스트 재생성
+                    await self.handle_browser_closed_error(account_id, recreate=True)
+                    context = await self.context_manager.get_or_create_context(account_id)
+                    # 탭 풀 재초기화
+                    if account_id not in self.tab_pools:
+                        self.tab_pools[account_id] = {}
+                        await self.register_initial_tabs(account_id, context)
+                    # 재시도
+                    tab = await context.new_page()
+                    logger.info(f"브라우저 복구 후 탭 생성 성공 (account_id={account_id})")
 
                 # 자동화 감지 방지 설정
                 await tab.set_extra_http_headers({
