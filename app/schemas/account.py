@@ -65,7 +65,7 @@ class AccountWithItems(Account):
 
 class AccountLoginStatus(BaseModel):
     """계정 로그인 상태 체크 응답"""
-    account_id: int
+    service_account_id: int
     account_name: str
     is_logged_in: bool
     checked_at: datetime

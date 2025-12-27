@@ -20,7 +20,7 @@ class SearchRequest(BaseModel):
         description="날짜 필터 (1h, 24h, 1w, 1m, 1y)",
     )
     max_pages: int = Field(1, ge=1, le=10, description="수집할 페이지 수 (1-10)")
-    account_id: Optional[int] = Field(None, description="브라우저 프로필 ID")
+    service_account_id: Optional[int] = Field(None, description="브라우저 프로필 ID")
 
 
 class SearchResult(BaseModel):
@@ -76,7 +76,7 @@ class SavedSearchCreate(BaseModel):
         description="날짜 필터",
     )
     max_pages: int = Field(1, ge=1, le=10, description="페이지 수")
-    account_id: Optional[int] = Field(None, description="브라우저 프로필 ID")
+    service_account_id: Optional[int] = Field(None, description="브라우저 프로필 ID")
     is_favorite: bool = Field(False, description="즐겨찾기 여부")
 
 
@@ -87,7 +87,7 @@ class SavedSearchUpdate(BaseModel):
     query: Optional[str] = Field(None, min_length=1, max_length=500)
     date_filter: Optional[str] = Field(None, pattern="^(1h|24h|1w|1m|1y)?$")
     max_pages: Optional[int] = Field(None, ge=1, le=10)
-    account_id: Optional[int] = None
+    service_account_id: Optional[int] = None
     is_favorite: Optional[bool] = None
 
 
@@ -99,7 +99,7 @@ class SavedSearchResponse(BaseModel):
     query: str
     date_filter: Optional[str]
     max_pages: int
-    account_id: Optional[int]
+    service_account_id: Optional[int]
     is_favorite: bool
     last_search_id: Optional[str]
     last_run_at: Optional[datetime]

@@ -96,8 +96,8 @@ DEFAULT_PROFILE_NAME: str = "default"
 
 ### browser_service.py
 
-- `get_or_create_context(account_id)`: 계정별 브라우저 컨텍스트 관리
-- `_create_browser_context(account_id)`: 프로필 경로를 DB에서 자동으로 읽어옴
+- `get_or_create_context(service_account_id)`: 계정별 브라우저 컨텍스트 관리
+- `_create_browser_context(service_account_id)`: 프로필 경로를 DB에서 자동으로 읽어옴
 
 ## 다중 프로필 사용 방법
 
@@ -116,13 +116,13 @@ POST /api/accounts
 
 ### 2. 계정별 모니터링
 
-BizItem을 생성할 때 `account_id`를 지정하면 해당 계정의 브라우저 프로필을 사용합니다:
+BizItem을 생성할 때 `service_account_id`를 지정하면 해당 계정의 브라우저 프로필을 사용합니다:
 
 ```bash
 POST /api/biz-items
 {
   "business_id": 1,
-  "account_id": 2,  # 서브계정 사용
+  "service_account_id": 2,  # 서브계정 사용
   "naver_booking_url": "https://..."
 }
 ```

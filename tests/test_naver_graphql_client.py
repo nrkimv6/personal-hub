@@ -1024,7 +1024,7 @@ class TestDataModelExtension:
             "extra_desc_json",
             "booking_precaution_json",
             "api_synced_at",
-            "account_id",  # 다중 프로필 지원
+            "service_account_id",  # 다중 프로필 지원
         ]
 
         for field in new_fields:
@@ -1037,7 +1037,7 @@ class TestDataModelExtension:
         from app.models.biz_item import BizItem
 
         assert hasattr(BizItem, "account"), "BizItem 모델에 account 관계가 없습니다"
-        assert hasattr(BizItem, "account_id"), "BizItem 모델에 account_id 필드가 없습니다"
+        assert hasattr(BizItem, "service_account_id"), "BizItem 모델에 service_account_id 필드가 없습니다"
 
     # --- Conformance: 형식 준수 ---
 

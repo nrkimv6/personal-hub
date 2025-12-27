@@ -32,7 +32,7 @@ class GoogleSavedSearch(Base):
     max_pages = Column(Integer, default=1)
 
     # 옵션
-    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True)
+    service_account_id = Column(Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True)
     is_favorite = Column(Boolean, default=False)
 
     # 마지막 실행 정보

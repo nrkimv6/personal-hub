@@ -57,7 +57,7 @@ def mock_post():
     post.caption = "Test caption"
     post.images = [{"src": "https://example.com/img.jpg", "alt": "Test"}]
     post.is_ad = False
-    post.account_id = 1
+    post.service_account_id = 1
     post.collected_at = datetime.now()
     return post
 
@@ -125,7 +125,7 @@ class TestCrawlRequestSchemaExtension:
 
         schema = CrawlRequestSchema(
             id=1,
-            account_id=1,
+            service_account_id=1,
             requested_at=datetime.now()
         )
         assert schema.request_type == "feed"
@@ -136,7 +136,7 @@ class TestCrawlRequestSchemaExtension:
 
         schema = CrawlRequestSchema(
             id=1,
-            account_id=1,
+            service_account_id=1,
             requested_at=datetime.now()
         )
         assert schema.target_post_id is None
@@ -169,7 +169,7 @@ class TestCrawlRequestServiceSinglePost:
         service = CrawlRequestService(mock_db)
         request = service.create_single_post_request(
             post_id=1,
-            account_id=1,
+            service_account_id=1,
             requested_by="manual"
         )
 
@@ -185,7 +185,7 @@ class TestCrawlRequestServiceSinglePost:
         service = CrawlRequestService(mock_db)
         service.create_single_post_request(
             post_id=1,
-            account_id=1,
+            service_account_id=1,
             requested_by="manual"
         )
 
@@ -203,7 +203,7 @@ class TestCrawlRequestServiceSinglePost:
         service = CrawlRequestService(mock_db)
         service.create_single_post_request(
             post_id=42,
-            account_id=1,
+            service_account_id=1,
             requested_by="manual"
         )
 
@@ -222,7 +222,7 @@ class TestCrawlRequestServiceSinglePost:
         service = CrawlRequestService(mock_db)
         result = service.create_single_post_request(
             post_id=1,
-            account_id=1,
+            service_account_id=1,
             requested_by="manual"
         )
 
@@ -396,7 +396,7 @@ class TestBackwardCompatibility:
         # get_pending_request를 직접 mock하여 None 반환
         with patch.object(service, 'get_pending_request', return_value=None):
             request = service.create_request(
-                account_id=1,
+                service_account_id=1,
                 requested_by="manual"
             )
 
@@ -410,7 +410,7 @@ class TestBackwardCompatibility:
 
         # 기존 필드들 존재 확인
         assert 'id' in fields
-        assert 'account_id' in fields
+        assert 'service_account_id' in fields
         assert 'requested_at' in fields
         assert 'requested_by' in fields
         assert 'status' in fields
@@ -433,7 +433,7 @@ class TestRecrawlBoundary:
         # feed 타입
         feed_schema = CrawlRequestSchema(
             id=1,
-            account_id=1,
+            service_account_id=1,
             requested_at=datetime.now(),
             request_type="feed"
         )
@@ -442,7 +442,7 @@ class TestRecrawlBoundary:
         # single_post 타입
         single_post_schema = CrawlRequestSchema(
             id=2,
-            account_id=1,
+            service_account_id=1,
             requested_at=datetime.now(),
             request_type="single_post",
             target_post_id=42

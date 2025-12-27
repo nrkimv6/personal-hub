@@ -157,30 +157,30 @@ class TestUniversalCrawlRequestModel:
         request = UniversalCrawlRequest(
             url=f"https://www.google.com/search?q=test_{unique_id}",
             url_type="generic",
-            account_id=1,  # 로그인 필요한 경우
+            service_account_id=1,  # 로그인 필요한 경우
             status="pending",
         )
         test_db_session.add(request)
         test_db_session.commit()
 
         saved = test_db_session.query(UniversalCrawlRequest).filter_by(id=request.id).first()
-        assert saved.account_id == 1
+        assert saved.service_account_id == 1
 
     def test_request_without_account_id(self, test_db_session):
-        """account_id 없는 요청 (HTTP 전용 또는 기본 프로필)"""
+        """service_account_id 없는 요청 (HTTP 전용 또는 기본 프로필)"""
         import uuid
         unique_id = uuid.uuid4().hex[:8]
         request = UniversalCrawlRequest(
             url=f"https://forms.gle/simple_{unique_id}",
             url_type="google_form",
-            account_id=None,  # 브라우저 불필요
+            service_account_id=None,  # 브라우저 불필요
             status="pending",
         )
         test_db_session.add(request)
         test_db_session.commit()
 
         saved = test_db_session.query(UniversalCrawlRequest).filter_by(id=request.id).first()
-        assert saved.account_id is None
+        assert saved.service_account_id is None
 
 
 class TestCrawlRequestRelationship:

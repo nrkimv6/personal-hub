@@ -506,7 +506,7 @@ class InstagramWorker:
             if not config or not config.enabled:
                 return
 
-            if not config.account_id:
+            if not config.service_account_id:
                 return
 
             # 스케줄러 생성
@@ -519,7 +519,7 @@ class InstagramWorker:
             )
 
             # 마지막 실행 시간 조회
-            last_run = crawl_service.get_last_run(account_id=config.account_id)
+            last_run = crawl_service.get_last_run(service_account_id=config.service_account_id)
             last_run_time = last_run.started_at if last_run else None
 
             # 실행 필요 확인
@@ -528,17 +528,17 @@ class InstagramWorker:
                 last_run=last_run_time,
                 min_interval_hours=min_interval,
             ):
-                logger.info(f"스케줄 실행 시간 도래: account_id={config.account_id}")
+                logger.info(f"스케줄 실행 시간 도래: service_account_id={config.service_account_id}")
 
                 # 이미 pending 요청이 있는지 확인
                 request_service = CrawlRequestService(db)
-                if request_service.has_active_request(config.account_id):
+                if request_service.has_active_request(config.service_account_id):
                     logger.info("이미 활성 요청 존재, 스킵")
                     return
 
                 # 요청 생성
                 request = request_service.create_request(
-                    account_id=config.account_id,
+                    service_account_id=config.service_account_id,
                     requested_by="scheduler",
                 )
 
@@ -590,12 +590,12 @@ class InstagramWorker:
         finally:
             db.close()
 
-    async def _get_tab_for_request(self, request_id: int, account_id: int = None):
+    async def _get_tab_for_request(self, request_id: int, service_account_id: int = None):
         """TabPoolManager를 통해 탭 획득.
 
         Args:
             request_id: 크롤링 요청 ID (탭 추적용)
-            account_id: 계정 ID (None이면 기본 계정 사용)
+            service_account_id: 계정 ID (None이면 기본 계정 사용)
 
         Returns:
             Page: 사용 가능한 브라우저 탭
@@ -613,9 +613,9 @@ class InstagramWorker:
         # TabPoolManager를 통해 탭 획득
         tab = await self.tab_pool_manager.get_tab(
             target_id=request_id,
-            account_id=account_id
+            service_account_id=service_account_id
         )
-        logger.info(f"탭 획득 완료: request_id={request_id}, account_id={account_id}")
+        logger.info(f"탭 획득 완료: request_id={request_id}, service_account_id={service_account_id}")
         return tab
 
     async def _release_tab(self, tab):
@@ -627,20 +627,20 @@ class InstagramWorker:
         if self.tab_pool_manager and tab:
             await self.tab_pool_manager.release_tab(tab)
 
-    async def _get_page_for_account(self, account_id: int = None):
+    async def _get_page_for_account(self, service_account_id: int = None):
         """계정별 브라우저 페이지 가져오기.
 
         TabPoolManager가 아닌 직접 ContextManager 사용.
 
         Args:
-            account_id: 계정 ID (None이면 기본 계정 사용)
+            service_account_id: 계정 ID (None이면 기본 계정 사용)
         """
         if self.context_manager is None:
             logger.info("ContextManager 초기화")
             self.context_manager = ContextManager()
 
         # 계정별 브라우저 컨텍스트 가져오기
-        context = await self.context_manager.get_or_create_context(account_id)
+        context = await self.context_manager.get_or_create_context(service_account_id)
 
         # 페이지 가져오기 - 기존 페이지 재사용 우선
         pages = context.pages
@@ -705,21 +705,21 @@ class InstagramWorker:
         error_msg = str(error).lower()
         return any(keyword.lower() in error_msg for keyword in self.BROWSER_CLOSED_KEYWORDS)
 
-    async def _recreate_browser_context(self, account_id: int = None):
+    async def _recreate_browser_context(self, service_account_id: int = None):
         """브라우저 컨텍스트 재생성.
 
         기존 컨텍스트와 Chromium 프로세스를 정리하고 새로 생성합니다.
 
         Args:
-            account_id: 계정 ID
+            service_account_id: 계정 ID
         """
-        logger.info(f"브라우저 컨텍스트 재생성 시작 (account_id={account_id})")
+        logger.info(f"브라우저 컨텍스트 재생성 시작 (service_account_id={service_account_id})")
 
         # 1. 기존 컨텍스트 닫기
         if self.context_manager:
             try:
-                await self.context_manager.close_context(account_id)
-                logger.info(f"기존 컨텍스트 닫기 완료 (account_id={account_id})")
+                await self.context_manager.close_context(service_account_id)
+                logger.info(f"기존 컨텍스트 닫기 완료 (service_account_id={service_account_id})")
             except Exception as e:
                 logger.warning(f"기존 컨텍스트 닫기 실패 (무시): {e}")
 
@@ -747,7 +747,7 @@ class InstagramWorker:
         # 4. 충분히 대기 (Chromium 프로세스 종료 및 Lock 해제 대기)
         await asyncio.sleep(3)
 
-        logger.info(f"브라우저 컨텍스트 재생성 준비 완료 (account_id={account_id})")
+        logger.info(f"브라우저 컨텍스트 재생성 준비 완료 (service_account_id={service_account_id})")
 
     async def _execute_feed_crawl(self, request: InstagramCrawlRequest, db, request_service, crawl_service):
         """피드 크롤링 실행 (TabPoolManager 사용으로 병렬 처리 가능)."""
@@ -758,10 +758,10 @@ class InstagramWorker:
         while retry_count <= max_retries:
             try:
                 # 계정 확인
-                account = db.query(Account).filter(Account.id == request.account_id).first()
+                account = db.query(Account).filter(Account.id == request.service_account_id).first()
                 if not account:
                     request_service.mark_failed(request.id, "계정을 찾을 수 없음")
-                    logger.warning(f"계정 없음: account_id={request.account_id}")
+                    logger.warning(f"계정 없음: service_account_id={request.service_account_id}")
                     return
 
                 # 워커 상태를 crawling으로 변경
@@ -797,7 +797,7 @@ class InstagramWorker:
                 # 크롤링 실행
                 crawl_run = await crawl_service.run_crawl(
                     crawler=crawler,
-                    account_id=request.account_id,
+                    service_account_id=request.service_account_id,
                 )
 
                 # 워커 상태 업데이트 (run_id 포함)
@@ -826,7 +826,7 @@ class InstagramWorker:
                     if tab:
                         await self._release_tab(tab)
                         tab = None
-                    await self._recreate_browser_context(request.account_id)
+                    await self._recreate_browser_context(request.service_account_id)
                     continue
 
                 request_service.mark_failed(request.id, str(e))
@@ -854,10 +854,10 @@ class InstagramWorker:
                     return
 
                 # 계정 확인
-                account = db.query(Account).filter(Account.id == request.account_id).first()
+                account = db.query(Account).filter(Account.id == request.service_account_id).first()
                 if not account:
                     request_service.mark_failed(request.id, "계정을 찾을 수 없음")
-                    logger.warning(f"계정 없음: account_id={request.account_id}")
+                    logger.warning(f"계정 없음: service_account_id={request.service_account_id}")
                     return
 
                 # 워커 상태를 recrawling으로 변경
@@ -908,7 +908,7 @@ class InstagramWorker:
                     if tab:
                         await self._release_tab(tab)
                         tab = None
-                    await self._recreate_browser_context(request.account_id)
+                    await self._recreate_browser_context(request.service_account_id)
                     continue
 
                 request_service.mark_failed(request.id, str(e))
@@ -935,10 +935,10 @@ class InstagramWorker:
                     return
 
                 # 계정 확인
-                account = db.query(Account).filter(Account.id == request.account_id).first()
+                account = db.query(Account).filter(Account.id == request.service_account_id).first()
                 if not account:
                     request_service.mark_failed(request.id, "계정을 찾을 수 없음")
-                    logger.warning(f"계정 없음: account_id={request.account_id}")
+                    logger.warning(f"계정 없음: service_account_id={request.service_account_id}")
                     return
 
                 # 워커 상태를 crawling으로 변경
@@ -969,7 +969,7 @@ class InstagramWorker:
                 result = await crawl_service.crawl_by_url(
                     crawler=crawler,
                     url=target_url,
-                    account_id=request.account_id,
+                    service_account_id=request.service_account_id,
                 )
 
                 if result["success"]:
@@ -997,7 +997,7 @@ class InstagramWorker:
                     if tab:
                         await self._release_tab(tab)
                         tab = None
-                    await self._recreate_browser_context(request.account_id)
+                    await self._recreate_browser_context(request.service_account_id)
                     continue
 
                 request_service.mark_failed(request.id, str(e))

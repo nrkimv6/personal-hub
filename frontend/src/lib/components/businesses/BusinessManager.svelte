@@ -66,7 +66,7 @@
     date: '',
     times: '',
     is_enabled: true,
-    account_id: null as number | null
+    service_account_id: null as number | null
   };
 
   async function fetchBusinesses() {
@@ -253,10 +253,10 @@
         date: newSchedule.date,
         times: times,
         is_enabled: newSchedule.is_enabled,
-        account_id: newSchedule.account_id
+        service_account_id: newSchedule.service_account_id
       });
       showAddScheduleModal = false;
-      newSchedule = { date: '', times: '', is_enabled: true, account_id: null };
+      newSchedule = { date: '', times: '', is_enabled: true, service_account_id: null };
       itemSchedules = await itemApi.getSchedules(selectedItem.id);
     } catch (e) {
       alert('일정 생성 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
@@ -812,7 +812,7 @@
         </div>
         <div>
           <label for="schedule_account_id" class="block text-sm font-medium text-gray-700 mb-1">사용 계정</label>
-          <select id="schedule_account_id" class="input" bind:value={newSchedule.account_id}>
+          <select id="schedule_account_id" class="input" bind:value={newSchedule.service_account_id}>
             <option value={null}>기본 계정</option>
             {#each accounts as account}
               <option value={account.id}>{account.name} ({account.profile_dir})</option>

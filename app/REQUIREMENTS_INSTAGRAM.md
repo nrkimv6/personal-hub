@@ -53,7 +53,7 @@ CREATE TABLE instagram_crawl_run (
 ```sql
 CREATE TABLE instagram_schedule_config (
     id INTEGER PRIMARY KEY,
-    account_id INTEGER REFERENCES accounts(id),
+    service_account_id INTEGER REFERENCES accounts(id),
     is_enabled INTEGER DEFAULT 1,
     schedule_times TEXT DEFAULT '["09:00", "14:00", "20:00"]',
     max_posts INTEGER DEFAULT 20,

@@ -58,7 +58,7 @@ class ScheduleMonitorService:
                     COALESCE(ms.time_range, bi.time_range) as time_range,
                     COALESCE(ms.auto_booking_enabled, bi.auto_booking_enabled) as auto_booking_enabled,
                     bi.max_bookings_per_schedule,
-                    COALESCE(ms.account_id, bi.account_id) as account_id,
+                    COALESCE(ms.service_account_id, bi.service_account_id) as service_account_id,
                     b.id as business_id,
                     b.business_id as naver_business_id,
                     b.business_type_id,
@@ -76,7 +76,7 @@ class ScheduleMonitorService:
                 return None
 
             # URL 생성
-            # 컬럼 인덱스: 0-12: schedule 필드, 13-19: biz_item 필드, 20-27: business 필드
+            # 컬럼 인덱스: 0-12: schedule 필드, 13-19: biz_item 필드 (19=service_account_id), 20-26: business 필드
             url = build_naver_booking_url(
                 business_type_id=result[23],  # business_type_id
                 business_id=result[22],       # naver_business_id
@@ -111,7 +111,7 @@ class ScheduleMonitorService:
                 "time_range": result[16],
                 "auto_booking_enabled": bool(result[17]),
                 "max_bookings_per_schedule": result[18] or 1,
-                "account_id": result[19],  # 다중 프로필 지원
+                "service_account_id": result[19],  # 다중 프로필 지원
                 "business_id": result[20],
                 "naver_business_id": result[21],
                 "business_type_id": result[22],

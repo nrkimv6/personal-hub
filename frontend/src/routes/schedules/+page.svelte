@@ -96,7 +96,7 @@
     url: '',
     name: '',
     biz_item_id: null as number | null,
-    account_id: null as number | null,
+    service_account_id: null as number | null,
     recurrence_day: 4, // 금요일
     trigger_time: '12:00',
     auto_booking_enabled: false,
@@ -137,7 +137,7 @@
     is_enabled: true,
     interval: 10,
     custom_interval: false,
-    account_id: null as number | null,
+    service_account_id: null as number | null,
     monitoring_mode: 'legacy' as 'legacy' | 'anonymous'
   };
 
@@ -189,7 +189,7 @@
     date: '',
     times: '',
     is_enabled: true,
-    account_id: null as number | null
+    service_account_id: null as number | null
   };
   let selectedBusinessItems: BizItem[] = [];
   let createLoading = false;
@@ -200,7 +200,7 @@
   let duplicateForm = {
     date: '',
     times: '',
-    account_id: null as number | null
+    service_account_id: null as number | null
   };
 
   async function fetchSchedules() {
@@ -345,7 +345,7 @@
   // 반복 규칙 수정 폼
   let recurringEditForm = {
     name: '',
-    account_id: null as number | null,
+    service_account_id: null as number | null,
     recurrence_day: 0,
     trigger_time: '12:00',
     auto_booking_enabled: false,
@@ -363,7 +363,7 @@
       url: '',
       name: '',
       biz_item_id: null,
-      account_id: null,
+      service_account_id: null,
       recurrence_day: 4,
       trigger_time: '12:00',
       auto_booking_enabled: false,
@@ -385,7 +385,7 @@
     editRecurringRule = rule;
     recurringEditForm = {
       name: rule.name,
-      account_id: rule.account_id,
+      service_account_id: rule.service_account_id,
       recurrence_day: rule.recurrence_day,
       trigger_time: rule.trigger_time,
       auto_booking_enabled: rule.auto_booking_enabled ?? false,
@@ -453,7 +453,7 @@
 
       await scheduleRecurringApi.update(editRecurringRule.id, {
         name: recurringEditForm.name,
-        account_id: recurringEditForm.account_id,
+        service_account_id: recurringEditForm.service_account_id,
         recurrence_day: recurringEditForm.recurrence_day,
         trigger_time: recurringEditForm.trigger_time,
         target_patterns: targetPatterns,
@@ -538,7 +538,7 @@
       const data: RecurringRuleCreate = {
         type: 'monitor',
         biz_item_id: recurringForm.biz_item_id,
-        account_id: recurringForm.account_id,
+        service_account_id: recurringForm.service_account_id,
         name: recurringForm.name,
         recurrence_day: recurringForm.recurrence_day,
         trigger_time: recurringForm.trigger_time,
@@ -630,7 +630,7 @@
       is_enabled: schedule.is_enabled,
       interval: schedule.interval || 30,
       custom_interval: schedule.custom_interval || false,
-      account_id: schedule.account_id,
+      service_account_id: schedule.service_account_id,
       monitoring_mode: (schedule as any).monitoring_mode || 'legacy'
     };
     showEditModal = true;
@@ -647,7 +647,7 @@
         is_enabled: editForm.is_enabled,
         interval: editForm.custom_interval ? editForm.interval : undefined,
         custom_interval: editForm.custom_interval,
-        account_id: editForm.account_id,
+        service_account_id: editForm.service_account_id,
         monitoring_mode: editForm.monitoring_mode
       };
       await scheduleApi.update(editSchedule.id, updateData);
@@ -683,7 +683,7 @@
       date: '',
       times: '',
       is_enabled: true,
-      account_id: null
+      service_account_id: null
     };
     selectedBusinessItems = [];
     createMode = 'select';
@@ -747,7 +747,7 @@
         date: createForm.date,
         times,
         is_enabled: createForm.is_enabled,
-        account_id: createForm.account_id
+        service_account_id: createForm.service_account_id
       };
       await itemApi.createSchedule(createForm.item_id, scheduleData);
       showCreateModal = false;
@@ -766,7 +766,7 @@
     duplicateForm = {
       date: schedule.date,
       times: schedule.times?.join(', ') || '',
-      account_id: schedule.account_id
+      service_account_id: schedule.service_account_id
     };
     showDuplicateModal = true;
   }
@@ -783,7 +783,7 @@
         date: duplicateForm.date,
         times,
         is_enabled: true,
-        account_id: duplicateForm.account_id
+        service_account_id: duplicateForm.service_account_id
       };
       await itemApi.createSchedule(duplicateSchedule.biz_item_pk, scheduleData);
       showDuplicateModal = false;
@@ -1409,7 +1409,7 @@
         </div>
         <div>
           <label for="edit-account" class="block text-sm font-medium text-gray-700 mb-1">사용 계정</label>
-          <select id="edit-account" class="input" bind:value={editForm.account_id}>
+          <select id="edit-account" class="input" bind:value={editForm.service_account_id}>
             <option value={null}>기본 계정</option>
             {#each accounts as account}
               <option value={account.id}>{account.name}</option>
@@ -1509,7 +1509,7 @@
           </div>
           <div>
             <label for="create-account" class="block text-sm font-medium text-gray-700 mb-1">사용 계정</label>
-            <select id="create-account" class="input" bind:value={createForm.account_id}>
+            <select id="create-account" class="input" bind:value={createForm.service_account_id}>
               <option value={null}>기본 계정</option>
               {#each accounts as account}
                 <option value={account.id}>{account.name}</option>
@@ -1604,7 +1604,7 @@
         </div>
         <div>
           <label for="dup-account" class="block text-sm font-medium text-gray-700 mb-1">사용 계정</label>
-          <select id="dup-account" class="input" bind:value={duplicateForm.account_id}>
+          <select id="dup-account" class="input" bind:value={duplicateForm.service_account_id}>
             <option value={null}>기본 계정</option>
             {#each accounts as account}
               <option value={account.id}>{account.name}</option>
@@ -1696,7 +1696,7 @@
         <!-- 계정 선택 -->
         <div>
           <label for="recurring-account" class="block text-sm font-medium text-gray-700 mb-1">사용 계정 (선택사항)</label>
-          <select id="recurring-account" class="input" bind:value={recurringForm.account_id}>
+          <select id="recurring-account" class="input" bind:value={recurringForm.service_account_id}>
             <option value={null}>계정 선택 안함</option>
             {#each accounts as account}
               <option value={account.id}>{account.name}</option>
@@ -1929,7 +1929,7 @@
         <!-- 계정 선택 -->
         <div>
           <label for="recurring-edit-account" class="block text-sm font-medium text-gray-700 mb-1">사용 계정 (선택사항)</label>
-          <select id="recurring-edit-account" class="input" bind:value={recurringEditForm.account_id}>
+          <select id="recurring-edit-account" class="input" bind:value={recurringEditForm.service_account_id}>
             <option value={null}>계정 선택 안함</option>
             {#each accounts as account}
               <option value={account.id}>{account.name}</option>

@@ -38,7 +38,7 @@ class BizItemBase(BaseModel):
 class BizItemCreate(BizItemBase):
     """BizItem 생성 스키마"""
     business_id: Optional[int] = None  # FK - route에서 설정됨
-    # DEPRECATED: account_id moved to MonitorSchedule (2025-12-03)
+    # DEPRECATED: service_account_id moved to MonitorSchedule (2025-12-03)
 
 
 class BizItemUpdate(BaseModel):
@@ -60,14 +60,14 @@ class BizItemUpdate(BaseModel):
     auto_booking_enabled: Optional[bool] = None
     max_bookings_per_schedule: Optional[int] = None
     booking_options_override: Optional[Dict[str, Any]] = None
-    # DEPRECATED: account_id moved to MonitorSchedule (2025-12-03)
+    # DEPRECATED: service_account_id moved to MonitorSchedule (2025-12-03)
 
 
 class BizItem(BizItemBase):
     """BizItem 응답 스키마"""
     id: int
     business_id: int
-    # DEPRECATED: account_id moved to MonitorSchedule (2025-12-03)
+    # DEPRECATED: service_account_id moved to MonitorSchedule (2025-12-03)
     api_synced_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime

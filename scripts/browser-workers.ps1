@@ -1,5 +1,5 @@
 # Browser Workers Management Script
-# Manages browser-based workers (monitor_worker, instagram_worker) for user session execution
+# Manages browser-based workers (monitor_worker, crawl_worker) for user session execution
 #
 # Usage:
 #   .\scripts\browser-workers.ps1 -Action start    # Start browser workers
@@ -35,7 +35,7 @@ if (-not (Test-Path $PidDir)) {
 
 # PID files for browser workers
 $WatchdogPidFile = Join-Path $PidDir "watchdog$PidSuffix.pid"
-$InstagramWatchdogPidFile = Join-Path $PidDir "instagram_watchdog$PidSuffix.pid"
+$CrawlWatchdogPidFile = Join-Path $PidDir "crawl_watchdog$PidSuffix.pid"
 $ClaudeWatchdogPidFile = Join-Path $PidDir "claude_watchdog$PidSuffix.pid"
 
 function Write-Log {
@@ -93,20 +93,20 @@ function Start-BrowserWorkers {
         $started++
     }
 
-    # Start Instagram Worker Watchdog
-    if (Test-ProcessRunning $InstagramWatchdogPidFile) {
-        Write-Log "Instagram Worker Watchdog already running" "WARN"
+    # Start Crawl Worker Watchdog (Instagram + Universal)
+    if (Test-ProcessRunning $CrawlWatchdogPidFile) {
+        Write-Log "Crawl Worker Watchdog already running" "WARN"
     } else {
-        Write-Log "Starting Instagram Worker Watchdog..."
+        Write-Log "Starting Crawl Worker Watchdog..."
         # Pass APP_MODE via command to ensure it's set in child process
-        $igWatchdogCmd = "`$env:APP_MODE='development'; & '$ScriptDir\instagram-watchdog.ps1'"
-        $igWatchdogProcess = Start-Process -FilePath "powershell.exe" `
-            -ArgumentList "-ExecutionPolicy", "Bypass", "-Command", $igWatchdogCmd `
+        $crawlWatchdogCmd = "`$env:APP_MODE='development'; & '$ScriptDir\crawl-watchdog.ps1'"
+        $crawlWatchdogProcess = Start-Process -FilePath "powershell.exe" `
+            -ArgumentList "-ExecutionPolicy", "Bypass", "-Command", $crawlWatchdogCmd `
             -WorkingDirectory $ProjectRoot `
             -WindowStyle Hidden `
             -PassThru
-        $igWatchdogProcess.Id | Out-File $InstagramWatchdogPidFile -Encoding ascii
-        Write-Log "Instagram Worker Watchdog started (PID: $($igWatchdogProcess.Id))" "OK"
+        $crawlWatchdogProcess.Id | Out-File $CrawlWatchdogPidFile -Encoding ascii
+        Write-Log "Crawl Worker Watchdog started (PID: $($crawlWatchdogProcess.Id))" "OK"
         $started++
     }
 
@@ -160,19 +160,19 @@ function Stop-BrowserWorkers {
         Remove-Item $WatchdogPidFile -Force -ErrorAction SilentlyContinue
     }
 
-    # Stop Instagram Worker Watchdog
-    if (Test-Path $InstagramWatchdogPidFile) {
-        $savedPid = Get-Content $InstagramWatchdogPidFile -ErrorAction SilentlyContinue
+    # Stop Crawl Worker Watchdog
+    if (Test-Path $CrawlWatchdogPidFile) {
+        $savedPid = Get-Content $CrawlWatchdogPidFile -ErrorAction SilentlyContinue
         if ($savedPid) {
             $proc = Get-Process -Id $savedPid -ErrorAction SilentlyContinue
             if ($proc) {
-                Write-Log "Stopping Instagram Worker Watchdog (PID: $savedPid)..."
+                Write-Log "Stopping Crawl Worker Watchdog (PID: $savedPid)..."
                 Stop-Process -Id $savedPid -Force -ErrorAction SilentlyContinue
-                Write-Log "Instagram Worker Watchdog stopped" "OK"
+                Write-Log "Crawl Worker Watchdog stopped" "OK"
                 $stopped++
             }
         }
-        Remove-Item $InstagramWatchdogPidFile -Force -ErrorAction SilentlyContinue
+        Remove-Item $CrawlWatchdogPidFile -Force -ErrorAction SilentlyContinue
     }
 
     # Stop Claude Worker Watchdog
@@ -192,10 +192,10 @@ function Stop-BrowserWorkers {
 
     # Also stop the actual worker processes (they may linger after watchdog stops)
     $WorkerPidFile = Join-Path $PidDir "worker$PidSuffix.pid"
-    $InstagramWorkerPidFile = Join-Path $PidDir "instagram_worker$PidSuffix.pid"
-    $ClaudeWorkerPidFile = Join-Path $PidDir "claude_worker$PidSuffix.pid"
+    $CrawlWorkerPidFile = Join-Path $PidDir "crawl_worker$PidSuffix.pid"
+    $ClaudeWorkerPidFile = Join-Path $PidDir "llm_worker$PidSuffix.pid"
 
-    foreach ($pidFile in @($WorkerPidFile, $InstagramWorkerPidFile, $ClaudeWorkerPidFile)) {
+    foreach ($pidFile in @($WorkerPidFile, $CrawlWorkerPidFile, $ClaudeWorkerPidFile)) {
         if (Test-Path $pidFile) {
             $savedPid = Get-Content $pidFile -ErrorAction SilentlyContinue
             if ($savedPid) {
@@ -234,10 +234,10 @@ function Show-Status {
         Write-Host "  [-] Not running" -ForegroundColor Yellow
     }
 
-    # Instagram Worker Watchdog
-    Write-Host "Instagram Worker Watchdog:" -ForegroundColor White
-    if (Test-ProcessRunning $InstagramWatchdogPidFile) {
-        $savedPid = Get-Content $InstagramWatchdogPidFile
+    # Crawl Worker Watchdog
+    Write-Host "Crawl Worker Watchdog:" -ForegroundColor White
+    if (Test-ProcessRunning $CrawlWatchdogPidFile) {
+        $savedPid = Get-Content $CrawlWatchdogPidFile
         Write-Host "  [+] Running (PID: $savedPid)" -ForegroundColor Green
     } else {
         Write-Host "  [-] Not running" -ForegroundColor Yellow
@@ -254,8 +254,8 @@ function Show-Status {
 
     # Actual worker processes
     $WorkerPidFile = Join-Path $PidDir "worker$PidSuffix.pid"
-    $InstagramWorkerPidFile = Join-Path $PidDir "instagram_worker$PidSuffix.pid"
-    $ClaudeWorkerPidFile = Join-Path $PidDir "claude_worker$PidSuffix.pid"
+    $CrawlWorkerPidFile = Join-Path $PidDir "crawl_worker$PidSuffix.pid"
+    $ClaudeWorkerPidFile = Join-Path $PidDir "llm_worker$PidSuffix.pid"
 
     Write-Host ""
     Write-Host "Worker Processes:" -ForegroundColor White
@@ -268,9 +268,9 @@ function Show-Status {
         Write-Host "    [-] Not running" -ForegroundColor Yellow
     }
 
-    Write-Host "  Instagram Worker:" -ForegroundColor Gray
-    if (Test-ProcessRunning $InstagramWorkerPidFile) {
-        $savedPid = Get-Content $InstagramWorkerPidFile
+    Write-Host "  Crawl Worker:" -ForegroundColor Gray
+    if (Test-ProcessRunning $CrawlWorkerPidFile) {
+        $savedPid = Get-Content $CrawlWorkerPidFile
         Write-Host "    [+] Running (PID: $savedPid)" -ForegroundColor Green
     } else {
         Write-Host "    [-] Not running" -ForegroundColor Yellow

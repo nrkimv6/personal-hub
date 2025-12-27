@@ -39,7 +39,7 @@ class CrawlService:
     async def run_crawl(
         self,
         crawler: InstagramCrawler,
-        account_id: int,
+        service_account_id: int,
         options: Optional[CrawlOptions] = None,
     ) -> InstagramCrawlRun:
         """크롤링 실행.
@@ -49,7 +49,7 @@ class CrawlService:
 
         Args:
             crawler: InstagramCrawler 인스턴스
-            account_id: 수집 계정 ID
+            service_account_id: 수집 계정 ID
             options: 크롤링 옵션
 
         Returns:
@@ -57,7 +57,7 @@ class CrawlService:
         """
         # 실행 기록 생성
         crawl_run = InstagramCrawlRun(
-            account_id=account_id,
+            service_account_id=service_account_id,
             started_at=datetime.now(),
         )
         self.db.add(crawl_run)
@@ -70,7 +70,7 @@ class CrawlService:
         async def on_post_collected(post: PostData) -> bool:
             """게시물 수집 즉시 저장 콜백."""
             save_stats["total_collected"] += 1
-            saved = self._save_post(post, account_id, crawl_run.id)
+            saved = self._save_post(post, service_account_id, crawl_run.id)
             if saved:
                 save_stats["new_saved"] += 1
 
@@ -194,7 +194,7 @@ class CrawlService:
         self,
         crawler: InstagramCrawler,
         url: str,
-        account_id: int,
+        service_account_id: int,
     ) -> dict:
         """URL로 단일 게시물 수집.
 
@@ -203,7 +203,7 @@ class CrawlService:
         Args:
             crawler: InstagramCrawler 인스턴스
             url: Instagram 게시물 URL
-            account_id: 사용할 계정 ID
+            service_account_id: 사용할 계정 ID
 
         Returns:
             dict: {"success": bool, "message": str, "post": InstagramPost | None, "is_new": bool}
@@ -278,7 +278,7 @@ class CrawlService:
                     post_type=crawled_data.post_type,
                     likes=crawled_data.likes,
                     comments=crawled_data.comments,
-                    account_id=account_id,
+                    service_account_id=service_account_id,
                     crawl_run_id=None,  # 단일 URL 수집은 crawl_run 없음
                 )
 
@@ -304,7 +304,7 @@ class CrawlService:
     def _save_post(
         self,
         post: PostData,
-        account_id: int,
+        service_account_id: int,
         crawl_run_id: int,
     ) -> bool:
         """게시물 저장 및 자동 분류.
@@ -335,7 +335,7 @@ class CrawlService:
             post_type=post.post_type,
             likes=post.likes,
             comments=post.comments,
-            account_id=account_id,
+            service_account_id=service_account_id,
             crawl_run_id=crawl_run_id,
         )
 
@@ -379,21 +379,21 @@ class CrawlService:
     def get_crawl_runs(
         self,
         limit: int = 10,
-        account_id: Optional[int] = None,
+        service_account_id: Optional[int] = None,
     ) -> List[InstagramCrawlRun]:
         """크롤링 실행 기록 조회.
 
         Args:
             limit: 조회 개수
-            account_id: 계정 필터
+            service_account_id: 계정 필터
 
         Returns:
             실행 기록 목록
         """
         query = self.db.query(InstagramCrawlRun)
 
-        if account_id:
-            query = query.filter(InstagramCrawlRun.account_id == account_id)
+        if service_account_id:
+            query = query.filter(InstagramCrawlRun.service_account_id == service_account_id)
 
         return query.order_by(desc(InstagramCrawlRun.started_at)).limit(limit).all()
 
@@ -403,7 +403,7 @@ class CrawlService:
         limit: int = 20,
         period: Optional[str] = None,
         status: Optional[str] = None,
-        account_id: Optional[int] = None,
+        service_account_id: Optional[int] = None,
     ) -> tuple[List[InstagramCrawlRun], int]:
         """크롤링 실행 기록 조회 (페이징 지원).
 
@@ -412,7 +412,7 @@ class CrawlService:
             limit: 페이지당 개수
             period: 기간 필터 ('1d', '7d', '30d', 'all')
             status: 상태 필터 ('success', 'failed', 'all')
-            account_id: 계정 필터
+            service_account_id: 계정 필터
 
         Returns:
             (실행 기록 목록, 전체 개수)
@@ -435,8 +435,8 @@ class CrawlService:
                 query = query.filter(InstagramCrawlRun.success == False)
 
         # 계정 필터
-        if account_id:
-            query = query.filter(InstagramCrawlRun.account_id == account_id)
+        if service_account_id:
+            query = query.filter(InstagramCrawlRun.service_account_id == service_account_id)
 
         # 전체 개수
         total = query.count()
@@ -542,12 +542,12 @@ class CrawlService:
             "daily_trend": daily_trend,
         }
 
-    def get_last_run(self, account_id: Optional[int] = None) -> Optional[InstagramCrawlRun]:
+    def get_last_run(self, service_account_id: Optional[int] = None) -> Optional[InstagramCrawlRun]:
         """마지막 실행 기록."""
         query = self.db.query(InstagramCrawlRun)
 
-        if account_id:
-            query = query.filter(InstagramCrawlRun.account_id == account_id)
+        if service_account_id:
+            query = query.filter(InstagramCrawlRun.service_account_id == service_account_id)
 
         return query.order_by(desc(InstagramCrawlRun.started_at)).first()
 
@@ -566,7 +566,7 @@ class CrawlService:
         duplicate_stop_count: Optional[int] = None,
         max_retries: Optional[int] = None,
         retry_interval_minutes: Optional[int] = None,
-        account_id: Optional[int] = None,
+        service_account_id: Optional[int] = None,
     ) -> InstagramScheduleConfig:
         """스케줄 설정 업데이트.
 
@@ -609,8 +609,8 @@ class CrawlService:
             config.retry_interval_minutes = retry_interval_minutes
 
         # 계정 지정
-        if account_id is not None:
-            config.account_id = account_id
+        if service_account_id is not None:
+            config.service_account_id = service_account_id
 
         config.updated_at = datetime.now()
 
@@ -651,7 +651,7 @@ class CrawlService:
 
         # 활성 계정 수 (오늘 실행된 고유 계정)
         from sqlalchemy import func
-        unique_accounts = self.db.query(func.count(func.distinct(InstagramCrawlRun.account_id))).filter(
+        unique_accounts = self.db.query(func.count(func.distinct(InstagramCrawlRun.service_account_id))).filter(
             InstagramCrawlRun.started_at >= today_start
         ).scalar() or 0
 
@@ -663,10 +663,10 @@ class CrawlService:
 
         if running_run:
             # 계정 정보 조회
-            account = self.db.query(Account).filter(Account.id == running_run.account_id).first()
+            account = self.db.query(Account).filter(Account.id == running_run.service_account_id).first()
             running_crawl = RunningCrawlInfo(
                 run_id=running_run.id,
-                account_id=running_run.account_id,
+                service_account_id=running_run.service_account_id,
                 account_username=account.name if account else None,
                 started_at=running_run.started_at,
                 total_collected=running_run.total_collected or 0,

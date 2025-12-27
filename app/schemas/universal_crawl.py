@@ -74,7 +74,7 @@ class UniversalCrawlRequestCreate(BaseModel):
     """UniversalCrawlRequest 생성 스키마"""
     url: str
     url_type: Optional[UrlType] = None  # 자동 감지 가능
-    account_id: Optional[int] = None  # 브라우저 프로필, 없으면 기본/HTTP
+    service_account_id: Optional[int] = None  # 브라우저 프로필, 없으면 기본/HTTP
     auto_analyze: bool = True
     priority: int = 0
     requested_by: RequestedBy = "manual"
@@ -94,7 +94,7 @@ class UniversalCrawlRequestResponse(BaseModel):
     id: int
     url: str
     url_type: str
-    account_id: Optional[int] = None
+    service_account_id: Optional[int] = None
     status: CrawlStatus
     requested_by: str
     requested_at: datetime
@@ -148,7 +148,7 @@ class CrawledPageList(BaseModel):
 class CrawlUrlRequest(BaseModel):
     """URL 크롤링 요청 (API 엔드포인트용)"""
     url: str
-    account_id: Optional[int] = None
+    service_account_id: Optional[int] = None
     auto_analyze: bool = True
     priority: int = 0
 

@@ -144,7 +144,7 @@ class ContextManager:
             await self._bypass_automation_detection(self.browser_context)
 
             # default 프로필을 사용하는 계정이 있으면 browser_contexts에도 등록
-            # 이렇게 해야 get_or_create_context(account_id)가 중복 창을 열지 않음
+            # 이렇게 해야 get_or_create_context(service_account_id)가 중복 창을 열지 않음
             from app.core.database import SessionLocal
             from app.services.account_service import account_service
             db = SessionLocal()
@@ -173,44 +173,44 @@ class ContextManager:
             self.browser_context = None
             raise
 
-    async def _get_context_lock(self, account_id: int) -> asyncio.Lock:
+    async def _get_context_lock(self, service_account_id: int) -> asyncio.Lock:
         """계정별 Lock을 가져오거나 생성합니다."""
         async with self._locks_lock:
-            if account_id not in self._context_locks:
-                self._context_locks[account_id] = asyncio.Lock()
-            return self._context_locks[account_id]
+            if service_account_id not in self._context_locks:
+                self._context_locks[service_account_id] = asyncio.Lock()
+            return self._context_locks[service_account_id]
 
-    async def get_or_create_context(self, account_id: Optional[int] = None) -> BrowserContext:
+    async def get_or_create_context(self, service_account_id: Optional[int] = None) -> BrowserContext:
         """
         계정별 브라우저 컨텍스트를 가져오거나 생성합니다.
 
         Args:
-            account_id: 계정 ID (None이면 기본 계정 사용)
+            service_account_id: 계정 ID (None이면 기본 계정 사용)
 
         Returns:
             BrowserContext: 계정에 해당하는 브라우저 컨텍스트
         """
         # account_id가 None이면 기본 계정(id=1) 사용
-        if account_id is None:
+        if service_account_id is None:
             from app.core.database import SessionLocal
             from app.services.account_service import account_service
             db = SessionLocal()
             try:
                 default_account = account_service.get_default_account(db)
                 if default_account:
-                    account_id = default_account.id
+                    service_account_id = default_account.id
                 else:
-                    account_id = 1  # fallback
+                    service_account_id = 1  # fallback
             finally:
                 db.close()
 
         # 계정별 Lock 획득 (동시 브라우저 생성 방지)
-        context_lock = await self._get_context_lock(account_id)
+        context_lock = await self._get_context_lock(service_account_id)
 
         async with context_lock:
             # 이미 존재하면 유효성 확인 후 반환
-            if account_id in self.browser_contexts:
-                context = self.browser_contexts[account_id]
+            if service_account_id in self.browser_contexts:
+                context = self.browser_contexts[service_account_id]
                 # 컨텍스트가 닫혔는지 확인 (더 엄격한 검사)
                 context_valid = False
                 try:
@@ -221,7 +221,7 @@ class ContextManager:
                             _ = pages[0].url
                             context_valid = True
                         except Exception as e:
-                            logger.warning(f"페이지 접근 실패 (account_id={account_id}): {e}")
+                            logger.warning(f"페이지 접근 실패 (service_account_id={service_account_id}): {e}")
                     else:
                         # 페이지가 없으면 브라우저가 살아있는지 직접 확인
                         try:
@@ -229,27 +229,27 @@ class ContextManager:
                             if browser and browser.is_connected():
                                 context_valid = True
                             else:
-                                logger.warning(f"브라우저 연결 끊김 (account_id={account_id})")
+                                logger.warning(f"브라우저 연결 끊김 (service_account_id={service_account_id})")
                         except Exception as e:
-                            logger.warning(f"브라우저 연결 상태 확인 실패 (account_id={account_id}): {e}")
+                            logger.warning(f"브라우저 연결 상태 확인 실패 (service_account_id={service_account_id}): {e}")
                 except Exception as e:
-                    logger.warning(f"브라우저 컨텍스트 유효성 검사 실패 (account_id={account_id}): {e}")
+                    logger.warning(f"브라우저 컨텍스트 유효성 검사 실패 (service_account_id={service_account_id}): {e}")
 
                 if context_valid:
-                    logger.debug(f"기존 브라우저 컨텍스트 재사용 (account_id={account_id})")
+                    logger.debug(f"기존 브라우저 컨텍스트 재사용 (service_account_id={service_account_id})")
                     return context
                 else:
                     # 컨텍스트가 닫혔으면 딕셔너리에서 제거
-                    logger.info(f"브라우저 컨텍스트가 닫혀있어 새로 생성합니다 (account_id={account_id})")
+                    logger.info(f"브라우저 컨텍스트가 닫혀있어 새로 생성합니다 (service_account_id={service_account_id})")
                     try:
-                        del self.browser_contexts[account_id]
+                        del self.browser_contexts[service_account_id]
                     except Exception:
                         pass
 
             # 새로 생성
-            logger.info(f"새 브라우저 컨텍스트 생성 중 (account_id={account_id})")
-            context = await self._create_browser_context(account_id)
-            self.browser_contexts[account_id] = context
+            logger.info(f"새 브라우저 컨텍스트 생성 중 (service_account_id={service_account_id})")
+            context = await self._create_browser_context(service_account_id)
+            self.browser_contexts[service_account_id] = context
 
             # 첫 번째 컨텍스트는 하위 호환을 위해 browser_context에도 저장
             if self.browser_context is None:
@@ -258,12 +258,12 @@ class ContextManager:
 
             return context
 
-    async def _create_browser_context(self, account_id: int) -> BrowserContext:
+    async def _create_browser_context(self, service_account_id: int) -> BrowserContext:
         """
         계정별 브라우저 컨텍스트를 생성합니다.
 
         Args:
-            account_id: 계정 ID
+            service_account_id: 계정 ID
 
         Returns:
             BrowserContext: 생성된 브라우저 컨텍스트
@@ -273,9 +273,9 @@ class ContextManager:
 
         db = SessionLocal()
         try:
-            account = account_service.get_by_id(db, account_id)
+            account = account_service.get_by_id(db, service_account_id)
             if not account:
-                raise ValueError(f"Account {account_id} not found")
+                raise ValueError(f"Account {service_account_id} not found")
 
             profile_path = Path(account.profile_path)
 
@@ -354,23 +354,23 @@ class ContextManager:
             await self._bypass_automation_detection(context)
 
             proxy_info = f", proxy={proxy_config.get('server')}" if proxy_config else ""
-            logger.info(f"브라우저 컨텍스트 생성 완료 (account_id={account_id}, profile={account.profile_dir}{proxy_info})")
+            logger.info(f"브라우저 컨텍스트 생성 완료 (service_account_id={service_account_id}, profile={account.profile_dir}{proxy_info})")
 
             # 마지막 사용 시간 업데이트
-            account_service.update_last_used(db, account_id)
+            account_service.update_last_used(db, service_account_id)
 
             return context
 
         finally:
             db.close()
 
-    async def _create_browser_context_visible(self, account_id: int) -> BrowserContext:
+    async def _create_browser_context_visible(self, service_account_id: int) -> BrowserContext:
         """
         계정별 브라우저 컨텍스트를 headless=False로 생성합니다.
         수동 로그인용으로 사용합니다.
 
         Args:
-            account_id: 계정 ID
+            service_account_id: 계정 ID
 
         Returns:
             BrowserContext: 생성된 브라우저 컨텍스트
@@ -379,8 +379,8 @@ class ContextManager:
         from app.services.account_service import account_service
 
         # 이미 존재하면 유효성 확인 후 반환
-        if account_id in self.browser_contexts:
-            context = self.browser_contexts[account_id]
+        if service_account_id in self.browser_contexts:
+            context = self.browser_contexts[service_account_id]
             context_valid = False
             try:
                 pages = context.pages  # 유효성 확인
@@ -390,7 +390,7 @@ class ContextManager:
                         _ = pages[0].url
                         context_valid = True
                     except Exception as e:
-                        logger.warning(f"페이지 접근 실패 (account_id={account_id}): {e}")
+                        logger.warning(f"페이지 접근 실패 (service_account_id={service_account_id}): {e}")
                 else:
                     # 페이지가 없으면 브라우저 연결 상태 확인
                     try:
@@ -398,27 +398,27 @@ class ContextManager:
                         if browser and browser.is_connected():
                             context_valid = True
                         else:
-                            logger.warning(f"브라우저 연결 끊김 (account_id={account_id})")
+                            logger.warning(f"브라우저 연결 끊김 (service_account_id={service_account_id})")
                     except Exception as e:
-                        logger.warning(f"브라우저 연결 상태 확인 실패 (account_id={account_id}): {e}")
+                        logger.warning(f"브라우저 연결 상태 확인 실패 (service_account_id={service_account_id}): {e}")
             except Exception as e:
-                logger.warning(f"브라우저 컨텍스트 유효성 검사 실패 (account_id={account_id}): {e}")
+                logger.warning(f"브라우저 컨텍스트 유효성 검사 실패 (service_account_id={service_account_id}): {e}")
 
             if context_valid:
-                logger.debug(f"기존 브라우저 컨텍스트 재사용 (account_id={account_id})")
+                logger.debug(f"기존 브라우저 컨텍스트 재사용 (service_account_id={service_account_id})")
                 return context
             else:
-                logger.info(f"브라우저 컨텍스트가 닫혀있어 새로 생성합니다 (account_id={account_id})")
+                logger.info(f"브라우저 컨텍스트가 닫혀있어 새로 생성합니다 (service_account_id={service_account_id})")
                 try:
-                    del self.browser_contexts[account_id]
+                    del self.browser_contexts[service_account_id]
                 except Exception:
                     pass
 
         db = SessionLocal()
         try:
-            account = account_service.get_by_id(db, account_id)
+            account = account_service.get_by_id(db, service_account_id)
             if not account:
-                raise ValueError(f"Account {account_id} not found")
+                raise ValueError(f"Account {service_account_id} not found")
 
             profile_path = Path(account.profile_path)
 
@@ -453,39 +453,39 @@ class ContextManager:
             # 자동화 감지 방지
             await self._bypass_automation_detection(context)
 
-            logger.info(f"브라우저 컨텍스트 생성 완료 (account_id={account_id}, profile={account.profile_dir}, headless=False)")
+            logger.info(f"브라우저 컨텍스트 생성 완료 (service_account_id={service_account_id}, profile={account.profile_dir}, headless=False)")
 
             # 컨텍스트 저장
-            self.browser_contexts[account_id] = context
+            self.browser_contexts[service_account_id] = context
 
             # 마지막 사용 시간 업데이트
-            account_service.update_last_used(db, account_id)
+            account_service.update_last_used(db, service_account_id)
 
             return context
 
         finally:
             db.close()
 
-    async def close_context(self, account_id: int):
+    async def close_context(self, service_account_id: int):
         """
         특정 계정의 브라우저 컨텍스트를 닫습니다.
 
         Args:
-            account_id: 계정 ID
+            service_account_id: 계정 ID
         """
-        if account_id in self.browser_contexts:
+        if service_account_id in self.browser_contexts:
             try:
-                context = self.browser_contexts[account_id]
+                context = self.browser_contexts[service_account_id]
                 await context.close()
-                del self.browser_contexts[account_id]
-                logger.info(f"브라우저 컨텍스트 종료 완료 (account_id={account_id})")
+                del self.browser_contexts[service_account_id]
+                logger.info(f"브라우저 컨텍스트 종료 완료 (service_account_id={service_account_id})")
             except Exception as e:
-                logger.error(f"브라우저 컨텍스트 종료 실패 (account_id={account_id}): {str(e)}")
+                logger.error(f"브라우저 컨텍스트 종료 실패 (service_account_id={service_account_id}): {str(e)}")
 
     async def close_all_contexts(self):
         """모든 브라우저 컨텍스트를 닫습니다."""
-        for account_id in list(self.browser_contexts.keys()):
-            await self.close_context(account_id)
+        for service_account_id in list(self.browser_contexts.keys()):
+            await self.close_context(service_account_id)
 
         if self.playwright_instance:
             try:

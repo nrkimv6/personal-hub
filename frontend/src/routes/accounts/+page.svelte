@@ -25,7 +25,7 @@
   interface BrowserCommand {
     id: number;
     command_type: string;
-    account_id: number;
+    service_account_id: number;
     status: string;
     request_data: any;
     result_data: any;
@@ -449,7 +449,7 @@
                   <tr class="border-t border-gray-100 hover:bg-gray-50">
                     <td class="px-3 py-2 text-gray-500">{cmd.id}</td>
                     <td class="px-3 py-2">{getCommandTypeLabel(cmd.command_type)}</td>
-                    <td class="px-3 py-2">{getAccountName(cmd.account_id)}</td>
+                    <td class="px-3 py-2">{getAccountName(cmd.service_account_id)}</td>
                     <td class="px-3 py-2">
                       <span class="px-2 py-0.5 text-xs rounded-full {statusInfo.class}">
                         {statusInfo.text}

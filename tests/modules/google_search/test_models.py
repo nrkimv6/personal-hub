@@ -57,7 +57,7 @@ class TestGoogleSavedSearch:
         assert saved.max_pages == 1
         assert saved.is_favorite is False
         assert saved.date_filter is None
-        assert saved.account_id is None
+        assert saved.service_account_id is None
 
     def test_update_saved_search(self, test_db_session):
         """Right: 저장된 검색 수정"""
