@@ -255,25 +255,19 @@ Write-ServiceLog "Frontend started (PID: $($frontendProcess.Id))"
 
 # ---- Start Workers (Dev mode only) ----
 if ($RunWorkers) {
-    # Note: Browser-based workers (monitor_worker, instagram_worker) are NOT started here.
-    # They require user session (headed browser) and are started via:
+    # Note: All workers that need user session access are NOT started here.
+    # They are started via browser-workers.ps1 in user session:
     #   - Startup program: startup-browser-workers.ps1 (auto on login)
     #   - Manual: browser-workers.ps1 -Action start
+    #
+    # Workers that require user session:
+    #   - monitor_worker: Uses Playwright browser
+    #   - instagram_worker: Uses Playwright browser
+    #   - claude_worker: Uses Claude CLI which requires user session for login credentials
+    #
     # See: docs/auto-start/2025-12-27-browser-worker-separation.md
-    Write-ServiceLog "Browser workers (monitor, instagram) will be started via startup program"
-
-    # Claude Worker Watchdog (no browser needed - uses CLI subprocess)
-    Write-ServiceLog "Starting Claude Watchdog..."
-    $ClaudeWatchdogPidFile = Join-Path $PidDir "claude_watchdog$PidSuffix.pid"
-    $claudeWatchdogProcess = Start-Process -FilePath "powershell.exe" `
-        -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\claude-watchdog.ps1" `
-        -WorkingDirectory $ProjectRoot `
-        -WindowStyle Hidden `
-        -PassThru
-    $claudeWatchdogProcess.Id | Out-File $ClaudeWatchdogPidFile -Encoding ascii
-    Write-ServiceLog "Claude Watchdog started (PID: $($claudeWatchdogProcess.Id))"
-
-    Start-Sleep -Seconds 2
+    Write-ServiceLog "All workers (monitor, instagram, claude) will be started via startup program"
+    Write-ServiceLog "Run: .\scripts\browser-workers.ps1 -Action start (in user session)"
 }
 
 # ============================================================

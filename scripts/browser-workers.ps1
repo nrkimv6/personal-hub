@@ -193,7 +193,7 @@ function Stop-BrowserWorkers {
     # Also stop the actual worker processes (they may linger after watchdog stops)
     $WorkerPidFile = Join-Path $PidDir "worker$PidSuffix.pid"
     $InstagramWorkerPidFile = Join-Path $PidDir "instagram_worker$PidSuffix.pid"
-    $ClaudeWorkerPidFile = Join-Path $PidDir "llm_worker$PidSuffix.pid"
+    $ClaudeWorkerPidFile = Join-Path $PidDir "claude_worker$PidSuffix.pid"
 
     foreach ($pidFile in @($WorkerPidFile, $InstagramWorkerPidFile, $ClaudeWorkerPidFile)) {
         if (Test-Path $pidFile) {
@@ -255,7 +255,7 @@ function Show-Status {
     # Actual worker processes
     $WorkerPidFile = Join-Path $PidDir "worker$PidSuffix.pid"
     $InstagramWorkerPidFile = Join-Path $PidDir "instagram_worker$PidSuffix.pid"
-    $ClaudeWorkerPidFile = Join-Path $PidDir "llm_worker$PidSuffix.pid"
+    $ClaudeWorkerPidFile = Join-Path $PidDir "claude_worker$PidSuffix.pid"
 
     Write-Host ""
     Write-Host "Worker Processes:" -ForegroundColor White
