@@ -855,6 +855,7 @@ class LLMService:
                     "last_requested_at": None,
                     "last_error": None,
                     "request_ids": [],  # 실패한 요청 ID들
+                    "prompt": req.prompt,  # 첫 번째 요청의 prompt
                 }
 
             group = caller_groups[key]

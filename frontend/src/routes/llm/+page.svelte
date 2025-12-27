@@ -32,6 +32,10 @@
 	let groupTotal = 0;
 	let groupPages = 0;
 
+	// 그룹 선택 (multi-재요청용)
+	let selectedGroupKeys: string[] = [];  // "caller_type:caller_id" 형식
+	let groupSelectAll = false;
+
 	// 필터 (탭에 따라 다르게 설정)
 	let filterCallerType = '';
 	let filterRequestedBy = '';
@@ -154,6 +158,63 @@
 		} catch (e) {
 			alert('재시도 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
 		}
+	}
+
+	// 그룹 선택 관련 함수
+	function getGroupKey(group: LLMCallerGroup): string {
+		return `${group.caller_type}:${group.caller_id}`;
+	}
+
+	function toggleGroupSelectAll() {
+		groupSelectAll = !groupSelectAll;
+		if (groupSelectAll) {
+			selectedGroupKeys = callerGroups.map(g => getGroupKey(g));
+		} else {
+			selectedGroupKeys = [];
+		}
+	}
+
+	function toggleGroupSelect(group: LLMCallerGroup) {
+		const key = getGroupKey(group);
+		if (selectedGroupKeys.includes(key)) {
+			selectedGroupKeys = selectedGroupKeys.filter(k => k !== key);
+		} else {
+			selectedGroupKeys = [...selectedGroupKeys, key];
+		}
+	}
+
+	async function multiRetrySelectedGroups() {
+		if (selectedGroupKeys.length === 0) return;
+
+		// 선택된 그룹들의 실패한 요청 ID들 수집
+		const selectedGroups = callerGroups.filter(g => selectedGroupKeys.includes(getGroupKey(g)));
+		const failedRequestIds: number[] = [];
+		for (const group of selectedGroups) {
+			failedRequestIds.push(...group.request_ids);
+		}
+
+		if (failedRequestIds.length === 0) {
+			alert('선택된 그룹에 재시도할 실패 요청이 없습니다.');
+			return;
+		}
+
+		if (!confirm(`선택된 ${selectedGroups.length}개 그룹의 ${failedRequestIds.length}개 실패 요청을 재시도하시겠습니까?`)) return;
+
+		try {
+			const result = await llmApi.batchRetry(failedRequestIds);
+			alert(`재시도 완료: 성공 ${result.success}개, 스킵 ${result.skipped}개`);
+			selectedGroupKeys = [];
+			groupSelectAll = false;
+			await fetchGroupedData();
+		} catch (e) {
+			alert('일괄 재시도 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		}
+	}
+
+	function truncatePrompt(prompt: string, maxLength: number = 80): string {
+		if (!prompt) return '-';
+		if (prompt.length <= maxLength) return prompt;
+		return prompt.substring(0, maxLength) + '...';
 	}
 
 	function toggleViewMode() {
@@ -546,7 +607,7 @@
 
 		<!-- 그룹 뷰 요약 및 일괄 재시도 버튼 -->
 		{#if activeTab === 'history' && viewMode === 'grouped' && groupedResponse}
-			<div class="mb-4 flex gap-4 items-center p-3 bg-gray-50 rounded-lg">
+			<div class="mb-4 flex gap-4 items-center p-3 bg-gray-50 rounded-lg flex-wrap">
 				<div class="text-sm">
 					<span class="text-gray-600">전체:</span>
 					<span class="font-bold text-gray-900">{groupedResponse.summary.total_callers}</span>
@@ -559,11 +620,19 @@
 					<span class="text-red-600">성공 없음:</span>
 					<span class="font-bold text-red-700">{groupedResponse.summary.callers_without_success}</span>
 				</div>
-				{#if groupedResponse.summary.callers_without_success > 0}
-					<button onclick={retryAllFailedWithoutSuccess} class="btn btn-primary btn-sm ml-auto">
-						성공 없는 것 일괄 재시도
-					</button>
-				{/if}
+				<div class="ml-auto flex gap-2">
+					{#if selectedGroupKeys.length > 0}
+						<span class="text-sm text-gray-600 self-center">{selectedGroupKeys.length}개 선택</span>
+						<button onclick={multiRetrySelectedGroups} class="btn btn-secondary btn-sm">
+							선택 그룹 재시도
+						</button>
+					{/if}
+					{#if groupedResponse.summary.callers_without_success > 0}
+						<button onclick={retryAllFailedWithoutSuccess} class="btn btn-primary btn-sm">
+							성공 없는 것 일괄 재시도
+						</button>
+					{/if}
+				</div>
 			</div>
 		{/if}
 
@@ -595,8 +664,17 @@
 					<table class="w-full">
 						<thead class="bg-gray-50 border-b border-gray-200">
 							<tr>
+								<th class="px-4 py-3 text-left">
+									<input
+										type="checkbox"
+										checked={groupSelectAll}
+										onchange={toggleGroupSelectAll}
+										class="rounded"
+									/>
+								</th>
 								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">타입</th>
 								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">호출자 ID</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">요청내용</th>
 								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">요청 수</th>
 								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">성공</th>
 								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">실패</th>
@@ -609,8 +687,19 @@
 						<tbody class="divide-y divide-gray-200">
 							{#each callerGroups as group}
 								<tr class="hover:bg-gray-50 {group.has_success ? '' : 'bg-red-50'}">
+									<td class="px-4 py-3">
+										<input
+											type="checkbox"
+											checked={selectedGroupKeys.includes(getGroupKey(group))}
+											onchange={() => toggleGroupSelect(group)}
+											class="rounded"
+										/>
+									</td>
 									<td class="px-4 py-3 text-sm text-gray-600">{group.caller_type}</td>
 									<td class="px-4 py-3 text-sm text-gray-900 font-mono">{group.caller_id}</td>
+									<td class="px-4 py-3 text-sm text-gray-700 max-w-xs truncate" title={group.prompt}>
+										{truncatePrompt(group.prompt)}
+									</td>
 									<td class="px-4 py-3 text-sm text-gray-900 font-bold">{group.total_count}</td>
 									<td class="px-4 py-3 text-sm text-green-600 font-bold">{group.completed_count}</td>
 									<td class="px-4 py-3 text-sm text-red-600 font-bold">{group.failed_count}</td>
