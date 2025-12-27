@@ -111,7 +111,7 @@ class ScheduleMonitorService:
                 "time_range": result[16],
                 "auto_booking_enabled": bool(result[17]),
                 "max_bookings_per_schedule": result[18] or 1,
-                "account_id": result[19],  # 다중 프로필 지원
+                "service_account_id": result[19],  # 다중 프로필 지원
                 "business_id": result[20],
                 "naver_business_id": result[21],
                 "business_type_id": result[22],

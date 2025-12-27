@@ -94,7 +94,7 @@ def sample_schedule_config(db_session, sample_account):
         ],
         max_posts=20,
         scroll_count=3,
-        account_id=sample_account.id,
+        service_account_id=sample_account.id,
     )
     db_session.add(config)
     db_session.commit()
@@ -106,7 +106,7 @@ def sample_schedule_config(db_session, sample_account):
 def pending_request(db_session, sample_account):
     """대기 중인 크롤링 요청."""
     request = InstagramCrawlRequest(
-        account_id=sample_account.id,
+        service_account_id=sample_account.id,
         requested_by="manual",
         status="pending",
         requested_at=datetime.utcnow(),
@@ -158,13 +158,13 @@ class TestProcessPendingRequests:
         """pending 요청이 요청 시간 순으로 반환되어야 한다."""
         # Given: 여러 pending 요청
         request1 = InstagramCrawlRequest(
-            account_id=sample_account.id,
+            service_account_id=sample_account.id,
             requested_by="manual",
             status="pending",
             requested_at=datetime.utcnow() - timedelta(hours=2),
         )
         request2 = InstagramCrawlRequest(
-            account_id=sample_account.id + 100,  # 다른 계정
+            service_account_id=sample_account.id + 100,  # 다른 계정
             requested_by="scheduler",
             status="pending",
             requested_at=datetime.utcnow() - timedelta(hours=1),
@@ -230,7 +230,7 @@ class TestScheduledRuns:
 
         # Then
         assert config is not None
-        assert config.account_id is not None
+        assert config.service_account_id is not None
         assert config.enabled is True
 
 
@@ -258,7 +258,7 @@ class TestBoundaryConditions:
         config = InstagramScheduleConfig(
             enabled=False,
             daily_runs=3,
-            account_id=sample_account.id,
+            service_account_id=sample_account.id,
         )
         db_session.add(config)
         db_session.commit()
@@ -272,11 +272,11 @@ class TestBoundaryConditions:
 
     def test_schedule_without_account_id(self, db_session):
         """account_id가 없으면 스케줄을 실행하지 않아야 한다."""
-        # Given: account_id 없는 config
+        # Given: service_account_id 없는 config
         config = InstagramScheduleConfig(
             enabled=True,
             daily_runs=3,
-            account_id=None,
+            service_account_id=None,
         )
         db_session.add(config)
         db_session.commit()
@@ -286,7 +286,7 @@ class TestBoundaryConditions:
 
         # Then
         assert retrieved_config is not None
-        assert retrieved_config.account_id is None
+        assert retrieved_config.service_account_id is None
 
 
 # ============================================================
@@ -303,7 +303,7 @@ class TestInverseRelations:
 
         # 실행 기록 생성
         crawl_run = InstagramCrawlRun(
-            account_id=pending_request.account_id,
+            service_account_id=pending_request.service_account_id,
             started_at=datetime.utcnow(),
             success=True,
             total_collected=5,
@@ -347,7 +347,7 @@ class TestCrossCheck:
         """CrawlRun이 DB에 저장되어야 한다."""
         # Given
         crawl_run = InstagramCrawlRun(
-            account_id=sample_account.id,
+            service_account_id=sample_account.id,
             started_at=datetime.utcnow(),
             success=True,
             total_collected=10,
@@ -359,7 +359,7 @@ class TestCrossCheck:
 
         # When: DB에서 다시 조회
         crawl_service = CrawlService(db_session)
-        runs = crawl_service.get_crawl_runs(limit=10, account_id=sample_account.id)
+        runs = crawl_service.get_crawl_runs(limit=10, service_account_id=sample_account.id)
 
         # Then
         assert len(runs) == 1
@@ -370,14 +370,14 @@ class TestCrossCheck:
         """get_last_run이 DB의 최신 상태를 반영해야 한다."""
         # Given: 여러 실행 기록
         run1 = InstagramCrawlRun(
-            account_id=sample_account.id,
+            service_account_id=sample_account.id,
             started_at=datetime.utcnow() - timedelta(hours=2),
             success=True,
             total_collected=5,
             new_saved=2,
         )
         run2 = InstagramCrawlRun(
-            account_id=sample_account.id,
+            service_account_id=sample_account.id,
             started_at=datetime.utcnow() - timedelta(hours=1),
             success=True,
             total_collected=8,
@@ -388,7 +388,7 @@ class TestCrossCheck:
 
         # When
         crawl_service = CrawlService(db_session)
-        last_run = crawl_service.get_last_run(account_id=sample_account.id)
+        last_run = crawl_service.get_last_run(service_account_id=sample_account.id)
 
         # Then: 가장 최근 실행 반환
         assert last_run is not None
@@ -450,7 +450,7 @@ class TestPerformance:
         for i in range(10):
             # 각기 다른 계정 ID 사용 (get_pending_request에서 계정당 하나만 반환)
             req = InstagramCrawlRequest(
-                account_id=sample_account.id + i,  # 다른 계정
+                service_account_id=sample_account.id + i,  # 다른 계정
                 requested_by="test",
                 status="pending",
                 requested_at=datetime.utcnow() - timedelta(minutes=10 - i),
@@ -467,7 +467,7 @@ class TestPerformance:
         # Then: 시간순 정렬
         assert len(pending_list) == 10
         # 가장 오래된 것이 먼저
-        assert pending_list[0].account_id == sample_account.id
+        assert pending_list[0].service_account_id == sample_account.id
 
     def test_has_active_request_performance(self, db_session, sample_account, pending_request):
         """has_active_request가 빠르게 동작해야 한다."""
@@ -516,7 +516,7 @@ class TestInstagramWorkerIntegration:
 
         # When: 성공 처리
         crawl_run = InstagramCrawlRun(
-            account_id=sample_account.id,
+            service_account_id=sample_account.id,
             started_at=datetime.utcnow(),
             success=True,
             total_collected=5,
@@ -540,7 +540,7 @@ class TestInstagramWorkerIntegration:
         """로그인 안 된 계정의 요청은 실패 처리되어야 한다."""
         # Given
         request = InstagramCrawlRequest(
-            account_id=sample_account_not_logged_in.id,
+            service_account_id=sample_account_not_logged_in.id,
             requested_by="manual",
             status="pending",
             requested_at=datetime.utcnow(),
@@ -664,7 +664,7 @@ class TestRealtimeSave:
         # When
         crawl_run = await crawl_service.run_crawl(
             crawler=mock_crawler,
-            account_id=sample_account.id,
+            service_account_id=sample_account.id,
         )
 
         # Then: 실행 성공
@@ -715,7 +715,7 @@ class TestRealtimeSave:
         # When
         crawl_run = await crawl_service.run_crawl(
             crawler=mock_crawler,
-            account_id=sample_account.id,
+            service_account_id=sample_account.id,
         )
 
         # Then: 실패했지만 저장된 데이터는 보존
@@ -745,7 +745,7 @@ class TestOrphanedRunCleanup:
         """단일 orphaned run이 정리되어야 한다."""
         # Given: finished_at이 NULL인 실행 기록 (워커 크래시 시뮬레이션)
         orphaned_run = InstagramCrawlRun(
-            account_id=sample_account.id,
+            service_account_id=sample_account.id,
             started_at=datetime.utcnow() - timedelta(hours=1),
             finished_at=None,  # 워커 크래시로 미완료
             success=False,
@@ -772,7 +772,7 @@ class TestOrphanedRunCleanup:
         orphaned_runs = []
         for i in range(3):
             run = InstagramCrawlRun(
-                account_id=sample_account.id,
+                service_account_id=sample_account.id,
                 started_at=datetime.utcnow() - timedelta(hours=i + 1),
                 finished_at=None,
                 success=False,
@@ -797,7 +797,7 @@ class TestOrphanedRunCleanup:
         """이미 완료된 실행 기록은 영향받지 않아야 한다."""
         # Given: 정상 완료된 실행 기록
         completed_run = InstagramCrawlRun(
-            account_id=sample_account.id,
+            service_account_id=sample_account.id,
             started_at=datetime.utcnow() - timedelta(hours=2),
             finished_at=datetime.utcnow() - timedelta(hours=1),
             success=True,
@@ -825,7 +825,7 @@ class TestOrphanedRunCleanup:
         """orphaned run만 정리되고 완료된 것은 유지되어야 한다."""
         # Given: 완료된 것과 orphaned 혼합
         completed_run = InstagramCrawlRun(
-            account_id=sample_account.id,
+            service_account_id=sample_account.id,
             started_at=datetime.utcnow() - timedelta(hours=3),
             finished_at=datetime.utcnow() - timedelta(hours=2),
             success=True,
@@ -833,7 +833,7 @@ class TestOrphanedRunCleanup:
             new_saved=10,
         )
         orphaned_run = InstagramCrawlRun(
-            account_id=sample_account.id,
+            service_account_id=sample_account.id,
             started_at=datetime.utcnow() - timedelta(hours=1),
             finished_at=None,
             success=False,
@@ -873,7 +873,7 @@ class TestOrphanedRunCleanup:
         """정리 시 수집된 데이터 카운트는 보존되어야 한다."""
         # Given
         orphaned_run = InstagramCrawlRun(
-            account_id=sample_account.id,
+            service_account_id=sample_account.id,
             started_at=datetime.utcnow() - timedelta(hours=1),
             finished_at=None,
             success=False,

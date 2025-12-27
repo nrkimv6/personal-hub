@@ -8,7 +8,7 @@ from typing import List, Optional
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from app.models import InstagramCrawlRun, InstagramScheduleConfig, ServiceAccount, InstagramPost
+from app.models import InstagramCrawlRun, InstagramScheduleConfig, Account, InstagramPost
 from .crawler import InstagramCrawler, CrawlOptions, PostData
 from .post_service import PostService
 from .scheduler import InstagramScheduler
@@ -49,7 +49,7 @@ class CrawlService:
 
         Args:
             crawler: InstagramCrawler 인스턴스
-            service_account_id: 서비스 계정 ID
+            service_account_id: 수집 계정 ID
             options: 크롤링 옵션
 
         Returns:
@@ -203,7 +203,7 @@ class CrawlService:
         Args:
             crawler: InstagramCrawler 인스턴스
             url: Instagram 게시물 URL
-            service_account_id: 서비스 계정 ID
+            service_account_id: 사용할 계정 ID
 
         Returns:
             dict: {"success": bool, "message": str, "post": InstagramPost | None, "is_new": bool}
@@ -385,7 +385,7 @@ class CrawlService:
 
         Args:
             limit: 조회 개수
-            service_account_id: 서비스 계정 필터
+            service_account_id: 계정 필터
 
         Returns:
             실행 기록 목록
@@ -412,7 +412,7 @@ class CrawlService:
             limit: 페이지당 개수
             period: 기간 필터 ('1d', '7d', '30d', 'all')
             status: 상태 필터 ('success', 'failed', 'all')
-            service_account_id: 서비스 계정 필터
+            service_account_id: 계정 필터
 
         Returns:
             (실행 기록 목록, 전체 개수)
@@ -434,7 +434,7 @@ class CrawlService:
             elif status == 'failed':
                 query = query.filter(InstagramCrawlRun.success == False)
 
-        # 서비스 계정 필터
+        # 계정 필터
         if service_account_id:
             query = query.filter(InstagramCrawlRun.service_account_id == service_account_id)
 
@@ -566,7 +566,7 @@ class CrawlService:
         duplicate_stop_count: Optional[int] = None,
         max_retries: Optional[int] = None,
         retry_interval_minutes: Optional[int] = None,
-        account_id: Optional[int] = None,
+        service_account_id: Optional[int] = None,
     ) -> InstagramScheduleConfig:
         """스케줄 설정 업데이트.
 
@@ -608,9 +608,9 @@ class CrawlService:
         if retry_interval_minutes is not None:
             config.retry_interval_minutes = retry_interval_minutes
 
-        # 서비스 계정 지정
-        if account_id is not None:
-            config.service_account_id = account_id
+        # 계정 지정
+        if service_account_id is not None:
+            config.service_account_id = service_account_id
 
         config.updated_at = datetime.now()
 
@@ -649,7 +649,7 @@ class CrawlService:
             )
             next_crawl_time = scheduler.get_next_run_time()
 
-        # 활성 계정 수 (오늘 실행된 고유 서비스 계정)
+        # 활성 계정 수 (오늘 실행된 고유 계정)
         from sqlalchemy import func
         unique_accounts = self.db.query(func.count(func.distinct(InstagramCrawlRun.service_account_id))).filter(
             InstagramCrawlRun.started_at >= today_start
@@ -662,12 +662,12 @@ class CrawlService:
         ).order_by(desc(InstagramCrawlRun.started_at)).first()
 
         if running_run:
-            # 서비스 계정 정보 조회
-            service_account = self.db.query(ServiceAccount).filter(ServiceAccount.id == running_run.service_account_id).first()
+            # 계정 정보 조회
+            account = self.db.query(Account).filter(Account.id == running_run.service_account_id).first()
             running_crawl = RunningCrawlInfo(
                 run_id=running_run.id,
-                account_id=running_run.service_account_id,
-                account_username=service_account.identifier if service_account else None,
+                service_account_id=running_run.service_account_id,
+                account_username=account.name if account else None,
                 started_at=running_run.started_at,
                 total_collected=running_run.total_collected or 0,
                 new_saved=running_run.new_saved or 0,

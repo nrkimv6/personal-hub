@@ -85,7 +85,7 @@ class CrawlResponse(BaseModel):
 class CrawlRunSchema(BaseModel):
     """크롤링 실행 기록."""
     id: int
-    account_id: int
+    service_account_id: int
     started_at: datetime
     finished_at: Optional[datetime] = None
     success: bool
@@ -144,7 +144,7 @@ class ScheduleConfigSchema(BaseModel):
     max_retries: int = 3
     retry_interval_minutes: int = 5
     # 계정 지정 (2025-12-21 추가)
-    account_id: Optional[int] = None
+    service_account_id: Optional[int] = None
     account_name: Optional[str] = None
     updated_at: Optional[datetime] = None
 
@@ -164,7 +164,7 @@ class ScheduleConfigUpdateSchema(BaseModel):
     max_retries: Optional[int] = None
     retry_interval_minutes: Optional[int] = None
     # 계정 지정 (2025-12-21 추가)
-    account_id: Optional[int] = None
+    service_account_id: Optional[int] = None
 
 
 class TodayScheduleItem(BaseModel):
@@ -180,7 +180,7 @@ class TodayScheduleItem(BaseModel):
 class RunningCrawlInfo(BaseModel):
     """실행 중인 크롤러 정보."""
     run_id: int
-    account_id: int
+    service_account_id: int
     account_username: Optional[str] = None
     started_at: datetime
     total_collected: int = 0
@@ -203,7 +203,7 @@ class StatsSchema(BaseModel):
 class CrawlRequestSchema(BaseModel):
     """크롤링 요청 스키마."""
     id: int
-    account_id: int
+    service_account_id: int
     requested_at: datetime
     requested_by: str = "manual"
     request_type: str = "feed"  # 'feed' | 'single_post' | 'single_post_url'
@@ -219,14 +219,14 @@ class CrawlRequestSchema(BaseModel):
 
 class CrawlRequestCreateSchema(BaseModel):
     """크롤링 요청 생성 스키마."""
-    account_id: int
+    service_account_id: int
     requested_by: str = "manual"
 
 
 class UrlCrawlRequestSchema(BaseModel):
     """URL로 단일 게시물 수집 요청 스키마."""
     url: str
-    account_id: int
+    service_account_id: int
 
 
 class UrlParseRequestSchema(BaseModel):
@@ -249,7 +249,7 @@ class UrlParseResponseSchema(BaseModel):
 class GenericUrlCrawlRequestSchema(BaseModel):
     """범용 URL 크롤링 요청 스키마."""
     url: str
-    account_id: int
+    service_account_id: int
     max_posts: int = 20
     scroll_count: int = 3
 
@@ -291,7 +291,7 @@ class RunListParams(BaseModel):
     limit: int = 20
     period: Optional[str] = None  # 1d, 7d, 30d, all
     status: Optional[str] = None  # success, failed, all
-    account_id: Optional[int] = None
+    service_account_id: Optional[int] = None
 
 
 class RunDetailSchema(CrawlRunSchema):
@@ -500,7 +500,7 @@ class CrawlHistoryItem(BaseModel):
     CrawlRequest 정보와 연결된 CrawlRun 요약을 포함.
     """
     id: int
-    account_id: int
+    service_account_id: int
     requested_at: datetime
     requested_by: str  # 'manual', 'scheduler', 'retry'
     request_type: str  # 'feed', 'single_post', 'single_post_url'

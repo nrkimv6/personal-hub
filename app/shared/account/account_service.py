@@ -23,9 +23,9 @@ class AccountService:
             query = query.filter(Account.is_active == True)
         return query.order_by(Account.name).all()
 
-    def get_by_id(self, db: Session, account_id: int) -> Optional[Account]:
+    def get_by_id(self, db: Session, service_account_id: int) -> Optional[Account]:
         """ID로 계정 조회"""
-        return db.query(Account).filter(Account.id == account_id).first()
+        return db.query(Account).filter(Account.id == service_account_id).first()
 
     def get_by_name(self, db: Session, name: str) -> Optional[Account]:
         """이름으로 계정 조회"""
@@ -67,9 +67,9 @@ class AccountService:
         logger.info(f"계정 생성: {account.name} (profile_dir={account.profile_dir})")
         return account
 
-    def update(self, db: Session, account_id: int, data: AccountUpdate) -> Optional[Account]:
+    def update(self, db: Session, service_account_id: int, data: AccountUpdate) -> Optional[Account]:
         """계정 수정"""
-        account = self.get_by_id(db, account_id)
+        account = self.get_by_id(db, service_account_id)
         if not account:
             return None
 
@@ -86,19 +86,19 @@ class AccountService:
         account.updated_at = datetime.now()
         db.commit()
         db.refresh(account)
-        logger.info(f"계정 수정: {account.name} (id={account_id})")
+        logger.info(f"계정 수정: {account.name} (id={service_account_id})")
         return account
 
-    def delete(self, db: Session, account_id: int, remove_profile: bool = False) -> bool:
+    def delete(self, db: Session, service_account_id: int, remove_profile: bool = False) -> bool:
         """
         계정 삭제
 
         Args:
             db: 데이터베이스 세션
-            account_id: 계정 ID
+            service_account_id: 계정 ID
             remove_profile: True일 경우 프로필 디렉토리도 삭제
         """
-        account = self.get_by_id(db, account_id)
+        account = self.get_by_id(db, service_account_id)
         if not account:
             return False
 
@@ -107,7 +107,7 @@ class AccountService:
         # DB에서 삭제
         db.delete(account)
         db.commit()
-        logger.info(f"계정 삭제: {account.name} (id={account_id})")
+        logger.info(f"계정 삭제: {account.name} (id={service_account_id})")
 
         # 프로필 디렉토리 삭제 옵션
         if remove_profile:
@@ -119,9 +119,9 @@ class AccountService:
 
         return True
 
-    def update_login_status(self, db: Session, account_id: int, is_logged_in: bool) -> Optional[Account]:
+    def update_login_status(self, db: Session, service_account_id: int, is_logged_in: bool) -> Optional[Account]:
         """로그인 상태 업데이트"""
-        account = self.get_by_id(db, account_id)
+        account = self.get_by_id(db, service_account_id)
         if not account:
             return None
 
@@ -132,9 +132,9 @@ class AccountService:
         logger.info(f"계정 로그인 상태 업데이트: {account.name} -> {is_logged_in}")
         return account
 
-    def update_last_used(self, db: Session, account_id: int) -> Optional[Account]:
+    def update_last_used(self, db: Session, service_account_id: int) -> Optional[Account]:
         """마지막 사용 시간 업데이트"""
-        account = self.get_by_id(db, account_id)
+        account = self.get_by_id(db, service_account_id)
         if not account:
             return None
 

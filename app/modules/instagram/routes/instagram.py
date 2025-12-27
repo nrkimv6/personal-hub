@@ -387,15 +387,15 @@ async def recrawl_post(
     if not post.url:
         raise HTTPException(status_code=400, detail="Post has no URL to recrawl")
 
-    # 게시물의 account_id 확인
-    account_id = post.account_id
-    if not account_id:
+    # 게시물의 service_account_id 확인
+    service_account_id = post.service_account_id
+    if not service_account_id:
         raise HTTPException(status_code=400, detail="Post has no associated account")
 
     # 재크롤링 요청 생성
     request = request_service.create_single_post_request(
         post_id=post_id,
-        account_id=account_id,
+        service_account_id=service_account_id,
         requested_by="manual",
     )
 
@@ -455,14 +455,14 @@ async def crawl_post_by_url(
         raise HTTPException(status_code=400, detail="Invalid Instagram post URL. Must be in format: https://www.instagram.com/p/...")
 
     # 계정 존재 확인
-    account = account_service.get_by_id(db, body.account_id)
+    account = account_service.get_by_id(db, body.service_account_id)
     if not account:
-        raise HTTPException(status_code=404, detail=f"Account {body.account_id} not found")
+        raise HTTPException(status_code=404, detail=f"Account {body.service_account_id} not found")
 
     # URL 크롤링 요청 생성
     request = request_service.create_url_crawl_request(
         url=url,
-        account_id=body.account_id,
+        service_account_id=body.service_account_id,
         requested_by="manual",
     )
 
@@ -503,15 +503,15 @@ async def crawl_by_generic_url(
         )
 
     # 계정 존재 확인
-    account = account_service.get_by_id(db, body.account_id)
+    account = account_service.get_by_id(db, body.service_account_id)
     if not account:
-        raise HTTPException(status_code=404, detail=f"Account {body.account_id} not found")
+        raise HTTPException(status_code=404, detail=f"Account {body.service_account_id} not found")
 
     # 크롤링 요청 생성
     request = request_service.create_generic_url_crawl_request(
         url=body.url,
         url_type=parsed.url_type.value,
-        account_id=body.account_id,
+        service_account_id=body.service_account_id,
         max_posts=body.max_posts,
         scroll_count=body.scroll_count,
         requested_by="manual",
@@ -524,7 +524,7 @@ async def crawl_by_generic_url(
 
 @router.post("/crawl/manual", response_model=CrawlRequestSchema)
 async def request_manual_crawl(
-    account_id: int = Query(..., description="수집 계정 ID"),
+    service_account_id: int = Query(..., description="수집 계정 ID"),
     db: Session = Depends(get_db),
 ):
     """수동 크롤링 요청.
@@ -535,25 +535,25 @@ async def request_manual_crawl(
     request_service = CrawlRequestService(db)
 
     # 이미 활성 요청이 있는지 확인
-    if request_service.has_active_request(account_id):
-        existing = request_service.get_pending_request(account_id)
+    if request_service.has_active_request(service_account_id):
+        existing = request_service.get_pending_request(service_account_id)
         if existing:
             return CrawlRequestSchema.model_validate(existing)
 
     # 새 요청 생성
-    request = request_service.create_request(account_id, requested_by="manual")
+    request = request_service.create_request(service_account_id, requested_by="manual")
     return CrawlRequestSchema.model_validate(request)
 
 
 @router.get("/crawl/requests", response_model=List[CrawlRequestSchema])
 async def get_crawl_requests(
     limit: int = Query(10, ge=1, le=50, description="조회 개수"),
-    account_id: Optional[int] = Query(None, description="계정 필터"),
+    service_account_id: Optional[int] = Query(None, description="계정 필터"),
     db: Session = Depends(get_db),
 ):
     """크롤링 요청 목록 조회."""
     request_service = CrawlRequestService(db)
-    requests = request_service.get_recent_requests(limit=limit, account_id=account_id)
+    requests = request_service.get_recent_requests(limit=limit, service_account_id=service_account_id)
     return [CrawlRequestSchema.model_validate(r) for r in requests]
 
 
@@ -589,7 +589,7 @@ async def retry_crawl_request(
     if original.request_type == "feed":
         # 피드 크롤링 재시도
         new_request = request_service.create_request(
-            account_id=original.account_id,
+            service_account_id=original.service_account_id,
             requested_by="retry",
         )
     elif original.request_type == "single_post":
@@ -598,7 +598,7 @@ async def retry_crawl_request(
             raise HTTPException(status_code=400, detail="Original request has no target post")
         new_request = request_service.create_single_post_request(
             post_id=original.target_post_id,
-            account_id=original.account_id,
+            service_account_id=original.service_account_id,
             requested_by="retry",
         )
     elif original.request_type == "single_post_url":
@@ -607,7 +607,7 @@ async def retry_crawl_request(
             raise HTTPException(status_code=400, detail="Original request has no target URL")
         new_request = request_service.create_url_crawl_request(
             url=original.target_url,
-            account_id=original.account_id,
+            service_account_id=original.service_account_id,
             requested_by="retry",
         )
     else:
@@ -624,7 +624,7 @@ async def get_crawl_history(
     requested_by: Optional[str] = Query(None, description="요청 출처 (manual, scheduler, retry)"),
     status: Optional[str] = Query(None, description="상태 (pending, processing, completed, failed)"),
     period: Optional[str] = Query(None, description="기간 (today, week, month)"),
-    account_id: Optional[int] = Query(None, description="계정 필터"),
+    service_account_id: Optional[int] = Query(None, description="계정 필터"),
     db: Session = Depends(get_db),
 ):
     """크롤링 이력 통합 조회.
@@ -641,7 +641,7 @@ async def get_crawl_history(
         requested_by=requested_by,
         status=status,
         period=period,
-        account_id=account_id,
+        service_account_id=service_account_id,
     )
 
     items = []
@@ -664,7 +664,7 @@ async def get_crawl_history(
 
         items.append(CrawlHistoryItem(
             id=req.id,
-            account_id=req.account_id,
+            service_account_id=req.service_account_id,
             requested_at=req.requested_at,
             requested_by=req.requested_by,
             request_type=req.request_type,
@@ -687,7 +687,7 @@ async def get_crawl_history(
 
 @router.post("/crawl", response_model=CrawlResponse)
 async def run_crawl(
-    account_id: int = Query(..., description="수집 계정 ID"),
+    service_account_id: int = Query(..., description="수집 계정 ID"),
     options: Optional[CrawlOptionsSchema] = None,
     db: Session = Depends(get_db),
 ):
@@ -697,7 +697,7 @@ async def run_crawl(
     이 API는 크롤링 요청을 큐에 추가합니다.
     """
     request_service = CrawlRequestService(db)
-    request = request_service.create_request(account_id, requested_by="manual")
+    request = request_service.create_request(service_account_id, requested_by="manual")
 
     return CrawlResponse(
         success=True,
@@ -714,7 +714,7 @@ async def get_crawl_runs(
     limit: int = Query(20, ge=1, le=100, description="페이지당 개수"),
     period: Optional[str] = Query(None, description="기간 필터 (1d, 7d, 30d, all)"),
     status: Optional[str] = Query(None, description="상태 필터 (success, failed, all)"),
-    account_id: Optional[int] = Query(None, description="계정 필터"),
+    service_account_id: Optional[int] = Query(None, description="계정 필터"),
     db: Session = Depends(get_db),
 ):
     """크롤링 실행 기록 조회 (페이징 지원)."""
@@ -724,7 +724,7 @@ async def get_crawl_runs(
         limit=limit,
         period=period,
         status=status,
-        account_id=account_id,
+        service_account_id=service_account_id,
     )
 
     return RunListResponse(
@@ -882,7 +882,7 @@ async def update_schedule_config(
         duplicate_stop_count=update.duplicate_stop_count,
         max_retries=update.max_retries,
         retry_interval_minutes=update.retry_interval_minutes,
-        account_id=update.account_id,
+        service_account_id=update.service_account_id,
     )
 
     return _config_to_schema(config)
@@ -901,7 +901,7 @@ async def get_today_schedule(
 
 @router.post("/login/open-browser")
 async def open_login_browser(
-    account_id: int = Query(..., description="계정 ID"),
+    service_account_id: int = Query(..., description="계정 ID"),
     db: Session = Depends(get_db),
 ):
     """Instagram 수동 로그인용 브라우저 열기.
@@ -909,13 +909,13 @@ async def open_login_browser(
     지정된 계정의 브라우저 프로필로 Instagram 로그인 페이지를 엽니다.
     사용자가 수동으로 로그인하면 세션이 저장됩니다.
     """
-    account = account_service.get_by_id(db, account_id)
+    account = account_service.get_by_id(db, service_account_id)
     if not account:
-        raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
+        raise HTTPException(status_code=404, detail=f"Account {service_account_id} not found")
 
     browser_service = get_browser_service()
     result = await browser_service.open_browser_for_account(
-        account_id, "https://www.instagram.com/"
+        service_account_id, "https://www.instagram.com/"
     )
 
     if not result.get("success"):
@@ -924,26 +924,26 @@ async def open_login_browser(
     return {
         "success": True,
         "message": "Instagram 로그인 페이지가 열렸습니다. 수동으로 로그인해주세요.",
-        "account_id": account_id,
+        "service_account_id": service_account_id,
         "account_name": account.name,
     }
 
 
 @router.post("/login/check")
 async def check_login_status(
-    account_id: int = Query(..., description="계정 ID"),
+    service_account_id: int = Query(..., description="계정 ID"),
     db: Session = Depends(get_db),
 ):
     """Instagram 로그인 상태 확인.
 
     지정된 계정으로 Instagram에 접속하여 로그인 상태를 확인하고 DB를 업데이트합니다.
     """
-    account = account_service.get_by_id(db, account_id)
+    account = account_service.get_by_id(db, service_account_id)
     if not account:
-        raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
+        raise HTTPException(status_code=404, detail=f"Account {service_account_id} not found")
 
     browser_service = get_browser_service()
-    result = await browser_service.check_instagram_login_status(account_id)
+    result = await browser_service.check_instagram_login_status(service_account_id)
 
     if not result.get("success"):
         raise HTTPException(status_code=500, detail=result.get("message", "로그인 상태 확인 실패"))
@@ -1038,7 +1038,7 @@ def _run_to_schema(run) -> CrawlRunSchema:
     """InstagramCrawlRun 모델을 CrawlRunSchema로 변환."""
     return CrawlRunSchema(
         id=run.id,
-        account_id=run.account_id,
+        service_account_id=run.service_account_id,
         started_at=run.started_at,
         finished_at=run.finished_at,
         success=run.success,
@@ -1064,7 +1064,7 @@ def _config_to_schema(config) -> ScheduleConfigSchema:
         duplicate_stop_count=getattr(config, 'duplicate_stop_count', 5) or 5,
         max_retries=getattr(config, 'max_retries', 3) or 3,
         retry_interval_minutes=getattr(config, 'retry_interval_minutes', 5) or 5,
-        account_id=getattr(config, 'account_id', None),
+        service_account_id=getattr(config, 'service_account_id', None),
         account_name=config.account.name if getattr(config, 'account', None) else None,
         updated_at=config.updated_at,
     )

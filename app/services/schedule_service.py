@@ -49,17 +49,17 @@ class ScheduleService:
     """일정 관리 서비스"""
 
     def get_by_item(self, db: Session, biz_item_id: int) -> List[MonitorSchedule]:
-        """아이템별 일정 목록 조회 (service_account 포함)"""
+        """아이템별 일정 목록 조회 (account 포함)"""
         return db.query(MonitorSchedule).options(
-            joinedload(MonitorSchedule.service_account)
+            joinedload(MonitorSchedule.account)
         ).filter(
             MonitorSchedule.biz_item_id == biz_item_id
         ).order_by(MonitorSchedule.date).all()
 
     def get_by_id(self, db: Session, schedule_id: int) -> Optional[MonitorSchedule]:
-        """ID로 일정 조회 (service_account 포함)"""
+        """ID로 일정 조회 (account 포함)"""
         return db.query(MonitorSchedule).options(
-            joinedload(MonitorSchedule.service_account)
+            joinedload(MonitorSchedule.account)
         ).filter(MonitorSchedule.id == schedule_id).first()
 
     def get_by_date(
@@ -99,7 +99,7 @@ class ScheduleService:
             BizItem,
             Business
         ).options(
-            joinedload(MonitorSchedule.service_account)
+            joinedload(MonitorSchedule.account)
         ).join(
             BizItem, MonitorSchedule.biz_item_id == BizItem.id
         ).join(
@@ -158,7 +158,7 @@ class ScheduleService:
             "booking_count": schedule.booking_count,
             "last_booking_time": schedule.last_booking_time,
             "service_account_id": schedule.service_account_id,
-            "service_account_name": schedule.service_account.identifier if schedule.service_account else None,
+            "account_name": schedule.account.name if schedule.account else None,
             "auto_booking_enabled": getattr(schedule, 'auto_booking_enabled', False),
             "monitoring_mode": getattr(schedule, 'monitoring_mode', 'legacy'),
             "created_at": schedule.created_at,

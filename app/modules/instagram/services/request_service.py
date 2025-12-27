@@ -31,7 +31,7 @@ class CrawlRequestService:
         """크롤링 요청 생성.
 
         Args:
-            service_account_id: 서비스 계정 ID
+            service_account_id: 수집 계정 ID
             requested_by: 요청 출처 ('manual', 'scheduler', 'retry')
 
         Returns:
@@ -40,7 +40,7 @@ class CrawlRequestService:
         # 이미 대기 중인 요청이 있는지 확인
         existing = self.get_pending_request(service_account_id)
         if existing:
-            logger.info(f"Pending request already exists for service account {service_account_id}")
+            logger.info(f"Pending request already exists for account {service_account_id}")
             return existing
 
         request = InstagramCrawlRequest(
@@ -53,14 +53,14 @@ class CrawlRequestService:
         self.db.commit()
         self.db.refresh(request)
 
-        logger.info(f"Created crawl request {request.id} for service account {service_account_id}")
+        logger.info(f"Created crawl request {request.id} for account {service_account_id}")
         return request
 
     def get_pending_request(self, service_account_id: Optional[int] = None) -> Optional[InstagramCrawlRequest]:
         """대기 중인 요청 조회.
 
         Args:
-            service_account_id: 특정 서비스 계정 필터 (없으면 전체)
+            service_account_id: 특정 계정 필터 (없으면 전체)
 
         Returns:
             대기 중인 요청, 없으면 None
@@ -172,7 +172,7 @@ class CrawlRequestService:
 
         Args:
             limit: 조회 개수
-            service_account_id: 서비스 계정 필터
+            service_account_id: 계정 필터
 
         Returns:
             최근 요청 목록
@@ -192,7 +192,7 @@ class CrawlRequestService:
         """활성 요청이 있는지 확인.
 
         Args:
-            service_account_id: 서비스 계정 ID
+            service_account_id: 계정 ID
 
         Returns:
             대기 중 또는 처리 중인 요청이 있으면 True
@@ -217,7 +217,7 @@ class CrawlRequestService:
 
         Args:
             post_id: 대상 게시물 ID (instagram_posts.id)
-            service_account_id: 서비스 계정 ID
+            service_account_id: 계정 ID
             requested_by: 요청 출처
 
         Returns:
@@ -262,7 +262,7 @@ class CrawlRequestService:
 
         Args:
             url: Instagram 게시물 URL
-            service_account_id: 서비스 계정 ID
+            service_account_id: 계정 ID
             requested_by: 요청 출처
 
         Returns:
@@ -313,7 +313,7 @@ class CrawlRequestService:
         Args:
             url: Instagram URL
             url_type: URL 타입 (account_profile, account_reels, hashtag 등)
-            service_account_id: 서비스 계정 ID
+            service_account_id: 계정 ID
             max_posts: 최대 수집 게시물 수
             scroll_count: 스크롤 횟수
             requested_by: 요청 출처
@@ -437,7 +437,7 @@ class CrawlRequestService:
             requested_by: 요청 출처 필터 ('manual', 'scheduler', 'retry')
             status: 상태 필터 ('pending', 'processing', 'completed', 'failed')
             period: 기간 필터 ('today', 'week', 'month')
-            service_account_id: 서비스 계정 필터
+            service_account_id: 계정 필터
 
         Returns:
             (요청 목록, 전체 개수) 튜플

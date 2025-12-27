@@ -56,7 +56,7 @@ class PostService:
             post_type: 게시물 유형 (NORMAL/SPONSORED/SUGGESTED)
             likes: 좋아요 수
             comments: 댓글 수
-            service_account_id: 수집 서비스 계정 ID
+            service_account_id: 수집 계정 ID
             crawl_run_id: 크롤링 실행 ID
 
         Returns:
