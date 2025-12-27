@@ -84,6 +84,7 @@ def verify_token(token: str) -> Optional[TokenData]:
 
 
 async def get_current_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> Optional[UserInfo]:
     """
@@ -92,20 +93,31 @@ async def get_current_user(
     인증되지 않은 경우 None 반환 (에러 발생 안 함)
     공개 API에서 사용
 
+    인증 우선순위:
+    1. Authorization 헤더 (Bearer 토큰)
+    2. Cookie (auth_token) - PWA Share Target 등에서 localStorage 접근 불가 시
+
     Returns:
         UserInfo 또는 None
     """
-    if credentials is None:
-        return None
+    # 1. Authorization 헤더 우선
+    if credentials is not None:
+        token_data = verify_token(credentials.credentials)
+        if token_data is not None:
+            return UserInfo(email=token_data.email, is_admin=token_data.is_admin)
 
-    token_data = verify_token(credentials.credentials)
-    if token_data is None:
-        return None
+    # 2. Cookie fallback (PWA Share Target 등에서 사용)
+    cookie_token = request.cookies.get("auth_token")
+    if cookie_token:
+        token_data = verify_token(cookie_token)
+        if token_data is not None:
+            return UserInfo(email=token_data.email, is_admin=token_data.is_admin)
 
-    return UserInfo(email=token_data.email, is_admin=token_data.is_admin)
+    return None
 
 
 async def get_current_user_required(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> UserInfo:
     """
@@ -113,28 +125,35 @@ async def get_current_user_required(
 
     인증되지 않은 경우 401 에러 발생
 
+    인증 우선순위:
+    1. Authorization 헤더 (Bearer 토큰)
+    2. Cookie (auth_token) - PWA Share Target 등에서 localStorage 접근 불가 시
+
     Returns:
         UserInfo
 
     Raises:
         HTTPException: 인증 실패 시 401
     """
-    if credentials is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="인증이 필요합니다",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    # 1. Authorization 헤더 우선
+    if credentials is not None:
+        token_data = verify_token(credentials.credentials)
+        if token_data is not None:
+            return UserInfo(email=token_data.email, is_admin=token_data.is_admin)
 
-    token_data = verify_token(credentials.credentials)
-    if token_data is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="유효하지 않은 토큰입니다",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    # 2. Cookie fallback (PWA Share Target 등에서 사용)
+    cookie_token = request.cookies.get("auth_token")
+    if cookie_token:
+        token_data = verify_token(cookie_token)
+        if token_data is not None:
+            return UserInfo(email=token_data.email, is_admin=token_data.is_admin)
 
-    return UserInfo(email=token_data.email, is_admin=token_data.is_admin)
+    # 둘 다 없거나 유효하지 않음
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="인증이 필요합니다",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 def is_localhost_request(request: Request) -> bool:
@@ -184,6 +203,10 @@ async def require_admin(
     localhost 요청의 경우 인증 없이 관리자로 처리
     외부 요청의 경우 JWT 토큰 검증 필요
 
+    인증 우선순위:
+    1. Authorization 헤더 (Bearer 토큰)
+    2. Cookie (auth_token) - PWA Share Target 등에서 localStorage 접근 불가 시
+
     Returns:
         UserInfo (관리자인 경우)
 
@@ -194,24 +217,30 @@ async def require_admin(
     if is_localhost_request(request):
         return UserInfo(email="localhost@admin", is_admin=True)
 
-    # 외부 요청: 인증 필수
-    if credentials is None:
+    # 1. Authorization 헤더 우선
+    user: Optional[UserInfo] = None
+    if credentials is not None:
+        token_data = verify_token(credentials.credentials)
+        if token_data is not None:
+            user = UserInfo(email=token_data.email, is_admin=token_data.is_admin)
+
+    # 2. Cookie fallback (PWA Share Target 등에서 사용)
+    if user is None:
+        cookie_token = request.cookies.get("auth_token")
+        if cookie_token:
+            token_data = verify_token(cookie_token)
+            if token_data is not None:
+                user = UserInfo(email=token_data.email, is_admin=token_data.is_admin)
+
+    # 인증 실패
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="인증이 필요합니다",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    token_data = verify_token(credentials.credentials)
-    if token_data is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="유효하지 않은 토큰입니다",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    user = UserInfo(email=token_data.email, is_admin=token_data.is_admin)
-
+    # 관리자 권한 확인
     if not user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
