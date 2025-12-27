@@ -36,6 +36,7 @@ if (-not (Test-Path $PidDir)) {
 # PID files for browser workers
 $WatchdogPidFile = Join-Path $PidDir "watchdog$PidSuffix.pid"
 $CrawlWatchdogPidFile = Join-Path $PidDir "crawl_watchdog$PidSuffix.pid"
+$ClaudeWatchdogPidFile = Join-Path $PidDir "claude_watchdog$PidSuffix.pid"
 
 function Write-Log {
     param([string]$Message, [string]$Level = "INFO")
@@ -109,6 +110,23 @@ function Start-BrowserWorkers {
         $started++
     }
 
+    # Start Claude Worker Watchdog
+    if (Test-ProcessRunning $ClaudeWatchdogPidFile) {
+        Write-Log "Claude Worker Watchdog already running" "WARN"
+    } else {
+        Write-Log "Starting Claude Worker Watchdog..."
+        # Pass APP_MODE via command to ensure it's set in child process
+        $claudeWatchdogCmd = "`$env:APP_MODE='development'; & '$ScriptDir\claude-watchdog.ps1'"
+        $claudeWatchdogProcess = Start-Process -FilePath "powershell.exe" `
+            -ArgumentList "-ExecutionPolicy", "Bypass", "-Command", $claudeWatchdogCmd `
+            -WorkingDirectory $ProjectRoot `
+            -WindowStyle Hidden `
+            -PassThru
+        $claudeWatchdogProcess.Id | Out-File $ClaudeWatchdogPidFile -Encoding ascii
+        Write-Log "Claude Worker Watchdog started (PID: $($claudeWatchdogProcess.Id))" "OK"
+        $started++
+    }
+
     if ($started -gt 0) {
         Write-Host ""
         Write-Log "$started browser worker(s) started" "OK"
@@ -157,11 +175,27 @@ function Stop-BrowserWorkers {
         Remove-Item $CrawlWatchdogPidFile -Force -ErrorAction SilentlyContinue
     }
 
+    # Stop Claude Worker Watchdog
+    if (Test-Path $ClaudeWatchdogPidFile) {
+        $savedPid = Get-Content $ClaudeWatchdogPidFile -ErrorAction SilentlyContinue
+        if ($savedPid) {
+            $proc = Get-Process -Id $savedPid -ErrorAction SilentlyContinue
+            if ($proc) {
+                Write-Log "Stopping Claude Worker Watchdog (PID: $savedPid)..."
+                Stop-Process -Id $savedPid -Force -ErrorAction SilentlyContinue
+                Write-Log "Claude Worker Watchdog stopped" "OK"
+                $stopped++
+            }
+        }
+        Remove-Item $ClaudeWatchdogPidFile -Force -ErrorAction SilentlyContinue
+    }
+
     # Also stop the actual worker processes (they may linger after watchdog stops)
     $WorkerPidFile = Join-Path $PidDir "worker$PidSuffix.pid"
     $CrawlWorkerPidFile = Join-Path $PidDir "crawl_worker$PidSuffix.pid"
+    $ClaudeWorkerPidFile = Join-Path $PidDir "llm_worker$PidSuffix.pid"
 
-    foreach ($pidFile in @($WorkerPidFile, $CrawlWorkerPidFile)) {
+    foreach ($pidFile in @($WorkerPidFile, $CrawlWorkerPidFile, $ClaudeWorkerPidFile)) {
         if (Test-Path $pidFile) {
             $savedPid = Get-Content $pidFile -ErrorAction SilentlyContinue
             if ($savedPid) {
@@ -209,9 +243,19 @@ function Show-Status {
         Write-Host "  [-] Not running" -ForegroundColor Yellow
     }
 
+    # Claude Worker Watchdog
+    Write-Host "Claude Worker Watchdog:" -ForegroundColor White
+    if (Test-ProcessRunning $ClaudeWatchdogPidFile) {
+        $savedPid = Get-Content $ClaudeWatchdogPidFile
+        Write-Host "  [+] Running (PID: $savedPid)" -ForegroundColor Green
+    } else {
+        Write-Host "  [-] Not running" -ForegroundColor Yellow
+    }
+
     # Actual worker processes
     $WorkerPidFile = Join-Path $PidDir "worker$PidSuffix.pid"
     $CrawlWorkerPidFile = Join-Path $PidDir "crawl_worker$PidSuffix.pid"
+    $ClaudeWorkerPidFile = Join-Path $PidDir "llm_worker$PidSuffix.pid"
 
     Write-Host ""
     Write-Host "Worker Processes:" -ForegroundColor White
@@ -227,6 +271,14 @@ function Show-Status {
     Write-Host "  Crawl Worker:" -ForegroundColor Gray
     if (Test-ProcessRunning $CrawlWorkerPidFile) {
         $savedPid = Get-Content $CrawlWorkerPidFile
+        Write-Host "    [+] Running (PID: $savedPid)" -ForegroundColor Green
+    } else {
+        Write-Host "    [-] Not running" -ForegroundColor Yellow
+    }
+
+    Write-Host "  Claude Worker:" -ForegroundColor Gray
+    if (Test-ProcessRunning $ClaudeWorkerPidFile) {
+        $savedPid = Get-Content $ClaudeWorkerPidFile
         Write-Host "    [+] Running (PID: $savedPid)" -ForegroundColor Green
     } else {
         Write-Host "    [-] Not running" -ForegroundColor Yellow
