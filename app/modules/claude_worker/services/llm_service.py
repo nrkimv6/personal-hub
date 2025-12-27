@@ -246,9 +246,15 @@ class LLMService:
                 os.unlink(prompt_file)
 
             if result.returncode != 0:
+                # stderr가 비어있을 수 있으므로 stdout도 확인
+                error_details = result.stderr.strip() if result.stderr else ""
+                if not error_details and result.stdout:
+                    error_details = result.stdout.strip()[:500]  # stdout에서 에러 메시지 추출
+                if not error_details:
+                    error_details = f"returncode={result.returncode}"
                 return {
                     "success": False,
-                    "error": f"Claude CLI error: {result.stderr or 'Unknown error'}",
+                    "error": f"Claude CLI error: {error_details}",
                 }
 
             raw_response = result.stdout.strip()
