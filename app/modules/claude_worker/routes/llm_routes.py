@@ -155,6 +155,27 @@ def create_request(
     return _to_response(request)
 
 
+@router.get("/requests/grouped-by-caller")
+def list_requests_grouped_by_caller(
+    caller_type: Optional[str] = Query(None, description="호출자 타입 필터"),
+    only_without_success: bool = Query(False, description="성공한 적 없는 caller만 조회"),
+    page: int = Query(1, ge=1, description="페이지 번호"),
+    page_size: int = Query(50, ge=1, le=100, description="페이지 크기"),
+    db: Session = Depends(get_db),
+):
+    """caller_id별로 그룹화된 요청 목록 조회.
+
+    각 caller별로 총 요청 수, 성공/실패 수, 성공 여부 등을 반환합니다.
+    """
+    service = LLMService(db)
+    return service.list_requests_grouped_by_caller(
+        caller_type=caller_type,
+        only_without_success=only_without_success,
+        page=page,
+        page_size=page_size,
+    )
+
+
 @router.get("/requests/{request_id}", response_model=LLMRequestResponse)
 def get_request_by_id(
     request_id: int,
@@ -288,27 +309,6 @@ def get_caller_stats(db: Session = Depends(get_db)):
     """호출자별 통계."""
     service = LLMService(db)
     return service.get_caller_stats()
-
-
-@router.get("/requests/grouped-by-caller")
-def list_requests_grouped_by_caller(
-    caller_type: Optional[str] = Query(None, description="호출자 타입 필터"),
-    only_without_success: bool = Query(False, description="성공한 적 없는 caller만 조회"),
-    page: int = Query(1, ge=1, description="페이지 번호"),
-    page_size: int = Query(50, ge=1, le=100, description="페이지 크기"),
-    db: Session = Depends(get_db),
-):
-    """caller_id별로 그룹화된 요청 목록 조회.
-
-    각 caller별로 총 요청 수, 성공/실패 수, 성공 여부 등을 반환합니다.
-    """
-    service = LLMService(db)
-    return service.list_requests_grouped_by_caller(
-        caller_type=caller_type,
-        only_without_success=only_without_success,
-        page=page,
-        page_size=page_size,
-    )
 
 
 class RetryFailedCallersRequest(BaseModel):
