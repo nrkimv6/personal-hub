@@ -20,7 +20,7 @@ class BizItem(Base):
     business_id = Column(Integer, ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False)
     # DEPRECATED: account_id moved to MonitorSchedule (2025-12-03)
     # 컬럼은 SQLite 제한으로 유지하되 사용하지 않음
-    service_account_id = Column(Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True)
+    service_account_id = Column(Integer, ForeignKey("service_accounts.id", ondelete="SET NULL"), nullable=True)
 
     # 식별자
     biz_item_id = Column(String, nullable=False)  # 네이버 biz_item_id
@@ -61,7 +61,7 @@ class BizItem(Base):
 
     # 관계
     business = relationship("Business", back_populates="items")
-    account = relationship("Account", back_populates="biz_items")
+    service_account = relationship("ServiceAccount", back_populates="biz_items")
     schedules = relationship("MonitorSchedule", back_populates="biz_item", cascade="all, delete-orphan")
     recurring_rules = relationship("RecurringRule", back_populates="biz_item", cascade="all, delete-orphan")
 

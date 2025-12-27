@@ -14,7 +14,7 @@ class InstagramCrawlRun(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
 
     # 실행 정보
-    service_account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False)
+    service_account_id = Column(Integer, ForeignKey("service_accounts.id", ondelete="CASCADE"), nullable=False)
     started_at = Column(DateTime, default=datetime.now, index=True)
     finished_at = Column(DateTime)
 

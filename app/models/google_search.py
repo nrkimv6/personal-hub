@@ -32,7 +32,7 @@ class GoogleSavedSearch(Base):
     max_pages = Column(Integer, default=1)
 
     # 옵션
-    service_account_id = Column(Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True)
+    service_account_id = Column(Integer, ForeignKey("service_accounts.id", ondelete="SET NULL"), nullable=True)
     is_favorite = Column(Boolean, default=False)
 
     # 마지막 실행 정보
@@ -45,7 +45,7 @@ class GoogleSavedSearch(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     # 관계
-    account = relationship("Account", backref="google_saved_searches")
+    service_account = relationship("ServiceAccount", backref="google_saved_searches")
 
     def __repr__(self) -> str:
         return f"<GoogleSavedSearch(id={self.id}, name='{self.name}', query='{self.query}')>"

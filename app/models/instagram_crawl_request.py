@@ -14,7 +14,7 @@ class InstagramCrawlRequest(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
 
     # 요청 정보
-    service_account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False)
+    service_account_id = Column(Integer, ForeignKey("service_accounts.id", ondelete="CASCADE"), nullable=False)
     requested_at = Column(DateTime, default=datetime.now, index=True)
     requested_by = Column(String(20), default="manual")  # 'manual', 'scheduler', 'retry'
 

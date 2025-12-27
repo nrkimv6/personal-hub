@@ -1065,7 +1065,7 @@ def _config_to_schema(config) -> ScheduleConfigSchema:
         max_retries=getattr(config, 'max_retries', 3) or 3,
         retry_interval_minutes=getattr(config, 'retry_interval_minutes', 5) or 5,
         service_account_id=getattr(config, 'service_account_id', None),
-        account_name=config.account.name if getattr(config, 'account', None) else None,
+        account_name=config.service_account.profile.name if getattr(config, 'service_account', None) else None,
         updated_at=config.updated_at,
     )
 

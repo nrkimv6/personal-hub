@@ -63,7 +63,7 @@ class UniversalCrawlRequest(Base):
     url_type = Column(String(50), nullable=False, default="other", index=True)
 
     # 브라우저 프로필 (Playwright 기반 크롤링용)
-    service_account_id = Column(Integer, ForeignKey("accounts.id", ondelete="SET NULL"))
+    service_account_id = Column(Integer, ForeignKey("service_accounts.id", ondelete="SET NULL"))
 
     # 요청 상태
     status = Column(String(20), nullable=False, default="pending", index=True)
@@ -87,7 +87,7 @@ class UniversalCrawlRequest(Base):
     extra_metadata = Column("metadata", Text)  # JSON, 컬럼명은 metadata 유지
 
     # Relationships
-    account = relationship("Account", foreign_keys=[service_account_id])
+    service_account = relationship("ServiceAccount", foreign_keys=[service_account_id])
     crawled_page = relationship("CrawledPage", back_populates="crawl_requests")
 
     def __repr__(self):
