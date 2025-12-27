@@ -10,20 +10,24 @@ import os
 import re
 import sqlite3
 import shutil
+import io
 
-# Windows에서 UTF-8 인코딩 강제 설정
+# Windows에서 UTF-8 인코딩 강제 설정 (가장 먼저 실행)
 if sys.platform == 'win32':
+    # 환경 변수 설정 (다른 프로세스에도 영향)
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+    os.environ['PYTHONUTF8'] = '1'
+
     # stdout/stderr를 UTF-8로 설정
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     if hasattr(sys.stderr, 'reconfigure'):
         sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
-    # 환경 변수 설정
-    os.environ['PYTHONIOENCODING'] = 'utf-8'
-
 
 import pytest
+
+
 from pathlib import Path
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
