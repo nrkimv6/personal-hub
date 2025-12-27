@@ -14,7 +14,7 @@ class InstagramCrawlRequest(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
 
     # 요청 정보
-    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False)
+    service_account_id = Column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False)
     requested_at = Column(DateTime, default=datetime.now, index=True)
     requested_by = Column(String(20), default="manual")  # 'manual', 'scheduler', 'retry'
 
@@ -39,4 +39,4 @@ class InstagramCrawlRequest(Base):
     target_post = relationship("InstagramPost", foreign_keys=[target_post_id])
 
     def __repr__(self):
-        return f"<InstagramCrawlRequest(id={self.id}, account_id={self.account_id}, type={self.request_type}, status={self.status})>"
+        return f"<InstagramCrawlRequest(id={self.id}, service_account_id={self.service_account_id}, type={self.request_type}, status={self.status})>"

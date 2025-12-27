@@ -63,7 +63,7 @@ def extract_instagram_urls(file_path: Path) -> list[dict]:
     return results
 
 
-def import_urls(urls: list[dict], account_id: int, dry_run: bool = False):
+def import_urls(urls: list[dict], service_account_id: int, dry_run: bool = False):
     """URL들을 크롤링 요청 테이블에 삽입"""
 
     # DB 연결
@@ -102,7 +102,7 @@ def import_urls(urls: list[dict], account_id: int, dry_run: bool = False):
         requests = []
         for u in new_urls:
             req = InstagramCrawlRequest(
-                account_id=account_id,
+                service_account_id=service_account_id,
                 request_type="single_post_url",
                 target_url=u['url'],
                 url_type=u['url_type'],
@@ -153,7 +153,7 @@ def main():
         print(f"  - {url_type}: {count}개")
 
     # 삽입
-    import_urls(urls, args.account_id, dry_run=args.dry_run)
+    import_urls(urls, args.service_account_id, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

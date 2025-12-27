@@ -49,7 +49,7 @@ def sample_crawl_requests():
     for i in range(5):
         req = MagicMock()
         req.id = i + 1
-        req.account_id = 1
+        req.service_account_id = 1
         req.requested_at = now - timedelta(hours=i)
         req.requested_by = "scheduler" if i % 2 == 0 else "manual"
         req.request_type = "feed" if i < 3 else "single_post_url"
@@ -226,14 +226,14 @@ class TestGetRequestsPaginatedFilter:
         mock_db.query.return_value.filter.assert_called()
 
     def test_filter_by_account_id(self, mock_db):
-        """account_id 필터 적용"""
+        """service_account_id 필터 적용"""
         from app.modules.instagram.services.request_service import CrawlRequestService
 
         mock_db.query.return_value.filter.return_value.count.return_value = 25
         mock_db.query.return_value.filter.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = []
 
         service = CrawlRequestService(mock_db)
-        service.get_requests_paginated(account_id=1)
+        service.get_requests_paginated(service_account_id=1)
 
         mock_db.query.return_value.filter.assert_called()
 
@@ -262,7 +262,7 @@ class TestCrawlHistorySchemas:
 
         fields = CrawlHistoryItem.model_fields
         assert 'id' in fields
-        assert 'account_id' in fields
+        assert 'service_account_id' in fields
         assert 'requested_at' in fields
         assert 'requested_by' in fields
         assert 'request_type' in fields
@@ -309,7 +309,7 @@ class TestCrawlHistorySchemas:
         now = datetime.now()
         item = CrawlHistoryItem(
             id=1,
-            account_id=1,
+            service_account_id=1,
             requested_at=now,
             requested_by="manual",
             request_type="feed",
@@ -333,7 +333,7 @@ class TestCrawlHistorySchemas:
         now = datetime.now()
         item = CrawlHistoryItem(
             id=2,
-            account_id=1,
+            service_account_id=1,
             requested_at=now,
             requested_by="manual",
             request_type="single_post_url",
@@ -353,7 +353,7 @@ class TestCrawlHistorySchemas:
         items = [
             CrawlHistoryItem(
                 id=i,
-                account_id=1,
+                service_account_id=1,
                 requested_at=now,
                 requested_by="manual",
                 request_type="feed",

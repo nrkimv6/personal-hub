@@ -157,7 +157,7 @@ class ScheduleService:
             "custom_interval": schedule.custom_interval,
             "booking_count": schedule.booking_count,
             "last_booking_time": schedule.last_booking_time,
-            "account_id": schedule.account_id,
+            "service_account_id": schedule.service_account_id,
             "account_name": schedule.account.name if schedule.account else None,
             "auto_booking_enabled": getattr(schedule, 'auto_booking_enabled', False),
             "monitoring_mode": getattr(schedule, 'monitoring_mode', 'legacy'),
@@ -207,7 +207,7 @@ class ScheduleService:
             auto_booking_enabled=data.auto_booking_enabled,
             interval=data.interval,
             custom_interval=data.custom_interval,
-            account_id=data.account_id,
+            service_account_id=data.service_account_id,
             monitoring_mode=data.monitoring_mode,
         )
         db.add(schedule)
@@ -237,7 +237,7 @@ class ScheduleService:
                 is_enabled=data.is_enabled,
                 interval=data.interval,
                 custom_interval=data.custom_interval,
-                account_id=data.account_id,
+                service_account_id=data.service_account_id,
                 monitoring_mode=data.monitoring_mode,
             )
             db.add(schedule)

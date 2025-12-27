@@ -17,7 +17,7 @@
 		query: string;
 		date_filter?: string;
 		max_pages: number;
-		account_id?: number;
+		service_account_id?: number;
 		is_favorite: boolean;
 		last_search_id?: string;
 		last_run_at?: string;

@@ -379,7 +379,7 @@ class GoogleSearchService:
         query: str,
         date_filter: Optional[str] = None,
         max_pages: int = 1,
-        account_id: Optional[int] = None,
+        service_account_id: Optional[int] = None,
     ) -> CrawlResult:
         """검색 수행.
 
@@ -387,7 +387,7 @@ class GoogleSearchService:
             query: 검색 키워드
             date_filter: 날짜 필터 (1h, 24h, 1w, 1m, 1y)
             max_pages: 수집할 페이지 수 (최대 10)
-            account_id: 브라우저 프로필 ID
+            service_account_id: 브라우저 프로필 ID
 
         Returns:
             CrawlResult: 검색 결과
@@ -396,7 +396,7 @@ class GoogleSearchService:
         max_pages = min(max(1, max_pages), 10)
 
         # 브라우저 컨텍스트 획득 (account_id가 None이면 기본 계정 사용)
-        context = await self.context_manager.get_or_create_context(account_id)
+        context = await self.context_manager.get_or_create_context(service_account_id)
         page = await context.new_page()
 
         try:
@@ -433,7 +433,7 @@ class GoogleSearchService:
             query=saved.query,
             date_filter=saved.date_filter,
             max_pages=saved.max_pages,
-            account_id=saved.account_id,
+            service_account_id=saved.service_account_id,
         )
 
         # 저장된 검색 조건 업데이트

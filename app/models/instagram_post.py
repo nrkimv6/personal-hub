@@ -37,7 +37,7 @@ class InstagramPost(Base):
     music_artist = Column(Text)  # 음악 아티스트
 
     # 수집 정보
-    account_id = Column(Integer, ForeignKey("accounts.id", ondelete="SET NULL"))
+    service_account_id = Column(Integer, ForeignKey("accounts.id", ondelete="SET NULL"))
     crawl_run_id = Column(Integer, ForeignKey("instagram_crawl_runs.id", ondelete="SET NULL"))
     collected_at = Column(DateTime, default=datetime.now, index=True)
 

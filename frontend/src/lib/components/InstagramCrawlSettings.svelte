@@ -55,7 +55,7 @@
 			editTimeWindows = [...configData.time_windows];
 			editMaxPosts = configData.max_posts;
 			editScrollCount = configData.scroll_count;
-			editAccountId = configData.account_id;
+			editAccountId = configData.service_account_id;
 			// 고급 설정
 			editMinIntervalHours = configData.min_interval_hours ?? 2;
 			editDuplicateStopCount = configData.duplicate_stop_count ?? 5;
@@ -84,7 +84,7 @@
 				duplicate_stop_count: editDuplicateStopCount,
 				max_retries: editMaxRetries,
 				retry_interval_minutes: editRetryIntervalMinutes,
-				account_id: editAccountId
+				service_account_id: editAccountId
 			});
 			successMessage = '설정이 저장되었습니다';
 			await fetchData();

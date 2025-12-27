@@ -55,22 +55,22 @@ class TabPoolManager:
         # 계정별 브라우저 복구 진행 중 플래그 (race condition 방지)
         self._recovery_in_progress: Dict[int, bool] = {}
 
-    async def get_tab(self, target_id: int, account_id: Optional[int] = None) -> Page:
+    async def get_tab(self, target_id: int, service_account_id: Optional[int] = None) -> Page:
         """계정별 탭 풀에서 사용 가능한 탭을 가져오거나 새로 생성합니다.
 
         Args:
             target_id: 모니터링 대상 (스케줄) ID
-            account_id: 계정 ID (None이면 기본 계정 사용)
+            service_account_id: 계정 ID (None이면 기본 계정 사용)
 
         Returns:
             Page: 해당 계정의 브라우저 컨텍스트에서 생성된 탭
         """
         # account_id가 None이면 기본 계정(id=1) 사용
-        if account_id is None:
-            account_id = 1
+        if service_account_id is None:
+            service_account_id = 1
 
         # 해당 계정의 브라우저 컨텍스트 가져오기 또는 생성
-        context = await self.context_manager.get_or_create_context(account_id)
+        context = await self.context_manager.get_or_create_context(service_account_id)
 
         # 컨텍스트 유효성 확인
         context_valid = False
@@ -83,7 +83,7 @@ class TabPoolManager:
                     _ = pages[0].url
                     context_valid = True
                 except Exception as e:
-                    logger.warning(f"페이지 접근 실패 (account_id={account_id}): {e}")
+                    logger.warning(f"페이지 접근 실패 (service_account_id={service_account_id}): {e}")
             else:
                 # 페이지가 없으면 브라우저가 살아있는지 직접 확인
                 try:
@@ -91,34 +91,34 @@ class TabPoolManager:
                     if browser and browser.is_connected():
                         context_valid = True
                     else:
-                        logger.warning(f"브라우저 연결 끊김 (account_id={account_id})")
+                        logger.warning(f"브라우저 연결 끊김 (service_account_id={service_account_id})")
                 except Exception as e:
-                    logger.warning(f"브라우저 연결 상태 확인 실패 (account_id={account_id}): {e}")
+                    logger.warning(f"브라우저 연결 상태 확인 실패 (service_account_id={service_account_id}): {e}")
         except Exception as e:
-            logger.warning(f"브라우저 컨텍스트가 닫힘 (account_id={account_id}): {str(e)}")
+            logger.warning(f"브라우저 컨텍스트가 닫힘 (service_account_id={service_account_id}): {str(e)}")
 
         if not context_valid:
-            logger.warning(f"브라우저 컨텍스트 재생성 필요 (account_id={account_id})")
+            logger.warning(f"브라우저 컨텍스트 재생성 필요 (service_account_id={service_account_id})")
 
             # handle_browser_closed_error를 통해 Lock 획득 후 정리 및 재생성 (race condition 방지)
-            cleanup_performed = await self.handle_browser_closed_error(account_id, recreate=True)
+            cleanup_performed = await self.handle_browser_closed_error(service_account_id, recreate=True)
 
             if cleanup_performed:
-                logger.info(f"브라우저 컨텍스트 재생성 완료 (account_id={account_id})")
+                logger.info(f"브라우저 컨텍스트 재생성 완료 (service_account_id={service_account_id})")
             else:
                 # 다른 태스크가 복구 중이면, get_or_create_context로 대기 후 기존 컨텍스트 사용
-                logger.info(f"다른 태스크에서 복구 중, 컨텍스트 대기 (account_id={account_id})")
+                logger.info(f"다른 태스크에서 복구 중, 컨텍스트 대기 (service_account_id={service_account_id})")
 
             # 재생성된 컨텍스트 가져오기
-            context = await self.context_manager.get_or_create_context(account_id)
+            context = await self.context_manager.get_or_create_context(service_account_id)
 
         # 계정별 탭 풀 초기화 및 초기 빈 탭 등록
-        if account_id not in self.tab_pools:
-            self.tab_pools[account_id] = {}
+        if service_account_id not in self.tab_pools:
+            self.tab_pools[service_account_id] = {}
             # 새 컨텍스트의 초기 빈 탭 등록 (launch_persistent_context로 생성된 탭 재사용)
-            await self.register_initial_tabs(account_id, context)
+            await self.register_initial_tabs(service_account_id, context)
 
-        account_tab_pool = self.tab_pools[account_id]
+        account_tab_pool = self.tab_pools[service_account_id]
 
         # 고유 요청 ID 생성
         request_id = f"req_{int(time.time())}_{random.randint(1000, 9999)}"
@@ -137,8 +137,8 @@ class TabPoolManager:
         while True:
             # 시간 초과 확인
             if time.time() - start_time > max_wait_time:
-                logger.warning(f"대상 {target_id}의 탭 요청이 {max_wait_time}초를 초과하여 시간 초과 (account_id={account_id})")
-                raise TimeoutError(f"탭 요청 시간 초과 (대상 ID: {target_id}, 계정 ID: {account_id}, 요청 ID: {request_id})")
+                logger.warning(f"대상 {target_id}의 탭 요청이 {max_wait_time}초를 초과하여 시간 초과 (service_account_id={service_account_id})")
+                raise TimeoutError(f"탭 요청 시간 초과 (대상 ID: {target_id}, 계정 ID: {service_account_id}, 요청 ID: {request_id})")
 
             # 해당 계정의 사용 가능한 탭 찾기 (사용 중이 아니고, 사용 횟수 미달)
             available_tabs = [
@@ -157,9 +157,9 @@ class TabPoolManager:
 
                 # 탭 유효성 검사 - 닫혔으면 풀에서 제거하고 다시 시도
                 if await self._is_tab_closed(tab):
-                    logger.warning(f"탭 {tab_id}이 닫혀있어 풀에서 제거합니다 (account_id={account_id})")
+                    logger.warning(f"탭 {tab_id}이 닫혀있어 풀에서 제거합니다 (service_account_id={service_account_id})")
                     self.tab_in_use[tab_id] = False  # 잠금 해제
-                    await self._remove_tab_from_pool(tab_id, account_id)
+                    await self._remove_tab_from_pool(tab_id, service_account_id)
                     continue
 
                 tabs_in_use = sum(1 for in_use in self.tab_in_use.values() if in_use)
@@ -179,16 +179,16 @@ class TabPoolManager:
                 })
 
                 # 고유 탭 ID 생성 (계정 ID 포함)
-                tab_id = f"{account_id}_{random.randint(1000, 9999)}"
+                tab_id = f"{service_account_id}_{random.randint(1000, 9999)}"
                 while tab_id in account_tab_pool or tab_id in self.tab_pool:
-                    tab_id = f"{account_id}_{random.randint(1000, 9999)}"
+                    tab_id = f"{service_account_id}_{random.randint(1000, 9999)}"
 
                 account_tab_pool[tab_id] = tab
                 self.tab_pool[tab_id] = tab  # 하위 호환성
                 self.tab_last_used[tab_id] = time.time()
                 self.tab_in_use[tab_id] = True  # ★ 새 탭도 즉시 잠금
                 self.tab_use_count[tab_id] = 0
-                self.tab_account[tab_id] = account_id
+                self.tab_account[tab_id] = service_account_id
                 self.total_active_tabs = total_tabs + 1
 
                 tabs_in_use = sum(1 for in_use in self.tab_in_use.values() if in_use)
@@ -198,7 +198,7 @@ class TabPoolManager:
                 # 모든 탭이 사용 중, 대기
                 wait_count += 1
                 if wait_count == 1:
-                    logger.info(f"대상 {target_id}의 탭 요청 {request_id} 대기 중 (계정 {account_id}, 전체 탭: {total_tabs}/{self.TOTAL_MAX_TABS}, 모두 사용 중)")
+                    logger.info(f"대상 {target_id}의 탭 요청 {request_id} 대기 중 (계정 {service_account_id}, 전체 탭: {total_tabs}/{self.TOTAL_MAX_TABS}, 모두 사용 중)")
 
                 # 대기 이벤트 생성
                 wait_event = asyncio.Event()
@@ -221,9 +221,9 @@ class TabPoolManager:
         # 탭 ID 및 계정 ID 저장 (release_tab에서 사용)
         tab._tab_id = tab_id
         tab._target_id = target_id
-        tab._account_id = account_id
+        tab._account_id = service_account_id
 
-        logger.debug(f"탭 {tab_id} -> 대상 {target_id} 할당 (계정 {account_id}, 사용 횟수: {self.tab_use_count[tab_id]}/{self.MAX_USES_PER_TAB})")
+        logger.debug(f"탭 {tab_id} -> 대상 {target_id} 할당 (계정 {service_account_id}, 사용 횟수: {self.tab_use_count[tab_id]}/{self.MAX_USES_PER_TAB})")
         return tab
 
     async def release_tab(self, tab: Page):
@@ -287,20 +287,20 @@ class TabPoolManager:
 
         # 제거 대상 탭 정리
         for tab_id in tabs_to_remove:
-            account_id = self.tab_account.get(tab_id)
-            if account_id is not None and account_id in self.tab_pools:
-                if tab_id in self.tab_pools[account_id]:
+            service_account_id = self.tab_account.get(tab_id)
+            if service_account_id is not None and service_account_id in self.tab_pools:
+                if tab_id in self.tab_pools[service_account_id]:
                     try:
-                        logger.debug(f"탭 {tab_id} 정리 시작 (계정 {account_id})")
-                        await self.tab_pools[account_id][tab_id].close()
-                        del self.tab_pools[account_id][tab_id]
+                        logger.debug(f"탭 {tab_id} 정리 시작 (계정 {service_account_id})")
+                        await self.tab_pools[service_account_id][tab_id].close()
+                        del self.tab_pools[service_account_id][tab_id]
                     except Exception as e:
                         logger.warning(f"탭 정리 중 오류 발생: {str(e)}")
 
             # 하위 호환성을 위한 전역 탭 풀에서도 제거
             if tab_id in self.tab_pool:
                 try:
-                    if account_id is None:
+                    if service_account_id is None:
                         await self.tab_pool[tab_id].close()
                     del self.tab_pool[tab_id]
                 except Exception as e:
@@ -332,7 +332,7 @@ class TabPoolManager:
         orphan_count = 0
         try:
             # 모든 브라우저 컨텍스트의 페이지 확인
-            for account_id, context in list(self.context_manager.browser_contexts.items()):
+            for service_account_id, context in list(self.context_manager.browser_contexts.items()):
                 try:
                     pages = context.pages
                 except Exception:
@@ -341,8 +341,8 @@ class TabPoolManager:
 
                 # 탭 풀에 등록된 페이지 목록
                 registered_pages = set()
-                if account_id in self.tab_pools:
-                    registered_pages = set(self.tab_pools[account_id].values())
+                if service_account_id in self.tab_pools:
+                    registered_pages = set(self.tab_pools[service_account_id].values())
 
                 # 컨텍스트의 모든 페이지 확인
                 for page in pages:
@@ -363,7 +363,7 @@ class TabPoolManager:
                         if page_url == "about:blank" or total_tabs > self.TOTAL_MAX_TABS:
                             await page.close()
                             orphan_count += 1
-                            logger.info(f"고아 탭 정리: account_id={account_id}, url={page_url}")
+                            logger.info(f"고아 탭 정리: service_account_id={service_account_id}, url={page_url}")
                     except Exception as e:
                         logger.debug(f"고아 탭 정리 중 오류 (무시): {e}")
 
@@ -385,12 +385,12 @@ class TabPoolManager:
         except Exception:
             return True
 
-    async def _remove_tab_from_pool(self, tab_id: str, account_id: int):
+    async def _remove_tab_from_pool(self, tab_id: str, service_account_id: int):
         """탭 풀에서 탭을 제거합니다."""
         try:
             # 계정별 탭 풀에서 제거
-            if account_id in self.tab_pools and tab_id in self.tab_pools[account_id]:
-                del self.tab_pools[account_id][tab_id]
+            if service_account_id in self.tab_pools and tab_id in self.tab_pools[service_account_id]:
+                del self.tab_pools[service_account_id][tab_id]
 
             # 하위 호환성 탭 풀에서 제거
             self.tab_pool.pop(tab_id, None)
@@ -408,13 +408,13 @@ class TabPoolManager:
         except Exception as e:
             logger.error(f"탭 풀 제거 중 오류: {str(e)}")
 
-    async def register_initial_tabs(self, account_id: int, context: BrowserContext) -> int:
+    async def register_initial_tabs(self, service_account_id: int, context: BrowserContext) -> int:
         """
         브라우저 컨텍스트의 기존 페이지들을 탭 풀에 등록합니다.
         launch_persistent_context로 생성된 초기 빈 탭을 재사용하기 위함.
 
         Args:
-            account_id: 계정 ID
+            service_account_id: 계정 ID
             context: 브라우저 컨텍스트
 
         Returns:
@@ -424,8 +424,8 @@ class TabPoolManager:
         registered_count = 0
 
         # 계정별 탭 풀 초기화
-        if account_id not in self.tab_pools:
-            self.tab_pools[account_id] = {}
+        if service_account_id not in self.tab_pools:
+            self.tab_pools[service_account_id] = {}
 
         for page in pages:
             # 이미 등록된 탭인지 확인
@@ -435,97 +435,97 @@ class TabPoolManager:
             # URL이 about:blank인 경우만 등록 (초기 빈 탭)
             if page.url == "about:blank":
                 # 고유 탭 ID 생성
-                tab_id = f"{account_id}_{random.randint(1000, 9999)}"
-                while tab_id in self.tab_pools[account_id] or tab_id in self.tab_pool:
-                    tab_id = f"{account_id}_{random.randint(1000, 9999)}"
+                tab_id = f"{service_account_id}_{random.randint(1000, 9999)}"
+                while tab_id in self.tab_pools[service_account_id] or tab_id in self.tab_pool:
+                    tab_id = f"{service_account_id}_{random.randint(1000, 9999)}"
 
                 # 풀에 등록
-                self.tab_pools[account_id][tab_id] = page
+                self.tab_pools[service_account_id][tab_id] = page
                 self.tab_pool[tab_id] = page  # 하위 호환성
                 self.tab_last_used[tab_id] = time.time()
                 self.tab_in_use[tab_id] = False
                 self.tab_use_count[tab_id] = 0
-                self.tab_account[tab_id] = account_id
+                self.tab_account[tab_id] = service_account_id
 
                 # 탭에 메타데이터 저장
                 page._tab_id = tab_id
-                page._account_id = account_id
+                page._account_id = service_account_id
 
                 registered_count += 1
-                logger.info(f"초기 빈 탭 등록: {tab_id} (account_id={account_id})")
+                logger.info(f"초기 빈 탭 등록: {tab_id} (service_account_id={service_account_id})")
 
         # 전체 활성 탭 수 업데이트
         self.total_active_tabs = sum(len(pool) for pool in self.tab_pools.values())
 
         if registered_count > 0:
-            logger.info(f"계정 {account_id}의 초기 탭 {registered_count}개 등록 완료 (전체 탭: {self.total_active_tabs}/{self.TOTAL_MAX_TABS})")
+            logger.info(f"계정 {service_account_id}의 초기 탭 {registered_count}개 등록 완료 (전체 탭: {self.total_active_tabs}/{self.TOTAL_MAX_TABS})")
 
         return registered_count
 
-    async def handle_browser_closed_error(self, account_id: int, recreate: bool = False) -> bool:
+    async def handle_browser_closed_error(self, service_account_id: int, recreate: bool = False) -> bool:
         """브라우저가 닫혔을 때 해당 계정의 컨텍스트와 탭을 정리합니다.
 
         Args:
-            account_id: 계정 ID
+            service_account_id: 계정 ID
             recreate: True면 정리 후 즉시 재생성까지 수행
 
         Returns:
             bool: True if cleanup was performed, False if recovery already in progress
         """
         # 이미 복구 진행 중이면 스킵 (race condition 방지)
-        if self._recovery_in_progress.get(account_id, False):
-            logger.info(f"계정 {account_id}의 브라우저 복구가 이미 진행 중입니다. 정리 스킵.")
+        if self._recovery_in_progress.get(service_account_id, False):
+            logger.info(f"계정 {service_account_id}의 브라우저 복구가 이미 진행 중입니다. 정리 스킵.")
             return False
 
         # context_manager의 Lock 획득 (브라우저 생성과 동기화)
-        context_lock = await self.context_manager._get_context_lock(account_id)
+        context_lock = await self.context_manager._get_context_lock(service_account_id)
 
         async with context_lock:
             # Lock 획득 후 다시 확인 (다른 태스크가 이미 처리했을 수 있음)
-            if self._recovery_in_progress.get(account_id, False):
-                logger.info(f"계정 {account_id}의 브라우저 복구가 이미 진행 중입니다. 정리 스킵.")
+            if self._recovery_in_progress.get(service_account_id, False):
+                logger.info(f"계정 {service_account_id}의 브라우저 복구가 이미 진행 중입니다. 정리 스킵.")
                 return False
 
             # 복구 진행 중 플래그 설정
-            self._recovery_in_progress[account_id] = True
+            self._recovery_in_progress[service_account_id] = True
 
             try:
-                logger.warning(f"계정 {account_id}의 브라우저가 닫혔습니다. 컨텍스트 및 탭 정리 중...")
+                logger.warning(f"계정 {service_account_id}의 브라우저가 닫혔습니다. 컨텍스트 및 탭 정리 중...")
 
                 # 해당 계정의 모든 탭 제거
-                if account_id in self.tab_pools:
-                    for tab_id in list(self.tab_pools[account_id].keys()):
-                        await self._remove_tab_from_pool(tab_id, account_id)
+                if service_account_id in self.tab_pools:
+                    for tab_id in list(self.tab_pools[service_account_id].keys()):
+                        await self._remove_tab_from_pool(tab_id, service_account_id)
                     try:
-                        del self.tab_pools[account_id]
+                        del self.tab_pools[service_account_id]
                     except KeyError:
                         pass
 
                 # 브라우저 컨텍스트 제거
-                if account_id in self.context_manager.browser_contexts:
+                if service_account_id in self.context_manager.browser_contexts:
                     try:
-                        del self.context_manager.browser_contexts[account_id]
+                        del self.context_manager.browser_contexts[service_account_id]
                     except KeyError:
                         pass
 
-                logger.info(f"계정 {account_id}의 브라우저 정리 완료.")
+                logger.info(f"계정 {service_account_id}의 브라우저 정리 완료.")
 
                 # recreate=True면 즉시 재생성 (Lock 내에서 수행하여 race condition 방지)
                 if recreate:
-                    logger.info(f"계정 {account_id}의 브라우저 재생성 시작...")
+                    logger.info(f"계정 {service_account_id}의 브라우저 재생성 시작...")
                     try:
                         # _create_browser_context 직접 호출 (Lock은 이미 획득됨)
-                        context = await self.context_manager._create_browser_context(account_id)
-                        self.context_manager.browser_contexts[account_id] = context
-                        logger.info(f"계정 {account_id}의 브라우저 재생성 완료")
+                        context = await self.context_manager._create_browser_context(service_account_id)
+                        self.context_manager.browser_contexts[service_account_id] = context
+                        logger.info(f"계정 {service_account_id}의 브라우저 재생성 완료")
                     except Exception as e:
-                        logger.error(f"계정 {account_id}의 브라우저 재생성 실패: {e}")
+                        logger.error(f"계정 {service_account_id}의 브라우저 재생성 실패: {e}")
                         raise
 
                 return True
             finally:
                 # 복구 진행 중 플래그 해제
-                self._recovery_in_progress[account_id] = False
+                self._recovery_in_progress[service_account_id] = False
 
     async def close_all_tabs(self) -> int:
         """
@@ -540,8 +540,8 @@ class TabPoolManager:
         closed_count = 0
 
         # 모든 계정의 탭 풀 정리
-        for account_id in list(self.tab_pools.keys()):
-            tab_pool = self.tab_pools[account_id]
+        for service_account_id in list(self.tab_pools.keys()):
+            tab_pool = self.tab_pools[service_account_id]
 
             for tab_id in list(tab_pool.keys()):
                 try:
@@ -569,7 +569,7 @@ class TabPoolManager:
                     self.tab_account.pop(tab_id, None)
 
                     closed_count += 1
-                    logger.debug(f"탭 {tab_id} 닫힘 (account_id={account_id})")
+                    logger.debug(f"탭 {tab_id} 닫힘 (service_account_id={service_account_id})")
 
                 except Exception as e:
                     logger.warning(f"탭 {tab_id} 정리 중 오류: {e}")
@@ -585,36 +585,36 @@ class TabPoolManager:
         logger.info(f"[TAB-POOL] 모든 탭 닫기 완료: {closed_count}개 탭 정리됨")
         return closed_count
 
-    def get_pool_size(self, account_id: Optional[int] = None) -> int:
+    def get_pool_size(self, service_account_id: Optional[int] = None) -> int:
         """
         탭 풀의 현재 크기를 반환합니다.
 
         Args:
-            account_id: 특정 계정의 탭 풀 크기만 반환 (None이면 전체)
+            service_account_id: 특정 계정의 탭 풀 크기만 반환 (None이면 전체)
 
         Returns:
             탭 풀 크기
         """
-        if account_id is not None:
-            return len(self.tab_pools.get(account_id, {}))
+        if service_account_id is not None:
+            return len(self.tab_pools.get(service_account_id, {}))
         return sum(len(pool) for pool in self.tab_pools.values())
 
-    async def warmup(self, min_tabs: int = 3, account_id: Optional[int] = None):
+    async def warmup(self, min_tabs: int = 3, service_account_id: Optional[int] = None):
         """
         탭 풀을 미리 워밍업합니다.
         브라우저 컨텍스트와 탭을 미리 생성하여 스나이핑 시 지연을 방지합니다.
 
         Args:
             min_tabs: 최소 탭 수 (기본 3개)
-            account_id: 계정 ID (None이면 기본 계정)
+            service_account_id: 계정 ID (None이면 기본 계정)
         """
-        target_account_id = account_id or 1
+        target_account_id = service_account_id or 1
 
         try:
             # 1. 브라우저 컨텍스트 확보
             context = await self.context_manager.get_or_create_context(target_account_id)
             if not context:
-                logger.warning(f"[TAB-WARMUP] 브라우저 컨텍스트 생성 실패 (account_id={target_account_id})")
+                logger.warning(f"[TAB-WARMUP] 브라우저 컨텍스트 생성 실패 (service_account_id={target_account_id})")
                 return
 
             # 2. 현재 풀 크기 확인
@@ -623,7 +623,7 @@ class TabPoolManager:
             # 3. 필요한 탭 수 계산
             tabs_needed = max(0, min_tabs - current_size)
             if tabs_needed == 0:
-                logger.info(f"[TAB-WARMUP] 탭 풀 충분함 (account_id={target_account_id}, 크기={current_size})")
+                logger.info(f"[TAB-WARMUP] 탭 풀 충분함 (service_account_id={target_account_id}, 크기={current_size})")
                 return
 
             # 4. 탭 풀 초기화 (필요한 경우)
@@ -635,7 +635,7 @@ class TabPoolManager:
                 tabs_needed = max(0, min_tabs - current_size)
 
             # 5. 부족한 탭 생성
-            logger.info(f"[TAB-WARMUP] 탭 {tabs_needed}개 생성 중 (account_id={target_account_id})")
+            logger.info(f"[TAB-WARMUP] 탭 {tabs_needed}개 생성 중 (service_account_id={target_account_id})")
 
             for i in range(tabs_needed):
                 try:
@@ -680,7 +680,7 @@ class TabPoolManager:
             # 6. 결과 업데이트
             self.total_active_tabs = sum(len(pool) for pool in self.tab_pools.values())
             final_size = len(self.tab_pools.get(target_account_id, {}))
-            logger.info(f"[TAB-WARMUP] 워밍업 완료 (account_id={target_account_id}, 탭 수: {current_size} → {final_size})")
+            logger.info(f"[TAB-WARMUP] 워밍업 완료 (service_account_id={target_account_id}, 탭 수: {current_size} → {final_size})")
 
         except Exception as e:
             logger.error(f"[TAB-WARMUP] 워밍업 중 오류: {e}")

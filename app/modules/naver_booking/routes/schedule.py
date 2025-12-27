@@ -27,17 +27,17 @@ from app.modules.naver_booking.services.anonymous_monitor import get_anonymous_m
 router = APIRouter(prefix="/api/v1/schedules", tags=["schedules"])
 
 
-def _fill_account_name(schedule):
-    """schedule에 account_name 채우기"""
-    if schedule and schedule.account:
-        schedule.account_name = schedule.account.name
+def _fill_service_account_name(schedule):
+    """schedule에 service_account_name 채우기"""
+    if schedule and schedule.service_account:
+        schedule.service_account_name = schedule.service_account.identifier
     return schedule
 
 
-def _fill_account_names(schedules):
-    """여러 schedule에 account_name 채우기"""
+def _fill_service_account_names(schedules):
+    """여러 schedule에 service_account_name 채우기"""
     for schedule in schedules:
-        _fill_account_name(schedule)
+        _fill_service_account_name(schedule)
     return schedules
 
 
@@ -58,22 +58,22 @@ def get_all_schedules(
 
     if is_enabled is True:
         schedules = db.query(ScheduleModel).options(
-            joinedload(ScheduleModel.account)
+            joinedload(ScheduleModel.service_account)
         ).filter(
             ScheduleModel.is_enabled == True
         ).order_by(ScheduleModel.date).all()
     elif is_enabled is False:
         schedules = db.query(ScheduleModel).options(
-            joinedload(ScheduleModel.account)
+            joinedload(ScheduleModel.service_account)
         ).filter(
             ScheduleModel.is_enabled == False
         ).order_by(ScheduleModel.date).all()
     else:
         schedules = db.query(ScheduleModel).options(
-            joinedload(ScheduleModel.account)
+            joinedload(ScheduleModel.service_account)
         ).order_by(ScheduleModel.date).all()
 
-    return _fill_account_names(schedules)
+    return _fill_service_account_names(schedules)
 
 
 @router.get("/with-context")

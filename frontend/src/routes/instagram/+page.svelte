@@ -201,7 +201,7 @@
 								<h3 class="text-lg font-semibold text-blue-900">크롤링 실행 중</h3>
 							</div>
 							<div class="text-sm text-blue-700">
-								<span class="font-medium">{stats.running_crawl.account_username || `계정 #${stats.running_crawl.account_id}`}</span>
+								<span class="font-medium">{stats.running_crawl.account_username || `계정 #${stats.running_crawl.service_account_id}`}</span>
 								<span class="mx-2">|</span>
 								<span>시작: {formatTimeAgo(stats.running_crawl.started_at)}</span>
 							</div>

@@ -491,7 +491,7 @@ class CrawlWorker:
             if not config or not config.enabled:
                 return
 
-            if not config.account_id:
+            if not config.service_account_id:
                 return
 
             time_windows = [
@@ -502,7 +502,7 @@ class CrawlWorker:
                 time_windows=time_windows,
             )
 
-            last_run = crawl_service.get_last_run(account_id=config.account_id)
+            last_run = crawl_service.get_last_run(service_account_id=config.service_account_id)
             last_run_time = last_run.started_at if last_run else None
 
             min_interval = getattr(config, 'min_interval_hours', 2) or 2
@@ -510,15 +510,15 @@ class CrawlWorker:
                 last_run=last_run_time,
                 min_interval_hours=min_interval,
             ):
-                logger.info(f"스케줄 실행 시간 도래: account_id={config.account_id}")
+                logger.info(f"스케줄 실행 시간 도래: service_account_id={config.service_account_id}")
 
                 request_service = CrawlRequestService(db)
-                if request_service.has_active_request(config.account_id):
+                if request_service.has_active_request(config.service_account_id):
                     logger.info("이미 활성 요청 존재, 스킵")
                     return
 
                 request = request_service.create_request(
-                    account_id=config.account_id,
+                    service_account_id=config.service_account_id,
                     requested_by="scheduler",
                 )
 
@@ -564,7 +564,7 @@ class CrawlWorker:
         finally:
             db.close()
 
-    async def _get_tab_for_request(self, request_id: int, account_id: int = None):
+    async def _get_tab_for_request(self, request_id: int, service_account_id: int = None):
         """TabPoolManager를 통해 탭 획득."""
         if self.context_manager is None:
             logger.info("ContextManager 초기화")
@@ -576,9 +576,9 @@ class CrawlWorker:
 
         tab = await self.tab_pool_manager.get_tab(
             target_id=request_id,
-            account_id=account_id
+            service_account_id=service_account_id
         )
-        logger.info(f"탭 획득 완료: request_id={request_id}, account_id={account_id}")
+        logger.info(f"탭 획득 완료: request_id={request_id}, service_account_id={service_account_id}")
         return tab
 
     async def _release_tab(self, tab):
@@ -586,13 +586,13 @@ class CrawlWorker:
         if self.tab_pool_manager and tab:
             await self.tab_pool_manager.release_tab(tab)
 
-    async def _get_page_for_account(self, account_id: int = None):
+    async def _get_page_for_account(self, service_account_id: int = None):
         """계정별 브라우저 페이지 가져오기."""
         if self.context_manager is None:
             logger.info("ContextManager 초기화")
             self.context_manager = ContextManager()
 
-        context = await self.context_manager.get_or_create_context(account_id)
+        context = await self.context_manager.get_or_create_context(service_account_id)
 
         pages = context.pages
         page = None
@@ -639,14 +639,14 @@ class CrawlWorker:
         error_msg = str(error).lower()
         return any(keyword.lower() in error_msg for keyword in self.BROWSER_CLOSED_KEYWORDS)
 
-    async def _recreate_browser_context(self, account_id: int = None):
+    async def _recreate_browser_context(self, service_account_id: int = None):
         """브라우저 컨텍스트 재생성."""
-        logger.info(f"브라우저 컨텍스트 재생성 시작 (account_id={account_id})")
+        logger.info(f"브라우저 컨텍스트 재생성 시작 (service_account_id={service_account_id})")
 
         if self.context_manager:
             try:
-                await self.context_manager.close_context(account_id)
-                logger.info(f"기존 컨텍스트 닫기 완료 (account_id={account_id})")
+                await self.context_manager.close_context(service_account_id)
+                logger.info(f"기존 컨텍스트 닫기 완료 (service_account_id={service_account_id})")
             except Exception as e:
                 logger.warning(f"기존 컨텍스트 닫기 실패 (무시): {e}")
 
@@ -670,7 +670,7 @@ class CrawlWorker:
 
         await asyncio.sleep(3)
 
-        logger.info(f"브라우저 컨텍스트 재생성 준비 완료 (account_id={account_id})")
+        logger.info(f"브라우저 컨텍스트 재생성 준비 완료 (service_account_id={service_account_id})")
 
     async def _execute_instagram_feed_crawl(self, request: InstagramCrawlRequest, db, request_service, crawl_service):
         """Instagram 피드 크롤링 실행."""
@@ -680,10 +680,10 @@ class CrawlWorker:
 
         while retry_count <= max_retries:
             try:
-                account = db.query(Account).filter(Account.id == request.account_id).first()
+                account = db.query(Account).filter(Account.id == request.service_account_id).first()
                 if not account:
                     request_service.mark_failed(request.id, "계정을 찾을 수 없음")
-                    logger.warning(f"계정 없음: account_id={request.account_id}")
+                    logger.warning(f"계정 없음: service_account_id={request.service_account_id}")
                     return
 
                 self._update_worker_state("crawling", account.name)
@@ -711,7 +711,7 @@ class CrawlWorker:
 
                 crawl_run = await crawl_service.run_crawl(
                     crawler=crawler,
-                    account_id=request.account_id,
+                    service_account_id=request.service_account_id,
                 )
 
                 self._update_worker_state("crawling", account.name, crawl_run.id)
@@ -737,7 +737,7 @@ class CrawlWorker:
                     if tab:
                         await self._release_tab(tab)
                         tab = None
-                    await self._recreate_browser_context(request.account_id)
+                    await self._recreate_browser_context(request.service_account_id)
                     continue
 
                 request_service.mark_failed(request.id, str(e))
@@ -762,10 +762,10 @@ class CrawlWorker:
                     logger.warning(f"대상 게시물 ID 없음: request_id={request.id}")
                     return
 
-                account = db.query(Account).filter(Account.id == request.account_id).first()
+                account = db.query(Account).filter(Account.id == request.service_account_id).first()
                 if not account:
                     request_service.mark_failed(request.id, "계정을 찾을 수 없음")
-                    logger.warning(f"계정 없음: account_id={request.account_id}")
+                    logger.warning(f"계정 없음: service_account_id={request.service_account_id}")
                     return
 
                 self._update_worker_state("recrawling", account.name)
@@ -811,7 +811,7 @@ class CrawlWorker:
                     if tab:
                         await self._release_tab(tab)
                         tab = None
-                    await self._recreate_browser_context(request.account_id)
+                    await self._recreate_browser_context(request.service_account_id)
                     continue
 
                 request_service.mark_failed(request.id, str(e))
@@ -836,10 +836,10 @@ class CrawlWorker:
                     logger.warning(f"대상 URL 없음: request_id={request.id}")
                     return
 
-                account = db.query(Account).filter(Account.id == request.account_id).first()
+                account = db.query(Account).filter(Account.id == request.service_account_id).first()
                 if not account:
                     request_service.mark_failed(request.id, "계정을 찾을 수 없음")
-                    logger.warning(f"계정 없음: account_id={request.account_id}")
+                    logger.warning(f"계정 없음: service_account_id={request.service_account_id}")
                     return
 
                 self._update_worker_state("crawling", account.name)
@@ -865,7 +865,7 @@ class CrawlWorker:
                 result = await crawl_service.crawl_by_url(
                     crawler=crawler,
                     url=target_url,
-                    account_id=request.account_id,
+                    service_account_id=request.service_account_id,
                 )
 
                 if result["success"]:
@@ -893,7 +893,7 @@ class CrawlWorker:
                     if tab:
                         await self._release_tab(tab)
                         tab = None
-                    await self._recreate_browser_context(request.account_id)
+                    await self._recreate_browser_context(request.service_account_id)
                     continue
 
                 request_service.mark_failed(request.id, str(e))
@@ -945,7 +945,7 @@ class CrawlWorker:
             logger.info(f"Universal 크롤링 시작: request_id={request_id}, url={request.url}")
 
             # 브라우저 페이지 획득
-            page = await self._get_page_for_account(request.account_id)
+            page = await self._get_page_for_account(request.service_account_id)
 
             # 페이지 로드
             await page.goto(request.url, wait_until="domcontentloaded", timeout=30000)

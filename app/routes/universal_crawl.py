@@ -43,7 +43,7 @@ async def create_crawl_request(
         request, message = universal_crawl_service.create_request(
             db=db,
             url=body.url,
-            account_id=body.account_id,
+            service_account_id=body.service_account_id,
             auto_analyze=body.auto_analyze,
             priority=body.priority,
             requested_by="api",

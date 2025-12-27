@@ -68,7 +68,7 @@ async def search(
     """구글 검색 수행.
 
     Args:
-        request: 검색 요청 (query, date_filter, max_pages, account_id)
+        request: 검색 요청 (query, date_filter, max_pages, service_account_id)
 
     Returns:
         SearchResponse: 검색 결과
@@ -79,7 +79,7 @@ async def search(
             query=request.query,
             date_filter=request.date_filter,
             max_pages=min(request.max_pages, 10),  # 최대 10페이지
-            account_id=request.account_id,
+            service_account_id=request.service_account_id,
         )
 
         return SearchResponse(
@@ -263,7 +263,7 @@ async def create_saved_search(
         query=data.query,
         date_filter=data.date_filter,
         max_pages=data.max_pages,
-        account_id=data.account_id,
+        service_account_id=data.service_account_id,
         is_favorite=data.is_favorite,
     )
     db.add(saved)
@@ -440,7 +440,7 @@ def _saved_to_response(saved: GoogleSavedSearch) -> SavedSearchResponse:
         query=saved.query,
         date_filter=saved.date_filter,
         max_pages=saved.max_pages,
-        account_id=saved.account_id,
+        service_account_id=saved.service_account_id,
         is_favorite=saved.is_favorite,
         last_search_id=saved.last_search_id,
         last_run_at=saved.last_run_at,

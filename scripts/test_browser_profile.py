@@ -74,7 +74,7 @@ async def test_browser_profile():
     # 기본 계정으로 컨텍스트 생성 시도
     print("   기본 계정으로 브라우저 컨텍스트 생성 중...")
     try:
-        context = await browser_service.get_or_create_context(account_id=None)
+        context = await browser_service.get_or_create_context(service_account_id=None)
         print(f"   ✓ 브라우저 컨텍스트 생성 성공")
         print(f"   컨텍스트 정보: {context}")
 
