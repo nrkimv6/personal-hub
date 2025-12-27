@@ -137,6 +137,10 @@ class EventService:
         # event_status 필터 (기간 기반)
         today = date.today()
         if event_status:
+            # cancelled 상태는 별도 처리 (ongoing/upcoming/ended와 배타적)
+            if event_status != "cancelled":
+                query = query.filter(Event.status != "cancelled")
+
             if event_status == "ongoing":
                 # 진행 중: 시작일 <= 오늘 AND (종료일 >= 오늘 OR 종료일 NULL)
                 conditions = [
