@@ -8,7 +8,7 @@ from typing import List, Optional
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from app.models import InstagramCrawlRun, InstagramScheduleConfig, Account, InstagramPost
+from app.models import InstagramCrawlRun, InstagramScheduleConfig, ServiceAccount, InstagramPost
 from .crawler import InstagramCrawler, CrawlOptions, PostData
 from .post_service import PostService
 from .scheduler import InstagramScheduler
@@ -663,11 +663,11 @@ class CrawlService:
 
         if running_run:
             # 계정 정보 조회
-            account = self.db.query(Account).filter(Account.id == running_run.service_account_id).first()
+            account = self.db.query(ServiceAccount).filter(ServiceAccount.id == running_run.service_account_id).first()
             running_crawl = RunningCrawlInfo(
                 run_id=running_run.id,
                 service_account_id=running_run.service_account_id,
-                account_username=account.name if account else None,
+                account_username=account.identifier if account else None,
                 started_at=running_run.started_at,
                 total_collected=running_run.total_collected or 0,
                 new_saved=running_run.new_saved or 0,

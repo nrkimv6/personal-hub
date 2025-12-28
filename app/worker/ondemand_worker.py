@@ -21,7 +21,7 @@ from typing import Optional, TYPE_CHECKING
 
 from app.worker.crawl_worker_base import CrawlWorkerBase
 from app.database import SessionLocal
-from app.models import Account, InstagramCrawlRequest
+from app.models import ServiceAccount, InstagramCrawlRequest
 from app.models.universal_crawl import UniversalCrawlRequest
 
 from app.modules.instagram.services.request_service import CrawlRequestService
@@ -195,13 +195,13 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
                     logger.warning(f"[{self.name}] 대상 게시물 ID 없음: request_id={request.id}")
                     return
 
-                account = db.query(Account).filter(Account.id == request.service_account_id).first()
+                account = db.query(ServiceAccount).filter(ServiceAccount.id == request.service_account_id).first()
                 if not account:
                     request_service.mark_failed(request.id, "계정을 찾을 수 없음")
                     logger.warning(f"[{self.name}] 계정 없음: service_account_id={request.service_account_id}")
                     return
 
-                self._update_worker_state("recrawling", account.name)
+                self._update_worker_state("recrawling", account.identifier)
 
                 # BrowserManager를 통한 탭 획득 및 크롤링 실행
                 result = await self.execute_with_tab(
@@ -246,7 +246,7 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
         self,
         tab: "Page",
         target_post_id: int,
-        account: Account,
+        account: ServiceAccount,
         db,
         crawl_service: CrawlService,
     ) -> dict:
@@ -292,13 +292,13 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
                     logger.warning(f"[{self.name}] 대상 URL 없음: request_id={request.id}")
                     return
 
-                account = db.query(Account).filter(Account.id == request.service_account_id).first()
+                account = db.query(ServiceAccount).filter(ServiceAccount.id == request.service_account_id).first()
                 if not account:
                     request_service.mark_failed(request.id, "계정을 찾을 수 없음")
                     logger.warning(f"[{self.name}] 계정 없음: service_account_id={request.service_account_id}")
                     return
 
-                self._update_worker_state("crawling", account.name)
+                self._update_worker_state("crawling", account.identifier)
 
                 # BrowserManager를 통한 탭 획득 및 크롤링 실행
                 result = await self.execute_with_tab(
@@ -351,7 +351,7 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
         self,
         tab: "Page",
         target_url: str,
-        account: Account,
+        account: ServiceAccount,
         db,
         crawl_service: CrawlService,
         request: InstagramCrawlRequest,

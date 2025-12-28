@@ -19,7 +19,7 @@ from typing import Optional, TYPE_CHECKING
 
 from app.worker.crawl_worker_base import CrawlWorkerBase
 from app.database import SessionLocal
-from app.models import Account, InstagramCrawlRequest
+from app.models import ServiceAccount, InstagramCrawlRequest
 
 from app.modules.instagram.services.request_service import CrawlRequestService
 from app.modules.instagram.services.crawl_service import CrawlService
@@ -152,13 +152,13 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
             while retry_count <= max_retries:
                 try:
-                    account = db.query(Account).filter(Account.id == request.service_account_id).first()
+                    account = db.query(ServiceAccount).filter(ServiceAccount.id == request.service_account_id).first()
                     if not account:
                         request_service.mark_failed(request.id, "계정을 찾을 수 없음")
                         logger.warning(f"[{self.name}] 계정 없음: service_account_id={request.service_account_id}")
                         return
 
-                    self._update_worker_state("crawling", account.name)
+                    self._update_worker_state("crawling", account.identifier)
 
                     # BrowserManager를 통한 탭 획득 및 크롤링 실행
                     result = await self.execute_with_tab(
@@ -205,7 +205,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         self,
         tab: "Page",
         request: InstagramCrawlRequest,
-        account: Account,
+        account: ServiceAccount,
         db,
         request_service: CrawlRequestService,
         crawl_service: CrawlService,

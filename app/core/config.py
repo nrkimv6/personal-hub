@@ -55,9 +55,6 @@ class Settings(BaseSettings):
     # 다중 프로필 설정
     BROWSER_PROFILES_DIR: str = "browser_profiles"  # DATA_DIR 하위의 프로필 디렉토리명
     DEFAULT_PROFILE_NAME: str = "default"  # 기본 프로필 이름
-
-    # Instagram 전용 계정 설정
-    INSTAGRAM_ACCOUNT_ID: int = 4  # Instagram 크롤링 전용 계정 ID (인스타, profile_dir=ny_ay_22)
     
     # # Supabase 설정
     # SUPABASE_URL: str
