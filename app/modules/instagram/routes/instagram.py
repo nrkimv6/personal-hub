@@ -1,5 +1,6 @@
 """Instagram API Routes."""
 
+import json
 import logging
 from datetime import date
 from typing import Optional, List
@@ -8,10 +9,10 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.services.browser_service import get_browser_service
 from app.shared.service_account import service_account_service
 from app.core.config import settings
 from ..models.schemas import (
@@ -924,6 +925,29 @@ async def get_today_schedule(
 
 # ============== Login ==============
 
+def _create_browser_command(
+    db: Session,
+    command_type: str,
+    service_account_id: int,
+    request_data: Optional[dict] = None
+) -> int:
+    """브라우저 명령 생성 (워커에서 처리)"""
+    request_json = json.dumps(request_data) if request_data else None
+
+    db.execute(text("""
+        INSERT INTO browser_commands (command_type, service_account_id, status, request_data)
+        VALUES (:command_type, :service_account_id, 'pending', :request_data)
+    """), {
+        "command_type": command_type,
+        "service_account_id": service_account_id,
+        "request_data": request_json
+    })
+    db.commit()
+
+    last_id = db.execute(text("SELECT last_insert_rowid()")).scalar()
+    return last_id
+
+
 @router.post("/login/open-browser")
 async def open_login_browser(
     service_account_id: int = Query(..., description="계정 ID"),
@@ -938,19 +962,20 @@ async def open_login_browser(
     if not account:
         raise HTTPException(status_code=404, detail=f"Account {service_account_id} not found")
 
-    browser_service = get_browser_service()
-    result = await browser_service.open_browser_for_account(
-        service_account_id, "https://www.instagram.com/"
+    # browser_commands 테이블을 통해 워커에 명령 전달
+    command_id = _create_browser_command(
+        db,
+        command_type="instagram_login",
+        service_account_id=service_account_id,
+        request_data={"url": "https://www.instagram.com/"}
     )
-
-    if not result.get("success"):
-        raise HTTPException(status_code=500, detail=result.get("message", "브라우저 열기 실패"))
 
     return {
         "success": True,
-        "message": "Instagram 로그인 페이지가 열렸습니다. 수동으로 로그인해주세요.",
+        "message": "Instagram 로그인 페이지 열기 명령이 생성되었습니다. 잠시 후 브라우저가 열립니다.",
+        "command_id": command_id,
         "service_account_id": service_account_id,
-        "account_name": account.name,
+        "account_name": account.profile.name if account.profile else account.identifier,
     }
 
 
@@ -967,13 +992,19 @@ async def check_login_status(
     if not account:
         raise HTTPException(status_code=404, detail=f"Account {service_account_id} not found")
 
-    browser_service = get_browser_service()
-    result = await browser_service.check_instagram_login_status(service_account_id)
+    command_id = _create_browser_command(
+        db,
+        command_type="instagram_check_login",
+        service_account_id=service_account_id,
+        request_data={}
+    )
 
-    if not result.get("success"):
-        raise HTTPException(status_code=500, detail=result.get("message", "로그인 상태 확인 실패"))
-
-    return result
+    return {
+        "success": True,
+        "message": "Instagram 로그인 상태 체크 명령이 생성되었습니다.",
+        "command_id": command_id,
+        "service_account_id": service_account_id,
+    }
 
 
 # ============== Image Proxy ==============

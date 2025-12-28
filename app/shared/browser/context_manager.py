@@ -146,13 +146,13 @@ class ContextManager:
             # default 프로필을 사용하는 계정이 있으면 browser_contexts에도 등록
             # 이렇게 해야 get_or_create_context(service_account_id)가 중복 창을 열지 않음
             from app.core.database import SessionLocal
-            from app.services.account_service import account_service
+            from app.shared.service_account import service_account_service
             db = SessionLocal()
             try:
-                # default 프로필을 사용하는 계정 찾기
-                accounts = account_service.get_active_accounts(db)
+                # default 프로필을 사용하는 서비스 계정 찾기
+                accounts = service_account_service.get_all(db)
                 for account in accounts:
-                    if account.profile_dir == settings.DEFAULT_PROFILE_NAME:
+                    if account.profile and account.profile.profile_dir == settings.DEFAULT_PROFILE_NAME:
                         self.browser_contexts[account.id] = self.browser_context
                         logger.info(f"default 프로필 컨텍스트를 계정 {account.id}에 등록")
             finally:
@@ -193,12 +193,15 @@ class ContextManager:
         # account_id가 None이면 기본 계정(id=1) 사용
         if service_account_id is None:
             from app.core.database import SessionLocal
-            from app.services.account_service import account_service
+            from app.shared.browser_profile import browser_profile_service
+            from app.shared.service_account import service_account_service
             db = SessionLocal()
             try:
-                default_account = account_service.get_default_account(db)
-                if default_account:
-                    service_account_id = default_account.id
+                # default 프로필을 사용하는 서비스 계정 찾기
+                default_profile = browser_profile_service.get_default_profile(db)
+                if default_profile:
+                    accounts = service_account_service.get_by_profile_id(db, default_profile.id)
+                    service_account_id = accounts[0].id if accounts else 1
                 else:
                     service_account_id = 1  # fallback
             finally:
@@ -269,15 +272,15 @@ class ContextManager:
             BrowserContext: 생성된 브라우저 컨텍스트
         """
         from app.core.database import SessionLocal
-        from app.services.account_service import account_service
+        from app.shared.service_account import service_account_service
 
         db = SessionLocal()
         try:
-            account = account_service.get_by_id(db, service_account_id)
-            if not account:
-                raise ValueError(f"Account {service_account_id} not found")
+            account = service_account_service.get_by_id(db, service_account_id)
+            if not account or not account.profile:
+                raise ValueError(f"ServiceAccount {service_account_id} not found or has no profile")
 
-            profile_path = Path(account.profile_path)
+            profile_path = Path(account.profile.profile_path)
 
             # 프로필 디렉토리 생성
             if not profile_path.exists():
@@ -354,10 +357,11 @@ class ContextManager:
             await self._bypass_automation_detection(context)
 
             proxy_info = f", proxy={proxy_config.get('server')}" if proxy_config else ""
-            logger.info(f"브라우저 컨텍스트 생성 완료 (service_account_id={service_account_id}, profile={account.profile_dir}{proxy_info})")
+            logger.info(f"브라우저 컨텍스트 생성 완료 (service_account_id={service_account_id}, profile={account.profile.profile_dir}{proxy_info})")
 
             # 마지막 사용 시간 업데이트
-            account_service.update_last_used(db, service_account_id)
+            from app.shared.browser_profile import browser_profile_service
+            browser_profile_service.update_last_used(db, account.profile_id)
 
             return context
 
@@ -376,7 +380,7 @@ class ContextManager:
             BrowserContext: 생성된 브라우저 컨텍스트
         """
         from app.core.database import SessionLocal
-        from app.services.account_service import account_service
+        from app.shared.service_account import service_account_service
 
         # 이미 존재하면 유효성 확인 후 반환
         if service_account_id in self.browser_contexts:
@@ -416,11 +420,11 @@ class ContextManager:
 
         db = SessionLocal()
         try:
-            account = account_service.get_by_id(db, service_account_id)
-            if not account:
-                raise ValueError(f"Account {service_account_id} not found")
+            account = service_account_service.get_by_id(db, service_account_id)
+            if not account or not account.profile:
+                raise ValueError(f"ServiceAccount {service_account_id} not found or has no profile")
 
-            profile_path = Path(account.profile_path)
+            profile_path = Path(account.profile.profile_path)
 
             # 프로필 디렉토리 생성
             if not profile_path.exists():
@@ -453,13 +457,13 @@ class ContextManager:
             # 자동화 감지 방지
             await self._bypass_automation_detection(context)
 
-            logger.info(f"브라우저 컨텍스트 생성 완료 (service_account_id={service_account_id}, profile={account.profile_dir}, headless=False)")
+            logger.info(f"브라우저 컨텍스트 생성 완료 (service_account_id={service_account_id}, profile={account.profile.profile_dir}, headless=False)")
 
             # 컨텍스트 저장
             self.browser_contexts[service_account_id] = context
 
             # 마지막 사용 시간 업데이트
-            account_service.update_last_used(db, service_account_id)
+            service_account_service.update_last_used(db, service_account_id)
 
             return context
 
