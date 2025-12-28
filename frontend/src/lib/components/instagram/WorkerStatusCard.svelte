@@ -8,6 +8,7 @@
   let loading = true;
   let error: string | null = null;
   let refreshInterval: ReturnType<typeof setInterval>;
+  let abortController: AbortController | null = null;
 
   // 상태별 색상
   function getStatusColor(healthStatus: string | null): string {
@@ -55,15 +56,23 @@
   }
 
   async function fetchData() {
+    // 이전 요청 취소
+    abortController?.abort();
+    abortController = new AbortController();
+
     try {
       const [statusData, healthData] = await Promise.all([
-        instagramApi.getWorkerStatus(),
-        instagramApi.getWorkerHealth()
+        instagramApi.getWorkerStatus({ signal: abortController.signal }),
+        instagramApi.getWorkerHealth({ signal: abortController.signal })
       ]);
       status = statusData;
       health = healthData;
       error = null;
     } catch (e) {
+      // 취소된 요청은 무시
+      if (e instanceof Error && e.name === 'AbortError') {
+        return;
+      }
       error = e instanceof Error ? e.message : '데이터 로드 실패';
     } finally {
       loading = false;
@@ -78,6 +87,7 @@
 
   onDestroy(() => {
     if (refreshInterval) clearInterval(refreshInterval);
+    abortController?.abort();  // 실행 중인 요청도 취소
   });
 </script>
 

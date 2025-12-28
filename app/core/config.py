@@ -185,6 +185,17 @@ class Settings(BaseSettings):
     # Cloudflare Tunnel 설정 (선택)
     TUNNEL_ID: Optional[str] = None
 
+    # Health Monitor 설정
+    HEALTH_MONITOR_ENABLED: bool = True  # 헬스 모니터링 활성화 여부
+    HEALTH_PID_CHECK_INTERVAL: int = 10  # PID+포트 체크 간격 (초)
+    HEALTH_HTTP_CHECK_INTERVAL: int = 60  # HTTP 체크 간격 (초)
+    HEALTH_CHECK_TIMEOUT: int = 10  # HTTP 요청 타임아웃 (초)
+    HEALTH_FAILURE_THRESHOLD: int = 3  # HTTP 연속 실패 횟수
+    HEALTH_RECOVERY_NOTIFY: bool = True  # 복구 시 알림
+    EXTERNAL_API_URL: str = ""  # 외부 API URL (Cloudflare Tunnel)
+    EXTERNAL_FRONTEND_URL: str = ""  # 외부 프론트엔드 URL (Cloudflare Tunnel)
+    PID_DIR: str = ".pids"  # PID 파일 디렉토리
+
     model_config = {
         "env_file": ".env",
         "case_sensitive": True,
