@@ -243,7 +243,11 @@ class HealthMonitorService:
             )
 
         # 2. 프로세스 존재 및 이름 확인 (잘못된 PID 감지)
-        if not self.check_process_exists(saved_pid, expected_process):
+        process_name_matches = self.check_process_exists(saved_pid, expected_process)
+        process_exists = self.check_process_exists(saved_pid, None)  # 이름 무관하게 존재 여부만
+
+        # 프로세스가 아예 없으면 실패
+        if not process_exists:
             return ServiceHealth(
                 name=service_name,
                 status=ServiceStatus.UNHEALTHY,
@@ -270,36 +274,32 @@ class HealthMonitorService:
                     actual_port_owner=None
                 )
 
-            if actual_owner != saved_pid:
-                # 핫 리로드 확인: 포트 점유자가 PID 파일 프로세스의 자식인지 체크
-                if self.is_descendant_of(actual_owner, saved_pid):
-                    # 핫 리로드로 인한 자식 프로세스 - 정상
-                    logger.debug(
-                        f"Hot reload detected: {service_name} port {expected_port} "
-                        f"owned by child PID {actual_owner} of parent {saved_pid}"
-                    )
-                    return ServiceHealth(
-                        name=service_name,
-                        status=ServiceStatus.HEALTHY,
-                        last_check=datetime.now(),
-                        failure_count=0,
-                        error_message=None,
-                        pid=saved_pid,
-                        expected_port=expected_port,
-                        actual_port_owner=actual_owner
-                    )
-
-                # 완전히 다른 프로세스가 포트 점유 - 진짜 문제
-                return ServiceHealth(
-                    name=service_name,
-                    status=ServiceStatus.UNHEALTHY,
-                    last_check=datetime.now(),
-                    failure_count=self._get_failure_count(service_name) + 1,
-                    error_message=f"Port {expected_port} hijacked by PID {actual_owner} (not child of {saved_pid})",
-                    pid=saved_pid,
-                    expected_port=expected_port,
-                    actual_port_owner=actual_owner
+            # 포트가 LISTENING 상태면 서비스 정상으로 판단
+            # (PID 파일과 실제 프로세스가 다를 수 있음 - 서비스 재시작 등)
+            if actual_owner == saved_pid or self.is_descendant_of(actual_owner, saved_pid):
+                # PID 일치 또는 자식 프로세스
+                logger.debug(
+                    f"{service_name}: port {expected_port} owned by PID {actual_owner} "
+                    f"(saved: {saved_pid}, match or descendant)"
                 )
+            else:
+                # PID 불일치지만 포트가 열려있음 - 서비스는 동작 중
+                logger.debug(
+                    f"{service_name}: port {expected_port} owned by PID {actual_owner} "
+                    f"(saved: {saved_pid}, different but service running)"
+                )
+
+            # 포트가 열려있으면 정상
+            return ServiceHealth(
+                name=service_name,
+                status=ServiceStatus.HEALTHY,
+                last_check=datetime.now(),
+                failure_count=0,
+                error_message=None,
+                pid=saved_pid,
+                expected_port=expected_port,
+                actual_port_owner=actual_owner
+            )
 
         # 모든 체크 통과
         return ServiceHealth(

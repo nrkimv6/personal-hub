@@ -77,13 +77,13 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         try:
             request_service = CrawlRequestService(db)
 
-            # feed 타입의 pending 요청 조회 (manual로 생성된 것)
+            # feed 타입의 pending 요청 조회 (manual 또는 retry로 생성된 것)
             pending_requests = (
                 db.query(InstagramCrawlRequest)
                 .filter(
                     InstagramCrawlRequest.status == "pending",
                     InstagramCrawlRequest.request_type.in_(["feed", None]),
-                    InstagramCrawlRequest.requested_by == "manual",
+                    InstagramCrawlRequest.requested_by.in_(["manual", "retry"]),
                 )
                 .order_by(InstagramCrawlRequest.requested_at)
                 .limit(1)

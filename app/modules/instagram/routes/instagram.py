@@ -928,18 +928,18 @@ async def get_today_schedule(
 def _create_browser_command(
     db: Session,
     command_type: str,
-    account_id: int,
+    service_account_id: int,
     request_data: Optional[dict] = None
 ) -> int:
     """브라우저 명령 생성 (워커에서 처리)"""
     request_json = json.dumps(request_data) if request_data else None
 
     db.execute(text("""
-        INSERT INTO browser_commands (command_type, account_id, status, request_data)
-        VALUES (:command_type, :account_id, 'pending', :request_data)
+        INSERT INTO browser_commands (command_type, service_account_id, status, request_data)
+        VALUES (:command_type, :service_account_id, 'pending', :request_data)
     """), {
         "command_type": command_type,
-        "account_id": account_id,
+        "service_account_id": service_account_id,
         "request_data": request_json
     })
     db.commit()
@@ -966,11 +966,8 @@ async def open_login_browser(
     command_id = _create_browser_command(
         db,
         command_type="instagram_login",
-        account_id=account.profile_id,
-        request_data={
-            "url": "https://www.instagram.com/",
-            "service_account_id": service_account_id
-        }
+        service_account_id=service_account_id,
+        request_data={"url": "https://www.instagram.com/"}
     )
 
     return {
@@ -998,8 +995,8 @@ async def check_login_status(
     command_id = _create_browser_command(
         db,
         command_type="instagram_check_login",
-        account_id=account.profile_id,
-        request_data={"service_account_id": service_account_id}
+        service_account_id=service_account_id,
+        request_data={}
     )
 
     return {
