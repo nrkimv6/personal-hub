@@ -143,6 +143,22 @@ class HealthMonitorService:
             pass
         return None
 
+    def is_descendant_of(self, child_pid: int, ancestor_pid: int) -> bool:
+        """child_pid가 ancestor_pid의 자식/자손인지 확인 (핫 리로드 감지용)"""
+        try:
+            process = psutil.Process(child_pid)
+            # 최대 5단계까지 부모 추적 (무한 루프 방지)
+            for _ in range(5):
+                parent_pid = process.ppid()
+                if parent_pid == 0:
+                    break
+                if parent_pid == ancestor_pid:
+                    return True
+                process = psutil.Process(parent_pid)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+        return False
+
     def check_pid_and_port(self, service_name: str) -> ServiceHealth:
         """PID 파일과 포트 점유 상태 확인"""
         config = SERVICE_CONFIG.get(service_name)
@@ -164,7 +180,7 @@ class HealthMonitorService:
                 name=service_name,
                 status=ServiceStatus.UNHEALTHY,
                 last_check=datetime.now(),
-                failure_count=1,
+                failure_count=self._get_failure_count(service_name) + 1,
                 error_message="PID file not found",
                 pid=None,
                 expected_port=expected_port
@@ -176,7 +192,7 @@ class HealthMonitorService:
                 name=service_name,
                 status=ServiceStatus.UNHEALTHY,
                 last_check=datetime.now(),
-                failure_count=1,
+                failure_count=self._get_failure_count(service_name) + 1,
                 error_message=f"Process {saved_pid} not running",
                 pid=saved_pid,
                 expected_port=expected_port
@@ -191,7 +207,7 @@ class HealthMonitorService:
                     name=service_name,
                     status=ServiceStatus.UNHEALTHY,
                     last_check=datetime.now(),
-                    failure_count=1,
+                    failure_count=self._get_failure_count(service_name) + 1,
                     error_message=f"Port {expected_port} not in use",
                     pid=saved_pid,
                     expected_port=expected_port,
@@ -199,12 +215,31 @@ class HealthMonitorService:
                 )
 
             if actual_owner != saved_pid:
+                # 핫 리로드 확인: 포트 점유자가 PID 파일 프로세스의 자식인지 체크
+                if self.is_descendant_of(actual_owner, saved_pid):
+                    # 핫 리로드로 인한 자식 프로세스 - 정상
+                    logger.debug(
+                        f"Hot reload detected: {service_name} port {expected_port} "
+                        f"owned by child PID {actual_owner} of parent {saved_pid}"
+                    )
+                    return ServiceHealth(
+                        name=service_name,
+                        status=ServiceStatus.HEALTHY,
+                        last_check=datetime.now(),
+                        failure_count=0,
+                        error_message=None,
+                        pid=saved_pid,
+                        expected_port=expected_port,
+                        actual_port_owner=actual_owner
+                    )
+
+                # 완전히 다른 프로세스가 포트 점유 - 진짜 문제
                 return ServiceHealth(
                     name=service_name,
                     status=ServiceStatus.UNHEALTHY,
                     last_check=datetime.now(),
-                    failure_count=1,
-                    error_message=f"Port {expected_port} owned by PID {actual_owner}, expected {saved_pid}",
+                    failure_count=self._get_failure_count(service_name) + 1,
+                    error_message=f"Port {expected_port} hijacked by PID {actual_owner} (not child of {saved_pid})",
                     pid=saved_pid,
                     expected_port=expected_port,
                     actual_port_owner=actual_owner
@@ -455,10 +490,10 @@ class HealthMonitorService:
                     prev = self.services.get(health.name)
                     self.services[health.name] = health
 
-                    # PID 체크 실패 시 즉시 알림 (threshold 없음)
-                    if health.status == ServiceStatus.UNHEALTHY:
-                        if not prev or prev.status != ServiceStatus.UNHEALTHY:
-                            await self._send_pid_failure_alert(health)
+                    # PID 체크도 threshold 적용 (연속 N회 실패 시 알림)
+                    if (health.status == ServiceStatus.UNHEALTHY
+                        and health.failure_count == settings.HEALTH_FAILURE_THRESHOLD):
+                        await self._send_pid_failure_alert(health)
 
                     # 복구 알림
                     if (prev and prev.status == ServiceStatus.UNHEALTHY

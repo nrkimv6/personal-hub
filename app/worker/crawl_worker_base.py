@@ -62,6 +62,13 @@ class CrawlWorkerBase(BaseWorker):
         self.worker_type = worker_type
         self._browser_initialized = False
 
+    async def _initialize(self):
+        """BaseWorker의 _initialize 오버라이드.
+
+        _on_start()를 호출하여 초기화 작업을 수행합니다.
+        """
+        await self._on_start()
+
     async def _on_start(self):
         """시작 시 초기화 훅.
 
