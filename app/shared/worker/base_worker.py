@@ -4,6 +4,11 @@
 모든 워커가 상속받는 추상 기본 클래스입니다.
 공통 기능 (heartbeat, 시그널 핸들링, 에러 핸들링 등)을 제공합니다.
 
+예외 격리:
+    - 메인 루프 레벨에서 모든 예외를 캐치
+    - 연속 에러 카운트로 치명적 상황 감지
+    - _safe_execute() 헬퍼로 작업 단위 예외 격리
+
 사용 예시:
     class MyWorker(BaseWorker):
         def __init__(self, browser_manager):
@@ -11,7 +16,7 @@
 
         async def _main_loop_iteration(self):
             # 한 사이클의 작업 수행
-            await self._process_requests()
+            await self._safe_execute("process_requests", self._process_requests)
 
         def _get_loop_interval(self) -> float:
             return 5.0  # 5초마다 실행
@@ -20,8 +25,11 @@ import asyncio
 import os
 import logging
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from datetime import datetime
-from typing import Optional, Set, TYPE_CHECKING
+from typing import Optional, Set, Dict, Callable, Awaitable, TYPE_CHECKING
+
+from app.shared.worker.exceptions import WorkerCriticalError
 
 if TYPE_CHECKING:
     from app.shared.browser.browser_manager import BrowserManager
@@ -47,7 +55,16 @@ class BaseWorker(ABC):
         pid: 프로세스 ID
         start_time: 워커 시작 시간
         worker_id: 워커 상태 추적용 ID (DB 저장)
+
+    예외 처리:
+        - _consecutive_errors: 연속 에러 카운트
+        - _max_consecutive_errors: 연속 에러 임계치 (기본 10회)
+        - _task_error_counts: 작업별 에러 카운트
     """
+
+    # 클래스 상수
+    DEFAULT_MAX_CONSECUTIVE_ERRORS = 10
+    DEFAULT_ERROR_BACKOFF_SECONDS = 5
 
     def __init__(
         self,
@@ -70,6 +87,12 @@ class BaseWorker(ABC):
 
         # 백그라운드 태스크 관리
         self._running_tasks: Set[asyncio.Task] = set()
+
+        # 예외 처리 관련
+        self._consecutive_errors: int = 0
+        self._max_consecutive_errors: int = self.DEFAULT_MAX_CONSECUTIVE_ERRORS
+        self._last_error: Optional[Exception] = None
+        self._task_error_counts: Dict[str, int] = defaultdict(int)
 
     @property
     def is_running(self) -> bool:
@@ -213,7 +236,13 @@ class BaseWorker(ABC):
     # ========== 내부 메서드 ==========
 
     async def _main_loop(self):
-        """메인 루프."""
+        """메인 루프 (예외 격리 강화).
+
+        Layer 2 예외 처리:
+        - while 루프 내 try/except로 모든 예외 캐치
+        - 예외 발생해도 루프 계속
+        - 연속 에러 카운트로 치명적 상황 감지
+        """
         interval = self._get_loop_interval()
         logger.info(f"[{self.name}] 메인 루프 시작 (간격: {interval}초)")
 
@@ -228,16 +257,46 @@ class BaseWorker(ABC):
                 # 메인 작업 실행
                 await self._main_loop_iteration()
 
+                # 성공 시 연속 에러 카운트 리셋
+                self._consecutive_errors = 0
+
                 # 대기
                 await self._wait_for_next_cycle(interval)
 
             except asyncio.CancelledError:
                 logger.info(f"[{self.name}] 메인 루프 취소됨")
-                break
+                raise  # 취소는 즉시 전파
 
             except Exception as e:
-                logger.error(f"[{self.name}] 메인 루프 오류: {e}", exc_info=True)
-                await asyncio.sleep(5)  # 오류 시 5초 대기 후 재시도
+                # 모든 예외 캐치, 로깅, 계속 실행
+                self._consecutive_errors += 1
+                self._last_error = e
+                self._task_error_counts[type(e).__name__] += 1
+
+                logger.error(
+                    f"[{self.name}] 메인 루프 오류 "
+                    f"({self._consecutive_errors}/{self._max_consecutive_errors}): {e}",
+                    exc_info=True
+                )
+
+                # 연속 에러 임계치 초과 시 상위로 전파
+                if self._consecutive_errors >= self._max_consecutive_errors:
+                    logger.critical(
+                        f"[{self.name}] 연속 에러 {self._max_consecutive_errors}회 초과. "
+                        f"워커 중단."
+                    )
+                    raise WorkerCriticalError(
+                        f"연속 에러 초과: {e}",
+                        worker_name=self.name,
+                        consecutive_errors=self._consecutive_errors
+                    ) from e
+
+                # 에러 후 백오프 대기
+                backoff_time = min(
+                    self.DEFAULT_ERROR_BACKOFF_SECONDS,
+                    self._consecutive_errors
+                )
+                await asyncio.sleep(backoff_time)
 
     async def _wait_for_next_cycle(self, interval: float):
         """다음 사이클까지 대기.
@@ -311,4 +370,54 @@ class BaseWorker(ABC):
             "uptime_seconds": self.uptime_seconds,
             "running_tasks": len(self._running_tasks),
             "start_time": self.start_time.isoformat() if self.start_time else None,
+            "consecutive_errors": self._consecutive_errors,
+            "task_error_counts": dict(self._task_error_counts),
         }
+
+    # ========== 예외 처리 헬퍼 ==========
+
+    async def _safe_execute(
+        self,
+        task_name: str,
+        coro_func: Callable[[], Awaitable]
+    ) -> bool:
+        """작업을 안전하게 실행 (Layer 3 예외 격리).
+
+        개별 작업의 예외를 격리하여 다른 작업에 영향을 주지 않습니다.
+        작업 실패해도 다음 작업이 계속됩니다.
+
+        Args:
+            task_name: 작업 이름 (로깅/추적용)
+            coro_func: 실행할 async 함수 (인자 없음)
+
+        Returns:
+            bool: 성공 시 True, 실패 시 False
+
+        사용 예시:
+            async def _main_loop_iteration(self):
+                await self._safe_execute("check_sessions", self._check_sessions)
+                await self._safe_execute("process_queue", self._process_queue)
+        """
+        try:
+            await coro_func()
+            return True
+
+        except asyncio.CancelledError:
+            raise  # 취소는 전파
+
+        except Exception as e:
+            # 작업 실패해도 다음 작업 계속
+            self._task_error_counts[task_name] += 1
+            logger.warning(
+                f"[{self.name}] 작업 '{task_name}' 실패 "
+                f"(총 {self._task_error_counts[task_name]}회): {e}",
+                exc_info=True
+            )
+            return False
+
+    def request_shutdown(self):
+        """종료 요청 (Orchestrator 호출용).
+
+        stop()의 별칭으로, Orchestrator에서 사용합니다.
+        """
+        self.stop()
