@@ -8,7 +8,7 @@ import os
 
 from sqlalchemy.orm import Session
 
-from app.models import InstagramWorkerStatus, InstagramCrawlRun
+from app.models import InstagramWorkerStatus, InstagramCrawlRun, InstagramCrawlRequest
 
 logger = logging.getLogger("instagram.worker_status")
 
@@ -67,20 +67,23 @@ class WorkerStatusService:
 
         logger.info(f"Worker registered: {worker_id} (PID: {worker_status.pid})")
         if orphaned_count > 0:
-            logger.info(f"Cleaned up {orphaned_count} orphaned crawl runs")
+            logger.info(f"Cleaned up {orphaned_count} orphaned records (runs + requests)")
 
         return worker_status
 
     def _cleanup_orphaned_runs(self) -> int:
-        """이전 워커 크래시로 인해 '실행중' 상태로 남은 orphaned run들을 정리합니다.
+        """이전 워커 크래시로 인해 '실행중' 상태로 남은 orphaned run/request들을 정리합니다.
 
-        finished_at이 NULL인 레코드들을 찾아 실패 처리합니다.
+        - InstagramCrawlRun: finished_at이 NULL인 레코드들을 찾아 실패 처리
+        - InstagramCrawlRequest: processing 상태인 레코드들을 찾아 실패 처리
 
         Returns:
             정리된 레코드 수
         """
         now = datetime.now()
+        total_cleaned = 0
 
+        # 1. Orphaned CrawlRun 정리
         orphaned_runs = self.db.query(InstagramCrawlRun).filter(
             InstagramCrawlRun.finished_at.is_(None)
         ).all()
@@ -93,8 +96,25 @@ class WorkerStatusService:
 
         if orphaned_runs:
             self.db.flush()
+            logger.info(f"Cleaned up {len(orphaned_runs)} orphaned crawl runs")
+        total_cleaned += len(orphaned_runs)
 
-        return len(orphaned_runs)
+        # 2. Orphaned CrawlRequest 정리 (processing 상태로 stuck된 것들)
+        orphaned_requests = self.db.query(InstagramCrawlRequest).filter(
+            InstagramCrawlRequest.status == "processing"
+        ).all()
+
+        for req in orphaned_requests:
+            req.status = "failed"
+            req.processed_at = now
+            req.error_message = "Worker crashed - marked as failed on restart"
+
+        if orphaned_requests:
+            self.db.flush()
+            logger.info(f"Cleaned up {len(orphaned_requests)} orphaned crawl requests")
+        total_cleaned += len(orphaned_requests)
+
+        return total_cleaned
 
     def update_heartbeat(self, worker_id: str) -> Optional[InstagramWorkerStatus]:
         """워커의 heartbeat를 업데이트합니다.

@@ -129,7 +129,7 @@ class CrawlWorkerBase(BaseWorker):
 
     # ========== Worker Status 관련 (DB 연동) ==========
 
-    def _register_worker(self):
+    def _register_worker_status(self):
         """워커 상태를 DB에 등록합니다.
 
         BaseWorker의 메서드를 오버라이드하여 WorkerStatusService 사용.
@@ -137,7 +137,7 @@ class CrawlWorkerBase(BaseWorker):
         db = SessionLocal()
         try:
             service = WorkerStatusService(db)
-            status = service.register_worker(worker_type=self.worker_type)
+            status = service.register_worker()
             self.worker_id = status.worker_id
             logger.info(f"[{self.name}] 워커 상태 등록 완료: worker_id={self.worker_id}")
         except Exception as e:
