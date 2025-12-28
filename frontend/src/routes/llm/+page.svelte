@@ -660,11 +660,11 @@
 					<p class="text-lg">그룹화된 이력이 없습니다</p>
 				</div>
 			{:else}
-				<div class="bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
-					<table class="w-full">
+				<div class="bg-white rounded-lg border border-gray-200 overflow-x-auto mb-6">
+					<table class="w-full min-w-[900px]">
 						<thead class="bg-gray-50 border-b border-gray-200">
 							<tr>
-								<th class="px-4 py-3 text-left">
+								<th class="px-4 py-3 text-left whitespace-nowrap">
 									<input
 										type="checkbox"
 										checked={groupSelectAll}
@@ -672,16 +672,16 @@
 										class="rounded"
 									/>
 								</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">타입</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">호출자 ID</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">요청내용</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">요청 수</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">성공</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">실패</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">대기</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">성공 여부</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">최근 상태</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">마지막 요청</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">타입</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">호출자 ID</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">요청내용</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">요청 수</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">성공</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">실패</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">대기</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">성공 여부</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">최근 상태</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">마지막 요청</th>
 							</tr>
 						</thead>
 						<tbody class="divide-y divide-gray-200">
@@ -755,11 +755,11 @@
 			</div>
 		{:else}
 			<!-- 개별 요청 목록 테이블 -->
-			<div class="bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
-				<table class="w-full">
+			<div class="bg-white rounded-lg border border-gray-200 overflow-x-auto mb-6">
+				<table class="w-full min-w-[700px]">
 					<thead class="bg-gray-50 border-b border-gray-200">
 						<tr>
-							<th class="px-4 py-3 text-left">
+							<th class="px-4 py-3 text-left whitespace-nowrap">
 								<input
 									type="checkbox"
 									checked={selectAll}
@@ -767,13 +767,13 @@
 									class="rounded"
 								/>
 							</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">타입</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">호출자 ID</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">요청자</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">상태</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">요청시간</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">액션</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">ID</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">타입</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">호출자 ID</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">요청자</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">상태</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">요청시간</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">액션</th>
 						</tr>
 					</thead>
 					<tbody class="divide-y divide-gray-200">
