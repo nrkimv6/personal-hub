@@ -357,10 +357,11 @@ class ContextManager:
             await self._bypass_automation_detection(context)
 
             proxy_info = f", proxy={proxy_config.get('server')}" if proxy_config else ""
-            logger.info(f"브라우저 컨텍스트 생성 완료 (service_account_id={service_account_id}, profile={account.profile_dir}{proxy_info})")
+            logger.info(f"브라우저 컨텍스트 생성 완료 (service_account_id={service_account_id}, profile={account.profile.profile_dir}{proxy_info})")
 
             # 마지막 사용 시간 업데이트
-            service_account_service.update_last_used(db, service_account_id)
+            from app.shared.browser_profile import browser_profile_service
+            browser_profile_service.update_last_used(db, account.profile_id)
 
             return context
 
@@ -456,13 +457,13 @@ class ContextManager:
             # 자동화 감지 방지
             await self._bypass_automation_detection(context)
 
-            logger.info(f"브라우저 컨텍스트 생성 완료 (service_account_id={service_account_id}, profile={account.profile_dir}, headless=False)")
+            logger.info(f"브라우저 컨텍스트 생성 완료 (service_account_id={service_account_id}, profile={account.profile.profile_dir}, headless=False)")
 
             # 컨텍스트 저장
             self.browser_contexts[service_account_id] = context
 
             # 마지막 사용 시간 업데이트
-            account_service.update_last_used(db, service_account_id)
+            service_account_service.update_last_used(db, service_account_id)
 
             return context
 

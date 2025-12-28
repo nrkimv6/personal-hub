@@ -23,7 +23,7 @@ sys.path.insert(0, str(project_root))
 
 from app.config import settings, logger
 from app.database import SessionLocal
-from app.services.account_service import account_service
+from app.shared.account import service_account_service
 from app.services.browser_service import BrowserService
 
 
@@ -47,7 +47,7 @@ async def test_browser_profile():
     print("2. 데이터베이스 계정 확인")
     db = SessionLocal()
     try:
-        accounts = account_service.get_all(db)
+        accounts = service_account_service.get_all(db)
         print(f"   총 계정 수: {len(accounts)}")
         for account in accounts:
             print(f"   - {account.name} (ID: {account.id})")
