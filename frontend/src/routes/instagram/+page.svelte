@@ -28,19 +28,29 @@
 	let loading = true;
 	let error: string | null = null;
 	let refreshInterval: number;
+	let abortController: AbortController | null = null;
 
 	async function fetchData() {
+		// 이전 요청 취소
+		abortController?.abort();
+		abortController = new AbortController();
+		const signal = abortController.signal;
+
 		try {
 			const [statsData, runsData, scheduleData] = await Promise.all([
-				instagramApi.stats(),
-				instagramApi.runs({ limit: 5 }),
-				instagramApi.todaySchedule()
+				instagramApi.stats({ signal }),
+				instagramApi.runs({ limit: 5 }, { signal }),
+				instagramApi.todaySchedule({ signal })
 			]);
 			stats = statsData;
 			recentRuns = runsData;
 			todaySchedule = scheduleData;
 			error = null;
 		} catch (e) {
+			// 취소된 요청은 무시
+			if (e instanceof Error && e.name === 'AbortError') {
+				return;
+			}
 			error = e instanceof Error ? e.message : '데이터 로드 실패';
 		} finally {
 			loading = false;
@@ -123,6 +133,7 @@
 
 	onDestroy(() => {
 		if (refreshInterval) clearInterval(refreshInterval);
+		abortController?.abort();  // 실행 중인 요청도 취소
 	});
 </script>
 
