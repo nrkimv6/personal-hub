@@ -28,10 +28,37 @@ function Write-Log {
 }
 
 Write-Log "Startup browser workers script started"
-Write-Log "Waiting $Delay seconds for services to initialize..."
 
-# 서비스가 시작될 때까지 대기
-Start-Sleep -Seconds $Delay
+# API 서버가 응답할 때까지 대기 (최대 5분)
+$apiUrl = "http://localhost:8001/health"
+$maxWait = 300  # 5분
+$waited = 0
+$checkInterval = 5
+
+Write-Log "Waiting for API server ($apiUrl) to be ready..."
+
+while ($waited -lt $maxWait) {
+    try {
+        $response = Invoke-WebRequest -Uri $apiUrl -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop
+        if ($response.StatusCode -eq 200) {
+            Write-Log "API server is ready after $waited seconds"
+            break
+        }
+    } catch {
+        # API 아직 안 됨
+    }
+
+    Start-Sleep -Seconds $checkInterval
+    $waited += $checkInterval
+
+    if ($waited % 30 -eq 0) {
+        Write-Log "Still waiting for API server... ($waited seconds elapsed)"
+    }
+}
+
+if ($waited -ge $maxWait) {
+    Write-Log "WARNING: API server not ready after $maxWait seconds, starting workers anyway"
+}
 
 Write-Log "Starting browser workers..."
 

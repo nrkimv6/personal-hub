@@ -213,6 +213,16 @@ class LLMService:
                 if npm_path not in env.get("PATH", ""):
                     env["PATH"] = npm_path + ";" + env.get("PATH", "")
 
+                # HOME/USERPROFILE 환경 변수 확인 및 설정
+                # 시작프로그램에서 실행 시 HOME이 설정되지 않을 수 있음
+                userprofile = env.get("USERPROFILE", "")
+                home = env.get("HOME", "")
+                if not home and userprofile:
+                    env["HOME"] = userprofile
+                    logger.debug(f"HOME 환경변수 설정: {userprofile}")
+
+                logger.debug(f"Claude CLI 실행 환경: HOME={env.get('HOME')}, USERPROFILE={env.get('USERPROFILE')}")
+
             try:
                 # 파일에서 프롬프트 읽어서 실행
                 # --tools "Read" 추가하여 이미지 파일 읽기 가능
