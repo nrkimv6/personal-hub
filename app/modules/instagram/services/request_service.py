@@ -418,6 +418,43 @@ class CrawlRequestService:
 
         return count
 
+    def cleanup_stale_pending_requests(self, timeout_minutes: int = 60) -> int:
+        """오래된 pending 상태 요청을 timeout 처리.
+
+        워커가 요청을 처리하지 못하고 오래 대기 중인 경우 타임아웃 처리합니다.
+
+        Args:
+            timeout_minutes: pending 상태 유지 시간 제한 (기본 60분)
+
+        Returns:
+            정리된 요청 수
+        """
+        cutoff_time = datetime.now() - timedelta(minutes=timeout_minutes)
+
+        stale_requests = (
+            self.db.query(InstagramCrawlRequest)
+            .filter(
+                InstagramCrawlRequest.status == "pending",
+                InstagramCrawlRequest.requested_at < cutoff_time,
+            )
+            .all()
+        )
+
+        count = 0
+        for request in stale_requests:
+            request.status = "failed"
+            request.error_message = f"Timeout: pending 상태가 {timeout_minutes}분 초과 (워커 미처리)"
+            count += 1
+            logger.warning(
+                f"Stale pending request {request.id} marked as failed (pending since {request.requested_at})"
+            )
+
+        if count > 0:
+            self.db.commit()
+            logger.info(f"Cleaned up {count} stale pending request(s)")
+
+        return count
+
     def get_requests_paginated(
         self,
         page: int = 1,

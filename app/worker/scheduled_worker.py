@@ -60,21 +60,63 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         """메인 루프 한 사이클.
 
         스케줄 설정을 확인하고, 실행 시간이 되면 크롤링을 시작합니다.
+        수동으로 생성된 feed 요청도 처리합니다.
         """
         # 완료된 태스크 정리
         self._cleanup_completed_tasks()
 
+        # 수동으로 생성된 pending feed 요청 처리
+        await self._dispatch_manual_feed_requests()
+
         # 스케줄 기반 실행 디스패치
         await self._dispatch_scheduled_runs()
 
-    def _cleanup_stale_requests(self):
-        """오래된 processing 상태 요청 정리."""
+    async def _dispatch_manual_feed_requests(self):
+        """수동으로 생성된 pending feed 요청을 처리합니다."""
         db = SessionLocal()
         try:
             request_service = CrawlRequestService(db)
-            cleaned = request_service.cleanup_stale_processing_requests(timeout_minutes=30)
-            if cleaned > 0:
-                logger.info(f"[{self.name}] {cleaned}개의 오래된 processing 요청 정리 완료")
+
+            # feed 타입의 pending 요청 조회 (manual로 생성된 것)
+            pending_requests = (
+                db.query(InstagramCrawlRequest)
+                .filter(
+                    InstagramCrawlRequest.status == "pending",
+                    InstagramCrawlRequest.request_type.in_(["feed", None]),
+                    InstagramCrawlRequest.requested_by == "manual",
+                )
+                .order_by(InstagramCrawlRequest.requested_at)
+                .limit(1)
+                .all()
+            )
+
+            for request in pending_requests:
+                task_name = f"feed_{request.id}"
+                if self._is_task_running(task_name):
+                    continue
+
+                task = self._create_task(
+                    self._execute_feed_crawl(request),
+                    task_name
+                )
+                logger.info(f"[{self.name}] 수동 피드 크롤링 태스크 시작: request_id={request.id}")
+
+        except Exception as e:
+            logger.error(f"[{self.name}] 수동 feed 요청 디스패치 오류: {e}", exc_info=True)
+        finally:
+            db.close()
+
+    def _cleanup_stale_requests(self):
+        """오래된 processing/pending 상태 요청 정리."""
+        db = SessionLocal()
+        try:
+            request_service = CrawlRequestService(db)
+            cleaned_processing = request_service.cleanup_stale_processing_requests(timeout_minutes=30)
+            cleaned_pending = request_service.cleanup_stale_pending_requests(timeout_minutes=60)
+            if cleaned_processing > 0:
+                logger.info(f"[{self.name}] {cleaned_processing}개의 오래된 processing 요청 정리 완료")
+            if cleaned_pending > 0:
+                logger.info(f"[{self.name}] {cleaned_pending}개의 오래된 pending 요청 정리 완료")
         except Exception as e:
             logger.error(f"[{self.name}] Stale request 정리 오류: {e}")
         finally:
