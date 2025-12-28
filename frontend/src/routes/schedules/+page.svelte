@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { scheduleApi, businessApi, accountApi, itemApi, scheduleRecurringApi } from '$lib/api';
-  import type { ScheduleWithContext, Business, BusinessWithItems, BizItem, Account, MonitorScheduleUpdate, MonitorScheduleCreate, RecurringRuleWithContext, RecurringRuleCreate, TargetPattern } from '$lib/types';
+  import { scheduleApi, businessApi, serviceAccountApi, itemApi, scheduleRecurringApi } from '$lib/api';
+  import type { ScheduleWithContext, Business, BusinessWithItems, BizItem, ServiceAccountWithProfile, MonitorScheduleUpdate, MonitorScheduleCreate, RecurringRuleWithContext, RecurringRuleCreate, TargetPattern } from '$lib/types';
   import AutoBookingList from '$lib/components/schedules/AutoBookingList.svelte';
   import MonitoringHistory from '$lib/components/MonitoringHistory.svelte';
   import BusinessManager from '$lib/components/businesses/BusinessManager.svelte';
