@@ -48,10 +48,22 @@ from ..services.url_parser import (
 )
 from ..services import PostService, CrawlService, CrawlRequestService
 from ..services.llm_classifier_service import LLMClassifierService
+from app.schemas.account import Account
 
 logger = logging.getLogger("instagram.api")
 
 router = APIRouter(prefix="/api/v1/instagram", tags=["instagram"])
+
+
+# ============== Accounts ==============
+
+@router.get("/accounts", response_model=List[Account])
+async def get_instagram_accounts(
+    db: Session = Depends(get_db),
+):
+    """Instagram 크롤링에 사용 가능한 계정 목록 조회."""
+    accounts = account_service.get_active_accounts(db)
+    return accounts
 
 
 # ============== Posts ==============
