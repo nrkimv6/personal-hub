@@ -8,7 +8,7 @@
 
   let schedules: ScheduleWithContext[] = [];
   let businesses: Business[] = [];
-  let accounts: Account[] = [];
+  let accounts: ServiceAccountWithProfile[] = [];
   let loading = true;
   let error: string | null = null;
 
@@ -566,7 +566,7 @@
 
   async function fetchAccounts() {
     try {
-      accounts = await accountApi.listActive();
+      accounts = await serviceAccountApi.listActive('naver');
     } catch (e) {
       console.error('계정 목록 로드 실패:', e);
     }
@@ -1412,7 +1412,7 @@
           <select id="edit-account" class="input" bind:value={editForm.service_account_id}>
             <option value={null}>기본 계정</option>
             {#each accounts as account}
-              <option value={account.id}>{account.name}</option>
+              <option value={account.id}>{account.profile_name}</option>
             {/each}
           </select>
         </div>
@@ -1512,7 +1512,7 @@
             <select id="create-account" class="input" bind:value={createForm.service_account_id}>
               <option value={null}>기본 계정</option>
               {#each accounts as account}
-                <option value={account.id}>{account.name}</option>
+                <option value={account.id}>{account.profile_name}</option>
               {/each}
             </select>
           </div>
@@ -1607,7 +1607,7 @@
           <select id="dup-account" class="input" bind:value={duplicateForm.service_account_id}>
             <option value={null}>기본 계정</option>
             {#each accounts as account}
-              <option value={account.id}>{account.name}</option>
+              <option value={account.id}>{account.profile_name}</option>
             {/each}
           </select>
         </div>
@@ -1699,7 +1699,7 @@
           <select id="recurring-account" class="input" bind:value={recurringForm.service_account_id}>
             <option value={null}>계정 선택 안함</option>
             {#each accounts as account}
-              <option value={account.id}>{account.name}</option>
+              <option value={account.id}>{account.profile_name}</option>
             {/each}
           </select>
         </div>
@@ -1932,7 +1932,7 @@
           <select id="recurring-edit-account" class="input" bind:value={recurringEditForm.service_account_id}>
             <option value={null}>계정 선택 안함</option>
             {#each accounts as account}
-              <option value={account.id}>{account.name}</option>
+              <option value={account.id}>{account.profile_name}</option>
             {/each}
           </select>
         </div>
