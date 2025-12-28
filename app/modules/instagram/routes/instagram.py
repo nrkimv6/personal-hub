@@ -480,7 +480,7 @@ async def crawl_post_by_url(
         raise HTTPException(status_code=400, detail="Invalid Instagram post URL. Must be in format: https://www.instagram.com/p/...")
 
     # 계정 존재 확인
-    account = account_service.get_by_id(db, body.service_account_id)
+    account = service_account_service.get_by_id(db, body.service_account_id)
     if not account:
         raise HTTPException(status_code=404, detail=f"Account {body.service_account_id} not found")
 
@@ -528,7 +528,7 @@ async def crawl_by_generic_url(
         )
 
     # 계정 존재 확인
-    account = account_service.get_by_id(db, body.service_account_id)
+    account = service_account_service.get_by_id(db, body.service_account_id)
     if not account:
         raise HTTPException(status_code=404, detail=f"Account {body.service_account_id} not found")
 
@@ -934,7 +934,7 @@ async def open_login_browser(
     지정된 계정의 브라우저 프로필로 Instagram 로그인 페이지를 엽니다.
     사용자가 수동으로 로그인하면 세션이 저장됩니다.
     """
-    account = account_service.get_by_id(db, service_account_id)
+    account = service_account_service.get_by_id(db, service_account_id)
     if not account:
         raise HTTPException(status_code=404, detail=f"Account {service_account_id} not found")
 
@@ -963,7 +963,7 @@ async def check_login_status(
 
     지정된 계정으로 Instagram에 접속하여 로그인 상태를 확인하고 DB를 업데이트합니다.
     """
-    account = account_service.get_by_id(db, service_account_id)
+    account = service_account_service.get_by_id(db, service_account_id)
     if not account:
         raise HTTPException(status_code=404, detail=f"Account {service_account_id} not found")
 
