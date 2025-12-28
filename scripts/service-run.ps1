@@ -23,14 +23,12 @@ if ($Dev) {
     $AppMode = "development"
     $LogDir = Join-Path $ProjectRoot "logs\dev"
     $PidSuffix = "_dev"
-    $RunWorkers = $true
 } else {
     $ApiPort = 8000
     $FrontendPort = 5173
     $AppMode = "production"
     $LogDir = Join-Path $ProjectRoot "logs"
     $PidSuffix = ""
-    $RunWorkers = $false
 }
 
 # Ensure directories exist
@@ -257,34 +255,21 @@ $frontendProcess = Start-Process -FilePath "npm.cmd" `
 $frontendProcess.Id | Out-File $FrontendPidFile -Encoding ascii
 Write-ServiceLog "Frontend started (PID: $($frontendProcess.Id))"
 
-# ---- Start Workers (Dev mode only) ----
-if ($RunWorkers) {
-    # Note: Browser-based workers (monitor_worker, crawl_worker) are NOT started here.
-    # They require user session (headed browser) and are started via:
-    #   - Startup program: startup-browser-workers.ps1 (auto on login)
-    #   - Manual: browser-workers.ps1 -Action start
-    #
-    # Workers that require user session:
-    #   - monitor_worker: Uses Playwright browser
-    #   - crawl_worker: Uses Playwright browser
-    #   - llm_worker: Uses Claude CLI which requires user session for login credentials
-    #
-    # See: docs/auto-start/2025-12-27-browser-worker-separation.md
-    Write-ServiceLog "Browser workers (monitor, crawl) will be started via startup program"
-
-    # Claude Worker Watchdog (no browser needed - uses CLI subprocess)
-    Write-ServiceLog "Starting Claude Watchdog..."
-    $ClaudeWatchdogPidFile = Join-Path $PidDir "claude_watchdog$PidSuffix.pid"
-    $claudeWatchdogProcess = Start-Process -FilePath "powershell.exe" `
-        -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\claude-watchdog.ps1" `
-        -WorkingDirectory $ProjectRoot `
-        -WindowStyle Hidden `
-        -PassThru
-    $claudeWatchdogProcess.Id | Out-File $ClaudeWatchdogPidFile -Encoding ascii
-    Write-ServiceLog "Claude Watchdog started (PID: $($claudeWatchdogProcess.Id))"
-
-    Start-Sleep -Seconds 2
-}
+# ---- Workers Note ----
+# All browser-based workers are NOT started here.
+# NSSM service runs in Session 0, which cannot use headed browsers.
+#
+# Workers are started via startup program (user session):
+#   - Startup program: startup-browser-workers.ps1 (auto on login)
+#   - Manual: browser-workers.ps1 -Action start
+#
+# Workers that require user session (headed browser):
+#   - monitor_worker: Uses Playwright browser for Naver booking
+#   - crawl_worker: Uses Playwright browser for Instagram
+#   - claude_worker: Uses Playwright browser for web scraping
+#
+# See: docs/auto-start/README.md
+Write-ServiceLog "All workers will be started via startup program (requires user session)"
 
 # ============================================================
 # STEP 3: Run API Server in Foreground (NSSM monitors this)
