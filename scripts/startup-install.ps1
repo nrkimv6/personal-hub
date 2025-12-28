@@ -63,7 +63,7 @@ switch ($Action) {
         Write-Host "On next login:" -ForegroundColor Yellow
         Write-Host "  1. Wait 15 seconds - Log viewer window opens"
         if ($IncludeWorkers) {
-            Write-Host "  2. Wait 20 seconds - Browser workers start (monitor_worker, instagram_worker)"
+            Write-Host "  2. Wait 20 seconds - Browser workers start (crawl_worker)"
         }
         Write-Host ""
     }
