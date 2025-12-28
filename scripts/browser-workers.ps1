@@ -81,10 +81,10 @@ function Start-BrowserWorkers {
         Write-Log "Monitor Worker Watchdog already running" "WARN"
     } else {
         Write-Log "Starting Monitor Worker Watchdog..."
-        # Pass APP_MODE via command to ensure it's set in child process
-        $watchdogCmd = "`$env:APP_MODE='development'; & '$ScriptDir\worker-watchdog.ps1'"
+        # Set APP_MODE environment variable for child process
+        $env:APP_MODE = "development"
         $watchdogProcess = Start-Process -FilePath "powershell.exe" `
-            -ArgumentList "-ExecutionPolicy", "Bypass", "-Command", $watchdogCmd `
+            -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\worker-watchdog.ps1" `
             -WorkingDirectory $ProjectRoot `
             -WindowStyle Hidden `
             -PassThru
@@ -98,10 +98,10 @@ function Start-BrowserWorkers {
         Write-Log "Crawl Worker Watchdog already running" "WARN"
     } else {
         Write-Log "Starting Crawl Worker Watchdog..."
-        # Pass APP_MODE via command to ensure it's set in child process
-        $crawlWatchdogCmd = "`$env:APP_MODE='development'; & '$ScriptDir\crawl-watchdog.ps1'"
+        # Set APP_MODE environment variable for child process
+        $env:APP_MODE = "development"
         $crawlWatchdogProcess = Start-Process -FilePath "powershell.exe" `
-            -ArgumentList "-ExecutionPolicy", "Bypass", "-Command", $crawlWatchdogCmd `
+            -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\crawl-watchdog.ps1" `
             -WorkingDirectory $ProjectRoot `
             -WindowStyle Hidden `
             -PassThru
@@ -115,10 +115,10 @@ function Start-BrowserWorkers {
         Write-Log "Claude Worker Watchdog already running" "WARN"
     } else {
         Write-Log "Starting Claude Worker Watchdog..."
-        # Pass APP_MODE via command to ensure it's set in child process
-        $claudeWatchdogCmd = "`$env:APP_MODE='development'; & '$ScriptDir\claude-watchdog.ps1'"
+        # Set APP_MODE environment variable for child process
+        $env:APP_MODE = "development"
         $claudeWatchdogProcess = Start-Process -FilePath "powershell.exe" `
-            -ArgumentList "-ExecutionPolicy", "Bypass", "-Command", $claudeWatchdogCmd `
+            -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\claude-watchdog.ps1" `
             -WorkingDirectory $ProjectRoot `
             -WindowStyle Hidden `
             -PassThru

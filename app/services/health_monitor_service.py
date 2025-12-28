@@ -84,14 +84,16 @@ class RecentAlert:
 
 
 # 서비스별 PID 파일과 예상 포트 매핑
+# process_name이 있으면 PID 파일 대신 프로세스 이름으로 직접 찾음 (Windows 서비스용)
+# expected_process: PID 파일의 프로세스가 이 이름인지 검증 (잘못된 PID 감지용)
 SERVICE_CONFIG = {
-    "api": {"pid_file": "api.pid", "port": 8000},
-    "api_dev": {"pid_file": "api_dev.pid", "port": 8001},
-    "frontend": {"pid_file": "frontend.pid", "port": 5173},
-    "frontend_dev": {"pid_file": "frontend_dev.pid", "port": 5174},
-    "worker": {"pid_file": "worker.pid", "port": None},
-    "worker_dev": {"pid_file": "worker_dev.pid", "port": None},
-    "cloudflared": {"pid_file": "cloudflared.pid", "port": None},
+    "api": {"pid_file": "api.pid", "port": 8000, "expected_process": "python"},
+    "api_dev": {"pid_file": "api_dev.pid", "port": 8001, "expected_process": "python"},
+    "frontend": {"pid_file": "frontend.pid", "port": 5173, "expected_process": "node"},
+    "frontend_dev": {"pid_file": "frontend_dev.pid", "port": 5174, "expected_process": "node"},
+    "worker": {"pid_file": "worker.pid", "port": None, "expected_process": "python"},
+    "worker_dev": {"pid_file": "worker_dev.pid", "port": None, "expected_process": "python"},
+    "cloudflared": {"process_name": "cloudflared", "port": None},  # Windows 서비스로 관리됨
 }
 
 
@@ -125,13 +127,39 @@ class HealthMonitorService:
             logger.debug(f"PID 파일 읽기 실패 ({service_name}): {e}")
             return None
 
-    def check_process_exists(self, pid: int) -> bool:
-        """PID가 실제로 실행 중인지 확인"""
+    def check_process_exists(self, pid: int, expected_name: str = None) -> bool:
+        """PID가 실제로 실행 중인지 확인
+
+        Args:
+            pid: 확인할 프로세스 ID
+            expected_name: 예상 프로세스 이름 (예: 'python'). None이면 이름 검증 생략
+        """
         try:
             process = psutil.Process(pid)
-            return process.is_running()
+            if not process.is_running():
+                return False
+
+            # 프로세스 이름 검증 (worker가 실제 python인지 확인)
+            if expected_name:
+                proc_name = process.name().lower()
+                # python.exe 또는 python3.exe 등
+                if expected_name.lower() not in proc_name:
+                    logger.debug(f"PID {pid} is {proc_name}, expected {expected_name}")
+                    return False
+
+            return True
         except psutil.NoSuchProcess:
             return False
+
+    def find_process_by_name(self, process_name: str) -> Optional[int]:
+        """프로세스 이름으로 PID 찾기 (Windows 서비스용)"""
+        try:
+            for proc in psutil.process_iter(['pid', 'name']):
+                if proc.info['name'] and proc.info['name'].lower() == f"{process_name}.exe".lower():
+                    return proc.info['pid']
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+        return None
 
     def get_port_owner(self, port: int) -> Optional[int]:
         """특정 포트를 점유하고 있는 PID 반환"""
@@ -171,8 +199,36 @@ class HealthMonitorService:
                 error_message="Unknown service"
             )
 
-        saved_pid = self.read_pid_file(service_name)
         expected_port = config.get("port")
+
+        # process_name이 설정된 경우 (Windows 서비스): 프로세스 이름으로 직접 찾기
+        if "process_name" in config:
+            process_name = config["process_name"]
+            found_pid = self.find_process_by_name(process_name)
+            if found_pid:
+                return ServiceHealth(
+                    name=service_name,
+                    status=ServiceStatus.HEALTHY,
+                    last_check=datetime.now(),
+                    failure_count=0,
+                    error_message=None,
+                    pid=found_pid,
+                    expected_port=expected_port
+                )
+            else:
+                return ServiceHealth(
+                    name=service_name,
+                    status=ServiceStatus.UNHEALTHY,
+                    last_check=datetime.now(),
+                    failure_count=self._get_failure_count(service_name) + 1,
+                    error_message=f"Process '{process_name}' not running",
+                    pid=None,
+                    expected_port=expected_port
+                )
+
+        # PID 파일 기반 체크
+        saved_pid = self.read_pid_file(service_name)
+        expected_process = config.get("expected_process")
 
         # 1. PID 파일 없음
         if saved_pid is None:
@@ -186,8 +242,8 @@ class HealthMonitorService:
                 expected_port=expected_port
             )
 
-        # 2. 프로세스 존재 확인
-        if not self.check_process_exists(saved_pid):
+        # 2. 프로세스 존재 및 이름 확인 (잘못된 PID 감지)
+        if not self.check_process_exists(saved_pid, expected_process):
             return ServiceHealth(
                 name=service_name,
                 status=ServiceStatus.UNHEALTHY,
