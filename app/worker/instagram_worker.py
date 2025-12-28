@@ -46,7 +46,7 @@ try:
     from app.database import SessionLocal
     logger.debug("app.database import 완료")
 
-    from app.models import Account, InstagramCrawlRequest, InstagramCrawlRun, InstagramScheduleConfig
+    from app.models import Account, ServiceAccount, InstagramCrawlRequest, InstagramCrawlRun, InstagramScheduleConfig
     logger.debug("app.models import 완료")
 
     from app.modules.instagram.services.request_service import CrawlRequestService
@@ -758,14 +758,14 @@ class InstagramWorker:
         while retry_count <= max_retries:
             try:
                 # 계정 확인
-                account = db.query(Account).filter(Account.id == request.service_account_id).first()
+                account = db.query(ServiceAccount).filter(ServiceAccount.id == request.service_account_id).first()
                 if not account:
                     request_service.mark_failed(request.id, "계정을 찾을 수 없음")
                     logger.warning(f"계정 없음: service_account_id={request.service_account_id}")
                     return
 
                 # 워커 상태를 crawling으로 변경
-                self._update_worker_state("crawling", account.name)
+                self._update_worker_state("crawling", account.identifier)
 
                 # TabPoolManager를 통해 탭 획득
                 tab = await self._get_tab_for_request(request.id, account.id)
@@ -854,14 +854,14 @@ class InstagramWorker:
                     return
 
                 # 계정 확인
-                account = db.query(Account).filter(Account.id == request.service_account_id).first()
+                account = db.query(ServiceAccount).filter(ServiceAccount.id == request.service_account_id).first()
                 if not account:
                     request_service.mark_failed(request.id, "계정을 찾을 수 없음")
                     logger.warning(f"계정 없음: service_account_id={request.service_account_id}")
                     return
 
                 # 워커 상태를 recrawling으로 변경
-                self._update_worker_state("recrawling", account.name)
+                self._update_worker_state("recrawling", account.identifier)
 
                 # TabPoolManager를 통해 탭 획득
                 tab = await self._get_tab_for_request(request.id, account.id)
@@ -935,14 +935,14 @@ class InstagramWorker:
                     return
 
                 # 계정 확인
-                account = db.query(Account).filter(Account.id == request.service_account_id).first()
+                account = db.query(ServiceAccount).filter(ServiceAccount.id == request.service_account_id).first()
                 if not account:
                     request_service.mark_failed(request.id, "계정을 찾을 수 없음")
                     logger.warning(f"계정 없음: service_account_id={request.service_account_id}")
                     return
 
                 # 워커 상태를 crawling으로 변경
-                self._update_worker_state("crawling", account.name)
+                self._update_worker_state("crawling", account.identifier)
 
                 # TabPoolManager를 통해 탭 획득
                 tab = await self._get_tab_for_request(request.id, account.id)
