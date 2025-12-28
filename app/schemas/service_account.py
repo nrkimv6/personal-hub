@@ -6,7 +6,13 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional, Dict, Any
 
-from app.schemas.account import BookingInfo
+
+class BookingInfo(BaseModel):
+    """예약 시 사용할 개인정보 (네이버 예약 전용)"""
+    phone_last4: Optional[str] = Field(None, description="전화번호 뒷자리 4자리")
+    visitor_name: Optional[str] = Field(None, description="실방문자 성함 (미입력 시 예매자 이름 사용)")
+    is_member: Optional[str] = Field("네", description="가입 여부 (기본: 네)")
+    has_visited: Optional[str] = Field("네", description="방문 여부 (기본: 네)")
 
 
 class ServiceAccountBase(BaseModel):

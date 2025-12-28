@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.services.browser_service import get_browser_service
-from app.services.account_service import account_service
+from app.shared.service_account import service_account_service
 from app.core.config import settings
 from ..models.schemas import (
     PostSchema,
@@ -48,7 +48,7 @@ from ..services.url_parser import (
 )
 from ..services import PostService, CrawlService, CrawlRequestService
 from ..services.llm_classifier_service import LLMClassifierService
-from app.schemas.account import Account
+from app.schemas.service_account import ServiceAccountWithProfile
 
 logger = logging.getLogger("instagram.api")
 
@@ -57,13 +57,27 @@ router = APIRouter(prefix="/api/v1/instagram", tags=["instagram"])
 
 # ============== Accounts ==============
 
-@router.get("/accounts", response_model=List[Account])
+@router.get("/accounts", response_model=List[ServiceAccountWithProfile])
 async def get_instagram_accounts(
     db: Session = Depends(get_db),
 ):
-    """Instagram 크롤링에 사용 가능한 계정 목록 조회."""
-    accounts = account_service.get_active_accounts(db)
-    return accounts
+    """Instagram 크롤링에 사용 가능한 서비스 계정 목록 조회."""
+    accounts = service_account_service.get_active_accounts_by_type(db, "instagram")
+    result = []
+    for acc in accounts:
+        result.append({
+            "id": acc.id,
+            "profile_id": acc.profile_id,
+            "service_type": acc.service_type,
+            "identifier": acc.identifier,
+            "is_logged_in": acc.is_logged_in,
+            "credentials": acc.credentials,
+            "created_at": acc.created_at,
+            "updated_at": acc.updated_at,
+            "profile_name": acc.profile.name if acc.profile else None,
+            "profile_dir": acc.profile.profile_dir if acc.profile else None,
+        })
+    return result
 
 
 # ============== Posts ==============
