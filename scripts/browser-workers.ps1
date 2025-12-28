@@ -1,5 +1,5 @@
 # Browser Workers Management Script
-# Manages browser-based workers (monitor_worker, crawl_worker) for user session execution
+# Manages browser-based workers via WorkerOrchestrator for user session execution
 #
 # Usage:
 #   .\scripts\browser-workers.ps1 -Action start    # Start browser workers
@@ -8,6 +8,11 @@
 #   .\scripts\browser-workers.ps1 -Action status   # Show status
 #
 # Note: This script is for Dev mode only (browser workers require user session)
+#
+# Architecture:
+#   - All workers (Naver, Instagram, Universal) run via WorkerOrchestrator
+#   - Single entry point: app.worker.main
+#   - Claude worker runs separately
 
 param(
     [Parameter(Mandatory=$true)]
@@ -33,10 +38,13 @@ if (-not (Test-Path $PidDir)) {
     New-Item -ItemType Directory -Path $PidDir -Force | Out-Null
 }
 
-# PID files for browser workers
-$WatchdogPidFile = Join-Path $PidDir "watchdog$PidSuffix.pid"
-$CrawlWatchdogPidFile = Join-Path $PidDir "crawl_watchdog$PidSuffix.pid"
+# PID files - unified worker watchdog + Claude
+$WorkerWatchdogPidFile = Join-Path $PidDir "worker_watchdog$PidSuffix.pid"
 $ClaudeWatchdogPidFile = Join-Path $PidDir "claude_watchdog$PidSuffix.pid"
+
+# Legacy PID files (for cleanup)
+$LegacyWatchdogPidFile = Join-Path $PidDir "watchdog$PidSuffix.pid"
+$LegacyCrawlWatchdogPidFile = Join-Path $PidDir "crawl_watchdog$PidSuffix.pid"
 
 function Write-Log {
     param([string]$Message, [string]$Level = "INFO")
@@ -67,55 +75,75 @@ function Test-ProcessRunning {
     return $null -ne $proc
 }
 
+function Stop-LegacyWatchdogs {
+    # Clean up legacy watchdog processes (old monitor_worker + crawl_worker separate watchdogs)
+    foreach ($legacyPidFile in @($LegacyWatchdogPidFile, $LegacyCrawlWatchdogPidFile)) {
+        if (Test-Path $legacyPidFile) {
+            $savedPid = Get-Content $legacyPidFile -ErrorAction SilentlyContinue
+            if ($savedPid) {
+                $proc = Get-Process -Id $savedPid -ErrorAction SilentlyContinue
+                if ($proc) {
+                    Write-Log "Stopping legacy watchdog (PID: $savedPid)..." "WARN"
+                    Stop-Process -Id $savedPid -Force -ErrorAction SilentlyContinue
+                }
+            }
+            Remove-Item $legacyPidFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    # Stop legacy worker processes
+    $LegacyWorkerPidFile = Join-Path $PidDir "worker$PidSuffix.pid"
+    $LegacyCrawlWorkerPidFile = Join-Path $PidDir "crawl_worker$PidSuffix.pid"
+
+    foreach ($legacyPidFile in @($LegacyWorkerPidFile, $LegacyCrawlWorkerPidFile)) {
+        if (Test-Path $legacyPidFile) {
+            $savedPid = Get-Content $legacyPidFile -ErrorAction SilentlyContinue
+            if ($savedPid) {
+                $proc = Get-Process -Id $savedPid -ErrorAction SilentlyContinue
+                if ($proc) {
+                    Write-Log "Stopping legacy worker (PID: $savedPid)..." "WARN"
+                    Stop-Process -Id $savedPid -Force -ErrorAction SilentlyContinue
+                }
+            }
+            Remove-Item $legacyPidFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Start-BrowserWorkers {
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host "  Starting Browser Workers" -ForegroundColor Cyan
+    Write-Host "  (WorkerOrchestrator Architecture)" -ForegroundColor Gray
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host ""
 
+    # First, clean up any legacy processes
+    Stop-LegacyWatchdogs
+
     $started = 0
 
-    # Start Monitor Worker Watchdog
-    if (Test-ProcessRunning $WatchdogPidFile) {
-        Write-Log "Monitor Worker Watchdog already running" "WARN"
+    # Start Unified Worker Watchdog (Naver + Instagram + Universal via WorkerOrchestrator)
+    if (Test-ProcessRunning $WorkerWatchdogPidFile) {
+        Write-Log "Worker Watchdog already running" "WARN"
     } else {
-        Write-Log "Starting Monitor Worker Watchdog..."
-        # Set APP_MODE environment variable for child process
+        Write-Log "Starting Worker Watchdog (all workers via WorkerOrchestrator)..."
         $env:APP_MODE = "development"
         $watchdogProcess = Start-Process -FilePath "powershell.exe" `
-            -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\worker-watchdog.ps1" `
+            -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\unified-worker-watchdog.ps1" `
             -WorkingDirectory $ProjectRoot `
             -WindowStyle Hidden `
             -PassThru
-        $watchdogProcess.Id | Out-File $WatchdogPidFile -Encoding ascii
-        Write-Log "Monitor Worker Watchdog started (PID: $($watchdogProcess.Id))" "OK"
+        $watchdogProcess.Id | Out-File $WorkerWatchdogPidFile -Encoding ascii
+        Write-Log "Worker Watchdog started (PID: $($watchdogProcess.Id))" "OK"
         $started++
     }
 
-    # Start Crawl Worker Watchdog (Instagram + Universal)
-    if (Test-ProcessRunning $CrawlWatchdogPidFile) {
-        Write-Log "Crawl Worker Watchdog already running" "WARN"
-    } else {
-        Write-Log "Starting Crawl Worker Watchdog..."
-        # Set APP_MODE environment variable for child process
-        $env:APP_MODE = "development"
-        $crawlWatchdogProcess = Start-Process -FilePath "powershell.exe" `
-            -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\crawl-watchdog.ps1" `
-            -WorkingDirectory $ProjectRoot `
-            -WindowStyle Hidden `
-            -PassThru
-        $crawlWatchdogProcess.Id | Out-File $CrawlWatchdogPidFile -Encoding ascii
-        Write-Log "Crawl Worker Watchdog started (PID: $($crawlWatchdogProcess.Id))" "OK"
-        $started++
-    }
-
-    # Start Claude Worker Watchdog
+    # Start Claude Worker Watchdog (separate process)
     if (Test-ProcessRunning $ClaudeWatchdogPidFile) {
         Write-Log "Claude Worker Watchdog already running" "WARN"
     } else {
         Write-Log "Starting Claude Worker Watchdog..."
-        # Set APP_MODE environment variable for child process
         $env:APP_MODE = "development"
         $claudeWatchdogProcess = Start-Process -FilePath "powershell.exe" `
             -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\claude-watchdog.ps1" `
@@ -129,10 +157,10 @@ function Start-BrowserWorkers {
 
     if ($started -gt 0) {
         Write-Host ""
-        Write-Log "$started browser worker(s) started" "OK"
+        Write-Log "$started watchdog(s) started" "OK"
     } else {
         Write-Host ""
-        Write-Log "All browser workers already running" "WARN"
+        Write-Log "All watchdogs already running" "WARN"
     }
 }
 
@@ -145,34 +173,19 @@ function Stop-BrowserWorkers {
 
     $stopped = 0
 
-    # Stop Monitor Worker Watchdog
-    if (Test-Path $WatchdogPidFile) {
-        $savedPid = Get-Content $WatchdogPidFile -ErrorAction SilentlyContinue
+    # Stop Worker Watchdog (unified)
+    if (Test-Path $WorkerWatchdogPidFile) {
+        $savedPid = Get-Content $WorkerWatchdogPidFile -ErrorAction SilentlyContinue
         if ($savedPid) {
             $proc = Get-Process -Id $savedPid -ErrorAction SilentlyContinue
             if ($proc) {
-                Write-Log "Stopping Monitor Worker Watchdog (PID: $savedPid)..."
+                Write-Log "Stopping Worker Watchdog (PID: $savedPid)..."
                 Stop-Process -Id $savedPid -Force -ErrorAction SilentlyContinue
-                Write-Log "Monitor Worker Watchdog stopped" "OK"
+                Write-Log "Worker Watchdog stopped" "OK"
                 $stopped++
             }
         }
-        Remove-Item $WatchdogPidFile -Force -ErrorAction SilentlyContinue
-    }
-
-    # Stop Crawl Worker Watchdog
-    if (Test-Path $CrawlWatchdogPidFile) {
-        $savedPid = Get-Content $CrawlWatchdogPidFile -ErrorAction SilentlyContinue
-        if ($savedPid) {
-            $proc = Get-Process -Id $savedPid -ErrorAction SilentlyContinue
-            if ($proc) {
-                Write-Log "Stopping Crawl Worker Watchdog (PID: $savedPid)..."
-                Stop-Process -Id $savedPid -Force -ErrorAction SilentlyContinue
-                Write-Log "Crawl Worker Watchdog stopped" "OK"
-                $stopped++
-            }
-        }
-        Remove-Item $CrawlWatchdogPidFile -Force -ErrorAction SilentlyContinue
+        Remove-Item $WorkerWatchdogPidFile -Force -ErrorAction SilentlyContinue
     }
 
     # Stop Claude Worker Watchdog
@@ -190,12 +203,11 @@ function Stop-BrowserWorkers {
         Remove-Item $ClaudeWatchdogPidFile -Force -ErrorAction SilentlyContinue
     }
 
-    # Also stop the actual worker processes (they may linger after watchdog stops)
-    $WorkerPidFile = Join-Path $PidDir "worker$PidSuffix.pid"
-    $CrawlWorkerPidFile = Join-Path $PidDir "crawl_worker$PidSuffix.pid"
-    $ClaudeWorkerPidFile = Join-Path $PidDir "llm_worker$PidSuffix.pid"
+    # Stop actual worker processes
+    $UnifiedWorkerPidFile = Join-Path $PidDir "unified_worker$PidSuffix.pid"
+    $ClaudeWorkerPidFile = Join-Path $PidDir "claude_worker$PidSuffix.pid"
 
-    foreach ($pidFile in @($WorkerPidFile, $CrawlWorkerPidFile, $ClaudeWorkerPidFile)) {
+    foreach ($pidFile in @($UnifiedWorkerPidFile, $ClaudeWorkerPidFile)) {
         if (Test-Path $pidFile) {
             $savedPid = Get-Content $pidFile -ErrorAction SilentlyContinue
             if ($savedPid) {
@@ -209,12 +221,15 @@ function Stop-BrowserWorkers {
         }
     }
 
+    # Also clean up legacy processes
+    Stop-LegacyWatchdogs
+
     if ($stopped -gt 0) {
         Write-Host ""
-        Write-Log "$stopped browser worker(s) stopped" "OK"
+        Write-Log "$stopped watchdog(s) stopped" "OK"
     } else {
         Write-Host ""
-        Write-Log "No browser workers were running" "WARN"
+        Write-Log "No watchdogs were running" "WARN"
     }
 }
 
@@ -222,22 +237,14 @@ function Show-Status {
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host "  Browser Workers Status" -ForegroundColor Cyan
+    Write-Host "  (WorkerOrchestrator Architecture)" -ForegroundColor Gray
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host ""
 
-    # Monitor Worker Watchdog
-    Write-Host "Monitor Worker Watchdog:" -ForegroundColor White
-    if (Test-ProcessRunning $WatchdogPidFile) {
-        $savedPid = Get-Content $WatchdogPidFile
-        Write-Host "  [+] Running (PID: $savedPid)" -ForegroundColor Green
-    } else {
-        Write-Host "  [-] Not running" -ForegroundColor Yellow
-    }
-
-    # Crawl Worker Watchdog
-    Write-Host "Crawl Worker Watchdog:" -ForegroundColor White
-    if (Test-ProcessRunning $CrawlWatchdogPidFile) {
-        $savedPid = Get-Content $CrawlWatchdogPidFile
+    # Unified Worker Watchdog
+    Write-Host "Worker Watchdog (Naver + Instagram + Universal):" -ForegroundColor White
+    if (Test-ProcessRunning $WorkerWatchdogPidFile) {
+        $savedPid = Get-Content $WorkerWatchdogPidFile
         Write-Host "  [+] Running (PID: $savedPid)" -ForegroundColor Green
     } else {
         Write-Host "  [-] Not running" -ForegroundColor Yellow
@@ -253,25 +260,19 @@ function Show-Status {
     }
 
     # Actual worker processes
-    $WorkerPidFile = Join-Path $PidDir "worker$PidSuffix.pid"
-    $CrawlWorkerPidFile = Join-Path $PidDir "crawl_worker$PidSuffix.pid"
-    $ClaudeWorkerPidFile = Join-Path $PidDir "llm_worker$PidSuffix.pid"
+    $UnifiedWorkerPidFile = Join-Path $PidDir "unified_worker$PidSuffix.pid"
+    $ClaudeWorkerPidFile = Join-Path $PidDir "claude_worker$PidSuffix.pid"
 
     Write-Host ""
     Write-Host "Worker Processes:" -ForegroundColor White
 
-    Write-Host "  Monitor Worker:" -ForegroundColor Gray
-    if (Test-ProcessRunning $WorkerPidFile) {
-        $savedPid = Get-Content $WorkerPidFile
+    Write-Host "  Unified Worker (via Orchestrator):" -ForegroundColor Gray
+    if (Test-ProcessRunning $UnifiedWorkerPidFile) {
+        $savedPid = Get-Content $UnifiedWorkerPidFile
         Write-Host "    [+] Running (PID: $savedPid)" -ForegroundColor Green
-    } else {
-        Write-Host "    [-] Not running" -ForegroundColor Yellow
-    }
-
-    Write-Host "  Crawl Worker:" -ForegroundColor Gray
-    if (Test-ProcessRunning $CrawlWorkerPidFile) {
-        $savedPid = Get-Content $CrawlWorkerPidFile
-        Write-Host "    [+] Running (PID: $savedPid)" -ForegroundColor Green
+        Write-Host "        -> NaverMonitorWorker" -ForegroundColor DarkGray
+        Write-Host "        -> ScheduledCrawlWorker" -ForegroundColor DarkGray
+        Write-Host "        -> OnDemandCrawlWorker" -ForegroundColor DarkGray
     } else {
         Write-Host "    [-] Not running" -ForegroundColor Yellow
     }
@@ -282,6 +283,30 @@ function Show-Status {
         Write-Host "    [+] Running (PID: $savedPid)" -ForegroundColor Green
     } else {
         Write-Host "    [-] Not running" -ForegroundColor Yellow
+    }
+
+    # Check for legacy processes
+    $hasLegacy = $false
+    foreach ($legacyFile in @($LegacyWatchdogPidFile, $LegacyCrawlWatchdogPidFile)) {
+        if (Test-ProcessRunning $legacyFile) {
+            $hasLegacy = $true
+            break
+        }
+    }
+
+    if ($hasLegacy) {
+        Write-Host ""
+        Write-Host "Legacy Processes (should be cleaned up):" -ForegroundColor Yellow
+        if (Test-ProcessRunning $LegacyWatchdogPidFile) {
+            $savedPid = Get-Content $LegacyWatchdogPidFile
+            Write-Host "  [!] Legacy Monitor Watchdog (PID: $savedPid)" -ForegroundColor Yellow
+        }
+        if (Test-ProcessRunning $LegacyCrawlWatchdogPidFile) {
+            $savedPid = Get-Content $LegacyCrawlWatchdogPidFile
+            Write-Host "  [!] Legacy Crawl Watchdog (PID: $savedPid)" -ForegroundColor Yellow
+        }
+        Write-Host ""
+        Write-Host "Run 'browser-workers.ps1 -Action restart' to clean up legacy processes" -ForegroundColor DarkYellow
     }
 
     Write-Host ""

@@ -1,4 +1,17 @@
-# Monitor Worker Watchdog Script
+# [DEPRECATED] Monitor Worker Watchdog Script
+#
+# DEPRECATED: This script is obsolete. Use unified-worker-watchdog.ps1 instead.
+# The legacy monitor_worker.py has been replaced by:
+#   - app/worker/main.py (unified entry point)
+#   - WorkerOrchestrator manages all workers
+#   - NaverMonitorWorker replaces monitor_worker.py
+#
+# For browser workers, use: browser-workers.ps1 -Action start
+#
+# ============================================================
+# [LEGACY CODE BELOW - DO NOT USE]
+# ============================================================
+#
 # Monitors the worker process and automatically restarts it if it crashes
 # Usage: .\scripts\worker-watchdog.ps1
 

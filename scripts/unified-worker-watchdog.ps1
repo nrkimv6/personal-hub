@@ -1,18 +1,19 @@
-# [DEPRECATED] Crawl Worker Watchdog Script
+# Unified Worker Watchdog Script
+# Monitors the unified worker process (all workers via WorkerOrchestrator) and automatically restarts if it crashes
 #
-# DEPRECATED: This script is obsolete. Use unified-worker-watchdog.ps1 instead.
-# All workers are now managed by WorkerOrchestrator:
-#   - app/worker/main.py (unified entry point)
-#   - NaverMonitorWorker + ScheduledCrawlWorker + OnDemandCrawlWorker
+# Workers managed:
+#   - NaverMonitorWorker: Naver booking monitoring/sniping
+#   - ScheduledCrawlWorker: Instagram scheduled feed crawling
+#   - OnDemandCrawlWorker: Instagram on-demand + Universal crawling
 #
-# For browser workers, use: browser-workers.ps1 -Action start
+# Usage: .\scripts\unified-worker-watchdog.ps1
 #
-# ============================================================
-# [LEGACY CODE BELOW - DO NOT USE]
-# ============================================================
-#
-# Monitors the crawl worker process (Instagram + Universal) and automatically restarts it if it crashes
-# Usage: .\scripts\crawl-watchdog.ps1
+# Architecture:
+#   Layer 0: This Watchdog (PowerShell) - restarts process on crash
+#   Layer 1: WorkerOrchestrator - supervises worker tasks
+#   Layer 2: BaseWorker._main_loop() - consecutive error tracking
+#   Layer 3: Worker._safe_execute() - individual task isolation
+#   Layer 4: BrowserManager - tab-level exception handling
 
 param(
     [int]$CheckInterval = 10,     # Check every 10 seconds
@@ -34,7 +35,7 @@ if ($isDev) {
     $PidSuffix = ""
 }
 $PidDir = Join-Path $ProjectRoot ".pids"
-$WorkerPidFile = Join-Path $PidDir "crawl_worker$PidSuffix.pid"
+$WorkerPidFile = Join-Path $PidDir "unified_worker$PidSuffix.pid"
 
 # Ensure directories exist
 if (-not (Test-Path $LogDir)) {
@@ -61,16 +62,16 @@ function Write-Log {
         }
     )
     # Also log to file
-    $logFile = Join-Path $LogDir "crawl_watchdog.log"
+    $logFile = Join-Path $LogDir "unified_watchdog.log"
     Add-Content -Path $logFile -Value $logMessage -Encoding UTF8
 }
 
-function Start-CrawlWorker {
+function Start-UnifiedWorker {
     $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $stdoutLogFile = Join-Path $LogDir "stdout_crawl_$Timestamp.log"
-    $stderrLogFile = Join-Path $LogDir "stderr_crawl_$Timestamp.log"
+    $stdoutLogFile = Join-Path $LogDir "stdout_unified_worker_$Timestamp.log"
+    $stderrLogFile = Join-Path $LogDir "stderr_unified_worker_$Timestamp.log"
 
-    Write-Log "Starting Crawl worker process (Instagram + Universal)..."
+    Write-Log "Starting unified worker process (all workers via WorkerOrchestrator)..."
 
     # Use venv python explicitly
     $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
@@ -88,8 +89,7 @@ function Start-CrawlWorker {
     $env:PYTHONIOENCODING = "utf-8"
     $env:APP_MODE = if ($isDev) { "development" } else { "production" }
 
-    # Start python directly (NOT via cmd.exe) to get correct PID
-    # Using new unified main entry point that runs both ScheduledCrawlWorker and OnDemandCrawlWorker
+    # Start python directly - runs all workers via WorkerOrchestrator
     $workerProcess = Start-Process -FilePath $VenvPython `
         -ArgumentList "-m", "app.worker.main" `
         -WorkingDirectory $ProjectRoot `
@@ -101,11 +101,14 @@ function Start-CrawlWorker {
     # Save PID
     $workerProcess.Id | Out-File $WorkerPidFile -Encoding ascii
 
-    Write-Log "Crawl worker started with PID: $($workerProcess.Id)"
+    Write-Log "Unified worker started with PID: $($workerProcess.Id)"
+    Write-Log "  -> NaverMonitorWorker"
+    Write-Log "  -> ScheduledCrawlWorker"
+    Write-Log "  -> OnDemandCrawlWorker"
     return $workerProcess.Id
 }
 
-function Test-CrawlWorkerRunning {
+function Test-UnifiedWorkerRunning {
     if (-not (Test-Path $WorkerPidFile)) {
         return $false
     }
@@ -119,21 +122,21 @@ function Test-CrawlWorkerRunning {
     return ($null -ne $process)
 }
 
-# Kill any orphaned crawl worker processes before starting
-function Stop-OrphanedCrawlWorkers {
-    Write-Log "Checking for orphaned crawl worker processes..."
+# Kill any orphaned worker processes before starting
+function Stop-OrphanedWorkers {
+    Write-Log "Checking for orphaned worker processes..."
     $killedCount = 0
 
-    # Find all python processes running crawl workers
+    # Find all python processes running app.worker.main
     $pythonProcs = Get-Process -Name "python*" -ErrorAction SilentlyContinue
     foreach ($proc in $pythonProcs) {
         try {
             $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($proc.Id)" -ErrorAction SilentlyContinue).CommandLine
-            if ($cmdLine -and ($cmdLine -like "*app.worker.main*")) {
+            if ($cmdLine -and $cmdLine -like "*app.worker.main*") {
                 # Check if this is our managed worker
                 $savedPid = if (Test-Path $WorkerPidFile) { Get-Content $WorkerPidFile -ErrorAction SilentlyContinue } else { $null }
                 if ($proc.Id -ne $savedPid) {
-                    Write-Log "Killing orphaned crawl worker (PID: $($proc.Id))" "WARN"
+                    Write-Log "Killing orphaned unified worker (PID: $($proc.Id))" "WARN"
                     Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
                     $killedCount++
                 }
@@ -144,14 +147,15 @@ function Stop-OrphanedCrawlWorkers {
     }
 
     if ($killedCount -gt 0) {
-        Write-Log "Killed $killedCount orphaned crawl worker(s)"
+        Write-Log "Killed $killedCount orphaned worker(s)"
         Start-Sleep -Seconds 2  # Wait for processes to fully terminate
     }
 }
 
 # Main watchdog loop
 Write-Log "=" * 50
-Write-Log "Crawl Worker Watchdog Started (Instagram + Universal)"
+Write-Log "Unified Worker Watchdog Started"
+Write-Log "(WorkerOrchestrator Architecture)"
 Write-Log "Check interval: ${CheckInterval}s"
 Write-Log "Max restarts: $MaxRestarts in ${RestartWindow}s"
 Write-Log "=" * 50
@@ -160,12 +164,12 @@ Write-Log "=" * 50
 Set-Location $ProjectRoot
 
 # Kill orphaned workers before starting
-Stop-OrphanedCrawlWorkers
+Stop-OrphanedWorkers
 
 # Initial check
-if (-not (Test-CrawlWorkerRunning)) {
-    Write-Log "Crawl worker not running, starting..." "WARN"
-    Start-CrawlWorker
+if (-not (Test-UnifiedWorkerRunning)) {
+    Write-Log "Unified worker not running, starting..." "WARN"
+    Start-UnifiedWorker
     $restartCount++
     $lastRestartTime = Get-Date
 }
@@ -184,28 +188,28 @@ try {
         }
 
         # Check if worker is running
-        if (-not (Test-CrawlWorkerRunning)) {
-            Write-Log "Crawl worker process died!" "ERROR"
+        if (-not (Test-UnifiedWorkerRunning)) {
+            Write-Log "Unified worker process died!" "ERROR"
 
             # Check restart limit
             if ($restartCount -ge $MaxRestarts) {
                 Write-Log "Maximum restart limit ($MaxRestarts) reached in ${RestartWindow}s window!" "ERROR"
-                Write-Log "Please check the crawl worker logs for the root cause." "ERROR"
+                Write-Log "Please check the worker logs for the root cause." "ERROR"
                 Write-Log "Watchdog stopping to prevent restart loop." "ERROR"
                 break
             }
 
             # Restart
-            Write-Log "Restarting crawl worker (attempt $($restartCount + 1)/$MaxRestarts)..." "WARN"
-            Start-CrawlWorker
+            Write-Log "Restarting unified worker (attempt $($restartCount + 1)/$MaxRestarts)..." "WARN"
+            Start-UnifiedWorker
             $restartCount++
             $lastRestartTime = Get-Date
         }
     }
 }
 catch {
-    Write-Log "Crawl Watchdog error: $_" "ERROR"
+    Write-Log "Watchdog error: $_" "ERROR"
 }
 finally {
-    Write-Log "Crawl Watchdog stopped"
+    Write-Log "Watchdog stopped"
 }
