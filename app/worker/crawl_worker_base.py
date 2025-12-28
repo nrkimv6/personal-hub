@@ -48,15 +48,26 @@ class CrawlWorkerBase(BaseWorker):
         "Target closed",
     ]
 
-    def __init__(self, name: str, worker_type: str = "crawl"):
+    def __init__(
+        self,
+        name: str,
+        worker_type: str = "crawl",
+        browser_manager: Optional[BrowserManager] = None
+    ):
         """CrawlWorkerBase 초기화.
 
         Args:
             name: 워커 이름
             worker_type: 워커 타입 (scheduled, ondemand 등)
+            browser_manager: 외부에서 주입받을 BrowserManager (None이면 자체 생성)
         """
-        # BrowserManager 생성
-        browser_manager = BrowserManager()
+        # BrowserManager: 외부 주입 또는 자체 생성
+        if browser_manager is None:
+            browser_manager = BrowserManager()
+            self._owns_browser = True  # 자체 생성 시 cleanup 책임
+        else:
+            self._owns_browser = False  # 외부 주입 시 cleanup 책임 없음
+
         super().__init__(name, browser_manager)
 
         self.worker_type = worker_type
@@ -82,8 +93,8 @@ class CrawlWorkerBase(BaseWorker):
 
     async def _on_stop(self):
         """종료 시 정리 훅."""
-        # 브라우저 매니저 정리
-        if self.browser and self.browser.is_initialized:
+        # 브라우저 매니저 정리 (자체 생성한 경우에만)
+        if self._owns_browser and self.browser and self.browser.is_initialized:
             try:
                 await self.browser.cleanup()
                 logger.info(f"[{self.name}] 브라우저 매니저 정리 완료")

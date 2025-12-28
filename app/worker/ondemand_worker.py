@@ -48,13 +48,18 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
         max_concurrent_requests: 동시 처리 가능한 최대 요청 수
     """
 
-    def __init__(self, max_concurrent_requests: int = 5):
+    def __init__(self, max_concurrent_requests: int = 5, browser_manager=None):
         """OnDemandCrawlWorker 초기화.
 
         Args:
             max_concurrent_requests: 동시 처리 가능한 최대 요청 수. 기본 5.
+            browser_manager: 외부에서 주입받을 BrowserManager (None이면 자체 생성)
         """
-        super().__init__(name="ondemand_worker", worker_type="ondemand")
+        super().__init__(
+            name="ondemand_worker",
+            worker_type="ondemand",
+            browser_manager=browser_manager
+        )
         self.max_concurrent_requests = max_concurrent_requests
         self._extractor_factory = get_extractor_factory()
 

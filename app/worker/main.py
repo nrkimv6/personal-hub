@@ -1,19 +1,23 @@
 """
-통합 크롤링 워커 메인 진입점.
+통합 워커 메인 진입점.
 
-두 가지 워커를 동시에 실행합니다:
+WorkerOrchestrator를 사용하여 모든 워커를 관리합니다:
+- NaverMonitorWorker: 네이버 예약 모니터링/스나이핑
 - ScheduledCrawlWorker: 스케줄 기반 Instagram 피드 크롤링
 - OnDemandCrawlWorker: 온디맨드 (Instagram 개별 + Universal) 크롤링
 
 실행 방법:
-    python -m app.worker.main                # 모든 워커 실행
-    python -m app.worker.main --scheduled    # 스케줄 워커만
-    python -m app.worker.main --ondemand     # 온디맨드 워커만
+    python -m app.worker.main                  # 모든 워커 실행
+    python -m app.worker.main --naver          # 네이버 워커만
+    python -m app.worker.main --scheduled      # 스케줄 워커만
+    python -m app.worker.main --ondemand       # 온디맨드 워커만
+    python -m app.worker.main --crawl          # 크롤 워커만 (scheduled + ondemand)
 
 주요 기능:
-    - 두 워커의 동시 실행 및 관리
+    - WorkerOrchestrator를 통한 중앙 집중식 워커 관리
+    - BrowserManager 공유 (한 프로세스에서 하나의 브라우저)
+    - 4계층 예외 격리 아키텍처
     - 시그널 핸들링 (SIGINT, SIGTERM)
-    - 비동기 로깅 통합
 """
 import asyncio
 import sys
@@ -32,16 +36,18 @@ from app.utils.async_logger import AsyncLoggerManager
 
 # 워커 전용 비동기 로거 설정
 logger = AsyncLoggerManager.setup_worker_logger(
-    log_prefix="crawl_worker",
+    log_prefix="worker",
     log_dir=Path("logs"),
     level=logging.DEBUG
 )
-logger.info(f"통합 크롤링 워커 로거 초기화 완료 - 로그 파일: {logger.log_file}")
+logger.info(f"통합 워커 로거 초기화 완료 - 로그 파일: {logger.log_file}")
 
 # 모듈 import
 try:
     logger.info("모듈 import 시작...")
 
+    from app.worker.orchestrator import WorkerOrchestrator
+    from app.worker.naver_monitor_worker import NaverMonitorWorker
     from app.worker.scheduled_worker import ScheduledCrawlWorker
     from app.worker.ondemand_worker import OnDemandCrawlWorker
 
@@ -50,12 +56,18 @@ try:
     for logger_name in [
         # 크롤러 관련
         'instagram.crawler', 'instagram.crawl_service', 'instagram.post_service', 'universal_crawl',
-        # 워커 관련 (누락되어 있던 것들)
+        # 워커 관련
         'app.shared.worker.base_worker',
+        'app.worker.orchestrator',
+        'app.worker.naver_monitor_worker',
         'app.worker.scheduled_worker',
         'app.worker.ondemand_worker',
         'app.worker.crawl_worker_base',
         'instagram.worker_status',
+        # 브라우저 관련
+        'app.shared.browser.browser_manager',
+        'app.shared.browser.context_manager',
+        'app.shared.browser.tab_pool_manager',
     ]:
         sub_logger = logging.getLogger(logger_name)
         sub_logger.setLevel(logging.DEBUG)
@@ -90,62 +102,66 @@ def handle_exception(loop, context):
         logger.error(f"[ASYNC-ERROR] Traceback:\n{tb_str}")
 
 
-async def run_workers(run_scheduled: bool = True, run_ondemand: bool = True):
-    """워커들을 실행합니다.
+async def run_with_orchestrator(
+    run_naver: bool = True,
+    run_scheduled: bool = True,
+    run_ondemand: bool = True
+):
+    """WorkerOrchestrator를 사용하여 워커들을 실행합니다.
 
     Args:
+        run_naver: 네이버 워커 실행 여부
         run_scheduled: 스케줄 워커 실행 여부
         run_ondemand: 온디맨드 워커 실행 여부
     """
-    workers = []
-
-    if run_scheduled:
-        scheduled_worker = ScheduledCrawlWorker()
-        workers.append(("scheduled", scheduled_worker))
-        logger.info("ScheduledCrawlWorker 생성됨")
-
-    if run_ondemand:
-        ondemand_worker = OnDemandCrawlWorker()
-        workers.append(("ondemand", ondemand_worker))
-        logger.info("OnDemandCrawlWorker 생성됨")
-
-    if not workers:
-        logger.error("실행할 워커가 없습니다.")
-        return
+    orchestrator = WorkerOrchestrator()
 
     # 시그널 핸들러 설정
-    shutdown_event = asyncio.Event()
-
     def signal_handler(signum, frame):
         logger.info(f"종료 시그널 수신: {signum}")
-        shutdown_event.set()
-        for name, worker in workers:
-            worker.stop()
+        asyncio.create_task(orchestrator.shutdown())
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # 워커 태스크 생성
-    tasks = []
-    for name, worker in workers:
-        task = asyncio.create_task(worker.start(), name=f"worker_{name}")
-        tasks.append(task)
-        logger.info(f"{name} 워커 태스크 시작")
-
     try:
-        # 모든 워커가 완료될 때까지 대기
-        await asyncio.gather(*tasks, return_exceptions=True)
-    except asyncio.CancelledError:
-        logger.info("워커 태스크 취소됨")
+        # 오케스트레이터 초기화 (BrowserManager 초기화 포함)
+        await orchestrator.initialize()
+
+        # 워커 등록 (BrowserManager 공유)
+        if run_naver:
+            naver_worker = NaverMonitorWorker(
+                browser_manager=orchestrator.browser_manager
+            )
+            orchestrator.register_worker("naver", naver_worker)
+            logger.info("NaverMonitorWorker 등록됨")
+
+        if run_scheduled:
+            scheduled_worker = ScheduledCrawlWorker(
+                browser_manager=orchestrator.browser_manager
+            )
+            orchestrator.register_worker("scheduled", scheduled_worker)
+            logger.info("ScheduledCrawlWorker 등록됨")
+
+        if run_ondemand:
+            ondemand_worker = OnDemandCrawlWorker(
+                browser_manager=orchestrator.browser_manager
+            )
+            orchestrator.register_worker("ondemand", ondemand_worker)
+            logger.info("OnDemandCrawlWorker 등록됨")
+
+        if not orchestrator.workers:
+            logger.error("실행할 워커가 없습니다.")
+            return
+
+        # 모든 워커 실행
+        await orchestrator.run()
+
+    except Exception as e:
+        logger.critical(f"오케스트레이터 실행 중 오류: {e}", exc_info=True)
+        raise
     finally:
-        # 정리
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+        await orchestrator.shutdown()
 
 
 async def main(args):
@@ -155,28 +171,38 @@ async def main(args):
     loop.set_exception_handler(handle_exception)
 
     logger.info("=" * 50)
-    logger.info("통합 크롤링 워커 프로세스 시작")
+    logger.info("통합 워커 프로세스 시작 (WorkerOrchestrator)")
     logger.info(f"PID: {os.getpid()}")
     logger.info(f"Python 버전: {sys.version}")
-    logger.info(f"실행 모드: scheduled={args.scheduled or args.all}, ondemand={args.ondemand or args.all}")
+    logger.info(
+        f"실행 모드: naver={args.naver or args.all}, "
+        f"scheduled={args.scheduled or args.crawl or args.all}, "
+        f"ondemand={args.ondemand or args.crawl or args.all}"
+    )
     logger.info("=" * 50)
 
     try:
-        await run_workers(
-            run_scheduled=args.scheduled or args.all,
-            run_ondemand=args.ondemand or args.all,
+        await run_with_orchestrator(
+            run_naver=args.naver or args.all,
+            run_scheduled=args.scheduled or args.crawl or args.all,
+            run_ondemand=args.ondemand or args.crawl or args.all,
         )
     except Exception as e:
         logger.critical(f"워커 치명적 오류: {e}", exc_info=True)
         sys.exit(1)
     finally:
-        logger.info("통합 크롤링 워커 프로세스 종료")
+        logger.info("통합 워커 프로세스 종료")
         AsyncLoggerManager.shutdown()
 
 
 def parse_args():
     """명령행 인자 파싱."""
-    parser = argparse.ArgumentParser(description="통합 크롤링 워커")
+    parser = argparse.ArgumentParser(description="통합 워커 (WorkerOrchestrator)")
+    parser.add_argument(
+        "--naver",
+        action="store_true",
+        help="네이버 워커만 실행",
+    )
     parser.add_argument(
         "--scheduled",
         action="store_true",
@@ -188,6 +214,11 @@ def parse_args():
         help="온디맨드 워커만 실행",
     )
     parser.add_argument(
+        "--crawl",
+        action="store_true",
+        help="크롤 워커만 실행 (scheduled + ondemand)",
+    )
+    parser.add_argument(
         "--all",
         action="store_true",
         default=True,
@@ -196,8 +227,8 @@ def parse_args():
 
     args = parser.parse_args()
 
-    # --scheduled 또는 --ondemand가 지정되면 --all은 False
-    if args.scheduled or args.ondemand:
+    # 개별 옵션이 지정되면 --all은 False
+    if args.naver or args.scheduled or args.ondemand or args.crawl:
         args.all = False
 
     return args

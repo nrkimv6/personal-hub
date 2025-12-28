@@ -43,13 +43,18 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         check_interval: 스케줄 확인 간격 (초)
     """
 
-    def __init__(self, check_interval: int = 30):
+    def __init__(self, check_interval: int = 30, browser_manager=None):
         """ScheduledCrawlWorker 초기화.
 
         Args:
             check_interval: 스케줄 확인 간격 (초). 기본 30초.
+            browser_manager: 외부에서 주입받을 BrowserManager (None이면 자체 생성)
         """
-        super().__init__(name="scheduled_worker", worker_type="scheduled")
+        super().__init__(
+            name="scheduled_worker",
+            worker_type="scheduled",
+            browser_manager=browser_manager
+        )
         self.check_interval = check_interval
 
     def _get_loop_interval(self) -> float:
