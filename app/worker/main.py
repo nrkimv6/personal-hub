@@ -45,9 +45,18 @@ try:
     from app.worker.scheduled_worker import ScheduledCrawlWorker
     from app.worker.ondemand_worker import OnDemandCrawlWorker
 
-    # 크롤러 관련 로거들이 워커 로거와 같은 핸들러를 사용하도록 설정
+    # 크롤러 및 워커 관련 로거들이 워커 로거와 같은 핸들러를 사용하도록 설정
     worker_handlers = logger.handlers
-    for logger_name in ['instagram.crawler', 'instagram.crawl_service', 'instagram.post_service', 'universal_crawl']:
+    for logger_name in [
+        # 크롤러 관련
+        'instagram.crawler', 'instagram.crawl_service', 'instagram.post_service', 'universal_crawl',
+        # 워커 관련 (누락되어 있던 것들)
+        'app.shared.worker.base_worker',
+        'app.worker.scheduled_worker',
+        'app.worker.ondemand_worker',
+        'app.worker.crawl_worker_base',
+        'instagram.worker_status',
+    ]:
         sub_logger = logging.getLogger(logger_name)
         sub_logger.setLevel(logging.DEBUG)
         for handler in worker_handlers:
