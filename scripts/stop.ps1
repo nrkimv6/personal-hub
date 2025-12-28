@@ -173,7 +173,7 @@ if ($pythonProcs) {
                 }
             }
             # Worker processes don't have port in command line, check by path pattern
-            if (-not $isTargetEnv -and ($cmd -match "app\.worker" -or $cmd -match "claude_worker" -or $cmd -match "instagram_worker")) {
+            if (-not $isTargetEnv -and ($cmd -match "app\.worker" -or $cmd -match "claude_worker")) {
                 # For dev mode, include if path contains monitor-page
                 if ($cmd -match "monitor-page") {
                     $isTargetEnv = $true

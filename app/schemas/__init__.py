@@ -1,15 +1,6 @@
 """
 스키마 모듈
 """
-from app.schemas.account import (
-    AccountBase,
-    AccountCreate,
-    AccountUpdate,
-    Account,
-    AccountWithItems,
-    AccountLoginStatus,
-    BookingInfo,
-)
 from app.schemas.browser_profile import (
     BrowserProfileBase,
     BrowserProfileCreate,
@@ -18,6 +9,7 @@ from app.schemas.browser_profile import (
     BrowserProfileWithAccounts,
 )
 from app.schemas.service_account import (
+    BookingInfo,
     ServiceAccountBase,
     ServiceAccountCreate,
     ServiceAccountUpdate,
@@ -83,14 +75,6 @@ from app.schemas.universal_crawl import (
 )
 
 __all__ = [
-    # account
-    "AccountBase",
-    "AccountCreate",
-    "AccountUpdate",
-    "Account",
-    "AccountWithItems",
-    "AccountLoginStatus",
-    "BookingInfo",
     # browser_profile
     "BrowserProfileBase",
     "BrowserProfileCreate",
@@ -98,6 +82,7 @@ __all__ = [
     "BrowserProfile",
     "BrowserProfileWithAccounts",
     # service_account
+    "BookingInfo",
     "ServiceAccountBase",
     "ServiceAccountCreate",
     "ServiceAccountUpdate",

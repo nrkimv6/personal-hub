@@ -316,19 +316,19 @@ class TestRecrawlAPIEndpoint:
 class TestWorkerSinglePostProcessing:
     """워커 single_post 처리 테스트"""
 
-    def test_worker_has_execute_single_post_recrawl_method(self):
-        """워커에 _execute_single_post_recrawl 메서드 존재"""
-        from app.worker.instagram_worker import InstagramWorker
+    def test_ondemand_worker_has_execute_single_post_recrawl_method(self):
+        """OnDemandCrawlWorker에 _execute_single_post_recrawl 메서드 존재"""
+        from app.worker.ondemand_worker import OnDemandCrawlWorker
 
-        worker = InstagramWorker()
+        worker = OnDemandCrawlWorker(browser_manager=None)
         assert hasattr(worker, '_execute_single_post_recrawl')
         assert callable(worker._execute_single_post_recrawl)
 
-    def test_worker_has_execute_feed_crawl_method(self):
-        """워커에 _execute_feed_crawl 메서드 존재 (기존 로직 분리)"""
-        from app.worker.instagram_worker import InstagramWorker
+    def test_scheduled_worker_has_execute_feed_crawl_method(self):
+        """ScheduledCrawlWorker에 _execute_feed_crawl 메서드 존재"""
+        from app.worker.scheduled_worker import ScheduledCrawlWorker
 
-        worker = InstagramWorker()
+        worker = ScheduledCrawlWorker(browser_manager=None)
         assert hasattr(worker, '_execute_feed_crawl')
         assert callable(worker._execute_feed_crawl)
 
