@@ -103,7 +103,14 @@
 			return;
 		}
 		if (isAnonymous) {
-			filterEventStatus = (tab === 'online' || tab === 'offline') ? 'ending_today' : null;
+			// 운영모드: 온라인은 내일까지, 오프라인은 진행중
+			if (tab === 'online') {
+				filterEventStatus = 'ending_tomorrow';
+			} else if (tab === 'offline') {
+				filterEventStatus = 'ongoing';
+			} else {
+				filterEventStatus = null;
+			}
 		} else if (tab === 'online' || tab === 'offline') {
 			filterEventStatus = 'ongoing';
 		} else if (tab === 'popup') {
@@ -583,9 +590,15 @@
 			showEventModal = true;
 		}
 
-		// 익명 사용자 필터 설정
+		// 익명 사용자(운영모드) 필터 설정
 		if (!$isLoggedIn) {
-			filterEventStatus = (activeTab === 'online' || activeTab === 'offline') ? 'ending_today' : null;
+			if (activeTab === 'online') {
+				filterEventStatus = 'ending_tomorrow';
+			} else if (activeTab === 'offline') {
+				filterEventStatus = 'ongoing';
+			} else {
+				filterEventStatus = null;
+			}
 		}
 
 		fetchEvents();
@@ -621,9 +634,13 @@
 		<div class="flex items-center gap-2">
 			{#if isAnonymous}
 				<!-- 익명 사용자: 필터 비활성화, 고정 배지만 표시 -->
-				{#if activeTab === 'online' || activeTab === 'offline'}
+				{#if activeTab === 'online'}
 					<span class="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-700 rounded-full">
-						오늘 마감
+						내일까지
+					</span>
+				{:else if activeTab === 'offline'}
+					<span class="px-2 py-1 text-xs font-medium bg-green-100 text-green-700 rounded-full">
+						진행중
 					</span>
 				{:else}
 					<span class="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded-full">
