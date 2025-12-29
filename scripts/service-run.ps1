@@ -260,20 +260,26 @@ if ($Dev) {
         Write-ServiceLog "Removed .env.local"
     }
 
-    # Build frontend
+    # Build frontend using cmd.exe for proper output redirection
     Write-ServiceLog "Building frontend for production..."
     $buildLogFile = Join-Path $LogDir "frontend_build_$Timestamp.log"
-    $buildResult = Start-Process -FilePath "npm.cmd" `
-        -ArgumentList "run", "build" `
-        -WorkingDirectory $FrontendDir `
-        -Wait -NoNewWindow `
-        -RedirectStandardOutput $buildLogFile `
-        -RedirectStandardError $buildLogFile `
+
+    # Use cmd /c to run npm build with output redirection
+    $buildResult = Start-Process -FilePath "cmd.exe" `
+        -ArgumentList "/c", "cd /d `"$FrontendDir`" && npm run build > `"$buildLogFile`" 2>&1" `
+        -Wait -WindowStyle Hidden `
         -PassThru
 
     if ($buildResult.ExitCode -ne 0) {
         Write-ServiceLog "ERROR: Frontend build failed (exit code: $($buildResult.ExitCode))"
         Write-ServiceLog "Check build log: $buildLogFile"
+        # Show last few lines of build log
+        if (Test-Path $buildLogFile) {
+            $lastLines = Get-Content $buildLogFile -Tail 10
+            foreach ($line in $lastLines) {
+                Write-ServiceLog "  $line"
+            }
+        }
         exit 1
     }
     Write-ServiceLog "Frontend build completed"
