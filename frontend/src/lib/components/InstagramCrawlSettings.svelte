@@ -6,13 +6,13 @@
 		InstagramTimeWindow,
 		InstagramTodayScheduleItem,
 		InstagramCrawlRequest,
-		Account
+		ServiceAccountWithProfile
 	} from '$lib/types';
 
 	let config: InstagramScheduleConfig | null = null;
 	let todaySchedule: InstagramTodayScheduleItem[] = [];
 	let pendingRequests: InstagramCrawlRequest[] = [];
-	let accounts: Account[] = [];
+	let accounts: ServiceAccountWithProfile[] = [];
 	let loading = true;
 	let saving = false;
 	let requesting = false;
@@ -232,7 +232,7 @@
 								<option value={null}>-- 계정 선택 --</option>
 								{#each accounts as account}
 									<option value={account.id}>
-										{account.name}
+										{account.profile_name}
 										{account.is_logged_in ? '(로그인됨)' : '(로그인 필요)'}
 									</option>
 								{/each}

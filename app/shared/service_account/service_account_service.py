@@ -70,6 +70,16 @@ class ServiceAccountService:
             BrowserProfile.is_active == True
         ).order_by(BrowserProfile.name).all()
 
+    def get_all_active_accounts(self, db: Session) -> List[ServiceAccount]:
+        """활성 프로필의 모든 서비스 계정 조회"""
+        return db.query(ServiceAccount).options(
+            joinedload(ServiceAccount.profile)
+        ).join(
+            BrowserProfile
+        ).filter(
+            BrowserProfile.is_active == True
+        ).order_by(BrowserProfile.name, ServiceAccount.service_type).all()
+
     def create(
         self,
         db: Session,
