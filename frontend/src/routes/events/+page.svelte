@@ -759,11 +759,14 @@
 			{showFilters}
 			{filterDeadlineDate}
 			{deadlineCounts}
+			{filterSearch}
 			onStatusFilterChange={handleStatusFilterChange}
 			onBookmarkedFilterToggle={handleBookmarkedFilterToggle}
 			onUnknownPeriodToggle={handleUnknownPeriodToggle}
 			onShowFiltersChange={(v) => (showFilters = v)}
 			onDeadlineDateChange={handleDeadlineDateChange}
+			onSearchChange={(v) => (filterSearch = v)}
+			onSearch={handleSearch}
 		/>
 	{/if}
 
