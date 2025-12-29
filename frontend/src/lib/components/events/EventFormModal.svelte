@@ -96,9 +96,20 @@
 		}
 		isSaving = true;
 		try {
+			// 빈 문자열을 null로 변환 (날짜 및 선택 필드)
 			const formData = {
 				...eventForm,
-				prizes: textToPrizes(prizesText)
+				prizes: textToPrizes(prizesText),
+				event_start: eventForm.event_start || null,
+				event_end: eventForm.event_end || null,
+				announcement_date: eventForm.announcement_date || null,
+				event_url: eventForm.event_url || null,
+				organizer: eventForm.organizer || null,
+				summary: eventForm.summary || null,
+				location_venue: eventForm.location_venue || null,
+				location_address: eventForm.location_address || null,
+				user_note: eventForm.user_note || null,
+				purchase_required: eventForm.purchase_required || null
 			};
 			await onSave(formData, !!editingEvent);
 			onClose();
