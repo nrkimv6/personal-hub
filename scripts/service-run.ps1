@@ -234,23 +234,60 @@ if (-not (Test-Path $nodeModules)) {
     }
 }
 
-# Set environment variable for Vite (non-default API port)
-if ($ApiPort -ne 8000) {
+# Start frontend - different modes for dev/production
+if ($Dev) {
+    # ---- Development: npm run dev (HMR, hot reload) ----
+    # Set environment variable for Vite (non-default API port)
     $env:VITE_API_PORT = $ApiPort
-    # Also write to .env.local for Vite to pick up (Start-Process may not inherit env vars)
-    $envLocalFile = Join-Path $FrontendDir ".env.local"
-    "VITE_API_PORT=$ApiPort" | Out-File $envLocalFile -Encoding utf8
-    Write-ServiceLog "Created .env.local with VITE_API_PORT=$ApiPort"
-}
+    # Write to .env.development.local (only loaded in Vite dev mode)
+    $envDevLocalFile = Join-Path $FrontendDir ".env.development.local"
+    "VITE_API_PORT=$ApiPort" | Out-File $envDevLocalFile -Encoding utf8
+    Write-ServiceLog "Created .env.development.local with VITE_API_PORT=$ApiPort"
 
-# Start frontend using npm.cmd directly (avoid cmd.exe socket inheritance issue)
-$frontendProcess = Start-Process -FilePath "npm.cmd" `
-    -ArgumentList "run", "dev", "--", "--host", "--port", $FrontendPort `
-    -WorkingDirectory $FrontendDir `
-    -WindowStyle Hidden `
-    -RedirectStandardOutput $frontendLogFile `
-    -RedirectStandardError $frontendErrLogFile `
-    -PassThru
+    $frontendProcess = Start-Process -FilePath "npm.cmd" `
+        -ArgumentList "run", "dev", "--", "--host", "--port", $FrontendPort `
+        -WorkingDirectory $FrontendDir `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $frontendLogFile `
+        -RedirectStandardError $frontendErrLogFile `
+        -PassThru
+} else {
+    # ---- Production: npm run build + npm run preview ----
+    # Remove .env.local if exists (prevents dev settings from affecting production)
+    $envLocalFile = Join-Path $FrontendDir ".env.local"
+    if (Test-Path $envLocalFile) {
+        Remove-Item $envLocalFile -Force
+        Write-ServiceLog "Removed .env.local"
+    }
+
+    # Build frontend
+    Write-ServiceLog "Building frontend for production..."
+    $buildLogFile = Join-Path $LogDir "frontend_build_$Timestamp.log"
+    $buildResult = Start-Process -FilePath "npm.cmd" `
+        -ArgumentList "run", "build" `
+        -WorkingDirectory $FrontendDir `
+        -Wait -NoNewWindow `
+        -RedirectStandardOutput $buildLogFile `
+        -RedirectStandardError $buildLogFile `
+        -PassThru
+
+    if ($buildResult.ExitCode -ne 0) {
+        Write-ServiceLog "ERROR: Frontend build failed (exit code: $($buildResult.ExitCode))"
+        Write-ServiceLog "Check build log: $buildLogFile"
+        exit 1
+    }
+    Write-ServiceLog "Frontend build completed"
+
+    # Start preview server
+    Write-ServiceLog "Starting frontend preview server..."
+    $frontendProcess = Start-Process -FilePath "npm.cmd" `
+        -ArgumentList "run", "preview", "--", "--host", "--port", $FrontendPort `
+        -WorkingDirectory $FrontendDir `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $frontendLogFile `
+        -RedirectStandardError $frontendErrLogFile `
+        -PassThru
+}
 
 $frontendProcess.Id | Out-File $FrontendPidFile -Encoding ascii
 Write-ServiceLog "Frontend started (PID: $($frontendProcess.Id))"

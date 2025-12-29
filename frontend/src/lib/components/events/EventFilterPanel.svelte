@@ -15,11 +15,15 @@
 		// 날짜별 마감 필터
 		filterDeadlineDate: string | null;
 		deadlineCounts: Record<string, number>;
+		// 검색
+		filterSearch: string;
 		onStatusFilterChange: (status: string | null) => void;
 		onBookmarkedFilterToggle: () => void;
 		onUnknownPeriodToggle: () => void;
 		onShowFiltersChange: (show: boolean) => void;
 		onDeadlineDateChange: (date: string | null) => void;
+		onSearchChange: (search: string) => void;
+		onSearch: () => void;
 	}
 
 	let {
@@ -29,12 +33,26 @@
 		showFilters,
 		filterDeadlineDate = null,
 		deadlineCounts = {},
+		filterSearch = '',
 		onStatusFilterChange,
 		onBookmarkedFilterToggle,
 		onUnknownPeriodToggle,
 		onShowFiltersChange,
-		onDeadlineDateChange
+		onDeadlineDateChange,
+		onSearchChange,
+		onSearch
 	}: Props = $props();
+
+	function handleSearchKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') {
+			onSearch();
+		}
+	}
+
+	function clearSearch() {
+		onSearchChange('');
+		onSearch();
+	}
 
 	function setEventStatusFilter(status: string) {
 		onStatusFilterChange(filterEventStatus === status ? null : status);
@@ -83,6 +101,40 @@
 	class:hidden={!showFilters}
 >
 	<div class="p-4 space-y-4">
+		<!-- 검색 -->
+		<div class="flex flex-col gap-2">
+			<label class="text-sm font-medium text-gray-700">검색</label>
+			<div class="relative">
+				<input
+					type="text"
+					value={filterSearch}
+					oninput={(e) => onSearchChange(e.currentTarget.value)}
+					onkeydown={handleSearchKeydown}
+					placeholder="제목, 요약, 주최자, 본문 검색..."
+					class="w-full px-3 py-2 pr-20 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+				/>
+				<div class="absolute right-1 top-1/2 -translate-y-1/2 flex gap-1">
+					{#if filterSearch}
+						<button
+							onclick={clearSearch}
+							class="p-1.5 text-gray-400 hover:text-gray-600"
+							title="검색어 지우기"
+						>
+							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+							</svg>
+						</button>
+					{/if}
+					<button
+						onclick={onSearch}
+						class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+					>
+						검색
+					</button>
+				</div>
+			</div>
+		</div>
+
 		<!-- 이벤트 상태 필터 -->
 		<div class="flex flex-col gap-2">
 			<label class="text-sm font-medium text-gray-700">상태</label>
@@ -155,6 +207,40 @@
 
 <!-- 데스크톱 필터 영역 -->
 <div class="hidden md:block mb-4 space-y-3">
+	<!-- 검색 입력 -->
+	<div class="flex items-center gap-3">
+		<span class="text-sm text-gray-500">검색:</span>
+		<div class="relative flex-1 max-w-md">
+			<input
+				type="text"
+				value={filterSearch}
+				oninput={(e) => onSearchChange(e.currentTarget.value)}
+				onkeydown={handleSearchKeydown}
+				placeholder="제목, 요약, 주최자, 본문 검색..."
+				class="w-full px-3 py-1.5 pr-20 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+			/>
+			<div class="absolute right-1 top-1/2 -translate-y-1/2 flex gap-1">
+				{#if filterSearch}
+					<button
+						onclick={clearSearch}
+						class="p-1 text-gray-400 hover:text-gray-600"
+						title="검색어 지우기"
+					>
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+						</svg>
+					</button>
+				{/if}
+				<button
+					onclick={onSearch}
+					class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+				>
+					검색
+				</button>
+			</div>
+		</div>
+	</div>
+
 	<!-- 첫 번째 줄: 이벤트 상태 필터 -->
 	<div class="flex flex-wrap gap-2 items-center">
 		<span class="text-sm text-gray-500">상태:</span>
