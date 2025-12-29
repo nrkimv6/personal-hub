@@ -6,6 +6,7 @@
 	 */
 	import { onMount } from 'svelte';
 	import { page as pageStore } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { eventApi, popupApi, uncategorizedApi, instagramApi, instagramTagApi } from '$lib/api';
 	import type { Event, EventCreate, EventUpdate, InstagramPost, Popup, UncategorizedPost, InstagramTag } from '$lib/types';
 	import { isAdmin, isLoggedIn } from '$lib/stores/auth';
@@ -95,15 +96,28 @@
 	// 탭/필터 관련 함수
 	// =========================================================
 
-	function switchTab(tab: TabMode) {
+	function switchTab(tab: TabMode, updateUrl: boolean = true) {
 		activeTab = tab;
 		currentPage = 1;
+
+		// URL 업데이트 (히스토리에 추가)
+		if (updateUrl) {
+			goto(`?tab=${tab}`, { replaceState: false, keepFocus: true, noScroll: true });
+		}
+
 		if (tab === 'crawl') {
 			// CrawlTab 컴포넌트가 자체적으로 데이터를 로드함
 			return;
 		}
 		if (isAnonymous) {
-			filterEventStatus = (tab === 'online' || tab === 'offline') ? 'ending_today' : null;
+			// 운영모드: 온라인은 내일까지, 오프라인은 진행중
+			if (tab === 'online') {
+				filterEventStatus = 'ending_tomorrow';
+			} else if (tab === 'offline') {
+				filterEventStatus = 'ongoing';
+			} else {
+				filterEventStatus = null;
+			}
 		} else if (tab === 'online' || tab === 'offline') {
 			filterEventStatus = 'ongoing';
 		} else if (tab === 'popup') {
@@ -576,6 +590,15 @@
 		// 날짜별 마감 카운트 로드
 		fetchDeadlineCounts();
 
+		// URL의 tab 파라미터로 초기 탭 설정
+		const urlTab = $pageStore.url.searchParams.get('tab');
+		const validTabs: TabMode[] = ['online', 'offline', 'popup', 'uncategorized', 'crawl'];
+		if (urlTab && validTabs.includes(urlTab as TabMode)) {
+			// URL 파라미터로 탭 전환 (URL 업데이트 불필요)
+			switchTab(urlTab as TabMode, false);
+			return; // switchTab에서 fetchEvents 호출하므로 여기서 종료
+		}
+
 		// PWA Share Target 처리
 		const action = $pageStore.url.searchParams.get('action');
 		const sharedUrl = $pageStore.url.searchParams.get('url');
@@ -583,9 +606,15 @@
 			showEventModal = true;
 		}
 
-		// 익명 사용자 필터 설정
+		// 익명 사용자(운영모드) 필터 설정
 		if (!$isLoggedIn) {
-			filterEventStatus = (activeTab === 'online' || activeTab === 'offline') ? 'ending_today' : null;
+			if (activeTab === 'online') {
+				filterEventStatus = 'ending_tomorrow';
+			} else if (activeTab === 'offline') {
+				filterEventStatus = 'ongoing';
+			} else {
+				filterEventStatus = null;
+			}
 		}
 
 		fetchEvents();
@@ -621,9 +650,13 @@
 		<div class="flex items-center gap-2">
 			{#if isAnonymous}
 				<!-- 익명 사용자: 필터 비활성화, 고정 배지만 표시 -->
-				{#if activeTab === 'online' || activeTab === 'offline'}
+				{#if activeTab === 'online'}
 					<span class="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-700 rounded-full">
-						오늘 마감
+						내일까지
+					</span>
+				{:else if activeTab === 'offline'}
+					<span class="px-2 py-1 text-xs font-medium bg-green-100 text-green-700 rounded-full">
+						진행중
 					</span>
 				{:else}
 					<span class="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded-full">
