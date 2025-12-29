@@ -304,6 +304,52 @@ class TestEventServiceFilter:
         for item in result.items:
             assert item.event_status == "ended"
 
+    def test_filter_by_event_status_ending_today(self, test_db_session, event_service):
+        """Right: 오늘 마감 상태 필터"""
+        today = date.today()
+        # 오늘 마감 이벤트 생성
+        event_service.create_event(test_db_session, EventCreate(
+            title="오늘 마감 이벤트",
+            event_type="event",
+            event_start=today - timedelta(days=3),
+            event_end=today,
+        ))
+        result = event_service.get_events(test_db_session, event_status="ending_today")
+        assert result.total >= 1
+        for item in result.items:
+            assert item.event_end == today
+
+    def test_filter_by_event_status_ending_tomorrow(self, test_db_session, event_service):
+        """Right: 내일까지 마감 상태 필터"""
+        today = date.today()
+        tomorrow = today + timedelta(days=1)
+        # 오늘 마감 이벤트
+        event_service.create_event(test_db_session, EventCreate(
+            title="오늘 마감 이벤트",
+            event_type="event",
+            event_start=today - timedelta(days=3),
+            event_end=today,
+        ))
+        # 내일 마감 이벤트
+        event_service.create_event(test_db_session, EventCreate(
+            title="내일 마감 이벤트",
+            event_type="event",
+            event_start=today - timedelta(days=3),
+            event_end=tomorrow,
+        ))
+        # 모레 마감 이벤트 (필터 대상 아님)
+        event_service.create_event(test_db_session, EventCreate(
+            title="모레 마감 이벤트",
+            event_type="event",
+            event_start=today - timedelta(days=3),
+            event_end=today + timedelta(days=2),
+        ))
+        result = event_service.get_events(test_db_session, event_status="ending_tomorrow")
+        assert result.total >= 2  # 오늘 마감 + 내일 마감
+        for item in result.items:
+            assert item.event_end >= today
+            assert item.event_end <= tomorrow
+
     def test_filter_by_is_bookmarked(self, test_db_session, event_service, sample_events):
         """Right: 북마크 필터"""
         result = event_service.get_events(test_db_session, is_bookmarked=True)
