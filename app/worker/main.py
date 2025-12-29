@@ -34,10 +34,15 @@ sys.path.insert(0, str(project_root))
 # 비동기 로거 설정
 from app.utils.async_logger import AsyncLoggerManager
 
+# APP_MODE에 따라 로그 디렉토리 결정
+is_dev = os.environ.get("APP_MODE") == "development"
+log_dir = Path("logs/dev") if is_dev else Path("logs")
+log_dir.mkdir(parents=True, exist_ok=True)
+
 # 워커 전용 비동기 로거 설정
 logger = AsyncLoggerManager.setup_worker_logger(
     log_prefix="worker",
-    log_dir=Path("logs"),
+    log_dir=log_dir,
     level=logging.DEBUG
 )
 logger.info(f"통합 워커 로거 초기화 완료 - 로그 파일: {logger.log_file}")
