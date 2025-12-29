@@ -1,11 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { businessApi, itemApi, scheduleApi, accountApi } from '$lib/api';
-  import type { Business, BusinessWithItems, BizItem, MonitorSchedule, Account } from '$lib/types';
+  import { businessApi, itemApi, scheduleApi, serviceAccountApi } from '$lib/api';
+  import type { Business, BusinessWithItems, BizItem, MonitorSchedule, ServiceAccountWithProfile } from '$lib/types';
   import SlotCheckModal from '$lib/components/SlotCheckModal.svelte';
 
   let businesses: Business[] = [];
-  let accounts: Account[] = [];
+  let accounts: ServiceAccountWithProfile[] = [];
   let loading = true;
   let error: string | null = null;
 
@@ -83,7 +83,7 @@
 
   async function fetchAccounts() {
     try {
-      accounts = await accountApi.listActive();
+      accounts = await serviceAccountApi.listActive('naver');
     } catch (e) {
       console.error('계정 목록 로드 실패:', e);
     }
@@ -815,7 +815,7 @@
           <select id="schedule_account_id" class="input" bind:value={newSchedule.service_account_id}>
             <option value={null}>기본 계정</option>
             {#each accounts as account}
-              <option value={account.id}>{account.name} ({account.profile_dir})</option>
+              <option value={account.id}>{account.profile_name} ({account.profile_dir})</option>
             {/each}
           </select>
           <p class="text-xs text-gray-500 mt-1">이 일정을 실행할 때 사용할 계정을 선택하세요</p>
