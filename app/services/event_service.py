@@ -107,14 +107,22 @@ class EventService:
         """이벤트 목록 조회 (필터/정렬/페이지네이션)"""
         query = db.query(Event)
 
-        # 검색어 필터 (LIKE)
+        # 검색어 필터 (LIKE) - Instagram 게시물 본문(caption) 포함
         if search:
             search_pattern = f"%{search}%"
+            # Instagram 게시물 본문 검색을 위한 서브쿼리
+            from sqlalchemy import select
+            caption_subquery = (
+                select(InstagramPost.id)
+                .where(InstagramPost.caption.ilike(search_pattern))
+                .scalar_subquery()
+            )
             query = query.filter(
                 or_(
                     Event.title.ilike(search_pattern),
                     Event.summary.ilike(search_pattern),
                     Event.organizer.ilike(search_pattern),
+                    Event.source_instagram_post_id.in_(caption_subquery),
                 )
             )
 
