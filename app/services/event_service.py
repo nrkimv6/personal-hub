@@ -174,6 +174,14 @@ class EventService:
                 # 오늘 마감: 종료일 == 오늘
                 query = query.filter(Event.event_end == today)
 
+            elif event_status == "ending_tomorrow":
+                # 내일까지 마감: 오늘 <= 종료일 <= 내일
+                tomorrow = today + timedelta(days=1)
+                query = query.filter(
+                    Event.event_end >= today,
+                    Event.event_end <= tomorrow
+                )
+
         # deadline_date 필터 (특정 날짜 마감)
         if deadline_date:
             from datetime import datetime

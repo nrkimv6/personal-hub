@@ -42,7 +42,7 @@ def get_deadline_counts(
 def get_events(
     event_type: Optional[str] = Query(None, description="이벤트 유형 (event/popup/ambassador/other)"),
     status: Optional[str] = Query(None, description="상태 (active/ended/cancelled)"),
-    event_status: Optional[str] = Query(None, description="진행 상태 (ongoing/upcoming/ended/ongoing_or_upcoming)"),
+    event_status: Optional[str] = Query(None, description="진행 상태 (ongoing/upcoming/ended/ongoing_or_upcoming/ending_today/ending_tomorrow)"),
     deadline_date: Optional[str] = Query(None, description="마감일 (YYYY-MM-DD 형식, 해당 날짜에 마감되는 이벤트)"),
     source_type: Optional[str] = Query(None, description="출처 유형 (instagram/manual/web/other)"),
     url_type: Optional[str] = Query(None, description="URL 유형 (google_form/naver_form/shop/survey/other)"),
