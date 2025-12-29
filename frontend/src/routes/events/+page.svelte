@@ -6,6 +6,7 @@
 	 */
 	import { onMount } from 'svelte';
 	import { page as pageStore } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { eventApi, popupApi, uncategorizedApi, instagramApi, instagramTagApi } from '$lib/api';
 	import type { Event, EventCreate, EventUpdate, InstagramPost, Popup, UncategorizedPost, InstagramTag } from '$lib/types';
 	import { isAdmin, isLoggedIn } from '$lib/stores/auth';
@@ -95,9 +96,15 @@
 	// 탭/필터 관련 함수
 	// =========================================================
 
-	function switchTab(tab: TabMode) {
+	function switchTab(tab: TabMode, updateUrl: boolean = true) {
 		activeTab = tab;
 		currentPage = 1;
+
+		// URL 업데이트 (히스토리에 추가)
+		if (updateUrl) {
+			goto(`?tab=${tab}`, { replaceState: false, keepFocus: true, noScroll: true });
+		}
+
 		if (tab === 'crawl') {
 			// CrawlTab 컴포넌트가 자체적으로 데이터를 로드함
 			return;
@@ -582,6 +589,15 @@
 
 		// 날짜별 마감 카운트 로드
 		fetchDeadlineCounts();
+
+		// URL의 tab 파라미터로 초기 탭 설정
+		const urlTab = $pageStore.url.searchParams.get('tab');
+		const validTabs: TabMode[] = ['online', 'offline', 'popup', 'uncategorized', 'crawl'];
+		if (urlTab && validTabs.includes(urlTab as TabMode)) {
+			// URL 파라미터로 탭 전환 (URL 업데이트 불필요)
+			switchTab(urlTab as TabMode, false);
+			return; // switchTab에서 fetchEvents 호출하므로 여기서 종료
+		}
 
 		// PWA Share Target 처리
 		const action = $pageStore.url.searchParams.get('action');
