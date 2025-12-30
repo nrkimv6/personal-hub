@@ -209,10 +209,16 @@ class TestUniversalCrawlService:
 
     def test_is_instagram_url(self):
         """Instagram URL 감지"""
+        # Instagram URL 패턴
         assert universal_crawl_service.is_instagram_url("https://www.instagram.com/p/ABC123/")
         assert universal_crawl_service.is_instagram_url("https://instagram.com/reel/XYZ789/")
+        assert universal_crawl_service.is_instagram_url("https://www.instagram.com/reels/ABC123/")
+        assert universal_crawl_service.is_instagram_url("https://www.instagram.com/stories/user123/")
+        assert universal_crawl_service.is_instagram_url("https://instagr.am/p/ABC123/")
+        # 비 Instagram URL
         assert not universal_crawl_service.is_instagram_url("https://forms.gle/test")
         assert not universal_crawl_service.is_instagram_url("https://blog.naver.com/test")
+        assert not universal_crawl_service.is_instagram_url("https://www.instagram.com/username/")  # 프로필은 제외
 
     def test_create_request_success(self, test_db_session):
         """요청 생성 성공"""
@@ -231,14 +237,20 @@ class TestUniversalCrawlService:
         assert request.url_type == "google_form"
         assert "등록되었습니다" in message
 
-    def test_create_request_instagram_rejected(self, test_db_session):
-        """Instagram URL 거부"""
-        with pytest.raises(ValueError) as exc_info:
-            universal_crawl_service.create_request(
-                db=test_db_session,
-                url="https://www.instagram.com/p/ABC123/",
-            )
-        assert "Instagram" in str(exc_info.value)
+    def test_create_request_instagram_accepted(self, test_db_session):
+        """Instagram URL 허용 (url_type=instagram으로 설정)"""
+        import uuid
+        unique_id = uuid.uuid4().hex[:8]
+
+        request, message = universal_crawl_service.create_request(
+            db=test_db_session,
+            url=f"https://www.instagram.com/p/{unique_id}/",
+        )
+
+        assert request.id is not None
+        assert request.status == "pending"
+        assert request.url_type == "instagram"
+        assert "등록되었습니다" in message
 
     def test_get_pending_requests(self, test_db_session):
         """대기 중인 요청 조회"""
@@ -312,15 +324,21 @@ class TestUniversalCrawlAPI:
         assert data["url_type"] == "google_form"
         assert data["status"] == "pending"
 
-    def test_create_crawl_request_instagram_rejected(self, client):
-        """POST /api/v2/crawl/url - Instagram URL 거부"""
+    def test_create_crawl_request_instagram_accepted(self, client):
+        """POST /api/v2/crawl/url - Instagram URL 허용"""
+        import uuid
+        unique_id = uuid.uuid4().hex[:8]
+
         response = client.post(
             "/api/v2/crawl/url",
-            json={"url": "https://www.instagram.com/p/ABC123/"}
+            json={"url": f"https://www.instagram.com/p/{unique_id}/"}
         )
 
-        assert response.status_code == 400
-        assert "Instagram" in response.json()["detail"]
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["url_type"] == "instagram"
+        assert data["status"] == "pending"
 
     def test_list_crawl_requests(self, client, sample_crawl_request):
         """GET /api/v2/crawl/universal-requests - 목록 조회"""
