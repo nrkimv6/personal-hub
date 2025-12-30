@@ -1,7 +1,6 @@
 """Instagram Crawl Service - 크롤링 실행 및 관리 서비스."""
 
 import asyncio
-import json
 import logging
 from datetime import datetime, date
 from typing import List, Optional
@@ -9,14 +8,14 @@ from typing import List, Optional
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from app.models import InstagramCrawlRun, InstagramScheduleConfig, ServiceAccount, InstagramPost
+from app.models import CrawlSchedule, CrawlScheduleRun, ServiceAccount, InstagramPost
+from app.services.crawl_schedule_service import CrawlScheduleService
 from .crawler import InstagramCrawler, CrawlOptions, PostData
 from .post_service import PostService
 from .scheduler import InstagramScheduler
 from .classifier_service import ClassifierService
 from ..models.schemas import (
     TimeWindow,
-    ScheduleConfigSchema,
     StatsSchema,
     TodayScheduleItem,
     RunningCrawlInfo,
@@ -36,13 +35,15 @@ class CrawlService:
         self.db = db
         self.post_service = PostService(db)
         self.classifier_service = ClassifierService(db)
+        self._schedule_service = CrawlScheduleService(db)
 
     async def run_crawl(
         self,
         crawler: InstagramCrawler,
         service_account_id: int,
         options: Optional[CrawlOptions] = None,
-    ) -> InstagramCrawlRun:
+        schedule_run_id: Optional[int] = None,
+    ) -> CrawlScheduleRun:
         """크롤링 실행.
 
         게시물을 수집하면서 즉시 DB에 저장합니다 (실시간 저장).
@@ -52,18 +53,25 @@ class CrawlService:
             crawler: InstagramCrawler 인스턴스
             service_account_id: 수집 계정 ID
             options: 크롤링 옵션
+            schedule_run_id: 기존 실행 기록 ID (없으면 새로 생성)
 
         Returns:
-            크롤링 실행 기록
+            크롤링 실행 기록 (CrawlScheduleRun)
         """
-        # 실행 기록 생성
-        crawl_run = InstagramCrawlRun(
-            service_account_id=service_account_id,
-            started_at=datetime.now(),
-        )
-        self.db.add(crawl_run)
-        self.db.commit()
-        self.db.refresh(crawl_run)
+        # 실행 기록 조회 또는 생성
+        if schedule_run_id:
+            crawl_run = self._schedule_service.get_run_by_id(schedule_run_id)
+            if not crawl_run:
+                raise ValueError(f"Schedule run {schedule_run_id} not found")
+        else:
+            # 기존 호환성을 위해 run 생성 (스케줄 없이 직접 호출 시)
+            # Instagram 피드용 기본 스케줄 조회 또는 임시 run 생성
+            schedule = self._get_or_create_default_schedule(service_account_id)
+            crawl_run = self._schedule_service.start_run(
+                schedule_id=schedule.id,
+                worker_id="crawl_service",
+                config_snapshot={}
+            )
 
         # 실시간 저장 통계
         save_stats = {"new_saved": 0, "total_collected": 0}
@@ -78,9 +86,11 @@ class CrawlService:
             # 10개마다 DB에 중간 통계 업데이트 (실시간 진행 상황 조회용)
             if save_stats["total_collected"] % 10 == 0:
                 try:
-                    crawl_run.total_collected = save_stats["total_collected"]
-                    crawl_run.new_saved = save_stats["new_saved"]
-                    self.db.commit()
+                    self._schedule_service.update_run_progress(
+                        crawl_run.id,
+                        collected_count=save_stats["total_collected"],
+                        saved_count=save_stats["new_saved"]
+                    )
                     logger.info(f"[Progress] {save_stats['total_collected']} collected, {save_stats['new_saved']} new")
                 except Exception as e:
                     logger.warning(f"Failed to update progress: {e}")
@@ -90,12 +100,16 @@ class CrawlService:
         try:
             # 크롤링 옵션 설정
             if options is None:
-                config = self.get_schedule_config()
-                options = CrawlOptions(
-                    max_posts=config.max_posts if config else 20,
-                    scroll_count=config.scroll_count if config else 3,
-                    duplicate_stop_count=getattr(config, 'duplicate_stop_count', 5) if config else 5,
-                )
+                schedule = self._schedule_service.get_schedule_by_id(crawl_run.schedule_id)
+                if schedule:
+                    config = schedule.get_target_config()
+                    options = CrawlOptions(
+                        max_posts=config.get("max_posts", 20),
+                        scroll_count=config.get("scroll_count", 3),
+                        duplicate_stop_count=config.get("duplicate_stop_count", 5),
+                    )
+                else:
+                    options = CrawlOptions(max_posts=20, scroll_count=3, duplicate_stop_count=5)
 
             # DB 중복 체크 콜백 설정
             crawler._db_duplicate_checker = lambda post_id: self.post_service.exists_by_post_id(post_id)
@@ -104,34 +118,50 @@ class CrawlService:
             posts = await crawler.crawl_feed(options, on_post_collected=on_post_collected)
 
             # 실행 기록 업데이트
-            crawl_run.success = True
-            crawl_run.total_collected = save_stats["total_collected"]
-            crawl_run.new_saved = save_stats["new_saved"]
-            crawl_run.finished_at = datetime.now()
+            self._schedule_service.complete_run(
+                crawl_run.id,
+                collected_count=save_stats["total_collected"],
+                saved_count=save_stats["new_saved"],
+                stop_reason=getattr(crawler, '_stop_reason', None)
+            )
 
             logger.info(f"Crawl completed: {save_stats['total_collected']} collected, {save_stats['new_saved']} new (realtime saved)")
 
         except (Exception, asyncio.CancelledError) as e:
             # 에러 발생해도 그때까지 저장된 데이터는 보존됨
-            # Note: asyncio.CancelledError는 Python 3.8+에서 BaseException을 상속하므로 명시적으로 캐치
             self.db.rollback()  # 먼저 세션 복구
-            crawl_run = self.db.query(InstagramCrawlRun).get(crawl_run.id)  # 다시 조회
-            if crawl_run:
-                crawl_run.success = False
-                crawl_run.error_message = str(e)[:500]  # 에러 메시지 길이 제한
-                crawl_run.total_collected = save_stats["total_collected"]
-                crawl_run.new_saved = save_stats["new_saved"]
-                crawl_run.finished_at = datetime.now()
+            try:
+                self._schedule_service.fail_run(crawl_run.id, str(e)[:500])
+            except Exception:
+                pass
             logger.error(f"Crawl failed after saving {save_stats['new_saved']} posts: {e}")
 
-        try:
-            self.db.commit()
-            self.db.refresh(crawl_run)
-        except Exception as commit_error:
-            logger.error(f"Failed to commit crawl_run update: {commit_error}")
-            self.db.rollback()
-
+        # 최신 상태 반환
+        crawl_run = self._schedule_service.get_run_by_id(crawl_run.id)
         return crawl_run
+
+    def _get_or_create_default_schedule(self, service_account_id: int) -> CrawlSchedule:
+        """기본 Instagram 피드 스케줄 조회 또는 생성."""
+        schedule_name = f"instagram_feed_account_{service_account_id}"
+        schedule = self._schedule_service.get_schedule_by_name(schedule_name)
+
+        if not schedule:
+            schedule = self._schedule_service.create_schedule(
+                name=schedule_name,
+                display_name=f"Instagram 피드 (계정 {service_account_id})",
+                target_type=CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+                target_config={
+                    "service_account_id": service_account_id,
+                    "max_posts": 20,
+                    "scroll_count": 3,
+                    "duplicate_stop_count": 5,
+                },
+                schedule_type="time_window",
+                schedule_value={"daily_runs": 3, "time_windows": []},
+                enabled=True,
+            )
+
+        return schedule
 
     async def recrawl_single_post(
         self,
@@ -382,22 +412,28 @@ class CrawlService:
         self,
         limit: int = 10,
         service_account_id: Optional[int] = None,
-    ) -> List[InstagramCrawlRun]:
+    ) -> List[CrawlScheduleRun]:
         """크롤링 실행 기록 조회.
 
         Args:
             limit: 조회 개수
-            service_account_id: 계정 필터
+            service_account_id: 계정 필터 (현재는 사용되지 않음 - 스케줄 기반 필터링으로 변경 예정)
 
         Returns:
             실행 기록 목록
         """
-        query = self.db.query(InstagramCrawlRun)
+        query = self.db.query(CrawlScheduleRun).join(CrawlSchedule).filter(
+            CrawlSchedule.target_type == CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED
+        )
 
         if service_account_id:
-            query = query.filter(InstagramCrawlRun.service_account_id == service_account_id)
+            # target_config에서 service_account_id를 필터링
+            # JSON 문자열에서 검색 (SQLite JSON 지원 제한으로 like 사용)
+            query = query.filter(
+                CrawlSchedule.target_config.like(f'%"service_account_id": {service_account_id}%')
+            )
 
-        return query.order_by(desc(InstagramCrawlRun.started_at)).limit(limit).all()
+        return query.order_by(desc(CrawlScheduleRun.started_at)).limit(limit).all()
 
     def get_crawl_runs_paginated(
         self,
@@ -406,50 +442,54 @@ class CrawlService:
         period: Optional[str] = None,
         status: Optional[str] = None,
         service_account_id: Optional[int] = None,
-    ) -> tuple[List[InstagramCrawlRun], int]:
+    ) -> tuple[List[CrawlScheduleRun], int]:
         """크롤링 실행 기록 조회 (페이징 지원).
 
         Args:
             page: 페이지 번호 (1부터 시작)
             limit: 페이지당 개수
             period: 기간 필터 ('1d', '7d', '30d', 'all')
-            status: 상태 필터 ('success', 'failed', 'all')
-            service_account_id: 계정 필터
+            status: 상태 필터 ('completed', 'failed', 'all')
+            service_account_id: 계정 필터 (현재는 사용되지 않음)
 
         Returns:
             (실행 기록 목록, 전체 개수)
         """
         from datetime import timedelta
 
-        query = self.db.query(InstagramCrawlRun)
+        query = self.db.query(CrawlScheduleRun).join(CrawlSchedule).filter(
+            CrawlSchedule.target_type == CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED
+        )
 
         # 기간 필터
         if period and period != 'all':
             days = {'1d': 1, '7d': 7, '30d': 30}.get(period, 7)
             cutoff = datetime.now() - timedelta(days=days)
-            query = query.filter(InstagramCrawlRun.started_at >= cutoff)
+            query = query.filter(CrawlScheduleRun.started_at >= cutoff)
 
-        # 상태 필터
+        # 상태 필터 (success/failed -> completed/failed로 매핑)
         if status and status != 'all':
             if status == 'success':
-                query = query.filter(InstagramCrawlRun.success == True)
+                query = query.filter(CrawlScheduleRun.status == CrawlScheduleRun.STATUS_COMPLETED)
             elif status == 'failed':
-                query = query.filter(InstagramCrawlRun.success == False)
+                query = query.filter(CrawlScheduleRun.status == CrawlScheduleRun.STATUS_FAILED)
 
         # 계정 필터
         if service_account_id:
-            query = query.filter(InstagramCrawlRun.service_account_id == service_account_id)
+            query = query.filter(
+                CrawlSchedule.target_config.like(f'%"service_account_id": {service_account_id}%')
+            )
 
         # 전체 개수
         total = query.count()
 
         # 페이징
         offset = (page - 1) * limit
-        runs = query.order_by(desc(InstagramCrawlRun.started_at)).offset(offset).limit(limit).all()
+        runs = query.order_by(desc(CrawlScheduleRun.started_at)).offset(offset).limit(limit).all()
 
         return runs, total
 
-    def get_crawl_run_by_id(self, run_id: int) -> Optional[InstagramCrawlRun]:
+    def get_crawl_run_by_id(self, run_id: int) -> Optional[CrawlScheduleRun]:
         """크롤링 실행 기록 상세 조회.
 
         Args:
@@ -458,9 +498,7 @@ class CrawlService:
         Returns:
             실행 기록 (없으면 None)
         """
-        return self.db.query(InstagramCrawlRun).filter(
-            InstagramCrawlRun.id == run_id
-        ).first()
+        return self._schedule_service.get_run_by_id(run_id)
 
     def get_run_stats(self, days: int = 7) -> dict:
         """실행 통계 조회.
@@ -476,25 +514,29 @@ class CrawlService:
 
         cutoff = datetime.now() - timedelta(days=days)
 
-        # 기본 통계
-        query = self.db.query(InstagramCrawlRun).filter(
-            InstagramCrawlRun.started_at >= cutoff
+        # Instagram 피드 타입으로 필터링된 기본 쿼리
+        base_query = self.db.query(CrawlScheduleRun).join(CrawlSchedule).filter(
+            CrawlSchedule.target_type == CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            CrawlScheduleRun.started_at >= cutoff
         )
 
-        total_runs = query.count()
-        success_runs = query.filter(InstagramCrawlRun.success == True).count()
+        total_runs = base_query.count()
+        success_runs = base_query.filter(
+            CrawlScheduleRun.status == CrawlScheduleRun.STATUS_COMPLETED
+        ).count()
         failed_runs = total_runs - success_runs
         success_rate = success_runs / total_runs if total_runs > 0 else 0.0
 
-        # 평균 수집 수
-        avg_collected = self.db.query(func.avg(InstagramCrawlRun.new_saved)).filter(
-            InstagramCrawlRun.started_at >= cutoff,
-            InstagramCrawlRun.success == True
+        # 평균 수집 수 (saved_count 사용)
+        avg_collected = self.db.query(func.avg(CrawlScheduleRun.saved_count)).join(CrawlSchedule).filter(
+            CrawlSchedule.target_type == CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            CrawlScheduleRun.started_at >= cutoff,
+            CrawlScheduleRun.status == CrawlScheduleRun.STATUS_COMPLETED
         ).scalar() or 0.0
 
         # 평균 소요 시간
-        runs_with_duration = query.filter(
-            InstagramCrawlRun.finished_at != None
+        runs_with_duration = base_query.filter(
+            CrawlScheduleRun.finished_at != None
         ).all()
 
         total_duration = 0
@@ -514,16 +556,17 @@ class CrawlService:
             day_start = datetime.combine(day, datetime.min.time())
             day_end = datetime.combine(day, datetime.max.time())
 
-            day_runs = self.db.query(InstagramCrawlRun).filter(
-                InstagramCrawlRun.started_at >= day_start,
-                InstagramCrawlRun.started_at <= day_end
+            day_runs = self.db.query(CrawlScheduleRun).join(CrawlSchedule).filter(
+                CrawlSchedule.target_type == CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+                CrawlScheduleRun.started_at >= day_start,
+                CrawlScheduleRun.started_at <= day_end
             ).all()
 
             day_total = len(day_runs)
-            day_success = sum(1 for r in day_runs if r.success)
+            day_success = sum(1 for r in day_runs if r.status == CrawlScheduleRun.STATUS_COMPLETED)
             day_failed = day_total - day_success
-            day_collected = sum(r.total_collected for r in day_runs)
-            day_saved = sum(r.new_saved for r in day_runs)
+            day_collected = sum(r.collected_count or 0 for r in day_runs)
+            day_saved = sum(r.saved_count or 0 for r in day_runs)
 
             daily_trend.append({
                 "date": day.isoformat(),
@@ -544,18 +587,24 @@ class CrawlService:
             "daily_trend": daily_trend,
         }
 
-    def get_last_run(self, service_account_id: Optional[int] = None) -> Optional[InstagramCrawlRun]:
+    def get_last_run(self, service_account_id: Optional[int] = None) -> Optional[CrawlScheduleRun]:
         """마지막 실행 기록."""
-        query = self.db.query(InstagramCrawlRun)
+        query = self.db.query(CrawlScheduleRun).join(CrawlSchedule).filter(
+            CrawlSchedule.target_type == CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED
+        )
 
         if service_account_id:
-            query = query.filter(InstagramCrawlRun.service_account_id == service_account_id)
+            query = query.filter(
+                CrawlSchedule.target_config.like(f'%"service_account_id": {service_account_id}%')
+            )
 
-        return query.order_by(desc(InstagramCrawlRun.started_at)).first()
+        return query.order_by(desc(CrawlScheduleRun.started_at)).first()
 
-    def get_schedule_config(self) -> Optional[InstagramScheduleConfig]:
-        """스케줄 설정 조회."""
-        return self.db.query(InstagramScheduleConfig).first()
+    def get_schedule_config(self) -> Optional[CrawlSchedule]:
+        """스케줄 설정 조회 (기본 Instagram 피드 스케줄 반환)."""
+        return self.db.query(CrawlSchedule).filter(
+            CrawlSchedule.target_type == CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED
+        ).first()
 
     def update_schedule_config(
         self,
@@ -569,71 +618,95 @@ class CrawlService:
         max_retries: Optional[int] = None,
         retry_interval_minutes: Optional[int] = None,
         service_account_id: Optional[int] = None,
-    ) -> InstagramScheduleConfig:
+    ) -> CrawlSchedule:
         """스케줄 설정 업데이트.
 
         Returns:
             업데이트된 설정
         """
-        config = self.get_schedule_config()
+        import json
 
-        if config is None:
-            # 기본 설정 생성
-            config = InstagramScheduleConfig()
-            self.db.add(config)
+        schedule = self.get_schedule_config()
+
+        if schedule is None:
+            # 기본 스케줄 생성
+            schedule = CrawlSchedule(
+                name="instagram_feed_default",
+                display_name="Instagram 피드 크롤링",
+                target_type=CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+                schedule_type=CrawlSchedule.SCHEDULE_TYPE_TIME_WINDOW,
+                enabled=True,
+            )
+            self.db.add(schedule)
+            self.db.flush()
 
         if enabled is not None:
-            config.enabled = enabled
+            schedule.enabled = enabled
 
-        if daily_runs is not None:
-            config.daily_runs = daily_runs
-
-        if time_windows is not None:
-            config.time_windows = [tw.model_dump() for tw in time_windows]
+        # target_config 업데이트
+        target_config = schedule.get_target_config()
 
         if max_posts is not None:
-            config.max_posts = max_posts
+            target_config["max_posts"] = max_posts
 
         if scroll_count is not None:
-            config.scroll_count = scroll_count
-
-        # 고급 설정
-        if min_interval_hours is not None:
-            config.min_interval_hours = min_interval_hours
+            target_config["scroll_count"] = scroll_count
 
         if duplicate_stop_count is not None:
-            config.duplicate_stop_count = duplicate_stop_count
+            target_config["duplicate_stop_count"] = duplicate_stop_count
+
+        if min_interval_hours is not None:
+            target_config["min_interval_hours"] = min_interval_hours
 
         if max_retries is not None:
-            config.max_retries = max_retries
+            target_config["max_retries"] = max_retries
 
         if retry_interval_minutes is not None:
-            config.retry_interval_minutes = retry_interval_minutes
+            target_config["retry_interval_minutes"] = retry_interval_minutes
 
-        # 계정 지정
         if service_account_id is not None:
-            config.service_account_id = service_account_id
+            target_config["service_account_id"] = service_account_id
 
-        config.updated_at = datetime.now()
+        schedule.set_target_config(target_config)
+
+        # schedule_value 업데이트 (time_windows, daily_runs)
+        schedule_value = {}
+        if schedule.schedule_value:
+            try:
+                schedule_value = json.loads(schedule.schedule_value)
+            except json.JSONDecodeError:
+                pass
+
+        if daily_runs is not None:
+            schedule_value["daily_runs"] = daily_runs
+
+        if time_windows is not None:
+            schedule_value["time_windows"] = [tw.model_dump() for tw in time_windows]
+
+        schedule.schedule_value = json.dumps(schedule_value, ensure_ascii=False)
+        schedule.updated_at = datetime.now()
 
         self.db.commit()
-        self.db.refresh(config)
+        self.db.refresh(schedule)
 
-        return config
+        return schedule
 
     def get_stats(self) -> StatsSchema:
         """통계 조회."""
+        import json
+
         total_posts = self.post_service.get_total_count()
         today_posts = self.post_service.get_today_count()
 
-        # 오늘 실행 통계
+        # 오늘 실행 통계 (Instagram 피드 타입만)
         today_start = datetime.combine(date.today(), datetime.min.time())
-        total_runs = self.db.query(InstagramCrawlRun).filter(
-            InstagramCrawlRun.started_at >= today_start
-        ).count()
-        success_runs = self.db.query(InstagramCrawlRun).filter(
-            InstagramCrawlRun.started_at >= today_start,
-            InstagramCrawlRun.success == True
+        today_runs_query = self.db.query(CrawlScheduleRun).join(CrawlSchedule).filter(
+            CrawlSchedule.target_type == CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            CrawlScheduleRun.started_at >= today_start
+        )
+        total_runs = today_runs_query.count()
+        success_runs = today_runs_query.filter(
+            CrawlScheduleRun.status == CrawlScheduleRun.STATUS_COMPLETED
         ).count()
 
         # 마지막 완료된 실행
@@ -641,38 +714,57 @@ class CrawlService:
         last_run_at = last_run.started_at if last_run else None
 
         # 다음 실행 시간 계산
-        config = self.get_schedule_config()
+        schedule = self.get_schedule_config()
         next_crawl_time = None
 
-        if config and config.enabled:
+        if schedule and schedule.enabled:
+            schedule_value = {}
+            if schedule.schedule_value:
+                try:
+                    schedule_value = json.loads(schedule.schedule_value)
+                except json.JSONDecodeError:
+                    pass
+
+            daily_runs = schedule_value.get("daily_runs", 3)
+            time_windows_data = schedule_value.get("time_windows", [])
+
             scheduler = InstagramScheduler(
-                daily_runs=config.daily_runs,
-                time_windows=[TimeWindow(**tw) for tw in (config.time_windows or [])],
+                daily_runs=daily_runs,
+                time_windows=[TimeWindow(**tw) for tw in time_windows_data],
             )
             next_crawl_time = scheduler.get_next_run_time()
 
-        # 활성 계정 수 (오늘 실행된 고유 계정)
+        # 활성 계정 수 (스케줄별 target_config에서 추출 - 현재는 단순화)
         from sqlalchemy import func
-        unique_accounts = self.db.query(func.count(func.distinct(InstagramCrawlRun.service_account_id))).filter(
-            InstagramCrawlRun.started_at >= today_start
+        unique_schedules = self.db.query(func.count(func.distinct(CrawlScheduleRun.schedule_id))).join(CrawlSchedule).filter(
+            CrawlSchedule.target_type == CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            CrawlScheduleRun.started_at >= today_start
         ).scalar() or 0
 
-        # 실행 중인 크롤러 정보 (finished_at이 None인 경우)
+        # 실행 중인 크롤러 정보 (status가 running인 경우)
         running_crawl = None
-        running_run = self.db.query(InstagramCrawlRun).filter(
-            InstagramCrawlRun.finished_at == None
-        ).order_by(desc(InstagramCrawlRun.started_at)).first()
+        running_run = self.db.query(CrawlScheduleRun).join(CrawlSchedule).filter(
+            CrawlSchedule.target_type == CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            CrawlScheduleRun.status == CrawlScheduleRun.STATUS_RUNNING
+        ).order_by(desc(CrawlScheduleRun.started_at)).first()
 
         if running_run:
-            # 계정 정보 조회
-            account = self.db.query(ServiceAccount).filter(ServiceAccount.id == running_run.service_account_id).first()
+            # 스케줄의 target_config에서 service_account_id 추출
+            schedule = running_run.schedule
+            target_config = schedule.get_target_config() if schedule else {}
+            service_account_id = target_config.get("service_account_id")
+
+            account = None
+            if service_account_id:
+                account = self.db.query(ServiceAccount).filter(ServiceAccount.id == service_account_id).first()
+
             running_crawl = RunningCrawlInfo(
                 run_id=running_run.id,
-                service_account_id=running_run.service_account_id,
+                service_account_id=service_account_id,
                 account_username=account.identifier if account else None,
                 started_at=running_run.started_at,
-                total_collected=running_run.total_collected or 0,
-                new_saved=running_run.new_saved or 0,
+                total_collected=running_run.collected_count or 0,
+                new_saved=running_run.saved_count or 0,
             )
 
         return StatsSchema(
@@ -682,7 +774,7 @@ class CrawlService:
             success_runs=success_runs,
             last_run_at=last_run_at,
             next_crawl_time=next_crawl_time,
-            unique_accounts=unique_accounts,
+            unique_accounts=unique_schedules,
             running_crawl=running_crawl,
         )
 
@@ -694,20 +786,34 @@ class CrawlService:
             각 항목은 scheduled_time, status, run_id를 포함.
             status: 'pending' (미래), 'completed' (완료), 'missed' (놓침)
         """
-        config = self.get_schedule_config()
+        import json
 
-        if not config or not config.enabled:
+        schedule = self.get_schedule_config()
+
+        if not schedule or not schedule.enabled:
             return []
 
+        # schedule_value에서 설정 추출
+        schedule_value = {}
+        if schedule.schedule_value:
+            try:
+                schedule_value = json.loads(schedule.schedule_value)
+            except json.JSONDecodeError:
+                pass
+
+        daily_runs = schedule_value.get("daily_runs", 3)
+        time_windows_data = schedule_value.get("time_windows", [])
+
         scheduler = InstagramScheduler(
-            daily_runs=config.daily_runs,
-            time_windows=[TimeWindow(**tw) for tw in (config.time_windows or [])],
+            daily_runs=daily_runs,
+            time_windows=[TimeWindow(**tw) for tw in time_windows_data],
         )
 
-        # 오늘 실행 기록
+        # 오늘 실행 기록 (Instagram 피드 타입만)
         today_start = datetime.combine(date.today(), datetime.min.time())
-        today_runs = self.db.query(InstagramCrawlRun).filter(
-            InstagramCrawlRun.started_at >= today_start
+        today_runs = self.db.query(CrawlScheduleRun).join(CrawlSchedule).filter(
+            CrawlSchedule.target_type == CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            CrawlScheduleRun.started_at >= today_start
         ).all()
 
         now = datetime.now()
@@ -722,9 +828,9 @@ class CrawlService:
                     matching_run = run
                     break
 
-            # 상태 결정
+            # 상태 결정 (status 필드 사용)
             if matching_run:
-                status = "completed" if matching_run.success else "missed"
+                status = "completed" if matching_run.status == CrawlScheduleRun.STATUS_COMPLETED else "missed"
                 run_id = matching_run.id
             elif run_time <= now:
                 status = "missed"
@@ -763,7 +869,7 @@ class CrawlService:
         else:
             return "unknown"
 
-    def should_retry(self, run: InstagramCrawlRun, max_retries: int = 3) -> bool:
+    def should_retry(self, run: CrawlScheduleRun, max_retries: int = 3) -> bool:
         """재시도 가능 여부 확인.
 
         Args:
@@ -773,16 +879,15 @@ class CrawlService:
         Returns:
             재시도 가능하면 True
         """
-        if run.success:
+        if run.status == CrawlScheduleRun.STATUS_COMPLETED:
             return False
 
-        retry_count = getattr(run, 'retry_count', 0) or 0
+        retry_count = run.retry_count or 0
         if retry_count >= max_retries:
             return False
 
         # 로그인 필요 에러는 재시도 불가
-        failure_reason = getattr(run, 'failure_reason', None)
-        if failure_reason == "login_required":
+        if run.error_message and "login" in run.error_message.lower():
             return False
 
         return True
@@ -804,7 +909,7 @@ class CrawlService:
         self,
         run_id: int,
         error: Exception,
-    ) -> InstagramCrawlRun:
+    ) -> CrawlScheduleRun:
         """크롤링 실패 기록.
 
         Args:
@@ -814,17 +919,16 @@ class CrawlService:
         Returns:
             업데이트된 실행 기록
         """
-        run = self.db.query(InstagramCrawlRun).get(run_id)
+        run = self._schedule_service.get_run_by_id(run_id)
         if not run:
             raise ValueError(f"CrawlRun {run_id} not found")
 
-        run.success = False
-        run.error_message = str(error)
-        run.failure_reason = self.classify_failure(error)
-        run.finished_at = datetime.now()
+        failure_reason = self.classify_failure(error)
+        error_message = f"{failure_reason}: {str(error)}"
+        run.mark_failed(error_message)
 
         self.db.commit()
         self.db.refresh(run)
 
-        logger.warning(f"Run {run_id} failed: {run.failure_reason} - {error}")
+        logger.warning(f"Run {run_id} failed: {failure_reason} - {error}")
         return run
