@@ -8,7 +8,6 @@
 		InstagramTodayScheduleItem,
 		InstagramCrawlRequest
 	} from '$lib/types';
-	import WorkerStatusCard from '$lib/components/instagram/WorkerStatusCard.svelte';
 	import TagManager from '$lib/components/instagram/TagManager.svelte';
 
 	// 탭 상태
@@ -178,12 +177,8 @@
 				{error}
 			</div>
 		{:else}
-			<!-- 워커 상태 및 통계 카드 -->
-			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-				<!-- 워커 상태 카드 -->
-				<WorkerStatusCard />
-
-				<!-- 통계 카드들 -->
+			<!-- 통계 카드 -->
+			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
 				<div class="card text-center">
 					<p class="text-3xl font-bold text-gray-900">{stats?.total_posts || 0}</p>
 					<p class="text-sm text-gray-500">전체 게시물</p>
