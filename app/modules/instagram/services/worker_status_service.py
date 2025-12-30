@@ -8,7 +8,7 @@ import os
 
 from sqlalchemy.orm import Session
 
-from app.models import InstagramWorkerStatus, InstagramCrawlRun, InstagramCrawlRequest
+from app.models import InstagramWorkerStatus, CrawlScheduleRun, CrawlRequest
 
 logger = logging.getLogger("instagram.worker_status")
 
@@ -74,8 +74,8 @@ class WorkerStatusService:
     def _cleanup_orphaned_runs(self) -> int:
         """이전 워커 크래시로 인해 '실행중' 상태로 남은 orphaned run/request들을 정리합니다.
 
-        - InstagramCrawlRun: finished_at이 NULL인 레코드들을 찾아 실패 처리
-        - InstagramCrawlRequest: processing 상태인 레코드들을 찾아 실패 처리
+        - CrawlScheduleRun: status가 'running'인 레코드들을 찾아 실패 처리
+        - CrawlRequest: processing 상태인 레코드들을 찾아 실패 처리
 
         Returns:
             정리된 레코드 수
@@ -83,31 +83,28 @@ class WorkerStatusService:
         now = datetime.now()
         total_cleaned = 0
 
-        # 1. Orphaned CrawlRun 정리
-        orphaned_runs = self.db.query(InstagramCrawlRun).filter(
-            InstagramCrawlRun.finished_at.is_(None)
+        # 1. Orphaned CrawlScheduleRun 정리 (running 상태로 stuck된 것들)
+        orphaned_runs = self.db.query(CrawlScheduleRun).filter(
+            CrawlScheduleRun.status == CrawlScheduleRun.STATUS_RUNNING
         ).all()
 
         for run in orphaned_runs:
             run.finished_at = now
-            run.success = False
+            run.status = CrawlScheduleRun.STATUS_FAILED
             run.error_message = "Worker crashed - marked as failed on restart"
-            run.failure_reason = "worker_crash"
 
         if orphaned_runs:
             self.db.flush()
-            logger.info(f"Cleaned up {len(orphaned_runs)} orphaned crawl runs")
+            logger.info(f"Cleaned up {len(orphaned_runs)} orphaned crawl schedule runs")
         total_cleaned += len(orphaned_runs)
 
         # 2. Orphaned CrawlRequest 정리 (processing 상태로 stuck된 것들)
-        orphaned_requests = self.db.query(InstagramCrawlRequest).filter(
-            InstagramCrawlRequest.status == "processing"
+        orphaned_requests = self.db.query(CrawlRequest).filter(
+            CrawlRequest.status == CrawlRequest.STATUS_PROCESSING
         ).all()
 
         for req in orphaned_requests:
-            req.status = "failed"
-            req.processed_at = now
-            req.error_message = "Worker crashed - marked as failed on restart"
+            req.mark_failed("Worker crashed - marked as failed on restart")
 
         if orphaned_requests:
             self.db.flush()
