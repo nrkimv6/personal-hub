@@ -1,20 +1,32 @@
 """Instagram Crawl Request Service - 수동 실행 요청 관리."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 
-from sqlalchemy import desc, func
-from sqlalchemy.orm import Session, joinedload
-from datetime import timedelta
+from sqlalchemy import desc
+from sqlalchemy.orm import Session
 
-from app.models import InstagramCrawlRequest, InstagramCrawlRun
+from app.models import CrawlRequest, CrawlScheduleRun
 
 logger = logging.getLogger("instagram.request_service")
 
+# Instagram URL 타입 상수
+URL_TYPE_INSTAGRAM_FEED = "instagram_feed"
+URL_TYPE_INSTAGRAM_POST = "instagram_post"
+URL_TYPE_INSTAGRAM_ACCOUNT = "instagram_account"
+URL_TYPE_INSTAGRAM_HASHTAG = "instagram_hashtag"
+URL_TYPE_INSTAGRAM_REELS = "instagram_reels"
+
 
 class CrawlRequestService:
-    """Instagram 크롤링 요청 관리 서비스."""
+    """Instagram 크롤링 요청 관리 서비스.
+
+    Note:
+        이 서비스는 Instagram 특화 요청을 관리하며,
+        내부적으로 공통 CrawlRequest 모델을 사용합니다.
+        service_account_id는 URL에 인코딩되어 저장됩니다.
+    """
 
     def __init__(self, db: Session):
         """
@@ -23,11 +35,24 @@ class CrawlRequestService:
         """
         self.db = db
 
+    def _make_feed_url(self, service_account_id: int) -> str:
+        """피드 크롤링용 가상 URL 생성."""
+        return f"instagram://feed?account_id={service_account_id}"
+
+    def _extract_account_id(self, url: str) -> Optional[int]:
+        """URL에서 account_id 추출."""
+        if url.startswith("instagram://feed?account_id="):
+            try:
+                return int(url.split("=")[1])
+            except (ValueError, IndexError):
+                return None
+        return None
+
     def create_request(
         self,
         service_account_id: int,
         requested_by: str = "manual",
-    ) -> InstagramCrawlRequest:
+    ) -> CrawlRequest:
         """크롤링 요청 생성.
 
         Args:
@@ -43,10 +68,12 @@ class CrawlRequestService:
             logger.info(f"Pending request already exists for account {service_account_id}")
             return existing
 
-        request = InstagramCrawlRequest(
-            service_account_id=service_account_id,
+        url = self._make_feed_url(service_account_id)
+        request = CrawlRequest(
+            url=url,
+            url_type=URL_TYPE_INSTAGRAM_FEED,
             requested_by=requested_by,
-            status="pending",
+            status=CrawlRequest.STATUS_PENDING,
             requested_at=datetime.now(),
         )
         self.db.add(request)
@@ -56,25 +83,27 @@ class CrawlRequestService:
         logger.info(f"Created crawl request {request.id} for account {service_account_id}")
         return request
 
-    def get_pending_request(self, service_account_id: Optional[int] = None) -> Optional[InstagramCrawlRequest]:
+    def get_pending_request(self, service_account_id: Optional[int] = None) -> Optional[CrawlRequest]:
         """대기 중인 요청 조회.
 
         Args:
-            service_account_id: 특정 계정 필터 (없으면 전체)
+            service_account_id: 특정 계정 필터 (없으면 전체 Instagram 요청)
 
         Returns:
             대기 중인 요청, 없으면 None
         """
-        query = self.db.query(InstagramCrawlRequest).filter(
-            InstagramCrawlRequest.status == "pending"
+        query = self.db.query(CrawlRequest).filter(
+            CrawlRequest.status == CrawlRequest.STATUS_PENDING,
+            CrawlRequest.url_type.like("instagram%")
         )
 
         if service_account_id:
-            query = query.filter(InstagramCrawlRequest.service_account_id == service_account_id)
+            url = self._make_feed_url(service_account_id)
+            query = query.filter(CrawlRequest.url == url)
 
-        return query.order_by(InstagramCrawlRequest.requested_at).first()
+        return query.order_by(CrawlRequest.requested_at).first()
 
-    def get_pending_requests(self, limit: int = 10) -> List[InstagramCrawlRequest]:
+    def get_pending_requests(self, limit: int = 10) -> List[CrawlRequest]:
         """대기 중인 요청 목록 조회.
 
         Args:
@@ -84,14 +113,17 @@ class CrawlRequestService:
             대기 중인 요청 목록
         """
         return (
-            self.db.query(InstagramCrawlRequest)
-            .filter(InstagramCrawlRequest.status == "pending")
-            .order_by(InstagramCrawlRequest.requested_at)
+            self.db.query(CrawlRequest)
+            .filter(
+                CrawlRequest.status == CrawlRequest.STATUS_PENDING,
+                CrawlRequest.url_type.like("instagram%")
+            )
+            .order_by(CrawlRequest.requested_at)
             .limit(limit)
             .all()
         )
 
-    def mark_processing(self, request_id: int) -> Optional[InstagramCrawlRequest]:
+    def mark_processing(self, request_id: int) -> Optional[CrawlRequest]:
         """요청을 처리 중으로 변경.
 
         Args:
@@ -100,12 +132,11 @@ class CrawlRequestService:
         Returns:
             업데이트된 요청
         """
-        request = self.db.query(InstagramCrawlRequest).get(request_id)
+        request = self.db.query(CrawlRequest).filter(CrawlRequest.id == request_id).first()
         if not request:
             return None
 
-        request.status = "processing"
-        request.processed_at = datetime.now()
+        request.mark_processing()
         self.db.commit()
         self.db.refresh(request)
 
@@ -115,22 +146,21 @@ class CrawlRequestService:
         self,
         request_id: int,
         crawl_run_id: int,
-    ) -> Optional[InstagramCrawlRequest]:
+    ) -> Optional[CrawlRequest]:
         """요청을 완료로 변경.
 
         Args:
             request_id: 요청 ID
-            crawl_run_id: 크롤링 실행 ID
+            crawl_run_id: 크롤링 실행 ID (CrawlScheduleRun.id)
 
         Returns:
             업데이트된 요청
         """
-        request = self.db.query(InstagramCrawlRequest).get(request_id)
+        request = self.db.query(CrawlRequest).filter(CrawlRequest.id == request_id).first()
         if not request:
             return None
 
-        request.status = "completed"
-        request.crawl_run_id = crawl_run_id
+        request.mark_completed(result_type="crawl_schedule_run", result_id=crawl_run_id)
         self.db.commit()
         self.db.refresh(request)
 
@@ -141,7 +171,7 @@ class CrawlRequestService:
         self,
         request_id: int,
         error_message: str,
-    ) -> Optional[InstagramCrawlRequest]:
+    ) -> Optional[CrawlRequest]:
         """요청을 실패로 변경.
 
         Args:
@@ -151,12 +181,11 @@ class CrawlRequestService:
         Returns:
             업데이트된 요청
         """
-        request = self.db.query(InstagramCrawlRequest).get(request_id)
+        request = self.db.query(CrawlRequest).filter(CrawlRequest.id == request_id).first()
         if not request:
             return None
 
-        request.status = "failed"
-        request.error_message = error_message
+        request.mark_failed(error_message)
         self.db.commit()
         self.db.refresh(request)
 
@@ -167,7 +196,7 @@ class CrawlRequestService:
         self,
         limit: int = 10,
         service_account_id: Optional[int] = None,
-    ) -> List[InstagramCrawlRequest]:
+    ) -> List[CrawlRequest]:
         """최근 요청 목록 조회.
 
         Args:
@@ -177,13 +206,16 @@ class CrawlRequestService:
         Returns:
             최근 요청 목록
         """
-        query = self.db.query(InstagramCrawlRequest)
+        query = self.db.query(CrawlRequest).filter(
+            CrawlRequest.url_type.like("instagram%")
+        )
 
         if service_account_id:
-            query = query.filter(InstagramCrawlRequest.service_account_id == service_account_id)
+            url = self._make_feed_url(service_account_id)
+            query = query.filter(CrawlRequest.url == url)
 
         return (
-            query.order_by(desc(InstagramCrawlRequest.requested_at))
+            query.order_by(desc(CrawlRequest.requested_at))
             .limit(limit)
             .all()
         )
@@ -197,11 +229,16 @@ class CrawlRequestService:
         Returns:
             대기 중 또는 처리 중인 요청이 있으면 True
         """
+        url = self._make_feed_url(service_account_id)
         return (
-            self.db.query(InstagramCrawlRequest)
+            self.db.query(CrawlRequest)
             .filter(
-                InstagramCrawlRequest.service_account_id == service_account_id,
-                InstagramCrawlRequest.status.in_(["pending", "processing"]),
+                CrawlRequest.url == url,
+                CrawlRequest.status.in_([
+                    CrawlRequest.STATUS_PENDING,
+                    CrawlRequest.STATUS_PICKED,
+                    CrawlRequest.STATUS_PROCESSING
+                ]),
             )
             .first()
             is not None
@@ -212,7 +249,7 @@ class CrawlRequestService:
         post_id: int,
         service_account_id: int,
         requested_by: str = "manual",
-    ) -> InstagramCrawlRequest:
+    ) -> CrawlRequest:
         """개별 게시물 재크롤링 요청 생성.
 
         Args:
@@ -223,13 +260,14 @@ class CrawlRequestService:
         Returns:
             생성된 요청 객체
         """
+        url = f"instagram://post/{post_id}?account_id={service_account_id}"
+
         # 이미 대기 중인 동일 게시물 요청이 있는지 확인
         existing = (
-            self.db.query(InstagramCrawlRequest)
+            self.db.query(CrawlRequest)
             .filter(
-                InstagramCrawlRequest.target_post_id == post_id,
-                InstagramCrawlRequest.request_type == "single_post",
-                InstagramCrawlRequest.status == "pending",
+                CrawlRequest.url == url,
+                CrawlRequest.status == CrawlRequest.STATUS_PENDING,
             )
             .first()
         )
@@ -237,12 +275,11 @@ class CrawlRequestService:
             logger.info(f"Pending single_post request already exists for post {post_id}")
             return existing
 
-        request = InstagramCrawlRequest(
-            service_account_id=service_account_id,
+        request = CrawlRequest(
+            url=url,
+            url_type=URL_TYPE_INSTAGRAM_POST,
             requested_by=requested_by,
-            request_type="single_post",
-            target_post_id=post_id,
-            status="pending",
+            status=CrawlRequest.STATUS_PENDING,
             requested_at=datetime.now(),
         )
         self.db.add(request)
@@ -257,7 +294,7 @@ class CrawlRequestService:
         url: str,
         service_account_id: int,
         requested_by: str = "manual",
-    ) -> InstagramCrawlRequest:
+    ) -> CrawlRequest:
         """URL로 단일 게시물 수집 요청 생성.
 
         Args:
@@ -270,11 +307,10 @@ class CrawlRequestService:
         """
         # 이미 대기 중인 동일 URL 요청이 있는지 확인
         existing = (
-            self.db.query(InstagramCrawlRequest)
+            self.db.query(CrawlRequest)
             .filter(
-                InstagramCrawlRequest.target_url == url,
-                InstagramCrawlRequest.request_type == "single_post_url",
-                InstagramCrawlRequest.status == "pending",
+                CrawlRequest.url == url,
+                CrawlRequest.status == CrawlRequest.STATUS_PENDING,
             )
             .first()
         )
@@ -282,12 +318,11 @@ class CrawlRequestService:
             logger.info(f"Pending url crawl request already exists for {url}")
             return existing
 
-        request = InstagramCrawlRequest(
-            service_account_id=service_account_id,
+        request = CrawlRequest(
+            url=url,
+            url_type=URL_TYPE_INSTAGRAM_POST,
             requested_by=requested_by,
-            request_type="single_post_url",
-            target_url=url,
-            status="pending",
+            status=CrawlRequest.STATUS_PENDING,
             requested_at=datetime.now(),
         )
         self.db.add(request)
@@ -305,7 +340,7 @@ class CrawlRequestService:
         max_posts: int = 20,
         scroll_count: int = 3,
         requested_by: str = "manual",
-    ) -> InstagramCrawlRequest:
+    ) -> CrawlRequest:
         """범용 URL 크롤링 요청 생성.
 
         계정 피드, 해시태그, 릴스 탐색 등 다양한 URL 타입을 지원합니다.
@@ -323,10 +358,10 @@ class CrawlRequestService:
         """
         # 이미 대기 중인 동일 URL 요청이 있는지 확인
         existing = (
-            self.db.query(InstagramCrawlRequest)
+            self.db.query(CrawlRequest)
             .filter(
-                InstagramCrawlRequest.target_url == url,
-                InstagramCrawlRequest.status == "pending",
+                CrawlRequest.url == url,
+                CrawlRequest.status == CrawlRequest.STATUS_PENDING,
             )
             .first()
         )
@@ -334,32 +369,22 @@ class CrawlRequestService:
             logger.info(f"Pending url crawl request already exists for {url}")
             return existing
 
-        # request_type 결정 (url_type 기반)
-        request_type_map = {
-            "single_post": "single_post_url",
-            "single_reel": "single_post_url",
-            "account_profile": "account_feed",
-            "account_reels": "account_reels",
-            "hashtag": "hashtag",
-            "reels_explore": "reels_explore",
+        # url_type에 따라 CrawlRequest.url_type 결정
+        url_type_map = {
+            "single_post": URL_TYPE_INSTAGRAM_POST,
+            "single_reel": URL_TYPE_INSTAGRAM_POST,
+            "account_profile": URL_TYPE_INSTAGRAM_ACCOUNT,
+            "account_reels": URL_TYPE_INSTAGRAM_REELS,
+            "hashtag": URL_TYPE_INSTAGRAM_HASHTAG,
+            "reels_explore": URL_TYPE_INSTAGRAM_REELS,
         }
-        request_type = request_type_map.get(url_type, "single_post_url")
+        crawl_url_type = url_type_map.get(url_type, URL_TYPE_INSTAGRAM_POST)
 
-        # 옵션을 config_snapshot에 저장
-        import json
-        config = {
-            "max_posts": max_posts,
-            "scroll_count": scroll_count,
-            "url_type": url_type,
-        }
-
-        request = InstagramCrawlRequest(
-            service_account_id=service_account_id,
+        request = CrawlRequest(
+            url=url,
+            url_type=crawl_url_type,
             requested_by=requested_by,
-            request_type=request_type,
-            target_url=url,
-            url_type=url_type,
-            status="pending",
+            status=CrawlRequest.STATUS_PENDING,
             requested_at=datetime.now(),
         )
         self.db.add(request)
@@ -369,7 +394,7 @@ class CrawlRequestService:
         logger.info(f"Created generic url crawl request {request.id} for {url} (type={url_type})")
         return request
 
-    def get_request_by_id(self, request_id: int) -> Optional[InstagramCrawlRequest]:
+    def get_request_by_id(self, request_id: int) -> Optional[CrawlRequest]:
         """요청 ID로 조회.
 
         Args:
@@ -378,7 +403,7 @@ class CrawlRequestService:
         Returns:
             요청 객체 또는 None
         """
-        return self.db.query(InstagramCrawlRequest).get(request_id)
+        return self.db.query(CrawlRequest).filter(CrawlRequest.id == request_id).first()
 
     def cleanup_stale_processing_requests(self, timeout_minutes: int = 30) -> int:
         """오래된 processing 상태 요청을 timeout 처리.
@@ -395,21 +420,24 @@ class CrawlRequestService:
         cutoff_time = datetime.now() - timedelta(minutes=timeout_minutes)
 
         stale_requests = (
-            self.db.query(InstagramCrawlRequest)
+            self.db.query(CrawlRequest)
             .filter(
-                InstagramCrawlRequest.status == "processing",
-                InstagramCrawlRequest.processed_at < cutoff_time,
+                CrawlRequest.url_type.like("instagram%"),
+                CrawlRequest.status.in_([
+                    CrawlRequest.STATUS_PROCESSING,
+                    CrawlRequest.STATUS_PICKED
+                ]),
+                CrawlRequest.picked_at < cutoff_time,
             )
             .all()
         )
 
         count = 0
         for request in stale_requests:
-            request.status = "failed"
-            request.error_message = f"Timeout: processing 상태가 {timeout_minutes}분 초과"
+            request.mark_failed(f"Timeout: {request.status} 상태가 {timeout_minutes}분 초과")
             count += 1
             logger.warning(
-                f"Stale request {request.id} marked as failed (processing since {request.processed_at})"
+                f"Stale request {request.id} marked as failed (status={request.status} since {request.picked_at})"
             )
 
         if count > 0:
@@ -432,18 +460,18 @@ class CrawlRequestService:
         cutoff_time = datetime.now() - timedelta(minutes=timeout_minutes)
 
         stale_requests = (
-            self.db.query(InstagramCrawlRequest)
+            self.db.query(CrawlRequest)
             .filter(
-                InstagramCrawlRequest.status == "pending",
-                InstagramCrawlRequest.requested_at < cutoff_time,
+                CrawlRequest.url_type.like("instagram%"),
+                CrawlRequest.status == CrawlRequest.STATUS_PENDING,
+                CrawlRequest.requested_at < cutoff_time,
             )
             .all()
         )
 
         count = 0
         for request in stale_requests:
-            request.status = "failed"
-            request.error_message = f"Timeout: pending 상태가 {timeout_minutes}분 초과 (워커 미처리)"
+            request.mark_failed(f"Timeout: pending 상태가 {timeout_minutes}분 초과 (워커 미처리)")
             count += 1
             logger.warning(
                 f"Stale pending request {request.id} marked as failed (pending since {request.requested_at})"
@@ -464,47 +492,60 @@ class CrawlRequestService:
         status: Optional[str] = None,
         period: Optional[str] = None,
         service_account_id: Optional[int] = None,
-    ) -> tuple[List[InstagramCrawlRequest], int]:
+    ) -> tuple[List[CrawlRequest], int]:
         """크롤링 요청 이력 페이징 조회.
 
         Args:
             page: 페이지 번호 (1부터 시작)
             limit: 페이지당 개수
-            request_type: 요청 타입 필터 ('feed', 'single_post', 'single_post_url')
+            request_type: 요청 타입 필터 (url_type으로 매핑됨)
             requested_by: 요청 출처 필터 ('manual', 'scheduler', 'retry')
             status: 상태 필터 ('pending', 'processing', 'completed', 'failed')
             period: 기간 필터 ('today', 'week', 'month')
-            service_account_id: 계정 필터
+            service_account_id: 계정 필터 (현재는 URL 기반 필터링)
 
         Returns:
             (요청 목록, 전체 개수) 튜플
         """
-        query = self.db.query(InstagramCrawlRequest)
+        query = self.db.query(CrawlRequest).filter(
+            CrawlRequest.url_type.like("instagram%")
+        )
 
-        # 필터 적용
+        # request_type을 url_type으로 변환
         if request_type:
-            query = query.filter(InstagramCrawlRequest.request_type == request_type)
+            type_map = {
+                "feed": URL_TYPE_INSTAGRAM_FEED,
+                "single_post": URL_TYPE_INSTAGRAM_POST,
+                "single_post_url": URL_TYPE_INSTAGRAM_POST,
+                "account_feed": URL_TYPE_INSTAGRAM_ACCOUNT,
+                "hashtag": URL_TYPE_INSTAGRAM_HASHTAG,
+            }
+            url_type = type_map.get(request_type, request_type)
+            query = query.filter(CrawlRequest.url_type == url_type)
 
         if requested_by:
-            query = query.filter(InstagramCrawlRequest.requested_by == requested_by)
+            query = query.filter(CrawlRequest.requested_by == requested_by)
 
         if status:
-            query = query.filter(InstagramCrawlRequest.status == status)
+            query = query.filter(CrawlRequest.status == status)
 
         if service_account_id:
-            query = query.filter(InstagramCrawlRequest.service_account_id == service_account_id)
+            # URL에 account_id가 포함된 요청 필터
+            query = query.filter(
+                CrawlRequest.url.like(f"%account_id={service_account_id}%")
+            )
 
         if period:
             now = datetime.now()
             if period == "today":
                 start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
-                query = query.filter(InstagramCrawlRequest.requested_at >= start_of_day)
+                query = query.filter(CrawlRequest.requested_at >= start_of_day)
             elif period == "week":
                 week_ago = now - timedelta(days=7)
-                query = query.filter(InstagramCrawlRequest.requested_at >= week_ago)
+                query = query.filter(CrawlRequest.requested_at >= week_ago)
             elif period == "month":
                 month_ago = now - timedelta(days=30)
-                query = query.filter(InstagramCrawlRequest.requested_at >= month_ago)
+                query = query.filter(CrawlRequest.requested_at >= month_ago)
 
         # 전체 개수
         total = query.count()
@@ -512,7 +553,7 @@ class CrawlRequestService:
         # 페이징 적용
         offset = (page - 1) * limit
         requests = (
-            query.order_by(desc(InstagramCrawlRequest.requested_at))
+            query.order_by(desc(CrawlRequest.requested_at))
             .offset(offset)
             .limit(limit)
             .all()
@@ -521,15 +562,15 @@ class CrawlRequestService:
         return requests, total
 
     def get_request_with_run(self, request_id: int) -> Optional[dict]:
-        """요청과 연결된 CrawlRun 정보를 함께 조회.
+        """요청과 연결된 CrawlScheduleRun 정보를 함께 조회.
 
         Args:
             request_id: 요청 ID
 
         Returns:
-            요청 정보와 CrawlRun 요약을 포함한 딕셔너리
+            요청 정보와 CrawlScheduleRun 요약을 포함한 딕셔너리
         """
-        request = self.db.query(InstagramCrawlRequest).get(request_id)
+        request = self.db.query(CrawlRequest).filter(CrawlRequest.id == request_id).first()
         if not request:
             return None
 
@@ -538,17 +579,17 @@ class CrawlRequestService:
             "crawl_run": None,
         }
 
-        if request.crawl_run_id:
-            run = self.db.query(InstagramCrawlRun).get(request.crawl_run_id)
+        if request.result_id and request.result_type == "crawl_schedule_run":
+            run = self.db.query(CrawlScheduleRun).filter(
+                CrawlScheduleRun.id == request.result_id
+            ).first()
             if run:
-                duration = None
-                if run.started_at and run.finished_at:
-                    duration = int((run.finished_at - run.started_at).total_seconds())
+                duration = run.duration_seconds
 
                 result["crawl_run"] = {
                     "id": run.id,
-                    "total_collected": run.total_collected,
-                    "new_saved": run.new_saved,
+                    "total_collected": run.collected_count,
+                    "new_saved": run.saved_count,
                     "duration_seconds": duration,
                     "stop_reason": run.stop_reason,
                 }
