@@ -178,10 +178,9 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
 
         while retry_count <= max_retries:
             try:
-                # Instagram 계정 조회 (첫 번째 활성 계정 사용)
+                # Instagram 계정 조회 (첫 번째 계정 사용)
                 account = db.query(ServiceAccount).filter(
-                    ServiceAccount.service_type == "instagram",
-                    ServiceAccount.is_active == True
+                    ServiceAccount.service_type == "instagram"
                 ).first()
 
                 if not account:
