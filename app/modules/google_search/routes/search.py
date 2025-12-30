@@ -2,92 +2,117 @@
 Google 검색 API 라우트
 
 검색 수행, 결과 조회, 히스토리 관리, 저장된 검색 조건 CRUD API를 제공합니다.
+
+Note:
+    검색 요청은 큐에 저장되고 워커에서 처리됩니다.
+    API 서버는 Session 0 (NSSM 서비스)에서 실행되어 브라우저 사용이 불가합니다.
 """
 
 import logging
+import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.shared.browser import ContextManager
 from app.models.google_search import (
     GoogleSavedSearch,
     GoogleSearchHistory,
     GoogleSearchResult,
+    GoogleSearchQueue,
 )
 from app.modules.google_search.models.schemas import (
     SearchRequest,
     SearchResult,
     SearchResponse,
+    SearchQueueResponse,
+    SearchStatusResponse,
     SearchHistoryItem,
     SavedSearchCreate,
     SavedSearchUpdate,
     SavedSearchResponse,
-)
-from app.modules.google_search.services.crawler import (
-    GoogleSearchService,
-    CaptchaDetectedError,
 )
 
 logger = logging.getLogger("google_search.routes")
 
 router = APIRouter(prefix="/api/google", tags=["google-search"])
 
-# 전역 ContextManager (다른 모듈과 공유)
-_context_manager: Optional[ContextManager] = None
-
-
-async def get_context_manager() -> ContextManager:
-    """ContextManager 인스턴스 반환."""
-    global _context_manager
-    if _context_manager is None:
-        _context_manager = ContextManager()
-    return _context_manager
-
-
-def set_context_manager(cm: ContextManager) -> None:
-    """외부에서 ContextManager 설정 (다른 모듈과 공유 시)."""
-    global _context_manager
-    _context_manager = cm
-
 
 # ============================================================
-# 검색 API
+# 검색 API (큐 기반)
 # ============================================================
 
 
-@router.post("/search", response_model=SearchResponse)
+@router.post("/search", response_model=SearchQueueResponse, status_code=202)
 async def search(
     request: SearchRequest,
     db: Session = Depends(get_db),
-    cm: ContextManager = Depends(get_context_manager),
 ):
-    """구글 검색 수행.
+    """구글 검색 요청을 큐에 추가.
+
+    검색 요청은 워커에서 비동기로 처리됩니다.
+    결과는 GET /api/google/search/{search_id}/status 에서 조회할 수 있습니다.
 
     Args:
         request: 검색 요청 (query, date_filter, max_pages, service_account_id)
 
     Returns:
-        SearchResponse: 검색 결과
+        SearchQueueResponse: 검색 요청 ID와 상태
     """
-    try:
-        service = GoogleSearchService(cm, db)
-        result = await service.search(
-            query=request.query,
-            date_filter=request.date_filter,
-            max_pages=min(request.max_pages, 10),  # 최대 10페이지
-            service_account_id=request.service_account_id,
-        )
+    search_id = str(uuid.uuid4())
 
-        return SearchResponse(
-            search_id=result.search_id,
-            query=result.query,
-            status=result.status,
-            total_results=result.total_results,
-            results=[
+    queue_item = GoogleSearchQueue(
+        search_id=search_id,
+        query=request.query,
+        date_filter=request.date_filter,
+        max_pages=min(request.max_pages, 10),
+        service_account_id=request.service_account_id,
+        status="pending",
+    )
+    db.add(queue_item)
+    db.commit()
+
+    logger.info(f"Search request queued: search_id={search_id}, query={request.query}")
+
+    return SearchQueueResponse(
+        search_id=search_id,
+        status="pending",
+        message="검색 요청이 큐에 추가되었습니다. 상태를 폴링하여 결과를 확인하세요.",
+    )
+
+
+@router.get("/search/{search_id}/status", response_model=SearchStatusResponse)
+async def get_search_status(
+    search_id: str,
+    db: Session = Depends(get_db),
+):
+    """검색 요청 상태 및 결과 조회.
+
+    Args:
+        search_id: 검색 세션 ID
+
+    Returns:
+        SearchStatusResponse: 검색 상태 및 결과 (완료 시)
+    """
+    # 먼저 큐에서 확인
+    queue_item = db.query(GoogleSearchQueue).filter_by(search_id=search_id).first()
+
+    if queue_item:
+        # 큐에 있는 경우 (pending 또는 processing)
+        results = []
+
+        # 완료된 경우 결과도 함께 조회
+        if queue_item.status == "completed":
+            db_results = (
+                db.query(GoogleSearchResult)
+                .filter_by(search_id=search_id)
+                .order_by(GoogleSearchResult.rank)
+                .all()
+            )
+            results = [
                 SearchResult(
                     rank=r.rank,
                     title=r.title,
@@ -96,21 +121,61 @@ async def search(
                     snippet=r.snippet,
                     publish_date=r.publish_date,
                 )
-                for r in result.results
-            ],
-            created_at=result.started_at or datetime.now(),
+                for r in db_results
+            ]
+
+        # 히스토리에서 total_results 조회
+        history = db.query(GoogleSearchHistory).filter_by(search_id=search_id).first()
+        total_results = history.total_results if history else 0
+
+        return SearchStatusResponse(
+            search_id=search_id,
+            query=queue_item.query,
+            status=queue_item.status,
+            total_results=total_results,
+            error_message=queue_item.error_message,
+            created_at=queue_item.created_at,
+            started_at=queue_item.started_at,
+            completed_at=queue_item.completed_at,
+            results=results,
         )
 
-    except CaptchaDetectedError as e:
-        logger.warning(f"CAPTCHA detected for query: {request.query}")
-        raise HTTPException(
-            status_code=503,
-            detail="CAPTCHA 감지됨. 수동 해결이 필요합니다."
-        )
+    # 큐에 없으면 히스토리에서 확인 (과거 완료된 검색)
+    history = db.query(GoogleSearchHistory).filter_by(search_id=search_id).first()
+    if not history:
+        raise HTTPException(status_code=404, detail="Search not found")
 
-    except Exception as e:
-        logger.error(f"Search failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    results = []
+    if history.status == "completed":
+        db_results = (
+            db.query(GoogleSearchResult)
+            .filter_by(search_id=search_id)
+            .order_by(GoogleSearchResult.rank)
+            .all()
+        )
+        results = [
+            SearchResult(
+                rank=r.rank,
+                title=r.title,
+                url=r.url,
+                display_url=r.display_url,
+                snippet=r.snippet,
+                publish_date=r.publish_date,
+            )
+            for r in db_results
+        ]
+
+    return SearchStatusResponse(
+        search_id=search_id,
+        query=history.query,
+        status=history.status,
+        total_results=history.total_results,
+        error_message=history.error_message,
+        created_at=history.created_at,
+        started_at=history.started_at,
+        completed_at=history.completed_at,
+        results=results,
+    )
 
 
 @router.get("/results/{search_id}", response_model=SearchResponse)
@@ -348,57 +413,47 @@ async def delete_saved_search(
     return {"message": "Saved search deleted successfully"}
 
 
-@router.post("/saved/{saved_id}/run", response_model=SearchResponse)
+@router.post("/saved/{saved_id}/run", response_model=SearchQueueResponse, status_code=202)
 async def run_saved_search(
     saved_id: int,
     db: Session = Depends(get_db),
-    cm: ContextManager = Depends(get_context_manager),
 ):
-    """저장된 검색 조건으로 검색 실행.
+    """저장된 검색 조건으로 검색 요청을 큐에 추가.
+
+    검색 요청은 워커에서 비동기로 처리됩니다.
+    결과는 GET /api/google/search/{search_id}/status 에서 조회할 수 있습니다.
 
     Args:
         saved_id: 저장된 검색 ID
 
     Returns:
-        SearchResponse: 검색 결과
+        SearchQueueResponse: 검색 요청 ID와 상태
     """
     saved = db.query(GoogleSavedSearch).filter_by(id=saved_id).first()
     if not saved:
         raise HTTPException(status_code=404, detail="Saved search not found")
 
-    try:
-        service = GoogleSearchService(cm, db)
-        result = await service.run_saved_search(saved_id)
+    search_id = str(uuid.uuid4())
 
-        return SearchResponse(
-            search_id=result.search_id,
-            query=result.query,
-            status=result.status,
-            total_results=result.total_results,
-            results=[
-                SearchResult(
-                    rank=r.rank,
-                    title=r.title,
-                    url=r.url,
-                    display_url=r.display_url,
-                    snippet=r.snippet,
-                    publish_date=r.publish_date,
-                )
-                for r in result.results
-            ],
-            created_at=result.started_at or datetime.now(),
-        )
+    queue_item = GoogleSearchQueue(
+        search_id=search_id,
+        query=saved.query,
+        date_filter=saved.date_filter,
+        max_pages=saved.max_pages,
+        service_account_id=saved.service_account_id,
+        saved_search_id=saved_id,
+        status="pending",
+    )
+    db.add(queue_item)
+    db.commit()
 
-    except CaptchaDetectedError:
-        logger.warning(f"CAPTCHA detected for saved search: {saved.name}")
-        raise HTTPException(
-            status_code=503,
-            detail="CAPTCHA 감지됨. 수동 해결이 필요합니다."
-        )
+    logger.info(f"Saved search queued: search_id={search_id}, saved_id={saved_id}, query={saved.query}")
 
-    except Exception as e:
-        logger.error(f"Run saved search failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return SearchQueueResponse(
+        search_id=search_id,
+        status="pending",
+        message="저장된 검색이 큐에 추가되었습니다. 상태를 폴링하여 결과를 확인하세요.",
+    )
 
 
 @router.post("/saved/{saved_id}/toggle-favorite", response_model=SavedSearchResponse)
