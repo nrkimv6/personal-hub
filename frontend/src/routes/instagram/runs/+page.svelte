@@ -28,8 +28,8 @@
 				period: period === 'all' ? undefined : period,
 				status: status === 'all' ? undefined : status
 			});
-			runs = response.items;
-			total = response.total;
+			runs = response.items ?? [];
+			total = response.total ?? 0;
 			error = null;
 		} catch (e) {
 			error = e instanceof Error ? e.message : '데이터 로드 실패';
@@ -171,7 +171,7 @@
 		<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
 			{error}
 		</div>
-	{:else if runs.length === 0}
+	{:else if !runs || runs.length === 0}
 		<div class="card text-center py-12">
 			<p class="text-gray-500">실행 기록이 없습니다</p>
 		</div>
