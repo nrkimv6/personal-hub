@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { navGroups, isActive, getActiveGroupId, type NavGroup } from '$lib/navigation';
+	import { navEntries, isNavGroup, isActive, getActiveEntryId, type NavEntry, type NavGroup, type NavSingleItem } from '$lib/navigation';
 	import { authStore, isAdmin, isLoggedIn, isAuthLoading } from '$lib/stores/auth';
 
 	// Props
@@ -17,9 +17,9 @@
 
 	// 현재 경로에 따라 활성 그룹 자동 펼침
 	$effect(() => {
-		const activeGroupId = getActiveGroupId($page.url.pathname);
-		if (activeGroupId && collapsedGroups[activeGroupId]) {
-			collapsedGroups[activeGroupId] = false;
+		const activeId = getActiveEntryId($page.url.pathname);
+		if (activeId && collapsedGroups[activeId]) {
+			collapsedGroups[activeId] = false;
 		}
 	});
 
@@ -42,28 +42,38 @@
 	// 앱 모드와 관리자 여부에 따라 메뉴 필터링
 	// - 관리자: 모든 메뉴 표시
 	// - 비관리자: public 아이템만 표시 (운영/개발 모드 상관없음)
-	function getVisibleGroups(groups: NavGroup[], admin: boolean): NavGroup[] {
+	function getVisibleEntries(entries: NavEntry[], admin: boolean): NavEntry[] {
 		// 관리자면 모든 메뉴 표시
 		if (admin) {
-			return groups;
+			return entries;
 		}
 		// 비관리자: public 아이템만 보여줌
-		return groups
-			.map((group) => ({
-				...group,
-				items: group.items.filter((item) => item.public)
-			}))
-			.filter((group) => group.items.length > 0);
+		return entries
+			.map((entry) => {
+				if (isNavGroup(entry)) {
+					return {
+						...entry,
+						items: entry.items.filter((item) => item.public)
+					};
+				}
+				return entry;
+			})
+			.filter((entry) => {
+				if (isNavGroup(entry)) {
+					return entry.items.length > 0;
+				}
+				return (entry as NavSingleItem).public;
+			});
 	}
 
-	// 필터링된 네비게이션 그룹 - Svelte 5 runes와 스토어 호환을 위해 $effect 사용
+	// 필터링된 네비게이션 - Svelte 5 runes와 스토어 호환을 위해 $effect 사용
 	// 초기값: public 아이템만 (운영 모드 기본값)
-	let visibleGroups = $state<NavGroup[]>(getVisibleGroups(navGroups, false));
+	let visibleEntries = $state<NavEntry[]>(getVisibleEntries(navEntries, false));
 
 	$effect(() => {
 		const admin = $isAdmin;
 		console.log('[Sidebar] Admin check:', { admin, willShowAll: admin });
-		visibleGroups = getVisibleGroups(navGroups, admin);
+		visibleEntries = getVisibleEntries(navEntries, admin);
 	});
 </script>
 
@@ -101,55 +111,73 @@
 
 <!-- 네비게이션 -->
 <nav class="flex-1 p-2 lg:p-4 overflow-y-auto">
-	{#each visibleGroups as group}
+	{#each visibleEntries as entry}
 		<div class="mb-2">
-			<!-- 그룹 헤더 -->
-			{#if !collapsed}
-				<button
-					onclick={() => toggleGroup(group.id)}
-					class="w-full flex items-center justify-between px-3 py-2 text-sm font-semibold text-gray-400 hover:text-white rounded-lg hover:bg-gray-700/50 transition-colors"
-				>
-					<span class="flex items-center gap-2">
-						<span>{group.icon}</span>
-						<span>{group.label}</span>
-					</span>
-					<svg
-						class="w-4 h-4 transition-transform {collapsedGroups[group.id] ? '-rotate-90' : ''}"
-						fill="none"
-						stroke="currentColor"
-						viewBox="0 0 24 24"
+			{#if isNavGroup(entry)}
+				<!-- 그룹 메뉴 (하위 아이템이 2개 이상) -->
+				<!-- 그룹 헤더 -->
+				{#if !collapsed}
+					<button
+						onclick={() => toggleGroup(entry.id)}
+						class="w-full flex items-center justify-between px-3 py-2 text-sm font-semibold text-gray-400 hover:text-white rounded-lg hover:bg-gray-700/50 transition-colors"
 					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M19 9l-7 7-7-7"
-						/>
-					</svg>
-				</button>
-			{/if}
+						<span class="flex items-center gap-2">
+							<span>{entry.icon}</span>
+							<span>{entry.label}</span>
+						</span>
+						<svg
+							class="w-4 h-4 transition-transform {collapsedGroups[entry.id] ? '-rotate-90' : ''}"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M19 9l-7 7-7-7"
+							/>
+						</svg>
+					</button>
+				{/if}
 
-			<!-- 그룹 아이템들 -->
-			{#if !collapsedGroups[group.id]}
-				<ul class="space-y-1 {collapsed ? '' : 'mt-1 ml-2'}">
-					{#each group.items as item}
-						<li>
-							<a
-								href={item.href}
-								onclick={handleNavClick}
-								class="flex items-center gap-3 px-3 py-2 rounded-lg transition-colors
-									{collapsed ? 'lg:justify-center lg:px-0' : ''}
-									{isActive(item.href, $page.url.pathname)
-									? 'bg-blue-600 text-white'
-									: 'text-gray-300 hover:bg-gray-700'}"
-								title={collapsed ? item.label : ''}
-							>
-								<span class="text-lg">{item.icon}</span>
-								<span class={collapsed ? 'lg:hidden' : ''}>{item.label}</span>
-							</a>
-						</li>
-					{/each}
-				</ul>
+				<!-- 그룹 아이템들 -->
+				{#if !collapsedGroups[entry.id]}
+					<ul class="space-y-1 {collapsed ? '' : 'mt-1 ml-2'}">
+						{#each entry.items as item}
+							<li>
+								<a
+									href={item.href}
+									onclick={handleNavClick}
+									class="flex items-center gap-3 px-3 py-2 rounded-lg transition-colors
+										{collapsed ? 'lg:justify-center lg:px-0' : ''}
+										{isActive(item.href, $page.url.pathname)
+										? 'bg-blue-600 text-white'
+										: 'text-gray-300 hover:bg-gray-700'}"
+									title={collapsed ? item.label : ''}
+								>
+									<span class="text-lg">{item.icon}</span>
+									<span class={collapsed ? 'lg:hidden' : ''}>{item.label}</span>
+								</a>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			{:else}
+				<!-- 단일 메뉴 아이템 -->
+				<a
+					href={entry.href}
+					onclick={handleNavClick}
+					class="flex items-center gap-3 px-3 py-2 rounded-lg transition-colors
+						{collapsed ? 'lg:justify-center lg:px-0' : ''}
+						{isActive(entry.href, $page.url.pathname)
+						? 'bg-blue-600 text-white'
+						: 'text-gray-300 hover:bg-gray-700'}"
+					title={collapsed ? entry.label : ''}
+				>
+					<span class="text-lg">{entry.icon}</span>
+					<span class={collapsed ? 'lg:hidden' : ''}>{entry.label}</span>
+				</a>
 			{/if}
 		</div>
 	{/each}
