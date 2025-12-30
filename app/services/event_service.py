@@ -107,22 +107,15 @@ class EventService:
         """이벤트 목록 조회 (필터/정렬/페이지네이션)"""
         query = db.query(Event)
 
-        # 검색어 필터 (LIKE) - Instagram 게시물 본문(caption) 포함
+        # 검색어 필터 (LIKE) - body_text 포함
         if search:
             search_pattern = f"%{search}%"
-            # Instagram 게시물 본문 검색을 위한 서브쿼리
-            from sqlalchemy import select
-            caption_subquery = (
-                select(InstagramPost.id)
-                .where(InstagramPost.caption.ilike(search_pattern))
-                .scalar_subquery()
-            )
             query = query.filter(
                 or_(
                     Event.title.ilike(search_pattern),
                     Event.summary.ilike(search_pattern),
                     Event.organizer.ilike(search_pattern),
-                    Event.source_instagram_post_id.in_(caption_subquery),
+                    Event.body_text.ilike(search_pattern),
                 )
             )
 
@@ -258,6 +251,7 @@ class EventService:
             announcement_date=data.announcement_date,
             organizer=data.organizer,
             summary=data.summary,
+            body_text=data.body_text,
             prizes=data.prizes,
             winner_count=data.winner_count,
             purchase_required=data.purchase_required,
@@ -380,6 +374,7 @@ class EventService:
             url_type="other",
             additional_urls=[],
             prizes=[],
+            body_text=post.caption,  # Instagram caption을 body_text로 저장
             source_type="instagram",
             source_instagram_post_id=post.id,
             source_url=post.url,
@@ -528,12 +523,13 @@ class EventService:
         # 날짜 문자열을 date 객체로 변환
         parsed_event = self._parse_event_dates(parsed_event)
 
-        # URL 정보 추가
+        # URL 정보 및 본문 추가
         parsed_event["event_url"] = url
         parsed_event["url_type"] = detect_url_type(url)
         parsed_event["source_type"] = "web"
         parsed_event["source_url"] = url
         parsed_event["input_source"] = "ai"
+        parsed_event["body_text"] = extracted.content  # 페이지 본문을 body_text로 저장
 
         # auto_save 처리
         created_event = None
@@ -651,6 +647,7 @@ class EventService:
             "announcement_date": event.announcement_date,
             "organizer": event.organizer,
             "summary": event.summary,
+            "body_text": event.body_text,
             "prizes": event.prizes or [],
             "winner_count": event.winner_count,
             "purchase_required": event.purchase_required,

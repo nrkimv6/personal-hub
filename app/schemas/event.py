@@ -19,6 +19,7 @@ class EventBase(BaseModel):
     announcement_date: Optional[date] = None
     organizer: Optional[str] = None
     summary: Optional[str] = None
+    body_text: Optional[str] = None  # 원본 본문 (Instagram caption, 웹페이지 본문 등)
     prizes: List[str] = []
     winner_count: Optional[int] = None
     purchase_required: Optional[str] = None  # yes_all/yes_partial/no
@@ -50,6 +51,7 @@ class EventUpdate(BaseModel):
     announcement_date: Optional[date] = None
     organizer: Optional[str] = None
     summary: Optional[str] = None
+    body_text: Optional[str] = None  # 원본 본문
     prizes: Optional[List[str]] = None
     winner_count: Optional[int] = None
     purchase_required: Optional[str] = None
