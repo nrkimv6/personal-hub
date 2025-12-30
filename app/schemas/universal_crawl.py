@@ -8,7 +8,7 @@ from typing import Optional, Literal
 
 
 # URL 타입 정의
-UrlType = Literal["google_form", "naver_form", "naver_blog", "generic", "other"]
+UrlType = Literal["google_form", "naver_form", "naver_blog", "generic", "other", "instagram", "instagram_post"]
 
 # 요청 상태 정의
 CrawlStatus = Literal["pending", "processing", "completed", "failed"]
