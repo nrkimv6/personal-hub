@@ -84,6 +84,53 @@ class GoogleSearchHistory(Base):
         return f"<GoogleSearchHistory(search_id='{self.search_id}', query='{self.query}', status='{self.status}')>"
 
 
+class GoogleSearchQueue(Base):
+    """Google 검색 큐 모델.
+
+    API 요청을 큐에 저장하고 워커에서 처리합니다.
+    Session 0 (NSSM 서비스)에서는 브라우저를 사용할 수 없으므로
+    사용자 세션의 워커에서 처리합니다.
+    """
+
+    __tablename__ = "google_search_queue"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # 검색 조건
+    search_id = Column(String(36), unique=True, nullable=False)
+    query = Column(String(500), nullable=False)
+    date_filter = Column(String(10), nullable=True)
+    max_pages = Column(Integer, default=1)
+
+    # 참조
+    service_account_id = Column(
+        Integer,
+        ForeignKey("service_accounts.id", ondelete="SET NULL"),
+        nullable=True
+    )
+    saved_search_id = Column(
+        Integer,
+        ForeignKey("google_saved_searches.id", ondelete="SET NULL"),
+        nullable=True
+    )
+
+    # 상태
+    status = Column(String(20), default="pending")  # pending, processing, completed, failed
+    error_message = Column(Text, nullable=True)
+
+    # 시간
+    created_at = Column(DateTime, default=datetime.now)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    # 관계
+    service_account = relationship("ServiceAccount", foreign_keys=[service_account_id])
+    saved_search = relationship("GoogleSavedSearch", foreign_keys=[saved_search_id])
+
+    def __repr__(self) -> str:
+        return f"<GoogleSearchQueue(search_id='{self.search_id}', query='{self.query}', status='{self.status}')>"
+
+
 class GoogleSearchResult(Base):
     """검색 결과 모델."""
 
