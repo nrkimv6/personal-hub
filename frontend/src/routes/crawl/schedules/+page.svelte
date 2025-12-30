@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { crawlApi } from '$lib/api';
+	import { crawlApiV2 } from '$lib/api';
 	import type { CrawlSchedule, CrawlRunStats } from '$lib/types';
 
 	let schedules: CrawlSchedule[] = [];
@@ -15,7 +15,7 @@
 	async function fetchSchedules() {
 		try {
 			loading = true;
-			schedules = await crawlApi.getSchedules({
+			schedules = await crawlApiV2.getSchedules({
 				target_type: targetType || undefined,
 				enabled_only: enabledOnly
 			});
@@ -24,7 +24,7 @@
 			// 각 스케줄의 통계 로드
 			for (const schedule of schedules) {
 				try {
-					const stats = await crawlApi.getScheduleStats(schedule.id, 7);
+					const stats = await crawlApiV2.getScheduleStats(schedule.id, 7);
 					statsMap.set(schedule.id, stats);
 				} catch {
 					// 통계 로드 실패 시 무시
@@ -44,7 +44,7 @@
 
 	async function handleToggle(scheduleId: number, enabled: boolean) {
 		try {
-			await crawlApi.toggleSchedule(scheduleId, enabled);
+			await crawlApiV2.toggleSchedule(scheduleId, enabled);
 			fetchSchedules();
 		} catch (e) {
 			error = e instanceof Error ? e.message : '토글 실패';
