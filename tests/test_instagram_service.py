@@ -918,7 +918,7 @@ class TestScheduleConfigAccountId:
         from app.models.instagram_schedule_config import InstagramScheduleConfig
 
         assert hasattr(InstagramScheduleConfig, 'service_account_id')
-        assert hasattr(InstagramScheduleConfig, 'account')
+        assert hasattr(InstagramScheduleConfig, 'service_account')
 
     def test_schedule_config_schema_has_account_fields(self):
         """ScheduleConfigSchema에 account 필드 존재"""
