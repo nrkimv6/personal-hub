@@ -124,3 +124,21 @@ class CrawlRequest(Base):
     def extra_metadata(self):
         """extra_metadata 호환 프로퍼티."""
         return None
+
+    @property
+    def request_type(self):
+        """request_type 호환 프로퍼티 (url_type 기반 변환)."""
+        # instagram URL은 single_post_url로 처리
+        if self.url_type == "instagram":
+            return "single_post_url"
+        return self.url_type
+
+    @property
+    def target_url(self):
+        """target_url 호환 프로퍼티 (url과 동일)."""
+        return self.url
+
+    @property
+    def target_post_id(self):
+        """target_post_id 호환 프로퍼티."""
+        return self.result_id if self.result_type == "instagram_post" else None
