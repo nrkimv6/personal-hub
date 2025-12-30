@@ -83,13 +83,7 @@
 			}
 		} catch (e) {
 			const message = e instanceof Error ? e.message : '알 수 없는 오류';
-			if (message.includes('Instagram')) {
-				toast.warning('Instagram URL은 Instagram 크롤러를 사용하세요.');
-				handleClose();
-				window.location.href = `/instagram/posts?shared_url=${encodeURIComponent(url.trim())}`;
-			} else {
-				error = message;
-			}
+			error = message;
 		} finally {
 			loading = false;
 		}
@@ -270,7 +264,7 @@
 							{/if}
 						</div>
 						<p class="text-xs text-gray-500 mt-1">
-							지원: Google Forms, Naver Form, Naver Blog, 일반 웹페이지
+							지원: Google Forms, Naver Form, Naver Blog, Instagram, 일반 웹페이지
 						</p>
 					</div>
 

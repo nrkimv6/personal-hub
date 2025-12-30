@@ -56,14 +56,14 @@ class UniversalCrawlService:
         Returns:
             Tuple[CrawlRequest, str]: (요청 객체, 메시지)
         """
-        # Instagram URL은 거부 (별도 크롤러 사용)
+        # Instagram URL은 instagram 타입으로 설정 (ondemand_worker가 처리)
         if self.is_instagram_url(url):
-            raise ValueError("Instagram URL은 Instagram 크롤러를 사용하세요.")
-
-        # URL 타입 자동 감지
-        url_type = detect_url_type(url)
-        if url_type == "sns":
-            url_type = "other"  # SNS 중 Instagram 제외한 것들
+            url_type = "instagram"
+        else:
+            # URL 타입 자동 감지
+            url_type = detect_url_type(url)
+            if url_type == "sns":
+                url_type = "other"  # SNS 중 Instagram 제외한 것들
 
         # 요청 생성
         request = CrawlRequest(
