@@ -1,6 +1,9 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
+  import type { Snippet } from 'svelte';
+
+  let { children }: { children: Snippet } = $props();
 
   const primaryTabs = [
     { id: 'dashboard', label: '대시보드', path: '/instagram' },
@@ -45,5 +48,5 @@
     </nav>
   </div>
 
-  <slot />
+  {@render children()}
 </div>
