@@ -21,7 +21,7 @@ from typing import Optional, TYPE_CHECKING
 
 from app.worker.crawl_worker_base import CrawlWorkerBase
 from app.database import SessionLocal
-from app.models import ServiceAccount, CrawlRequest
+from app.models import ServiceAccount, CrawlRequest, CrawlScheduleRun
 
 from app.services.crawl_request_service import CrawlRequestService
 from app.modules.instagram.services.crawl_service import CrawlService
@@ -409,17 +409,18 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
             service_account_id=account.id,
         )
 
+        is_success = crawl_run.status == CrawlScheduleRun.STATUS_COMPLETED
         logger.info(
-            f"[{self.name}] 피드 크롤링 완료: success={crawl_run.success}, "
-            f"collected={crawl_run.total_collected}, new={crawl_run.new_saved}"
+            f"[{self.name}] 피드 크롤링 완료: status={crawl_run.status}, "
+            f"collected={crawl_run.collected_count}, new={crawl_run.saved_count}"
         )
 
-        if crawl_run.success:
+        if is_success:
             return {
                 "success": True,
-                "crawl_run_id": crawl_run.run_id,
-                "total_collected": crawl_run.total_collected,
-                "new_saved": crawl_run.new_saved,
+                "crawl_run_id": crawl_run.id,
+                "total_collected": crawl_run.collected_count or 0,
+                "new_saved": crawl_run.saved_count or 0,
             }
         else:
             return {
