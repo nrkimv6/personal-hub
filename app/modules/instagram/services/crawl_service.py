@@ -1,5 +1,6 @@
 """Instagram Crawl Service - 크롤링 실행 및 관리 서비스."""
 
+import asyncio
 import json
 import logging
 from datetime import datetime, date
@@ -110,8 +111,9 @@ class CrawlService:
 
             logger.info(f"Crawl completed: {save_stats['total_collected']} collected, {save_stats['new_saved']} new (realtime saved)")
 
-        except Exception as e:
+        except (Exception, asyncio.CancelledError) as e:
             # 에러 발생해도 그때까지 저장된 데이터는 보존됨
+            # Note: asyncio.CancelledError는 Python 3.8+에서 BaseException을 상속하므로 명시적으로 캐치
             self.db.rollback()  # 먼저 세션 복구
             crawl_run = self.db.query(InstagramCrawlRun).get(crawl_run.id)  # 다시 조회
             if crawl_run:
