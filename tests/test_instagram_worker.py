@@ -397,3 +397,124 @@ class TestPostData:
         assert post.account == "testuser"
         assert post.is_ad is True
         assert len(post.images) == 1
+
+
+# ============================================================
+# ScheduledCrawlWorker 테스트
+# ============================================================
+
+class TestScheduledCrawlWorkerRight:
+    """ScheduledCrawlWorker 정상 동작 테스트."""
+
+    def test_init_with_default_interval(self):
+        """기본 check_interval로 초기화."""
+        from app.worker.scheduled_worker import ScheduledCrawlWorker
+
+        worker = ScheduledCrawlWorker()
+        assert worker.check_interval == 30
+        assert worker.name == "scheduled_worker"
+        assert worker.worker_type == "scheduled"
+
+    def test_init_with_custom_interval(self):
+        """커스텀 check_interval로 초기화."""
+        from app.worker.scheduled_worker import ScheduledCrawlWorker
+
+        worker = ScheduledCrawlWorker(check_interval=60)
+        assert worker.check_interval == 60
+
+    def test_get_loop_interval(self):
+        """루프 간격이 1초로 설정됨."""
+        from app.worker.scheduled_worker import ScheduledCrawlWorker
+
+        worker = ScheduledCrawlWorker()
+        assert worker._get_loop_interval() == 1.0
+
+
+class TestScheduledCrawlWorkerBoundary:
+    """ScheduledCrawlWorker 경계값 테스트."""
+
+    def test_zero_check_interval(self):
+        """check_interval이 0인 경우."""
+        from app.worker.scheduled_worker import ScheduledCrawlWorker
+
+        worker = ScheduledCrawlWorker(check_interval=0)
+        assert worker.check_interval == 0
+
+
+# ============================================================
+# OnDemandCrawlWorker 테스트
+# ============================================================
+
+class TestOnDemandCrawlWorkerRight:
+    """OnDemandCrawlWorker 정상 동작 테스트."""
+
+    def test_init_with_default_max_requests(self):
+        """기본 max_concurrent_requests로 초기화."""
+        from app.worker.ondemand_worker import OnDemandCrawlWorker
+
+        worker = OnDemandCrawlWorker()
+        assert worker.max_concurrent_requests == 5
+        assert worker.name == "ondemand_worker"
+        assert worker.worker_type == "ondemand"
+
+    def test_init_with_custom_max_requests(self):
+        """커스텀 max_concurrent_requests로 초기화."""
+        from app.worker.ondemand_worker import OnDemandCrawlWorker
+
+        worker = OnDemandCrawlWorker(max_concurrent_requests=10)
+        assert worker.max_concurrent_requests == 10
+
+    def test_get_loop_interval(self):
+        """루프 간격이 1초로 설정됨."""
+        from app.worker.ondemand_worker import OnDemandCrawlWorker
+
+        worker = OnDemandCrawlWorker()
+        assert worker._get_loop_interval() == 1.0
+
+
+class TestOnDemandCrawlWorkerBoundary:
+    """OnDemandCrawlWorker 경계값 테스트."""
+
+    def test_single_max_requests(self):
+        """max_concurrent_requests가 1인 경우."""
+        from app.worker.ondemand_worker import OnDemandCrawlWorker
+
+        worker = OnDemandCrawlWorker(max_concurrent_requests=1)
+        assert worker.max_concurrent_requests == 1
+
+
+# ============================================================
+# CrawlWorkerBase 테스트
+# ============================================================
+
+class TestCrawlWorkerBaseRight:
+    """CrawlWorkerBase 공통 기능 테스트."""
+
+    def test_worker_base_initialization(self):
+        """워커 기본 상태 초기화."""
+        from app.worker.scheduled_worker import ScheduledCrawlWorker
+
+        worker = ScheduledCrawlWorker()
+        assert worker.shutdown_event is not None
+        assert worker._running_tasks == set()
+
+    def test_worker_type_attribute(self):
+        """워커 타입 구분."""
+        from app.worker.scheduled_worker import ScheduledCrawlWorker
+        from app.worker.ondemand_worker import OnDemandCrawlWorker
+
+        scheduled = ScheduledCrawlWorker()
+        ondemand = OnDemandCrawlWorker()
+
+        assert scheduled.worker_type == "scheduled"
+        assert ondemand.worker_type == "ondemand"
+
+    def test_request_shutdown_sets_event(self):
+        """request_shutdown 호출 시 이벤트 설정."""
+        from app.worker.scheduled_worker import ScheduledCrawlWorker
+
+        worker = ScheduledCrawlWorker()
+        assert not worker.shutdown_event.is_set()
+
+        worker.request_shutdown()
+        assert worker.shutdown_event.is_set()

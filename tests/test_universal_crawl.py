@@ -134,7 +134,7 @@ class TestCrawlRequestModel:
         assert saved.requested_by == "pwa_share"
 
     def test_request_status_transitions(self, test_db_session, sample_crawl_request):
-        """요청 상태 전이"""
+        """요청 상태 전이 (mark_* 메서드 사용)"""
         request = sample_crawl_request
 
         # pending -> picked
@@ -193,6 +193,38 @@ class TestCrawlRequestModel:
         assert saved.result_type == "crawled_page"
         assert saved.result_id == 123
         assert saved.crawled_page_id == 123  # 프로퍼티 테스트
+
+    def test_request_with_worker_id(self, test_db_session):
+        """worker_id가 있는 요청"""
+        import uuid
+        unique_id = uuid.uuid4().hex[:8]
+        request = CrawlRequest(
+            url=f"https://www.google.com/search?q=test_{unique_id}",
+            url_type="generic",
+            worker_id="worker-1",
+            status="pending",
+        )
+        test_db_session.add(request)
+        test_db_session.commit()
+
+        saved = test_db_session.query(CrawlRequest).filter_by(id=request.id).first()
+        assert saved.worker_id == "worker-1"
+
+    def test_request_without_worker_id(self, test_db_session):
+        """worker_id 없는 요청"""
+        import uuid
+        unique_id = uuid.uuid4().hex[:8]
+        request = CrawlRequest(
+            url=f"https://forms.gle/no_worker_{unique_id}",
+            url_type="google_form",
+            worker_id=None,
+            status="pending",
+        )
+        test_db_session.add(request)
+        test_db_session.commit()
+
+        saved = test_db_session.query(CrawlRequest).filter_by(id=request.id).first()
+        assert saved.worker_id is None
 
 
 class TestCrawlRequestRelationship:
