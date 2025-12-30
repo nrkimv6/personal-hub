@@ -10,7 +10,7 @@ from sqlalchemy import func, desc, asc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import InstagramPost, InstagramCrawlRun
+from app.models import InstagramPost
 from app.models.instagram_post_tag import InstagramPostTag, InstagramPostTagRelation
 
 logger = logging.getLogger("instagram.post_service")

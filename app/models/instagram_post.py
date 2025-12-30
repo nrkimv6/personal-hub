@@ -49,8 +49,7 @@ class InstagramPost(Base):
     classified_id = Column(Integer)  # 각 테이블의 ID
     classified_at = Column(DateTime, index=True)  # AI 분류 완료 시각
 
-    # 관계
-    crawl_run = relationship("InstagramCrawlRun", back_populates="posts")
+    # 관계 (참고: crawl_run_id는 레거시, schedule_run_id로 마이그레이션 예정)
     tag_relations = relationship(
         "InstagramPostTagRelation",
         back_populates="post",
