@@ -5,12 +5,14 @@ WorkerOrchestrator를 사용하여 모든 워커를 관리합니다:
 - NaverMonitorWorker: 네이버 예약 모니터링/스나이핑
 - ScheduledCrawlWorker: 스케줄 기반 Instagram 피드 크롤링
 - OnDemandCrawlWorker: 온디맨드 (Instagram 개별 + Universal) 크롤링
+- GoogleSearchWorker: Google 검색 큐 처리
 
 실행 방법:
     python -m app.worker.main                  # 모든 워커 실행
     python -m app.worker.main --naver          # 네이버 워커만
     python -m app.worker.main --scheduled      # 스케줄 워커만
     python -m app.worker.main --ondemand       # 온디맨드 워커만
+    python -m app.worker.main --google         # Google 검색 워커만
     python -m app.worker.main --crawl          # 크롤 워커만 (scheduled + ondemand)
 
 주요 기능:
@@ -55,6 +57,7 @@ try:
     from app.worker.naver_monitor_worker import NaverMonitorWorker
     from app.worker.scheduled_worker import ScheduledCrawlWorker
     from app.worker.ondemand_worker import OnDemandCrawlWorker
+    from app.worker.google_search_worker import GoogleSearchWorker
 
     # 크롤러 및 워커 관련 로거들이 워커 로거와 같은 핸들러를 사용하도록 설정
     worker_handlers = logger.handlers
@@ -67,6 +70,7 @@ try:
         'app.worker.naver_monitor_worker',
         'app.worker.scheduled_worker',
         'app.worker.ondemand_worker',
+        'app.worker.google_search_worker',
         'app.worker.crawl_worker_base',
         'instagram.worker_status',
         # 브라우저 관련
@@ -110,7 +114,8 @@ def handle_exception(loop, context):
 async def run_with_orchestrator(
     run_naver: bool = True,
     run_scheduled: bool = True,
-    run_ondemand: bool = True
+    run_ondemand: bool = True,
+    run_google: bool = True,
 ):
     """WorkerOrchestrator를 사용하여 워커들을 실행합니다.
 
@@ -118,6 +123,7 @@ async def run_with_orchestrator(
         run_naver: 네이버 워커 실행 여부
         run_scheduled: 스케줄 워커 실행 여부
         run_ondemand: 온디맨드 워커 실행 여부
+        run_google: Google 검색 워커 실행 여부
     """
     orchestrator = WorkerOrchestrator()
 
@@ -155,6 +161,13 @@ async def run_with_orchestrator(
             orchestrator.register_worker("ondemand", ondemand_worker)
             logger.info("OnDemandCrawlWorker 등록됨")
 
+        if run_google:
+            google_worker = GoogleSearchWorker(
+                browser_manager=orchestrator.browser_manager
+            )
+            orchestrator.register_worker("google_search", google_worker)
+            logger.info("GoogleSearchWorker 등록됨")
+
         if not orchestrator.workers:
             logger.error("실행할 워커가 없습니다.")
             return
@@ -182,7 +195,8 @@ async def main(args):
     logger.info(
         f"실행 모드: naver={args.naver or args.all}, "
         f"scheduled={args.scheduled or args.crawl or args.all}, "
-        f"ondemand={args.ondemand or args.crawl or args.all}"
+        f"ondemand={args.ondemand or args.crawl or args.all}, "
+        f"google={args.google or args.all}"
     )
     logger.info("=" * 50)
 
@@ -191,6 +205,7 @@ async def main(args):
             run_naver=args.naver or args.all,
             run_scheduled=args.scheduled or args.crawl or args.all,
             run_ondemand=args.ondemand or args.crawl or args.all,
+            run_google=args.google or args.all,
         )
     except Exception as e:
         logger.critical(f"워커 치명적 오류: {e}", exc_info=True)
@@ -219,6 +234,11 @@ def parse_args():
         help="온디맨드 워커만 실행",
     )
     parser.add_argument(
+        "--google",
+        action="store_true",
+        help="Google 검색 워커만 실행",
+    )
+    parser.add_argument(
         "--crawl",
         action="store_true",
         help="크롤 워커만 실행 (scheduled + ondemand)",
@@ -233,7 +253,7 @@ def parse_args():
     args = parser.parse_args()
 
     # 개별 옵션이 지정되면 --all은 False
-    if args.naver or args.scheduled or args.ondemand or args.crawl:
+    if args.naver or args.scheduled or args.ondemand or args.google or args.crawl:
         args.all = False
 
     return args
