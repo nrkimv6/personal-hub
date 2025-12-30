@@ -55,3 +55,52 @@ class CollectedPostFilters(BaseModel):
     date_from: Optional[datetime] = None
     date_to: Optional[datetime] = None
     is_active: Optional[bool] = None  # Instagram 전용
+
+
+class CrawlHistoryItem(BaseModel):
+    """크롤링 이력 항목."""
+
+    id: int
+    history_type: str  # 'request' | 'schedule_run'
+
+    # 공통 필드
+    source_type: str  # 'instagram' | 'web'
+    status: str  # 'pending', 'processing', 'completed', 'failed'
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+    duration_seconds: Optional[int] = None
+    error_message: Optional[str] = None
+
+    # Request 전용
+    url: Optional[str] = None
+    url_type: Optional[str] = None
+    request_type: Optional[str] = None  # 'feed', 'single_post', 'single_post_url'
+    requested_by: Optional[str] = None  # 'manual', 'scheduler', 'retry'
+
+    # Schedule Run 전용
+    schedule_id: Optional[int] = None
+    schedule_name: Optional[str] = None
+    collected_count: int = 0
+    saved_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class CrawlHistoryList(BaseModel):
+    """크롤링 이력 목록 응답."""
+
+    items: List[CrawlHistoryItem]
+    total: int
+    page: int
+    limit: int
+    total_pages: int
+
+
+class CrawlHistoryStats(BaseModel):
+    """크롤링 이력 통계."""
+
+    total_requests: int = 0
+    completed_requests: int = 0
+    failed_requests: int = 0
+    processing_requests: int = 0

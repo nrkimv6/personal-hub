@@ -1,13 +1,14 @@
 """수집 관리 서비스."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, desc
+from sqlalchemy import or_, desc, func
 
 from app.models.instagram_post import InstagramPost
 from app.models.universal_crawl import CrawledPage
-from app.schemas.collect import CollectedPostBase
+from app.models import CrawlRequest, CrawlScheduleRun, CrawlSchedule
+from app.schemas.collect import CollectedPostBase, CrawlHistoryItem, CrawlHistoryStats
 
 
 class CollectService:
@@ -263,3 +264,212 @@ class CollectService:
         types.extend([t[0] for t in web_types if t[0]])
 
         return types
+
+    def get_crawl_history(
+        self,
+        page: int = 1,
+        limit: int = 20,
+        source_type: Optional[str] = None,
+        status: Optional[str] = None,
+        period: Optional[str] = None,  # 'today', 'week', 'month', None(전체)
+    ) -> Tuple[List[CrawlHistoryItem], int, CrawlHistoryStats]:
+        """통합 크롤링 이력 조회.
+
+        crawl_requests와 crawl_schedule_runs를 통합하여 조회합니다.
+        """
+        results = []
+        total = 0
+
+        # 기간 필터 계산
+        date_from = None
+        if period == 'today':
+            date_from = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        elif period == 'week':
+            date_from = datetime.now() - timedelta(days=7)
+        elif period == 'month':
+            date_from = datetime.now() - timedelta(days=30)
+
+        # CrawlRequest 조회
+        if source_type is None or source_type in ('instagram', 'web'):
+            requests, req_total = self._get_crawl_requests(
+                page=page,
+                limit=limit,
+                source_type=source_type,
+                status=status,
+                date_from=date_from,
+            )
+            results.extend(requests)
+            total += req_total
+
+        # CrawlScheduleRun 조회
+        if source_type is None or source_type in ('instagram', 'web'):
+            runs, run_total = self._get_schedule_runs(
+                page=page,
+                limit=limit,
+                source_type=source_type,
+                status=status,
+                date_from=date_from,
+            )
+            results.extend(runs)
+            total += run_total
+
+        # 시간순 정렬
+        results.sort(key=lambda x: x.started_at, reverse=True)
+
+        # 페이징 처리
+        start = (page - 1) * limit
+        end = start + limit
+        results = results[start:end]
+
+        # 통계 계산
+        stats = self._get_history_stats(source_type=source_type, date_from=date_from)
+
+        return results, total, stats
+
+    def _get_crawl_requests(
+        self,
+        page: int,
+        limit: int,
+        source_type: Optional[str],
+        status: Optional[str],
+        date_from: Optional[datetime],
+    ) -> Tuple[List[CrawlHistoryItem], int]:
+        """CrawlRequest 조회."""
+        query = self.db.query(CrawlRequest)
+
+        # source_type 필터
+        if source_type == 'instagram':
+            query = query.filter(CrawlRequest.url_type.like('instagram%'))
+        elif source_type == 'web':
+            query = query.filter(~CrawlRequest.url_type.like('instagram%'))
+
+        # status 필터
+        if status:
+            query = query.filter(CrawlRequest.status == status)
+
+        # 기간 필터
+        if date_from:
+            query = query.filter(CrawlRequest.requested_at >= date_from)
+
+        total = query.count()
+
+        # 페이징 (통합 정렬을 위해 많이 가져옴)
+        requests = (
+            query.order_by(desc(CrawlRequest.requested_at))
+            .limit(limit * 2)  # 통합 정렬 후 페이징을 위해 여유있게
+            .all()
+        )
+
+        return [self._request_to_history(r) for r in requests], total
+
+    def _get_schedule_runs(
+        self,
+        page: int,
+        limit: int,
+        source_type: Optional[str],
+        status: Optional[str],
+        date_from: Optional[datetime],
+    ) -> Tuple[List[CrawlHistoryItem], int]:
+        """CrawlScheduleRun 조회."""
+        query = self.db.query(CrawlScheduleRun).join(CrawlSchedule)
+
+        # source_type 필터
+        if source_type == 'instagram':
+            query = query.filter(CrawlSchedule.target_type == 'instagram_feed')
+        elif source_type == 'web':
+            query = query.filter(CrawlSchedule.target_type != 'instagram_feed')
+
+        # status 필터
+        if status:
+            query = query.filter(CrawlScheduleRun.status == status)
+
+        # 기간 필터
+        if date_from:
+            query = query.filter(CrawlScheduleRun.started_at >= date_from)
+
+        total = query.count()
+
+        # 페이징
+        runs = (
+            query.order_by(desc(CrawlScheduleRun.started_at))
+            .limit(limit * 2)
+            .all()
+        )
+
+        return [self._run_to_history(r) for r in runs], total
+
+    def _request_to_history(self, request: CrawlRequest) -> CrawlHistoryItem:
+        """CrawlRequest를 CrawlHistoryItem으로 변환."""
+        is_instagram = request.url_type.startswith('instagram') if request.url_type else False
+
+        return CrawlHistoryItem(
+            id=request.id,
+            history_type='request',
+            source_type='instagram' if is_instagram else 'web',
+            status=request.status,
+            started_at=request.requested_at,
+            finished_at=request.processed_at,
+            duration_seconds=None,  # CrawlRequest는 duration 없음
+            error_message=request.error_message,
+            url=request.url,
+            url_type=request.url_type,
+            request_type=self._get_request_type(request),
+            requested_by=request.requested_by,
+        )
+
+    def _run_to_history(self, run: CrawlScheduleRun) -> CrawlHistoryItem:
+        """CrawlScheduleRun을 CrawlHistoryItem으로 변환."""
+        schedule = run.schedule
+        is_instagram = schedule.target_type == 'instagram_feed' if schedule else False
+
+        return CrawlHistoryItem(
+            id=run.id,
+            history_type='schedule_run',
+            source_type='instagram' if is_instagram else 'web',
+            status=run.status,
+            started_at=run.started_at,
+            finished_at=run.finished_at,
+            duration_seconds=run.duration_seconds,
+            error_message=run.error_message,
+            schedule_id=run.schedule_id,
+            schedule_name=schedule.display_name or schedule.name if schedule else None,
+            collected_count=run.collected_count or 0,
+            saved_count=run.saved_count or 0,
+        )
+
+    def _get_request_type(self, request: CrawlRequest) -> str:
+        """CrawlRequest의 타입 판별."""
+        if request.url_type and request.url_type.startswith('instagram'):
+            if 'feed' in request.url_type:
+                return 'feed'
+            return 'single_post'
+        return 'url'
+
+    def _get_history_stats(
+        self,
+        source_type: Optional[str],
+        date_from: Optional[datetime],
+    ) -> CrawlHistoryStats:
+        """크롤링 이력 통계 계산."""
+        # CrawlRequest 통계
+        req_query = self.db.query(CrawlRequest)
+        if source_type == 'instagram':
+            req_query = req_query.filter(CrawlRequest.url_type.like('instagram%'))
+        elif source_type == 'web':
+            req_query = req_query.filter(~CrawlRequest.url_type.like('instagram%'))
+        if date_from:
+            req_query = req_query.filter(CrawlRequest.requested_at >= date_from)
+
+        total = req_query.count()
+        completed = req_query.filter(CrawlRequest.status == 'completed').count()
+        failed = req_query.filter(CrawlRequest.status == 'failed').count()
+        processing = req_query.filter(
+            CrawlRequest.status.in_(['pending', 'processing'])
+        ).count()
+
+        return CrawlHistoryStats(
+            total_requests=total,
+            completed_requests=completed,
+            failed_requests=failed,
+            processing_requests=processing,
+        )

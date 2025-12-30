@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.services.collect_service import CollectService
-from app.schemas.collect import CollectedPostList, CollectedPostBase
+from app.schemas.collect import CollectedPostList, CollectedPostBase, CrawlHistoryList
 
 router = APIRouter(prefix="/collect", tags=["collect"])
 
@@ -60,3 +60,36 @@ async def get_url_types(
     """사용 가능한 URL 타입 목록 조회."""
     service = CollectService(db)
     return service.get_url_types()
+
+
+@router.get("/history", response_model=CrawlHistoryList)
+async def get_crawl_history(
+    source_type: Optional[str] = Query(None, description="소스 타입 (instagram, web)"),
+    status: Optional[str] = Query(None, description="상태 (pending, processing, completed, failed)"),
+    period: Optional[str] = Query("week", description="기간 (today, week, month, all)"),
+    page: int = Query(1, ge=1, description="페이지 번호"),
+    limit: int = Query(20, ge=1, le=100, description="페이지당 개수"),
+    db: Session = Depends(get_db),
+):
+    """통합 크롤링 이력 조회.
+
+    CrawlRequest와 CrawlScheduleRun을 통합하여 조회합니다.
+    """
+    service = CollectService(db)
+    items, total, stats = service.get_crawl_history(
+        page=page,
+        limit=limit,
+        source_type=source_type,
+        status=status,
+        period=period if period != "all" else None,
+    )
+
+    total_pages = (total + limit - 1) // limit
+
+    return CrawlHistoryList(
+        items=items,
+        total=total,
+        page=page,
+        limit=limit,
+        total_pages=total_pages,
+    )
