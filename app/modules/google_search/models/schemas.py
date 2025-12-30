@@ -48,6 +48,34 @@ class SearchResponse(BaseModel):
         from_attributes = True
 
 
+class SearchQueueResponse(BaseModel):
+    """검색 큐 응답 스키마 (비동기 검색 요청 시 반환)."""
+
+    search_id: str = Field(..., description="검색 세션 ID")
+    status: str = Field(..., description="검색 상태 (pending)")
+    message: str = Field(default="검색 요청이 큐에 추가되었습니다.", description="안내 메시지")
+
+    class Config:
+        from_attributes = True
+
+
+class SearchStatusResponse(BaseModel):
+    """검색 상태 조회 응답 스키마."""
+
+    search_id: str = Field(..., description="검색 세션 ID")
+    query: str = Field(..., description="검색 키워드")
+    status: str = Field(..., description="검색 상태 (pending, processing, completed, failed)")
+    total_results: int = Field(default=0, description="총 결과 수")
+    error_message: Optional[str] = Field(None, description="오류 메시지")
+    created_at: datetime = Field(..., description="생성 시간")
+    started_at: Optional[datetime] = Field(None, description="처리 시작 시간")
+    completed_at: Optional[datetime] = Field(None, description="완료 시간")
+    results: List[SearchResult] = Field(default_factory=list, description="검색 결과 목록 (완료 시)")
+
+    class Config:
+        from_attributes = True
+
+
 class SearchHistoryItem(BaseModel):
     """검색 히스토리 항목 스키마."""
 
