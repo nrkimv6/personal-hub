@@ -178,9 +178,13 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
 
         while retry_count <= max_retries:
             try:
-                # Instagram 계정 조회 (첫 번째 계정 사용)
-                account = db.query(ServiceAccount).filter(
-                    ServiceAccount.service_type == "instagram"
+                # Instagram 계정 조회 (활성 프로필의 첫 번째 계정 사용)
+                from app.models.browser_profile import BrowserProfile
+                account = db.query(ServiceAccount).join(
+                    BrowserProfile
+                ).filter(
+                    ServiceAccount.service_type == "instagram",
+                    BrowserProfile.is_active == True
                 ).first()
 
                 if not account:
