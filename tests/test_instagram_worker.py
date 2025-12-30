@@ -19,7 +19,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 
 from app.models.base import Base
-from app.models import Account, InstagramCrawlRequest, InstagramCrawlRun, InstagramScheduleConfig
+from app.models import BrowserProfile, ServiceAccount, InstagramCrawlRequest, InstagramCrawlRun, InstagramScheduleConfig
 from app.modules.instagram.services.request_service import CrawlRequestService
 from app.modules.instagram.services.crawl_service import CrawlService
 from app.modules.instagram.services.scheduler import InstagramScheduler
@@ -53,32 +53,48 @@ def db_session():
 
 @pytest.fixture
 def sample_account(db_session):
-    """테스트용 Instagram 계정."""
-    account = Account(
+    """테스트용 Instagram 계정 (BrowserProfile + ServiceAccount)."""
+    profile = BrowserProfile(
         name="test_user",
         profile_dir="test_profile",
-        is_logged_in=True,
         is_active=True,
     )
-    db_session.add(account)
+    db_session.add(profile)
     db_session.commit()
-    db_session.refresh(account)
-    return account
+    db_session.refresh(profile)
+
+    service_account = ServiceAccount(
+        profile_id=profile.id,
+        service_type="instagram",
+        is_logged_in=True,
+    )
+    db_session.add(service_account)
+    db_session.commit()
+    db_session.refresh(service_account)
+    return service_account
 
 
 @pytest.fixture
 def sample_account_not_logged_in(db_session):
-    """로그인 안 된 Instagram 계정."""
-    account = Account(
+    """로그인 안 된 Instagram 계정 (BrowserProfile + ServiceAccount)."""
+    profile = BrowserProfile(
         name="not_logged_in_user",
         profile_dir="not_logged_in_profile",
-        is_logged_in=False,
         is_active=True,
     )
-    db_session.add(account)
+    db_session.add(profile)
     db_session.commit()
-    db_session.refresh(account)
-    return account
+    db_session.refresh(profile)
+
+    service_account = ServiceAccount(
+        profile_id=profile.id,
+        service_type="instagram",
+        is_logged_in=False,
+    )
+    db_session.add(service_account)
+    db_session.commit()
+    db_session.refresh(service_account)
+    return service_account
 
 
 @pytest.fixture
@@ -406,7 +422,7 @@ class TestErrorHandling:
     def test_not_logged_in_account_detection(self, db_session, sample_account_not_logged_in):
         """로그인 안 된 계정이 올바르게 감지되어야 한다."""
         # Given
-        account = db_session.query(Account).get(sample_account_not_logged_in.id)
+        account = db_session.query(ServiceAccount).get(sample_account_not_logged_in.id)
 
         # Then
         assert account is not None
@@ -551,7 +567,7 @@ class TestInstagramWorkerIntegration:
         request_service = CrawlRequestService(db_session)
 
         # 계정 로그인 상태 확인
-        account = db_session.query(Account).get(sample_account_not_logged_in.id)
+        account = db_session.query(ServiceAccount).get(sample_account_not_logged_in.id)
         assert account.is_logged_in is False
 
         # When: 로그인 안 됨으로 실패 처리

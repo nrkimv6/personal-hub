@@ -989,26 +989,26 @@ class TestMigration030:
         assert "ALTER TABLE" in content.upper() or "instagram_schedule_config" in content
 
 
-class TestAccountRelationship:
-    """Account 관계(relationship) 테스트"""
+class TestServiceAccountRelationship:
+    """ServiceAccount 관계(relationship) 테스트"""
 
-    def test_schedule_config_account_relationship(self):
-        """InstagramScheduleConfig.account relationship 존재"""
+    def test_schedule_config_service_account_relationship(self):
+        """InstagramScheduleConfig.service_account relationship 존재"""
         from app.models.instagram_schedule_config import InstagramScheduleConfig
         from sqlalchemy.orm import RelationshipProperty
 
-        # account relationship이 정의되어 있는지 확인
+        # service_account relationship이 정의되어 있는지 확인
         mapper = InstagramScheduleConfig.__mapper__
-        assert 'account' in mapper.relationships
+        assert 'service_account' in mapper.relationships
 
-    def test_account_model_exists(self):
-        """Account 모델 존재 및 필수 필드"""
-        from app.models.account import Account
+    def test_service_account_model_exists(self):
+        """ServiceAccount 모델 존재 및 필수 필드"""
+        from app.models.service_account import ServiceAccount
 
-        assert hasattr(Account, 'id')
-        assert hasattr(Account, 'name')
-        assert hasattr(Account, 'is_logged_in')
-        assert hasattr(Account, 'profile_path')
+        assert hasattr(ServiceAccount, 'id')
+        assert hasattr(ServiceAccount, 'service_type')
+        assert hasattr(ServiceAccount, 'is_logged_in')
+        assert hasattr(ServiceAccount, 'profile_id')
 
 
 # ============================================================
