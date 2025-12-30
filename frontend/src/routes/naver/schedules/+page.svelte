@@ -841,9 +841,8 @@
   });
 </script>
 
-<div class="p-6">
-  <div class="mb-6 flex justify-between items-center">
-    <h2 class="text-2xl font-bold text-gray-900">모니터링 관리</h2>
+<div>
+  <div class="mb-6 flex justify-end">
     <div class="flex gap-2">
       <a href="/businesses" class="btn btn-secondary btn-sm">
         업체/상품 관리
