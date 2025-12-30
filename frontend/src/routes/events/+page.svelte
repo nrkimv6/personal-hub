@@ -15,6 +15,7 @@
 	// 컴포넌트 import
 	import EventListCard from '$lib/components/events/EventListCard.svelte';
 	import CrawlTab from '$lib/components/events/CrawlTab.svelte';
+	import CrawlScheduleTab from '$lib/components/events/CrawlScheduleTab.svelte';
 	import EventListTable from '$lib/components/events/EventListTable.svelte';
 	import PopupListCard from '$lib/components/events/PopupListCard.svelte';
 	import PopupListTable from '$lib/components/events/PopupListTable.svelte';
@@ -35,8 +36,8 @@
 	let loading = $state(true);
 	let error: string | null = $state(null);
 
-	// 탭 모드: online(온라인 이벤트), offline(오프라인 이벤트), popup, uncategorized, crawl
-	type TabMode = 'online' | 'offline' | 'popup' | 'uncategorized' | 'crawl';
+	// 탭 모드: online(온라인 이벤트), offline(오프라인 이벤트), popup, uncategorized, crawl, crawl_schedule
+	type TabMode = 'online' | 'offline' | 'popup' | 'uncategorized' | 'crawl' | 'crawl_schedule';
 	let activeTab: TabMode = $state('online');
 
 	// 미분류 목록
@@ -45,6 +46,10 @@
 	// 크롤링 탭 참조
 	let crawlTabRef: CrawlTab | null = $state(null);
 	let crawlTotal = $state(0);
+
+	// 스케줄 크롤링 탭 참조
+	let crawlScheduleTabRef: CrawlScheduleTab | null = $state(null);
+	let crawlScheduleTotal = $state(0);
 
 	// 필터
 	let filterEventStatus: string | null = $state('ongoing');
@@ -105,8 +110,8 @@
 			goto(`?tab=${tab}`, { replaceState: false, keepFocus: true, noScroll: true });
 		}
 
-		if (tab === 'crawl') {
-			// CrawlTab 컴포넌트가 자체적으로 데이터를 로드함
+		if (tab === 'crawl' || tab === 'crawl_schedule') {
+			// CrawlTab, CrawlScheduleTab 컴포넌트가 자체적으로 데이터를 로드함
 			return;
 		}
 		if (isAnonymous) {
@@ -592,7 +597,7 @@
 
 		// URL의 tab 파라미터로 초기 탭 설정
 		const urlTab = $pageStore.url.searchParams.get('tab');
-		const validTabs: TabMode[] = ['online', 'offline', 'popup', 'uncategorized', 'crawl'];
+		const validTabs: TabMode[] = ['online', 'offline', 'popup', 'uncategorized', 'crawl', 'crawl_schedule'];
 		if (urlTab && validTabs.includes(urlTab as TabMode)) {
 			// URL 파라미터로 탭 전환 (URL 업데이트 불필요)
 			switchTab(urlTab as TabMode, false);
@@ -740,6 +745,14 @@
 			>
 				크롤링 이력
 			</button>
+			<button
+				onclick={() => switchTab('crawl_schedule')}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'crawl_schedule'
+					? 'border-teal-600 text-teal-600'
+					: 'border-transparent text-gray-500 hover:text-gray-700'}"
+			>
+				스케줄 크롤링
+			</button>
 		</nav>
 	</div>
 
@@ -750,6 +763,11 @@
 			bind:currentPage
 			{pageSize}
 			onTotalChange={(t) => (crawlTotal = t)}
+		/>
+	{:else if activeTab === 'crawl_schedule'}
+		<CrawlScheduleTab
+			bind:this={crawlScheduleTabRef}
+			onTotalChange={(t) => (crawlScheduleTotal = t)}
 		/>
 	{:else if !isAnonymous}
 		<EventFilterPanel
@@ -770,8 +788,8 @@
 		/>
 	{/if}
 
-	<!-- 목록 (크롤링 탭은 CrawlTab 컴포넌트에서 렌더링) -->
-	{#if activeTab !== 'crawl'}
+	<!-- 목록 (크롤링 탭은 별도 컴포넌트에서 렌더링) -->
+	{#if activeTab !== 'crawl' && activeTab !== 'crawl_schedule'}
 		{#if loading}
 			<div class="flex justify-center items-center h-64">
 				<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
