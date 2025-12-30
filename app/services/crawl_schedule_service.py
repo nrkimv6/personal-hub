@@ -1,7 +1,7 @@
 """크롤링 스케줄 서비스."""
 
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List
 from sqlalchemy.orm import Session
 
 from app.models import CrawlSchedule, CrawlScheduleRun
@@ -229,3 +229,75 @@ class CrawlScheduleService:
             "total_collected": total_collected,
             "total_saved": total_saved
         }
+
+    def has_active_run(self, schedule_id: int) -> bool:
+        """활성 실행(running 상태)이 있는지 확인."""
+        return self.db.query(CrawlScheduleRun).filter(
+            CrawlScheduleRun.schedule_id == schedule_id,
+            CrawlScheduleRun.status == CrawlScheduleRun.STATUS_RUNNING
+        ).first() is not None
+
+    def cleanup_stale_runs(self, timeout_minutes: int = 30) -> int:
+        """오래된 running 상태 실행을 failed로 정리.
+
+        워커가 비정상 종료되면 running 상태로 남을 수 있음.
+
+        Args:
+            timeout_minutes: running 상태 유지 시간 제한
+
+        Returns:
+            정리된 실행 수
+        """
+        cutoff = datetime.now() - timedelta(minutes=timeout_minutes)
+
+        stale_runs = self.db.query(CrawlScheduleRun).filter(
+            CrawlScheduleRun.status == CrawlScheduleRun.STATUS_RUNNING,
+            CrawlScheduleRun.started_at < cutoff
+        ).all()
+
+        count = 0
+        for run in stale_runs:
+            run.mark_failed(f"Timeout: running 상태가 {timeout_minutes}분 초과")
+            count += 1
+
+        if count > 0:
+            self.db.commit()
+
+        return count
+
+    def update_run_progress(
+        self,
+        run_id: int,
+        collected_count: int,
+        saved_count: int
+    ):
+        """실행 중간 진행 상황 업데이트."""
+        run = self.db.query(CrawlScheduleRun).filter(
+            CrawlScheduleRun.id == run_id
+        ).first()
+
+        if run:
+            run.collected_count = collected_count
+            run.saved_count = saved_count
+            self.db.commit()
+
+    def get_all_schedules(
+        self,
+        target_type: Optional[str] = None,
+        enabled_only: bool = False
+    ) -> List[CrawlSchedule]:
+        """모든 스케줄 조회."""
+        query = self.db.query(CrawlSchedule)
+
+        if target_type:
+            query = query.filter(CrawlSchedule.target_type == target_type)
+        if enabled_only:
+            query = query.filter(CrawlSchedule.enabled == True)
+
+        return query.order_by(CrawlSchedule.created_at.desc()).all()
+
+    def get_run_by_id(self, run_id: int) -> Optional[CrawlScheduleRun]:
+        """실행 ID로 조회."""
+        return self.db.query(CrawlScheduleRun).filter(
+            CrawlScheduleRun.id == run_id
+        ).first()

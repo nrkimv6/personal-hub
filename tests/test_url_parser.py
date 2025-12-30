@@ -383,23 +383,6 @@ class TestMigration041:
         assert "music_artist" in content
 
 
-class TestInstagramCrawlRequestUrlType:
-    """InstagramCrawlRequest url_type 필드 테스트"""
-
-    def test_model_has_url_type_column(self):
-        """모델에 url_type 컬럼이 있어야 함"""
-        from app.models.instagram_crawl_request import InstagramCrawlRequest
-
-        assert hasattr(InstagramCrawlRequest, "url_type")
-
-    def test_url_type_is_nullable(self):
-        """url_type은 nullable"""
-        from app.models.instagram_crawl_request import InstagramCrawlRequest
-
-        column = InstagramCrawlRequest.__table__.columns["url_type"]
-        assert column.nullable is True
-
-
 class TestInstagramPostReelFields:
     """InstagramPost 릴스 필드 테스트"""
 

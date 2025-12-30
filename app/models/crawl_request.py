@@ -85,3 +85,42 @@ class CrawlRequest(Base):
         self.status = self.STATUS_FAILED
         self.processed_at = datetime.now()
         self.error_message = error_message
+
+    # 스키마 호환용 프로퍼티들 (UniversalCrawlRequestResponse와 호환)
+    @property
+    def crawled_page_id(self):
+        """crawled_page_id 호환 프로퍼티."""
+        if self.result_type == "crawled_page":
+            return self.result_id
+        return None
+
+    @property
+    def started_at(self):
+        """started_at 호환 프로퍼티 (picked_at와 동일)."""
+        return self.picked_at
+
+    @property
+    def completed_at(self):
+        """completed_at 호환 프로퍼티 (processed_at와 동일)."""
+        return self.processed_at
+
+    @property
+    def service_account_id(self):
+        """service_account_id 호환 프로퍼티 (URL에서 추출)."""
+        # URL 기반 요청에서는 service_account_id가 없음
+        return None
+
+    @property
+    def auto_analyze(self):
+        """auto_analyze 호환 프로퍼티."""
+        return True  # 기본값
+
+    @property
+    def priority(self):
+        """priority 호환 프로퍼티."""
+        return 0  # 기본값
+
+    @property
+    def extra_metadata(self):
+        """extra_metadata 호환 프로퍼티."""
+        return None

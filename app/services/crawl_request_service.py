@@ -1,7 +1,7 @@
 """단건 크롤링 요청 서비스."""
 
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timedelta
+from typing import Optional, List
 from sqlalchemy.orm import Session
 
 from app.models import CrawlRequest
@@ -159,3 +159,54 @@ class CrawlRequestService:
         self.db.commit()
         self.db.refresh(retry_request)
         return retry_request
+
+    def cleanup_stale_processing(self, timeout_minutes: int = 30) -> int:
+        """오래된 processing/picked 상태 요청을 failed로 정리.
+
+        워커가 비정상 종료되면 요청이 processing 상태로 남을 수 있음.
+
+        Args:
+            timeout_minutes: 상태 유지 시간 제한
+
+        Returns:
+            정리된 요청 수
+        """
+        cutoff = datetime.now() - timedelta(minutes=timeout_minutes)
+
+        stale_requests = self.db.query(CrawlRequest).filter(
+            CrawlRequest.status.in_([
+                CrawlRequest.STATUS_PROCESSING,
+                CrawlRequest.STATUS_PICKED
+            ]),
+            CrawlRequest.picked_at < cutoff
+        ).all()
+
+        count = 0
+        for request in stale_requests:
+            request.mark_failed(f"Timeout: {request.status} 상태가 {timeout_minutes}분 초과")
+            count += 1
+
+        if count > 0:
+            self.db.commit()
+
+        return count
+
+    def has_pending_for_url(self, url: str) -> bool:
+        """동일 URL에 대한 pending 요청이 있는지 확인."""
+        return self.db.query(CrawlRequest).filter(
+            CrawlRequest.url == url,
+            CrawlRequest.status == CrawlRequest.STATUS_PENDING
+        ).first() is not None
+
+    def get_active_requests(self, url_type: Optional[str] = None) -> List[CrawlRequest]:
+        """활성 상태(pending, picked, processing) 요청 조회."""
+        query = self.db.query(CrawlRequest).filter(
+            CrawlRequest.status.in_([
+                CrawlRequest.STATUS_PENDING,
+                CrawlRequest.STATUS_PICKED,
+                CrawlRequest.STATUS_PROCESSING
+            ])
+        )
+        if url_type:
+            query = query.filter(CrawlRequest.url_type == url_type)
+        return query.order_by(CrawlRequest.requested_at.asc()).all()

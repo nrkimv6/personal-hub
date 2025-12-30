@@ -20,10 +20,16 @@ CORRECT 원칙 적용:
 """
 
 import pytest
+import uuid
 from datetime import datetime, timedelta
 from sqlalchemy.exc import IntegrityError
 
 from app.models import CrawlRequest, CrawlSchedule, CrawlScheduleRun
+
+
+def unique_name(prefix: str = "test") -> str:
+    """테스트용 고유 이름 생성."""
+    return f"{prefix}_{uuid.uuid4().hex[:8]}"
 
 
 class TestCrawlRequest:
@@ -137,7 +143,7 @@ class TestCrawlSchedule:
     def test_create_schedule_right(self, test_db_session):
         """[Right] 기본 스케줄 생성이 올바르게 동작해야 함."""
         schedule = CrawlSchedule(
-            name="instagram_feed_test",
+            name=unique_name("instagram_feed"),
             display_name="Instagram 피드 테스트",
             target_type=CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
             schedule_type=CrawlSchedule.SCHEDULE_TYPE_TIME_WINDOW,
@@ -153,8 +159,9 @@ class TestCrawlSchedule:
 
     def test_unique_name_constraint(self, test_db_session):
         """[Existence] name은 유니크해야 함."""
+        dup_name = unique_name("duplicate")
         schedule1 = CrawlSchedule(
-            name="unique_schedule",
+            name=dup_name,
             target_type="test",
             schedule_type="manual"
         )
@@ -162,7 +169,7 @@ class TestCrawlSchedule:
         test_db_session.commit()
 
         schedule2 = CrawlSchedule(
-            name="unique_schedule",  # 중복
+            name=dup_name,  # 중복
             target_type="test",
             schedule_type="manual"
         )
@@ -171,10 +178,13 @@ class TestCrawlSchedule:
         with pytest.raises(IntegrityError):
             test_db_session.commit()
 
+        test_db_session.rollback()  # 실패한 트랜잭션 롤백
+
     def test_target_config_json_right(self, test_db_session):
         """[Right] target_config JSON 직렬화가 올바르게 동작해야 함."""
+        name = unique_name("config")
         schedule = CrawlSchedule(
-            name="config_test",
+            name=name,
             target_type=CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
             schedule_type=CrawlSchedule.SCHEDULE_TYPE_INTERVAL
         )
@@ -185,13 +195,13 @@ class TestCrawlSchedule:
         test_db_session.commit()
 
         # DB에서 다시 로드
-        loaded = test_db_session.query(CrawlSchedule).filter_by(name="config_test").first()
+        loaded = test_db_session.query(CrawlSchedule).filter_by(name=name).first()
         assert loaded.get_target_config() == config
 
     def test_target_config_empty_boundary(self, test_db_session):
         """[Boundary] 빈 target_config 처리."""
         schedule = CrawlSchedule(
-            name="empty_config_test",
+            name=unique_name("empty_config"),
             target_type="test",
             schedule_type="manual",
             target_config=None
@@ -204,7 +214,7 @@ class TestCrawlSchedule:
     def test_update_last_run_time(self, test_db_session):
         """[Time] 마지막 실행 시간 업데이트가 올바르게 동작해야 함."""
         schedule = CrawlSchedule(
-            name="time_test",
+            name=unique_name("time"),
             target_type="test",
             schedule_type="manual"
         )
@@ -222,7 +232,7 @@ class TestCrawlSchedule:
     def test_runs_relationship_cardinality(self, test_db_session):
         """[Cardinality] 스케줄과 실행 이력의 1:N 관계."""
         schedule = CrawlSchedule(
-            name="cardinality_test",
+            name=unique_name("cardinality"),
             target_type="test",
             schedule_type="manual"
         )

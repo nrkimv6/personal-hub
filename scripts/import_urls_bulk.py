@@ -23,8 +23,13 @@ sys.path.insert(0, str(project_root))
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models.instagram_crawl_request import InstagramCrawlRequest
+from app.models.crawl_request import CrawlRequest
 from app.config import settings
+
+
+# URL 타입 상수
+URL_TYPE_INSTAGRAM_POST = "instagram_post"
+URL_TYPE_INSTAGRAM_REEL = "instagram_reel"
 
 
 def extract_instagram_urls(file_path: Path) -> list[dict]:
@@ -34,9 +39,9 @@ def extract_instagram_urls(file_path: Path) -> list[dict]:
     # Instagram URL 패턴
     patterns = [
         # 일반 게시물: /p/ID/
-        (r'https://www\.instagram\.com/(?:[^/]+/)?p/([A-Za-z0-9_-]+)/?', 'single_post'),
+        (r'https://www\.instagram\.com/(?:[^/]+/)?p/([A-Za-z0-9_-]+)/?', URL_TYPE_INSTAGRAM_POST),
         # 릴스: /reel/ID/
-        (r'https://www\.instagram\.com/(?:[^/]+/)?reel/([A-Za-z0-9_-]+)/?', 'single_reel'),
+        (r'https://www\.instagram\.com/(?:[^/]+/)?reel/([A-Za-z0-9_-]+)/?', URL_TYPE_INSTAGRAM_REEL),
     ]
 
     results = []
@@ -47,7 +52,7 @@ def extract_instagram_urls(file_path: Path) -> list[dict]:
             url = match.group(0).rstrip('/')
             # URL 정규화 (계정명 포함된 URL을 표준 형식으로)
             post_id = match.group(1)
-            if url_type == 'single_post':
+            if url_type == URL_TYPE_INSTAGRAM_POST:
                 normalized_url = f'https://www.instagram.com/p/{post_id}/'
             else:
                 normalized_url = f'https://www.instagram.com/reel/{post_id}/'
@@ -63,7 +68,7 @@ def extract_instagram_urls(file_path: Path) -> list[dict]:
     return results
 
 
-def import_urls(urls: list[dict], service_account_id: int, dry_run: bool = False):
+def import_urls(urls: list[dict], dry_run: bool = False):
     """URL들을 크롤링 요청 테이블에 삽입"""
 
     # DB 연결
@@ -74,8 +79,8 @@ def import_urls(urls: list[dict], service_account_id: int, dry_run: bool = False
 
     try:
         # 이미 존재하는 URL 확인
-        existing = session.query(InstagramCrawlRequest.target_url).filter(
-            InstagramCrawlRequest.target_url.in_([u['url'] for u in urls])
+        existing = session.query(CrawlRequest.url).filter(
+            CrawlRequest.url.in_([u['url'] for u in urls])
         ).all()
         existing_urls = {r[0] for r in existing}
 
@@ -101,12 +106,10 @@ def import_urls(urls: list[dict], service_account_id: int, dry_run: bool = False
         now = datetime.now()
         requests = []
         for u in new_urls:
-            req = InstagramCrawlRequest(
-                service_account_id=service_account_id,
-                request_type="single_post_url",
-                target_url=u['url'],
+            req = CrawlRequest(
+                url=u['url'],
                 url_type=u['url_type'],
-                status="pending",
+                status=CrawlRequest.STATUS_PENDING,
                 requested_at=now,
                 requested_by="bulk_import"
             )
@@ -128,7 +131,6 @@ def main():
     parser = argparse.ArgumentParser(description="URL 목록을 크롤링 요청 큐에 일괄 추가")
     parser.add_argument("--dry-run", action="store_true", help="실제 삽입 없이 파싱 결과만 확인")
     parser.add_argument("--file", type=str, default="data/2025-12-24_original_files.md", help="입력 파일 경로")
-    parser.add_argument("--account-id", type=int, default=1, help="연결할 account ID")
     args = parser.parse_args()
 
     file_path = project_root / args.file
@@ -153,7 +155,7 @@ def main():
         print(f"  - {url_type}: {count}개")
 
     # 삽입
-    import_urls(urls, args.service_account_id, dry_run=args.dry_run)
+    import_urls(urls, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

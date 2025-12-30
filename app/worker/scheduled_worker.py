@@ -1,8 +1,7 @@
 """
 스케줄 기반 크롤링 워커.
 
-Instagram 스케줄 설정(InstagramScheduleConfig)에 따라
-정해진 시간에 피드 크롤링을 자동으로 수행합니다.
+CrawlSchedule 설정에 따라 정해진 시간에 피드 크롤링을 자동으로 수행합니다.
 
 실행 방법:
     python -m app.worker.scheduled_worker
@@ -19,9 +18,9 @@ from typing import Optional, TYPE_CHECKING
 
 from app.worker.crawl_worker_base import CrawlWorkerBase
 from app.database import SessionLocal
-from app.models import ServiceAccount, InstagramCrawlRequest
+from app.models import ServiceAccount, CrawlSchedule, CrawlScheduleRun
 
-from app.modules.instagram.services.request_service import CrawlRequestService
+from app.services.crawl_schedule_service import CrawlScheduleService
 from app.modules.instagram.services.crawl_service import CrawlService
 from app.modules.instagram.services.scheduler import InstagramScheduler
 from app.modules.instagram.services.crawler import InstagramCrawler
@@ -36,7 +35,7 @@ logger = logging.getLogger(__name__)
 class ScheduledCrawlWorker(CrawlWorkerBase):
     """스케줄 기반 Instagram 피드 크롤링 워커.
 
-    InstagramScheduleConfig 설정에 따라 정해진 시간에
+    CrawlSchedule 설정에 따라 정해진 시간에
     자동으로 Instagram 피드를 크롤링합니다.
 
     Attributes:
@@ -65,65 +64,23 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         """메인 루프 한 사이클.
 
         스케줄 설정을 확인하고, 실행 시간이 되면 크롤링을 시작합니다.
-        수동으로 생성된 feed 요청도 처리합니다.
         """
         # 완료된 태스크 정리
         self._cleanup_completed_tasks()
 
-        # 수동으로 생성된 pending feed 요청 처리
-        await self._dispatch_manual_feed_requests()
-
         # 스케줄 기반 실행 디스패치
         await self._dispatch_scheduled_runs()
 
-    async def _dispatch_manual_feed_requests(self):
-        """수동으로 생성된 pending feed 요청을 처리합니다."""
-        db = SessionLocal()
-        try:
-            request_service = CrawlRequestService(db)
-
-            # feed 타입의 pending 요청 조회 (manual 또는 retry로 생성된 것)
-            pending_requests = (
-                db.query(InstagramCrawlRequest)
-                .filter(
-                    InstagramCrawlRequest.status == "pending",
-                    InstagramCrawlRequest.request_type.in_(["feed", None]),
-                    InstagramCrawlRequest.requested_by.in_(["manual", "retry"]),
-                )
-                .order_by(InstagramCrawlRequest.requested_at)
-                .limit(1)
-                .all()
-            )
-
-            for request in pending_requests:
-                task_name = f"feed_{request.id}"
-                if self._is_task_running(task_name):
-                    continue
-
-                task = self._create_task(
-                    self._execute_feed_crawl(request),
-                    task_name
-                )
-                logger.info(f"[{self.name}] 수동 피드 크롤링 태스크 시작: request_id={request.id}")
-
-        except Exception as e:
-            logger.error(f"[{self.name}] 수동 feed 요청 디스패치 오류: {e}", exc_info=True)
-        finally:
-            db.close()
-
     def _cleanup_stale_requests(self):
-        """오래된 processing/pending 상태 요청 정리."""
+        """오래된 running 상태 실행 정리."""
         db = SessionLocal()
         try:
-            request_service = CrawlRequestService(db)
-            cleaned_processing = request_service.cleanup_stale_processing_requests(timeout_minutes=30)
-            cleaned_pending = request_service.cleanup_stale_pending_requests(timeout_minutes=60)
-            if cleaned_processing > 0:
-                logger.info(f"[{self.name}] {cleaned_processing}개의 오래된 processing 요청 정리 완료")
-            if cleaned_pending > 0:
-                logger.info(f"[{self.name}] {cleaned_pending}개의 오래된 pending 요청 정리 완료")
+            schedule_service = CrawlScheduleService(db)
+            cleaned = schedule_service.cleanup_stale_runs(timeout_minutes=30)
+            if cleaned > 0:
+                logger.info(f"[{self.name}] {cleaned}개의 오래된 running 실행 정리 완료")
         except Exception as e:
-            logger.error(f"[{self.name}] Stale request 정리 오류: {e}")
+            logger.error(f"[{self.name}] Stale run 정리 오류: {e}")
         finally:
             db.close()
 
@@ -131,78 +88,110 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         """스케줄 설정을 확인하고 실행 시간이면 크롤링을 시작합니다."""
         db = SessionLocal()
         try:
-            crawl_service = CrawlService(db)
-            config = crawl_service.get_schedule_config()
+            schedule_service = CrawlScheduleService(db)
 
-            if not config or not config.enabled:
-                return
-
-            if not config.service_account_id:
-                return
-
-            time_windows = [
-                TimeWindow(**tw) for tw in (config.time_windows or [])
-            ]
-
-            scheduler = InstagramScheduler(
-                daily_runs=config.daily_runs,
-                time_windows=time_windows,
+            # Instagram feed 타입의 활성 스케줄 조회
+            schedules = schedule_service.get_schedules_by_type(
+                CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+                enabled_only=True
             )
 
-            last_run = crawl_service.get_last_run(service_account_id=config.service_account_id)
-            last_run_time = last_run.started_at if last_run else None
-
-            min_interval = getattr(config, 'min_interval_hours', 2) or 2
-            if scheduler.should_run_now(
-                last_run=last_run_time,
-                min_interval_hours=min_interval,
-            ):
-                logger.info(f"[{self.name}] 스케줄 실행 시간 도래: service_account_id={config.service_account_id}")
-
-                request_service = CrawlRequestService(db)
-                if request_service.has_active_request(config.service_account_id):
-                    logger.info(f"[{self.name}] 이미 활성 요청 존재, 스킵")
-                    return
-
-                request = request_service.create_request(
-                    service_account_id=config.service_account_id,
-                    requested_by="scheduler",
-                )
-
-                if not self._is_task_running(f"feed_{request.id}"):
-                    task = self._create_task(
-                        self._execute_feed_crawl(request),
-                        f"feed_{request.id}"
-                    )
-                    logger.info(f"[{self.name}] 스케줄 피드 크롤링 태스크 시작: request_id={request.id}")
+            for schedule in schedules:
+                await self._process_schedule(db, schedule, schedule_service)
 
         except Exception as e:
             logger.error(f"[{self.name}] 스케줄 디스패치 오류: {e}", exc_info=True)
         finally:
             db.close()
 
-    async def _execute_feed_crawl(self, request: InstagramCrawlRequest):
+    async def _process_schedule(
+        self,
+        db,
+        schedule: CrawlSchedule,
+        schedule_service: CrawlScheduleService
+    ):
+        """개별 스케줄 처리."""
+        try:
+            config = schedule.get_target_config()
+            service_account_id = config.get("service_account_id")
+
+            if not service_account_id:
+                return
+
+            # 타임 윈도우 설정
+            time_windows = [
+                TimeWindow(**tw) for tw in config.get("time_windows", [])
+            ]
+            daily_runs = config.get("daily_runs", 3)
+            min_interval = config.get("min_interval_hours", 2)
+
+            scheduler = InstagramScheduler(
+                daily_runs=daily_runs,
+                time_windows=time_windows,
+            )
+
+            # 마지막 실행 시간 조회
+            last_run = schedule_service.get_latest_run(schedule.id)
+            last_run_time = last_run.started_at if last_run else None
+
+            if scheduler.should_run_now(
+                last_run=last_run_time,
+                min_interval_hours=min_interval,
+            ):
+                logger.info(f"[{self.name}] 스케줄 실행 시간 도래: schedule_id={schedule.id}")
+
+                # 이미 활성 실행이 있는지 확인
+                if schedule_service.has_active_run(schedule.id):
+                    logger.info(f"[{self.name}] 이미 활성 실행 존재, 스킵")
+                    return
+
+                # 실행 시작
+                run = schedule_service.start_run(
+                    schedule_id=schedule.id,
+                    worker_id=self.name,
+                    config_snapshot=config
+                )
+
+                task_name = f"schedule_{schedule.id}_run_{run.id}"
+                if not self._is_task_running(task_name):
+                    self._create_task(
+                        self._execute_feed_crawl(schedule, run, service_account_id),
+                        task_name
+                    )
+                    logger.info(f"[{self.name}] 스케줄 피드 크롤링 태스크 시작: run_id={run.id}")
+
+        except Exception as e:
+            logger.error(f"[{self.name}] 스케줄 처리 오류: schedule_id={schedule.id}, error={e}", exc_info=True)
+
+    async def _execute_feed_crawl(
+        self,
+        schedule: CrawlSchedule,
+        run: CrawlScheduleRun,
+        service_account_id: int
+    ):
         """Instagram 피드 크롤링 실행.
 
         Args:
-            request: 크롤링 요청 객체
+            schedule: 크롤링 스케줄
+            run: 실행 기록
+            service_account_id: 계정 ID
         """
         db = SessionLocal()
         max_retries = 3
         retry_count = 0
 
         try:
-            request_service = CrawlRequestService(db)
+            schedule_service = CrawlScheduleService(db)
             crawl_service = CrawlService(db)
-
-            request_service.mark_processing(request.id)
 
             while retry_count <= max_retries:
                 try:
-                    account = db.query(ServiceAccount).filter(ServiceAccount.id == request.service_account_id).first()
+                    account = db.query(ServiceAccount).filter(
+                        ServiceAccount.id == service_account_id
+                    ).first()
                     if not account:
-                        request_service.mark_failed(request.id, "계정을 찾을 수 없음")
-                        logger.warning(f"[{self.name}] 계정 없음: service_account_id={request.service_account_id}")
+                        schedule_service.fail_run(run.id, "계정을 찾을 수 없음")
+                        logger.warning(f"[{self.name}] 계정 없음: service_account_id={service_account_id}")
                         return
 
                     self._update_worker_state("crawling", account.identifier)
@@ -211,10 +200,11 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                     result = await self.execute_with_tab(
                         callback=self._crawl_with_tab,
                         service_account_id=account.id,
-                        request=request,
+                        schedule=schedule,
+                        run=run,
                         account=account,
                         db=db,
-                        request_service=request_service,
+                        schedule_service=schedule_service,
                         crawl_service=crawl_service,
                     )
 
@@ -233,15 +223,15 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                             self._browser_initialized = False
                         continue
 
-                    request_service.mark_failed(request.id, str(e))
+                    schedule_service.fail_run(run.id, str(e))
                     logger.error(f"[{self.name}] 크롤링 예외: {e}", exc_info=True)
                     return
 
         except Exception as e:
-            logger.error(f"[{self.name}] 피드 크롤링 실패: request_id={request.id}, error={e}", exc_info=True)
+            logger.error(f"[{self.name}] 피드 크롤링 실패: run_id={run.id}, error={e}", exc_info=True)
             try:
-                request_service = CrawlRequestService(db)
-                request_service.mark_failed(request.id, str(e))
+                schedule_service = CrawlScheduleService(db)
+                schedule_service.fail_run(run.id, str(e))
             except Exception:
                 pass
         finally:
@@ -251,20 +241,22 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
     async def _crawl_with_tab(
         self,
         tab: "Page",
-        request: InstagramCrawlRequest,
+        schedule: CrawlSchedule,
+        run: CrawlScheduleRun,
         account: ServiceAccount,
         db,
-        request_service: CrawlRequestService,
+        schedule_service: CrawlScheduleService,
         crawl_service: CrawlService,
     ) -> bool:
         """탭을 사용하여 피드 크롤링을 수행합니다.
 
         Args:
             tab: Playwright Page 객체
-            request: 크롤링 요청
+            schedule: 크롤링 스케줄
+            run: 실행 기록
             account: 계정 정보
             db: DB 세션
-            request_service: 요청 서비스
+            schedule_service: 스케줄 서비스
             crawl_service: 크롤링 서비스
 
         Returns:
@@ -279,7 +271,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         if not is_logged_in:
             account.is_logged_in = False
             db.commit()
-            request_service.mark_failed(request.id, "Instagram 로그인 필요")
+            schedule_service.fail_run(run.id, "Instagram 로그인 필요")
             logger.warning(f"[{self.name}] Instagram 로그인 필요: account={account.name}")
             return False
         else:
@@ -289,26 +281,34 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         crawler = InstagramCrawler(tab)
         logger.info(f"[{self.name}] InstagramCrawler 생성 완료, 크롤링 시작...")
 
+        # CrawlService.run_crawl 사용 (CrawlScheduleRun 생성)
         crawl_run = await crawl_service.run_crawl(
             crawler=crawler,
-            service_account_id=request.service_account_id,
+            service_account_id=account.id,
         )
 
-        self._update_worker_state("crawling", account.name, crawl_run.id)
+        self._update_worker_state("crawling", account.name, run.id)
 
         logger.info(
             f"[{self.name}] 크롤링 완료: success={crawl_run.success}, "
             f"collected={crawl_run.total_collected}, new={crawl_run.new_saved}"
         )
 
+        # CrawlScheduleRun 업데이트
         if crawl_run.success:
-            request_service.mark_completed(request.id, crawl_run.id)
+            schedule_service.complete_run(
+                run.id,
+                collected_count=crawl_run.total_collected,
+                saved_count=crawl_run.new_saved,
+                stop_reason=crawl_run.stop_reason
+            )
+            schedule_service.update_schedule_after_run(schedule.id)
             logger.info(
-                f"[{self.name}] 크롤링 완료: request_id={request.id}, "
+                f"[{self.name}] 크롤링 완료: run_id={run.id}, "
                 f"collected={crawl_run.total_collected}, new={crawl_run.new_saved}"
             )
         else:
-            request_service.mark_failed(request.id, crawl_run.error_message or "크롤링 실패")
+            schedule_service.fail_run(run.id, crawl_run.error_message or "크롤링 실패")
             logger.warning(f"[{self.name}] 크롤링 실패: {crawl_run.error_message}")
 
         return crawl_run.success
