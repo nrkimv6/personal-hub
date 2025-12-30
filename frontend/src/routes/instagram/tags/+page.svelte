@@ -144,9 +144,8 @@
 	});
 </script>
 
-<div class="p-6">
-	<div class="mb-6 flex justify-between items-center">
-		<h2 class="text-2xl font-bold text-gray-900">태그 관리</h2>
+<div>
+	<div class="mb-6 flex justify-end">
 		<div class="flex gap-2">
 			<button onclick={reclassifyAll} disabled={reclassifying} class="btn btn-secondary btn-sm">
 				{reclassifying ? '재분류 중...' : '전체 재분류'}

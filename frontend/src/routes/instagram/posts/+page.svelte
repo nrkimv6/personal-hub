@@ -601,12 +601,11 @@
 	});
 </script>
 
-<div class="p-4 md:p-6">
+<div>
 	<!-- 헤더 -->
 	<div class="mb-4 md:mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-		<!-- 제목 + URL 수집 버튼 + 선택 모드 -->
+		<!-- URL 수집 버튼 + 선택 모드 -->
 		<div class="flex items-center justify-between sm:justify-start gap-3">
-			<h2 class="text-xl md:text-2xl font-bold text-gray-900">게시물</h2>
 			{#if !isSelectMode}
 				{#if $isAdmin}
 				<button
