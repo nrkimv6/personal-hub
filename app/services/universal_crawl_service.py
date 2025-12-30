@@ -8,19 +8,15 @@ from typing import List, Optional, Tuple
 from datetime import datetime, date
 
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import desc, asc, or_, and_
+from sqlalchemy import desc, asc, or_
 
-from app.models.universal_crawl import UniversalCrawlRequest, CrawledPage
+from app.models import CrawlRequest
+from app.models.universal_crawl import CrawledPage
 from app.schemas.universal_crawl import (
-    UniversalCrawlRequestCreate,
-    UniversalCrawlRequestUpdate,
     UniversalCrawlRequestResponse,
     UniversalCrawlRequestList,
-    CrawledPageCreate,
     CrawledPageResponse,
     CrawledPageList,
-    CrawlUrlRequest,
-    CrawlUrlResponse,
 )
 from app.services.event_service import detect_url_type
 
@@ -53,12 +49,12 @@ class UniversalCrawlService:
         priority: int = 0,
         requested_by: str = "manual",
         extra_metadata: Optional[dict] = None,
-    ) -> Tuple[UniversalCrawlRequest, str]:
+    ) -> Tuple[CrawlRequest, str]:
         """
         크롤링 요청 생성
 
         Returns:
-            Tuple[UniversalCrawlRequest, str]: (요청 객체, 메시지)
+            Tuple[CrawlRequest, str]: (요청 객체, 메시지)
         """
         # Instagram URL은 거부 (별도 크롤러 사용)
         if self.is_instagram_url(url):
@@ -70,15 +66,12 @@ class UniversalCrawlService:
             url_type = "other"  # SNS 중 Instagram 제외한 것들
 
         # 요청 생성
-        request = UniversalCrawlRequest(
+        request = CrawlRequest(
             url=url,
             url_type=url_type,
-            service_account_id=service_account_id,
-            status="pending",
+            status=CrawlRequest.STATUS_PENDING,
             requested_by=requested_by,
-            auto_analyze=auto_analyze,
-            priority=priority,
-            extra_metadata=json.dumps(extra_metadata) if extra_metadata else None,
+            requested_at=datetime.now(),
         )
 
         db.add(request)
@@ -92,15 +85,12 @@ class UniversalCrawlService:
         self,
         db: Session,
         limit: int = 10,
-    ) -> List[UniversalCrawlRequest]:
-        """대기 중인 요청 조회 (우선순위 순)"""
+    ) -> List[CrawlRequest]:
+        """대기 중인 요청 조회"""
         return (
-            db.query(UniversalCrawlRequest)
-            .filter(UniversalCrawlRequest.status == "pending")
-            .order_by(
-                desc(UniversalCrawlRequest.priority),
-                UniversalCrawlRequest.requested_at,
-            )
+            db.query(CrawlRequest)
+            .filter(CrawlRequest.status == CrawlRequest.STATUS_PENDING)
+            .order_by(CrawlRequest.requested_at)
             .limit(limit)
             .all()
         )
@@ -109,10 +99,10 @@ class UniversalCrawlService:
         self,
         db: Session,
         request_id: int,
-    ) -> Optional[UniversalCrawlRequest]:
+    ) -> Optional[CrawlRequest]:
         """요청 상세 조회"""
-        return db.query(UniversalCrawlRequest).filter(
-            UniversalCrawlRequest.id == request_id
+        return db.query(CrawlRequest).filter(
+            CrawlRequest.id == request_id
         ).first()
 
     def get_requests(
@@ -143,29 +133,28 @@ class UniversalCrawlService:
             sort_by: 정렬 컬럼
             sort_order: 정렬 순서 (asc/desc)
         """
-        query = db.query(UniversalCrawlRequest).options(
-            joinedload(UniversalCrawlRequest.crawled_page)
-        )
+        query = db.query(CrawlRequest)
 
         # 기본 필터
         if status:
-            query = query.filter(UniversalCrawlRequest.status == status)
+            query = query.filter(CrawlRequest.status == status)
         if url_type:
-            query = query.filter(UniversalCrawlRequest.url_type == url_type)
+            query = query.filter(CrawlRequest.url_type == url_type)
 
         # URL 검색
         if url_search:
-            query = query.filter(UniversalCrawlRequest.url.ilike(f"%{url_search}%"))
+            query = query.filter(CrawlRequest.url.ilike(f"%{url_search}%"))
 
         # 날짜 범위 필터
         if date_from:
-            query = query.filter(UniversalCrawlRequest.requested_at >= datetime.combine(date_from, datetime.min.time()))
+            query = query.filter(CrawlRequest.requested_at >= datetime.combine(date_from, datetime.min.time()))
         if date_to:
-            query = query.filter(UniversalCrawlRequest.requested_at <= datetime.combine(date_to, datetime.max.time()))
+            query = query.filter(CrawlRequest.requested_at <= datetime.combine(date_to, datetime.max.time()))
 
         # 본문 검색 (crawled_page 조인 필요)
         if content_search:
-            query = query.join(CrawledPage, UniversalCrawlRequest.crawled_page_id == CrawledPage.id, isouter=True)
+            query = query.join(CrawledPage, CrawlRequest.result_id == CrawledPage.id, isouter=True)
+            query = query.filter(CrawlRequest.result_type == "crawled_page")
             query = query.filter(
                 or_(
                     CrawledPage.content.ilike(f"%{content_search}%"),
@@ -177,7 +166,8 @@ class UniversalCrawlService:
         # 분석 상태 필터
         if analysis_status:
             if not content_search:
-                query = query.join(CrawledPage, UniversalCrawlRequest.crawled_page_id == CrawledPage.id, isouter=True)
+                query = query.join(CrawledPage, CrawlRequest.result_id == CrawledPage.id, isouter=True)
+                query = query.filter(CrawlRequest.result_type == "crawled_page")
 
             if analysis_status == "event":
                 query = query.filter(CrawledPage.is_event == True)
@@ -187,7 +177,7 @@ class UniversalCrawlService:
                 query = query.filter(
                     or_(
                         CrawledPage.is_event.is_(None),
-                        UniversalCrawlRequest.crawled_page_id.is_(None),
+                        CrawlRequest.result_id.is_(None),
                     )
                 )
 
@@ -195,7 +185,7 @@ class UniversalCrawlService:
         total_pages = (total + page_size - 1) // page_size
 
         # 정렬
-        sort_column = getattr(UniversalCrawlRequest, sort_by, UniversalCrawlRequest.requested_at)
+        sort_column = getattr(CrawlRequest, sort_by, CrawlRequest.requested_at)
         if sort_order == "asc":
             query = query.order_by(asc(sort_column))
         else:
@@ -222,7 +212,7 @@ class UniversalCrawlService:
         status: str,
         error_message: Optional[str] = None,
         crawled_page_id: Optional[int] = None,
-    ) -> Optional[UniversalCrawlRequest]:
+    ) -> Optional[CrawlRequest]:
         """요청 상태 업데이트"""
         request = self.get_request(db, request_id)
         if not request:
@@ -230,15 +220,12 @@ class UniversalCrawlService:
 
         request.status = status
 
-        if status == "processing":
-            request.started_at = datetime.now()
-        elif status in ("completed", "failed"):
-            request.completed_at = datetime.now()
-
-        if error_message:
-            request.error_message = error_message
-        if crawled_page_id:
-            request.crawled_page_id = crawled_page_id
+        if status == CrawlRequest.STATUS_PROCESSING:
+            request.mark_processing()
+        elif status == CrawlRequest.STATUS_COMPLETED and crawled_page_id:
+            request.mark_completed(result_type="crawled_page", result_id=crawled_page_id)
+        elif status == CrawlRequest.STATUS_FAILED:
+            request.mark_failed(error_message or "Unknown error")
 
         db.commit()
         db.refresh(request)
@@ -250,51 +237,63 @@ class UniversalCrawlService:
         self,
         db: Session,
         request_id: int,
-    ) -> Optional[UniversalCrawlRequest]:
+    ) -> Optional[CrawlRequest]:
         """요청을 processing 상태로 전환"""
-        return self.update_request_status(db, request_id, "processing")
+        request = self.get_request(db, request_id)
+        if not request:
+            return None
+        request.mark_processing()
+        db.commit()
+        db.refresh(request)
+        return request
 
     def mark_completed(
         self,
         db: Session,
         request_id: int,
         crawled_page_id: int,
-    ) -> Optional[UniversalCrawlRequest]:
+    ) -> Optional[CrawlRequest]:
         """요청을 completed 상태로 전환"""
-        return self.update_request_status(
-            db, request_id, "completed", crawled_page_id=crawled_page_id
-        )
+        request = self.get_request(db, request_id)
+        if not request:
+            return None
+        request.mark_completed(result_type="crawled_page", result_id=crawled_page_id)
+        db.commit()
+        db.refresh(request)
+        return request
 
     def mark_failed(
         self,
         db: Session,
         request_id: int,
         error_message: str,
-    ) -> Optional[UniversalCrawlRequest]:
+    ) -> Optional[CrawlRequest]:
         """요청을 failed 상태로 전환"""
         request = self.get_request(db, request_id)
-        if request:
-            request.retry_count += 1
-        return self.update_request_status(
-            db, request_id, "failed", error_message=error_message
-        )
+        if not request:
+            return None
+        request.retry_count = (request.retry_count or 0) + 1
+        request.mark_failed(error_message)
+        db.commit()
+        db.refresh(request)
+        return request
 
     def retry_request(
         self,
         db: Session,
         request_id: int,
-    ) -> Optional[UniversalCrawlRequest]:
+    ) -> Optional[CrawlRequest]:
         """요청 재시도 (실패/완료 상태 모두 가능)"""
         request = self.get_request(db, request_id)
         if not request:
             return None
-        if request.status not in ("failed", "completed"):
+        if request.status not in (CrawlRequest.STATUS_FAILED, CrawlRequest.STATUS_COMPLETED):
             raise ValueError("실패 또는 완료된 요청만 재시도할 수 있습니다.")
 
-        request.status = "pending"
+        request.status = CrawlRequest.STATUS_PENDING
         request.error_message = None
-        request.started_at = None
-        request.completed_at = None
+        request.picked_at = None
+        request.processed_at = None
         request.requested_at = datetime.now()  # 재시도 시간으로 갱신
 
         db.commit()
