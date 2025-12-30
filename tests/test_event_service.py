@@ -428,6 +428,31 @@ class TestEventServiceFilter:
         result = event_service.get_events(test_db_session, search="ABC컴퍼니")
         assert result.total >= 1
 
+    def test_search_by_body_text(self, test_db_session, event_service):
+        """Right: body_text 검색"""
+        event_service.create_event(test_db_session, EventCreate(
+            title="일반 이벤트",
+            event_type="event",
+            body_text="특별 할인 이벤트 진행 중! 선착순 100명 한정",
+        ))
+
+        result = event_service.get_events(test_db_session, search="선착순 100명")
+        assert result.total >= 1
+
+    def test_search_by_body_text_only(self, test_db_session, event_service):
+        """Right: body_text에만 있는 키워드 검색"""
+        event_service.create_event(test_db_session, EventCreate(
+            title="평범한 제목",
+            event_type="event",
+            summary="평범한 요약",
+            organizer="평범한 주최자",
+            body_text="이 본문에만 존재하는 유니크키워드XYZ",
+        ))
+
+        result = event_service.get_events(test_db_session, search="유니크키워드XYZ")
+        assert result.total >= 1
+        assert any("유니크키워드XYZ" in (item.body_text or "") for item in result.items)
+
 
 class TestEventServiceImportFromInstagram:
     """Instagram에서 이벤트 가져오기 테스트"""
@@ -488,6 +513,26 @@ class TestEventServiceImportFromInstagram:
         result = event_service.import_from_instagram(test_db_session, data)
 
         assert result is None
+
+    def test_import_from_instagram_saves_body_text(self, test_db_session, event_service):
+        """Right: Instagram import 시 caption을 body_text에 저장"""
+        import uuid
+        unique_id = f"test_post_{uuid.uuid4().hex[:8]}"
+        post = InstagramPost(
+            post_id=unique_id,
+            account="test_account",
+            url=f"https://instagram.com/p/{unique_id}",
+            caption="이것은 Instagram 게시물 캡션입니다. #이벤트 #경품",
+        )
+        test_db_session.add(post)
+        test_db_session.commit()
+        test_db_session.refresh(post)
+
+        data = EventImportFromInstagram(instagram_post_id=post.id)
+        event = event_service.import_from_instagram(test_db_session, data)
+
+        assert event is not None
+        assert event.body_text == "이것은 Instagram 게시물 캡션입니다. #이벤트 #경품"
 
 
 class TestEventStatusCalculation:
