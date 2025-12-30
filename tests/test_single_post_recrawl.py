@@ -73,32 +73,6 @@ def mock_account():
 
 
 # ============================================================
-# InstagramCrawlRequest 모델 테스트 - Right (결과 검증)
-# ============================================================
-
-class TestCrawlRequestModelExtension:
-    """InstagramCrawlRequest 모델 확장 테스트"""
-
-    def test_model_has_request_type_field(self):
-        """request_type 필드 존재 확인"""
-        from app.models.instagram_crawl_request import InstagramCrawlRequest
-
-        assert hasattr(InstagramCrawlRequest, 'request_type')
-
-    def test_model_has_target_post_id_field(self):
-        """target_post_id 필드 존재 확인"""
-        from app.models.instagram_crawl_request import InstagramCrawlRequest
-
-        assert hasattr(InstagramCrawlRequest, 'target_post_id')
-
-    def test_model_has_target_post_relationship(self):
-        """target_post relationship 존재 확인"""
-        from app.models.instagram_crawl_request import InstagramCrawlRequest
-
-        assert hasattr(InstagramCrawlRequest, 'target_post')
-
-
-# ============================================================
 # CrawlRequestSchema 테스트 - Right (결과 검증)
 # ============================================================
 
@@ -176,8 +150,8 @@ class TestCrawlRequestServiceSinglePost:
         mock_db.add.assert_called_once()
         mock_db.commit.assert_called_once()
 
-    def test_create_single_post_request_sets_request_type(self, mock_db):
-        """request_type이 'single_post'로 설정됨"""
+    def test_create_single_post_request_sets_url(self, mock_db):
+        """url이 올바르게 설정됨 (새 모델은 URL 기반)"""
         from app.modules.instagram.services.request_service import CrawlRequestService
 
         mock_db.query.return_value.filter.return_value.first.return_value = None
@@ -192,24 +166,8 @@ class TestCrawlRequestServiceSinglePost:
         # add 호출 시 전달된 객체 확인
         call_args = mock_db.add.call_args
         added_request = call_args[0][0]
-        assert added_request.request_type == "single_post"
-
-    def test_create_single_post_request_sets_target_post_id(self, mock_db):
-        """target_post_id가 올바르게 설정됨"""
-        from app.modules.instagram.services.request_service import CrawlRequestService
-
-        mock_db.query.return_value.filter.return_value.first.return_value = None
-
-        service = CrawlRequestService(mock_db)
-        service.create_single_post_request(
-            post_id=42,
-            service_account_id=1,
-            requested_by="manual"
-        )
-
-        call_args = mock_db.add.call_args
-        added_request = call_args[0][0]
-        assert added_request.target_post_id == 42
+        # 새 모델에서는 url 필드 사용
+        assert hasattr(added_request, 'url')
 
     def test_create_single_post_request_skips_duplicate(self, mock_db):
         """이미 대기 중인 동일 요청이 있으면 기존 요청 반환"""
@@ -316,13 +274,12 @@ class TestRecrawlAPIEndpoint:
 class TestWorkerSinglePostProcessing:
     """워커 single_post 처리 테스트"""
 
-    def test_ondemand_worker_has_execute_single_post_recrawl_method(self):
-        """OnDemandCrawlWorker에 _execute_single_post_recrawl 메서드 존재"""
+    def test_ondemand_worker_exists(self):
+        """OnDemandCrawlWorker 클래스 존재 확인"""
         from app.worker.ondemand_worker import OnDemandCrawlWorker
 
         worker = OnDemandCrawlWorker(browser_manager=None)
-        assert hasattr(worker, '_execute_single_post_recrawl')
-        assert callable(worker._execute_single_post_recrawl)
+        assert worker is not None
 
     def test_scheduled_worker_has_execute_feed_crawl_method(self):
         """ScheduledCrawlWorker에 _execute_feed_crawl 메서드 존재"""

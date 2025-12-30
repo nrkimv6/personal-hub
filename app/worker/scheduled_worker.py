@@ -281,7 +281,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         crawler = InstagramCrawler(tab)
         logger.info(f"[{self.name}] InstagramCrawler 생성 완료, 크롤링 시작...")
 
-        # 기존 CrawlService.run_crawl 사용 (InstagramCrawlRun 생성)
+        # CrawlService.run_crawl 사용 (CrawlScheduleRun 생성)
         crawl_run = await crawl_service.run_crawl(
             crawler=crawler,
             service_account_id=account.id,

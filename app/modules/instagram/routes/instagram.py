@@ -657,7 +657,7 @@ async def get_crawl_history(
 
     모든 크롤링 활동(피드 크롤링, URL 요청, 개별 게시물 재크롤링)을 한눈에 조회.
     """
-    from app.models import InstagramCrawlRun
+    from app.models import CrawlScheduleRun
 
     request_service = CrawlRequestService(db)
     requests, total = request_service.get_requests_paginated(
@@ -672,33 +672,60 @@ async def get_crawl_history(
 
     items = []
     for req in requests:
-        # CrawlRun 정보 조회 (있는 경우)
+        # CrawlScheduleRun 정보 조회 (있는 경우)
         crawl_run_summary = None
-        if req.crawl_run_id:
-            run = db.query(InstagramCrawlRun).get(req.crawl_run_id)
+        if req.result_id and req.result_type == "crawl_schedule_run":
+            run = db.query(CrawlScheduleRun).filter(CrawlScheduleRun.id == req.result_id).first()
             if run:
-                duration = None
-                if run.started_at and run.finished_at:
-                    duration = int((run.finished_at - run.started_at).total_seconds())
+                duration = run.duration_seconds
                 crawl_run_summary = CrawlRunSummary(
                     id=run.id,
-                    total_collected=run.total_collected,
-                    new_saved=run.new_saved,
+                    total_collected=run.collected_count or 0,
+                    new_saved=run.saved_count or 0,
                     duration_seconds=duration,
                     stop_reason=run.stop_reason,
                 )
 
+        # URL에서 service_account_id 추출 (instagram://feed?account_id=X 형식)
+        service_account_id_from_url = None
+        if req.url and "account_id=" in req.url:
+            try:
+                service_account_id_from_url = int(req.url.split("account_id=")[1].split("&")[0])
+            except (ValueError, IndexError):
+                pass
+
+        # url_type에서 request_type 매핑
+        request_type_map = {
+            "instagram_feed": "feed",
+            "instagram_post": "single_post",
+            "instagram_account": "account_feed",
+            "instagram_hashtag": "hashtag",
+            "instagram_reels": "reels",
+        }
+        request_type = request_type_map.get(req.url_type, req.url_type)
+
+        # target_url은 URL 자체 (instagram:// 스킴 제외)
+        target_url = req.url if not req.url.startswith("instagram://") else None
+
+        # target_post_id 추출 (instagram://post/123 형식)
+        target_post_id = None
+        if req.url and req.url.startswith("instagram://post/"):
+            try:
+                target_post_id = int(req.url.split("/")[3].split("?")[0])
+            except (ValueError, IndexError):
+                pass
+
         items.append(CrawlHistoryItem(
             id=req.id,
-            service_account_id=req.service_account_id,
+            service_account_id=service_account_id_from_url,
             requested_at=req.requested_at,
             requested_by=req.requested_by,
-            request_type=req.request_type,
-            target_url=req.target_url,
-            target_post_id=req.target_post_id,
+            request_type=request_type,
+            target_url=target_url,
+            target_post_id=target_post_id,
             status=req.status,
             processed_at=req.processed_at,
-            crawl_run_id=req.crawl_run_id,
+            crawl_run_id=req.result_id if req.result_type == "crawl_schedule_run" else None,
             error_message=req.error_message,
             crawl_run=crawl_run_summary,
         ))
@@ -1065,37 +1092,62 @@ async def proxy_image(
 # ============== Helpers ==============
 
 def _run_to_schema(run) -> CrawlRunSchema:
-    """InstagramCrawlRun 모델을 CrawlRunSchema로 변환."""
+    """CrawlScheduleRun 모델을 CrawlRunSchema로 변환."""
+    import json
+
+    # schedule의 target_config에서 service_account_id 추출
+    service_account_id = None
+    if run.schedule:
+        target_config = run.schedule.get_target_config()
+        service_account_id = target_config.get("service_account_id")
+
     return CrawlRunSchema(
         id=run.id,
-        service_account_id=run.service_account_id,
+        service_account_id=service_account_id,
         started_at=run.started_at,
         finished_at=run.finished_at,
-        success=run.success,
-        total_collected=run.total_collected,
-        new_saved=run.new_saved,
+        success=(run.status == "completed"),
+        total_collected=run.collected_count or 0,
+        new_saved=run.saved_count or 0,
         error_message=run.error_message,
-        retry_count=getattr(run, 'retry_count', 0) or 0,
-        retry_of_run_id=getattr(run, 'retry_of_run_id', None),
-        failure_reason=getattr(run, 'failure_reason', None),
+        retry_count=run.retry_count or 0,
+        retry_of_run_id=run.retry_of_run_id,
+        failure_reason=run.stop_reason if run.status == "failed" else None,
     )
 
 
 def _config_to_schema(config) -> ScheduleConfigSchema:
-    """InstagramScheduleConfig 모델을 ScheduleConfigSchema로 변환."""
+    """CrawlSchedule 모델을 ScheduleConfigSchema로 변환."""
+    import json
+
+    # target_config에서 설정 추출
+    target_config = config.get_target_config()
+
+    # schedule_value에서 설정 추출
+    schedule_value = {}
+    if config.schedule_value:
+        try:
+            schedule_value = json.loads(config.schedule_value)
+        except json.JSONDecodeError:
+            pass
+
+    # service_account 정보 조회를 위해 DB 조회가 필요하지만,
+    # 여기서는 target_config의 값만 사용
+    service_account_id = target_config.get("service_account_id")
+
     return ScheduleConfigSchema(
         id=config.id,
         enabled=config.enabled,
-        daily_runs=config.daily_runs,
-        time_windows=[TimeWindow(**tw) for tw in (config.time_windows or [])],
-        max_posts=config.max_posts,
-        scroll_count=config.scroll_count,
-        min_interval_hours=getattr(config, 'min_interval_hours', 2) or 2,
-        duplicate_stop_count=getattr(config, 'duplicate_stop_count', 5) or 5,
-        max_retries=getattr(config, 'max_retries', 3) or 3,
-        retry_interval_minutes=getattr(config, 'retry_interval_minutes', 5) or 5,
-        service_account_id=getattr(config, 'service_account_id', None),
-        account_name=config.service_account.profile.name if getattr(config, 'service_account', None) else None,
+        daily_runs=schedule_value.get("daily_runs", 3),
+        time_windows=[TimeWindow(**tw) for tw in schedule_value.get("time_windows", [])],
+        max_posts=target_config.get("max_posts", 20),
+        scroll_count=target_config.get("scroll_count", 3),
+        min_interval_hours=target_config.get("min_interval_hours", 2),
+        duplicate_stop_count=target_config.get("duplicate_stop_count", 5),
+        max_retries=target_config.get("max_retries", 3),
+        retry_interval_minutes=target_config.get("retry_interval_minutes", 5),
+        service_account_id=service_account_id,
+        account_name=None,  # DB 조회 없이는 알 수 없음
         updated_at=config.updated_at,
     )
 
