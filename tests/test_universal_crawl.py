@@ -291,15 +291,15 @@ class TestUniversalCrawlService:
 
 
 class TestUniversalCrawlAPI:
-    """Universal Crawl API 테스트"""
+    """Universal Crawl API 테스트 (v2로 통합됨)"""
 
     def test_create_crawl_request_api(self, client):
-        """POST /api/v1/crawl/url - 요청 생성"""
+        """POST /api/v2/crawl/url - 요청 생성"""
         import uuid
         unique_id = uuid.uuid4().hex[:8]
 
         response = client.post(
-            "/api/v1/crawl/url",
+            "/api/v2/crawl/url",
             json={
                 "url": f"https://docs.google.com/forms/d/e/{unique_id}",
                 "auto_analyze": True,
@@ -313,9 +313,9 @@ class TestUniversalCrawlAPI:
         assert data["status"] == "pending"
 
     def test_create_crawl_request_instagram_rejected(self, client):
-        """POST /api/v1/crawl/url - Instagram URL 거부"""
+        """POST /api/v2/crawl/url - Instagram URL 거부"""
         response = client.post(
-            "/api/v1/crawl/url",
+            "/api/v2/crawl/url",
             json={"url": "https://www.instagram.com/p/ABC123/"}
         )
 
@@ -323,8 +323,8 @@ class TestUniversalCrawlAPI:
         assert "Instagram" in response.json()["detail"]
 
     def test_list_crawl_requests(self, client, sample_crawl_request):
-        """GET /api/v1/crawl/requests - 목록 조회"""
-        response = client.get("/api/v1/crawl/requests")
+        """GET /api/v2/crawl/universal-requests - 목록 조회"""
+        response = client.get("/api/v2/crawl/universal-requests")
 
         assert response.status_code == 200
         data = response.json()
@@ -332,32 +332,32 @@ class TestUniversalCrawlAPI:
         assert "total" in data
 
     def test_get_crawl_request(self, client, sample_crawl_request):
-        """GET /api/v1/crawl/requests/{id} - 상세 조회"""
-        response = client.get(f"/api/v1/crawl/requests/{sample_crawl_request.id}")
+        """GET /api/v2/crawl/universal-requests/{id} - 상세 조회"""
+        response = client.get(f"/api/v2/crawl/universal-requests/{sample_crawl_request.id}")
 
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == sample_crawl_request.id
 
     def test_list_crawled_pages(self, client, sample_crawled_page):
-        """GET /api/v1/crawl/pages - 목록 조회"""
-        response = client.get("/api/v1/crawl/pages")
+        """GET /api/v2/crawl/pages - 목록 조회"""
+        response = client.get("/api/v2/crawl/pages")
 
         assert response.status_code == 200
         data = response.json()
         assert "items" in data
 
     def test_get_crawled_page(self, client, sample_crawled_page):
-        """GET /api/v1/crawl/pages/{id} - 상세 조회"""
-        response = client.get(f"/api/v1/crawl/pages/{sample_crawled_page.id}")
+        """GET /api/v2/crawl/pages/{id} - 상세 조회"""
+        response = client.get(f"/api/v2/crawl/pages/{sample_crawled_page.id}")
 
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == sample_crawled_page.id
 
     def test_analyze_page_api(self, client, sample_crawled_page):
-        """POST /api/v1/crawl/pages/{id}/analyze - AI 분석 요청"""
-        response = client.post(f"/api/v1/crawl/pages/{sample_crawled_page.id}/analyze")
+        """POST /api/v2/crawl/pages/{id}/analyze - AI 분석 요청"""
+        response = client.post(f"/api/v2/crawl/pages/{sample_crawled_page.id}/analyze")
 
         assert response.status_code == 200
         data = response.json()
@@ -367,13 +367,13 @@ class TestUniversalCrawlAPI:
         assert "request_id" in data
 
     def test_analyze_page_not_found(self, client):
-        """POST /api/v1/crawl/pages/{id}/analyze - 없는 페이지"""
-        response = client.post("/api/v1/crawl/pages/99999/analyze")
+        """POST /api/v2/crawl/pages/{id}/analyze - 없는 페이지"""
+        response = client.post("/api/v2/crawl/pages/99999/analyze")
 
         assert response.status_code == 404
 
     def test_get_analysis_status_not_requested(self, client, sample_crawled_page):
-        """GET /api/v1/crawl/pages/{id}/analysis - 분석 요청 없음"""
+        """GET /api/v2/crawl/pages/{id}/analysis - 분석 요청 없음"""
         # 먼저 분석 요청이 없는 새 페이지 생성
         import uuid
         import hashlib
@@ -383,7 +383,7 @@ class TestUniversalCrawlAPI:
 
         # 다른 fixture를 통해 생성된 페이지 사용 가능하지만,
         # 분석 요청이 없는 상태를 테스트해야 하므로 별도 조회
-        response = client.get(f"/api/v1/crawl/pages/{sample_crawled_page.id}/analysis")
+        response = client.get(f"/api/v2/crawl/pages/{sample_crawled_page.id}/analysis")
 
         # 분석 요청이 없으면 not_requested
         assert response.status_code == 200
@@ -391,26 +391,26 @@ class TestUniversalCrawlAPI:
         assert data["status"] in ["not_requested", "pending", "completed"]
 
     def test_list_requests_with_filters(self, client, sample_crawl_request):
-        """GET /api/v1/crawl/requests - 필터 파라미터 테스트"""
+        """GET /api/v2/crawl/universal-requests - 필터 파라미터 테스트"""
         # 상태 필터
-        response = client.get("/api/v1/crawl/requests?status=pending")
+        response = client.get("/api/v2/crawl/universal-requests?status=pending")
         assert response.status_code == 200
 
         # URL 타입 필터
-        response = client.get("/api/v1/crawl/requests?url_type=google_form")
+        response = client.get("/api/v2/crawl/universal-requests?url_type=google_form")
         assert response.status_code == 200
 
         # 분석 상태 필터
-        response = client.get("/api/v1/crawl/requests?analysis_status=unanalyzed")
+        response = client.get("/api/v2/crawl/universal-requests?analysis_status=unanalyzed")
         assert response.status_code == 200
 
         # 정렬
-        response = client.get("/api/v1/crawl/requests?sort_by=requested_at&sort_order=desc")
+        response = client.get("/api/v2/crawl/universal-requests?sort_by=requested_at&sort_order=desc")
         assert response.status_code == 200
 
     def test_list_requests_url_search(self, client, sample_crawl_request):
-        """GET /api/v1/crawl/requests - URL 검색"""
-        response = client.get("/api/v1/crawl/requests?url_search=google")
+        """GET /api/v2/crawl/universal-requests - URL 검색"""
+        response = client.get("/api/v2/crawl/universal-requests?url_search=google")
         assert response.status_code == 200
 
 

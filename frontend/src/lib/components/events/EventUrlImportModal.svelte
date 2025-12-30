@@ -69,7 +69,7 @@
 		error = null;
 
 		try {
-			const response = await crawlApi.createRequest({
+			const response = await crawlApi.createUrlRequest({
 				url: url.trim(),
 				auto_analyze: true,
 				priority: 0
