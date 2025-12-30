@@ -43,7 +43,8 @@
 					prizes: editingEvent.prizes || [],
 					winner_count: editingEvent.winner_count,
 					purchase_required: editingEvent.purchase_required,
-					user_note: editingEvent.user_note || ''
+					user_note: editingEvent.user_note || '',
+					body_text: editingEvent.body_text || ''
 				};
 				prizesText = prizesToText(editingEvent.prizes);
 			} else if (importedData) {
@@ -64,7 +65,8 @@
 					purchase_required: importedData.purchase_required,
 					source_type: importedData.source_type,
 					source_url: importedData.source_url,
-					input_source: importedData.input_source
+					input_source: importedData.input_source,
+					body_text: importedData.body_text || ''
 				};
 				prizesText = prizesToText(importedData.prizes);
 			} else {
@@ -109,7 +111,8 @@
 				location_venue: eventForm.location_venue || null,
 				location_address: eventForm.location_address || null,
 				user_note: eventForm.user_note || null,
-				purchase_required: eventForm.purchase_required || null
+				purchase_required: eventForm.purchase_required || null,
+				body_text: eventForm.body_text || null
 			};
 			await onSave(formData, !!editingEvent);
 			onClose();
@@ -372,6 +375,25 @@
 							class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 						></textarea>
 					</div>
+
+					<!-- 원본 본문 (접이식) -->
+					{#if eventForm.body_text}
+						<details class="border border-gray-200 rounded-lg">
+							<summary class="px-3 py-2 text-sm font-medium text-gray-700 cursor-pointer hover:bg-gray-50">
+								원본 본문 (펼쳐서 보기)
+							</summary>
+							<div class="p-3 pt-0">
+								<textarea
+									id="event-body-text"
+									bind:value={eventForm.body_text}
+									placeholder="Instagram 캡션, 웹페이지 본문 등..."
+									rows="6"
+									class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-xs"
+								></textarea>
+								<p class="mt-1 text-xs text-gray-500">검색에 포함되는 원본 텍스트 (Instagram 캡션, 웹페이지 본문 등)</p>
+							</div>
+						</details>
+					{/if}
 
 					<!-- 메모 -->
 					<div>

@@ -32,6 +32,7 @@ class Event(Base):
     # 이벤트 상세
     organizer = Column(String)  # 주최사/브랜드
     summary = Column(Text)  # 이벤트 요약
+    body_text = Column(Text)  # 원본 본문 (Instagram caption, 웹페이지 본문 등)
     prizes = Column(JSON, default=list)  # ["경품1", "경품2"]
     winner_count = Column(Integer)
     purchase_required = Column(String)  # yes_all/yes_partial/no
