@@ -38,7 +38,7 @@ class InstagramPost(Base):
 
     # 수집 정보
     service_account_id = Column(Integer, ForeignKey("service_accounts.id", ondelete="SET NULL"))
-    crawl_run_id = Column(Integer, ForeignKey("instagram_crawl_runs.id", ondelete="SET NULL"))
+    crawl_run_id = Column(Integer)  # 레거시 - instagram_crawl_runs FK 제거됨
     collected_at = Column(DateTime, default=datetime.now, index=True)
 
     # 활성화 상태

@@ -2,7 +2,8 @@
 
 from datetime import datetime
 from typing import Optional, List
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -114,9 +115,6 @@ class ScheduleResponse(BaseModel):
         from_attributes = True
 
 
-from pydantic import BaseModel
-
-
 @router.get("/schedules")
 async def get_schedules(
     db: Session = Depends(get_db),
@@ -148,7 +146,6 @@ async def toggle_schedule(
     service = CrawlScheduleService(db)
     schedule = service.toggle_schedule(schedule_id, enabled)
     if not schedule:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Schedule not found")
     return {"success": True, "enabled": schedule.enabled}
 
@@ -162,8 +159,6 @@ async def trigger_schedule_run(
 
     스케줄에 대응하는 크롤링 요청을 즉시 생성합니다.
     """
-    from fastapi import HTTPException
-
     schedule = db.query(CrawlSchedule).filter(CrawlSchedule.id == schedule_id).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")

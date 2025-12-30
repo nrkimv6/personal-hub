@@ -106,26 +106,26 @@ class CrawlService:
                     options = CrawlOptions(
                         max_posts=config.get("max_posts", 20),
                         scroll_count=config.get("scroll_count", 3),
-                        duplicate_stop_count=config.get("duplicate_stop_count", 5),
+                        duplicate_stop_count=config.get("duplicate_stop_count", 50),
                     )
                 else:
-                    options = CrawlOptions(max_posts=20, scroll_count=3, duplicate_stop_count=5)
+                    options = CrawlOptions(max_posts=20, scroll_count=3, duplicate_stop_count=50)
 
             # DB 중복 체크 콜백 설정
             crawler._db_duplicate_checker = lambda post_id: self.post_service.exists_by_post_id(post_id)
 
             # 크롤링 실행 (실시간 저장 콜백 전달)
-            posts = await crawler.crawl_feed(options, on_post_collected=on_post_collected)
+            result = await crawler.crawl_feed(options, on_post_collected=on_post_collected)
 
-            # 실행 기록 업데이트
+            # 실행 기록 업데이트 (CrawlResult에서 stop_reason 추출)
             self._schedule_service.complete_run(
                 crawl_run.id,
                 collected_count=save_stats["total_collected"],
                 saved_count=save_stats["new_saved"],
-                stop_reason=getattr(crawler, '_stop_reason', None)
+                stop_reason=result.stop_reason
             )
 
-            logger.info(f"Crawl completed: {save_stats['total_collected']} collected, {save_stats['new_saved']} new (realtime saved)")
+            logger.info(f"Crawl completed: {save_stats['total_collected']} collected, {save_stats['new_saved']} new, stop_reason={result.stop_reason}")
 
         except (Exception, asyncio.CancelledError) as e:
             # 에러 발생해도 그때까지 저장된 데이터는 보존됨
