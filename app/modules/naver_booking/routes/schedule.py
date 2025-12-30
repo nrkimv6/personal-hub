@@ -316,7 +316,7 @@ def get_schedule(schedule_id: int, db: Session = Depends(get_db)):
     schedule = schedule_service.get_by_id(db, schedule_id)
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
-    return _fill_account_name(schedule)
+    return _fill_service_account_name(schedule)
 
 
 @router.put("/{schedule_id}", response_model=MonitorSchedule)
@@ -327,7 +327,7 @@ def update_schedule(schedule_id: int, data: MonitorScheduleUpdate, db: Session =
         raise HTTPException(status_code=404, detail="Schedule not found")
     # 다시 로드하여 account 정보 포함
     schedule = schedule_service.get_by_id(db, schedule_id)
-    return _fill_account_name(schedule)
+    return _fill_service_account_name(schedule)
 
 
 @router.delete("/{schedule_id}", status_code=204)
@@ -346,7 +346,7 @@ def enable_schedule(schedule_id: int, db: Session = Depends(get_db)):
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
     schedule = schedule_service.get_by_id(db, schedule_id)
-    return _fill_account_name(schedule)
+    return _fill_service_account_name(schedule)
 
 
 @router.post("/{schedule_id}/disable", response_model=MonitorSchedule)
@@ -356,7 +356,7 @@ def disable_schedule(schedule_id: int, db: Session = Depends(get_db)):
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
     schedule = schedule_service.get_by_id(db, schedule_id)
-    return _fill_account_name(schedule)
+    return _fill_service_account_name(schedule)
 
 
 @router.get("/unified")
