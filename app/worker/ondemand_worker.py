@@ -9,6 +9,7 @@
     python -m app.worker.ondemand_worker
 
 주요 기능:
+    - Instagram 피드 크롤링 (수동 요청)
     - Instagram URL 크롤링 (게시물/릴스)
     - Universal URL 크롤링 (다양한 사이트 자동 감지)
     - AI 분석 자동 요청 지원
@@ -145,7 +146,14 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
 
             url_type = request.url_type
 
+            # Instagram 관련 타입 처리
             if url_type == CrawlRequest.URL_TYPE_INSTAGRAM:
+                await self._execute_instagram_crawl(request, db, request_service)
+            elif url_type == "instagram_feed":
+                # 수동 피드 크롤링 요청
+                await self._execute_instagram_feed_crawl(request, db, request_service)
+            elif url_type in ("instagram_post", "instagram_account", "instagram_hashtag", "instagram_reels"):
+                # Instagram URL 크롤링 (게시물/계정/해시태그/릴스)
                 await self._execute_instagram_crawl(request, db, request_service)
             else:
                 # 기타 URL은 범용 추출기 사용
@@ -271,6 +279,153 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
         )
 
         return result
+
+    # ========== Instagram 피드 크롤링 ==========
+
+    def _extract_account_id_from_url(self, url: str) -> Optional[int]:
+        """URL에서 account_id 추출.
+
+        instagram://feed?account_id=6 형식에서 account_id 추출
+        """
+        if url and url.startswith("instagram://feed?account_id="):
+            try:
+                return int(url.split("=")[1])
+            except (ValueError, IndexError):
+                return None
+        return None
+
+    async def _execute_instagram_feed_crawl(
+        self,
+        request: CrawlRequest,
+        db,
+        request_service: CrawlRequestService,
+    ):
+        """Instagram 피드 크롤링 실행 (수동 요청).
+
+        instagram://feed?account_id=X 형식의 요청을 처리합니다.
+        """
+        max_retries = 3
+        retry_count = 0
+
+        # URL에서 account_id 추출
+        service_account_id = self._extract_account_id_from_url(request.url)
+        if not service_account_id:
+            request_service.fail_request(request.id, "URL에서 account_id를 추출할 수 없음")
+            logger.warning(f"[{self.name}] account_id 추출 실패: url={request.url}")
+            return
+
+        while retry_count <= max_retries:
+            try:
+                # 계정 조회
+                account = db.query(ServiceAccount).filter(
+                    ServiceAccount.id == service_account_id
+                ).first()
+
+                if not account:
+                    request_service.fail_request(request.id, f"계정을 찾을 수 없음: id={service_account_id}")
+                    logger.warning(f"[{self.name}] 계정 없음: service_account_id={service_account_id}")
+                    return
+
+                self._update_worker_state("crawling", account.identifier)
+
+                # BrowserManager를 통한 탭 획득 및 크롤링 실행
+                result = await self.execute_with_tab(
+                    callback=self._instagram_feed_crawl_with_tab,
+                    service_account_id=account.id,
+                    request=request,
+                    account=account,
+                    db=db,
+                    request_service=request_service,
+                )
+
+                if result.get("success"):
+                    crawl_run_id = result.get("crawl_run_id")
+                    request_service.complete_request(
+                        request.id,
+                        result_type="crawl_schedule_run",
+                        result_id=crawl_run_id or 0
+                    )
+                    logger.info(
+                        f"[{self.name}] Instagram 피드 크롤링 완료: request_id={request.id}, "
+                        f"crawl_run_id={crawl_run_id}, collected={result.get('total_collected', 0)}, "
+                        f"new={result.get('new_saved', 0)}"
+                    )
+                else:
+                    request_service.fail_request(request.id, result.get("message", "피드 크롤링 실패"))
+                    logger.warning(f"[{self.name}] Instagram 피드 크롤링 실패: {result.get('message')}")
+
+                return
+
+            except Exception as e:
+                if self.is_browser_closed_error(e) and retry_count < max_retries:
+                    retry_count += 1
+                    logger.warning(
+                        f"[{self.name}] 브라우저 closed 에러 감지, 재시도 ({retry_count}/{max_retries}): {e}"
+                    )
+                    if self.browser and self.browser.is_initialized:
+                        await self.browser.cleanup()
+                        self._browser_initialized = False
+                    continue
+
+                request_service.fail_request(request.id, str(e))
+                logger.error(f"[{self.name}] Instagram 피드 크롤링 예외: {e}", exc_info=True)
+                return
+
+            finally:
+                self._update_worker_state("idle")
+
+    async def _instagram_feed_crawl_with_tab(
+        self,
+        tab: "Page",
+        request: CrawlRequest,
+        account: ServiceAccount,
+        db,
+        request_service: CrawlRequestService,
+    ) -> dict:
+        """탭을 사용하여 Instagram 피드 크롤링을 수행합니다."""
+        logger.info(f"[{self.name}] Instagram 피드 페이지로 이동 중...")
+        await tab.goto("https://www.instagram.com/", wait_until="domcontentloaded")
+        await tab.wait_for_timeout(2000)
+        logger.info(f"[{self.name}] Instagram 페이지 로드 완료: {tab.url}")
+
+        # 로그인 상태 확인
+        is_logged_in = await self._check_instagram_login(tab)
+        if not is_logged_in:
+            account.is_logged_in = False
+            db.commit()
+            return {"success": False, "message": "Instagram 로그인 필요"}
+        else:
+            account.is_logged_in = True
+            db.commit()
+
+        # 피드 크롤링 실행
+        crawl_service = CrawlService(db)
+        crawler = InstagramCrawler(tab)
+        logger.info(f"[{self.name}] InstagramCrawler 생성 완료, 피드 크롤링 시작...")
+
+        # run_crawl은 CrawlScheduleRun을 생성하고 피드 크롤링 수행
+        crawl_run = await crawl_service.run_crawl(
+            crawler=crawler,
+            service_account_id=account.id,
+        )
+
+        logger.info(
+            f"[{self.name}] 피드 크롤링 완료: success={crawl_run.success}, "
+            f"collected={crawl_run.total_collected}, new={crawl_run.new_saved}"
+        )
+
+        if crawl_run.success:
+            return {
+                "success": True,
+                "crawl_run_id": crawl_run.run_id,
+                "total_collected": crawl_run.total_collected,
+                "new_saved": crawl_run.new_saved,
+            }
+        else:
+            return {
+                "success": False,
+                "message": crawl_run.error_message or "피드 크롤링 실패",
+            }
 
     # ========== Universal 크롤링 ==========
 
