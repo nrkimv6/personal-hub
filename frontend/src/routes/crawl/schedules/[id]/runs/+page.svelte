@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { crawlApiV2 } from '$lib/api';
+	import { crawlApi } from '$lib/api';
 	import type { CrawlSchedule, CrawlScheduleRun, CrawlRunStats } from '$lib/types';
 
 	let schedule: CrawlSchedule | null = null;
@@ -23,7 +23,7 @@
 
 	async function fetchSchedule() {
 		try {
-			schedule = await crawlApiV2.getSchedule(scheduleId);
+			schedule = await crawlApi.getSchedule(scheduleId);
 		} catch (e) {
 			console.error('Schedule fetch error:', e);
 		}
@@ -32,7 +32,7 @@
 	async function fetchRuns() {
 		try {
 			loading = true;
-			const response = await crawlApiV2.getScheduleRuns(scheduleId, {
+			const response = await crawlApi.getScheduleRuns(scheduleId, {
 				page: currentPage,
 				limit,
 				status: status || undefined
@@ -49,7 +49,7 @@
 
 	async function fetchStats() {
 		try {
-			stats = await crawlApiV2.getScheduleStats(scheduleId, 7);
+			stats = await crawlApi.getScheduleStats(scheduleId, 7);
 		} catch (e) {
 			console.error('Stats fetch error:', e);
 		}
