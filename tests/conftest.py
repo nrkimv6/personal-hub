@@ -153,3 +153,83 @@ def mock_external_request():
     with patch('app.core.auth.is_localhost_request', return_value=False), \
          patch('app.routes.auth.is_localhost_request', return_value=False):
         yield
+
+
+# ============================================================
+# 서비스 레이어 테스트용 Mock 픽스처
+# ============================================================
+
+@pytest.fixture
+def mock_playwright_page():
+    """Mock Playwright Page 객체"""
+    from unittest.mock import AsyncMock, MagicMock
+
+    page = AsyncMock()
+    page.goto = AsyncMock()
+    page.click = AsyncMock()
+    page.fill = AsyncMock()
+    page.wait_for_selector = AsyncMock()
+    page.wait_for_load_state = AsyncMock()
+    page.content = AsyncMock(return_value="<html></html>")
+    page.url = "https://example.com"
+    page.is_closed = MagicMock(return_value=False)
+
+    # locator 체이닝 지원
+    locator = AsyncMock()
+    locator.click = AsyncMock()
+    locator.fill = AsyncMock()
+    locator.inner_text = AsyncMock(return_value="텍스트")
+    locator.text_content = AsyncMock(return_value="텍스트")
+    locator.is_visible = AsyncMock(return_value=True)
+    locator.count = AsyncMock(return_value=1)
+    page.locator = MagicMock(return_value=locator)
+    page.query_selector = AsyncMock(return_value=locator)
+    page.query_selector_all = AsyncMock(return_value=[locator])
+
+    return page
+
+
+@pytest.fixture
+def mock_playwright_browser():
+    """Mock Playwright Browser 객체"""
+    from unittest.mock import AsyncMock, MagicMock
+
+    browser = AsyncMock()
+    browser.is_connected = MagicMock(return_value=True)
+    browser.close = AsyncMock()
+
+    # Context 생성 Mock
+    context = AsyncMock()
+    context.new_page = AsyncMock()
+    context.close = AsyncMock()
+    browser.new_context = AsyncMock(return_value=context)
+
+    return browser
+
+
+@pytest.fixture
+def mock_aiohttp_session():
+    """Mock aiohttp ClientSession"""
+    from unittest.mock import AsyncMock, MagicMock
+
+    response = AsyncMock()
+    response.status = 200
+    response.text = AsyncMock(return_value='{"ok": true}')
+    response.json = AsyncMock(return_value={"ok": True})
+
+    session = MagicMock()
+    session.post = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=response)))
+    session.get = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=response)))
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=None)
+
+    return session
+
+
+@pytest.fixture
+def mock_telegram_settings():
+    """텔레그램 설정 Mock"""
+    return {
+        "bot_token": "test_bot_token",
+        "chat_id": "test_chat_id"
+    }
