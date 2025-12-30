@@ -137,49 +137,62 @@ class TestCrawlRequestModel:
         """요청 상태 전이"""
         request = sample_crawl_request
 
-        # pending -> processing
-        request.status = "processing"
-        request.started_at = datetime.now()
+        # pending -> picked
+        request.mark_picked("test_worker")
+        test_db_session.commit()
+        assert request.status == "picked"
+        assert request.picked_at is not None
+
+        # picked -> processing
+        request.mark_processing()
         test_db_session.commit()
         assert request.status == "processing"
 
         # processing -> completed
-        request.status = "completed"
-        request.completed_at = datetime.now()
+        request.mark_completed(result_type="crawled_page", result_id=1)
         test_db_session.commit()
         assert request.status == "completed"
+        assert request.processed_at is not None
 
-    def test_request_with_account_id(self, test_db_session):
-        """account_id가 있는 요청 (브라우저 프로필 필요)"""
+    def test_request_mark_failed(self, test_db_session):
+        """요청 실패 상태 전이"""
         import uuid
         unique_id = uuid.uuid4().hex[:8]
         request = CrawlRequest(
             url=f"https://www.google.com/search?q=test_{unique_id}",
             url_type="generic",
-            service_account_id=1,  # 로그인 필요한 경우
             status="pending",
         )
         test_db_session.add(request)
         test_db_session.commit()
 
-        saved = test_db_session.query(CrawlRequest).filter_by(id=request.id).first()
-        assert saved.service_account_id == 1
+        request.mark_failed("테스트 에러")
+        test_db_session.commit()
 
-    def test_request_without_account_id(self, test_db_session):
-        """service_account_id 없는 요청 (HTTP 전용 또는 기본 프로필)"""
+        saved = test_db_session.query(CrawlRequest).filter_by(id=request.id).first()
+        assert saved.status == "failed"
+        assert saved.error_message == "테스트 에러"
+
+    def test_request_result_types(self, test_db_session):
+        """요청 결과 타입별 처리"""
         import uuid
         unique_id = uuid.uuid4().hex[:8]
         request = CrawlRequest(
             url=f"https://forms.gle/simple_{unique_id}",
             url_type="google_form",
-            service_account_id=None,  # 브라우저 불필요
             status="pending",
         )
         test_db_session.add(request)
         test_db_session.commit()
 
+        # crawled_page 결과
+        request.mark_completed(result_type="crawled_page", result_id=123)
+        test_db_session.commit()
+
         saved = test_db_session.query(CrawlRequest).filter_by(id=request.id).first()
-        assert saved.service_account_id is None
+        assert saved.result_type == "crawled_page"
+        assert saved.result_id == 123
+        assert saved.crawled_page_id == 123  # 프로퍼티 테스트
 
 
 class TestCrawlRequestRelationship:
@@ -190,17 +203,23 @@ class TestCrawlRequestRelationship:
         request = CrawlRequest(
             url=sample_crawled_page.url,
             url_type=sample_crawled_page.url_type,
-            status="completed",
-            crawled_page_id=sample_crawled_page.id,
+            status="pending",
         )
         test_db_session.add(request)
         test_db_session.commit()
 
+        # 완료 처리 시 결과 연결
+        request.mark_completed(
+            result_type="crawled_page",
+            result_id=sample_crawled_page.id
+        )
+        test_db_session.commit()
+
         # 관계 확인
         saved = test_db_session.query(CrawlRequest).filter_by(id=request.id).first()
-        assert saved.crawled_page_id == sample_crawled_page.id
-        assert saved.crawled_page is not None
-        assert saved.crawled_page.title == "테스트 구글폼"
+        assert saved.result_type == "crawled_page"
+        assert saved.result_id == sample_crawled_page.id
+        assert saved.crawled_page_id == sample_crawled_page.id  # 프로퍼티 확인
 
 
 class TestUniversalCrawlService:
@@ -278,7 +297,6 @@ class TestUniversalCrawlService:
         # pending -> processing
         updated = universal_crawl_service.mark_processing(test_db_session, request_id)
         assert updated.status == "processing"
-        assert updated.started_at is not None
 
     def test_retry_request(self, test_db_session):
         """실패한 요청 재시도"""
