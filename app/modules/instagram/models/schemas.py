@@ -85,7 +85,7 @@ class CrawlResponse(BaseModel):
 class CrawlRunSchema(BaseModel):
     """크롤링 실행 기록."""
     id: int
-    service_account_id: int
+    service_account_id: Optional[int] = None
     started_at: datetime
     finished_at: Optional[datetime] = None
     success: bool
@@ -203,7 +203,7 @@ class StatsSchema(BaseModel):
 class CrawlRequestSchema(BaseModel):
     """크롤링 요청 스키마."""
     id: int
-    service_account_id: int
+    service_account_id: Optional[int] = None
     requested_at: datetime
     requested_by: str = "manual"
     request_type: str = "feed"  # 'feed' | 'single_post' | 'single_post_url'
@@ -500,7 +500,7 @@ class CrawlHistoryItem(BaseModel):
     CrawlRequest 정보와 연결된 CrawlRun 요약을 포함.
     """
     id: int
-    service_account_id: int
+    service_account_id: Optional[int] = None
     requested_at: datetime
     requested_by: str  # 'manual', 'scheduler', 'retry'
     request_type: str  # 'feed', 'single_post', 'single_post_url'
