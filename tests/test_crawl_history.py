@@ -75,8 +75,11 @@ class TestGetRequestsPaginatedRight:
         """튜플 (requests, total) 반환"""
         from app.modules.instagram.services.request_service import CrawlRequestService
 
-        mock_db.query.return_value.count.return_value = 0
-        mock_db.query.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = []
+        # 서비스는 query().filter().count()와 query().filter().order_by().offset().limit().all() 호출
+        mock_query = mock_db.query.return_value
+        mock_filter = mock_query.filter.return_value
+        mock_filter.count.return_value = 0
+        mock_filter.order_by.return_value.offset.return_value.limit.return_value.all.return_value = []
 
         service = CrawlRequestService(mock_db)
         result = service.get_requests_paginated()
@@ -88,8 +91,10 @@ class TestGetRequestsPaginatedRight:
         """전체 개수 올바르게 반환"""
         from app.modules.instagram.services.request_service import CrawlRequestService
 
-        mock_db.query.return_value.count.return_value = 100
-        mock_db.query.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = sample_crawl_requests
+        mock_query = mock_db.query.return_value
+        mock_filter = mock_query.filter.return_value
+        mock_filter.count.return_value = 100
+        mock_filter.order_by.return_value.offset.return_value.limit.return_value.all.return_value = sample_crawl_requests
 
         service = CrawlRequestService(mock_db)
         requests, total = service.get_requests_paginated()
@@ -100,14 +105,16 @@ class TestGetRequestsPaginatedRight:
         """페이징 적용 확인"""
         from app.modules.instagram.services.request_service import CrawlRequestService
 
-        mock_db.query.return_value.count.return_value = 100
-        mock_db.query.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = []
+        mock_query = mock_db.query.return_value
+        mock_filter = mock_query.filter.return_value
+        mock_filter.count.return_value = 100
+        mock_filter.order_by.return_value.offset.return_value.limit.return_value.all.return_value = []
 
         service = CrawlRequestService(mock_db)
         service.get_requests_paginated(page=3, limit=10)
 
         # offset = (3-1) * 10 = 20
-        mock_db.query.return_value.order_by.return_value.offset.assert_called_once()
+        mock_filter.order_by.return_value.offset.assert_called_once()
 
 
 # ============================================================
@@ -121,22 +128,26 @@ class TestGetRequestsPaginatedBoundary:
         """page=1일 때 offset=0"""
         from app.modules.instagram.services.request_service import CrawlRequestService
 
-        mock_db.query.return_value.count.return_value = 0
-        mock_db.query.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = []
+        mock_query = mock_db.query.return_value
+        mock_filter = mock_query.filter.return_value
+        mock_filter.count.return_value = 0
+        mock_filter.order_by.return_value.offset.return_value.limit.return_value.all.return_value = []
 
         service = CrawlRequestService(mock_db)
         service.get_requests_paginated(page=1, limit=20)
 
         # page=1이면 offset=0
-        call_args = mock_db.query.return_value.order_by.return_value.offset.call_args[0][0]
+        call_args = mock_filter.order_by.return_value.offset.call_args[0][0]
         assert call_args == 0
 
     def test_empty_result(self, mock_db):
         """빈 결과"""
         from app.modules.instagram.services.request_service import CrawlRequestService
 
-        mock_db.query.return_value.count.return_value = 0
-        mock_db.query.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = []
+        mock_query = mock_db.query.return_value
+        mock_filter = mock_query.filter.return_value
+        mock_filter.count.return_value = 0
+        mock_filter.order_by.return_value.offset.return_value.limit.return_value.all.return_value = []
 
         service = CrawlRequestService(mock_db)
         requests, total = service.get_requests_paginated()
@@ -386,14 +397,16 @@ class TestCrawlHistoryOrdering:
         """requested_at 내림차순 정렬"""
         from app.modules.instagram.services.request_service import CrawlRequestService
 
-        mock_db.query.return_value.count.return_value = 0
-        mock_db.query.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = []
+        mock_query = mock_db.query.return_value
+        mock_filter = mock_query.filter.return_value
+        mock_filter.count.return_value = 0
+        mock_filter.order_by.return_value.offset.return_value.limit.return_value.all.return_value = []
 
         service = CrawlRequestService(mock_db)
         service.get_requests_paginated()
 
         # order_by가 호출됨
-        mock_db.query.return_value.order_by.assert_called()
+        mock_filter.order_by.assert_called()
 
 
 # ============================================================
@@ -452,7 +465,7 @@ class TestGetRequestWithRun:
         """요청이 없으면 None 반환"""
         from app.modules.instagram.services.request_service import CrawlRequestService
 
-        mock_db.query.return_value.get.return_value = None
+        mock_db.query.return_value.filter.return_value.first.return_value = None
 
         service = CrawlRequestService(mock_db)
         result = service.get_request_with_run(999)
@@ -464,8 +477,9 @@ class TestGetRequestWithRun:
         from app.modules.instagram.services.request_service import CrawlRequestService
 
         mock_request = MagicMock()
-        mock_request.crawl_run_id = None
-        mock_db.query.return_value.get.return_value = mock_request
+        mock_request.result_id = None
+        mock_request.result_type = None
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_request
 
         service = CrawlRequestService(mock_db)
         result = service.get_request_with_run(1)
@@ -479,25 +493,25 @@ class TestGetRequestWithRun:
         from app.modules.instagram.services.request_service import CrawlRequestService
 
         mock_request = MagicMock()
-        mock_request.crawl_run_id = 100
+        mock_request.result_id = 100
+        mock_request.result_type = "crawl_schedule_run"
 
         mock_run = MagicMock()
         mock_run.id = 100
-        mock_run.total_collected = 25
-        mock_run.new_saved = 10
+        mock_run.collected_count = 25
+        mock_run.saved_count = 10
         mock_run.started_at = datetime.now() - timedelta(minutes=5)
         mock_run.finished_at = datetime.now()
         mock_run.stop_reason = "completed"
 
-        def get_side_effect(id):
-            if isinstance(id, int):
-                if id == 1:
-                    return mock_request
-                elif id == 100:
-                    return mock_run
-            return None
+        # duration_seconds 프로퍼티 추가
+        mock_run.duration_seconds = 300
 
-        mock_db.query.return_value.get.side_effect = get_side_effect
+        # 첫 번째 filter().first()는 request 반환
+        # 두 번째 filter().first()는 run 반환
+        mock_filter = MagicMock()
+        mock_filter.first.side_effect = [mock_request, mock_run]
+        mock_db.query.return_value.filter.return_value = mock_filter
 
         service = CrawlRequestService(mock_db)
         result = service.get_request_with_run(1)

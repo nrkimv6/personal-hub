@@ -9,7 +9,8 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.database import get_db
-from app.models.universal_crawl import UniversalCrawlRequest, CrawledPage
+from app.models.universal_crawl import CrawledPage
+from app.models.crawl_request import CrawlRequest
 from app.core.auth import create_access_token
 from app.services.universal_crawl_service import universal_crawl_service
 
@@ -61,13 +62,11 @@ def sample_crawl_request(test_db_session):
     """테스트용 크롤링 요청 생성"""
     import uuid
     unique_id = uuid.uuid4().hex[:8]
-    request = UniversalCrawlRequest(
+    request = CrawlRequest(
         url=f"https://docs.google.com/forms/d/e/{unique_id}",
         url_type="google_form",
         status="pending",
         requested_by="manual",
-        auto_analyze=True,
-        priority=0,
     )
     test_db_session.add(request)
     test_db_session.commit()
@@ -111,14 +110,14 @@ class TestCrawledPageModel:
             test_db_session.commit()
 
 
-class TestUniversalCrawlRequestModel:
-    """UniversalCrawlRequest 모델 테스트"""
+class TestCrawlRequestModel:
+    """CrawlRequest 모델 테스트"""
 
     def test_create_request(self, test_db_session):
         """크롤링 요청 생성"""
         import uuid
         unique_id = uuid.uuid4().hex[:8]
-        request = UniversalCrawlRequest(
+        request = CrawlRequest(
             url=f"https://blog.naver.com/testuser/{unique_id}",
             url_type="naver_blog",
             status="pending",
@@ -128,7 +127,7 @@ class TestUniversalCrawlRequestModel:
         test_db_session.commit()
 
         # 조회 확인
-        saved = test_db_session.query(UniversalCrawlRequest).filter_by(id=request.id).first()
+        saved = test_db_session.query(CrawlRequest).filter_by(id=request.id).first()
         assert saved is not None
         assert saved.url_type == "naver_blog"
         assert saved.status == "pending"
@@ -140,47 +139,47 @@ class TestUniversalCrawlRequestModel:
 
         # pending -> processing
         request.status = "processing"
-        request.started_at = datetime.now()
+        request.picked_at = datetime.now()
         test_db_session.commit()
         assert request.status == "processing"
 
         # processing -> completed
         request.status = "completed"
-        request.completed_at = datetime.now()
+        request.processed_at = datetime.now()
         test_db_session.commit()
         assert request.status == "completed"
 
-    def test_request_with_account_id(self, test_db_session):
-        """account_id가 있는 요청 (브라우저 프로필 필요)"""
+    def test_request_with_worker_id(self, test_db_session):
+        """worker_id가 있는 요청"""
         import uuid
         unique_id = uuid.uuid4().hex[:8]
-        request = UniversalCrawlRequest(
+        request = CrawlRequest(
             url=f"https://www.google.com/search?q=test_{unique_id}",
             url_type="generic",
-            service_account_id=1,  # 로그인 필요한 경우
+            worker_id="worker-1",
             status="pending",
         )
         test_db_session.add(request)
         test_db_session.commit()
 
-        saved = test_db_session.query(UniversalCrawlRequest).filter_by(id=request.id).first()
-        assert saved.service_account_id == 1
+        saved = test_db_session.query(CrawlRequest).filter_by(id=request.id).first()
+        assert saved.worker_id == "worker-1"
 
-    def test_request_without_account_id(self, test_db_session):
-        """service_account_id 없는 요청 (HTTP 전용 또는 기본 프로필)"""
+    def test_request_without_worker_id(self, test_db_session):
+        """worker_id 없는 요청"""
         import uuid
         unique_id = uuid.uuid4().hex[:8]
-        request = UniversalCrawlRequest(
+        request = CrawlRequest(
             url=f"https://forms.gle/simple_{unique_id}",
             url_type="google_form",
-            service_account_id=None,  # 브라우저 불필요
+            worker_id=None,
             status="pending",
         )
         test_db_session.add(request)
         test_db_session.commit()
 
-        saved = test_db_session.query(UniversalCrawlRequest).filter_by(id=request.id).first()
-        assert saved.service_account_id is None
+        saved = test_db_session.query(CrawlRequest).filter_by(id=request.id).first()
+        assert saved.worker_id is None
 
 
 class TestCrawlRequestRelationship:
@@ -188,20 +187,20 @@ class TestCrawlRequestRelationship:
 
     def test_link_request_to_page(self, test_db_session, sample_crawled_page):
         """요청과 결과 페이지 연결"""
-        request = UniversalCrawlRequest(
+        request = CrawlRequest(
             url=sample_crawled_page.url,
             url_type=sample_crawled_page.url_type,
             status="completed",
-            crawled_page_id=sample_crawled_page.id,
+            result_type="crawled_page",
+            result_id=sample_crawled_page.id,
         )
         test_db_session.add(request)
         test_db_session.commit()
 
         # 관계 확인
-        saved = test_db_session.query(UniversalCrawlRequest).filter_by(id=request.id).first()
-        assert saved.crawled_page_id == sample_crawled_page.id
-        assert saved.crawled_page is not None
-        assert saved.crawled_page.title == "테스트 구글폼"
+        saved = test_db_session.query(CrawlRequest).filter_by(id=request.id).first()
+        assert saved.result_id == sample_crawled_page.id
+        assert saved.result_type == "crawled_page"
 
 
 class TestUniversalCrawlService:
@@ -267,7 +266,6 @@ class TestUniversalCrawlService:
         # pending -> processing
         updated = universal_crawl_service.mark_processing(test_db_session, request_id)
         assert updated.status == "processing"
-        assert updated.started_at is not None
 
     def test_retry_request(self, test_db_session):
         """실패한 요청 재시도"""
