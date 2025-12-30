@@ -59,7 +59,7 @@
 
 		submitting = true;
 		try {
-			const response = await crawlApi.createRequest({
+			const response = await crawlApi.createUrlRequest({
 				url: newUrl.trim(),
 				auto_analyze: true,
 				priority: 0
@@ -85,7 +85,7 @@
 
 	async function handleRetry(requestId: number) {
 		try {
-			await crawlApi.retryRequest(requestId);
+			await crawlApi.retryUniversalRequest(requestId);
 			toast.success('재시도 요청 완료');
 			await fetchRequests();
 		} catch (e) {

@@ -99,7 +99,7 @@
 
 		submitting = true;
 		try {
-			const response = await crawlApi.createRequest({
+			const response = await crawlApi.createUrlRequest({
 				url: sharedUrl,
 				auto_analyze: true,
 				priority: 0
