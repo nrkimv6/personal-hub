@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { crawlApi } from '$lib/api';
+	import { crawlApiV2 } from '$lib/api';
 	import type { CrawlRequest, CrawlRequestPaginated } from '$lib/types';
 
 	let requests: CrawlRequest[] = [];
@@ -21,7 +21,7 @@
 	async function fetchRequests() {
 		try {
 			loading = true;
-			const response = await crawlApi.getRequests({
+			const response = await crawlApiV2.getRequests({
 				page,
 				limit,
 				url_type: urlType || undefined,
@@ -44,7 +44,7 @@
 
 	async function handleRetry(requestId: number) {
 		try {
-			await crawlApi.retryRequest(requestId);
+			await crawlApiV2.retryRequest(requestId);
 			fetchRequests();
 		} catch (e) {
 			error = e instanceof Error ? e.message : '재시도 실패';
