@@ -1,7 +1,7 @@
 # Core module - 핵심 인프라
 from app.core.config import settings, logger, setup_logging, Settings
 from app.core.database import get_db, SessionLocal, Base, engine, init_extra_tables
-from app.core.dependencies import get_notification_service, get_db_session, get_browser_service
+from app.core.dependencies import get_notification_service, get_db_session
 from app.core.exceptions import (
     AppException,
     NotFoundError,
@@ -26,7 +26,6 @@ __all__ = [
     # dependencies
     "get_notification_service",
     "get_db_session",
-    "get_browser_service",
     # exceptions
     "AppException",
     "NotFoundError",
