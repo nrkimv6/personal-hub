@@ -180,7 +180,7 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
             try:
                 # Instagram 계정 조회 (첫 번째 활성 계정 사용)
                 account = db.query(ServiceAccount).filter(
-                    ServiceAccount.service == "instagram",
+                    ServiceAccount.service_type == "instagram",
                     ServiceAccount.is_active == True
                 ).first()
 
