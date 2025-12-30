@@ -91,7 +91,7 @@ SERVICE_CONFIG = {
     "api_dev": {"pid_file": "api_dev.pid", "port": 8001, "expected_process": "python"},
     "frontend": {"pid_file": "frontend.pid", "port": 5173, "expected_process": "node"},
     "frontend_dev": {"pid_file": "frontend_dev.pid", "port": 5174, "expected_process": "node"},
-    "worker": {"pid_file": "unified_worker.pid", "port": None, "expected_process": "python"},
+    # worker는 개발 모드에서만 실행됨 (운영 모드는 워커 비활성화)
     "worker_dev": {"pid_file": "unified_worker_dev.pid", "port": None, "expected_process": "python"},
     "cloudflared": {"process_name": "cloudflared", "port": None},  # Windows 서비스로 관리됨
 }
