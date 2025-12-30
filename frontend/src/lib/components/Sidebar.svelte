@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { navGroups, isActive, getActiveGroupId, type NavGroup, type NavItem } from '$lib/navigation';
+	import { navGroups, isActive, getActiveGroupId, type NavGroup } from '$lib/navigation';
 	import { authStore, isAdmin, isLoggedIn, isAuthLoading } from '$lib/stores/auth';
-	import { isDevMode } from '$lib/stores/appMode';
 
 	// Props
 	let {
@@ -40,15 +39,15 @@
 		await authStore.logout();
 	}
 
-	// 앱 모드에 따라 메뉴 필터링
-	// - 개발 모드: 모든 메뉴 표시
-	// - 운영 모드: public 아이템만 표시 (관리자 여부 상관없음)
-	function getVisibleGroups(groups: NavGroup[], devMode: boolean): NavGroup[] {
-		// 개발 모드면 모든 메뉴 표시
-		if (devMode) {
+	// 앱 모드와 관리자 여부에 따라 메뉴 필터링
+	// - 관리자: 모든 메뉴 표시
+	// - 비관리자: public 아이템만 표시 (운영/개발 모드 상관없음)
+	function getVisibleGroups(groups: NavGroup[], admin: boolean): NavGroup[] {
+		// 관리자면 모든 메뉴 표시
+		if (admin) {
 			return groups;
 		}
-		// 운영 모드: public 아이템만 보여줌
+		// 비관리자: public 아이템만 보여줌
 		return groups
 			.map((group) => ({
 				...group,
@@ -62,9 +61,9 @@
 	let visibleGroups = $state<NavGroup[]>(getVisibleGroups(navGroups, false));
 
 	$effect(() => {
-		const devMode = $isDevMode;
-		console.log('[Sidebar] Mode check:', { devMode, willShowAll: devMode });
-		visibleGroups = getVisibleGroups(navGroups, devMode);
+		const admin = $isAdmin;
+		console.log('[Sidebar] Admin check:', { admin, willShowAll: admin });
+		visibleGroups = getVisibleGroups(navGroups, admin);
 	});
 </script>
 
