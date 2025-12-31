@@ -45,6 +45,7 @@ class CrawlSchedule(Base):
     TARGET_TYPE_INSTAGRAM_FEED = "instagram_feed"
     TARGET_TYPE_NAVER_BLOG = "naver_blog"
     TARGET_TYPE_NAVER_CAFE = "naver_cafe"
+    TARGET_TYPE_WRITING_TASK = "writing_task"
 
     SCHEDULE_TYPE_CRON = "cron"
     SCHEDULE_TYPE_INTERVAL = "interval"
