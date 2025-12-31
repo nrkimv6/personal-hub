@@ -14,6 +14,10 @@ from app.modules.claude_worker.models.llm_request import LLMRequest, LLMWorkerSt
 
 logger = logging.getLogger("claude_worker.llm_service")
 
+# 워커 헬스체크 임계값 (초)
+HEARTBEAT_WARNING_THRESHOLD = 120  # 2분: warning 상태
+HEARTBEAT_UNHEALTHY_THRESHOLD = 600  # 10분: unhealthy 상태
+
 
 class LLMService:
     """범용 LLM 서비스.
@@ -420,19 +424,39 @@ class LLMService:
         )
 
     def check_worker_health(self) -> dict:
-        """워커 건강 상태 확인."""
+        """워커 건강 상태 확인.
+
+        Returns:
+            dict with keys:
+                - status: "healthy" | "warning" | "unhealthy" | "no_worker"
+                - message: 상태 설명
+                - worker_id: 워커 ID (있는 경우)
+                - state: 현재 상태 (healthy/warning인 경우)
+                - processed_count: 처리 건수 (healthy인 경우)
+                - seconds_since_heartbeat: 마지막 heartbeat 이후 경과 시간
+        """
         status = self.get_worker_status()
         if not status:
-            return {"status": "no_worker", "message": "No active worker"}
+            return {"status": "no_worker", "message": "활성 워커 없음"}
 
         now = datetime.now()
         if status.last_heartbeat:
             seconds_since = (now - status.last_heartbeat).total_seconds()
-            if seconds_since > 60:
+
+            if seconds_since > HEARTBEAT_UNHEALTHY_THRESHOLD:
                 return {
                     "status": "unhealthy",
-                    "message": f"Last heartbeat {seconds_since:.0f}s ago",
+                    "message": f"마지막 heartbeat {seconds_since/60:.0f}분 전 - 재시작 필요",
                     "worker_id": status.worker_id,
+                    "seconds_since_heartbeat": int(seconds_since),
+                }
+            elif seconds_since > HEARTBEAT_WARNING_THRESHOLD:
+                return {
+                    "status": "warning",
+                    "message": f"마지막 heartbeat {seconds_since:.0f}초 전 - 지연 발생",
+                    "worker_id": status.worker_id,
+                    "state": status.current_state,
+                    "seconds_since_heartbeat": int(seconds_since),
                 }
 
         return {

@@ -84,11 +84,12 @@ class LLMWorkerStatusSchema(BaseModel):
 
 
 class LLMWorkerHealthSchema(BaseModel):
-    status: str
+    status: str  # healthy | warning | unhealthy | no_worker
     message: Optional[str] = None
     worker_id: Optional[str] = None
     state: Optional[str] = None
     processed_count: Optional[int] = None
+    seconds_since_heartbeat: Optional[int] = None
 
 
 class LLMStatsSchema(BaseModel):

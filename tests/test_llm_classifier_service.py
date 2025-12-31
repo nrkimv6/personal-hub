@@ -11,7 +11,11 @@ from sqlalchemy.orm import sessionmaker
 from app.models.base import Base
 from app.models.instagram_post import InstagramPost
 from app.modules.claude_worker.models.llm_request import LLMRequest, LLMWorkerStatus
-from app.modules.claude_worker.services.llm_service import LLMService
+from app.modules.claude_worker.services.llm_service import (
+    LLMService,
+    HEARTBEAT_WARNING_THRESHOLD,
+    HEARTBEAT_UNHEALTHY_THRESHOLD,
+)
 from app.modules.instagram.services.llm_classifier_service import (
     LLMClassifierService,
     LLM_TRIGGER_TAGS,
@@ -305,17 +309,116 @@ class TestLLMServiceCheckWorkerHealth:
     """check_worker_health 메서드 테스트."""
 
     def test_right_healthy_worker(self, llm_service, test_session):
-        """정상 워커."""
+        """정상 워커 - heartbeat이 최근인 경우."""
         llm_service.register_worker("worker-123", 12345)
         health = llm_service.check_worker_health()
 
         assert health["status"] == "healthy"
+        assert health["worker_id"] == "worker-123"
+        assert "seconds_since_heartbeat" not in health
 
     def test_right_no_worker(self, llm_service):
         """워커 없음."""
         health = llm_service.check_worker_health()
 
         assert health["status"] == "no_worker"
+        assert "활성 워커 없음" in health["message"]
+
+    def test_right_warning_state(self, llm_service, test_session):
+        """warning 상태 - heartbeat이 2분~10분 전인 경우."""
+        from datetime import timedelta
+
+        llm_service.register_worker("worker-123", 12345)
+
+        # heartbeat을 3분 전으로 설정
+        status = llm_service.get_worker_status()
+        status.last_heartbeat = datetime.now() - timedelta(seconds=180)
+        test_session.commit()
+
+        health = llm_service.check_worker_health()
+
+        assert health["status"] == "warning"
+        assert health["worker_id"] == "worker-123"
+        assert health["seconds_since_heartbeat"] >= 180
+        assert "지연 발생" in health["message"]
+
+    def test_right_unhealthy_state(self, llm_service, test_session):
+        """unhealthy 상태 - heartbeat이 10분 이상 전인 경우."""
+        from datetime import timedelta
+
+        llm_service.register_worker("worker-123", 12345)
+
+        # heartbeat을 15분 전으로 설정
+        status = llm_service.get_worker_status()
+        status.last_heartbeat = datetime.now() - timedelta(seconds=900)
+        test_session.commit()
+
+        health = llm_service.check_worker_health()
+
+        assert health["status"] == "unhealthy"
+        assert health["worker_id"] == "worker-123"
+        assert health["seconds_since_heartbeat"] >= 900
+        assert "재시작 필요" in health["message"]
+
+    def test_boundary_just_under_warning_threshold(self, llm_service, test_session):
+        """경계: warning 임계값 바로 아래 (healthy 유지)."""
+        from datetime import timedelta
+
+        llm_service.register_worker("worker-123", 12345)
+
+        # heartbeat을 임계값보다 10초 적게 설정
+        status = llm_service.get_worker_status()
+        status.last_heartbeat = datetime.now() - timedelta(seconds=HEARTBEAT_WARNING_THRESHOLD - 10)
+        test_session.commit()
+
+        health = llm_service.check_worker_health()
+
+        # 임계값 미만은 healthy
+        assert health["status"] == "healthy"
+
+    def test_boundary_just_over_warning_threshold(self, llm_service, test_session):
+        """경계: warning 임계값 바로 초과."""
+        from datetime import timedelta
+
+        llm_service.register_worker("worker-123", 12345)
+
+        status = llm_service.get_worker_status()
+        status.last_heartbeat = datetime.now() - timedelta(seconds=HEARTBEAT_WARNING_THRESHOLD + 1)
+        test_session.commit()
+
+        health = llm_service.check_worker_health()
+
+        assert health["status"] == "warning"
+
+    def test_boundary_just_under_unhealthy_threshold(self, llm_service, test_session):
+        """경계: unhealthy 임계값 바로 아래 (warning 유지)."""
+        from datetime import timedelta
+
+        llm_service.register_worker("worker-123", 12345)
+
+        # heartbeat을 임계값보다 10초 적게 설정
+        status = llm_service.get_worker_status()
+        status.last_heartbeat = datetime.now() - timedelta(seconds=HEARTBEAT_UNHEALTHY_THRESHOLD - 10)
+        test_session.commit()
+
+        health = llm_service.check_worker_health()
+
+        # 임계값 미만은 warning
+        assert health["status"] == "warning"
+
+    def test_boundary_just_over_unhealthy_threshold(self, llm_service, test_session):
+        """경계: unhealthy 임계값 바로 초과."""
+        from datetime import timedelta
+
+        llm_service.register_worker("worker-123", 12345)
+
+        status = llm_service.get_worker_status()
+        status.last_heartbeat = datetime.now() - timedelta(seconds=HEARTBEAT_UNHEALTHY_THRESHOLD + 1)
+        test_session.commit()
+
+        health = llm_service.check_worker_health()
+
+        assert health["status"] == "unhealthy"
 
 
 class TestLLMServiceGetStats:
