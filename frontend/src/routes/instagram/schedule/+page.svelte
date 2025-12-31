@@ -3,10 +3,10 @@
 	import { goto } from '$app/navigation';
 
 	onMount(() => {
-		goto('/instagram/crawl', { replaceState: true });
+		goto('/collect/schedule', { replaceState: true });
 	});
 </script>
 
 <div class="flex justify-center items-center h-64">
-	<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+	<p class="text-gray-500">스케줄 설정 페이지로 이동 중...</p>
 </div>
