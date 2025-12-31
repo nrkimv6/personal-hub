@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from app.models.writing import WritingSource, GeneratedWriting
 from app.modules.writing.services.writing_service import WritingService
+from app.modules.claude_worker.models.llm_request import LLMRequest
 
 
 @pytest.fixture(autouse=True)
@@ -18,11 +19,17 @@ def cleanup_writing_data(test_db_session):
     # 테스트 전 정리
     test_db_session.query(GeneratedWriting).delete()
     test_db_session.query(WritingSource).delete()
+    test_db_session.query(LLMRequest).filter(
+        LLMRequest.caller_type == "writing"
+    ).delete()
     test_db_session.commit()
     yield
     # 테스트 후 정리
     test_db_session.query(GeneratedWriting).delete()
     test_db_session.query(WritingSource).delete()
+    test_db_session.query(LLMRequest).filter(
+        LLMRequest.caller_type == "writing"
+    ).delete()
     test_db_session.commit()
 
 
@@ -342,3 +349,140 @@ class TestWritingWorker:
         # 빈 문자열이어도 None은 아님
         assert worker.mix_prompt_template is not None
         assert worker.random_prompt_template is not None
+
+    def test_mix_writing_creates_llm_request_on_success(self, test_db_session):
+        """믹스 글쓰기 성공 시 LLMRequest 이력 저장 테스트"""
+        from app.modules.writing.worker.writing_worker import WritingWorker
+
+        # 테스트 소스 데이터 추가
+        for i in range(3):
+            test_db_session.add(WritingSource(
+                content=f"테스트 소스 {i}. " * 20,
+                category="test"
+            ))
+        test_db_session.commit()
+
+        # LLM 서비스 mock
+        with patch.object(WritingWorker, '_load_prompts'):
+            worker = WritingWorker(test_db_session)
+            worker.mix_prompt_template = "테스트 프롬프트 (여기에 첫 번째 글 붙여넣기) (여기에 두 번째 글 붙여넣기) (여기에 세 번째 글 붙여넣기)"
+            worker.random_prompt_template = "랜덤 프롬프트"
+
+            # execute_claude mock (성공)
+            worker.llm_service.execute_claude = MagicMock(return_value={
+                "success": True,
+                "raw_response": "---\n생성된 글 내용입니다. " * 20
+            })
+
+            # 믹스 글쓰기 실행
+            result = worker._generate_mix_writing(run_id=1, index=0)
+
+            assert result is True
+
+            # LLMRequest 이력 확인
+            llm_request = test_db_session.query(LLMRequest).filter(
+                LLMRequest.caller_type == "writing",
+                LLMRequest.caller_id == "mix_1_0"
+            ).first()
+
+            assert llm_request is not None
+            assert llm_request.status == "completed"
+            assert llm_request.raw_response is not None
+            assert llm_request.processed_at is not None
+            assert llm_request.error_message is None
+
+    def test_mix_writing_creates_llm_request_on_failure(self, test_db_session):
+        """믹스 글쓰기 실패 시 LLMRequest 이력 저장 테스트"""
+        from app.modules.writing.worker.writing_worker import WritingWorker
+
+        # 테스트 소스 데이터 추가
+        for i in range(3):
+            test_db_session.add(WritingSource(
+                content=f"테스트 소스 {i}. " * 20,
+                category="test"
+            ))
+        test_db_session.commit()
+
+        with patch.object(WritingWorker, '_load_prompts'):
+            worker = WritingWorker(test_db_session)
+            worker.mix_prompt_template = "테스트 프롬프트 (여기에 첫 번째 글 붙여넣기) (여기에 두 번째 글 붙여넣기) (여기에 세 번째 글 붙여넣기)"
+
+            # execute_claude mock (실패)
+            worker.llm_service.execute_claude = MagicMock(return_value={
+                "success": False,
+                "error": "LLM 호출 타임아웃"
+            })
+
+            result = worker._generate_mix_writing(run_id=1, index=0)
+
+            assert result is False
+
+            # LLMRequest 이력 확인 (실패로 기록)
+            llm_request = test_db_session.query(LLMRequest).filter(
+                LLMRequest.caller_type == "writing",
+                LLMRequest.caller_id == "mix_1_0"
+            ).first()
+
+            assert llm_request is not None
+            assert llm_request.status == "failed"
+            assert llm_request.error_message == "LLM 호출 타임아웃"
+            assert llm_request.processed_at is not None
+
+    def test_random_writing_creates_llm_request_on_success(self, test_db_session):
+        """랜덤 글쓰기 성공 시 LLMRequest 이력 저장 테스트"""
+        from app.modules.writing.worker.writing_worker import WritingWorker
+
+        with patch.object(WritingWorker, '_load_prompts'):
+            worker = WritingWorker(test_db_session)
+            worker.mix_prompt_template = ""
+            worker.random_prompt_template = "랜덤 글쓰기 프롬프트입니다."
+
+            # execute_claude mock (성공)
+            worker.llm_service.execute_claude = MagicMock(return_value={
+                "success": True,
+                "raw_response": "---\n랜덤으로 생성된 글 내용입니다. " * 20
+            })
+
+            result = worker._generate_random_writing(run_id=2, index=1)
+
+            assert result is True
+
+            # LLMRequest 이력 확인
+            llm_request = test_db_session.query(LLMRequest).filter(
+                LLMRequest.caller_type == "writing",
+                LLMRequest.caller_id == "random_2_1"
+            ).first()
+
+            assert llm_request is not None
+            assert llm_request.status == "completed"
+            assert llm_request.requested_by == "scheduler"
+            assert llm_request.request_source == "writing_worker"
+
+    def test_random_writing_creates_llm_request_on_failure(self, test_db_session):
+        """랜덤 글쓰기 실패 시 LLMRequest 이력 저장 테스트"""
+        from app.modules.writing.worker.writing_worker import WritingWorker
+
+        with patch.object(WritingWorker, '_load_prompts'):
+            worker = WritingWorker(test_db_session)
+            worker.mix_prompt_template = ""
+            worker.random_prompt_template = "랜덤 글쓰기 프롬프트입니다."
+
+            # execute_claude mock (실패)
+            worker.llm_service.execute_claude = MagicMock(return_value={
+                "success": False,
+                "error": "API 오류"
+            })
+
+            result = worker._generate_random_writing(run_id=2, index=1)
+
+            assert result is False
+
+            # LLMRequest 이력 확인
+            llm_request = test_db_session.query(LLMRequest).filter(
+                LLMRequest.caller_type == "writing",
+                LLMRequest.caller_id == "random_2_1"
+            ).first()
+
+            assert llm_request is not None
+            assert llm_request.status == "failed"
+            assert llm_request.error_message == "API 오류"
