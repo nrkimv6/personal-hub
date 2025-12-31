@@ -35,6 +35,31 @@
 		created_at: string;
 	}
 
+	interface Schedule {
+		id: number;
+		name: string;
+		display_name?: string;
+		target_config: { saved_search_id: number };
+		schedule_value: {
+			time_windows: { start: string; end: string }[];
+			daily_runs: number;
+			min_interval_hours: number;
+		};
+		enabled: boolean;
+		next_run_at?: string;
+		last_run_at?: string;
+	}
+
+	interface ScheduleRun {
+		id: number;
+		started_at: string;
+		finished_at?: string;
+		status: string;
+		collected_count: number;
+		stop_reason?: string;
+		error_message?: string;
+	}
+
 	// API 함수
 	const API_BASE = '/api/google';
 
@@ -65,6 +90,17 @@
 	let saveAsFavorite = $state(false);
 
 	let activeTab: 'saved' | 'history' = $state('saved');
+
+	// 스케줄 상태
+	let schedules: Schedule[] = $state([]);
+	let showScheduleModal = $state(false);
+	let selectedSavedSearch: SavedSearch | null = $state(null);
+	let scheduleTime = $state('09:00');
+	let scheduleEnabled = $state(true);
+	let editingSchedule: Schedule | null = $state(null);
+	let showRunsModal = $state(false);
+	let scheduleRuns: ScheduleRun[] = $state([]);
+	let selectedScheduleId: number | null = $state(null);
 
 	const dateFilters = [
 		{ value: '', label: '전체 기간' },
@@ -286,9 +322,117 @@
 		}
 	}
 
+	// 스케줄 기능
+	async function loadSchedules() {
+		try {
+			schedules = await apiRequest<Schedule[]>('/schedule/');
+		} catch (e) {
+			console.error('스케줄 로드 실패:', e);
+		}
+	}
+
+	function getScheduleForSaved(savedId: number): Schedule | undefined {
+		return schedules.find((s) => s.target_config.saved_search_id === savedId);
+	}
+
+	async function openScheduleModal(saved: SavedSearch, event: Event) {
+		event.stopPropagation();
+		selectedSavedSearch = saved;
+
+		const existing = getScheduleForSaved(saved.id);
+		if (existing) {
+			editingSchedule = existing;
+			const tw = existing.schedule_value.time_windows[0];
+			scheduleTime = tw?.start || '09:00';
+			scheduleEnabled = existing.enabled;
+		} else {
+			editingSchedule = null;
+			scheduleTime = '09:00';
+			scheduleEnabled = true;
+		}
+
+		showScheduleModal = true;
+	}
+
+	async function saveSchedule() {
+		if (!selectedSavedSearch) return;
+
+		try {
+			if (editingSchedule) {
+				// 수정
+				await apiRequest(`/schedule/${editingSchedule.id}`, {
+					method: 'PUT',
+					body: JSON.stringify({
+						schedule_value: {
+							time_windows: [{ start: scheduleTime, end: scheduleTime }],
+							daily_runs: 1,
+							min_interval_hours: 1
+						},
+						enabled: scheduleEnabled
+					})
+				});
+			} else {
+				// 생성
+				await apiRequest('/schedule/', {
+					method: 'POST',
+					body: JSON.stringify({
+						saved_search_id: selectedSavedSearch.id,
+						display_name: `${selectedSavedSearch.name} 자동 검색`,
+						schedule_type: 'time_window',
+						schedule_value: {
+							time_windows: [{ start: scheduleTime, end: scheduleTime }],
+							daily_runs: 1,
+							min_interval_hours: 1
+						},
+						enabled: scheduleEnabled
+					})
+				});
+			}
+
+			showScheduleModal = false;
+			await loadSchedules();
+		} catch (e) {
+			error = e instanceof Error ? e.message : '스케줄 저장 실패';
+		}
+	}
+
+	async function deleteSchedule() {
+		if (!editingSchedule) return;
+		if (!confirm('스케줄을 삭제하시겠습니까?')) return;
+
+		try {
+			await apiRequest(`/schedule/${editingSchedule.id}`, { method: 'DELETE' });
+			showScheduleModal = false;
+			await loadSchedules();
+		} catch (e) {
+			error = '스케줄 삭제 실패';
+		}
+	}
+
+	async function openRunsModal(scheduleId: number, event: Event) {
+		event.stopPropagation();
+		selectedScheduleId = scheduleId;
+
+		try {
+			const response = await apiRequest<{ items: ScheduleRun[] }>(
+				`/schedule/${scheduleId}/runs?limit=10`
+			);
+			scheduleRuns = response.items;
+			showRunsModal = true;
+		} catch (e) {
+			error = '실행 이력 조회 실패';
+		}
+	}
+
+	function formatScheduleTime(schedule: Schedule): string {
+		const tw = schedule.schedule_value.time_windows[0];
+		return tw ? tw.start : '-';
+	}
+
 	onMount(() => {
 		loadSavedSearches();
 		loadHistory();
+		loadSchedules();
 	});
 </script>
 
@@ -442,6 +586,26 @@
 												>
 													{saved.is_favorite ? '★' : '☆'}
 												</button>
+												<button
+													onclick={(e) => openScheduleModal(saved, e)}
+													class="p-1 text-gray-400 hover:text-green-500"
+													title="스케줄 설정"
+												>
+													{#if getScheduleForSaved(saved.id)}
+														<span class="text-green-500">⏰</span>
+													{:else}
+														⏰
+													{/if}
+												</button>
+												{#if getScheduleForSaved(saved.id)}
+													<button
+														onclick={(e) => openRunsModal(getScheduleForSaved(saved.id)!.id, e)}
+														class="p-1 text-xs text-gray-400 hover:text-purple-500"
+														title="실행 이력"
+													>
+														📊
+													</button>
+												{/if}
 												{#if saved.last_search_id}
 													<button
 														onclick={(e) => loadLastResults(saved, e)}
@@ -462,13 +626,20 @@
 										</div>
 
 										<!-- 메타 정보 -->
-										<div class="mt-2 flex gap-2 text-xs text-gray-400">
+										<div class="mt-2 flex flex-wrap gap-2 text-xs text-gray-400">
 											{#if saved.date_filter}
 												<span
 													>{dateFilters.find((f) => f.value === saved.date_filter)?.label}</span
 												>
 											{/if}
 											<span>{saved.max_pages}p</span>
+											{#if getScheduleForSaved(saved.id)}
+												{@const schedule = getScheduleForSaved(saved.id)!}
+												<span class="text-green-600">
+													⏰ {formatScheduleTime(schedule)}
+													{schedule.enabled ? '' : '(중지)'}
+												</span>
+											{/if}
 											{#if saved.last_run_at}
 												<span>· {formatDate(saved.last_run_at)}</span>
 											{/if}
@@ -561,6 +732,121 @@
 					class="rounded-lg bg-blue-500 px-4 py-2 text-white hover:bg-blue-600 disabled:opacity-50"
 				>
 					저장
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- 스케줄 설정 모달 -->
+{#if showScheduleModal && selectedSavedSearch}
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+		<div class="w-96 rounded-lg bg-white p-6 shadow-xl">
+			<h3 class="mb-4 text-lg font-semibold">
+				{editingSchedule ? '스케줄 수정' : '스케줄 설정'}
+			</h3>
+
+			<div class="space-y-4">
+				<div class="text-sm text-gray-600">
+					<div><strong>검색명:</strong> {selectedSavedSearch.name}</div>
+					<div><strong>검색어:</strong> {selectedSavedSearch.query}</div>
+				</div>
+
+				<div>
+					<label for="schedule-time" class="mb-1 block text-sm font-medium">실행 시간</label>
+					<input
+						id="schedule-time"
+						type="time"
+						bind:value={scheduleTime}
+						class="w-full rounded-lg border px-3 py-2"
+					/>
+				</div>
+
+				<label class="flex items-center gap-2">
+					<input type="checkbox" bind:checked={scheduleEnabled} />
+					<span class="text-sm">스케줄 활성화</span>
+				</label>
+
+				{#if editingSchedule?.next_run_at}
+					<div class="text-sm text-gray-500">
+						다음 실행: {formatDate(editingSchedule.next_run_at)}
+					</div>
+				{/if}
+			</div>
+
+			<div class="mt-6 flex justify-between">
+				{#if editingSchedule}
+					<button onclick={deleteSchedule} class="rounded-lg px-4 py-2 text-red-600 hover:bg-red-50">
+						삭제
+					</button>
+				{:else}
+					<div></div>
+				{/if}
+
+				<div class="flex gap-2">
+					<button
+						onclick={() => (showScheduleModal = false)}
+						class="rounded-lg px-4 py-2 text-gray-600 hover:bg-gray-100"
+					>
+						취소
+					</button>
+					<button
+						onclick={saveSchedule}
+						class="rounded-lg bg-green-500 px-4 py-2 text-white hover:bg-green-600"
+					>
+						{editingSchedule ? '수정' : '저장'}
+					</button>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- 실행 이력 모달 -->
+{#if showRunsModal}
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+		<div class="max-h-[80vh] w-[500px] overflow-auto rounded-lg bg-white p-6 shadow-xl">
+			<h3 class="mb-4 text-lg font-semibold">스케줄 실행 이력</h3>
+
+			{#if scheduleRuns.length === 0}
+				<div class="py-4 text-center text-gray-500">실행 이력이 없습니다.</div>
+			{:else}
+				<ul class="divide-y">
+					{#each scheduleRuns as run}
+						<li class="py-3">
+							<div class="flex items-center justify-between">
+								<div>
+									<span class="text-sm">{formatDate(run.started_at)}</span>
+									{#if run.status === 'completed'}
+										<span class="ml-2 rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">
+											완료
+										</span>
+									{:else if run.status === 'failed'}
+										<span class="ml-2 rounded bg-red-100 px-2 py-0.5 text-xs text-red-700">
+											실패
+										</span>
+									{:else}
+										<span class="ml-2 rounded bg-yellow-100 px-2 py-0.5 text-xs text-yellow-700">
+											실행중
+										</span>
+									{/if}
+								</div>
+								<span class="text-sm text-gray-500">{run.collected_count}개 수집</span>
+							</div>
+							{#if run.error_message}
+								<div class="mt-1 text-xs text-red-500">{run.error_message}</div>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			{/if}
+
+			<div class="mt-4 flex justify-end">
+				<button
+					onclick={() => (showRunsModal = false)}
+					class="rounded-lg px-4 py-2 text-gray-600 hover:bg-gray-100"
+				>
+					닫기
 				</button>
 			</div>
 		</div>
