@@ -7,7 +7,12 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.crawl_schedule import CrawlSchedule, CrawlScheduleRun
-from app.models.writing import WritingSource, GeneratedWriting, WritingRssFeed
+from app.models.writing import (
+    WritingSource,
+    GeneratedWriting,
+    WritingRssFeed,
+    WritingSearchQuery,
+)
 
 
 class WritingService:
@@ -536,4 +541,257 @@ class WritingService:
             "collected": added,
             "total_fetched": len(items),
             "feeds": len(feeds),
+        }
+
+    # ========== 검색 쿼리 관리 ==========
+
+    def list_search_queries(
+        self,
+        source_type: Optional[str] = None,
+        enabled_only: bool = True,
+    ) -> list[WritingSearchQuery]:
+        """검색 쿼리 목록 조회."""
+        query = self.db.query(WritingSearchQuery)
+
+        if enabled_only:
+            query = query.filter(WritingSearchQuery.enabled == 1)
+
+        if source_type:
+            query = query.filter(WritingSearchQuery.source_type == source_type)
+
+        return query.order_by(
+            WritingSearchQuery.priority.desc(),
+            WritingSearchQuery.id.desc(),
+        ).all()
+
+    def get_search_query(self, query_id: int) -> Optional[WritingSearchQuery]:
+        """검색 쿼리 상세 조회."""
+        return (
+            self.db.query(WritingSearchQuery)
+            .filter(WritingSearchQuery.id == query_id)
+            .first()
+        )
+
+    def add_search_query(
+        self,
+        query: str,
+        source_type: str = WritingSearchQuery.SOURCE_TYPE_NAVER,
+        search_target: str = WritingSearchQuery.TARGET_BLOG,
+        priority: int = 0,
+    ) -> WritingSearchQuery:
+        """검색 쿼리 추가."""
+        search_query = WritingSearchQuery(
+            query=query,
+            source_type=source_type,
+            search_target=search_target,
+            priority=priority,
+            enabled=1,
+        )
+        self.db.add(search_query)
+        self.db.commit()
+        self.db.refresh(search_query)
+        return search_query
+
+    def update_search_query(
+        self,
+        query_id: int,
+        query: Optional[str] = None,
+        source_type: Optional[str] = None,
+        search_target: Optional[str] = None,
+        enabled: Optional[bool] = None,
+        priority: Optional[int] = None,
+    ) -> Optional[WritingSearchQuery]:
+        """검색 쿼리 수정."""
+        search_query = self.get_search_query(query_id)
+        if not search_query:
+            return None
+
+        if query is not None:
+            search_query.query = query
+        if source_type is not None:
+            search_query.source_type = source_type
+        if search_target is not None:
+            search_query.search_target = search_target
+        if enabled is not None:
+            search_query.enabled = 1 if enabled else 0
+        if priority is not None:
+            search_query.priority = priority
+
+        self.db.commit()
+        self.db.refresh(search_query)
+        return search_query
+
+    def delete_search_query(self, query_id: int) -> bool:
+        """검색 쿼리 삭제."""
+        search_query = self.get_search_query(query_id)
+        if not search_query:
+            return False
+
+        self.db.delete(search_query)
+        self.db.commit()
+        return True
+
+    def update_search_query_status(
+        self,
+        query_id: int,
+        success: bool,
+        result_count: int = 0,
+        error_message: Optional[str] = None,
+    ) -> None:
+        """검색 쿼리 상태 업데이트."""
+        search_query = self.get_search_query(query_id)
+        if not search_query:
+            return
+
+        search_query.last_searched_at = datetime.now()
+        search_query.result_count += result_count
+
+        if success:
+            search_query.success_count += 1
+        else:
+            search_query.error_count += 1
+            search_query.last_error = error_message
+
+        self.db.commit()
+
+    # ========== 검색 수집 ==========
+
+    async def collect_from_searches(
+        self,
+        source_type: Optional[str] = None,
+        min_length: int = 100,
+        max_length: int = 5000,
+        max_queries: int = 10,
+    ) -> dict:
+        """검색 API에서 글 수집.
+
+        Args:
+            source_type: 검색 엔진 ('naver', 'kakao', None=전체)
+            min_length: 최소 글자 수
+            max_length: 최대 글자 수
+            max_queries: 최대 쿼리 수
+
+        Returns:
+            수집 결과 dict
+        """
+        from app.modules.writing.services.search_collector import (
+            NaverSearchCollector,
+            KakaoSearchCollector,
+            SearchContentFilter,
+        )
+
+        # 검색 쿼리 조회
+        queries = self.list_search_queries(source_type=source_type, enabled_only=True)
+        if not queries:
+            return {"collected": 0, "queries": 0, "message": "No enabled queries"}
+
+        # 최대 쿼리 수 제한
+        queries = queries[:max_queries]
+
+        # 수집기 초기화
+        naver_collector = NaverSearchCollector()
+        kakao_collector = KakaoSearchCollector()
+
+        all_items = []
+        query_results = []
+
+        for q in queries:
+            items = []
+            error_message = None
+
+            try:
+                if q.source_type == WritingSearchQuery.SOURCE_TYPE_NAVER:
+                    if not naver_collector.is_configured():
+                        error_message = "Naver API not configured"
+                    elif q.search_target == WritingSearchQuery.TARGET_BLOG:
+                        items = await naver_collector.search_blog(q.query)
+                    elif q.search_target == WritingSearchQuery.TARGET_CAFE:
+                        items = await naver_collector.search_cafe(q.query)
+
+                elif q.source_type == WritingSearchQuery.SOURCE_TYPE_KAKAO:
+                    if not kakao_collector.is_configured():
+                        error_message = "Kakao API not configured"
+                    elif q.search_target == WritingSearchQuery.TARGET_BLOG:
+                        items = await kakao_collector.search_blog(q.query)
+                    elif q.search_target == WritingSearchQuery.TARGET_CAFE:
+                        items = await kakao_collector.search_cafe(q.query)
+
+                # 쿼리 상태 업데이트
+                self.update_search_query_status(
+                    q.id,
+                    success=error_message is None,
+                    result_count=len(items),
+                    error_message=error_message,
+                )
+
+                all_items.extend(items)
+                query_results.append({
+                    "query": q.query,
+                    "source_type": q.source_type,
+                    "count": len(items),
+                    "error": error_message,
+                })
+
+            except Exception as e:
+                self.update_search_query_status(
+                    q.id,
+                    success=False,
+                    error_message=str(e),
+                )
+                query_results.append({
+                    "query": q.query,
+                    "source_type": q.source_type,
+                    "count": 0,
+                    "error": str(e),
+                })
+
+        # 필터링
+        filtered_items = SearchContentFilter.filter_items(
+            all_items,
+            min_length=min_length,
+            max_length=max_length,
+        )
+
+        # DB에 저장 (중복 체크)
+        added = 0
+        for item in filtered_items:
+            # 해시로 중복 체크
+            existing = (
+                self.db.query(WritingSource)
+                .filter(WritingSource.content_hash == item.get("content_hash"))
+                .first()
+            )
+            if existing:
+                continue
+
+            # URL로도 중복 체크
+            if item.get("link"):
+                url_existing = (
+                    self.db.query(WritingSource)
+                    .filter(WritingSource.source_url == item["link"])
+                    .first()
+                )
+                if url_existing:
+                    continue
+
+            # 새 소스 추가
+            source = WritingSource(
+                content=item["content"],
+                category=None,
+                source_info=item.get("author") or item.get("source"),
+                source_url=item.get("link"),
+                source_type=WritingSource.SOURCE_TYPE_API,
+                content_hash=item.get("content_hash"),
+            )
+            self.db.add(source)
+            added += 1
+
+        self.db.commit()
+
+        return {
+            "collected": added,
+            "total_fetched": len(all_items),
+            "filtered": len(filtered_items),
+            "queries": len(queries),
+            "query_results": query_results,
         }
