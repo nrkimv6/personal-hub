@@ -368,7 +368,11 @@ async def trigger_schedule_run(
     elif schedule.target_type == 'writing_task':
         # 스케줄 실행 기록 생성
         schedule_service = CrawlScheduleService(db)
-        run = schedule_service.start_run(schedule.id, {"source": "manual"})
+        run = schedule_service.start_run(
+            schedule_id=schedule.id,
+            worker_id="manual",
+            config_snapshot={"source": "manual"}
+        )
 
         return {
             "success": True,
