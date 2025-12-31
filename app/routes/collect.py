@@ -1,7 +1,9 @@
 """수집 관리 API 라우트."""
 
+import json
+import uuid
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -11,6 +13,7 @@ from app.services.collect_service import CollectService
 from app.services.crawl_schedule_service import CrawlScheduleService
 from app.schemas.collect import CollectedPostList, CollectedPostBase, CrawlHistoryList
 from app.models import CrawlSchedule, CrawlRequest
+from app.models.google_search import GoogleSearchQueue, GoogleSavedSearch
 
 router = APIRouter(prefix="/collect", tags=["collect"])
 
@@ -115,6 +118,29 @@ class ScheduleResponse(BaseModel):
         from_attributes = True
 
 
+class CollectScheduleCreate(BaseModel):
+    """스케줄 생성 요청 스키마."""
+    target_type: str  # instagram_feed, google_search, writing_task
+    target_config: Optional[Dict[str, Any]] = None
+    display_name: Optional[str] = None
+    schedule_type: str = "time_window"
+    schedule_value: Optional[Dict[str, Any]] = None
+
+
+def _generate_schedule_name(data: CollectScheduleCreate) -> str:
+    """스케줄 타입과 설정에 따라 고유한 스케줄 이름 생성."""
+    if data.target_type == "instagram_feed":
+        account_id = data.target_config.get("service_account_id") if data.target_config else None
+        return f"instagram_feed_account_{account_id}"
+    elif data.target_type == "google_search":
+        saved_id = data.target_config.get("saved_search_id") if data.target_config else None
+        return f"google_search_{saved_id}"
+    elif data.target_type == "writing_task":
+        return "writing_task_default"
+    else:
+        return f"{data.target_type}_{uuid.uuid4().hex[:8]}"
+
+
 @router.get("/schedules")
 async def get_schedules(
     db: Session = Depends(get_db),
@@ -134,6 +160,104 @@ async def get_schedules(
         )
         for s in schedules
     ]
+
+
+@router.post("/schedules", response_model=ScheduleResponse)
+async def create_schedule(
+    data: CollectScheduleCreate,
+    db: Session = Depends(get_db),
+):
+    """통합 스케줄 생성 API.
+
+    지원 타입:
+    - instagram_feed: Instagram 피드 수집 (target_config.service_account_id 필요)
+    - google_search: Google 검색 수집 (target_config.saved_search_id 필요)
+    - writing_task: 글쓰기 태스크
+    """
+    schedule_service = CrawlScheduleService(db)
+
+    # 타입별 검증 및 중복 체크
+    if data.target_type == "instagram_feed":
+        if not data.target_config or not data.target_config.get("service_account_id"):
+            raise HTTPException(
+                status_code=400,
+                detail="Instagram 스케줄에는 service_account_id가 필요합니다"
+            )
+        account_id = data.target_config["service_account_id"]
+        schedule_name = f"instagram_feed_account_{account_id}"
+        existing = schedule_service.get_schedule_by_name(schedule_name)
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail="이미 해당 계정의 스케줄이 존재합니다"
+            )
+        # display_name 자동 생성
+        if not data.display_name:
+            data.display_name = f"Instagram 피드 (계정 {account_id})"
+
+    elif data.target_type == "google_search":
+        if not data.target_config or not data.target_config.get("saved_search_id"):
+            raise HTTPException(
+                status_code=400,
+                detail="Google 검색 스케줄에는 saved_search_id가 필요합니다"
+            )
+        saved_id = data.target_config["saved_search_id"]
+        # 저장된 검색 존재 확인
+        saved_search = db.query(GoogleSavedSearch).filter_by(id=saved_id).first()
+        if not saved_search:
+            raise HTTPException(
+                status_code=404,
+                detail="저장된 검색을 찾을 수 없습니다"
+            )
+        schedule_name = f"google_search_{saved_id}"
+        existing = schedule_service.get_schedule_by_name(schedule_name)
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail="이미 해당 검색의 스케줄이 존재합니다"
+            )
+        # display_name 자동 생성
+        if not data.display_name:
+            data.display_name = f"Google 검색 ({saved_search.name})"
+
+    elif data.target_type == "writing_task":
+        schedule_name = "writing_task_default"
+        existing = schedule_service.get_schedule_by_name(schedule_name)
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail="이미 글쓰기 스케줄이 존재합니다"
+            )
+        if not data.display_name:
+            data.display_name = "글쓰기 태스크"
+
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"지원하지 않는 스케줄 타입입니다: {data.target_type}"
+        )
+
+    # 스케줄 생성
+    schedule = schedule_service.create_schedule(
+        name=schedule_name,
+        display_name=data.display_name,
+        target_type=data.target_type,
+        target_config=data.target_config,
+        schedule_type=data.schedule_type,
+        schedule_value=json.dumps(data.schedule_value) if data.schedule_value else None,
+        enabled=True
+    )
+
+    return ScheduleResponse(
+        id=schedule.id,
+        name=schedule.name,
+        display_name=schedule.display_name,
+        target_type=schedule.target_type,
+        schedule_type=schedule.schedule_type,
+        enabled=schedule.enabled,
+        last_run_at=schedule.last_run_at,
+        next_run_at=schedule.next_run_at,
+    )
 
 
 @router.post("/schedules/{schedule_id}/toggle")
@@ -204,10 +328,61 @@ async def trigger_schedule_run(
             "request_id": request.id,
         }
 
-    # 범용 크롤링 스케줄의 경우
+    # Google 검색 스케줄의 경우
+    elif schedule.target_type == 'google_search':
+        target_config = schedule.get_target_config() if schedule.target_config else {}
+        saved_search_id = target_config.get('saved_search_id')
+
+        if not saved_search_id:
+            raise HTTPException(
+                status_code=400,
+                detail="저장된 검색이 설정되지 않았습니다"
+            )
+
+        saved_search = db.query(GoogleSavedSearch).filter_by(id=saved_search_id).first()
+        if not saved_search:
+            raise HTTPException(
+                status_code=404,
+                detail="저장된 검색을 찾을 수 없습니다"
+            )
+
+        # GoogleSearchQueue에 추가
+        queue_item = GoogleSearchQueue(
+            search_id=str(uuid.uuid4()),
+            query=saved_search.query,
+            date_filter=saved_search.date_filter,
+            max_pages=saved_search.max_pages,
+            saved_search_id=saved_search_id,
+            status="pending"
+        )
+        db.add(queue_item)
+        db.commit()
+
+        return {
+            "success": True,
+            "message": "검색이 요청되었습니다",
+            "search_id": queue_item.search_id,
+        }
+
+    # 글쓰기 태스크 스케줄의 경우
+    elif schedule.target_type == 'writing_task':
+        # 스케줄 실행 기록 생성
+        schedule_service = CrawlScheduleService(db)
+        run = schedule_service.start_run(
+            schedule_id=schedule.id,
+            worker_id="manual",
+            config_snapshot={"source": "manual"}
+        )
+
+        return {
+            "success": True,
+            "message": "글쓰기 태스크가 예약되었습니다",
+            "run_id": run.id,
+        }
+
+    # 지원하지 않는 스케줄 타입
     else:
-        # TODO: 범용 크롤링 스케줄 즉시 실행 구현
         return {
             "success": False,
-            "message": "현재 이 스케줄 타입은 즉시 실행을 지원하지 않습니다",
+            "message": f"스케줄 타입 '{schedule.target_type}'은(는) 즉시 실행을 지원하지 않습니다",
         }
