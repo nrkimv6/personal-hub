@@ -1,4 +1,4 @@
-from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING
+from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass, field
 from app.models.monitor import MonitorTarget
 from app.services.abstract_site_monitor import AbstractSiteMonitor
@@ -16,9 +16,6 @@ from app.modules.naver_booking.utils.parsers import parse_time_and_stock, parse_
 from app.utils.parsers import extract_date_from_url
 from app.utils.slot_utils import is_slot_available, is_slot_displayable_from_dict
 
-# 순환 참조 방지를 위한 지연 import
-if TYPE_CHECKING:
-    from app.services.browser_service import BrowserService
 
 # 한국 시간대 정의
 KST = timezone(timedelta(hours=9))
