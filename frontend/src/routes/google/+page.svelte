@@ -75,20 +75,23 @@
 		{ value: '1y', label: '최근 1년' }
 	];
 
-	// 검색 기능
+	// 현재 폴링 중인 검색 ID
+	let pendingSearchId: string | null = $state(null);
+
+	// 검색 기능 (비동기 폴링 방식)
 	async function search() {
 		if (!query.trim()) return;
 
 		loading = true;
 		error = '';
+		results = [];
 
 		try {
-			const response = await apiRequest<{
+			// 1. 검색 요청을 큐에 추가
+			const queueResponse = await apiRequest<{
 				search_id: string;
-				query: string;
 				status: string;
-				total_results: number;
-				results: SearchResult[];
+				message: string;
 			}>('/search', {
 				method: 'POST',
 				body: JSON.stringify({
@@ -97,12 +100,54 @@
 					max_pages: maxPages
 				})
 			});
-			results = response.results;
-			await loadHistory();
+
+			// 2. 상태 폴링하여 완료될 때까지 대기
+			const searchId = queueResponse.search_id;
+			pendingSearchId = searchId;
+			await pollForResults(searchId);
 		} catch (e) {
 			error = e instanceof Error ? e.message : '검색 중 오류가 발생했습니다.';
 		} finally {
 			loading = false;
+			pendingSearchId = null;
+		}
+	}
+
+	// 검색 결과 폴링 (무제한, 1초 간격)
+	async function pollForResults(searchId: string) {
+		let status = 'pending';
+
+		while (status === 'pending' || status === 'processing') {
+			// 다른 검색이 시작되면 현재 폴링 중단
+			if (pendingSearchId !== searchId) {
+				return;
+			}
+
+			await new Promise((resolve) => setTimeout(resolve, 1000)); // 1초 대기
+
+			try {
+				const statusResponse = await apiRequest<{
+					search_id: string;
+					query: string;
+					status: string;
+					total_results: number;
+					error_message?: string;
+					results: SearchResult[];
+				}>(`/search/${searchId}/status`);
+
+				status = statusResponse.status;
+
+				if (status === 'completed') {
+					results = statusResponse.results;
+					await loadHistory();
+					break;
+				} else if (status === 'failed') {
+					throw new Error(statusResponse.error_message || '검색 실패');
+				}
+			} catch (e) {
+				// 네트워크 에러 시 재시도
+				console.warn('Poll failed, retrying...', e);
+			}
 		}
 	}
 
@@ -141,21 +186,29 @@
 	async function runSavedSearch(saved: SavedSearch) {
 		loading = true;
 		error = '';
+		results = [];
+		query = saved.query;
+		dateFilter = saved.date_filter || '';
+		maxPages = saved.max_pages;
 
 		try {
-			const response = await apiRequest<{
+			// 1. 저장된 검색 실행 요청
+			const queueResponse = await apiRequest<{
 				search_id: string;
-				results: SearchResult[];
+				status: string;
+				message: string;
 			}>(`/saved/${saved.id}/run`, { method: 'POST' });
-			results = response.results;
-			query = saved.query;
-			dateFilter = saved.date_filter || '';
-			maxPages = saved.max_pages;
+
+			// 2. 상태 폴링 (공통 함수 사용)
+			const searchId = queueResponse.search_id;
+			pendingSearchId = searchId;
+			await pollForResults(searchId);
 			await loadSavedSearches();
 		} catch (e) {
 			error = e instanceof Error ? e.message : '검색 실패';
 		} finally {
 			loading = false;
+			pendingSearchId = null;
 		}
 	}
 

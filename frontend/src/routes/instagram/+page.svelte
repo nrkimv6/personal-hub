@@ -197,9 +197,9 @@
 					</p>
 				</div>
 				<div class="flex gap-2">
-					<a href="/instagram/posts" class="btn btn-primary btn-sm"> 게시물 보기 </a>
-					<a href="/instagram/history" class="btn btn-secondary btn-sm"> 크롤링 이력 </a>
-					<a href="/instagram/schedule" class="btn btn-secondary btn-sm"> 설정 </a>
+					<a href="/collect/posts" class="btn btn-primary btn-sm"> 게시물 보기 </a>
+					<a href="/collect/history" class="btn btn-secondary btn-sm"> 크롤링 이력 </a>
+					<a href="/collect/schedule" class="btn btn-secondary btn-sm"> 스케줄 </a>
 				</div>
 			</div>
 		</div>
@@ -232,7 +232,7 @@
 			<div class="card">
 				<div class="flex items-center justify-between mb-4">
 					<h3 class="text-lg font-semibold text-gray-900">최근 실행 기록</h3>
-					<a href="/instagram/runs" class="text-sm text-blue-600 hover:text-blue-800">전체 보기</a>
+					<a href="/collect/history" class="text-sm text-blue-600 hover:text-blue-800">전체 보기</a>
 				</div>
 				{#if recentRuns.length === 0}
 					<p class="text-gray-500 text-center py-4">실행 기록 없음</p>
