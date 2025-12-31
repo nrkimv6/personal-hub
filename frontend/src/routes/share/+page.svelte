@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
-	import { crawlApi, instagramApi } from '$lib/api';
+	import { crawlApi, collectApi } from '$lib/api';
 	import { toast } from '$lib/stores/toast';
 
 	let sharedUrl = $state('');
@@ -66,11 +66,11 @@
 		submitting = true;
 		try {
 			// Instagram 계정 목록 가져오기
-			const accounts = await instagramApi.getAccounts();
+			const accounts = await collectApi.getAccounts();
 			if (accounts.length === 0) {
 				toast.error('등록된 Instagram 계정이 없습니다.');
 				// 계정이 없으면 Instagram 페이지로 이동
-				window.location.replace(`/instagram/posts?shared_url=${encodeURIComponent(sharedUrl)}`);
+				window.location.replace(`/collect?shared_url=${encodeURIComponent(sharedUrl)}`);
 				return;
 			}
 
@@ -79,7 +79,7 @@
 			const accountId = defaultAccount?.id ?? accounts[0].id;
 
 			// 크롤링 요청
-			await instagramApi.crawlByGenericUrl(sharedUrl, accountId);
+			await collectApi.crawlByGenericUrl(sharedUrl, accountId);
 			toast.success('Instagram 수집 요청 완료');
 
 			// 창 닫기 시도
@@ -118,7 +118,7 @@
 			if (message.includes('Instagram')) {
 				toast.warning('Instagram URL은 Instagram 크롤러를 사용하세요.');
 				// Instagram 페이지로 이동 (replace로 히스토리에서 /share 제거)
-				window.location.replace(`/instagram/posts?shared_url=${encodeURIComponent(sharedUrl)}`);
+				window.location.replace(`/collect?shared_url=${encodeURIComponent(sharedUrl)}`);
 				return;
 			}
 			toast.error(`오류: ${message}`);
@@ -160,7 +160,7 @@
 	// PWA standalone 모드에서는 goto()가 동작하지 않을 수 있으므로 window.location 사용
 	// replace()를 사용하여 /share 페이지를 히스토리에서 제거 (뒤로가기 시 건너뜀)
 	function handleInstagram() {
-		window.location.replace(`/instagram/posts?shared_url=${encodeURIComponent(sharedUrl)}`);
+		window.location.replace(`/collect?shared_url=${encodeURIComponent(sharedUrl)}`);
 	}
 
 	function handleEventForm() {

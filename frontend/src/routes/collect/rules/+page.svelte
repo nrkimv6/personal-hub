@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { instagramTagApi } from '$lib/api';
+	import { collectApi } from '$lib/api';
 	import type { InstagramTag, InstagramKeyword } from '$lib/types';
 
 	let tags: InstagramTag[] = [];
@@ -30,7 +30,7 @@
 	async function fetchTags() {
 		loading = true;
 		try {
-			tags = await instagramTagApi.getTags(true);
+			tags = await collectApi.tags.getTags(true);
 			error = null;
 		} catch (e) {
 			error = e instanceof Error ? e.message : '태그 목록 로드 실패';
@@ -43,7 +43,7 @@
 		selectedTag = tag;
 		loadingKeywords = true;
 		try {
-			keywords = await instagramTagApi.getKeywords(tag.id, true);
+			keywords = await collectApi.tags.getKeywords(tag.id, true);
 		} catch (e) {
 			console.error('키워드 로드 실패:', e);
 			keywords = [];
@@ -55,7 +55,7 @@
 	async function createTag() {
 		if (!newTagName.trim()) return;
 		try {
-			await instagramTagApi.createTag({
+			await collectApi.tags.createTag({
 				name: newTagName.trim(),
 				display_name: newTagDisplayName.trim() || newTagName.trim(),
 				description: newTagDescription.trim() || undefined,
@@ -75,7 +75,7 @@
 	async function deleteTag(tagId: number) {
 		if (!confirm('이 태그를 삭제하시겠습니까? 관련 키워드와 분류도 모두 삭제됩니다.')) return;
 		try {
-			await instagramTagApi.deleteTag(tagId);
+			await collectApi.tags.deleteTag(tagId);
 			if (selectedTag?.id === tagId) {
 				selectedTag = null;
 				keywords = [];
@@ -89,7 +89,7 @@
 	async function addKeyword() {
 		if (!selectedTag || !newKeyword.trim()) return;
 		try {
-			await instagramTagApi.addKeyword(selectedTag.id, {
+			await collectApi.tags.addKeyword(selectedTag.id, {
 				keyword: newKeyword.trim(),
 				is_regex: newKeywordIsRegex,
 				is_case_sensitive: newKeywordCaseSensitive
@@ -97,7 +97,7 @@
 			newKeyword = '';
 			newKeywordIsRegex = false;
 			newKeywordCaseSensitive = false;
-			keywords = await instagramTagApi.getKeywords(selectedTag.id, true);
+			keywords = await collectApi.tags.getKeywords(selectedTag.id, true);
 		} catch (e) {
 			alert('키워드 추가 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
 		}
@@ -106,9 +106,9 @@
 	async function deleteKeyword(keywordId: number) {
 		if (!confirm('이 키워드를 삭제하시겠습니까?')) return;
 		try {
-			await instagramTagApi.deleteKeyword(keywordId);
+			await collectApi.tags.deleteKeyword(keywordId);
 			if (selectedTag) {
-				keywords = await instagramTagApi.getKeywords(selectedTag.id, true);
+				keywords = await collectApi.tags.getKeywords(selectedTag.id, true);
 			}
 		} catch (e) {
 			alert('키워드 삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
@@ -117,9 +117,9 @@
 
 	async function toggleKeyword(keywordId: number) {
 		try {
-			await instagramTagApi.toggleKeyword(keywordId);
+			await collectApi.tags.toggleKeyword(keywordId);
 			if (selectedTag) {
-				keywords = await instagramTagApi.getKeywords(selectedTag.id, true);
+				keywords = await collectApi.tags.getKeywords(selectedTag.id, true);
 			}
 		} catch (e) {
 			alert('키워드 상태 변경 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
@@ -130,7 +130,7 @@
 		if (!confirm('전체 게시물을 재분류하시겠습니까? 기존 분류가 초기화됩니다.')) return;
 		reclassifying = true;
 		try {
-			const result = await instagramTagApi.reclassifyAll();
+			const result = await collectApi.tags.reclassifyAll();
 			alert(`재분류 완료: ${result.classified}/${result.total}개 게시물 분류됨`);
 		} catch (e) {
 			alert('재분류 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));

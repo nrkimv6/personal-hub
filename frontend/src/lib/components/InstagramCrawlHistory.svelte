@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { instagramApi } from '$lib/api';
+	import { collectApi } from '$lib/api';
 	import type { CrawlHistoryItem } from '$lib/types';
 
 	let items: CrawlHistoryItem[] = [];
@@ -39,7 +39,7 @@
 	export async function fetchHistory(silent = false) {
 		try {
 			if (!silent) loading = true;
-			const response = await instagramApi.getCrawlHistory({
+			const response = await collectApi.getInstagramCrawlHistory({
 				page,
 				limit,
 				request_type: requestType === 'all' ? undefined : requestType,
@@ -174,7 +174,7 @@
 		if (retryingId) return;
 		try {
 			retryingId = item.id;
-			await instagramApi.retryCrawlRequest(item.id);
+			await collectApi.retryCrawlRequest(item.id);
 			await fetchHistory();
 		} catch (e) {
 			console.error('Retry failed:', e);

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { instagramApi } from '$lib/api';
+	import { collectApi } from '$lib/api';
 	import type {
 		InstagramScheduleConfig,
 		InstagramTimeWindow,
@@ -39,10 +39,10 @@
 		loading = true;
 		try {
 			const [configData, scheduleData, pendingData, accountsData] = await Promise.all([
-				instagramApi.getSchedule(),
-				instagramApi.todaySchedule(),
-				instagramApi.getPendingRequests(5),
-				instagramApi.getAccounts()
+				collectApi.getInstagramSchedule(),
+				collectApi.todaySchedule(),
+				collectApi.getPendingRequests(5),
+				collectApi.getAccounts()
 			]);
 			config = configData;
 			todaySchedule = scheduleData;
@@ -74,7 +74,7 @@
 		saving = true;
 		successMessage = null;
 		try {
-			await instagramApi.updateSchedule({
+			await collectApi.updateInstagramSchedule({
 				enabled: editEnabled,
 				daily_runs: editDailyRuns,
 				time_windows: editTimeWindows,
@@ -103,7 +103,7 @@
 		requesting = true;
 		successMessage = null;
 		try {
-			const result = await instagramApi.requestManualCrawl(editAccountId);
+			const result = await collectApi.requestManualCrawl(editAccountId);
 			successMessage = `수집 요청 #${result.id}이(가) 추가되었습니다`;
 			await fetchData();
 		} catch (e) {
@@ -121,7 +121,7 @@
 		openingBrowser = true;
 		successMessage = null;
 		try {
-			const result = await instagramApi.openLoginBrowser(editAccountId);
+			const result = await collectApi.openLoginBrowser(editAccountId);
 			successMessage = result.message;
 		} catch (e) {
 			error = e instanceof Error ? e.message : '브라우저 열기 실패';
@@ -139,7 +139,7 @@
 		successMessage = null;
 		error = null;
 		try {
-			const result = await instagramApi.checkLoginStatus(editAccountId);
+			const result = await collectApi.checkLoginStatus(editAccountId);
 			if (result.is_logged_in) {
 				successMessage = `${result.account_name}: 로그인 확인됨`;
 			} else {

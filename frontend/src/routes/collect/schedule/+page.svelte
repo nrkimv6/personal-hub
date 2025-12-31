@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { collectApi, type CrawlSchedule } from '$lib/api';
+	import { collectApi } from '$lib/api';
+	import type { CrawlSchedule } from '$lib/types';
 	import InstagramCrawlSettings from '$lib/components/InstagramCrawlSettings.svelte';
 
 	let schedules: CrawlSchedule[] = [];

@@ -7,7 +7,7 @@
 	import { onMount } from 'svelte';
 	import { page as pageStore } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { eventApi, popupApi, uncategorizedApi, instagramApi, instagramTagApi } from '$lib/api';
+	import { eventApi, popupApi, uncategorizedApi, collectApi } from '$lib/api';
 	import type { Event, EventCreate, EventUpdate, InstagramPost, Popup, UncategorizedPost, InstagramTag } from '$lib/types';
 	import { isAdmin, isLoggedIn } from '$lib/stores/auth';
 	import { localParticipation } from '$lib/stores/localParticipation';
@@ -417,7 +417,7 @@
 		try {
 			const postId = type === 'event' ? event?.source_instagram_post_id : popup?.source_instagram_post_id;
 			if (postId) {
-				instagramPost = await instagramApi.getPost(postId);
+				instagramPost = await collectApi.getPost(postId);
 			}
 		} catch (e) {
 			console.error('Instagram 게시물 로드 실패:', e);
@@ -477,7 +477,7 @@
 
 	async function handleRecrawl(postId: number): Promise<void> {
 		try {
-			await instagramApi.recrawlPost(postId);
+			await collectApi.recrawlPost(postId);
 			alert('재크롤링 요청이 등록되었습니다.');
 		} catch (e) {
 			console.error('재크롤링 요청 실패:', e);
@@ -487,7 +487,7 @@
 
 	async function handleTagsUpdate(postId: number, tagIds: number[]): Promise<void> {
 		try {
-			const updated = await instagramApi.updatePost(postId, { tag_ids: tagIds });
+			const updated = await collectApi.updatePost(postId, { tag_ids: tagIds });
 			if (instagramPost?.id === postId) {
 				instagramPost = updated;
 			}
@@ -501,7 +501,7 @@
 	async function handleDeletePost(postId: number): Promise<void> {
 		if (!confirm('이 게시물을 삭제하시겠습니까?')) return;
 		try {
-			await instagramApi.deletePost(postId);
+			await collectApi.deletePost(postId);
 			closeFeedViewer();
 			await fetchEvents();
 		} catch (e) {
@@ -512,7 +512,7 @@
 
 	async function handleRequestLlmAnalysis(postId: number): Promise<void> {
 		try {
-			await instagramApi.requestLlmAnalysis(postId);
+			await collectApi.requestLlmAnalysisSingle(postId);
 			alert('AI 분석 요청이 등록되었습니다.');
 		} catch (e) {
 			console.error('AI 분석 요청 실패:', e);
@@ -573,7 +573,7 @@
 		localParticipation.load();
 
 		try {
-			availableTags = await instagramTagApi.getTags();
+			availableTags = await collectApi.tags.getTags();
 		} catch (e) {
 			console.error('태그 목록 로드 실패:', e);
 		}
