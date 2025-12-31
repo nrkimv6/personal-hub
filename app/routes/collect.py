@@ -178,10 +178,6 @@ async def trigger_schedule_run(
 
     # Instagram 피드 스케줄의 경우
     if schedule.target_type == 'instagram_feed':
-        # InstagramCrawlRequest 생성
-        from app.modules.instagram.services.request_service import CrawlRequestService
-        request_service = CrawlRequestService(db)
-
         target_config = schedule.get_target_config() if schedule.target_config else {}
         service_account_id = target_config.get('service_account_id')
 
@@ -191,10 +187,17 @@ async def trigger_schedule_run(
                 detail="스케줄에 계정이 설정되지 않았습니다"
             )
 
-        request = request_service.create_request(
-            service_account_id=service_account_id,
+        # CrawlRequest (범용 테이블)에 요청 생성
+        request = CrawlRequest(
+            url=f"instagram://feed?account_id={service_account_id}",
+            url_type="instagram_feed",
+            status="pending",
             requested_by="manual",
         )
+        db.add(request)
+        db.commit()
+        db.refresh(request)
+
         return {
             "success": True,
             "message": f"크롤링 요청 #{request.id}이(가) 생성되었습니다",
