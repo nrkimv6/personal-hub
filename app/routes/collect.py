@@ -328,10 +328,57 @@ async def trigger_schedule_run(
             "request_id": request.id,
         }
 
-    # 범용 크롤링 스케줄의 경우
+    # Google 검색 스케줄의 경우
+    elif schedule.target_type == 'google_search':
+        target_config = schedule.get_target_config() if schedule.target_config else {}
+        saved_search_id = target_config.get('saved_search_id')
+
+        if not saved_search_id:
+            raise HTTPException(
+                status_code=400,
+                detail="저장된 검색이 설정되지 않았습니다"
+            )
+
+        saved_search = db.query(GoogleSavedSearch).filter_by(id=saved_search_id).first()
+        if not saved_search:
+            raise HTTPException(
+                status_code=404,
+                detail="저장된 검색을 찾을 수 없습니다"
+            )
+
+        # GoogleSearchQueue에 추가
+        queue_item = GoogleSearchQueue(
+            search_id=str(uuid.uuid4()),
+            query=saved_search.query,
+            date_filter=saved_search.date_filter,
+            max_pages=saved_search.max_pages,
+            saved_search_id=saved_search_id,
+            status="pending"
+        )
+        db.add(queue_item)
+        db.commit()
+
+        return {
+            "success": True,
+            "message": "검색이 요청되었습니다",
+            "search_id": queue_item.search_id,
+        }
+
+    # 글쓰기 태스크 스케줄의 경우
+    elif schedule.target_type == 'writing_task':
+        # 스케줄 실행 기록 생성
+        schedule_service = CrawlScheduleService(db)
+        run = schedule_service.start_run(schedule.id, {"source": "manual"})
+
+        return {
+            "success": True,
+            "message": "글쓰기 태스크가 예약되었습니다",
+            "run_id": run.id,
+        }
+
+    # 지원하지 않는 스케줄 타입
     else:
-        # TODO: 범용 크롤링 스케줄 즉시 실행 구현
         return {
             "success": False,
-            "message": "현재 이 스케줄 타입은 즉시 실행을 지원하지 않습니다",
+            "message": f"스케줄 타입 '{schedule.target_type}'은(는) 즉시 실행을 지원하지 않습니다",
         }
