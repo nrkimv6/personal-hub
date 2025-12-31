@@ -59,6 +59,38 @@ class WritingRssFeed(Base):
         return f"<WritingRssFeed(id={self.id}, name={self.name})>"
 
 
+class WritingSearchQuery(Base):
+    """검색 쿼리 관리."""
+
+    __tablename__ = "writing_search_queries"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    query = Column(String(200), nullable=False)  # 검색어
+    source_type = Column(String(50), nullable=False, default="naver")  # 검색 엔진
+    search_target = Column(String(50), nullable=False, default="blog")  # 검색 대상
+    enabled = Column(Integer, nullable=False, default=1)  # 활성화 여부
+    priority = Column(Integer, nullable=False, default=0)  # 우선순위
+    last_searched_at = Column(DateTime, nullable=True)  # 마지막 검색 시간
+    result_count = Column(Integer, nullable=False, default=0)  # 누적 결과 수
+    success_count = Column(Integer, nullable=False, default=0)  # 성공 횟수
+    error_count = Column(Integer, nullable=False, default=0)  # 실패 횟수
+    last_error = Column(Text, nullable=True)  # 마지막 에러
+    created_at = Column(DateTime, default=datetime.now)
+
+    # 검색 엔진 상수
+    SOURCE_TYPE_NAVER = "naver"
+    SOURCE_TYPE_KAKAO = "kakao"
+    SOURCE_TYPE_GOOGLE = "google"
+
+    # 검색 대상 상수
+    TARGET_BLOG = "blog"
+    TARGET_CAFE = "cafe"
+    TARGET_NEWS = "news"
+
+    def __repr__(self):
+        return f"<WritingSearchQuery(id={self.id}, query={self.query})>"
+
+
 class GeneratedWriting(Base):
     """생성된 글."""
 
