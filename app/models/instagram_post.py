@@ -55,12 +55,8 @@ class InstagramPost(Base):
         back_populates="post",
         cascade="all, delete-orphan",
     )
-    # LLM 분류 요청 (최신순)
-    llm_requests = relationship(
-        "InstagramLLMClassificationRequest",
-        back_populates="post",
-        order_by="desc(InstagramLLMClassificationRequest.requested_at)",
-    )
+    # LLM 분류 요청 - InstagramLLMClassificationRequest 제거됨 (2025-12-31)
+    # LLM 요청은 llm_requests 테이블에서 caller_type='instagram', caller_id=post.id로 조회
 
     @property
     def tags(self) -> list[str]:

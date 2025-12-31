@@ -188,11 +188,7 @@ class PostService:
         Returns:
             (게시물 목록, 전체 개수)
         """
-        from app.models.instagram_llm_request import InstagramLLMClassificationRequest
-
-        query = self.db.query(InstagramPost).options(
-            selectinload(InstagramPost.llm_requests)
-        )
+        query = self.db.query(InstagramPost)
 
         # 캡션 검색어 필터 (LIKE)
         if search:
@@ -268,7 +264,6 @@ class PostService:
         """
         return (
             self.db.query(InstagramPost)
-            .options(selectinload(InstagramPost.llm_requests))
             .filter(InstagramPost.id == post_id)
             .first()
         )

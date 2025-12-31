@@ -319,8 +319,8 @@ class TestPostService:
         """존재하지 않는 게시물 삭제"""
         from app.modules.instagram.services.post_service import PostService
 
-        # get_post_by_id uses options(selectinload).filter().first()
-        mock_db.query.return_value.options.return_value.filter.return_value.first.return_value = None
+        # get_post_by_id uses filter().first() (selectinload 제거됨)
+        mock_db.query.return_value.filter.return_value.first.return_value = None
 
         service = PostService(mock_db)
         result = service.delete_post(999)
@@ -349,9 +349,9 @@ class TestPostServiceSearch:
         """search가 있으면 ilike 필터 호출"""
         from app.modules.instagram.services.post_service import PostService
 
-        # Mock 설정 - get_posts uses options(selectinload) first
+        # Mock 설정 - get_posts 쿼리 (selectinload 제거됨)
         mock_query = MagicMock()
-        mock_db.query.return_value.options.return_value = mock_query
+        mock_db.query.return_value = mock_query
         mock_query.filter.return_value = mock_query
         mock_query.join.return_value = mock_query
         mock_query.distinct.return_value = mock_query
@@ -372,7 +372,7 @@ class TestPostServiceSearch:
         from app.modules.instagram.services.post_service import PostService
 
         mock_query = MagicMock()
-        mock_db.query.return_value.options.return_value = mock_query
+        mock_db.query.return_value = mock_query
         mock_query.filter.return_value = mock_query
         mock_query.order_by.return_value = mock_query
         mock_query.offset.return_value = mock_query
@@ -391,7 +391,7 @@ class TestPostServiceSearch:
         from app.modules.instagram.services.post_service import PostService
 
         mock_query = MagicMock()
-        mock_db.query.return_value.options.return_value = mock_query
+        mock_db.query.return_value = mock_query
         mock_query.filter.return_value = mock_query
         mock_query.order_by.return_value = mock_query
         mock_query.offset.return_value = mock_query
@@ -410,7 +410,7 @@ class TestPostServiceSearch:
         from app.modules.instagram.services.post_service import PostService
 
         mock_query = MagicMock()
-        mock_db.query.return_value.options.return_value = mock_query
+        mock_db.query.return_value = mock_query
         mock_query.filter.return_value = mock_query
         mock_query.order_by.return_value = mock_query
         mock_query.offset.return_value = mock_query
@@ -432,7 +432,7 @@ class TestPostServiceSearch:
         from app.modules.instagram.services.post_service import PostService
 
         mock_query = MagicMock()
-        mock_db.query.return_value.options.return_value = mock_query
+        mock_db.query.return_value = mock_query
         mock_query.filter.return_value = mock_query
         mock_query.order_by.return_value = mock_query
         mock_query.offset.return_value = mock_query
@@ -1427,94 +1427,22 @@ class TestMigration033:
 
 
 # ============================================================
-# Phase 2: 이벤트 로그 테스트
+# Phase 2: 이벤트 로그 테스트 - 레거시 (2025-12-31 삭제됨)
 # ============================================================
-
-class TestInstagramCrawlEventModel:
-    """InstagramCrawlEvent 모델 테스트"""
-
-    def test_model_exists(self):
-        """InstagramCrawlEvent 모델 존재"""
-        from app.models.instagram_crawl_event import InstagramCrawlEvent
-
-        assert InstagramCrawlEvent is not None
-
-    def test_model_has_columns(self):
-        """InstagramCrawlEvent에 필요한 컬럼 존재"""
-        from app.models.instagram_crawl_event import InstagramCrawlEvent
-
-        assert hasattr(InstagramCrawlEvent, 'id')
-        assert hasattr(InstagramCrawlEvent, 'crawl_run_id')
-        assert hasattr(InstagramCrawlEvent, 'timestamp')
-        assert hasattr(InstagramCrawlEvent, 'event_type')
-        assert hasattr(InstagramCrawlEvent, 'message')
-        assert hasattr(InstagramCrawlEvent, 'details')
-
-    def test_model_imported_in_init(self):
-        """app.models에서 import 가능"""
-        from app.models import InstagramCrawlEvent
-
-        assert InstagramCrawlEvent is not None
+# TestInstagramCrawlEventModel, TestCrawlEventSchema, TestCrawlRunSummarySchema 삭제됨
+# instagram_crawl_events 테이블 및 InstagramCrawlEvent 모델 제거로 인해 테스트 제거
 
 
 class TestMigration034:
-    """034_crawl_event_log 마이그레이션 테스트"""
+    """034_crawl_event_log 마이그레이션 테스트 (레거시)
+
+    Note: instagram_crawl_events 테이블은 삭제되었으나, 마이그레이션 파일은 유지됨
+    """
 
     def test_migration_file_exists(self):
         """034_crawl_event_log.sql 파일 존재"""
         migration_path = PROJECT_ROOT / "app" / "migrations" / "034_crawl_event_log.sql"
         assert migration_path.exists(), "034_crawl_event_log.sql should exist"
-
-    def test_migration_contains_table(self):
-        """마이그레이션에 테이블 생성 포함"""
-        migration_path = PROJECT_ROOT / "app" / "migrations" / "034_crawl_event_log.sql"
-        content = migration_path.read_text(encoding="utf-8")
-
-        assert "instagram_crawl_events" in content
-        assert "crawl_run_id" in content
-        assert "event_type" in content
-        assert "CREATE INDEX" in content
-
-
-class TestCrawlEventSchema:
-    """CrawlEventSchema 테스트"""
-
-    def test_schema_exists(self):
-        """CrawlEventSchema 존재"""
-        from app.modules.instagram.models.schemas import CrawlEventSchema
-
-        assert CrawlEventSchema is not None
-
-    def test_schema_has_fields(self):
-        """CrawlEventSchema에 필드 존재"""
-        from app.modules.instagram.models.schemas import CrawlEventSchema
-
-        fields = CrawlEventSchema.model_fields
-        assert 'id' in fields
-        assert 'crawl_run_id' in fields
-        assert 'timestamp' in fields
-        assert 'event_type' in fields
-        assert 'message' in fields
-        assert 'details' in fields
-
-
-class TestCrawlRunSummarySchema:
-    """CrawlRunSummarySchema 테스트"""
-
-    def test_schema_exists(self):
-        """CrawlRunSummarySchema 존재"""
-        from app.modules.instagram.models.schemas import CrawlRunSummarySchema
-
-        assert CrawlRunSummarySchema is not None
-
-    def test_schema_has_fields(self):
-        """CrawlRunSummarySchema에 필드 존재"""
-        from app.modules.instagram.models.schemas import CrawlRunSummarySchema
-
-        fields = CrawlRunSummarySchema.model_fields
-        assert 'run' in fields
-        assert 'events' in fields
-        assert 'event_counts' in fields
 
 
 class TestPostDataAdField:
