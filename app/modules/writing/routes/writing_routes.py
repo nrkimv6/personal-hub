@@ -566,3 +566,31 @@ async def collect_from_searches(
         return result
     except Exception as e:
         raise HTTPException(500, f"Collection failed: {e}")
+
+
+# ========== 위키문헌 수집 ==========
+
+
+@router.post("/wikisource/collect")
+async def collect_from_wikisource(
+    categories: Optional[str] = Query(None, description="쉼표로 구분된 카테고리 목록"),
+    min_length: int = Query(200, ge=100, le=1000),
+    max_length: int = Query(10000, ge=500, le=50000),
+    db: Session = Depends(get_db),
+):
+    """위키문헌에서 글 수집."""
+    service = WritingService(db)
+    try:
+        # 카테고리 파싱
+        cat_list = None
+        if categories:
+            cat_list = [c.strip() for c in categories.split(",") if c.strip()]
+
+        result = await service.collect_from_wikisource(
+            categories=cat_list,
+            min_length=min_length,
+            max_length=max_length,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(500, f"Collection failed: {e}")

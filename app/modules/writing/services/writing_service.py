@@ -795,3 +795,76 @@ class WritingService:
             "queries": len(queries),
             "query_results": query_results,
         }
+
+    # ========== 위키문헌 수집 ==========
+
+    async def collect_from_wikisource(
+        self,
+        categories: Optional[list[str]] = None,
+        min_length: int = 200,
+        max_length: int = 10000,
+    ) -> dict:
+        """위키문헌에서 글 수집.
+
+        Args:
+            categories: 카테고리 목록 (None이면 기본 카테고리)
+            min_length: 최소 글자 수
+            max_length: 최대 글자 수
+
+        Returns:
+            수집 결과 dict
+        """
+        from app.modules.writing.services.public_data_collector import (
+            WikisourceCollector,
+        )
+
+        collector = WikisourceCollector()
+        items = await collector.collect_all_categories(
+            categories=categories,
+            min_length=min_length,
+            max_length=max_length,
+        )
+
+        if not items:
+            return {"collected": 0, "total_fetched": 0, "message": "No items found"}
+
+        # DB에 저장 (중복 체크)
+        added = 0
+        for item in items:
+            # 해시로 중복 체크
+            existing = (
+                self.db.query(WritingSource)
+                .filter(WritingSource.content_hash == item.get("content_hash"))
+                .first()
+            )
+            if existing:
+                continue
+
+            # URL로도 중복 체크
+            if item.get("link"):
+                url_existing = (
+                    self.db.query(WritingSource)
+                    .filter(WritingSource.source_url == item["link"])
+                    .first()
+                )
+                if url_existing:
+                    continue
+
+            # 새 소스 추가
+            source = WritingSource(
+                content=item["content"],
+                category="위키문헌",
+                source_info=item.get("title"),
+                source_url=item.get("link"),
+                source_type="wikisource",
+                content_hash=item.get("content_hash"),
+            )
+            self.db.add(source)
+            added += 1
+
+        self.db.commit()
+
+        return {
+            "collected": added,
+            "total_fetched": len(items),
+        }
