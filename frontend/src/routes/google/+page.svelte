@@ -75,6 +75,9 @@
 		{ value: '1y', label: '최근 1년' }
 	];
 
+	// 현재 폴링 중인 검색 ID
+	let pendingSearchId: string | null = $state(null);
+
 	// 검색 기능 (비동기 폴링 방식)
 	async function search() {
 		if (!query.trim()) return;
@@ -100,18 +103,29 @@
 
 			// 2. 상태 폴링하여 완료될 때까지 대기
 			const searchId = queueResponse.search_id;
-			let status = queueResponse.status;
-			let pollCount = 0;
-			const maxPolls = 60; // 최대 30초 (500ms * 60)
+			pendingSearchId = searchId;
+			await pollForResults(searchId);
+		} catch (e) {
+			error = e instanceof Error ? e.message : '검색 중 오류가 발생했습니다.';
+		} finally {
+			loading = false;
+			pendingSearchId = null;
+		}
+	}
 
-			while (status === 'pending' || status === 'processing') {
-				if (pollCount >= maxPolls) {
-					throw new Error('검색 시간이 초과되었습니다. 히스토리에서 결과를 확인하세요.');
-				}
+	// 검색 결과 폴링 (무제한, 1초 간격)
+	async function pollForResults(searchId: string) {
+		let status = 'pending';
 
-				await new Promise((resolve) => setTimeout(resolve, 500)); // 500ms 대기
-				pollCount++;
+		while (status === 'pending' || status === 'processing') {
+			// 다른 검색이 시작되면 현재 폴링 중단
+			if (pendingSearchId !== searchId) {
+				return;
+			}
 
+			await new Promise((resolve) => setTimeout(resolve, 1000)); // 1초 대기
+
+			try {
 				const statusResponse = await apiRequest<{
 					search_id: string;
 					query: string;
@@ -125,17 +139,15 @@
 
 				if (status === 'completed') {
 					results = statusResponse.results;
+					await loadHistory();
 					break;
 				} else if (status === 'failed') {
 					throw new Error(statusResponse.error_message || '검색 실패');
 				}
+			} catch (e) {
+				// 네트워크 에러 시 재시도
+				console.warn('Poll failed, retrying...', e);
 			}
-
-			await loadHistory();
-		} catch (e) {
-			error = e instanceof Error ? e.message : '검색 중 오류가 발생했습니다.';
-		} finally {
-			loading = false;
 		}
 	}
 
@@ -187,43 +199,16 @@
 				message: string;
 			}>(`/saved/${saved.id}/run`, { method: 'POST' });
 
-			// 2. 상태 폴링하여 완료될 때까지 대기
+			// 2. 상태 폴링 (공통 함수 사용)
 			const searchId = queueResponse.search_id;
-			let status = queueResponse.status;
-			let pollCount = 0;
-			const maxPolls = 60; // 최대 30초
-
-			while (status === 'pending' || status === 'processing') {
-				if (pollCount >= maxPolls) {
-					throw new Error('검색 시간이 초과되었습니다. 히스토리에서 결과를 확인하세요.');
-				}
-
-				await new Promise((resolve) => setTimeout(resolve, 500));
-				pollCount++;
-
-				const statusResponse = await apiRequest<{
-					search_id: string;
-					status: string;
-					error_message?: string;
-					results: SearchResult[];
-				}>(`/search/${searchId}/status`);
-
-				status = statusResponse.status;
-
-				if (status === 'completed') {
-					results = statusResponse.results;
-					break;
-				} else if (status === 'failed') {
-					throw new Error(statusResponse.error_message || '검색 실패');
-				}
-			}
-
+			pendingSearchId = searchId;
+			await pollForResults(searchId);
 			await loadSavedSearches();
-			await loadHistory();
 		} catch (e) {
 			error = e instanceof Error ? e.message : '검색 실패';
 		} finally {
 			loading = false;
+			pendingSearchId = null;
 		}
 	}
 
