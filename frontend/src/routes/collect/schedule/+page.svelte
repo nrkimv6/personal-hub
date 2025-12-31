@@ -97,6 +97,8 @@
 				return { class: 'bg-pink-100 text-pink-800', text: 'Instagram' };
 			case 'universal_crawl':
 				return { class: 'bg-blue-100 text-blue-800', text: 'Web' };
+			case 'google_search':
+				return { class: 'bg-yellow-100 text-yellow-800', text: 'Google' };
 			default:
 				return { class: 'bg-gray-100 text-gray-800', text: type };
 		}
@@ -110,6 +112,8 @@
 				return { class: 'bg-blue-50 text-blue-700', text: '간격' };
 			case 'cron':
 				return { class: 'bg-purple-50 text-purple-700', text: 'Cron' };
+			case 'time_window':
+				return { class: 'bg-orange-50 text-orange-700', text: '시간대' };
 			default:
 				return { class: 'bg-gray-50 text-gray-700', text: type };
 		}
@@ -188,6 +192,15 @@
 
 						<!-- 버튼 그룹 -->
 						<div class="flex items-center gap-2">
+							<!-- 실행 이력 버튼 -->
+							<a
+								href="/crawl/schedules/{schedule.id}/runs"
+								class="btn btn-secondary btn-sm"
+								title="실행 이력 보기"
+							>
+								이력
+							</a>
+
 							<!-- 설정 버튼 (Instagram만) -->
 							{#if schedule.target_type === 'instagram_feed'}
 								<button
