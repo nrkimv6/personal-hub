@@ -42,6 +42,22 @@ class BulkSourceRequest(BaseModel):
     sources: list[dict]
 
 
+class FeedCreateRequest(BaseModel):
+    """RSS 피드 생성 요청."""
+
+    name: str
+    url: str
+    source_type: str = "tistory"
+
+
+class FeedUpdateRequest(BaseModel):
+    """RSS 피드 수정 요청."""
+
+    name: Optional[str] = None
+    url: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
 # ========== 생성된 글 조회 ==========
 
 
@@ -293,3 +309,118 @@ def _writing_to_dict(writing, include_full: bool = False) -> dict:
         )
 
     return result
+
+
+def _feed_to_dict(feed) -> dict:
+    """WritingRssFeed를 dict로 변환."""
+    return {
+        "id": feed.id,
+        "name": feed.name,
+        "url": feed.url,
+        "source_type": feed.source_type,
+        "enabled": bool(feed.enabled),
+        "last_fetched_at": feed.last_fetched_at.isoformat() if feed.last_fetched_at else None,
+        "fetch_count": feed.fetch_count,
+        "error_count": feed.error_count,
+        "last_error": feed.last_error,
+        "created_at": feed.created_at.isoformat() if feed.created_at else None,
+    }
+
+
+# ========== RSS 피드 관리 ==========
+
+
+@router.get("/feeds")
+def list_feeds(
+    source_type: Optional[str] = None,
+    include_disabled: bool = False,
+    db: Session = Depends(get_db),
+):
+    """RSS 피드 목록 조회."""
+    service = WritingService(db)
+    feeds = service.list_feeds(
+        source_type=source_type,
+        enabled_only=not include_disabled,
+    )
+    return {"items": [_feed_to_dict(f) for f in feeds], "total": len(feeds)}
+
+
+@router.get("/feeds/{feed_id}")
+def get_feed(
+    feed_id: int,
+    db: Session = Depends(get_db),
+):
+    """RSS 피드 상세 조회."""
+    service = WritingService(db)
+    feed = service.get_feed(feed_id)
+    if not feed:
+        raise HTTPException(404, "Feed not found")
+    return _feed_to_dict(feed)
+
+
+@router.post("/feeds")
+def add_feed(
+    data: FeedCreateRequest,
+    db: Session = Depends(get_db),
+):
+    """RSS 피드 추가."""
+    service = WritingService(db)
+    try:
+        feed = service.add_feed(
+            name=data.name,
+            url=data.url,
+            source_type=data.source_type,
+        )
+        return _feed_to_dict(feed)
+    except Exception as e:
+        raise HTTPException(400, f"Failed to add feed: {e}")
+
+
+@router.put("/feeds/{feed_id}")
+def update_feed(
+    feed_id: int,
+    data: FeedUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    """RSS 피드 수정."""
+    service = WritingService(db)
+    feed = service.update_feed(
+        feed_id=feed_id,
+        name=data.name,
+        url=data.url,
+        enabled=data.enabled,
+    )
+    if not feed:
+        raise HTTPException(404, "Feed not found")
+    return _feed_to_dict(feed)
+
+
+@router.delete("/feeds/{feed_id}")
+def delete_feed(
+    feed_id: int,
+    db: Session = Depends(get_db),
+):
+    """RSS 피드 삭제."""
+    service = WritingService(db)
+    success = service.delete_feed(feed_id)
+    if not success:
+        raise HTTPException(404, "Feed not found")
+    return {"deleted": True}
+
+
+@router.post("/feeds/collect")
+async def collect_from_feeds(
+    min_length: int = Query(300, ge=100, le=1000),
+    max_length: int = Query(3000, ge=500, le=10000),
+    db: Session = Depends(get_db),
+):
+    """모든 활성 RSS 피드에서 글 수집."""
+    service = WritingService(db)
+    try:
+        result = await service.collect_from_feeds(
+            min_length=min_length,
+            max_length=max_length,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(500, f"Collection failed: {e}")
