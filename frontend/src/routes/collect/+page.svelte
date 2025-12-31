@@ -21,6 +21,10 @@
   // URL 타입 목록
   let urlTypes: string[] = [];
 
+  // 상세보기 모달
+  let selectedPost: CollectedPost | null = null;
+  let currentImageIndex = 0;
+
   $: canPrevPage = page > 1;
   $: canNextPage = page < totalPages;
 
@@ -131,6 +135,34 @@
     }
   }
 
+  function openDetail(post: CollectedPost) {
+    selectedPost = post;
+    currentImageIndex = 0;
+  }
+
+  function closeDetail() {
+    selectedPost = null;
+  }
+
+  function formatContent(text: string | null): string {
+    if (!text) return '';
+    // 줄바꿈을 <br>로 변환하고, @멘션과 #해시태그 스타일링
+    const lines = text.split('\n');
+    return lines
+      .map((line) => {
+        return line.replace(/([@#][\w\uAC00-\uD7AF]+)/g, (match) => {
+          if (match.startsWith('#')) {
+            return `<span class="text-gray-500">${match}</span>`;
+          }
+          if (match.startsWith('@')) {
+            return `<span class="font-semibold text-gray-900">${match}</span>`;
+          }
+          return match;
+        });
+      })
+      .join('<br/>');
+  }
+
   onMount(() => {
     fetchPosts();
     fetchUrlTypes();
@@ -227,83 +259,66 @@
       <p class="text-gray-500">게시물이 없습니다</p>
     </div>
   {:else}
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+    <div class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 md:gap-4">
       {#each posts as post}
         {@const sourceBadge = getSourceBadge(post.source_type)}
         {@const classificationBadge = getClassificationBadge(post.classification)}
-        {@const urlTypeBadge = getUrlTypeBadge(post.url_type)}
-        <div class="card hover:shadow-lg transition-shadow">
+        <div
+          class="card hover:shadow-lg transition-shadow cursor-pointer"
+          onclick={() => openDetail(post)}
+          onkeydown={(e) => e.key === 'Enter' && openDetail(post)}
+          role="button"
+          tabindex="0"
+        >
           <!-- 썸네일 -->
           {#if post.thumbnail}
-            <div class="aspect-square bg-gray-100 rounded-lg overflow-hidden mb-3">
+            <div class="aspect-square bg-gray-100 rounded-lg mb-2 md:mb-3 overflow-hidden relative">
               <img
                 src={post.thumbnail}
                 alt={post.title || ''}
                 class="w-full h-full object-cover"
                 loading="lazy"
               />
+              <!-- 배지 오버레이 -->
+              <div class="absolute top-1 right-1 flex gap-1">
+                <span class="px-1.5 py-0.5 text-xs rounded-full {sourceBadge.class} shadow-sm">
+                  {sourceBadge.text}
+                </span>
+                {#if classificationBadge}
+                  <span class="px-1.5 py-0.5 text-xs rounded-full {classificationBadge.class} shadow-sm">
+                    {classificationBadge.text}
+                  </span>
+                {/if}
+              </div>
             </div>
           {:else}
-            <div class="aspect-square bg-gray-100 rounded-lg flex items-center justify-center mb-3">
-              <span class="text-4xl text-gray-400">
+            <div class="aspect-square bg-gray-200 rounded-lg mb-2 md:mb-3 flex items-center justify-center relative">
+              <span class="text-2xl md:text-4xl text-gray-400">
                 {post.source_type === 'instagram' ? '📷' : '📄'}
               </span>
+              <!-- 배지 오버레이 -->
+              <div class="absolute top-1 right-1 flex gap-1">
+                <span class="px-1.5 py-0.5 text-xs rounded-full {sourceBadge.class} shadow-sm">
+                  {sourceBadge.text}
+                </span>
+              </div>
             </div>
           {/if}
 
-          <!-- 배지들 -->
-          <div class="flex flex-wrap gap-1 mb-2">
-            <span class="px-2 py-0.5 text-xs rounded-full {sourceBadge.class}">
-              {sourceBadge.text}
-            </span>
-            <span class="px-2 py-0.5 text-xs rounded-full {urlTypeBadge.class}">
-              {urlTypeBadge.text}
-            </span>
-            {#if classificationBadge}
-              <span class="px-2 py-0.5 text-xs rounded-full {classificationBadge.class}">
-                {classificationBadge.text}
-              </span>
-            {/if}
-          </div>
-
-          <!-- 제목/본문 -->
-          <h3 class="font-medium text-gray-900 line-clamp-2 mb-1">
-            {post.title || '(제목 없음)'}
-          </h3>
-
-          <!-- 메타 정보 -->
-          <div class="text-xs text-gray-500 space-y-1">
-            {#if post.account_name}
-              <p>@{post.account_name}</p>
-            {/if}
-            <p>{formatDate(post.created_at)}</p>
-          </div>
-
-          <!-- 태그 -->
-          {#if post.tags && post.tags.length > 0}
-            <div class="flex flex-wrap gap-1 mt-2">
-              {#each post.tags.slice(0, 3) as tag}
-                <span class="px-1.5 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">
-                  {tag}
-                </span>
-              {/each}
-              {#if post.tags.length > 3}
-                <span class="px-1.5 py-0.5 text-xs text-gray-400">
-                  +{post.tags.length - 3}
-                </span>
+          <!-- 정보 -->
+          <div class="space-y-1">
+            <div class="flex items-center justify-between">
+              {#if post.account_name}
+                <span class="font-medium text-xs md:text-sm text-gray-900 truncate">@{post.account_name}</span>
+              {:else}
+                <span class="font-medium text-xs md:text-sm text-gray-900 truncate">{post.title || '게시물'}</span>
               {/if}
             </div>
-          {/if}
-
-          <!-- 링크 -->
-          <a
-            href={post.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            class="mt-3 text-xs text-blue-600 hover:underline truncate block"
-          >
-            원본 보기 →
-          </a>
+            <p class="text-xs text-gray-500 line-clamp-2 hidden md:block">
+              {post.content ? post.content.slice(0, 50) : post.title || ''}
+            </p>
+            <p class="text-xs text-gray-400">{formatDate(post.created_at)}</p>
+          </div>
         </div>
       {/each}
     </div>
@@ -332,3 +347,114 @@
     {/if}
   {/if}
 </div>
+
+<!-- 상세보기 모달 -->
+{#if selectedPost}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center sm:p-4"
+    onclick={closeDetail}
+    onkeydown={(e) => e.key === 'Escape' && closeDetail()}
+    role="dialog"
+    tabindex="-1"
+  >
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <div
+      class="bg-white rounded-t-xl sm:rounded-xl w-full sm:max-w-lg max-h-[95vh] sm:max-h-[90vh] overflow-auto"
+      onclick={(e) => e.stopPropagation()}
+    >
+      <!-- Header -->
+      <div class="sticky top-0 bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          {#if selectedPost.account_name}
+            <span class="font-semibold text-sm text-gray-900">@{selectedPost.account_name}</span>
+          {:else}
+            <span class="font-medium text-sm text-gray-700">{selectedPost.title || '게시물'}</span>
+          {/if}
+          {#if selectedPost.source_type}
+            {@const sourceBadge = getSourceBadge(selectedPost.source_type)}
+            <span class="px-2 py-0.5 text-xs rounded-full {sourceBadge.class}">{sourceBadge.text}</span>
+          {/if}
+        </div>
+        <button
+          onclick={closeDetail}
+          class="p-2 hover:bg-gray-100 rounded-full transition-colors"
+          aria-label="닫기"
+        >
+          <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- 이미지 -->
+      {#if selectedPost.thumbnail}
+        <div class="relative w-full aspect-square bg-gray-100 overflow-hidden">
+          <img
+            src={selectedPost.thumbnail}
+            alt={selectedPost.title || '게시물 이미지'}
+            class="w-full h-full object-cover"
+          />
+        </div>
+      {/if}
+
+      <!-- 본문 -->
+      <div class="px-4 py-4">
+        <!-- 배지들 -->
+        <div class="flex flex-wrap gap-1 mb-3">
+          {@const classificationBadge = getClassificationBadge(selectedPost.classification)}
+          {@const urlTypeBadge = getUrlTypeBadge(selectedPost.url_type)}
+          <span class="px-2 py-0.5 text-xs rounded-full {urlTypeBadge.class}">{urlTypeBadge.text}</span>
+          {#if classificationBadge}
+            <span class="px-2 py-0.5 text-xs rounded-full {classificationBadge.class}">{classificationBadge.text}</span>
+          {/if}
+        </div>
+
+        <!-- 제목 -->
+        {#if selectedPost.title}
+          <h3 class="font-semibold text-gray-900 mb-2">{selectedPost.title}</h3>
+        {/if}
+
+        <!-- 내용 -->
+        {#if selectedPost.content}
+          <div class="text-sm text-gray-700 leading-relaxed mb-4 max-h-60 overflow-y-auto">
+            {@html formatContent(selectedPost.content)}
+          </div>
+        {/if}
+
+        <!-- 태그 -->
+        {#if selectedPost.tags && selectedPost.tags.length > 0}
+          <div class="flex flex-wrap gap-1 mb-4">
+            {#each selectedPost.tags as tag}
+              <span class="px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded-full">{tag}</span>
+            {/each}
+          </div>
+        {/if}
+
+        <!-- 메타 정보 -->
+        <div class="text-xs text-gray-400 pt-3 border-t border-gray-100">
+          <div class="flex justify-between">
+            <span>수집일: {formatDate(selectedPost.created_at)}</span>
+            {#if selectedPost.account_name}
+              <span>계정: @{selectedPost.account_name}</span>
+            {/if}
+          </div>
+        </div>
+
+        <!-- 액션 버튼 -->
+        <div class="flex gap-2 flex-wrap pt-4 mt-4 border-t border-gray-100">
+          <a
+            href={selectedPost.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn btn-primary btn-sm"
+          >
+            원본 보기
+          </a>
+          <button onclick={closeDetail} class="btn btn-secondary btn-sm">닫기</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
