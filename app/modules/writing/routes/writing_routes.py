@@ -58,6 +58,25 @@ class FeedUpdateRequest(BaseModel):
     enabled: Optional[bool] = None
 
 
+class SearchQueryCreateRequest(BaseModel):
+    """검색 쿼리 생성 요청."""
+
+    query: str
+    source_type: str = "naver"  # 'naver', 'kakao', 'google'
+    search_target: str = "blog"  # 'blog', 'cafe', 'news'
+    priority: int = 0
+
+
+class SearchQueryUpdateRequest(BaseModel):
+    """검색 쿼리 수정 요청."""
+
+    query: Optional[str] = None
+    source_type: Optional[str] = None
+    search_target: Optional[str] = None
+    enabled: Optional[bool] = None
+    priority: Optional[int] = None
+
+
 # ========== 생성된 글 조회 ==========
 
 
@@ -420,6 +439,129 @@ async def collect_from_feeds(
         result = await service.collect_from_feeds(
             min_length=min_length,
             max_length=max_length,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(500, f"Collection failed: {e}")
+
+
+# ========== 검색 쿼리 관리 ==========
+
+
+def _query_to_dict(query) -> dict:
+    """WritingSearchQuery를 dict로 변환."""
+    return {
+        "id": query.id,
+        "query": query.query,
+        "source_type": query.source_type,
+        "search_target": query.search_target,
+        "enabled": bool(query.enabled),
+        "priority": query.priority,
+        "last_searched_at": (
+            query.last_searched_at.isoformat() if query.last_searched_at else None
+        ),
+        "result_count": query.result_count,
+        "success_count": query.success_count,
+        "error_count": query.error_count,
+        "last_error": query.last_error,
+        "created_at": query.created_at.isoformat() if query.created_at else None,
+    }
+
+
+@router.get("/search-queries")
+def list_search_queries(
+    source_type: Optional[str] = None,
+    include_disabled: bool = False,
+    db: Session = Depends(get_db),
+):
+    """검색 쿼리 목록 조회."""
+    service = WritingService(db)
+    queries = service.list_search_queries(
+        source_type=source_type,
+        enabled_only=not include_disabled,
+    )
+    return {"items": [_query_to_dict(q) for q in queries], "total": len(queries)}
+
+
+@router.get("/search-queries/{query_id}")
+def get_search_query(
+    query_id: int,
+    db: Session = Depends(get_db),
+):
+    """검색 쿼리 상세 조회."""
+    service = WritingService(db)
+    query = service.get_search_query(query_id)
+    if not query:
+        raise HTTPException(404, "Query not found")
+    return _query_to_dict(query)
+
+
+@router.post("/search-queries")
+def add_search_query(
+    data: SearchQueryCreateRequest,
+    db: Session = Depends(get_db),
+):
+    """검색 쿼리 추가."""
+    service = WritingService(db)
+    query = service.add_search_query(
+        query=data.query,
+        source_type=data.source_type,
+        search_target=data.search_target,
+        priority=data.priority,
+    )
+    return _query_to_dict(query)
+
+
+@router.put("/search-queries/{query_id}")
+def update_search_query(
+    query_id: int,
+    data: SearchQueryUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    """검색 쿼리 수정."""
+    service = WritingService(db)
+    query = service.update_search_query(
+        query_id=query_id,
+        query=data.query,
+        source_type=data.source_type,
+        search_target=data.search_target,
+        enabled=data.enabled,
+        priority=data.priority,
+    )
+    if not query:
+        raise HTTPException(404, "Query not found")
+    return _query_to_dict(query)
+
+
+@router.delete("/search-queries/{query_id}")
+def delete_search_query(
+    query_id: int,
+    db: Session = Depends(get_db),
+):
+    """검색 쿼리 삭제."""
+    service = WritingService(db)
+    success = service.delete_search_query(query_id)
+    if not success:
+        raise HTTPException(404, "Query not found")
+    return {"deleted": True}
+
+
+@router.post("/search-queries/collect")
+async def collect_from_searches(
+    source_type: Optional[str] = None,
+    min_length: int = Query(100, ge=50, le=1000),
+    max_length: int = Query(5000, ge=500, le=10000),
+    max_queries: int = Query(10, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """검색 API에서 글 수집."""
+    service = WritingService(db)
+    try:
+        result = await service.collect_from_searches(
+            source_type=source_type,
+            min_length=min_length,
+            max_length=max_length,
+            max_queries=max_queries,
         )
         return result
     except Exception as e:
