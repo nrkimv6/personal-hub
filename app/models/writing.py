@@ -38,6 +38,7 @@ class GeneratedWriting(Base):
     # 결과
     content = Column(Text, nullable=False)  # 생성된 글
     raw_response = Column(Text, nullable=True)  # LLM 전체 응답
+    selected_elements = Column(Text, nullable=True)  # 선택된 요소 JSON
 
     # 평가
     rating = Column(Integer, nullable=True)  # 1: 추천, -1: 비추천, NULL: 미평가
