@@ -183,18 +183,25 @@
 				<div
 					class="text-lg font-bold {workerStatus?.status === 'healthy'
 						? 'text-green-600'
-						: workerStatus?.status === 'no_worker'
-							? 'text-gray-500'
-							: 'text-red-600'}"
+						: workerStatus?.status === 'warning'
+							? 'text-yellow-600'
+							: workerStatus?.status === 'no_worker'
+								? 'text-gray-500'
+								: 'text-red-600'}"
 				>
 					{workerStatus?.status === 'healthy'
 						? '정상'
-						: workerStatus?.status === 'no_worker'
-							? '없음'
-							: '비정상'}
+						: workerStatus?.status === 'warning'
+							? '지연'
+							: workerStatus?.status === 'no_worker'
+								? '없음'
+								: '비정상'}
 				</div>
 				{#if workerStatus?.state}
 					<div class="text-xs text-gray-400">{workerStatus.state}</div>
+				{/if}
+				{#if workerStatus?.message && workerStatus?.status !== 'healthy'}
+					<div class="text-xs text-gray-400">{workerStatus.message}</div>
 				{/if}
 			</div>
 
