@@ -312,6 +312,10 @@ class SearchContentFilter:
         """
         filtered = []
 
+        # 키워드 소문자 변환 (한 번만)
+        exclude_lower = [kw.lower() for kw in cls.EXCLUDE_KEYWORDS]
+        prefer_lower = [kw.lower() for kw in cls.PREFER_KEYWORDS]
+
         for item in items:
             content = item.get("content", "")
             content_lower = content.lower()
@@ -321,11 +325,11 @@ class SearchContentFilter:
                 continue
 
             # 제외 키워드 체크
-            if any(kw in content_lower for kw in cls.EXCLUDE_KEYWORDS):
+            if any(kw in content_lower for kw in exclude_lower):
                 continue
 
             # 선호 키워드 점수 계산
-            score = sum(1 for kw in cls.PREFER_KEYWORDS if kw in content_lower)
+            score = sum(1 for kw in prefer_lower if kw in content_lower)
             item["relevance_score"] = score
 
             filtered.append(item)
