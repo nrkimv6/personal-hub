@@ -28,6 +28,7 @@ from app.modules.instagram.services.crawl_service import CrawlService
 from app.modules.instagram.services.scheduler import InstagramScheduler
 from app.modules.instagram.services.crawler import InstagramCrawler
 from app.modules.instagram.models.schemas import TimeWindow
+from app.modules.writing.worker.writing_worker import WritingWorker
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -108,6 +109,14 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             )
             for schedule in google_schedules:
                 await self._process_google_search_schedule(db, schedule, schedule_service)
+
+            # Writing task 타입의 활성 스케줄 조회
+            writing_schedules = schedule_service.get_schedules_by_type(
+                CrawlSchedule.TARGET_TYPE_WRITING_TASK,
+                enabled_only=True
+            )
+            for schedule in writing_schedules:
+                await self._process_writing_schedule(db, schedule, schedule_service)
 
         except Exception as e:
             logger.error(f"[{self.name}] 스케줄 디스패치 오류: {e}", exc_info=True)
@@ -538,3 +547,145 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             await asyncio.sleep(2)
 
         return {"status": "failed", "error_message": "Timeout"}
+
+    # =====================================
+    # Writing Task 스케줄 처리
+    # =====================================
+
+    async def _process_writing_schedule(
+        self,
+        db,
+        schedule: CrawlSchedule,
+        schedule_service: CrawlScheduleService
+    ):
+        """Writing task 스케줄 처리.
+
+        Args:
+            db: DB 세션
+            schedule: 크롤링 스케줄
+            schedule_service: 스케줄 서비스
+        """
+        try:
+            config = schedule.get_target_config()
+
+            # 타임 윈도우 설정
+            time_windows = [
+                TimeWindow(**tw) for tw in config.get("time_windows", [])
+            ]
+            daily_runs = config.get("daily_runs", 1)
+            min_interval = config.get("min_interval_hours", 20)  # 기본 20시간 간격
+
+            scheduler = InstagramScheduler(
+                daily_runs=daily_runs,
+                time_windows=time_windows,
+            )
+
+            # 마지막 실행 시간 조회
+            last_run = schedule_service.get_latest_run(schedule.id)
+            last_run_time = last_run.started_at if last_run else None
+
+            if scheduler.should_run_now(
+                last_run=last_run_time,
+                min_interval_hours=min_interval,
+            ):
+                logger.info(f"[{self.name}] Writing task 스케줄 실행 시간 도래: schedule_id={schedule.id}")
+
+                # 이미 활성 실행이 있는지 확인
+                if schedule_service.has_active_run(schedule.id):
+                    logger.info(f"[{self.name}] 이미 활성 실행 존재, 스킵")
+                    return
+
+                # 실행 시작
+                run = schedule_service.start_run(
+                    schedule_id=schedule.id,
+                    worker_id=self.name,
+                    config_snapshot=config
+                )
+
+                task_name = f"writing_schedule_{schedule.id}_run_{run.id}"
+                if not self._is_task_running(task_name):
+                    self._create_task(
+                        self._execute_writing_task(schedule, run),
+                        task_name
+                    )
+                    logger.info(f"[{self.name}] Writing task 태스크 시작: run_id={run.id}")
+
+        except Exception as e:
+            logger.error(f"[{self.name}] Writing task 스케줄 처리 오류: schedule_id={schedule.id}, error={e}", exc_info=True)
+
+    async def _execute_writing_task(
+        self,
+        schedule: CrawlSchedule,
+        run: CrawlScheduleRun
+    ):
+        """Writing task 실행.
+
+        Args:
+            schedule: 스케줄
+            run: 실행 기록
+        """
+        db = SessionLocal()
+        try:
+            schedule_service = CrawlScheduleService(db)
+
+            self._update_worker_state("writing", f"schedule_{schedule.id}")
+
+            # WritingWorker 실행 (동기 호출을 별도 스레드에서 실행)
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                self._run_writing_worker_sync,
+                schedule,
+                run
+            )
+
+            if result.get("error"):
+                schedule_service.fail_run(run.id, result["error"])
+                logger.error(f"[{self.name}] Writing task 실패: {result['error']}")
+            else:
+                schedule_service.complete_run(
+                    run.id,
+                    collected_count=result.get("total", 0),
+                    saved_count=result.get("success", 0),
+                    stop_reason="completed"
+                )
+                schedule_service.update_schedule_after_run(schedule.id)
+                logger.info(
+                    f"[{self.name}] Writing task 완료: run_id={run.id}, "
+                    f"total={result.get('total', 0)}, success={result.get('success', 0)}"
+                )
+
+        except Exception as e:
+            logger.error(f"[{self.name}] Writing task 실행 실패: run_id={run.id}, error={e}", exc_info=True)
+            try:
+                schedule_service = CrawlScheduleService(db)
+                schedule_service.fail_run(run.id, str(e))
+            except Exception:
+                pass
+        finally:
+            self._update_worker_state("idle")
+            db.close()
+
+    def _run_writing_worker_sync(
+        self,
+        schedule: CrawlSchedule,
+        run: CrawlScheduleRun
+    ) -> dict:
+        """WritingWorker 동기 실행 (별도 스레드에서 호출).
+
+        Args:
+            schedule: 스케줄
+            run: 실행 기록
+
+        Returns:
+            실행 결과 dict
+        """
+        db = SessionLocal()
+        try:
+            worker = WritingWorker(db)
+            return worker.run(schedule, run)
+        except Exception as e:
+            logger.error(f"[{self.name}] WritingWorker 실행 오류: {e}", exc_info=True)
+            return {"error": str(e)}
+        finally:
+            db.close()
