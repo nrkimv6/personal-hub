@@ -7,7 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.crawl_schedule import CrawlSchedule, CrawlScheduleRun
-from app.models.writing import WritingSource, GeneratedWriting
+from app.models.writing import WritingSource, GeneratedWriting, WritingRssFeed
 
 
 class WritingService:
@@ -369,4 +369,171 @@ class WritingService:
             "run_id": run.id,
             "schedule_id": schedule.id,
             **result,
+        }
+
+    # ========== RSS 피드 관리 ==========
+
+    def list_feeds(
+        self,
+        source_type: Optional[str] = None,
+        enabled_only: bool = True,
+    ) -> list[WritingRssFeed]:
+        """RSS 피드 목록 조회."""
+        query = self.db.query(WritingRssFeed)
+
+        if enabled_only:
+            query = query.filter(WritingRssFeed.enabled == 1)
+
+        if source_type:
+            query = query.filter(WritingRssFeed.source_type == source_type)
+
+        return query.order_by(WritingRssFeed.id.desc()).all()
+
+    def get_feed(self, feed_id: int) -> Optional[WritingRssFeed]:
+        """RSS 피드 상세 조회."""
+        return self.db.query(WritingRssFeed).filter(WritingRssFeed.id == feed_id).first()
+
+    def add_feed(
+        self,
+        name: str,
+        url: str,
+        source_type: str = WritingRssFeed.SOURCE_TYPE_TISTORY,
+    ) -> WritingRssFeed:
+        """RSS 피드 추가."""
+        feed = WritingRssFeed(
+            name=name,
+            url=url,
+            source_type=source_type,
+            enabled=1,
+        )
+        self.db.add(feed)
+        self.db.commit()
+        self.db.refresh(feed)
+        return feed
+
+    def update_feed(
+        self,
+        feed_id: int,
+        name: Optional[str] = None,
+        url: Optional[str] = None,
+        enabled: Optional[bool] = None,
+    ) -> Optional[WritingRssFeed]:
+        """RSS 피드 수정."""
+        feed = self.get_feed(feed_id)
+        if not feed:
+            return None
+
+        if name is not None:
+            feed.name = name
+        if url is not None:
+            feed.url = url
+        if enabled is not None:
+            feed.enabled = 1 if enabled else 0
+
+        self.db.commit()
+        self.db.refresh(feed)
+        return feed
+
+    def delete_feed(self, feed_id: int) -> bool:
+        """RSS 피드 삭제."""
+        feed = self.get_feed(feed_id)
+        if not feed:
+            return False
+
+        self.db.delete(feed)
+        self.db.commit()
+        return True
+
+    def update_feed_status(
+        self,
+        feed_id: int,
+        success: bool,
+        error_message: Optional[str] = None,
+    ) -> None:
+        """RSS 피드 상태 업데이트."""
+        feed = self.get_feed(feed_id)
+        if not feed:
+            return
+
+        feed.last_fetched_at = datetime.now()
+        feed.fetch_count += 1
+
+        if not success:
+            feed.error_count += 1
+            feed.last_error = error_message
+
+        self.db.commit()
+
+    # ========== RSS 수집 ==========
+
+    async def collect_from_feeds(
+        self,
+        min_length: int = 300,
+        max_length: int = 3000,
+    ) -> dict:
+        """모든 활성 RSS 피드에서 글 수집.
+
+        Returns:
+            수집 결과 dict
+        """
+        from app.modules.writing.services.rss_collector import RSSCollector
+
+        feeds = self.list_feeds(enabled_only=True)
+        if not feeds:
+            return {"collected": 0, "feeds": 0, "message": "No enabled feeds"}
+
+        collector = RSSCollector()
+        feed_urls = [feed.url for feed in feeds]
+
+        # 수집
+        items = await collector.collect_from_feeds(
+            feed_urls,
+            min_length=min_length,
+            max_length=max_length,
+        )
+
+        # DB에 저장 (중복 체크)
+        added = 0
+        for item in items:
+            # 해시로 중복 체크
+            existing = (
+                self.db.query(WritingSource)
+                .filter(WritingSource.content_hash == item.get("content_hash"))
+                .first()
+            )
+            if existing:
+                continue
+
+            # URL로도 중복 체크
+            if item.get("link"):
+                url_existing = (
+                    self.db.query(WritingSource)
+                    .filter(WritingSource.source_url == item["link"])
+                    .first()
+                )
+                if url_existing:
+                    continue
+
+            # 새 소스 추가
+            source = WritingSource(
+                content=item["content"],
+                category=None,  # 자동 분류 필요시 추후 구현
+                source_info=item.get("author") or item.get("source"),
+                source_url=item.get("link"),
+                source_type=WritingSource.SOURCE_TYPE_RSS,
+                content_hash=item.get("content_hash"),
+            )
+            self.db.add(source)
+            added += 1
+
+        self.db.commit()
+
+        # 피드별 상태 업데이트
+        for feed in feeds:
+            self.update_feed_status(feed.id, success=True)
+
+        return {
+            "collected": added,
+            "total_fetched": len(items),
+            "feeds": len(feeds),
         }
