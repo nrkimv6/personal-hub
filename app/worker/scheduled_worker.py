@@ -1,7 +1,7 @@
 """
 스케줄 기반 크롤링 워커.
 
-CrawlSchedule 설정에 따라 정해진 시간에 피드 크롤링을 자동으로 수행합니다.
+CrawlSchedule 설정에 따라 정해진 시간에 크롤링을 자동으로 수행합니다.
 
 실행 방법:
     python -m app.worker.scheduled_worker
@@ -10,15 +10,18 @@ CrawlSchedule 설정에 따라 정해진 시간에 피드 크롤링을 자동으
     - 스케줄 설정에 따른 자동 피드 크롤링
     - TimeWindow 기반 실행 시간 관리
     - 최소 간격 제한 준수
+    - Google 검색 스케줄 지원
 """
 import asyncio
 import logging
+import uuid
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
 from app.worker.crawl_worker_base import CrawlWorkerBase
 from app.database import SessionLocal
 from app.models import ServiceAccount, CrawlSchedule, CrawlScheduleRun
+from app.models.google_search import GoogleSearchQueue, GoogleSearchHistory, GoogleSavedSearch
 
 from app.services.crawl_schedule_service import CrawlScheduleService
 from app.modules.instagram.services.crawl_service import CrawlService
@@ -91,13 +94,20 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             schedule_service = CrawlScheduleService(db)
 
             # Instagram feed 타입의 활성 스케줄 조회
-            schedules = schedule_service.get_schedules_by_type(
+            instagram_schedules = schedule_service.get_schedules_by_type(
                 CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
                 enabled_only=True
             )
-
-            for schedule in schedules:
+            for schedule in instagram_schedules:
                 await self._process_schedule(db, schedule, schedule_service)
+
+            # Google search 타입의 활성 스케줄 조회
+            google_schedules = schedule_service.get_schedules_by_type(
+                CrawlSchedule.TARGET_TYPE_GOOGLE_SEARCH,
+                enabled_only=True
+            )
+            for schedule in google_schedules:
+                await self._process_google_search_schedule(db, schedule, schedule_service)
 
         except Exception as e:
             logger.error(f"[{self.name}] 스케줄 디스패치 오류: {e}", exc_info=True)
@@ -342,3 +352,189 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         except Exception as e:
             logger.warning(f"[{self.name}] Instagram 로그인 상태 확인 실패: {e}")
             return False
+
+    # =====================================
+    # Google 검색 스케줄 처리
+    # =====================================
+
+    async def _process_google_search_schedule(
+        self,
+        db,
+        schedule: CrawlSchedule,
+        schedule_service: CrawlScheduleService
+    ):
+        """Google 검색 스케줄 처리.
+
+        Args:
+            db: DB 세션
+            schedule: 크롤링 스케줄
+            schedule_service: 스케줄 서비스
+        """
+        try:
+            config = schedule.get_target_config()
+            saved_search_id = config.get("saved_search_id")
+
+            if not saved_search_id:
+                logger.warning(f"[{self.name}] saved_search_id 없음: schedule_id={schedule.id}")
+                return
+
+            # 타임 윈도우 설정
+            time_windows = [
+                TimeWindow(**tw) for tw in config.get("time_windows", [])
+            ]
+            daily_runs = config.get("daily_runs", 1)
+            min_interval = config.get("min_interval_hours", 1)
+
+            scheduler = InstagramScheduler(
+                daily_runs=daily_runs,
+                time_windows=time_windows,
+            )
+
+            # 마지막 실행 시간 조회
+            last_run = schedule_service.get_latest_run(schedule.id)
+            last_run_time = last_run.started_at if last_run else None
+
+            if scheduler.should_run_now(
+                last_run=last_run_time,
+                min_interval_hours=min_interval,
+            ):
+                logger.info(f"[{self.name}] Google 검색 스케줄 실행 시간 도래: schedule_id={schedule.id}")
+
+                # 이미 활성 실행이 있는지 확인
+                if schedule_service.has_active_run(schedule.id):
+                    logger.info(f"[{self.name}] 이미 활성 실행 존재, 스킵")
+                    return
+
+                # 실행 시작
+                run = schedule_service.start_run(
+                    schedule_id=schedule.id,
+                    worker_id=self.name,
+                    config_snapshot=config
+                )
+
+                task_name = f"google_schedule_{schedule.id}_run_{run.id}"
+                if not self._is_task_running(task_name):
+                    self._create_task(
+                        self._execute_google_search(schedule, run, saved_search_id),
+                        task_name
+                    )
+                    logger.info(f"[{self.name}] Google 검색 스케줄 태스크 시작: run_id={run.id}")
+
+        except Exception as e:
+            logger.error(f"[{self.name}] Google 검색 스케줄 처리 오류: schedule_id={schedule.id}, error={e}", exc_info=True)
+
+    async def _execute_google_search(
+        self,
+        schedule: CrawlSchedule,
+        run: CrawlScheduleRun,
+        saved_search_id: int
+    ):
+        """Google 검색 실행.
+
+        Args:
+            schedule: 크롤링 스케줄
+            run: 실행 기록
+            saved_search_id: 저장된 검색 ID
+        """
+        db = SessionLocal()
+        try:
+            schedule_service = CrawlScheduleService(db)
+
+            # 저장된 검색 조회
+            saved_search = db.query(GoogleSavedSearch).filter_by(id=saved_search_id).first()
+            if not saved_search:
+                schedule_service.fail_run(run.id, "저장된 검색을 찾을 수 없습니다")
+                logger.warning(f"[{self.name}] 저장된 검색 없음: saved_search_id={saved_search_id}")
+                return
+
+            self._update_worker_state("searching", saved_search.name)
+
+            # GoogleSearchQueue에 추가 (기존 워커가 처리)
+            search_id = str(uuid.uuid4())
+            queue_item = GoogleSearchQueue(
+                search_id=search_id,
+                query=saved_search.query,
+                date_filter=saved_search.date_filter,
+                max_pages=saved_search.max_pages or 1,
+                service_account_id=saved_search.service_account_id,
+                saved_search_id=saved_search_id,
+                status="pending"
+            )
+            db.add(queue_item)
+            db.commit()
+
+            logger.info(
+                f"[{self.name}] Google 검색 큐에 추가: "
+                f"search_id={search_id}, query={saved_search.query}"
+            )
+
+            # 검색 완료 대기 (폴링)
+            result = await self._wait_for_search_completion(search_id)
+
+            if result["status"] == "completed":
+                schedule_service.complete_run(
+                    run.id,
+                    collected_count=result["total_results"],
+                    saved_count=result["total_results"],
+                    stop_reason=CrawlScheduleRun.STOP_REASON_SEARCH_COMPLETED
+                )
+                schedule_service.update_schedule_after_run(schedule.id)
+                logger.info(
+                    f"[{self.name}] Google 검색 완료: run_id={run.id}, "
+                    f"total_results={result['total_results']}"
+                )
+            else:
+                error_msg = result.get("error_message", "검색 실패")
+                if "CAPTCHA" in error_msg:
+                    schedule_service.fail_run(run.id, error_msg)
+                    logger.warning(f"[{self.name}] Google 검색 실패 (CAPTCHA): {error_msg}")
+                else:
+                    schedule_service.fail_run(run.id, error_msg)
+                    logger.warning(f"[{self.name}] Google 검색 실패: {error_msg}")
+
+        except Exception as e:
+            logger.error(f"[{self.name}] Google 검색 실행 실패: run_id={run.id}, error={e}", exc_info=True)
+            try:
+                schedule_service = CrawlScheduleService(db)
+                schedule_service.fail_run(run.id, str(e))
+            except Exception:
+                pass
+        finally:
+            self._update_worker_state("idle")
+            db.close()
+
+    async def _wait_for_search_completion(
+        self,
+        search_id: str,
+        timeout: int = 300
+    ) -> dict:
+        """검색 완료 대기 (최대 5분).
+
+        Args:
+            search_id: 검색 세션 ID
+            timeout: 타임아웃 (초)
+
+        Returns:
+            dict: {"status": "completed"|"failed", "total_results": int, "error_message": str}
+        """
+        start = datetime.now()
+
+        while (datetime.now() - start).total_seconds() < timeout:
+            db = SessionLocal()
+            try:
+                # 큐 상태 확인
+                queue = db.query(GoogleSearchQueue).filter_by(search_id=search_id).first()
+
+                if queue and queue.status in ["completed", "failed"]:
+                    history = db.query(GoogleSearchHistory).filter_by(search_id=search_id).first()
+                    return {
+                        "status": queue.status,
+                        "total_results": history.total_results if history else 0,
+                        "error_message": queue.error_message
+                    }
+            finally:
+                db.close()
+
+            await asyncio.sleep(2)
+
+        return {"status": "failed", "error_message": "Timeout"}
