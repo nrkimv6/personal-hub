@@ -26,6 +26,7 @@ from app.models import ServiceAccount, CrawlRequest, CrawlScheduleRun
 from app.services.crawl_request_service import CrawlRequestService
 from app.modules.instagram.services.crawl_service import CrawlService
 from app.modules.instagram.services.crawler import InstagramCrawler
+from app.utils.error_utils import format_error_message
 
 from app.services.page_extractor.factory import get_extractor_factory
 
@@ -166,7 +167,7 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
             )
             try:
                 request_service = CrawlRequestService(db)
-                request_service.fail_request(request.id, str(e))
+                request_service.fail_request(request.id, format_error_message(e))
             except Exception:
                 pass
         finally:
@@ -240,7 +241,7 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
                         self._browser_initialized = False
                     continue
 
-                request_service.fail_request(request.id, str(e))
+                request_service.fail_request(request.id, format_error_message(e))
                 logger.error(f"[{self.name}] Instagram 크롤링 예외: {e}", exc_info=True)
                 return
 
@@ -367,7 +368,7 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
                         self._browser_initialized = False
                     continue
 
-                request_service.fail_request(request.id, str(e))
+                request_service.fail_request(request.id, format_error_message(e))
                 logger.error(f"[{self.name}] Instagram 피드 크롤링 예외: {e}", exc_info=True)
                 return
 
@@ -481,7 +482,7 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
                         self._browser_initialized = False
                     continue
 
-                request_service.fail_request(request.id, str(e))
+                request_service.fail_request(request.id, format_error_message(e))
                 logger.error(f"[{self.name}] Universal 크롤링 예외: {e}", exc_info=True)
                 return
 
