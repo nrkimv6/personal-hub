@@ -130,11 +130,12 @@ class CrawlService:
         except (Exception, asyncio.CancelledError) as e:
             # 에러 발생해도 그때까지 저장된 데이터는 보존됨
             self.db.rollback()  # 먼저 세션 복구
+            error_msg = self._format_error_message(e)
             try:
-                self._schedule_service.fail_run(crawl_run.id, str(e)[:500])
+                self._schedule_service.fail_run(crawl_run.id, error_msg[:500])
             except Exception:
                 pass
-            logger.error(f"Crawl failed after saving {save_stats['new_saved']} posts: {e}")
+            logger.error(f"Crawl failed after saving {save_stats['new_saved']} posts: {error_msg}")
 
         # 최신 상태 반환
         crawl_run = self._schedule_service.get_run_by_id(crawl_run.id)
@@ -932,3 +933,20 @@ class CrawlService:
 
         logger.warning(f"Run {run_id} failed: {failure_reason} - {error}")
         return run
+
+    @staticmethod
+    def _format_error_message(e: Exception) -> str:
+        """예외를 에러 메시지 문자열로 변환.
+
+        빈 메시지인 경우 예외 타입명을 반환합니다.
+
+        Args:
+            e: 발생한 예외
+
+        Returns:
+            에러 메시지 문자열
+        """
+        msg = str(e).strip()
+        if msg:
+            return f"{type(e).__name__}: {msg}"
+        return type(e).__name__
