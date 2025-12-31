@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.models.crawl_schedule import CrawlSchedule, CrawlScheduleRun
 from app.models.writing import WritingSource, GeneratedWriting
 from app.modules.claude_worker.services.llm_service import LLMService
+from app.modules.claude_worker.models.llm_request import LLMRequest
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,7 @@ class WritingWorker:
             # 1. 믹스 글쓰기 (5회)
             for i in range(self.MIX_COUNT):
                 logger.info(f"믹스 글쓰기 {i + 1}/{self.MIX_COUNT}")
-                if self._generate_mix_writing(run.id):
+                if self._generate_mix_writing(run.id, index=i):
                     success += 1
                 else:
                     failed += 1
@@ -119,7 +120,7 @@ class WritingWorker:
             # 2. 랜덤 프롬프트 글쓰기 (3회)
             for i in range(self.RANDOM_COUNT):
                 logger.info(f"랜덤 글쓰기 {i + 1}/{self.RANDOM_COUNT}")
-                if self._generate_random_writing(run.id):
+                if self._generate_random_writing(run.id, index=i):
                     success += 1
                 else:
                     failed += 1
@@ -145,15 +146,17 @@ class WritingWorker:
 
         return {"total": total, "success": success, "failed": failed}
 
-    def _generate_mix_writing(self, run_id: int) -> bool:
+    def _generate_mix_writing(self, run_id: int, index: int = 0) -> bool:
         """믹스 글쓰기 (3개 소스 조합).
 
         Args:
             run_id: CrawlScheduleRun ID
+            index: 실행 인덱스 (0부터 시작)
 
         Returns:
             성공 여부
         """
+        llm_request = None
         try:
             # 랜덤 3개 소스 선택
             sources = (
@@ -177,16 +180,43 @@ class WritingWorker:
             for i, (placeholder, source) in enumerate(zip(placeholders, sources)):
                 prompt = prompt.replace(placeholder, source.content)
 
-            # LLM 호출
-            result = self.llm_service.execute_claude(prompt, timeout=self.LLM_TIMEOUT)
+            # LLM 요청 이력 생성
+            llm_request = LLMRequest(
+                caller_type="writing",
+                caller_id=f"mix_{run_id}_{index}",
+                prompt=prompt[:5000] if len(prompt) > 5000 else prompt,
+                status="processing",
+                requested_by="scheduler",
+                request_source="writing_worker",
+            )
+            self.db.add(llm_request)
+            self.db.commit()
+            self.db.refresh(llm_request)
+
+            # LLM 호출 (글쓰기는 JSON이 아니라 텍스트 응답)
+            result = self.llm_service.execute_claude(
+                prompt, timeout=self.LLM_TIMEOUT, parse_json=False
+            )
 
             if not result.get("success"):
-                logger.error(f"LLM 호출 실패: {result.get('error')}")
+                error_msg = result.get('error', 'Unknown error')
+                logger.error(f"LLM 호출 실패: {error_msg}")
+                # LLM 요청 실패 기록
+                llm_request.status = "failed"
+                llm_request.error_message = error_msg
+                llm_request.processed_at = datetime.now()
+                self.db.commit()
                 return False
 
             # 결과 저장
             source_ids = ",".join(str(s.id) for s in sources)
             raw_response = result.get("raw_response", "")
+
+            # LLM 요청 완료 기록
+            llm_request.status = "completed"
+            llm_request.raw_response = raw_response
+            llm_request.processed_at = datetime.now()
+            self.db.commit()
 
             # 생성된 글 추출
             content = self._extract_generated_content(raw_response)
@@ -207,18 +237,27 @@ class WritingWorker:
 
         except Exception as e:
             logger.error(f"믹스 글쓰기 실패: {e}", exc_info=True)
-            self.db.rollback()
+            # LLM 요청 실패 기록
+            if llm_request:
+                llm_request.status = "failed"
+                llm_request.error_message = str(e)
+                llm_request.processed_at = datetime.now()
+                self.db.commit()
+            else:
+                self.db.rollback()
             return False
 
-    def _generate_random_writing(self, run_id: int) -> bool:
+    def _generate_random_writing(self, run_id: int, index: int = 0) -> bool:
         """랜덤 프롬프트 글쓰기.
 
         Args:
             run_id: CrawlScheduleRun ID
+            index: 실행 인덱스 (0부터 시작)
 
         Returns:
             성공 여부
         """
+        llm_request = None
         try:
             prompt = self.random_prompt_template
 
@@ -226,14 +265,42 @@ class WritingWorker:
                 logger.error("랜덤 프롬프트가 없습니다")
                 return False
 
-            # LLM 호출
-            result = self.llm_service.execute_claude(prompt, timeout=self.LLM_TIMEOUT)
+            # LLM 요청 이력 생성
+            llm_request = LLMRequest(
+                caller_type="writing",
+                caller_id=f"random_{run_id}_{index}",
+                prompt=prompt[:5000] if len(prompt) > 5000 else prompt,
+                status="processing",
+                requested_by="scheduler",
+                request_source="writing_worker",
+            )
+            self.db.add(llm_request)
+            self.db.commit()
+            self.db.refresh(llm_request)
+
+            # LLM 호출 (글쓰기는 JSON이 아니라 텍스트 응답)
+            result = self.llm_service.execute_claude(
+                prompt, timeout=self.LLM_TIMEOUT, parse_json=False
+            )
 
             if not result.get("success"):
-                logger.error(f"LLM 호출 실패: {result.get('error')}")
+                error_msg = result.get('error', 'Unknown error')
+                logger.error(f"LLM 호출 실패: {error_msg}")
+                # LLM 요청 실패 기록
+                llm_request.status = "failed"
+                llm_request.error_message = error_msg
+                llm_request.processed_at = datetime.now()
+                self.db.commit()
                 return False
 
             raw_response = result.get("raw_response", "")
+
+            # LLM 요청 완료 기록
+            llm_request.status = "completed"
+            llm_request.raw_response = raw_response
+            llm_request.processed_at = datetime.now()
+            self.db.commit()
+
             content = self._extract_generated_content(raw_response)
 
             writing = GeneratedWriting(
@@ -252,7 +319,14 @@ class WritingWorker:
 
         except Exception as e:
             logger.error(f"랜덤 글쓰기 실패: {e}", exc_info=True)
-            self.db.rollback()
+            # LLM 요청 실패 기록
+            if llm_request:
+                llm_request.status = "failed"
+                llm_request.error_message = str(e)
+                llm_request.processed_at = datetime.now()
+                self.db.commit()
+            else:
+                self.db.rollback()
             return False
 
     def _extract_generated_content(self, raw_response: str) -> str:

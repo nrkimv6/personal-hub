@@ -25,6 +25,7 @@ from app.models.google_search import GoogleSearchQueue, GoogleSearchHistory, Goo
 
 from app.services.crawl_schedule_service import CrawlScheduleService
 from app.modules.instagram.services.crawl_service import CrawlService
+from app.utils.error_utils import format_error_message
 from app.modules.instagram.services.scheduler import InstagramScheduler
 from app.modules.instagram.services.crawler import InstagramCrawler
 from app.modules.instagram.models.schemas import TimeWindow
@@ -242,15 +243,15 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                             self._browser_initialized = False
                         continue
 
-                    schedule_service.fail_run(run.id, str(e))
-                    logger.error(f"[{self.name}] 크롤링 예외: {e}", exc_info=True)
+                    schedule_service.fail_run(run.id, format_error_message(e))
+                    logger.error(f"[{self.name}] 크롤링 예외: {format_error_message(e)}", exc_info=True)
                     return
 
         except Exception as e:
-            logger.error(f"[{self.name}] 피드 크롤링 실패: run_id={run.id}, error={e}", exc_info=True)
+            logger.error(f"[{self.name}] 피드 크롤링 실패: run_id={run.id}, error={format_error_message(e)}", exc_info=True)
             try:
                 schedule_service = CrawlScheduleService(db)
-                schedule_service.fail_run(run.id, str(e))
+                schedule_service.fail_run(run.id, format_error_message(e))
             except Exception:
                 pass
         finally:
@@ -502,10 +503,10 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                     logger.warning(f"[{self.name}] Google 검색 실패: {error_msg}")
 
         except Exception as e:
-            logger.error(f"[{self.name}] Google 검색 실행 실패: run_id={run.id}, error={e}", exc_info=True)
+            logger.error(f"[{self.name}] Google 검색 실행 실패: run_id={run.id}, error={format_error_message(e)}", exc_info=True)
             try:
                 schedule_service = CrawlScheduleService(db)
-                schedule_service.fail_run(run.id, str(e))
+                schedule_service.fail_run(run.id, format_error_message(e))
             except Exception:
                 pass
         finally:
