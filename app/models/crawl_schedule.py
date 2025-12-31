@@ -46,6 +46,7 @@ class CrawlSchedule(Base):
     TARGET_TYPE_NAVER_BLOG = "naver_blog"
     TARGET_TYPE_NAVER_CAFE = "naver_cafe"
     TARGET_TYPE_WRITING_TASK = "writing_task"
+    TARGET_TYPE_GOOGLE_SEARCH = "google_search"
 
     SCHEDULE_TYPE_CRON = "cron"
     SCHEDULE_TYPE_INTERVAL = "interval"
@@ -125,6 +126,8 @@ class CrawlScheduleRun(Base):
     STOP_REASON_TIMEOUT = "timeout"
     STOP_REASON_ERROR = "error"
     STOP_REASON_SHUTDOWN = "shutdown"
+    STOP_REASON_SEARCH_COMPLETED = "search_completed"
+    STOP_REASON_CAPTCHA = "captcha_detected"
 
     def __repr__(self):
         return f"<CrawlScheduleRun(id={self.id}, schedule_id={self.schedule_id}, status={self.status})>"
