@@ -186,12 +186,13 @@ class LLMService:
 
     # ========== Claude 실행 ==========
 
-    def execute_claude(self, prompt: str, timeout: int = 120) -> dict:
+    def execute_claude(self, prompt: str, timeout: int = 120, parse_json: bool = True) -> dict:
         """Claude CLI 실행 (동기).
 
         Args:
             prompt: LLM 프롬프트
             timeout: 타임아웃 (초)
+            parse_json: True면 JSON 파싱 시도, False면 raw_response만 반환
 
         Returns:
             {"success": True, "result": {...}, "raw_response": "..."}
@@ -273,18 +274,26 @@ class LLMService:
 
             raw_response = result.stdout.strip()
 
-            # JSON 파싱
-            try:
-                parsed = self._parse_json_response(raw_response)
+            # JSON 파싱 (선택적)
+            if parse_json:
+                try:
+                    parsed = self._parse_json_response(raw_response)
+                    return {
+                        "success": True,
+                        "result": parsed,
+                        "raw_response": raw_response,
+                    }
+                except ValueError as e:
+                    return {
+                        "success": False,
+                        "error": f"JSON 파싱 실패: {e}",
+                        "raw_response": raw_response,
+                    }
+            else:
+                # JSON 파싱 없이 raw_response만 반환
                 return {
                     "success": True,
-                    "result": parsed,
-                    "raw_response": raw_response,
-                }
-            except ValueError as e:
-                return {
-                    "success": False,
-                    "error": f"JSON 파싱 실패: {e}",
+                    "result": None,
                     "raw_response": raw_response,
                 }
 

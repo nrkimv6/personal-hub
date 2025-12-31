@@ -177,8 +177,10 @@ class WritingWorker:
             for i, (placeholder, source) in enumerate(zip(placeholders, sources)):
                 prompt = prompt.replace(placeholder, source.content)
 
-            # LLM 호출
-            result = self.llm_service.execute_claude(prompt, timeout=self.LLM_TIMEOUT)
+            # LLM 호출 (글쓰기는 JSON이 아니라 텍스트 응답)
+            result = self.llm_service.execute_claude(
+                prompt, timeout=self.LLM_TIMEOUT, parse_json=False
+            )
 
             if not result.get("success"):
                 logger.error(f"LLM 호출 실패: {result.get('error')}")
@@ -226,8 +228,10 @@ class WritingWorker:
                 logger.error("랜덤 프롬프트가 없습니다")
                 return False
 
-            # LLM 호출
-            result = self.llm_service.execute_claude(prompt, timeout=self.LLM_TIMEOUT)
+            # LLM 호출 (글쓰기는 JSON이 아니라 텍스트 응답)
+            result = self.llm_service.execute_claude(
+                prompt, timeout=self.LLM_TIMEOUT, parse_json=False
+            )
 
             if not result.get("success"):
                 logger.error(f"LLM 호출 실패: {result.get('error')}")
