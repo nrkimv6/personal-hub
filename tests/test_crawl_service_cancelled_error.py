@@ -172,3 +172,77 @@ class TestCancelledErrorInheritance:
             caught = True
 
         assert caught, "CancelledError should be caught with (Exception, CancelledError)"
+
+
+# ============================================================
+# _format_error_message 테스트
+# ============================================================
+
+class TestFormatErrorMessage:
+    """CrawlService._format_error_message() 테스트
+
+    RIGHT-BICEP 원칙 적용:
+    - Right: 올바른 형식으로 에러 메시지가 반환되는가?
+    - Boundary: 빈 메시지, None 등 경계 조건 처리
+    - Error: 다양한 예외 타입에서 동작
+
+    CORRECT 조건 적용:
+    - Conformance: 예상된 형식(타입: 메시지)으로 반환되는가?
+    - Existence: 빈 메시지일 때도 타입명이 반환되는가?
+    """
+
+    @pytest.fixture
+    def service(self, mock_db):
+        """CrawlService 인스턴스"""
+        from app.modules.instagram.services.crawl_service import CrawlService
+        return CrawlService(mock_db)
+
+    def test_format_with_message(self, service):
+        """[Right] 메시지가 있는 예외는 '타입: 메시지' 형식으로 반환"""
+        error = ValueError("invalid value")
+        result = service._format_error_message(error)
+        assert result == "ValueError: invalid value"
+
+    def test_format_cancelled_error_empty(self, service):
+        """[Boundary] CancelledError(빈 메시지)는 타입명만 반환"""
+        error = asyncio.CancelledError()
+        result = service._format_error_message(error)
+        assert result == "CancelledError"
+
+    def test_format_cancelled_error_with_message(self, service):
+        """[Right] CancelledError(메시지 있음)는 '타입: 메시지' 형식으로 반환"""
+        error = asyncio.CancelledError("task was cancelled")
+        result = service._format_error_message(error)
+        assert result == "CancelledError: task was cancelled"
+
+    def test_format_exception_with_empty_message(self, service):
+        """[Boundary] 빈 메시지 Exception은 타입명만 반환"""
+        error = RuntimeError("")
+        result = service._format_error_message(error)
+        assert result == "RuntimeError"
+
+    def test_format_exception_with_whitespace_only(self, service):
+        """[Boundary] 공백만 있는 메시지는 타입명만 반환"""
+        error = RuntimeError("   ")
+        result = service._format_error_message(error)
+        assert result == "RuntimeError"
+
+    def test_format_timeout_error(self, service):
+        """[Error] TimeoutError 처리"""
+        error = TimeoutError("connection timed out")
+        result = service._format_error_message(error)
+        assert result == "TimeoutError: connection timed out"
+
+    def test_format_keyboard_interrupt(self, service):
+        """[Error] KeyboardInterrupt 처리"""
+        error = KeyboardInterrupt()
+        result = service._format_error_message(error)
+        assert result == "KeyboardInterrupt"
+
+    def test_format_custom_exception(self, service):
+        """[Right] 커스텀 예외 처리"""
+        class CustomError(Exception):
+            pass
+        error = CustomError("custom error message")
+        result = service._format_error_message(error)
+        assert result == "CustomError: custom error message"
