@@ -1,6 +1,10 @@
 """
 Alembic environment configuration.
-SQLAlchemy 모델과 연동하여 자동 마이그레이션 생성을 지원합니다.
+
+이 프로젝트는 수동 마이그레이션을 사용합니다.
+- autogenerate는 모델과 DB 스키마 불일치로 지원하지 않습니다.
+- alembic revision -m "description" 으로 빈 마이그레이션 생성
+- 마이그레이션 파일에 upgrade/downgrade 로직 직접 작성
 """
 from logging.config import fileConfig
 
@@ -18,12 +22,8 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Import all models for autogenerate support
-# Base.metadata에 모든 모델이 등록되어야 합니다
-from app.models.base import Base
-from app.models import *  # noqa: F401, F403 - 모든 모델 임포트
-
-target_metadata = Base.metadata
+# 수동 마이그레이션 모드 - target_metadata 없이 사용
+target_metadata = None
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
