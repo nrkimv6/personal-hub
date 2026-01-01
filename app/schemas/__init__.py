@@ -73,6 +73,18 @@ from app.schemas.universal_crawl import (
     CrawlUrlRequest,
     CrawlUrlResponse,
 )
+from app.schemas.error_log import (
+    ErrorLogBase,
+    ErrorLogCreate,
+    ErrorLogUpdate,
+    ErrorLogResponse,
+    ErrorLogList,
+    ErrorLogStats,
+    ErrorLogSourceStats,
+    ErrorLogTypeStats,
+    ErrorLogHourlyStats,
+    ErrorLogStatsResponse,
+)
 
 __all__ = [
     # browser_profile
@@ -140,4 +152,15 @@ __all__ = [
     "UniversalCrawlRequestList",
     "CrawlUrlRequest",
     "CrawlUrlResponse",
+    # error_log
+    "ErrorLogBase",
+    "ErrorLogCreate",
+    "ErrorLogUpdate",
+    "ErrorLogResponse",
+    "ErrorLogList",
+    "ErrorLogStats",
+    "ErrorLogSourceStats",
+    "ErrorLogTypeStats",
+    "ErrorLogHourlyStats",
+    "ErrorLogStatsResponse",
 ]
