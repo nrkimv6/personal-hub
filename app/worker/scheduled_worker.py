@@ -359,7 +359,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                 saved_count=crawl_run.new_saved,
                 stop_reason=crawl_run.stop_reason
             )
-            schedule_service.update_schedule_after_run(schedule.id)
+            schedule_service.update_schedule_after_run(run.schedule_id)
             logger.info(
                 f"[{self.name}] 크롤링 완료: run_id={run.id}, "
                 f"collected={crawl_run.total_collected}, new={crawl_run.new_saved}"
@@ -523,7 +523,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                     saved_count=result["total_results"],
                     stop_reason=TaskScheduleRun.STOP_REASON_SEARCH_COMPLETED
                 )
-                schedule_service.update_schedule_after_run(schedule.id)
+                schedule_service.update_schedule_after_run(run.schedule_id)
                 logger.info(
                     f"[{self.name}] Google 검색 완료: run_id={run.id}, "
                     f"total_results={result['total_results']}"
@@ -748,10 +748,10 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                     run.id,
                     collected_count=total_collected,
                     saved_count=total_collected,
-                    stop_reason=TaskScheduleRun.STOP_REASON_NORMAL
+                    stop_reason="completed"
                 )
 
-            schedule_service.update_schedule_after_run(schedule.id)
+            schedule_service.update_schedule_after_run(run.schedule_id)
             logger.info(f"[{self.name}] Writing Source 수집 완료: run_id={run.id}, total={total_collected}")
 
         except Exception as e:
@@ -864,7 +864,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                     saved_count=result.get("success", 0),
                     stop_reason="completed"
                 )
-                schedule_service.update_schedule_after_run(schedule.id)
+                schedule_service.update_schedule_after_run(run.schedule_id)
                 logger.info(
                     f"[{self.name}] Writing task 완료: run_id={run.id}, "
                     f"total={result.get('total', 0)}, success={result.get('success', 0)}"
@@ -1022,7 +1022,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                     saved_count=total_keywords,
                     stop_reason="completed"
                 )
-                schedule_service.update_schedule_after_run(schedule.id)
+                schedule_service.update_schedule_after_run(run.schedule_id)
                 logger.info(
                     f"[{self.name}] Keyword Analysis 완료: run_id={run.id}, "
                     f"keywords={total_keywords}"
