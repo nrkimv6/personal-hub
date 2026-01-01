@@ -421,6 +421,36 @@ async def trigger_schedule_run(
             "run_id": run.id,
         }
 
+    # Writing Source 수집 스케줄의 경우
+    elif schedule.target_type == 'writing_source_collect':
+        schedule_service = TaskScheduleService(db)
+        run = schedule_service.start_run(
+            schedule_id=schedule.id,
+            worker_id="manual",
+            config_snapshot={"source": "manual"}
+        )
+
+        return {
+            "success": True,
+            "message": "소스 수집 태스크가 예약되었습니다",
+            "run_id": run.id,
+        }
+
+    # Keyword Analysis 스케줄의 경우
+    elif schedule.target_type == 'keyword_analysis':
+        schedule_service = TaskScheduleService(db)
+        run = schedule_service.start_run(
+            schedule_id=schedule.id,
+            worker_id="manual",
+            config_snapshot={"source": "manual"}
+        )
+
+        return {
+            "success": True,
+            "message": "키워드 분석 태스크가 예약되었습니다",
+            "run_id": run.id,
+        }
+
     # 지원하지 않는 스케줄 타입
     else:
         return {
