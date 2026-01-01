@@ -42,6 +42,41 @@ class BulkSourceRequest(BaseModel):
     sources: list[dict]
 
 
+class FeedCreateRequest(BaseModel):
+    """RSS 피드 생성 요청."""
+
+    name: str
+    url: str
+    source_type: str = "tistory"
+
+
+class FeedUpdateRequest(BaseModel):
+    """RSS 피드 수정 요청."""
+
+    name: Optional[str] = None
+    url: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+class SearchQueryCreateRequest(BaseModel):
+    """검색 쿼리 생성 요청."""
+
+    query: str
+    source_type: str = "naver"  # 'naver', 'kakao', 'google'
+    search_target: str = "blog"  # 'blog', 'cafe', 'news'
+    priority: int = 0
+
+
+class SearchQueryUpdateRequest(BaseModel):
+    """검색 쿼리 수정 요청."""
+
+    query: Optional[str] = None
+    source_type: Optional[str] = None
+    search_target: Optional[str] = None
+    enabled: Optional[bool] = None
+    priority: Optional[int] = None
+
+
 # ========== 생성된 글 조회 ==========
 
 
@@ -293,3 +328,269 @@ def _writing_to_dict(writing, include_full: bool = False) -> dict:
         )
 
     return result
+
+
+def _feed_to_dict(feed) -> dict:
+    """WritingRssFeed를 dict로 변환."""
+    return {
+        "id": feed.id,
+        "name": feed.name,
+        "url": feed.url,
+        "source_type": feed.source_type,
+        "enabled": bool(feed.enabled),
+        "last_fetched_at": feed.last_fetched_at.isoformat() if feed.last_fetched_at else None,
+        "fetch_count": feed.fetch_count,
+        "error_count": feed.error_count,
+        "last_error": feed.last_error,
+        "created_at": feed.created_at.isoformat() if feed.created_at else None,
+    }
+
+
+# ========== RSS 피드 관리 ==========
+
+
+@router.get("/feeds")
+def list_feeds(
+    source_type: Optional[str] = None,
+    include_disabled: bool = False,
+    db: Session = Depends(get_db),
+):
+    """RSS 피드 목록 조회."""
+    service = WritingService(db)
+    feeds = service.list_feeds(
+        source_type=source_type,
+        enabled_only=not include_disabled,
+    )
+    return {"items": [_feed_to_dict(f) for f in feeds], "total": len(feeds)}
+
+
+@router.get("/feeds/{feed_id}")
+def get_feed(
+    feed_id: int,
+    db: Session = Depends(get_db),
+):
+    """RSS 피드 상세 조회."""
+    service = WritingService(db)
+    feed = service.get_feed(feed_id)
+    if not feed:
+        raise HTTPException(404, "Feed not found")
+    return _feed_to_dict(feed)
+
+
+@router.post("/feeds")
+def add_feed(
+    data: FeedCreateRequest,
+    db: Session = Depends(get_db),
+):
+    """RSS 피드 추가."""
+    service = WritingService(db)
+    try:
+        feed = service.add_feed(
+            name=data.name,
+            url=data.url,
+            source_type=data.source_type,
+        )
+        return _feed_to_dict(feed)
+    except Exception as e:
+        raise HTTPException(400, f"Failed to add feed: {e}")
+
+
+@router.put("/feeds/{feed_id}")
+def update_feed(
+    feed_id: int,
+    data: FeedUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    """RSS 피드 수정."""
+    service = WritingService(db)
+    feed = service.update_feed(
+        feed_id=feed_id,
+        name=data.name,
+        url=data.url,
+        enabled=data.enabled,
+    )
+    if not feed:
+        raise HTTPException(404, "Feed not found")
+    return _feed_to_dict(feed)
+
+
+@router.delete("/feeds/{feed_id}")
+def delete_feed(
+    feed_id: int,
+    db: Session = Depends(get_db),
+):
+    """RSS 피드 삭제."""
+    service = WritingService(db)
+    success = service.delete_feed(feed_id)
+    if not success:
+        raise HTTPException(404, "Feed not found")
+    return {"deleted": True}
+
+
+@router.post("/feeds/collect")
+async def collect_from_feeds(
+    min_length: int = Query(300, ge=100, le=1000),
+    max_length: int = Query(3000, ge=500, le=10000),
+    db: Session = Depends(get_db),
+):
+    """모든 활성 RSS 피드에서 글 수집."""
+    service = WritingService(db)
+    try:
+        result = await service.collect_from_feeds(
+            min_length=min_length,
+            max_length=max_length,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(500, f"Collection failed: {e}")
+
+
+# ========== 검색 쿼리 관리 ==========
+
+
+def _query_to_dict(query) -> dict:
+    """WritingSearchQuery를 dict로 변환."""
+    return {
+        "id": query.id,
+        "query": query.query,
+        "source_type": query.source_type,
+        "search_target": query.search_target,
+        "enabled": bool(query.enabled),
+        "priority": query.priority,
+        "last_searched_at": (
+            query.last_searched_at.isoformat() if query.last_searched_at else None
+        ),
+        "result_count": query.result_count,
+        "success_count": query.success_count,
+        "error_count": query.error_count,
+        "last_error": query.last_error,
+        "created_at": query.created_at.isoformat() if query.created_at else None,
+    }
+
+
+@router.get("/search-queries")
+def list_search_queries(
+    source_type: Optional[str] = None,
+    include_disabled: bool = False,
+    db: Session = Depends(get_db),
+):
+    """검색 쿼리 목록 조회."""
+    service = WritingService(db)
+    queries = service.list_search_queries(
+        source_type=source_type,
+        enabled_only=not include_disabled,
+    )
+    return {"items": [_query_to_dict(q) for q in queries], "total": len(queries)}
+
+
+@router.get("/search-queries/{query_id}")
+def get_search_query(
+    query_id: int,
+    db: Session = Depends(get_db),
+):
+    """검색 쿼리 상세 조회."""
+    service = WritingService(db)
+    query = service.get_search_query(query_id)
+    if not query:
+        raise HTTPException(404, "Query not found")
+    return _query_to_dict(query)
+
+
+@router.post("/search-queries")
+def add_search_query(
+    data: SearchQueryCreateRequest,
+    db: Session = Depends(get_db),
+):
+    """검색 쿼리 추가."""
+    service = WritingService(db)
+    query = service.add_search_query(
+        query=data.query,
+        source_type=data.source_type,
+        search_target=data.search_target,
+        priority=data.priority,
+    )
+    return _query_to_dict(query)
+
+
+@router.put("/search-queries/{query_id}")
+def update_search_query(
+    query_id: int,
+    data: SearchQueryUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    """검색 쿼리 수정."""
+    service = WritingService(db)
+    query = service.update_search_query(
+        query_id=query_id,
+        query=data.query,
+        source_type=data.source_type,
+        search_target=data.search_target,
+        enabled=data.enabled,
+        priority=data.priority,
+    )
+    if not query:
+        raise HTTPException(404, "Query not found")
+    return _query_to_dict(query)
+
+
+@router.delete("/search-queries/{query_id}")
+def delete_search_query(
+    query_id: int,
+    db: Session = Depends(get_db),
+):
+    """검색 쿼리 삭제."""
+    service = WritingService(db)
+    success = service.delete_search_query(query_id)
+    if not success:
+        raise HTTPException(404, "Query not found")
+    return {"deleted": True}
+
+
+@router.post("/search-queries/collect")
+async def collect_from_searches(
+    source_type: Optional[str] = None,
+    min_length: int = Query(100, ge=50, le=1000),
+    max_length: int = Query(5000, ge=500, le=10000),
+    max_queries: int = Query(10, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """검색 API에서 글 수집."""
+    service = WritingService(db)
+    try:
+        result = await service.collect_from_searches(
+            source_type=source_type,
+            min_length=min_length,
+            max_length=max_length,
+            max_queries=max_queries,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(500, f"Collection failed: {e}")
+
+
+# ========== 위키문헌 수집 ==========
+
+
+@router.post("/wikisource/collect")
+async def collect_from_wikisource(
+    categories: Optional[str] = Query(None, description="쉼표로 구분된 카테고리 목록"),
+    min_length: int = Query(200, ge=100, le=1000),
+    max_length: int = Query(10000, ge=500, le=50000),
+    db: Session = Depends(get_db),
+):
+    """위키문헌에서 글 수집."""
+    service = WritingService(db)
+    try:
+        # 카테고리 파싱
+        cat_list = None
+        if categories:
+            cat_list = [c.strip() for c in categories.split(",") if c.strip()]
+
+        result = await service.collect_from_wikisource(
+            categories=cat_list,
+            min_length=min_length,
+            max_length=max_length,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(500, f"Collection failed: {e}")

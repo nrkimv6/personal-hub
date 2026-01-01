@@ -185,6 +185,13 @@ class Settings(BaseSettings):
     # Cloudflare Tunnel 설정 (선택)
     TUNNEL_ID: Optional[str] = None
 
+    # 검색 API 설정 (Writing Source 수집용)
+    NAVER_CLIENT_ID: str = ""  # 네이버 개발자 센터에서 발급
+    NAVER_CLIENT_SECRET: str = ""  # 네이버 개발자 센터에서 발급
+    KAKAO_REST_API_KEY: str = ""  # 카카오 개발자 센터에서 발급
+    GOOGLE_SEARCH_API_KEY: str = ""  # Google Cloud Console에서 발급 (선택)
+    GOOGLE_SEARCH_CSE_ID: str = ""  # Programmable Search Engine ID (선택)
+
     # Health Monitor 설정
     HEALTH_MONITOR_ENABLED: bool = True  # 헬스 모니터링 활성화 여부
     HEALTH_PID_CHECK_INTERVAL: int = 10  # PID+포트 체크 간격 (초)

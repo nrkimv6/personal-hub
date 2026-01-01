@@ -47,6 +47,7 @@ class CrawlSchedule(Base):
     TARGET_TYPE_NAVER_CAFE = "naver_cafe"
     TARGET_TYPE_WRITING_TASK = "writing_task"
     TARGET_TYPE_GOOGLE_SEARCH = "google_search"
+    TARGET_TYPE_WRITING_SOURCE_COLLECT = "writing_source_collect"  # RSS/위키문헌 수집
 
     SCHEDULE_TYPE_CRON = "cron"
     SCHEDULE_TYPE_INTERVAL = "interval"
