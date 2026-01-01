@@ -1032,11 +1032,11 @@ class TestDataModelExtension:
 
     def test_reference_biz_item_account_relationship(self):
         """
-        [Reference] BizItem과 Account 관계가 설정되었는지
+        [Reference] BizItem과 ServiceAccount 관계가 설정되었는지
         """
         from app.models.biz_item import BizItem
 
-        assert hasattr(BizItem, "account"), "BizItem 모델에 account 관계가 없습니다"
+        assert hasattr(BizItem, "service_account"), "BizItem 모델에 service_account 관계가 없습니다"
         assert hasattr(BizItem, "service_account_id"), "BizItem 모델에 service_account_id 필드가 없습니다"
 
     # --- Conformance: 형식 준수 ---

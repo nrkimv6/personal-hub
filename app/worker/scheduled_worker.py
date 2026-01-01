@@ -16,7 +16,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING
 
 from app.worker.crawl_worker_base import CrawlWorkerBase
 from app.database import SessionLocal
@@ -35,6 +35,27 @@ if TYPE_CHECKING:
     from playwright.async_api import Page
 
 logger = logging.getLogger(__name__)
+
+
+def parse_time_windows(raw_windows: list) -> Optional[List[TimeWindow]]:
+    """TimeWindow 목록 파싱. 빈 배열이면 None 반환.
+
+    start_hour/end_hour 형식도 start/end로 변환 지원.
+    """
+    if not raw_windows:
+        return None
+
+    result = []
+    for tw in raw_windows:
+        # start_hour/end_hour 형식 변환
+        if "start_hour" in tw and "start" not in tw:
+            tw = {
+                "start": f"{tw['start_hour']:02d}:00",
+                "end": f"{tw['end_hour']:02d}:00"
+            }
+        result.append(TimeWindow(**tw))
+
+    return result if result else None
 
 
 class ScheduledCrawlWorker(CrawlWorkerBase):
@@ -154,10 +175,8 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             if not service_account_id:
                 return
 
-            # 타임 윈도우 설정
-            time_windows = [
-                TimeWindow(**tw) for tw in config.get("time_windows", [])
-            ]
+            # 타임 윈도우 설정 (빈 배열이면 None으로 처리하여 기본값 사용)
+            time_windows = parse_time_windows(config.get("time_windows", []))
             daily_runs = config.get("daily_runs", 3)
             min_interval = config.get("min_interval_hours", 2)
 
@@ -404,10 +423,8 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                 logger.warning(f"[{self.name}] saved_search_id 없음: schedule_id={schedule.id}")
                 return
 
-            # 타임 윈도우 설정
-            time_windows = [
-                TimeWindow(**tw) for tw in config.get("time_windows", [])
-            ]
+            # 타임 윈도우 설정 (빈 배열이면 None으로 처리하여 기본값 사용)
+            time_windows = parse_time_windows(config.get("time_windows", []))
             daily_runs = config.get("daily_runs", 1)
             min_interval = config.get("min_interval_hours", 1)
 
@@ -585,10 +602,8 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         try:
             config = schedule.get_target_config()
 
-            # 타임 윈도우 설정
-            time_windows = [
-                TimeWindow(**tw) for tw in config.get("time_windows", [])
-            ]
+            # 타임 윈도우 설정 (빈 배열이면 None으로 처리하여 기본값 사용)
+            time_windows = parse_time_windows(config.get("time_windows", []))
             daily_runs = config.get("daily_runs", 1)
             min_interval = config.get("min_interval_hours", 20)  # 기본 20시간 (하루 1회)
 
@@ -753,10 +768,8 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         try:
             config = schedule.get_target_config()
 
-            # 타임 윈도우 설정
-            time_windows = [
-                TimeWindow(**tw) for tw in config.get("time_windows", [])
-            ]
+            # 타임 윈도우 설정 (빈 배열이면 None으로 처리하여 기본값 사용)
+            time_windows = parse_time_windows(config.get("time_windows", []))
             daily_runs = config.get("daily_runs", 1)
             min_interval = config.get("min_interval_hours", 20)  # 기본 20시간 간격
 

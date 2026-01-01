@@ -435,6 +435,9 @@ class TestScreenshot:
         """
         [Right] 스크린샷 저장
         """
+        import tempfile
+        import os
+
         mock_page = MagicMock()
         mock_page.screenshot = AsyncMock()
 
@@ -442,9 +445,11 @@ class TestScreenshot:
         mock_context.pages = [mock_page]
         manager.browser_context = mock_context
 
-        with patch('pathlib.Path.mkdir'), \
-             patch('pathlib.Path.exists', return_value=True):
-            result = await manager.take_screenshot("test")
+        # 임시 디렉토리 사용
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch('app.shared.browser.context_manager.settings') as mock_settings:
+                mock_settings.BASE_DIR = temp_dir
+                result = await manager.take_screenshot("test")
 
         assert result is not None
         assert "test" in result
@@ -455,6 +460,8 @@ class TestScreenshot:
         """
         [Right] 모든 페이지 스크린샷
         """
+        import tempfile
+
         mock_page1 = MagicMock()
         mock_page1.screenshot = AsyncMock()
         mock_page2 = MagicMock()
@@ -464,9 +471,11 @@ class TestScreenshot:
         mock_context.pages = [mock_page1, mock_page2]
         manager.browser_context = mock_context
 
-        with patch('pathlib.Path.mkdir'), \
-             patch('pathlib.Path.exists', return_value=True):
-            result = await manager.take_screenshots_all_pages("test")
+        # 임시 디렉토리 사용
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch('app.shared.browser.context_manager.settings') as mock_settings:
+                mock_settings.BASE_DIR = temp_dir
+                result = await manager.take_screenshots_all_pages("test")
 
         assert len(result) == 2
         mock_page1.screenshot.assert_called_once()
@@ -501,6 +510,8 @@ class TestScreenshot:
         """
         [Error] 페이지 스크린샷 실패해도 다른 페이지는 계속
         """
+        import tempfile
+
         mock_page1 = MagicMock()
         mock_page1.screenshot = AsyncMock(side_effect=Exception("스크린샷 실패"))
         mock_page2 = MagicMock()
@@ -510,9 +521,11 @@ class TestScreenshot:
         mock_context.pages = [mock_page1, mock_page2]
         manager.browser_context = mock_context
 
-        with patch('pathlib.Path.mkdir'), \
-             patch('pathlib.Path.exists', return_value=True):
-            result = await manager.take_screenshots_all_pages("test")
+        # 임시 디렉토리 사용
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch('app.shared.browser.context_manager.settings') as mock_settings:
+                mock_settings.BASE_DIR = temp_dir
+                result = await manager.take_screenshots_all_pages("test")
 
         # 두 번째 페이지는 성공
         assert len(result) == 1
