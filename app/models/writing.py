@@ -113,7 +113,7 @@ class GeneratedWriting(Base):
 
     # 메타
     schedule_run_id = Column(
-        Integer, ForeignKey("crawl_schedule_runs.id", ondelete="SET NULL"), nullable=True
+        Integer, ForeignKey("task_schedule_runs.id", ondelete="SET NULL"), nullable=True
     )
     created_at = Column(DateTime, default=datetime.now, index=True)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)

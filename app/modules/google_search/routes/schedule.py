@@ -9,9 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.crawl_schedule import CrawlSchedule, CrawlScheduleRun
+from app.models.task_schedule import TaskSchedule, TaskScheduleRun
 from app.models.google_search import GoogleSavedSearch
-from app.services.crawl_schedule_service import CrawlScheduleService
+from app.services.task_schedule_service import TaskScheduleService
 from app.modules.google_search.models.schedule_schemas import (
     GoogleSearchScheduleCreate,
     GoogleSearchScheduleUpdate,
@@ -26,10 +26,10 @@ router = APIRouter(prefix="/api/google/schedule", tags=["google-search-schedule"
 
 
 def _schedule_to_response(
-    schedule: CrawlSchedule,
+    schedule: TaskSchedule,
     saved_search: Optional[GoogleSavedSearch] = None
 ) -> GoogleSearchScheduleResponse:
-    """CrawlSchedule을 응답 스키마로 변환."""
+    """TaskSchedule을 응답 스키마로 변환."""
     config = schedule.get_target_config()
     schedule_value = json.loads(schedule.schedule_value) if schedule.schedule_value else {}
 
@@ -51,8 +51,8 @@ def _schedule_to_response(
     )
 
 
-def _run_to_response(run: CrawlScheduleRun) -> ScheduleRunResponse:
-    """CrawlScheduleRun을 응답 스키마로 변환."""
+def _run_to_response(run: TaskScheduleRun) -> ScheduleRunResponse:
+    """TaskScheduleRun을 응답 스키마로 변환."""
     return ScheduleRunResponse(
         id=run.id,
         schedule_id=run.schedule_id,
@@ -79,20 +79,20 @@ async def create_google_search_schedule(
         raise HTTPException(status_code=404, detail="저장된 검색을 찾을 수 없습니다")
 
     # 이미 해당 saved_search_id로 스케줄이 있는지 확인
-    existing = db.query(CrawlSchedule).filter(
-        CrawlSchedule.target_type == CrawlSchedule.TARGET_TYPE_GOOGLE_SEARCH,
-        CrawlSchedule.target_config.contains(f'"saved_search_id": {data.saved_search_id}')
+    existing = db.query(TaskSchedule).filter(
+        TaskSchedule.target_type == TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
+        TaskSchedule.target_config.contains(f'"saved_search_id": {data.saved_search_id}')
     ).first()
     if existing:
         raise HTTPException(status_code=400, detail="이미 해당 저장된 검색에 대한 스케줄이 존재합니다")
 
-    schedule_service = CrawlScheduleService(db)
+    schedule_service = TaskScheduleService(db)
 
     # 스케줄 생성
     schedule = schedule_service.create_schedule(
         name=f"google_search_{data.saved_search_id}",
         display_name=data.display_name or f"{saved_search.name} 자동 검색",
-        target_type=CrawlSchedule.TARGET_TYPE_GOOGLE_SEARCH,
+        target_type=TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
         schedule_type=data.schedule_type,
         target_config={"saved_search_id": data.saved_search_id},
         schedule_value=data.schedule_value.model_dump_json(),
@@ -111,14 +111,14 @@ async def list_google_search_schedules(
     db: Session = Depends(get_db)
 ):
     """Google 검색 스케줄 목록 조회."""
-    query = db.query(CrawlSchedule).filter(
-        CrawlSchedule.target_type == CrawlSchedule.TARGET_TYPE_GOOGLE_SEARCH
+    query = db.query(TaskSchedule).filter(
+        TaskSchedule.target_type == TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH
     )
 
     if enabled_only:
-        query = query.filter(CrawlSchedule.enabled == True)
+        query = query.filter(TaskSchedule.enabled == True)
 
-    schedules = query.order_by(CrawlSchedule.created_at.desc()).all()
+    schedules = query.order_by(TaskSchedule.created_at.desc()).all()
 
     result = []
     for schedule in schedules:
@@ -144,11 +144,11 @@ async def get_google_search_schedule(
     db: Session = Depends(get_db)
 ):
     """Google 검색 스케줄 조회."""
-    schedule = db.query(CrawlSchedule).filter_by(id=schedule_id).first()
+    schedule = db.query(TaskSchedule).filter_by(id=schedule_id).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="스케줄을 찾을 수 없습니다")
 
-    if schedule.target_type != CrawlSchedule.TARGET_TYPE_GOOGLE_SEARCH:
+    if schedule.target_type != TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH:
         raise HTTPException(status_code=400, detail="Google 검색 스케줄이 아닙니다")
 
     config = schedule.get_target_config()
@@ -166,14 +166,14 @@ async def update_google_search_schedule(
     db: Session = Depends(get_db)
 ):
     """Google 검색 스케줄 수정."""
-    schedule = db.query(CrawlSchedule).filter_by(id=schedule_id).first()
+    schedule = db.query(TaskSchedule).filter_by(id=schedule_id).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="스케줄을 찾을 수 없습니다")
 
-    if schedule.target_type != CrawlSchedule.TARGET_TYPE_GOOGLE_SEARCH:
+    if schedule.target_type != TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH:
         raise HTTPException(status_code=400, detail="Google 검색 스케줄이 아닙니다")
 
-    schedule_service = CrawlScheduleService(db)
+    schedule_service = TaskScheduleService(db)
 
     updates = {}
     if data.display_name is not None:
@@ -201,11 +201,11 @@ async def delete_google_search_schedule(
     db: Session = Depends(get_db)
 ):
     """Google 검색 스케줄 삭제."""
-    schedule = db.query(CrawlSchedule).filter_by(id=schedule_id).first()
+    schedule = db.query(TaskSchedule).filter_by(id=schedule_id).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="스케줄을 찾을 수 없습니다")
 
-    if schedule.target_type != CrawlSchedule.TARGET_TYPE_GOOGLE_SEARCH:
+    if schedule.target_type != TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH:
         raise HTTPException(status_code=400, detail="Google 검색 스케줄이 아닙니다")
 
     db.delete(schedule)
@@ -222,7 +222,7 @@ async def enable_google_search_schedule(
     db: Session = Depends(get_db)
 ):
     """Google 검색 스케줄 활성화."""
-    schedule_service = CrawlScheduleService(db)
+    schedule_service = TaskScheduleService(db)
     schedule = schedule_service.toggle_schedule(schedule_id, enabled=True)
 
     if not schedule:
@@ -242,7 +242,7 @@ async def disable_google_search_schedule(
     db: Session = Depends(get_db)
 ):
     """Google 검색 스케줄 비활성화."""
-    schedule_service = CrawlScheduleService(db)
+    schedule_service = TaskScheduleService(db)
     schedule = schedule_service.toggle_schedule(schedule_id, enabled=False)
 
     if not schedule:
@@ -266,11 +266,11 @@ async def get_schedule_runs(
 ):
     """스케줄 실행 이력 조회."""
     # 스케줄 존재 확인
-    schedule = db.query(CrawlSchedule).filter_by(id=schedule_id).first()
+    schedule = db.query(TaskSchedule).filter_by(id=schedule_id).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="스케줄을 찾을 수 없습니다")
 
-    schedule_service = CrawlScheduleService(db)
+    schedule_service = TaskScheduleService(db)
     result = schedule_service.get_runs_paginated(
         schedule_id=schedule_id,
         page=page,
@@ -295,11 +295,11 @@ async def get_schedule_stats(
 ):
     """스케줄 실행 통계 조회."""
     # 스케줄 존재 확인
-    schedule = db.query(CrawlSchedule).filter_by(id=schedule_id).first()
+    schedule = db.query(TaskSchedule).filter_by(id=schedule_id).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="스케줄을 찾을 수 없습니다")
 
-    schedule_service = CrawlScheduleService(db)
+    schedule_service = TaskScheduleService(db)
     stats = schedule_service.get_run_stats(schedule_id=schedule_id, days=days)
 
     return stats

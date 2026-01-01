@@ -7,7 +7,7 @@ from typing import List, Optional
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from app.models import CrawlRequest, CrawlScheduleRun
+from app.models import CrawlRequest, TaskScheduleRun
 
 logger = logging.getLogger("instagram.request_service")
 
@@ -151,7 +151,7 @@ class CrawlRequestService:
 
         Args:
             request_id: 요청 ID
-            crawl_run_id: 크롤링 실행 ID (CrawlScheduleRun.id)
+            crawl_run_id: 크롤링 실행 ID (TaskScheduleRun.id)
 
         Returns:
             업데이트된 요청
@@ -562,13 +562,13 @@ class CrawlRequestService:
         return requests, total
 
     def get_request_with_run(self, request_id: int) -> Optional[dict]:
-        """요청과 연결된 CrawlScheduleRun 정보를 함께 조회.
+        """요청과 연결된 TaskScheduleRun 정보를 함께 조회.
 
         Args:
             request_id: 요청 ID
 
         Returns:
-            요청 정보와 CrawlScheduleRun 요약을 포함한 딕셔너리
+            요청 정보와 TaskScheduleRun 요약을 포함한 딕셔너리
         """
         request = self.db.query(CrawlRequest).filter(CrawlRequest.id == request_id).first()
         if not request:
@@ -580,8 +580,8 @@ class CrawlRequestService:
         }
 
         if request.result_id and request.result_type == "crawl_schedule_run":
-            run = self.db.query(CrawlScheduleRun).filter(
-                CrawlScheduleRun.id == request.result_id
+            run = self.db.query(TaskScheduleRun).filter(
+                TaskScheduleRun.id == request.result_id
             ).first()
             if run:
                 duration = run.duration_seconds

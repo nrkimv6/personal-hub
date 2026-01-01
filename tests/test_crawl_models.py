@@ -1,5 +1,5 @@
 """
-크롤링 모델 테스트 (CrawlRequest, CrawlSchedule, CrawlScheduleRun)
+크롤링 모델 테스트 (CrawlRequest, TaskSchedule, TaskScheduleRun)
 
 RIGHT-BICEP 테스트 원칙 적용:
 - Right: 올바른 결과 반환
@@ -24,7 +24,7 @@ import uuid
 from datetime import datetime, timedelta
 from sqlalchemy.exc import IntegrityError
 
-from app.models import CrawlRequest, CrawlSchedule, CrawlScheduleRun
+from app.models import CrawlRequest, TaskSchedule, TaskScheduleRun
 
 
 def unique_name(prefix: str = "test") -> str:
@@ -137,16 +137,16 @@ class TestCrawlRequest:
         assert request.status in repr_str
 
 
-class TestCrawlSchedule:
-    """CrawlSchedule 모델 테스트."""
+class TestTaskSchedule:
+    """TaskSchedule 모델 테스트."""
 
     def test_create_schedule_right(self, test_db_session):
         """[Right] 기본 스케줄 생성이 올바르게 동작해야 함."""
-        schedule = CrawlSchedule(
+        schedule = TaskSchedule(
             name=unique_name("instagram_feed"),
             display_name="Instagram 피드 테스트",
-            target_type=CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
-            schedule_type=CrawlSchedule.SCHEDULE_TYPE_TIME_WINDOW,
+            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
             schedule_value='{"times": ["09:00", "14:00", "21:00"]}',
             enabled=True
         )
@@ -160,7 +160,7 @@ class TestCrawlSchedule:
     def test_unique_name_constraint(self, test_db_session):
         """[Existence] name은 유니크해야 함."""
         dup_name = unique_name("duplicate")
-        schedule1 = CrawlSchedule(
+        schedule1 = TaskSchedule(
             name=dup_name,
             target_type="test",
             schedule_type="manual"
@@ -168,7 +168,7 @@ class TestCrawlSchedule:
         test_db_session.add(schedule1)
         test_db_session.commit()
 
-        schedule2 = CrawlSchedule(
+        schedule2 = TaskSchedule(
             name=dup_name,  # 중복
             target_type="test",
             schedule_type="manual"
@@ -183,10 +183,10 @@ class TestCrawlSchedule:
     def test_target_config_json_right(self, test_db_session):
         """[Right] target_config JSON 직렬화가 올바르게 동작해야 함."""
         name = unique_name("config")
-        schedule = CrawlSchedule(
+        schedule = TaskSchedule(
             name=name,
-            target_type=CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
-            schedule_type=CrawlSchedule.SCHEDULE_TYPE_INTERVAL
+            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_INTERVAL
         )
 
         config = {"account_id": 1, "max_posts": 500, "duplicate_stop": 5}
@@ -195,12 +195,12 @@ class TestCrawlSchedule:
         test_db_session.commit()
 
         # DB에서 다시 로드
-        loaded = test_db_session.query(CrawlSchedule).filter_by(name=name).first()
+        loaded = test_db_session.query(TaskSchedule).filter_by(name=name).first()
         assert loaded.get_target_config() == config
 
     def test_target_config_empty_boundary(self, test_db_session):
         """[Boundary] 빈 target_config 처리."""
-        schedule = CrawlSchedule(
+        schedule = TaskSchedule(
             name=unique_name("empty_config"),
             target_type="test",
             schedule_type="manual",
@@ -213,7 +213,7 @@ class TestCrawlSchedule:
 
     def test_update_last_run_time(self, test_db_session):
         """[Time] 마지막 실행 시간 업데이트가 올바르게 동작해야 함."""
-        schedule = CrawlSchedule(
+        schedule = TaskSchedule(
             name=unique_name("time"),
             target_type="test",
             schedule_type="manual"
@@ -231,7 +231,7 @@ class TestCrawlSchedule:
 
     def test_runs_relationship_cardinality(self, test_db_session):
         """[Cardinality] 스케줄과 실행 이력의 1:N 관계."""
-        schedule = CrawlSchedule(
+        schedule = TaskSchedule(
             name=unique_name("cardinality"),
             target_type="test",
             schedule_type="manual"
@@ -241,10 +241,10 @@ class TestCrawlSchedule:
 
         # 3개의 실행 이력 추가
         for i in range(3):
-            run = CrawlScheduleRun(
+            run = TaskScheduleRun(
                 schedule_id=schedule.id,
                 started_at=datetime.now(),
-                status=CrawlScheduleRun.STATUS_COMPLETED
+                status=TaskScheduleRun.STATUS_COMPLETED
             )
             test_db_session.add(run)
         test_db_session.commit()
@@ -253,16 +253,16 @@ class TestCrawlSchedule:
         assert len(schedule.runs) == 3
 
 
-class TestCrawlScheduleRun:
-    """CrawlScheduleRun 모델 테스트."""
+class TestTaskScheduleRun:
+    """TaskScheduleRun 모델 테스트."""
 
     @pytest.fixture
     def sample_schedule(self, test_db_session):
         """테스트용 스케줄 생성."""
-        schedule = CrawlSchedule(
+        schedule = TaskSchedule(
             name=f"test_schedule_{datetime.now().timestamp()}",
-            target_type=CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
-            schedule_type=CrawlSchedule.SCHEDULE_TYPE_MANUAL
+            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_MANUAL
         )
         test_db_session.add(schedule)
         test_db_session.commit()
@@ -270,7 +270,7 @@ class TestCrawlScheduleRun:
 
     def test_create_run_right(self, test_db_session, sample_schedule):
         """[Right] 기본 실행 기록 생성이 올바르게 동작해야 함."""
-        run = CrawlScheduleRun(
+        run = TaskScheduleRun(
             schedule_id=sample_schedule.id,
             started_at=datetime.now(),
             worker_id="worker-123"
@@ -279,13 +279,13 @@ class TestCrawlScheduleRun:
         test_db_session.commit()
 
         assert run.id is not None
-        assert run.status == CrawlScheduleRun.STATUS_RUNNING
+        assert run.status == TaskScheduleRun.STATUS_RUNNING
         assert run.collected_count == 0
         assert run.saved_count == 0
 
     def test_mark_completed_right(self, test_db_session, sample_schedule):
         """[Right] 완료 처리가 올바르게 동작해야 함."""
-        run = CrawlScheduleRun(
+        run = TaskScheduleRun(
             schedule_id=sample_schedule.id,
             started_at=datetime.now()
         )
@@ -295,18 +295,18 @@ class TestCrawlScheduleRun:
         run.mark_completed(
             collected_count=100,
             saved_count=50,
-            stop_reason=CrawlScheduleRun.STOP_REASON_DUPLICATE
+            stop_reason=TaskScheduleRun.STOP_REASON_DUPLICATE
         )
 
-        assert run.status == CrawlScheduleRun.STATUS_COMPLETED
+        assert run.status == TaskScheduleRun.STATUS_COMPLETED
         assert run.collected_count == 100
         assert run.saved_count == 50
-        assert run.stop_reason == CrawlScheduleRun.STOP_REASON_DUPLICATE
+        assert run.stop_reason == TaskScheduleRun.STOP_REASON_DUPLICATE
         assert run.finished_at is not None
 
     def test_mark_failed_right(self, test_db_session, sample_schedule):
         """[Right] 실패 처리가 올바르게 동작해야 함."""
-        run = CrawlScheduleRun(
+        run = TaskScheduleRun(
             schedule_id=sample_schedule.id,
             started_at=datetime.now()
         )
@@ -315,14 +315,14 @@ class TestCrawlScheduleRun:
 
         run.mark_failed("Login required")
 
-        assert run.status == CrawlScheduleRun.STATUS_FAILED
+        assert run.status == TaskScheduleRun.STATUS_FAILED
         assert run.error_message == "Login required"
         assert run.finished_at is not None
 
     def test_duration_seconds_time(self, test_db_session, sample_schedule):
         """[Time] 실행 시간 계산이 올바르게 동작해야 함."""
         start = datetime.now()
-        run = CrawlScheduleRun(
+        run = TaskScheduleRun(
             schedule_id=sample_schedule.id,
             started_at=start
         )
@@ -338,7 +338,7 @@ class TestCrawlScheduleRun:
 
     def test_config_snapshot_json_right(self, test_db_session, sample_schedule):
         """[Right] config_snapshot JSON 직렬화가 올바르게 동작해야 함."""
-        run = CrawlScheduleRun(
+        run = TaskScheduleRun(
             schedule_id=sample_schedule.id,
             started_at=datetime.now()
         )
@@ -348,12 +348,12 @@ class TestCrawlScheduleRun:
         test_db_session.add(run)
         test_db_session.commit()
 
-        loaded = test_db_session.query(CrawlScheduleRun).get(run.id)
+        loaded = test_db_session.query(TaskScheduleRun).get(run.id)
         assert loaded.get_config_snapshot() == config
 
     def test_schedule_foreign_key_reference(self, test_db_session, sample_schedule):
         """[Reference] 스케줄 FK 관계가 올바르게 동작해야 함."""
-        run = CrawlScheduleRun(
+        run = TaskScheduleRun(
             schedule_id=sample_schedule.id,
             started_at=datetime.now()
         )
@@ -366,16 +366,16 @@ class TestCrawlScheduleRun:
 
     def test_retry_self_reference(self, test_db_session, sample_schedule):
         """[Reference] 재시도 자기참조 FK가 올바르게 동작해야 함."""
-        original_run = CrawlScheduleRun(
+        original_run = TaskScheduleRun(
             schedule_id=sample_schedule.id,
             started_at=datetime.now(),
-            status=CrawlScheduleRun.STATUS_FAILED,
+            status=TaskScheduleRun.STATUS_FAILED,
             error_message="First attempt failed"
         )
         test_db_session.add(original_run)
         test_db_session.commit()
 
-        retry_run = CrawlScheduleRun(
+        retry_run = TaskScheduleRun(
             schedule_id=sample_schedule.id,
             started_at=datetime.now(),
             retry_count=1,
@@ -389,7 +389,7 @@ class TestCrawlScheduleRun:
 
     def test_cascade_delete_ordering(self, test_db_session):
         """[Ordering] 스케줄 삭제 시 실행 기록도 삭제되어야 함."""
-        schedule = CrawlSchedule(
+        schedule = TaskSchedule(
             name=f"cascade_test_{datetime.now().timestamp()}",
             target_type="test",
             schedule_type="manual"
@@ -399,7 +399,7 @@ class TestCrawlScheduleRun:
         schedule_id = schedule.id
 
         # 실행 기록 추가
-        run = CrawlScheduleRun(
+        run = TaskScheduleRun(
             schedule_id=schedule_id,
             started_at=datetime.now()
         )
@@ -412,7 +412,7 @@ class TestCrawlScheduleRun:
         test_db_session.commit()
 
         # 실행 기록도 삭제되었는지 확인
-        deleted_run = test_db_session.query(CrawlScheduleRun).get(run_id)
+        deleted_run = test_db_session.query(TaskScheduleRun).get(run_id)
         assert deleted_run is None
 
 
@@ -422,11 +422,11 @@ class TestCrawlModelsIntegration:
     def test_full_crawl_workflow(self, test_db_session):
         """[Cross-check] 전체 크롤링 워크플로우 테스트."""
         # 1. 스케줄 생성
-        schedule = CrawlSchedule(
+        schedule = TaskSchedule(
             name=f"workflow_test_{datetime.now().timestamp()}",
             display_name="워크플로우 테스트",
-            target_type=CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
-            schedule_type=CrawlSchedule.SCHEDULE_TYPE_TIME_WINDOW,
+            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
             schedule_value='{"times": ["09:00"]}',
             enabled=True
         )
@@ -435,7 +435,7 @@ class TestCrawlModelsIntegration:
         test_db_session.commit()
 
         # 2. 실행 시작
-        run = CrawlScheduleRun(
+        run = TaskScheduleRun(
             schedule_id=schedule.id,
             started_at=datetime.now(),
             worker_id="worker-001"
@@ -448,7 +448,7 @@ class TestCrawlModelsIntegration:
         run.mark_completed(
             collected_count=100,
             saved_count=80,
-            stop_reason=CrawlScheduleRun.STOP_REASON_DUPLICATE
+            stop_reason=TaskScheduleRun.STOP_REASON_DUPLICATE
         )
         schedule.update_last_run(datetime.now() + timedelta(hours=5))
         test_db_session.commit()
@@ -456,7 +456,7 @@ class TestCrawlModelsIntegration:
         # 4. 검증
         assert schedule.last_run_at is not None
         assert len(schedule.runs) == 1
-        assert schedule.runs[0].status == CrawlScheduleRun.STATUS_COMPLETED
+        assert schedule.runs[0].status == TaskScheduleRun.STATUS_COMPLETED
         assert schedule.runs[0].saved_count == 80
 
     def test_single_request_workflow(self, test_db_session):

@@ -468,7 +468,7 @@ class TestCrawlService:
     def test_update_schedule_config_creates_if_not_exists(self, mock_db):
         """설정이 없으면 생성"""
         from app.modules.instagram.services.crawl_service import CrawlService
-        from app.models.crawl_schedule import CrawlSchedule
+        from app.models.task_schedule import TaskSchedule
 
         mock_db.query.return_value.filter.return_value.first.return_value = None
 
@@ -481,9 +481,9 @@ class TestCrawlService:
     def test_update_schedule_config_updates_existing(self, mock_db):
         """기존 설정 업데이트"""
         from app.modules.instagram.services.crawl_service import CrawlService
-        from app.models.crawl_schedule import CrawlSchedule
+        from app.models.task_schedule import TaskSchedule
 
-        existing_config = MagicMock(spec=CrawlSchedule)
+        existing_config = MagicMock(spec=TaskSchedule)
         existing_config.enabled = True
         existing_config.schedule_value = '{"daily_runs": 3, "time_windows": []}'
         mock_db.query.return_value.filter.return_value.first.return_value = existing_config
@@ -552,12 +552,12 @@ class TestMigration:
     def test_model_imports(self):
         """모델 임포트 확인 (새 모델 구조)"""
         from app.models.instagram_post import InstagramPost
-        from app.models.crawl_schedule import CrawlSchedule, CrawlScheduleRun
+        from app.models.task_schedule import TaskSchedule, TaskScheduleRun
         from app.models.crawl_request import CrawlRequest
 
         assert InstagramPost is not None
-        assert CrawlSchedule is not None
-        assert CrawlScheduleRun is not None
+        assert TaskSchedule is not None
+        assert TaskScheduleRun is not None
         assert CrawlRequest is not None
 
 

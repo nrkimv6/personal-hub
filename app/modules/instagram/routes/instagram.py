@@ -657,7 +657,7 @@ async def get_crawl_history(
 
     모든 크롤링 활동(피드 크롤링, URL 요청, 개별 게시물 재크롤링)을 한눈에 조회.
     """
-    from app.models import CrawlScheduleRun
+    from app.models import TaskScheduleRun
 
     request_service = CrawlRequestService(db)
     requests, total = request_service.get_requests_paginated(
@@ -672,10 +672,10 @@ async def get_crawl_history(
 
     items = []
     for req in requests:
-        # CrawlScheduleRun 정보 조회 (있는 경우)
+        # TaskScheduleRun 정보 조회 (있는 경우)
         crawl_run_summary = None
         if req.result_id and req.result_type == "crawl_schedule_run":
-            run = db.query(CrawlScheduleRun).filter(CrawlScheduleRun.id == req.result_id).first()
+            run = db.query(TaskScheduleRun).filter(TaskScheduleRun.id == req.result_id).first()
             if run:
                 duration = run.duration_seconds
                 crawl_run_summary = CrawlRunSummary(
@@ -1051,7 +1051,7 @@ async def proxy_image(
 # ============== Helpers ==============
 
 def _run_to_schema(run) -> CrawlRunSchema:
-    """CrawlScheduleRun 모델을 CrawlRunSchema로 변환."""
+    """TaskScheduleRun 모델을 CrawlRunSchema로 변환."""
     import json
 
     # schedule의 target_config에서 service_account_id 추출
@@ -1076,7 +1076,7 @@ def _run_to_schema(run) -> CrawlRunSchema:
 
 
 def _config_to_schema(config) -> ScheduleConfigSchema:
-    """CrawlSchedule 모델을 ScheduleConfigSchema로 변환."""
+    """TaskSchedule 모델을 ScheduleConfigSchema로 변환."""
     import json
 
     # target_config에서 설정 추출

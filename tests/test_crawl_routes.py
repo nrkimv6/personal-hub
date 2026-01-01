@@ -10,7 +10,7 @@ from datetime import datetime
 
 from app.main import app
 from app.database import get_db
-from app.models import CrawlRequest, CrawlSchedule
+from app.models import CrawlRequest, TaskSchedule
 
 
 @pytest.fixture
@@ -89,13 +89,13 @@ class TestCrawlRequestRoutes:
         assert response.status_code == 404
 
 
-class TestCrawlScheduleRoutes:
-    """CrawlSchedule API 라우트 테스트."""
+class TestTaskScheduleRoutes:
+    """TaskSchedule API 라우트 테스트."""
 
     def test_create_schedule_right(self, client):
         """[Right] 스케줄 생성 API가 올바르게 동작해야 함."""
         ts = datetime.now().timestamp()
-        response = client.post("/api/v2/crawl/schedules", json={
+        response = client.post("/api/tasks/schedules", json={
             "name": f"test_schedule_{ts}",
             "target_type": "instagram_feed",
             "schedule_type": "manual",
@@ -114,14 +114,14 @@ class TestCrawlScheduleRoutes:
         name = f"duplicate_test_{ts}"
 
         # 첫 번째 생성
-        client.post("/api/v2/crawl/schedules", json={
+        client.post("/api/tasks/schedules", json={
             "name": name,
             "target_type": "instagram_feed",
             "schedule_type": "manual"
         })
 
         # 두 번째 생성 시도 (동일 이름)
-        response = client.post("/api/v2/crawl/schedules", json={
+        response = client.post("/api/tasks/schedules", json={
             "name": name,
             "target_type": "naver_blog",
             "schedule_type": "manual"
@@ -134,14 +134,14 @@ class TestCrawlScheduleRoutes:
         ts = datetime.now().timestamp()
 
         # 스케줄 생성
-        client.post("/api/v2/crawl/schedules", json={
+        client.post("/api/tasks/schedules", json={
             "name": f"list_test_{ts}",
             "target_type": "instagram_feed",
             "schedule_type": "manual",
             "enabled": True
         })
 
-        response = client.get("/api/v2/crawl/schedules", params={
+        response = client.get("/api/tasks/schedules", params={
             "enabled_only": True
         })
 
@@ -154,7 +154,7 @@ class TestCrawlScheduleRoutes:
         ts = datetime.now().timestamp()
 
         # 생성
-        create_response = client.post("/api/v2/crawl/schedules", json={
+        create_response = client.post("/api/tasks/schedules", json={
             "name": f"detail_test_{ts}",
             "target_type": "naver_blog",
             "schedule_type": "time_window"
@@ -162,7 +162,7 @@ class TestCrawlScheduleRoutes:
         schedule_id = create_response.json()["id"]
 
         # 조회
-        response = client.get(f"/api/v2/crawl/schedules/{schedule_id}")
+        response = client.get(f"/api/tasks/schedules/{schedule_id}")
 
         assert response.status_code == 200
         data = response.json()
@@ -173,7 +173,7 @@ class TestCrawlScheduleRoutes:
         ts = datetime.now().timestamp()
 
         # 생성
-        create_response = client.post("/api/v2/crawl/schedules", json={
+        create_response = client.post("/api/tasks/schedules", json={
             "name": f"update_test_{ts}",
             "target_type": "instagram_feed",
             "schedule_type": "manual",
@@ -182,7 +182,7 @@ class TestCrawlScheduleRoutes:
         schedule_id = create_response.json()["id"]
 
         # 업데이트
-        response = client.put(f"/api/v2/crawl/schedules/{schedule_id}", json={
+        response = client.put(f"/api/tasks/schedules/{schedule_id}", json={
             "display_name": "업데이트된 이름",
             "enabled": False
         })
@@ -197,7 +197,7 @@ class TestCrawlScheduleRoutes:
         ts = datetime.now().timestamp()
 
         # 생성 (enabled=True)
-        create_response = client.post("/api/v2/crawl/schedules", json={
+        create_response = client.post("/api/tasks/schedules", json={
             "name": f"toggle_test_{ts}",
             "target_type": "instagram_feed",
             "schedule_type": "manual",
@@ -207,7 +207,7 @@ class TestCrawlScheduleRoutes:
 
         # 비활성화
         response = client.post(
-            f"/api/v2/crawl/schedules/{schedule_id}/toggle",
+            f"/api/tasks/schedules/{schedule_id}/toggle",
             params={"enabled": False}
         )
 
@@ -218,14 +218,14 @@ class TestCrawlScheduleRoutes:
 
 
 class TestCrawlRunRoutes:
-    """CrawlScheduleRun API 라우트 테스트."""
+    """TaskScheduleRun API 라우트 테스트."""
 
     def test_get_schedule_runs_right(self, client):
         """[Right] 스케줄 실행 이력 조회 API가 올바르게 동작해야 함."""
         ts = datetime.now().timestamp()
 
         # 스케줄 생성
-        create_response = client.post("/api/v2/crawl/schedules", json={
+        create_response = client.post("/api/tasks/schedules", json={
             "name": f"runs_test_{ts}",
             "target_type": "instagram_feed",
             "schedule_type": "manual"
@@ -233,7 +233,7 @@ class TestCrawlRunRoutes:
         schedule_id = create_response.json()["id"]
 
         # 실행 이력 조회
-        response = client.get(f"/api/v2/crawl/schedules/{schedule_id}/runs")
+        response = client.get(f"/api/tasks/schedules/{schedule_id}/runs")
 
         assert response.status_code == 200
         data = response.json()
@@ -245,7 +245,7 @@ class TestCrawlRunRoutes:
         ts = datetime.now().timestamp()
 
         # 스케줄 생성
-        create_response = client.post("/api/v2/crawl/schedules", json={
+        create_response = client.post("/api/tasks/schedules", json={
             "name": f"stats_test_{ts}",
             "target_type": "instagram_feed",
             "schedule_type": "manual"
@@ -254,7 +254,7 @@ class TestCrawlRunRoutes:
 
         # 통계 조회
         response = client.get(
-            f"/api/v2/crawl/schedules/{schedule_id}/stats",
+            f"/api/tasks/schedules/{schedule_id}/stats",
             params={"days": 7}
         )
 
@@ -266,7 +266,7 @@ class TestCrawlRunRoutes:
 
     def test_get_all_runs_right(self, client):
         """[Right] 전체 실행 이력 조회 API가 올바르게 동작해야 함."""
-        response = client.get("/api/v2/crawl/runs")
+        response = client.get("/api/tasks/runs")
 
         assert response.status_code == 200
         data = response.json()
