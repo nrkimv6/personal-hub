@@ -237,6 +237,24 @@ class TaskScheduleService:
             TaskScheduleRun.status == TaskScheduleRun.STATUS_RUNNING
         ).first() is not None
 
+    def get_pending_manual_run(self, schedule_id: int) -> Optional[TaskScheduleRun]:
+        """수동으로 생성된 대기 중인 실행 조회.
+
+        API에서 수동 실행 시 worker_id='manual'로 생성된 run을 찾습니다.
+        워커가 이 run을 감지하면 실제로 실행합니다.
+
+        Args:
+            schedule_id: 스케줄 ID
+
+        Returns:
+            수동으로 생성된 running 상태의 run (없으면 None)
+        """
+        return self.db.query(TaskScheduleRun).filter(
+            TaskScheduleRun.schedule_id == schedule_id,
+            TaskScheduleRun.status == TaskScheduleRun.STATUS_RUNNING,
+            TaskScheduleRun.worker_id == "manual"
+        ).order_by(TaskScheduleRun.started_at.asc()).first()
+
     def cleanup_stale_runs(self, timeout_minutes: int = 30) -> int:
         """오래된 running 상태 실행을 failed로 정리.
 

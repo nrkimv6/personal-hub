@@ -604,6 +604,21 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         try:
             config = schedule.get_target_config()
 
+            # 수동 실행 요청 확인 (API에서 즉시 실행 버튼 클릭 시)
+            manual_run = schedule_service.get_pending_manual_run(schedule.id)
+            if manual_run:
+                task_name = f"writing_source_{schedule.id}_run_{manual_run.id}"
+                if not self._is_task_running(task_name):
+                    # worker_id 업데이트
+                    manual_run.worker_id = self.name
+                    db.commit()
+                    self._create_task(
+                        self._execute_writing_source_collect(schedule, manual_run, config),
+                        task_name
+                    )
+                    logger.info(f"[{self.name}] 수동 Writing Source 수집 태스크 시작: run_id={manual_run.id}")
+                return
+
             # 타임 윈도우 설정 (빈 배열이면 None으로 처리하여 기본값 사용)
             time_windows = parse_time_windows(config.get("time_windows", []))
             daily_runs = config.get("daily_runs", 1)
@@ -909,6 +924,21 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         """
         try:
             config = schedule.get_target_config()
+
+            # 수동 실행 요청 확인 (API에서 즉시 실행 버튼 클릭 시)
+            manual_run = schedule_service.get_pending_manual_run(schedule.id)
+            if manual_run:
+                task_name = f"keyword_analysis_{schedule.id}_run_{manual_run.id}"
+                if not self._is_task_running(task_name):
+                    # worker_id 업데이트
+                    manual_run.worker_id = self.name
+                    db.commit()
+                    self._create_task(
+                        self._execute_keyword_analysis(schedule, manual_run, config),
+                        task_name
+                    )
+                    logger.info(f"[{self.name}] 수동 Keyword Analysis 태스크 시작: run_id={manual_run.id}")
+                return
 
             # cron 스케줄의 경우 should_run_now 체크를 위해 InstagramScheduler 사용
             # 시간 기반 실행 확인을 위한 간단한 체크
