@@ -361,3 +361,74 @@ class TestRunSchedule:
         response = client.post(f"{API_PREFIX}/collect/schedules/99999/run")
 
         assert response.status_code == 404
+
+
+# ============================================================
+# Delete 테스트
+# ============================================================
+
+class TestDeleteSchedule:
+    """스케줄 삭제 테스트"""
+
+    def test_delete_schedule_without_runs(self, client, sample_service_account):
+        """실행 이력 없는 스케줄 삭제"""
+        # 스케줄 생성
+        create_resp = client.post(f"{API_PREFIX}/collect/schedules", json={
+            "target_type": "instagram_feed",
+            "target_config": {"service_account_id": sample_service_account.id},
+        })
+        schedule_id = create_resp.json()["id"]
+
+        # 삭제 (이력 없으므로 delete_runs=false도 성공)
+        response = client.delete(f"{API_PREFIX}/collect/schedules/{schedule_id}?delete_runs=false")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["deleted_runs"] == 0
+
+        # 삭제 확인
+        list_resp = client.get(f"{API_PREFIX}/collect/schedules")
+        assert len(list_resp.json()) == 0
+
+    def test_delete_schedule_with_runs(self, client):
+        """실행 이력 있는 스케줄 삭제 (delete_runs=true)"""
+        # 글쓰기 스케줄 생성
+        create_resp = client.post(f"{API_PREFIX}/collect/schedules", json={
+            "target_type": "writing_task",
+        })
+        schedule_id = create_resp.json()["id"]
+
+        # 즉시 실행으로 이력 생성
+        client.post(f"{API_PREFIX}/collect/schedules/{schedule_id}/run")
+
+        # 삭제 (이력 포함)
+        response = client.delete(f"{API_PREFIX}/collect/schedules/{schedule_id}?delete_runs=true")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["deleted_runs"] >= 1
+
+    def test_delete_schedule_with_runs_requires_flag(self, client):
+        """실행 이력 있는 스케줄 삭제 시 delete_runs 필요"""
+        # 글쓰기 스케줄 생성
+        create_resp = client.post(f"{API_PREFIX}/collect/schedules", json={
+            "target_type": "writing_task",
+        })
+        schedule_id = create_resp.json()["id"]
+
+        # 즉시 실행으로 이력 생성
+        client.post(f"{API_PREFIX}/collect/schedules/{schedule_id}/run")
+
+        # delete_runs=false로 삭제 시도 (이력 있으므로 실패해야 함)
+        response = client.delete(f"{API_PREFIX}/collect/schedules/{schedule_id}?delete_runs=false")
+
+        assert response.status_code == 400
+        assert "실행 이력이 있습니다" in response.json()["detail"]
+
+    def test_delete_nonexistent_schedule(self, client):
+        """존재하지 않는 스케줄 삭제"""
+        response = client.delete(f"{API_PREFIX}/collect/schedules/99999?delete_runs=true")
+
+        assert response.status_code == 404

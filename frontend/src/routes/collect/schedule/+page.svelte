@@ -32,6 +32,11 @@
 	let savedSearches: { id: number; name: string; query: string; is_favorite: boolean }[] = [];
 	let loadingTargets = false;
 
+	// 삭제 모달 상태
+	let showDeleteModal = false;
+	let deleteTarget: CrawlSchedule | null = null;
+	let deleting = false;
+
 	const scheduleTypes = [
 		{ value: 'instagram_feed', label: 'Instagram 피드', icon: '📸', color: 'pink' },
 		{ value: 'google_search', label: 'Google 검색', icon: '🔍', color: 'yellow' },
@@ -185,6 +190,35 @@
 			error = e instanceof Error ? e.message : '즉시 실행 실패';
 		} finally {
 			runningId = null;
+		}
+	}
+
+	function openDeleteModal(schedule: CrawlSchedule) {
+		deleteTarget = schedule;
+		showDeleteModal = true;
+	}
+
+	function closeDeleteModal() {
+		showDeleteModal = false;
+		deleteTarget = null;
+	}
+
+	async function confirmDelete() {
+		if (!deleteTarget) return;
+
+		deleting = true;
+		error = null;
+		try {
+			const result = await collectApi.deleteSchedule(deleteTarget.id, true);
+			if (result.success) {
+				successMessage = result.message;
+				closeDeleteModal();
+				await fetchSchedules();
+			}
+		} catch (e) {
+			error = e instanceof Error ? e.message : '삭제 실패';
+		} finally {
+			deleting = false;
 		}
 	}
 
@@ -346,6 +380,15 @@
 								{:else}
 									즉시 실행
 								{/if}
+							</button>
+
+							<!-- 삭제 버튼 -->
+							<button
+								onclick={() => openDeleteModal(schedule)}
+								class="btn btn-sm text-red-600 hover:bg-red-50 border border-red-200"
+								title="스케줄 삭제"
+							>
+								삭제
 							</button>
 						</div>
 					</div>
@@ -550,6 +593,46 @@
 						</button>
 					</div>
 				{/if}
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- 삭제 확인 모달 -->
+{#if showDeleteModal && deleteTarget}
+	<div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+		<div class="bg-white rounded-xl shadow-2xl max-w-md w-full">
+			<!-- 모달 헤더 -->
+			<div class="px-6 py-4 border-b border-gray-200">
+				<h2 class="text-xl font-bold text-gray-900">스케줄 삭제</h2>
+			</div>
+
+			<!-- 모달 컨텐츠 -->
+			<div class="p-6">
+				<p class="text-gray-700 mb-4">
+					<strong>"{deleteTarget.display_name || deleteTarget.name}"</strong> 스케줄을 삭제하시겠습니까?
+				</p>
+				<p class="text-sm text-red-600 bg-red-50 p-3 rounded-lg">
+					실행 이력도 함께 삭제됩니다. 이 작업은 되돌릴 수 없습니다.
+				</p>
+			</div>
+
+			<!-- 모달 푸터 -->
+			<div class="px-6 py-4 border-t border-gray-200 flex justify-end gap-2">
+				<button onclick={closeDeleteModal} class="btn btn-secondary" disabled={deleting}>
+					취소
+				</button>
+				<button
+					onclick={confirmDelete}
+					disabled={deleting}
+					class="btn bg-red-600 text-white hover:bg-red-700"
+				>
+					{#if deleting}
+						삭제 중...
+					{:else}
+						삭제
+					{/if}
+				</button>
 			</div>
 		</div>
 	</div>

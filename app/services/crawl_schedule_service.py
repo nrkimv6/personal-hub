@@ -301,3 +301,33 @@ class CrawlScheduleService:
         return self.db.query(CrawlScheduleRun).filter(
             CrawlScheduleRun.id == run_id
         ).first()
+
+    def delete_schedule(self, schedule_id: int, delete_runs: bool = False) -> bool:
+        """스케줄 삭제.
+
+        Args:
+            schedule_id: 삭제할 스케줄 ID
+            delete_runs: True면 실행 이력도 함께 삭제, False면 이력 유지
+
+        Returns:
+            삭제 성공 여부
+        """
+        schedule = self.get_schedule_by_id(schedule_id)
+        if not schedule:
+            return False
+
+        if delete_runs:
+            # 실행 이력도 함께 삭제
+            self.db.query(CrawlScheduleRun).filter(
+                CrawlScheduleRun.schedule_id == schedule_id
+            ).delete()
+
+        self.db.delete(schedule)
+        self.db.commit()
+        return True
+
+    def get_run_count(self, schedule_id: int) -> int:
+        """스케줄의 실행 이력 수 조회."""
+        return self.db.query(CrawlScheduleRun).filter(
+            CrawlScheduleRun.schedule_id == schedule_id
+        ).count()

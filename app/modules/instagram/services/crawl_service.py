@@ -142,11 +142,19 @@ class CrawlService:
         return crawl_run
 
     def _get_or_create_default_schedule(self, service_account_id: int) -> CrawlSchedule:
-        """기본 Instagram 피드 스케줄 조회 또는 생성."""
+        """기본 Instagram 피드 스케줄 조회 또는 생성.
+
+        DEPRECATED: 수집관리-스케줄 페이지에서 직접 스케줄을 생성하도록 권장됨.
+        자동 생성은 호환성을 위해 유지되나, 향후 제거 예정.
+        """
         schedule_name = f"instagram_feed_account_{service_account_id}"
         schedule = self._schedule_service.get_schedule_by_name(schedule_name)
 
         if not schedule:
+            logger.warning(
+                f"Instagram 스케줄 자동 생성됨 (권장하지 않음): {schedule_name}. "
+                "수집관리-스케줄 페이지에서 직접 생성하세요."
+            )
             schedule = self._schedule_service.create_schedule(
                 name=schedule_name,
                 display_name=f"Instagram 피드 (계정 {service_account_id})",

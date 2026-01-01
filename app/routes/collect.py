@@ -274,6 +274,47 @@ async def toggle_schedule(
     return {"success": True, "enabled": schedule.enabled}
 
 
+@router.delete("/schedules/{schedule_id}")
+async def delete_schedule(
+    schedule_id: int,
+    delete_runs: bool = Query(False, description="실행 이력도 함께 삭제"),
+    db: Session = Depends(get_db),
+):
+    """스케줄 삭제.
+
+    Args:
+        schedule_id: 삭제할 스케줄 ID
+        delete_runs: True면 실행 이력도 함께 삭제 (기본: False - 이력 유지)
+    """
+    service = CrawlScheduleService(db)
+
+    # 스케줄 존재 확인
+    schedule = service.get_schedule_by_id(schedule_id)
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    # 실행 이력 수 확인 (삭제 전 정보 제공)
+    run_count = service.get_run_count(schedule_id)
+
+    # 이력이 있는데 delete_runs=False인 경우 경고
+    if run_count > 0 and not delete_runs:
+        raise HTTPException(
+            status_code=400,
+            detail=f"스케줄에 {run_count}개의 실행 이력이 있습니다. "
+                   "이력도 삭제하려면 delete_runs=true를 사용하세요."
+        )
+
+    success = service.delete_schedule(schedule_id, delete_runs=delete_runs)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete schedule")
+
+    return {
+        "success": True,
+        "message": f"스케줄이 삭제되었습니다" + (f" (이력 {run_count}개 포함)" if delete_runs and run_count > 0 else ""),
+        "deleted_runs": run_count if delete_runs else 0,
+    }
+
+
 @router.post("/schedules/{schedule_id}/run")
 async def trigger_schedule_run(
     schedule_id: int,
