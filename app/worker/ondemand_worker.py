@@ -330,9 +330,11 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
                 self._update_worker_state("crawling", account.identifier)
 
                 # BrowserManager를 통한 탭 획득 및 크롤링 실행
+                # Instagram 피드 크롤링은 최대 500개까지 수집 가능하므로 충분한 시간 필요
                 result = await self.execute_with_tab(
                     callback=self._instagram_feed_crawl_with_tab,
                     service_account_id=account.id,
+                    operation_timeout=3600.0,  # 1시간 타임아웃
                     request=request,
                     account=account,
                     db=db,
