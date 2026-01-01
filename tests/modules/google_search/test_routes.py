@@ -87,7 +87,7 @@ def sample_history_with_results(test_db_session):
 
 
 class TestSavedSearchListAPI:
-    """GET /api/google/saved 테스트"""
+    """GET /api/v1/google/saved 테스트"""
 
     def test_list_saved_searches_empty(self, client, test_db_session):
         """Right: 빈 목록 조회"""
@@ -95,13 +95,13 @@ class TestSavedSearchListAPI:
         test_db_session.query(GoogleSavedSearch).delete()
         test_db_session.commit()
 
-        response = client.get("/api/google/saved")
+        response = client.get("/api/v1/google/saved")
         assert response.status_code == 200
         assert response.json() == []
 
     def test_list_saved_searches_with_data(self, client, sample_saved_search):
         """Right: 저장된 검색 목록 조회"""
-        response = client.get("/api/google/saved")
+        response = client.get("/api/v1/google/saved")
         assert response.status_code == 200
         data = response.json()
         assert len(data) >= 1
@@ -118,7 +118,7 @@ class TestSavedSearchListAPI:
         test_db_session.add(non_fav)
         test_db_session.commit()
 
-        response = client.get("/api/google/saved?favorite_only=true")
+        response = client.get("/api/v1/google/saved?favorite_only=true")
         assert response.status_code == 200
         data = response.json()
         for item in data:
@@ -126,11 +126,11 @@ class TestSavedSearchListAPI:
 
 
 class TestSavedSearchCreateAPI:
-    """POST /api/google/saved 테스트"""
+    """POST /api/v1/google/saved 테스트"""
 
     def test_create_saved_search_right(self, client):
         """Right: 저장된 검색 생성"""
-        response = client.post("/api/google/saved", json={
+        response = client.post("/api/v1/google/saved", json={
             "name": "새 검색",
             "query": "fastapi tutorial",
             "date_filter": "1m",
@@ -147,7 +147,7 @@ class TestSavedSearchCreateAPI:
 
     def test_create_saved_search_minimal(self, client):
         """Boundary: 최소 필드만으로 생성"""
-        response = client.post("/api/google/saved", json={
+        response = client.post("/api/v1/google/saved", json={
             "name": "최소 검색",
             "query": "minimal",
         })
@@ -159,11 +159,11 @@ class TestSavedSearchCreateAPI:
 
 
 class TestSavedSearchDetailAPI:
-    """GET /api/google/saved/{id} 테스트"""
+    """GET /api/v1/google/saved/{id} 테스트"""
 
     def test_get_saved_search_right(self, client, sample_saved_search):
         """Right: 저장된 검색 상세 조회"""
-        response = client.get(f"/api/google/saved/{sample_saved_search.id}")
+        response = client.get(f"/api/v1/google/saved/{sample_saved_search.id}")
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == sample_saved_search.id
@@ -171,16 +171,16 @@ class TestSavedSearchDetailAPI:
 
     def test_get_saved_search_not_found(self, client):
         """Error: 존재하지 않는 ID"""
-        response = client.get("/api/google/saved/99999")
+        response = client.get("/api/v1/google/saved/99999")
         assert response.status_code == 404
 
 
 class TestSavedSearchUpdateAPI:
-    """PUT /api/google/saved/{id} 테스트"""
+    """PUT /api/v1/google/saved/{id} 테스트"""
 
     def test_update_saved_search_right(self, client, sample_saved_search):
         """Right: 저장된 검색 수정"""
-        response = client.put(f"/api/google/saved/{sample_saved_search.id}", json={
+        response = client.put(f"/api/v1/google/saved/{sample_saved_search.id}", json={
             "name": "수정된 검색",
             "max_pages": 5,
         })
@@ -193,32 +193,32 @@ class TestSavedSearchUpdateAPI:
 
     def test_update_saved_search_not_found(self, client):
         """Error: 존재하지 않는 ID 수정"""
-        response = client.put("/api/google/saved/99999", json={
+        response = client.put("/api/v1/google/saved/99999", json={
             "name": "Not Found",
         })
         assert response.status_code == 404
 
 
 class TestSavedSearchDeleteAPI:
-    """DELETE /api/google/saved/{id} 테스트"""
+    """DELETE /api/v1/google/saved/{id} 테스트"""
 
     def test_delete_saved_search_right(self, client, sample_saved_search):
         """Right: 저장된 검색 삭제"""
-        response = client.delete(f"/api/google/saved/{sample_saved_search.id}")
+        response = client.delete(f"/api/v1/google/saved/{sample_saved_search.id}")
         assert response.status_code == 200
 
         # 삭제 확인
-        response = client.get(f"/api/google/saved/{sample_saved_search.id}")
+        response = client.get(f"/api/v1/google/saved/{sample_saved_search.id}")
         assert response.status_code == 404
 
     def test_delete_saved_search_not_found(self, client):
         """Error: 존재하지 않는 ID 삭제"""
-        response = client.delete("/api/google/saved/99999")
+        response = client.delete("/api/v1/google/saved/99999")
         assert response.status_code == 404
 
 
 class TestToggleFavoriteAPI:
-    """POST /api/google/saved/{id}/toggle-favorite 테스트"""
+    """POST /api/v1/google/saved/{id}/toggle-favorite 테스트"""
 
     def test_toggle_favorite_on(self, client, test_db_session):
         """Right: 즐겨찾기 활성화"""
@@ -231,7 +231,7 @@ class TestToggleFavoriteAPI:
         test_db_session.commit()
         test_db_session.refresh(saved)
 
-        response = client.post(f"/api/google/saved/{saved.id}/toggle-favorite")
+        response = client.post(f"/api/v1/google/saved/{saved.id}/toggle-favorite")
         assert response.status_code == 200
         data = response.json()
         assert data["is_favorite"] is True
@@ -239,14 +239,14 @@ class TestToggleFavoriteAPI:
     def test_toggle_favorite_off(self, client, sample_saved_search):
         """Right: 즐겨찾기 비활성화"""
         # sample_saved_search는 is_favorite=True
-        response = client.post(f"/api/google/saved/{sample_saved_search.id}/toggle-favorite")
+        response = client.post(f"/api/v1/google/saved/{sample_saved_search.id}/toggle-favorite")
         assert response.status_code == 200
         data = response.json()
         assert data["is_favorite"] is False
 
     def test_toggle_favorite_not_found(self, client):
         """Error: 존재하지 않는 ID"""
-        response = client.post("/api/google/saved/99999/toggle-favorite")
+        response = client.post("/api/v1/google/saved/99999/toggle-favorite")
         assert response.status_code == 404
 
 
@@ -255,7 +255,7 @@ class TestSearchResultsAPI:
 
     def test_get_results_right(self, client, sample_history_with_results):
         """Right: 검색 결과 조회"""
-        response = client.get(f"/api/google/results/{sample_history_with_results.search_id}")
+        response = client.get(f"/api/v1/google/results/{sample_history_with_results.search_id}")
         assert response.status_code == 200
         data = response.json()
         assert data["search_id"] == sample_history_with_results.search_id
@@ -266,7 +266,7 @@ class TestSearchResultsAPI:
 
     def test_get_results_not_found(self, client):
         """Error: 존재하지 않는 search_id"""
-        response = client.get("/api/google/results/non-existent-uuid")
+        response = client.get("/api/v1/google/results/non-existent-uuid")
         assert response.status_code == 404
 
 
@@ -279,13 +279,13 @@ class TestSearchHistoryAPI:
         test_db_session.query(GoogleSearchHistory).delete()
         test_db_session.commit()
 
-        response = client.get("/api/google/history")
+        response = client.get("/api/v1/google/history")
         assert response.status_code == 200
         assert response.json() == []
 
     def test_get_history_with_data(self, client, sample_history_with_results):
         """Right: 히스토리 조회"""
-        response = client.get("/api/google/history")
+        response = client.get("/api/v1/google/history")
         assert response.status_code == 200
         data = response.json()
         assert len(data) >= 1
@@ -302,7 +302,7 @@ class TestSearchHistoryAPI:
             test_db_session.add(history)
         test_db_session.commit()
 
-        response = client.get("/api/google/history?limit=3")
+        response = client.get("/api/v1/google/history?limit=3")
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 3
@@ -315,14 +315,14 @@ class TestDeleteHistoryAPI:
         """Right: 히스토리 삭제"""
         search_id = sample_history_with_results.search_id
 
-        response = client.delete(f"/api/google/history/{search_id}")
+        response = client.delete(f"/api/v1/google/history/{search_id}")
         assert response.status_code == 200
 
         # 삭제 확인
-        response = client.get(f"/api/google/results/{search_id}")
+        response = client.get(f"/api/v1/google/results/{search_id}")
         assert response.status_code == 404
 
     def test_delete_history_not_found(self, client):
         """Error: 존재하지 않는 히스토리 삭제"""
-        response = client.delete("/api/google/history/non-existent-uuid")
+        response = client.delete("/api/v1/google/history/non-existent-uuid")
         assert response.status_code == 404

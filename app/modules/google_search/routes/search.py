@@ -38,7 +38,7 @@ from app.modules.google_search.models.schemas import (
 
 logger = logging.getLogger("google_search.routes")
 
-router = APIRouter(prefix="/api/google", tags=["google-search"])
+router = APIRouter(prefix="/api/v1/google", tags=["google-search"])
 
 
 # ============================================================
@@ -54,7 +54,7 @@ async def search(
     """구글 검색 요청을 큐에 추가.
 
     검색 요청은 워커에서 비동기로 처리됩니다.
-    결과는 GET /api/google/search/{search_id}/status 에서 조회할 수 있습니다.
+    결과는 GET /api/v1/google/search/{search_id}/status 에서 조회할 수 있습니다.
 
     Args:
         request: 검색 요청 (query, date_filter, max_pages, service_account_id)
@@ -421,7 +421,7 @@ async def run_saved_search(
     """저장된 검색 조건으로 검색 요청을 큐에 추가.
 
     검색 요청은 워커에서 비동기로 처리됩니다.
-    결과는 GET /api/google/search/{search_id}/status 에서 조회할 수 있습니다.
+    결과는 GET /api/v1/google/search/{search_id}/status 에서 조회할 수 있습니다.
 
     Args:
         saved_id: 저장된 검색 ID

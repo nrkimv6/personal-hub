@@ -61,7 +61,7 @@
 	}
 
 	// API 함수
-	const API_BASE = '/api/google';
+	const API_BASE = '/api/v1/google';
 
 	async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
 		const response = await fetch(`${API_BASE}${endpoint}`, {
