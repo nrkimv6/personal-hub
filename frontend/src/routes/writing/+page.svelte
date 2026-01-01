@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { writingApi, type GeneratedWriting, type WritingStats, type WritingSource } from '$lib/api';
+	import { writingApi, keywordApi, type GeneratedWriting, type WritingStats, type WritingSource, type KeywordStats, type KeywordStatsResponse, type Stopword } from '$lib/api';
 
 	// 상태
 	let writings: GeneratedWriting[] = [];
@@ -9,8 +9,19 @@
 	let loading = true;
 	let error: string | null = null;
 
+	// 키워드 상태
+	let keywords: KeywordStats[] = [];
+	let keywordStats: KeywordStatsResponse | null = null;
+	let stopwords: Stopword[] = [];
+	let keywordOffset = 0;
+	let keywordLimit = 100;
+	let keywordTotal = 0;
+	let keywordMinFreq = 10;
+	let analyzing = false;
+	let analyzeResult: { mode: string; saved_keywords?: number; new_keywords?: number; updated_keywords?: number } | null = null;
+
 	// 탭
-	type Tab = 'writings' | 'sources';
+	type Tab = 'writings' | 'sources' | 'keywords';
 	let activeTab: Tab = 'writings';
 
 	// 필터
@@ -90,9 +101,114 @@
 		activeTab = tab;
 		if (tab === 'writings') {
 			fetchData();
-		} else {
+		} else if (tab === 'sources') {
 			fetchSources();
+		} else if (tab === 'keywords') {
+			fetchKeywords();
 		}
+	}
+
+	async function fetchKeywords() {
+		loading = true;
+		error = null;
+		try {
+			const [listRes, statsRes] = await Promise.all([
+				keywordApi.list({
+					limit: keywordLimit,
+					offset: keywordOffset,
+					min_frequency: keywordMinFreq,
+					include_stopwords: false,
+					include_promoted: true
+				}),
+				keywordApi.stats()
+			]);
+			keywords = listRes.items;
+			keywordTotal = listRes.count;
+			keywordStats = statsRes;
+		} catch (e) {
+			error = e instanceof Error ? e.message : '키워드 로드 실패';
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function runAnalysis(mode: 'full' | 'incremental') {
+		if (analyzing) return;
+		const confirmMsg = mode === 'full'
+			? '전체 분석을 실행하시겠습니까? (기존 데이터가 초기화됩니다)'
+			: '증분 분석을 실행하시겠습니까?';
+		if (!confirm(confirmMsg)) return;
+
+		analyzing = true;
+		analyzeResult = null;
+		try {
+			const result = await keywordApi.analyze({ mode });
+			analyzeResult = result;
+			await fetchKeywords();
+		} catch (e) {
+			alert('분석 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		} finally {
+			analyzing = false;
+		}
+	}
+
+	async function promoteKeyword(kw: KeywordStats) {
+		if (!confirm(`"${kw.keyword}"를 writing_elements로 승격하시겠습니까?`)) return;
+		try {
+			await keywordApi.promote(kw.id);
+			alert(`"${kw.keyword}" 승격 완료`);
+			await fetchKeywords();
+		} catch (e) {
+			alert('승격 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		}
+	}
+
+	async function markAsStopword(kw: KeywordStats) {
+		if (!confirm(`"${kw.keyword}"를 불용어로 마킹하시겠습니까?`)) return;
+		try {
+			await keywordApi.markStopword(kw.id);
+			alert(`"${kw.keyword}" 불용어 처리 완료`);
+			await fetchKeywords();
+		} catch (e) {
+			alert('불용어 마킹 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		}
+	}
+
+	async function promoteBatch() {
+		const limit = prompt('승격할 키워드 수 (기본: 50)', '50');
+		if (!limit) return;
+		const minFreq = prompt('최소 빈도수 (기본: 100)', '100');
+		if (!minFreq) return;
+
+		try {
+			const result = await keywordApi.promoteBatch({
+				limit: parseInt(limit),
+				min_frequency: parseInt(minFreq)
+			});
+			alert(`${result.promoted_count}개 키워드가 승격되었습니다.`);
+			await fetchKeywords();
+		} catch (e) {
+			alert('일괄 승격 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		}
+	}
+
+	function keywordPrevPage() {
+		if (keywordOffset > 0) {
+			keywordOffset = Math.max(0, keywordOffset - keywordLimit);
+			fetchKeywords();
+		}
+	}
+
+	function keywordNextPage() {
+		if (keywordOffset + keywordLimit < keywordTotal) {
+			keywordOffset += keywordLimit;
+			fetchKeywords();
+		}
+	}
+
+	function handleKeywordFilter() {
+		keywordOffset = 0;
+		fetchKeywords();
 	}
 
 	function handleFilter() {
@@ -331,6 +447,12 @@
 			>
 				소스 ({stats?.source_count ?? 0})
 			</button>
+			<button
+				onclick={() => switchTab('keywords')}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'keywords' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+			>
+				키워드 ({keywordStats?.total_keywords ?? 0})
+			</button>
 		</nav>
 	</div>
 
@@ -469,6 +591,162 @@
 						</button>
 						<span class="px-3 py-1.5 text-sm">{sourceCurrentPage} / {sourcePages}</span>
 						<button onclick={sourceNextPage} disabled={sourceCurrentPage >= sourcePages} class="btn btn-secondary btn-sm disabled:opacity-50">
+							다음
+						</button>
+					</div>
+				</div>
+			{/if}
+		{/if}
+	{:else if activeTab === 'keywords'}
+		<!-- 키워드 통계 -->
+		{#if keywordStats}
+			<div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+				<div class="card p-4">
+					<div class="text-sm text-gray-500">전체 키워드</div>
+					<div class="text-2xl font-bold text-gray-900">{keywordStats.total_keywords.toLocaleString()}</div>
+				</div>
+				<div class="card p-4">
+					<div class="text-sm text-gray-500">승격됨</div>
+					<div class="text-2xl font-bold text-green-600">{keywordStats.promoted.toLocaleString()}</div>
+				</div>
+				<div class="card p-4">
+					<div class="text-sm text-gray-500">불용어</div>
+					<div class="text-2xl font-bold text-red-600">{keywordStats.stopwords.toLocaleString()}</div>
+				</div>
+				<div class="card p-4">
+					<div class="text-sm text-gray-500">검토됨</div>
+					<div class="text-2xl font-bold text-blue-600">{keywordStats.reviewed.toLocaleString()}</div>
+				</div>
+				<div class="card p-4">
+					<div class="text-sm text-gray-500">미검토</div>
+					<div class="text-2xl font-bold text-orange-600">{keywordStats.pending_review.toLocaleString()}</div>
+				</div>
+			</div>
+		{/if}
+
+		<!-- 분석 결과 알림 -->
+		{#if analyzeResult}
+			<div class="mb-4 p-4 bg-green-50 border border-green-200 text-green-700 rounded-lg">
+				분석 완료 ({analyzeResult.mode}):
+				{#if analyzeResult.saved_keywords}
+					{analyzeResult.saved_keywords.toLocaleString()}개 키워드 저장
+				{:else}
+					신규 {analyzeResult.new_keywords ?? 0}개, 업데이트 {analyzeResult.updated_keywords ?? 0}개
+				{/if}
+				<button onclick={() => analyzeResult = null} class="ml-4 text-green-800 hover:underline">닫기</button>
+			</div>
+		{/if}
+
+		<!-- 키워드 필터 및 액션 -->
+		<div class="mb-4 flex flex-wrap gap-2 items-center justify-between">
+			<div class="flex gap-2 items-center">
+				<label class="text-sm text-gray-600">최소 빈도:</label>
+				<input
+					type="number"
+					bind:value={keywordMinFreq}
+					min="1"
+					class="w-20 px-2 py-1 border border-gray-300 rounded text-sm"
+				/>
+				<button onclick={handleKeywordFilter} class="btn btn-primary btn-sm">필터</button>
+			</div>
+			<div class="flex gap-2">
+				<button
+					onclick={() => runAnalysis('incremental')}
+					disabled={analyzing}
+					class="btn btn-secondary btn-sm disabled:opacity-50"
+				>
+					{analyzing ? '분석 중...' : '증분 분석'}
+				</button>
+				<button
+					onclick={() => runAnalysis('full')}
+					disabled={analyzing}
+					class="btn btn-secondary btn-sm disabled:opacity-50"
+				>
+					전체 분석
+				</button>
+				<button onclick={promoteBatch} class="btn btn-primary btn-sm">
+					일괄 승격
+				</button>
+			</div>
+		</div>
+
+		{#if loading}
+			<div class="flex justify-center items-center h-64">
+				<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+			</div>
+		{:else if error}
+			<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">{error}</div>
+		{:else if keywords.length === 0}
+			<div class="text-center py-12 text-gray-500">
+				<p class="text-lg">키워드가 없습니다</p>
+				<p class="text-sm mt-2">분석 버튼을 눌러 키워드를 추출해보세요.</p>
+			</div>
+		{:else}
+			<!-- 키워드 목록 -->
+			<div class="bg-white rounded-lg border border-gray-200 overflow-x-auto mb-6">
+				<table class="w-full min-w-[700px]">
+					<thead class="bg-gray-50 border-b border-gray-200">
+						<tr>
+							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">키워드</th>
+							<th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">빈도</th>
+							<th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">소스 수</th>
+							<th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">상태</th>
+							<th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">액션</th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-gray-200">
+						{#each keywords as kw (kw.id)}
+							<tr class="hover:bg-gray-50">
+								<td class="px-4 py-3 text-sm font-medium text-gray-900">{kw.keyword}</td>
+								<td class="px-4 py-3 text-sm text-right text-gray-700">{kw.frequency.toLocaleString()}</td>
+								<td class="px-4 py-3 text-sm text-right text-gray-500">{kw.source_count.toLocaleString()}</td>
+								<td class="px-4 py-3 text-center">
+									{#if kw.is_promoted}
+										<span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">승격됨</span>
+									{:else if kw.is_stopword}
+										<span class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800">불용어</span>
+									{:else}
+										<span class="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-600">미검토</span>
+									{/if}
+								</td>
+								<td class="px-4 py-3 text-center">
+									{#if !kw.is_promoted && !kw.is_stopword}
+										<button
+											onclick={() => promoteKeyword(kw)}
+											class="text-green-600 hover:text-green-800 text-sm mr-2"
+										>
+											승격
+										</button>
+										<button
+											onclick={() => markAsStopword(kw)}
+											class="text-red-600 hover:text-red-800 text-sm"
+										>
+											불용어
+										</button>
+									{:else}
+										<span class="text-gray-400 text-sm">-</span>
+									{/if}
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+
+			<!-- 페이지네이션 -->
+			{#if keywordTotal > keywordLimit}
+				<div class="flex justify-between items-center">
+					<span class="text-sm text-gray-500">
+						전체 {keywordTotal.toLocaleString()}개 중 {keywordOffset + 1} - {Math.min(keywordOffset + keywordLimit, keywordTotal)}
+					</span>
+					<div class="flex gap-2">
+						<button onclick={keywordPrevPage} disabled={keywordOffset === 0} class="btn btn-secondary btn-sm disabled:opacity-50">
+							이전
+						</button>
+						<span class="px-3 py-1.5 text-sm">
+							{Math.floor(keywordOffset / keywordLimit) + 1} / {Math.ceil(keywordTotal / keywordLimit)}
+						</span>
+						<button onclick={keywordNextPage} disabled={keywordOffset + keywordLimit >= keywordTotal} class="btn btn-secondary btn-sm disabled:opacity-50">
 							다음
 						</button>
 					</div>

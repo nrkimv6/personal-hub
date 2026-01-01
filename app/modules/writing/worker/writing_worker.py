@@ -81,9 +81,9 @@ class WritingWorker:
     2. 랜덤 프롬프트 글쓰기 → 3회 (요소 직접 지정 + 쿨다운 + 시즌 가중치)
     """
 
-    # 프롬프트 파일 경로 (프로젝트 루트 기준)
-    MIX_PROMPT_PATH = Path("docs/idea/mix_prompt.md")
-    RANDOM_PROMPT_PATH = Path("docs/idea/random_writing_prompt_v2.md")
+    # 프롬프트 파일 경로 (모듈 기준)
+    MIX_PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "mix_prompt.md"
+    RANDOM_PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "random_prompt.md"
 
     # 실행 횟수
     MIX_COUNT = 5
@@ -114,8 +114,8 @@ class WritingWorker:
 
     def _load_prompts(self):
         """프롬프트 파일 로드."""
-        mix_path = self.project_root / self.MIX_PROMPT_PATH
-        random_path = self.project_root / self.RANDOM_PROMPT_PATH
+        mix_path = self.MIX_PROMPT_PATH
+        random_path = self.RANDOM_PROMPT_PATH
 
         if mix_path.exists():
             self.mix_prompt_template = mix_path.read_text(encoding="utf-8")

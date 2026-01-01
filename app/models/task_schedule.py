@@ -48,6 +48,7 @@ class TaskSchedule(Base):
     TARGET_TYPE_WRITING_TASK = "writing_task"
     TARGET_TYPE_GOOGLE_SEARCH = "google_search"
     TARGET_TYPE_WRITING_SOURCE_COLLECT = "writing_source_collect"  # RSS/위키문헌 수집
+    TARGET_TYPE_KEYWORD_ANALYSIS = "keyword_analysis"  # 키워드 분석
 
     SCHEDULE_TYPE_CRON = "cron"
     SCHEDULE_TYPE_INTERVAL = "interval"

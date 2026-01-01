@@ -21,6 +21,11 @@ class WritingElement(Base):
     name = Column(String(100), nullable=False)  # 요소 이름
     season_hint = Column(String(50), nullable=True)  # 시즌 힌트 (쉼표 구분)
     is_active = Column(Integer, default=1)  # 활성화 여부
+
+    # 빈도 기반 키워드용 (keyword_stats에서 승격된 경우)
+    frequency = Column(Integer, nullable=True)  # 빈도수
+    source_keyword_id = Column(Integer, nullable=True)  # 원본 keyword_stats.id
+
     created_at = Column(DateTime, default=datetime.now)
 
     # 카테고리 상수
