@@ -1,4 +1,4 @@
-"""Crawl Schedule SQLAlchemy Models - 스케줄 설정 및 실행 이력."""
+"""Task Schedule SQLAlchemy Models - 스케줄 설정 및 실행 이력."""
 
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
@@ -8,10 +8,10 @@ import json
 from .base import Base
 
 
-class CrawlSchedule(Base):
-    """크롤링 스케줄 설정 모델."""
+class TaskSchedule(Base):
+    """태스크 스케줄 설정 모델."""
 
-    __tablename__ = "crawl_schedules"
+    __tablename__ = "task_schedules"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
 
@@ -39,7 +39,7 @@ class CrawlSchedule(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     # Relationships
-    runs = relationship("CrawlScheduleRun", back_populates="schedule", cascade="all, delete-orphan")
+    runs = relationship("TaskScheduleRun", back_populates="schedule", cascade="all, delete-orphan")
 
     # 타입 상수
     TARGET_TYPE_INSTAGRAM_FEED = "instagram_feed"
@@ -55,7 +55,7 @@ class CrawlSchedule(Base):
     SCHEDULE_TYPE_MANUAL = "manual"
 
     def __repr__(self):
-        return f"<CrawlSchedule(id={self.id}, name={self.name}, target_type={self.target_type})>"
+        return f"<TaskSchedule(id={self.id}, name={self.name}, target_type={self.target_type})>"
 
     def get_target_config(self) -> dict:
         """target_config JSON을 dict로 반환."""
@@ -77,15 +77,15 @@ class CrawlSchedule(Base):
             self.next_run_at = next_run_at
 
 
-class CrawlScheduleRun(Base):
-    """크롤링 스케줄 실행 이력 모델."""
+class TaskScheduleRun(Base):
+    """태스크 스케줄 실행 이력 모델."""
 
-    __tablename__ = "crawl_schedule_runs"
+    __tablename__ = "task_schedule_runs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
 
     # 스케줄 연결
-    schedule_id = Column(Integer, ForeignKey("crawl_schedules.id", ondelete="CASCADE"), nullable=False, index=True)
+    schedule_id = Column(Integer, ForeignKey("task_schedules.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # 실행 정보
     started_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
@@ -109,11 +109,11 @@ class CrawlScheduleRun(Base):
 
     # 재시도 정보
     retry_count = Column(Integer, default=0)
-    retry_of_run_id = Column(Integer, ForeignKey("crawl_schedule_runs.id", ondelete="SET NULL"), nullable=True)
+    retry_of_run_id = Column(Integer, ForeignKey("task_schedule_runs.id", ondelete="SET NULL"), nullable=True)
 
     # Relationships
-    schedule = relationship("CrawlSchedule", back_populates="runs")
-    retry_of = relationship("CrawlScheduleRun", remote_side=[id], foreign_keys=[retry_of_run_id])
+    schedule = relationship("TaskSchedule", back_populates="runs")
+    retry_of = relationship("TaskScheduleRun", remote_side=[id], foreign_keys=[retry_of_run_id])
 
     # 상태 상수
     STATUS_RUNNING = "running"
@@ -131,7 +131,7 @@ class CrawlScheduleRun(Base):
     STOP_REASON_CAPTCHA = "captcha_detected"
 
     def __repr__(self):
-        return f"<CrawlScheduleRun(id={self.id}, schedule_id={self.schedule_id}, status={self.status})>"
+        return f"<TaskScheduleRun(id={self.id}, schedule_id={self.schedule_id}, status={self.status})>"
 
     def get_config_snapshot(self) -> dict:
         """config_snapshot JSON을 dict로 반환."""
