@@ -29,6 +29,7 @@ from app.utils.error_utils import format_error_message
 from app.modules.instagram.services.scheduler import InstagramScheduler
 from app.modules.instagram.services.crawler import InstagramCrawler
 from app.modules.instagram.models.schemas import TimeWindow
+from app.modules.writing.worker.writing_worker import WritingWorker
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -125,6 +126,14 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             )
             for schedule in writing_source_schedules:
                 await self._process_writing_source_schedule(db, schedule, schedule_service)
+
+            # Keyword analysis 타입의 활성 스케줄 조회
+            keyword_schedules = schedule_service.get_schedules_by_type(
+                CrawlSchedule.TARGET_TYPE_KEYWORD_ANALYSIS,
+                enabled_only=True
+            )
+            for schedule in keyword_schedules:
+                await self._process_keyword_analysis_schedule(db, schedule, schedule_service)
 
         except Exception as e:
             logger.error(f"[{self.name}] 스케줄 디스패치 오류: {e}", exc_info=True)
@@ -862,6 +871,156 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             return worker.run(schedule, run)
         except Exception as e:
             logger.error(f"[{self.name}] WritingWorker 실행 오류: {e}", exc_info=True)
+            return {"error": str(e)}
+        finally:
+            db.close()
+
+    # =====================================
+    # Keyword Analysis 스케줄 처리
+    # =====================================
+
+    async def _process_keyword_analysis_schedule(
+        self,
+        db,
+        schedule: CrawlSchedule,
+        schedule_service: CrawlScheduleService
+    ):
+        """Keyword Analysis 스케줄 처리.
+
+        Args:
+            db: DB 세션
+            schedule: 크롤링 스케줄
+            schedule_service: 스케줄 서비스
+        """
+        try:
+            config = schedule.get_target_config()
+
+            # cron 스케줄의 경우 should_run_now 체크를 위해 InstagramScheduler 사용
+            # 시간 기반 실행 확인을 위한 간단한 체크
+            min_interval = config.get("min_interval_hours", 168)  # 기본 7일 (168시간)
+
+            # 마지막 실행 시간 조회
+            last_run = schedule_service.get_latest_run(schedule.id)
+            last_run_time = last_run.started_at if last_run else None
+
+            # 간단한 간격 체크 (cron 대신)
+            should_run = False
+            if last_run_time is None:
+                should_run = True
+            else:
+                hours_since = (datetime.now() - last_run_time).total_seconds() / 3600
+                if hours_since >= min_interval:
+                    should_run = True
+
+            if should_run:
+                logger.info(f"[{self.name}] Keyword Analysis 스케줄 실행 시간 도래: schedule_id={schedule.id}")
+
+                # 이미 활성 실행이 있는지 확인
+                if schedule_service.has_active_run(schedule.id):
+                    logger.info(f"[{self.name}] 이미 활성 실행 존재, 스킵")
+                    return
+
+                # 실행 시작
+                run = schedule_service.start_run(
+                    schedule_id=schedule.id,
+                    worker_id=self.name,
+                    config_snapshot=config
+                )
+
+                task_name = f"keyword_analysis_{schedule.id}_run_{run.id}"
+                if not self._is_task_running(task_name):
+                    self._create_task(
+                        self._execute_keyword_analysis(schedule, run, config),
+                        task_name
+                    )
+                    logger.info(f"[{self.name}] Keyword Analysis 태스크 시작: run_id={run.id}")
+
+        except Exception as e:
+            logger.error(f"[{self.name}] Keyword Analysis 스케줄 처리 오류: schedule_id={schedule.id}, error={e}", exc_info=True)
+
+    async def _execute_keyword_analysis(
+        self,
+        schedule: CrawlSchedule,
+        run: CrawlScheduleRun,
+        config: dict
+    ):
+        """Keyword Analysis 실행.
+
+        Args:
+            schedule: 크롤링 스케줄
+            run: 실행 기록
+            config: 분석 설정
+        """
+        db = SessionLocal()
+        try:
+            schedule_service = CrawlScheduleService(db)
+
+            self._update_worker_state("analyzing", "keywords")
+
+            # KeywordAnalyzer 실행 (동기 호출을 별도 스레드에서 실행)
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                self._run_keyword_analysis_sync,
+                config
+            )
+
+            if result.get("error"):
+                schedule_service.fail_run(run.id, result["error"])
+                logger.error(f"[{self.name}] Keyword Analysis 실패: {result['error']}")
+            else:
+                # 결과 처리
+                total_keywords = result.get("saved_keywords") or result.get("new_keywords", 0) + result.get("updated_keywords", 0)
+                schedule_service.complete_run(
+                    run.id,
+                    collected_count=result.get("total_sources") or result.get("new_sources", 0),
+                    saved_count=total_keywords,
+                    stop_reason="completed"
+                )
+                schedule_service.update_schedule_after_run(schedule.id)
+                logger.info(
+                    f"[{self.name}] Keyword Analysis 완료: run_id={run.id}, "
+                    f"keywords={total_keywords}"
+                )
+
+        except Exception as e:
+            logger.error(f"[{self.name}] Keyword Analysis 실행 실패: run_id={run.id}, error={e}", exc_info=True)
+            try:
+                schedule_service = CrawlScheduleService(db)
+                schedule_service.fail_run(run.id, str(e))
+            except Exception:
+                pass
+        finally:
+            self._update_worker_state("idle")
+            db.close()
+
+    def _run_keyword_analysis_sync(self, config: dict) -> dict:
+        """KeywordAnalyzer 동기 실행 (별도 스레드에서 호출).
+
+        Args:
+            config: 분석 설정
+
+        Returns:
+            실행 결과 dict
+        """
+        db = SessionLocal()
+        try:
+            from app.modules.writing.services.keyword_analyzer import KeywordAnalyzer
+
+            analyzer = KeywordAnalyzer(db)
+
+            mode = config.get("mode", "incremental")
+            min_freq = config.get("min_freq", 3)
+            min_length = config.get("min_length", 2)
+
+            if mode == "full":
+                result = analyzer.analyze_all(min_freq=min_freq, min_length=min_length)
+            else:
+                result = analyzer.analyze_incremental(min_freq=min_freq, min_length=min_length)
+
+            return result
+        except Exception as e:
+            logger.error(f"[{self.name}] KeywordAnalyzer 실행 오류: {e}", exc_info=True)
             return {"error": str(e)}
         finally:
             db.close()
