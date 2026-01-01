@@ -129,7 +129,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
             # Keyword analysis 타입의 활성 스케줄 조회
             keyword_schedules = schedule_service.get_schedules_by_type(
-                CrawlSchedule.TARGET_TYPE_KEYWORD_ANALYSIS,
+                TaskSchedule.TARGET_TYPE_KEYWORD_ANALYSIS,
                 enabled_only=True
             )
             for schedule in keyword_schedules:
@@ -882,8 +882,8 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
     async def _process_keyword_analysis_schedule(
         self,
         db,
-        schedule: CrawlSchedule,
-        schedule_service: CrawlScheduleService
+        schedule: TaskSchedule,
+        schedule_service: TaskScheduleService
     ):
         """Keyword Analysis 스케줄 처리.
 
@@ -940,8 +940,8 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
     async def _execute_keyword_analysis(
         self,
-        schedule: CrawlSchedule,
-        run: CrawlScheduleRun,
+        schedule: TaskSchedule,
+        run: TaskScheduleRun,
         config: dict
     ):
         """Keyword Analysis 실행.
@@ -953,7 +953,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         """
         db = SessionLocal()
         try:
-            schedule_service = CrawlScheduleService(db)
+            schedule_service = TaskScheduleService(db)
 
             self._update_worker_state("analyzing", "keywords")
 
@@ -986,7 +986,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         except Exception as e:
             logger.error(f"[{self.name}] Keyword Analysis 실행 실패: run_id={run.id}, error={e}", exc_info=True)
             try:
-                schedule_service = CrawlScheduleService(db)
+                schedule_service = TaskScheduleService(db)
                 schedule_service.fail_run(run.id, str(e))
             except Exception:
                 pass
