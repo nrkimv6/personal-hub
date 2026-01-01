@@ -51,7 +51,7 @@ def mock_crawler():
 
 @pytest.fixture
 def mock_crawl_run():
-    """Mock CrawlScheduleRun (was InstagramCrawlRun)"""
+    """Mock TaskScheduleRun (was InstagramCrawlRun)"""
     run = MagicMock()
     run.id = 1
     run.success = False

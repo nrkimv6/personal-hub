@@ -36,7 +36,7 @@ from sqlalchemy.pool import StaticPool
 from app.main import app
 from app.database import get_db
 from app.models.base import Base
-from app.models import CrawlSchedule, ServiceAccount, BrowserProfile
+from app.models import TaskSchedule, ServiceAccount, BrowserProfile
 from app.models.google_search import GoogleSavedSearch
 
 

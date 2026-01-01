@@ -24,7 +24,7 @@ class InstagramWorkerStatus(Base):
     # 상태 정보
     current_state = Column(String(20), default="idle")  # idle, crawling, processing
     current_account = Column(String(100), nullable=True)
-    current_run_id = Column(Integer, ForeignKey("crawl_schedule_runs.id", ondelete="SET NULL"), nullable=True)
+    current_run_id = Column(Integer, ForeignKey("task_schedule_runs.id", ondelete="SET NULL"), nullable=True)
 
     # 활성 여부
     is_alive = Column(Boolean, default=True, index=True)

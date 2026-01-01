@@ -1,5 +1,5 @@
 """
-크롤링 서비스 테스트 (CrawlRequestService, CrawlScheduleService)
+크롤링 서비스 테스트 (CrawlRequestService, TaskScheduleService)
 
 RIGHT-BICEP, CORRECT 원칙 적용
 """
@@ -7,9 +7,9 @@ RIGHT-BICEP, CORRECT 원칙 적용
 import pytest
 from datetime import datetime, timedelta
 
-from app.models import CrawlRequest, CrawlSchedule, CrawlScheduleRun
+from app.models import CrawlRequest, TaskSchedule, TaskScheduleRun
 from app.services.crawl_request_service import CrawlRequestService
-from app.services.crawl_schedule_service import CrawlScheduleService
+from app.services.task_schedule_service import TaskScheduleService
 
 
 class TestCrawlRequestService:
@@ -117,19 +117,19 @@ class TestCrawlRequestService:
         assert retry.status == CrawlRequest.STATUS_PENDING
 
 
-class TestCrawlScheduleService:
-    """CrawlScheduleService 테스트."""
+class TestTaskScheduleService:
+    """TaskScheduleService 테스트."""
 
     @pytest.fixture
     def service(self, test_db_session):
-        return CrawlScheduleService(test_db_session)
+        return TaskScheduleService(test_db_session)
 
     def test_create_schedule_right(self, service):
         """[Right] 스케줄 생성이 올바르게 동작해야 함."""
         schedule = service.create_schedule(
             name=f"test_schedule_{datetime.now().timestamp()}",
-            target_type=CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
-            schedule_type=CrawlSchedule.SCHEDULE_TYPE_TIME_WINDOW,
+            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
             display_name="테스트 스케줄",
             target_config={"account_id": 1, "max_posts": 100},
             schedule_value='{"times": ["09:00", "14:00"]}',
@@ -137,7 +137,7 @@ class TestCrawlScheduleService:
         )
 
         assert schedule.id is not None
-        assert schedule.target_type == CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED
+        assert schedule.target_type == TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED
         assert schedule.get_target_config()["account_id"] == 1
 
     def test_get_schedule_by_name_right(self, service):
@@ -145,8 +145,8 @@ class TestCrawlScheduleService:
         name = f"unique_schedule_{datetime.now().timestamp()}"
         service.create_schedule(
             name=name,
-            target_type=CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
-            schedule_type=CrawlSchedule.SCHEDULE_TYPE_MANUAL
+            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_MANUAL
         )
 
         found = service.get_schedule_by_name(name)
@@ -159,28 +159,28 @@ class TestCrawlScheduleService:
         ts = datetime.now().timestamp()
         service.create_schedule(
             name=f"ig1_{ts}",
-            target_type=CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
-            schedule_type=CrawlSchedule.SCHEDULE_TYPE_MANUAL,
+            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_MANUAL,
             enabled=True
         )
         service.create_schedule(
             name=f"blog1_{ts}",
-            target_type=CrawlSchedule.TARGET_TYPE_NAVER_BLOG,
-            schedule_type=CrawlSchedule.SCHEDULE_TYPE_MANUAL,
+            target_type=TaskSchedule.TARGET_TYPE_NAVER_BLOG,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_MANUAL,
             enabled=True
         )
 
-        ig_schedules = service.get_schedules_by_type(CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED)
+        ig_schedules = service.get_schedules_by_type(TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED)
         assert len(ig_schedules) >= 1
         for s in ig_schedules:
-            assert s.target_type == CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED
+            assert s.target_type == TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED
 
     def test_update_schedule_right(self, service):
         """[Right] 스케줄 업데이트가 올바르게 동작해야 함."""
         schedule = service.create_schedule(
             name=f"update_test_{datetime.now().timestamp()}",
-            target_type=CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
-            schedule_type=CrawlSchedule.SCHEDULE_TYPE_MANUAL,
+            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_MANUAL,
             enabled=True
         )
 
@@ -199,8 +199,8 @@ class TestCrawlScheduleService:
         """[Right] 실행 시작이 올바르게 동작해야 함."""
         schedule = service.create_schedule(
             name=f"run_test_{datetime.now().timestamp()}",
-            target_type=CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
-            schedule_type=CrawlSchedule.SCHEDULE_TYPE_MANUAL
+            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_MANUAL
         )
 
         run = service.start_run(
@@ -211,7 +211,7 @@ class TestCrawlScheduleService:
 
         assert run.id is not None
         assert run.schedule_id == schedule.id
-        assert run.status == CrawlScheduleRun.STATUS_RUNNING
+        assert run.status == TaskScheduleRun.STATUS_RUNNING
         assert run.worker_id == "worker-123"
         assert run.get_config_snapshot()["max_posts"] == 100
 
@@ -219,8 +219,8 @@ class TestCrawlScheduleService:
         """[Right] 실행 완료가 올바르게 동작해야 함."""
         schedule = service.create_schedule(
             name=f"complete_test_{datetime.now().timestamp()}",
-            target_type=CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
-            schedule_type=CrawlSchedule.SCHEDULE_TYPE_MANUAL
+            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_MANUAL
         )
         run = service.start_run(schedule.id)
 
@@ -228,35 +228,35 @@ class TestCrawlScheduleService:
             run.id,
             collected_count=100,
             saved_count=80,
-            stop_reason=CrawlScheduleRun.STOP_REASON_DUPLICATE
+            stop_reason=TaskScheduleRun.STOP_REASON_DUPLICATE
         )
 
-        assert completed.status == CrawlScheduleRun.STATUS_COMPLETED
+        assert completed.status == TaskScheduleRun.STATUS_COMPLETED
         assert completed.collected_count == 100
         assert completed.saved_count == 80
-        assert completed.stop_reason == CrawlScheduleRun.STOP_REASON_DUPLICATE
+        assert completed.stop_reason == TaskScheduleRun.STOP_REASON_DUPLICATE
         assert completed.finished_at is not None
 
     def test_fail_run_right(self, service):
         """[Right] 실행 실패가 올바르게 동작해야 함."""
         schedule = service.create_schedule(
             name=f"fail_test_{datetime.now().timestamp()}",
-            target_type=CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
-            schedule_type=CrawlSchedule.SCHEDULE_TYPE_MANUAL
+            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_MANUAL
         )
         run = service.start_run(schedule.id)
 
         failed = service.fail_run(run.id, "Login required")
 
-        assert failed.status == CrawlScheduleRun.STATUS_FAILED
+        assert failed.status == TaskScheduleRun.STATUS_FAILED
         assert failed.error_message == "Login required"
 
     def test_get_runs_paginated_right(self, service):
         """[Right] 실행 이력 페이징이 올바르게 동작해야 함."""
         schedule = service.create_schedule(
             name=f"pagination_test_{datetime.now().timestamp()}",
-            target_type=CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
-            schedule_type=CrawlSchedule.SCHEDULE_TYPE_MANUAL
+            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_MANUAL
         )
 
         # 15개 실행 생성
@@ -274,8 +274,8 @@ class TestCrawlScheduleService:
         """[Right] 실행 통계가 올바르게 동작해야 함."""
         schedule = service.create_schedule(
             name=f"stats_test_{datetime.now().timestamp()}",
-            target_type=CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
-            schedule_type=CrawlSchedule.SCHEDULE_TYPE_MANUAL
+            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_MANUAL
         )
 
         # 성공 2개, 실패 1개
@@ -298,8 +298,8 @@ class TestCrawlScheduleService:
         """[Right] 실행 후 스케줄 업데이트가 올바르게 동작해야 함."""
         schedule = service.create_schedule(
             name=f"after_run_test_{datetime.now().timestamp()}",
-            target_type=CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
-            schedule_type=CrawlSchedule.SCHEDULE_TYPE_MANUAL
+            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_MANUAL
         )
 
         assert schedule.last_run_at is None

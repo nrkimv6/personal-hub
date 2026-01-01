@@ -6,7 +6,7 @@ Google 검색 스케줄 테스트.
 - CORRECT (일관성, 순서, 범위, 참조, 존재, 카디널리티, 시간)
 
 테스트 범위:
-- CrawlSchedule 모델 (TARGET_TYPE_GOOGLE_SEARCH)
+- TaskSchedule 모델 (TARGET_TYPE_GOOGLE_SEARCH)
 - Google 검색 스케줄 API
 - ScheduledCrawlWorker Google 검색 핸들러
 """
@@ -22,7 +22,7 @@ from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 
 from app.models.base import Base
-from app.models.crawl_schedule import CrawlSchedule, CrawlScheduleRun
+from app.models.task_schedule import TaskSchedule, TaskScheduleRun
 from app.models.google_search import (
     GoogleSearchQueue,
     GoogleSearchHistory,
@@ -70,12 +70,12 @@ def sample_saved_search(db_session):
 @pytest.fixture
 def sample_google_schedule(db_session, sample_saved_search):
     """샘플 Google 검색 스케줄 생성."""
-    schedule = CrawlSchedule(
+    schedule = TaskSchedule(
         name=f"google_search_{sample_saved_search.id}",
         display_name="테스트 자동 검색",
-        target_type=CrawlSchedule.TARGET_TYPE_GOOGLE_SEARCH,
+        target_type=TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
         target_config=json.dumps({"saved_search_id": sample_saved_search.id}),
-        schedule_type=CrawlSchedule.SCHEDULE_TYPE_TIME_WINDOW,
+        schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
         schedule_value=json.dumps({
             "time_windows": [{"start": "09:00", "end": "18:00"}],
             "daily_runs": 1,
@@ -93,23 +93,23 @@ def sample_google_schedule(db_session, sample_saved_search):
 # RIGHT: Are the results right?
 # ============================================================
 
-class TestCrawlScheduleConstants:
-    """CrawlSchedule 상수 테스트."""
+class TestTaskScheduleConstants:
+    """TaskSchedule 상수 테스트."""
 
     def test_target_type_google_search_exists(self):
         """TARGET_TYPE_GOOGLE_SEARCH 상수 존재 확인."""
-        assert hasattr(CrawlSchedule, "TARGET_TYPE_GOOGLE_SEARCH")
-        assert CrawlSchedule.TARGET_TYPE_GOOGLE_SEARCH == "google_search"
+        assert hasattr(TaskSchedule, "TARGET_TYPE_GOOGLE_SEARCH")
+        assert TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH == "google_search"
 
     def test_stop_reason_search_completed_exists(self):
         """STOP_REASON_SEARCH_COMPLETED 상수 존재 확인."""
-        assert hasattr(CrawlScheduleRun, "STOP_REASON_SEARCH_COMPLETED")
-        assert CrawlScheduleRun.STOP_REASON_SEARCH_COMPLETED == "search_completed"
+        assert hasattr(TaskScheduleRun, "STOP_REASON_SEARCH_COMPLETED")
+        assert TaskScheduleRun.STOP_REASON_SEARCH_COMPLETED == "search_completed"
 
     def test_stop_reason_captcha_exists(self):
         """STOP_REASON_CAPTCHA 상수 존재 확인."""
-        assert hasattr(CrawlScheduleRun, "STOP_REASON_CAPTCHA")
-        assert CrawlScheduleRun.STOP_REASON_CAPTCHA == "captcha_detected"
+        assert hasattr(TaskScheduleRun, "STOP_REASON_CAPTCHA")
+        assert TaskScheduleRun.STOP_REASON_CAPTCHA == "captcha_detected"
 
 
 class TestGoogleScheduleResults:
@@ -117,10 +117,10 @@ class TestGoogleScheduleResults:
 
     def test_schedule_creation_with_google_search_type(self, db_session, sample_saved_search):
         """Google 검색 타입으로 스케줄 생성."""
-        schedule = CrawlSchedule(
+        schedule = TaskSchedule(
             name="test_google_schedule",
-            target_type=CrawlSchedule.TARGET_TYPE_GOOGLE_SEARCH,
-            schedule_type=CrawlSchedule.SCHEDULE_TYPE_TIME_WINDOW,
+            target_type=TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
             enabled=True,
         )
         schedule.set_target_config({"saved_search_id": sample_saved_search.id})
@@ -134,10 +134,10 @@ class TestGoogleScheduleResults:
 
     def test_schedule_run_creation(self, db_session, sample_google_schedule):
         """스케줄 실행 기록 생성."""
-        run = CrawlScheduleRun(
+        run = TaskScheduleRun(
             schedule_id=sample_google_schedule.id,
             started_at=datetime.now(),
-            status=CrawlScheduleRun.STATUS_RUNNING,
+            status=TaskScheduleRun.STATUS_RUNNING,
         )
         db_session.add(run)
         db_session.commit()
@@ -147,10 +147,10 @@ class TestGoogleScheduleResults:
 
     def test_schedule_run_mark_completed(self, db_session, sample_google_schedule):
         """스케줄 실행 완료 처리."""
-        run = CrawlScheduleRun(
+        run = TaskScheduleRun(
             schedule_id=sample_google_schedule.id,
             started_at=datetime.now(),
-            status=CrawlScheduleRun.STATUS_RUNNING,
+            status=TaskScheduleRun.STATUS_RUNNING,
         )
         db_session.add(run)
         db_session.commit()
@@ -159,7 +159,7 @@ class TestGoogleScheduleResults:
         run.mark_completed(
             collected_count=25,
             saved_count=25,
-            stop_reason=CrawlScheduleRun.STOP_REASON_SEARCH_COMPLETED
+            stop_reason=TaskScheduleRun.STOP_REASON_SEARCH_COMPLETED
         )
         db_session.commit()
 
@@ -178,10 +178,10 @@ class TestGoogleScheduleBoundary:
 
     def test_schedule_without_saved_search_id(self, db_session):
         """saved_search_id 없는 스케줄 설정."""
-        schedule = CrawlSchedule(
+        schedule = TaskSchedule(
             name="empty_config_schedule",
-            target_type=CrawlSchedule.TARGET_TYPE_GOOGLE_SEARCH,
-            schedule_type=CrawlSchedule.SCHEDULE_TYPE_TIME_WINDOW,
+            target_type=TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
         )
         schedule.set_target_config({})
         db_session.add(schedule)
@@ -192,10 +192,10 @@ class TestGoogleScheduleBoundary:
 
     def test_schedule_with_empty_time_windows(self, db_session, sample_saved_search):
         """빈 time_windows 스케줄."""
-        schedule = CrawlSchedule(
+        schedule = TaskSchedule(
             name="empty_windows_schedule",
-            target_type=CrawlSchedule.TARGET_TYPE_GOOGLE_SEARCH,
-            schedule_type=CrawlSchedule.SCHEDULE_TYPE_TIME_WINDOW,
+            target_type=TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
             schedule_value=json.dumps({"time_windows": [], "daily_runs": 1}),
         )
         schedule.set_target_config({"saved_search_id": sample_saved_search.id})
@@ -215,10 +215,10 @@ class TestGoogleScheduleError:
 
     def test_schedule_run_mark_failed(self, db_session, sample_google_schedule):
         """스케줄 실행 실패 처리."""
-        run = CrawlScheduleRun(
+        run = TaskScheduleRun(
             schedule_id=sample_google_schedule.id,
             started_at=datetime.now(),
-            status=CrawlScheduleRun.STATUS_RUNNING,
+            status=TaskScheduleRun.STATUS_RUNNING,
         )
         db_session.add(run)
         db_session.commit()
@@ -233,10 +233,10 @@ class TestGoogleScheduleError:
 
     def test_schedule_run_timeout(self, db_session, sample_google_schedule):
         """스케줄 실행 타임아웃."""
-        run = CrawlScheduleRun(
+        run = TaskScheduleRun(
             schedule_id=sample_google_schedule.id,
             started_at=datetime.now(),
-            status=CrawlScheduleRun.STATUS_RUNNING,
+            status=TaskScheduleRun.STATUS_RUNNING,
         )
         db_session.add(run)
         db_session.commit()
@@ -258,10 +258,10 @@ class TestGoogleScheduleCorrect:
     def test_conformance_target_type(self, sample_google_schedule):
         """target_type 적합성."""
         assert sample_google_schedule.target_type in [
-            CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
-            CrawlSchedule.TARGET_TYPE_NAVER_BLOG,
-            CrawlSchedule.TARGET_TYPE_NAVER_CAFE,
-            CrawlSchedule.TARGET_TYPE_GOOGLE_SEARCH,
+            TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            TaskSchedule.TARGET_TYPE_NAVER_BLOG,
+            TaskSchedule.TARGET_TYPE_NAVER_CAFE,
+            TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
         ]
 
     def test_ordering_runs_by_started_at(self, db_session, sample_google_schedule):
@@ -270,19 +270,19 @@ class TestGoogleScheduleCorrect:
 
         runs = []
         for i in range(3):
-            run = CrawlScheduleRun(
+            run = TaskScheduleRun(
                 schedule_id=sample_google_schedule.id,
                 started_at=datetime.now(),
-                status=CrawlScheduleRun.STATUS_COMPLETED,
+                status=TaskScheduleRun.STATUS_COMPLETED,
             )
             db_session.add(run)
             db_session.commit()
             runs.append(run)
             time.sleep(0.01)
 
-        ordered = db_session.query(CrawlScheduleRun).filter_by(
+        ordered = db_session.query(TaskScheduleRun).filter_by(
             schedule_id=sample_google_schedule.id
-        ).order_by(CrawlScheduleRun.started_at.desc()).all()
+        ).order_by(TaskScheduleRun.started_at.desc()).all()
 
         for i in range(len(ordered) - 1):
             assert ordered[i].started_at >= ordered[i + 1].started_at
@@ -299,16 +299,16 @@ class TestGoogleScheduleCorrect:
     def test_cardinality_multiple_runs(self, db_session, sample_google_schedule):
         """하나의 스케줄에 여러 실행."""
         for i in range(5):
-            run = CrawlScheduleRun(
+            run = TaskScheduleRun(
                 schedule_id=sample_google_schedule.id,
                 started_at=datetime.now(),
-                status=CrawlScheduleRun.STATUS_COMPLETED,
+                status=TaskScheduleRun.STATUS_COMPLETED,
             )
             db_session.add(run)
 
         db_session.commit()
 
-        runs = db_session.query(CrawlScheduleRun).filter_by(
+        runs = db_session.query(TaskScheduleRun).filter_by(
             schedule_id=sample_google_schedule.id
         ).all()
         assert len(runs) == 5
@@ -316,17 +316,17 @@ class TestGoogleScheduleCorrect:
     def test_time_duration_seconds(self, db_session, sample_google_schedule):
         """실행 시간 계산."""
         started = datetime.now()
-        run = CrawlScheduleRun(
+        run = TaskScheduleRun(
             schedule_id=sample_google_schedule.id,
             started_at=started,
-            status=CrawlScheduleRun.STATUS_RUNNING,
+            status=TaskScheduleRun.STATUS_RUNNING,
         )
         db_session.add(run)
         db_session.commit()
 
         # 3초 후 완료
         run.finished_at = started + timedelta(seconds=3)
-        run.status = CrawlScheduleRun.STATUS_COMPLETED
+        run.status = TaskScheduleRun.STATUS_COMPLETED
         db_session.commit()
 
         assert run.duration_seconds == 3
@@ -433,10 +433,10 @@ class TestGoogleScheduleAPI:
         """스케줄 실행 이력 조회 API."""
         # 실행 기록 생성
         for i in range(3):
-            run = CrawlScheduleRun(
+            run = TaskScheduleRun(
                 schedule_id=sample_google_schedule.id,
                 started_at=datetime.now(),
-                status=CrawlScheduleRun.STATUS_COMPLETED,
+                status=TaskScheduleRun.STATUS_COMPLETED,
                 collected_count=10,
                 saved_count=10,
             )
@@ -454,10 +454,10 @@ class TestGoogleScheduleAPI:
     def test_get_schedule_stats(self, test_client, db_session, sample_google_schedule):
         """스케줄 통계 조회 API."""
         # 실행 기록 생성
-        run = CrawlScheduleRun(
+        run = TaskScheduleRun(
             schedule_id=sample_google_schedule.id,
             started_at=datetime.now(),
-            status=CrawlScheduleRun.STATUS_COMPLETED,
+            status=TaskScheduleRun.STATUS_COMPLETED,
             collected_count=20,
             saved_count=20,
         )
