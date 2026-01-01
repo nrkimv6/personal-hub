@@ -1,7 +1,7 @@
 """
 스케줄 기반 크롤링 워커.
 
-CrawlSchedule 설정에 따라 정해진 시간에 크롤링을 자동으로 수행합니다.
+TaskSchedule 설정에 따라 정해진 시간에 크롤링을 자동으로 수행합니다.
 
 실행 방법:
     python -m app.worker.scheduled_worker
@@ -20,10 +20,10 @@ from typing import Optional, TYPE_CHECKING
 
 from app.worker.crawl_worker_base import CrawlWorkerBase
 from app.database import SessionLocal
-from app.models import ServiceAccount, CrawlSchedule, CrawlScheduleRun
+from app.models import ServiceAccount, TaskSchedule, TaskScheduleRun
 from app.models.google_search import GoogleSearchQueue, GoogleSearchHistory, GoogleSavedSearch
 
-from app.services.crawl_schedule_service import CrawlScheduleService
+from app.services.task_schedule_service import TaskScheduleService
 from app.modules.instagram.services.crawl_service import CrawlService
 from app.utils.error_utils import format_error_message
 from app.modules.instagram.services.scheduler import InstagramScheduler
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 class ScheduledCrawlWorker(CrawlWorkerBase):
     """스케줄 기반 Instagram 피드 크롤링 워커.
 
-    CrawlSchedule 설정에 따라 정해진 시간에
+    TaskSchedule 설정에 따라 정해진 시간에
     자동으로 Instagram 피드를 크롤링합니다.
 
     Attributes:
@@ -79,7 +79,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         """오래된 running 상태 실행 정리."""
         db = SessionLocal()
         try:
-            schedule_service = CrawlScheduleService(db)
+            schedule_service = TaskScheduleService(db)
             cleaned = schedule_service.cleanup_stale_runs(timeout_minutes=30)
             if cleaned > 0:
                 logger.info(f"[{self.name}] {cleaned}개의 오래된 running 실행 정리 완료")
@@ -92,11 +92,11 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         """스케줄 설정을 확인하고 실행 시간이면 크롤링을 시작합니다."""
         db = SessionLocal()
         try:
-            schedule_service = CrawlScheduleService(db)
+            schedule_service = TaskScheduleService(db)
 
             # Instagram feed 타입의 활성 스케줄 조회
             instagram_schedules = schedule_service.get_schedules_by_type(
-                CrawlSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+                TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
                 enabled_only=True
             )
             for schedule in instagram_schedules:
@@ -104,7 +104,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
             # Google search 타입의 활성 스케줄 조회
             google_schedules = schedule_service.get_schedules_by_type(
-                CrawlSchedule.TARGET_TYPE_GOOGLE_SEARCH,
+                TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
                 enabled_only=True
             )
             for schedule in google_schedules:
@@ -112,7 +112,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
             # Writing task 타입의 활성 스케줄 조회
             writing_task_schedules = schedule_service.get_schedules_by_type(
-                CrawlSchedule.TARGET_TYPE_WRITING_TASK,
+                TaskSchedule.TARGET_TYPE_WRITING_TASK,
                 enabled_only=True
             )
             for schedule in writing_task_schedules:
@@ -120,7 +120,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
             # Writing source collect 타입의 활성 스케줄 조회
             writing_source_schedules = schedule_service.get_schedules_by_type(
-                CrawlSchedule.TARGET_TYPE_WRITING_SOURCE_COLLECT,
+                TaskSchedule.TARGET_TYPE_WRITING_SOURCE_COLLECT,
                 enabled_only=True
             )
             for schedule in writing_source_schedules:
@@ -134,8 +134,8 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
     async def _process_schedule(
         self,
         db,
-        schedule: CrawlSchedule,
-        schedule_service: CrawlScheduleService
+        schedule: TaskSchedule,
+        schedule_service: TaskScheduleService
     ):
         """개별 스케줄 처리."""
         try:
@@ -192,8 +192,8 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
     async def _execute_feed_crawl(
         self,
-        schedule: CrawlSchedule,
-        run: CrawlScheduleRun,
+        schedule: TaskSchedule,
+        run: TaskScheduleRun,
         service_account_id: int
     ):
         """Instagram 피드 크롤링 실행.
@@ -208,7 +208,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         retry_count = 0
 
         try:
-            schedule_service = CrawlScheduleService(db)
+            schedule_service = TaskScheduleService(db)
             crawl_service = CrawlService(db)
 
             while retry_count <= max_retries:
@@ -257,7 +257,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         except Exception as e:
             logger.error(f"[{self.name}] 피드 크롤링 실패: run_id={run.id}, error={format_error_message(e)}", exc_info=True)
             try:
-                schedule_service = CrawlScheduleService(db)
+                schedule_service = TaskScheduleService(db)
                 schedule_service.fail_run(run.id, format_error_message(e))
             except Exception:
                 pass
@@ -268,11 +268,11 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
     async def _crawl_with_tab(
         self,
         tab: "Page",
-        schedule: CrawlSchedule,
-        run: CrawlScheduleRun,
+        schedule: TaskSchedule,
+        run: TaskScheduleRun,
         account: ServiceAccount,
         db,
-        schedule_service: CrawlScheduleService,
+        schedule_service: TaskScheduleService,
         crawl_service: CrawlService,
     ) -> bool:
         """탭을 사용하여 피드 크롤링을 수행합니다.
@@ -308,7 +308,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         crawler = InstagramCrawler(tab)
         logger.info(f"[{self.name}] InstagramCrawler 생성 완료, 크롤링 시작...")
 
-        # CrawlService.run_crawl 사용 (CrawlScheduleRun 생성)
+        # CrawlService.run_crawl 사용 (TaskScheduleRun 생성)
         crawl_run = await crawl_service.run_crawl(
             crawler=crawler,
             service_account_id=account.id,
@@ -321,7 +321,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             f"collected={crawl_run.total_collected}, new={crawl_run.new_saved}"
         )
 
-        # CrawlScheduleRun 업데이트
+        # TaskScheduleRun 업데이트
         if crawl_run.success:
             schedule_service.complete_run(
                 run.id,
@@ -377,8 +377,8 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
     async def _process_google_search_schedule(
         self,
         db,
-        schedule: CrawlSchedule,
-        schedule_service: CrawlScheduleService
+        schedule: TaskSchedule,
+        schedule_service: TaskScheduleService
     ):
         """Google 검색 스케줄 처리.
 
@@ -442,8 +442,8 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
     async def _execute_google_search(
         self,
-        schedule: CrawlSchedule,
-        run: CrawlScheduleRun,
+        schedule: TaskSchedule,
+        run: TaskScheduleRun,
         saved_search_id: int
     ):
         """Google 검색 실행.
@@ -455,7 +455,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         """
         db = SessionLocal()
         try:
-            schedule_service = CrawlScheduleService(db)
+            schedule_service = TaskScheduleService(db)
 
             # 저장된 검색 조회
             saved_search = db.query(GoogleSavedSearch).filter_by(id=saved_search_id).first()
@@ -493,7 +493,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                     run.id,
                     collected_count=result["total_results"],
                     saved_count=result["total_results"],
-                    stop_reason=CrawlScheduleRun.STOP_REASON_SEARCH_COMPLETED
+                    stop_reason=TaskScheduleRun.STOP_REASON_SEARCH_COMPLETED
                 )
                 schedule_service.update_schedule_after_run(schedule.id)
                 logger.info(
@@ -512,7 +512,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         except Exception as e:
             logger.error(f"[{self.name}] Google 검색 실행 실패: run_id={run.id}, error={format_error_message(e)}", exc_info=True)
             try:
-                schedule_service = CrawlScheduleService(db)
+                schedule_service = TaskScheduleService(db)
                 schedule_service.fail_run(run.id, format_error_message(e))
             except Exception:
                 pass
@@ -563,8 +563,8 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
     async def _process_writing_source_schedule(
         self,
         db,
-        schedule: CrawlSchedule,
-        schedule_service: CrawlScheduleService
+        schedule: TaskSchedule,
+        schedule_service: TaskScheduleService
     ):
         """Writing Source 수집 스케줄 처리.
 
@@ -623,8 +623,8 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
     async def _execute_writing_source_collect(
         self,
-        schedule: CrawlSchedule,
-        run: CrawlScheduleRun,
+        schedule: TaskSchedule,
+        run: TaskScheduleRun,
         config: dict
     ):
         """Writing Source 수집 실행 (RSS, 위키문헌).
@@ -636,7 +636,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         """
         db = SessionLocal()
         try:
-            schedule_service = CrawlScheduleService(db)
+            schedule_service = TaskScheduleService(db)
 
             from app.modules.writing.services.writing_service import WritingService
             writing_service = WritingService(db)
@@ -707,7 +707,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                     run.id,
                     collected_count=total_collected,
                     saved_count=total_collected,
-                    stop_reason=CrawlScheduleRun.STOP_REASON_NORMAL
+                    stop_reason=TaskScheduleRun.STOP_REASON_NORMAL
                 )
 
             schedule_service.update_schedule_after_run(schedule.id)
@@ -716,7 +716,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         except Exception as e:
             logger.error(f"[{self.name}] Writing Source 수집 실패: run_id={run.id}, error={format_error_message(e)}", exc_info=True)
             try:
-                schedule_service = CrawlScheduleService(db)
+                schedule_service = TaskScheduleService(db)
                 schedule_service.fail_run(run.id, format_error_message(e))
             except Exception:
                 pass
@@ -731,8 +731,8 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
     async def _process_writing_schedule(
         self,
         db,
-        schedule: CrawlSchedule,
-        schedule_service: CrawlScheduleService
+        schedule: TaskSchedule,
+        schedule_service: TaskScheduleService
     ):
         """Writing task 스케줄 처리.
 
@@ -791,8 +791,8 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
     async def _execute_writing_task(
         self,
-        schedule: CrawlSchedule,
-        run: CrawlScheduleRun
+        schedule: TaskSchedule,
+        run: TaskScheduleRun
     ):
         """Writing task 실행.
 
@@ -802,7 +802,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         """
         db = SessionLocal()
         try:
-            schedule_service = CrawlScheduleService(db)
+            schedule_service = TaskScheduleService(db)
 
             self._update_worker_state("writing", f"schedule_{schedule.id}")
 
@@ -834,7 +834,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         except Exception as e:
             logger.error(f"[{self.name}] Writing task 실행 실패: run_id={run.id}, error={e}", exc_info=True)
             try:
-                schedule_service = CrawlScheduleService(db)
+                schedule_service = TaskScheduleService(db)
                 schedule_service.fail_run(run.id, str(e))
             except Exception:
                 pass
@@ -844,8 +844,8 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
     def _run_writing_worker_sync(
         self,
-        schedule: CrawlSchedule,
-        run: CrawlScheduleRun
+        schedule: TaskSchedule,
+        run: TaskScheduleRun
     ) -> dict:
         """WritingWorker 동기 실행 (별도 스레드에서 호출).
 

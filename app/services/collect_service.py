@@ -7,7 +7,7 @@ from sqlalchemy import or_, desc, func
 
 from app.models.instagram_post import InstagramPost
 from app.models.universal_crawl import CrawledPage
-from app.models import CrawlRequest, CrawlScheduleRun, CrawlSchedule
+from app.models import CrawlRequest, TaskScheduleRun, TaskSchedule
 from app.schemas.collect import CollectedPostBase, CrawlHistoryItem, CrawlHistoryStats
 
 
@@ -301,7 +301,7 @@ class CollectService:
             results.extend(requests)
             total += req_total
 
-        # CrawlScheduleRun 조회
+        # TaskScheduleRun 조회
         if source_type is None or source_type in ('instagram', 'web'):
             runs, run_total = self._get_schedule_runs(
                 page=page,
@@ -370,28 +370,28 @@ class CollectService:
         status: Optional[str],
         date_from: Optional[datetime],
     ) -> Tuple[List[CrawlHistoryItem], int]:
-        """CrawlScheduleRun 조회."""
-        query = self.db.query(CrawlScheduleRun).join(CrawlSchedule)
+        """TaskScheduleRun 조회."""
+        query = self.db.query(TaskScheduleRun).join(TaskSchedule)
 
         # source_type 필터
         if source_type == 'instagram':
-            query = query.filter(CrawlSchedule.target_type == 'instagram_feed')
+            query = query.filter(TaskSchedule.target_type == 'instagram_feed')
         elif source_type == 'web':
-            query = query.filter(CrawlSchedule.target_type != 'instagram_feed')
+            query = query.filter(TaskSchedule.target_type != 'instagram_feed')
 
         # status 필터
         if status:
-            query = query.filter(CrawlScheduleRun.status == status)
+            query = query.filter(TaskScheduleRun.status == status)
 
         # 기간 필터
         if date_from:
-            query = query.filter(CrawlScheduleRun.started_at >= date_from)
+            query = query.filter(TaskScheduleRun.started_at >= date_from)
 
         total = query.count()
 
         # 페이징
         runs = (
-            query.order_by(desc(CrawlScheduleRun.started_at))
+            query.order_by(desc(TaskScheduleRun.started_at))
             .limit(limit * 2)
             .all()
         )
@@ -417,8 +417,8 @@ class CollectService:
             requested_by=request.requested_by,
         )
 
-    def _run_to_history(self, run: CrawlScheduleRun) -> CrawlHistoryItem:
-        """CrawlScheduleRun을 CrawlHistoryItem으로 변환."""
+    def _run_to_history(self, run: TaskScheduleRun) -> CrawlHistoryItem:
+        """TaskScheduleRun을 CrawlHistoryItem으로 변환."""
         schedule = run.schedule
         is_instagram = schedule.target_type == 'instagram_feed' if schedule else False
 

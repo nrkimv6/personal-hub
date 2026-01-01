@@ -6,7 +6,7 @@ from typing import Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.crawl_schedule import CrawlSchedule, CrawlScheduleRun
+from app.models.task_schedule import TaskSchedule, TaskScheduleRun
 from app.models.writing import (
     WritingSource,
     GeneratedWriting,
@@ -249,13 +249,13 @@ class WritingService:
 
     # ========== 스케줄 실행 ==========
 
-    def get_writing_schedule(self) -> Optional[CrawlSchedule]:
+    def get_writing_schedule(self) -> Optional[TaskSchedule]:
         """작문 스케줄 조회."""
         return (
-            self.db.query(CrawlSchedule)
+            self.db.query(TaskSchedule)
             .filter(
-                CrawlSchedule.target_type == CrawlSchedule.TARGET_TYPE_WRITING_TASK,
-                CrawlSchedule.enabled == True,
+                TaskSchedule.target_type == TaskSchedule.TARGET_TYPE_WRITING_TASK,
+                TaskSchedule.enabled == True,
             )
             .first()
         )
@@ -272,11 +272,11 @@ class WritingService:
         schedule = self.get_writing_schedule()
         if not schedule:
             # 임시 스케줄 생성 (수동 실행용)
-            schedule = CrawlSchedule(
+            schedule = TaskSchedule(
                 name="writing_task_manual",
                 display_name="수동 글쓰기",
-                target_type=CrawlSchedule.TARGET_TYPE_WRITING_TASK,
-                schedule_type=CrawlSchedule.SCHEDULE_TYPE_MANUAL,
+                target_type=TaskSchedule.TARGET_TYPE_WRITING_TASK,
+                schedule_type=TaskSchedule.SCHEDULE_TYPE_MANUAL,
                 enabled=True,
             )
             self.db.add(schedule)
@@ -284,10 +284,10 @@ class WritingService:
             self.db.refresh(schedule)
 
         # 실행 기록 생성
-        run = CrawlScheduleRun(
+        run = TaskScheduleRun(
             schedule_id=schedule.id,
             started_at=datetime.now(),
-            status=CrawlScheduleRun.STATUS_RUNNING,
+            status=TaskScheduleRun.STATUS_RUNNING,
             worker_id="manual",
         )
         self.db.add(run)
@@ -323,11 +323,11 @@ class WritingService:
 
         # 실행 대기 중인 스케줄 조회
         schedule = (
-            self.db.query(CrawlSchedule)
+            self.db.query(TaskSchedule)
             .filter(
-                CrawlSchedule.target_type == CrawlSchedule.TARGET_TYPE_WRITING_TASK,
-                CrawlSchedule.enabled == True,
-                CrawlSchedule.next_run_at <= now,
+                TaskSchedule.target_type == TaskSchedule.TARGET_TYPE_WRITING_TASK,
+                TaskSchedule.enabled == True,
+                TaskSchedule.next_run_at <= now,
             )
             .first()
         )
@@ -337,10 +337,10 @@ class WritingService:
 
         # 이미 실행 중인지 확인
         running = (
-            self.db.query(CrawlScheduleRun)
+            self.db.query(TaskScheduleRun)
             .filter(
-                CrawlScheduleRun.schedule_id == schedule.id,
-                CrawlScheduleRun.status == CrawlScheduleRun.STATUS_RUNNING,
+                TaskScheduleRun.schedule_id == schedule.id,
+                TaskScheduleRun.status == TaskScheduleRun.STATUS_RUNNING,
             )
             .first()
         )
@@ -348,10 +348,10 @@ class WritingService:
             return None
 
         # 실행 기록 생성
-        run = CrawlScheduleRun(
+        run = TaskScheduleRun(
             schedule_id=schedule.id,
             started_at=datetime.now(),
-            status=CrawlScheduleRun.STATUS_RUNNING,
+            status=TaskScheduleRun.STATUS_RUNNING,
             worker_id="scheduled",
         )
         self.db.add(run)

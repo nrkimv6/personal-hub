@@ -8,7 +8,7 @@ import os
 
 from sqlalchemy.orm import Session
 
-from app.models import InstagramWorkerStatus, CrawlScheduleRun, CrawlRequest
+from app.models import InstagramWorkerStatus, TaskScheduleRun, CrawlRequest
 
 logger = logging.getLogger("instagram.worker_status")
 
@@ -74,7 +74,7 @@ class WorkerStatusService:
     def _cleanup_orphaned_runs(self) -> int:
         """이전 워커 크래시로 인해 '실행중' 상태로 남은 orphaned run/request들을 정리합니다.
 
-        - CrawlScheduleRun: status가 'running'인 레코드들을 찾아 실패 처리
+        - TaskScheduleRun: status가 'running'인 레코드들을 찾아 실패 처리
         - CrawlRequest: processing 상태인 레코드들을 찾아 실패 처리
 
         Returns:
@@ -83,14 +83,14 @@ class WorkerStatusService:
         now = datetime.now()
         total_cleaned = 0
 
-        # 1. Orphaned CrawlScheduleRun 정리 (running 상태로 stuck된 것들)
-        orphaned_runs = self.db.query(CrawlScheduleRun).filter(
-            CrawlScheduleRun.status == CrawlScheduleRun.STATUS_RUNNING
+        # 1. Orphaned TaskScheduleRun 정리 (running 상태로 stuck된 것들)
+        orphaned_runs = self.db.query(TaskScheduleRun).filter(
+            TaskScheduleRun.status == TaskScheduleRun.STATUS_RUNNING
         ).all()
 
         for run in orphaned_runs:
             run.finished_at = now
-            run.status = CrawlScheduleRun.STATUS_FAILED
+            run.status = TaskScheduleRun.STATUS_FAILED
             run.error_message = "Worker crashed - marked as failed on restart"
 
         if orphaned_runs:

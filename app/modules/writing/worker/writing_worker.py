@@ -1,7 +1,7 @@
 """
 Writing Worker - 스케줄 기반 글 생성 워커.
 
-CrawlSchedule 설정에 따라 매일 정해진 시간에 자동으로 글을 생성합니다.
+TaskSchedule 설정에 따라 매일 정해진 시간에 자동으로 글을 생성합니다.
 
 주요 기능:
     - 랜덤 3개 글 소스 믹스 글쓰기 (5회) - 쿨다운 적용
@@ -19,7 +19,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.crawl_schedule import CrawlSchedule, CrawlScheduleRun
+from app.models.task_schedule import TaskSchedule, TaskScheduleRun
 from app.models.writing import WritingSource, GeneratedWriting
 from app.models.writing_element import WritingElement
 from app.modules.claude_worker.services.llm_service import LLMService
@@ -154,7 +154,7 @@ class WritingWorker:
         else:
             return WritingElement.SEASON_WINTER
 
-    def run(self, schedule: CrawlSchedule, run: CrawlScheduleRun) -> dict:
+    def run(self, schedule: TaskSchedule, run: TaskScheduleRun) -> dict:
         """워커 실행.
 
         Args:
@@ -232,7 +232,7 @@ class WritingWorker:
         """믹스 글쓰기 (3개 소스 조합) - 쿨다운 및 슬롯 중복 방지 적용.
 
         Args:
-            run_id: CrawlScheduleRun ID
+            run_id: TaskScheduleRun ID
             slot_context: 당일 슬롯 컨텍스트
             index: 실행 인덱스 (0부터 시작)
 
@@ -347,7 +347,7 @@ class WritingWorker:
         """랜덤 프롬프트 글쓰기 - 요소 직접 지정, 쿨다운 및 시즌 가중치 적용.
 
         Args:
-            run_id: CrawlScheduleRun ID
+            run_id: TaskScheduleRun ID
             slot_context: 당일 슬롯 컨텍스트
             season: 현재 시즌
             index: 실행 인덱스 (0부터 시작)
@@ -563,8 +563,8 @@ class WritingWorker:
 
 def run_writing_task_sync(
     db: Session,
-    schedule: CrawlSchedule,
-    run: CrawlScheduleRun,
+    schedule: TaskSchedule,
+    run: TaskScheduleRun,
     project_root: Optional[Path] = None,
 ) -> dict:
     """동기식 작문 태스크 실행 (외부 호출용).

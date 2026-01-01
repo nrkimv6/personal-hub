@@ -21,7 +21,7 @@ from typing import Optional, TYPE_CHECKING
 
 from app.worker.crawl_worker_base import CrawlWorkerBase
 from app.database import SessionLocal
-from app.models import ServiceAccount, CrawlRequest, CrawlScheduleRun
+from app.models import ServiceAccount, CrawlRequest, TaskScheduleRun
 
 from app.services.crawl_request_service import CrawlRequestService
 from app.modules.instagram.services.crawl_service import CrawlService
@@ -404,13 +404,13 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
         crawler = InstagramCrawler(tab)
         logger.info(f"[{self.name}] InstagramCrawler 생성 완료, 피드 크롤링 시작...")
 
-        # run_crawl은 CrawlScheduleRun을 생성하고 피드 크롤링 수행
+        # run_crawl은 TaskScheduleRun을 생성하고 피드 크롤링 수행
         crawl_run = await crawl_service.run_crawl(
             crawler=crawler,
             service_account_id=account.id,
         )
 
-        is_success = crawl_run.status == CrawlScheduleRun.STATUS_COMPLETED
+        is_success = crawl_run.status == TaskScheduleRun.STATUS_COMPLETED
         logger.info(
             f"[{self.name}] 피드 크롤링 완료: status={crawl_run.status}, "
             f"collected={crawl_run.collected_count}, new={crawl_run.saved_count}"

@@ -10,9 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.services.collect_service import CollectService
-from app.services.crawl_schedule_service import CrawlScheduleService
+from app.services.task_schedule_service import TaskScheduleService
 from app.schemas.collect import CollectedPostList, CollectedPostBase, CrawlHistoryList
-from app.models import CrawlSchedule, CrawlRequest
+from app.models import TaskSchedule, CrawlRequest
 from app.models.google_search import GoogleSearchQueue, GoogleSavedSearch
 
 router = APIRouter(prefix="/collect", tags=["collect"])
@@ -79,7 +79,7 @@ async def get_crawl_history(
 ):
     """통합 크롤링 이력 조회.
 
-    CrawlRequest와 CrawlScheduleRun을 통합하여 조회합니다.
+    CrawlRequest와 TaskScheduleRun을 통합하여 조회합니다.
     """
     service = CollectService(db)
     items, total, stats = service.get_crawl_history(
@@ -146,7 +146,7 @@ async def get_schedules(
     db: Session = Depends(get_db),
 ):
     """전체 스케줄 목록 조회."""
-    schedules = db.query(CrawlSchedule).order_by(CrawlSchedule.target_type, CrawlSchedule.name).all()
+    schedules = db.query(TaskSchedule).order_by(TaskSchedule.target_type, TaskSchedule.name).all()
     return [
         ScheduleResponse(
             id=s.id,
@@ -174,7 +174,7 @@ async def create_schedule(
     - google_search: Google 검색 수집 (target_config.saved_search_id 필요)
     - writing_task: 글쓰기 태스크
     """
-    schedule_service = CrawlScheduleService(db)
+    schedule_service = TaskScheduleService(db)
 
     # 타입별 검증 및 중복 체크
     if data.target_type == "instagram_feed":
@@ -267,7 +267,7 @@ async def toggle_schedule(
     db: Session = Depends(get_db),
 ):
     """스케줄 활성화/비활성화."""
-    service = CrawlScheduleService(db)
+    service = TaskScheduleService(db)
     schedule = service.toggle_schedule(schedule_id, enabled)
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
@@ -286,7 +286,7 @@ async def delete_schedule(
         schedule_id: 삭제할 스케줄 ID
         delete_runs: True면 실행 이력도 함께 삭제 (기본: False - 이력 유지)
     """
-    service = CrawlScheduleService(db)
+    service = TaskScheduleService(db)
 
     # 스케줄 존재 확인
     schedule = service.get_schedule_by_id(schedule_id)
@@ -324,7 +324,7 @@ async def trigger_schedule_run(
 
     스케줄에 대응하는 크롤링 요청을 즉시 생성합니다.
     """
-    schedule = db.query(CrawlSchedule).filter(CrawlSchedule.id == schedule_id).first()
+    schedule = db.query(TaskSchedule).filter(TaskSchedule.id == schedule_id).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
@@ -408,7 +408,7 @@ async def trigger_schedule_run(
     # 글쓰기 태스크 스케줄의 경우
     elif schedule.target_type == 'writing_task':
         # 스케줄 실행 기록 생성
-        schedule_service = CrawlScheduleService(db)
+        schedule_service = TaskScheduleService(db)
         run = schedule_service.start_run(
             schedule_id=schedule.id,
             worker_id="manual",
