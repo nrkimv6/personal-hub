@@ -1,14 +1,14 @@
-"""크롤링 스케줄 서비스."""
+"""태스크 스케줄 서비스."""
 
 from datetime import datetime, timedelta
 from typing import Optional, List
 from sqlalchemy.orm import Session
 
-from app.models import CrawlSchedule, CrawlScheduleRun
+from app.models import TaskSchedule, TaskScheduleRun
 
 
-class CrawlScheduleService:
-    """크롤링 스케줄 관리 서비스."""
+class TaskScheduleService:
+    """태스크 스케줄 관리 서비스."""
 
     def __init__(self, db: Session):
         self.db = db
@@ -22,9 +22,9 @@ class CrawlScheduleService:
         target_config: Optional[dict] = None,
         schedule_value: Optional[str] = None,
         enabled: bool = True
-    ) -> CrawlSchedule:
+    ) -> TaskSchedule:
         """새 스케줄 생성."""
-        schedule = CrawlSchedule(
+        schedule = TaskSchedule(
             name=name,
             display_name=display_name,
             target_type=target_type,
@@ -40,44 +40,44 @@ class CrawlScheduleService:
         self.db.refresh(schedule)
         return schedule
 
-    def get_schedule_by_name(self, name: str) -> Optional[CrawlSchedule]:
+    def get_schedule_by_name(self, name: str) -> Optional[TaskSchedule]:
         """이름으로 스케줄 조회."""
-        return self.db.query(CrawlSchedule).filter(
-            CrawlSchedule.name == name
+        return self.db.query(TaskSchedule).filter(
+            TaskSchedule.name == name
         ).first()
 
-    def get_schedule_by_id(self, schedule_id: int) -> Optional[CrawlSchedule]:
+    def get_schedule_by_id(self, schedule_id: int) -> Optional[TaskSchedule]:
         """ID로 스케줄 조회."""
-        return self.db.query(CrawlSchedule).filter(
-            CrawlSchedule.id == schedule_id
+        return self.db.query(TaskSchedule).filter(
+            TaskSchedule.id == schedule_id
         ).first()
 
     def get_schedules_by_type(
         self,
         target_type: str,
         enabled_only: bool = True
-    ) -> list[CrawlSchedule]:
+    ) -> list[TaskSchedule]:
         """타입별 스케줄 조회."""
-        query = self.db.query(CrawlSchedule).filter(
-            CrawlSchedule.target_type == target_type
+        query = self.db.query(TaskSchedule).filter(
+            TaskSchedule.target_type == target_type
         )
         if enabled_only:
-            query = query.filter(CrawlSchedule.enabled == True)
+            query = query.filter(TaskSchedule.enabled == True)
         return query.all()
 
-    def get_due_schedules(self) -> list[CrawlSchedule]:
+    def get_due_schedules(self) -> list[TaskSchedule]:
         """실행 대기 중인 스케줄 조회."""
         now = datetime.now()
-        return self.db.query(CrawlSchedule).filter(
-            CrawlSchedule.enabled == True,
-            CrawlSchedule.next_run_at <= now
+        return self.db.query(TaskSchedule).filter(
+            TaskSchedule.enabled == True,
+            TaskSchedule.next_run_at <= now
         ).all()
 
     def update_schedule(
         self,
         schedule_id: int,
         **updates
-    ) -> Optional[CrawlSchedule]:
+    ) -> Optional[TaskSchedule]:
         """스케줄 업데이트."""
         schedule = self.get_schedule_by_id(schedule_id)
         if not schedule:
@@ -94,7 +94,7 @@ class CrawlScheduleService:
         self.db.refresh(schedule)
         return schedule
 
-    def toggle_schedule(self, schedule_id: int, enabled: bool) -> Optional[CrawlSchedule]:
+    def toggle_schedule(self, schedule_id: int, enabled: bool) -> Optional[TaskSchedule]:
         """스케줄 활성화/비활성화."""
         return self.update_schedule(schedule_id, enabled=enabled)
 
@@ -103,12 +103,12 @@ class CrawlScheduleService:
         schedule_id: int,
         worker_id: Optional[str] = None,
         config_snapshot: Optional[dict] = None
-    ) -> CrawlScheduleRun:
+    ) -> TaskScheduleRun:
         """스케줄 실행 시작."""
-        run = CrawlScheduleRun(
+        run = TaskScheduleRun(
             schedule_id=schedule_id,
             started_at=datetime.now(),
-            status=CrawlScheduleRun.STATUS_RUNNING,
+            status=TaskScheduleRun.STATUS_RUNNING,
             worker_id=worker_id
         )
         if config_snapshot:
@@ -125,10 +125,10 @@ class CrawlScheduleService:
         collected_count: int,
         saved_count: int,
         stop_reason: Optional[str] = None
-    ) -> Optional[CrawlScheduleRun]:
+    ) -> Optional[TaskScheduleRun]:
         """실행 완료 처리."""
-        run = self.db.query(CrawlScheduleRun).filter(
-            CrawlScheduleRun.id == run_id
+        run = self.db.query(TaskScheduleRun).filter(
+            TaskScheduleRun.id == run_id
         ).first()
 
         if run:
@@ -141,10 +141,10 @@ class CrawlScheduleService:
         self,
         run_id: int,
         error_message: str
-    ) -> Optional[CrawlScheduleRun]:
+    ) -> Optional[TaskScheduleRun]:
         """실행 실패 처리."""
-        run = self.db.query(CrawlScheduleRun).filter(
-            CrawlScheduleRun.id == run_id
+        run = self.db.query(TaskScheduleRun).filter(
+            TaskScheduleRun.id == run_id
         ).first()
 
         if run:
@@ -172,16 +172,16 @@ class CrawlScheduleService:
         status: Optional[str] = None
     ) -> dict:
         """실행 이력 페이징 조회."""
-        query = self.db.query(CrawlScheduleRun)
+        query = self.db.query(TaskScheduleRun)
 
         if schedule_id:
-            query = query.filter(CrawlScheduleRun.schedule_id == schedule_id)
+            query = query.filter(TaskScheduleRun.schedule_id == schedule_id)
         if status:
-            query = query.filter(CrawlScheduleRun.status == status)
+            query = query.filter(TaskScheduleRun.status == status)
 
         total = query.count()
         items = query.order_by(
-            CrawlScheduleRun.started_at.desc()
+            TaskScheduleRun.started_at.desc()
         ).offset((page - 1) * limit).limit(limit).all()
 
         return {
@@ -192,11 +192,11 @@ class CrawlScheduleService:
             "pages": (total + limit - 1) // limit
         }
 
-    def get_latest_run(self, schedule_id: int) -> Optional[CrawlScheduleRun]:
+    def get_latest_run(self, schedule_id: int) -> Optional[TaskScheduleRun]:
         """스케줄의 최신 실행 조회."""
-        return self.db.query(CrawlScheduleRun).filter(
-            CrawlScheduleRun.schedule_id == schedule_id
-        ).order_by(CrawlScheduleRun.started_at.desc()).first()
+        return self.db.query(TaskScheduleRun).filter(
+            TaskScheduleRun.schedule_id == schedule_id
+        ).order_by(TaskScheduleRun.started_at.desc()).first()
 
     def get_run_stats(
         self,
@@ -206,17 +206,17 @@ class CrawlScheduleService:
         """실행 통계 조회."""
         since = datetime.now() - timedelta(days=days)
 
-        query = self.db.query(CrawlScheduleRun).filter(
-            CrawlScheduleRun.started_at >= since
+        query = self.db.query(TaskScheduleRun).filter(
+            TaskScheduleRun.started_at >= since
         )
         if schedule_id:
-            query = query.filter(CrawlScheduleRun.schedule_id == schedule_id)
+            query = query.filter(TaskScheduleRun.schedule_id == schedule_id)
 
         runs = query.all()
 
         total_runs = len(runs)
-        completed_runs = sum(1 for r in runs if r.status == CrawlScheduleRun.STATUS_COMPLETED)
-        failed_runs = sum(1 for r in runs if r.status == CrawlScheduleRun.STATUS_FAILED)
+        completed_runs = sum(1 for r in runs if r.status == TaskScheduleRun.STATUS_COMPLETED)
+        failed_runs = sum(1 for r in runs if r.status == TaskScheduleRun.STATUS_FAILED)
         total_collected = sum(r.collected_count or 0 for r in runs)
         total_saved = sum(r.saved_count or 0 for r in runs)
 
@@ -232,9 +232,9 @@ class CrawlScheduleService:
 
     def has_active_run(self, schedule_id: int) -> bool:
         """활성 실행(running 상태)이 있는지 확인."""
-        return self.db.query(CrawlScheduleRun).filter(
-            CrawlScheduleRun.schedule_id == schedule_id,
-            CrawlScheduleRun.status == CrawlScheduleRun.STATUS_RUNNING
+        return self.db.query(TaskScheduleRun).filter(
+            TaskScheduleRun.schedule_id == schedule_id,
+            TaskScheduleRun.status == TaskScheduleRun.STATUS_RUNNING
         ).first() is not None
 
     def cleanup_stale_runs(self, timeout_minutes: int = 30) -> int:
@@ -250,9 +250,9 @@ class CrawlScheduleService:
         """
         cutoff = datetime.now() - timedelta(minutes=timeout_minutes)
 
-        stale_runs = self.db.query(CrawlScheduleRun).filter(
-            CrawlScheduleRun.status == CrawlScheduleRun.STATUS_RUNNING,
-            CrawlScheduleRun.started_at < cutoff
+        stale_runs = self.db.query(TaskScheduleRun).filter(
+            TaskScheduleRun.status == TaskScheduleRun.STATUS_RUNNING,
+            TaskScheduleRun.started_at < cutoff
         ).all()
 
         count = 0
@@ -272,8 +272,8 @@ class CrawlScheduleService:
         saved_count: int
     ):
         """실행 중간 진행 상황 업데이트."""
-        run = self.db.query(CrawlScheduleRun).filter(
-            CrawlScheduleRun.id == run_id
+        run = self.db.query(TaskScheduleRun).filter(
+            TaskScheduleRun.id == run_id
         ).first()
 
         if run:
@@ -285,21 +285,21 @@ class CrawlScheduleService:
         self,
         target_type: Optional[str] = None,
         enabled_only: bool = False
-    ) -> List[CrawlSchedule]:
+    ) -> List[TaskSchedule]:
         """모든 스케줄 조회."""
-        query = self.db.query(CrawlSchedule)
+        query = self.db.query(TaskSchedule)
 
         if target_type:
-            query = query.filter(CrawlSchedule.target_type == target_type)
+            query = query.filter(TaskSchedule.target_type == target_type)
         if enabled_only:
-            query = query.filter(CrawlSchedule.enabled == True)
+            query = query.filter(TaskSchedule.enabled == True)
 
-        return query.order_by(CrawlSchedule.created_at.desc()).all()
+        return query.order_by(TaskSchedule.created_at.desc()).all()
 
-    def get_run_by_id(self, run_id: int) -> Optional[CrawlScheduleRun]:
+    def get_run_by_id(self, run_id: int) -> Optional[TaskScheduleRun]:
         """실행 ID로 조회."""
-        return self.db.query(CrawlScheduleRun).filter(
-            CrawlScheduleRun.id == run_id
+        return self.db.query(TaskScheduleRun).filter(
+            TaskScheduleRun.id == run_id
         ).first()
 
     def delete_schedule(self, schedule_id: int, delete_runs: bool = False) -> bool:
@@ -318,8 +318,8 @@ class CrawlScheduleService:
 
         if delete_runs:
             # 실행 이력도 함께 삭제
-            self.db.query(CrawlScheduleRun).filter(
-                CrawlScheduleRun.schedule_id == schedule_id
+            self.db.query(TaskScheduleRun).filter(
+                TaskScheduleRun.schedule_id == schedule_id
             ).delete()
 
         self.db.delete(schedule)
@@ -328,6 +328,10 @@ class CrawlScheduleService:
 
     def get_run_count(self, schedule_id: int) -> int:
         """스케줄의 실행 이력 수 조회."""
-        return self.db.query(CrawlScheduleRun).filter(
-            CrawlScheduleRun.schedule_id == schedule_id
+        return self.db.query(TaskScheduleRun).filter(
+            TaskScheduleRun.schedule_id == schedule_id
         ).count()
+
+
+# 하위 호환성 별칭 (deprecated - 향후 제거 예정)
+CrawlScheduleService = TaskScheduleService
