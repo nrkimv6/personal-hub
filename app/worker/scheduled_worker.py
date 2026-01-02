@@ -613,7 +613,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                     manual_run.worker_id = self.name
                     db.commit()
                     self._create_task(
-                        self._execute_writing_source_collect(schedule, manual_run, config),
+                        self._execute_writing_source_collect(manual_run, config),
                         task_name
                     )
                     logger.info(f"[{self.name}] 수동 Writing Source 수집 태스크 시작: run_id={manual_run.id}")
@@ -654,7 +654,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                 task_name = f"writing_source_{schedule.id}_run_{run.id}"
                 if not self._is_task_running(task_name):
                     self._create_task(
-                        self._execute_writing_source_collect(schedule, run, config),
+                        self._execute_writing_source_collect(run, config),
                         task_name
                     )
                     logger.info(f"[{self.name}] Writing Source 수집 태스크 시작: run_id={run.id}")
@@ -664,14 +664,12 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
     async def _execute_writing_source_collect(
         self,
-        schedule: TaskSchedule,
         run: TaskScheduleRun,
         config: dict
     ):
         """Writing Source 수집 실행 (RSS, 위키문헌).
 
         Args:
-            schedule: 크롤링 스케줄
             run: 실행 기록
             config: 수집 설정
         """
@@ -934,7 +932,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                     manual_run.worker_id = self.name
                     db.commit()
                     self._create_task(
-                        self._execute_keyword_analysis(schedule, manual_run, config),
+                        self._execute_keyword_analysis(manual_run, config),
                         task_name
                     )
                     logger.info(f"[{self.name}] 수동 Keyword Analysis 태스크 시작: run_id={manual_run.id}")
@@ -975,7 +973,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                 task_name = f"keyword_analysis_{schedule.id}_run_{run.id}"
                 if not self._is_task_running(task_name):
                     self._create_task(
-                        self._execute_keyword_analysis(schedule, run, config),
+                        self._execute_keyword_analysis(run, config),
                         task_name
                     )
                     logger.info(f"[{self.name}] Keyword Analysis 태스크 시작: run_id={run.id}")
@@ -985,14 +983,12 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
     async def _execute_keyword_analysis(
         self,
-        schedule: TaskSchedule,
         run: TaskScheduleRun,
         config: dict
     ):
         """Keyword Analysis 실행.
 
         Args:
-            schedule: 크롤링 스케줄
             run: 실행 기록
             config: 분석 설정
         """
