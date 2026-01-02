@@ -329,7 +329,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             account.is_logged_in = False
             db.commit()
             schedule_service.fail_run(run.id, "Instagram 로그인 필요")
-            logger.warning(f"[{self.name}] Instagram 로그인 필요: account={account.name}")
+            logger.warning(f"[{self.name}] Instagram 로그인 필요: account={account.identifier}")
             return False
         else:
             account.is_logged_in = True
@@ -344,7 +344,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             service_account_id=account.id,
         )
 
-        self._update_worker_state("crawling", account.name, run.id)
+        self._update_worker_state("crawling", account.identifier, run.id)
 
         logger.info(
             f"[{self.name}] 크롤링 완료: success={crawl_run.success}, "
