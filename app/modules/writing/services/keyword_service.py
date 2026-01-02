@@ -42,6 +42,24 @@ class KeywordService:
 
         return query.order_by(desc(KeywordStats.frequency)).offset(offset).limit(limit).all()
 
+    def count_keywords(
+        self,
+        min_frequency: int = 0,
+        include_stopwords: bool = False,
+        include_promoted: bool = True,
+    ) -> int:
+        """키워드 총 개수 조회 (필터 조건 적용)."""
+        query = self.db.query(KeywordStats)
+
+        if not include_stopwords:
+            query = query.filter(KeywordStats.is_stopword == 0)
+        if not include_promoted:
+            query = query.filter(KeywordStats.is_promoted == 0)
+        if min_frequency > 0:
+            query = query.filter(KeywordStats.frequency >= min_frequency)
+
+        return query.count()
+
     def get_candidates(self, limit: int = 50, min_frequency: int = 100) -> list[KeywordStats]:
         """승격 후보 키워드 조회 (미검토 + 미승격 + 고빈도)."""
         return (
@@ -73,17 +91,34 @@ class KeywordService:
         if kw.is_stopword:
             raise ValueError(f"Cannot promote stopword: {kw.keyword}")
 
-        # writing_elements에 추가
-        element = WritingElement(
-            category=WritingElement.CATEGORY_KEYWORD,
-            name=kw.keyword,
-            frequency=kw.frequency,
-            source_keyword_id=kw.id,
-            season_hint=season_hint,
-            is_active=1,
+        # 이미 동일한 이름의 element가 존재하는지 확인
+        existing_element = (
+            self.db.query(WritingElement)
+            .filter_by(category=WritingElement.CATEGORY_KEYWORD, name=kw.keyword)
+            .first()
         )
-        self.db.add(element)
-        self.db.flush()
+
+        if existing_element:
+            # 기존 element에 연결하고 frequency 업데이트
+            existing_element.frequency = max(existing_element.frequency or 0, kw.frequency)
+            existing_element.source_keyword_id = kw.id
+            if season_hint:
+                existing_element.season_hint = season_hint
+            element = existing_element
+            logger.info(f"Linked keyword to existing element: {kw.keyword} → element_id={element.id}")
+        else:
+            # writing_elements에 새로 추가
+            element = WritingElement(
+                category=WritingElement.CATEGORY_KEYWORD,
+                name=kw.keyword,
+                frequency=kw.frequency,
+                source_keyword_id=kw.id,
+                season_hint=season_hint,
+                is_active=1,
+            )
+            self.db.add(element)
+            self.db.flush()
+            logger.info(f"Promoted keyword: {kw.keyword} → element_id={element.id}")
 
         # keyword_stats 업데이트
         kw.is_promoted = 1
@@ -91,9 +126,34 @@ class KeywordService:
         kw.reviewed_at = datetime.now()
 
         self.db.commit()
-        logger.info(f"Promoted keyword: {kw.keyword} → element_id={element.id}")
 
         return element
+
+    def demote_keyword(self, keyword_id: int) -> KeywordStats:
+        """승격된 키워드를 원래 상태로 되돌림 (writing_elements에서도 삭제)."""
+        kw = self.db.query(KeywordStats).get(keyword_id)
+        if not kw:
+            raise ValueError(f"Keyword not found: {keyword_id}")
+
+        if not kw.is_promoted:
+            raise ValueError(f"Not promoted: {kw.keyword}")
+
+        # writing_elements에서 해당 element 삭제 (있으면)
+        if kw.element_id:
+            element = self.db.query(WritingElement).get(kw.element_id)
+            if element:
+                self.db.delete(element)
+                logger.info(f"Deleted element: {element.name} (id={element.id})")
+
+        # keyword_stats 업데이트
+        kw.is_promoted = 0
+        kw.element_id = None
+        kw.reviewed_at = None  # 검토 상태도 리셋
+
+        self.db.commit()
+        logger.info(f"Demoted keyword: {kw.keyword}")
+
+        return kw
 
     def promote_batch(
         self,

@@ -67,10 +67,16 @@ def list_keywords(
         include_stopwords=include_stopwords,
         include_promoted=include_promoted,
     )
+    total = service.count_keywords(
+        min_frequency=min_frequency,
+        include_stopwords=include_stopwords,
+        include_promoted=include_promoted,
+    )
 
     return {
         "items": [_keyword_to_dict(k) for k in keywords],
         "count": len(keywords),
+        "total": total,
         "offset": offset,
         "limit": limit,
     }
@@ -152,6 +158,20 @@ def promote_batch(
             for e in elements
         ],
     }
+
+
+@router.delete("/{keyword_id}")
+def demote_keyword(
+    keyword_id: int,
+    db: Session = Depends(get_db),
+):
+    """승격된 키워드 삭제 (원래 상태로 되돌림)."""
+    service = KeywordService(db)
+    try:
+        kw = service.demote_keyword(keyword_id)
+        return {"success": True, "keyword": kw.keyword}
+    except ValueError as e:
+        raise HTTPException(404, str(e))
 
 
 # ========== 불용어 관리 ==========

@@ -123,7 +123,7 @@
 				keywordApi.stats()
 			]);
 			keywords = listRes.items;
-			keywordTotal = listRes.count;
+			keywordTotal = listRes.total;
 			keywordStats = statsRes;
 		} catch (e) {
 			error = e instanceof Error ? e.message : '키워드 로드 실패';
@@ -160,6 +160,17 @@
 			await fetchKeywords();
 		} catch (e) {
 			alert('승격 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		}
+	}
+
+	async function demoteKeyword(kw: KeywordStats) {
+		if (!confirm(`"${kw.keyword}" 승격을 취소하시겠습니까?`)) return;
+		try {
+			await keywordApi.demote(kw.id);
+			alert(`"${kw.keyword}" 승격 취소 완료`);
+			await fetchKeywords();
+		} catch (e) {
+			alert('승격 취소 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
 		}
 	}
 
@@ -710,7 +721,14 @@
 									{/if}
 								</td>
 								<td class="px-4 py-3 text-center">
-									{#if !kw.is_promoted && !kw.is_stopword}
+									{#if kw.is_promoted}
+										<button
+											onclick={() => demoteKeyword(kw)}
+											class="text-red-600 hover:text-red-800 text-sm"
+										>
+											삭제
+										</button>
+									{:else if !kw.is_stopword}
 										<button
 											onclick={() => promoteKeyword(kw)}
 											class="text-green-600 hover:text-green-800 text-sm mr-2"
