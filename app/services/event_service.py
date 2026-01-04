@@ -97,7 +97,7 @@ class EventService:
         is_bookmarked: Optional[bool] = None,
         is_participated: Optional[bool] = None,
         is_offline: Optional[bool] = None,  # 오프라인 이벤트 필터
-        include_unknown_period: bool = True,
+        unknown_period_filter: str = "include",  # exclude/include/only
         search: Optional[str] = None,
         sort_by: str = "event_end",
         sort_order: str = "asc",
@@ -135,9 +135,21 @@ class EventService:
         if is_offline is not None:
             query = query.filter(Event.is_offline == is_offline)
 
-        # event_status 필터 (기간 기반)
+        # unknown_period_filter 처리 (exclude/include/only)
         today = date.today()
-        if event_status:
+        include_unknown = unknown_period_filter in ("include", "only")
+
+        # only: 기간미정만 보기 (시작일과 종료일 모두 NULL)
+        if unknown_period_filter == "only":
+            query = query.filter(
+                and_(Event.event_start.is_(None), Event.event_end.is_(None))
+            )
+        elif unknown_period_filter == "exclude":
+            # exclude: 기간미정 제외 (종료일이 있는 것만)
+            query = query.filter(Event.event_end.isnot(None))
+
+        # event_status 필터 (기간 기반) - only가 아닐 때만 적용
+        if event_status and unknown_period_filter != "only":
             # cancelled 상태는 별도 처리 (ongoing/upcoming/ended와 배타적)
             if event_status != "cancelled":
                 query = query.filter(Event.status != "cancelled")
@@ -147,10 +159,10 @@ class EventService:
                 conditions = [
                     and_(
                         or_(Event.event_start <= today, Event.event_start.is_(None)),
-                        or_(Event.event_end >= today, Event.event_end.is_(None) if include_unknown_period else False),
+                        or_(Event.event_end >= today, Event.event_end.is_(None) if include_unknown else False),
                     )
                 ]
-                if include_unknown_period:
+                if include_unknown:
                     conditions.append(
                         and_(Event.event_start.is_(None), Event.event_end.is_(None))
                     )
@@ -167,7 +179,7 @@ class EventService:
             elif event_status == "ongoing_or_upcoming":
                 # 진행 중 + 예정: 종료일 >= 오늘 OR 종료일 NULL
                 conditions = [Event.event_end >= today]
-                if include_unknown_period:
+                if include_unknown:
                     conditions.append(Event.event_end.is_(None))
                 query = query.filter(or_(*conditions))
 
