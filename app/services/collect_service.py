@@ -36,11 +36,17 @@ class CollectService:
         results = []
         total = 0
 
+        # 통합 조회 시: 각 소스에서 충분한 데이터를 가져와 통합 후 페이징
+        # 단일 소스 조회 시: 해당 소스에서 직접 페이징
+        is_combined = source_type is None
+        fetch_page = 1 if is_combined else page
+        fetch_limit = page * limit if is_combined else limit
+
         # Instagram 게시물 조회
         if source_type is None or source_type == 'instagram':
             ig_posts, ig_total = self._get_instagram_posts(
-                page=page,
-                limit=limit,
+                page=fetch_page,
+                limit=fetch_limit,
                 url_type=url_type,
                 classification=classification,
                 search=search,
@@ -54,8 +60,8 @@ class CollectService:
         # Web (CrawledPages) 조회
         if source_type is None or source_type == 'web':
             web_posts, web_total = self._get_web_posts(
-                page=page,
-                limit=limit,
+                page=fetch_page,
+                limit=fetch_limit,
                 url_type=url_type,
                 classification=classification,
                 search=search,
@@ -68,9 +74,8 @@ class CollectService:
         # 날짜순 정렬
         results.sort(key=lambda x: x.created_at, reverse=True)
 
-        # 페이징 처리 (통합 후)
-        if source_type is None:
-            # 통합 조회 시 재정렬 후 페이징
+        # 통합 조회 시에만 재페이징 (단일 소스는 이미 페이징됨)
+        if is_combined:
             start = (page - 1) * limit
             end = start + limit
             results = results[start:end]

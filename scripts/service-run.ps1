@@ -370,11 +370,12 @@ try {
     Write-ServiceLog "Service stopping, running cleanup..."
 
     # Use stop.ps1 to properly clean up all processes
+    # -SkipWatchdog: Don't kill watchdog processes (they run in user session, not service)
     try {
         if ($Dev) {
-            & $stopScript -Force -Dev 2>&1 | ForEach-Object { Write-ServiceLog $_ }
+            & $stopScript -Force -Dev -SkipWatchdog 2>&1 | ForEach-Object { Write-ServiceLog $_ }
         } else {
-            & $stopScript -Force 2>&1 | ForEach-Object { Write-ServiceLog $_ }
+            & $stopScript -Force -SkipWatchdog 2>&1 | ForEach-Object { Write-ServiceLog $_ }
         }
     } catch {
         Write-ServiceLog "Cleanup error: $_"

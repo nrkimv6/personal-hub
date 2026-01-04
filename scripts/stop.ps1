@@ -2,9 +2,10 @@
 # Stops FastAPI server, monitoring worker, and Frontend (including zombie processes)
 
 param(
-    [switch]$Force,  # Skip confirmations
-    [switch]$Dev,    # Stop dev environment (ports 8001, 5174)
-    [switch]$All     # Stop both dev and production environments
+    [switch]$Force,        # Skip confirmations
+    [switch]$Dev,          # Stop dev environment (ports 8001, 5174)
+    [switch]$All,          # Stop both dev and production environments
+    [switch]$SkipWatchdog  # Don't kill watchdog processes (for service restart)
 )
 
 # Trap all errors and wait for key before exit
@@ -62,43 +63,51 @@ Write-Host ""
 # STEP 0: Kill Watchdog Processes (only for target environment)
 # ============================================================
 $envLabel = if ($All) { "all environments" } elseif ($Dev) { "dev" } else { "production" }
-Write-Host "[0] Killing Watchdog processes ($envLabel)" -ForegroundColor Cyan
-Write-Host "----------------------------------------"
 
-$watchdogKilled = 0
+if ($SkipWatchdog) {
+    Write-Host "[0] Skipping Watchdog processes (-SkipWatchdog)" -ForegroundColor Gray
+    Write-Host "----------------------------------------"
+    Write-Host "  (watchdog processes preserved)" -ForegroundColor Gray
+    Write-Host ""
+} else {
+    Write-Host "[0] Killing Watchdog processes ($envLabel)" -ForegroundColor Cyan
+    Write-Host "----------------------------------------"
 
-# Get target watchdog PIDs from PID files
-$targetWatchdogPids = @()
-foreach ($pidFile in $PidFiles) {
-    if ((Test-Path $pidFile) -and $pidFile -match "watchdog") {
-        $savedPid = Get-Content $pidFile -ErrorAction SilentlyContinue
-        if ($savedPid) {
-            $targetWatchdogPids += [int]$savedPid
-        }
-    }
-}
+    $watchdogKilled = 0
 
-if ($targetWatchdogPids.Count -gt 0) {
-    foreach ($procId in $targetWatchdogPids) {
-        $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
-        if ($proc) {
-            Write-Host "  [*] Watchdog PID $procId" -ForegroundColor Yellow
-            try {
-                Stop-Process -Id $procId -Force -ErrorAction Stop
-                Write-Host "      -> Killed" -ForegroundColor Green
-                $watchdogKilled++
-            } catch {
-                Write-Host "      -> Failed: $($_.Exception.Message)" -ForegroundColor Red
+    # Get target watchdog PIDs from PID files
+    $targetWatchdogPids = @()
+    foreach ($pidFile in $PidFiles) {
+        if ((Test-Path $pidFile) -and $pidFile -match "watchdog") {
+            $savedPid = Get-Content $pidFile -ErrorAction SilentlyContinue
+            if ($savedPid) {
+                $targetWatchdogPids += [int]$savedPid
             }
         }
     }
-}
 
-if ($watchdogKilled -eq 0) {
-    Write-Host "  (no watchdog processes found for $envLabel)" -ForegroundColor Gray
-}
+    if ($targetWatchdogPids.Count -gt 0) {
+        foreach ($procId in $targetWatchdogPids) {
+            $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
+            if ($proc) {
+                Write-Host "  [*] Watchdog PID $procId" -ForegroundColor Yellow
+                try {
+                    Stop-Process -Id $procId -Force -ErrorAction Stop
+                    Write-Host "      -> Killed" -ForegroundColor Green
+                    $watchdogKilled++
+                } catch {
+                    Write-Host "      -> Failed: $($_.Exception.Message)" -ForegroundColor Red
+                }
+            }
+        }
+    }
 
-Write-Host ""
+    if ($watchdogKilled -eq 0) {
+        Write-Host "  (no watchdog processes found for $envLabel)" -ForegroundColor Gray
+    }
+
+    Write-Host ""
+}
 
 # ============================================================
 # STEP 1: Kill worker processes by PID files first (handles Session 0 processes)
