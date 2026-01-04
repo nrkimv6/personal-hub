@@ -306,7 +306,7 @@ class VideoDownloadWorker(BaseWorker):
             return {"success": False, "error": str(e)}
 
     async def _download_vimeo(self, request: VideoDownload) -> dict:
-        """Vimeo 다운로드.
+        """Vimeo 다운로드 (yt-dlp 직접 호출, 진행률 로깅).
 
         Args:
             request: VideoDownload 요청 객체
@@ -315,35 +315,65 @@ class VideoDownloadWorker(BaseWorker):
             결과 딕셔너리 {success, output_path, file_size, title, error}
         """
         try:
-            # download-vimeo.py의 함수 import
-            # 파일명이 하이픈이라 특별 처리 필요
-            import importlib.util
-            spec = importlib.util.spec_from_file_location(
-                "download_vimeo",
-                os.path.join(DOWNLOADER_PROJECT_PATH, "download-vimeo.py")
-            )
-            download_vimeo_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(download_vimeo_module)
-
-            download_vimeo_ytdlp = download_vimeo_module.download_vimeo_ytdlp
+            import subprocess
 
             current_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_filename = os.path.join(self.output_dir, f'vimeo_{current_datetime}')
 
-            # 동기 함수를 비동기로 실행
-            success = await asyncio.to_thread(
-                download_vimeo_ytdlp,
-                request.url,
-                output_filename,
-                request.quality or "best",
-                None,  # referer
-                request.embedding_url,  # embedding_url
-                None,  # cookies
-                False  # show_info
+            # yt-dlp 명령 구성
+            cmd = [
+                'yt-dlp',
+                '--no-warnings',
+                '--progress',
+                '--newline',  # 진행률을 한 줄씩 출력
+                '--merge-output-format', 'mp4',
+                '-o', f'{output_filename}.%(ext)s',
+            ]
+
+            # 임베딩 URL이 있으면 referer 설정
+            if request.embedding_url:
+                cmd.extend(['--referer', request.embedding_url])
+
+            cmd.append(request.url)
+
+            logger.info(f"[{self.name}] yt-dlp 시작: {request.url[:60]}...")
+
+            # subprocess로 실행하면서 출력 파싱
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
             )
 
-            if not success:
-                return {"success": False, "error": "Vimeo 다운로드 실패"}
+            last_progress = -1
+            while True:
+                line = await process.stdout.readline()
+                if not line:
+                    break
+                line = line.decode('utf-8', errors='ignore').strip()
+
+                # 진행률 파싱 (예: [download]  45.2% of 100.00MiB)
+                if '[download]' in line and '%' in line:
+                    try:
+                        # 퍼센트 추출
+                        percent_str = line.split('%')[0].split()[-1]
+                        percent = int(float(percent_str))
+                        # 10% 단위로 로그 출력 (너무 많이 찍지 않도록)
+                        if percent >= last_progress + 10:
+                            logger.info(f"[{self.name}] 다운로드 진행: {percent}%")
+                            last_progress = percent
+                    except (ValueError, IndexError):
+                        pass
+                elif '[Merger]' in line or 'Merging' in line:
+                    logger.info(f"[{self.name}] 비디오/오디오 병합 중...")
+
+            # stderr도 읽기
+            stderr_output = await process.stderr.read()
+            await process.wait()
+
+            if process.returncode != 0:
+                error_msg = stderr_output.decode('utf-8', errors='ignore')[:200]
+                return {"success": False, "error": f"yt-dlp 실패: {error_msg}"}
 
             # 다운로드된 파일 찾기
             possible_extensions = ['.mp4', '.webm', '.mkv']
@@ -352,6 +382,7 @@ class VideoDownloadWorker(BaseWorker):
                 if os.path.exists(output_path):
                     file_size = os.path.getsize(output_path)
                     title = self._extract_title_from_filename(output_path)
+                    logger.info(f"[{self.name}] 다운로드 완료: {file_size / 1024 / 1024:.1f}MB")
                     return {
                         "success": True,
                         "output_path": output_path,
@@ -436,11 +467,11 @@ def main():
     )
     args = parser.parse_args()
 
-    # 로깅 설정
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    # 로깅 설정 (stdout으로 출력 - logs.ps1에서 읽을 수 있도록)
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    logging.root.setLevel(logging.INFO)
+    logging.root.addHandler(handler)
 
     worker = VideoDownloadWorker(
         output_dir=args.output_dir,

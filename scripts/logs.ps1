@@ -151,12 +151,14 @@ $workerLogFile = Get-LatestLogFile "stdout_worker_"
 $frontendLogFile = Get-LatestLogFile "frontend_"
 $igWorkerLogFile = Get-LatestLogFile "stdout_instagram_"
 $claudeWorkerLogFile = Get-LatestLogFile "stdout_llm_worker_"
+$videoDownloadWorkerLogFile = Get-LatestLogFile "stdout_video_download_worker_"
 
 # Static log files (not timestamped)
 $serviceRunnerLogFile = Join-Path $LogDir "service_runner.log"
 $watchdogLogFile = Join-Path $LogDir "watchdog.log"
 $igWatchdogLogFile = Join-Path $LogDir "instagram_watchdog.log"
 $claudeWatchdogLogFile = Join-Path $LogDir "claude_watchdog.log"
+$videoDownloadWatchdogLogFile = Join-Path $LogDir "video_download_watchdog.log"
 $cloudflaredLogFile = Join-Path $ProjectRoot "logs" "cloudflared.log"
 
 # Check if log files are stale (created more than 1 hour before the latest API log)
@@ -180,7 +182,8 @@ if ($apiLogFile) {
         @{ Name = "Worker"; Var = "workerLogFile" },
         @{ Name = "Frontend"; Var = "frontendLogFile" },
         @{ Name = "IG-Worker"; Var = "igWorkerLogFile" },
-        @{ Name = "Claude Worker"; Var = "claudeWorkerLogFile" }
+        @{ Name = "Claude Worker"; Var = "claudeWorkerLogFile" },
+        @{ Name = "Video Download"; Var = "videoDownloadWorkerLogFile" }
     )
 
     foreach ($log in $timestampedLogs) {
@@ -196,6 +199,7 @@ if ($apiLogFile) {
         @{ Name = "Watchdog"; Var = "watchdogLogFile" },
         @{ Name = "IG-Watchdog"; Var = "igWatchdogLogFile" },
         @{ Name = "Claude-Watchdog"; Var = "claudeWatchdogLogFile" },
+        @{ Name = "Video-DL-Watchdog"; Var = "videoDownloadWatchdogLogFile" },
         @{ Name = "Service Runner"; Var = "serviceRunnerLogFile" }
     )
 
@@ -294,10 +298,12 @@ function Start-CombinedLogTail {
         [string]$FrontendLog,
         [string]$IgWorkerLog,
         [string]$ClaudeWorkerLog,
+        [string]$VideoDownloadLog,
         [string]$ServiceRunnerLog,
         [string]$WatchdogLog,
         [string]$IgWatchdogLog,
         [string]$ClaudeWatchdogLog,
+        [string]$VideoDownloadWatchdogLog,
         [string]$CloudflaredLog
     )
 
@@ -315,10 +321,12 @@ function Start-CombinedLogTail {
         "WORKER"      = @{ Path = $WorkerLog;         Color = "Magenta";     Tail = 5 }
         "IG-WORKER"   = @{ Path = $IgWorkerLog;       Color = "DarkMagenta"; Tail = 3 }
         "CLAUDE"      = @{ Path = $ClaudeWorkerLog;   Color = "Blue";        Tail = 3 }
+        "VIDEO-DL"    = @{ Path = $VideoDownloadLog;  Color = "DarkGreen";   Tail = 5 }
         "FRONTEND"    = @{ Path = $FrontendLog;       Color = "Green";       Tail = 3 }
         "WATCHDOG"    = @{ Path = $WatchdogLog;       Color = "DarkYellow";  Tail = 2 }
         "IG-WD"       = @{ Path = $IgWatchdogLog;     Color = "DarkYellow";  Tail = 2 }
         "CLAUDE-WD"   = @{ Path = $ClaudeWatchdogLog; Color = "DarkYellow";  Tail = 2 }
+        "VIDEO-DL-WD" = @{ Path = $VideoDownloadWatchdogLog; Color = "DarkYellow"; Tail = 2 }
     }
 
     # Track file positions
@@ -362,6 +370,7 @@ function Start-CombinedLogTail {
         "WORKER"      = "stdout_worker_*.log"
         "IG-WORKER"   = "stdout_instagram_*.log"
         "CLAUDE"      = "stdout_llm_worker_*.log"
+        "VIDEO-DL"    = "stdout_video_download_worker_*.log"
         "FRONTEND"    = "frontend_*.log"
     }
 
@@ -461,10 +470,12 @@ if ($Follow) {
                 -FrontendLog $frontendLogFile `
                 -IgWorkerLog $igWorkerLogFile `
                 -ClaudeWorkerLog $claudeWorkerLogFile `
+                -VideoDownloadLog $videoDownloadWorkerLogFile `
                 -ServiceRunnerLog $serviceRunnerLogFile `
                 -WatchdogLog $watchdogLogFile `
                 -IgWatchdogLog $igWatchdogLogFile `
                 -ClaudeWatchdogLog $claudeWatchdogLogFile `
+                -VideoDownloadWatchdogLog $videoDownloadWatchdogLogFile `
                 -CloudflaredLog $cloudflaredLogFile
         }
     }
