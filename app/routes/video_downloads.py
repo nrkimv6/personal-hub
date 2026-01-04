@@ -21,7 +21,7 @@ from app.schemas.video_download import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/video-downloads", tags=["video-downloads"])
+router = APIRouter(prefix="/api/v1/video-downloads", tags=["video-downloads"])
 
 
 @router.post("", response_model=VideoDownloadCreateResponse)

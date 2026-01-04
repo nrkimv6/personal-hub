@@ -1,7 +1,7 @@
 /**
  * System API - 시스템, 워커, 이벤트, 팝업, LLM, 에러 관리
  */
-import { request, API_BASE } from './client';
+import { request, API_BASE, getAuthToken } from './client';
 import type {
   SystemStatus,
   QueueItem,
@@ -782,6 +782,27 @@ export const integrityApi = {
 // Video Download API
 // ============================================================
 
+// video-downloads는 /api/video-downloads 경로 사용 (v1 없음)
+async function requestVideoDownload<T>(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const url = `/api/video-downloads${endpoint}`;
+  const token = getAuthToken();
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...options.headers
+  };
+  const response = await fetch(url, { ...options, headers, credentials: 'include' });
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new Error(error.detail || '요청 실패');
+  }
+  if (response.status === 204) return null as T;
+  return response.json();
+}
+
 export const videoDownloadApi = {
   // 다운로드 목록 조회
   list: (params?: {
@@ -796,27 +817,27 @@ export const videoDownloadApi = {
     if (params?.page) searchParams.set('page', params.page.toString());
     if (params?.limit) searchParams.set('limit', params.limit.toString());
     const query = searchParams.toString();
-    return request<VideoDownloadList>(`/video-downloads${query ? `?${query}` : ''}`);
+    return requestVideoDownload<VideoDownloadList>(`${query ? `?${query}` : ''}`);
   },
 
   // 단건 조회
   get: (id: number) =>
-    request<VideoDownload>(`/video-downloads/${id}`),
+    requestVideoDownload<VideoDownload>(`/${id}`),
 
   // 다운로드 요청 생성
   create: (data: VideoDownloadCreate) =>
-    request<VideoDownload>('/video-downloads', {
+    requestVideoDownload<VideoDownload>('', {
       method: 'POST',
       body: JSON.stringify(data)
     }),
 
   // 다운로드 취소
   cancel: (id: number) =>
-    request<VideoDownload>(`/video-downloads/${id}`, {
+    requestVideoDownload<VideoDownload>(`/${id}`, {
       method: 'DELETE'
     }),
 
   // 통계 조회
   stats: () =>
-    request<VideoDownloadStats>('/video-downloads/stats')
+    requestVideoDownload<VideoDownloadStats>('/stats')
 };
