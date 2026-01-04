@@ -352,8 +352,8 @@
 					</div>
 
 					<!-- 링크 -->
-					{@const eventUrls = getEventUrls()}
-					{#if eventUrls.length > 0}
+					{#if getEventUrls().length > 0}
+						{@const eventUrls = getEventUrls()}
 						<div class="mt-3 pt-3 border-t border-gray-100">
 							<div class="space-y-1.5">
 								{#each eventUrls as url, index}
@@ -704,8 +704,8 @@
 						</div>
 
 						<!-- 링크 -->
-						{@const mobileEventUrls = getEventUrls()}
-						{#if mobileEventUrls.length > 0}
+						{#if getEventUrls().length > 0}
+							{@const mobileEventUrls = getEventUrls()}
 							<div class="mt-3 pt-3 border-t border-gray-100">
 								<div class="space-y-1.5">
 									{#each mobileEventUrls as url, index}

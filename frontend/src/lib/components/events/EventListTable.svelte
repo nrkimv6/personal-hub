@@ -315,9 +315,9 @@
 						</td>
 						<!-- 원본 링크 -->
 						<td class="px-2 py-2 text-center" onclick={(e) => e.stopPropagation()}>
-							{@const urlCount = event.event_url ? 1 + (event.additional_urls?.length || 0) : 0}
 							<div class="flex gap-1 justify-center items-center">
 								{#if event.event_url}
+									{@const urlCount = 1 + (event.additional_urls?.length || 0)}
 									<a
 										href={event.event_url}
 										target="_blank"
