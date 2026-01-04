@@ -30,6 +30,7 @@ from app.modules.instagram.services.scheduler import InstagramScheduler
 from app.modules.instagram.services.crawler import InstagramCrawler
 from app.modules.instagram.models.schemas import TimeWindow
 from app.modules.writing.worker.writing_worker import WritingWorker
+from app.modules.writing.worker.topic_extract_worker import TopicExtractWorker
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -155,6 +156,14 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             )
             for schedule in keyword_schedules:
                 await self._process_keyword_analysis_schedule(db, schedule, schedule_service)
+
+            # Topic extract 타입의 활성 스케줄 조회
+            topic_extract_schedules = schedule_service.get_schedules_by_type(
+                TaskSchedule.TARGET_TYPE_TOPIC_EXTRACT,
+                enabled_only=True
+            )
+            for schedule in topic_extract_schedules:
+                await self._process_topic_extract_schedule(db, schedule, schedule_service)
 
         except Exception as e:
             logger.error(f"[{self.name}] 스케줄 디스패치 오류: {e}", exc_info=True)
@@ -1063,6 +1072,159 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             return result
         except Exception as e:
             logger.error(f"[{self.name}] KeywordAnalyzer 실행 오류: {e}", exc_info=True)
+            return {"error": str(e)}
+        finally:
+            db.close()
+
+    # =====================================
+    # Topic Extract 스케줄 처리
+    # =====================================
+
+    async def _process_topic_extract_schedule(
+        self,
+        db,
+        schedule: TaskSchedule,
+        schedule_service: TaskScheduleService
+    ):
+        """Topic Extract 스케줄 처리.
+
+        Args:
+            db: DB 세션
+            schedule: 스케줄
+            schedule_service: 스케줄 서비스
+        """
+        try:
+            config = schedule.get_target_config()
+
+            # 수동 실행 요청 확인
+            manual_run = schedule_service.get_pending_manual_run(schedule.id)
+            if manual_run:
+                task_name = f"topic_extract_{schedule.id}_run_{manual_run.id}"
+                if not self._is_task_running(task_name):
+                    manual_run.worker_id = self.name
+                    db.commit()
+                    self._create_task(
+                        self._execute_topic_extract(manual_run, config),
+                        task_name
+                    )
+                    logger.info(f"[{self.name}] 수동 Topic Extract 태스크 시작: run_id={manual_run.id}")
+                return
+
+            # 간격 체크
+            min_interval = config.get("min_interval_hours", 20)  # 기본 20시간
+
+            # 마지막 실행 시간 조회
+            last_run = schedule_service.get_latest_run(schedule.id)
+            last_run_time = last_run.started_at if last_run else None
+
+            should_run = False
+            if last_run_time is None:
+                should_run = True
+            else:
+                hours_since = (datetime.now() - last_run_time).total_seconds() / 3600
+                if hours_since >= min_interval:
+                    should_run = True
+
+            if should_run:
+                logger.info(f"[{self.name}] Topic Extract 스케줄 실행 시간 도래: schedule_id={schedule.id}")
+
+                # 이미 활성 실행이 있는지 확인
+                if schedule_service.has_active_run(schedule.id):
+                    logger.info(f"[{self.name}] 이미 활성 실행 존재, 스킵")
+                    return
+
+                # 실행 시작
+                run = schedule_service.start_run(
+                    schedule_id=schedule.id,
+                    worker_id=self.name,
+                    config_snapshot=config
+                )
+
+                task_name = f"topic_extract_{schedule.id}_run_{run.id}"
+                if not self._is_task_running(task_name):
+                    self._create_task(
+                        self._execute_topic_extract(run, config),
+                        task_name
+                    )
+                    logger.info(f"[{self.name}] Topic Extract 태스크 시작: run_id={run.id}")
+
+        except Exception as e:
+            logger.error(f"[{self.name}] Topic Extract 스케줄 처리 오류: schedule_id={schedule.id}, error={e}", exc_info=True)
+
+    async def _execute_topic_extract(
+        self,
+        run: TaskScheduleRun,
+        config: dict
+    ):
+        """Topic Extract 실행.
+
+        Args:
+            run: 실행 기록
+            config: 설정
+        """
+        db = SessionLocal()
+        try:
+            schedule_service = TaskScheduleService(db)
+            schedule = db.query(TaskSchedule).filter_by(id=run.schedule_id).first()
+
+            self._update_worker_state("extracting", "topics")
+
+            # TopicExtractWorker 실행 (동기 호출을 별도 스레드에서 실행)
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                self._run_topic_extract_sync,
+                schedule,
+                run
+            )
+
+            if result.get("error"):
+                schedule_service.fail_run(run.id, result["error"])
+                logger.error(f"[{self.name}] Topic Extract 실패: {result['error']}")
+            else:
+                schedule_service.complete_run(
+                    run.id,
+                    collected_count=result.get("total", 0),
+                    saved_count=result.get("extracted", 0),
+                    stop_reason="completed"
+                )
+                schedule_service.update_schedule_after_run(run.schedule_id)
+                logger.info(
+                    f"[{self.name}] Topic Extract 완료: run_id={run.id}, "
+                    f"total={result.get('total', 0)}, extracted={result.get('extracted', 0)}"
+                )
+
+        except Exception as e:
+            logger.error(f"[{self.name}] Topic Extract 실행 실패: run_id={run.id}, error={e}", exc_info=True)
+            try:
+                schedule_service = TaskScheduleService(db)
+                schedule_service.fail_run(run.id, str(e))
+            except Exception:
+                pass
+        finally:
+            self._update_worker_state("idle")
+            db.close()
+
+    def _run_topic_extract_sync(
+        self,
+        schedule: TaskSchedule,
+        run: TaskScheduleRun
+    ) -> dict:
+        """TopicExtractWorker 동기 실행 (별도 스레드에서 호출).
+
+        Args:
+            schedule: 스케줄
+            run: 실행 기록
+
+        Returns:
+            실행 결과 dict
+        """
+        db = SessionLocal()
+        try:
+            worker = TopicExtractWorker(db)
+            return worker.run(schedule, run)
+        except Exception as e:
+            logger.error(f"[{self.name}] TopicExtractWorker 실행 오류: {e}", exc_info=True)
             return {"error": str(e)}
         finally:
             db.close()
