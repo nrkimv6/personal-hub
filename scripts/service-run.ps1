@@ -63,7 +63,40 @@ $env:APP_MODE = $AppMode
 $env:PYTHONIOENCODING = "utf-8"
 
 # ============================================================
-# STEP 0: Port Cleanup (improved with graceful shutdown)
+# STEP 0: Start Redis (Podman)
+# ============================================================
+Write-ServiceLog "Starting Redis via Podman..."
+
+try {
+    # Podman machine 상태 확인
+    & podman machine info 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-ServiceLog "  Podman machine not running, starting..."
+        & podman machine start 2>&1 | ForEach-Object { Write-ServiceLog "  $_" }
+        Start-Sleep -Seconds 15  # WSL2 VM 시작 대기
+    } else {
+        Write-ServiceLog "  Podman machine already running"
+    }
+
+    # Redis 컨테이너 시작
+    Set-Location $ProjectRoot
+    & podman-compose up -d redis 2>&1 | ForEach-Object { Write-ServiceLog "  $_" }
+    Start-Sleep -Seconds 3
+
+    # Redis 연결 테스트
+    $pingResult = & podman exec monitor-redis redis-cli ping 2>&1
+    if ($pingResult -eq "PONG") {
+        Write-ServiceLog "  Redis started and responding"
+    } else {
+        Write-ServiceLog "  WARNING: Redis ping failed: $pingResult"
+    }
+} catch {
+    Write-ServiceLog "  WARNING: Redis start failed: $_"
+    Write-ServiceLog "  -> Using SQLite fallback mode"
+}
+
+# ============================================================
+# STEP 1: Port Cleanup (improved with graceful shutdown)
 # ============================================================
 Write-ServiceLog "Cleaning up ports..."
 $portsToClean = @($ApiPort, $FrontendPort)
