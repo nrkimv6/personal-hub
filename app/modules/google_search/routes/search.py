@@ -6,12 +6,16 @@ Google 검색 API 라우트
 Note:
     검색 요청은 큐에 저장되고 워커에서 처리됩니다.
     API 서버는 Session 0 (NSSM 서비스)에서 실행되어 브라우저 사용이 불가합니다.
+
+Redis 큐 지원:
+    - Redis 연결 시: Redis 큐에 추가 (status=queued)
+    - Redis 미연결 시: SQLite 폴링 (status=pending)
 """
 
 import logging
 import uuid
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -35,6 +39,8 @@ from app.modules.google_search.models.schemas import (
     SavedSearchUpdate,
     SavedSearchResponse,
 )
+from app.shared.redis import RedisClient, RedisQueue
+from app.shared.redis.queue import GOOGLE_SEARCH_QUEUE
 
 logger = logging.getLogger("google_search.routes")
 
@@ -56,6 +62,8 @@ async def search(
     검색 요청은 워커에서 비동기로 처리됩니다.
     결과는 GET /api/v1/google/search/{search_id}/status 에서 조회할 수 있습니다.
 
+    Redis 연결 시 Redis 큐에 추가하고, 미연결 시 SQLite 폴링으로 처리됩니다.
+
     Args:
         request: 검색 요청 (query, date_filter, max_pages, service_account_id)
 
@@ -64,22 +72,27 @@ async def search(
     """
     search_id = str(uuid.uuid4())
 
+    # DB에 큐 아이템 저장
     queue_item = GoogleSearchQueue(
         search_id=search_id,
         query=request.query,
         date_filter=request.date_filter,
         max_pages=min(request.max_pages, 10),
         service_account_id=request.service_account_id,
-        status="pending",
+        status=GoogleSearchQueue.STATUS_QUEUED,  # 일단 queued로 설정
     )
     db.add(queue_item)
     db.commit()
+    db.refresh(queue_item)
 
-    logger.info(f"Search request queued: search_id={search_id}, query={request.query}")
+    # Redis 큐에 추가 시도
+    status = await _enqueue_to_redis(queue_item, db)
+
+    logger.info(f"Search request queued: search_id={search_id}, query={request.query}, mode={'redis' if status == 'queued' else 'sqlite'}")
 
     return SearchQueueResponse(
         search_id=search_id,
-        status="pending",
+        status=status,
         message="검색 요청이 큐에 추가되었습니다. 상태를 폴링하여 결과를 확인하세요.",
     )
 
@@ -423,6 +436,8 @@ async def run_saved_search(
     검색 요청은 워커에서 비동기로 처리됩니다.
     결과는 GET /api/v1/google/search/{search_id}/status 에서 조회할 수 있습니다.
 
+    Redis 연결 시 Redis 큐에 추가하고, 미연결 시 SQLite 폴링으로 처리됩니다.
+
     Args:
         saved_id: 저장된 검색 ID
 
@@ -442,16 +457,20 @@ async def run_saved_search(
         max_pages=saved.max_pages,
         service_account_id=saved.service_account_id,
         saved_search_id=saved_id,
-        status="pending",
+        status=GoogleSearchQueue.STATUS_QUEUED,
     )
     db.add(queue_item)
     db.commit()
+    db.refresh(queue_item)
 
-    logger.info(f"Saved search queued: search_id={search_id}, saved_id={saved_id}, query={saved.query}")
+    # Redis 큐에 추가 시도
+    status = await _enqueue_to_redis(queue_item, db)
+
+    logger.info(f"Saved search queued: search_id={search_id}, saved_id={saved_id}, query={saved.query}, mode={'redis' if status == 'queued' else 'sqlite'}")
 
     return SearchQueueResponse(
         search_id=search_id,
-        status="pending",
+        status=status,
         message="저장된 검색이 큐에 추가되었습니다. 상태를 폴링하여 결과를 확인하세요.",
     )
 
@@ -503,3 +522,46 @@ def _saved_to_response(saved: GoogleSavedSearch) -> SavedSearchResponse:
         created_at=saved.created_at,
         updated_at=saved.updated_at,
     )
+
+
+async def _enqueue_to_redis(queue_item: GoogleSearchQueue, db: Session) -> str:
+    """Redis 큐에 검색 요청 추가.
+
+    Redis 연결 시 Redis 큐에 추가하고, 미연결 시 SQLite 폴링으로 fallback.
+
+    Args:
+        queue_item: DB에 저장된 큐 아이템
+        db: DB 세션
+
+    Returns:
+        str: 최종 상태 (queued 또는 pending)
+    """
+    redis_client = await RedisClient.get_client()
+    if redis_client:
+        queue = RedisQueue(redis_client, GOOGLE_SEARCH_QUEUE)
+        success = await queue.push({
+            "id": queue_item.id,
+            "search_id": queue_item.search_id,
+            "query": queue_item.query,
+            "date_filter": queue_item.date_filter,
+            "max_pages": queue_item.max_pages,
+            "service_account_id": queue_item.service_account_id,
+            "saved_search_id": queue_item.saved_search_id,
+            "created_at": queue_item.created_at,
+        })
+
+        if success:
+            logger.debug(f"Redis 큐에 검색 요청 추가: search_id={queue_item.search_id}")
+            return GoogleSearchQueue.STATUS_QUEUED
+        else:
+            # Redis push 실패 → SQLite fallback
+            logger.warning(f"Redis push 실패, SQLite fallback: search_id={queue_item.search_id}")
+            queue_item.status = GoogleSearchQueue.STATUS_PENDING
+            db.commit()
+            return GoogleSearchQueue.STATUS_PENDING
+    else:
+        # Redis 미연결 → SQLite fallback
+        logger.debug(f"Redis 미연결, SQLite 폴링 모드: search_id={queue_item.search_id}")
+        queue_item.status = GoogleSearchQueue.STATUS_PENDING
+        db.commit()
+        return GoogleSearchQueue.STATUS_PENDING
