@@ -68,19 +68,20 @@ $env:PYTHONIOENCODING = "utf-8"
 Write-ServiceLog "Starting Redis via Podman..."
 
 try {
-    # Podman machine 상태 확인
-    & podman machine info 2>&1 | Out-Null
+    # Podman machine 실제 연결 확인 (podman ps는 실제 데몬 연결 필요)
+    & podman ps 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        Write-ServiceLog "  Podman machine not running, starting..."
+        Write-ServiceLog "  Podman machine not connected, starting..."
         & podman machine start 2>&1 | ForEach-Object { Write-ServiceLog "  $_" }
         Start-Sleep -Seconds 15  # WSL2 VM 시작 대기
     } else {
-        Write-ServiceLog "  Podman machine already running"
+        Write-ServiceLog "  Podman machine connected"
     }
 
-    # Redis 컨테이너 시작
+    # Redis 컨테이너 시작 (venv의 podman-compose 사용)
+    $PodmanCompose = Join-Path $ProjectRoot ".venv\Scripts\podman-compose.exe"
     Set-Location $ProjectRoot
-    & podman-compose up -d redis 2>&1 | ForEach-Object { Write-ServiceLog "  $_" }
+    & $PodmanCompose up -d redis 2>&1 | ForEach-Object { Write-ServiceLog "  $_" }
     Start-Sleep -Seconds 3
 
     # Redis 연결 테스트
