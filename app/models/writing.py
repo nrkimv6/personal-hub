@@ -114,6 +114,9 @@ class GeneratedWriting(Base):
     # 평가
     rating = Column(Integer, nullable=True)  # 1: 추천, -1: 비추천, NULL: 미평가
 
+    # 소재 추출 (086 마이그레이션)
+    extracted_topics = Column(Text, nullable=True)  # Mix Writing에서 추출된 소재 JSON
+
     # 메타
     schedule_run_id = Column(
         Integer, ForeignKey("task_schedule_runs.id", ondelete="SET NULL"), nullable=True
