@@ -658,6 +658,15 @@
                 />
                 <!-- 배지 오버레이 -->
                 <div class="absolute top-1 right-1 flex gap-1">
+                  {#if post.llm_status}
+                    {#if post.llm_status === 'completed'}
+                      <span class="px-1.5 py-0.5 text-xs bg-green-500 text-white rounded-full shadow-sm" title="AI 분석 완료">AI</span>
+                    {:else if post.llm_status === 'pending' || post.llm_status === 'processing'}
+                      <span class="px-1.5 py-0.5 text-xs bg-yellow-500 text-white rounded-full shadow-sm animate-pulse" title="AI 분석 대기중">AI</span>
+                    {:else if post.llm_status === 'failed'}
+                      <span class="px-1.5 py-0.5 text-xs bg-red-500 text-white rounded-full shadow-sm" title="AI 분석 실패">AI</span>
+                    {/if}
+                  {/if}
                   <span class="px-1.5 py-0.5 text-xs rounded-full {sourceBadge.class} shadow-sm">
                     {sourceBadge.text}
                   </span>
@@ -675,6 +684,15 @@
                 </span>
                 <!-- 배지 오버레이 -->
                 <div class="absolute top-1 right-1 flex gap-1">
+                  {#if post.llm_status}
+                    {#if post.llm_status === 'completed'}
+                      <span class="px-1.5 py-0.5 text-xs bg-green-500 text-white rounded-full shadow-sm" title="AI 분석 완료">AI</span>
+                    {:else if post.llm_status === 'pending' || post.llm_status === 'processing'}
+                      <span class="px-1.5 py-0.5 text-xs bg-yellow-500 text-white rounded-full shadow-sm animate-pulse" title="AI 분석 대기중">AI</span>
+                    {:else if post.llm_status === 'failed'}
+                      <span class="px-1.5 py-0.5 text-xs bg-red-500 text-white rounded-full shadow-sm" title="AI 분석 실패">AI</span>
+                    {/if}
+                  {/if}
                   <span class="px-1.5 py-0.5 text-xs rounded-full {sourceBadge.class} shadow-sm">
                     {sourceBadge.text}
                   </span>
@@ -745,6 +763,15 @@
                   <span class="font-medium text-sm text-gray-900">@{post.account_name}</span>
                 {:else}
                   <span class="font-medium text-sm text-gray-900 truncate">{post.title || '게시물'}</span>
+                {/if}
+                {#if post.llm_status}
+                  {#if post.llm_status === 'completed'}
+                    <span class="px-1.5 py-0.5 text-xs bg-green-100 text-green-700 rounded" title="AI 분석 완료">AI</span>
+                  {:else if post.llm_status === 'pending' || post.llm_status === 'processing'}
+                    <span class="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded animate-pulse" title="AI 분석 대기중">AI</span>
+                  {:else if post.llm_status === 'failed'}
+                    <span class="px-1.5 py-0.5 text-xs bg-red-100 text-red-700 rounded" title="AI 분석 실패">AI</span>
+                  {/if}
                 {/if}
                 <span class="px-1.5 py-0.5 text-xs rounded-full {sourceBadge.class}">
                   {sourceBadge.text}

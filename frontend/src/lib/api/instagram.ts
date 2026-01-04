@@ -383,6 +383,7 @@ export interface CollectedPost {
   account_name?: string;
   is_active?: boolean;
   tags?: string[];
+  llm_status?: 'pending' | 'processing' | 'completed' | 'failed' | null;
   // Web 전용
   extractor_used?: string;
   is_event?: boolean;
