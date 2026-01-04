@@ -22,7 +22,7 @@ from app.modules.google_search.models.schedule_schemas import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/google/schedule", tags=["google-search-schedule"])
+router = APIRouter(prefix="/api/v1/google/schedule", tags=["google-search-schedule"])
 
 
 def _schedule_to_response(

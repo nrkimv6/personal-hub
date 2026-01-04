@@ -354,7 +354,7 @@ class TestGoogleScheduleAPI:
     def test_create_schedule(self, test_client, db_session, sample_saved_search):
         """스케줄 생성 API."""
         response = test_client.post(
-            "/api/google/schedule/",
+            "/api/v1/google/schedule/",
             json={
                 "saved_search_id": sample_saved_search.id,
                 "display_name": "API 테스트 스케줄",
@@ -376,7 +376,7 @@ class TestGoogleScheduleAPI:
 
     def test_list_schedules(self, test_client, db_session, sample_google_schedule):
         """스케줄 목록 조회 API."""
-        response = test_client.get("/api/google/schedule/")
+        response = test_client.get("/api/v1/google/schedule/")
 
         assert response.status_code == 200
         data = response.json()
@@ -385,7 +385,7 @@ class TestGoogleScheduleAPI:
 
     def test_get_schedule(self, test_client, db_session, sample_google_schedule):
         """스케줄 조회 API."""
-        response = test_client.get(f"/api/google/schedule/{sample_google_schedule.id}")
+        response = test_client.get(f"/api/v1/google/schedule/{sample_google_schedule.id}")
 
         assert response.status_code == 200
         data = response.json()
@@ -394,7 +394,7 @@ class TestGoogleScheduleAPI:
     def test_update_schedule(self, test_client, db_session, sample_google_schedule):
         """스케줄 수정 API."""
         response = test_client.put(
-            f"/api/google/schedule/{sample_google_schedule.id}",
+            f"/api/v1/google/schedule/{sample_google_schedule.id}",
             json={
                 "display_name": "수정된 스케줄",
                 "enabled": False
@@ -410,22 +410,22 @@ class TestGoogleScheduleAPI:
         """스케줄 삭제 API."""
         schedule_id = sample_google_schedule.id
 
-        response = test_client.delete(f"/api/google/schedule/{schedule_id}")
+        response = test_client.delete(f"/api/v1/google/schedule/{schedule_id}")
         assert response.status_code == 200
 
         # 삭제 확인
-        response = test_client.get(f"/api/google/schedule/{schedule_id}")
+        response = test_client.get(f"/api/v1/google/schedule/{schedule_id}")
         assert response.status_code == 404
 
     def test_enable_disable_schedule(self, test_client, db_session, sample_google_schedule):
         """스케줄 활성화/비활성화 API."""
         # 비활성화
-        response = test_client.post(f"/api/google/schedule/{sample_google_schedule.id}/disable")
+        response = test_client.post(f"/api/v1/google/schedule/{sample_google_schedule.id}/disable")
         assert response.status_code == 200
         assert response.json()["enabled"] is False
 
         # 활성화
-        response = test_client.post(f"/api/google/schedule/{sample_google_schedule.id}/enable")
+        response = test_client.post(f"/api/v1/google/schedule/{sample_google_schedule.id}/enable")
         assert response.status_code == 200
         assert response.json()["enabled"] is True
 
@@ -443,7 +443,7 @@ class TestGoogleScheduleAPI:
             db_session.add(run)
         db_session.commit()
 
-        response = test_client.get(f"/api/google/schedule/{sample_google_schedule.id}/runs")
+        response = test_client.get(f"/api/v1/google/schedule/{sample_google_schedule.id}/runs")
 
         assert response.status_code == 200
         data = response.json()
@@ -464,7 +464,7 @@ class TestGoogleScheduleAPI:
         db_session.add(run)
         db_session.commit()
 
-        response = test_client.get(f"/api/google/schedule/{sample_google_schedule.id}/stats?days=7")
+        response = test_client.get(f"/api/v1/google/schedule/{sample_google_schedule.id}/stats?days=7")
 
         assert response.status_code == 200
         data = response.json()
@@ -474,7 +474,7 @@ class TestGoogleScheduleAPI:
     def test_create_duplicate_schedule_error(self, test_client, db_session, sample_saved_search, sample_google_schedule):
         """중복 스케줄 생성 에러."""
         response = test_client.post(
-            "/api/google/schedule/",
+            "/api/v1/google/schedule/",
             json={
                 "saved_search_id": sample_saved_search.id,
                 "schedule_type": "time_window",
@@ -491,7 +491,7 @@ class TestGoogleScheduleAPI:
 
     def test_schedule_not_found_error(self, test_client):
         """존재하지 않는 스케줄 에러."""
-        response = test_client.get("/api/google/schedule/99999")
+        response = test_client.get("/api/v1/google/schedule/99999")
         assert response.status_code == 404
 
 
