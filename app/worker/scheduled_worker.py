@@ -346,29 +346,30 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
         self._update_worker_state("crawling", account.identifier, run.id)
 
+        crawl_success = crawl_run.status == TaskScheduleRun.STATUS_COMPLETED
         logger.info(
-            f"[{self.name}] 크롤링 완료: success={crawl_run.success}, "
-            f"collected={crawl_run.total_collected}, new={crawl_run.new_saved}"
+            f"[{self.name}] 크롤링 완료: success={crawl_success}, "
+            f"collected={crawl_run.collected_count}, new={crawl_run.saved_count}"
         )
 
         # TaskScheduleRun 업데이트
-        if crawl_run.success:
+        if crawl_success:
             schedule_service.complete_run(
                 run.id,
-                collected_count=crawl_run.total_collected,
-                saved_count=crawl_run.new_saved,
+                collected_count=crawl_run.collected_count,
+                saved_count=crawl_run.saved_count,
                 stop_reason=crawl_run.stop_reason
             )
             schedule_service.update_schedule_after_run(run.schedule_id)
             logger.info(
                 f"[{self.name}] 크롤링 완료: run_id={run.id}, "
-                f"collected={crawl_run.total_collected}, new={crawl_run.new_saved}"
+                f"collected={crawl_run.collected_count}, new={crawl_run.saved_count}"
             )
         else:
             schedule_service.fail_run(run.id, crawl_run.error_message or "크롤링 실패")
             logger.warning(f"[{self.name}] 크롤링 실패: {crawl_run.error_message}")
 
-        return crawl_run.success
+        return crawl_success
 
     async def _check_instagram_login(self, page: "Page") -> bool:
         """Instagram 로그인 상태 확인.

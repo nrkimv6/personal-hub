@@ -32,6 +32,7 @@
 				eventForm = {
 					title: editingEvent.title,
 					event_type: editingEvent.event_type,
+					status: editingEvent.status,
 					event_url: editingEvent.event_url || '',
 					event_start: editingEvent.event_start || '',
 					event_end: editingEvent.event_end || '',
