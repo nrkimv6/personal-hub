@@ -48,7 +48,7 @@ python scripts/check_profile_config.py
 ```
 ✓ 새 프로필 구조가 올바르게 설정되었습니다!
   브라우저는 다음 경로의 프로필을 사용합니다:
-  D:\work\project\tools\monitor-page-multi-profile\data\browser_profiles\default
+  D:\work\project\tools\monitor-page\data\browser_profiles\default
 ```
 
 ### 3. 브라우저 작동 확인
