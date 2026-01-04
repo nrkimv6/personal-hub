@@ -24,6 +24,9 @@ class WritingSource(Base):
 
     created_at = Column(DateTime, default=datetime.now)
 
+    # 소재 추출
+    topic_extracted_at = Column(DateTime, nullable=True)  # 소재 추출 완료 시각
+
     # 상수
     SOURCE_TYPE_RSS = "rss"
     SOURCE_TYPE_API = "api"

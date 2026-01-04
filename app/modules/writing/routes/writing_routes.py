@@ -327,7 +327,119 @@ def create_topic_extract_requests(
         raise HTTPException(500, str(e))
 
 
+# ========== 소재(Elements) 관리 ==========
+
+
+@router.get("/elements")
+def list_elements(
+    category: Optional[str] = None,
+    source_type: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    """소재(writing_elements) 목록 조회.
+
+    Args:
+        category: 카테고리 필터 (topic, tone, ending 등)
+        source_type: 출처 타입 필터 (seed, auto, manual)
+        page: 페이지 번호
+        page_size: 페이지 크기
+    """
+    from app.models.writing_element import WritingElement
+
+    query = db.query(WritingElement).filter(WritingElement.is_active == 1)
+
+    if category:
+        query = query.filter(WritingElement.category == category)
+    if source_type:
+        query = query.filter(WritingElement.source_type == source_type)
+
+    total = query.count()
+    items = (
+        query.order_by(WritingElement.frequency.desc(), WritingElement.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    return {
+        "items": [_element_to_dict(e) for e in items],
+        "total": total,
+        "page": page,
+        "pages": (total + page_size - 1) // page_size,
+    }
+
+
+@router.get("/elements/stats")
+def get_elements_stats(db: Session = Depends(get_db)):
+    """소재 통계 조회."""
+    from app.models.writing_element import WritingElement
+    from sqlalchemy import func
+
+    # 카테고리별 개수
+    category_stats = (
+        db.query(WritingElement.category, func.count(WritingElement.id))
+        .filter(WritingElement.is_active == 1)
+        .group_by(WritingElement.category)
+        .all()
+    )
+
+    # source_type별 개수
+    source_type_stats = (
+        db.query(WritingElement.source_type, func.count(WritingElement.id))
+        .filter(WritingElement.is_active == 1)
+        .group_by(WritingElement.source_type)
+        .all()
+    )
+
+    # topic 카테고리의 source_type별 개수
+    topic_by_source = (
+        db.query(WritingElement.source_type, func.count(WritingElement.id))
+        .filter(
+            WritingElement.is_active == 1,
+            WritingElement.category == WritingElement.CATEGORY_TOPIC,
+        )
+        .group_by(WritingElement.source_type)
+        .all()
+    )
+
+    return {
+        "by_category": {cat: cnt for cat, cnt in category_stats},
+        "by_source_type": {st or "seed": cnt for st, cnt in source_type_stats},
+        "topic_by_source": {st or "seed": cnt for st, cnt in topic_by_source},
+        "total": sum(cnt for _, cnt in category_stats),
+    }
+
+
+@router.delete("/elements/{element_id}")
+def delete_element(element_id: int, db: Session = Depends(get_db)):
+    """소재 비활성화 (soft delete)."""
+    from app.models.writing_element import WritingElement
+
+    element = db.query(WritingElement).filter(WritingElement.id == element_id).first()
+    if not element:
+        raise HTTPException(404, "Element not found")
+
+    element.is_active = 0
+    db.commit()
+    return {"success": True}
+
+
 # ========== 헬퍼 함수 ==========
+
+
+def _element_to_dict(element) -> dict:
+    """WritingElement를 dict로 변환."""
+    return {
+        "id": element.id,
+        "category": element.category,
+        "name": element.name,
+        "source_type": element.source_type or "seed",
+        "frequency": element.frequency or 1,
+        "is_active": bool(element.is_active),
+        "created_at": element.created_at.isoformat() if element.created_at else None,
+    }
 
 
 def _writing_to_dict(writing, include_full: bool = False) -> dict:

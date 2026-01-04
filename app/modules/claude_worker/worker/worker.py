@@ -439,6 +439,79 @@ def mark_universal_crawl_failed(db, page_id: int, error_message: str) -> bool:
     return True
 
 
+def save_topic_extract_result(db, caller_id: str, llm_result: dict) -> bool:
+    """소재 추출 LLM 결과를 writing_elements에 저장.
+
+    Args:
+        db: DB 세션
+        caller_id: 배치 식별자 (예: "manual_batch_1_231050")
+        llm_result: LLM 결과 {"topics": [{"source_id": 1, "topic": "소재"}, ...]}
+
+    Returns:
+        성공 여부
+    """
+    from app.models.writing_element import WritingElement
+
+    try:
+        topics = llm_result.get("topics", [])
+        if not topics:
+            logger.info(f"topic_extract {caller_id}: 추출된 소재 없음")
+            return True
+
+        saved_count = 0
+        for item in topics:
+            topic = item.get("topic", "").strip()
+            if not topic or len(topic) < 2:
+                continue
+
+            # 너무 짧거나 일반적인 단어 필터링
+            if len(topic) <= 3 and topic in ["사랑", "마음", "추억", "가족", "행복"]:
+                continue
+
+            try:
+                # 중복 체크
+                existing = (
+                    db.query(WritingElement)
+                    .filter(
+                        WritingElement.category == WritingElement.CATEGORY_TOPIC,
+                        WritingElement.name == topic,
+                    )
+                    .first()
+                )
+
+                if existing:
+                    if existing.frequency:
+                        existing.frequency += 1
+                    else:
+                        existing.frequency = 2
+                else:
+                    new_element = WritingElement(
+                        category=WritingElement.CATEGORY_TOPIC,
+                        name=topic,
+                        source_type=WritingElement.SOURCE_TYPE_AUTO,
+                        frequency=1,
+                        is_active=1,
+                    )
+                    db.add(new_element)
+
+                saved_count += 1
+
+            except Exception as e:
+                logger.warning(f"소재 저장 실패: {topic} - {e}")
+                continue
+
+        if saved_count:
+            db.commit()
+            logger.info(f"topic_extract {caller_id}: 소재 {saved_count}개 저장 완료")
+
+        return True
+
+    except Exception as e:
+        logger.error(f"topic_extract 결과 저장 실패: {e}", exc_info=True)
+        db.rollback()
+        return False
+
+
 class LLMWorker:
     """Claude LLM 워커."""
 
@@ -670,6 +743,8 @@ class LLMWorker:
                     save_instagram_result(db, int(request.caller_id), result["result"])
                 elif request.caller_type == "universal_crawl":
                     save_universal_crawl_result(db, int(request.caller_id), result["result"])
+                elif request.caller_type == "topic_extract":
+                    save_topic_extract_result(db, request.caller_id, result["result"])
             else:
                 service.mark_failed(request.id, result["error"])
                 self._increment_error()

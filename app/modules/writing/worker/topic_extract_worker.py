@@ -286,10 +286,14 @@ class TopicExtractWorker:
             ])
             prompt = self.prompt_template.replace("{sources}", sources_text)
 
+            # source_id 전체 기록 (추적 및 중복 감지용)
+            source_ids = [s.id for s in batch]
+            source_ids_str = ",".join(str(sid) for sid in source_ids)
+
             # LLM 요청 생성 (pending 상태)
             llm_request = LLMRequest(
                 caller_type="topic_extract",
-                caller_id=f"manual_batch_{batch_num}_{datetime.now().strftime('%H%M%S')}",
+                caller_id=f"src:{source_ids_str}",  # 예: src:101,102,103,104,105
                 prompt=prompt,
                 status="pending",  # Claude Worker가 처리
                 requested_by="manual",

@@ -331,6 +331,11 @@ class WritingWorker:
                 [s.id for s in sources],
                 writing.id,
             )
+
+            # 소재 추출 완료 마킹 (Topic Extract 배치와 중복 방지)
+            for source in sources:
+                source.topic_extracted_at = datetime.now()
+
             self.db.commit()
 
             logger.info(f"믹스 글쓰기 완료: id={writing.id}, sources={source_ids}")

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { writingApi, keywordApi, type GeneratedWriting, type WritingStats, type WritingSource, type KeywordStats, type KeywordStatsResponse, type Stopword } from '$lib/api';
+	import { writingApi, keywordApi, type GeneratedWriting, type WritingStats, type WritingSource, type KeywordStats, type KeywordStatsResponse, type Stopword, type WritingElement, type WritingElementStats } from '$lib/api';
 
 	// 상태
 	let writings: GeneratedWriting[] = [];
@@ -20,8 +20,20 @@
 	let analyzing = false;
 	let analyzeResult: { mode: string; saved_keywords?: number; new_keywords?: number; updated_keywords?: number } | null = null;
 
+	// 소재 상태
+	let elements: WritingElement[] = [];
+	let elementStats: WritingElementStats | null = null;
+	let elementCurrentPage = 1;
+	let elementPageSize = 50;
+	let elementTotal = 0;
+	let elementPages = 0;
+	let elementFilterCategory = '';
+	let elementFilterSourceType = '';
+	let extracting = false;
+	let extractResult: { success: boolean; created_requests: number } | null = null;
+
 	// 탭
-	type Tab = 'writings' | 'sources' | 'keywords';
+	type Tab = 'writings' | 'sources' | 'keywords' | 'elements';
 	let activeTab: Tab = 'writings';
 
 	// 필터
@@ -105,7 +117,97 @@
 			fetchSources();
 		} else if (tab === 'keywords') {
 			fetchKeywords();
+		} else if (tab === 'elements') {
+			fetchElements();
 		}
+	}
+
+	async function fetchElements() {
+		loading = true;
+		error = null;
+		try {
+			const [listRes, statsRes] = await Promise.all([
+				writingApi.listElements({
+					category: elementFilterCategory || undefined,
+					source_type: elementFilterSourceType || undefined,
+					page: elementCurrentPage,
+					page_size: elementPageSize
+				}),
+				writingApi.getElementsStats()
+			]);
+			elements = listRes.items;
+			elementTotal = listRes.total;
+			elementPages = listRes.pages;
+			elementStats = statsRes;
+		} catch (e) {
+			error = e instanceof Error ? e.message : '소재 로드 실패';
+		} finally {
+			loading = false;
+		}
+	}
+
+	function handleElementFilter() {
+		elementCurrentPage = 1;
+		fetchElements();
+	}
+
+	function elementPrevPage() {
+		if (elementCurrentPage > 1) {
+			elementCurrentPage--;
+			fetchElements();
+		}
+	}
+
+	function elementNextPage() {
+		if (elementCurrentPage < elementPages) {
+			elementCurrentPage++;
+			fetchElements();
+		}
+	}
+
+	async function deleteElement(id: number, name: string) {
+		if (!confirm(`"${name}" 소재를 삭제하시겠습니까?`)) return;
+		try {
+			await writingApi.deleteElement(id);
+			await fetchElements();
+		} catch (e) {
+			alert('삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		}
+	}
+
+	async function extractTopics() {
+		if (extracting) return;
+		const limitStr = prompt('추출할 소스 수 (기본: 100, 최대: 500)', '100');
+		if (!limitStr) return;
+		const limit = parseInt(limitStr);
+		if (isNaN(limit) || limit < 1 || limit > 500) {
+			alert('1~500 사이의 숫자를 입력하세요.');
+			return;
+		}
+
+		extracting = true;
+		extractResult = null;
+		try {
+			const result = await writingApi.extractTopics(limit);
+			extractResult = result;
+			alert(`${result.created_requests}개의 추출 요청이 생성되었습니다. Claude Worker가 처리합니다.`);
+		} catch (e) {
+			alert('추출 요청 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		} finally {
+			extracting = false;
+		}
+	}
+
+	function getSourceTypeLabel(type: string): string {
+		if (type === 'auto') return '자동 추출';
+		if (type === 'manual') return '수동 추가';
+		return '시드';
+	}
+
+	function getSourceTypeClass(type: string): string {
+		if (type === 'auto') return 'bg-green-100 text-green-800';
+		if (type === 'manual') return 'bg-blue-100 text-blue-800';
+		return 'bg-gray-100 text-gray-600';
 	}
 
 	async function fetchKeywords() {
@@ -464,6 +566,12 @@
 			>
 				키워드 ({keywordStats?.total_keywords ?? 0})
 			</button>
+			<button
+				onclick={() => switchTab('elements')}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'elements' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+			>
+				소재 ({elementStats?.total ?? 0})
+			</button>
 		</nav>
 	</div>
 
@@ -765,6 +873,122 @@
 							{Math.floor(keywordOffset / keywordLimit) + 1} / {Math.ceil(keywordTotal / keywordLimit)}
 						</span>
 						<button onclick={keywordNextPage} disabled={keywordOffset + keywordLimit >= keywordTotal} class="btn btn-secondary btn-sm disabled:opacity-50">
+							다음
+						</button>
+					</div>
+				</div>
+			{/if}
+		{/if}
+	{:else if activeTab === 'elements'}
+		<!-- 소재 통계 -->
+		{#if elementStats}
+			<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+				<div class="card p-4">
+					<div class="text-sm text-gray-500">전체 소재</div>
+					<div class="text-2xl font-bold text-gray-900">{elementStats.total}</div>
+				</div>
+				<div class="card p-4">
+					<div class="text-sm text-gray-500">시드</div>
+					<div class="text-2xl font-bold text-gray-600">{elementStats.topic_by_source?.seed ?? 0}</div>
+				</div>
+				<div class="card p-4">
+					<div class="text-sm text-gray-500">자동 추출</div>
+					<div class="text-2xl font-bold text-green-600">{elementStats.topic_by_source?.auto ?? 0}</div>
+				</div>
+				<div class="card p-4">
+					<div class="text-sm text-gray-500">수동 추가</div>
+					<div class="text-2xl font-bold text-blue-600">{elementStats.topic_by_source?.manual ?? 0}</div>
+				</div>
+			</div>
+		{/if}
+
+		<!-- 소재 필터 및 액션 -->
+		<div class="mb-4 flex flex-wrap gap-2 items-center justify-between">
+			<div class="flex gap-2 items-center">
+				<select bind:value={elementFilterCategory} class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
+					<option value="">전체 카테고리</option>
+					<option value="topic">소재(topic)</option>
+					<option value="tone">어조(tone)</option>
+					<option value="ending">마무리(ending)</option>
+				</select>
+				<select bind:value={elementFilterSourceType} class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
+					<option value="">전체 출처</option>
+					<option value="seed">시드</option>
+					<option value="auto">자동 추출</option>
+					<option value="manual">수동 추가</option>
+				</select>
+				<button onclick={handleElementFilter} class="btn btn-primary btn-sm">필터</button>
+			</div>
+			<button
+				onclick={extractTopics}
+				disabled={extracting}
+				class="btn btn-secondary btn-sm disabled:opacity-50"
+			>
+				{extracting ? '추출 중...' : '소재 추출'}
+			</button>
+		</div>
+
+		{#if loading}
+			<div class="flex justify-center items-center h-64">
+				<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+			</div>
+		{:else if error}
+			<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">{error}</div>
+		{:else if elements.length === 0}
+			<div class="text-center py-12 text-gray-500">
+				<p class="text-lg">소재가 없습니다</p>
+				<p class="text-sm mt-2">소재 추출 버튼을 눌러 소재를 수집해보세요.</p>
+			</div>
+		{:else}
+			<!-- 소재 목록 -->
+			<div class="bg-white rounded-lg border border-gray-200 overflow-x-auto mb-6">
+				<table class="w-full min-w-[600px]">
+					<thead class="bg-gray-50 border-b border-gray-200">
+						<tr>
+							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">소재명</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">카테고리</th>
+							<th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">출처</th>
+							<th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">빈도</th>
+							<th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">액션</th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-gray-200">
+						{#each elements as elem (elem.id)}
+							<tr class="hover:bg-gray-50">
+								<td class="px-4 py-3 text-sm font-medium text-gray-900">{elem.name}</td>
+								<td class="px-4 py-3 text-sm text-gray-600">{elem.category}</td>
+								<td class="px-4 py-3 text-center">
+									<span class="px-2 py-1 text-xs rounded-full {getSourceTypeClass(elem.source_type)}">
+										{getSourceTypeLabel(elem.source_type)}
+									</span>
+								</td>
+								<td class="px-4 py-3 text-sm text-right text-gray-700">{elem.frequency}</td>
+								<td class="px-4 py-3 text-center">
+									<button
+										onclick={() => deleteElement(elem.id, elem.name)}
+										class="text-red-600 hover:text-red-800 text-sm"
+									>
+										삭제
+									</button>
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+
+			<!-- 페이지네이션 -->
+			{#if elementPages > 1}
+				<div class="flex justify-between items-center">
+					<span class="text-sm text-gray-500">
+						전체 {elementTotal}개 중 {(elementCurrentPage - 1) * elementPageSize + 1} - {Math.min(elementCurrentPage * elementPageSize, elementTotal)}
+					</span>
+					<div class="flex gap-2">
+						<button onclick={elementPrevPage} disabled={elementCurrentPage === 1} class="btn btn-secondary btn-sm disabled:opacity-50">
+							이전
+						</button>
+						<span class="px-3 py-1.5 text-sm">{elementCurrentPage} / {elementPages}</span>
+						<button onclick={elementNextPage} disabled={elementCurrentPage >= elementPages} class="btn btn-secondary btn-sm disabled:opacity-50">
 							다음
 						</button>
 					</div>
