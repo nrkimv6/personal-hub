@@ -29,7 +29,7 @@ class PopupService:
         source_type: Optional[str] = None,
         is_bookmarked: Optional[bool] = None,
         is_visited: Optional[bool] = None,
-        include_unknown_period: bool = True,
+        unknown_period_filter: str = "include",  # exclude/include/only
         search: Optional[str] = None,
         sort_by: str = "end_date",
         sort_order: str = "asc",
@@ -60,17 +60,29 @@ class PopupService:
         if is_visited is not None:
             query = query.filter(Popup.is_visited == is_visited)
 
-        # popup_status 필터 (기간 기반)
+        # unknown_period_filter 처리 (exclude/include/only)
         today = date.today()
-        if popup_status:
+        include_unknown = unknown_period_filter in ("include", "only")
+
+        # only: 기간미정만 보기 (시작일과 종료일 모두 NULL)
+        if unknown_period_filter == "only":
+            query = query.filter(
+                and_(Popup.start_date.is_(None), Popup.end_date.is_(None))
+            )
+        elif unknown_period_filter == "exclude":
+            # exclude: 기간미정 제외 (종료일이 있는 것만)
+            query = query.filter(Popup.end_date.isnot(None))
+
+        # popup_status 필터 (기간 기반) - only가 아닐 때만 적용
+        if popup_status and unknown_period_filter != "only":
             if popup_status == "ongoing":
                 conditions = [
                     and_(
                         or_(Popup.start_date <= today, Popup.start_date.is_(None)),
-                        or_(Popup.end_date >= today, Popup.end_date.is_(None) if include_unknown_period else False),
+                        or_(Popup.end_date >= today, Popup.end_date.is_(None) if include_unknown else False),
                     )
                 ]
-                if include_unknown_period:
+                if include_unknown:
                     conditions.append(
                         and_(Popup.start_date.is_(None), Popup.end_date.is_(None))
                     )
@@ -84,7 +96,7 @@ class PopupService:
 
             elif popup_status == "ongoing_or_upcoming":
                 conditions = [Popup.end_date >= today]
-                if include_unknown_period:
+                if include_unknown:
                     conditions.append(Popup.end_date.is_(None))
                 query = query.filter(or_(*conditions))
 

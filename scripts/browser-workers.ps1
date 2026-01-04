@@ -38,9 +38,10 @@ if (-not (Test-Path $PidDir)) {
     New-Item -ItemType Directory -Path $PidDir -Force | Out-Null
 }
 
-# PID files - unified worker watchdog + Claude
+# PID files - unified worker watchdog + Claude + Video Download
 $WorkerWatchdogPidFile = Join-Path $PidDir "worker_watchdog$PidSuffix.pid"
 $ClaudeWatchdogPidFile = Join-Path $PidDir "claude_watchdog$PidSuffix.pid"
+$VideoDownloadWatchdogPidFile = Join-Path $PidDir "video_download_watchdog$PidSuffix.pid"
 
 # Legacy PID files (for cleanup)
 $LegacyWatchdogPidFile = Join-Path $PidDir "watchdog$PidSuffix.pid"
@@ -155,6 +156,22 @@ function Start-BrowserWorkers {
         $started++
     }
 
+    # Start Video Download Worker Watchdog (separate process, no browser needed)
+    if (Test-ProcessRunning $VideoDownloadWatchdogPidFile) {
+        Write-Log "Video Download Watchdog already running" "WARN"
+    } else {
+        Write-Log "Starting Video Download Watchdog..."
+        $env:APP_MODE = "development"
+        $videoDownloadWatchdogProcess = Start-Process -FilePath "powershell.exe" `
+            -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\video-download-watchdog.ps1" `
+            -WorkingDirectory $ProjectRoot `
+            -WindowStyle Hidden `
+            -PassThru
+        $videoDownloadWatchdogProcess.Id | Out-File $VideoDownloadWatchdogPidFile -Encoding ascii
+        Write-Log "Video Download Watchdog started (PID: $($videoDownloadWatchdogProcess.Id))" "OK"
+        $started++
+    }
+
     if ($started -gt 0) {
         Write-Host ""
         Write-Log "$started watchdog(s) started" "OK"
@@ -203,11 +220,27 @@ function Stop-BrowserWorkers {
         Remove-Item $ClaudeWatchdogPidFile -Force -ErrorAction SilentlyContinue
     }
 
+    # Stop Video Download Worker Watchdog
+    if (Test-Path $VideoDownloadWatchdogPidFile) {
+        $savedPid = Get-Content $VideoDownloadWatchdogPidFile -ErrorAction SilentlyContinue
+        if ($savedPid) {
+            $proc = Get-Process -Id $savedPid -ErrorAction SilentlyContinue
+            if ($proc) {
+                Write-Log "Stopping Video Download Watchdog (PID: $savedPid)..."
+                Stop-Process -Id $savedPid -Force -ErrorAction SilentlyContinue
+                Write-Log "Video Download Watchdog stopped" "OK"
+                $stopped++
+            }
+        }
+        Remove-Item $VideoDownloadWatchdogPidFile -Force -ErrorAction SilentlyContinue
+    }
+
     # Stop actual worker processes
     $UnifiedWorkerPidFile = Join-Path $PidDir "unified_worker$PidSuffix.pid"
     $ClaudeWorkerPidFile = Join-Path $PidDir "claude_worker$PidSuffix.pid"
+    $VideoDownloadWorkerPidFile = Join-Path $PidDir "video_download_worker$PidSuffix.pid"
 
-    foreach ($pidFile in @($UnifiedWorkerPidFile, $ClaudeWorkerPidFile)) {
+    foreach ($pidFile in @($UnifiedWorkerPidFile, $ClaudeWorkerPidFile, $VideoDownloadWorkerPidFile)) {
         if (Test-Path $pidFile) {
             $savedPid = Get-Content $pidFile -ErrorAction SilentlyContinue
             if ($savedPid) {
@@ -259,9 +292,19 @@ function Show-Status {
         Write-Host "  [-] Not running" -ForegroundColor Yellow
     }
 
+    # Video Download Worker Watchdog
+    Write-Host "Video Download Watchdog:" -ForegroundColor White
+    if (Test-ProcessRunning $VideoDownloadWatchdogPidFile) {
+        $savedPid = Get-Content $VideoDownloadWatchdogPidFile
+        Write-Host "  [+] Running (PID: $savedPid)" -ForegroundColor Green
+    } else {
+        Write-Host "  [-] Not running" -ForegroundColor Yellow
+    }
+
     # Actual worker processes
     $UnifiedWorkerPidFile = Join-Path $PidDir "unified_worker$PidSuffix.pid"
     $ClaudeWorkerPidFile = Join-Path $PidDir "claude_worker$PidSuffix.pid"
+    $VideoDownloadWorkerPidFile = Join-Path $PidDir "video_download_worker$PidSuffix.pid"
 
     Write-Host ""
     Write-Host "Worker Processes:" -ForegroundColor White
@@ -280,6 +323,14 @@ function Show-Status {
     Write-Host "  Claude Worker:" -ForegroundColor Gray
     if (Test-ProcessRunning $ClaudeWorkerPidFile) {
         $savedPid = Get-Content $ClaudeWorkerPidFile
+        Write-Host "    [+] Running (PID: $savedPid)" -ForegroundColor Green
+    } else {
+        Write-Host "    [-] Not running" -ForegroundColor Yellow
+    }
+
+    Write-Host "  Video Download Worker:" -ForegroundColor Gray
+    if (Test-ProcessRunning $VideoDownloadWorkerPidFile) {
+        $savedPid = Get-Content $VideoDownloadWorkerPidFile
         Write-Host "    [+] Running (PID: $savedPid)" -ForegroundColor Green
     } else {
         Write-Host "    [-] Not running" -ForegroundColor Yellow

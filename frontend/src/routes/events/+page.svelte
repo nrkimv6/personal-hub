@@ -43,7 +43,6 @@
 
 	// 필터
 	let filterEventStatus: string | null = $state('ongoing');
-	let filterBookmarked: boolean | null = $state(null);  // 북마크 기능 임시 비활성화 (변수는 유지)
 	let filterUrlType: string | null = $state(null);
 	let filterSourceType: string | null = $state(null);
 	let filterSearch = $state('');  // 검색어
@@ -51,19 +50,18 @@
 	let deadlineCounts: Record<string, number> = $state({});  // 날짜별 마감 이벤트 개수
 	let sortBy = $state('event_end');
 	let sortOrder = $state('asc');
-	let includeUnknownPeriod = $state(false);
+	let unknownPeriodFilter = $state('include');  // exclude/include/only
 	let showFilters = $state(false);
 
 	// 활성 필터 카운트
 	const activeFilterCount = $derived(
 		[
 			filterEventStatus,
-			// filterBookmarked !== null,  // 북마크 기능 임시 비활성화
 			filterUrlType,
 			filterSourceType,
 			filterSearch,
 			filterDeadlineDate,
-			includeUnknownPeriod
+			unknownPeriodFilter !== 'include'  // include가 아니면 활성 필터로 카운트
 		].filter(Boolean).length
 	);
 
@@ -121,45 +119,55 @@
 
 	function handleStatusFilterChange(status: string | null) {
 		filterEventStatus = status;
-		// 상태 필터 선택 시 날짜 필터 초기화
-		if (status) {
-			filterDeadlineDate = null;
-		}
+		// Phase 2: 마감일 필터와 독립 동작 (초기화하지 않음)
 		currentPage = 1;
 		fetchEvents();
 	}
 
-	function handleBookmarkedFilterToggle() {
-		filterBookmarked = filterBookmarked === true ? null : true;
+	function handleUnknownPeriodFilterChange(filter: string) {
+		unknownPeriodFilter = filter;
 		currentPage = 1;
 		fetchEvents();
 	}
 
-	function handleUnknownPeriodToggle() {
-		includeUnknownPeriod = !includeUnknownPeriod;
+	function handleSortChange(newSortBy: string, newSortOrder: string) {
+		sortBy = newSortBy;
+		sortOrder = newSortOrder;
+		currentPage = 1;
+		fetchEvents();
+	}
+
+	function handleQuickFilter(preset: { filters: { eventStatus: string; sortBy: string; sortOrder: string; unknownPeriodFilter: string } }) {
+		filterEventStatus = preset.filters.eventStatus || null;
+		sortBy = preset.filters.sortBy;
+		sortOrder = preset.filters.sortOrder;
+		unknownPeriodFilter = preset.filters.unknownPeriodFilter;
+		filterDeadlineDate = null;  // 빠른 필터 시 마감일 초기화
+		currentPage = 1;
+		fetchEvents();
+	}
+
+	function handleUrlTypeChange(urlType: string | null) {
+		filterUrlType = urlType;
+		currentPage = 1;
+		fetchEvents();
+	}
+
+	function handleSourceTypeChange(sourceType: string | null) {
+		filterSourceType = sourceType;
 		currentPage = 1;
 		fetchEvents();
 	}
 
 	function handleDeadlineDateChange(date: string | null) {
 		filterDeadlineDate = date;
-		// 날짜 필터 선택 시 상태 필터 초기화
-		if (date) {
-			filterEventStatus = null;
-		}
+		// Phase 2: 상태 필터와 독립 동작 (초기화하지 않음)
 		currentPage = 1;
 		fetchEvents();
 	}
 
 	// 검색 실행
 	function handleSearch() {
-		currentPage = 1;
-		fetchEvents();
-	}
-
-	// 검색어 초기화
-	function clearSearch() {
-		filterSearch = '';
 		currentPage = 1;
 		fetchEvents();
 	}
@@ -197,13 +205,12 @@
 					page: currentPage,
 					page_size: pageSize,
 					sort_by: sortBy === 'event_end' ? 'end_date' : sortBy === 'event_start' ? 'start_date' : sortBy,
-					sort_order: sortOrder
+					sort_order: sortOrder,
+					unknown_period_filter: unknownPeriodFilter
 				};
 				if (filterEventStatus) params.popup_status = filterEventStatus;
-				// if (filterBookmarked !== null) params.is_bookmarked = filterBookmarked;  // 북마크 기능 임시 비활성화
 				if (filterSourceType) params.source_type = filterSourceType;
 				if (filterSearch) params.search = filterSearch;
-				if (includeUnknownPeriod) params.include_unknown_period = true;
 
 				const response = await popupApi.list(params);
 				popups = response.items;
@@ -234,19 +241,15 @@
 					sort_by: sortBy,
 					sort_order: sortOrder,
 					event_type: 'event',
-					is_offline: activeTab === 'offline'  // 탭에 따라 온라인/오프라인 필터
+					is_offline: activeTab === 'offline',  // 탭에 따라 온라인/오프라인 필터
+					unknown_period_filter: unknownPeriodFilter
 				};
-				// deadline_date가 설정되면 event_status를 무시
-				if (filterDeadlineDate) {
-					params.deadline_date = filterDeadlineDate;
-				} else if (filterEventStatus) {
-					params.event_status = filterEventStatus;
-				}
-				// if (filterBookmarked !== null) params.is_bookmarked = filterBookmarked;  // 북마크 기능 임시 비활성화
+				// Phase 2: 상태/마감일 필터 독립 동작 (둘 다 적용)
+				if (filterEventStatus) params.event_status = filterEventStatus;
+				if (filterDeadlineDate) params.deadline_date = filterDeadlineDate;
 				if (filterUrlType) params.url_type = filterUrlType;
 				if (filterSourceType) params.source_type = filterSourceType;
 				if (filterSearch) params.search = filterSearch;
-				if (includeUnknownPeriod) params.include_unknown_period = true;
 
 				const response = await eventApi.list(params);
 				events = response.items;
@@ -672,12 +675,10 @@
 			{/if}
 
 			<span class="text-sm text-gray-600">총 {total}건</span>
-			<!-- 북마크 기능 임시 비활성화
-			{#if filterBookmarked}
-				<span class="hidden sm:inline text-sm text-yellow-600">(북마크만)</span>
-			{/if} -->
-			{#if includeUnknownPeriod}
-				<span class="hidden sm:inline text-sm text-amber-600">(기간미정 포함)</span>
+			{#if unknownPeriodFilter === 'only'}
+				<span class="hidden sm:inline text-sm text-amber-600">(기간미정만)</span>
+			{:else if unknownPeriodFilter === 'exclude'}
+				<span class="hidden sm:inline text-sm text-gray-500">(기간미정 제외)</span>
 			{/if}
 		</div>
 	</div>
@@ -724,19 +725,25 @@
 	{#if !isAnonymous}
 		<EventFilterPanel
 			{filterEventStatus}
-			{filterBookmarked}
-			{includeUnknownPeriod}
+			{unknownPeriodFilter}
 			{showFilters}
 			{filterDeadlineDate}
 			{deadlineCounts}
 			{filterSearch}
+			{sortBy}
+			{sortOrder}
+			{filterUrlType}
+			{filterSourceType}
 			onStatusFilterChange={handleStatusFilterChange}
-			onBookmarkedFilterToggle={handleBookmarkedFilterToggle}
-			onUnknownPeriodToggle={handleUnknownPeriodToggle}
+			onUnknownPeriodFilterChange={handleUnknownPeriodFilterChange}
 			onShowFiltersChange={(v) => (showFilters = v)}
 			onDeadlineDateChange={handleDeadlineDateChange}
 			onSearchChange={(v) => (filterSearch = v)}
 			onSearch={handleSearch}
+			onSortChange={handleSortChange}
+			onQuickFilter={handleQuickFilter}
+			onUrlTypeChange={handleUrlTypeChange}
+			onSourceTypeChange={handleSourceTypeChange}
 		/>
 	{/if}
 
@@ -882,7 +889,7 @@
 	show={showEventModal}
 	{editingEvent}
 	importedData={importedEventData}
-	{activeTab}
+	activeTab={activeTab === 'popup' ? 'popup' : 'event'}
 	onClose={() => {
 		showEventModal = false;
 		importedEventData = null;
