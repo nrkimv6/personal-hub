@@ -203,6 +203,13 @@ class Settings(BaseSettings):
     EXTERNAL_FRONTEND_URL: str = ""  # 외부 프론트엔드 URL (Cloudflare Tunnel)
     PID_DIR: str = ".pids"  # PID 파일 디렉토리
 
+    # Redis 설정 (Queue Migration)
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_ENABLED: bool = True  # False면 기존 SQLite 폴링 모드
+    REDIS_QUEUE_PREFIX: str = "monitor"  # 큐 이름 prefix
+    REDIS_CONNECTION_TIMEOUT: int = 5  # 연결 타임아웃 (초)
+
     model_config = {
         "env_file": ".env",
         "case_sensitive": True,
