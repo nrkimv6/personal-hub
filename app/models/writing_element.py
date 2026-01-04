@@ -26,7 +26,15 @@ class WritingElement(Base):
     frequency = Column(Integer, nullable=True)  # 빈도수
     source_keyword_id = Column(Integer, nullable=True)  # 원본 keyword_stats.id
 
+    # 소스 타입 (seed: 시드, auto: 자동추출, manual: 수동)
+    source_type = Column(String(20), default="seed")
+
     created_at = Column(DateTime, default=datetime.now)
+
+    # 소스 타입 상수
+    SOURCE_TYPE_SEED = "seed"
+    SOURCE_TYPE_AUTO = "auto"
+    SOURCE_TYPE_MANUAL = "manual"
 
     # 카테고리 상수
     CATEGORY_TOPIC = "topic"  # 소재

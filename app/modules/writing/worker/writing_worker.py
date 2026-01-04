@@ -277,9 +277,9 @@ class WritingWorker:
             self.db.commit()
             self.db.refresh(llm_request)
 
-            # LLM 호출 (글쓰기는 JSON이 아니라 텍스트 응답)
+            # LLM 호출 (JSON 파싱)
             result = self.llm_service.execute_claude(
-                prompt, timeout=self.LLM_TIMEOUT, parse_json=False
+                prompt, timeout=self.LLM_TIMEOUT, parse_json=True
             )
 
             if not result.get("success"):
@@ -294,6 +294,7 @@ class WritingWorker:
             # 결과 저장
             source_ids = ",".join(str(s.id) for s in sources)
             raw_response = result.get("raw_response", "")
+            parsed_result = result.get("result", {})
 
             # LLM 요청 완료 기록
             llm_request.status = "completed"
@@ -301,8 +302,16 @@ class WritingWorker:
             llm_request.processed_at = datetime.now()
             self.db.commit()
 
-            # 생성된 글 추출
-            content = self._extract_generated_content(raw_response)
+            # JSON 응답에서 글과 분석 추출
+            content = parsed_result.get("generated_writing", "")
+            analysis = parsed_result.get("analysis", [])
+
+            # JSON 파싱 실패 시 기존 방식으로 폴백
+            if not content:
+                content = self._extract_generated_content(raw_response)
+
+            # 추출된 소재 저장
+            extracted_topics = self._save_extracted_topics(analysis)
 
             writing = GeneratedWriting(
                 task_type=GeneratedWriting.TASK_TYPE_MIX,
@@ -310,6 +319,7 @@ class WritingWorker:
                 source_ids=source_ids,
                 content=content,
                 raw_response=raw_response,
+                extracted_topics=json.dumps(extracted_topics, ensure_ascii=False) if extracted_topics else None,
                 schedule_run_id=run_id,
             )
             self.db.add(writing)
@@ -559,6 +569,70 @@ class WritingWorker:
                     return stripped
 
         return raw_response.strip()
+
+    def _save_extracted_topics(self, analysis: list) -> list[str]:
+        """분석 결과에서 소재를 추출하여 writing_elements에 저장.
+
+        Args:
+            analysis: LLM 분석 결과 리스트
+                [{"source_index": 1, "topic": "소재", ...}, ...]
+
+        Returns:
+            저장된 소재 이름 리스트
+        """
+        saved_topics = []
+
+        for item in analysis:
+            topic = item.get("topic", "").strip()
+            if not topic or len(topic) < 2:
+                continue
+
+            # 너무 짧거나 일반적인 단어 필터링
+            if len(topic) <= 3 and topic in ["사랑", "마음", "추억", "가족", "행복"]:
+                logger.debug(f"일반적인 단어 스킵: {topic}")
+                continue
+
+            try:
+                # 중복 체크
+                existing = (
+                    self.db.query(WritingElement)
+                    .filter(
+                        WritingElement.category == WritingElement.CATEGORY_TOPIC,
+                        WritingElement.name == topic,
+                    )
+                    .first()
+                )
+
+                if existing:
+                    # 빈도 증가
+                    if existing.frequency:
+                        existing.frequency += 1
+                    else:
+                        existing.frequency = 2
+                    logger.debug(f"기존 소재 빈도 증가: {topic} -> {existing.frequency}")
+                else:
+                    # 새 소재 추가
+                    new_element = WritingElement(
+                        category=WritingElement.CATEGORY_TOPIC,
+                        name=topic,
+                        source_type=WritingElement.SOURCE_TYPE_AUTO,
+                        frequency=1,
+                        is_active=1,
+                    )
+                    self.db.add(new_element)
+                    logger.info(f"새 소재 추가: {topic}")
+
+                saved_topics.append(topic)
+
+            except Exception as e:
+                logger.warning(f"소재 저장 실패: {topic} - {e}")
+                continue
+
+        if saved_topics:
+            self.db.commit()
+            logger.info(f"소재 {len(saved_topics)}개 저장 완료: {saved_topics}")
+
+        return saved_topics
 
 
 def run_writing_task_sync(

@@ -304,6 +304,29 @@ def run_writing_task(db: Session = Depends(get_db)):
         raise HTTPException(500, str(e))
 
 
+@router.post("/extract-topics")
+def create_topic_extract_requests(
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    """소재 추출 LLM 요청 생성.
+
+    기존 소스에서 소재를 추출하는 LLM 요청을 생성합니다.
+    Claude Worker가 처리하면 소재가 writing_elements에 저장됩니다.
+
+    Args:
+        limit: 처리할 소스 수 (기본 100, 최대 500)
+    """
+    from app.modules.writing.worker.topic_extract_worker import TopicExtractWorker
+
+    try:
+        worker = TopicExtractWorker(db)
+        count = worker.create_extract_requests(limit=limit)
+        return {"success": True, "created_requests": count}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 # ========== 헬퍼 함수 ==========
 
 
