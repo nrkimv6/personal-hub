@@ -83,3 +83,14 @@ class VideoDownloadCreateResponse(BaseModel):
     download_type: DownloadType
     status: DownloadStatus
     message: str
+
+
+class VideoDownloadStats(BaseModel):
+    """다운로드 통계 응답"""
+    total: int
+    pending: int
+    picked: int
+    processing: int
+    completed: int
+    failed: int
+    cancelled: int

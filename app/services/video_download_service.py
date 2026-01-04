@@ -371,3 +371,33 @@ class VideoDownloadService:
             self.db.commit()
             return True
         return False
+
+    def get_stats(self) -> dict:
+        """다운로드 통계 조회.
+
+        Returns:
+            상태별 요청 수 통계
+        """
+        from sqlalchemy import func
+
+        stats = self.db.query(
+            VideoDownload.status,
+            func.count(VideoDownload.id)
+        ).group_by(VideoDownload.status).all()
+
+        result = {
+            "total": 0,
+            "pending": 0,
+            "picked": 0,
+            "processing": 0,
+            "completed": 0,
+            "failed": 0,
+            "cancelled": 0
+        }
+
+        for status, count in stats:
+            if status in result:
+                result[status] = count
+            result["total"] += count
+
+        return result

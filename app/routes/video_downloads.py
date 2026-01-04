@@ -17,6 +17,7 @@ from app.schemas.video_download import (
     VideoDownloadList,
     VideoDownloadCreateRequest,
     VideoDownloadCreateResponse,
+    VideoDownloadStats,
 )
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,17 @@ async def list_download_requests(
         page_size=result["page_size"],
         total_pages=result["total_pages"]
     )
+
+
+@router.get("/stats", response_model=VideoDownloadStats)
+async def get_download_stats(
+    db: Session = Depends(get_db),
+):
+    """
+    다운로드 통계 조회 (상태별 요청 수)
+    """
+    service = VideoDownloadService(db)
+    return service.get_stats()
 
 
 @router.get("/active")

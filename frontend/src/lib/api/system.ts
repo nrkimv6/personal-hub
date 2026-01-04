@@ -782,12 +782,11 @@ export const integrityApi = {
 // Video Download API
 // ============================================================
 
-// video-downloads는 /api/video-downloads 경로 사용 (v1 없음)
 async function requestVideoDownload<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const url = `/api/video-downloads${endpoint}`;
+  const url = `/api/v1/video-downloads${endpoint}`;
   const token = getAuthToken();
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
