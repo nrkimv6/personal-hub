@@ -8,6 +8,7 @@ from sqlalchemy import or_, desc, func
 from app.models.instagram_post import InstagramPost
 from app.models.universal_crawl import CrawledPage
 from app.models import CrawlRequest, TaskScheduleRun, TaskSchedule
+from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.schemas.collect import CollectedPostBase, CrawlHistoryItem, CrawlHistoryStats
 
 
@@ -136,7 +137,40 @@ class CollectService:
             .all()
         )
 
-        return [self._instagram_to_collected(p) for p in posts], total
+        # LLM 상태 조회 (배치)
+        post_ids = [p.id for p in posts]
+        llm_status_map = self._get_llm_status_batch(post_ids)
+
+        return [self._instagram_to_collected(p, llm_status_map.get(p.id)) for p in posts], total
+
+    def _get_llm_status_batch(self, post_ids: List[int]) -> dict:
+        """Instagram 게시물들의 LLM 상태를 배치로 조회."""
+        if not post_ids:
+            return {}
+
+        # 각 게시물의 최신 LLM 요청 상태 조회 (서브쿼리)
+        latest_requests = (
+            self.db.query(
+                LLMRequest.caller_id,
+                LLMRequest.status,
+            )
+            .filter(
+                LLMRequest.caller_type == 'instagram',
+                LLMRequest.caller_id.in_([str(pid) for pid in post_ids]),
+                LLMRequest.deleted_at.is_(None),
+            )
+            .order_by(LLMRequest.caller_id, desc(LLMRequest.requested_at))
+            .all()
+        )
+
+        # caller_id별 첫 번째(최신) 상태만 사용
+        status_map = {}
+        for caller_id, status in latest_requests:
+            pid = int(caller_id)
+            if pid not in status_map:
+                status_map[pid] = status
+
+        return status_map
 
     def _get_web_posts(
         self,
@@ -199,7 +233,9 @@ class CollectService:
 
         return [self._web_to_collected(p) for p in pages], total
 
-    def _instagram_to_collected(self, post: InstagramPost) -> CollectedPostBase:
+    def _instagram_to_collected(
+        self, post: InstagramPost, llm_status: Optional[str] = None
+    ) -> CollectedPostBase:
         """InstagramPost를 CollectedPostBase로 변환."""
         # 캡션에서 제목 추출 (첫 50자)
         title = None
@@ -226,6 +262,7 @@ class CollectService:
             account_name=post.account,
             is_active=post.is_active,
             tags=[rel.tag.name for rel in post.tag_relations if rel.tag] if post.tag_relations else [],
+            llm_status=llm_status,
         )
 
     def _web_to_collected(self, page: CrawledPage) -> CollectedPostBase:

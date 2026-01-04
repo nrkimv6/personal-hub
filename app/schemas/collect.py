@@ -31,6 +31,9 @@ class CollectedPostBase(BaseModel):
     extractor_used: Optional[str] = None
     is_event: Optional[bool] = None
 
+    # AI 분석 상태 (Instagram 전용)
+    llm_status: Optional[str] = None  # pending | processing | completed | failed
+
     class Config:
         from_attributes = True
 
