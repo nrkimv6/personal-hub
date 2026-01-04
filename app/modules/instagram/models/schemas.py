@@ -254,6 +254,21 @@ class GenericUrlCrawlRequestSchema(BaseModel):
     scroll_count: int = 3
 
 
+class BatchUrlCrawlRequestSchema(BaseModel):
+    """복수 URL 크롤링 요청 스키마."""
+    urls: List[str]  # 최대 20개 제한
+    service_account_id: int
+    max_posts: int = 20
+    scroll_count: int = 3
+
+
+class BatchUrlCrawlResponse(BaseModel):
+    """복수 URL 크롤링 응답."""
+    created: int  # 생성된 요청 수
+    skipped: int  # 건너뛴 수 (중복, 유효하지 않음)
+    errors: List[str]  # 오류 메시지
+
+
 # Worker Status 스키마
 
 class WorkerStatusSchema(BaseModel):

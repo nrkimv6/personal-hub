@@ -244,6 +244,26 @@ class CrawlRequestService:
             is not None
         )
 
+    def get_pending_by_url(self, url: str) -> Optional[CrawlRequest]:
+        """URL로 대기 중인 요청 조회.
+
+        배치 URL 크롤링 시 중복 체크용으로 사용합니다.
+
+        Args:
+            url: Instagram URL
+
+        Returns:
+            대기 중인 요청, 없으면 None
+        """
+        return (
+            self.db.query(CrawlRequest)
+            .filter(
+                CrawlRequest.url == url,
+                CrawlRequest.status == CrawlRequest.STATUS_PENDING,
+            )
+            .first()
+        )
+
     def create_single_post_request(
         self,
         post_id: int,
