@@ -5,11 +5,11 @@
 
 import logging
 from datetime import datetime, date
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.database import get_db
 from app.models import CrawlRequest
@@ -70,6 +70,22 @@ class PaginatedRequestsResponse(BaseModel):
     page: int
     limit: int
     pages: int
+
+
+class BatchUrlCrawlRequest(BaseModel):
+    """복수 URL 배치 크롤링 요청 스키마."""
+    urls: List[str] = Field(..., max_length=20, description="크롤링할 URL 목록 (최대 20개)")
+    service_account_id: Optional[int] = Field(None, description="서비스 계정 ID (Instagram용)")
+    auto_analyze: bool = Field(True, description="자동 분석 여부")
+    priority: int = Field(0, description="우선순위 (높을수록 먼저 처리)")
+
+
+class BatchUrlCrawlResponse(BaseModel):
+    """복수 URL 배치 크롤링 응답."""
+    created: int = Field(..., description="생성된 요청 수")
+    skipped: int = Field(..., description="건너뛴 수 (중복 등)")
+    errors: List[str] = Field(default_factory=list, description="오류 메시지 목록")
+    request_ids: List[int] = Field(default_factory=list, description="생성된 요청 ID 목록")
 
 
 # ============= Request Endpoints =============
@@ -179,6 +195,76 @@ async def create_url_crawl_request(
     except Exception as e:
         logger.error(f"크롤링 요청 생성 실패: {e}")
         raise HTTPException(status_code=500, detail="크롤링 요청 생성에 실패했습니다.")
+
+
+@router.post("/urls", response_model=BatchUrlCrawlResponse)
+async def create_batch_url_crawl_request(
+    body: BatchUrlCrawlRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    복수 URL 배치 크롤링 요청 생성
+
+    - 최대 20개 URL 동시 요청
+    - 모든 URL 타입 지원 (Instagram, Google Form, Naver Blog 등)
+    - URL 타입은 자동 감지됨
+    - 중복(pending 상태) URL은 자동 스킵
+    - OnDemand Worker가 순차 처리
+    """
+    if len(body.urls) > 20:
+        raise HTTPException(status_code=400, detail="최대 20개 URL까지 요청 가능합니다.")
+
+    created = 0
+    skipped = 0
+    errors: List[str] = []
+    request_ids: List[int] = []
+
+    for url in body.urls:
+        url = url.strip()
+        if not url:
+            continue
+
+        try:
+            # 이미 pending 상태인 동일 URL 체크
+            existing = (
+                db.query(CrawlRequest)
+                .filter(
+                    CrawlRequest.url == url,
+                    CrawlRequest.status == CrawlRequest.STATUS_PENDING,
+                )
+                .first()
+            )
+
+            if existing:
+                skipped += 1
+                continue
+
+            # 크롤링 요청 생성
+            request, _ = universal_crawl_service.create_request(
+                db=db,
+                url=url,
+                service_account_id=body.service_account_id,
+                auto_analyze=body.auto_analyze,
+                priority=body.priority,
+                requested_by="batch_api",
+            )
+            created += 1
+            request_ids.append(request.id)
+
+        except ValueError as e:
+            errors.append(f"{url}: {str(e)}")
+            skipped += 1
+        except Exception as e:
+            logger.error(f"배치 크롤링 요청 생성 실패 ({url}): {e}")
+            errors.append(f"{url}: 요청 생성 실패")
+            skipped += 1
+
+    return BatchUrlCrawlResponse(
+        created=created,
+        skipped=skipped,
+        errors=errors,
+        request_ids=request_ids,
+    )
 
 
 @router.get("/universal-requests", response_model=UniversalCrawlRequestList)

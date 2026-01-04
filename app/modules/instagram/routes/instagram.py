@@ -32,8 +32,6 @@ from ..models.schemas import (
     UrlParseRequestSchema,
     UrlParseResponseSchema,
     GenericUrlCrawlRequestSchema,
-    BatchUrlCrawlRequestSchema,
-    BatchUrlCrawlResponse,
     RunListResponse,
     RunStatsSchema,
     DailyTrendItem,
@@ -546,74 +544,6 @@ async def crawl_by_generic_url(
     )
 
     return CrawlRequestSchema.model_validate(request)
-
-
-@router.post("/crawl/urls", response_model=BatchUrlCrawlResponse)
-async def crawl_by_urls(
-    body: BatchUrlCrawlRequestSchema,
-    db: Session = Depends(get_db),
-):
-    """복수 URL 배치 크롤링 요청.
-
-    여러 Instagram URL을 한 번에 크롤링 요청합니다.
-    각 URL은 개별 CrawlRequest로 생성되며, 워커가 순차 처리합니다.
-
-    - 최대 20개까지 처리
-    - 중복 URL은 스킵
-    - 지원하지 않는 URL은 에러 목록에 추가
-    """
-    request_service = CrawlRequestService(db)
-
-    # 계정 존재 확인
-    account = service_account_service.get_by_id(db, body.service_account_id)
-    if not account:
-        raise HTTPException(status_code=404, detail=f"Account {body.service_account_id} not found")
-
-    created = 0
-    skipped = 0
-    errors: List[str] = []
-
-    for url in body.urls[:20]:  # 최대 20개
-        url = url.strip()
-        if not url:
-            continue
-
-        try:
-            # URL 파싱
-            parsed = parse_instagram_url(url)
-
-            if not parsed.is_supported:
-                if parsed.url_type == InstagramUrlType.STORY:
-                    errors.append(f"스토리 미지원: {url}")
-                else:
-                    errors.append(f"지원하지 않는 URL: {url}")
-                skipped += 1
-                continue
-
-            # 중복 체크 (pending 상태인 동일 URL)
-            existing = request_service.get_pending_by_url(url)
-            if existing:
-                errors.append(f"이미 대기 중: {url}")
-                skipped += 1
-                continue
-
-            # 크롤링 요청 생성
-            request_service.create_generic_url_crawl_request(
-                url=url,
-                url_type=parsed.url_type.value,
-                service_account_id=body.service_account_id,
-                max_posts=body.max_posts,
-                scroll_count=body.scroll_count,
-                requested_by="manual",
-            )
-            created += 1
-
-        except Exception as e:
-            errors.append(f"{url}: {str(e)}")
-            skipped += 1
-
-    logger.info(f"Batch crawl request: created={created}, skipped={skipped}")
-    return BatchUrlCrawlResponse(created=created, skipped=skipped, errors=errors)
 
 
 # ============== Crawl ==============

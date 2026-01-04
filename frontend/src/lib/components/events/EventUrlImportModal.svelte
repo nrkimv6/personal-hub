@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
 	 * URL에서 이벤트 정보 추출 모달 컴포넌트
-	 * - Instagram 크롤링: 다건 URL 배치 크롤링 (가장 자주 사용)
+	 * - 배치 크롤링: 다건 URL 배치 크롤링 (모든 URL 타입 지원)
 	 * - 즉시 추출: AI가 바로 이벤트 정보를 추출하여 편집 가능
 	 * - 백그라운드 크롤링: 크롤링 큐에 등록 후 이력 페이지로 이동
 	 */
@@ -17,28 +17,41 @@
 
 	let { show, onClose, onImportComplete }: Props = $props();
 
-	// 모드 타입: Instagram 크롤링을 첫 번째로
-	type ImportMode = 'instagram' | 'instant' | 'background';
+	// 모드 타입: 배치 크롤링을 첫 번째로
+	type ImportMode = 'batch' | 'instant' | 'background';
 
 	// 상태
 	let url = $state('');
-	let urlsInput = $state('');  // Instagram 다건 URL 입력
+	let urlsInput = $state('');  // 다건 URL 입력
 	let loading = $state(false);
 	let error: string | null = $state(null);
 	let result: EventImportFromUrlResponse | null = $state(null);
-	let mode: ImportMode = $state('instagram');  // 기본값: Instagram
+	let mode: ImportMode = $state('batch');  // 기본값: 배치 크롤링
 
-	// Instagram 크롤링용 상태
+	// Instagram 계정 (Instagram URL에만 필요)
 	let accounts: ServiceAccountWithProfile[] = $state([]);
 	let selectedAccountId: number | null = $state(null);
-	let crawlResult: { created: number; skipped: number; errors: string[] } | null = $state(null);
+	let crawlResult: { created: number; skipped: number; errors: string[]; request_ids?: number[] } | null = $state(null);
 
-	// URL 파싱
+	// URL 파싱 (모든 URL 지원)
 	const parsedUrls = $derived(
 		urlsInput
 			.split('\n')
 			.map(line => line.trim())
-			.filter(line => line && (line.includes('instagram.com') || line.includes('instagr.am')))
+			.filter(line => {
+				if (!line) return false;
+				try {
+					new URL(line);
+					return true;
+				} catch {
+					return false;
+				}
+			})
+	);
+
+	// Instagram URL 개수
+	const instagramUrlCount = $derived(
+		parsedUrls.filter(url => url.includes('instagram.com') || url.includes('instagr.am')).length
 	);
 
 	// 페이지 타입 라벨
@@ -58,7 +71,7 @@
 		failed: '추출 실패'
 	};
 
-	// 계정 목록 로드
+	// 계정 목록 로드 (Instagram URL 크롤링용)
 	async function loadAccounts() {
 		try {
 			accounts = await collectApi.getAccounts();
@@ -71,9 +84,9 @@
 		}
 	}
 
-	// 모달 열릴 때 계정 로드
+	// Instagram URL이 있을 때만 계정 로드
 	$effect(() => {
-		if (show && accounts.length === 0) {
+		if (show && instagramUrlCount > 0 && accounts.length === 0) {
 			loadAccounts();
 		}
 	});
@@ -88,15 +101,16 @@
 		}
 	}
 
-	// Instagram 배치 크롤링 요청
-	async function handleInstagramCrawl() {
+	// 배치 크롤링 요청 (모든 URL 타입 지원)
+	async function handleBatchCrawl() {
 		if (parsedUrls.length === 0) {
-			error = 'Instagram URL을 입력해주세요.';
+			error = 'URL을 입력해주세요.';
 			return;
 		}
 
-		if (!selectedAccountId) {
-			error = '수집 계정을 선택해주세요.';
+		// Instagram URL이 있는데 계정이 선택되지 않은 경우
+		if (instagramUrlCount > 0 && !selectedAccountId) {
+			error = 'Instagram URL이 있습니다. 수집 계정을 선택해주세요.';
 			return;
 		}
 
@@ -105,7 +119,9 @@
 		crawlResult = null;
 
 		try {
-			crawlResult = await collectApi.crawlByUrls(parsedUrls, selectedAccountId);
+			crawlResult = await collectApi.crawlByUrls(parsedUrls, {
+				serviceAccountId: selectedAccountId ?? undefined
+			});
 
 			if (crawlResult.created > 0) {
 				toast.success(`${crawlResult.created}개 크롤링 요청 등록 완료`);
@@ -221,7 +237,7 @@
 		result = null;
 		crawlResult = null;
 		loading = false;
-		mode = 'instagram';
+		mode = 'batch';
 		onClose();
 	}
 
@@ -262,8 +278,8 @@
 					<div>
 						<h3 class="text-lg font-bold text-gray-900">URL에서 가져오기</h3>
 						<p class="text-sm text-gray-500 mt-1">
-							{#if mode === 'instagram'}
-								Instagram URL을 입력하면 크롤링 큐에 등록됩니다
+							{#if mode === 'batch'}
+								URL을 입력하면 크롤링 큐에 등록됩니다
 							{:else if mode === 'instant'}
 								이벤트 URL을 입력하면 AI가 정보를 추출합니다
 							{:else}
@@ -279,12 +295,12 @@
 				<!-- 모드 선택 -->
 				<div class="mb-4 flex gap-2">
 					<button
-						onclick={() => switchMode('instagram')}
-						class="flex-1 px-3 py-2 text-sm rounded-lg border transition-colors {mode === 'instagram'
-							? 'bg-pink-50 border-pink-500 text-pink-700'
+						onclick={() => switchMode('batch')}
+						class="flex-1 px-3 py-2 text-sm rounded-lg border transition-colors {mode === 'batch'
+							? 'bg-purple-50 border-purple-500 text-purple-700'
 							: 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}"
 					>
-						<div class="font-medium">Instagram 크롤링</div>
+						<div class="font-medium">배치 크롤링</div>
 						<div class="text-xs opacity-75 mt-0.5">다건 URL 지원</div>
 					</button>
 					<button
@@ -307,56 +323,68 @@
 					</button>
 				</div>
 
-				<!-- Instagram 크롤링 모드 -->
-				{#if mode === 'instagram'}
+				<!-- 배치 크롤링 모드 -->
+				{#if mode === 'batch'}
 					<div class="space-y-4">
-						<!-- 계정 선택 -->
-						<div>
-							<label for="account-select" class="block text-sm font-medium text-gray-700 mb-1">
-								수집 계정
-							</label>
-							<select
-								id="account-select"
-								bind:value={selectedAccountId}
-								class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
-								disabled={loading}
-							>
-								{#each accounts as account}
-									<option value={account.id}>
-										{account.username} ({account.profile_name})
-									</option>
-								{/each}
-							</select>
-						</div>
-
 						<!-- URL 입력 (다건) -->
 						<div>
 							<label for="urls-input" class="block text-sm font-medium text-gray-700 mb-1">
-								Instagram URL (한 줄에 하나씩)
+								URL (한 줄에 하나씩)
 							</label>
 							<textarea
 								id="urls-input"
 								bind:value={urlsInput}
-								placeholder="https://www.instagram.com/p/xxx/&#10;https://www.instagram.com/reel/yyy/&#10;https://www.instagram.com/username/"
+								placeholder="https://www.instagram.com/p/xxx/&#10;https://forms.gle/xxx&#10;https://blog.naver.com/xxx/xxx"
 								rows="5"
-								class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-pink-500 font-mono text-sm"
+								class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 font-mono text-sm"
 								disabled={loading}
 							></textarea>
 							<div class="flex justify-between items-center mt-1">
 								<p class="text-xs text-gray-500">
-									계정, 게시물, 릴스 URL 지원 (최대 20개)
+									Instagram, Google Forms, Naver Blog 등 (최대 20개)
 								</p>
-								<span class="text-xs font-medium {parsedUrls.length > 0 ? 'text-pink-600' : 'text-gray-400'}">
+								<span class="text-xs font-medium {parsedUrls.length > 0 ? 'text-purple-600' : 'text-gray-400'}">
 									{parsedUrls.length}개 URL
+									{#if instagramUrlCount > 0}
+										<span class="text-pink-500">(IG: {instagramUrlCount})</span>
+									{/if}
 								</span>
 							</div>
 						</div>
 
+						<!-- Instagram URL이 있을 때만 계정 선택 표시 -->
+						{#if instagramUrlCount > 0}
+							<div>
+								<label for="account-select" class="block text-sm font-medium text-gray-700 mb-1">
+									Instagram 수집 계정
+								</label>
+								<select
+									id="account-select"
+									bind:value={selectedAccountId}
+									class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+									disabled={loading}
+								>
+									{#if accounts.length === 0}
+										<option value={null}>계정 로딩 중...</option>
+									{:else}
+										{#each accounts as account}
+											<option value={account.id}>
+												{account.username} ({account.profile_name})
+											</option>
+										{/each}
+									{/if}
+								</select>
+								<p class="text-xs text-pink-500 mt-1">
+									Instagram URL 크롤링에 필요합니다
+								</p>
+							</div>
+						{/if}
+
 						<!-- 크롤링 버튼 -->
 						<button
-							onclick={handleInstagramCrawl}
-							disabled={loading || parsedUrls.length === 0 || !selectedAccountId}
-							class="w-full px-4 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+							onclick={handleBatchCrawl}
+							disabled={loading || parsedUrls.length === 0 || (instagramUrlCount > 0 && !selectedAccountId)}
+							class="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2"
 						>
 							{#if loading}
 								<span class="animate-spin">⏳</span>
@@ -386,7 +414,7 @@
 									</div>
 								{/if}
 								<div class="pt-2 border-t border-gray-200">
-									<a href="/collect?tab=history" class="text-sm text-pink-600 hover:text-pink-700">
+									<a href="/crawl" class="text-sm text-purple-600 hover:text-purple-700">
 										크롤링 이력 확인 →
 									</a>
 								</div>
@@ -590,13 +618,8 @@
 					</div>
 				{/if}
 
-				<!-- Instagram 모드가 아닐 때 에러 메시지 표시 -->
-				{#if mode !== 'instagram' && error}
-					<!-- 에러는 위에서 이미 처리됨 -->
-				{/if}
-
-				<!-- Instagram 모드에서 에러 메시지 -->
-				{#if mode === 'instagram' && error}
+				<!-- 배치 모드에서 에러 메시지 -->
+				{#if mode === 'batch' && error}
 					<div class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
 						<p class="text-sm text-red-700">{error}</p>
 					</div>
