@@ -8,6 +8,10 @@ Layer 1 예외 처리:
     - 태스크 감독 (supervision)으로 자동 재시작
     - Fail-Fast 전략: 재시작 횟수 초과 시 프로세스 종료 → Watchdog 위임
 
+Redis 큐 지원:
+    - 시작 시 Redis 연결 초기화
+    - 종료 시 Redis 연결 정리
+
 사용 예시:
     orchestrator = WorkerOrchestrator()
     await orchestrator.initialize()
@@ -24,6 +28,7 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 from app.shared.browser.browser_manager import BrowserManager
 from app.shared.worker.base_worker import BaseWorker
 from app.shared.worker.exceptions import WorkerCriticalError
+from app.shared.redis import RedisClient
 
 if TYPE_CHECKING:
     pass
@@ -77,7 +82,7 @@ class WorkerOrchestrator:
         self._initialized = False
 
     async def initialize(self):
-        """브라우저 매니저 및 워커 초기화.
+        """브라우저 매니저, Redis 및 워커 초기화.
 
         이 메서드는 run() 전에 호출되어야 합니다.
         하위 클래스에서 오버라이드하여 워커를 등록합니다.
@@ -88,7 +93,19 @@ class WorkerOrchestrator:
 
         logger.info("[Orchestrator] 초기화 시작")
 
-        # 1. 브라우저 매니저 초기화
+        # 1. Redis 연결 초기화
+        redis_client = await RedisClient.get_client()
+        if redis_client:
+            health = await RedisClient.health_check()
+            logger.info(
+                f"[Orchestrator] Redis 연결 완료: "
+                f"{health.get('host')}:{health.get('port')} "
+                f"(v{health.get('version', 'unknown')})"
+            )
+        else:
+            logger.info("[Orchestrator] Redis 미연결 - SQLite 폴링 모드로 동작")
+
+        # 2. 브라우저 매니저 초기화
         self.browser_manager = BrowserManager()
         await self.browser_manager.initialize()
         logger.info("[Orchestrator] BrowserManager 초기화 완료")
@@ -341,6 +358,10 @@ class WorkerOrchestrator:
         if self.browser_manager:
             await self.browser_manager.cleanup()
 
+        # Redis 연결 정리
+        await RedisClient.close()
+        logger.info("[Orchestrator] Redis 연결 종료")
+
         self._initialized = False
         logger.info("[Orchestrator] 종료 완료")
 
@@ -366,6 +387,7 @@ class WorkerOrchestrator:
                 self.browser_manager.get_status()
                 if self.browser_manager else None
             ),
+            "redis_connected": RedisClient.is_connected(),
         }
 
     async def __aenter__(self):
