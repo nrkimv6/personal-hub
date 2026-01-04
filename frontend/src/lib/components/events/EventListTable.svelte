@@ -315,6 +315,7 @@
 						</td>
 						<!-- 원본 링크 -->
 						<td class="px-2 py-2 text-center" onclick={(e) => e.stopPropagation()}>
+							{@const urlCount = event.event_url ? 1 + (event.additional_urls?.length || 0) : 0}
 							<div class="flex gap-1 justify-center items-center">
 								{#if event.event_url}
 									<a
@@ -326,11 +327,14 @@
 									>
 										참여
 									</a>
+									{#if urlCount > 1}
+										<span class="text-[10px] text-blue-500 font-medium" title="{urlCount}개 링크">+{urlCount - 1}</span>
+									{/if}
 									{#if isAdmin}
 										<button
 											onclick={(e) => copyEventUrl(event, e)}
 											class="p-0.5 rounded hover:bg-gray-100 transition-colors"
-											title={copiedEventId === event.id ? '복사됨!' : '링크 복사'}
+											title={copiedEventId === event.id ? '복사됨!' : '메인 링크 복사'}
 										>
 											{#if copiedEventId === event.id}
 												<svg class="w-3.5 h-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">

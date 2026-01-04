@@ -24,6 +24,38 @@
 	let prizesText = $state('');
 	let isSaving = $state(false);
 
+	// 복수 URL 관리
+	let eventUrls = $state<string[]>(['']);
+
+	// URL 배열 → event_url + additional_urls 변환
+	function urlsToFormData(urls: string[]): { event_url: string | null; additional_urls: string[] } {
+		const filtered = urls.filter(u => u.trim());
+		return {
+			event_url: filtered[0] || null,
+			additional_urls: filtered.slice(1)
+		};
+	}
+
+	// event_url + additional_urls → URL 배열 변환
+	function formDataToUrls(eventUrl: string | null, additionalUrls: string[] | undefined): string[] {
+		const urls: string[] = [];
+		if (eventUrl) urls.push(eventUrl);
+		if (additionalUrls?.length) urls.push(...additionalUrls);
+		return urls.length ? urls : [''];  // 최소 1개 빈 입력
+	}
+
+	// URL 추가
+	function addUrl() {
+		eventUrls = [...eventUrls, ''];
+	}
+
+	// URL 삭제
+	function removeUrl(index: number) {
+		if (eventUrls.length > 1) {
+			eventUrls = eventUrls.filter((_, i) => i !== index);
+		}
+	}
+
 	// editingEvent 또는 importedData가 변경되면 폼 초기화
 	$effect(() => {
 		if (show) {
@@ -33,7 +65,6 @@
 					title: editingEvent.title,
 					event_type: editingEvent.event_type,
 					status: editingEvent.status,
-					event_url: editingEvent.event_url || '',
 					event_start: editingEvent.event_start || '',
 					event_end: editingEvent.event_end || '',
 					organizer: editingEvent.organizer || '',
@@ -48,12 +79,12 @@
 					body_text: editingEvent.body_text || ''
 				};
 				prizesText = prizesToText(editingEvent.prizes);
+				eventUrls = formDataToUrls(editingEvent.event_url, editingEvent.additional_urls);
 			} else if (importedData) {
 				// URL 가져오기 모드: 추출된 데이터로 초기화
 				eventForm = {
 					title: importedData.title || '',
 					event_type: importedData.event_type || 'event',
-					event_url: importedData.event_url || '',
 					event_start: importedData.event_start || '',
 					event_end: importedData.event_end || '',
 					organizer: importedData.organizer || '',
@@ -70,12 +101,12 @@
 					body_text: importedData.body_text || ''
 				};
 				prizesText = prizesToText(importedData.prizes);
+				eventUrls = formDataToUrls(importedData.event_url, importedData.additional_urls);
 			} else {
 				// 새 이벤트 모드: 빈 폼으로 초기화
 				eventForm = {
 					title: '',
 					event_type: activeTab === 'popup' ? 'popup' : 'event',
-					event_url: '',
 					event_start: '',
 					event_end: '',
 					organizer: '',
@@ -88,6 +119,7 @@
 					purchase_required: undefined
 				};
 				prizesText = '';
+				eventUrls = [''];
 			}
 		}
 	});
@@ -99,6 +131,9 @@
 		}
 		isSaving = true;
 		try {
+			// URL 배열 → event_url + additional_urls 변환
+			const { event_url, additional_urls } = urlsToFormData(eventUrls);
+
 			// 빈 문자열을 null로 변환 (날짜 및 선택 필드)
 			const formData = {
 				...eventForm,
@@ -106,7 +141,8 @@
 				event_start: eventForm.event_start || null,
 				event_end: eventForm.event_end || null,
 				announcement_date: eventForm.announcement_date || null,
-				event_url: eventForm.event_url || null,
+				event_url,
+				additional_urls,
 				organizer: eventForm.organizer || null,
 				summary: eventForm.summary || null,
 				location_venue: eventForm.location_venue || null,
@@ -218,19 +254,47 @@
 						{/if}
 					</div>
 
-					<!-- 이벤트 URL -->
+					<!-- 이벤트 URL 목록 -->
 					<div>
-						<label for="event-url" class="block text-sm font-medium text-gray-700 mb-1"
-							>이벤트 URL</label
-						>
-						<input
-							id="event-url"
-							type="text"
-							bind:value={eventForm.event_url}
-							placeholder="https://..."
-							class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-						/>
-						<p class="mt-1 text-xs text-gray-500">구글폼, 네이버폼 등 참여 URL (자동으로 타입 감지)</p>
+						<label class="block text-sm font-medium text-gray-700 mb-1">이벤트 URL</label>
+						<div class="space-y-2">
+							{#each eventUrls as url, index}
+								<div class="flex gap-2 items-center">
+									<input
+										type="text"
+										bind:value={eventUrls[index]}
+										placeholder="https://..."
+										class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+									/>
+									{#if index === 0}
+										<span class="text-xs text-blue-600 whitespace-nowrap px-2 py-1 bg-blue-50 rounded">메인</span>
+									{/if}
+									{#if eventUrls.length > 1}
+										<button
+											type="button"
+											onclick={() => removeUrl(index)}
+											class="text-gray-400 hover:text-red-500 p-1"
+											title="URL 삭제"
+										>
+											<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+											</svg>
+										</button>
+									{/if}
+								</div>
+							{/each}
+							<button
+								type="button"
+								onclick={addUrl}
+								class="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+							>
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+								</svg>
+								URL 추가
+							</button>
+						</div>
+						<p class="mt-1 text-xs text-gray-500">구글폼, 네이버폼 등 참여 URL (첫 번째 URL로 타입 감지)</p>
 					</div>
 
 					<!-- 기간 -->

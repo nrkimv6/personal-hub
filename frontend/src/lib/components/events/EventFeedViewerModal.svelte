@@ -147,6 +147,20 @@
 		if (source === 'ai_edited') return 'bg-blue-100 text-blue-700';
 		return 'bg-gray-100 text-gray-600';
 	}
+
+	// 이벤트 URL 목록 (event_url + additional_urls)
+	function getEventUrls(): string[] {
+		if (type === 'event' && event) {
+			const urls: string[] = [];
+			if (event.event_url) urls.push(event.event_url);
+			if (event.additional_urls?.length) urls.push(...event.additional_urls);
+			return urls;
+		}
+		if (type === 'popup' && popup?.official_url) {
+			return [popup.official_url];
+		}
+		return [];
+	}
 </script>
 
 {#if show && item}
@@ -338,31 +352,42 @@
 					</div>
 
 					<!-- 링크 -->
-					{#if (type === 'event' && event?.event_url) || (type === 'popup' && popup?.official_url)}
-						<div class="mt-3 pt-3 border-t border-gray-100 flex items-center gap-3">
-							<a
-								href={type === 'event' ? event?.event_url : popup?.official_url}
-								target="_blank"
-								rel="noopener noreferrer"
-								class="flex items-center gap-2 text-sm text-blue-600 hover:underline"
-							>
-								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
-									/>
-								</svg>
-								{type === 'event' ? '이벤트 참여' : '공식 사이트'}
-							</a>
+					{@const eventUrls = getEventUrls()}
+					{#if eventUrls.length > 0}
+						<div class="mt-3 pt-3 border-t border-gray-100">
+							<div class="space-y-1.5">
+								{#each eventUrls as url, index}
+									<div class="flex items-center gap-2">
+										<a
+											href={url}
+											target="_blank"
+											rel="noopener noreferrer"
+											class="flex items-center gap-1.5 text-sm text-blue-600 hover:underline truncate flex-1"
+											title={url}
+										>
+											<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
+												/>
+											</svg>
+											<span class="truncate">{index === 0 ? (type === 'event' ? '이벤트 참여' : '공식 사이트') : `링크 ${index + 1}`}</span>
+										</a>
+										{#if index === 0}
+											<span class="text-[10px] text-blue-600 px-1.5 py-0.5 bg-blue-50 rounded shrink-0">메인</span>
+										{/if}
+									</div>
+								{/each}
+							</div>
 							{#if isAdmin}
 								<button
 									onclick={copyEventUrl}
-									class="flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors {copied
+									class="mt-2 flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors {copied
 										? 'bg-green-100 text-green-700'
 										: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
-									title={copied ? '복사됨!' : '링크 복사'}
+									title={copied ? '복사됨!' : '메인 링크 복사'}
 								>
 									{#if copied}
 										<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -373,7 +398,7 @@
 										<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
 										</svg>
-										복사
+										메인 복사
 									{/if}
 								</button>
 							{/if}
@@ -679,31 +704,42 @@
 						</div>
 
 						<!-- 링크 -->
-						{#if (type === 'event' && event?.event_url) || (type === 'popup' && popup?.official_url)}
-							<div class="mt-3 pt-3 border-t border-gray-100 flex items-center gap-3">
-								<a
-									href={type === 'event' ? event?.event_url : popup?.official_url}
-									target="_blank"
-									rel="noopener noreferrer"
-									class="flex items-center gap-2 text-sm text-blue-600 hover:underline"
-								>
-									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
-										/>
-									</svg>
-									{type === 'event' ? '이벤트 참여' : '공식 사이트'}
-								</a>
+						{@const mobileEventUrls = getEventUrls()}
+						{#if mobileEventUrls.length > 0}
+							<div class="mt-3 pt-3 border-t border-gray-100">
+								<div class="space-y-1.5">
+									{#each mobileEventUrls as url, index}
+										<div class="flex items-center gap-2">
+											<a
+												href={url}
+												target="_blank"
+												rel="noopener noreferrer"
+												class="flex items-center gap-1.5 text-sm text-blue-600 hover:underline truncate flex-1"
+												title={url}
+											>
+												<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														stroke-width="2"
+														d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
+													/>
+												</svg>
+												<span class="truncate">{index === 0 ? (type === 'event' ? '이벤트 참여' : '공식 사이트') : `링크 ${index + 1}`}</span>
+											</a>
+											{#if index === 0}
+												<span class="text-[10px] text-blue-600 px-1.5 py-0.5 bg-blue-50 rounded shrink-0">메인</span>
+											{/if}
+										</div>
+									{/each}
+								</div>
 								{#if isAdmin}
 									<button
 										onclick={copyEventUrl}
-										class="flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors {copied
+										class="mt-2 flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors {copied
 											? 'bg-green-100 text-green-700'
 											: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
-										title={copied ? '복사됨!' : '링크 복사'}
+										title={copied ? '복사됨!' : '메인 링크 복사'}
 									>
 										{#if copied}
 											<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -714,7 +750,7 @@
 											<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
 											</svg>
-											복사
+											메인 복사
 										{/if}
 									</button>
 								{/if}

@@ -81,12 +81,13 @@
 				<!-- 북마크/복사 버튼 -->
 				<div class="flex items-center gap-1" onclick={(e) => e.stopPropagation()}>
 					{#if isAdmin && event.event_url}
+						{@const urlCount = 1 + (event.additional_urls?.length || 0)}
 						<button
 							onclick={(e) => copyEventUrl(event, e)}
-							class="p-1.5 rounded-lg transition-colors {copiedEventId === event.id
+							class="p-1.5 rounded-lg transition-colors flex items-center gap-0.5 {copiedEventId === event.id
 								? 'bg-green-100 text-green-600'
 								: 'bg-gray-100 text-gray-500 hover:bg-gray-200'}"
-							title={copiedEventId === event.id ? '복사됨!' : '참여 링크 복사'}
+							title={copiedEventId === event.id ? '복사됨!' : '메인 링크 복사'}
 						>
 							{#if copiedEventId === event.id}
 								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -96,6 +97,9 @@
 								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
 								</svg>
+							{/if}
+							{#if urlCount > 1}
+								<span class="text-[10px] font-medium">+{urlCount - 1}</span>
 							{/if}
 						</button>
 					{/if}
