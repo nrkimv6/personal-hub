@@ -90,6 +90,10 @@ class GoogleSearchQueue(Base):
     API 요청을 큐에 저장하고 워커에서 처리합니다.
     Session 0 (NSSM 서비스)에서는 브라우저를 사용할 수 없으므로
     사용자 세션의 워커에서 처리합니다.
+
+    Redis 큐 지원:
+    - Redis 연결 시: Redis 큐에 추가 (status=queued)
+    - Redis 미연결 시: SQLite 폴링 (status=pending)
     """
 
     __tablename__ = "google_search_queue"
@@ -115,8 +119,15 @@ class GoogleSearchQueue(Base):
     )
 
     # 상태
-    status = Column(String(20), default="pending")  # pending, processing, completed, failed
+    status = Column(String(20), default="pending")  # pending, queued, processing, completed, failed
     error_message = Column(Text, nullable=True)
+
+    # 상태 상수
+    STATUS_PENDING = "pending"    # SQLite 폴링 모드용
+    STATUS_QUEUED = "queued"      # Redis 큐에 들어감
+    STATUS_PROCESSING = "processing"
+    STATUS_COMPLETED = "completed"
+    STATUS_FAILED = "failed"
 
     # 시간
     created_at = Column(DateTime, default=datetime.now)

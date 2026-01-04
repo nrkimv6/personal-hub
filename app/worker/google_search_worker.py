@@ -14,6 +14,10 @@ Session 0 (NSSM 서비스)에서는 브라우저 사용이 불가하므로
     - GoogleSearchCrawler를 사용하여 검색 수행
     - 결과를 google_search_history, google_search_results에 저장
     - saved_search 연결 시 마지막 실행 정보 업데이트
+
+Redis 큐 지원:
+    - Redis 연결 시: Redis 큐에서 작업 수신
+    - Redis 미연결 시: SQLite 폴링 fallback
 """
 import asyncio
 import logging
@@ -33,6 +37,8 @@ from app.modules.google_search.services.crawler import (
     CrawlOptions,
     CaptchaDetectedError,
 )
+from app.shared.redis import RedisClient, RedisQueue
+from app.shared.redis.queue import GOOGLE_SEARCH_QUEUE
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -47,8 +53,14 @@ class GoogleSearchWorker(BaseWorker):
     큐에서 pending 상태의 검색 요청을 가져와 처리합니다.
     BrowserManager를 통해 브라우저 탭을 획득하여 검색을 수행합니다.
 
+    Redis 큐 지원:
+    - Redis 연결 시: Redis 큐에서 작업 수신 (즉각 반응)
+    - Redis 미연결 시: SQLite 폴링 fallback (1초 간격)
+
     Attributes:
         browser_manager: BrowserManager 참조
+        use_redis: Redis 큐 사용 여부
+        redis_queue: Redis 큐 인스턴스
     """
 
     def __init__(self, browser_manager: Optional["BrowserManager"] = None):
@@ -62,20 +74,104 @@ class GoogleSearchWorker(BaseWorker):
             browser_manager=browser_manager
         )
 
+        # Redis 큐 관련
+        self.use_redis = False
+        self.redis_queue: Optional[RedisQueue] = None
+        self._redis_initialized = False
+
+    async def _setup_redis(self):
+        """Redis 큐 초기화."""
+        if self._redis_initialized:
+            return
+
+        redis_client = await RedisClient.get_client()
+        if redis_client:
+            self.redis_queue = RedisQueue(redis_client, GOOGLE_SEARCH_QUEUE)
+            self.use_redis = True
+            logger.info(f"[{self.name}] Redis 큐 모드 활성화")
+        else:
+            self.use_redis = False
+            logger.info(f"[{self.name}] SQLite 폴링 모드 (Redis 미연결)")
+
+        self._redis_initialized = True
+
     def _get_loop_interval(self) -> float:
         """메인 루프 간격 반환.
 
         Returns:
-            float: 1초 (빠른 반응)
+            float: Redis 모드 0.1초, SQLite 모드 1초
         """
-        return 1.0
+        return 0.1 if self.use_redis else 1.0
 
     async def _main_loop_iteration(self):
         """메인 루프 한 사이클.
 
-        큐에서 pending 요청을 조회하고 처리합니다.
+        Redis 큐 또는 SQLite에서 요청을 가져와 처리합니다.
         """
-        await self._safe_execute("process_pending_queue", self._process_pending_queue)
+        # Redis 초기화 (첫 번째 호출 시)
+        await self._setup_redis()
+
+        # Redis 큐 또는 SQLite 폴링
+        if self.use_redis:
+            await self._safe_execute("process_redis_queue", self._process_redis_queue)
+        else:
+            await self._safe_execute("process_pending_queue", self._process_pending_queue)
+
+    # ========== Redis 큐 처리 ==========
+
+    async def _process_redis_queue(self):
+        """Redis 큐에서 작업을 가져와 처리."""
+        if not self.redis_queue:
+            return
+
+        job = await self.redis_queue.pop_nowait()
+        if not job:
+            return  # 큐가 비어있음
+
+        queue_id = job.get("id")
+        if not queue_id:
+            logger.warning(f"[{self.name}] Redis 큐 메시지에 id 없음: {job}")
+            return
+
+        db = SessionLocal()
+        try:
+            queue_item = db.query(GoogleSearchQueue).filter(
+                GoogleSearchQueue.id == queue_id
+            ).first()
+
+            if not queue_item:
+                logger.warning(f"[{self.name}] Redis 큐의 요청이 DB에 없음: id={queue_id}")
+                return
+
+            # 이미 처리된 요청인지 확인
+            if queue_item.status not in (
+                GoogleSearchQueue.STATUS_QUEUED,
+                GoogleSearchQueue.STATUS_PENDING
+            ):
+                logger.debug(
+                    f"[{self.name}] 이미 처리된 요청: id={queue_id}, status={queue_item.status}"
+                )
+                return
+
+            logger.info(
+                f"[{self.name}] Redis 큐에서 검색 요청 처리: "
+                f"search_id={queue_item.search_id}, query={queue_item.query}"
+            )
+
+            # processing 상태로 변경
+            queue_item.status = GoogleSearchQueue.STATUS_PROCESSING
+            queue_item.started_at = datetime.now()
+            db.commit()
+
+            # 검색 실행
+            await self._execute_search(queue_item, db)
+
+        except Exception as e:
+            logger.error(f"[{self.name}] Redis 큐 처리 오류: {e}", exc_info=True)
+        finally:
+            db.close()
+
+    # ========== SQLite 폴링 (Fallback) ==========
 
     async def _process_pending_queue(self):
         """pending 상태의 검색 요청을 처리."""
