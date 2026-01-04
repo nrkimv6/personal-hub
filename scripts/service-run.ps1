@@ -371,11 +371,12 @@ try {
 
     # Use stop.ps1 to properly clean up all processes
     # -SkipWatchdog: Don't kill watchdog processes (they run in user session, not service)
+    # -SkipWorkers: Don't kill worker processes (they run separately via browser-workers.ps1)
     try {
         if ($Dev) {
-            & $stopScript -Force -Dev -SkipWatchdog 2>&1 | ForEach-Object { Write-ServiceLog $_ }
+            & $stopScript -Force -Dev -SkipWatchdog -SkipWorkers 2>&1 | ForEach-Object { Write-ServiceLog $_ }
         } else {
-            & $stopScript -Force -SkipWatchdog 2>&1 | ForEach-Object { Write-ServiceLog $_ }
+            & $stopScript -Force -SkipWatchdog -SkipWorkers 2>&1 | ForEach-Object { Write-ServiceLog $_ }
         }
     } catch {
         Write-ServiceLog "Cleanup error: $_"

@@ -5,7 +5,8 @@ param(
     [switch]$Force,        # Skip confirmations
     [switch]$Dev,          # Stop dev environment (ports 8001, 5174)
     [switch]$All,          # Stop both dev and production environments
-    [switch]$SkipWatchdog  # Don't kill watchdog processes (for service restart)
+    [switch]$SkipWatchdog, # Don't kill watchdog processes (for service restart)
+    [switch]$SkipWorkers   # Don't kill worker processes (for service restart - workers run separately)
 )
 
 # Trap all errors and wait for key before exit
@@ -120,6 +121,16 @@ $pidKilled = 0
 # Kill workers by PID file - this catches Session 0 processes that have no visible CommandLine
 foreach ($pidFile in $PidFiles) {
     if ((Test-Path $pidFile) -and $pidFile -match "worker") {
+        # watchdog PID files are handled separately by -SkipWatchdog
+        if ($pidFile -match "watchdog") { continue }
+
+        # -SkipWorkers: preserve worker processes (for service restart - workers run separately)
+        if ($SkipWorkers) {
+            $pidFileName = Split-Path $pidFile -Leaf
+            Write-Host "  (skipping: $pidFileName - SkipWorkers)" -ForegroundColor Gray
+            continue
+        }
+
         $savedPid = Get-Content $pidFile -ErrorAction SilentlyContinue
         if ($savedPid) {
             $proc = Get-Process -Id $savedPid -ErrorAction SilentlyContinue
@@ -183,6 +194,10 @@ if ($pythonProcs) {
             }
             # Worker processes don't have port in command line, check by path pattern
             if (-not $isTargetEnv -and ($cmd -match "app\.worker" -or $cmd -match "claude_worker")) {
+                # -SkipWorkers: preserve worker processes (for service restart - workers run separately)
+                if ($SkipWorkers) {
+                    continue
+                }
                 # For dev mode, include if path contains monitor-page
                 if ($cmd -match "monitor-page") {
                     $isTargetEnv = $true
