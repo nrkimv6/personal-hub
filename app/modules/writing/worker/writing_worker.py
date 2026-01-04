@@ -76,18 +76,21 @@ class SlotContext:
 class WritingWorker:
     """작문 워커.
 
-    매일 정해진 시간에 실행되어:
-    1. 랜덤 3개 글 믹스 → 5회 (쿨다운 + 슬롯 중복 방지)
-    2. 랜덤 프롬프트 글쓰기 → 3회 (요소 직접 지정 + 쿨다운 + 시즌 가중치)
+    매일 정해진 시간에 실행되어 (5+3+3 구조):
+    1. 믹스 글쓰기 → 5회 (소스 3개 조합, 쿨다운 + 슬롯 중복 방지)
+    2. 랜덤 소재+키워드 글쓰기 → 3회 (소재 1 + 키워드 2 + 스타일)
+    3. 키워드 전용 글쓰기 → 3회 (키워드 3개만 + 스타일, 소재 없음)
     """
 
     # 프롬프트 파일 경로 (모듈 기준)
     MIX_PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "mix_prompt.md"
     RANDOM_PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "random_prompt.md"
+    KEYWORD_ONLY_PROMPT_PATH = Path(__file__).parent.parent / "prompts" / "keyword_only_prompt.md"
 
-    # 실행 횟수
-    MIX_COUNT = 5
-    RANDOM_COUNT = 3
+    # 실행 횟수: 5+3+3 구조
+    MIX_COUNT = 5  # 소스 3개 믹스
+    RANDOM_TOPIC_COUNT = 3  # 소재+키워드 조합
+    RANDOM_KEYWORD_COUNT = 3  # 키워드만 (소재 제외)
 
     # LLM 타임아웃 (초)
     LLM_TIMEOUT = 180
@@ -116,6 +119,7 @@ class WritingWorker:
         """프롬프트 파일 로드."""
         mix_path = self.MIX_PROMPT_PATH
         random_path = self.RANDOM_PROMPT_PATH
+        keyword_only_path = self.KEYWORD_ONLY_PROMPT_PATH
 
         if mix_path.exists():
             self.mix_prompt_template = mix_path.read_text(encoding="utf-8")
@@ -130,6 +134,13 @@ class WritingWorker:
         else:
             self.random_prompt_template = ""
             logger.warning(f"Random prompt not found: {random_path}")
+
+        if keyword_only_path.exists():
+            self.keyword_only_prompt_template = keyword_only_path.read_text(encoding="utf-8")
+            logger.debug(f"Keyword-only prompt loaded from {keyword_only_path}")
+        else:
+            self.keyword_only_prompt_template = ""
+            logger.warning(f"Keyword-only prompt not found: {keyword_only_path}")
 
     def _get_current_season(self) -> Optional[str]:
         """현재 시즌 반환."""
@@ -194,10 +205,19 @@ class WritingWorker:
                     failed += 1
                 total += 1
 
-            # 2. 랜덤 프롬프트 글쓰기 (3회)
-            for i in range(self.RANDOM_COUNT):
-                logger.info(f"랜덤 글쓰기 {i + 1}/{self.RANDOM_COUNT}")
+            # 2. 랜덤 소재+키워드 글쓰기 (3회)
+            for i in range(self.RANDOM_TOPIC_COUNT):
+                logger.info(f"랜덤 글쓰기 {i + 1}/{self.RANDOM_TOPIC_COUNT}")
                 if self._generate_random_writing(run.id, slot_context, current_season, index=i):
+                    success += 1
+                else:
+                    failed += 1
+                total += 1
+
+            # 3. 랜덤 키워드만 글쓰기 (3회)
+            for i in range(self.RANDOM_KEYWORD_COUNT):
+                logger.info(f"키워드 전용 글쓰기 {i + 1}/{self.RANDOM_KEYWORD_COUNT}")
+                if self._generate_keyword_only_writing(run.id, slot_context, current_season, index=i):
                     success += 1
                 else:
                     failed += 1
@@ -481,6 +501,195 @@ class WritingWorker:
             else:
                 self.db.rollback()
             return False
+
+    def _generate_keyword_only_writing(
+        self,
+        run_id: int,
+        slot_context: SlotContext,
+        season: Optional[str],
+        index: int = 0,
+    ) -> bool:
+        """키워드 전용 글쓰기 - 소재 없이 키워드 3개로 글 생성.
+
+        Args:
+            run_id: TaskScheduleRun ID
+            slot_context: 당일 슬롯 컨텍스트
+            season: 현재 시즌
+            index: 실행 인덱스 (0부터 시작)
+
+        Returns:
+            성공 여부
+        """
+        llm_request = None
+        try:
+            if not self.keyword_only_prompt_template:
+                logger.error("키워드 전용 프롬프트가 없습니다")
+                return False
+
+            # 요소 선택 (키워드 3개 + tone/style/format/emotion)
+            selected_elements = self._select_keyword_only_elements(slot_context, season)
+
+            if not selected_elements:
+                logger.error("키워드 전용 요소 선택 실패")
+                return False
+
+            # 슬롯 컨텍스트에 사용 기록
+            for elem in selected_elements["all"]:
+                slot_context.mark_used_element(elem)
+
+            # 프롬프트 구성 (소재 없이 키워드만)
+            prompt = self.keyword_only_prompt_template.format(
+                keywords=", ".join(k.name for k in selected_elements["keywords"]),
+                tone=selected_elements["tone"].name,
+                style=selected_elements["style"].name,
+                format=selected_elements["format"].name,
+                emotion=selected_elements["emotion"].name,
+            )
+
+            # LLM 요청 이력 생성
+            llm_request = LLMRequest(
+                caller_type="writing",
+                caller_id=f"keyword_{run_id}_{index}",
+                prompt=prompt[:5000] if len(prompt) > 5000 else prompt,
+                status="processing",
+                requested_by="scheduler",
+                request_source="writing_worker",
+            )
+            self.db.add(llm_request)
+            self.db.commit()
+            self.db.refresh(llm_request)
+
+            # LLM 호출
+            result = self.llm_service.execute_claude(
+                prompt, timeout=self.LLM_TIMEOUT, parse_json=False
+            )
+
+            if not result.get("success"):
+                error_msg = result.get('error', 'Unknown error')
+                logger.error(f"LLM 호출 실패: {error_msg}")
+                llm_request.status = "failed"
+                llm_request.error_message = error_msg
+                llm_request.processed_at = datetime.now()
+                self.db.commit()
+                return False
+
+            raw_response = result.get("raw_response", "")
+
+            # LLM 요청 완료 기록
+            llm_request.status = "completed"
+            llm_request.raw_response = raw_response
+            llm_request.processed_at = datetime.now()
+            self.db.commit()
+
+            content = self._extract_generated_content(raw_response)
+
+            # selected_elements JSON 생성
+            selected_json = json.dumps({
+                "keywords": [k.name for k in selected_elements["keywords"]],
+                "tone": selected_elements["tone"].name,
+                "style": selected_elements["style"].name,
+                "format": selected_elements["format"].name,
+                "emotion": selected_elements["emotion"].name,
+                "season": season,
+            }, ensure_ascii=False)
+
+            writing = GeneratedWriting(
+                task_type=GeneratedWriting.TASK_TYPE_KEYWORD,
+                prompt_used=prompt[:2000] if len(prompt) > 2000 else prompt,
+                source_ids=None,
+                content=content,
+                raw_response=raw_response,
+                selected_elements=selected_json,
+                schedule_run_id=run_id,
+            )
+            self.db.add(writing)
+            self.db.commit()
+            self.db.refresh(writing)
+
+            # 요소 사용 이력 기록
+            self.selector.record_element_usage(
+                selected_elements["all"],
+                writing.id,
+            )
+            self.db.commit()
+
+            logger.info(
+                f"키워드 전용 글쓰기 완료: id={writing.id}, "
+                f"keywords={[k.name for k in selected_elements['keywords']]}, season={season}"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"키워드 전용 글쓰기 실패: {e}", exc_info=True)
+            if llm_request:
+                llm_request.status = "failed"
+                llm_request.error_message = str(e)
+                llm_request.processed_at = datetime.now()
+                self.db.commit()
+            else:
+                self.db.rollback()
+            return False
+
+    def _select_keyword_only_elements(
+        self,
+        slot_context: SlotContext,
+        season: Optional[str],
+    ) -> Optional[dict]:
+        """Keyword-Only Writing용 요소 선택 (소재 제외).
+
+        Args:
+            slot_context: 당일 슬롯 컨텍스트
+            season: 현재 시즌
+
+        Returns:
+            {"keywords": [...], "tone": ..., "all": [...]}
+        """
+        try:
+            # 키워드 3개 선택 (소재 없음)
+            keywords = self.selector.select_elements(
+                WritingElement.CATEGORY_KEYWORD,
+                count=3,
+                exclude_ids=slot_context.get_exclude_ids(WritingElement.CATEGORY_KEYWORD),
+                season=season,
+            )
+            tone = self.selector.select_element(
+                WritingElement.CATEGORY_TONE,
+                exclude_ids=slot_context.get_exclude_ids(WritingElement.CATEGORY_TONE),
+                season=season,
+            )
+            style = self.selector.select_element(
+                WritingElement.CATEGORY_STYLE,
+                exclude_ids=slot_context.get_exclude_ids(WritingElement.CATEGORY_STYLE),
+            )
+            fmt = self.selector.select_element(
+                WritingElement.CATEGORY_FORMAT,
+                exclude_ids=slot_context.get_exclude_ids(WritingElement.CATEGORY_FORMAT),
+            )
+            emotion = self.selector.select_element(
+                WritingElement.CATEGORY_EMOTION,
+                exclude_ids=slot_context.get_exclude_ids(WritingElement.CATEGORY_EMOTION),
+                season=season,
+            )
+
+            # 필수 요소 체크 (키워드 3개 필수)
+            if not all([tone, style, fmt, emotion]) or len(keywords) < 3:
+                logger.error("키워드 전용 필수 요소 선택 실패")
+                return None
+
+            all_elements = [tone, style, fmt, emotion] + keywords
+
+            return {
+                "keywords": keywords,
+                "tone": tone,
+                "style": style,
+                "format": fmt,
+                "emotion": emotion,
+                "all": all_elements,
+            }
+
+        except Exception as e:
+            logger.error(f"키워드 전용 요소 선택 실패: {e}", exc_info=True)
+            return None
 
     def _select_random_elements(
         self,

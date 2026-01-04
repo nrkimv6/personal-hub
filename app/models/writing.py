@@ -124,7 +124,8 @@ class GeneratedWriting(Base):
 
     # 상수
     TASK_TYPE_MIX = "mix"  # 3개 글 믹스
-    TASK_TYPE_RANDOM = "random"  # 랜덤 프롬프트
+    TASK_TYPE_RANDOM = "random"  # 랜덤 프롬프트 (소재+키워드)
+    TASK_TYPE_KEYWORD = "keyword"  # 키워드 전용 (소재 없음)
 
     RATING_LIKE = 1
     RATING_DISLIKE = -1
