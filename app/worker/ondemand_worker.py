@@ -13,6 +13,10 @@
     - Instagram URL 크롤링 (게시물/릴스)
     - Universal URL 크롤링 (다양한 사이트 자동 감지)
     - AI 분석 자동 요청 지원
+
+Redis 큐 지원:
+    - Redis 연결 시: Redis 큐에서 작업 수신 (BRPOP)
+    - Redis 미연결 시: SQLite 폴링 fallback
 """
 import asyncio
 import logging
@@ -29,6 +33,8 @@ from app.modules.instagram.services.crawler import InstagramCrawler
 from app.utils.error_utils import format_error_message
 
 from app.services.page_extractor.factory import get_extractor_factory
+from app.shared.redis import RedisClient, RedisQueue
+from app.shared.redis.queue import CRAWL_REQUEST_QUEUE
 
 if TYPE_CHECKING:
     from playwright.async_api import Page
@@ -45,8 +51,14 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
     - Google Form 크롤링
     - 기타 URL 크롤링
 
+    Redis 큐 지원:
+    - Redis 연결 시: Redis 큐에서 작업 수신 (즉각 반응)
+    - Redis 미연결 시: SQLite 폴링 fallback (1초 간격)
+
     Attributes:
         max_concurrent_requests: 동시 처리 가능한 최대 요청 수
+        use_redis: Redis 큐 사용 여부
+        redis_queue: Redis 큐 인스턴스
     """
 
     def __init__(self, max_concurrent_requests: int = 5, browser_manager=None):
@@ -64,20 +76,49 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
         self.max_concurrent_requests = max_concurrent_requests
         self._extractor_factory = get_extractor_factory()
 
+        # Redis 큐 관련
+        self.use_redis = False
+        self.redis_queue: Optional[RedisQueue] = None
+        self._redis_initialized = False
+
+    async def _setup_redis(self):
+        """Redis 큐 초기화."""
+        if self._redis_initialized:
+            return
+
+        redis_client = await RedisClient.get_client()
+        if redis_client:
+            self.redis_queue = RedisQueue(redis_client, CRAWL_REQUEST_QUEUE)
+            self.use_redis = True
+            logger.info(f"[{self.name}] Redis 큐 모드 활성화")
+        else:
+            self.use_redis = False
+            logger.info(f"[{self.name}] SQLite 폴링 모드 (Redis 미연결)")
+
+        self._redis_initialized = True
+
     def _get_loop_interval(self) -> float:
         """메인 루프 간격 반환."""
-        return 1.0  # 1초마다 체크 (빠른 반응)
+        # Redis 모드: 짧은 간격 (큐가 비어있을 때만 대기)
+        # SQLite 모드: 1초 간격 폴링
+        return 0.1 if self.use_redis else 1.0
 
     async def _main_loop_iteration(self):
         """메인 루프 한 사이클.
 
-        Pending 요청들을 확인하고 백그라운드 태스크로 디스패치합니다.
+        Redis 큐 또는 SQLite에서 요청을 가져와 처리합니다.
         """
+        # Redis 초기화 (첫 번째 호출 시)
+        await self._setup_redis()
+
         # 완료된 태스크 정리
         self._cleanup_completed_tasks()
 
-        # CrawlRequest Pending 요청 디스패치
-        await self._dispatch_pending_requests()
+        # Redis 큐 또는 SQLite 폴링
+        if self.use_redis:
+            await self._process_redis_queue()
+        else:
+            await self._dispatch_pending_requests()
 
     def _cleanup_stale_requests(self):
         """오래된 processing 상태 요청 정리."""
@@ -91,6 +132,78 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
             logger.error(f"[{self.name}] Stale request 정리 오류: {e}")
         finally:
             db.close()
+
+    # ========== Redis 큐 처리 ==========
+
+    async def _process_redis_queue(self):
+        """Redis 큐에서 작업을 가져와 처리.
+
+        동시 처리 슬롯이 있을 때만 큐에서 작업을 가져옵니다.
+        """
+        if not self.redis_queue:
+            return
+
+        # 동시 처리 슬롯 확인
+        active_count = len(self._active_tasks)
+        available_slots = self.max_concurrent_requests - active_count
+
+        if available_slots <= 0:
+            return
+
+        # 사용 가능한 슬롯 수만큼 작업 가져오기
+        for _ in range(available_slots):
+            job = await self.redis_queue.pop_nowait()
+            if not job:
+                break  # 큐가 비어있음
+
+            request_id = job.get("id")
+            if not request_id:
+                logger.warning(f"[{self.name}] Redis 큐 메시지에 id 없음: {job}")
+                continue
+
+            task_name = f"req_{request_id}"
+            if self._is_task_running(task_name):
+                logger.debug(f"[{self.name}] 이미 실행 중인 요청: {request_id}")
+                continue
+
+            # DB에서 요청 조회 및 상태 업데이트
+            db = SessionLocal()
+            try:
+                request = db.query(CrawlRequest).filter(
+                    CrawlRequest.id == request_id
+                ).first()
+
+                if not request:
+                    logger.warning(f"[{self.name}] Redis 큐의 요청이 DB에 없음: id={request_id}")
+                    continue
+
+                # 이미 처리된 요청인지 확인
+                if request.status not in (CrawlRequest.STATUS_QUEUED, CrawlRequest.STATUS_PENDING):
+                    logger.debug(f"[{self.name}] 이미 처리된 요청: id={request_id}, status={request.status}")
+                    continue
+
+                # picked 상태로 변경
+                request.status = CrawlRequest.STATUS_PICKED
+                request.picked_at = datetime.now()
+                request.worker_id = self.name
+                db.commit()
+
+                # 태스크 시작 (request 객체는 _execute_request에서 새로 조회)
+                self._create_task(
+                    self._execute_request(request),
+                    task_name
+                )
+                logger.info(
+                    f"[{self.name}] Redis 큐에서 태스크 시작: request_id={request_id}, "
+                    f"url_type={request.url_type}"
+                )
+
+            except Exception as e:
+                logger.error(f"[{self.name}] Redis 큐 처리 오류: {e}", exc_info=True)
+            finally:
+                db.close()
+
+    # ========== SQLite 폴링 (Fallback) ==========
 
     async def _dispatch_pending_requests(self):
         """Pending 요청을 백그라운드 태스크로 디스패치."""

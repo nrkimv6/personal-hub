@@ -47,7 +47,8 @@ class CrawlRequest(Base):
     created_at = Column(DateTime, default=datetime.now)
 
     # 상태 상수
-    STATUS_PENDING = "pending"
+    STATUS_PENDING = "pending"  # SQLite 폴링 모드용
+    STATUS_QUEUED = "queued"    # Redis 큐에 들어감
     STATUS_PICKED = "picked"
     STATUS_PROCESSING = "processing"
     STATUS_COMPLETED = "completed"
