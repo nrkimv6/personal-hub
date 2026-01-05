@@ -144,7 +144,7 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
             return
 
         # 동시 처리 슬롯 확인
-        active_count = len(self._active_tasks)
+        active_count = len(self._running_tasks)
         available_slots = self.max_concurrent_requests - active_count
 
         if available_slots <= 0:
@@ -175,6 +175,16 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
 
                 if not request:
                     logger.warning(f"[{self.name}] Redis 큐의 요청이 DB에 없음: id={request_id}")
+                    continue
+
+                # 취소된 요청 스킵
+                if request.status == CrawlRequest.STATUS_CANCELLED:
+                    logger.info(f"[{self.name}] 취소된 요청 스킵: id={request_id}")
+                    continue
+
+                # Activity 요청은 ActivityWorker가 처리
+                if request.url_type == CrawlRequest.URL_TYPE_ACTIVITY:
+                    logger.debug(f"[{self.name}] Activity 요청 스킵: id={request_id}")
                     continue
 
                 # 이미 처리된 요청인지 확인
@@ -217,6 +227,10 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
             )
 
             for pending in pending_list:
+                # Activity 요청은 ActivityWorker가 처리
+                if pending.url_type == CrawlRequest.URL_TYPE_ACTIVITY:
+                    continue
+
                 task_name = f"req_{pending.id}"
                 if self._is_task_running(task_name):
                     continue
@@ -259,6 +273,18 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
             )
 
             url_type = request.url_type
+
+            # Activity 타입은 ActivityWorker가 처리 (스킵 - 상태 유지)
+            if url_type == CrawlRequest.URL_TYPE_ACTIVITY:
+                logger.warning(
+                    f"[{self.name}] Activity 요청이 잘못 전달됨 (ActivityWorker가 처리해야 함): id={request.id}"
+                )
+                # 실패 처리하여 재시도 없이 종료
+                request_service.fail_request(
+                    request.id,
+                    "Activity 요청은 ActivityWorker가 처리해야 합니다"
+                )
+                return
 
             # Instagram 관련 타입 처리
             if url_type == CrawlRequest.URL_TYPE_INSTAGRAM:

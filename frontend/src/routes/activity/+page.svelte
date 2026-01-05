@@ -31,6 +31,22 @@
 		error_message: string | null;
 	}
 
+	interface Course {
+		id: number;
+		name: string;
+		center_name: string;
+		category: string | null;
+		fee: number | null;
+		day_of_week: string | null;
+		time_start: string | null;
+		time_end: string | null;
+		course_start: string | null;
+		course_end: string | null;
+		instructor_name: string | null;
+		source_url: string | null;
+		collected_at: string;
+	}
+
 	// API 함수
 	const API_BASE = '/api/activity';
 
@@ -46,12 +62,25 @@
 		return response.json();
 	}
 
-	// 상태
+	// 탭 상태
+	let activeTab: 'centers' | 'courses' = $state('centers');
+
+	// 공통 상태
+	let loading = $state(true);
+	let error = $state('');
+
+	// 센터 관련 상태
 	let workerStatus: WorkerStatus | null = $state(null);
 	let centers: Center[] = $state([]);
 	let requests: CrawlRequest[] = $state([]);
-	let loading = $state(true);
-	let error = $state('');
+
+	// 강좌 관련 상태
+	let courses: Course[] = $state([]);
+	let courseTotal = $state(0);
+	let coursePage = $state(1);
+	let coursePageSize = $state(20);
+	let courseKeyword = $state('');
+	let courseCategory = $state('');
 
 	// 워커 상태 로드
 	async function loadWorkerStatus() {
@@ -81,6 +110,26 @@
 		}
 	}
 
+	// 강좌 목록 로드
+	async function loadCourses() {
+		try {
+			const params = new URLSearchParams({
+				page: coursePage.toString(),
+				page_size: coursePageSize.toString()
+			});
+			if (courseKeyword) params.append('keyword', courseKeyword);
+			if (courseCategory) params.append('category', courseCategory);
+
+			const response = await apiRequest<{ items: Course[]; total: number; page: number }>(
+				`/courses?${params}`
+			);
+			courses = response.items;
+			courseTotal = response.total;
+		} catch (e) {
+			console.error('강좌 목록 로드 실패:', e);
+		}
+	}
+
 	// 크롤링 요청 생성
 	async function requestCrawl(centerId: number) {
 		try {
@@ -95,6 +144,12 @@
 		}
 	}
 
+	// 강좌 검색
+	async function searchCourses() {
+		coursePage = 1;
+		await loadCourses();
+	}
+
 	function formatDate(dateStr: string | null): string {
 		if (!dateStr) return '-';
 		return new Date(dateStr).toLocaleString('ko-KR', {
@@ -102,6 +157,14 @@
 			day: 'numeric',
 			hour: '2-digit',
 			minute: '2-digit'
+		});
+	}
+
+	function formatSimpleDate(dateStr: string | null): string {
+		if (!dateStr) return '-';
+		return new Date(dateStr).toLocaleDateString('ko-KR', {
+			month: 'short',
+			day: 'numeric'
 		});
 	}
 
@@ -126,9 +189,45 @@
 			culture: '문화센터',
 			sports: '체육센터',
 			youth: '청소년센터',
-			welfare: '복지관'
+			welfare: '복지관',
+			department: '백화점',
+			mart: '마트'
 		};
 		return types[type] || type;
+	}
+
+	function getCategoryName(cat: string | null): string {
+		if (!cat) return '-';
+		const categories: Record<string, string> = {
+			exercise: '운동/건강',
+			art: '미술/공예',
+			music: '음악',
+			cooking: '요리',
+			language: '어학',
+			hobby: '취미/교양',
+			certificate: '자격증',
+			other: '기타'
+		};
+		return categories[cat] || cat;
+	}
+
+	function formatFee(fee: number | null): string {
+		if (fee === null || fee === undefined) return '-';
+		return `${fee.toLocaleString()}원`;
+	}
+
+	// 탭 변경 시 데이터 로드
+	async function handleTabChange(tab: 'centers' | 'courses') {
+		activeTab = tab;
+		if (tab === 'courses' && courses.length === 0) {
+			await loadCourses();
+		}
+	}
+
+	// 페이지 변경
+	async function changePage(newPage: number) {
+		coursePage = newPage;
+		await loadCourses();
 	}
 
 	onMount(async () => {
@@ -136,6 +235,9 @@
 		await Promise.all([loadWorkerStatus(), loadCenters(), loadRequests()]);
 		loading = false;
 	});
+
+	// 총 페이지 수 계산
+	const totalPages = $derived(Math.ceil(courseTotal / coursePageSize));
 </script>
 
 <svelte:head>
@@ -143,15 +245,38 @@
 </svelte:head>
 
 <div class="container mx-auto p-4">
-	<h1 class="mb-6 text-2xl font-bold">문화/체육센터 강좌</h1>
+	<h1 class="mb-4 text-2xl font-bold">문화/체육센터 강좌</h1>
 
 	{#if error}
-		<div class="mb-6 rounded-lg bg-red-100 p-4 text-red-700">{error}</div>
+		<div class="mb-4 rounded-lg bg-red-100 p-4 text-red-700">{error}</div>
 	{/if}
+
+	<!-- 탭 네비게이션 -->
+	<div class="mb-6 border-b">
+		<nav class="-mb-px flex space-x-8">
+			<button
+				onclick={() => handleTabChange('centers')}
+				class="border-b-2 px-1 py-2 text-sm font-medium {activeTab === 'centers'
+					? 'border-blue-500 text-blue-600'
+					: 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'}"
+			>
+				센터 관리
+			</button>
+			<button
+				onclick={() => handleTabChange('courses')}
+				class="border-b-2 px-1 py-2 text-sm font-medium {activeTab === 'courses'
+					? 'border-blue-500 text-blue-600'
+					: 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'}"
+			>
+				강좌 목록 ({courseTotal || '...'})
+			</button>
+		</nav>
+	</div>
 
 	{#if loading}
 		<div class="text-gray-500">로딩 중...</div>
-	{:else}
+	{:else if activeTab === 'centers'}
+		<!-- 센터 관리 탭 -->
 		<div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
 			<!-- 워커 상태 카드 -->
 			<div class="rounded-lg bg-white p-4 shadow">
@@ -213,9 +338,7 @@
 									{@const badge = getStatusBadge(req.status)}
 									<tr class="border-b">
 										<td class="py-2">{req.id}</td>
-										<td class="py-2">
-											<span class="max-w-48 truncate" title={req.url}>{req.url}</span>
-										</td>
+										<td class="max-w-48 truncate py-2" title={req.url}>{req.url}</td>
 										<td class="py-2">
 											<span class="rounded px-2 py-0.5 {badge.bg} {badge.text}">
 												{badge.label}
@@ -245,7 +368,6 @@
 								<th class="pb-2">ID</th>
 								<th class="pb-2">이름</th>
 								<th class="pb-2">유형</th>
-								<th class="pb-2">지역</th>
 								<th class="pb-2">크롤링 방식</th>
 								<th class="pb-2">마지막 크롤링</th>
 								<th class="pb-2">상태</th>
@@ -258,12 +380,6 @@
 									<td class="py-2">{center.id}</td>
 									<td class="py-2 font-medium">{center.name}</td>
 									<td class="py-2">{getCenterTypeName(center.center_type)}</td>
-									<td class="py-2">
-										{center.region}
-										{#if center.district}
-											<span class="text-gray-400">{center.district}</span>
-										{/if}
-									</td>
 									<td class="py-2">{center.crawl_method}</td>
 									<td class="py-2 text-gray-500">{formatDate(center.last_crawled_at)}</td>
 									<td class="py-2">
@@ -287,6 +403,121 @@
 						</tbody>
 					</table>
 				</div>
+			{/if}
+		</div>
+	{:else}
+		<!-- 강좌 목록 탭 -->
+		<div class="rounded-lg bg-white p-4 shadow">
+			<!-- 검색 필터 -->
+			<div class="mb-4 flex flex-wrap gap-4">
+				<input
+					type="text"
+					bind:value={courseKeyword}
+					placeholder="강좌명 검색..."
+					class="rounded border px-3 py-2 text-sm"
+					onkeydown={(e) => e.key === 'Enter' && searchCourses()}
+				/>
+				<select
+					bind:value={courseCategory}
+					class="rounded border px-3 py-2 text-sm"
+					onchange={searchCourses}
+				>
+					<option value="">전체 카테고리</option>
+					<option value="exercise">운동/건강</option>
+					<option value="art">미술/공예</option>
+					<option value="music">음악</option>
+					<option value="cooking">요리</option>
+					<option value="language">어학</option>
+					<option value="hobby">취미/교양</option>
+					<option value="other">기타</option>
+				</select>
+				<button onclick={searchCourses} class="rounded bg-blue-500 px-4 py-2 text-sm text-white hover:bg-blue-600">
+					검색
+				</button>
+			</div>
+
+			<!-- 강좌 테이블 -->
+			{#if courses.length === 0}
+				<div class="py-8 text-center text-gray-500">
+					{courseKeyword || courseCategory ? '검색 결과가 없습니다.' : '수집된 강좌가 없습니다.'}
+				</div>
+			{:else}
+				<div class="overflow-x-auto">
+					<table class="w-full text-sm">
+						<thead>
+							<tr class="border-b text-left text-gray-500">
+								<th class="pb-2">강좌명</th>
+								<th class="pb-2">센터</th>
+								<th class="pb-2">카테고리</th>
+								<th class="pb-2">요일/시간</th>
+								<th class="pb-2">기간</th>
+								<th class="pb-2">강사</th>
+								<th class="pb-2">수강료</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each courses as course}
+								<tr class="border-b hover:bg-gray-50">
+									<td class="max-w-64 truncate py-2 font-medium" title={course.name}>
+										{#if course.source_url}
+											<a
+												href={course.source_url}
+												target="_blank"
+												class="text-blue-600 hover:underline"
+											>
+												{course.name}
+											</a>
+										{:else}
+											{course.name}
+										{/if}
+									</td>
+									<td class="py-2 text-gray-600">{course.center_name || '-'}</td>
+									<td class="py-2">{getCategoryName(course.category)}</td>
+									<td class="py-2">
+										{course.day_of_week || '-'}
+										{#if course.time_start}
+											<span class="text-gray-500">{course.time_start}~{course.time_end}</span>
+										{/if}
+									</td>
+									<td class="py-2 text-gray-500">
+										{formatSimpleDate(course.course_start)} ~ {formatSimpleDate(course.course_end)}
+									</td>
+									<td class="py-2">{course.instructor_name || '-'}</td>
+									<td class="py-2">{formatFee(course.fee)}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+
+				<!-- 페이지네이션 -->
+				{#if totalPages > 1}
+					<div class="mt-4 flex items-center justify-between">
+						<div class="text-sm text-gray-500">
+							총 {courseTotal}개 중 {(coursePage - 1) * coursePageSize + 1}-{Math.min(
+								coursePage * coursePageSize,
+								courseTotal
+							)}
+						</div>
+						<div class="flex gap-2">
+							<button
+								onclick={() => changePage(coursePage - 1)}
+								disabled={coursePage <= 1}
+								class="rounded border px-3 py-1 text-sm disabled:opacity-50"
+							>
+								이전
+							</button>
+							<span class="px-3 py-1 text-sm">{coursePage} / {totalPages}</span>
+							<button
+								onclick={() => changePage(coursePage + 1)}
+								disabled={coursePage >= totalPages}
+								class="rounded border px-3 py-1 text-sm disabled:opacity-50"
+							>
+								다음
+							</button>
+						</div>
+					</div>
+				{/if}
 			{/if}
 		</div>
 	{/if}
