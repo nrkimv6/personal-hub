@@ -838,5 +838,11 @@ export const videoDownloadApi = {
 
   // 통계 조회
   stats: () =>
-    requestVideoDownload<VideoDownloadStats>('/stats')
+    requestVideoDownload<VideoDownloadStats>('/stats'),
+
+  // 재시도
+  retry: (id: number) =>
+    requestVideoDownload<{ success: boolean; message: string }>(`/${id}/retry`, {
+      method: 'POST'
+    })
 };

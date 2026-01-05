@@ -226,6 +226,34 @@ class VideoDownloadService:
             self.db.refresh(request)
         return request
 
+    def retry_request(self, request_id: int) -> Optional[VideoDownload]:
+        """실패/취소된 요청 재시도.
+
+        Args:
+            request_id: 요청 ID
+
+        Returns:
+            업데이트된 요청 (없으면 None)
+        """
+        request = self.db.query(VideoDownload).filter(
+            VideoDownload.id == request_id,
+            VideoDownload.status.in_([
+                VideoDownload.STATUS_FAILED,
+                VideoDownload.STATUS_CANCELLED
+            ])
+        ).first()
+
+        if request:
+            request.status = VideoDownload.STATUS_PENDING
+            request.progress = 0
+            request.error_message = None
+            request.picked_at = None
+            request.processed_at = None
+            request.worker_id = None
+            self.db.commit()
+            self.db.refresh(request)
+        return request
+
     def get_request_by_id(self, request_id: int) -> Optional[VideoDownload]:
         """ID로 요청 조회.
 

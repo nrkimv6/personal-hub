@@ -24,6 +24,7 @@
   let newType: VideoDownloadType | '' = '';
   let newQuality = 'best';
   let newEmbeddingUrl = '';
+  let newOutputFilename = '';
   let isSubmitting = false;
 
   // 자동 새로고침
@@ -90,6 +91,7 @@
         download_type: newType || undefined,
         quality: newQuality,
         embedding_url: newEmbeddingUrl || undefined,
+        output_filename: newOutputFilename.trim() || undefined,
       });
 
       // 폼 초기화
@@ -97,6 +99,7 @@
       newType = '';
       newQuality = 'best';
       newEmbeddingUrl = '';
+      newOutputFilename = '';
       showAddModal = false;
 
       // 새로고침
@@ -116,6 +119,15 @@
       await Promise.all([fetchDownloads(), fetchStats()]);
     } catch (e) {
       alert(e instanceof Error ? e.message : '취소 실패');
+    }
+  }
+
+  async function handleRetry(id: number) {
+    try {
+      await videoDownloadApi.retry(id);
+      await Promise.all([fetchDownloads(), fetchStats()]);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : '재시도 실패');
     }
   }
 
@@ -316,8 +328,11 @@
               </td>
               <td class="px-4 py-3">
                 <div class="max-w-md">
+                  {#if download.output_filename}
+                    <div class="font-medium text-gray-900 truncate" title={download.output_filename}>{download.output_filename}</div>
+                  {/if}
                   {#if download.title}
-                    <div class="font-medium text-gray-900 truncate" title={download.title}>{download.title}</div>
+                    <div class="text-xs text-gray-500 truncate" title={download.title}>{download.title}</div>
                   {/if}
                   <a
                     href={download.url}
@@ -370,6 +385,13 @@
                     class="text-xs text-red-600 hover:text-red-800"
                   >
                     취소
+                  </button>
+                {:else if download.status === 'failed' || download.status === 'cancelled'}
+                  <button
+                    onclick={() => handleRetry(download.id)}
+                    class="text-xs text-blue-600 hover:text-blue-800"
+                  >
+                    재시도
                   </button>
                 {:else if download.status === 'completed' && download.output_path}
                   <span class="text-xs text-gray-500" title={download.output_path}>
@@ -470,10 +492,10 @@
           </select>
         </div>
 
-        {#if newType === 'vimeo'}
+        {#if newType === 'vimeo' || newUrl.toLowerCase().includes('vimeo')}
           <div>
             <label for="embeddingUrl" class="block text-sm font-medium text-gray-700 mb-1">
-              임베드 URL (선택)
+              임베드 페이지 URL (선택)
             </label>
             <input
               type="url"
@@ -482,9 +504,23 @@
               placeholder="https://example.com/page-with-vimeo"
               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
-            <p class="text-xs text-gray-500 mt-1">도메인 제한이 있는 Vimeo 영상의 경우 임베드된 페이지 URL 입력</p>
+            <p class="text-xs text-gray-500 mt-1">embed-only 비디오의 경우 비디오가 임베드된 페이지 URL 입력 필수</p>
           </div>
         {/if}
+
+        <div>
+          <label for="outputFilename" class="block text-sm font-medium text-gray-700 mb-1">
+            파일명 (선택)
+          </label>
+          <input
+            type="text"
+            id="outputFilename"
+            bind:value={newOutputFilename}
+            placeholder="저장할 파일명 (확장자 제외)"
+            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          />
+          <p class="text-xs text-gray-500 mt-1">미입력 시 영상 제목으로 자동 설정</p>
+        </div>
 
         <div class="flex justify-end gap-3 pt-4">
           <button

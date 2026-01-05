@@ -193,3 +193,34 @@ async def delete_download_request(
         )
 
     return {"success": True, "message": "다운로드 요청이 삭제되었습니다."}
+
+
+@router.post("/{download_id}/retry")
+async def retry_download_request(
+    download_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    실패한 다운로드 요청 재시도
+
+    failed/cancelled 상태의 요청만 재시도 가능
+    - 상태를 pending으로 재설정
+    - progress=0, error_message=None 초기화
+    """
+    service = VideoDownloadService(db)
+    request = service.get_request_by_id(download_id)
+
+    if not request:
+        raise HTTPException(status_code=404, detail="다운로드 요청을 찾을 수 없습니다.")
+
+    if request.status not in [VideoDownload.STATUS_FAILED, VideoDownload.STATUS_CANCELLED]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"재시도할 수 없는 상태입니다. (상태: {request.status})"
+        )
+
+    retried = service.retry_request(download_id)
+    if not retried:
+        raise HTTPException(status_code=400, detail="재시도에 실패했습니다.")
+
+    return {"success": True, "message": "다운로드 요청이 재시도 대기열에 추가되었습니다."}

@@ -318,7 +318,11 @@ class VideoDownloadWorker(BaseWorker):
             import subprocess
 
             current_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_filename = os.path.join(self.output_dir, f'vimeo_{current_datetime}')
+            # 사용자 지정 파일명이 있으면 사용, 없으면 기본 패턴
+            if request.output_filename:
+                output_filename = os.path.join(self.output_dir, request.output_filename)
+            else:
+                output_filename = os.path.join(self.output_dir, f'vimeo_{current_datetime}')
 
             # yt-dlp 명령 구성
             cmd = [
