@@ -173,6 +173,7 @@ $frontendLogFile = Get-LatestLogFile "frontend_"
 $igWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_instagram_", "instagram_")
 $claudeWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_llm_worker_", "llm_worker_")
 $videoDownloadWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_video_download_worker_", "video_download_worker_")
+$crawlWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_crawl_", "crawl_worker_")
 
 # Static log files (not timestamped)
 $serviceRunnerLogFile = Join-Path $LogDir "service_runner.log"
@@ -180,6 +181,7 @@ $watchdogLogFile = Join-Path $LogDir "watchdog.log"
 $igWatchdogLogFile = Join-Path $LogDir "instagram_watchdog.log"
 $claudeWatchdogLogFile = Join-Path $LogDir "claude_watchdog.log"
 $videoDownloadWatchdogLogFile = Join-Path $LogDir "video_download_watchdog.log"
+$crawlWatchdogLogFile = Join-Path $LogDir "crawl_watchdog.log"
 $cloudflaredLogFile = Join-Path $ProjectRoot "logs" "cloudflared.log"
 
 # Check if log files are stale (created more than 1 hour before the latest API log)
@@ -204,7 +206,8 @@ if ($apiLogFile) {
         @{ Name = "Frontend"; Var = "frontendLogFile" },
         @{ Name = "IG-Worker"; Var = "igWorkerLogFile" },
         @{ Name = "Claude Worker"; Var = "claudeWorkerLogFile" },
-        @{ Name = "Video Download"; Var = "videoDownloadWorkerLogFile" }
+        @{ Name = "Video Download"; Var = "videoDownloadWorkerLogFile" },
+        @{ Name = "Crawl Worker"; Var = "crawlWorkerLogFile" }
     )
 
     foreach ($log in $timestampedLogs) {
@@ -221,6 +224,7 @@ if ($apiLogFile) {
         @{ Name = "IG-Watchdog"; Var = "igWatchdogLogFile" },
         @{ Name = "Claude-Watchdog"; Var = "claudeWatchdogLogFile" },
         @{ Name = "Video-DL-Watchdog"; Var = "videoDownloadWatchdogLogFile" },
+        @{ Name = "Crawl-Watchdog"; Var = "crawlWatchdogLogFile" },
         @{ Name = "Service Runner"; Var = "serviceRunnerLogFile" }
     )
 
@@ -320,11 +324,13 @@ function Start-CombinedLogTail {
         [string]$IgWorkerLog,
         [string]$ClaudeWorkerLog,
         [string]$VideoDownloadLog,
+        [string]$CrawlWorkerLog,
         [string]$ServiceRunnerLog,
         [string]$WatchdogLog,
         [string]$IgWatchdogLog,
         [string]$ClaudeWatchdogLog,
         [string]$VideoDownloadWatchdogLog,
+        [string]$CrawlWatchdogLog,
         [string]$CloudflaredLog
     )
 
@@ -343,11 +349,13 @@ function Start-CombinedLogTail {
         "IG-WORKER"   = @{ Path = $IgWorkerLog;       Color = "DarkMagenta"; Tail = 3 }
         "CLAUDE"      = @{ Path = $ClaudeWorkerLog;   Color = "Blue";        Tail = 3 }
         "VIDEO-DL"    = @{ Path = $VideoDownloadLog;  Color = "DarkGreen";   Tail = 5 }
+        "CRAWL"       = @{ Path = $CrawlWorkerLog;    Color = "DarkBlue";    Tail = 5 }
         "FRONTEND"    = @{ Path = $FrontendLog;       Color = "Green";       Tail = 3 }
         "WATCHDOG"    = @{ Path = $WatchdogLog;       Color = "DarkYellow";  Tail = 2 }
         "IG-WD"       = @{ Path = $IgWatchdogLog;     Color = "DarkYellow";  Tail = 2 }
         "CLAUDE-WD"   = @{ Path = $ClaudeWatchdogLog; Color = "DarkYellow";  Tail = 2 }
         "VIDEO-DL-WD" = @{ Path = $VideoDownloadWatchdogLog; Color = "DarkYellow"; Tail = 2 }
+        "CRAWL-WD"    = @{ Path = $CrawlWatchdogLog;  Color = "DarkYellow";  Tail = 2 }
     }
 
     # Track file positions
@@ -392,6 +400,7 @@ function Start-CombinedLogTail {
         "IG-WORKER"   = @("stdout_instagram_*.log", "instagram_*.log")
         "CLAUDE"      = @("stdout_llm_worker_*.log", "llm_worker_*.log")
         "VIDEO-DL"    = @("stdout_video_download_worker_*.log", "video_download_worker_*.log")
+        "CRAWL"       = @("stdout_crawl_*.log", "crawl_worker_*.log")
         "FRONTEND"    = @("frontend_*.log")
     }
 
@@ -503,11 +512,13 @@ if ($Follow) {
                 -IgWorkerLog $igWorkerLogFile `
                 -ClaudeWorkerLog $claudeWorkerLogFile `
                 -VideoDownloadLog $videoDownloadWorkerLogFile `
+                -CrawlWorkerLog $crawlWorkerLogFile `
                 -ServiceRunnerLog $serviceRunnerLogFile `
                 -WatchdogLog $watchdogLogFile `
                 -IgWatchdogLog $igWatchdogLogFile `
                 -ClaudeWatchdogLog $claudeWatchdogLogFile `
                 -VideoDownloadWatchdogLog $videoDownloadWatchdogLogFile `
+                -CrawlWatchdogLog $crawlWatchdogLogFile `
                 -CloudflaredLog $cloudflaredLogFile
         }
     }
