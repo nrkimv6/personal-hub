@@ -229,7 +229,11 @@ class ActivityWorker(CrawlWorkerBase):
             # 동적 크롤링이 필요한 경우 브라우저 탭 사용
             if self.browser:
                 await self._ensure_browser_initialized()
-                page = await self.browser.new_page()
+                # TabPoolManager를 통해 탭 획득 (center.id를 target_id로 사용)
+                page = await self.browser.tab_pool_manager.get_tab(
+                    target_id=center.id,
+                    service_account_id=None  # 기본 계정 사용
+                )
 
         try:
             crawler = get_crawler(center, page)
