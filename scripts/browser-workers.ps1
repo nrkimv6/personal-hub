@@ -2,10 +2,11 @@
 # Manages browser-based workers via WorkerOrchestrator for user session execution
 #
 # Usage:
-#   .\scripts\browser-workers.ps1 -Action start    # Start browser workers
-#   .\scripts\browser-workers.ps1 -Action stop     # Stop browser workers
-#   .\scripts\browser-workers.ps1 -Action restart  # Restart browser workers
-#   .\scripts\browser-workers.ps1 -Action status   # Show status
+#   .\scripts\browser-workers.ps1 -Action start       # Start browser workers
+#   .\scripts\browser-workers.ps1 -Action stop        # Stop browser workers
+#   .\scripts\browser-workers.ps1 -Action restart     # Restart browser workers
+#   .\scripts\browser-workers.ps1 -Action status      # Show status
+#   .\scripts\browser-workers.ps1 -Action restart-api # Restart API server (NSSM service)
 #
 # Note: This script is for Dev mode only (browser workers require user session)
 #
@@ -16,7 +17,7 @@
 
 param(
     [Parameter(Mandatory=$true)]
-    [ValidateSet("start", "stop", "restart", "status")]
+    [ValidateSet("start", "stop", "restart", "status", "restart-api")]
     [string]$Action
 )
 
@@ -266,6 +267,78 @@ function Stop-BrowserWorkers {
     }
 }
 
+function Restart-ApiServer {
+    Write-Host ""
+    Write-Host "========================================" -ForegroundColor Yellow
+    Write-Host "  Restarting API Server" -ForegroundColor Yellow
+    Write-Host "  (Hot reload disabled - manual restart)" -ForegroundColor Gray
+    Write-Host "========================================" -ForegroundColor Yellow
+    Write-Host ""
+
+    $serviceName = "Monitor Page (Development)"
+    $apiPidFile = Join-Path $PidDir "api$PidSuffix.pid"
+
+    # Check if running as admin
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+    if ($isAdmin) {
+        # Admin: use NSSM restart
+        Write-Log "Restarting NSSM service: $serviceName"
+        try {
+            $result = nssm restart $serviceName 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-Log "API server restarted successfully" "OK"
+            } else {
+                Write-Log "NSSM restart failed: $result" "ERROR"
+            }
+        } catch {
+            Write-Log "Failed to restart NSSM service: $_" "ERROR"
+        }
+    } else {
+        # Non-admin: kill process, NSSM will auto-restart
+        Write-Log "Non-admin mode: killing API process (NSSM will auto-restart)"
+
+        if (Test-Path $apiPidFile) {
+            $savedPid = Get-Content $apiPidFile -ErrorAction SilentlyContinue
+            if ($savedPid) {
+                $proc = Get-Process -Id $savedPid -ErrorAction SilentlyContinue
+                if ($proc) {
+                    Write-Log "Stopping API process (PID: $savedPid)..."
+                    Stop-Process -Id $savedPid -Force -ErrorAction SilentlyContinue
+                    Write-Log "API process stopped. NSSM will auto-restart." "OK"
+                } else {
+                    Write-Log "API process not found (PID: $savedPid)" "WARN"
+                }
+            }
+        } else {
+            # Try to find by port
+            Write-Log "PID file not found, trying to find by port 8001..."
+            $conn = Get-NetTCPConnection -LocalPort 8001 -ErrorAction SilentlyContinue | Where-Object { $_.State -eq 'Listen' }
+            if ($conn) {
+                $procId = $conn.OwningProcess
+                Write-Log "Found process on port 8001 (PID: $procId), stopping..."
+                Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+                Write-Log "API process stopped. NSSM will auto-restart." "OK"
+            } else {
+                Write-Log "No process found on port 8001" "WARN"
+            }
+        }
+    }
+
+    # Wait and check
+    Write-Log "Waiting for API to restart..."
+    Start-Sleep -Seconds 5
+
+    try {
+        $response = Invoke-WebRequest "http://localhost:8001/api/v1/system/status" -TimeoutSec 5 -UseBasicParsing
+        if ($response.StatusCode -eq 200) {
+            Write-Log "API server is healthy" "OK"
+        }
+    } catch {
+        Write-Log "API not responding yet (may still be starting)" "WARN"
+    }
+}
+
 function Show-Status {
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Cyan
@@ -375,6 +448,9 @@ switch ($Action) {
         Stop-BrowserWorkers
         Start-Sleep -Seconds 2
         Start-BrowserWorkers
+    }
+    "restart-api" {
+        Restart-ApiServer
     }
     "status" {
         Show-Status

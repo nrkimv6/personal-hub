@@ -370,8 +370,10 @@ try {
     # Build uvicorn arguments
     $uvicornArgs = @("-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", $ApiPort)
     if ($Dev) {
-        $uvicornArgs += "--reload"
-        Write-ServiceLog "Hot reload enabled for development mode"
+        # Hot reload disabled - causes hang in Windows NSSM environment (Session 0)
+        # See: docs/2026-01-04-api-stability-improvements.md
+        # Manual reload: browser-workers.ps1 -Action restart-api
+        Write-ServiceLog "Development mode (manual reload required - hot reload disabled for stability)"
     }
 
     # Start API and wait for it (this is the main process NSSM watches)
