@@ -40,6 +40,7 @@ class InstagramPost(Base):
     service_account_id = Column(Integer, ForeignKey("service_accounts.id", ondelete="SET NULL"))
     crawl_run_id = Column(Integer)  # 레거시 - instagram_crawl_runs FK 제거됨
     collected_at = Column(DateTime, default=datetime.now, index=True)
+    source = Column(String(20), default="playwright", index=True)  # "playwright" | "extension"
 
     # 활성화 상태
     is_active = Column(Boolean, default=True, index=True)
