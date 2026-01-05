@@ -53,12 +53,14 @@ class CrawlRequest(Base):
     STATUS_PROCESSING = "processing"
     STATUS_COMPLETED = "completed"
     STATUS_FAILED = "failed"
+    STATUS_CANCELLED = "cancelled"  # 사용자에 의해 취소됨
 
     # URL 타입 상수
     URL_TYPE_INSTAGRAM = "instagram"
     URL_TYPE_NAVER_BLOG = "naver_blog"
     URL_TYPE_NAVER_FORM = "naver_form"
     URL_TYPE_GOOGLE_FORM = "google_form"
+    URL_TYPE_ACTIVITY = "activity"
     URL_TYPE_OTHER = "other"
 
     def __repr__(self):
@@ -86,6 +88,12 @@ class CrawlRequest(Base):
         self.status = self.STATUS_FAILED
         self.processed_at = datetime.now()
         self.error_message = error_message
+
+    def mark_cancelled(self, reason: str = "사용자 취소"):
+        """취소로 표시."""
+        self.status = self.STATUS_CANCELLED
+        self.processed_at = datetime.now()
+        self.error_message = reason
 
     # 스키마 호환용 프로퍼티들 (UniversalCrawlRequestResponse와 호환)
     @property
