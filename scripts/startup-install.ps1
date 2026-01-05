@@ -1,30 +1,36 @@
 # Monitor Page - 시작 프로그램 등록/해제
 # 부팅 후 자동으로 서비스 로그 창을 엽니다.
 # -IncludeWorkers 옵션으로 브라우저 워커도 등록할 수 있습니다.
+# -IncludeApiWatchdog 옵션으로 API Watchdog도 등록할 수 있습니다.
 #
 # 사용법:
-#   .\startup-install.ps1 -Action install                   # 로그 뷰어만 등록
-#   .\startup-install.ps1 -Action install -IncludeWorkers   # 로그 뷰어 + 브라우저 워커 등록
-#   .\startup-install.ps1 -Action uninstall                 # 시작 프로그램 해제
-#   .\startup-install.ps1 -Action uninstall -IncludeWorkers # 브라우저 워커도 해제
-#   .\startup-install.ps1 -Action status                    # 상태 확인
+#   .\startup-install.ps1 -Action install                       # 로그 뷰어만 등록
+#   .\startup-install.ps1 -Action install -IncludeWorkers       # 로그 뷰어 + 브라우저 워커 등록
+#   .\startup-install.ps1 -Action install -IncludeApiWatchdog   # 로그 뷰어 + API Watchdog 등록
+#   .\startup-install.ps1 -Action install -IncludeWorkers -IncludeApiWatchdog  # 전체 등록
+#   .\startup-install.ps1 -Action uninstall                     # 시작 프로그램 해제
+#   .\startup-install.ps1 -Action status                        # 상태 확인
 
 param(
     [Parameter(Mandatory=$true)]
     [ValidateSet("install", "uninstall", "status")]
     [string]$Action,
 
-    [switch]$IncludeWorkers  # 브라우저 워커 시작 프로그램 포함
+    [switch]$IncludeWorkers,      # 브라우저 워커 시작 프로그램 포함
+    [switch]$IncludeApiWatchdog   # API Watchdog 시작 프로그램 포함
 )
 
 $ShortcutName = "MonitorPage-Logs.lnk"
 $ShortcutPath = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\$ShortcutName"
 $WorkerShortcutName = "MonitorPage-BrowserWorkers.lnk"
 $WorkerShortcutPath = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\$WorkerShortcutName"
+$ApiWatchdogShortcutName = "MonitorPage-APIWatchdog.lnk"
+$ApiWatchdogShortcutPath = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\$ApiWatchdogShortcutName"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 $StartupScript = Join-Path $ScriptDir "startup-logs.ps1"
 $WorkerStartupScript = Join-Path $ScriptDir "startup-browser-workers.ps1"
+$ApiWatchdogStartupScript = Join-Path $ScriptDir "startup-api-watchdog.ps1"
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
@@ -59,11 +65,27 @@ switch ($Action) {
             Write-Host "    Location: $WorkerShortcutPath" -ForegroundColor Gray
         }
 
+        # API Watchdog 바로가기 생성 (옵션)
+        if ($IncludeApiWatchdog) {
+            $ApiWatchdogShortcut = $WshShell.CreateShortcut($ApiWatchdogShortcutPath)
+            $ApiWatchdogShortcut.TargetPath = "powershell.exe"
+            $ApiWatchdogShortcut.Arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ApiWatchdogStartupScript`""
+            $ApiWatchdogShortcut.WorkingDirectory = $ProjectRoot
+            $ApiWatchdogShortcut.Description = "Monitor Page - API Watchdog (hang detection + staged recovery)"
+            $ApiWatchdogShortcut.Save()
+
+            Write-Host "[+] API Watchdog startup registered" -ForegroundColor Green
+            Write-Host "    Location: $ApiWatchdogShortcutPath" -ForegroundColor Gray
+        }
+
         Write-Host ""
         Write-Host "On next login:" -ForegroundColor Yellow
         Write-Host "  1. Wait 15 seconds - Log viewer window opens"
         if ($IncludeWorkers) {
-            Write-Host "  2. Wait 20 seconds - Browser workers start (crawl_worker)"
+            Write-Host "  2. Wait 20 seconds - Browser workers start"
+        }
+        if ($IncludeApiWatchdog) {
+            Write-Host "  3. Wait 30 seconds - API Watchdog starts (hang detection)"
         }
         Write-Host ""
     }
@@ -88,6 +110,16 @@ switch ($Action) {
                 Write-Host "[!] Browser workers startup not registered" -ForegroundColor Yellow
             }
         }
+
+        if ($IncludeApiWatchdog) {
+            if (Test-Path $ApiWatchdogShortcutPath) {
+                Remove-Item $ApiWatchdogShortcutPath -Force
+                Write-Host "[+] API Watchdog startup removed" -ForegroundColor Green
+                $removed = $true
+            } else {
+                Write-Host "[!] API Watchdog startup not registered" -ForegroundColor Yellow
+            }
+        }
     }
 
     "status" {
@@ -104,6 +136,14 @@ switch ($Action) {
         # 브라우저 워커
         Write-Host "  Browser Workers:" -ForegroundColor White
         if (Test-Path $WorkerShortcutPath) {
+            Write-Host "    [+] Registered" -ForegroundColor Green
+        } else {
+            Write-Host "    [-] Not registered" -ForegroundColor Yellow
+        }
+
+        # API Watchdog
+        Write-Host "  API Watchdog:" -ForegroundColor White
+        if (Test-Path $ApiWatchdogShortcutPath) {
             Write-Host "    [+] Registered" -ForegroundColor Green
         } else {
             Write-Host "    [-] Not registered" -ForegroundColor Yellow
@@ -127,6 +167,15 @@ switch ($Action) {
         Write-Host "  Instagram Worker Watchdog:" -ForegroundColor White
         if ((Test-Path $igWatchdogPid) -and (Get-Process -Id (Get-Content $igWatchdogPid -ErrorAction SilentlyContinue) -ErrorAction SilentlyContinue)) {
             $savedPid = Get-Content $igWatchdogPid
+            Write-Host "    [+] Running (PID: $savedPid)" -ForegroundColor Green
+        } else {
+            Write-Host "    [-] Not running" -ForegroundColor Yellow
+        }
+
+        $apiWatchdogPid = Join-Path $PidDir "api_watchdog_dev.pid"
+        Write-Host "  API Watchdog:" -ForegroundColor White
+        if ((Test-Path $apiWatchdogPid) -and (Get-Process -Id (Get-Content $apiWatchdogPid -ErrorAction SilentlyContinue) -ErrorAction SilentlyContinue)) {
+            $savedPid = Get-Content $apiWatchdogPid
             Write-Host "    [+] Running (PID: $savedPid)" -ForegroundColor Green
         } else {
             Write-Host "    [-] Not running" -ForegroundColor Yellow
