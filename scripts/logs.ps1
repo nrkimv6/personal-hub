@@ -98,9 +98,20 @@ if ($Target -eq "list") {
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host ""
 
+    # Helper to find logs with multiple patterns
+    function Get-LogsMultiPattern {
+        param([string[]]$Patterns)
+        $allLogs = @()
+        foreach ($pattern in $Patterns) {
+            $found = Get-ChildItem (Join-Path $LogDir $pattern) -ErrorAction SilentlyContinue
+            if ($found) { $allLogs += $found }
+        }
+        return $allLogs | Sort-Object LastWriteTime -Descending
+    }
+
     # API logs
     Write-Host "[API Server Logs]" -ForegroundColor Yellow
-    $apiLogs = Get-ChildItem (Join-Path $LogDir "stdout_api_*.log") -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+    $apiLogs = Get-LogsMultiPattern @("stdout_api_*.log", "api_*.log")
     if ($apiLogs) {
         foreach ($log in $apiLogs) {
             $size = "{0:N2} KB" -f ($log.Length / 1KB)
@@ -115,7 +126,7 @@ if ($Target -eq "list") {
 
     # Worker logs
     Write-Host "[Worker Logs]" -ForegroundColor Yellow
-    $workerLogs = Get-ChildItem (Join-Path $LogDir "stdout_worker_*.log") -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+    $workerLogs = Get-LogsMultiPattern @("stdout_worker_*.log", "worker_*.log", "unified_worker_*.log")
     if ($workerLogs) {
         foreach ($log in $workerLogs) {
             $size = "{0:N2} KB" -f ($log.Length / 1KB)
@@ -130,7 +141,7 @@ if ($Target -eq "list") {
 
     # Frontend logs
     Write-Host "[Frontend Logs]" -ForegroundColor Yellow
-    $frontendLogs = Get-ChildItem (Join-Path $LogDir "frontend_*.log") -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+    $frontendLogs = Get-LogsMultiPattern @("frontend_*.log")
     if ($frontendLogs) {
         foreach ($log in $frontendLogs) {
             $size = "{0:N2} KB" -f ($log.Length / 1KB)
@@ -145,13 +156,23 @@ if ($Target -eq "list") {
     exit 0
 }
 
-# Get log files (stdout_* prefix is used by run.ps1)
-$apiLogFile = Get-LatestLogFile "stdout_api_"
-$workerLogFile = Get-LatestLogFile "stdout_worker_"
+# Get log files - try both patterns (stdout_* for NSSM, plain for direct run)
+function Get-LatestLogFileMultiPattern {
+    param([string[]]$Prefixes)
+
+    foreach ($prefix in $Prefixes) {
+        $file = Get-LatestLogFile $prefix
+        if ($file) { return $file }
+    }
+    return $null
+}
+
+$apiLogFile = Get-LatestLogFileMultiPattern @("stdout_api_", "api_")
+$workerLogFile = Get-LatestLogFileMultiPattern @("stdout_worker_", "worker_", "unified_worker_")
 $frontendLogFile = Get-LatestLogFile "frontend_"
-$igWorkerLogFile = Get-LatestLogFile "stdout_instagram_"
-$claudeWorkerLogFile = Get-LatestLogFile "stdout_llm_worker_"
-$videoDownloadWorkerLogFile = Get-LatestLogFile "stdout_video_download_worker_"
+$igWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_instagram_", "instagram_")
+$claudeWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_llm_worker_", "llm_worker_")
+$videoDownloadWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_video_download_worker_", "video_download_worker_")
 
 # Static log files (not timestamped)
 $serviceRunnerLogFile = Join-Path $LogDir "service_runner.log"
@@ -364,23 +385,36 @@ function Start-CombinedLogTail {
         $logFileNames[$source] = Split-Path $logFiles[$source] -Leaf
     }
 
-    # Define timestamped log patterns for auto-refresh
-    $timestampedLogs = @{
-        "API"         = "stdout_api_*.log"
-        "WORKER"      = "stdout_worker_*.log"
-        "IG-WORKER"   = "stdout_instagram_*.log"
-        "CLAUDE"      = "stdout_llm_worker_*.log"
-        "VIDEO-DL"    = "stdout_video_download_worker_*.log"
-        "FRONTEND"    = "frontend_*.log"
+    # Define timestamped log patterns for auto-refresh (multiple patterns per source)
+    $timestampedLogPatterns = @{
+        "API"         = @("stdout_api_*.log", "api_*.log")
+        "WORKER"      = @("stdout_worker_*.log", "worker_*.log", "unified_worker_*.log")
+        "IG-WORKER"   = @("stdout_instagram_*.log", "instagram_*.log")
+        "CLAUDE"      = @("stdout_llm_worker_*.log", "llm_worker_*.log")
+        "VIDEO-DL"    = @("stdout_video_download_worker_*.log", "video_download_worker_*.log")
+        "FRONTEND"    = @("frontend_*.log")
+    }
+
+    # Helper to find latest log from multiple patterns
+    function Get-LatestLogFromPatterns {
+        param([string[]]$Patterns)
+        $latestLog = $null
+        foreach ($pattern in $Patterns) {
+            $found = Get-ChildItem -Path $LogDir -Filter $pattern -ErrorAction SilentlyContinue |
+                Sort-Object Name -Descending | Select-Object -First 1
+            if ($found -and (-not $latestLog -or $found.Name -gt $latestLog.Name)) {
+                $latestLog = $found
+            }
+        }
+        return $latestLog
     }
 
     try {
         while ($true) {
             # Check for new log files (service restart detection)
-            foreach ($source in $timestampedLogs.Keys) {
-                $pattern = $timestampedLogs[$source]
-                $latestLog = Get-ChildItem -Path $LogDir -Filter $pattern -ErrorAction SilentlyContinue |
-                    Sort-Object Name -Descending | Select-Object -First 1
+            foreach ($source in $timestampedLogPatterns.Keys) {
+                $patterns = $timestampedLogPatterns[$source]
+                $latestLog = Get-LatestLogFromPatterns $patterns
 
                 if ($latestLog) {
                     $currentName = $logFileNames[$source]
@@ -393,8 +427,6 @@ function Start-CombinedLogTail {
                     }
                 } elseif (-not $logFiles.ContainsKey($source)) {
                     # Log file appeared for the first time
-                    $latestLog = Get-ChildItem -Path $LogDir -Filter $pattern -ErrorAction SilentlyContinue |
-                        Sort-Object Name -Descending | Select-Object -First 1
                     if ($latestLog) {
                         Write-Host "[$source] === New log detected: $($latestLog.Name) ===" -ForegroundColor Green
                         $logFiles[$source] = $latestLog.FullName
