@@ -28,7 +28,9 @@ import type {
   VideoDownload,
   VideoDownloadCreate,
   VideoDownloadList,
-  VideoDownloadStats
+  VideoDownloadStats,
+  VideoDownloadBatchCreate,
+  VideoDownloadBatchResponse
 } from '../types';
 
 // ============================================================
@@ -844,5 +846,18 @@ export const videoDownloadApi = {
   retry: (id: number) =>
     requestVideoDownload<{ success: boolean; message: string }>(`/${id}/retry`, {
       method: 'POST'
+    }),
+
+  // 삭제 (completed/failed/cancelled만 가능)
+  delete: (id: number) =>
+    requestVideoDownload<{ success: boolean; message: string }>(`/${id}/remove`, {
+      method: 'DELETE'
+    }),
+
+  // 배치 다운로드 요청 생성
+  createBatch: (data: VideoDownloadBatchCreate) =>
+    requestVideoDownload<VideoDownloadBatchResponse>('/batch', {
+      method: 'POST',
+      body: JSON.stringify(data)
     })
 };

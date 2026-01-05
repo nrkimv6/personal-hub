@@ -2,7 +2,7 @@
 
 import re
 from datetime import datetime, timedelta
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from sqlalchemy.orm import Session
 
 from app.models import VideoDownload
@@ -429,3 +429,64 @@ class VideoDownloadService:
             result["total"] += count
 
         return result
+
+    def create_batch_requests(
+        self,
+        urls: List[str],
+        download_type: Optional[str] = None,
+        quality: str = "best",
+        embedding_url: Optional[str] = None,
+        output_prefix: Optional[str] = None
+    ) -> Tuple[List[VideoDownload], int]:
+        """배치 다운로드 요청 생성.
+
+        Args:
+            urls: 비디오 URL 목록
+            download_type: 다운로드 타입 (None이면 URL별 자동 감지)
+            quality: 화질 설정
+            embedding_url: Vimeo 임베딩 URL (전체 URL에 적용)
+            output_prefix: 파일명 접두사
+
+        Returns:
+            (생성된 요청 목록, 스킵된 URL 수)
+        """
+        created_requests = []
+        skipped_count = 0
+
+        for idx, url in enumerate(urls):
+            url = url.strip()
+            if not url:
+                continue
+
+            # 중복 체크 (pending 상태)
+            if self.has_pending_for_url(url):
+                skipped_count += 1
+                continue
+
+            # URL별 다운로드 타입 결정
+            actual_type = download_type or self.detect_download_type(url)
+
+            # 파일명 생성 (접두사 + 인덱스)
+            output_filename = None
+            if output_prefix:
+                output_filename = f"{output_prefix}{idx + 1:02d}"
+
+            # 요청 생성
+            request = VideoDownload(
+                url=url,
+                download_type=actual_type,
+                quality=quality,
+                embedding_url=embedding_url if actual_type == VideoDownload.TYPE_VIMEO else None,
+                output_filename=output_filename,
+                status=VideoDownload.STATUS_PENDING,
+                created_at=datetime.now()
+            )
+            self.db.add(request)
+            created_requests.append(request)
+
+        if created_requests:
+            self.db.commit()
+            for req in created_requests:
+                self.db.refresh(req)
+
+        return created_requests, skipped_count

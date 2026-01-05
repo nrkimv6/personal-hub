@@ -94,3 +94,21 @@ class VideoDownloadStats(BaseModel):
     completed: int
     failed: int
     cancelled: int
+
+
+class VideoDownloadBatchCreate(BaseModel):
+    """배치 다운로드 요청 스키마"""
+    urls: list[str]
+    download_type: Optional[DownloadType] = None  # 자동 감지 또는 지정
+    quality: str = "best"
+    embedding_url: Optional[str] = None  # Vimeo용 (전체 URL에 적용)
+    output_prefix: Optional[str] = None  # 파일명 접두사 (선택)
+
+
+class VideoDownloadBatchResponse(BaseModel):
+    """배치 다운로드 요청 응답 스키마"""
+    success: bool
+    created_count: int
+    skipped_count: int  # 중복 URL
+    download_ids: list[int]
+    message: str
