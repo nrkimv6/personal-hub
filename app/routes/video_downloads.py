@@ -18,6 +18,8 @@ from app.schemas.video_download import (
     VideoDownloadCreateRequest,
     VideoDownloadCreateResponse,
     VideoDownloadStats,
+    VideoDownloadBatchCreate,
+    VideoDownloadBatchResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,6 +72,57 @@ async def create_download_request(
     except Exception as e:
         logger.error(f"다운로드 요청 생성 실패: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="다운로드 요청 생성에 실패했습니다.")
+
+
+@router.post("/batch", response_model=VideoDownloadBatchResponse)
+async def create_batch_download_request(
+    body: VideoDownloadBatchCreate,
+    db: Session = Depends(get_db),
+):
+    """
+    배치 다운로드 요청 생성 (여러 URL 동시 등록)
+
+    - urls: 비디오 URL 목록
+    - download_type: 다운로드 타입 (미지정 시 URL별 자동 감지)
+    - quality: 화질 설정 (기본: best)
+    - embedding_url: Vimeo 임베딩 URL (모든 Vimeo URL에 적용)
+    - output_prefix: 파일명 접두사 (선택, 예: "course_01_")
+    """
+    try:
+        if not body.urls:
+            raise HTTPException(status_code=400, detail="URL 목록이 비어있습니다.")
+
+        service = VideoDownloadService(db)
+        created_requests, skipped_count = service.create_batch_requests(
+            urls=body.urls,
+            download_type=body.download_type,
+            quality=body.quality,
+            embedding_url=body.embedding_url,
+            output_prefix=body.output_prefix
+        )
+
+        created_count = len(created_requests)
+        download_ids = [r.id for r in created_requests]
+
+        if created_count == 0 and skipped_count > 0:
+            message = f"모든 URL이 중복되어 스킵되었습니다. ({skipped_count}개)"
+        elif skipped_count > 0:
+            message = f"{created_count}개 요청 생성, {skipped_count}개 중복 스킵"
+        else:
+            message = f"{created_count}개 다운로드 요청이 생성되었습니다."
+
+        return VideoDownloadBatchResponse(
+            success=created_count > 0,
+            created_count=created_count,
+            skipped_count=skipped_count,
+            download_ids=download_ids,
+            message=message
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"배치 다운로드 요청 생성 실패: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="배치 다운로드 요청 생성에 실패했습니다.")
 
 
 @router.get("", response_model=VideoDownloadList)

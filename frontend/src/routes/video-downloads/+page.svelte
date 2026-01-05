@@ -27,6 +27,11 @@
   let newOutputFilename = '';
   let isSubmitting = false;
 
+  // 배치 모드
+  let batchMode = false;
+  let batchUrls: string[] = [''];
+  let batchOutputPrefix = '';
+
   // 자동 새로고침
   let refreshInterval: ReturnType<typeof setInterval> | null = null;
   let autoRefresh = true;
@@ -82,6 +87,11 @@
   }
 
   async function handleSubmit() {
+    if (batchMode) {
+      await handleBatchSubmit();
+      return;
+    }
+
     if (!newUrl.trim()) return;
 
     isSubmitting = true;
@@ -95,12 +105,7 @@
       });
 
       // 폼 초기화
-      newUrl = '';
-      newType = '';
-      newQuality = 'best';
-      newEmbeddingUrl = '';
-      newOutputFilename = '';
-      showAddModal = false;
+      resetForm();
 
       // 새로고침
       await Promise.all([fetchDownloads(), fetchStats()]);
@@ -110,6 +115,72 @@
       isSubmitting = false;
     }
   }
+
+  async function handleBatchSubmit() {
+    const validUrls = batchUrls.filter(url => url.trim());
+    if (validUrls.length === 0) {
+      alert('URL을 입력해주세요.');
+      return;
+    }
+
+    isSubmitting = true;
+    try {
+      const result = await videoDownloadApi.createBatch({
+        urls: validUrls.map(url => url.trim()),
+        download_type: newType || undefined,
+        quality: newQuality,
+        embedding_url: newEmbeddingUrl || undefined,
+        output_prefix: batchOutputPrefix.trim() || undefined,
+      });
+
+      alert(result.message);
+
+      // 폼 초기화
+      resetForm();
+
+      // 새로고침
+      await Promise.all([fetchDownloads(), fetchStats()]);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : '배치 다운로드 요청 실패');
+    } finally {
+      isSubmitting = false;
+    }
+  }
+
+  function resetForm() {
+    newUrl = '';
+    newType = '';
+    newQuality = 'best';
+    newEmbeddingUrl = '';
+    newOutputFilename = '';
+    batchUrls = [''];
+    batchOutputPrefix = '';
+    batchMode = false;
+    showAddModal = false;
+  }
+
+  function addBatchUrl() {
+    batchUrls = [...batchUrls, ''];
+  }
+
+  function removeBatchUrl(index: number) {
+    if (batchUrls.length > 1) {
+      batchUrls = batchUrls.filter((_, i) => i !== index);
+    }
+  }
+
+  function updateBatchUrl(index: number, value: string) {
+    batchUrls[index] = value;
+    batchUrls = batchUrls;
+  }
+
+  // Vimeo 감지 (배치 모드)
+  $: hasVimeoUrl = batchMode
+    ? batchUrls.some(url => url.toLowerCase().includes('vimeo'))
+    : newUrl.toLowerCase().includes('vimeo') || newType === 'vimeo';
+
+  // 유효한 URL 개수
+  $: validUrlCount = batchUrls.filter(url => url.trim()).length;
 
   async function handleCancel(id: number) {
     if (!confirm('다운로드를 취소하시겠습니까?')) return;
@@ -128,6 +199,17 @@
       await Promise.all([fetchDownloads(), fetchStats()]);
     } catch (e) {
       alert(e instanceof Error ? e.message : '재시도 실패');
+    }
+  }
+
+  async function handleDelete(id: number) {
+    if (!confirm('이 다운로드 기록을 삭제하시겠습니까?')) return;
+
+    try {
+      await videoDownloadApi.delete(id);
+      await Promise.all([fetchDownloads(), fetchStats()]);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : '삭제 실패');
     }
   }
 
@@ -379,25 +461,41 @@
                 {formatDate(download.created_at)}
               </td>
               <td class="px-4 py-3 text-right">
-                {#if download.status === 'pending' || download.status === 'picked' || download.status === 'processing'}
-                  <button
-                    onclick={() => handleCancel(download.id)}
-                    class="text-xs text-red-600 hover:text-red-800"
-                  >
-                    취소
-                  </button>
-                {:else if download.status === 'failed' || download.status === 'cancelled'}
-                  <button
-                    onclick={() => handleRetry(download.id)}
-                    class="text-xs text-blue-600 hover:text-blue-800"
-                  >
-                    재시도
-                  </button>
-                {:else if download.status === 'completed' && download.output_path}
-                  <span class="text-xs text-gray-500" title={download.output_path}>
-                    저장됨
-                  </span>
-                {/if}
+                <div class="flex items-center justify-end gap-2">
+                  {#if download.status === 'pending' || download.status === 'picked' || download.status === 'processing'}
+                    <button
+                      onclick={() => handleCancel(download.id)}
+                      class="text-xs text-red-600 hover:text-red-800"
+                    >
+                      취소
+                    </button>
+                  {:else if download.status === 'failed' || download.status === 'cancelled'}
+                    <button
+                      onclick={() => handleRetry(download.id)}
+                      class="text-xs text-blue-600 hover:text-blue-800"
+                    >
+                      재시도
+                    </button>
+                    <button
+                      onclick={() => handleDelete(download.id)}
+                      class="text-xs text-gray-500 hover:text-red-600"
+                    >
+                      삭제
+                    </button>
+                  {:else if download.status === 'completed'}
+                    {#if download.output_path}
+                      <span class="text-xs text-gray-500" title={download.output_path}>
+                        저장됨
+                      </span>
+                    {/if}
+                    <button
+                      onclick={() => handleDelete(download.id)}
+                      class="text-xs text-gray-500 hover:text-red-600"
+                    >
+                      삭제
+                    </button>
+                  {/if}
+                </div>
               </td>
             </tr>
           {/each}
@@ -438,27 +536,108 @@
 <!-- 새 다운로드 모달 -->
 {#if showAddModal}
   <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-    <div class="bg-white rounded-lg w-full max-w-lg mx-4 overflow-hidden shadow-xl">
-      <div class="px-6 py-4 border-b border-gray-200">
+    <div class="bg-white rounded-lg w-full max-w-lg mx-4 overflow-hidden shadow-xl max-h-[90vh] flex flex-col">
+      <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
         <h2 class="text-lg font-semibold text-gray-900">새 다운로드</h2>
+        <label class="flex items-center gap-2 cursor-pointer">
+          <span class="text-sm text-gray-600">배치 모드</span>
+          <button
+            type="button"
+            onclick={() => batchMode = !batchMode}
+            class="relative w-11 h-6 rounded-full transition-colors {batchMode ? 'bg-blue-600' : 'bg-gray-300'}"
+          >
+            <span
+              class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform {batchMode ? 'translate-x-5' : ''}"
+            ></span>
+          </button>
+        </label>
       </div>
 
-      <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }} class="p-6 space-y-4">
-        <div>
-          <label for="url" class="block text-sm font-medium text-gray-700 mb-1">
-            URL <span class="text-red-500">*</span>
-          </label>
-          <input
-            type="url"
-            id="url"
-            bind:value={newUrl}
-            placeholder="https://www.youtube.com/watch?v=..."
-            required
-            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          />
-          <p class="text-xs text-gray-500 mt-1">YouTube, YouTube Live, Vimeo URL 지원</p>
-        </div>
+      <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }} class="p-6 space-y-4 overflow-y-auto flex-1">
+        {#if batchMode}
+          <!-- 배치 모드: 복수 URL 입력 -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+              URL 목록 <span class="text-red-500">*</span>
+            </label>
+            <div class="space-y-2 max-h-48 overflow-y-auto">
+              {#each batchUrls as url, index}
+                <div class="flex items-center gap-2">
+                  <input
+                    type="url"
+                    value={url}
+                    oninput={(e) => updateBatchUrl(index, (e.target as HTMLInputElement).value)}
+                    placeholder="https://vimeo.com/..."
+                    class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onclick={() => removeBatchUrl(index)}
+                    disabled={batchUrls.length === 1}
+                    class="p-2 text-gray-400 hover:text-red-500 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                  </button>
+                </div>
+              {/each}
+            </div>
+            <button
+              type="button"
+              onclick={addBatchUrl}
+              class="mt-2 text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1"
+            >
+              <span class="text-lg">+</span> URL 추가
+            </button>
+          </div>
 
+          <div>
+            <label for="batchOutputPrefix" class="block text-sm font-medium text-gray-700 mb-1">
+              파일명 접두사 (선택)
+            </label>
+            <input
+              type="text"
+              id="batchOutputPrefix"
+              bind:value={batchOutputPrefix}
+              placeholder="course_01_"
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+            <p class="text-xs text-gray-500 mt-1">입력시 파일명이 접두사01, 접두사02... 형태로 저장</p>
+          </div>
+        {:else}
+          <!-- 단일 모드: 기존 UI -->
+          <div>
+            <label for="url" class="block text-sm font-medium text-gray-700 mb-1">
+              URL <span class="text-red-500">*</span>
+            </label>
+            <input
+              type="url"
+              id="url"
+              bind:value={newUrl}
+              placeholder="https://www.youtube.com/watch?v=..."
+              required
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+            <p class="text-xs text-gray-500 mt-1">YouTube, YouTube Live, Vimeo URL 지원</p>
+          </div>
+
+          <div>
+            <label for="outputFilename" class="block text-sm font-medium text-gray-700 mb-1">
+              파일명 (선택)
+            </label>
+            <input
+              type="text"
+              id="outputFilename"
+              bind:value={newOutputFilename}
+              placeholder="저장할 파일명 (확장자 제외)"
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+            <p class="text-xs text-gray-500 mt-1">미입력 시 영상 제목으로 자동 설정</p>
+          </div>
+        {/if}
+
+        <!-- 공통 설정 -->
         <div>
           <label for="type" class="block text-sm font-medium text-gray-700 mb-1">
             다운로드 타입
@@ -492,7 +671,7 @@
           </select>
         </div>
 
-        {#if newType === 'vimeo' || newUrl.toLowerCase().includes('vimeo')}
+        {#if hasVimeoUrl}
           <div>
             <label for="embeddingUrl" class="block text-sm font-medium text-gray-700 mb-1">
               임베드 페이지 URL (선택)
@@ -508,34 +687,26 @@
           </div>
         {/if}
 
-        <div>
-          <label for="outputFilename" class="block text-sm font-medium text-gray-700 mb-1">
-            파일명 (선택)
-          </label>
-          <input
-            type="text"
-            id="outputFilename"
-            bind:value={newOutputFilename}
-            placeholder="저장할 파일명 (확장자 제외)"
-            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          />
-          <p class="text-xs text-gray-500 mt-1">미입력 시 영상 제목으로 자동 설정</p>
-        </div>
-
         <div class="flex justify-end gap-3 pt-4">
           <button
             type="button"
-            onclick={() => showAddModal = false}
+            onclick={resetForm}
             class="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
           >
             취소
           </button>
           <button
             type="submit"
-            disabled={isSubmitting || !newUrl.trim()}
+            disabled={isSubmitting || (batchMode ? validUrlCount === 0 : !newUrl.trim())}
             class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isSubmitting ? '요청중...' : '다운로드 요청'}
+            {#if isSubmitting}
+              요청중...
+            {:else if batchMode}
+              다운로드 요청 ({validUrlCount}개)
+            {:else}
+              다운로드 요청
+            {/if}
           </button>
         </div>
       </form>
