@@ -174,10 +174,10 @@
     batchUrls = batchUrls;
   }
 
-  // Vimeo 감지 (배치 모드)
-  $: hasVimeoUrl = batchMode
+  // Vimeo 감지 (타입 선택 또는 URL에 vimeo 포함)
+  $: hasVimeoUrl = newType === 'vimeo' || (batchMode
     ? batchUrls.some(url => url.toLowerCase().includes('vimeo'))
-    : newUrl.toLowerCase().includes('vimeo') || newType === 'vimeo';
+    : newUrl.toLowerCase().includes('vimeo'));
 
   // 유효한 URL 개수
   $: validUrlCount = batchUrls.filter(url => url.trim()).length;
