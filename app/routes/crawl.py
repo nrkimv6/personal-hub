@@ -158,6 +158,26 @@ async def retry_request(
     return retry
 
 
+@router.post("/requests/{request_id}/cancel", response_model=CrawlRequestResponse)
+async def cancel_request(
+    request_id: int,
+    db: Session = Depends(get_db)
+):
+    """대기 중인 요청 취소.
+
+    pending, queued 상태의 요청만 취소 가능합니다.
+    picked, processing 상태는 이미 워커가 처리 중이므로 취소할 수 없습니다.
+    """
+    service = CrawlRequestService(db)
+    cancelled = await service.cancel_request(request_id)
+    if not cancelled:
+        raise HTTPException(
+            status_code=400,
+            detail="취소할 수 없는 상태입니다 (pending/queued만 취소 가능)"
+        )
+    return cancelled
+
+
 # ============= URL Crawl Endpoints (from v1) =============
 
 @router.post("/url", response_model=CrawlUrlResponse)

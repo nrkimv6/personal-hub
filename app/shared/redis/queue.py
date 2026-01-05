@@ -200,3 +200,38 @@ class RedisQueue:
             "name": self.queue_name,
             "length": await self.length(),
         }
+
+    async def remove_by_id(self, request_id: int) -> bool:
+        """ID로 큐에서 항목 제거 (best effort).
+
+        큐 전체를 순회하면서 ID가 일치하는 항목을 찾아 제거합니다.
+        Redis List의 특성상 정확한 제거가 보장되지 않을 수 있습니다.
+
+        Args:
+            request_id: 제거할 요청 ID
+
+        Returns:
+            bool: 제거 성공 여부
+        """
+        try:
+            # 큐 전체를 조회
+            items = await self.client.lrange(self.queue_name, 0, -1)
+
+            for item in items:
+                try:
+                    data = json.loads(item)
+                    if data.get("id") == request_id:
+                        # 해당 항목 제거 (count=1: 첫 번째 일치 항목만)
+                        removed = await self.client.lrem(self.queue_name, 1, item)
+                        if removed > 0:
+                            logger.info(f"큐에서 항목 제거 성공: {self.queue_name}, id={request_id}")
+                            return True
+                except json.JSONDecodeError:
+                    continue
+
+            logger.debug(f"큐에서 항목을 찾지 못함: {self.queue_name}, id={request_id}")
+            return False
+
+        except Exception as e:
+            logger.warning(f"큐에서 항목 제거 실패: {self.queue_name}, id={request_id}, error={e}")
+            return False

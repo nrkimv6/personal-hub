@@ -293,3 +293,81 @@ class CrawlRequestService:
         if url_type:
             query = query.filter(CrawlRequest.url_type == url_type)
         return query.order_by(CrawlRequest.requested_at.asc()).all()
+
+    async def cancel_request(
+        self,
+        request_id: int,
+        reason: str = "사용자 취소"
+    ) -> Optional[CrawlRequest]:
+        """대기 중인 요청 취소.
+
+        pending, queued 상태만 취소 가능.
+        Redis 큐에서도 제거 시도 (best effort).
+
+        Args:
+            request_id: 취소할 요청 ID
+            reason: 취소 사유
+
+        Returns:
+            취소된 요청 객체 또는 None (취소 불가 시)
+        """
+        request = self.db.query(CrawlRequest).filter(
+            CrawlRequest.id == request_id,
+            CrawlRequest.status.in_([
+                CrawlRequest.STATUS_PENDING,
+                CrawlRequest.STATUS_QUEUED
+            ])
+        ).first()
+
+        if not request:
+            return None
+
+        # Redis 큐에서 제거 시도 (best effort - 실패해도 계속 진행)
+        try:
+            redis_client = await RedisClient.get_client()
+            if redis_client:
+                queue = RedisQueue(redis_client, CRAWL_REQUEST_QUEUE)
+                # 큐에서 해당 ID의 항목 제거 시도
+                await queue.remove_by_id(request_id)
+                logger.info(f"Redis 큐에서 요청 제거 시도: id={request_id}")
+        except Exception as e:
+            logger.warning(f"Redis 큐에서 요청 제거 실패 (무시): id={request_id}, error={e}")
+
+        request.mark_cancelled(reason)
+        self.db.commit()
+        self.db.refresh(request)
+        logger.info(f"요청 취소 완료: id={request_id}, reason={reason}")
+        return request
+
+    def cancel_request_sync(
+        self,
+        request_id: int,
+        reason: str = "사용자 취소"
+    ) -> Optional[CrawlRequest]:
+        """대기 중인 요청 취소 (동기 버전 - Redis 큐 제거 없음).
+
+        pending, queued 상태만 취소 가능.
+
+        Args:
+            request_id: 취소할 요청 ID
+            reason: 취소 사유
+
+        Returns:
+            취소된 요청 객체 또는 None (취소 불가 시)
+        """
+        request = self.db.query(CrawlRequest).filter(
+            CrawlRequest.id == request_id,
+            CrawlRequest.status.in_([
+                CrawlRequest.STATUS_PENDING,
+                CrawlRequest.STATUS_QUEUED
+            ])
+        ).first()
+
+        if not request:
+            return None
+
+        request.mark_cancelled(reason)
+        self.db.commit()
+        self.db.refresh(request)
+        logger.info(f"요청 취소 완료 (동기): id={request_id}, reason={reason}")
+        return request

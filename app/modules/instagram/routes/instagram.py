@@ -551,23 +551,29 @@ async def crawl_by_generic_url(
 @router.post("/crawl/manual", response_model=CrawlRequestSchema)
 async def request_manual_crawl(
     service_account_id: int = Query(..., description="수집 계정 ID"),
+    force: bool = Query(False, description="True면 이미 대기 중인 요청이 있어도 새로 생성 (다중 큐잉)"),
     db: Session = Depends(get_db),
 ):
     """수동 크롤링 요청.
 
     요청은 큐에 추가되며 워커가 처리합니다.
-    이미 대기 중인 요청이 있으면 기존 요청을 반환합니다.
+    기본적으로 이미 대기 중인 요청이 있으면 기존 요청을 반환합니다.
+    force=True를 사용하면 여러 요청을 큐에 쌓을 수 있습니다.
     """
     request_service = CrawlRequestService(db)
 
-    # 이미 활성 요청이 있는지 확인
-    if request_service.has_active_request(service_account_id):
+    # force=False일 때만 기존 활성 요청 체크
+    if not force and request_service.has_active_request(service_account_id):
         existing = request_service.get_pending_request(service_account_id)
         if existing:
             return CrawlRequestSchema.model_validate(existing)
 
-    # 새 요청 생성
-    request = request_service.create_request(service_account_id, requested_by="manual")
+    # 새 요청 생성 (force=True면 중복 체크 스킵)
+    request = request_service.create_request(
+        service_account_id,
+        requested_by="manual",
+        force_create=force
+    )
     return CrawlRequestSchema.model_validate(request)
 
 

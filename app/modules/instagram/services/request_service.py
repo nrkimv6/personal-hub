@@ -52,21 +52,24 @@ class CrawlRequestService:
         self,
         service_account_id: int,
         requested_by: str = "manual",
+        force_create: bool = False,
     ) -> CrawlRequest:
         """크롤링 요청 생성.
 
         Args:
             service_account_id: 수집 계정 ID
             requested_by: 요청 출처 ('manual', 'scheduler', 'retry')
+            force_create: True면 중복 체크 없이 강제 생성 (다중 큐잉 허용)
 
         Returns:
             생성된 요청 객체
         """
-        # 이미 대기 중인 요청이 있는지 확인
-        existing = self.get_pending_request(service_account_id)
-        if existing:
-            logger.info(f"Pending request already exists for account {service_account_id}")
-            return existing
+        # 이미 대기 중인 요청이 있는지 확인 (force_create=True면 스킵)
+        if not force_create:
+            existing = self.get_pending_request(service_account_id)
+            if existing:
+                logger.info(f"Pending request already exists for account {service_account_id}")
+                return existing
 
         url = self._make_feed_url(service_account_id)
         request = CrawlRequest(
@@ -80,7 +83,7 @@ class CrawlRequestService:
         self.db.commit()
         self.db.refresh(request)
 
-        logger.info(f"Created crawl request {request.id} for account {service_account_id}")
+        logger.info(f"Created crawl request {request.id} for account {service_account_id} (force={force_create})")
         return request
 
     def get_pending_request(self, service_account_id: Optional[int] = None) -> Optional[CrawlRequest]:
