@@ -207,8 +207,6 @@ class ActivityWorker(CrawlWorkerBase):
     async def _crawl_center(self, center: ActivityCenter, crawl_run_id: int) -> dict:
         """센터 크롤링 수행.
 
-        TODO: 사이트별 크롤러 구현 후 여기서 호출
-
         Args:
             center: 센터 모델
             crawl_run_id: 크롤링 실행 ID
@@ -216,29 +214,82 @@ class ActivityWorker(CrawlWorkerBase):
         Returns:
             결과 딕셔너리 {found, new, updated}
         """
+        from app.modules.activity.crawlers import get_crawler
+        from app.modules.activity.services.import_service import ImportService
+        from app.modules.activity.models.schemas import CourseImportRequest
+
         logger.info(
             f"[ActivityWorker] 크롤링 시작: "
             f"center={center.name}, method={center.crawl_method}"
         )
 
-        # TODO: 크롤러 방식에 따라 분기
-        # if center.crawl_method == "static":
-        #     return await self._crawl_static(center)
-        # elif center.crawl_method == "dynamic":
-        #     return await self._crawl_dynamic(center)
-        # elif center.crawl_method == "api":
-        #     return await self._crawl_api(center)
+        # 크롤러 획득
+        page = None
+        if center.crawl_method == "dynamic":
+            # 동적 크롤링이 필요한 경우 브라우저 탭 사용
+            if self.browser:
+                await self._ensure_browser_initialized()
+                page = await self.browser.new_page()
 
-        # 현재는 더미 결과 반환 (크롤러 미구현)
-        logger.warning(
-            f"[ActivityWorker] 사이트별 크롤러 미구현: {center.name}"
-        )
+        try:
+            crawler = get_crawler(center, page)
 
-        return {
-            "found": 0,
-            "new": 0,
-            "updated": 0,
-        }
+            if not crawler:
+                raise ValueError(f"지원되지 않는 크롤러: {center.name}")
+
+            # DB 세션 및 ImportService 생성
+            db = SessionLocal()
+            import_service = ImportService(db)
+
+            # 수집 결과 추적
+            stats = {"found": 0, "new": 0, "updated": 0}
+
+            async def on_course_collected(course):
+                """강좌 수집 콜백 - 실시간 저장."""
+                nonlocal stats
+                try:
+                    # 단일 강좌 임포트
+                    request = CourseImportRequest(
+                        courses=[course],
+                        update_existing=True,
+                    )
+                    result = import_service.import_courses(request, crawl_run_id)
+
+                    stats["found"] += 1
+                    stats["new"] += result.created
+                    stats["updated"] += result.updated
+
+                    return result.created > 0
+                except Exception as e:
+                    logger.error(f"[ActivityWorker] 강좌 저장 실패: {e}")
+                    return False
+
+            try:
+                # 크롤링 실행
+                result = await crawler.crawl(on_course_collected=on_course_collected)
+
+                logger.info(
+                    f"[ActivityWorker] 크롤링 결과: status={result.status}, "
+                    f"found={stats['found']}, new={stats['new']}, updated={stats['updated']}"
+                )
+
+                if result.error_message:
+                    logger.warning(
+                        f"[ActivityWorker] 크롤링 오류: {result.error_message}"
+                    )
+
+                return stats
+
+            finally:
+                db.close()
+
+        finally:
+            # 동적 크롤링 탭 정리
+            if page:
+                try:
+                    await page.close()
+                except Exception as e:
+                    logger.warning(f"[ActivityWorker] 페이지 정리 실패: {e}")
 
     def _mark_request_failed(self, request_id: int, error: str):
         """요청 실패 처리."""
