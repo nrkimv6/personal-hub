@@ -100,6 +100,26 @@ class BaseCrawler(ABC):
     def _load_config(self) -> CrawlConfig:
         """센터의 crawl_config에서 설정 로드."""
         raw_config = self.center.crawl_config or {}
+
+        # 알려진 키 목록
+        known_keys = {
+            "max_pages",
+            "page_size",
+            "delay",
+            "timeout",
+            "selectors",
+            "api_endpoint",
+            "api_headers",
+            "api_params",
+            "extra",
+            "crawler_id",  # 크롤러 선택용
+        }
+
+        # extra: 명시적 extra + 알려지지 않은 키들 병합
+        explicit_extra = raw_config.get("extra", {})
+        implicit_extra = {k: v for k, v in raw_config.items() if k not in known_keys}
+        merged_extra = {**implicit_extra, **explicit_extra}
+
         return CrawlConfig(
             max_pages=raw_config.get("max_pages", 100),
             page_size=raw_config.get("page_size", 20),
@@ -109,7 +129,7 @@ class BaseCrawler(ABC):
             api_endpoint=raw_config.get("api_endpoint"),
             api_headers=raw_config.get("api_headers", {}),
             api_params=raw_config.get("api_params", {}),
-            extra=raw_config.get("extra", {}),
+            extra=merged_extra,
         )
 
     @abstractmethod
