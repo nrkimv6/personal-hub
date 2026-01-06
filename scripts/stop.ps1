@@ -317,6 +317,11 @@ Write-Host "----------------------------------------"
 
 foreach ($pidFile in $PidFiles) {
     if (Test-Path $pidFile) {
+        # -SkipWorkers: preserve worker/watchdog PID files (for service restart - workers run separately)
+        if ($SkipWorkers -and ($pidFile -match "worker" -or $pidFile -match "watchdog")) {
+            Write-Host "  (skipping: $(Split-Path $pidFile -Leaf) - SkipWorkers)" -ForegroundColor Gray
+            continue
+        }
         $name = Split-Path $pidFile -Leaf
         Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
         Write-Host "  [+] Deleted: $name" -ForegroundColor Green
@@ -333,7 +338,7 @@ Write-Host "----------------------------------------"
 
 # Only clean up browsers in Dev mode or when stopping All
 # Production mode doesn't run workers, so no browsers to clean
-if ($Dev -or $All) {
+if (($Dev -or $All) -and (-not $SkipWorkers)) {
     $browserProfilesPath = Join-Path $ProjectRoot "data\browser_profiles"
 
     # 5-1: Kill Playwright Chromium processes (identified by ms-playwright path)
