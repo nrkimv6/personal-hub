@@ -148,12 +148,13 @@ class VideoDownloadWorker(BaseWorker):
                 logger.warning(f"[{self.name}] 요청을 찾을 수 없음: id={request_id}")
                 return
 
-            # processing 상태로 변경
-            service.start_processing(request_id)
+            # processing 상태로 변경 (commit 발생하므로 반환된 객체 사용)
+            request = service.start_processing(request_id) or request
 
             logger.info(
                 f"[{self.name}] 다운로드 시작: id={request_id}, "
-                f"type={request.download_type}, url={request.url}"
+                f"type={request.download_type}, url={request.url}, "
+                f"output_filename={request.output_filename}"
             )
 
             # 다운로드 타입에 따라 분기
