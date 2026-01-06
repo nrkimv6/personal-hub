@@ -155,6 +155,7 @@ export const eventApi = {
     if (params?.is_participated !== undefined) searchParams.append('is_participated', String(params.is_participated));
     if (params?.is_offline !== undefined) searchParams.append('is_offline', String(params.is_offline));
     if (params?.include_unknown_period !== undefined) searchParams.append('include_unknown_period', String(params.include_unknown_period));
+    if (params?.unknown_period_filter) searchParams.append('unknown_period_filter', params.unknown_period_filter);
     if (params?.search) searchParams.append('search', params.search);
     if (params?.sort_by) searchParams.append('sort_by', params.sort_by);
     if (params?.sort_order) searchParams.append('sort_order', params.sort_order);
@@ -250,6 +251,7 @@ export const popupApi = {
     if (params?.is_bookmarked !== undefined) searchParams.append('is_bookmarked', String(params.is_bookmarked));
     if (params?.is_visited !== undefined) searchParams.append('is_visited', String(params.is_visited));
     if (params?.include_unknown_period !== undefined) searchParams.append('include_unknown_period', String(params.include_unknown_period));
+    if (params?.unknown_period_filter) searchParams.append('unknown_period_filter', params.unknown_period_filter);
     if (params?.search) searchParams.append('search', params.search);
     if (params?.sort_by) searchParams.append('sort_by', params.sort_by);
     if (params?.sort_order) searchParams.append('sort_order', params.sort_order);
