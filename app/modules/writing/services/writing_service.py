@@ -1,6 +1,9 @@
 """Writing Service - 글 생성 관련 비즈니스 로직."""
 
+import json
+import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import func
@@ -13,6 +16,10 @@ from app.models.writing import (
     WritingRssFeed,
     WritingSearchQuery,
 )
+from app.modules.writing.models.writing_batch import WritingBatch
+from app.modules.claude_worker.models.llm_request import LLMRequest
+
+logger = logging.getLogger(__name__)
 
 
 class WritingService:
@@ -306,6 +313,464 @@ class WritingService:
             "run_id": run.id,
             "schedule_id": schedule.id,
             **result,
+        }
+
+    # ========== 배치 기반 글쓰기 (Redis 큐) ==========
+
+    async def create_writing_batch(
+        self,
+        schedule_run_id: Optional[int] = None,
+    ) -> WritingBatch:
+        """글쓰기 배치 생성 및 LLM 요청 큐잉.
+
+        11개 LLM 요청을 생성하고 Redis 큐에 추가합니다.
+        API는 즉시 반환되고, Claude Worker가 비동기로 처리합니다.
+
+        Args:
+            schedule_run_id: 스케줄 실행 ID (수동 실행 시 None)
+
+        Returns:
+            생성된 WritingBatch
+        """
+        from app.modules.writing.worker.writing_worker import SlotContext
+        from app.modules.writing.services.element_selector import ElementSelector
+        from app.models.writing_element import WritingElement
+        from app.shared.redis import RedisClient, RedisQueue
+        from app.shared.redis.queue import LLM_REQUEST_QUEUE
+
+        # 1. 배치 레코드 생성
+        batch = WritingBatch(
+            schedule_run_id=schedule_run_id,
+            status=WritingBatch.STATUS_PENDING,
+            total_count=11,  # 5 mix + 3 random + 3 keyword
+        )
+        self.db.add(batch)
+        self.db.commit()
+        self.db.refresh(batch)
+
+        # 2. 슬롯 컨텍스트 초기화
+        slot_context = SlotContext()
+        selector = ElementSelector(self.db)
+
+        # 3. 현재 시즌 결정
+        current_season = self._get_current_season()
+
+        # 4. Redis 클라이언트 획득
+        redis_client = await RedisClient.get_client()
+        llm_queue = RedisQueue(redis_client, LLM_REQUEST_QUEUE) if redis_client else None
+
+        # 5. 프롬프트 템플릿 로드
+        prompts = self._load_prompt_templates()
+
+        # 6. 11개 LLM 요청 생성
+        # Mix 글쓰기 (5회)
+        for i in range(5):
+            await self._queue_mix_writing(
+                batch.id, selector, slot_context, i, prompts, llm_queue
+            )
+
+        # Random 소재+키워드 글쓰기 (3회)
+        for i in range(3):
+            await self._queue_random_writing(
+                batch.id, selector, slot_context, current_season, i, prompts, llm_queue
+            )
+
+        # Keyword-only 글쓰기 (3회)
+        for i in range(3):
+            await self._queue_keyword_writing(
+                batch.id, selector, slot_context, current_season, i, prompts, llm_queue
+            )
+
+        # 7. 슬롯 컨텍스트 저장 및 배치 시작
+        batch.slot_context = json.dumps({
+            "used_source_ids": slot_context.used_source_ids,
+            "used_topic_ids": slot_context.used_topic_ids,
+            "used_keyword_ids": slot_context.used_keyword_ids,
+            "season": current_season,
+        }, ensure_ascii=False)
+        batch.mark_started()
+        self.db.commit()
+
+        logger.info(f"글쓰기 배치 생성 완료: batch_id={batch.id}, total={batch.total_count}")
+        return batch
+
+    def _load_prompt_templates(self) -> dict:
+        """프롬프트 템플릿 로드."""
+        base_path = Path(__file__).parent.parent / "prompts"
+
+        templates = {}
+        for name in ["mix_prompt", "random_prompt", "keyword_only_prompt"]:
+            path = base_path / f"{name}.md"
+            if path.exists():
+                templates[name] = path.read_text(encoding="utf-8")
+            else:
+                templates[name] = ""
+                logger.warning(f"프롬프트 파일 없음: {path}")
+
+        return templates
+
+    def _get_current_season(self) -> Optional[str]:
+        """현재 시즌 반환."""
+        from app.models.writing_element import WritingElement
+
+        month = datetime.now().month
+        day = datetime.now().day
+
+        # 특별일 체크
+        if month == 5 and 5 <= day <= 10:
+            return WritingElement.SEASON_PARENTS_DAY
+        if month == 9 and 10 <= day <= 20:
+            return WritingElement.SEASON_CHUSEOK
+
+        # 계절
+        if month in [3, 4, 5]:
+            return WritingElement.SEASON_SPRING
+        elif month in [6, 7, 8]:
+            return WritingElement.SEASON_SUMMER
+        elif month in [9, 10, 11]:
+            return WritingElement.SEASON_FALL
+        else:
+            return WritingElement.SEASON_WINTER
+
+    async def _queue_mix_writing(
+        self,
+        batch_id: int,
+        selector,
+        slot_context,
+        index: int,
+        prompts: dict,
+        llm_queue,
+    ):
+        """믹스 글쓰기 LLM 요청 생성."""
+        # 소스 선택 (쿨다운 + 슬롯 중복 방지)
+        sources = selector.select_sources(
+            count=3,
+            exclude_ids=slot_context.used_source_ids,
+        )
+
+        if len(sources) < 3:
+            logger.warning(f"소스 부족: {len(sources)}개 - 배치 {batch_id} mix_{index}")
+            return
+
+        # 슬롯 컨텍스트에 사용 기록
+        slot_context.mark_used_sources([s.id for s in sources])
+
+        # 프롬프트 구성
+        prompt = prompts.get("mix_prompt", "")
+        placeholders = [
+            "(여기에 첫 번째 글 붙여넣기)",
+            "(여기에 두 번째 글 붙여넣기)",
+            "(여기에 세 번째 글 붙여넣기)",
+        ]
+        for placeholder, source in zip(placeholders, sources):
+            prompt = prompt.replace(placeholder, source.content)
+
+        # LLM 요청 DB 저장
+        metadata = {
+            "task_type": "mix",
+            "source_ids": [s.id for s in sources],
+            "index": index,
+        }
+
+        request = LLMRequest(
+            caller_type="writing",
+            caller_id=f"mix_{batch_id}_{index}",
+            prompt=prompt[:5000] if len(prompt) > 5000 else prompt,
+            status="queued" if llm_queue else "pending",
+            requested_by="batch",
+            request_source="writing_batch",
+            writing_batch_id=batch_id,
+            writing_metadata=json.dumps(metadata, ensure_ascii=False),
+        )
+        self.db.add(request)
+        self.db.commit()
+        self.db.refresh(request)
+
+        # Redis 큐에 추가
+        if llm_queue:
+            await llm_queue.push({
+                "id": request.id,
+                "caller_type": "writing",
+                "caller_id": f"mix_{batch_id}_{index}",
+                "prompt": prompt[:2000],  # 큐 메시지는 간략하게
+                "writing_batch_id": batch_id,
+                "writing_metadata": metadata,
+                "created_at": request.requested_at.isoformat() if request.requested_at else None,
+            })
+            logger.debug(f"Mix 요청 큐잉: batch={batch_id}, index={index}")
+
+    async def _queue_random_writing(
+        self,
+        batch_id: int,
+        selector,
+        slot_context,
+        season: Optional[str],
+        index: int,
+        prompts: dict,
+        llm_queue,
+    ):
+        """랜덤 소재+키워드 글쓰기 LLM 요청 생성."""
+        from app.models.writing_element import WritingElement
+
+        # 요소 선택 (쿨다운 + 슬롯 중복 방지 + 시즌 가중치)
+        topic = selector.select_element(
+            WritingElement.CATEGORY_TOPIC,
+            exclude_ids=slot_context.used_topic_ids,
+            season=season,
+        )
+        keywords = selector.select_elements(
+            WritingElement.CATEGORY_KEYWORD,
+            count=2,
+            exclude_ids=slot_context.used_keyword_ids,
+            season=season,
+        )
+        tone = selector.select_element(WritingElement.CATEGORY_TONE, season=season)
+        style = selector.select_element(WritingElement.CATEGORY_STYLE)
+        fmt = selector.select_element(WritingElement.CATEGORY_FORMAT)
+        emotion = selector.select_element(WritingElement.CATEGORY_EMOTION, season=season)
+
+        if not all([topic, tone, style, fmt, emotion]) or len(keywords) < 2:
+            logger.warning(f"요소 부족 - 배치 {batch_id} random_{index}")
+            return
+
+        # 슬롯 컨텍스트에 사용 기록
+        slot_context.mark_used_element(topic)
+        for k in keywords:
+            slot_context.mark_used_element(k)
+
+        # 프롬프트 구성
+        prompt = prompts.get("random_prompt", "").format(
+            topic=topic.name,
+            keywords=", ".join(k.name for k in keywords),
+            tone=tone.name,
+            style=style.name,
+            format=fmt.name,
+            emotion=emotion.name,
+        )
+
+        # 메타데이터
+        metadata = {
+            "task_type": "random",
+            "topic_id": topic.id,
+            "keyword_ids": [k.id for k in keywords],
+            "selected_elements": {
+                "topic": topic.name,
+                "keywords": [k.name for k in keywords],
+                "tone": tone.name,
+                "style": style.name,
+                "format": fmt.name,
+                "emotion": emotion.name,
+            },
+            "season": season,
+            "index": index,
+        }
+
+        request = LLMRequest(
+            caller_type="writing",
+            caller_id=f"random_{batch_id}_{index}",
+            prompt=prompt[:5000] if len(prompt) > 5000 else prompt,
+            status="queued" if llm_queue else "pending",
+            requested_by="batch",
+            request_source="writing_batch",
+            writing_batch_id=batch_id,
+            writing_metadata=json.dumps(metadata, ensure_ascii=False),
+        )
+        self.db.add(request)
+        self.db.commit()
+        self.db.refresh(request)
+
+        # Redis 큐에 추가
+        if llm_queue:
+            await llm_queue.push({
+                "id": request.id,
+                "caller_type": "writing",
+                "caller_id": f"random_{batch_id}_{index}",
+                "prompt": prompt[:2000],
+                "writing_batch_id": batch_id,
+                "writing_metadata": metadata,
+                "created_at": request.requested_at.isoformat() if request.requested_at else None,
+            })
+            logger.debug(f"Random 요청 큐잉: batch={batch_id}, index={index}")
+
+    async def _queue_keyword_writing(
+        self,
+        batch_id: int,
+        selector,
+        slot_context,
+        season: Optional[str],
+        index: int,
+        prompts: dict,
+        llm_queue,
+    ):
+        """키워드 전용 글쓰기 LLM 요청 생성."""
+        from app.models.writing_element import WritingElement
+
+        # 요소 선택 (키워드 3개 + tone/style/format/emotion)
+        keywords = selector.select_elements(
+            WritingElement.CATEGORY_KEYWORD,
+            count=3,
+            exclude_ids=slot_context.used_keyword_ids,
+            season=season,
+        )
+        tone = selector.select_element(WritingElement.CATEGORY_TONE, season=season)
+        style = selector.select_element(WritingElement.CATEGORY_STYLE)
+        fmt = selector.select_element(WritingElement.CATEGORY_FORMAT)
+        emotion = selector.select_element(WritingElement.CATEGORY_EMOTION, season=season)
+
+        if not all([tone, style, fmt, emotion]) or len(keywords) < 3:
+            logger.warning(f"키워드 전용 요소 부족 - 배치 {batch_id} keyword_{index}")
+            return
+
+        # 슬롯 컨텍스트에 사용 기록
+        for k in keywords:
+            slot_context.mark_used_element(k)
+
+        # 프롬프트 구성
+        prompt = prompts.get("keyword_only_prompt", "").format(
+            keywords=", ".join(k.name for k in keywords),
+            tone=tone.name,
+            style=style.name,
+            format=fmt.name,
+            emotion=emotion.name,
+        )
+
+        # 메타데이터
+        metadata = {
+            "task_type": "keyword",
+            "keyword_ids": [k.id for k in keywords],
+            "selected_elements": {
+                "keywords": [k.name for k in keywords],
+                "tone": tone.name,
+                "style": style.name,
+                "format": fmt.name,
+                "emotion": emotion.name,
+            },
+            "season": season,
+            "index": index,
+        }
+
+        request = LLMRequest(
+            caller_type="writing",
+            caller_id=f"keyword_{batch_id}_{index}",
+            prompt=prompt[:5000] if len(prompt) > 5000 else prompt,
+            status="queued" if llm_queue else "pending",
+            requested_by="batch",
+            request_source="writing_batch",
+            writing_batch_id=batch_id,
+            writing_metadata=json.dumps(metadata, ensure_ascii=False),
+        )
+        self.db.add(request)
+        self.db.commit()
+        self.db.refresh(request)
+
+        # Redis 큐에 추가
+        if llm_queue:
+            await llm_queue.push({
+                "id": request.id,
+                "caller_type": "writing",
+                "caller_id": f"keyword_{batch_id}_{index}",
+                "prompt": prompt[:2000],
+                "writing_batch_id": batch_id,
+                "writing_metadata": metadata,
+                "created_at": request.requested_at.isoformat() if request.requested_at else None,
+            })
+            logger.debug(f"Keyword 요청 큐잉: batch={batch_id}, index={index}")
+
+    # ========== 배치 조회 ==========
+
+    def get_batch(self, batch_id: int) -> Optional[WritingBatch]:
+        """배치 상세 조회."""
+        return self.db.query(WritingBatch).filter(WritingBatch.id == batch_id).first()
+
+    def get_batch_status(self, batch_id: int) -> Optional[dict]:
+        """배치 진행 상황 조회."""
+        batch = self.get_batch(batch_id)
+        if not batch:
+            return None
+
+        # 해당 배치의 LLM 요청 목록 조회
+        requests = (
+            self.db.query(LLMRequest)
+            .filter(LLMRequest.writing_batch_id == batch_id)
+            .all()
+        )
+
+        # 완료된 글 목록 조회
+        writings = (
+            self.db.query(GeneratedWriting)
+            .filter(
+                GeneratedWriting.schedule_run_id == batch.schedule_run_id,
+                GeneratedWriting.deleted_at.is_(None),
+            )
+            .all()
+        ) if batch.schedule_run_id else []
+
+        return {
+            "id": batch.id,
+            "status": batch.status,
+            "total": batch.total_count,
+            "completed": batch.completed_count,
+            "failed": batch.failed_count,
+            "progress_percent": batch.progress_percent,
+            "created_at": batch.created_at.isoformat() if batch.created_at else None,
+            "started_at": batch.started_at.isoformat() if batch.started_at else None,
+            "completed_at": batch.completed_at.isoformat() if batch.completed_at else None,
+            "requests": [
+                {
+                    "id": r.id,
+                    "caller_id": r.caller_id,
+                    "status": r.status,
+                    "error": r.error_message,
+                }
+                for r in requests
+            ],
+            "writings": [
+                {
+                    "id": w.id,
+                    "task_type": w.task_type,
+                    "preview": w.content[:200] if w.content else "",
+                }
+                for w in writings
+            ],
+        }
+
+    def list_batches(
+        self,
+        status: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict:
+        """배치 목록 조회."""
+        query = self.db.query(WritingBatch)
+
+        if status:
+            query = query.filter(WritingBatch.status == status)
+
+        total = query.count()
+        items = (
+            query.order_by(WritingBatch.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+
+        return {
+            "items": [
+                {
+                    "id": b.id,
+                    "status": b.status,
+                    "total": b.total_count,
+                    "completed": b.completed_count,
+                    "failed": b.failed_count,
+                    "progress_percent": b.progress_percent,
+                    "created_at": b.created_at.isoformat() if b.created_at else None,
+                }
+                for b in items
+            ],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "pages": (total + page_size - 1) // page_size if total > 0 else 1,
         }
 
     def check_and_run_due_schedule(self) -> Optional[dict]:

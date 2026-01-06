@@ -439,6 +439,108 @@ def mark_universal_crawl_failed(db, page_id: int, error_message: str) -> bool:
     return True
 
 
+def save_writing_result(db, request, result: dict) -> bool:
+    """Writing LLM 결과 저장.
+
+    Args:
+        db: DB 세션
+        request: LLMRequest 객체
+        result: LLM 실행 결과
+
+    Returns:
+        성공 여부
+    """
+    from app.modules.writing.models.writing_batch import WritingBatch
+    from app.models.writing import GeneratedWriting
+    import json
+
+    try:
+        # writing_metadata 파싱
+        metadata = {}
+        if request.writing_metadata:
+            metadata = json.loads(request.writing_metadata)
+
+        task_type = metadata.get("task_type", "unknown")
+
+        # GeneratedWriting 생성
+        content = result.get("raw_response", "")
+        if not content and result.get("result"):
+            # JSON 결과에서 content 추출 시도
+            llm_result = result.get("result", {})
+            if isinstance(llm_result, dict):
+                content = llm_result.get("content", str(llm_result))
+            else:
+                content = str(llm_result)
+
+        writing = GeneratedWriting(
+            task_type=task_type,
+            content=content[:10000] if content else "",
+            schedule_run_id=None,  # 배치에서는 schedule_run_id 없음
+            llm_request_id=request.id,
+        )
+
+        # 메타데이터 기반 추가 필드 설정
+        if task_type == "mix":
+            source_ids = metadata.get("source_ids", [])
+            if source_ids:
+                writing.source_ids = json.dumps(source_ids)
+        elif task_type in ["random", "keyword"]:
+            selected = metadata.get("selected_elements", {})
+            writing.selected_elements = json.dumps(selected, ensure_ascii=False)
+
+        db.add(writing)
+
+        # 배치 카운트 업데이트
+        if request.writing_batch_id:
+            batch = db.query(WritingBatch).filter(
+                WritingBatch.id == request.writing_batch_id
+            ).first()
+            if batch:
+                batch.increment_completed()
+                logger.info(f"배치 진행: batch_id={batch.id}, completed={batch.completed_count}/{batch.total_count}")
+
+        db.commit()
+        logger.info(f"Writing result saved: request_id={request.id}, task_type={task_type}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to save writing result: {e}", exc_info=True)
+        db.rollback()
+        return False
+
+
+def mark_writing_failed(db, request, error_message: str) -> bool:
+    """Writing LLM 실패 처리.
+
+    Args:
+        db: DB 세션
+        request: LLMRequest 객체
+        error_message: 에러 메시지
+
+    Returns:
+        성공 여부
+    """
+    from app.modules.writing.models.writing_batch import WritingBatch
+
+    try:
+        # 배치 카운트 업데이트
+        if request.writing_batch_id:
+            batch = db.query(WritingBatch).filter(
+                WritingBatch.id == request.writing_batch_id
+            ).first()
+            if batch:
+                batch.increment_failed()
+                logger.warning(f"Writing 요청 실패: batch_id={batch.id}, request_id={request.id}, error={error_message}")
+
+        db.commit()
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to mark writing failed: {e}", exc_info=True)
+        db.rollback()
+        return False
+
+
 def save_topic_extract_result(db, caller_id: str, llm_result: dict) -> bool:
     """소재 추출 LLM 결과를 writing_elements에 저장.
 
@@ -745,6 +847,8 @@ class LLMWorker:
                     save_universal_crawl_result(db, int(request.caller_id), result["result"])
                 elif request.caller_type == "topic_extract":
                     save_topic_extract_result(db, request.caller_id, result["result"])
+                elif request.caller_type == "writing":
+                    save_writing_result(db, request, result)
             else:
                 service.mark_failed(request.id, result["error"])
                 self._increment_error()
@@ -755,6 +859,8 @@ class LLMWorker:
                     mark_instagram_failed(db, int(request.caller_id), result["error"])
                 elif request.caller_type == "universal_crawl":
                     mark_universal_crawl_failed(db, int(request.caller_id), result["error"])
+                elif request.caller_type == "writing":
+                    mark_writing_failed(db, request, result["error"])
 
         except Exception as e:
             service.mark_failed(request.id, str(e))

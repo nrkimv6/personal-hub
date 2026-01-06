@@ -327,6 +327,79 @@ def create_topic_extract_requests(
         raise HTTPException(500, str(e))
 
 
+# ========== 배치 기반 글쓰기 ==========
+
+
+@router.post("/batches")
+async def create_writing_batch(db: Session = Depends(get_db)):
+    """글쓰기 배치 생성 (비동기).
+
+    11개 LLM 요청을 생성하고 즉시 반환합니다.
+    배치 상태는 GET /batches/{batch_id}/status로 조회하세요.
+    """
+    service = WritingService(db)
+    try:
+        batch = await service.create_writing_batch()
+        return {
+            "success": True,
+            "batch_id": batch.id,
+            "message": f"배치 생성 완료. {batch.total_count}개 LLM 요청이 큐에 추가되었습니다.",
+            "status_url": f"/api/writing/batches/{batch.id}/status",
+        }
+    except Exception as e:
+        raise HTTPException(500, f"배치 생성 실패: {e}")
+
+
+@router.get("/batches")
+def list_writing_batches(
+    status: Optional[str] = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """글쓰기 배치 목록 조회."""
+    service = WritingService(db)
+    return service.list_batches(
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/batches/{batch_id}")
+def get_writing_batch(batch_id: int, db: Session = Depends(get_db)):
+    """글쓰기 배치 상세 조회."""
+    service = WritingService(db)
+    batch = service.get_batch(batch_id)
+    if not batch:
+        raise HTTPException(404, "Batch not found")
+
+    return {
+        "id": batch.id,
+        "status": batch.status,
+        "total": batch.total_count,
+        "completed": batch.completed_count,
+        "failed": batch.failed_count,
+        "progress_percent": batch.progress_percent,
+        "created_at": batch.created_at.isoformat() if batch.created_at else None,
+        "started_at": batch.started_at.isoformat() if batch.started_at else None,
+        "completed_at": batch.completed_at.isoformat() if batch.completed_at else None,
+    }
+
+
+@router.get("/batches/{batch_id}/status")
+def get_writing_batch_status(batch_id: int, db: Session = Depends(get_db)):
+    """글쓰기 배치 진행 상황 상세 조회.
+
+    각 LLM 요청의 상태와 생성된 글 목록을 포함합니다.
+    """
+    service = WritingService(db)
+    status = service.get_batch_status(batch_id)
+    if not status:
+        raise HTTPException(404, "Batch not found")
+    return status
+
+
 # ========== 소재(Elements) 관리 ==========
 
 

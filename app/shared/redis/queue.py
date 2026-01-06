@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 # 큐 이름 상수
 CRAWL_REQUEST_QUEUE = "crawl:requests"
 GOOGLE_SEARCH_QUEUE = "google:searches"
+LLM_REQUEST_QUEUE = "llm:requests"
 
 
 class RedisQueue:

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { writingApi, keywordApi, type GeneratedWriting, type WritingStats, type WritingSource, type KeywordStats, type KeywordStatsResponse, type Stopword, type WritingElement, type WritingElementStats } from '$lib/api';
+	import { writingApi, keywordApi, type GeneratedWriting, type WritingStats, type WritingSource, type KeywordStats, type KeywordStatsResponse, type Stopword, type WritingElement, type WritingElementStats, type WritingBatch, type WritingBatchStatus } from '$lib/api';
 
 	// 상태
 	let writings: GeneratedWriting[] = [];
@@ -8,6 +8,16 @@
 	let stats: WritingStats | null = null;
 	let loading = true;
 	let error: string | null = null;
+
+	// 배치 상태
+	let batches: WritingBatch[] = [];
+	let batchTotal = 0;
+	let batchPage = 1;
+	let batchPageSize = 10;
+	let batchPages = 0;
+	let activeBatch: WritingBatchStatus | null = null;
+	let batchPolling: ReturnType<typeof setInterval> | null = null;
+	let creatingBatch = false;
 
 	// 키워드 상태
 	let keywords: KeywordStats[] = [];
@@ -33,7 +43,7 @@
 	let extractResult: { success: boolean; created_requests: number } | null = null;
 
 	// 탭
-	type Tab = 'writings' | 'sources' | 'keywords' | 'elements';
+	type Tab = 'writings' | 'sources' | 'keywords' | 'elements' | 'batches';
 	let activeTab: Tab = 'writings';
 
 	// 필터
@@ -111,6 +121,11 @@
 
 	function switchTab(tab: Tab) {
 		activeTab = tab;
+		// 배치 탭에서 벗어나면 폴링 중지
+		if (tab !== 'batches' && batchPolling) {
+			clearInterval(batchPolling);
+			batchPolling = null;
+		}
 		if (tab === 'writings') {
 			fetchData();
 		} else if (tab === 'sources') {
@@ -119,6 +134,8 @@
 			fetchKeywords();
 		} else if (tab === 'elements') {
 			fetchElements();
+		} else if (tab === 'batches') {
+			fetchBatches();
 		}
 	}
 
@@ -479,7 +496,122 @@
 	}
 
 	function getTaskTypeLabel(type: string): string {
-		return type === 'mix' ? '소스 혼합' : type === 'random' ? '랜덤 작문' : type;
+		return type === 'mix' ? '소스 혼합' : type === 'random' ? '랜덤 작문' : type === 'keyword' ? '키워드' : type;
+	}
+
+	// ============================================================
+	// 배치 관련 함수
+	// ============================================================
+
+	async function fetchBatches() {
+		loading = true;
+		error = null;
+		try {
+			const res = await writingApi.listBatches({
+				page: batchPage,
+				page_size: batchPageSize
+			});
+			batches = res.items;
+			batchTotal = res.total;
+			batchPages = res.pages;
+		} catch (e) {
+			error = e instanceof Error ? e.message : '배치 로드 실패';
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function createBatch() {
+		if (creatingBatch) return;
+		if (!confirm('새 글쓰기 배치를 생성하시겠습니까? (11개 LLM 요청)')) return;
+
+		creatingBatch = true;
+		try {
+			const result = await writingApi.createBatch();
+			alert(result.message);
+			await fetchBatches();
+			// 생성 후 바로 해당 배치 상태 확인
+			await viewBatchStatus(result.batch_id);
+		} catch (e) {
+			alert('배치 생성 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		} finally {
+			creatingBatch = false;
+		}
+	}
+
+	async function viewBatchStatus(batchId: number) {
+		try {
+			activeBatch = await writingApi.getBatchStatus(batchId);
+			// 진행 중이면 폴링 시작
+			if (activeBatch && activeBatch.status === 'running') {
+				startBatchPolling(batchId);
+			}
+		} catch (e) {
+			alert('배치 상태 조회 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
+		}
+	}
+
+	function startBatchPolling(batchId: number) {
+		if (batchPolling) {
+			clearInterval(batchPolling);
+		}
+		batchPolling = setInterval(async () => {
+			try {
+				activeBatch = await writingApi.getBatchStatus(batchId);
+				// 완료되면 폴링 중지
+				if (activeBatch && (activeBatch.status === 'completed' || activeBatch.status === 'failed')) {
+					if (batchPolling) {
+						clearInterval(batchPolling);
+						batchPolling = null;
+					}
+					await fetchBatches(); // 목록 새로고침
+				}
+			} catch (e) {
+				console.error('배치 폴링 실패:', e);
+			}
+		}, 3000); // 3초마다 폴링
+	}
+
+	function closeBatchModal() {
+		activeBatch = null;
+		if (batchPolling) {
+			clearInterval(batchPolling);
+			batchPolling = null;
+		}
+	}
+
+	function getBatchStatusLabel(status: string): string {
+		switch (status) {
+			case 'pending': return '대기';
+			case 'running': return '진행 중';
+			case 'completed': return '완료';
+			case 'failed': return '실패';
+			default: return status;
+		}
+	}
+
+	function getBatchStatusClass(status: string): string {
+		switch (status) {
+			case 'pending': return 'bg-gray-100 text-gray-800';
+			case 'running': return 'bg-blue-100 text-blue-800';
+			case 'completed': return 'bg-green-100 text-green-800';
+			case 'failed': return 'bg-red-100 text-red-800';
+			default: return 'bg-gray-100 text-gray-600';
+		}
+	}
+
+	function batchPrevPage() {
+		if (batchPage > 1) {
+			batchPage--;
+			fetchBatches();
+		}
+	}
+
+	function batchNextPage() {
+		if (batchPage < batchPages) {
+			batchPage++;
+			fetchBatches();
+		}
 	}
 
 	function getRatingIcon(rating: number | null): string {
@@ -572,6 +704,12 @@
 			>
 				소재 ({elementStats?.total ?? 0})
 			</button>
+			<button
+				onclick={() => switchTab('batches')}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'batches' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+			>
+				배치 ({batchTotal})
+			</button>
 		</nav>
 	</div>
 
@@ -656,7 +794,7 @@
 				</div>
 			{/if}
 		{/if}
-	{:else}
+	{:else if activeTab === 'sources'}
 		<!-- 소스 목록 -->
 		{#if loading}
 			<div class="flex justify-center items-center h-64">
@@ -995,8 +1133,210 @@
 				</div>
 			{/if}
 		{/if}
+	{:else if activeTab === 'batches'}
+		<!-- 배치 헤더 -->
+		<div class="mb-4 flex justify-between items-center">
+			<h3 class="text-lg font-semibold text-gray-900">글쓰기 배치</h3>
+			<button
+				onclick={createBatch}
+				disabled={creatingBatch}
+				class="btn btn-primary btn-sm disabled:opacity-50"
+			>
+				{creatingBatch ? '생성 중...' : '새 배치 생성'}
+			</button>
+		</div>
+
+		{#if loading}
+			<div class="flex justify-center items-center h-64">
+				<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+			</div>
+		{:else if error}
+			<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">{error}</div>
+		{:else if batches.length === 0}
+			<div class="text-center py-12 text-gray-500">
+				<p class="text-lg">배치가 없습니다</p>
+				<p class="text-sm mt-2">'새 배치 생성' 버튼을 눌러 글쓰기를 시작하세요.</p>
+			</div>
+		{:else}
+			<!-- 배치 목록 -->
+			<div class="bg-white rounded-lg border border-gray-200 overflow-x-auto mb-6">
+				<table class="w-full min-w-[600px]">
+					<thead class="bg-gray-50 border-b border-gray-200">
+						<tr>
+							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
+							<th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">상태</th>
+							<th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">진행</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">생성일</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">완료일</th>
+							<th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">액션</th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-gray-200">
+						{#each batches as batch (batch.id)}
+							<tr class="hover:bg-gray-50">
+								<td class="px-4 py-3 text-sm font-medium text-gray-900">#{batch.id}</td>
+								<td class="px-4 py-3 text-center">
+									<span class="px-2 py-1 text-xs rounded-full {getBatchStatusClass(batch.status)}">
+										{getBatchStatusLabel(batch.status)}
+									</span>
+								</td>
+								<td class="px-4 py-3">
+									<div class="flex items-center gap-2">
+										<div class="flex-1 bg-gray-200 rounded-full h-2">
+											<div
+												class="bg-blue-600 h-2 rounded-full transition-all"
+												style="width: {batch.progress_percent}%"
+											></div>
+										</div>
+										<span class="text-sm text-gray-600 w-16 text-right">
+											{batch.completed}/{batch.total}
+										</span>
+									</div>
+								</td>
+								<td class="px-4 py-3 text-sm text-gray-500">{formatDateTime(batch.created_at)}</td>
+								<td class="px-4 py-3 text-sm text-gray-500">{formatDateTime(batch.completed_at)}</td>
+								<td class="px-4 py-3 text-center">
+									<button
+										onclick={() => viewBatchStatus(batch.id)}
+										class="text-blue-600 hover:text-blue-800 text-sm"
+									>
+										상세보기
+									</button>
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+
+			<!-- 페이지네이션 -->
+			{#if batchPages > 1}
+				<div class="flex justify-between items-center">
+					<span class="text-sm text-gray-500">
+						전체 {batchTotal}개 중 {(batchPage - 1) * batchPageSize + 1} - {Math.min(batchPage * batchPageSize, batchTotal)}
+					</span>
+					<div class="flex gap-2">
+						<button onclick={batchPrevPage} disabled={batchPage === 1} class="btn btn-secondary btn-sm disabled:opacity-50">
+							이전
+						</button>
+						<span class="px-3 py-1.5 text-sm">{batchPage} / {batchPages}</span>
+						<button onclick={batchNextPage} disabled={batchPage >= batchPages} class="btn btn-secondary btn-sm disabled:opacity-50">
+							다음
+						</button>
+					</div>
+				</div>
+			{/if}
+		{/if}
 	{/if}
 </div>
+
+<!-- 배치 상태 모달 -->
+{#if activeBatch}
+	<div
+		class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+		onclick={closeBatchModal}
+		onkeydown={(e) => e.key === 'Escape' && closeBatchModal()}
+		role="dialog"
+		tabindex="-1"
+	>
+		<div
+			class="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-auto"
+			onclick={(e) => e.stopPropagation()}
+		>
+			<div class="p-6">
+				<div class="flex justify-between items-start mb-4">
+					<div>
+						<h3 class="text-lg font-bold text-gray-900">배치 #{activeBatch.id}</h3>
+						<span class="px-2 py-1 text-xs rounded-full {getBatchStatusClass(activeBatch.status)}">
+							{getBatchStatusLabel(activeBatch.status)}
+						</span>
+					</div>
+					<button onclick={closeBatchModal} class="text-gray-400 hover:text-gray-600 text-2xl">
+						&times;
+					</button>
+				</div>
+
+				<!-- 진행 상황 -->
+				<div class="mb-6">
+					<div class="flex justify-between items-center mb-2">
+						<span class="text-sm font-medium text-gray-700">진행 상황</span>
+						<span class="text-sm text-gray-600">
+							{activeBatch.completed} 완료 / {activeBatch.failed} 실패 / {activeBatch.total} 전체
+						</span>
+					</div>
+					<div class="w-full bg-gray-200 rounded-full h-3">
+						<div
+							class="h-3 rounded-full transition-all {activeBatch.failed > 0 ? 'bg-yellow-500' : 'bg-blue-600'}"
+							style="width: {activeBatch.progress_percent}%"
+						></div>
+					</div>
+					{#if activeBatch.status === 'running' && batchPolling}
+						<p class="text-xs text-blue-600 mt-2 animate-pulse">자동 새로고침 중...</p>
+					{/if}
+				</div>
+
+				<!-- LLM 요청 목록 -->
+				<div class="mb-4">
+					<h4 class="text-sm font-medium text-gray-700 mb-2">LLM 요청</h4>
+					<div class="max-h-48 overflow-auto border rounded-lg">
+						<table class="w-full text-sm">
+							<thead class="bg-gray-50 sticky top-0">
+								<tr>
+									<th class="px-3 py-2 text-left text-xs text-gray-500">ID</th>
+									<th class="px-3 py-2 text-left text-xs text-gray-500">타입</th>
+									<th class="px-3 py-2 text-center text-xs text-gray-500">상태</th>
+								</tr>
+							</thead>
+							<tbody class="divide-y divide-gray-100">
+								{#each activeBatch.requests as req}
+									<tr class="hover:bg-gray-50">
+										<td class="px-3 py-2 text-gray-900">{req.id}</td>
+										<td class="px-3 py-2 text-gray-600">{req.caller_id.split('_')[0]}</td>
+										<td class="px-3 py-2 text-center">
+											{#if req.status === 'completed'}
+												<span class="text-green-600">✓</span>
+											{:else if req.status === 'failed'}
+												<span class="text-red-600" title={req.error || ''}>✗</span>
+											{:else if req.status === 'processing'}
+												<span class="text-blue-600 animate-pulse">●</span>
+											{:else}
+												<span class="text-gray-400">○</span>
+											{/if}
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				</div>
+
+				<!-- 생성된 글 목록 -->
+				{#if activeBatch.writings && activeBatch.writings.length > 0}
+					<div class="mb-4">
+						<h4 class="text-sm font-medium text-gray-700 mb-2">생성된 글 ({activeBatch.writings.length}개)</h4>
+						<div class="space-y-2 max-h-48 overflow-auto">
+							{#each activeBatch.writings as writing}
+								<div class="p-3 bg-gray-50 rounded-lg">
+									<div class="flex justify-between items-start mb-1">
+										<span class="text-xs px-2 py-0.5 rounded-full {writing.task_type === 'mix' ? 'bg-purple-100 text-purple-800' : 'bg-indigo-100 text-indigo-800'}">
+											{getTaskTypeLabel(writing.task_type)}
+										</span>
+										<span class="text-xs text-gray-500">#{writing.id}</span>
+									</div>
+									<p class="text-sm text-gray-700 line-clamp-2">{writing.preview}</p>
+								</div>
+							{/each}
+						</div>
+					</div>
+				{/if}
+
+				<div class="flex justify-end pt-4 border-t">
+					<button onclick={closeBatchModal} class="btn btn-secondary btn-sm">닫기</button>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <!-- 글 상세 모달 -->
 {#if showModal && selectedWriting}
