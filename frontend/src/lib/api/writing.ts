@@ -78,6 +78,40 @@ export interface WritingElementStats {
   total: number;
 }
 
+export interface WritingBatch {
+  id: number;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  total: number;
+  completed: number;
+  failed: number;
+  progress_percent: number;
+  created_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface WritingBatchStatus extends WritingBatch {
+  requests: Array<{
+    id: number;
+    caller_id: string;
+    status: string;
+    error: string | null;
+  }>;
+  writings: Array<{
+    id: number;
+    task_type: string;
+    preview: string;
+  }>;
+}
+
+export interface WritingBatchListResponse {
+  items: WritingBatch[];
+  total: number;
+  page: number;
+  page_size: number;
+  pages: number;
+}
+
 export interface KeywordStats {
   id: number;
   keyword: string;
@@ -282,7 +316,39 @@ export const writingApi = {
   extractTopics: (limit: number = 100) =>
     requestWriting<{ success: boolean; created_requests: number }>(`/extract-topics?limit=${limit}`, {
       method: 'POST'
-    })
+    }),
+
+  // ============================================================
+  // 배치 기반 글쓰기 API
+  // ============================================================
+
+  // 배치 생성 (비동기)
+  createBatch: () =>
+    requestWriting<{ success: boolean; batch_id: number; message: string; status_url: string }>('/batches', {
+      method: 'POST'
+    }),
+
+  // 배치 목록 조회
+  listBatches: (params?: {
+    status?: string;
+    page?: number;
+    page_size?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.status) searchParams.set('status', params.status);
+    if (params?.page) searchParams.set('page', params.page.toString());
+    if (params?.page_size) searchParams.set('page_size', params.page_size.toString());
+    const query = searchParams.toString();
+    return requestWriting<WritingBatchListResponse>(`/batches${query ? `?${query}` : ''}`);
+  },
+
+  // 배치 상세 조회
+  getBatch: (id: number) =>
+    requestWriting<WritingBatch>(`/batches/${id}`),
+
+  // 배치 진행 상황 상세 조회
+  getBatchStatus: (id: number) =>
+    requestWriting<WritingBatchStatus>(`/batches/${id}/status`)
 };
 
 // ============================================================

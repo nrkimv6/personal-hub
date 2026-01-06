@@ -991,3 +991,245 @@ class TestWritingWorkerRotation:
             with patch('app.modules.writing.worker.writing_worker.datetime') as mock_dt:
                 mock_dt.now.return_value = datetime(2026, 10, 15)
                 assert worker._get_current_season() == "fall"
+
+
+class TestWritingBatch:
+    """WritingBatch 모델 테스트"""
+
+    def test_batch_creation(self, test_db_session):
+        """WritingBatch 생성 테스트"""
+        from app.modules.writing.models.writing_batch import WritingBatch
+
+        batch = WritingBatch(
+            status=WritingBatch.STATUS_PENDING,
+            total_count=11
+        )
+        test_db_session.add(batch)
+        test_db_session.commit()
+
+        assert batch.id is not None
+        assert batch.status == "pending"
+        assert batch.total_count == 11
+        assert batch.completed_count == 0
+        assert batch.failed_count == 0
+        assert batch.created_at is not None
+
+    def test_batch_mark_started(self, test_db_session):
+        """배치 시작 표시 테스트"""
+        from app.modules.writing.models.writing_batch import WritingBatch
+
+        batch = WritingBatch(total_count=11)
+        test_db_session.add(batch)
+        test_db_session.commit()
+
+        batch.mark_started()
+        test_db_session.commit()
+
+        assert batch.status == WritingBatch.STATUS_RUNNING
+        assert batch.started_at is not None
+
+    def test_batch_increment_completed(self, test_db_session):
+        """완료 카운트 증가 테스트"""
+        from app.modules.writing.models.writing_batch import WritingBatch
+
+        batch = WritingBatch(total_count=3)
+        batch.mark_started()
+        test_db_session.add(batch)
+        test_db_session.commit()
+
+        batch.increment_completed()
+        assert batch.completed_count == 1
+        assert batch.status == WritingBatch.STATUS_RUNNING
+
+        batch.increment_completed()
+        batch.increment_completed()
+        test_db_session.commit()
+
+        assert batch.completed_count == 3
+        assert batch.status == WritingBatch.STATUS_COMPLETED
+        assert batch.completed_at is not None
+
+    def test_batch_increment_failed(self, test_db_session):
+        """실패 카운트 증가 테스트"""
+        from app.modules.writing.models.writing_batch import WritingBatch
+
+        batch = WritingBatch(total_count=3)
+        batch.mark_started()
+        test_db_session.add(batch)
+        test_db_session.commit()
+
+        batch.increment_completed()
+        batch.increment_failed()
+        batch.increment_failed()
+        test_db_session.commit()
+
+        assert batch.completed_count == 1
+        assert batch.failed_count == 2
+        assert batch.status == WritingBatch.STATUS_COMPLETED  # 모든 요청 완료 시
+
+    def test_batch_progress_percent(self, test_db_session):
+        """진행률 계산 테스트"""
+        from app.modules.writing.models.writing_batch import WritingBatch
+
+        batch = WritingBatch(total_count=10)
+        batch.mark_started()
+        test_db_session.add(batch)
+
+        assert batch.progress_percent == 0
+
+        batch.increment_completed()
+        batch.increment_completed()
+        assert batch.progress_percent == 20
+
+        batch.increment_failed()
+        assert batch.progress_percent == 30
+
+    def test_batch_is_done(self, test_db_session):
+        """완료 여부 확인 테스트"""
+        from app.modules.writing.models.writing_batch import WritingBatch
+
+        batch = WritingBatch(total_count=2)
+        test_db_session.add(batch)
+
+        assert batch.is_done is False
+
+        batch.mark_started()
+        assert batch.is_done is False
+
+        batch.increment_completed()
+        batch.increment_completed()
+
+        assert batch.is_done is True
+
+
+class TestWritingBatchService:
+    """WritingService 배치 관련 메서드 테스트"""
+
+    @pytest.fixture(autouse=True)
+    def cleanup_batch_data(self, test_db_session):
+        """각 테스트 전후로 배치 관련 데이터 정리"""
+        from app.modules.writing.models.writing_batch import WritingBatch
+
+        yield
+        test_db_session.query(WritingBatch).delete()
+        test_db_session.commit()
+
+    def test_get_batch(self, test_db_session):
+        """배치 조회 테스트"""
+        from app.modules.writing.models.writing_batch import WritingBatch
+
+        batch = WritingBatch(total_count=11)
+        test_db_session.add(batch)
+        test_db_session.commit()
+
+        service = WritingService(test_db_session)
+        result = service.get_batch(batch.id)
+
+        assert result is not None
+        assert result.id == batch.id
+        assert result.total_count == 11
+
+    def test_get_batch_not_found(self, test_db_session):
+        """존재하지 않는 배치 조회 테스트"""
+        service = WritingService(test_db_session)
+        result = service.get_batch(99999)
+
+        assert result is None
+
+    def test_list_batches(self, test_db_session):
+        """배치 목록 조회 테스트"""
+        from app.modules.writing.models.writing_batch import WritingBatch
+
+        # 테스트 배치 추가
+        for i in range(5):
+            batch = WritingBatch(total_count=11)
+            if i < 2:
+                batch.status = WritingBatch.STATUS_COMPLETED
+            test_db_session.add(batch)
+        test_db_session.commit()
+
+        service = WritingService(test_db_session)
+
+        # 전체 목록
+        result = service.list_batches(page=1, page_size=10)
+        assert result["total"] == 5
+        assert len(result["items"]) == 5
+
+        # 상태 필터
+        result = service.list_batches(status="completed", page=1, page_size=10)
+        assert result["total"] == 2
+
+        # 페이지네이션
+        result = service.list_batches(page=1, page_size=2)
+        assert len(result["items"]) == 2
+        assert result["pages"] == 3
+
+    def test_get_batch_status(self, test_db_session):
+        """배치 상태 조회 테스트"""
+        from app.modules.writing.models.writing_batch import WritingBatch
+
+        batch = WritingBatch(total_count=11)
+        batch.mark_started()
+        batch.increment_completed()
+        batch.increment_completed()
+        test_db_session.add(batch)
+        test_db_session.commit()
+
+        service = WritingService(test_db_session)
+        result = service.get_batch_status(batch.id)
+
+        assert result is not None
+        assert result["id"] == batch.id
+        assert result["status"] == WritingBatch.STATUS_RUNNING
+        assert result["completed"] == 2
+        assert result["total"] == 11
+        assert result["progress_percent"] > 0
+        assert "requests" in result
+        assert "writings" in result
+
+
+class TestLLMRequestWritingExtension:
+    """LLMRequest writing 확장 컬럼 테스트"""
+
+    def test_llm_request_with_writing_batch_id(self, test_db_session):
+        """writing_batch_id 컬럼 테스트"""
+        from app.modules.writing.models.writing_batch import WritingBatch
+
+        batch = WritingBatch(total_count=11)
+        test_db_session.add(batch)
+        test_db_session.commit()
+
+        request = LLMRequest(
+            caller_type="writing",
+            caller_id="mix_1_0",
+            prompt="테스트 프롬프트",
+            writing_batch_id=batch.id
+        )
+        test_db_session.add(request)
+        test_db_session.commit()
+
+        assert request.id is not None
+        assert request.writing_batch_id == batch.id
+
+    def test_llm_request_with_writing_metadata(self, test_db_session):
+        """writing_metadata 컬럼 테스트"""
+        import json
+
+        metadata = {
+            "task_type": "mix",
+            "source_ids": [1, 2, 3]
+        }
+
+        request = LLMRequest(
+            caller_type="writing",
+            caller_id="mix_1_0",
+            prompt="테스트 프롬프트",
+            writing_metadata=json.dumps(metadata)
+        )
+        test_db_session.add(request)
+        test_db_session.commit()
+
+        assert request.writing_metadata is not None
+        loaded = json.loads(request.writing_metadata)
+        assert loaded["task_type"] == "mix"
+        assert loaded["source_ids"] == [1, 2, 3]

@@ -51,6 +51,10 @@ class LLMRequest(Base):
     # Soft delete
     deleted_at = Column(DateTime)
 
+    # 글쓰기 배치 관련
+    writing_batch_id = Column(Integer, ForeignKey("writing_batches.id", ondelete="SET NULL"))
+    writing_metadata = Column(Text)  # JSON: task_type, source_ids, selected_elements 등
+
     def __repr__(self) -> str:
         return f"<LLMRequest(id={self.id}, caller={self.caller_type}:{self.caller_id}, status={self.status})>"
 
