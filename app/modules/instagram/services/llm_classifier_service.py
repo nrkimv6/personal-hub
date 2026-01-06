@@ -10,6 +10,7 @@ import logging
 import os
 import time
 import urllib.request
+from datetime import date
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -30,6 +31,9 @@ LLM_TRIGGER_TAGS = ["event"]
 
 # 프롬프트 템플릿
 CLASSIFICATION_PROMPT = """다음 Instagram 게시물을 분석하여 정보를 추출해주세요.
+
+**오늘 날짜: {today}**
+**게시물 작성일: {posted_at}**
 
 ## 게시물 내용
 {caption}
@@ -238,7 +242,11 @@ class LLMClassifierService:
             image_section = ""
 
         # 프롬프트 생성
+        today_str = date.today().strftime("%Y-%m-%d")
+        posted_at_str = post.posted_at.strftime("%Y-%m-%d") if post.posted_at else "알 수 없음"
         prompt = CLASSIFICATION_PROMPT.format(
+            today=today_str,
+            posted_at=posted_at_str,
             caption=post.caption,
             image_section=image_section,
         )
