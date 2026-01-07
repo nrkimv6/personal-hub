@@ -2,11 +2,23 @@
  * API Client - 공통 request 함수 및 인증 처리
  */
 
-export const API_BASE = '/api/v1';
-const TOKEN_KEY = 'auth_token';
-
 // 브라우저 환경 체크
 const isBrowser = typeof window !== 'undefined';
+
+/**
+ * API Base URL 결정
+ * - Capacitor 네이티브 앱: 환경변수 또는 기본값 사용
+ * - 웹(PWA): 상대경로 사용 (현재 도메인 기준)
+ */
+function getApiBase(): string {
+  if (isBrowser && (window as any).Capacitor?.isNativePlatform()) {
+    return import.meta.env.VITE_API_URL || 'https://dev-monitor.woory.day/api/v1';
+  }
+  return '/api/v1';
+}
+
+export const API_BASE = getApiBase();
+const TOKEN_KEY = 'auth_token';
 
 /**
  * 저장된 인증 토큰 반환

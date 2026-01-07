@@ -25,6 +25,9 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 
+# Import port utilities
+. "$ScriptDir\port-utils.ps1"
+
 # Dev mode only - browser workers need user session
 $env:APP_MODE = "development"
 $LogDir = Join-Path $ProjectRoot "logs\dev"
@@ -119,6 +122,11 @@ function Start-BrowserWorkers {
     Write-Host "  (WorkerOrchestrator Architecture)" -ForegroundColor Gray
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host ""
+
+    # Check for zombie ports before starting (Dev mode uses port 8001)
+    if (-not (Test-PortsBeforeStart -Ports @(8001) -ServiceName "Browser Workers")) {
+        return
+    }
 
     # First, clean up any legacy processes
     Stop-LegacyWatchdogs

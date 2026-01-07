@@ -26,6 +26,9 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 
+# Import port utilities
+. "$ScriptDir\port-utils.ps1"
+
 # Service configuration
 # Each service runs service-run.ps1 which starts API (foreground) + Frontend + Workers (background)
 $services = @(
@@ -175,6 +178,18 @@ function Start-MonitorService {
     param($svc, [switch]$OpenLogs)
 
     Write-Host "[*] Starting service: $($svc.DisplayName)" -ForegroundColor Cyan
+
+    # Determine ports based on service type
+    $portsToCheck = if ($svc.Name -eq "MonitorPage-Dev") {
+        @(8001, 5174)  # Dev API + Frontend
+    } else {
+        @(8000, 5173)  # Prod API + Frontend
+    }
+
+    # Check for zombie ports before starting
+    if (-not (Test-PortsBeforeStart -Ports $portsToCheck -ServiceName $svc.DisplayName)) {
+        return $false
+    }
 
     $service = Get-Service -Name $svc.Name -ErrorAction SilentlyContinue
     if (-not $service) {

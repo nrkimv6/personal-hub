@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Monitor Page</string>
+    <string name="title_activity_main">Monitor Page</string>
+    <string name="package_name">com.monitor.page</string>
+    <string name="custom_url_scheme">com.monitor.page</string>
+</resources>
