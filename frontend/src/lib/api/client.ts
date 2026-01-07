@@ -45,6 +45,16 @@ export function clearAuthToken(): void {
 }
 
 /**
+ * API 연결 에러 클래스 (좀비 포트 감지용)
+ */
+export class ApiConnectionError extends Error {
+  constructor(message: string, public readonly originalError?: Error) {
+    super(message);
+    this.name = 'ApiConnectionError';
+  }
+}
+
+/**
  * API 요청 함수
  */
 export async function request<T>(
@@ -62,7 +72,17 @@ export async function request<T>(
   };
 
   // credentials: 'include'로 Cookie 전송 (PWA 공유 기능 등에서 localStorage 접근 불가 시 대비)
-  const response = await fetch(url, { ...options, headers, credentials: 'include' });
+  let response: Response;
+  try {
+    response = await fetch(url, { ...options, headers, credentials: 'include' });
+  } catch (err) {
+    // 네트워크 에러 (API 서버 연결 불가 - 좀비 포트 가능성)
+    const error = err instanceof Error ? err : new Error(String(err));
+    throw new ApiConnectionError(
+      'API 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요. (좀비 포트 가능성: net stop winnat && net start winnat 또는 재부팅 필요)',
+      error
+    );
+  }
 
   // 401 Unauthorized 처리
   if (response.status === 401) {
