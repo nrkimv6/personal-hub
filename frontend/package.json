@@ -25,6 +25,9 @@
 		"vite": "^7.2.2"
 	},
 	"dependencies": {
+		"@capacitor/android": "^8.0.0",
+		"@capacitor/cli": "^8.0.0",
+		"@capacitor/core": "^8.0.0",
 		"@tailwindcss/postcss": "^4.1.17",
 		"chart.js": "^4.5.1",
 		"html-to-image": "^1.11.13"
