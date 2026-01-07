@@ -910,11 +910,18 @@ export interface ProjectServices {
 
 export interface ServiceDashboardStatus {
   projects: Record<string, ProjectServices>;
+  collected_at: string | null;
+  collection_duration_ms: number | null;
 }
 
 export const serviceDashboardApi = {
-  // 전체 서비스 현황 조회
+  // 전체 서비스 현황 조회 (캐시)
   status: () => request<ServiceDashboardStatus>('/system/services/status'),
+
+  // 즉시 새로고침 (수집 후 반환)
+  refresh: () => request<ServiceDashboardStatus>('/system/services/refresh', {
+    method: 'POST'
+  }),
 
   // NSSM 서비스 목록
   nssmServices: () => request<NssmService[]>('/system/services/nssm'),

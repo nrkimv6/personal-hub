@@ -2,22 +2,59 @@
 System dashboard API routes
 Provides endpoints for querying and managing Windows services, startup programs, and scheduled tasks
 """
+from typing import Optional
 from fastapi import APIRouter, HTTPException
 
 from .services.system_service import SystemService
+from .services.system_cache_collector import SystemCacheCollector
 
 router = APIRouter(prefix="/api/v1/system", tags=["system"])
 
 # Service instance
 _service = SystemService()
+_cache_collector: Optional[SystemCacheCollector] = None
+
+
+def set_cache_collector(collector: SystemCacheCollector):
+    """main.py에서 호출하여 collector 인스턴스 설정"""
+    global _cache_collector
+    _cache_collector = collector
 
 
 # ===== Read Operations (Phase 1) =====
 
 @router.get("/services/status")
 async def get_all_services_status():
-    """Get all services status grouped by project"""
+    """Get all services status grouped by project (cached)
+
+    Returns:
+        projects: 프로젝트별 서비스 상태
+        collected_at: 마지막 수집 시각 (ISO 8601)
+        collection_duration_ms: 수집 소요 시간 (ms)
+    """
+    if _cache_collector:
+        return _cache_collector.get_cached_status()
+    # fallback: 캐시 수집기가 없으면 직접 수집 (느림)
     return await _service.get_all_services_status()
+
+
+@router.post("/services/refresh")
+async def refresh_services_status():
+    """즉시 상태 수집 후 반환
+
+    Returns:
+        projects: 프로젝트별 서비스 상태
+        collected_at: 수집 시각 (ISO 8601)
+        collection_duration_ms: 수집 소요 시간 (ms)
+    """
+    if not _cache_collector:
+        raise HTTPException(status_code=503, detail="Cache collector not initialized")
+
+    result = await _cache_collector.collect_and_cache()
+    if result is None:
+        raise HTTPException(status_code=503, detail="Collection in progress or failed")
+
+    return result
 
 
 @router.get("/services/nssm")

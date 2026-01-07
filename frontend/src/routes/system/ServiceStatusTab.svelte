@@ -12,33 +12,67 @@
   let status = $state<ServiceDashboardStatus | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let lastUpdated = $state<Date | null>(null);
   let actionLoading = $state<string | null>(null);
+  let refreshing = $state(false);
 
   const REFRESH_INTERVAL = 30000;
+
+  // 서버 수집 시각을 상대 시간으로 포맷
+  function formatCollectedAt(isoString: string | null): string {
+    if (!isoString) return '수집 전';
+    try {
+      const date = new Date(isoString);
+      const now = new Date();
+      const diffSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+      if (diffSeconds < 10) return '방금 전';
+      if (diffSeconds < 60) return `${diffSeconds}초 전`;
+      if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)}분 전`;
+      return date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return isoString;
+    }
+  }
 
   async function fetchStatus() {
     try {
       status = await serviceDashboardApi.status();
       error = null;
-      lastUpdated = new Date();
-
-      // 서비스 상태 카운트 계산
-      if (status && onStatusChange) {
-        let running = 0;
-        let total = 0;
-        for (const project of Object.values(status.projects)) {
-          for (const svc of project.nssm_services) {
-            total++;
-            if (svc.status === 'Running') running++;
-          }
-        }
-        onStatusChange(running, total);
-      }
+      updateServiceCounts();
     } catch (e) {
       error = e instanceof Error ? e.message : '데이터 로드 실패';
     } finally {
       loading = false;
+    }
+  }
+
+  // 즉시 수집 (서버에서 PowerShell 실행)
+  async function refreshStatus() {
+    if (refreshing) return;
+    refreshing = true;
+    try {
+      status = await serviceDashboardApi.refresh();
+      error = null;
+      updateServiceCounts();
+    } catch (e) {
+      error = e instanceof Error ? e.message : '새로고침 실패';
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  // 서비스 상태 카운트 계산 (부모 컴포넌트에 전달)
+  function updateServiceCounts() {
+    if (status && onStatusChange) {
+      let running = 0;
+      let total = 0;
+      for (const project of Object.values(status.projects)) {
+        for (const svc of project.nssm_services) {
+          total++;
+          if (svc.status === 'Running') running++;
+        }
+      }
+      onStatusChange(running, total);
     }
   }
 
@@ -165,19 +199,30 @@
   <!-- 헤더 -->
   <div class="flex justify-between items-center">
     <div class="flex items-center gap-4">
-      {#if lastUpdated}
-        <span class="text-sm text-gray-500 dark:text-gray-400">
-          마지막 업데이트: {lastUpdated.toLocaleTimeString()}
-        </span>
-      {/if}
+      <!-- 서버 수집 시각 표시 -->
+      <span class="text-sm text-gray-500 dark:text-gray-400">
+        마지막 수집: {formatCollectedAt(status?.collected_at ?? null)}
+      </span>
+
+      <!-- 즉시 수집 버튼 -->
+      <button
+        onclick={refreshStatus}
+        disabled={refreshing}
+        class="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {refreshing ? '수집 중...' : '즉시 수집'}
+      </button>
+
+      <!-- 캐시 새로고침 버튼 -->
       <button
         onclick={fetchStatus}
         class="px-3 py-1 text-sm bg-gray-100 dark:bg-gray-700 rounded hover:bg-gray-200 dark:hover:bg-gray-600"
       >
         새로고침
       </button>
+
       <span class="text-xs text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
-        30초 자동 새로고침
+        30초 자동
       </span>
     </div>
   </div>
