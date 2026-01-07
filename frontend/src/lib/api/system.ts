@@ -863,3 +863,112 @@ export const videoDownloadApi = {
       body: JSON.stringify(data)
     })
 };
+
+// ============================================================
+// Service Dashboard API (서비스 현황 대시보드)
+// ============================================================
+
+export interface NssmService {
+  name: string;
+  project: string;
+  status: string;
+  start_type: string;
+  display_name: string;
+}
+
+export interface StartupProgram {
+  name: string;
+  project: string;
+  registered: boolean;
+  path: string;
+}
+
+export interface ScheduledTask {
+  Name: string;
+  Folder: string;
+  State: string;
+  Description: string;
+  LastRun: string | null;
+  NextRun: string | null;
+  LastResult: number | null;
+  project: string;
+}
+
+export interface WorkerProcess {
+  name: string;
+  project: string;
+  pid: number | null;
+  running: boolean;
+}
+
+export interface ProjectServices {
+  nssm_services: NssmService[];
+  startup_programs: StartupProgram[];
+  scheduled_tasks: ScheduledTask[];
+  worker_processes: WorkerProcess[];
+}
+
+export interface ServiceDashboardStatus {
+  projects: Record<string, ProjectServices>;
+}
+
+export const serviceDashboardApi = {
+  // 전체 서비스 현황 조회
+  status: () => request<ServiceDashboardStatus>('/system/services/status'),
+
+  // NSSM 서비스 목록
+  nssmServices: () => request<NssmService[]>('/system/services/nssm'),
+
+  // 시작프로그램 목록
+  startupPrograms: () => request<StartupProgram[]>('/system/services/startup'),
+
+  // 예약 작업 목록
+  scheduledTasks: () => request<ScheduledTask[]>('/system/services/tasks'),
+
+  // 워커 프로세스 목록
+  workers: () => request<WorkerProcess[]>('/system/services/workers'),
+
+  // === 관리 기능 ===
+
+  // NSSM 서비스 재시작
+  restartNssm: (name: string) =>
+    request<{ success: boolean; message: string }>(`/system/services/nssm/${name}/restart`, {
+      method: 'POST'
+    }),
+
+  // NSSM 서비스 중지
+  stopNssm: (name: string) =>
+    request<{ success: boolean; message: string }>(`/system/services/nssm/${name}/stop`, {
+      method: 'POST'
+    }),
+
+  // NSSM 서비스 시작
+  startNssm: (name: string) =>
+    request<{ success: boolean; message: string }>(`/system/services/nssm/${name}/start`, {
+      method: 'POST'
+    }),
+
+  // 시작프로그램 제거
+  removeStartup: (name: string) =>
+    request<{ success: boolean; message: string }>(`/system/services/startup/${name}`, {
+      method: 'DELETE'
+    }),
+
+  // 예약 작업 실행
+  runTask: (folder: string, name: string) =>
+    request<{ success: boolean; message: string }>(`/system/services/tasks/${folder}/${name}/run`, {
+      method: 'POST'
+    }),
+
+  // 예약 작업 제거
+  removeTask: (folder: string, name: string) =>
+    request<{ success: boolean; message: string }>(`/system/services/tasks/${folder}/${name}`, {
+      method: 'DELETE'
+    }),
+
+  // 워커 재시작
+  restartWorkers: () =>
+    request<{ success: boolean; message: string }>('/system/services/workers/restart', {
+      method: 'POST'
+    })
+};
