@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { dashboardApi } from '$lib/api';
+  import { ApiConnectionError } from '$lib/api/client';
   import type { UnifiedDashboard } from '$lib/types';
   import ServiceHealthCard from './ServiceHealthCard.svelte';
   import SystemResourceCard from './SystemResourceCard.svelte';
@@ -11,6 +12,7 @@
   let data = $state<UnifiedDashboard | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
+  let isConnectionError = $state(false);
   let lastUpdated = $state<Date | null>(null);
 
   const REFRESH_INTERVAL = 10000; // 10초
@@ -19,9 +21,16 @@
     try {
       data = await dashboardApi.unified();
       error = null;
+      isConnectionError = false;
       lastUpdated = new Date();
     } catch (e) {
-      error = e instanceof Error ? e.message : '데이터 로드 실패';
+      if (e instanceof ApiConnectionError) {
+        isConnectionError = true;
+        error = 'API 서버에 연결할 수 없습니다';
+      } else {
+        isConnectionError = false;
+        error = e instanceof Error ? e.message : '데이터 로드 실패';
+      }
     } finally {
       loading = false;
     }
@@ -61,10 +70,25 @@
     </div>
   {:else if error}
     <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-      <p class="text-red-600 dark:text-red-400">{error}</p>
+      <p class="text-red-600 dark:text-red-400 font-medium">{error}</p>
+
+      {#if isConnectionError}
+        <div class="mt-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded">
+          <p class="text-sm font-medium text-yellow-800 dark:text-yellow-200">좀비 포트 가능성</p>
+          <p class="text-xs text-yellow-700 dark:text-yellow-300 mt-1">
+            서버가 비정상 종료되어 포트가 점유된 상태일 수 있습니다.
+          </p>
+          <div class="mt-2 text-xs text-yellow-600 dark:text-yellow-400 space-y-1">
+            <p class="font-medium">해결 방법:</p>
+            <p>1. 관리자 권한으로 실행: <code class="bg-yellow-100 dark:bg-yellow-800 px-1 rounded">net stop winnat && net start winnat</code></p>
+            <p>2. 위 방법이 안 되면 시스템 재부팅</p>
+          </div>
+        </div>
+      {/if}
+
       <button
         onclick={fetchData}
-        class="mt-2 text-sm text-red-700 dark:text-red-300 underline hover:no-underline"
+        class="mt-3 text-sm text-red-700 dark:text-red-300 underline hover:no-underline"
       >
         다시 시도
       </button>
