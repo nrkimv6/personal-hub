@@ -1,0 +1,447 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+
+	// Types
+	interface SleepStatus {
+		is_active: boolean;
+		mode: string;
+		block_start: string | null;
+		block_end: string | null;
+		grace_until: string | null;
+		bypass_attempts_today: number;
+	}
+
+	interface Schedule {
+		warning_times: string[];
+		block_start: string;
+		block_end: string;
+	}
+
+	interface LogEntry {
+		timestamp: string;
+		type: string;
+		reason?: string;
+		details?: Record<string, unknown>;
+	}
+
+	interface DailyStats {
+		date: string;
+		bypass_attempts: number;
+		emergency_unlocks: number;
+		estimated_sleep_time?: string;
+	}
+
+	// State
+	let status = $state<SleepStatus | null>(null);
+	let schedule = $state<Schedule | null>(null);
+	let logs = $state<LogEntry[]>([]);
+	let stats = $state<DailyStats[]>([]);
+	let loading = $state(true);
+	let error = $state<string | null>(null);
+
+	// Emergency unlock form
+	let password = $state('');
+	let reason = $state('');
+	let unlocking = $state(false);
+	let unlockError = $state<string | null>(null);
+	let unlockSuccess = $state<string | null>(null);
+
+	const API_BASE = '/api/v1/sleep-now';
+
+	async function fetchData() {
+		loading = true;
+		error = null;
+		try {
+			const [statusRes, scheduleRes, logsRes, statsRes] = await Promise.all([
+				fetch(`${API_BASE}/status`),
+				fetch(`${API_BASE}/schedule`),
+				fetch(`${API_BASE}/logs?days=7`),
+				fetch(`${API_BASE}/stats?days=7`)
+			]);
+
+			if (!statusRes.ok) throw new Error('상태 조회 실패');
+
+			status = await statusRes.json();
+			schedule = await scheduleRes.json();
+			logs = await logsRes.json();
+			stats = await statsRes.json();
+		} catch (e) {
+			error = e instanceof Error ? e.message : '데이터 로드 실패';
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function emergencyUnlock() {
+		if (!password || password.length < 16) {
+			unlockError = '비밀번호는 16자 이상이어야 합니다';
+			return;
+		}
+
+		unlocking = true;
+		unlockError = null;
+		unlockSuccess = null;
+
+		try {
+			const res = await fetch(`${API_BASE}/emergency-unlock`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ password, reason })
+			});
+
+			if (!res.ok) {
+				const data = await res.json();
+				throw new Error(data.detail || '잠금 해제 실패');
+			}
+
+			const data = await res.json();
+			unlockSuccess = data.message;
+			password = '';
+			reason = '';
+			await fetchData();
+		} catch (e) {
+			unlockError = e instanceof Error ? e.message : '잠금 해제 실패';
+		} finally {
+			unlocking = false;
+		}
+	}
+
+	async function skipToday() {
+		if (!password || password.length < 16) {
+			unlockError = '비밀번호는 16자 이상이어야 합니다';
+			return;
+		}
+
+		unlocking = true;
+		unlockError = null;
+		unlockSuccess = null;
+
+		try {
+			const res = await fetch(`${API_BASE}/skip-today`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ password, reason })
+			});
+
+			if (!res.ok) {
+				const data = await res.json();
+				throw new Error(data.detail || '하루 비활성화 실패');
+			}
+
+			const data = await res.json();
+			unlockSuccess = data.message;
+			password = '';
+			reason = '';
+			await fetchData();
+		} catch (e) {
+			unlockError = e instanceof Error ? e.message : '하루 비활성화 실패';
+		} finally {
+			unlocking = false;
+		}
+	}
+
+	function formatDateTime(iso: string | null): string {
+		if (!iso) return '-';
+		return new Date(iso).toLocaleString('ko-KR');
+	}
+
+	function getStatusColor(mode: string): string {
+		switch (mode) {
+			case 'blocking':
+				return 'bg-red-100 text-red-800 border-red-200';
+			case 'warning':
+				return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+			case 'grace':
+				return 'bg-blue-100 text-blue-800 border-blue-200';
+			default:
+				return 'bg-gray-100 text-gray-800 border-gray-200';
+		}
+	}
+
+	function getStatusText(mode: string): string {
+		switch (mode) {
+			case 'blocking':
+				return '차단 중';
+			case 'warning':
+				return '경고 중';
+			case 'grace':
+				return '유예 중';
+			case 'disabled':
+				return '비활성';
+			default:
+				return mode;
+		}
+	}
+
+	function getLogTypeColor(type: string): string {
+		switch (type) {
+			case 'block_start':
+				return 'bg-red-100 text-red-700';
+			case 'block_end':
+				return 'bg-green-100 text-green-700';
+			case 'bypass_attempt':
+				return 'bg-orange-100 text-orange-700';
+			case 'emergency_unlock':
+				return 'bg-blue-100 text-blue-700';
+			case 'skip_today':
+				return 'bg-purple-100 text-purple-700';
+			default:
+				return 'bg-gray-100 text-gray-700';
+		}
+	}
+
+	function getLogTypeText(type: string): string {
+		switch (type) {
+			case 'block_start':
+				return '차단 시작';
+			case 'block_end':
+				return '차단 해제';
+			case 'bypass_attempt':
+				return '우회 시도';
+			case 'emergency_unlock':
+				return '긴급 해제';
+			case 'emergency_unlock_failed':
+				return '해제 실패';
+			case 'skip_today':
+				return '오늘 비활성화';
+			default:
+				return type;
+		}
+	}
+
+	onMount(() => {
+		fetchData();
+		// Auto refresh every 30 seconds
+		const interval = setInterval(fetchData, 30000);
+		return () => clearInterval(interval);
+	});
+</script>
+
+<div class="p-6 max-w-6xl mx-auto">
+	<div class="mb-6 flex items-center justify-between">
+		<h1 class="text-2xl font-bold text-gray-900">Sleep Now</h1>
+		<button
+			onclick={fetchData}
+			class="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+		>
+			새로고침
+		</button>
+	</div>
+
+	{#if loading && !status}
+		<div class="flex items-center justify-center h-64">
+			<div class="text-gray-500">로딩 중...</div>
+		</div>
+	{:else if error}
+		<div class="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+			{error}
+		</div>
+	{:else}
+		<!-- Status Card -->
+		<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+			<!-- Current Status -->
+			<div class="bg-white rounded-lg shadow p-6">
+				<h2 class="text-lg font-semibold text-gray-900 mb-4">현재 상태</h2>
+				{#if status}
+					<div class="space-y-3">
+						<div class="flex items-center gap-3">
+							<span
+								class="px-3 py-1 rounded-full text-sm font-medium border {getStatusColor(
+									status.mode
+								)}"
+							>
+								{getStatusText(status.mode)}
+							</span>
+							{#if status.is_active}
+								<span class="text-2xl">🔒</span>
+							{:else}
+								<span class="text-2xl">🔓</span>
+							{/if}
+						</div>
+
+						{#if status.block_start}
+							<div class="text-sm text-gray-600">
+								<span class="font-medium">차단 시작:</span>
+								{formatDateTime(status.block_start)}
+							</div>
+						{/if}
+						{#if status.block_end}
+							<div class="text-sm text-gray-600">
+								<span class="font-medium">차단 해제:</span>
+								{formatDateTime(status.block_end)}
+							</div>
+						{/if}
+						{#if status.grace_until}
+							<div class="text-sm text-blue-600">
+								<span class="font-medium">유예 종료:</span>
+								{formatDateTime(status.grace_until)}
+							</div>
+						{/if}
+						<div class="text-sm text-gray-600">
+							<span class="font-medium">오늘 우회 시도:</span>
+							<span class="text-orange-600 font-semibold">{status.bypass_attempts_today}회</span>
+						</div>
+					</div>
+				{/if}
+			</div>
+
+			<!-- Schedule -->
+			<div class="bg-white rounded-lg shadow p-6">
+				<h2 class="text-lg font-semibold text-gray-900 mb-4">스케줄</h2>
+				{#if schedule}
+					<div class="space-y-3">
+						<div class="text-sm">
+							<span class="font-medium text-gray-700">차단 시작:</span>
+							<span class="text-red-600 font-semibold">{schedule.block_start}</span>
+						</div>
+						<div class="text-sm">
+							<span class="font-medium text-gray-700">차단 해제:</span>
+							<span class="text-green-600 font-semibold">{schedule.block_end}</span>
+						</div>
+						<div class="text-sm">
+							<span class="font-medium text-gray-700">경고 시간:</span>
+							<div class="mt-1 flex flex-wrap gap-1">
+								{#each schedule.warning_times as time}
+									<span class="px-2 py-0.5 bg-yellow-100 text-yellow-700 text-xs rounded">
+										{time}
+									</span>
+								{/each}
+							</div>
+						</div>
+					</div>
+				{/if}
+			</div>
+
+			<!-- Weekly Stats -->
+			<div class="bg-white rounded-lg shadow p-6">
+				<h2 class="text-lg font-semibold text-gray-900 mb-4">주간 통계</h2>
+				{#if stats.length > 0}
+					<div class="space-y-2">
+						<div class="text-sm">
+							<span class="font-medium text-gray-700">총 우회 시도:</span>
+							<span class="text-orange-600 font-semibold">
+								{stats.reduce((sum, s) => sum + s.bypass_attempts, 0)}회
+							</span>
+						</div>
+						<div class="text-sm">
+							<span class="font-medium text-gray-700">긴급 해제:</span>
+							<span class="text-blue-600 font-semibold">
+								{stats.reduce((sum, s) => sum + s.emergency_unlocks, 0)}회
+							</span>
+						</div>
+					</div>
+				{:else}
+					<div class="text-sm text-gray-500">통계 없음</div>
+				{/if}
+			</div>
+		</div>
+
+		<!-- Emergency Unlock -->
+		<div class="bg-white rounded-lg shadow p-6 mb-6">
+			<h2 class="text-lg font-semibold text-gray-900 mb-4">긴급 해제</h2>
+			<p class="text-sm text-gray-600 mb-4">
+				긴급한 경우 아래 비밀번호를 입력하여 1시간 유예를 받을 수 있습니다. 비밀번호는 16자 이상이어야
+				합니다.
+			</p>
+
+			{#if unlockError}
+				<div class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+					{unlockError}
+				</div>
+			{/if}
+			{#if unlockSuccess}
+				<div class="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
+					{unlockSuccess}
+				</div>
+			{/if}
+
+			<div class="space-y-4">
+				<div>
+					<label for="password" class="block text-sm font-medium text-gray-700 mb-1">
+						비밀번호
+					</label>
+					<input
+						type="password"
+						id="password"
+						bind:value={password}
+						class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+						placeholder="16자 이상의 비밀번호"
+					/>
+				</div>
+				<div>
+					<label for="reason" class="block text-sm font-medium text-gray-700 mb-1">
+						사유 (선택)
+					</label>
+					<input
+						type="text"
+						id="reason"
+						bind:value={reason}
+						class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+						placeholder="해제 사유 입력"
+					/>
+				</div>
+				<div class="flex gap-3">
+					<button
+						onclick={emergencyUnlock}
+						disabled={unlocking}
+						class="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg transition-colors"
+					>
+						{unlocking ? '처리 중...' : '1시간 유예'}
+					</button>
+					<button
+						onclick={skipToday}
+						disabled={unlocking}
+						class="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-400 text-white rounded-lg transition-colors"
+					>
+						{unlocking ? '처리 중...' : '오늘 하루 비활성화'}
+					</button>
+				</div>
+			</div>
+		</div>
+
+		<!-- Recent Logs -->
+		<div class="bg-white rounded-lg shadow p-6">
+			<h2 class="text-lg font-semibold text-gray-900 mb-4">최근 로그</h2>
+			{#if logs.length > 0}
+				<div class="overflow-x-auto">
+					<table class="w-full text-sm">
+						<thead class="bg-gray-50">
+							<tr>
+								<th class="px-4 py-2 text-left font-medium text-gray-600">시간</th>
+								<th class="px-4 py-2 text-left font-medium text-gray-600">유형</th>
+								<th class="px-4 py-2 text-left font-medium text-gray-600">상세</th>
+							</tr>
+						</thead>
+						<tbody class="divide-y divide-gray-100">
+							{#each logs.slice(0, 20) as log}
+								<tr class="hover:bg-gray-50">
+									<td class="px-4 py-2 text-gray-600">
+										{new Date(log.timestamp).toLocaleString('ko-KR')}
+									</td>
+									<td class="px-4 py-2">
+										<span
+											class="px-2 py-0.5 rounded text-xs font-medium {getLogTypeColor(log.type)}"
+										>
+											{getLogTypeText(log.type)}
+										</span>
+									</td>
+									<td class="px-4 py-2 text-gray-600">
+										{#if log.reason}
+											{log.reason}
+										{:else if log.details}
+											{JSON.stringify(log.details)}
+										{:else}
+											-
+										{/if}
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{:else}
+				<div class="text-sm text-gray-500 text-center py-8">로그 없음</div>
+			{/if}
+		</div>
+	{/if}
+</div>
