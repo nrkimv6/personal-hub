@@ -3,7 +3,7 @@
 
 param(
     [switch]$Force,        # Skip confirmations
-    [switch]$Dev,          # Stop dev environment (ports 8001, 5174)
+    [switch]$Dev,          # Stop dev environment (ports 8001, 6101)
     [switch]$All,          # Stop both dev and production environments
     [switch]$SkipWatchdog, # Don't kill watchdog processes (for service restart)
     [switch]$SkipWorkers   # Don't kill worker processes (for service restart - workers run separately)
@@ -25,17 +25,17 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 # Port settings based on mode
 if ($All) {
     $ApiPorts = @(8000, 8001)
-    $FrontendPorts = @(5173, 5174)
+    $FrontendPorts = @(6100, 6101)
     $PidSuffixes = @("", "_dev")
     Write-Host "[MODE] Stopping ALL environments (production + dev)" -ForegroundColor Yellow
 } elseif ($Dev) {
     $ApiPorts = @(8001)
-    $FrontendPorts = @(5174)
+    $FrontendPorts = @(6101)
     $PidSuffixes = @("_dev")
     Write-Host "[MODE] Stopping DEV environment only" -ForegroundColor Yellow
 } else {
     $ApiPorts = @(8000)
-    $FrontendPorts = @(5173)
+    $FrontendPorts = @(6100)
     $PidSuffixes = @("")
     Write-Host "[MODE] Stopping PRODUCTION environment only" -ForegroundColor Yellow
 }

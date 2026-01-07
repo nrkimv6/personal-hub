@@ -5,7 +5,7 @@
 # Development mode (-Dev): All features enabled including workers
 
 param(
-    [switch]$Dev,        # Dev mode: use different ports (API: 8001, Frontend: 5174) + workers
+    [switch]$Dev,        # Dev mode: use different ports (API: 8001, Frontend: 6101) + workers
     [switch]$SkipWorker  # Skip worker even in Dev mode (for PyCharm debugger)
 )
 
@@ -16,12 +16,12 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 # Mode and port settings
 if ($Dev) {
     $ApiPort = 8001
-    $FrontendPort = 5174
+    $FrontendPort = 6101
     $AppMode = "development"
     $RunWorkers = -not $SkipWorker  # Run workers unless explicitly skipped
 } else {
     $ApiPort = 8000
-    $FrontendPort = 5173
+    $FrontendPort = 6100
     $AppMode = "production"
     $RunWorkers = $false  # Production mode: no workers
 }

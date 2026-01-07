@@ -2,7 +2,7 @@
 # Starts FastAPI server, monitoring worker, and Frontend in background
 
 param(
-    [switch]$Dev  # Dev mode: use different ports (8001, 5174) for development
+    [switch]$Dev  # Dev mode: use different ports (8001, 6101) for development
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,13 +13,13 @@ $FrontendDir = Join-Path $ProjectRoot "frontend"
 # Port and mode settings - Dev mode uses different ports to avoid affecting production
 if ($Dev) {
     $ApiPort = 8001
-    $FrontendPort = 5174
+    $FrontendPort = 6101
     $AppMode = "development"
     $LogDir = Join-Path $ProjectRoot "logs\dev"
     Write-Host "[DEV MODE] Using development ports (API: $ApiPort, Frontend: $FrontendPort)" -ForegroundColor Yellow
 } else {
     $ApiPort = 8000
-    $FrontendPort = 5173
+    $FrontendPort = 6100
     $AppMode = "production"
     $LogDir = Join-Path $ProjectRoot "logs"
 }

@@ -89,8 +89,8 @@ class RecentAlert:
 SERVICE_CONFIG = {
     "api": {"pid_file": "api.pid", "port": 8000, "expected_process": "python"},
     "api_dev": {"pid_file": "api_dev.pid", "port": 8001, "expected_process": "python"},
-    "frontend": {"pid_file": "frontend.pid", "port": 5173, "expected_process": "node"},
-    "frontend_dev": {"pid_file": "frontend_dev.pid", "port": 5174, "expected_process": "node"},
+    "frontend": {"pid_file": "frontend.pid", "port": 6100, "expected_process": "node"},
+    "frontend_dev": {"pid_file": "frontend_dev.pid", "port": 6101, "expected_process": "node"},
     # worker는 개발 모드에서만 실행됨 (운영 모드는 워커 비활성화)
     "worker_dev": {"pid_file": "unified_worker_dev.pid", "port": None, "expected_process": "python"},
     "cloudflared": {"process_name": "cloudflared", "port": None},  # Windows 서비스로 관리됨
@@ -428,7 +428,7 @@ class HealthMonitorService:
     async def check_all_http_endpoints(self) -> list[ServiceHealth]:
         """모든 서비스 HTTP 헬스 체크"""
         port = 8001 if settings.APP_MODE == "development" else 8000
-        frontend_port = 5174 if settings.APP_MODE == "development" else 5173
+        frontend_port = 6101 if settings.APP_MODE == "development" else 6100
 
         checks = [
             self.check_http_endpoint("api_internal", f"http://localhost:{port}/api/v1/system/status"),

@@ -32,7 +32,7 @@ $services = @(
     @{
         Name = "MonitorPage"
         DisplayName = "Monitor Page (Production)"
-        Description = "Monitor Page Production Server - API(8000) + Frontend(5173)"
+        Description = "Monitor Page Production Server - API(8000) + Frontend(6100)"
         Script = "$ScriptDir\service-run.ps1"
         Args = ""
         LogDir = Join-Path $ProjectRoot "logs"
@@ -43,7 +43,7 @@ if ($IncludeDev -and ($Action -eq "install" -or $Action -eq "uninstall")) {
     $services += @{
         Name = "MonitorPage-Dev"
         DisplayName = "Monitor Page (Development)"
-        Description = "Monitor Page Development Server - API(8001) + Frontend(5174) + Workers"
+        Description = "Monitor Page Development Server - API(8001) + Frontend(6101) + Workers"
         Script = "$ScriptDir\service-run.ps1"
         Args = "-Dev"
         LogDir = Join-Path $ProjectRoot "logs\dev"
@@ -56,7 +56,7 @@ if ($Dev -and ($Action -in @("start", "stop", "restart"))) {
         @{
             Name = "MonitorPage-Dev"
             DisplayName = "Monitor Page (Development)"
-            Description = "Monitor Page Development Server - API(8001) + Frontend(5174) + Workers"
+            Description = "Monitor Page Development Server - API(8001) + Frontend(6101) + Workers"
             Script = "$ScriptDir\service-run.ps1"
             Args = "-Dev"
             LogDir = Join-Path $ProjectRoot "logs\dev"

@@ -6,7 +6,7 @@
 
 사용법:
     python with_server.py --server "uvicorn app.main:app --port 8001" --port 8001 \
-                          --server "npm run dev --prefix frontend -- --port 5174" --port 5174 \
+                          --server "npm run dev --prefix frontend -- --port 6101" --port 6101 \
                           -- pytest tests/e2e/
 
 참조: https://github.com/anthropics/skills/blob/main/skills/webapp-testing/scripts/with_server.py

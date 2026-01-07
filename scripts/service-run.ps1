@@ -19,13 +19,13 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 # Mode and port settings
 if ($Dev) {
     $ApiPort = 8001
-    $FrontendPort = 5174
+    $FrontendPort = 6101
     $AppMode = "development"
     $LogDir = Join-Path $ProjectRoot "logs\dev"
     $PidSuffix = "_dev"
 } else {
     $ApiPort = 8000
-    $FrontendPort = 5173
+    $FrontendPort = 6100
     $AppMode = "production"
     $LogDir = Join-Path $ProjectRoot "logs"
     $PidSuffix = ""

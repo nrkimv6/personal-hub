@@ -22,7 +22,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 # 테스트 설정
 E2E_CONFIG = {
     "api_url": "http://localhost:8001",
-    "frontend_url": "http://localhost:5174",
+    "frontend_url": "http://localhost:6101",
     "headless": True,  # CI에서는 True, 디버깅 시 False
     "slow_mo": 0,  # 디버깅 시 100~500 설정
     "timeout": 30000,  # 30초

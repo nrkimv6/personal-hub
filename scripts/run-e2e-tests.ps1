@@ -75,15 +75,15 @@ if ($NoServer) {
 
     Write-Info "서버 시작 및 테스트 실행..."
     Write-Info "  API: http://localhost:8001"
-    Write-Info "  Frontend: http://localhost:5174"
+    Write-Info "  Frontend: http://localhost:6101"
 
     Push-Location $ProjectRoot
     try {
         python $WithServerScript `
             --server "python -m uvicorn app.main:app --host 0.0.0.0 --port 8001" `
             --port 8001 `
-            --server "npm run dev --prefix frontend -- --port 5174" `
-            --port 5174 `
+            --server "npm run dev --prefix frontend -- --port 6101" `
+            --port 6101 `
             --timeout 60 `
             -- pytest $TestPath -v --tb=short
 

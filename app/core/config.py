@@ -177,7 +177,7 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7일
 
     # 프론트엔드 URL (OAuth 콜백 후 리디렉트)
-    FRONTEND_URL: str = "http://localhost:5173"
+    FRONTEND_URL: str = "http://localhost:6100"
 
     # 백엔드 API URL (OAuth redirect_uri 생성용, Cloudflare Tunnel 사용 시 필수)
     API_BASE_URL: str = ""  # 예: "https://monitor.woory.day/api/v1"
