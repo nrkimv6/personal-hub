@@ -1,17 +1,67 @@
 @import "tailwindcss";
 
 :root {
+  /* Primary */
   --primary: #3b82f6;
-  --primary-dark: #2563eb;
+  --primary-hover: #2563eb;
+  --primary-active: #1d4ed8;
+  --primary-light: #eff6ff;
+  --primary-disabled: #93c5fd;
+
+  /* Semantic */
   --success: #22c55e;
+  --success-light: #dcfce7;
   --warning: #f59e0b;
+  --warning-light: #fef3c7;
   --error: #ef4444;
+  --error-light: #fee2e2;
+  --info: #0ea5e9;
+  --info-light: #e0f2fe;
+
+  /* Neutral - Light */
+  --bg-page: #f9fafb;
+  --bg-card: #ffffff;
+  --bg-sidebar: #1f2937;
+  --border: #e5e7eb;
+  --text-primary: #111827;
+  --text-secondary: #6b7280;
+  --text-muted: #9ca3af;
+
+  /* Gray scale (legacy support) */
   --gray-50: #f9fafb;
   --gray-100: #f3f4f6;
   --gray-200: #e5e7eb;
+  --gray-300: #d1d5db;
+  --gray-400: #9ca3af;
+  --gray-500: #6b7280;
+  --gray-600: #4b5563;
   --gray-700: #374151;
   --gray-800: #1f2937;
   --gray-900: #111827;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+/* Dark mode */
+.dark {
+  --bg-page: #111827;
+  --bg-card: #1f2937;
+  --bg-sidebar: #111827;
+  --border: #374151;
+  --text-primary: #f9fafb;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
 }
 
 body {
