@@ -9,3 +9,5 @@ export { default as Toggle } from './Toggle.svelte';
 export { default as Table } from './Table.svelte';
 export { default as Pagination } from './Pagination.svelte';
 export { default as Gauge } from './Gauge.svelte';
+export { default as ProgressBar } from './ProgressBar.svelte';
+export { default as StatusBadge } from './StatusBadge.svelte';

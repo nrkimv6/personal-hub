@@ -1,117 +1,377 @@
 @import "tailwindcss";
 
-:root {
+/* ===================================
+   Tailwind CSS 4 Theme Configuration
+   - Defines colors for utility generation
+   - Enables hover:*, focus:*, etc. variants
+   =================================== */
+@theme {
   /* Primary */
-  --primary: #3b82f6;
-  --primary-hover: #2563eb;
-  --primary-active: #1d4ed8;
-  --primary-light: #eff6ff;
-  --primary-disabled: #93c5fd;
+  --color-primary: hsl(226 60% 45%);
+  --color-primary-foreground: hsl(0 0% 100%);
+  --color-primary-hover: hsl(226 60% 38%);
+  --color-primary-active: hsl(226 60% 32%);
+  --color-primary-light: hsl(226 60% 96%);
+  --color-primary-muted: hsl(226 40% 65%);
 
-  /* Semantic */
-  --success: #22c55e;
-  --success-light: #dcfce7;
-  --warning: #f59e0b;
-  --warning-light: #fef3c7;
-  --error: #ef4444;
-  --error-light: #fee2e2;
-  --info: #0ea5e9;
-  --info-light: #e0f2fe;
+  /* Background & Surface */
+  --color-background: hsl(220 14% 96%);
+  --color-foreground: hsl(224 30% 12%);
+  --color-card: hsl(0 0% 100%);
+  --color-card-foreground: hsl(224 30% 12%);
+  --color-popover: hsl(0 0% 100%);
+  --color-popover-foreground: hsl(224 30% 12%);
 
-  /* Neutral - Light */
-  --bg-page: #f9fafb;
-  --bg-card: #ffffff;
-  --bg-sidebar: #1f2937;
-  --border: #e5e7eb;
-  --text-primary: #111827;
-  --text-secondary: #6b7280;
-  --text-muted: #9ca3af;
+  /* Secondary & Muted */
+  --color-secondary: hsl(220 14% 92%);
+  --color-secondary-foreground: hsl(224 20% 25%);
+  --color-muted: hsl(220 14% 94%);
+  --color-muted-foreground: hsl(220 10% 46%);
+  --color-accent: hsl(220 14% 92%);
+  --color-accent-foreground: hsl(224 20% 25%);
 
-  /* Gray scale (legacy support) */
-  --gray-50: #f9fafb;
-  --gray-100: #f3f4f6;
-  --gray-200: #e5e7eb;
-  --gray-300: #d1d5db;
-  --gray-400: #9ca3af;
-  --gray-500: #6b7280;
-  --gray-600: #4b5563;
-  --gray-700: #374151;
-  --gray-800: #1f2937;
-  --gray-900: #111827;
+  /* Semantic - Success */
+  --color-success: hsl(152 55% 42%);
+  --color-success-foreground: hsl(0 0% 100%);
+  --color-success-light: hsl(152 55% 95%);
+  --color-success-muted: hsl(152 35% 55%);
 
-  /* Spacing */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-6: 24px;
-  --space-8: 32px;
+  /* Semantic - Warning */
+  --color-warning: hsl(38 92% 50%);
+  --color-warning-foreground: hsl(38 92% 15%);
+  --color-warning-light: hsl(38 92% 95%);
+  --color-warning-muted: hsl(38 60% 60%);
 
-  /* Radius */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  /* Semantic - Error */
+  --color-error: hsl(0 72% 51%);
+  --color-error-foreground: hsl(0 0% 100%);
+  --color-error-light: hsl(0 72% 96%);
+  --color-error-muted: hsl(0 50% 65%);
+  --color-destructive: hsl(0 72% 51%);
+  --color-destructive-foreground: hsl(0 0% 100%);
+
+  /* Semantic - Info */
+  --color-info: hsl(199 89% 48%);
+  --color-info-foreground: hsl(0 0% 100%);
+  --color-info-light: hsl(199 89% 95%);
+  --color-info-muted: hsl(199 60% 60%);
+
+  /* Category Colors */
+  --color-purple: hsl(270 60% 55%);
+  --color-purple-light: hsl(270 60% 95%);
+  --color-pink: hsl(330 70% 55%);
+  --color-pink-light: hsl(330 70% 95%);
+
+  /* Border & Input */
+  --color-border: hsl(220 13% 88%);
+  --color-input: hsl(220 13% 88%);
+  --color-ring: hsl(226 60% 45%);
+
+  /* Sidebar */
+  --color-sidebar: hsl(224 30% 14%);
+  --color-sidebar-foreground: hsl(220 15% 75%);
+  --color-sidebar-primary: hsl(226 60% 55%);
+  --color-sidebar-primary-foreground: hsl(0 0% 100%);
+  --color-sidebar-accent: hsl(224 25% 20%);
+  --color-sidebar-accent-foreground: hsl(0 0% 100%);
+  --color-sidebar-border: hsl(224 20% 22%);
+  --color-sidebar-ring: hsl(226 60% 55%);
+  --color-sidebar-muted: hsl(220 15% 55%);
+
+  /* Gray Scale */
+  --color-gray-50: hsl(210 20% 98%);
+  --color-gray-100: hsl(220 14% 96%);
+  --color-gray-200: hsl(220 13% 91%);
+  --color-gray-300: hsl(216 12% 84%);
+  --color-gray-400: hsl(218 11% 65%);
+  --color-gray-500: hsl(220 9% 46%);
+  --color-gray-600: hsl(215 14% 34%);
+  --color-gray-700: hsl(217 19% 27%);
+  --color-gray-800: hsl(215 28% 17%);
+  --color-gray-900: hsl(221 39% 11%);
+
+  /* Border Radius */
+  --radius-lg: 0.5rem;
+  --radius-md: 0.375rem;
+  --radius-sm: 0.25rem;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 hsl(224 30% 12% / 0.04);
+  --shadow-md: 0 4px 6px -1px hsl(224 30% 12% / 0.06), 0 2px 4px -2px hsl(224 30% 12% / 0.06);
+  --shadow-lg: 0 10px 15px -3px hsl(224 30% 12% / 0.08), 0 4px 6px -4px hsl(224 30% 12% / 0.08);
+  --shadow-card: 0 1px 2px 0 hsl(224 30% 12% / 0.04);
+  --shadow-card-hover: 0 4px 6px -1px hsl(224 30% 12% / 0.06), 0 2px 4px -2px hsl(224 30% 12% / 0.06);
+  --shadow-modal: 0 10px 15px -3px hsl(224 30% 12% / 0.08), 0 4px 6px -4px hsl(224 30% 12% / 0.08);
+
+  /* Animations */
+  --animate-pulse-soft: pulse-soft 2s ease-in-out infinite;
+  --animate-fade-in: fade-in 0.2s ease-out;
+  --animate-slide-in-right: slide-in-right 0.3s ease-out;
 }
 
-/* Dark mode */
-.dark {
-  --bg-page: #111827;
-  --bg-card: #1f2937;
-  --bg-sidebar: #111827;
-  --border: #374151;
-  --text-primary: #f9fafb;
-  --text-secondary: #9ca3af;
-  --text-muted: #6b7280;
+/* ===================================
+   Monitoring Dashboard Design System
+   - Muted, eye-friendly colors
+   - Slate-indigo primary palette
+   - Clear semantic status colors
+   =================================== */
+
+@layer base {
+  :root {
+    /* Primary - Muted Slate Indigo */
+    --primary: 226 60% 45%;
+    --primary-foreground: 0 0% 100%;
+    --primary-hover: 226 60% 38%;
+    --primary-active: 226 60% 32%;
+    --primary-light: 226 60% 96%;
+    --primary-muted: 226 40% 65%;
+
+    /* Background & Surface */
+    --background: 220 14% 96%;
+    --foreground: 224 30% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 30% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 30% 12%;
+
+    /* Sidebar - Dark */
+    --sidebar-background: 224 30% 14%;
+    --sidebar-foreground: 220 15% 75%;
+    --sidebar-primary: 226 60% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 224 25% 20%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 224 20% 22%;
+    --sidebar-ring: 226 60% 55%;
+    --sidebar-muted: 220 15% 55%;
+
+    /* Secondary & Muted */
+    --secondary: 220 14% 92%;
+    --secondary-foreground: 224 20% 25%;
+    --muted: 220 14% 94%;
+    --muted-foreground: 220 10% 46%;
+    --accent: 220 14% 92%;
+    --accent-foreground: 224 20% 25%;
+
+    /* Semantic - Success */
+    --success: 152 55% 42%;
+    --success-foreground: 0 0% 100%;
+    --success-light: 152 55% 95%;
+    --success-muted: 152 35% 55%;
+
+    /* Semantic - Warning */
+    --warning: 38 92% 50%;
+    --warning-foreground: 38 92% 15%;
+    --warning-light: 38 92% 95%;
+    --warning-muted: 38 60% 60%;
+
+    /* Semantic - Error/Destructive */
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --error: 0 72% 51%;
+    --error-foreground: 0 0% 100%;
+    --error-light: 0 72% 96%;
+    --error-muted: 0 50% 65%;
+
+    /* Semantic - Info */
+    --info: 199 89% 48%;
+    --info-foreground: 0 0% 100%;
+    --info-light: 199 89% 95%;
+    --info-muted: 199 60% 60%;
+
+    /* Category Colors */
+    --purple: 270 60% 55%;
+    --purple-light: 270 60% 95%;
+    --pink: 330 70% 55%;
+    --pink-light: 330 70% 95%;
+
+    /* Border & Input */
+    --border: 220 13% 88%;
+    --input: 220 13% 88%;
+    --ring: 226 60% 45%;
+
+    /* Radius */
+    --radius: 0.5rem;
+
+    /* Shadows */
+    --shadow-sm: 0 1px 2px 0 hsl(224 30% 12% / 0.04);
+    --shadow-md: 0 4px 6px -1px hsl(224 30% 12% / 0.06), 0 2px 4px -2px hsl(224 30% 12% / 0.06);
+    --shadow-lg: 0 10px 15px -3px hsl(224 30% 12% / 0.08), 0 4px 6px -4px hsl(224 30% 12% / 0.08);
+
+    /* Gray Scale (Legacy Support - HSL) */
+    --gray-50: 210 20% 98%;
+    --gray-100: 220 14% 96%;
+    --gray-200: 220 13% 91%;
+    --gray-300: 216 12% 84%;
+    --gray-400: 218 11% 65%;
+    --gray-500: 220 9% 46%;
+    --gray-600: 215 14% 34%;
+    --gray-700: 217 19% 27%;
+    --gray-800: 215 28% 17%;
+    --gray-900: 221 39% 11%;
+
+    /* Spacing */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-6: 24px;
+    --space-8: 32px;
+  }
+
+  /* Dark Mode */
+  .dark {
+    /* Primary - Slightly brighter for dark mode */
+    --primary: 226 60% 60%;
+    --primary-foreground: 224 30% 8%;
+    --primary-hover: 226 60% 65%;
+    --primary-active: 226 60% 55%;
+    --primary-light: 226 40% 18%;
+    --primary-muted: 226 40% 50%;
+
+    /* Background & Surface */
+    --background: 224 30% 8%;
+    --foreground: 220 15% 92%;
+    --card: 224 25% 12%;
+    --card-foreground: 220 15% 92%;
+    --popover: 224 25% 12%;
+    --popover-foreground: 220 15% 92%;
+
+    /* Sidebar */
+    --sidebar-background: 224 30% 6%;
+    --sidebar-foreground: 220 15% 70%;
+    --sidebar-primary: 226 60% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 224 25% 15%;
+    --sidebar-accent-foreground: 220 15% 92%;
+    --sidebar-border: 224 20% 16%;
+    --sidebar-ring: 226 60% 60%;
+    --sidebar-muted: 220 15% 50%;
+
+    /* Secondary & Muted */
+    --secondary: 224 20% 18%;
+    --secondary-foreground: 220 15% 85%;
+    --muted: 224 20% 16%;
+    --muted-foreground: 220 10% 55%;
+    --accent: 224 20% 18%;
+    --accent-foreground: 220 15% 85%;
+
+    /* Semantic - adjusted for dark */
+    --success: 152 55% 50%;
+    --success-light: 152 40% 15%;
+    --warning: 38 92% 55%;
+    --warning-light: 38 60% 15%;
+    --destructive: 0 72% 55%;
+    --error: 0 72% 55%;
+    --error-light: 0 50% 15%;
+    --info: 199 89% 55%;
+    --info-light: 199 60% 15%;
+
+    /* Category Colors */
+    --purple: 270 60% 60%;
+    --purple-light: 270 40% 18%;
+    --pink: 330 70% 60%;
+    --pink-light: 330 50% 18%;
+
+    /* Border & Input */
+    --border: 224 20% 20%;
+    --input: 224 20% 20%;
+    --ring: 226 60% 60%;
+
+    /* Shadows - more subtle in dark */
+    --shadow-sm: 0 1px 2px 0 hsl(0 0% 0% / 0.2);
+    --shadow-md: 0 4px 6px -1px hsl(0 0% 0% / 0.3), 0 2px 4px -2px hsl(0 0% 0% / 0.2);
+    --shadow-lg: 0 10px 15px -3px hsl(0 0% 0% / 0.4), 0 4px 6px -4px hsl(0 0% 0% / 0.3);
+
+    /* Gray Scale - Dark (Legacy) */
+    --gray-50: 221 39% 11%;
+    --gray-100: 215 28% 17%;
+    --gray-200: 217 19% 27%;
+    --gray-300: 215 14% 34%;
+    --gray-400: 220 9% 46%;
+    --gray-500: 218 11% 65%;
+    --gray-600: 216 12% 84%;
+    --gray-700: 220 13% 91%;
+    --gray-800: 220 14% 96%;
+    --gray-900: 210 20% 98%;
+  }
 }
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-  background-color: var(--gray-50);
-  color: var(--gray-900);
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  html {
+    font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'Fira Code', Consolas, Monaco, 'Andale Mono', monospace;
+  }
 }
 
-/* 상태 뱃지 */
-.badge {
-  padding: 0.25rem 0.5rem;
-  border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 500;
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
 }
 
-.badge-success {
-  background-color: #dcfce7;
-  color: #166534;
+/* Keyframes */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
-.badge-warning {
-  background-color: #fef3c7;
-  color: #92400e;
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
-.badge-error {
-  background-color: #fee2e2;
-  color: #991b1b;
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-.badge-info {
-  background-color: #dbeafe;
-  color: #1e40af;
+@keyframes slide-in-right {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
 }
 
-.badge-gray {
-  background-color: #f3f4f6;
-  color: #1f2937;
+/* Animation Utilities */
+.animate-spin {
+  animation: spin 1s linear infinite;
 }
 
-.badge-purple {
-  background-color: #f3e8ff;
-  color: #7c3aed;
+.animate-pulse-soft {
+  animation: pulse-soft 2s ease-in-out infinite;
 }
 
-/* 버튼 */
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s ease-out;
+}
+
+/* ===================================
+   Legacy CSS Classes (Compatibility)
+   새 색상 시스템으로 업데이트됨
+   점진적으로 컴포넌트로 교체 예정
+   =================================== */
+
+/* 버튼 기본 스타일 */
 .btn {
   padding: 0.5rem 1rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius);
   font-weight: 500;
   transition: background-color 0.2s, color 0.2s;
   cursor: pointer;
@@ -123,58 +383,73 @@ body {
   text-decoration: none;
 }
 
-.btn-primary {
-  background-color: #2563eb;
-  color: white;
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
-.btn-primary:hover {
-  background-color: #1d4ed8;
+.btn-primary {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: hsl(var(--primary-hover));
 }
 
 .btn-secondary {
-  background-color: #e5e7eb;
-  color: #1f2937;
+  background-color: hsl(var(--secondary));
+  color: hsl(var(--secondary-foreground));
 }
 
-.btn-secondary:hover {
-  background-color: #d1d5db;
+.btn-secondary:hover:not(:disabled) {
+  background-color: hsl(var(--secondary) / 0.8);
 }
 
 .btn-success {
-  background-color: #16a34a;
-  color: white;
+  background-color: hsl(var(--success));
+  color: hsl(var(--success-foreground));
 }
 
-.btn-success:hover {
-  background-color: #15803d;
+.btn-success:hover:not(:disabled) {
+  background-color: hsl(var(--success) / 0.9);
 }
 
 .btn-danger {
-  background-color: #dc2626;
-  color: white;
+  background-color: hsl(var(--error));
+  color: hsl(var(--error-foreground));
 }
 
-.btn-danger:hover {
-  background-color: #b91c1c;
-}
-
-.btn-info {
-  background-color: #dbeafe;
-  color: #1e40af;
-}
-
-.btn-info:hover {
-  background-color: #bfdbfe;
+.btn-danger:hover:not(:disabled) {
+  background-color: hsl(var(--error) / 0.9);
 }
 
 .btn-warning {
-  background-color: #fef3c7;
-  color: #92400e;
+  background-color: hsl(var(--warning));
+  color: hsl(var(--warning-foreground));
 }
 
-.btn-warning:hover {
-  background-color: #fde68a;
+.btn-warning:hover:not(:disabled) {
+  background-color: hsl(var(--warning) / 0.9);
+}
+
+.btn-info {
+  background-color: hsl(var(--info-light));
+  color: hsl(var(--info));
+}
+
+.btn-info:hover:not(:disabled) {
+  background-color: hsl(var(--info-light) / 0.8);
+}
+
+.btn-outline {
+  background-color: transparent;
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground));
+}
+
+.btn-outline:hover:not(:disabled) {
+  background-color: hsl(var(--muted));
 }
 
 .btn-sm {
@@ -187,33 +462,83 @@ body {
   font-size: 0.75rem;
 }
 
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+/* 배지 스타일 */
+.badge {
+  padding: 0.25rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
 }
 
-/* 카드 */
+.badge-success {
+  background-color: hsl(var(--success-light));
+  color: hsl(var(--success));
+}
+
+.badge-warning {
+  background-color: hsl(var(--warning-light));
+  color: hsl(var(--warning-foreground));
+}
+
+.badge-error {
+  background-color: hsl(var(--error-light));
+  color: hsl(var(--error));
+}
+
+.badge-info {
+  background-color: hsl(var(--info-light));
+  color: hsl(var(--info));
+}
+
+.badge-gray {
+  background-color: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+}
+
+.badge-purple {
+  background-color: hsl(var(--purple-light));
+  color: hsl(var(--purple));
+}
+
+.badge-pink {
+  background-color: hsl(var(--pink-light));
+  color: hsl(var(--pink));
+}
+
+.badge-primary {
+  background-color: hsl(var(--primary-light));
+  color: hsl(var(--primary));
+}
+
+/* 카드 스타일 */
 .card {
-  background-color: white;
-  border-radius: 0.5rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e5e7eb;
+  background-color: hsl(var(--card));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid hsl(var(--border));
   padding: 1rem;
 }
 
-/* 입력 필드 */
+/* 입력 필드 스타일 */
 .input {
   width: 100%;
   padding: 0.5rem 0.75rem;
-  border: 1px solid #d1d5db;
-  border-radius: 0.5rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
   outline: none;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .input:focus {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  border-color: hsl(var(--ring));
+  box-shadow: 0 0 0 3px hsl(var(--ring) / 0.1);
+}
+
+.input:disabled {
+  background-color: hsl(var(--muted));
+  cursor: not-allowed;
 }
 
 textarea.input {
@@ -225,7 +550,7 @@ select.input {
   cursor: pointer;
 }
 
-/* 테이블 */
+/* 테이블 스타일 */
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -236,20 +561,20 @@ select.input {
   text-align: left;
   font-size: 0.75rem;
   font-weight: 500;
-  color: #6b7280;
+  color: hsl(var(--muted-foreground));
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  background-color: #f9fafb;
-  border-bottom: 1px solid #e5e7eb;
+  background-color: hsl(var(--muted));
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 .table td {
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 .table tr:hover {
-  background-color: #f9fafb;
+  background-color: hsl(var(--muted));
 }
 
 /* 체크박스 */
@@ -257,19 +582,5 @@ input[type="checkbox"] {
   width: 1rem;
   height: 1rem;
   cursor: pointer;
-  accent-color: #3b82f6;
-}
-
-/* 로딩 스피너 */
-.animate-spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+  accent-color: hsl(var(--primary));
 }

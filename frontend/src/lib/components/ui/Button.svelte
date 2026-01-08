@@ -1,32 +1,37 @@
 <script lang="ts">
-  export let variant: 'primary' | 'secondary' | 'danger' | 'warning' | 'success' | 'ghost' | 'info' = 'primary';
-  export let size: 'xs' | 'sm' | 'md' | 'lg' = 'md';
+  export let variant: 'primary' | 'secondary' | 'destructive' | 'outline' | 'ghost' | 'link' | 'success' | 'warning' | 'info' = 'primary';
+  export let size: 'xs' | 'sm' | 'md' | 'lg' | 'icon' = 'md';
   export let disabled = false;
   export let loading = false;
   export let type: 'button' | 'submit' = 'button';
 
   const variants: Record<string, string> = {
-    primary: 'bg-primary hover:bg-primary-hover text-white',
-    secondary: 'bg-white border border-gray-300 hover:bg-gray-50 text-gray-700',
-    danger: 'bg-error hover:bg-red-600 text-white',
-    warning: 'bg-warning hover:bg-amber-600 text-white',
-    success: 'bg-success hover:bg-green-600 text-white',
-    ghost: 'bg-transparent hover:bg-gray-100 text-primary',
-    info: 'bg-info-light hover:bg-sky-200 text-sky-700',
+    primary: 'bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-active',
+    secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
+    destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
+    outline: 'border border-input bg-background hover:bg-accent hover:text-accent-foreground',
+    ghost: 'hover:bg-accent hover:text-accent-foreground',
+    link: 'text-primary underline-offset-4 hover:underline',
+    success: 'bg-success text-success-foreground hover:bg-success/90',
+    warning: 'bg-warning text-warning-foreground hover:bg-warning/90',
+    info: 'bg-info text-info-foreground hover:bg-info/90',
   };
 
   const sizes: Record<string, string> = {
-    xs: 'h-6 px-2 text-xs',
-    sm: 'h-8 px-3 text-sm',
-    md: 'h-10 px-4 text-sm',
-    lg: 'h-12 px-6 text-base',
+    xs: 'h-7 px-2 text-xs rounded-sm',
+    sm: 'h-9 px-3 text-sm rounded-md',
+    md: 'h-10 px-4 text-sm rounded-md',
+    lg: 'h-11 px-8 text-base rounded-md',
+    icon: 'h-10 w-10 rounded-md',
   };
 </script>
 
 <button
   {type}
-  class="inline-flex items-center justify-center rounded-md font-medium transition-colors
-         disabled:opacity-50 disabled:cursor-not-allowed
+  class="inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium
+         ring-offset-background transition-colors
+         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2
+         disabled:pointer-events-none disabled:opacity-50
          {variants[variant]} {sizes[size]}"
   disabled={disabled || loading}
   on:click

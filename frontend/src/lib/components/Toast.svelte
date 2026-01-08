@@ -26,13 +26,26 @@
 	function getColorClass(type: Toast['type']) {
 		switch (type) {
 			case 'success':
-				return 'bg-green-500';
+				return 'bg-success';
 			case 'error':
-				return 'bg-red-500';
+				return 'bg-error';
 			case 'warning':
-				return 'bg-yellow-500';
+				return 'bg-warning';
 			default:
-				return 'bg-blue-500';
+				return 'bg-info';
+		}
+	}
+
+	function getTextClass(type: Toast['type']) {
+		switch (type) {
+			case 'success':
+				return 'text-success-foreground';
+			case 'error':
+				return 'text-error-foreground';
+			case 'warning':
+				return 'text-warning-foreground';
+			default:
+				return 'text-info-foreground';
 		}
 	}
 </script>
@@ -41,9 +54,7 @@
 	<div class="fixed bottom-4 right-4 z-50 space-y-2">
 		{#each toasts as t (t.id)}
 			<div
-				class="flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg text-white {getColorClass(
-					t.type
-				)} animate-slide-in"
+				class="flex items-center gap-3 px-4 py-3 rounded-lg shadow-modal {getColorClass(t.type)} {getTextClass(t.type)} animate-slide-in-right"
 			>
 				<span class="font-bold">{getIcon(t.type)}</span>
 				<span>{t.message}</span>
@@ -58,20 +69,3 @@
 		{/each}
 	</div>
 {/if}
-
-<style>
-	@keyframes slide-in {
-		from {
-			transform: translateX(100%);
-			opacity: 0;
-		}
-		to {
-			transform: translateX(0);
-			opacity: 1;
-		}
-	}
-
-	.animate-slide-in {
-		animation: slide-in 0.3s ease-out;
-	}
-</style>

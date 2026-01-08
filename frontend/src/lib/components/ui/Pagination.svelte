@@ -39,7 +39,8 @@
 
 <nav class="flex items-center gap-1" aria-label="Pagination">
   <button
-    class="px-3 py-1.5 text-sm rounded-md border border-border hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+    class="px-3 py-1.5 text-sm rounded-md border border-border bg-background hover:bg-muted text-foreground
+           disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
     disabled={currentPage === 1}
     on:click={() => goToPage(currentPage - 1)}
   >
@@ -48,13 +49,13 @@
 
   {#each pages as page}
     {#if page === '...'}
-      <span class="px-2 text-gray-400">...</span>
+      <span class="px-2 text-muted-foreground">...</span>
     {:else}
       <button
         class="px-3 py-1.5 text-sm rounded-md transition-colors
                {currentPage === page
-                 ? 'bg-primary text-white'
-                 : 'hover:bg-gray-100 text-gray-700'}"
+                 ? 'bg-primary text-primary-foreground'
+                 : 'hover:bg-muted text-foreground'}"
         on:click={() => goToPage(page)}
       >
         {page}
@@ -63,7 +64,8 @@
   {/each}
 
   <button
-    class="px-3 py-1.5 text-sm rounded-md border border-border hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+    class="px-3 py-1.5 text-sm rounded-md border border-border bg-background hover:bg-muted text-foreground
+           disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
     disabled={currentPage === totalPages}
     on:click={() => goToPage(currentPage + 1)}
   >

@@ -1,6 +1,7 @@
 <script lang="ts">
   export let padding: 'none' | 'sm' | 'md' | 'lg' = 'md';
   export let shadow: boolean = true;
+  export let hover: boolean = false;
 
   const paddings: Record<string, string> = {
     none: '',
@@ -11,7 +12,10 @@
 </script>
 
 <div
-  class="bg-card rounded-lg border border-border {shadow ? 'shadow-sm' : ''} {paddings[padding]}"
+  class="bg-card text-card-foreground rounded-lg border border-border transition-shadow
+         {shadow ? 'shadow-card' : ''}
+         {hover ? 'hover:shadow-card-hover' : ''}
+         {paddings[padding]}"
   {...$$restProps}
 >
   <slot />

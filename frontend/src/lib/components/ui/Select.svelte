@@ -15,16 +15,16 @@
 <select
   bind:value
   {disabled}
-  class="w-full rounded-md border border-border transition-colors outline-none
-         focus:border-primary focus:ring-2 focus:ring-primary/20
-         disabled:bg-gray-50 disabled:cursor-not-allowed
-         cursor-pointer bg-white
+  class="w-full rounded-md border border-input bg-background text-foreground transition-colors outline-none
+         ring-offset-background cursor-pointer
+         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2
+         disabled:bg-muted disabled:cursor-not-allowed disabled:opacity-50
          {sizes[size]}"
   on:change
   {...$$restProps}
 >
   {#if placeholder}
-    <option value="" disabled>{placeholder}</option>
+    <option value="" disabled class="text-muted-foreground">{placeholder}</option>
   {/if}
   {#each options as opt}
     <option value={opt.value}>{opt.label}</option>

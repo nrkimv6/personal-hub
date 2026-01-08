@@ -25,18 +25,18 @@
   let { tabs, activeTab = $bindable(), variant = 'primary', urlBased = false }: Props = $props();
 
   const primaryStyles = {
-    active: 'border-primary text-primary dark:text-blue-400',
-    inactive: 'border-transparent text-secondary hover:text-primary hover:border-gray-300',
+    active: 'border-primary text-primary',
+    inactive: 'border-transparent text-muted-foreground hover:text-primary hover:border-muted',
   };
 
   const secondaryStyles = {
-    active: 'bg-card dark:bg-gray-700 text-primary dark:text-white shadow-sm',
-    inactive: 'text-secondary dark:text-gray-400 hover:text-primary',
+    active: 'bg-card text-primary shadow-sm',
+    inactive: 'text-muted-foreground hover:text-primary',
   };
 
   const underlineStyles = {
     active: 'border-primary text-primary',
-    inactive: 'border-transparent text-secondary hover:text-primary',
+    inactive: 'border-transparent text-muted-foreground hover:text-primary',
   };
 
   function getStyles(isActive: boolean) {
@@ -58,7 +58,7 @@
 </script>
 
 {#if variant === 'secondary'}
-  <div class="bg-page dark:bg-gray-800 rounded-lg p-1 mb-4 inline-flex">
+  <div class="bg-muted rounded-lg p-1 mb-4 inline-flex">
     {#each tabs as tab}
       {#if urlBased && tab.href}
         <a
@@ -68,7 +68,7 @@
           {#if tab.icon}<span class="mr-1">{tab.icon}</span>{/if}
           {tab.label}
           {#if tab.count !== undefined}
-            <span class="ml-1 text-xs bg-gray-200 dark:bg-gray-600 px-1.5 py-0.5 rounded-full">{tab.count}</span>
+            <span class="ml-1 text-xs bg-secondary px-1.5 py-0.5 rounded-full">{tab.count}</span>
           {/if}
         </a>
       {:else}
@@ -79,14 +79,14 @@
           {#if tab.icon}<span class="mr-1">{tab.icon}</span>{/if}
           {tab.label}
           {#if tab.count !== undefined}
-            <span class="ml-1 text-xs bg-gray-200 dark:bg-gray-600 px-1.5 py-0.5 rounded-full">{tab.count}</span>
+            <span class="ml-1 text-xs bg-secondary px-1.5 py-0.5 rounded-full">{tab.count}</span>
           {/if}
         </button>
       {/if}
     {/each}
   </div>
 {:else}
-  <div class="border-b border-border dark:border-gray-700 mb-4">
+  <div class="border-b border-border mb-4">
     <nav class="flex space-x-1" aria-label="Tabs">
       {#each tabs as tab}
         {#if urlBased && tab.href}
@@ -97,7 +97,7 @@
             {#if tab.icon}<span class="mr-2">{tab.icon}</span>{/if}
             {tab.label}
             {#if tab.count !== undefined}
-              <span class="ml-1 text-xs bg-gray-100 dark:bg-gray-600 px-1.5 py-0.5 rounded-full">{tab.count}</span>
+              <span class="ml-1 text-xs bg-muted px-1.5 py-0.5 rounded-full">{tab.count}</span>
             {/if}
           </a>
         {:else}
@@ -108,7 +108,7 @@
             {#if tab.icon}<span class="mr-2">{tab.icon}</span>{/if}
             {tab.label}
             {#if tab.count !== undefined}
-              <span class="ml-1 text-xs bg-gray-100 dark:bg-gray-600 px-1.5 py-0.5 rounded-full">{tab.count}</span>
+              <span class="ml-1 text-xs bg-muted px-1.5 py-0.5 rounded-full">{tab.count}</span>
             {/if}
           </button>
         {/if}

@@ -85,87 +85,87 @@
 	}
 </script>
 
-<div class="hidden md:block bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
+<div class="hidden md:block bg-card rounded-lg border border-border overflow-hidden mb-6">
 	<div class="overflow-x-auto">
 		<table class="w-full">
-			<thead class="bg-gray-50 border-b border-gray-200">
+			<thead class="bg-muted border-b border-border">
 				<tr>
 					<th
-						class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+						class="px-2 py-2 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap"
 						>상태</th
 					>
 					{#if showTypeColumn}
 						<th
-							class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+							class="px-2 py-2 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap"
 							>유형</th
 						>
 					{/if}
 					<th
-						class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:bg-gray-100 select-none"
+						class="px-2 py-2 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap cursor-pointer hover:bg-secondary select-none"
 						onclick={() => onSort('organizer')}
 					>
-						주최 <span class="text-gray-400">{getSortIcon('organizer')}</span>
+						주최 <span class="text-muted-foreground/50">{getSortIcon('organizer')}</span>
 					</th>
 					<th
-						class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-[180px] cursor-pointer hover:bg-gray-100 select-none"
+						class="px-2 py-2 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap max-w-[180px] cursor-pointer hover:bg-secondary select-none"
 						onclick={() => onSort('title')}
 					>
-						제목 <span class="text-gray-400">{getSortIcon('title')}</span>
+						제목 <span class="text-muted-foreground/50">{getSortIcon('title')}</span>
 					</th>
 					<th
-						class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:bg-gray-100 select-none"
+						class="px-2 py-2 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap cursor-pointer hover:bg-secondary select-none"
 						onclick={() => onSort('event_end')}
 					>
-						기간 <span class="text-gray-400">{getSortIcon('event_end')}</span>
+						기간 <span class="text-muted-foreground/50">{getSortIcon('event_end')}</span>
 					</th>
 					<th
-						class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:bg-gray-100 select-none"
+						class="px-2 py-2 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap cursor-pointer hover:bg-secondary select-none"
 						onclick={() => onSort('announcement_date')}
 					>
-						발표일 <span class="text-gray-400">{getSortIcon('announcement_date')}</span>
+						발표일 <span class="text-muted-foreground/50">{getSortIcon('announcement_date')}</span>
 					</th>
 					<th
-						class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-[120px]"
+						class="px-2 py-2 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap max-w-[120px]"
 						>경품</th
 					>
 					<th
-						class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+						class="px-2 py-2 text-center text-xs font-medium text-muted-foreground uppercase whitespace-nowrap"
 						>당첨자</th
 					>
 					<th
-						class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+						class="px-2 py-2 text-center text-xs font-medium text-muted-foreground uppercase whitespace-nowrap"
 						>조건</th
 					>
 					<th
-						class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:bg-gray-100 select-none"
+						class="px-2 py-2 text-center text-xs font-medium text-muted-foreground uppercase whitespace-nowrap cursor-pointer hover:bg-secondary select-none"
 						onclick={() => onSort('created_at')}
 					>
-						수집일 <span class="text-gray-400">{getSortIcon('created_at')}</span>
+						수집일 <span class="text-muted-foreground/50">{getSortIcon('created_at')}</span>
 					</th>
 					<th
-						class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+						class="px-2 py-2 text-center text-xs font-medium text-muted-foreground uppercase whitespace-nowrap"
 						>출처</th
 					>
 					<th
-						class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+						class="px-2 py-2 text-center text-xs font-medium text-muted-foreground uppercase whitespace-nowrap"
 						>원본</th
 					>
 					<th
-						class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+						class="px-2 py-2 text-center text-xs font-medium text-muted-foreground uppercase whitespace-nowrap"
 						>관리</th
 					>
 				</tr>
 			</thead>
-			<tbody class="divide-y divide-gray-200">
+			<tbody class="divide-y divide-border">
 				{#each events as event (event.id)}
 					<tr
 						class="cursor-pointer transition-all {isParticipated(event)
-							? 'bg-gray-100 opacity-50 hover:opacity-70'
+							? 'bg-muted opacity-50 hover:opacity-70'
 							: isEndingToday(event)
-								? 'bg-orange-100 hover:bg-orange-200 font-semibold'
+								? 'bg-warning-light hover:bg-warning-light/80 font-semibold'
 								: isUnknownPeriod(event)
-									? 'bg-amber-50 hover:bg-amber-100'
-									: 'hover:bg-gray-50'}"
+									? 'bg-warning-light/50 hover:bg-warning-light/70'
+									: 'hover:bg-muted'}"
 						onclick={() => onEventClick(event)}
 					>
 						<!-- 상태 -->
@@ -181,10 +181,10 @@
 							<td class="px-2 py-2">
 								<span
 									class="px-2 py-0.5 text-xs rounded {event.event_type === 'popup'
-										? 'bg-pink-100 text-pink-700'
+										? 'bg-pink-light text-pink'
 										: event.event_type === 'event'
-											? 'bg-purple-100 text-purple-700'
-											: 'bg-gray-100 text-gray-600'}"
+											? 'bg-purple-light text-purple'
+											: 'bg-muted text-muted-foreground'}"
 								>
 									{event.event_type === 'popup'
 										? '팝업'
@@ -198,23 +198,23 @@
 						<td class="px-2 py-2 max-w-[100px]">
 							{#if event.organizer}
 								<span
-									class="text-sm font-medium text-blue-600 truncate block"
+									class="text-sm font-medium text-primary truncate block"
 									title={event.organizer}
 								>
 									{event.organizer}
 								</span>
 							{:else}
-								<span class="text-xs text-gray-400">-</span>
+								<span class="text-xs text-muted-foreground">-</span>
 							{/if}
 						</td>
 						<!-- 제목 -->
 						<td class="px-2 py-2 max-w-[180px]">
-							<span class="block truncate text-sm font-medium text-gray-900" title={event.title}>
+							<span class="block truncate text-sm font-medium text-foreground" title={event.title}>
 								{event.title}
 							</span>
 							{#if event.summary}
 								<span
-									class="block truncate text-xs text-gray-500 line-clamp-2"
+									class="block truncate text-xs text-muted-foreground line-clamp-2"
 									title={event.summary}
 								>
 									{truncate(event.summary, 40)}
@@ -222,35 +222,35 @@
 							{/if}
 						</td>
 						<!-- 기간 -->
-						<td class="px-2 py-2 text-sm text-gray-600 whitespace-nowrap">
+						<td class="px-2 py-2 text-sm text-muted-foreground whitespace-nowrap">
 							{#if event.event_end}
 								<div class="flex flex-col gap-0.5">
 									{#if event.event_start}
-										<span class="text-xs text-gray-500">{formatDate(event.event_start)}</span>
+										<span class="text-xs text-muted-foreground">{formatDate(event.event_start)}</span>
 									{/if}
 									{#if isEndingToday(event)}
-										<span class="text-xs font-bold text-orange-600 bg-orange-50 px-1 rounded"
+										<span class="text-xs font-bold text-warning bg-warning-light px-1 rounded"
 											>오늘 마감!</span
 										>
 									{:else}
-										<span class="text-xs text-gray-500">~ {formatDate(event.event_end)}</span>
+										<span class="text-xs text-muted-foreground">~ {formatDate(event.event_end)}</span>
 									{/if}
 								</div>
 							{:else if event.event_start}
 								<div class="flex flex-col gap-0.5">
-									<span class="text-xs text-gray-500">{formatDate(event.event_start)} ~</span>
-									<span class="text-xs text-amber-600 bg-amber-50 px-1 rounded">기간 미정</span>
+									<span class="text-xs text-muted-foreground">{formatDate(event.event_start)} ~</span>
+									<span class="text-xs text-warning bg-warning-light px-1 rounded">기간 미정</span>
 								</div>
 							{:else}
-								<span class="text-xs text-amber-600 bg-amber-50 px-1 rounded">기간 미정</span>
+								<span class="text-xs text-warning bg-warning-light px-1 rounded">기간 미정</span>
 							{/if}
 						</td>
 						<!-- 발표일 -->
-						<td class="px-2 py-2 text-xs text-gray-600 whitespace-nowrap">
+						<td class="px-2 py-2 text-xs text-muted-foreground whitespace-nowrap">
 							{#if event.announcement_date}
-								<span class="text-gray-700">{formatDate(event.announcement_date)}</span>
+								<span class="text-foreground">{formatDate(event.announcement_date)}</span>
 							{:else}
-								<span class="text-gray-400">-</span>
+								<span class="text-muted-foreground">-</span>
 							{/if}
 						</td>
 						<!-- 경품 -->
@@ -259,52 +259,52 @@
 								<div class="flex flex-wrap gap-0.5">
 									{#each event.prizes.slice(0, 2) as prize}
 										<span
-											class="text-xs bg-yellow-50 text-yellow-700 px-1 rounded truncate max-w-[100px]"
+											class="text-xs bg-warning-light text-warning-foreground px-1 rounded truncate max-w-[100px]"
 											title={prize}
 										>
 											{truncate(prize, 12)}
 										</span>
 									{/each}
 									{#if event.prizes.length > 2}
-										<span class="text-xs text-gray-500">+{event.prizes.length - 2}개</span>
+										<span class="text-xs text-muted-foreground">+{event.prizes.length - 2}개</span>
 									{/if}
 								</div>
 							{:else}
-								<span class="text-xs text-gray-400">-</span>
+								<span class="text-xs text-muted-foreground">-</span>
 							{/if}
 						</td>
 						<!-- 당첨자 -->
 						<td class="px-2 py-2 text-center">
 							{#if event.winner_count}
-								<span class="text-sm font-medium text-purple-600">{event.winner_count}명</span>
+								<span class="text-sm font-medium text-purple">{event.winner_count}명</span>
 							{:else}
-								<span class="text-xs text-gray-400">-</span>
+								<span class="text-xs text-muted-foreground">-</span>
 							{/if}
 						</td>
 						<!-- 조건 -->
 						<td class="px-2 py-2 text-center">
 							{#if event.purchase_required === 'yes_all'}
-								<span class="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded">구매필수</span>
+								<span class="text-xs bg-error-light text-error px-1.5 py-0.5 rounded">구매필수</span>
 							{:else if event.purchase_required === 'yes_partial'}
-								<span class="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded"
+								<span class="text-xs bg-warning-light text-warning px-1.5 py-0.5 rounded"
 									>부분구매</span
 								>
 							{:else if event.purchase_required === 'no'}
-								<span class="text-xs bg-green-100 text-green-600 px-1.5 py-0.5 rounded">무료</span>
+								<span class="text-xs bg-success-light text-success px-1.5 py-0.5 rounded">무료</span>
 							{:else}
-								<span class="text-xs text-gray-400">-</span>
+								<span class="text-xs text-muted-foreground">-</span>
 							{/if}
 						</td>
 						<!-- 수집일 -->
-						<td class="px-2 py-2 text-center text-xs text-gray-500 whitespace-nowrap">
+						<td class="px-2 py-2 text-center text-xs text-muted-foreground whitespace-nowrap">
 							{formatDate(event.created_at)}
 						</td>
 						<!-- 출처 -->
 						<td class="px-2 py-2 text-center">
 							<span
 								class="px-1.5 py-0.5 text-xs rounded {event.source_type === 'instagram'
-									? 'bg-pink-100 text-pink-600'
-									: 'bg-gray-100 text-gray-600'}"
+									? 'bg-pink-light text-pink'
+									: 'bg-muted text-muted-foreground'}"
 							>
 								{event.source_type === 'instagram'
 									? 'IG'
@@ -322,26 +322,26 @@
 										href={event.event_url}
 										target="_blank"
 										rel="noopener noreferrer"
-										class="text-xs text-blue-600 hover:text-blue-800 hover:underline"
+										class="text-xs text-primary hover:text-primary-hover hover:underline"
 										title="이벤트 참여"
 									>
 										참여
 									</a>
 									{#if urlCount > 1}
-										<span class="text-[10px] text-blue-500 font-medium" title="{urlCount}개 링크">+{urlCount - 1}</span>
+										<span class="text-[10px] text-primary-muted font-medium" title="{urlCount}개 링크">+{urlCount - 1}</span>
 									{/if}
 									{#if isAdmin}
 										<button
 											onclick={(e) => copyEventUrl(event, e)}
-											class="p-0.5 rounded hover:bg-gray-100 transition-colors"
+											class="p-0.5 rounded hover:bg-muted transition-colors"
 											title={copiedEventId === event.id ? '복사됨!' : '메인 링크 복사'}
 										>
 											{#if copiedEventId === event.id}
-												<svg class="w-3.5 h-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<svg class="w-3.5 h-3.5 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
 												</svg>
 											{:else}
-												<svg class="w-3.5 h-3.5 text-gray-400 hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<svg class="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
 												</svg>
 											{/if}
@@ -351,14 +351,14 @@
 								{#if event.source_type === 'instagram' && (event.source_instagram_url || event.source_instagram_post_id)}
 									<button
 										onclick={(e) => openInstagramSource(event, e)}
-										class="text-xs text-pink-600 hover:text-pink-800 hover:underline font-medium"
+										class="text-xs text-pink hover:text-pink/80 hover:underline font-medium"
 										title="Instagram 원본"
 									>
 										IG
 									</button>
 								{/if}
 								{#if !event.event_url && !(event.source_type === 'instagram' && (event.source_instagram_url || event.source_instagram_post_id))}
-									<span class="text-xs text-gray-400">-</span>
+									<span class="text-xs text-muted-foreground">-</span>
 								{/if}
 							</div>
 						</td>
@@ -368,8 +368,8 @@
 								<button
 									onclick={(e) => onBookmarkToggle(event, e)}
 									class="text-lg transition-colors {event.is_bookmarked
-										? 'text-yellow-500'
-										: 'text-gray-300 hover:text-yellow-400'}"
+										? 'text-warning'
+										: 'text-muted-foreground hover:text-warning'}"
 									title={event.is_bookmarked ? '북마크 해제' : '북마크'}
 								>
 									{event.is_bookmarked ? '★' : '☆'}
@@ -377,8 +377,8 @@
 								<button
 									onclick={(e) => onParticipateToggle(event, e)}
 									class="px-1.5 py-0.5 text-xs rounded transition-colors {isParticipated(event)
-										? 'bg-green-100 text-green-700'
-										: 'bg-gray-100 text-gray-500 hover:bg-gray-200'}"
+										? 'bg-success-light text-success'
+										: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 									title={isParticipated(event) ? '참여 취소' : '참여 완료'}
 								>
 									{isParticipated(event) ? '참여' : '미참여'}

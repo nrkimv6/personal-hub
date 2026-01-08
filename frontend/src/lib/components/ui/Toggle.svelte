@@ -15,13 +15,14 @@
   aria-checked={checked}
   {disabled}
   class="relative inline-flex shrink-0 cursor-pointer rounded-full transition-colors
+         ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2
          disabled:opacity-50 disabled:cursor-not-allowed
-         {checked ? 'bg-primary' : 'bg-gray-200'}
+         {checked ? 'bg-primary' : 'bg-muted'}
          {sizes[size].track}"
   on:click={() => !disabled && (checked = !checked)}
 >
   <span
-    class="pointer-events-none inline-block rounded-full bg-white shadow transform transition-transform
+    class="pointer-events-none inline-block rounded-full bg-background shadow-sm transform transition-transform
            {checked ? sizes[size].translate : 'translate-x-0.5'}
            {sizes[size].thumb}"
     style="margin-top: 0.125rem;"

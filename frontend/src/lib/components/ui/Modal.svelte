@@ -40,23 +40,23 @@
 
 {#if open}
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center"
+    class="fixed inset-0 z-50 flex items-center justify-center animate-fade-in"
     on:click={handleBackdropClick}
     role="dialog"
     aria-modal="true"
     aria-labelledby="modal-title"
   >
     <!-- Overlay -->
-    <div class="absolute inset-0 bg-black/50"></div>
+    <div class="absolute inset-0 bg-foreground/50 backdrop-blur-sm"></div>
 
     <!-- Modal -->
-    <div class="relative bg-card rounded-lg shadow-xl {sizes[size]} w-full mx-4 max-h-[85vh] flex flex-col">
+    <div class="relative bg-card text-card-foreground rounded-lg shadow-modal {sizes[size]} w-full mx-4 max-h-[85vh] flex flex-col border border-border">
       <!-- Header -->
       <div class="flex items-center justify-between p-4 border-b border-border">
-        <h3 id="modal-title" class="text-lg font-semibold text-primary">{title}</h3>
+        <h3 id="modal-title" class="text-lg font-semibold text-foreground">{title}</h3>
         <button
           on:click={close}
-          class="text-gray-400 hover:text-gray-600 transition-colors"
+          class="text-muted-foreground hover:text-foreground transition-colors rounded-md p-1 hover:bg-muted"
           aria-label="Close modal"
         >
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

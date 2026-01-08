@@ -3,45 +3,20 @@ export default {
   content: ['./src/**/*.{html,js,svelte,ts}'],
   darkMode: 'class',
   theme: {
+    container: {
+      center: true,
+      padding: '2rem',
+      screens: {
+        '2xl': '1400px',
+      },
+    },
     extend: {
-      colors: {
-        primary: {
-          DEFAULT: 'var(--primary)',
-          hover: 'var(--primary-hover)',
-          active: 'var(--primary-active)',
-          light: 'var(--primary-light)',
-          disabled: 'var(--primary-disabled)',
-        },
-        success: {
-          DEFAULT: 'var(--success)',
-          light: 'var(--success-light)',
-        },
-        warning: {
-          DEFAULT: 'var(--warning)',
-          light: 'var(--warning-light)',
-        },
-        error: {
-          DEFAULT: 'var(--error)',
-          light: 'var(--error-light)',
-        },
-        info: {
-          DEFAULT: 'var(--info)',
-          light: 'var(--info-light)',
-        },
+      fontFamily: {
+        sans: ['Pretendard Variable', 'Pretendard', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'],
+        mono: ['Fira Code', 'Consolas', 'Monaco', 'monospace'],
       },
-      backgroundColor: {
-        page: 'var(--bg-page)',
-        card: 'var(--bg-card)',
-        sidebar: 'var(--bg-sidebar)',
-      },
-      borderColor: {
-        DEFAULT: 'var(--border)',
-      },
-      textColor: {
-        primary: 'var(--text-primary)',
-        secondary: 'var(--text-secondary)',
-        muted: 'var(--text-muted)',
-      },
+      // Colors are defined in @theme block in app.css for Tailwind CSS 4
+      // This ensures proper utility generation (hover:*, focus:*, etc.)
       spacing: {
         'space-1': 'var(--space-1)',
         'space-2': 'var(--space-2)',
@@ -49,11 +24,6 @@ export default {
         'space-4': 'var(--space-4)',
         'space-6': 'var(--space-6)',
         'space-8': 'var(--space-8)',
-      },
-      borderRadius: {
-        sm: 'var(--radius-sm)',
-        md: 'var(--radius-md)',
-        lg: 'var(--radius-lg)',
       },
     },
   },

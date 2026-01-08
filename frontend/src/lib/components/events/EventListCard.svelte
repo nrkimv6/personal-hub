@@ -46,13 +46,13 @@
 <div class="md:hidden space-y-3 mb-6">
 	{#each events as event (event.id)}
 		<div
-			class="rounded-lg border p-3 cursor-pointer hover:shadow-md transition-all {isParticipated(event)
-				? 'bg-gray-100 border-gray-200 opacity-60'
+			class="rounded-lg border p-3 cursor-pointer hover:shadow-card-hover transition-all {isParticipated(event)
+				? 'bg-muted border-border opacity-60'
 				: isEndingToday(event)
-					? 'bg-orange-50 border-orange-300'
+					? 'bg-warning-light border-warning'
 					: isUnknownPeriod(event)
-						? 'bg-amber-50 border-amber-200'
-						: 'bg-white border-gray-200'}"
+						? 'bg-warning-light border-warning-muted'
+						: 'bg-card border-border'}"
 			onclick={() => onEventClick(event)}
 			onkeydown={(e) => e.key === 'Enter' && onEventClick(event)}
 			role="button"
@@ -65,17 +65,17 @@
 							{getEventStatusLabel(event.event_status)}
 						</span>
 						{#if event.source_type === 'instagram'}
-							<span class="px-1.5 py-0.5 text-xs rounded bg-pink-100 text-pink-600">IG</span>
+							<span class="px-1.5 py-0.5 text-xs rounded bg-pink-light text-pink">IG</span>
 						{/if}
 						{#if event.purchase_required === 'no'}
-							<span class="px-1.5 py-0.5 text-xs rounded bg-green-100 text-green-600">무료</span>
+							<span class="px-1.5 py-0.5 text-xs rounded bg-success-light text-success">무료</span>
 						{:else if event.purchase_required === 'yes_all'}
-							<span class="px-1.5 py-0.5 text-xs rounded bg-red-100 text-red-600">구매</span>
+							<span class="px-1.5 py-0.5 text-xs rounded bg-error-light text-error">구매</span>
 						{/if}
 					</div>
-					<h3 class="font-medium text-gray-900 truncate" title={event.title}>{event.title}</h3>
+					<h3 class="font-medium text-foreground truncate" title={event.title}>{event.title}</h3>
 					{#if event.organizer}
-						<p class="text-sm text-blue-600 truncate">{event.organizer}</p>
+						<p class="text-sm text-primary truncate">{event.organizer}</p>
 					{/if}
 				</div>
 				<!-- 북마크/복사 버튼 -->
@@ -85,8 +85,8 @@
 						<button
 							onclick={(e) => copyEventUrl(event, e)}
 							class="p-1.5 rounded-lg transition-colors flex items-center gap-0.5 {copiedEventId === event.id
-								? 'bg-green-100 text-green-600'
-								: 'bg-gray-100 text-gray-500 hover:bg-gray-200'}"
+								? 'bg-success-light text-success'
+								: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 							title={copiedEventId === event.id ? '복사됨!' : '메인 링크 복사'}
 						>
 							{#if copiedEventId === event.id}
@@ -106,36 +106,36 @@
 					<button
 						onclick={(e) => onBookmarkToggle(event, e)}
 						class="text-xl transition-colors {event.is_bookmarked
-							? 'text-yellow-500'
-							: 'text-gray-300'}"
+							? 'text-warning'
+							: 'text-muted-foreground hover:text-warning'}"
 					>
 						{event.is_bookmarked ? '★' : '☆'}
 					</button>
 				</div>
 			</div>
-			<div class="flex items-center gap-2 text-xs text-gray-500">
+			<div class="flex items-center gap-2 text-xs text-muted-foreground">
 				<div class="flex flex-wrap items-center gap-2 flex-1">
 					<!-- 기간 -->
 					{#if event.event_end}
 						{#if isEndingToday(event)}
-							<span class="font-bold text-orange-600 bg-orange-100 px-1.5 py-0.5 rounded"
+							<span class="font-bold text-warning bg-warning-light px-1.5 py-0.5 rounded"
 								>오늘 마감!</span
 							>
 						{:else}
 							<span>~ {formatDate(event.event_end)}</span>
 						{/if}
 					{:else}
-						<span class="text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">기간 미정</span>
+						<span class="text-warning bg-warning-light px-1.5 py-0.5 rounded">기간 미정</span>
 					{/if}
 					<!-- 경품 -->
 					{#if event.prizes && event.prizes.length > 0}
-						<span class="text-yellow-700 bg-yellow-50 px-1.5 py-0.5 rounded truncate max-w-[100px]"
+						<span class="text-warning-foreground bg-warning-light px-1.5 py-0.5 rounded truncate max-w-[100px]"
 							>{event.prizes[0]}</span
 						>
 					{/if}
 					<!-- 당첨자 수 -->
 					{#if event.winner_count}
-						<span class="text-purple-600">{event.winner_count}명</span>
+						<span class="text-purple">{event.winner_count}명</span>
 					{/if}
 				</div>
 				<!-- 참여 체크박스 (큰 사이즈) -->
@@ -144,8 +144,8 @@
 					class="flex items-center justify-center w-10 h-10 rounded-lg border-2 transition-all {isParticipated(
 						event
 					)
-						? 'bg-green-500 border-green-500 text-white'
-						: 'bg-white border-gray-300 text-gray-400 hover:border-green-400'}"
+						? 'bg-success border-success text-success-foreground'
+						: 'bg-card border-border text-muted-foreground hover:border-success'}"
 					title={isParticipated(event) ? '참여 취소' : '참여 완료'}
 				>
 					{#if isParticipated(event)}
