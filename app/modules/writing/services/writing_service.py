@@ -137,6 +137,72 @@ class WritingService:
         self.db.refresh(writing)
         return writing
 
+    def refine_writing(self, writing_id: int, force: bool = False) -> dict:
+        """생성된 글 교정 요청.
+
+        Args:
+            writing_id: 글 ID
+            force: True면 이미 pending/processing 요청이 있어도 새로 생성
+
+        Returns:
+            {"success": bool, "message": str, "request_id": int|None}
+        """
+        writing = self.get_generated_writing(writing_id)
+        if not writing:
+            return {"success": False, "message": "글을 찾을 수 없습니다.", "request_id": None}
+
+        # 중복 교정 요청 확인 (force=False일 때만)
+        if not force:
+            existing_request = (
+                self.db.query(LLMRequest)
+                .filter(
+                    LLMRequest.caller_type == "writing_refine",
+                    LLMRequest.caller_id == str(writing_id),
+                    LLMRequest.status.in_(["pending", "processing"]),
+                )
+                .first()
+            )
+            if existing_request:
+                return {
+                    "success": False,
+                    "message": "이미 교정 요청이 진행 중입니다.",
+                    "request_id": existing_request.id,
+                }
+
+        # 교정 프롬프트 로드
+        refine_prompt_path = (
+            Path(__file__).parent.parent / "prompts" / "refine_prompt.md"
+        )
+        if not refine_prompt_path.exists():
+            return {
+                "success": False,
+                "message": "교정 프롬프트 파일을 찾을 수 없습니다.",
+                "request_id": None,
+            }
+
+        refine_template = refine_prompt_path.read_text(encoding="utf-8")
+        refine_prompt = refine_template.replace("{content}", writing.content)
+
+        # LLM 요청 생성
+        refine_request = LLMRequest(
+            caller_type="writing_refine",
+            caller_id=str(writing_id),
+            prompt=refine_prompt,
+            status="pending",
+            requested_by="manual",
+            request_source="writing_api",
+        )
+        self.db.add(refine_request)
+        self.db.commit()
+        self.db.refresh(refine_request)
+
+        logger.info(f"교정 요청 생성 (수동): writing_id={writing_id}, request_id={refine_request.id}")
+        return {
+            "success": True,
+            "message": "교정 요청이 생성되었습니다.",
+            "request_id": refine_request.id,
+        }
+
     # ========== 소스 관리 ==========
 
     def list_sources(

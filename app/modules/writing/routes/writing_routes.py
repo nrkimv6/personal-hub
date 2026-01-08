@@ -180,6 +180,30 @@ def rate_generated_writing(
     return {"id": writing_id, "rating": data.rating}
 
 
+@router.post("/generated/{writing_id}/refine")
+def refine_generated_writing(
+    writing_id: int,
+    force: bool = Query(False, description="이미 진행 중인 요청이 있어도 새로 생성"),
+    db: Session = Depends(get_db),
+):
+    """생성된 글 교정 요청 (노년층 가독성).
+
+    Args:
+        writing_id: 교정할 글 ID
+        force: True면 이미 pending/processing 요청이 있어도 새로 생성
+
+    Returns:
+        {"success": bool, "message": str, "request_id": int|None}
+    """
+    service = WritingService(db)
+    result = service.refine_writing(writing_id, force=force)
+
+    if not result["success"]:
+        raise HTTPException(400, result["message"])
+
+    return result
+
+
 # ========== 소스 관리 ==========
 
 
