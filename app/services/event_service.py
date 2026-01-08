@@ -487,88 +487,31 @@ class EventService:
         # LLM 프롬프트 생성
         prompt = build_event_extract_prompt(extracted)
 
-        # LLM 실행 (동기)
-        llm_service = LLMService(db)
-        llm_result = llm_service.execute_claude(prompt, timeout=120)
+        # LLM 요청 생성 (비동기 큐 패턴)
+        from app.modules.claude_worker.models.llm_request import LLMRequest
 
-        if not llm_result.get("success"):
-            return EventImportFromUrlResponse(
-                success=False,
-                is_event=True,
-                page_type=extracted.page_type,
-                extraction_method=extracted.extraction_method,
-                raw_content=extracted.content[:1000] if extracted.content else None,
-                error=f"LLM 분석 실패: {llm_result.get('error', 'Unknown error')}",
-            )
+        llm_request = LLMRequest(
+            caller_type="event_import",
+            caller_id=url,
+            prompt=prompt,
+            status="pending",
+            requested_by="api",
+            request_source="event_import",
+        )
+        db.add(llm_request)
+        db.commit()
+        db.refresh(llm_request)
 
-        # LLM 응답 파싱
-        raw_response = llm_result.get("raw_response", "")
-        parsed_event = llm_result.get("result")
+        logger.info(f"Event import 요청 생성: request_id={llm_request.id}, url={url}")
 
-        if not parsed_event:
-            # result가 없으면 raw_response에서 직접 파싱 시도
-            parsed_event = parse_event_from_llm_response(raw_response)
-
-        if not parsed_event:
-            return EventImportFromUrlResponse(
-                success=False,
-                is_event=True,
-                page_type=extracted.page_type,
-                extraction_method=extracted.extraction_method,
-                raw_content=extracted.content[:1000] if extracted.content else None,
-                error="LLM 응답에서 이벤트 정보를 추출할 수 없습니다",
-            )
-
-        # 비이벤트 처리: is_event=False인 경우
-        if not parsed_event.get("is_event", True):
-            not_event_reason = parsed_event.get("not_event_reason", "이벤트가 아닙니다")
-            return EventImportFromUrlResponse(
-                success=True,  # 추출 자체는 성공
-                is_event=False,
-                page_type=extracted.page_type,
-                extraction_method=extracted.extraction_method,
-                extracted_event=parsed_event,  # 비이벤트 정보도 포함 (title, summary 등)
-                raw_content=extracted.content[:1000] if extracted.content else None,
-                not_event_reason=not_event_reason,
-            )
-
-        # 날짜 문자열을 date 객체로 변환
-        parsed_event = self._parse_event_dates(parsed_event)
-
-        # URL 정보 및 본문 추가
-        parsed_event["event_url"] = url
-        parsed_event["url_type"] = detect_url_type(url)
-        parsed_event["source_type"] = "web"
-        parsed_event["source_url"] = url
-        parsed_event["input_source"] = "ai"
-        parsed_event["body_text"] = extracted.content  # 페이지 본문을 body_text로 저장
-
-        # auto_save 처리
-        created_event = None
-        if data.auto_save:
-            try:
-                event_create = EventCreate(**parsed_event)
-                created_event = self.create_event(db, event_create)
-            except Exception as e:
-                logger.error(f"Event 생성 실패: {e}")
-                return EventImportFromUrlResponse(
-                    success=True,  # 추출은 성공
-                    is_event=True,
-                    page_type=extracted.page_type,
-                    extraction_method=extracted.extraction_method,
-                    extracted_event=parsed_event,
-                    raw_content=extracted.content[:1000] if extracted.content else None,
-                    error=f"Event 생성 실패: {str(e)}",
-                )
-
+        # 즉시 응답 반환 (Worker가 처리)
         return EventImportFromUrlResponse(
             success=True,
             is_event=True,
             page_type=extracted.page_type,
             extraction_method=extracted.extraction_method,
-            extracted_event=parsed_event,
             raw_content=extracted.content[:1000] if extracted.content else None,
-            created_event=created_event,
+            message=f"이벤트 등록 요청을 받았습니다 (요청 ID: {llm_request.id})",
         )
 
     async def _extract_page_content(self, url: str):

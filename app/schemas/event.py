@@ -163,4 +163,5 @@ class EventImportFromUrlResponse(BaseModel):
     raw_content: Optional[str] = None  # 추출된 원본 텍스트 (디버깅용)
     created_event: Optional[EventResponse] = None  # auto_save=True일 때 생성된 Event
     not_event_reason: Optional[str] = None  # is_event=False일 때 이유
+    message: Optional[str] = None  # 비동기 처리 메시지 (요청 ID 포함)
     error: Optional[str] = None

@@ -196,28 +196,28 @@ class WritingWorker:
                 self.db.commit()
                 return {"total": 0, "success": 0, "failed": 0, "error": error_msg}
 
-            # 1. 믹스 글쓰기 (5회)
+            # 1. 믹스 글쓰기 (5회) - 비동기 큐에 요청
             for i in range(self.MIX_COUNT):
-                logger.info(f"믹스 글쓰기 {i + 1}/{self.MIX_COUNT}")
-                if self._generate_mix_writing(run.id, slot_context, index=i):
+                logger.info(f"믹스 글쓰기 요청 {i + 1}/{self.MIX_COUNT}")
+                if self._queue_mix_writing(run.id, slot_context, index=i):
                     success += 1
                 else:
                     failed += 1
                 total += 1
 
-            # 2. 랜덤 소재+키워드 글쓰기 (3회)
+            # 2. 랜덤 소재+키워드 글쓰기 (3회) - 비동기 큐에 요청
             for i in range(self.RANDOM_TOPIC_COUNT):
-                logger.info(f"랜덤 글쓰기 {i + 1}/{self.RANDOM_TOPIC_COUNT}")
-                if self._generate_random_writing(run.id, slot_context, current_season, index=i):
+                logger.info(f"랜덤 글쓰기 요청 {i + 1}/{self.RANDOM_TOPIC_COUNT}")
+                if self._queue_random_writing(run.id, slot_context, current_season, index=i):
                     success += 1
                 else:
                     failed += 1
                 total += 1
 
-            # 3. 랜덤 키워드만 글쓰기 (3회)
+            # 3. 랜덤 키워드만 글쓰기 (3회) - 비동기 큐에 요청
             for i in range(self.RANDOM_KEYWORD_COUNT):
-                logger.info(f"키워드 전용 글쓰기 {i + 1}/{self.RANDOM_KEYWORD_COUNT}")
-                if self._generate_keyword_only_writing(run.id, slot_context, current_season, index=i):
+                logger.info(f"키워드 전용 글쓰기 요청 {i + 1}/{self.RANDOM_KEYWORD_COUNT}")
+                if self._queue_keyword_writing(run.id, slot_context, current_season, index=i):
                     success += 1
                 else:
                     failed += 1
@@ -243,13 +243,13 @@ class WritingWorker:
 
         return {"total": total, "success": success, "failed": failed}
 
-    def _generate_mix_writing(
+    def _queue_mix_writing(
         self,
         run_id: int,
         slot_context: SlotContext,
         index: int = 0,
     ) -> bool:
-        """믹스 글쓰기 (3개 소스 조합) - 쿨다운 및 슬롯 중복 방지 적용.
+        """믹스 글쓰기 LLM 요청 생성 (비동기 큐 패턴).
 
         Args:
             run_id: TaskScheduleRun ID
@@ -259,7 +259,6 @@ class WritingWorker:
         Returns:
             성공 여부
         """
-        llm_request = None
         try:
             # 쿨다운 + 슬롯 중복 방지 적용하여 소스 선택
             sources = self.selector.select_sources(
@@ -284,102 +283,39 @@ class WritingWorker:
             for placeholder, source in zip(placeholders, sources):
                 prompt = prompt.replace(placeholder, source.content)
 
-            # LLM 요청 이력 생성
+            # LLM 요청 생성 (pending 상태 - Worker가 처리)
             llm_request = LLMRequest(
-                caller_type="writing",
+                caller_type="writing_generate",
                 caller_id=f"mix_{run_id}_{index}",
-                prompt=prompt[:5000] if len(prompt) > 5000 else prompt,
-                status="processing",
+                prompt=prompt,
+                status="pending",
                 requested_by="scheduler",
                 request_source="writing_worker",
+                writing_metadata=json.dumps({
+                    "task_type": "mix",
+                    "source_ids": [s.id for s in sources],
+                    "run_id": run_id,
+                }),
             )
             self.db.add(llm_request)
             self.db.commit()
-            self.db.refresh(llm_request)
 
-            # LLM 호출 (JSON 파싱)
-            result = self.llm_service.execute_claude(
-                prompt, timeout=self.LLM_TIMEOUT, parse_json=True
-            )
-
-            if not result.get("success"):
-                error_msg = result.get('error', 'Unknown error')
-                logger.error(f"LLM 호출 실패: {error_msg}")
-                llm_request.status = "failed"
-                llm_request.error_message = error_msg
-                llm_request.processed_at = datetime.now()
-                self.db.commit()
-                return False
-
-            # 결과 저장
-            source_ids = ",".join(str(s.id) for s in sources)
-            raw_response = result.get("raw_response", "")
-            parsed_result = result.get("result", {})
-
-            # LLM 요청 완료 기록
-            llm_request.status = "completed"
-            llm_request.raw_response = raw_response
-            llm_request.processed_at = datetime.now()
-            self.db.commit()
-
-            # JSON 응답에서 글과 분석 추출
-            content = parsed_result.get("generated_writing", "")
-            analysis = parsed_result.get("analysis", [])
-
-            # JSON 파싱 실패 시 기존 방식으로 폴백
-            if not content:
-                content = self._extract_generated_content(raw_response)
-
-            # 추출된 소재 저장
-            extracted_topics = self._save_extracted_topics(analysis)
-
-            writing = GeneratedWriting(
-                task_type=GeneratedWriting.TASK_TYPE_MIX,
-                prompt_used=prompt[:2000] if len(prompt) > 2000 else prompt,
-                source_ids=source_ids,
-                content=content,
-                raw_response=raw_response,
-                extracted_topics=json.dumps(extracted_topics, ensure_ascii=False) if extracted_topics else None,
-                schedule_run_id=run_id,
-            )
-            self.db.add(writing)
-            self.db.commit()
-            self.db.refresh(writing)
-
-            # 소스 사용 이력 기록
-            self.selector.record_source_usage(
-                [s.id for s in sources],
-                writing.id,
-            )
-
-            # 소재 추출 완료 마킹 (Topic Extract 배치와 중복 방지)
-            for source in sources:
-                source.topic_extracted_at = datetime.now()
-
-            self.db.commit()
-
-            logger.info(f"믹스 글쓰기 완료: id={writing.id}, sources={source_ids}")
+            logger.info(f"믹스 글쓰기 요청 생성: request_id={llm_request.id}, sources={[s.id for s in sources]}")
             return True
 
         except Exception as e:
-            logger.error(f"믹스 글쓰기 실패: {e}", exc_info=True)
-            if llm_request:
-                llm_request.status = "failed"
-                llm_request.error_message = str(e)
-                llm_request.processed_at = datetime.now()
-                self.db.commit()
-            else:
-                self.db.rollback()
+            logger.error(f"믹스 글쓰기 요청 생성 실패: {e}", exc_info=True)
+            self.db.rollback()
             return False
 
-    def _generate_random_writing(
+    def _queue_random_writing(
         self,
         run_id: int,
         slot_context: SlotContext,
         season: Optional[str],
         index: int = 0,
     ) -> bool:
-        """랜덤 프롬프트 글쓰기 - 요소 직접 지정, 쿨다운 및 시즌 가중치 적용.
+        """랜덤 프롬프트 글쓰기 LLM 요청 생성 (비동기 큐 패턴).
 
         Args:
             run_id: TaskScheduleRun ID
@@ -390,7 +326,6 @@ class WritingWorker:
         Returns:
             성공 여부
         """
-        llm_request = None
         try:
             if not self.random_prompt_template:
                 logger.error("랜덤 프롬프트가 없습니다")
@@ -417,45 +352,8 @@ class WritingWorker:
                 emotion=selected_elements["emotion"].name,
             )
 
-            # LLM 요청 이력 생성
-            llm_request = LLMRequest(
-                caller_type="writing",
-                caller_id=f"random_{run_id}_{index}",
-                prompt=prompt[:5000] if len(prompt) > 5000 else prompt,
-                status="processing",
-                requested_by="scheduler",
-                request_source="writing_worker",
-            )
-            self.db.add(llm_request)
-            self.db.commit()
-            self.db.refresh(llm_request)
-
-            # LLM 호출
-            result = self.llm_service.execute_claude(
-                prompt, timeout=self.LLM_TIMEOUT, parse_json=False
-            )
-
-            if not result.get("success"):
-                error_msg = result.get('error', 'Unknown error')
-                logger.error(f"LLM 호출 실패: {error_msg}")
-                llm_request.status = "failed"
-                llm_request.error_message = error_msg
-                llm_request.processed_at = datetime.now()
-                self.db.commit()
-                return False
-
-            raw_response = result.get("raw_response", "")
-
-            # LLM 요청 완료 기록
-            llm_request.status = "completed"
-            llm_request.raw_response = raw_response
-            llm_request.processed_at = datetime.now()
-            self.db.commit()
-
-            content = self._extract_generated_content(raw_response)
-
             # selected_elements JSON 생성
-            selected_json = json.dumps({
+            selected_json = {
                 "topic": selected_elements["topic"].name,
                 "keywords": [k.name for k in selected_elements["keywords"]],
                 "tone": selected_elements["tone"].name,
@@ -463,53 +361,44 @@ class WritingWorker:
                 "format": selected_elements["format"].name,
                 "emotion": selected_elements["emotion"].name,
                 "season": season,
-            }, ensure_ascii=False)
+            }
 
-            writing = GeneratedWriting(
-                task_type=GeneratedWriting.TASK_TYPE_RANDOM,
-                prompt_used=prompt[:2000] if len(prompt) > 2000 else prompt,
-                source_ids=None,
-                content=content,
-                raw_response=raw_response,
-                selected_elements=selected_json,
-                schedule_run_id=run_id,
+            # LLM 요청 생성 (pending 상태)
+            llm_request = LLMRequest(
+                caller_type="writing_generate",
+                caller_id=f"random_{run_id}_{index}",
+                prompt=prompt,
+                status="pending",
+                requested_by="scheduler",
+                request_source="writing_worker",
+                writing_metadata=json.dumps({
+                    "task_type": "random",
+                    "selected_elements": selected_json,
+                    "run_id": run_id,
+                }),
             )
-            self.db.add(writing)
-            self.db.commit()
-            self.db.refresh(writing)
-
-            # 요소 사용 이력 기록
-            self.selector.record_element_usage(
-                selected_elements["all"],
-                writing.id,
-            )
+            self.db.add(llm_request)
             self.db.commit()
 
             logger.info(
-                f"랜덤 글쓰기 완료: id={writing.id}, "
+                f"랜덤 글쓰기 요청 생성: request_id={llm_request.id}, "
                 f"topic={selected_elements['topic'].name}, season={season}"
             )
             return True
 
         except Exception as e:
-            logger.error(f"랜덤 글쓰기 실패: {e}", exc_info=True)
-            if llm_request:
-                llm_request.status = "failed"
-                llm_request.error_message = str(e)
-                llm_request.processed_at = datetime.now()
-                self.db.commit()
-            else:
-                self.db.rollback()
+            logger.error(f"랜덤 글쓰기 요청 생성 실패: {e}", exc_info=True)
+            self.db.rollback()
             return False
 
-    def _generate_keyword_only_writing(
+    def _queue_keyword_writing(
         self,
         run_id: int,
         slot_context: SlotContext,
         season: Optional[str],
         index: int = 0,
     ) -> bool:
-        """키워드 전용 글쓰기 - 소재 없이 키워드 3개로 글 생성.
+        """키워드 전용 글쓰기 LLM 요청 생성 (비동기 큐 패턴).
 
         Args:
             run_id: TaskScheduleRun ID
@@ -520,7 +409,6 @@ class WritingWorker:
         Returns:
             성공 여부
         """
-        llm_request = None
         try:
             if not self.keyword_only_prompt_template:
                 logger.error("키워드 전용 프롬프트가 없습니다")
@@ -546,88 +434,42 @@ class WritingWorker:
                 emotion=selected_elements["emotion"].name,
             )
 
-            # LLM 요청 이력 생성
-            llm_request = LLMRequest(
-                caller_type="writing",
-                caller_id=f"keyword_{run_id}_{index}",
-                prompt=prompt[:5000] if len(prompt) > 5000 else prompt,
-                status="processing",
-                requested_by="scheduler",
-                request_source="writing_worker",
-            )
-            self.db.add(llm_request)
-            self.db.commit()
-            self.db.refresh(llm_request)
-
-            # LLM 호출
-            result = self.llm_service.execute_claude(
-                prompt, timeout=self.LLM_TIMEOUT, parse_json=False
-            )
-
-            if not result.get("success"):
-                error_msg = result.get('error', 'Unknown error')
-                logger.error(f"LLM 호출 실패: {error_msg}")
-                llm_request.status = "failed"
-                llm_request.error_message = error_msg
-                llm_request.processed_at = datetime.now()
-                self.db.commit()
-                return False
-
-            raw_response = result.get("raw_response", "")
-
-            # LLM 요청 완료 기록
-            llm_request.status = "completed"
-            llm_request.raw_response = raw_response
-            llm_request.processed_at = datetime.now()
-            self.db.commit()
-
-            content = self._extract_generated_content(raw_response)
-
             # selected_elements JSON 생성
-            selected_json = json.dumps({
+            selected_json = {
                 "keywords": [k.name for k in selected_elements["keywords"]],
                 "tone": selected_elements["tone"].name,
                 "style": selected_elements["style"].name,
                 "format": selected_elements["format"].name,
                 "emotion": selected_elements["emotion"].name,
                 "season": season,
-            }, ensure_ascii=False)
+            }
 
-            writing = GeneratedWriting(
-                task_type=GeneratedWriting.TASK_TYPE_KEYWORD,
-                prompt_used=prompt[:2000] if len(prompt) > 2000 else prompt,
-                source_ids=None,
-                content=content,
-                raw_response=raw_response,
-                selected_elements=selected_json,
-                schedule_run_id=run_id,
+            # LLM 요청 생성 (pending 상태)
+            llm_request = LLMRequest(
+                caller_type="writing_generate",
+                caller_id=f"keyword_{run_id}_{index}",
+                prompt=prompt,
+                status="pending",
+                requested_by="scheduler",
+                request_source="writing_worker",
+                writing_metadata=json.dumps({
+                    "task_type": "keyword",
+                    "selected_elements": selected_json,
+                    "run_id": run_id,
+                }),
             )
-            self.db.add(writing)
-            self.db.commit()
-            self.db.refresh(writing)
-
-            # 요소 사용 이력 기록
-            self.selector.record_element_usage(
-                selected_elements["all"],
-                writing.id,
-            )
+            self.db.add(llm_request)
             self.db.commit()
 
             logger.info(
-                f"키워드 전용 글쓰기 완료: id={writing.id}, "
+                f"키워드 전용 글쓰기 요청 생성: request_id={llm_request.id}, "
                 f"keywords={[k.name for k in selected_elements['keywords']]}, season={season}"
             )
             return True
 
         except Exception as e:
-            logger.error(f"키워드 전용 글쓰기 실패: {e}", exc_info=True)
-            if llm_request:
-                llm_request.status = "failed"
-                llm_request.error_message = str(e)
-                llm_request.processed_at = datetime.now()
-                self.db.commit()
-            else:
-                self.db.rollback()
+            logger.error(f"키워드 전용 글쓰기 요청 생성 실패: {e}", exc_info=True)
+            self.db.rollback()
             return False
 
     def _select_keyword_only_elements(

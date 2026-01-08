@@ -475,8 +475,197 @@ def save_writing_refine_result(db, request, result: dict) -> bool:
         return False
 
 
+def save_writing_generate_result(db, request, result: dict) -> bool:
+    """writing_generate 결과 → GeneratedWriting 저장.
+
+    WritingWorker에서 생성한 요청의 결과를 저장합니다.
+
+    Args:
+        db: DB 세션
+        request: LLMRequest 객체
+        result: LLM 실행 결과
+
+    Returns:
+        성공 여부
+    """
+    from app.models.writing import GeneratedWriting, WritingSource
+    from app.models.writing_element import WritingElement
+    from app.modules.writing.services.element_selector import ElementSelector
+    import json
+
+    try:
+        # writing_metadata 파싱
+        metadata = {}
+        if request.writing_metadata:
+            metadata = json.loads(request.writing_metadata)
+
+        task_type = metadata.get("task_type", "unknown")
+        run_id = metadata.get("run_id")
+
+        # JSON 결과에서 content 추출
+        raw_response = result.get("raw_response", "")
+        parsed_result = result.get("result", {})
+
+        # Mix 타입: JSON에서 generated_writing 추출
+        if task_type == "mix":
+            content = parsed_result.get("generated_writing", "")
+            if not content:
+                # Fallback: raw_response에서 추출
+                content = _extract_generated_content(raw_response)
+
+            # 소스 ID 복원
+            source_ids = metadata.get("source_ids", [])
+            source_ids_str = ",".join(str(sid) for sid in source_ids)
+
+            # 추출된 소재 저장
+            analysis = parsed_result.get("analysis", [])
+            extracted_topics = _save_extracted_topics(db, analysis)
+
+            writing = GeneratedWriting(
+                task_type=GeneratedWriting.TASK_TYPE_MIX,
+                prompt_used=request.prompt[:2000] if len(request.prompt) > 2000 else request.prompt,
+                source_ids=source_ids_str,
+                content=content,
+                raw_response=raw_response,
+                extracted_topics=json.dumps(extracted_topics, ensure_ascii=False) if extracted_topics else None,
+                schedule_run_id=run_id,
+                llm_request_id=request.id,
+            )
+            db.add(writing)
+            db.flush()
+
+            # 소스 사용 이력 기록
+            selector = ElementSelector(db)
+            selector.record_source_usage(source_ids, writing.id)
+
+            # 소재 추출 완료 마킹
+            for sid in source_ids:
+                source = db.query(WritingSource).filter(WritingSource.id == sid).first()
+                if source:
+                    source.topic_extracted_at = datetime.now()
+
+        # Random/Keyword 타입
+        else:
+            content = _extract_generated_content(raw_response)
+
+            # selected_elements JSON
+            selected_elements = metadata.get("selected_elements", {})
+            selected_json = json.dumps(selected_elements, ensure_ascii=False)
+
+            writing = GeneratedWriting(
+                task_type=task_type,
+                prompt_used=request.prompt[:2000] if len(request.prompt) > 2000 else request.prompt,
+                source_ids=None,
+                content=content,
+                raw_response=raw_response,
+                selected_elements=selected_json,
+                schedule_run_id=run_id,
+                llm_request_id=request.id,
+            )
+            db.add(writing)
+            db.flush()
+
+            # 요소 사용 이력 기록
+            selector = ElementSelector(db)
+            element_ids = []
+            for key, value in selected_elements.items():
+                if key == "keywords":
+                    # List of element names
+                    continue
+                elif isinstance(value, str):
+                    # Single element name
+                    elem = db.query(WritingElement).filter(WritingElement.name == value).first()
+                    if elem:
+                        element_ids.append(elem)
+
+            if element_ids:
+                selector.record_element_usage(element_ids, writing.id)
+
+        db.commit()
+        logger.info(f"writing_generate result saved: writing_id={writing.id}, task_type={task_type}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to save writing_generate result: {e}", exc_info=True)
+        db.rollback()
+        return False
+
+
+def _extract_generated_content(raw_response: str) -> str:
+    """LLM 응답에서 생성된 글 추출."""
+    if not raw_response:
+        return ""
+
+    # --- 구분자가 있으면 이후 내용 추출
+    if "---" in raw_response:
+        parts = raw_response.split("---")
+        for part in reversed(parts):
+            stripped = part.strip()
+            if stripped and len(stripped) > 100:
+                return stripped
+
+    return raw_response.strip()
+
+
+def _save_extracted_topics(db, analysis: list) -> list[str]:
+    """분석 결과에서 소재를 추출하여 writing_elements에 저장."""
+    from app.models.writing_element import WritingElement
+
+    saved_topics = []
+
+    for item in analysis:
+        topic = item.get("topic", "").strip()
+        if not topic or len(topic) < 2:
+            continue
+
+        # 너무 짧거나 일반적인 단어 필터링
+        if len(topic) <= 3 and topic in ["사랑", "마음", "추억", "가족", "행복"]:
+            logger.debug(f"일반적인 단어 스킵: {topic}")
+            continue
+
+        try:
+            # 중복 체크
+            existing = (
+                db.query(WritingElement)
+                .filter(
+                    WritingElement.category == WritingElement.CATEGORY_TOPIC,
+                    WritingElement.name == topic,
+                )
+                .first()
+            )
+
+            if existing:
+                if existing.frequency:
+                    existing.frequency += 1
+                else:
+                    existing.frequency = 2
+                logger.debug(f"기존 소재 빈도 증가: {topic} -> {existing.frequency}")
+            else:
+                new_element = WritingElement(
+                    category=WritingElement.CATEGORY_TOPIC,
+                    name=topic,
+                    source_type=WritingElement.SOURCE_TYPE_AUTO,
+                    frequency=1,
+                    is_active=1,
+                )
+                db.add(new_element)
+                logger.info(f"새 소재 추가: {topic}")
+
+            saved_topics.append(topic)
+
+        except Exception as e:
+            logger.warning(f"소재 저장 실패: {topic} - {e}")
+            continue
+
+    if saved_topics:
+        db.commit()
+        logger.info(f"소재 {len(saved_topics)}개 저장 완료: {saved_topics}")
+
+    return saved_topics
+
+
 def save_writing_result(db, request, result: dict) -> bool:
-    """Writing LLM 결과 저장.
+    """Writing LLM 결과 저장 (배치용).
 
     Args:
         db: DB 세션
@@ -591,6 +780,72 @@ def mark_writing_failed(db, request, error_message: str) -> bool:
 
     except Exception as e:
         logger.error(f"Failed to mark writing failed: {e}", exc_info=True)
+        db.rollback()
+        return False
+
+
+def save_event_import_result(db, request, result: dict) -> bool:
+    """event_import 결과 → Event 생성.
+
+    Args:
+        db: DB 세션
+        request: LLMRequest 객체
+        result: LLM 실행 결과
+
+    Returns:
+        성공 여부
+    """
+    from app.models.event import Event
+    import json
+
+    try:
+        parsed_event = result.get("result", {})
+
+        if not parsed_event:
+            logger.warning(f"event_import {request.caller_id}: LLM 결과 없음")
+            return False
+
+        # 비이벤트 처리
+        if not parsed_event.get("is_event", True):
+            logger.info(f"비이벤트: {request.caller_id}")
+            return True
+
+        # 날짜 파싱
+        event_period = parsed_event.get("event_period") or {}
+        event_start = parse_date(event_period.get("start"))
+        event_end = parse_date(event_period.get("end"))
+        announcement_date = parse_date(parsed_event.get("announcement_date"))
+
+        # URL 리스트
+        urls = parsed_event.get("urls") or []
+
+        # Event 생성
+        event = Event(
+            title=parsed_event.get("title") or "제목 없음",
+            event_type="event",
+            event_url=urls[0] if urls else request.caller_id,  # caller_id는 원본 URL
+            additional_urls=urls[1:] if len(urls) > 1 else [],
+            event_start=event_start,
+            event_end=event_end,
+            announcement_date=announcement_date,
+            organizer=parsed_event.get("organizer"),
+            summary=parsed_event.get("summary"),
+            prizes=parsed_event.get("prizes") or [],
+            winner_count=parsed_event.get("winner_count"),
+            purchase_required=parsed_event.get("purchase_required"),
+            source_type="web",
+            source_url=request.caller_id,
+            input_source="ai",
+        )
+        db.add(event)
+        db.commit()
+        db.refresh(event)
+
+        logger.info(f"Event 생성 완료: id={event.id}, title={event.title}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to save event_import result: {e}", exc_info=True)
         db.rollback()
         return False
 
@@ -903,8 +1158,12 @@ class LLMWorker:
                     save_topic_extract_result(db, request.caller_id, result["result"])
                 elif request.caller_type == "writing":
                     save_writing_result(db, request, result)
+                elif request.caller_type == "writing_generate":
+                    save_writing_generate_result(db, request, result)
                 elif request.caller_type == "writing_refine":
                     save_writing_refine_result(db, request, result)
+                elif request.caller_type == "event_import":
+                    save_event_import_result(db, request, result)
             else:
                 service.mark_failed(request.id, result["error"])
                 self._increment_error()

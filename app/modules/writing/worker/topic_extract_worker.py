@@ -47,64 +47,38 @@ class TopicExtractWorker:
             logger.warning(f"Topic extract prompt not found: {self.PROMPT_PATH}")
 
     def run(self, schedule: TaskSchedule, run: TaskScheduleRun) -> dict:
-        """워커 실행.
+        """워커 실행 (비동기 큐 패턴).
 
         Args:
             schedule: 스케줄 설정
             run: 실행 기록
 
         Returns:
-            {"total": 100, "extracted": 95, "failed": 5}
+            {"total": 요청수, "extracted": 0, "failed": 0}
         """
-        total = 0
-        extracted = 0
-        failed = 0
-
         logger.info(f"TopicExtractWorker 시작: schedule_id={schedule.id}, run_id={run.id}")
 
         try:
-            # 미처리 소스 조회
-            sources = self._get_unprocessed_sources(limit=self.DAILY_LIMIT)
-            total = len(sources)
+            # 비동기 요청 생성 (create_extract_requests 사용)
+            request_count = self.create_extract_requests(limit=self.DAILY_LIMIT)
 
-            if total == 0:
-                logger.info("처리할 소스가 없습니다.")
-                run.mark_completed(collected_count=0, saved_count=0, stop_reason="no_sources")
-                self.db.commit()
-                return {"total": 0, "extracted": 0, "failed": 0}
-
-            logger.info(f"처리할 소스: {total}개")
-
-            # 배치 처리
-            for i in range(0, total, self.BATCH_SIZE):
-                batch = sources[i:i + self.BATCH_SIZE]
-                batch_num = i // self.BATCH_SIZE + 1
-                logger.info(f"배치 {batch_num} 처리 중 ({len(batch)}개)")
-
-                try:
-                    count = self._process_batch(batch, run.id, batch_num)
-                    extracted += count
-                except Exception as e:
-                    logger.error(f"배치 {batch_num} 처리 실패: {e}", exc_info=True)
-                    failed += len(batch)
-
-            # 완료 처리
+            # 완료 처리 (Worker가 실제 추출 수행)
             run.mark_completed(
-                collected_count=total,
-                saved_count=extracted,
-                stop_reason="completed"
+                collected_count=request_count,
+                saved_count=0,  # Worker가 처리하므로 0
+                stop_reason="requests_created"
             )
             self.db.commit()
 
-            logger.info(f"TopicExtractWorker 완료: total={total}, extracted={extracted}, failed={failed}")
+            logger.info(f"TopicExtractWorker 완료: {request_count}개 요청 생성")
+
+            return {"total": request_count, "extracted": 0, "failed": 0}
 
         except Exception as e:
             logger.error(f"TopicExtractWorker 실행 실패: {e}", exc_info=True)
             run.mark_failed(str(e))
             self.db.commit()
             raise
-
-        return {"total": total, "extracted": extracted, "failed": failed}
 
     def _get_unprocessed_sources(self, limit: int) -> list[WritingSource]:
         """미처리 소스 조회."""
