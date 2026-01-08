@@ -111,6 +111,10 @@ class GeneratedWriting(Base):
     raw_response = Column(Text, nullable=True)  # LLM 전체 응답
     selected_elements = Column(Text, nullable=True)  # 선택된 요소 JSON
 
+    # 교정 (009 마이그레이션)
+    refined_content = Column(Text, nullable=True)  # 교정된 글 (노년층 가독성)
+    refined_at = Column(DateTime, nullable=True)  # 교정 완료 시각
+
     # 평가
     rating = Column(Integer, nullable=True)  # 1: 추천, -1: 비추천, NULL: 미평가
 

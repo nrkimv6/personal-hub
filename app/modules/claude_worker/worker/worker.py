@@ -439,6 +439,42 @@ def mark_universal_crawl_failed(db, page_id: int, error_message: str) -> bool:
     return True
 
 
+def save_writing_refine_result(db, request, result: dict) -> bool:
+    """교정 결과를 GeneratedWriting.refined_content에 저장.
+
+    Args:
+        db: DB 세션
+        request: LLMRequest 객체
+        result: LLM 실행 결과
+
+    Returns:
+        성공 여부
+    """
+    from app.models.writing import GeneratedWriting
+
+    try:
+        writing_id = int(request.caller_id)
+        writing = db.query(GeneratedWriting).filter(
+            GeneratedWriting.id == writing_id
+        ).first()
+
+        if not writing:
+            logger.warning(f"GeneratedWriting not found: {writing_id}")
+            return False
+
+        # 교정된 글 저장
+        writing.refined_content = result.get("raw_response", "")
+        writing.refined_at = datetime.now()
+        db.commit()
+        logger.info(f"교정 완료: writing_id={writing_id}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to save writing refine result: {e}", exc_info=True)
+        db.rollback()
+        return False
+
+
 def save_writing_result(db, request, result: dict) -> bool:
     """Writing LLM 결과 저장.
 
@@ -489,6 +525,24 @@ def save_writing_result(db, request, result: dict) -> bool:
             writing.selected_elements = json.dumps(selected, ensure_ascii=False)
 
         db.add(writing)
+        db.flush()  # writing.id 생성
+
+        # 교정 요청 자동 생성
+        refine_prompt_path = Path(__file__).parent.parent.parent / "modules" / "writing" / "prompts" / "refine_prompt.md"
+        if refine_prompt_path.exists():
+            refine_template = refine_prompt_path.read_text(encoding="utf-8")
+            refine_prompt = refine_template.replace("{content}", writing.content)
+
+            refine_request = LLMRequest(
+                caller_type="writing_refine",
+                caller_id=str(writing.id),
+                prompt=refine_prompt,
+                status="pending",
+                requested_by="auto",
+                request_source="writing_worker",
+            )
+            db.add(refine_request)
+            logger.info(f"교정 요청 생성: writing_id={writing.id}")
 
         # 배치 카운트 업데이트
         if request.writing_batch_id:
@@ -849,6 +903,8 @@ class LLMWorker:
                     save_topic_extract_result(db, request.caller_id, result["result"])
                 elif request.caller_type == "writing":
                     save_writing_result(db, request, result)
+                elif request.caller_type == "writing_refine":
+                    save_writing_refine_result(db, request, result)
             else:
                 service.mark_failed(request.id, result["error"])
                 self._increment_error()
