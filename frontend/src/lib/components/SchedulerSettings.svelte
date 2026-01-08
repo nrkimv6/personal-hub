@@ -194,9 +194,10 @@
 									>
 										{actionLoading[task.name] ? '...' : '실행'}
 									</Button>
-									<button
-										class="btn btn-sm {task.enabled ? 'btn-warning' : 'btn-success'}"
-										onclick={() => toggleTask(task)}
+									<Button
+										variant={task.enabled ? 'warning' : 'success'}
+										size="sm"
+										on:click={() => toggleTask(task)}
 										disabled={actionLoading[task.name]}
 									>
 										{task.enabled ? '비활성화' : '활성화'}

@@ -238,9 +238,10 @@
 						실행 이력
 					</Button>
 					{#if $isAdmin}
-						<button
-							onclick={() => handleToggle(schedule.id, !schedule.enabled)}
-							class="btn btn-sm {schedule.enabled ? 'btn-danger' : 'btn-primary'}"
+						<Button
+							variant={schedule.enabled ? 'error' : 'primary'}
+							size="sm"
+							on:click={() => handleToggle(schedule.id, !schedule.enabled)}
 						>
 							{schedule.enabled ? '비활성화' : '활성화'}
 						</Button>

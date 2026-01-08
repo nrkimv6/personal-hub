@@ -253,8 +253,9 @@
                     >
                       0
                     </Button>
-                    <button
-                      class="btn btn-xs {schedule.auto_booking_enabled ? 'btn-warning' : 'btn-success'}"
+                    <Button
+                      variant={schedule.auto_booking_enabled ? 'warning' : 'success'}
+                      size="xs"
                       on:click={() => handleToggleAutoBooking(schedule)}
                       title={schedule.auto_booking_enabled ? '자동예약 중지' : '자동예약 활성화'}
                     >

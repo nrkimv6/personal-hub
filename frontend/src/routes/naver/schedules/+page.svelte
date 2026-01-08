@@ -1087,7 +1087,12 @@
                     <div class="flex items-center gap-1">
                       <span class="font-medium">{dateInfo.date}</span>
                       {#if dateInfo.badge}
-                        <span class="badge text-xs {dateInfo.badge === '지남' ? 'badge-gray' : dateInfo.badge === '오늘' ? 'badge-warning' : 'badge-info'}">{dateInfo.badge}</span>
+                        <Badge
+                          variant={dateInfo.badge === '지남' ? 'secondary' : dateInfo.badge === '오늘' ? 'warning' : 'info'}
+                          class="text-xs"
+                        >
+                          {dateInfo.badge}
+                        </Badge>
                       {/if}
                     </div>
                     <div class="text-xs text-muted-foreground">
@@ -1239,9 +1244,9 @@
                     on:click={() => handleToggleRecurringRule(rule)}
                     title={rule.is_enabled ? '클릭하여 비활성화' : '클릭하여 활성화'}
                   >
-                    <span class="badge {rule.is_enabled ? 'badge-success' : 'badge-gray'}">
+                    <Badge variant={rule.is_enabled ? 'success' : 'secondary'}>
                       {rule.is_enabled ? '활성' : '비활성'}
-                    </span>
+                    </Badge>
                     {#if rule.auto_booking_enabled}
                       <div class="text-xs text-success mt-0.5">자동예약</div>
                     {/if}

@@ -362,9 +362,10 @@
 							<td class="px-2 py-3 text-sm">
 								{#if buildBookingUrl(event)}
 									{@const url = buildBookingUrl(event) as string}
-									<button
-										class="btn btn-xs {copiedId === event.id ? 'btn-success' : 'btn-secondary'}"
-										onclick={() => copyUrl(url, event.id)}
+									<Button
+										variant={copiedId === event.id ? 'success' : 'secondary'}
+										size="xs"
+										on:click={() => copyUrl(url, event.id)}
 										title={url}
 									>
 										{copiedId === event.id ? '복사됨' : '복사'}

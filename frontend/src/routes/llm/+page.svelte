@@ -600,9 +600,10 @@
 
 			{#if activeTab === 'history'}
 				<div class="ml-auto flex items-center gap-2">
-					<button
-						onclick={toggleViewMode}
-						class="btn btn-sm {viewMode === 'grouped' ? 'btn-primary' : 'btn-secondary'}"
+					<Button
+						variant={viewMode === 'grouped' ? 'primary' : 'secondary'}
+						size="sm"
+						on:click={toggleViewMode}
 					>
 						{viewMode === 'individual' ? '그룹 뷰' : '개별 뷰'}
 					</Button>
