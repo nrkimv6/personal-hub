@@ -4,6 +4,7 @@
 	 */
 	import type { Event, EventCreate, EventUpdate } from '$lib/types';
 	import { prizesToText, textToPrizes } from '$lib/utils/eventUtils';
+	import { Button } from '$lib/components/ui';
 
 	interface Props {
 		show: boolean;
@@ -179,7 +180,7 @@
 			<div class="p-6">
 				<div class="flex justify-between items-start mb-4">
 					<div class="flex items-center gap-2">
-						<h3 class="text-lg font-bold text-gray-900">
+						<h3 class="text-lg font-bold text-foreground">
 							{editingEvent ? '이벤트 수정' : importedData ? 'URL에서 가져온 이벤트' : '새 이벤트'}
 						</h3>
 						{#if editingEvent}
@@ -189,7 +190,7 @@
 									? 'bg-purple-100 text-purple-700'
 									: inputSource === 'ai_edited'
 										? 'bg-blue-100 text-blue-700'
-										: 'bg-gray-100 text-gray-600'}"
+										: 'bg-muted text-muted-foreground'}"
 							>
 								{inputSource === 'ai' ? 'AI 분석' : inputSource === 'ai_edited' ? 'AI+수정' : '수동 입력'}
 							</span>
@@ -199,7 +200,7 @@
 							</span>
 						{/if}
 					</div>
-					<button onclick={onClose} class="text-gray-400 hover:text-gray-600 text-2xl">
+					<button onclick={onClose} class="text-muted-foreground hover:text-muted-foreground text-2xl">
 						&times;
 					</button>
 				</div>
@@ -207,7 +208,7 @@
 				<div class="space-y-4">
 					<!-- 제목 -->
 					<div>
-						<label for="event-title" class="block text-sm font-medium text-gray-700 mb-1">
+						<label for="event-title" class="block text-sm font-medium text-foreground mb-1">
 							제목 <span class="text-red-500">*</span>
 						</label>
 						<input
@@ -215,20 +216,20 @@
 							type="text"
 							bind:value={eventForm.title}
 							placeholder="이벤트 제목"
-							class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+							class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 						/>
 					</div>
 
 					<!-- 유형 + 상태 -->
 					<div class="grid grid-cols-2 gap-4">
 						<div>
-							<label for="event-type" class="block text-sm font-medium text-gray-700 mb-1"
+							<label for="event-type" class="block text-sm font-medium text-foreground mb-1"
 								>유형</label
 							>
 							<select
 								id="event-type"
 								bind:value={eventForm.event_type}
-								class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 							>
 								<option value="event">이벤트</option>
 								<option value="popup">팝업</option>
@@ -238,13 +239,13 @@
 						</div>
 						{#if editingEvent}
 							<div>
-								<label for="event-status" class="block text-sm font-medium text-gray-700 mb-1"
+								<label for="event-status" class="block text-sm font-medium text-foreground mb-1"
 									>상태</label
 								>
 								<select
 									id="event-status"
 									bind:value={eventForm.status}
-									class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+									class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 								>
 									<option value="active">활성</option>
 									<option value="ended">종료</option>
@@ -256,7 +257,7 @@
 
 					<!-- 이벤트 URL 목록 -->
 					<div>
-						<label class="block text-sm font-medium text-gray-700 mb-1">이벤트 URL</label>
+						<label class="block text-sm font-medium text-foreground mb-1">이벤트 URL</label>
 						<div class="space-y-2">
 							{#each eventUrls as url, index}
 								<div class="flex gap-2 items-center">
@@ -264,7 +265,7 @@
 										type="text"
 										bind:value={eventUrls[index]}
 										placeholder="https://..."
-										class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+										class="flex-1 px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 									/>
 									{#if index === 0}
 										<span class="text-xs text-blue-600 whitespace-nowrap px-2 py-1 bg-blue-50 rounded">메인</span>
@@ -273,7 +274,7 @@
 										<button
 											type="button"
 											onclick={() => removeUrl(index)}
-											class="text-gray-400 hover:text-red-500 p-1"
+											class="text-muted-foreground hover:text-red-500 p-1"
 											title="URL 삭제"
 										>
 											<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -294,31 +295,31 @@
 								URL 추가
 							</button>
 						</div>
-						<p class="mt-1 text-xs text-gray-500">구글폼, 네이버폼 등 참여 URL (첫 번째 URL로 타입 감지)</p>
+						<p class="mt-1 text-xs text-muted-foreground">구글폼, 네이버폼 등 참여 URL (첫 번째 URL로 타입 감지)</p>
 					</div>
 
 					<!-- 기간 -->
 					<div class="grid grid-cols-2 gap-4">
 						<div>
-							<label for="event-start" class="block text-sm font-medium text-gray-700 mb-1"
+							<label for="event-start" class="block text-sm font-medium text-foreground mb-1"
 								>시작일</label
 							>
 							<input
 								id="event-start"
 								type="date"
 								bind:value={eventForm.event_start}
-								class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 							/>
 						</div>
 						<div>
-							<label for="event-end" class="block text-sm font-medium text-gray-700 mb-1"
+							<label for="event-end" class="block text-sm font-medium text-foreground mb-1"
 								>종료일</label
 							>
 							<input
 								id="event-end"
 								type="date"
 								bind:value={eventForm.event_end}
-								class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 							/>
 						</div>
 					</div>
@@ -326,7 +327,7 @@
 					<!-- 주최 + 발표일 -->
 					<div class="grid grid-cols-2 gap-4">
 						<div>
-							<label for="event-organizer" class="block text-sm font-medium text-gray-700 mb-1"
+							<label for="event-organizer" class="block text-sm font-medium text-foreground mb-1"
 								>주최</label
 							>
 							<input
@@ -334,18 +335,18 @@
 								type="text"
 								bind:value={eventForm.organizer}
 								placeholder="주최자/브랜드명"
-								class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 							/>
 						</div>
 						<div>
-							<label for="event-announcement" class="block text-sm font-medium text-gray-700 mb-1"
+							<label for="event-announcement" class="block text-sm font-medium text-foreground mb-1"
 								>발표일</label
 							>
 							<input
 								id="event-announcement"
 								type="date"
 								bind:value={eventForm.announcement_date}
-								class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 							/>
 						</div>
 					</div>
@@ -354,7 +355,7 @@
 					{#if eventForm.event_type === 'popup'}
 						<div class="grid grid-cols-2 gap-4">
 							<div>
-								<label for="event-venue" class="block text-sm font-medium text-gray-700 mb-1"
+								<label for="event-venue" class="block text-sm font-medium text-foreground mb-1"
 									>장소명</label
 								>
 								<input
@@ -362,11 +363,11 @@
 									type="text"
 									bind:value={eventForm.location_venue}
 									placeholder="예: 더현대 서울"
-									class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+									class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 								/>
 							</div>
 							<div>
-								<label for="event-address" class="block text-sm font-medium text-gray-700 mb-1"
+								<label for="event-address" class="block text-sm font-medium text-foreground mb-1"
 									>주소</label
 								>
 								<input
@@ -374,7 +375,7 @@
 									type="text"
 									bind:value={eventForm.location_address}
 									placeholder="예: 서울시 영등포구..."
-									class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+									class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 								/>
 							</div>
 						</div>
@@ -382,7 +383,7 @@
 
 					<!-- 경품 -->
 					<div>
-						<label for="event-prizes" class="block text-sm font-medium text-gray-700 mb-1"
+						<label for="event-prizes" class="block text-sm font-medium text-foreground mb-1"
 							>경품</label
 						>
 						<textarea
@@ -390,15 +391,15 @@
 							bind:value={prizesText}
 							placeholder="경품을 한 줄에 하나씩 입력&#10;예: 아이패드 프로&#10;에어팟 프로"
 							rows="3"
-							class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+							class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
 						></textarea>
-						<p class="mt-1 text-xs text-gray-500">한 줄에 하나의 경품 입력</p>
+						<p class="mt-1 text-xs text-muted-foreground">한 줄에 하나의 경품 입력</p>
 					</div>
 
 					<!-- 당첨자 수 + 조건 -->
 					<div class="grid grid-cols-2 gap-4">
 						<div>
-							<label for="event-winner-count" class="block text-sm font-medium text-gray-700 mb-1"
+							<label for="event-winner-count" class="block text-sm font-medium text-foreground mb-1"
 								>당첨자 수</label
 							>
 							<input
@@ -407,17 +408,17 @@
 								min="0"
 								bind:value={eventForm.winner_count}
 								placeholder="예: 10"
-								class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 							/>
 						</div>
 						<div>
-							<label for="event-purchase" class="block text-sm font-medium text-gray-700 mb-1"
+							<label for="event-purchase" class="block text-sm font-medium text-foreground mb-1"
 								>구매 조건</label
 							>
 							<select
 								id="event-purchase"
 								bind:value={eventForm.purchase_required}
-								class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 							>
 								<option value={undefined}>선택 안함</option>
 								<option value="no">무료 (구매 불필요)</option>
@@ -429,7 +430,7 @@
 
 					<!-- 요약 -->
 					<div>
-						<label for="event-summary" class="block text-sm font-medium text-gray-700 mb-1"
+						<label for="event-summary" class="block text-sm font-medium text-foreground mb-1"
 							>요약</label
 						>
 						<textarea
@@ -437,14 +438,14 @@
 							bind:value={eventForm.summary}
 							placeholder="이벤트 설명..."
 							rows="3"
-							class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+							class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 						></textarea>
 					</div>
 
 					<!-- 원본 본문 (접이식) -->
 					{#if eventForm.body_text}
-						<details class="border border-gray-200 rounded-lg">
-							<summary class="px-3 py-2 text-sm font-medium text-gray-700 cursor-pointer hover:bg-gray-50">
+						<details class="border border-border rounded-lg">
+							<summary class="px-3 py-2 text-sm font-medium text-foreground cursor-pointer hover:bg-muted">
 								원본 본문 (펼쳐서 보기)
 							</summary>
 							<div class="p-3 pt-0">
@@ -453,40 +454,41 @@
 									bind:value={eventForm.body_text}
 									placeholder="Instagram 캡션, 웹페이지 본문 등..."
 									rows="6"
-									class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-xs"
+									class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-xs"
 								></textarea>
-								<p class="mt-1 text-xs text-gray-500">검색에 포함되는 원본 텍스트 (Instagram 캡션, 웹페이지 본문 등)</p>
+								<p class="mt-1 text-xs text-muted-foreground">검색에 포함되는 원본 텍스트 (Instagram 캡션, 웹페이지 본문 등)</p>
 							</div>
 						</details>
 					{/if}
 
 					<!-- 메모 -->
 					<div>
-						<label for="event-note" class="block text-sm font-medium text-gray-700 mb-1">메모</label
+						<label for="event-note" class="block text-sm font-medium text-foreground mb-1">메모</label
 						>
 						<textarea
 							id="event-note"
 							bind:value={eventForm.user_note}
 							placeholder="개인 메모..."
 							rows="2"
-							class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+							class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 						></textarea>
 					</div>
 				</div>
 
 				<div class="mt-6 flex gap-2 justify-end">
-					<button onclick={onClose} class="btn btn-secondary btn-sm"> 취소 </button>
-					<button
-						onclick={handleSave}
+					<Button variant="secondary" size="sm" on:click={onClose}>취소</Button>
+					<Button
+						variant="primary"
+						size="sm"
+						on:click={handleSave}
 						disabled={isSaving}
-						class="btn btn-primary btn-sm disabled:opacity-50"
 					>
 						{#if isSaving}
 							저장 중...
 						{:else}
 							{editingEvent ? '수정' : '등록'}
 						{/if}
-					</button>
+					</Button>
 				</div>
 			</div>
 		</div>

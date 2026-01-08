@@ -180,7 +180,7 @@
 			case 'failed':
 				return { bg: 'bg-red-100', text: 'text-red-700', label: '실패' };
 			default:
-				return { bg: 'bg-gray-100', text: 'text-gray-700', label: status };
+				return { bg: 'bg-muted', text: 'text-foreground', label: status };
 		}
 	}
 
@@ -258,7 +258,7 @@
 				onclick={() => handleTabChange('centers')}
 				class="border-b-2 px-1 py-2 text-sm font-medium {activeTab === 'centers'
 					? 'border-blue-500 text-blue-600'
-					: 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'}"
+					: 'border-transparent text-muted-foreground hover:border-border hover:text-foreground'}"
 			>
 				센터 관리
 			</button>
@@ -266,7 +266,7 @@
 				onclick={() => handleTabChange('courses')}
 				class="border-b-2 px-1 py-2 text-sm font-medium {activeTab === 'courses'
 					? 'border-blue-500 text-blue-600'
-					: 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'}"
+					: 'border-transparent text-muted-foreground hover:border-border hover:text-foreground'}"
 			>
 				강좌 목록 ({courseTotal || '...'})
 			</button>
@@ -274,7 +274,7 @@
 	</div>
 
 	{#if loading}
-		<div class="text-gray-500">로딩 중...</div>
+		<div class="text-muted-foreground">로딩 중...</div>
 	{:else if activeTab === 'centers'}
 		<!-- 센터 관리 탭 -->
 		<div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -285,34 +285,34 @@
 				{#if workerStatus}
 					<div class="space-y-3">
 						<div class="flex items-center justify-between">
-							<span class="text-gray-600">상태</span>
+							<span class="text-muted-foreground">상태</span>
 							{#if workerStatus.is_running}
 								<span class="rounded bg-green-100 px-2 py-1 text-sm text-green-700">실행 중</span>
 							{:else}
-								<span class="rounded bg-gray-100 px-2 py-1 text-sm text-gray-600">대기</span>
+								<span class="rounded bg-muted px-2 py-1 text-sm text-muted-foreground">대기</span>
 							{/if}
 						</div>
 						<div class="flex items-center justify-between">
-							<span class="text-gray-600">대기 요청</span>
+							<span class="text-muted-foreground">대기 요청</span>
 							<span class="font-medium">{workerStatus.pending_requests}</span>
 						</div>
 						<div class="flex items-center justify-between">
-							<span class="text-gray-600">처리 중</span>
+							<span class="text-muted-foreground">처리 중</span>
 							<span class="font-medium">{workerStatus.processing_requests}</span>
 						</div>
 						<div class="flex items-center justify-between">
-							<span class="text-gray-600">24시간 크롤링</span>
+							<span class="text-muted-foreground">24시간 크롤링</span>
 							<span class="font-medium">{workerStatus.recent_runs}회</span>
 						</div>
 						{#if workerStatus.last_activity}
 							<div class="flex items-center justify-between">
-								<span class="text-gray-600">마지막 활동</span>
+								<span class="text-muted-foreground">마지막 활동</span>
 								<span class="text-sm">{formatDate(workerStatus.last_activity)}</span>
 							</div>
 						{/if}
 					</div>
 				{:else}
-					<div class="text-gray-500">워커 상태를 가져올 수 없습니다.</div>
+					<div class="text-muted-foreground">워커 상태를 가져올 수 없습니다.</div>
 				{/if}
 			</div>
 
@@ -321,12 +321,12 @@
 				<h2 class="mb-4 text-lg font-semibold">최근 크롤링 요청</h2>
 
 				{#if requests.length === 0}
-					<div class="text-gray-500">요청 내역이 없습니다.</div>
+					<div class="text-muted-foreground">요청 내역이 없습니다.</div>
 				{:else}
 					<div class="overflow-x-auto">
 						<table class="w-full text-sm">
 							<thead>
-								<tr class="border-b text-left text-gray-500">
+								<tr class="border-b text-left text-muted-foreground">
 									<th class="pb-2">ID</th>
 									<th class="pb-2">URL</th>
 									<th class="pb-2">상태</th>
@@ -344,7 +344,7 @@
 												{badge.label}
 											</span>
 										</td>
-										<td class="py-2 text-gray-500">{formatDate(req.requested_at)}</td>
+										<td class="py-2 text-muted-foreground">{formatDate(req.requested_at)}</td>
 									</tr>
 								{/each}
 							</tbody>
@@ -359,12 +359,12 @@
 			<h2 class="mb-4 text-lg font-semibold">등록된 센터 ({centers.length})</h2>
 
 			{#if centers.length === 0}
-				<div class="text-gray-500">등록된 센터가 없습니다.</div>
+				<div class="text-muted-foreground">등록된 센터가 없습니다.</div>
 			{:else}
 				<div class="overflow-x-auto">
 					<table class="w-full text-sm">
 						<thead>
-							<tr class="border-b text-left text-gray-500">
+							<tr class="border-b text-left text-muted-foreground">
 								<th class="pb-2">ID</th>
 								<th class="pb-2">이름</th>
 								<th class="pb-2">유형</th>
@@ -376,17 +376,17 @@
 						</thead>
 						<tbody>
 							{#each centers as center}
-								<tr class="border-b hover:bg-gray-50">
+								<tr class="border-b hover:bg-muted">
 									<td class="py-2">{center.id}</td>
 									<td class="py-2 font-medium">{center.name}</td>
 									<td class="py-2">{getCenterTypeName(center.center_type)}</td>
 									<td class="py-2">{center.crawl_method}</td>
-									<td class="py-2 text-gray-500">{formatDate(center.last_crawled_at)}</td>
+									<td class="py-2 text-muted-foreground">{formatDate(center.last_crawled_at)}</td>
 									<td class="py-2">
 										{#if center.is_active}
 											<span class="rounded bg-green-100 px-2 py-0.5 text-green-700">활성</span>
 										{:else}
-											<span class="rounded bg-gray-100 px-2 py-0.5 text-gray-600">비활성</span>
+											<span class="rounded bg-muted px-2 py-0.5 text-muted-foreground">비활성</span>
 										{/if}
 									</td>
 									<td class="py-2">
@@ -438,14 +438,14 @@
 
 			<!-- 강좌 테이블 -->
 			{#if courses.length === 0}
-				<div class="py-8 text-center text-gray-500">
+				<div class="py-8 text-center text-muted-foreground">
 					{courseKeyword || courseCategory ? '검색 결과가 없습니다.' : '수집된 강좌가 없습니다.'}
 				</div>
 			{:else}
 				<div class="overflow-x-auto">
 					<table class="w-full text-sm">
 						<thead>
-							<tr class="border-b text-left text-gray-500">
+							<tr class="border-b text-left text-muted-foreground">
 								<th class="pb-2">강좌명</th>
 								<th class="pb-2">센터</th>
 								<th class="pb-2">카테고리</th>
@@ -457,7 +457,7 @@
 						</thead>
 						<tbody>
 							{#each courses as course}
-								<tr class="border-b hover:bg-gray-50">
+								<tr class="border-b hover:bg-muted">
 									<td class="max-w-64 truncate py-2 font-medium" title={course.name}>
 										{#if course.source_url}
 											<a
@@ -471,15 +471,15 @@
 											{course.name}
 										{/if}
 									</td>
-									<td class="py-2 text-gray-600">{course.center_name || '-'}</td>
+									<td class="py-2 text-muted-foreground">{course.center_name || '-'}</td>
 									<td class="py-2">{getCategoryName(course.category)}</td>
 									<td class="py-2">
 										{course.day_of_week || '-'}
 										{#if course.time_start}
-											<span class="text-gray-500">{course.time_start}~{course.time_end}</span>
+											<span class="text-muted-foreground">{course.time_start}~{course.time_end}</span>
 										{/if}
 									</td>
-									<td class="py-2 text-gray-500">
+									<td class="py-2 text-muted-foreground">
 										{formatSimpleDate(course.course_start)} ~ {formatSimpleDate(course.course_end)}
 									</td>
 									<td class="py-2">{course.instructor_name || '-'}</td>
@@ -493,7 +493,7 @@
 				<!-- 페이지네이션 -->
 				{#if totalPages > 1}
 					<div class="mt-4 flex items-center justify-between">
-						<div class="text-sm text-gray-500">
+						<div class="text-sm text-muted-foreground">
 							총 {courseTotal}개 중 {(coursePage - 1) * coursePageSize + 1}-{Math.min(
 								coursePage * coursePageSize,
 								courseTotal

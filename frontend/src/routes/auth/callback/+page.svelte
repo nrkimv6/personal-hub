@@ -37,11 +37,11 @@
 	});
 </script>
 
-<div class="min-h-screen flex items-center justify-center bg-gray-100">
+<div class="min-h-screen flex items-center justify-center bg-muted">
 	<div class="bg-white p-8 rounded-lg shadow-md max-w-md w-full text-center">
 		{#if status === 'loading'}
 			<div class="animate-spin w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
-			<p class="text-gray-600">로그인 처리 중...</p>
+			<p class="text-muted-foreground">로그인 처리 중...</p>
 		{:else if status === 'success'}
 			<div class="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
 				<svg class="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -49,7 +49,7 @@
 				</svg>
 			</div>
 			<p class="text-green-600 font-medium">로그인 성공!</p>
-			<p class="text-gray-500 text-sm mt-2">잠시 후 이동합니다...</p>
+			<p class="text-muted-foreground text-sm mt-2">잠시 후 이동합니다...</p>
 		{:else}
 			<div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
 				<svg class="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -57,7 +57,7 @@
 				</svg>
 			</div>
 			<p class="text-red-600 font-medium">로그인 실패</p>
-			<p class="text-gray-500 text-sm mt-2">{errorMessage}</p>
+			<p class="text-muted-foreground text-sm mt-2">{errorMessage}</p>
 			<a href="/" class="inline-block mt-4 text-blue-500 hover:underline">홈으로 돌아가기</a>
 		{/if}
 	</div>

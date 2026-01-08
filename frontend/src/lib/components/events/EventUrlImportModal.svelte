@@ -276,8 +276,8 @@
 				<!-- 헤더 -->
 				<div class="flex justify-between items-start mb-4">
 					<div>
-						<h3 class="text-lg font-bold text-gray-900">URL에서 가져오기</h3>
-						<p class="text-sm text-gray-500 mt-1">
+						<h3 class="text-lg font-bold text-foreground">URL에서 가져오기</h3>
+						<p class="text-sm text-muted-foreground mt-1">
 							{#if mode === 'batch'}
 								URL을 입력하면 크롤링 큐에 등록됩니다
 							{:else if mode === 'instant'}
@@ -287,7 +287,7 @@
 							{/if}
 						</p>
 					</div>
-					<button onclick={handleClose} class="text-gray-400 hover:text-gray-600 text-2xl">
+					<button onclick={handleClose} class="text-muted-foreground hover:text-muted-foreground text-2xl">
 						&times;
 					</button>
 				</div>
@@ -298,7 +298,7 @@
 						onclick={() => switchMode('batch')}
 						class="flex-1 px-3 py-2 text-sm rounded-lg border transition-colors {mode === 'batch'
 							? 'bg-purple-50 border-purple-500 text-purple-700'
-							: 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}"
+							: 'bg-card border-border text-muted-foreground hover:bg-muted'}"
 					>
 						<div class="font-medium">배치 크롤링</div>
 						<div class="text-xs opacity-75 mt-0.5">다건 URL 지원</div>
@@ -307,7 +307,7 @@
 						onclick={() => switchMode('instant')}
 						class="flex-1 px-3 py-2 text-sm rounded-lg border transition-colors {mode === 'instant'
 							? 'bg-blue-50 border-blue-500 text-blue-700'
-							: 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}"
+							: 'bg-card border-border text-muted-foreground hover:bg-muted'}"
 					>
 						<div class="font-medium">이벤트 추출</div>
 						<div class="text-xs opacity-75 mt-0.5">AI로 정보 추출</div>
@@ -316,7 +316,7 @@
 						onclick={() => switchMode('background')}
 						class="flex-1 px-3 py-2 text-sm rounded-lg border transition-colors {mode === 'background'
 							? 'bg-green-50 border-green-500 text-green-700'
-							: 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}"
+							: 'bg-card border-border text-muted-foreground hover:bg-muted'}"
 					>
 						<div class="font-medium">백그라운드</div>
 						<div class="text-xs opacity-75 mt-0.5">큐에 등록</div>
@@ -328,7 +328,7 @@
 					<div class="space-y-4">
 						<!-- URL 입력 (다건) -->
 						<div>
-							<label for="urls-input" class="block text-sm font-medium text-gray-700 mb-1">
+							<label for="urls-input" class="block text-sm font-medium text-foreground mb-1">
 								URL (한 줄에 하나씩)
 							</label>
 							<textarea
@@ -336,14 +336,14 @@
 								bind:value={urlsInput}
 								placeholder="https://www.instagram.com/p/xxx/&#10;https://forms.gle/xxx&#10;https://blog.naver.com/xxx/xxx"
 								rows="5"
-								class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 font-mono text-sm"
+								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 font-mono text-sm"
 								disabled={loading}
 							></textarea>
 							<div class="flex justify-between items-center mt-1">
-								<p class="text-xs text-gray-500">
+								<p class="text-xs text-muted-foreground">
 									Instagram, Google Forms, Naver Blog 등 (최대 20개)
 								</p>
-								<span class="text-xs font-medium {parsedUrls.length > 0 ? 'text-purple-600' : 'text-gray-400'}">
+								<span class="text-xs font-medium {parsedUrls.length > 0 ? 'text-purple-600' : 'text-muted-foreground'}">
 									{parsedUrls.length}개 URL
 									{#if instagramUrlCount > 0}
 										<span class="text-pink-500">(IG: {instagramUrlCount})</span>
@@ -355,13 +355,13 @@
 						<!-- Instagram URL이 있을 때만 계정 선택 표시 -->
 						{#if instagramUrlCount > 0}
 							<div>
-								<label for="account-select" class="block text-sm font-medium text-gray-700 mb-1">
+								<label for="account-select" class="block text-sm font-medium text-foreground mb-1">
 									Instagram 수집 계정
 								</label>
 								<select
 									id="account-select"
 									bind:value={selectedAccountId}
-									class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
+									class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-pink-500"
 									disabled={loading}
 								>
 									{#if accounts.length === 0}
@@ -396,7 +396,7 @@
 
 						<!-- 크롤링 결과 -->
 						{#if crawlResult}
-							<div class="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-2">
+							<div class="p-4 bg-background border border-border rounded-lg space-y-2">
 								<div class="flex items-center gap-4 text-sm">
 									<span class="text-green-600 font-medium">✓ 등록: {crawlResult.created}개</span>
 									{#if crawlResult.skipped > 0}
@@ -405,15 +405,15 @@
 								</div>
 								{#if crawlResult.errors.length > 0}
 									<div class="mt-2">
-										<p class="text-xs font-medium text-gray-600 mb-1">상세:</p>
-										<ul class="text-xs text-gray-500 space-y-0.5 max-h-24 overflow-y-auto">
+										<p class="text-xs font-medium text-muted-foreground mb-1">상세:</p>
+										<ul class="text-xs text-muted-foreground space-y-0.5 max-h-24 overflow-y-auto">
 											{#each crawlResult.errors as err}
 												<li class="truncate" title={err}>• {err}</li>
 											{/each}
 										</ul>
 									</div>
 								{/if}
-								<div class="pt-2 border-t border-gray-200">
+								<div class="pt-2 border-t border-border">
 									<a href="/crawl" class="text-sm text-purple-600 hover:text-purple-700">
 										크롤링 이력 확인 →
 									</a>
@@ -427,7 +427,7 @@
 				{#if mode === 'instant' || mode === 'background'}
 					<div class="space-y-4">
 						<div>
-							<label for="import-url" class="block text-sm font-medium text-gray-700 mb-1">
+							<label for="import-url" class="block text-sm font-medium text-foreground mb-1">
 								{mode === 'instant' ? '이벤트 URL' : 'URL'}
 							</label>
 							<div class="flex gap-2">
@@ -436,7 +436,7 @@
 									type="url"
 									bind:value={url}
 									placeholder="https://forms.gle/... 또는 https://naver.me/..."
-									class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+									class="flex-1 px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 									disabled={loading}
 								/>
 								{#if mode === 'instant'}
@@ -467,7 +467,7 @@
 									</button>
 								{/if}
 							</div>
-							<p class="text-xs text-gray-500 mt-1">
+							<p class="text-xs text-muted-foreground mt-1">
 								지원: Google Forms, Naver Form, Naver Blog, Instagram, 일반 웹페이지
 							</p>
 						</div>
@@ -487,7 +487,7 @@
 									<span class="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full text-xs">
 										이벤트 아님
 									</span>
-									<span class="px-2 py-0.5 bg-gray-100 text-gray-700 rounded-full text-xs">
+									<span class="px-2 py-0.5 bg-muted text-foreground rounded-full text-xs">
 										{pageTypeLabels[result.page_type] || result.page_type}
 									</span>
 								</div>
@@ -496,13 +496,13 @@
 								<div class="space-y-2 text-sm">
 									{#if result.extracted_event?.title}
 										<div>
-											<span class="font-medium text-gray-700">페이지 제목:</span>
-											<span class="ml-2 text-gray-900">{result.extracted_event.title}</span>
+											<span class="font-medium text-foreground">페이지 제목:</span>
+											<span class="ml-2 text-foreground">{result.extracted_event.title}</span>
 										</div>
 									{/if}
 
 									<div>
-										<span class="font-medium text-gray-700">분석 결과:</span>
+										<span class="font-medium text-foreground">분석 결과:</span>
 										<p class="mt-1 text-yellow-700 text-sm bg-white p-2 rounded border border-yellow-200">
 											{result.not_event_reason || '이 페이지는 이벤트/행사/프로모션 페이지가 아닙니다.'}
 										</p>
@@ -510,8 +510,8 @@
 
 									{#if result.extracted_event?.summary}
 										<div>
-											<span class="font-medium text-gray-700">요약:</span>
-											<p class="mt-1 text-gray-600 text-xs bg-white p-2 rounded border">
+											<span class="font-medium text-foreground">요약:</span>
+											<p class="mt-1 text-muted-foreground text-xs bg-white p-2 rounded border">
 												{result.extracted_event.summary}
 											</p>
 										</div>
@@ -522,7 +522,7 @@
 								<div class="flex justify-end gap-2 pt-2 border-t border-yellow-200">
 									<button
 										onclick={handleClose}
-										class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800"
+										class="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground"
 									>
 										닫기
 									</button>
@@ -552,21 +552,21 @@
 								<!-- 추출된 이벤트 정보 -->
 								<div class="space-y-2 text-sm">
 									<div>
-										<span class="font-medium text-gray-700">제목:</span>
-										<span class="ml-2 text-gray-900">{result.extracted_event.title}</span>
+										<span class="font-medium text-foreground">제목:</span>
+										<span class="ml-2 text-foreground">{result.extracted_event.title}</span>
 									</div>
 
 									{#if result.extracted_event.organizer}
 										<div>
-											<span class="font-medium text-gray-700">주최:</span>
-											<span class="ml-2 text-gray-900">{result.extracted_event.organizer}</span>
+											<span class="font-medium text-foreground">주최:</span>
+											<span class="ml-2 text-foreground">{result.extracted_event.organizer}</span>
 										</div>
 									{/if}
 
 									{#if result.extracted_event.event_start || result.extracted_event.event_end}
 										<div>
-											<span class="font-medium text-gray-700">기간:</span>
-											<span class="ml-2 text-gray-900">
+											<span class="font-medium text-foreground">기간:</span>
+											<span class="ml-2 text-foreground">
 												{result.extracted_event.event_start || '미정'} ~ {result.extracted_event.event_end || '미정'}
 											</span>
 										</div>
@@ -574,8 +574,8 @@
 
 									{#if result.extracted_event.prizes && (result.extracted_event.prizes as string[]).length > 0}
 										<div>
-											<span class="font-medium text-gray-700">경품:</span>
-											<span class="ml-2 text-gray-900">
+											<span class="font-medium text-foreground">경품:</span>
+											<span class="ml-2 text-foreground">
 												{(result.extracted_event.prizes as string[]).join(', ')}
 											</span>
 										</div>
@@ -583,15 +583,15 @@
 
 									{#if result.extracted_event.winner_count}
 										<div>
-											<span class="font-medium text-gray-700">당첨자:</span>
-											<span class="ml-2 text-gray-900">{result.extracted_event.winner_count}명</span>
+											<span class="font-medium text-foreground">당첨자:</span>
+											<span class="ml-2 text-foreground">{result.extracted_event.winner_count}명</span>
 										</div>
 									{/if}
 
 									{#if result.extracted_event.summary}
 										<div>
-											<span class="font-medium text-gray-700">요약:</span>
-											<p class="mt-1 text-gray-600 text-xs bg-white p-2 rounded border">
+											<span class="font-medium text-foreground">요약:</span>
+											<p class="mt-1 text-muted-foreground text-xs bg-white p-2 rounded border">
 												{result.extracted_event.summary}
 											</p>
 										</div>
@@ -602,7 +602,7 @@
 								<div class="flex justify-end gap-2 pt-2 border-t border-green-200">
 									<button
 										onclick={handleClose}
-										class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800"
+										class="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground"
 									>
 										취소
 									</button>

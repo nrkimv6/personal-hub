@@ -8,6 +8,7 @@
 		InstagramCrawlRequest,
 		ServiceAccountWithProfile
 	} from '$lib/types';
+	import { Button } from '$lib/components/ui';
 
 	let config: InstagramScheduleConfig | null = null;
 	let todaySchedule: InstagramTodayScheduleItem[] = [];
@@ -174,7 +175,7 @@
 			case 'missed':
 				return 'bg-red-100 text-red-800';
 			default:
-				return 'bg-gray-100 text-gray-800';
+				return 'bg-muted text-foreground';
 		}
 	}
 
@@ -217,17 +218,17 @@
 		<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 			<!-- 설정 폼 -->
 			<div class="card">
-				<h3 class="text-lg font-semibold text-gray-900 mb-4">스케줄 설정</h3>
+				<h3 class="text-lg font-semibold text-foreground mb-4">스케줄 설정</h3>
 
 				<div class="space-y-4">
 					<!-- 계정 선택 -->
 					<div>
-						<label for="account" class="block font-medium text-gray-700 mb-1">크롤링 계정</label>
+						<label for="account" class="block font-medium text-foreground mb-1">크롤링 계정</label>
 						<div class="flex gap-2">
 							<select
 								id="account"
 								bind:value={editAccountId}
-								class="flex-1 px-3 py-2 border border-gray-300 rounded-lg"
+								class="flex-1 px-3 py-2 border border-border rounded-lg"
 							>
 								<option value={null}>-- 계정 선택 --</option>
 								{#each accounts as account}
@@ -237,21 +238,25 @@
 									</option>
 								{/each}
 							</select>
-							<button
-								onclick={openLoginBrowser}
+							<Button
+								variant="secondary"
+								size="sm"
+								on:click={openLoginBrowser}
 								disabled={!editAccountId || openingBrowser}
-								class="btn btn-secondary btn-sm whitespace-nowrap"
+								class="whitespace-nowrap"
 							>
 								{openingBrowser ? '열기...' : '로그인'}
-							</button>
-							<button
-								onclick={checkLoginStatus}
+							</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								on:click={checkLoginStatus}
 								disabled={!editAccountId || checkingLogin}
-								class="btn btn-outline btn-sm whitespace-nowrap"
+								class="whitespace-nowrap"
 								title="로그인 후 이 버튼을 눌러 상태를 확인하세요"
 							>
 								{checkingLogin ? '확인중...' : '확인'}
-							</button>
+							</Button>
 						</div>
 						{#if !editAccountId}
 							<p class="text-xs text-amber-600 mt-1">
@@ -266,18 +271,18 @@
 
 					<!-- 활성화 -->
 					<div class="flex items-center justify-between">
-						<label for="enabled" class="font-medium text-gray-700">자동 수집</label>
+						<label for="enabled" class="font-medium text-foreground">자동 수집</label>
 						<label class="relative inline-flex items-center cursor-pointer">
 							<input id="enabled" type="checkbox" bind:checked={editEnabled} class="sr-only peer" />
 							<div
-								class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"
+								class="w-11 h-6 bg-secondary peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"
 							></div>
 						</label>
 					</div>
 
 					<!-- 일일 실행 횟수 -->
 					<div>
-						<label for="dailyRuns" class="block font-medium text-gray-700 mb-1"
+						<label for="dailyRuns" class="block font-medium text-foreground mb-1"
 							>일일 수집 횟수</label
 						>
 						<input
@@ -286,27 +291,27 @@
 							bind:value={editDailyRuns}
 							min="1"
 							max="10"
-							class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+							class="w-full px-3 py-2 border border-border rounded-lg"
 						/>
-						<p class="text-xs text-gray-500 mt-1">하루에 몇 번 수집할지 설정합니다</p>
+						<p class="text-xs text-muted-foreground mt-1">하루에 몇 번 수집할지 설정합니다</p>
 					</div>
 
 					<!-- 시간 윈도우 -->
 					<div>
-						<label class="block font-medium text-gray-700 mb-2">수집 시간대</label>
+						<label class="block font-medium text-foreground mb-2">수집 시간대</label>
 						<div class="space-y-2">
 							{#each editTimeWindows as window, idx}
 								<div class="flex items-center gap-2">
 									<input
 										type="time"
 										bind:value={window.start}
-										class="px-3 py-2 border border-gray-300 rounded-lg"
+										class="px-3 py-2 border border-border rounded-lg"
 									/>
 									<span>~</span>
 									<input
 										type="time"
 										bind:value={window.end}
-										class="px-3 py-2 border border-gray-300 rounded-lg"
+										class="px-3 py-2 border border-border rounded-lg"
 									/>
 									<button
 										onclick={() => removeTimeWindow(idx)}
@@ -320,12 +325,12 @@
 						<button onclick={addTimeWindow} class="mt-2 text-sm text-blue-600 hover:text-blue-800">
 							+ 시간대 추가
 						</button>
-						<p class="text-xs text-gray-500 mt-1">각 시간대 내에서 랜덤한 시간에 수집합니다</p>
+						<p class="text-xs text-muted-foreground mt-1">각 시간대 내에서 랜덤한 시간에 수집합니다</p>
 					</div>
 
 					<!-- 최대 게시물 수 -->
 					<div>
-						<label for="maxPosts" class="block font-medium text-gray-700 mb-1"
+						<label for="maxPosts" class="block font-medium text-foreground mb-1"
 							>최대 수집 게시물</label
 						>
 						<input
@@ -334,13 +339,13 @@
 							bind:value={editMaxPosts}
 							min="10"
 							max="200"
-							class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+							class="w-full px-3 py-2 border border-border rounded-lg"
 						/>
 					</div>
 
 					<!-- 스크롤 횟수 -->
 					<div>
-						<label for="scrollCount" class="block font-medium text-gray-700 mb-1">스크롤 횟수</label
+						<label for="scrollCount" class="block font-medium text-foreground mb-1">스크롤 횟수</label
 						>
 						<input
 							id="scrollCount"
@@ -348,13 +353,13 @@
 							bind:value={editScrollCount}
 							min="1"
 							max="20"
-							class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+							class="w-full px-3 py-2 border border-border rounded-lg"
 						/>
-						<p class="text-xs text-gray-500 mt-1">더 많은 게시물을 로드하기 위한 스크롤 횟수</p>
+						<p class="text-xs text-muted-foreground mt-1">더 많은 게시물을 로드하기 위한 스크롤 횟수</p>
 					</div>
 
 					<!-- 고급 설정 토글 -->
-					<div class="border-t border-gray-200 pt-4">
+					<div class="border-t border-border pt-4">
 						<button
 							type="button"
 							onclick={() => (showAdvanced = !showAdvanced)}
@@ -364,9 +369,9 @@
 						</button>
 
 						{#if showAdvanced}
-							<div class="mt-4 space-y-4 bg-gray-50 p-4 rounded-lg">
+							<div class="mt-4 space-y-4 bg-background p-4 rounded-lg">
 								<div>
-									<label for="minInterval" class="block font-medium text-gray-700 mb-1"
+									<label for="minInterval" class="block font-medium text-foreground mb-1"
 										>최소 실행 간격 (시간)</label
 									>
 									<input
@@ -375,15 +380,15 @@
 										bind:value={editMinIntervalHours}
 										min="0"
 										max="24"
-										class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+										class="w-full px-3 py-2 border border-border rounded-lg"
 									/>
-									<p class="text-xs text-gray-500 mt-1">
+									<p class="text-xs text-muted-foreground mt-1">
 										마지막 수집 후 최소 대기 시간 (0이면 비활성화)
 									</p>
 								</div>
 
 								<div>
-									<label for="duplicateStop" class="block font-medium text-gray-700 mb-1"
+									<label for="duplicateStop" class="block font-medium text-foreground mb-1"
 										>중복 감지 중단</label
 									>
 									<input
@@ -392,13 +397,13 @@
 										bind:value={editDuplicateStopCount}
 										min="0"
 										max="50"
-										class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+										class="w-full px-3 py-2 border border-border rounded-lg"
 									/>
-									<p class="text-xs text-gray-500 mt-1">연속 N개 중복 시 수집 중단 (0이면 비활성화)</p>
+									<p class="text-xs text-muted-foreground mt-1">연속 N개 중복 시 수집 중단 (0이면 비활성화)</p>
 								</div>
 
 								<div>
-									<label for="maxRetries" class="block font-medium text-gray-700 mb-1"
+									<label for="maxRetries" class="block font-medium text-foreground mb-1"
 										>최대 재시도</label
 									>
 									<input
@@ -407,13 +412,13 @@
 										bind:value={editMaxRetries}
 										min="0"
 										max="10"
-										class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+										class="w-full px-3 py-2 border border-border rounded-lg"
 									/>
-									<p class="text-xs text-gray-500 mt-1">실패 시 최대 재시도 횟수</p>
+									<p class="text-xs text-muted-foreground mt-1">실패 시 최대 재시도 횟수</p>
 								</div>
 
 								<div>
-									<label for="retryInterval" class="block font-medium text-gray-700 mb-1"
+									<label for="retryInterval" class="block font-medium text-foreground mb-1"
 										>재시도 간격 (분)</label
 									>
 									<input
@@ -422,29 +427,30 @@
 										bind:value={editRetryIntervalMinutes}
 										min="1"
 										max="60"
-										class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+										class="w-full px-3 py-2 border border-border rounded-lg"
 									/>
-									<p class="text-xs text-gray-500 mt-1">재시도 기본 간격 (지수 백오프 적용)</p>
+									<p class="text-xs text-muted-foreground mt-1">재시도 기본 간격 (지수 백오프 적용)</p>
 								</div>
 							</div>
 						{/if}
 					</div>
 
 					<!-- 저장 버튼 -->
-					<button onclick={saveConfig} disabled={saving} class="btn btn-primary w-full">
+					<Button variant="primary" on:click={saveConfig} disabled={saving} class="w-full">
 						{saving ? '저장 중...' : '설정 저장'}
-					</button>
+					</Button>
 				</div>
 			</div>
 
 			<!-- 오늘 스케줄 -->
 			<div class="card">
 				<div class="flex justify-between items-center mb-4">
-					<h3 class="text-lg font-semibold text-gray-900">오늘 수집 스케줄</h3>
-					<button
-						onclick={requestManualCrawl}
+					<h3 class="text-lg font-semibold text-foreground">오늘 수집 스케줄</h3>
+					<Button
+						variant="primary"
+						size="sm"
+						on:click={requestManualCrawl}
 						disabled={!editAccountId || requesting || pendingRequests.length > 0}
-						class="btn btn-primary btn-sm"
 						title={!editAccountId ? '계정을 먼저 선택하세요' : ''}
 					>
 						{#if requesting}
@@ -456,7 +462,7 @@
 						{:else}
 							지금 수집
 						{/if}
-					</button>
+					</Button>
 				</div>
 
 				{#if pendingRequests.length > 0}
@@ -466,13 +472,13 @@
 				{/if}
 
 				{#if todaySchedule.length === 0}
-					<p class="text-gray-500 text-center py-8">
+					<p class="text-muted-foreground text-center py-8">
 						{editEnabled ? '스케줄이 아직 생성되지 않았습니다' : '자동 수집이 비활성화되어 있습니다'}
 					</p>
 				{:else}
 					<div class="space-y-3">
 						{#each todaySchedule as item, idx}
-							<div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+							<div class="flex items-center justify-between p-3 bg-background rounded-lg">
 								<div class="flex items-center gap-3">
 									<span
 										class="w-8 h-8 flex items-center justify-center bg-blue-100 text-blue-800 rounded-full font-medium"
@@ -489,8 +495,8 @@
 					</div>
 				{/if}
 
-				<div class="mt-6 pt-4 border-t border-gray-200">
-					<p class="text-sm text-gray-500 mb-2">
+				<div class="mt-6 pt-4 border-t border-border">
+					<p class="text-sm text-muted-foreground mb-2">
 						수집 시간은 매일 랜덤하게 결정됩니다. 같은 날짜에는 동일한 시간에 수집합니다.
 					</p>
 				</div>

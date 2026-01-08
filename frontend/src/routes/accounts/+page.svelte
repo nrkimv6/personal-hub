@@ -344,7 +344,7 @@
       'completed': { text: '완료', class: 'bg-green-100 text-green-700' },
       'failed': { text: '실패', class: 'bg-red-100 text-red-700' }
     };
-    return statusMap[status] || { text: status, class: 'bg-gray-100 text-gray-700' };
+    return statusMap[status] || { text: status, class: 'bg-muted text-foreground' };
   }
 
   function getAccountName(accountId: number): string {
@@ -358,8 +358,8 @@
     <!-- 헤더 -->
     <div class="mb-6 flex items-center justify-between">
       <div>
-        <h1 class="text-3xl font-bold text-gray-900">계정 관리</h1>
-        <p class="text-gray-600 mt-1">네이버 계정별 브라우저 프로필 관리</p>
+        <h1 class="text-3xl font-bold text-foreground">계정 관리</h1>
+        <p class="text-muted-foreground mt-1">네이버 계정별 브라우저 프로필 관리</p>
       </div>
       <button
         on:click={openCreateModal}
@@ -390,12 +390,12 @@
                   : `복구 시도 중 (${browserStatus.recovery_attempts}/3)`}
             </span>
             {#if browserStatus.error}
-              <span class="text-sm text-gray-500">- {browserStatus.error}</span>
+              <span class="text-sm text-muted-foreground">- {browserStatus.error}</span>
             {/if}
           </div>
           <button
             on:click={toggleCommands}
-            class="px-3 py-1 text-sm bg-white border border-gray-300 rounded hover:bg-gray-50 transition-colors"
+            class="px-3 py-1 text-sm bg-card border border-border rounded hover:bg-muted transition-colors"
           >
             {showCommands ? '▲ 명령 이력 닫기' : '▼ 명령 이력 보기'}
           </button>
@@ -414,25 +414,25 @@
 
     <!-- 브라우저 명령 이력 -->
     {#if showCommands}
-      <div class="mb-6 bg-white border border-gray-200 rounded-lg overflow-hidden">
-        <div class="p-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
-          <h3 class="font-medium text-gray-700">브라우저 명령 이력</h3>
+      <div class="mb-6 bg-card border border-border rounded-lg overflow-hidden">
+        <div class="p-3 bg-background border-b border-border flex items-center justify-between">
+          <h3 class="font-medium text-foreground">브라우저 명령 이력</h3>
           <button
             on:click={loadBrowserCommands}
             disabled={commandsLoading}
-            class="px-2 py-1 text-sm text-gray-600 hover:text-gray-800 disabled:opacity-50"
+            class="px-2 py-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50"
           >
             {commandsLoading ? '로딩...' : '🔄 새로고침'}
           </button>
         </div>
         {#if browserCommands.length === 0}
-          <div class="p-4 text-center text-gray-500">
+          <div class="p-4 text-center text-muted-foreground">
             {commandsLoading ? '로딩 중...' : '명령 이력이 없습니다'}
           </div>
         {:else}
           <div class="overflow-x-auto">
             <table class="w-full text-sm">
-              <thead class="bg-gray-50 text-gray-600">
+              <thead class="bg-background text-muted-foreground">
                 <tr>
                   <th class="px-3 py-2 text-left">ID</th>
                   <th class="px-3 py-2 text-left">명령</th>
@@ -446,8 +446,8 @@
               <tbody>
                 {#each browserCommands as cmd (cmd.id)}
                   {@const statusInfo = getStatusLabel(cmd.status)}
-                  <tr class="border-t border-gray-100 hover:bg-gray-50">
-                    <td class="px-3 py-2 text-gray-500">{cmd.id}</td>
+                  <tr class="border-t border-border hover:bg-muted">
+                    <td class="px-3 py-2 text-muted-foreground">{cmd.id}</td>
                     <td class="px-3 py-2">{getCommandTypeLabel(cmd.command_type)}</td>
                     <td class="px-3 py-2">{getAccountName(cmd.service_account_id)}</td>
                     <td class="px-3 py-2">
@@ -455,8 +455,8 @@
                         {statusInfo.text}
                       </span>
                     </td>
-                    <td class="px-3 py-2 text-gray-500">{formatDate(cmd.created_at)}</td>
-                    <td class="px-3 py-2 text-gray-500">{formatDate(cmd.completed_at)}</td>
+                    <td class="px-3 py-2 text-muted-foreground">{formatDate(cmd.created_at)}</td>
+                    <td class="px-3 py-2 text-muted-foreground">{formatDate(cmd.completed_at)}</td>
                     <td class="px-3 py-2 text-sm">
                       {#if cmd.error_message}
                         <span class="text-red-600">{cmd.error_message}</span>
@@ -478,15 +478,15 @@
     {#if loading}
       <div class="text-center py-12">
         <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent"></div>
-        <p class="mt-2 text-gray-600">로딩 중...</p>
+        <p class="mt-2 text-muted-foreground">로딩 중...</p>
       </div>
     {:else if error}
       <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
         ⚠️ {error}
       </div>
     {:else if accounts.length === 0}
-      <div class="text-center py-12 bg-gray-50 rounded-lg">
-        <p class="text-gray-500">등록된 계정이 없습니다</p>
+      <div class="text-center py-12 bg-background rounded-lg">
+        <p class="text-muted-foreground">등록된 계정이 없습니다</p>
         <button
           on:click={openCreateModal}
           class="mt-4 text-blue-600 hover:underline"
@@ -497,12 +497,12 @@
     {:else}
       <div class="grid gap-4">
         {#each accounts as account (account.id)}
-          <div class="bg-white border border-gray-200 rounded-lg p-5 hover:shadow-md transition-shadow">
+          <div class="bg-card border border-border rounded-lg p-5 hover:shadow-md transition-shadow">
             <div class="flex items-start justify-between">
               <div class="flex-1">
                 <div class="flex items-center gap-3">
-                  <h3 class="text-lg font-semibold text-gray-900">{account.name}</h3>
-                  <span class="px-2 py-1 text-xs rounded-full {account.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}">
+                  <h3 class="text-lg font-semibold text-foreground">{account.name}</h3>
+                  <span class="px-2 py-1 text-xs rounded-full {account.is_active ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}">
                     {account.is_active ? '활성' : '비활성'}
                   </span>
                   {#if account.is_logged_in}
@@ -512,11 +512,11 @@
                   {/if}
                 </div>
 
-                <div class="mt-2 space-y-1 text-sm text-gray-600">
+                <div class="mt-2 space-y-1 text-sm text-muted-foreground">
                   {#if account.email}
                     <p>📧 {account.email}</p>
                   {/if}
-                  <p>📁 프로필: <code class="bg-gray-100 px-2 py-0.5 rounded">{account.profile_dir}</code></p>
+                  <p>📁 프로필: <code class="bg-muted px-2 py-0.5 rounded">{account.profile_dir}</code></p>
                   {#if account.description}
                     <p>💬 {account.description}</p>
                   {/if}
@@ -565,14 +565,14 @@
               <div class="flex items-start gap-2">
                 <button
                   on:click={() => toggleActive(account)}
-                  class="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 transition-colors"
+                  class="px-3 py-1.5 text-sm border border-border rounded hover:bg-muted transition-colors"
                   title={account.is_active ? '비활성화' : '활성화'}
                 >
                   {account.is_active ? '⏸️' : '▶️'}
                 </button>
                 <button
                   on:click={() => openEditModal(account)}
-                  class="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors"
+                  class="px-3 py-1.5 text-sm bg-muted text-foreground rounded hover:bg-secondary transition-colors"
                 >
                   수정
                 </button>
@@ -601,52 +601,52 @@
 
       <form on:submit|preventDefault={handleSubmit} class="space-y-4">
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">
+          <label class="block text-sm font-medium text-foreground mb-1">
             계정명 <span class="text-red-500">*</span>
           </label>
           <input
             type="text"
             bind:value={formData.name}
-            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             placeholder="예: 메인계정"
             required
           />
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">
+          <label class="block text-sm font-medium text-foreground mb-1">
             프로필 디렉토리 <span class="text-red-500">*</span>
           </label>
           <input
             type="text"
             bind:value={formData.profile_dir}
-            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             placeholder="예: account_1"
             required
             disabled={!!editingAccount}
           />
-          <p class="text-xs text-gray-500 mt-1">영문, 숫자, 언더스코어만 사용 (수정 불가)</p>
+          <p class="text-xs text-muted-foreground mt-1">영문, 숫자, 언더스코어만 사용 (수정 불가)</p>
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">
+          <label class="block text-sm font-medium text-foreground mb-1">
             이메일 (선택)
           </label>
           <input
             type="email"
             bind:value={formData.email}
-            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             placeholder="예: user@naver.com"
           />
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">
+          <label class="block text-sm font-medium text-foreground mb-1">
             설명 (선택)
           </label>
           <textarea
             bind:value={formData.description}
-            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             rows="2"
             placeholder="예: 서브 계정"
           ></textarea>
@@ -659,14 +659,14 @@
             bind:checked={formData.is_active}
             class="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
           />
-          <label for="is_active" class="text-sm text-gray-700">활성화</label>
+          <label for="is_active" class="text-sm text-foreground">활성화</label>
         </div>
 
         <div class="flex gap-2 pt-4">
           <button
             type="button"
             on:click={closeModal}
-            class="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            class="flex-1 px-4 py-2 border border-border rounded-lg hover:bg-muted transition-colors"
           >
             취소
           </button>

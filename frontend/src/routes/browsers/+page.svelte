@@ -28,18 +28,18 @@
 
 <div class="p-6">
 	<div class="mb-6">
-		<h1 class="text-2xl font-bold text-gray-900">브라우저 관리</h1>
-		<p class="text-gray-500 mt-1">브라우저 프로필 및 프록시 관리</p>
+		<h1 class="text-2xl font-bold text-foreground">브라우저 관리</h1>
+		<p class="text-muted-foreground mt-1">브라우저 프로필 및 프록시 관리</p>
 	</div>
 
 	<!-- 탭 네비게이션 -->
-	<div class="border-b border-gray-200 mb-6">
+	<div class="border-b border-border mb-6">
 		<nav class="flex space-x-8">
 			{#each tabs as tab}
 				<button
 					class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === tab.id
 						? 'border-blue-500 text-blue-600'
-						: 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}"
+						: 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
 					onclick={() => (activeTab = tab.id)}
 				>
 					{tab.label}

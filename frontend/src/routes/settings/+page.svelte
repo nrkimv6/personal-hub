@@ -31,18 +31,18 @@
 
 <div class="p-6">
 	<div class="mb-6">
-		<h2 class="text-2xl font-bold text-gray-900">설정</h2>
+		<h2 class="text-2xl font-bold text-foreground">설정</h2>
 	</div>
 
 	<!-- 탭 -->
-	<div class="mb-6 border-b border-gray-200">
+	<div class="mb-6 border-b border-border">
 		<nav class="flex gap-4">
 			<button
 				onclick={() => switchTab('notification')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab ===
 				'notification'
 					? 'border-blue-600 text-blue-600'
-					: 'border-transparent text-gray-500 hover:text-gray-700'}"
+					: 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				알림
 			</button>
@@ -51,7 +51,7 @@
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab ===
 				'scheduler'
 					? 'border-blue-600 text-blue-600'
-					: 'border-transparent text-gray-500 hover:text-gray-700'}"
+					: 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				스케줄러
 			</button>

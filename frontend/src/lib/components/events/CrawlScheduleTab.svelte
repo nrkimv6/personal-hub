@@ -138,7 +138,7 @@
 			case 'running': return 'bg-blue-100 text-blue-800';
 			case 'completed': return 'bg-green-100 text-green-800';
 			case 'failed': return 'bg-red-100 text-red-800';
-			default: return 'bg-gray-100 text-gray-800';
+			default: return 'bg-muted text-foreground';
 		}
 	}
 
@@ -161,7 +161,7 @@
 <div class="mb-4 space-y-2">
 	<div class="flex flex-wrap gap-4 items-center">
 		<div>
-			<label for="targetType" class="block text-sm font-medium text-gray-700 mb-1">대상 타입</label>
+			<label for="targetType" class="block text-sm font-medium text-foreground mb-1">대상 타입</label>
 			<select
 				id="targetType"
 				bind:value={targetType}
@@ -180,9 +180,9 @@
 				id="enabledOnly"
 				bind:checked={enabledOnly}
 				onchange={handleFilterChange}
-				class="rounded border-gray-300"
+				class="rounded border-border"
 			/>
-			<label for="enabledOnly" class="text-sm text-gray-700">활성화된 것만</label>
+			<label for="enabledOnly" class="text-sm text-foreground">활성화된 것만</label>
 		</div>
 	</div>
 </div>
@@ -197,7 +197,7 @@
 		{error}
 	</div>
 {:else if !schedules || schedules.length === 0}
-	<div class="text-center py-12 text-gray-500">
+	<div class="text-center py-12 text-muted-foreground">
 		<p class="text-lg">스케줄이 없습니다</p>
 	</div>
 {:else}
@@ -205,19 +205,19 @@
 	<div class="md:hidden space-y-3">
 		{#each schedules as schedule}
 			{@const stats = statsMap.get(schedule.id)}
-			<div class="bg-white border rounded-lg p-4">
+			<div class="bg-card border rounded-lg p-4">
 				<div class="flex items-center justify-between mb-2">
-					<h3 class="font-semibold text-gray-900 truncate flex-1">
+					<h3 class="font-semibold text-foreground truncate flex-1">
 						{schedule.display_name || schedule.name}
 					</h3>
-					<span class="px-2 py-0.5 text-xs rounded-full {schedule.enabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}">
+					<span class="px-2 py-0.5 text-xs rounded-full {schedule.enabled ? 'bg-green-100 text-green-800' : 'bg-muted text-muted-foreground'}">
 						{schedule.enabled ? '활성' : '비활성'}
 					</span>
 				</div>
-				<div class="text-sm text-gray-600 space-y-1">
+				<div class="text-sm text-muted-foreground space-y-1">
 					<div class="flex gap-2">
-						<span class="px-2 py-0.5 text-xs rounded bg-gray-100">{getTargetTypeLabel(schedule.target_type)}</span>
-						<span class="px-2 py-0.5 text-xs rounded bg-gray-100">{getScheduleTypeLabel(schedule.schedule_type)}</span>
+						<span class="px-2 py-0.5 text-xs rounded bg-muted">{getTargetTypeLabel(schedule.target_type)}</span>
+						<span class="px-2 py-0.5 text-xs rounded bg-muted">{getScheduleTypeLabel(schedule.schedule_type)}</span>
 					</div>
 					{#if schedule.last_run_at}
 						<p class="text-xs">마지막: {formatDateTime(schedule.last_run_at)}</p>
@@ -254,7 +254,7 @@
 	<div class="hidden md:block overflow-x-auto">
 		<table class="w-full">
 			<thead>
-				<tr class="border-b text-left text-sm text-gray-600">
+				<tr class="border-b text-left text-sm text-muted-foreground">
 					<th class="pb-3 font-medium">스케줄</th>
 					<th class="pb-3 font-medium">대상</th>
 					<th class="pb-3 font-medium">주기</th>
@@ -267,31 +267,31 @@
 			<tbody>
 				{#each schedules as schedule}
 					{@const stats = statsMap.get(schedule.id)}
-					<tr class="border-b hover:bg-gray-50">
+					<tr class="border-b hover:bg-muted">
 						<td class="py-3">
-							<span class="font-medium text-gray-900">{schedule.display_name || schedule.name}</span>
+							<span class="font-medium text-foreground">{schedule.display_name || schedule.name}</span>
 						</td>
 						<td class="py-3">
-							<span class="px-2 py-1 text-xs rounded bg-gray-100">{getTargetTypeLabel(schedule.target_type)}</span>
+							<span class="px-2 py-1 text-xs rounded bg-muted">{getTargetTypeLabel(schedule.target_type)}</span>
 						</td>
-						<td class="py-3 text-sm text-gray-600">
+						<td class="py-3 text-sm text-muted-foreground">
 							{getScheduleTypeLabel(schedule.schedule_type)}
 						</td>
 						<td class="py-3">
-							<span class="px-2 py-1 text-xs rounded-full {schedule.enabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}">
+							<span class="px-2 py-1 text-xs rounded-full {schedule.enabled ? 'bg-green-100 text-green-800' : 'bg-muted text-muted-foreground'}">
 								{schedule.enabled ? '활성' : '비활성'}
 							</span>
 						</td>
-						<td class="py-3 text-sm text-gray-600">
+						<td class="py-3 text-sm text-muted-foreground">
 							{formatDateTime(schedule.last_run_at)}
 						</td>
 						<td class="py-3 text-sm">
 							{#if stats}
-								<span class="text-gray-600">{stats.total_runs}회</span>
+								<span class="text-muted-foreground">{stats.total_runs}회</span>
 								<span class="text-green-600 ml-1">{stats.success_rate.toFixed(0)}%</span>
 								<span class="text-blue-600 ml-1">{stats.total_saved}건</span>
 							{:else}
-								<span class="text-gray-400">-</span>
+								<span class="text-muted-foreground">-</span>
 							{/if}
 						</td>
 						<td class="py-3">
@@ -335,9 +335,9 @@
 			<div class="flex justify-between items-center mb-4">
 				<div>
 					<h3 class="text-lg font-bold">실행 이력</h3>
-					<p class="text-sm text-gray-500">{selectedSchedule.display_name || selectedSchedule.name}</p>
+					<p class="text-sm text-muted-foreground">{selectedSchedule.display_name || selectedSchedule.name}</p>
 				</div>
-				<button onclick={() => (showRunsModal = false)} class="text-gray-400 hover:text-gray-600 text-2xl">
+				<button onclick={() => (showRunsModal = false)} class="text-muted-foreground hover:text-muted-foreground text-2xl">
 					&times;
 				</button>
 			</div>
@@ -347,7 +347,7 @@
 					<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
 				</div>
 			{:else if runs.length === 0}
-				<div class="text-center py-8 text-gray-500">
+				<div class="text-center py-8 text-muted-foreground">
 					실행 이력이 없습니다
 				</div>
 			{:else}
@@ -359,10 +359,10 @@
 									<span class="px-2 py-0.5 text-xs rounded-full {getStatusBadge(run.status)}">
 										{getStatusText(run.status)}
 									</span>
-									<span class="text-sm text-gray-600">{formatDateTime(run.started_at)}</span>
+									<span class="text-sm text-muted-foreground">{formatDateTime(run.started_at)}</span>
 								</div>
 								<div class="text-sm">
-									<span class="text-gray-600">발견: {run.items_found}</span>
+									<span class="text-muted-foreground">발견: {run.items_found}</span>
 									<span class="text-blue-600 ml-2">저장: {run.items_saved}</span>
 								</div>
 							</div>

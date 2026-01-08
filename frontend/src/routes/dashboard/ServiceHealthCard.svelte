@@ -114,7 +114,7 @@
     switch (status) {
       case 'healthy': return 'text-green-500';
       case 'unhealthy': return 'text-red-500';
-      default: return 'text-gray-400';
+      default: return 'text-muted-foreground';
     }
   }
 
@@ -122,7 +122,7 @@
     switch (status) {
       case 'healthy': return 'bg-green-100 dark:bg-green-900/30';
       case 'unhealthy': return 'bg-red-100 dark:bg-red-900/30';
-      default: return 'bg-gray-100 dark:bg-gray-800';
+      default: return 'bg-muted dark:bg-gray-800';
     }
   }
 
@@ -138,10 +138,10 @@
 </script>
 
 <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-  <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">서비스 상태</h2>
+  <h2 class="text-lg font-semibold text-foreground dark:text-white mb-4">서비스 상태</h2>
 
   {#if Object.keys(health).length === 0}
-    <p class="text-gray-500 dark:text-gray-400 text-sm">
+    <p class="text-muted-foreground dark:text-muted-foreground text-sm">
       헬스 모니터가 비활성화되어 있거나 데이터가 없습니다.
     </p>
   {:else}
@@ -151,14 +151,14 @@
           <span class="text-xl {getStatusColor(svc.status)} mt-0.5">●</span>
           <div class="flex-1 min-w-0">
             <div class="flex items-center justify-between gap-2">
-              <span class="font-medium text-gray-900 dark:text-white truncate">
+              <span class="font-medium text-foreground dark:text-white truncate">
                 {svc.displayName}
               </span>
               <span class="text-xs font-medium px-2 py-0.5 rounded {getStatusColor(svc.status)} {getStatusBgColor(svc.status)} shrink-0">
                 {getStatusLabel(svc.status)}
               </span>
             </div>
-            <div class="text-xs text-gray-500 dark:text-gray-400 mt-1 space-y-0.5">
+            <div class="text-xs text-muted-foreground dark:text-muted-foreground mt-1 space-y-0.5">
               {#if svc.pid || svc.port}
                 <div class="flex gap-3">
                   {#if svc.pid}<span>PID: {svc.pid}</span>{/if}

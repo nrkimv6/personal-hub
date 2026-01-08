@@ -200,7 +200,7 @@
   <div class="flex justify-between items-center">
     <div class="flex items-center gap-4">
       <!-- 서버 수집 시각 표시 -->
-      <span class="text-sm text-gray-500 dark:text-gray-400">
+      <span class="text-sm text-muted-foreground dark:text-muted-foreground">
         마지막 수집: {formatCollectedAt(status?.collected_at ?? null)}
       </span>
 
@@ -216,12 +216,12 @@
       <!-- 캐시 새로고침 버튼 -->
       <button
         onclick={fetchStatus}
-        class="px-3 py-1 text-sm bg-gray-100 dark:bg-gray-700 rounded hover:bg-gray-200 dark:hover:bg-gray-600"
+        class="px-3 py-1 text-sm bg-muted dark:bg-gray-700 rounded hover:bg-secondary dark:hover:bg-gray-600"
       >
         새로고침
       </button>
 
-      <span class="text-xs text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
+      <span class="text-xs text-muted-foreground dark:text-muted-foreground bg-muted dark:bg-gray-800 px-2 py-1 rounded">
         30초 자동
       </span>
     </div>
@@ -230,7 +230,7 @@
   {#if loading}
     <div class="text-center py-20">
       <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent"></div>
-      <p class="mt-4 text-gray-500 dark:text-gray-400">로딩 중...</p>
+      <p class="mt-4 text-muted-foreground dark:text-muted-foreground">로딩 중...</p>
     </div>
   {:else if error}
     <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
@@ -257,14 +257,14 @@
           <!-- NSSM Services -->
           {#if project.nssm_services.length > 0}
             <section class="mb-4">
-              <h3 class="text-lg font-medium mb-2 text-gray-700 dark:text-gray-300">Windows 서비스</h3>
+              <h3 class="text-lg font-medium mb-2 text-foreground dark:text-gray-300">Windows 서비스</h3>
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {#each project.nssm_services as svc}
                   <div class="p-3 rounded border flex justify-between items-center
                     {svc.status === 'Running' ? 'border-green-500 bg-green-50 dark:bg-green-900/20' : 'border-red-500 bg-red-50 dark:bg-red-900/20'}">
                     <div>
-                      <div class="font-medium text-gray-900 dark:text-white">{svc.name}</div>
-                      <div class="text-xs text-gray-500 dark:text-gray-400">{svc.display_name}</div>
+                      <div class="font-medium text-foreground dark:text-white">{svc.name}</div>
+                      <div class="text-xs text-muted-foreground dark:text-muted-foreground">{svc.display_name}</div>
                       <span class="px-2 py-0.5 rounded text-xs mt-1 inline-block
                         {svc.status === 'Running' ? 'bg-green-200 dark:bg-green-800 text-green-800 dark:text-green-200' : 'bg-red-200 dark:bg-red-800 text-red-800 dark:text-red-200'}">
                         {svc.status}
@@ -302,19 +302,19 @@
           <!-- Startup Programs -->
           {#if project.startup_programs.length > 0}
             <section class="mb-4">
-              <h3 class="text-lg font-medium mb-2 text-gray-700 dark:text-gray-300">시작프로그램</h3>
+              <h3 class="text-lg font-medium mb-2 text-foreground dark:text-gray-300">시작프로그램</h3>
               <table class="w-full text-sm">
-                <thead class="bg-gray-100 dark:bg-gray-700">
+                <thead class="bg-muted dark:bg-gray-700">
                   <tr>
-                    <th class="text-left p-2 text-gray-700 dark:text-gray-300">이름</th>
-                    <th class="text-left p-2 text-gray-700 dark:text-gray-300">상태</th>
-                    <th class="text-left p-2 text-gray-700 dark:text-gray-300">액션</th>
+                    <th class="text-left p-2 text-foreground dark:text-gray-300">이름</th>
+                    <th class="text-left p-2 text-foreground dark:text-gray-300">상태</th>
+                    <th class="text-left p-2 text-foreground dark:text-gray-300">액션</th>
                   </tr>
                 </thead>
                 <tbody>
                   {#each project.startup_programs as prog}
                     <tr class="border-b dark:border-gray-700">
-                      <td class="p-2 text-gray-900 dark:text-white">{prog.name}</td>
+                      <td class="p-2 text-foreground dark:text-white">{prog.name}</td>
                       <td class="p-2">
                         <span class="text-green-600 dark:text-green-400">등록됨</span>
                       </td>
@@ -336,23 +336,23 @@
           <!-- Scheduled Tasks -->
           {#if project.scheduled_tasks.length > 0}
             <section class="mb-4">
-              <h3 class="text-lg font-medium mb-2 text-gray-700 dark:text-gray-300">예약 작업</h3>
+              <h3 class="text-lg font-medium mb-2 text-foreground dark:text-gray-300">예약 작업</h3>
               <div class="overflow-x-auto">
                 <table class="w-full text-sm">
-                  <thead class="bg-gray-100 dark:bg-gray-700">
+                  <thead class="bg-muted dark:bg-gray-700">
                     <tr>
-                      <th class="text-left p-2 text-gray-700 dark:text-gray-300">작업명</th>
-                      <th class="text-left p-2 text-gray-700 dark:text-gray-300">상태</th>
-                      <th class="text-left p-2 text-gray-700 dark:text-gray-300">마지막 실행</th>
-                      <th class="text-left p-2 text-gray-700 dark:text-gray-300">다음 실행</th>
-                      <th class="text-left p-2 text-gray-700 dark:text-gray-300">결과</th>
-                      <th class="text-left p-2 text-gray-700 dark:text-gray-300">액션</th>
+                      <th class="text-left p-2 text-foreground dark:text-gray-300">작업명</th>
+                      <th class="text-left p-2 text-foreground dark:text-gray-300">상태</th>
+                      <th class="text-left p-2 text-foreground dark:text-gray-300">마지막 실행</th>
+                      <th class="text-left p-2 text-foreground dark:text-gray-300">다음 실행</th>
+                      <th class="text-left p-2 text-foreground dark:text-gray-300">결과</th>
+                      <th class="text-left p-2 text-foreground dark:text-gray-300">액션</th>
                     </tr>
                   </thead>
                   <tbody>
                     {#each project.scheduled_tasks as task}
                       <tr class="border-b dark:border-gray-700">
-                        <td class="p-2 font-medium text-gray-900 dark:text-white" title={task.Description || ''}>
+                        <td class="p-2 font-medium text-foreground dark:text-white" title={task.Description || ''}>
                           {task.Name}
                         </td>
                         <td class="p-2">
@@ -361,10 +361,10 @@
                             {task.State}
                           </span>
                         </td>
-                        <td class="p-2 text-gray-600 dark:text-gray-400 text-xs">{formatDateTime(task.LastRun)}</td>
-                        <td class="p-2 text-xs text-gray-900 dark:text-white">{formatDateTime(task.NextRun)}</td>
+                        <td class="p-2 text-muted-foreground dark:text-muted-foreground text-xs">{formatDateTime(task.LastRun)}</td>
+                        <td class="p-2 text-xs text-foreground dark:text-white">{formatDateTime(task.NextRun)}</td>
                         <td class="p-2 text-xs
-                          {task.LastResult === 0 ? 'text-green-600 dark:text-green-400' : task.LastResult !== null ? 'text-red-600 dark:text-red-400' : 'text-gray-400'}">
+                          {task.LastResult === 0 ? 'text-green-600 dark:text-green-400' : task.LastResult !== null ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}">
                           {getTaskResultText(task.LastResult)}
                         </td>
                         <td class="p-2 space-x-1">
@@ -393,7 +393,7 @@
           {#if project.worker_processes.length > 0}
             <section>
               <div class="flex justify-between items-center mb-2">
-                <h3 class="text-lg font-medium text-gray-700 dark:text-gray-300">워커 프로세스</h3>
+                <h3 class="text-lg font-medium text-foreground dark:text-gray-300">워커 프로세스</h3>
                 <button
                   class="px-3 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
                   disabled={actionLoading === 'workers'}
@@ -403,14 +403,14 @@
               </div>
               <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {#each project.worker_processes as worker}
-                  <div class="p-3 rounded border {worker.running ? 'border-green-500 dark:border-green-600' : 'border-gray-300 dark:border-gray-600'}">
-                    <div class="font-medium text-gray-900 dark:text-white">{worker.name}</div>
+                  <div class="p-3 rounded border {worker.running ? 'border-green-500 dark:border-green-600' : 'border-border dark:border-gray-600'}">
+                    <div class="font-medium text-foreground dark:text-white">{worker.name}</div>
                     <div class="text-sm">
                       {#if worker.running}
                         <span class="text-green-600 dark:text-green-400">Running</span>
-                        <span class="text-xs text-gray-500 dark:text-gray-400 ml-1">(PID: {worker.pid})</span>
+                        <span class="text-xs text-muted-foreground dark:text-muted-foreground ml-1">(PID: {worker.pid})</span>
                       {:else}
-                        <span class="text-gray-400 dark:text-gray-500">Stopped</span>
+                        <span class="text-muted-foreground dark:text-muted-foreground">Stopped</span>
                       {/if}
                     </div>
                   </div>

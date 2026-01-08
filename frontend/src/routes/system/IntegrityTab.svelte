@@ -155,7 +155,7 @@
       case 'critical': return 'text-red-600 bg-red-50 dark:text-red-400 dark:bg-red-900/20';
       case 'warning': return 'text-yellow-600 bg-yellow-50 dark:text-yellow-400 dark:bg-yellow-900/20';
       case 'info': return 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/20';
-      default: return 'text-gray-600 bg-gray-50 dark:text-gray-400 dark:bg-gray-800';
+      default: return 'text-muted-foreground bg-background dark:text-muted-foreground dark:bg-gray-800';
     }
   }
 
@@ -197,8 +197,8 @@
   {#if checkResult}
     <div class="grid grid-cols-4 gap-4">
       <div class="bg-white dark:bg-gray-800 p-4 rounded shadow-sm">
-        <div class="text-sm text-gray-500 dark:text-gray-400">전체 문제</div>
-        <div class="text-2xl font-bold text-gray-900 dark:text-white">{checkResult.total_issues}</div>
+        <div class="text-sm text-muted-foreground dark:text-muted-foreground">전체 문제</div>
+        <div class="text-2xl font-bold text-foreground dark:text-white">{checkResult.total_issues}</div>
       </div>
       <div class="bg-red-50 dark:bg-red-900/20 p-4 rounded shadow-sm">
         <div class="text-sm text-red-600 dark:text-red-400">Critical</div>
@@ -220,7 +220,7 @@
         <button
           onclick={() => fixAll(true)}
           disabled={fixingAll}
-          class="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50"
+          class="px-4 py-2 bg-muted dark:bg-gray-700 text-foreground dark:text-gray-300 rounded hover:bg-secondary dark:hover:bg-gray-600 disabled:opacity-50"
         >
           {fixingAll ? '처리 중...' : '👁️ 미리보기 (전체)'}
         </button>
@@ -238,35 +238,35 @@
     {#if checkResult.issues.length > 0}
       <div class="bg-white dark:bg-gray-800 rounded shadow-sm overflow-hidden">
         <table class="w-full">
-          <thead class="bg-gray-50 dark:bg-gray-900">
+          <thead class="bg-background dark:bg-gray-900">
             <tr>
-              <th class="px-4 py-3 text-left text-sm font-medium text-gray-600 dark:text-gray-400">심각도</th>
-              <th class="px-4 py-3 text-left text-sm font-medium text-gray-600 dark:text-gray-400">테이블</th>
-              <th class="px-4 py-3 text-left text-sm font-medium text-gray-600 dark:text-gray-400">유형</th>
-              <th class="px-4 py-3 text-left text-sm font-medium text-gray-600 dark:text-gray-400">설명</th>
-              <th class="px-4 py-3 text-right text-sm font-medium text-gray-600 dark:text-gray-400">수량</th>
-              <th class="px-4 py-3 text-center text-sm font-medium text-gray-600 dark:text-gray-400">작업</th>
+              <th class="px-4 py-3 text-left text-sm font-medium text-muted-foreground dark:text-muted-foreground">심각도</th>
+              <th class="px-4 py-3 text-left text-sm font-medium text-muted-foreground dark:text-muted-foreground">테이블</th>
+              <th class="px-4 py-3 text-left text-sm font-medium text-muted-foreground dark:text-muted-foreground">유형</th>
+              <th class="px-4 py-3 text-left text-sm font-medium text-muted-foreground dark:text-muted-foreground">설명</th>
+              <th class="px-4 py-3 text-right text-sm font-medium text-muted-foreground dark:text-muted-foreground">수량</th>
+              <th class="px-4 py-3 text-center text-sm font-medium text-muted-foreground dark:text-muted-foreground">작업</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+          <tbody class="divide-y divide-border dark:divide-gray-700">
             {#each checkResult.issues as issue}
-              <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+              <tr class="hover:bg-muted dark:hover:bg-gray-700/50">
                 <td class="px-4 py-3">
                   <span class="px-2 py-1 rounded text-sm {getSeverityClass(issue.severity)}">
                     {getSeverityIcon(issue.severity)} {issue.severity}
                   </span>
                 </td>
-                <td class="px-4 py-3 font-mono text-sm text-gray-900 dark:text-white">{issue.table}</td>
-                <td class="px-4 py-3 font-mono text-sm text-gray-900 dark:text-white">{issue.issue_type}</td>
-                <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{issue.description}</td>
-                <td class="px-4 py-3 text-right font-mono text-gray-900 dark:text-white">{issue.count.toLocaleString()}</td>
+                <td class="px-4 py-3 font-mono text-sm text-foreground dark:text-white">{issue.table}</td>
+                <td class="px-4 py-3 font-mono text-sm text-foreground dark:text-white">{issue.issue_type}</td>
+                <td class="px-4 py-3 text-sm text-muted-foreground dark:text-muted-foreground">{issue.description}</td>
+                <td class="px-4 py-3 text-right font-mono text-foreground dark:text-white">{issue.count.toLocaleString()}</td>
                 <td class="px-4 py-3 text-center">
                   {#if issue.auto_fixable}
                     <div class="flex justify-center gap-1">
                       <button
                         onclick={() => fixSpecific(issue.table, issue.issue_type, true)}
                         disabled={fixingTable === `${issue.table}/${issue.issue_type}`}
-                        class="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50"
+                        class="px-2 py-1 text-xs bg-muted dark:bg-gray-700 text-muted-foreground dark:text-gray-300 rounded hover:bg-secondary dark:hover:bg-gray-600 disabled:opacity-50"
                         title="미리보기"
                       >👁️</button>
                       <button
@@ -277,14 +277,14 @@
                       >🔧</button>
                     </div>
                   {:else}
-                    <span class="text-xs text-gray-400 dark:text-gray-500">수동 처리</span>
+                    <span class="text-xs text-muted-foreground dark:text-muted-foreground">수동 처리</span>
                   {/if}
                 </td>
               </tr>
               <!-- 샘플 ID 표시 (있는 경우) -->
               {#if issue.sample_ids.length > 0}
-                <tr class="bg-gray-50 dark:bg-gray-900/50">
-                  <td colspan="6" class="px-4 py-2 text-xs text-gray-500 dark:text-gray-400">
+                <tr class="bg-background dark:bg-gray-900/50">
+                  <td colspan="6" class="px-4 py-2 text-xs text-muted-foreground dark:text-muted-foreground">
                     샘플 ID: {issue.sample_ids.join(', ')}
                     {#if issue.count > issue.sample_ids.length}
                       ... 외 {issue.count - issue.sample_ids.length}개
@@ -306,16 +306,16 @@
   <!-- DB 통계 -->
   {#if dbStats}
     <div class="bg-white dark:bg-gray-800 rounded shadow-sm p-4">
-      <h2 class="text-lg font-semibold mb-4 text-gray-900 dark:text-white">DB 통계</h2>
+      <h2 class="text-lg font-semibold mb-4 text-foreground dark:text-white">DB 통계</h2>
       <div class="mb-4">
-        <span class="text-gray-500 dark:text-gray-400">DB 크기:</span>
-        <span class="font-mono font-semibold text-gray-900 dark:text-white">{dbStats.db_size_mb} MB</span>
+        <span class="text-muted-foreground dark:text-muted-foreground">DB 크기:</span>
+        <span class="font-mono font-semibold text-foreground dark:text-white">{dbStats.db_size_mb} MB</span>
       </div>
       <div class="grid grid-cols-4 gap-3">
         {#each Object.entries(dbStats.tables) as [table, count]}
-          <div class="flex justify-between items-center py-1 px-2 bg-gray-50 dark:bg-gray-900/50 rounded text-sm">
-            <span class="font-mono text-gray-600 dark:text-gray-400">{table}</span>
-            <span class="font-mono font-semibold text-gray-900 dark:text-white">{formatCount(count)}</span>
+          <div class="flex justify-between items-center py-1 px-2 bg-background dark:bg-gray-900/50 rounded text-sm">
+            <span class="font-mono text-muted-foreground dark:text-muted-foreground">{table}</span>
+            <span class="font-mono font-semibold text-foreground dark:text-white">{formatCount(count)}</span>
           </div>
         {/each}
       </div>
@@ -326,7 +326,7 @@
   {#if loading && !checkResult}
     <div class="flex justify-center items-center py-12">
       <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-      <span class="ml-3 text-gray-600 dark:text-gray-400">검사 중...</span>
+      <span class="ml-3 text-muted-foreground dark:text-muted-foreground">검사 중...</span>
     </div>
   {/if}
 </div>

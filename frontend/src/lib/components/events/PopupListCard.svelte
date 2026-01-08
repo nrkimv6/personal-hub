@@ -25,7 +25,7 @@
 <div class="md:hidden space-y-3 mb-6">
 	{#each popups as popup (popup.id)}
 		<div
-			class="bg-white rounded-lg border border-gray-200 p-3 cursor-pointer hover:shadow-md transition-shadow {isPopupEndingToday(
+			class="bg-white rounded-lg border border-border p-3 cursor-pointer hover:shadow-md transition-shadow {isPopupEndingToday(
 				popup
 			)
 				? 'border-orange-300 bg-orange-50'
@@ -47,7 +47,7 @@
 							<span class="px-1.5 py-0.5 text-xs rounded bg-pink-100 text-pink-600">IG</span>
 						{/if}
 					</div>
-					<h3 class="font-medium text-gray-900 truncate" title={popup.title}>{popup.title}</h3>
+					<h3 class="font-medium text-foreground truncate" title={popup.title}>{popup.title}</h3>
 					{#if popup.brand || popup.organizer}
 						<p class="text-sm text-blue-600 truncate">{popup.brand || popup.organizer}</p>
 					{/if}
@@ -64,7 +64,7 @@
 					</button>
 				</div>
 			</div>
-			<div class="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+			<div class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
 				<!-- 기간 -->
 				{#if popup.end_date}
 					{#if isPopupEndingToday(popup)}
@@ -79,13 +79,13 @@
 				{/if}
 				<!-- 위치 -->
 				{#if popup.venue_name}
-					<span class="text-gray-600 truncate max-w-[120px]">{popup.venue_name}</span>
+					<span class="text-muted-foreground truncate max-w-[120px]">{popup.venue_name}</span>
 				{/if}
 				<!-- 방문 상태 -->
 				<span
 					class="ml-auto px-1.5 py-0.5 rounded {popup.is_visited
 						? 'bg-green-100 text-green-700'
-						: 'bg-gray-100 text-gray-500'}"
+						: 'bg-muted text-muted-foreground'}"
 				>
 					{popup.is_visited ? '방문' : '미방문'}
 				</span>

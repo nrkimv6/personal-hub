@@ -50,14 +50,14 @@
 <div class="p-6 space-y-6">
   <!-- 헤더 -->
   <div class="flex justify-between items-center">
-    <h1 class="text-2xl font-bold text-gray-900 dark:text-white">통합 대시보드</h1>
+    <h1 class="text-2xl font-bold text-foreground dark:text-white">통합 대시보드</h1>
     <div class="flex items-center gap-4">
       {#if lastUpdated}
-        <span class="text-sm text-gray-500 dark:text-gray-400">
+        <span class="text-sm text-muted-foreground dark:text-muted-foreground">
           마지막 업데이트: {lastUpdated.toLocaleTimeString()}
         </span>
       {/if}
-      <span class="text-xs text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
+      <span class="text-xs text-muted-foreground dark:text-muted-foreground bg-muted dark:bg-gray-800 px-2 py-1 rounded">
         10초 자동 새로고침
       </span>
     </div>
@@ -66,7 +66,7 @@
   {#if loading}
     <div class="text-center py-20">
       <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent"></div>
-      <p class="mt-4 text-gray-500 dark:text-gray-400">로딩 중...</p>
+      <p class="mt-4 text-muted-foreground dark:text-muted-foreground">로딩 중...</p>
     </div>
   {:else if error}
     <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">

@@ -139,7 +139,7 @@
       case 'critical': return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
       case 'error': return 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400';
       case 'warning': return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400';
-      default: return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400';
+      default: return 'bg-muted text-foreground dark:bg-gray-800 dark:text-muted-foreground';
     }
   }
 
@@ -151,7 +151,7 @@
       instagram: 'bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-400',
       writing: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400',
     };
-    return colors[src] || 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400';
+    return colors[src] || 'bg-muted text-foreground dark:bg-gray-800 dark:text-muted-foreground';
   }
 
   onMount(() => {
@@ -171,8 +171,8 @@
   {#if stats}
     <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
       <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">
-        <div class="text-sm text-gray-500 dark:text-gray-400">전체</div>
-        <div class="text-2xl font-bold text-gray-900 dark:text-white">{stats.summary.total_count}</div>
+        <div class="text-sm text-muted-foreground dark:text-muted-foreground">전체</div>
+        <div class="text-2xl font-bold text-foreground dark:text-white">{stats.summary.total_count}</div>
       </div>
       <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">
         <div class="text-sm text-red-500">Critical</div>
@@ -187,8 +187,8 @@
         <div class="text-2xl font-bold text-yellow-600">{stats.summary.warning_count}</div>
       </div>
       <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">
-        <div class="text-sm text-gray-500 dark:text-gray-400">미해결</div>
-        <div class="text-2xl font-bold text-gray-900 dark:text-white">{stats.summary.unresolved_count}</div>
+        <div class="text-sm text-muted-foreground dark:text-muted-foreground">미해결</div>
+        <div class="text-2xl font-bold text-foreground dark:text-white">{stats.summary.unresolved_count}</div>
       </div>
       <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">
         <div class="text-sm text-green-500">해결률</div>
@@ -199,12 +199,12 @@
     <!-- TOP 에러 타입 -->
     {#if stats.by_type.length > 0}
       <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">
-        <h3 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">자주 발생하는 에러 (24시간)</h3>
+        <h3 class="text-sm font-medium text-muted-foreground dark:text-muted-foreground mb-3">자주 발생하는 에러 (24시간)</h3>
         <div class="space-y-2">
           {#each stats.by_type.slice(0, 5) as typeStats}
             <div class="flex justify-between items-center text-sm">
-              <span class="font-mono text-gray-700 dark:text-gray-300">{typeStats.error_type}</span>
-              <span class="text-gray-500 dark:text-gray-400">{typeStats.count}회</span>
+              <span class="font-mono text-foreground dark:text-gray-300">{typeStats.error_type}</span>
+              <span class="text-muted-foreground dark:text-muted-foreground">{typeStats.count}회</span>
             </div>
           {/each}
         </div>
@@ -216,11 +216,11 @@
   <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">
     <div class="flex flex-wrap gap-4 items-end">
       <div>
-        <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">소스</label>
+        <label class="block text-xs text-muted-foreground dark:text-muted-foreground mb-1">소스</label>
         <select
           bind:value={source}
           onchange={handleFilterChange}
-          class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+          class="px-3 py-2 border border-border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-foreground dark:text-white text-sm"
         >
           <option value="">전체</option>
           {#each sources as src}
@@ -229,11 +229,11 @@
         </select>
       </div>
       <div>
-        <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">심각도</label>
+        <label class="block text-xs text-muted-foreground dark:text-muted-foreground mb-1">심각도</label>
         <select
           bind:value={severity}
           onchange={handleFilterChange}
-          class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+          class="px-3 py-2 border border-border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-foreground dark:text-white text-sm"
         >
           <option value="">전체</option>
           <option value="critical">Critical</option>
@@ -242,11 +242,11 @@
         </select>
       </div>
       <div>
-        <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">해결 상태</label>
+        <label class="block text-xs text-muted-foreground dark:text-muted-foreground mb-1">해결 상태</label>
         <select
           bind:value={resolved}
           onchange={handleFilterChange}
-          class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+          class="px-3 py-2 border border-border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-foreground dark:text-white text-sm"
         >
           <option value={undefined}>전체</option>
           <option value={false}>미해결</option>
@@ -254,13 +254,13 @@
         </select>
       </div>
       <div class="flex-1">
-        <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">검색</label>
+        <label class="block text-xs text-muted-foreground dark:text-muted-foreground mb-1">검색</label>
         <input
           type="text"
           bind:value={search}
           onkeyup={(e) => e.key === 'Enter' && handleFilterChange()}
           placeholder="메시지 검색..."
-          class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+          class="w-full px-3 py-2 border border-border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-foreground dark:text-white text-sm"
         />
       </div>
       {#if selectedIds.size > 0}
@@ -276,37 +276,37 @@
 
   <!-- 에러 목록 -->
   <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden">
-    <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-      <thead class="bg-gray-50 dark:bg-gray-900">
+    <table class="min-w-full divide-y divide-border dark:divide-gray-700">
+      <thead class="bg-background dark:bg-gray-900">
         <tr>
           <th class="w-10 px-4 py-3">
             <input type="checkbox" checked={selectAll} onchange={toggleSelectAll} />
           </th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">시간</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">소스</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">심각도</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">타입</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">메시지</th>
-          <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">상태</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground dark:text-muted-foreground uppercase">시간</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground dark:text-muted-foreground uppercase">소스</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground dark:text-muted-foreground uppercase">심각도</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground dark:text-muted-foreground uppercase">타입</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground dark:text-muted-foreground uppercase">메시지</th>
+          <th class="px-4 py-3 text-center text-xs font-medium text-muted-foreground dark:text-muted-foreground uppercase">상태</th>
           <th class="px-4 py-3"></th>
         </tr>
       </thead>
-      <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+      <tbody class="divide-y divide-border dark:divide-gray-700">
         {#if loading}
           <tr>
-            <td colspan="8" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
+            <td colspan="8" class="px-4 py-8 text-center text-muted-foreground dark:text-muted-foreground">
               로딩 중...
             </td>
           </tr>
         {:else if errors.length === 0}
           <tr>
-            <td colspan="8" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
+            <td colspan="8" class="px-4 py-8 text-center text-muted-foreground dark:text-muted-foreground">
               에러가 없습니다
             </td>
           </tr>
         {:else}
           {#each errors as error}
-            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+            <tr class="hover:bg-muted dark:hover:bg-gray-700/50">
               <td class="px-4 py-3">
                 <input
                   type="checkbox"
@@ -314,7 +314,7 @@
                   onchange={() => toggleSelect(error.id)}
                 />
               </td>
-              <td class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
+              <td class="px-4 py-3 text-sm text-muted-foreground dark:text-muted-foreground whitespace-nowrap">
                 {formatDate(error.created_at)}
               </td>
               <td class="px-4 py-3">
@@ -327,10 +327,10 @@
                   {error.severity}
                 </span>
               </td>
-              <td class="px-4 py-3 text-sm font-mono text-gray-700 dark:text-gray-300">
+              <td class="px-4 py-3 text-sm font-mono text-foreground dark:text-gray-300">
                 {error.error_type}
               </td>
-              <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 max-w-md truncate">
+              <td class="px-4 py-3 text-sm text-muted-foreground dark:text-muted-foreground max-w-md truncate">
                 {error.message}
               </td>
               <td class="px-4 py-3 text-center">
@@ -364,8 +364,8 @@
 
     <!-- 페이지네이션 -->
     {#if total > pageSize}
-      <div class="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center">
-        <span class="text-sm text-gray-500 dark:text-gray-400">
+      <div class="px-4 py-3 border-t border-border dark:border-gray-700 flex justify-between items-center">
+        <span class="text-sm text-muted-foreground dark:text-muted-foreground">
           총 {total}개 중 {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, total)}
         </span>
         <div class="flex gap-2">
@@ -395,8 +395,8 @@
     <div class="bg-white dark:bg-gray-800 rounded-lg max-w-3xl w-full max-h-[80vh] overflow-auto m-4" onclick={(e) => e.stopPropagation()}>
       <div class="p-6">
         <div class="flex justify-between items-start mb-4">
-          <h2 class="text-lg font-bold text-gray-900 dark:text-white">에러 상세</h2>
-          <button onclick={() => detailModal = null} class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+          <h2 class="text-lg font-bold text-foreground dark:text-white">에러 상세</h2>
+          <button onclick={() => detailModal = null} class="text-muted-foreground hover:text-foreground dark:text-muted-foreground dark:hover:text-gray-200">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -406,39 +406,39 @@
         <div class="space-y-4">
           <div class="grid grid-cols-2 gap-4">
             <div>
-              <span class="text-sm text-gray-500 dark:text-gray-400">시간</span>
-              <p class="text-gray-900 dark:text-white">{new Date(detailModal.created_at).toLocaleString('ko-KR')}</p>
+              <span class="text-sm text-muted-foreground dark:text-muted-foreground">시간</span>
+              <p class="text-foreground dark:text-white">{new Date(detailModal.created_at).toLocaleString('ko-KR')}</p>
             </div>
             <div>
-              <span class="text-sm text-gray-500 dark:text-gray-400">소스</span>
+              <span class="text-sm text-muted-foreground dark:text-muted-foreground">소스</span>
               <p><span class="px-2 py-1 text-xs rounded-full {getSourceColor(detailModal.source)}">{detailModal.source}</span></p>
             </div>
             <div>
-              <span class="text-sm text-gray-500 dark:text-gray-400">심각도</span>
+              <span class="text-sm text-muted-foreground dark:text-muted-foreground">심각도</span>
               <p><span class="px-2 py-1 text-xs rounded-full {getSeverityColor(detailModal.severity)}">{detailModal.severity}</span></p>
             </div>
             <div>
-              <span class="text-sm text-gray-500 dark:text-gray-400">타입</span>
-              <p class="font-mono text-gray-900 dark:text-white">{detailModal.error_type}</p>
+              <span class="text-sm text-muted-foreground dark:text-muted-foreground">타입</span>
+              <p class="font-mono text-foreground dark:text-white">{detailModal.error_type}</p>
             </div>
           </div>
 
           <div>
-            <span class="text-sm text-gray-500 dark:text-gray-400">메시지</span>
-            <p class="text-gray-900 dark:text-white mt-1">{detailModal.message}</p>
+            <span class="text-sm text-muted-foreground dark:text-muted-foreground">메시지</span>
+            <p class="text-foreground dark:text-white mt-1">{detailModal.message}</p>
           </div>
 
           {#if detailModal.traceback}
             <div>
-              <span class="text-sm text-gray-500 dark:text-gray-400">트레이스백</span>
-              <pre class="mt-1 p-3 bg-gray-100 dark:bg-gray-900 rounded text-xs overflow-auto max-h-60">{detailModal.traceback}</pre>
+              <span class="text-sm text-muted-foreground dark:text-muted-foreground">트레이스백</span>
+              <pre class="mt-1 p-3 bg-muted dark:bg-gray-900 rounded text-xs overflow-auto max-h-60">{detailModal.traceback}</pre>
             </div>
           {/if}
 
           {#if detailModal.context && Object.keys(detailModal.context).length > 0}
             <div>
-              <span class="text-sm text-gray-500 dark:text-gray-400">컨텍스트</span>
-              <pre class="mt-1 p-3 bg-gray-100 dark:bg-gray-900 rounded text-xs overflow-auto">{JSON.stringify(detailModal.context, null, 2)}</pre>
+              <span class="text-sm text-muted-foreground dark:text-muted-foreground">컨텍스트</span>
+              <pre class="mt-1 p-3 bg-muted dark:bg-gray-900 rounded text-xs overflow-auto">{JSON.stringify(detailModal.context, null, 2)}</pre>
             </div>
           {/if}
 

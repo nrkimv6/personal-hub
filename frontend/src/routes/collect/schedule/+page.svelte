@@ -248,7 +248,7 @@
 			case 'writing_task':
 				return { class: 'bg-purple-100 text-purple-800', text: '글쓰기' };
 			default:
-				return { class: 'bg-gray-100 text-gray-800', text: type };
+				return { class: 'bg-muted text-foreground', text: type };
 		}
 	}
 
@@ -263,7 +263,7 @@
 			case 'time_window':
 				return { class: 'bg-orange-50 text-orange-700', text: '시간대' };
 			default:
-				return { class: 'bg-gray-50 text-gray-700', text: type };
+				return { class: 'bg-background text-foreground', text: type };
 		}
 	}
 
@@ -275,7 +275,7 @@
 <div>
 	<!-- 헤더 -->
 	<div class="flex justify-between items-center mb-6">
-		<h2 class="text-xl font-bold text-gray-900">스케줄 설정</h2>
+		<h2 class="text-xl font-bold text-foreground">스케줄 설정</h2>
 		<button onclick={openAddModal} class="btn btn-primary">
 			+ 스케줄 추가
 		</button>
@@ -299,7 +299,7 @@
 		</div>
 	{:else if schedules.length === 0}
 		<div class="card text-center py-12">
-			<p class="text-gray-500">등록된 스케줄이 없습니다</p>
+			<p class="text-muted-foreground">등록된 스케줄이 없습니다</p>
 		</div>
 	{:else}
 		<div class="space-y-4">
@@ -316,7 +316,7 @@
 								disabled={togglingId === schedule.id}
 								class="relative inline-flex items-center h-6 rounded-full w-11 transition-colors {schedule.enabled
 									? 'bg-blue-600'
-									: 'bg-gray-200'}"
+									: 'bg-secondary'}"
 							>
 								<span
 									class="inline-block w-4 h-4 transform bg-white rounded-full transition-transform {schedule.enabled
@@ -327,7 +327,7 @@
 
 							<div>
 								<div class="flex items-center gap-2">
-									<span class="font-medium text-gray-900">
+									<span class="font-medium text-foreground">
 										{schedule.display_name || schedule.name}
 									</span>
 									<span class="px-2 py-0.5 text-xs rounded-full {targetBadge.class}">
@@ -337,7 +337,7 @@
 										{scheduleBadge.text}
 									</span>
 								</div>
-								<div class="text-sm text-gray-500 mt-1 flex gap-4">
+								<div class="text-sm text-muted-foreground mt-1 flex gap-4">
 									<span>마지막 실행: {formatDateTime(schedule.last_run_at)}</span>
 									{#if schedule.enabled && schedule.next_run_at}
 										<span>다음 실행: {formatDateTime(schedule.next_run_at)}</span>
@@ -396,8 +396,8 @@
 			{/each}
 		</div>
 
-		<div class="mt-6 p-4 bg-gray-50 rounded-lg">
-			<p class="text-sm text-gray-600">
+		<div class="mt-6 p-4 bg-background rounded-lg">
+			<p class="text-sm text-muted-foreground">
 				<strong>안내:</strong> Instagram 스케줄은 "설정" 버튼을 클릭하여 상세 설정을 변경할 수 있습니다.
 			</p>
 		</div>
@@ -409,13 +409,13 @@
 	<div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
 		<div class="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
 			<!-- 모달 헤더 -->
-			<div class="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-				<h2 class="text-xl font-bold text-gray-900">
+			<div class="flex items-center justify-between px-6 py-4 border-b border-border">
+				<h2 class="text-xl font-bold text-foreground">
 					Instagram 수집 설정
 				</h2>
 				<button
 					onclick={closeSettings}
-					class="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+					class="text-muted-foreground hover:text-muted-foreground text-2xl leading-none"
 				>
 					&times;
 				</button>
@@ -434,9 +434,9 @@
 	<div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
 		<div class="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-hidden">
 			<!-- 모달 헤더 -->
-			<div class="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+			<div class="flex items-center justify-between px-6 py-4 border-b border-border">
 				<div class="flex items-center gap-2">
-					<h2 class="text-xl font-bold text-gray-900">스케줄 추가</h2>
+					<h2 class="text-xl font-bold text-foreground">스케줄 추가</h2>
 					{#if addStep > 1}
 						<button
 							onclick={() => (addStep = addStep === 3 && selectedType === 'writing_task' ? 1 : addStep - 1)}
@@ -448,7 +448,7 @@
 				</div>
 				<button
 					onclick={closeAddModal}
-					class="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+					class="text-muted-foreground hover:text-muted-foreground text-2xl leading-none"
 				>
 					&times;
 				</button>
@@ -458,7 +458,7 @@
 			<div class="p-6">
 				{#if addStep === 1}
 					<!-- Step 1: 타입 선택 -->
-					<p class="text-gray-600 mb-4">어떤 종류의 스케줄을 추가하시겠습니까?</p>
+					<p class="text-muted-foreground mb-4">어떤 종류의 스케줄을 추가하시겠습니까?</p>
 					<div class="grid grid-cols-1 gap-3">
 						{#each scheduleTypes as st}
 							<button
@@ -468,8 +468,8 @@
 							>
 								<span class="text-2xl">{st.icon}</span>
 								<div>
-									<div class="font-medium text-gray-900">{st.label}</div>
-									<div class="text-sm text-gray-500">
+									<div class="font-medium text-foreground">{st.label}</div>
+									<div class="text-sm text-muted-foreground">
 										{#if st.value === 'instagram_feed'}
 											Instagram 피드를 주기적으로 수집합니다
 										{:else if st.value === 'google_search'}
@@ -490,9 +490,9 @@
 							<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
 						</div>
 					{:else if selectedType === 'instagram_feed'}
-						<p class="text-gray-600 mb-4">수집할 Instagram 계정을 선택하세요</p>
+						<p class="text-muted-foreground mb-4">수집할 Instagram 계정을 선택하세요</p>
 						{#if serviceAccounts.length === 0}
-							<p class="text-gray-500 text-center py-4">등록된 계정이 없습니다</p>
+							<p class="text-muted-foreground text-center py-4">등록된 계정이 없습니다</p>
 						{:else}
 							<div class="space-y-2 max-h-64 overflow-y-auto">
 								{#each serviceAccounts as account}
@@ -504,8 +504,8 @@
 											📸
 										</div>
 										<div>
-											<div class="font-medium text-gray-900">{account.profile_name || account.identifier}</div>
-											<div class="text-sm text-gray-500">
+											<div class="font-medium text-foreground">{account.profile_name || account.identifier}</div>
+											<div class="text-sm text-muted-foreground">
 												{account.is_logged_in ? '로그인됨' : '로그인 필요'}
 											</div>
 										</div>
@@ -514,9 +514,9 @@
 							</div>
 						{/if}
 					{:else if selectedType === 'google_search'}
-						<p class="text-gray-600 mb-4">수집할 저장된 검색을 선택하세요</p>
+						<p class="text-muted-foreground mb-4">수집할 저장된 검색을 선택하세요</p>
 						{#if savedSearches.length === 0}
-							<p class="text-gray-500 text-center py-4">저장된 검색이 없습니다</p>
+							<p class="text-muted-foreground text-center py-4">저장된 검색이 없습니다</p>
 						{:else}
 							<div class="space-y-2 max-h-64 overflow-y-auto">
 								{#each savedSearches as saved}
@@ -528,8 +528,8 @@
 											{saved.is_favorite ? '⭐' : '🔍'}
 										</div>
 										<div>
-											<div class="font-medium text-gray-900">{saved.name}</div>
-											<div class="text-sm text-gray-500 truncate max-w-xs">{saved.query}</div>
+											<div class="font-medium text-foreground">{saved.name}</div>
+											<div class="text-sm text-muted-foreground truncate max-w-xs">{saved.query}</div>
 										</div>
 									</button>
 								{/each}
@@ -540,7 +540,7 @@
 				{:else if addStep === 3}
 					<!-- Step 3: 시간 설정 -->
 					<div class="mb-4">
-						<p class="text-gray-600 mb-2">실행 시간을 설정하세요</p>
+						<p class="text-muted-foreground mb-2">실행 시간을 설정하세요</p>
 						{#if selectedType !== 'writing_task' && selectedTarget}
 							<p class="text-sm text-blue-600">
 								선택된 대상: {selectedTarget.name}
@@ -571,7 +571,7 @@
 
 					<button
 						onclick={addTime}
-						class="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-blue-500 hover:text-blue-600 transition-colors"
+						class="w-full py-2 border-2 border-dashed border-border rounded-lg text-muted-foreground hover:border-blue-500 hover:text-blue-600 transition-colors"
 					>
 						+ 시간 추가
 					</button>
@@ -603,13 +603,13 @@
 	<div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
 		<div class="bg-white rounded-xl shadow-2xl max-w-md w-full">
 			<!-- 모달 헤더 -->
-			<div class="px-6 py-4 border-b border-gray-200">
-				<h2 class="text-xl font-bold text-gray-900">스케줄 삭제</h2>
+			<div class="px-6 py-4 border-b border-border">
+				<h2 class="text-xl font-bold text-foreground">스케줄 삭제</h2>
 			</div>
 
 			<!-- 모달 컨텐츠 -->
 			<div class="p-6">
-				<p class="text-gray-700 mb-4">
+				<p class="text-foreground mb-4">
 					<strong>"{deleteTarget.display_name || deleteTarget.name}"</strong> 스케줄을 삭제하시겠습니까?
 				</p>
 				<p class="text-sm text-red-600 bg-red-50 p-3 rounded-lg">
@@ -618,7 +618,7 @@
 			</div>
 
 			<!-- 모달 푸터 -->
-			<div class="px-6 py-4 border-t border-gray-200 flex justify-end gap-2">
+			<div class="px-6 py-4 border-t border-border flex justify-end gap-2">
 				<button onclick={closeDeleteModal} class="btn btn-secondary" disabled={deleting}>
 					취소
 				</button>

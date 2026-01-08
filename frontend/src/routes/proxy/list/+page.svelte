@@ -136,10 +136,10 @@
     const classes: Record<string, string> = {
       active: 'bg-green-100 text-green-800',
       pending: 'bg-yellow-100 text-yellow-800',
-      inactive: 'bg-gray-100 text-gray-800',
+      inactive: 'bg-muted text-foreground',
       blacklisted: 'bg-red-100 text-red-800'
     };
-    return classes[status] || 'bg-gray-100 text-gray-800';
+    return classes[status] || 'bg-muted text-foreground';
   }
 
   function getSortIcon(column: string): string {
@@ -152,23 +152,23 @@
 <div class="bg-white rounded-lg shadow p-4 mb-6">
   <div class="flex flex-wrap gap-4 items-end">
     <div class="flex-1 min-w-[200px]">
-      <label for="search" class="block text-sm font-medium text-gray-700 mb-1">검색</label>
+      <label for="search" class="block text-sm font-medium text-foreground mb-1">검색</label>
       <input
         id="search"
         type="text"
         bind:value={searchQuery}
         on:keyup={(e) => e.key === 'Enter' && handleFilterChange()}
         placeholder="IP, 호스트 검색..."
-        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+        class="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
       />
     </div>
     <div>
-      <label for="status" class="block text-sm font-medium text-gray-700 mb-1">상태</label>
+      <label for="status" class="block text-sm font-medium text-foreground mb-1">상태</label>
       <select
         id="status"
         bind:value={statusFilter}
         on:change={handleFilterChange}
-        class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+        class="px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
       >
         {#each statusOptions as opt}
           <option value={opt.value}>{opt.label}</option>
@@ -176,12 +176,12 @@
       </select>
     </div>
     <div>
-      <label for="protocol" class="block text-sm font-medium text-gray-700 mb-1">프로토콜</label>
+      <label for="protocol" class="block text-sm font-medium text-foreground mb-1">프로토콜</label>
       <select
         id="protocol"
         bind:value={protocolFilter}
         on:change={handleFilterChange}
-        class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+        class="px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
       >
         {#each protocolOptions as opt}
           <option value={opt.value}>{opt.label}</option>
@@ -189,12 +189,12 @@
       </select>
     </div>
     <div>
-      <label for="sort" class="block text-sm font-medium text-gray-700 mb-1">정렬</label>
+      <label for="sort" class="block text-sm font-medium text-foreground mb-1">정렬</label>
       <select
         id="sort"
         bind:value={sortBy}
         on:change={() => loadData()}
-        class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+        class="px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
       >
         {#each sortOptions as opt}
           <option value={opt.value}>{opt.label}</option>
@@ -213,7 +213,7 @@
 {#if loading}
   <div class="flex items-center justify-center py-12">
     <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-    <span class="ml-3 text-gray-600">로딩 중...</span>
+    <span class="ml-3 text-muted-foreground">로딩 중...</span>
   </div>
 {:else if error}
   <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
@@ -222,7 +222,7 @@
   </div>
 {:else}
   <!-- 결과 정보 -->
-  <div class="mb-4 text-sm text-gray-600">
+  <div class="mb-4 text-sm text-muted-foreground">
     전체 {total.toLocaleString()}개 중 {proxies.length}개 표시
     (페이지 {page}/{totalPages})
   </div>
@@ -231,88 +231,88 @@
   <div class="bg-white rounded-lg shadow overflow-hidden">
     <div class="overflow-x-auto">
       <table class="w-full">
-        <thead class="bg-gray-50">
+        <thead class="bg-background">
           <tr>
             <th
-              class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+              class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer hover:bg-muted"
               on:click={() => handleSort('host')}
             >
               프록시{getSortIcon('host')}
             </th>
-            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th class="px-4 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider">
               프로토콜
             </th>
-            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th class="px-4 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider">
               상태
             </th>
             <th
-              class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+              class="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer hover:bg-muted"
               on:click={() => handleSort('avg_response_time')}
             >
               응답시간{getSortIcon('avg_response_time')}
             </th>
             <th
-              class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+              class="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer hover:bg-muted"
               on:click={() => handleSort('success_count')}
             >
               성공률{getSortIcon('success_count')}
             </th>
             <th
-              class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+              class="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer hover:bg-muted"
               on:click={() => handleSort('priority_score')}
             >
               점수{getSortIcon('priority_score')}
             </th>
             <th
-              class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+              class="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider cursor-pointer hover:bg-muted"
               on:click={() => handleSort('last_checked_at')}
             >
               마지막 검증{getSortIcon('last_checked_at')}
             </th>
-            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th class="px-4 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider">
               액션
             </th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-200">
+        <tbody class="divide-y divide-border">
           {#each proxies as proxy}
-            <tr class="hover:bg-gray-50">
+            <tr class="hover:bg-muted">
               <td class="px-4 py-3">
                 <a href="/proxy/{proxy.id}" class="text-blue-600 hover:underline font-mono text-sm">
                   {proxy.host}:{proxy.port}
                 </a>
                 {#if proxy.country}
-                  <span class="ml-2 text-xs text-gray-500">{proxy.country}</span>
+                  <span class="ml-2 text-xs text-muted-foreground">{proxy.country}</span>
                 {/if}
               </td>
               <td class="px-4 py-3 text-center">
-                <span class="text-xs uppercase text-gray-600">{proxy.protocol}</span>
+                <span class="text-xs uppercase text-muted-foreground">{proxy.protocol}</span>
               </td>
               <td class="px-4 py-3 text-center">
                 <span class="px-2 py-0.5 text-xs rounded-full {getStatusBadgeClass(proxy.status)}">
                   {proxy.status}
                 </span>
               </td>
-              <td class="px-4 py-3 text-right text-sm text-gray-600">
+              <td class="px-4 py-3 text-right text-sm text-muted-foreground">
                 {formatTime(proxy.avg_response_time)}
               </td>
-              <td class="px-4 py-3 text-right text-sm text-gray-600">
+              <td class="px-4 py-3 text-right text-sm text-muted-foreground">
                 {formatPercent(proxy.success_rate)}
-                <span class="text-xs text-gray-400">
+                <span class="text-xs text-muted-foreground">
                   ({proxy.success_count}/{proxy.total_checks})
                 </span>
               </td>
               <td class="px-4 py-3 text-right text-sm font-medium">
                 {proxy.priority_score.toFixed(1)}
               </td>
-              <td class="px-4 py-3 text-right text-sm text-gray-500">
+              <td class="px-4 py-3 text-right text-sm text-muted-foreground">
                 {formatDate(proxy.last_checked_at)}
               </td>
               <td class="px-4 py-3 text-center">
                 <div class="flex items-center justify-center gap-1">
                   <a
                     href="/proxy/{proxy.id}"
-                    class="p-1 text-gray-400 hover:text-blue-600 transition-colors"
+                    class="p-1 text-muted-foreground hover:text-blue-600 transition-colors"
                     title="상세 보기"
                   >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -323,7 +323,7 @@
                   {#if proxy.status === 'blacklisted'}
                     <button
                       on:click={() => handleStatusChange(proxy, 'active')}
-                      class="p-1 text-gray-400 hover:text-green-600 transition-colors"
+                      class="p-1 text-muted-foreground hover:text-green-600 transition-colors"
                       title="블랙리스트 해제"
                     >
                       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -333,7 +333,7 @@
                   {:else}
                     <button
                       on:click={() => handleStatusChange(proxy, 'blacklisted')}
-                      class="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                      class="p-1 text-muted-foreground hover:text-red-600 transition-colors"
                       title="블랙리스트 등록"
                     >
                       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -343,7 +343,7 @@
                   {/if}
                   <button
                     on:click={() => handleDelete(proxy)}
-                    class="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                    class="p-1 text-muted-foreground hover:text-red-600 transition-colors"
                     title="삭제"
                   >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -355,7 +355,7 @@
             </tr>
           {:else}
             <tr>
-              <td colspan="8" class="px-4 py-8 text-center text-gray-500">
+              <td colspan="8" class="px-4 py-8 text-center text-muted-foreground">
                 프록시 데이터가 없습니다.
               </td>
             </tr>
@@ -366,36 +366,36 @@
 
     <!-- 페이지네이션 -->
     {#if totalPages > 1}
-      <div class="px-4 py-3 border-t border-gray-200 flex items-center justify-between">
-        <div class="text-sm text-gray-500">
+      <div class="px-4 py-3 border-t border-border flex items-center justify-between">
+        <div class="text-sm text-muted-foreground">
           페이지 {page} / {totalPages}
         </div>
         <div class="flex gap-2">
           <button
             on:click={() => handlePageChange(1)}
             disabled={page === 1}
-            class="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            class="px-3 py-1 text-sm border border-border rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
           >
             처음
           </button>
           <button
             on:click={() => handlePageChange(page - 1)}
             disabled={page === 1}
-            class="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            class="px-3 py-1 text-sm border border-border rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
           >
             이전
           </button>
           <button
             on:click={() => handlePageChange(page + 1)}
             disabled={page === totalPages}
-            class="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            class="px-3 py-1 text-sm border border-border rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
           >
             다음
           </button>
           <button
             on:click={() => handlePageChange(totalPages)}
             disabled={page === totalPages}
-            class="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            class="px-3 py-1 text-sm border border-border rounded hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
           >
             마지막
           </button>

@@ -196,20 +196,20 @@
 	{#if monitoringStats}
 		<div class="grid grid-cols-2 md:grid-cols-7 gap-4 mb-6">
 			<div class="card p-4 text-center">
-				<div class="text-2xl font-bold text-gray-900">{monitoringStats.total_checks}</div>
-				<div class="text-sm text-gray-500">총 체크</div>
+				<div class="text-2xl font-bold text-foreground">{monitoringStats.total_checks}</div>
+				<div class="text-sm text-muted-foreground">총 체크</div>
 			</div>
 			<div class="card p-4 text-center">
 				<div class="text-2xl font-bold text-green-600">{monitoringStats.success_count}</div>
-				<div class="text-sm text-gray-500">성공</div>
+				<div class="text-sm text-muted-foreground">성공</div>
 			</div>
 			<div class="card p-4 text-center">
 				<div class="text-2xl font-bold text-blue-600">{monitoringStats.available_count}</div>
-				<div class="text-sm text-gray-500">슬롯 발견</div>
+				<div class="text-sm text-muted-foreground">슬롯 발견</div>
 			</div>
 			<div class="card p-4 text-center">
-				<div class="text-2xl font-bold text-gray-600">{monitoringStats.no_slots_count}</div>
-				<div class="text-sm text-gray-500">매진</div>
+				<div class="text-2xl font-bold text-muted-foreground">{monitoringStats.no_slots_count}</div>
+				<div class="text-sm text-muted-foreground">매진</div>
 			</div>
 			<div class="card p-4 text-center">
 				<div class="text-2xl font-bold text-yellow-600">
@@ -219,19 +219,19 @@
 						(monitoringStats.closed_count || 0) +
 						(monitoringStats.not_opened_count || 0)}
 				</div>
-				<div class="text-sm text-gray-500">비활성화</div>
+				<div class="text-sm text-muted-foreground">비활성화</div>
 			</div>
 			<div class="card p-4 text-center">
 				<div class="text-2xl font-bold text-red-600">{monitoringStats.error_count}</div>
-				<div class="text-sm text-gray-500">에러</div>
+				<div class="text-sm text-muted-foreground">에러</div>
 			</div>
 			<div class="card p-4 text-center">
-				<div class="text-2xl font-bold text-gray-900">
+				<div class="text-2xl font-bold text-foreground">
 					{monitoringStats.avg_response_time_ms
 						? formatResponseTime(monitoringStats.avg_response_time_ms)
 						: '-'}
 				</div>
-				<div class="text-sm text-gray-500">평균 응답</div>
+				<div class="text-sm text-muted-foreground">평균 응답</div>
 			</div>
 		</div>
 	{/if}
@@ -240,7 +240,7 @@
 	<div class="card mb-6">
 		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
 			<div>
-				<label for="monitoring-business" class="block text-sm font-medium text-gray-700 mb-1"
+				<label for="monitoring-business" class="block text-sm font-medium text-foreground mb-1"
 					>업체</label
 				>
 				<select id="monitoring-business" class="input" bind:value={filters.business_id}>
@@ -251,7 +251,7 @@
 				</select>
 			</div>
 			<div>
-				<label for="monitoring-status" class="block text-sm font-medium text-gray-700 mb-1"
+				<label for="monitoring-status" class="block text-sm font-medium text-foreground mb-1"
 					>상태</label
 				>
 				<select id="monitoring-status" class="input" bind:value={filters.status}>
@@ -269,7 +269,7 @@
 				</select>
 			</div>
 			<div>
-				<label for="monitoring-date-from" class="block text-sm font-medium text-gray-700 mb-1"
+				<label for="monitoring-date-from" class="block text-sm font-medium text-foreground mb-1"
 					>시작일</label
 				>
 				<input
@@ -280,7 +280,7 @@
 				/>
 			</div>
 			<div>
-				<label for="monitoring-date-to" class="block text-sm font-medium text-gray-700 mb-1"
+				<label for="monitoring-date-to" class="block text-sm font-medium text-foreground mb-1"
 					>종료일</label
 				>
 				<input id="monitoring-date-to" type="date" class="input" bind:value={filters.date_to} />
@@ -302,39 +302,39 @@
 			{error}
 		</div>
 	{:else if monitoringEvents.length === 0}
-		<div class="text-center py-12 text-gray-500">
+		<div class="text-center py-12 text-muted-foreground">
 			<p class="text-lg">모니터링 내역이 없습니다.</p>
 		</div>
 	{:else}
 		<div class="overflow-x-auto">
-			<table class="min-w-full divide-y divide-gray-200">
-				<thead class="bg-gray-50">
+			<table class="min-w-full divide-y divide-border">
+				<thead class="bg-background">
 					<tr>
-						<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">시간</th>
-						<th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase"
+						<th class="px-3 py-3 text-left text-xs font-medium text-muted-foreground uppercase">시간</th>
+						<th class="px-3 py-3 text-left text-xs font-medium text-muted-foreground uppercase"
 							>업체/상품</th
 						>
-						<th class="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase">링크</th>
-						<th class="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase">날짜</th>
-						<th class="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase">상태</th>
-						<th class="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase">슬롯</th>
-						<th class="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase"
+						<th class="px-2 py-3 text-left text-xs font-medium text-muted-foreground uppercase">링크</th>
+						<th class="px-2 py-3 text-left text-xs font-medium text-muted-foreground uppercase">날짜</th>
+						<th class="px-2 py-3 text-left text-xs font-medium text-muted-foreground uppercase">상태</th>
+						<th class="px-2 py-3 text-left text-xs font-medium text-muted-foreground uppercase">슬롯</th>
+						<th class="px-2 py-3 text-left text-xs font-medium text-muted-foreground uppercase"
 							>필터 슬롯</th
 						>
-						<th class="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase">예약</th>
-						<th class="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase">방식</th>
-						<th class="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase">응답</th>
-						<th class="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase">에러</th>
+						<th class="px-2 py-3 text-left text-xs font-medium text-muted-foreground uppercase">예약</th>
+						<th class="px-2 py-3 text-left text-xs font-medium text-muted-foreground uppercase">방식</th>
+						<th class="px-2 py-3 text-left text-xs font-medium text-muted-foreground uppercase">응답</th>
+						<th class="px-2 py-3 text-left text-xs font-medium text-muted-foreground uppercase">에러</th>
 					</tr>
 				</thead>
-				<tbody class="bg-white divide-y divide-gray-200">
+				<tbody class="bg-white divide-y divide-border">
 					{#each monitoringEvents as event}
-						<tr class="hover:bg-gray-50">
-							<td class="px-3 py-3 text-sm text-gray-900 whitespace-nowrap">
+						<tr class="hover:bg-muted">
+							<td class="px-3 py-3 text-sm text-foreground whitespace-nowrap">
 								<div class="flex items-center gap-1">
 									{#if event.graphql_response}
 										<button
-											class="w-5 h-5 flex items-center justify-center text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+											class="w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
 											onclick={() => toggleEventExpand(event.id)}
 											title={expandedEventIds[event.id] ? '접기' : '펼치기'}
 										>
@@ -354,8 +354,8 @@
 								</div>
 							</td>
 							<td class="px-3 py-3 text-sm">
-								<div class="font-medium text-gray-900">{event.business_name || '-'}</div>
-								<div class="text-gray-500">{event.biz_item_name || '-'}</div>
+								<div class="font-medium text-foreground">{event.business_name || '-'}</div>
+								<div class="text-muted-foreground">{event.biz_item_name || '-'}</div>
 							</td>
 							<td class="px-2 py-3 text-sm">
 								{#if buildBookingUrl(event)}
@@ -368,16 +368,16 @@
 										{copiedId === event.id ? '복사됨' : '복사'}
 									</button>
 								{:else}
-									<span class="text-gray-400">-</span>
+									<span class="text-muted-foreground">-</span>
 								{/if}
 							</td>
-							<td class="px-2 py-3 text-sm text-gray-600">{event.schedule_date || '-'}</td>
+							<td class="px-2 py-3 text-sm text-muted-foreground">{event.schedule_date || '-'}</td>
 							<td class="px-2 py-3">
 								<span class="badge {getStatusBadgeClass(event.status)}">
 									{getStatusLabel(event.status)}
 								</span>
 							</td>
-							<td class="px-2 py-3 text-sm text-gray-600">
+							<td class="px-2 py-3 text-sm text-muted-foreground">
 								{event.original_slot_count ?? event.available_count}개
 								{#if event.hash_changed}
 									<span class="text-blue-600 text-xs">(변경)</span>
@@ -385,17 +385,17 @@
 							</td>
 							<td class="px-2 py-3 text-sm">
 								{#if event.time_range}
-									<div class="text-gray-900">
+									<div class="text-foreground">
 										{event.filtered_slot_count ?? '-'}개
 										{#if event.target_time_matched}
 											<span class="text-green-600">&#10003;</span>
 										{:else}
-											<span class="text-gray-400">&#10007;</span>
+											<span class="text-muted-foreground">&#10007;</span>
 										{/if}
 									</div>
-									<div class="text-xs text-gray-500">{event.time_range}</div>
+									<div class="text-xs text-muted-foreground">{event.time_range}</div>
 								{:else}
-									<span class="text-gray-400">-</span>
+									<span class="text-muted-foreground">-</span>
 								{/if}
 							</td>
 							<td class="px-2 py-3 text-sm">
@@ -408,7 +408,7 @@
 										<span class="badge badge-warning">시도</span>
 									{/if}
 								{:else}
-									<span class="text-gray-400">-</span>
+									<span class="text-muted-foreground">-</span>
 								{/if}
 							</td>
 							<td class="px-2 py-3 text-sm">
@@ -419,10 +419,10 @@
 								{:else if event.fetch_method === 'anonymous_api'}
 									<span class="badge badge-purple text-xs">익명</span>
 								{:else}
-									<span class="text-gray-400">-</span>
+									<span class="text-muted-foreground">-</span>
 								{/if}
 							</td>
-							<td class="px-2 py-3 text-sm text-gray-600">
+							<td class="px-2 py-3 text-sm text-muted-foreground">
 								{formatResponseTime(event.response_time_ms)}
 							</td>
 							<td
@@ -434,7 +434,7 @@
 						</tr>
 						<!-- 확장 행 -->
 						{#if expandedEventIds[event.id]}
-							<tr class="bg-gray-50">
+							<tr class="bg-background">
 								<td colspan="11" class="px-3 py-4">
 									<div class="space-y-3">
 										{#if event.graphql_time_ms !== null || event.booking_time_ms !== null}
@@ -442,7 +442,7 @@
 												<div class="text-sm font-medium text-blue-800 mb-2">타이밍 상세</div>
 												<div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
 													<div>
-														<span class="text-gray-600">GraphQL:</span>
+														<span class="text-muted-foreground">GraphQL:</span>
 														<span class="font-medium ml-1">
 															{event.graphql_time_ms !== null
 																? `${event.graphql_time_ms.toFixed(0)}ms`
@@ -450,7 +450,7 @@
 														</span>
 													</div>
 													<div>
-														<span class="text-gray-600">예약:</span>
+														<span class="text-muted-foreground">예약:</span>
 														<span class="font-medium ml-1">
 															{event.booking_time_ms !== null
 																? `${event.booking_time_ms.toFixed(0)}ms`
@@ -458,7 +458,7 @@
 														</span>
 													</div>
 													<div>
-														<span class="text-gray-600">전체:</span>
+														<span class="text-muted-foreground">전체:</span>
 														<span class="font-bold ml-1">
 															{event.response_time_ms !== null
 																? `${event.response_time_ms.toFixed(0)}ms`
@@ -469,11 +469,11 @@
 											</div>
 										{/if}
 										{#if event.graphql_response}
-											<div class="border border-gray-200 rounded-lg bg-white">
+											<div class="border border-border rounded-lg bg-white">
 												<div
-													class="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-gray-50 rounded-t-lg"
+													class="flex items-center justify-between px-4 py-2 border-b border-border bg-background rounded-t-lg"
 												>
-													<span class="text-sm font-medium text-gray-700">GraphQL 응답</span>
+													<span class="text-sm font-medium text-foreground">GraphQL 응답</span>
 													<button
 														class="btn btn-xs btn-secondary"
 														onclick={() => copyGraphqlResponse(event.graphql_response)}
@@ -483,7 +483,7 @@
 												</div>
 												<div class="p-4 max-h-80 overflow-auto">
 													<pre
-														class="text-xs font-mono text-gray-800 whitespace-pre-wrap break-words">{formatJson(
+														class="text-xs font-mono text-foreground whitespace-pre-wrap break-words">{formatJson(
 															event.graphql_response
 														)}</pre>
 												</div>
@@ -501,7 +501,7 @@
 		<!-- 페이지네이션 -->
 		{#if totalPages > 1}
 			<div class="mt-4 flex items-center justify-between">
-				<div class="text-sm text-gray-500">
+				<div class="text-sm text-muted-foreground">
 					총 {total}건 중 {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, total)}
 				</div>
 				<div class="flex gap-2">

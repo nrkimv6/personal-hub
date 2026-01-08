@@ -623,7 +623,7 @@
 	<!-- 헤더 -->
 	<div class="mb-4 md:mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
 		<div class="flex items-center justify-between sm:justify-start gap-3">
-			<h2 class="text-xl md:text-2xl font-bold text-gray-900">이벤트 관리</h2>
+			<h2 class="text-xl md:text-2xl font-bold text-foreground">이벤트 관리</h2>
 			{#if $isAdmin}
 				<div class="flex gap-2">
 					<button onclick={openCreateModal} class="btn btn-primary btn-sm"> + 새 이벤트 </button>
@@ -647,7 +647,7 @@
 						진행중
 					</span>
 				{:else}
-					<span class="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-600 rounded-full">
+					<span class="px-2 py-1 text-xs font-medium bg-muted text-muted-foreground rounded-full">
 						전체
 					</span>
 				{/if}
@@ -674,23 +674,23 @@
 				</button>
 			{/if}
 
-			<span class="text-sm text-gray-600">총 {total}건</span>
+			<span class="text-sm text-muted-foreground">총 {total}건</span>
 			{#if unknownPeriodFilter === 'only'}
 				<span class="hidden sm:inline text-sm text-amber-600">(기간미정만)</span>
 			{:else if unknownPeriodFilter === 'exclude'}
-				<span class="hidden sm:inline text-sm text-gray-500">(기간미정 제외)</span>
+				<span class="hidden sm:inline text-sm text-muted-foreground">(기간미정 제외)</span>
 			{/if}
 		</div>
 	</div>
 
 	<!-- 탭 -->
-	<div class="mb-4 border-b border-gray-200">
+	<div class="mb-4 border-b border-border">
 		<nav class="flex gap-4">
 			<button
 				onclick={() => switchTab('online')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'online'
 					? 'border-purple-600 text-purple-600'
-					: 'border-transparent text-gray-500 hover:text-gray-700'}"
+					: 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				온라인 이벤트
 			</button>
@@ -698,7 +698,7 @@
 				onclick={() => switchTab('offline')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'offline'
 					? 'border-green-600 text-green-600'
-					: 'border-transparent text-gray-500 hover:text-gray-700'}"
+					: 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				오프라인 이벤트
 			</button>
@@ -706,15 +706,15 @@
 				onclick={() => switchTab('popup')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'popup'
 					? 'border-pink-600 text-pink-600'
-					: 'border-transparent text-gray-500 hover:text-gray-700'}"
+					: 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				팝업
 			</button>
 			<button
 				onclick={() => switchTab('uncategorized')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'uncategorized'
-					? 'border-gray-600 text-gray-600'
-					: 'border-transparent text-gray-500 hover:text-gray-700'}"
+					? 'border-gray-600 text-muted-foreground'
+					: 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				미분류
 			</button>
@@ -757,7 +757,7 @@
 				{error}
 			</div>
 		{:else if (activeTab === 'popup' ? popups.length : activeTab === 'uncategorized' ? uncategorizedPosts.length : events.length) === 0}
-			<div class="text-center py-12 text-gray-500">
+			<div class="text-center py-12 text-muted-foreground">
 				<p class="text-lg">
 					{activeTab === 'popup' ? '등록된 팝업이 없습니다' : activeTab === 'uncategorized' ? '미분류 항목이 없습니다' : activeTab === 'offline' ? '등록된 오프라인 이벤트가 없습니다' : '등록된 온라인 이벤트가 없습니다'}
 				</p>
@@ -772,27 +772,27 @@
 		<div class="space-y-3">
 			{#each uncategorizedPosts as post}
 				<div
-					class="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
+					class="bg-card border border-border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
 					onclick={() => post.source_instagram_url && window.open(post.source_instagram_url, '_blank')}
 				>
 					<div class="flex items-start gap-4">
 						<div class="flex-1 min-w-0">
 							<div class="flex items-center gap-2 mb-1">
-								<span class="px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-600">
+								<span class="px-2 py-0.5 text-xs font-medium rounded-full bg-muted text-muted-foreground">
 									{post.original_tag || '미분류'}
 								</span>
 								{#if post.source_instagram_account}
-									<span class="text-xs text-gray-500">@{post.source_instagram_account}</span>
+									<span class="text-xs text-muted-foreground">@{post.source_instagram_account}</span>
 								{/if}
 							</div>
-							<h3 class="font-medium text-gray-900 truncate">
+							<h3 class="font-medium text-foreground truncate">
 								{post.title || '제목 없음'}
 							</h3>
 							{#if post.summary}
-								<p class="text-sm text-gray-600 mt-1 line-clamp-2">{post.summary}</p>
+								<p class="text-sm text-muted-foreground mt-1 line-clamp-2">{post.summary}</p>
 							{/if}
 							{#if post.organizer}
-								<p class="text-xs text-gray-500 mt-1">{post.organizer}</p>
+								<p class="text-xs text-muted-foreground mt-1">{post.organizer}</p>
 							{/if}
 						</div>
 						{#if $isAdmin}
@@ -854,7 +854,7 @@
 		<!-- 페이지네이션 -->
 		{#if !loading && !error && (activeTab === 'popup' ? popups.length : activeTab === 'uncategorized' ? uncategorizedPosts.length : events.length) > 0}
 		<div class="flex flex-col sm:flex-row justify-between items-center gap-3 mt-6">
-			<span class="text-sm text-gray-500">
+			<span class="text-sm text-muted-foreground">
 				전체 {total}개 중 {(currentPage - 1) * pageSize + 1} - {Math.min(
 					currentPage * pageSize,
 					total

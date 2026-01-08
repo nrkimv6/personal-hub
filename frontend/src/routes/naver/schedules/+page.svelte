@@ -866,36 +866,36 @@
   </div>
 
   <!-- 탭 네비게이션 -->
-  <div class="border-b border-gray-200 mb-6">
+  <div class="border-b border-border mb-6">
     <nav class="flex space-x-8">
       <button
-        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'schedules' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}"
+        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'schedules' ? 'border-blue-500 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
         on:click={() => activeTab = 'schedules'}
       >
         전체 일정
-        <span class="ml-2 px-2 py-0.5 text-xs rounded-full {activeTab === 'schedules' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'}">{schedules.length}</span>
+        <span class="ml-2 px-2 py-0.5 text-xs rounded-full {activeTab === 'schedules' ? 'bg-blue-100 text-blue-600' : 'bg-muted text-muted-foreground'}">{schedules.length}</span>
       </button>
       <button
-        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'booking' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}"
+        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'booking' ? 'border-blue-500 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
         on:click={() => activeTab = 'booking'}
       >
         자동 예약
       </button>
       <button
-        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'recurring' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}"
+        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'recurring' ? 'border-blue-500 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
         on:click={() => activeTab = 'recurring'}
       >
         반복 규칙
-        <span class="ml-2 px-2 py-0.5 text-xs rounded-full {activeTab === 'recurring' ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-600'}">{recurringRules.length}</span>
+        <span class="ml-2 px-2 py-0.5 text-xs rounded-full {activeTab === 'recurring' ? 'bg-blue-100 text-blue-600' : 'bg-muted text-muted-foreground'}">{recurringRules.length}</span>
       </button>
       <button
-        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'history' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}"
+        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'history' ? 'border-blue-500 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
         on:click={() => activeTab = 'history'}
       >
         실행 내역
       </button>
       <button
-        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'businesses' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}"
+        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'businesses' ? 'border-blue-500 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
         on:click={() => activeTab = 'businesses'}
       >
         업체 관리
@@ -908,7 +908,7 @@
   <div class="card mb-6">
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
       <div>
-        <label for="search" class="block text-sm font-medium text-gray-700 mb-1">검색</label>
+        <label for="search" class="block text-sm font-medium text-foreground mb-1">검색</label>
         <input
           id="search"
           type="text"
@@ -919,7 +919,7 @@
         />
       </div>
       <div>
-        <label for="business" class="block text-sm font-medium text-gray-700 mb-1">업체</label>
+        <label for="business" class="block text-sm font-medium text-foreground mb-1">업체</label>
         <select id="business" class="input" bind:value={filters.business_id}>
           <option value={null}>전체</option>
           {#each businesses as business}
@@ -928,7 +928,7 @@
         </select>
       </div>
       <div>
-        <label for="status" class="block text-sm font-medium text-gray-700 mb-1">상태</label>
+        <label for="status" class="block text-sm font-medium text-foreground mb-1">상태</label>
         <select id="status" class="input" bind:value={filters.is_enabled}>
           <option value={null}>전체</option>
           <option value={true}>활성</option>
@@ -936,11 +936,11 @@
         </select>
       </div>
       <div>
-        <label for="date_from" class="block text-sm font-medium text-gray-700 mb-1">시작일</label>
+        <label for="date_from" class="block text-sm font-medium text-foreground mb-1">시작일</label>
         <input id="date_from" type="date" class="input" bind:value={filters.date_from} />
       </div>
       <div>
-        <label for="date_to" class="block text-sm font-medium text-gray-700 mb-1">종료일</label>
+        <label for="date_to" class="block text-sm font-medium text-foreground mb-1">종료일</label>
         <input id="date_to" type="date" class="input" bind:value={filters.date_to} />
       </div>
     </div>
@@ -961,12 +961,12 @@
     </div>
   {:else if schedules.length === 0}
     <div class="card text-center py-12">
-      <p class="text-gray-500">등록된 일정이 없습니다.</p>
+      <p class="text-muted-foreground">등록된 일정이 없습니다.</p>
     </div>
   {:else}
     <div class="card">
       <div class="mb-4 flex items-center justify-between">
-        <div class="text-sm text-gray-600">
+        <div class="text-sm text-muted-foreground">
           총 {schedules.length}개의 일정
           {#if selectedIds.size > 0}
             <span class="ml-2 text-blue-600">({selectedIds.size}개 선택)</span>
@@ -1025,7 +1025,7 @@
                 </td>
                 <!-- 상태 (간격 포함) -->
                 <td
-                  class="cursor-pointer hover:bg-gray-100"
+                  class="cursor-pointer hover:bg-muted"
                   on:click={() => handleToggleSchedule(schedule)}
                   title={schedule.is_enabled ? '클릭하여 비활성화' : '클릭하여 활성화'}
                 >
@@ -1037,7 +1037,7 @@
                       </span>
                     {/if}
                   </div>
-                  <div class="text-xs text-gray-500 mt-0.5">
+                  <div class="text-xs text-muted-foreground mt-0.5">
                     {#if schedule.custom_interval}
                       <span class="text-blue-600" title="수동 설정">{formatInterval(schedule.interval)}</span>
                     {:else}
@@ -1055,7 +1055,7 @@
                           <span class="badge badge-gray text-xs">OFF</span>
                         {/if}
                       </div>
-                      <div class="text-xs text-gray-500 truncate flex items-center gap-1" title={schedule.item_name}>
+                      <div class="text-xs text-muted-foreground truncate flex items-center gap-1" title={schedule.item_name}>
                         {schedule.item_name}
                         {#if !schedule.item_is_enabled}
                           <span class="badge badge-gray text-xs">OFF</span>
@@ -1088,13 +1088,13 @@
                         <span class="badge text-xs {dateInfo.badge === '지남' ? 'badge-gray' : dateInfo.badge === '오늘' ? 'badge-warning' : 'badge-info'}">{dateInfo.badge}</span>
                       {/if}
                     </div>
-                    <div class="text-xs text-gray-500">
+                    <div class="text-xs text-muted-foreground">
                       {#if schedule.times && schedule.times.length > 0}
                         {#if schedule.times.length <= 2}
                           {schedule.times.join(', ')}
                         {:else}
                           {schedule.times.slice(0, 2).join(', ')}
-                          <span class="text-gray-400">+{schedule.times.length - 2}</span>
+                          <span class="text-muted-foreground">+{schedule.times.length - 2}</span>
                         {/if}
                       {:else if schedule.time_range}
                         {schedule.time_range}
@@ -1109,12 +1109,12 @@
                   {#if schedule.account_name}
                     <span class="badge badge-info text-xs">{schedule.account_name}</span>
                   {:else}
-                    <span class="text-gray-400 text-xs">기본</span>
+                    <span class="text-muted-foreground text-xs">기본</span>
                   {/if}
                 </td>
                 <!-- 체크 (마지막 체크 + 다음 실행 병합, lg 이상에서만 표시) -->
                 <td class="hidden lg:table-cell text-xs whitespace-nowrap">
-                  <div class="text-gray-500">
+                  <div class="text-muted-foreground">
                     최근: {formatTime(schedule.last_check_time)}
                   </div>
                   <div>
@@ -1123,7 +1123,7 @@
                     {:else if schedule.run_status === 'queued'}
                       <span class="text-blue-600">다음: {getRemainingTime(schedule.next_run_time)}</span>
                     {:else}
-                      <span class="text-gray-400">-</span>
+                      <span class="text-muted-foreground">-</span>
                     {/if}
                   </div>
                 </td>
@@ -1208,12 +1208,12 @@
       </div>
     {:else if recurringRules.length === 0}
       <div class="card text-center py-12">
-        <p class="text-gray-500 mb-4">등록된 반복 규칙이 없습니다.</p>
-        <p class="text-sm text-gray-400">반복 규칙은 매주 특정 요일/시간에 일정을 자동으로 생성합니다.</p>
+        <p class="text-muted-foreground mb-4">등록된 반복 규칙이 없습니다.</p>
+        <p class="text-sm text-muted-foreground">반복 규칙은 매주 특정 요일/시간에 일정을 자동으로 생성합니다.</p>
       </div>
     {:else}
       <div class="card">
-        <div class="mb-4 text-sm text-gray-600">
+        <div class="mb-4 text-sm text-muted-foreground">
           총 {recurringRules.length}개의 반복 규칙
         </div>
         <div class="overflow-x-auto">
@@ -1233,7 +1233,7 @@
                 <tr class="{!rule.is_enabled ? 'opacity-60' : ''}">
                   <!-- 상태 -->
                   <td
-                    class="cursor-pointer hover:bg-gray-100"
+                    class="cursor-pointer hover:bg-muted"
                     on:click={() => handleToggleRecurringRule(rule)}
                     title={rule.is_enabled ? '클릭하여 비활성화' : '클릭하여 활성화'}
                   >
@@ -1247,7 +1247,7 @@
                   <!-- 규칙/업체 (이름+업체+아이템 병합) -->
                   <td class="max-w-48">
                     <div class="font-medium text-sm truncate" title={rule.name}>{rule.name}</div>
-                    <div class="text-xs text-gray-500 truncate" title="{rule.business_name} - {rule.item_name}">
+                    <div class="text-xs text-muted-foreground truncate" title="{rule.business_name} - {rule.item_name}">
                       {rule.business_name} / {rule.item_name}
                     </div>
                   </td>
@@ -1255,12 +1255,12 @@
                   <td>
                     <div class="text-sm">
                       <div class="font-medium">{WEEKDAY_NAMES[rule.recurrence_day]}요일</div>
-                      <div class="text-xs text-gray-500">{rule.trigger_time}</div>
+                      <div class="text-xs text-muted-foreground">{rule.trigger_time}</div>
                     </div>
                   </td>
                   <!-- 대상 패턴 (md 이상에서만 표시) -->
                   <td class="hidden md:table-cell">
-                    <div class="text-xs text-gray-600 max-w-xs truncate" title={formatTargetPatterns(rule.target_patterns)}>
+                    <div class="text-xs text-muted-foreground max-w-xs truncate" title={formatTargetPatterns(rule.target_patterns)}>
                       {formatTargetPatterns(rule.target_patterns)}
                     </div>
                   </td>
@@ -1270,10 +1270,10 @@
                       {#if rule.is_enabled && rule.next_trigger_at}
                         <span class="text-blue-600 font-medium">다음: {formatNextTrigger(rule.next_trigger_at)}</span>
                       {:else}
-                        <span class="text-gray-400">다음: -</span>
+                        <span class="text-muted-foreground">다음: -</span>
                       {/if}
                     </div>
-                    <div class="text-gray-500">
+                    <div class="text-muted-foreground">
                       {#if rule.last_triggered_at}
                         최근: {new Date(rule.last_triggered_at).toLocaleDateString('ko-KR')}
                       {:else}
@@ -1339,13 +1339,13 @@
     <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
       <div class="p-4 border-b">
         <h3 class="text-lg font-semibold">일정 수정</h3>
-        <p class="text-sm text-gray-500 mt-1">
+        <p class="text-sm text-muted-foreground mt-1">
           {editSchedule.business_name} - {editSchedule.item_name} ({editSchedule.date})
         </p>
       </div>
       <form on:submit|preventDefault={handleUpdateSchedule} class="p-4 space-y-4">
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">시간 설정 방식</label>
+          <label class="block text-sm font-medium text-foreground mb-2">시간 설정 방식</label>
           <div class="flex gap-4 mb-2">
             <label class="flex items-center gap-1">
               <input type="radio" bind:group={editForm.use_time_range} value={false} />
@@ -1363,7 +1363,7 @@
               bind:value={editForm.time_range}
               placeholder="예: 13:00-20:00"
             />
-            <p class="text-xs text-gray-500 mt-1">시작-종료 시간 범위</p>
+            <p class="text-xs text-muted-foreground mt-1">시작-종료 시간 범위</p>
           {:else}
             <input
               id="edit-times"
@@ -1372,15 +1372,15 @@
               bind:value={editForm.times}
               placeholder="예: 10:00, 14:00, 18:00"
             />
-            <p class="text-xs text-gray-500 mt-1">쉼표로 구분하여 여러 시간 입력</p>
+            <p class="text-xs text-muted-foreground mt-1">쉼표로 구분하여 여러 시간 입력</p>
           {/if}
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-2">모니터링 간격</label>
+          <label class="block text-sm font-medium text-foreground mb-2">모니터링 간격</label>
           <div class="space-y-2">
             <label class="flex items-center gap-2">
               <input type="checkbox" bind:checked={editForm.custom_interval} />
-              <span class="text-sm text-gray-700">수동 설정</span>
+              <span class="text-sm text-foreground">수동 설정</span>
             </label>
             {#if editForm.custom_interval}
               <div class="flex items-center gap-2">
@@ -1392,22 +1392,22 @@
                   min="5"
                   max="3600"
                 />
-                <span class="text-sm text-gray-600">초</span>
+                <span class="text-sm text-muted-foreground">초</span>
               </div>
             {:else}
               {@const dateInfo = formatDate(editSchedule?.date || '')}
-              <div class="text-sm text-gray-500 bg-gray-50 px-3 py-2 rounded">
-                기본값: <span class="font-medium text-gray-700">{formatInterval(editSchedule?.interval)}</span>
-                <span class="text-gray-400 ml-1">({dateInfo.badge || '날짜 기준'})</span>
+              <div class="text-sm text-muted-foreground bg-background px-3 py-2 rounded">
+                기본값: <span class="font-medium text-foreground">{formatInterval(editSchedule?.interval)}</span>
+                <span class="text-muted-foreground ml-1">({dateInfo.badge || '날짜 기준'})</span>
               </div>
-              <p class="text-xs text-gray-400">
+              <p class="text-xs text-muted-foreground">
                 D-1 이하: 30초 / D-3 이하: 1분 / D-7 이하: 5분 / D-7 초과: 15분
               </p>
             {/if}
           </div>
         </div>
         <div>
-          <label for="edit-account" class="block text-sm font-medium text-gray-700 mb-1">사용 계정</label>
+          <label for="edit-account" class="block text-sm font-medium text-foreground mb-1">사용 계정</label>
           <select id="edit-account" class="input" bind:value={editForm.service_account_id}>
             <option value={null}>기본 계정</option>
             {#each accounts as account}
@@ -1416,12 +1416,12 @@
           </select>
         </div>
         <div>
-          <label for="edit-monitoring-mode" class="block text-sm font-medium text-gray-700 mb-1">모니터링 모드</label>
+          <label for="edit-monitoring-mode" class="block text-sm font-medium text-foreground mb-1">모니터링 모드</label>
           <select id="edit-monitoring-mode" class="input" bind:value={editForm.monitoring_mode}>
             <option value="legacy">기존 방식 (로그인 탭 사용)</option>
             <option value="anonymous">익명 모드 (효율 우선)</option>
           </select>
-          <p class="text-xs text-gray-500 mt-1">
+          <p class="text-xs text-muted-foreground mt-1">
             {#if editForm.monitoring_mode === 'anonymous'}
               재고 확인은 익명으로, 예약 시에만 탭을 사용합니다. 더 많은 스케줄을 동시에 모니터링할 수 있습니다.
             {:else}
@@ -1431,7 +1431,7 @@
         </div>
         <label class="flex items-center gap-2">
           <input type="checkbox" bind:checked={editForm.is_enabled} />
-          <span class="text-sm font-medium text-gray-700">활성화</span>
+          <span class="text-sm font-medium text-foreground">활성화</span>
         </label>
         <div class="flex justify-end gap-2 pt-4">
           <button type="button" class="btn btn-secondary" on:click={() => { showEditModal = false; editSchedule = null; }}>
@@ -1452,13 +1452,13 @@
         <h3 class="text-lg font-semibold">일정 등록</h3>
         <div class="flex gap-2 mt-3">
           <button
-            class="px-3 py-1 text-sm rounded-md {createMode === 'select' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}"
+            class="px-3 py-1 text-sm rounded-md {createMode === 'select' ? 'bg-blue-600 text-white' : 'bg-secondary text-foreground'}"
             on:click={() => createMode = 'select'}
           >
             업체/아이템 선택
           </button>
           <button
-            class="px-3 py-1 text-sm rounded-md {createMode === 'url' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}"
+            class="px-3 py-1 text-sm rounded-md {createMode === 'url' ? 'bg-blue-600 text-white' : 'bg-secondary text-foreground'}"
             on:click={() => createMode = 'url'}
           >
             URL로 등록
@@ -1469,7 +1469,7 @@
       {#if createMode === 'select'}
         <form on:submit|preventDefault={handleCreateFromSelect} class="p-4 space-y-4">
           <div>
-            <label for="create-business" class="block text-sm font-medium text-gray-700 mb-1">업체</label>
+            <label for="create-business" class="block text-sm font-medium text-foreground mb-1">업체</label>
             <select
               id="create-business"
               class="input"
@@ -1483,7 +1483,7 @@
             </select>
           </div>
           <div>
-            <label for="create-item" class="block text-sm font-medium text-gray-700 mb-1">아이템</label>
+            <label for="create-item" class="block text-sm font-medium text-foreground mb-1">아이템</label>
             <select id="create-item" class="input" bind:value={createForm.item_id} disabled={!createForm.business_id}>
               <option value={null}>아이템 선택</option>
               {#each selectedBusinessItems as item}
@@ -1492,11 +1492,11 @@
             </select>
           </div>
           <div>
-            <label for="create-date" class="block text-sm font-medium text-gray-700 mb-1">날짜</label>
+            <label for="create-date" class="block text-sm font-medium text-foreground mb-1">날짜</label>
             <input id="create-date" type="date" class="input" bind:value={createForm.date} />
           </div>
           <div>
-            <label for="create-times" class="block text-sm font-medium text-gray-700 mb-1">시간 (쉼표 구분, 선택)</label>
+            <label for="create-times" class="block text-sm font-medium text-foreground mb-1">시간 (쉼표 구분, 선택)</label>
             <input
               id="create-times"
               type="text"
@@ -1504,10 +1504,10 @@
               bind:value={createForm.times}
               placeholder="예: 10:00, 14:00, 18:00"
             />
-            <p class="text-xs text-gray-500 mt-1">비워두면 아이템의 시간 범위 설정을 따릅니다</p>
+            <p class="text-xs text-muted-foreground mt-1">비워두면 아이템의 시간 범위 설정을 따릅니다</p>
           </div>
           <div>
-            <label for="create-account" class="block text-sm font-medium text-gray-700 mb-1">사용 계정</label>
+            <label for="create-account" class="block text-sm font-medium text-foreground mb-1">사용 계정</label>
             <select id="create-account" class="input" bind:value={createForm.service_account_id}>
               <option value={null}>기본 계정</option>
               {#each accounts as account}
@@ -1517,7 +1517,7 @@
           </div>
           <label class="flex items-center gap-2">
             <input type="checkbox" bind:checked={createForm.is_enabled} />
-            <span class="text-sm font-medium text-gray-700">활성화</span>
+            <span class="text-sm font-medium text-foreground">활성화</span>
           </label>
           <div class="flex justify-end gap-2 pt-4">
             <button type="button" class="btn btn-secondary" on:click={() => showCreateModal = false}>
@@ -1531,7 +1531,7 @@
       {:else}
         <form on:submit|preventDefault={handleCreateFromUrl} class="p-4 space-y-4">
           <div>
-            <label for="create-url" class="block text-sm font-medium text-gray-700 mb-1">네이버 예약 URL</label>
+            <label for="create-url" class="block text-sm font-medium text-foreground mb-1">네이버 예약 URL</label>
             <input
               id="create-url"
               type="url"
@@ -1541,7 +1541,7 @@
             />
           </div>
           <div>
-            <label for="create-item-name" class="block text-sm font-medium text-gray-700 mb-1">아이템 이름</label>
+            <label for="create-item-name" class="block text-sm font-medium text-foreground mb-1">아이템 이름</label>
             <input
               id="create-item-name"
               type="text"
@@ -1551,7 +1551,7 @@
             />
           </div>
           <div>
-            <label for="create-business-name" class="block text-sm font-medium text-gray-700 mb-1">업체 이름 (선택)</label>
+            <label for="create-business-name" class="block text-sm font-medium text-foreground mb-1">업체 이름 (선택)</label>
             <input
               id="create-business-name"
               type="text"
@@ -1559,7 +1559,7 @@
               bind:value={createForm.business_name}
               placeholder="자동으로 가져옵니다"
             />
-            <p class="text-xs text-gray-500 mt-1">비워두면 URL에서 자동으로 가져옵니다</p>
+            <p class="text-xs text-muted-foreground mt-1">비워두면 URL에서 자동으로 가져옵니다</p>
           </div>
           <div class="flex justify-end gap-2 pt-4">
             <button type="button" class="btn btn-secondary" on:click={() => showCreateModal = false}>
@@ -1581,17 +1581,17 @@
     <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
       <div class="p-4 border-b">
         <h3 class="text-lg font-semibold">일정 복제</h3>
-        <p class="text-sm text-gray-500 mt-1">
+        <p class="text-sm text-muted-foreground mt-1">
           {duplicateSchedule.business_name} - {duplicateSchedule.item_name}
         </p>
       </div>
       <form on:submit|preventDefault={handleDuplicate} class="p-4 space-y-4">
         <div>
-          <label for="dup-date" class="block text-sm font-medium text-gray-700 mb-1">날짜</label>
+          <label for="dup-date" class="block text-sm font-medium text-foreground mb-1">날짜</label>
           <input id="dup-date" type="date" class="input" bind:value={duplicateForm.date} />
         </div>
         <div>
-          <label for="dup-times" class="block text-sm font-medium text-gray-700 mb-1">시간 (쉼표 구분)</label>
+          <label for="dup-times" class="block text-sm font-medium text-foreground mb-1">시간 (쉼표 구분)</label>
           <input
             id="dup-times"
             type="text"
@@ -1599,10 +1599,10 @@
             bind:value={duplicateForm.times}
             placeholder="예: 10:00, 14:00, 18:00"
           />
-          <p class="text-xs text-gray-500 mt-1">비워두면 아이템의 시간 범위 설정을 따릅니다</p>
+          <p class="text-xs text-muted-foreground mt-1">비워두면 아이템의 시간 범위 설정을 따릅니다</p>
         </div>
         <div>
-          <label for="dup-account" class="block text-sm font-medium text-gray-700 mb-1">사용 계정</label>
+          <label for="dup-account" class="block text-sm font-medium text-foreground mb-1">사용 계정</label>
           <select id="dup-account" class="input" bind:value={duplicateForm.service_account_id}>
             <option value={null}>기본 계정</option>
             {#each accounts as account}
@@ -1638,7 +1638,7 @@
 
         <!-- 규칙 이름 -->
         <div>
-          <label for="recurring-name" class="block text-sm font-medium text-gray-700 mb-1">규칙 이름</label>
+          <label for="recurring-name" class="block text-sm font-medium text-foreground mb-1">규칙 이름</label>
           <input
             id="recurring-name"
             type="text"
@@ -1651,7 +1651,7 @@
 
         <!-- URL 입력 -->
         <div>
-          <label for="recurring-url" class="block text-sm font-medium text-gray-700 mb-1">네이버 예약 URL</label>
+          <label for="recurring-url" class="block text-sm font-medium text-foreground mb-1">네이버 예약 URL</label>
           <div class="flex gap-2">
             <input
               id="recurring-url"
@@ -1694,7 +1694,7 @@
 
         <!-- 계정 선택 -->
         <div>
-          <label for="recurring-account" class="block text-sm font-medium text-gray-700 mb-1">사용 계정 (선택사항)</label>
+          <label for="recurring-account" class="block text-sm font-medium text-foreground mb-1">사용 계정 (선택사항)</label>
           <select id="recurring-account" class="input" bind:value={recurringForm.service_account_id}>
             <option value={null}>계정 선택 안함</option>
             {#each accounts as account}
@@ -1705,10 +1705,10 @@
 
         <!-- 반복 설정 -->
         <div class="border-t pt-4">
-          <h4 class="text-sm font-medium text-gray-900 mb-3">반복 설정</h4>
+          <h4 class="text-sm font-medium text-foreground mb-3">반복 설정</h4>
           <div class="grid grid-cols-2 gap-4">
             <div>
-              <label for="recurring-day" class="block text-sm font-medium text-gray-700 mb-1">트리거 요일</label>
+              <label for="recurring-day" class="block text-sm font-medium text-foreground mb-1">트리거 요일</label>
               <select id="recurring-day" class="input" bind:value={recurringForm.recurrence_day}>
                 {#each WEEKDAY_NAMES as name, idx}
                   <option value={idx}>{name}요일</option>
@@ -1716,7 +1716,7 @@
               </select>
             </div>
             <div>
-              <label for="recurring-time" class="block text-sm font-medium text-gray-700 mb-1">트리거 시간 (오픈 시간)</label>
+              <label for="recurring-time" class="block text-sm font-medium text-foreground mb-1">트리거 시간 (오픈 시간)</label>
               <input
                 id="recurring-time"
                 type="time"
@@ -1731,7 +1731,7 @@
         <!-- 대상 날짜/시간 패턴 -->
         <div class="border-t pt-4">
           <div class="flex justify-between items-center mb-3">
-            <h4 class="text-sm font-medium text-gray-900">대상 날짜/시간 패턴</h4>
+            <h4 class="text-sm font-medium text-foreground">대상 날짜/시간 패턴</h4>
             <div class="flex gap-2">
               {#if recurringRules.length > 0}
                 <button type="button" class="btn btn-info btn-sm" on:click={openPatternCopyModal}>
@@ -1745,13 +1745,13 @@
           </div>
 
           {#if recurringForm.target_patterns.length === 0}
-            <div class="text-sm text-gray-500 text-center py-4 bg-gray-50 rounded">
+            <div class="text-sm text-muted-foreground text-center py-4 bg-background rounded">
               패턴을 추가해주세요. 트리거 날짜 기준 D+N일에 대한 시간을 설정합니다.
             </div>
           {:else}
             <div class="space-y-3">
               {#each recurringForm.target_patterns as pattern, idx}
-                <div class="border rounded-lg p-3 bg-gray-50">
+                <div class="border rounded-lg p-3 bg-background">
                   <div class="flex items-center gap-3 mb-2">
                     <div class="flex items-center gap-2">
                       <span class="text-sm font-medium">D+</span>
@@ -1763,7 +1763,7 @@
                         max="30"
                       />
                     </div>
-                    <span class="text-sm text-gray-500">({getRecurringDayLabel(pattern.day_offset)})</span>
+                    <span class="text-sm text-muted-foreground">({getRecurringDayLabel(pattern.day_offset)})</span>
                     <input
                       type="text"
                       class="input flex-1"
@@ -1813,12 +1813,12 @@
 
         <!-- 모니터링 옵션 -->
         <div class="border-t pt-4">
-          <h4 class="text-sm font-medium text-gray-900 mb-3">모니터링 옵션</h4>
+          <h4 class="text-sm font-medium text-foreground mb-3">모니터링 옵션</h4>
           <label class="flex items-center gap-2">
             <input type="checkbox" bind:checked={recurringForm.auto_booking_enabled} />
             <span class="text-sm">자동 예약 활성화</span>
           </label>
-          <p class="text-xs text-gray-500 mt-1">생성되는 일정에서 슬롯 발견 시 자동으로 예약을 수행합니다.</p>
+          <p class="text-xs text-muted-foreground mt-1">생성되는 일정에서 슬롯 발견 시 자동으로 예약을 수행합니다.</p>
         </div>
 
         <!-- 버튼 -->
@@ -1849,12 +1849,12 @@
     <div class="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 max-h-[70vh] overflow-y-auto">
       <div class="p-4 border-b sticky top-0 bg-white">
         <h3 class="text-lg font-semibold">대상 패턴 복사</h3>
-        <p class="text-sm text-gray-500 mt-1">기존 반복 규칙에서 대상 패턴을 복사합니다.</p>
+        <p class="text-sm text-muted-foreground mt-1">기존 반복 규칙에서 대상 패턴을 복사합니다.</p>
       </div>
 
       <div class="p-4">
         {#if recurringRules.length === 0}
-          <div class="text-center py-8 text-gray-500">
+          <div class="text-center py-8 text-muted-foreground">
             복사할 수 있는 반복 규칙이 없습니다.
           </div>
         {:else}
@@ -1867,9 +1867,9 @@
               >
                 <div class="flex items-center justify-between">
                   <div>
-                    <div class="font-medium text-gray-900">{rule.name}</div>
-                    <div class="text-sm text-gray-500">{rule.business_name} - {rule.item_name}</div>
-                    <div class="text-xs text-gray-400 mt-1">
+                    <div class="font-medium text-foreground">{rule.name}</div>
+                    <div class="text-sm text-muted-foreground">{rule.business_name} - {rule.item_name}</div>
+                    <div class="text-xs text-muted-foreground mt-1">
                       {formatTargetPatterns(rule.target_patterns)}
                     </div>
                   </div>
@@ -1900,7 +1900,7 @@
     <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
       <div class="p-4 border-b sticky top-0 bg-white">
         <h3 class="text-lg font-semibold">반복 모니터링 규칙 수정</h3>
-        <p class="text-sm text-gray-500 mt-1">
+        <p class="text-sm text-muted-foreground mt-1">
           {editRecurringRule.business_name} - {editRecurringRule.item_name}
         </p>
       </div>
@@ -1914,7 +1914,7 @@
 
         <!-- 규칙 이름 -->
         <div>
-          <label for="recurring-edit-name" class="block text-sm font-medium text-gray-700 mb-1">규칙 이름</label>
+          <label for="recurring-edit-name" class="block text-sm font-medium text-foreground mb-1">규칙 이름</label>
           <input
             id="recurring-edit-name"
             type="text"
@@ -1927,7 +1927,7 @@
 
         <!-- 계정 선택 -->
         <div>
-          <label for="recurring-edit-account" class="block text-sm font-medium text-gray-700 mb-1">사용 계정 (선택사항)</label>
+          <label for="recurring-edit-account" class="block text-sm font-medium text-foreground mb-1">사용 계정 (선택사항)</label>
           <select id="recurring-edit-account" class="input" bind:value={recurringEditForm.service_account_id}>
             <option value={null}>계정 선택 안함</option>
             {#each accounts as account}
@@ -1938,10 +1938,10 @@
 
         <!-- 반복 설정 -->
         <div class="border-t pt-4">
-          <h4 class="text-sm font-medium text-gray-900 mb-3">반복 설정</h4>
+          <h4 class="text-sm font-medium text-foreground mb-3">반복 설정</h4>
           <div class="grid grid-cols-2 gap-4">
             <div>
-              <label for="recurring-edit-day" class="block text-sm font-medium text-gray-700 mb-1">트리거 요일</label>
+              <label for="recurring-edit-day" class="block text-sm font-medium text-foreground mb-1">트리거 요일</label>
               <select id="recurring-edit-day" class="input" bind:value={recurringEditForm.recurrence_day}>
                 {#each WEEKDAY_NAMES as name, idx}
                   <option value={idx}>{name}요일</option>
@@ -1949,7 +1949,7 @@
               </select>
             </div>
             <div>
-              <label for="recurring-edit-time" class="block text-sm font-medium text-gray-700 mb-1">트리거 시간 (오픈 시간)</label>
+              <label for="recurring-edit-time" class="block text-sm font-medium text-foreground mb-1">트리거 시간 (오픈 시간)</label>
               <input
                 id="recurring-edit-time"
                 type="time"
@@ -1964,20 +1964,20 @@
         <!-- 대상 날짜/시간 패턴 -->
         <div class="border-t pt-4">
           <div class="flex justify-between items-center mb-3">
-            <h4 class="text-sm font-medium text-gray-900">대상 날짜/시간 패턴</h4>
+            <h4 class="text-sm font-medium text-foreground">대상 날짜/시간 패턴</h4>
             <button type="button" class="btn btn-secondary btn-sm" on:click={addRecurringEditTargetPattern}>
               + 패턴 추가
             </button>
           </div>
 
           {#if recurringEditForm.target_patterns.length === 0}
-            <div class="text-sm text-gray-500 text-center py-4 bg-gray-50 rounded">
+            <div class="text-sm text-muted-foreground text-center py-4 bg-background rounded">
               패턴을 추가해주세요. 트리거 날짜 기준 D+N일에 대한 시간을 설정합니다.
             </div>
           {:else}
             <div class="space-y-3">
               {#each recurringEditForm.target_patterns as pattern, idx}
-                <div class="border rounded-lg p-3 bg-gray-50">
+                <div class="border rounded-lg p-3 bg-background">
                   <div class="flex items-center gap-3 mb-2">
                     <div class="flex items-center gap-2">
                       <span class="text-sm font-medium">D+</span>
@@ -1989,7 +1989,7 @@
                         max="30"
                       />
                     </div>
-                    <span class="text-sm text-gray-500">({getRecurringEditDayLabel(pattern.day_offset)})</span>
+                    <span class="text-sm text-muted-foreground">({getRecurringEditDayLabel(pattern.day_offset)})</span>
                     <input
                       type="text"
                       class="input flex-1"
@@ -2039,12 +2039,12 @@
 
         <!-- 모니터링 옵션 -->
         <div class="border-t pt-4">
-          <h4 class="text-sm font-medium text-gray-900 mb-3">모니터링 옵션</h4>
+          <h4 class="text-sm font-medium text-foreground mb-3">모니터링 옵션</h4>
           <label class="flex items-center gap-2">
             <input type="checkbox" bind:checked={recurringEditForm.auto_booking_enabled} />
             <span class="text-sm">자동 예약 활성화</span>
           </label>
-          <p class="text-xs text-gray-500 mt-1">생성되는 일정에서 슬롯 발견 시 자동으로 예약을 수행합니다.</p>
+          <p class="text-xs text-muted-foreground mt-1">생성되는 일정에서 슬롯 발견 시 자동으로 예약을 수행합니다.</p>
         </div>
 
         <!-- 버튼 -->

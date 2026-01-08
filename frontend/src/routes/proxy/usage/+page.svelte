@@ -83,16 +83,16 @@
   }
 
   function getErrorTypeBadgeClass(errorType: string | null): string {
-    if (!errorType) return 'bg-gray-100 text-gray-800';
+    if (!errorType) return 'bg-muted text-foreground';
     const classes: Record<string, string> = {
       timeout: 'bg-yellow-100 text-yellow-800',
       connection_error: 'bg-red-100 text-red-800',
       http_403: 'bg-orange-100 text-orange-800',
       http_429: 'bg-purple-100 text-purple-800',
       http_500: 'bg-red-100 text-red-800',
-      unknown: 'bg-gray-100 text-gray-800'
+      unknown: 'bg-muted text-foreground'
     };
-    return classes[errorType] || 'bg-gray-100 text-gray-800';
+    return classes[errorType] || 'bg-muted text-foreground';
   }
 
   function truncateUrl(url: string, maxLen = 40): string {
@@ -104,7 +104,7 @@
 {#if loading}
   <div class="flex items-center justify-center py-12">
     <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-    <span class="ml-3 text-gray-600">로딩 중...</span>
+    <span class="ml-3 text-muted-foreground">로딩 중...</span>
   </div>
 {:else if error}
   <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
@@ -115,12 +115,12 @@
   <!-- 필터 및 액션 -->
   <div class="flex items-center justify-between mb-6">
     <div class="flex items-center gap-4">
-      <label class="flex items-center gap-2 text-sm text-gray-600">
+      <label class="flex items-center gap-2 text-sm text-muted-foreground">
         <span>기간:</span>
         <select
           bind:value={hoursFilter}
           on:change={loadData}
-          class="px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          class="px-3 py-1.5 border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value={1}>1시간</option>
           <option value={6}>6시간</option>
@@ -142,21 +142,21 @@
     <!-- 통계 카드 -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
       <div class="bg-white rounded-lg shadow p-4">
-        <div class="text-sm text-gray-500">사용된 프록시</div>
-        <div class="text-2xl font-bold text-gray-900">{stats.total_proxies_used.toLocaleString()}</div>
+        <div class="text-sm text-muted-foreground">사용된 프록시</div>
+        <div class="text-2xl font-bold text-foreground">{stats.total_proxies_used.toLocaleString()}</div>
       </div>
       <div class="bg-white rounded-lg shadow p-4">
-        <div class="text-sm text-gray-500">총 시도 횟수</div>
+        <div class="text-sm text-muted-foreground">총 시도 횟수</div>
         <div class="text-2xl font-bold text-blue-600">{stats.total_attempts.toLocaleString()}</div>
       </div>
       <div class="bg-white rounded-lg shadow p-4">
-        <div class="text-sm text-gray-500">전체 성공률</div>
+        <div class="text-sm text-muted-foreground">전체 성공률</div>
         <div class="text-2xl font-bold {stats.overall_success_rate >= 80 ? 'text-green-600' : stats.overall_success_rate >= 50 ? 'text-yellow-600' : 'text-red-600'}">
           {formatPercent(stats.overall_success_rate)}
         </div>
       </div>
       <div class="bg-white rounded-lg shadow p-4">
-        <div class="text-sm text-gray-500">에러 유형</div>
+        <div class="text-sm text-muted-foreground">에러 유형</div>
         <div class="text-2xl font-bold text-orange-600">
           {Object.keys(stats.by_error_type || {}).length}
         </div>
@@ -166,7 +166,7 @@
     <!-- 에러 유형별 분포 -->
     {#if stats.by_error_type && Object.keys(stats.by_error_type).length > 0}
       <div class="bg-white rounded-lg shadow p-6 mb-8">
-        <h3 class="text-lg font-semibold text-gray-900 mb-4">에러 유형별 분포</h3>
+        <h3 class="text-lg font-semibold text-foreground mb-4">에러 유형별 분포</h3>
         <div class="flex flex-wrap gap-3">
           {#each Object.entries(stats.by_error_type) as [errorType, count]}
             <div class="flex items-center gap-2 px-3 py-2 rounded-lg {getErrorTypeBadgeClass(errorType)}">
@@ -181,35 +181,35 @@
     <!-- 프록시별 통계 -->
     {#if stats.by_proxy && stats.by_proxy.length > 0}
       <div class="bg-white rounded-lg shadow mb-8">
-        <div class="p-4 border-b border-gray-200">
-          <h3 class="text-lg font-semibold text-gray-900">프록시별 사용 통계</h3>
-          <p class="text-sm text-gray-500">시도 횟수 기준 상위 프록시</p>
+        <div class="p-4 border-b border-border">
+          <h3 class="text-lg font-semibold text-foreground">프록시별 사용 통계</h3>
+          <p class="text-sm text-muted-foreground">시도 횟수 기준 상위 프록시</p>
         </div>
         <div class="overflow-x-auto">
           <table class="w-full">
-            <thead class="bg-gray-50">
+            <thead class="bg-background">
               <tr>
-                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">프록시 호스트</th>
-                <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">시도</th>
-                <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">성공</th>
-                <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">실패</th>
-                <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">성공률</th>
-                <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">평균 응답</th>
-                <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">마지막 사용</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">프록시 호스트</th>
+                <th class="px-4 py-2 text-right text-xs font-medium text-muted-foreground uppercase">시도</th>
+                <th class="px-4 py-2 text-right text-xs font-medium text-muted-foreground uppercase">성공</th>
+                <th class="px-4 py-2 text-right text-xs font-medium text-muted-foreground uppercase">실패</th>
+                <th class="px-4 py-2 text-right text-xs font-medium text-muted-foreground uppercase">성공률</th>
+                <th class="px-4 py-2 text-right text-xs font-medium text-muted-foreground uppercase">평균 응답</th>
+                <th class="px-4 py-2 text-right text-xs font-medium text-muted-foreground uppercase">마지막 사용</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-gray-200">
+            <tbody class="divide-y divide-border">
               {#each stats.by_proxy.slice(0, 15) as proxy}
-                <tr class="hover:bg-gray-50">
-                  <td class="px-4 py-2 font-mono text-sm text-gray-900">{proxy.proxy_host}</td>
-                  <td class="px-4 py-2 text-right text-sm text-gray-600">{proxy.total_attempts}</td>
+                <tr class="hover:bg-muted">
+                  <td class="px-4 py-2 font-mono text-sm text-foreground">{proxy.proxy_host}</td>
+                  <td class="px-4 py-2 text-right text-sm text-muted-foreground">{proxy.total_attempts}</td>
                   <td class="px-4 py-2 text-right text-sm text-green-600">{proxy.success_count}</td>
                   <td class="px-4 py-2 text-right text-sm text-red-600">{proxy.fail_count}</td>
                   <td class="px-4 py-2 text-right text-sm {proxy.success_rate >= 80 ? 'text-green-600' : proxy.success_rate >= 50 ? 'text-yellow-600' : 'text-red-600'}">
                     {formatPercent(proxy.success_rate)}
                   </td>
-                  <td class="px-4 py-2 text-right text-sm text-gray-600">{formatMs(proxy.avg_response_time_ms)}</td>
-                  <td class="px-4 py-2 text-right text-sm text-gray-500">{formatDate(proxy.last_used_at)}</td>
+                  <td class="px-4 py-2 text-right text-sm text-muted-foreground">{formatMs(proxy.avg_response_time_ms)}</td>
+                  <td class="px-4 py-2 text-right text-sm text-muted-foreground">{formatDate(proxy.last_used_at)}</td>
                 </tr>
               {/each}
             </tbody>
@@ -222,31 +222,31 @@
   <!-- 실패 프록시 목록 -->
   {#if failedProxies.length > 0}
     <div class="bg-white rounded-lg shadow mb-8">
-      <div class="p-4 border-b border-gray-200 bg-red-50">
+      <div class="p-4 border-b border-border bg-red-50">
         <h3 class="text-lg font-semibold text-red-900">실패 프록시 (최근 {hoursFilter}시간)</h3>
         <p class="text-sm text-red-700">{minFailures}회 이상 실패한 프록시</p>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full">
-          <thead class="bg-gray-50">
+          <thead class="bg-background">
             <tr>
-              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">프록시 호스트</th>
-              <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">실패 횟수</th>
-              <th class="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">마지막 에러</th>
-              <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">마지막 실패</th>
+              <th class="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">프록시 호스트</th>
+              <th class="px-4 py-2 text-right text-xs font-medium text-muted-foreground uppercase">실패 횟수</th>
+              <th class="px-4 py-2 text-center text-xs font-medium text-muted-foreground uppercase">마지막 에러</th>
+              <th class="px-4 py-2 text-right text-xs font-medium text-muted-foreground uppercase">마지막 실패</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-gray-200">
+          <tbody class="divide-y divide-border">
             {#each failedProxies as proxy}
-              <tr class="hover:bg-gray-50">
-                <td class="px-4 py-2 font-mono text-sm text-gray-900">{proxy.proxy_host}</td>
+              <tr class="hover:bg-muted">
+                <td class="px-4 py-2 font-mono text-sm text-foreground">{proxy.proxy_host}</td>
                 <td class="px-4 py-2 text-right text-sm font-medium text-red-600">{proxy.fail_count}</td>
                 <td class="px-4 py-2 text-center">
                   <span class="px-2 py-0.5 text-xs rounded-full {getErrorTypeBadgeClass(proxy.last_error_type)}">
                     {proxy.last_error_type || '-'}
                   </span>
                 </td>
-                <td class="px-4 py-2 text-right text-sm text-gray-500">{formatDate(proxy.last_failed_at)}</td>
+                <td class="px-4 py-2 text-right text-sm text-muted-foreground">{formatDate(proxy.last_failed_at)}</td>
               </tr>
             {/each}
           </tbody>
@@ -258,11 +258,11 @@
   <!-- 재시도 이력 -->
   {#if retryHistory.length > 0}
     <div class="bg-white rounded-lg shadow mb-8">
-      <div class="p-4 border-b border-gray-200">
-        <h3 class="text-lg font-semibold text-gray-900">재시도 이력</h3>
-        <p class="text-sm text-gray-500">최근 요청의 재시도 과정</p>
+      <div class="p-4 border-b border-border">
+        <h3 class="text-lg font-semibold text-foreground">재시도 이력</h3>
+        <p class="text-sm text-muted-foreground">최근 요청의 재시도 과정</p>
       </div>
-      <div class="divide-y divide-gray-200">
+      <div class="divide-y divide-border">
         {#each retryHistory as history}
           <div class="p-4">
             <div class="flex items-center justify-between mb-2">
@@ -270,11 +270,11 @@
                 <span class="px-2 py-0.5 text-xs rounded-full {history.final_success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
                   {history.final_success ? '성공' : '실패'}
                 </span>
-                <span class="text-sm text-gray-600">
+                <span class="text-sm text-muted-foreground">
                   {history.business_name || '-'} / {history.biz_item_name || '-'}
                 </span>
               </div>
-              <span class="text-xs text-gray-500">
+              <span class="text-xs text-muted-foreground">
                 {history.total_attempts}회 시도 | {history.total_duration_ms ? formatMs(history.total_duration_ms) : '-'}
               </span>
             </div>
@@ -300,28 +300,28 @@
 
   <!-- 최근 사용 로그 -->
   <div class="bg-white rounded-lg shadow">
-    <div class="p-4 border-b border-gray-200">
-      <h3 class="text-lg font-semibold text-gray-900">최근 사용 로그</h3>
-      <p class="text-sm text-gray-500">최근 50건의 프록시 사용 기록</p>
+    <div class="p-4 border-b border-border">
+      <h3 class="text-lg font-semibold text-foreground">최근 사용 로그</h3>
+      <p class="text-sm text-muted-foreground">최근 50건의 프록시 사용 기록</p>
     </div>
     <div class="overflow-x-auto">
       <table class="w-full">
-        <thead class="bg-gray-50">
+        <thead class="bg-background">
           <tr>
-            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">시간</th>
-            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">프록시</th>
-            <th class="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">시도</th>
-            <th class="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">결과</th>
-            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">응답시간</th>
-            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">에러</th>
+            <th class="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">시간</th>
+            <th class="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">프록시</th>
+            <th class="px-4 py-2 text-center text-xs font-medium text-muted-foreground uppercase">시도</th>
+            <th class="px-4 py-2 text-center text-xs font-medium text-muted-foreground uppercase">결과</th>
+            <th class="px-4 py-2 text-right text-xs font-medium text-muted-foreground uppercase">응답시간</th>
+            <th class="px-4 py-2 text-left text-xs font-medium text-muted-foreground uppercase">에러</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-200">
+        <tbody class="divide-y divide-border">
           {#each recentLogs as log}
-            <tr class="hover:bg-gray-50">
-              <td class="px-4 py-2 text-sm text-gray-500">{formatDate(log.timestamp)}</td>
-              <td class="px-4 py-2 font-mono text-sm text-gray-900">{log.proxy_host || truncateUrl(log.proxy_url, 25)}</td>
-              <td class="px-4 py-2 text-center text-sm text-gray-600">#{log.attempt_number}</td>
+            <tr class="hover:bg-muted">
+              <td class="px-4 py-2 text-sm text-muted-foreground">{formatDate(log.timestamp)}</td>
+              <td class="px-4 py-2 font-mono text-sm text-foreground">{log.proxy_host || truncateUrl(log.proxy_url, 25)}</td>
+              <td class="px-4 py-2 text-center text-sm text-muted-foreground">#{log.attempt_number}</td>
               <td class="px-4 py-2 text-center">
                 {#if log.success}
                   <span class="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-800">
@@ -333,20 +333,20 @@
                   </span>
                 {/if}
               </td>
-              <td class="px-4 py-2 text-right text-sm text-gray-600">{formatMs(log.response_time_ms)}</td>
+              <td class="px-4 py-2 text-right text-sm text-muted-foreground">{formatMs(log.response_time_ms)}</td>
               <td class="px-4 py-2 text-sm">
                 {#if log.error_type}
                   <span class="px-2 py-0.5 text-xs rounded-full {getErrorTypeBadgeClass(log.error_type)}">
                     {log.error_type}
                   </span>
                 {:else}
-                  <span class="text-gray-400">-</span>
+                  <span class="text-muted-foreground">-</span>
                 {/if}
               </td>
             </tr>
           {:else}
             <tr>
-              <td colspan="6" class="px-4 py-8 text-center text-gray-500">
+              <td colspan="6" class="px-4 py-8 text-center text-muted-foreground">
                 사용 로그가 없습니다.
               </td>
             </tr>

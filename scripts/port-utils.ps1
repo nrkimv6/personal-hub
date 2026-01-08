@@ -49,7 +49,7 @@ function Test-ZombiePort {
             Port = $Port
             PID = $owningPid
             IsZombie = $true
-            Message = "Port $Port: Zombie PID $owningPid detected. Reboot required or try: net stop winnat && net start winnat"
+            Message = "Port ${Port}: Zombie PID $owningPid detected. Reboot required or try: net stop winnat && net start winnat"
         }
     }
 

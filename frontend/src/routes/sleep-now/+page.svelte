@@ -154,7 +154,7 @@
 			case 'grace':
 				return 'bg-blue-100 text-blue-800 border-blue-200';
 			default:
-				return 'bg-gray-100 text-gray-800 border-gray-200';
+				return 'bg-muted text-foreground border-border';
 		}
 	}
 
@@ -186,7 +186,7 @@
 			case 'skip_today':
 				return 'bg-purple-100 text-purple-700';
 			default:
-				return 'bg-gray-100 text-gray-700';
+				return 'bg-muted text-foreground';
 		}
 	}
 
@@ -219,10 +219,10 @@
 
 <div class="p-6 max-w-6xl mx-auto">
 	<div class="mb-6 flex items-center justify-between">
-		<h1 class="text-2xl font-bold text-gray-900">Sleep Now</h1>
+		<h1 class="text-2xl font-bold text-foreground">Sleep Now</h1>
 		<button
 			onclick={fetchData}
-			class="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+			class="px-4 py-2 text-sm bg-muted hover:bg-secondary rounded-lg transition-colors"
 		>
 			새로고침
 		</button>
@@ -230,7 +230,7 @@
 
 	{#if loading && !status}
 		<div class="flex items-center justify-center h-64">
-			<div class="text-gray-500">로딩 중...</div>
+			<div class="text-muted-foreground">로딩 중...</div>
 		</div>
 	{:else if error}
 		<div class="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
@@ -241,7 +241,7 @@
 		<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
 			<!-- Current Status -->
 			<div class="bg-white rounded-lg shadow p-6">
-				<h2 class="text-lg font-semibold text-gray-900 mb-4">현재 상태</h2>
+				<h2 class="text-lg font-semibold text-foreground mb-4">현재 상태</h2>
 				{#if status}
 					<div class="space-y-3">
 						<div class="flex items-center gap-3">
@@ -260,13 +260,13 @@
 						</div>
 
 						{#if status.block_start}
-							<div class="text-sm text-gray-600">
+							<div class="text-sm text-muted-foreground">
 								<span class="font-medium">차단 시작:</span>
 								{formatDateTime(status.block_start)}
 							</div>
 						{/if}
 						{#if status.block_end}
-							<div class="text-sm text-gray-600">
+							<div class="text-sm text-muted-foreground">
 								<span class="font-medium">차단 해제:</span>
 								{formatDateTime(status.block_end)}
 							</div>
@@ -277,7 +277,7 @@
 								{formatDateTime(status.grace_until)}
 							</div>
 						{/if}
-						<div class="text-sm text-gray-600">
+						<div class="text-sm text-muted-foreground">
 							<span class="font-medium">오늘 우회 시도:</span>
 							<span class="text-orange-600 font-semibold">{status.bypass_attempts_today}회</span>
 						</div>
@@ -287,19 +287,19 @@
 
 			<!-- Schedule -->
 			<div class="bg-white rounded-lg shadow p-6">
-				<h2 class="text-lg font-semibold text-gray-900 mb-4">스케줄</h2>
+				<h2 class="text-lg font-semibold text-foreground mb-4">스케줄</h2>
 				{#if schedule}
 					<div class="space-y-3">
 						<div class="text-sm">
-							<span class="font-medium text-gray-700">차단 시작:</span>
+							<span class="font-medium text-foreground">차단 시작:</span>
 							<span class="text-red-600 font-semibold">{schedule.block_start}</span>
 						</div>
 						<div class="text-sm">
-							<span class="font-medium text-gray-700">차단 해제:</span>
+							<span class="font-medium text-foreground">차단 해제:</span>
 							<span class="text-green-600 font-semibold">{schedule.block_end}</span>
 						</div>
 						<div class="text-sm">
-							<span class="font-medium text-gray-700">경고 시간:</span>
+							<span class="font-medium text-foreground">경고 시간:</span>
 							<div class="mt-1 flex flex-wrap gap-1">
 								{#each schedule.warning_times as time}
 									<span class="px-2 py-0.5 bg-yellow-100 text-yellow-700 text-xs rounded">
@@ -314,32 +314,32 @@
 
 			<!-- Weekly Stats -->
 			<div class="bg-white rounded-lg shadow p-6">
-				<h2 class="text-lg font-semibold text-gray-900 mb-4">주간 통계</h2>
+				<h2 class="text-lg font-semibold text-foreground mb-4">주간 통계</h2>
 				{#if stats.length > 0}
 					<div class="space-y-2">
 						<div class="text-sm">
-							<span class="font-medium text-gray-700">총 우회 시도:</span>
+							<span class="font-medium text-foreground">총 우회 시도:</span>
 							<span class="text-orange-600 font-semibold">
 								{stats.reduce((sum, s) => sum + s.bypass_attempts, 0)}회
 							</span>
 						</div>
 						<div class="text-sm">
-							<span class="font-medium text-gray-700">긴급 해제:</span>
+							<span class="font-medium text-foreground">긴급 해제:</span>
 							<span class="text-blue-600 font-semibold">
 								{stats.reduce((sum, s) => sum + s.emergency_unlocks, 0)}회
 							</span>
 						</div>
 					</div>
 				{:else}
-					<div class="text-sm text-gray-500">통계 없음</div>
+					<div class="text-sm text-muted-foreground">통계 없음</div>
 				{/if}
 			</div>
 		</div>
 
 		<!-- Emergency Unlock -->
 		<div class="bg-white rounded-lg shadow p-6 mb-6">
-			<h2 class="text-lg font-semibold text-gray-900 mb-4">긴급 해제</h2>
-			<p class="text-sm text-gray-600 mb-4">
+			<h2 class="text-lg font-semibold text-foreground mb-4">긴급 해제</h2>
+			<p class="text-sm text-muted-foreground mb-4">
 				긴급한 경우 아래 비밀번호를 입력하여 1시간 유예를 받을 수 있습니다. 비밀번호는 16자 이상이어야
 				합니다.
 			</p>
@@ -357,26 +357,26 @@
 
 			<div class="space-y-4">
 				<div>
-					<label for="password" class="block text-sm font-medium text-gray-700 mb-1">
+					<label for="password" class="block text-sm font-medium text-foreground mb-1">
 						비밀번호
 					</label>
 					<input
 						type="password"
 						id="password"
 						bind:value={password}
-						class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+						class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 						placeholder="16자 이상의 비밀번호"
 					/>
 				</div>
 				<div>
-					<label for="reason" class="block text-sm font-medium text-gray-700 mb-1">
+					<label for="reason" class="block text-sm font-medium text-foreground mb-1">
 						사유 (선택)
 					</label>
 					<input
 						type="text"
 						id="reason"
 						bind:value={reason}
-						class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+						class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 						placeholder="해제 사유 입력"
 					/>
 				</div>
@@ -401,21 +401,21 @@
 
 		<!-- Recent Logs -->
 		<div class="bg-white rounded-lg shadow p-6">
-			<h2 class="text-lg font-semibold text-gray-900 mb-4">최근 로그</h2>
+			<h2 class="text-lg font-semibold text-foreground mb-4">최근 로그</h2>
 			{#if logs.length > 0}
 				<div class="overflow-x-auto">
 					<table class="w-full text-sm">
-						<thead class="bg-gray-50">
+						<thead class="bg-background">
 							<tr>
-								<th class="px-4 py-2 text-left font-medium text-gray-600">시간</th>
-								<th class="px-4 py-2 text-left font-medium text-gray-600">유형</th>
-								<th class="px-4 py-2 text-left font-medium text-gray-600">상세</th>
+								<th class="px-4 py-2 text-left font-medium text-muted-foreground">시간</th>
+								<th class="px-4 py-2 text-left font-medium text-muted-foreground">유형</th>
+								<th class="px-4 py-2 text-left font-medium text-muted-foreground">상세</th>
 							</tr>
 						</thead>
-						<tbody class="divide-y divide-gray-100">
+						<tbody class="divide-y divide-border">
 							{#each logs.slice(0, 20) as log}
-								<tr class="hover:bg-gray-50">
-									<td class="px-4 py-2 text-gray-600">
+								<tr class="hover:bg-muted">
+									<td class="px-4 py-2 text-muted-foreground">
 										{new Date(log.timestamp).toLocaleString('ko-KR')}
 									</td>
 									<td class="px-4 py-2">
@@ -425,7 +425,7 @@
 											{getLogTypeText(log.type)}
 										</span>
 									</td>
-									<td class="px-4 py-2 text-gray-600">
+									<td class="px-4 py-2 text-muted-foreground">
 										{#if log.reason}
 											{log.reason}
 										{:else if log.details}
@@ -440,7 +440,7 @@
 					</table>
 				</div>
 			{:else}
-				<div class="text-sm text-gray-500 text-center py-8">로그 없음</div>
+				<div class="text-sm text-muted-foreground text-center py-8">로그 없음</div>
 			{/if}
 		</div>
 	{/if}

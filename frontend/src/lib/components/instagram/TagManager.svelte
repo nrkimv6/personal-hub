@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { collectApi } from '$lib/api';
 	import type { InstagramTag, InstagramKeyword } from '$lib/types';
+	import { Button } from '$lib/components/ui';
 
 	let tags: InstagramTag[] = [];
 	let loading = true;
@@ -145,14 +146,14 @@
 </script>
 
 <div class="mb-6 flex justify-between items-center">
-	<h2 class="text-xl font-bold text-gray-900">태그 관리</h2>
+	<h2 class="text-xl font-bold text-foreground">태그 관리</h2>
 	<div class="flex gap-2">
-		<button onclick={reclassifyAll} disabled={reclassifying} class="btn btn-secondary btn-sm">
+		<Button variant="secondary" size="sm" on:click={reclassifyAll} disabled={reclassifying}>
 			{reclassifying ? '재분류 중...' : '전체 재분류'}
-		</button>
-		<button onclick={() => (showCreateTagModal = true)} class="btn btn-primary btn-sm">
+		</Button>
+		<Button variant="primary" size="sm" on:click={() => (showCreateTagModal = true)}>
 			+ 새 태그
-		</button>
+		</Button>
 	</div>
 </div>
 
@@ -170,7 +171,7 @@
 		<div class="card">
 			<h3 class="text-lg font-semibold mb-4">태그 목록</h3>
 			{#if tags.length === 0}
-				<p class="text-gray-500 text-sm">등록된 태그가 없습니다</p>
+				<p class="text-muted-foreground text-sm">등록된 태그가 없습니다</p>
 			{:else}
 				<div class="space-y-2">
 					{#each tags as tag (tag.id)}
@@ -178,7 +179,7 @@
 							class="flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors {selectedTag?.id ===
 							tag.id
 								? 'bg-blue-50 border border-blue-200'
-								: 'hover:bg-gray-50'}"
+								: 'hover:bg-muted'}"
 							onclick={() => selectTag(tag)}
 							onkeydown={(e) => e.key === 'Enter' && selectTag(tag)}
 							role="button"
@@ -190,7 +191,7 @@
 									style="background-color: {tag.color};"
 								></span>
 								<span class="font-medium">{tag.display_name}</span>
-								<span class="text-xs text-gray-500">({tag.keyword_count})</span>
+								<span class="text-xs text-muted-foreground">({tag.keyword_count})</span>
 							</div>
 							<button
 								onclick={(e) => {
@@ -221,15 +222,15 @@
 				</div>
 
 				<!-- 키워드 추가 폼 -->
-				<div class="mb-4 p-3 bg-gray-50 rounded-lg">
+				<div class="mb-4 p-3 bg-background rounded-lg">
 					<div class="flex flex-wrap gap-2 items-end">
 						<div class="flex-1 min-w-48">
-							<label class="block text-xs text-gray-500 mb-1">키워드</label>
+							<label class="block text-xs text-muted-foreground mb-1">키워드</label>
 							<input
 								type="text"
 								bind:value={newKeyword}
 								placeholder="새 키워드 입력"
-								class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+								class="w-full px-3 py-1.5 border border-border rounded-lg text-sm"
 								onkeydown={(e) => e.key === 'Enter' && addKeyword()}
 							/>
 						</div>
@@ -241,7 +242,7 @@
 							<input type="checkbox" bind:checked={newKeywordCaseSensitive} />
 							대소문자 구분
 						</label>
-						<button onclick={addKeyword} class="btn btn-primary btn-sm"> 추가 </button>
+						<Button variant="primary" size="sm" on:click={addKeyword}>추가</Button>
 					</div>
 				</div>
 
@@ -253,17 +254,17 @@
 						></div>
 					</div>
 				{:else if keywords.length === 0}
-					<p class="text-gray-500 text-sm text-center py-4">등록된 키워드가 없습니다</p>
+					<p class="text-muted-foreground text-sm text-center py-4">등록된 키워드가 없습니다</p>
 				{:else}
 					<div class="space-y-1">
 						{#each keywords as kw (kw.id)}
 							<div
 								class="flex items-center justify-between p-2 rounded-lg {kw.is_active
 									? 'bg-white'
-									: 'bg-gray-100 opacity-60'}"
+									: 'bg-muted opacity-60'}"
 							>
 								<div class="flex items-center gap-2">
-									<code class="text-sm px-2 py-0.5 bg-gray-100 rounded">{kw.keyword}</code>
+									<code class="text-sm px-2 py-0.5 bg-muted rounded">{kw.keyword}</code>
 									{#if kw.is_regex}
 										<span class="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded"
 											>정규식</span
@@ -296,7 +297,7 @@
 					</div>
 				{/if}
 			{:else}
-				<div class="text-center py-12 text-gray-500">
+				<div class="text-center py-12 text-muted-foreground">
 					<p>왼쪽에서 태그를 선택하세요</p>
 				</div>
 			{/if}
@@ -310,10 +311,10 @@
 		<div class="bg-white rounded-xl max-w-md w-full">
 			<div class="p-6">
 				<div class="flex justify-between items-start mb-4">
-					<h3 class="text-lg font-bold text-gray-900">새 태그 생성</h3>
+					<h3 class="text-lg font-bold text-foreground">새 태그 생성</h3>
 					<button
 						onclick={() => (showCreateTagModal = false)}
-						class="text-gray-400 hover:text-gray-600 text-2xl"
+						class="text-muted-foreground hover:text-muted-foreground text-2xl"
 					>
 						&times;
 					</button>
@@ -321,46 +322,46 @@
 
 				<div class="space-y-4">
 					<div>
-						<label class="block text-sm font-medium text-gray-700 mb-1">태그 ID (영문)</label>
+						<label class="block text-sm font-medium text-foreground mb-1">태그 ID (영문)</label>
 						<input
 							type="text"
 							bind:value={newTagName}
 							placeholder="예: event, popup_store"
-							class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+							class="w-full px-3 py-2 border border-border rounded-lg"
 						/>
 					</div>
 					<div>
-						<label class="block text-sm font-medium text-gray-700 mb-1">표시 이름</label>
+						<label class="block text-sm font-medium text-foreground mb-1">표시 이름</label>
 						<input
 							type="text"
 							bind:value={newTagDisplayName}
 							placeholder="예: 이벤트, 팝업스토어"
-							class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+							class="w-full px-3 py-2 border border-border rounded-lg"
 						/>
 					</div>
 					<div>
-						<label class="block text-sm font-medium text-gray-700 mb-1">설명 (선택)</label>
+						<label class="block text-sm font-medium text-foreground mb-1">설명 (선택)</label>
 						<input
 							type="text"
 							bind:value={newTagDescription}
 							placeholder="태그 설명"
-							class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+							class="w-full px-3 py-2 border border-border rounded-lg"
 						/>
 					</div>
 					<div>
-						<label class="block text-sm font-medium text-gray-700 mb-1">색상</label>
+						<label class="block text-sm font-medium text-foreground mb-1">색상</label>
 						<div class="flex items-center gap-2">
 							<input type="color" bind:value={newTagColor} class="w-10 h-10 rounded" />
-							<span class="text-sm text-gray-500">{newTagColor}</span>
+							<span class="text-sm text-muted-foreground">{newTagColor}</span>
 						</div>
 					</div>
 				</div>
 
 				<div class="mt-6 flex justify-end gap-2">
-					<button onclick={() => (showCreateTagModal = false)} class="btn btn-secondary btn-sm">
+					<Button variant="secondary" size="sm" on:click={() => (showCreateTagModal = false)}>
 						취소
-					</button>
-					<button onclick={createTag} class="btn btn-primary btn-sm"> 생성 </button>
+					</Button>
+					<Button variant="primary" size="sm" on:click={createTag}>생성</Button>
 				</div>
 			</div>
 		</div>

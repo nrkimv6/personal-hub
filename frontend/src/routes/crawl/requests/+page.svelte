@@ -70,7 +70,7 @@
 	function getStatusBadge(status: string): { class: string; text: string } {
 		switch (status) {
 			case 'pending':
-				return { class: 'bg-gray-100 text-gray-800', text: '대기' };
+				return { class: 'bg-muted text-foreground', text: '대기' };
 			case 'picked':
 				return { class: 'bg-yellow-100 text-yellow-800', text: '픽업됨' };
 			case 'processing':
@@ -80,7 +80,7 @@
 			case 'failed':
 				return { class: 'bg-red-100 text-red-800', text: '실패' };
 			default:
-				return { class: 'bg-gray-100 text-gray-800', text: status };
+				return { class: 'bg-muted text-foreground', text: status };
 		}
 	}
 
@@ -102,15 +102,15 @@
 
 <div class="p-6 max-w-7xl mx-auto">
 	<div class="mb-6">
-		<h2 class="text-2xl font-bold text-gray-900">단건 크롤링 요청</h2>
-		<p class="text-sm text-gray-500 mt-1">개별 URL 크롤링 요청 목록</p>
+		<h2 class="text-2xl font-bold text-foreground">단건 크롤링 요청</h2>
+		<p class="text-sm text-muted-foreground mt-1">개별 URL 크롤링 요청 목록</p>
 	</div>
 
 	<!-- 필터 -->
 	<div class="card mb-6">
 		<div class="flex flex-wrap gap-4 items-center">
 			<div>
-				<label for="urlType" class="block text-sm font-medium text-gray-700 mb-1">URL 타입</label>
+				<label for="urlType" class="block text-sm font-medium text-foreground mb-1">URL 타입</label>
 				<select
 					id="urlType"
 					bind:value={urlType}
@@ -126,7 +126,7 @@
 				</select>
 			</div>
 			<div>
-				<label for="status" class="block text-sm font-medium text-gray-700 mb-1">상태</label>
+				<label for="status" class="block text-sm font-medium text-foreground mb-1">상태</label>
 				<select
 					id="status"
 					bind:value={status}
@@ -155,33 +155,33 @@
 		</div>
 	{:else if !requests || requests.length === 0}
 		<div class="card text-center py-12">
-			<p class="text-gray-500">요청 기록이 없습니다</p>
+			<p class="text-muted-foreground">요청 기록이 없습니다</p>
 		</div>
 	{:else}
 		<div class="card overflow-hidden">
-			<table class="min-w-full divide-y divide-gray-200">
-				<thead class="bg-gray-50">
+			<table class="min-w-full divide-y divide-border">
+				<thead class="bg-background">
 					<tr>
-						<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-						<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">URL</th>
-						<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">타입</th>
-						<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">상태</th>
-						<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">요청 시간</th>
-						<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">처리 시간</th>
-						<th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">액션</th>
+						<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">ID</th>
+						<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">URL</th>
+						<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">타입</th>
+						<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">상태</th>
+						<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">요청 시간</th>
+						<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">처리 시간</th>
+						<th class="px-4 py-3 text-center text-xs font-medium text-muted-foreground uppercase">액션</th>
 					</tr>
 				</thead>
-				<tbody class="bg-white divide-y divide-gray-200">
+				<tbody class="bg-white divide-y divide-border">
 					{#each requests as req}
 						{@const badge = getStatusBadge(req.status)}
-						<tr class="hover:bg-gray-50">
-							<td class="px-4 py-3 text-sm text-gray-500">
+						<tr class="hover:bg-muted">
+							<td class="px-4 py-3 text-sm text-muted-foreground">
 								{req.id}
 							</td>
-							<td class="px-4 py-3 text-sm text-gray-900 max-w-xs truncate" title={req.url}>
+							<td class="px-4 py-3 text-sm text-foreground max-w-xs truncate" title={req.url}>
 								{req.url}
 							</td>
-							<td class="px-4 py-3 text-sm text-gray-600">
+							<td class="px-4 py-3 text-sm text-muted-foreground">
 								{getUrlTypeLabel(req.url_type)}
 							</td>
 							<td class="px-4 py-3">
@@ -194,10 +194,10 @@
 									</span>
 								{/if}
 							</td>
-							<td class="px-4 py-3 text-sm text-gray-600">
+							<td class="px-4 py-3 text-sm text-muted-foreground">
 								{formatDateTime(req.requested_at)}
 							</td>
-							<td class="px-4 py-3 text-sm text-gray-600">
+							<td class="px-4 py-3 text-sm text-muted-foreground">
 								{formatDateTime(req.processed_at)}
 							</td>
 							<td class="px-4 py-3 text-center">
@@ -226,7 +226,7 @@
 				>
 					이전
 				</button>
-				<span class="text-sm text-gray-600">
+				<span class="text-sm text-muted-foreground">
 					{page} / {totalPages}
 				</span>
 				<button

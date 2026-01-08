@@ -32,7 +32,7 @@
 <div class="p-4">
   <h1 class="text-2xl font-bold mb-4 dark:text-white">Instagram</h1>
 
-  <div class="border-b border-gray-200 dark:border-gray-700 mb-4">
+  <div class="border-b border-border dark:border-gray-700 mb-4">
     <nav class="flex space-x-1" aria-label="Primary Tabs">
       {#each primaryTabs as tab}
         <button
@@ -40,7 +40,7 @@
           class="py-3 px-5 border-b-2 font-medium text-base transition-colors
             {activeTab === tab.id
               ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}"
+              : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
         >
           {tab.label}
         </button>

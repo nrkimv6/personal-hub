@@ -10,6 +10,7 @@
 	import FeedCard from '$lib/components/instagram/FeedCard.svelte';
 	import SourcesList from '$lib/components/events/SourcesList.svelte';
 	import { getEventStatusColor, getEventStatusLabel, getDaysRemaining } from '$lib/utils/eventUtils';
+	import { Button } from '$lib/components/ui';
 	
 	type ViewerType = 'event' | 'popup';
 	type MobileViewerTab = 'info' | 'feed';
@@ -145,7 +146,7 @@
 		const source = getInputSource();
 		if (source === 'ai') return 'bg-purple-100 text-purple-700';
 		if (source === 'ai_edited') return 'bg-blue-100 text-blue-700';
-		return 'bg-gray-100 text-gray-600';
+		return 'bg-muted text-muted-foreground';
 	}
 
 	// 이벤트 URL 목록 (event_url + additional_urls)
@@ -180,7 +181,7 @@
 				<!-- 왼쪽: AI 분석 패널 -->
 				<div class="bg-white rounded-xl p-4 w-80 shrink-0 max-h-[85vh] overflow-y-auto">
 					<div class="flex items-center justify-between mb-3">
-						<h4 class="font-semibold text-sm text-gray-900 flex items-center gap-2">
+						<h4 class="font-semibold text-sm text-foreground flex items-center gap-2">
 							<svg
 								class="w-4 h-4 text-{themeColor}-600"
 								fill="none"
@@ -215,9 +216,9 @@
 									수정
 								</button>
 							{/if}
-							<button onclick={onClose} class="p-1 hover:bg-gray-100 rounded-full" aria-label="닫기">
+							<button onclick={onClose} class="p-1 hover:bg-muted rounded-full" aria-label="닫기">
 								<svg
-									class="w-4 h-4 text-gray-500"
+									class="w-4 h-4 text-muted-foreground"
 									fill="none"
 									stroke="currentColor"
 									viewBox="0 0 24 24"
@@ -238,7 +239,7 @@
 					>
 						<!-- 분류 -->
 						<div class="flex items-center gap-2">
-							<span class="text-gray-500 w-12">분류:</span>
+							<span class="text-muted-foreground w-12">분류:</span>
 							<span class="px-2 py-0.5 font-medium rounded-full bg-{themeColor}-100 text-{themeColor}-700">
 								{type === 'popup' ? '팝업' : '이벤트'}
 							</span>
@@ -252,15 +253,15 @@
 						<!-- 주최/브랜드 -->
 						{#if getOrganizer()}
 							<div class="flex items-center gap-2">
-								<span class="text-gray-500 w-12">{type === 'popup' ? '브랜드:' : '주최:'}</span>
-								<span class="text-gray-900">{getOrganizer()}</span>
+								<span class="text-muted-foreground w-12">{type === 'popup' ? '브랜드:' : '주최:'}</span>
+								<span class="text-foreground">{getOrganizer()}</span>
 							</div>
 						{/if}
 						<!-- 기간 -->
 						{#if getPeriod().start || getPeriod().end}
 							<div class="flex items-center gap-2">
-								<span class="text-gray-500 w-12">기간:</span>
-								<span class="text-gray-900">
+								<span class="text-muted-foreground w-12">기간:</span>
+								<span class="text-foreground">
 									{getPeriod().start || '?'} ~ {getPeriod().end || '?'}
 									{#if type === 'event' && event?.days_remaining !== null && event?.days_remaining !== undefined}
 										<span
@@ -268,7 +269,7 @@
 												? 'text-orange-600 font-bold'
 												: event.days_remaining > 0
 													? 'text-blue-600'
-													: 'text-gray-400'}"
+													: 'text-muted-foreground'}"
 										>
 											({getDaysRemaining(event)})
 										</span>
@@ -282,14 +283,14 @@
 							<!-- 발표일 -->
 							{#if event.announcement_date}
 								<div class="flex items-center gap-2">
-									<span class="text-gray-500 w-12">발표일:</span>
-									<span class="text-gray-900">{event.announcement_date}</span>
+									<span class="text-muted-foreground w-12">발표일:</span>
+									<span class="text-foreground">{event.announcement_date}</span>
 								</div>
 							{/if}
 							<!-- 구매조건 -->
 							{#if event.purchase_required}
 								<div class="flex items-center gap-2">
-									<span class="text-gray-500 w-12">구매:</span>
+									<span class="text-muted-foreground w-12">구매:</span>
 									<span
 										class="px-1.5 py-0.5 rounded {event.purchase_required === 'no'
 											? 'bg-green-100 text-green-700'
@@ -308,14 +309,14 @@
 							<!-- 당첨자 -->
 							{#if event.winner_count}
 								<div class="flex items-center gap-2">
-									<span class="text-gray-500 w-12">당첨자:</span>
-									<span class="text-gray-900">{event.winner_count}명</span>
+									<span class="text-muted-foreground w-12">당첨자:</span>
+									<span class="text-foreground">{event.winner_count}명</span>
 								</div>
 							{/if}
 							<!-- 경품 -->
 							{#if event.prizes && event.prizes.length > 0}
 								<div class="flex items-start gap-2">
-									<span class="text-gray-500 w-12 shrink-0">경품:</span>
+									<span class="text-muted-foreground w-12 shrink-0">경품:</span>
 									<div class="flex flex-wrap gap-1">
 										{#each event.prizes as prize}
 											<span class="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded">{prize}</span>
@@ -328,13 +329,13 @@
 						<!-- 팝업 전용 필드: 위치 -->
 						{#if type === 'popup' && popup && (popup.venue_name || popup.address)}
 							<div class="flex items-start gap-2">
-								<span class="text-gray-500 w-12 shrink-0">위치:</span>
+								<span class="text-muted-foreground w-12 shrink-0">위치:</span>
 								<div>
 									{#if popup.venue_name}
-										<span class="text-gray-900 font-medium">{popup.venue_name}</span>
+										<span class="text-foreground font-medium">{popup.venue_name}</span>
 									{/if}
 									{#if popup.address}
-										<span class="text-gray-600 block">{popup.address}</span>
+										<span class="text-muted-foreground block">{popup.address}</span>
 									{/if}
 								</div>
 							</div>
@@ -343,8 +344,8 @@
 						<!-- 요약 -->
 						{#if (type === 'event' && event?.summary) || (type === 'popup' && popup?.summary)}
 							<div class="flex items-start gap-2">
-								<span class="text-gray-500 w-12 shrink-0">요약:</span>
-								<p class="text-gray-700">
+								<span class="text-muted-foreground w-12 shrink-0">요약:</span>
+								<p class="text-foreground">
 									{type === 'event' ? event?.summary : popup?.summary}
 								</p>
 							</div>
@@ -354,7 +355,7 @@
 					<!-- 링크 -->
 					{#if getEventUrls().length > 0}
 						{@const eventUrls = getEventUrls()}
-						<div class="mt-3 pt-3 border-t border-gray-100">
+						<div class="mt-3 pt-3 border-t border-border">
 							<div class="space-y-1.5">
 								{#each eventUrls as url, index}
 									<div class="flex items-center gap-2">
@@ -386,7 +387,7 @@
 									onclick={copyEventUrl}
 									class="mt-2 flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors {copied
 										? 'bg-green-100 text-green-700'
-										: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+										: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 									title={copied ? '복사됨!' : '메인 링크 복사'}
 								>
 									{#if copied}
@@ -406,12 +407,12 @@
 					{/if}
 
 					<!-- 북마크/참여 또는 방문 -->
-					<div class="mt-3 pt-3 border-t border-gray-100 flex gap-2">
+					<div class="mt-3 pt-3 border-t border-border flex gap-2">
 						<button
 							onclick={onBookmarkToggle}
 							class="flex-1 py-2 text-xs rounded transition-colors {getBookmarked()
 								? 'bg-yellow-100 text-yellow-700'
-								: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+								: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 						>
 							{getBookmarked() ? '★ 북마크됨' : '☆ 북마크'}
 						</button>
@@ -420,7 +421,7 @@
 								onclick={onParticipateToggle}
 								class="flex-1 py-2 text-xs rounded transition-colors {isParticipated
 									? 'bg-green-100 text-green-700'
-									: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+									: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 							>
 								{isParticipated ? '✓ 참여완료' : '참여체크'}
 							</button>
@@ -429,7 +430,7 @@
 								onclick={onVisitToggle}
 								class="flex-1 py-2 text-xs rounded transition-colors {getVisited()
 									? 'bg-green-100 text-green-700'
-									: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+									: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 							>
 								{getVisited() ? '✓ 방문완료' : '방문하기'}
 							</button>
@@ -442,7 +443,7 @@
 							onclick={onOfflineToggle}
 							class="w-full mt-2 py-2 text-xs rounded transition-colors {event.is_offline
 								? 'bg-green-100 text-green-700 hover:bg-green-200'
-								: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+								: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 						>
 							{event.is_offline ? '📍 오프라인 이벤트' : '🌐 온라인 이벤트'} (클릭하여 변경)
 						</button>
@@ -450,7 +451,7 @@
 
 					<!-- 출처 목록 -->
 					{#if item?.id}
-						<div class="mt-3 pt-3 border-t border-gray-100">
+						<div class="mt-3 pt-3 border-t border-border">
 							<SourcesList
 								entityType={type === 'event' ? 'events' : 'popups'}
 								entityId={item.id}
@@ -492,16 +493,15 @@
 						/>
 					{:else}
 						<div class="bg-white rounded-xl p-8 text-center w-[468px]">
-							<p class="text-gray-500 mb-4">Instagram 게시물을 불러올 수 없습니다.</p>
+							<p class="text-muted-foreground mb-4">Instagram 게시물을 불러올 수 없습니다.</p>
 							{#if getInstagramUrl()}
-								<a
-									href={getInstagramUrl()}
-									target="_blank"
-									rel="noopener noreferrer"
-									class="btn btn-primary btn-sm"
+								<Button
+									variant="primary"
+									size="sm"
+									on:click={() => window.open(getInstagramUrl() || '', '_blank')}
 								>
 									Instagram에서 보기
-								</a>
+								</Button>
 							{/if}
 						</div>
 					{/if}
@@ -511,12 +511,12 @@
 			<!-- 모바일 레이아웃: lg 미만 -->
 			<div class="lg:hidden">
 				<!-- 탭 헤더 -->
-				<div class="flex bg-white rounded-t-xl border-b border-gray-200">
+				<div class="flex bg-white rounded-t-xl border-b border-border">
 					<button
 						onclick={() => (mobileViewerTab = 'info')}
 						class="flex-1 py-3 text-sm font-medium transition-colors {mobileViewerTab === 'info'
 							? `border-b-2 border-${themeColor}-600 text-${themeColor}-600`
-							: 'text-gray-500'}"
+							: 'text-muted-foreground'}"
 					>
 						AI 분석
 					</button>
@@ -524,13 +524,13 @@
 						onclick={() => (mobileViewerTab = 'feed')}
 						class="flex-1 py-3 text-sm font-medium transition-colors {mobileViewerTab === 'feed'
 							? `border-b-2 border-${themeColor}-600 text-${themeColor}-600`
-							: 'text-gray-500'}"
+							: 'text-muted-foreground'}"
 					>
 						원본 피드
 					</button>
 					<button
 						onclick={onClose}
-						class="px-4 py-3 text-gray-500 hover:text-gray-700"
+						class="px-4 py-3 text-muted-foreground hover:text-foreground"
 						aria-label="닫기"
 					>
 						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -549,7 +549,7 @@
 					<!-- AI 분석 탭 -->
 					<div class="bg-white rounded-b-xl p-4 max-h-[70vh] overflow-y-auto">
 						<div class="flex items-center justify-between mb-3">
-							<h4 class="font-semibold text-sm text-gray-900 flex items-center gap-2">
+							<h4 class="font-semibold text-sm text-foreground flex items-center gap-2">
 								<svg
 									class="w-4 h-4 text-{themeColor}-600"
 									fill="none"
@@ -592,7 +592,7 @@
 						>
 							<!-- 분류 -->
 							<div class="flex items-center gap-2">
-								<span class="text-gray-500 w-12">분류:</span>
+								<span class="text-muted-foreground w-12">분류:</span>
 								<span class="px-2 py-0.5 font-medium rounded-full bg-{themeColor}-100 text-{themeColor}-700">
 									{type === 'popup' ? '팝업' : '이벤트'}
 								</span>
@@ -606,15 +606,15 @@
 							<!-- 주최/브랜드 -->
 							{#if getOrganizer()}
 								<div class="flex items-center gap-2">
-									<span class="text-gray-500 w-12">{type === 'popup' ? '브랜드:' : '주최:'}</span>
-									<span class="text-gray-900">{getOrganizer()}</span>
+									<span class="text-muted-foreground w-12">{type === 'popup' ? '브랜드:' : '주최:'}</span>
+									<span class="text-foreground">{getOrganizer()}</span>
 								</div>
 							{/if}
 							<!-- 기간 -->
 							{#if getPeriod().start || getPeriod().end}
 								<div class="flex items-center gap-2">
-									<span class="text-gray-500 w-12">기간:</span>
-									<span class="text-gray-900">
+									<span class="text-muted-foreground w-12">기간:</span>
+									<span class="text-foreground">
 										{getPeriod().start || '?'} ~ {getPeriod().end || '?'}
 										{#if type === 'event' && event?.days_remaining !== null && event?.days_remaining !== undefined}
 											<span
@@ -622,7 +622,7 @@
 													? 'text-orange-600 font-bold'
 													: event.days_remaining > 0
 														? 'text-blue-600'
-														: 'text-gray-400'}"
+														: 'text-muted-foreground'}"
 											>
 												({getDaysRemaining(event)})
 											</span>
@@ -635,13 +635,13 @@
 							{#if type === 'event' && event}
 								{#if event.announcement_date}
 									<div class="flex items-center gap-2">
-										<span class="text-gray-500 w-12">발표일:</span>
-										<span class="text-gray-900">{event.announcement_date}</span>
+										<span class="text-muted-foreground w-12">발표일:</span>
+										<span class="text-foreground">{event.announcement_date}</span>
 									</div>
 								{/if}
 								{#if event.purchase_required}
 									<div class="flex items-center gap-2">
-										<span class="text-gray-500 w-12">구매:</span>
+										<span class="text-muted-foreground w-12">구매:</span>
 										<span
 											class="px-1.5 py-0.5 rounded {event.purchase_required === 'no'
 												? 'bg-green-100 text-green-700'
@@ -659,13 +659,13 @@
 								{/if}
 								{#if event.winner_count}
 									<div class="flex items-center gap-2">
-										<span class="text-gray-500 w-12">당첨자:</span>
-										<span class="text-gray-900">{event.winner_count}명</span>
+										<span class="text-muted-foreground w-12">당첨자:</span>
+										<span class="text-foreground">{event.winner_count}명</span>
 									</div>
 								{/if}
 								{#if event.prizes && event.prizes.length > 0}
 									<div class="flex items-start gap-2">
-										<span class="text-gray-500 w-12 shrink-0">경품:</span>
+										<span class="text-muted-foreground w-12 shrink-0">경품:</span>
 										<div class="flex flex-wrap gap-1">
 											{#each event.prizes as prize}
 												<span class="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded"
@@ -680,13 +680,13 @@
 							<!-- 팝업 전용 필드: 위치 -->
 							{#if type === 'popup' && popup && (popup.venue_name || popup.address)}
 								<div class="flex items-start gap-2">
-									<span class="text-gray-500 w-12 shrink-0">위치:</span>
+									<span class="text-muted-foreground w-12 shrink-0">위치:</span>
 									<div>
 										{#if popup.venue_name}
-											<span class="text-gray-900 font-medium">{popup.venue_name}</span>
+											<span class="text-foreground font-medium">{popup.venue_name}</span>
 										{/if}
 										{#if popup.address}
-											<span class="text-gray-600 block">{popup.address}</span>
+											<span class="text-muted-foreground block">{popup.address}</span>
 										{/if}
 									</div>
 								</div>
@@ -695,8 +695,8 @@
 							<!-- 요약 -->
 							{#if (type === 'event' && event?.summary) || (type === 'popup' && popup?.summary)}
 								<div class="flex items-start gap-2">
-									<span class="text-gray-500 w-12 shrink-0">요약:</span>
-									<p class="text-gray-700">
+									<span class="text-muted-foreground w-12 shrink-0">요약:</span>
+									<p class="text-foreground">
 										{type === 'event' ? event?.summary : popup?.summary}
 									</p>
 								</div>
@@ -706,7 +706,7 @@
 						<!-- 링크 -->
 						{#if getEventUrls().length > 0}
 							{@const mobileEventUrls = getEventUrls()}
-							<div class="mt-3 pt-3 border-t border-gray-100">
+							<div class="mt-3 pt-3 border-t border-border">
 								<div class="space-y-1.5">
 									{#each mobileEventUrls as url, index}
 										<div class="flex items-center gap-2">
@@ -738,7 +738,7 @@
 										onclick={copyEventUrl}
 										class="mt-2 flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors {copied
 											? 'bg-green-100 text-green-700'
-											: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+											: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 										title={copied ? '복사됨!' : '메인 링크 복사'}
 									>
 										{#if copied}
@@ -758,12 +758,12 @@
 						{/if}
 
 						<!-- 북마크/참여 또는 방문 -->
-						<div class="mt-3 pt-3 border-t border-gray-100 flex gap-2">
+						<div class="mt-3 pt-3 border-t border-border flex gap-2">
 							<button
 								onclick={onBookmarkToggle}
 								class="flex-1 py-2 text-sm rounded transition-colors {getBookmarked()
 									? 'bg-yellow-100 text-yellow-700'
-									: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+									: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 							>
 								{getBookmarked() ? '★ 북마크됨' : '☆ 북마크'}
 							</button>
@@ -772,7 +772,7 @@
 									onclick={onParticipateToggle}
 									class="flex-1 py-2 text-sm rounded transition-colors {isParticipated
 										? 'bg-green-100 text-green-700'
-										: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+										: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 								>
 									{isParticipated ? '✓ 참여완료' : '참여체크'}
 								</button>
@@ -781,7 +781,7 @@
 									onclick={onVisitToggle}
 									class="flex-1 py-2 text-sm rounded transition-colors {getVisited()
 										? 'bg-green-100 text-green-700'
-										: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+										: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 								>
 									{getVisited() ? '✓ 방문완료' : '방문하기'}
 								</button>
@@ -794,7 +794,7 @@
 								onclick={onOfflineToggle}
 								class="w-full mt-2 py-2 text-sm rounded transition-colors {event.is_offline
 									? 'bg-green-100 text-green-700 hover:bg-green-200'
-									: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+									: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 							>
 								{event.is_offline ? '📍 오프라인 이벤트' : '🌐 온라인 이벤트'} (클릭하여 변경)
 							</button>
@@ -802,7 +802,7 @@
 
 						<!-- 출처 목록 -->
 						{#if item?.id}
-							<div class="mt-3 pt-3 border-t border-gray-100">
+							<div class="mt-3 pt-3 border-t border-border">
 								<SourcesList
 									entityType={type === 'event' ? 'events' : 'popups'}
 									entityId={item.id}
@@ -845,16 +845,15 @@
 							/>
 						{:else}
 							<div class="bg-white rounded-xl p-8 text-center w-full max-w-[468px]">
-								<p class="text-gray-500 mb-4">Instagram 게시물을 불러올 수 없습니다.</p>
+								<p class="text-muted-foreground mb-4">Instagram 게시물을 불러올 수 없습니다.</p>
 								{#if getInstagramUrl()}
-									<a
-										href={getInstagramUrl()}
-										target="_blank"
-										rel="noopener noreferrer"
-										class="btn btn-primary btn-sm"
+									<Button
+										variant="primary"
+										size="sm"
+										on:click={() => window.open(getInstagramUrl() || '', '_blank')}
 									>
 										Instagram에서 보기
-									</a>
+									</Button>
 								{/if}
 							</div>
 						{/if}

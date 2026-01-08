@@ -75,7 +75,7 @@
       case 'integrity':
         return 'bg-yellow-500 text-white';
       default:
-        return 'bg-gray-200 text-gray-700 dark:bg-gray-600 dark:text-gray-200';
+        return 'bg-secondary text-foreground dark:bg-gray-600 dark:text-gray-200';
     }
   }
 
@@ -100,11 +100,11 @@
 <div class="p-6 space-y-6">
   <!-- 헤더 -->
   <div class="flex justify-between items-center">
-    <h1 class="text-2xl font-bold text-gray-900 dark:text-white">시스템 현황</h1>
+    <h1 class="text-2xl font-bold text-foreground dark:text-white">시스템 현황</h1>
   </div>
 
   <!-- 탭 네비게이션 -->
-  <div class="border-b border-gray-200 dark:border-gray-700">
+  <div class="border-b border-border dark:border-gray-700">
     <nav class="flex gap-4" aria-label="Tabs">
       {#each tabs as tab}
         {@const isActive = activeTab === tab.id}
@@ -114,7 +114,7 @@
           class="flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors
             {isActive
               ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-              : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'}"
+              : 'border-transparent text-muted-foreground dark:text-muted-foreground hover:text-foreground dark:hover:text-gray-300 hover:border-border dark:hover:border-gray-600'}"
           aria-current={isActive ? 'page' : undefined}
         >
           <span>{tab.icon}</span>

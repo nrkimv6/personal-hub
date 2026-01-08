@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { writingApi, keywordApi, type GeneratedWriting, type WritingStats, type WritingSource, type KeywordStats, type KeywordStatsResponse, type Stopword, type WritingElement, type WritingElementStats, type WritingBatch, type WritingBatchStatus } from '$lib/api';
+	import { Button } from '$lib/components/ui';
 
 	// 상태
 	let writings: GeneratedWriting[] = [];
@@ -224,7 +225,7 @@
 	function getSourceTypeClass(type: string): string {
 		if (type === 'auto') return 'bg-green-100 text-green-800';
 		if (type === 'manual') return 'bg-blue-100 text-blue-800';
-		return 'bg-gray-100 text-gray-600';
+		return 'bg-muted text-muted-foreground';
 	}
 
 	async function fetchKeywords() {
@@ -592,11 +593,11 @@
 
 	function getBatchStatusClass(status: string): string {
 		switch (status) {
-			case 'pending': return 'bg-gray-100 text-gray-800';
+			case 'pending': return 'bg-muted text-foreground';
 			case 'running': return 'bg-blue-100 text-blue-800';
 			case 'completed': return 'bg-green-100 text-green-800';
 			case 'failed': return 'bg-red-100 text-red-800';
-			default: return 'bg-gray-100 text-gray-600';
+			default: return 'bg-muted text-muted-foreground';
 		}
 	}
 
@@ -628,18 +629,19 @@
 <div class="p-6">
 	<!-- 헤더 -->
 	<div class="mb-6 flex justify-between items-center">
-		<h2 class="text-2xl font-bold text-gray-900">글쓰기 워커</h2>
+		<h2 class="text-2xl font-bold text-foreground">글쓰기 워커</h2>
 		<div class="flex gap-2">
-			<button
-				onclick={runWritingTask}
+			<Button
+				on:click={runWritingTask}
 				disabled={running}
-				class="btn btn-primary btn-sm disabled:opacity-50"
+				variant="primary"
+				size="sm"
 			>
 				{running ? '실행 중...' : '수동 실행'}
-			</button>
-			<button onclick={() => switchTab(activeTab)} class="btn btn-secondary btn-sm">
+			</Button>
+			<Button on:click={() => switchTab(activeTab)} variant="secondary" size="sm">
 				새로고침
-			</button>
+			</Button>
 		</div>
 	</div>
 
@@ -655,58 +657,58 @@
 	{#if stats}
 		<div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
 			<div class="card p-4">
-				<div class="text-sm text-gray-500">소스</div>
-				<div class="text-2xl font-bold text-gray-900">{stats.source_count}</div>
+				<div class="text-sm text-muted-foreground">소스</div>
+				<div class="text-2xl font-bold text-foreground">{stats.source_count}</div>
 			</div>
 			<div class="card p-4">
-				<div class="text-sm text-gray-500">생성된 글</div>
+				<div class="text-sm text-muted-foreground">생성된 글</div>
 				<div class="text-2xl font-bold text-blue-600">{stats.generated_count}</div>
 			</div>
 			<div class="card p-4">
-				<div class="text-sm text-gray-500">소스 혼합</div>
+				<div class="text-sm text-muted-foreground">소스 혼합</div>
 				<div class="text-2xl font-bold text-purple-600">{stats.by_type.mix}</div>
 			</div>
 			<div class="card p-4">
-				<div class="text-sm text-gray-500">랜덤 작문</div>
+				<div class="text-sm text-muted-foreground">랜덤 작문</div>
 				<div class="text-2xl font-bold text-indigo-600">{stats.by_type.random}</div>
 			</div>
 			<div class="card p-4">
-				<div class="text-sm text-gray-500">오늘 생성</div>
+				<div class="text-sm text-muted-foreground">오늘 생성</div>
 				<div class="text-2xl font-bold text-green-600">{stats.today_count}</div>
 			</div>
 		</div>
 	{/if}
 
 	<!-- 탭 -->
-	<div class="mb-4 border-b border-gray-200">
+	<div class="mb-4 border-b border-border">
 		<nav class="flex gap-4">
 			<button
 				onclick={() => switchTab('writings')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'writings' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'writings' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				생성된 글 ({stats?.generated_count ?? 0})
 			</button>
 			<button
 				onclick={() => switchTab('sources')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'sources' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'sources' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				소스 ({stats?.source_count ?? 0})
 			</button>
 			<button
 				onclick={() => switchTab('keywords')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'keywords' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'keywords' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				키워드 ({keywordStats?.total_keywords ?? 0})
 			</button>
 			<button
 				onclick={() => switchTab('elements')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'elements' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'elements' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				소재 ({elementStats?.total ?? 0})
 			</button>
 			<button
 				onclick={() => switchTab('batches')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'batches' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'batches' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				배치 ({batchTotal})
 			</button>
@@ -716,19 +718,19 @@
 	{#if activeTab === 'writings'}
 		<!-- 필터 -->
 		<div class="mb-4 flex flex-wrap gap-2 items-center">
-			<select bind:value={filterTaskType} class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
+			<select bind:value={filterTaskType} class="px-3 py-1.5 border border-border rounded-lg text-sm">
 				<option value="">전체 타입</option>
 				<option value="mix">소스 혼합</option>
 				<option value="random">랜덤 작문</option>
 			</select>
-			<select bind:value={filterRating} class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
+			<select bind:value={filterRating} class="px-3 py-1.5 border border-border rounded-lg text-sm">
 				<option value="">전체 평가</option>
 				<option value="1">추천</option>
 				<option value="-1">비추천</option>
 				<option value="null">미평가</option>
 			</select>
-			<button onclick={handleFilter} class="btn btn-primary btn-sm">필터</button>
-			<button onclick={clearFilters} class="btn btn-secondary btn-sm">초기화</button>
+			<Button on:click={handleFilter} variant="primary" size="sm">필터</Button>
+			<Button on:click={clearFilters} variant="secondary" size="sm">초기화</Button>
 		</div>
 
 		{#if loading}
@@ -738,38 +740,38 @@
 		{:else if error}
 			<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">{error}</div>
 		{:else if writings.length === 0}
-			<div class="text-center py-12 text-gray-500">
+			<div class="text-center py-12 text-muted-foreground">
 				<p class="text-lg">생성된 글이 없습니다</p>
 				<p class="text-sm mt-2">수동 실행 버튼을 눌러 글을 생성해보세요.</p>
 			</div>
 		{:else}
 			<!-- 글 목록 -->
-			<div class="bg-white rounded-lg border border-gray-200 overflow-x-auto mb-6">
+			<div class="bg-white rounded-lg border border-border overflow-x-auto mb-6">
 				<table class="w-full min-w-[600px]">
-					<thead class="bg-gray-50 border-b border-gray-200">
+					<thead class="bg-background border-b border-border">
 						<tr>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">타입</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">미리보기</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">평가</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">생성일</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">ID</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">타입</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">미리보기</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">평가</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">생성일</th>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-gray-200">
+					<tbody class="divide-y divide-border">
 						{#each writings as writing (writing.id)}
 							<tr
-								class="hover:bg-gray-50 cursor-pointer"
+								class="hover:bg-muted cursor-pointer"
 								onclick={() => openWritingModal(writing)}
 							>
-								<td class="px-4 py-3 text-sm text-gray-900">{writing.id}</td>
+								<td class="px-4 py-3 text-sm text-foreground">{writing.id}</td>
 								<td class="px-4 py-3">
 									<span class="px-2 py-1 text-xs rounded-full {writing.task_type === 'mix' ? 'bg-purple-100 text-purple-800' : 'bg-indigo-100 text-indigo-800'}">
 										{getTaskTypeLabel(writing.task_type)}
 									</span>
 								</td>
-								<td class="px-4 py-3 text-sm text-gray-700 max-w-md truncate">{writing.preview}</td>
+								<td class="px-4 py-3 text-sm text-foreground max-w-md truncate">{writing.preview}</td>
 								<td class="px-4 py-3 text-lg">{getRatingIcon(writing.rating)}</td>
-								<td class="px-4 py-3 text-sm text-gray-500">{formatDateTime(writing.created_at)}</td>
+								<td class="px-4 py-3 text-sm text-muted-foreground">{formatDateTime(writing.created_at)}</td>
 							</tr>
 						{/each}
 					</tbody>
@@ -779,17 +781,17 @@
 			<!-- 페이지네이션 -->
 			{#if pages > 1}
 				<div class="flex justify-between items-center">
-					<span class="text-sm text-gray-500">
+					<span class="text-sm text-muted-foreground">
 						전체 {total}개 중 {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, total)}
 					</span>
 					<div class="flex gap-2">
-						<button onclick={prevPage} disabled={currentPage === 1} class="btn btn-secondary btn-sm disabled:opacity-50">
+						<Button on:click={prevPage} disabled={currentPage === 1} variant="secondary" size="sm">
 							이전
-						</button>
+						</Button>
 						<span class="px-3 py-1.5 text-sm">{currentPage} / {pages}</span>
-						<button onclick={nextPage} disabled={currentPage >= pages} class="btn btn-secondary btn-sm disabled:opacity-50">
+						<Button on:click={nextPage} disabled={currentPage >= pages} variant="secondary" size="sm">
 							다음
-						</button>
+						</Button>
 					</div>
 				</div>
 			{/if}
@@ -803,33 +805,33 @@
 		{:else if error}
 			<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">{error}</div>
 		{:else if sources.length === 0}
-			<div class="text-center py-12 text-gray-500">
+			<div class="text-center py-12 text-muted-foreground">
 				<p class="text-lg">소스가 없습니다</p>
 				<p class="text-sm mt-2">DB에 소스를 추가해주세요.</p>
 			</div>
 		{:else}
-			<div class="bg-white rounded-lg border border-gray-200 overflow-x-auto mb-6">
+			<div class="bg-white rounded-lg border border-border overflow-x-auto mb-6">
 				<table class="w-full min-w-[500px]">
-					<thead class="bg-gray-50 border-b border-gray-200">
+					<thead class="bg-background border-b border-border">
 						<tr>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">카테고리</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">미리보기</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">출처</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">생성일</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">ID</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">카테고리</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">미리보기</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">출처</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">생성일</th>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-gray-200">
+					<tbody class="divide-y divide-border">
 						{#each sources as source (source.id)}
 							<tr
-								class="hover:bg-gray-50 cursor-pointer"
+								class="hover:bg-muted cursor-pointer"
 								onclick={() => openSourceModal(source)}
 							>
-								<td class="px-4 py-3 text-sm text-gray-900">{source.id}</td>
-								<td class="px-4 py-3 text-sm text-gray-600">{source.category || '-'}</td>
-								<td class="px-4 py-3 text-sm text-gray-700 max-w-md truncate">{source.preview}</td>
-								<td class="px-4 py-3 text-sm text-gray-500">{source.source_info || '-'}</td>
-								<td class="px-4 py-3 text-sm text-gray-500">{formatDateTime(source.created_at)}</td>
+								<td class="px-4 py-3 text-sm text-foreground">{source.id}</td>
+								<td class="px-4 py-3 text-sm text-muted-foreground">{source.category || '-'}</td>
+								<td class="px-4 py-3 text-sm text-foreground max-w-md truncate">{source.preview}</td>
+								<td class="px-4 py-3 text-sm text-muted-foreground">{source.source_info || '-'}</td>
+								<td class="px-4 py-3 text-sm text-muted-foreground">{formatDateTime(source.created_at)}</td>
 							</tr>
 						{/each}
 					</tbody>
@@ -839,17 +841,17 @@
 			<!-- 소스 페이지네이션 -->
 			{#if sourcePages > 1}
 				<div class="flex justify-between items-center">
-					<span class="text-sm text-gray-500">
+					<span class="text-sm text-muted-foreground">
 						전체 {sourceTotal}개 중 {(sourceCurrentPage - 1) * sourcePageSize + 1} - {Math.min(sourceCurrentPage * sourcePageSize, sourceTotal)}
 					</span>
 					<div class="flex gap-2">
-						<button onclick={sourcePrevPage} disabled={sourceCurrentPage === 1} class="btn btn-secondary btn-sm disabled:opacity-50">
+						<Button on:click={sourcePrevPage} disabled={sourceCurrentPage === 1} variant="secondary" size="sm">
 							이전
-						</button>
+						</Button>
 						<span class="px-3 py-1.5 text-sm">{sourceCurrentPage} / {sourcePages}</span>
-						<button onclick={sourceNextPage} disabled={sourceCurrentPage >= sourcePages} class="btn btn-secondary btn-sm disabled:opacity-50">
+						<Button on:click={sourceNextPage} disabled={sourceCurrentPage >= sourcePages} variant="secondary" size="sm">
 							다음
-						</button>
+						</Button>
 					</div>
 				</div>
 			{/if}
@@ -859,23 +861,23 @@
 		{#if keywordStats}
 			<div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
 				<div class="card p-4">
-					<div class="text-sm text-gray-500">전체 키워드</div>
-					<div class="text-2xl font-bold text-gray-900">{keywordStats.total_keywords.toLocaleString()}</div>
+					<div class="text-sm text-muted-foreground">전체 키워드</div>
+					<div class="text-2xl font-bold text-foreground">{keywordStats.total_keywords.toLocaleString()}</div>
 				</div>
 				<div class="card p-4">
-					<div class="text-sm text-gray-500">승격됨</div>
+					<div class="text-sm text-muted-foreground">승격됨</div>
 					<div class="text-2xl font-bold text-green-600">{keywordStats.promoted.toLocaleString()}</div>
 				</div>
 				<div class="card p-4">
-					<div class="text-sm text-gray-500">불용어</div>
+					<div class="text-sm text-muted-foreground">불용어</div>
 					<div class="text-2xl font-bold text-red-600">{keywordStats.stopwords.toLocaleString()}</div>
 				</div>
 				<div class="card p-4">
-					<div class="text-sm text-gray-500">검토됨</div>
+					<div class="text-sm text-muted-foreground">검토됨</div>
 					<div class="text-2xl font-bold text-blue-600">{keywordStats.reviewed.toLocaleString()}</div>
 				</div>
 				<div class="card p-4">
-					<div class="text-sm text-gray-500">미검토</div>
+					<div class="text-sm text-muted-foreground">미검토</div>
 					<div class="text-2xl font-bold text-orange-600">{keywordStats.pending_review.toLocaleString()}</div>
 				</div>
 			</div>
@@ -897,33 +899,35 @@
 		<!-- 키워드 필터 및 액션 -->
 		<div class="mb-4 flex flex-wrap gap-2 items-center justify-between">
 			<div class="flex gap-2 items-center">
-				<label class="text-sm text-gray-600">최소 빈도:</label>
+				<label class="text-sm text-muted-foreground">최소 빈도:</label>
 				<input
 					type="number"
 					bind:value={keywordMinFreq}
 					min="1"
-					class="w-20 px-2 py-1 border border-gray-300 rounded text-sm"
+					class="w-20 px-2 py-1 border border-border rounded text-sm"
 				/>
-				<button onclick={handleKeywordFilter} class="btn btn-primary btn-sm">필터</button>
+				<Button on:click={handleKeywordFilter} variant="primary" size="sm">필터</Button>
 			</div>
 			<div class="flex gap-2">
-				<button
-					onclick={() => runAnalysis('incremental')}
+				<Button
+					on:click={() => runAnalysis('incremental')}
 					disabled={analyzing}
-					class="btn btn-secondary btn-sm disabled:opacity-50"
+					variant="secondary"
+					size="sm"
 				>
 					{analyzing ? '분석 중...' : '증분 분석'}
-				</button>
-				<button
-					onclick={() => runAnalysis('full')}
+				</Button>
+				<Button
+					on:click={() => runAnalysis('full')}
 					disabled={analyzing}
-					class="btn btn-secondary btn-sm disabled:opacity-50"
+					variant="secondary"
+					size="sm"
 				>
 					전체 분석
-				</button>
-				<button onclick={promoteBatch} class="btn btn-primary btn-sm">
+				</Button>
+				<Button on:click={promoteBatch} variant="primary" size="sm">
 					일괄 승격
-				</button>
+				</Button>
 			</div>
 		</div>
 
@@ -934,36 +938,36 @@
 		{:else if error}
 			<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">{error}</div>
 		{:else if keywords.length === 0}
-			<div class="text-center py-12 text-gray-500">
+			<div class="text-center py-12 text-muted-foreground">
 				<p class="text-lg">키워드가 없습니다</p>
 				<p class="text-sm mt-2">분석 버튼을 눌러 키워드를 추출해보세요.</p>
 			</div>
 		{:else}
 			<!-- 키워드 목록 -->
-			<div class="bg-white rounded-lg border border-gray-200 overflow-x-auto mb-6">
+			<div class="bg-white rounded-lg border border-border overflow-x-auto mb-6">
 				<table class="w-full min-w-[700px]">
-					<thead class="bg-gray-50 border-b border-gray-200">
+					<thead class="bg-background border-b border-border">
 						<tr>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">키워드</th>
-							<th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">빈도</th>
-							<th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">소스 수</th>
-							<th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">상태</th>
-							<th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">액션</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">키워드</th>
+							<th class="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase">빈도</th>
+							<th class="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase">소스 수</th>
+							<th class="px-4 py-3 text-center text-xs font-medium text-muted-foreground uppercase">상태</th>
+							<th class="px-4 py-3 text-center text-xs font-medium text-muted-foreground uppercase">액션</th>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-gray-200">
+					<tbody class="divide-y divide-border">
 						{#each keywords as kw (kw.id)}
-							<tr class="hover:bg-gray-50">
-								<td class="px-4 py-3 text-sm font-medium text-gray-900">{kw.keyword}</td>
-								<td class="px-4 py-3 text-sm text-right text-gray-700">{kw.frequency.toLocaleString()}</td>
-								<td class="px-4 py-3 text-sm text-right text-gray-500">{kw.source_count.toLocaleString()}</td>
+							<tr class="hover:bg-muted">
+								<td class="px-4 py-3 text-sm font-medium text-foreground">{kw.keyword}</td>
+								<td class="px-4 py-3 text-sm text-right text-foreground">{kw.frequency.toLocaleString()}</td>
+								<td class="px-4 py-3 text-sm text-right text-muted-foreground">{kw.source_count.toLocaleString()}</td>
 								<td class="px-4 py-3 text-center">
 									{#if kw.is_promoted}
 										<span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">승격됨</span>
 									{:else if kw.is_stopword}
 										<span class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800">불용어</span>
 									{:else}
-										<span class="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-600">미검토</span>
+										<span class="px-2 py-1 text-xs rounded-full bg-muted text-muted-foreground">미검토</span>
 									{/if}
 								</td>
 								<td class="px-4 py-3 text-center">
@@ -988,7 +992,7 @@
 											불용어
 										</button>
 									{:else}
-										<span class="text-gray-400 text-sm">-</span>
+										<span class="text-muted-foreground text-sm">-</span>
 									{/if}
 								</td>
 							</tr>
@@ -1000,19 +1004,19 @@
 			<!-- 페이지네이션 -->
 			{#if keywordTotal > keywordLimit}
 				<div class="flex justify-between items-center">
-					<span class="text-sm text-gray-500">
+					<span class="text-sm text-muted-foreground">
 						전체 {keywordTotal.toLocaleString()}개 중 {keywordOffset + 1} - {Math.min(keywordOffset + keywordLimit, keywordTotal)}
 					</span>
 					<div class="flex gap-2">
-						<button onclick={keywordPrevPage} disabled={keywordOffset === 0} class="btn btn-secondary btn-sm disabled:opacity-50">
+						<Button on:click={keywordPrevPage} disabled={keywordOffset === 0} variant="secondary" size="sm">
 							이전
-						</button>
+						</Button>
 						<span class="px-3 py-1.5 text-sm">
 							{Math.floor(keywordOffset / keywordLimit) + 1} / {Math.ceil(keywordTotal / keywordLimit)}
 						</span>
-						<button onclick={keywordNextPage} disabled={keywordOffset + keywordLimit >= keywordTotal} class="btn btn-secondary btn-sm disabled:opacity-50">
+						<Button on:click={keywordNextPage} disabled={keywordOffset + keywordLimit >= keywordTotal} variant="secondary" size="sm">
 							다음
-						</button>
+						</Button>
 					</div>
 				</div>
 			{/if}
@@ -1022,19 +1026,19 @@
 		{#if elementStats}
 			<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
 				<div class="card p-4">
-					<div class="text-sm text-gray-500">전체 소재</div>
-					<div class="text-2xl font-bold text-gray-900">{elementStats.total}</div>
+					<div class="text-sm text-muted-foreground">전체 소재</div>
+					<div class="text-2xl font-bold text-foreground">{elementStats.total}</div>
 				</div>
 				<div class="card p-4">
-					<div class="text-sm text-gray-500">시드</div>
-					<div class="text-2xl font-bold text-gray-600">{elementStats.topic_by_source?.seed ?? 0}</div>
+					<div class="text-sm text-muted-foreground">시드</div>
+					<div class="text-2xl font-bold text-muted-foreground">{elementStats.topic_by_source?.seed ?? 0}</div>
 				</div>
 				<div class="card p-4">
-					<div class="text-sm text-gray-500">자동 추출</div>
+					<div class="text-sm text-muted-foreground">자동 추출</div>
 					<div class="text-2xl font-bold text-green-600">{elementStats.topic_by_source?.auto ?? 0}</div>
 				</div>
 				<div class="card p-4">
-					<div class="text-sm text-gray-500">수동 추가</div>
+					<div class="text-sm text-muted-foreground">수동 추가</div>
 					<div class="text-2xl font-bold text-blue-600">{elementStats.topic_by_source?.manual ?? 0}</div>
 				</div>
 			</div>
@@ -1043,27 +1047,28 @@
 		<!-- 소재 필터 및 액션 -->
 		<div class="mb-4 flex flex-wrap gap-2 items-center justify-between">
 			<div class="flex gap-2 items-center">
-				<select bind:value={elementFilterCategory} class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
+				<select bind:value={elementFilterCategory} class="px-3 py-1.5 border border-border rounded-lg text-sm">
 					<option value="">전체 카테고리</option>
 					<option value="topic">소재(topic)</option>
 					<option value="tone">어조(tone)</option>
 					<option value="ending">마무리(ending)</option>
 				</select>
-				<select bind:value={elementFilterSourceType} class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
+				<select bind:value={elementFilterSourceType} class="px-3 py-1.5 border border-border rounded-lg text-sm">
 					<option value="">전체 출처</option>
 					<option value="seed">시드</option>
 					<option value="auto">자동 추출</option>
 					<option value="manual">수동 추가</option>
 				</select>
-				<button onclick={handleElementFilter} class="btn btn-primary btn-sm">필터</button>
+				<Button on:click={handleElementFilter} variant="primary" size="sm">필터</Button>
 			</div>
-			<button
-				onclick={extractTopics}
+			<Button
+				on:click={extractTopics}
 				disabled={extracting}
-				class="btn btn-secondary btn-sm disabled:opacity-50"
+				variant="secondary"
+				size="sm"
 			>
 				{extracting ? '추출 중...' : '소재 추출'}
-			</button>
+			</Button>
 		</div>
 
 		{#if loading}
@@ -1073,34 +1078,34 @@
 		{:else if error}
 			<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">{error}</div>
 		{:else if elements.length === 0}
-			<div class="text-center py-12 text-gray-500">
+			<div class="text-center py-12 text-muted-foreground">
 				<p class="text-lg">소재가 없습니다</p>
 				<p class="text-sm mt-2">소재 추출 버튼을 눌러 소재를 수집해보세요.</p>
 			</div>
 		{:else}
 			<!-- 소재 목록 -->
-			<div class="bg-white rounded-lg border border-gray-200 overflow-x-auto mb-6">
+			<div class="bg-white rounded-lg border border-border overflow-x-auto mb-6">
 				<table class="w-full min-w-[600px]">
-					<thead class="bg-gray-50 border-b border-gray-200">
+					<thead class="bg-background border-b border-border">
 						<tr>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">소재명</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">카테고리</th>
-							<th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">출처</th>
-							<th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">빈도</th>
-							<th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">액션</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">소재명</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">카테고리</th>
+							<th class="px-4 py-3 text-center text-xs font-medium text-muted-foreground uppercase">출처</th>
+							<th class="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase">빈도</th>
+							<th class="px-4 py-3 text-center text-xs font-medium text-muted-foreground uppercase">액션</th>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-gray-200">
+					<tbody class="divide-y divide-border">
 						{#each elements as elem (elem.id)}
-							<tr class="hover:bg-gray-50">
-								<td class="px-4 py-3 text-sm font-medium text-gray-900">{elem.name}</td>
-								<td class="px-4 py-3 text-sm text-gray-600">{elem.category}</td>
+							<tr class="hover:bg-muted">
+								<td class="px-4 py-3 text-sm font-medium text-foreground">{elem.name}</td>
+								<td class="px-4 py-3 text-sm text-muted-foreground">{elem.category}</td>
 								<td class="px-4 py-3 text-center">
 									<span class="px-2 py-1 text-xs rounded-full {getSourceTypeClass(elem.source_type)}">
 										{getSourceTypeLabel(elem.source_type)}
 									</span>
 								</td>
-								<td class="px-4 py-3 text-sm text-right text-gray-700">{elem.frequency}</td>
+								<td class="px-4 py-3 text-sm text-right text-foreground">{elem.frequency}</td>
 								<td class="px-4 py-3 text-center">
 									<button
 										onclick={() => deleteElement(elem.id, elem.name)}
@@ -1118,17 +1123,17 @@
 			<!-- 페이지네이션 -->
 			{#if elementPages > 1}
 				<div class="flex justify-between items-center">
-					<span class="text-sm text-gray-500">
+					<span class="text-sm text-muted-foreground">
 						전체 {elementTotal}개 중 {(elementCurrentPage - 1) * elementPageSize + 1} - {Math.min(elementCurrentPage * elementPageSize, elementTotal)}
 					</span>
 					<div class="flex gap-2">
-						<button onclick={elementPrevPage} disabled={elementCurrentPage === 1} class="btn btn-secondary btn-sm disabled:opacity-50">
+						<Button on:click={elementPrevPage} disabled={elementCurrentPage === 1} variant="secondary" size="sm">
 							이전
-						</button>
+						</Button>
 						<span class="px-3 py-1.5 text-sm">{elementCurrentPage} / {elementPages}</span>
-						<button onclick={elementNextPage} disabled={elementCurrentPage >= elementPages} class="btn btn-secondary btn-sm disabled:opacity-50">
+						<Button on:click={elementNextPage} disabled={elementCurrentPage >= elementPages} variant="secondary" size="sm">
 							다음
-						</button>
+						</Button>
 					</div>
 				</div>
 			{/if}
@@ -1136,14 +1141,15 @@
 	{:else if activeTab === 'batches'}
 		<!-- 배치 헤더 -->
 		<div class="mb-4 flex justify-between items-center">
-			<h3 class="text-lg font-semibold text-gray-900">글쓰기 배치</h3>
-			<button
-				onclick={createBatch}
+			<h3 class="text-lg font-semibold text-foreground">글쓰기 배치</h3>
+			<Button
+				on:click={createBatch}
 				disabled={creatingBatch}
-				class="btn btn-primary btn-sm disabled:opacity-50"
+				variant="primary"
+				size="sm"
 			>
 				{creatingBatch ? '생성 중...' : '새 배치 생성'}
-			</button>
+			</Button>
 		</div>
 
 		{#if loading}
@@ -1153,28 +1159,28 @@
 		{:else if error}
 			<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">{error}</div>
 		{:else if batches.length === 0}
-			<div class="text-center py-12 text-gray-500">
+			<div class="text-center py-12 text-muted-foreground">
 				<p class="text-lg">배치가 없습니다</p>
 				<p class="text-sm mt-2">'새 배치 생성' 버튼을 눌러 글쓰기를 시작하세요.</p>
 			</div>
 		{:else}
 			<!-- 배치 목록 -->
-			<div class="bg-white rounded-lg border border-gray-200 overflow-x-auto mb-6">
+			<div class="bg-white rounded-lg border border-border overflow-x-auto mb-6">
 				<table class="w-full min-w-[600px]">
-					<thead class="bg-gray-50 border-b border-gray-200">
+					<thead class="bg-background border-b border-border">
 						<tr>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-							<th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">상태</th>
-							<th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">진행</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">생성일</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">완료일</th>
-							<th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">액션</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">ID</th>
+							<th class="px-4 py-3 text-center text-xs font-medium text-muted-foreground uppercase">상태</th>
+							<th class="px-4 py-3 text-center text-xs font-medium text-muted-foreground uppercase">진행</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">생성일</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">완료일</th>
+							<th class="px-4 py-3 text-center text-xs font-medium text-muted-foreground uppercase">액션</th>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-gray-200">
+					<tbody class="divide-y divide-border">
 						{#each batches as batch (batch.id)}
-							<tr class="hover:bg-gray-50">
-								<td class="px-4 py-3 text-sm font-medium text-gray-900">#{batch.id}</td>
+							<tr class="hover:bg-muted">
+								<td class="px-4 py-3 text-sm font-medium text-foreground">#{batch.id}</td>
 								<td class="px-4 py-3 text-center">
 									<span class="px-2 py-1 text-xs rounded-full {getBatchStatusClass(batch.status)}">
 										{getBatchStatusLabel(batch.status)}
@@ -1182,19 +1188,19 @@
 								</td>
 								<td class="px-4 py-3">
 									<div class="flex items-center gap-2">
-										<div class="flex-1 bg-gray-200 rounded-full h-2">
+										<div class="flex-1 bg-secondary rounded-full h-2">
 											<div
 												class="bg-blue-600 h-2 rounded-full transition-all"
 												style="width: {batch.progress_percent}%"
 											></div>
 										</div>
-										<span class="text-sm text-gray-600 w-16 text-right">
+										<span class="text-sm text-muted-foreground w-16 text-right">
 											{batch.completed}/{batch.total}
 										</span>
 									</div>
 								</td>
-								<td class="px-4 py-3 text-sm text-gray-500">{formatDateTime(batch.created_at)}</td>
-								<td class="px-4 py-3 text-sm text-gray-500">{formatDateTime(batch.completed_at)}</td>
+								<td class="px-4 py-3 text-sm text-muted-foreground">{formatDateTime(batch.created_at)}</td>
+								<td class="px-4 py-3 text-sm text-muted-foreground">{formatDateTime(batch.completed_at)}</td>
 								<td class="px-4 py-3 text-center">
 									<button
 										onclick={() => viewBatchStatus(batch.id)}
@@ -1212,17 +1218,17 @@
 			<!-- 페이지네이션 -->
 			{#if batchPages > 1}
 				<div class="flex justify-between items-center">
-					<span class="text-sm text-gray-500">
+					<span class="text-sm text-muted-foreground">
 						전체 {batchTotal}개 중 {(batchPage - 1) * batchPageSize + 1} - {Math.min(batchPage * batchPageSize, batchTotal)}
 					</span>
 					<div class="flex gap-2">
-						<button onclick={batchPrevPage} disabled={batchPage === 1} class="btn btn-secondary btn-sm disabled:opacity-50">
+						<Button on:click={batchPrevPage} disabled={batchPage === 1} variant="secondary" size="sm">
 							이전
-						</button>
+						</Button>
 						<span class="px-3 py-1.5 text-sm">{batchPage} / {batchPages}</span>
-						<button onclick={batchNextPage} disabled={batchPage >= batchPages} class="btn btn-secondary btn-sm disabled:opacity-50">
+						<Button on:click={batchNextPage} disabled={batchPage >= batchPages} variant="secondary" size="sm">
 							다음
-						</button>
+						</Button>
 					</div>
 				</div>
 			{/if}
@@ -1246,12 +1252,12 @@
 			<div class="p-6">
 				<div class="flex justify-between items-start mb-4">
 					<div>
-						<h3 class="text-lg font-bold text-gray-900">배치 #{activeBatch.id}</h3>
+						<h3 class="text-lg font-bold text-foreground">배치 #{activeBatch.id}</h3>
 						<span class="px-2 py-1 text-xs rounded-full {getBatchStatusClass(activeBatch.status)}">
 							{getBatchStatusLabel(activeBatch.status)}
 						</span>
 					</div>
-					<button onclick={closeBatchModal} class="text-gray-400 hover:text-gray-600 text-2xl">
+					<button onclick={closeBatchModal} class="text-muted-foreground hover:text-muted-foreground text-2xl">
 						&times;
 					</button>
 				</div>
@@ -1259,12 +1265,12 @@
 				<!-- 진행 상황 -->
 				<div class="mb-6">
 					<div class="flex justify-between items-center mb-2">
-						<span class="text-sm font-medium text-gray-700">진행 상황</span>
-						<span class="text-sm text-gray-600">
+						<span class="text-sm font-medium text-foreground">진행 상황</span>
+						<span class="text-sm text-muted-foreground">
 							{activeBatch.completed} 완료 / {activeBatch.failed} 실패 / {activeBatch.total} 전체
 						</span>
 					</div>
-					<div class="w-full bg-gray-200 rounded-full h-3">
+					<div class="w-full bg-secondary rounded-full h-3">
 						<div
 							class="h-3 rounded-full transition-all {activeBatch.failed > 0 ? 'bg-yellow-500' : 'bg-blue-600'}"
 							style="width: {activeBatch.progress_percent}%"
@@ -1277,21 +1283,21 @@
 
 				<!-- LLM 요청 목록 -->
 				<div class="mb-4">
-					<h4 class="text-sm font-medium text-gray-700 mb-2">LLM 요청</h4>
+					<h4 class="text-sm font-medium text-foreground mb-2">LLM 요청</h4>
 					<div class="max-h-48 overflow-auto border rounded-lg">
 						<table class="w-full text-sm">
-							<thead class="bg-gray-50 sticky top-0">
+							<thead class="bg-background sticky top-0">
 								<tr>
-									<th class="px-3 py-2 text-left text-xs text-gray-500">ID</th>
-									<th class="px-3 py-2 text-left text-xs text-gray-500">타입</th>
-									<th class="px-3 py-2 text-center text-xs text-gray-500">상태</th>
+									<th class="px-3 py-2 text-left text-xs text-muted-foreground">ID</th>
+									<th class="px-3 py-2 text-left text-xs text-muted-foreground">타입</th>
+									<th class="px-3 py-2 text-center text-xs text-muted-foreground">상태</th>
 								</tr>
 							</thead>
-							<tbody class="divide-y divide-gray-100">
+							<tbody class="divide-y divide-border">
 								{#each activeBatch.requests as req}
-									<tr class="hover:bg-gray-50">
-										<td class="px-3 py-2 text-gray-900">{req.id}</td>
-										<td class="px-3 py-2 text-gray-600">{req.caller_id.split('_')[0]}</td>
+									<tr class="hover:bg-muted">
+										<td class="px-3 py-2 text-foreground">{req.id}</td>
+										<td class="px-3 py-2 text-muted-foreground">{req.caller_id.split('_')[0]}</td>
 										<td class="px-3 py-2 text-center">
 											{#if req.status === 'completed'}
 												<span class="text-green-600">✓</span>
@@ -1300,7 +1306,7 @@
 											{:else if req.status === 'processing'}
 												<span class="text-blue-600 animate-pulse">●</span>
 											{:else}
-												<span class="text-gray-400">○</span>
+												<span class="text-muted-foreground">○</span>
 											{/if}
 										</td>
 									</tr>
@@ -1313,17 +1319,17 @@
 				<!-- 생성된 글 목록 -->
 				{#if activeBatch.writings && activeBatch.writings.length > 0}
 					<div class="mb-4">
-						<h4 class="text-sm font-medium text-gray-700 mb-2">생성된 글 ({activeBatch.writings.length}개)</h4>
+						<h4 class="text-sm font-medium text-foreground mb-2">생성된 글 ({activeBatch.writings.length}개)</h4>
 						<div class="space-y-2 max-h-48 overflow-auto">
 							{#each activeBatch.writings as writing}
-								<div class="p-3 bg-gray-50 rounded-lg">
+								<div class="p-3 bg-background rounded-lg">
 									<div class="flex justify-between items-start mb-1">
 										<span class="text-xs px-2 py-0.5 rounded-full {writing.task_type === 'mix' ? 'bg-purple-100 text-purple-800' : 'bg-indigo-100 text-indigo-800'}">
 											{getTaskTypeLabel(writing.task_type)}
 										</span>
-										<span class="text-xs text-gray-500">#{writing.id}</span>
+										<span class="text-xs text-muted-foreground">#{writing.id}</span>
 									</div>
-									<p class="text-sm text-gray-700 line-clamp-2">{writing.preview}</p>
+									<p class="text-sm text-foreground line-clamp-2">{writing.preview}</p>
 								</div>
 							{/each}
 						</div>
@@ -1331,7 +1337,7 @@
 				{/if}
 
 				<div class="flex justify-end pt-4 border-t">
-					<button onclick={closeBatchModal} class="btn btn-secondary btn-sm">닫기</button>
+					<Button on:click={closeBatchModal} variant="secondary" size="sm">닫기</Button>
 				</div>
 			</div>
 		</div>
@@ -1354,63 +1360,66 @@
 			<div class="p-6">
 				<div class="flex justify-between items-start mb-4">
 					<div>
-						<h3 class="text-lg font-bold text-gray-900">글 상세 #{selectedWriting.id}</h3>
+						<h3 class="text-lg font-bold text-foreground">글 상세 #{selectedWriting.id}</h3>
 						<span class="px-2 py-1 text-xs rounded-full {selectedWriting.task_type === 'mix' ? 'bg-purple-100 text-purple-800' : 'bg-indigo-100 text-indigo-800'}">
 							{getTaskTypeLabel(selectedWriting.task_type)}
 						</span>
 					</div>
-					<button onclick={closeModal} class="text-gray-400 hover:text-gray-600 text-2xl">
+					<button onclick={closeModal} class="text-muted-foreground hover:text-muted-foreground text-2xl">
 						&times;
 					</button>
 				</div>
 
 				<div class="grid grid-cols-2 gap-4 text-sm mb-4">
 					<div>
-						<span class="text-gray-500">생성일:</span>
+						<span class="text-muted-foreground">생성일:</span>
 						<span class="ml-1">{formatDateTime(selectedWriting.created_at)}</span>
 					</div>
 					<div>
-						<span class="text-gray-500">수정일:</span>
+						<span class="text-muted-foreground">수정일:</span>
 						<span class="ml-1">{formatDateTime(selectedWriting.updated_at)}</span>
 					</div>
 					<div>
-						<span class="text-gray-500">소스 ID:</span>
+						<span class="text-muted-foreground">소스 ID:</span>
 						<span class="ml-1">{selectedWriting.source_ids?.join(', ') || '-'}</span>
 					</div>
 					<div>
-						<span class="text-gray-500">평가:</span>
+						<span class="text-muted-foreground">평가:</span>
 						<span class="ml-1 text-lg">{getRatingIcon(selectedWriting.rating)}</span>
 					</div>
 				</div>
 
 				<!-- 평가 버튼 -->
 				<div class="mb-4 flex gap-2">
-					<button
-						onclick={() => rateWriting(1)}
-						class="btn btn-sm {selectedWriting.rating === 1 ? 'btn-primary' : 'btn-secondary'}"
+					<Button
+						on:click={() => rateWriting(1)}
+						variant={selectedWriting.rating === 1 ? 'primary' : 'secondary'}
+						size="sm"
 					>
 						👍 추천
-					</button>
-					<button
-						onclick={() => rateWriting(-1)}
-						class="btn btn-sm {selectedWriting.rating === -1 ? 'btn-danger' : 'btn-secondary'}"
+					</Button>
+					<Button
+						on:click={() => rateWriting(-1)}
+						variant={selectedWriting.rating === -1 ? 'destructive' : 'secondary'}
+						size="sm"
 					>
 						👎 비추천
-					</button>
+					</Button>
 					{#if selectedWriting.rating !== null}
-						<button
-							onclick={() => rateWriting(null)}
-							class="btn btn-sm btn-secondary"
+						<Button
+							on:click={() => rateWriting(null)}
+							variant="secondary"
+							size="sm"
 						>
 							평가 취소
-						</button>
+						</Button>
 					{/if}
 				</div>
 
 				<!-- 본문 -->
 				<div class="mb-4">
 					<div class="flex justify-between items-center mb-2">
-						<div class="text-sm font-medium text-gray-700">본문</div>
+						<div class="text-sm font-medium text-foreground">본문</div>
 						{#if !editMode}
 							<button onclick={() => editMode = true} class="text-blue-600 hover:text-blue-800 text-sm">
 								수정
@@ -1421,14 +1430,14 @@
 						<textarea
 							bind:value={editContent}
 							rows="12"
-							class="w-full px-3 py-2 border border-gray-300 rounded-lg resize-none text-sm"
+							class="w-full px-3 py-2 border border-border rounded-lg resize-none text-sm"
 						></textarea>
 						<div class="mt-2 flex gap-2">
-							<button onclick={saveEdit} class="btn btn-primary btn-sm">저장</button>
-							<button onclick={() => { editMode = false; editContent = selectedWriting?.content || ''; }} class="btn btn-secondary btn-sm">취소</button>
+							<Button on:click={saveEdit} variant="primary" size="sm">저장</Button>
+							<Button on:click={() => { editMode = false; editContent = selectedWriting?.content || ''; }} variant="secondary" size="sm">취소</Button>
 						</div>
 					{:else}
-						<div class="p-4 bg-gray-50 rounded-lg whitespace-pre-wrap text-sm max-h-96 overflow-auto">
+						<div class="p-4 bg-background rounded-lg whitespace-pre-wrap text-sm max-h-96 overflow-auto">
 							{selectedWriting.content}
 						</div>
 					{/if}
@@ -1437,18 +1446,18 @@
 				<!-- 프롬프트 (접힘) -->
 				{#if selectedWriting.prompt_used}
 					<details class="mb-4">
-						<summary class="text-sm font-medium text-gray-500 cursor-pointer hover:text-gray-700">
+						<summary class="text-sm font-medium text-muted-foreground cursor-pointer hover:text-foreground">
 							사용된 프롬프트 보기
 						</summary>
-						<div class="mt-2 p-3 bg-gray-100 rounded-lg text-xs whitespace-pre-wrap max-h-64 overflow-auto">
+						<div class="mt-2 p-3 bg-muted rounded-lg text-xs whitespace-pre-wrap max-h-64 overflow-auto">
 							{selectedWriting.prompt_used}
 						</div>
 					</details>
 				{/if}
 
 				<div class="flex gap-2 pt-4 border-t">
-					<button onclick={deleteWriting} class="btn btn-danger btn-sm">삭제</button>
-					<button onclick={closeModal} class="btn btn-secondary btn-sm ml-auto">닫기</button>
+					<Button on:click={deleteWriting} variant="destructive" size="sm">삭제</Button>
+					<Button on:click={closeModal} variant="secondary" size="sm" class="ml-auto">닫기</Button>
 				</div>
 			</div>
 		</div>
@@ -1470,37 +1479,37 @@
 		>
 			<div class="p-6">
 				<div class="flex justify-between items-start mb-4">
-					<h3 class="text-lg font-bold text-gray-900">소스 #{selectedSource.id}</h3>
-					<button onclick={closeSourceModal} class="text-gray-400 hover:text-gray-600 text-2xl">
+					<h3 class="text-lg font-bold text-foreground">소스 #{selectedSource.id}</h3>
+					<button onclick={closeSourceModal} class="text-muted-foreground hover:text-muted-foreground text-2xl">
 						&times;
 					</button>
 				</div>
 
 				<div class="grid grid-cols-2 gap-4 text-sm mb-4">
 					<div>
-						<span class="text-gray-500">카테고리:</span>
+						<span class="text-muted-foreground">카테고리:</span>
 						<span class="ml-1">{selectedSource.category || '-'}</span>
 					</div>
 					<div>
-						<span class="text-gray-500">출처:</span>
+						<span class="text-muted-foreground">출처:</span>
 						<span class="ml-1">{selectedSource.source_info || '-'}</span>
 					</div>
 					<div>
-						<span class="text-gray-500">생성일:</span>
+						<span class="text-muted-foreground">생성일:</span>
 						<span class="ml-1">{formatDateTime(selectedSource.created_at)}</span>
 					</div>
 				</div>
 
 				<div class="mb-4">
-					<div class="text-sm font-medium text-gray-700 mb-2">내용</div>
-					<div class="p-4 bg-gray-50 rounded-lg whitespace-pre-wrap text-sm max-h-96 overflow-auto">
+					<div class="text-sm font-medium text-foreground mb-2">내용</div>
+					<div class="p-4 bg-background rounded-lg whitespace-pre-wrap text-sm max-h-96 overflow-auto">
 						{selectedSource.content}
 					</div>
 				</div>
 
 				<div class="flex gap-2 pt-4 border-t">
-					<button onclick={deleteSource} class="btn btn-danger btn-sm">삭제</button>
-					<button onclick={closeSourceModal} class="btn btn-secondary btn-sm ml-auto">닫기</button>
+					<Button on:click={deleteSource} variant="destructive" size="sm">삭제</Button>
+					<Button on:click={closeSourceModal} variant="secondary" size="sm" class="ml-auto">닫기</Button>
 				</div>
 			</div>
 		</div>

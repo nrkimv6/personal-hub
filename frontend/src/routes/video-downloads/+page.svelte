@@ -48,12 +48,12 @@
 
   // 상태별 스타일
   const statusStyles: Record<VideoDownloadStatus, { label: string; color: string }> = {
-    pending: { label: '대기중', color: 'text-gray-600 bg-gray-100' },
+    pending: { label: '대기중', color: 'text-muted-foreground bg-muted' },
     picked: { label: '준비중', color: 'text-yellow-600 bg-yellow-100' },
     processing: { label: '다운로드중', color: 'text-blue-600 bg-blue-100' },
     completed: { label: '완료', color: 'text-green-600 bg-green-100' },
     failed: { label: '실패', color: 'text-red-600 bg-red-100' },
-    cancelled: { label: '취소됨', color: 'text-gray-500 bg-gray-50' },
+    cancelled: { label: '취소됨', color: 'text-muted-foreground bg-background' },
   };
 
   async function fetchDownloads() {
@@ -278,8 +278,8 @@
   <!-- 헤더 -->
   <div class="flex items-center justify-between mb-6">
     <div>
-      <h1 class="text-2xl font-bold text-gray-900">비디오 다운로드</h1>
-      <p class="text-sm text-gray-500 mt-1">YouTube, Vimeo 영상 다운로드</p>
+      <h1 class="text-2xl font-bold text-foreground">비디오 다운로드</h1>
+      <p class="text-sm text-muted-foreground mt-1">YouTube, Vimeo 영상 다운로드</p>
     </div>
     <button
       onclick={() => showAddModal = true}
@@ -293,52 +293,52 @@
   <!-- 통계 카드 -->
   {#if stats}
     <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
-      <div class="bg-white rounded-lg p-3 border border-gray-200">
-        <div class="text-xs text-gray-500">전체</div>
-        <div class="text-xl font-bold text-gray-900">{stats.total}</div>
+      <div class="bg-white rounded-lg p-3 border border-border">
+        <div class="text-xs text-muted-foreground">전체</div>
+        <div class="text-xl font-bold text-foreground">{stats.total}</div>
       </div>
-      <div class="bg-white rounded-lg p-3 border border-gray-200">
-        <div class="text-xs text-gray-500">대기중</div>
-        <div class="text-xl font-bold text-gray-600">{stats.pending}</div>
+      <div class="bg-white rounded-lg p-3 border border-border">
+        <div class="text-xs text-muted-foreground">대기중</div>
+        <div class="text-xl font-bold text-muted-foreground">{stats.pending}</div>
       </div>
-      <div class="bg-white rounded-lg p-3 border border-gray-200">
-        <div class="text-xs text-gray-500">진행중</div>
+      <div class="bg-white rounded-lg p-3 border border-border">
+        <div class="text-xs text-muted-foreground">진행중</div>
         <div class="text-xl font-bold text-blue-600">{stats.processing + stats.picked}</div>
       </div>
-      <div class="bg-white rounded-lg p-3 border border-gray-200">
-        <div class="text-xs text-gray-500">완료</div>
+      <div class="bg-white rounded-lg p-3 border border-border">
+        <div class="text-xs text-muted-foreground">완료</div>
         <div class="text-xl font-bold text-green-600">{stats.completed}</div>
       </div>
-      <div class="bg-white rounded-lg p-3 border border-gray-200">
-        <div class="text-xs text-gray-500">실패</div>
+      <div class="bg-white rounded-lg p-3 border border-border">
+        <div class="text-xs text-muted-foreground">실패</div>
         <div class="text-xl font-bold text-red-600">{stats.failed}</div>
       </div>
-      <div class="bg-white rounded-lg p-3 border border-gray-200">
-        <div class="text-xs text-gray-500">취소</div>
-        <div class="text-xl font-bold text-gray-500">{stats.cancelled}</div>
+      <div class="bg-white rounded-lg p-3 border border-border">
+        <div class="text-xs text-muted-foreground">취소</div>
+        <div class="text-xl font-bold text-muted-foreground">{stats.cancelled}</div>
       </div>
-      <div class="bg-white rounded-lg p-3 border border-gray-200 flex items-center gap-2">
+      <div class="bg-white rounded-lg p-3 border border-border flex items-center gap-2">
         <input
           type="checkbox"
           id="autoRefresh"
           bind:checked={autoRefresh}
           class="rounded"
         />
-        <label for="autoRefresh" class="text-xs text-gray-500 cursor-pointer">자동 새로고침</label>
+        <label for="autoRefresh" class="text-xs text-muted-foreground cursor-pointer">자동 새로고침</label>
       </div>
     </div>
   {/if}
 
   <!-- 필터 -->
-  <div class="bg-white rounded-lg p-4 border border-gray-200 mb-4">
+  <div class="bg-white rounded-lg p-4 border border-border mb-4">
     <div class="flex flex-wrap gap-4">
       <div>
-        <label for="statusFilter" class="block text-xs text-gray-500 mb-1">상태</label>
+        <label for="statusFilter" class="block text-xs text-muted-foreground mb-1">상태</label>
         <select
           id="statusFilter"
           bind:value={statusFilter}
           onchange={handleFilterChange}
-          class="px-3 py-1.5 border border-gray-300 rounded-md text-sm"
+          class="px-3 py-1.5 border border-border rounded-md text-sm"
         >
           <option value="">전체</option>
           <option value="pending">대기중</option>
@@ -349,12 +349,12 @@
         </select>
       </div>
       <div>
-        <label for="typeFilter" class="block text-xs text-gray-500 mb-1">타입</label>
+        <label for="typeFilter" class="block text-xs text-muted-foreground mb-1">타입</label>
         <select
           id="typeFilter"
           bind:value={typeFilter}
           onchange={handleFilterChange}
-          class="px-3 py-1.5 border border-gray-300 rounded-md text-sm"
+          class="px-3 py-1.5 border border-border rounded-md text-sm"
         >
           <option value="">전체</option>
           <option value="youtube">YouTube</option>
@@ -367,17 +367,17 @@
 
   <!-- 다운로드 목록 -->
   {#if loading && downloads.length === 0}
-    <div class="bg-white rounded-lg p-12 border border-gray-200 text-center">
+    <div class="bg-white rounded-lg p-12 border border-border text-center">
       <div class="animate-spin w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full mx-auto mb-4"></div>
-      <p class="text-gray-500">로딩중...</p>
+      <p class="text-muted-foreground">로딩중...</p>
     </div>
   {:else if error}
     <div class="bg-red-50 rounded-lg p-4 border border-red-200 text-red-600">
       {error}
     </div>
   {:else if downloads.length === 0}
-    <div class="bg-white rounded-lg p-12 border border-gray-200 text-center">
-      <p class="text-gray-500 mb-4">다운로드 요청이 없습니다.</p>
+    <div class="bg-white rounded-lg p-12 border border-border text-center">
+      <p class="text-muted-foreground mb-4">다운로드 요청이 없습니다.</p>
       <button
         onclick={() => showAddModal = true}
         class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
@@ -386,24 +386,24 @@
       </button>
     </div>
   {:else}
-    <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+    <div class="bg-white rounded-lg border border-border overflow-hidden">
       <table class="w-full">
-        <thead class="bg-gray-50 border-b border-gray-200">
+        <thead class="bg-background border-b border-border">
           <tr>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">타입</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">URL / 제목</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">상태</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">진행률</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">크기</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">생성일</th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">액션</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">타입</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">URL / 제목</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">상태</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">진행률</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">크기</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">생성일</th>
+            <th class="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase">액션</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-200">
+        <tbody class="divide-y divide-border">
           {#each downloads as download (download.id)}
-            <tr class="hover:bg-gray-50">
+            <tr class="hover:bg-muted">
               <td class="px-4 py-3">
-                <span class="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium {typeStyles[download.download_type]?.color || 'text-gray-600 bg-gray-100'}">
+                <span class="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium {typeStyles[download.download_type]?.color || 'text-muted-foreground bg-muted'}">
                   {typeStyles[download.download_type]?.icon || '?'}
                   {typeStyles[download.download_type]?.label || download.download_type}
                 </span>
@@ -411,10 +411,10 @@
               <td class="px-4 py-3">
                 <div class="max-w-md">
                   {#if download.output_filename}
-                    <div class="font-medium text-gray-900 truncate" title={download.output_filename}>{download.output_filename}</div>
+                    <div class="font-medium text-foreground truncate" title={download.output_filename}>{download.output_filename}</div>
                   {/if}
                   {#if download.title}
-                    <div class="text-xs text-gray-500 truncate" title={download.title}>{download.title}</div>
+                    <div class="text-xs text-muted-foreground truncate" title={download.title}>{download.title}</div>
                   {/if}
                   <a
                     href={download.url}
@@ -428,7 +428,7 @@
                 </div>
               </td>
               <td class="px-4 py-3">
-                <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium {statusStyles[download.status]?.color || 'text-gray-600 bg-gray-100'}">
+                <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium {statusStyles[download.status]?.color || 'text-muted-foreground bg-muted'}">
                   {statusStyles[download.status]?.label || download.status}
                 </span>
                 {#if download.error_message}
@@ -440,24 +440,24 @@
               <td class="px-4 py-3">
                 {#if download.status === 'processing'}
                   <div class="w-24">
-                    <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
+                    <div class="h-2 bg-secondary rounded-full overflow-hidden">
                       <div
                         class="h-full bg-blue-600 transition-all duration-300"
                         style="width: {download.progress}%"
                       ></div>
                     </div>
-                    <div class="text-xs text-gray-500 mt-1">{download.progress}%</div>
+                    <div class="text-xs text-muted-foreground mt-1">{download.progress}%</div>
                   </div>
                 {:else if download.status === 'completed'}
                   <span class="text-green-600 text-sm">100%</span>
                 {:else}
-                  <span class="text-gray-400 text-sm">-</span>
+                  <span class="text-muted-foreground text-sm">-</span>
                 {/if}
               </td>
-              <td class="px-4 py-3 text-sm text-gray-600">
+              <td class="px-4 py-3 text-sm text-muted-foreground">
                 {formatBytes(download.file_size)}
               </td>
-              <td class="px-4 py-3 text-sm text-gray-600">
+              <td class="px-4 py-3 text-sm text-muted-foreground">
                 {formatDate(download.created_at)}
               </td>
               <td class="px-4 py-3 text-right">
@@ -478,19 +478,19 @@
                     </button>
                     <button
                       onclick={() => handleDelete(download.id)}
-                      class="text-xs text-gray-500 hover:text-red-600"
+                      class="text-xs text-muted-foreground hover:text-red-600"
                     >
                       삭제
                     </button>
                   {:else if download.status === 'completed'}
                     {#if download.output_path}
-                      <span class="text-xs text-gray-500" title={download.output_path}>
+                      <span class="text-xs text-muted-foreground" title={download.output_path}>
                         저장됨
                       </span>
                     {/if}
                     <button
                       onclick={() => handleDelete(download.id)}
-                      class="text-xs text-gray-500 hover:text-red-600"
+                      class="text-xs text-muted-foreground hover:text-red-600"
                     >
                       삭제
                     </button>
@@ -506,24 +506,24 @@
     <!-- 페이지네이션 -->
     {#if totalPages > 1}
       <div class="flex items-center justify-between mt-4">
-        <div class="text-sm text-gray-500">
+        <div class="text-sm text-muted-foreground">
           총 {total}개 중 {(page - 1) * limit + 1}-{Math.min(page * limit, total)}개
         </div>
         <div class="flex items-center gap-2">
           <button
             onclick={() => handlePageChange(page - 1)}
             disabled={!canPrevPage}
-            class="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+            class="px-3 py-1 border border-border rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-muted"
           >
             이전
           </button>
-          <span class="text-sm text-gray-600">
+          <span class="text-sm text-muted-foreground">
             {page} / {totalPages}
           </span>
           <button
             onclick={() => handlePageChange(page + 1)}
             disabled={!canNextPage}
-            class="px-3 py-1 border border-gray-300 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+            class="px-3 py-1 border border-border rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-muted"
           >
             다음
           </button>
@@ -537,10 +537,10 @@
 {#if showAddModal}
   <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
     <div class="bg-white rounded-lg w-full max-w-lg mx-4 overflow-hidden shadow-xl max-h-[90vh] flex flex-col">
-      <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-        <h2 class="text-lg font-semibold text-gray-900">새 다운로드</h2>
+      <div class="px-6 py-4 border-b border-border flex items-center justify-between">
+        <h2 class="text-lg font-semibold text-foreground">새 다운로드</h2>
         <label class="flex items-center gap-2 cursor-pointer">
-          <span class="text-sm text-gray-600">배치 모드</span>
+          <span class="text-sm text-muted-foreground">배치 모드</span>
           <button
             type="button"
             onclick={() => batchMode = !batchMode}
@@ -557,7 +557,7 @@
         {#if batchMode}
           <!-- 배치 모드: 복수 URL 입력 -->
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2">
+            <label class="block text-sm font-medium text-foreground mb-2">
               URL 목록 <span class="text-red-500">*</span>
             </label>
             <div class="space-y-2 max-h-48 overflow-y-auto">
@@ -568,13 +568,13 @@
                     value={url}
                     oninput={(e) => updateBatchUrl(index, (e.target as HTMLInputElement).value)}
                     placeholder="https://vimeo.com/..."
-                    class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    class="flex-1 px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
                   />
                   <button
                     type="button"
                     onclick={() => removeBatchUrl(index)}
                     disabled={batchUrls.length === 1}
-                    class="p-2 text-gray-400 hover:text-red-500 disabled:opacity-30 disabled:cursor-not-allowed"
+                    class="p-2 text-muted-foreground hover:text-red-500 disabled:opacity-30 disabled:cursor-not-allowed"
                   >
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -593,7 +593,7 @@
           </div>
 
           <div>
-            <label for="batchOutputPrefix" class="block text-sm font-medium text-gray-700 mb-1">
+            <label for="batchOutputPrefix" class="block text-sm font-medium text-foreground mb-1">
               파일명 접두사 (선택)
             </label>
             <input
@@ -601,14 +601,14 @@
               id="batchOutputPrefix"
               bind:value={batchOutputPrefix}
               placeholder="course_01_"
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
-            <p class="text-xs text-gray-500 mt-1">입력시 파일명이 접두사01, 접두사02... 형태로 저장</p>
+            <p class="text-xs text-muted-foreground mt-1">입력시 파일명이 접두사01, 접두사02... 형태로 저장</p>
           </div>
         {:else}
           <!-- 단일 모드: 기존 UI -->
           <div>
-            <label for="url" class="block text-sm font-medium text-gray-700 mb-1">
+            <label for="url" class="block text-sm font-medium text-foreground mb-1">
               URL <span class="text-red-500">*</span>
             </label>
             <input
@@ -617,13 +617,13 @@
               bind:value={newUrl}
               placeholder="https://www.youtube.com/watch?v=..."
               required
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
-            <p class="text-xs text-gray-500 mt-1">YouTube, YouTube Live, Vimeo URL 지원</p>
+            <p class="text-xs text-muted-foreground mt-1">YouTube, YouTube Live, Vimeo URL 지원</p>
           </div>
 
           <div>
-            <label for="outputFilename" class="block text-sm font-medium text-gray-700 mb-1">
+            <label for="outputFilename" class="block text-sm font-medium text-foreground mb-1">
               파일명 (선택)
             </label>
             <input
@@ -631,21 +631,21 @@
               id="outputFilename"
               bind:value={newOutputFilename}
               placeholder="저장할 파일명 (확장자 제외)"
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
-            <p class="text-xs text-gray-500 mt-1">미입력 시 영상 제목으로 자동 설정</p>
+            <p class="text-xs text-muted-foreground mt-1">미입력 시 영상 제목으로 자동 설정</p>
           </div>
         {/if}
 
         <!-- 공통 설정 -->
         <div>
-          <label for="type" class="block text-sm font-medium text-gray-700 mb-1">
+          <label for="type" class="block text-sm font-medium text-foreground mb-1">
             다운로드 타입
           </label>
           <select
             id="type"
             bind:value={newType}
-            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           >
             <option value="">자동 감지</option>
             <option value="youtube">YouTube (일반 영상)</option>
@@ -655,13 +655,13 @@
         </div>
 
         <div>
-          <label for="quality" class="block text-sm font-medium text-gray-700 mb-1">
+          <label for="quality" class="block text-sm font-medium text-foreground mb-1">
             화질
           </label>
           <select
             id="quality"
             bind:value={newQuality}
-            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           >
             <option value="best">최고 화질</option>
             <option value="1080">1080p</option>
@@ -673,7 +673,7 @@
 
         {#if hasVimeoUrl}
           <div>
-            <label for="embeddingUrl" class="block text-sm font-medium text-gray-700 mb-1">
+            <label for="embeddingUrl" class="block text-sm font-medium text-foreground mb-1">
               임베드 페이지 URL (선택)
             </label>
             <input
@@ -681,9 +681,9 @@
               id="embeddingUrl"
               bind:value={newEmbeddingUrl}
               placeholder="https://example.com/page-with-vimeo"
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
-            <p class="text-xs text-gray-500 mt-1">embed-only 비디오의 경우 비디오가 임베드된 페이지 URL 입력 필수</p>
+            <p class="text-xs text-muted-foreground mt-1">embed-only 비디오의 경우 비디오가 임베드된 페이지 URL 입력 필수</p>
           </div>
         {/if}
 
@@ -691,7 +691,7 @@
           <button
             type="button"
             onclick={resetForm}
-            class="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50"
+            class="px-4 py-2 text-foreground border border-border rounded-lg hover:bg-muted"
           >
             취소
           </button>

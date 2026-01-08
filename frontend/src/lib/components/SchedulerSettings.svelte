@@ -91,13 +91,13 @@
 			case 'ready':
 				return 'bg-green-100 text-green-800';
 			case 'disabled':
-				return 'bg-gray-100 text-gray-600';
+				return 'bg-muted text-muted-foreground';
 			case 'success':
 				return 'bg-green-100 text-green-800';
 			case 'failed':
 				return 'bg-red-100 text-red-800';
 			default:
-				return 'bg-gray-100 text-gray-600';
+				return 'bg-muted text-muted-foreground';
 		}
 	}
 
@@ -122,7 +122,7 @@
 		<!-- 작업 목록 -->
 		<div class="mb-8">
 			<div class="flex items-center justify-between mb-4">
-				<h3 class="text-lg font-semibold text-gray-900">등록된 작업</h3>
+				<h3 class="text-lg font-semibold text-foreground">등록된 작업</h3>
 				<button
 					class="btn btn-secondary btn-sm"
 					onclick={() => fetchData()}
@@ -144,7 +144,7 @@
 								<div class="flex-1">
 									<div class="flex items-center gap-3 mb-2">
 										<span
-											class={`px-2 py-1 text-xs font-medium rounded ${task.enabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}
+											class={`px-2 py-1 text-xs font-medium rounded ${task.enabled ? 'bg-green-100 text-green-800' : 'bg-muted text-muted-foreground'}`}
 										>
 											{task.enabled ? '활성' : '비활성'}
 										</span>
@@ -153,29 +153,29 @@
 										>
 											{task.status}
 										</span>
-										<h4 class="text-lg font-medium text-gray-900">
+										<h4 class="text-lg font-medium text-foreground">
 											{taskLabels[task.name]?.name || task.name}
 										</h4>
 									</div>
-									<p class="text-sm text-gray-500 mb-3">
+									<p class="text-sm text-muted-foreground mb-3">
 										{taskLabels[task.name]?.description || ''}
 									</p>
 									<div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
 										<div>
-											<span class="text-gray-500">스케줄:</span>
+											<span class="text-muted-foreground">스케줄:</span>
 											<span class="ml-1 font-medium">{task.schedule || '-'}</span>
 										</div>
 										<div>
-											<span class="text-gray-500">마지막 실행:</span>
+											<span class="text-muted-foreground">마지막 실행:</span>
 											<span class="ml-1">{formatDateTime(task.last_run_time)}</span>
 											{getResultIcon(task.last_result)}
 										</div>
 										<div>
-											<span class="text-gray-500">다음 실행:</span>
+											<span class="text-muted-foreground">다음 실행:</span>
 											<span class="ml-1">{formatDateTime(task.next_run_time)}</span>
 										</div>
 										<div>
-											<span class="text-gray-500">마지막 결과:</span>
+											<span class="text-muted-foreground">마지막 결과:</span>
 											<span class="ml-1"
 												>{task.last_result === null
 													? '-'
@@ -211,39 +211,39 @@
 
 		<!-- 실행 로그 -->
 		<div>
-			<h3 class="text-lg font-semibold text-gray-900 mb-4">최근 실행 로그</h3>
+			<h3 class="text-lg font-semibold text-foreground mb-4">최근 실행 로그</h3>
 
 			{#if logs.length === 0}
-				<div class="text-gray-500 text-center py-8">실행 로그가 없습니다.</div>
+				<div class="text-muted-foreground text-center py-8">실행 로그가 없습니다.</div>
 			{:else}
 				<div class="overflow-x-auto">
-					<table class="min-w-full divide-y divide-gray-200">
-						<thead class="bg-gray-50">
+					<table class="min-w-full divide-y divide-border">
+						<thead class="bg-background">
 							<tr>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase"
 									>작업</th
 								>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase"
 									>상태</th
 								>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase"
 									>시작 시간</th
 								>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase"
 									>소요 시간</th
 								>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase"
 									>처리 건수</th
 								>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase"
 									>오류</th
 								>
 							</tr>
 						</thead>
-						<tbody class="bg-white divide-y divide-gray-200">
+						<tbody class="bg-white divide-y divide-border">
 							{#each logs as log}
 								<tr>
-									<td class="px-4 py-3 text-sm font-medium text-gray-900">
+									<td class="px-4 py-3 text-sm font-medium text-foreground">
 										{taskLabels[log.task_name]?.name || log.task_name}
 									</td>
 									<td class="px-4 py-3">
@@ -259,13 +259,13 @@
 														: log.status}
 										</span>
 									</td>
-									<td class="px-4 py-3 text-sm text-gray-500">
+									<td class="px-4 py-3 text-sm text-muted-foreground">
 										{formatDateTime(log.started_at)}
 									</td>
-									<td class="px-4 py-3 text-sm text-gray-500">
+									<td class="px-4 py-3 text-sm text-muted-foreground">
 										{formatDuration(log.duration_seconds)}
 									</td>
-									<td class="px-4 py-3 text-sm text-gray-500">
+									<td class="px-4 py-3 text-sm text-muted-foreground">
 										{log.records_processed !== null
 											? `${log.records_processed.toLocaleString()}건`
 											: '-'}

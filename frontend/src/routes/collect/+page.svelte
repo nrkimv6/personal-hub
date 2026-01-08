@@ -4,6 +4,7 @@
   import { page as pageStore } from '$app/stores';
   import { collectApi, type CollectedPost, type CollectedPostFilters } from '$lib/api';
   import type { LLMRequest, UrlParseResponse, ServiceAccountWithProfile } from '$lib/types';
+  import { Button } from '$lib/components/ui';
 
   let posts: CollectedPost[] = [];
   let loading = true;
@@ -62,8 +63,8 @@
     account_reels: { icon: '🎥', color: 'text-pink-700', bgColor: 'bg-pink-100' },
     hashtag: { icon: '#', color: 'text-orange-700', bgColor: 'bg-orange-100' },
     reels_explore: { icon: '🔥', color: 'text-red-700', bgColor: 'bg-red-100' },
-    story: { icon: '⏰', color: 'text-gray-700', bgColor: 'bg-gray-100' },
-    unknown: { icon: '❓', color: 'text-gray-700', bgColor: 'bg-gray-100' },
+    story: { icon: '⏰', color: 'text-foreground', bgColor: 'bg-muted' },
+    unknown: { icon: '❓', color: 'text-foreground', bgColor: 'bg-muted' },
   };
 
   // 피드 타입인지 (추가 옵션 표시용)
@@ -146,7 +147,7 @@
       case 'web':
         return { class: 'bg-blue-100 text-blue-800', text: 'Web' };
       default:
-        return { class: 'bg-gray-100 text-gray-800', text: sourceType };
+        return { class: 'bg-muted text-foreground', text: sourceType };
     }
   }
 
@@ -160,7 +161,7 @@
       case 'uncategorized':
         return { class: 'bg-yellow-100 text-yellow-800', text: '미분류' };
       default:
-        return { class: 'bg-gray-100 text-gray-800', text: classification };
+        return { class: 'bg-muted text-foreground', text: classification };
     }
   }
 
@@ -175,7 +176,7 @@
       case 'naver_form':
         return { class: 'bg-green-50 text-green-700', text: '네이버 폼' };
       default:
-        return { class: 'bg-gray-50 text-gray-700', text: urlType };
+        return { class: 'bg-background text-foreground', text: urlType };
     }
   }
 
@@ -410,10 +411,10 @@
       .map((line) => {
         return line.replace(/([@#][\w\uAC00-\uD7AF]+)/g, (match) => {
           if (match.startsWith('#')) {
-            return `<span class="text-gray-500">${match}</span>`;
+            return `<span class="text-muted-foreground">${match}</span>`;
           }
           if (match.startsWith('@')) {
-            return `<span class="font-semibold text-gray-900">${match}</span>`;
+            return `<span class="font-semibold text-foreground">${match}</span>`;
           }
           return match;
         });
@@ -455,7 +456,7 @@
     <div class="flex flex-wrap gap-4 items-end">
       <!-- 소스 타입 -->
       <div>
-        <label for="sourceType" class="block text-sm font-medium text-gray-700 mb-1">소스</label>
+        <label for="sourceType" class="block text-sm font-medium text-foreground mb-1">소스</label>
         <select
           id="sourceType"
           bind:value={sourceType}
@@ -470,7 +471,7 @@
 
       <!-- URL 타입 -->
       <div>
-        <label for="urlType" class="block text-sm font-medium text-gray-700 mb-1">URL 타입</label>
+        <label for="urlType" class="block text-sm font-medium text-foreground mb-1">URL 타입</label>
         <select
           id="urlType"
           bind:value={urlType}
@@ -486,7 +487,7 @@
 
       <!-- 분류 상태 -->
       <div>
-        <label for="classification" class="block text-sm font-medium text-gray-700 mb-1">분류</label>
+        <label for="classification" class="block text-sm font-medium text-foreground mb-1">분류</label>
         <select
           id="classification"
           bind:value={classification}
@@ -503,7 +504,7 @@
 
       <!-- 검색 -->
       <div class="flex-1 min-w-[200px]">
-        <label for="search" class="block text-sm font-medium text-gray-700 mb-1">검색</label>
+        <label for="search" class="block text-sm font-medium text-foreground mb-1">검색</label>
         <div class="flex gap-2">
           <input
             id="search"
@@ -513,7 +514,7 @@
             class="input input-sm flex-1"
             onkeydown={(e) => e.key === 'Enter' && handleSearch()}
           />
-          <button onclick={handleSearch} class="btn btn-primary btn-sm">검색</button>
+          <Button on:click={handleSearch} variant="primary" size="sm">검색</Button>
         </div>
       </div>
     </div>
@@ -523,12 +524,12 @@
   <div class="flex justify-between items-center">
     <!-- 왼쪽: 통계 + 선택 모드 -->
     <div class="flex items-center gap-4">
-      <span class="text-sm text-gray-600">총 {total}개</span>
+      <span class="text-sm text-muted-foreground">총 {total}개</span>
       {#if isSelectMode}
         <span class="text-sm text-blue-600 font-medium">{selectedPostIds.size}개 선택됨</span>
-        <button onclick={toggleSelectAll} class="btn btn-secondary btn-xs">
+        <Button on:click={toggleSelectAll} variant="secondary" size="xs">
           {selectedPostIds.size === posts.length ? '전체 해제' : '전체 선택'}
-        </button>
+        </Button>
       {/if}
     </div>
 
@@ -537,24 +538,25 @@
       <!-- 일괄 작업 메뉴 (선택 모드에서만) -->
       {#if isSelectMode && selectedPostIds.size > 0}
         <div class="relative">
-          <button
-            onclick={() => showBatchActionMenu = !showBatchActionMenu}
-            class="btn btn-primary btn-sm"
+          <Button
+            on:click={() => showBatchActionMenu = !showBatchActionMenu}
+            variant="primary"
+            size="sm"
             disabled={isBatchProcessing}
           >
             {isBatchProcessing ? '처리 중...' : '일괄 작업'}
-          </button>
+          </Button>
           {#if showBatchActionMenu}
-            <div class="absolute right-0 mt-1 w-40 bg-white rounded-lg shadow-lg border border-gray-200 z-10">
+            <div class="absolute right-0 mt-1 w-40 bg-white rounded-lg shadow-lg border border-border z-10">
               <button
                 onclick={runBatchAnalysis}
-                class="w-full px-4 py-2 text-left text-sm hover:bg-gray-50"
+                class="w-full px-4 py-2 text-left text-sm hover:bg-muted"
               >
                 AI 분석 요청
               </button>
               <button
                 onclick={runBatchDeactivate}
-                class="w-full px-4 py-2 text-left text-sm hover:bg-gray-50"
+                class="w-full px-4 py-2 text-left text-sm hover:bg-muted"
               >
                 비활성화
               </button>
@@ -570,23 +572,24 @@
       {/if}
 
       <!-- 선택 모드 토글 -->
-      <button
-        onclick={toggleSelectMode}
-        class="btn btn-sm {isSelectMode ? 'btn-primary' : 'btn-secondary'}"
+      <Button
+        on:click={toggleSelectMode}
+        variant={isSelectMode ? 'primary' : 'secondary'}
+        size="sm"
       >
         {isSelectMode ? '선택 취소' : '선택'}
-      </button>
+      </Button>
 
       <!-- URL 수집 버튼 -->
-      <button onclick={openUrlCrawlModal} class="btn btn-secondary btn-sm">
+      <Button on:click={openUrlCrawlModal} variant="secondary" size="sm">
         URL 수집
-      </button>
+      </Button>
 
       <!-- 뷰 모드 토글 -->
-      <div class="flex border border-gray-300 rounded-lg overflow-hidden">
+      <div class="flex border border-border rounded-lg overflow-hidden">
         <button
           onclick={() => setViewMode('grid')}
-          class="px-3 py-1.5 text-sm {viewMode === 'grid' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}"
+          class="px-3 py-1.5 text-sm {viewMode === 'grid' ? 'bg-blue-600 text-white' : 'bg-white text-muted-foreground hover:bg-muted'}"
           title="그리드 뷰"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -595,7 +598,7 @@
         </button>
         <button
           onclick={() => setViewMode('list')}
-          class="px-3 py-1.5 text-sm {viewMode === 'list' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}"
+          class="px-3 py-1.5 text-sm {viewMode === 'list' ? 'bg-blue-600 text-white' : 'bg-white text-muted-foreground hover:bg-muted'}"
           title="리스트 뷰"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -604,7 +607,7 @@
         </button>
       </div>
 
-      <span class="text-sm text-gray-500">{page} / {totalPages} 페이지</span>
+      <span class="text-sm text-muted-foreground">{page} / {totalPages} 페이지</span>
     </div>
   </div>
 
@@ -619,7 +622,7 @@
     </div>
   {:else if posts.length === 0}
     <div class="card text-center py-12">
-      <p class="text-gray-500">게시물이 없습니다</p>
+      <p class="text-muted-foreground">게시물이 없습니다</p>
     </div>
   {:else}
     <!-- 그리드 뷰 -->
@@ -642,14 +645,14 @@
                   type="checkbox"
                   checked={selectedPostIds.has(post.source_id)}
                   onclick={(e) => { e.stopPropagation(); togglePostSelection(post.source_id!); }}
-                  class="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  class="w-5 h-5 rounded border-border text-blue-600 focus:ring-blue-500"
                 />
               </div>
             {/if}
 
             <!-- 썸네일 -->
             {#if post.thumbnail}
-              <div class="aspect-square bg-gray-100 rounded-lg mb-2 md:mb-3 overflow-hidden relative">
+              <div class="aspect-square bg-muted rounded-lg mb-2 md:mb-3 overflow-hidden relative">
                 <img
                   src={post.thumbnail}
                   alt={post.title || ''}
@@ -678,8 +681,8 @@
                 </div>
               </div>
             {:else}
-              <div class="aspect-square bg-gray-200 rounded-lg mb-2 md:mb-3 flex items-center justify-center relative">
-                <span class="text-2xl md:text-4xl text-gray-400">
+              <div class="aspect-square bg-secondary rounded-lg mb-2 md:mb-3 flex items-center justify-center relative">
+                <span class="text-2xl md:text-4xl text-muted-foreground">
                   {post.source_type === 'instagram' ? '📷' : '📄'}
                 </span>
                 <!-- 배지 오버레이 -->
@@ -704,15 +707,15 @@
             <div class="space-y-1">
               <div class="flex items-center justify-between">
                 {#if post.account_name}
-                  <span class="font-medium text-xs md:text-sm text-gray-900 truncate">@{post.account_name}</span>
+                  <span class="font-medium text-xs md:text-sm text-foreground truncate">@{post.account_name}</span>
                 {:else}
-                  <span class="font-medium text-xs md:text-sm text-gray-900 truncate">{post.title || '게시물'}</span>
+                  <span class="font-medium text-xs md:text-sm text-foreground truncate">{post.title || '게시물'}</span>
                 {/if}
               </div>
-              <p class="text-xs text-gray-500 line-clamp-2 hidden md:block">
+              <p class="text-xs text-muted-foreground line-clamp-2 hidden md:block">
                 {post.content ? post.content.slice(0, 50) : post.title || ''}
               </p>
-              <p class="text-xs text-gray-400">{formatDate(post.created_at)}</p>
+              <p class="text-xs text-muted-foreground">{formatDate(post.created_at)}</p>
             </div>
           </div>
         {/each}
@@ -736,12 +739,12 @@
                 type="checkbox"
                 checked={selectedPostIds.has(post.source_id)}
                 onclick={(e) => { e.stopPropagation(); togglePostSelection(post.source_id!); }}
-                class="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                class="w-5 h-5 rounded border-border text-blue-600 focus:ring-blue-500"
               />
             {/if}
 
             <!-- 썸네일 -->
-            <div class="w-16 h-16 flex-shrink-0 rounded-lg overflow-hidden bg-gray-100">
+            <div class="w-16 h-16 flex-shrink-0 rounded-lg overflow-hidden bg-muted">
               {#if post.thumbnail}
                 <img
                   src={post.thumbnail}
@@ -750,7 +753,7 @@
                   loading="lazy"
                 />
               {:else}
-                <div class="w-full h-full flex items-center justify-center text-2xl text-gray-400">
+                <div class="w-full h-full flex items-center justify-center text-2xl text-muted-foreground">
                   {post.source_type === 'instagram' ? '📷' : '📄'}
                 </div>
               {/if}
@@ -760,9 +763,9 @@
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 mb-1">
                 {#if post.account_name}
-                  <span class="font-medium text-sm text-gray-900">@{post.account_name}</span>
+                  <span class="font-medium text-sm text-foreground">@{post.account_name}</span>
                 {:else}
-                  <span class="font-medium text-sm text-gray-900 truncate">{post.title || '게시물'}</span>
+                  <span class="font-medium text-sm text-foreground truncate">{post.title || '게시물'}</span>
                 {/if}
                 {#if post.llm_status}
                   {#if post.llm_status === 'completed'}
@@ -782,10 +785,10 @@
                   </span>
                 {/if}
               </div>
-              <p class="text-sm text-gray-600 line-clamp-1">
+              <p class="text-sm text-muted-foreground line-clamp-1">
                 {post.content ? post.content.slice(0, 100) : post.title || ''}
               </p>
-              <p class="text-xs text-gray-400 mt-1">{formatDate(post.created_at)}</p>
+              <p class="text-xs text-muted-foreground mt-1">{formatDate(post.created_at)}</p>
             </div>
           </div>
         {/each}
@@ -795,23 +798,25 @@
     <!-- 페이지네이션 -->
     {#if totalPages > 1}
       <div class="flex justify-center items-center gap-4 mt-6">
-        <button
-          onclick={prevPage}
+        <Button
+          on:click={prevPage}
           disabled={!canPrevPage}
-          class="btn btn-secondary btn-sm"
+          variant="secondary"
+          size="sm"
         >
           이전
-        </button>
-        <span class="text-sm text-gray-600">
+        </Button>
+        <span class="text-sm text-muted-foreground">
           {page} / {totalPages}
         </span>
-        <button
-          onclick={nextPage}
+        <Button
+          on:click={nextPage}
           disabled={!canNextPage}
-          class="btn btn-secondary btn-sm"
+          variant="secondary"
+          size="sm"
         >
           다음
-        </button>
+        </Button>
       </div>
     {/if}
   {/if}
@@ -834,12 +839,12 @@
       onclick={(e) => e.stopPropagation()}
     >
       <!-- Header -->
-      <div class="sticky top-0 bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
+      <div class="sticky top-0 bg-card border-b border-border px-4 py-3 flex items-center justify-between">
         <div class="flex items-center gap-2">
           {#if selectedPost.account_name}
-            <span class="font-semibold text-sm text-gray-900">@{selectedPost.account_name}</span>
+            <span class="font-semibold text-sm text-foreground">@{selectedPost.account_name}</span>
           {:else}
-            <span class="font-medium text-sm text-gray-700">{selectedPost.title || '게시물'}</span>
+            <span class="font-medium text-sm text-foreground">{selectedPost.title || '게시물'}</span>
           {/if}
           {#if selectedPost.source_type}
             {@const sourceBadge = getSourceBadge(selectedPost.source_type)}
@@ -848,10 +853,10 @@
         </div>
         <button
           onclick={closeDetail}
-          class="p-2 hover:bg-gray-100 rounded-full transition-colors"
+          class="p-2 hover:bg-muted rounded-full transition-colors"
           aria-label="닫기"
         >
-          <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-5 h-5 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
@@ -859,7 +864,7 @@
 
       <!-- 이미지 -->
       {#if selectedPost.thumbnail}
-        <div class="relative w-full aspect-square bg-gray-100 overflow-hidden">
+        <div class="relative w-full aspect-square bg-muted overflow-hidden">
           <img
             src={selectedPost.thumbnail}
             alt={selectedPost.title || '게시물 이미지'}
@@ -884,12 +889,12 @@
 
         <!-- 제목 -->
         {#if selectedPost.title}
-          <h3 class="font-semibold text-gray-900 mb-2">{selectedPost.title}</h3>
+          <h3 class="font-semibold text-foreground mb-2">{selectedPost.title}</h3>
         {/if}
 
         <!-- 내용 -->
         {#if selectedPost.content}
-          <div class="text-sm text-gray-700 leading-relaxed mb-4 max-h-60 overflow-y-auto">
+          <div class="text-sm text-foreground leading-relaxed mb-4 max-h-60 overflow-y-auto">
             {@html formatContent(selectedPost.content)}
           </div>
         {/if}
@@ -898,13 +903,13 @@
         {#if selectedPost.tags && selectedPost.tags.length > 0}
           <div class="flex flex-wrap gap-1 mb-4">
             {#each selectedPost.tags as tag}
-              <span class="px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded-full">{tag}</span>
+              <span class="px-2 py-0.5 text-xs bg-muted text-muted-foreground rounded-full">{tag}</span>
             {/each}
           </div>
         {/if}
 
         <!-- 메타 정보 -->
-        <div class="text-xs text-gray-400 pt-3 border-t border-gray-100">
+        <div class="text-xs text-muted-foreground pt-3 border-t border-border">
           <div class="flex justify-between">
             <span>수집일: {formatDate(selectedPost.created_at)}</span>
             {#if selectedPost.account_name}
@@ -915,53 +920,53 @@
 
         <!-- AI 분석 결과 (Instagram 전용) -->
         {#if selectedPost.source_type === 'instagram' && selectedPost.source_id}
-          <div class="pt-3 border-t border-gray-100 mb-4">
-            <h4 class="text-sm font-medium text-gray-700 mb-2">AI 분석</h4>
+          <div class="pt-3 border-t border-border mb-4">
+            <h4 class="text-sm font-medium text-foreground mb-2">AI 분석</h4>
             {#if loadingLlm}
-              <div class="text-sm text-gray-500">로딩 중...</div>
+              <div class="text-sm text-muted-foreground">로딩 중...</div>
             {:else if selectedPostLlmResult?.result}
-              <div class="bg-gray-50 rounded-lg p-3 text-sm">
+              <div class="bg-background rounded-lg p-3 text-sm">
                 <div class="flex items-center gap-2 mb-2">
                   <span class="font-medium">분류:</span>
-                  <span class="px-2 py-0.5 rounded-full text-xs {selectedPostLlmResult.result.tag === '이벤트' ? 'bg-green-100 text-green-700' : selectedPostLlmResult.result.tag === '팝업' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'}">
+                  <span class="px-2 py-0.5 rounded-full text-xs {selectedPostLlmResult.result.tag === '이벤트' ? 'bg-green-100 text-green-700' : selectedPostLlmResult.result.tag === '팝업' ? 'bg-purple-100 text-purple-700' : 'bg-muted text-foreground'}">
                     {selectedPostLlmResult.result.tag || '미분류'}
                   </span>
                 </div>
                 {#if selectedPostLlmResult.result.summary}
-                  <p class="text-gray-600">{selectedPostLlmResult.result.summary}</p>
+                  <p class="text-muted-foreground">{selectedPostLlmResult.result.summary}</p>
                 {/if}
               </div>
             {:else if selectedPostLlmResult}
-              <div class="text-sm text-gray-500">상태: {selectedPostLlmResult.status}</div>
+              <div class="text-sm text-muted-foreground">상태: {selectedPostLlmResult.status}</div>
             {:else}
-              <div class="text-sm text-gray-500">분석 결과 없음</div>
+              <div class="text-sm text-muted-foreground">분석 결과 없음</div>
             {/if}
           </div>
         {/if}
 
         <!-- 액션 버튼 -->
-        <div class="flex gap-2 flex-wrap pt-4 mt-4 border-t border-gray-100">
+        <div class="flex gap-2 flex-wrap pt-4 mt-4 border-t border-border">
           <a
             href={selectedPost.url}
             target="_blank"
             rel="noopener noreferrer"
-            class="btn btn-primary btn-sm"
+            class="inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-active h-9 px-3 text-sm rounded-md"
           >
             원본 보기
           </a>
           {#if selectedPost.source_type === 'instagram' && selectedPost.source_id}
             {@const postSourceId = selectedPost.source_id}
-            <button onclick={() => recrawlPost(postSourceId)} class="btn btn-secondary btn-sm">
+            <Button on:click={() => recrawlPost(postSourceId)} variant="secondary" size="sm">
               재크롤링
-            </button>
-            <button onclick={() => requestLlmAnalysis(postSourceId)} class="btn btn-secondary btn-sm">
+            </Button>
+            <Button on:click={() => requestLlmAnalysis(postSourceId)} variant="secondary" size="sm">
               AI 분석
-            </button>
-            <button onclick={() => deletePost(postSourceId)} class="btn btn-danger btn-sm">
+            </Button>
+            <Button on:click={() => deletePost(postSourceId)} variant="destructive" size="sm">
               삭제
-            </button>
+            </Button>
           {/if}
-          <button onclick={closeDetail} class="btn btn-secondary btn-sm">닫기</button>
+          <Button on:click={closeDetail} variant="secondary" size="sm">닫기</Button>
         </div>
       </div>
     </div>
@@ -985,7 +990,7 @@
 
       <!-- URL 입력 -->
       <div class="mb-4">
-        <label for="urlCrawlInput" class="block text-sm font-medium text-gray-700 mb-1">
+        <label for="urlCrawlInput" class="block text-sm font-medium text-foreground mb-1">
           Instagram URL
         </label>
         <input
@@ -1000,7 +1005,7 @@
 
       <!-- URL 파싱 결과 -->
       {#if isUrlParsing}
-        <div class="text-sm text-gray-500 mb-4">URL 분석 중...</div>
+        <div class="text-sm text-muted-foreground mb-4">URL 분석 중...</div>
       {:else if parsedUrl}
         {@const style = urlTypeStyles[parsedUrl.url_type] || urlTypeStyles.unknown}
         <div class="mb-4 p-3 rounded-lg {style.bgColor}">
@@ -1009,10 +1014,10 @@
             <div>
               <span class="font-medium {style.color}">{parsedUrl.url_type_description}</span>
               {#if parsedUrl.username}
-                <span class="text-sm text-gray-600 ml-2">@{parsedUrl.username}</span>
+                <span class="text-sm text-muted-foreground ml-2">@{parsedUrl.username}</span>
               {/if}
               {#if parsedUrl.hashtag}
-                <span class="text-sm text-gray-600 ml-2">#{parsedUrl.hashtag}</span>
+                <span class="text-sm text-muted-foreground ml-2">#{parsedUrl.hashtag}</span>
               {/if}
             </div>
           </div>
@@ -1026,7 +1031,7 @@
       {#if isFeedType}
         <div class="mb-4 space-y-3">
           <div>
-            <label for="maxPosts" class="block text-sm font-medium text-gray-700 mb-1">
+            <label for="maxPosts" class="block text-sm font-medium text-foreground mb-1">
               최대 게시물 수
             </label>
             <input
@@ -1039,7 +1044,7 @@
             />
           </div>
           <div>
-            <label for="scrollCount" class="block text-sm font-medium text-gray-700 mb-1">
+            <label for="scrollCount" class="block text-sm font-medium text-foreground mb-1">
               스크롤 횟수
             </label>
             <input
@@ -1056,7 +1061,7 @@
 
       <!-- 계정 선택 -->
       <div class="mb-4">
-        <label for="urlCrawlAccount" class="block text-sm font-medium text-gray-700 mb-1">
+        <label for="urlCrawlAccount" class="block text-sm font-medium text-foreground mb-1">
           수집 계정
         </label>
         <select
@@ -1072,14 +1077,14 @@
 
       <!-- 버튼 -->
       <div class="flex gap-2 justify-end">
-        <button onclick={closeUrlCrawlModal} class="btn btn-secondary">취소</button>
-        <button
-          onclick={submitUrlCrawl}
+        <Button on:click={closeUrlCrawlModal} variant="secondary">취소</Button>
+        <Button
+          on:click={submitUrlCrawl}
           disabled={isUrlCrawling || !urlCrawlInput.trim() || !urlCrawlAccountId || (parsedUrl && !parsedUrl.is_supported)}
-          class="btn btn-primary"
+          variant="primary"
         >
           {isUrlCrawling ? '요청 중...' : '수집 요청'}
-        </button>
+        </Button>
       </div>
     </div>
   </div>
@@ -1099,13 +1104,13 @@
       onclick={(e) => e.stopPropagation()}
     >
       <h3 class="text-lg font-semibold mb-4">삭제 확인</h3>
-      <p class="text-gray-600 mb-6">
+      <p class="text-muted-foreground mb-6">
         선택한 {selectedPostIds.size}개 게시물을 삭제하시겠습니까?<br/>
         이 작업은 되돌릴 수 없습니다.
       </p>
       <div class="flex gap-2 justify-end">
-        <button onclick={() => showDeleteConfirmModal = false} class="btn btn-secondary">취소</button>
-        <button onclick={runBatchDelete} class="btn btn-danger">삭제</button>
+        <Button on:click={() => showDeleteConfirmModal = false} variant="secondary">취소</Button>
+        <Button on:click={runBatchDelete} variant="destructive">삭제</Button>
       </div>
     </div>
   </div>

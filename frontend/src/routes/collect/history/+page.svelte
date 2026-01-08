@@ -89,7 +89,7 @@
 			case 'schedule_run':
 				return { class: 'bg-purple-100 text-purple-800', text: '스케줄' };
 			default:
-				return { class: 'bg-gray-100 text-gray-800', text: type };
+				return { class: 'bg-muted text-foreground', text: type };
 		}
 	}
 
@@ -100,14 +100,14 @@
 			case 'web':
 				return { class: 'bg-blue-100 text-blue-800', text: 'Web' };
 			default:
-				return { class: 'bg-gray-100 text-gray-800', text: source };
+				return { class: 'bg-muted text-foreground', text: source };
 		}
 	}
 
 	function getStatusBadge(s: string): { class: string; text: string } {
 		switch (s) {
 			case 'pending':
-				return { class: 'bg-gray-100 text-gray-600', text: '대기' };
+				return { class: 'bg-muted text-muted-foreground', text: '대기' };
 			case 'processing':
 				return { class: 'bg-yellow-100 text-yellow-800', text: '처리중' };
 			case 'completed':
@@ -115,7 +115,7 @@
 			case 'failed':
 				return { class: 'bg-red-100 text-red-800', text: '실패' };
 			default:
-				return { class: 'bg-gray-100 text-gray-600', text: s };
+				return { class: 'bg-muted text-muted-foreground', text: s };
 		}
 	}
 
@@ -152,26 +152,26 @@
 	<!-- 통계 요약 -->
 	<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
 		<div class="card text-center">
-			<p class="text-2xl font-bold text-gray-900">{total}</p>
-			<p class="text-sm text-gray-500">전체</p>
+			<p class="text-2xl font-bold text-foreground">{total}</p>
+			<p class="text-sm text-muted-foreground">전체</p>
 		</div>
 		<div class="card text-center">
 			<p class="text-2xl font-bold text-green-600">
 				{items.filter((i) => i.status === 'completed').length}
 			</p>
-			<p class="text-sm text-gray-500">완료</p>
+			<p class="text-sm text-muted-foreground">완료</p>
 		</div>
 		<div class="card text-center">
 			<p class="text-2xl font-bold text-yellow-600">
 				{items.filter((i) => i.status === 'pending' || i.status === 'processing').length}
 			</p>
-			<p class="text-sm text-gray-500">진행중</p>
+			<p class="text-sm text-muted-foreground">진행중</p>
 		</div>
 		<div class="card text-center">
 			<p class="text-2xl font-bold text-red-600">
 				{items.filter((i) => i.status === 'failed').length}
 			</p>
-			<p class="text-sm text-gray-500">실패</p>
+			<p class="text-sm text-muted-foreground">실패</p>
 		</div>
 	</div>
 
@@ -179,7 +179,7 @@
 	<div class="card mb-6">
 		<div class="flex flex-wrap gap-4 items-center">
 			<div>
-				<label for="sourceType" class="block text-sm font-medium text-gray-700 mb-1">소스</label>
+				<label for="sourceType" class="block text-sm font-medium text-foreground mb-1">소스</label>
 				<select
 					id="sourceType"
 					bind:value={sourceType}
@@ -192,7 +192,7 @@
 				</select>
 			</div>
 			<div>
-				<label for="status" class="block text-sm font-medium text-gray-700 mb-1">상태</label>
+				<label for="status" class="block text-sm font-medium text-foreground mb-1">상태</label>
 				<select
 					id="status"
 					bind:value={status}
@@ -207,7 +207,7 @@
 				</select>
 			</div>
 			<div>
-				<label for="period" class="block text-sm font-medium text-gray-700 mb-1">기간</label>
+				<label for="period" class="block text-sm font-medium text-foreground mb-1">기간</label>
 				<select
 					id="period"
 					bind:value={period}
@@ -242,30 +242,30 @@
 		</div>
 	{:else if items.length === 0}
 		<div class="card text-center py-12">
-			<p class="text-gray-500">크롤링 이력이 없습니다</p>
+			<p class="text-muted-foreground">크롤링 이력이 없습니다</p>
 		</div>
 	{:else}
 		<div class="card overflow-hidden">
 			<div class="overflow-x-auto">
-				<table class="min-w-full divide-y divide-gray-200 table-fixed">
-					<thead class="bg-gray-50">
+				<table class="min-w-full divide-y divide-border table-fixed">
+					<thead class="bg-background">
 						<tr>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-28">시간</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-20">타입</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-24">소스</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-48">대상</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-20">상태</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-40">결과</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-20">소요시간</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase w-28">시간</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase w-20">타입</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase w-24">소스</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase w-48">대상</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase w-20">상태</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase w-40">결과</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase w-20">소요시간</th>
 						</tr>
 					</thead>
-					<tbody class="bg-white divide-y divide-gray-200">
+					<tbody class="bg-white divide-y divide-border">
 						{#each items as item}
 							{@const typeBadge = getHistoryTypeBadge(item.history_type)}
 							{@const sourceBadge = getSourceBadge(item.source_type)}
 							{@const statusBadge = getStatusBadge(item.status)}
-							<tr class="hover:bg-gray-50">
-								<td class="px-4 py-3 text-sm text-gray-900">
+							<tr class="hover:bg-muted">
+								<td class="px-4 py-3 text-sm text-foreground">
 									{formatDateTime(item.started_at)}
 								</td>
 								<td class="px-4 py-3">
@@ -278,7 +278,7 @@
 										{sourceBadge.text}
 									</span>
 								</td>
-								<td class="px-4 py-3 text-sm text-gray-600">
+								<td class="px-4 py-3 text-sm text-muted-foreground">
 									{#if item.history_type === 'schedule_run'}
 										<span class="font-medium">{item.schedule_name || '-'}</span>
 									{:else}
@@ -292,12 +292,12 @@
 										{statusBadge.text}
 									</span>
 								</td>
-								<td class="px-4 py-3 text-sm text-gray-600">
+								<td class="px-4 py-3 text-sm text-muted-foreground">
 									<div class="truncate max-w-[160px]" title={item.error_message || getResultSummary(item)}>
 										{getResultSummary(item)}
 									</div>
 								</td>
-								<td class="px-4 py-3 text-sm text-gray-600">
+								<td class="px-4 py-3 text-sm text-muted-foreground">
 									{formatDuration(item.duration_seconds)}
 								</td>
 							</tr>
@@ -320,7 +320,7 @@
 				>
 					이전
 				</button>
-				<span class="text-sm text-gray-600">
+				<span class="text-sm text-muted-foreground">
 					{page} / {totalPages}
 				</span>
 				<button

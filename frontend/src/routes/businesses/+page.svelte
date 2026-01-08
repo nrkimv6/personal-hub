@@ -353,7 +353,7 @@
 
 <div class="p-6">
   <div class="mb-6 flex justify-between items-center">
-    <h2 class="text-2xl font-bold text-gray-900">업체 관리</h2>
+    <h2 class="text-2xl font-bold text-foreground">업체 관리</h2>
     <div class="flex gap-2">
       <button class="btn btn-secondary btn-sm" on:click={fetchBusinesses}>
         새로고침
@@ -379,10 +379,10 @@
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <!-- 업체 목록 (왼쪽) -->
       <div class="card">
-        <h3 class="text-lg font-semibold text-gray-900 mb-4">업체 목록 ({businesses.length})</h3>
+        <h3 class="text-lg font-semibold text-foreground mb-4">업체 목록 ({businesses.length})</h3>
 
         {#if businesses.length === 0}
-          <p class="text-gray-500 text-center py-4">등록된 업체가 없습니다.</p>
+          <p class="text-muted-foreground text-center py-4">등록된 업체가 없습니다.</p>
         {:else}
           <div class="overflow-x-auto">
             <table class="table table-sm">
@@ -397,7 +397,7 @@
               <tbody>
                 {#each businesses as business (business.id)}
                   <tr
-                    class="cursor-pointer hover:bg-gray-50 {selectedBusiness?.id === business.id ? 'bg-blue-50' : ''} {!business.is_enabled ? 'opacity-50' : ''}"
+                    class="cursor-pointer hover:bg-muted {selectedBusiness?.id === business.id ? 'bg-blue-50' : ''} {!business.is_enabled ? 'opacity-50' : ''}"
                     on:click={() => selectBusiness(business)}
                   >
                     <td>
@@ -411,7 +411,7 @@
                     </td>
                     <td>
                       <div class="font-medium">{business.name}</div>
-                      <div class="text-xs text-gray-500">{business.business_id}</div>
+                      <div class="text-xs text-muted-foreground">{business.business_id}</div>
                     </td>
                     <td>
                       <span class="badge badge-info">{business.service_type}</span>
@@ -445,7 +445,7 @@
       <!-- 아이템 목록 (가운데) -->
       <div class="card">
         <div class="flex justify-between items-center mb-4">
-          <h3 class="text-lg font-semibold text-gray-900">
+          <h3 class="text-lg font-semibold text-foreground">
             아이템 {#if selectedBusiness}({selectedBusiness.items?.length || 0}){/if}
           </h3>
           {#if selectedBusiness}
@@ -456,13 +456,13 @@
         </div>
 
         {#if !selectedBusiness}
-          <p class="text-gray-500 text-center py-8">업체를 선택하세요</p>
+          <p class="text-muted-foreground text-center py-8">업체를 선택하세요</p>
         {:else if loadingItems}
           <div class="flex justify-center py-8">
             <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
           </div>
         {:else if !selectedBusiness.items || selectedBusiness.items.length === 0}
-          <p class="text-gray-500 text-center py-4">등록된 아이템이 없습니다.</p>
+          <p class="text-muted-foreground text-center py-4">등록된 아이템이 없습니다.</p>
         {:else}
           <div class="overflow-x-auto">
             <table class="table table-sm">
@@ -477,7 +477,7 @@
               <tbody>
                 {#each selectedBusiness.items as item (item.id)}
                   <tr
-                    class="cursor-pointer hover:bg-gray-50 {selectedItem?.id === item.id ? 'bg-blue-50' : ''} {!item.is_enabled ? 'opacity-50' : ''}"
+                    class="cursor-pointer hover:bg-muted {selectedItem?.id === item.id ? 'bg-blue-50' : ''} {!item.is_enabled ? 'opacity-50' : ''}"
                     on:click={() => selectItem(item)}
                   >
                     <td>
@@ -491,7 +491,7 @@
                     </td>
                     <td>
                       <div class="font-medium">{item.name}</div>
-                      <div class="text-xs text-gray-500">{item.biz_item_id}</div>
+                      <div class="text-xs text-muted-foreground">{item.biz_item_id}</div>
                     </td>
                     <td>
                       {#if item.auto_booking_enabled}
@@ -540,7 +540,7 @@
       <!-- 일정 목록 (오른쪽) -->
       <div class="card">
         <div class="flex justify-between items-center mb-4">
-          <h3 class="text-lg font-semibold text-gray-900">
+          <h3 class="text-lg font-semibold text-foreground">
             일정 {#if selectedItem}({itemSchedules.length}){/if}
           </h3>
           {#if selectedItem}
@@ -551,18 +551,18 @@
         </div>
 
         {#if !selectedItem}
-          <p class="text-gray-500 text-center py-8">아이템을 선택하세요</p>
+          <p class="text-muted-foreground text-center py-8">아이템을 선택하세요</p>
         {:else if loadingSchedules}
           <div class="flex justify-center py-8">
             <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
           </div>
         {:else if itemSchedules.length === 0}
-          <p class="text-gray-500 text-center py-4">등록된 일정이 없습니다.</p>
+          <p class="text-muted-foreground text-center py-4">등록된 일정이 없습니다.</p>
         {:else}
           <div class="space-y-2 max-h-96 overflow-y-auto">
             {#each itemSchedules as schedule (schedule.id)}
               {@const status = getStatusBadge(schedule.run_status, schedule.is_enabled)}
-              <div class="flex items-center justify-between p-2 rounded bg-gray-50 {!schedule.is_enabled ? 'opacity-50' : ''}">
+              <div class="flex items-center justify-between p-2 rounded bg-background {!schedule.is_enabled ? 'opacity-50' : ''}">
                 <div class="flex items-center gap-2">
                   <input
                     type="checkbox"
@@ -572,7 +572,7 @@
                   <div>
                     <div class="font-medium text-sm">{schedule.date}</div>
                     {#if schedule.times && schedule.times.length > 0}
-                      <div class="text-xs text-gray-500">{schedule.times.join(', ')}</div>
+                      <div class="text-xs text-muted-foreground">{schedule.times.join(', ')}</div>
                     {/if}
                     {#if schedule.account_name}
                       <span class="badge badge-info text-xs">👤 {schedule.account_name}</span>
@@ -610,33 +610,33 @@
       </div>
       <form on:submit|preventDefault={handleCreateBusiness} class="p-4 space-y-4">
         <div>
-          <label for="business_id" class="block text-sm font-medium text-gray-700 mb-1">Business ID (네이버)</label>
+          <label for="business_id" class="block text-sm font-medium text-foreground mb-1">Business ID (네이버)</label>
           <input id="business_id" type="text" class="input" bind:value={newBusiness.business_id} required placeholder="예: 1234567" />
         </div>
         <div>
-          <label for="business_type_id" class="block text-sm font-medium text-gray-700 mb-1">Business Type ID</label>
+          <label for="business_type_id" class="block text-sm font-medium text-foreground mb-1">Business Type ID</label>
           <input id="business_type_id" type="text" class="input" bind:value={newBusiness.business_type_id} required placeholder="예: 10" />
         </div>
         <div>
-          <label for="name" class="block text-sm font-medium text-gray-700 mb-1">업체명</label>
+          <label for="name" class="block text-sm font-medium text-foreground mb-1">업체명</label>
           <input id="name" type="text" class="input" bind:value={newBusiness.name} required placeholder="표시 이름" />
         </div>
         <div class="grid grid-cols-2 gap-4">
           <div>
-            <label for="service_type" class="block text-sm font-medium text-gray-700 mb-1">서비스</label>
+            <label for="service_type" class="block text-sm font-medium text-foreground mb-1">서비스</label>
             <select id="service_type" class="input" bind:value={newBusiness.service_type}>
               <option value="naver">네이버</option>
               <option value="coupang">쿠팡</option>
             </select>
           </div>
           <div>
-            <label for="category" class="block text-sm font-medium text-gray-700 mb-1">카테고리</label>
+            <label for="category" class="block text-sm font-medium text-foreground mb-1">카테고리</label>
             <input id="category" type="text" class="input" bind:value={newBusiness.category} placeholder="default" />
           </div>
         </div>
         <label class="flex items-center gap-2">
           <input type="checkbox" bind:checked={newBusiness.is_enabled} />
-          <span class="text-sm font-medium text-gray-700">활성화</span>
+          <span class="text-sm font-medium text-foreground">활성화</span>
         </label>
         <div class="flex justify-end gap-2 pt-4">
           <button type="button" class="btn btn-secondary" on:click={() => showAddBusinessModal = false}>
@@ -658,20 +658,20 @@
       </div>
       <form on:submit|preventDefault={handleUpdateBusiness} class="p-4 space-y-4">
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Business ID</label>
-          <input type="text" class="input bg-gray-100" value={editBusiness.business_id} disabled />
+          <label class="block text-sm font-medium text-foreground mb-1">Business ID</label>
+          <input type="text" class="input bg-muted" value={editBusiness.business_id} disabled />
         </div>
         <div>
-          <label for="edit-name" class="block text-sm font-medium text-gray-700 mb-1">업체명</label>
+          <label for="edit-name" class="block text-sm font-medium text-foreground mb-1">업체명</label>
           <input id="edit-name" type="text" class="input" bind:value={editBusiness.name} required />
         </div>
         <div>
-          <label for="edit-category" class="block text-sm font-medium text-gray-700 mb-1">카테고리</label>
+          <label for="edit-category" class="block text-sm font-medium text-foreground mb-1">카테고리</label>
           <input id="edit-category" type="text" class="input" bind:value={editBusiness.category} />
         </div>
         <label class="flex items-center gap-2">
           <input type="checkbox" bind:checked={editBusiness.is_enabled} />
-          <span class="text-sm font-medium text-gray-700">활성화</span>
+          <span class="text-sm font-medium text-foreground">활성화</span>
         </label>
         <div class="flex justify-end gap-2 pt-4">
           <button type="button" class="btn btn-secondary" on:click={() => { showEditBusinessModal = false; editBusiness = null; }}>
@@ -693,29 +693,29 @@
       </div>
       <form on:submit|preventDefault={handleCreateItem} class="p-4 space-y-4">
         <div>
-          <label for="biz_item_id" class="block text-sm font-medium text-gray-700 mb-1">Biz Item ID (네이버)</label>
+          <label for="biz_item_id" class="block text-sm font-medium text-foreground mb-1">Biz Item ID (네이버)</label>
           <input id="biz_item_id" type="text" class="input" bind:value={newItem.biz_item_id} required placeholder="예: 5001234" />
         </div>
         <div>
-          <label for="item_name" class="block text-sm font-medium text-gray-700 mb-1">아이템명</label>
+          <label for="item_name" class="block text-sm font-medium text-foreground mb-1">아이템명</label>
           <input id="item_name" type="text" class="input" bind:value={newItem.name} required placeholder="표시 이름" />
         </div>
         <div>
-          <label for="time_range" class="block text-sm font-medium text-gray-700 mb-1">시간 범위</label>
+          <label for="time_range" class="block text-sm font-medium text-foreground mb-1">시간 범위</label>
           <input id="time_range" type="text" class="input" bind:value={newItem.time_range} placeholder="예: 10:00-21:00" />
         </div>
         <label class="flex items-center gap-2">
           <input type="checkbox" bind:checked={newItem.is_enabled} />
-          <span class="text-sm font-medium text-gray-700">활성화</span>
+          <span class="text-sm font-medium text-foreground">활성화</span>
         </label>
         <div class="flex items-center gap-4">
           <label class="flex items-center gap-2">
             <input type="checkbox" bind:checked={newItem.auto_booking_enabled} />
-            <span class="text-sm font-medium text-gray-700">자동 예약</span>
+            <span class="text-sm font-medium text-foreground">자동 예약</span>
           </label>
           {#if newItem.auto_booking_enabled}
             <div class="flex items-center gap-2">
-              <label for="max_bookings" class="text-sm text-gray-700">최대 예약:</label>
+              <label for="max_bookings" class="text-sm text-foreground">최대 예약:</label>
               <input
                 id="max_bookings"
                 type="number"
@@ -747,29 +747,29 @@
       </div>
       <form on:submit|preventDefault={handleUpdateItem} class="p-4 space-y-4">
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Biz Item ID</label>
-          <input type="text" class="input bg-gray-100" value={editItem.biz_item_id} disabled />
+          <label class="block text-sm font-medium text-foreground mb-1">Biz Item ID</label>
+          <input type="text" class="input bg-muted" value={editItem.biz_item_id} disabled />
         </div>
         <div>
-          <label for="edit-item-name" class="block text-sm font-medium text-gray-700 mb-1">아이템명</label>
+          <label for="edit-item-name" class="block text-sm font-medium text-foreground mb-1">아이템명</label>
           <input id="edit-item-name" type="text" class="input" bind:value={editItem.name} required />
         </div>
         <div>
-          <label for="edit-time-range" class="block text-sm font-medium text-gray-700 mb-1">시간 범위</label>
+          <label for="edit-time-range" class="block text-sm font-medium text-foreground mb-1">시간 범위</label>
           <input id="edit-time-range" type="text" class="input" bind:value={editItem.time_range} placeholder="예: 10:00-21:00" />
         </div>
         <label class="flex items-center gap-2">
           <input type="checkbox" bind:checked={editItem.is_enabled} />
-          <span class="text-sm font-medium text-gray-700">활성화</span>
+          <span class="text-sm font-medium text-foreground">활성화</span>
         </label>
         <div class="flex items-center gap-4">
           <label class="flex items-center gap-2">
             <input type="checkbox" bind:checked={editItem.auto_booking_enabled} />
-            <span class="text-sm font-medium text-gray-700">자동 예약</span>
+            <span class="text-sm font-medium text-foreground">자동 예약</span>
           </label>
           {#if editItem.auto_booking_enabled}
             <div class="flex items-center gap-2">
-              <label for="edit-max-bookings" class="text-sm text-gray-700">최대 예약:</label>
+              <label for="edit-max-bookings" class="text-sm text-foreground">최대 예약:</label>
               <input
                 id="edit-max-bookings"
                 type="number"
@@ -801,26 +801,26 @@
       </div>
       <form on:submit|preventDefault={handleCreateSchedule} class="p-4 space-y-4">
         <div>
-          <label for="schedule_date" class="block text-sm font-medium text-gray-700 mb-1">날짜</label>
+          <label for="schedule_date" class="block text-sm font-medium text-foreground mb-1">날짜</label>
           <input id="schedule_date" type="date" class="input" bind:value={newSchedule.date} required />
         </div>
         <div>
-          <label for="schedule_times" class="block text-sm font-medium text-gray-700 mb-1">시간 (쉼표 구분)</label>
+          <label for="schedule_times" class="block text-sm font-medium text-foreground mb-1">시간 (쉼표 구분)</label>
           <input id="schedule_times" type="text" class="input" bind:value={newSchedule.times} placeholder="예: 10:00, 14:00, 18:00" />
         </div>
         <div>
-          <label for="schedule_account_id" class="block text-sm font-medium text-gray-700 mb-1">사용 계정</label>
+          <label for="schedule_account_id" class="block text-sm font-medium text-foreground mb-1">사용 계정</label>
           <select id="schedule_account_id" class="input" bind:value={newSchedule.service_account_id}>
             <option value={null}>기본 계정</option>
             {#each accounts as account}
               <option value={account.id}>{account.profile_name} ({account.profile_dir})</option>
             {/each}
           </select>
-          <p class="text-xs text-gray-500 mt-1">이 일정을 실행할 때 사용할 계정을 선택하세요</p>
+          <p class="text-xs text-muted-foreground mt-1">이 일정을 실행할 때 사용할 계정을 선택하세요</p>
         </div>
         <label class="flex items-center gap-2">
           <input type="checkbox" bind:checked={newSchedule.is_enabled} />
-          <span class="text-sm font-medium text-gray-700">활성화</span>
+          <span class="text-sm font-medium text-foreground">활성화</span>
         </label>
         <div class="flex justify-end gap-2 pt-4">
           <button type="button" class="btn btn-secondary" on:click={() => showAddScheduleModal = false}>
@@ -839,13 +839,13 @@
     <div class="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4">
       <div class="p-4 border-b">
         <h3 class="text-lg font-semibold">URL로 임포트</h3>
-        <p class="text-sm text-gray-500 mt-1">
+        <p class="text-sm text-muted-foreground mt-1">
           네이버 예약 URL에서 업체/아이템/일정을 자동 생성합니다.
         </p>
       </div>
       <form on:submit|preventDefault={handleUrlImport} class="p-4 space-y-4">
         <div>
-          <label for="import-url" class="block text-sm font-medium text-gray-700 mb-1">
+          <label for="import-url" class="block text-sm font-medium text-foreground mb-1">
             URL <span class="text-red-500">*</span>
           </label>
           <input
@@ -856,13 +856,13 @@
             required
             placeholder="https://booking.naver.com/booking/...?startDateTime=..."
           />
-          <p class="text-xs text-gray-500 mt-1">
+          <p class="text-xs text-muted-foreground mt-1">
             형식: /booking/{'{category}'}/bizes/{'{businessId}'}/items/{'{itemId}'}?startDateTime=...
           </p>
         </div>
         <div class="grid grid-cols-2 gap-4">
           <div>
-            <label for="import-item-name" class="block text-sm font-medium text-gray-700 mb-1">
+            <label for="import-item-name" class="block text-sm font-medium text-foreground mb-1">
               아이템명 <span class="text-red-500">*</span>
             </label>
             <input
@@ -875,7 +875,7 @@
             />
           </div>
           <div>
-            <label for="import-business-name" class="block text-sm font-medium text-gray-700 mb-1">
+            <label for="import-business-name" class="block text-sm font-medium text-foreground mb-1">
               업체명 (선택)
             </label>
             <input
@@ -888,7 +888,7 @@
           </div>
         </div>
         <div>
-          <label for="import-time-range" class="block text-sm font-medium text-gray-700 mb-1">
+          <label for="import-time-range" class="block text-sm font-medium text-foreground mb-1">
             시간 범위 (선택)
           </label>
           <input
@@ -902,11 +902,11 @@
         <div class="flex items-center gap-4">
           <label class="flex items-center gap-2">
             <input type="checkbox" bind:checked={urlImport.auto_booking_enabled} />
-            <span class="text-sm font-medium text-gray-700">자동 예약</span>
+            <span class="text-sm font-medium text-foreground">자동 예약</span>
           </label>
           {#if urlImport.auto_booking_enabled}
             <div class="flex items-center gap-2">
-              <label for="import-max-bookings" class="text-sm text-gray-700">최대 예약:</label>
+              <label for="import-max-bookings" class="text-sm text-foreground">최대 예약:</label>
               <input
                 id="import-max-bookings"
                 type="number"
@@ -928,7 +928,7 @@
               {urlImportResult.message}
             </p>
             {#if urlImportResult.parsed_info}
-              <div class="text-xs text-gray-500 mt-2">
+              <div class="text-xs text-muted-foreground mt-2">
                 <p>카테고리: {urlImportResult.parsed_info.category}</p>
                 <p>업체ID: {urlImportResult.parsed_info.naver_business_id}</p>
                 <p>아이템ID: {urlImportResult.parsed_info.naver_item_id}</p>

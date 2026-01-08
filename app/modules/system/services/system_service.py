@@ -152,7 +152,7 @@ class SystemService:
 
     async def _query_tasks_in_folder(self, folder: str, project_name: str) -> list:
         """Query all scheduled tasks in a folder"""
-        ps_cmd = f"""
+        ps_script = f'''
 $tasks = Get-ScheduledTask -TaskPath '\\{folder}\\' -ErrorAction SilentlyContinue
 if ($tasks) {{
     $tasks | ForEach-Object {{
@@ -168,9 +168,9 @@ if ($tasks) {{
         }}
     }} | ConvertTo-Json -Compress
 }}
-"""
-        proc = await asyncio.create_subprocess_shell(
-            f'powershell -Command "{ps_cmd}"',
+'''
+        proc = await asyncio.create_subprocess_exec(
+            'powershell', '-NoProfile', '-Command', ps_script,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -180,7 +180,13 @@ if ($tasks) {{
             return []
 
         try:
-            data = json.loads(stdout.decode('utf-8'))
+            # Windows PowerShell may output in cp949 or utf-8
+            try:
+                output = stdout.decode('utf-8')
+            except UnicodeDecodeError:
+                output = stdout.decode('cp949', errors='replace')
+
+            data = json.loads(output)
             if isinstance(data, dict):
                 data = [data]
 

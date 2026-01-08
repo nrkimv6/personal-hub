@@ -152,13 +152,13 @@
 	<!-- 기간 선택 헤더 -->
 	<div class="mb-6 flex justify-between items-center">
 		<div>
-			<p class="text-sm text-gray-500">LLM 처리 시간 및 파이프라인 성능 분석</p>
+			<p class="text-sm text-muted-foreground">LLM 처리 시간 및 파이프라인 성능 분석</p>
 		</div>
 		<div class="flex gap-3 items-center">
 			<select
 				bind:value={hours}
 				onchange={handlePeriodChange}
-				class="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+				class="px-3 py-2 border border-border rounded-lg text-sm"
 			>
 				{#each hourOptions as opt}
 					<option value={opt.value}>{opt.label}</option>
@@ -179,14 +179,14 @@
 		<div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-6">
 			<!-- 워커 상태 -->
 			<div class="card p-4">
-				<div class="text-sm text-gray-500">워커 상태</div>
+				<div class="text-sm text-muted-foreground">워커 상태</div>
 				<div
 					class="text-lg font-bold {workerStatus?.status === 'healthy'
 						? 'text-green-600'
 						: workerStatus?.status === 'warning'
 							? 'text-yellow-600'
 							: workerStatus?.status === 'no_worker'
-								? 'text-gray-500'
+								? 'text-muted-foreground'
 								: 'text-red-600'}"
 				>
 					{workerStatus?.status === 'healthy'
@@ -198,29 +198,29 @@
 								: '비정상'}
 				</div>
 				{#if workerStatus?.state}
-					<div class="text-xs text-gray-400">{workerStatus.state}</div>
+					<div class="text-xs text-muted-foreground">{workerStatus.state}</div>
 				{/if}
 				{#if workerStatus?.message && workerStatus?.status !== 'healthy'}
-					<div class="text-xs text-gray-400">{workerStatus.message}</div>
+					<div class="text-xs text-muted-foreground">{workerStatus.message}</div>
 				{/if}
 			</div>
 
 			<!-- 총 요청 -->
 			<div class="card p-4">
-				<div class="text-sm text-gray-500">총 요청</div>
-				<div class="text-2xl font-bold text-gray-900">{stats.llm_stats.total_requests}</div>
-				<div class="text-xs text-gray-400">최근 {hours}시간</div>
+				<div class="text-sm text-muted-foreground">총 요청</div>
+				<div class="text-2xl font-bold text-foreground">{stats.llm_stats.total_requests}</div>
+				<div class="text-xs text-muted-foreground">최근 {hours}시간</div>
 			</div>
 
 			<!-- 실패 -->
 			<div class="card p-4">
-				<div class="text-sm text-gray-500">실패</div>
+				<div class="text-sm text-muted-foreground">실패</div>
 				<div class="text-2xl font-bold text-red-600">{stats.llm_stats.failed_count}</div>
 			</div>
 
 			<!-- 평균 처리 시간 -->
 			<div class="card p-4">
-				<div class="text-sm text-gray-500">평균 처리 시간</div>
+				<div class="text-sm text-muted-foreground">평균 처리 시간</div>
 				<div class="text-2xl font-bold text-blue-600">
 					{formatTime(stats.llm_stats.avg_processing_time)}
 				</div>
@@ -228,26 +228,26 @@
 
 			<!-- P50 -->
 			<div class="card p-4">
-				<div class="text-sm text-gray-500">P50</div>
+				<div class="text-sm text-muted-foreground">P50</div>
 				<div class="text-2xl font-bold text-green-600">{formatTime(stats.llm_stats.p50)}</div>
 			</div>
 
 			<!-- P95 -->
 			<div class="card p-4">
-				<div class="text-sm text-gray-500">P95</div>
+				<div class="text-sm text-muted-foreground">P95</div>
 				<div class="text-2xl font-bold text-orange-600">{formatTime(stats.llm_stats.p95)}</div>
 			</div>
 		</div>
 
 		<!-- 처리 시간 범위 -->
 		<div class="card p-4 mb-6">
-			<h3 class="text-lg font-bold text-gray-900 mb-3">처리 시간 분포</h3>
+			<h3 class="text-lg font-bold text-foreground mb-3">처리 시간 분포</h3>
 			<div class="flex items-center gap-8">
 				<div class="flex items-center gap-2">
-					<span class="text-sm text-gray-500">최소:</span>
+					<span class="text-sm text-muted-foreground">최소:</span>
 					<span class="font-medium">{formatTime(stats.llm_stats.min_time)}</span>
 				</div>
-				<div class="flex-1 h-2 bg-gray-200 rounded-full relative">
+				<div class="flex-1 h-2 bg-secondary rounded-full relative">
 					<div
 						class="absolute inset-y-0 left-0 bg-blue-500 rounded-full"
 						style="width: {stats.llm_stats.max_time > 0
@@ -256,7 +256,7 @@
 					></div>
 				</div>
 				<div class="flex items-center gap-2">
-					<span class="text-sm text-gray-500">최대:</span>
+					<span class="text-sm text-muted-foreground">최대:</span>
 					<span class="font-medium">{formatTime(stats.llm_stats.max_time)}</span>
 				</div>
 			</div>
@@ -264,7 +264,7 @@
 
 		<!-- 시간대별 차트 -->
 		<div class="card p-4 mb-6">
-			<h3 class="text-lg font-bold text-gray-900 mb-3">시간대별 분포</h3>
+			<h3 class="text-lg font-bold text-foreground mb-3">시간대별 분포</h3>
 			<div class="h-64">
 				<canvas bind:this={chartCanvas}></canvas>
 			</div>
@@ -273,30 +273,30 @@
 		<!-- 느린 요청 목록 -->
 		{#if stats.slow_requests.length > 0}
 			<div class="card p-4">
-				<h3 class="text-lg font-bold text-gray-900 mb-3">느린 요청 (상위 10개)</h3>
+				<h3 class="text-lg font-bold text-foreground mb-3">느린 요청 (상위 10개)</h3>
 				<div class="overflow-x-auto">
 					<table class="w-full">
-						<thead class="bg-gray-50 border-b border-gray-200">
+						<thead class="bg-background border-b border-border">
 							<tr>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">타입</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">ID</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">타입</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase"
 									>호출자 ID</th
 								>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase"
 									>처리 시간</th
 								>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase"
 									>요청 시간</th
 								>
 							</tr>
 						</thead>
-						<tbody class="divide-y divide-gray-200">
+						<tbody class="divide-y divide-border">
 							{#each stats.slow_requests as req}
-								<tr class="hover:bg-gray-50">
-									<td class="px-4 py-3 text-sm text-gray-900">{req.id}</td>
-									<td class="px-4 py-3 text-sm text-gray-600">{req.caller_type}</td>
-									<td class="px-4 py-3 text-sm text-gray-600">{req.caller_id}</td>
+								<tr class="hover:bg-muted">
+									<td class="px-4 py-3 text-sm text-foreground">{req.id}</td>
+									<td class="px-4 py-3 text-sm text-muted-foreground">{req.caller_type}</td>
+									<td class="px-4 py-3 text-sm text-muted-foreground">{req.caller_id}</td>
 									<td class="px-4 py-3">
 										<span
 											class="px-2 py-1 text-xs rounded-full {req.processing_time > 60
@@ -306,7 +306,7 @@
 											{formatTime(req.processing_time)}
 										</span>
 									</td>
-									<td class="px-4 py-3 text-sm text-gray-500">{formatDateTime(req.requested_at)}</td>
+									<td class="px-4 py-3 text-sm text-muted-foreground">{formatDateTime(req.requested_at)}</td>
 								</tr>
 							{/each}
 						</tbody>
@@ -314,7 +314,7 @@
 				</div>
 			</div>
 		{:else}
-			<div class="card p-4 text-center text-gray-500">
+			<div class="card p-4 text-center text-muted-foreground">
 				<p>분석 기간 내 완료된 요청이 없습니다.</p>
 			</div>
 		{/if}

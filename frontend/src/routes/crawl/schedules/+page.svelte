@@ -93,15 +93,15 @@
 
 <div class="p-6 max-w-7xl mx-auto">
 	<div class="mb-6">
-		<h2 class="text-2xl font-bold text-gray-900">크롤링 스케줄</h2>
-		<p class="text-sm text-gray-500 mt-1">정기 크롤링 스케줄 관리</p>
+		<h2 class="text-2xl font-bold text-foreground">크롤링 스케줄</h2>
+		<p class="text-sm text-muted-foreground mt-1">정기 크롤링 스케줄 관리</p>
 	</div>
 
 	<!-- 필터 -->
 	<div class="card mb-6">
 		<div class="flex flex-wrap gap-4 items-center">
 			<div>
-				<label for="targetType" class="block text-sm font-medium text-gray-700 mb-1">대상 타입</label>
+				<label for="targetType" class="block text-sm font-medium text-foreground mb-1">대상 타입</label>
 				<select
 					id="targetType"
 					bind:value={targetType}
@@ -120,9 +120,9 @@
 					id="enabledOnly"
 					bind:checked={enabledOnly}
 					onchange={handleFilterChange}
-					class="rounded border-gray-300"
+					class="rounded border-border"
 				/>
-				<label for="enabledOnly" class="text-sm text-gray-700">활성화된 것만</label>
+				<label for="enabledOnly" class="text-sm text-foreground">활성화된 것만</label>
 			</div>
 		</div>
 	</div>
@@ -138,7 +138,7 @@
 		</div>
 	{:else if !schedules || schedules.length === 0}
 		<div class="card text-center py-12">
-			<p class="text-gray-500">스케줄이 없습니다</p>
+			<p class="text-muted-foreground">스케줄이 없습니다</p>
 		</div>
 	{:else}
 		<div class="grid gap-4">
@@ -148,14 +148,14 @@
 					<div class="flex justify-between items-start">
 						<div class="flex-1">
 							<div class="flex items-center gap-3 mb-2">
-								<h3 class="text-lg font-semibold text-gray-900">
+								<h3 class="text-lg font-semibold text-foreground">
 									{schedule.display_name || schedule.name}
 								</h3>
-								<span class="px-2 py-1 text-xs rounded-full {schedule.enabled ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}">
+								<span class="px-2 py-1 text-xs rounded-full {schedule.enabled ? 'bg-green-100 text-green-800' : 'bg-muted text-muted-foreground'}">
 									{schedule.enabled ? '활성' : '비활성'}
 								</span>
 							</div>
-							<div class="flex flex-wrap gap-4 text-sm text-gray-600">
+							<div class="flex flex-wrap gap-4 text-sm text-muted-foreground">
 								<span>대상: {getTargetTypeLabel(schedule.target_type)}</span>
 								<span>주기: {getScheduleTypeLabel(schedule.schedule_type)}</span>
 								{#if schedule.last_run_at}
@@ -168,9 +168,9 @@
 
 							{#if stats}
 								<div class="mt-3 flex gap-6 text-sm">
-									<span class="text-gray-500">
+									<span class="text-muted-foreground">
 										7일 통계:
-										<span class="font-medium text-gray-900">{stats.total_runs}</span>회 실행,
+										<span class="font-medium text-foreground">{stats.total_runs}</span>회 실행,
 										<span class="font-medium text-green-600">{stats.success_rate.toFixed(0)}%</span> 성공률,
 										<span class="font-medium text-blue-600">{stats.total_saved}</span>건 저장
 									</span>

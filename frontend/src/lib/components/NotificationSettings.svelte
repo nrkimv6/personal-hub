@@ -69,14 +69,14 @@
 		<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 			<!-- 알림 설정 -->
 			<div class="card">
-				<h3 class="text-lg font-semibold text-gray-900 mb-4">알림 설정</h3>
+				<h3 class="text-lg font-semibold text-foreground mb-4">알림 설정</h3>
 
 				{#if notificationSettings}
 					<div class="space-y-4">
 						<div class="flex items-center justify-between">
 							<div>
 								<p class="font-medium">텔레그램 알림</p>
-								<p class="text-sm text-gray-500">텔레그램으로 알림을 받습니다.</p>
+								<p class="text-sm text-muted-foreground">텔레그램으로 알림을 받습니다.</p>
 							</div>
 							<label class="relative inline-flex items-center cursor-pointer">
 								<input
@@ -85,7 +85,7 @@
 									bind:checked={notificationSettings.enable_telegram}
 								/>
 								<div
-									class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"
+									class="w-11 h-6 bg-secondary peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"
 								></div>
 							</label>
 						</div>
@@ -93,7 +93,7 @@
 						<div class="flex items-center justify-between">
 							<div>
 								<p class="font-medium">데스크톱 알림</p>
-								<p class="text-sm text-gray-500">시스템 알림을 표시합니다.</p>
+								<p class="text-sm text-muted-foreground">시스템 알림을 표시합니다.</p>
 							</div>
 							<label class="relative inline-flex items-center cursor-pointer">
 								<input
@@ -102,7 +102,7 @@
 									bind:checked={notificationSettings.enable_desktop}
 								/>
 								<div
-									class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"
+									class="w-11 h-6 bg-secondary peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"
 								></div>
 							</label>
 						</div>
@@ -118,7 +118,7 @@
 											type="checkbox"
 											checked={notificationSettings.notify_states.includes(option.value)}
 											onchange={() => toggleNotifyState(option.value)}
-											class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+											class="rounded border-border text-blue-600 focus:ring-blue-500"
 										/>
 										<span class="text-sm">{option.label}</span>
 									</label>
@@ -139,7 +139,7 @@
 
 			<!-- API 문서 링크 -->
 			<div class="card">
-				<h3 class="text-lg font-semibold text-gray-900 mb-4">API 문서</h3>
+				<h3 class="text-lg font-semibold text-foreground mb-4">API 문서</h3>
 				<div class="flex gap-4">
 					<a href="/docs" target="_blank" class="btn btn-secondary"> Swagger UI </a>
 					<a href="/redoc" target="_blank" class="btn btn-secondary"> ReDoc </a>

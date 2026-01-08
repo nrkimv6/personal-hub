@@ -425,8 +425,8 @@
 			case 'processing': return 'bg-blue-100 text-blue-800';
 			case 'completed': return 'bg-green-100 text-green-800';
 			case 'failed': return 'bg-red-100 text-red-800';
-			case 'cancelled': return 'bg-gray-100 text-gray-800';
-			default: return 'bg-gray-100 text-gray-800';
+			case 'cancelled': return 'bg-muted text-foreground';
+			default: return 'bg-muted text-foreground';
 		}
 	}
 
@@ -471,7 +471,7 @@
 <div class="p-6">
 	<!-- 헤더 -->
 	<div class="mb-6 flex justify-between items-center">
-		<h2 class="text-2xl font-bold text-gray-900">LLM 요청 관리</h2>
+		<h2 class="text-2xl font-bold text-foreground">LLM 요청 관리</h2>
 		<div class="flex gap-2">
 			<button onclick={runCleanup} class="btn btn-secondary btn-sm" title="Stale 정리 및 오래된 이력 삭제">
 				정리
@@ -487,38 +487,38 @@
 		<div class="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
 			<!-- 워커 상태 -->
 			<div class="card p-4">
-				<div class="text-sm text-gray-500">워커 상태</div>
-				<div class="text-lg font-bold {workerStatus?.status === 'healthy' ? 'text-green-600' : workerStatus?.status === 'warning' ? 'text-yellow-600' : workerStatus?.status === 'no_worker' ? 'text-gray-500' : 'text-red-600'}">
+				<div class="text-sm text-muted-foreground">워커 상태</div>
+				<div class="text-lg font-bold {workerStatus?.status === 'healthy' ? 'text-green-600' : workerStatus?.status === 'warning' ? 'text-yellow-600' : workerStatus?.status === 'no_worker' ? 'text-muted-foreground' : 'text-red-600'}">
 					{workerStatus?.status === 'healthy' ? '정상' : workerStatus?.status === 'warning' ? '지연' : workerStatus?.status === 'no_worker' ? '없음' : '비정상'}
 				</div>
 				{#if workerStatus?.state}
-					<div class="text-xs text-gray-400">{workerStatus.state}</div>
+					<div class="text-xs text-muted-foreground">{workerStatus.state}</div>
 				{/if}
 				{#if workerStatus?.message && workerStatus?.status !== 'healthy'}
-					<div class="text-xs text-gray-400">{workerStatus.message}</div>
+					<div class="text-xs text-muted-foreground">{workerStatus.message}</div>
 				{/if}
 			</div>
 
 			<!-- 통계 카드들 -->
 			{#if stats}
 				<div class="card p-4">
-					<div class="text-sm text-gray-500">전체</div>
-					<div class="text-2xl font-bold text-gray-900">{stats.total}</div>
+					<div class="text-sm text-muted-foreground">전체</div>
+					<div class="text-2xl font-bold text-foreground">{stats.total}</div>
 				</div>
 				<div class="card p-4 cursor-pointer hover:bg-yellow-50" onclick={() => switchTab('queue')}>
-					<div class="text-sm text-gray-500">대기중</div>
+					<div class="text-sm text-muted-foreground">대기중</div>
 					<div class="text-2xl font-bold text-yellow-600">{stats.pending}</div>
 				</div>
 				<div class="card p-4 cursor-pointer hover:bg-blue-50" onclick={() => switchTab('queue')}>
-					<div class="text-sm text-gray-500">처리중</div>
+					<div class="text-sm text-muted-foreground">처리중</div>
 					<div class="text-2xl font-bold text-blue-600">{stats.processing}</div>
 				</div>
 				<div class="card p-4 cursor-pointer hover:bg-green-50" onclick={() => switchTab('history')}>
-					<div class="text-sm text-gray-500">완료</div>
+					<div class="text-sm text-muted-foreground">완료</div>
 					<div class="text-2xl font-bold text-green-600">{stats.completed}</div>
 				</div>
 				<div class="card p-4 cursor-pointer hover:bg-red-50" onclick={() => switchTab('history')}>
-					<div class="text-sm text-gray-500">실패</div>
+					<div class="text-sm text-muted-foreground">실패</div>
 					<div class="text-2xl font-bold text-red-600">{stats.failed}</div>
 				</div>
 			{/if}
@@ -526,29 +526,29 @@
 	{/if}
 
 	<!-- 탭 -->
-	<div class="mb-4 border-b border-gray-200">
+	<div class="mb-4 border-b border-border">
 		<nav class="flex gap-4">
 			<button
 				onclick={() => switchTab('queue')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'queue' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'queue' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				대기열 (pending/processing)
 			</button>
 			<button
 				onclick={() => switchTab('history')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'history' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'history' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				이력 (completed/failed)
 			</button>
 			<button
 				onclick={() => switchTab('create')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'create' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'create' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				수동 요청 생성
 			</button>
 			<button
 				onclick={() => switchTab('performance')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'performance' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'performance' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				성능 분석
 			</button>
@@ -558,10 +558,10 @@
 	{#if activeTab === 'queue' || activeTab === 'history'}
 		<!-- 필터 -->
 		<div class="mb-4 flex flex-wrap gap-2 items-center">
-			<span class="text-sm text-gray-500">
+			<span class="text-sm text-muted-foreground">
 				{activeTab === 'queue' ? '대기열: pending, processing' : '이력: completed, failed, cancelled'}
 			</span>
-			<select bind:value={filterCallerType} class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
+			<select bind:value={filterCallerType} class="px-3 py-1.5 border border-border rounded-lg text-sm">
 				<option value="">전체 타입</option>
 				<option value="instagram">Instagram</option>
 				<option value="test">Test</option>
@@ -571,7 +571,7 @@
 					type="text"
 					placeholder="요청자"
 					bind:value={filterRequestedBy}
-					class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+					class="px-3 py-1.5 border border-border rounded-lg text-sm"
 				/>
 			{/if}
 			{#if activeTab === 'queue'}
@@ -579,7 +579,7 @@
 					type="text"
 					placeholder="요청자"
 					bind:value={filterRequestedBy}
-					class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+					class="px-3 py-1.5 border border-border rounded-lg text-sm"
 				/>
 			{/if}
 			{#if activeTab === 'history' && viewMode === 'grouped'}
@@ -610,10 +610,10 @@
 
 		<!-- 그룹 뷰 요약 및 일괄 재시도 버튼 -->
 		{#if activeTab === 'history' && viewMode === 'grouped' && groupedResponse}
-			<div class="mb-4 flex gap-4 items-center p-3 bg-gray-50 rounded-lg flex-wrap">
+			<div class="mb-4 flex gap-4 items-center p-3 bg-background rounded-lg flex-wrap">
 				<div class="text-sm">
-					<span class="text-gray-600">전체:</span>
-					<span class="font-bold text-gray-900">{groupedResponse.summary.total_callers}</span>
+					<span class="text-muted-foreground">전체:</span>
+					<span class="font-bold text-foreground">{groupedResponse.summary.total_callers}</span>
 				</div>
 				<div class="text-sm">
 					<span class="text-green-600">성공 있음:</span>
@@ -625,7 +625,7 @@
 				</div>
 				<div class="ml-auto flex gap-2">
 					{#if selectedGroupKeys.length > 0}
-						<span class="text-sm text-gray-600 self-center">{selectedGroupKeys.length}개 선택</span>
+						<span class="text-sm text-muted-foreground self-center">{selectedGroupKeys.length}개 선택</span>
 						<button onclick={multiRetrySelectedGroups} class="btn btn-secondary btn-sm">
 							선택 그룹 재시도
 						</button>
@@ -642,7 +642,7 @@
 		<!-- 일괄 작업 버튼 (개별 뷰) -->
 		{#if viewMode === 'individual' && selectedIds.length > 0}
 			<div class="mb-4 flex gap-2 items-center">
-				<span class="text-sm text-gray-600">{selectedIds.length}개 선택</span>
+				<span class="text-sm text-muted-foreground">{selectedIds.length}개 선택</span>
 				{#if activeTab === 'history'}
 					<button onclick={batchRetry} class="btn btn-secondary btn-sm">일괄 재시도</button>
 				{/if}
@@ -659,13 +659,13 @@
 		{:else if activeTab === 'history' && viewMode === 'grouped'}
 			<!-- 그룹 뷰 테이블 -->
 			{#if callerGroups.length === 0}
-				<div class="text-center py-12 text-gray-500">
+				<div class="text-center py-12 text-muted-foreground">
 					<p class="text-lg">그룹화된 이력이 없습니다</p>
 				</div>
 			{:else}
-				<div class="bg-white rounded-lg border border-gray-200 overflow-x-auto mb-6">
+				<div class="bg-white rounded-lg border border-border overflow-x-auto mb-6">
 					<table class="w-full min-w-[900px]">
-						<thead class="bg-gray-50 border-b border-gray-200">
+						<thead class="bg-background border-b border-border">
 							<tr>
 								<th class="px-4 py-3 text-left whitespace-nowrap">
 									<input
@@ -675,21 +675,21 @@
 										class="rounded"
 									/>
 								</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">타입</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">호출자 ID</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">요청내용</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">요청 수</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">성공</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">실패</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">대기</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">성공 여부</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">최근 상태</th>
-								<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">마지막 요청</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">타입</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">호출자 ID</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">요청내용</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">요청 수</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">성공</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">실패</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">대기</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">성공 여부</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">최근 상태</th>
+								<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">마지막 요청</th>
 							</tr>
 						</thead>
-						<tbody class="divide-y divide-gray-200">
+						<tbody class="divide-y divide-border">
 							{#each callerGroups as group}
-								<tr class="hover:bg-gray-50 {group.has_success ? '' : 'bg-red-50'}">
+								<tr class="hover:bg-muted {group.has_success ? '' : 'bg-red-50'}">
 									<td class="px-4 py-3">
 										<input
 											type="checkbox"
@@ -698,12 +698,12 @@
 											class="rounded"
 										/>
 									</td>
-									<td class="px-4 py-3 text-sm text-gray-600">{group.caller_type}</td>
-									<td class="px-4 py-3 text-sm text-gray-900 font-mono">{group.caller_id}</td>
-									<td class="px-4 py-3 text-sm text-gray-700 max-w-xs truncate" title={group.prompt}>
+									<td class="px-4 py-3 text-sm text-muted-foreground">{group.caller_type}</td>
+									<td class="px-4 py-3 text-sm text-foreground font-mono">{group.caller_id}</td>
+									<td class="px-4 py-3 text-sm text-foreground max-w-xs truncate" title={group.prompt}>
 										{truncatePrompt(group.prompt)}
 									</td>
-									<td class="px-4 py-3 text-sm text-gray-900 font-bold">{group.total_count}</td>
+									<td class="px-4 py-3 text-sm text-foreground font-bold">{group.total_count}</td>
 									<td class="px-4 py-3 text-sm text-green-600 font-bold">{group.completed_count}</td>
 									<td class="px-4 py-3 text-sm text-red-600 font-bold">{group.failed_count}</td>
 									<td class="px-4 py-3 text-sm text-yellow-600">{group.pending_count}</td>
@@ -719,7 +719,7 @@
 											{getStatusLabel(group.last_status)}
 										</span>
 									</td>
-									<td class="px-4 py-3 text-sm text-gray-500">{formatDateTime(group.last_requested_at)}</td>
+									<td class="px-4 py-3 text-sm text-muted-foreground">{formatDateTime(group.last_requested_at)}</td>
 								</tr>
 							{/each}
 						</tbody>
@@ -729,7 +729,7 @@
 				<!-- 그룹 뷰 페이지네이션 -->
 				{#if groupPages > 1}
 					<div class="flex justify-between items-center">
-						<span class="text-sm text-gray-500">
+						<span class="text-sm text-muted-foreground">
 							전체 {groupTotal}개 중 {(groupCurrentPage - 1) * groupPageSize + 1} - {Math.min(groupCurrentPage * groupPageSize, groupTotal)}
 						</span>
 						<div class="flex gap-2">
@@ -753,14 +753,14 @@
 				{/if}
 			{/if}
 		{:else if requests.length === 0}
-			<div class="text-center py-12 text-gray-500">
+			<div class="text-center py-12 text-muted-foreground">
 				<p class="text-lg">{activeTab === 'queue' ? '대기열이 비어있습니다' : '이력이 없습니다'}</p>
 			</div>
 		{:else}
 			<!-- 개별 요청 목록 테이블 -->
-			<div class="bg-white rounded-lg border border-gray-200 overflow-x-auto mb-6">
+			<div class="bg-white rounded-lg border border-border overflow-x-auto mb-6">
 				<table class="w-full min-w-[700px]">
-					<thead class="bg-gray-50 border-b border-gray-200">
+					<thead class="bg-background border-b border-border">
 						<tr>
 							<th class="px-4 py-3 text-left whitespace-nowrap">
 								<input
@@ -770,19 +770,19 @@
 									class="rounded"
 								/>
 							</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">ID</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">타입</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">호출자 ID</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">요청자</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">상태</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">요청시간</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">액션</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">ID</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">타입</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">호출자 ID</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">요청자</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">상태</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">요청시간</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">액션</th>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-gray-200">
+					<tbody class="divide-y divide-border">
 						{#each requests as request (request.id)}
 							<tr
-								class="hover:bg-gray-50 cursor-pointer"
+								class="hover:bg-muted cursor-pointer"
 								onclick={() => openModal(request)}
 							>
 								<td class="px-4 py-3" onclick={(e) => e.stopPropagation()}>
@@ -793,16 +793,16 @@
 										class="rounded"
 									/>
 								</td>
-								<td class="px-4 py-3 text-sm text-gray-900">{request.id}</td>
-								<td class="px-4 py-3 text-sm text-gray-600">{request.caller_type}</td>
-								<td class="px-4 py-3 text-sm text-gray-600">{request.caller_id}</td>
-								<td class="px-4 py-3 text-sm text-gray-600">{request.requested_by || '-'}</td>
+								<td class="px-4 py-3 text-sm text-foreground">{request.id}</td>
+								<td class="px-4 py-3 text-sm text-muted-foreground">{request.caller_type}</td>
+								<td class="px-4 py-3 text-sm text-muted-foreground">{request.caller_id}</td>
+								<td class="px-4 py-3 text-sm text-muted-foreground">{request.requested_by || '-'}</td>
 								<td class="px-4 py-3">
 									<span class="px-2 py-1 text-xs rounded-full {getStatusColor(request.status)}">
 										{getStatusLabel(request.status)}
 									</span>
 								</td>
-								<td class="px-4 py-3 text-sm text-gray-500">{formatDateTime(request.requested_at)}</td>
+								<td class="px-4 py-3 text-sm text-muted-foreground">{formatDateTime(request.requested_at)}</td>
 								<td class="px-4 py-3" onclick={(e) => e.stopPropagation()}>
 									<div class="flex gap-1">
 										{#if request.status === 'pending'}
@@ -838,7 +838,7 @@
 			<!-- 페이지네이션 -->
 			{#if pages > 1}
 				<div class="flex justify-between items-center">
-					<span class="text-sm text-gray-500">
+					<span class="text-sm text-muted-foreground">
 						전체 {total}개 중 {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, total)}
 					</span>
 					<div class="flex gap-2">
@@ -865,22 +865,22 @@
 		<!-- 이력 탭의 통계 -->
 		{#if activeTab === 'history' && historyStats}
 			<div class="mt-8">
-				<h3 class="text-lg font-bold text-gray-900 mb-4">7일간 통계</h3>
+				<h3 class="text-lg font-bold text-foreground mb-4">7일간 통계</h3>
 				<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
 					<div class="card p-4">
-						<div class="text-sm text-gray-500">총 요청</div>
-						<div class="text-2xl font-bold text-gray-900">{historyStats.summary.total}</div>
+						<div class="text-sm text-muted-foreground">총 요청</div>
+						<div class="text-2xl font-bold text-foreground">{historyStats.summary.total}</div>
 					</div>
 					<div class="card p-4">
-						<div class="text-sm text-gray-500">성공률</div>
+						<div class="text-sm text-muted-foreground">성공률</div>
 						<div class="text-2xl font-bold text-green-600">{historyStats.summary.success_rate}%</div>
 					</div>
 					<div class="card p-4">
-						<div class="text-sm text-gray-500">완료</div>
+						<div class="text-sm text-muted-foreground">완료</div>
 						<div class="text-2xl font-bold text-green-600">{historyStats.summary.completed}</div>
 					</div>
 					<div class="card p-4">
-						<div class="text-sm text-gray-500">평균 처리 시간</div>
+						<div class="text-sm text-muted-foreground">평균 처리 시간</div>
 						<div class="text-2xl font-bold text-blue-600">{historyStats.summary.avg_processing_time_seconds}s</div>
 					</div>
 				</div>
@@ -889,9 +889,9 @@
 	{:else if activeTab === 'create'}
 		<!-- 수동 요청 생성 폼 -->
 		<div class="max-w-2xl">
-			<div class="bg-white rounded-lg border border-gray-200 p-6">
-				<h3 class="text-lg font-bold text-gray-900 mb-4">수동 LLM 요청 생성</h3>
-				<p class="text-sm text-gray-500 mb-6">테스트 또는 디버깅 목적으로 수동으로 LLM 요청을 생성합니다.</p>
+			<div class="bg-white rounded-lg border border-border p-6">
+				<h3 class="text-lg font-bold text-foreground mb-4">수동 LLM 요청 생성</h3>
+				<p class="text-sm text-muted-foreground mb-6">테스트 또는 디버깅 목적으로 수동으로 LLM 요청을 생성합니다.</p>
 
 				{#if createSuccess}
 					<div class="mb-4 p-4 bg-green-50 border border-green-200 text-green-700 rounded-lg">
@@ -907,48 +907,48 @@
 
 				<div class="space-y-4">
 					<div>
-						<label class="block text-sm font-medium text-gray-700 mb-1">호출자 타입</label>
-						<select bind:value={createForm.caller_type} class="w-full px-3 py-2 border border-gray-300 rounded-lg">
+						<label class="block text-sm font-medium text-foreground mb-1">호출자 타입</label>
+						<select bind:value={createForm.caller_type} class="w-full px-3 py-2 border border-border rounded-lg">
 							<option value="test">test</option>
 							<option value="instagram">instagram</option>
 						</select>
 					</div>
 
 					<div>
-						<label class="block text-sm font-medium text-gray-700 mb-1">호출자 ID *</label>
+						<label class="block text-sm font-medium text-foreground mb-1">호출자 ID *</label>
 						<input
 							type="text"
 							bind:value={createForm.caller_id}
 							placeholder="예: 123"
-							class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+							class="w-full px-3 py-2 border border-border rounded-lg"
 						/>
 					</div>
 
 					<div>
-						<label class="block text-sm font-medium text-gray-700 mb-1">프롬프트 *</label>
+						<label class="block text-sm font-medium text-foreground mb-1">프롬프트 *</label>
 						<textarea
 							bind:value={createForm.prompt}
 							rows="6"
 							placeholder="LLM에 전달할 프롬프트를 입력하세요..."
-							class="w-full px-3 py-2 border border-gray-300 rounded-lg resize-none"
+							class="w-full px-3 py-2 border border-border rounded-lg resize-none"
 						></textarea>
 					</div>
 
 					<div class="grid grid-cols-2 gap-4">
 						<div>
-							<label class="block text-sm font-medium text-gray-700 mb-1">요청자</label>
+							<label class="block text-sm font-medium text-foreground mb-1">요청자</label>
 							<input
 								type="text"
 								bind:value={createForm.requested_by}
-								class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+								class="w-full px-3 py-2 border border-border rounded-lg"
 							/>
 						</div>
 						<div>
-							<label class="block text-sm font-medium text-gray-700 mb-1">출처</label>
+							<label class="block text-sm font-medium text-foreground mb-1">출처</label>
 							<input
 								type="text"
 								bind:value={createForm.request_source}
-								class="w-full px-3 py-2 border border-gray-300 rounded-lg"
+								class="w-full px-3 py-2 border border-border rounded-lg"
 							/>
 						</div>
 					</div>
@@ -986,43 +986,43 @@
 			<div class="p-6">
 				<div class="flex justify-between items-start mb-4">
 					<div>
-						<h3 class="text-lg font-bold text-gray-900">요청 상세 #{selectedRequest.id}</h3>
+						<h3 class="text-lg font-bold text-foreground">요청 상세 #{selectedRequest.id}</h3>
 						<span class="px-2 py-1 text-xs rounded-full {getStatusColor(selectedRequest.status)}">
 							{getStatusLabel(selectedRequest.status)}
 						</span>
 					</div>
-					<button onclick={closeModal} class="text-gray-400 hover:text-gray-600 text-2xl">
+					<button onclick={closeModal} class="text-muted-foreground hover:text-muted-foreground text-2xl">
 						&times;
 					</button>
 				</div>
 
 				<div class="grid grid-cols-2 gap-4 text-sm mb-4">
 					<div>
-						<span class="text-gray-500">타입:</span>
+						<span class="text-muted-foreground">타입:</span>
 						<span class="ml-1">{selectedRequest.caller_type}</span>
 					</div>
 					<div>
-						<span class="text-gray-500">호출자 ID:</span>
+						<span class="text-muted-foreground">호출자 ID:</span>
 						<span class="ml-1">{selectedRequest.caller_id}</span>
 					</div>
 					<div>
-						<span class="text-gray-500">요청자:</span>
+						<span class="text-muted-foreground">요청자:</span>
 						<span class="ml-1">{selectedRequest.requested_by || '-'}</span>
 					</div>
 					<div>
-						<span class="text-gray-500">출처:</span>
+						<span class="text-muted-foreground">출처:</span>
 						<span class="ml-1">{selectedRequest.request_source || '-'}</span>
 					</div>
 					<div>
-						<span class="text-gray-500">요청 시간:</span>
+						<span class="text-muted-foreground">요청 시간:</span>
 						<span class="ml-1">{formatDateTime(selectedRequest.requested_at)}</span>
 					</div>
 					<div>
-						<span class="text-gray-500">처리 시간:</span>
+						<span class="text-muted-foreground">처리 시간:</span>
 						<span class="ml-1">{formatDateTime(selectedRequest.processed_at)}</span>
 					</div>
 					<div>
-						<span class="text-gray-500">재시도 횟수:</span>
+						<span class="text-muted-foreground">재시도 횟수:</span>
 						<span class="ml-1">{selectedRequest.retry_count}</span>
 					</div>
 				</div>
@@ -1035,9 +1035,9 @@
 				{/if}
 
 				{#if selectedRequest.result}
-					<div class="mb-4 p-3 bg-gray-50 rounded-lg">
-						<div class="text-sm font-medium text-gray-800 mb-1">결과</div>
-						<pre class="text-sm text-gray-700 whitespace-pre-wrap overflow-auto max-h-64">{JSON.stringify(selectedRequest.result, null, 2)}</pre>
+					<div class="mb-4 p-3 bg-background rounded-lg">
+						<div class="text-sm font-medium text-foreground mb-1">결과</div>
+						<pre class="text-sm text-foreground whitespace-pre-wrap overflow-auto max-h-64">{JSON.stringify(selectedRequest.result, null, 2)}</pre>
 					</div>
 				{/if}
 

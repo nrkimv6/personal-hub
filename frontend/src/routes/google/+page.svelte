@@ -477,7 +477,7 @@
 			<button
 				onclick={() => (showSaveModal = true)}
 				disabled={!query.trim()}
-				class="rounded-lg border border-gray-300 px-4 py-2 hover:bg-gray-50 disabled:opacity-50"
+				class="rounded-lg border border-border px-4 py-2 hover:bg-muted disabled:opacity-50"
 				title="검색 조건 저장"
 			>
 				저장
@@ -495,13 +495,13 @@
 			<h2 class="mb-4 text-lg font-semibold">검색 결과 ({results.length}개)</h2>
 
 			{#if results.length === 0}
-				<div class="text-gray-500">검색 결과가 없습니다.</div>
+				<div class="text-muted-foreground">검색 결과가 없습니다.</div>
 			{:else}
 				<div class="space-y-4">
 					{#each results as result}
 						<div class="rounded-lg bg-white p-4 shadow">
 							<div class="flex items-start gap-3">
-								<span class="w-6 font-mono text-sm text-gray-400">{result.rank}</span>
+								<span class="w-6 font-mono text-sm text-muted-foreground">{result.rank}</span>
 								<div class="flex-1">
 									<a
 										href={result.url}
@@ -515,10 +515,10 @@
 										<div class="mt-1 text-sm text-green-700">{result.display_url}</div>
 									{/if}
 									{#if result.snippet}
-										<p class="mt-2 text-sm text-gray-600">{result.snippet}</p>
+										<p class="mt-2 text-sm text-muted-foreground">{result.snippet}</p>
 									{/if}
 									{#if result.publish_date}
-										<span class="mt-2 inline-block text-xs text-gray-400">
+										<span class="mt-2 inline-block text-xs text-muted-foreground">
 											{result.publish_date}
 										</span>
 									{/if}
@@ -540,7 +540,7 @@
 					class:border-blue-500={activeTab === 'saved'}
 					class:text-blue-600={activeTab === 'saved'}
 					class:border-transparent={activeTab !== 'saved'}
-					class:text-gray-500={activeTab !== 'saved'}
+					class:text-muted-foreground={activeTab !== 'saved'}
 				>
 					저장된 검색
 				</button>
@@ -550,7 +550,7 @@
 					class:border-blue-500={activeTab === 'history'}
 					class:text-blue-600={activeTab === 'history'}
 					class:border-transparent={activeTab !== 'history'}
-					class:text-gray-500={activeTab !== 'history'}
+					class:text-muted-foreground={activeTab !== 'history'}
 				>
 					최근 검색
 				</button>
@@ -560,11 +560,11 @@
 			{#if activeTab === 'saved'}
 				<div class="rounded-lg bg-white shadow">
 					{#if savedSearches.length === 0}
-						<div class="p-4 text-sm text-gray-500">저장된 검색이 없습니다.</div>
+						<div class="p-4 text-sm text-muted-foreground">저장된 검색이 없습니다.</div>
 					{:else}
 						<ul class="divide-y">
 							{#each savedSearches as saved}
-								<li class="hover:bg-gray-50">
+								<li class="hover:bg-muted">
 									<div class="p-3">
 										<div class="flex items-center justify-between">
 											<button onclick={() => runSavedSearch(saved)} class="flex-1 text-left">
@@ -574,21 +574,21 @@
 													{/if}
 													<span class="text-sm font-medium">{saved.name}</span>
 												</div>
-												<div class="mt-1 text-xs text-gray-500">{saved.query}</div>
+												<div class="mt-1 text-xs text-muted-foreground">{saved.query}</div>
 											</button>
 
 											<!-- 액션 버튼 -->
 											<div class="flex gap-1">
 												<button
 													onclick={(e) => toggleFavorite(saved, e)}
-													class="p-1 text-gray-400 hover:text-yellow-500"
+													class="p-1 text-muted-foreground hover:text-yellow-500"
 													title="즐겨찾기"
 												>
 													{saved.is_favorite ? '★' : '☆'}
 												</button>
 												<button
 													onclick={(e) => openScheduleModal(saved, e)}
-													class="p-1 text-gray-400 hover:text-green-500"
+													class="p-1 text-muted-foreground hover:text-green-500"
 													title="스케줄 설정"
 												>
 													{#if getScheduleForSaved(saved.id)}
@@ -600,7 +600,7 @@
 												{#if getScheduleForSaved(saved.id)}
 													<button
 														onclick={(e) => openRunsModal(getScheduleForSaved(saved.id)!.id, e)}
-														class="p-1 text-xs text-gray-400 hover:text-purple-500"
+														class="p-1 text-xs text-muted-foreground hover:text-purple-500"
 														title="실행 이력"
 													>
 														📊
@@ -609,7 +609,7 @@
 												{#if saved.last_search_id}
 													<button
 														onclick={(e) => loadLastResults(saved, e)}
-														class="p-1 text-xs text-gray-400 hover:text-blue-500"
+														class="p-1 text-xs text-muted-foreground hover:text-blue-500"
 														title="마지막 결과 보기"
 													>
 														📋
@@ -617,7 +617,7 @@
 												{/if}
 												<button
 													onclick={(e) => deleteSavedSearch(saved, e)}
-													class="p-1 text-gray-400 hover:text-red-500"
+													class="p-1 text-muted-foreground hover:text-red-500"
 													title="삭제"
 												>
 													✕
@@ -626,7 +626,7 @@
 										</div>
 
 										<!-- 메타 정보 -->
-										<div class="mt-2 flex flex-wrap gap-2 text-xs text-gray-400">
+										<div class="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
 											{#if saved.date_filter}
 												<span
 													>{dateFilters.find((f) => f.value === saved.date_filter)?.label}</span
@@ -659,17 +659,17 @@
 			{#if activeTab === 'history'}
 				<div class="rounded-lg bg-white shadow">
 					{#if history.length === 0}
-						<div class="p-4 text-sm text-gray-500">검색 기록이 없습니다.</div>
+						<div class="p-4 text-sm text-muted-foreground">검색 기록이 없습니다.</div>
 					{:else}
 						<ul class="divide-y">
 							{#each history as item}
 								<li>
 									<button
 										onclick={() => loadFromHistory(item)}
-										class="w-full p-3 text-left hover:bg-gray-50"
+										class="w-full p-3 text-left hover:bg-muted"
 									>
 										<div class="text-sm font-medium">{item.query}</div>
-										<div class="mt-1 text-xs text-gray-400">
+										<div class="mt-1 text-xs text-muted-foreground">
 											{item.total_results}개 결과
 											{#if item.date_filter}
 												· {dateFilters.find((f) => f.value === item.date_filter)?.label}
@@ -704,7 +704,7 @@
 					/>
 				</div>
 
-				<div class="text-sm text-gray-600">
+				<div class="text-sm text-muted-foreground">
 					<div><strong>검색어:</strong> {query}</div>
 					<div>
 						<strong>날짜 필터:</strong>
@@ -722,7 +722,7 @@
 			<div class="mt-6 flex justify-end gap-2">
 				<button
 					onclick={() => (showSaveModal = false)}
-					class="rounded-lg px-4 py-2 text-gray-600 hover:bg-gray-100"
+					class="rounded-lg px-4 py-2 text-muted-foreground hover:bg-muted"
 				>
 					취소
 				</button>
@@ -747,7 +747,7 @@
 			</h3>
 
 			<div class="space-y-4">
-				<div class="text-sm text-gray-600">
+				<div class="text-sm text-muted-foreground">
 					<div><strong>검색명:</strong> {selectedSavedSearch.name}</div>
 					<div><strong>검색어:</strong> {selectedSavedSearch.query}</div>
 				</div>
@@ -768,7 +768,7 @@
 				</label>
 
 				{#if editingSchedule?.next_run_at}
-					<div class="text-sm text-gray-500">
+					<div class="text-sm text-muted-foreground">
 						다음 실행: {formatDate(editingSchedule.next_run_at)}
 					</div>
 				{/if}
@@ -786,7 +786,7 @@
 				<div class="flex gap-2">
 					<button
 						onclick={() => (showScheduleModal = false)}
-						class="rounded-lg px-4 py-2 text-gray-600 hover:bg-gray-100"
+						class="rounded-lg px-4 py-2 text-muted-foreground hover:bg-muted"
 					>
 						취소
 					</button>
@@ -809,7 +809,7 @@
 			<h3 class="mb-4 text-lg font-semibold">스케줄 실행 이력</h3>
 
 			{#if scheduleRuns.length === 0}
-				<div class="py-4 text-center text-gray-500">실행 이력이 없습니다.</div>
+				<div class="py-4 text-center text-muted-foreground">실행 이력이 없습니다.</div>
 			{:else}
 				<ul class="divide-y">
 					{#each scheduleRuns as run}
@@ -831,7 +831,7 @@
 										</span>
 									{/if}
 								</div>
-								<span class="text-sm text-gray-500">{run.collected_count}개 수집</span>
+								<span class="text-sm text-muted-foreground">{run.collected_count}개 수집</span>
 							</div>
 							{#if run.error_message}
 								<div class="mt-1 text-xs text-red-500">{run.error_message}</div>
@@ -844,7 +844,7 @@
 			<div class="mt-4 flex justify-end">
 				<button
 					onclick={() => (showRunsModal = false)}
-					class="rounded-lg px-4 py-2 text-gray-600 hover:bg-gray-100"
+					class="rounded-lg px-4 py-2 text-muted-foreground hover:bg-muted"
 				>
 					닫기
 				</button>

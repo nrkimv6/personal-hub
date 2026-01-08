@@ -148,7 +148,7 @@
 
 <div class="p-6">
   <div class="mb-6 flex justify-between items-center">
-    <h2 class="text-2xl font-bold text-gray-900">예약 관리</h2>
+    <h2 class="text-2xl font-bold text-foreground">예약 관리</h2>
     <button class="btn btn-secondary btn-sm" on:click={fetchSchedules}>
       새로고침
     </button>
@@ -157,7 +157,7 @@
   <!-- 자동 예약 대상 목록 -->
   <div class="card">
     <div class="flex justify-between items-center mb-4">
-      <h3 class="text-lg font-semibold text-gray-900">
+      <h3 class="text-lg font-semibold text-foreground">
         자동 예약 대상 ({getAutoBookingSchedules().length})
       </h3>
     </div>
@@ -171,28 +171,28 @@
         {error}
       </div>
     {:else if getAutoBookingSchedules().length === 0}
-      <p class="text-gray-500 text-center py-8">
+      <p class="text-muted-foreground text-center py-8">
         자동 예약이 활성화된 일정이 없습니다.
       </p>
     {:else}
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
-          <thead class="bg-gray-50">
+          <thead class="bg-background">
             <tr>
-              <th class="px-3 py-2 text-left font-medium text-gray-600">대상</th>
-              <th class="px-3 py-2 text-left font-medium text-gray-600 w-24">날짜</th>
-              <th class="px-3 py-2 text-left font-medium text-gray-600 w-20">상태</th>
-              <th class="px-3 py-2 text-left font-medium text-gray-600 w-24">시간범위</th>
-              <th class="px-3 py-2 text-left font-medium text-gray-600 w-20">예약</th>
-              <th class="px-3 py-2 text-left font-medium text-gray-600 w-28">마지막 확인</th>
-              <th class="px-3 py-2 text-center font-medium text-gray-600 w-24">작업</th>
+              <th class="px-3 py-2 text-left font-medium text-muted-foreground">대상</th>
+              <th class="px-3 py-2 text-left font-medium text-muted-foreground w-24">날짜</th>
+              <th class="px-3 py-2 text-left font-medium text-muted-foreground w-20">상태</th>
+              <th class="px-3 py-2 text-left font-medium text-muted-foreground w-24">시간범위</th>
+              <th class="px-3 py-2 text-left font-medium text-muted-foreground w-20">예약</th>
+              <th class="px-3 py-2 text-left font-medium text-muted-foreground w-28">마지막 확인</th>
+              <th class="px-3 py-2 text-center font-medium text-muted-foreground w-24">작업</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-gray-200">
+          <tbody class="divide-y divide-border">
             {#each getAutoBookingSchedules() as schedule (schedule.id)}
               {@const inactive = isScheduleInactive(schedule)}
               {@const statusBadge = getRunStatusBadge(schedule.run_status)}
-              <tr class={inactive ? 'bg-gray-50 text-gray-400' : ''}>
+              <tr class={inactive ? 'bg-background text-muted-foreground' : ''}>
                 <td class="px-3 py-2">
                   <div class="flex items-center gap-2">
                     <input
@@ -202,19 +202,19 @@
                       title={schedule.is_enabled ? '비활성화' : '활성화'}
                     />
                     <div>
-                      <div class="font-medium {inactive ? 'text-gray-400' : 'text-gray-900'}">
+                      <div class="font-medium {inactive ? 'text-muted-foreground' : 'text-foreground'}">
                         {schedule.business_name}
                       </div>
-                      <div class="text-xs {inactive ? 'text-gray-400' : 'text-gray-500'}">
+                      <div class="text-xs {inactive ? 'text-muted-foreground' : 'text-muted-foreground'}">
                         {schedule.item_name}
                         {#if schedule.times && schedule.times.length > 0}
-                          <span class="text-gray-400">({schedule.times.join(', ')})</span>
+                          <span class="text-muted-foreground">({schedule.times.join(', ')})</span>
                         {/if}
                       </div>
                     </div>
                   </div>
                 </td>
-                <td class="px-3 py-2 {inactive ? 'text-gray-400' : ''}">
+                <td class="px-3 py-2 {inactive ? 'text-muted-foreground' : ''}">
                   {schedule.date}
                 </td>
                 <td class="px-3 py-2">
@@ -227,14 +227,14 @@
                     {/if}
                   </div>
                 </td>
-                <td class="px-3 py-2 text-xs {inactive ? 'text-gray-400' : 'text-gray-600'}">
+                <td class="px-3 py-2 text-xs {inactive ? 'text-muted-foreground' : 'text-muted-foreground'}">
                   {schedule.time_range || '-'}
                 </td>
                 <td class="px-3 py-2">
-                  <span class="font-medium {inactive ? 'text-gray-400' : ''}">{schedule.booking_count}</span>
-                  <span class="text-gray-400">/ {schedule.max_bookings_per_schedule}</span>
+                  <span class="font-medium {inactive ? 'text-muted-foreground' : ''}">{schedule.booking_count}</span>
+                  <span class="text-muted-foreground">/ {schedule.max_bookings_per_schedule}</span>
                 </td>
-                <td class="px-3 py-2 text-xs {inactive ? 'text-gray-400' : 'text-gray-500'}">
+                <td class="px-3 py-2 text-xs {inactive ? 'text-muted-foreground' : 'text-muted-foreground'}">
                   {formatDateTime(schedule.last_check)}
                 </td>
                 <td class="px-3 py-2">
@@ -272,11 +272,11 @@
 
   <!-- 슬롯 필터링 테스트 -->
   <div class="card mt-6">
-    <h3 class="text-lg font-semibold text-gray-900 mb-4">슬롯 필터링 테스트</h3>
+    <h3 class="text-lg font-semibold text-foreground mb-4">슬롯 필터링 테스트</h3>
     <form on:submit|preventDefault={handleFilterTest} class="space-y-4">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">
+          <label class="block text-sm font-medium text-foreground mb-1">
             슬롯 목록 (한 줄에 하나씩)
           </label>
           <textarea
@@ -287,7 +287,7 @@
           ></textarea>
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">시간 범위</label>
+          <label class="block text-sm font-medium text-foreground mb-1">시간 범위</label>
           <input
             type="text"
             class="input"
@@ -298,8 +298,8 @@
           <button type="submit" class="btn btn-secondary w-full mt-4">테스트</button>
 
           {#if filterTest.result}
-            <div class="mt-4 p-3 bg-gray-50 rounded-lg text-sm">
-              <p class="text-gray-600">
+            <div class="mt-4 p-3 bg-background rounded-lg text-sm">
+              <p class="text-muted-foreground">
                 원본: {filterTest.result.original_count}개 → 필터링: {filterTest.result.filtered_count}개
               </p>
               {#if filterTest.result.filtered_slots.length > 0}
@@ -325,13 +325,13 @@
     <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
       <div class="p-4 border-b">
         <h3 class="text-lg font-semibold">일정 설정 수정</h3>
-        <p class="text-sm text-gray-500 mt-1">
+        <p class="text-sm text-muted-foreground mt-1">
           {editingSchedule.business_name} - {editingSchedule.item_name} ({editingSchedule.date})
         </p>
       </div>
       <form on:submit|preventDefault={handleUpdateSchedule} class="p-4 space-y-4">
         <div>
-          <label for="edit-times" class="block text-sm font-medium text-gray-700 mb-1">
+          <label for="edit-times" class="block text-sm font-medium text-foreground mb-1">
             시간 필터 (쉼표 구분)
           </label>
           <input
@@ -341,10 +341,10 @@
             bind:value={editForm.times}
             placeholder="예: 18:00, 19:00, 20:00"
           />
-          <p class="text-xs text-gray-500 mt-1">특정 시간만 모니터링하려면 입력하세요</p>
+          <p class="text-xs text-muted-foreground mt-1">특정 시간만 모니터링하려면 입력하세요</p>
         </div>
         <div>
-          <label for="edit-time-range" class="block text-sm font-medium text-gray-700 mb-1">
+          <label for="edit-time-range" class="block text-sm font-medium text-foreground mb-1">
             시간 범위 (자동예약용)
           </label>
           <input
@@ -354,10 +354,10 @@
             bind:value={editForm.time_range}
             placeholder="예: 18:00-21:00"
           />
-          <p class="text-xs text-gray-500 mt-1">자동예약 시 이 시간대의 슬롯만 예약합니다</p>
+          <p class="text-xs text-muted-foreground mt-1">자동예약 시 이 시간대의 슬롯만 예약합니다</p>
         </div>
         <div>
-          <label for="edit-max-bookings" class="block text-sm font-medium text-gray-700 mb-1">
+          <label for="edit-max-bookings" class="block text-sm font-medium text-foreground mb-1">
             최대 예약 수
           </label>
           <input
@@ -371,7 +371,7 @@
         </div>
         <label class="flex items-center gap-2">
           <input type="checkbox" bind:checked={editForm.is_enabled} />
-          <span class="text-sm font-medium text-gray-700">모니터링 활성화</span>
+          <span class="text-sm font-medium text-foreground">모니터링 활성화</span>
         </label>
         <div class="flex justify-end gap-2 pt-4">
           <button type="button" class="btn btn-secondary" on:click={() => editingSchedule = null}>

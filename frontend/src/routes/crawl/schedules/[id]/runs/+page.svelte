@@ -94,7 +94,7 @@
 			case 'failed':
 				return { class: 'bg-red-100 text-red-800', text: '실패' };
 			default:
-				return { class: 'bg-gray-100 text-gray-800', text: status };
+				return { class: 'bg-muted text-foreground', text: status };
 		}
 	}
 
@@ -119,7 +119,7 @@
 <div class="p-6 max-w-7xl mx-auto">
 	<div class="mb-6 flex justify-between items-center">
 		<div>
-			<h2 class="text-2xl font-bold text-gray-900">
+			<h2 class="text-2xl font-bold text-foreground">
 				{#if schedule}
 					{schedule.display_name || schedule.name}
 				{:else}
@@ -127,7 +127,7 @@
 				{/if}
 				실행 이력
 			</h2>
-			<p class="text-sm text-gray-500 mt-1">스케줄 실행 기록</p>
+			<p class="text-sm text-muted-foreground mt-1">스케줄 실행 기록</p>
 		</div>
 		<a href="/crawl/schedules" class="btn btn-secondary btn-sm">스케줄 목록</a>
 	</div>
@@ -136,24 +136,24 @@
 	{#if stats}
 		<div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
 			<div class="card text-center">
-				<p class="text-2xl font-bold text-gray-900">{stats.total_runs}</p>
-				<p class="text-sm text-gray-500">전체 실행</p>
+				<p class="text-2xl font-bold text-foreground">{stats.total_runs}</p>
+				<p class="text-sm text-muted-foreground">전체 실행</p>
 			</div>
 			<div class="card text-center">
 				<p class="text-2xl font-bold text-green-600">{stats.completed_runs}</p>
-				<p class="text-sm text-gray-500">완료</p>
+				<p class="text-sm text-muted-foreground">완료</p>
 			</div>
 			<div class="card text-center">
 				<p class="text-2xl font-bold text-red-600">{stats.failed_runs}</p>
-				<p class="text-sm text-gray-500">실패</p>
+				<p class="text-sm text-muted-foreground">실패</p>
 			</div>
 			<div class="card text-center">
 				<p class="text-2xl font-bold text-blue-600">{stats.success_rate.toFixed(1)}%</p>
-				<p class="text-sm text-gray-500">성공률</p>
+				<p class="text-sm text-muted-foreground">성공률</p>
 			</div>
 			<div class="card text-center">
 				<p class="text-2xl font-bold text-purple-600">{stats.total_saved}</p>
-				<p class="text-sm text-gray-500">총 저장</p>
+				<p class="text-sm text-muted-foreground">총 저장</p>
 			</div>
 		</div>
 	{/if}
@@ -162,7 +162,7 @@
 	<div class="card mb-6">
 		<div class="flex flex-wrap gap-4 items-center">
 			<div>
-				<label for="status" class="block text-sm font-medium text-gray-700 mb-1">상태</label>
+				<label for="status" class="block text-sm font-medium text-foreground mb-1">상태</label>
 				<select
 					id="status"
 					bind:value={status}
@@ -189,27 +189,27 @@
 		</div>
 	{:else if !runs || runs.length === 0}
 		<div class="card text-center py-12">
-			<p class="text-gray-500">실행 기록이 없습니다</p>
+			<p class="text-muted-foreground">실행 기록이 없습니다</p>
 		</div>
 	{:else}
 		<div class="card overflow-hidden">
-			<table class="min-w-full divide-y divide-gray-200">
-				<thead class="bg-gray-50">
+			<table class="min-w-full divide-y divide-border">
+				<thead class="bg-background">
 					<tr>
-						<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">시작 시간</th>
-						<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">상태</th>
-						<th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">수집</th>
-						<th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">저장</th>
-						<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">종료 사유</th>
-						<th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">소요 시간</th>
-						<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">워커</th>
+						<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">시작 시간</th>
+						<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">상태</th>
+						<th class="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase">수집</th>
+						<th class="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase">저장</th>
+						<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">종료 사유</th>
+						<th class="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase">소요 시간</th>
+						<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">워커</th>
 					</tr>
 				</thead>
-				<tbody class="bg-white divide-y divide-gray-200">
+				<tbody class="bg-white divide-y divide-border">
 					{#each runs as run}
 						{@const badge = getStatusBadge(run.status)}
-						<tr class="hover:bg-gray-50">
-							<td class="px-4 py-3 text-sm text-gray-900">
+						<tr class="hover:bg-muted">
+							<td class="px-4 py-3 text-sm text-foreground">
 								{formatDateTime(run.started_at)}
 							</td>
 							<td class="px-4 py-3">
@@ -222,19 +222,19 @@
 									</span>
 								{/if}
 							</td>
-							<td class="px-4 py-3 text-sm text-gray-900 text-right">
+							<td class="px-4 py-3 text-sm text-foreground text-right">
 								{run.collected_count}
 							</td>
 							<td class="px-4 py-3 text-sm text-blue-600 text-right font-medium">
 								{run.saved_count}
 							</td>
-							<td class="px-4 py-3 text-sm text-gray-600">
+							<td class="px-4 py-3 text-sm text-muted-foreground">
 								{getStopReasonLabel(run.stop_reason)}
 							</td>
-							<td class="px-4 py-3 text-sm text-gray-600 text-right">
+							<td class="px-4 py-3 text-sm text-muted-foreground text-right">
 								{formatDuration(run.duration_seconds)}
 							</td>
-							<td class="px-4 py-3 text-sm text-gray-500">
+							<td class="px-4 py-3 text-sm text-muted-foreground">
 								{run.worker_id || '-'}
 							</td>
 						</tr>
@@ -253,7 +253,7 @@
 				>
 					이전
 				</button>
-				<span class="text-sm text-gray-600">
+				<span class="text-sm text-muted-foreground">
 					{currentPage} / {totalPages}
 				</span>
 				<button

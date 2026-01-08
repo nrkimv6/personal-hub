@@ -95,7 +95,7 @@
 			case 'single_post_url':
 				return { class: 'bg-indigo-100 text-indigo-800', text: 'URL' };
 			default:
-				return { class: 'bg-gray-100 text-gray-800', text: type };
+				return { class: 'bg-muted text-foreground', text: type };
 		}
 	}
 
@@ -108,14 +108,14 @@
 			case 'retry':
 				return { class: 'bg-yellow-50 text-yellow-700', text: '재시도' };
 			default:
-				return { class: 'bg-gray-50 text-gray-700', text: by };
+				return { class: 'bg-background text-foreground', text: by };
 		}
 	}
 
 	function getStatusBadge(s: string): { class: string; text: string } {
 		switch (s) {
 			case 'pending':
-				return { class: 'bg-gray-100 text-gray-600', text: '대기' };
+				return { class: 'bg-muted text-muted-foreground', text: '대기' };
 			case 'processing':
 				return { class: 'bg-yellow-100 text-yellow-800', text: '처리중' };
 			case 'completed':
@@ -123,7 +123,7 @@
 			case 'failed':
 				return { class: 'bg-red-100 text-red-800', text: '실패' };
 			default:
-				return { class: 'bg-gray-100 text-gray-600', text: s };
+				return { class: 'bg-muted text-muted-foreground', text: s };
 		}
 	}
 
@@ -200,26 +200,26 @@
 	<!-- 통계 요약 -->
 	<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
 		<div class="card text-center">
-			<p class="text-2xl font-bold text-gray-900">{total}</p>
-			<p class="text-sm text-gray-500">전체 요청</p>
+			<p class="text-2xl font-bold text-foreground">{total}</p>
+			<p class="text-sm text-muted-foreground">전체 요청</p>
 		</div>
 		<div class="card text-center">
 			<p class="text-2xl font-bold text-green-600">
 				{items.filter((i) => i.status === 'completed').length}
 			</p>
-			<p class="text-sm text-gray-500">완료</p>
+			<p class="text-sm text-muted-foreground">완료</p>
 		</div>
 		<div class="card text-center">
 			<p class="text-2xl font-bold text-yellow-600">
 				{items.filter((i) => i.status === 'pending' || i.status === 'processing').length}
 			</p>
-			<p class="text-sm text-gray-500">진행중</p>
+			<p class="text-sm text-muted-foreground">진행중</p>
 		</div>
 		<div class="card text-center">
 			<p class="text-2xl font-bold text-red-600">
 				{items.filter((i) => i.status === 'failed').length}
 			</p>
-			<p class="text-sm text-gray-500">실패</p>
+			<p class="text-sm text-muted-foreground">실패</p>
 		</div>
 	</div>
 
@@ -227,7 +227,7 @@
 	<div class="card mb-6">
 		<div class="flex flex-wrap gap-4 items-center">
 			<div>
-				<label for="requestType" class="block text-sm font-medium text-gray-700 mb-1">타입</label>
+				<label for="requestType" class="block text-sm font-medium text-foreground mb-1">타입</label>
 				<select
 					id="requestType"
 					bind:value={requestType}
@@ -241,7 +241,7 @@
 				</select>
 			</div>
 			<div>
-				<label for="requestedBy" class="block text-sm font-medium text-gray-700 mb-1">출처</label>
+				<label for="requestedBy" class="block text-sm font-medium text-foreground mb-1">출처</label>
 				<select
 					id="requestedBy"
 					bind:value={requestedBy}
@@ -255,7 +255,7 @@
 				</select>
 			</div>
 			<div>
-				<label for="status" class="block text-sm font-medium text-gray-700 mb-1">상태</label>
+				<label for="status" class="block text-sm font-medium text-foreground mb-1">상태</label>
 				<select
 					id="status"
 					bind:value={status}
@@ -270,7 +270,7 @@
 				</select>
 			</div>
 			<div>
-				<label for="period" class="block text-sm font-medium text-gray-700 mb-1">기간</label>
+				<label for="period" class="block text-sm font-medium text-foreground mb-1">기간</label>
 				<select
 					id="period"
 					bind:value={period}
@@ -305,33 +305,33 @@
 		</div>
 	{:else if items.length === 0}
 		<div class="card text-center py-12">
-			<p class="text-gray-500">크롤링 이력이 없습니다</p>
+			<p class="text-muted-foreground">크롤링 이력이 없습니다</p>
 		</div>
 	{:else}
 		<div class="card overflow-hidden">
 			<div class="overflow-x-auto">
-			<table class="min-w-full divide-y divide-gray-200 table-fixed">
-				<thead class="bg-gray-50">
+			<table class="min-w-full divide-y divide-border table-fixed">
+				<thead class="bg-background">
 					<tr>
-						<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-32"
+						<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase w-32"
 							>요청 시간</th
 						>
-						<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-24">타입</th>
-						<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-48">URL</th>
-						<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-20">출처</th>
-						<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-20">상태</th>
-						<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-48">결과</th>
-						<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-20">소요시간</th>
-						<th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase w-16">작업</th>
+						<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase w-24">타입</th>
+						<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase w-48">URL</th>
+						<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase w-20">출처</th>
+						<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase w-20">상태</th>
+						<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase w-48">결과</th>
+						<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase w-20">소요시간</th>
+						<th class="px-4 py-3 text-center text-xs font-medium text-muted-foreground uppercase w-16">작업</th>
 					</tr>
 				</thead>
-				<tbody class="bg-white divide-y divide-gray-200">
+				<tbody class="bg-white divide-y divide-border">
 					{#each items as item}
 						{@const typeBadge = getRequestTypeBadge(item.request_type)}
 						{@const byBadge = getRequestedByBadge(item.requested_by)}
 						{@const statusBadge = getStatusBadge(item.status)}
-						<tr class="hover:bg-gray-50">
-							<td class="px-4 py-3 text-sm text-gray-900">
+						<tr class="hover:bg-muted">
+							<td class="px-4 py-3 text-sm text-foreground">
 								{formatDateTime(item.requested_at)}
 							</td>
 							<td class="px-4 py-3">
@@ -342,12 +342,12 @@
 							<td class="px-4 py-3">
 								{#if item.target_url}
 									<div class="flex items-center gap-1">
-										<span class="text-xs text-gray-500 truncate max-w-[140px]" title={item.target_url}>
+										<span class="text-xs text-muted-foreground truncate max-w-[140px]" title={item.target_url}>
 											{truncateUrl(item.target_url, 25)}
 										</span>
 										<button
 											onclick={() => copyUrl(item)}
-											class="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors flex-shrink-0"
+											class="p-1 text-muted-foreground hover:text-blue-600 hover:bg-blue-50 rounded transition-colors flex-shrink-0"
 											title="URL 복사"
 										>
 											{#if copiedId === item.id}
@@ -362,7 +362,7 @@
 										</button>
 									</div>
 								{:else}
-									<span class="text-xs text-gray-400">-</span>
+									<span class="text-xs text-muted-foreground">-</span>
 								{/if}
 							</td>
 							<td class="px-4 py-3">
@@ -375,12 +375,12 @@
 									{statusBadge.text}
 								</span>
 							</td>
-							<td class="px-4 py-3 text-sm text-gray-600 max-w-[200px]">
+							<td class="px-4 py-3 text-sm text-muted-foreground max-w-[200px]">
 								<div class="truncate" title={item.error_message || getResultSummary(item)}>
 									{getResultSummary(item)}
 								</div>
 							</td>
-							<td class="px-4 py-3 text-sm text-gray-600">
+							<td class="px-4 py-3 text-sm text-muted-foreground">
 								{#if item.crawl_run?.duration_seconds}
 									{formatDuration(item.crawl_run.duration_seconds)}
 								{:else}
@@ -393,7 +393,7 @@
 										<button
 											onclick={() => retryRequest(item)}
 											disabled={retryingId === item.id}
-											class="p-1.5 text-gray-500 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors disabled:opacity-50"
+											class="p-1.5 text-muted-foreground hover:text-orange-600 hover:bg-orange-50 rounded transition-colors disabled:opacity-50"
 											title="재시도"
 										>
 											{#if retryingId === item.id}
@@ -430,7 +430,7 @@
 				>
 					이전
 				</button>
-				<span class="text-sm text-gray-600">
+				<span class="text-sm text-muted-foreground">
 					{page} / {totalPages}
 				</span>
 				<button

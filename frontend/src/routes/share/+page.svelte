@@ -204,7 +204,7 @@
 	{:else if processing || submitting}
 		<div class="flex items-center justify-center py-8">
 			<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-			<span class="ml-3 text-gray-600">
+			<span class="ml-3 text-muted-foreground">
 				{#if submitting}
 					크롤링 요청 등록 중...
 				{:else}
@@ -215,7 +215,7 @@
 	{:else if !sharedUrl}
 		<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
 			<p class="text-yellow-800">공유된 URL이 없습니다.</p>
-			<button onclick={handleCancel} class="mt-4 px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300">
+			<button onclick={handleCancel} class="mt-4 px-4 py-2 bg-secondary rounded-lg hover:bg-gray-300">
 				홈으로 돌아가기
 			</button>
 		</div>
@@ -230,34 +230,34 @@
 	{:else}
 		<div class="space-y-4">
 			<!-- 공유 받은 정보 표시 -->
-			<div class="bg-gray-50 rounded-lg p-4 space-y-2">
+			<div class="bg-background rounded-lg p-4 space-y-2">
 				{#if sharedTitle}
 					<div>
-						<span class="text-sm text-gray-500">제목:</span>
+						<span class="text-sm text-muted-foreground">제목:</span>
 						<p class="font-medium">{sharedTitle}</p>
 					</div>
 				{/if}
 				<div>
-					<span class="text-sm text-gray-500">URL:</span>
+					<span class="text-sm text-muted-foreground">URL:</span>
 					<p class="font-mono text-sm break-all text-blue-600">{sharedUrl}</p>
 				</div>
 				{#if sharedText && sharedText !== sharedUrl}
 					<div>
-						<span class="text-sm text-gray-500">텍스트:</span>
-						<p class="text-sm text-gray-700">{sharedText}</p>
+						<span class="text-sm text-muted-foreground">텍스트:</span>
+						<p class="text-sm text-foreground">{sharedText}</p>
 					</div>
 				{/if}
 			</div>
 
 			<!-- URL 타입 표시 -->
 			<div class="flex items-center gap-2">
-				<span class="text-sm text-gray-500">감지된 타입:</span>
+				<span class="text-sm text-muted-foreground">감지된 타입:</span>
 				{#if urlType === 'instagram'}
 					<span class="px-2 py-1 bg-pink-100 text-pink-800 rounded text-sm">Instagram</span>
 				{:else if urlType === 'event_form'}
 					<span class="px-2 py-1 bg-green-100 text-green-800 rounded text-sm">이벤트 폼</span>
 				{:else}
-					<span class="px-2 py-1 bg-gray-100 text-gray-800 rounded text-sm">기타</span>
+					<span class="px-2 py-1 bg-muted text-foreground rounded text-sm">기타</span>
 				{/if}
 			</div>
 
@@ -296,7 +296,7 @@
 
 				<button
 					onclick={handleCancel}
-					class="w-full px-4 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+					class="w-full px-4 py-3 bg-secondary text-foreground rounded-lg hover:bg-gray-300"
 				>
 					취소
 				</button>

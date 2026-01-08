@@ -44,53 +44,53 @@
 	}
 </script>
 
-<div class="hidden md:block bg-white rounded-lg border border-gray-200 overflow-hidden mb-6">
+<div class="hidden md:block bg-white rounded-lg border border-border overflow-hidden mb-6">
 	<div class="overflow-x-auto">
 		<table class="w-full">
-			<thead class="bg-gray-50 border-b border-gray-200">
+			<thead class="bg-background border-b border-border">
 				<tr>
 					<th
-						class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+						class="px-2 py-2 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap"
 						>상태</th
 					>
 					<th
-						class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+						class="px-2 py-2 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap"
 						>브랜드</th
 					>
 					<th
-						class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-[180px]"
+						class="px-2 py-2 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap max-w-[180px]"
 						>제목</th
 					>
 					<th
-						class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+						class="px-2 py-2 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap"
 						>기간</th
 					>
 					<th
-						class="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap max-w-[150px]"
+						class="px-2 py-2 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap max-w-[150px]"
 						>위치</th
 					>
 					<th
-						class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+						class="px-2 py-2 text-center text-xs font-medium text-muted-foreground uppercase whitespace-nowrap"
 						>출처</th
 					>
 					<th
-						class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+						class="px-2 py-2 text-center text-xs font-medium text-muted-foreground uppercase whitespace-nowrap"
 						>원본</th
 					>
 					<th
-						class="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase whitespace-nowrap"
+						class="px-2 py-2 text-center text-xs font-medium text-muted-foreground uppercase whitespace-nowrap"
 						>관리</th
 					>
 				</tr>
 			</thead>
-			<tbody class="divide-y divide-gray-200">
+			<tbody class="divide-y divide-border">
 				{#each popups as popup (popup.id)}
 					<tr
 						class="cursor-pointer transition-colors {isPopupEndingToday(popup)
 							? 'bg-orange-100 hover:bg-orange-200 font-semibold'
 							: isPopupUnknownPeriod(popup)
 								? 'bg-amber-50 hover:bg-amber-100'
-								: 'hover:bg-gray-50'}"
+								: 'hover:bg-muted'}"
 						onclick={() => onPopupClick(popup)}
 					>
 						<!-- 상태 -->
@@ -111,17 +111,17 @@
 									{popup.brand || popup.organizer}
 								</span>
 							{:else}
-								<span class="text-xs text-gray-400">-</span>
+								<span class="text-xs text-muted-foreground">-</span>
 							{/if}
 						</td>
 						<!-- 제목 -->
 						<td class="px-2 py-2 max-w-[180px]">
-							<span class="block truncate text-sm font-medium text-gray-900" title={popup.title}>
+							<span class="block truncate text-sm font-medium text-foreground" title={popup.title}>
 								{popup.title}
 							</span>
 							{#if popup.summary}
 								<span
-									class="block truncate text-xs text-gray-500 line-clamp-2"
+									class="block truncate text-xs text-muted-foreground line-clamp-2"
 									title={popup.summary}
 								>
 									{truncate(popup.summary, 40)}
@@ -129,23 +129,23 @@
 							{/if}
 						</td>
 						<!-- 기간 -->
-						<td class="px-2 py-2 text-sm text-gray-600 whitespace-nowrap">
+						<td class="px-2 py-2 text-sm text-muted-foreground whitespace-nowrap">
 							{#if popup.end_date}
 								<div class="flex flex-col gap-0.5">
 									{#if popup.start_date}
-										<span class="text-xs text-gray-500">{formatDate(popup.start_date)}</span>
+										<span class="text-xs text-muted-foreground">{formatDate(popup.start_date)}</span>
 									{/if}
 									{#if isPopupEndingToday(popup)}
 										<span class="text-xs font-bold text-orange-600 bg-orange-50 px-1 rounded"
 											>오늘 마감!</span
 										>
 									{:else}
-										<span class="text-xs text-gray-500">~ {formatDate(popup.end_date)}</span>
+										<span class="text-xs text-muted-foreground">~ {formatDate(popup.end_date)}</span>
 									{/if}
 								</div>
 							{:else if popup.start_date}
 								<div class="flex flex-col gap-0.5">
-									<span class="text-xs text-gray-500">{formatDate(popup.start_date)} ~</span>
+									<span class="text-xs text-muted-foreground">{formatDate(popup.start_date)} ~</span>
 									<span class="text-xs text-amber-600 bg-amber-50 px-1 rounded">기간 미정</span>
 								</div>
 							{:else}
@@ -156,17 +156,17 @@
 						<td class="px-2 py-2 max-w-[150px]">
 							{#if popup.venue_name}
 								<div class="flex flex-col">
-									<span class="text-xs font-medium text-gray-700 truncate" title={popup.venue_name}>
+									<span class="text-xs font-medium text-foreground truncate" title={popup.venue_name}>
 										{popup.venue_name}
 									</span>
 									{#if popup.address}
-										<span class="text-xs text-gray-500 truncate" title={popup.address}>
+										<span class="text-xs text-muted-foreground truncate" title={popup.address}>
 											{truncate(popup.address, 20)}
 										</span>
 									{/if}
 								</div>
 							{:else}
-								<span class="text-xs text-gray-400">-</span>
+								<span class="text-xs text-muted-foreground">-</span>
 							{/if}
 						</td>
 						<!-- 출처 -->
@@ -174,7 +174,7 @@
 							<span
 								class="px-1.5 py-0.5 text-xs rounded {popup.source_type === 'instagram'
 									? 'bg-pink-100 text-pink-600'
-									: 'bg-gray-100 text-gray-600'}"
+									: 'bg-muted text-muted-foreground'}"
 							>
 								{popup.source_type === 'instagram'
 									? 'IG'
@@ -207,7 +207,7 @@
 									</button>
 								{/if}
 								{#if !popup.official_url && !(popup.source_type === 'instagram' && (popup.source_instagram_url || popup.source_instagram_post_id))}
-									<span class="text-xs text-gray-400">-</span>
+									<span class="text-xs text-muted-foreground">-</span>
 								{/if}
 							</div>
 						</td>
@@ -227,7 +227,7 @@
 									onclick={(e) => onVisitedToggle(popup, e)}
 									class="px-1.5 py-0.5 text-xs rounded transition-colors {popup.is_visited
 										? 'bg-green-100 text-green-700'
-										: 'bg-gray-100 text-gray-500 hover:bg-gray-200'}"
+										: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 									title={popup.is_visited ? '방문 취소' : '방문 완료'}
 								>
 									{popup.is_visited ? '방문' : '미방문'}

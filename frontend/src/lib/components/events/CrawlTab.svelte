@@ -140,7 +140,7 @@
 			case 'processing': return 'bg-blue-100 text-blue-800';
 			case 'completed': return 'bg-green-100 text-green-800';
 			case 'failed': return 'bg-red-100 text-red-800';
-			default: return 'bg-gray-100 text-gray-800';
+			default: return 'bg-muted text-foreground';
 		}
 	}
 
@@ -159,14 +159,14 @@
 			case 'google_form': return 'bg-blue-100 text-blue-700';
 			case 'naver_form': return 'bg-green-100 text-green-700';
 			case 'naver_blog': return 'bg-emerald-100 text-emerald-700';
-			default: return 'bg-gray-100 text-gray-600';
+			default: return 'bg-muted text-muted-foreground';
 		}
 	}
 
 	function getAnalysisResult(req: UniversalCrawlRequest) {
-		if (!req.crawled_page) return { text: '-', badge: 'text-gray-400' };
+		if (!req.crawled_page) return { text: '-', badge: 'text-muted-foreground' };
 		if (req.crawled_page.is_event === null || req.crawled_page.is_event === undefined) {
-			return { text: '미분석', badge: 'bg-gray-100 text-gray-600' };
+			return { text: '미분석', badge: 'bg-muted text-muted-foreground' };
 		}
 		if (req.crawled_page.is_event) {
 			return { text: '이벤트', badge: 'bg-purple-100 text-purple-700' };
@@ -268,12 +268,12 @@
 <div class="mb-4 space-y-2">
 	<!-- 상태 필터 -->
 	<div class="flex flex-wrap gap-2">
-		<span class="text-sm text-gray-500 py-1.5">상태:</span>
+		<span class="text-sm text-muted-foreground py-1.5">상태:</span>
 		<button
 			onclick={() => handleStatusFilter(null)}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === null
 				? 'bg-gray-800 text-white'
-				: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+				: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 		>
 			전체
 		</button>
@@ -312,12 +312,12 @@
 	</div>
 	<!-- 분석 상태 필터 -->
 	<div class="flex flex-wrap gap-2">
-		<span class="text-sm text-gray-500 py-1.5">분석:</span>
+		<span class="text-sm text-muted-foreground py-1.5">분석:</span>
 		<button
 			onclick={() => handleAnalysisFilter(null)}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterAnalysis === null
 				? 'bg-gray-800 text-white'
-				: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+				: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 		>
 			전체
 		</button>
@@ -341,7 +341,7 @@
 			onclick={() => handleAnalysisFilter('unanalyzed')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterAnalysis === 'unanalyzed'
 				? 'bg-gray-600 text-white'
-				: 'bg-gray-200 text-gray-600 hover:bg-gray-300'}"
+				: 'bg-secondary text-muted-foreground hover:bg-gray-300'}"
 		>
 			미분석
 		</button>
@@ -358,7 +358,7 @@
 		{error}
 	</div>
 {:else if requests.length === 0}
-	<div class="text-center py-12 text-gray-500">
+	<div class="text-center py-12 text-muted-foreground">
 		<p class="text-lg">크롤링 요청 이력이 없습니다</p>
 		{#if $isAdmin}
 			<button onclick={() => (showAddModal = true)} class="mt-4 btn btn-primary btn-sm">
@@ -375,7 +375,7 @@
 				onkeydown={(e) => e.key === 'Enter' && openDetail(req)}
 				role="button"
 				tabindex="0"
-				class="w-full text-left bg-white border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
+				class="w-full text-left bg-card border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
 			>
 				<div class="flex items-start justify-between gap-2 mb-2">
 					<div class="flex gap-1">
@@ -390,8 +390,8 @@
 						<span class="px-2 py-0.5 text-xs rounded-full {getAnalysisResult(req).badge}">{getAnalysisResult(req).text}</span>
 					{/if}
 				</div>
-				<p class="text-sm text-gray-900 break-all line-clamp-2 mb-2">{req.url}</p>
-				<div class="flex justify-between items-center text-xs text-gray-500">
+				<p class="text-sm text-foreground break-all line-clamp-2 mb-2">{req.url}</p>
+				<div class="flex justify-between items-center text-xs text-muted-foreground">
 					<span>{formatDate(req.requested_at)}</span>
 					<div class="flex gap-2">
 						{#if canAnalyze(req) && $isAdmin}
@@ -431,7 +431,7 @@
 	<div class="hidden md:block overflow-x-auto">
 		<table class="w-full">
 			<thead>
-				<tr class="border-b text-left text-sm text-gray-600">
+				<tr class="border-b text-left text-sm text-muted-foreground">
 					<th class="pb-3 font-medium">상태</th>
 					<th class="pb-3 font-medium">타입</th>
 					<th class="pb-3 font-medium">URL</th>
@@ -443,7 +443,7 @@
 			</thead>
 			<tbody>
 				{#each requests as req}
-					<tr class="border-b hover:bg-gray-50 cursor-pointer" onclick={() => openDetail(req)}>
+					<tr class="border-b hover:bg-muted cursor-pointer" onclick={() => openDetail(req)}>
 						<td class="py-3">
 							<span class="px-2 py-1 text-xs rounded-full {getStatusBadge(req.status)}">
 								{getStatusText(req.status)}
@@ -455,7 +455,7 @@
 							</span>
 						</td>
 						<td class="py-3 max-w-md">
-							<span class="text-sm text-gray-700 break-all line-clamp-1">{req.url}</span>
+							<span class="text-sm text-foreground break-all line-clamp-1">{req.url}</span>
 						</td>
 						<td class="py-3">
 							{#if true}
@@ -467,8 +467,8 @@
 								{/if}
 							{/if}
 						</td>
-						<td class="py-3 text-sm text-gray-600">{formatDate(req.requested_at)}</td>
-						<td class="py-3 text-sm text-gray-600">
+						<td class="py-3 text-sm text-muted-foreground">{formatDate(req.requested_at)}</td>
+						<td class="py-3 text-sm text-muted-foreground">
 							{req.completed_at ? formatDate(req.completed_at) : '-'}
 						</td>
 						<td class="py-3">
@@ -511,24 +511,24 @@
 	<!-- 페이지네이션 -->
 	{#if totalPages > 1}
 		<div class="flex justify-between items-center mt-6 pt-4 border-t">
-			<span class="text-sm text-gray-500">
+			<span class="text-sm text-muted-foreground">
 				전체 {total}건 중 {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, total)}
 			</span>
 			<div class="flex gap-2 items-center">
 				<button
 					onclick={() => goToPage(currentPage - 1)}
 					disabled={currentPage === 1}
-					class="px-3 py-1.5 text-sm rounded border disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+					class="px-3 py-1.5 text-sm rounded border disabled:opacity-50 disabled:cursor-not-allowed hover:bg-muted"
 				>
 					이전
 				</button>
-				<span class="text-sm text-gray-600">
+				<span class="text-sm text-muted-foreground">
 					{currentPage} / {totalPages}
 				</span>
 				<button
 					onclick={() => goToPage(currentPage + 1)}
 					disabled={currentPage >= totalPages}
-					class="px-3 py-1.5 text-sm rounded border disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+					class="px-3 py-1.5 text-sm rounded border disabled:opacity-50 disabled:cursor-not-allowed hover:bg-muted"
 				>
 					다음
 				</button>
@@ -549,23 +549,23 @@
 		<div class="bg-white rounded-xl w-full max-w-lg p-6" onclick={(e) => e.stopPropagation()}>
 			<div class="flex justify-between items-center mb-4">
 				<h3 class="text-lg font-bold">URL 크롤링 요청</h3>
-				<button onclick={() => (showAddModal = false)} class="text-gray-400 hover:text-gray-600 text-2xl">
+				<button onclick={() => (showAddModal = false)} class="text-muted-foreground hover:text-muted-foreground text-2xl">
 					&times;
 				</button>
 			</div>
 
 			<div class="space-y-4">
 				<div>
-					<label for="crawl-url" class="block text-sm font-medium text-gray-700 mb-1">URL</label>
+					<label for="crawl-url" class="block text-sm font-medium text-foreground mb-1">URL</label>
 					<input
 						id="crawl-url"
 						type="url"
 						bind:value={newUrl}
 						placeholder="https://forms.gle/... 또는 https://blog.naver.com/..."
-						class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+						class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 						onkeydown={(e) => e.key === 'Enter' && handleAddRequest()}
 					/>
-					<p class="mt-1 text-xs text-gray-500">
+					<p class="mt-1 text-xs text-muted-foreground">
 						구글폼, 네이버폼, 네이버 블로그 등 지원
 					</p>
 				</div>
@@ -608,18 +608,18 @@
 						{getStatusText(selectedRequest.status)}
 					</span>
 				</div>
-				<button onclick={() => (showDetailModal = false)} class="text-gray-400 hover:text-gray-600 text-2xl">
+				<button onclick={() => (showDetailModal = false)} class="text-muted-foreground hover:text-muted-foreground text-2xl">
 					&times;
 				</button>
 			</div>
 
 			<div class="space-y-4">
 				<!-- 요청 정보 -->
-				<div class="bg-gray-50 rounded-lg p-4">
-					<h4 class="text-sm font-medium text-gray-700 mb-2">요청 정보</h4>
+				<div class="bg-background rounded-lg p-4">
+					<h4 class="text-sm font-medium text-foreground mb-2">요청 정보</h4>
 					<dl class="space-y-2 text-sm">
 						<div class="flex">
-							<dt class="w-24 text-gray-500">URL</dt>
+							<dt class="w-24 text-muted-foreground">URL</dt>
 							<dd class="flex-1 break-all">
 								<a href={selectedRequest.url} target="_blank" class="text-blue-600 hover:underline">
 									{selectedRequest.url}
@@ -627,22 +627,22 @@
 							</dd>
 						</div>
 						<div class="flex">
-							<dt class="w-24 text-gray-500">타입</dt>
+							<dt class="w-24 text-muted-foreground">타입</dt>
 							<dd>{selectedRequest.url_type}</dd>
 						</div>
 						<div class="flex">
-							<dt class="w-24 text-gray-500">요청 시간</dt>
+							<dt class="w-24 text-muted-foreground">요청 시간</dt>
 							<dd>{new Date(selectedRequest.requested_at).toLocaleString('ko-KR')}</dd>
 						</div>
 						{#if selectedRequest.completed_at}
 							<div class="flex">
-								<dt class="w-24 text-gray-500">완료 시간</dt>
+								<dt class="w-24 text-muted-foreground">완료 시간</dt>
 								<dd>{new Date(selectedRequest.completed_at).toLocaleString('ko-KR')}</dd>
 							</div>
 						{/if}
 						{#if selectedRequest.error_message}
 							<div class="flex">
-								<dt class="w-24 text-gray-500">오류</dt>
+								<dt class="w-24 text-muted-foreground">오류</dt>
 								<dd class="text-red-600">{selectedRequest.error_message}</dd>
 							</div>
 						{/if}
@@ -656,30 +656,30 @@
 					</div>
 				{:else if selectedPage}
 					<div class="bg-blue-50 rounded-lg p-4">
-						<h4 class="text-sm font-medium text-gray-700 mb-2">크롤링 결과</h4>
+						<h4 class="text-sm font-medium text-foreground mb-2">크롤링 결과</h4>
 						<dl class="space-y-2 text-sm">
 							{#if selectedPage.title}
 								<div class="flex">
-									<dt class="w-24 text-gray-500">제목</dt>
+									<dt class="w-24 text-muted-foreground">제목</dt>
 									<dd class="font-medium">{selectedPage.title}</dd>
 								</div>
 							{/if}
 							{#if selectedPage.description}
 								<div class="flex">
-									<dt class="w-24 text-gray-500">설명</dt>
-									<dd class="text-gray-700">{selectedPage.description}</dd>
+									<dt class="w-24 text-muted-foreground">설명</dt>
+									<dd class="text-foreground">{selectedPage.description}</dd>
 								</div>
 							{/if}
 							{#if selectedPage.extractor_used}
 								<div class="flex">
-									<dt class="w-24 text-gray-500">추출기</dt>
+									<dt class="w-24 text-muted-foreground">추출기</dt>
 									<dd>{selectedPage.extractor_used}</dd>
 								</div>
 							{/if}
 							{#if selectedPage.content}
 								<div>
-									<dt class="text-gray-500 mb-1">본문 (일부)</dt>
-									<dd class="bg-white rounded p-2 text-xs text-gray-600 max-h-32 overflow-auto whitespace-pre-wrap">
+									<dt class="text-muted-foreground mb-1">본문 (일부)</dt>
+									<dd class="bg-white rounded p-2 text-xs text-muted-foreground max-h-32 overflow-auto whitespace-pre-wrap">
 										{selectedPage.content.substring(0, 500)}{selectedPage.content.length > 500 ? '...' : ''}
 									</dd>
 								</div>
@@ -690,10 +690,10 @@
 					<!-- AI 분석 결과 -->
 					{#if selectedPage.is_event !== null && selectedPage.is_event !== undefined}
 						<div class="bg-purple-50 rounded-lg p-4">
-							<h4 class="text-sm font-medium text-gray-700 mb-2">AI 분석 결과</h4>
+							<h4 class="text-sm font-medium text-foreground mb-2">AI 분석 결과</h4>
 							<dl class="space-y-2 text-sm">
 								<div class="flex">
-									<dt class="w-24 text-gray-500">분류</dt>
+									<dt class="w-24 text-muted-foreground">분류</dt>
 									<dd>
 										{#if selectedPage.is_event}
 											<span class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-700">이벤트</span>
@@ -706,20 +706,20 @@
 									{@const result = selectedPage.analysis_result as Record<string, string>}
 									{#if result.reason}
 										<div class="flex">
-											<dt class="w-24 text-gray-500">판단 근거</dt>
-											<dd class="text-gray-700">{result.reason}</dd>
+											<dt class="w-24 text-muted-foreground">판단 근거</dt>
+											<dd class="text-foreground">{result.reason}</dd>
 										</div>
 									{/if}
 									{#if result.event_type}
 										<div class="flex">
-											<dt class="w-24 text-gray-500">이벤트 유형</dt>
-											<dd class="text-gray-700">{result.event_type}</dd>
+											<dt class="w-24 text-muted-foreground">이벤트 유형</dt>
+											<dd class="text-foreground">{result.event_type}</dd>
 										</div>
 									{/if}
 									{#if result.summary}
 										<div>
-											<dt class="text-gray-500 mb-1">요약</dt>
-											<dd class="bg-white rounded p-2 text-xs text-gray-600">{result.summary}</dd>
+											<dt class="text-muted-foreground mb-1">요약</dt>
+											<dd class="bg-white rounded p-2 text-xs text-muted-foreground">{result.summary}</dd>
 										</div>
 									{/if}
 								{/if}

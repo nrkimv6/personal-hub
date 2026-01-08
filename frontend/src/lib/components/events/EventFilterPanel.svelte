@@ -18,6 +18,7 @@
 		URL_TYPE_OPTIONS,
 		SOURCE_TYPE_OPTIONS
 	} from '$lib/constants/eventConstants';
+	import { Button } from '$lib/components/ui';
 
 	interface Props {
 		filterEventStatus: string | null;
@@ -185,13 +186,13 @@
 
 <!-- 모바일 필터 패널 (접이식) -->
 <div
-	class="md:hidden mb-4 bg-white rounded-lg border border-gray-200 overflow-hidden transition-all duration-300"
+	class="md:hidden mb-4 bg-white rounded-lg border border-border overflow-hidden transition-all duration-300"
 	class:hidden={!showFilters}
 >
 	<div class="p-4 space-y-4">
 		<!-- 검색 -->
 		<div class="flex flex-col gap-2">
-			<span class="text-sm font-medium text-gray-700">검색</span>
+			<span class="text-sm font-medium text-foreground">검색</span>
 			<div class="relative">
 				<input
 					type="text"
@@ -199,13 +200,13 @@
 					oninput={(e) => onSearchChange(e.currentTarget.value)}
 					onkeydown={handleSearchKeydown}
 					placeholder="제목, 요약, 주최자, 본문 검색..."
-					class="w-full px-3 py-2 pr-20 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+					class="w-full px-3 py-2 pr-20 text-sm border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 				/>
 				<div class="absolute right-1 top-1/2 -translate-y-1/2 flex gap-1">
 					{#if filterSearch}
 						<button
 							onclick={clearSearch}
-							class="p-1.5 text-gray-400 hover:text-gray-600"
+							class="p-1.5 text-muted-foreground hover:text-muted-foreground"
 							title="검색어 지우기"
 						>
 							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -226,12 +227,12 @@
 		<!-- 빠른 필터 프리셋 -->
 		{#if onQuickFilter}
 			<div class="flex flex-col gap-2">
-				<span class="text-sm font-medium text-gray-700">빠른 필터</span>
+				<span class="text-sm font-medium text-foreground">빠른 필터</span>
 				<div class="flex flex-wrap gap-2">
 					{#each QUICK_FILTER_PRESETS as preset}
 						<button
 							onclick={() => applyQuickFilter(preset)}
-							class="px-3 py-1.5 text-sm rounded-full bg-gradient-to-r from-gray-100 to-gray-50 text-gray-700 hover:from-blue-100 hover:to-blue-50 hover:text-blue-700 transition-colors flex items-center gap-1"
+							class="px-3 py-1.5 text-sm rounded-full bg-gradient-to-r from-gray-100 to-gray-50 text-foreground hover:from-blue-100 hover:to-blue-50 hover:text-blue-700 transition-colors flex items-center gap-1"
 						>
 							<span>{preset.icon}</span>
 							<span>{preset.label}</span>
@@ -243,7 +244,7 @@
 
 		<!-- 이벤트 상태 필터 -->
 		<div class="flex flex-col gap-2">
-			<span class="text-sm font-medium text-gray-700">상태</span>
+			<span class="text-sm font-medium text-foreground">상태</span>
 			<div class="flex flex-wrap gap-2">
 				{#each EVENT_STATUS_OPTIONS as opt}
 					{@const isActive = opt.value === '' ? filterEventStatus === null : filterEventStatus === opt.value}
@@ -251,7 +252,7 @@
 						onclick={() => setEventStatusFilter(opt.value)}
 						class="px-3 py-1.5 text-sm rounded-full transition-colors {isActive
 							? opt.color + ' ring-2 ring-offset-1 ring-gray-400'
-							: 'bg-gray-100 text-gray-600'}"
+							: 'bg-muted text-muted-foreground'}"
 					>
 						{opt.label}
 					</button>
@@ -261,7 +262,7 @@
 
 		<!-- 마감일 날짜 필터 -->
 		<div class="flex flex-col gap-2">
-			<span class="text-sm font-medium text-gray-700">마감일</span>
+			<span class="text-sm font-medium text-foreground">마감일</span>
 			<div class="flex flex-wrap gap-2">
 				{#each deadlineDates as { dateStr, label, dayLabel }}
 					{@const count = deadlineCounts[dateStr] || 0}
@@ -269,11 +270,11 @@
 						onclick={() => setDeadlineDateFilter(dateStr)}
 						class="px-2.5 py-1.5 text-xs rounded-lg transition-colors flex flex-col items-center min-w-[48px] {filterDeadlineDate === dateStr
 							? 'bg-indigo-100 text-indigo-700 ring-2 ring-offset-1 ring-indigo-400'
-							: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+							: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 					>
 						<span class="font-medium">{label}</span>
 						<span class="text-[10px] opacity-70">{dayLabel}</span>
-						<span class="text-[10px] mt-0.5 font-semibold {count > 0 ? 'text-indigo-600' : 'text-gray-400'}">{count}건</span>
+						<span class="text-[10px] mt-0.5 font-semibold {count > 0 ? 'text-indigo-600' : 'text-muted-foreground'}">{count}건</span>
 					</button>
 				{/each}
 			</div>
@@ -281,14 +282,14 @@
 
 		<!-- 기간미정 필터 (3단계) -->
 		<div class="flex flex-col gap-2">
-			<span class="text-sm font-medium text-gray-700">기간 미정</span>
+			<span class="text-sm font-medium text-foreground">기간 미정</span>
 			<div class="flex gap-2">
 				{#each UNKNOWN_PERIOD_OPTIONS as opt}
 					<button
 						onclick={() => setUnknownPeriodFilter(opt.value)}
 						class="px-3 py-1.5 text-sm rounded-full transition-colors flex-1 {unknownPeriodFilter === opt.value
 							? opt.color + ' ring-2 ring-offset-1 ring-gray-400'
-							: 'bg-gray-100 text-gray-600'}"
+							: 'bg-muted text-muted-foreground'}"
 					>
 						{opt.label}
 					</button>
@@ -298,7 +299,7 @@
 
 		<!-- 정렬 옵션 -->
 		<div class="flex flex-col gap-2">
-			<span class="text-sm font-medium text-gray-700">정렬</span>
+			<span class="text-sm font-medium text-foreground">정렬</span>
 			<div class="flex flex-wrap gap-2">
 				{#each SORT_OPTIONS as opt}
 					{@const isActive = sortBy === opt.value}
@@ -306,7 +307,7 @@
 						onclick={() => handleSortChange(opt.value)}
 						class="px-3 py-1.5 text-sm rounded-full transition-colors flex items-center gap-1 {isActive
 							? 'bg-blue-100 text-blue-700 ring-2 ring-offset-1 ring-blue-400'
-							: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+							: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 					>
 						<span>{opt.icon}</span>
 						<span>{opt.label}</span>
@@ -322,7 +323,7 @@
 		{#if onUrlTypeChange || onSourceTypeChange}
 			<button
 				onclick={() => showAdvancedFilters = !showAdvancedFilters}
-				class="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-800"
+				class="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
 			>
 				<svg class="w-4 h-4 transition-transform {showAdvancedFilters ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
@@ -331,17 +332,17 @@
 			</button>
 
 			{#if showAdvancedFilters}
-				<div class="space-y-3 pl-2 border-l-2 border-gray-200">
+				<div class="space-y-3 pl-2 border-l-2 border-border">
 					<!-- URL 타입 필터 -->
 					{#if onUrlTypeChange}
 						<div class="flex flex-col gap-2">
-							<span class="text-sm font-medium text-gray-600">URL 타입</span>
+							<span class="text-sm font-medium text-muted-foreground">URL 타입</span>
 							<div class="flex flex-wrap gap-2">
 								<button
 									onclick={() => onUrlTypeChange?.(null)}
 									class="px-2 py-1 text-xs rounded-full {filterUrlType === null
-										? 'bg-gray-200 text-gray-700'
-										: 'bg-gray-100 text-gray-500'}"
+										? 'bg-secondary text-foreground'
+										: 'bg-muted text-muted-foreground'}"
 								>
 									전체
 								</button>
@@ -350,7 +351,7 @@
 										onclick={() => onUrlTypeChange?.(filterUrlType === opt.value ? null : opt.value)}
 										class="px-2 py-1 text-xs rounded-full {filterUrlType === opt.value
 											? 'bg-purple-100 text-purple-700'
-											: 'bg-gray-100 text-gray-500'}"
+											: 'bg-muted text-muted-foreground'}"
 									>
 										{opt.label}
 									</button>
@@ -362,13 +363,13 @@
 					<!-- 출처 필터 -->
 					{#if onSourceTypeChange}
 						<div class="flex flex-col gap-2">
-							<span class="text-sm font-medium text-gray-600">출처</span>
+							<span class="text-sm font-medium text-muted-foreground">출처</span>
 							<div class="flex flex-wrap gap-2">
 								<button
 									onclick={() => onSourceTypeChange?.(null)}
 									class="px-2 py-1 text-xs rounded-full {filterSourceType === null
-										? 'bg-gray-200 text-gray-700'
-										: 'bg-gray-100 text-gray-500'}"
+										? 'bg-secondary text-foreground'
+										: 'bg-muted text-muted-foreground'}"
 								>
 									전체
 								</button>
@@ -377,7 +378,7 @@
 										onclick={() => onSourceTypeChange?.(filterSourceType === opt.value ? null : opt.value)}
 										class="px-2 py-1 text-xs rounded-full {filterSourceType === opt.value
 											? 'bg-teal-100 text-teal-700'
-											: 'bg-gray-100 text-gray-500'}"
+											: 'bg-muted text-muted-foreground'}"
 									>
 										{opt.label}
 									</button>
@@ -390,10 +391,10 @@
 		{/if}
 
 		<!-- 닫기 버튼 -->
-		<div class="pt-2 border-t border-gray-100">
-			<button onclick={() => onShowFiltersChange(false)} class="w-full btn btn-secondary btn-sm">
+		<div class="pt-2 border-t border-border">
+			<Button variant="secondary" size="sm" on:click={() => onShowFiltersChange(false)} class="w-full">
 				닫기
-			</button>
+			</Button>
 		</div>
 	</div>
 </div>
@@ -422,13 +423,13 @@
 				oninput={(e) => onSearchChange(e.currentTarget.value)}
 				onkeydown={handleSearchKeydown}
 				placeholder="제목, 요약, 주최자, 본문 검색..."
-				class="w-full px-3 py-1.5 pr-20 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+				class="w-full px-3 py-1.5 pr-20 text-sm border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 			/>
 			<div class="absolute right-1 top-1/2 -translate-y-1/2 flex gap-1">
 				{#if filterSearch}
 					<button
 						onclick={clearSearch}
-						class="p-1 text-gray-400 hover:text-gray-600"
+						class="p-1 text-muted-foreground hover:text-muted-foreground"
 						title="검색어 지우기"
 					>
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -451,7 +452,7 @@
 				{#each QUICK_FILTER_PRESETS as preset}
 					<button
 						onclick={() => applyQuickFilter(preset)}
-						class="px-3 py-1.5 text-sm rounded-full bg-gradient-to-r from-gray-100 to-gray-50 text-gray-700 hover:from-blue-100 hover:to-blue-50 hover:text-blue-700 transition-colors flex items-center gap-1 whitespace-nowrap"
+						class="px-3 py-1.5 text-sm rounded-full bg-gradient-to-r from-gray-100 to-gray-50 text-foreground hover:from-blue-100 hover:to-blue-50 hover:text-blue-700 transition-colors flex items-center gap-1 whitespace-nowrap"
 						title={preset.label}
 					>
 						<span>{preset.icon}</span>
@@ -464,14 +465,14 @@
 
 	<!-- 두 번째 줄: 이벤트 상태 + 기간미정 필터 + 정렬 -->
 	<div class="flex flex-wrap gap-2 items-center">
-		<span class="text-sm text-gray-500">상태:</span>
+		<span class="text-sm text-muted-foreground">상태:</span>
 		{#each EVENT_STATUS_OPTIONS as opt}
 			{@const isActive = opt.value === '' ? filterEventStatus === null : filterEventStatus === opt.value}
 			<button
 				onclick={() => setEventStatusFilter(opt.value)}
 				class="px-3 py-1 text-sm rounded-full transition-colors {isActive
 					? opt.color + ' ring-2 ring-offset-1 ring-gray-400'
-					: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+					: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 			>
 				{opt.label}
 			</button>
@@ -480,13 +481,13 @@
 		<span class="text-gray-300 mx-1">|</span>
 
 		<!-- 기간미정 필터 (3단계) -->
-		<span class="text-sm text-gray-500">기간미정:</span>
+		<span class="text-sm text-muted-foreground">기간미정:</span>
 		{#each UNKNOWN_PERIOD_OPTIONS as opt}
 			<button
 				onclick={() => setUnknownPeriodFilter(opt.value)}
 				class="px-2 py-1 text-xs rounded-full transition-colors {unknownPeriodFilter === opt.value
 					? opt.color + ' ring-2 ring-offset-1 ring-gray-400'
-					: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+					: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 			>
 				{opt.label}
 			</button>
@@ -495,14 +496,14 @@
 		<span class="text-gray-300 mx-1">|</span>
 
 		<!-- 정렬 옵션 -->
-		<span class="text-sm text-gray-500">정렬:</span>
+		<span class="text-sm text-muted-foreground">정렬:</span>
 		{#each SORT_OPTIONS as opt}
 			{@const isActive = sortBy === opt.value}
 			<button
 				onclick={() => handleSortChange(opt.value)}
 				class="px-2 py-1 text-xs rounded-full transition-colors flex items-center gap-1 {isActive
 					? 'bg-blue-100 text-blue-700 ring-1 ring-blue-400'
-					: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+					: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 			>
 				<span>{opt.icon}</span>
 				<span>{opt.label}</span>
@@ -515,18 +516,18 @@
 
 	<!-- 세 번째 줄: 마감일 날짜 필터 -->
 	<div class="flex flex-wrap gap-2 items-center">
-		<span class="text-sm text-gray-500">마감일:</span>
+		<span class="text-sm text-muted-foreground">마감일:</span>
 		{#each deadlineDates as { dateStr, label, dayLabel }}
 			{@const count = deadlineCounts[dateStr] || 0}
 			<button
 				onclick={() => setDeadlineDateFilter(dateStr)}
 				class="px-2.5 py-1 text-sm rounded-lg transition-colors flex items-center gap-1.5 {filterDeadlineDate === dateStr
 					? 'bg-indigo-100 text-indigo-700 ring-2 ring-offset-1 ring-indigo-400'
-					: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+					: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 			>
 				<span class="font-medium">{label}</span>
 				<span class="text-xs opacity-70">({dayLabel})</span>
-				<span class="text-xs font-semibold {count > 0 ? 'text-indigo-600' : 'text-gray-400'}">{count}건</span>
+				<span class="text-xs font-semibold {count > 0 ? 'text-indigo-600' : 'text-muted-foreground'}">{count}건</span>
 			</button>
 		{/each}
 
@@ -536,8 +537,8 @@
 			<button
 				onclick={() => showAdvancedFilters = !showAdvancedFilters}
 				class="px-2 py-1 text-xs rounded-full transition-colors flex items-center gap-1 {showAdvancedFilters
-					? 'bg-gray-200 text-gray-700'
-					: 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+					? 'bg-secondary text-foreground'
+					: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 			>
 				<svg class="w-3 h-3 transition-transform {showAdvancedFilters ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
@@ -549,16 +550,16 @@
 
 	<!-- 고급 필터 (URL 타입, 출처) -->
 	{#if showAdvancedFilters && (onUrlTypeChange || onSourceTypeChange)}
-		<div class="flex flex-wrap gap-4 items-center p-2 bg-gray-50 rounded-lg">
+		<div class="flex flex-wrap gap-4 items-center p-2 bg-background rounded-lg">
 			<!-- URL 타입 필터 -->
 			{#if onUrlTypeChange}
 				<div class="flex items-center gap-2">
-					<span class="text-sm text-gray-500">URL:</span>
+					<span class="text-sm text-muted-foreground">URL:</span>
 					<button
 						onclick={() => onUrlTypeChange?.(null)}
 						class="px-2 py-0.5 text-xs rounded-full {filterUrlType === null
-							? 'bg-gray-200 text-gray-700'
-							: 'bg-gray-100 text-gray-500 hover:bg-gray-200'}"
+							? 'bg-secondary text-foreground'
+							: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 					>
 						전체
 					</button>
@@ -567,7 +568,7 @@
 							onclick={() => onUrlTypeChange?.(filterUrlType === opt.value ? null : opt.value)}
 							class="px-2 py-0.5 text-xs rounded-full {filterUrlType === opt.value
 								? 'bg-purple-100 text-purple-700'
-								: 'bg-gray-100 text-gray-500 hover:bg-gray-200'}"
+								: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 						>
 							{opt.label}
 						</button>
@@ -578,12 +579,12 @@
 			<!-- 출처 필터 -->
 			{#if onSourceTypeChange}
 				<div class="flex items-center gap-2">
-					<span class="text-sm text-gray-500">출처:</span>
+					<span class="text-sm text-muted-foreground">출처:</span>
 					<button
 						onclick={() => onSourceTypeChange?.(null)}
 						class="px-2 py-0.5 text-xs rounded-full {filterSourceType === null
-							? 'bg-gray-200 text-gray-700'
-							: 'bg-gray-100 text-gray-500 hover:bg-gray-200'}"
+							? 'bg-secondary text-foreground'
+							: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 					>
 						전체
 					</button>
@@ -592,7 +593,7 @@
 							onclick={() => onSourceTypeChange?.(filterSourceType === opt.value ? null : opt.value)}
 							class="px-2 py-0.5 text-xs rounded-full {filterSourceType === opt.value
 								? 'bg-teal-100 text-teal-700'
-								: 'bg-gray-100 text-gray-500 hover:bg-gray-200'}"
+								: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 						>
 							{opt.label}
 						</button>
