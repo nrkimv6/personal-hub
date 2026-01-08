@@ -1,8 +1,10 @@
 """Activity Crawl/Import API Routes."""
 
+import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -15,7 +17,12 @@ from app.modules.activity.models.schemas import (
 )
 from app.modules.activity.services.import_service import ImportService
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/crawl", tags=["activity-crawl"])
+
+# activity-hub 동기화 URL
+ACTIVITY_HUB_SYNC_URL = "https://activity-hub.woory.day/api/sync"
 
 
 @router.post("/import", response_model=CourseImportResponse)
@@ -121,3 +128,51 @@ def get_crawl_run(
         error_message=run.error_message,
         center_name=center_name,
     )
+
+
+async def _trigger_activity_hub_sync():
+    """activity-hub D1 동기화 트리거 (백그라운드)."""
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(ACTIVITY_HUB_SYNC_URL)
+            if response.status_code == 200:
+                result = response.json()
+                logger.info(
+                    f"activity-hub sync completed: "
+                    f"centers={result.get('centersCount', 0)}, "
+                    f"courses={result.get('coursesCount', 0)}"
+                )
+            else:
+                logger.error(f"activity-hub sync failed: {response.status_code}")
+    except Exception as e:
+        logger.error(f"activity-hub sync error: {e}")
+
+
+@router.post("/sync-hub")
+async def trigger_activity_hub_sync(
+    background_tasks: BackgroundTasks,
+):
+    """
+    activity-hub D1 동기화 트리거.
+
+    monitor-page의 강좌 데이터를 activity-hub D1에 동기화합니다.
+    백그라운드에서 실행되며, 즉시 응답을 반환합니다.
+    """
+    background_tasks.add_task(_trigger_activity_hub_sync)
+    return {"message": "activity-hub 동기화가 시작되었습니다.", "status": "pending"}
+
+
+@router.get("/sync-hub/status")
+async def get_activity_hub_sync_status():
+    """
+    activity-hub 동기화 상태 확인.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(ACTIVITY_HUB_SYNC_URL)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {"error": f"status check failed: {response.status_code}"}
+    except Exception as e:
+        return {"error": str(e)}
