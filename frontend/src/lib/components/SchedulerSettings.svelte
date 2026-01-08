@@ -125,7 +125,7 @@
 		<div class="mb-8">
 			<div class="flex items-center justify-between mb-4">
 				<h3 class="text-lg font-semibold text-foreground">등록된 작업</h3>
-				<Button variant="secondary"sm
+				<Button variant="secondary" size="sm"
 					onclick={() => fetchData()}
 					disabled={loading}
 				>
@@ -188,7 +188,7 @@
 									</div>
 								</div>
 								<div class="flex gap-2 ml-4">
-									<Button variant="primary"sm
+									<Button variant="primary" size="sm"
 										onclick={() => runTask(task.name)}
 										disabled={actionLoading[task.name]}
 									>

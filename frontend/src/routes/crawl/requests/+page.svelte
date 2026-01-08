@@ -204,7 +204,7 @@
 							</td>
 							<td class="px-4 py-3 text-center">
 								{#if req.status === 'failed'}
-									<Button variant="secondary"xs on:click={() => handleRetry(req.id)}
+									<Button variant="secondary" size="xs" on:click={() => handleRetry(req.id)}
 									>
 										재시도
 									</Button>
@@ -225,7 +225,7 @@
 					class="btn btn-secondary btn-sm"
 				>
 					이전
-				</Button>
+				</button>
 				<span class="text-sm text-muted-foreground">
 					{page} / {totalPages}
 				</span>
@@ -235,7 +235,7 @@
 					class="btn btn-secondary btn-sm"
 				>
 					다음
-				</Button>
+				</button>
 			</div>
 		{/if}
 	{/if}

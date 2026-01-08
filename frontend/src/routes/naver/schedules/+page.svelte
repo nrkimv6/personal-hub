@@ -850,17 +850,17 @@
         업체/상품 관리
       </a>
       {#if activeTab === 'schedules'}
-        <Button variant="primary"sm on:click={openCreateModal}>
+        <Button variant="primary" size="sm" on:click={openCreateModal}>
           일정 등록
         </Button>
-        <Button variant="secondary"sm on:click={fetchSchedules}>
+        <Button variant="secondary" size="sm" on:click={fetchSchedules}>
           새로고침
         </Button>
       {:else if activeTab === 'recurring'}
-        <Button variant="secondary"sm on:click={fetchRecurringRules}>
+        <Button variant="secondary" size="sm" on:click={fetchRecurringRules}>
           새로고침
         </Button>
-        <Button variant="primary"sm on:click={openRecurringCreateModal}>
+        <Button variant="primary" size="sm" on:click={openRecurringCreateModal}>
           + 반복 규칙 등록
         </Button>
       {/if}
@@ -876,32 +876,32 @@
       >
         전체 일정
         <span class="ml-2 px-2 py-0.5 text-xs rounded-full {activeTab === 'schedules' ? 'bg-primary-light text-primary' : 'bg-muted text-muted-foreground'}">{schedules.length}</span>
-      </Button>
+      </button>
       <button
         class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'booking' ? 'border-blue-500 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
         on:click={() => activeTab = 'booking'}
       >
         자동 예약
-      </Button>
+      </button>
       <button
         class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'recurring' ? 'border-blue-500 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
         on:click={() => activeTab = 'recurring'}
       >
         반복 규칙
         <span class="ml-2 px-2 py-0.5 text-xs rounded-full {activeTab === 'recurring' ? 'bg-primary-light text-primary' : 'bg-muted text-muted-foreground'}">{recurringRules.length}</span>
-      </Button>
+      </button>
       <button
         class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'history' ? 'border-blue-500 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
         on:click={() => activeTab = 'history'}
       >
         실행 내역
-      </Button>
+      </button>
       <button
         class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'businesses' ? 'border-blue-500 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
         on:click={() => activeTab = 'businesses'}
       >
         업체 관리
-      </Button>
+      </button>
     </nav>
   </div>
 
@@ -976,15 +976,15 @@
         </div>
         {#if selectedIds.size > 0}
           <div class="flex gap-2">
-            <Button variant="secondary"sm on:click={() => bulkToggleEnabled(true)}>
+            <Button variant="secondary" size="sm" on:click={() => bulkToggleEnabled(true)}>
               일괄 활성화
             </Button>
-            <Button variant="secondary"sm on:click={() => bulkToggleEnabled(false)}>
+            <Button variant="secondary" size="sm" on:click={() => bulkToggleEnabled(false)}>
               일괄 비활성화
             </Button>
             <button class="btn btn-danger btn-sm" on:click={bulkDelete}>
               일괄 삭제
-            </Button>
+            </button>
           </div>
         {/if}
       </div>
@@ -1065,7 +1065,7 @@
                       </div>
                     </div>
                     <button
-                      on:click|stopPropagation={() => copyToClipboard(buildBookingUrl(schedule), schedule.id)}
+                      on:click={(e) => { e.stopPropagation(); copyToClipboard(buildBookingUrl(schedule), schedule.id) }}
                       class="btn btn-secondary btn-xs p-1 shrink-0"
                       title="예약 링크 복사"
                     >
@@ -1078,7 +1078,7 @@
                           <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
                         </svg>
                       {/if}
-                    </Button>
+                    </button>
                   </div>
                 </td>
                 <!-- 일정 (날짜+시간 병합) -->
@@ -1151,7 +1151,7 @@
                           <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                         </svg>
                       {/if}
-                    </Button>
+                    </button>
                     {#if schedule.booking_count > 0}
                       <span class="text-success font-medium text-xs">{schedule.booking_count}</span>
                     {/if}
@@ -1168,7 +1168,7 @@
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
                         <path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
                       </svg>
-                    </Button>
+                    </button>
                     <button
                       class="btn btn-secondary btn-xs p-1"
                       on:click={() => openDuplicateModal(schedule)}
@@ -1177,7 +1177,7 @@
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75" />
                       </svg>
-                    </Button>
+                    </button>
                     <button
                       class="btn btn-danger btn-xs p-1"
                       on:click={() => handleDeleteSchedule(schedule)}
@@ -1186,7 +1186,7 @@
                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
                         <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
                       </svg>
-                    </Button>
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -1299,7 +1299,7 @@
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
                           <path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
                         </svg>
-                      </Button>
+                      </button>
                       <button
                         class="btn btn-info btn-xs p-1"
                         on:click={() => handleTriggerRecurringRule(rule)}
@@ -1308,7 +1308,7 @@
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
                           <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
                         </svg>
-                      </Button>
+                      </button>
                       <button
                         class="btn btn-danger btn-xs p-1"
                         on:click={() => handleDeleteRecurringRule(rule)}
@@ -1317,7 +1317,7 @@
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
                           <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
                         </svg>
-                      </Button>
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -1443,8 +1443,8 @@
         <div class="flex justify-end gap-2 pt-4">
           <button type="button" class="btn btn-secondary" on:click={() => { showEditModal = false; editSchedule = null; }}>
             취소
-          </Button>
-          <button type="submit" class="btn btn-primary">저장</Button>
+          </button>
+          <button type="submit" class="btn btn-primary">저장</button>
         </div>
       </form>
     </div>
@@ -1463,13 +1463,13 @@
             on:click={() => createMode = 'select'}
           >
             업체/아이템 선택
-          </Button>
+          </button>
           <button
             class="px-3 py-1 text-sm rounded-md {createMode === 'url' ? 'bg-primary text-white' : 'bg-secondary text-foreground'}"
             on:click={() => createMode = 'url'}
           >
             URL로 등록
-          </Button>
+          </button>
         </div>
       </div>
 
@@ -1529,10 +1529,10 @@
           <div class="flex justify-end gap-2 pt-4">
             <button type="button" class="btn btn-secondary" on:click={() => showCreateModal = false}>
               취소
-            </Button>
+            </button>
             <button type="submit" class="btn btn-primary" disabled={createLoading}>
               {createLoading ? '등록 중...' : '등록'}
-            </Button>
+            </button>
           </div>
         </form>
       {:else}
@@ -1571,10 +1571,10 @@
           <div class="flex justify-end gap-2 pt-4">
             <button type="button" class="btn btn-secondary" on:click={() => showCreateModal = false}>
               취소
-            </Button>
+            </button>
             <button type="submit" class="btn btn-primary" disabled={createLoading}>
               {createLoading ? '등록 중...' : '등록'}
-            </Button>
+            </button>
           </div>
         </form>
       {/if}
@@ -1620,8 +1620,8 @@
         <div class="flex justify-end gap-2 pt-4">
           <button type="button" class="btn btn-secondary" on:click={() => { showDuplicateModal = false; duplicateSchedule = null; }}>
             취소
-          </Button>
-          <button type="submit" class="btn btn-primary">복제</Button>
+          </button>
+          <button type="submit" class="btn btn-primary">복제</button>
         </div>
       </form>
     </div>
@@ -1681,7 +1681,7 @@
                 {:else}
                   확인
                 {/if}
-              </Button>
+              </button>
             {:else}
               <button
                 type="button"
@@ -1689,7 +1689,7 @@
                 on:click={() => { recurringUrlParsed = false; recurringParsedInfo = {}; recurringForm.biz_item_id = null; }}
               >
                 변경
-              </Button>
+              </button>
             {/if}
           </div>
           {#if recurringUrlParsed && recurringParsedInfo.business_name}
@@ -1743,11 +1743,11 @@
               {#if recurringRules.length > 0}
                 <button type="button" class="btn btn-info btn-sm" on:click={openPatternCopyModal}>
                   기존 패턴 복사
-                </Button>
+                </button>
               {/if}
               <button type="button" class="btn btn-secondary btn-sm" on:click={addRecurringTargetPattern}>
                 + 패턴 추가
-              </Button>
+              </button>
             </div>
           </div>
 
@@ -1783,7 +1783,7 @@
                       on:click={() => removeRecurringTargetPattern(idx)}
                     >
                       삭제
-                    </Button>
+                    </button>
                   </div>
                   <div class="flex items-center gap-3">
                     <label class="flex items-center gap-2">
@@ -1836,14 +1836,14 @@
             on:click={() => showRecurringCreateModal = false}
           >
             취소
-          </Button>
+          </button>
           <button
             type="submit"
             class="btn btn-primary"
             disabled={recurringCreateLoading}
           >
             {recurringCreateLoading ? '생성 중...' : '생성'}
-          </Button>
+          </button>
         </div>
       </form>
     </div>
@@ -1882,7 +1882,7 @@
                   </div>
                   <span class="text-primary text-sm">선택</span>
                 </div>
-              </Button>
+              </button>
             {/each}
           </div>
         {/if}
@@ -1895,7 +1895,7 @@
           on:click={() => showPatternCopyModal = false}
         >
           취소
-        </Button>
+        </button>
       </div>
     </div>
   </div>
@@ -1974,7 +1974,7 @@
             <h4 class="text-sm font-medium text-foreground">대상 날짜/시간 패턴</h4>
             <button type="button" class="btn btn-secondary btn-sm" on:click={addRecurringEditTargetPattern}>
               + 패턴 추가
-            </Button>
+            </button>
           </div>
 
           {#if recurringEditForm.target_patterns.length === 0}
@@ -2009,7 +2009,7 @@
                       on:click={() => removeRecurringEditTargetPattern(idx)}
                     >
                       삭제
-                    </Button>
+                    </button>
                   </div>
                   <div class="flex items-center gap-3">
                     <label class="flex items-center gap-2">
@@ -2062,14 +2062,14 @@
             on:click={() => { showRecurringEditModal = false; editRecurringRule = null; }}
           >
             취소
-          </Button>
+          </button>
           <button
             type="submit"
             class="btn btn-primary"
             disabled={recurringEditLoading}
           >
             {recurringEditLoading ? '저장 중...' : '저장'}
-          </Button>
+          </button>
         </div>
       </form>
     </div>

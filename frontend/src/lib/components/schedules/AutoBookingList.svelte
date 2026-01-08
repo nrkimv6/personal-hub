@@ -157,7 +157,7 @@
       <h3 class="text-lg font-semibold text-foreground">
         자동 예약 대상 ({getAutoBookingSchedules().length})
       </h3>
-      <Button variant="secondary"sm on:click={fetchSchedules}>
+      <Button variant="secondary" size="sm" on:click={fetchSchedules}>
         새로고침
       </Button>
     </div>
@@ -239,13 +239,13 @@
                 </td>
                 <td class="px-3 py-2">
                   <div class="flex justify-center gap-1">
-                    <Button variant="secondary"xs
+                    <Button variant="secondary" size="xs"
                       onclick={() => openEditModal(schedule)}
                       title="수정"
                     >
                       ✏
                     </Button>
-                    <Button variant="secondary"xs
+                    <Button variant="secondary" size="xs"
                       onclick={() => handleResetBookingCount(schedule)}
                       title="예약 횟수 초기화"
                     >
@@ -294,7 +294,7 @@
             required
             placeholder="18:00-21:00"
           />
-          <button type="submit" class="btn btn-secondary w-full mt-4">테스트</Button>
+          <button type="submit" class="btn btn-secondary w-full mt-4">테스트</button>
 
           {#if filterTest.result}
             <div class="mt-4 p-3 bg-background rounded-lg text-sm">
@@ -375,8 +375,8 @@
         <div class="flex justify-end gap-2 pt-4">
           <button type="button" class="btn btn-secondary" onclick={() => editingSchedule = null}>
             취소
-          </Button>
-          <button type="submit" class="btn btn-primary">저장</Button>
+          </button>
+          <button type="submit" class="btn btn-primary">저장</button>
         </div>
       </form>
     </div>

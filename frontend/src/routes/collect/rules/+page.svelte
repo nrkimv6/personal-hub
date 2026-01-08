@@ -149,10 +149,10 @@
 <div>
 	<div class="mb-6 flex justify-end">
 		<div class="flex gap-2">
-			<button onclick={reclassifyAll} disabled={reclassifying} class="btn btn-secondary btn-sm">
+			<Button variant="secondary" size="sm" on:click={reclassifyAll} disabled={reclassifying}>
 				{reclassifying ? '재분류 중...' : '전체 재분류'}
 			</Button>
-			<Button variant="primary"sm on:click={() => (showCreateTagModal = true)}>
+			<Button variant="primary" size="sm" on:click={() => (showCreateTagModal = true)}>
 				+ 새 태그
 			</Button>
 		</div>
@@ -202,7 +202,7 @@
 									class="text-error hover:text-error text-sm"
 								>
 									삭제
-								</Button>
+								</button>
 							</div>
 						{/each}
 					</div>
@@ -243,7 +243,7 @@
 								<input type="checkbox" bind:checked={newKeywordCaseSensitive} />
 								대소문자 구분
 							</label>
-							<Button variant="primary"sm on:click={addKeyword}> 추가 </Button>
+							<Button variant="primary" size="sm" on:click={addKeyword}> 추가 </Button>
 						</div>
 					</div>
 
@@ -285,13 +285,13 @@
 												: 'text-success hover:text-success'}"
 										>
 											{kw.is_active ? '비활성화' : '활성화'}
-										</Button>
+										</button>
 										<button
 											onclick={() => deleteKeyword(kw.id)}
 											class="text-error hover:text-error text-sm"
 										>
 											삭제
-										</Button>
+										</button>
 									</div>
 								</div>
 							{/each}
@@ -319,7 +319,7 @@
 						class="text-muted-foreground hover:text-muted-foreground text-2xl"
 					>
 						&times;
-					</Button>
+					</button>
 				</div>
 
 				<div class="space-y-4">
@@ -360,10 +360,10 @@
 				</div>
 
 				<div class="mt-6 flex justify-end gap-2">
-					<Button variant="secondary"sm on:click={() => (showCreateTagModal = false)}>
+					<Button variant="secondary" size="sm" on:click={() => (showCreateTagModal = false)}>
 						취소
 					</Button>
-					<Button variant="primary"sm on:click={createTag}> 생성 </Button>
+					<Button variant="primary" size="sm" on:click={createTag}> 생성 </Button>
 				</div>
 			</div>
 		</div>

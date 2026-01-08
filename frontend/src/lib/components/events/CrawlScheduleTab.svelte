@@ -233,7 +233,7 @@
 					{/if}
 				</div>
 				<div class="mt-3 flex gap-2">
-					<Button variant="secondary"sm on:click={() => openRunsModal(schedule)}
+					<Button variant="secondary" size="sm" on:click={() => openRunsModal(schedule)}
 					>
 						실행 이력
 					</Button>
@@ -302,14 +302,14 @@
 									class="text-sm text-primary hover:underline"
 								>
 									실행 이력
-								</Button>
+								</button>
 								{#if $isAdmin}
 									<button
 										onclick={() => handleToggle(schedule.id, !schedule.enabled)}
 										class="text-sm {schedule.enabled ? 'text-error' : 'text-success'} hover:underline"
 									>
 										{schedule.enabled ? '비활성화' : '활성화'}
-									</Button>
+									</button>
 								{/if}
 							</div>
 						</td>
@@ -340,7 +340,7 @@
 				</div>
 				<button onclick={() => (showRunsModal = false)} class="text-muted-foreground hover:text-muted-foreground text-2xl">
 					&times;
-				</Button>
+				</button>
 			</div>
 
 			{#if loadingRuns}
@@ -378,7 +378,7 @@
 			{/if}
 
 			<div class="mt-6 flex justify-end">
-				<Button variant="secondary"sm on:click={() => (showRunsModal = false)}>닫기</Button>
+				<Button variant="secondary" size="sm" on:click={() => (showRunsModal = false)}>닫기</Button>
 			</div>
 		</div>
 	</div>

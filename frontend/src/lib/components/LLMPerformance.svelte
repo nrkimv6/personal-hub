@@ -166,7 +166,7 @@
 					<option value={opt.value}>{opt.label}</option>
 				{/each}
 			</select>
-			<Button variant="secondary"sm on:click={() => fetchData()}>새로고침</Button>
+			<Button variant="secondary" size="sm" on:click={() => fetchData()}>새로고침</Button>
 		</div>
 	</div>
 

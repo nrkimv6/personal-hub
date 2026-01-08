@@ -348,7 +348,7 @@
 													d={expandedEventIds[event.id] ? 'M19 9l-7 7-7-7' : 'M9 5l7 7-7 7'}
 												/>
 											</svg>
-										</Button>
+										</button>
 									{:else}
 										<span class="w-5"></span>
 									{/if}
@@ -482,7 +482,7 @@
 														onclick={() => copyGraphqlResponse(event.graphql_response)}
 													>
 														복사
-													</Button>
+													</button>
 												</div>
 												<div class="p-4 max-h-80 overflow-auto">
 													<pre
@@ -508,7 +508,7 @@
 					총 {total}건 중 {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, total)}
 				</div>
 				<div class="flex gap-2">
-					<Button variant="secondary"sm
+					<Button variant="secondary" size="sm"
 						disabled={page === 1}
 						onclick={() => {
 							page--;
@@ -518,7 +518,7 @@
 						이전
 					</Button>
 					<span class="px-3 py-1 text-sm">{page} / {totalPages}</span>
-					<Button variant="secondary"sm
+					<Button variant="secondary" size="sm"
 						disabled={page === totalPages}
 						onclick={() => {
 							page++;

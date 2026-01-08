@@ -360,13 +360,13 @@
     <p class="text-sm text-muted-foreground">업체, 아이템, 모니터링 일정을 관리합니다</p>
   </div>
   <div class="flex gap-2">
-    <Button variant="secondary"sm on:click={fetchBusinesses}>
+    <Button variant="secondary" size="sm" on:click={fetchBusinesses}>
       새로고침
     </Button>
-    <Button variant="success"sm on:click={() => showUrlImportModal = true}>
+    <Button variant="success" size="sm" on:click={() => showUrlImportModal = true}>
       URL 임포트
     </Button>
-    <Button variant="primary"sm on:click={() => showAddBusinessModal = true}>
+    <Button variant="primary" size="sm" on:click={() => showAddBusinessModal = true}>
       + 업체 추가
     </Button>
   </div>
@@ -423,19 +423,19 @@
                   </td>
                   <td>
                     <div class="flex gap-1">
-                      <Button variant="secondary"xs
-                        on:click|stopPropagation={() => { editBusiness = {...business}; showEditBusinessModal = true; }}
+                      <Button variant="secondary" size="xs"
+                        on:click={(e) => { e.stopPropagation(); { editBusiness = {...business }}; showEditBusinessModal = true; }}
                         title="수정"
                       >
                         ✏
                       </Button>
                       <button
                         class="btn btn-danger btn-xs"
-                        on:click|stopPropagation={() => handleDeleteBusiness(business)}
+                        on:click={(e) => { e.stopPropagation(); handleDeleteBusiness(business) }}
                         title="삭제"
                       >
                         🗑
-                      </Button>
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -453,7 +453,7 @@
           아이템 {#if selectedBusiness}({selectedBusiness.items?.length || 0}){/if}
         </h3>
         {#if selectedBusiness}
-          <Button variant="secondary"sm on:click={() => showAddItemModal = true}>
+          <Button variant="secondary" size="sm" on:click={() => showAddItemModal = true}>
             + 추가
           </Button>
         {/if}
@@ -506,29 +506,28 @@
                   </td>
                   <td>
                     <div class="flex gap-1">
-                      <Button variant="secondary"xs
-                        on:click|stopPropagation={() => {
+                      <Button variant="secondary" size="xs"
+                        on:click={(e) => { e.stopPropagation(); {
                           slotCheckBusiness = selectedBusiness;
                           slotCheckItem = item;
-                          showSlotCheckModal = true;
-                        }}
+                          showSlotCheckModal = true; }}}
                         title="슬롯 조회"
                       >
                         🔍
                       </Button>
-                      <Button variant="secondary"xs
-                        on:click|stopPropagation={() => { editItem = {...item}; showEditItemModal = true; }}
+                      <Button variant="secondary" size="xs"
+                        on:click={(e) => { e.stopPropagation(); { editItem = {...item }}; showEditItemModal = true; }}
                         title="수정"
                       >
                         ✏
                       </Button>
                       <button
                         class="btn btn-danger btn-xs"
-                        on:click|stopPropagation={() => handleDeleteItem(item)}
+                        on:click={(e) => { e.stopPropagation(); handleDeleteItem(item) }}
                         title="삭제"
                       >
                         🗑
-                      </Button>
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -546,7 +545,7 @@
           일정 {#if selectedItem}({itemSchedules.length}){/if}
         </h3>
         {#if selectedItem}
-          <Button variant="secondary"sm on:click={() => showAddScheduleModal = true}>
+          <Button variant="secondary" size="sm" on:click={() => showAddScheduleModal = true}>
             + 추가
           </Button>
         {/if}
@@ -592,7 +591,7 @@
                   title="삭제"
                 >
                   ✕
-                </Button>
+                </button>
               </div>
             </div>
           {/each}
@@ -642,8 +641,8 @@
         <div class="flex justify-end gap-2 pt-4">
           <button type="button" class="btn btn-secondary" on:click={() => showAddBusinessModal = false}>
             취소
-          </Button>
-          <button type="submit" class="btn btn-primary">추가</Button>
+          </button>
+          <button type="submit" class="btn btn-primary">추가</button>
         </div>
       </form>
     </div>
@@ -677,8 +676,8 @@
         <div class="flex justify-end gap-2 pt-4">
           <button type="button" class="btn btn-secondary" on:click={() => { showEditBusinessModal = false; editBusiness = null; }}>
             취소
-          </Button>
-          <button type="submit" class="btn btn-primary">저장</Button>
+          </button>
+          <button type="submit" class="btn btn-primary">저장</button>
         </div>
       </form>
     </div>
@@ -731,8 +730,8 @@
         <div class="flex justify-end gap-2 pt-4">
           <button type="button" class="btn btn-secondary" on:click={() => showAddItemModal = false}>
             취소
-          </Button>
-          <button type="submit" class="btn btn-primary">추가</Button>
+          </button>
+          <button type="submit" class="btn btn-primary">추가</button>
         </div>
       </form>
     </div>
@@ -785,8 +784,8 @@
         <div class="flex justify-end gap-2 pt-4">
           <button type="button" class="btn btn-secondary" on:click={() => { showEditItemModal = false; editItem = null; }}>
             취소
-          </Button>
-          <button type="submit" class="btn btn-primary">저장</Button>
+          </button>
+          <button type="submit" class="btn btn-primary">저장</button>
         </div>
       </form>
     </div>
@@ -826,8 +825,8 @@
         <div class="flex justify-end gap-2 pt-4">
           <button type="button" class="btn btn-secondary" on:click={() => showAddScheduleModal = false}>
             취소
-          </Button>
-          <button type="submit" class="btn btn-primary">추가</Button>
+          </button>
+          <button type="submit" class="btn btn-primary">추가</button>
         </div>
       </form>
     </div>
@@ -948,10 +947,10 @@
             on:click={() => { showUrlImportModal = false; urlImportResult = null; }}
           >
             닫기
-          </Button>
+          </button>
           <button type="submit" class="btn btn-primary" disabled={urlImportLoading}>
             {urlImportLoading ? '처리 중...' : '임포트'}
-          </Button>
+          </button>
         </div>
       </form>
     </div>

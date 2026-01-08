@@ -325,7 +325,7 @@
 										? 'translate-x-6'
 										: 'translate-x-1'}"
 								></span>
-							</Button>
+							</button>
 
 							<div>
 								<div class="flex items-center gap-2">
@@ -361,7 +361,7 @@
 
 							<!-- 설정 버튼 (Instagram만) -->
 							{#if schedule.target_type === 'instagram_feed'}
-								<Button variant="secondary"sm on:click={() => openSettings(schedule)}
+								<Button variant="secondary" size="sm" on:click={() => openSettings(schedule)}
 									title="상세 설정"
 								>
 									설정
@@ -369,10 +369,11 @@
 							{/if}
 
 							<!-- 즉시 실행 버튼 -->
-							<button
-								onclick={() => runSchedule(schedule)}
+							<Button
+								variant="primary"
+								size="sm"
+								on:click={() => runSchedule(schedule)}
 								disabled={runningId === schedule.id || !schedule.enabled}
-								class="btn btn-primary btn-sm"
 								title={!schedule.enabled ? '스케줄을 먼저 활성화하세요' : '즉시 실행'}
 							>
 								{#if runningId === schedule.id}
@@ -389,7 +390,7 @@
 								title="스케줄 삭제"
 							>
 								삭제
-							</Button>
+							</button>
 						</div>
 					</div>
 				</div>
@@ -418,7 +419,7 @@
 					class="text-muted-foreground hover:text-muted-foreground text-2xl leading-none"
 				>
 					&times;
-				</Button>
+				</button>
 			</div>
 
 			<!-- 모달 컨텐츠 -->
@@ -443,7 +444,7 @@
 							class="text-sm text-primary hover:text-primary-hover"
 						>
 							← 이전
-						</Button>
+						</button>
 					{/if}
 				</div>
 				<button
@@ -451,7 +452,7 @@
 					class="text-muted-foreground hover:text-muted-foreground text-2xl leading-none"
 				>
 					&times;
-				</Button>
+				</button>
 			</div>
 
 			<!-- 모달 컨텐츠 -->
@@ -479,7 +480,7 @@
 										{/if}
 									</div>
 								</div>
-							</Button>
+							</button>
 						{/each}
 					</div>
 
@@ -509,7 +510,7 @@
 												{account.is_logged_in ? '로그인됨' : '로그인 필요'}
 											</div>
 										</div>
-									</Button>
+									</button>
 								{/each}
 							</div>
 						{/if}
@@ -531,7 +532,7 @@
 											<div class="font-medium text-foreground">{saved.name}</div>
 											<div class="text-sm text-muted-foreground truncate max-w-xs">{saved.query}</div>
 										</div>
-									</Button>
+									</button>
 								{/each}
 							</div>
 						{/if}
@@ -563,7 +564,7 @@
 										title="삭제"
 									>
 										✕
-									</Button>
+									</button>
 								{/if}
 							</div>
 						{/each}
@@ -574,7 +575,7 @@
 						class="w-full py-2 border-2 border-dashed border-border rounded-lg text-muted-foreground hover:border-blue-500 hover:text-primary transition-colors"
 					>
 						+ 시간 추가
-					</Button>
+					</button>
 
 					<div class="mt-6 flex justify-end gap-2">
 						<Button variant="secondary" on:click={closeAddModal}>
@@ -590,7 +591,7 @@
 							{:else}
 								생성
 							{/if}
-						</Button>
+						</button>
 					</div>
 				{/if}
 			</div>
@@ -632,7 +633,7 @@
 					{:else}
 						삭제
 					{/if}
-				</Button>
+				</button>
 			</div>
 		</div>
 	</div>

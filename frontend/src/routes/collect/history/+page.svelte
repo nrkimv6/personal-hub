@@ -310,26 +310,28 @@
 		<!-- 페이지네이션 -->
 		{#if totalPages > 1}
 			<div class="flex justify-center items-center gap-2 mt-6">
-				<button
-					onclick={() => {
+				<Button
+					variant="secondary"
+					size="sm"
+					on:click={() => {
 						page = Math.max(1, page - 1);
 						fetchHistory();
 					}}
 					disabled={page === 1}
-					class="btn btn-secondary btn-sm"
 				>
 					이전
 				</Button>
 				<span class="text-sm text-muted-foreground">
 					{page} / {totalPages}
 				</span>
-				<button
-					onclick={() => {
+				<Button
+					variant="secondary"
+					size="sm"
+					on:click={() => {
 						page = Math.min(totalPages, page + 1);
 						fetchHistory();
 					}}
 					disabled={page === totalPages}
-					class="btn btn-secondary btn-sm"
 				>
 					다음
 				</Button>

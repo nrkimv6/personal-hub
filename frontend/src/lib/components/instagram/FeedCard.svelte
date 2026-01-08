@@ -339,7 +339,7 @@
 						d="M6 18L18 6M6 6l12 12"
 					/>
 				</svg>
-			</Button>
+			</button>
 		{:else}
 			<!-- 목록 모드: 상세 보기 버튼 -->
 			<button
@@ -352,7 +352,7 @@
 						d="M6 10a2 2 0 11-4 0 2 2 0 014 0zM12 10a2 2 0 11-4 0 2 2 0 014 0zM16 12a2 2 0 100-4 2 2 0 000 4z"
 					/>
 				</svg>
-			</Button>
+			</button>
 		{/if}
 	</div>
 
@@ -397,7 +397,7 @@
 								d="M15 19l-7-7 7-7"
 							/>
 						</svg>
-					</Button>
+					</button>
 				{/if}
 				{#if currentImageIndex < post.images.length - 1}
 					<button
@@ -413,7 +413,7 @@
 								d="M9 5l7 7-7 7"
 							/>
 						</svg>
-					</Button>
+					</button>
 				{/if}
 			{/if}
 		</div>
@@ -451,7 +451,7 @@
 						</svg>
 					{/if}
 				</span>
-			</Button>
+			</button>
 		{:else if showTabs}
 			<!-- 상세 모드 + 탭 UI (llmResult가 전달된 경우) -->
 			<div class="flex border-b border-border mb-3">
@@ -462,7 +462,7 @@
 						: 'text-muted-foreground hover:text-foreground'}"
 				>
 					원본 캡션
-				</Button>
+				</button>
 				<button
 					onclick={() => (detailTab = 'ai')}
 					class="flex-1 py-2 text-sm font-medium transition-colors {detailTab === 'ai'
@@ -475,7 +475,7 @@
 					{:else if llmResult?.status === 'pending' || llmResult?.status === 'processing'}
 						<span class="ml-1 px-1 text-xs bg-warning-light text-warning rounded">대기</span>
 					{/if}
-				</Button>
+				</button>
 			</div>
 		{:else}
 			<!-- 상세 모드: 기본 (탭 없음) -->
@@ -613,7 +613,7 @@
 						<div class="text-center py-4">
 							<p class="text-sm text-muted-foreground mb-3">AI 분석 결과가 없습니다.</p>
 							{#if onRequestLlmAnalysis}
-								<Button variant="primary"sm on:click={() => onRequestLlmAnalysis && onRequestLlmAnalysis(post.id)}
+								<Button variant="primary" size="sm" on:click={() => onRequestLlmAnalysis && onRequestLlmAnalysis(post.id)}
 								>
 									AI 분석 요청
 								</Button>
@@ -644,7 +644,7 @@
 									class="text-xs text-primary hover:text-primary-hover underline"
 								>
 									편집
-								</Button>
+								</button>
 							{/if}
 						</div>
 						{#if editingTags}
@@ -664,7 +664,7 @@
 										{#if editTagIds.includes(tag.id)}
 											<span class="ml-1">✓</span>
 										{/if}
-									</Button>
+									</button>
 								{/each}
 							</div>
 							<div class="flex gap-2">
@@ -674,8 +674,8 @@
 									class="btn btn-primary btn-sm disabled:opacity-50"
 								>
 									{savingTags ? '저장 중...' : '저장'}
-								</Button>
-								<Button variant="secondary"sm on:click={cancelEditTags}> 취소 </Button>
+								</button>
+								<Button variant="secondary" size="sm" on:click={cancelEditTags}> 취소 </Button>
 							</div>
 						{:else}
 							<!-- 보기 모드 -->
@@ -729,7 +729,7 @@
 							{:else}
 								&#8635; 재크롤링
 							{/if}
-						</Button>
+						</button>
 						{/if}
 					{/if}
 					<!-- AI 분석 요청 버튼 -->
@@ -749,7 +749,7 @@
 								</svg>
 								AI 분석
 							{/if}
-						</Button>
+						</button>
 					{/if}
 					<!-- 캡쳐 다운로드 버튼 -->
 					<button
@@ -767,7 +767,7 @@
 							</svg>
 							캡쳐
 						{/if}
-					</Button>
+					</button>
 					<!-- 공유 버튼 -->
 					<button
 						onclick={handleShare}
@@ -784,9 +784,9 @@
 							</svg>
 							공유
 						{/if}
-					</Button>
+					</button>
 					{#if onDelete}
-					<button onclick={handleDelete} class="btn btn-danger btn-sm"> 삭제 </Button>
+					<button onclick={handleDelete} class="btn btn-danger btn-sm"> 삭제 </button>
 					{/if}
 				</div>
 			{/if}

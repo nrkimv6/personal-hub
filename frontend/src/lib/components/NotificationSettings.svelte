@@ -132,7 +132,7 @@
 							disabled={saving}
 						>
 							{saving ? '저장 중...' : '설정 저장'}
-						</Button>
+						</button>
 					</div>
 				{/if}
 			</div>

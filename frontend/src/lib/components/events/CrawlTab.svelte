@@ -278,7 +278,7 @@
 				: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 		>
 			전체
-		</Button>
+		</button>
 		<button
 			onclick={() => handleStatusFilter('pending')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'pending'
@@ -286,7 +286,7 @@
 				: 'bg-warning-light text-warning-foreground hover:bg-yellow-200'}"
 		>
 			대기
-		</Button>
+		</button>
 		<button
 			onclick={() => handleStatusFilter('processing')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'processing'
@@ -294,7 +294,7 @@
 				: 'bg-primary-light text-primary hover:bg-blue-200'}"
 		>
 			처리 중
-		</Button>
+		</button>
 		<button
 			onclick={() => handleStatusFilter('completed')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'completed'
@@ -302,7 +302,7 @@
 				: 'bg-success-light text-success hover:bg-green-200'}"
 		>
 			완료
-		</Button>
+		</button>
 		<button
 			onclick={() => handleStatusFilter('failed')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'failed'
@@ -310,7 +310,7 @@
 				: 'bg-error-light text-error hover:bg-red-200'}"
 		>
 			실패
-		</Button>
+		</button>
 	</div>
 	<!-- 분석 상태 필터 -->
 	<div class="flex flex-wrap gap-2">
@@ -322,7 +322,7 @@
 				: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 		>
 			전체
-		</Button>
+		</button>
 		<button
 			onclick={() => handleAnalysisFilter('event')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterAnalysis === 'event'
@@ -330,7 +330,7 @@
 				: 'bg-purple-light text-purple hover:bg-purple-200'}"
 		>
 			이벤트
-		</Button>
+		</button>
 		<button
 			onclick={() => handleAnalysisFilter('uncategorized')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterAnalysis === 'uncategorized'
@@ -338,7 +338,7 @@
 				: 'bg-warning-light text-warning hover:bg-orange-200'}"
 		>
 			미분류
-		</Button>
+		</button>
 		<button
 			onclick={() => handleAnalysisFilter('unanalyzed')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterAnalysis === 'unanalyzed'
@@ -346,7 +346,7 @@
 				: 'bg-secondary text-muted-foreground hover:bg-gray-300'}"
 		>
 			미분석
-		</Button>
+		</button>
 	</div>
 </div>
 
@@ -365,7 +365,7 @@
 		{#if $isAdmin}
 			<button onclick={() => (showAddModal = true)} class="mt-4 btn btn-primary btn-sm">
 				+ URL 크롤링 요청
-			</Button>
+			</button>
 		{/if}
 	</div>
 {:else}
@@ -410,7 +410,7 @@
 								{:else}
 									AI 분석
 								{/if}
-							</Button>
+							</button>
 						{/if}
 						{#if (req.status === 'failed' || req.status === 'completed') && $isAdmin}
 							<button
@@ -421,7 +421,7 @@
 								class="text-primary hover:underline"
 							>
 								재시도
-							</Button>
+							</button>
 						{/if}
 					</div>
 				</div>
@@ -489,7 +489,7 @@
 										{:else}
 											AI 분석
 										{/if}
-									</Button>
+									</button>
 								{/if}
 								{#if (req.status === 'failed' || req.status === 'completed') && $isAdmin}
 									<button
@@ -500,7 +500,7 @@
 										class="text-sm text-primary hover:underline"
 									>
 										재시도
-									</Button>
+									</button>
 								{/if}
 							</div>
 						</td>
@@ -523,7 +523,7 @@
 					class="px-3 py-1.5 text-sm rounded border disabled:opacity-50 disabled:cursor-not-allowed hover:bg-muted"
 				>
 					이전
-				</Button>
+				</button>
 				<span class="text-sm text-muted-foreground">
 					{currentPage} / {totalPages}
 				</span>
@@ -533,7 +533,7 @@
 					class="px-3 py-1.5 text-sm rounded border disabled:opacity-50 disabled:cursor-not-allowed hover:bg-muted"
 				>
 					다음
-				</Button>
+				</button>
 			</div>
 		</div>
 	{/if}
@@ -553,7 +553,7 @@
 				<h3 class="text-lg font-bold">URL 크롤링 요청</h3>
 				<button onclick={() => (showAddModal = false)} class="text-muted-foreground hover:text-muted-foreground text-2xl">
 					&times;
-				</Button>
+				</button>
 			</div>
 
 			<div class="space-y-4">
@@ -574,7 +574,7 @@
 			</div>
 
 			<div class="mt-6 flex gap-2 justify-end">
-				<Button variant="secondary"sm on:click={() => (showAddModal = false)}>취소</Button>
+				<Button variant="secondary" size="sm" on:click={() => (showAddModal = false)}>취소</Button>
 				<button onclick={handleAddRequest} disabled={submitting} class="btn btn-primary btn-sm disabled:opacity-50">
 					{#if submitting}
 						<span class="flex items-center gap-2">
@@ -584,7 +584,7 @@
 					{:else}
 						요청
 					{/if}
-				</Button>
+				</button>
 			</div>
 		</div>
 	</div>
@@ -612,7 +612,7 @@
 				</div>
 				<button onclick={() => (showDetailModal = false)} class="text-muted-foreground hover:text-muted-foreground text-2xl">
 					&times;
-				</Button>
+				</button>
 			</div>
 
 			<div class="space-y-4">
@@ -746,14 +746,14 @@
 						{:else}
 							AI 분석
 						{/if}
-					</Button>
+					</button>
 				{/if}
 				{#if (selectedRequest.status === 'failed' || selectedRequest.status === 'completed') && $isAdmin}
 					<button onclick={() => selectedRequest && handleRetry(selectedRequest.id)} class="btn btn-outline btn-sm">
 						재시도
-					</Button>
+					</button>
 				{/if}
-				<Button variant="secondary"sm on:click={() => (showDetailModal = false)}>닫기</Button>
+				<Button variant="secondary" size="sm" on:click={() => (showDetailModal = false)}>닫기</Button>
 			</div>
 		</div>
 	</div>
