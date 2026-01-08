@@ -84,11 +84,11 @@
   function getErrorTypeBadgeClass(errorType: string | null): string {
     if (!errorType) return 'bg-muted text-foreground';
     const classes: Record<string, string> = {
-      timeout: 'bg-yellow-100 text-yellow-800',
-      connection_error: 'bg-red-100 text-red-800',
-      http_403: 'bg-orange-100 text-orange-800',
-      http_429: 'bg-purple-100 text-purple-800',
-      http_500: 'bg-red-100 text-red-800',
+      timeout: 'bg-warning-light text-warning-foreground',
+      connection_error: 'bg-error-light text-error',
+      http_403: 'bg-warning-light text-warning',
+      http_429: 'bg-purple-light text-purple-800',
+      http_500: 'bg-error-light text-error',
       unknown: 'bg-muted text-foreground'
     };
     return classes[errorType] || 'bg-muted text-foreground';
@@ -106,7 +106,7 @@
     <span class="ml-3 text-muted-foreground">로딩 중...</span>
   </div>
 {:else if error}
-  <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+  <div class="bg-error-light border border-red-200 rounded-lg p-4 text-error">
     {error}
     <button onclick={loadData} class="ml-2 underline hover:no-underline">다시 시도</button>
   </div>
@@ -119,7 +119,7 @@
         <select
           bind:value={hoursFilter}
           onchange={loadData}
-          class="px-3 py-1.5 border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          class="px-3 py-1.5 border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring"
         >
           <option value={1}>1시간</option>
           <option value={6}>6시간</option>
@@ -131,7 +131,7 @@
     </div>
     <button
       onclick={handleCleanup}
-      class="px-4 py-2 text-sm text-red-600 border border-red-300 rounded-md hover:bg-red-50 transition-colors"
+      class="px-4 py-2 text-sm text-error border border-red-300 rounded-md hover:bg-error-light transition-colors"
     >
       오래된 로그 정리
     </button>
@@ -146,17 +146,17 @@
       </div>
       <div class="bg-white rounded-lg shadow p-4">
         <div class="text-sm text-muted-foreground">총 시도 횟수</div>
-        <div class="text-2xl font-bold text-blue-600">{stats.total_attempts.toLocaleString()}</div>
+        <div class="text-2xl font-bold text-primary">{stats.total_attempts.toLocaleString()}</div>
       </div>
       <div class="bg-white rounded-lg shadow p-4">
         <div class="text-sm text-muted-foreground">전체 성공률</div>
-        <div class="text-2xl font-bold {stats.overall_success_rate >= 80 ? 'text-green-600' : stats.overall_success_rate >= 50 ? 'text-yellow-600' : 'text-red-600'}">
+        <div class="text-2xl font-bold {stats.overall_success_rate >= 80 ? 'text-success' : stats.overall_success_rate >= 50 ? 'text-warning-foreground' : 'text-error'}">
           {formatPercent(stats.overall_success_rate)}
         </div>
       </div>
       <div class="bg-white rounded-lg shadow p-4">
         <div class="text-sm text-muted-foreground">에러 유형</div>
-        <div class="text-2xl font-bold text-orange-600">
+        <div class="text-2xl font-bold text-warning">
           {Object.keys(stats.by_error_type || {}).length}
         </div>
       </div>
@@ -202,9 +202,9 @@
                 <tr class="hover:bg-muted">
                   <td class="px-4 py-2 font-mono text-sm text-foreground">{proxy.proxy_host}</td>
                   <td class="px-4 py-2 text-right text-sm text-muted-foreground">{proxy.total_attempts}</td>
-                  <td class="px-4 py-2 text-right text-sm text-green-600">{proxy.success_count}</td>
-                  <td class="px-4 py-2 text-right text-sm text-red-600">{proxy.fail_count}</td>
-                  <td class="px-4 py-2 text-right text-sm {proxy.success_rate >= 80 ? 'text-green-600' : proxy.success_rate >= 50 ? 'text-yellow-600' : 'text-red-600'}">
+                  <td class="px-4 py-2 text-right text-sm text-success">{proxy.success_count}</td>
+                  <td class="px-4 py-2 text-right text-sm text-error">{proxy.fail_count}</td>
+                  <td class="px-4 py-2 text-right text-sm {proxy.success_rate >= 80 ? 'text-success' : proxy.success_rate >= 50 ? 'text-warning-foreground' : 'text-error'}">
                     {formatPercent(proxy.success_rate)}
                   </td>
                   <td class="px-4 py-2 text-right text-sm text-muted-foreground">{formatMs(proxy.avg_response_time_ms)}</td>
@@ -221,9 +221,9 @@
   <!-- 실패 프록시 목록 -->
   {#if failedProxies.length > 0}
     <div class="bg-white rounded-lg shadow mb-8">
-      <div class="p-4 border-b border-border bg-red-50">
+      <div class="p-4 border-b border-border bg-error-light">
         <h3 class="text-lg font-semibold text-red-900">실패 프록시 (최근 {hoursFilter}시간)</h3>
-        <p class="text-sm text-red-700">{minFailures}회 이상 실패한 프록시</p>
+        <p class="text-sm text-error">{minFailures}회 이상 실패한 프록시</p>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full">
@@ -239,7 +239,7 @@
             {#each failedProxies as proxy}
               <tr class="hover:bg-muted">
                 <td class="px-4 py-2 font-mono text-sm text-foreground">{proxy.proxy_host}</td>
-                <td class="px-4 py-2 text-right text-sm font-medium text-red-600">{proxy.fail_count}</td>
+                <td class="px-4 py-2 text-right text-sm font-medium text-error">{proxy.fail_count}</td>
                 <td class="px-4 py-2 text-center">
                   <span class="px-2 py-0.5 text-xs rounded-full {getErrorTypeBadgeClass(proxy.last_error_type)}">
                     {proxy.last_error_type || '-'}
@@ -266,7 +266,7 @@
           <div class="p-4">
             <div class="flex items-center justify-between mb-2">
               <div class="flex items-center gap-3">
-                <span class="px-2 py-0.5 text-xs rounded-full {history.final_success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                <span class="px-2 py-0.5 text-xs rounded-full {history.final_success ? 'bg-success-light text-success' : 'bg-error-light text-error'}">
                   {history.final_success ? '성공' : '실패'}
                 </span>
                 <span class="text-sm text-muted-foreground">
@@ -280,11 +280,11 @@
 
             <div class="flex flex-wrap gap-2 mt-2">
               {#each history.attempts as attempt}
-                <div class="flex items-center gap-1 px-2 py-1 rounded text-xs {attempt.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}">
+                <div class="flex items-center gap-1 px-2 py-1 rounded text-xs {attempt.success ? 'bg-success-light text-success' : 'bg-error-light text-error'}">
                   <span class="font-medium">#{attempt.attempt_number}</span>
                   <span class="font-mono">{attempt.proxy_host || truncateUrl(attempt.proxy_url, 15)}</span>
                   {#if attempt.success}
-                    <span class="text-green-600">{attempt.http_status || 'OK'}</span>
+                    <span class="text-success">{attempt.http_status || 'OK'}</span>
                   {:else}
                     <span>{attempt.error_type || 'error'}</span>
                   {/if}
@@ -323,11 +323,11 @@
               <td class="px-4 py-2 text-center text-sm text-muted-foreground">#{log.attempt_number}</td>
               <td class="px-4 py-2 text-center">
                 {#if log.success}
-                  <span class="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-800">
+                  <span class="px-2 py-0.5 text-xs rounded-full bg-success-light text-success">
                     {log.http_status || 'OK'}
                   </span>
                 {:else}
-                  <span class="px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-800">
+                  <span class="px-2 py-0.5 text-xs rounded-full bg-error-light text-error">
                     {log.http_status || 'FAIL'}
                   </span>
                 {/if}

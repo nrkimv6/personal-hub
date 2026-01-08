@@ -869,33 +869,33 @@
   <div class="border-b border-border mb-6">
     <nav class="flex space-x-8">
       <button
-        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'schedules' ? 'border-blue-500 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
+        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'schedules' ? 'border-blue-500 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
         on:click={() => activeTab = 'schedules'}
       >
         전체 일정
-        <span class="ml-2 px-2 py-0.5 text-xs rounded-full {activeTab === 'schedules' ? 'bg-blue-100 text-blue-600' : 'bg-muted text-muted-foreground'}">{schedules.length}</span>
+        <span class="ml-2 px-2 py-0.5 text-xs rounded-full {activeTab === 'schedules' ? 'bg-primary-light text-primary' : 'bg-muted text-muted-foreground'}">{schedules.length}</span>
       </button>
       <button
-        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'booking' ? 'border-blue-500 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
+        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'booking' ? 'border-blue-500 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
         on:click={() => activeTab = 'booking'}
       >
         자동 예약
       </button>
       <button
-        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'recurring' ? 'border-blue-500 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
+        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'recurring' ? 'border-blue-500 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
         on:click={() => activeTab = 'recurring'}
       >
         반복 규칙
-        <span class="ml-2 px-2 py-0.5 text-xs rounded-full {activeTab === 'recurring' ? 'bg-blue-100 text-blue-600' : 'bg-muted text-muted-foreground'}">{recurringRules.length}</span>
+        <span class="ml-2 px-2 py-0.5 text-xs rounded-full {activeTab === 'recurring' ? 'bg-primary-light text-primary' : 'bg-muted text-muted-foreground'}">{recurringRules.length}</span>
       </button>
       <button
-        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'history' ? 'border-blue-500 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
+        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'history' ? 'border-blue-500 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
         on:click={() => activeTab = 'history'}
       >
         실행 내역
       </button>
       <button
-        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'businesses' ? 'border-blue-500 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
+        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'businesses' ? 'border-blue-500 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
         on:click={() => activeTab = 'businesses'}
       >
         업체 관리
@@ -956,7 +956,7 @@
       <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
     </div>
   {:else if error}
-    <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+    <div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">
       {error}
     </div>
   {:else if schedules.length === 0}
@@ -969,7 +969,7 @@
         <div class="text-sm text-muted-foreground">
           총 {schedules.length}개의 일정
           {#if selectedIds.size > 0}
-            <span class="ml-2 text-blue-600">({selectedIds.size}개 선택)</span>
+            <span class="ml-2 text-primary">({selectedIds.size}개 선택)</span>
           {/if}
         </div>
         {#if selectedIds.size > 0}
@@ -1013,7 +1013,7 @@
             {#each schedules as schedule (schedule.id)}
               {@const status = getStatusBadge(schedule.run_status, schedule.is_enabled)}
               {@const dateInfo = formatDate(schedule.date)}
-              <tr class="{!schedule.is_enabled ? 'opacity-60' : ''} {schedule.error_count > 0 ? 'bg-red-50' : ''} {selectedIds.has(schedule.id) ? 'bg-blue-50' : ''}">
+              <tr class="{!schedule.is_enabled ? 'opacity-60' : ''} {schedule.error_count > 0 ? 'bg-error-light' : ''} {selectedIds.has(schedule.id) ? 'bg-primary-light' : ''}">
                 <!-- 체크박스 -->
                 <td>
                   <input
@@ -1039,7 +1039,7 @@
                   </div>
                   <div class="text-xs text-muted-foreground mt-0.5">
                     {#if schedule.custom_interval}
-                      <span class="text-blue-600" title="수동 설정">{formatInterval(schedule.interval)}</span>
+                      <span class="text-primary" title="수동 설정">{formatInterval(schedule.interval)}</span>
                     {:else}
                       {formatInterval(schedule.interval)}
                     {/if}
@@ -1068,7 +1068,7 @@
                       title="예약 링크 복사"
                     >
                       {#if copiedId === schedule.id}
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3.5 h-3.5 text-green-600">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3.5 h-3.5 text-success">
                           <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" />
                         </svg>
                       {:else}
@@ -1119,9 +1119,9 @@
                   </div>
                   <div>
                     {#if schedule.run_status === 'running'}
-                      <span class="text-green-600 font-medium">실행 중</span>
+                      <span class="text-success font-medium">실행 중</span>
                     {:else if schedule.run_status === 'queued'}
-                      <span class="text-blue-600">다음: {getRemainingTime(schedule.next_run_time)}</span>
+                      <span class="text-primary">다음: {getRemainingTime(schedule.next_run_time)}</span>
                     {:else}
                       <span class="text-muted-foreground">-</span>
                     {/if}
@@ -1146,7 +1146,7 @@
                       {/if}
                     </button>
                     {#if schedule.booking_count > 0}
-                      <span class="text-green-600 font-medium text-xs">{schedule.booking_count}</span>
+                      <span class="text-success font-medium text-xs">{schedule.booking_count}</span>
                     {/if}
                   </div>
                 </td>
@@ -1203,7 +1203,7 @@
         <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
     {:else if recurringError}
-      <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+      <div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">
         {recurringError}
       </div>
     {:else if recurringRules.length === 0}
@@ -1241,7 +1241,7 @@
                       {rule.is_enabled ? '활성' : '비활성'}
                     </span>
                     {#if rule.auto_booking_enabled}
-                      <div class="text-xs text-green-600 mt-0.5">자동예약</div>
+                      <div class="text-xs text-success mt-0.5">자동예약</div>
                     {/if}
                   </td>
                   <!-- 규칙/업체 (이름+업체+아이템 병합) -->
@@ -1268,7 +1268,7 @@
                   <td class="hidden lg:table-cell text-xs whitespace-nowrap">
                     <div>
                       {#if rule.is_enabled && rule.next_trigger_at}
-                        <span class="text-blue-600 font-medium">다음: {formatNextTrigger(rule.next_trigger_at)}</span>
+                        <span class="text-primary font-medium">다음: {formatNextTrigger(rule.next_trigger_at)}</span>
                       {:else}
                         <span class="text-muted-foreground">다음: -</span>
                       {/if}
@@ -1452,13 +1452,13 @@
         <h3 class="text-lg font-semibold">일정 등록</h3>
         <div class="flex gap-2 mt-3">
           <button
-            class="px-3 py-1 text-sm rounded-md {createMode === 'select' ? 'bg-blue-600 text-white' : 'bg-secondary text-foreground'}"
+            class="px-3 py-1 text-sm rounded-md {createMode === 'select' ? 'bg-primary text-white' : 'bg-secondary text-foreground'}"
             on:click={() => createMode = 'select'}
           >
             업체/아이템 선택
           </button>
           <button
-            class="px-3 py-1 text-sm rounded-md {createMode === 'url' ? 'bg-blue-600 text-white' : 'bg-secondary text-foreground'}"
+            class="px-3 py-1 text-sm rounded-md {createMode === 'url' ? 'bg-primary text-white' : 'bg-secondary text-foreground'}"
             on:click={() => createMode = 'url'}
           >
             URL로 등록
@@ -1631,7 +1631,7 @@
 
       <form on:submit|preventDefault={createRecurringRule} class="p-4 space-y-4">
         {#if recurringCreateError}
-          <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+          <div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg text-sm">
             {recurringCreateError}
           </div>
         {/if}
@@ -1686,7 +1686,7 @@
             {/if}
           </div>
           {#if recurringUrlParsed && recurringParsedInfo.business_name}
-            <div class="mt-2 p-2 bg-green-50 border border-green-200 rounded text-sm text-green-700">
+            <div class="mt-2 p-2 bg-success-light border border-green-200 rounded text-sm text-success">
               ✓ {recurringParsedInfo.business_name} - {recurringParsedInfo.item_name}
             </div>
           {/if}
@@ -1862,7 +1862,7 @@
             {#each recurringRules as rule (rule.id)}
               <button
                 type="button"
-                class="w-full text-left p-3 border rounded-lg hover:bg-blue-50 hover:border-blue-300 transition-colors"
+                class="w-full text-left p-3 border rounded-lg hover:bg-primary-light hover:border-blue-300 transition-colors"
                 on:click={() => copyPatternFromRule(rule)}
               >
                 <div class="flex items-center justify-between">
@@ -1873,7 +1873,7 @@
                       {formatTargetPatterns(rule.target_patterns)}
                     </div>
                   </div>
-                  <span class="text-blue-600 text-sm">선택</span>
+                  <span class="text-primary text-sm">선택</span>
                 </div>
               </button>
             {/each}
@@ -1907,7 +1907,7 @@
 
       <form on:submit|preventDefault={handleUpdateRecurringRule} class="p-4 space-y-4">
         {#if recurringEditError}
-          <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+          <div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg text-sm">
             {recurringEditError}
           </div>
         {/if}

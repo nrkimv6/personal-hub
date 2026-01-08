@@ -167,13 +167,13 @@
 	function getScheduleStatusColor(status: string): string {
 		switch (status) {
 			case 'completed':
-				return 'bg-green-100 text-green-800';
+				return 'bg-success-light text-success';
 			case 'running':
-				return 'bg-blue-100 text-blue-800';
+				return 'bg-primary-light text-primary';
 			case 'pending':
-				return 'bg-yellow-100 text-yellow-800';
+				return 'bg-warning-light text-warning-foreground';
 			case 'missed':
-				return 'bg-red-100 text-red-800';
+				return 'bg-error-light text-error';
 			default:
 				return 'bg-muted text-foreground';
 		}
@@ -205,12 +205,12 @@
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 		</div>
 	{:else if error}
-		<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
+		<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg mb-4">
 			{error}
 		</div>
 	{:else}
 		{#if successMessage}
-			<div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-4">
+			<div class="bg-success-light border border-green-200 text-success px-4 py-3 rounded-lg mb-4">
 				{successMessage}
 			</div>
 		{/if}
@@ -259,11 +259,11 @@
 							</Button>
 						</div>
 						{#if !editAccountId}
-							<p class="text-xs text-amber-600 mt-1">
+							<p class="text-xs text-warning mt-1">
 								계정이 선택되지 않으면 크롤링이 실행되지 않습니다
 							</p>
 						{:else if selectedAccount && !selectedAccount.is_logged_in}
-							<p class="text-xs text-amber-600 mt-1">
+							<p class="text-xs text-warning mt-1">
 								선택한 계정으로 Instagram 로그인이 필요합니다
 							</p>
 						{/if}
@@ -275,7 +275,7 @@
 						<label class="relative inline-flex items-center cursor-pointer">
 							<input id="enabled" type="checkbox" bind:checked={editEnabled} class="sr-only peer" />
 							<div
-								class="w-11 h-6 bg-secondary peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"
+								class="w-11 h-6 bg-secondary peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"
 							></div>
 						</label>
 					</div>
@@ -315,14 +315,14 @@
 									/>
 									<button
 										onclick={() => removeTimeWindow(idx)}
-										class="text-red-500 hover:text-red-700 text-xl"
+										class="text-error hover:text-error text-xl"
 									>
 										&times;
 									</button>
 								</div>
 							{/each}
 						</div>
-						<button onclick={addTimeWindow} class="mt-2 text-sm text-blue-600 hover:text-blue-800">
+						<button onclick={addTimeWindow} class="mt-2 text-sm text-primary hover:text-primary-hover">
 							+ 시간대 추가
 						</button>
 						<p class="text-xs text-muted-foreground mt-1">각 시간대 내에서 랜덤한 시간에 수집합니다</p>
@@ -363,7 +363,7 @@
 						<button
 							type="button"
 							onclick={() => (showAdvanced = !showAdvanced)}
-							class="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1"
+							class="text-sm text-primary hover:text-primary-hover flex items-center gap-1"
 						>
 							{showAdvanced ? '▼' : '▶'} 고급 설정
 						</button>
@@ -466,8 +466,8 @@
 				</div>
 
 				{#if pendingRequests.length > 0}
-					<div class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-						<p class="text-sm text-yellow-800">대기 중인 요청: {pendingRequests.length}개</p>
+					<div class="mb-4 p-3 bg-warning-light border border-yellow-200 rounded-lg">
+						<p class="text-sm text-warning-foreground">대기 중인 요청: {pendingRequests.length}개</p>
 					</div>
 				{/if}
 
@@ -481,7 +481,7 @@
 							<div class="flex items-center justify-between p-3 bg-background rounded-lg">
 								<div class="flex items-center gap-3">
 									<span
-										class="w-8 h-8 flex items-center justify-center bg-blue-100 text-blue-800 rounded-full font-medium"
+										class="w-8 h-8 flex items-center justify-center bg-primary-light text-primary rounded-full font-medium"
 									>
 										{idx + 1}
 									</span>

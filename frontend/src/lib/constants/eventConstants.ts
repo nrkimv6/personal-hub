@@ -5,17 +5,17 @@
 // 이벤트 상태 옵션 (전체 포함)
 export const EVENT_STATUS_OPTIONS = [
 	{ value: '', label: '전체', color: 'bg-secondary text-foreground' },
-	{ value: 'ending_today', label: '오늘 마감', color: 'bg-orange-100 text-orange-700' },
-	{ value: 'ongoing', label: '진행 중', color: 'bg-green-100 text-green-700' },
-	{ value: 'upcoming', label: '예정', color: 'bg-blue-100 text-blue-700' },
+	{ value: 'ending_today', label: '오늘 마감', color: 'bg-warning-light text-warning' },
+	{ value: 'ongoing', label: '진행 중', color: 'bg-success-light text-success' },
+	{ value: 'upcoming', label: '예정', color: 'bg-primary-light text-primary' },
 	{ value: 'ended', label: '종료', color: 'bg-muted text-muted-foreground' },
-	{ value: 'cancelled', label: '취소됨', color: 'bg-red-100 text-red-600' }
+	{ value: 'cancelled', label: '취소됨', color: 'bg-error-light text-error' }
 ] as const;
 
 // 기간 미정 필터 옵션
 export const UNKNOWN_PERIOD_OPTIONS = [
 	{ value: 'exclude', label: '제외', color: 'bg-muted text-muted-foreground' },
-	{ value: 'include', label: '포함', color: 'bg-amber-100 text-amber-700' },
+	{ value: 'include', label: '포함', color: 'bg-warning-light text-amber-700' },
 	{ value: 'only', label: '만', color: 'bg-amber-200 text-amber-800' }
 ] as const;
 

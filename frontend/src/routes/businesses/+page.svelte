@@ -372,7 +372,7 @@
       <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
     </div>
   {:else if error}
-    <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+    <div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">
       {error}
     </div>
   {:else}
@@ -397,7 +397,7 @@
               <tbody>
                 {#each businesses as business (business.id)}
                   <tr
-                    class="cursor-pointer hover:bg-muted {selectedBusiness?.id === business.id ? 'bg-blue-50' : ''} {!business.is_enabled ? 'opacity-50' : ''}"
+                    class="cursor-pointer hover:bg-muted {selectedBusiness?.id === business.id ? 'bg-primary-light' : ''} {!business.is_enabled ? 'opacity-50' : ''}"
                     on:click={() => selectBusiness(business)}
                   >
                     <td>
@@ -477,7 +477,7 @@
               <tbody>
                 {#each selectedBusiness.items as item (item.id)}
                   <tr
-                    class="cursor-pointer hover:bg-muted {selectedItem?.id === item.id ? 'bg-blue-50' : ''} {!item.is_enabled ? 'opacity-50' : ''}"
+                    class="cursor-pointer hover:bg-muted {selectedItem?.id === item.id ? 'bg-primary-light' : ''} {!item.is_enabled ? 'opacity-50' : ''}"
                     on:click={() => selectItem(item)}
                   >
                     <td>
@@ -582,10 +582,10 @@
                 <div class="flex items-center gap-2">
                   <span class="badge {status.class}">{status.text}</span>
                   {#if schedule.booking_count > 0}
-                    <span class="text-xs text-green-600">예약:{schedule.booking_count}</span>
+                    <span class="text-xs text-success">예약:{schedule.booking_count}</span>
                   {/if}
                   <button
-                    class="text-red-500 hover:text-red-700 text-sm"
+                    class="text-error hover:text-error text-sm"
                     on:click={() => handleDeleteSchedule(schedule)}
                     title="삭제"
                   >
@@ -846,7 +846,7 @@
       <form on:submit|preventDefault={handleUrlImport} class="p-4 space-y-4">
         <div>
           <label for="import-url" class="block text-sm font-medium text-foreground mb-1">
-            URL <span class="text-red-500">*</span>
+            URL <span class="text-error">*</span>
           </label>
           <input
             id="import-url"
@@ -863,7 +863,7 @@
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label for="import-item-name" class="block text-sm font-medium text-foreground mb-1">
-              아이템명 <span class="text-red-500">*</span>
+              아이템명 <span class="text-error">*</span>
             </label>
             <input
               id="import-item-name"
@@ -920,11 +920,11 @@
         </div>
 
         {#if urlImportResult}
-          <div class="p-3 rounded-lg {urlImportResult.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}">
-            <p class="{urlImportResult.success ? 'text-green-800' : 'text-red-800'} font-medium">
+          <div class="p-3 rounded-lg {urlImportResult.success ? 'bg-success-light border border-green-200' : 'bg-error-light border border-red-200'}">
+            <p class="{urlImportResult.success ? 'text-success' : 'text-error'} font-medium">
               {urlImportResult.success ? '성공' : '실패'}
             </p>
-            <p class="text-sm mt-1 {urlImportResult.success ? 'text-green-600' : 'text-red-600'}">
+            <p class="text-sm mt-1 {urlImportResult.success ? 'text-success' : 'text-error'}">
               {urlImportResult.message}
             </p>
             {#if urlImportResult.parsed_info}

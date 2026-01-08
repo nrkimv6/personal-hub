@@ -10,11 +10,11 @@
   function getWorkerStatusColor(status: string) {
     switch (status) {
       case 'healthy':
-        return 'text-green-500';
+        return 'text-success';
       case 'warning':
-        return 'text-yellow-500';
+        return 'text-warning';
       case 'dead':
-        return 'text-red-500';
+        return 'text-error';
       default:
         return 'text-muted-foreground';
     }
@@ -36,11 +36,11 @@
   function getWorkerStatusBg(status: string) {
     switch (status) {
       case 'healthy':
-        return 'bg-green-100 dark:bg-green-900/30';
+        return 'bg-success-light dark:bg-green-900/30';
       case 'warning':
-        return 'bg-yellow-100 dark:bg-yellow-900/30';
+        return 'bg-warning-light dark:bg-yellow-900/30';
       case 'dead':
-        return 'bg-red-100 dark:bg-red-900/30';
+        return 'bg-error-light dark:bg-red-900/30';
       default:
         return 'bg-muted dark:bg-gray-800';
     }
@@ -77,7 +77,7 @@
       <!-- 오늘 수집 -->
       <div class="flex justify-between items-center">
         <span class="text-muted-foreground dark:text-muted-foreground">오늘 수집</span>
-        <span class="font-bold text-xl text-purple-600 dark:text-purple-400">{summary.today_collected}</span>
+        <span class="font-bold text-xl text-purple dark:text-purple-400">{summary.today_collected}</span>
       </div>
 
       <!-- 다음 실행 -->

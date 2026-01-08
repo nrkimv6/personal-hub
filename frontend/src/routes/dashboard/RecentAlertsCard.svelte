@@ -10,9 +10,9 @@
   function getAlertColor(type: string) {
     switch (type) {
       case 'recovery':
-        return 'text-green-500';
+        return 'text-success';
       case 'failure':
-        return 'text-red-500';
+        return 'text-error';
       default:
         return 'text-muted-foreground';
     }

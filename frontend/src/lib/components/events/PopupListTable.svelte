@@ -87,9 +87,9 @@
 				{#each popups as popup (popup.id)}
 					<tr
 						class="cursor-pointer transition-colors {isPopupEndingToday(popup)
-							? 'bg-orange-100 hover:bg-orange-200 font-semibold'
+							? 'bg-warning-light hover:bg-orange-200 font-semibold'
 							: isPopupUnknownPeriod(popup)
-								? 'bg-amber-50 hover:bg-amber-100'
+								? 'bg-warning-light hover:bg-warning-light'
 								: 'hover:bg-muted'}"
 						onclick={() => onPopupClick(popup)}
 					>
@@ -105,7 +105,7 @@
 						<td class="px-2 py-2 max-w-[100px]">
 							{#if popup.brand || popup.organizer}
 								<span
-									class="text-sm font-medium text-blue-600 truncate block"
+									class="text-sm font-medium text-primary truncate block"
 									title={popup.brand || popup.organizer}
 								>
 									{popup.brand || popup.organizer}
@@ -136,7 +136,7 @@
 										<span class="text-xs text-muted-foreground">{formatDate(popup.start_date)}</span>
 									{/if}
 									{#if isPopupEndingToday(popup)}
-										<span class="text-xs font-bold text-orange-600 bg-orange-50 px-1 rounded"
+										<span class="text-xs font-bold text-warning bg-warning-light px-1 rounded"
 											>오늘 마감!</span
 										>
 									{:else}
@@ -146,10 +146,10 @@
 							{:else if popup.start_date}
 								<div class="flex flex-col gap-0.5">
 									<span class="text-xs text-muted-foreground">{formatDate(popup.start_date)} ~</span>
-									<span class="text-xs text-amber-600 bg-amber-50 px-1 rounded">기간 미정</span>
+									<span class="text-xs text-warning bg-warning-light px-1 rounded">기간 미정</span>
 								</div>
 							{:else}
-								<span class="text-xs text-amber-600 bg-amber-50 px-1 rounded">기간 미정</span>
+								<span class="text-xs text-warning bg-warning-light px-1 rounded">기간 미정</span>
 							{/if}
 						</td>
 						<!-- 위치 -->
@@ -173,7 +173,7 @@
 						<td class="px-2 py-2 text-center">
 							<span
 								class="px-1.5 py-0.5 text-xs rounded {popup.source_type === 'instagram'
-									? 'bg-pink-100 text-pink-600'
+									? 'bg-pink-light text-pink'
 									: 'bg-muted text-muted-foreground'}"
 							>
 								{popup.source_type === 'instagram'
@@ -191,7 +191,7 @@
 										href={popup.official_url}
 										target="_blank"
 										rel="noopener noreferrer"
-										class="text-xs text-blue-600 hover:text-blue-800 hover:underline"
+										class="text-xs text-primary hover:text-primary-hover hover:underline"
 										title="공식 사이트"
 									>
 										공식
@@ -200,7 +200,7 @@
 								{#if popup.source_type === 'instagram' && (popup.source_instagram_url || popup.source_instagram_post_id)}
 									<button
 										onclick={(e) => openInstagramSource(popup, e)}
-										class="text-xs text-pink-600 hover:text-pink-800 hover:underline font-medium"
+										class="text-xs text-pink hover:text-pink hover:underline font-medium"
 										title="Instagram 원본"
 									>
 										IG
@@ -217,7 +217,7 @@
 								<button
 									onclick={(e) => onBookmarkToggle(popup, e)}
 									class="text-lg transition-colors {popup.is_bookmarked
-										? 'text-yellow-500'
+										? 'text-warning'
 										: 'text-gray-300 hover:text-yellow-400'}"
 									title={popup.is_bookmarked ? '북마크 해제' : '북마크'}
 								>
@@ -226,7 +226,7 @@
 								<button
 									onclick={(e) => onVisitedToggle(popup, e)}
 									class="px-1.5 py-0.5 text-xs rounded transition-colors {popup.is_visited
-										? 'bg-green-100 text-green-700'
+										? 'bg-success-light text-success'
 										: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 									title={popup.is_visited ? '방문 취소' : '방문 완료'}
 								>

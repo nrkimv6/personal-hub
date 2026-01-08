@@ -421,10 +421,10 @@
 
 	function getStatusColor(status: string): string {
 		switch (status) {
-			case 'pending': return 'bg-yellow-100 text-yellow-800';
-			case 'processing': return 'bg-blue-100 text-blue-800';
-			case 'completed': return 'bg-green-100 text-green-800';
-			case 'failed': return 'bg-red-100 text-red-800';
+			case 'pending': return 'bg-warning-light text-warning-foreground';
+			case 'processing': return 'bg-primary-light text-primary';
+			case 'completed': return 'bg-success-light text-success';
+			case 'failed': return 'bg-error-light text-error';
 			case 'cancelled': return 'bg-muted text-foreground';
 			default: return 'bg-muted text-foreground';
 		}
@@ -488,7 +488,7 @@
 			<!-- 워커 상태 -->
 			<div class="card p-4">
 				<div class="text-sm text-muted-foreground">워커 상태</div>
-				<div class="text-lg font-bold {workerStatus?.status === 'healthy' ? 'text-green-600' : workerStatus?.status === 'warning' ? 'text-yellow-600' : workerStatus?.status === 'no_worker' ? 'text-muted-foreground' : 'text-red-600'}">
+				<div class="text-lg font-bold {workerStatus?.status === 'healthy' ? 'text-success' : workerStatus?.status === 'warning' ? 'text-warning-foreground' : workerStatus?.status === 'no_worker' ? 'text-muted-foreground' : 'text-error'}">
 					{workerStatus?.status === 'healthy' ? '정상' : workerStatus?.status === 'warning' ? '지연' : workerStatus?.status === 'no_worker' ? '없음' : '비정상'}
 				</div>
 				{#if workerStatus?.state}
@@ -505,21 +505,21 @@
 					<div class="text-sm text-muted-foreground">전체</div>
 					<div class="text-2xl font-bold text-foreground">{stats.total}</div>
 				</div>
-				<div class="card p-4 cursor-pointer hover:bg-yellow-50" onclick={() => switchTab('queue')}>
+				<div class="card p-4 cursor-pointer hover:bg-warning-light" onclick={() => switchTab('queue')}>
 					<div class="text-sm text-muted-foreground">대기중</div>
-					<div class="text-2xl font-bold text-yellow-600">{stats.pending}</div>
+					<div class="text-2xl font-bold text-warning-foreground">{stats.pending}</div>
 				</div>
-				<div class="card p-4 cursor-pointer hover:bg-blue-50" onclick={() => switchTab('queue')}>
+				<div class="card p-4 cursor-pointer hover:bg-primary-light" onclick={() => switchTab('queue')}>
 					<div class="text-sm text-muted-foreground">처리중</div>
-					<div class="text-2xl font-bold text-blue-600">{stats.processing}</div>
+					<div class="text-2xl font-bold text-primary">{stats.processing}</div>
 				</div>
-				<div class="card p-4 cursor-pointer hover:bg-green-50" onclick={() => switchTab('history')}>
+				<div class="card p-4 cursor-pointer hover:bg-success-light" onclick={() => switchTab('history')}>
 					<div class="text-sm text-muted-foreground">완료</div>
-					<div class="text-2xl font-bold text-green-600">{stats.completed}</div>
+					<div class="text-2xl font-bold text-success">{stats.completed}</div>
 				</div>
-				<div class="card p-4 cursor-pointer hover:bg-red-50" onclick={() => switchTab('history')}>
+				<div class="card p-4 cursor-pointer hover:bg-error-light" onclick={() => switchTab('history')}>
 					<div class="text-sm text-muted-foreground">실패</div>
-					<div class="text-2xl font-bold text-red-600">{stats.failed}</div>
+					<div class="text-2xl font-bold text-error">{stats.failed}</div>
 				</div>
 			{/if}
 		</div>
@@ -530,25 +530,25 @@
 		<nav class="flex gap-4">
 			<button
 				onclick={() => switchTab('queue')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'queue' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'queue' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				대기열 (pending/processing)
 			</button>
 			<button
 				onclick={() => switchTab('history')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'history' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'history' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				이력 (completed/failed)
 			</button>
 			<button
 				onclick={() => switchTab('create')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'create' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'create' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				수동 요청 생성
 			</button>
 			<button
 				onclick={() => switchTab('performance')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'performance' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'performance' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				성능 분석
 			</button>
@@ -616,12 +616,12 @@
 					<span class="font-bold text-foreground">{groupedResponse.summary.total_callers}</span>
 				</div>
 				<div class="text-sm">
-					<span class="text-green-600">성공 있음:</span>
-					<span class="font-bold text-green-700">{groupedResponse.summary.callers_with_success}</span>
+					<span class="text-success">성공 있음:</span>
+					<span class="font-bold text-success">{groupedResponse.summary.callers_with_success}</span>
 				</div>
 				<div class="text-sm">
-					<span class="text-red-600">성공 없음:</span>
-					<span class="font-bold text-red-700">{groupedResponse.summary.callers_without_success}</span>
+					<span class="text-error">성공 없음:</span>
+					<span class="font-bold text-error">{groupedResponse.summary.callers_without_success}</span>
 				</div>
 				<div class="ml-auto flex gap-2">
 					{#if selectedGroupKeys.length > 0}
@@ -655,7 +655,7 @@
 				<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 			</div>
 		{:else if error}
-			<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">{error}</div>
+			<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">{error}</div>
 		{:else if activeTab === 'history' && viewMode === 'grouped'}
 			<!-- 그룹 뷰 테이블 -->
 			{#if callerGroups.length === 0}
@@ -689,7 +689,7 @@
 						</thead>
 						<tbody class="divide-y divide-border">
 							{#each callerGroups as group}
-								<tr class="hover:bg-muted {group.has_success ? '' : 'bg-red-50'}">
+								<tr class="hover:bg-muted {group.has_success ? '' : 'bg-error-light'}">
 									<td class="px-4 py-3">
 										<input
 											type="checkbox"
@@ -704,14 +704,14 @@
 										{truncatePrompt(group.prompt)}
 									</td>
 									<td class="px-4 py-3 text-sm text-foreground font-bold">{group.total_count}</td>
-									<td class="px-4 py-3 text-sm text-green-600 font-bold">{group.completed_count}</td>
-									<td class="px-4 py-3 text-sm text-red-600 font-bold">{group.failed_count}</td>
-									<td class="px-4 py-3 text-sm text-yellow-600">{group.pending_count}</td>
+									<td class="px-4 py-3 text-sm text-success font-bold">{group.completed_count}</td>
+									<td class="px-4 py-3 text-sm text-error font-bold">{group.failed_count}</td>
+									<td class="px-4 py-3 text-sm text-warning-foreground">{group.pending_count}</td>
 									<td class="px-4 py-3">
 										{#if group.has_success}
-											<span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">있음</span>
+											<span class="px-2 py-1 text-xs rounded-full bg-success-light text-success">있음</span>
 										{:else}
-											<span class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800">없음</span>
+											<span class="px-2 py-1 text-xs rounded-full bg-error-light text-error">없음</span>
 										{/if}
 									</td>
 									<td class="px-4 py-3">
@@ -808,7 +808,7 @@
 										{#if request.status === 'pending'}
 											<button
 												onclick={() => cancelRequest(request.id)}
-												class="text-yellow-600 hover:text-yellow-800 text-sm"
+												class="text-warning-foreground hover:text-warning-foreground text-sm"
 											>
 												취소
 											</button>
@@ -816,14 +816,14 @@
 										{#if request.status === 'failed' || request.status === 'completed'}
 											<button
 												onclick={() => retryRequest(request.id)}
-												class="text-blue-600 hover:text-blue-800 text-sm"
+												class="text-primary hover:text-primary-hover text-sm"
 											>
 												{request.status === 'completed' ? '재분석' : '재시도'}
 											</button>
 										{/if}
 										<button
 											onclick={() => deleteRequest(request.id)}
-											class="text-red-600 hover:text-red-800 text-sm"
+											class="text-error hover:text-error text-sm"
 										>
 											삭제
 										</button>
@@ -873,15 +873,15 @@
 					</div>
 					<div class="card p-4">
 						<div class="text-sm text-muted-foreground">성공률</div>
-						<div class="text-2xl font-bold text-green-600">{historyStats.summary.success_rate}%</div>
+						<div class="text-2xl font-bold text-success">{historyStats.summary.success_rate}%</div>
 					</div>
 					<div class="card p-4">
 						<div class="text-sm text-muted-foreground">완료</div>
-						<div class="text-2xl font-bold text-green-600">{historyStats.summary.completed}</div>
+						<div class="text-2xl font-bold text-success">{historyStats.summary.completed}</div>
 					</div>
 					<div class="card p-4">
 						<div class="text-sm text-muted-foreground">평균 처리 시간</div>
-						<div class="text-2xl font-bold text-blue-600">{historyStats.summary.avg_processing_time_seconds}s</div>
+						<div class="text-2xl font-bold text-primary">{historyStats.summary.avg_processing_time_seconds}s</div>
 					</div>
 				</div>
 			</div>
@@ -894,13 +894,13 @@
 				<p class="text-sm text-muted-foreground mb-6">테스트 또는 디버깅 목적으로 수동으로 LLM 요청을 생성합니다.</p>
 
 				{#if createSuccess}
-					<div class="mb-4 p-4 bg-green-50 border border-green-200 text-green-700 rounded-lg">
+					<div class="mb-4 p-4 bg-success-light border border-green-200 text-success rounded-lg">
 						요청이 성공적으로 생성되었습니다. 대기열 탭으로 이동합니다...
 					</div>
 				{/if}
 
 				{#if createError}
-					<div class="mb-4 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
+					<div class="mb-4 p-4 bg-error-light border border-red-200 text-error rounded-lg">
 						{createError}
 					</div>
 				{/if}
@@ -1028,9 +1028,9 @@
 				</div>
 
 				{#if selectedRequest.error_message}
-					<div class="mb-4 p-3 bg-red-50 rounded-lg">
-						<div class="text-sm font-medium text-red-800 mb-1">에러 메시지</div>
-						<p class="text-sm text-red-700 whitespace-pre-wrap">{selectedRequest.error_message}</p>
+					<div class="mb-4 p-3 bg-error-light rounded-lg">
+						<div class="text-sm font-medium text-error mb-1">에러 메시지</div>
+						<p class="text-sm text-error whitespace-pre-wrap">{selectedRequest.error_message}</p>
 					</div>
 				{/if}
 

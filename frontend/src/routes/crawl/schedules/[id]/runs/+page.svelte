@@ -88,11 +88,11 @@
 	function getStatusBadge(status: string): { class: string; text: string } {
 		switch (status) {
 			case 'running':
-				return { class: 'bg-blue-100 text-blue-800', text: '실행중' };
+				return { class: 'bg-primary-light text-primary', text: '실행중' };
 			case 'completed':
-				return { class: 'bg-green-100 text-green-800', text: '완료' };
+				return { class: 'bg-success-light text-success', text: '완료' };
 			case 'failed':
-				return { class: 'bg-red-100 text-red-800', text: '실패' };
+				return { class: 'bg-error-light text-error', text: '실패' };
 			default:
 				return { class: 'bg-muted text-foreground', text: status };
 		}
@@ -140,19 +140,19 @@
 				<p class="text-sm text-muted-foreground">전체 실행</p>
 			</div>
 			<div class="card text-center">
-				<p class="text-2xl font-bold text-green-600">{stats.completed_runs}</p>
+				<p class="text-2xl font-bold text-success">{stats.completed_runs}</p>
 				<p class="text-sm text-muted-foreground">완료</p>
 			</div>
 			<div class="card text-center">
-				<p class="text-2xl font-bold text-red-600">{stats.failed_runs}</p>
+				<p class="text-2xl font-bold text-error">{stats.failed_runs}</p>
 				<p class="text-sm text-muted-foreground">실패</p>
 			</div>
 			<div class="card text-center">
-				<p class="text-2xl font-bold text-blue-600">{stats.success_rate.toFixed(1)}%</p>
+				<p class="text-2xl font-bold text-primary">{stats.success_rate.toFixed(1)}%</p>
 				<p class="text-sm text-muted-foreground">성공률</p>
 			</div>
 			<div class="card text-center">
-				<p class="text-2xl font-bold text-purple-600">{stats.total_saved}</p>
+				<p class="text-2xl font-bold text-purple">{stats.total_saved}</p>
 				<p class="text-sm text-muted-foreground">총 저장</p>
 			</div>
 		</div>
@@ -184,7 +184,7 @@
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 		</div>
 	{:else if error}
-		<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+		<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">
 			{error}
 		</div>
 	{:else if !runs || runs.length === 0}
@@ -217,7 +217,7 @@
 									{badge.text}
 								</span>
 								{#if run.error_message}
-									<span class="ml-2 text-xs text-red-500" title={run.error_message}>
+									<span class="ml-2 text-xs text-error" title={run.error_message}>
 										{run.error_message.substring(0, 25)}...
 									</span>
 								{/if}
@@ -225,7 +225,7 @@
 							<td class="px-4 py-3 text-sm text-foreground text-right">
 								{run.collected_count}
 							</td>
-							<td class="px-4 py-3 text-sm text-blue-600 text-right font-medium">
+							<td class="px-4 py-3 text-sm text-primary text-right font-medium">
 								{run.saved_count}
 							</td>
 							<td class="px-4 py-3 text-sm text-muted-foreground">

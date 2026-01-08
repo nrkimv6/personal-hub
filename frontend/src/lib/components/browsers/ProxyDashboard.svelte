@@ -61,9 +61,9 @@
 
   function getStatusBadgeClass(status: string): string {
     const classes: Record<string, string> = {
-      running: 'bg-blue-100 text-blue-800',
-      completed: 'bg-green-100 text-green-800',
-      failed: 'bg-red-100 text-red-800',
+      running: 'bg-primary-light text-primary',
+      completed: 'bg-success-light text-success',
+      failed: 'bg-error-light text-error',
       cancelled: 'bg-muted text-foreground'
     };
     return classes[status] || 'bg-muted text-foreground';
@@ -76,7 +76,7 @@
     <span class="ml-3 text-muted-foreground">로딩 중...</span>
   </div>
 {:else if error}
-  <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+  <div class="bg-error-light border border-red-200 rounded-lg p-4 text-error">
     {error}
     <button onclick={loadData} class="ml-2 underline hover:no-underline">다시 시도</button>
   </div>
@@ -89,19 +89,19 @@
     </div>
     <div class="bg-white rounded-lg shadow p-4">
       <div class="text-sm text-muted-foreground">활성 프록시</div>
-      <div class="text-2xl font-bold text-green-600">{stats.active.toLocaleString()}</div>
+      <div class="text-2xl font-bold text-success">{stats.active.toLocaleString()}</div>
     </div>
     <div class="bg-white rounded-lg shadow p-4">
       <div class="text-sm text-muted-foreground">평균 응답시간</div>
-      <div class="text-2xl font-bold text-blue-600">{formatTime(stats.avg_response_time)}</div>
+      <div class="text-2xl font-bold text-primary">{formatTime(stats.avg_response_time)}</div>
     </div>
     <div class="bg-white rounded-lg shadow p-4">
       <div class="text-sm text-muted-foreground">전체 성공률</div>
-      <div class="text-2xl font-bold text-purple-600">{formatPercent(stats.overall_success_rate)}</div>
+      <div class="text-2xl font-bold text-purple">{formatPercent(stats.overall_success_rate)}</div>
     </div>
     <div class="bg-white rounded-lg shadow p-4">
       <div class="text-sm text-muted-foreground">오늘 검증</div>
-      <div class="text-2xl font-bold text-orange-600">{stats.today_checks.toLocaleString()}</div>
+      <div class="text-2xl font-bold text-warning">{stats.today_checks.toLocaleString()}</div>
     </div>
   </div>
 
@@ -113,7 +113,7 @@
       <div class="space-y-3">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
-            <span class="w-3 h-3 rounded-full bg-green-500"></span>
+            <span class="w-3 h-3 rounded-full bg-success"></span>
             <span class="text-foreground">Active</span>
           </div>
           <div class="flex items-center gap-2">
@@ -125,7 +125,7 @@
         </div>
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
-            <span class="w-3 h-3 rounded-full bg-yellow-500"></span>
+            <span class="w-3 h-3 rounded-full bg-warning"></span>
             <span class="text-foreground">Pending</span>
           </div>
           <div class="flex items-center gap-2">
@@ -149,7 +149,7 @@
         </div>
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
-            <span class="w-3 h-3 rounded-full bg-red-500"></span>
+            <span class="w-3 h-3 rounded-full bg-error"></span>
             <span class="text-foreground">Blacklisted</span>
           </div>
           <div class="flex items-center gap-2">
@@ -205,7 +205,7 @@
             {#each topProxies as proxy}
               <tr class="hover:bg-muted">
                 <td class="px-4 py-2">
-                  <a href="/proxy/{proxy.id}" class="text-blue-600 hover:underline text-sm font-mono">
+                  <a href="/proxy/{proxy.id}" class="text-primary hover:underline text-sm font-mono">
                     {proxy.host}:{proxy.port}
                   </a>
                 </td>

@@ -173,7 +173,7 @@
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 		</div>
 	{:else if error}
-		<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">{error}</div>
+		<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">{error}</div>
 	{:else if stats}
 		<!-- 요약 카드 -->
 		<div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-6">
@@ -182,12 +182,12 @@
 				<div class="text-sm text-muted-foreground">워커 상태</div>
 				<div
 					class="text-lg font-bold {workerStatus?.status === 'healthy'
-						? 'text-green-600'
+						? 'text-success'
 						: workerStatus?.status === 'warning'
-							? 'text-yellow-600'
+							? 'text-warning-foreground'
 							: workerStatus?.status === 'no_worker'
 								? 'text-muted-foreground'
-								: 'text-red-600'}"
+								: 'text-error'}"
 				>
 					{workerStatus?.status === 'healthy'
 						? '정상'
@@ -215,13 +215,13 @@
 			<!-- 실패 -->
 			<div class="card p-4">
 				<div class="text-sm text-muted-foreground">실패</div>
-				<div class="text-2xl font-bold text-red-600">{stats.llm_stats.failed_count}</div>
+				<div class="text-2xl font-bold text-error">{stats.llm_stats.failed_count}</div>
 			</div>
 
 			<!-- 평균 처리 시간 -->
 			<div class="card p-4">
 				<div class="text-sm text-muted-foreground">평균 처리 시간</div>
-				<div class="text-2xl font-bold text-blue-600">
+				<div class="text-2xl font-bold text-primary">
 					{formatTime(stats.llm_stats.avg_processing_time)}
 				</div>
 			</div>
@@ -229,13 +229,13 @@
 			<!-- P50 -->
 			<div class="card p-4">
 				<div class="text-sm text-muted-foreground">P50</div>
-				<div class="text-2xl font-bold text-green-600">{formatTime(stats.llm_stats.p50)}</div>
+				<div class="text-2xl font-bold text-success">{formatTime(stats.llm_stats.p50)}</div>
 			</div>
 
 			<!-- P95 -->
 			<div class="card p-4">
 				<div class="text-sm text-muted-foreground">P95</div>
-				<div class="text-2xl font-bold text-orange-600">{formatTime(stats.llm_stats.p95)}</div>
+				<div class="text-2xl font-bold text-warning">{formatTime(stats.llm_stats.p95)}</div>
 			</div>
 		</div>
 
@@ -249,7 +249,7 @@
 				</div>
 				<div class="flex-1 h-2 bg-secondary rounded-full relative">
 					<div
-						class="absolute inset-y-0 left-0 bg-blue-500 rounded-full"
+						class="absolute inset-y-0 left-0 bg-primary rounded-full"
 						style="width: {stats.llm_stats.max_time > 0
 							? (stats.llm_stats.avg_processing_time / stats.llm_stats.max_time) * 100
 							: 0}%"
@@ -300,8 +300,8 @@
 									<td class="px-4 py-3">
 										<span
 											class="px-2 py-1 text-xs rounded-full {req.processing_time > 60
-												? 'bg-red-100 text-red-800'
-												: 'bg-yellow-100 text-yellow-800'}"
+												? 'bg-error-light text-error'
+												: 'bg-warning-light text-warning-foreground'}"
 										>
 											{formatTime(req.processing_time)}
 										</span>

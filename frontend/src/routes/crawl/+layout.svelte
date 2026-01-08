@@ -10,7 +10,7 @@
 				<a
 					href="/crawl/requests"
 					class="inline-flex items-center px-1 border-b-2 text-sm font-medium {$page.url.pathname.startsWith('/crawl/requests')
-						? 'border-blue-500 text-blue-600'
+						? 'border-blue-500 text-primary'
 						: 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
 				>
 					단건 요청
@@ -18,7 +18,7 @@
 				<a
 					href="/crawl/schedules"
 					class="inline-flex items-center px-1 border-b-2 text-sm font-medium {$page.url.pathname.startsWith('/crawl/schedules')
-						? 'border-blue-500 text-blue-600'
+						? 'border-blue-500 text-primary'
 						: 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
 				>
 					스케줄

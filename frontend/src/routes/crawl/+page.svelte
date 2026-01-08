@@ -113,13 +113,13 @@
 	function getStatusBadge(status: string) {
 		switch (status) {
 			case 'pending':
-				return 'bg-yellow-100 text-yellow-800';
+				return 'bg-warning-light text-warning-foreground';
 			case 'processing':
-				return 'bg-blue-100 text-blue-800';
+				return 'bg-primary-light text-primary';
 			case 'completed':
-				return 'bg-green-100 text-green-800';
+				return 'bg-success-light text-success';
 			case 'failed':
-				return 'bg-red-100 text-red-800';
+				return 'bg-error-light text-error';
 			default:
 				return 'bg-muted text-foreground';
 		}
@@ -143,9 +143,9 @@
 	function getUrlTypeBadge(urlType: string) {
 		switch (urlType) {
 			case 'google_form':
-				return 'bg-blue-100 text-blue-700';
+				return 'bg-primary-light text-primary';
 			case 'naver_form':
-				return 'bg-green-100 text-green-700';
+				return 'bg-success-light text-success';
 			case 'naver_blog':
 				return 'bg-emerald-100 text-emerald-700';
 			default:
@@ -159,9 +159,9 @@
 			return { text: '미분석', badge: 'bg-muted text-muted-foreground' };
 		}
 		if (req.crawled_page.is_event) {
-			return { text: '이벤트', badge: 'bg-purple-100 text-purple-700' };
+			return { text: '이벤트', badge: 'bg-purple-light text-purple' };
 		}
-		return { text: '미분류', badge: 'bg-yellow-100 text-yellow-700' };
+		return { text: '미분류', badge: 'bg-warning-light text-warning-foreground' };
 	}
 
 	function formatDate(dateStr: string) {
@@ -221,31 +221,31 @@
 			onclick={() => handleStatusFilter('pending')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'pending'
 				? 'bg-yellow-600 text-white'
-				: 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'}"
+				: 'bg-warning-light text-warning-foreground hover:bg-yellow-200'}"
 		>
 			대기
 		</button>
 		<button
 			onclick={() => handleStatusFilter('processing')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'processing'
-				? 'bg-blue-600 text-white'
-				: 'bg-blue-100 text-blue-700 hover:bg-blue-200'}"
+				? 'bg-primary text-white'
+				: 'bg-primary-light text-primary hover:bg-blue-200'}"
 		>
 			처리 중
 		</button>
 		<button
 			onclick={() => handleStatusFilter('completed')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'completed'
-				? 'bg-green-600 text-white'
-				: 'bg-green-100 text-green-700 hover:bg-green-200'}"
+				? 'bg-success text-white'
+				: 'bg-success-light text-success hover:bg-green-200'}"
 		>
 			완료
 		</button>
 		<button
 			onclick={() => handleStatusFilter('failed')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'failed'
-				? 'bg-red-600 text-white'
-				: 'bg-red-100 text-red-700 hover:bg-red-200'}"
+				? 'bg-error text-white'
+				: 'bg-error-light text-error hover:bg-red-200'}"
 		>
 			실패
 		</button>
@@ -257,7 +257,7 @@
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 		</div>
 	{:else if error}
-		<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+		<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">
 			{error}
 		</div>
 	{:else if requests.length === 0}
@@ -299,7 +299,7 @@
 									e.stopPropagation();
 									handleRetry(req.id);
 								}}
-								class="text-blue-600 hover:underline"
+								class="text-primary hover:underline"
 							>
 								재시도
 							</button>
@@ -360,7 +360,7 @@
 											e.stopPropagation();
 											handleRetry(req.id);
 										}}
-										class="text-sm text-blue-600 hover:underline"
+										class="text-sm text-primary hover:underline"
 									>
 										재시도
 									</button>
@@ -430,7 +430,7 @@
 						type="url"
 						bind:value={newUrl}
 						placeholder="https://forms.gle/... 또는 https://blog.naver.com/..."
-						class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+						class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 						onkeydown={(e) => e.key === 'Enter' && handleAddRequest()}
 					/>
 					<p class="mt-1 text-xs text-muted-foreground">
@@ -489,7 +489,7 @@
 						<div class="flex">
 							<dt class="w-24 text-muted-foreground">URL</dt>
 							<dd class="flex-1 break-all">
-								<a href={selectedRequest.url} target="_blank" class="text-blue-600 hover:underline">
+								<a href={selectedRequest.url} target="_blank" class="text-primary hover:underline">
 									{selectedRequest.url}
 								</a>
 							</dd>
@@ -511,7 +511,7 @@
 						{#if selectedRequest.error_message}
 							<div class="flex">
 								<dt class="w-24 text-muted-foreground">오류</dt>
-								<dd class="text-red-600">{selectedRequest.error_message}</dd>
+								<dd class="text-error">{selectedRequest.error_message}</dd>
 							</div>
 						{/if}
 					</dl>
@@ -523,7 +523,7 @@
 						<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
 					</div>
 				{:else if selectedPage}
-					<div class="bg-blue-50 rounded-lg p-4">
+					<div class="bg-primary-light rounded-lg p-4">
 						<h4 class="text-sm font-medium text-foreground mb-2">크롤링 결과</h4>
 						<dl class="space-y-2 text-sm">
 							{#if selectedPage.title}

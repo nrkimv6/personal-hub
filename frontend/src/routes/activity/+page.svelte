@@ -171,14 +171,14 @@
 	function getStatusBadge(status: string): { bg: string; text: string; label: string } {
 		switch (status) {
 			case 'pending':
-				return { bg: 'bg-yellow-100', text: 'text-yellow-700', label: '대기' };
+				return { bg: 'bg-warning-light', text: 'text-warning-foreground', label: '대기' };
 			case 'picked':
 			case 'processing':
-				return { bg: 'bg-blue-100', text: 'text-blue-700', label: '처리중' };
+				return { bg: 'bg-primary-light', text: 'text-primary', label: '처리중' };
 			case 'completed':
-				return { bg: 'bg-green-100', text: 'text-green-700', label: '완료' };
+				return { bg: 'bg-success-light', text: 'text-success', label: '완료' };
 			case 'failed':
-				return { bg: 'bg-red-100', text: 'text-red-700', label: '실패' };
+				return { bg: 'bg-error-light', text: 'text-error', label: '실패' };
 			default:
 				return { bg: 'bg-muted', text: 'text-foreground', label: status };
 		}
@@ -248,7 +248,7 @@
 	<h1 class="mb-4 text-2xl font-bold">문화/체육센터 강좌</h1>
 
 	{#if error}
-		<div class="mb-4 rounded-lg bg-red-100 p-4 text-red-700">{error}</div>
+		<div class="mb-4 rounded-lg bg-error-light p-4 text-error">{error}</div>
 	{/if}
 
 	<!-- 탭 네비게이션 -->
@@ -257,7 +257,7 @@
 			<button
 				onclick={() => handleTabChange('centers')}
 				class="border-b-2 px-1 py-2 text-sm font-medium {activeTab === 'centers'
-					? 'border-blue-500 text-blue-600'
+					? 'border-blue-500 text-primary'
 					: 'border-transparent text-muted-foreground hover:border-border hover:text-foreground'}"
 			>
 				센터 관리
@@ -265,7 +265,7 @@
 			<button
 				onclick={() => handleTabChange('courses')}
 				class="border-b-2 px-1 py-2 text-sm font-medium {activeTab === 'courses'
-					? 'border-blue-500 text-blue-600'
+					? 'border-blue-500 text-primary'
 					: 'border-transparent text-muted-foreground hover:border-border hover:text-foreground'}"
 			>
 				강좌 목록 ({courseTotal || '...'})
@@ -287,7 +287,7 @@
 						<div class="flex items-center justify-between">
 							<span class="text-muted-foreground">상태</span>
 							{#if workerStatus.is_running}
-								<span class="rounded bg-green-100 px-2 py-1 text-sm text-green-700">실행 중</span>
+								<span class="rounded bg-success-light px-2 py-1 text-sm text-success">실행 중</span>
 							{:else}
 								<span class="rounded bg-muted px-2 py-1 text-sm text-muted-foreground">대기</span>
 							{/if}
@@ -384,7 +384,7 @@
 									<td class="py-2 text-muted-foreground">{formatDate(center.last_crawled_at)}</td>
 									<td class="py-2">
 										{#if center.is_active}
-											<span class="rounded bg-green-100 px-2 py-0.5 text-green-700">활성</span>
+											<span class="rounded bg-success-light px-2 py-0.5 text-success">활성</span>
 										{:else}
 											<span class="rounded bg-muted px-2 py-0.5 text-muted-foreground">비활성</span>
 										{/if}
@@ -393,7 +393,7 @@
 										<button
 											onclick={() => requestCrawl(center.id)}
 											disabled={!center.is_active}
-											class="rounded bg-blue-500 px-3 py-1 text-white hover:bg-blue-600 disabled:opacity-50"
+											class="rounded bg-primary px-3 py-1 text-white hover:bg-primary-hover disabled:opacity-50"
 										>
 											크롤링
 										</button>
@@ -431,7 +431,7 @@
 					<option value="hobby">취미/교양</option>
 					<option value="other">기타</option>
 				</select>
-				<button onclick={searchCourses} class="rounded bg-blue-500 px-4 py-2 text-sm text-white hover:bg-blue-600">
+				<button onclick={searchCourses} class="rounded bg-primary px-4 py-2 text-sm text-white hover:bg-primary-hover">
 					검색
 				</button>
 			</div>
@@ -463,7 +463,7 @@
 											<a
 												href={course.source_url}
 												target="_blank"
-												class="text-blue-600 hover:underline"
+												class="text-primary hover:underline"
 											>
 												{course.name}
 											</a>

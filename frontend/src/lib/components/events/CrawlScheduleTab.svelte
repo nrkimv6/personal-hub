@@ -134,10 +134,10 @@
 
 	function getStatusBadge(status: string) {
 		switch (status) {
-			case 'pending': return 'bg-yellow-100 text-yellow-800';
-			case 'running': return 'bg-blue-100 text-blue-800';
-			case 'completed': return 'bg-green-100 text-green-800';
-			case 'failed': return 'bg-red-100 text-red-800';
+			case 'pending': return 'bg-warning-light text-warning-foreground';
+			case 'running': return 'bg-primary-light text-primary';
+			case 'completed': return 'bg-success-light text-success';
+			case 'failed': return 'bg-error-light text-error';
 			default: return 'bg-muted text-foreground';
 		}
 	}
@@ -193,7 +193,7 @@
 		<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 	</div>
 {:else if error}
-	<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+	<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">
 		{error}
 	</div>
 {:else if !schedules || schedules.length === 0}
@@ -210,7 +210,7 @@
 					<h3 class="font-semibold text-foreground truncate flex-1">
 						{schedule.display_name || schedule.name}
 					</h3>
-					<span class="px-2 py-0.5 text-xs rounded-full {schedule.enabled ? 'bg-green-100 text-green-800' : 'bg-muted text-muted-foreground'}">
+					<span class="px-2 py-0.5 text-xs rounded-full {schedule.enabled ? 'bg-success-light text-success' : 'bg-muted text-muted-foreground'}">
 						{schedule.enabled ? '활성' : '비활성'}
 					</span>
 				</div>
@@ -225,8 +225,8 @@
 					{#if stats}
 						<p class="text-xs">
 							7일: {stats.total_runs}회,
-							<span class="text-green-600">{stats.success_rate.toFixed(0)}%</span> 성공,
-							<span class="text-blue-600">{stats.total_saved}</span>건
+							<span class="text-success">{stats.success_rate.toFixed(0)}%</span> 성공,
+							<span class="text-primary">{stats.total_saved}</span>건
 						</p>
 					{/if}
 				</div>
@@ -278,7 +278,7 @@
 							{getScheduleTypeLabel(schedule.schedule_type)}
 						</td>
 						<td class="py-3">
-							<span class="px-2 py-1 text-xs rounded-full {schedule.enabled ? 'bg-green-100 text-green-800' : 'bg-muted text-muted-foreground'}">
+							<span class="px-2 py-1 text-xs rounded-full {schedule.enabled ? 'bg-success-light text-success' : 'bg-muted text-muted-foreground'}">
 								{schedule.enabled ? '활성' : '비활성'}
 							</span>
 						</td>
@@ -288,8 +288,8 @@
 						<td class="py-3 text-sm">
 							{#if stats}
 								<span class="text-muted-foreground">{stats.total_runs}회</span>
-								<span class="text-green-600 ml-1">{stats.success_rate.toFixed(0)}%</span>
-								<span class="text-blue-600 ml-1">{stats.total_saved}건</span>
+								<span class="text-success ml-1">{stats.success_rate.toFixed(0)}%</span>
+								<span class="text-primary ml-1">{stats.total_saved}건</span>
 							{:else}
 								<span class="text-muted-foreground">-</span>
 							{/if}
@@ -298,14 +298,14 @@
 							<div class="flex gap-2">
 								<button
 									onclick={() => openRunsModal(schedule)}
-									class="text-sm text-blue-600 hover:underline"
+									class="text-sm text-primary hover:underline"
 								>
 									실행 이력
 								</button>
 								{#if $isAdmin}
 									<button
 										onclick={() => handleToggle(schedule.id, !schedule.enabled)}
-										class="text-sm {schedule.enabled ? 'text-red-600' : 'text-green-600'} hover:underline"
+										class="text-sm {schedule.enabled ? 'text-error' : 'text-success'} hover:underline"
 									>
 										{schedule.enabled ? '비활성화' : '활성화'}
 									</button>
@@ -353,7 +353,7 @@
 			{:else}
 				<div class="space-y-2">
 					{#each runs as run}
-						<div class="border rounded-lg p-3 {run.status === 'failed' ? 'border-red-200 bg-red-50' : ''}">
+						<div class="border rounded-lg p-3 {run.status === 'failed' ? 'border-red-200 bg-error-light' : ''}">
 							<div class="flex items-center justify-between">
 								<div class="flex items-center gap-2">
 									<span class="px-2 py-0.5 text-xs rounded-full {getStatusBadge(run.status)}">
@@ -363,11 +363,11 @@
 								</div>
 								<div class="text-sm">
 									<span class="text-muted-foreground">발견: {run.items_found}</span>
-									<span class="text-blue-600 ml-2">저장: {run.items_saved}</span>
+									<span class="text-primary ml-2">저장: {run.items_saved}</span>
 								</div>
 							</div>
 							{#if run.error_message}
-								<p class="mt-2 text-sm text-red-600 bg-red-100 rounded p-2">
+								<p class="mt-2 text-sm text-error bg-error-light rounded p-2">
 									{run.error_message}
 								</p>
 							{/if}

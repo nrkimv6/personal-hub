@@ -41,7 +41,7 @@
 				onclick={() => switchTab('notification')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab ===
 				'notification'
-					? 'border-blue-600 text-blue-600'
+					? 'border-blue-600 text-primary'
 					: 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				알림
@@ -50,7 +50,7 @@
 				onclick={() => switchTab('scheduler')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab ===
 				'scheduler'
-					? 'border-blue-600 text-blue-600'
+					? 'border-blue-600 text-primary'
 					: 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				스케줄러

@@ -112,16 +112,16 @@
 
   function getStatusColor(status: string) {
     switch (status) {
-      case 'healthy': return 'text-green-500';
-      case 'unhealthy': return 'text-red-500';
+      case 'healthy': return 'text-success';
+      case 'unhealthy': return 'text-error';
       default: return 'text-muted-foreground';
     }
   }
 
   function getStatusBgColor(status: string) {
     switch (status) {
-      case 'healthy': return 'bg-green-100 dark:bg-green-900/30';
-      case 'unhealthy': return 'bg-red-100 dark:bg-red-900/30';
+      case 'healthy': return 'bg-success-light dark:bg-green-900/30';
+      case 'unhealthy': return 'bg-error-light dark:bg-red-900/30';
       default: return 'bg-muted dark:bg-gray-800';
     }
   }
@@ -172,7 +172,7 @@
                 </div>
               {/if}
               {#if svc.errors.length > 0}
-                <div class="text-red-500 truncate" title={svc.errors.join(', ')}>
+                <div class="text-error truncate" title={svc.errors.join(', ')}>
                   {svc.errors[0]}
                 </div>
               {/if}

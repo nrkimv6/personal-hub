@@ -41,18 +41,18 @@
 
   // 타입별 스타일
   const typeStyles: Record<VideoDownloadType, { icon: string; label: string; color: string }> = {
-    youtube: { icon: '▶', label: 'YouTube', color: 'text-red-600 bg-red-100' },
-    youtube_stream: { icon: '🔴', label: 'YouTube Live', color: 'text-red-700 bg-red-200' },
-    vimeo: { icon: '🎬', label: 'Vimeo', color: 'text-blue-600 bg-blue-100' },
+    youtube: { icon: '▶', label: 'YouTube', color: 'text-error bg-error-light' },
+    youtube_stream: { icon: '🔴', label: 'YouTube Live', color: 'text-error bg-red-200' },
+    vimeo: { icon: '🎬', label: 'Vimeo', color: 'text-primary bg-primary-light' },
   };
 
   // 상태별 스타일
   const statusStyles: Record<VideoDownloadStatus, { label: string; color: string }> = {
     pending: { label: '대기중', color: 'text-muted-foreground bg-muted' },
-    picked: { label: '준비중', color: 'text-yellow-600 bg-yellow-100' },
-    processing: { label: '다운로드중', color: 'text-blue-600 bg-blue-100' },
-    completed: { label: '완료', color: 'text-green-600 bg-green-100' },
-    failed: { label: '실패', color: 'text-red-600 bg-red-100' },
+    picked: { label: '준비중', color: 'text-warning-foreground bg-warning-light' },
+    processing: { label: '다운로드중', color: 'text-primary bg-primary-light' },
+    completed: { label: '완료', color: 'text-success bg-success-light' },
+    failed: { label: '실패', color: 'text-error bg-error-light' },
     cancelled: { label: '취소됨', color: 'text-muted-foreground bg-background' },
   };
 
@@ -283,7 +283,7 @@
     </div>
     <button
       onclick={() => showAddModal = true}
-      class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+      class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors flex items-center gap-2"
     >
       <span class="text-lg">+</span>
       새 다운로드
@@ -303,15 +303,15 @@
       </div>
       <div class="bg-white rounded-lg p-3 border border-border">
         <div class="text-xs text-muted-foreground">진행중</div>
-        <div class="text-xl font-bold text-blue-600">{stats.processing + stats.picked}</div>
+        <div class="text-xl font-bold text-primary">{stats.processing + stats.picked}</div>
       </div>
       <div class="bg-white rounded-lg p-3 border border-border">
         <div class="text-xs text-muted-foreground">완료</div>
-        <div class="text-xl font-bold text-green-600">{stats.completed}</div>
+        <div class="text-xl font-bold text-success">{stats.completed}</div>
       </div>
       <div class="bg-white rounded-lg p-3 border border-border">
         <div class="text-xs text-muted-foreground">실패</div>
-        <div class="text-xl font-bold text-red-600">{stats.failed}</div>
+        <div class="text-xl font-bold text-error">{stats.failed}</div>
       </div>
       <div class="bg-white rounded-lg p-3 border border-border">
         <div class="text-xs text-muted-foreground">취소</div>
@@ -372,7 +372,7 @@
       <p class="text-muted-foreground">로딩중...</p>
     </div>
   {:else if error}
-    <div class="bg-red-50 rounded-lg p-4 border border-red-200 text-red-600">
+    <div class="bg-error-light rounded-lg p-4 border border-red-200 text-error">
       {error}
     </div>
   {:else if downloads.length === 0}
@@ -380,7 +380,7 @@
       <p class="text-muted-foreground mb-4">다운로드 요청이 없습니다.</p>
       <button
         onclick={() => showAddModal = true}
-        class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+        class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover"
       >
         새 다운로드 추가
       </button>
@@ -420,7 +420,7 @@
                     href={download.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    class="text-xs text-blue-600 hover:underline truncate block"
+                    class="text-xs text-primary hover:underline truncate block"
                     title={download.url}
                   >
                     {truncateUrl(download.url)}
@@ -432,7 +432,7 @@
                   {statusStyles[download.status]?.label || download.status}
                 </span>
                 {#if download.error_message}
-                  <div class="text-xs text-red-500 mt-1 truncate max-w-32" title={download.error_message}>
+                  <div class="text-xs text-error mt-1 truncate max-w-32" title={download.error_message}>
                     {download.error_message}
                   </div>
                 {/if}
@@ -442,14 +442,14 @@
                   <div class="w-24">
                     <div class="h-2 bg-secondary rounded-full overflow-hidden">
                       <div
-                        class="h-full bg-blue-600 transition-all duration-300"
+                        class="h-full bg-primary transition-all duration-300"
                         style="width: {download.progress}%"
                       ></div>
                     </div>
                     <div class="text-xs text-muted-foreground mt-1">{download.progress}%</div>
                   </div>
                 {:else if download.status === 'completed'}
-                  <span class="text-green-600 text-sm">100%</span>
+                  <span class="text-success text-sm">100%</span>
                 {:else}
                   <span class="text-muted-foreground text-sm">-</span>
                 {/if}
@@ -465,20 +465,20 @@
                   {#if download.status === 'pending' || download.status === 'picked' || download.status === 'processing'}
                     <button
                       onclick={() => handleCancel(download.id)}
-                      class="text-xs text-red-600 hover:text-red-800"
+                      class="text-xs text-error hover:text-error"
                     >
                       취소
                     </button>
                   {:else if download.status === 'failed' || download.status === 'cancelled'}
                     <button
                       onclick={() => handleRetry(download.id)}
-                      class="text-xs text-blue-600 hover:text-blue-800"
+                      class="text-xs text-primary hover:text-primary-hover"
                     >
                       재시도
                     </button>
                     <button
                       onclick={() => handleDelete(download.id)}
-                      class="text-xs text-muted-foreground hover:text-red-600"
+                      class="text-xs text-muted-foreground hover:text-error"
                     >
                       삭제
                     </button>
@@ -490,7 +490,7 @@
                     {/if}
                     <button
                       onclick={() => handleDelete(download.id)}
-                      class="text-xs text-muted-foreground hover:text-red-600"
+                      class="text-xs text-muted-foreground hover:text-error"
                     >
                       삭제
                     </button>
@@ -544,7 +544,7 @@
           <button
             type="button"
             onclick={() => batchMode = !batchMode}
-            class="relative w-11 h-6 rounded-full transition-colors {batchMode ? 'bg-blue-600' : 'bg-gray-300'}"
+            class="relative w-11 h-6 rounded-full transition-colors {batchMode ? 'bg-primary' : 'bg-gray-300'}"
           >
             <span
               class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform {batchMode ? 'translate-x-5' : ''}"
@@ -558,7 +558,7 @@
           <!-- 배치 모드: 복수 URL 입력 -->
           <div>
             <label class="block text-sm font-medium text-foreground mb-2">
-              URL 목록 <span class="text-red-500">*</span>
+              URL 목록 <span class="text-error">*</span>
             </label>
             <div class="space-y-2 max-h-48 overflow-y-auto">
               {#each batchUrls as url, index}
@@ -568,13 +568,13 @@
                     value={url}
                     oninput={(e) => updateBatchUrl(index, (e.target as HTMLInputElement).value)}
                     placeholder="https://vimeo.com/..."
-                    class="flex-1 px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    class="flex-1 px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring text-sm"
                   />
                   <button
                     type="button"
                     onclick={() => removeBatchUrl(index)}
                     disabled={batchUrls.length === 1}
-                    class="p-2 text-muted-foreground hover:text-red-500 disabled:opacity-30 disabled:cursor-not-allowed"
+                    class="p-2 text-muted-foreground hover:text-error disabled:opacity-30 disabled:cursor-not-allowed"
                   >
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -586,7 +586,7 @@
             <button
               type="button"
               onclick={addBatchUrl}
-              class="mt-2 text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1"
+              class="mt-2 text-sm text-primary hover:text-primary-hover flex items-center gap-1"
             >
               <span class="text-lg">+</span> URL 추가
             </button>
@@ -601,7 +601,7 @@
               id="batchOutputPrefix"
               bind:value={batchOutputPrefix}
               placeholder="course_01_"
-              class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
             />
             <p class="text-xs text-muted-foreground mt-1">입력시 파일명이 접두사01, 접두사02... 형태로 저장</p>
           </div>
@@ -609,7 +609,7 @@
           <!-- 단일 모드: 기존 UI -->
           <div>
             <label for="url" class="block text-sm font-medium text-foreground mb-1">
-              URL <span class="text-red-500">*</span>
+              URL <span class="text-error">*</span>
             </label>
             <input
               type="url"
@@ -617,7 +617,7 @@
               bind:value={newUrl}
               placeholder="https://www.youtube.com/watch?v=..."
               required
-              class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
             />
             <p class="text-xs text-muted-foreground mt-1">YouTube, YouTube Live, Vimeo URL 지원</p>
           </div>
@@ -631,7 +631,7 @@
               id="outputFilename"
               bind:value={newOutputFilename}
               placeholder="저장할 파일명 (확장자 제외)"
-              class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
             />
             <p class="text-xs text-muted-foreground mt-1">미입력 시 영상 제목으로 자동 설정</p>
           </div>
@@ -645,7 +645,7 @@
           <select
             id="type"
             bind:value={newType}
-            class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
           >
             <option value="">자동 감지</option>
             <option value="youtube">YouTube (일반 영상)</option>
@@ -661,7 +661,7 @@
           <select
             id="quality"
             bind:value={newQuality}
-            class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
           >
             <option value="best">최고 화질</option>
             <option value="1080">1080p</option>
@@ -681,7 +681,7 @@
               id="embeddingUrl"
               bind:value={newEmbeddingUrl}
               placeholder="https://example.com/page-with-vimeo"
-              class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
             />
             <p class="text-xs text-muted-foreground mt-1">embed-only 비디오의 경우 비디오가 임베드된 페이지 URL 입력 필수</p>
           </div>
@@ -698,7 +698,7 @@
           <button
             type="submit"
             disabled={isSubmitting || (batchMode ? validUrlCount === 0 : !newUrl.trim())}
-            class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {#if isSubmitting}
               요청중...

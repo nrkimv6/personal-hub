@@ -62,7 +62,7 @@
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 		</div>
 	{:else if error}
-		<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+		<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">
 			{error}
 		</div>
 	{:else}
@@ -85,7 +85,7 @@
 									bind:checked={notificationSettings.enable_telegram}
 								/>
 								<div
-									class="w-11 h-6 bg-secondary peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"
+									class="w-11 h-6 bg-secondary peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"
 								></div>
 							</label>
 						</div>
@@ -102,7 +102,7 @@
 									bind:checked={notificationSettings.enable_desktop}
 								/>
 								<div
-									class="w-11 h-6 bg-secondary peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"
+									class="w-11 h-6 bg-secondary peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-border after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"
 								></div>
 							</label>
 						</div>
@@ -118,7 +118,7 @@
 											type="checkbox"
 											checked={notificationSettings.notify_states.includes(option.value)}
 											onchange={() => toggleNotifyState(option.value)}
-											class="rounded border-border text-blue-600 focus:ring-blue-500"
+											class="rounded border-border text-primary focus:ring-ring"
 										/>
 										<span class="text-sm">{option.label}</span>
 									</label>

@@ -208,7 +208,7 @@
       <button
         onclick={refreshStatus}
         disabled={refreshing}
-        class="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+        class="px-3 py-1 text-sm bg-primary text-white rounded hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {refreshing ? '수집 중...' : '즉시 수집'}
       </button>
@@ -233,11 +233,11 @@
       <p class="mt-4 text-muted-foreground dark:text-muted-foreground">로딩 중...</p>
     </div>
   {:else if error}
-    <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-      <p class="text-red-600 dark:text-red-400 font-medium">{error}</p>
+    <div class="bg-error-light dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+      <p class="text-error dark:text-red-400 font-medium">{error}</p>
       <button
         onclick={fetchStatus}
-        class="mt-3 text-sm text-red-700 dark:text-red-300 underline hover:no-underline"
+        class="mt-3 text-sm text-error dark:text-red-300 underline hover:no-underline"
       >
         다시 시도
       </button>
@@ -252,7 +252,7 @@
 
       {#if hasContent}
         <div class="border dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800">
-          <h2 class="text-xl font-semibold mb-4 text-blue-600 dark:text-blue-400">{projectName}</h2>
+          <h2 class="text-xl font-semibold mb-4 text-primary dark:text-blue-400">{projectName}</h2>
 
           <!-- NSSM Services -->
           {#if project.nssm_services.length > 0}
@@ -261,32 +261,32 @@
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {#each project.nssm_services as svc}
                   <div class="p-3 rounded border flex justify-between items-center
-                    {svc.status === 'Running' ? 'border-green-500 bg-green-50 dark:bg-green-900/20' : 'border-red-500 bg-red-50 dark:bg-red-900/20'}">
+                    {svc.status === 'Running' ? 'border-green-500 bg-success-light dark:bg-green-900/20' : 'border-red-500 bg-error-light dark:bg-red-900/20'}">
                     <div>
                       <div class="font-medium text-foreground dark:text-white">{svc.name}</div>
                       <div class="text-xs text-muted-foreground dark:text-muted-foreground">{svc.display_name}</div>
                       <span class="px-2 py-0.5 rounded text-xs mt-1 inline-block
-                        {svc.status === 'Running' ? 'bg-green-200 dark:bg-green-800 text-green-800 dark:text-green-200' : 'bg-red-200 dark:bg-red-800 text-red-800 dark:text-red-200'}">
+                        {svc.status === 'Running' ? 'bg-green-200 dark:bg-green-800 text-success dark:text-green-200' : 'bg-red-200 dark:bg-red-800 text-error dark:text-red-200'}">
                         {svc.status}
                       </span>
                     </div>
                     <div class="flex gap-1">
                       {#if svc.status === 'Running'}
                         <button
-                          class="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
+                          class="px-2 py-1 text-xs bg-primary text-white rounded hover:bg-primary-hover disabled:opacity-50"
                           disabled={actionLoading?.startsWith(`nssm-`)}
                           onclick={() => restartService(svc.name)}>
                           재시작
                         </button>
                         <button
-                          class="px-2 py-1 text-xs bg-orange-500 text-white rounded hover:bg-orange-600 disabled:opacity-50"
+                          class="px-2 py-1 text-xs bg-warning text-white rounded hover:bg-warning/90 disabled:opacity-50"
                           disabled={actionLoading?.startsWith(`nssm-`)}
                           onclick={() => stopService(svc.name)}>
                           중지
                         </button>
                       {:else}
                         <button
-                          class="px-2 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50"
+                          class="px-2 py-1 text-xs bg-success text-white rounded hover:bg-success/90 disabled:opacity-50"
                           disabled={actionLoading?.startsWith(`nssm-`)}
                           onclick={() => startService(svc.name)}>
                           시작
@@ -316,11 +316,11 @@
                     <tr class="border-b dark:border-gray-700">
                       <td class="p-2 text-foreground dark:text-white">{prog.name}</td>
                       <td class="p-2">
-                        <span class="text-green-600 dark:text-green-400">등록됨</span>
+                        <span class="text-success dark:text-green-400">등록됨</span>
                       </td>
                       <td class="p-2">
                         <button
-                          class="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50"
+                          class="px-2 py-1 text-xs bg-error text-white rounded hover:bg-error/90 disabled:opacity-50"
                           disabled={actionLoading === `startup-${prog.name}`}
                           onclick={() => removeStartup(prog.name)}>
                           제거
@@ -357,25 +357,25 @@
                         </td>
                         <td class="p-2">
                           <span class="px-2 py-0.5 rounded text-xs
-                            {task.State === 'Ready' ? 'bg-green-200 dark:bg-green-800 text-green-800 dark:text-green-200' : 'bg-yellow-200 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200'}">
+                            {task.State === 'Ready' ? 'bg-green-200 dark:bg-green-800 text-success dark:text-green-200' : 'bg-yellow-200 dark:bg-yellow-800 text-warning-foreground dark:text-yellow-200'}">
                             {task.State}
                           </span>
                         </td>
                         <td class="p-2 text-muted-foreground dark:text-muted-foreground text-xs">{formatDateTime(task.LastRun)}</td>
                         <td class="p-2 text-xs text-foreground dark:text-white">{formatDateTime(task.NextRun)}</td>
                         <td class="p-2 text-xs
-                          {task.LastResult === 0 ? 'text-green-600 dark:text-green-400' : task.LastResult !== null ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}">
+                          {task.LastResult === 0 ? 'text-success dark:text-green-400' : task.LastResult !== null ? 'text-error dark:text-red-400' : 'text-muted-foreground'}">
                           {getTaskResultText(task.LastResult)}
                         </td>
                         <td class="p-2 space-x-1">
                           <button
-                            class="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
+                            class="px-2 py-1 text-xs bg-primary text-white rounded hover:bg-primary-hover disabled:opacity-50"
                             disabled={actionLoading?.startsWith(`run-${task.Folder}`)}
                             onclick={() => runTask(task.Folder, task.Name)}>
                             실행
                           </button>
                           <button
-                            class="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 disabled:opacity-50"
+                            class="px-2 py-1 text-xs bg-error text-white rounded hover:bg-error/90 disabled:opacity-50"
                             disabled={actionLoading?.startsWith(`task-${task.Folder}`)}
                             onclick={() => removeTask(task.Folder, task.Name)}>
                             제거
@@ -395,7 +395,7 @@
               <div class="flex justify-between items-center mb-2">
                 <h3 class="text-lg font-medium text-foreground dark:text-gray-300">워커 프로세스</h3>
                 <button
-                  class="px-3 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50"
+                  class="px-3 py-1 text-xs bg-primary text-white rounded hover:bg-primary-hover disabled:opacity-50"
                   disabled={actionLoading === 'workers'}
                   onclick={restartWorkers}>
                   전체 재시작
@@ -407,7 +407,7 @@
                     <div class="font-medium text-foreground dark:text-white">{worker.name}</div>
                     <div class="text-sm">
                       {#if worker.running}
-                        <span class="text-green-600 dark:text-green-400">Running</span>
+                        <span class="text-success dark:text-green-400">Running</span>
                         <span class="text-xs text-muted-foreground dark:text-muted-foreground ml-1">(PID: {worker.pid})</span>
                       {:else}
                         <span class="text-muted-foreground dark:text-muted-foreground">Stopped</span>

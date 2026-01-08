@@ -240,13 +240,13 @@
 	function getTargetTypeBadge(type: string): { class: string; text: string } {
 		switch (type) {
 			case 'instagram_feed':
-				return { class: 'bg-pink-100 text-pink-800', text: 'Instagram' };
+				return { class: 'bg-pink-light text-pink', text: 'Instagram' };
 			case 'universal_crawl':
-				return { class: 'bg-blue-100 text-blue-800', text: 'Web' };
+				return { class: 'bg-primary-light text-primary', text: 'Web' };
 			case 'google_search':
-				return { class: 'bg-yellow-100 text-yellow-800', text: 'Google' };
+				return { class: 'bg-warning-light text-warning-foreground', text: 'Google' };
 			case 'writing_task':
-				return { class: 'bg-purple-100 text-purple-800', text: '글쓰기' };
+				return { class: 'bg-purple-light text-purple-800', text: '글쓰기' };
 			default:
 				return { class: 'bg-muted text-foreground', text: type };
 		}
@@ -255,13 +255,13 @@
 	function getScheduleTypeBadge(type: string): { class: string; text: string } {
 		switch (type) {
 			case 'daily':
-				return { class: 'bg-green-50 text-green-700', text: '일일' };
+				return { class: 'bg-success-light text-success', text: '일일' };
 			case 'interval':
-				return { class: 'bg-blue-50 text-blue-700', text: '간격' };
+				return { class: 'bg-primary-light text-primary', text: '간격' };
 			case 'cron':
-				return { class: 'bg-purple-50 text-purple-700', text: 'Cron' };
+				return { class: 'bg-purple-light text-purple', text: 'Cron' };
 			case 'time_window':
-				return { class: 'bg-orange-50 text-orange-700', text: '시간대' };
+				return { class: 'bg-warning-light text-warning', text: '시간대' };
 			default:
 				return { class: 'bg-background text-foreground', text: type };
 		}
@@ -282,13 +282,13 @@
 	</div>
 
 	{#if successMessage}
-		<div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-4">
+		<div class="bg-success-light border border-green-200 text-success px-4 py-3 rounded-lg mb-4">
 			{successMessage}
 		</div>
 	{/if}
 
 	{#if error}
-		<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
+		<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg mb-4">
 			{error}
 		</div>
 	{/if}
@@ -315,7 +315,7 @@
 								onclick={() => toggleSchedule(schedule)}
 								disabled={togglingId === schedule.id}
 								class="relative inline-flex items-center h-6 rounded-full w-11 transition-colors {schedule.enabled
-									? 'bg-blue-600'
+									? 'bg-primary'
 									: 'bg-secondary'}"
 							>
 								<span
@@ -385,7 +385,7 @@
 							<!-- 삭제 버튼 -->
 							<button
 								onclick={() => openDeleteModal(schedule)}
-								class="btn btn-sm text-red-600 hover:bg-red-50 border border-red-200"
+								class="btn btn-sm text-error hover:bg-error-light border border-red-200"
 								title="스케줄 삭제"
 							>
 								삭제
@@ -440,7 +440,7 @@
 					{#if addStep > 1}
 						<button
 							onclick={() => (addStep = addStep === 3 && selectedType === 'writing_task' ? 1 : addStep - 1)}
-							class="text-sm text-blue-600 hover:text-blue-800"
+							class="text-sm text-primary hover:text-primary-hover"
 						>
 							← 이전
 						</button>
@@ -464,7 +464,7 @@
 							<button
 								onclick={() => selectType(st.value)}
 								disabled={loadingTargets}
-								class="flex items-center gap-3 p-4 border-2 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors text-left"
+								class="flex items-center gap-3 p-4 border-2 rounded-lg hover:border-blue-500 hover:bg-primary-light transition-colors text-left"
 							>
 								<span class="text-2xl">{st.icon}</span>
 								<div>
@@ -498,9 +498,9 @@
 								{#each serviceAccounts as account}
 									<button
 										onclick={() => selectTarget({ id: account.id, name: account.profile_name || account.identifier })}
-										class="w-full flex items-center gap-3 p-3 border rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors text-left"
+										class="w-full flex items-center gap-3 p-3 border rounded-lg hover:border-blue-500 hover:bg-primary-light transition-colors text-left"
 									>
-										<div class="w-10 h-10 bg-pink-100 rounded-full flex items-center justify-center text-pink-600">
+										<div class="w-10 h-10 bg-pink-light rounded-full flex items-center justify-center text-pink">
 											📸
 										</div>
 										<div>
@@ -522,9 +522,9 @@
 								{#each savedSearches as saved}
 									<button
 										onclick={() => selectTarget({ id: saved.id, name: saved.name })}
-										class="w-full flex items-center gap-3 p-3 border rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors text-left"
+										class="w-full flex items-center gap-3 p-3 border rounded-lg hover:border-blue-500 hover:bg-primary-light transition-colors text-left"
 									>
-										<div class="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center text-yellow-600">
+										<div class="w-10 h-10 bg-warning-light rounded-full flex items-center justify-center text-warning-foreground">
 											{saved.is_favorite ? '⭐' : '🔍'}
 										</div>
 										<div>
@@ -542,7 +542,7 @@
 					<div class="mb-4">
 						<p class="text-muted-foreground mb-2">실행 시간을 설정하세요</p>
 						{#if selectedType !== 'writing_task' && selectedTarget}
-							<p class="text-sm text-blue-600">
+							<p class="text-sm text-primary">
 								선택된 대상: {selectedTarget.name}
 							</p>
 						{/if}
@@ -554,12 +554,12 @@
 								<input
 									type="time"
 									bind:value={scheduleTimes[i]}
-									class="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+									class="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 								/>
 								{#if scheduleTimes.length > 1}
 									<button
 										onclick={() => removeTime(i)}
-										class="p-2 text-red-600 hover:bg-red-50 rounded-lg"
+										class="p-2 text-error hover:bg-error-light rounded-lg"
 										title="삭제"
 									>
 										✕
@@ -571,7 +571,7 @@
 
 					<button
 						onclick={addTime}
-						class="w-full py-2 border-2 border-dashed border-border rounded-lg text-muted-foreground hover:border-blue-500 hover:text-blue-600 transition-colors"
+						class="w-full py-2 border-2 border-dashed border-border rounded-lg text-muted-foreground hover:border-blue-500 hover:text-primary transition-colors"
 					>
 						+ 시간 추가
 					</button>
@@ -612,7 +612,7 @@
 				<p class="text-foreground mb-4">
 					<strong>"{deleteTarget.display_name || deleteTarget.name}"</strong> 스케줄을 삭제하시겠습니까?
 				</p>
-				<p class="text-sm text-red-600 bg-red-50 p-3 rounded-lg">
+				<p class="text-sm text-error bg-error-light p-3 rounded-lg">
 					실행 이력도 함께 삭제됩니다. 이 작업은 되돌릴 수 없습니다.
 				</p>
 			</div>
@@ -625,7 +625,7 @@
 				<button
 					onclick={confirmDelete}
 					disabled={deleting}
-					class="btn bg-red-600 text-white hover:bg-red-700"
+					class="btn bg-error text-white hover:bg-error/90"
 				>
 					{#if deleting}
 						삭제 중...

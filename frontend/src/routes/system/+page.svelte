@@ -71,9 +71,9 @@
   function getBadgeClass(tabId: TabId): string {
     switch (tabId) {
       case 'errors':
-        return 'bg-red-500 text-white';
+        return 'bg-error text-white';
       case 'integrity':
-        return 'bg-yellow-500 text-white';
+        return 'bg-warning text-white';
       default:
         return 'bg-secondary text-foreground dark:bg-gray-600 dark:text-gray-200';
     }
@@ -113,7 +113,7 @@
           onclick={() => setTab(tab.id)}
           class="flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors
             {isActive
-              ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+              ? 'border-blue-500 text-primary dark:text-blue-400'
               : 'border-transparent text-muted-foreground dark:text-muted-foreground hover:text-foreground dark:hover:text-gray-300 hover:border-border dark:hover:border-gray-600'}"
           aria-current={isActive ? 'page' : undefined}
         >

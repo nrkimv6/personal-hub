@@ -200,11 +200,11 @@
 				<div class="text-sm text-muted-foreground">총 체크</div>
 			</div>
 			<div class="card p-4 text-center">
-				<div class="text-2xl font-bold text-green-600">{monitoringStats.success_count}</div>
+				<div class="text-2xl font-bold text-success">{monitoringStats.success_count}</div>
 				<div class="text-sm text-muted-foreground">성공</div>
 			</div>
 			<div class="card p-4 text-center">
-				<div class="text-2xl font-bold text-blue-600">{monitoringStats.available_count}</div>
+				<div class="text-2xl font-bold text-primary">{monitoringStats.available_count}</div>
 				<div class="text-sm text-muted-foreground">슬롯 발견</div>
 			</div>
 			<div class="card p-4 text-center">
@@ -212,7 +212,7 @@
 				<div class="text-sm text-muted-foreground">매진</div>
 			</div>
 			<div class="card p-4 text-center">
-				<div class="text-2xl font-bold text-yellow-600">
+				<div class="text-2xl font-bold text-warning-foreground">
 					{(monitoringStats.inactive_count || 0) +
 						(monitoringStats.hidden_count || 0) +
 						(monitoringStats.paused_count || 0) +
@@ -222,7 +222,7 @@
 				<div class="text-sm text-muted-foreground">비활성화</div>
 			</div>
 			<div class="card p-4 text-center">
-				<div class="text-2xl font-bold text-red-600">{monitoringStats.error_count}</div>
+				<div class="text-2xl font-bold text-error">{monitoringStats.error_count}</div>
 				<div class="text-sm text-muted-foreground">에러</div>
 			</div>
 			<div class="card p-4 text-center">
@@ -298,7 +298,7 @@
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 		</div>
 	{:else if error}
-		<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+		<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">
 			{error}
 		</div>
 	{:else if monitoringEvents.length === 0}
@@ -334,7 +334,7 @@
 								<div class="flex items-center gap-1">
 									{#if event.graphql_response}
 										<button
-											class="w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+											class="w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-primary-light rounded transition-colors"
 											onclick={() => toggleEventExpand(event.id)}
 											title={expandedEventIds[event.id] ? '접기' : '펼치기'}
 										>
@@ -380,7 +380,7 @@
 							<td class="px-2 py-3 text-sm text-muted-foreground">
 								{event.original_slot_count ?? event.available_count}개
 								{#if event.hash_changed}
-									<span class="text-blue-600 text-xs">(변경)</span>
+									<span class="text-primary text-xs">(변경)</span>
 								{/if}
 							</td>
 							<td class="px-2 py-3 text-sm">
@@ -388,7 +388,7 @@
 									<div class="text-foreground">
 										{event.filtered_slot_count ?? '-'}개
 										{#if event.target_time_matched}
-											<span class="text-green-600">&#10003;</span>
+											<span class="text-success">&#10003;</span>
 										{:else}
 											<span class="text-muted-foreground">&#10007;</span>
 										{/if}
@@ -426,7 +426,7 @@
 								{formatResponseTime(event.response_time_ms)}
 							</td>
 							<td
-								class="px-2 py-3 text-sm text-red-600 max-w-[100px] truncate"
+								class="px-2 py-3 text-sm text-error max-w-[100px] truncate"
 								title={event.error_message || ''}
 							>
 								{event.error_message || '-'}
@@ -438,8 +438,8 @@
 								<td colspan="11" class="px-3 py-4">
 									<div class="space-y-3">
 										{#if event.graphql_time_ms !== null || event.booking_time_ms !== null}
-											<div class="border border-blue-200 rounded-lg bg-blue-50 p-3">
-												<div class="text-sm font-medium text-blue-800 mb-2">타이밍 상세</div>
+											<div class="border border-blue-200 rounded-lg bg-primary-light p-3">
+												<div class="text-sm font-medium text-primary mb-2">타이밍 상세</div>
 												<div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
 													<div>
 														<span class="text-muted-foreground">GraphQL:</span>

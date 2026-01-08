@@ -144,8 +144,8 @@
 
 	function getInputSourceColor(): string {
 		const source = getInputSource();
-		if (source === 'ai') return 'bg-purple-100 text-purple-700';
-		if (source === 'ai_edited') return 'bg-blue-100 text-blue-700';
+		if (source === 'ai') return 'bg-purple-light text-purple';
+		if (source === 'ai_edited') return 'bg-primary-light text-primary';
 		return 'bg-muted text-muted-foreground';
 	}
 
@@ -203,7 +203,7 @@
 									href={getInstagramUrl()}
 									target="_blank"
 									rel="noopener noreferrer"
-									class="text-xs text-pink-600 hover:text-pink-800 underline"
+									class="text-xs text-pink hover:text-pink underline"
 								>
 									원본 링크
 								</a>
@@ -266,9 +266,9 @@
 									{#if type === 'event' && event?.days_remaining !== null && event?.days_remaining !== undefined}
 										<span
 											class="ml-1 {event.days_remaining === 0
-												? 'text-orange-600 font-bold'
+												? 'text-warning font-bold'
 												: event.days_remaining > 0
-													? 'text-blue-600'
+													? 'text-primary'
 													: 'text-muted-foreground'}"
 										>
 											({getDaysRemaining(event)})
@@ -293,10 +293,10 @@
 									<span class="text-muted-foreground w-12">구매:</span>
 									<span
 										class="px-1.5 py-0.5 rounded {event.purchase_required === 'no'
-											? 'bg-green-100 text-green-700'
+											? 'bg-success-light text-success'
 											: event.purchase_required === 'yes_all'
-												? 'bg-red-100 text-red-700'
-												: 'bg-yellow-100 text-yellow-700'}"
+												? 'bg-error-light text-error'
+												: 'bg-warning-light text-warning-foreground'}"
 									>
 										{event.purchase_required === 'no'
 											? '불필요'
@@ -319,7 +319,7 @@
 									<span class="text-muted-foreground w-12 shrink-0">경품:</span>
 									<div class="flex flex-wrap gap-1">
 										{#each event.prizes as prize}
-											<span class="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded">{prize}</span>
+											<span class="px-1.5 py-0.5 bg-warning-light text-amber-800 rounded">{prize}</span>
 										{/each}
 									</div>
 								</div>
@@ -363,7 +363,7 @@
 											href={url}
 											target="_blank"
 											rel="noopener noreferrer"
-											class="flex items-center gap-1.5 text-sm text-blue-600 hover:underline truncate flex-1"
+											class="flex items-center gap-1.5 text-sm text-primary hover:underline truncate flex-1"
 											title={url}
 										>
 											<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -377,7 +377,7 @@
 											<span class="truncate">{index === 0 ? (type === 'event' ? '이벤트 참여' : '공식 사이트') : `링크 ${index + 1}`}</span>
 										</a>
 										{#if index === 0}
-											<span class="text-[10px] text-blue-600 px-1.5 py-0.5 bg-blue-50 rounded shrink-0">메인</span>
+											<span class="text-[10px] text-primary px-1.5 py-0.5 bg-primary-light rounded shrink-0">메인</span>
 										{/if}
 									</div>
 								{/each}
@@ -386,7 +386,7 @@
 								<button
 									onclick={copyEventUrl}
 									class="mt-2 flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors {copied
-										? 'bg-green-100 text-green-700'
+										? 'bg-success-light text-success'
 										: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 									title={copied ? '복사됨!' : '메인 링크 복사'}
 								>
@@ -411,7 +411,7 @@
 						<button
 							onclick={onBookmarkToggle}
 							class="flex-1 py-2 text-xs rounded transition-colors {getBookmarked()
-								? 'bg-yellow-100 text-yellow-700'
+								? 'bg-warning-light text-warning-foreground'
 								: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 						>
 							{getBookmarked() ? '★ 북마크됨' : '☆ 북마크'}
@@ -420,7 +420,7 @@
 							<button
 								onclick={onParticipateToggle}
 								class="flex-1 py-2 text-xs rounded transition-colors {isParticipated
-									? 'bg-green-100 text-green-700'
+									? 'bg-success-light text-success'
 									: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 							>
 								{isParticipated ? '✓ 참여완료' : '참여체크'}
@@ -429,7 +429,7 @@
 							<button
 								onclick={onVisitToggle}
 								class="flex-1 py-2 text-xs rounded transition-colors {getVisited()
-									? 'bg-green-100 text-green-700'
+									? 'bg-success-light text-success'
 									: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 							>
 								{getVisited() ? '✓ 방문완료' : '방문하기'}
@@ -442,7 +442,7 @@
 						<button
 							onclick={onOfflineToggle}
 							class="w-full mt-2 py-2 text-xs rounded transition-colors {event.is_offline
-								? 'bg-green-100 text-green-700 hover:bg-green-200'
+								? 'bg-success-light text-success hover:bg-green-200'
 								: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 						>
 							{event.is_offline ? '📍 오프라인 이벤트' : '🌐 온라인 이벤트'} (클릭하여 변경)
@@ -464,7 +464,7 @@
 					{#if type === 'event' && onDelete}
 						<button
 							onclick={onDelete}
-							class="w-full mt-2 py-2 text-xs text-red-600 hover:bg-red-50 rounded transition-colors"
+							class="w-full mt-2 py-2 text-xs text-error hover:bg-error-light rounded transition-colors"
 						>
 							이벤트 삭제
 						</button>
@@ -571,7 +571,7 @@
 									href={getInstagramUrl()}
 									target="_blank"
 									rel="noopener noreferrer"
-									class="text-xs text-pink-600 hover:text-pink-800 underline"
+									class="text-xs text-pink hover:text-pink underline"
 								>
 									원본 링크
 								</a>
@@ -619,9 +619,9 @@
 										{#if type === 'event' && event?.days_remaining !== null && event?.days_remaining !== undefined}
 											<span
 												class="ml-1 {event.days_remaining === 0
-													? 'text-orange-600 font-bold'
+													? 'text-warning font-bold'
 													: event.days_remaining > 0
-														? 'text-blue-600'
+														? 'text-primary'
 														: 'text-muted-foreground'}"
 											>
 												({getDaysRemaining(event)})
@@ -644,10 +644,10 @@
 										<span class="text-muted-foreground w-12">구매:</span>
 										<span
 											class="px-1.5 py-0.5 rounded {event.purchase_required === 'no'
-												? 'bg-green-100 text-green-700'
+												? 'bg-success-light text-success'
 												: event.purchase_required === 'yes_all'
-													? 'bg-red-100 text-red-700'
-													: 'bg-yellow-100 text-yellow-700'}"
+													? 'bg-error-light text-error'
+													: 'bg-warning-light text-warning-foreground'}"
 										>
 											{event.purchase_required === 'no'
 												? '불필요'
@@ -668,7 +668,7 @@
 										<span class="text-muted-foreground w-12 shrink-0">경품:</span>
 										<div class="flex flex-wrap gap-1">
 											{#each event.prizes as prize}
-												<span class="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded"
+												<span class="px-1.5 py-0.5 bg-warning-light text-amber-800 rounded"
 													>{prize}</span
 												>
 											{/each}
@@ -714,7 +714,7 @@
 												href={url}
 												target="_blank"
 												rel="noopener noreferrer"
-												class="flex items-center gap-1.5 text-sm text-blue-600 hover:underline truncate flex-1"
+												class="flex items-center gap-1.5 text-sm text-primary hover:underline truncate flex-1"
 												title={url}
 											>
 												<svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -728,7 +728,7 @@
 												<span class="truncate">{index === 0 ? (type === 'event' ? '이벤트 참여' : '공식 사이트') : `링크 ${index + 1}`}</span>
 											</a>
 											{#if index === 0}
-												<span class="text-[10px] text-blue-600 px-1.5 py-0.5 bg-blue-50 rounded shrink-0">메인</span>
+												<span class="text-[10px] text-primary px-1.5 py-0.5 bg-primary-light rounded shrink-0">메인</span>
 											{/if}
 										</div>
 									{/each}
@@ -737,7 +737,7 @@
 									<button
 										onclick={copyEventUrl}
 										class="mt-2 flex items-center gap-1 px-2 py-1 text-xs rounded transition-colors {copied
-											? 'bg-green-100 text-green-700'
+											? 'bg-success-light text-success'
 											: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 										title={copied ? '복사됨!' : '메인 링크 복사'}
 									>
@@ -762,7 +762,7 @@
 							<button
 								onclick={onBookmarkToggle}
 								class="flex-1 py-2 text-sm rounded transition-colors {getBookmarked()
-									? 'bg-yellow-100 text-yellow-700'
+									? 'bg-warning-light text-warning-foreground'
 									: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 							>
 								{getBookmarked() ? '★ 북마크됨' : '☆ 북마크'}
@@ -771,7 +771,7 @@
 								<button
 									onclick={onParticipateToggle}
 									class="flex-1 py-2 text-sm rounded transition-colors {isParticipated
-										? 'bg-green-100 text-green-700'
+										? 'bg-success-light text-success'
 										: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 								>
 									{isParticipated ? '✓ 참여완료' : '참여체크'}
@@ -780,7 +780,7 @@
 								<button
 									onclick={onVisitToggle}
 									class="flex-1 py-2 text-sm rounded transition-colors {getVisited()
-										? 'bg-green-100 text-green-700'
+										? 'bg-success-light text-success'
 										: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 								>
 									{getVisited() ? '✓ 방문완료' : '방문하기'}
@@ -793,7 +793,7 @@
 							<button
 								onclick={onOfflineToggle}
 								class="w-full mt-2 py-2 text-sm rounded transition-colors {event.is_offline
-									? 'bg-green-100 text-green-700 hover:bg-green-200'
+									? 'bg-success-light text-success hover:bg-green-200'
 									: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 							>
 								{event.is_offline ? '📍 오프라인 이벤트' : '🌐 온라인 이벤트'} (클릭하여 변경)
@@ -815,7 +815,7 @@
 						{#if type === 'event' && onDelete}
 							<button
 								onclick={onDelete}
-								class="w-full mt-2 py-2 text-sm text-red-600 hover:bg-red-50 rounded transition-colors"
+								class="w-full mt-2 py-2 text-sm text-error hover:bg-error-light rounded transition-colors"
 							>
 								이벤트 삭제
 							</button>

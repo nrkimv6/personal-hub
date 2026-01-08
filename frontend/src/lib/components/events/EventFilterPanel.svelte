@@ -200,7 +200,7 @@
 					oninput={(e) => onSearchChange(e.currentTarget.value)}
 					onkeydown={handleSearchKeydown}
 					placeholder="제목, 요약, 주최자, 본문 검색..."
-					class="w-full px-3 py-2 pr-20 text-sm border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+					class="w-full px-3 py-2 pr-20 text-sm border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 				/>
 				<div class="absolute right-1 top-1/2 -translate-y-1/2 flex gap-1">
 					{#if filterSearch}
@@ -216,7 +216,7 @@
 					{/if}
 					<button
 						onclick={onSearch}
-						class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+						class="px-2 py-1 text-xs bg-primary text-white rounded hover:bg-primary-hover"
 					>
 						검색
 					</button>
@@ -232,7 +232,7 @@
 					{#each QUICK_FILTER_PRESETS as preset}
 						<button
 							onclick={() => applyQuickFilter(preset)}
-							class="px-3 py-1.5 text-sm rounded-full bg-gradient-to-r from-gray-100 to-gray-50 text-foreground hover:from-blue-100 hover:to-blue-50 hover:text-blue-700 transition-colors flex items-center gap-1"
+							class="px-3 py-1.5 text-sm rounded-full bg-gradient-to-r from-gray-100 to-gray-50 text-foreground hover:from-blue-100 hover:to-blue-50 hover:text-primary-hover transition-colors flex items-center gap-1"
 						>
 							<span>{preset.icon}</span>
 							<span>{preset.label}</span>
@@ -269,12 +269,12 @@
 					<button
 						onclick={() => setDeadlineDateFilter(dateStr)}
 						class="px-2.5 py-1.5 text-xs rounded-lg transition-colors flex flex-col items-center min-w-[48px] {filterDeadlineDate === dateStr
-							? 'bg-indigo-100 text-indigo-700 ring-2 ring-offset-1 ring-indigo-400'
+							? 'bg-primary-light text-indigo-700 ring-2 ring-offset-1 ring-indigo-400'
 							: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 					>
 						<span class="font-medium">{label}</span>
 						<span class="text-[10px] opacity-70">{dayLabel}</span>
-						<span class="text-[10px] mt-0.5 font-semibold {count > 0 ? 'text-indigo-600' : 'text-muted-foreground'}">{count}건</span>
+						<span class="text-[10px] mt-0.5 font-semibold {count > 0 ? 'text-primary' : 'text-muted-foreground'}">{count}건</span>
 					</button>
 				{/each}
 			</div>
@@ -306,7 +306,7 @@
 					<button
 						onclick={() => handleSortChange(opt.value)}
 						class="px-3 py-1.5 text-sm rounded-full transition-colors flex items-center gap-1 {isActive
-							? 'bg-blue-100 text-blue-700 ring-2 ring-offset-1 ring-blue-400'
+							? 'bg-primary-light text-primary ring-2 ring-offset-1 ring-blue-400'
 							: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 					>
 						<span>{opt.icon}</span>
@@ -350,7 +350,7 @@
 									<button
 										onclick={() => onUrlTypeChange?.(filterUrlType === opt.value ? null : opt.value)}
 										class="px-2 py-1 text-xs rounded-full {filterUrlType === opt.value
-											? 'bg-purple-100 text-purple-700'
+											? 'bg-purple-light text-purple'
 											: 'bg-muted text-muted-foreground'}"
 									>
 										{opt.label}
@@ -377,7 +377,7 @@
 									<button
 										onclick={() => onSourceTypeChange?.(filterSourceType === opt.value ? null : opt.value)}
 										class="px-2 py-1 text-xs rounded-full {filterSourceType === opt.value
-											? 'bg-teal-100 text-teal-700'
+											? 'bg-success-light text-success'
 											: 'bg-muted text-muted-foreground'}"
 									>
 										{opt.label}
@@ -403,11 +403,11 @@
 <div class="hidden md:block mb-4 space-y-3">
 	<!-- 현재 필터 상태 요약 (활성 필터가 있을 때만) -->
 	{#if activeFilters().length > 0}
-		<div class="flex items-center gap-2 p-2 bg-blue-50 rounded-lg">
-			<span class="text-xs text-blue-600 font-medium">활성 필터:</span>
+		<div class="flex items-center gap-2 p-2 bg-primary-light rounded-lg">
+			<span class="text-xs text-primary font-medium">활성 필터:</span>
 			<div class="flex flex-wrap gap-1">
 				{#each activeFilters() as filter}
-					<span class="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full">{filter}</span>
+					<span class="px-2 py-0.5 text-xs bg-primary-light text-primary rounded-full">{filter}</span>
 				{/each}
 			</div>
 		</div>
@@ -423,7 +423,7 @@
 				oninput={(e) => onSearchChange(e.currentTarget.value)}
 				onkeydown={handleSearchKeydown}
 				placeholder="제목, 요약, 주최자, 본문 검색..."
-				class="w-full px-3 py-1.5 pr-20 text-sm border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+				class="w-full px-3 py-1.5 pr-20 text-sm border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 			/>
 			<div class="absolute right-1 top-1/2 -translate-y-1/2 flex gap-1">
 				{#if filterSearch}
@@ -439,7 +439,7 @@
 				{/if}
 				<button
 					onclick={onSearch}
-					class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+					class="px-2 py-1 text-xs bg-primary text-white rounded hover:bg-primary-hover"
 				>
 					검색
 				</button>
@@ -452,7 +452,7 @@
 				{#each QUICK_FILTER_PRESETS as preset}
 					<button
 						onclick={() => applyQuickFilter(preset)}
-						class="px-3 py-1.5 text-sm rounded-full bg-gradient-to-r from-gray-100 to-gray-50 text-foreground hover:from-blue-100 hover:to-blue-50 hover:text-blue-700 transition-colors flex items-center gap-1 whitespace-nowrap"
+						class="px-3 py-1.5 text-sm rounded-full bg-gradient-to-r from-gray-100 to-gray-50 text-foreground hover:from-blue-100 hover:to-blue-50 hover:text-primary-hover transition-colors flex items-center gap-1 whitespace-nowrap"
 						title={preset.label}
 					>
 						<span>{preset.icon}</span>
@@ -502,7 +502,7 @@
 			<button
 				onclick={() => handleSortChange(opt.value)}
 				class="px-2 py-1 text-xs rounded-full transition-colors flex items-center gap-1 {isActive
-					? 'bg-blue-100 text-blue-700 ring-1 ring-blue-400'
+					? 'bg-primary-light text-primary ring-1 ring-blue-400'
 					: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 			>
 				<span>{opt.icon}</span>
@@ -522,12 +522,12 @@
 			<button
 				onclick={() => setDeadlineDateFilter(dateStr)}
 				class="px-2.5 py-1 text-sm rounded-lg transition-colors flex items-center gap-1.5 {filterDeadlineDate === dateStr
-					? 'bg-indigo-100 text-indigo-700 ring-2 ring-offset-1 ring-indigo-400'
+					? 'bg-primary-light text-indigo-700 ring-2 ring-offset-1 ring-indigo-400'
 					: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 			>
 				<span class="font-medium">{label}</span>
 				<span class="text-xs opacity-70">({dayLabel})</span>
-				<span class="text-xs font-semibold {count > 0 ? 'text-indigo-600' : 'text-muted-foreground'}">{count}건</span>
+				<span class="text-xs font-semibold {count > 0 ? 'text-primary' : 'text-muted-foreground'}">{count}건</span>
 			</button>
 		{/each}
 
@@ -567,7 +567,7 @@
 						<button
 							onclick={() => onUrlTypeChange?.(filterUrlType === opt.value ? null : opt.value)}
 							class="px-2 py-0.5 text-xs rounded-full {filterUrlType === opt.value
-								? 'bg-purple-100 text-purple-700'
+								? 'bg-purple-light text-purple'
 								: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 						>
 							{opt.label}
@@ -592,7 +592,7 @@
 						<button
 							onclick={() => onSourceTypeChange?.(filterSourceType === opt.value ? null : opt.value)}
 							class="px-2 py-0.5 text-xs rounded-full {filterSourceType === opt.value
-								? 'bg-teal-100 text-teal-700'
+								? 'bg-success-light text-success'
 								: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 						>
 							{opt.label}

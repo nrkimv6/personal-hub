@@ -136,10 +136,10 @@
 
 	function getStatusBadge(status: string) {
 		switch (status) {
-			case 'pending': return 'bg-yellow-100 text-yellow-800';
-			case 'processing': return 'bg-blue-100 text-blue-800';
-			case 'completed': return 'bg-green-100 text-green-800';
-			case 'failed': return 'bg-red-100 text-red-800';
+			case 'pending': return 'bg-warning-light text-warning-foreground';
+			case 'processing': return 'bg-primary-light text-primary';
+			case 'completed': return 'bg-success-light text-success';
+			case 'failed': return 'bg-error-light text-error';
 			default: return 'bg-muted text-foreground';
 		}
 	}
@@ -156,8 +156,8 @@
 
 	function getUrlTypeBadge(urlType: string) {
 		switch (urlType) {
-			case 'google_form': return 'bg-blue-100 text-blue-700';
-			case 'naver_form': return 'bg-green-100 text-green-700';
+			case 'google_form': return 'bg-primary-light text-primary';
+			case 'naver_form': return 'bg-success-light text-success';
 			case 'naver_blog': return 'bg-emerald-100 text-emerald-700';
 			default: return 'bg-muted text-muted-foreground';
 		}
@@ -169,9 +169,9 @@
 			return { text: '미분석', badge: 'bg-muted text-muted-foreground' };
 		}
 		if (req.crawled_page.is_event) {
-			return { text: '이벤트', badge: 'bg-purple-100 text-purple-700' };
+			return { text: '이벤트', badge: 'bg-purple-light text-purple' };
 		}
-		return { text: '미분류', badge: 'bg-yellow-100 text-yellow-700' };
+		return { text: '미분류', badge: 'bg-warning-light text-warning-foreground' };
 	}
 
 	function formatDate(dateStr: string) {
@@ -281,31 +281,31 @@
 			onclick={() => handleStatusFilter('pending')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'pending'
 				? 'bg-yellow-600 text-white'
-				: 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'}"
+				: 'bg-warning-light text-warning-foreground hover:bg-yellow-200'}"
 		>
 			대기
 		</button>
 		<button
 			onclick={() => handleStatusFilter('processing')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'processing'
-				? 'bg-blue-600 text-white'
-				: 'bg-blue-100 text-blue-700 hover:bg-blue-200'}"
+				? 'bg-primary text-white'
+				: 'bg-primary-light text-primary hover:bg-blue-200'}"
 		>
 			처리 중
 		</button>
 		<button
 			onclick={() => handleStatusFilter('completed')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'completed'
-				? 'bg-green-600 text-white'
-				: 'bg-green-100 text-green-700 hover:bg-green-200'}"
+				? 'bg-success text-white'
+				: 'bg-success-light text-success hover:bg-green-200'}"
 		>
 			완료
 		</button>
 		<button
 			onclick={() => handleStatusFilter('failed')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'failed'
-				? 'bg-red-600 text-white'
-				: 'bg-red-100 text-red-700 hover:bg-red-200'}"
+				? 'bg-error text-white'
+				: 'bg-error-light text-error hover:bg-red-200'}"
 		>
 			실패
 		</button>
@@ -325,7 +325,7 @@
 			onclick={() => handleAnalysisFilter('event')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterAnalysis === 'event'
 				? 'bg-purple-600 text-white'
-				: 'bg-purple-100 text-purple-700 hover:bg-purple-200'}"
+				: 'bg-purple-light text-purple hover:bg-purple-200'}"
 		>
 			이벤트
 		</button>
@@ -333,7 +333,7 @@
 			onclick={() => handleAnalysisFilter('uncategorized')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterAnalysis === 'uncategorized'
 				? 'bg-orange-600 text-white'
-				: 'bg-orange-100 text-orange-700 hover:bg-orange-200'}"
+				: 'bg-warning-light text-warning hover:bg-orange-200'}"
 		>
 			미분류
 		</button>
@@ -354,7 +354,7 @@
 		<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 	</div>
 {:else if error}
-	<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+	<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">
 		{error}
 	</div>
 {:else if requests.length === 0}
@@ -401,7 +401,7 @@
 									handleAnalyze(req);
 								}}
 								disabled={Boolean(req.crawled_page_id && analyzingPages.has(req.crawled_page_id))}
-								class="text-purple-600 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+								class="text-purple hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
 							>
 								{#if req.crawled_page_id && analyzingPages.has(req.crawled_page_id)}
 									분석 중...
@@ -416,7 +416,7 @@
 									e.stopPropagation();
 									handleRetry(req.id);
 								}}
-								class="text-blue-600 hover:underline"
+								class="text-primary hover:underline"
 							>
 								재시도
 							</button>
@@ -480,7 +480,7 @@
 											handleAnalyze(req);
 										}}
 										disabled={Boolean(req.crawled_page_id && analyzingPages.has(req.crawled_page_id))}
-										class="text-sm text-purple-600 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+										class="text-sm text-purple hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
 									>
 										{#if req.crawled_page_id && analyzingPages.has(req.crawled_page_id)}
 											분석 중...
@@ -495,7 +495,7 @@
 											e.stopPropagation();
 											handleRetry(req.id);
 										}}
-										class="text-sm text-blue-600 hover:underline"
+										class="text-sm text-primary hover:underline"
 									>
 										재시도
 									</button>
@@ -562,7 +562,7 @@
 						type="url"
 						bind:value={newUrl}
 						placeholder="https://forms.gle/... 또는 https://blog.naver.com/..."
-						class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+						class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 						onkeydown={(e) => e.key === 'Enter' && handleAddRequest()}
 					/>
 					<p class="mt-1 text-xs text-muted-foreground">
@@ -621,7 +621,7 @@
 						<div class="flex">
 							<dt class="w-24 text-muted-foreground">URL</dt>
 							<dd class="flex-1 break-all">
-								<a href={selectedRequest.url} target="_blank" class="text-blue-600 hover:underline">
+								<a href={selectedRequest.url} target="_blank" class="text-primary hover:underline">
 									{selectedRequest.url}
 								</a>
 							</dd>
@@ -643,7 +643,7 @@
 						{#if selectedRequest.error_message}
 							<div class="flex">
 								<dt class="w-24 text-muted-foreground">오류</dt>
-								<dd class="text-red-600">{selectedRequest.error_message}</dd>
+								<dd class="text-error">{selectedRequest.error_message}</dd>
 							</div>
 						{/if}
 					</dl>
@@ -655,7 +655,7 @@
 						<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
 					</div>
 				{:else if selectedPage}
-					<div class="bg-blue-50 rounded-lg p-4">
+					<div class="bg-primary-light rounded-lg p-4">
 						<h4 class="text-sm font-medium text-foreground mb-2">크롤링 결과</h4>
 						<dl class="space-y-2 text-sm">
 							{#if selectedPage.title}
@@ -689,16 +689,16 @@
 
 					<!-- AI 분석 결과 -->
 					{#if selectedPage.is_event !== null && selectedPage.is_event !== undefined}
-						<div class="bg-purple-50 rounded-lg p-4">
+						<div class="bg-purple-light rounded-lg p-4">
 							<h4 class="text-sm font-medium text-foreground mb-2">AI 분석 결과</h4>
 							<dl class="space-y-2 text-sm">
 								<div class="flex">
 									<dt class="w-24 text-muted-foreground">분류</dt>
 									<dd>
 										{#if selectedPage.is_event}
-											<span class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-700">이벤트</span>
+											<span class="px-2 py-1 text-xs rounded-full bg-purple-light text-purple">이벤트</span>
 										{:else}
-											<span class="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-700">미분류</span>
+											<span class="px-2 py-1 text-xs rounded-full bg-warning-light text-warning-foreground">미분류</span>
 										{/if}
 									</dd>
 								</div>
@@ -734,7 +734,7 @@
 					<button
 						onclick={() => selectedRequest && handleAnalyze(selectedRequest)}
 						disabled={Boolean(selectedRequest.crawled_page_id && analyzingPages.has(selectedRequest.crawled_page_id))}
-						class="btn btn-outline btn-sm text-purple-600 border-purple-300 hover:bg-purple-50 disabled:opacity-50"
+						class="btn btn-outline btn-sm text-purple border-purple-300 hover:bg-purple-light disabled:opacity-50"
 					>
 						{#if selectedRequest.crawled_page_id && analyzingPages.has(selectedRequest.crawled_page_id)}
 							<span class="flex items-center gap-2">

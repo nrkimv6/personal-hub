@@ -148,11 +148,11 @@
 	function getStatusColor(mode: string): string {
 		switch (mode) {
 			case 'blocking':
-				return 'bg-red-100 text-red-800 border-red-200';
+				return 'bg-error-light text-error border-red-200';
 			case 'warning':
-				return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+				return 'bg-warning-light text-warning-foreground border-yellow-200';
 			case 'grace':
-				return 'bg-blue-100 text-blue-800 border-blue-200';
+				return 'bg-primary-light text-primary border-blue-200';
 			default:
 				return 'bg-muted text-foreground border-border';
 		}
@@ -176,15 +176,15 @@
 	function getLogTypeColor(type: string): string {
 		switch (type) {
 			case 'block_start':
-				return 'bg-red-100 text-red-700';
+				return 'bg-error-light text-error';
 			case 'block_end':
-				return 'bg-green-100 text-green-700';
+				return 'bg-success-light text-success';
 			case 'bypass_attempt':
-				return 'bg-orange-100 text-orange-700';
+				return 'bg-warning-light text-warning';
 			case 'emergency_unlock':
-				return 'bg-blue-100 text-blue-700';
+				return 'bg-primary-light text-primary';
 			case 'skip_today':
-				return 'bg-purple-100 text-purple-700';
+				return 'bg-purple-light text-purple';
 			default:
 				return 'bg-muted text-foreground';
 		}
@@ -233,7 +233,7 @@
 			<div class="text-muted-foreground">로딩 중...</div>
 		</div>
 	{:else if error}
-		<div class="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+		<div class="bg-error-light border border-red-200 rounded-lg p-4 text-error">
 			{error}
 		</div>
 	{:else}
@@ -272,14 +272,14 @@
 							</div>
 						{/if}
 						{#if status.grace_until}
-							<div class="text-sm text-blue-600">
+							<div class="text-sm text-primary">
 								<span class="font-medium">유예 종료:</span>
 								{formatDateTime(status.grace_until)}
 							</div>
 						{/if}
 						<div class="text-sm text-muted-foreground">
 							<span class="font-medium">오늘 우회 시도:</span>
-							<span class="text-orange-600 font-semibold">{status.bypass_attempts_today}회</span>
+							<span class="text-warning font-semibold">{status.bypass_attempts_today}회</span>
 						</div>
 					</div>
 				{/if}
@@ -292,17 +292,17 @@
 					<div class="space-y-3">
 						<div class="text-sm">
 							<span class="font-medium text-foreground">차단 시작:</span>
-							<span class="text-red-600 font-semibold">{schedule.block_start}</span>
+							<span class="text-error font-semibold">{schedule.block_start}</span>
 						</div>
 						<div class="text-sm">
 							<span class="font-medium text-foreground">차단 해제:</span>
-							<span class="text-green-600 font-semibold">{schedule.block_end}</span>
+							<span class="text-success font-semibold">{schedule.block_end}</span>
 						</div>
 						<div class="text-sm">
 							<span class="font-medium text-foreground">경고 시간:</span>
 							<div class="mt-1 flex flex-wrap gap-1">
 								{#each schedule.warning_times as time}
-									<span class="px-2 py-0.5 bg-yellow-100 text-yellow-700 text-xs rounded">
+									<span class="px-2 py-0.5 bg-warning-light text-warning-foreground text-xs rounded">
 										{time}
 									</span>
 								{/each}
@@ -319,13 +319,13 @@
 					<div class="space-y-2">
 						<div class="text-sm">
 							<span class="font-medium text-foreground">총 우회 시도:</span>
-							<span class="text-orange-600 font-semibold">
+							<span class="text-warning font-semibold">
 								{stats.reduce((sum, s) => sum + s.bypass_attempts, 0)}회
 							</span>
 						</div>
 						<div class="text-sm">
 							<span class="font-medium text-foreground">긴급 해제:</span>
-							<span class="text-blue-600 font-semibold">
+							<span class="text-primary font-semibold">
 								{stats.reduce((sum, s) => sum + s.emergency_unlocks, 0)}회
 							</span>
 						</div>
@@ -345,12 +345,12 @@
 			</p>
 
 			{#if unlockError}
-				<div class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+				<div class="mb-4 p-3 bg-error-light border border-red-200 rounded-lg text-error text-sm">
 					{unlockError}
 				</div>
 			{/if}
 			{#if unlockSuccess}
-				<div class="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
+				<div class="mb-4 p-3 bg-success-light border border-green-200 rounded-lg text-success text-sm">
 					{unlockSuccess}
 				</div>
 			{/if}
@@ -364,7 +364,7 @@
 						type="password"
 						id="password"
 						bind:value={password}
-						class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+						class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 						placeholder="16자 이상의 비밀번호"
 					/>
 				</div>
@@ -376,7 +376,7 @@
 						type="text"
 						id="reason"
 						bind:value={reason}
-						class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+						class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 						placeholder="해제 사유 입력"
 					/>
 				</div>
@@ -384,7 +384,7 @@
 					<button
 						onclick={emergencyUnlock}
 						disabled={unlocking}
-						class="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg transition-colors"
+						class="px-4 py-2 bg-primary hover:bg-primary-hover disabled:bg-blue-400 text-white rounded-lg transition-colors"
 					>
 						{unlocking ? '처리 중...' : '1시간 유예'}
 					</button>

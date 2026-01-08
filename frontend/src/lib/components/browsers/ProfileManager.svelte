@@ -228,9 +228,9 @@
 
   function getServiceTypeColor(type: string): string {
     switch (type) {
-      case 'naver': return 'bg-green-100 text-green-700';
-      case 'instagram': return 'bg-pink-100 text-pink-700';
-      case 'coupang': return 'bg-red-100 text-red-700';
+      case 'naver': return 'bg-success-light text-success';
+      case 'instagram': return 'bg-pink-light text-pink';
+      case 'coupang': return 'bg-error-light text-error';
       default: return 'bg-muted text-foreground';
     }
   }
@@ -245,7 +245,7 @@
     </div>
     <button
       onclick={openCreateModal}
-      class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+      class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors"
     >
       + 프로필 추가
     </button>
@@ -257,7 +257,7 @@
       <p class="mt-2 text-muted-foreground">로딩 중...</p>
     </div>
   {:else if error}
-    <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+    <div class="bg-error-light border border-red-200 rounded-lg p-4 text-error">
       {error}
     </div>
   {:else if profiles.length === 0}
@@ -265,7 +265,7 @@
       <p class="text-muted-foreground">등록된 프로필이 없습니다</p>
       <button
         onclick={openCreateModal}
-        class="mt-4 text-blue-600 hover:underline"
+        class="mt-4 text-primary hover:underline"
       >
         첫 프로필 추가하기
       </button>
@@ -279,7 +279,7 @@
               <!-- 프로필 헤더 -->
               <div class="flex items-center gap-3">
                 <h3 class="text-lg font-semibold text-foreground">{profile.name}</h3>
-                <span class="px-2 py-1 text-xs rounded-full {profile.is_active ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'}">
+                <span class="px-2 py-1 text-xs rounded-full {profile.is_active ? 'bg-success-light text-success' : 'bg-muted text-muted-foreground'}">
                   {profile.is_active ? '활성' : '비활성'}
                 </span>
               </div>
@@ -300,7 +300,7 @@
                   <span class="text-sm font-medium text-foreground">서비스 계정</span>
                   <button
                     onclick={() => openAddAccountModal(profile.id)}
-                    class="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+                    class="px-2 py-0.5 text-xs bg-primary-light text-primary rounded hover:bg-blue-200 transition-colors"
                   >
                     + 추가
                   </button>
@@ -320,7 +320,7 @@
                             {account.identifier || '(미설정)'}
                           </span>
                           {#if account.is_logged_in}
-                            <span class="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700">
+                            <span class="px-2 py-0.5 text-xs rounded-full bg-primary-light text-primary">
                               로그인됨
                             </span>
                           {/if}
@@ -339,7 +339,7 @@
                           <button
                             onclick={() => openLoginPage(account)}
                             disabled={!!browserLoading[account.id]}
-                            class="px-2 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                            class="px-2 py-1 text-xs bg-success-light text-success rounded hover:bg-green-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
                             title="로그인 페이지 열기"
                           >
                             {browserLoading[account.id] === 'login' ? '...' : '로그인'}
@@ -347,7 +347,7 @@
                           <button
                             onclick={() => checkLoginStatus(account)}
                             disabled={!!browserLoading[account.id]}
-                            class="px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                            class="px-2 py-1 text-xs bg-primary-light text-primary rounded hover:bg-blue-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
                             title="로그인 상태 확인"
                           >
                             {browserLoading[account.id] === 'check' ? '...' : '확인'}
@@ -355,14 +355,14 @@
                           <button
                             onclick={() => closeBrowser(account)}
                             disabled={!!browserLoading[account.id]}
-                            class="px-2 py-1 text-xs bg-orange-100 text-orange-700 rounded hover:bg-orange-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                            class="px-2 py-1 text-xs bg-warning-light text-warning rounded hover:bg-orange-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
                             title="브라우저 세션 종료"
                           >
                             {browserLoading[account.id] === 'close' ? '...' : '종료'}
                           </button>
                           <button
                             onclick={() => deleteServiceAccount(account.id, account.identifier)}
-                            class="px-2 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors"
+                            class="px-2 py-1 text-xs bg-error-light text-error rounded hover:bg-error-light transition-colors"
                           >
                             삭제
                           </button>
@@ -391,7 +391,7 @@
               </button>
               <button
                 onclick={() => deleteProfile(profile.id, profile.name)}
-                class="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors"
+                class="px-3 py-1.5 text-sm bg-error-light text-error rounded hover:bg-error-light transition-colors"
               >
                 삭제
               </button>
@@ -414,13 +414,13 @@
       <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }} class="space-y-4">
         <div>
           <label class="block text-sm font-medium text-foreground mb-1" for="profile-name">
-            프로필명 <span class="text-red-500">*</span>
+            프로필명 <span class="text-error">*</span>
           </label>
           <input
             id="profile-name"
             type="text"
             bind:value={formData.name}
-            class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-transparent"
             placeholder="예: 메인 프로필"
             required
           />
@@ -428,13 +428,13 @@
 
         <div>
           <label class="block text-sm font-medium text-foreground mb-1" for="profile-dir">
-            프로필 디렉토리 <span class="text-red-500">*</span>
+            프로필 디렉토리 <span class="text-error">*</span>
           </label>
           <input
             id="profile-dir"
             type="text"
             bind:value={formData.profile_dir}
-            class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-transparent"
             placeholder="예: profile_1"
             required
             disabled={!!editingProfile}
@@ -449,7 +449,7 @@
           <textarea
             id="description"
             bind:value={formData.description}
-            class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-transparent"
             rows="2"
             placeholder="예: 서브 계정용 프로필"
           ></textarea>
@@ -460,7 +460,7 @@
             type="checkbox"
             id="is_active"
             bind:checked={formData.is_active}
-            class="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+            class="w-4 h-4 text-primary rounded focus:ring-2 focus:ring-ring"
           />
           <label for="is_active" class="text-sm text-foreground">활성화</label>
         </div>
@@ -475,7 +475,7 @@
           </button>
           <button
             type="submit"
-            class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            class="flex-1 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors"
           >
             {editingProfile ? '수정' : '추가'}
           </button>
@@ -494,12 +494,12 @@
       <form onsubmit={(e) => { e.preventDefault(); handleAddAccount(); }} class="space-y-4">
         <div>
           <label class="block text-sm font-medium text-foreground mb-1" for="service-type">
-            서비스 타입 <span class="text-red-500">*</span>
+            서비스 타입 <span class="text-error">*</span>
           </label>
           <select
             id="service-type"
             bind:value={accountFormData.service_type}
-            class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-transparent"
           >
             <option value="naver">네이버</option>
             <option value="instagram">Instagram</option>
@@ -515,7 +515,7 @@
             id="identifier"
             type="text"
             bind:value={accountFormData.identifier}
-            class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-transparent"
             placeholder="예: user@naver.com"
           />
         </div>
@@ -530,7 +530,7 @@
           </button>
           <button
             type="submit"
-            class="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            class="flex-1 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors"
           >
             추가
           </button>

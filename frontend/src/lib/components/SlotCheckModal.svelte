@@ -127,15 +127,15 @@
 
 	// 슬롯 상태에 따른 색상
 	function getSlotBgColor(slot: SlotInfo): string {
-		if (!slot.is_available) return 'bg-red-50';
-		if (slot.remaining <= 2) return 'bg-yellow-50';
-		return 'bg-green-50';
+		if (!slot.is_available) return 'bg-error-light';
+		if (slot.remaining <= 2) return 'bg-warning-light';
+		return 'bg-success-light';
 	}
 
 	function getSlotTextColor(slot: SlotInfo): string {
-		if (!slot.is_available) return 'text-red-600';
-		if (slot.remaining <= 2) return 'text-yellow-600';
-		return 'text-green-600';
+		if (!slot.is_available) return 'text-error';
+		if (slot.remaining <= 2) return 'text-warning-foreground';
+		return 'text-success';
 	}
 
 	function getSlotBorderColor(slot: SlotInfo): string {
@@ -152,17 +152,17 @@
 	// 진행률 바 색상
 	function getProgressColor(booked: number, capacity: number): string {
 		const ratio = capacity > 0 ? booked / capacity : 1;
-		if (ratio >= 1) return 'bg-red-500';
-		if (ratio >= 0.8) return 'bg-yellow-500';
-		return 'bg-green-500';
+		if (ratio >= 1) return 'bg-error';
+		if (ratio >= 0.8) return 'bg-warning';
+		return 'bg-success';
 	}
 
 	// 날짜 요약 상태
 	function getDateStatusColor(dateSlots: DateSlots): string {
 		const { total_remaining, total_capacity } = dateSlots.summary;
-		if (total_remaining === 0) return 'text-red-600';
-		if (total_remaining / total_capacity < 0.2) return 'text-yellow-600';
-		return 'text-green-600';
+		if (total_remaining === 0) return 'text-error';
+		if (total_remaining / total_capacity < 0.2) return 'text-warning-foreground';
+		return 'text-success';
 	}
 
 	// URL 복사
@@ -241,7 +241,7 @@
 								type="date"
 								bind:value={targetDate}
 								min={getTodayDate()}
-								class="px-3 py-1.5 border border-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+								class="px-3 py-1.5 border border-border rounded-lg text-sm focus:ring-2 focus:ring-ring focus:border-transparent"
 							/>
 						</div>
 
@@ -249,7 +249,7 @@
 							<label class="text-sm text-foreground">조회 기간:</label>
 							<select
 								bind:value={daysAhead}
-								class="px-3 py-1.5 border border-border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+								class="px-3 py-1.5 border border-border rounded-lg text-sm focus:ring-2 focus:ring-ring focus:border-transparent"
 							>
 								<option value={7}>7일</option>
 								<option value={14}>14일</option>
@@ -262,7 +262,7 @@
 						<button
 							onclick={checkSlots}
 							disabled={loading}
-							class="ml-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors text-sm"
+							class="ml-auto px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors text-sm"
 						>
 							{#if loading}
 								<span class="flex items-center gap-2">
@@ -293,7 +293,7 @@
 
 				<!-- 에러 메시지 -->
 				{#if error}
-					<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
+					<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg mb-4">
 						<div class="flex items-center gap-2">
 							<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path
@@ -318,14 +318,14 @@
 									<p class="text-2xl font-bold text-foreground">{result.summary.total_slots}</p>
 									<p class="text-xs text-muted-foreground">총 슬롯</p>
 								</div>
-								<div class="text-center px-4 py-2 bg-green-50 rounded-lg">
-									<p class="text-2xl font-bold text-green-600">
+								<div class="text-center px-4 py-2 bg-success-light rounded-lg">
+									<p class="text-2xl font-bold text-success">
 										{result.summary.total_available_slots}
 									</p>
 									<p class="text-xs text-muted-foreground">예약 가능</p>
 								</div>
-								<div class="text-center px-4 py-2 bg-blue-50 rounded-lg">
-									<p class="text-2xl font-bold text-blue-600">
+								<div class="text-center px-4 py-2 bg-primary-light rounded-lg">
+									<p class="text-2xl font-bold text-primary">
 										{result.summary.available_dates.length}
 									</p>
 									<p class="text-xs text-muted-foreground">예약 가능일</p>
@@ -371,16 +371,16 @@
 											{monitoringStats.total_checks.toLocaleString()}회
 										</p>
 									</div>
-									<div class="p-3 bg-green-50 rounded-lg">
+									<div class="p-3 bg-success-light rounded-lg">
 										<p class="text-xs text-muted-foreground">재고 발견</p>
-										<p class="text-lg font-bold text-green-600">
+										<p class="text-lg font-bold text-success">
 											{monitoringStats.available_count}회
 											<span class="text-sm font-normal">({getAvailableRate()}%)</span>
 										</p>
 									</div>
-									<div class="p-3 bg-blue-50 rounded-lg">
+									<div class="p-3 bg-primary-light rounded-lg">
 										<p class="text-xs text-muted-foreground">평균 응답</p>
-										<p class="text-lg font-bold text-blue-600">
+										<p class="text-lg font-bold text-primary">
 											{monitoringStats.avg_response_time_ms
 												? Math.round(monitoringStats.avg_response_time_ms)
 												: '-'}ms
@@ -435,7 +435,7 @@
 										</span>
 										{#if result.summary.available_dates.includes(dateSlots.date)}
 											<span
-												class="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 rounded-full"
+												class="px-2 py-0.5 text-xs font-medium bg-success-light text-success rounded-full"
 											>
 												예약가능
 											</span>

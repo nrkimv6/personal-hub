@@ -639,11 +639,11 @@
 			{#if isAnonymous}
 				<!-- 익명 사용자: 필터 비활성화, 고정 배지만 표시 -->
 				{#if activeTab === 'online'}
-					<span class="px-2 py-1 text-xs font-medium bg-orange-100 text-orange-700 rounded-full">
+					<span class="px-2 py-1 text-xs font-medium bg-warning-light text-warning rounded-full">
 						내일까지
 					</span>
 				{:else if activeTab === 'offline'}
-					<span class="px-2 py-1 text-xs font-medium bg-green-100 text-green-700 rounded-full">
+					<span class="px-2 py-1 text-xs font-medium bg-success-light text-success rounded-full">
 						진행중
 					</span>
 				{:else}
@@ -667,7 +667,7 @@
 					</svg>
 					필터
 					{#if activeFilterCount > 0}
-						<span class="px-1.5 py-0.5 text-xs bg-blue-600 text-white rounded-full"
+						<span class="px-1.5 py-0.5 text-xs bg-primary text-white rounded-full"
 							>{activeFilterCount}</span
 						>
 					{/if}
@@ -676,7 +676,7 @@
 
 			<span class="text-sm text-muted-foreground">총 {total}건</span>
 			{#if unknownPeriodFilter === 'only'}
-				<span class="hidden sm:inline text-sm text-amber-600">(기간미정만)</span>
+				<span class="hidden sm:inline text-sm text-warning">(기간미정만)</span>
 			{:else if unknownPeriodFilter === 'exclude'}
 				<span class="hidden sm:inline text-sm text-muted-foreground">(기간미정 제외)</span>
 			{/if}
@@ -689,7 +689,7 @@
 			<button
 				onclick={() => switchTab('online')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'online'
-					? 'border-purple-600 text-purple-600'
+					? 'border-purple-600 text-purple'
 					: 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				온라인 이벤트
@@ -697,7 +697,7 @@
 			<button
 				onclick={() => switchTab('offline')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'offline'
-					? 'border-green-600 text-green-600'
+					? 'border-green-600 text-success'
 					: 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				오프라인 이벤트
@@ -705,7 +705,7 @@
 			<button
 				onclick={() => switchTab('popup')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'popup'
-					? 'border-pink-600 text-pink-600'
+					? 'border-pink-600 text-pink'
 					: 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				팝업
@@ -753,7 +753,7 @@
 				<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 			</div>
 		{:else if error}
-			<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+			<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">
 				{error}
 			</div>
 		{:else if (activeTab === 'popup' ? popups.length : activeTab === 'uncategorized' ? uncategorizedPosts.length : events.length) === 0}
@@ -799,13 +799,13 @@
 							<div class="flex gap-2" onclick={(e) => e.stopPropagation()}>
 								<button
 									onclick={() => handleReclassify(post, 'event')}
-									class="px-2 py-1 text-xs bg-purple-100 text-purple-700 rounded hover:bg-purple-200"
+									class="px-2 py-1 text-xs bg-purple-light text-purple rounded hover:bg-purple-200"
 								>
 									이벤트로
 								</button>
 								<button
 									onclick={() => handleReclassify(post, 'popup')}
-									class="px-2 py-1 text-xs bg-pink-100 text-pink-700 rounded hover:bg-pink-200"
+									class="px-2 py-1 text-xs bg-pink-light text-pink rounded hover:bg-pink-200"
 								>
 									팝업으로
 								</button>

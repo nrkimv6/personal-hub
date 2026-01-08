@@ -8,9 +8,9 @@
   let { resource }: Props = $props();
 
   function getProgressColor(percent: number) {
-    if (percent >= 90) return 'bg-red-500';
-    if (percent >= 70) return 'bg-yellow-500';
-    return 'bg-blue-500';
+    if (percent >= 90) return 'bg-error';
+    if (percent >= 70) return 'bg-warning';
+    return 'bg-primary';
   }
 
   function formatMB(mb: number) {

@@ -133,10 +133,10 @@
 
   function getStatusBadgeClass(status: string): string {
     const classes: Record<string, string> = {
-      active: 'bg-green-100 text-green-800',
-      pending: 'bg-yellow-100 text-yellow-800',
+      active: 'bg-success-light text-success',
+      pending: 'bg-warning-light text-warning-foreground',
       inactive: 'bg-muted text-foreground',
-      blacklisted: 'bg-red-100 text-red-800'
+      blacklisted: 'bg-error-light text-error'
     };
     return classes[status] || 'bg-muted text-foreground';
   }
@@ -158,7 +158,7 @@
         bind:value={searchQuery}
         onkeyup={(e) => e.key === 'Enter' && handleFilterChange()}
         placeholder="IP, 호스트 검색..."
-        class="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+        class="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
       />
     </div>
     <div>
@@ -167,7 +167,7 @@
         id="status"
         bind:value={statusFilter}
         onchange={handleFilterChange}
-        class="px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+        class="px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
       >
         {#each statusOptions as opt}
           <option value={opt.value}>{opt.label}</option>
@@ -180,7 +180,7 @@
         id="protocol"
         bind:value={protocolFilter}
         onchange={handleFilterChange}
-        class="px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+        class="px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
       >
         {#each protocolOptions as opt}
           <option value={opt.value}>{opt.label}</option>
@@ -193,7 +193,7 @@
         id="sort"
         bind:value={sortBy}
         onchange={() => loadData()}
-        class="px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+        class="px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
       >
         {#each sortOptions as opt}
           <option value={opt.value}>{opt.label}</option>
@@ -202,7 +202,7 @@
     </div>
     <button
       onclick={handleFilterChange}
-      class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+      class="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover transition-colors"
     >
       검색
     </button>
@@ -215,7 +215,7 @@
     <span class="ml-3 text-muted-foreground">로딩 중...</span>
   </div>
 {:else if error}
-  <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+  <div class="bg-error-light border border-red-200 rounded-lg p-4 text-error">
     {error}
     <button onclick={loadData} class="ml-2 underline hover:no-underline">다시 시도</button>
   </div>
@@ -277,7 +277,7 @@
           {#each proxies as proxy}
             <tr class="hover:bg-muted">
               <td class="px-4 py-3">
-                <a href="/proxy/{proxy.id}" class="text-blue-600 hover:underline font-mono text-sm">
+                <a href="/proxy/{proxy.id}" class="text-primary hover:underline font-mono text-sm">
                   {proxy.host}:{proxy.port}
                 </a>
                 {#if proxy.country}
@@ -311,7 +311,7 @@
                 <div class="flex items-center justify-center gap-1">
                   <a
                     href="/proxy/{proxy.id}"
-                    class="p-1 text-muted-foreground hover:text-blue-600 transition-colors"
+                    class="p-1 text-muted-foreground hover:text-primary transition-colors"
                     title="상세 보기"
                   >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -322,7 +322,7 @@
                   {#if proxy.status === 'blacklisted'}
                     <button
                       onclick={() => handleStatusChange(proxy, 'active')}
-                      class="p-1 text-muted-foreground hover:text-green-600 transition-colors"
+                      class="p-1 text-muted-foreground hover:text-success transition-colors"
                       title="블랙리스트 해제"
                     >
                       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -332,7 +332,7 @@
                   {:else}
                     <button
                       onclick={() => handleStatusChange(proxy, 'blacklisted')}
-                      class="p-1 text-muted-foreground hover:text-red-600 transition-colors"
+                      class="p-1 text-muted-foreground hover:text-error transition-colors"
                       title="블랙리스트 등록"
                     >
                       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -342,7 +342,7 @@
                   {/if}
                   <button
                     onclick={() => handleDelete(proxy)}
-                    class="p-1 text-muted-foreground hover:text-red-600 transition-colors"
+                    class="p-1 text-muted-foreground hover:text-error transition-colors"
                     title="삭제"
                   >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

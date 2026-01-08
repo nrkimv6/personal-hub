@@ -43,22 +43,22 @@
 			<div class="animate-spin w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
 			<p class="text-muted-foreground">로그인 처리 중...</p>
 		{:else if status === 'success'}
-			<div class="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-				<svg class="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+			<div class="w-12 h-12 bg-success-light rounded-full flex items-center justify-center mx-auto mb-4">
+				<svg class="w-6 h-6 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
 				</svg>
 			</div>
-			<p class="text-green-600 font-medium">로그인 성공!</p>
+			<p class="text-success font-medium">로그인 성공!</p>
 			<p class="text-muted-foreground text-sm mt-2">잠시 후 이동합니다...</p>
 		{:else}
-			<div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-				<svg class="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+			<div class="w-12 h-12 bg-error-light rounded-full flex items-center justify-center mx-auto mb-4">
+				<svg class="w-6 h-6 text-error" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
 				</svg>
 			</div>
-			<p class="text-red-600 font-medium">로그인 실패</p>
+			<p class="text-error font-medium">로그인 실패</p>
 			<p class="text-muted-foreground text-sm mt-2">{errorMessage}</p>
-			<a href="/" class="inline-block mt-4 text-blue-500 hover:underline">홈으로 돌아가기</a>
+			<a href="/" class="inline-block mt-4 text-primary hover:underline">홈으로 돌아가기</a>
 		{/if}
 	</div>
 </div>

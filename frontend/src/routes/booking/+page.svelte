@@ -167,7 +167,7 @@
         <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
       </div>
     {:else if error}
-      <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+      <div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">
         {error}
       </div>
     {:else if getAutoBookingSchedules().length === 0}
@@ -305,11 +305,11 @@
               {#if filterTest.result.filtered_slots.length > 0}
                 <ul class="mt-2 space-y-1">
                   {#each filterTest.result.filtered_slots as slot}
-                    <li class="text-green-600">✓ {slot}</li>
+                    <li class="text-success">✓ {slot}</li>
                   {/each}
                 </ul>
               {:else}
-                <p class="text-yellow-600 mt-2">조건에 맞는 슬롯이 없습니다.</p>
+                <p class="text-warning-foreground mt-2">조건에 맞는 슬롯이 없습니다.</p>
               {/if}
             </div>
           {/if}

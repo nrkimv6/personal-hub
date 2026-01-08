@@ -72,13 +72,13 @@
 			case 'pending':
 				return { class: 'bg-muted text-foreground', text: '대기' };
 			case 'picked':
-				return { class: 'bg-yellow-100 text-yellow-800', text: '픽업됨' };
+				return { class: 'bg-warning-light text-warning-foreground', text: '픽업됨' };
 			case 'processing':
-				return { class: 'bg-blue-100 text-blue-800', text: '처리중' };
+				return { class: 'bg-primary-light text-primary', text: '처리중' };
 			case 'completed':
-				return { class: 'bg-green-100 text-green-800', text: '완료' };
+				return { class: 'bg-success-light text-success', text: '완료' };
 			case 'failed':
-				return { class: 'bg-red-100 text-red-800', text: '실패' };
+				return { class: 'bg-error-light text-error', text: '실패' };
 			default:
 				return { class: 'bg-muted text-foreground', text: status };
 		}
@@ -150,7 +150,7 @@
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 		</div>
 	{:else if error}
-		<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+		<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">
 			{error}
 		</div>
 	{:else if !requests || requests.length === 0}
@@ -189,7 +189,7 @@
 									{badge.text}
 								</span>
 								{#if req.error_message}
-									<span class="ml-2 text-xs text-red-500" title={req.error_message}>
+									<span class="ml-2 text-xs text-error" title={req.error_message}>
 										{req.error_message.substring(0, 20)}...
 									</span>
 								{/if}

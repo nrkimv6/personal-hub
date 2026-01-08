@@ -223,8 +223,8 @@
 	}
 
 	function getSourceTypeClass(type: string): string {
-		if (type === 'auto') return 'bg-green-100 text-green-800';
-		if (type === 'manual') return 'bg-blue-100 text-blue-800';
+		if (type === 'auto') return 'bg-success-light text-success';
+		if (type === 'manual') return 'bg-primary-light text-primary';
 		return 'bg-muted text-muted-foreground';
 	}
 
@@ -594,9 +594,9 @@
 	function getBatchStatusClass(status: string): string {
 		switch (status) {
 			case 'pending': return 'bg-muted text-foreground';
-			case 'running': return 'bg-blue-100 text-blue-800';
-			case 'completed': return 'bg-green-100 text-green-800';
-			case 'failed': return 'bg-red-100 text-red-800';
+			case 'running': return 'bg-primary-light text-primary';
+			case 'completed': return 'bg-success-light text-success';
+			case 'failed': return 'bg-error-light text-error';
 			default: return 'bg-muted text-muted-foreground';
 		}
 	}
@@ -647,9 +647,9 @@
 
 	<!-- 실행 결과 알림 -->
 	{#if runResult}
-		<div class="mb-4 p-4 bg-green-50 border border-green-200 text-green-700 rounded-lg">
+		<div class="mb-4 p-4 bg-success-light border border-green-200 text-success rounded-lg">
 			실행 완료: 소스 혼합 {runResult.mix_count}개, 랜덤 작문 {runResult.random_count}개 생성됨
-			<button onclick={() => runResult = null} class="ml-4 text-green-800 hover:underline">닫기</button>
+			<button onclick={() => runResult = null} class="ml-4 text-success hover:underline">닫기</button>
 		</div>
 	{/if}
 
@@ -662,19 +662,19 @@
 			</div>
 			<div class="card p-4">
 				<div class="text-sm text-muted-foreground">생성된 글</div>
-				<div class="text-2xl font-bold text-blue-600">{stats.generated_count}</div>
+				<div class="text-2xl font-bold text-primary">{stats.generated_count}</div>
 			</div>
 			<div class="card p-4">
 				<div class="text-sm text-muted-foreground">소스 혼합</div>
-				<div class="text-2xl font-bold text-purple-600">{stats.by_type.mix}</div>
+				<div class="text-2xl font-bold text-purple">{stats.by_type.mix}</div>
 			</div>
 			<div class="card p-4">
 				<div class="text-sm text-muted-foreground">랜덤 작문</div>
-				<div class="text-2xl font-bold text-indigo-600">{stats.by_type.random}</div>
+				<div class="text-2xl font-bold text-primary">{stats.by_type.random}</div>
 			</div>
 			<div class="card p-4">
 				<div class="text-sm text-muted-foreground">오늘 생성</div>
-				<div class="text-2xl font-bold text-green-600">{stats.today_count}</div>
+				<div class="text-2xl font-bold text-success">{stats.today_count}</div>
 			</div>
 		</div>
 	{/if}
@@ -684,31 +684,31 @@
 		<nav class="flex gap-4">
 			<button
 				onclick={() => switchTab('writings')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'writings' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'writings' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				생성된 글 ({stats?.generated_count ?? 0})
 			</button>
 			<button
 				onclick={() => switchTab('sources')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'sources' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'sources' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				소스 ({stats?.source_count ?? 0})
 			</button>
 			<button
 				onclick={() => switchTab('keywords')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'keywords' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'keywords' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				키워드 ({keywordStats?.total_keywords ?? 0})
 			</button>
 			<button
 				onclick={() => switchTab('elements')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'elements' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'elements' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				소재 ({elementStats?.total ?? 0})
 			</button>
 			<button
 				onclick={() => switchTab('batches')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'batches' ? 'border-blue-600 text-blue-600' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'batches' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				배치 ({batchTotal})
 			</button>
@@ -738,7 +738,7 @@
 				<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 			</div>
 		{:else if error}
-			<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">{error}</div>
+			<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">{error}</div>
 		{:else if writings.length === 0}
 			<div class="text-center py-12 text-muted-foreground">
 				<p class="text-lg">생성된 글이 없습니다</p>
@@ -765,7 +765,7 @@
 							>
 								<td class="px-4 py-3 text-sm text-foreground">{writing.id}</td>
 								<td class="px-4 py-3">
-									<span class="px-2 py-1 text-xs rounded-full {writing.task_type === 'mix' ? 'bg-purple-100 text-purple-800' : 'bg-indigo-100 text-indigo-800'}">
+									<span class="px-2 py-1 text-xs rounded-full {writing.task_type === 'mix' ? 'bg-purple-light text-purple-800' : 'bg-primary-light text-indigo-800'}">
 										{getTaskTypeLabel(writing.task_type)}
 									</span>
 								</td>
@@ -803,7 +803,7 @@
 				<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 			</div>
 		{:else if error}
-			<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">{error}</div>
+			<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">{error}</div>
 		{:else if sources.length === 0}
 			<div class="text-center py-12 text-muted-foreground">
 				<p class="text-lg">소스가 없습니다</p>
@@ -866,33 +866,33 @@
 				</div>
 				<div class="card p-4">
 					<div class="text-sm text-muted-foreground">승격됨</div>
-					<div class="text-2xl font-bold text-green-600">{keywordStats.promoted.toLocaleString()}</div>
+					<div class="text-2xl font-bold text-success">{keywordStats.promoted.toLocaleString()}</div>
 				</div>
 				<div class="card p-4">
 					<div class="text-sm text-muted-foreground">불용어</div>
-					<div class="text-2xl font-bold text-red-600">{keywordStats.stopwords.toLocaleString()}</div>
+					<div class="text-2xl font-bold text-error">{keywordStats.stopwords.toLocaleString()}</div>
 				</div>
 				<div class="card p-4">
 					<div class="text-sm text-muted-foreground">검토됨</div>
-					<div class="text-2xl font-bold text-blue-600">{keywordStats.reviewed.toLocaleString()}</div>
+					<div class="text-2xl font-bold text-primary">{keywordStats.reviewed.toLocaleString()}</div>
 				</div>
 				<div class="card p-4">
 					<div class="text-sm text-muted-foreground">미검토</div>
-					<div class="text-2xl font-bold text-orange-600">{keywordStats.pending_review.toLocaleString()}</div>
+					<div class="text-2xl font-bold text-warning">{keywordStats.pending_review.toLocaleString()}</div>
 				</div>
 			</div>
 		{/if}
 
 		<!-- 분석 결과 알림 -->
 		{#if analyzeResult}
-			<div class="mb-4 p-4 bg-green-50 border border-green-200 text-green-700 rounded-lg">
+			<div class="mb-4 p-4 bg-success-light border border-green-200 text-success rounded-lg">
 				분석 완료 ({analyzeResult.mode}):
 				{#if analyzeResult.saved_keywords}
 					{analyzeResult.saved_keywords.toLocaleString()}개 키워드 저장
 				{:else}
 					신규 {analyzeResult.new_keywords ?? 0}개, 업데이트 {analyzeResult.updated_keywords ?? 0}개
 				{/if}
-				<button onclick={() => analyzeResult = null} class="ml-4 text-green-800 hover:underline">닫기</button>
+				<button onclick={() => analyzeResult = null} class="ml-4 text-success hover:underline">닫기</button>
 			</div>
 		{/if}
 
@@ -936,7 +936,7 @@
 				<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 			</div>
 		{:else if error}
-			<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">{error}</div>
+			<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">{error}</div>
 		{:else if keywords.length === 0}
 			<div class="text-center py-12 text-muted-foreground">
 				<p class="text-lg">키워드가 없습니다</p>
@@ -963,9 +963,9 @@
 								<td class="px-4 py-3 text-sm text-right text-muted-foreground">{kw.source_count.toLocaleString()}</td>
 								<td class="px-4 py-3 text-center">
 									{#if kw.is_promoted}
-										<span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">승격됨</span>
+										<span class="px-2 py-1 text-xs rounded-full bg-success-light text-success">승격됨</span>
 									{:else if kw.is_stopword}
-										<span class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800">불용어</span>
+										<span class="px-2 py-1 text-xs rounded-full bg-error-light text-error">불용어</span>
 									{:else}
 										<span class="px-2 py-1 text-xs rounded-full bg-muted text-muted-foreground">미검토</span>
 									{/if}
@@ -974,20 +974,20 @@
 									{#if kw.is_promoted}
 										<button
 											onclick={() => demoteKeyword(kw)}
-											class="text-red-600 hover:text-red-800 text-sm"
+											class="text-error hover:text-error text-sm"
 										>
 											삭제
 										</button>
 									{:else if !kw.is_stopword}
 										<button
 											onclick={() => promoteKeyword(kw)}
-											class="text-green-600 hover:text-green-800 text-sm mr-2"
+											class="text-success hover:text-success text-sm mr-2"
 										>
 											승격
 										</button>
 										<button
 											onclick={() => markAsStopword(kw)}
-											class="text-red-600 hover:text-red-800 text-sm"
+											class="text-error hover:text-error text-sm"
 										>
 											불용어
 										</button>
@@ -1035,11 +1035,11 @@
 				</div>
 				<div class="card p-4">
 					<div class="text-sm text-muted-foreground">자동 추출</div>
-					<div class="text-2xl font-bold text-green-600">{elementStats.topic_by_source?.auto ?? 0}</div>
+					<div class="text-2xl font-bold text-success">{elementStats.topic_by_source?.auto ?? 0}</div>
 				</div>
 				<div class="card p-4">
 					<div class="text-sm text-muted-foreground">수동 추가</div>
-					<div class="text-2xl font-bold text-blue-600">{elementStats.topic_by_source?.manual ?? 0}</div>
+					<div class="text-2xl font-bold text-primary">{elementStats.topic_by_source?.manual ?? 0}</div>
 				</div>
 			</div>
 		{/if}
@@ -1076,7 +1076,7 @@
 				<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 			</div>
 		{:else if error}
-			<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">{error}</div>
+			<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">{error}</div>
 		{:else if elements.length === 0}
 			<div class="text-center py-12 text-muted-foreground">
 				<p class="text-lg">소재가 없습니다</p>
@@ -1109,7 +1109,7 @@
 								<td class="px-4 py-3 text-center">
 									<button
 										onclick={() => deleteElement(elem.id, elem.name)}
-										class="text-red-600 hover:text-red-800 text-sm"
+										class="text-error hover:text-error text-sm"
 									>
 										삭제
 									</button>
@@ -1157,7 +1157,7 @@
 				<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 			</div>
 		{:else if error}
-			<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">{error}</div>
+			<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">{error}</div>
 		{:else if batches.length === 0}
 			<div class="text-center py-12 text-muted-foreground">
 				<p class="text-lg">배치가 없습니다</p>
@@ -1190,7 +1190,7 @@
 									<div class="flex items-center gap-2">
 										<div class="flex-1 bg-secondary rounded-full h-2">
 											<div
-												class="bg-blue-600 h-2 rounded-full transition-all"
+												class="bg-primary h-2 rounded-full transition-all"
 												style="width: {batch.progress_percent}%"
 											></div>
 										</div>
@@ -1204,7 +1204,7 @@
 								<td class="px-4 py-3 text-center">
 									<button
 										onclick={() => viewBatchStatus(batch.id)}
-										class="text-blue-600 hover:text-blue-800 text-sm"
+										class="text-primary hover:text-primary-hover text-sm"
 									>
 										상세보기
 									</button>
@@ -1272,12 +1272,12 @@
 					</div>
 					<div class="w-full bg-secondary rounded-full h-3">
 						<div
-							class="h-3 rounded-full transition-all {activeBatch.failed > 0 ? 'bg-yellow-500' : 'bg-blue-600'}"
+							class="h-3 rounded-full transition-all {activeBatch.failed > 0 ? 'bg-warning' : 'bg-primary'}"
 							style="width: {activeBatch.progress_percent}%"
 						></div>
 					</div>
 					{#if activeBatch.status === 'running' && batchPolling}
-						<p class="text-xs text-blue-600 mt-2 animate-pulse">자동 새로고침 중...</p>
+						<p class="text-xs text-primary mt-2 animate-pulse">자동 새로고침 중...</p>
 					{/if}
 				</div>
 
@@ -1300,11 +1300,11 @@
 										<td class="px-3 py-2 text-muted-foreground">{req.caller_id.split('_')[0]}</td>
 										<td class="px-3 py-2 text-center">
 											{#if req.status === 'completed'}
-												<span class="text-green-600">✓</span>
+												<span class="text-success">✓</span>
 											{:else if req.status === 'failed'}
-												<span class="text-red-600" title={req.error || ''}>✗</span>
+												<span class="text-error" title={req.error || ''}>✗</span>
 											{:else if req.status === 'processing'}
-												<span class="text-blue-600 animate-pulse">●</span>
+												<span class="text-primary animate-pulse">●</span>
 											{:else}
 												<span class="text-muted-foreground">○</span>
 											{/if}
@@ -1324,7 +1324,7 @@
 							{#each activeBatch.writings as writing}
 								<div class="p-3 bg-background rounded-lg">
 									<div class="flex justify-between items-start mb-1">
-										<span class="text-xs px-2 py-0.5 rounded-full {writing.task_type === 'mix' ? 'bg-purple-100 text-purple-800' : 'bg-indigo-100 text-indigo-800'}">
+										<span class="text-xs px-2 py-0.5 rounded-full {writing.task_type === 'mix' ? 'bg-purple-light text-purple-800' : 'bg-primary-light text-indigo-800'}">
 											{getTaskTypeLabel(writing.task_type)}
 										</span>
 										<span class="text-xs text-muted-foreground">#{writing.id}</span>
@@ -1361,7 +1361,7 @@
 				<div class="flex justify-between items-start mb-4">
 					<div>
 						<h3 class="text-lg font-bold text-foreground">글 상세 #{selectedWriting.id}</h3>
-						<span class="px-2 py-1 text-xs rounded-full {selectedWriting.task_type === 'mix' ? 'bg-purple-100 text-purple-800' : 'bg-indigo-100 text-indigo-800'}">
+						<span class="px-2 py-1 text-xs rounded-full {selectedWriting.task_type === 'mix' ? 'bg-purple-light text-purple-800' : 'bg-primary-light text-indigo-800'}">
 							{getTaskTypeLabel(selectedWriting.task_type)}
 						</span>
 					</div>
@@ -1421,7 +1421,7 @@
 					<div class="flex justify-between items-center mb-2">
 						<div class="text-sm font-medium text-foreground">본문</div>
 						{#if !editMode}
-							<button onclick={() => editMode = true} class="text-blue-600 hover:text-blue-800 text-sm">
+							<button onclick={() => editMode = true} class="text-primary hover:text-primary-hover text-sm">
 								수정
 							</button>
 						{/if}

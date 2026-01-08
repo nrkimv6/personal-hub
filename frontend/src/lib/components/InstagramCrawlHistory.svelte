@@ -89,11 +89,11 @@
 	function getRequestTypeBadge(type: string): { class: string; text: string } {
 		switch (type) {
 			case 'feed':
-				return { class: 'bg-blue-100 text-blue-800', text: '피드' };
+				return { class: 'bg-primary-light text-primary', text: '피드' };
 			case 'single_post':
-				return { class: 'bg-purple-100 text-purple-800', text: '재크롤' };
+				return { class: 'bg-purple-light text-purple-800', text: '재크롤' };
 			case 'single_post_url':
-				return { class: 'bg-indigo-100 text-indigo-800', text: 'URL' };
+				return { class: 'bg-primary-light text-indigo-800', text: 'URL' };
 			default:
 				return { class: 'bg-muted text-foreground', text: type };
 		}
@@ -102,11 +102,11 @@
 	function getRequestedByBadge(by: string): { class: string; text: string } {
 		switch (by) {
 			case 'scheduler':
-				return { class: 'bg-blue-50 text-blue-700', text: '스케줄' };
+				return { class: 'bg-primary-light text-primary', text: '스케줄' };
 			case 'manual':
-				return { class: 'bg-green-50 text-green-700', text: '수동' };
+				return { class: 'bg-success-light text-success', text: '수동' };
 			case 'retry':
-				return { class: 'bg-yellow-50 text-yellow-700', text: '재시도' };
+				return { class: 'bg-warning-light text-warning-foreground', text: '재시도' };
 			default:
 				return { class: 'bg-background text-foreground', text: by };
 		}
@@ -117,11 +117,11 @@
 			case 'pending':
 				return { class: 'bg-muted text-muted-foreground', text: '대기' };
 			case 'processing':
-				return { class: 'bg-yellow-100 text-yellow-800', text: '처리중' };
+				return { class: 'bg-warning-light text-warning-foreground', text: '처리중' };
 			case 'completed':
-				return { class: 'bg-green-100 text-green-800', text: '완료' };
+				return { class: 'bg-success-light text-success', text: '완료' };
 			case 'failed':
-				return { class: 'bg-red-100 text-red-800', text: '실패' };
+				return { class: 'bg-error-light text-error', text: '실패' };
 			default:
 				return { class: 'bg-muted text-muted-foreground', text: s };
 		}
@@ -204,19 +204,19 @@
 			<p class="text-sm text-muted-foreground">전체 요청</p>
 		</div>
 		<div class="card text-center">
-			<p class="text-2xl font-bold text-green-600">
+			<p class="text-2xl font-bold text-success">
 				{items.filter((i) => i.status === 'completed').length}
 			</p>
 			<p class="text-sm text-muted-foreground">완료</p>
 		</div>
 		<div class="card text-center">
-			<p class="text-2xl font-bold text-yellow-600">
+			<p class="text-2xl font-bold text-warning-foreground">
 				{items.filter((i) => i.status === 'pending' || i.status === 'processing').length}
 			</p>
 			<p class="text-sm text-muted-foreground">진행중</p>
 		</div>
 		<div class="card text-center">
-			<p class="text-2xl font-bold text-red-600">
+			<p class="text-2xl font-bold text-error">
 				{items.filter((i) => i.status === 'failed').length}
 			</p>
 			<p class="text-sm text-muted-foreground">실패</p>
@@ -285,8 +285,8 @@
 			</div>
 			<div class="flex items-end">
 				{#if hasProcessingItems}
-					<span class="text-xs text-yellow-600 flex items-center gap-1">
-						<span class="inline-block w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></span>
+					<span class="text-xs text-warning-foreground flex items-center gap-1">
+						<span class="inline-block w-2 h-2 bg-warning rounded-full animate-pulse"></span>
 						자동 새로고침 중
 					</span>
 				{/if}
@@ -300,7 +300,7 @@
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 		</div>
 	{:else if error}
-		<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+		<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">
 			{error}
 		</div>
 	{:else if items.length === 0}
@@ -347,11 +347,11 @@
 										</span>
 										<button
 											onclick={() => copyUrl(item)}
-											class="p-1 text-muted-foreground hover:text-blue-600 hover:bg-blue-50 rounded transition-colors flex-shrink-0"
+											class="p-1 text-muted-foreground hover:text-primary hover:bg-primary-light rounded transition-colors flex-shrink-0"
 											title="URL 복사"
 										>
 											{#if copiedId === item.id}
-												<svg class="w-3.5 h-3.5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<svg class="w-3.5 h-3.5 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
 												</svg>
 											{:else}
@@ -393,7 +393,7 @@
 										<button
 											onclick={() => retryRequest(item)}
 											disabled={retryingId === item.id}
-											class="p-1.5 text-muted-foreground hover:text-orange-600 hover:bg-orange-50 rounded transition-colors disabled:opacity-50"
+											class="p-1.5 text-muted-foreground hover:text-warning hover:bg-warning-light rounded transition-colors disabled:opacity-50"
 											title="재시도"
 										>
 											{#if retryingId === item.id}

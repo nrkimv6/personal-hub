@@ -11,7 +11,7 @@
         onclick={() => activeTab = tab.id}
         class="py-3 px-5 border-b-2 font-medium text-base transition-colors
           {activeTab === tab.id
-            ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+            ? 'border-blue-500 text-primary dark:text-blue-400'
             : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
       >
         {#if tab.icon}<span class="mr-2">{tab.icon}</span>{/if}

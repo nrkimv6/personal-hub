@@ -85,9 +85,9 @@
 	function getHistoryTypeBadge(type: string): { class: string; text: string } {
 		switch (type) {
 			case 'request':
-				return { class: 'bg-blue-100 text-blue-800', text: '요청' };
+				return { class: 'bg-primary-light text-primary', text: '요청' };
 			case 'schedule_run':
-				return { class: 'bg-purple-100 text-purple-800', text: '스케줄' };
+				return { class: 'bg-purple-light text-purple-800', text: '스케줄' };
 			default:
 				return { class: 'bg-muted text-foreground', text: type };
 		}
@@ -96,9 +96,9 @@
 	function getSourceBadge(source: string): { class: string; text: string } {
 		switch (source) {
 			case 'instagram':
-				return { class: 'bg-pink-100 text-pink-800', text: 'Instagram' };
+				return { class: 'bg-pink-light text-pink', text: 'Instagram' };
 			case 'web':
-				return { class: 'bg-blue-100 text-blue-800', text: 'Web' };
+				return { class: 'bg-primary-light text-primary', text: 'Web' };
 			default:
 				return { class: 'bg-muted text-foreground', text: source };
 		}
@@ -109,11 +109,11 @@
 			case 'pending':
 				return { class: 'bg-muted text-muted-foreground', text: '대기' };
 			case 'processing':
-				return { class: 'bg-yellow-100 text-yellow-800', text: '처리중' };
+				return { class: 'bg-warning-light text-warning-foreground', text: '처리중' };
 			case 'completed':
-				return { class: 'bg-green-100 text-green-800', text: '완료' };
+				return { class: 'bg-success-light text-success', text: '완료' };
 			case 'failed':
-				return { class: 'bg-red-100 text-red-800', text: '실패' };
+				return { class: 'bg-error-light text-error', text: '실패' };
 			default:
 				return { class: 'bg-muted text-muted-foreground', text: s };
 		}
@@ -156,19 +156,19 @@
 			<p class="text-sm text-muted-foreground">전체</p>
 		</div>
 		<div class="card text-center">
-			<p class="text-2xl font-bold text-green-600">
+			<p class="text-2xl font-bold text-success">
 				{items.filter((i) => i.status === 'completed').length}
 			</p>
 			<p class="text-sm text-muted-foreground">완료</p>
 		</div>
 		<div class="card text-center">
-			<p class="text-2xl font-bold text-yellow-600">
+			<p class="text-2xl font-bold text-warning-foreground">
 				{items.filter((i) => i.status === 'pending' || i.status === 'processing').length}
 			</p>
 			<p class="text-sm text-muted-foreground">진행중</p>
 		</div>
 		<div class="card text-center">
-			<p class="text-2xl font-bold text-red-600">
+			<p class="text-2xl font-bold text-error">
 				{items.filter((i) => i.status === 'failed').length}
 			</p>
 			<p class="text-sm text-muted-foreground">실패</p>
@@ -222,8 +222,8 @@
 			</div>
 			<div class="flex items-end">
 				{#if hasProcessingItems}
-					<span class="text-xs text-yellow-600 flex items-center gap-1">
-						<span class="inline-block w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></span>
+					<span class="text-xs text-warning-foreground flex items-center gap-1">
+						<span class="inline-block w-2 h-2 bg-warning rounded-full animate-pulse"></span>
 						자동 새로고침 중
 					</span>
 				{/if}
@@ -237,7 +237,7 @@
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 		</div>
 	{:else if error}
-		<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+		<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">
 			{error}
 		</div>
 	{:else if items.length === 0}

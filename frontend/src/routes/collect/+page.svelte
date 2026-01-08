@@ -57,12 +57,12 @@
 
   // URL 타입별 스타일
   const urlTypeStyles: Record<string, { icon: string; color: string; bgColor: string }> = {
-    single_post: { icon: '📷', color: 'text-blue-700', bgColor: 'bg-blue-100' },
-    single_reel: { icon: '🎬', color: 'text-purple-700', bgColor: 'bg-purple-100' },
-    account_profile: { icon: '👤', color: 'text-green-700', bgColor: 'bg-green-100' },
-    account_reels: { icon: '🎥', color: 'text-pink-700', bgColor: 'bg-pink-100' },
-    hashtag: { icon: '#', color: 'text-orange-700', bgColor: 'bg-orange-100' },
-    reels_explore: { icon: '🔥', color: 'text-red-700', bgColor: 'bg-red-100' },
+    single_post: { icon: '📷', color: 'text-primary', bgColor: 'bg-primary-light' },
+    single_reel: { icon: '🎬', color: 'text-purple', bgColor: 'bg-purple-light' },
+    account_profile: { icon: '👤', color: 'text-success', bgColor: 'bg-success-light' },
+    account_reels: { icon: '🎥', color: 'text-pink', bgColor: 'bg-pink-light' },
+    hashtag: { icon: '#', color: 'text-warning', bgColor: 'bg-warning-light' },
+    reels_explore: { icon: '🔥', color: 'text-error', bgColor: 'bg-error-light' },
     story: { icon: '⏰', color: 'text-foreground', bgColor: 'bg-muted' },
     unknown: { icon: '❓', color: 'text-foreground', bgColor: 'bg-muted' },
   };
@@ -143,9 +143,9 @@
   function getSourceBadge(sourceType: string): { class: string; text: string } {
     switch (sourceType) {
       case 'instagram':
-        return { class: 'bg-pink-100 text-pink-800', text: 'Instagram' };
+        return { class: 'bg-pink-light text-pink', text: 'Instagram' };
       case 'web':
-        return { class: 'bg-blue-100 text-blue-800', text: 'Web' };
+        return { class: 'bg-primary-light text-primary', text: 'Web' };
       default:
         return { class: 'bg-muted text-foreground', text: sourceType };
     }
@@ -155,11 +155,11 @@
     if (!classification) return null;
     switch (classification) {
       case 'event':
-        return { class: 'bg-green-100 text-green-800', text: '이벤트' };
+        return { class: 'bg-success-light text-success', text: '이벤트' };
       case 'popup':
-        return { class: 'bg-purple-100 text-purple-800', text: '팝업' };
+        return { class: 'bg-purple-light text-purple-800', text: '팝업' };
       case 'uncategorized':
-        return { class: 'bg-yellow-100 text-yellow-800', text: '미분류' };
+        return { class: 'bg-warning-light text-warning-foreground', text: '미분류' };
       default:
         return { class: 'bg-muted text-foreground', text: classification };
     }
@@ -168,13 +168,13 @@
   function getUrlTypeBadge(urlType: string): { class: string; text: string } {
     switch (urlType) {
       case 'instagram_post':
-        return { class: 'bg-pink-50 text-pink-700', text: 'IG 게시물' };
+        return { class: 'bg-pink-light text-pink', text: 'IG 게시물' };
       case 'google_form':
-        return { class: 'bg-blue-50 text-blue-700', text: 'Google Form' };
+        return { class: 'bg-primary-light text-primary', text: 'Google Form' };
       case 'naver_blog':
-        return { class: 'bg-green-50 text-green-700', text: '네이버 블로그' };
+        return { class: 'bg-success-light text-success', text: '네이버 블로그' };
       case 'naver_form':
-        return { class: 'bg-green-50 text-green-700', text: '네이버 폼' };
+        return { class: 'bg-success-light text-success', text: '네이버 폼' };
       default:
         return { class: 'bg-background text-foreground', text: urlType };
     }
@@ -526,7 +526,7 @@
     <div class="flex items-center gap-4">
       <span class="text-sm text-muted-foreground">총 {total}개</span>
       {#if isSelectMode}
-        <span class="text-sm text-blue-600 font-medium">{selectedPostIds.size}개 선택됨</span>
+        <span class="text-sm text-primary font-medium">{selectedPostIds.size}개 선택됨</span>
         <Button on:click={toggleSelectAll} variant="secondary" size="xs">
           {selectedPostIds.size === posts.length ? '전체 해제' : '전체 선택'}
         </Button>
@@ -562,7 +562,7 @@
               </button>
               <button
                 onclick={confirmBatchDelete}
-                class="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                class="w-full px-4 py-2 text-left text-sm text-error hover:bg-error-light"
               >
                 삭제
               </button>
@@ -589,7 +589,7 @@
       <div class="flex border border-border rounded-lg overflow-hidden">
         <button
           onclick={() => setViewMode('grid')}
-          class="px-3 py-1.5 text-sm {viewMode === 'grid' ? 'bg-blue-600 text-white' : 'bg-white text-muted-foreground hover:bg-muted'}"
+          class="px-3 py-1.5 text-sm {viewMode === 'grid' ? 'bg-primary text-white' : 'bg-white text-muted-foreground hover:bg-muted'}"
           title="그리드 뷰"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -598,7 +598,7 @@
         </button>
         <button
           onclick={() => setViewMode('list')}
-          class="px-3 py-1.5 text-sm {viewMode === 'list' ? 'bg-blue-600 text-white' : 'bg-white text-muted-foreground hover:bg-muted'}"
+          class="px-3 py-1.5 text-sm {viewMode === 'list' ? 'bg-primary text-white' : 'bg-white text-muted-foreground hover:bg-muted'}"
           title="리스트 뷰"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -617,7 +617,7 @@
       <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
     </div>
   {:else if error}
-    <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+    <div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">
       {error}
     </div>
   {:else if posts.length === 0}
@@ -645,7 +645,7 @@
                   type="checkbox"
                   checked={selectedPostIds.has(post.source_id)}
                   onclick={(e) => { e.stopPropagation(); togglePostSelection(post.source_id!); }}
-                  class="w-5 h-5 rounded border-border text-blue-600 focus:ring-blue-500"
+                  class="w-5 h-5 rounded border-border text-primary focus:ring-ring"
                 />
               </div>
             {/if}
@@ -663,11 +663,11 @@
                 <div class="absolute top-1 right-1 flex gap-1">
                   {#if post.llm_status}
                     {#if post.llm_status === 'completed'}
-                      <span class="px-1.5 py-0.5 text-xs bg-green-500 text-white rounded-full shadow-sm" title="AI 분석 완료">AI</span>
+                      <span class="px-1.5 py-0.5 text-xs bg-success text-white rounded-full shadow-sm" title="AI 분석 완료">AI</span>
                     {:else if post.llm_status === 'pending' || post.llm_status === 'processing'}
-                      <span class="px-1.5 py-0.5 text-xs bg-yellow-500 text-white rounded-full shadow-sm animate-pulse" title="AI 분석 대기중">AI</span>
+                      <span class="px-1.5 py-0.5 text-xs bg-warning text-white rounded-full shadow-sm animate-pulse" title="AI 분석 대기중">AI</span>
                     {:else if post.llm_status === 'failed'}
-                      <span class="px-1.5 py-0.5 text-xs bg-red-500 text-white rounded-full shadow-sm" title="AI 분석 실패">AI</span>
+                      <span class="px-1.5 py-0.5 text-xs bg-error text-white rounded-full shadow-sm" title="AI 분석 실패">AI</span>
                     {/if}
                   {/if}
                   <span class="px-1.5 py-0.5 text-xs rounded-full {sourceBadge.class} shadow-sm">
@@ -689,11 +689,11 @@
                 <div class="absolute top-1 right-1 flex gap-1">
                   {#if post.llm_status}
                     {#if post.llm_status === 'completed'}
-                      <span class="px-1.5 py-0.5 text-xs bg-green-500 text-white rounded-full shadow-sm" title="AI 분석 완료">AI</span>
+                      <span class="px-1.5 py-0.5 text-xs bg-success text-white rounded-full shadow-sm" title="AI 분석 완료">AI</span>
                     {:else if post.llm_status === 'pending' || post.llm_status === 'processing'}
-                      <span class="px-1.5 py-0.5 text-xs bg-yellow-500 text-white rounded-full shadow-sm animate-pulse" title="AI 분석 대기중">AI</span>
+                      <span class="px-1.5 py-0.5 text-xs bg-warning text-white rounded-full shadow-sm animate-pulse" title="AI 분석 대기중">AI</span>
                     {:else if post.llm_status === 'failed'}
-                      <span class="px-1.5 py-0.5 text-xs bg-red-500 text-white rounded-full shadow-sm" title="AI 분석 실패">AI</span>
+                      <span class="px-1.5 py-0.5 text-xs bg-error text-white rounded-full shadow-sm" title="AI 분석 실패">AI</span>
                     {/if}
                   {/if}
                   <span class="px-1.5 py-0.5 text-xs rounded-full {sourceBadge.class} shadow-sm">
@@ -739,7 +739,7 @@
                 type="checkbox"
                 checked={selectedPostIds.has(post.source_id)}
                 onclick={(e) => { e.stopPropagation(); togglePostSelection(post.source_id!); }}
-                class="w-5 h-5 rounded border-border text-blue-600 focus:ring-blue-500"
+                class="w-5 h-5 rounded border-border text-primary focus:ring-ring"
               />
             {/if}
 
@@ -769,11 +769,11 @@
                 {/if}
                 {#if post.llm_status}
                   {#if post.llm_status === 'completed'}
-                    <span class="px-1.5 py-0.5 text-xs bg-green-100 text-green-700 rounded" title="AI 분석 완료">AI</span>
+                    <span class="px-1.5 py-0.5 text-xs bg-success-light text-success rounded" title="AI 분석 완료">AI</span>
                   {:else if post.llm_status === 'pending' || post.llm_status === 'processing'}
-                    <span class="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded animate-pulse" title="AI 분석 대기중">AI</span>
+                    <span class="px-1.5 py-0.5 text-xs bg-warning-light text-warning-foreground rounded animate-pulse" title="AI 분석 대기중">AI</span>
                   {:else if post.llm_status === 'failed'}
-                    <span class="px-1.5 py-0.5 text-xs bg-red-100 text-red-700 rounded" title="AI 분석 실패">AI</span>
+                    <span class="px-1.5 py-0.5 text-xs bg-error-light text-error rounded" title="AI 분석 실패">AI</span>
                   {/if}
                 {/if}
                 <span class="px-1.5 py-0.5 text-xs rounded-full {sourceBadge.class}">
@@ -928,7 +928,7 @@
               <div class="bg-background rounded-lg p-3 text-sm">
                 <div class="flex items-center gap-2 mb-2">
                   <span class="font-medium">분류:</span>
-                  <span class="px-2 py-0.5 rounded-full text-xs {selectedPostLlmResult.result.tag === '이벤트' ? 'bg-green-100 text-green-700' : selectedPostLlmResult.result.tag === '팝업' ? 'bg-purple-100 text-purple-700' : 'bg-muted text-foreground'}">
+                  <span class="px-2 py-0.5 rounded-full text-xs {selectedPostLlmResult.result.tag === '이벤트' ? 'bg-success-light text-success' : selectedPostLlmResult.result.tag === '팝업' ? 'bg-purple-light text-purple' : 'bg-muted text-foreground'}">
                     {selectedPostLlmResult.result.tag || '미분류'}
                   </span>
                 </div>
@@ -1022,7 +1022,7 @@
             </div>
           </div>
           {#if !parsedUrl.is_supported}
-            <p class="text-sm text-red-600 mt-2">이 URL 타입은 지원되지 않습니다.</p>
+            <p class="text-sm text-error mt-2">이 URL 타입은 지원되지 않습니다.</p>
           {/if}
         </div>
       {/if}

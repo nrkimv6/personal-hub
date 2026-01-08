@@ -28,9 +28,9 @@
 			class="bg-white rounded-lg border border-border p-3 cursor-pointer hover:shadow-md transition-shadow {isPopupEndingToday(
 				popup
 			)
-				? 'border-orange-300 bg-orange-50'
+				? 'border-orange-300 bg-warning-light'
 				: isPopupUnknownPeriod(popup)
-					? 'border-amber-200 bg-amber-50'
+					? 'border-amber-200 bg-warning-light'
 					: ''}"
 			onclick={() => onPopupClick(popup)}
 			onkeydown={(e) => e.key === 'Enter' && onPopupClick(popup)}
@@ -44,12 +44,12 @@
 							{getEventStatusLabel(popup.popup_status)}
 						</span>
 						{#if popup.source_type === 'instagram'}
-							<span class="px-1.5 py-0.5 text-xs rounded bg-pink-100 text-pink-600">IG</span>
+							<span class="px-1.5 py-0.5 text-xs rounded bg-pink-light text-pink">IG</span>
 						{/if}
 					</div>
 					<h3 class="font-medium text-foreground truncate" title={popup.title}>{popup.title}</h3>
 					{#if popup.brand || popup.organizer}
-						<p class="text-sm text-blue-600 truncate">{popup.brand || popup.organizer}</p>
+						<p class="text-sm text-primary truncate">{popup.brand || popup.organizer}</p>
 					{/if}
 				</div>
 				<!-- 북마크 버튼 -->
@@ -57,7 +57,7 @@
 					<button
 						onclick={(e) => onBookmarkToggle(popup, e)}
 						class="text-xl transition-colors {popup.is_bookmarked
-							? 'text-yellow-500'
+							? 'text-warning'
 							: 'text-gray-300'}"
 					>
 						{popup.is_bookmarked ? '★' : '☆'}
@@ -68,14 +68,14 @@
 				<!-- 기간 -->
 				{#if popup.end_date}
 					{#if isPopupEndingToday(popup)}
-						<span class="font-bold text-orange-600 bg-orange-100 px-1.5 py-0.5 rounded"
+						<span class="font-bold text-warning bg-warning-light px-1.5 py-0.5 rounded"
 							>오늘 마감!</span
 						>
 					{:else}
 						<span>~ {formatDate(popup.end_date)}</span>
 					{/if}
 				{:else}
-					<span class="text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">기간 미정</span>
+					<span class="text-warning bg-warning-light px-1.5 py-0.5 rounded">기간 미정</span>
 				{/if}
 				<!-- 위치 -->
 				{#if popup.venue_name}
@@ -84,7 +84,7 @@
 				<!-- 방문 상태 -->
 				<span
 					class="ml-auto px-1.5 py-0.5 rounded {popup.is_visited
-						? 'bg-green-100 text-green-700'
+						? 'bg-success-light text-success'
 						: 'bg-muted text-muted-foreground'}"
 				>
 					{popup.is_visited ? '방문' : '미방문'}

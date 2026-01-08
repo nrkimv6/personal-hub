@@ -83,8 +83,8 @@
 	// 출처 유형별 색상
 	function getSourceTypeColor(type: string): string {
 		switch (type) {
-			case 'instagram': return 'bg-pink-100 text-pink-700';
-			case 'web': return 'bg-blue-100 text-blue-700';
+			case 'instagram': return 'bg-pink-light text-pink';
+			case 'web': return 'bg-primary-light text-primary';
 			case 'manual': return 'bg-muted text-foreground';
 			default: return 'bg-muted text-muted-foreground';
 		}
@@ -101,7 +101,7 @@
 {#if loading}
 	<div class="text-sm text-muted-foreground py-2">출처 로드 중...</div>
 {:else if error}
-	<div class="text-sm text-red-500 py-2">{error}</div>
+	<div class="text-sm text-error py-2">{error}</div>
 {:else if sources.length === 0}
 	<div class="text-sm text-muted-foreground py-2">출처 정보 없음</div>
 {:else}
@@ -137,7 +137,7 @@
 							href={primary.source_url}
 							target="_blank"
 							rel="noopener"
-							class="text-blue-500 hover:underline truncate max-w-[200px]"
+							class="text-primary hover:underline truncate max-w-[200px]"
 						>
 							{truncateUrl(primary.source_url)}
 						</a>
@@ -160,7 +160,7 @@
 									{getSourceTypeIcon(source.source_type)}
 								</span>
 								{#if source.is_primary}
-									<span class="text-xs px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded">
+									<span class="text-xs px-1.5 py-0.5 bg-warning-light text-warning-foreground rounded">
 										대표
 									</span>
 								{/if}
@@ -177,7 +177,7 @@
 										href={source.source_url}
 										target="_blank"
 										rel="noopener"
-										class="text-blue-500 hover:underline block truncate"
+										class="text-primary hover:underline block truncate"
 									>
 										{source.source_url}
 									</a>
@@ -186,7 +186,7 @@
 							{#if source.contributed_fields && source.contributed_fields.length > 0}
 								<div class="mt-1 flex flex-wrap gap-1">
 									{#each source.contributed_fields as field}
-										<span class="text-xs px-1 py-0.5 bg-green-50 text-green-600 rounded">
+										<span class="text-xs px-1 py-0.5 bg-success-light text-success rounded">
 											{field}
 										</span>
 									{/each}
@@ -199,7 +199,7 @@
 								{#if !source.is_primary}
 									<button
 										onclick={() => handleSetPrimary(source.id)}
-										class="p-1 text-yellow-500 hover:bg-yellow-50 rounded"
+										class="p-1 text-warning hover:bg-warning-light rounded"
 										title="대표 출처로 설정"
 									>
 										⭐
@@ -207,7 +207,7 @@
 								{/if}
 								<button
 									onclick={() => handleRemove(source.id)}
-									class="p-1 text-red-500 hover:bg-red-50 rounded"
+									class="p-1 text-error hover:bg-error-light rounded"
 									title="삭제"
 								>
 									🗑️

@@ -469,7 +469,7 @@
 			<button
 				onclick={search}
 				disabled={loading || !query.trim()}
-				class="rounded-lg bg-blue-500 px-6 py-2 text-white hover:bg-blue-600 disabled:opacity-50"
+				class="rounded-lg bg-primary px-6 py-2 text-white hover:bg-primary-hover disabled:opacity-50"
 			>
 				{loading ? '검색 중...' : '검색'}
 			</button>
@@ -486,7 +486,7 @@
 	</div>
 
 	{#if error}
-		<div class="mb-6 rounded-lg bg-red-100 p-4 text-red-700">{error}</div>
+		<div class="mb-6 rounded-lg bg-error-light p-4 text-error">{error}</div>
 	{/if}
 
 	<div class="grid grid-cols-1 gap-6 lg:grid-cols-4">
@@ -507,12 +507,12 @@
 										href={result.url}
 										target="_blank"
 										rel="noopener noreferrer"
-										class="font-medium text-blue-600 hover:underline"
+										class="font-medium text-primary hover:underline"
 									>
 										{result.title}
 									</a>
 									{#if result.display_url}
-										<div class="mt-1 text-sm text-green-700">{result.display_url}</div>
+										<div class="mt-1 text-sm text-success">{result.display_url}</div>
 									{/if}
 									{#if result.snippet}
 										<p class="mt-2 text-sm text-muted-foreground">{result.snippet}</p>
@@ -538,7 +538,7 @@
 					onclick={() => (activeTab = 'saved')}
 					class="flex-1 border-b-2 py-2 text-sm font-medium transition-colors"
 					class:border-blue-500={activeTab === 'saved'}
-					class:text-blue-600={activeTab === 'saved'}
+					class:text-primary={activeTab === 'saved'}
 					class:border-transparent={activeTab !== 'saved'}
 					class:text-muted-foreground={activeTab !== 'saved'}
 				>
@@ -548,7 +548,7 @@
 					onclick={() => (activeTab = 'history')}
 					class="flex-1 border-b-2 py-2 text-sm font-medium transition-colors"
 					class:border-blue-500={activeTab === 'history'}
-					class:text-blue-600={activeTab === 'history'}
+					class:text-primary={activeTab === 'history'}
 					class:border-transparent={activeTab !== 'history'}
 					class:text-muted-foreground={activeTab !== 'history'}
 				>
@@ -570,7 +570,7 @@
 											<button onclick={() => runSavedSearch(saved)} class="flex-1 text-left">
 												<div class="flex items-center gap-2">
 													{#if saved.is_favorite}
-														<span class="text-yellow-500">★</span>
+														<span class="text-warning">★</span>
 													{/if}
 													<span class="text-sm font-medium">{saved.name}</span>
 												</div>
@@ -581,18 +581,18 @@
 											<div class="flex gap-1">
 												<button
 													onclick={(e) => toggleFavorite(saved, e)}
-													class="p-1 text-muted-foreground hover:text-yellow-500"
+													class="p-1 text-muted-foreground hover:text-warning"
 													title="즐겨찾기"
 												>
 													{saved.is_favorite ? '★' : '☆'}
 												</button>
 												<button
 													onclick={(e) => openScheduleModal(saved, e)}
-													class="p-1 text-muted-foreground hover:text-green-500"
+													class="p-1 text-muted-foreground hover:text-success"
 													title="스케줄 설정"
 												>
 													{#if getScheduleForSaved(saved.id)}
-														<span class="text-green-500">⏰</span>
+														<span class="text-success">⏰</span>
 													{:else}
 														⏰
 													{/if}
@@ -609,7 +609,7 @@
 												{#if saved.last_search_id}
 													<button
 														onclick={(e) => loadLastResults(saved, e)}
-														class="p-1 text-xs text-muted-foreground hover:text-blue-500"
+														class="p-1 text-xs text-muted-foreground hover:text-primary"
 														title="마지막 결과 보기"
 													>
 														📋
@@ -617,7 +617,7 @@
 												{/if}
 												<button
 													onclick={(e) => deleteSavedSearch(saved, e)}
-													class="p-1 text-muted-foreground hover:text-red-500"
+													class="p-1 text-muted-foreground hover:text-error"
 													title="삭제"
 												>
 													✕
@@ -635,7 +635,7 @@
 											<span>{saved.max_pages}p</span>
 											{#if getScheduleForSaved(saved.id)}
 												{@const schedule = getScheduleForSaved(saved.id)!}
-												<span class="text-green-600">
+												<span class="text-success">
 													⏰ {formatScheduleTime(schedule)}
 													{schedule.enabled ? '' : '(중지)'}
 												</span>
@@ -729,7 +729,7 @@
 				<button
 					onclick={saveCurrentSearch}
 					disabled={!saveName.trim()}
-					class="rounded-lg bg-blue-500 px-4 py-2 text-white hover:bg-blue-600 disabled:opacity-50"
+					class="rounded-lg bg-primary px-4 py-2 text-white hover:bg-primary-hover disabled:opacity-50"
 				>
 					저장
 				</button>
@@ -776,7 +776,7 @@
 
 			<div class="mt-6 flex justify-between">
 				{#if editingSchedule}
-					<button onclick={deleteSchedule} class="rounded-lg px-4 py-2 text-red-600 hover:bg-red-50">
+					<button onclick={deleteSchedule} class="rounded-lg px-4 py-2 text-error hover:bg-error-light">
 						삭제
 					</button>
 				{:else}
@@ -792,7 +792,7 @@
 					</button>
 					<button
 						onclick={saveSchedule}
-						class="rounded-lg bg-green-500 px-4 py-2 text-white hover:bg-green-600"
+						class="rounded-lg bg-success px-4 py-2 text-white hover:bg-success/90"
 					>
 						{editingSchedule ? '수정' : '저장'}
 					</button>
@@ -818,15 +818,15 @@
 								<div>
 									<span class="text-sm">{formatDate(run.started_at)}</span>
 									{#if run.status === 'completed'}
-										<span class="ml-2 rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">
+										<span class="ml-2 rounded bg-success-light px-2 py-0.5 text-xs text-success">
 											완료
 										</span>
 									{:else if run.status === 'failed'}
-										<span class="ml-2 rounded bg-red-100 px-2 py-0.5 text-xs text-red-700">
+										<span class="ml-2 rounded bg-error-light px-2 py-0.5 text-xs text-error">
 											실패
 										</span>
 									{:else}
-										<span class="ml-2 rounded bg-yellow-100 px-2 py-0.5 text-xs text-yellow-700">
+										<span class="ml-2 rounded bg-warning-light px-2 py-0.5 text-xs text-warning-foreground">
 											실행중
 										</span>
 									{/if}
@@ -834,7 +834,7 @@
 								<span class="text-sm text-muted-foreground">{run.collected_count}개 수집</span>
 							</div>
 							{#if run.error_message}
-								<div class="mt-1 text-xs text-red-500">{run.error_message}</div>
+								<div class="mt-1 text-xs text-error">{run.error_message}</div>
 							{/if}
 						</li>
 					{/each}

@@ -133,7 +133,7 @@
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 		</div>
 	{:else if error}
-		<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+		<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">
 			{error}
 		</div>
 	{:else if !schedules || schedules.length === 0}
@@ -151,7 +151,7 @@
 								<h3 class="text-lg font-semibold text-foreground">
 									{schedule.display_name || schedule.name}
 								</h3>
-								<span class="px-2 py-1 text-xs rounded-full {schedule.enabled ? 'bg-green-100 text-green-800' : 'bg-muted text-muted-foreground'}">
+								<span class="px-2 py-1 text-xs rounded-full {schedule.enabled ? 'bg-success-light text-success' : 'bg-muted text-muted-foreground'}">
 									{schedule.enabled ? '활성' : '비활성'}
 								</span>
 							</div>
@@ -171,8 +171,8 @@
 									<span class="text-muted-foreground">
 										7일 통계:
 										<span class="font-medium text-foreground">{stats.total_runs}</span>회 실행,
-										<span class="font-medium text-green-600">{stats.success_rate.toFixed(0)}%</span> 성공률,
-										<span class="font-medium text-blue-600">{stats.total_saved}</span>건 저장
+										<span class="font-medium text-success">{stats.success_rate.toFixed(0)}%</span> 성공률,
+										<span class="font-medium text-primary">{stats.total_saved}</span>건 저장
 									</span>
 								</div>
 							{/if}

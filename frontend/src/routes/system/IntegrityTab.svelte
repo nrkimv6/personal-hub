@@ -152,9 +152,9 @@
   // 심각도별 색상 클래스
   function getSeverityClass(severity: string): string {
     switch (severity) {
-      case 'critical': return 'text-red-600 bg-red-50 dark:text-red-400 dark:bg-red-900/20';
-      case 'warning': return 'text-yellow-600 bg-yellow-50 dark:text-yellow-400 dark:bg-yellow-900/20';
-      case 'info': return 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-900/20';
+      case 'critical': return 'text-error bg-error-light dark:text-red-400 dark:bg-red-900/20';
+      case 'warning': return 'text-warning-foreground bg-warning-light dark:text-yellow-400 dark:bg-yellow-900/20';
+      case 'info': return 'text-primary bg-primary-light dark:text-blue-400 dark:bg-blue-900/20';
       default: return 'text-muted-foreground bg-background dark:text-muted-foreground dark:bg-gray-800';
     }
   }
@@ -176,7 +176,7 @@
     <button
       onclick={runCheck}
       disabled={loading}
-      class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+      class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover disabled:opacity-50"
     >
       {loading ? '검사 중...' : '🔄 검사 실행'}
     </button>
@@ -184,7 +184,7 @@
 
   <!-- 알림 메시지 -->
   {#if lastFixResult}
-    <div class="p-3 rounded {lastFixResult.success ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400' : 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400'}">
+    <div class="p-3 rounded {lastFixResult.success ? 'bg-success-light text-success dark:bg-green-900/20 dark:text-green-400' : 'bg-error-light text-error dark:bg-red-900/20 dark:text-red-400'}">
       {lastFixResult.message}
       <button
         onclick={() => lastFixResult = null}
@@ -200,17 +200,17 @@
         <div class="text-sm text-muted-foreground dark:text-muted-foreground">전체 문제</div>
         <div class="text-2xl font-bold text-foreground dark:text-white">{checkResult.total_issues}</div>
       </div>
-      <div class="bg-red-50 dark:bg-red-900/20 p-4 rounded shadow-sm">
-        <div class="text-sm text-red-600 dark:text-red-400">Critical</div>
-        <div class="text-2xl font-bold text-red-700 dark:text-red-300">{checkResult.by_severity.critical}</div>
+      <div class="bg-error-light dark:bg-red-900/20 p-4 rounded shadow-sm">
+        <div class="text-sm text-error dark:text-red-400">Critical</div>
+        <div class="text-2xl font-bold text-error dark:text-red-300">{checkResult.by_severity.critical}</div>
       </div>
-      <div class="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded shadow-sm">
-        <div class="text-sm text-yellow-600 dark:text-yellow-400">Warning</div>
-        <div class="text-2xl font-bold text-yellow-700 dark:text-yellow-300">{checkResult.by_severity.warning}</div>
+      <div class="bg-warning-light dark:bg-yellow-900/20 p-4 rounded shadow-sm">
+        <div class="text-sm text-warning-foreground dark:text-yellow-400">Warning</div>
+        <div class="text-2xl font-bold text-warning-foreground dark:text-yellow-300">{checkResult.by_severity.warning}</div>
       </div>
-      <div class="bg-blue-50 dark:bg-blue-900/20 p-4 rounded shadow-sm">
-        <div class="text-sm text-blue-600 dark:text-blue-400">Info</div>
-        <div class="text-2xl font-bold text-blue-700 dark:text-blue-300">{checkResult.by_severity.info}</div>
+      <div class="bg-primary-light dark:bg-blue-900/20 p-4 rounded shadow-sm">
+        <div class="text-sm text-primary dark:text-blue-400">Info</div>
+        <div class="text-2xl font-bold text-primary dark:text-blue-300">{checkResult.by_severity.info}</div>
       </div>
     </div>
 
@@ -227,7 +227,7 @@
         <button
           onclick={() => fixAll(false)}
           disabled={fixingAll}
-          class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+          class="px-4 py-2 bg-success text-white rounded hover:bg-success/90 disabled:opacity-50"
         >
           {fixingAll ? '처리 중...' : '🔧 자동 수정 (전체)'}
         </button>
@@ -272,7 +272,7 @@
                       <button
                         onclick={() => fixSpecific(issue.table, issue.issue_type, false)}
                         disabled={fixingTable === `${issue.table}/${issue.issue_type}`}
-                        class="px-2 py-1 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded hover:bg-green-200 dark:hover:bg-green-900/50 disabled:opacity-50"
+                        class="px-2 py-1 text-xs bg-success-light dark:bg-green-900/30 text-success dark:text-green-400 rounded hover:bg-green-200 dark:hover:bg-green-900/50 disabled:opacity-50"
                         title="수정"
                       >🔧</button>
                     </div>
@@ -297,7 +297,7 @@
         </table>
       </div>
     {:else}
-      <div class="bg-green-50 dark:bg-green-900/20 p-6 rounded text-center text-green-700 dark:text-green-400">
+      <div class="bg-success-light dark:bg-green-900/20 p-6 rounded text-center text-success dark:text-green-400">
         ✅ 모든 정합성 검사를 통과했습니다!
       </div>
     {/if}

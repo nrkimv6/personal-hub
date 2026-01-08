@@ -187,15 +187,15 @@
 							{@const inputSource = editingEvent.input_source || 'human'}
 							<span
 								class="px-2 py-0.5 text-xs rounded-full {inputSource === 'ai'
-									? 'bg-purple-100 text-purple-700'
+									? 'bg-purple-light text-purple'
 									: inputSource === 'ai_edited'
-										? 'bg-blue-100 text-blue-700'
+										? 'bg-primary-light text-primary'
 										: 'bg-muted text-muted-foreground'}"
 							>
 								{inputSource === 'ai' ? 'AI 분석' : inputSource === 'ai_edited' ? 'AI+수정' : '수동 입력'}
 							</span>
 						{:else if importedData}
-							<span class="px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-700">
+							<span class="px-2 py-0.5 text-xs rounded-full bg-purple-light text-purple">
 								AI 분석
 							</span>
 						{/if}
@@ -209,14 +209,14 @@
 					<!-- 제목 -->
 					<div>
 						<label for="event-title" class="block text-sm font-medium text-foreground mb-1">
-							제목 <span class="text-red-500">*</span>
+							제목 <span class="text-error">*</span>
 						</label>
 						<input
 							id="event-title"
 							type="text"
 							bind:value={eventForm.title}
 							placeholder="이벤트 제목"
-							class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+							class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 						/>
 					</div>
 
@@ -229,7 +229,7 @@
 							<select
 								id="event-type"
 								bind:value={eventForm.event_type}
-								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 							>
 								<option value="event">이벤트</option>
 								<option value="popup">팝업</option>
@@ -245,7 +245,7 @@
 								<select
 									id="event-status"
 									bind:value={eventForm.status}
-									class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+									class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 								>
 									<option value="active">활성</option>
 									<option value="ended">종료</option>
@@ -265,16 +265,16 @@
 										type="text"
 										bind:value={eventUrls[index]}
 										placeholder="https://..."
-										class="flex-1 px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+										class="flex-1 px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 									/>
 									{#if index === 0}
-										<span class="text-xs text-blue-600 whitespace-nowrap px-2 py-1 bg-blue-50 rounded">메인</span>
+										<span class="text-xs text-primary whitespace-nowrap px-2 py-1 bg-primary-light rounded">메인</span>
 									{/if}
 									{#if eventUrls.length > 1}
 										<button
 											type="button"
 											onclick={() => removeUrl(index)}
-											class="text-muted-foreground hover:text-red-500 p-1"
+											class="text-muted-foreground hover:text-error p-1"
 											title="URL 삭제"
 										>
 											<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -287,7 +287,7 @@
 							<button
 								type="button"
 								onclick={addUrl}
-								class="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+								class="text-sm text-primary hover:text-primary-hover flex items-center gap-1"
 							>
 								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
@@ -308,7 +308,7 @@
 								id="event-start"
 								type="date"
 								bind:value={eventForm.event_start}
-								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 							/>
 						</div>
 						<div>
@@ -319,7 +319,7 @@
 								id="event-end"
 								type="date"
 								bind:value={eventForm.event_end}
-								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 							/>
 						</div>
 					</div>
@@ -335,7 +335,7 @@
 								type="text"
 								bind:value={eventForm.organizer}
 								placeholder="주최자/브랜드명"
-								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 							/>
 						</div>
 						<div>
@@ -346,7 +346,7 @@
 								id="event-announcement"
 								type="date"
 								bind:value={eventForm.announcement_date}
-								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 							/>
 						</div>
 					</div>
@@ -363,7 +363,7 @@
 									type="text"
 									bind:value={eventForm.location_venue}
 									placeholder="예: 더현대 서울"
-									class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+									class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 								/>
 							</div>
 							<div>
@@ -375,7 +375,7 @@
 									type="text"
 									bind:value={eventForm.location_address}
 									placeholder="예: 서울시 영등포구..."
-									class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+									class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 								/>
 							</div>
 						</div>
@@ -391,7 +391,7 @@
 							bind:value={prizesText}
 							placeholder="경품을 한 줄에 하나씩 입력&#10;예: 아이패드 프로&#10;에어팟 프로"
 							rows="3"
-							class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+							class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring font-mono text-sm"
 						></textarea>
 						<p class="mt-1 text-xs text-muted-foreground">한 줄에 하나의 경품 입력</p>
 					</div>
@@ -408,7 +408,7 @@
 								min="0"
 								bind:value={eventForm.winner_count}
 								placeholder="예: 10"
-								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 							/>
 						</div>
 						<div>
@@ -418,7 +418,7 @@
 							<select
 								id="event-purchase"
 								bind:value={eventForm.purchase_required}
-								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 							>
 								<option value={undefined}>선택 안함</option>
 								<option value="no">무료 (구매 불필요)</option>
@@ -438,7 +438,7 @@
 							bind:value={eventForm.summary}
 							placeholder="이벤트 설명..."
 							rows="3"
-							class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+							class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 						></textarea>
 					</div>
 
@@ -454,7 +454,7 @@
 									bind:value={eventForm.body_text}
 									placeholder="Instagram 캡션, 웹페이지 본문 등..."
 									rows="6"
-									class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-xs"
+									class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring font-mono text-xs"
 								></textarea>
 								<p class="mt-1 text-xs text-muted-foreground">검색에 포함되는 원본 텍스트 (Instagram 캡션, 웹페이지 본문 등)</p>
 							</div>
@@ -470,7 +470,7 @@
 							bind:value={eventForm.user_note}
 							placeholder="개인 메모..."
 							rows="2"
-							class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+							class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 						></textarea>
 					</div>
 				</div>

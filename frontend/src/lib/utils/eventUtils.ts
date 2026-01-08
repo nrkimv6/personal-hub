@@ -27,13 +27,13 @@ export function formatDate(dateStr: string | null): string {
 export function getEventStatusColor(status: string): string {
 	switch (status) {
 		case 'ongoing':
-			return 'bg-green-100 text-green-700';
+			return 'bg-success-light text-success';
 		case 'upcoming':
-			return 'bg-blue-100 text-blue-700';
+			return 'bg-primary-light text-primary';
 		case 'ended':
 			return 'bg-muted text-muted-foreground';
 		case 'cancelled':
-			return 'bg-red-100 text-red-600';
+			return 'bg-error-light text-error';
 		default:
 			return 'bg-muted text-muted-foreground';
 	}

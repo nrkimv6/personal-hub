@@ -161,7 +161,7 @@
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 		</div>
 	{:else if error}
-		<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+		<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">
 			{error}
 		</div>
 	{:else}
@@ -177,7 +177,7 @@
 							<div
 								class="flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors {selectedTag?.id ===
 								tag.id
-									? 'bg-blue-50 border border-blue-200'
+									? 'bg-primary-light border border-blue-200'
 									: 'hover:bg-muted'}"
 								onclick={() => selectTag(tag)}
 								onkeydown={(e) => e.key === 'Enter' && selectTag(tag)}
@@ -197,7 +197,7 @@
 										e.stopPropagation();
 										deleteTag(tag.id);
 									}}
-									class="text-red-500 hover:text-red-700 text-sm"
+									class="text-error hover:text-error text-sm"
 								>
 									삭제
 								</button>
@@ -265,12 +265,12 @@
 									<div class="flex items-center gap-2">
 										<code class="text-sm px-2 py-0.5 bg-muted rounded">{kw.keyword}</code>
 										{#if kw.is_regex}
-											<span class="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded"
+											<span class="text-xs px-1.5 py-0.5 bg-purple-light text-purple rounded"
 												>정규식</span
 											>
 										{/if}
 										{#if kw.is_case_sensitive}
-											<span class="text-xs px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded"
+											<span class="text-xs px-1.5 py-0.5 bg-warning-light text-warning rounded"
 												>대소문자 구분</span
 											>
 										{/if}
@@ -279,14 +279,14 @@
 										<button
 											onclick={() => toggleKeyword(kw.id)}
 											class="text-sm {kw.is_active
-												? 'text-yellow-600 hover:text-yellow-700'
-												: 'text-green-600 hover:text-green-700'}"
+												? 'text-warning-foreground hover:text-warning'
+												: 'text-success hover:text-success'}"
 										>
 											{kw.is_active ? '비활성화' : '활성화'}
 										</button>
 										<button
 											onclick={() => deleteKeyword(kw.id)}
-											class="text-red-500 hover:text-red-700 text-sm"
+											class="text-error hover:text-error text-sm"
 										>
 											삭제
 										</button>

@@ -87,15 +87,15 @@
 	function getStatusColor(status: string): string {
 		switch (status.toLowerCase()) {
 			case 'running':
-				return 'bg-blue-100 text-blue-800';
+				return 'bg-primary-light text-primary';
 			case 'ready':
-				return 'bg-green-100 text-green-800';
+				return 'bg-success-light text-success';
 			case 'disabled':
 				return 'bg-muted text-muted-foreground';
 			case 'success':
-				return 'bg-green-100 text-green-800';
+				return 'bg-success-light text-success';
 			case 'failed':
-				return 'bg-red-100 text-red-800';
+				return 'bg-error-light text-error';
 			default:
 				return 'bg-muted text-muted-foreground';
 		}
@@ -115,7 +115,7 @@
 			<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
 		</div>
 	{:else if error}
-		<div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+		<div class="bg-error-light border border-red-200 text-error px-4 py-3 rounded-lg">
 			{error}
 		</div>
 	{:else}
@@ -133,7 +133,7 @@
 			</div>
 
 			{#if tasks.length === 0}
-				<div class="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded-lg">
+				<div class="bg-warning-light border border-yellow-200 text-warning-foreground px-4 py-3 rounded-lg">
 					등록된 작업이 없습니다. Windows 작업 스케줄러에서 MonitorPage 폴더에 작업을 등록해주세요.
 				</div>
 			{:else}
@@ -144,7 +144,7 @@
 								<div class="flex-1">
 									<div class="flex items-center gap-3 mb-2">
 										<span
-											class={`px-2 py-1 text-xs font-medium rounded ${task.enabled ? 'bg-green-100 text-green-800' : 'bg-muted text-muted-foreground'}`}
+											class={`px-2 py-1 text-xs font-medium rounded ${task.enabled ? 'bg-success-light text-success' : 'bg-muted text-muted-foreground'}`}
 										>
 											{task.enabled ? '활성' : '비활성'}
 										</span>
@@ -270,7 +270,7 @@
 											? `${log.records_processed.toLocaleString()}건`
 											: '-'}
 									</td>
-									<td class="px-4 py-3 text-sm text-red-600">
+									<td class="px-4 py-3 text-sm text-error">
 										{log.error_message || '-'}
 									</td>
 								</tr>

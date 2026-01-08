@@ -297,7 +297,7 @@
 					<button
 						onclick={() => switchMode('batch')}
 						class="flex-1 px-3 py-2 text-sm rounded-lg border transition-colors {mode === 'batch'
-							? 'bg-purple-50 border-purple-500 text-purple-700'
+							? 'bg-purple-light border-purple-500 text-purple'
 							: 'bg-card border-border text-muted-foreground hover:bg-muted'}"
 					>
 						<div class="font-medium">배치 크롤링</div>
@@ -306,7 +306,7 @@
 					<button
 						onclick={() => switchMode('instant')}
 						class="flex-1 px-3 py-2 text-sm rounded-lg border transition-colors {mode === 'instant'
-							? 'bg-blue-50 border-blue-500 text-blue-700'
+							? 'bg-primary-light border-blue-500 text-primary'
 							: 'bg-card border-border text-muted-foreground hover:bg-muted'}"
 					>
 						<div class="font-medium">이벤트 추출</div>
@@ -315,7 +315,7 @@
 					<button
 						onclick={() => switchMode('background')}
 						class="flex-1 px-3 py-2 text-sm rounded-lg border transition-colors {mode === 'background'
-							? 'bg-green-50 border-green-500 text-green-700'
+							? 'bg-success-light border-green-500 text-success'
 							: 'bg-card border-border text-muted-foreground hover:bg-muted'}"
 					>
 						<div class="font-medium">백그라운드</div>
@@ -343,7 +343,7 @@
 								<p class="text-xs text-muted-foreground">
 									Instagram, Google Forms, Naver Blog 등 (최대 20개)
 								</p>
-								<span class="text-xs font-medium {parsedUrls.length > 0 ? 'text-purple-600' : 'text-muted-foreground'}">
+								<span class="text-xs font-medium {parsedUrls.length > 0 ? 'text-purple' : 'text-muted-foreground'}">
 									{parsedUrls.length}개 URL
 									{#if instagramUrlCount > 0}
 										<span class="text-pink-500">(IG: {instagramUrlCount})</span>
@@ -398,9 +398,9 @@
 						{#if crawlResult}
 							<div class="p-4 bg-background border border-border rounded-lg space-y-2">
 								<div class="flex items-center gap-4 text-sm">
-									<span class="text-green-600 font-medium">✓ 등록: {crawlResult.created}개</span>
+									<span class="text-success font-medium">✓ 등록: {crawlResult.created}개</span>
 									{#if crawlResult.skipped > 0}
-										<span class="text-yellow-600">⚠ 스킵: {crawlResult.skipped}개</span>
+										<span class="text-warning-foreground">⚠ 스킵: {crawlResult.skipped}개</span>
 									{/if}
 								</div>
 								{#if crawlResult.errors.length > 0}
@@ -414,7 +414,7 @@
 									</div>
 								{/if}
 								<div class="pt-2 border-t border-border">
-									<a href="/crawl" class="text-sm text-purple-600 hover:text-purple-700">
+									<a href="/crawl" class="text-sm text-purple hover:text-purple">
 										크롤링 이력 확인 →
 									</a>
 								</div>
@@ -436,14 +436,14 @@
 									type="url"
 									bind:value={url}
 									placeholder="https://forms.gle/... 또는 https://naver.me/..."
-									class="flex-1 px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+									class="flex-1 px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
 									disabled={loading}
 								/>
 								{#if mode === 'instant'}
 									<button
 										onclick={handleExtract}
 										disabled={loading || !url.trim()}
-										class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+										class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
 									>
 										{#if loading}
 											<span class="animate-spin">⏳</span>
@@ -456,7 +456,7 @@
 									<button
 										onclick={handleBackgroundCrawl}
 										disabled={loading || !url.trim()}
-										class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+										class="px-4 py-2 bg-success text-white rounded-lg hover:bg-success/90 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
 									>
 										{#if loading}
 											<span class="animate-spin">⏳</span>
@@ -474,17 +474,17 @@
 
 						<!-- 에러 메시지 -->
 						{#if error}
-							<div class="p-3 bg-red-50 border border-red-200 rounded-lg">
-								<p class="text-sm text-red-700">{error}</p>
+							<div class="p-3 bg-error-light border border-red-200 rounded-lg">
+								<p class="text-sm text-error">{error}</p>
 							</div>
 						{/if}
 
 						<!-- 추출 결과: 이벤트가 아닌 경우 (즉시 추출 모드에서만) -->
 						{#if mode === 'instant' && result?.success && !result.is_event}
-							<div class="p-4 bg-yellow-50 border border-yellow-200 rounded-lg space-y-3">
+							<div class="p-4 bg-warning-light border border-yellow-200 rounded-lg space-y-3">
 								<!-- 추출 정보 -->
 								<div class="flex items-center gap-2 text-sm">
-									<span class="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full text-xs">
+									<span class="px-2 py-0.5 bg-warning-light text-warning-foreground rounded-full text-xs">
 										이벤트 아님
 									</span>
 									<span class="px-2 py-0.5 bg-muted text-foreground rounded-full text-xs">
@@ -503,7 +503,7 @@
 
 									<div>
 										<span class="font-medium text-foreground">분석 결과:</span>
-										<p class="mt-1 text-yellow-700 text-sm bg-white p-2 rounded border border-yellow-200">
+										<p class="mt-1 text-warning-foreground text-sm bg-white p-2 rounded border border-yellow-200">
 											{result.not_event_reason || '이 페이지는 이벤트/행사/프로모션 페이지가 아닙니다.'}
 										</p>
 									</div>
@@ -538,13 +538,13 @@
 
 						<!-- 추출 결과: 이벤트인 경우 (즉시 추출 모드에서만) -->
 						{#if mode === 'instant' && result?.success && result.is_event && result.extracted_event}
-							<div class="p-4 bg-green-50 border border-green-200 rounded-lg space-y-3">
+							<div class="p-4 bg-success-light border border-green-200 rounded-lg space-y-3">
 								<!-- 추출 정보 -->
 								<div class="flex items-center gap-2 text-sm">
-									<span class="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs">
+									<span class="px-2 py-0.5 bg-success-light text-success rounded-full text-xs">
 										{pageTypeLabels[result.page_type] || result.page_type}
 									</span>
-									<span class="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs">
+									<span class="px-2 py-0.5 bg-primary-light text-primary rounded-full text-xs">
 										{extractionMethodLabels[result.extraction_method] || result.extraction_method}
 									</span>
 								</div>
@@ -608,7 +608,7 @@
 									</button>
 									<button
 										onclick={handleUseExtractedData}
-										class="px-4 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
+										class="px-4 py-1.5 text-sm bg-success text-white rounded-lg hover:bg-success/90"
 									>
 										이 정보로 이벤트 생성
 									</button>
@@ -620,8 +620,8 @@
 
 				<!-- 배치 모드에서 에러 메시지 -->
 				{#if mode === 'batch' && error}
-					<div class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-						<p class="text-sm text-red-700">{error}</p>
+					<div class="mt-4 p-3 bg-error-light border border-red-200 rounded-lg">
+						<p class="text-sm text-error">{error}</p>
 					</div>
 				{/if}
 			</div>

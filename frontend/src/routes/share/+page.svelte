@@ -190,13 +190,13 @@
 
 	{#if shareCompleted}
 		<!-- 공유 완료 (창 닫기 실패 시) -->
-		<div class="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
-			<div class="text-green-600 text-4xl mb-3">✓</div>
-			<p class="text-green-800 font-medium text-lg mb-2">수집 요청 완료</p>
-			<p class="text-sm text-green-700 mb-4">이전 앱으로 돌아가세요</p>
+		<div class="bg-success-light border border-green-200 rounded-lg p-6 text-center">
+			<div class="text-success text-4xl mb-3">✓</div>
+			<p class="text-success font-medium text-lg mb-2">수집 요청 완료</p>
+			<p class="text-sm text-success mb-4">이전 앱으로 돌아가세요</p>
 			<button
 				onclick={handleGoBack}
-				class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
+				class="px-6 py-2 bg-success text-white rounded-lg hover:bg-success/90 font-medium"
 			>
 				뒤로가기
 			</button>
@@ -213,19 +213,19 @@
 			</span>
 		</div>
 	{:else if !sharedUrl}
-		<div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-			<p class="text-yellow-800">공유된 URL이 없습니다.</p>
+		<div class="bg-warning-light border border-yellow-200 rounded-lg p-4">
+			<p class="text-warning-foreground">공유된 URL이 없습니다.</p>
 			<button onclick={handleCancel} class="mt-4 px-4 py-2 bg-secondary rounded-lg hover:bg-gray-300">
 				홈으로 돌아가기
 			</button>
 		</div>
 	{:else if autoSubmitDone}
-		<div class="bg-green-50 border border-green-200 rounded-lg p-4">
+		<div class="bg-success-light border border-green-200 rounded-lg p-4">
 			<div class="flex items-center gap-2 mb-2">
-				<span class="text-green-600 text-xl">✓</span>
-				<p class="text-green-800 font-medium">크롤링 요청이 등록되었습니다.</p>
+				<span class="text-success text-xl">✓</span>
+				<p class="text-success font-medium">크롤링 요청이 등록되었습니다.</p>
 			</div>
-			<p class="text-sm text-green-700">잠시 후 홈으로 이동합니다...</p>
+			<p class="text-sm text-success">잠시 후 홈으로 이동합니다...</p>
 		</div>
 	{:else}
 		<div class="space-y-4">
@@ -239,7 +239,7 @@
 				{/if}
 				<div>
 					<span class="text-sm text-muted-foreground">URL:</span>
-					<p class="font-mono text-sm break-all text-blue-600">{sharedUrl}</p>
+					<p class="font-mono text-sm break-all text-primary">{sharedUrl}</p>
 				</div>
 				{#if sharedText && sharedText !== sharedUrl}
 					<div>
@@ -253,9 +253,9 @@
 			<div class="flex items-center gap-2">
 				<span class="text-sm text-muted-foreground">감지된 타입:</span>
 				{#if urlType === 'instagram'}
-					<span class="px-2 py-1 bg-pink-100 text-pink-800 rounded text-sm">Instagram</span>
+					<span class="px-2 py-1 bg-pink-light text-pink rounded text-sm">Instagram</span>
 				{:else if urlType === 'event_form'}
-					<span class="px-2 py-1 bg-green-100 text-green-800 rounded text-sm">이벤트 폼</span>
+					<span class="px-2 py-1 bg-success-light text-success rounded text-sm">이벤트 폼</span>
 				{:else}
 					<span class="px-2 py-1 bg-muted text-foreground rounded text-sm">기타</span>
 				{/if}
@@ -274,7 +274,7 @@
 					<button
 						onclick={handleManualSubmit}
 						disabled={submitting}
-						class="w-full px-4 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+						class="w-full px-4 py-3 bg-primary text-white rounded-lg hover:bg-primary-hover font-medium disabled:opacity-50 disabled:cursor-not-allowed"
 					>
 						{#if submitting}
 							<span class="flex items-center justify-center gap-2">
@@ -289,7 +289,7 @@
 
 				<button
 					onclick={handleEventForm}
-					class="w-full px-4 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-medium"
+					class="w-full px-4 py-3 bg-success text-white rounded-lg hover:bg-success/90 font-medium"
 				>
 					직접 이벤트로 등록
 				</button>

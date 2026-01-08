@@ -80,23 +80,23 @@
 
   function getStatusBadgeClass(status: string): string {
     const classes: Record<string, string> = {
-      active: 'bg-green-100 text-green-800',
-      pending: 'bg-yellow-100 text-yellow-800',
+      active: 'bg-success-light text-success',
+      pending: 'bg-warning-light text-warning-foreground',
       inactive: 'bg-muted text-foreground',
-      blacklisted: 'bg-red-100 text-red-800'
+      blacklisted: 'bg-error-light text-error'
     };
     return classes[status] || 'bg-muted text-foreground';
   }
 
   function getCheckResultClass(isValid: boolean): string {
     return isValid
-      ? 'bg-green-100 text-green-800'
-      : 'bg-red-100 text-red-800';
+      ? 'bg-success-light text-success'
+      : 'bg-error-light text-error';
   }
 </script>
 
 <div class="mb-4">
-  <a href="/proxy/list" class="text-blue-600 hover:underline text-sm">&larr; 목록으로</a>
+  <a href="/proxy/list" class="text-primary hover:underline text-sm">&larr; 목록으로</a>
 </div>
 
 {#if loading}
@@ -105,7 +105,7 @@
     <span class="ml-3 text-muted-foreground">로딩 중...</span>
   </div>
 {:else if error}
-  <div class="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+  <div class="bg-error-light border border-red-200 rounded-lg p-4 text-error">
     {error}
     <button on:click={loadData} class="ml-2 underline hover:no-underline">다시 시도</button>
   </div>
@@ -164,15 +164,15 @@
           </div>
           <div class="bg-background rounded-lg p-4">
             <div class="text-sm text-muted-foreground">성공 횟수</div>
-            <div class="text-2xl font-bold text-green-600">{proxy.success_count}</div>
+            <div class="text-2xl font-bold text-success">{proxy.success_count}</div>
           </div>
           <div class="bg-background rounded-lg p-4">
             <div class="text-sm text-muted-foreground">성공률</div>
-            <div class="text-2xl font-bold text-blue-600">{formatPercent(proxy.success_rate)}</div>
+            <div class="text-2xl font-bold text-primary">{formatPercent(proxy.success_rate)}</div>
           </div>
           <div class="bg-background rounded-lg p-4">
             <div class="text-sm text-muted-foreground">연속 실패</div>
-            <div class="text-2xl font-bold text-red-600">{proxy.fail_count}</div>
+            <div class="text-2xl font-bold text-error">{proxy.fail_count}</div>
           </div>
         </div>
 
@@ -183,15 +183,15 @@
           </div>
           <div class="bg-background rounded-lg p-4">
             <div class="text-sm text-muted-foreground">최소 응답시간</div>
-            <div class="text-xl font-bold text-green-600">{formatTime(proxy.min_response_time)}</div>
+            <div class="text-xl font-bold text-success">{formatTime(proxy.min_response_time)}</div>
           </div>
           <div class="bg-background rounded-lg p-4">
             <div class="text-sm text-muted-foreground">최대 응답시간</div>
-            <div class="text-xl font-bold text-orange-600">{formatTime(proxy.max_response_time)}</div>
+            <div class="text-xl font-bold text-warning">{formatTime(proxy.max_response_time)}</div>
           </div>
           <div class="bg-background rounded-lg p-4">
             <div class="text-sm text-muted-foreground">우선순위 점수</div>
-            <div class="text-xl font-bold text-purple-600">{proxy.priority_score.toFixed(1)}</div>
+            <div class="text-xl font-bold text-purple">{proxy.priority_score.toFixed(1)}</div>
           </div>
         </div>
       </div>
@@ -258,7 +258,7 @@
           {#if proxy.status === 'blacklisted'}
             <button
               on:click={() => handleStatusChange('active')}
-              class="w-full px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+              class="w-full px-4 py-2 bg-success text-white rounded-md hover:bg-success/90 transition-colors"
             >
               블랙리스트 해제
             </button>
@@ -274,7 +274,7 @@
           {#if proxy.status === 'inactive'}
             <button
               on:click={() => handleStatusChange('pending')}
-              class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+              class="w-full px-4 py-2 bg-primary text-white rounded-md hover:bg-primary-hover transition-colors"
             >
               재검증 대기열 추가
             </button>
@@ -282,7 +282,7 @@
 
           <button
             on:click={handleDelete}
-            class="w-full px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+            class="w-full px-4 py-2 bg-error text-white rounded-md hover:bg-error/90 transition-colors"
           >
             프록시 삭제
           </button>

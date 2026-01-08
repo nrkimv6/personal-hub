@@ -136,20 +136,20 @@
 
   function getSeverityColor(sev: string): string {
     switch (sev) {
-      case 'critical': return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400';
-      case 'error': return 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400';
-      case 'warning': return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400';
+      case 'critical': return 'bg-error-light text-error dark:bg-red-900/30 dark:text-red-400';
+      case 'error': return 'bg-warning-light text-warning dark:bg-orange-900/30 dark:text-orange-400';
+      case 'warning': return 'bg-warning-light text-warning-foreground dark:bg-yellow-900/30 dark:text-yellow-400';
       default: return 'bg-muted text-foreground dark:bg-gray-800 dark:text-muted-foreground';
     }
   }
 
   function getSourceColor(src: string): string {
     const colors: Record<string, string> = {
-      api: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
-      worker: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
-      naver: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
-      instagram: 'bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-400',
-      writing: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400',
+      api: 'bg-primary-light text-primary dark:bg-blue-900/30 dark:text-blue-400',
+      worker: 'bg-purple-light text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
+      naver: 'bg-success-light text-success dark:bg-green-900/30 dark:text-green-400',
+      instagram: 'bg-pink-light text-pink dark:bg-pink-900/30 dark:text-pink-400',
+      writing: 'bg-primary-light text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400',
     };
     return colors[src] || 'bg-muted text-foreground dark:bg-gray-800 dark:text-muted-foreground';
   }
@@ -175,24 +175,24 @@
         <div class="text-2xl font-bold text-foreground dark:text-white">{stats.summary.total_count}</div>
       </div>
       <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">
-        <div class="text-sm text-red-500">Critical</div>
-        <div class="text-2xl font-bold text-red-600">{stats.summary.critical_count}</div>
+        <div class="text-sm text-error">Critical</div>
+        <div class="text-2xl font-bold text-error">{stats.summary.critical_count}</div>
       </div>
       <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">
-        <div class="text-sm text-orange-500">Error</div>
-        <div class="text-2xl font-bold text-orange-600">{stats.summary.error_count}</div>
+        <div class="text-sm text-warning">Error</div>
+        <div class="text-2xl font-bold text-warning">{stats.summary.error_count}</div>
       </div>
       <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">
-        <div class="text-sm text-yellow-500">Warning</div>
-        <div class="text-2xl font-bold text-yellow-600">{stats.summary.warning_count}</div>
+        <div class="text-sm text-warning">Warning</div>
+        <div class="text-2xl font-bold text-warning-foreground">{stats.summary.warning_count}</div>
       </div>
       <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">
         <div class="text-sm text-muted-foreground dark:text-muted-foreground">미해결</div>
         <div class="text-2xl font-bold text-foreground dark:text-white">{stats.summary.unresolved_count}</div>
       </div>
       <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">
-        <div class="text-sm text-green-500">해결률</div>
-        <div class="text-2xl font-bold text-green-600">{stats.summary.resolve_rate}%</div>
+        <div class="text-sm text-success">해결률</div>
+        <div class="text-2xl font-bold text-success">{stats.summary.resolve_rate}%</div>
       </div>
     </div>
 
@@ -266,7 +266,7 @@
       {#if selectedIds.size > 0}
         <button
           onclick={resolveBulk}
-          class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
+          class="px-4 py-2 bg-success text-white rounded-lg hover:bg-success/90 text-sm"
         >
           {selectedIds.size}개 해결 처리
         </button>
@@ -335,22 +335,22 @@
               </td>
               <td class="px-4 py-3 text-center">
                 {#if error.resolved}
-                  <span class="text-green-500">해결됨</span>
+                  <span class="text-success">해결됨</span>
                 {:else}
-                  <span class="text-red-500">미해결</span>
+                  <span class="text-error">미해결</span>
                 {/if}
               </td>
               <td class="px-4 py-3 text-right">
                 <button
                   onclick={() => detailModal = error}
-                  class="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 text-sm mr-2"
+                  class="text-primary hover:text-primary-hover dark:text-blue-400 dark:hover:text-blue-300 text-sm mr-2"
                 >
                   상세
                 </button>
                 {#if !error.resolved}
                   <button
                     onclick={() => resolveError(error.id)}
-                    class="text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300 text-sm"
+                    class="text-success hover:text-success dark:text-green-400 dark:hover:text-green-300 text-sm"
                   >
                     해결
                   </button>
@@ -443,21 +443,21 @@
           {/if}
 
           {#if detailModal.resolved}
-            <div class="p-3 bg-green-50 dark:bg-green-900/20 rounded">
-              <p class="text-green-800 dark:text-green-400">
+            <div class="p-3 bg-success-light dark:bg-green-900/20 rounded">
+              <p class="text-success dark:text-green-400">
                 해결됨 ({detailModal.resolved_at ? new Date(detailModal.resolved_at).toLocaleString('ko-KR') : ''})
                 {#if detailModal.resolved_by}
                   by {detailModal.resolved_by}
                 {/if}
               </p>
               {#if detailModal.notes}
-                <p class="text-sm text-green-700 dark:text-green-300 mt-1">{detailModal.notes}</p>
+                <p class="text-sm text-success dark:text-green-300 mt-1">{detailModal.notes}</p>
               {/if}
             </div>
           {:else}
             <button
               onclick={() => { resolveError(detailModal!.id); detailModal = null; }}
-              class="w-full py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+              class="w-full py-2 bg-success text-white rounded-lg hover:bg-success/90"
             >
               해결 처리
             </button>
