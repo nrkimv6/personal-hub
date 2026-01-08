@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { Button } from '$lib/components/ui';
+
 	import { onMount, onDestroy } from 'svelte';
 	import { llmApi, type LLMPerformanceStats, type LLMWorkerStatus } from '$lib/api';
 	import Chart from 'chart.js/auto';
@@ -164,7 +166,7 @@
 					<option value={opt.value}>{opt.label}</option>
 				{/each}
 			</select>
-			<button onclick={() => fetchData()} class="btn btn-secondary btn-sm">새로고침</button>
+			<Button variant="secondary"sm on:click={() => fetchData()}>새로고침</Button>
 		</div>
 	</div>
 

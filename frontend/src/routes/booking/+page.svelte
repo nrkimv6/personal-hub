@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { Badge, Button } from '$lib/components/ui';
+
   import { onMount } from 'svelte';
   import { scheduleApi, bookingApi, itemApi } from '$lib/api';
   import type { ScheduleWithContext, MonitorScheduleUpdate } from '$lib/types';
@@ -149,9 +151,9 @@
 <div class="p-6">
   <div class="mb-6 flex justify-between items-center">
     <h2 class="text-2xl font-bold text-foreground">예약 관리</h2>
-    <button class="btn btn-secondary btn-sm" on:click={fetchSchedules}>
+    <Button variant="secondary"sm on:click={fetchSchedules}>
       새로고침
-    </button>
+    </Button>
   </div>
 
   <!-- 자동 예약 대상 목록 -->
@@ -221,9 +223,9 @@
                   <div class="flex flex-col gap-1">
                     <span class="badge {statusBadge.class}">{statusBadge.label}</span>
                     {#if !schedule.business_is_enabled}
-                      <span class="badge badge-gray text-xs">업체OFF</span>
+                      <Badge variant="secondary" class="text-xs">업체OFF</Badge>
                     {:else if !schedule.item_is_enabled}
-                      <span class="badge badge-gray text-xs">아이템OFF</span>
+                      <Badge variant="secondary" class="text-xs">아이템OFF</Badge>
                     {/if}
                   </div>
                 </td>
@@ -239,27 +241,25 @@
                 </td>
                 <td class="px-3 py-2">
                   <div class="flex justify-center gap-1">
-                    <button
-                      class="btn btn-secondary btn-xs"
+                    <Button variant="secondary"xs
                       on:click={() => openEditModal(schedule)}
                       title="수정"
                     >
                       ✏
-                    </button>
-                    <button
-                      class="btn btn-secondary btn-xs"
+                    </Button>
+                    <Button variant="secondary"xs
                       on:click={() => handleResetBookingCount(schedule)}
                       title="예약 횟수 초기화"
                     >
                       0
-                    </button>
+                    </Button>
                     <button
                       class="btn btn-xs {schedule.auto_booking_enabled ? 'btn-warning' : 'btn-success'}"
                       on:click={() => handleToggleAutoBooking(schedule)}
                       title={schedule.auto_booking_enabled ? '자동예약 중지' : '자동예약 활성화'}
                     >
                       {schedule.auto_booking_enabled ? '⏸' : '▶'}
-                    </button>
+                    </Button>
                   </div>
                 </td>
               </tr>
@@ -295,7 +295,7 @@
             required
             placeholder="18:00-21:00"
           />
-          <button type="submit" class="btn btn-secondary w-full mt-4">테스트</button>
+          <button type="submit" class="btn btn-secondary w-full mt-4">테스트</Button>
 
           {#if filterTest.result}
             <div class="mt-4 p-3 bg-background rounded-lg text-sm">
@@ -376,8 +376,8 @@
         <div class="flex justify-end gap-2 pt-4">
           <button type="button" class="btn btn-secondary" on:click={() => editingSchedule = null}>
             취소
-          </button>
-          <button type="submit" class="btn btn-primary">저장</button>
+          </Button>
+          <button type="submit" class="btn btn-primary">저장</Button>
         </div>
       </form>
     </div>

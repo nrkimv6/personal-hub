@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { Button } from '$lib/components/ui';
+
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -473,12 +475,12 @@
 	<div class="mb-6 flex justify-between items-center">
 		<h2 class="text-2xl font-bold text-foreground">LLM 요청 관리</h2>
 		<div class="flex gap-2">
-			<button onclick={runCleanup} class="btn btn-secondary btn-sm" title="Stale 정리 및 오래된 이력 삭제">
+			<Button variant="secondary"sm on:click={runCleanup} title="Stale 정리 및 오래된 이력 삭제">
 				정리
-			</button>
-			<button onclick={() => fetchData()} class="btn btn-secondary btn-sm">
+			</Button>
+			<Button variant="secondary"sm on:click={() => fetchData()}>
 				새로고침
-			</button>
+			</Button>
 		</div>
 	</div>
 
@@ -533,25 +535,25 @@
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'queue' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				대기열 (pending/processing)
-			</button>
+			</Button>
 			<button
 				onclick={() => switchTab('history')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'history' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				이력 (completed/failed)
-			</button>
+			</Button>
 			<button
 				onclick={() => switchTab('create')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'create' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				수동 요청 생성
-			</button>
+			</Button>
 			<button
 				onclick={() => switchTab('performance')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'performance' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				성능 분석
-			</button>
+			</Button>
 		</nav>
 	</div>
 
@@ -593,8 +595,8 @@
 					성공 없는 것만
 				</label>
 			{/if}
-			<button onclick={viewMode === 'grouped' ? handleGroupFilter : handleFilter} class="btn btn-primary btn-sm">필터</button>
-			<button onclick={clearFilters} class="btn btn-secondary btn-sm">초기화</button>
+			<Button variant="primary"sm on:click={viewMode === 'grouped' ? handleGroupFilter : handleFilter}>필터</Button>
+			<Button variant="secondary"sm on:click={clearFilters}>초기화</Button>
 
 			{#if activeTab === 'history'}
 				<div class="ml-auto flex items-center gap-2">
@@ -603,7 +605,7 @@
 						class="btn btn-sm {viewMode === 'grouped' ? 'btn-primary' : 'btn-secondary'}"
 					>
 						{viewMode === 'individual' ? '그룹 뷰' : '개별 뷰'}
-					</button>
+					</Button>
 				</div>
 			{/if}
 		</div>
@@ -626,14 +628,14 @@
 				<div class="ml-auto flex gap-2">
 					{#if selectedGroupKeys.length > 0}
 						<span class="text-sm text-muted-foreground self-center">{selectedGroupKeys.length}개 선택</span>
-						<button onclick={multiRetrySelectedGroups} class="btn btn-secondary btn-sm">
+						<Button variant="secondary"sm on:click={multiRetrySelectedGroups}>
 							선택 그룹 재시도
-						</button>
+						</Button>
 					{/if}
 					{#if groupedResponse.summary.callers_without_success > 0}
-						<button onclick={retryAllFailedWithoutSuccess} class="btn btn-primary btn-sm">
+						<Button variant="primary"sm on:click={retryAllFailedWithoutSuccess}>
 							성공 없는 것 일괄 재시도
-						</button>
+						</Button>
 					{/if}
 				</div>
 			</div>
@@ -644,9 +646,9 @@
 			<div class="mb-4 flex gap-2 items-center">
 				<span class="text-sm text-muted-foreground">{selectedIds.length}개 선택</span>
 				{#if activeTab === 'history'}
-					<button onclick={batchRetry} class="btn btn-secondary btn-sm">일괄 재시도</button>
+					<Button variant="secondary"sm on:click={batchRetry}>일괄 재시도</Button>
 				{/if}
-				<button onclick={batchDelete} class="btn btn-danger btn-sm">일괄 삭제</button>
+				<button onclick={batchDelete} class="btn btn-danger btn-sm">일괄 삭제</Button>
 			</div>
 		{/if}
 
@@ -739,7 +741,7 @@
 								class="btn btn-secondary btn-sm disabled:opacity-50"
 							>
 								이전
-							</button>
+							</Button>
 							<span class="px-3 py-1.5 text-sm">{groupCurrentPage} / {groupPages}</span>
 							<button
 								onclick={groupNextPage}
@@ -747,7 +749,7 @@
 								class="btn btn-secondary btn-sm disabled:opacity-50"
 							>
 								다음
-							</button>
+							</Button>
 						</div>
 					</div>
 				{/if}
@@ -811,7 +813,7 @@
 												class="text-warning-foreground hover:text-warning-foreground text-sm"
 											>
 												취소
-											</button>
+											</Button>
 										{/if}
 										{#if request.status === 'failed' || request.status === 'completed'}
 											<button
@@ -819,14 +821,14 @@
 												class="text-primary hover:text-primary-hover text-sm"
 											>
 												{request.status === 'completed' ? '재분석' : '재시도'}
-											</button>
+											</Button>
 										{/if}
 										<button
 											onclick={() => deleteRequest(request.id)}
 											class="text-error hover:text-error text-sm"
 										>
 											삭제
-										</button>
+										</Button>
 									</div>
 								</td>
 							</tr>
@@ -848,7 +850,7 @@
 							class="btn btn-secondary btn-sm disabled:opacity-50"
 						>
 							이전
-						</button>
+						</Button>
 						<span class="px-3 py-1.5 text-sm">{currentPage} / {pages}</span>
 						<button
 							onclick={nextPage}
@@ -856,7 +858,7 @@
 							class="btn btn-secondary btn-sm disabled:opacity-50"
 						>
 							다음
-						</button>
+						</Button>
 					</div>
 				</div>
 			{/if}
@@ -960,7 +962,7 @@
 							class="btn btn-primary w-full disabled:opacity-50"
 						>
 							{createLoading ? '생성 중...' : '요청 생성'}
-						</button>
+						</Button>
 					</div>
 				</div>
 			</div>
@@ -993,7 +995,7 @@
 					</div>
 					<button onclick={closeModal} class="text-muted-foreground hover:text-muted-foreground text-2xl">
 						&times;
-					</button>
+					</Button>
 				</div>
 
 				<div class="grid grid-cols-2 gap-4 text-sm mb-4">
@@ -1048,7 +1050,7 @@
 							class="btn btn-secondary btn-sm"
 						>
 							취소
-						</button>
+						</Button>
 					{/if}
 					{#if selectedRequest.status === 'failed' || selectedRequest.status === 'completed'}
 						<button
@@ -1056,15 +1058,15 @@
 							class="btn btn-primary btn-sm"
 						>
 							{selectedRequest.status === 'completed' ? '재분석' : '재시도'}
-						</button>
+						</Button>
 					{/if}
 					<button
 						onclick={() => { deleteRequest(selectedRequest!.id); closeModal(); }}
 						class="btn btn-danger btn-sm"
 					>
 						삭제
-					</button>
-					<button onclick={closeModal} class="btn btn-secondary btn-sm">닫기</button>
+					</Button>
+					<Button variant="secondary"sm on:click={closeModal}>닫기</Button>
 				</div>
 			</div>
 		</div>

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { Button } from '$lib/components/ui';
+
 	/**
 	 * 스케줄 크롤링 탭 컴포넌트
 	 * 정기 크롤링 스케줄 관리
@@ -231,19 +233,17 @@
 					{/if}
 				</div>
 				<div class="mt-3 flex gap-2">
-					<button
-						onclick={() => openRunsModal(schedule)}
-						class="btn btn-secondary btn-sm flex-1"
+					<Button variant="secondary"sm on:click={() => openRunsModal(schedule)}
 					>
 						실행 이력
-					</button>
+					</Button>
 					{#if $isAdmin}
 						<button
 							onclick={() => handleToggle(schedule.id, !schedule.enabled)}
 							class="btn btn-sm {schedule.enabled ? 'btn-danger' : 'btn-primary'}"
 						>
 							{schedule.enabled ? '비활성화' : '활성화'}
-						</button>
+						</Button>
 					{/if}
 				</div>
 			</div>
@@ -301,14 +301,14 @@
 									class="text-sm text-primary hover:underline"
 								>
 									실행 이력
-								</button>
+								</Button>
 								{#if $isAdmin}
 									<button
 										onclick={() => handleToggle(schedule.id, !schedule.enabled)}
 										class="text-sm {schedule.enabled ? 'text-error' : 'text-success'} hover:underline"
 									>
 										{schedule.enabled ? '비활성화' : '활성화'}
-									</button>
+									</Button>
 								{/if}
 							</div>
 						</td>
@@ -339,7 +339,7 @@
 				</div>
 				<button onclick={() => (showRunsModal = false)} class="text-muted-foreground hover:text-muted-foreground text-2xl">
 					&times;
-				</button>
+				</Button>
 			</div>
 
 			{#if loadingRuns}
@@ -377,7 +377,7 @@
 			{/if}
 
 			<div class="mt-6 flex justify-end">
-				<button onclick={() => (showRunsModal = false)} class="btn btn-secondary btn-sm">닫기</button>
+				<Button variant="secondary"sm on:click={() => (showRunsModal = false)}>닫기</Button>
 			</div>
 		</div>
 	</div>

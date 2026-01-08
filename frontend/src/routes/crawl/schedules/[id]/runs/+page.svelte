@@ -252,7 +252,7 @@
 					class="btn btn-secondary btn-sm"
 				>
 					이전
-				</button>
+				</Button>
 				<span class="text-sm text-muted-foreground">
 					{currentPage} / {totalPages}
 				</span>
@@ -262,7 +262,7 @@
 					class="btn btn-secondary btn-sm"
 				>
 					다음
-				</button>
+				</Button>
 			</div>
 		{/if}
 	{/if}

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { Button } from '$lib/components/ui';
+
 	import { onMount } from 'svelte';
 	import { collectApi } from '$lib/api';
 	import type { InstagramTag, InstagramKeyword } from '$lib/types';
@@ -149,10 +151,10 @@
 		<div class="flex gap-2">
 			<button onclick={reclassifyAll} disabled={reclassifying} class="btn btn-secondary btn-sm">
 				{reclassifying ? '재분류 중...' : '전체 재분류'}
-			</button>
-			<button onclick={() => (showCreateTagModal = true)} class="btn btn-primary btn-sm">
+			</Button>
+			<Button variant="primary"sm on:click={() => (showCreateTagModal = true)}>
 				+ 새 태그
-			</button>
+			</Button>
 		</div>
 	</div>
 
@@ -200,7 +202,7 @@
 									class="text-error hover:text-error text-sm"
 								>
 									삭제
-								</button>
+								</Button>
 							</div>
 						{/each}
 					</div>
@@ -241,7 +243,7 @@
 								<input type="checkbox" bind:checked={newKeywordCaseSensitive} />
 								대소문자 구분
 							</label>
-							<button onclick={addKeyword} class="btn btn-primary btn-sm"> 추가 </button>
+							<Button variant="primary"sm on:click={addKeyword}> 추가 </Button>
 						</div>
 					</div>
 
@@ -283,13 +285,13 @@
 												: 'text-success hover:text-success'}"
 										>
 											{kw.is_active ? '비활성화' : '활성화'}
-										</button>
+										</Button>
 										<button
 											onclick={() => deleteKeyword(kw.id)}
 											class="text-error hover:text-error text-sm"
 										>
 											삭제
-										</button>
+										</Button>
 									</div>
 								</div>
 							{/each}
@@ -317,7 +319,7 @@
 						class="text-muted-foreground hover:text-muted-foreground text-2xl"
 					>
 						&times;
-					</button>
+					</Button>
 				</div>
 
 				<div class="space-y-4">
@@ -358,10 +360,10 @@
 				</div>
 
 				<div class="mt-6 flex justify-end gap-2">
-					<button onclick={() => (showCreateTagModal = false)} class="btn btn-secondary btn-sm">
+					<Button variant="secondary"sm on:click={() => (showCreateTagModal = false)}>
 						취소
-					</button>
-					<button onclick={createTag} class="btn btn-primary btn-sm"> 생성 </button>
+					</Button>
+					<Button variant="primary"sm on:click={createTag}> 생성 </Button>
 				</div>
 			</div>
 		</div>

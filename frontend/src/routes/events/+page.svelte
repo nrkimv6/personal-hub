@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { Button } from '$lib/components/ui';
+
 	/**
 	 * 이벤트/팝업 관리 페이지
 	 *
@@ -626,10 +628,10 @@
 			<h2 class="text-xl md:text-2xl font-bold text-foreground">이벤트 관리</h2>
 			{#if $isAdmin}
 				<div class="flex gap-2">
-					<button onclick={openCreateModal} class="btn btn-primary btn-sm"> + 새 이벤트 </button>
+					<Button variant="primary"sm on:click={openCreateModal}> + 새 이벤트 </Button>
 					<button onclick={openUrlImportModal} class="btn btn-outline btn-sm" title="URL에서 이벤트 가져오기">
 						🔗 URL 가져오기
-					</button>
+					</Button>
 				</div>
 			{/if}
 		</div>
@@ -671,7 +673,7 @@
 							>{activeFilterCount}</span
 						>
 					{/if}
-				</button>
+				</Button>
 			{/if}
 
 			<span class="text-sm text-muted-foreground">총 {total}건</span>
@@ -693,7 +695,7 @@
 					: 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				온라인 이벤트
-			</button>
+			</Button>
 			<button
 				onclick={() => switchTab('offline')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'offline'
@@ -701,7 +703,7 @@
 					: 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				오프라인 이벤트
-			</button>
+			</Button>
 			<button
 				onclick={() => switchTab('popup')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'popup'
@@ -709,7 +711,7 @@
 					: 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				팝업
-			</button>
+			</Button>
 			<button
 				onclick={() => switchTab('uncategorized')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'uncategorized'
@@ -717,7 +719,7 @@
 					: 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
 				미분류
-			</button>
+			</Button>
 		</nav>
 	</div>
 
@@ -764,7 +766,7 @@
 				{#if $isAdmin && activeTab !== 'uncategorized'}
 					<button onclick={openCreateModal} class="mt-4 btn btn-primary btn-sm">
 						+ {activeTab === 'popup' ? '새 팝업 등록' : '새 이벤트 등록'}
-					</button>
+					</Button>
 				{/if}
 			</div>
 		{:else if activeTab === 'uncategorized'}
@@ -802,13 +804,13 @@
 									class="px-2 py-1 text-xs bg-purple-light text-purple rounded hover:bg-purple-200"
 								>
 									이벤트로
-								</button>
+								</Button>
 								<button
 									onclick={() => handleReclassify(post, 'popup')}
 									class="px-2 py-1 text-xs bg-pink-light text-pink rounded hover:bg-pink-200"
 								>
 									팝업으로
-								</button>
+								</Button>
 							</div>
 						{/if}
 					</div>
@@ -867,7 +869,7 @@
 					class="btn btn-secondary btn-sm disabled:opacity-50"
 				>
 					이전
-				</button>
+				</Button>
 				<span class="px-3 py-1.5 text-sm">
 					{currentPage} / {Math.ceil(total / pageSize)}
 				</span>
@@ -877,7 +879,7 @@
 					class="btn btn-secondary btn-sm disabled:opacity-50"
 				>
 					다음
-				</button>
+				</Button>
 			</div>
 		</div>
 		{/if}

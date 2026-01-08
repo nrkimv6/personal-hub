@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { Badge, Button } from '$lib/components/ui';
+
 	import { onMount } from 'svelte';
 	import { monitoringEventApi, businessApi } from '$lib/api';
 	import type { MonitoringEvent, MonitoringEventStats, Business } from '$lib/types';
@@ -286,8 +288,8 @@
 				<input id="monitoring-date-to" type="date" class="input" bind:value={filters.date_to} />
 			</div>
 			<div class="flex items-end gap-2">
-				<button class="btn btn-primary" onclick={handleSearch}>검색</button>
-				<button class="btn btn-secondary" onclick={clearFilters}>초기화</button>
+				<Button variant="primary" on:click={handleSearch}>검색</Button>
+				<Button variant="secondary" on:click={clearFilters}>초기화</Button>
 			</div>
 		</div>
 	</div>
@@ -346,7 +348,7 @@
 													d={expandedEventIds[event.id] ? 'M19 9l-7 7-7-7' : 'M9 5l7 7-7 7'}
 												/>
 											</svg>
-										</button>
+										</Button>
 									{:else}
 										<span class="w-5"></span>
 									{/if}
@@ -366,7 +368,7 @@
 										title={url}
 									>
 										{copiedId === event.id ? '복사됨' : '복사'}
-									</button>
+									</Button>
 								{:else}
 									<span class="text-muted-foreground">-</span>
 								{/if}
@@ -401,11 +403,11 @@
 							<td class="px-2 py-3 text-sm">
 								{#if event.booking_triggered}
 									{#if event.booking_success === true}
-										<span class="badge badge-success">성공</span>
+										<Badge variant="success">성공</Badge>
 									{:else if event.booking_success === false}
-										<span class="badge badge-error">실패</span>
+										<Badge variant="error">실패</Badge>
 									{:else}
-										<span class="badge badge-warning">시도</span>
+										<Badge variant="warning">시도</Badge>
 									{/if}
 								{:else}
 									<span class="text-muted-foreground">-</span>
@@ -413,9 +415,9 @@
 							</td>
 							<td class="px-2 py-3 text-sm">
 								{#if event.fetch_method === 'graphql_api'}
-									<span class="badge badge-info text-xs">API</span>
+									<Badge variant="info" class="text-xs">API</Badge>
 								{:else if event.fetch_method === 'html_scrape'}
-									<span class="badge badge-gray text-xs">HTML</span>
+									<Badge variant="secondary" class="text-xs">HTML</Badge>
 								{:else if event.fetch_method === 'anonymous_api'}
 									<span class="badge badge-purple text-xs">익명</span>
 								{:else}
@@ -479,7 +481,7 @@
 														onclick={() => copyGraphqlResponse(event.graphql_response)}
 													>
 														복사
-													</button>
+													</Button>
 												</div>
 												<div class="p-4 max-h-80 overflow-auto">
 													<pre
@@ -505,8 +507,7 @@
 					총 {total}건 중 {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, total)}
 				</div>
 				<div class="flex gap-2">
-					<button
-						class="btn btn-secondary btn-sm"
+					<Button variant="secondary"sm
 						disabled={page === 1}
 						onclick={() => {
 							page--;
@@ -514,10 +515,9 @@
 						}}
 					>
 						이전
-					</button>
+					</Button>
 					<span class="px-3 py-1 text-sm">{page} / {totalPages}</span>
-					<button
-						class="btn btn-secondary btn-sm"
+					<Button variant="secondary"sm
 						disabled={page === totalPages}
 						onclick={() => {
 							page++;
@@ -525,7 +525,7 @@
 						}}
 					>
 						다음
-					</button>
+					</Button>
 				</div>
 			</div>
 		{/if}

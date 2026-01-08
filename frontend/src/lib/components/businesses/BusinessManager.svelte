@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { Badge, Button } from '$lib/components/ui';
+
   import { onMount } from 'svelte';
   import { businessApi, itemApi, scheduleApi, serviceAccountApi } from '$lib/api';
   import type { Business, BusinessWithItems, BizItem, MonitorSchedule, ServiceAccountWithProfile } from '$lib/types';
@@ -358,15 +360,15 @@
     <p class="text-sm text-muted-foreground">업체, 아이템, 모니터링 일정을 관리합니다</p>
   </div>
   <div class="flex gap-2">
-    <button class="btn btn-secondary btn-sm" on:click={fetchBusinesses}>
+    <Button variant="secondary"sm on:click={fetchBusinesses}>
       새로고침
-    </button>
-    <button class="btn btn-success btn-sm" on:click={() => showUrlImportModal = true}>
+    </Button>
+    <Button variant="success"sm on:click={() => showUrlImportModal = true}>
       URL 임포트
-    </button>
-    <button class="btn btn-primary btn-sm" on:click={() => showAddBusinessModal = true}>
+    </Button>
+    <Button variant="primary"sm on:click={() => showAddBusinessModal = true}>
       + 업체 추가
-    </button>
+    </Button>
   </div>
 </div>
 
@@ -417,24 +419,23 @@
                     <div class="text-xs text-muted-foreground">{business.business_id}</div>
                   </td>
                   <td>
-                    <span class="badge badge-info">{business.service_type}</span>
+                    <Badge variant="info">{business.service_type}</Badge>
                   </td>
                   <td>
                     <div class="flex gap-1">
-                      <button
-                        class="btn btn-secondary btn-xs"
+                      <Button variant="secondary"xs
                         on:click|stopPropagation={() => { editBusiness = {...business}; showEditBusinessModal = true; }}
                         title="수정"
                       >
                         ✏
-                      </button>
+                      </Button>
                       <button
                         class="btn btn-danger btn-xs"
                         on:click|stopPropagation={() => handleDeleteBusiness(business)}
                         title="삭제"
                       >
                         🗑
-                      </button>
+                      </Button>
                     </div>
                   </td>
                 </tr>
@@ -452,9 +453,9 @@
           아이템 {#if selectedBusiness}({selectedBusiness.items?.length || 0}){/if}
         </h3>
         {#if selectedBusiness}
-          <button class="btn btn-secondary btn-sm" on:click={() => showAddItemModal = true}>
+          <Button variant="secondary"sm on:click={() => showAddItemModal = true}>
             + 추가
-          </button>
+          </Button>
         {/if}
       </div>
 
@@ -498,15 +499,14 @@
                   </td>
                   <td>
                     {#if item.auto_booking_enabled}
-                      <span class="badge badge-success">ON</span>
+                      <Badge variant="success">ON</Badge>
                     {:else}
-                      <span class="badge badge-gray">OFF</span>
+                      <Badge variant="secondary">OFF</Badge>
                     {/if}
                   </td>
                   <td>
                     <div class="flex gap-1">
-                      <button
-                        class="btn btn-secondary btn-xs"
+                      <Button variant="secondary"xs
                         on:click|stopPropagation={() => {
                           slotCheckBusiness = selectedBusiness;
                           slotCheckItem = item;
@@ -515,21 +515,20 @@
                         title="슬롯 조회"
                       >
                         🔍
-                      </button>
-                      <button
-                        class="btn btn-secondary btn-xs"
+                      </Button>
+                      <Button variant="secondary"xs
                         on:click|stopPropagation={() => { editItem = {...item}; showEditItemModal = true; }}
                         title="수정"
                       >
                         ✏
-                      </button>
+                      </Button>
                       <button
                         class="btn btn-danger btn-xs"
                         on:click|stopPropagation={() => handleDeleteItem(item)}
                         title="삭제"
                       >
                         🗑
-                      </button>
+                      </Button>
                     </div>
                   </td>
                 </tr>
@@ -547,9 +546,9 @@
           일정 {#if selectedItem}({itemSchedules.length}){/if}
         </h3>
         {#if selectedItem}
-          <button class="btn btn-secondary btn-sm" on:click={() => showAddScheduleModal = true}>
+          <Button variant="secondary"sm on:click={() => showAddScheduleModal = true}>
             + 추가
-          </button>
+          </Button>
         {/if}
       </div>
 
@@ -578,7 +577,7 @@
                     <div class="text-xs text-muted-foreground">{schedule.times.join(', ')}</div>
                   {/if}
                   {#if schedule.account_name}
-                    <span class="badge badge-info text-xs">👤 {schedule.account_name}</span>
+                    <Badge variant="info" class="text-xs">👤 {schedule.account_name}</Badge>
                   {/if}
                 </div>
               </div>
@@ -593,7 +592,7 @@
                   title="삭제"
                 >
                   ✕
-                </button>
+                </Button>
               </div>
             </div>
           {/each}
@@ -643,8 +642,8 @@
         <div class="flex justify-end gap-2 pt-4">
           <button type="button" class="btn btn-secondary" on:click={() => showAddBusinessModal = false}>
             취소
-          </button>
-          <button type="submit" class="btn btn-primary">추가</button>
+          </Button>
+          <button type="submit" class="btn btn-primary">추가</Button>
         </div>
       </form>
     </div>
@@ -678,8 +677,8 @@
         <div class="flex justify-end gap-2 pt-4">
           <button type="button" class="btn btn-secondary" on:click={() => { showEditBusinessModal = false; editBusiness = null; }}>
             취소
-          </button>
-          <button type="submit" class="btn btn-primary">저장</button>
+          </Button>
+          <button type="submit" class="btn btn-primary">저장</Button>
         </div>
       </form>
     </div>
@@ -732,8 +731,8 @@
         <div class="flex justify-end gap-2 pt-4">
           <button type="button" class="btn btn-secondary" on:click={() => showAddItemModal = false}>
             취소
-          </button>
-          <button type="submit" class="btn btn-primary">추가</button>
+          </Button>
+          <button type="submit" class="btn btn-primary">추가</Button>
         </div>
       </form>
     </div>
@@ -786,8 +785,8 @@
         <div class="flex justify-end gap-2 pt-4">
           <button type="button" class="btn btn-secondary" on:click={() => { showEditItemModal = false; editItem = null; }}>
             취소
-          </button>
-          <button type="submit" class="btn btn-primary">저장</button>
+          </Button>
+          <button type="submit" class="btn btn-primary">저장</Button>
         </div>
       </form>
     </div>
@@ -827,8 +826,8 @@
         <div class="flex justify-end gap-2 pt-4">
           <button type="button" class="btn btn-secondary" on:click={() => showAddScheduleModal = false}>
             취소
-          </button>
-          <button type="submit" class="btn btn-primary">추가</button>
+          </Button>
+          <button type="submit" class="btn btn-primary">추가</Button>
         </div>
       </form>
     </div>
@@ -949,10 +948,10 @@
             on:click={() => { showUrlImportModal = false; urlImportResult = null; }}
           >
             닫기
-          </button>
+          </Button>
           <button type="submit" class="btn btn-primary" disabled={urlImportLoading}>
             {urlImportLoading ? '처리 중...' : '임포트'}
-          </button>
+          </Button>
         </div>
       </form>
     </div>

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { Button } from '$lib/components/ui';
+
 	import { onMount } from 'svelte';
 	import { crawlApi } from '$lib/api';
 	import type { CrawlRequest, CrawlRequestPaginated } from '$lib/types';
@@ -202,12 +204,10 @@
 							</td>
 							<td class="px-4 py-3 text-center">
 								{#if req.status === 'failed'}
-									<button
-										onclick={() => handleRetry(req.id)}
-										class="btn btn-secondary btn-xs"
+									<Button variant="secondary"xs on:click={() => handleRetry(req.id)}
 									>
 										재시도
-									</button>
+									</Button>
 								{/if}
 							</td>
 						</tr>
@@ -225,7 +225,7 @@
 					class="btn btn-secondary btn-sm"
 				>
 					이전
-				</button>
+				</Button>
 				<span class="text-sm text-muted-foreground">
 					{page} / {totalPages}
 				</span>
@@ -235,7 +235,7 @@
 					class="btn btn-secondary btn-sm"
 				>
 					다음
-				</button>
+				</Button>
 			</div>
 		{/if}
 	{/if}

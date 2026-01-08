@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { Button } from '$lib/components/ui';
+
 	import { onMount } from 'svelte';
 	import { collectApi } from '$lib/api';
 	import type { CrawlSchedule, ServiceAccountWithProfile } from '$lib/types';
@@ -276,9 +278,9 @@
 	<!-- 헤더 -->
 	<div class="flex justify-between items-center mb-6">
 		<h2 class="text-xl font-bold text-foreground">스케줄 설정</h2>
-		<button onclick={openAddModal} class="btn btn-primary">
+		<Button variant="primary" on:click={openAddModal}>
 			+ 스케줄 추가
-		</button>
+		</Button>
 	</div>
 
 	{#if successMessage}
@@ -323,7 +325,7 @@
 										? 'translate-x-6'
 										: 'translate-x-1'}"
 								></span>
-							</button>
+							</Button>
 
 							<div>
 								<div class="flex items-center gap-2">
@@ -359,13 +361,11 @@
 
 							<!-- 설정 버튼 (Instagram만) -->
 							{#if schedule.target_type === 'instagram_feed'}
-								<button
-									onclick={() => openSettings(schedule)}
-									class="btn btn-secondary btn-sm"
+								<Button variant="secondary"sm on:click={() => openSettings(schedule)}
 									title="상세 설정"
 								>
 									설정
-								</button>
+								</Button>
 							{/if}
 
 							<!-- 즉시 실행 버튼 -->
@@ -380,7 +380,7 @@
 								{:else}
 									즉시 실행
 								{/if}
-							</button>
+							</Button>
 
 							<!-- 삭제 버튼 -->
 							<button
@@ -389,7 +389,7 @@
 								title="스케줄 삭제"
 							>
 								삭제
-							</button>
+							</Button>
 						</div>
 					</div>
 				</div>
@@ -418,7 +418,7 @@
 					class="text-muted-foreground hover:text-muted-foreground text-2xl leading-none"
 				>
 					&times;
-				</button>
+				</Button>
 			</div>
 
 			<!-- 모달 컨텐츠 -->
@@ -443,7 +443,7 @@
 							class="text-sm text-primary hover:text-primary-hover"
 						>
 							← 이전
-						</button>
+						</Button>
 					{/if}
 				</div>
 				<button
@@ -451,7 +451,7 @@
 					class="text-muted-foreground hover:text-muted-foreground text-2xl leading-none"
 				>
 					&times;
-				</button>
+				</Button>
 			</div>
 
 			<!-- 모달 컨텐츠 -->
@@ -479,7 +479,7 @@
 										{/if}
 									</div>
 								</div>
-							</button>
+							</Button>
 						{/each}
 					</div>
 
@@ -509,7 +509,7 @@
 												{account.is_logged_in ? '로그인됨' : '로그인 필요'}
 											</div>
 										</div>
-									</button>
+									</Button>
 								{/each}
 							</div>
 						{/if}
@@ -531,7 +531,7 @@
 											<div class="font-medium text-foreground">{saved.name}</div>
 											<div class="text-sm text-muted-foreground truncate max-w-xs">{saved.query}</div>
 										</div>
-									</button>
+									</Button>
 								{/each}
 							</div>
 						{/if}
@@ -563,7 +563,7 @@
 										title="삭제"
 									>
 										✕
-									</button>
+									</Button>
 								{/if}
 							</div>
 						{/each}
@@ -574,12 +574,12 @@
 						class="w-full py-2 border-2 border-dashed border-border rounded-lg text-muted-foreground hover:border-blue-500 hover:text-primary transition-colors"
 					>
 						+ 시간 추가
-					</button>
+					</Button>
 
 					<div class="mt-6 flex justify-end gap-2">
-						<button onclick={closeAddModal} class="btn btn-secondary">
+						<Button variant="secondary" on:click={closeAddModal}>
 							취소
-						</button>
+						</Button>
 						<button
 							onclick={createSchedule}
 							disabled={creating}
@@ -590,7 +590,7 @@
 							{:else}
 								생성
 							{/if}
-						</button>
+						</Button>
 					</div>
 				{/if}
 			</div>
@@ -619,9 +619,9 @@
 
 			<!-- 모달 푸터 -->
 			<div class="px-6 py-4 border-t border-border flex justify-end gap-2">
-				<button onclick={closeDeleteModal} class="btn btn-secondary" disabled={deleting}>
+				<Button variant="secondary" on:click={closeDeleteModal} disabled={deleting}>
 					취소
-				</button>
+				</Button>
 				<button
 					onclick={confirmDelete}
 					disabled={deleting}
@@ -632,7 +632,7 @@
 					{:else}
 						삭제
 					{/if}
-				</button>
+				</Button>
 			</div>
 		</div>
 	</div>

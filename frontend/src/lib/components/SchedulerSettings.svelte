@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { Button } from '$lib/components/ui';
+
 	import { onMount } from 'svelte';
 	import { schedulerApi } from '$lib/api';
 	import type { ScheduledTask, TaskLog } from '$lib/types';
@@ -123,13 +125,12 @@
 		<div class="mb-8">
 			<div class="flex items-center justify-between mb-4">
 				<h3 class="text-lg font-semibold text-foreground">등록된 작업</h3>
-				<button
-					class="btn btn-secondary btn-sm"
+				<Button variant="secondary"sm
 					onclick={() => fetchData()}
 					disabled={loading}
 				>
 					새로고침
-				</button>
+				</Button>
 			</div>
 
 			{#if tasks.length === 0}
@@ -187,20 +188,19 @@
 									</div>
 								</div>
 								<div class="flex gap-2 ml-4">
-									<button
-										class="btn btn-primary btn-sm"
+									<Button variant="primary"sm
 										onclick={() => runTask(task.name)}
 										disabled={actionLoading[task.name]}
 									>
 										{actionLoading[task.name] ? '...' : '실행'}
-									</button>
+									</Button>
 									<button
 										class="btn btn-sm {task.enabled ? 'btn-warning' : 'btn-success'}"
 										onclick={() => toggleTask(task)}
 										disabled={actionLoading[task.name]}
 									>
 										{task.enabled ? '비활성화' : '활성화'}
-									</button>
+									</Button>
 								</div>
 							</div>
 						</div>

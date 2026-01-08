@@ -190,7 +190,7 @@
 								class="btn btn-sm {schedule.enabled ? 'btn-danger' : 'btn-primary'}"
 							>
 								{schedule.enabled ? '비활성화' : '활성화'}
-							</button>
+							</Button>
 						</div>
 					</div>
 				</div>
