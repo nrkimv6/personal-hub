@@ -165,6 +165,14 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             for schedule in topic_extract_schedules:
                 await self._process_topic_extract_schedule(db, schedule, schedule_service)
 
+            # Report 타입의 활성 스케줄 조회
+            report_schedules = schedule_service.get_schedules_by_type(
+                TaskSchedule.TARGET_TYPE_REPORT,
+                enabled_only=True
+            )
+            for schedule in report_schedules:
+                await self._process_report_schedule(db, schedule, schedule_service)
+
         except Exception as e:
             logger.error(f"[{self.name}] 스케줄 디스패치 오류: {e}", exc_info=True)
         finally:
@@ -1227,4 +1235,129 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             logger.error(f"[{self.name}] TopicExtractWorker 실행 오류: {e}", exc_info=True)
             return {"error": str(e)}
         finally:
+            db.close()
+
+    # =====================================
+    # Report 스케줄 처리
+    # =====================================
+
+    async def _process_report_schedule(
+        self,
+        db,
+        schedule: TaskSchedule,
+        schedule_service: TaskScheduleService
+    ):
+        """Report 스케줄 처리.
+
+        Args:
+            db: DB 세션
+            schedule: 스케줄
+            schedule_service: 스케줄 서비스
+        """
+        try:
+            config = schedule.get_target_config()
+
+            # 타임 윈도우 확인
+            time_windows = parse_time_windows(config.get("time_windows", []))
+            min_interval = config.get("min_interval_hours", 24)
+
+            scheduler = InstagramScheduler(
+                daily_runs=config.get("daily_runs", 1),
+                time_windows=time_windows,
+            )
+
+            # 마지막 실행 시간 조회
+            last_run = schedule_service.get_latest_run(schedule.id)
+            last_run_time = last_run.started_at if last_run else None
+
+            if scheduler.should_run_now(last_run=last_run_time, min_interval_hours=min_interval):
+                logger.info(f"[{self.name}] Report 스케줄 실행 시간 도래: schedule_id={schedule.id}")
+
+                # 이미 활성 실행이 있는지 확인
+                if schedule_service.has_active_run(schedule.id):
+                    logger.info(f"[{self.name}] 이미 활성 실행 존재, 스킵")
+                    return
+
+                # 실행 시작
+                run = schedule_service.start_run(
+                    schedule_id=schedule.id,
+                    worker_id=self.name,
+                    config_snapshot=config
+                )
+
+                task_name = f"report_{schedule.id}_run_{run.id}"
+                if not self._is_task_running(task_name):
+                    self._create_task(
+                        self._execute_report_generation(schedule, run, config),
+                        task_name
+                    )
+                    logger.info(f"[{self.name}] Report 생성 태스크 시작: run_id={run.id}")
+
+        except Exception as e:
+            logger.error(f"[{self.name}] Report 스케줄 처리 오류: schedule_id={schedule.id}, error={e}", exc_info=True)
+
+    async def _execute_report_generation(
+        self,
+        schedule: TaskSchedule,
+        run: TaskScheduleRun,
+        config: dict
+    ):
+        """보고서 생성 실행.
+
+        Args:
+            schedule: 스케줄
+            run: 실행 기록
+            config: 보고서 설정
+        """
+        from datetime import timedelta
+
+        db = SessionLocal()
+        try:
+            schedule_service = TaskScheduleService(db)
+
+            self._update_worker_state("generating", f"report_{schedule.id}")
+
+            from app.modules.reports.services.report_service import ReportService
+            report_service = ReportService(db)
+
+            # 기간 계산
+            period = config.get("period", "daily")
+            period_end = datetime.now()
+            if period == "daily":
+                period_start = period_end - timedelta(days=1)
+            elif period == "weekly":
+                period_start = period_end - timedelta(weeks=1)
+            else:
+                period_start = period_end - timedelta(days=30)
+
+            # LLM 요청 생성
+            llm_request = report_service.request_report(
+                report_type=config.get("report_type", "daily_summary"),
+                period_start=period_start,
+                period_end=period_end,
+                config=config
+            )
+
+            # 완료 처리 (LLM Worker가 비동기로 처리)
+            schedule_service.complete_run(
+                run.id,
+                collected_count=1,
+                saved_count=1,
+                stop_reason=f"report_requested_id_{llm_request.id}"
+            )
+            schedule_service.update_schedule_after_run(run.schedule_id)
+            logger.info(
+                f"[{self.name}] Report 요청 완료: run_id={run.id}, "
+                f"llm_request_id={llm_request.id}"
+            )
+
+        except Exception as e:
+            logger.error(f"[{self.name}] Report 생성 실행 실패: run_id={run.id}, error={e}", exc_info=True)
+            try:
+                schedule_service = TaskScheduleService(db)
+                schedule_service.fail_run(run.id, str(e))
+            except Exception:
+                pass
+        finally:
+            self._update_worker_state("idle")
             db.close()
