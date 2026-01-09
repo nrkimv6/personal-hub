@@ -63,38 +63,20 @@ $env:APP_MODE = $AppMode
 $env:PYTHONIOENCODING = "utf-8"
 
 # ============================================================
-# STEP 0: Start Redis (Podman)
+# STEP 0: Redis - DISABLED (Session 0 Constraint)
 # ============================================================
-Write-ServiceLog "Starting Redis via Podman..."
-
-try {
-    # Podman machine 실제 연결 확인 (podman ps는 실제 데몬 연결 필요)
-    & podman ps 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-ServiceLog "  Podman machine not connected, starting..."
-        & podman machine start 2>&1 | ForEach-Object { Write-ServiceLog "  $_" }
-        Start-Sleep -Seconds 15  # WSL2 VM 시작 대기
-    } else {
-        Write-ServiceLog "  Podman machine connected"
-    }
-
-    # Redis 컨테이너 시작 (venv의 podman-compose 사용)
-    $PodmanCompose = Join-Path $ProjectRoot ".venv\Scripts\podman-compose.exe"
-    Set-Location $ProjectRoot
-    & $PodmanCompose up -d redis 2>&1 | ForEach-Object { Write-ServiceLog "  $_" }
-    Start-Sleep -Seconds 3
-
-    # Redis 연결 테스트
-    $pingResult = & podman exec monitor-redis redis-cli ping 2>&1
-    if ($pingResult -eq "PONG") {
-        Write-ServiceLog "  Redis started and responding"
-    } else {
-        Write-ServiceLog "  WARNING: Redis ping failed: $pingResult"
-    }
-} catch {
-    Write-ServiceLog "  WARNING: Redis start failed: $_"
-    Write-ServiceLog "  -> Using SQLite fallback mode"
-}
+# Redis는 startup-browser-workers.ps1에서 시작됨 (사용자 세션 필요)
+#
+# NSSM 서비스는 Session 0 (시스템 세션)에서 실행되어:
+#   - Podman Machine (WSL2 VM)이 사용자 로그인 후에만 초기화됨
+#   - "Cannot connect to Podman" 에러 발생 → SQLite 폴백
+#
+# Redis는 로그인 시작프로그램 (Session 1)에서 시작:
+#   - startup-browser-workers.ps1 → Redis 시작 → browser-workers.ps1
+#   - 참고: docs/auto-start/2026-01-09-redis-server-failure-analysis.md
+#
+# API는 Redis 없이 정상 동작 (SQLite 폴백 모드)
+Write-ServiceLog "Redis will be started via startup program (requires user session)"
 
 # ============================================================
 # STEP 1: Port Cleanup (improved with graceful shutdown)
