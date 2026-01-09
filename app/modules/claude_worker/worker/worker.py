@@ -47,6 +47,10 @@ try:
     from app.modules.claude_worker.models.llm_request import LLMRequest
     logger.debug("llm_request 모델 import 완료")
 
+    # WritingBatch 모델 import (LLMRequest의 외래키 참조를 위해 필요)
+    from app.modules.writing.models.writing_batch import WritingBatch
+    logger.debug("writing_batch 모델 import 완료")
+
     from app.modules.claude_worker.services.llm_service import LLMService
     logger.debug("llm_service import 완료")
 
