@@ -927,6 +927,67 @@ def save_topic_extract_result(db, caller_id: str, llm_result: dict) -> bool:
         return False
 
 
+def save_report_result(db, request, result: dict) -> bool:
+    """보고서 생성 LLM 결과를 generated_reports에 저장.
+
+    Args:
+        db: DB 세션
+        request: LLMRequest 객체
+        result: LLM 결과 {"result": {...}, "raw_response": "..."}
+
+    Returns:
+        성공 여부
+    """
+    from app.modules.reports.models.generated_report import GeneratedReport
+    import json
+
+    try:
+        llm_result = result.get("result", {})
+
+        # caller_id에서 report_type, date 파싱
+        # 형식: "report_type_YYYYMMDD"
+        parts = request.caller_id.split("_")
+        if len(parts) < 2:
+            logger.error(f"Invalid caller_id format: {request.caller_id}")
+            return False
+
+        date_str = parts[-1]  # YYYYMMDD
+        report_type = "_".join(parts[:-1])  # 나머지는 report_type
+
+        try:
+            period_end = datetime.strptime(date_str, "%Y%m%d")
+        except ValueError:
+            logger.error(f"Invalid date in caller_id: {date_str}")
+            return False
+
+        # period_start는 period_end - 1일 (daily 기준)
+        from datetime import timedelta
+        period_start = period_end - timedelta(days=1)
+
+        report = GeneratedReport(
+            report_type=report_type,
+            period_start=period_start,
+            period_end=period_end,
+            title=llm_result.get("title", f"{report_type} report"),
+            content=llm_result.get("content", ""),
+            summary=llm_result.get("summary"),
+            statistics=json.dumps(llm_result.get("statistics", {}), ensure_ascii=False),
+            llm_request_id=request.id,
+            schedule_run_id=None,  # TODO: schedule_run_id 연결
+            format="markdown"
+        )
+        db.add(report)
+        db.commit()
+
+        logger.info(f"report {request.caller_id}: 보고서 저장 완료 (id={report.id})")
+        return True
+
+    except Exception as e:
+        logger.error(f"report 결과 저장 실패: {e}", exc_info=True)
+        db.rollback()
+        return False
+
+
 class LLMWorker:
     """Claude LLM 워커."""
 
@@ -1168,6 +1229,8 @@ class LLMWorker:
                     save_writing_refine_result(db, request, result)
                 elif request.caller_type == "event_import":
                     save_event_import_result(db, request, result)
+                elif request.caller_type == "report":
+                    save_report_result(db, request, result)
             else:
                 service.mark_failed(request.id, result["error"])
                 self._increment_error()
