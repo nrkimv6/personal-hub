@@ -50,6 +50,7 @@ class TaskSchedule(Base):
     TARGET_TYPE_WRITING_SOURCE_COLLECT = "writing_source_collect"  # RSS/위키문헌 수집
     TARGET_TYPE_KEYWORD_ANALYSIS = "keyword_analysis"  # 키워드 분석
     TARGET_TYPE_TOPIC_EXTRACT = "topic_extract"  # 소재 자동 추출
+    TARGET_TYPE_REPORT = "report"  # LLM 보고서 생성
 
     SCHEDULE_TYPE_CRON = "cron"
     SCHEDULE_TYPE_INTERVAL = "interval"
