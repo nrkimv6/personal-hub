@@ -91,11 +91,59 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
             self.redis_queue = RedisQueue(redis_client, CRAWL_REQUEST_QUEUE)
             self.use_redis = True
             logger.info(f"[{self.name}] Redis 큐 모드 활성화")
+
+            # 워커 시작 시 pending 요청을 Redis 큐에 푸시
+            await self._recover_pending_requests()
         else:
             self.use_redis = False
             logger.info(f"[{self.name}] SQLite 폴링 모드 (Redis 미연결)")
 
         self._redis_initialized = True
+
+    async def _recover_pending_requests(self):
+        """워커 시작 시 pending 요청을 Redis 큐에 복구.
+
+        이전에 Redis 큐에 푸시되지 않은 pending 요청을 감지하여 큐에 추가합니다.
+        이는 API가 재시작되거나 Redis 푸시가 누락된 경우를 대비한 복구 메커니즘입니다.
+        """
+        if not self.redis_queue:
+            return
+
+        db = SessionLocal()
+        try:
+            request_service = CrawlRequestService(db)
+
+            # pending 상태인 요청 조회 (최대 100개)
+            pending_requests = request_service.get_pending_requests(limit=100)
+
+            recovered = 0
+            for request in pending_requests:
+                # Activity 요청은 ActivityWorker가 처리
+                if request.url_type == CrawlRequest.URL_TYPE_ACTIVITY:
+                    continue
+
+                # Redis 큐에 푸시
+                success = await self.redis_queue.push({
+                    "id": request.id,
+                    "url": request.url,
+                    "url_type": request.url_type,
+                    "requested_by": request.requested_by,
+                    "created_at": request.requested_at,
+                })
+
+                if success:
+                    # 상태를 queued로 변경
+                    request.status = CrawlRequest.STATUS_QUEUED
+                    recovered += 1
+
+            if recovered > 0:
+                db.commit()
+                logger.info(f"[{self.name}] {recovered}개의 pending 요청을 Redis 큐에 복구")
+
+        except Exception as e:
+            logger.error(f"[{self.name}] Pending 요청 복구 오류: {e}", exc_info=True)
+        finally:
+            db.close()
 
     def _get_loop_interval(self) -> float:
         """메인 루프 간격 반환."""

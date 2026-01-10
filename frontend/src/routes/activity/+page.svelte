@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { toast } from '$lib/stores/toast';
 
 	// 타입 정의
 	interface WorkerStatus {
@@ -73,6 +74,7 @@
 	let workerStatus: WorkerStatus | null = $state(null);
 	let centers: Center[] = $state([]);
 	let requests: CrawlRequest[] = $state([]);
+	let syncing = $state(false);
 
 	// 강좌 관련 상태
 	let courses: Course[] = $state([]);
@@ -81,6 +83,20 @@
 	let coursePageSize = $state(20);
 	let courseKeyword = $state('');
 	let courseCategory = $state('');
+
+	// Activity-Hub 수동 동기화
+	async function syncToActivityHub() {
+		syncing = true;
+		try {
+			await apiRequest('/crawl/sync-hub', { method: 'POST' });
+			toast.success('Activity-Hub 동기화가 시작되었습니다.');
+			setTimeout(() => loadWorkerStatus(), 2000);
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : '동기화 요청 실패');
+		} finally {
+			syncing = false;
+		}
+	}
 
 	// 워커 상태 로드
 	async function loadWorkerStatus() {
@@ -310,6 +326,25 @@
 								<span class="text-sm">{formatDate(workerStatus.last_activity)}</span>
 							</div>
 						{/if}
+
+						<!-- Activity-Hub 수동 동기화 버튼 -->
+						<button
+							onclick={syncToActivityHub}
+							disabled={syncing}
+							class="mt-4 w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+						>
+							{#if syncing}
+								<span class="flex items-center justify-center gap-2">
+									<svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24">
+										<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+										<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+									</svg>
+									동기화 중...
+								</span>
+							{:else}
+								Activity-Hub 동기화
+							{/if}
+						</button>
 					</div>
 				{:else}
 					<div class="text-muted-foreground">워커 상태를 가져올 수 없습니다.</div>

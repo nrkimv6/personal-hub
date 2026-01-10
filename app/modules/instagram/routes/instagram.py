@@ -418,10 +418,14 @@ async def recrawl_post(
     if not service_account_id:
         raise HTTPException(status_code=400, detail="Post has no associated account")
 
-    # 재크롤링 요청 생성
-    request = request_service.create_single_post_request(
-        post_id=post_id,
-        service_account_id=service_account_id,
+    # 재크롤링 요청 생성 (Redis 큐 푸시 포함)
+    from app.services.crawl_request_service import CrawlRequestService as CommonCrawlRequestService
+    common_service = CommonCrawlRequestService(db)
+
+    url = f"instagram://post/{post_id}?account_id={service_account_id}"
+    request = await common_service.create_request_async(
+        url=url,
+        url_type="instagram_post",
         requested_by="manual",
     )
 
@@ -485,10 +489,13 @@ async def crawl_post_by_url(
     if not account:
         raise HTTPException(status_code=404, detail=f"Account {body.service_account_id} not found")
 
-    # URL 크롤링 요청 생성
-    request = request_service.create_url_crawl_request(
+    # URL 크롤링 요청 생성 (Redis 큐 푸시 포함)
+    from app.services.crawl_request_service import CrawlRequestService as CommonCrawlRequestService
+    common_service = CommonCrawlRequestService(db)
+
+    request = await common_service.create_request_async(
         url=url,
-        service_account_id=body.service_account_id,
+        url_type="instagram_post",
         requested_by="manual",
     )
 
@@ -533,13 +540,24 @@ async def crawl_by_generic_url(
     if not account:
         raise HTTPException(status_code=404, detail=f"Account {body.service_account_id} not found")
 
-    # 크롤링 요청 생성
-    request = request_service.create_generic_url_crawl_request(
+    # 크롤링 요청 생성 (Redis 큐 푸시 포함)
+    from app.services.crawl_request_service import CrawlRequestService as CommonCrawlRequestService
+    common_service = CommonCrawlRequestService(db)
+
+    # url_type 매핑
+    url_type_map = {
+        "single_post": "instagram_post",
+        "single_reel": "instagram_post",
+        "account_profile": "instagram_account",
+        "account_reels": "instagram_reels",
+        "hashtag": "instagram_hashtag",
+        "reels_explore": "instagram_reels",
+    }
+    crawl_url_type = url_type_map.get(parsed.url_type.value, "instagram_post")
+
+    request = await common_service.create_request_async(
         url=body.url,
-        url_type=parsed.url_type.value,
-        service_account_id=body.service_account_id,
-        max_posts=body.max_posts,
-        scroll_count=body.scroll_count,
+        url_type=crawl_url_type,
         requested_by="manual",
     )
 

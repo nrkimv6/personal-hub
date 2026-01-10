@@ -40,7 +40,7 @@ class UniversalCrawlService:
         url_lower = url.lower()
         return any(pattern in url_lower for pattern in self.INSTAGRAM_PATTERNS)
 
-    def create_request(
+    async def create_request(
         self,
         db: Session,
         url: str,
@@ -65,18 +65,15 @@ class UniversalCrawlService:
             if url_type == "sns":
                 url_type = "other"  # SNS 중 Instagram 제외한 것들
 
-        # 요청 생성
-        request = CrawlRequest(
+        # 요청 생성 (Redis 큐 푸시 포함)
+        from app.services.crawl_request_service import CrawlRequestService
+        request_service = CrawlRequestService(db)
+
+        request = await request_service.create_request_async(
             url=url,
             url_type=url_type,
-            status=CrawlRequest.STATUS_PENDING,
             requested_by=requested_by,
-            requested_at=datetime.now(),
         )
-
-        db.add(request)
-        db.commit()
-        db.refresh(request)
 
         logger.info(f"크롤링 요청 생성: id={request.id}, url={url}, type={url_type}")
         return request, f"크롤링 요청이 등록되었습니다. (ID: {request.id})"

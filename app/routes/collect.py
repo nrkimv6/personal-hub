@@ -352,16 +352,15 @@ async def trigger_schedule_run(
                 detail="스케줄에 계정이 설정되지 않았습니다"
             )
 
-        # CrawlRequest (범용 테이블)에 요청 생성
-        request = CrawlRequest(
+        # CrawlRequest (범용 테이블)에 요청 생성 (Redis 큐 푸시 포함)
+        from app.services.crawl_request_service import CrawlRequestService
+        request_service = CrawlRequestService(db)
+
+        request = await request_service.create_request_async(
             url=f"instagram://feed?account_id={service_account_id}",
             url_type="instagram_feed",
-            status="pending",
             requested_by="manual",
         )
-        db.add(request)
-        db.commit()
-        db.refresh(request)
 
         return {
             "success": True,

@@ -100,15 +100,15 @@ def create_crawl_request(
     # URL 형식: activity://center/{id}
     url = f"activity://center/{center.id}"
 
-    request = CrawlRequest(
+    # Redis 큐 푸시 포함
+    from app.services.crawl_request_service import CrawlRequestService
+    request_service = CrawlRequestService(db)
+
+    request = await request_service.create_request_async(
         url=url,
         url_type=CrawlRequest.URL_TYPE_ACTIVITY,
-        status=CrawlRequest.STATUS_PENDING,
         requested_by="manual",
     )
-    db.add(request)
-    db.commit()
-    db.refresh(request)
 
     return request
 
