@@ -451,6 +451,65 @@ async def trigger_schedule_run(
             "run_id": run.id,
         }
 
+    # Report 스케줄의 경우
+    elif schedule.target_type == 'report':
+        from datetime import timedelta
+        from app.modules.reports.services.report_service import ReportService
+
+        schedule_service = TaskScheduleService(db)
+        target_config = schedule.get_target_config() if schedule.target_config else {}
+
+        # 스케줄 실행 기록 시작
+        run = schedule_service.start_run(
+            schedule_id=schedule.id,
+            worker_id="manual",
+            config_snapshot=target_config
+        )
+
+        try:
+            report_service = ReportService(db)
+
+            # 기간 계산
+            period = target_config.get("period", "daily")
+            period_end = datetime.now()
+            if period == "daily":
+                period_start = period_end - timedelta(days=1)
+            elif period == "weekly":
+                period_start = period_end - timedelta(weeks=1)
+            else:
+                period_start = period_end - timedelta(days=30)
+
+            # LLM 요청 생성
+            llm_request = report_service.request_report(
+                report_type=target_config.get("report_type", "daily_summary"),
+                period_start=period_start,
+                period_end=period_end,
+                config=target_config
+            )
+
+            # 완료 처리 (LLM Worker가 비동기로 처리)
+            schedule_service.complete_run(
+                run.id,
+                collected_count=1,
+                saved_count=1,
+                stop_reason=f"report_requested_id_{llm_request.id}"
+            )
+            schedule_service.update_schedule_after_run(run.schedule_id)
+
+            return {
+                "success": True,
+                "message": "보고서 생성이 요청되었습니다",
+                "run_id": run.id,
+                "llm_request_id": llm_request.id,
+            }
+
+        except Exception as e:
+            schedule_service.fail_run(run.id, str(e))
+            raise HTTPException(
+                status_code=500,
+                detail=f"보고서 생성 요청 실패: {str(e)}"
+            )
+
     # 지원하지 않는 스케줄 타입
     else:
         return {
