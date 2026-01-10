@@ -315,9 +315,9 @@ class CollectService:
         status: Optional[str] = None,
         period: Optional[str] = None,  # 'today', 'week', 'month', None(전체)
     ) -> Tuple[List[CrawlHistoryItem], int, CrawlHistoryStats]:
-        """통합 크롤링 이력 조회.
+        """통합 워커 실행 이력 조회.
 
-        crawl_requests와 crawl_schedule_runs를 통합하여 조회합니다.
+        crawl_requests, task_schedule_runs, google_search_queue를 통합하여 조회합니다.
         """
         results = []
         total = 0
@@ -332,7 +332,7 @@ class CollectService:
             date_from = datetime.now() - timedelta(days=30)
 
         # CrawlRequest 조회
-        if source_type is None or source_type in ('instagram', 'web'):
+        if source_type is None or source_type in ('instagram', 'web', 'activity'):
             requests, req_total = self._get_crawl_requests(
                 page=page,
                 limit=limit,
@@ -344,7 +344,7 @@ class CollectService:
             total += req_total
 
         # TaskScheduleRun 조회
-        if source_type is None or source_type in ('instagram', 'web'):
+        if source_type is None or source_type in ('instagram', 'web', 'writing', 'report'):
             runs, run_total = self._get_schedule_runs(
                 page=page,
                 limit=limit,
@@ -354,6 +354,17 @@ class CollectService:
             )
             results.extend(runs)
             total += run_total
+
+        # GoogleSearchQueue 조회 (신규 추가)
+        if source_type is None or source_type == 'google_search':
+            searches, search_total = self._get_google_searches(
+                page=page,
+                limit=limit,
+                status=status,
+                date_from=date_from,
+            )
+            results.extend(searches)
+            total += search_total
 
         # 시간순 정렬
         results.sort(key=lambda x: x.started_at, reverse=True)
@@ -440,6 +451,37 @@ class CollectService:
 
         return [self._run_to_history(r) for r in runs], total
 
+    def _get_google_searches(
+        self,
+        page: int,
+        limit: int,
+        status: Optional[str],
+        date_from: Optional[datetime],
+    ) -> Tuple[List[CrawlHistoryItem], int]:
+        """GoogleSearchQueue 조회."""
+        from app.models.google_search import GoogleSearchQueue
+
+        query = self.db.query(GoogleSearchQueue)
+
+        # status 필터
+        if status:
+            query = query.filter(GoogleSearchQueue.status == status)
+
+        # 기간 필터
+        if date_from:
+            query = query.filter(GoogleSearchQueue.created_at >= date_from)
+
+        total = query.count()
+
+        # 페이징
+        searches = (
+            query.order_by(desc(GoogleSearchQueue.created_at))
+            .limit(limit * 2)
+            .all()
+        )
+
+        return [self._google_search_to_history(s) for s in searches], total
+
     def _request_to_history(self, request: CrawlRequest) -> CrawlHistoryItem:
         """CrawlRequest를 CrawlHistoryItem으로 변환."""
         is_instagram = request.url_type.startswith('instagram') if request.url_type else False
@@ -479,6 +521,36 @@ class CollectService:
             saved_count=run.saved_count or 0,
         )
 
+    def _google_search_to_history(self, search) -> CrawlHistoryItem:
+        """GoogleSearchQueue를 CrawlHistoryItem으로 변환."""
+        # duration 계산
+        duration_seconds = None
+        if search.started_at and search.completed_at:
+            duration_seconds = int((search.completed_at - search.started_at).total_seconds())
+
+        # schedule 정보
+        schedule_name = None
+        if search.schedule:
+            schedule_name = search.schedule.display_name or search.schedule.name
+
+        return CrawlHistoryItem(
+            id=search.id,
+            history_type='google_search',
+            source_type='google_search',
+            status=search.status,
+            started_at=search.created_at,
+            finished_at=search.completed_at,
+            duration_seconds=duration_seconds,
+            error_message=search.error_message,
+            url=f"google://search?q={search.query}",
+            url_type='google_search',
+            requested_by='schedule' if search.schedule_id else 'manual',
+            schedule_id=search.schedule_id,
+            schedule_name=schedule_name,
+            collected_count=search.result_count or 0,
+            saved_count=0,
+        )
+
     def _get_request_type(self, request: CrawlRequest) -> str:
         """CrawlRequest의 타입 판별."""
         if request.url_type and request.url_type.startswith('instagram'):
@@ -492,22 +564,60 @@ class CollectService:
         source_type: Optional[str],
         date_from: Optional[datetime],
     ) -> CrawlHistoryStats:
-        """크롤링 이력 통계 계산."""
-        # CrawlRequest 통계
-        req_query = self.db.query(CrawlRequest)
-        if source_type == 'instagram':
-            req_query = req_query.filter(CrawlRequest.url_type.like('instagram%'))
-        elif source_type == 'web':
-            req_query = req_query.filter(~CrawlRequest.url_type.like('instagram%'))
-        if date_from:
-            req_query = req_query.filter(CrawlRequest.requested_at >= date_from)
+        """워커 실행 이력 통계 계산."""
+        from app.models.google_search import GoogleSearchQueue
 
-        total = req_query.count()
-        completed = req_query.filter(CrawlRequest.status == 'completed').count()
-        failed = req_query.filter(CrawlRequest.status == 'failed').count()
-        processing = req_query.filter(
-            CrawlRequest.status.in_(['pending', 'processing'])
-        ).count()
+        total = 0
+        completed = 0
+        failed = 0
+        processing = 0
+
+        # CrawlRequest 통계
+        if source_type is None or source_type in ('instagram', 'web', 'activity'):
+            req_query = self.db.query(CrawlRequest)
+            if source_type == 'instagram':
+                req_query = req_query.filter(CrawlRequest.url_type.like('instagram%'))
+            elif source_type == 'web':
+                req_query = req_query.filter(~CrawlRequest.url_type.like('instagram%'))
+            elif source_type == 'activity':
+                req_query = req_query.filter(CrawlRequest.url_type == 'activity')
+            if date_from:
+                req_query = req_query.filter(CrawlRequest.requested_at >= date_from)
+
+            total += req_query.count()
+            completed += req_query.filter(CrawlRequest.status == 'completed').count()
+            failed += req_query.filter(CrawlRequest.status == 'failed').count()
+            processing += req_query.filter(
+                CrawlRequest.status.in_(['pending', 'processing'])
+            ).count()
+
+        # TaskScheduleRun 통계
+        if source_type is None or source_type in ('instagram', 'web', 'writing', 'report'):
+            run_query = self.db.query(TaskScheduleRun).join(TaskSchedule)
+            if source_type == 'instagram':
+                run_query = run_query.filter(TaskSchedule.target_type == 'instagram_feed')
+            elif source_type in ('web', 'writing', 'report'):
+                run_query = run_query.filter(TaskSchedule.target_type != 'instagram_feed')
+            if date_from:
+                run_query = run_query.filter(TaskScheduleRun.started_at >= date_from)
+
+            total += run_query.count()
+            completed += run_query.filter(TaskScheduleRun.status == 'completed').count()
+            failed += run_query.filter(TaskScheduleRun.status == 'failed').count()
+            processing += run_query.filter(TaskScheduleRun.status == 'running').count()
+
+        # GoogleSearchQueue 통계 (신규)
+        if source_type is None or source_type == 'google_search':
+            search_query = self.db.query(GoogleSearchQueue)
+            if date_from:
+                search_query = search_query.filter(GoogleSearchQueue.created_at >= date_from)
+
+            total += search_query.count()
+            completed += search_query.filter(GoogleSearchQueue.status == 'completed').count()
+            failed += search_query.filter(GoogleSearchQueue.status == 'failed').count()
+            processing += search_query.filter(
+                GoogleSearchQueue.status.in_(['pending', 'queued', 'processing'])
+            ).count()
 
         return CrawlHistoryStats(
             total_requests=total,

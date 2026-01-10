@@ -394,6 +394,7 @@ async def trigger_schedule_run(
             date_filter=saved_search.date_filter,
             max_pages=saved_search.max_pages,
             saved_search_id=saved_search_id,
+            schedule_id=schedule.id,  # 스케줄 ID 저장
             status="pending"
         )
         db.add(queue_item)

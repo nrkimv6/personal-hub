@@ -117,10 +117,16 @@ class GoogleSearchQueue(Base):
         ForeignKey("google_saved_searches.id", ondelete="SET NULL"),
         nullable=True
     )
+    schedule_id = Column(
+        Integer,
+        ForeignKey("task_schedules.id", ondelete="SET NULL"),
+        nullable=True
+    )
 
     # 상태
     status = Column(String(20), default="pending")  # pending, queued, processing, completed, failed
     error_message = Column(Text, nullable=True)
+    result_count = Column(Integer, default=0)
 
     # 상태 상수
     STATUS_PENDING = "pending"    # SQLite 폴링 모드용
@@ -137,6 +143,7 @@ class GoogleSearchQueue(Base):
     # 관계
     service_account = relationship("ServiceAccount", foreign_keys=[service_account_id])
     saved_search = relationship("GoogleSavedSearch", foreign_keys=[saved_search_id])
+    schedule = relationship("TaskSchedule", foreign_keys=[schedule_id])
 
     def __repr__(self) -> str:
         return f"<GoogleSearchQueue(search_id='{self.search_id}', query='{self.query}', status='{self.status}')>"

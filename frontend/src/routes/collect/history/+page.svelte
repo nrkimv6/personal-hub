@@ -100,6 +100,14 @@
 				return { class: 'bg-pink-light text-pink', text: 'Instagram' };
 			case 'web':
 				return { class: 'bg-primary-light text-primary', text: 'Web' };
+			case 'google_search':
+				return { class: 'bg-blue-100 text-blue-700', text: 'Google 검색' };
+			case 'activity':
+				return { class: 'bg-purple-100 text-purple-700', text: '문화센터' };
+			case 'writing':
+				return { class: 'bg-green-100 text-green-700', text: '글쓰기' };
+			case 'report':
+				return { class: 'bg-orange-100 text-orange-700', text: '보고서' };
 			default:
 				return { class: 'bg-muted text-foreground', text: source };
 		}
@@ -128,6 +136,9 @@
 		if (item.history_type === 'schedule_run') {
 			return `${item.collected_count}개 수집 / ${item.saved_count}개 저장`;
 		}
+		if (item.history_type === 'google_search') {
+			return `${item.collected_count}개 검색 결과`;
+		}
 		return '완료';
 	}
 
@@ -135,6 +146,16 @@
 		if (!url) return '-';
 		if (url.length <= maxLen) return url;
 		return url.substring(0, maxLen) + '...';
+	}
+
+	function extractGoogleQuery(url: string | undefined): string {
+		if (!url) return '-';
+		try {
+			const match = url.match(/q=([^&]+)/);
+			return match ? decodeURIComponent(match[1]) : url;
+		} catch {
+			return url;
+		}
 	}
 
 	onMount(() => {
@@ -185,11 +206,15 @@
 					id="sourceType"
 					bind:value={sourceType}
 					onchange={handleFilterChange}
-					class="input input-sm w-32"
+					class="input input-sm w-40"
 				>
 					<option value="">전체</option>
 					<option value="instagram">Instagram</option>
 					<option value="web">Web</option>
+					<option value="google_search">Google 검색</option>
+					<option value="activity">문화센터</option>
+					<option value="writing">글쓰기</option>
+					<option value="report">보고서</option>
 				</select>
 			</div>
 			<div>
@@ -243,7 +268,7 @@
 		</div>
 	{:else if items.length === 0}
 		<div class="card text-center py-12">
-			<p class="text-muted-foreground">크롤링 이력이 없습니다</p>
+			<p class="text-muted-foreground">워커 실행 이력이 없습니다</p>
 		</div>
 	{:else}
 		<div class="card overflow-hidden">
@@ -282,6 +307,10 @@
 								<td class="px-4 py-3 text-sm text-muted-foreground">
 									{#if item.history_type === 'schedule_run'}
 										<span class="font-medium">{item.schedule_name || '-'}</span>
+									{:else if item.history_type === 'google_search'}
+										<span class="text-xs truncate max-w-[180px] block" title={item.url}>
+											🔍 {extractGoogleQuery(item.url)}
+										</span>
 									{:else}
 										<span class="text-xs truncate max-w-[180px] block" title={item.url}>
 											{truncateUrl(item.url, 30)}

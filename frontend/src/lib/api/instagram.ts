@@ -411,19 +411,19 @@ export interface CollectedPostFilters {
 
 export interface CrawlHistoryItem {
   id: number;
-  history_type: 'request' | 'schedule_run';
-  source_type: 'instagram' | 'web';
+  history_type: 'request' | 'schedule_run' | 'google_search';
+  source_type: 'instagram' | 'web' | 'google_search' | 'activity' | 'writing' | 'report';
   status: 'pending' | 'processing' | 'completed' | 'failed';
   started_at: string;
   finished_at: string | null;
   duration_seconds: number | null;
   error_message: string | null;
-  // Request 전용
+  // Request / Google Search 전용
   url?: string;
   url_type?: string;
   request_type?: string;
   requested_by?: string;
-  // Schedule Run 전용
+  // Schedule Run / Google Search 전용
   schedule_id?: number;
   schedule_name?: string;
   collected_count: number;

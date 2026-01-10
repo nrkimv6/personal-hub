@@ -61,26 +61,26 @@ class CollectedPostFilters(BaseModel):
 
 
 class CrawlHistoryItem(BaseModel):
-    """크롤링 이력 항목."""
+    """워커 실행 이력 항목."""
 
     id: int
-    history_type: str  # 'request' | 'schedule_run'
+    history_type: str  # 'request' | 'schedule_run' | 'google_search'
 
     # 공통 필드
-    source_type: str  # 'instagram' | 'web'
+    source_type: str  # 'instagram' | 'web' | 'google_search' | 'activity' | 'writing' | 'report'
     status: str  # 'pending', 'processing', 'completed', 'failed'
     started_at: datetime
     finished_at: Optional[datetime] = None
     duration_seconds: Optional[int] = None
     error_message: Optional[str] = None
 
-    # Request 전용
+    # Request / Google Search 전용
     url: Optional[str] = None
     url_type: Optional[str] = None
     request_type: Optional[str] = None  # 'feed', 'single_post', 'single_post_url'
-    requested_by: Optional[str] = None  # 'manual', 'scheduler', 'retry'
+    requested_by: Optional[str] = None  # 'manual', 'schedule', 'retry'
 
-    # Schedule Run 전용
+    # Schedule Run / Google Search 전용
     schedule_id: Optional[int] = None
     schedule_name: Optional[str] = None
     collected_count: int = 0
@@ -91,7 +91,7 @@ class CrawlHistoryItem(BaseModel):
 
 
 class CrawlHistoryList(BaseModel):
-    """크롤링 이력 목록 응답."""
+    """워커 실행 이력 목록 응답."""
 
     items: List[CrawlHistoryItem]
     total: int
@@ -101,7 +101,7 @@ class CrawlHistoryList(BaseModel):
 
 
 class CrawlHistoryStats(BaseModel):
-    """크롤링 이력 통계."""
+    """워커 실행 이력 통계."""
 
     total_requests: int = 0
     completed_requests: int = 0
