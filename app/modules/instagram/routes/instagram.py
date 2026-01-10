@@ -562,14 +562,9 @@ async def request_manual_crawl(
     """
     request_service = CrawlRequestService(db)
 
-    # force=False일 때만 기존 활성 요청 체크
-    if not force and request_service.has_active_request(service_account_id):
-        existing = request_service.get_pending_request(service_account_id)
-        if existing:
-            return CrawlRequestSchema.model_validate(existing)
-
     # 새 요청 생성 (force=True면 중복 체크 스킵)
-    request = request_service.create_request(
+    # create_request_async는 내부적으로 중복 체크 수행
+    request = await request_service.create_request_async(
         service_account_id,
         requested_by="manual",
         force_create=force

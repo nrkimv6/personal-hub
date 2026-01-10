@@ -7,6 +7,7 @@ Activity Worker - 문화/체육센터 강좌 크롤링 워커.
     - CrawlRequest(url_type='activity') 처리
     - 센터별 크롤링 실행 (crawl_method에 따라 static/dynamic/api)
     - BrowserManager 연동 (동적 크롤링 대비)
+    - 크롤링 완료 시 activity-hub 동기화 트리거 (방식 B: PULL)
 
 Note:
     현재는 기본 틀만 구현되어 있으며, 실제 사이트별 크롤러는
@@ -14,8 +15,11 @@ Note:
 """
 import asyncio
 import logging
+import os
 from typing import Optional
 from datetime import datetime
+
+import httpx
 
 from app.worker.crawl_worker_base import CrawlWorkerBase
 from app.shared.browser.browser_manager import BrowserManager
@@ -161,6 +165,10 @@ class ActivityWorker(CrawlWorkerBase):
                     f"[ActivityWorker] 크롤링 완료: center={center.name}, "
                     f"found={result.get('found', 0)}, new={result.get('new', 0)}"
                 )
+
+                # 크롤링 성공 시 activity-hub 동기화 (방식 A + B 모두 실행)
+                await self._trigger_activity_hub_sync_pull()  # 방식 B: PULL
+                await self._trigger_activity_hub_sync_push(db, center.id)  # 방식 A: PUSH
 
             except Exception as e:
                 crawl_run.mark_failed(str(e))
@@ -346,3 +354,65 @@ class ActivityWorker(CrawlWorkerBase):
         status["processing"] = self._processing
         status["poll_interval"] = self._poll_interval
         return status
+
+    async def _trigger_activity_hub_sync_pull(self):
+        """activity-hub 동기화 트리거 (방식 B: PULL).
+
+        크롤링 완료 후 activity-hub에 동기화 신호를 보냅니다.
+        activity-hub는 monitor-page API를 호출해서 데이터를 가져갑니다.
+        """
+        api_key = os.getenv("ACTIVITY_HUB_SYNC_API_KEY", "")
+        if not api_key:
+            logger.warning("[ActivityWorker] ACTIVITY_HUB_SYNC_API_KEY not set, skipping sync")
+            return
+
+        try:
+            headers = {"Authorization": f"Bearer {api_key}"}
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(
+                    "https://activity-hub.woory.day/api/sync",
+                    headers=headers
+                )
+                if response.status_code == 200:
+                    result = response.json()
+                    logger.info(
+                        f"[ActivityWorker][PULL] Sync triggered: "
+                        f"centers={result.get('centersCount', 0)}, "
+                        f"courses={result.get('coursesCount', 0)}"
+                    )
+                else:
+                    logger.error(
+                        f"[ActivityWorker][PULL] Sync failed: {response.status_code}, "
+                        f"response: {response.text}"
+                    )
+        except Exception as e:
+            logger.error(f"[ActivityWorker][PULL] Sync error: {e}")
+
+    async def _trigger_activity_hub_sync_push(self, db, center_id: int):
+        """activity-hub 동기화 실행 (방식 A: PUSH).
+
+        크롤링 완료 후 강좌 데이터를 직접 activity-hub로 전송합니다.
+
+        Args:
+            db: DB 세션
+            center_id: 크롤링된 센터 ID
+        """
+        try:
+            from app.modules.activity.services.sync_service import SyncService
+
+            sync_service = SyncService()
+            result = await sync_service.push_center_courses(db, center_id)
+
+            if result.get("success"):
+                logger.info(
+                    f"[ActivityWorker][PUSH] Sync success: center_id={center_id}, "
+                    f"centers={result.get('centersCount', 0)}, "
+                    f"courses={result.get('coursesCount', 0)}"
+                )
+            else:
+                logger.error(
+                    f"[ActivityWorker][PUSH] Sync failed: center_id={center_id}, "
+                    f"error={result.get('error', 'unknown')}"
+                )
+        except Exception as e:
+            logger.error(f"[ActivityWorker][PUSH] Sync error: {e}")

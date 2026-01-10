@@ -8,6 +8,8 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from app.models import CrawlRequest, TaskScheduleRun
+from app.shared.redis import RedisClient, RedisQueue
+from app.shared.redis.queue import CRAWL_REQUEST_QUEUE
 
 logger = logging.getLogger("instagram.request_service")
 
@@ -84,6 +86,68 @@ class CrawlRequestService:
         self.db.refresh(request)
 
         logger.info(f"Created crawl request {request.id} for account {service_account_id} (force={force_create})")
+        return request
+
+    async def create_request_async(
+        self,
+        service_account_id: int,
+        requested_by: str = "manual",
+        force_create: bool = False,
+    ) -> CrawlRequest:
+        """크롤링 요청 생성 (비동기, Redis 큐 지원).
+
+        Args:
+            service_account_id: 수집 계정 ID
+            requested_by: 요청 출처 ('manual', 'scheduler', 'retry')
+            force_create: True면 중복 체크 없이 강제 생성 (다중 큐잉 허용)
+
+        Returns:
+            생성된 요청 객체
+        """
+        # 이미 대기 중인 요청이 있는지 확인 (force_create=True면 스킵)
+        if not force_create:
+            existing = self.get_pending_request(service_account_id)
+            if existing:
+                logger.info(f"Pending request already exists for account {service_account_id}")
+                return existing
+
+        url = self._make_feed_url(service_account_id)
+        request = CrawlRequest(
+            url=url,
+            url_type=URL_TYPE_INSTAGRAM_FEED,
+            requested_by=requested_by,
+            status=CrawlRequest.STATUS_QUEUED,  # Redis에 푸시할 예정이므로 queued
+            requested_at=datetime.now(),
+        )
+        self.db.add(request)
+        self.db.commit()
+        self.db.refresh(request)
+
+        # Redis 큐에 추가 시도
+        redis_client = await RedisClient.get_client()
+        if redis_client:
+            queue = RedisQueue(redis_client, CRAWL_REQUEST_QUEUE)
+            success = await queue.push({
+                "id": request.id,
+                "url": url,
+                "url_type": URL_TYPE_INSTAGRAM_FEED,
+                "requested_by": requested_by,
+                "created_at": request.requested_at,
+            })
+
+            if success:
+                logger.info(f"Created crawl request {request.id} for account {service_account_id} and pushed to Redis queue")
+            else:
+                # Redis push 실패 → SQLite fallback
+                logger.warning(f"Redis push 실패, SQLite fallback: id={request.id}")
+                request.status = CrawlRequest.STATUS_PENDING
+                self.db.commit()
+        else:
+            # Redis 미연결 → SQLite fallback
+            logger.info(f"Redis 미연결, SQLite 폴링 모드: id={request.id}")
+            request.status = CrawlRequest.STATUS_PENDING
+            self.db.commit()
+
         return request
 
     def get_pending_request(self, service_account_id: Optional[int] = None) -> Optional[CrawlRequest]:

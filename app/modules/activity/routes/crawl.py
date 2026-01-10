@@ -1,6 +1,7 @@
 """Activity Crawl/Import API Routes."""
 
 import logging
+import os
 from typing import Optional
 
 import httpx
@@ -21,8 +22,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/crawl", tags=["activity-crawl"])
 
-# activity-hub 동기화 URL
+# activity-hub 동기화 설정
 ACTIVITY_HUB_SYNC_URL = "https://activity-hub.woory.day/api/sync"
+ACTIVITY_HUB_SYNC_API_KEY = os.getenv("ACTIVITY_HUB_SYNC_API_KEY", "")
 
 
 @router.post("/import", response_model=CourseImportResponse)
@@ -131,21 +133,29 @@ def get_crawl_run(
 
 
 async def _trigger_activity_hub_sync():
-    """activity-hub D1 동기화 트리거 (백그라운드)."""
+    """activity-hub D1 동기화 트리거 (백그라운드, PULL 방식)."""
+    if not ACTIVITY_HUB_SYNC_API_KEY:
+        logger.error("ACTIVITY_HUB_SYNC_API_KEY not set in environment variables")
+        return
+
     try:
+        headers = {"Authorization": f"Bearer {ACTIVITY_HUB_SYNC_API_KEY}"}
         async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(ACTIVITY_HUB_SYNC_URL)
+            response = await client.post(ACTIVITY_HUB_SYNC_URL, headers=headers)
             if response.status_code == 200:
                 result = response.json()
                 logger.info(
-                    f"activity-hub sync completed: "
+                    f"[PULL] activity-hub sync completed: "
                     f"centers={result.get('centersCount', 0)}, "
                     f"courses={result.get('coursesCount', 0)}"
                 )
             else:
-                logger.error(f"activity-hub sync failed: {response.status_code}")
+                logger.error(
+                    f"[PULL] activity-hub sync failed: {response.status_code}, "
+                    f"response: {response.text}"
+                )
     except Exception as e:
-        logger.error(f"activity-hub sync error: {e}")
+        logger.error(f"[PULL] activity-hub sync error: {e}")
 
 
 @router.post("/sync-hub")
