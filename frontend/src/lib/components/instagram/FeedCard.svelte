@@ -127,6 +127,31 @@
 		}
 	}
 
+	function formatRelativeTime(isoString: string | null): string {
+		if (!isoString) return '-';
+		try {
+			const now = new Date();
+			const posted = new Date(isoString);
+			const diffMs = now.getTime() - posted.getTime();
+
+			const diffMinutes = Math.floor(diffMs / 60000);
+			const diffHours = Math.floor(diffMinutes / 60);
+			const diffDays = Math.floor(diffHours / 24);
+			const diffWeeks = Math.floor(diffDays / 7);
+
+			if (diffMinutes < 1) return '방금 전';
+			if (diffMinutes < 60) return `${diffMinutes}분 전`;
+			if (diffHours < 24) return `${diffHours}시간 전`;
+			if (diffDays < 7) return `${diffDays}일 전`;
+			if (diffWeeks < 4) return `${diffWeeks}주 전`;
+
+			// 1개월 이상은 절대 날짜로 표시
+			return formatDateTime(isoString);
+		} catch {
+			return '-';
+		}
+	}
+
 	// 태그 편집 함수
 	function startEditTags() {
 		editTagIds =
@@ -699,7 +724,7 @@
 			<!-- 메타 정보 -->
 			<div class="text-xs text-muted-foreground pt-2 border-t border-border" data-capture-exclude>
 				<div class="flex justify-between">
-					<span>업로드: {post.display_time || formatDateTime(post.posted_at)}</span>
+					<span>업로드: {formatRelativeTime(post.posted_at)}</span>
 					<span>수집: {formatDateTime(post.collected_at)}</span>
 				</div>
 			</div>
