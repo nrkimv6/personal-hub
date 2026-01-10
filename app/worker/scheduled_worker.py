@@ -42,12 +42,23 @@ def parse_time_windows(raw_windows: list) -> Optional[List[TimeWindow]]:
     """TimeWindow 목록 파싱. 빈 배열이면 None 반환.
 
     start_hour/end_hour 형식도 start/end로 변환 지원.
+    list 형식([start, end])도 dict 형식으로 변환 지원.
     """
     if not raw_windows:
         return None
 
     result = []
+    logger = logging.getLogger(__name__)
+
     for tw in raw_windows:
+        # list 형식 처리: ["09:00", "12:00"] -> {"start": "09:00", "end": "12:00"}
+        if isinstance(tw, list):
+            if len(tw) == 2:
+                tw = {"start": tw[0], "end": tw[1]}
+            else:
+                logger.warning(f"Invalid time window list format (expected 2 elements): {tw}")
+                continue
+
         # start_hour/end_hour 형식 변환
         if "start_hour" in tw and "start" not in tw:
             tw = {
