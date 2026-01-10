@@ -121,6 +121,9 @@ class GeneratedWriting(Base):
     # 소재 추출 (086 마이그레이션)
     extracted_topics = Column(Text, nullable=True)  # Mix Writing에서 추출된 소재 JSON
 
+    # LLM 요청 연결 (092 마이그레이션)
+    llm_request_id = Column(Integer, ForeignKey("llm_requests.id"), nullable=True)
+
     # 메타
     schedule_run_id = Column(
         Integer, ForeignKey("task_schedule_runs.id", ondelete="SET NULL"), nullable=True
