@@ -122,9 +122,9 @@ class TopicExtractWorker:
         self.db.refresh(llm_request)
 
         try:
-            # LLM 호출
+            # LLM 호출 (글쓰기는 도구 사용 금지)
             result = self.llm_service.execute_claude(
-                prompt, timeout=self.LLM_TIMEOUT, parse_json=True
+                prompt, timeout=self.LLM_TIMEOUT, parse_json=True, enable_tools=False
             )
 
             if not result.get("success"):

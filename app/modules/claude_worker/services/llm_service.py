@@ -186,13 +186,14 @@ class LLMService:
 
     # ========== Claude 실행 ==========
 
-    def execute_claude(self, prompt: str, timeout: int = 120, parse_json: bool = True) -> dict:
+    def execute_claude(self, prompt: str, timeout: int = 120, parse_json: bool = True, enable_tools: bool = False) -> dict:
         """Claude CLI 실행 (동기).
 
         Args:
             prompt: LLM 프롬프트
             timeout: 타임아웃 (초)
             parse_json: True면 JSON 파싱 시도, False면 raw_response만 반환
+            enable_tools: True면 Read 도구 활성화 (이미지 분석 등), False면 도구 없이 실행
 
         Returns:
             {"success": True, "result": {...}, "raw_response": "..."}
@@ -230,11 +231,17 @@ class LLMService:
 
             try:
                 # 파일에서 프롬프트 읽어서 실행
-                # --tools "Read" 추가하여 이미지 파일 읽기 가능
-                tools_opt = '--tools "Read"'
+                # enable_tools=True일 때만 --tools "Read" 추가 (이미지 분석 등)
+                # enable_tools에 따라 명령어 구성
+                # -p (prompt mode)는 Claude Code 컨텍스트를 활성화하므로 사용하지 않음
+                if enable_tools:
+                    tools_opt = '--tools "Read"'
+                else:
+                    tools_opt = ''
+
                 if sys.platform == "win32":
                     # Windows: shell=True 필요
-                    cmd = f'type "{prompt_file}" | claude -p {tools_opt}'
+                    cmd = f'type "{prompt_file}" | claude {tools_opt}'
                     result = subprocess.run(
                         cmd,
                         capture_output=True,
@@ -246,7 +253,7 @@ class LLMService:
                     )
                 else:
                     # Unix: cat으로 파이프
-                    cmd = f'cat "{prompt_file}" | claude -p {tools_opt}'
+                    cmd = f'cat "{prompt_file}" | claude {tools_opt}'
                     result = subprocess.run(
                         cmd,
                         capture_output=True,

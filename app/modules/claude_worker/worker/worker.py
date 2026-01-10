@@ -1334,13 +1334,18 @@ class LLMWorker:
             service.mark_processing(request.id)
             self._update_worker_state("processing", request.id)
 
-            logger.info(f"LLM 실행 시작: id={request.id}")
+            logger.info(f"LLM 실행 시작: id={request.id}, caller_type={request.caller_type}")
+
+            # caller_type에 따라 도구 활성화 결정
+            # - instagram, universal_crawl: Read 도구로 이미지 분석 가능
+            # - writing 관련: 도구 사용 금지 (도구 사용 시 글 작성 대신 프롬프트 분석만 함)
+            enable_tools = request.caller_type in ["instagram", "universal_crawl"]
 
             # Claude CLI 실행 (비동기 실행을 위해 run_in_executor 사용)
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(
                 None,
-                lambda: service.execute_claude(request.prompt)
+                lambda: service.execute_claude(request.prompt, enable_tools=enable_tools)
             )
 
             if result["success"]:
