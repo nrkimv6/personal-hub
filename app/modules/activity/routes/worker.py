@@ -82,7 +82,7 @@ def get_worker_status(db: Session = Depends(get_db)):
 
 
 @router.post("/request", response_model=CrawlRequestResponse, status_code=201)
-def create_crawl_request(
+async def create_crawl_request(
     data: CrawlRequestCreate,
     db: Session = Depends(get_db),
 ):
