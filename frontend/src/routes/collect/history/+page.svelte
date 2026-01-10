@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { collectApi, type CrawlHistoryItem, type CrawlHistoryFilters } from '$lib/api';
+	import { Button } from '$lib/components/ui';
 
 	let items: CrawlHistoryItem[] = [];
 	let loading = true;
