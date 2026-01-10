@@ -107,6 +107,7 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
         이는 API가 재시작되거나 Redis 푸시가 누락된 경우를 대비한 복구 메커니즘입니다.
         """
         if not self.redis_queue:
+            logger.debug(f"[{self.name}] Redis 큐가 없어 pending 복구 스킵")
             return
 
         db = SessionLocal()
@@ -115,14 +116,21 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
 
             # pending 상태인 요청 조회 (최대 100개)
             pending_requests = request_service.get_pending_requests(limit=100)
+            logger.debug(f"[{self.name}] Pending 요청 조회: {len(pending_requests)}개")
 
             recovered = 0
+            skipped_activity = 0
+            failed_push = 0
+
             for request in pending_requests:
                 # Activity 요청은 ActivityWorker가 처리
                 if request.url_type == CrawlRequest.URL_TYPE_ACTIVITY:
+                    skipped_activity += 1
+                    logger.debug(f"[{self.name}] Activity 요청 스킵: id={request.id}")
                     continue
 
                 # Redis 큐에 푸시
+                logger.debug(f"[{self.name}] Redis 푸시 시도: id={request.id}, type={request.url_type}")
                 success = await self.redis_queue.push({
                     "id": request.id,
                     "url": request.url,
@@ -135,10 +143,16 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
                     # 상태를 queued로 변경
                     request.status = CrawlRequest.STATUS_QUEUED
                     recovered += 1
+                    logger.debug(f"[{self.name}] Redis 푸시 성공: id={request.id}")
+                else:
+                    failed_push += 1
+                    logger.warning(f"[{self.name}] Redis 푸시 실패: id={request.id}")
 
             if recovered > 0:
                 db.commit()
-                logger.info(f"[{self.name}] {recovered}개의 pending 요청을 Redis 큐에 복구")
+                logger.info(f"[{self.name}] {recovered}개의 pending 요청을 Redis 큐에 복구 (Activity 스킵: {skipped_activity}, 푸시 실패: {failed_push})")
+            else:
+                logger.info(f"[{self.name}] 복구할 pending 요청 없음 (전체: {len(pending_requests)}, Activity 스킵: {skipped_activity}, 푸시 실패: {failed_push})")
 
         except Exception as e:
             logger.error(f"[{self.name}] Pending 요청 복구 오류: {e}", exc_info=True)

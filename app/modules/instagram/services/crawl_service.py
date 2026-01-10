@@ -243,13 +243,39 @@ class CrawlService:
 
         Args:
             crawler: InstagramCrawler 인스턴스
-            url: Instagram 게시물 URL
+            url: Instagram 게시물 URL (HTTP URL 또는 instagram://post/{db_id} 형식)
             service_account_id: 사용할 계정 ID
 
         Returns:
             dict: {"success": bool, "message": str, "post": InstagramPost | None, "is_new": bool}
         """
         logger.info(f"Starting URL crawl: {url}")
+
+        # instagram:// 프로토콜 처리 (내부 참조)
+        if url.startswith("instagram://post/"):
+            # instagram://post/{db_id}?account_id={id} 형식에서 DB ID 추출
+            try:
+                # "instagram://post/5813?account_id=6" -> "5813"
+                parts = url.split("instagram://post/")[1].split("?")[0]
+                db_id = int(parts)
+
+                # DB에서 기존 포스트 조회
+                existing_post = self.db.query(InstagramPost).filter(
+                    InstagramPost.id == db_id
+                ).first()
+
+                if not existing_post:
+                    return {"success": False, "message": f"Post not found in DB: id={db_id}", "post": None, "is_new": False}
+
+                if not existing_post.url:
+                    return {"success": False, "message": f"Post has no URL: id={db_id}", "post": None, "is_new": False}
+
+                # 실제 Instagram URL로 변환
+                logger.info(f"Converting instagram:// to actual URL: {existing_post.url}")
+                url = existing_post.url
+
+            except (ValueError, IndexError) as e:
+                return {"success": False, "message": f"Invalid instagram:// URL format: {e}", "post": None, "is_new": False}
 
         # URL에서 post_id 추출
         post_id = self._extract_post_id(url)
