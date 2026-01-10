@@ -943,6 +943,21 @@ def save_report_result(db, request, result: dict) -> bool:
 
     try:
         llm_result = result.get("result", {})
+        raw_response = result.get("raw_response", "")
+
+        # JSON 파싱 실패 시 raw_response 사용
+        if not llm_result and raw_response:
+            logger.info(f"report {request.caller_id}: JSON 파싱 실패, raw_response 사용")
+            # raw_response를 content로 사용
+            content = raw_response
+            title = None
+            summary = None
+            statistics = {}
+        else:
+            content = llm_result.get("content", "")
+            title = llm_result.get("title")
+            summary = llm_result.get("summary")
+            statistics = llm_result.get("statistics", {})
 
         # caller_id에서 report_type, date 파싱
         # 형식: "report_type_YYYYMMDD"
@@ -968,10 +983,10 @@ def save_report_result(db, request, result: dict) -> bool:
             report_type=report_type,
             period_start=period_start,
             period_end=period_end,
-            title=llm_result.get("title", f"{report_type} report"),
-            content=llm_result.get("content", ""),
-            summary=llm_result.get("summary"),
-            statistics=json.dumps(llm_result.get("statistics", {}), ensure_ascii=False),
+            title=title or f"{report_type} report",
+            content=content,
+            summary=summary,
+            statistics=json.dumps(statistics, ensure_ascii=False),
             llm_request_id=request.id,
             schedule_run_id=None,  # TODO: schedule_run_id 연결
             format="markdown"
@@ -1232,17 +1247,60 @@ class LLMWorker:
                 elif request.caller_type == "report":
                     save_report_result(db, request, result)
             else:
-                service.mark_failed(request.id, result["error"])
-                self._increment_error()
-                logger.warning(f"LLM 실행 실패: {result['error']}")
+                # JSON 파싱 실패지만 raw_response가 있는 경우
+                if "raw_response" in result and result.get("raw_response"):
+                    # writing_generate, writing_refine, report의 경우 raw_response만으로도 성공 처리
+                    if request.caller_type in ["writing_generate", "writing_refine", "report"]:
+                        logger.info(f"JSON 파싱 실패했지만 raw_response 사용: id={request.id}")
 
-                # caller_type별 실패 표시
-                if request.caller_type == "instagram":
-                    mark_instagram_failed(db, int(request.caller_id), result["error"])
-                elif request.caller_type == "universal_crawl":
-                    mark_universal_crawl_failed(db, int(request.caller_id), result["error"])
-                elif request.caller_type == "writing":
-                    mark_writing_failed(db, request, result["error"])
+                        # 빈 result dict로 결과 재구성
+                        fallback_result = {
+                            "success": True,
+                            "result": {},
+                            "raw_response": result.get("raw_response", "")
+                        }
+
+                        service.mark_completed(
+                            request.id,
+                            {},  # 빈 결과
+                            result.get("raw_response", ""),
+                        )
+                        self._increment_processed()
+                        logger.info(f"LLM 실행 완료 (JSON 없음, raw_response 사용): id={request.id}")
+
+                        # caller_type별 결과 저장
+                        if request.caller_type == "writing_generate":
+                            save_writing_generate_result(db, request, fallback_result)
+                        elif request.caller_type == "writing_refine":
+                            save_writing_refine_result(db, request, fallback_result)
+                        elif request.caller_type == "report":
+                            save_report_result(db, request, fallback_result)
+                    else:
+                        # 다른 타입은 실패 처리
+                        service.mark_failed(request.id, result["error"])
+                        self._increment_error()
+                        logger.warning(f"LLM 실행 실패: {result['error']}")
+
+                        # caller_type별 실패 표시
+                        if request.caller_type == "instagram":
+                            mark_instagram_failed(db, int(request.caller_id), result["error"])
+                        elif request.caller_type == "universal_crawl":
+                            mark_universal_crawl_failed(db, int(request.caller_id), result["error"])
+                        elif request.caller_type == "writing":
+                            mark_writing_failed(db, request, result["error"])
+                else:
+                    # raw_response도 없으면 실패 처리
+                    service.mark_failed(request.id, result["error"])
+                    self._increment_error()
+                    logger.warning(f"LLM 실행 실패: {result['error']}")
+
+                    # caller_type별 실패 표시
+                    if request.caller_type == "instagram":
+                        mark_instagram_failed(db, int(request.caller_id), result["error"])
+                    elif request.caller_type == "universal_crawl":
+                        mark_universal_crawl_failed(db, int(request.caller_id), result["error"])
+                    elif request.caller_type == "writing":
+                        mark_writing_failed(db, request, result["error"])
 
         except Exception as e:
             service.mark_failed(request.id, str(e))
