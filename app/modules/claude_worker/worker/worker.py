@@ -927,6 +927,108 @@ def save_topic_extract_result(db, caller_id: str, llm_result: dict) -> bool:
         return False
 
 
+def _extract_json_from_markdown(text: str) -> Optional[dict]:
+    """마크다운 코드블록에서 JSON 추출.
+
+    Args:
+        text: 마크다운 텍스트
+
+    Returns:
+        파싱된 JSON dict 또는 None
+    """
+    import re
+    import json
+
+    # ```json 시작 위치 찾기
+    json_start_match = re.search(r"```json\s*\n", text)
+    if not json_start_match:
+        return None
+
+    start_pos = json_start_match.end()
+
+    # 브레이스 카운팅으로 JSON 끝 찾기
+    brace_count = 0
+    in_string = False
+    escape_next = False
+    json_end_pos = -1
+
+    for i in range(start_pos, len(text)):
+        char = text[i]
+
+        if escape_next:
+            escape_next = False
+            continue
+
+        if char == '\\':
+            escape_next = True
+            continue
+
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            continue
+
+        if not in_string:
+            if char == '{':
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    json_end_pos = i + 1
+                    break
+
+    if json_end_pos == -1:
+        logger.debug("마크다운 블록 JSON 끝을 찾을 수 없음")
+        return None
+
+    json_str = text[start_pos:json_end_pos]
+
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError as e:
+        logger.debug(f"마크다운 블록 JSON 파싱 실패: {e}")
+        return None
+
+
+def _extract_json_braces(text: str) -> Optional[dict]:
+    """{ } 블록 추출 및 파싱.
+
+    Args:
+        text: 텍스트
+
+    Returns:
+        파싱된 JSON dict 또는 None
+    """
+    import re
+    import json
+
+    brace_match = re.search(r"\{[\s\S]*\}", text)
+    if brace_match:
+        try:
+            return json.loads(brace_match.group())
+        except json.JSONDecodeError as e:
+            logger.debug(f"중괄호 블록 JSON 파싱 실패: {e}")
+            return None
+    return None
+
+
+def _try_parse_json(text: str) -> Optional[dict]:
+    """전체 텍스트를 JSON으로 파싱 시도.
+
+    Args:
+        text: 텍스트
+
+    Returns:
+        파싱된 JSON dict 또는 None
+    """
+    import json
+
+    try:
+        return json.loads(text.strip())
+    except json.JSONDecodeError as e:
+        logger.debug(f"전체 텍스트 JSON 파싱 실패: {e}")
+        return None
+
+
 def save_report_result(db, request, result: dict) -> bool:
     """보고서 생성 LLM 결과를 generated_reports에 저장.
 
@@ -945,10 +1047,31 @@ def save_report_result(db, request, result: dict) -> bool:
         llm_result = result.get("result", {})
         raw_response = result.get("raw_response", "")
 
-        # JSON 파싱 실패 시 raw_response 사용
+        # JSON 파싱 실패 시 raw_response에서 JSON 재추출 시도
         if not llm_result and raw_response:
-            logger.info(f"report {request.caller_id}: JSON 파싱 실패, raw_response 사용")
-            # raw_response를 content로 사용
+            logger.info(f"report {request.caller_id}: JSON 파싱 실패, 재추출 시도")
+
+            # 방법 1: ```json ... ``` 블록에서 추출
+            llm_result = _extract_json_from_markdown(raw_response)
+            if llm_result:
+                logger.info(f"report {request.caller_id}: 마크다운 블록에서 JSON 추출 성공")
+
+            # 방법 2: { } 블록 추출
+            if not llm_result:
+                llm_result = _extract_json_braces(raw_response)
+                if llm_result:
+                    logger.info(f"report {request.caller_id}: 중괄호 블록에서 JSON 추출 성공")
+
+            # 방법 3: 전체를 JSON으로 파싱 시도
+            if not llm_result:
+                llm_result = _try_parse_json(raw_response)
+                if llm_result:
+                    logger.info(f"report {request.caller_id}: 전체 텍스트 JSON 파싱 성공")
+
+        # 최종 fallback: raw_response를 content로
+        if not llm_result:
+            if raw_response:
+                logger.warning(f"report {request.caller_id}: 모든 JSON 추출 실패, raw_response를 content로 사용")
             content = raw_response
             title = None
             summary = None
