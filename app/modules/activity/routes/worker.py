@@ -100,11 +100,12 @@ async def create_crawl_request(
     # URL 형식: activity://center/{id}
     url = f"activity://center/{center.id}"
 
-    # Redis 큐 푸시 포함
+    # Activity 요청은 Redis 큐 없이 pending 상태로만 생성
+    # (ActivityWorker가 DB를 직접 폴링)
     from app.services.crawl_request_service import CrawlRequestService
     request_service = CrawlRequestService(db)
 
-    request = await request_service.create_request_async(
+    request = request_service.create_request(
         url=url,
         url_type=CrawlRequest.URL_TYPE_ACTIVITY,
         requested_by="manual",
