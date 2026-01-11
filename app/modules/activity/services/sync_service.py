@@ -1,15 +1,15 @@
 """Activity Hub Sync Service - PUSH 방식 동기화."""
 
 import logging
-import os
 from typing import Optional
 
 import httpx
 from sqlalchemy.orm import Session
 
 from app.models.activity import ActivityCenter, ActivityCourse
+from app.core.config import settings
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("[API]")
 
 
 class SyncService:
@@ -17,8 +17,9 @@ class SyncService:
 
     def __init__(self):
         """SyncService 초기화."""
-        self.api_url = os.getenv("ACTIVITY_HUB_PUSH_URL", "https://activity-hub.woory.day/api/push")
-        self.api_key = os.getenv("ACTIVITY_HUB_SYNC_API_KEY", "")
+        self.api_url = settings.ACTIVITY_HUB_PUSH_URL
+        self.api_key = settings.ACTIVITY_HUB_SYNC_API_KEY
+        logger.info(f"[SyncService] Initialized with api_url={self.api_url}, api_key={'SET' if self.api_key else 'NOT SET'}")
 
     def _map_category(self, category: Optional[str]) -> str:
         """카테고리 매핑."""

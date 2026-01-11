@@ -11,6 +11,9 @@ from pydantic import Field, validator, AnyHttpUrl
 logger = logging.getLogger("monitor_app")
 logger.setLevel(logging.INFO)
 
+# 프로젝트 루트 디렉토리 (.env 파일 경로 계산용)
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+
 class Settings(BaseSettings):
     # 기본 설정
     APP_NAME: str = "모니터링 시스템 API"
@@ -192,6 +195,10 @@ class Settings(BaseSettings):
     GOOGLE_SEARCH_API_KEY: str = ""  # Google Cloud Console에서 발급 (선택)
     GOOGLE_SEARCH_CSE_ID: str = ""  # Programmable Search Engine ID (선택)
 
+    # Activity Hub 동기화 설정
+    ACTIVITY_HUB_PUSH_URL: str = "https://activity-hub.woory.day/api/push"  # Activity Hub PUSH API URL
+    ACTIVITY_HUB_SYNC_API_KEY: str = ""  # Activity Hub 동기화 API 키
+
     # Health Monitor 설정
     HEALTH_MONITOR_ENABLED: bool = True  # 헬스 모니터링 활성화 여부
     HEALTH_PID_CHECK_INTERVAL: int = 10  # PID+포트 체크 간격 (초)
@@ -211,7 +218,7 @@ class Settings(BaseSettings):
     REDIS_CONNECTION_TIMEOUT: int = 5  # 연결 타임아웃 (초)
 
     model_config = {
-        "env_file": ".env",
+        "env_file": str(PROJECT_ROOT / ".env"),
         "case_sensitive": True,
         "extra": "ignore"  # 알 수 없는 환경변수 무시 (다른 기능의 환경변수 등)
     }
