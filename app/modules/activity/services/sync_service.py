@@ -168,12 +168,20 @@ class SyncService:
 
             courses = db.query(ActivityCourse).filter(ActivityCourse.center_id == center_id).all()
 
+            logger.info(f"[SyncService][PUSH] Center {center_id} has {len(courses)} courses in DB")
+
             # 데이터 변환
             center_data = self._convert_center(center)
             courses_data = [self._convert_course(course) for course in courses]
 
+            logger.info(f"[SyncService][PUSH] Sending {len(courses_data)} courses to activity-hub")
+
             # activity-hub로 전송
-            headers = {"Authorization": f"Bearer {self.api_key}"}
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "User-Agent": "MonitorPage/1.0 (ActivityHub Sync Client)",
+                "Content-Type": "application/json"
+            }
             payload = {
                 "centers": [center_data],
                 "courses": courses_data,

@@ -196,7 +196,7 @@ class Settings(BaseSettings):
     GOOGLE_SEARCH_CSE_ID: str = ""  # Programmable Search Engine ID (선택)
 
     # Activity Hub 동기화 설정
-    ACTIVITY_HUB_PUSH_URL: str = "https://activity-hub.woory.day/api/push"  # Activity Hub PUSH API URL
+    ACTIVITY_HUB_PUSH_URL: str = "https://activity.woory.day/api/push"  # Activity Hub PUSH API URL
     ACTIVITY_HUB_SYNC_API_KEY: str = ""  # Activity Hub 동기화 API 키
 
     # Health Monitor 설정

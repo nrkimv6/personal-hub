@@ -239,9 +239,9 @@ async def test_sync_hub(
     try:
         sync_service = SyncService()
 
-        # 첫 번째 활성 센터 조회
+        # 강좌가 있는 센터로 테스트 (ID 81: 신세계 대구신세계 - 483 courses)
         center = db.query(ActivityCenter).filter(
-            ActivityCenter.is_active == True
+            ActivityCenter.id == 81
         ).first()
 
         if not center:
