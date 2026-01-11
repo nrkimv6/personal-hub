@@ -1,6 +1,5 @@
 """Activity Crawl/Import API Routes."""
 
-import logging
 import os
 from typing import Optional
 
@@ -17,13 +16,13 @@ from app.modules.activity.models.schemas import (
     CrawlRunListResponse,
 )
 from app.modules.activity.services.import_service import ImportService
-
-logger = logging.getLogger(__name__)
+from app.modules.activity.services.sync_service import SyncService
+from app.core.config import logger
 
 router = APIRouter(prefix="/crawl", tags=["activity-crawl"])
 
-# activity-hub 동기화 설정
-ACTIVITY_HUB_SYNC_URL = "https://activity-hub.woory.day/api/sync"
+# activity-hub 동기화 설정 (PULL 방식 - 비활성화)
+# ACTIVITY_HUB_SYNC_URL = "https://activity-hub.woory.day/api/sync"
 ACTIVITY_HUB_SYNC_API_KEY = os.getenv("ACTIVITY_HUB_SYNC_API_KEY", "")
 
 
@@ -132,30 +131,85 @@ def get_crawl_run(
     )
 
 
-async def _trigger_activity_hub_sync():
-    """activity-hub D1 동기화 트리거 (백그라운드, PULL 방식)."""
-    if not ACTIVITY_HUB_SYNC_API_KEY:
-        logger.error("ACTIVITY_HUB_SYNC_API_KEY not set in environment variables")
-        return
+# ============================================================
+# PULL 방식 (비활성화) - activity-hub가 데이터를 가져가는 방식
+# ============================================================
+# async def _trigger_activity_hub_sync():
+#     """activity-hub D1 동기화 트리거 (백그라운드, PULL 방식)."""
+#     if not ACTIVITY_HUB_SYNC_API_KEY:
+#         logger.error("ACTIVITY_HUB_SYNC_API_KEY not set in environment variables")
+#         return
+#
+#     try:
+#         headers = {"Authorization": f"Bearer {ACTIVITY_HUB_SYNC_API_KEY}"}
+#         async with httpx.AsyncClient(timeout=120.0) as client:
+#             response = await client.post(ACTIVITY_HUB_SYNC_URL, headers=headers)
+#             if response.status_code == 200:
+#                 result = response.json()
+#                 logger.info(
+#                     f"[PULL] activity-hub sync completed: "
+#                     f"centers={result.get('centersCount', 0)}, "
+#                     f"courses={result.get('coursesCount', 0)}"
+#                 )
+#             else:
+#                 logger.error(
+#                     f"[PULL] activity-hub sync failed: {response.status_code}, "
+#                     f"response: {response.text}"
+#                 )
+#     except Exception as e:
+#         logger.error(f"[PULL] activity-hub sync error: {e}")
 
+
+async def _push_all_centers_to_activity_hub():
+    """모든 센터의 데이터를 activity-hub로 PUSH (백그라운드)."""
+    from app.database import SessionLocal
+
+    logger.info("[PUSH] ===== BACKGROUND TASK STARTED =====")
+
+    db = SessionLocal()
     try:
-        headers = {"Authorization": f"Bearer {ACTIVITY_HUB_SYNC_API_KEY}"}
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(ACTIVITY_HUB_SYNC_URL, headers=headers)
-            if response.status_code == 200:
-                result = response.json()
-                logger.info(
-                    f"[PULL] activity-hub sync completed: "
-                    f"centers={result.get('centersCount', 0)}, "
-                    f"courses={result.get('coursesCount', 0)}"
-                )
-            else:
-                logger.error(
-                    f"[PULL] activity-hub sync failed: {response.status_code}, "
-                    f"response: {response.text}"
-                )
+        sync_service = SyncService()
+
+        # 활성화된 센터 목록 조회
+        centers = db.query(ActivityCenter).filter(
+            ActivityCenter.is_active == True
+        ).all()
+
+        if not centers:
+            logger.warning("[PUSH] No active centers found for sync")
+            return
+
+        logger.info(f"[PUSH] Starting sync for {len(centers)} centers")
+
+        total_centers = 0
+        total_courses = 0
+        failed_centers = []
+
+        for center in centers:
+            try:
+                logger.info(f"[PUSH] Syncing center {center.id}: {center.name}")
+                result = await sync_service.push_center_courses(db, center.id)
+
+                if result.get("success"):
+                    total_centers += 1
+                    courses_count = result.get("coursesCount", 0)
+                    total_courses += courses_count
+                    logger.info(f"[PUSH] ✓ Center {center.id} ({center.name}) synced: {courses_count} courses")
+                else:
+                    failed_centers.append(center.id)
+                    logger.error(f"[PUSH] ✗ Center {center.id} sync failed: {result.get('error')}")
+            except Exception as e:
+                failed_centers.append(center.id)
+                logger.error(f"[PUSH] ✗ Center {center.id} sync error: {e}", exc_info=True)
+
+        logger.info(
+            f"[PUSH] ===== SYNC COMPLETED: {total_centers}/{len(centers)} centers, "
+            f"{total_courses} courses, failed: {failed_centers} ====="
+        )
     except Exception as e:
-        logger.error(f"[PULL] activity-hub sync error: {e}")
+        logger.error(f"[PUSH] ===== FATAL ERROR: {e} =====", exc_info=True)
+    finally:
+        db.close()
 
 
 @router.post("/sync-hub")
@@ -163,13 +217,54 @@ async def trigger_activity_hub_sync(
     background_tasks: BackgroundTasks,
 ):
     """
-    activity-hub D1 동기화 트리거.
+    activity-hub D1 동기화 (PUSH 방식).
 
-    monitor-page의 강좌 데이터를 activity-hub D1에 동기화합니다.
+    monitor-page의 모든 활성 센터 데이터를 activity-hub로 전송합니다.
     백그라운드에서 실행되며, 즉시 응답을 반환합니다.
     """
-    background_tasks.add_task(_trigger_activity_hub_sync)
+    logger.info("[PUSH] ===== SYNC REQUEST RECEIVED, ADDING BACKGROUND TASK =====")
+    background_tasks.add_task(_push_all_centers_to_activity_hub)
     return {"message": "activity-hub 동기화가 시작되었습니다.", "status": "pending"}
+
+
+@router.post("/sync-hub/test")
+async def test_sync_hub(
+    db: Session = Depends(get_db),
+):
+    """
+    activity-hub 동기화 테스트 (즉시 실행, 결과 반환).
+
+    테스트용으로 첫 번째 센터만 동기화하고 결과를 즉시 반환합니다.
+    """
+    try:
+        sync_service = SyncService()
+
+        # 첫 번째 활성 센터 조회
+        center = db.query(ActivityCenter).filter(
+            ActivityCenter.is_active == True
+        ).first()
+
+        if not center:
+            logger.warning("[TEST] No active centers found")
+            return {
+                "success": False,
+                "message": "활성화된 센터가 없습니다."
+            }
+
+        logger.info(f"[TEST] Testing sync for center {center.id}: {center.name}")
+        result = await sync_service.push_center_courses(db, center.id)
+
+        logger.info(f"[TEST] Result: {result}")
+
+        return {
+            "success": result.get("success"),
+            "center_id": center.id,
+            "center_name": center.name,
+            "result": result
+        }
+    except Exception as e:
+        logger.error(f"[TEST] Error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/sync-hub/status")
@@ -177,12 +272,5 @@ async def get_activity_hub_sync_status():
     """
     activity-hub 동기화 상태 확인.
     """
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(ACTIVITY_HUB_SYNC_URL)
-            if response.status_code == 200:
-                return response.json()
-            else:
-                return {"error": f"status check failed: {response.status_code}"}
-    except Exception as e:
-        return {"error": str(e)}
+    # PUSH 방식에서는 상태 확인 불필요
+    return {"message": "PUSH 방식으로 변경됨. 개별 센터 동기화 로그를 확인하세요."}
