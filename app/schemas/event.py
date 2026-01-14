@@ -103,6 +103,10 @@ class EventResponse(EventBase):
         if self.status == "cancelled":
             return "cancelled"
 
+        # 조기종료: status가 "ended"면 날짜와 관계없이 종료 처리
+        if self.status == "ended":
+            return "ended"
+
         today = date.today()
 
         # 종료일 기준

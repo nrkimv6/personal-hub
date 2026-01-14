@@ -154,6 +154,10 @@ class EventService:
             if event_status != "cancelled":
                 query = query.filter(Event.status != "cancelled")
 
+            # 조기종료(status="ended") 일괄 처리: ended 필터가 아니면 제외
+            if event_status not in ("ended", "cancelled"):
+                query = query.filter(Event.status != "ended")
+
             if event_status == "ongoing":
                 # 진행 중: 시작일 <= 오늘 AND (종료일 >= 오늘 OR 종료일 NULL)
                 conditions = [
@@ -173,8 +177,10 @@ class EventService:
                 query = query.filter(Event.event_start > today)
 
             elif event_status == "ended":
-                # 종료: 종료일 < 오늘
-                query = query.filter(Event.event_end < today)
+                # 종료: 종료일 < 오늘 OR 조기종료(status="ended")
+                query = query.filter(
+                    or_(Event.event_end < today, Event.status == "ended")
+                )
 
             elif event_status == "ongoing_or_upcoming":
                 # 진행 중 + 예정: 종료일 >= 오늘 OR 종료일 NULL
