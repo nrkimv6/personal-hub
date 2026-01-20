@@ -509,9 +509,6 @@ class CollectService:
             created_count=created_count,
             updated_count=updated_count,
             unchanged_count=unchanged_count,
-            url_type=request.url_type,
-            request_type=self._get_request_type(request),
-            requested_by=request.requested_by,
         )
 
     def _run_to_history(self, run: TaskScheduleRun) -> CrawlHistoryItem:
