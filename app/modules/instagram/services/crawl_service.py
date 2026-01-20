@@ -247,7 +247,8 @@ class CrawlService:
             service_account_id: 사용할 계정 ID
 
         Returns:
-            dict: {"success": bool, "message": str, "post": InstagramPost | None, "is_new": bool}
+            dict: {"success": bool, "message": str, "post": InstagramPost | None, "status": str}
+                status: 'created' | 'updated' | 'unchanged'
         """
         logger.info(f"Starting URL crawl: {url}")
 
@@ -265,108 +266,74 @@ class CrawlService:
                 ).first()
 
                 if not existing_post:
-                    return {"success": False, "message": f"Post not found in DB: id={db_id}", "post": None, "is_new": False}
+                    return {"success": False, "message": f"Post not found in DB: id={db_id}", "post": None, "status": "error"}
 
                 if not existing_post.url:
-                    return {"success": False, "message": f"Post has no URL: id={db_id}", "post": None, "is_new": False}
+                    return {"success": False, "message": f"Post has no URL: id={db_id}", "post": None, "status": "error"}
 
                 # 실제 Instagram URL로 변환
                 logger.info(f"Converting instagram:// to actual URL: {existing_post.url}")
                 url = existing_post.url
 
             except (ValueError, IndexError) as e:
-                return {"success": False, "message": f"Invalid instagram:// URL format: {e}", "post": None, "is_new": False}
+                return {"success": False, "message": f"Invalid instagram:// URL format: {e}", "post": None, "status": "error"}
 
         # URL에서 post_id 추출
         post_id = self._extract_post_id(url)
         if not post_id:
-            return {"success": False, "message": "Invalid URL format", "post": None, "is_new": False}
+            return {"success": False, "message": "Invalid URL format", "post": None, "status": "error"}
 
         try:
             # 크롤링 실행
             crawled_data = await crawler.crawl_single_post(url)
 
             if not crawled_data:
-                return {"success": False, "message": "Failed to crawl post - no data returned", "post": None, "is_new": False}
+                return {"success": False, "message": "Failed to crawl post - no data returned", "post": None, "status": "error"}
 
-            # 기존 게시물 확인
-            existing_post = self.post_service.get_post_by_instagram_id(post_id)
+            # posted_at 파싱
+            posted_at = None
+            if crawled_data.datetime_str:
+                try:
+                    posted_at = datetime.fromisoformat(crawled_data.datetime_str.replace("Z", "+00:00"))
+                except Exception:
+                    pass
 
-            if existing_post:
-                # 기존 게시물 업데이트
-                if crawled_data.caption:
-                    existing_post.caption = crawled_data.caption
-                if crawled_data.images:
-                    existing_post.images = crawled_data.images
-                if crawled_data.is_ad is not None:
-                    existing_post.is_ad = crawled_data.is_ad
-                if crawled_data.datetime_str:
+            # create_or_update_post 사용 (status 반환받음)
+            post, status = self.post_service.create_or_update_post(
+                post_id=post_id,
+                account=crawled_data.account,
+                url=url,
+                caption=crawled_data.caption,
+                images=crawled_data.images,
+                posted_at=posted_at,
+                display_time=crawled_data.display_time,
+                is_ad=crawled_data.is_ad,
+                post_type=crawled_data.post_type,
+                likes=crawled_data.likes,
+                comments=crawled_data.comments,
+                service_account_id=service_account_id,
+                crawl_run_id=None,  # 단일 URL 수집은 crawl_run 없음
+            )
+
+            if post and status != 'error':
+                # 신규 생성된 경우에만 자동 분류
+                if status == 'created':
                     try:
-                        existing_post.posted_at = datetime.fromisoformat(
-                            crawled_data.datetime_str.replace("Z", "+00:00")
-                        )
-                    except Exception:
-                        pass
-                if crawled_data.display_time:
-                    existing_post.display_time = crawled_data.display_time
-                if crawled_data.likes is not None:
-                    existing_post.likes = crawled_data.likes
-                if crawled_data.comments is not None:
-                    existing_post.comments = crawled_data.comments
-
-                existing_post.collected_at = datetime.now()
-
-                self.db.commit()
-                self.db.refresh(existing_post)
-
-                logger.info(f"Updated existing post {post_id}")
-                return {"success": True, "message": "Post updated", "post": existing_post, "is_new": False}
-
-            else:
-                # 새 게시물 생성
-                posted_at = None
-                if crawled_data.datetime_str:
-                    try:
-                        posted_at = datetime.fromisoformat(
-                            crawled_data.datetime_str.replace("Z", "+00:00")
-                        )
-                    except Exception:
-                        pass
-
-                new_post = self.post_service.create_post(
-                    post_id=post_id,
-                    account=crawled_data.account,
-                    url=url,
-                    caption=crawled_data.caption,
-                    images=crawled_data.images,
-                    posted_at=posted_at,
-                    display_time=crawled_data.display_time,
-                    is_ad=crawled_data.is_ad,
-                    post_type=crawled_data.post_type,
-                    likes=crawled_data.likes,
-                    comments=crawled_data.comments,
-                    service_account_id=service_account_id,
-                    crawl_run_id=None,  # 단일 URL 수집은 crawl_run 없음
-                )
-
-                if new_post:
-                    # 자동 분류 실행
-                    try:
-                        tags = self.classifier_service.classify_post(new_post)
+                        tags = self.classifier_service.classify_post(post)
                         if tags:
-                            logger.debug(f"Post {new_post.id} classified: {[t['tag'] for t in tags]}")
+                            logger.debug(f"Post {post.id} classified: {[t['tag'] for t in tags]}")
                     except Exception as e:
-                        logger.warning(f"Failed to classify post {new_post.id}: {e}")
+                        logger.warning(f"Failed to classify post {post.id}: {e}")
 
-                    logger.info(f"Created new post {post_id} from URL")
-                    return {"success": True, "message": "New post created", "post": new_post, "is_new": True}
-                else:
-                    return {"success": False, "message": "Failed to create post", "post": None, "is_new": False}
+                logger.info(f"Crawl completed: post_id={post_id}, status={status}")
+                return {"success": True, "message": f"Post {status}", "post": post, "status": status}
+            else:
+                return {"success": False, "message": "Failed to save post", "post": None, "status": "error"}
 
         except Exception as e:
             logger.error(f"Failed to crawl URL {url}: {e}")
             self.db.rollback()
-            return {"success": False, "message": str(e), "post": None, "is_new": False}
+            return {"success": False, "message": str(e), "post": None, "status": "error"}
 
     def _save_post(
         self,
@@ -377,7 +344,7 @@ class CrawlService:
         """게시물 저장 및 자동 분류.
 
         Returns:
-            저장 성공 여부 (중복이면 False)
+            저장 성공 여부 (신규 생성된 경우만 True)
         """
         # URL에서 post_id 추출
         post_id = self._extract_post_id(post.url) or f"unknown_{post.index}"
@@ -390,7 +357,7 @@ class CrawlService:
             except Exception:
                 pass
 
-        result = self.post_service.create_post(
+        result, status = self.post_service.create_or_update_post(
             post_id=post_id,
             account=post.account,
             url=post.url,
@@ -406,8 +373,8 @@ class CrawlService:
             crawl_run_id=crawl_run_id,
         )
 
-        # 신규 저장된 게시물 자동 분류
-        if result is not None:
+        # 신규 생성된 게시물만 자동 분류
+        if result is not None and status == 'created':
             try:
                 tags = self.classifier_service.classify_post(result)
                 if tags:
@@ -415,7 +382,7 @@ class CrawlService:
             except Exception as e:
                 logger.warning(f"Failed to classify post {result.id}: {e}")
 
-        return result is not None
+        return status == 'created'
 
     def _extract_post_id(self, url: Optional[str]) -> Optional[str]:
         """URL에서 게시물 ID 추출.

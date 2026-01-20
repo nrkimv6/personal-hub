@@ -85,6 +85,9 @@ class CrawlHistoryItem(BaseModel):
     schedule_name: Optional[str] = None
     collected_count: int = 0
     saved_count: int = 0
+    created_count: int = 0  # 신규 추가
+    updated_count: int = 0  # 업데이트
+    unchanged_count: int = 0  # 중복 (변경없음)
 
     class Config:
         from_attributes = True

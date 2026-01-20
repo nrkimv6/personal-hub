@@ -66,6 +66,9 @@ class ScheduleRunResponse(BaseModel):
     status: str
     collected_count: int = 0
     saved_count: int = 0
+    created_count: int = 0  # 신규 추가
+    updated_count: int = 0  # 업데이트
+    unchanged_count: int = 0  # 중복 (변경없음)
     stop_reason: Optional[str] = None
     error_message: Optional[str] = None
     worker_id: Optional[str] = None
@@ -211,7 +214,7 @@ async def get_schedule_runs(
         status=status
     )
     return PaginatedRunsResponse(
-        items=[_run_to_response(r) for r in result["items"]],
+        items=[_run_to_response(r, db) for r in result["items"]],
         total=result["total"],
         page=result["page"],
         limit=result["limit"],
@@ -237,6 +240,100 @@ async def get_schedule_stats(
     return stats
 
 
+class RunPostResponse(BaseModel):
+    """실행에서 수집된 포스트 응답 스키마."""
+    id: int
+    post_id: str
+    account: str
+    url: str | None
+    caption: str | None
+    collected_at: datetime
+    status: str  # 'created' | 'updated' | 'unchanged'
+    has_duplicate_post_id: bool  # 같은 post_id를 가진 포스트가 여러 개 존재
+
+    class Config:
+        from_attributes = True
+
+
+@router.get("/schedules/{schedule_id}/runs/{run_id}/posts")
+async def get_run_posts(
+    schedule_id: int,
+    run_id: int,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    """실행에서 수집된 포스트 목록 조회."""
+    from app.models import InstagramPost
+    from sqlalchemy import func
+
+    service = TaskScheduleService(db)
+
+    # 스케줄 및 실행 존재 확인
+    schedule = service.get_schedule_by_id(schedule_id)
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    run = service.get_run_by_id(run_id)
+    if not run or run.schedule_id != schedule_id:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    # Instagram 스케줄만 지원
+    if schedule.target_type != "instagram_feed":
+        raise HTTPException(
+            status_code=400,
+            detail="포스트 조회는 Instagram 스케줄만 지원합니다"
+        )
+
+    # 해당 run에서 발견된 포스트 조회 (last_seen_run_id 사용)
+    offset = (page - 1) * limit
+    posts_query = db.query(InstagramPost).filter(
+        InstagramPost.last_seen_run_id == run_id
+    ).order_by(InstagramPost.last_seen_at.desc())
+
+    total = posts_query.count()
+    posts = posts_query.offset(offset).limit(limit).all()
+
+    # 각 포스트에 대해 신규/업데이트/중복 판별
+    result_posts = []
+    for post in posts:
+        # 상태 판별
+        if post.crawl_run_id == run_id:
+            # 이번 실행에서 처음 생성됨
+            status = 'created'
+        elif post.updated_at and abs((post.updated_at - run.started_at).total_seconds()) < 60:
+            # updated_at이 run 시작 시간과 1분 이내면 이번 실행에서 업데이트됨
+            status = 'updated'
+        else:
+            # 그 외는 중복 (변경 없이 발견만 됨)
+            status = 'unchanged'
+
+        # 같은 post_id를 가진 포스트가 2개 이상 있는지 확인
+        duplicate_count = db.query(func.count(InstagramPost.id)).filter(
+            InstagramPost.post_id == post.post_id
+        ).scalar()
+        has_duplicate_post_id = duplicate_count > 1
+
+        result_posts.append(RunPostResponse(
+            id=post.id,
+            post_id=post.post_id,
+            account=post.account,
+            url=post.url,
+            caption=post.caption,
+            collected_at=post.collected_at,
+            status=status,
+            has_duplicate_post_id=has_duplicate_post_id
+        ))
+
+    return {
+        "items": result_posts,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "pages": (total + limit - 1) // limit
+    }
+
+
 @router.get("/runs", response_model=PaginatedRunsResponse)
 async def get_all_runs(
     page: int = Query(1, ge=1),
@@ -252,7 +349,7 @@ async def get_all_runs(
         status=status
     )
     return PaginatedRunsResponse(
-        items=[_run_to_response(r) for r in result["items"]],
+        items=[_run_to_response(r, db) for r in result["items"]],
         total=result["total"],
         page=result["page"],
         limit=result["limit"],
@@ -280,8 +377,35 @@ def _schedule_to_response(schedule: TaskSchedule) -> ScheduleResponse:
     )
 
 
-def _run_to_response(run: TaskScheduleRun) -> ScheduleRunResponse:
+def _run_to_response(run: TaskScheduleRun, db: Session = None) -> ScheduleRunResponse:
     """실행을 응답 스키마로 변환."""
+    from app.models import InstagramPost
+    from sqlalchemy.orm import joinedload
+
+    created_count = 0
+    updated_count = 0
+    unchanged_count = 0
+
+    # Instagram 스케줄인 경우에만 집계
+    if db:
+        # schedule 관계 로드
+        if not run.schedule:
+            db.refresh(run, ['schedule'])
+
+        if run.schedule and run.schedule.target_type == "instagram_feed":
+            # 해당 run에서 발견된 포스트 조회
+            posts = db.query(InstagramPost).filter(
+                InstagramPost.last_seen_run_id == run.id
+            ).all()
+
+            for post in posts:
+                if post.crawl_run_id == run.id:
+                    created_count += 1
+                elif post.updated_at and abs((post.updated_at - run.started_at).total_seconds()) < 60:
+                    updated_count += 1
+                else:
+                    unchanged_count += 1
+
     return ScheduleRunResponse(
         id=run.id,
         schedule_id=run.schedule_id,
@@ -290,6 +414,9 @@ def _run_to_response(run: TaskScheduleRun) -> ScheduleRunResponse:
         status=run.status,
         collected_count=run.collected_count,
         saved_count=run.saved_count,
+        created_count=created_count,
+        updated_count=updated_count,
+        unchanged_count=unchanged_count,
         stop_reason=run.stop_reason,
         error_message=run.error_message,
         worker_id=run.worker_id,

@@ -38,9 +38,15 @@ class InstagramPost(Base):
 
     # 수집 정보
     service_account_id = Column(Integer, ForeignKey("service_accounts.id", ondelete="SET NULL"))
-    crawl_run_id = Column(Integer)  # 레거시 - instagram_crawl_runs FK 제거됨
-    collected_at = Column(DateTime, default=datetime.now, index=True)
+    crawl_run_id = Column(Integer)  # 처음 수집한 run ID
+    collected_at = Column(DateTime, default=datetime.now, index=True)  # 레거시 호환용
     source = Column(String(20), default="playwright", index=True)  # "playwright" | "extension"
+
+    # 추적 정보 (신규/업데이트/중복 판별용)
+    created_at = Column(DateTime, default=datetime.now, index=True)  # 처음 생성된 시간
+    updated_at = Column(DateTime, index=True)  # 마지막 업데이트 시간
+    last_seen_at = Column(DateTime, default=datetime.now, index=True)  # 마지막 발견 시간
+    last_seen_run_id = Column(Integer, index=True)  # 마지막 발견된 run ID
 
     # 활성화 상태
     is_active = Column(Boolean, default=True, index=True)

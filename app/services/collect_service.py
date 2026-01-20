@@ -486,6 +486,11 @@ class CollectService:
         """CrawlRequest를 CrawlHistoryItem으로 변환."""
         is_instagram = request.url_type.startswith('instagram') if request.url_type else False
 
+        # 단일 URL 크롤링이므로 카운트는 1 또는 0
+        created_count = 1 if request.result_status == 'created' else 0
+        updated_count = 1 if request.result_status == 'updated' else 0
+        unchanged_count = 1 if request.result_status == 'unchanged' else 0
+
         return CrawlHistoryItem(
             id=request.id,
             history_type='request',
@@ -497,6 +502,14 @@ class CollectService:
             error_message=request.error_message,
             url=request.url,
             url_type=request.url_type,
+            request_type=request.request_type,
+            requested_by=request.requested_by,
+            collected_count=1 if request.status == 'completed' else 0,
+            saved_count=created_count,  # 신규만 saved로 카운트
+            created_count=created_count,
+            updated_count=updated_count,
+            unchanged_count=unchanged_count,
+            url_type=request.url_type,
             request_type=self._get_request_type(request),
             requested_by=request.requested_by,
         )
@@ -506,10 +519,41 @@ class CollectService:
         schedule = run.schedule
         is_instagram = schedule.target_type == 'instagram_feed' if schedule else False
 
+        # Instagram 스케줄인 경우 신규/업데이트/중복 집계
+        created_count = 0
+        updated_count = 0
+        unchanged_count = 0
+
+        if is_instagram and schedule:
+            # 해당 run에서 발견된 포스트 조회
+            posts = self.db.query(InstagramPost).filter(
+                InstagramPost.last_seen_run_id == run.id
+            ).all()
+
+            for post in posts:
+                if post.crawl_run_id == run.id:
+                    created_count += 1
+                elif post.updated_at and abs((post.updated_at - run.started_at).total_seconds()) < 60:
+                    updated_count += 1
+                else:
+                    unchanged_count += 1
+
+        # source_type 결정
+        source_type_map = {
+            'instagram_feed': 'instagram',
+            'google_search': 'google_search',
+            'writing_task': 'writing',
+            'writing_source_collect': 'writing',
+            'keyword_analysis': 'writing',
+            'topic_extract': 'writing',
+            'report': 'report',
+        }
+        source_type = source_type_map.get(schedule.target_type, 'web') if schedule else 'web'
+
         return CrawlHistoryItem(
             id=run.id,
             history_type='schedule_run',
-            source_type='instagram' if is_instagram else 'web',
+            source_type=source_type,
             status=run.status,
             started_at=run.started_at,
             finished_at=run.finished_at,
@@ -519,6 +563,9 @@ class CollectService:
             schedule_name=schedule.display_name or schedule.name if schedule else None,
             collected_count=run.collected_count or 0,
             saved_count=run.saved_count or 0,
+            created_count=created_count,
+            updated_count=updated_count,
+            unchanged_count=unchanged_count,
         )
 
     def _google_search_to_history(self, search) -> CrawlHistoryItem:

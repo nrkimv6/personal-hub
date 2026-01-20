@@ -41,7 +41,7 @@ class PostService:
         comments: Optional[int] = None,
         service_account_id: Optional[int] = None,
         crawl_run_id: Optional[int] = None,
-    ) -> Tuple[Optional[InstagramPost], bool]:
+    ) -> Tuple[Optional[InstagramPost], str]:
         """게시물 생성 또는 업데이트 (upsert).
 
         Args:
@@ -60,7 +60,7 @@ class PostService:
             crawl_run_id: 크롤링 실행 ID
 
         Returns:
-            (게시물, is_new) - is_new=True면 새로 생성됨, False면 이미 존재함
+            (게시물, status) - status: 'created' | 'updated' | 'unchanged'
         """
         # unknown_* 형태의 post_id를 콘텐츠 기반 해시 ID로 변경
         if post_id.startswith("unknown_"):
@@ -70,18 +70,49 @@ class PostService:
             post_id = f"ad_{hash_id}"
             logger.debug(f"Generated content-based post_id: {post_id}")
 
-        # post_id로 중복 체크 (unknown_* → ad_* 변환 후에도 체크)
+        # post_id로 기존 포스트 조회
         existing = self.get_post_by_instagram_id(post_id)
-        if existing:
-            logger.debug(f"Post already exists by post_id: {post_id}")
-            return existing, False
 
-        # URL로 중복 체크 (URL이 있을 때)
-        if url:
-            existing = self.get_post_by_url(url)
-            if existing:
-                logger.debug(f"Post already exists by url: {url}")
-                return existing, False
+        now = datetime.now()
+
+        if existing:
+            # 기존 포스트가 있으면 업데이트 여부 확인
+            has_changes = False
+
+            # 변경된 필드 확인
+            if caption and existing.caption != caption:
+                existing.caption = caption
+                has_changes = True
+            if images and existing.images != images:
+                existing.images = images
+                has_changes = True
+            if likes is not None and existing.likes != likes:
+                existing.likes = likes
+                has_changes = True
+            if comments is not None and existing.comments != comments:
+                existing.comments = comments
+                has_changes = True
+            if display_time and existing.display_time != display_time:
+                existing.display_time = display_time
+                has_changes = True
+
+            # last_seen 정보는 항상 업데이트
+            existing.last_seen_at = now
+            existing.last_seen_run_id = crawl_run_id
+
+            if has_changes:
+                # 실제 내용이 변경되었으면 updated_at 갱신
+                existing.updated_at = now
+                self.db.commit()
+                self.db.refresh(existing)
+                logger.info(f"Updated post: {post_id} from @{account}")
+                return existing, 'updated'
+            else:
+                # 변경 없으면 그냥 커밋 (last_seen만 업데이트)
+                self.db.commit()
+                self.db.refresh(existing)
+                logger.debug(f"Post unchanged: {post_id}")
+                return existing, 'unchanged'
 
         # 새 게시물 생성
         post = InstagramPost(
@@ -98,7 +129,10 @@ class PostService:
             comments=comments,
             service_account_id=service_account_id,
             crawl_run_id=crawl_run_id,
-            collected_at=datetime.now(),
+            collected_at=now,
+            created_at=now,
+            last_seen_at=now,
+            last_seen_run_id=crawl_run_id,
         )
 
         try:
@@ -106,11 +140,11 @@ class PostService:
             self.db.commit()
             self.db.refresh(post)
             logger.info(f"Created post: {post_id} from @{account}")
-            return post, True
+            return post, 'created'
         except IntegrityError as e:
             self.db.rollback()
             logger.warning(f"Duplicate post skipped (IntegrityError): {post_id}")
-            return None, False
+            return None, 'error'
 
     def create_post(
         self,
@@ -133,7 +167,7 @@ class PostService:
         Returns:
             생성된 게시물, 중복이면 None
         """
-        post, is_new = self.create_or_update_post(
+        post, status = self.create_or_update_post(
             post_id=post_id,
             account=account,
             url=url,
@@ -148,7 +182,7 @@ class PostService:
             service_account_id=service_account_id,
             crawl_run_id=crawl_run_id,
         )
-        return post if is_new else None
+        return post if status == 'created' else None
 
     def get_posts(
         self,

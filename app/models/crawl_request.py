@@ -38,6 +38,7 @@ class CrawlRequest(Base):
     # 결과 연결 (다형성)
     result_type = Column(String(50), nullable=True)  # 'instagram_post', 'crawled_page'
     result_id = Column(Integer, nullable=True)
+    result_status = Column(String(20), nullable=True, index=True)  # 'created', 'updated', 'unchanged'
 
     # 에러
     error_message = Column(Text, nullable=True)
@@ -76,12 +77,13 @@ class CrawlRequest(Base):
         """크롤링 진행 중으로 표시."""
         self.status = self.STATUS_PROCESSING
 
-    def mark_completed(self, result_type: str, result_id: int):
+    def mark_completed(self, result_type: str, result_id: int, result_status: str = None):
         """완료로 표시."""
         self.status = self.STATUS_COMPLETED
         self.processed_at = datetime.now()
         self.result_type = result_type
         self.result_id = result_id
+        self.result_status = result_status  # 'created', 'updated', 'unchanged'
 
     def mark_failed(self, error_message: str):
         """실패로 표시."""

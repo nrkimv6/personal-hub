@@ -133,9 +133,23 @@
 		if (item.status === 'processing') return '처리 중...';
 		if (item.status === 'failed') return item.error_message || '실패';
 
+		// URL 수동 크롤링인 경우
+		if (item.history_type === 'request') {
+			if (item.created_count === 1) return '신규 추가';
+			if (item.updated_count === 1) return '업데이트됨';
+			if (item.unchanged_count === 1) return '중복 (변경없음)';
+			return '완료';
+		}
+
+		// 스케줄 실행인 경우
 		if (item.history_type === 'schedule_run') {
+			// Instagram 스케줄인 경우 상세 정보 표시
+			if (item.source_type === 'instagram' && (item.created_count || item.updated_count || item.unchanged_count)) {
+				return `신규 ${item.created_count} / 업데이트 ${item.updated_count} / 중복 ${item.unchanged_count}`;
+			}
 			return `${item.collected_count}개 수집 / ${item.saved_count}개 저장`;
 		}
+
 		if (item.history_type === 'google_search') {
 			return `${item.collected_count}개 검색 결과`;
 		}

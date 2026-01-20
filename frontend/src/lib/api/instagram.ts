@@ -34,7 +34,8 @@ import type {
   CrawlScheduleRunPaginated,
   CrawlRunStats,
   UrlParseResponse,
-  LLMRequest
+  LLMRequest,
+  RunPostsPaginated
 } from '../types';
 
 // ============================================================
@@ -348,6 +349,18 @@ export const crawlApi = {
   getScheduleStats: (scheduleId: number, days?: number) =>
     requestTasks<CrawlRunStats>(`/schedules/${scheduleId}/stats${days ? `?days=${days}` : ''}`),
 
+  // 실행에서 수집된 포스트 조회
+  getRunPosts: (scheduleId: number, runId: number, params?: {
+    page?: number;
+    limit?: number;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.page) searchParams.set('page', params.page.toString());
+    if (params?.limit) searchParams.set('limit', params.limit.toString());
+    const query = searchParams.toString();
+    return requestTasks<RunPostsPaginated>(`/schedules/${scheduleId}/runs/${runId}/posts${query ? `?${query}` : ''}`);
+  },
+
   // 전체 실행 이력 조회
   getAllRuns: (params?: {
     page?: number;
@@ -428,6 +441,9 @@ export interface CrawlHistoryItem {
   schedule_name?: string;
   collected_count: number;
   saved_count: number;
+  created_count: number;  // 신규 추가
+  updated_count: number;  // 업데이트
+  unchanged_count: number;  // 중복 (변경없음)
 }
 
 export interface CrawlHistoryList {

@@ -136,7 +136,8 @@ class CrawlRequestService:
         self,
         request_id: int,
         result_type: str,
-        result_id: int
+        result_id: int,
+        result_status: str = None
     ) -> Optional[CrawlRequest]:
         """요청 완료 처리."""
         request = self.db.query(CrawlRequest).filter(
@@ -144,7 +145,7 @@ class CrawlRequestService:
         ).first()
 
         if request:
-            request.mark_completed(result_type, result_id)
+            request.mark_completed(result_type, result_id, result_status)
             self.db.commit()
             self.db.refresh(request)
         return request

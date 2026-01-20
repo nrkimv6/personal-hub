@@ -416,14 +416,16 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
 
                 if result.get("success"):
                     post = result.get("post")
+                    status = result.get("status", "unknown")  # 'created', 'updated', 'unchanged'
                     request_service.complete_request(
                         request.id,
                         result_type="instagram_post",
-                        result_id=post.id if post else 0
+                        result_id=post.id if post else 0,
+                        result_status=status
                     )
                     logger.info(
                         f"[{self.name}] Instagram 크롤링 완료: request_id={request.id}, "
-                        f"post_id={post.id if post else None}"
+                        f"post_id={post.id if post else None}, status={status}"
                     )
                 else:
                     request_service.fail_request(request.id, result.get("message", "크롤링 실패"))
