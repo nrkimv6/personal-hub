@@ -1,11 +1,13 @@
 """Sleep Now API routes for monitor-page integration"""
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from datetime import datetime, timedelta
 from pathlib import Path
 import hashlib
+import hmac
 import json
+import re
 import sys
 
 router = APIRouter(prefix="/api/v1/sleep-now", tags=["sleep-now"])
@@ -97,19 +99,33 @@ def _log_event(event_type: str, details: dict | None = None) -> None:
     log_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def _verify_password(password: str) -> bool:
-    """Verify emergency unlock password"""
+def _load_config() -> dict:
+    """Load settings.json from sleep-now project"""
     if not CONFIG_FILE.exists():
-        return False
+        return {}
+    return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
 
-    config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+
+def _save_config(config: dict) -> None:
+    """Save settings.json to sleep-now project"""
+    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG_FILE.write_text(
+        json.dumps(config, indent=2, ensure_ascii=False),
+        encoding="utf-8"
+    )
+
+
+def _verify_password(password: str) -> bool:
+    """Verify emergency unlock password with timing-attack resistance"""
+    config = _load_config()
     stored_hash = config.get("emergency", {}).get("password_hash", "")
 
     if not stored_hash:
         return False
 
     input_hash = hashlib.sha256(password.encode()).hexdigest()
-    return input_hash == stored_hash
+    # Use hmac.compare_digest to prevent timing attacks
+    return hmac.compare_digest(stored_hash, input_hash)
 
 
 @router.get("/status", response_model=SleepNowStatus)
@@ -265,4 +281,154 @@ async def skip_today(request: EmergencyUnlockRequest):
         "success": True,
         "grace_until": tomorrow_7am,
         "message": "오늘 하루 비활성화되었습니다.",
+    }
+
+
+# ==================== 설정 변경 API ====================
+
+
+class ScheduleUpdateRequest(BaseModel):
+    """스케줄 설정 변경 요청"""
+    password: str
+    warning_times: list[str] | None = None
+    block_start: str | None = None
+    block_end: str | None = None
+
+    @field_validator('warning_times')
+    @classmethod
+    def validate_warning_times(cls, v):
+        if v is None:
+            return v
+        time_pattern = re.compile(r'^([01]?[0-9]|2[0-3]):[0-5][0-9]$')
+        for time_str in v:
+            if not time_pattern.match(time_str):
+                raise ValueError(f'Invalid time format: {time_str}. Use HH:MM format.')
+        return v
+
+    @field_validator('block_start', 'block_end')
+    @classmethod
+    def validate_time(cls, v):
+        if v is None:
+            return v
+        time_pattern = re.compile(r'^([01]?[0-9]|2[0-3]):[0-5][0-9]$')
+        if not time_pattern.match(v):
+            raise ValueError(f'Invalid time format: {v}. Use HH:MM format.')
+        return v
+
+
+class PasswordChangeRequest(BaseModel):
+    """비밀번호 변경 요청"""
+    current_password: str
+    new_password: str
+    confirm_password: str
+
+    @field_validator('new_password')
+    @classmethod
+    def validate_new_password(cls, v):
+        if len(v) < 16:
+            raise ValueError('Password must be at least 16 characters')
+        return v
+
+
+@router.put("/schedule")
+async def update_schedule(request: ScheduleUpdateRequest):
+    """스케줄 설정 변경 (비밀번호 인증 필요)"""
+    # 비밀번호 검증
+    if not _verify_password(request.password):
+        _log_event("schedule_update_failed", {"reason": "invalid_password"})
+        raise HTTPException(status_code=401, detail="비밀번호가 올바르지 않습니다")
+
+    # 설정 파일 로드
+    config = _load_config()
+
+    # Phase 3 복수 블록 지원: blocks 배열 사용
+    if "blocks" in config.get("schedule", {}) and config["schedule"]["blocks"]:
+        # Multi-block mode: 첫 번째 블록 수정
+        schedule = config["schedule"]
+        if not schedule["blocks"]:
+            schedule["blocks"] = [{
+                "name": "night",
+                "enabled": True,
+                "warning_times": ["23:00", "23:30", "23:45", "23:50"],
+                "block_start": "00:00",
+                "block_end": "07:00"
+            }]
+
+        block = schedule["blocks"][0]
+    else:
+        # Legacy mode: 직접 schedule 필드 수정
+        schedule = config.get("schedule", {})
+        block = schedule
+
+    # 변경사항 적용
+    updated = False
+    if request.warning_times is not None:
+        if len(request.warning_times) < 1:
+            raise HTTPException(status_code=400, detail="최소 1개의 경고 시간이 필요합니다")
+        block["warning_times"] = request.warning_times
+        updated = True
+
+    if request.block_start is not None:
+        block["block_start"] = request.block_start
+        updated = True
+
+    if request.block_end is not None:
+        block["block_end"] = request.block_end
+        updated = True
+
+    if not updated:
+        raise HTTPException(status_code=400, detail="변경할 항목이 없습니다")
+
+    # 설정 저장
+    config["schedule"] = schedule
+    _save_config(config)
+
+    _log_event("schedule_updated", {
+        "warning_times": block.get("warning_times"),
+        "block_start": block.get("block_start"),
+        "block_end": block.get("block_end"),
+    })
+
+    return {
+        "success": True,
+        "message": "스케줄이 업데이트되었습니다. 서비스 재시작이 필요합니다.",
+        "schedule": {
+            "warning_times": block.get("warning_times"),
+            "block_start": block.get("block_start"),
+            "block_end": block.get("block_end"),
+        },
+        "restart_required": True,
+    }
+
+
+@router.put("/password")
+async def change_password(request: PasswordChangeRequest):
+    """비상 비밀번호 변경"""
+    # 현재 비밀번호 검증
+    if not _verify_password(request.current_password):
+        _log_event("password_change_failed", {"reason": "current_password_mismatch"})
+        raise HTTPException(status_code=401, detail="현재 비밀번호가 올바르지 않습니다")
+
+    # 새 비밀번호 확인
+    if request.new_password != request.confirm_password:
+        raise HTTPException(status_code=400, detail="새 비밀번호가 일치하지 않습니다")
+
+    # 현재와 동일한 비밀번호 체크
+    if request.current_password == request.new_password:
+        raise HTTPException(status_code=400, detail="새 비밀번호는 현재와 달라야 합니다")
+
+    # 새 비밀번호 해시 생성 및 저장
+    new_hash = hashlib.sha256(request.new_password.encode()).hexdigest()
+
+    config = _load_config()
+    if "emergency" not in config:
+        config["emergency"] = {}
+    config["emergency"]["password_hash"] = new_hash
+    _save_config(config)
+
+    _log_event("password_changed", {"new_hash_prefix": new_hash[:8]})
+
+    return {
+        "success": True,
+        "message": "비밀번호가 변경되었습니다",
     }

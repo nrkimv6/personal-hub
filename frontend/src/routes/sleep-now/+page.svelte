@@ -46,6 +46,26 @@
 	let unlockError = $state<string | null>(null);
 	let unlockSuccess = $state<string | null>(null);
 
+	// Tab state
+	let activeTab = $state<'status' | 'settings'>('status');
+
+	// Settings form state
+	let settingsPassword = $state('');
+	let warningTimesInput = $state('');
+	let blockStartInput = $state('');
+	let blockEndInput = $state('');
+	let settingsSaving = $state(false);
+	let settingsError = $state<string | null>(null);
+	let settingsSuccess = $state<string | null>(null);
+
+	// Password change form state
+	let currentPassword = $state('');
+	let newPassword = $state('');
+	let confirmPassword = $state('');
+	let passwordChanging = $state(false);
+	let passwordError = $state<string | null>(null);
+	let passwordSuccess = $state<string | null>(null);
+
 	const API_BASE = '/api/v1/sleep-now';
 
 	async function fetchData() {
@@ -140,6 +160,110 @@
 		}
 	}
 
+	async function updateSchedule() {
+		if (!settingsPassword || settingsPassword.length < 16) {
+			settingsError = '비밀번호는 16자 이상이어야 합니다';
+			return;
+		}
+
+		settingsSaving = true;
+		settingsError = null;
+		settingsSuccess = null;
+
+		try {
+			const body: Record<string, unknown> = { password: settingsPassword };
+
+			// Parse warning times
+			if (warningTimesInput.trim()) {
+				const times = warningTimesInput
+					.split(',')
+					.map((t) => t.trim())
+					.filter((t) => t);
+				if (times.length > 0) body.warning_times = times;
+			}
+
+			// Add block times if provided
+			if (blockStartInput.trim()) body.block_start = blockStartInput.trim();
+			if (blockEndInput.trim()) body.block_end = blockEndInput.trim();
+
+			const res = await fetch(`${API_BASE}/schedule`, {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(body)
+			});
+
+			if (!res.ok) {
+				const data = await res.json();
+				throw new Error(data.detail || '스케줄 업데이트 실패');
+			}
+
+			const data = await res.json();
+			settingsSuccess = data.message;
+			settingsPassword = '';
+			await fetchData();
+		} catch (e) {
+			settingsError = e instanceof Error ? e.message : '스케줄 업데이트 실패';
+		} finally {
+			settingsSaving = false;
+		}
+	}
+
+	async function changePassword() {
+		if (!currentPassword || currentPassword.length < 16) {
+			passwordError = '현재 비밀번호는 16자 이상이어야 합니다';
+			return;
+		}
+
+		if (!newPassword || newPassword.length < 16) {
+			passwordError = '새 비밀번호는 16자 이상이어야 합니다';
+			return;
+		}
+
+		if (newPassword !== confirmPassword) {
+			passwordError = '새 비밀번호가 일치하지 않습니다';
+			return;
+		}
+
+		passwordChanging = true;
+		passwordError = null;
+		passwordSuccess = null;
+
+		try {
+			const res = await fetch(`${API_BASE}/password`, {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					current_password: currentPassword,
+					new_password: newPassword,
+					confirm_password: confirmPassword
+				})
+			});
+
+			if (!res.ok) {
+				const data = await res.json();
+				throw new Error(data.detail || '비밀번호 변경 실패');
+			}
+
+			const data = await res.json();
+			passwordSuccess = data.message;
+			currentPassword = '';
+			newPassword = '';
+			confirmPassword = '';
+		} catch (e) {
+			passwordError = e instanceof Error ? e.message : '비밀번호 변경 실패';
+		} finally {
+			passwordChanging = false;
+		}
+	}
+
+	function initializeSettingsForm() {
+		if (schedule) {
+			warningTimesInput = schedule.warning_times.join(', ');
+			blockStartInput = schedule.block_start;
+			blockEndInput = schedule.block_end;
+		}
+	}
+
 	function formatDateTime(iso: string | null): string {
 		if (!iso) return '-';
 		return new Date(iso).toLocaleString('ko-KR');
@@ -228,6 +352,31 @@
 		</button>
 	</div>
 
+	<!-- Tab Navigation -->
+	<div class="mb-6 border-b border-border">
+		<nav class="flex gap-6">
+			<button
+				onclick={() => (activeTab = 'status')}
+				class="pb-3 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'status'
+					? 'border-primary text-primary'
+					: 'border-transparent text-muted-foreground hover:text-foreground'}"
+			>
+				상태 모니터링
+			</button>
+			<button
+				onclick={() => {
+					activeTab = 'settings';
+					initializeSettingsForm();
+				}}
+				class="pb-3 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'settings'
+					? 'border-primary text-primary'
+					: 'border-transparent text-muted-foreground hover:text-foreground'}"
+			>
+				설정
+			</button>
+		</nav>
+	</div>
+
 	{#if loading && !status}
 		<div class="flex items-center justify-center h-64">
 			<div class="text-muted-foreground">로딩 중...</div>
@@ -236,7 +385,8 @@
 		<div class="bg-error-light border border-red-200 rounded-lg p-4 text-error">
 			{error}
 		</div>
-	{:else}
+	{:else if activeTab === 'status'}
+		<!-- Status Tab -->
 		<!-- Status Card -->
 		<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
 			<!-- Current Status -->
@@ -442,6 +592,166 @@
 			{:else}
 				<div class="text-sm text-muted-foreground text-center py-8">로그 없음</div>
 			{/if}
+		</div>
+	{:else if activeTab === 'settings'}
+		<!-- Settings Tab -->
+		<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+			<!-- Schedule Settings -->
+			<div class="bg-white rounded-lg shadow p-6">
+				<h2 class="text-lg font-semibold text-foreground mb-4">스케줄 설정</h2>
+				<p class="text-sm text-muted-foreground mb-4">
+					경고 시간과 차단 시간을 변경할 수 있습니다. 변경 후에는 서비스 재시작이 필요합니다.
+				</p>
+
+				{#if settingsError}
+					<div class="mb-4 p-3 bg-error-light border border-red-200 rounded-lg text-error text-sm">
+						{settingsError}
+					</div>
+				{/if}
+				{#if settingsSuccess}
+					<div class="mb-4 p-3 bg-success-light border border-green-200 rounded-lg text-success text-sm">
+						{settingsSuccess}
+					</div>
+				{/if}
+
+				<div class="space-y-4">
+					<div>
+						<label for="warningTimes" class="block text-sm font-medium text-foreground mb-1">
+							경고 시간 (쉼표로 구분)
+						</label>
+						<input
+							type="text"
+							id="warningTimes"
+							bind:value={warningTimesInput}
+							class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+							placeholder="예: 23:00, 23:30, 23:45, 23:50"
+						/>
+						<p class="mt-1 text-xs text-muted-foreground">HH:MM 형식으로 입력하세요</p>
+					</div>
+
+					<div class="grid grid-cols-2 gap-3">
+						<div>
+							<label for="blockStart" class="block text-sm font-medium text-foreground mb-1">
+								차단 시작
+							</label>
+							<input
+								type="text"
+								id="blockStart"
+								bind:value={blockStartInput}
+								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+								placeholder="00:00"
+							/>
+						</div>
+						<div>
+							<label for="blockEnd" class="block text-sm font-medium text-foreground mb-1">
+								차단 해제
+							</label>
+							<input
+								type="text"
+								id="blockEnd"
+								bind:value={blockEndInput}
+								class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+								placeholder="07:00"
+							/>
+						</div>
+					</div>
+
+					<div>
+						<label for="settingsPassword" class="block text-sm font-medium text-foreground mb-1">
+							비밀번호 (16자 이상)
+						</label>
+						<input
+							type="password"
+							id="settingsPassword"
+							bind:value={settingsPassword}
+							class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+							placeholder="비밀번호 입력"
+						/>
+					</div>
+
+					<button
+						onclick={updateSchedule}
+						disabled={settingsSaving}
+						class="w-full px-4 py-2 bg-primary hover:bg-primary-hover disabled:bg-blue-400 text-white rounded-lg transition-colors"
+					>
+						{settingsSaving ? '저장 중...' : '설정 저장'}
+					</button>
+
+					{#if settingsSuccess}
+						<div class="p-3 bg-warning-light border border-yellow-200 rounded-lg text-warning-foreground text-sm">
+							⚠️ 설정이 변경되었습니다. 서비스 재시작이 필요합니다.
+						</div>
+					{/if}
+				</div>
+			</div>
+
+			<!-- Password Change -->
+			<div class="bg-white rounded-lg shadow p-6">
+				<h2 class="text-lg font-semibold text-foreground mb-4">비밀번호 변경</h2>
+				<p class="text-sm text-muted-foreground mb-4">
+					긴급 해제 및 설정 변경에 사용되는 비밀번호를 변경합니다.
+				</p>
+
+				{#if passwordError}
+					<div class="mb-4 p-3 bg-error-light border border-red-200 rounded-lg text-error text-sm">
+						{passwordError}
+					</div>
+				{/if}
+				{#if passwordSuccess}
+					<div class="mb-4 p-3 bg-success-light border border-green-200 rounded-lg text-success text-sm">
+						{passwordSuccess}
+					</div>
+				{/if}
+
+				<div class="space-y-4">
+					<div>
+						<label for="currentPassword" class="block text-sm font-medium text-foreground mb-1">
+							현재 비밀번호
+						</label>
+						<input
+							type="password"
+							id="currentPassword"
+							bind:value={currentPassword}
+							class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+							placeholder="현재 비밀번호"
+						/>
+					</div>
+
+					<div>
+						<label for="newPassword" class="block text-sm font-medium text-foreground mb-1">
+							새 비밀번호 (16자 이상)
+						</label>
+						<input
+							type="password"
+							id="newPassword"
+							bind:value={newPassword}
+							class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+							placeholder="새 비밀번호"
+						/>
+					</div>
+
+					<div>
+						<label for="confirmPassword" class="block text-sm font-medium text-foreground mb-1">
+							새 비밀번호 확인
+						</label>
+						<input
+							type="password"
+							id="confirmPassword"
+							bind:value={confirmPassword}
+							class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+							placeholder="새 비밀번호 확인"
+						/>
+					</div>
+
+					<button
+						onclick={changePassword}
+						disabled={passwordChanging}
+						class="w-full px-4 py-2 bg-primary hover:bg-primary-hover disabled:bg-blue-400 text-white rounded-lg transition-colors"
+					>
+						{passwordChanging ? '변경 중...' : '비밀번호 변경'}
+					</button>
+				</div>
+			</div>
 		</div>
 	{/if}
 </div>
