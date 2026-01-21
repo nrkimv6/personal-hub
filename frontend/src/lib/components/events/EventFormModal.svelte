@@ -5,6 +5,7 @@
 	import type { Event, EventCreate, EventUpdate } from '$lib/types';
 	import { prizesToText, textToPrizes } from '$lib/utils/eventUtils';
 	import { Button } from '$lib/components/ui';
+	import { eventApi } from '$lib/api/system';
 
 	interface Props {
 		show: boolean;
@@ -27,6 +28,50 @@
 
 	// 복수 URL 관리
 	let eventUrls = $state<string[]>(['']);
+
+	// URL 중복 체크 상태
+	let duplicateWarning = $state<{ url: string; eventId: number; title: string } | null>(null);
+	let isCheckingDuplicate = $state(false);
+	let duplicateCheckTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	// URL 중복 체크 (debounced)
+	async function checkDuplicateUrl(url: string, index: number) {
+		if (!url || url.trim().length < 10) {
+			if (index === 0) duplicateWarning = null;
+			return;
+		}
+
+		// 수정 모드에서는 현재 이벤트 제외
+		const excludeId = editingEvent?.id;
+
+		isCheckingDuplicate = true;
+		try {
+			const existing = await eventApi.checkDuplicateUrl(url.trim(), excludeId);
+			if (existing && index === 0) {
+				duplicateWarning = {
+					url: url.trim(),
+					eventId: existing.id,
+					title: existing.title
+				};
+			} else if (index === 0) {
+				duplicateWarning = null;
+			}
+		} catch {
+			// 체크 실패는 무시
+		} finally {
+			isCheckingDuplicate = false;
+		}
+	}
+
+	// URL 변경 시 debounced 중복 체크
+	function handleUrlChange(index: number) {
+		if (duplicateCheckTimeout) {
+			clearTimeout(duplicateCheckTimeout);
+		}
+		duplicateCheckTimeout = setTimeout(() => {
+			checkDuplicateUrl(eventUrls[index], index);
+		}, 500);
+	}
 
 	// URL 배열 → event_url + additional_urls 변환
 	function urlsToFormData(urls: string[]): { event_url: string | null; additional_urls: string[] } {
@@ -60,6 +105,14 @@
 	// editingEvent 또는 importedData가 변경되면 폼 초기화
 	$effect(() => {
 		if (show) {
+			// 중복 경고 리셋
+			duplicateWarning = null;
+			isCheckingDuplicate = false;
+			if (duplicateCheckTimeout) {
+				clearTimeout(duplicateCheckTimeout);
+				duplicateCheckTimeout = null;
+			}
+
 			if (editingEvent) {
 				// 수정 모드: 기존 이벤트 데이터로 초기화
 				eventForm = {
@@ -264,8 +317,9 @@
 									<input
 										type="text"
 										bind:value={eventUrls[index]}
+										oninput={() => handleUrlChange(index)}
 										placeholder="https://..."
-										class="flex-1 px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+										class="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring {index === 0 && duplicateWarning ? 'border-warning' : 'border-border'}"
 									/>
 									{#if index === 0}
 										<span class="text-xs text-primary whitespace-nowrap px-2 py-1 bg-primary-light rounded">메인</span>
@@ -284,6 +338,23 @@
 									{/if}
 								</div>
 							{/each}
+							{#if duplicateWarning}
+								<div class="flex items-start gap-2 p-2 bg-warning-light rounded-lg text-sm">
+									<svg class="w-4 h-4 text-warning mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+									</svg>
+									<div>
+										<p class="font-medium text-warning-foreground">이미 등록된 URL입니다</p>
+										<p class="text-muted-foreground">
+											기존 이벤트: <span class="font-medium">{duplicateWarning.title}</span> (ID: {duplicateWarning.eventId})
+										</p>
+										<p class="text-xs text-muted-foreground mt-1">저장 시 비활성화(disabled) 상태로 등록됩니다.</p>
+									</div>
+								</div>
+							{/if}
+							{#if isCheckingDuplicate}
+								<p class="text-xs text-muted-foreground">URL 중복 확인 중...</p>
+							{/if}
 							<button
 								type="button"
 								onclick={addUrl}

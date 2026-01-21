@@ -107,14 +107,14 @@ def create_event(
     """
     새 이벤트를 생성합니다. (관리자 전용)
     """
-    # URL 중복 체크 (경고만)
+    # URL 중복 체크: 중복이면 disabled 상태로 저장
+    is_duplicate = False
     if data.event_url:
         existing = event_service.check_duplicate_url(db, data.event_url)
         if existing:
-            # 중복이 있어도 생성은 허용, 응답에 경고 포함하지 않음 (클라이언트에서 처리)
-            pass
+            is_duplicate = True
 
-    return event_service.create_event(db, data)
+    return event_service.create_event(db, data, auto_disable=is_duplicate)
 
 
 @router.put("/{event_id}", response_model=EventResponse)

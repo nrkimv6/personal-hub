@@ -253,14 +253,24 @@ class EventService:
             return None
         return self._to_response(db, event)
 
-    def create_event(self, db: Session, data: EventCreate) -> EventResponse:
-        """이벤트 생성"""
+    def create_event(self, db: Session, data: EventCreate, auto_disable: bool = False) -> EventResponse:
+        """이벤트 생성
+
+        Args:
+            db: DB 세션
+            data: 이벤트 생성 데이터
+            auto_disable: True이면 status='disabled'로 생성 (중복 URL 등)
+        """
         # URL 타입 자동 분류
         url_type = data.url_type or detect_url_type(data.event_url)
+
+        # 중복 URL인 경우 disabled 상태로 생성
+        status = "disabled" if auto_disable else "active"
 
         event = Event(
             title=data.title,
             event_type=data.event_type,
+            status=status,
             event_url=data.event_url,
             url_type=url_type,
             additional_urls=data.additional_urls,

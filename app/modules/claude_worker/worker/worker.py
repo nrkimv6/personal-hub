@@ -265,11 +265,26 @@ def save_universal_crawl_result(db, page_id: int, llm_result: dict) -> bool:
                 page.event_id = existing_event.id
                 logger.info(f"CrawledPage {page_id}: added source to Event {existing_event.id} (similarity={similarity:.2f})")
             else:
-                # 새 이벤트 생성
-                event = _create_event_from_crawl(db, page, llm_result, event_data)
-                _add_source_to_event(db, event, page, llm_result, is_primary=True)
-                page.event_id = event.id
-                logger.info(f"CrawledPage {page_id}: created Event {event.id}")
+                # URL 중복 체크: event_url이 이미 존재하면 스킵
+                event_url = event_data.get("event_url")
+                if event_url:
+                    from app.services.event_service import event_service
+                    existing_by_url = event_service.check_duplicate_url(db, event_url)
+                    if existing_by_url:
+                        page.event_id = existing_by_url.id
+                        logger.info(f"CrawledPage {page_id}: URL already exists (event_id={existing_by_url.id}), skipping creation")
+                    else:
+                        # 새 이벤트 생성
+                        event = _create_event_from_crawl(db, page, llm_result, event_data)
+                        _add_source_to_event(db, event, page, llm_result, is_primary=True)
+                        page.event_id = event.id
+                        logger.info(f"CrawledPage {page_id}: created Event {event.id}")
+                else:
+                    # URL 없이 새 이벤트 생성
+                    event = _create_event_from_crawl(db, page, llm_result, event_data)
+                    _add_source_to_event(db, event, page, llm_result, is_primary=True)
+                    page.event_id = event.id
+                    logger.info(f"CrawledPage {page_id}: created Event {event.id}")
 
         # 팝업 자동 생성 (confidence >= 0.7)
         elif is_popup and confidence >= 0.7:
