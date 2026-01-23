@@ -115,6 +115,8 @@
 			case 'duplicate_stop': return '중복 종료';
 			case 'error': return '오류';
 			case 'manual': return '수동 종료';
+			case 'search_queued': return '검색 요청됨 (비동기)';
+			case 'search_completed': return '검색 완료';
 			default: return reason;
 		}
 	}

@@ -107,6 +107,14 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         # 완료된 태스크 정리
         self._cleanup_completed_tasks()
 
+        # 오래된 running 상태 실행 정리 (5분마다 실행)
+        if not hasattr(self, '_last_stale_cleanup'):
+            self._last_stale_cleanup = datetime.now()
+
+        if (datetime.now() - self._last_stale_cleanup).total_seconds() >= 300:
+            self._cleanup_stale_requests()
+            self._last_stale_cleanup = datetime.now()
+
         # 스케줄 기반 실행 디스패치
         await self._dispatch_scheduled_runs()
 
@@ -514,7 +522,10 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         run: TaskScheduleRun,
         saved_search_id: int
     ):
-        """Google 검색 실행.
+        """Google 검색 실행 (비동기 큐 방식).
+
+        검색 요청을 큐에 추가하고 즉시 완료 처리합니다.
+        실제 검색은 GoogleSearchWorker가 비동기로 처리합니다.
 
         Args:
             schedule: 크롤링 스케줄
@@ -534,7 +545,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
             self._update_worker_state("searching", saved_search.name)
 
-            # GoogleSearchQueue에 추가 (기존 워커가 처리)
+            # GoogleSearchQueue에 추가 (스케줄 실행 추적을 위한 메타데이터 포함)
             search_id = str(uuid.uuid4())
             queue_item = GoogleSearchQueue(
                 search_id=search_id,
@@ -553,29 +564,15 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                 f"search_id={search_id}, query={saved_search.query}"
             )
 
-            # 검색 완료 대기 (폴링)
-            result = await self._wait_for_search_completion(search_id)
-
-            if result["status"] == "completed":
-                schedule_service.complete_run(
-                    run.id,
-                    collected_count=result["total_results"],
-                    saved_count=result["total_results"],
-                    stop_reason=TaskScheduleRun.STOP_REASON_SEARCH_COMPLETED
-                )
-                schedule_service.update_schedule_after_run(run.schedule_id)
-                logger.info(
-                    f"[{self.name}] Google 검색 완료: run_id={run.id}, "
-                    f"total_results={result['total_results']}"
-                )
-            else:
-                error_msg = result.get("error_message", "검색 실패")
-                if "CAPTCHA" in error_msg:
-                    schedule_service.fail_run(run.id, error_msg)
-                    logger.warning(f"[{self.name}] Google 검색 실패 (CAPTCHA): {error_msg}")
-                else:
-                    schedule_service.fail_run(run.id, error_msg)
-                    logger.warning(f"[{self.name}] Google 검색 실패: {error_msg}")
+            # 즉시 완료 처리 (비동기 - 실제 결과는 GoogleSearchWorker가 처리)
+            schedule_service.complete_run(
+                run.id,
+                collected_count=0,
+                saved_count=0,
+                stop_reason=TaskScheduleRun.STOP_REASON_SEARCH_QUEUED
+            )
+            schedule_service.update_schedule_after_run(run.schedule_id)
+            logger.info(f"[{self.name}] Google 검색 스케줄 완료 (큐 추가): run_id={run.id}")
 
         except Exception as e:
             logger.error(f"[{self.name}] Google 검색 실행 실패: run_id={run.id}, error={format_error_message(e)}", exc_info=True)
@@ -603,6 +600,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             dict: {"status": "completed"|"failed", "total_results": int, "error_message": str}
         """
         start = datetime.now()
+        logger.info(f"[{self.name}] 검색 완료 대기 시작: search_id={search_id}, timeout={timeout}s")
 
         while (datetime.now() - start).total_seconds() < timeout:
             db = SessionLocal()
@@ -611,6 +609,11 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                 queue = db.query(GoogleSearchQueue).filter_by(search_id=search_id).first()
 
                 if queue and queue.status in ["completed", "failed"]:
+                    elapsed = int((datetime.now() - start).total_seconds())
+                    logger.info(
+                        f"[{self.name}] 검색 완료 확인: search_id={search_id}, "
+                        f"status={queue.status}, elapsed={elapsed}s"
+                    )
                     history = db.query(GoogleSearchHistory).filter_by(search_id=search_id).first()
                     return {
                         "status": queue.status,
@@ -622,6 +625,10 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
             await asyncio.sleep(2)
 
+        # 타임아웃 발생
+        logger.warning(
+            f"[{self.name}] 검색 완료 대기 타임아웃: search_id={search_id}, timeout={timeout}s"
+        )
         return {"status": "failed", "error_message": "Timeout"}
 
     # =====================================

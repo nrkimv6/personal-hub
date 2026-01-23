@@ -132,6 +132,7 @@ class TaskScheduleRun(Base):
     STOP_REASON_SHUTDOWN = "shutdown"
     STOP_REASON_SEARCH_COMPLETED = "search_completed"
     STOP_REASON_CAPTCHA = "captcha_detected"
+    STOP_REASON_SEARCH_QUEUED = "search_queued"  # 검색 큐에 추가됨 (비동기)
 
     def __repr__(self):
         return f"<TaskScheduleRun(id={self.id}, schedule_id={self.schedule_id}, status={self.status})>"
