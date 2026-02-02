@@ -507,8 +507,9 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
                 task_name = f"google_schedule_{schedule.id}_run_{run.id}"
                 if not self._is_task_running(task_name):
+                    # Note: schedule/run 객체 대신 ID를 전달하여 세션 바인딩 오류 방지
                     self._create_task(
-                        self._execute_google_search(schedule, run, saved_search_id),
+                        self._execute_google_search(schedule.id, run.id, saved_search_id),
                         task_name
                     )
                     logger.info(f"[{self.name}] Google 검색 스케줄 태스크 시작: run_id={run.id}")
@@ -518,8 +519,8 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
     async def _execute_google_search(
         self,
-        schedule: TaskSchedule,
-        run: TaskScheduleRun,
+        schedule_id: int,
+        run_id: int,
         saved_search_id: int
     ):
         """Google 검색 실행 (비동기 큐 방식).
@@ -528,8 +529,8 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         실제 검색은 GoogleSearchWorker가 비동기로 처리합니다.
 
         Args:
-            schedule: 크롤링 스케줄
-            run: 실행 기록
+            schedule_id: 스케줄 ID
+            run_id: 실행 기록 ID
             saved_search_id: 저장된 검색 ID
         """
         db = SessionLocal()
@@ -539,7 +540,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             # 저장된 검색 조회
             saved_search = db.query(GoogleSavedSearch).filter_by(id=saved_search_id).first()
             if not saved_search:
-                schedule_service.fail_run(run.id, "저장된 검색을 찾을 수 없습니다")
+                schedule_service.fail_run(run_id, "저장된 검색을 찾을 수 없습니다")
                 logger.warning(f"[{self.name}] 저장된 검색 없음: saved_search_id={saved_search_id}")
                 return
 
@@ -566,19 +567,19 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
             # 즉시 완료 처리 (비동기 - 실제 결과는 GoogleSearchWorker가 처리)
             schedule_service.complete_run(
-                run.id,
+                run_id,
                 collected_count=0,
                 saved_count=0,
                 stop_reason=TaskScheduleRun.STOP_REASON_SEARCH_QUEUED
             )
-            schedule_service.update_schedule_after_run(run.schedule_id)
-            logger.info(f"[{self.name}] Google 검색 스케줄 완료 (큐 추가): run_id={run.id}")
+            schedule_service.update_schedule_after_run(schedule_id)
+            logger.info(f"[{self.name}] Google 검색 스케줄 완료 (큐 추가): run_id={run_id}")
 
         except Exception as e:
-            logger.error(f"[{self.name}] Google 검색 실행 실패: run_id={run.id}, error={format_error_message(e)}", exc_info=True)
+            logger.error(f"[{self.name}] Google 검색 실행 실패: run_id={run_id}, error={format_error_message(e)}", exc_info=True)
             try:
                 schedule_service = TaskScheduleService(db)
-                schedule_service.fail_run(run.id, format_error_message(e))
+                schedule_service.fail_run(run_id, format_error_message(e))
             except Exception:
                 pass
         finally:
