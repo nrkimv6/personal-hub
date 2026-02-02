@@ -93,8 +93,8 @@
 	}
 
 	async function emergencyUnlock() {
-		if (!password || password.length < 16) {
-			unlockError = '비밀번호는 16자 이상이어야 합니다';
+		if (!password) {
+			unlockError = '비밀번호를 입력하세요';
 			return;
 		}
 
@@ -127,8 +127,8 @@
 	}
 
 	async function skipToday() {
-		if (!password || password.length < 16) {
-			unlockError = '비밀번호는 16자 이상이어야 합니다';
+		if (!password) {
+			unlockError = '비밀번호를 입력하세요';
 			return;
 		}
 
@@ -161,8 +161,8 @@
 	}
 
 	async function updateSchedule() {
-		if (!settingsPassword || settingsPassword.length < 16) {
-			settingsError = '비밀번호는 16자 이상이어야 합니다';
+		if (!settingsPassword) {
+			settingsError = '비밀번호를 입력하세요';
 			return;
 		}
 
@@ -209,13 +209,13 @@
 	}
 
 	async function changePassword() {
-		if (!currentPassword || currentPassword.length < 16) {
-			passwordError = '현재 비밀번호는 16자 이상이어야 합니다';
+		if (!currentPassword) {
+			passwordError = '현재 비밀번호를 입력하세요';
 			return;
 		}
 
-		if (!newPassword || newPassword.length < 16) {
-			passwordError = '새 비밀번호는 16자 이상이어야 합니다';
+		if (!newPassword || newPassword.length < 4) {
+			passwordError = '새 비밀번호는 4자 이상이어야 합니다';
 			return;
 		}
 
@@ -515,7 +515,7 @@
 						id="password"
 						bind:value={password}
 						class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
-						placeholder="16자 이상의 비밀번호"
+						placeholder="비밀번호 입력"
 					/>
 				</div>
 				<div>
