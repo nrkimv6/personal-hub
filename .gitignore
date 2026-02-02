@@ -24,3 +24,5 @@ data/llm_images/
 htmlcov/
 .coverage
 .coverage.*
+
+*cwd
