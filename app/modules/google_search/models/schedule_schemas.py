@@ -69,6 +69,7 @@ class ScheduleRunResponse(BaseModel):
     stop_reason: Optional[str]
     error_message: Optional[str]
     duration_seconds: Optional[int]
+    search_id: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -80,3 +81,48 @@ class ScheduleRunListResponse(BaseModel):
     page: int
     limit: int
     pages: int
+
+
+class ScheduleSearchResultItem(BaseModel):
+    """스케줄 검색 결과 항목."""
+    rank: int
+    title: str
+    url: str
+    display_url: Optional[str] = None
+    snippet: Optional[str] = None
+    publish_date: Optional[str] = None
+
+
+class ScheduleSearchHistoryItem(BaseModel):
+    """스케줄 검색 히스토리 항목 (결과 포함)."""
+    search_id: str
+    query: str
+    date_filter: Optional[str] = None
+    status: str
+    total_results: int
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+    results: List[ScheduleSearchResultItem] = Field(default_factory=list)
+
+
+class ScheduleSearchResultsResponse(BaseModel):
+    """스케줄별 검색 결과 목록 응답."""
+    schedule_id: int
+    schedule_name: Optional[str] = None
+    saved_search_name: Optional[str] = None
+    query: Optional[str] = None
+    items: List[ScheduleSearchHistoryItem]
+    total: int
+    page: int
+    limit: int
+
+
+class ScheduleRecentResultItem(BaseModel):
+    """전체 스케줄 최근 결과 요약 항목."""
+    schedule_id: int
+    schedule_name: Optional[str] = None
+    saved_search_name: Optional[str] = None
+    query: Optional[str] = None
+    enabled: bool
+    last_search: Optional[ScheduleSearchHistoryItem] = None
+    last_run_at: Optional[datetime] = None
