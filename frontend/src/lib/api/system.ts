@@ -350,6 +350,8 @@ export interface LLMRequest {
   status: string;
   requested_by?: string;
   request_source?: string;
+  provider?: string;
+  model?: string;
   requested_at?: string;
   processed_at?: string;
   result?: Record<string, unknown>;
@@ -547,6 +549,8 @@ export const llmApi = {
     prompt: string;
     requested_by?: string;
     request_source?: string;
+    provider?: string;
+    model?: string;
   }) =>
     request<LLMRequest>('/llm/requests', {
       method: 'POST',

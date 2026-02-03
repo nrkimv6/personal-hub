@@ -1341,11 +1341,24 @@ class LLMWorker:
             # - writing 관련: 도구 사용 금지 (도구 사용 시 글 작성 대신 프롬프트 분석만 함)
             enable_tools = request.caller_type in ["instagram", "universal_crawl"]
 
-            # Claude CLI 실행 (비동기 실행을 위해 run_in_executor 사용)
+            # provider/model 읽기 (기본값: claude, "")
+            provider = getattr(request, "provider", None) or "claude"
+            model = getattr(request, "model", None) or ""
+
+            # Gemini는 tools 미지원
+            if provider == "gemini":
+                enable_tools = False
+
+            # LLM 실행 (비동기 실행을 위해 run_in_executor 사용)
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(
                 None,
-                lambda: service.execute_claude(request.prompt, enable_tools=enable_tools)
+                lambda: service.execute_llm(
+                    prompt=request.prompt,
+                    provider=provider,
+                    model=model,
+                    enable_tools=enable_tools
+                )
             )
 
             if result["success"]:
