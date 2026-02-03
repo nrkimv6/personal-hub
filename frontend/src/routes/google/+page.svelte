@@ -60,6 +60,36 @@
 		error_message?: string;
 	}
 
+	interface ScheduleRecentResult {
+		schedule_id: number;
+		schedule_name?: string;
+		saved_search_name?: string;
+		query?: string;
+		enabled: boolean;
+		last_search?: {
+			search_id: string;
+			query: string;
+			date_filter?: string;
+			status: string;
+			total_results: number;
+			created_at: string;
+			completed_at?: string;
+			results: SearchResult[];
+		};
+		last_run_at?: string;
+	}
+
+	interface ScheduleSearchHistory {
+		search_id: string;
+		query: string;
+		date_filter?: string;
+		status: string;
+		total_results: number;
+		created_at: string;
+		completed_at?: string;
+		results: SearchResult[];
+	}
+
 	// API 함수
 	const API_BASE = '/api/v1/google';
 
@@ -89,7 +119,7 @@
 	let saveName = $state('');
 	let saveAsFavorite = $state(false);
 
-	let activeTab: 'saved' | 'history' = $state('saved');
+	let activeTab: 'saved' | 'history' | 'schedule-results' = $state('saved');
 
 	// 스케줄 상태
 	let schedules: Schedule[] = $state([]);
@@ -101,6 +131,12 @@
 	let showRunsModal = $state(false);
 	let scheduleRuns: ScheduleRun[] = $state([]);
 	let selectedScheduleId: number | null = $state(null);
+
+	// 스케줄 결과 상태
+	let scheduleRecentResults: ScheduleRecentResult[] = $state([]);
+	let expandedScheduleId: number | null = $state(null);
+	let scheduleSearchHistories: ScheduleSearchHistory[] = $state([]);
+	let loadingScheduleResults = $state(false);
 
 	const dateFilters = [
 		{ value: '', label: '전체 기간' },
@@ -429,6 +465,45 @@
 		return tw ? tw.start : '-';
 	}
 
+	// 스케줄 결과 기능
+	async function loadScheduleRecentResults() {
+		try {
+			scheduleRecentResults = await apiRequest<ScheduleRecentResult[]>('/schedule/recent-results');
+		} catch (e) {
+			console.error('스케줄 결과 로드 실패:', e);
+		}
+	}
+
+	async function loadScheduleSearchResults(scheduleId: number) {
+		if (expandedScheduleId === scheduleId) {
+			expandedScheduleId = null;
+			scheduleSearchHistories = [];
+			return;
+		}
+
+		loadingScheduleResults = true;
+		expandedScheduleId = scheduleId;
+
+		try {
+			const response = await apiRequest<{
+				items: ScheduleSearchHistory[];
+				total: number;
+			}>(`/schedule/${scheduleId}/search-results?limit=10`);
+			scheduleSearchHistories = response.items;
+		} catch (e) {
+			console.error('스케줄 검색 결과 로드 실패:', e);
+			scheduleSearchHistories = [];
+		} finally {
+			loadingScheduleResults = false;
+		}
+	}
+
+	function loadScheduleResultToMain(searchHistory: ScheduleSearchHistory) {
+		results = searchHistory.results;
+		query = searchHistory.query;
+		dateFilter = searchHistory.date_filter || '';
+	}
+
 	onMount(() => {
 		loadSavedSearches();
 		loadHistory();
@@ -554,6 +629,19 @@
 				>
 					최근 검색
 				</button>
+				<button
+					onclick={() => {
+						activeTab = 'schedule-results';
+						loadScheduleRecentResults();
+					}}
+					class="flex-1 border-b-2 py-2 text-sm font-medium transition-colors"
+					class:border-blue-500={activeTab === 'schedule-results'}
+					class:text-primary={activeTab === 'schedule-results'}
+					class:border-transparent={activeTab !== 'schedule-results'}
+					class:text-muted-foreground={activeTab !== 'schedule-results'}
+				>
+					스케줄 결과
+				</button>
 			</div>
 
 			<!-- 저장된 검색 목록 -->
@@ -676,6 +764,108 @@
 											{/if}
 										</div>
 									</button>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+				</div>
+			{/if}
+
+			<!-- 스케줄 결과 -->
+			{#if activeTab === 'schedule-results'}
+				<div class="rounded-lg bg-white shadow">
+					{#if scheduleRecentResults.length === 0}
+						<div class="p-4 text-sm text-muted-foreground">스케줄이 없습니다.</div>
+					{:else}
+						<ul class="divide-y">
+							{#each scheduleRecentResults as item}
+								<li>
+									<!-- 스케줄 헤더 -->
+									<button
+										onclick={() => loadScheduleSearchResults(item.schedule_id)}
+										class="w-full p-3 text-left hover:bg-muted"
+									>
+										<div class="flex items-center justify-between">
+											<div class="flex items-center gap-2">
+												<span
+													class="inline-block h-2 w-2 rounded-full"
+													class:bg-success={item.enabled}
+													class:bg-muted-foreground={!item.enabled}
+												></span>
+												<span class="text-sm font-medium">
+													{item.saved_search_name || item.schedule_name}
+												</span>
+											</div>
+											<span class="text-xs text-muted-foreground">
+												{expandedScheduleId === item.schedule_id ? '▲' : '▼'}
+											</span>
+										</div>
+										<div class="mt-1 text-xs text-muted-foreground">{item.query}</div>
+										{#if item.last_search}
+											<div class="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+												<span>{item.last_search.total_results}개 결과</span>
+												<span>· {formatDate(item.last_search.completed_at || item.last_search.created_at)}</span>
+											</div>
+										{:else if item.last_run_at}
+											<div class="mt-1 text-xs text-muted-foreground">
+												마지막 실행: {formatDate(item.last_run_at)}
+											</div>
+										{:else}
+											<div class="mt-1 text-xs text-muted-foreground">실행 기록 없음</div>
+										{/if}
+									</button>
+
+									<!-- 최근 결과 미리보기: 마지막 검색 결과 바로 표시 -->
+									{#if item.last_search && expandedScheduleId !== item.schedule_id}
+										<div class="border-t px-3 pb-2">
+											<button
+												onclick={() => loadScheduleResultToMain(item.last_search!)}
+												class="mt-1 text-xs text-primary hover:underline"
+											>
+												최근 결과 보기 ({item.last_search.total_results}개)
+											</button>
+										</div>
+									{/if}
+
+									<!-- 확장: 검색 히스토리 목록 -->
+									{#if expandedScheduleId === item.schedule_id}
+										<div class="border-t bg-gray-50">
+											{#if loadingScheduleResults}
+												<div class="p-3 text-center text-xs text-muted-foreground">
+													로딩 중...
+												</div>
+											{:else if scheduleSearchHistories.length === 0}
+												<div class="p-3 text-center text-xs text-muted-foreground">
+													검색 결과가 없습니다.
+												</div>
+											{:else}
+												<ul class="divide-y divide-gray-200">
+													{#each scheduleSearchHistories as sh}
+														<li>
+															<button
+																onclick={() => loadScheduleResultToMain(sh)}
+																class="w-full p-3 text-left hover:bg-gray-100"
+															>
+																<div class="flex items-center justify-between">
+																	<span class="text-xs font-medium">
+																		{formatDate(sh.completed_at || sh.created_at)}
+																	</span>
+																	<span class="text-xs text-muted-foreground">
+																		{sh.total_results}개
+																	</span>
+																</div>
+																{#if sh.date_filter}
+																	<span class="text-xs text-muted-foreground">
+																		{dateFilters.find((f) => f.value === sh.date_filter)?.label}
+																	</span>
+																{/if}
+															</button>
+														</li>
+													{/each}
+												</ul>
+											{/if}
+										</div>
+									{/if}
 								</li>
 							{/each}
 						</ul>

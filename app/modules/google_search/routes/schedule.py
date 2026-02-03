@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.task_schedule import TaskSchedule, TaskScheduleRun
-from app.models.google_search import GoogleSavedSearch
+from app.models.google_search import GoogleSavedSearch, GoogleSearchQueue, GoogleSearchHistory, GoogleSearchResult
 from app.services.task_schedule_service import TaskScheduleService
 from app.modules.google_search.models.schedule_schemas import (
     GoogleSearchScheduleCreate,
@@ -18,6 +18,10 @@ from app.modules.google_search.models.schedule_schemas import (
     GoogleSearchScheduleResponse,
     ScheduleRunResponse,
     ScheduleRunListResponse,
+    ScheduleSearchResultItem,
+    ScheduleSearchHistoryItem,
+    ScheduleSearchResultsResponse,
+    ScheduleRecentResultItem,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,7 +55,7 @@ def _schedule_to_response(
     )
 
 
-def _run_to_response(run: TaskScheduleRun) -> ScheduleRunResponse:
+def _run_to_response(run: TaskScheduleRun, search_id: Optional[str] = None) -> ScheduleRunResponse:
     """TaskScheduleRun을 응답 스키마로 변환."""
     return ScheduleRunResponse(
         id=run.id,
@@ -64,6 +68,7 @@ def _run_to_response(run: TaskScheduleRun) -> ScheduleRunResponse:
         stop_reason=run.stop_reason,
         error_message=run.error_message,
         duration_seconds=run.duration_seconds,
+        search_id=search_id,
     )
 
 
@@ -134,6 +139,91 @@ async def list_google_search_schedules(
             saved_search = db.query(GoogleSavedSearch).filter_by(id=schedule_saved_search_id).first()
 
         result.append(_schedule_to_response(schedule, saved_search))
+
+    return result
+
+
+@router.get("/recent-results", response_model=List[ScheduleRecentResultItem])
+async def get_recent_schedule_results(
+    db: Session = Depends(get_db)
+):
+    """전체 Google 검색 스케줄의 최근 검색 결과 요약.
+
+    각 스케줄별로 마지막 검색 결과를 포함하여 반환합니다.
+    """
+    schedules = (
+        db.query(TaskSchedule)
+        .filter(TaskSchedule.target_type == TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH)
+        .order_by(TaskSchedule.last_run_at.desc().nullslast())
+        .all()
+    )
+
+    result = []
+    for schedule in schedules:
+        config = schedule.get_target_config()
+        saved_search_id = config.get("saved_search_id")
+
+        saved_search = None
+        if saved_search_id:
+            saved_search = db.query(GoogleSavedSearch).filter_by(id=saved_search_id).first()
+
+        # 가장 최근 완료된 검색 큐 항목
+        queue_filter = [GoogleSearchQueue.status == "completed"]
+        if saved_search_id:
+            queue_filter.append(
+                (GoogleSearchQueue.schedule_id == schedule.id) |
+                (GoogleSearchQueue.saved_search_id == saved_search_id)
+            )
+        else:
+            queue_filter.append(GoogleSearchQueue.schedule_id == schedule.id)
+
+        latest_queue = (
+            db.query(GoogleSearchQueue)
+            .filter(*queue_filter)
+            .order_by(GoogleSearchQueue.completed_at.desc())
+            .first()
+        )
+
+        last_search = None
+        if latest_queue:
+            history = db.query(GoogleSearchHistory).filter_by(search_id=latest_queue.search_id).first()
+            if history:
+                db_results = (
+                    db.query(GoogleSearchResult)
+                    .filter_by(search_id=latest_queue.search_id)
+                    .order_by(GoogleSearchResult.rank)
+                    .all()
+                )
+                last_search = ScheduleSearchHistoryItem(
+                    search_id=latest_queue.search_id,
+                    query=history.query,
+                    date_filter=history.date_filter,
+                    status=history.status,
+                    total_results=history.total_results,
+                    created_at=history.created_at,
+                    completed_at=history.completed_at,
+                    results=[
+                        ScheduleSearchResultItem(
+                            rank=r.rank,
+                            title=r.title,
+                            url=r.url,
+                            display_url=r.display_url,
+                            snippet=r.snippet,
+                            publish_date=r.publish_date,
+                        )
+                        for r in db_results
+                    ],
+                )
+
+        result.append(ScheduleRecentResultItem(
+            schedule_id=schedule.id,
+            schedule_name=schedule.display_name or schedule.name,
+            saved_search_name=saved_search.name if saved_search else None,
+            query=saved_search.query if saved_search else None,
+            enabled=schedule.enabled,
+            last_search=last_search,
+            last_run_at=schedule.last_run_at,
+        ))
 
     return result
 
@@ -303,3 +393,103 @@ async def get_schedule_stats(
     stats = schedule_service.get_run_stats(schedule_id=schedule_id, days=days)
 
     return stats
+
+
+@router.get("/{schedule_id}/search-results", response_model=ScheduleSearchResultsResponse)
+async def get_schedule_search_results(
+    schedule_id: int,
+    page: int = Query(1, ge=1, description="페이지 번호"),
+    limit: int = Query(10, ge=1, le=50, description="페이지 크기"),
+    include_results: bool = Query(True, description="검색 결과 포함 여부"),
+    db: Session = Depends(get_db)
+):
+    """특정 스케줄의 검색 결과 히스토리 조회.
+
+    스케줄에 연결된 저장된 검색의 모든 검색 히스토리와 결과를 반환합니다.
+    """
+    schedule = db.query(TaskSchedule).filter_by(id=schedule_id).first()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="스케줄을 찾을 수 없습니다")
+
+    if schedule.target_type != TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH:
+        raise HTTPException(status_code=400, detail="Google 검색 스케줄이 아닙니다")
+
+    config = schedule.get_target_config()
+    saved_search_id = config.get("saved_search_id")
+
+    saved_search = None
+    if saved_search_id:
+        saved_search = db.query(GoogleSavedSearch).filter_by(id=saved_search_id).first()
+
+    # GoogleSearchQueue에서 이 스케줄/저장된 검색과 연결된 검색 히스토리 조회
+    queue_query = db.query(GoogleSearchQueue).filter(
+        GoogleSearchQueue.status == "completed"
+    )
+
+    # schedule_id가 설정된 항목 우선, 없으면 saved_search_id로 조회
+    if saved_search_id:
+        queue_query = queue_query.filter(
+            (GoogleSearchQueue.schedule_id == schedule_id) |
+            (GoogleSearchQueue.saved_search_id == saved_search_id)
+        )
+    else:
+        queue_query = queue_query.filter(GoogleSearchQueue.schedule_id == schedule_id)
+
+    total = queue_query.count()
+    queue_items = (
+        queue_query
+        .order_by(GoogleSearchQueue.completed_at.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
+
+    items = []
+    for qi in queue_items:
+        history = db.query(GoogleSearchHistory).filter_by(search_id=qi.search_id).first()
+        if not history:
+            continue
+
+        results = []
+        if include_results:
+            db_results = (
+                db.query(GoogleSearchResult)
+                .filter_by(search_id=qi.search_id)
+                .order_by(GoogleSearchResult.rank)
+                .all()
+            )
+            results = [
+                ScheduleSearchResultItem(
+                    rank=r.rank,
+                    title=r.title,
+                    url=r.url,
+                    display_url=r.display_url,
+                    snippet=r.snippet,
+                    publish_date=r.publish_date,
+                )
+                for r in db_results
+            ]
+
+        items.append(ScheduleSearchHistoryItem(
+            search_id=qi.search_id,
+            query=history.query,
+            date_filter=history.date_filter,
+            status=history.status,
+            total_results=history.total_results,
+            created_at=history.created_at,
+            completed_at=history.completed_at,
+            results=results,
+        ))
+
+    return ScheduleSearchResultsResponse(
+        schedule_id=schedule_id,
+        schedule_name=schedule.display_name or schedule.name,
+        saved_search_name=saved_search.name if saved_search else None,
+        query=saved_search.query if saved_search else None,
+        items=items,
+        total=total,
+        page=page,
+        limit=limit,
+    )
+
+
