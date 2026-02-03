@@ -532,6 +532,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                 max_pages=saved_search.max_pages or 1,
                 service_account_id=saved_search.service_account_id,
                 saved_search_id=saved_search_id,
+                schedule_id=schedule.id,
                 status="pending"
             )
             db.add(queue_item)
