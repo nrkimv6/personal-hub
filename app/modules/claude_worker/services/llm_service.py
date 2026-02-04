@@ -333,7 +333,7 @@ class LLMService:
                 "error": str(e),
             }
 
-    def execute_gemini(self, prompt: str, model: str = "", timeout: int = 120, parse_json: bool = True) -> dict:
+    def execute_gemini(self, prompt: str, model: str = "", timeout: int = 120, parse_json: bool = True, enable_tools: bool = False) -> dict:
         """Gemini CLI 실행 (동기).
 
         Args:
@@ -341,6 +341,7 @@ class LLMService:
             model: 모델명 (빈 문자열이면 기본 모델 사용)
             timeout: 타임아웃 (초)
             parse_json: True면 JSON 파싱 시도, False면 raw_response만 반환
+            enable_tools: True면 파일 도구 활성화 (Gemini는 built-in으로 지원)
 
         Returns:
             {"success": True, "result": {...}, "raw_response": "..."}
@@ -377,7 +378,8 @@ class LLMService:
 
             try:
                 # 파일에서 프롬프트 읽어서 실행
-                # Gemini는 tools 옵션을 지원하지 않으므로 model만 지정
+                # Gemini는 built-in으로 file system tools를 지원함
+                # enable_tools는 현재 무시 (기본적으로 활성화되어 있음)
                 if model:
                     model_opt = f'--model {model}'
                 else:
@@ -481,7 +483,7 @@ class LLMService:
             model: 모델명 (빈 문자열이면 기본 모델 사용)
             timeout: 타임아웃 (초)
             parse_json: True면 JSON 파싱 시도, False면 raw_response만 반환
-            enable_tools: True면 도구 활성화 (Claude만 지원)
+            enable_tools: True면 도구 활성화 (Claude, Gemini 모두 지원)
 
         Returns:
             {"success": True, "result": {...}, "raw_response": "..."}
@@ -489,8 +491,8 @@ class LLMService:
             {"success": False, "error": "..."}
         """
         if provider == "gemini":
-            # Gemini는 tools를 지원하지 않음
-            return self.execute_gemini(prompt, model, timeout, parse_json)
+            # Gemini도 built-in file system tools 지원
+            return self.execute_gemini(prompt, model, timeout, parse_json, enable_tools)
         else:
             # 기본값은 Claude
             return self.execute_claude(prompt, model, timeout, parse_json, enable_tools)

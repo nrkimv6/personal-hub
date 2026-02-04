@@ -1345,10 +1345,6 @@ class LLMWorker:
             provider = getattr(request, "provider", None) or "claude"
             model = getattr(request, "model", None) or ""
 
-            # Gemini는 tools 미지원
-            if provider == "gemini":
-                enable_tools = False
-
             # LLM 실행 (비동기 실행을 위해 run_in_executor 사용)
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(
