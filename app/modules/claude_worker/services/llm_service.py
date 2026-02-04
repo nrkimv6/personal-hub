@@ -37,6 +37,8 @@ class LLMService:
         prompt: str,
         requested_by: str = "unknown",
         request_source: str = None,
+        provider: str = "claude",
+        model: str = "",
     ) -> LLMRequest:
         """요청을 큐에 추가 (non-blocking).
 
@@ -46,6 +48,8 @@ class LLMService:
             prompt: LLM에 전달할 프롬프트
             requested_by: 요청자 (예: 'api', 'scheduler', 'manual')
             request_source: 요청 출처 (예: 'instagram_crawl', 'manual_test')
+            provider: LLM Provider ('claude' 또는 'gemini')
+            model: 모델명 (빈 문자열이면 기본 모델 사용)
 
         Returns:
             생성된 LLMRequest
@@ -73,6 +77,8 @@ class LLMService:
             status="pending",
             requested_by=requested_by,
             request_source=request_source,
+            provider=provider,
+            model=model,
         )
         self.db.add(request)
         self.db.commit()
@@ -186,11 +192,12 @@ class LLMService:
 
     # ========== Claude 실행 ==========
 
-    def execute_claude(self, prompt: str, timeout: int = 120, parse_json: bool = True, enable_tools: bool = False) -> dict:
+    def execute_claude(self, prompt: str, model: str = "", timeout: int = 120, parse_json: bool = True, enable_tools: bool = False) -> dict:
         """Claude CLI 실행 (동기).
 
         Args:
             prompt: LLM 프롬프트
+            model: 모델명 (빈 문자열이면 기본 모델 사용)
             timeout: 타임아웃 (초)
             parse_json: True면 JSON 파싱 시도, False면 raw_response만 반환
             enable_tools: True면 Read 도구 활성화 (이미지 분석 등), False면 도구 없이 실행
@@ -239,9 +246,15 @@ class LLMService:
                 else:
                     tools_opt = ''
 
+                # model 옵션 추가
+                if model:
+                    model_opt = f'--model {model}'
+                else:
+                    model_opt = ''
+
                 if sys.platform == "win32":
                     # Windows: shell=True 필요
-                    cmd = f'type "{prompt_file}" | claude {tools_opt}'
+                    cmd = f'type "{prompt_file}" | claude {tools_opt} {model_opt}'
                     result = subprocess.run(
                         cmd,
                         capture_output=True,
@@ -253,7 +266,7 @@ class LLMService:
                     )
                 else:
                     # Unix: cat으로 파이프
-                    cmd = f'cat "{prompt_file}" | claude {tools_opt}'
+                    cmd = f'cat "{prompt_file}" | claude {tools_opt} {model_opt}'
                     result = subprocess.run(
                         cmd,
                         capture_output=True,
@@ -319,6 +332,170 @@ class LLMService:
                 "success": False,
                 "error": str(e),
             }
+
+    def execute_gemini(self, prompt: str, model: str = "", timeout: int = 120, parse_json: bool = True, enable_tools: bool = False) -> dict:
+        """Gemini CLI 실행 (동기).
+
+        Args:
+            prompt: LLM 프롬프트
+            model: 모델명 (빈 문자열이면 기본 모델 사용)
+            timeout: 타임아웃 (초)
+            parse_json: True면 JSON 파싱 시도, False면 raw_response만 반환
+            enable_tools: True면 파일 도구 활성화 (Gemini는 built-in으로 지원)
+
+        Returns:
+            {"success": True, "result": {...}, "raw_response": "..."}
+            또는
+            {"success": False, "error": "..."}
+        """
+        try:
+            import sys
+            import tempfile
+            import os
+
+            # 프롬프트를 임시 파일에 저장하여 전달 (긴 프롬프트 및 특수문자 처리)
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", delete=False, encoding="utf-8"
+            ) as f:
+                f.write(prompt)
+                prompt_file = f.name
+
+            # PATH에 npm bin 경로 추가 (Windows)
+            env = os.environ.copy()
+            if sys.platform == "win32":
+                npm_path = os.path.expanduser("~/AppData/Roaming/npm")
+                if npm_path not in env.get("PATH", ""):
+                    env["PATH"] = npm_path + ";" + env.get("PATH", "")
+
+                # HOME/USERPROFILE 환경 변수 확인 및 설정
+                userprofile = env.get("USERPROFILE", "")
+                home = env.get("HOME", "")
+                if not home and userprofile:
+                    env["HOME"] = userprofile
+                    logger.debug(f"HOME 환경변수 설정: {userprofile}")
+
+                logger.debug(f"Gemini CLI 실행 환경: HOME={env.get('HOME')}, USERPROFILE={env.get('USERPROFILE')}")
+
+            try:
+                # 파일에서 프롬프트 읽어서 실행
+                # Gemini는 built-in으로 file system tools를 지원함
+                # enable_tools는 현재 무시 (기본적으로 활성화되어 있음)
+                if model:
+                    model_opt = f'--model {model}'
+                else:
+                    model_opt = ''
+
+                if sys.platform == "win32":
+                    # Windows: shell=True 필요
+                    cmd = f'type "{prompt_file}" | gemini {model_opt}'
+                    result = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                        encoding="utf-8",
+                        shell=True,
+                        env=env,
+                    )
+                else:
+                    # Unix: cat으로 파이프
+                    cmd = f'cat "{prompt_file}" | gemini {model_opt}'
+                    result = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                        encoding="utf-8",
+                        shell=True,
+                        env=env,
+                    )
+            finally:
+                # 임시 파일 삭제
+                os.unlink(prompt_file)
+
+            if result.returncode != 0:
+                # stderr가 비어있을 수 있으므로 stdout도 확인
+                error_details = result.stderr.strip() if result.stderr else ""
+                if not error_details and result.stdout:
+                    error_details = result.stdout.strip()[:500]  # stdout에서 에러 메시지 추출
+                if not error_details:
+                    error_details = f"returncode={result.returncode}"
+                return {
+                    "success": False,
+                    "error": f"Gemini CLI error: {error_details}",
+                }
+
+            raw_response = result.stdout.strip()
+
+            # JSON 파싱 (선택적)
+            if parse_json:
+                try:
+                    parsed = self._parse_json_response(raw_response)
+                    return {
+                        "success": True,
+                        "result": parsed,
+                        "raw_response": raw_response,
+                    }
+                except ValueError as e:
+                    return {
+                        "success": False,
+                        "error": f"JSON 파싱 실패: {e}",
+                        "raw_response": raw_response,
+                    }
+            else:
+                # JSON 파싱 없이 raw_response만 반환
+                return {
+                    "success": True,
+                    "result": None,
+                    "raw_response": raw_response,
+                }
+
+        except subprocess.TimeoutExpired:
+            return {
+                "success": False,
+                "error": f"Timeout ({timeout}s)",
+            }
+        except FileNotFoundError:
+            return {
+                "success": False,
+                "error": "Gemini CLI not found. Install with: npm install -g @google/generative-ai-cli",
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+            }
+
+    def execute_llm(
+        self,
+        prompt: str,
+        provider: str = "claude",
+        model: str = "",
+        timeout: int = 120,
+        parse_json: bool = True,
+        enable_tools: bool = False
+    ) -> dict:
+        """LLM 통합 실행 메서드.
+
+        Args:
+            prompt: LLM 프롬프트
+            provider: Provider ('claude' 또는 'gemini')
+            model: 모델명 (빈 문자열이면 기본 모델 사용)
+            timeout: 타임아웃 (초)
+            parse_json: True면 JSON 파싱 시도, False면 raw_response만 반환
+            enable_tools: True면 도구 활성화 (Claude, Gemini 모두 지원)
+
+        Returns:
+            {"success": True, "result": {...}, "raw_response": "..."}
+            또는
+            {"success": False, "error": "..."}
+        """
+        if provider == "gemini":
+            # Gemini도 built-in file system tools 지원
+            return self.execute_gemini(prompt, model, timeout, parse_json, enable_tools)
+        else:
+            # 기본값은 Claude
+            return self.execute_claude(prompt, model, timeout, parse_json, enable_tools)
 
     def _parse_json_response(self, text: str) -> dict:
         """Claude 응답에서 JSON 추출.

@@ -35,6 +35,8 @@ class LLMRequest(Base):
     # 요청자 정보
     requested_by = Column(String(100), default="unknown")  # 'api', 'scheduler', 'manual', 'user:xxx'
     request_source = Column(String(100))  # 'instagram_crawl', 'manual_test', etc.
+    provider = Column(String(20), default="claude")  # 'claude', 'gemini', etc.
+    model = Column(String(100), default="")  # 모델명, 빈 문자열이면 Provider 기본 모델 사용
 
     # 처리 상태
     status = Column(

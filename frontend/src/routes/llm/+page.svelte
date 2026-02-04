@@ -70,11 +70,24 @@
 		caller_id: '',
 		prompt: '',
 		requested_by: 'manual',
-		request_source: 'manual_test'
+		request_source: 'manual_test',
+		provider: 'claude',
+		model: ''
 	};
 	let createLoading = false;
 	let createError: string | null = null;
 	let createSuccess = false;
+
+	// Provider별 모델 목록
+	const providerModels: Record<string, string[]> = {
+		claude: ['(기본)', 'claude-sonnet-4-20250514', 'claude-opus-4-20250514'],
+		gemini: ['(기본)', 'gemini-2.5-pro', 'gemini-2.5-flash']
+	};
+
+	// Provider 변경 시 model 초기화
+	$: if (createForm.provider) {
+		createForm.model = '';
+	}
 
 	// 탭별 status 필터
 	function getStatusFilter(): string | undefined {
@@ -375,14 +388,21 @@
 		createSuccess = false;
 
 		try {
-			await llmApi.create(createForm);
+			// model이 "(기본)"이면 빈 문자열로 변환
+			const requestData = {
+				...createForm,
+				model: createForm.model === '(기본)' ? '' : createForm.model
+			};
+			await llmApi.create(requestData);
 			createSuccess = true;
 			createForm = {
 				caller_type: 'test',
 				caller_id: '',
 				prompt: '',
 				requested_by: 'manual',
-				request_source: 'manual_test'
+				request_source: 'manual_test',
+				provider: 'claude',
+				model: ''
 			};
 			// 대기열 탭으로 전환
 			setTimeout(() => {
@@ -777,6 +797,7 @@
 							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">타입</th>
 							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">호출자 ID</th>
 							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">요청자</th>
+							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">Provider</th>
 							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">상태</th>
 							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">요청시간</th>
 							<th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase whitespace-nowrap">액션</th>
@@ -800,6 +821,9 @@
 								<td class="px-4 py-3 text-sm text-muted-foreground">{request.caller_type}</td>
 								<td class="px-4 py-3 text-sm text-muted-foreground">{request.caller_id}</td>
 								<td class="px-4 py-3 text-sm text-muted-foreground">{request.requested_by || '-'}</td>
+								<td class="px-4 py-3 text-sm text-muted-foreground">
+									{request.provider ? (request.provider === 'claude' ? 'Claude' : 'Gemini') : 'Claude'}
+								</td>
 								<td class="px-4 py-3">
 									<span class="px-2 py-1 text-xs rounded-full {getStatusColor(request.status)}">
 										{getStatusLabel(request.status)}
@@ -927,6 +951,26 @@
 						/>
 					</div>
 
+					<div class="grid grid-cols-2 gap-4">
+						<div>
+							<label class="block text-sm font-medium text-foreground mb-1">Provider</label>
+							<select bind:value={createForm.provider} class="w-full px-3 py-2 border border-border rounded-lg">
+								<option value="claude">Claude</option>
+								<option value="gemini">Gemini</option>
+							</select>
+						</div>
+						<div>
+							<label class="block text-sm font-medium text-foreground mb-1">Model</label>
+							<select bind:value={createForm.model} class="w-full px-3 py-2 border border-border rounded-lg">
+								{#each providerModels[createForm.provider] as modelOption}
+									<option value={modelOption === '(기본)' ? '' : modelOption}>
+										{modelOption}
+									</option>
+								{/each}
+							</select>
+						</div>
+					</div>
+
 					<div>
 						<label class="block text-sm font-medium text-foreground mb-1">프롬프트 *</label>
 						<textarea
@@ -1015,6 +1059,14 @@
 					<div>
 						<span class="text-muted-foreground">출처:</span>
 						<span class="ml-1">{selectedRequest.request_source || '-'}</span>
+					</div>
+					<div>
+						<span class="text-muted-foreground">Provider:</span>
+						<span class="ml-1">{selectedRequest.provider || 'claude'}</span>
+					</div>
+					<div>
+						<span class="text-muted-foreground">Model:</span>
+						<span class="ml-1">{selectedRequest.model || '(기본)'}</span>
 					</div>
 					<div>
 						<span class="text-muted-foreground">요청 시간:</span>

@@ -25,6 +25,8 @@ class LLMRequestCreate(BaseModel):
     prompt: str
     requested_by: str = "api"
     request_source: Optional[str] = None
+    provider: str = "claude"
+    model: str = ""
 
 
 class LLMRequestResponse(BaseModel):
@@ -34,6 +36,8 @@ class LLMRequestResponse(BaseModel):
     status: str
     requested_by: Optional[str] = None
     request_source: Optional[str] = None
+    provider: str = "claude"
+    model: str = ""
     requested_at: Optional[datetime] = None
     processed_at: Optional[datetime] = None
     result: Optional[dict] = None
@@ -100,6 +104,8 @@ def _to_response(request) -> LLMRequestResponse:
         status=request.status,
         requested_by=request.requested_by,
         request_source=request.request_source,
+        provider=getattr(request, "provider", "claude"),
+        model=getattr(request, "model", ""),
         requested_at=request.requested_at,
         processed_at=request.processed_at,
         result=result,
@@ -151,6 +157,8 @@ def create_request(
         data.prompt,
         requested_by=data.requested_by,
         request_source=data.request_source,
+        provider=data.provider,
+        model=data.model,
     )
     return _to_response(request)
 
