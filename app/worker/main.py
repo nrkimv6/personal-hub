@@ -59,6 +59,7 @@ try:
     from app.worker.ondemand_worker import OnDemandCrawlWorker
     from app.worker.google_search_worker import GoogleSearchWorker
     from app.worker.activity_worker import ActivityWorker
+    from app.worker.mobile_crawl_worker import MobileCrawlWorker
 
     # 크롤러 및 워커 관련 로거들이 워커 로거와 같은 핸들러를 사용하도록 설정
     worker_handlers = logger.handlers
@@ -119,6 +120,7 @@ async def run_with_orchestrator(
     run_ondemand: bool = True,
     run_google: bool = True,
     run_activity: bool = True,
+    run_mobile: bool = True,
 ):
     """WorkerOrchestrator를 사용하여 워커들을 실행합니다.
 
@@ -179,6 +181,13 @@ async def run_with_orchestrator(
             orchestrator.register_worker("activity", activity_worker)
             logger.info("ActivityWorker 등록됨")
 
+        if run_mobile:
+            mobile_worker = MobileCrawlWorker(
+                browser_manager=None  # 모바일 서버가 브라우저 관리
+            )
+            orchestrator.register_worker("mobile_crawl", mobile_worker)
+            logger.info("MobileCrawlWorker 등록됨")
+
         if not orchestrator.workers:
             logger.error("실행할 워커가 없습니다.")
             return
@@ -208,7 +217,8 @@ async def main(args):
         f"scheduled={args.scheduled or args.crawl or args.all}, "
         f"ondemand={args.ondemand or args.crawl or args.all}, "
         f"google={args.google or args.all}, "
-        f"activity={args.activity or args.all}"
+        f"activity={args.activity or args.all}, "
+        f"mobile={args.mobile or args.all}"
     )
     logger.info("=" * 50)
 
@@ -219,6 +229,7 @@ async def main(args):
             run_ondemand=args.ondemand or args.crawl or args.all,
             run_google=args.google or args.all,
             run_activity=args.activity or args.all,
+            run_mobile=args.mobile or args.all,
         )
     except Exception as e:
         logger.critical(f"워커 치명적 오류: {e}", exc_info=True)
@@ -262,6 +273,11 @@ def parse_args():
         help="Activity 워커만 실행 (문화/체육센터 강좌)",
     )
     parser.add_argument(
+        "--mobile",
+        action="store_true",
+        help="Mobile 크롤링 워커만 실행",
+    )
+    parser.add_argument(
         "--all",
         action="store_true",
         default=True,
@@ -271,7 +287,7 @@ def parse_args():
     args = parser.parse_args()
 
     # 개별 옵션이 지정되면 --all은 False
-    if args.naver or args.scheduled or args.ondemand or args.google or args.crawl or args.activity:
+    if args.naver or args.scheduled or args.ondemand or args.google or args.crawl or args.activity or args.mobile:
         args.all = False
 
     return args

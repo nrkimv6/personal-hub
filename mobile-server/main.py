@@ -69,7 +69,10 @@ app.add_middleware(
 
 # 라우터 등록
 from routes import fetch_router
+from routes.crawl import router as crawl_router
+
 app.include_router(fetch_router)
+app.include_router(crawl_router, prefix="/api")
 
 
 @app.get("/")

@@ -86,6 +86,9 @@
 					<button class="btn btn-primary" onclick={executeTarget}>
 						즉시 실행
 					</button>
+					<button class="btn btn-secondary" onclick={() => goto(`/mobile/targets/${targetId}/schedule`)}>
+						스케줄 관리
+					</button>
 					<button class="btn btn-ghost" onclick={() => goto(`/mobile/targets/${targetId}/edit`)}>
 						수정
 					</button>
