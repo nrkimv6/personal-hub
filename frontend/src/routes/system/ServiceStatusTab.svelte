@@ -88,19 +88,6 @@
 
   // === 관리 기능 ===
 
-  async function restartService(name: string) {
-    if (!confirm(`서비스 "${name}"을(를) 재시작하시겠습니까?`)) return;
-    actionLoading = `nssm-restart-${name}`;
-    try {
-      await serviceDashboardApi.restartNssm(name);
-      await fetchStatus();
-    } catch (e) {
-      alert(`재시작 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
-    } finally {
-      actionLoading = null;
-    }
-  }
-
   async function stopService(name: string) {
     if (!confirm(`서비스 "${name}"을(를) 중지하시겠습니까?`)) return;
     actionLoading = `nssm-stop-${name}`;
@@ -333,12 +320,6 @@
                           disabled={selfRestartState !== 'idle' || actionLoading?.startsWith(`nssm-`)}
                           onclick={selfRestartApi}>
                           {selfRestartState !== 'idle' ? 'Graceful...' : 'Graceful 재시작'}
-                        </button>
-                        <button
-                          class="px-2 py-1 text-xs bg-primary text-white rounded hover:bg-primary-hover disabled:opacity-50"
-                          disabled={actionLoading?.startsWith(`nssm-`) || selfRestartState !== 'idle'}
-                          onclick={() => restartService(svc.name)}>
-                          NSSM 재시작
                         </button>
                         <button
                           class="px-2 py-1 text-xs bg-warning text-white rounded hover:bg-warning/90 disabled:opacity-50"
