@@ -32,6 +32,7 @@ class CrawlOptions:
     date_filter: Optional[str] = None  # 1h, 24h, 1w, 1m, 1y
     min_delay: float = 2.0      # 최소 대기 시간 (초)
     max_delay: float = 5.0      # 최대 대기 시간 (초)
+    search_params: Optional[Dict[str, Any]] = None  # 추가 파라미터 (lr, cr, as_sitesearch, num)
 
 
 @dataclass
@@ -117,7 +118,7 @@ class GoogleSearchCrawler:
                 start = page_num * 10
 
                 # URL 생성 및 페이지 이동
-                url = self._build_url(query, start, tbs)
+                url = self._build_url(query, start, tbs, options.search_params)
                 logger.debug(f"Navigating to page {page_num + 1}: {url}")
 
                 await self.page.goto(url, wait_until="domcontentloaded")
@@ -210,7 +211,8 @@ class GoogleSearchCrawler:
         self,
         query: str,
         start: int = 0,
-        tbs: Optional[str] = None
+        tbs: Optional[str] = None,
+        search_params: Optional[Dict[str, Any]] = None,
     ) -> str:
         """검색 URL 생성.
 
@@ -218,10 +220,13 @@ class GoogleSearchCrawler:
             query: 검색 키워드
             start: 시작 위치 (0, 10, 20, ...)
             tbs: 날짜 필터 (qdr:h, qdr:d, qdr:w, qdr:m, qdr:y)
+            search_params: 추가 파라미터 (lr, cr, as_sitesearch, num)
 
         Returns:
             Google 검색 URL
         """
+        from app.modules.google_search.utils.selectors import ALLOWED_SEARCH_PARAMS
+
         # hl=ko로 한국어 결과 요청
         url = f"https://www.google.com/search?q={quote(query)}&hl=ko"
 
@@ -230,6 +235,12 @@ class GoogleSearchCrawler:
 
         if tbs:
             url += f"&tbs={tbs}"
+
+        # 추가 검색 파라미터 (허용 키만)
+        if search_params:
+            for key, value in search_params.items():
+                if key in ALLOWED_SEARCH_PARAMS and value:
+                    url += f"&{quote(str(key))}={quote(str(value))}"
 
         return url
 

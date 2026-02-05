@@ -225,9 +225,19 @@ class GoogleSearchWorker(BaseWorker):
             try:
                 # 크롤러 생성 및 검색 실행
                 crawler = GoogleSearchCrawler(page, db)
+                # search_params JSON 역직렬화
+                search_params = None
+                if queue_item.search_params:
+                    try:
+                        import json
+                        search_params = json.loads(queue_item.search_params)
+                    except (json.JSONDecodeError, TypeError):
+                        search_params = None
+
                 options = CrawlOptions(
                     max_pages=queue_item.max_pages or 1,
                     date_filter=queue_item.date_filter,
+                    search_params=search_params,
                 )
 
                 # 기존 검색 실행 (히스토리, 결과 저장은 크롤러 내부에서 처리)
@@ -322,7 +332,7 @@ class GoogleSearchWorker(BaseWorker):
             start = page_num * 10
 
             # URL 생성 및 페이지 이동
-            url = crawler._build_url(query, start, tbs)
+            url = crawler._build_url(query, start, tbs, options.search_params)
 
             await crawler.page.goto(url, wait_until="domcontentloaded")
             await asyncio.sleep(1.5)

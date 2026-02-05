@@ -12,6 +12,7 @@ Redis 큐 지원:
     - Redis 미연결 시: SQLite 폴링 (status=pending)
 """
 
+import json
 import logging
 import uuid
 from datetime import datetime
@@ -73,12 +74,18 @@ async def search(
     search_id = str(uuid.uuid4())
 
     # DB에 큐 아이템 저장
+    # search_params JSON 직렬화
+    search_params_json = None
+    if request.search_params:
+        search_params_json = json.dumps(request.search_params)
+
     queue_item = GoogleSearchQueue(
         search_id=search_id,
         query=request.query,
         date_filter=request.date_filter,
         max_pages=min(request.max_pages, 10),
         service_account_id=request.service_account_id,
+        search_params=search_params_json,
         status=GoogleSearchQueue.STATUS_QUEUED,  # 일단 queued로 설정
     )
     db.add(queue_item)
@@ -336,6 +343,11 @@ async def create_saved_search(
     Returns:
         SavedSearchResponse: 저장된 검색 조건
     """
+    # search_params JSON 직렬화
+    search_params_json = None
+    if data.search_params:
+        search_params_json = json.dumps(data.search_params)
+
     saved = GoogleSavedSearch(
         name=data.name,
         query=data.query,
@@ -343,6 +355,7 @@ async def create_saved_search(
         max_pages=data.max_pages,
         service_account_id=data.service_account_id,
         is_favorite=data.is_favorite,
+        search_params=search_params_json,
     )
     db.add(saved)
     db.commit()
@@ -394,6 +407,8 @@ async def update_saved_search(
     # 부분 업데이트
     update_data = data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
+        if field == "search_params" and value is not None:
+            value = json.dumps(value)
         setattr(saved, field, value)
 
     saved.updated_at = datetime.now()
@@ -456,6 +471,7 @@ async def run_saved_search(
         date_filter=saved.date_filter,
         max_pages=saved.max_pages,
         service_account_id=saved.service_account_id,
+        search_params=saved.search_params,
         saved_search_id=saved_id,
         status=GoogleSearchQueue.STATUS_QUEUED,
     )
@@ -508,6 +524,14 @@ async def toggle_favorite(
 
 def _saved_to_response(saved: GoogleSavedSearch) -> SavedSearchResponse:
     """SQLAlchemy 모델을 Pydantic 응답으로 변환."""
+    # search_params JSON 역직렬화
+    search_params = None
+    if saved.search_params:
+        try:
+            search_params = json.loads(saved.search_params)
+        except (json.JSONDecodeError, TypeError):
+            search_params = None
+
     return SavedSearchResponse(
         id=saved.id,
         name=saved.name,
@@ -516,6 +540,7 @@ def _saved_to_response(saved: GoogleSavedSearch) -> SavedSearchResponse:
         max_pages=saved.max_pages,
         service_account_id=saved.service_account_id,
         is_favorite=saved.is_favorite,
+        search_params=search_params,
         last_search_id=saved.last_search_id,
         last_run_at=saved.last_run_at,
         last_result_count=saved.last_result_count,
