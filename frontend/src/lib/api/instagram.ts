@@ -531,6 +531,32 @@ export const collectApi = {
       { method: 'DELETE' }
     ),
 
+  // 스케줄 상세 조회
+  getScheduleDetail: (scheduleId: number) =>
+    request<CrawlSchedule & {
+      target_config?: Record<string, unknown>;
+      schedule_value?: Record<string, unknown>;
+      saved_search?: {
+        id: number;
+        name: string;
+        query: string;
+        date_filter: string | null;
+        max_pages: number;
+        search_params: Record<string, unknown> | null;
+      };
+    }>(`/collect/schedules/${scheduleId}`),
+
+  // 스케줄 수정
+  updateSchedule: (scheduleId: number, data: {
+    display_name?: string;
+    schedule_value?: Record<string, unknown>;
+    google_search_params?: Record<string, unknown>;
+  }) =>
+    request<CrawlSchedule>(`/collect/schedules/${scheduleId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
   // Google 저장된 검색 목록 조회
   getSavedSearches: () =>
     request<{ id: number; name: string; query: string; is_favorite: boolean }[]>('/google/saved'),
