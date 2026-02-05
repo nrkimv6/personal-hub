@@ -32,6 +32,32 @@ DATE_FILTER_LABELS = {
     "1y": "최근 1년",
 }
 
+# 언어 옵션 (Google lr 파라미터)
+LANGUAGE_OPTIONS = {
+    "lang_ko": "한국어",
+    "lang_en": "영어",
+    "lang_ja": "일본어",
+    "lang_zh-CN": "중국어 간체",
+}
+
+# 국가 옵션 (Google cr 파라미터)
+COUNTRY_OPTIONS = {
+    "countryKR": "한국",
+    "countryUS": "미국",
+    "countryJP": "일본",
+    "countryCN": "중국",
+}
+
+# 페이지당 결과 수 옵션 (Google num 파라미터)
+NUM_OPTIONS = {
+    10: "10개",
+    20: "20개",
+    50: "50개",
+}
+
+# 추가 검색 파라미터 허용 키 목록
+ALLOWED_SEARCH_PARAMS = {"lr", "cr", "as_sitesearch", "num"}
+
 # 검색 결과 파싱용 JavaScript 코드
 SCRAPE_RESULTS_JS = """
 () => {
