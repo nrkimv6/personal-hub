@@ -167,7 +167,7 @@ def calculate_uptime(start_time_str: str) -> Optional[int]:
 
 REDIS_WORKER_COMMANDS_KEY = "worker:commands"
 REDIS_WORKER_RESULTS_KEY = "worker:command_results"
-REDIS_COMMAND_RESULT_TIMEOUT = 15  # 결과 대기 타임아웃 (초)
+REDIS_COMMAND_RESULT_TIMEOUT = 60  # 결과 대기 타임아웃 (초)
 
 
 async def _send_worker_command(action: str) -> dict:

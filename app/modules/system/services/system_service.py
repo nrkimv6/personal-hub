@@ -285,10 +285,42 @@ if ($tasks) {{
         return await self._run_admin_command(ps_cmd, f"Unregistered task: {folder}/{name}")
 
     async def restart_worker(self, name: str) -> dict:
-        """Restart a worker process (by running browser-workers.ps1)"""
-        script_path = "D:\\work\\project\\tools\\monitor-page\\scripts\\browser-workers.ps1"
-        ps_cmd = f"& '{script_path}' -Action restart"
-        return await self._run_admin_command(ps_cmd, f"Restarted workers")
+        """Restart a worker process (Redis 명령 → Session 1 리스너)
+
+        API(Session 0)에서 직접 subprocess로 워커를 실행하면 Session 0에서 뜨므로
+        GUI 브라우저가 표시되지 않음. Redis를 통해 Session 1의 리스너에 명령 전달.
+        """
+        from app.shared.redis.client import RedisClient
+
+        redis_client = await RedisClient.get_client()
+        if not redis_client:
+            return {"success": False, "message": "Redis 연결 없음. Session 1에서 수동 실행: browser-workers.ps1 -Action restart"}
+
+        try:
+            from datetime import datetime
+            command = json.dumps({
+                "action": "restart",
+                "timestamp": datetime.now().isoformat(),
+                "source": "system-api",
+            })
+
+            # 이전 결과 비우기
+            await redis_client.delete("worker:command_results")
+            # 명령 전송
+            await redis_client.lpush("worker:commands", command)
+
+            # 결과 대기 (최대 60초)
+            result = await redis_client.brpop("worker:command_results", timeout=60)
+
+            if result:
+                _, result_data = result
+                result_json = json.loads(result_data) if isinstance(result_data, str) else json.loads(result_data.decode())
+                return {"success": result_json.get("success", False), "message": result_json.get("message", "완료")}
+            else:
+                return {"success": False, "message": "리스너 응답 타임아웃 (60초). 리스너가 실행 중인지 확인하세요."}
+
+        except Exception as e:
+            return {"success": False, "message": f"Redis 명령 전송 실패: {str(e)}"}
 
     async def _run_admin_command(self, ps_cmd: str, success_msg: str) -> dict:
         """Execute a PowerShell command (may require admin privileges)"""
