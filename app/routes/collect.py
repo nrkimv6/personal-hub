@@ -120,6 +120,13 @@ class ScheduleResponse(BaseModel):
         from_attributes = True
 
 
+class ScheduleDetailResponse(ScheduleResponse):
+    """스케줄 상세 응답 스키마 (수정 모달용)."""
+    target_config: Optional[Dict[str, Any]] = None
+    schedule_value: Optional[Dict[str, Any]] = None
+    saved_search: Optional[Dict[str, Any]] = None  # Google 검색: { query, date_filter, max_pages, search_params }
+
+
 class CollectScheduleCreate(BaseModel):
     """스케줄 생성 요청 스키마."""
     target_type: str  # instagram_feed, google_search, writing_task
@@ -127,6 +134,13 @@ class CollectScheduleCreate(BaseModel):
     display_name: Optional[str] = None
     schedule_type: str = "time_window"
     schedule_value: Optional[Dict[str, Any]] = None
+
+
+class CollectScheduleUpdate(BaseModel):
+    """스케줄 수정 요청 스키마."""
+    display_name: Optional[str] = None
+    schedule_value: Optional[Dict[str, Any]] = None  # 시간대 설정
+    google_search_params: Optional[Dict[str, Any]] = None  # Google 검색 전용: query, date_filter, max_pages, search_params
 
 
 def _generate_schedule_name(data: CollectScheduleCreate) -> str:
@@ -198,19 +212,56 @@ async def create_schedule(
             data.display_name = f"Instagram 피드 (계정 {account_id})"
 
     elif data.target_type == "google_search":
-        if not data.target_config or not data.target_config.get("saved_search_id"):
+        if not data.target_config:
             raise HTTPException(
                 status_code=400,
-                detail="Google 검색 스케줄에는 saved_search_id가 필요합니다"
+                detail="Google 검색 스케줄에는 target_config가 필요합니다"
             )
-        saved_id = data.target_config["saved_search_id"]
-        # 저장된 검색 존재 확인
-        saved_search = db.query(GoogleSavedSearch).filter_by(id=saved_id).first()
-        if not saved_search:
-            raise HTTPException(
-                status_code=404,
-                detail="저장된 검색을 찾을 수 없습니다"
+
+        # 새 검색어로 생성하는 경우
+        if data.target_config.get("create_new_search"):
+            query = data.target_config.get("query", "").strip()
+            if not query:
+                raise HTTPException(
+                    status_code=400,
+                    detail="검색 키워드(query)를 입력해주세요"
+                )
+
+            # GoogleSavedSearch 새로 생성
+            search_name = data.target_config.get("name") or f"[auto] {query}"
+            new_saved = GoogleSavedSearch(
+                name=search_name,
+                query=query,
+                date_filter=data.target_config.get("date_filter"),
+                max_pages=data.target_config.get("max_pages", 1),
+                is_favorite=False,
             )
+            # search_params 처리
+            sp = data.target_config.get("search_params")
+            if sp:
+                new_saved.search_params = json.dumps(sp) if isinstance(sp, dict) else sp
+            db.add(new_saved)
+            db.flush()  # ID 확보
+
+            saved_id = new_saved.id
+            saved_search = new_saved
+            # target_config를 정규화 (saved_search_id 기반으로 통일)
+            data.target_config = {"saved_search_id": saved_id}
+        else:
+            # 기존 저장된 검색 선택
+            if not data.target_config.get("saved_search_id"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Google 검색 스케줄에는 saved_search_id 또는 create_new_search가 필요합니다"
+                )
+            saved_id = data.target_config["saved_search_id"]
+            saved_search = db.query(GoogleSavedSearch).filter_by(id=saved_id).first()
+            if not saved_search:
+                raise HTTPException(
+                    status_code=404,
+                    detail="저장된 검색을 찾을 수 없습니다"
+                )
+
         schedule_name = f"google_search_{saved_id}"
         existing = schedule_service.get_schedule_by_name(schedule_name)
         if existing:
@@ -259,6 +310,139 @@ async def create_schedule(
         enabled=schedule.enabled,
         last_run_at=schedule.last_run_at,
         next_run_at=schedule.next_run_at,
+    )
+
+
+@router.get("/schedules/{schedule_id}", response_model=ScheduleDetailResponse)
+async def get_schedule_detail(
+    schedule_id: int,
+    db: Session = Depends(get_db),
+):
+    """스케줄 상세 조회 (수정 모달용)."""
+    schedule = db.query(TaskSchedule).filter_by(id=schedule_id).first()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    target_config = schedule.get_target_config() if schedule.target_config else None
+    schedule_value = json.loads(schedule.schedule_value) if schedule.schedule_value else None
+
+    # Google 검색인 경우 SavedSearch 정보 포함
+    saved_search_info = None
+    if schedule.target_type == "google_search" and target_config:
+        saved_id = target_config.get("saved_search_id")
+        if saved_id:
+            saved = db.query(GoogleSavedSearch).filter_by(id=saved_id).first()
+            if saved:
+                sp = None
+                if saved.search_params:
+                    sp = json.loads(saved.search_params) if isinstance(saved.search_params, str) else saved.search_params
+                saved_search_info = {
+                    "id": saved.id,
+                    "name": saved.name,
+                    "query": saved.query,
+                    "date_filter": saved.date_filter,
+                    "max_pages": saved.max_pages,
+                    "search_params": sp,
+                }
+
+    return ScheduleDetailResponse(
+        id=schedule.id,
+        name=schedule.name,
+        display_name=schedule.display_name,
+        target_type=schedule.target_type,
+        schedule_type=schedule.schedule_type,
+        enabled=schedule.enabled,
+        last_run_at=schedule.last_run_at,
+        next_run_at=schedule.next_run_at,
+        target_config=target_config,
+        schedule_value=schedule_value,
+        saved_search=saved_search_info,
+    )
+
+
+@router.put("/schedules/{schedule_id}", response_model=ScheduleDetailResponse)
+async def update_schedule(
+    schedule_id: int,
+    data: CollectScheduleUpdate,
+    db: Session = Depends(get_db),
+):
+    """스케줄 수정 API.
+
+    - display_name: 표시 이름 변경
+    - schedule_value: 실행 시간대 변경
+    - google_search_params: Google 검색 조건 변경 (연결된 SavedSearch 함께 수정)
+    """
+    schedule = db.query(TaskSchedule).filter_by(id=schedule_id).first()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    schedule_service = TaskScheduleService(db)
+
+    updates = {}
+    if data.display_name is not None:
+        updates["display_name"] = data.display_name
+    if data.schedule_value is not None:
+        updates["schedule_value"] = json.dumps(data.schedule_value)
+
+    if updates:
+        schedule_service.update_schedule(schedule_id, **updates)
+
+    # Google 검색 파라미터 수정
+    if data.google_search_params and schedule.target_type == "google_search":
+        target_config = schedule.get_target_config() if schedule.target_config else {}
+        saved_id = target_config.get("saved_search_id")
+        if saved_id:
+            saved = db.query(GoogleSavedSearch).filter_by(id=saved_id).first()
+            if saved:
+                gsp = data.google_search_params
+                if "query" in gsp and gsp["query"]:
+                    saved.query = gsp["query"]
+                if "date_filter" in gsp:
+                    saved.date_filter = gsp["date_filter"] or None
+                if "max_pages" in gsp:
+                    saved.max_pages = max(1, min(10, gsp["max_pages"]))
+                if "search_params" in gsp:
+                    sp = gsp["search_params"]
+                    saved.search_params = json.dumps(sp) if isinstance(sp, dict) else sp
+                if "name" in gsp and gsp["name"]:
+                    saved.name = gsp["name"]
+                db.commit()
+
+    # 상세 응답 반환 (get_schedule_detail과 동일)
+    schedule = db.query(TaskSchedule).filter_by(id=schedule_id).first()
+    target_config = schedule.get_target_config() if schedule.target_config else None
+    schedule_value = json.loads(schedule.schedule_value) if schedule.schedule_value else None
+
+    saved_search_info = None
+    if schedule.target_type == "google_search" and target_config:
+        saved_id = target_config.get("saved_search_id")
+        if saved_id:
+            saved = db.query(GoogleSavedSearch).filter_by(id=saved_id).first()
+            if saved:
+                sp = None
+                if saved.search_params:
+                    sp = json.loads(saved.search_params) if isinstance(saved.search_params, str) else saved.search_params
+                saved_search_info = {
+                    "id": saved.id,
+                    "name": saved.name,
+                    "query": saved.query,
+                    "date_filter": saved.date_filter,
+                    "max_pages": saved.max_pages,
+                    "search_params": sp,
+                }
+
+    return ScheduleDetailResponse(
+        id=schedule.id,
+        name=schedule.name,
+        display_name=schedule.display_name,
+        target_type=schedule.target_type,
+        schedule_type=schedule.schedule_type,
+        enabled=schedule.enabled,
+        last_run_at=schedule.last_run_at,
+        next_run_at=schedule.next_run_at,
+        target_config=target_config,
+        schedule_value=schedule_value,
+        saved_search=saved_search_info,
     )
 
 
