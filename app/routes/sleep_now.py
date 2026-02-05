@@ -115,6 +115,21 @@ def _save_config(config: dict) -> None:
     )
 
 
+def _trigger_reload() -> bool:
+    """sleep-now 서비스에 리로드 트리거 생성
+
+    Returns:
+        트리거 파일 생성 성공 여부
+    """
+    trigger_path = SLEEP_NOW_PATH / "data/reload_trigger"
+    try:
+        trigger_path.parent.mkdir(parents=True, exist_ok=True)
+        trigger_path.write_text(datetime.now().isoformat(), encoding="utf-8")
+        return True
+    except Exception as e:
+        return False
+
+
 def _verify_password(password: str) -> bool:
     """Verify emergency unlock password with timing-attack resistance"""
     config = _load_config()
@@ -389,15 +404,25 @@ async def update_schedule(request: ScheduleUpdateRequest):
         "block_end": block.get("block_end"),
     })
 
+    # ★ sleep-now 서비스에 리로드 트리거 생성
+    trigger_success = _trigger_reload()
+
+    if trigger_success:
+        message = "스케줄이 업데이트되었습니다. 1분 이내 자동 반영됩니다."
+        restart_required = False
+    else:
+        message = "스케줄이 저장되었으나 서비스 재시작이 필요합니다."
+        restart_required = True
+
     return {
         "success": True,
-        "message": "스케줄이 업데이트되었습니다. 서비스 재시작이 필요합니다.",
+        "message": message,
         "schedule": {
             "warning_times": block.get("warning_times"),
             "block_start": block.get("block_start"),
             "block_end": block.get("block_end"),
         },
-        "restart_required": True,
+        "restart_required": restart_required,
     }
 
 
