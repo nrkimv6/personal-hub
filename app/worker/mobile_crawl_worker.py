@@ -16,7 +16,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.database import get_sync_db
+from app.database import SessionLocal
 from app.models import TaskSchedule, TaskScheduleRun
 from app.modules.mobile_crawl.services.mobile_server_client import MobileServerClient
 from app.modules.mobile_crawl.services.target_service import MobileCrawlTargetService
@@ -57,7 +57,7 @@ class MobileCrawlWorker(BaseWorker):
 
     async def _check_and_execute_schedules(self):
         """Due 스케줄 확인 및 실행"""
-        db = next(get_sync_db())
+        db = SessionLocal()
         try:
             now = datetime.utcnow()
 
