@@ -22,6 +22,7 @@
 		last_search_id?: string;
 		last_run_at?: string;
 		last_result_count?: number;
+		search_params?: { lr?: string; cr?: string; as_sitesearch?: string; num?: number } | null;
 		created_at: string;
 		updated_at: string;
 	}
@@ -118,6 +119,7 @@
 	let showSaveModal = $state(false);
 	let saveName = $state('');
 	let saveAsFavorite = $state(false);
+	let editingSavedSearch: SavedSearch | null = $state(null);
 
 	let activeTab: 'saved' | 'history' | 'schedule-results' = $state('saved');
 
@@ -147,8 +149,47 @@
 		{ value: '1y', label: '최근 1년' }
 	];
 
+	// 고급 옵션 상태
+	let showAdvancedOptions = $state(false);
+	let searchLang = $state('');
+	let searchCountry = $state('');
+	let searchSite = $state('');
+	let searchNum = $state(10);
+
+	const languageOptions = [
+		{ value: '', label: '전체' },
+		{ value: 'lang_ko', label: '한국어' },
+		{ value: 'lang_en', label: '영어' },
+		{ value: 'lang_ja', label: '일본어' }
+	];
+
+	const countryOptions = [
+		{ value: '', label: '전체' },
+		{ value: 'countryKR', label: '한국' },
+		{ value: 'countryUS', label: '미국' },
+		{ value: 'countryJP', label: '일본' }
+	];
+
 	// 현재 폴링 중인 검색 ID
 	let pendingSearchId: string | null = $state(null);
+
+	// search_params 헬퍼: 현재 고급 옵션 값을 객체로 구성
+	function buildSearchParams(): Record<string, string | number> | undefined {
+		const params: Record<string, string | number> = {};
+		if (searchLang) params.lr = searchLang;
+		if (searchCountry) params.cr = searchCountry;
+		if (searchSite) params.as_sitesearch = searchSite;
+		if (searchNum !== 10) params.num = searchNum;
+		return Object.keys(params).length > 0 ? params : undefined;
+	}
+
+	// 탭 전환 헬퍼 (URL 파라미터 영속화)
+	function setActiveTab(tab: typeof activeTab) {
+		activeTab = tab;
+		const url = new URL(window.location.href);
+		url.searchParams.set('tab', tab);
+		window.history.replaceState(null, '', url.toString());
+	}
 
 	// 검색 기능 (비동기 폴링 방식)
 	async function search() {
@@ -169,7 +210,8 @@
 				body: JSON.stringify({
 					query: query.trim(),
 					date_filter: dateFilter || undefined,
-					max_pages: maxPages
+					max_pages: maxPages,
+					search_params: buildSearchParams()
 				})
 			});
 
@@ -233,22 +275,41 @@
 	}
 
 	async function saveCurrentSearch() {
-		if (!saveName.trim() || !query.trim()) return;
+		if (!saveName.trim()) return;
 
 		try {
-			await apiRequest('/saved', {
-				method: 'POST',
-				body: JSON.stringify({
-					name: saveName.trim(),
-					query: query.trim(),
-					date_filter: dateFilter || undefined,
-					max_pages: maxPages,
-					is_favorite: saveAsFavorite
-				})
-			});
+			if (editingSavedSearch) {
+				// 수정 모드: PUT
+				await apiRequest(`/saved/${editingSavedSearch.id}`, {
+					method: 'PUT',
+					body: JSON.stringify({
+						name: saveName.trim(),
+						query: query.trim(),
+						date_filter: dateFilter || undefined,
+						max_pages: maxPages,
+						is_favorite: saveAsFavorite,
+						search_params: buildSearchParams()
+					})
+				});
+			} else {
+				// 생성 모드: POST
+				if (!query.trim()) return;
+				await apiRequest('/saved', {
+					method: 'POST',
+					body: JSON.stringify({
+						name: saveName.trim(),
+						query: query.trim(),
+						date_filter: dateFilter || undefined,
+						max_pages: maxPages,
+						is_favorite: saveAsFavorite,
+						search_params: buildSearchParams()
+					})
+				});
+			}
 			showSaveModal = false;
 			saveName = '';
 			saveAsFavorite = false;
+			editingSavedSearch = null;
 			await loadSavedSearches();
 		} catch (e) {
 			error = '저장 실패';
@@ -320,6 +381,32 @@
 		} catch (e) {
 			error = '결과 로드 실패';
 		}
+	}
+
+	// 수정 모달 열기
+	function openEditModal(saved: SavedSearch, event: Event) {
+		event.stopPropagation();
+		editingSavedSearch = saved;
+		saveName = saved.name;
+		query = saved.query;
+		dateFilter = saved.date_filter || '';
+		maxPages = saved.max_pages;
+		saveAsFavorite = saved.is_favorite;
+		// search_params 복원
+		if (saved.search_params) {
+			searchLang = saved.search_params.lr || '';
+			searchCountry = saved.search_params.cr || '';
+			searchSite = saved.search_params.as_sitesearch || '';
+			searchNum = saved.search_params.num || 10;
+			showAdvancedOptions = true;
+		} else {
+			searchLang = '';
+			searchCountry = '';
+			searchSite = '';
+			searchNum = 10;
+			showAdvancedOptions = false;
+		}
+		showSaveModal = true;
 	}
 
 	// 히스토리 기능
@@ -505,14 +592,31 @@
 	}
 
 	onMount(() => {
+		// URL 파라미터에서 탭 상태 복원
+		const urlParams = new URLSearchParams(window.location.search);
+		const tabParam = urlParams.get('tab');
+		if (tabParam === 'saved' || tabParam === 'history' || tabParam === 'schedule-results') {
+			activeTab = tabParam;
+		}
+
 		loadSavedSearches();
 		loadHistory();
 		loadSchedules();
+
+		// schedule-results 탭이면 데이터 로드
+		if (activeTab === 'schedule-results') {
+			loadScheduleRecentResults();
+		}
 	});
 </script>
 
 <svelte:head>
 	<title>구글 검색 | Monitor Page</title>
+	<style>
+		body {
+			overscroll-behavior-y: contain;
+		}
+	</style>
 </svelte:head>
 
 <div class="container mx-auto p-4">
@@ -550,7 +654,10 @@
 			</button>
 
 			<button
-				onclick={() => (showSaveModal = true)}
+				onclick={() => {
+					editingSavedSearch = null;
+					showSaveModal = true;
+				}}
 				disabled={!query.trim()}
 				class="rounded-lg border border-border px-4 py-2 hover:bg-muted disabled:opacity-50"
 				title="검색 조건 저장"
@@ -558,6 +665,53 @@
 				저장
 			</button>
 		</div>
+
+		<!-- 고급 옵션 토글 -->
+		<button
+			onclick={() => (showAdvancedOptions = !showAdvancedOptions)}
+			class="mt-3 text-sm text-muted-foreground hover:text-foreground"
+		>
+			{showAdvancedOptions ? '▼ 고급 옵션' : '▶ 고급 옵션'}
+		</button>
+
+		<!-- 고급 옵션 패널 -->
+		{#if showAdvancedOptions}
+			<div class="mt-3 flex flex-wrap gap-4">
+				<div>
+					<label class="mb-1 block text-xs text-muted-foreground">언어</label>
+					<select bind:value={searchLang} class="rounded-lg border px-3 py-1.5 text-sm">
+						{#each languageOptions as opt}
+							<option value={opt.value}>{opt.label}</option>
+						{/each}
+					</select>
+				</div>
+				<div>
+					<label class="mb-1 block text-xs text-muted-foreground">국가</label>
+					<select bind:value={searchCountry} class="rounded-lg border px-3 py-1.5 text-sm">
+						{#each countryOptions as opt}
+							<option value={opt.value}>{opt.label}</option>
+						{/each}
+					</select>
+				</div>
+				<div>
+					<label class="mb-1 block text-xs text-muted-foreground">사이트 제한</label>
+					<input
+						type="text"
+						bind:value={searchSite}
+						placeholder="예: booking.naver.com"
+						class="rounded-lg border px-3 py-1.5 text-sm"
+					/>
+				</div>
+				<div>
+					<label class="mb-1 block text-xs text-muted-foreground">페이지당 결과</label>
+					<select bind:value={searchNum} class="rounded-lg border px-3 py-1.5 text-sm">
+						{#each [10, 20, 50] as n}
+							<option value={n}>{n}개</option>
+						{/each}
+					</select>
+				</div>
+			</div>
+		{/if}
 	</div>
 
 	{#if error}
@@ -565,52 +719,12 @@
 	{/if}
 
 	<div class="grid grid-cols-1 gap-6 lg:grid-cols-4">
-		<!-- 검색 결과 -->
-		<div class="lg:col-span-3">
-			<h2 class="mb-4 text-lg font-semibold">검색 결과 ({results.length}개)</h2>
-
-			{#if results.length === 0}
-				<div class="text-muted-foreground">검색 결과가 없습니다.</div>
-			{:else}
-				<div class="space-y-4">
-					{#each results as result}
-						<div class="rounded-lg bg-white p-4 shadow">
-							<div class="flex items-start gap-3">
-								<span class="w-6 font-mono text-sm text-muted-foreground">{result.rank}</span>
-								<div class="flex-1">
-									<a
-										href={result.url}
-										target="_blank"
-										rel="noopener noreferrer"
-										class="font-medium text-primary hover:underline"
-									>
-										{result.title}
-									</a>
-									{#if result.display_url}
-										<div class="mt-1 text-sm text-success">{result.display_url}</div>
-									{/if}
-									{#if result.snippet}
-										<p class="mt-2 text-sm text-muted-foreground">{result.snippet}</p>
-									{/if}
-									{#if result.publish_date}
-										<span class="mt-2 inline-block text-xs text-muted-foreground">
-											{result.publish_date}
-										</span>
-									{/if}
-								</div>
-							</div>
-						</div>
-					{/each}
-				</div>
-			{/if}
-		</div>
-
-		<!-- 사이드바: 저장된 검색 + 히스토리 -->
-		<div>
+		<!-- 사이드바: 저장된 검색 + 히스토리 (모바일에서 먼저 표시) -->
+		<div class="order-1 max-h-72 overflow-y-auto lg:order-2 lg:max-h-none lg:overflow-y-visible">
 			<!-- 탭 헤더 -->
 			<div class="mb-4 flex border-b">
 				<button
-					onclick={() => (activeTab = 'saved')}
+					onclick={() => setActiveTab('saved')}
 					class="flex-1 border-b-2 py-2 text-sm font-medium transition-colors"
 					class:border-blue-500={activeTab === 'saved'}
 					class:text-primary={activeTab === 'saved'}
@@ -620,7 +734,7 @@
 					저장된 검색
 				</button>
 				<button
-					onclick={() => (activeTab = 'history')}
+					onclick={() => setActiveTab('history')}
 					class="flex-1 border-b-2 py-2 text-sm font-medium transition-colors"
 					class:border-blue-500={activeTab === 'history'}
 					class:text-primary={activeTab === 'history'}
@@ -631,7 +745,7 @@
 				</button>
 				<button
 					onclick={() => {
-						activeTab = 'schedule-results';
+						setActiveTab('schedule-results');
 						loadScheduleRecentResults();
 					}}
 					class="flex-1 border-b-2 py-2 text-sm font-medium transition-colors"
@@ -673,6 +787,13 @@
 													title="즐겨찾기"
 												>
 													{saved.is_favorite ? '★' : '☆'}
+												</button>
+												<button
+													onclick={(e) => openEditModal(saved, e)}
+													class="p-1 text-muted-foreground hover:text-primary"
+													title="수정"
+												>
+													✏️
 												</button>
 												<button
 													onclick={(e) => openScheduleModal(saved, e)}
@@ -873,14 +994,56 @@
 				</div>
 			{/if}
 		</div>
+
+		<!-- 검색 결과 (모바일에서 아래 표시) -->
+		<div class="order-2 lg:order-1 lg:col-span-3">
+			<h2 class="mb-4 text-lg font-semibold">검색 결과 ({results.length}개)</h2>
+
+			{#if results.length === 0}
+				<div class="text-muted-foreground">검색 결과가 없습니다.</div>
+			{:else}
+				<div class="space-y-4">
+					{#each results as result}
+						<div class="rounded-lg bg-white p-4 shadow">
+							<div class="flex items-start gap-3">
+								<span class="w-6 font-mono text-sm text-muted-foreground">{result.rank}</span>
+								<div class="flex-1">
+									<a
+										href={result.url}
+										target="_blank"
+										rel="noopener noreferrer"
+										class="font-medium text-primary hover:underline"
+									>
+										{result.title}
+									</a>
+									{#if result.display_url}
+										<div class="mt-1 text-sm text-success">{result.display_url}</div>
+									{/if}
+									{#if result.snippet}
+										<p class="mt-2 text-sm text-muted-foreground">{result.snippet}</p>
+									{/if}
+									{#if result.publish_date}
+										<span class="mt-2 inline-block text-xs text-muted-foreground">
+											{result.publish_date}
+										</span>
+									{/if}
+								</div>
+							</div>
+						</div>
+					{/each}
+				</div>
+			{/if}
+		</div>
 	</div>
 </div>
 
-<!-- 저장 모달 -->
+<!-- 저장/수정 모달 -->
 {#if showSaveModal}
 	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
 		<div class="w-96 rounded-lg bg-white p-6 shadow-xl">
-			<h3 class="mb-4 text-lg font-semibold">검색 조건 저장</h3>
+			<h3 class="mb-4 text-lg font-semibold">
+				{editingSavedSearch ? '검색 조건 수정' : '검색 조건 저장'}
+			</h3>
 
 			<div class="space-y-4">
 				<div>
@@ -894,14 +1057,91 @@
 					/>
 				</div>
 
-				<div class="text-sm text-muted-foreground">
-					<div><strong>검색어:</strong> {query}</div>
+				{#if editingSavedSearch}
+					<!-- 수정 모드: 편집 가능한 필드 -->
 					<div>
-						<strong>날짜 필터:</strong>
-						{dateFilters.find((f) => f.value === dateFilter)?.label || '전체'}
+						<label for="edit-query" class="mb-1 block text-sm font-medium">검색어</label>
+						<input
+							id="edit-query"
+							type="text"
+							bind:value={query}
+							class="w-full rounded-lg border px-3 py-2"
+						/>
 					</div>
-					<div><strong>페이지 수:</strong> {maxPages}</div>
-				</div>
+					<div class="flex gap-4">
+						<div class="flex-1">
+							<label for="edit-date-filter" class="mb-1 block text-sm font-medium">날짜 필터</label>
+							<select id="edit-date-filter" bind:value={dateFilter} class="w-full rounded-lg border px-3 py-2">
+								{#each dateFilters as filter}
+									<option value={filter.value}>{filter.label}</option>
+								{/each}
+							</select>
+						</div>
+						<div>
+							<label for="edit-max-pages" class="mb-1 block text-sm font-medium">페이지 수</label>
+							<select id="edit-max-pages" bind:value={maxPages} class="rounded-lg border px-3 py-2">
+								{#each [1, 2, 3, 5, 10] as pages}
+									<option value={pages}>{pages}</option>
+								{/each}
+							</select>
+						</div>
+					</div>
+
+					<!-- 수정 모드: 고급 옵션 -->
+					<button
+						onclick={() => (showAdvancedOptions = !showAdvancedOptions)}
+						class="text-sm text-muted-foreground hover:text-foreground"
+					>
+						{showAdvancedOptions ? '▼ 고급 옵션' : '▶ 고급 옵션'}
+					</button>
+					{#if showAdvancedOptions}
+						<div class="flex flex-wrap gap-3">
+							<div class="flex-1">
+								<label class="mb-1 block text-xs text-muted-foreground">언어</label>
+								<select bind:value={searchLang} class="w-full rounded-lg border px-2 py-1.5 text-sm">
+									{#each languageOptions as opt}
+										<option value={opt.value}>{opt.label}</option>
+									{/each}
+								</select>
+							</div>
+							<div class="flex-1">
+								<label class="mb-1 block text-xs text-muted-foreground">국가</label>
+								<select bind:value={searchCountry} class="w-full rounded-lg border px-2 py-1.5 text-sm">
+									{#each countryOptions as opt}
+										<option value={opt.value}>{opt.label}</option>
+									{/each}
+								</select>
+							</div>
+							<div class="w-full">
+								<label class="mb-1 block text-xs text-muted-foreground">사이트 제한</label>
+								<input
+									type="text"
+									bind:value={searchSite}
+									placeholder="예: booking.naver.com"
+									class="w-full rounded-lg border px-2 py-1.5 text-sm"
+								/>
+							</div>
+							<div>
+								<label class="mb-1 block text-xs text-muted-foreground">페이지당 결과</label>
+								<select bind:value={searchNum} class="rounded-lg border px-2 py-1.5 text-sm">
+									{#each [10, 20, 50] as n}
+										<option value={n}>{n}개</option>
+									{/each}
+								</select>
+							</div>
+						</div>
+					{/if}
+				{:else}
+					<!-- 생성 모드: 현재 검색 폼 값 표시 (읽기 전용) -->
+					<div class="text-sm text-muted-foreground">
+						<div><strong>검색어:</strong> {query}</div>
+						<div>
+							<strong>날짜 필터:</strong>
+							{dateFilters.find((f) => f.value === dateFilter)?.label || '전체'}
+						</div>
+						<div><strong>페이지 수:</strong> {maxPages}</div>
+					</div>
+				{/if}
 
 				<label class="flex items-center gap-2">
 					<input type="checkbox" bind:checked={saveAsFavorite} />
@@ -911,7 +1151,10 @@
 
 			<div class="mt-6 flex justify-end gap-2">
 				<button
-					onclick={() => (showSaveModal = false)}
+					onclick={() => {
+						showSaveModal = false;
+						editingSavedSearch = null;
+					}}
 					class="rounded-lg px-4 py-2 text-muted-foreground hover:bg-muted"
 				>
 					취소
@@ -921,7 +1164,7 @@
 					disabled={!saveName.trim()}
 					class="rounded-lg bg-primary px-4 py-2 text-white hover:bg-primary-hover disabled:opacity-50"
 				>
-					저장
+					{editingSavedSearch ? '수정' : '저장'}
 				</button>
 			</div>
 		</div>

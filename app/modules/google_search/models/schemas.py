@@ -2,7 +2,7 @@
 Google 검색 Pydantic 스키마 정의
 """
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from pydantic import BaseModel, Field
 
@@ -21,6 +21,16 @@ class SearchRequest(BaseModel):
     )
     max_pages: int = Field(1, ge=1, le=10, description="수집할 페이지 수 (1-10)")
     service_account_id: Optional[int] = Field(None, description="브라우저 프로필 ID")
+    search_params: Optional[Dict[str, Any]] = Field(None, description="추가 검색 파라미터 (lr, cr, as_sitesearch, num)")
+
+
+class SearchParams(BaseModel):
+    """추가 검색 파라미터."""
+
+    lr: Optional[str] = Field(None, description="언어 제한 (lang_ko 등)")
+    cr: Optional[str] = Field(None, description="국가 제한 (countryKR 등)")
+    as_sitesearch: Optional[str] = Field(None, description="사이트 내 검색")
+    num: Optional[int] = Field(None, ge=10, le=100, description="페이지당 결과 수")
 
 
 class SearchResult(BaseModel):
@@ -106,6 +116,7 @@ class SavedSearchCreate(BaseModel):
     max_pages: int = Field(1, ge=1, le=10, description="페이지 수")
     service_account_id: Optional[int] = Field(None, description="브라우저 프로필 ID")
     is_favorite: bool = Field(False, description="즐겨찾기 여부")
+    search_params: Optional[Dict[str, Any]] = Field(None, description="추가 검색 파라미터")
 
 
 class SavedSearchUpdate(BaseModel):
@@ -117,6 +128,7 @@ class SavedSearchUpdate(BaseModel):
     max_pages: Optional[int] = Field(None, ge=1, le=10)
     service_account_id: Optional[int] = None
     is_favorite: Optional[bool] = None
+    search_params: Optional[Dict[str, Any]] = None
 
 
 class SavedSearchResponse(BaseModel):
@@ -129,6 +141,7 @@ class SavedSearchResponse(BaseModel):
     max_pages: int
     service_account_id: Optional[int]
     is_favorite: bool
+    search_params: Optional[Dict[str, Any]] = None
     last_search_id: Optional[str]
     last_run_at: Optional[datetime]
     last_result_count: Optional[int]

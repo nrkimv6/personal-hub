@@ -34,6 +34,7 @@ class GoogleSavedSearch(Base):
     # 옵션
     service_account_id = Column(Integer, ForeignKey("service_accounts.id", ondelete="SET NULL"), nullable=True)
     is_favorite = Column(Boolean, default=False)
+    search_params = Column(Text, nullable=True)  # JSON: {lr, cr, as_sitesearch, num}
 
     # 마지막 실행 정보
     last_search_id = Column(String(36), nullable=True)
@@ -105,6 +106,7 @@ class GoogleSearchQueue(Base):
     query = Column(String(500), nullable=False)
     date_filter = Column(String(10), nullable=True)
     max_pages = Column(Integer, default=1)
+    search_params = Column(Text, nullable=True)  # JSON: {lr, cr, as_sitesearch, num}
 
     # 참조
     service_account_id = Column(
