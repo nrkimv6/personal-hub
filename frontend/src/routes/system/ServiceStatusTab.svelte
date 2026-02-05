@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { serviceDashboardApi } from '$lib/api';
+  import { serviceDashboardApi, systemApi } from '$lib/api';
   import type { ServiceDashboardStatus } from '$lib/api';
 
   // Props
@@ -14,6 +14,10 @@
   let error = $state<string | null>(null);
   let actionLoading = $state<string | null>(null);
   let refreshing = $state(false);
+
+  // Self-restart 상태
+  let selfRestartState = $state<'idle' | 'requested' | 'waiting' | 'checking' | 'done' | 'failed'>('idle');
+  let selfRestartMessage = $state('');
 
   const REFRESH_INTERVAL = 30000;
 
@@ -173,6 +177,58 @@
     }
   }
 
+  async function selfRestartApi() {
+    if (!confirm('API 서버를 graceful 재시작하시겠습니까?\n\n소켓을 정상 해제한 후 NSSM이 자동으로 재시작합니다.\n(약 15초 소요)')) return;
+
+    selfRestartState = 'requested';
+    selfRestartMessage = 'Self-restart 요청 중...';
+
+    try {
+      const response = await systemApi.selfRestart(2.0);
+      selfRestartState = 'waiting';
+      selfRestartMessage = `PID ${response.pid} 종료 대기 중... (NSSM이 자동 재시작)`;
+
+      // shutdown(2초) + NSSM throttle(10초) + startup(~3초) 대기
+      await new Promise(r => setTimeout(r, 15000));
+
+      // Health check 반복
+      selfRestartState = 'checking';
+      selfRestartMessage = 'API 재시작 확인 중...';
+
+      const maxRetries = 6;
+      const retryInterval = 5000;
+      let success = false;
+
+      for (let i = 1; i <= maxRetries; i++) {
+        try {
+          await systemApi.status();
+          success = true;
+          break;
+        } catch {
+          selfRestartMessage = `API 응답 대기 중... (${i}/${maxRetries})`;
+          if (i < maxRetries) await new Promise(r => setTimeout(r, retryInterval));
+        }
+      }
+
+      if (success) {
+        selfRestartState = 'done';
+        selfRestartMessage = 'API 재시작 완료';
+        await fetchStatus();
+        // 3초 후 상태 초기화
+        setTimeout(() => {
+          selfRestartState = 'idle';
+          selfRestartMessage = '';
+        }, 3000);
+      } else {
+        selfRestartState = 'failed';
+        selfRestartMessage = 'API 재시작 확인 실패. 수동 확인 필요.';
+      }
+    } catch (e) {
+      selfRestartState = 'failed';
+      selfRestartMessage = `요청 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`;
+    }
+  }
+
   function formatDateTime(isoString: string | null): string {
     if (!isoString) return '-';
     try {
@@ -273,14 +329,20 @@
                     <div class="flex gap-1">
                       {#if svc.status === 'Running'}
                         <button
+                          class="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                          disabled={selfRestartState !== 'idle' || actionLoading?.startsWith(`nssm-`)}
+                          onclick={selfRestartApi}>
+                          {selfRestartState !== 'idle' ? 'Graceful...' : 'Graceful 재시작'}
+                        </button>
+                        <button
                           class="px-2 py-1 text-xs bg-primary text-white rounded hover:bg-primary-hover disabled:opacity-50"
-                          disabled={actionLoading?.startsWith(`nssm-`)}
+                          disabled={actionLoading?.startsWith(`nssm-`) || selfRestartState !== 'idle'}
                           onclick={() => restartService(svc.name)}>
-                          재시작
+                          NSSM 재시작
                         </button>
                         <button
                           class="px-2 py-1 text-xs bg-warning text-white rounded hover:bg-warning/90 disabled:opacity-50"
-                          disabled={actionLoading?.startsWith(`nssm-`)}
+                          disabled={actionLoading?.startsWith(`nssm-`) || selfRestartState !== 'idle'}
                           onclick={() => stopService(svc.name)}>
                           중지
                         </button>
@@ -296,6 +358,28 @@
                   </div>
                 {/each}
               </div>
+
+              <!-- Self-restart 진행 상태 -->
+              {#if selfRestartState !== 'idle'}
+                <div class="mt-3 p-3 rounded-lg text-sm flex items-center gap-2
+                  {selfRestartState === 'done' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' :
+                   selfRestartState === 'failed' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' :
+                   'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'}">
+                  {#if selfRestartState === 'done'}
+                    <span>OK</span>
+                  {:else if selfRestartState === 'failed'}
+                    <span>!</span>
+                    <button
+                      class="ml-auto text-xs underline hover:no-underline"
+                      onclick={() => { selfRestartState = 'idle'; selfRestartMessage = ''; }}>
+                      닫기
+                    </button>
+                  {:else}
+                    <div class="inline-block animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent"></div>
+                  {/if}
+                  <span>{selfRestartMessage}</span>
+                </div>
+              {/if}
             </section>
           {/if}
 
