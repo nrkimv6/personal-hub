@@ -14,9 +14,9 @@
 	let togglingId: number | null = null;
 	let runningId: number | null = null;
 
-	// 설정 모달 상태
-	let showSettingsModal = false;
-	let selectedSchedule: CrawlSchedule | null = null;
+	// Instagram 설정 모달 상태
+	let showInstagramSettingsModal = false;
+	let instagramSettingsSchedule: CrawlSchedule | null = null;
 	let settingsRef: InstagramCrawlSettings | null = null;
 
 	// 추가 모달 상태
@@ -29,6 +29,19 @@
 	let selectedTarget: { id: number; name: string } | null = null;
 	let scheduleTimes: string[] = ['09:00', '12:00', '18:00'];
 
+	// Google 검색 추가 - 탭 상태
+	let googleAddTab: 'existing' | 'new' = 'existing';
+
+	// Google 검색 새 검색어 입력 폼
+	let newSearchQuery = '';
+	let newSearchName = '';
+	let newSearchDateFilter = '';
+	let newSearchMaxPages = 1;
+	let newSearchLr = '';
+	let newSearchCr = '';
+	let newSearchSitesearch = '';
+	let showAdvancedOptions = false;
+
 	// 대상 목록
 	let serviceAccounts: ServiceAccountWithProfile[] = [];
 	let savedSearches: { id: number; name: string; query: string; is_favorite: boolean }[] = [];
@@ -39,23 +52,66 @@
 	let deleteTarget: CrawlSchedule | null = null;
 	let deleting = false;
 
+	// 수정 모달 상태
+	let showEditModal = false;
+	let editSchedule: CrawlSchedule | null = null;
+	let editLoading = false;
+	let editSaving = false;
+	let editDisplayName = '';
+	let editTimes: string[] = [];
+	// Google 검색 수정 전용
+	let editGoogleQuery = '';
+	let editGoogleName = '';
+	let editGoogleDateFilter = '';
+	let editGoogleMaxPages = 1;
+	let editGoogleLr = '';
+	let editGoogleCr = '';
+	let editGoogleSitesearch = '';
+	let editShowAdvanced = false;
+
 	const scheduleTypes = [
 		{ value: 'instagram_feed', label: 'Instagram 피드', icon: '📸', color: 'pink' },
 		{ value: 'google_search', label: 'Google 검색', icon: '🔍', color: 'yellow' },
 		{ value: 'writing_task', label: '글쓰기 태스크', icon: '✍️', color: 'purple' }
 	];
 
-	function openSettings(schedule: CrawlSchedule) {
-		selectedSchedule = schedule;
-		showSettingsModal = true;
+	const dateFilterOptions = [
+		{ value: '', label: '전체 기간' },
+		{ value: '1h', label: '1시간 이내' },
+		{ value: '24h', label: '24시간 이내' },
+		{ value: '1w', label: '1주일 이내' },
+		{ value: '1m', label: '1개월 이내' },
+		{ value: '1y', label: '1년 이내' }
+	];
+
+	const languageOptions = [
+		{ value: '', label: '제한 없음' },
+		{ value: 'lang_ko', label: '한국어' },
+		{ value: 'lang_en', label: '영어' },
+		{ value: 'lang_ja', label: '일본어' }
+	];
+
+	const countryOptions = [
+		{ value: '', label: '제한 없음' },
+		{ value: 'countryKR', label: '한국' },
+		{ value: 'countryUS', label: '미국' },
+		{ value: 'countryJP', label: '일본' }
+	];
+
+	// ============ Instagram 설정 모달 ============
+
+	function openInstagramSettings(schedule: CrawlSchedule) {
+		instagramSettingsSchedule = schedule;
+		showInstagramSettingsModal = true;
 	}
 
-	function closeSettings() {
-		showSettingsModal = false;
-		selectedSchedule = null;
-		// 설정 저장 후 목록 새로고침
+	function closeInstagramSettings() {
+		showInstagramSettingsModal = false;
+		instagramSettingsSchedule = null;
 		fetchSchedules();
 	}
+
+	// ============ 추가 모달 ============
 
 	function openAddModal() {
 		showAddModal = true;
@@ -63,6 +119,8 @@
 		selectedType = '';
 		selectedTarget = null;
 		scheduleTimes = ['09:00', '12:00', '18:00'];
+		googleAddTab = 'existing';
+		resetNewSearchForm();
 	}
 
 	function closeAddModal() {
@@ -72,16 +130,25 @@
 		selectedTarget = null;
 	}
 
+	function resetNewSearchForm() {
+		newSearchQuery = '';
+		newSearchName = '';
+		newSearchDateFilter = '';
+		newSearchMaxPages = 1;
+		newSearchLr = '';
+		newSearchCr = '';
+		newSearchSitesearch = '';
+		showAdvancedOptions = false;
+	}
+
 	async function selectType(type: string) {
 		selectedType = type;
 
-		// writing_task는 대상 선택 불필요
 		if (type === 'writing_task') {
 			addStep = 3;
 			return;
 		}
 
-		// 대상 목록 로드
 		loadingTargets = true;
 		try {
 			if (type === 'instagram_feed') {
@@ -99,6 +166,15 @@
 
 	function selectTarget(target: { id: number; name: string }) {
 		selectedTarget = target;
+		addStep = 3;
+	}
+
+	function proceedWithNewSearch() {
+		if (!newSearchQuery.trim()) {
+			error = '검색 키워드를 입력해주세요';
+			return;
+		}
+		selectedTarget = null; // 새 검색어는 target 없음
 		addStep = 3;
 	}
 
@@ -133,8 +209,26 @@
 
 			if (selectedType === 'instagram_feed' && selectedTarget) {
 				data.target_config = { service_account_id: selectedTarget.id };
-			} else if (selectedType === 'google_search' && selectedTarget) {
-				data.target_config = { saved_search_id: selectedTarget.id };
+			} else if (selectedType === 'google_search') {
+				if (selectedTarget) {
+					// 기존 저장된 검색 선택
+					data.target_config = { saved_search_id: selectedTarget.id };
+				} else {
+					// 새 검색어로 생성
+					const searchParams: Record<string, unknown> = {};
+					if (newSearchLr) searchParams.lr = newSearchLr;
+					if (newSearchCr) searchParams.cr = newSearchCr;
+					if (newSearchSitesearch) searchParams.as_sitesearch = newSearchSitesearch;
+
+					data.target_config = {
+						create_new_search: true,
+						query: newSearchQuery.trim(),
+						name: newSearchName.trim() || undefined,
+						date_filter: newSearchDateFilter || undefined,
+						max_pages: newSearchMaxPages,
+						search_params: Object.keys(searchParams).length > 0 ? searchParams : undefined
+					};
+				}
 			}
 
 			await collectApi.createSchedule(data);
@@ -147,6 +241,122 @@
 			creating = false;
 		}
 	}
+
+	// ============ 수정 모달 ============
+
+	async function openEditModal(schedule: CrawlSchedule) {
+		editSchedule = schedule;
+		editLoading = true;
+		showEditModal = true;
+		editShowAdvanced = false;
+		error = null;
+
+		try {
+			const detail = await collectApi.getScheduleDetail(schedule.id);
+
+			editDisplayName = detail.display_name || '';
+
+			// 시간 설정 복원
+			if (detail.schedule_value?.time_windows) {
+				editTimes = (detail.schedule_value.time_windows as { start: string; end: string }[]).map(
+					(tw) => tw.start
+				);
+			} else {
+				editTimes = ['09:00'];
+			}
+
+			// Google 검색 파라미터 복원
+			if (schedule.target_type === 'google_search' && detail.saved_search) {
+				editGoogleQuery = detail.saved_search.query || '';
+				editGoogleName = detail.saved_search.name || '';
+				editGoogleDateFilter = detail.saved_search.date_filter || '';
+				editGoogleMaxPages = detail.saved_search.max_pages || 1;
+				const sp = detail.saved_search.search_params as Record<string, string> | null;
+				editGoogleLr = sp?.lr || '';
+				editGoogleCr = sp?.cr || '';
+				editGoogleSitesearch = sp?.as_sitesearch || '';
+			} else {
+				editGoogleQuery = '';
+				editGoogleName = '';
+				editGoogleDateFilter = '';
+				editGoogleMaxPages = 1;
+				editGoogleLr = '';
+				editGoogleCr = '';
+				editGoogleSitesearch = '';
+			}
+		} catch (e) {
+			error = e instanceof Error ? e.message : '스케줄 정보 로드 실패';
+			showEditModal = false;
+		} finally {
+			editLoading = false;
+		}
+	}
+
+	function closeEditModal() {
+		showEditModal = false;
+		editSchedule = null;
+	}
+
+	async function saveEdit() {
+		if (!editSchedule) return;
+
+		editSaving = true;
+		error = null;
+
+		try {
+			const updateData: {
+				display_name?: string;
+				schedule_value?: Record<string, unknown>;
+				google_search_params?: Record<string, unknown>;
+			} = {};
+
+			// 표시 이름
+			if (editDisplayName.trim()) {
+				updateData.display_name = editDisplayName.trim();
+			}
+
+			// 시간 설정
+			updateData.schedule_value = {
+				daily_runs: editTimes.length,
+				time_windows: editTimes.map((t) => ({ start: t, end: t }))
+			};
+
+			// Google 검색 파라미터
+			if (editSchedule.target_type === 'google_search') {
+				const searchParams: Record<string, unknown> = {};
+				if (editGoogleLr) searchParams.lr = editGoogleLr;
+				if (editGoogleCr) searchParams.cr = editGoogleCr;
+				if (editGoogleSitesearch) searchParams.as_sitesearch = editGoogleSitesearch;
+
+				updateData.google_search_params = {
+					query: editGoogleQuery.trim(),
+					name: editGoogleName.trim() || undefined,
+					date_filter: editGoogleDateFilter || null,
+					max_pages: editGoogleMaxPages,
+					search_params: Object.keys(searchParams).length > 0 ? searchParams : {}
+				};
+			}
+
+			await collectApi.updateSchedule(editSchedule.id, updateData);
+			successMessage = '스케줄이 수정되었습니다';
+			closeEditModal();
+			await fetchSchedules();
+		} catch (e) {
+			error = e instanceof Error ? e.message : '스케줄 수정 실패';
+		} finally {
+			editSaving = false;
+		}
+	}
+
+	function editAddTime() {
+		editTimes = [...editTimes, '12:00'];
+	}
+
+	function editRemoveTime(index: number) {
+		editTimes = editTimes.filter((_, i) => i !== index);
+	}
+
+	// ============ 기본 기능 ============
 
 	async function fetchSchedules() {
 		loading = true;
@@ -359,12 +569,19 @@
 								이력
 							</a>
 
-							<!-- 설정 버튼 (Instagram만) -->
+							<!-- 수정 버튼 (모든 타입) -->
+							<Button variant="secondary" size="sm" on:click={() => openEditModal(schedule)}
+								title="스케줄 수정"
+							>
+								수정
+							</Button>
+
+							<!-- Instagram 상세 설정 버튼 -->
 							{#if schedule.target_type === 'instagram_feed'}
-								<Button variant="secondary" size="sm" on:click={() => openSettings(schedule)}
-									title="상세 설정"
+								<Button variant="secondary" size="sm" on:click={() => openInstagramSettings(schedule)}
+									title="Instagram 상세 설정"
 								>
-									설정
+									IG설정
 								</Button>
 							{/if}
 
@@ -396,33 +613,22 @@
 				</div>
 			{/each}
 		</div>
-
-		<div class="mt-6 p-4 bg-background rounded-lg">
-			<p class="text-sm text-muted-foreground">
-				<strong>안내:</strong> Instagram 스케줄은 "설정" 버튼을 클릭하여 상세 설정을 변경할 수 있습니다.
-			</p>
-		</div>
 	{/if}
 </div>
 
 <!-- Instagram 설정 모달 -->
-{#if showSettingsModal && selectedSchedule?.target_type === 'instagram_feed'}
+{#if showInstagramSettingsModal && instagramSettingsSchedule?.target_type === 'instagram_feed'}
 	<div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
 		<div class="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
-			<!-- 모달 헤더 -->
 			<div class="flex items-center justify-between px-6 py-4 border-b border-border">
-				<h2 class="text-xl font-bold text-foreground">
-					Instagram 수집 설정
-				</h2>
+				<h2 class="text-xl font-bold text-foreground">Instagram 수집 설정</h2>
 				<button
-					onclick={closeSettings}
+					onclick={closeInstagramSettings}
 					class="text-muted-foreground hover:text-muted-foreground text-2xl leading-none"
 				>
 					&times;
 				</button>
 			</div>
-
-			<!-- 모달 컨텐츠 -->
 			<div class="p-6 overflow-y-auto max-h-[calc(90vh-80px)]">
 				<InstagramCrawlSettings bind:this={settingsRef} />
 			</div>
@@ -434,16 +640,21 @@
 {#if showAddModal}
 	<div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
 		<div class="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-hidden">
-			<!-- 모달 헤더 -->
 			<div class="flex items-center justify-between px-6 py-4 border-b border-border">
 				<div class="flex items-center gap-2">
 					<h2 class="text-xl font-bold text-foreground">스케줄 추가</h2>
 					{#if addStep > 1}
 						<button
-							onclick={() => (addStep = addStep === 3 && selectedType === 'writing_task' ? 1 : addStep - 1)}
+							onclick={() => {
+								if (addStep === 3 && selectedType === 'writing_task') {
+									addStep = 1;
+								} else {
+									addStep = addStep - 1;
+								}
+							}}
 							class="text-sm text-primary hover:text-primary-hover"
 						>
-							← 이전
+							&#8592; 이전
 						</button>
 					{/if}
 				</div>
@@ -455,8 +666,7 @@
 				</button>
 			</div>
 
-			<!-- 모달 컨텐츠 -->
-			<div class="p-6">
+			<div class="p-6 overflow-y-auto max-h-[calc(90vh-80px)]">
 				{#if addStep === 1}
 					<!-- Step 1: 타입 선택 -->
 					<p class="text-muted-foreground mb-4">어떤 종류의 스케줄을 추가하시겠습니까?</p>
@@ -474,7 +684,7 @@
 										{#if st.value === 'instagram_feed'}
 											Instagram 피드를 주기적으로 수집합니다
 										{:else if st.value === 'google_search'}
-											저장된 검색 결과를 주기적으로 수집합니다
+											Google 검색 결과를 주기적으로 수집합니다
 										{:else}
 											글쓰기 태스크를 주기적으로 실행합니다
 										{/if}
@@ -515,25 +725,153 @@
 							</div>
 						{/if}
 					{:else if selectedType === 'google_search'}
-						<p class="text-muted-foreground mb-4">수집할 저장된 검색을 선택하세요</p>
-						{#if savedSearches.length === 0}
-							<p class="text-muted-foreground text-center py-4">저장된 검색이 없습니다</p>
+						<!-- Google 검색 탭: 저장된 검색 선택 / 새 검색어 입력 -->
+						<div class="flex border-b border-border mb-4">
+							<button
+								onclick={() => (googleAddTab = 'existing')}
+								class="px-4 py-2 text-sm font-medium border-b-2 transition-colors {googleAddTab === 'existing'
+									? 'border-primary text-primary'
+									: 'border-transparent text-muted-foreground hover:text-foreground'}"
+							>
+								저장된 검색 선택
+							</button>
+							<button
+								onclick={() => (googleAddTab = 'new')}
+								class="px-4 py-2 text-sm font-medium border-b-2 transition-colors {googleAddTab === 'new'
+									? 'border-primary text-primary'
+									: 'border-transparent text-muted-foreground hover:text-foreground'}"
+							>
+								새 검색어 입력
+							</button>
+						</div>
+
+						{#if googleAddTab === 'existing'}
+							{#if savedSearches.length === 0}
+								<p class="text-muted-foreground text-center py-4">저장된 검색이 없습니다. "새 검색어 입력" 탭을 이용하세요.</p>
+							{:else}
+								<div class="space-y-2 max-h-64 overflow-y-auto">
+									{#each savedSearches as saved}
+										<button
+											onclick={() => selectTarget({ id: saved.id, name: saved.name })}
+											class="w-full flex items-center gap-3 p-3 border rounded-lg hover:border-blue-500 hover:bg-primary-light transition-colors text-left"
+										>
+											<div class="w-10 h-10 bg-warning-light rounded-full flex items-center justify-center text-warning-foreground">
+												{saved.is_favorite ? '⭐' : '🔍'}
+											</div>
+											<div>
+												<div class="font-medium text-foreground">{saved.name}</div>
+												<div class="text-sm text-muted-foreground truncate max-w-xs">{saved.query}</div>
+											</div>
+										</button>
+									{/each}
+								</div>
+							{/if}
 						{:else}
-							<div class="space-y-2 max-h-64 overflow-y-auto">
-								{#each savedSearches as saved}
-									<button
-										onclick={() => selectTarget({ id: saved.id, name: saved.name })}
-										class="w-full flex items-center gap-3 p-3 border rounded-lg hover:border-blue-500 hover:bg-primary-light transition-colors text-left"
-									>
-										<div class="w-10 h-10 bg-warning-light rounded-full flex items-center justify-center text-warning-foreground">
-											{saved.is_favorite ? '⭐' : '🔍'}
+							<!-- 새 검색어 입력 폼 -->
+							<div class="space-y-4">
+								<div>
+									<label for="new-query" class="block text-sm font-medium text-foreground mb-1">검색 키워드 *</label>
+									<input
+										id="new-query"
+										type="text"
+										bind:value={newSearchQuery}
+										placeholder="검색할 키워드를 입력하세요"
+										class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+									/>
+								</div>
+
+								<div>
+									<label for="new-name" class="block text-sm font-medium text-foreground mb-1">저장 이름</label>
+									<input
+										id="new-name"
+										type="text"
+										bind:value={newSearchName}
+										placeholder="자동 생성됨 (선택)"
+										class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+									/>
+								</div>
+
+								<div class="grid grid-cols-2 gap-3">
+									<div>
+										<label for="new-datefilter" class="block text-sm font-medium text-foreground mb-1">기간 필터</label>
+										<select
+											id="new-datefilter"
+											bind:value={newSearchDateFilter}
+											class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+										>
+											{#each dateFilterOptions as opt}
+												<option value={opt.value}>{opt.label}</option>
+											{/each}
+										</select>
+									</div>
+									<div>
+										<label for="new-maxpages" class="block text-sm font-medium text-foreground mb-1">수집 페이지</label>
+										<input
+											id="new-maxpages"
+											type="number"
+											min="1"
+											max="10"
+											bind:value={newSearchMaxPages}
+											class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+										/>
+									</div>
+								</div>
+
+								<!-- 고급 옵션 토글 -->
+								<button
+									onclick={() => (showAdvancedOptions = !showAdvancedOptions)}
+									class="text-sm text-primary hover:text-primary-hover flex items-center gap-1"
+								>
+									{showAdvancedOptions ? '▼' : '▶'} 고급 검색 옵션
+								</button>
+
+								{#if showAdvancedOptions}
+									<div class="space-y-3 pl-3 border-l-2 border-border">
+										<div>
+											<label for="new-lr" class="block text-sm font-medium text-foreground mb-1">언어 제한</label>
+											<select
+												id="new-lr"
+												bind:value={newSearchLr}
+												class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+											>
+												{#each languageOptions as opt}
+													<option value={opt.value}>{opt.label}</option>
+												{/each}
+											</select>
 										</div>
 										<div>
-											<div class="font-medium text-foreground">{saved.name}</div>
-											<div class="text-sm text-muted-foreground truncate max-w-xs">{saved.query}</div>
+											<label for="new-cr" class="block text-sm font-medium text-foreground mb-1">국가 제한</label>
+											<select
+												id="new-cr"
+												bind:value={newSearchCr}
+												class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+											>
+												{#each countryOptions as opt}
+													<option value={opt.value}>{opt.label}</option>
+												{/each}
+											</select>
 										</div>
+										<div>
+											<label for="new-sitesearch" class="block text-sm font-medium text-foreground mb-1">사이트 제한</label>
+											<input
+												id="new-sitesearch"
+												type="text"
+												bind:value={newSearchSitesearch}
+												placeholder="예: naver.com"
+												class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+											/>
+										</div>
+									</div>
+								{/if}
+
+								<div class="flex justify-end">
+									<button
+										onclick={proceedWithNewSearch}
+										class="btn btn-primary"
+									>
+										다음 →
 									</button>
-								{/each}
+								</div>
 							</div>
 						{/if}
 					{/if}
@@ -542,7 +880,14 @@
 					<!-- Step 3: 시간 설정 -->
 					<div class="mb-4">
 						<p class="text-muted-foreground mb-2">실행 시간을 설정하세요</p>
-						{#if selectedType !== 'writing_task' && selectedTarget}
+						{#if selectedType === 'google_search' && !selectedTarget && newSearchQuery}
+							<p class="text-sm text-primary">
+								검색어: {newSearchQuery}
+								{#if newSearchDateFilter}
+									| 기간: {dateFilterOptions.find(o => o.value === newSearchDateFilter)?.label}
+								{/if}
+							</p>
+						{:else if selectedType !== 'writing_task' && selectedTarget}
 							<p class="text-sm text-primary">
 								선택된 대상: {selectedTarget.name}
 							</p>
@@ -599,16 +944,199 @@
 	</div>
 {/if}
 
+<!-- 수정 모달 -->
+{#if showEditModal && editSchedule}
+	<div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+		<div class="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-hidden">
+			<div class="flex items-center justify-between px-6 py-4 border-b border-border">
+				<h2 class="text-xl font-bold text-foreground">스케줄 수정</h2>
+				<button
+					onclick={closeEditModal}
+					class="text-muted-foreground hover:text-muted-foreground text-2xl leading-none"
+				>
+					&times;
+				</button>
+			</div>
+
+			<div class="p-6 overflow-y-auto max-h-[calc(90vh-80px)]">
+				{#if editLoading}
+					<div class="flex justify-center py-8">
+						<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+					</div>
+				{:else}
+					<div class="space-y-5">
+						<!-- 기본 정보 -->
+						<div>
+							<label for="edit-displayname" class="block text-sm font-medium text-foreground mb-1">표시 이름</label>
+							<input
+								id="edit-displayname"
+								type="text"
+								bind:value={editDisplayName}
+								class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+							/>
+						</div>
+
+						<!-- Google 검색 조건 (Google만) -->
+						{#if editSchedule.target_type === 'google_search'}
+							<div class="border-t border-border pt-4">
+								<h3 class="font-medium text-foreground mb-3">검색 조건</h3>
+								<div class="space-y-3">
+									<div>
+										<label for="edit-google-query" class="block text-sm font-medium text-foreground mb-1">검색 키워드 *</label>
+										<input
+											id="edit-google-query"
+											type="text"
+											bind:value={editGoogleQuery}
+											class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+										/>
+									</div>
+									<div>
+										<label for="edit-google-name" class="block text-sm font-medium text-foreground mb-1">저장 이름</label>
+										<input
+											id="edit-google-name"
+											type="text"
+											bind:value={editGoogleName}
+											class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+										/>
+									</div>
+									<div class="grid grid-cols-2 gap-3">
+										<div>
+											<label for="edit-datefilter" class="block text-sm font-medium text-foreground mb-1">기간 필터</label>
+											<select
+												id="edit-datefilter"
+												bind:value={editGoogleDateFilter}
+												class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+											>
+												{#each dateFilterOptions as opt}
+													<option value={opt.value}>{opt.label}</option>
+												{/each}
+											</select>
+										</div>
+										<div>
+											<label for="edit-maxpages" class="block text-sm font-medium text-foreground mb-1">수집 페이지</label>
+											<input
+												id="edit-maxpages"
+												type="number"
+												min="1"
+												max="10"
+												bind:value={editGoogleMaxPages}
+												class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+											/>
+										</div>
+									</div>
+
+									<!-- 고급 옵션 -->
+									<button
+										onclick={() => (editShowAdvanced = !editShowAdvanced)}
+										class="text-sm text-primary hover:text-primary-hover flex items-center gap-1"
+									>
+										{editShowAdvanced ? '▼' : '▶'} 고급 검색 옵션
+									</button>
+
+									{#if editShowAdvanced}
+										<div class="space-y-3 pl-3 border-l-2 border-border">
+											<div>
+												<label for="edit-lr" class="block text-sm font-medium text-foreground mb-1">언어 제한</label>
+												<select
+													id="edit-lr"
+													bind:value={editGoogleLr}
+													class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+												>
+													{#each languageOptions as opt}
+														<option value={opt.value}>{opt.label}</option>
+													{/each}
+												</select>
+											</div>
+											<div>
+												<label for="edit-cr" class="block text-sm font-medium text-foreground mb-1">국가 제한</label>
+												<select
+													id="edit-cr"
+													bind:value={editGoogleCr}
+													class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+												>
+													{#each countryOptions as opt}
+														<option value={opt.value}>{opt.label}</option>
+													{/each}
+												</select>
+											</div>
+											<div>
+												<label for="edit-sitesearch" class="block text-sm font-medium text-foreground mb-1">사이트 제한</label>
+												<input
+													id="edit-sitesearch"
+													type="text"
+													bind:value={editGoogleSitesearch}
+													placeholder="예: naver.com"
+													class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+												/>
+											</div>
+										</div>
+									{/if}
+								</div>
+							</div>
+						{/if}
+
+						<!-- 실행 시간 설정 -->
+						<div class="border-t border-border pt-4">
+							<h3 class="font-medium text-foreground mb-3">실행 시간</h3>
+							<div class="space-y-3 mb-3">
+								{#each editTimes as time, i}
+									<div class="flex items-center gap-2">
+										<input
+											type="time"
+											bind:value={editTimes[i]}
+											class="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+										/>
+										{#if editTimes.length > 1}
+											<button
+												onclick={() => editRemoveTime(i)}
+												class="p-2 text-error hover:bg-error-light rounded-lg"
+												title="삭제"
+											>
+												✕
+											</button>
+										{/if}
+									</div>
+								{/each}
+							</div>
+							<button
+								onclick={editAddTime}
+								class="w-full py-2 border-2 border-dashed border-border rounded-lg text-muted-foreground hover:border-blue-500 hover:text-primary transition-colors text-sm"
+							>
+								+ 시간 추가
+							</button>
+						</div>
+
+						<!-- 저장 버튼 -->
+						<div class="flex justify-end gap-2 pt-2">
+							<Button variant="secondary" on:click={closeEditModal}>
+								취소
+							</Button>
+							<button
+								onclick={saveEdit}
+								disabled={editSaving}
+								class="btn btn-primary"
+							>
+								{#if editSaving}
+									저장 중...
+								{:else}
+									저장
+								{/if}
+							</button>
+						</div>
+					</div>
+				{/if}
+			</div>
+		</div>
+	</div>
+{/if}
+
 <!-- 삭제 확인 모달 -->
 {#if showDeleteModal && deleteTarget}
 	<div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
 		<div class="bg-white rounded-xl shadow-2xl max-w-md w-full">
-			<!-- 모달 헤더 -->
 			<div class="px-6 py-4 border-b border-border">
 				<h2 class="text-xl font-bold text-foreground">스케줄 삭제</h2>
 			</div>
-
-			<!-- 모달 컨텐츠 -->
 			<div class="p-6">
 				<p class="text-foreground mb-4">
 					<strong>"{deleteTarget.display_name || deleteTarget.name}"</strong> 스케줄을 삭제하시겠습니까?
@@ -617,8 +1145,6 @@
 					실행 이력도 함께 삭제됩니다. 이 작업은 되돌릴 수 없습니다.
 				</p>
 			</div>
-
-			<!-- 모달 푸터 -->
 			<div class="px-6 py-4 border-t border-border flex justify-end gap-2">
 				<Button variant="secondary" on:click={closeDeleteModal} disabled={deleting}>
 					취소
