@@ -42,10 +42,11 @@ if (-not (Test-Path $PidDir)) {
     New-Item -ItemType Directory -Path $PidDir -Force | Out-Null
 }
 
-# PID files - unified worker watchdog + Claude + Video Download
+# PID files - unified worker watchdog + Claude + Video Download + Redis Command Listener
 $WorkerWatchdogPidFile = Join-Path $PidDir "worker_watchdog$PidSuffix.pid"
 $ClaudeWatchdogPidFile = Join-Path $PidDir "claude_watchdog$PidSuffix.pid"
 $VideoDownloadWatchdogPidFile = Join-Path $PidDir "video_download_watchdog$PidSuffix.pid"
+$CommandListenerPidFile = Join-Path $PidDir "command_listener$PidSuffix.pid"
 
 # Legacy PID files (for cleanup)
 $LegacyWatchdogPidFile = Join-Path $PidDir "watchdog$PidSuffix.pid"
@@ -181,6 +182,31 @@ function Start-BrowserWorkers {
         $started++
     }
 
+    # Start Redis Worker Command Listener (BRPOP-based, near-zero CPU)
+    if (Test-ProcessRunning $CommandListenerPidFile) {
+        Write-Log "Redis Command Listener already running" "WARN"
+    } else {
+        Write-Log "Starting Redis Worker Command Listener..."
+        $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+        if (-not (Test-Path $VenvPython)) {
+            $VenvPython = Join-Path $ProjectRoot "venv\Scripts\python.exe"
+        }
+
+        if (Test-Path $VenvPython) {
+            $listenerScript = Join-Path $ScriptDir "worker-command-listener.py"
+            $listenerProcess = Start-Process -FilePath $VenvPython `
+                -ArgumentList $listenerScript `
+                -WorkingDirectory $ProjectRoot `
+                -WindowStyle Hidden `
+                -PassThru
+            $listenerProcess.Id | Out-File $CommandListenerPidFile -Encoding ascii
+            Write-Log "Redis Command Listener started (PID: $($listenerProcess.Id))" "OK"
+            $started++
+        } else {
+            Write-Log "Python venv not found, skipping Command Listener" "ERROR"
+        }
+    }
+
     if ($started -gt 0) {
         Write-Host ""
         Write-Log "$started watchdog(s) started" "OK"
@@ -242,6 +268,21 @@ function Stop-BrowserWorkers {
             }
         }
         Remove-Item $VideoDownloadWatchdogPidFile -Force -ErrorAction SilentlyContinue
+    }
+
+    # Stop Redis Command Listener
+    if (Test-Path $CommandListenerPidFile) {
+        $savedPid = Get-Content $CommandListenerPidFile -ErrorAction SilentlyContinue
+        if ($savedPid) {
+            $proc = Get-Process -Id $savedPid -ErrorAction SilentlyContinue
+            if ($proc) {
+                Write-Log "Stopping Redis Command Listener (PID: $savedPid)..."
+                Stop-Process -Id $savedPid -Force -ErrorAction SilentlyContinue
+                Write-Log "Redis Command Listener stopped" "OK"
+                $stopped++
+            }
+        }
+        Remove-Item $CommandListenerPidFile -Force -ErrorAction SilentlyContinue
     }
 
     # Stop actual worker processes
@@ -370,6 +411,15 @@ function Show-Status {
     Write-Host "Video Download Watchdog:" -ForegroundColor White
     if (Test-ProcessRunning $VideoDownloadWatchdogPidFile) {
         $savedPid = Get-Content $VideoDownloadWatchdogPidFile
+        Write-Host "  [+] Running (PID: $savedPid)" -ForegroundColor Green
+    } else {
+        Write-Host "  [-] Not running" -ForegroundColor Yellow
+    }
+
+    # Redis Command Listener
+    Write-Host "Redis Command Listener:" -ForegroundColor White
+    if (Test-ProcessRunning $CommandListenerPidFile) {
+        $savedPid = Get-Content $CommandListenerPidFile
         Write-Host "  [+] Running (PID: $savedPid)" -ForegroundColor Green
     } else {
         Write-Host "  [-] Not running" -ForegroundColor Yellow

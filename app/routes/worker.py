@@ -1,15 +1,17 @@
 """
 워커 관리 API 엔드포인트
 모니터링 워커 프로세스를 관리하기 위한 API를 제공합니다.
+
+워커 시작/중지/재시작은 Redis를 통해 Session 1의 리스너에 명령을 전달합니다.
+API 서버(Session 0)에서 직접 워커 프로세스를 생성하지 않습니다.
 """
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
-import subprocess
+import json
 import sys
 import os
-import signal
 import psutil
 from pathlib import Path
 
@@ -161,21 +163,58 @@ def calculate_uptime(start_time_str: str) -> Optional[int]:
         return None
 
 
-# ============= Global Worker Process Reference =============
+# ============= Redis Worker Command =============
 
-_worker_process: Optional[subprocess.Popen] = None
-
-
-def get_worker_process() -> Optional[subprocess.Popen]:
-    """전역 워커 프로세스 참조를 반환합니다."""
-    global _worker_process
-    return _worker_process
+REDIS_WORKER_COMMANDS_KEY = "worker:commands"
+REDIS_WORKER_RESULTS_KEY = "worker:command_results"
+REDIS_COMMAND_RESULT_TIMEOUT = 15  # 결과 대기 타임아웃 (초)
 
 
-def set_worker_process(process: Optional[subprocess.Popen]):
-    """전역 워커 프로세스 참조를 설정합니다."""
-    global _worker_process
-    _worker_process = process
+async def _send_worker_command(action: str) -> dict:
+    """Redis를 통해 워커 명령을 전송하고 결과를 대기합니다.
+
+    Session 1에서 실행 중인 worker-command-listener가 명령을 수신하고 실행합니다.
+
+    Args:
+        action: 워커 명령 (start, stop, restart)
+
+    Returns:
+        dict: {success: bool, message: str}
+    """
+    from app.shared.redis.client import RedisClient
+
+    redis_client = await RedisClient.get_client()
+    if not redis_client:
+        return {"success": False, "message": "Redis 연결 없음. 워커는 Session 1에서 수동 관리하세요: browser-workers.ps1 -Action " + action}
+
+    command = json.dumps({
+        "action": action,
+        "timestamp": datetime.now().isoformat(),
+        "source": "api",
+    })
+
+    try:
+        # 이전 결과 비우기
+        await redis_client.delete(REDIS_WORKER_RESULTS_KEY)
+
+        # 명령 전송
+        await redis_client.lpush(REDIS_WORKER_COMMANDS_KEY, command)
+        logger.info(f"[WorkerAPI] Redis 워커 명령 전송: {action}")
+
+        # 결과 대기 (BRPOP - 블로킹)
+        result = await redis_client.brpop(REDIS_WORKER_RESULTS_KEY, timeout=REDIS_COMMAND_RESULT_TIMEOUT)
+
+        if result:
+            _, result_data = result
+            result_json = json.loads(result_data) if isinstance(result_data, str) else json.loads(result_data.decode())
+            logger.info(f"[WorkerAPI] 워커 명령 결과: {result_json}")
+            return result_json
+        else:
+            return {"success": False, "message": f"명령 '{action}' 전송됨, 리스너 응답 타임아웃 ({REDIS_COMMAND_RESULT_TIMEOUT}초). 리스너가 실행 중인지 확인하세요."}
+
+    except Exception as e:
+        logger.error(f"[WorkerAPI] Redis 워커 명령 전송 실패: {e}")
+        return {"success": False, "message": f"Redis 명령 전송 실패: {str(e)}"}
 
 
 # ============= API Endpoints =============
@@ -202,7 +241,7 @@ async def get_worker_status():
 
 @router.post("/start", response_model=WorkerActionResponse)
 async def start_worker():
-    """워커 프로세스를 시작합니다."""
+    """워커 프로세스를 시작합니다. (Redis → Session 1 리스너)"""
     # 이미 실행 중인지 확인
     status_data = get_worker_status_from_db()
     pid = status_data.get("pid")
@@ -214,45 +253,17 @@ async def start_worker():
             pid=pid
         )
 
-    try:
-        # 워커 프로세스 시작
-        worker_script = Path(__file__).parent.parent / "worker" / "monitor_worker.py"
-
-        # Python 인터프리터 경로
-        python_path = sys.executable
-
-        # 워커 프로세스 시작 (백그라운드)
-        process = subprocess.Popen(
-            [python_path, "-m", "app.worker.monitor_worker"],
-            cwd=str(Path(__file__).parent.parent.parent),  # 프로젝트 루트
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=True  # 새 세션에서 실행 (부모 프로세스 종료 시에도 계속 실행)
-        )
-
-        # 전역 참조 저장
-        set_worker_process(process)
-
-        logger.info(f"워커 프로세스 시작됨 (PID: {process.pid})")
-
-        return WorkerActionResponse(
-            success=True,
-            message=f"워커 프로세스가 시작되었습니다",
-            pid=process.pid
-        )
-
-    except Exception as e:
-        logger.error(f"워커 시작 실패: {str(e)}", exc_info=True)
-        return WorkerActionResponse(
-            success=False,
-            message=f"워커 시작 실패: {str(e)}",
-            pid=None
-        )
+    result = await _send_worker_command("start")
+    return WorkerActionResponse(
+        success=result["success"],
+        message=result["message"],
+        pid=result.get("pid")
+    )
 
 
 @router.post("/stop", response_model=WorkerActionResponse)
 async def stop_worker():
-    """워커 프로세스를 중지합니다."""
+    """워커 프로세스를 중지합니다. (Redis → Session 1 리스너)"""
     status_data = get_worker_status_from_db()
     pid = status_data.get("pid")
 
@@ -263,76 +274,23 @@ async def stop_worker():
             pid=None
         )
 
-    try:
-        # 프로세스에 종료 시그널 전송
-        process = psutil.Process(pid)
-
-        # 우선 SIGTERM 전송 (graceful shutdown)
-        if sys.platform == 'win32':
-            process.terminate()
-        else:
-            os.kill(pid, signal.SIGTERM)
-
-        # 최대 10초 대기
-        try:
-            process.wait(timeout=10)
-        except psutil.TimeoutExpired:
-            # 강제 종료
-            logger.warning(f"워커가 정상 종료되지 않아 강제 종료합니다 (PID: {pid})")
-            process.kill()
-            process.wait(timeout=5)
-
-        # 전역 참조 정리
-        set_worker_process(None)
-
-        logger.info(f"워커 프로세스 종료됨 (PID: {pid})")
-
-        return WorkerActionResponse(
-            success=True,
-            message=f"워커 프로세스가 종료되었습니다 (PID: {pid})",
-            pid=pid
-        )
-
-    except psutil.NoSuchProcess:
-        return WorkerActionResponse(
-            success=True,
-            message="워커 프로세스가 이미 종료되었습니다",
-            pid=pid
-        )
-    except Exception as e:
-        logger.error(f"워커 종료 실패: {str(e)}", exc_info=True)
-        return WorkerActionResponse(
-            success=False,
-            message=f"워커 종료 실패: {str(e)}",
-            pid=pid
-        )
+    result = await _send_worker_command("stop")
+    return WorkerActionResponse(
+        success=result["success"],
+        message=result["message"],
+        pid=result.get("pid")
+    )
 
 
 @router.post("/restart", response_model=WorkerActionResponse)
 async def restart_worker():
-    """워커 프로세스를 재시작합니다."""
-    # 먼저 중지
-    stop_result = await stop_worker()
-
-    # 잠시 대기
-    import asyncio
-    await asyncio.sleep(2)
-
-    # 시작
-    start_result = await start_worker()
-
-    if start_result.success:
-        return WorkerActionResponse(
-            success=True,
-            message="워커 프로세스가 재시작되었습니다",
-            pid=start_result.pid
-        )
-    else:
-        return WorkerActionResponse(
-            success=False,
-            message=f"워커 재시작 실패: {start_result.message}",
-            pid=None
-        )
+    """워커 프로세스를 재시작합니다. (Redis → Session 1 리스너)"""
+    result = await _send_worker_command("restart")
+    return WorkerActionResponse(
+        success=result["success"],
+        message=result["message"],
+        pid=result.get("pid")
+    )
 
 
 @router.get("/logs", response_model=WorkerLogsResponse)
