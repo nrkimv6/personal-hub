@@ -65,7 +65,7 @@ class MobileCrawlWorker(BaseWorker):
             schedules = db.query(TaskSchedule).filter(
                 TaskSchedule.target_type == "mobile_crawl",
                 TaskSchedule.enabled == True,
-                TaskSchedule.next_run <= now
+                TaskSchedule.next_run_at <= now
             ).limit(10).all()
 
             if not schedules:
@@ -107,11 +107,10 @@ class MobileCrawlWorker(BaseWorker):
         db.flush()  # run.id 생성
 
         run_id = run.id
-        start_time = datetime.utcnow()
 
         try:
             # target_config에서 mobile_crawl_target_id 추출
-            target_id = schedule.target_config.get("mobile_crawl_target_id")
+            target_id = schedule.get_target_config().get("mobile_crawl_target_id")
             if not target_id:
                 raise ValueError("target_config에 mobile_crawl_target_id가 없습니다")
 
@@ -139,21 +138,15 @@ class MobileCrawlWorker(BaseWorker):
             )
 
             # 실행 완료 처리
-            duration = (datetime.utcnow() - start_time).total_seconds()
-
-            run.status = "completed"
-            run.completed_at = datetime.utcnow()
-            run.result = {
-                "collected_count": result["total_count"],
-                "new_count": stats["new"],
-                "updated_count": stats["updated"],
-                "unchanged_count": stats["unchanged"],
-                "duration_seconds": duration
-            }
+            run.mark_completed(
+                collected_count=result["total_count"],
+                saved_count=stats["new"] + stats["updated"]
+            )
 
             # 다음 실행 시간 갱신
-            schedule.last_run = datetime.utcnow()
-            schedule.next_run = schedule.last_run + timedelta(seconds=schedule.interval_seconds)
+            interval = int(schedule.schedule_value) if schedule.schedule_value else 3600
+            next_run = datetime.utcnow() + timedelta(seconds=interval)
+            schedule.update_last_run(next_run_at=next_run)
 
             logger.info(
                 f"[MobileCrawlWorker] 스케줄 {schedule.id} 완료: "
@@ -164,19 +157,12 @@ class MobileCrawlWorker(BaseWorker):
 
         except Exception as e:
             # 실행 실패 처리
-            duration = (datetime.utcnow() - start_time).total_seconds()
-
-            run.status = "failed"
-            run.completed_at = datetime.utcnow()
-            run.error_message = str(e)
-            run.result = {
-                "error": str(e),
-                "duration_seconds": duration
-            }
+            run.mark_failed(error_message=str(e))
 
             # 다음 실행 시간은 갱신 (계속 시도)
-            schedule.last_run = datetime.utcnow()
-            schedule.next_run = schedule.last_run + timedelta(seconds=schedule.interval_seconds)
+            interval = int(schedule.schedule_value) if schedule.schedule_value else 3600
+            next_run = datetime.utcnow() + timedelta(seconds=interval)
+            schedule.update_last_run(next_run_at=next_run)
 
             logger.error(
                 f"[MobileCrawlWorker] 스케줄 {schedule.id} 실패: {str(e)}"
