@@ -283,52 +283,45 @@ function Restart-ApiServer {
     Write-Host "========================================" -ForegroundColor Yellow
     Write-Host ""
 
+    $apiPort = 8001
     $serviceName = "Monitor Page (Development)"
-    $apiPidFile = Join-Path $PidDir "api$PidSuffix.pid"
 
-    # Check if running as admin
-    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-
-    if ($isAdmin) {
-        # Admin: use NSSM restart
-        Write-Log "Restarting NSSM service: $serviceName"
-        try {
-            $result = nssm restart $serviceName 2>&1
-            if ($LASTEXITCODE -eq 0) {
-                Write-Log "API server restarted successfully" "OK"
-            } else {
-                Write-Log "NSSM restart failed: $result" "ERROR"
-            }
-        } catch {
-            Write-Log "Failed to restart NSSM service: $_" "ERROR"
+    # 1순위: Self-Restart API (graceful, 포트 정상 해제)
+    $selfRestartEndpoint = "http://localhost:${apiPort}/api/v1/system/self-restart?delay=2"
+    try {
+        $response = Invoke-WebRequest -Uri $selfRestartEndpoint -Method POST -TimeoutSec 5 -UseBasicParsing
+        if ($response.StatusCode -eq 200) {
+            Write-Log "Self-restart API called (graceful shutdown)" "OK"
         }
-    } else {
-        # Non-admin: kill process, NSSM will auto-restart
-        Write-Log "Non-admin mode: killing API process (NSSM will auto-restart)"
+    } catch {
+        Write-Log "Self-restart API unavailable: $($_.Exception.Message)" "WARN"
 
-        if (Test-Path $apiPidFile) {
-            $savedPid = Get-Content $apiPidFile -ErrorAction SilentlyContinue
-            if ($savedPid) {
-                $proc = Get-Process -Id $savedPid -ErrorAction SilentlyContinue
-                if ($proc) {
-                    Write-Log "Stopping API process (PID: $savedPid)..."
-                    Stop-Process -Id $savedPid -Force -ErrorAction SilentlyContinue
-                    Write-Log "API process stopped. NSSM will auto-restart." "OK"
+        # 2순위: NSSM restart (관리자 권한 필요)
+        $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+        if ($isAdmin) {
+            Write-Log "Falling back to NSSM restart (admin mode)"
+            try {
+                $result = nssm restart $serviceName 2>&1
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Log "API server restarted via NSSM" "OK"
                 } else {
-                    Write-Log "API process not found (PID: $savedPid)" "WARN"
+                    Write-Log "NSSM restart failed: $result" "ERROR"
                 }
+            } catch {
+                Write-Log "Failed to restart NSSM service: $_" "ERROR"
             }
         } else {
-            # Try to find by port
-            Write-Log "PID file not found, trying to find by port 8001..."
-            $conn = Get-NetTCPConnection -LocalPort 8001 -ErrorAction SilentlyContinue | Where-Object { $_.State -eq 'Listen' }
+            # 3순위: Stop-Process -Force (포트 점유 위험)
+            Write-Log "Non-admin: falling back to Stop-Process -Force (port issue risk)" "WARN"
+            $conn = Get-NetTCPConnection -LocalPort $apiPort -ErrorAction SilentlyContinue | Where-Object { $_.State -eq 'Listen' }
             if ($conn) {
                 $procId = $conn.OwningProcess
-                Write-Log "Found process on port 8001 (PID: $procId), stopping..."
+                Write-Log "Killing API process (PID: $procId) on port $apiPort..."
                 Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
-                Write-Log "API process stopped. NSSM will auto-restart." "OK"
+                Write-Log "API process stopped. NSSM will auto-restart." "WARN"
             } else {
-                Write-Log "No process found on port 8001" "WARN"
+                Write-Log "No process found on port $apiPort" "WARN"
             }
         }
     }

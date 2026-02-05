@@ -5,7 +5,7 @@
 # (When API hangs, its internal HealthMonitorService also hangs)
 #
 # Recovery stages:
-#   Stage 1 (3 failures): Restart via NSSM
+#   Stage 1 (3 failures): Self-restart API (graceful) → NSSM restart fallback
 #   Stage 2 (6 failures): Force kill port owner + NSSM restart
 #   Stage 3 (9 failures): System reboot (last resort)
 #
@@ -78,11 +78,24 @@ function Restart-ApiService {
 
     Write-WatchdogLog "Attempting API restart: $Reason" "WARN"
 
-    # Check if running as admin
+    # 1순위: Self-Restart API (graceful, 관리자 권한 불필요, 포트 정상 해제)
+    $selfRestartEndpoint = "http://localhost:${port}/api/v1/system/self-restart?delay=2"
+    try {
+        $response = Invoke-WebRequest -Uri $selfRestartEndpoint -Method POST -TimeoutSec 5 -UseBasicParsing
+        if ($response.StatusCode -eq 200) {
+            Write-WatchdogLog "Self-restart API called (graceful shutdown → NSSM auto-restart)" "OK"
+            return $true
+        }
+    } catch {
+        Write-WatchdogLog "Self-restart API unavailable: $($_.Exception.Message)" "WARN"
+    }
+
+    # 2순위: NSSM restart (관리자 권한 필요)
     $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
     if ($isAdmin) {
         try {
+            Write-WatchdogLog "Falling back to NSSM restart (admin mode)" "WARN"
             $result = nssm restart $serviceName 2>&1
             Write-WatchdogLog "NSSM restart command executed" "INFO"
             return $true
@@ -90,24 +103,23 @@ function Restart-ApiService {
             Write-WatchdogLog "NSSM restart failed: $_" "ERROR"
             return $false
         }
-    } else {
-        Write-WatchdogLog "Non-admin mode: Cannot use NSSM. Trying process kill..." "WARN"
+    }
 
-        # Try to find and kill by port
-        $conn = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue | Where-Object { $_.State -eq 'Listen' }
-        if ($conn) {
-            try {
-                Stop-Process -Id $conn.OwningProcess -Force -ErrorAction Stop
-                Write-WatchdogLog "Killed process on port $port (PID: $($conn.OwningProcess)). NSSM will auto-restart." "OK"
-                return $true
-            } catch {
-                Write-WatchdogLog "Failed to kill process: $_" "ERROR"
-                return $false
-            }
-        } else {
-            Write-WatchdogLog "No process found on port $port" "WARN"
+    # 3순위: Stop-Process -Force (포트 점유 위험 있음 — 최후의 수단)
+    Write-WatchdogLog "Non-admin mode: Falling back to Stop-Process -Force (port issue risk)" "WARN"
+    $conn = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue | Where-Object { $_.State -eq 'Listen' }
+    if ($conn) {
+        try {
+            Stop-Process -Id $conn.OwningProcess -Force -ErrorAction Stop
+            Write-WatchdogLog "Force killed PID $($conn.OwningProcess) on port $port. NSSM will auto-restart." "WARN"
+            return $true
+        } catch {
+            Write-WatchdogLog "Failed to kill process: $_" "ERROR"
             return $false
         }
+    } else {
+        Write-WatchdogLog "No process found on port $port" "WARN"
+        return $false
     }
 }
 

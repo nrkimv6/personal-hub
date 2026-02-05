@@ -64,6 +64,13 @@ export const systemApi = {
     request<{ status: string; stopped_count: number; started_count: number }>(
       '/system/restart-all',
       { method: 'POST' }
+    ),
+
+  // API 서버 self-restart (graceful shutdown → NSSM 자동 재시작)
+  selfRestart: (delay: number = 2.0) =>
+    request<{ status: string; pid: number; delay: number; message: string }>(
+      `/system/self-restart?delay=${delay}`,
+      { method: 'POST' }
     )
 };
 
