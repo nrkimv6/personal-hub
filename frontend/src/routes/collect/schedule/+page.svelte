@@ -29,9 +29,6 @@
 	let selectedTarget: { id: number; name: string } | null = null;
 	let scheduleTimes: string[] = ['09:00', '12:00', '18:00'];
 
-	// Google 검색 추가 - 탭 상태
-	let googleAddTab: 'existing' | 'new' = 'existing';
-
 	// Google 검색 새 검색어 입력 폼
 	let newSearchQuery = '';
 	let newSearchName = '';
@@ -44,7 +41,6 @@
 
 	// 대상 목록
 	let serviceAccounts: ServiceAccountWithProfile[] = [];
-	let savedSearches: { id: number; name: string; query: string; is_favorite: boolean }[] = [];
 	let loadingTargets = false;
 
 	// 삭제 모달 상태
@@ -119,7 +115,6 @@
 		selectedType = '';
 		selectedTarget = null;
 		scheduleTimes = ['09:00', '12:00', '18:00'];
-		googleAddTab = 'existing';
 		resetNewSearchForm();
 	}
 
@@ -149,12 +144,16 @@
 			return;
 		}
 
+		if (type === 'google_search') {
+			// Google 검색은 항상 새 검색어 입력 폼으로 이동
+			addStep = 2;
+			return;
+		}
+
 		loadingTargets = true;
 		try {
 			if (type === 'instagram_feed') {
 				serviceAccounts = await collectApi.getAccounts();
-			} else if (type === 'google_search') {
-				savedSearches = await collectApi.getSavedSearches();
 			}
 			addStep = 2;
 		} catch (e) {
@@ -210,25 +209,19 @@
 			if (selectedType === 'instagram_feed' && selectedTarget) {
 				data.target_config = { service_account_id: selectedTarget.id };
 			} else if (selectedType === 'google_search') {
-				if (selectedTarget) {
-					// 기존 저장된 검색 선택
-					data.target_config = { saved_search_id: selectedTarget.id };
-				} else {
-					// 새 검색어로 생성
-					const searchParams: Record<string, unknown> = {};
-					if (newSearchLr) searchParams.lr = newSearchLr;
-					if (newSearchCr) searchParams.cr = newSearchCr;
-					if (newSearchSitesearch) searchParams.as_sitesearch = newSearchSitesearch;
+				const searchParams: Record<string, unknown> = {};
+				if (newSearchLr) searchParams.lr = newSearchLr;
+				if (newSearchCr) searchParams.cr = newSearchCr;
+				if (newSearchSitesearch) searchParams.as_sitesearch = newSearchSitesearch;
 
-					data.target_config = {
-						create_new_search: true,
-						query: newSearchQuery.trim(),
-						name: newSearchName.trim() || undefined,
-						date_filter: newSearchDateFilter || undefined,
-						max_pages: newSearchMaxPages,
-						search_params: Object.keys(searchParams).length > 0 ? searchParams : undefined
-					};
-				}
+				data.target_config = {
+					create_new_search: true,
+					query: newSearchQuery.trim(),
+					name: newSearchName.trim() || undefined,
+					date_filter: newSearchDateFilter || undefined,
+					max_pages: newSearchMaxPages,
+					search_params: Object.keys(searchParams).length > 0 ? searchParams : undefined
+				};
 			}
 
 			await collectApi.createSchedule(data);
@@ -725,50 +718,9 @@
 							</div>
 						{/if}
 					{:else if selectedType === 'google_search'}
-						<!-- Google 검색 탭: 저장된 검색 선택 / 새 검색어 입력 -->
-						<div class="flex border-b border-border mb-4">
-							<button
-								onclick={() => (googleAddTab = 'existing')}
-								class="px-4 py-2 text-sm font-medium border-b-2 transition-colors {googleAddTab === 'existing'
-									? 'border-primary text-primary'
-									: 'border-transparent text-muted-foreground hover:text-foreground'}"
-							>
-								저장된 검색 선택
-							</button>
-							<button
-								onclick={() => (googleAddTab = 'new')}
-								class="px-4 py-2 text-sm font-medium border-b-2 transition-colors {googleAddTab === 'new'
-									? 'border-primary text-primary'
-									: 'border-transparent text-muted-foreground hover:text-foreground'}"
-							>
-								새 검색어 입력
-							</button>
-						</div>
-
-						{#if googleAddTab === 'existing'}
-							{#if savedSearches.length === 0}
-								<p class="text-muted-foreground text-center py-4">저장된 검색이 없습니다. "새 검색어 입력" 탭을 이용하세요.</p>
-							{:else}
-								<div class="space-y-2 max-h-64 overflow-y-auto">
-									{#each savedSearches as saved}
-										<button
-											onclick={() => selectTarget({ id: saved.id, name: saved.name })}
-											class="w-full flex items-center gap-3 p-3 border rounded-lg hover:border-blue-500 hover:bg-primary-light transition-colors text-left"
-										>
-											<div class="w-10 h-10 bg-warning-light rounded-full flex items-center justify-center text-warning-foreground">
-												{saved.is_favorite ? '⭐' : '🔍'}
-											</div>
-											<div>
-												<div class="font-medium text-foreground">{saved.name}</div>
-												<div class="text-sm text-muted-foreground truncate max-w-xs">{saved.query}</div>
-											</div>
-										</button>
-									{/each}
-								</div>
-							{/if}
-						{:else}
-							<!-- 새 검색어 입력 폼 -->
-							<div class="space-y-4">
+						<!-- Google 검색: 새 검색어 입력 -->
+						<p class="text-muted-foreground mb-4">검색 조건을 입력하세요</p>
+						<div class="space-y-4">
 								<div>
 									<label for="new-query" class="block text-sm font-medium text-foreground mb-1">검색 키워드 *</label>
 									<input
@@ -872,22 +824,21 @@
 										다음 →
 									</button>
 								</div>
-							</div>
-						{/if}
+						</div>
 					{/if}
 
 				{:else if addStep === 3}
 					<!-- Step 3: 시간 설정 -->
 					<div class="mb-4">
 						<p class="text-muted-foreground mb-2">실행 시간을 설정하세요</p>
-						{#if selectedType === 'google_search' && !selectedTarget && newSearchQuery}
+						{#if selectedType === 'google_search' && newSearchQuery}
 							<p class="text-sm text-primary">
 								검색어: {newSearchQuery}
 								{#if newSearchDateFilter}
 									| 기간: {dateFilterOptions.find(o => o.value === newSearchDateFilter)?.label}
 								{/if}
 							</p>
-						{:else if selectedType !== 'writing_task' && selectedTarget}
+						{:else if selectedType === 'instagram_feed' && selectedTarget}
 							<p class="text-sm text-primary">
 								선택된 대상: {selectedTarget.name}
 							</p>
