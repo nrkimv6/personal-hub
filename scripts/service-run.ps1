@@ -348,9 +348,18 @@ $stderrLogFile = Join-Path $LogDir "stderr_api_$Timestamp.log"
 # Set WORKER_AUTO_START=false to prevent API from spawning its own workers
 $env:WORKER_AUTO_START = "false"
 
+# Set API_PORT for programmatic uvicorn (app/main.py __main__ block)
+$env:API_PORT = $ApiPort
+
 try {
-    # Build uvicorn arguments
-    $uvicornArgs = @("-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", $ApiPort)
+    # Programmatic uvicorn: python -m app.main
+    # (서버 인스턴스를 app.core.server_state에 저장하여 self-restart에서
+    #  server.should_exit = True 로 graceful shutdown 가능)
+    # CLI uvicorn (python -m uvicorn) 대비 장점:
+    #   - server.should_exit: uvicorn 공식 graceful shutdown 경로
+    #   - timeout_graceful_shutdown=30: shutdown 타임아웃 설정
+    #   - signal.raise_signal(SIGINT) 의 Windows 호환성 이슈 회피
+    $uvicornArgs = @("-m", "app.main")
     if ($Dev) {
         # Hot reload disabled - causes hang in Windows NSSM environment (Session 0)
         # See: docs/2026-01-04-api-stability-improvements.md
