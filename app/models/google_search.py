@@ -35,6 +35,7 @@ class GoogleSavedSearch(Base):
     service_account_id = Column(Integer, ForeignKey("service_accounts.id", ondelete="SET NULL"), nullable=True)
     is_favorite = Column(Boolean, default=False)
     search_params = Column(Text, nullable=True)  # JSON: {lr, cr, as_sitesearch, num}
+    notify_on_new = Column(Boolean, default=False)  # 신규 결과 발견 시 알림 (v097 추가)
 
     # 마지막 실행 정보
     last_search_id = Column(String(36), nullable=True)
@@ -177,6 +178,16 @@ class GoogleSearchResult(Base):
     # 필터 정보
     date_filter = Column(String(10), nullable=True)
     page_number = Column(Integer, default=1)
+
+    # 신규 결과 감지 (v097 추가)
+    is_new = Column(Boolean, default=False)        # 이 런에서 최초 등장
+    rank_change = Column(Integer, nullable=True)   # 순위 변화 (양수=상승, 음수=하락)
+    prev_rank = Column(Integer, nullable=True)     # 이전 런에서의 순위
+
+    # 관리 기능 (v097 추가)
+    is_read = Column(Boolean, default=False)       # 읽음 여부
+    is_bookmarked = Column(Boolean, default=False) # 북마크 여부
+    memo = Column(Text, nullable=True)             # 메모
 
     # 메타
     created_at = Column(DateTime, default=datetime.now)

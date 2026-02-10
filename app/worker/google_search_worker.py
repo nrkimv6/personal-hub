@@ -386,8 +386,25 @@ class GoogleSearchWorker(BaseWorker):
         )
         db.add(history)
 
-        # 결과 저장
+        # 이전 런 결과 조회 (신규 결과 감지용)
+        prev_url_rank_map = self._get_previous_run_results(
+            db, queue_item.saved_search_id, query, search_id
+        )
+
+        # 결과 저장 (신규 여부 및 순위 변화 계산)
+        new_result_count = 0
         for result in all_results:
+            is_new = result.url not in prev_url_rank_map
+            rank_change = None
+            prev_rank = None
+
+            if not is_new:
+                prev_rank = prev_url_rank_map[result.url]
+                rank_change = prev_rank - result.rank  # 양수 = 상승, 음수 = 하락
+
+            if is_new:
+                new_result_count += 1
+
             record = GoogleSearchResult(
                 search_id=search_id,
                 query=query,
@@ -399,10 +416,19 @@ class GoogleSearchWorker(BaseWorker):
                 publish_date=result.publish_date,
                 date_filter=options.date_filter,
                 page_number=result.page_number,
+                is_new=is_new,
+                rank_change=rank_change,
+                prev_rank=prev_rank,
             )
             db.add(record)
 
         db.commit()
+
+        # 신규 결과 알림 발송
+        if new_result_count > 0 and queue_item.saved_search_id:
+            self._send_new_result_notification(
+                db, queue_item.saved_search_id, query, new_result_count
+            )
 
         return CrawlResult(
             search_id=search_id,
@@ -444,3 +470,94 @@ class GoogleSearchWorker(BaseWorker):
             logger.warning(
                 f"[{self.name}] Failed to update saved search: {e}"
             )
+
+    def _get_previous_run_results(
+        self,
+        db,
+        saved_search_id: Optional[int],
+        query: str,
+        current_search_id: str,
+    ) -> dict:
+        """이전 런의 결과 URL→rank 매핑 조회.
+
+        Args:
+            db: DB 세션
+            saved_search_id: 저장된 검색 ID (없으면 query로 조회)
+            query: 검색 키워드
+            current_search_id: 현재 검색 ID (제외용)
+
+        Returns:
+            dict: {url: rank} 매핑
+        """
+        try:
+            # 직전 런의 search_id 찾기
+            if saved_search_id:
+                prev_queue = (
+                    db.query(GoogleSearchQueue)
+                    .filter(
+                        GoogleSearchQueue.saved_search_id == saved_search_id,
+                        GoogleSearchQueue.status == "completed",
+                        GoogleSearchQueue.search_id != current_search_id,
+                    )
+                    .order_by(GoogleSearchQueue.completed_at.desc())
+                    .first()
+                )
+            else:
+                prev_queue = (
+                    db.query(GoogleSearchQueue)
+                    .filter(
+                        GoogleSearchQueue.query == query,
+                        GoogleSearchQueue.status == "completed",
+                        GoogleSearchQueue.search_id != current_search_id,
+                    )
+                    .order_by(GoogleSearchQueue.completed_at.desc())
+                    .first()
+                )
+
+            if not prev_queue:
+                return {}
+
+            # 이전 런의 결과 조회
+            prev_results = db.query(GoogleSearchResult).filter(
+                GoogleSearchResult.search_id == prev_queue.search_id
+            ).all()
+
+            return {r.url: r.rank for r in prev_results}
+
+        except Exception as e:
+            logger.warning(f"[{self.name}] Failed to get previous run results: {e}")
+            return {}
+
+    def _send_new_result_notification(
+        self,
+        db,
+        saved_search_id: int,
+        query: str,
+        new_count: int,
+    ):
+        """신규 결과 알림 발송.
+
+        Args:
+            db: DB 세션
+            saved_search_id: 저장된 검색 ID
+            query: 검색 키워드
+            new_count: 신규 결과 수
+        """
+        try:
+            saved = db.query(GoogleSavedSearch).filter_by(id=saved_search_id).first()
+            if not saved or not saved.notify_on_new:
+                return
+
+            # 알림 발송 (텔레그램 등)
+            from app.core.notification import send_notification
+
+            message = f"🔍 [{saved.name}] 신규 검색 결과 {new_count}건 발견\n검색어: {query}"
+            asyncio.create_task(send_notification(message))
+
+            logger.info(
+                f"[{self.name}] New result notification sent: "
+                f"saved_search={saved.name}, new_count={new_count}"
+            )
+
+        except Exception as e:
+            logger.warning(f"[{self.name}] Failed to send notification: {e}")
