@@ -18,6 +18,8 @@ class ReportService:
 
     SLEEP_NOW_LOG_DIR = r"D:\work\project\tools\sleep-now\logs"
     NIGHTLY_CLEANUP_LOG_DIR = r"D:\work\project\service\wtools\common\scripts\logs"
+    WTOOLS_AUDIT_DIR = r"D:\work\project\service\wtools\common\docs\audit"
+    WTOOLS_IDEATION_DIR = r"D:\work\project\service\wtools\common\docs\ideation"
 
     def __init__(self, db: Session):
         self.db = db
@@ -135,6 +137,81 @@ class ReportService:
             "writing": {}
         }
 
+    def collect_weekly_code_review(self, date: datetime) -> Dict[str, str]:
+        """주간 코드 리뷰 데이터 수집.
+
+        Args:
+            date: 분석 기준 날짜 (해당 날짜 또는 최근 7일 내 파일 검색)
+
+        Returns:
+            dict: {
+                "audit_content": str,
+                "ideation_content": str,
+                "date": str
+            }
+        """
+        audit_dir = Path(self.WTOOLS_AUDIT_DIR)
+        ideation_dir = Path(self.WTOOLS_IDEATION_DIR)
+        date_str = date.strftime("%Y-%m-%d")
+
+        # audit 파일 찾기 (정확한 날짜 → 최근 7일 fallback)
+        audit_content = ""
+        audit_file = audit_dir / f"{date_str}_codebase-audit.md"
+        if audit_file.exists():
+            try:
+                audit_content = audit_file.read_text(encoding="utf-8")
+            except Exception as e:
+                logger.error(f"Failed to read audit file: {e}")
+                audit_content = f"(파일 읽기 실패: {e})"
+        else:
+            # 최근 7일 내 파일 역순 검색
+            try:
+                audit_files = sorted(audit_dir.glob("*_codebase-audit.md"), reverse=True)
+                for af in audit_files:
+                    try:
+                        file_date_str = af.stem.split("_")[0]  # YYYY-MM-DD
+                        file_date = datetime.strptime(file_date_str, "%Y-%m-%d")
+                        if (date - file_date).days <= 7:
+                            audit_content = af.read_text(encoding="utf-8")
+                            logger.info(f"Found audit file from {file_date_str} (fallback)")
+                            break
+                    except (ValueError, IndexError):
+                        continue
+            except Exception as e:
+                logger.error(f"Failed to search audit files: {e}")
+
+        # ideation 파일 찾기 (정확한 날짜 → 최근 7일 fallback)
+        ideation_content = ""
+        ideation_file = ideation_dir / f"{date_str}_ideation-report.md"
+        if ideation_file.exists():
+            try:
+                ideation_content = ideation_file.read_text(encoding="utf-8")
+            except Exception as e:
+                logger.error(f"Failed to read ideation file: {e}")
+                ideation_content = f"(파일 읽기 실패: {e})"
+        else:
+            # 최근 7일 내 파일 역순 검색
+            try:
+                ideation_files = sorted(ideation_dir.glob("*_ideation-report.md"), reverse=True)
+                for idf in ideation_files:
+                    try:
+                        file_date_str = idf.stem.split("_")[0]  # YYYY-MM-DD
+                        file_date = datetime.strptime(file_date_str, "%Y-%m-%d")
+                        if (date - file_date).days <= 7:
+                            ideation_content = idf.read_text(encoding="utf-8")
+                            logger.info(f"Found ideation file from {file_date_str} (fallback)")
+                            break
+                    except (ValueError, IndexError):
+                        continue
+            except Exception as e:
+                logger.error(f"Failed to search ideation files: {e}")
+
+        return {
+            "audit_content": audit_content or "(audit 파일 없음 - 최근 7일 내 파일을 찾을 수 없음)",
+            "ideation_content": ideation_content or "(ideation 파일 없음 - 최근 7일 내 파일을 찾을 수 없음)",
+            "date": date_str
+        }
+
     def generate_report_prompt(
         self,
         report_type: str,
@@ -149,7 +226,7 @@ class ReportService:
         Returns:
             프롬프트 문자열
         """
-        from app.modules.reports.prompts import nightly_cleanup, sleep_now, daily_summary
+        from app.modules.reports.prompts import nightly_cleanup, sleep_now, daily_summary, weekly_code_review
 
         if report_type == "nightly_cleanup":
             return nightly_cleanup.NIGHTLY_CLEANUP_REPORT_PROMPT.format(**data)
@@ -160,6 +237,8 @@ class ReportService:
                 data_json=json.dumps(data, ensure_ascii=False, indent=2),
                 date=data.get("date", "")
             )
+        elif report_type == "weekly_code_review":
+            return weekly_code_review.WEEKLY_CODE_REVIEW_PROMPT.format(**data)
         else:
             raise ValueError(f"Unknown report type: {report_type}")
 
@@ -185,6 +264,8 @@ class ReportService:
             data = self.collect_nightly_cleanup_logs(period_end)  # 당일 기준
         elif report_type == "sleep_now":
             data = self.collect_sleep_now_logs(period_end)  # 당일 기준
+        elif report_type == "weekly_code_review":
+            data = self.collect_weekly_code_review(period_end)  # 당일 또는 최근 7일
         else:
             data = self.collect_daily_data(period_start)
 
