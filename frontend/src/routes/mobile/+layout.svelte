@@ -17,7 +17,7 @@
 		<MobileServerStatus />
 	</div>
 
-	<div class="tabs tabs-boxed">
+	<div class="tabs tabs-boxed overflow-x-auto flex-nowrap whitespace-nowrap">
 		{#each navItems as item}
 			<a
 				href={item.path}

@@ -1,7 +1,7 @@
 <script>
-	import { page } from '$app/stores';
-	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { page } from "$app/stores";
+	import { onMount } from "svelte";
+	import { goto } from "$app/navigation";
 
 	const targetId = $derived($page.params.id);
 
@@ -14,7 +14,7 @@
 	let showNewScheduleForm = $state(false);
 	let newSchedule = $state({
 		interval_days: 7, // 기본 주 1회
-		enabled: true
+		enabled: true,
 	});
 
 	async function loadData() {
@@ -23,7 +23,7 @@
 
 			// 대상 정보 로드
 			const targetRes = await fetch(`/api/v1/mobile/targets/${targetId}`);
-			if (!targetRes.ok) throw new Error('대상 조회 실패');
+			if (!targetRes.ok) throw new Error("대상 조회 실패");
 			target = await targetRes.json();
 
 			// 스케줄 목록 로드 (Mock)
@@ -41,14 +41,16 @@
 		return [
 			{
 				id: 1,
-				target_type: 'mobile_crawl',
+				target_type: "mobile_crawl",
 				target_config: { mobile_crawl_target_id: parseInt(targetId) },
 				interval_seconds: 7 * 24 * 3600, // 7일
 				enabled: true,
 				last_run: new Date(Date.now() - 2 * 24 * 3600000).toISOString(),
 				next_run: new Date(Date.now() + 5 * 24 * 3600000).toISOString(),
-				created_at: new Date(Date.now() - 30 * 24 * 3600000).toISOString()
-			}
+				created_at: new Date(
+					Date.now() - 30 * 24 * 3600000,
+				).toISOString(),
+			},
 		];
 	}
 
@@ -56,24 +58,24 @@
 		try {
 			const intervalSeconds = newSchedule.interval_days * 24 * 3600;
 
-			const response = await fetch('/api/v1/schedules', {
-				method: 'POST',
+			const response = await fetch("/api/v1/schedules", {
+				method: "POST",
 				headers: {
-					'Content-Type': 'application/json'
+					"Content-Type": "application/json",
 				},
 				body: JSON.stringify({
-					target_type: 'mobile_crawl',
+					target_type: "mobile_crawl",
 					target_config: {
-						mobile_crawl_target_id: parseInt(targetId)
+						mobile_crawl_target_id: parseInt(targetId),
 					},
 					interval_seconds: intervalSeconds,
-					enabled: newSchedule.enabled
-				})
+					enabled: newSchedule.enabled,
+				}),
 			});
 
-			if (!response.ok) throw new Error('스케줄 생성 실패');
+			if (!response.ok) throw new Error("스케줄 생성 실패");
 
-			alert('스케줄이 생성되었습니다.');
+			alert("스케줄이 생성되었습니다.");
 			showNewScheduleForm = false;
 			await loadData();
 		} catch (err) {
@@ -84,19 +86,19 @@
 	async function toggleSchedule(schedule) {
 		try {
 			const response = await fetch(`/api/v1/schedules/${schedule.id}`, {
-				method: 'PUT',
+				method: "PUT",
 				headers: {
-					'Content-Type': 'application/json'
+					"Content-Type": "application/json",
 				},
 				body: JSON.stringify({
 					...schedule,
-					enabled: !schedule.enabled
-				})
+					enabled: !schedule.enabled,
+				}),
 			});
 
-			if (!response.ok) throw new Error('스케줄 업데이트 실패');
+			if (!response.ok) throw new Error("스케줄 업데이트 실패");
 
-			alert('스케줄 상태가 변경되었습니다.');
+			alert("스케줄 상태가 변경되었습니다.");
 			await loadData();
 		} catch (err) {
 			alert(`스케줄 업데이트 실패: ${err.message}`);
@@ -104,16 +106,16 @@
 	}
 
 	async function deleteSchedule(schedule) {
-		if (!confirm('스케줄을 삭제하시겠습니까?')) return;
+		if (!confirm("스케줄을 삭제하시겠습니까?")) return;
 
 		try {
 			const response = await fetch(`/api/v1/schedules/${schedule.id}`, {
-				method: 'DELETE'
+				method: "DELETE",
 			});
 
-			if (!response.ok) throw new Error('스케줄 삭제 실패');
+			if (!response.ok) throw new Error("스케줄 삭제 실패");
 
-			alert('스케줄이 삭제되었습니다.');
+			alert("스케줄이 삭제되었습니다.");
 			await loadData();
 		} catch (err) {
 			alert(`스케줄 삭제 실패: ${err.message}`);
@@ -130,7 +132,7 @@
 		if (hours > 0) parts.push(`${hours}시간`);
 		if (minutes > 0) parts.push(`${minutes}분`);
 
-		return parts.join(' ') || '0분';
+		return parts.join(" ") || "0분";
 	}
 
 	onMount(() => {
@@ -148,7 +150,9 @@
 			<div class="breadcrumbs text-sm">
 				<ul>
 					<li><a href="/mobile/targets">크롤링 대상</a></li>
-					<li><a href="/mobile/targets/{targetId}">{target.name}</a></li>
+					<li>
+						<a href="/mobile/targets/{targetId}">{target.name}</a>
+					</li>
 					<li>스케줄 관리</li>
 				</ul>
 			</div>
@@ -160,7 +164,10 @@
 		<!-- 새 스케줄 버튼 -->
 		<div class="mb-6">
 			{#if !showNewScheduleForm}
-				<button class="btn btn-primary" onclick={() => (showNewScheduleForm = true)}>
+				<button
+					class="btn btn-primary"
+					onclick={() => (showNewScheduleForm = true)}
+				>
 					+ 새 스케줄 추가
 				</button>
 			{/if}
@@ -184,22 +191,38 @@
 							class="input input-bordered w-32"
 						/>
 						<label class="label">
-							<span class="label-text-alt">{formatInterval(newSchedule.interval_days * 86400)}</span>
+							<span class="label-text-alt"
+								>{formatInterval(
+									newSchedule.interval_days * 86400,
+								)}</span
+							>
 						</label>
 					</div>
 
 					<div class="form-control">
 						<label class="label cursor-pointer justify-start gap-2">
-							<input type="checkbox" bind:checked={newSchedule.enabled} class="checkbox" />
+							<input
+								type="checkbox"
+								bind:checked={newSchedule.enabled}
+								class="checkbox"
+							/>
 							<span class="label-text">활성화</span>
 						</label>
 					</div>
 
 					<div class="card-actions justify-end">
-						<button class="btn btn-ghost" onclick={() => (showNewScheduleForm = false)}>
+						<button
+							class="btn btn-ghost"
+							onclick={() => (showNewScheduleForm = false)}
+						>
 							취소
 						</button>
-						<button class="btn btn-primary" onclick={createSchedule}> 생성 </button>
+						<button
+							class="btn btn-primary"
+							onclick={createSchedule}
+						>
+							생성
+						</button>
 					</div>
 				</div>
 			</div>
@@ -228,40 +251,77 @@
 				{#each schedules as schedule}
 					<div class="card bg-base-100 shadow">
 						<div class="card-body">
-							<div class="flex justify-between items-start">
-								<div class="flex-1">
-									<div class="flex items-center gap-2 mb-2">
-										<h3 class="font-semibold">주기: {formatInterval(schedule.interval_seconds)}</h3>
-										<div class="badge {schedule.enabled ? 'badge-success' : 'badge-ghost'}">
-											{schedule.enabled ? '활성화' : '비활성화'}
+							<div
+								class="flex flex-col sm:flex-row justify-between items-start gap-4"
+							>
+								<div class="flex-1 w-full min-w-0">
+									<div
+										class="flex flex-wrap items-center gap-2 mb-2"
+									>
+										<h3
+											class="font-semibold whitespace-nowrap"
+										>
+											주기: {formatInterval(
+												schedule.interval_seconds,
+											)}
+										</h3>
+										<div
+											class="badge {schedule.enabled
+												? 'badge-success'
+												: 'badge-ghost'} shrink-0"
+										>
+											{schedule.enabled
+												? "활성화"
+												: "비활성화"}
 										</div>
 									</div>
 
 									<div class="text-sm space-y-1">
 										{#if schedule.last_run}
-											<div class="text-gray-600">
-												마지막 실행: {new Date(schedule.last_run).toLocaleString()}
+											<div
+												class="text-gray-600 break-words"
+											>
+												마지막 실행: {new Date(
+													schedule.last_run,
+												).toLocaleString()}
 											</div>
 										{/if}
 										{#if schedule.next_run}
-											<div class="text-gray-600">
-												다음 실행: {new Date(schedule.next_run).toLocaleString()}
+											<div
+												class="text-gray-600 break-words"
+											>
+												다음 실행: {new Date(
+													schedule.next_run,
+												).toLocaleString()}
 											</div>
 										{/if}
-										<div class="text-xs text-gray-500">
-											생성일: {new Date(schedule.created_at).toLocaleString()}
+										<div
+											class="text-xs text-gray-500 break-words"
+										>
+											생성일: {new Date(
+												schedule.created_at,
+											).toLocaleString()}
 										</div>
 									</div>
 								</div>
 
-								<div class="flex gap-2">
+								<div
+									class="flex gap-2 w-full sm:w-auto justify-end flex-wrap"
+								>
 									<button
-										class="btn btn-sm {schedule.enabled ? 'btn-warning' : 'btn-success'}"
+										class="btn btn-sm {schedule.enabled
+											? 'btn-warning'
+											: 'btn-success'} flex-1 sm:flex-none"
 										onclick={() => toggleSchedule(schedule)}
 									>
-										{schedule.enabled ? '비활성화' : '활성화'}
+										{schedule.enabled
+											? "비활성화"
+											: "활성화"}
 									</button>
-									<button class="btn btn-sm btn-error" onclick={() => deleteSchedule(schedule)}>
+									<button
+										class="btn btn-sm btn-error flex-1 sm:flex-none"
+										onclick={() => deleteSchedule(schedule)}
+									>
 										삭제
 									</button>
 								</div>
@@ -298,7 +358,10 @@
 		</div>
 
 		<div class="mt-6">
-			<button class="btn btn-ghost" onclick={() => goto(`/mobile/targets/${targetId}`)}>
+			<button
+				class="btn btn-ghost"
+				onclick={() => goto(`/mobile/targets/${targetId}`)}
+			>
 				← 대상 상세로 돌아가기
 			</button>
 		</div>

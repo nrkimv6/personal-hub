@@ -1,5 +1,5 @@
 <script>
-	import { onMount } from 'svelte';
+	import { onMount } from "svelte";
 
 	// Sample HTML for testing
 	const SAMPLE_HTML = `<!DOCTYPE html>
@@ -31,25 +31,30 @@
 </html>`;
 
 	let html = $state(SAMPLE_HTML);
-	let testSelector = $state('.product-card');
+	let testSelector = $state(".product-card");
 	let testResult = $state(null);
 	let testError = $state(null);
 
 	// Parse config builder
-	let containerSelector = $state('.product-card');
+	let containerSelector = $state(".product-card");
 	let attributes = $state([
-		{ name: 'title', selector: '.product-title', type: 'text' },
-		{ name: 'price', selector: '.price', type: 'text' },
-		{ name: 'status', selector: '.status', type: 'text' },
-		{ name: 'image', selector: '.product-image', type: 'attr', attr: 'src' },
-		{ name: 'link', selector: '.detail-link', type: 'attr', attr: 'href' }
+		{ name: "title", selector: ".product-title", type: "text" },
+		{ name: "price", selector: ".price", type: "text" },
+		{ name: "status", selector: ".status", type: "text" },
+		{
+			name: "image",
+			selector: ".product-image",
+			type: "attr",
+			attr: "src",
+		},
+		{ name: "link", selector: ".detail-link", type: "attr", attr: "href" },
 	]);
 
-	let paginationType = $state('url'); // 'url', 'scroll', 'none'
-	let paginationSelector = $state('.pagination a');
+	let paginationType = $state("url"); // 'url', 'scroll', 'none'
+	let paginationSelector = $state(".pagination a");
 	let maxPages = $state(10);
 
-	let generatedConfig = $state('');
+	let generatedConfig = $state("");
 
 	function loadSampleHtml() {
 		html = SAMPLE_HTML;
@@ -62,31 +67,31 @@
 		testResult = null;
 
 		if (!testSelector) {
-			testError = '셀렉터를 입력해주세요.';
+			testError = "셀렉터를 입력해주세요.";
 			return;
 		}
 
 		try {
 			// HTML을 임시 DOM으로 파싱
 			const parser = new DOMParser();
-			const doc = parser.parseFromString(html, 'text/html');
+			const doc = parser.parseFromString(html, "text/html");
 			const elements = doc.querySelectorAll(testSelector);
 
 			if (elements.length === 0) {
-				testResult = { count: 0, message: '매칭되는 요소가 없습니다.' };
+				testResult = { count: 0, message: "매칭되는 요소가 없습니다." };
 			} else {
 				const samples = Array.from(elements)
 					.slice(0, 5)
 					.map((el) => ({
 						tagName: el.tagName.toLowerCase(),
 						textContent: el.textContent.trim().substring(0, 100),
-						innerHTML: el.innerHTML.substring(0, 200)
+						innerHTML: el.innerHTML.substring(0, 200),
 					}));
 
 				testResult = {
 					count: elements.length,
 					message: `${elements.length}개의 요소가 발견되었습니다.`,
-					samples
+					samples,
 				};
 			}
 		} catch (err) {
@@ -95,7 +100,10 @@
 	}
 
 	function addAttribute() {
-		attributes = [...attributes, { name: '', selector: '', type: 'text', attr: '' }];
+		attributes = [
+			...attributes,
+			{ name: "", selector: "", type: "text", attr: "" },
+		];
 	}
 
 	function removeAttribute(index) {
@@ -104,27 +112,37 @@
 
 	function generateConfig() {
 		const config = {
-			version: '1.0',
+			version: "1.0",
 			container_selector: containerSelector,
 			attributes: Object.fromEntries(
 				attributes
 					.filter((a) => a.name && a.selector)
 					.map((a) => {
-						if (a.type === 'attr' && a.attr) {
-							return [a.name, { selector: a.selector, type: 'attr', attr: a.attr }];
+						if (a.type === "attr" && a.attr) {
+							return [
+								a.name,
+								{
+									selector: a.selector,
+									type: "attr",
+									attr: a.attr,
+								},
+							];
 						} else {
-							return [a.name, { selector: a.selector, type: a.type }];
+							return [
+								a.name,
+								{ selector: a.selector, type: a.type },
+							];
 						}
-					})
+					}),
 			),
 			pagination:
-				paginationType === 'none'
+				paginationType === "none"
 					? null
 					: {
 							type: paginationType,
 							selector: paginationSelector,
-							max_pages: maxPages
-						}
+							max_pages: maxPages,
+						},
 		};
 
 		generatedConfig = JSON.stringify(config, null, 2);
@@ -133,7 +151,7 @@
 	function copyConfig() {
 		if (generatedConfig) {
 			navigator.clipboard.writeText(generatedConfig);
-			alert('설정이 클립보드에 복사되었습니다.');
+			alert("설정이 클립보드에 복사되었습니다.");
 		}
 	}
 
@@ -146,8 +164,8 @@
 	<div class="mb-6">
 		<h1 class="text-2xl font-bold">HTML 분석 도구</h1>
 		<p class="text-gray-600 mt-1">
-			샘플 HTML을 분석하여 크롤링 설정을 생성합니다. 실제 대상 페이지의 HTML을 붙여넣거나 샘플
-			데이터를 사용하세요.
+			샘플 HTML을 분석하여 크롤링 설정을 생성합니다. 실제 대상 페이지의
+			HTML을 붙여넣거나 샘플 데이터를 사용하세요.
 		</p>
 	</div>
 
@@ -157,9 +175,16 @@
 			<!-- HTML 입력 -->
 			<div class="card bg-base-100 shadow">
 				<div class="card-body">
-					<div class="flex justify-between items-center">
+					<div
+						class="flex flex-wrap justify-between items-center gap-2 mb-2"
+					>
 						<h2 class="card-title">HTML 입력</h2>
-						<button class="btn btn-sm btn-ghost" onclick={loadSampleHtml}> 샘플 로드 </button>
+						<button
+							class="btn btn-sm btn-ghost"
+							onclick={loadSampleHtml}
+						>
+							샘플 로드
+						</button>
 					</div>
 
 					<textarea
@@ -169,7 +194,9 @@
 						placeholder="HTML을 붙여넣으세요..."
 					></textarea>
 
-					<div class="text-xs text-gray-500">크기: {(html.length / 1024).toFixed(2)} KB</div>
+					<div class="text-xs text-gray-500">
+						크기: {(html.length / 1024).toFixed(2)} KB
+					</div>
 				</div>
 			</div>
 
@@ -189,7 +216,10 @@
 								placeholder=".product-card"
 								class="input input-bordered join-item flex-1"
 							/>
-							<button class="btn join-item btn-primary" onclick={testSelectorInBrowser}>
+							<button
+								class="btn join-item btn-primary"
+								onclick={testSelectorInBrowser}
+							>
 								테스트
 							</button>
 						</div>
@@ -204,12 +234,18 @@
 					{#if testResult}
 						<div class="alert alert-info">
 							<div>
-								<div class="font-bold">{testResult.message}</div>
+								<div class="font-bold">
+									{testResult.message}
+								</div>
 								{#if testResult.samples && testResult.samples.length > 0}
 									<div class="text-sm mt-2">
-										<div class="font-semibold mb-1">샘플 (최대 5개):</div>
+										<div class="font-semibold mb-1">
+											샘플 (최대 5개):
+										</div>
 										{#each testResult.samples as sample, i}
-											<div class="bg-base-200 p-2 rounded mt-1">
+											<div
+												class="bg-base-200 p-2 rounded mt-1"
+											>
 												<div class="font-mono text-xs">
 													&lt;{sample.tagName}&gt; {sample.textContent}
 												</div>
@@ -233,7 +269,9 @@
 
 					<div class="form-control">
 						<label class="label">
-							<span class="label-text">각 아이템을 감싸는 요소의 셀렉터</span>
+							<span class="label-text"
+								>각 아이템을 감싸는 요소의 셀렉터</span
+							>
 						</label>
 						<input
 							type="text"
@@ -251,15 +289,22 @@
 				<div class="card-body">
 					<div class="flex justify-between items-center">
 						<h2 class="card-title">2. 속성 추출 규칙</h2>
-						<button class="btn btn-sm btn-ghost" onclick={addAttribute}>+ 추가</button>
+						<button
+							class="btn btn-sm btn-ghost"
+							onclick={addAttribute}>+ 추가</button
+						>
 					</div>
 
 					<div class="space-y-3">
 						{#each attributes as attr, i}
 							<div class="border rounded p-3">
-								<div class="grid grid-cols-12 gap-2 items-start">
+								<div
+									class="grid grid-cols-12 gap-2 items-start"
+								>
 									<div class="col-span-3">
-										<label class="label label-text text-xs">필드명</label>
+										<label class="label label-text text-xs"
+											>필드명</label
+										>
 										<input
 											type="text"
 											bind:value={attr.name}
@@ -269,7 +314,9 @@
 										/>
 									</div>
 									<div class="col-span-4">
-										<label class="label label-text text-xs">셀렉터</label>
+										<label class="label label-text text-xs"
+											>셀렉터</label
+										>
 										<input
 											type="text"
 											bind:value={attr.selector}
@@ -279,7 +326,9 @@
 										/>
 									</div>
 									<div class="col-span-2">
-										<label class="label label-text text-xs">타입</label>
+										<label class="label label-text text-xs"
+											>타입</label
+										>
 										<select
 											bind:value={attr.type}
 											class="select select-sm select-bordered w-full"
@@ -290,8 +339,11 @@
 										</select>
 									</div>
 									<div class="col-span-2">
-										{#if attr.type === 'attr'}
-											<label class="label label-text text-xs">속성</label>
+										{#if attr.type === "attr"}
+											<label
+												class="label label-text text-xs"
+												>속성</label
+											>
 											<input
 												type="text"
 												bind:value={attr.attr}
@@ -352,10 +404,12 @@
 						</select>
 					</div>
 
-					{#if paginationType !== 'none'}
+					{#if paginationType !== "none"}
 						<div class="form-control">
 							<label class="label">
-								<span class="label-text">다음 페이지 링크 셀렉터</span>
+								<span class="label-text"
+									>다음 페이지 링크 셀렉터</span
+								>
 							</label>
 							<input
 								type="text"
@@ -375,7 +429,7 @@
 								bind:value={maxPages}
 								min="1"
 								max="100"
-								class="input input-bordered w-32"
+								class="input input-bordered w-full max-w-xs"
 								onchange={generateConfig}
 							/>
 						</div>
@@ -386,9 +440,14 @@
 			<!-- 생성된 JSON -->
 			<div class="card bg-base-100 shadow">
 				<div class="card-body">
-					<div class="flex justify-between items-center">
+					<div
+						class="flex flex-wrap justify-between items-center gap-2 mb-2"
+					>
 						<h2 class="card-title">4. 생성된 설정 (JSON)</h2>
-						<button class="btn btn-sm btn-ghost" onclick={copyConfig}>복사</button>
+						<button
+							class="btn btn-sm btn-ghost"
+							onclick={copyConfig}>복사</button
+						>
 					</div>
 
 					<textarea
@@ -413,7 +472,8 @@
 							></path>
 						</svg>
 						<span class="text-sm"
-							>이 JSON을 크롤링 대상 등록 시 "파싱 설정" 필드에 붙여넣으세요.</span
+							>이 JSON을 크롤링 대상 등록 시 "파싱 설정" 필드에
+							붙여넣으세요.</span
 						>
 					</div>
 				</div>

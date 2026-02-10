@@ -147,7 +147,9 @@
 		<div class="alert alert-error">{error}</div>
 	{:else}
 		<!-- 이력 테이블 -->
-		<div class="overflow-x-auto">
+		<!-- 이력 목록 (모바일용 카드 + 데스크탑용 테이블) -->
+		<!-- 데스크탑 테이블 -->
+		<div class="hidden md:block overflow-x-auto">
 			<table class="table table-zebra">
 				<thead>
 					<tr>
@@ -187,7 +189,7 @@
 										</div>
 									</div>
 								{:else if run.error_message}
-									<div class="text-sm text-error">{run.error_message}</div>
+									<div class="text-sm text-error break-words max-w-xs">{run.error_message}</div>
 								{:else}
 									-
 								{/if}
@@ -211,10 +213,68 @@
 					{/each}
 				</tbody>
 			</table>
-
-			{#if filteredRuns().length === 0}
-				<div class="text-center py-8 text-gray-500">실행 이력이 없습니다.</div>
-			{/if}
 		</div>
+
+		<!-- 모바일 카드 목록 -->
+		<div class="md:hidden grid gap-4">
+			{#each filteredRuns() as run}
+				<div class="card bg-base-100 shadow-sm border">
+					<div class="card-body p-4">
+						<div class="flex justify-between items-start mb-2">
+							<div class="flex items-center gap-2">
+								<span class="text-sm font-mono text-gray-500">#{run.id}</span>
+								<button
+									class="font-bold link link-primary no-underline"
+									onclick={() => goto(`/mobile/targets/${run.target_id}`)}
+								>
+									{run.target_name}
+								</button>
+							</div>
+							<div class="badge {getStatusBadgeClass(run.status)} badge-sm">
+								{getStatusText(run.status)}
+							</div>
+						</div>
+
+						<div class="text-xs text-gray-500 mb-3">
+							{new Date(run.started_at).toLocaleString()}
+						</div>
+
+						{#if run.status === 'completed'}
+							<div class="bg-base-200 rounded p-3 text-sm mb-3">
+								<div class="flex justify-between mb-1">
+									<span>수집:</span>
+									<span class="font-semibold">{run.result.collected_count}건</span>
+								</div>
+								<div class="flex justify-between mb-1 text-gray-600">
+									<span>(신규/변경):</span>
+									<span>{run.result.new_count} / {run.result.updated_count}</span>
+								</div>
+								<div class="flex justify-between">
+									<span>소요시간:</span>
+									<span>{run.result.duration_seconds.toFixed(2)}초</span>
+								</div>
+							</div>
+						{:else if run.error_message}
+							<div class="alert alert-error text-xs py-2 mb-3">
+								{run.error_message}
+							</div>
+						{/if}
+
+						<div class="card-actions justify-end">
+							<button
+								class="btn btn-sm btn-outline btn-block"
+								onclick={() => goto(`/mobile/runs/${run.id}/items`)}
+							>
+								결과 보기
+							</button>
+						</div>
+					</div>
+				</div>
+			{/each}
+		</div>
+
+	{#if filteredRuns().length === 0}
+		<div class="text-center py-8 text-gray-500">실행 이력이 없습니다.</div>
+	{/if}
 	{/if}
 </div>

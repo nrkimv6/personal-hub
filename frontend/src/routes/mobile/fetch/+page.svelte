@@ -1,8 +1,8 @@
 <script>
-	import { onMount } from 'svelte';
+	import { onMount } from "svelte";
 
-	let url = $state('');
-	let waitForSelector = $state('');
+	let url = $state("");
+	let waitForSelector = $state("");
 	let waitTimeout = $state(30);
 	let screenshot = $state(false);
 
@@ -12,7 +12,7 @@
 
 	async function fetchHtml() {
 		if (!url) {
-			error = 'URL을 입력해주세요.';
+			error = "URL을 입력해주세요.";
 			return;
 		}
 
@@ -21,22 +21,22 @@
 			error = null;
 			result = null;
 
-			const response = await fetch('/api/v1/mobile/fetch-html', {
-				method: 'POST',
+			const response = await fetch("/api/v1/mobile/fetch-html", {
+				method: "POST",
 				headers: {
-					'Content-Type': 'application/json'
+					"Content-Type": "application/json",
 				},
 				body: JSON.stringify({
 					url,
 					wait_for_selector: waitForSelector || undefined,
 					wait_timeout: waitTimeout,
-					screenshot
-				})
+					screenshot,
+				}),
 			});
 
 			if (!response.ok) {
 				const errorData = await response.json();
-				throw new Error(errorData.detail || 'HTML 수집 실패');
+				throw new Error(errorData.detail || "HTML 수집 실패");
 			}
 
 			result = await response.json();
@@ -55,7 +55,7 @@
 	function copyHtml() {
 		if (result?.html) {
 			navigator.clipboard.writeText(result.html);
-			alert('HTML이 클립보드에 복사되었습니다.');
+			alert("HTML이 클립보드에 복사되었습니다.");
 		}
 	}
 </script>
@@ -63,7 +63,9 @@
 <div class="container mx-auto p-4 max-w-6xl">
 	<div class="mb-6">
 		<h1 class="text-2xl font-bold">모바일 HTML 수집 도구</h1>
-		<p class="text-gray-600 mt-1">모바일 서버를 통해 페이지의 렌더링된 HTML을 수집합니다.</p>
+		<p class="text-gray-600 mt-1">
+			모바일 서버를 통해 페이지의 렌더링된 HTML을 수집합니다.
+		</p>
 	</div>
 
 	<!-- 입력 폼 -->
@@ -89,7 +91,9 @@
 			<div class="form-control">
 				<label class="label">
 					<span class="label-text">대기 셀렉터 (선택)</span>
-					<span class="label-text-alt">특정 요소가 나타날 때까지 대기</span>
+					<span class="label-text-alt"
+						>특정 요소가 나타날 때까지 대기</span
+					>
 				</label>
 				<input
 					type="text"
@@ -110,7 +114,7 @@
 					bind:value={waitTimeout}
 					min="5"
 					max="120"
-					class="input input-bordered w-32"
+					class="input input-bordered w-full max-w-xs"
 					disabled={loading}
 				/>
 			</div>
@@ -118,17 +122,30 @@
 			<!-- 스크린샷 -->
 			<div class="form-control">
 				<label class="label cursor-pointer justify-start gap-2">
-					<input type="checkbox" bind:checked={screenshot} class="checkbox" disabled={loading} />
+					<input
+						type="checkbox"
+						bind:checked={screenshot}
+						class="checkbox"
+						disabled={loading}
+					/>
 					<span class="label-text">스크린샷 수집</span>
 				</label>
 			</div>
 
 			<!-- 버튼 -->
 			<div class="card-actions justify-end mt-4">
-				<button class="btn btn-ghost" onclick={clearResults} disabled={loading || (!result && !error)}>
+				<button
+					class="btn btn-ghost"
+					onclick={clearResults}
+					disabled={loading || (!result && !error)}
+				>
 					초기화
 				</button>
-				<button class="btn btn-primary" onclick={fetchHtml} disabled={loading}>
+				<button
+					class="btn btn-primary"
+					onclick={fetchHtml}
+					disabled={loading}
+				>
 					{#if loading}
 						<span class="loading loading-spinner"></span>
 						수집 중...
@@ -170,19 +187,31 @@
 
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 						<div>
-							<div class="text-sm font-semibold text-gray-600">페이지 제목</div>
-							<div class="text-base mt-1">{result.title || 'N/A'}</div>
+							<div class="text-sm font-semibold text-gray-600">
+								페이지 제목
+							</div>
+							<div class="text-base mt-1">
+								{result.title || "N/A"}
+							</div>
 						</div>
 						<div>
-							<div class="text-sm font-semibold text-gray-600">수집 시각</div>
+							<div class="text-sm font-semibold text-gray-600">
+								수집 시각
+							</div>
 							<div class="text-base mt-1">
 								{new Date(result.fetched_at).toLocaleString()}
 							</div>
 						</div>
 						<div class="md:col-span-2">
-							<div class="text-sm font-semibold text-gray-600">최종 URL</div>
+							<div class="text-sm font-semibold text-gray-600">
+								최종 URL
+							</div>
 							<div class="text-base mt-1 break-all">
-								<a href={result.final_url} target="_blank" class="link link-primary">
+								<a
+									href={result.final_url}
+									target="_blank"
+									class="link link-primary"
+								>
 									{result.final_url}
 								</a>
 							</div>
@@ -210,7 +239,9 @@
 			<!-- HTML 원본 -->
 			<div class="card bg-base-100 shadow">
 				<div class="card-body">
-					<div class="flex justify-between items-center">
+					<div
+						class="flex flex-wrap justify-between items-center gap-2 mb-2"
+					>
 						<h2 class="card-title">HTML 원본</h2>
 						<button class="btn btn-sm btn-ghost" onclick={copyHtml}>
 							<svg

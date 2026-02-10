@@ -1,6 +1,6 @@
 <script>
-	import { onMount } from 'svelte';
-	import { page } from '$app/stores';
+	import { onMount } from "svelte";
+	import { page } from "$app/stores";
 
 	let items = $state([]);
 	let loading = $state(true);
@@ -23,7 +23,7 @@
 			loading = true;
 
 			// 대상 목록 로드
-			const targetsRes = await fetch('/api/v1/mobile/targets');
+			const targetsRes = await fetch("/api/v1/mobile/targets");
 			if (targetsRes.ok) {
 				targets = await targetsRes.json();
 			}
@@ -41,7 +41,10 @@
 		const mockItems = [];
 
 		for (let i = 0; i < 50; i++) {
-			const target = targets[i % Math.max(targets.length, 1)] || { id: 1, name: 'Mock 대상' };
+			const target = targets[i % Math.max(targets.length, 1)] || {
+				id: 1,
+				name: "Mock 대상",
+			};
 			const isChanged = Math.random() > 0.7;
 
 			mockItems.push({
@@ -54,11 +57,15 @@
 				is_changed: isChanged,
 				attributes: {
 					price: `${Math.floor(Math.random() * 100 + 10) * 1000}원`,
-					status: Math.random() > 0.5 ? '재고 있음' : '품절',
-					date: new Date(Date.now() - i * 86400000).toISOString().split('T')[0]
+					status: Math.random() > 0.5 ? "재고 있음" : "품절",
+					date: new Date(Date.now() - i * 86400000)
+						.toISOString()
+						.split("T")[0],
 				},
-				first_seen_at: new Date(Date.now() - i * 86400000 - 7 * 86400000).toISOString(),
-				last_seen_at: new Date(Date.now() - i * 86400000).toISOString()
+				first_seen_at: new Date(
+					Date.now() - i * 86400000 - 7 * 86400000,
+				).toISOString(),
+				last_seen_at: new Date(Date.now() - i * 86400000).toISOString(),
 			});
 		}
 
@@ -69,7 +76,9 @@
 		let result = items;
 
 		if (targetFilter) {
-			result = result.filter((item) => item.target_id === parseInt(targetFilter));
+			result = result.filter(
+				(item) => item.target_id === parseInt(targetFilter),
+			);
 		}
 
 		if (showOnlyChanged) {
@@ -85,7 +94,9 @@
 		return filteredItems().slice(start, end);
 	});
 
-	const totalPages = $derived(Math.ceil(filteredItems().length / itemsPerPage));
+	const totalPages = $derived(
+		Math.ceil(filteredItems().length / itemsPerPage),
+	);
 
 	function openItemDetail(item) {
 		selectedItem = item;
@@ -103,7 +114,9 @@
 <div class="container mx-auto p-4">
 	<div class="mb-6">
 		<h1 class="text-2xl font-bold">수집 아이템 목록</h1>
-		<p class="text-gray-600 mt-1">모든 대상에서 수집된 아이템을 조회합니다.</p>
+		<p class="text-gray-600 mt-1">
+			모든 대상에서 수집된 아이템을 조회합니다.
+		</p>
 	</div>
 
 	<!-- 필터 -->
@@ -114,7 +127,10 @@
 					<label class="label">
 						<span class="label-text">대상</span>
 					</label>
-					<select bind:value={targetFilter} class="select select-bordered">
+					<select
+						bind:value={targetFilter}
+						class="select select-bordered"
+					>
 						<option value={null}>전체</option>
 						{#each targets as target}
 							<option value={target.id}>{target.name}</option>
@@ -124,7 +140,11 @@
 
 				<div class="form-control">
 					<label class="label cursor-pointer justify-start gap-2">
-						<input type="checkbox" bind:checked={showOnlyChanged} class="checkbox" />
+						<input
+							type="checkbox"
+							bind:checked={showOnlyChanged}
+							class="checkbox"
+						/>
 						<span class="label-text">변경된 아이템만 보기</span>
 					</label>
 				</div>
@@ -141,32 +161,51 @@
 		<!-- 아이템 그리드 -->
 		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
 			{#each paginatedItems() as item}
-				<div class="card bg-base-100 shadow hover:shadow-lg transition-shadow cursor-pointer">
-					<button onclick={() => openItemDetail(item)} class="text-left">
+				<div
+					class="card bg-base-100 shadow hover:shadow-lg transition-shadow cursor-pointer"
+				>
+					<button
+						onclick={() => openItemDetail(item)}
+						class="text-left"
+					>
 						{#if item.image_url}
 							<figure>
-								<img src={item.image_url} alt={item.title} class="w-full h-48 object-cover" />
+								<img
+									src={item.image_url}
+									alt={item.title}
+									class="w-full h-48 object-cover"
+								/>
 							</figure>
 						{/if}
 						<div class="card-body">
 							<h3 class="card-title text-base">
 								{item.title}
 								{#if item.is_changed}
-									<span class="badge badge-warning badge-sm">변경됨</span>
+									<span class="badge badge-warning badge-sm"
+										>변경됨</span
+									>
 								{/if}
 							</h3>
 
 							<div class="text-sm space-y-1">
 								{#if item.attributes.price}
-									<div><strong>가격:</strong> {item.attributes.price}</div>
+									<div>
+										<strong>가격:</strong>
+										{item.attributes.price}
+									</div>
 								{/if}
 								{#if item.attributes.status}
-									<div><strong>상태:</strong> {item.attributes.status}</div>
+									<div>
+										<strong>상태:</strong>
+										{item.attributes.status}
+									</div>
 								{/if}
 							</div>
 
 							<div class="text-xs text-gray-500 mt-2">
-								최종: {new Date(item.last_seen_at).toLocaleString()}
+								최종: {new Date(
+									item.last_seen_at,
+								).toLocaleString()}
 							</div>
 						</div>
 					</button>
@@ -214,8 +253,10 @@
 <!-- 아이템 상세 모달 (7-8) -->
 {#if selectedItem}
 	<div class="modal modal-open">
-		<div class="modal-box max-w-3xl">
-			<h3 class="font-bold text-lg mb-4">{selectedItem.title}</h3>
+		<div class="modal-box w-11/12 max-w-3xl">
+			<h3 class="font-bold text-lg mb-4 break-words">
+				{selectedItem.title}
+			</h3>
 
 			{#if selectedItem.image_url}
 				<img
@@ -230,22 +271,33 @@
 				<div>
 					<h4 class="font-semibold mb-2">기본 정보</h4>
 					<div class="space-y-1 text-sm">
-						<div><strong>대상:</strong> {selectedItem.target_name}</div>
+						<div>
+							<strong>대상:</strong>
+							{selectedItem.target_name}
+						</div>
 						{#if selectedItem.item_url}
 							<div>
 								<strong>URL:</strong>
-								<a href={selectedItem.item_url} target="_blank" class="link link-primary">
+								<a
+									href={selectedItem.item_url}
+									target="_blank"
+									class="link link-primary break-all"
+								>
 									{selectedItem.item_url}
 								</a>
 							</div>
 						{/if}
 						<div>
 							<strong>최초 발견:</strong>
-							{new Date(selectedItem.first_seen_at).toLocaleString()}
+							{new Date(
+								selectedItem.first_seen_at,
+							).toLocaleString()}
 						</div>
 						<div>
 							<strong>최종 확인:</strong>
-							{new Date(selectedItem.last_seen_at).toLocaleString()}
+							{new Date(
+								selectedItem.last_seen_at,
+							).toLocaleString()}
 						</div>
 					</div>
 				</div>
@@ -255,9 +307,14 @@
 					<h4 class="font-semibold mb-2">속성</h4>
 					<div class="bg-base-200 p-3 rounded text-sm">
 						{#each Object.entries(selectedItem.attributes) as [key, value]}
-							<div class="flex justify-between py-1">
-								<span class="font-medium">{key}:</span>
-								<span>{value}</span>
+							<div
+								class="flex flex-col sm:flex-row sm:justify-between py-2 border-b last:border-0 border-base-300 gap-1"
+							>
+								<span class="font-medium shrink-0">{key}:</span>
+								<span
+									class="break-all sm:text-right text-gray-600"
+									>{value}</span
+								>
 							</div>
 						{/each}
 					</div>
@@ -284,7 +341,11 @@
 							</div>
 							<div class="timeline-end timeline-box">
 								<div class="font-semibold">최종 확인</div>
-								<div class="text-xs">{new Date(selectedItem.last_seen_at).toLocaleString()}</div>
+								<div class="text-xs">
+									{new Date(
+										selectedItem.last_seen_at,
+									).toLocaleString()}
+								</div>
 								<div class="text-sm mt-1">변경사항 없음</div>
 							</div>
 							<hr />
@@ -307,7 +368,11 @@
 							</div>
 							<div class="timeline-end timeline-box">
 								<div class="font-semibold">최초 발견</div>
-								<div class="text-xs">{new Date(selectedItem.first_seen_at).toLocaleString()}</div>
+								<div class="text-xs">
+									{new Date(
+										selectedItem.first_seen_at,
+									).toLocaleString()}
+								</div>
 							</div>
 						</li>
 					</ul>
@@ -317,7 +382,11 @@
 			<div class="modal-action">
 				<button class="btn" onclick={closeItemDetail}>닫기</button>
 				{#if selectedItem.item_url}
-					<a href={selectedItem.item_url} target="_blank" class="btn btn-primary">
+					<a
+						href={selectedItem.item_url}
+						target="_blank"
+						class="btn btn-primary"
+					>
 						원본 페이지 열기
 					</a>
 				{/if}
