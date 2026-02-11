@@ -2,7 +2,6 @@
 
 import subprocess
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict
@@ -25,9 +24,9 @@ class ExecutorService:
         if state.is_running():
             raise HTTPException(status_code=409, detail="Already running")
 
-        # 명령어 구성
+        # 명령어 구성 (auto-next 전용 venv의 python 사용)
         cmd = [
-            sys.executable,  # python 실행 파일 경로
+            str(config.AUTO_NEXT_PYTHON),
             "-m",
             "auto_next",
             "run",
@@ -50,29 +49,38 @@ class ExecutorService:
         if request.skip_plan:
             cmd.append("--skip-plan")
 
+        if request.parallel:
+            cmd.append("--parallel")
+
+        if request.projects:
+            cmd.extend(["--projects", request.projects])
+
         # 로그 파일 경로
         log_dir = config.WTOOLS_BASE_DIR / config.LOG_DIR
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / f"auto-next-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
 
-        # subprocess 실행
+        # subprocess 실행 (파일 핸들을 열어둔 채로 유지)
         try:
-            with open(log_file, "w", encoding="utf-8") as f:
-                process = subprocess.Popen(
-                    cmd,
-                    cwd=str(config.AUTO_NEXT_MODULE_PATH),
-                    stdout=f,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                )
+            log_handle = open(log_file, "w", encoding="utf-8")
 
-            # 상태 저장
+            process = subprocess.Popen(
+                cmd,
+                cwd=str(config.AUTO_NEXT_MODULE_PATH),
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+
+            # 상태 저장 (파일 핸들도 보관 — stop/reset 시 닫음)
             state.process = process
             state.pid = process.pid
             state.start_time = datetime.now()
             state.plan_file = request.plan_file
             state.current_cycle = 0
-            state.options = request.dict()
+            state.options = request.model_dump()
+            state.log_file_handle = log_handle
+            state.log_file_path = str(log_file)
 
             return RunStatusResponse(
                 running=True,
@@ -103,7 +111,7 @@ class ExecutorService:
             state.process.kill()
             state.process.wait()
 
-        # 상태 초기화
+        # 상태 초기화 (로그 파일 핸들도 닫힘)
         state.reset()
 
         return {"message": "Stopped successfully"}
@@ -114,7 +122,7 @@ class ExecutorService:
 
         # 프로세스 종료 여부 확인
         if state.process and not state.is_running():
-            # 자동 정리
+            # 자동 정리 (로그 파일 핸들도 닫힘)
             state.reset()
 
         return RunStatusResponse(

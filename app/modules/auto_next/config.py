@@ -21,6 +21,17 @@ class AutoNextConfig(BaseSettings):
     LOG_DIR: Path = Path("common/logs")
     LOG_FILE_PATTERN: str = "auto-next-*.log"
 
+    # 프로젝트 디렉토리 목록 (plan 탐색용)
+    PROJECT_DIRS: List[str] = [
+        "activity-hub", "admin-tools", "auth-worker", "cross-noti",
+        "gentle-words", "line-minder", "memo-alarm", "mini-toolbox",
+        "sacred-hours", "screenshot-generator", "story-weaver",
+        "tb-wish", "tool-view", "wedding-mass-guide",
+    ]
+
+    # 외부 plan 저장 파일
+    EXTERNAL_PLANS_FILE: Path = Path(r"D:\work\project\tools\monitor-page\data\external_plans.json")
+
     # 외부 경로 화이트리스트
     ALLOWED_EXTERNAL_PATHS: List[str] = [r"D:\work\project"]
 
@@ -29,6 +40,9 @@ class AutoNextConfig(BaseSettings):
 
     # auto-next 모듈 경로
     AUTO_NEXT_MODULE_PATH: Path = Path(r"D:\work\project\service\wtools\common\tools\auto-next")
+
+    # auto-next 전용 Python 실행 파일 (monitor-page venv가 아닌 auto-next venv 사용)
+    AUTO_NEXT_PYTHON: Path = Path(r"D:\work\project\service\wtools\common\tools\auto-next\.venv\Scripts\python.exe")
 
     class Config:
         env_prefix = "AUTO_NEXT_"

@@ -114,7 +114,7 @@
 		<!-- Run Control + Plans -->
 		<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 			<RunControl status={runStatus} {plans} onStatusChange={handleRunStatusChange} />
-			<PlanList {plans} />
+			<PlanList {plans} onPlansChange={loadData} />
 		</div>
 
 		<!-- Task List -->

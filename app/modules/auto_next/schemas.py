@@ -64,6 +64,8 @@ class RunRequest(BaseModel):
     until: Optional[str] = Field(None, description="종료 시각 (HH:MM 형식)")
     dry_run: bool = Field(False, description="DRY_RUN 모드")
     skip_plan: bool = Field(False, description="plan 단계 스킵")
+    parallel: bool = Field(False, description="병렬 실행 모드")
+    projects: Optional[str] = Field(None, description="프로젝트 목록 (쉼표 구분)")
 
 
 class RunStatusResponse(BaseModel):
@@ -88,6 +90,8 @@ class PlanFileResponse(BaseModel):
     filename: str
     status: str
     progress: PlanProgressResponse
+    source: str = "common"  # common, 프로젝트명, external
+    ignored: bool = False  # 완료/빈 plan
 
 
 class HistoryEntry(BaseModel):

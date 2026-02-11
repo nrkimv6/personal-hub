@@ -55,6 +55,8 @@ export interface RunRequest {
 	until?: string | null;
 	dry_run?: boolean;
 	skip_plan?: boolean;
+	parallel?: boolean;
+	projects?: string | null;
 }
 
 export interface RunStatusResponse {
@@ -76,6 +78,8 @@ export interface PlanFileResponse {
 	filename: string;
 	status: string;
 	progress: PlanProgressResponse;
+	source: string;
+	ignored: boolean;
 }
 
 export interface HistoryEntry {
@@ -190,6 +194,8 @@ export const autoNextRunnerApi = {
 export const autoNextPlanApi = {
 	list: () => autoNextRequest<PlanFileResponse[]>('/plans'),
 
+	ignored: () => autoNextRequest<PlanFileResponse[]>('/plans/ignored'),
+
 	get: (encodedPath: string) =>
 		autoNextRequest<PlanProgressResponse>(`/plans/${encodedPath}`),
 
@@ -198,6 +204,12 @@ export const autoNextPlanApi = {
 	addExternal: (path: string) =>
 		autoNextRequest<{ success: boolean }>('/plans/add-external', {
 			method: 'POST',
+			body: JSON.stringify({ path })
+		}),
+
+	removeExternal: (path: string) =>
+		autoNextRequest<{ success: boolean }>('/plans/external', {
+			method: 'DELETE',
 			body: JSON.stringify({ path })
 		})
 };

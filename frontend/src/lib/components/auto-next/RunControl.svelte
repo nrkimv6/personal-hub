@@ -14,6 +14,8 @@
 	let maxCycles = $state(0);
 	let until = $state('');
 	let dryRun = $state(false);
+	let parallel = $state(false);
+	let projects = $state('');
 	let actionLoading = $state(false);
 	let actionError = $state<string | null>(null);
 
@@ -29,7 +31,9 @@
 				plan_file: selectedPlan,
 				max_cycles: maxCycles || 0,
 				until: until || null,
-				dry_run: dryRun
+				dry_run: dryRun,
+				parallel: parallel,
+				projects: projects || null
 			});
 			onStatusChange();
 		} catch (e) {
@@ -125,10 +129,28 @@
 					/>
 				</div>
 			</div>
-			<label class="flex items-center gap-2 text-sm text-gray-600">
-				<input type="checkbox" bind:checked={dryRun} />
-				Dry Run (실제 실행 안 함)
-			</label>
+			<div class="flex gap-4">
+				<label class="flex items-center gap-2 text-sm text-gray-600">
+					<input type="checkbox" bind:checked={dryRun} />
+					Dry Run
+				</label>
+				<label class="flex items-center gap-2 text-sm text-gray-600">
+					<input type="checkbox" bind:checked={parallel} />
+					병렬 실행
+				</label>
+			</div>
+			{#if parallel}
+				<div>
+					<label class="block text-sm text-gray-600 mb-1" for="projects">프로젝트 (쉼표 구분)</label>
+					<input
+						id="projects"
+						type="text"
+						class="w-full border rounded-lg px-3 py-2 text-sm"
+						bind:value={projects}
+						placeholder="예: memo-alarm,activity-hub"
+					/>
+				</div>
+			{/if}
 			<button
 				class="w-full py-2 rounded-lg font-medium text-white bg-green-500 hover:bg-green-600 disabled:opacity-50 transition-colors"
 				onclick={handleStart}
