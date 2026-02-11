@@ -905,11 +905,17 @@ export interface ScheduledTask {
   project: string;
 }
 
-export interface WorkerProcess {
-  name: string;
-  project: string;
+export interface ProcessStatus {
   pid: number | null;
   running: boolean;
+}
+
+export interface WorkerProcess {
+  name: string;
+  label: string;
+  project: string;
+  watchdog: ProcessStatus | null;
+  worker: ProcessStatus | null;
 }
 
 export interface ProjectServices {

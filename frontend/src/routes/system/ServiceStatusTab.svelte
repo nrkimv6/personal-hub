@@ -458,7 +458,13 @@
           {#if project.worker_processes.length > 0}
             <section>
               <div class="flex justify-between items-center mb-2">
-                <h3 class="text-lg font-medium text-foreground dark:text-gray-300">워커 프로세스</h3>
+                <div class="flex items-center gap-3">
+                  <h3 class="text-lg font-medium text-foreground dark:text-gray-300">워커 프로세스</h3>
+                  <span class="text-xs text-muted-foreground dark:text-gray-500 flex items-center gap-2">
+                    <span class="flex items-center gap-0.5"><span class="inline-block w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600"></span> 왓치독</span>
+                    <span class="flex items-center gap-0.5"><span class="inline-block w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600"></span> 워커</span>
+                  </span>
+                </div>
                 <button
                   class="px-3 py-1 text-xs bg-primary text-white rounded hover:bg-primary-hover disabled:opacity-50"
                   disabled={actionLoading === 'workers'}
@@ -467,13 +473,33 @@
                 </button>
               </div>
               <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {#each project.worker_processes as worker}
-                  <div class="p-3 rounded border {worker.running ? 'border-green-500 dark:border-green-600' : 'border-border dark:border-gray-600'}">
-                    <div class="font-medium text-foreground dark:text-white">{worker.name}</div>
+                {#each project.worker_processes as proc}
+                  {@const primaryStatus = proc.worker ?? proc.watchdog}
+                  {@const isRunning = primaryStatus?.running ?? false}
+                  <div class="p-3 rounded border {isRunning ? 'border-green-500 dark:border-green-600' : 'border-border dark:border-gray-600'}">
+                    <div class="flex justify-between items-center">
+                      <span class="font-medium text-foreground dark:text-white">{proc.label}</span>
+                      <span class="flex items-center gap-1">
+                        {#if proc.watchdog}
+                          <span
+                            class="inline-block w-2 h-2 rounded-full {proc.watchdog.running ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}"
+                            title="왓치독: {proc.watchdog.running ? `Running (PID: ${proc.watchdog.pid})` : 'Stopped'}"
+                          ></span>
+                        {/if}
+                        {#if proc.worker}
+                          <span
+                            class="inline-block w-2 h-2 rounded-full {proc.worker.running ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}"
+                            title="워커: {proc.worker.running ? `Running (PID: ${proc.worker.pid})` : 'Stopped'}"
+                          ></span>
+                        {/if}
+                      </span>
+                    </div>
                     <div class="text-sm">
-                      {#if worker.running}
+                      {#if isRunning}
                         <span class="text-success dark:text-green-400">Running</span>
-                        <span class="text-xs text-muted-foreground dark:text-muted-foreground ml-1">(PID: {worker.pid})</span>
+                        {#if primaryStatus?.pid}
+                          <span class="text-xs text-muted-foreground dark:text-muted-foreground ml-1">(PID: {primaryStatus.pid})</span>
+                        {/if}
                       {:else}
                         <span class="text-muted-foreground dark:text-muted-foreground">Stopped</span>
                       {/if}
