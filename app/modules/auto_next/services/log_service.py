@@ -1,4 +1,4 @@
-"""로그 스트리밍 서비스"""
+"""로그 스트리밍 서비스 - Redis 기반 로그 경로 조회"""
 
 import asyncio
 from collections import deque
@@ -6,32 +6,44 @@ from pathlib import Path
 from typing import Optional, AsyncGenerator
 import glob
 
+import redis
+
 from app.modules.auto_next.config import config
 from app.modules.auto_next.schemas import LogResponse
+from app.modules.auto_next.services.state import get_state
+
+# Redis 설정
+REDIS_HOST = "localhost"
+REDIS_PORT = 6379
+STATE_KEY = "auto-next:state"
 
 
 class LogService:
-    """로그 파일 스트리밍 서비스"""
+    """로그 파일 스트리밍 서비스 - Redis 기반"""
 
-    def _find_latest_log(self) -> Optional[Path]:
-        """최신 로그 파일 찾기"""
-        log_dir = config.WTOOLS_BASE_DIR / config.LOG_DIR
-        if not log_dir.exists():
-            return None
+    def __init__(self):
+        """Redis 클라이언트 초기화"""
+        self.redis_client = redis.Redis(
+            host=REDIS_HOST,
+            port=REDIS_PORT,
+            decode_responses=True,
+            socket_connect_timeout=5,
+        )
 
-        pattern = str(log_dir / config.LOG_FILE_PATTERN)
-        log_files = glob.glob(pattern)
-
-        if not log_files:
-            return None
-
-        # 최신 파일 반환 (mtime 기준)
-        latest_file = max(log_files, key=lambda f: Path(f).stat().st_mtime)
-        return Path(latest_file)
+    def _find_current_log(self) -> Optional[Path]:
+        """현재 실행 중인 auto-next 프로세스의 로그 파일 (Redis에서 조회)"""
+        try:
+            # Redis에서 로그 경로 조회
+            log_path = self.redis_client.get(STATE_KEY + ":log_file_path")
+            if log_path and Path(log_path).exists():
+                return Path(log_path)
+        except redis.ConnectionError:
+            pass
+        return None
 
     def tail_log_file(self, n_lines: int = 100) -> LogResponse:
         """로그 파일 끝에서 N줄 읽기"""
-        log_file = self._find_latest_log()
+        log_file = self._find_current_log()
 
         if not log_file or not log_file.exists():
             return LogResponse(lines=[], total_lines=0)
@@ -51,30 +63,43 @@ class LogService:
             )
 
     async def stream_log_file(self) -> AsyncGenerator[str, None]:
-        """로그 파일 실시간 스트리밍 (SSE 형식)"""
-        log_file = self._find_latest_log()
+        """로그 파일 실시간 스트리밍 (SSE 형식) - 현재 프로세스 로그만"""
+        current_file: Optional[Path] = None
+        f = None
 
-        if not log_file or not log_file.exists():
-            yield "data: [No log file found]\n\n"
-            return
-
-        # 파일 열기 및 끝으로 이동
         try:
-            with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
-                # 파일 끝으로 이동
-                f.seek(0, 2)
+            while True:
+                # 매 루프마다 현재 프로세스의 로그 파일 확인
+                new_file = self._find_current_log()
 
-                # 무한 루프로 새 줄 읽기
-                while True:
+                if new_file != current_file:
+                    # 로그 파일이 바뀜 (새 실행 시작 등)
+                    if f:
+                        f.close()
+                        f = None
+                    current_file = new_file
+
+                    if current_file and current_file.exists():
+                        f = open(current_file, "r", encoding="utf-8", errors="ignore")
+                        # 처음부터 읽기 (새 실행이므로)
+                    else:
+                        yield "data: [Waiting for log...]\n\n"
+                        await asyncio.sleep(1)
+                        continue
+
+                if f:
                     line = f.readline()
                     if line:
-                        # 새 줄이 있으면 전송
                         yield f"data: {line}\n\n"
                     else:
-                        # 새 줄이 없으면 0.5초 대기
                         await asyncio.sleep(0.5)
+                else:
+                    await asyncio.sleep(1)
         except Exception as e:
             yield f"data: [Error: {str(e)}]\n\n"
+        finally:
+            if f:
+                f.close()
 
 
 # 싱글톤 인스턴스

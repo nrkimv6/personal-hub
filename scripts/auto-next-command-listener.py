@@ -1,0 +1,354 @@
+"""
+Redis Auto-Next Command Listener
+
+Session 1 (사용자 세션)에서 실행되는 auto-next 명령 리스너입니다.
+API 서버(Session 0)에서 Redis를 통해 전달된 명령을 수신하고 실행합니다.
+
+동작 방식:
+    - BRPOP으로 auto-next:commands 키를 블로킹 대기 (CPU 0%)
+    - 명령 수신 시 auto-next CLI 실행
+    - 실행 결과/PID를 auto-next:command_results에 반환
+    - stop 명령 시 프로세스 terminate
+
+사용법:
+    python scripts/auto-next-command-listener.py
+
+아키텍처:
+    API (Session 0) → Redis LPUSH → [이 리스너 (Session 1)] → auto-next CLI
+"""
+import json
+import logging
+import subprocess
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Optional, Dict
+
+import redis
+
+# 설정
+REDIS_HOST = "localhost"
+REDIS_PORT = 6379
+COMMANDS_KEY = "auto-next:commands"
+RESULTS_KEY = "auto-next:command_results"
+STATE_KEY = "auto-next:state"
+BRPOP_TIMEOUT = 0  # 0 = 무한 대기
+
+SCRIPT_DIR = Path(__file__).parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+WTOOLS_BASE_DIR = Path("D:/work/project/service/wtools")
+AUTO_NEXT_MODULE_PATH = WTOOLS_BASE_DIR / "common/tools/auto-next"
+AUTO_NEXT_PYTHON = AUTO_NEXT_MODULE_PATH / ".venv/Scripts/python.exe"
+LOG_DIR = WTOOLS_BASE_DIR / "common/logs"
+
+# 로깅 설정
+log_dir = PROJECT_ROOT / "logs" / "dev"
+log_dir.mkdir(parents=True, exist_ok=True)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(log_dir / "auto_next_command_listener.log", encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
+)
+logger = logging.getLogger(__name__)
+
+# 전역 프로세스 관리
+_current_process: Optional[subprocess.Popen] = None
+_current_log_file: Optional[Path] = None
+
+
+def start_auto_next(command: Dict, redis_client: redis.Redis) -> Dict:
+    """auto-next CLI 실행 시작
+
+    Args:
+        command: {action: "run", plan_file: str, max_cycles: int, ...}
+        redis_client: Redis 클라이언트
+
+    Returns:
+        dict: {success: bool, message: str, pid: int|None, log_file: str|None}
+    """
+    global _current_process, _current_log_file
+
+    # 이미 실행 중이면 에러
+    if _current_process and _current_process.poll() is None:
+        return {
+            "success": False,
+            "message": f"Already running (PID: {_current_process.pid})"
+        }
+
+    # 명령어 구성
+    plan_file = command.get("plan_file")
+    if not plan_file:
+        return {"success": False, "message": "plan_file required"}
+
+    cmd = [
+        str(AUTO_NEXT_PYTHON),
+        "-m",
+        "auto_next",
+        "run",
+        "--plan-file",
+        plan_file,
+    ]
+
+    # 옵션 추가
+    if command.get("max_cycles"):
+        cmd.extend(["--max-cycles", str(command["max_cycles"])])
+
+    if command.get("max_tokens"):
+        cmd.extend(["--max-tokens", str(command["max_tokens"])])
+
+    if command.get("until"):
+        cmd.extend(["--until", command["until"]])
+
+    if command.get("dry_run"):
+        cmd.append("--dry-run")
+
+    if command.get("skip_plan"):
+        cmd.append("--skip-plan")
+
+    if command.get("parallel"):
+        cmd.append("--parallel")
+
+    if command.get("projects"):
+        cmd.extend(["--projects", command["projects"]])
+
+    # 로그 파일 생성
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_file = LOG_DIR / f"auto-next-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
+
+    try:
+        # subprocess 실행
+        log_handle = open(log_file, "w", encoding="utf-8")
+
+        # UTF-8 강제
+        import os
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
+
+        process = subprocess.Popen(
+            cmd,
+            cwd=str(AUTO_NEXT_MODULE_PATH),
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=env,
+        )
+
+        _current_process = process
+        _current_log_file = log_file
+
+        # Redis에 상태 저장
+        state = {
+            "pid": process.pid,
+            "plan_file": plan_file,
+            "log_file_path": str(log_file),
+            "start_time": datetime.now().isoformat(),
+            "status": "running",
+        }
+        redis_client.set(STATE_KEY + ":log_file_path", str(log_file))
+        redis_client.set(STATE_KEY + ":pid", process.pid)
+        redis_client.set(STATE_KEY + ":plan_file", plan_file)
+        redis_client.set(STATE_KEY + ":start_time", state["start_time"])
+        redis_client.set(STATE_KEY + ":status", "running")
+
+        logger.info(f"auto-next started (PID: {process.pid}, log: {log_file})")
+
+        return {
+            "success": True,
+            "message": "auto-next started",
+            "pid": process.pid,
+            "log_file": str(log_file),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to start auto-next: {e}")
+        return {
+            "success": False,
+            "message": f"Failed to start: {str(e)}"
+        }
+
+
+def stop_auto_next(redis_client: redis.Redis) -> Dict:
+    """auto-next 프로세스 종료
+
+    Returns:
+        dict: {success: bool, message: str}
+    """
+    global _current_process, _current_log_file
+
+    if not _current_process or _current_process.poll() is not None:
+        return {"success": False, "message": "Not running"}
+
+    try:
+        logger.info(f"Stopping auto-next (PID: {_current_process.pid})...")
+
+        # Windows: terminate() 호출
+        _current_process.terminate()
+
+        # 5초 대기
+        try:
+            _current_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            # 강제 종료
+            _current_process.kill()
+            _current_process.wait()
+
+        logger.info("auto-next stopped")
+
+        # Redis 상태 업데이트
+        redis_client.set(STATE_KEY + ":status", "stopped")
+        redis_client.delete(STATE_KEY + ":pid")
+        redis_client.delete(STATE_KEY + ":log_file_path")
+
+        _current_process = None
+        _current_log_file = None
+
+        return {
+            "success": True,
+            "message": "Stopped successfully"
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to stop auto-next: {e}")
+        return {
+            "success": False,
+            "message": f"Failed to stop: {str(e)}"
+        }
+
+
+def get_status(redis_client: redis.Redis) -> Dict:
+    """현재 실행 상태 조회
+
+    Returns:
+        dict: {success: bool, running: bool, pid: int|None, log_file: str|None}
+    """
+    global _current_process
+
+    if _current_process and _current_process.poll() is None:
+        return {
+            "success": True,
+            "running": True,
+            "pid": _current_process.pid,
+            "log_file": str(_current_log_file) if _current_log_file else None,
+        }
+    else:
+        # 종료된 경우 Redis 상태 정리
+        if _current_process:
+            redis_client.set(STATE_KEY + ":status", "stopped")
+            redis_client.delete(STATE_KEY + ":pid")
+            redis_client.delete(STATE_KEY + ":log_file_path")
+            _current_process = None
+            _current_log_file = None
+
+        return {
+            "success": True,
+            "running": False,
+            "pid": None,
+            "log_file": None,
+        }
+
+
+def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
+    """명령 실행
+
+    Args:
+        command: {action: str, ...}
+        redis_client: Redis 클라이언트
+
+    Returns:
+        dict: {success: bool, message: str, ...}
+    """
+    action = command.get("action")
+
+    if action == "run":
+        return start_auto_next(command, redis_client)
+    elif action == "stop":
+        return stop_auto_next(redis_client)
+    elif action == "status":
+        return get_status(redis_client)
+    else:
+        return {"success": False, "message": f"Unknown action: {action}"}
+
+
+def main():
+    """메인 루프: Redis BRPOP으로 명령 대기 및 실행."""
+    logger.info("=" * 50)
+    logger.info("Auto-Next Command Listener 시작")
+    logger.info(f"Redis: {REDIS_HOST}:{REDIS_PORT}")
+    logger.info(f"명령 키: {COMMANDS_KEY}")
+    logger.info(f"결과 키: {RESULTS_KEY}")
+    logger.info(f"상태 키: {STATE_KEY}")
+    logger.info(f"auto-next 모듈: {AUTO_NEXT_MODULE_PATH}")
+    logger.info("=" * 50)
+
+    reconnect_delay = 1
+
+    while True:
+        try:
+            # Redis 연결
+            r = redis.Redis(
+                host=REDIS_HOST,
+                port=REDIS_PORT,
+                decode_responses=True,
+                socket_connect_timeout=5,
+            )
+            r.ping()
+            logger.info("Redis 연결 성공")
+            reconnect_delay = 1  # 연결 성공 시 리셋
+
+            # BRPOP 루프 (블로킹 대기)
+            while True:
+                result = r.brpop(COMMANDS_KEY, timeout=BRPOP_TIMEOUT)
+
+                if result is None:
+                    continue
+
+                _, raw_command = result
+
+                try:
+                    command = json.loads(raw_command)
+                except json.JSONDecodeError:
+                    logger.warning(f"잘못된 명령 형식: {raw_command}")
+                    continue
+
+                action = command.get("action")
+                source = command.get("source", "unknown")
+                timestamp = command.get("timestamp", "")
+
+                logger.info(f"명령 수신: action={action}, source={source}, time={timestamp}")
+
+                # 명령 실행
+                command_result = execute_command(command, r)
+                command_result["action"] = action
+                command_result["executed_at"] = datetime.now().isoformat()
+
+                # 결과 반환 (API가 BRPOP으로 대기 중)
+                r.lpush(RESULTS_KEY, json.dumps(command_result, ensure_ascii=False))
+                # 결과 키 만료 설정 (30초 후 자동 삭제, 누적 방지)
+                r.expire(RESULTS_KEY, 30)
+
+                logger.info(f"명령 결과 반환: {command_result}")
+
+        except redis.ConnectionError as e:
+            logger.warning(f"Redis 연결 실패: {e}, {reconnect_delay}초 후 재시도")
+            time.sleep(reconnect_delay)
+            reconnect_delay = min(reconnect_delay * 2, 30)
+
+        except KeyboardInterrupt:
+            logger.info("Ctrl+C로 종료")
+            break
+
+        except Exception as e:
+            logger.error(f"예상치 못한 오류: {e}", exc_info=True)
+            time.sleep(5)
+
+    logger.info("Auto-Next Command Listener 종료")
+
+
+if __name__ == "__main__":
+    main()
