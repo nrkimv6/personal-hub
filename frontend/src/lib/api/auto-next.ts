@@ -65,6 +65,8 @@ export interface RunStatusResponse {
 	plan_file: string | null;
 	start_time: string | null;
 	current_cycle: number | null;
+	exit_code: number | null;
+	crashed: boolean;
 }
 
 export interface PlanProgressResponse {

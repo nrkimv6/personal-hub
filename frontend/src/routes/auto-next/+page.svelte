@@ -87,6 +87,11 @@
 				<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
 				실행 중
 			</span>
+		{:else if runStatus?.crashed}
+			<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+				<span class="w-2 h-2 rounded-full bg-red-500"></span>
+				비정상 종료 (exit: {runStatus.exit_code})
+			</span>
 		{:else}
 			<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-600">
 				<span class="w-2 h-2 rounded-full bg-gray-400"></span>

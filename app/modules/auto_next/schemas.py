@@ -75,6 +75,8 @@ class RunStatusResponse(BaseModel):
     plan_file: Optional[str] = None
     start_time: Optional[datetime] = None
     current_cycle: Optional[int] = None
+    exit_code: Optional[int] = None  # None=실행중/미시작, 0=정상종료, 그 외=crash
+    crashed: bool = False  # exit_code != 0일 때 True
 
 
 class PlanProgressResponse(BaseModel):
