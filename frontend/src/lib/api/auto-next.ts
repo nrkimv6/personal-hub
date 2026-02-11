@@ -103,10 +103,10 @@ export interface TaskListParams {
 }
 
 // ============================================================
-// API prefix (auto-next는 /api/v1이 아닌 /api/auto-next 사용)
+// API prefix (백엔드 라우터: /api/v1/auto-next)
 // ============================================================
 
-const AUTO_NEXT_BASE = '/api/auto-next';
+const AUTO_NEXT_BASE = '/api/v1/auto-next';
 
 async function autoNextRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
 	const url = `${AUTO_NEXT_BASE}${endpoint}`;

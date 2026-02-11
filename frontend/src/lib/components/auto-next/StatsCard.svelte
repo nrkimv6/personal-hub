@@ -23,7 +23,7 @@
 		return `${minutes}m`;
 	}
 
-	let progressSegments = $derived(() => {
+	let segs = $derived.by(() => {
 		const total = stats.total || 1;
 		return {
 			success: (stats.success / total) * 100,
@@ -65,7 +65,6 @@
 		<span>{stats.completion_rate.toFixed(1)}% 완료</span>
 	</div>
 	<div class="w-full h-3 bg-gray-100 rounded-full overflow-hidden flex">
-		{@const segs = progressSegments()}
 		{#if segs.success > 0}
 			<div class="bg-green-500 h-full" style="width: {segs.success}%"></div>
 		{/if}

@@ -18,7 +18,7 @@ from app.modules.auto_next.services.state import get_state
 def _create_test_app() -> FastAPI:
     """테스트용 미니 FastAPI 앱"""
     test_app = FastAPI()
-    prefix = "/api/auto-next"
+    prefix = "/api/v1/auto-next"
     test_app.include_router(tasks_router, prefix=prefix)
     test_app.include_router(stats_router, prefix=prefix)
     test_app.include_router(runner_router, prefix=prefix)

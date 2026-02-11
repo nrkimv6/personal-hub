@@ -10,7 +10,7 @@ from app.modules.auto_next.services.state import get_state
 
 class TestGetStatus:
     async def test_get_status_not_running(self, client):
-        response = await client.get("/api/auto-next/status")
+        response = await client.get("/api/v1/auto-next/status")
         assert response.status_code == 200
         data = response.json()
         assert data["running"] is False
@@ -29,7 +29,7 @@ class TestStartRun:
                 mock_config.LOG_DIR = "logs"
                 mock_config.AUTO_NEXT_MODULE_PATH = tmp_path
 
-                response = await client.post("/api/auto-next/run", json={
+                response = await client.post("/api/v1/auto-next/run", json={
                     "plan_file": "test-plan.md"
                 })
 
@@ -45,7 +45,7 @@ class TestStartRun:
         state.process = mock_process
         state.pid = 99999
 
-        response = await client.post("/api/auto-next/run", json={
+        response = await client.post("/api/v1/auto-next/run", json={
             "plan_file": "test-plan.md"
         })
         assert response.status_code == 409
@@ -53,7 +53,7 @@ class TestStartRun:
 
 class TestStopRun:
     async def test_stop_not_running_returns_404(self, client):
-        response = await client.post("/api/auto-next/stop")
+        response = await client.post("/api/v1/auto-next/stop")
         assert response.status_code == 404
 
     async def test_stop_running_process(self, client):
@@ -65,6 +65,6 @@ class TestStopRun:
         state.pid = 99999
         state.start_time = datetime.now()
 
-        response = await client.post("/api/auto-next/stop")
+        response = await client.post("/api/v1/auto-next/stop")
         assert response.status_code == 200
         mock_process.terminate.assert_called_once()
