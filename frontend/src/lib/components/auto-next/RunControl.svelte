@@ -1,0 +1,141 @@
+<script lang="ts">
+	import { autoNextRunnerApi } from '$lib/api';
+	import type { AutoNextRunStatusResponse, AutoNextPlanFileResponse } from '$lib/api';
+
+	interface Props {
+		status: AutoNextRunStatusResponse | null;
+		plans: AutoNextPlanFileResponse[];
+		onStatusChange: () => void;
+	}
+
+	let { status, plans, onStatusChange }: Props = $props();
+
+	let selectedPlan = $state('');
+	let maxCycles = $state(0);
+	let until = $state('');
+	let dryRun = $state(false);
+	let actionLoading = $state(false);
+	let actionError = $state<string | null>(null);
+
+	async function handleStart() {
+		if (!selectedPlan) {
+			actionError = 'Plan 파일을 선택하세요';
+			return;
+		}
+		actionLoading = true;
+		actionError = null;
+		try {
+			await autoNextRunnerApi.start({
+				plan_file: selectedPlan,
+				max_cycles: maxCycles || 0,
+				until: until || null,
+				dry_run: dryRun
+			});
+			onStatusChange();
+		} catch (e) {
+			actionError = e instanceof Error ? e.message : '시작 실패';
+		} finally {
+			actionLoading = false;
+		}
+	}
+
+	async function handleStop() {
+		if (!confirm('실행을 중지하시겠습니까?')) return;
+		actionLoading = true;
+		actionError = null;
+		try {
+			await autoNextRunnerApi.stop();
+			onStatusChange();
+		} catch (e) {
+			actionError = e instanceof Error ? e.message : '중지 실패';
+		} finally {
+			actionLoading = false;
+		}
+	}
+
+	function formatTime(iso: string | null): string {
+		if (!iso) return '-';
+		return new Date(iso).toLocaleString('ko-KR');
+	}
+</script>
+
+<div class="bg-white rounded-lg border p-4">
+	<h2 class="font-semibold mb-3">실행 제어</h2>
+
+	{#if actionError}
+		<div class="text-sm text-red-600 bg-red-50 rounded p-2 mb-3">{actionError}</div>
+	{/if}
+
+	{#if status?.running}
+		<!-- 실행 중 상태 -->
+		<div class="space-y-3">
+			<div class="grid grid-cols-2 gap-2 text-sm">
+				<div class="text-gray-500">PID</div>
+				<div class="font-mono">{status.pid}</div>
+				<div class="text-gray-500">Plan</div>
+				<div class="truncate" title={status.plan_file || ''}>{status.plan_file || '-'}</div>
+				<div class="text-gray-500">시작 시각</div>
+				<div>{formatTime(status.start_time)}</div>
+				<div class="text-gray-500">현재 사이클</div>
+				<div>{status.current_cycle ?? '-'}</div>
+			</div>
+			<button
+				class="w-full py-2 rounded-lg font-medium text-white bg-red-500 hover:bg-red-600 disabled:opacity-50 transition-colors"
+				onclick={handleStop}
+				disabled={actionLoading}
+			>
+				{actionLoading ? '중지 중...' : '중지'}
+			</button>
+		</div>
+	{:else}
+		<!-- 중지 상태 - 시작 폼 -->
+		<div class="space-y-3">
+			<div>
+				<label class="block text-sm text-gray-600 mb-1" for="plan-select">Plan 파일</label>
+				<select
+					id="plan-select"
+					class="w-full border rounded-lg px-3 py-2 text-sm"
+					bind:value={selectedPlan}
+				>
+					<option value="">선택...</option>
+					{#each plans as plan}
+						<option value={plan.path}>{plan.filename} ({plan.progress.percent}%)</option>
+					{/each}
+				</select>
+			</div>
+			<div class="grid grid-cols-2 gap-3">
+				<div>
+					<label class="block text-sm text-gray-600 mb-1" for="max-cycles">최대 사이클</label>
+					<input
+						id="max-cycles"
+						type="number"
+						class="w-full border rounded-lg px-3 py-2 text-sm"
+						bind:value={maxCycles}
+						min="0"
+						placeholder="0 = 무제한"
+					/>
+				</div>
+				<div>
+					<label class="block text-sm text-gray-600 mb-1" for="until-time">종료 시각</label>
+					<input
+						id="until-time"
+						type="time"
+						class="w-full border rounded-lg px-3 py-2 text-sm"
+						bind:value={until}
+					/>
+				</div>
+			</div>
+			<label class="flex items-center gap-2 text-sm text-gray-600">
+				<input type="checkbox" bind:checked={dryRun} />
+				Dry Run (실제 실행 안 함)
+			</label>
+			<button
+				class="w-full py-2 rounded-lg font-medium text-white bg-green-500 hover:bg-green-600 disabled:opacity-50 transition-colors"
+				onclick={handleStart}
+				disabled={actionLoading || !selectedPlan}
+			>
+				{actionLoading ? '시작 중...' : '시작'}
+			</button>
+		</div>
+	{/if}
+</div>

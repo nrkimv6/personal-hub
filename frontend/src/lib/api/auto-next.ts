@@ -1,0 +1,216 @@
+/**
+ * Auto Next API - auto-next 모니터링 및 제어
+ */
+import { request, API_BASE, getAuthToken } from './client';
+
+// ============================================================
+// Types
+// ============================================================
+
+export interface TaskResponse {
+	id: string;
+	type: string;
+	source_path: string;
+	text: string;
+	priority: number;
+	status: string;
+	created_at: string;
+	started_at: string | null;
+	finished_at: string | null;
+	duration_seconds: number | null;
+	output_tokens: number;
+	input_tokens: number;
+	cache_read_tokens: number;
+	cache_creation_tokens: number;
+	error_message: string | null;
+	model_used: string | null;
+}
+
+export interface TaskListResponse {
+	tasks: TaskResponse[];
+	total: number;
+}
+
+export interface StatsResponse {
+	total: number;
+	pending: number;
+	running: number;
+	success: number;
+	failed: number;
+	skipped: number;
+	completed: number;
+	completion_rate: number;
+	success_rate: number;
+	total_input_tokens: number;
+	total_output_tokens: number;
+	total_cache_tokens: number;
+	total_tokens: number;
+	total_duration_ms: number;
+}
+
+export interface RunRequest {
+	plan_file: string;
+	max_cycles?: number;
+	max_tokens?: number;
+	until?: string | null;
+	dry_run?: boolean;
+	skip_plan?: boolean;
+}
+
+export interface RunStatusResponse {
+	running: boolean;
+	pid: number | null;
+	plan_file: string | null;
+	start_time: string | null;
+	current_cycle: number | null;
+}
+
+export interface PlanProgressResponse {
+	done: number;
+	total: number;
+	percent: number;
+}
+
+export interface PlanFileResponse {
+	path: string;
+	filename: string;
+	status: string;
+	progress: PlanProgressResponse;
+}
+
+export interface HistoryEntry {
+	date: string;
+	count: number;
+	success: number;
+	failed: number;
+}
+
+export interface DuplicateTaskResponse {
+	text: string;
+	count: number;
+	tasks: TaskResponse[];
+}
+
+export interface LogResponse {
+	lines: string[];
+	total_lines: number;
+}
+
+export interface TaskListParams {
+	status?: string;
+	limit?: number;
+	offset?: number;
+}
+
+// ============================================================
+// API prefix (auto-next는 /api/v1이 아닌 /api/auto-next 사용)
+// ============================================================
+
+const AUTO_NEXT_BASE = '/api/auto-next';
+
+async function autoNextRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+	const url = `${AUTO_NEXT_BASE}${endpoint}`;
+
+	const token = getAuthToken();
+	const headers: HeadersInit = {
+		'Content-Type': 'application/json',
+		...(token ? { Authorization: `Bearer ${token}` } : {}),
+		...options.headers
+	};
+
+	const response = await fetch(url, { ...options, headers, credentials: 'include' });
+
+	if (!response.ok) {
+		const error = await response.json().catch(() => ({ detail: response.statusText }));
+		const detail = error.detail;
+		const message = typeof detail === 'string' ? detail : detail?.message || '요청 실패';
+		throw new Error(message);
+	}
+
+	if (response.status === 204) {
+		return null as T;
+	}
+
+	return response.json();
+}
+
+// ============================================================
+// Tasks API
+// ============================================================
+
+export const autoNextTaskApi = {
+	list: (params?: TaskListParams) => {
+		const search = new URLSearchParams();
+		if (params?.status) search.set('status', params.status);
+		if (params?.limit) search.set('limit', String(params.limit));
+		if (params?.offset) search.set('offset', String(params.offset));
+		const qs = search.toString();
+		return autoNextRequest<TaskListResponse>(`/tasks${qs ? '?' + qs : ''}`);
+	},
+
+	get: (id: string) => autoNextRequest<TaskResponse>(`/tasks/${id}`),
+
+	delete: (id: string) =>
+		autoNextRequest<{ success: boolean }>(`/tasks/${id}`, { method: 'DELETE' })
+};
+
+// ============================================================
+// Stats API
+// ============================================================
+
+export const autoNextStatsApi = {
+	stats: () => autoNextRequest<StatsResponse>('/stats'),
+
+	history: (days: number = 30) => autoNextRequest<HistoryEntry[]>(`/history?days=${days}`),
+
+	duplicates: (minCount: number = 2) =>
+		autoNextRequest<DuplicateTaskResponse[]>(`/duplicates?min_count=${minCount}`)
+};
+
+// ============================================================
+// Runner API
+// ============================================================
+
+export const autoNextRunnerApi = {
+	start: (data: RunRequest) =>
+		autoNextRequest<RunStatusResponse>('/run', {
+			method: 'POST',
+			body: JSON.stringify(data)
+		}),
+
+	stop: () => autoNextRequest<{ success: boolean }>('/stop', { method: 'POST' }),
+
+	status: () => autoNextRequest<RunStatusResponse>('/status')
+};
+
+// ============================================================
+// Plans API
+// ============================================================
+
+export const autoNextPlanApi = {
+	list: () => autoNextRequest<PlanFileResponse[]>('/plans'),
+
+	get: (encodedPath: string) =>
+		autoNextRequest<PlanProgressResponse>(`/plans/${encodedPath}`),
+
+	sync: () => autoNextRequest<{ synced: number }>('/plans/sync', { method: 'POST' }),
+
+	addExternal: (path: string) =>
+		autoNextRequest<{ success: boolean }>('/plans/add-external', {
+			method: 'POST',
+			body: JSON.stringify({ path })
+		})
+};
+
+// ============================================================
+// Logs API
+// ============================================================
+
+export const autoNextLogApi = {
+	recent: (lines: number = 100) =>
+		autoNextRequest<LogResponse>(`/logs/recent?lines=${lines}`),
+
+	connectStream: (): EventSource => {
+		return new EventSource(`${AUTO_NEXT_BASE}/logs/stream`);
+	}
+};
