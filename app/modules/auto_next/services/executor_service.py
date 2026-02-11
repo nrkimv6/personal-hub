@@ -3,6 +3,7 @@
 import json
 import subprocess
 import sys
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Dict
@@ -10,6 +11,7 @@ from typing import Dict
 import redis
 from fastapi import HTTPException
 
+from app.config import logger
 from app.modules.auto_next.config import config
 from app.modules.auto_next.schemas import RunRequest, RunStatusResponse
 from app.modules.auto_next.services.state import get_state
@@ -127,8 +129,22 @@ class ExecutorService:
                 status_code=500,
                 detail=f"Invalid response from listener: {str(e)}"
             )
+        except HTTPException:
+            raise
         except Exception as e:
+            logger.error(f"[auto-next] start 실패: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Failed to start: {str(e)}")
+
+    def _force_cleanup_state(self):
+        """Redis 상태 강제 정리 (listener 무응답 시 fallback)"""
+        try:
+            self.redis_client.delete(STATE_KEY + ":status")
+            self.redis_client.delete(STATE_KEY + ":pid")
+            self.redis_client.delete(STATE_KEY + ":plan_file")
+            self.redis_client.delete(STATE_KEY + ":start_time")
+            self.redis_client.delete(STATE_KEY + ":log_file_path")
+        except Exception:
+            pass
 
     def stop_auto_next(self) -> Dict:
         """auto-next 실행 중지 - Redis 명령 전송"""
@@ -152,19 +168,18 @@ class ExecutorService:
             result = self.redis_client.brpop(RESULTS_KEY, timeout=COMMAND_TIMEOUT)
 
             if result is None:
-                raise HTTPException(
-                    status_code=504,
-                    detail="Command timeout - listener may not be responding"
-                )
+                # listener 무응답 → 프로세스가 죽었을 가능성 → 상태 강제 정리
+                logger.warning("[auto-next] listener 무응답, Redis 상태 강제 정리")
+                self._force_cleanup_state()
+                return {"message": "Force cleaned (listener not responding)"}
 
             _, raw_result = result
             result_data = json.loads(raw_result)
 
             if not result_data.get("success"):
-                raise HTTPException(
-                    status_code=500,
-                    detail=result_data.get("message", "Failed to stop")
-                )
+                # stop 실패해도 상태 정리
+                self._force_cleanup_state()
+                return {"message": f"Force cleaned: {result_data.get('message', '')}"}
 
             return {"message": "Stopped successfully"}
 
@@ -174,15 +189,31 @@ class ExecutorService:
                 detail="Redis connection failed - command listener may not be running"
             )
         except json.JSONDecodeError as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Invalid response from listener: {str(e)}"
-            )
+            self._force_cleanup_state()
+            return {"message": "Force cleaned (invalid listener response)"}
+        except HTTPException:
+            raise
         except Exception as e:
+            logger.error(f"[auto-next] stop 실패: {traceback.format_exc()}")
+            self._force_cleanup_state()
             raise HTTPException(status_code=500, detail=f"Failed to stop: {str(e)}")
 
+    def _is_pid_alive(self, pid: int) -> bool:
+        """PID가 실제로 살아있는지 확인"""
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if handle:
+                kernel32.CloseHandle(handle)
+                return True
+            return False
+        except Exception:
+            return False
+
     def get_process_status(self) -> RunStatusResponse:
-        """프로세스 상태 조회 - Redis에서 조회"""
+        """프로세스 상태 조회 - Redis에서 조회 + stale 상태 자동 정리"""
         try:
             # Redis에서 상태 조회
             status = self.redis_client.get(STATE_KEY + ":status")
@@ -191,6 +222,16 @@ class ExecutorService:
                 pid_str = self.redis_client.get(STATE_KEY + ":pid")
                 plan_file = self.redis_client.get(STATE_KEY + ":plan_file")
                 start_time_str = self.redis_client.get(STATE_KEY + ":start_time")
+
+                # PID 생존 확인 → 죽었으면 상태 자동 정리
+                if pid_str and not self._is_pid_alive(int(pid_str)):
+                    logger.warning(f"[auto-next] PID {pid_str} 죽음 감지, 상태 자동 정리")
+                    self._force_cleanup_state()
+                    return RunStatusResponse(
+                        running=False,
+                        pid=None,
+                        plan_file=None,
+                    )
 
                 return RunStatusResponse(
                     running=True,
@@ -215,6 +256,7 @@ class ExecutorService:
                 plan_file=None,
             )
         except Exception as e:
+            logger.error(f"[auto-next] status 조회 실패: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")
 
 
