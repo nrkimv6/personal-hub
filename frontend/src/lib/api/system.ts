@@ -1,7 +1,7 @@
 /**
  * System API - 시스템, 워커, 이벤트, 팝업, LLM, 에러 관리
  */
-import { request, API_BASE, getAuthToken } from './client';
+import { request, API_BASE, getAuthToken, fetchWithTimeout } from './client';
 import type {
   SystemStatus,
   QueueItem,
@@ -808,7 +808,7 @@ async function requestVideoDownload<T>(
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...options.headers
   };
-  const response = await fetch(url, { ...options, headers, credentials: 'include' });
+  const response = await fetchWithTimeout(url, { ...options, headers, credentials: 'include' });
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: response.statusText }));
     throw new Error(error.detail || '요청 실패');

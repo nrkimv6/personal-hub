@@ -289,20 +289,14 @@ export const itemApi = {
 // ============================================================
 
 export const notificationApi = {
-  getSettings: async (): Promise<NotificationSettings> => {
-    const res = await fetch(`${API_BASE}/notification/settings`);
-    if (!res.ok) throw new Error('Failed to fetch notification settings');
-    return res.json();
-  },
-  updateSettings: async (settings: NotificationSettings): Promise<NotificationSettings> => {
-    const res = await fetch(`${API_BASE}/notification/settings`, {
+  getSettings: (): Promise<NotificationSettings> =>
+    request<NotificationSettings>('/notification/settings'),
+
+  updateSettings: (settings: NotificationSettings): Promise<NotificationSettings> =>
+    request<NotificationSettings>('/notification/settings', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(settings)
-    });
-    if (!res.ok) throw new Error('Failed to update notification settings');
-    return res.json();
-  }
+    })
 };
 
 // ============================================================

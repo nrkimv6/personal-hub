@@ -55,6 +55,72 @@ export class ApiConnectionError extends Error {
 }
 
 /**
+ * 기존 signal과 타임아웃 signal을 합치는 유틸리티
+ * - 사용자의 AbortController signal과 타임아웃 signal을 모두 처리
+ * - 둘 중 하나라도 abort되면 전체 요청이 중단됨
+ */
+function mergeSignals(
+  existingSignal: AbortSignal | undefined,
+  timeoutSignal: AbortSignal
+): AbortSignal {
+  if (!existingSignal) return timeoutSignal;
+
+  // AbortSignal.any() 지원 시 사용 (Chrome 116+, Firefox 124+, Safari 17.4+)
+  if ('any' in AbortSignal) {
+    return (AbortSignal as any).any([existingSignal, timeoutSignal]);
+  }
+
+  // 폴백: 수동 합성
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  existingSignal.addEventListener('abort', onAbort);
+  timeoutSignal.addEventListener('abort', onAbort);
+  return controller.signal;
+}
+
+/**
+ * 타임아웃 기능이 있는 fetch 래퍼
+ * - 기본 타임아웃: 30초
+ * - 기존 AbortController signal과 충돌하지 않도록 signal 합성
+ * - 타임아웃 시 명확한 에러 메시지 반환
+ *
+ * @param url - 요청 URL
+ * @param options - fetch 옵션
+ * @param timeout - 타임아웃 (밀리초), 기본값 30000ms (30초)
+ * @returns fetch Response
+ */
+export async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeout: number = 30000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  // 기존 signal이 있으면 합침 (AbortController signal 충돌 방지)
+  const mergedSignal = mergeSignals(options.signal, controller.signal);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: mergedSignal
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error instanceof Error && error.name === 'AbortError') {
+      // 사용자 abort vs 타임아웃 구분
+      if (options.signal?.aborted) {
+        throw error; // 사용자가 직접 abort한 경우 원래 에러 전달
+      }
+      throw new Error(`요청 타임아웃 (${timeout}ms): ${url}`);
+    }
+    throw error;
+  }
+}
+
+/**
  * API 요청 함수
  */
 export async function request<T>(
@@ -74,7 +140,7 @@ export async function request<T>(
   // credentials: 'include'로 Cookie 전송 (PWA 공유 기능 등에서 localStorage 접근 불가 시 대비)
   let response: Response;
   try {
-    response = await fetch(url, { ...options, headers, credentials: 'include' });
+    response = await fetchWithTimeout(url, { ...options, headers, credentials: 'include' });
   } catch (err) {
     // 네트워크 에러 (API 서버 연결 불가 - 좀비 포트 가능성)
     const error = err instanceof Error ? err : new Error(String(err));

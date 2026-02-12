@@ -1,7 +1,7 @@
 /**
  * Writing API - 글쓰기 워커 및 키워드 관리
  */
-import { getAuthToken } from './client';
+import { getAuthToken, fetchWithTimeout } from './client';
 
 // ============================================================
 // Types
@@ -157,7 +157,7 @@ async function requestWriting<T>(
     ...options.headers
   };
 
-  const response = await fetch(url, { ...options, headers, credentials: 'include' });
+  const response = await fetchWithTimeout(url, { ...options, headers, credentials: 'include' });
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: response.statusText }));
@@ -177,7 +177,7 @@ async function requestKeyword<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const url = `/api/writing/keywords${endpoint}`;
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',

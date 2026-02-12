@@ -1,7 +1,7 @@
 /**
  * Auto Next API - auto-next 모니터링 및 제어
  */
-import { request, API_BASE, getAuthToken } from './client';
+import { request, API_BASE, getAuthToken, fetchWithTimeout } from './client';
 
 // ============================================================
 // Types
@@ -147,7 +147,7 @@ async function autoNextRequest<T>(endpoint: string, options: RequestInit = {}): 
 		...options.headers
 	};
 
-	const response = await fetch(url, { ...options, headers, credentials: 'include' });
+	const response = await fetchWithTimeout(url, { ...options, headers, credentials: 'include' });
 
 	if (!response.ok) {
 		const error = await response.json().catch(() => ({ detail: response.statusText }));

@@ -1,7 +1,7 @@
 /**
  * Instagram/Crawl API - 인스타그램 크롤링 및 수집 관련
  */
-import { request, getAuthToken } from './client';
+import { request, getAuthToken, fetchWithTimeout } from './client';
 import type {
   ServiceAccountWithProfile,
   InstagramPost,
@@ -58,7 +58,7 @@ async function requestTasks<T>(
     ...options.headers as Record<string, string>
   };
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     ...options,
     headers
   });
@@ -84,7 +84,7 @@ async function requestV2<T>(
     ...options.headers
   };
 
-  const response = await fetch(url, { ...options, headers, credentials: 'include' });
+  const response = await fetchWithTimeout(url, { ...options, headers, credentials: 'include' });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
