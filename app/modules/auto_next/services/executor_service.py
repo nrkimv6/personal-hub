@@ -57,10 +57,12 @@ class ExecutorService:
         # Redis 명령 생성
         command = {
             "action": "run",
-            "plan_file": request.plan_file,
             "source": "monitor-page-api",
             "timestamp": datetime.now().isoformat(),
         }
+
+        if request.plan_file:
+            command["plan_file"] = request.plan_file
 
         # 옵션 추가
         if request.max_cycles and request.max_cycles > 0:

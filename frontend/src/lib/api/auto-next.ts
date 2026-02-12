@@ -49,7 +49,7 @@ export interface StatsResponse {
 }
 
 export interface RunRequest {
-	plan_file: string;
+	plan_file?: string | null;
 	max_cycles?: number;
 	max_tokens?: number;
 	until?: string | null;
@@ -157,7 +157,10 @@ export const autoNextTaskApi = {
 	get: (id: string) => autoNextRequest<TaskResponse>(`/tasks/${id}`),
 
 	delete: (id: string) =>
-		autoNextRequest<{ success: boolean }>(`/tasks/${id}`, { method: 'DELETE' })
+		autoNextRequest<{ success: boolean }>(`/tasks/${id}`, { method: 'DELETE' }),
+
+	deleteCompleted: () =>
+		autoNextRequest<{ deleted: number }>('/tasks', { method: 'DELETE' })
 };
 
 // ============================================================
@@ -165,7 +168,10 @@ export const autoNextTaskApi = {
 // ============================================================
 
 export const autoNextStatsApi = {
-	stats: () => autoNextRequest<StatsResponse>('/stats'),
+	stats: (since?: string) => {
+		const qs = since ? `?since=${encodeURIComponent(since)}` : '';
+		return autoNextRequest<StatsResponse>(`/stats${qs}`);
+	},
 
 	history: (days: number = 30) => autoNextRequest<HistoryEntry[]>(`/history?days=${days}`),
 

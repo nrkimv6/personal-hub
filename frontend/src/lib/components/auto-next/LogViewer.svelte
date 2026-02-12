@@ -2,16 +2,28 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { autoNextLogApi } from '$lib/api';
 
-	let lines = $state<string[]>([]);
+	interface LogLine {
+		text: string;
+		isStale: boolean;
+	}
+
+	let lines = $state<LogLine[]>([]);
 	let connected = $state(false);
 	let autoScroll = $state(true);
 	let logContainer: HTMLDivElement;
 	let eventSource: EventSource | null = null;
+	let sseStarted = $state(false);
 
 	const MAX_LINES = 500;
+	const SEPARATOR_PATTERN = '════════════════';
 
-	function addLine(line: string) {
-		lines.push(line);
+	function addLine(text: string, isStale: boolean) {
+		// 구분자 감지 시 이전 라인을 모두 stale로 전환
+		if (text.includes(SEPARATOR_PATTERN) && !isStale) {
+			lines = lines.map((l) => ({ ...l, isStale: true }));
+		}
+
+		lines.push({ text, isStale });
 		if (lines.length > MAX_LINES) {
 			lines = lines.slice(lines.length - MAX_LINES);
 		}
@@ -28,9 +40,10 @@
 		eventSource = autoNextLogApi.connectStream();
 		eventSource.onopen = () => {
 			connected = true;
+			sseStarted = true;
 		};
 		eventSource.onmessage = (event) => {
-			addLine(event.data);
+			addLine(event.data, false);
 		};
 		eventSource.onerror = () => {
 			connected = false;
@@ -44,7 +57,8 @@
 	async function loadRecent() {
 		try {
 			const res = await autoNextLogApi.recent(100);
-			lines = res.lines;
+			// 초기 로드된 라인은 모두 stale (이전 로그)
+			lines = res.lines.map((text: string) => ({ text, isStale: true }));
 		} catch {
 			// 로그 없을 수 있음
 		}
@@ -92,7 +106,11 @@
 			<span class="text-gray-500">로그가 없습니다</span>
 		{:else}
 			{#each lines as line}
-				<div class="whitespace-pre-wrap break-all">{line}</div>
+				<div
+					class="whitespace-pre-wrap break-all {line.isStale ? 'opacity-40 text-gray-500' : ''}"
+				>
+					{line.text}
+				</div>
 			{/each}
 		{/if}
 	</div>

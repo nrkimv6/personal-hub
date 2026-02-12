@@ -58,7 +58,7 @@ class StatsResponse(BaseModel):
 
 class RunRequest(BaseModel):
     """실행 요청 스키마"""
-    plan_file: str = Field(..., description="Plan 파일 경로")
+    plan_file: Optional[str] = Field(None, description="Plan 파일 경로 (null=전체 실행)")
     max_cycles: Optional[int] = Field(0, description="최대 사이클 수 (0=무제한)")
     max_tokens: Optional[int] = Field(0, description="최대 토큰 수 (0=무제한)")
     until: Optional[str] = Field(None, description="종료 시각 (HH:MM 형식)")

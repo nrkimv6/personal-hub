@@ -37,4 +37,11 @@ async def delete_task(task_id: str):
     return {"message": "Task deleted successfully", "task_id": task_id}
 
 
+@router.delete("/tasks")
+async def delete_completed_tasks():
+    """완료된 작업(success/failed/skipped) 일괄 삭제"""
+    deleted = db_service.delete_completed_tasks()
+    return {"message": f"Deleted {deleted} completed tasks", "deleted": deleted}
+
+
 __all__ = ['router']

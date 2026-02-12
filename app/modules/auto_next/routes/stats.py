@@ -1,7 +1,7 @@
 """통계 API"""
 
 from fastapi import APIRouter, Query
-from typing import List
+from typing import List, Optional
 
 from app.modules.auto_next.schemas import StatsResponse, HistoryEntry, DuplicateTaskResponse
 from app.modules.auto_next.services.db_service import db_service
@@ -10,9 +10,11 @@ router = APIRouter()
 
 
 @router.get("/stats", response_model=StatsResponse)
-async def get_stats():
+async def get_stats(
+    since: Optional[str] = Query(None, description="이 시간 이후 task만 집계 (ISO format)")
+):
     """시스템 통계 조회"""
-    return db_service.get_stats()
+    return db_service.get_stats(since=since)
 
 
 @router.get("/history", response_model=List[HistoryEntry])

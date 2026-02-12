@@ -111,10 +111,25 @@ class DBService:
             conn.commit()
             return cursor.rowcount > 0
 
-    def get_stats(self) -> StatsResponse:
-        """통계 조회"""
+    def delete_completed_tasks(self) -> int:
+        """완료된 작업(success/failed/skipped) 일괄 삭제"""
         with self._get_connection() as conn:
-            query = """
+            cursor = conn.execute(
+                "DELETE FROM tasks WHERE status IN ('success', 'failed', 'skipped')"
+            )
+            conn.commit()
+            return cursor.rowcount
+
+    def get_stats(self, since: str = None) -> StatsResponse:
+        """통계 조회. since가 주어지면 해당 시간 이후 생성된 task만 집계"""
+        with self._get_connection() as conn:
+            where_clause = ""
+            params = ()
+            if since:
+                where_clause = "WHERE created_at >= ?"
+                params = (since,)
+
+            query = f"""
                 SELECT
                     COUNT(*) as total,
                     SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
@@ -133,8 +148,9 @@ class DBService:
                         END
                     ) as total_duration_ms
                 FROM tasks
+                {where_clause}
             """
-            row = conn.execute(query).fetchone()
+            row = conn.execute(query, params).fetchone()
 
             total = row["total"] or 0
             pending = row["pending"] or 0

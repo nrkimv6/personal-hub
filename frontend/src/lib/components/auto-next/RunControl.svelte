@@ -10,6 +10,7 @@
 
 	let { status, plans, onStatusChange }: Props = $props();
 
+	let mode = $state<'single' | 'all'>('single');
 	let selectedPlan = $state('');
 	let maxCycles = $state(0);
 	let until = $state('');
@@ -20,7 +21,7 @@
 	let actionError = $state<string | null>(null);
 
 	async function handleStart() {
-		if (!selectedPlan) {
+		if (mode === 'single' && !selectedPlan) {
 			actionError = 'Plan 파일을 선택하세요';
 			return;
 		}
@@ -28,11 +29,11 @@
 		actionError = null;
 		try {
 			await autoNextRunnerApi.start({
-				plan_file: selectedPlan,
+				plan_file: mode === 'single' ? selectedPlan : null,
 				max_cycles: maxCycles || 0,
 				until: until || null,
 				dry_run: dryRun,
-				parallel: parallel,
+				parallel: mode === 'all' ? true : parallel,
 				projects: projects || null
 			});
 			onStatusChange();
@@ -77,7 +78,7 @@
 				<div class="text-gray-500">PID</div>
 				<div class="font-mono">{status.pid}</div>
 				<div class="text-gray-500">Plan</div>
-				<div class="truncate" title={status.plan_file || ''}>{status.plan_file || '-'}</div>
+				<div class="truncate" title={status.plan_file || '전체 실행'}>{status.plan_file || '전체 실행'}</div>
 				<div class="text-gray-500">시작 시각</div>
 				<div>{formatTime(status.start_time)}</div>
 				<div class="text-gray-500">현재 사이클</div>
@@ -94,19 +95,42 @@
 	{:else}
 		<!-- 중지 상태 - 시작 폼 -->
 		<div class="space-y-3">
-			<div>
-				<label class="block text-sm text-gray-600 mb-1" for="plan-select">Plan 파일</label>
-				<select
-					id="plan-select"
-					class="w-full border rounded-lg px-3 py-2 text-sm"
-					bind:value={selectedPlan}
+			<!-- 모드 선택 -->
+			<div class="flex rounded-lg border text-sm overflow-hidden">
+				<button
+					class="flex-1 px-3 py-1.5 transition-colors {mode === 'single' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}"
+					onclick={() => (mode = 'single')}
 				>
-					<option value="">선택...</option>
-					{#each plans as plan}
-						<option value={plan.path}>{plan.filename} ({plan.progress.percent}%)</option>
-					{/each}
-				</select>
+					단일 Plan
+				</button>
+				<button
+					class="flex-1 px-3 py-1.5 transition-colors {mode === 'all' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}"
+					onclick={() => (mode = 'all')}
+				>
+					전체 실행
+				</button>
 			</div>
+
+			{#if mode === 'single'}
+				<div>
+					<label class="block text-sm text-gray-600 mb-1" for="plan-select">Plan 파일</label>
+					<select
+						id="plan-select"
+						class="w-full border rounded-lg px-3 py-2 text-sm"
+						bind:value={selectedPlan}
+					>
+						<option value="">선택...</option>
+						{#each plans as plan}
+							<option value={plan.path}>{plan.filename} ({plan.progress.percent}%)</option>
+						{/each}
+					</select>
+				</div>
+			{:else}
+				<div class="text-sm text-gray-500 bg-gray-50 rounded-lg p-3">
+					모든 미완료 Plan 파일을 순차적으로 실행합니다.
+				</div>
+			{/if}
+
 			<div class="grid grid-cols-2 gap-3">
 				<div>
 					<label class="block text-sm text-gray-600 mb-1" for="max-cycles">최대 사이클</label>
@@ -134,12 +158,14 @@
 					<input type="checkbox" bind:checked={dryRun} />
 					Dry Run
 				</label>
-				<label class="flex items-center gap-2 text-sm text-gray-600">
-					<input type="checkbox" bind:checked={parallel} />
-					병렬 실행
-				</label>
+				{#if mode === 'single'}
+					<label class="flex items-center gap-2 text-sm text-gray-600">
+						<input type="checkbox" bind:checked={parallel} />
+						병렬 실행
+					</label>
+				{/if}
 			</div>
-			{#if parallel}
+			{#if (mode === 'single' && parallel) || mode === 'all'}
 				<div>
 					<label class="block text-sm text-gray-600 mb-1" for="projects">프로젝트 (쉼표 구분)</label>
 					<input
@@ -147,16 +173,16 @@
 						type="text"
 						class="w-full border rounded-lg px-3 py-2 text-sm"
 						bind:value={projects}
-						placeholder="예: memo-alarm,activity-hub"
+						placeholder="예: memo-alarm,activity-hub (비우면 전체)"
 					/>
 				</div>
 			{/if}
 			<button
 				class="w-full py-2 rounded-lg font-medium text-white bg-green-500 hover:bg-green-600 disabled:opacity-50 transition-colors"
 				onclick={handleStart}
-				disabled={actionLoading || !selectedPlan}
+				disabled={actionLoading || (mode === 'single' && !selectedPlan)}
 			>
-				{actionLoading ? '시작 중...' : '시작'}
+				{actionLoading ? '시작 중...' : mode === 'all' ? '전체 실행 시작' : '시작'}
 			</button>
 		</div>
 	{/if}
