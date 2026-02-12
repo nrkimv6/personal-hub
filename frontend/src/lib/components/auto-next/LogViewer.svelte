@@ -106,8 +106,13 @@
 			<span class="text-gray-500">로그가 없습니다</span>
 		{:else}
 			{#each lines as line}
+				{@const tagColor = line.isStale ? '' :
+					line.text.includes('[AI]') ? 'text-cyan-400' :
+					line.text.includes('[TOOL]') ? 'text-yellow-400' :
+					line.text.includes('[DONE]') ? 'text-green-400' :
+					line.text.includes('[ERROR]') ? 'text-red-400' : ''}
 				<div
-					class="whitespace-pre-wrap break-all {line.isStale ? 'opacity-40 text-gray-500' : ''}"
+					class="whitespace-pre-wrap break-all {line.isStale ? 'opacity-40 text-gray-500' : tagColor}"
 				>
 					{line.text}
 				</div>

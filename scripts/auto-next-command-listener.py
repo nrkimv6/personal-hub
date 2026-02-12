@@ -204,6 +204,7 @@ def stop_auto_next(redis_client: redis.Redis) -> Dict:
         redis_client.set(STATE_KEY + ":status", "stopped")
         redis_client.delete(STATE_KEY + ":pid")
         redis_client.delete(STATE_KEY + ":log_file_path")
+        redis_client.delete(STATE_KEY + ":stream_log_path")
 
         _current_process = None
         _current_log_file = None
@@ -242,6 +243,7 @@ def get_status(redis_client: redis.Redis) -> Dict:
             redis_client.set(STATE_KEY + ":status", "stopped")
             redis_client.delete(STATE_KEY + ":pid")
             redis_client.delete(STATE_KEY + ":log_file_path")
+            redis_client.delete(STATE_KEY + ":stream_log_path")
             _current_process = None
             _current_log_file = None
 
