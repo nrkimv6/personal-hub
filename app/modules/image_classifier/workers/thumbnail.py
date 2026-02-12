@@ -31,31 +31,7 @@ class ThumbnailWorker:
         Args:
             batch_size: 배치 크기
         """
-        # 썸네일 파일이 없는 파일 조회
-        result = self.db.execute(
-            text("""
-                SELECT id, file_path
-                FROM file_classifications
-                WHERE id NOT IN (
-                    SELECT DISTINCT file_id
-                    FROM (
-                        SELECT id AS file_id
-                        FROM file_classifications
-                        WHERE id IN (
-                            SELECT CAST(REPLACE(name, '.jpg', '') AS INTEGER) AS file_id
-                            FROM (
-                                SELECT name FROM pragma_file_list(:thumb_dir)
-                                WHERE name LIKE '%.jpg'
-                            )
-                        )
-                    )
-                )
-                LIMIT :batch_size
-            """),
-            {"thumb_dir": str(self.thumbnail_dir), "batch_size": batch_size}
-        ).fetchall()
-
-        # 위 쿼리가 복잡하므로 단순화: 모든 파일을 순회하며 썸네일 파일 존재 여부 확인
+        # 모든 파일을 순회하며 썸네일 파일 존재 여부 확인
         result = self.db.execute(
             text("SELECT id, file_path FROM file_classifications LIMIT :batch_size"),
             {"batch_size": batch_size}
