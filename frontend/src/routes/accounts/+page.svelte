@@ -62,10 +62,15 @@
   };
 
   onMount(async () => {
-    await Promise.all([
+    const results = await Promise.allSettled([
       loadAccounts(),
       loadBrowserStatus()
     ]);
+    // 실패한 항목 경고 표시
+    const failedCount = results.filter(r => r.status === 'rejected').length;
+    if (failedCount > 0) {
+      console.warn(`[accounts] ${failedCount}개 로드 실패 - 일부 데이터 없음`);
+    }
     // 10초마다 브라우저 상태 및 명령 이력 새로고침
     refreshInterval = setInterval(async () => {
       await loadBrowserStatus();

@@ -70,7 +70,7 @@
 
 	async function loadData() {
 		try {
-			const [s, t, r, p] = await Promise.all([
+			const results = await Promise.allSettled([
 				autoNextStatsApi.stats(),
 				autoNextTaskApi.list({
 					status: statusFilter,
@@ -80,10 +80,17 @@
 				autoNextRunnerApi.status(),
 				autoNextPlanApi.list()
 			]);
-			stats = s;
-			taskList = t;
-			runStatus = r;
-			plans = p;
+
+			stats = results[0].status === 'fulfilled' ? results[0].value : null;
+			taskList = results[1].status === 'fulfilled' ? results[1].value : null;
+			runStatus = results[2].status === 'fulfilled' ? results[2].value : null;
+			plans = results[3].status === 'fulfilled' ? results[3].value : null;
+
+			// 실패한 항목 경고 표시
+			const failedCount = results.filter(r => r.status === 'rejected').length;
+			if (failedCount > 0) {
+				console.warn(`[AutoNext] ${failedCount}개 API 호출 실패 - 일부 데이터 없음`);
+			}
 			error = null;
 
 			// 현재 실행 시작 시간 추적 + 현재 run stats 조회
