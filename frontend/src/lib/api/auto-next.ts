@@ -192,7 +192,12 @@ export const autoNextRunnerApi = {
 
 	stop: () => autoNextRequest<{ success: boolean }>('/stop', { method: 'POST' }),
 
-	status: () => autoNextRequest<RunStatusResponse>('/status')
+	status: () => autoNextRequest<RunStatusResponse>('/status'),
+
+	resetState: () =>
+		autoNextRequest<{ success: boolean; reset_count: number }>('/reset-state', {
+			method: 'POST'
+		})
 };
 
 // ============================================================

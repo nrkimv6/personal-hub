@@ -148,6 +148,48 @@ class ExecutorService:
         except Exception:
             pass
 
+    def reset_running_state(self) -> Dict:
+        """RUNNING 상태 강제 초기화 - Redis + auto-next DB"""
+        try:
+            # 1. Redis 상태 정리
+            self._force_cleanup_state()
+            logger.info("[auto-next] Redis 상태 정리 완료")
+
+            # 2. auto-next SQLite DB의 RUNNING 작업을 PENDING으로 변경
+            import sqlite3
+
+            # auto-next DB 경로 구성 (wtools 기준)
+            db_path = Path(config.base_dir) / "common" / "tools" / "auto-next" / "data" / "tasks.db"
+
+            if not db_path.exists():
+                logger.warning(f"[auto-next] DB not found: {db_path}")
+                return {"success": True, "reset_count": 0, "message": "auto-next DB not found"}
+
+            conn = sqlite3.connect(str(db_path))
+            cursor = conn.cursor()
+
+            try:
+                # RUNNING 작업 조회
+                cursor.execute("SELECT COUNT(*) FROM tasks WHERE status='running'")
+                reset_count = cursor.fetchone()[0]
+
+                if reset_count > 0:
+                    # RUNNING → PENDING 변경
+                    cursor.execute(
+                        "UPDATE tasks SET status='pending', started_at=NULL WHERE status='running'"
+                    )
+                    conn.commit()
+                    logger.info(f"[auto-next] {reset_count}개 작업을 RUNNING → PENDING으로 변경")
+
+                return {"success": True, "reset_count": reset_count}
+
+            finally:
+                conn.close()
+
+        except Exception as e:
+            logger.error(f"[auto-next] reset_running_state 실패: {traceback.format_exc()}")
+            raise HTTPException(status_code=500, detail=f"Failed to reset state: {str(e)}")
+
     def stop_auto_next(self) -> Dict:
         """auto-next 실행 중지 - Redis 명령 전송"""
         try:

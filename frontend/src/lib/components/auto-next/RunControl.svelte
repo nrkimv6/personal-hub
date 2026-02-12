@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { autoNextRunnerApi } from '$lib/api';
+	import { autoNextRunnerApi, autoNextPlanApi } from '$lib/api';
 	import type { AutoNextRunStatusResponse, AutoNextPlanFileResponse } from '$lib/api';
 
 	interface Props {
@@ -58,6 +58,34 @@
 		}
 	}
 
+	async function handleSync() {
+		actionLoading = true;
+		actionError = null;
+		try {
+			await autoNextPlanApi.sync();
+			onStatusChange();
+		} catch (e) {
+			actionError = e instanceof Error ? e.message : '동기화 실패';
+		} finally {
+			actionLoading = false;
+		}
+	}
+
+	async function handleResetState() {
+		if (!confirm('RUNNING 상태를 초기화하시겠습니까?\n미완료 작업이 PENDING으로 복구됩니다.')) return;
+		actionLoading = true;
+		actionError = null;
+		try {
+			const result = await autoNextRunnerApi.resetState();
+			console.log(`${result.reset_count}개 작업 초기화됨`);
+			onStatusChange();
+		} catch (e) {
+			actionError = e instanceof Error ? e.message : '초기화 실패';
+		} finally {
+			actionLoading = false;
+		}
+	}
+
 	function formatTime(iso: string | null): string {
 		if (!iso) return '-';
 		return new Date(iso).toLocaleString('ko-KR');
@@ -84,13 +112,22 @@
 				<div class="text-gray-500">현재 사이클</div>
 				<div>{status.current_cycle ?? '-'}</div>
 			</div>
-			<button
-				class="w-full py-2 rounded-lg font-medium text-white bg-red-500 hover:bg-red-600 disabled:opacity-50 transition-colors"
-				onclick={handleStop}
-				disabled={actionLoading}
-			>
-				{actionLoading ? '중지 중...' : '중지'}
-			</button>
+			<div class="grid grid-cols-2 gap-2">
+				<button
+					class="py-2 rounded-lg font-medium text-white bg-blue-500 hover:bg-blue-600 disabled:opacity-50 transition-colors"
+					onclick={handleSync}
+					disabled={actionLoading}
+				>
+					{actionLoading ? '동기화 중...' : '재동기화'}
+				</button>
+				<button
+					class="py-2 rounded-lg font-medium text-white bg-red-500 hover:bg-red-600 disabled:opacity-50 transition-colors"
+					onclick={handleStop}
+					disabled={actionLoading}
+				>
+					{actionLoading ? '중지 중...' : '중지'}
+				</button>
+			</div>
 		</div>
 	{:else}
 		<!-- 중지 상태 - 시작 폼 -->
@@ -177,13 +214,23 @@
 					/>
 				</div>
 			{/if}
-			<button
-				class="w-full py-2 rounded-lg font-medium text-white bg-green-500 hover:bg-green-600 disabled:opacity-50 transition-colors"
-				onclick={handleStart}
-				disabled={actionLoading || (mode === 'single' && !selectedPlan)}
-			>
-				{actionLoading ? '시작 중...' : mode === 'all' ? '전체 실행 시작' : '시작'}
-			</button>
+			<div class="grid grid-cols-2 gap-2">
+				<button
+					class="py-2 rounded-lg font-medium text-white bg-green-500 hover:bg-green-600 disabled:opacity-50 transition-colors"
+					onclick={handleStart}
+					disabled={actionLoading || (mode === 'single' && !selectedPlan)}
+				>
+					{actionLoading ? '시작 중...' : mode === 'all' ? '전체 실행 시작' : '시작'}
+				</button>
+				<button
+					class="py-2 rounded-lg font-medium text-white bg-yellow-500 hover:bg-yellow-600 disabled:opacity-50 transition-colors"
+					onclick={handleResetState}
+					disabled={actionLoading}
+					title="RUNNING 상태를 강제로 초기화하고 미완료 작업을 PENDING으로 복구합니다."
+				>
+					{actionLoading ? '초기화 중...' : '상태 초기화'}
+				</button>
+			</div>
 		</div>
 	{/if}
 </div>

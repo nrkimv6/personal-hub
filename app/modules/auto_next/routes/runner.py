@@ -26,4 +26,10 @@ async def get_status():
     return executor_service.get_process_status()
 
 
+@router.post("/reset-state")
+async def reset_state():
+    """RUNNING 상태 강제 초기화 (비정상 종료 후 복구)"""
+    return executor_service.reset_running_state()
+
+
 __all__ = ['router']
