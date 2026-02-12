@@ -72,7 +72,11 @@
 		try {
 			const [s, t, r, p] = await Promise.all([
 				autoNextStatsApi.stats(),
-				autoNextTaskApi.list({ status: statusFilter, limit: 50 }),
+				autoNextTaskApi.list({
+					status: statusFilter,
+					limit: 50,
+					source_path: runStatus?.plan_file ?? undefined  // 현재 plan 기준 필터
+				}),
 				autoNextRunnerApi.status(),
 				autoNextPlanApi.list()
 			]);
@@ -114,10 +118,19 @@
 
 	async function handleDeleteCompleted() {
 		try {
-			await autoNextTaskApi.deleteCompleted();
+			await autoNextTaskApi.deleteCompleted(runStatus?.plan_file ?? undefined);
 			await loadData();
 		} catch (e) {
 			error = e instanceof Error ? e.message : '일괄 삭제 실패';
+		}
+	}
+
+	async function handleDeleteOld(hours: number) {
+		try {
+			await autoNextTaskApi.deleteOld(hours, runStatus?.plan_file ?? undefined);
+			await loadData();
+		} catch (e) {
+			error = e instanceof Error ? e.message : '이력 정리 실패';
 		}
 	}
 
@@ -278,6 +291,7 @@
 				onFilterChange={handleFilterChange}
 				onDelete={handleDeleteTask}
 				onDeleteCompleted={handleDeleteCompleted}
+				onDeleteOld={handleDeleteOld}
 			/>
 		{/if}
 

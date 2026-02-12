@@ -64,34 +64,32 @@ class DBService:
         )
 
     def get_tasks(
-        self, status: Optional[str] = None, limit: int = 50, offset: int = 0
+        self, status: Optional[str] = None, limit: int = 50, offset: int = 0,
+        source_path: Optional[str] = None
     ) -> TaskListResponse:
-        """작업 목록 조회"""
+        """작업 목록 조회. source_path가 주어지면 해당 plan의 task만 반환"""
         with self._get_connection() as conn:
-            # 총 개수 쿼리
-            if status:
-                count_query = "SELECT COUNT(*) as cnt FROM tasks WHERE status = ?"
-                total = conn.execute(count_query, (status,)).fetchone()["cnt"]
-            else:
-                count_query = "SELECT COUNT(*) as cnt FROM tasks"
-                total = conn.execute(count_query).fetchone()["cnt"]
+            conditions = []
+            params = []
 
-            # 목록 쿼리
             if status:
-                list_query = """
-                    SELECT * FROM tasks
-                    WHERE status = ?
-                    ORDER BY created_at DESC
-                    LIMIT ? OFFSET ?
-                """
-                rows = conn.execute(list_query, (status, limit, offset)).fetchall()
-            else:
-                list_query = """
-                    SELECT * FROM tasks
-                    ORDER BY created_at DESC
-                    LIMIT ? OFFSET ?
-                """
-                rows = conn.execute(list_query, (limit, offset)).fetchall()
+                conditions.append("status = ?")
+                params.append(status)
+            if source_path:
+                conditions.append("source_path = ?")
+                params.append(source_path)
+
+            where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+
+            count_query = f"SELECT COUNT(*) as cnt FROM tasks{where_clause}"
+            total = conn.execute(count_query, params).fetchone()["cnt"]
+
+            list_query = f"""
+                SELECT * FROM tasks{where_clause}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+            """
+            rows = conn.execute(list_query, params + [limit, offset]).fetchall()
 
             tasks = [self._row_to_task_response(row) for row in rows]
             return TaskListResponse(tasks=tasks, total=total)
@@ -111,12 +109,48 @@ class DBService:
             conn.commit()
             return cursor.rowcount > 0
 
-    def delete_completed_tasks(self) -> int:
-        """완료된 작업(success/failed/skipped) 일괄 삭제"""
+    def delete_completed_tasks(self, source_path: Optional[str] = None) -> int:
+        """완료된 작업 일괄 삭제. source_path가 주어지면 해당 plan의 task만 삭제"""
         with self._get_connection() as conn:
-            cursor = conn.execute(
-                "DELETE FROM tasks WHERE status IN ('success', 'failed', 'skipped')"
-            )
+            if source_path:
+                cursor = conn.execute(
+                    "DELETE FROM tasks WHERE status IN ('success', 'failed', 'skipped') AND source_path = ?",
+                    (source_path,)
+                )
+            else:
+                cursor = conn.execute(
+                    "DELETE FROM tasks WHERE status IN ('success', 'failed', 'skipped')"
+                )
+            conn.commit()
+            return cursor.rowcount
+
+    def delete_old_tasks(self, hours: int = 24, source_path: Optional[str] = None) -> int:
+        """일정 시간 이상 된 완료 작업 삭제
+
+        Args:
+            hours: 완료 후 경과 시간 (기본 24시간)
+            source_path: plan 파일 경로 (없으면 전체)
+        """
+        with self._get_connection() as conn:
+            if source_path:
+                cursor = conn.execute(
+                    """
+                    DELETE FROM tasks
+                    WHERE status IN ('success', 'failed', 'skipped')
+                    AND finished_at < datetime('now', '-' || ? || ' hours')
+                    AND source_path = ?
+                    """,
+                    (hours, source_path)
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    DELETE FROM tasks
+                    WHERE status IN ('success', 'failed', 'skipped')
+                    AND finished_at < datetime('now', '-' || ? || ' hours')
+                    """,
+                    (hours,)
+                )
             conn.commit()
             return cursor.rowcount
 

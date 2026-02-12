@@ -168,11 +168,12 @@ async function autoNextRequest<T>(endpoint: string, options: RequestInit = {}): 
 // ============================================================
 
 export const autoNextTaskApi = {
-	list: (params?: TaskListParams) => {
+	list: (params?: TaskListParams & { source_path?: string }) => {
 		const search = new URLSearchParams();
 		if (params?.status) search.set('status', params.status);
 		if (params?.limit) search.set('limit', String(params.limit));
 		if (params?.offset) search.set('offset', String(params.offset));
+		if (params?.source_path) search.set('source_path', params.source_path);
 		const qs = search.toString();
 		return autoNextRequest<TaskListResponse>(`/tasks${qs ? '?' + qs : ''}`);
 	},
@@ -182,8 +183,19 @@ export const autoNextTaskApi = {
 	delete: (id: string) =>
 		autoNextRequest<{ success: boolean }>(`/tasks/${id}`, { method: 'DELETE' }),
 
-	deleteCompleted: () =>
-		autoNextRequest<{ deleted: number }>('/tasks', { method: 'DELETE' })
+	deleteCompleted: (source_path?: string) => {
+		const qs = source_path ? `?source_path=${encodeURIComponent(source_path)}` : '';
+		return autoNextRequest<{ deleted: number }>(`/tasks${qs}`, { method: 'DELETE' });
+	},
+
+	deleteOld: (hours: number = 24, source_path?: string) => {
+		const search = new URLSearchParams({ hours: String(hours) });
+		if (source_path) search.set('source_path', source_path);
+		return autoNextRequest<{ deleted: number; hours: number; message: string }>(
+			`/tasks/old?${search}`,
+			{ method: 'DELETE' }
+		);
+	}
 };
 
 // ============================================================

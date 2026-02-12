@@ -8,9 +8,10 @@
 		onFilterChange: (filter: string | undefined) => void;
 		onDelete: (id: string) => void;
 		onDeleteCompleted: () => void;
+		onDeleteOld?: (hours: number) => void;
 	}
 
-	let { tasks, total, currentFilter, onFilterChange, onDelete, onDeleteCompleted }: Props =
+	let { tasks, total, currentFilter, onFilterChange, onDelete, onDeleteCompleted, onDeleteOld }: Props =
 		$props();
 
 	let expandedId = $state<string | null>(null);
@@ -27,6 +28,44 @@
 	let hasCompletedTasks = $derived(
 		tasks.some((t) => t.status === 'success' || t.status === 'failed' || t.status === 'skipped')
 	);
+
+	// 자동 정리 옵션 상태
+	let autoCleanup = $state(
+		typeof window !== 'undefined'
+			? localStorage.getItem('autoNext_autoCleanup') === 'true'
+			: false
+	);
+
+	let autoCleanupHours = $state(
+		typeof window !== 'undefined'
+			? parseInt(localStorage.getItem('autoNext_autoCleanupHours') || '24')
+			: 24
+	);
+
+	// localStorage 동기화
+	$effect(() => {
+		if (typeof window !== 'undefined') {
+			localStorage.setItem('autoNext_autoCleanup', String(autoCleanup));
+			localStorage.setItem('autoNext_autoCleanupHours', String(autoCleanupHours));
+		}
+	});
+
+	// 자동 정리 실행 (활성화 시 1시간마다)
+	$effect(() => {
+		if (!autoCleanup || !onDeleteOld) return;
+		onDeleteOld(autoCleanupHours);  // 즉시 1회
+		const interval = setInterval(() => onDeleteOld!(autoCleanupHours), 3600000);
+		return () => clearInterval(interval);
+	});
+
+	let showCleanupMenu = $state(false);
+
+	function handleDeleteOldManual(hours: number) {
+		if (confirm(`${hours}시간 이상 된 완료 작업을 삭제하시겠습니까?`)) {
+			onDeleteOld?.(hours);
+		}
+		showCleanupMenu = false;
+	}
 
 	function statusBadge(status: string): string {
 		const map: Record<string, string> = {
@@ -80,6 +119,30 @@
 				작업 목록 <span class="text-sm text-gray-400 font-normal">({total})</span>
 			</h2>
 		</div>
+		<!-- 자동 정리 설정 -->
+		<div class="flex items-center gap-2 text-xs">
+			<label class="flex items-center gap-1.5 text-gray-600 cursor-pointer">
+				<input
+					type="checkbox"
+					bind:checked={autoCleanup}
+					class="rounded"
+				/>
+				<span>자동 정리</span>
+			</label>
+			{#if autoCleanup}
+				<select
+					bind:value={autoCleanupHours}
+					class="border rounded px-1.5 py-0.5"
+					title="지정한 시간 이상 된 완료 작업을 자동 삭제합니다"
+				>
+					<option value={12}>12시간</option>
+					<option value={24}>24시간</option>
+					<option value={48}>48시간</option>
+					<option value={72}>3일</option>
+					<option value={168}>7일</option>
+				</select>
+			{/if}
+		</div>
 		<div class="flex items-center gap-2">
 			<div class="flex gap-1">
 				{#each statusFilters as f}
@@ -92,12 +155,31 @@
 				{/each}
 			</div>
 			{#if hasCompletedTasks}
-				<button
-					class="px-2.5 py-1 text-xs rounded-full border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
-					onclick={handleDeleteCompleted}
-				>
-					이력 정리
-				</button>
+				<div class="relative">
+					<button
+						class="px-2.5 py-1 text-xs rounded-full border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
+						onclick={() => showCleanupMenu = !showCleanupMenu}
+					>
+						이력 정리 ▾
+					</button>
+
+					{#if showCleanupMenu}
+						<div class="absolute right-0 mt-1 bg-white border rounded-lg shadow-lg z-10 text-xs">
+							<button class="block px-3 py-1.5 hover:bg-gray-50 w-full text-left" onclick={handleDeleteCompleted}>
+								현재 plan 전체 삭제
+							</button>
+							<button class="block px-3 py-1.5 hover:bg-gray-50 w-full text-left" onclick={() => handleDeleteOldManual(24)}>
+								24시간 이상
+							</button>
+							<button class="block px-3 py-1.5 hover:bg-gray-50 w-full text-left" onclick={() => handleDeleteOldManual(48)}>
+								48시간 이상
+							</button>
+							<button class="block px-3 py-1.5 hover:bg-gray-50 w-full text-left" onclick={() => handleDeleteOldManual(168)}>
+								7일 이상
+							</button>
+						</div>
+					{/if}
+				</div>
 			{/if}
 		</div>
 	</div>
