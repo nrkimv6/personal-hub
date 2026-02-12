@@ -1,5 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import GoogleResultsTab from './GoogleResultsTab.svelte';
+
+	// 최상위 탭: 검색 실행 / 검색결과 관리
+	type MainTab = 'search' | 'results';
+	let mainTab: MainTab = $state('search');
 
 	// 타입 정의
 	interface SearchResult {
@@ -591,11 +596,25 @@
 		dateFilter = searchHistory.date_filter || '';
 	}
 
+	// 최상위 탭 전환 (URL 파라미터 영속화)
+	function setMainTab(tab: MainTab) {
+		mainTab = tab;
+		const url = new URL(window.location.href);
+		if (tab === 'search') {
+			url.searchParams.delete('tab');
+		} else {
+			url.searchParams.set('tab', tab);
+		}
+		window.history.replaceState(null, '', url.toString());
+	}
+
 	onMount(() => {
 		// URL 파라미터에서 탭 상태 복원
 		const urlParams = new URLSearchParams(window.location.search);
 		const tabParam = urlParams.get('tab');
-		if (tabParam === 'saved' || tabParam === 'history' || tabParam === 'schedule-results') {
+		if (tabParam === 'results') {
+			mainTab = 'results';
+		} else if (tabParam === 'saved' || tabParam === 'history' || tabParam === 'schedule-results') {
 			activeTab = tabParam;
 		}
 
@@ -620,7 +639,33 @@
 </svelte:head>
 
 <div class="container mx-auto p-4">
-	<h1 class="mb-6 text-2xl font-bold">구글 검색</h1>
+	<h1 class="mb-4 text-2xl font-bold">구글 검색</h1>
+
+	<!-- 최상위 탭 -->
+	<div class="mb-6 border-b border-border">
+		<nav class="flex gap-4">
+			<button
+				onclick={() => setMainTab('search')}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {mainTab === 'search'
+					? 'border-blue-500 text-primary'
+					: 'border-transparent text-muted-foreground hover:text-foreground'}"
+			>
+				🔎 검색 실행
+			</button>
+			<button
+				onclick={() => setMainTab('results')}
+				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {mainTab === 'results'
+					? 'border-blue-500 text-primary'
+					: 'border-transparent text-muted-foreground hover:text-foreground'}"
+			>
+				📋 검색결과 관리
+			</button>
+		</nav>
+	</div>
+
+	{#if mainTab === 'results'}
+		<GoogleResultsTab />
+	{:else}
 
 	<!-- 검색 폼 -->
 	<div class="mb-6 rounded-lg bg-white p-4 shadow">
@@ -1036,6 +1081,8 @@
 		</div>
 	</div>
 </div>
+
+{/if} <!-- mainTab === 'search' -->
 
 <!-- 저장/수정 모달 -->
 {#if showSaveModal}
