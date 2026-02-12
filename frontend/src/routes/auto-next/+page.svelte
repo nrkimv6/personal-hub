@@ -5,6 +5,7 @@
 	import RunControl from '$lib/components/auto-next/RunControl.svelte';
 	import PlanList from '$lib/components/auto-next/PlanList.svelte';
 	import LogViewer from '$lib/components/auto-next/LogViewer.svelte';
+	import { createSmartPolling } from '$lib/utils/smart-polling';
 	import {
 		autoNextStatsApi,
 		autoNextTaskApi,
@@ -25,7 +26,7 @@
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let statusFilter = $state<string | undefined>(undefined);
-	let refreshInterval: ReturnType<typeof setInterval>;
+	let pollingController: ReturnType<typeof createSmartPolling> | null = null;
 
 	async function loadData() {
 		try {
@@ -67,11 +68,25 @@
 
 	onMount(() => {
 		loadData();
-		refreshInterval = setInterval(loadData, 5000);
+		pollingController = createSmartPolling(
+			loadData,
+			() => ({ running: runStatus?.running ?? false })
+		);
 	});
 
 	onDestroy(() => {
-		if (refreshInterval) clearInterval(refreshInterval);
+		if (pollingController) {
+			pollingController.cleanup();
+			pollingController = null;
+		}
+	});
+
+	// runStatus 변경 시 폴링 간격 재평가
+	$effect(() => {
+		if (runStatus && pollingController) {
+			// runStatus.running 값이 변경되면 폴링 간격을 즉시 재평가
+			pollingController.refresh();
+		}
 	});
 </script>
 
@@ -81,7 +96,33 @@
 
 <div class="p-4 md:p-6 space-y-6 max-w-7xl mx-auto">
 	<div class="flex items-center justify-between">
-		<h1 class="text-2xl font-bold">Auto Next</h1>
+		<div class="flex items-center gap-3">
+			<h1 class="text-2xl font-bold">Auto Next</h1>
+			<button
+				onclick={loadData}
+				disabled={loading}
+				class="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+				title="새로고침"
+			>
+				<svg
+					class:animate-spin={loading}
+					xmlns="http://www.w3.org/2000/svg"
+					width="20"
+					height="20"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+				>
+					<path d="M21 2v6h-6" />
+					<path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+					<path d="M3 22v-6h6" />
+					<path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+				</svg>
+			</button>
+		</div>
 		{#if runStatus?.running}
 			<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
 				<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
