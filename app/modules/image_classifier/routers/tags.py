@@ -1,0 +1,227 @@
+"""
+태그 관련 API 엔드포인트
+
+- GET /api/ic/tags: 태그 목록 조회
+- POST /api/ic/tags: 태그 추가
+- POST /api/ic/files/bulk-tag: 파일에 일괄 태그 부여
+- DELETE /api/ic/tags/{id}: 태그 삭제
+"""
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from sqlalchemy import text
+
+from ..database import get_db
+
+router = APIRouter(prefix="/tags", tags=["Tags"])
+
+
+# === 요청/응답 스키마 ===
+class TagCreate(BaseModel):
+    """태그 생성 요청"""
+    name: str
+
+
+class BulkTagRequest(BaseModel):
+    """일괄 태그 요청"""
+    file_ids: list[int]
+    tag_names: list[str]
+
+
+# === 엔드포인트 ===
+@router.get("/")
+async def get_tags(
+    sort_by: str = "usage",  # usage/name/recent
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """
+    태그 목록 조회
+
+    Args:
+        sort_by: 정렬 기준 (usage=사용량, name=이름, recent=최근)
+        limit: 최대 개수
+    """
+    order_clause = "usage_count DESC"
+    if sort_by == "name":
+        order_clause = "name ASC"
+    elif sort_by == "recent":
+        order_clause = "created_at DESC"
+
+    query = text(f"""
+        SELECT id, name, usage_count, created_at
+        FROM tags
+        ORDER BY {order_clause}
+        LIMIT :limit
+    """)
+    tags = db.execute(query, {"limit": limit}).fetchall()
+
+    return {
+        "tags": [
+            {
+                "id": tag.id,
+                "name": tag.name,
+                "usage_count": tag.usage_count or 0,
+                "created_at": tag.created_at,
+            }
+            for tag in tags
+        ]
+    }
+
+
+@router.post("/")
+async def create_tag(
+    request: TagCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    태그 추가
+
+    - 중복 확인 후 생성
+    """
+    # 중복 확인
+    dup_query = text("SELECT id FROM tags WHERE name = :name")
+    duplicate = db.execute(dup_query, {"name": request.name}).fetchone()
+
+    if duplicate:
+        return {
+            "status": "exists",
+            "tag_id": duplicate.id,
+            "message": "이미 존재하는 태그입니다."
+        }
+
+    # 태그 생성
+    insert_query = text("""
+        INSERT INTO tags (name, usage_count)
+        VALUES (:name, 0)
+    """)
+    db.execute(insert_query, {"name": request.name})
+    db.commit()
+
+    # 생성된 태그 조회
+    new_tag_query = text("SELECT id FROM tags WHERE name = :name")
+    new_tag = db.execute(new_tag_query, {"name": request.name}).fetchone()
+
+    return {
+        "status": "created",
+        "tag_id": new_tag.id,
+        "message": "태그 생성 완료"
+    }
+
+
+@router.post("/bulk-tag")
+async def bulk_tag_files(
+    request: BulkTagRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    파일에 일괄 태그 부여
+
+    - 태그가 없으면 자동 생성
+    - file_tags 테이블에 연결
+    """
+    # 태그 생성/조회
+    tag_ids = []
+    for tag_name in request.tag_names:
+        # 태그 존재 확인
+        query = text("SELECT id FROM tags WHERE name = :name")
+        tag = db.execute(query, {"name": tag_name}).fetchone()
+
+        if tag:
+            tag_id = tag.id
+        else:
+            # 태그 생성
+            insert_query = text("INSERT INTO tags (name, usage_count) VALUES (:name, 0)")
+            db.execute(insert_query, {"name": tag_name})
+            db.flush()
+
+            new_tag_query = text("SELECT id FROM tags WHERE name = :name")
+            tag_id = db.execute(new_tag_query, {"name": tag_name}).fetchone().id
+
+        tag_ids.append(tag_id)
+
+    # 파일-태그 연결
+    added_count = 0
+    for file_id in request.file_ids:
+        for tag_id in tag_ids:
+            # 중복 확인
+            dup_query = text("""
+                SELECT 1 FROM file_tags
+                WHERE file_id = :file_id AND tag_id = :tag_id
+            """)
+            exists = db.execute(dup_query, {"file_id": file_id, "tag_id": tag_id}).fetchone()
+
+            if not exists:
+                insert_query = text("""
+                    INSERT INTO file_tags (file_id, tag_id)
+                    VALUES (:file_id, :tag_id)
+                """)
+                db.execute(insert_query, {"file_id": file_id, "tag_id": tag_id})
+
+                # 사용량 증가
+                update_query = text("""
+                    UPDATE tags
+                    SET usage_count = usage_count + 1
+                    WHERE id = :tag_id
+                """)
+                db.execute(update_query, {"tag_id": tag_id})
+
+                added_count += 1
+
+    db.commit()
+
+    return {
+        "status": "success",
+        "files_tagged": len(request.file_ids),
+        "tags_added": added_count,
+        "message": "일괄 태그 부여 완료"
+    }
+
+
+@router.delete("/{tag_id}")
+async def delete_tag(
+    tag_id: int,
+    force: bool = False,
+    db: Session = Depends(get_db)
+):
+    """
+    태그 삭제
+
+    Args:
+        force: True면 연결된 파일 관계도 모두 삭제
+    """
+    # 태그 조회
+    tag_query = text("SELECT id, name FROM tags WHERE id = :tag_id")
+    tag = db.execute(tag_query, {"tag_id": tag_id}).fetchone()
+
+    if not tag:
+        raise HTTPException(status_code=404, detail="태그를 찾을 수 없습니다.")
+
+    # 연결된 파일 확인
+    usage_query = text("SELECT COUNT(*) as count FROM file_tags WHERE tag_id = :tag_id")
+    usage_count = db.execute(usage_query, {"tag_id": tag_id}).fetchone().count
+
+    if usage_count > 0 and not force:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{usage_count}개 파일에 사용 중입니다. force=true로 강제 삭제하세요."
+        )
+
+    # 파일-태그 관계 삭제
+    if force:
+        delete_relations_query = text("DELETE FROM file_tags WHERE tag_id = :tag_id")
+        db.execute(delete_relations_query, {"tag_id": tag_id})
+
+    # 태그 삭제
+    delete_query = text("DELETE FROM tags WHERE id = :tag_id")
+    db.execute(delete_query, {"tag_id": tag_id})
+
+    db.commit()
+
+    return {
+        "status": "success",
+        "tag_id": tag_id,
+        "relations_deleted": usage_count if force else 0,
+        "message": "태그 삭제 완료"
+    }
