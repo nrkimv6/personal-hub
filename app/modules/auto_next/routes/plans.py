@@ -7,7 +7,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.modules.auto_next.schemas import PlanFileResponse, PlanProgressResponse
+from app.modules.auto_next.schemas import PlanFileResponse, PlanProgressResponse, PlanDetailResponse
 from app.modules.auto_next.services.plan_service import plan_service
 
 router = APIRouter()
@@ -41,6 +41,24 @@ async def get_plan_progress(encoded_path: str):
         raise HTTPException(status_code=404, detail="Plan file not found")
 
     return plan_service.get_plan_progress(path)
+
+
+@router.get("/plans/{encoded_path}/items", response_model=PlanDetailResponse)
+async def get_plan_items(encoded_path: str):
+    """plan 항목 상세 조회 (Phase별 체크박스 파싱)"""
+    try:
+        decoded_path = base64.urlsafe_b64decode(encoded_path).decode("utf-8")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid encoded path")
+
+    if not plan_service.validate_external_path(decoded_path):
+        raise HTTPException(status_code=403, detail="Path not allowed")
+
+    path = Path(decoded_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Plan file not found")
+
+    return plan_service.parse_plan_items(path)
 
 
 class AddExternalPlanRequest(BaseModel):

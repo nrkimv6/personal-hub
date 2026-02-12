@@ -96,6 +96,32 @@ class PlanFileResponse(BaseModel):
     ignored: bool = False  # 완료/빈 plan
 
 
+class PlanItemResponse(BaseModel):
+    """plan 항목 (체크박스 1개)"""
+    level: int  # 0=상위(번호), 1=하위(대시)
+    text: str
+    checked: bool
+    children: List['PlanItemResponse'] = []
+    file_path: Optional[str] = None  # 파일 경로 언급 시
+
+
+class PlanPhaseResponse(BaseModel):
+    """plan Phase 단위"""
+    name: str
+    items: List[PlanItemResponse]
+    done_count: int
+    total_count: int
+
+
+class PlanDetailResponse(BaseModel):
+    """plan 상세 (항목 파싱 결과)"""
+    path: str
+    filename: str
+    status: str
+    phases: List[PlanPhaseResponse]
+    progress: PlanProgressResponse
+
+
 class HistoryEntry(BaseModel):
     """작업 히스토리 엔트리"""
     date: str
@@ -128,4 +154,7 @@ __all__ = [
     'HistoryEntry',
     'DuplicateTaskResponse',
     'LogResponse',
+    'PlanItemResponse',
+    'PlanPhaseResponse',
+    'PlanDetailResponse',
 ]

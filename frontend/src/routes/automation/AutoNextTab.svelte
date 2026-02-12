@@ -4,6 +4,7 @@
 	import TaskList from '$lib/components/auto-next/TaskList.svelte';
 	import RunControl from '$lib/components/auto-next/RunControl.svelte';
 	import PlanList from '$lib/components/auto-next/PlanList.svelte';
+	import PlanItems from '$lib/components/auto-next/PlanItems.svelte';
 	import LogViewer from '$lib/components/auto-next/LogViewer.svelte';
 	import { createSmartPolling } from '$lib/utils/smart-polling';
 	import {
@@ -16,7 +17,8 @@
 		AutoNextStatsResponse,
 		AutoNextTaskListResponse,
 		AutoNextRunStatusResponse,
-		AutoNextPlanFileResponse
+		AutoNextPlanFileResponse,
+		AutoNextPlanDetailResponse
 	} from '$lib/api';
 
 	let stats = $state<AutoNextStatsResponse | null>(null);
@@ -32,6 +34,32 @@
 	let justCompleted = $state(false);
 	let completedTimer: ReturnType<typeof setTimeout> | null = null;
 	let lastStartTime = $state<string | null>(null);
+	let selectedPlan = $state<AutoNextPlanFileResponse | null>(null);
+	let planDetail = $state<AutoNextPlanDetailResponse | null>(null);
+	let planDetailLoading = $state(false);
+
+	async function handlePlanSelect(plan: AutoNextPlanFileResponse) {
+		if (selectedPlan?.path === plan.path) {
+			selectedPlan = null;
+			planDetail = null;
+			return;
+		}
+		selectedPlan = plan;
+		planDetailLoading = true;
+		try {
+			const encoded = btoa(plan.path).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+			planDetail = await autoNextPlanApi.items(encoded);
+		} catch {
+			planDetail = null;
+		} finally {
+			planDetailLoading = false;
+		}
+	}
+
+	function closePlanDetail() {
+		selectedPlan = null;
+		planDetail = null;
+	}
 
 	async function loadData() {
 		try {
@@ -188,8 +216,17 @@
 		<!-- Run Control + Plans -->
 		<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 			<RunControl status={runStatus} {plans} onStatusChange={handleRunStatusChange} />
-			<PlanList {plans} onPlansChange={loadData} />
+			<PlanList {plans} onPlansChange={loadData} onPlanSelect={handlePlanSelect} selectedPath={selectedPlan?.path ?? null} />
 		</div>
+
+		<!-- Plan Detail -->
+		{#if planDetailLoading}
+			<div class="flex items-center justify-center py-8">
+				<div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
+			</div>
+		{:else if planDetail}
+			<PlanItems detail={planDetail} onClose={closePlanDetail} />
+		{/if}
 
 		<!-- Task List -->
 		{#if taskList}

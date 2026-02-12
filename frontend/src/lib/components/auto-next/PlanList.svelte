@@ -5,9 +5,11 @@
 	interface Props {
 		plans: AutoNextPlanFileResponse[];
 		onPlansChange?: () => void;
+		onPlanSelect?: (plan: AutoNextPlanFileResponse) => void;
+		selectedPath?: string | null;
 	}
 
-	let { plans, onPlansChange }: Props = $props();
+	let { plans, onPlansChange, onPlanSelect, selectedPath = null }: Props = $props();
 
 	let showIgnored = $state(false);
 	let ignoredPlans = $state<AutoNextPlanFileResponse[]>([]);
@@ -137,7 +139,10 @@
 	{:else}
 		<div class="space-y-2 max-h-96 overflow-y-auto">
 			{#each displayPlans as plan}
-				<div class="border rounded-lg p-3 hover:bg-gray-50 transition-colors">
+				<button
+					class="w-full text-left border rounded-lg p-3 hover:bg-gray-50 transition-colors {selectedPath === plan.path ? 'ring-2 ring-blue-400 bg-blue-50' : ''}"
+					onclick={() => onPlanSelect?.(plan)}
+				>
 					<div class="flex items-center justify-between mb-1">
 						<span class="text-sm font-medium truncate flex-1" title={plan.path}>{plan.filename}</span>
 						<div class="flex gap-1 ml-2 shrink-0">
@@ -167,7 +172,7 @@
 							{plan.progress.done}/{plan.progress.total} ({plan.progress.percent}%)
 						</span>
 					</div>
-				</div>
+				</button>
 			{/each}
 		</div>
 	{/if}

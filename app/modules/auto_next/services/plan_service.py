@@ -3,10 +3,13 @@
 import json
 import re
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from app.modules.auto_next.config import config
-from app.modules.auto_next.schemas import PlanFileResponse, PlanProgressResponse
+from app.modules.auto_next.schemas import (
+    PlanFileResponse, PlanProgressResponse,
+    PlanDetailResponse, PlanPhaseResponse, PlanItemResponse,
+)
 
 
 class PlanService:
@@ -189,6 +192,102 @@ class PlanService:
             return "unknown"
         except Exception:
             return "unknown"
+
+    def _find_todo_file(self, plan_path: Path) -> Optional[Path]:
+        """plan 경로에서 대응하는 _todo.md 파일 탐색"""
+        todo_name = plan_path.stem + "_todo.md"
+        todo_path = plan_path.parent / todo_name
+        if todo_path.exists():
+            return todo_path
+        return None
+
+    def parse_plan_items(self, path: Path) -> PlanDetailResponse:
+        """plan 파일을 Phase별 항목으로 파싱"""
+        # _todo 파일이 있으면 우선 사용
+        todo_file = self._find_todo_file(path)
+        parse_path = todo_file if todo_file else path
+
+        content = parse_path.read_text(encoding="utf-8", errors="ignore")
+        lines = content.split("\n")
+
+        phases: List[PlanPhaseResponse] = []
+        current_phase_name = "기타"
+        current_items: List[PlanItemResponse] = []
+        current_parent: Optional[PlanItemResponse] = None
+
+        # 파일 경로 패턴: `path/to/file.ext`
+        file_path_pattern = re.compile(r'`([^`]+\.[a-zA-Z]+)`')
+
+        for line in lines:
+            # Phase 헤더 감지
+            phase_match = re.match(r'^#{2,3}\s+Phase\s+\d+[:\s—–-]*(.*)', line)
+            if phase_match:
+                # 이전 phase 저장
+                if current_items:
+                    done = sum(1 for i in current_items if i.checked)
+                    total_children = sum(len(i.children) for i in current_items)
+                    done_children = sum(1 for i in current_items for c in i.children if c.checked)
+                    phases.append(PlanPhaseResponse(
+                        name=current_phase_name,
+                        items=current_items,
+                        done_count=done + done_children,
+                        total_count=len(current_items) + total_children,
+                    ))
+                current_phase_name = phase_match.group(0).lstrip("#").strip()
+                current_items = []
+                current_parent = None
+                continue
+
+            # 번호 체크박스 (상위): 1. [ ] or 1. [x]
+            num_match = re.match(r'^(\d+)\.\s*\[([ x→])\]\s*(.*)', line)
+            if num_match:
+                text = num_match.group(3).strip()
+                fp = file_path_pattern.search(text)
+                item = PlanItemResponse(
+                    level=0,
+                    text=text,
+                    checked=num_match.group(2) == 'x',
+                    file_path=fp.group(1) if fp else None,
+                )
+                current_items.append(item)
+                current_parent = item
+                continue
+
+            # 대시 체크박스 (하위): - [ ] or - [x]
+            dash_match = re.match(r'^\s+-\s*\[([ x→])\]\s*(.*)', line)
+            if dash_match and current_parent is not None:
+                text = dash_match.group(2).strip()
+                fp = file_path_pattern.search(text)
+                child = PlanItemResponse(
+                    level=1,
+                    text=text,
+                    checked=dash_match.group(1) == 'x',
+                    file_path=fp.group(1) if fp else None,
+                )
+                current_parent.children.append(child)
+
+        # 마지막 phase 저장
+        if current_items:
+            done = sum(1 for i in current_items if i.checked)
+            total_children = sum(len(i.children) for i in current_items)
+            done_children = sum(1 for i in current_items for c in i.children if c.checked)
+            phases.append(PlanPhaseResponse(
+                name=current_phase_name,
+                items=current_items,
+                done_count=done + done_children,
+                total_count=len(current_items) + total_children,
+            ))
+
+        status = self.get_plan_status(path)
+        progress = self.get_plan_progress(parse_path)
+
+        return PlanDetailResponse(
+            path=str(path),
+            filename=path.name,
+            status=status,
+            phases=phases,
+            progress=progress,
+        )
 
     def validate_external_path(self, path: str) -> bool:
         """외부 경로 화이트리스트 검증"""

@@ -102,6 +102,29 @@ export interface LogResponse {
 	total_lines: number;
 }
 
+export interface PlanItemResponse {
+	level: number;
+	text: string;
+	checked: boolean;
+	children: PlanItemResponse[];
+	file_path: string | null;
+}
+
+export interface PlanPhaseResponse {
+	name: string;
+	items: PlanItemResponse[];
+	done_count: number;
+	total_count: number;
+}
+
+export interface PlanDetailResponse {
+	path: string;
+	filename: string;
+	status: string;
+	phases: PlanPhaseResponse[];
+	progress: PlanProgressResponse;
+}
+
 export interface TaskListParams {
 	status?: string;
 	limit?: number;
@@ -224,7 +247,10 @@ export const autoNextPlanApi = {
 		autoNextRequest<{ success: boolean }>('/plans/external', {
 			method: 'DELETE',
 			body: JSON.stringify({ path })
-		})
+		}),
+
+	items: (encodedPath: string) =>
+		autoNextRequest<PlanDetailResponse>(`/plans/${encodedPath}/items`)
 };
 
 // ============================================================
