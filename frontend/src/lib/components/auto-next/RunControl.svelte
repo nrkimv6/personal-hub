@@ -217,6 +217,14 @@
 					/>
 				</div>
 			{/if}
+			<button
+				class="w-full py-2 rounded-lg font-medium text-white bg-blue-500 hover:bg-blue-600 disabled:opacity-50 transition-colors"
+				onclick={handleSync}
+				disabled={actionLoading}
+				title="Plan 파일과 TODO.md를 SQLite 큐에 동기화합니다"
+			>
+				{actionLoading ? '동기화 중...' : 'Plan/TODO 동기화'}
+			</button>
 			<div class="grid grid-cols-3 gap-2">
 				<button
 					class="py-2 rounded-lg font-medium text-white bg-green-500 hover:bg-green-600 disabled:opacity-50 transition-colors"

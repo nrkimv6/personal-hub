@@ -14,7 +14,17 @@
 		$props();
 
 	let expandedId = $state<string | null>(null);
-	let showAll = $state(false);
+	let showAll = $state(
+		typeof window !== 'undefined'
+			? localStorage.getItem('autoNext_taskView') === 'all'
+			: false
+	);
+
+	$effect(() => {
+		if (typeof window !== 'undefined') {
+			localStorage.setItem('autoNext_taskView', showAll ? 'all' : 'current');
+		}
+	});
 
 	const statusFilters = [
 		{ value: undefined, label: '전체' },
@@ -91,12 +101,14 @@
 				<button
 					class="px-2.5 py-1 transition-colors {!showAll ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}"
 					onclick={() => (showAll = false)}
+					title="대기 중 + 실행 중인 작업만 표시합니다."
 				>
 					현재만
 				</button>
 				<button
 					class="px-2.5 py-1 transition-colors {showAll ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}"
 					onclick={() => (showAll = true)}
+					title="완료된 작업을 포함한 전체 이력을 표시합니다. 디버깅 및 통계 확인에 유용합니다."
 				>
 					전체 이력
 				</button>
