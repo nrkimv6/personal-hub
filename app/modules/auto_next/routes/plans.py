@@ -1,6 +1,7 @@
 """plan 문서 관리 API"""
 
 import base64
+import logging
 from pathlib import Path
 from typing import List
 
@@ -9,6 +10,8 @@ from pydantic import BaseModel
 
 from app.modules.auto_next.schemas import PlanFileResponse, PlanProgressResponse, PlanDetailResponse
 from app.modules.auto_next.services.plan_service import plan_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -30,8 +33,9 @@ async def get_plan_progress(encoded_path: str):
     """특정 plan 진행률 조회 (base64 인코딩된 경로)"""
     try:
         decoded_path = base64.urlsafe_b64decode(encoded_path).decode("utf-8")
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid encoded path")
+    except Exception as e:
+        logger.error(f"Base64 디코딩 실패: encoded_path={encoded_path}, error={e}")
+        raise HTTPException(status_code=400, detail=f"Invalid encoded path: {str(e)}")
 
     if not plan_service.validate_external_path(decoded_path):
         raise HTTPException(status_code=403, detail="Path not allowed")
@@ -48,8 +52,9 @@ async def get_plan_items(encoded_path: str):
     """plan 항목 상세 조회 (Phase별 체크박스 파싱)"""
     try:
         decoded_path = base64.urlsafe_b64decode(encoded_path).decode("utf-8")
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid encoded path")
+    except Exception as e:
+        logger.error(f"Base64 디코딩 실패: encoded_path={encoded_path}, error={e}")
+        raise HTTPException(status_code=400, detail=f"Invalid encoded path: {str(e)}")
 
     if not plan_service.validate_external_path(decoded_path):
         raise HTTPException(status_code=403, detail="Path not allowed")

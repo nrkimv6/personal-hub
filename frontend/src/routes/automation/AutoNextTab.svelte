@@ -7,6 +7,7 @@
 	import PlanItems from '$lib/components/auto-next/PlanItems.svelte';
 	import LogViewer from '$lib/components/auto-next/LogViewer.svelte';
 	import { createSmartPolling } from '$lib/utils/smart-polling';
+	import { encodePathToBase64 } from '$lib/utils/encoding';
 	import {
 		autoNextStatsApi,
 		autoNextTaskApi,
@@ -47,7 +48,7 @@
 		selectedPlan = plan;
 		planDetailLoading = true;
 		try {
-			const encoded = btoa(plan.path).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+			const encoded = encodePathToBase64(plan.path);
 			planDetail = await autoNextPlanApi.items(encoded);
 		} catch {
 			planDetail = null;
