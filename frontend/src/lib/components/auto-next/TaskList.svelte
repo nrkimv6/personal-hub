@@ -14,17 +14,6 @@
 		$props();
 
 	let expandedId = $state<string | null>(null);
-	let showAll = $state(
-		typeof window !== 'undefined'
-			? localStorage.getItem('autoNext_taskView') === 'all'
-			: false
-	);
-
-	$effect(() => {
-		if (typeof window !== 'undefined') {
-			localStorage.setItem('autoNext_taskView', showAll ? 'all' : 'current');
-		}
-	});
 
 	const statusFilters = [
 		{ value: undefined, label: '전체' },
@@ -34,12 +23,6 @@
 		{ value: 'failed', label: '실패' },
 		{ value: 'skipped', label: '스킵' }
 	];
-
-	let filteredTasks = $derived.by(() => {
-		if (showAll) return tasks;
-		// "현재만" 모드: pending + running만 표시
-		return tasks.filter((t) => t.status === 'pending' || t.status === 'running');
-	});
 
 	let hasCompletedTasks = $derived(
 		tasks.some((t) => t.status === 'success' || t.status === 'failed' || t.status === 'skipped')
@@ -94,39 +77,20 @@
 	<div class="p-4 border-b flex items-center justify-between flex-wrap gap-2">
 		<div class="flex items-center gap-3">
 			<h2 class="font-semibold">
-				작업 목록 <span class="text-sm text-gray-400 font-normal">({showAll ? total : filteredTasks.length})</span>
+				작업 목록 <span class="text-sm text-gray-400 font-normal">({total})</span>
 			</h2>
-			<!-- 현재만/전체 토글 -->
-			<div class="flex rounded-lg border text-xs overflow-hidden">
-				<button
-					class="px-2.5 py-1 transition-colors {!showAll ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}"
-					onclick={() => (showAll = false)}
-					title="대기 중 + 실행 중인 작업만 표시합니다."
-				>
-					현재만
-				</button>
-				<button
-					class="px-2.5 py-1 transition-colors {showAll ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}"
-					onclick={() => (showAll = true)}
-					title="완료된 작업을 포함한 전체 이력을 표시합니다. 디버깅 및 통계 확인에 유용합니다."
-				>
-					전체 이력
-				</button>
-			</div>
 		</div>
 		<div class="flex items-center gap-2">
-			{#if showAll}
-				<div class="flex gap-1">
-					{#each statusFilters as f}
-						<button
-							class="px-2.5 py-1 text-xs rounded-full border transition-colors {currentFilter === f.value ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}"
-							onclick={() => onFilterChange(f.value)}
-						>
-							{f.label}
-						</button>
-					{/each}
-				</div>
-			{/if}
+			<div class="flex gap-1">
+				{#each statusFilters as f}
+					<button
+						class="px-2.5 py-1 text-xs rounded-full border transition-colors {currentFilter === f.value ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}"
+						onclick={() => onFilterChange(f.value)}
+					>
+						{f.label}
+					</button>
+				{/each}
+			</div>
 			{#if hasCompletedTasks}
 				<button
 					class="px-2.5 py-1 text-xs rounded-full border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
@@ -138,10 +102,8 @@
 		</div>
 	</div>
 
-	{#if filteredTasks.length === 0}
-		<div class="p-8 text-center text-gray-400">
-			{showAll ? '작업이 없습니다' : '진행 중인 작업이 없습니다'}
-		</div>
+	{#if tasks.length === 0}
+		<div class="p-8 text-center text-gray-400">작업이 없습니다</div>
 	{:else}
 		<div class="overflow-x-auto">
 			<table class="w-full text-sm">
@@ -157,7 +119,7 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each filteredTasks as task (task.id)}
+					{#each tasks as task (task.id)}
 						<tr
 							class="border-b hover:bg-gray-50 cursor-pointer transition-colors"
 							onclick={() => toggleExpand(task.id)}

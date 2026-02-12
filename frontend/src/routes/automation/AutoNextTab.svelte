@@ -6,6 +6,7 @@
 	import PlanList from '$lib/components/auto-next/PlanList.svelte';
 	import PlanItems from '$lib/components/auto-next/PlanItems.svelte';
 	import LogViewer from '$lib/components/auto-next/LogViewer.svelte';
+	import CurrentTaskCard from '$lib/components/auto-next/CurrentTaskCard.svelte';
 	import { createSmartPolling } from '$lib/utils/smart-polling';
 	import { encodePathToBase64 } from '$lib/utils/encoding';
 	import {
@@ -38,6 +39,11 @@
 	let selectedPlan = $state<AutoNextPlanFileResponse | null>(null);
 	let planDetail = $state<AutoNextPlanDetailResponse | null>(null);
 	let planDetailLoading = $state(false);
+	let showTaskHistory = $state(
+		typeof window !== 'undefined'
+			? localStorage.getItem('autoNext_showTaskHistory') === 'true'
+			: false
+	);
 
 	async function handlePlanSelect(plan: AutoNextPlanFileResponse) {
 		if (selectedPlan?.path === plan.path) {
@@ -147,6 +153,13 @@
 		}
 		if (runStatus) prevRunning = runStatus.running;
 	});
+
+	// localStorage에 showTaskHistory 상태 저장
+	$effect(() => {
+		if (typeof window !== 'undefined') {
+			localStorage.setItem('autoNext_showTaskHistory', String(showTaskHistory));
+		}
+	});
 </script>
 
 <div class="space-y-6">
@@ -217,6 +230,17 @@
 			<StatsCard {stats} {currentRunStats} isRunning={runStatus?.running ?? false} />
 		{/if}
 
+		<!-- Current Task Card -->
+		{#if runStatus?.running && taskList?.tasks}
+			{@const currentTask = taskList.tasks.find(t => t.status === 'running')}
+			{#if currentTask}
+				<CurrentTaskCard
+					task={currentTask}
+					onShowDetail={() => { showTaskHistory = true; }}
+				/>
+			{/if}
+		{/if}
+
 		<!-- Run Control + Plans -->
 		<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 			<RunControl status={runStatus} {plans} onStatusChange={handleRunStatusChange} />
@@ -232,8 +256,21 @@
 			<PlanItems detail={planDetail} onClose={closePlanDetail} />
 		{/if}
 
+		<!-- Task History Toggle -->
+		<div class="flex items-center gap-2">
+			<label class="flex items-center gap-2 text-sm text-gray-600 cursor-pointer hover:text-gray-800 transition-colors">
+				<input
+					type="checkbox"
+					bind:checked={showTaskHistory}
+					class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+				/>
+				<span>작업 이력 보기</span>
+				<span class="text-xs text-gray-400">(개발자용)</span>
+			</label>
+		</div>
+
 		<!-- Task List -->
-		{#if taskList}
+		{#if showTaskHistory && taskList}
 			<TaskList
 				tasks={taskList.tasks}
 				total={taskList.total}
