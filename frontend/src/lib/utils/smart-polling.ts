@@ -10,6 +10,8 @@ export interface SmartPollingOptions {
 	slowInterval?: number;
 	/** 탭 비활성: 리소스 절약 (기본: 30000ms) */
 	idleInterval?: number;
+	/** 에러 핸들러 (콜백 실패 시 호출) */
+	onError?: (error: Error) => void;
 }
 
 export interface SmartPollingState {
@@ -66,7 +68,18 @@ export function createSmartPolling(
 				clearInterval(intervalId);
 			}
 			currentInterval = newInterval;
-			intervalId = setInterval(callback, currentInterval);
+
+			// 에러 핸들링이 포함된 콜백 래퍼
+			const wrappedCallback = async () => {
+				try {
+					await callback();
+				} catch (error) {
+					console.error('[smart-polling] Callback error:', error);
+					options?.onError?.(error instanceof Error ? error : new Error(String(error)));
+				}
+			};
+
+			intervalId = setInterval(wrappedCallback, currentInterval);
 		}
 	}
 
