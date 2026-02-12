@@ -4,6 +4,7 @@
 API 키, 모델 선택, 리밋, 스캔 대상 경로 등
 """
 
+import json
 from pathlib import Path
 from typing import Optional
 from pydantic_settings import BaseSettings
@@ -77,3 +78,52 @@ def ensure_dirs():
 
 # 모듈 로드 시 디렉토리 생성
 ensure_dirs()
+
+
+def save_settings_to_file():
+    """설정을 JSON 파일에 저장"""
+    settings_dict = {
+        "SCAN_ROOT_FOLDERS": settings.SCAN_ROOT_FOLDERS,
+        "AI_MODE": settings.AI_MODE,
+        "CLAUDE_CLI_PATH": settings.CLAUDE_CLI_PATH,
+        "GEMINI_CLI_PATH": settings.GEMINI_CLI_PATH,
+        "CLI_MAX_WORKERS": settings.CLI_MAX_WORKERS,
+        "CLI_TIMEOUT_SECONDS": settings.CLI_TIMEOUT_SECONDS,
+        "CLUSTER_GAP_MINUTES": settings.CLUSTER_GAP_MINUTES,
+        "TARGET_ROOT_FOLDER": settings.TARGET_ROOT_FOLDER,
+        "USE_TRASH": settings.USE_TRASH,
+        "MAX_FILES_PER_SCAN": settings.MAX_FILES_PER_SCAN,
+        "PHASH_DUPLICATE_THRESHOLD": settings.PHASH_DUPLICATE_THRESHOLD,
+        "CLIP_BATCH_SIZE": settings.CLIP_BATCH_SIZE,
+        "CLIP_USE_GPU": settings.CLIP_USE_GPU,
+        "FAISS_SIMILARITY_THRESHOLD": settings.FAISS_SIMILARITY_THRESHOLD,
+    }
+
+    settings_file = Path(__file__).parents[3] / "data" / "image_classifier" / "settings.json"
+    settings_file.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(settings_file, "w", encoding="utf-8") as f:
+        json.dump(settings_dict, f, indent=2, ensure_ascii=False)
+
+
+def load_settings_from_file():
+    """파일에서 설정 로드 (있으면)"""
+    settings_file = Path(__file__).parents[3] / "data" / "image_classifier" / "settings.json"
+
+    if not settings_file.exists():
+        return
+
+    try:
+        with open(settings_file, "r", encoding="utf-8") as f:
+            saved = json.load(f)
+
+        # 런타임 설정 덮어쓰기
+        for key, value in saved.items():
+            if hasattr(settings, key):
+                setattr(settings, key, value)
+    except Exception as e:
+        print(f"[경고] 설정 파일 로드 실패: {e}")
+
+
+# 모듈 로드 시 저장된 설정 복원
+load_settings_from_file()

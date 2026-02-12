@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS folder_mappings (
     is_mixed BOOLEAN DEFAULT FALSE,
     file_count INTEGER,
     folder_status TEXT DEFAULT 'unknown'
-        CHECK(folder_status IN ('clear','unclear','flat','nested')),
+        CHECK(folder_status IN ('unknown','clear','unclear','flat','nested')),
     mapped_by TEXT DEFAULT 'user'
         CHECK(mapped_by IN ('user','ai_suggested','inherited')),
     parent_mapping_id INTEGER REFERENCES folder_mappings(id),

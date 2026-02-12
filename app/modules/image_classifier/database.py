@@ -89,7 +89,9 @@ def init_db():
         db.close()
 
 
-# 모듈 임포트 시 자동 초기화 (선택적)
-# 프로덕션에서는 명시적 호출 권장
-if __name__ != "__main__":
-    pass  # 자동 초기화 비활성화
+# 모듈 임포트 시 자동 초기화
+# 테이블이 없으면 자동 생성, 이미 있으면 skip (멱등성)
+try:
+    init_db()
+except Exception as e:
+    print(f"[경고] DB 자동 초기화 실패 (무시됨): {e}")

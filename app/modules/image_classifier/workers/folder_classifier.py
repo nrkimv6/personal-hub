@@ -120,19 +120,30 @@ class FolderClassifier:
 
         return "unclear"
 
-    def classify_all_folders(self):
+    def classify_all_folders(self, force: bool = False):
         """
         DB의 모든 폴더에 대해 자동 분류 실행
+
+        Args:
+            force: True면 이미 분류된 폴더도 재분류 (기본: False)
 
         Returns:
             분류 결과 통계
         """
         # 모든 폴더 조회
-        query = text("""
-            SELECT id, folder_path, file_count
-            FROM folder_mappings
-            WHERE folder_status = 'unknown' OR folder_status IS NULL
-        """)
+        if force:
+            # force=True: 모든 폴더 재분류
+            query = text("""
+                SELECT id, folder_path, file_count
+                FROM folder_mappings
+            """)
+        else:
+            # force=False: unknown/NULL 폴더만 분류
+            query = text("""
+                SELECT id, folder_path, file_count
+                FROM folder_mappings
+                WHERE folder_status = 'unknown' OR folder_status IS NULL
+            """)
         folders = self.db.execute(query).fetchall()
 
         stats = {

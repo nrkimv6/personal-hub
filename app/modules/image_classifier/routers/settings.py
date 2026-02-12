@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional
 
-from ..config import settings
+from ..config import settings, save_settings_to_file
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
 
@@ -121,4 +121,15 @@ async def update_settings(request: SettingsUpdateRequest):
     if request.use_trash is not None:
         settings.USE_TRASH = request.use_trash
 
-    return {"status": "ok", "message": "설정이 업데이트되었습니다 (런타임만 반영)"}
+    # 파일에 저장
+    try:
+        save_settings_to_file()
+        return {
+            "status": "ok",
+            "message": "설정이 저장되었습니다 (영구 저장됨)"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"설정 저장 실패: {str(e)}"
+        }

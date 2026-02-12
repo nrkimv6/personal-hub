@@ -60,20 +60,22 @@ class InheritRequest(BaseModel):
 
 # === 엔드포인트 ===
 @router.post("/classify")
-async def classify_folders(db: Session = Depends(get_db)):
+async def classify_folders(force: bool = False, db: Session = Depends(get_db)):
     """
     폴더 자동 분류 실행
 
-    - 모든 unknown 폴더에 대해 clear/unclear/flat/nested 판정
+    - force=False (기본): unknown 폴더만 분류
+    - force=True: 이미 분류된 폴더도 재분류
     - 폴더명 패턴 매칭 사용
     """
     classifier = FolderClassifier(db)
-    stats = classifier.classify_all_folders()
+    stats = classifier.classify_all_folders(force=force)
 
+    mode = "재분류" if force else "신규 분류"
     return {
         "status": "completed",
         "stats": stats,
-        "message": f"총 {stats['total']}개 폴더 분류 완료"
+        "message": f"총 {stats['total']}개 폴더 {mode} 완료"
     }
 
 
