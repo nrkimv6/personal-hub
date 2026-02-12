@@ -13,9 +13,13 @@
 	let logContainer: HTMLDivElement;
 	let eventSource: EventSource | null = null;
 	let sseStarted = $state(false);
+	let reconnectCount = $state(0);
+	let sseError = $state<string | null>(null);
 
 	const MAX_LINES = 500;
 	const SEPARATOR_PATTERN = '════════════════';
+	const MAX_RECONNECT = 10;
+	const BASE_DELAY = 5000;
 
 	function addLine(text: string, isStale: boolean) {
 		// 구분자 감지 시 이전 라인을 모두 stale로 전환
@@ -34,6 +38,17 @@
 		}
 	}
 
+	function getReconnectDelay() {
+		// Exponential backoff: 5s, 10s, 20s, 40s, 60s (max)
+		return Math.min(BASE_DELAY * Math.pow(2, reconnectCount), 60000);
+	}
+
+	function manualReconnect() {
+		reconnectCount = 0;
+		sseError = null;
+		connectSSE();
+	}
+
 	function connectSSE() {
 		if (eventSource) eventSource.close();
 
@@ -41,6 +56,8 @@
 		eventSource.onopen = () => {
 			connected = true;
 			sseStarted = true;
+			reconnectCount = 0;
+			sseError = null;
 		};
 		eventSource.onmessage = (event) => {
 			addLine(event.data, false);
@@ -49,8 +66,14 @@
 			connected = false;
 			eventSource?.close();
 			eventSource = null;
-			// 5초 후 재연결
-			setTimeout(connectSSE, 5000);
+
+			if (reconnectCount >= MAX_RECONNECT) {
+				sseError = 'SSE 연결 실패 (최대 재시도 초과)';
+				return;
+			}
+
+			reconnectCount++;
+			setTimeout(connectSSE, getReconnectDelay());
 		};
 	}
 
@@ -86,10 +109,21 @@
 					<span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
 					연결됨
 				</span>
+			{:else if sseError}
+				<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-700">
+					<span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+					{sseError}
+				</span>
+				<button
+					onclick={manualReconnect}
+					class="px-2 py-0.5 text-xs bg-blue-500 text-white rounded hover:bg-blue-600"
+				>
+					수동 재연결
+				</button>
 			{:else}
 				<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-500">
 					<span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
-					끊김
+					끊김 (재시도 {reconnectCount}/{MAX_RECONNECT})
 				</span>
 			{/if}
 		</div>
