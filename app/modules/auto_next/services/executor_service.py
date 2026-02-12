@@ -148,41 +148,71 @@ class ExecutorService:
         except Exception:
             pass
 
-    def reset_running_state(self) -> Dict:
-        """RUNNING 상태 강제 초기화 - Redis + auto-next DB"""
+    def reset_running_state(self, full_reset: bool = False) -> Dict:
+        """RUNNING 상태 강제 초기화 - Redis + auto-next DB
+
+        full_reset=True이면 모든 작업을 삭제하여 완전 초기화
+        """
         try:
             # 1. Redis 상태 정리
             self._force_cleanup_state()
             logger.info("[auto-next] Redis 상태 정리 완료")
 
-            # 2. auto-next SQLite DB의 RUNNING 작업을 PENDING으로 변경
+            # 2. auto-next SQLite DB 정리
             import sqlite3
 
-            # auto-next DB 경로 구성 (wtools 기준)
-            db_path = Path(config.base_dir) / "common" / "tools" / "auto-next" / "data" / "tasks.db"
+            db_path = Path(config.AUTO_NEXT_DB_PATH)
 
             if not db_path.exists():
-                logger.warning(f"[auto-next] DB not found: {db_path}")
-                return {"success": True, "reset_count": 0, "message": "auto-next DB not found"}
-
-            conn = sqlite3.connect(str(db_path))
-            cursor = conn.cursor()
+                logger.warning(f"[auto-next] DB 파일을 찾을 수 없음: {db_path}")
+                return {
+                    "success": True,
+                    "reset_count": 0,
+                    "message": f"auto-next DB not found at {db_path}"
+                }
 
             try:
-                # RUNNING 작업 조회
-                cursor.execute("SELECT COUNT(*) FROM tasks WHERE status='running'")
-                reset_count = cursor.fetchone()[0]
+                conn = sqlite3.connect(str(db_path))
+                cursor = conn.cursor()
+            except sqlite3.Error as e:
+                logger.error(f"[auto-next] DB 연결 실패: {db_path}, error: {e}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to connect to auto-next DB: {str(e)}"
+                )
 
-                if reset_count > 0:
-                    # RUNNING → PENDING 변경
-                    cursor.execute(
-                        "UPDATE tasks SET status='pending', started_at=NULL WHERE status='running'"
-                    )
+            try:
+                if full_reset:
+                    # 전체 리셋: 모든 작업 삭제
+                    cursor.execute("SELECT COUNT(*) FROM tasks")
+                    result = cursor.fetchone()
+                    reset_count = result[0] if result else 0
+                    cursor.execute("DELETE FROM tasks")
                     conn.commit()
-                    logger.info(f"[auto-next] {reset_count}개 작업을 RUNNING → PENDING으로 변경")
+                    logger.info(f"[auto-next] 전체 리셋: {reset_count}개 작업 삭제")
+                else:
+                    # RUNNING → PENDING 변경만
+                    cursor.execute("SELECT COUNT(*) FROM tasks WHERE status='running'")
+                    result = cursor.fetchone()
+                    reset_count = result[0] if result else 0
 
-                return {"success": True, "reset_count": reset_count}
+                    if reset_count > 0:
+                        cursor.execute(
+                            "UPDATE tasks SET status='pending', started_at=NULL WHERE status='running'"
+                        )
+                        conn.commit()
+                        logger.info(f"[auto-next] {reset_count}개 작업을 RUNNING → PENDING으로 변경")
+                    else:
+                        logger.info("[auto-next] RUNNING 상태의 작업이 없음")
 
+                return {"success": True, "reset_count": reset_count, "full_reset": full_reset}
+
+            except sqlite3.Error as e:
+                logger.error(f"[auto-next] DB 쿼리 실패: {e}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Database query failed: {str(e)}"
+                )
             finally:
                 conn.close()
 

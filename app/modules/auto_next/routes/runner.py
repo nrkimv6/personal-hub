@@ -27,9 +27,9 @@ async def get_status():
 
 
 @router.post("/reset-state")
-async def reset_state():
-    """RUNNING 상태 강제 초기화 (비정상 종료 후 복구)"""
-    return executor_service.reset_running_state()
+async def reset_state(full_reset: bool = False):
+    """RUNNING 상태 강제 초기화 (비정상 종료 후 복구). full_reset=true이면 모든 작업 삭제"""
+    return executor_service.reset_running_state(full_reset=full_reset)
 
 
 __all__ = ['router']

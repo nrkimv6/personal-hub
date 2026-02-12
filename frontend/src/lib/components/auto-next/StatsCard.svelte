@@ -11,7 +11,16 @@
 
 	let showCurrent = $state(true);
 
-	let displayStats = $derived(showCurrent && currentRunStats ? currentRunStats : stats);
+	const emptyStats: AutoNextStatsResponse = {
+		total: 0, pending: 0, running: 0, success: 0, failed: 0, skipped: 0,
+		completed: 0, completion_rate: 0, success_rate: 0,
+		total_input_tokens: 0, total_output_tokens: 0, total_cache_tokens: 0,
+		total_tokens: 0, total_duration_ms: 0
+	};
+
+	let displayStats = $derived(
+		showCurrent ? (currentRunStats ?? emptyStats) : stats
+	);
 
 	function formatTokens(n: number): string {
 		if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';

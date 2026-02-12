@@ -76,10 +76,13 @@
 			error = null;
 
 			// 현재 실행 시작 시간 추적 + 현재 run stats 조회
-			const startTime = r.start_time || lastStartTime;
-			if (startTime) {
-				lastStartTime = startTime;
-				currentRunStats = await autoNextStatsApi.stats(startTime);
+			if (r.running && r.start_time) {
+				lastStartTime = r.start_time;
+				currentRunStats = await autoNextStatsApi.stats(r.start_time);
+			} else if (!r.running) {
+				// 실행 중이 아니면 현재 실행 stats 초기화
+				currentRunStats = null;
+				lastStartTime = null;
 			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : '데이터 로드 실패';

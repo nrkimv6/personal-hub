@@ -71,13 +71,16 @@
 		}
 	}
 
-	async function handleResetState() {
-		if (!confirm('RUNNING 상태를 초기화하시겠습니까?\n미완료 작업이 PENDING으로 복구됩니다.')) return;
+	async function handleResetState(fullReset: boolean = false) {
+		const msg = fullReset
+			? '전체 리셋: 모든 작업 기록을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.'
+			: 'RUNNING 상태를 초기화하시겠습니까?\n미완료 작업이 PENDING으로 복구됩니다.';
+		if (!confirm(msg)) return;
 		actionLoading = true;
 		actionError = null;
 		try {
-			const result = await autoNextRunnerApi.resetState();
-			console.log(`${result.reset_count}개 작업 초기화됨`);
+			const result = await autoNextRunnerApi.resetState(fullReset);
+			console.log(`${result.reset_count}개 작업 ${fullReset ? '삭제' : '초기화'}됨`);
 			onStatusChange();
 		} catch (e) {
 			actionError = e instanceof Error ? e.message : '초기화 실패';
@@ -214,7 +217,7 @@
 					/>
 				</div>
 			{/if}
-			<div class="grid grid-cols-2 gap-2">
+			<div class="grid grid-cols-3 gap-2">
 				<button
 					class="py-2 rounded-lg font-medium text-white bg-green-500 hover:bg-green-600 disabled:opacity-50 transition-colors"
 					onclick={handleStart}
@@ -224,11 +227,19 @@
 				</button>
 				<button
 					class="py-2 rounded-lg font-medium text-white bg-yellow-500 hover:bg-yellow-600 disabled:opacity-50 transition-colors"
-					onclick={handleResetState}
+					onclick={() => handleResetState(false)}
 					disabled={actionLoading}
 					title="RUNNING 상태를 강제로 초기화하고 미완료 작업을 PENDING으로 복구합니다."
 				>
 					{actionLoading ? '초기화 중...' : '상태 초기화'}
+				</button>
+				<button
+					class="py-2 rounded-lg font-medium text-white bg-red-500 hover:bg-red-600 disabled:opacity-50 transition-colors"
+					onclick={() => handleResetState(true)}
+					disabled={actionLoading}
+					title="모든 작업 기록을 삭제하고 완전히 초기화합니다."
+				>
+					{actionLoading ? '삭제 중...' : '전체 리셋'}
 				</button>
 			</div>
 		</div>

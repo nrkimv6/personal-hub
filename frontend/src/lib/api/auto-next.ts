@@ -217,10 +217,11 @@ export const autoNextRunnerApi = {
 
 	status: () => autoNextRequest<RunStatusResponse>('/status'),
 
-	resetState: () =>
-		autoNextRequest<{ success: boolean; reset_count: number }>('/reset-state', {
-			method: 'POST'
-		})
+	resetState: (fullReset: boolean = false) =>
+		autoNextRequest<{ success: boolean; reset_count: number; full_reset: boolean }>(
+			`/reset-state?full_reset=${fullReset}`,
+			{ method: 'POST' }
+		)
 };
 
 // ============================================================
