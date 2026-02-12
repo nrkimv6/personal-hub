@@ -1080,9 +1080,9 @@
 			{/if}
 		</div>
 	</div>
-</div>
 
 {/if} <!-- mainTab === 'search' -->
+</div>
 
 <!-- 저장/수정 모달 -->
 {#if showSaveModal}
