@@ -2,6 +2,7 @@
 System service for querying and managing Windows services, startup programs, and scheduled tasks
 """
 import asyncio
+import ctypes
 import json
 from pathlib import Path
 from typing import Optional
@@ -245,16 +246,19 @@ if ($tasks) {{
         return {"pid": pid, "running": running}
 
     async def _check_process_exists(self, pid: int) -> bool:
-        """Check if a process exists by PID"""
+        """Check if a process exists by PID (Windows 크로스세션 호환)
+
+        ctypes.windll.kernel32.OpenProcess를 사용하여
+        NSSM Session 0에서 사용자 Session 1 프로세스도 조회 가능.
+        """
         try:
-            ps_cmd = f"Get-Process -Id {pid} -ErrorAction SilentlyContinue"
-            proc = await asyncio.create_subprocess_shell(
-                f'powershell -Command "{ps_cmd}"',
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, _ = await proc.communicate()
-            return bool(stdout)
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if handle:
+                kernel32.CloseHandle(handle)
+                return True
+            return False
         except Exception:
             return False
 
