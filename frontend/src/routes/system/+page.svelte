@@ -4,9 +4,11 @@
   import ServiceStatusTab from './ServiceStatusTab.svelte';
   import ErrorLogTab from './ErrorLogTab.svelte';
   import IntegrityTab from './IntegrityTab.svelte';
+  import BrowsersTab from './BrowsersTab.svelte';
+  import SettingsTab from './SettingsTab.svelte';
 
   // 탭 정의
-  type TabId = 'status' | 'errors' | 'integrity';
+  type TabId = 'status' | 'errors' | 'integrity' | 'browsers' | 'settings';
 
   interface Tab {
     id: TabId;
@@ -17,7 +19,9 @@
   const tabs: Tab[] = [
     { id: 'status', label: '서비스 상태', icon: '🖥️' },
     { id: 'errors', label: '에러 로그', icon: '⚠️' },
-    { id: 'integrity', label: '데이터 정합성', icon: '🔍' }
+    { id: 'integrity', label: '데이터 정합성', icon: '🔍' },
+    { id: 'browsers', label: '브라우저/프록시', icon: '🌐' },
+    { id: 'settings', label: '설정', icon: '⚙️' }
   ];
 
   // 배지 상태
@@ -28,7 +32,7 @@
   // URL 파라미터에서 탭 읽기
   let activeTab = $derived.by((): TabId => {
     const tabParam = $page.url.searchParams.get('tab');
-    if (tabParam === 'errors' || tabParam === 'integrity') {
+    if (tabParam === 'errors' || tabParam === 'integrity' || tabParam === 'browsers' || tabParam === 'settings') {
       return tabParam;
     }
     return 'status';
@@ -94,13 +98,13 @@
 </script>
 
 <svelte:head>
-  <title>시스템 현황</title>
+  <title>시스템 / 설정 | Monitor Page</title>
 </svelte:head>
 
 <div class="p-6 space-y-6">
   <!-- 헤더 -->
   <div class="flex justify-between items-center">
-    <h1 class="text-2xl font-bold text-foreground dark:text-white">시스템 현황</h1>
+    <h1 class="text-2xl font-bold text-foreground dark:text-white">시스템 / 설정</h1>
   </div>
 
   <!-- 탭 네비게이션 -->
@@ -137,6 +141,10 @@
       <ErrorLogTab onUnresolvedChange={handleUnresolvedChange} />
     {:else if activeTab === 'integrity'}
       <IntegrityTab onIssueCountChange={handleIssueCountChange} />
+    {:else if activeTab === 'browsers'}
+      <BrowsersTab />
+    {:else if activeTab === 'settings'}
+      <SettingsTab />
     {/if}
   </div>
 </div>
