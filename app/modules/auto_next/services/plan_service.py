@@ -153,9 +153,9 @@ class PlanService:
         # 모든 체크박스 완료
         if progress.total > 0 and progress.done == progress.total:
             return True
-        # 체크박스 없음
-        if progress.total == 0:
-            return True
+        # 체크박스 없음 - README, 참조 문서 등은 표시
+        # if progress.total == 0:
+        #     return True
         return False
 
     def get_plan_progress(self, path: Path) -> PlanProgressResponse:

@@ -9,7 +9,6 @@ import re
 from collections import Counter
 from datetime import datetime
 
-from kiwipiepy import Kiwi
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -36,12 +35,20 @@ class KeywordAnalyzer:
         self._stopwords = None
 
     @property
-    def kiwi(self) -> Kiwi:
+    def kiwi(self):
         """Kiwi 인스턴스 (lazy loading)."""
         if self._kiwi is None:
-            logger.info("Kiwi 형태소 분석기 로딩...")
-            self._kiwi = Kiwi(num_workers=4)
-            logger.info("Kiwi 로딩 완료")
+            try:
+                from kiwipiepy import Kiwi
+                logger.info("Kiwi 형태소 분석기 로딩...")
+                self._kiwi = Kiwi(num_workers=4)
+                logger.info("Kiwi 로딩 완료")
+            except ImportError as e:
+                logger.error(f"kiwipiepy를 import할 수 없습니다: {e}")
+                raise ImportError(
+                    "키워드 분석 기능을 사용하려면 kiwipiepy 패키지를 설치해야 합니다. "
+                    "설치: pip install kiwipiepy"
+                ) from e
         return self._kiwi
 
     @property

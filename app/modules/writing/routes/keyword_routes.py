@@ -7,7 +7,6 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.modules.writing.services.keyword_analyzer import KeywordAnalyzer
 from app.modules.writing.services.keyword_service import KeywordService
 
 router = APIRouter(prefix="/api/writing/keywords", tags=["keywords"])
@@ -254,6 +253,19 @@ def run_analysis(
     db: Session = Depends(get_db),
 ):
     """키워드 분석 실행."""
+    try:
+        # Lazy import - kiwipiepy가 없어도 서버는 시작됨
+        from app.modules.writing.services.keyword_analyzer import KeywordAnalyzer
+    except ImportError as e:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "키워드 분석 기능을 사용할 수 없습니다.",
+                "reason": "kiwipiepy 패키지가 설치되지 않았습니다.",
+                "solution": "pip install kiwipiepy를 실행하여 패키지를 설치하세요.",
+            },
+        )
+
     analyzer = KeywordAnalyzer(db)
 
     try:
@@ -269,6 +281,15 @@ def run_analysis(
             )
 
         return {"success": True, "mode": data.mode, **result}
+    except ImportError as e:
+        # KeywordAnalyzer 내부에서 kiwi property 접근 시 발생하는 ImportError
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "키워드 분석 기능을 사용할 수 없습니다.",
+                "reason": str(e),
+            },
+        )
     except Exception as e:
         raise HTTPException(500, f"Analysis failed: {e}")
 

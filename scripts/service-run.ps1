@@ -368,6 +368,12 @@ try {
     }
 
     # Start API and wait for it (this is the main process NSSM watches)
+    # Set environment variables before starting process (PowerShell 5.1 compatible)
+    $env:API_PORT = $ApiPort
+    $env:WORKER_AUTO_START = "false"
+    $env:APP_MODE = $AppMode
+    $env:PYTHONIOENCODING = "utf-8"
+
     $apiProcess = Start-Process -FilePath $VenvPython `
         -ArgumentList $uvicornArgs `
         -WorkingDirectory $ProjectRoot `
