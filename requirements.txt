@@ -19,3 +19,10 @@ alembic>=1.13.0
 
 # Redis Queue
 redis>=5.0.0
+
+# Image Classifier Dependencies
+pillow>=10.0.0
+imagehash>=4.3.0
+sentence-transformers>=2.2.0
+faiss-cpu>=1.7.4
+send2trash>=1.8.0

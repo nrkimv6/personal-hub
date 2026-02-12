@@ -1,0 +1,191 @@
+"""
+Claude CLI 어댑터 (subprocess 기반)
+
+구독 중인 Claude CLI를 프로그래밍적으로 호출하여 이미지 분류 수행.
+추가 API 비용 없음 ($0).
+"""
+
+import asyncio
+import json
+import subprocess
+from typing import Optional
+
+from .base import ClassifierAdapter, ClassifyResult
+from ..config import settings
+
+
+class ClaudeCLIAdapter(ClassifierAdapter):
+    """Claude CLI 어댑터"""
+
+    def __init__(self, cli_path: Optional[str] = None):
+        self.cli_path = cli_path or settings.CLAUDE_CLI_PATH
+        self.timeout = settings.CLI_TIMEOUT_SECONDS
+
+    async def classify_image(
+        self,
+        image_path: str,
+        prompt: str,
+        categories: list[str],
+    ) -> ClassifyResult:
+        """단일 이미지 분류"""
+        # 프롬프트에 이미지 경로와 카테고리 목록 포함
+        full_prompt = self._build_prompt(prompt, categories, [image_path])
+
+        # JSON 스키마 정의
+        json_schema = {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string"},
+                "confidence": {"type": "number"},
+                "reasoning": {"type": "string"}
+            },
+            "required": ["category", "confidence"]
+        }
+
+        try:
+            # Claude CLI 호출
+            result = await asyncio.wait_for(
+                self._run_cli(full_prompt, json_schema),
+                timeout=self.timeout
+            )
+
+            return ClassifyResult(
+                category_path=result.get("category", "unknown"),
+                confidence=float(result.get("confidence", 0.5)),
+                reasoning=result.get("reasoning"),
+                model="claude-sonnet-3.5 (CLI)"
+            )
+
+        except asyncio.TimeoutError:
+            return ClassifyResult(
+                category_path="error/timeout",
+                confidence=0.0,
+                reasoning="CLI 호출 타임아웃",
+                model="claude (CLI)"
+            )
+
+        except Exception as e:
+            return ClassifyResult(
+                category_path="error/exception",
+                confidence=0.0,
+                reasoning=str(e),
+                model="claude (CLI)"
+            )
+
+    async def classify_images_batch(
+        self,
+        image_paths: list[str],
+        prompt: str,
+        categories: list[str],
+    ) -> list[ClassifyResult]:
+        """배치 분류 (클러스터 단위)"""
+        # 배치 프롬프트: 이미지 여러 장을 한 번에 전달
+        full_prompt = self._build_prompt(prompt, categories, image_paths)
+
+        # JSON 스키마: 배열 응답
+        json_schema = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "image_path": {"type": "string"},
+                    "category": {"type": "string"},
+                    "confidence": {"type": "number"},
+                    "reasoning": {"type": "string"}
+                },
+                "required": ["image_path", "category", "confidence"]
+            }
+        }
+
+        try:
+            result = await asyncio.wait_for(
+                self._run_cli(full_prompt, json_schema),
+                timeout=self.timeout * 2  # 배치는 타임아웃 2배
+            )
+
+            # 결과 매핑
+            results = []
+            result_map = {item["image_path"]: item for item in result}
+
+            for img_path in image_paths:
+                item = result_map.get(img_path, {})
+                results.append(ClassifyResult(
+                    category_path=item.get("category", "unknown"),
+                    confidence=float(item.get("confidence", 0.5)),
+                    reasoning=item.get("reasoning"),
+                    model="claude-sonnet-3.5 (CLI batch)"
+                ))
+
+            return results
+
+        except Exception as e:
+            # 실패 시 전체 unknown 반환
+            return [
+                ClassifyResult(
+                    category_path="error/exception",
+                    confidence=0.0,
+                    reasoning=str(e),
+                    model="claude (CLI)"
+                )
+                for _ in image_paths
+            ]
+
+    async def _run_cli(self, prompt: str, json_schema: dict) -> dict:
+        """Claude CLI subprocess 실행"""
+        cmd = [
+            self.cli_path,
+            "-p", prompt,
+            "--output-format", "json",
+            "--json-schema", json.dumps(json_schema),
+            "--allowedTools", "Read"  # 이미지 파일 읽기 허용
+        ]
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        stdout, stderr = await proc.communicate()
+
+        if proc.returncode != 0:
+            raise RuntimeError(f"Claude CLI 오류: {stderr.decode()}")
+
+        return json.loads(stdout.decode())
+
+    def _build_prompt(self, context: str, categories: list[str], image_paths: list[str]) -> str:
+        """프롬프트 생성"""
+        cat_list = "\n".join(f"- {cat}" for cat in categories)
+        img_list = "\n".join(f"- {path}" for path in image_paths)
+
+        return f"""
+다음 이미지를 아래 카테고리 중 하나로 분류하세요.
+
+**컨텍스트:**
+{context}
+
+**가능한 카테고리:**
+{cat_list}
+
+**이미지 파일:**
+{img_list}
+
+각 이미지 파일을 Read 도구로 읽어서 분석하고, 가장 적합한 카테고리를 선택하세요.
+응답은 반드시 지정된 JSON 스키마 형식으로만 출력하세요.
+"""
+
+    def get_model_name(self) -> str:
+        return "claude-sonnet-3.5 (CLI)"
+
+    async def is_available(self) -> bool:
+        """CLI 실행 가능 여부 확인"""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                self.cli_path, "--version",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            await proc.communicate()
+            return proc.returncode == 0
+        except FileNotFoundError:
+            return False
