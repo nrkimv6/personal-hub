@@ -198,7 +198,7 @@ if ($tasks) {{
             return []
 
     async def get_worker_status(self) -> list:
-        """Query worker process status by PID files"""
+        """Query worker process status by PID files (watchdog + worker pairs)"""
         result = []
 
         for project_name, config in MANAGED_PROJECTS.items():
@@ -210,25 +210,39 @@ if ($tasks) {{
             pid_dir = project_path / workers_config["pid_dir"]
 
             for worker in workers_config.get("items", []):
-                pid_path = pid_dir / worker["pid_file"]
-                running = False
-                pid = None
-
-                if pid_path.exists():
-                    try:
-                        pid = int(pid_path.read_text().strip())
-                        running = await self._check_process_exists(pid)
-                    except (ValueError, IOError):
-                        pass
-
-                result.append({
+                entry = {
                     "name": worker["name"],
+                    "label": worker.get("label", worker["name"]),
                     "project": project_name,
-                    "pid": pid,
-                    "running": running
-                })
+                    "watchdog": None,
+                    "worker": None,
+                }
+
+                watchdog_pid_file = worker.get("watchdog_pid_file")
+                if watchdog_pid_file:
+                    entry["watchdog"] = await self._read_pid_status(pid_dir / watchdog_pid_file)
+
+                worker_pid_file = worker.get("worker_pid_file")
+                if worker_pid_file:
+                    entry["worker"] = await self._read_pid_status(pid_dir / worker_pid_file)
+
+                result.append(entry)
 
         return result
+
+    async def _read_pid_status(self, pid_path: Path) -> dict:
+        """Read PID file and check process status"""
+        pid = None
+        running = False
+
+        if pid_path.exists():
+            try:
+                pid = int(pid_path.read_text().strip())
+                running = await self._check_process_exists(pid)
+            except (ValueError, IOError):
+                pass
+
+        return {"pid": pid, "running": running}
 
     async def _check_process_exists(self, pid: int) -> bool:
         """Check if a process exists by PID"""
