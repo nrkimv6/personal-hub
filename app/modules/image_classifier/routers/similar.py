@@ -2,7 +2,7 @@
 유사 이미지 검색 관련 API 엔드포인트
 
 - GET /api/ic/similar/{file_id}: 특정 파일과 유사한 이미지 검색
-- POST /api/ic/similar/bulk-suggest: 벌크 유사 분류 제안
+- GET /api/ic/similar/bulk-suggest: 벌크 유사 분류 제안
 - POST /api/ic/similar/apply: 유사 분류 적용
 - POST /api/ic/similar/build-index: FAISS 인덱스 빌드
 """
@@ -120,9 +120,10 @@ async def get_similar_images(
     return results
 
 
-@router.post("/bulk-suggest")
+@router.get("/bulk-suggest")
 async def bulk_suggest_similar(
-    request: BulkSuggestRequest,
+    threshold: float = 0.85,
+    max_results: int = 50,
     db: Session = Depends(get_db)
 ):
     """
@@ -151,7 +152,7 @@ async def bulk_suggest_similar(
         AND feat.clip_embedding IS NOT NULL
         LIMIT :max_results
     """)
-    unclassified_files = db.execute(unclassified_query, {"max_results": request.max_results}).fetchall()
+    unclassified_files = db.execute(unclassified_query, {"max_results": max_results}).fetchall()
 
     # 각 미분류 파일에 대해 유사 파일 검색
     suggestions = []
@@ -162,7 +163,7 @@ async def bulk_suggest_similar(
         embedding = np.frombuffer(file.clip_embedding, dtype=np.float32)
 
         # 유사 파일 검색 (분류된 파일만)
-        similar_results = faiss_manager.search_by_embedding(embedding, k=5, threshold=request.threshold)
+        similar_results = faiss_manager.search_by_embedding(embedding, k=5, threshold=threshold)
 
         if not similar_results:
             continue

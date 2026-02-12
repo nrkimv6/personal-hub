@@ -12,7 +12,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
 # 이미지 분류 DB 경로
-DB_DIR = Path(__file__).resolve().parents[4] / "data"
+DB_DIR = Path(__file__).resolve().parents[3] / "data"
 DB_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DB_DIR / "image_classifier.db"
 DB_URL = f"sqlite:///{DB_PATH}"

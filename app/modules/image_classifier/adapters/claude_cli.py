@@ -53,7 +53,7 @@ class ClaudeCLIAdapter(ClassifierAdapter):
                 category_path=result.get("category", "unknown"),
                 confidence=float(result.get("confidence", 0.5)),
                 reasoning=result.get("reasoning"),
-                model="claude-sonnet-3.5 (CLI)"
+                model=f"{settings.CLAUDE_MODEL} (CLI)"
             )
 
         except asyncio.TimeoutError:
@@ -61,7 +61,7 @@ class ClaudeCLIAdapter(ClassifierAdapter):
                 category_path="error/timeout",
                 confidence=0.0,
                 reasoning="CLI 호출 타임아웃",
-                model="claude (CLI)"
+                model=f"{settings.CLAUDE_MODEL} (CLI)"
             )
 
         except Exception as e:
@@ -69,7 +69,7 @@ class ClaudeCLIAdapter(ClassifierAdapter):
                 category_path="error/exception",
                 confidence=0.0,
                 reasoning=str(e),
-                model="claude (CLI)"
+                model=f"{settings.CLAUDE_MODEL} (CLI)"
             )
 
     async def classify_images_batch(
@@ -113,7 +113,7 @@ class ClaudeCLIAdapter(ClassifierAdapter):
                     category_path=item.get("category", "unknown"),
                     confidence=float(item.get("confidence", 0.5)),
                     reasoning=item.get("reasoning"),
-                    model="claude-sonnet-3.5 (CLI batch)"
+                    model=f"{settings.CLAUDE_MODEL} (CLI batch)"
                 ))
 
             return results
@@ -125,7 +125,7 @@ class ClaudeCLIAdapter(ClassifierAdapter):
                     category_path="error/exception",
                     confidence=0.0,
                     reasoning=str(e),
-                    model="claude (CLI)"
+                    model=f"{settings.CLAUDE_MODEL} (CLI)"
                 )
                 for _ in image_paths
             ]
@@ -137,7 +137,8 @@ class ClaudeCLIAdapter(ClassifierAdapter):
             "-p", prompt,
             "--output-format", "json",
             "--json-schema", json.dumps(json_schema),
-            "--allowedTools", "Read"  # 이미지 파일 읽기 허용
+            "--allowedTools", "Read",  # 이미지 파일 읽기 허용
+            "--model", settings.CLAUDE_MODEL
         ]
 
         proc = await asyncio.create_subprocess_exec(
@@ -175,7 +176,7 @@ class ClaudeCLIAdapter(ClassifierAdapter):
 """
 
     def get_model_name(self) -> str:
-        return "claude-sonnet-3.5 (CLI)"
+        return f"{settings.CLAUDE_MODEL} (CLI)"
 
     async def is_available(self) -> bool:
         """CLI 실행 가능 여부 확인"""

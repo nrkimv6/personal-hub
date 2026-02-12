@@ -40,6 +40,7 @@ class ImageClassifierSettings(BaseSettings):
     # === AI 분류 설정 (CLI 우선) ===
     AI_MODE: str = "cli"  # "cli" | "api"
     CLAUDE_CLI_PATH: str = "claude"  # claude CLI 실행 경로
+    CLAUDE_MODEL: str = "claude-sonnet-4-5-20250929"  # Claude CLI 모델 ID
     GEMINI_CLI_PATH: str = "gemini"  # gemini CLI 실행 경로
 
     # API 키 (선택적 — API 모드 시에만 사용)

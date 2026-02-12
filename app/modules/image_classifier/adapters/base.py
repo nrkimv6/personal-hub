@@ -8,6 +8,14 @@ from typing import Optional
 
 
 @dataclass
+class ClassifyRequest:
+    """AI 분류 요청"""
+    image_paths: list[str]  # 이미지 파일 경로 목록
+    prompt: str  # AI에게 전달할 프롬프트
+    categories: list[str]  # 가능한 카테고리 목록
+
+
+@dataclass
 class ClassifyResult:
     """AI 분류 결과"""
     category_path: str  # "outdoor/travel" 형식의 카테고리 경로
