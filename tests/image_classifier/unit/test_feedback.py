@@ -95,8 +95,8 @@ def test_analyze_feedback_filename_patterns(feedback_learner, seeded_feedback):
 
 def test_analyze_feedback_folder_patterns(feedback_learner, seeded_feedback):
     """17.3 Right: analyze_feedback → folder 패턴 추출"""
-    # 추가 피드백 생성 (threshold 5개 이상)
-    for i in range(6, 12):
+    # 추가 피드백 생성 (threshold 5개 이상, ID 중복 방지)
+    for i in range(11, 17):  # 11-16번 사용 (1-10은 seeded_feedback에서 사용)
         feedback_learner.db.execute(text("""
             INSERT INTO file_classifications (id, file_path, file_hash, status)
             VALUES (:id, :path, 'hash', 'ai_classified')
@@ -160,7 +160,7 @@ def test_generate_rules(feedback_learner, test_db):
             "confidence": 0.9,
         },
         {
-            "type": "folder",
+            "type": "folder_path",  # 'folder' → 'folder_path'
             "pattern": "photos/travel",
             "category_id": 2,
             "confidence": 0.85,

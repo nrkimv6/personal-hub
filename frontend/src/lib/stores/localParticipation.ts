@@ -15,6 +15,24 @@ type ParticipationMap = Record<number, boolean>;
 
 function createLocalParticipationStore() {
 	const { subscribe, set, update } = writable<ParticipationMap>({});
+	let saveTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	/**
+	 * 쓰기 throttle - 1초 내 중복 저장 방지
+	 */
+	function saveThrottled(state: ParticipationMap): void {
+		if (saveTimeout) return; // 이미 예약됨
+		saveTimeout = setTimeout(() => {
+			if (!browser) return;
+			try {
+				localStorage.setItem(PARTICIPATED_STORAGE_KEY, JSON.stringify(state));
+			} catch (e) {
+				console.error('로컬 참여 상태 저장 실패:', e);
+			} finally {
+				saveTimeout = null;
+			}
+		}, 1000); // 1초 throttle
+	}
 
 	return {
 		subscribe,
@@ -66,14 +84,8 @@ function createLocalParticipationStore() {
 		toggle(eventId: number, currentState: boolean): void {
 			update((state) => {
 				const newState = { ...state, [eventId]: !currentState };
-				// 저장
-				if (browser) {
-					try {
-						localStorage.setItem(PARTICIPATED_STORAGE_KEY, JSON.stringify(newState));
-					} catch (e) {
-						console.error('로컬 참여 상태 저장 실패:', e);
-					}
-				}
+				// throttled 저장
+				saveThrottled(newState);
 				return newState;
 			});
 		},
@@ -84,13 +96,8 @@ function createLocalParticipationStore() {
 		setParticipated(eventId: number, participated: boolean): void {
 			update((state) => {
 				const newState = { ...state, [eventId]: participated };
-				if (browser) {
-					try {
-						localStorage.setItem(PARTICIPATED_STORAGE_KEY, JSON.stringify(newState));
-					} catch (e) {
-						console.error('로컬 참여 상태 저장 실패:', e);
-					}
-				}
+				// throttled 저장
+				saveThrottled(newState);
 				return newState;
 			});
 		}

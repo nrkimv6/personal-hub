@@ -97,8 +97,8 @@ async def start_scan(
         "error": None,
     })
 
-    # 백그라운드에서 스캔 실행
-    background_tasks.add_task(run_scan_task, root_folders, db)
+    # 백그라운드에서 스캔 실행 (세션 전달하지 않음)
+    background_tasks.add_task(run_scan_task, root_folders)
 
     return {
         "status": "started",
@@ -180,7 +180,7 @@ async def get_folders(
 
 
 # === 백그라운드 태스크 ===
-async def run_scan_task(root_folders: list[str], db: Session):
+async def run_scan_task(root_folders: list[str]):
     """
     스캔 백그라운드 태스크
 
@@ -188,6 +188,10 @@ async def run_scan_task(root_folders: list[str], db: Session):
     - 진행 상태를 scan_state에 업데이트
     """
     global scan_state
+
+    # 백그라운드 태스크용 독립 세션 생성
+    from ..database import SessionLocal
+    db = SessionLocal()
 
     try:
         scanner = FolderScanner(db, settings)
@@ -202,6 +206,8 @@ async def run_scan_task(root_folders: list[str], db: Session):
         scan_state["error"] = str(e)
         scan_state["is_running"] = False
         print(f"[스캔 오류] {e}")
+    finally:
+        db.close()
 
 
 def update_scan_progress(

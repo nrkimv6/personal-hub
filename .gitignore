@@ -24,5 +24,7 @@ data/llm_images/
 htmlcov/
 .coverage
 .coverage.*
+data/image_classifier/settings.json
 
 *cwd
+data/image_classifier
