@@ -68,58 +68,6 @@ async def build_faiss_index(
     }
 
 
-@router.get("/{file_id}", response_model=list[SimilarImageResponse])
-async def get_similar_images(
-    file_id: int,
-    k: int = 10,
-    threshold: float = 0.7,
-    db: Session = Depends(get_db)
-):
-    """
-    특정 파일과 유사한 이미지 검색
-
-    Args:
-        file_id: 기준 파일 ID
-        k: 반환할 결과 수
-        threshold: 유사도 임계값 (0~1)
-    """
-    global faiss_manager
-
-    # FAISS 매니저 초기화
-    if faiss_manager is None:
-        faiss_manager = FAISSIndexManager(db)
-        if not faiss_manager.load_index():
-            raise HTTPException(
-                status_code=503,
-                detail="FAISS 인덱스가 없습니다. 먼저 /api/ic/similar/build-index를 호출하세요."
-            )
-
-    # 유사 이미지 검색
-    similar_files = faiss_manager.search_similar(file_id, k, threshold)
-
-    # 결과 조회
-    results = []
-    for similar_file_id, similarity in similar_files:
-        query = text("""
-            SELECT fc.file_path, fc.final_category_id, cat.full_path
-            FROM file_classifications fc
-            LEFT JOIN categories cat ON fc.final_category_id = cat.id
-            WHERE fc.id = :file_id
-        """)
-        file_info = db.execute(query, {"file_id": similar_file_id}).fetchone()
-
-        if file_info:
-            results.append(SimilarImageResponse(
-                file_id=similar_file_id,
-                file_path=file_info.file_path,
-                similarity=similarity,
-                category_id=file_info.final_category_id,
-                category_path=file_info.full_path,
-            ))
-
-    return results
-
-
 @router.get("/bulk-suggest")
 async def bulk_suggest_similar(
     threshold: float = 0.85,
@@ -200,6 +148,58 @@ async def bulk_suggest_similar(
         "total_unclassified": len(unclassified_files),
         "suggestions": suggestions,
     }
+
+
+@router.get("/{file_id}", response_model=list[SimilarImageResponse])
+async def get_similar_images(
+    file_id: int,
+    k: int = 10,
+    threshold: float = 0.7,
+    db: Session = Depends(get_db)
+):
+    """
+    특정 파일과 유사한 이미지 검색
+
+    Args:
+        file_id: 기준 파일 ID
+        k: 반환할 결과 수
+        threshold: 유사도 임계값 (0~1)
+    """
+    global faiss_manager
+
+    # FAISS 매니저 초기화
+    if faiss_manager is None:
+        faiss_manager = FAISSIndexManager(db)
+        if not faiss_manager.load_index():
+            raise HTTPException(
+                status_code=503,
+                detail="FAISS 인덱스가 없습니다. 먼저 /api/ic/similar/build-index를 호출하세요."
+            )
+
+    # 유사 이미지 검색
+    similar_files = faiss_manager.search_similar(file_id, k, threshold)
+
+    # 결과 조회
+    results = []
+    for similar_file_id, similarity in similar_files:
+        query = text("""
+            SELECT fc.file_path, fc.final_category_id, cat.full_path
+            FROM file_classifications fc
+            LEFT JOIN categories cat ON fc.final_category_id = cat.id
+            WHERE fc.id = :file_id
+        """)
+        file_info = db.execute(query, {"file_id": similar_file_id}).fetchone()
+
+        if file_info:
+            results.append(SimilarImageResponse(
+                file_id=similar_file_id,
+                file_path=file_info.file_path,
+                similarity=similarity,
+                category_id=file_info.final_category_id,
+                category_path=file_info.full_path,
+            ))
+
+    return results
 
 
 @router.post("/apply")
