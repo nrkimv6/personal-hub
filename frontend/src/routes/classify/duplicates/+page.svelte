@@ -242,6 +242,8 @@
 										src={getThumbnailUrl(member.file_id)}
 										alt="파일 {member.file_id}"
 										class="w-full h-full object-contain"
+										loading="lazy"
+										decoding="async"
 										on:error={(e) => {
 											e.currentTarget.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"><rect width="300" height="300" fill="%23f3f4f6"/><text x="50%" y="50%" text-anchor="middle" dy=".3em" fill="%239ca3af" font-family="sans-serif">No Image</text></svg>';
 										}}

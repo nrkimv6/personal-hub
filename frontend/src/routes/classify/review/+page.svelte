@@ -89,7 +89,7 @@
 			{#each files as file}
 				<div class="file-card" class:selected={selectedFiles.has(file.id)}>
 					<input type="checkbox" checked={selectedFiles.has(file.id)} on:change={() => toggleFile(file.id)} />
-					<img src={getThumbnailUrl(file.id)} alt={file.file_path} />
+					<img src={getThumbnailUrl(file.id)} alt={file.file_path} loading="lazy" decoding="async" />
 					<div class="file-info">
 						<div class="category">{file.ai_category}</div>
 						<div class="confidence">{(file.ai_confidence * 100).toFixed(0)}% 신뢰도</div>

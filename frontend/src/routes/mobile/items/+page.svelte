@@ -174,6 +174,8 @@
 									src={item.image_url}
 									alt={item.title}
 									class="w-full h-48 object-cover"
+									loading="lazy"
+									decoding="async"
 								/>
 							</figure>
 						{/if}
@@ -263,6 +265,8 @@
 					src={selectedItem.image_url}
 					alt={selectedItem.title}
 					class="w-full rounded-lg mb-4"
+					loading="lazy"
+					decoding="async"
 				/>
 			{/if}
 

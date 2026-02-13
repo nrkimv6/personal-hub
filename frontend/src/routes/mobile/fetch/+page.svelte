@@ -230,6 +230,8 @@
 								src="data:image/png;base64,{result.screenshot_base64}"
 								alt="Page Screenshot"
 								class="w-full"
+								loading="lazy"
+								decoding="async"
 							/>
 						</div>
 					</div>

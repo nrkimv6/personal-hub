@@ -174,7 +174,7 @@
 									checked={selectedFiles.has(file.file_id)}
 									on:change={() => toggleFile(file.file_id)}
 								/>
-								<img src={getThumbnailUrl(file.file_id)} alt={file.file_path} />
+								<img src={getThumbnailUrl(file.file_id)} alt={file.file_path} loading="lazy" decoding="async" />
 								<div class="file-info">
 									<div class="similarity">{(file.similarity * 100).toFixed(0)}% 유사</div>
 									<div class="file-path">{file.file_path.split('/').pop()}</div>

@@ -869,6 +869,8 @@
             src={selectedPost.thumbnail}
             alt={selectedPost.title || '게시물 이미지'}
             class="w-full h-full object-cover"
+            loading="lazy"
+            decoding="async"
           />
         </div>
       {/if}
