@@ -15,7 +15,7 @@ from ..database import get_db
 from ..adapters.claude_cli import ClaudeCLIAdapter
 from ..adapters.gemini_cli import GeminiCLIAdapter
 
-router = APIRouter(prefix="/api/ic/classify", tags=["classify"])
+router = APIRouter(prefix="/classify", tags=["classify"])
 logger = logging.getLogger(__name__)
 
 # 전역 상태 (실제 프로덕션에서는 Redis 등 사용)
