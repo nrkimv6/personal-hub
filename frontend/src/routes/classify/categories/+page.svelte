@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	// === 타입 정의 ===
 	interface Category {
@@ -34,7 +35,7 @@
 	async function loadCategories() {
 		loading = true;
 		try {
-			const res = await fetch('/api/ic/categories?include_tree=true');
+			const res = await fetchWithTimeout('/api/ic/categories?include_tree=true');
 			const data = await res.json();
 			categories = data.categories || [];
 		} catch (e) {
@@ -46,7 +47,7 @@
 
 	async function createCategory() {
 		try {
-			const res = await fetch('/api/ic/categories', {
+			const res = await fetchWithTimeout('/api/ic/categories', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -76,7 +77,7 @@
 		if (!editingCategory.id) return;
 
 		try {
-			const res = await fetch(`/api/ic/categories/${editingCategory.id}`, {
+			const res = await fetchWithTimeout(`/api/ic/categories/${editingCategory.id}`, {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -114,7 +115,7 @@
 		}
 
 		try {
-			const res = await fetch(`/api/ic/categories/${categoryId}?force=${force}`, {
+			const res = await fetchWithTimeout(`/api/ic/categories/${categoryId}?force=${force}`, {
 				method: 'DELETE'
 			});
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { fetchWithTimeout } from '$lib/api/client';
 
   interface Account {
     id: number;
@@ -88,7 +89,7 @@
 
   async function loadBrowserStatus() {
     try {
-      const res = await fetch('/api/v1/worker/browser-status');
+      const res = await fetchWithTimeout('/api/v1/worker/browser-status');
       if (res.ok) {
         browserStatus = await res.json();
       }
@@ -100,7 +101,7 @@
   async function loadBrowserCommands() {
     try {
       commandsLoading = true;
-      const res = await fetch('/api/v1/accounts/browser/commands?limit=20');
+      const res = await fetchWithTimeout('/api/v1/accounts/browser/commands?limit=20');
       if (res.ok) {
         const data = await res.json();
         browserCommands = data.commands;
@@ -122,7 +123,7 @@
   async function loadAccounts() {
     try {
       loading = true;
-      const res = await fetch('/api/v1/accounts/');
+      const res = await fetchWithTimeout('/api/v1/accounts/');
       if (!res.ok) throw new Error('계정 목록을 불러올 수 없습니다');
       accounts = await res.json();
       error = '';
@@ -175,7 +176,7 @@
 
       const method = editingAccount ? 'PUT' : 'POST';
 
-      const res = await fetch(url, {
+      const res = await fetchWithTimeout(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
@@ -199,7 +200,7 @@
     }
 
     try {
-      const res = await fetch(`/api/v1/accounts/${id}`, {
+      const res = await fetchWithTimeout(`/api/v1/accounts/${id}`, {
         method: 'DELETE'
       });
 
@@ -212,7 +213,7 @@
 
   async function toggleActive(account: Account) {
     try {
-      const res = await fetch(`/api/v1/accounts/${account.id}`, {
+      const res = await fetchWithTimeout(`/api/v1/accounts/${account.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_active: !account.is_active })
@@ -250,7 +251,7 @@
   async function openBrowser(account: Account) {
     browserLoading[account.id] = 'open';
     try {
-      const res = await fetch(`/api/v1/accounts/${account.id}/browser/open`, {
+      const res = await fetchWithTimeout(`/api/v1/accounts/${account.id}/browser/open`, {
         method: 'POST'
       });
       if (!res.ok) {
@@ -272,7 +273,7 @@
   async function openNaverLogin(account: Account) {
     browserLoading[account.id] = 'login';
     try {
-      const res = await fetch(`/api/v1/accounts/${account.id}/browser/naver-login`, {
+      const res = await fetchWithTimeout(`/api/v1/accounts/${account.id}/browser/naver-login`, {
         method: 'POST'
       });
       if (!res.ok) {
@@ -293,7 +294,7 @@
   async function checkLoginStatus(account: Account) {
     browserLoading[account.id] = 'check';
     try {
-      const res = await fetch(`/api/v1/accounts/${account.id}/browser/check-login`, {
+      const res = await fetchWithTimeout(`/api/v1/accounts/${account.id}/browser/check-login`, {
         method: 'POST'
       });
       if (!res.ok) {
@@ -314,7 +315,7 @@
   async function closeBrowser(account: Account) {
     browserLoading[account.id] = 'close';
     try {
-      const res = await fetch(`/api/v1/accounts/${account.id}/browser/close`, {
+      const res = await fetchWithTimeout(`/api/v1/accounts/${account.id}/browser/close`, {
         method: 'POST'
       });
       if (!res.ok) {

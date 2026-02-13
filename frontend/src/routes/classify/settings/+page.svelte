@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	interface Settings {
 		model: string;
@@ -33,7 +34,7 @@
 	async function loadSettings() {
 		loading = true;
 		try {
-			const response = await fetch('/api/ic/settings');
+			const response = await fetchWithTimeout('/api/ic/settings');
 			if (response.ok) {
 				settings = await response.json();
 			}
@@ -47,7 +48,7 @@
 	async function saveSettings() {
 		saving = true;
 		try {
-			await fetch('/api/ic/settings', {
+			await fetchWithTimeout('/api/ic/settings', {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(settings)

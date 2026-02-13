@@ -1,5 +1,6 @@
 <script>
 	import { onMount } from "svelte";
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	let url = $state("");
 	let waitForSelector = $state("");
@@ -21,7 +22,7 @@
 			error = null;
 			result = null;
 
-			const response = await fetch("/api/v1/mobile/fetch-html", {
+			const response = await fetchWithTimeout("/api/v1/mobile/fetch-html", {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",

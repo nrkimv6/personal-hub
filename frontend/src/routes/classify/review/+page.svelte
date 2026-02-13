@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	interface FileReview {
 		id: number;
@@ -22,7 +23,7 @@
 	async function loadFiles() {
 		loading = true;
 		try {
-			const response = await fetch(`/api/ic/files?status=ai_classified&sort=${sortBy}`);
+			const response = await fetchWithTimeout(`/api/ic/files?status=ai_classified&sort=${sortBy}`);
 			if (response.ok) {
 				files = await response.json();
 			}
@@ -47,7 +48,7 @@
 		if (ids.length === 0) return;
 
 		try {
-			await fetch('/api/ic/files/approve', {
+			await fetchWithTimeout('/api/ic/files/approve', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ file_ids: ids })

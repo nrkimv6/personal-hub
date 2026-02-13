@@ -1,6 +1,7 @@
 <script>
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	let runs = $state([]);
 	let loading = $state(true);
@@ -16,7 +17,7 @@
 			loading = true;
 
 			// 대상 목록 로드
-			const targetsRes = await fetch('/api/v1/mobile/targets');
+			const targetsRes = await fetchWithTimeout('/api/v1/mobile/targets');
 			if (targetsRes.ok) {
 				targets = await targetsRes.json();
 			}

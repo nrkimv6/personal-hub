@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { toast } from '$lib/stores/toast';
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	// 타입 정의
 	interface WorkerStatus {
@@ -52,7 +53,7 @@
 	const API_BASE = '/api/activity';
 
 	async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-		const response = await fetch(`${API_BASE}${endpoint}`, {
+		const response = await fetchWithTimeout(`${API_BASE}${endpoint}`, {
 			headers: { 'Content-Type': 'application/json', ...options.headers },
 			...options
 		});

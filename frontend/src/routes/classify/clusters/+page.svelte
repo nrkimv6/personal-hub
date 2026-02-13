@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	interface Cluster {
 		id: number;
@@ -23,7 +24,7 @@
 	async function loadClusters() {
 		loading = true;
 		try {
-			const response = await fetch('/api/ic/clusters');
+			const response = await fetchWithTimeout('/api/ic/clusters');
 			if (response.ok) {
 				clusters = await response.json();
 			}

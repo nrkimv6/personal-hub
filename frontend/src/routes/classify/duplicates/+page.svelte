@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	interface DuplicateGroup {
 		group_id: number;
@@ -41,7 +42,7 @@
 				params.set('status', filter.status);
 			}
 
-			const res = await fetch(`/api/ic/duplicates?${params}`);
+			const res = await fetchWithTimeout(`/api/ic/duplicates?${params}`);
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const data = await res.json();
 			groups = data.groups;
@@ -54,7 +55,7 @@
 
 	async function loadGroupDetail(groupId: number) {
 		try {
-			const res = await fetch(`/api/ic/duplicates/${groupId}`);
+			const res = await fetchWithTimeout(`/api/ic/duplicates/${groupId}`);
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			selectedGroup = await res.json();
 		} catch (err: any) {
@@ -68,7 +69,7 @@
 		}
 
 		try {
-			const res = await fetch(`/api/ic/duplicates/${groupId}/resolve`, {
+			const res = await fetchWithTimeout(`/api/ic/duplicates/${groupId}/resolve`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({

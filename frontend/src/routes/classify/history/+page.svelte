@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	interface MoveHistory {
 		id: number;
@@ -19,7 +20,7 @@
 	async function loadHistory() {
 		loading = true;
 		try {
-			const response = await fetch('/api/ic/files?status=moved&limit=100');
+			const response = await fetchWithTimeout('/api/ic/files?status=moved&limit=100');
 			if (response.ok) {
 				history = await response.json();
 			}
@@ -34,7 +35,7 @@
 		if (!confirm('이 파일을 원래 위치로 복원하시겠습니까?')) return;
 
 		try {
-			await fetch(`/api/ic/files/${id}/rollback`, { method: 'POST' });
+			await fetchWithTimeout(`/api/ic/files/${id}/rollback`, { method: 'POST' });
 			alert('복원되었습니다.');
 			await loadHistory();
 		} catch (err) {

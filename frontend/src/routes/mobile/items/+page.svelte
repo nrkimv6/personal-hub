@@ -1,6 +1,7 @@
 <script>
 	import { onMount } from "svelte";
 	import { page } from "$app/stores";
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	let items = $state([]);
 	let loading = $state(true);
@@ -23,7 +24,7 @@
 			loading = true;
 
 			// 대상 목록 로드
-			const targetsRes = await fetch("/api/v1/mobile/targets");
+			const targetsRes = await fetchWithTimeout("/api/v1/mobile/targets");
 			if (targetsRes.ok) {
 				targets = await targetsRes.json();
 			}

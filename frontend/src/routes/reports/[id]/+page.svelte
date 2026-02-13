@@ -4,6 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { Button } from '$lib/components/ui';
 	import { isAdmin } from '$lib/stores/auth';
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	type Report = {
 		id: number;
@@ -37,7 +38,7 @@
 		error = null;
 
 		try {
-			const response = await fetch(`/api/v1/reports/${reportId}`);
+			const response = await fetchWithTimeout(`/api/v1/reports/${reportId}`);
 
 			if (!response.ok) {
 				if (response.status === 404) {
@@ -62,7 +63,7 @@
 		deleting = true;
 
 		try {
-			const response = await fetch(`/api/v1/reports/${reportId}`, {
+			const response = await fetchWithTimeout(`/api/v1/reports/${reportId}`, {
 				method: 'DELETE',
 				credentials: 'include'
 			});

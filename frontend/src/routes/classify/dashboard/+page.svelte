@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	let health: any = null;
 	let loading = true;
@@ -9,7 +10,7 @@
 		loading = true;
 		error = null;
 		try {
-			const res = await fetch('/api/ic/health');
+			const res = await fetchWithTimeout('/api/ic/health');
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			health = await res.json();
 		} catch (err: any) {

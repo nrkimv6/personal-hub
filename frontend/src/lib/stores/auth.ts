@@ -6,6 +6,7 @@
 
 import { writable, derived } from 'svelte/store';
 import { browser } from '$app/environment';
+import { fetchWithTimeout } from '$lib/api/client';
 
 const API_BASE = '/api/v1';
 const TOKEN_KEY = 'auth_token';
@@ -56,7 +57,7 @@ function createAuthStore() {
 
 				// credentials: 'include'로 Cookie도 전송 (PWA 공유 기능 등)
 				// 백엔드는 Authorization 헤더가 없으면 Cookie에서 토큰 확인
-				const response = await fetch(`${API_BASE}/auth/me`, { headers, credentials: 'include' });
+				const response = await fetchWithTimeout(`${API_BASE}/auth/me`, { headers, credentials: 'include' }, 10000);
 
 				// 401 Unauthorized: 토큰이 유효하지 않음 (만료 등)
 				if (response.status === 401) {
@@ -147,7 +148,7 @@ function createAuthStore() {
 
 			try {
 				const token = localStorage.getItem(TOKEN_KEY);
-				await fetch(`${API_BASE}/auth/logout`, {
+				await fetchWithTimeout(`${API_BASE}/auth/logout`, {
 					method: 'POST',
 					headers: token ? { Authorization: `Bearer ${token}` } : {},
 					credentials: 'include'  // Cookie 삭제를 위해

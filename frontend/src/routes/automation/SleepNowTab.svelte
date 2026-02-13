@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	// Types
 	interface SleepStatus {
@@ -103,7 +104,7 @@
 		unlockSuccess = null;
 
 		try {
-			const res = await fetch(`${API_BASE}/emergency-unlock`, {
+			const res = await fetchWithTimeout(`${API_BASE}/emergency-unlock`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ password, reason })
@@ -137,7 +138,7 @@
 		unlockSuccess = null;
 
 		try {
-			const res = await fetch(`${API_BASE}/skip-today`, {
+			const res = await fetchWithTimeout(`${API_BASE}/skip-today`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ password, reason })
@@ -186,7 +187,7 @@
 			if (blockStartInput.trim()) body.block_start = blockStartInput.trim();
 			if (blockEndInput.trim()) body.block_end = blockEndInput.trim();
 
-			const res = await fetch(`${API_BASE}/schedule`, {
+			const res = await fetchWithTimeout(`${API_BASE}/schedule`, {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(body)
@@ -229,7 +230,7 @@
 		passwordSuccess = null;
 
 		try {
-			const res = await fetch(`${API_BASE}/password`, {
+			const res = await fetchWithTimeout(`${API_BASE}/password`, {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({

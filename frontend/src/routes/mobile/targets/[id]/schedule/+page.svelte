@@ -2,6 +2,7 @@
 	import { page } from "$app/stores";
 	import { onMount } from "svelte";
 	import { goto } from "$app/navigation";
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	const targetId = $derived($page.params.id);
 
@@ -22,7 +23,7 @@
 			loading = true;
 
 			// 대상 정보 로드
-			const targetRes = await fetch(`/api/v1/mobile/targets/${targetId}`);
+			const targetRes = await fetchWithTimeout(`/api/v1/mobile/targets/${targetId}`);
 			if (!targetRes.ok) throw new Error("대상 조회 실패");
 			target = await targetRes.json();
 
@@ -58,7 +59,7 @@
 		try {
 			const intervalSeconds = newSchedule.interval_days * 24 * 3600;
 
-			const response = await fetch("/api/v1/schedules", {
+			const response = await fetchWithTimeout("/api/v1/schedules", {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
@@ -85,7 +86,7 @@
 
 	async function toggleSchedule(schedule) {
 		try {
-			const response = await fetch(`/api/v1/schedules/${schedule.id}`, {
+			const response = await fetchWithTimeout(`/api/v1/schedules/${schedule.id}`, {
 				method: "PUT",
 				headers: {
 					"Content-Type": "application/json",
@@ -109,7 +110,7 @@
 		if (!confirm("스케줄을 삭제하시겠습니까?")) return;
 
 		try {
-			const response = await fetch(`/api/v1/schedules/${schedule.id}`, {
+			const response = await fetchWithTimeout(`/api/v1/schedules/${schedule.id}`, {
 				method: "DELETE",
 			});
 

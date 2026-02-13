@@ -6,6 +6,7 @@
 	 * 이벤트 전용 컬럼: 발표일, 경품, 당첨자, 조건, 수집일
 	 */
 	import type { Event } from '$lib/types';
+	import { fetchWithTimeout } from '$lib/api/client';
 	import {
 		formatDate,
 		getEventStatusColor,
@@ -69,7 +70,7 @@
 
 		// API로 가져오기
 		try {
-			const res = await fetch(`/api/v1/events/${event.id}/instagram-source`);
+			const res = await fetchWithTimeout(`/api/v1/events/${event.id}/instagram-source`);
 			const data = await res.json();
 			if (data.url) {
 				window.open(data.url, '_blank');

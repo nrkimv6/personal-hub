@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	interface SimilarFile {
 		file_id: number;
@@ -32,7 +33,7 @@
 		error = '';
 
 		try {
-			const response = await fetch(`/api/ic/similar/bulk-suggest?threshold=${threshold}`);
+			const response = await fetchWithTimeout(`/api/ic/similar/bulk-suggest?threshold=${threshold}`);
 
 			if (!response.ok) {
 				throw new Error('Failed to load similar suggestions');
@@ -83,7 +84,7 @@
 		error = '';
 
 		try {
-			const response = await fetch('/api/ic/similar/apply', {
+			const response = await fetchWithTimeout('/api/ic/similar/apply', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ file_ids: fileIds, category_id: category })

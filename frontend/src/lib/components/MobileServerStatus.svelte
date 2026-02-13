@@ -1,5 +1,6 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	let status = $state('unknown'); // 'connected', 'disconnected', 'unknown'
 	let health = $state(null);
@@ -8,7 +9,7 @@
 
 	async function checkHealth() {
 		try {
-			const response = await fetch('/api/v1/mobile/health', {
+			const response = await fetchWithTimeout('/api/v1/mobile/health', {
 				signal: AbortSignal.timeout(5000)
 			});
 

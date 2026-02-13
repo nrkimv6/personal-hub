@@ -6,6 +6,7 @@
  * - development: 모든 기능 활성화
  */
 import { writable, derived } from 'svelte/store';
+import { fetchWithTimeout } from '$lib/api/client';
 
 export type AppMode = 'production' | 'development';
 
@@ -44,7 +45,7 @@ export const appModeLoaded = derived(appModeStore, ($store) => $store.isLoaded);
  */
 export async function loadAppMode(): Promise<void> {
 	try {
-		const res = await fetch('/api/v1/system/mode');
+		const res = await fetchWithTimeout('/api/v1/system/mode', {}, 10000);
 		if (res.ok) {
 			const data = await res.json();
 			console.log('[appMode] API response:', data);

@@ -6,6 +6,7 @@
 	 * 팝업 전용 컬럼: 브랜드, 위치, 방문 상태
 	 */
 	import type { Popup } from '$lib/types';
+	import { fetchWithTimeout } from '$lib/api/client';
 	import {
 		formatDate,
 		getEventStatusColor,
@@ -33,7 +34,7 @@
 		}
 
 		try {
-			const res = await fetch(`/api/v1/popups/${popup.id}/instagram-source`);
+			const res = await fetchWithTimeout(`/api/v1/popups/${popup.id}/instagram-source`);
 			const data = await res.json();
 			if (data.url) {
 				window.open(data.url, '_blank');

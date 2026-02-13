@@ -2,6 +2,7 @@
 	import { page } from "$app/stores";
 	import { onMount } from "svelte";
 	import { goto } from "$app/navigation";
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	const targetId = $derived($page.params.id);
 
@@ -16,12 +17,12 @@
 			loading = true;
 
 			// 대상 정보
-			const targetRes = await fetch(`/api/v1/mobile/targets/${targetId}`);
+			const targetRes = await fetchWithTimeout(`/api/v1/mobile/targets/${targetId}`);
 			if (!targetRes.ok) throw new Error("대상 조회 실패");
 			target = await targetRes.json();
 
 			// 통계
-			const statsRes = await fetch(
+			const statsRes = await fetchWithTimeout(
 				`/api/v1/mobile/targets/${targetId}/stats`,
 			);
 			if (statsRes.ok) {
@@ -29,7 +30,7 @@
 			}
 
 			// 최근 아이템
-			const itemsRes = await fetch(
+			const itemsRes = await fetchWithTimeout(
 				`/api/v1/mobile/targets/${targetId}/items?limit=20`,
 			);
 			if (itemsRes.ok) {
@@ -46,7 +47,7 @@
 		if (!confirm("즉시 크롤링을 실행하시겠습니까?")) return;
 
 		try {
-			const response = await fetch(
+			const response = await fetchWithTimeout(
 				`/api/v1/mobile/targets/${targetId}/execute`,
 				{
 					method: "POST",

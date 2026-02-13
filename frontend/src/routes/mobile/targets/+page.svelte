@@ -1,6 +1,7 @@
 <script>
 	import { onMount } from "svelte";
 	import { goto } from "$app/navigation";
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	let targets = $state([]);
 	let loading = $state(true);
@@ -9,7 +10,7 @@
 	async function loadTargets() {
 		try {
 			loading = true;
-			const response = await fetch("/api/v1/mobile/targets");
+			const response = await fetchWithTimeout("/api/v1/mobile/targets");
 			if (!response.ok) throw new Error("대상 목록 조회 실패");
 			targets = await response.json();
 		} catch (err) {
@@ -23,7 +24,7 @@
 		if (!confirm("정말 삭제하시겠습니까?")) return;
 
 		try {
-			const response = await fetch(`/api/v1/mobile/targets/${id}`, {
+			const response = await fetchWithTimeout(`/api/v1/mobile/targets/${id}`, {
 				method: "DELETE",
 			});
 			if (!response.ok) throw new Error("삭제 실패");
@@ -37,7 +38,7 @@
 		if (!confirm("즉시 크롤링을 실행하시겠습니까?")) return;
 
 		try {
-			const response = await fetch(
+			const response = await fetchWithTimeout(
 				`/api/v1/mobile/targets/${id}/execute`,
 				{
 					method: "POST",

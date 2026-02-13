@@ -1,5 +1,6 @@
 <script>
 	import { goto } from '$app/navigation';
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	let form = $state({
 		name: '',
@@ -16,7 +17,7 @@
 			saving = true;
 			error = null;
 
-			const response = await fetch('/api/v1/mobile/targets', {
+			const response = await fetchWithTimeout('/api/v1/mobile/targets', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(form)

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	interface Rule {
 		id: number;
@@ -22,7 +23,7 @@
 	async function loadRules() {
 		loading = true;
 		try {
-			const response = await fetch('/api/ic/rules');
+			const response = await fetchWithTimeout('/api/ic/rules');
 			if (response.ok) {
 				rules = await response.json();
 			}
@@ -35,7 +36,7 @@
 
 	async function toggleRule(id: number) {
 		try {
-			await fetch(`/api/ic/rules/${id}/toggle`, { method: 'POST' });
+			await fetchWithTimeout(`/api/ic/rules/${id}/toggle`, { method: 'POST' });
 			await loadRules();
 		} catch (err) {
 			alert('규칙 토글 실패');
@@ -46,7 +47,7 @@
 		if (!confirm('이 규칙을 삭제하시겠습니까?')) return;
 
 		try {
-			await fetch(`/api/ic/rules/${id}`, { method: 'DELETE' });
+			await fetchWithTimeout(`/api/ic/rules/${id}`, { method: 'DELETE' });
 			await loadRules();
 		} catch (err) {
 			alert('규칙 삭제 실패');

@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { Button } from '$lib/components/ui';
 	import { goto } from '$app/navigation';
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	type Report = {
 		id: number;
@@ -60,7 +61,7 @@
 				params.append('search', filterSearch);
 			}
 
-			const response = await fetch(`/api/v1/reports?${params}`);
+			const response = await fetchWithTimeout(`/api/v1/reports?${params}`);
 
 			if (!response.ok) {
 				throw new Error(`Failed to load reports: ${response.statusText}`);

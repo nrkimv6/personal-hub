@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+  import { fetchWithTimeout } from '$lib/api/client';
 
 	// === 타입 정의 ===
 	interface Folder {
@@ -38,7 +39,7 @@
 	// === API 호출 ===
 	async function loadCategories() {
 		try {
-			const res = await fetch('/api/ic/categories?include_tree=true');
+			const res = await fetchWithTimeout('/api/ic/categories?include_tree=true');
 			const data = await res.json();
 			categories = data.categories || [];
 		} catch (e) {
@@ -55,7 +56,7 @@
 			}
 			params.append('limit', '500');
 
-			const res = await fetch(`/api/ic/scan/folders?${params}`);
+			const res = await fetchWithTimeout(`/api/ic/scan/folders?${params}`);
 			const data = await res.json();
 			folders = data.folders || [];
 		} catch (e) {
@@ -68,7 +69,7 @@
 	async function classifyAllFolders() {
 		classifyLoading = true;
 		try {
-			const res = await fetch('/api/ic/folders/classify', { method: 'POST' });
+			const res = await fetchWithTimeout('/api/ic/folders/classify', { method: 'POST' });
 			const data = await res.json();
 			alert(`분류 완료: ${JSON.stringify(data.stats)}`);
 			await loadFolders();
@@ -85,7 +86,7 @@
 		folders = [...folders]; // 리렌더링
 
 		try {
-			const res = await fetch('/api/ic/folders/ai-suggest', {
+			const res = await fetchWithTimeout('/api/ic/folders/ai-suggest', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ folder_id: folder.id })
@@ -110,7 +111,7 @@
 
 	async function saveMapping(folder: Folder, categoryId: number) {
 		try {
-			const res = await fetch(`/api/ic/folders/${folder.id}/map`, {
+			const res = await fetchWithTimeout(`/api/ic/folders/${folder.id}/map`, {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ category_id: categoryId })
@@ -131,7 +132,7 @@
 
 	async function applyInheritance(folderId: number) {
 		try {
-			const res = await fetch('/api/ic/folders/inherit', {
+			const res = await fetchWithTimeout('/api/ic/folders/inherit', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ parent_folder_id: folderId, apply_to_children: true })
