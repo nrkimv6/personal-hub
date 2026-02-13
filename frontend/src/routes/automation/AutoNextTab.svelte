@@ -94,10 +94,10 @@
 			error = null;
 
 			// 현재 실행 시작 시간 추적 + 현재 run stats 조회
-			if (r.running && r.start_time) {
-				lastStartTime = r.start_time;
-				currentRunStats = await autoNextStatsApi.stats(r.start_time);
-			} else if (!r.running) {
+			if (runStatus?.running && runStatus.start_time) {
+				lastStartTime = runStatus.start_time;
+				currentRunStats = await autoNextStatsApi.stats(runStatus.start_time);
+			} else if (!runStatus?.running) {
 				// 실행 중이 아니면 현재 실행 stats 초기화
 				currentRunStats = null;
 				lastStartTime = null;
