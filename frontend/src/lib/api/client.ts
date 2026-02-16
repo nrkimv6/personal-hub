@@ -121,6 +121,17 @@ export async function fetchWithTimeout(
 }
 
 /**
+ * 글로벌 API 에러 핸들러 (타임아웃, 연결 에러 등 자동 알림용)
+ * - 레이아웃에서 toast store와 연결하여 사용
+ */
+type ApiErrorHandler = (message: string, type: 'timeout' | 'connection' | 'auth') => void;
+let globalErrorHandler: ApiErrorHandler | null = null;
+
+export function setApiErrorHandler(handler: ApiErrorHandler): void {
+  globalErrorHandler = handler;
+}
+
+/**
  * API 요청 함수
  */
 export async function request<T>(
@@ -142,12 +153,19 @@ export async function request<T>(
   try {
     response = await fetchWithTimeout(url, { ...options, headers, credentials: 'include' });
   } catch (err) {
-    // 네트워크 에러 (API 서버 연결 불가 - 좀비 포트 가능성)
     const error = err instanceof Error ? err : new Error(String(err));
-    throw new ApiConnectionError(
-      'API 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요. (좀비 포트 가능성: net stop winnat && net start winnat 또는 재부팅 필요)',
+    // 타임아웃 에러 감지
+    if (error.message.includes('타임아웃')) {
+      globalErrorHandler?.(error.message, 'timeout');
+      throw error;
+    }
+    // 네트워크 에러 (API 서버 연결 불가 - 좀비 포트 가능성)
+    const connError = new ApiConnectionError(
+      'API 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요.',
       error
     );
+    globalErrorHandler?.(connError.message, 'connection');
+    throw connError;
   }
 
   // 401 Unauthorized 처리

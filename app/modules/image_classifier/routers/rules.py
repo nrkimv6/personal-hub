@@ -8,6 +8,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -19,27 +20,31 @@ router = APIRouter(prefix="/rules", tags=["Rules"])
 class RuleResponse(BaseModel):
     """분류 규칙 응답"""
     id: int
-    pattern: str
-    category_path: str
+    rule_type: str
+    category_id: int
+    rule_content: str
     priority: int
-    enabled: bool
+    is_active: bool
+    source: Optional[str] = None
+    hit_count: int = 0
 
 
 class RuleCreateRequest(BaseModel):
     """규칙 생성 요청"""
-    pattern: str
-    category_path: str
-    priority: int = 100
-    enabled: bool = True
+    rule_type: str = "keyword"
+    category_id: int
+    rule_content: str
+    priority: int = 0
+    is_active: bool = True
+    source: str = "user"
 
 
 @router.get("")
 async def get_rules(db: Session = Depends(get_db)) -> list[RuleResponse]:
     """분류 규칙 목록 조회"""
 
-    # classification_rules 테이블 확인
     result = db.execute(text("""
-        SELECT id, pattern, category_path, priority, enabled
+        SELECT id, rule_type, category_id, rule_content, priority, is_active, source, hit_count
         FROM classification_rules
         ORDER BY priority DESC, id ASC
     """)).fetchall()
@@ -47,10 +52,13 @@ async def get_rules(db: Session = Depends(get_db)) -> list[RuleResponse]:
     return [
         RuleResponse(
             id=row[0],
-            pattern=row[1],
-            category_path=row[2],
-            priority=row[3],
-            enabled=bool(row[4])
+            rule_type=row[1],
+            category_id=row[2],
+            rule_content=row[3],
+            priority=row[4],
+            is_active=bool(row[5]),
+            source=row[6],
+            hit_count=row[7] or 0
         )
         for row in result
     ]
@@ -64,13 +72,15 @@ async def create_rule(
     """분류 규칙 추가"""
 
     db.execute(text("""
-        INSERT INTO classification_rules (pattern, category_path, priority, enabled)
-        VALUES (:pattern, :category_path, :priority, :enabled)
+        INSERT INTO classification_rules (rule_type, category_id, rule_content, priority, is_active, source)
+        VALUES (:rule_type, :category_id, :rule_content, :priority, :is_active, :source)
     """), {
-        "pattern": request.pattern,
-        "category_path": request.category_path,
+        "rule_type": request.rule_type,
+        "category_id": request.category_id,
+        "rule_content": request.rule_content,
         "priority": request.priority,
-        "enabled": request.enabled
+        "is_active": request.is_active,
+        "source": request.source
     })
     db.commit()
 

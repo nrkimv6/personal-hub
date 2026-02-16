@@ -82,17 +82,19 @@ def start_auto_next(command: Dict, redis_client: redis.Redis) -> Dict:
 
     # 명령어 구성
     plan_file = command.get("plan_file")
-    if not plan_file:
-        return {"success": False, "message": "plan_file required"}
+    is_parallel = command.get("parallel", False)
+    if not plan_file and not is_parallel:
+        return {"success": False, "message": "plan_file required (use parallel mode for batch execution)"}
 
     cmd = [
         str(AUTO_NEXT_PYTHON),
         "-m",
         "auto_next",
         "run",
-        "--plan-file",
-        plan_file,
     ]
+
+    if plan_file:
+        cmd.extend(["--plan-file", plan_file])
 
     # 옵션 추가
     if command.get("max_cycles"):
@@ -145,14 +147,14 @@ def start_auto_next(command: Dict, redis_client: redis.Redis) -> Dict:
         # Redis에 상태 저장
         state = {
             "pid": process.pid,
-            "plan_file": plan_file,
+            "plan_file": plan_file or "ALL",
             "log_file_path": str(log_file),
             "start_time": datetime.now().isoformat(),
             "status": "running",
         }
         redis_client.set(STATE_KEY + ":log_file_path", str(log_file))
         redis_client.set(STATE_KEY + ":pid", process.pid)
-        redis_client.set(STATE_KEY + ":plan_file", plan_file)
+        redis_client.set(STATE_KEY + ":plan_file", plan_file or "ALL")
         redis_client.set(STATE_KEY + ":start_time", state["start_time"])
         redis_client.set(STATE_KEY + ":status", "running")
 
