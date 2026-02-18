@@ -450,20 +450,52 @@ try {
     $startTime = Get-Date
 
     # API가 포트를 열 때까지 최초 대기 (최대 60초)
+    # 포트 감지 + stdout 로그 "Application startup complete" 감지 병행
     $waitStart = Get-Date
     $portReady = $false
     while ((New-TimeSpan -Start $waitStart -End (Get-Date)).TotalSeconds -lt 60) {
+        # 프로세스가 이미 종료됐으면 대기 중단
+        if ($apiProcess.HasExited) {
+            Write-ServiceLog "WARNING: API process exited during startup (ExitCode: $($apiProcess.ExitCode))"
+            break
+        }
+        # 포트 감지
         $pids = Get-ListeningPids -Port $ApiPort
         if ($pids.Count -gt 0) {
             $portReady = $true
             Write-ServiceLog "API Server listening on port $ApiPort (PIDs: $($pids -join ', '))"
             break
         }
+        # Fallback: stdout 로그에서 startup complete 감지
+        if (Test-Path $stdoutLogFile) {
+            $logContent = Get-Content $stdoutLogFile -Raw -ErrorAction SilentlyContinue
+            if ($logContent -and $logContent.Contains("Application startup complete")) {
+                # 로그에는 나왔지만 포트가 아직 안 보이면 잠깐 더 대기
+                Start-Sleep -Seconds 3
+                $pids = Get-ListeningPids -Port $ApiPort
+                if ($pids.Count -gt 0) {
+                    $portReady = $true
+                    Write-ServiceLog "API Server listening on port $ApiPort (detected via log fallback, PIDs: $($pids -join ', '))"
+                    break
+                }
+            }
+        }
         Start-Sleep -Seconds 2
     }
 
     if (-not $portReady) {
-        Write-ServiceLog "ERROR: API Server failed to start listening on port $ApiPort within 60 seconds"
+        if ($apiProcess.HasExited) {
+            Write-ServiceLog "ERROR: API Server process died during startup (ExitCode: $($apiProcess.ExitCode))"
+        } else {
+            Write-ServiceLog "ERROR: API Server failed to start listening on port $ApiPort within 60 seconds"
+            Write-ServiceLog "  Checking stdout log for clues..."
+            if (Test-Path $stdoutLogFile) {
+                $lastLines = Get-Content $stdoutLogFile -Tail 5 -ErrorAction SilentlyContinue
+                foreach ($line in $lastLines) {
+                    Write-ServiceLog "  stdout: $line"
+                }
+            }
+        }
         $exitCode = 1
     } else {
         # 포트 기반 Heartbeat 루프
