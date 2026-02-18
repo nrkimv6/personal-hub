@@ -31,33 +31,36 @@
 	<title>시스템 자동화 | Monitor Page</title>
 </svelte:head>
 
-<div class="p-6">
-	<h1 class="text-2xl font-bold text-foreground mb-4">시스템 자동화</h1>
-
-	<div class="mb-6 border-b border-border">
-		<nav class="flex gap-4">
+<div class="flex flex-col h-screen overflow-hidden">
+	<div class="flex items-center gap-4 px-4 lg:px-6 h-12 border-b shrink-0">
+		<h1 class="text-sm font-semibold text-foreground">시스템 자동화</h1>
+		<nav class="flex gap-1">
 			<button
 				onclick={() => setMainTab('auto-next')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {mainTab === 'auto-next'
-					? 'border-blue-500 text-primary'
-					: 'border-transparent text-muted-foreground hover:text-foreground'}"
+				class="px-3 py-1 text-xs font-medium rounded transition-colors {mainTab === 'auto-next'
+					? 'bg-blue-50 text-blue-700'
+					: 'text-muted-foreground hover:text-foreground hover:bg-gray-50'}"
 			>
-				🤖 Auto Next
+				Auto Next
 			</button>
 			<button
 				onclick={() => setMainTab('sleep-now')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {mainTab === 'sleep-now'
-					? 'border-blue-500 text-primary'
-					: 'border-transparent text-muted-foreground hover:text-foreground'}"
+				class="px-3 py-1 text-xs font-medium rounded transition-colors {mainTab === 'sleep-now'
+					? 'bg-blue-50 text-blue-700'
+					: 'text-muted-foreground hover:text-foreground hover:bg-gray-50'}"
 			>
-				🌙 Sleep Now
+				Sleep Now
 			</button>
 		</nav>
 	</div>
 
-	{#if mainTab === 'auto-next'}
-		<AutoNextTab />
-	{:else if mainTab === 'sleep-now'}
-		<SleepNowTab />
-	{/if}
+	<div class="flex-1 overflow-hidden">
+		{#if mainTab === 'auto-next'}
+			<AutoNextTab />
+		{:else if mainTab === 'sleep-now'}
+			<div class="p-6 overflow-auto h-full">
+				<SleepNowTab />
+			</div>
+		{/if}
+	</div>
 </div>

@@ -34,6 +34,7 @@
 	let completedTimer: ReturnType<typeof setTimeout> | null = null;
 	let lastStartTime = $state<string | null>(null);
 	let panelOpen = $state(true);
+	let taskHistoryOpen = $state(false);
 
 	async function loadData() {
 		try {
@@ -141,37 +142,7 @@
 	let activePlan = $derived(plans?.find(p => p.path === runStatus?.plan_file) ?? null);
 </script>
 
-<div class="flex flex-col h-screen overflow-hidden">
-	<!-- Header -->
-	<header class="flex items-center justify-between px-4 lg:px-6 h-12 border-b shrink-0">
-		<div class="flex items-center gap-3">
-			<div class="flex items-center gap-2">
-				<svg class="w-4 h-4 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-					<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-				</svg>
-				<h1 class="text-sm font-semibold">Auto Next</h1>
-			</div>
-			<span class="text-xs text-gray-500 hidden sm:inline">AI Task Automation</span>
-		</div>
-		<div class="flex items-center gap-3">
-			<button
-				onclick={loadData}
-				disabled={loading}
-				class="p-1.5 rounded hover:bg-gray-100 disabled:opacity-50 transition-colors"
-				title="새로고침"
-			>
-				<svg
-					class="w-3.5 h-3.5 text-gray-500 {loading ? 'animate-spin' : ''}"
-					viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-				>
-					<path d="M21 2v6h-6" />
-					<path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
-					<path d="M3 22v-6h6" />
-					<path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
-				</svg>
-			</button>
-		</div>
-	</header>
+<div class="flex flex-col h-full overflow-hidden">
 
 	<!-- Main content -->
 	<div class="flex-1 flex flex-col overflow-hidden">
@@ -270,16 +241,16 @@
 
 				<!-- Expanded panel content -->
 				{#if panelOpen}
-					<div class="px-4 pb-4 flex flex-col gap-4">
+					<div class="px-4 pb-4 flex flex-col gap-4 bg-gray-50">
 						<!-- RunControl - full width card -->
-						<div class="border rounded-lg p-4">
+						<div class="bg-white border rounded-lg p-4">
 							<RunControl status={runStatus} {plans} onStatusChange={handleRunStatusChange} />
 						</div>
 
 						<!-- Grid: Active Task + Stats + Plans -->
 						<div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
 							<!-- Active Task -->
-							<div class="border rounded-lg p-4">
+							<div class="bg-white border rounded-lg p-4">
 								{#if runStatus?.running && currentTask}
 									<CurrentTaskCard task={currentTask} />
 								{:else}
@@ -288,7 +259,7 @@
 							</div>
 
 							<!-- Stats -->
-							<div class="border rounded-lg p-4">
+							<div class="bg-white border rounded-lg p-4">
 								<div class="flex items-center gap-2 mb-3">
 									<svg class="w-3.5 h-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
 									<span class="text-xs font-medium uppercase tracking-wider">Statistics</span>
@@ -299,7 +270,7 @@
 							</div>
 
 							<!-- Plan Files -->
-							<div class="border rounded-lg p-4 max-h-[340px] overflow-hidden flex flex-col">
+							<div class="bg-white border rounded-lg p-4 max-h-[340px] overflow-hidden flex flex-col">
 								<PlanList {plans} onPlansChange={loadData} />
 							</div>
 						</div>
@@ -310,36 +281,49 @@
 			<!-- Log Viewer + Task History -->
 			<div class="flex flex-col flex-1 overflow-hidden">
 				<!-- Log Viewer -->
-				<div class="flex-1 min-h-0 border-b">
+				<div class="flex-1 min-h-0">
 					<LogViewer />
 				</div>
 
-				<!-- Task History -->
-				<div class="h-[280px] shrink-0 overflow-hidden">
-					<div class="p-4 h-full flex flex-col">
-						<div class="flex items-center gap-2 mb-3 shrink-0">
-							<svg class="w-3.5 h-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-							<span class="text-xs font-medium uppercase tracking-wider">Task History</span>
-							<span class="text-[10px] text-gray-500 font-mono ml-auto">{taskList?.total ?? 0} tasks</span>
-						</div>
-						<div class="flex-1 min-h-0">
-							{#if !runStatus?.plan_file}
-								<div class="flex items-center justify-center h-full text-sm text-gray-400">
-									Plan을 실행하면 관련 작업 이력이 표시됩니다.
+				<!-- Task History (collapsible, default collapsed) -->
+				<div class="shrink-0 border-t">
+					<button
+						onclick={() => (taskHistoryOpen = !taskHistoryOpen)}
+						class="flex items-center gap-2 w-full px-4 py-2 hover:bg-gray-50 transition-colors"
+					>
+						<svg class="w-3.5 h-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+						<span class="text-xs font-medium uppercase tracking-wider">Task History</span>
+						<span class="text-[10px] text-gray-500 font-mono">{taskList?.total ?? 0} tasks</span>
+						<svg
+							class="w-3.5 h-3.5 text-gray-400 ml-auto transition-transform {taskHistoryOpen ? '' : 'rotate-180'}"
+							viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+						>
+							<path d="M18 15l-6-6-6 6" />
+						</svg>
+					</button>
+					{#if taskHistoryOpen}
+						<div class="h-[280px] overflow-hidden">
+							<div class="px-4 pb-4 h-full flex flex-col">
+								<div class="flex-1 min-h-0">
+									{#if !runStatus?.plan_file}
+										<div class="flex items-center justify-center h-full text-sm text-gray-400">
+											Plan을 실행하면 관련 작업 이력이 표시됩니다.
+										</div>
+									{:else if taskList}
+										<TaskList
+											tasks={taskList.tasks}
+											total={taskList.total}
+											currentFilter={statusFilter}
+											onFilterChange={handleFilterChange}
+											onDelete={handleDeleteTask}
+											onDeleteCompleted={handleDeleteCompleted}
+											onDeleteOld={handleDeleteOld}
+										/>
+									{/if}
 								</div>
-							{:else if taskList}
-								<TaskList
-									tasks={taskList.tasks}
-									total={taskList.total}
-									currentFilter={statusFilter}
-									onFilterChange={handleFilterChange}
-									onDelete={handleDeleteTask}
-									onDeleteCompleted={handleDeleteCompleted}
-									onDeleteOld={handleDeleteOld}
-								/>
-							{/if}
+							</div>
 						</div>
-					</div>
+					{/if}
 				</div>
 			</div>
 		{/if}

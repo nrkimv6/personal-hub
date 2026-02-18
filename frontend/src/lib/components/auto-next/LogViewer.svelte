@@ -25,14 +25,14 @@
 	const MAX_RECONNECT = 10;
 	const BASE_DELAY = 5000;
 
-	// Tag colors for light background
+	// Tag colors for dark background
 	const tagColors: Record<string, { text: string; bg: string }> = {
-		AI: { text: 'text-blue-600', bg: 'bg-blue-500/10' },
-		TOOL: { text: 'text-yellow-600', bg: 'bg-yellow-500/10' },
-		DONE: { text: 'text-green-600', bg: 'bg-green-500/10' },
-		ERROR: { text: 'text-red-600', bg: 'bg-red-500/10' },
+		AI: { text: 'text-blue-400', bg: 'bg-blue-500/20' },
+		TOOL: { text: 'text-yellow-400', bg: 'bg-yellow-500/20' },
+		DONE: { text: 'text-green-400', bg: 'bg-green-500/20' },
+		ERROR: { text: 'text-red-400', bg: 'bg-red-500/20' },
 		INFO: { text: 'text-gray-500', bg: 'bg-transparent' },
-		SYSTEM: { text: 'text-purple-600', bg: 'bg-purple-500/10' }
+		SYSTEM: { text: 'text-purple-400', bg: 'bg-purple-500/20' }
 	};
 
 	const LINE_PATTERN = /^\[?(\d{2}:\d{2}:\d{2})\]?\s*\[(\w+)\]\s*(.*)/;
@@ -175,23 +175,23 @@
 
 <div class="flex flex-col h-full">
 	<!-- Toolbar -->
-	<div class="flex items-center justify-between px-3 py-2 border-b shrink-0">
+	<div class="flex items-center justify-between px-3 py-2 border-b border-gray-700 shrink-0 bg-gray-900">
 		<div class="flex items-center gap-2">
-			<span class="text-xs font-medium uppercase tracking-wider">Live Logs</span>
+			<span class="text-xs font-medium uppercase tracking-wider text-gray-300">Live Logs</span>
 			<div class="flex items-center gap-1.5">
 				{#if connected === 'connected'}
 					<div class="w-2 h-2 rounded-full bg-green-500"></div>
-					<span class="text-[10px] text-green-600">SSE 연결됨</span>
+					<span class="text-[10px] text-green-400">SSE 연결됨</span>
 				{:else if connected === 'error'}
 					<div class="w-2 h-2 rounded-full bg-red-500"></div>
-					<span class="text-[10px] text-red-600">연결 실패</span>
+					<span class="text-[10px] text-red-400">연결 실패</span>
 				{:else}
 					<div class="w-2 h-2 rounded-full bg-gray-400"></div>
 					<span class="text-[10px] text-gray-500">재시도 {reconnectCount}/{MAX_RECONNECT}</span>
 				{/if}
 			</div>
 			{#if paused && pauseBuffer.length > 0}
-				<span class="text-[10px] text-yellow-600 bg-yellow-50 px-1.5 py-0.5 rounded">
+				<span class="text-[10px] text-yellow-400 bg-yellow-500/20 px-1.5 py-0.5 rounded">
 					+{pauseBuffer.length} 버퍼
 				</span>
 			{/if}
@@ -199,7 +199,7 @@
 		<div class="flex items-center gap-1">
 			{#if connected !== 'connected'}
 				<button
-					class="h-6 px-2 text-[10px] text-gray-500 hover:bg-gray-100 rounded transition-colors inline-flex items-center gap-1"
+					class="h-6 px-2 text-[10px] text-gray-500 hover:bg-gray-700 rounded transition-colors inline-flex items-center gap-1"
 					onclick={manualReconnect}
 				>
 					<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v6h6"/><path d="M3 13a9 9 0 1 0 3-7.7L3 8"/></svg>
@@ -207,7 +207,7 @@
 				</button>
 			{/if}
 			<button
-				class="h-6 px-2 text-[10px] rounded transition-colors inline-flex items-center gap-1 {autoScroll ? 'text-blue-600' : 'text-gray-500'} hover:bg-gray-100"
+				class="h-6 px-2 text-[10px] rounded transition-colors inline-flex items-center gap-1 {autoScroll ? 'text-blue-400' : 'text-gray-400'} hover:bg-gray-700"
 				onclick={() => {
 					if (autoScroll) {
 						autoScroll = false;
@@ -228,7 +228,7 @@
 			</button>
 			{#if !autoScroll}
 				<button
-					class="h-6 px-2 text-[10px] text-gray-500 hover:bg-gray-100 rounded transition-colors inline-flex items-center gap-1"
+					class="h-6 px-2 text-[10px] text-gray-500 hover:bg-gray-700 rounded transition-colors inline-flex items-center gap-1"
 					onclick={scrollToBottom}
 				>
 					<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/><line x1="5" y1="19" x2="19" y2="19"/></svg>
@@ -242,29 +242,29 @@
 	<div
 		bind:this={logContainer}
 		onscroll={handleScroll}
-		class="flex-1 overflow-y-auto font-mono text-xs p-3"
+		class="flex-1 overflow-y-auto font-mono text-xs p-3 bg-gray-950 text-gray-300"
 	>
 		{#if lines.length === 0}
-			<span class="text-gray-400">로그가 없습니다</span>
+			<span class="text-gray-600">로그가 없습니다</span>
 		{:else}
 			{#each lines as line}
 				{#if isSeparator(line.raw)}
 					<div class="py-2 text-center select-none {line.isStale ? 'opacity-25' : 'opacity-60'}">
-						<span class="text-gray-500 text-[10px]">{extractSeparatorText(line.raw)}</span>
+						<span class="text-gray-500 text-[10px]">{extractSeparatorText(line.raw)}</span><!-- separator -->
 					</div>
 				{:else if line.tag}
 					{@const style = getTagStyle(line.tag)}
-					<div class="flex items-start gap-2 py-0.5 leading-5 {line.isStale ? 'opacity-30' : ''} {line.tag === 'ERROR' ? 'bg-red-50 -mx-3 px-3 rounded' : ''}">
+					<div class="flex items-start gap-2 py-0.5 leading-5 {line.isStale ? 'opacity-30' : ''} {line.tag === 'ERROR' ? 'bg-red-950/50 -mx-3 px-3 rounded' : ''}">
 						<span class="text-gray-400/60 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
 						<span class="shrink-0 w-[42px] text-right font-semibold {style.text}">
 							<span class="rounded px-1 py-0.5 {style.bg}">{line.tag}</span>
 						</span>
-						<span class="flex-1 min-w-0 break-all {line.tag === 'ERROR' ? 'text-red-600' : line.tag === 'DONE' ? 'text-green-600' : 'text-gray-800'}">
+						<span class="flex-1 min-w-0 break-all {line.tag === 'ERROR' ? 'text-red-400' : line.tag === 'DONE' ? 'text-green-400' : 'text-gray-300'}">
 							{line.message}
 						</span>
 					</div>
 				{:else}
-					<div class="py-0.5 leading-5 {line.isStale ? 'opacity-30' : ''} text-gray-600 break-all whitespace-pre-wrap">
+					<div class="py-0.5 leading-5 {line.isStale ? 'opacity-30' : ''} text-gray-400 break-all whitespace-pre-wrap">
 						{line.raw}
 					</div>
 				{/if}
