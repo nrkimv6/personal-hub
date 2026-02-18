@@ -23,25 +23,25 @@ class TestPageLoad:
         main = page.locator("main")
         expect(main).to_be_visible()
 
-    def test_businesses_page_loads(self, page: Page, frontend_url: str):
-        """업체 목록 페이지 로드"""
-        page.goto(f"{frontend_url}/businesses")
+    def test_naver_page_loads(self, page: Page, frontend_url: str):
+        """네이버 예약 페이지 로드"""
+        page.goto(f"{frontend_url}/naver")
         page.wait_for_load_state("networkidle")
 
         expect(page).to_have_title("모니터링 시스템")
         expect(page.locator("main")).to_be_visible()
 
-    def test_naver_schedules_page_loads(self, page: Page, frontend_url: str):
-        """네이버 스케줄 페이지 로드"""
-        page.goto(f"{frontend_url}/naver/schedules")
+    def test_activity_page_loads(self, page: Page, frontend_url: str):
+        """문화/체육센터 페이지 로드"""
+        page.goto(f"{frontend_url}/activity")
         page.wait_for_load_state("networkidle")
 
         expect(page).to_have_title("모니터링 시스템")
         expect(page.locator("main")).to_be_visible()
 
-    def test_instagram_page_loads(self, page: Page, frontend_url: str):
-        """Instagram 페이지 로드"""
-        page.goto(f"{frontend_url}/instagram")
+    def test_collect_page_loads(self, page: Page, frontend_url: str):
+        """수집 관리 페이지 로드"""
+        page.goto(f"{frontend_url}/collect")
         page.wait_for_load_state("networkidle")
 
         expect(page).to_have_title("모니터링 시스템")
@@ -68,12 +68,11 @@ class TestSidebar:
         page.goto(f"{frontend_url}/dashboard")
         page.wait_for_load_state("networkidle")
 
-        # 업체 메뉴 클릭 (있는 경우)
-        businesses_link = page.locator("aside a[href='/businesses']")
-        if businesses_link.count() > 0:
-            businesses_link.click()
-            page.wait_for_load_state("networkidle")
-            expect(page).to_have_url(f"{frontend_url}/businesses")
+        # 네이버 예약 메뉴 클릭
+        naver_link = page.locator("aside a[href='/naver']")
+        naver_link.click()
+        page.wait_for_load_state("networkidle")
+        expect(page).to_have_url(f"{frontend_url}/naver")
 
 
 class TestMobileNavigation:
