@@ -1,0 +1,415 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.11, pytest-9.0.1, pluggy-1.6.0 -- D:\work\project\tools\monitor-page\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\work\project\tools\monitor-page
+configfile: pytest.ini
+plugins: anyio-3.7.1, asyncio-1.3.0, cov-7.0.0, timeout-2.4.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+timeout: 30.0s
+timeout method: thread
+timeout func_only: False
+collecting ... collected 174 items
+
+tests/auto_next/test_api_security.py::TestDecodePathFunction::test_valid_base64_decodes PASSED [  0%]
+tests/auto_next/test_api_security.py::TestDecodePathFunction::test_with_padding PASSED [  1%]
+tests/auto_next/test_api_security.py::TestDecodePathFunction::test_invalid_base64_raises PASSED [  1%]
+tests/auto_next/test_api_security.py::TestDecodePathFunction::test_special_chars_in_path PASSED [  2%]
+tests/auto_next/test_api_security.py::TestApiPathSecurity::test_path_traversal_blocked PASSED [  2%]
+tests/auto_next/test_api_security.py::TestApiPathSecurity::test_invalid_base64_returns_400 PASSED [  3%]
+tests/auto_next/test_api_security.py::TestApiPathSecurity::test_nonexistent_file_returns_404 PASSED [  4%]
+tests/auto_next/test_api_security.py::TestApiPathSecurity::test_valid_path_returns_200 PASSED [  4%]
+tests/auto_next/test_api_security.py::TestApiPathSecurity::test_items_path_traversal_blocked PASSED [  5%]
+tests/auto_next/test_api_security.py::TestApiPathSecurity::test_ignore_invalid_base64_returns_400 PASSED [  5%]
+tests/auto_next/test_api_security.py::TestApiPathSecurity::test_unignore_invalid_base64_returns_400 PASSED [  6%]
+tests/auto_next/test_api_security.py::TestApiPathSecurity::test_empty_string_path_blocked PASSED [  6%]
+tests/auto_next/test_command_listener.py::TestStartAutoNextValidation::test_single_mode_without_plan_file_returns_error PASSED [  7%]
+tests/auto_next/test_command_listener.py::TestStartAutoNextValidation::test_parallel_mode_without_plan_file_passes PASSED [  8%]
+tests/auto_next/test_command_listener.py::TestStartAutoNextValidation::test_single_mode_with_plan_file_passes PASSED [  8%]
+tests/auto_next/test_command_listener.py::TestStartAutoNextValidation::test_parallel_mode_with_plan_file_passes PASSED [  9%]
+tests/auto_next/test_command_listener.py::TestStartAutoNextValidation::test_parallel_false_without_plan_file_returns_error PASSED [  9%]
+tests/auto_next/test_command_listener.py::TestCommandBuilding::test_single_mode_includes_plan_file_flag PASSED [ 10%]
+tests/auto_next/test_command_listener.py::TestCommandBuilding::test_parallel_mode_without_plan_file_no_plan_flag PASSED [ 10%]
+tests/auto_next/test_command_listener.py::TestCommandBuilding::test_parallel_with_projects PASSED [ 11%]
+tests/auto_next/test_command_listener.py::TestExecutorServiceCommand::test_all_mode_sends_parallel_true PASSED [ 12%]
+tests/auto_next/test_command_listener.py::TestExecutorServiceCommand::test_single_mode_sends_plan_file PASSED [ 12%]
+tests/auto_next/test_command_listener.py::TestExecutorServiceCommand::test_all_mode_plan_file_not_in_command PASSED [ 13%]
+tests/auto_next/test_command_listener.py::TestRedisStateSaving::test_parallel_mode_saves_ALL_as_plan_file PASSED [ 13%]
+tests/auto_next/test_command_listener.py::TestRedisStateSaving::test_single_mode_saves_actual_plan_file PASSED [ 14%]
+tests/auto_next/test_command_listener.py::TestRedisStateSaving::test_parallel_with_plan_file_saves_plan_file PASSED [ 14%]
+tests/auto_next/test_command_listener_process.py::TestStartAutoNext::test_start_creates_subprocess PASSED [ 15%]
+tests/auto_next/test_command_listener_process.py::TestStartAutoNext::test_start_parallel_no_plan_file PASSED [ 16%]
+tests/auto_next/test_command_listener_process.py::TestStartAutoNext::test_start_sets_redis_state PASSED [ 16%]
+tests/auto_next/test_command_listener_process.py::TestStartAutoNext::test_start_plan_file_none_saves_ALL PASSED [ 17%]
+tests/auto_next/test_command_listener_process.py::TestStartAutoNext::test_start_already_running_returns_error PASSED [ 17%]
+tests/auto_next/test_command_listener_process.py::TestStopAutoNext::test_stop_terminates_process PASSED [ 18%]
+tests/auto_next/test_command_listener_process.py::TestStopAutoNext::test_stop_force_kills_on_timeout PASSED [ 18%]
+tests/auto_next/test_command_listener_process.py::TestStopAutoNext::test_stop_clears_redis_state PASSED [ 19%]
+tests/auto_next/test_command_listener_process.py::TestStopAutoNext::test_stop_not_running_returns_error PASSED [ 20%]
+tests/auto_next/test_command_listener_process.py::TestGetStatus::test_status_running PASSED [ 20%]
+tests/auto_next/test_command_listener_process.py::TestGetStatus::test_status_dead_process_cleanup PASSED [ 21%]
+tests/auto_next/test_command_listener_process.py::TestGetStatus::test_status_no_process PASSED [ 21%]
+tests/auto_next/test_command_listener_process.py::TestExecuteCommand::test_unknown_action PASSED [ 22%]
+tests/auto_next/test_command_listener_process.py::TestExecuteCommand::test_dispatch_status PASSED [ 22%]
+tests/auto_next/test_db_service.py::TestGetTasks::test_empty_db_returns_empty PASSED [ 23%]
+tests/auto_next/test_db_service.py::TestGetTasks::test_all_tasks_returned PASSED [ 24%]
+tests/auto_next/test_db_service.py::TestGetTasks::test_source_path_filter PASSED [ 24%]
+tests/auto_next/test_db_service.py::TestGetTasks::test_status_filter PASSED [ 25%]
+tests/auto_next/test_db_service.py::TestGetTasks::test_combined_filter PASSED [ 25%]
+tests/auto_next/test_db_service.py::TestGetTasks::test_limit_offset_pagination PASSED [ 26%]
+tests/auto_next/test_db_service.py::TestGetTasks::test_offset_beyond_total PASSED [ 27%]
+tests/auto_next/test_db_service.py::TestGetStats::test_empty_db_all_zero PASSED [ 27%]
+tests/auto_next/test_db_service.py::TestGetStats::test_completion_rate PASSED [ 28%]
+tests/auto_next/test_db_service.py::TestGetStats::test_success_rate PASSED [ 28%]
+tests/auto_next/test_db_service.py::TestGetStats::test_token_aggregation PASSED [ 29%]
+tests/auto_next/test_db_service.py::TestGetStats::test_status_counts PASSED [ 29%]
+tests/auto_next/test_db_service.py::TestGetStats::test_since_filter PASSED [ 30%]
+tests/auto_next/test_db_service.py::TestDelete::test_delete_completed_tasks PASSED [ 31%]
+tests/auto_next/test_db_service.py::TestDelete::test_delete_completed_with_source_path PASSED [ 31%]
+tests/auto_next/test_db_service.py::TestDelete::test_delete_task_nonexistent PASSED [ 32%]
+tests/auto_next/test_db_service.py::TestDelete::test_delete_task_existing PASSED [ 32%]
+tests/auto_next/test_db_service.py::TestDelete::test_delete_old_tasks PASSED [ 33%]
+tests/auto_next/test_db_service.py::TestHistoryAndDuplicates::test_history_date_grouping PASSED [ 33%]
+tests/auto_next/test_db_service.py::TestHistoryAndDuplicates::test_duplicate_tasks PASSED [ 34%]
+tests/auto_next/test_db_service.py::TestHistoryAndDuplicates::test_no_duplicates PASSED [ 35%]
+tests/auto_next/test_db_service.py::TestGetTaskById::test_existing_task PASSED [ 35%]
+tests/auto_next/test_db_service.py::TestGetTaskById::test_nonexistent_task PASSED [ 36%]
+tests/auto_next/test_db_service.py::TestGetTaskById::test_duration_calculation PASSED [ 36%]
+tests/auto_next/test_db_service.py::TestGetTaskById::test_duration_none_when_not_finished PASSED [ 37%]
+tests/auto_next/test_error_boundary.py::TestUTF8Encoding::test_cp949_plan_file_no_crash PASSED [ 37%]
+tests/auto_next/test_error_boundary.py::TestUTF8Encoding::test_mixed_encoding_plan PASSED [ 38%]
+tests/auto_next/test_error_boundary.py::TestLargePlanFile::test_large_plan_many_checkboxes PASSED [ 39%]
+tests/auto_next/test_error_boundary.py::TestLargePlanFile::test_large_plan_parse_items PASSED [ 39%]
+tests/auto_next/test_error_boundary.py::TestDBServiceBoundary::test_limit_zero PASSED [ 40%]
+tests/auto_next/test_error_boundary.py::TestDBServiceBoundary::test_limit_one PASSED [ 40%]
+tests/auto_next/test_error_boundary.py::TestDBServiceBoundary::test_limit_large PASSED [ 41%]
+tests/auto_next/test_error_boundary.py::TestDBServiceBoundary::test_offset_beyond_total PASSED [ 41%]
+tests/auto_next/test_error_boundary.py::TestRunRequestValidation::test_max_cycles_zero_is_valid PASSED [ 42%]
+tests/auto_next/test_error_boundary.py::TestRunRequestValidation::test_max_cycles_negative_is_valid_schema PASSED [ 43%]
+tests/auto_next/test_error_boundary.py::TestRunRequestValidation::test_max_tokens_zero PASSED [ 43%]
+tests/auto_next/test_error_boundary.py::TestRunRequestValidation::test_max_tokens_negative PASSED [ 44%]
+tests/auto_next/test_error_boundary.py::TestRunRequestValidation::test_all_defaults PASSED [ 44%]
+tests/auto_next/test_error_boundary.py::TestBase64Decoding::test_standard_base64_path PASSED [ 45%]
+tests/auto_next/test_error_boundary.py::TestBase64Decoding::test_base64_no_padding PASSED [ 45%]
+tests/auto_next/test_error_boundary.py::TestBase64Decoding::test_base64_with_special_chars PASSED [ 46%]
+tests/auto_next/test_error_boundary.py::TestBase64Decoding::test_invalid_base64_raises PASSED [ 47%]
+tests/auto_next/test_error_boundary.py::TestBase64Decoding::test_empty_string_decodes PASSED [ 47%]
+tests/auto_next/test_executor_service.py::TestStartAutoNext::test_start_single_plan_command PASSED [ 48%]
+tests/auto_next/test_executor_service.py::TestStartAutoNext::test_start_parallel_command PASSED [ 48%]
+tests/auto_next/test_executor_service.py::TestStartAutoNext::test_start_all_options PASSED [ 49%]
+tests/auto_next/test_executor_service.py::TestStartAutoNext::test_start_already_running_409 PASSED [ 50%]
+tests/auto_next/test_executor_service.py::TestStartAutoNext::test_start_redis_down_503 PASSED [ 50%]
+tests/auto_next/test_executor_service.py::TestStartAutoNext::test_start_brpop_timeout_504 PASSED [ 51%]
+tests/auto_next/test_executor_service.py::TestStartAutoNext::test_start_listener_failure_500 PASSED [ 51%]
+tests/auto_next/test_executor_service.py::TestStartAutoNext::test_start_json_decode_error_500 PASSED [ 52%]
+tests/auto_next/test_executor_service.py::TestStopAutoNext::test_stop_not_running_404 PASSED [ 52%]
+tests/auto_next/test_executor_service.py::TestStopAutoNext::test_stop_success PASSED [ 53%]
+tests/auto_next/test_executor_service.py::TestStopAutoNext::test_stop_listener_timeout_force_cleanup PASSED [ 54%]
+tests/auto_next/test_executor_service.py::TestStopAutoNext::test_stop_redis_down_503 PASSED [ 54%]
+tests/auto_next/test_executor_service.py::TestStopAutoNext::test_stop_json_decode_force_cleanup PASSED [ 55%]
+tests/auto_next/test_executor_service.py::TestGetProcessStatus::test_status_running_alive_pid PASSED [ 55%]
+tests/auto_next/test_executor_service.py::TestGetProcessStatus::test_status_running_dead_pid_auto_cleanup PASSED [ 56%]
+tests/auto_next/test_executor_service.py::TestGetProcessStatus::test_status_not_running PASSED [ 56%]
+tests/auto_next/test_executor_service.py::TestGetProcessStatus::test_status_redis_down_returns_not_running PASSED [ 57%]
+tests/auto_next/test_executor_service.py::TestResetRunningState::test_reset_running_to_pending PASSED [ 58%]
+tests/auto_next/test_executor_service.py::TestResetRunningState::test_full_reset_deletes_all PASSED [ 58%]
+tests/auto_next/test_executor_service.py::TestResetRunningState::test_reset_no_running_tasks PASSED [ 59%]
+tests/auto_next/test_executor_service.py::TestResetRunningState::test_reset_db_not_found PASSED [ 59%]
+tests/auto_next/test_executor_service.py::TestIsPidAlive::test_valid_pid_returns_true PASSED [ 60%]
+tests/auto_next/test_executor_service.py::TestIsPidAlive::test_dead_pid_returns_false PASSED [ 60%]
+tests/auto_next/test_executor_service.py::TestIsPidAlive::test_negative_pid_returns_false PASSED [ 61%]
+tests/auto_next/test_executor_service.py::TestIsPidAlive::test_exception_returns_false PASSED [ 62%]
+tests/auto_next/test_executor_service.py::TestCORRECTConformance::test_run_request_invalid_schema PASSED [ 62%]
+tests/auto_next/test_executor_service.py::TestCORRECTConformance::test_plan_file_none_vs_empty PASSED [ 63%]
+tests/auto_next/test_log_state_service.py::TestLogServiceTailLogFile::test_file_exists_returns_last_n_lines PASSED [ 63%]
+tests/auto_next/test_log_state_service.py::TestLogServiceTailLogFile::test_file_not_found_returns_empty PASSED [ 64%]
+tests/auto_next/test_log_state_service.py::TestLogServiceTailLogFile::test_file_path_doesnt_exist_returns_empty PASSED [ 64%]
+tests/auto_next/test_log_state_service.py::TestLogServiceTailLogFile::test_read_error_returns_error_message PASSED [ 65%]
+tests/auto_next/test_log_state_service.py::TestLogServiceTailLogFile::test_default_n_lines_is_100 PASSED [ 66%]
+tests/auto_next/test_log_state_service.py::TestLogServiceFindCurrentLog::test_stream_log_path_priority PASSED [ 66%]
+tests/auto_next/test_log_state_service.py::TestLogServiceFindCurrentLog::test_fallback_to_log_file_path PASSED [ 67%]
+tests/auto_next/test_log_state_service.py::TestLogServiceFindCurrentLog::test_redis_connection_error_returns_none PASSED [ 67%]
+tests/auto_next/test_log_state_service.py::TestLogServiceFindCurrentLog::test_both_paths_missing_returns_none PASSED [ 68%]
+tests/auto_next/test_log_state_service.py::TestLogServiceFindCurrentLog::test_path_exists_but_file_deleted PASSED [ 68%]
+tests/auto_next/test_log_state_service.py::TestRunStateIsRunning::test_no_process_returns_false PASSED [ 69%]
+tests/auto_next/test_log_state_service.py::TestRunStateIsRunning::test_running_process_returns_true PASSED [ 70%]
+tests/auto_next/test_log_state_service.py::TestRunStateIsRunning::test_terminated_process_returns_false PASSED [ 70%]
+tests/auto_next/test_log_state_service.py::TestRunStateIsRunning::test_crashed_process_returns_false PASSED [ 71%]
+tests/auto_next/test_log_state_service.py::TestRunStateReset::test_reset_preserves_crash_info_on_error_exit PASSED [ 71%]
+tests/auto_next/test_log_state_service.py::TestRunStateReset::test_reset_normal_exit_not_crashed PASSED [ 72%]
+tests/auto_next/test_log_state_service.py::TestRunStateReset::test_reset_no_process PASSED [ 72%]
+tests/auto_next/test_log_state_service.py::TestRunStateReset::test_reset_closes_log_file_handle PASSED [ 73%]
+tests/auto_next/test_log_state_service.py::TestRunStateReset::test_reset_skips_already_closed_handle PASSED [ 74%]
+tests/auto_next/test_log_state_service.py::TestRunStateReset::test_reset_clears_all_runtime_fields PASSED [ 74%]
+tests/auto_next/test_log_state_service.py::TestRunStateClearCrashInfo::test_clears_all_crash_fields PASSED [ 75%]
+tests/auto_next/test_plan_service.py::TestIsIgnoredPlan::test_status_complete_is_ignored PASSED [ 75%]
+tests/auto_next/test_plan_service.py::TestIsIgnoredPlan::test_status_impl_complete_is_ignored PASSED [ 76%]
+tests/auto_next/test_plan_service.py::TestIsIgnoredPlan::test_all_checkboxes_done_is_ignored PASSED [ 77%]
+tests/auto_next/test_plan_service.py::TestIsIgnoredPlan::test_zero_checkboxes_not_ignored PASSED [ 77%]
+tests/auto_next/test_plan_service.py::TestIsIgnoredPlan::test_manual_ignore_list PASSED [ 78%]
+tests/auto_next/test_plan_service.py::TestIsIgnoredPlan::test_partial_progress_not_ignored PASSED [ 78%]
+tests/auto_next/test_plan_service.py::TestParsePlanItems::test_phase_with_numbered_and_dash_items PASSED [ 79%]
+tests/auto_next/test_plan_service.py::TestParsePlanItems::test_checkbox_formats PASSED [ 79%]
+tests/auto_next/test_plan_service.py::TestParsePlanItems::test_empty_file PASSED [ 80%]
+tests/auto_next/test_plan_service.py::TestParsePlanItems::test_no_checkboxes PASSED [ 81%]
+tests/auto_next/test_plan_service.py::TestParsePlanItems::test_nonexistent_path_raises PASSED [ 81%]
+tests/auto_next/test_plan_service.py::TestParsePlanItems::test_todo_file_preferred PASSED [ 82%]
+tests/auto_next/test_plan_service.py::TestParsePlanItems::test_done_count_includes_children PASSED [ 82%]
+tests/auto_next/test_plan_service.py::TestGetPlanProgress::test_progress_count PASSED [ 83%]
+tests/auto_next/test_plan_service.py::TestGetPlanProgress::test_status_extraction PASSED [ 83%]
+tests/auto_next/test_plan_service.py::TestGetPlanProgress::test_status_missing PASSED [ 84%]
+tests/auto_next/test_plan_service.py::TestGetPlanProgress::test_progress_nonexistent_file PASSED [ 85%]
+tests/auto_next/test_plan_service.py::TestGetPlanProgress::test_status_nonexistent_file PASSED [ 85%]
+tests/auto_next/test_plan_service.py::TestValidateExternalPath::test_allowed_path PASSED [ 86%]
+tests/auto_next/test_plan_service.py::TestValidateExternalPath::test_denied_path PASSED [ 86%]
+tests/auto_next/test_plan_service.py::TestValidateExternalPath::test_path_traversal PASSED [ 87%]
+tests/auto_next/test_plan_service.py::TestExternalPlanManagement::test_add_and_remove_external_plan PASSED [ 87%]
+tests/auto_next/test_plan_service.py::TestExternalPlanManagement::test_add_and_remove_ignore PASSED [ 88%]
+tests/auto_next/test_plan_service.py::TestExternalPlanManagement::test_list_plans_scans_common_and_external PASSED [ 89%]
+app/modules/auto_next/tests/test_integration.py::TestFullFlow::test_full_lifecycle PASSED [ 89%]
+app/modules/auto_next/tests/test_integration.py::TestPlansList::test_plans_list_returns_200 PASSED [ 90%]
+app/modules/auto_next/tests/test_integration.py::TestLogsRecent::test_logs_recent_returns_200 PASSED [ 90%]
+app/modules/auto_next/tests/test_runner_api.py::TestGetStatus::test_get_status_not_running PASSED [ 91%]
+app/modules/auto_next/tests/test_runner_api.py::TestStartRun::test_start_run_success FAILED [ 91%]
+app/modules/auto_next/tests/test_runner_api.py::TestStartRun::test_double_start_returns_409 FAILED [ 92%]
+app/modules/auto_next/tests/test_runner_api.py::TestStopRun::test_stop_not_running_returns_404 FAILED [ 93%]
+app/modules/auto_next/tests/test_runner_api.py::TestStopRun::test_stop_running_process FAILED [ 93%]
+app/modules/auto_next/tests/test_tasks_api.py::TestGetTasks::test_get_tasks_returns_200 PASSED [ 94%]
+app/modules/auto_next/tests/test_tasks_api.py::TestGetTasks::test_get_tasks_total_count PASSED [ 94%]
+app/modules/auto_next/tests/test_tasks_api.py::TestGetTasks::test_get_tasks_with_status_filter PASSED [ 95%]
+app/modules/auto_next/tests/test_tasks_api.py::TestGetTasks::test_get_tasks_with_limit PASSED [ 95%]
+app/modules/auto_next/tests/test_tasks_api.py::TestGetTask::test_get_task_found PASSED [ 96%]
+app/modules/auto_next/tests/test_tasks_api.py::TestGetTask::test_get_task_not_found PASSED [ 97%]
+app/modules/auto_next/tests/test_tasks_api.py::TestDeleteTask::test_delete_task_success PASSED [ 97%]
+app/modules/auto_next/tests/test_tasks_api.py::TestDeleteTask::test_delete_task_not_found PASSED [ 98%]
+app/modules/auto_next/tests/test_tasks_api.py::TestGetStats::test_get_stats_returns_200 PASSED [ 98%]
+app/modules/auto_next/tests/test_tasks_api.py::TestGetStats::test_get_history PASSED [ 99%]
+app/modules/auto_next/tests/test_tasks_api.py::TestGetStats::test_get_duplicates PASSED [100%]
+
+================================== FAILURES ===================================
+_____________________ TestStartRun.test_start_run_success _____________________
+.venv\Lib\site-packages\redis\asyncio\connection.py:542: in send_packed_command
+    self._writer.writelines(command)
+C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\streams.py:349: in writelines
+    self._transport.writelines(data)
+C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\transports.py:123: in writelines
+    self.write(data)
+C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\proactor_events.py:366: in write
+    self._loop_writing(data=bytes(data))
+C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\proactor_events.py:402: in _loop_writing
+    self._write_fut = self._loop._proactor.send(self._sock, data)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AttributeError: 'NoneType' object has no attribute 'send'
+
+During handling of the above exception, another exception occurred:
+app\modules\auto_next\tests\test_runner_api.py:32: in test_start_run_success
+    response = await client.post("/api/v1/auto-next/run", json={
+.venv\Lib\site-packages\httpx\_client.py:1848: in post
+    return await self.request(
+.venv\Lib\site-packages\httpx\_client.py:1530: in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\httpx\_client.py:1617: in send
+    response = await self._send_handling_auth(
+.venv\Lib\site-packages\httpx\_client.py:1645: in _send_handling_auth
+    response = await self._send_handling_redirects(
+.venv\Lib\site-packages\httpx\_client.py:1682: in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\httpx\_client.py:1719: in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\httpx\_transports\asgi.py:162: in handle_async_request
+    await self.app(scope, receive, send)
+.venv\Lib\site-packages\fastapi\applications.py:1106: in __call__
+    await super().__call__(scope, receive, send)
+.venv\Lib\site-packages\starlette\applications.py:122: in __call__
+    await self.middleware_stack(scope, receive, send)
+.venv\Lib\site-packages\starlette\middleware\errors.py:184: in __call__
+    raise exc
+.venv\Lib\site-packages\starlette\middleware\errors.py:162: in __call__
+    await self.app(scope, receive, _send)
+.venv\Lib\site-packages\starlette\middleware\exceptions.py:79: in __call__
+    raise exc
+.venv\Lib\site-packages\starlette\middleware\exceptions.py:68: in __call__
+    await self.app(scope, receive, sender)
+.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:20: in __call__
+    raise e
+.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:17: in __call__
+    await self.app(scope, receive, send)
+.venv\Lib\site-packages\starlette\routing.py:718: in __call__
+    await route.handle(scope, receive, send)
+.venv\Lib\site-packages\starlette\routing.py:276: in handle
+    await self.app(scope, receive, send)
+.venv\Lib\site-packages\starlette\routing.py:66: in app
+    response = await func(request)
+               ^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\fastapi\routing.py:274: in app
+    raw_response = await run_endpoint_function(
+.venv\Lib\site-packages\fastapi\routing.py:191: in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\modules\auto_next\routes\runner.py:14: in start_run
+    return await executor_service.start_auto_next(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\modules\auto_next\services\executor_service.py:52: in start_auto_next
+    status = await self.async_redis.get(STATE_KEY + ":status")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\redis\asyncio\client.py:725: in execute_command
+    return await conn.retry.call_with_retry(
+.venv\Lib\site-packages\redis\asyncio\retry.py:50: in call_with_retry
+    return await do()
+           ^^^^^^^^^^
+.venv\Lib\site-packages\redis\asyncio\client.py:699: in _send_command_parse_response
+    await conn.send_command(*args)
+.venv\Lib\site-packages\redis\asyncio\connection.py:567: in send_command
+    await self.send_packed_command(
+.venv\Lib\site-packages\redis\asyncio\connection.py:562: in send_packed_command
+    await self.disconnect(nowait=True)
+.venv\Lib\site-packages\redis\asyncio\connection.py:487: in disconnect
+    self._writer.close()  # type: ignore[union-attr]
+    ^^^^^^^^^^^^^^^^^^^^
+C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\streams.py:358: in close
+    return self._transport.close()
+           ^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\proactor_events.py:109: in close
+    self._loop.call_soon(self._call_connection_lost, None)
+C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\base_events.py:799: in call_soon
+    self._check_closed()
+C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\base_events.py:545: in _check_closed
+    raise RuntimeError('Event loop is closed')
+E   RuntimeError: Event loop is closed
+_________________ TestStartRun.test_double_start_returns_409 __________________
+app\modules\auto_next\tests\test_runner_api.py:51: in test_double_start_returns_409
+    assert response.status_code == 409
+E   assert 200 == 409
+E    +  where 200 = <Response [200 OK]>.status_code
+________________ TestStopRun.test_stop_not_running_returns_404 ________________
+app\modules\auto_next\tests\test_runner_api.py:57: in test_stop_not_running_returns_404
+    assert response.status_code == 404
+E   assert 500 == 404
+E    +  where 500 = <Response [500 Internal Server Error]>.status_code
+---------------------------- Captured stdout call -----------------------------
+2026-02-18 19:39:27,725 - [API] ERROR - [auto-next] stop 실패: Traceback (most recent call last):
+  File "D:\work\project\tools\monitor-page\.venv\Lib\site-packages\redis\asyncio\connection.py", line 542, in send_packed_command
+    self._writer.writelines(command)
+  File "C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\streams.py", line 349, in writelines
+    self._transport.writelines(data)
+  File "C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\transports.py", line 123, in writelines
+    self.write(data)
+  File "C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 366, in write
+    self._loop_writing(data=bytes(data))
+  File "C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 402, in _loop_writing
+    self._write_fut = self._loop._proactor.send(self._sock, data)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'send'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\work\project\tools\monitor-page\app\modules\auto_next\services\executor_service.py", line 235, in stop_auto_next
+    status = await self.async_redis.get(STATE_KEY + ":status")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\work\project\tools\monitor-page\.venv\Lib\site-packages\redis\asyncio\client.py", line 725, in execute_command
+    return await conn.retry.call_with_retry(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\work\project\tools\monitor-page\.venv\Lib\site-packages\redis\asyncio\retry.py", line 50, in call_with_retry
+    return await do()
+           ^^^^^^^^^^
+  File "D:\work\project\tools\monitor-page\.venv\Lib\site-packages\redis\asyncio\client.py", line 699, in _send_command_parse_response
+    await conn.send_command(*args)
+  File "D:\work\project\tools\monitor-page\.venv\Lib\site-packages\redis\asyncio\connection.py", line 567, in send_command
+    await self.send_packed_command(
+  File "D:\work\project\tools\monitor-page\.venv\Lib\site-packages\redis\asyncio\connection.py", line 562, in send_packed_command
+    await self.disconnect(nowait=True)
+  File "D:\work\project\tools\monitor-page\.venv\Lib\site-packages\redis\asyncio\connection.py", line 487, in disconnect
+    self._writer.close()  # type: ignore[union-attr]
+    ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\streams.py", line 358, in close
+    return self._transport.close()
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 109, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+  File "C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\base_events.py", line 799, in call_soon
+    self._check_closed()
+  File "C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\base_events.py", line 545, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+
+------------------------------ Captured log call ------------------------------
+ERROR    api_server:executor_service.py:279 [auto-next] stop 실패: Traceback (most recent call last):
+  File "D:\work\project\tools\monitor-page\.venv\Lib\site-packages\redis\asyncio\connection.py", line 542, in send_packed_command
+    self._writer.writelines(command)
+  File "C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\streams.py", line 349, in writelines
+    self._transport.writelines(data)
+  File "C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\transports.py", line 123, in writelines
+    self.write(data)
+  File "C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 366, in write
+    self._loop_writing(data=bytes(data))
+  File "C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 402, in _loop_writing
+    self._write_fut = self._loop._proactor.send(self._sock, data)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'send'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\work\project\tools\monitor-page\app\modules\auto_next\services\executor_service.py", line 235, in stop_auto_next
+    status = await self.async_redis.get(STATE_KEY + ":status")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\work\project\tools\monitor-page\.venv\Lib\site-packages\redis\asyncio\client.py", line 725, in execute_command
+    return await conn.retry.call_with_retry(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\work\project\tools\monitor-page\.venv\Lib\site-packages\redis\asyncio\retry.py", line 50, in call_with_retry
+    return await do()
+           ^^^^^^^^^^
+  File "D:\work\project\tools\monitor-page\.venv\Lib\site-packages\redis\asyncio\client.py", line 699, in _send_command_parse_response
+    await conn.send_command(*args)
+  File "D:\work\project\tools\monitor-page\.venv\Lib\site-packages\redis\asyncio\connection.py", line 567, in send_command
+    await self.send_packed_command(
+  File "D:\work\project\tools\monitor-page\.venv\Lib\site-packages\redis\asyncio\connection.py", line 562, in send_packed_command
+    await self.disconnect(nowait=True)
+  File "D:\work\project\tools\monitor-page\.venv\Lib\site-packages\redis\asyncio\connection.py", line 487, in disconnect
+    self._writer.close()  # type: ignore[union-attr]
+    ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\streams.py", line 358, in close
+    return self._transport.close()
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 109, in close
+    self._loop.call_soon(self._call_connection_lost, None)
+  File "C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\base_events.py", line 799, in call_soon
+    self._check_closed()
+  File "C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\asyncio\base_events.py", line 545, in _check_closed
+    raise RuntimeError('Event loop is closed')
+RuntimeError: Event loop is closed
+____________________ TestStopRun.test_stop_running_process ____________________
+app\modules\auto_next\tests\test_runner_api.py:69: in test_stop_running_process
+    assert response.status_code == 200
+E   assert 404 == 200
+E    +  where 404 = <Response [404 Not Found]>.status_code
+============================== warnings summary ===============================
+.venv\Lib\site-packages\pydantic\_internal\_config.py:271
+.venv\Lib\site-packages\pydantic\_internal\_config.py:271
+  D:\work\project\tools\monitor-page\.venv\Lib\site-packages\pydantic\_internal\_config.py:271: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.5/migration/
+    warnings.warn(DEPRECATION_MESSAGE, DeprecationWarning)
+
+.venv\Lib\site-packages\pydantic\_internal\_fields.py:149
+  D:\work\project\tools\monitor-page\.venv\Lib\site-packages\pydantic\_internal\_fields.py:149: UserWarning: Field "model_used" has conflict with protected namespace "model_".
+  
+  You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+    warnings.warn(
+
+app\core\config.py:23
+  D:\work\project\tools\monitor-page\app\core\config.py:23: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.5/migration/
+    @validator("APP_MODE", pre=True)
+
+app\core\database.py:34
+  D:\work\project\tools\monitor-page\app\core\database.py:34: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    Base = declarative_base()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED app/modules/auto_next/tests/test_runner_api.py::TestStartRun::test_start_run_success
+FAILED app/modules/auto_next/tests/test_runner_api.py::TestStartRun::test_double_start_returns_409
+FAILED app/modules/auto_next/tests/test_runner_api.py::TestStopRun::test_stop_not_running_returns_404
+FAILED app/modules/auto_next/tests/test_runner_api.py::TestStopRun::test_stop_running_process
+================== 4 failed, 170 passed, 5 warnings in 4.42s ==================

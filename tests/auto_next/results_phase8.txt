@@ -1,0 +1,190 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.11, pytest-9.0.1, pluggy-1.6.0 -- D:\work\project\tools\monitor-page\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\work\project\tools\monitor-page
+configfile: pytest.ini
+plugins: anyio-3.7.1, asyncio-1.3.0, cov-7.0.0, timeout-2.4.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+timeout: 30.0s
+timeout method: thread
+timeout func_only: False
+collecting ... collected 12 items
+
+tests/auto_next/test_api_security.py::TestDecodePathFunction::test_valid_base64_decodes PASSED [  8%]
+tests/auto_next/test_api_security.py::TestDecodePathFunction::test_with_padding PASSED [ 16%]
+tests/auto_next/test_api_security.py::TestDecodePathFunction::test_invalid_base64_raises PASSED [ 25%]
+tests/auto_next/test_api_security.py::TestDecodePathFunction::test_special_chars_in_path PASSED [ 33%]
+tests/auto_next/test_api_security.py::TestApiPathSecurity::test_path_traversal_blocked PASSED [ 41%]
+tests/auto_next/test_api_security.py::TestApiPathSecurity::test_invalid_base64_returns_400 PASSED [ 50%]
+tests/auto_next/test_api_security.py::TestApiPathSecurity::test_nonexistent_file_returns_404 PASSED [ 58%]
+tests/auto_next/test_api_security.py::TestApiPathSecurity::test_valid_path_returns_200 FAILED [ 66%]
+tests/auto_next/test_api_security.py::TestApiPathSecurity::test_items_path_traversal_blocked PASSED [ 75%]
+tests/auto_next/test_api_security.py::TestApiPathSecurity::test_ignore_invalid_base64_returns_400 PASSED [ 83%]
+tests/auto_next/test_api_security.py::TestApiPathSecurity::test_unignore_invalid_base64_returns_400 PASSED [ 91%]
+tests/auto_next/test_api_security.py::TestApiPathSecurity::test_empty_encoded_path FAILED [100%]
+
+================================== FAILURES ===================================
+_______________ TestApiPathSecurity.test_valid_path_returns_200 _______________
+
+self = <tests.auto_next.test_api_security.TestApiPathSecurity object at 0x000002BC470C1790>
+client = <starlette.testclient.TestClient object at 0x000002BC471969C0>
+tmp_path = WindowsPath('C:/Users/Narang/AppData/Local/Temp/pytest-of-Narang/pytest-171/test_valid_path_returns_2000')
+
+    def test_valid_path_returns_200(self, client, tmp_path):
+        """정상 경로 → 200"""
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text("# Plan\n- [ ] task1", encoding="utf-8")
+        encoded = self._encode(str(plan_file))
+        with patch("app.modules.auto_next.routes.plans.plan_service") as mock_ps:
+            mock_ps.validate_external_path.return_value = True
+            mock_ps.get_plan_progress.return_value = {
+                "path": str(plan_file), "status": "진행중",
+                "done": 0, "total": 1, "phases": []
+            }
+>           resp = client.get(f"/api/v1/auto-next/plans/{encoded}")
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\auto_next\test_api_security.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+.venv\Lib\site-packages\starlette\testclient.py:499: in get
+    return super().get(
+.venv\Lib\site-packages\httpx\_client.py:1041: in get
+    return self.request(
+.venv\Lib\site-packages\starlette\testclient.py:465: in request
+    return super().request(
+.venv\Lib\site-packages\httpx\_client.py:814: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\httpx\_client.py:901: in send
+    response = self._send_handling_auth(
+.venv\Lib\site-packages\httpx\_client.py:929: in _send_handling_auth
+    response = self._send_handling_redirects(
+.venv\Lib\site-packages\httpx\_client.py:966: in _send_handling_redirects
+    response = self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\httpx\_client.py:1002: in _send_single_request
+    response = transport.handle_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\starlette\testclient.py:342: in handle_request
+    raise exc
+.venv\Lib\site-packages\starlette\testclient.py:339: in handle_request
+    portal.call(self.app, scope, receive, send)
+.venv\Lib\site-packages\anyio\from_thread.py:277: in call
+    return cast(T_Retval, self.start_task_soon(func, *args).result())
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\concurrent\futures\_base.py:456: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+C:\Users\Narang\AppData\Roaming\uv\python\cpython-3.12.11-windows-x86_64-none\Lib\concurrent\futures\_base.py:401: in __get_result
+    raise self._exception
+.venv\Lib\site-packages\anyio\from_thread.py:217: in _call_func
+    retval = await retval
+             ^^^^^^^^^^^^
+.venv\Lib\site-packages\fastapi\applications.py:1106: in __call__
+    await super().__call__(scope, receive, send)
+.venv\Lib\site-packages\starlette\applications.py:122: in __call__
+    await self.middleware_stack(scope, receive, send)
+.venv\Lib\site-packages\starlette\middleware\errors.py:184: in __call__
+    raise exc
+.venv\Lib\site-packages\starlette\middleware\errors.py:162: in __call__
+    await self.app(scope, receive, _send)
+.venv\Lib\site-packages\starlette\middleware\exceptions.py:79: in __call__
+    raise exc
+.venv\Lib\site-packages\starlette\middleware\exceptions.py:68: in __call__
+    await self.app(scope, receive, sender)
+.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:20: in __call__
+    raise e
+.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:17: in __call__
+    await self.app(scope, receive, send)
+.venv\Lib\site-packages\starlette\routing.py:718: in __call__
+    await route.handle(scope, receive, send)
+.venv\Lib\site-packages\starlette\routing.py:276: in handle
+    await self.app(scope, receive, send)
+.venv\Lib\site-packages\starlette\routing.py:66: in app
+    response = await func(request)
+               ^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\fastapi\routing.py:292: in app
+    content = await serialize_response(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    async def serialize_response(
+        *,
+        field: Optional[ModelField] = None,
+        response_content: Any,
+        include: Optional[IncEx] = None,
+        exclude: Optional[IncEx] = None,
+        by_alias: bool = True,
+        exclude_unset: bool = False,
+        exclude_defaults: bool = False,
+        exclude_none: bool = False,
+        is_coroutine: bool = True,
+    ) -> Any:
+        if field:
+            errors = []
+            if not hasattr(field, "serialize"):
+                # pydantic v1
+                response_content = _prepare_response_content(
+                    response_content,
+                    exclude_unset=exclude_unset,
+                    exclude_defaults=exclude_defaults,
+                    exclude_none=exclude_none,
+                )
+            if is_coroutine:
+                value, errors_ = field.validate(response_content, {}, loc=("response",))
+            else:
+                value, errors_ = await run_in_threadpool(
+                    field.validate, response_content, {}, loc=("response",)
+                )
+            if isinstance(errors_, list):
+                errors.extend(errors_)
+            elif errors_:
+                errors.append(errors_)
+            if errors:
+>               raise ResponseValidationError(
+                    errors=_normalize_errors(errors), body=response_content
+                )
+E               fastapi.exceptions.ResponseValidationError: 1 validation errors:
+E                 {'type': 'missing', 'loc': ('response', 'percent'), 'msg': 'Field required', 'input': {'path': 'C:\\Users\\Narang\\AppData\\Local\\Temp\\pytest-of-Narang\\pytest-171\\test_valid_path_returns_2000\\plan.md', 'status': '진행중', 'done': 0, 'total': 1, 'phases': []}, 'url': 'https://errors.pydantic.dev/2.5/v/missing'}
+
+.venv\Lib\site-packages\fastapi\routing.py:155: ResponseValidationError
+_________________ TestApiPathSecurity.test_empty_encoded_path _________________
+
+self = <tests.auto_next.test_api_security.TestApiPathSecurity object at 0x000002BC470C3D70>
+client = <starlette.testclient.TestClient object at 0x000002BC486EDAF0>
+
+    def test_empty_encoded_path(self, client):
+        """빈 encoded_path → base64 디코딩 시 빈 문자열"""
+        encoded = self._encode("")
+        with patch("app.modules.auto_next.routes.plans.plan_service") as mock_ps:
+            mock_ps.validate_external_path.return_value = False
+            resp = client.get(f"/api/v1/auto-next/plans/{encoded}")
+>       assert resp.status_code == 403
+E       assert 200 == 403
+E        +  where 200 = <Response [200 OK]>.status_code
+
+tests\auto_next\test_api_security.py:112: AssertionError
+============================== warnings summary ===============================
+.venv\Lib\site-packages\pydantic\_internal\_config.py:271
+.venv\Lib\site-packages\pydantic\_internal\_config.py:271
+  D:\work\project\tools\monitor-page\.venv\Lib\site-packages\pydantic\_internal\_config.py:271: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.5/migration/
+    warnings.warn(DEPRECATION_MESSAGE, DeprecationWarning)
+
+.venv\Lib\site-packages\pydantic\_internal\_fields.py:149
+  D:\work\project\tools\monitor-page\.venv\Lib\site-packages\pydantic\_internal\_fields.py:149: UserWarning: Field "model_used" has conflict with protected namespace "model_".
+  
+  You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+    warnings.warn(
+
+app\core\config.py:23
+  D:\work\project\tools\monitor-page\app\core\config.py:23: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.5/migration/
+    @validator("APP_MODE", pre=True)
+
+app\core\database.py:34
+  D:\work\project\tools\monitor-page\app\core\database.py:34: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    Base = declarative_base()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/auto_next/test_api_security.py::TestApiPathSecurity::test_valid_path_returns_200
+FAILED tests/auto_next/test_api_security.py::TestApiPathSecurity::test_empty_encoded_path
+================== 2 failed, 10 passed, 5 warnings in 5.44s ===================

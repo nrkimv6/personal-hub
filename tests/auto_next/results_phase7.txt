@@ -1,0 +1,48 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.11, pytest-9.0.1, pluggy-1.6.0 -- D:\work\project\tools\monitor-page\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: D:\work\project\tools\monitor-page
+configfile: pytest.ini
+plugins: anyio-3.7.1, asyncio-1.3.0, cov-7.0.0, timeout-2.4.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+timeout: 30.0s
+timeout method: thread
+timeout func_only: False
+collecting ... collected 21 items
+
+tests/auto_next/test_log_state_service.py::TestLogServiceTailLogFile::test_file_exists_returns_last_n_lines PASSED [  4%]
+tests/auto_next/test_log_state_service.py::TestLogServiceTailLogFile::test_file_not_found_returns_empty PASSED [  9%]
+tests/auto_next/test_log_state_service.py::TestLogServiceTailLogFile::test_file_path_doesnt_exist_returns_empty PASSED [ 14%]
+tests/auto_next/test_log_state_service.py::TestLogServiceTailLogFile::test_read_error_returns_error_message PASSED [ 19%]
+tests/auto_next/test_log_state_service.py::TestLogServiceTailLogFile::test_default_n_lines_is_100 PASSED [ 23%]
+tests/auto_next/test_log_state_service.py::TestLogServiceFindCurrentLog::test_stream_log_path_priority PASSED [ 28%]
+tests/auto_next/test_log_state_service.py::TestLogServiceFindCurrentLog::test_fallback_to_log_file_path PASSED [ 33%]
+tests/auto_next/test_log_state_service.py::TestLogServiceFindCurrentLog::test_redis_connection_error_returns_none PASSED [ 38%]
+tests/auto_next/test_log_state_service.py::TestLogServiceFindCurrentLog::test_both_paths_missing_returns_none PASSED [ 42%]
+tests/auto_next/test_log_state_service.py::TestLogServiceFindCurrentLog::test_path_exists_but_file_deleted PASSED [ 47%]
+tests/auto_next/test_log_state_service.py::TestRunStateIsRunning::test_no_process_returns_false PASSED [ 52%]
+tests/auto_next/test_log_state_service.py::TestRunStateIsRunning::test_running_process_returns_true PASSED [ 57%]
+tests/auto_next/test_log_state_service.py::TestRunStateIsRunning::test_terminated_process_returns_false PASSED [ 61%]
+tests/auto_next/test_log_state_service.py::TestRunStateIsRunning::test_crashed_process_returns_false PASSED [ 66%]
+tests/auto_next/test_log_state_service.py::TestRunStateReset::test_reset_preserves_crash_info_on_error_exit PASSED [ 71%]
+tests/auto_next/test_log_state_service.py::TestRunStateReset::test_reset_normal_exit_not_crashed PASSED [ 76%]
+tests/auto_next/test_log_state_service.py::TestRunStateReset::test_reset_no_process PASSED [ 80%]
+tests/auto_next/test_log_state_service.py::TestRunStateReset::test_reset_closes_log_file_handle PASSED [ 85%]
+tests/auto_next/test_log_state_service.py::TestRunStateReset::test_reset_skips_already_closed_handle PASSED [ 90%]
+tests/auto_next/test_log_state_service.py::TestRunStateReset::test_reset_clears_all_runtime_fields PASSED [ 95%]
+tests/auto_next/test_log_state_service.py::TestRunStateClearCrashInfo::test_clears_all_crash_fields PASSED [100%]
+
+============================== warnings summary ===============================
+.venv\Lib\site-packages\pydantic\_internal\_config.py:271
+.venv\Lib\site-packages\pydantic\_internal\_config.py:271
+  D:\work\project\tools\monitor-page\.venv\Lib\site-packages\pydantic\_internal\_config.py:271: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.5/migration/
+    warnings.warn(DEPRECATION_MESSAGE, DeprecationWarning)
+
+.venv\Lib\site-packages\pydantic\_internal\_fields.py:149
+  D:\work\project\tools\monitor-page\.venv\Lib\site-packages\pydantic\_internal\_fields.py:149: UserWarning: Field "model_used" has conflict with protected namespace "model_".
+  
+  You may be able to resolve this warning by setting `model_config['protected_namespaces'] = ()`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 21 passed, 3 warnings in 2.86s ========================
