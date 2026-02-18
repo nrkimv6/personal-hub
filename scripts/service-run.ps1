@@ -454,11 +454,10 @@ try {
     $waitStart = Get-Date
     $portReady = $false
     while ((New-TimeSpan -Start $waitStart -End (Get-Date)).TotalSeconds -lt 60) {
-        # 프로세스가 이미 종료됐으면 대기 중단
-        if ($apiProcess.HasExited) {
-            Write-ServiceLog "WARNING: API process exited during startup (ExitCode: $($apiProcess.ExitCode))"
-            break
-        }
+        # NOTE: $apiProcess.HasExited는 사용하지 않음
+        # Start-Process -PassThru는 부모 python.exe PID를 추적하는데,
+        # uvicorn은 자식 프로세스로 실행되어 부모는 즉시 종료됨.
+        # 따라서 HasExited=True여도 실제 uvicorn은 살아있을 수 있음.
         # 포트 감지
         $pids = Get-ListeningPids -Port $ApiPort
         if ($pids.Count -gt 0) {
@@ -484,16 +483,12 @@ try {
     }
 
     if (-not $portReady) {
-        if ($apiProcess.HasExited) {
-            Write-ServiceLog "ERROR: API Server process died during startup (ExitCode: $($apiProcess.ExitCode))"
-        } else {
-            Write-ServiceLog "ERROR: API Server failed to start listening on port $ApiPort within 60 seconds"
-            Write-ServiceLog "  Checking stdout log for clues..."
-            if (Test-Path $stdoutLogFile) {
-                $lastLines = Get-Content $stdoutLogFile -Tail 5 -ErrorAction SilentlyContinue
-                foreach ($line in $lastLines) {
-                    Write-ServiceLog "  stdout: $line"
-                }
+        Write-ServiceLog "ERROR: API Server failed to start listening on port $ApiPort within 60 seconds"
+        Write-ServiceLog "  Checking stdout log for clues..."
+        if (Test-Path $stdoutLogFile) {
+            $lastLines = Get-Content $stdoutLogFile -Tail 5 -ErrorAction SilentlyContinue
+            foreach ($line in $lastLines) {
+                Write-ServiceLog "  stdout: $line"
             }
         }
         $exitCode = 1
