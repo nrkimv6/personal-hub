@@ -88,9 +88,9 @@ function Get-ListeningPids {
         $lines = netstat -ano 2>$null | Select-String ":${Port}\s+.*LISTENING"
         foreach ($line in $lines) {
             if ($line -match '\s(\d+)\s*$') {
-                $pid = [int]$Matches[1]
-                if ($pid -ne 0 -and $pids -notcontains $pid) {
-                    $pids += $pid
+                $procId = [int]$Matches[1]
+                if ($procId -ne 0 -and $pids -notcontains $procId) {
+                    $pids += $procId
                 }
             }
         }
