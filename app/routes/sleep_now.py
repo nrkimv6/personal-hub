@@ -7,6 +7,7 @@ from pathlib import Path
 import hashlib
 import hmac
 import json
+import copy
 import re
 import sys
 
@@ -141,6 +142,62 @@ def _verify_password(password: str) -> bool:
     input_hash = hashlib.sha256(password.encode()).hexdigest()
     # Use hmac.compare_digest to prevent timing attacks
     return hmac.compare_digest(stored_hash, input_hash)
+
+
+# ==================== 설정 관리 상수 & 헬퍼 ====================
+
+# PUT /config에서 변경 차단할 필드 (password_hash는 PUT /password 전용)
+PROTECTED_FIELDS: dict[str, list[str]] = {
+    "emergency": ["password_hash"],
+}
+
+# 변경 시 서비스 재시작이 필요한 섹션
+RESTART_REQUIRED_SECTIONS: list[str] = ["session_worker", "browsers"]
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """dict를 재귀적으로 deep merge합니다.
+
+    ⚠️ list 필드는 merge가 아닌 전체 교체됩니다.
+    base를 복사한 뒤 override 키를 반복하며,
+    양쪽 모두 dict인 경우 재귀 호출, 아닌 경우 override 값으로 대체합니다.
+    """
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def _validate_config(config: dict) -> str | None:
+    """sleep-now의 Settings.model_validate(config)로 유효성 검증합니다.
+
+    Returns:
+        성공 시 None, 실패 시 에러 메시지 str
+    """
+    try:
+        sleep_now_src = str(SLEEP_NOW_PATH / "src")
+        if sleep_now_src not in sys.path:
+            sys.path.insert(0, sleep_now_src)
+        from config import Settings
+        Settings.model_validate(config)
+        return None
+    except Exception as e:
+        return str(e)
+
+
+def _mask_sensitive_fields(config: dict) -> dict:
+    """GET 응답 시 민감한 필드를 마스킹합니다.
+
+    emergency.password_hash를 "***"로 마스킹합니다.
+    원본 dict 수정 방지를 위해 copy.deepcopy를 사용합니다.
+    """
+    masked = copy.deepcopy(config)
+    if "emergency" in masked and "password_hash" in masked["emergency"]:
+        masked["emergency"]["password_hash"] = "***"
+    return masked
 
 
 @router.get("/status", response_model=SleepNowStatus)
@@ -345,6 +402,32 @@ class PasswordChangeRequest(BaseModel):
         return v
 
 
+class ConfigUpdateRequest(BaseModel):
+    """범용 설정 변경 요청"""
+    password: str
+    config: dict
+
+
+class DateExceptionRequest(BaseModel):
+    """날짜 예외 추가/수정 요청"""
+    password: str
+    date: str
+    enabled: bool = False
+    reason: str = ""
+
+    @field_validator('date')
+    @classmethod
+    def validate_date(cls, v):
+        if not re.match(r'^\d{4}-\d{2}-\d{2}$', v):
+            raise ValueError('날짜 형식이 올바르지 않습니다. YYYY-MM-DD 형식을 사용하세요.')
+        return v
+
+
+class DeleteExceptionRequest(BaseModel):
+    """날짜 예외 삭제 요청 (비밀번호 request body로 전달, URL 로그 노출 방지)"""
+    password: str
+
+
 @router.put("/schedule")
 async def update_schedule(request: ScheduleUpdateRequest):
     """스케줄 설정 변경 (비밀번호 인증 필요)"""
@@ -396,6 +479,12 @@ async def update_schedule(request: ScheduleUpdateRequest):
 
     # 설정 저장
     config["schedule"] = schedule
+
+    # 유효성 검증 (_validate_config 재사용)
+    error = _validate_config(config)
+    if error:
+        raise HTTPException(status_code=400, detail=f"설정 유효성 검증 실패: {error}")
+
     _save_config(config)
 
     _log_event("schedule_updated", {
@@ -456,4 +545,152 @@ async def change_password(request: PasswordChangeRequest):
     return {
         "success": True,
         "message": "비밀번호가 변경되었습니다",
+    }
+
+
+# ==================== 설정 조회/변경 API (범용) ====================
+
+
+@router.get("/config")
+async def get_config():
+    """전체 설정 조회 (password_hash 마스킹)"""
+    config = _load_config()
+    return _mask_sensitive_fields(config)
+
+
+@router.post("/config/schedule/exceptions")
+async def add_date_exception(request: DateExceptionRequest):
+    """날짜 예외 추가/수정 (비밀번호 필요)
+
+    ⚠️ 라우트 선언 순서: /config/{section} 보다 먼저 선언하여 FastAPI 매칭 충돌 방지
+    """
+    if not _verify_password(request.password):
+        _log_event("date_exception_failed", {"reason": "invalid_password"})
+        raise HTTPException(status_code=401, detail="비밀번호가 올바르지 않습니다")
+
+    config = _load_config()
+    if "schedule" not in config:
+        config["schedule"] = {}
+    if "exceptions" not in config["schedule"]:
+        config["schedule"]["exceptions"] = {}
+
+    config["schedule"]["exceptions"][request.date] = {
+        "enabled": request.enabled,
+        "reason": request.reason,
+    }
+
+    _save_config(config)
+    _trigger_reload()
+    _log_event("date_exception_added", {
+        "date": request.date,
+        "enabled": request.enabled,
+        "reason": request.reason,
+    })
+
+    return {
+        "success": True,
+        "message": f"{request.date} 날짜 예외가 설정되었습니다.",
+        "exception": config["schedule"]["exceptions"][request.date],
+    }
+
+
+@router.delete("/config/schedule/exceptions/{date}")
+async def delete_date_exception(date: str, request: DeleteExceptionRequest):
+    """날짜 예외 삭제 (비밀번호 request body로 전달, URL 로그 노출 방지)
+
+    ⚠️ 라우트 선언 순서: /config/{section} 보다 먼저 선언하여 FastAPI 매칭 충돌 방지
+    """
+    # 날짜 형식 검증
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$', date):
+        raise HTTPException(
+            status_code=400,
+            detail="날짜 형식이 올바르지 않습니다. YYYY-MM-DD 형식을 사용하세요."
+        )
+
+    if not _verify_password(request.password):
+        _log_event("date_exception_delete_failed", {"reason": "invalid_password"})
+        raise HTTPException(status_code=401, detail="비밀번호가 올바르지 않습니다")
+
+    config = _load_config()
+    exceptions = config.get("schedule", {}).get("exceptions", {})
+
+    if date not in exceptions:
+        raise HTTPException(status_code=404, detail=f"{date} 날짜 예외가 존재하지 않습니다")
+
+    del config["schedule"]["exceptions"][date]
+    _save_config(config)
+    _trigger_reload()
+
+    return {
+        "success": True,
+        "message": f"{date} 날짜 예외가 삭제되었습니다.",
+    }
+
+
+@router.get("/config/{section}")
+async def get_config_section(section: str):
+    """섹션별 설정 조회 (존재하지 않는 섹션은 404 반환)
+
+    emergency 섹션은 password_hash 마스킹 적용
+    """
+    config = _load_config()
+    if section not in config:
+        raise HTTPException(status_code=404, detail=f"섹션 '{section}'을 찾을 수 없습니다")
+
+    section_data = config[section]
+    if section == "emergency" and isinstance(section_data, dict) and "password_hash" in section_data:
+        section_data = dict(section_data)
+        section_data["password_hash"] = "***"
+
+    return section_data
+
+
+@router.put("/config")
+async def update_config(request: ConfigUpdateRequest):
+    """범용 설정 변경 API (비밀번호 필요, deep merge)
+
+    ⚠️ list 필드(warning_times, kill_targets.kill 등)는 merge가 아닌 전체 교체됩니다.
+    emergency.password_hash는 PUT /password 전용으로 이 API에서 변경 불가합니다.
+    """
+    if not _verify_password(request.password):
+        _log_event("config_update_failed", {"reason": "invalid_password"})
+        raise HTTPException(status_code=401, detail="비밀번호가 올바르지 않습니다")
+
+    # PROTECTED_FIELDS 차단 검증
+    for section, fields in PROTECTED_FIELDS.items():
+        if section in request.config:
+            for field in fields:
+                if field in request.config[section]:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"'{section}.{field}'은(는) 직접 변경할 수 없습니다. PUT /password를 사용하세요."
+                    )
+
+    # 현재 설정 로드 후 deep merge
+    current_config = _load_config()
+    merged_config = _deep_merge(current_config, request.config)
+
+    # Pydantic 유효성 검증
+    error = _validate_config(merged_config)
+    if error:
+        raise HTTPException(status_code=400, detail=f"설정 유효성 검증 실패: {error}")
+
+    # 저장 및 리로드
+    _save_config(merged_config)
+    _trigger_reload()
+    _log_event("config_updated", {"sections": list(request.config.keys())})
+
+    # restart_required 판별
+    changed_sections = set(request.config.keys())
+    restart_required = bool(changed_sections & set(RESTART_REQUIRED_SECTIONS))
+
+    return {
+        "success": True,
+        "message": (
+            "설정이 업데이트되었습니다. 서비스 재시작이 필요합니다."
+            if restart_required
+            else "설정이 업데이트되었습니다. 1분 이내 자동 반영됩니다."
+        ),
+        "sections_updated": list(changed_sections),
+        "restart_required": restart_required,
     }
