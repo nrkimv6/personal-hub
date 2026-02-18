@@ -17,6 +17,22 @@ from app.modules.naver_booking.utils.parsers import parse_time_and_stock, parse_
 from app.utils.parsers import extract_date_from_url
 from app.core.database import SessionLocal, get_db
 
+def _is_session_0() -> bool:
+    """Windows Session 0 (NSSM 서비스) 환경인지 감지합니다.
+    Session 0에서는 네트워크/UI 접근이 제한되어 Telegram/Desktop 알림이 hang합니다."""
+    try:
+        import ctypes
+        session_id = ctypes.c_ulong()
+        ctypes.windll.kernel32.ProcessIdToSessionId(
+            ctypes.windll.kernel32.GetCurrentProcessId(),
+            ctypes.byref(session_id)
+        )
+        return session_id.value == 0
+    except Exception:
+        return False
+
+_IN_SESSION_0 = _is_session_0()
+
 class NotificationService:
     def __init__(self):
         self.db = next(get_db())
@@ -24,6 +40,12 @@ class NotificationService:
         self.telegram_bot_token = settings.TELEGRAM_BOT_TOKEN
         self.telegram_chat_id = settings.TELEGRAM_CHAT_ID
         self.enable_desktop = settings.ENABLE_DESKTOP_NOTIFICATION
+
+        # Session 0에서는 Telegram/Desktop 알림 비활성화 (hang 방지)
+        if _IN_SESSION_0:
+            self.enable_telegram = False
+            self.enable_desktop = False
+            logger.info("Session 0 감지 — Telegram/Desktop 알림 비활성화")
         
         # 중복 메시지 필터링을 위한 변수들
         self.recent_messages = deque(maxlen=settings.RECENT_MESSAGES_MAX)
@@ -266,6 +288,8 @@ class NotificationService:
 
     async def _send_telegram(self, message: str):
         """텔레그램으로 알림을 전송합니다."""
+        if _IN_SESSION_0:
+            return False
         if not self.telegram_bot_token or not self.telegram_chat_id:
             logger.warning("텔레그램 설정이 없어 알림을 전송할 수 없습니다.")
             return
@@ -278,9 +302,13 @@ class NotificationService:
                 "parse_mode": "HTML"
             }
 
-            async with aiohttp.ClientSession() as session:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(url, json=data) as response:
                     return response.status == 200
+        except asyncio.TimeoutError:
+            logger.warning("텔레그램 알림 전송 타임아웃 (10초)")
+            return False
         except Exception as e:
             logger.error(f"텔레그램 알림 전송 실패: {str(e)}")
             return False
@@ -455,6 +483,8 @@ class NotificationService:
 
     async def send_telegram(self, message: str, force_send: bool = False):
         """텔레그램으로 알림을 보냅니다."""
+        if _IN_SESSION_0:
+            return  # Session 0에서는 무조건 스킵 (force_send도 무시)
         if not self.enable_telegram and not force_send:
             return
             
@@ -463,7 +493,8 @@ class NotificationService:
             return
             
         try:
-            async with aiohttp.ClientSession() as session:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
                 data = {
                     "chat_id": self.telegram_chat_id,
@@ -473,5 +504,7 @@ class NotificationService:
                 async with session.post(url, json=data) as response:
                     if response.status != 200:
                         logger.error(f"텔레그램 알림 전송 실패: {await response.text()}")
+        except asyncio.TimeoutError:
+            logger.warning("텔레그램 알림 전송 타임아웃 (10초)")
         except Exception as e:
             logger.error(f"텔레그램 알림 전송 중 오류 발생: {str(e)}") 

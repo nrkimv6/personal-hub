@@ -79,6 +79,64 @@ $env:PYTHONIOENCODING = "utf-8"
 Write-ServiceLog "Redis will be started via startup program (requires user session)"
 
 # ============================================================
+# Helper: netstat 기반 포트 PID 조회 (Session 0에서 Get-NetTCPConnection 행 방지)
+# ============================================================
+function Get-ListeningPids {
+    param([int]$Port)
+    $pids = @()
+    try {
+        $lines = netstat -ano 2>$null | Select-String ":${Port}\s+.*LISTENING"
+        foreach ($line in $lines) {
+            if ($line -match '\s(\d+)\s*$') {
+                $procId = [int]$Matches[1]
+                if ($procId -ne 0 -and $pids -notcontains $procId) {
+                    $pids += $procId
+                }
+            }
+        }
+    } catch {
+        Write-ServiceLog "  WARNING: netstat failed for port ${Port}: $_"
+    }
+    return $pids
+}
+
+# ============================================================
+# STEP 0.5: Stale PID / Orphan Process Cleanup
+# ============================================================
+Write-ServiceLog "Checking for stale PID files and orphan processes..."
+
+# (a) Stale PID 파일 기반 고아 프로세스 정리
+if (Test-Path $PidDir) {
+    $pidFiles = Get-ChildItem -Path $PidDir -Filter "*.pid" -ErrorAction SilentlyContinue
+    foreach ($pidFile in $pidFiles) {
+        $stalePid = (Get-Content $pidFile.FullName -ErrorAction SilentlyContinue).Trim()
+        if ($stalePid -and $stalePid -match '^\d+$') {
+            $proc = Get-Process -Id ([int]$stalePid) -ErrorAction SilentlyContinue
+            if ($proc) {
+                Write-ServiceLog "  Killing orphan process: $($proc.ProcessName) (PID: $stalePid) from $($pidFile.Name)"
+                Stop-Process -Id ([int]$stalePid) -Force -ErrorAction SilentlyContinue
+            } else {
+                Write-ServiceLog "  Cleaned stale PID file: $($pidFile.Name) (PID $stalePid no longer exists)"
+            }
+            Remove-Item $pidFile.FullName -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+# (b) Vite 고아 프로세스 탐지 (잘못된 포트의 Vite 프로세스 제거)
+try {
+    $nodeProcs = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue
+    foreach ($np in $nodeProcs) {
+        if ($np.CommandLine -and $np.CommandLine -match 'vite' -and $np.CommandLine -notmatch "--port\s+$FrontendPort") {
+            Write-ServiceLog "  Killing orphan Vite process (PID: $($np.ProcessId), Cmd: $($np.CommandLine.Substring(0, [Math]::Min(80, $np.CommandLine.Length)))...)"
+            Stop-Process -Id $np.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+    }
+} catch {
+    Write-ServiceLog "  WARNING: Vite orphan check failed: $_"
+}
+
+# ============================================================
 # STEP 1: Port Cleanup (improved with graceful shutdown)
 # ============================================================
 Write-ServiceLog "Cleaning up ports..."
@@ -89,21 +147,12 @@ $gracefulTimeoutMs = 2000
 
 foreach ($port in $portsToClean) {
     for ($retry = 0; $retry -lt $maxRetries; $retry++) {
-        # Listen 상태인 연결만 필터링
-        $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
-
-        if (-not $conn) {
-            Write-ServiceLog "  Port ${port}: available"
-            break
-        }
-
-        # PID 0 제외 (커널/시스템)
-        $pids = $conn | Select-Object -ExpandProperty OwningProcess -Unique | Where-Object { $_ -ne 0 }
+        # netstat 기반으로 Listen 중인 PID 조회 (Session 0 호환)
+        $pids = Get-ListeningPids -Port $port
 
         if ($pids.Count -eq 0) {
-            Write-ServiceLog "  Port ${port}: in use by system (waiting...)"
-            Start-Sleep -Milliseconds $retryDelayMs
-            continue
+            Write-ServiceLog "  Port ${port}: available"
+            break
         }
 
         foreach ($procId in $pids) {
@@ -139,10 +188,10 @@ foreach ($port in $portsToClean) {
         }
     }
 
-    # 최종 확인
-    $stillUsed = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
-    if ($stillUsed) {
-        Write-ServiceLog "  WARNING: Port ${port} still in use after cleanup"
+    # 최종 확인 (netstat 기반)
+    $remainingPids = Get-ListeningPids -Port $port
+    if ($remainingPids.Count -gt 0) {
+        Write-ServiceLog "  WARNING: Port ${port} still in use after cleanup (PIDs: $($remainingPids -join ', '))"
     }
 }
 
@@ -253,6 +302,13 @@ if (-not (Test-Path $nodeModules)) {
 # Start frontend - different modes for dev/production
 if ($Dev) {
     # ---- Development: npm run dev (HMR, hot reload) ----
+    # Stale build 디렉토리 제거 (lstat 에러 방지)
+    $buildDir = Join-Path $FrontendDir "build"
+    if (Test-Path $buildDir) {
+        Remove-Item $buildDir -Recurse -Force -ErrorAction SilentlyContinue
+        Write-ServiceLog "Cleaned up stale build directory"
+    }
+
     # Set environment variable for Vite (non-default API port)
     $env:VITE_API_PORT = $ApiPort
     # Write to .env.development.local (only loaded in Vite dev mode)
@@ -387,9 +443,101 @@ try {
     Write-ServiceLog "API Server started (PID: $($apiProcess.Id))"
     Write-ServiceLog "Waiting for API Server to exit..."
 
-    # Wait for API process to exit
-    $apiProcess.WaitForExit()
-    $exitCode = $apiProcess.ExitCode
+    # 포트 기반 헬스체크 루프 (HasExited 대신 포트 LISTENING 여부로 판단)
+    # 근거: Start-Process -PassThru가 추적하는 부모 PID와 실제 uvicorn PID가
+    #       다를 수 있어, HasExited가 API가 살아있는데도 True를 반환하는 문제 해결
+    $heartbeatInterval = 30  # 초
+    $startTime = Get-Date
+
+    # API가 포트를 열 때까지 최초 대기 (최대 60초)
+    # 포트 감지 + stdout 로그 "Application startup complete" 감지 병행
+    $waitStart = Get-Date
+    $portReady = $false
+    while ((New-TimeSpan -Start $waitStart -End (Get-Date)).TotalSeconds -lt 60) {
+        # NOTE: $apiProcess.HasExited는 사용하지 않음
+        # Start-Process -PassThru는 부모 python.exe PID를 추적하는데,
+        # uvicorn은 자식 프로세스로 실행되어 부모는 즉시 종료됨.
+        # 따라서 HasExited=True여도 실제 uvicorn은 살아있을 수 있음.
+        # 포트 감지
+        $pids = Get-ListeningPids -Port $ApiPort
+        if ($pids.Count -gt 0) {
+            $portReady = $true
+            Write-ServiceLog "API Server listening on port $ApiPort (PIDs: $($pids -join ', '))"
+            break
+        }
+        # Fallback: stdout 로그에서 startup complete 감지
+        if (Test-Path $stdoutLogFile) {
+            $logContent = Get-Content $stdoutLogFile -Raw -ErrorAction SilentlyContinue
+            if ($logContent -and $logContent.Contains("Application startup complete")) {
+                # 로그에는 나왔지만 포트가 아직 안 보이면 잠깐 더 대기
+                Start-Sleep -Seconds 3
+                $pids = Get-ListeningPids -Port $ApiPort
+                if ($pids.Count -gt 0) {
+                    $portReady = $true
+                    Write-ServiceLog "API Server listening on port $ApiPort (detected via log fallback, PIDs: $($pids -join ', '))"
+                    break
+                }
+            }
+        }
+        Start-Sleep -Seconds 2
+    }
+
+    if (-not $portReady) {
+        Write-ServiceLog "ERROR: API Server failed to start listening on port $ApiPort within 60 seconds"
+        Write-ServiceLog "  Checking stdout log for clues..."
+        if (Test-Path $stdoutLogFile) {
+            $lastLines = Get-Content $stdoutLogFile -Tail 5 -ErrorAction SilentlyContinue
+            foreach ($line in $lastLines) {
+                Write-ServiceLog "  stdout: $line"
+            }
+        }
+        $exitCode = 1
+    } else {
+        # TCP 기반 Heartbeat 루프
+        # Session 0에서는 Invoke-WebRequest/netstat 모두 localhost 접근이 불안정하므로
+        # .NET TcpClient로 직접 포트 연결을 시도하여 API 생존 여부를 확인
+        $consecutiveFailures = 0
+        $maxConsecutiveFailures = 3  # 3회 연속 실패 시 종료 판단
+        while ($true) {
+            Start-Sleep -Seconds $heartbeatInterval
+            $alive = $false
+
+            # 1차: TcpClient로 포트 연결 시도
+            try {
+                $tcp = New-Object System.Net.Sockets.TcpClient
+                $connectResult = $tcp.BeginConnect("127.0.0.1", $ApiPort, $null, $null)
+                $waited = $connectResult.AsyncWaitHandle.WaitOne(5000, $false)
+                if ($waited -and $tcp.Connected) {
+                    $alive = $true
+                }
+                $tcp.Close()
+            } catch {
+                # TcpClient 실패 시 무시
+            }
+
+            # 2차: TcpClient 실패 시 netstat fallback
+            if (-not $alive) {
+                $pids = Get-ListeningPids -Port $ApiPort
+                if ($pids.Count -gt 0) {
+                    $alive = $true
+                }
+            }
+
+            if ($alive) {
+                $consecutiveFailures = 0
+                $uptimeMin = [int](New-TimeSpan -Start $startTime -End (Get-Date)).TotalMinutes
+                Write-ServiceLog "Heartbeat: API running on port $ApiPort (Uptime: ${uptimeMin}m)"
+            } else {
+                $consecutiveFailures++
+                Write-ServiceLog "Heartbeat FAIL ($consecutiveFailures/$maxConsecutiveFailures): API not responding on port $ApiPort"
+                if ($consecutiveFailures -ge $maxConsecutiveFailures) {
+                    Write-ServiceLog "API Server not responding after $maxConsecutiveFailures consecutive checks"
+                    break
+                }
+            }
+        }
+        $exitCode = $apiProcess.ExitCode
+    }
 
     Write-ServiceLog "API Server exited with code: $exitCode"
 
