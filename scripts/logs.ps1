@@ -99,12 +99,20 @@ if ($Target -eq "list") {
     Write-Host ""
 
     # Helper to find logs with multiple patterns
+    # Dev 모드일 때 base logs/ 디렉토리도 탐색 (API 앱의 LOG_DIR가 logs/ 고정)
     function Get-LogsMultiPattern {
         param([string[]]$Patterns)
+        $searchDirs = @($LogDir)
+        if ($Dev) {
+            $baseLogDir = Join-Path $ProjectRoot "logs"
+            if ($baseLogDir -ne $LogDir) { $searchDirs += $baseLogDir }
+        }
         $allLogs = @()
-        foreach ($pattern in $Patterns) {
-            $found = Get-ChildItem (Join-Path $LogDir $pattern) -ErrorAction SilentlyContinue
-            if ($found) { $allLogs += $found }
+        foreach ($dir in $searchDirs) {
+            foreach ($pattern in $Patterns) {
+                $found = Get-ChildItem (Join-Path $dir $pattern) -ErrorAction SilentlyContinue
+                if ($found) { $allLogs += $found }
+            }
         }
         return $allLogs | Sort-Object LastWriteTime -Descending
     }
@@ -167,23 +175,27 @@ function Get-LatestLogFileMultiPattern {
     return $null
 }
 
-# API 로그: 타임스탬프 로그 vs NSSM stdout 중 최신 선택
-# Python 마이그레이션 후 API 로그는 NSSM stdout (service_MonitorPage*.log)으로 감
-$apiLogFile = Get-LatestLogFileMultiPattern @("stdout_api_", "api_")
-$nssmLogPattern = if ($Dev) { "service_MonitorPage-Dev.log" } else { "service_MonitorPage.log" }
-$nssmLog = Join-Path $LogDir $nssmLogPattern
-if (Test-Path $nssmLog) {
-    if (-not $apiLogFile) {
-        $apiLogFile = $nssmLog
-    } else {
-        # 둘 다 있으면 LastWriteTime 비교하여 최신 선택
-        $apiTime = (Get-Item $apiLogFile).LastWriteTime
-        $nssmTime = (Get-Item $nssmLog).LastWriteTime
-        if ($nssmTime -gt $apiTime) {
-            $apiLogFile = $nssmLog
-        }
+# API 로그: 모든 후보에서 LastWriteTime이 가장 최신인 파일 선택
+# Python 마이그레이션 후 API 앱은 LOG_DIR="logs" (하드코딩)에 api_*.log를 기록.
+# Dev 모드: $LogDir=logs/dev/ (stdout_api_*, NSSM log) + logs/ (api_*)
+# 운영 모드: $LogDir=logs/ (stdout_api_*, api_*, NSSM log) 모두 동일 디렉토리
+$apiCandidates = @()
+# 1) $LogDir 내 stdout_api_*, api_*
+foreach ($prefix in @("stdout_api_*.log", "api_*.log")) {
+    $found = Get-ChildItem (Join-Path $LogDir $prefix) -ErrorAction SilentlyContinue
+    if ($found) { $apiCandidates += $found }
+}
+# 2) Dev 모드: base logs/ 디렉토리의 api_* (앱의 LOG_DIR가 logs/ 고정)
+if ($Dev) {
+    $baseLogDir = Join-Path $ProjectRoot "logs"
+    if ($baseLogDir -ne $LogDir) {
+        $found = Get-ChildItem (Join-Path $baseLogDir "api_*.log") -ErrorAction SilentlyContinue
+        if ($found) { $apiCandidates += $found }
     }
 }
+# LastWriteTime이 가장 최신인 파일 선택
+$apiLogFile = $apiCandidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if ($apiLogFile) { $apiLogFile = $apiLogFile.FullName }
 $workerLogFile = Get-LatestLogFileMultiPattern @("stdout_worker_", "worker_", "unified_worker_")
 $frontendLogFile = Get-LatestLogFileMultiPattern @("frontend_2")
 $igWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_instagram_", "instagram_")
@@ -198,7 +210,7 @@ $igWatchdogLogFile = Join-Path $LogDir "instagram_watchdog.log"
 $claudeWatchdogLogFile = Join-Path $LogDir "claude_watchdog.log"
 $videoDownloadWatchdogLogFile = Join-Path $LogDir "video_download_watchdog.log"
 $crawlWatchdogLogFile = Join-Path $LogDir "crawl_watchdog.log"
-$cloudflaredLogFile = Join-Path $ProjectRoot "logs" "cloudflared.log"
+$cloudflaredLogFile = Join-Path (Join-Path $ProjectRoot "logs") "cloudflared.log"
 
 # Check if log files are stale (created more than 1 hour before the latest API log)
 function Test-StaleLogFile {
@@ -420,14 +432,22 @@ function Start-CombinedLogTail {
     }
 
     # Helper to find latest log from multiple patterns
+    # Dev 모드일 때 base logs/ 디렉토리도 탐색 (API 앱의 LOG_DIR가 logs/ 고정)
     function Get-LatestLogFromPatterns {
         param([string[]]$Patterns)
+        $searchDirs = @($LogDir)
+        if ($Dev) {
+            $baseLogDir = Join-Path $ProjectRoot "logs"
+            if ($baseLogDir -ne $LogDir) { $searchDirs += $baseLogDir }
+        }
         $latestLog = $null
-        foreach ($pattern in $Patterns) {
-            $found = Get-ChildItem -Path $LogDir -Filter $pattern -ErrorAction SilentlyContinue |
-                Sort-Object Name -Descending | Select-Object -First 1
-            if ($found -and (-not $latestLog -or $found.Name -gt $latestLog.Name)) {
-                $latestLog = $found
+        foreach ($dir in $searchDirs) {
+            foreach ($pattern in $Patterns) {
+                $found = Get-ChildItem -Path $dir -Filter $pattern -ErrorAction SilentlyContinue |
+                    Sort-Object Name -Descending | Select-Object -First 1
+                if ($found -and (-not $latestLog -or $found.Name -gt $latestLog.Name)) {
+                    $latestLog = $found
+                }
             }
         }
         return $latestLog
