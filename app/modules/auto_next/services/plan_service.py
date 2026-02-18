@@ -17,7 +17,9 @@ class PlanService:
 
     def __init__(self):
         self._external_plans: List[str] = []
+        self._ignored_plans: List[str] = []
         self._load_external_plans()
+        self._load_ignored_plans()
 
     def _load_external_plans(self):
         """외부 plan 목록 로드 (JSON 파일)"""
@@ -33,6 +35,39 @@ class PlanService:
         path = config.EXTERNAL_PLANS_FILE
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self._external_plans, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _load_ignored_plans(self):
+        """수동 무시 plan 목록 로드"""
+        path = config.IGNORED_PLANS_FILE
+        if path.exists():
+            try:
+                self._ignored_plans = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                self._ignored_plans = []
+
+    def _save_ignored_plans(self):
+        """수동 무시 plan 목록 저장"""
+        path = config.IGNORED_PLANS_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self._ignored_plans, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def add_to_ignore(self, plan_path: str) -> bool:
+        """plan을 수동 무시 목록에 추가"""
+        resolved = str(Path(plan_path).resolve())
+        if resolved not in self._ignored_plans:
+            self._ignored_plans.append(resolved)
+            self._save_ignored_plans()
+            return True
+        return False
+
+    def remove_from_ignore(self, plan_path: str) -> bool:
+        """plan을 수동 무시 목록에서 제거"""
+        resolved = str(Path(plan_path).resolve())
+        if resolved in self._ignored_plans:
+            self._ignored_plans.remove(resolved)
+            self._save_ignored_plans()
+            return True
+        return False
 
     def add_external_plan(self, plan_path: str) -> bool:
         """외부 plan 경로 추가 (영구 저장)"""
@@ -147,15 +182,15 @@ class PlanService:
 
     def _is_ignored_plan(self, path: Path, status: str, progress: PlanProgressResponse) -> bool:
         """plan이 무시 대상인지 판단"""
+        # 수동 무시 목록
+        if str(path.resolve()) in self._ignored_plans:
+            return True
         # 완료 상태
         if "완료" in status or "구현완료" in status:
             return True
         # 모든 체크박스 완료
         if progress.total > 0 and progress.done == progress.total:
             return True
-        # 체크박스 없음 - README, 참조 문서 등은 표시
-        # if progress.total == 0:
-        #     return True
         return False
 
     def get_plan_progress(self, path: Path) -> PlanProgressResponse:

@@ -16,6 +16,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _decode_path(encoded: str) -> str:
+    """URL-safe base64 디코딩 (패딩 자동 복원)"""
+    padded = encoded + '=' * ((4 - len(encoded) % 4) % 4)
+    return base64.urlsafe_b64decode(padded).decode("utf-8")
+
+
 @router.get("/plans", response_model=List[PlanFileResponse])
 async def get_plans():
     """plan 목록 조회 (프로젝트별 탐색 포함)"""
@@ -32,7 +38,7 @@ async def get_ignored_plans():
 async def get_plan_progress(encoded_path: str):
     """특정 plan 진행률 조회 (base64 인코딩된 경로)"""
     try:
-        decoded_path = base64.urlsafe_b64decode(encoded_path).decode("utf-8")
+        decoded_path = _decode_path(encoded_path)
     except Exception as e:
         logger.error(f"Base64 디코딩 실패: encoded_path={encoded_path}, error={e}")
         raise HTTPException(status_code=400, detail=f"Invalid encoded path: {str(e)}")
@@ -51,7 +57,7 @@ async def get_plan_progress(encoded_path: str):
 async def get_plan_items(encoded_path: str):
     """plan 항목 상세 조회 (Phase별 체크박스 파싱)"""
     try:
-        decoded_path = base64.urlsafe_b64decode(encoded_path).decode("utf-8")
+        decoded_path = _decode_path(encoded_path)
     except Exception as e:
         logger.error(f"Base64 디코딩 실패: encoded_path={encoded_path}, error={e}")
         raise HTTPException(status_code=400, detail=f"Invalid encoded path: {str(e)}")
@@ -91,6 +97,32 @@ async def remove_external_plan(request: AddExternalPlanRequest):
     removed = plan_service.remove_external_plan(request.path)
     if not removed:
         raise HTTPException(status_code=404, detail="External plan not found")
+    return {"success": True}
+
+
+@router.post("/plans/{encoded_path}/ignore")
+async def ignore_plan(encoded_path: str):
+    """plan을 수동 무시 목록에 추가"""
+    try:
+        decoded_path = _decode_path(encoded_path)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid encoded path: {str(e)}")
+
+    added = plan_service.add_to_ignore(decoded_path)
+    return {"success": added, "path": decoded_path}
+
+
+@router.delete("/plans/{encoded_path}/ignore")
+async def unignore_plan(encoded_path: str):
+    """plan을 수동 무시 목록에서 제거"""
+    try:
+        decoded_path = _decode_path(encoded_path)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid encoded path: {str(e)}")
+
+    removed = plan_service.remove_from_ignore(decoded_path)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Plan not in ignore list")
     return {"success": True}
 
 

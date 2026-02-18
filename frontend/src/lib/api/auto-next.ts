@@ -263,7 +263,13 @@ export const autoNextPlanApi = {
 		}),
 
 	items: (encodedPath: string) =>
-		autoNextRequest<PlanDetailResponse>(`/plans/${encodedPath}/items`)
+		autoNextRequest<PlanDetailResponse>(`/plans/${encodedPath}/items`),
+
+	ignore: (encodedPath: string) =>
+		autoNextRequest<{ success: boolean }>(`/plans/${encodedPath}/ignore`, { method: 'POST' }),
+
+	unignore: (encodedPath: string) =>
+		autoNextRequest<{ success: boolean }>(`/plans/${encodedPath}/ignore`, { method: 'DELETE' })
 };
 
 // ============================================================

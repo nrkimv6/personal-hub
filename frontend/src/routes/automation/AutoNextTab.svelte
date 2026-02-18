@@ -75,7 +75,7 @@
 				autoNextTaskApi.list({
 					status: statusFilter,
 					limit: 50,
-					source_path: runStatus?.plan_file ?? undefined  // 현재 plan 기준 필터
+					source_path: runStatus?.plan_file ?? selectedPlan?.path ?? undefined
 				}),
 				autoNextRunnerApi.status(),
 				autoNextPlanApi.list()
@@ -290,16 +290,22 @@
 		</div>
 
 		<!-- Task List -->
-		{#if showTaskHistory && taskList}
-			<TaskList
-				tasks={taskList.tasks}
-				total={taskList.total}
-				currentFilter={statusFilter}
-				onFilterChange={handleFilterChange}
-				onDelete={handleDeleteTask}
-				onDeleteCompleted={handleDeleteCompleted}
-				onDeleteOld={handleDeleteOld}
-			/>
+		{#if showTaskHistory}
+			{#if !runStatus?.plan_file && !selectedPlan}
+				<div class="bg-gray-50 border border-gray-200 rounded-lg p-6 text-center text-sm text-gray-500">
+					Plan을 선택하면 관련 작업 이력이 표시됩니다.
+				</div>
+			{:else if taskList}
+				<TaskList
+					tasks={taskList.tasks}
+					total={taskList.total}
+					currentFilter={statusFilter}
+					onFilterChange={handleFilterChange}
+					onDelete={handleDeleteTask}
+					onDeleteCompleted={handleDeleteCompleted}
+					onDeleteOld={handleDeleteOld}
+				/>
+			{/if}
 		{/if}
 
 		<!-- Log Viewer -->

@@ -32,6 +32,9 @@ class AutoNextConfig(BaseSettings):
     # 외부 plan 저장 파일
     EXTERNAL_PLANS_FILE: Path = Path(r"D:\work\project\tools\monitor-page\data\external_plans.json")
 
+    # 수동 무시 plan 저장 파일
+    IGNORED_PLANS_FILE: Path = Path(r"D:\work\project\tools\monitor-page\data\ignored_plans.json")
+
     # 외부 경로 화이트리스트
     ALLOWED_EXTERNAL_PATHS: List[str] = [r"D:\work\project"]
 

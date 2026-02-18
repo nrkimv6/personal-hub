@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { autoNextPlanApi } from '$lib/api';
 	import type { AutoNextPlanFileResponse } from '$lib/api';
+	import { encodePathToBase64 } from '$lib/utils/encoding';
 
 	interface Props {
 		plans: AutoNextPlanFileResponse[];
@@ -53,10 +54,32 @@
 		}
 	}
 
-	async function handleRemoveExternal(path: string) {
+	async function handleRemoveExternal(e: Event, path: string) {
+		e.stopPropagation();
 		try {
 			await autoNextPlanApi.removeExternal(path);
 			onPlansChange?.();
+		} catch {
+			// ignore
+		}
+	}
+
+	async function handleIgnore(e: Event, path: string) {
+		e.stopPropagation();
+		try {
+			await autoNextPlanApi.ignore(encodePathToBase64(path));
+			onPlansChange?.();
+		} catch {
+			// ignore
+		}
+	}
+
+	async function handleUnignore(e: Event, path: string) {
+		e.stopPropagation();
+		try {
+			await autoNextPlanApi.unignore(encodePathToBase64(path));
+			onPlansChange?.();
+			await loadIgnored();
 		} catch {
 			// ignore
 		}
@@ -152,10 +175,23 @@
 							<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium {statusBadge(plan.status)}">
 								{plan.status}
 							</span>
+							{#if showIgnored}
+								<button
+									class="text-[10px] text-blue-400 hover:text-blue-600 ml-1"
+									onclick={(e) => handleUnignore(e, plan.path)}
+									title="무시 해제"
+								>복원</button>
+							{:else}
+								<button
+									class="text-[10px] text-gray-400 hover:text-red-500 ml-1"
+									onclick={(e) => handleIgnore(e, plan.path)}
+									title="무시 목록에 추가"
+								>무시</button>
+							{/if}
 							{#if plan.source === 'external'}
 								<button
 									class="text-[10px] text-red-400 hover:text-red-600 ml-1"
-									onclick={() => handleRemoveExternal(plan.path)}
+									onclick={(e) => handleRemoveExternal(e, plan.path)}
 									title="외부 plan 제거"
 								>x</button>
 							{/if}
