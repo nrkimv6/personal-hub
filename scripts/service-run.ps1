@@ -79,6 +79,64 @@ $env:PYTHONIOENCODING = "utf-8"
 Write-ServiceLog "Redis will be started via startup program (requires user session)"
 
 # ============================================================
+# Helper: netstat 기반 포트 PID 조회 (Session 0에서 Get-NetTCPConnection 행 방지)
+# ============================================================
+function Get-ListeningPids {
+    param([int]$Port)
+    $pids = @()
+    try {
+        $lines = netstat -ano 2>$null | Select-String ":${Port}\s+.*LISTENING"
+        foreach ($line in $lines) {
+            if ($line -match '\s(\d+)\s*$') {
+                $pid = [int]$Matches[1]
+                if ($pid -ne 0 -and $pids -notcontains $pid) {
+                    $pids += $pid
+                }
+            }
+        }
+    } catch {
+        Write-ServiceLog "  WARNING: netstat failed for port ${Port}: $_"
+    }
+    return $pids
+}
+
+# ============================================================
+# STEP 0.5: Stale PID / Orphan Process Cleanup
+# ============================================================
+Write-ServiceLog "Checking for stale PID files and orphan processes..."
+
+# (a) Stale PID 파일 기반 고아 프로세스 정리
+if (Test-Path $PidDir) {
+    $pidFiles = Get-ChildItem -Path $PidDir -Filter "*.pid" -ErrorAction SilentlyContinue
+    foreach ($pidFile in $pidFiles) {
+        $stalePid = (Get-Content $pidFile.FullName -ErrorAction SilentlyContinue).Trim()
+        if ($stalePid -and $stalePid -match '^\d+$') {
+            $proc = Get-Process -Id ([int]$stalePid) -ErrorAction SilentlyContinue
+            if ($proc) {
+                Write-ServiceLog "  Killing orphan process: $($proc.ProcessName) (PID: $stalePid) from $($pidFile.Name)"
+                Stop-Process -Id ([int]$stalePid) -Force -ErrorAction SilentlyContinue
+            } else {
+                Write-ServiceLog "  Cleaned stale PID file: $($pidFile.Name) (PID $stalePid no longer exists)"
+            }
+            Remove-Item $pidFile.FullName -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+# (b) Vite 고아 프로세스 탐지 (잘못된 포트의 Vite 프로세스 제거)
+try {
+    $nodeProcs = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue
+    foreach ($np in $nodeProcs) {
+        if ($np.CommandLine -and $np.CommandLine -match 'vite' -and $np.CommandLine -notmatch "--port\s+$FrontendPort") {
+            Write-ServiceLog "  Killing orphan Vite process (PID: $($np.ProcessId), Cmd: $($np.CommandLine.Substring(0, [Math]::Min(80, $np.CommandLine.Length)))...)"
+            Stop-Process -Id $np.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+    }
+} catch {
+    Write-ServiceLog "  WARNING: Vite orphan check failed: $_"
+}
+
+# ============================================================
 # STEP 1: Port Cleanup (improved with graceful shutdown)
 # ============================================================
 Write-ServiceLog "Cleaning up ports..."
@@ -89,21 +147,12 @@ $gracefulTimeoutMs = 2000
 
 foreach ($port in $portsToClean) {
     for ($retry = 0; $retry -lt $maxRetries; $retry++) {
-        # Listen 상태인 연결만 필터링
-        $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
-
-        if (-not $conn) {
-            Write-ServiceLog "  Port ${port}: available"
-            break
-        }
-
-        # PID 0 제외 (커널/시스템)
-        $pids = $conn | Select-Object -ExpandProperty OwningProcess -Unique | Where-Object { $_ -ne 0 }
+        # netstat 기반으로 Listen 중인 PID 조회 (Session 0 호환)
+        $pids = Get-ListeningPids -Port $port
 
         if ($pids.Count -eq 0) {
-            Write-ServiceLog "  Port ${port}: in use by system (waiting...)"
-            Start-Sleep -Milliseconds $retryDelayMs
-            continue
+            Write-ServiceLog "  Port ${port}: available"
+            break
         }
 
         foreach ($procId in $pids) {
@@ -139,10 +188,10 @@ foreach ($port in $portsToClean) {
         }
     }
 
-    # 최종 확인
-    $stillUsed = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
-    if ($stillUsed) {
-        Write-ServiceLog "  WARNING: Port ${port} still in use after cleanup"
+    # 최종 확인 (netstat 기반)
+    $remainingPids = Get-ListeningPids -Port $port
+    if ($remainingPids.Count -gt 0) {
+        Write-ServiceLog "  WARNING: Port ${port} still in use after cleanup (PIDs: $($remainingPids -join ', '))"
     }
 }
 
@@ -253,6 +302,13 @@ if (-not (Test-Path $nodeModules)) {
 # Start frontend - different modes for dev/production
 if ($Dev) {
     # ---- Development: npm run dev (HMR, hot reload) ----
+    # Stale build 디렉토리 제거 (lstat 에러 방지)
+    $buildDir = Join-Path $FrontendDir "build"
+    if (Test-Path $buildDir) {
+        Remove-Item $buildDir -Recurse -Force -ErrorAction SilentlyContinue
+        Write-ServiceLog "Cleaned up stale build directory"
+    }
+
     # Set environment variable for Vite (non-default API port)
     $env:VITE_API_PORT = $ApiPort
     # Write to .env.development.local (only loaded in Vite dev mode)
@@ -387,8 +443,14 @@ try {
     Write-ServiceLog "API Server started (PID: $($apiProcess.Id))"
     Write-ServiceLog "Waiting for API Server to exit..."
 
-    # Wait for API process to exit
-    $apiProcess.WaitForExit()
+    # Heartbeat 루프로 API 프로세스 대기 (행 감지 용이화)
+    $heartbeatInterval = 30  # 초
+    while (-not $apiProcess.HasExited) {
+        Start-Sleep -Seconds $heartbeatInterval
+        if (-not $apiProcess.HasExited) {
+            Write-ServiceLog "Heartbeat: API running (PID: $($apiProcess.Id), Uptime: $([int](New-TimeSpan -Start $apiProcess.StartTime -End (Get-Date)).TotalMinutes)m)"
+        }
+    }
     $exitCode = $apiProcess.ExitCode
 
     Write-ServiceLog "API Server exited with code: $exitCode"

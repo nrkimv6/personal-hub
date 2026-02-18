@@ -33,15 +33,21 @@ function Test-ZombiePort {
         [int]$Port
     )
 
-    # Use Get-NetTCPConnection for more reliable detection (PowerShell native)
-    $connection = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
-                  Select-Object -First 1
+    # netstat 기반으로 조회 (Session 0에서 Get-NetTCPConnection 행 방지)
+    $owningPid = $null
+    try {
+        $lines = netstat -ano 2>$null | Select-String ":${Port}\s+.*LISTENING"
+        if ($lines) {
+            $firstLine = $lines | Select-Object -First 1
+            if ($firstLine -match '\s(\d+)\s*$') {
+                $owningPid = [int]$Matches[1]
+            }
+        }
+    } catch { }
 
-    if (-not $connection) {
+    if (-not $owningPid -or $owningPid -eq 0) {
         return $null
     }
-
-    $owningPid = $connection.OwningProcess
     $process = Get-Process -Id $owningPid -ErrorAction SilentlyContinue
 
     if (-not $process) {
