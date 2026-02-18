@@ -41,12 +41,6 @@ class NotificationService:
         self.telegram_chat_id = settings.TELEGRAM_CHAT_ID
         self.enable_desktop = settings.ENABLE_DESKTOP_NOTIFICATION
 
-        # Session 0에서는 Telegram/Desktop 알림 비활성화 (hang 방지)
-        if _IN_SESSION_0:
-            self.enable_telegram = False
-            self.enable_desktop = False
-            logger.info("Session 0 감지 — Telegram/Desktop 알림 비활성화")
-        
         # 중복 메시지 필터링을 위한 변수들
         self.recent_messages = deque(maxlen=settings.RECENT_MESSAGES_MAX)
         self.message_timestamps = {}  # 메시지 해시: 타임스탬프
@@ -288,8 +282,6 @@ class NotificationService:
 
     async def _send_telegram(self, message: str):
         """텔레그램으로 알림을 전송합니다."""
-        if _IN_SESSION_0:
-            return False
         if not self.telegram_bot_token or not self.telegram_chat_id:
             logger.warning("텔레그램 설정이 없어 알림을 전송할 수 없습니다.")
             return
@@ -483,8 +475,6 @@ class NotificationService:
 
     async def send_telegram(self, message: str, force_send: bool = False):
         """텔레그램으로 알림을 보냅니다."""
-        if _IN_SESSION_0:
-            return  # Session 0에서는 무조건 스킵 (force_send도 무시)
         if not self.enable_telegram and not force_send:
             return
             
