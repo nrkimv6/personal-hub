@@ -443,12 +443,6 @@ try {
     Write-ServiceLog "API Server started (PID: $($apiProcess.Id))"
     Write-ServiceLog "Waiting for API Server to exit..."
 
-    # 포트 기반 헬스체크 루프 (HasExited 대신 포트 LISTENING 여부로 판단)
-    # 근거: Start-Process -PassThru가 추적하는 부모 PID와 실제 uvicorn PID가
-    #       다를 수 있어, HasExited가 API가 살아있는데도 True를 반환하는 문제 해결
-    $heartbeatInterval = 30  # 초
-    $startTime = Get-Date
-
     # API가 포트를 열 때까지 최초 대기 (최대 60초)
     # 포트 감지 + stdout 로그 "Application startup complete" 감지 병행
     $waitStart = Get-Date
@@ -493,50 +487,31 @@ try {
         }
         $exitCode = 1
     } else {
-        # TCP 기반 Heartbeat 루프
-        # Session 0에서는 Invoke-WebRequest/netstat 모두 localhost 접근이 불안정하므로
-        # .NET TcpClient로 직접 포트 연결을 시도하여 API 생존 여부를 확인
-        $consecutiveFailures = 0
-        $maxConsecutiveFailures = 3  # 3회 연속 실패 시 종료 판단
-        while ($true) {
-            Start-Sleep -Seconds $heartbeatInterval
-            $alive = $false
-
-            # 1차: TcpClient로 포트 연결 시도
-            try {
-                $tcp = New-Object System.Net.Sockets.TcpClient
-                $connectResult = $tcp.BeginConnect("127.0.0.1", $ApiPort, $null, $null)
-                $waited = $connectResult.AsyncWaitHandle.WaitOne(5000, $false)
-                if ($waited -and $tcp.Connected) {
-                    $alive = $true
-                }
-                $tcp.Close()
-            } catch {
-                # TcpClient 실패 시 무시
-            }
-
-            # 2차: TcpClient 실패 시 netstat fallback
-            if (-not $alive) {
-                $pids = Get-ListeningPids -Port $ApiPort
-                if ($pids.Count -gt 0) {
-                    $alive = $true
-                }
-            }
-
-            if ($alive) {
-                $consecutiveFailures = 0
-                $uptimeMin = [int](New-TimeSpan -Start $startTime -End (Get-Date)).TotalMinutes
-                Write-ServiceLog "Heartbeat: API running on port $ApiPort (Uptime: ${uptimeMin}m)"
+        # 실제 uvicorn PID에 대해 WaitForExit 호출
+        # Start-Process -PassThru의 부모 PID와 실제 uvicorn PID가 다를 수 있음.
+        # 포트 감지에서 확인된 실제 PID를 사용하여 프로세스 종료를 대기.
+        # 하트비트 루프는 Session 0에서 TcpClient/netstat가 간헐적으로 실패하여
+        # 건강한 API를 오살(false-kill)하는 문제가 있어 제거됨.
+        # See: docs/plan/2026-02-18_api-crash-loop-investigation.md
+        $uvicornPids = Get-ListeningPids -Port $ApiPort
+        if ($uvicornPids.Count -gt 0) {
+            $uvicornPid = $uvicornPids[0]
+            $uvicornProc = Get-Process -Id $uvicornPid -ErrorAction SilentlyContinue
+            if ($uvicornProc) {
+                Write-ServiceLog "Waiting on uvicorn process (PID: $uvicornPid) to exit..."
+                $uvicornProc.WaitForExit()
+                $exitCode = $uvicornProc.ExitCode
+                Write-ServiceLog "Uvicorn process exited (code: $exitCode)"
             } else {
-                $consecutiveFailures++
-                Write-ServiceLog "Heartbeat FAIL ($consecutiveFailures/$maxConsecutiveFailures): API not responding on port $ApiPort"
-                if ($consecutiveFailures -ge $maxConsecutiveFailures) {
-                    Write-ServiceLog "API Server not responding after $maxConsecutiveFailures consecutive checks"
-                    break
-                }
+                Write-ServiceLog "WARNING: Could not find uvicorn process (PID: $uvicornPid), falling back to parent"
+                $apiProcess.WaitForExit()
+                $exitCode = $apiProcess.ExitCode
             }
+        } else {
+            Write-ServiceLog "WARNING: No process listening on port $ApiPort, falling back to parent"
+            $apiProcess.WaitForExit()
+            $exitCode = $apiProcess.ExitCode
         }
-        $exitCode = $apiProcess.ExitCode
     }
 
     Write-ServiceLog "API Server exited with code: $exitCode"
