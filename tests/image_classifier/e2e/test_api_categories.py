@@ -313,3 +313,25 @@ def test_category_lifecycle_crud(client, test_db):
         {"cat_id": cat_id}
     ).fetchone()[0]
     assert count == 0
+
+
+# ================================================
+# Boundary: 깊은 계층 추가 테스트
+# ================================================
+
+def test_deep_hierarchy(client, test_db):
+    """5.16 Boundary: 5단계 깊은 계층 구조"""
+    # 여행 → 해외 → 아시아 → 일본 → 도쿄
+    level1 = client.post("/api/ic/categories/", json={"name": "여행"}).json()["id"]
+    level2 = client.post("/api/ic/categories/", json={"name": "해외", "parent_id": level1}).json()["id"]
+    level3 = client.post("/api/ic/categories/", json={"name": "아시아", "parent_id": level2}).json()["id"]
+    level4 = client.post("/api/ic/categories/", json={"name": "일본", "parent_id": level3}).json()["id"]
+    level5 = client.post("/api/ic/categories/", json={"name": "도쿄", "parent_id": level4}).json()["id"]
+
+    # 최하위 카테고리 full_path 확인
+    result = test_db.execute(
+        text("SELECT full_path FROM categories WHERE id = :cat_id"),
+        {"cat_id": level5}
+    ).fetchone()
+
+    assert result.full_path == "여행/해외/아시아/일본/도쿄"

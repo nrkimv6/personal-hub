@@ -146,3 +146,49 @@ def test_delete_nonexistent_tag(client, test_db):
 
     assert response.status_code == 404
     assert "찾을 수 없습니다" in response.json()["detail"]
+
+
+# ================================================
+# Boundary: 경계값 추가 테스트
+# ================================================
+
+def test_create_tag_empty_name(client):
+    """15.9 Boundary: POST /tags {name: ""} → 400 or 422"""
+    response = client.post("/api/ic/tags/", json={"name": ""})
+
+    # 빈 이름은 거부되어야 함
+    assert response.status_code in [400, 422]
+
+
+def test_create_tag_long_name(client):
+    """15.10 Boundary: POST /tags {name: 초장문} → 생성 or 자름"""
+    long_name = "a" * 500
+    response = client.post("/api/ic/tags/", json={"name": long_name})
+
+    # 현재는 검증 없이 저장 (향후 제한 추가 가능)
+    assert response.status_code == 200
+
+
+def test_bulk_tag_empty_file_ids(client, seeded_tags):
+    """15.11 Boundary: POST /bulk-tag {file_ids: []} → 빈 목록"""
+    response = client.post("/api/ic/tags/bulk-tag", json={
+        "file_ids": [],
+        "tag_names": ["test"]
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["files_tagged"] == 0
+
+
+def test_bulk_tag_empty_tag_names(client, seeded_tags):
+    """15.12 Boundary: POST /bulk-tag {tag_names: []} → 빈 태그 목록"""
+    response = client.post("/api/ic/tags/bulk-tag", json={
+        "file_ids": [1],
+        "tag_names": []
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    # 태그가 없으므로 태깅 안 됨
+    assert data["files_tagged"] in [0, 1]  # 구현에 따라 다를 수 있음

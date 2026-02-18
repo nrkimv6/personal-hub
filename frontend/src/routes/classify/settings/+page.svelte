@@ -3,25 +3,49 @@
   import { fetchWithTimeout } from '$lib/api/client';
 
 	interface Settings {
-		model: string;
-		api_key_anthropic: string;
-		api_key_google: string;
-		daily_limit: number;
-		monthly_limit: number;
-		scan_folders: string[];
-		filename_patterns: any[];
-		year_annotations: Record<number, string>;
+		scan_root_folders: string[];
+		image_extensions: string[];
+		max_files_per_scan: number;
+		phash_hash_size: number;
+		phash_duplicate_threshold: number;
+		clip_model_name: string;
+		clip_batch_size: number;
+		clip_use_gpu: boolean;
+		faiss_similarity_threshold: number;
+		thumbnail_size: [number, number];
+		thumbnail_quality: number;
+		ai_mode: string;
+		claude_cli_path: string;
+		gemini_cli_path: string;
+		cli_max_workers: number;
+		cli_timeout_seconds: number;
+		cluster_gap_minutes: number;
+		target_root_folder: string | null;
+		use_trash: boolean;
+		max_workers_per_task: number;
 	}
 
 	let settings: Settings = {
-		model: 'claude_cli',
-		api_key_anthropic: '',
-		api_key_google: '',
-		daily_limit: 10,
-		monthly_limit: 100,
-		scan_folders: [],
-		filename_patterns: [],
-		year_annotations: {}
+		scan_root_folders: [],
+		image_extensions: [],
+		max_files_per_scan: 300000,
+		phash_hash_size: 16,
+		phash_duplicate_threshold: 10,
+		clip_model_name: 'clip-ViT-B-32',
+		clip_batch_size: 64,
+		clip_use_gpu: true,
+		faiss_similarity_threshold: 0.85,
+		thumbnail_size: [300, 300],
+		thumbnail_quality: 85,
+		ai_mode: 'cli',
+		claude_cli_path: 'claude',
+		gemini_cli_path: 'gemini',
+		cli_max_workers: 2,
+		cli_timeout_seconds: 30,
+		cluster_gap_minutes: 60,
+		target_root_folder: null,
+		use_trash: true,
+		max_workers_per_task: 4
 	};
 
 	let loading = false;
@@ -36,7 +60,8 @@
 		try {
 			const response = await fetchWithTimeout('/api/ic/settings');
 			if (response.ok) {
-				settings = await response.json();
+				const data = await response.json();
+				settings = { ...settings, ...data };
 			}
 		} catch (err) {
 			console.error('Failed to load settings:', err);
@@ -48,12 +73,29 @@
 	async function saveSettings() {
 		saving = true;
 		try {
-			await fetchWithTimeout('/api/ic/settings', {
+			const response = await fetchWithTimeout('/api/ic/settings', {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(settings)
+				body: JSON.stringify({
+					scan_root_folders: settings.scan_root_folders,
+					max_files_per_scan: settings.max_files_per_scan,
+					phash_duplicate_threshold: settings.phash_duplicate_threshold,
+					clip_batch_size: settings.clip_batch_size,
+					clip_use_gpu: settings.clip_use_gpu,
+					faiss_similarity_threshold: settings.faiss_similarity_threshold,
+					ai_mode: settings.ai_mode,
+					cli_max_workers: settings.cli_max_workers,
+					cli_timeout_seconds: settings.cli_timeout_seconds,
+					cluster_gap_minutes: settings.cluster_gap_minutes,
+					target_root_folder: settings.target_root_folder,
+					use_trash: settings.use_trash
+				})
 			});
-			alert('설정이 저장되었습니다.');
+			if (response.ok) {
+				alert('설정이 저장되었습니다.');
+			} else {
+				alert('설정 저장 실패');
+			}
 		} catch (err) {
 			alert('설정 저장 실패');
 		} finally {
@@ -70,63 +112,83 @@
 	{:else}
 		<div class="settings-form">
 			<section>
-				<h2>AI 분류 모델</h2>
+				<h2>AI 분류 모드</h2>
 				<label>
-					<input type="radio" bind:group={settings.model} value="claude_cli" />
-					Claude CLI (기본, 무료)
+					<input type="radio" bind:group={settings.ai_mode} value="cli" />
+					CLI 모드 (기본, 무료)
 				</label>
 				<label>
-					<input type="radio" bind:group={settings.model} value="gemini_cli" />
-					Gemini CLI
-				</label>
-				<label>
-					<input type="radio" bind:group={settings.model} value="api" />
+					<input type="radio" bind:group={settings.ai_mode} value="api" />
 					API 모드 (고속, 유료)
 				</label>
-
-				{#if settings.model === 'api'}
-					<div class="api-keys">
-						<label>
-							Anthropic API Key:
-							<input type="password" bind:value={settings.api_key_anthropic} placeholder="sk-ant-..." />
-						</label>
-						<label>
-							Google API Key:
-							<input type="password" bind:value={settings.api_key_google} placeholder="..." />
-						</label>
-					</div>
-				{/if}
 			</section>
 
 			<section>
-				<h2>API 리밋</h2>
+				<h2>스캔 설정</h2>
 				<label>
-					일일 리밋 (USD):
-					<input type="number" bind:value={settings.daily_limit} min="0" step="1" />
+					스캔 대상 폴더 (한 줄에 하나씩):
+					<textarea bind:value={settings.scan_root_folders} rows="3" placeholder="D:\Photos&#10;D:\Downloads"></textarea>
 				</label>
 				<label>
-					월간 리밋 (USD):
-					<input type="number" bind:value={settings.monthly_limit} min="0" step="10" />
+					최대 스캔 파일 수:
+					<input type="number" bind:value={settings.max_files_per_scan} min="1000" step="1000" />
 				</label>
 			</section>
 
 			<section>
-				<h2>스캔 대상 폴더</h2>
-				<p>이미지를 스캔할 폴더들을 지정합니다.</p>
-				<textarea bind:value={settings.scan_folders} rows="5" placeholder="D:\Photos&#10;D:\Downloads"></textarea>
+				<h2>중복 탐지 설정</h2>
+				<label>
+					pHash 중복 임계값 (0-64, 낮을수록 엄격):
+					<input type="number" bind:value={settings.phash_duplicate_threshold} min="0" max="64" step="1" />
+				</label>
 			</section>
 
 			<section>
-				<h2>연도별 메모</h2>
-				<p>각 연도의 주요 이벤트를 입력하면 AI 분류 정확도가 향상됩니다.</p>
-				<div class="year-annotations">
-					{#each Object.entries(settings.year_annotations) as [year, memo]}
-						<label>
-							{year}:
-							<input type="text" bind:value={settings.year_annotations[Number(year)]} placeholder="예: 제주 여행, 이사" />
-						</label>
-					{/each}
-				</div>
+				<h2>유사도 검색 설정</h2>
+				<label>
+					CLIP 배치 크기 (GPU 메모리에 따라 조정):
+					<input type="number" bind:value={settings.clip_batch_size} min="1" max="256" step="1" />
+				</label>
+				<label>
+					<input type="checkbox" bind:checked={settings.clip_use_gpu} />
+					GPU 사용
+				</label>
+				<label>
+					FAISS 유사도 임계값 (0.0-1.0):
+					<input type="number" bind:value={settings.faiss_similarity_threshold} min="0" max="1" step="0.01" />
+				</label>
+			</section>
+
+			<section>
+				<h2>클러스터링 설정</h2>
+				<label>
+					클러스터 시간 간격 (분):
+					<input type="number" bind:value={settings.cluster_gap_minutes} min="1" max="1440" step="1" />
+				</label>
+			</section>
+
+			<section>
+				<h2>파일 정리 설정</h2>
+				<label>
+					목표 폴더 루트:
+					<input type="text" bind:value={settings.target_root_folder} placeholder="D:\정리" />
+				</label>
+				<label>
+					<input type="checkbox" bind:checked={settings.use_trash} />
+					삭제 시 휴지통 사용
+				</label>
+			</section>
+
+			<section>
+				<h2>워커 설정</h2>
+				<label>
+					CLI 최대 워커 수:
+					<input type="number" bind:value={settings.cli_max_workers} min="1" max="8" step="1" />
+				</label>
+				<label>
+					CLI 타임아웃 (초):
+					<input type="number" bind:value={settings.cli_timeout_seconds} min="10" max="300" step="5" />
+				</label>
 			</section>
 
 			<div class="actions">
@@ -155,7 +217,7 @@
 		margin-top: 0.25rem;
 	}
 	.api-keys { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #eee; }
-	.year-annotations { display: flex; flex-direction: column; gap: 0.5rem; }
+	textarea { font-family: inherit; }
 	.actions { text-align: center; }
 	button { padding: 0.75rem 2rem; background: #007bff; color: white; border: none; border-radius: 4px; font-size: 1rem; cursor: pointer; }
 	button:disabled { background: #ccc; }
