@@ -493,20 +493,30 @@ try {
         }
         $exitCode = 1
     } else {
-        # HTTP 기반 Heartbeat 루프
-        # netstat는 Session 0에서 간헐적으로 포트를 감지 못하므로 HTTP로 교체
+        # TCP 기반 Heartbeat 루프
+        # Session 0에서는 Invoke-WebRequest/netstat 모두 localhost 접근이 불안정하므로
+        # .NET TcpClient로 직접 포트 연결을 시도하여 API 생존 여부를 확인
         $consecutiveFailures = 0
         $maxConsecutiveFailures = 3  # 3회 연속 실패 시 종료 판단
         while ($true) {
             Start-Sleep -Seconds $heartbeatInterval
             $alive = $false
+
+            # 1차: TcpClient로 포트 연결 시도
             try {
-                $response = Invoke-WebRequest -Uri "http://localhost:${ApiPort}/api/v1/system/status" -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop
-                if ($response.StatusCode -eq 200) {
+                $tcp = New-Object System.Net.Sockets.TcpClient
+                $connectResult = $tcp.BeginConnect("127.0.0.1", $ApiPort, $null, $null)
+                $waited = $connectResult.AsyncWaitHandle.WaitOne(5000, $false)
+                if ($waited -and $tcp.Connected) {
                     $alive = $true
                 }
+                $tcp.Close()
             } catch {
-                # HTTP 실패 시 포트 체크로 fallback
+                # TcpClient 실패 시 무시
+            }
+
+            # 2차: TcpClient 실패 시 netstat fallback
+            if (-not $alive) {
                 $pids = Get-ListeningPids -Port $ApiPort
                 if ($pids.Count -gt 0) {
                     $alive = $true
