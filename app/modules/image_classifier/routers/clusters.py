@@ -31,7 +31,7 @@ class ClusterFileResponse(BaseModel):
     """클러스터 내 파일"""
     file_id: int
     file_path: str
-    capture_time: datetime
+    capture_time: Optional[datetime]
     thumbnail_url: Optional[str]
 
 
@@ -59,7 +59,7 @@ async def get_clusters(
             tc.start_time,
             tc.end_time,
             tc.file_count,
-            tc.duration_minutes,
+            CAST((julianday(tc.end_time) - julianday(tc.start_time)) * 1440 AS INTEGER) as duration_minutes,
             c.full_path
         FROM time_clusters tc
         LEFT JOIN categories c ON tc.category_id = c.id
@@ -73,7 +73,7 @@ async def get_clusters(
             start_time=row[1],
             end_time=row[2],
             file_count=row[3],
-            duration_minutes=row[4],
+            duration_minutes=row[4] or 0,
             category_path=row[5]
         )
         for row in result
@@ -94,7 +94,7 @@ async def get_cluster_detail(
             tc.start_time,
             tc.end_time,
             tc.file_count,
-            tc.duration_minutes,
+            CAST((julianday(tc.end_time) - julianday(tc.start_time)) * 1440 AS INTEGER) as duration_minutes,
             c.full_path
         FROM time_clusters tc
         LEFT JOIN categories c ON tc.category_id = c.id
@@ -109,10 +109,10 @@ async def get_cluster_detail(
         SELECT
             f.id,
             f.file_path,
-            f.capture_time
-        FROM files f
-        WHERE f.time_cluster_id = :cluster_id
-        ORDER BY f.capture_time ASC
+            COALESCE(f.user_date, f.extracted_date) as capture_time
+        FROM file_classifications f
+        WHERE f.cluster_id = :cluster_id
+        ORDER BY COALESCE(f.user_date, f.extracted_date) ASC
     """), {"cluster_id": cluster_id}).fetchall()
 
     files = [
@@ -130,7 +130,7 @@ async def get_cluster_detail(
         start_time=cluster_row[1],
         end_time=cluster_row[2],
         file_count=cluster_row[3],
-        duration_minutes=cluster_row[4],
+        duration_minutes=cluster_row[4] or 0,
         category_path=cluster_row[5],
         files=files
     )
