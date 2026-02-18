@@ -11,13 +11,13 @@ router = APIRouter()
 @router.post("/run", response_model=RunStatusResponse)
 async def start_run(request: RunRequest):
     """auto-next 실행 시작"""
-    return executor_service.start_auto_next(request)
+    return await executor_service.start_auto_next(request)
 
 
 @router.post("/stop")
 async def stop_run():
     """auto-next 실행 중지"""
-    return executor_service.stop_auto_next()
+    return await executor_service.stop_auto_next()
 
 
 @router.get("/status", response_model=RunStatusResponse)

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict
 
 import redis
+import redis.asyncio as aioredis
 from fastapi import HTTPException
 
 from app.config import logger
@@ -36,14 +37,21 @@ class ExecutorService:
             decode_responses=True,
             socket_connect_timeout=5,
         )
+        # 비동기 클라이언트 (brpop 등 블로킹 호출용)
+        self.async_redis = aioredis.Redis(
+            host=REDIS_HOST,
+            port=REDIS_PORT,
+            decode_responses=True,
+            socket_connect_timeout=5,
+        )
 
-    def start_auto_next(self, request: RunRequest) -> RunStatusResponse:
-        """auto-next 실행 시작 - Redis 명령 전송"""
+    async def start_auto_next(self, request: RunRequest) -> RunStatusResponse:
+        """auto-next 실행 시작 - Redis 명령 전송 (비동기)"""
         # Redis를 통해 상태 확인
         try:
-            status = self.redis_client.get(STATE_KEY + ":status")
+            status = await self.async_redis.get(STATE_KEY + ":status")
             if status == "running":
-                pid = self.redis_client.get(STATE_KEY + ":pid")
+                pid = await self.async_redis.get(STATE_KEY + ":pid")
                 raise HTTPException(
                     status_code=409,
                     detail=f"Already running (PID: {pid})"
@@ -88,10 +96,10 @@ class ExecutorService:
 
         try:
             # Redis LPUSH - 명령 전송
-            self.redis_client.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
+            await self.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
 
-            # BRPOP으로 결과 대기 (블로킹, 타임아웃 설정)
-            result = self.redis_client.brpop(RESULTS_KEY, timeout=COMMAND_TIMEOUT)
+            # BRPOP으로 결과 대기 (비동기, 이벤트 루프 블로킹 없음)
+            result = await self.async_redis.brpop(RESULTS_KEY, timeout=COMMAND_TIMEOUT)
 
             if result is None:
                 raise HTTPException(
@@ -109,9 +117,9 @@ class ExecutorService:
                 )
 
             # Redis에서 상태 조회
-            pid = self.redis_client.get(STATE_KEY + ":pid")
-            plan_file = self.redis_client.get(STATE_KEY + ":plan_file")
-            start_time_str = self.redis_client.get(STATE_KEY + ":start_time")
+            pid = await self.async_redis.get(STATE_KEY + ":pid")
+            plan_file = await self.async_redis.get(STATE_KEY + ":plan_file")
+            start_time_str = await self.async_redis.get(STATE_KEY + ":start_time")
 
             return RunStatusResponse(
                 running=True,
@@ -220,11 +228,11 @@ class ExecutorService:
             logger.error(f"[auto-next] reset_running_state 실패: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Failed to reset state: {str(e)}")
 
-    def stop_auto_next(self) -> Dict:
-        """auto-next 실행 중지 - Redis 명령 전송"""
+    async def stop_auto_next(self) -> Dict:
+        """auto-next 실행 중지 - Redis 명령 전송 (비동기)"""
         try:
             # Redis를 통해 상태 확인
-            status = self.redis_client.get(STATE_KEY + ":status")
+            status = await self.async_redis.get(STATE_KEY + ":status")
             if status != "running":
                 raise HTTPException(status_code=404, detail="Not running")
 
@@ -236,10 +244,10 @@ class ExecutorService:
             }
 
             # Redis LPUSH - 명령 전송
-            self.redis_client.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
+            await self.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
 
-            # BRPOP으로 결과 대기
-            result = self.redis_client.brpop(RESULTS_KEY, timeout=COMMAND_TIMEOUT)
+            # BRPOP으로 결과 대기 (비동기, 이벤트 루프 블로킹 없음)
+            result = await self.async_redis.brpop(RESULTS_KEY, timeout=COMMAND_TIMEOUT)
 
             if result is None:
                 # listener 무응답 → 프로세스가 죽었을 가능성 → 상태 강제 정리
