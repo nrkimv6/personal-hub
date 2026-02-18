@@ -111,7 +111,7 @@ if ($Target -eq "list") {
 
     # API logs
     Write-Host "[API Server Logs]" -ForegroundColor Yellow
-    $apiLogs = Get-LogsMultiPattern @("stdout_api_*.log", "api_*.log")
+    $apiLogs = Get-LogsMultiPattern @("stdout_api_*.log", "api_*.log", "service_MonitorPage*.log")
     if ($apiLogs) {
         foreach ($log in $apiLogs) {
             $size = "{0:N2} KB" -f ($log.Length / 1KB)
@@ -168,6 +168,16 @@ function Get-LatestLogFileMultiPattern {
 }
 
 $apiLogFile = Get-LatestLogFileMultiPattern @("stdout_api_", "api_")
+
+# Python service runner: NSSM stdout 로그 (service_MonitorPage*.log)
+# 인프로세스 uvicorn이므로 API + service_runner 로그가 여기에 기록됨
+if (-not $apiLogFile) {
+    $nssmLogPattern = if ($Dev) { "service_MonitorPage-Dev.log" } else { "service_MonitorPage.log" }
+    $nssmLog = Join-Path $LogDir $nssmLogPattern
+    if (Test-Path $nssmLog) {
+        $apiLogFile = $nssmLog
+    }
+}
 $workerLogFile = Get-LatestLogFileMultiPattern @("stdout_worker_", "worker_", "unified_worker_")
 $frontendLogFile = Get-LatestLogFileMultiPattern @("frontend_", "frontend_err_")
 $igWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_instagram_", "instagram_")
@@ -394,7 +404,7 @@ function Start-CombinedLogTail {
 
     # Define timestamped log patterns for auto-refresh (multiple patterns per source)
     $timestampedLogPatterns = @{
-        "API"         = @("stdout_api_*.log", "api_*.log")
+        "API"         = @("stdout_api_*.log", "api_*.log", "service_MonitorPage*.log")
         "WORKER"      = @("stdout_worker_*.log", "worker_*.log", "unified_worker_*.log")
         "IG-WORKER"   = @("stdout_instagram_*.log", "instagram_*.log")
         "CLAUDE"      = @("stdout_llm_worker_*.log", "llm_worker_*.log")
