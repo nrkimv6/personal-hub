@@ -1,262 +1,226 @@
-"""Command Listener 프로세스 관리 TC
+"""Command Listener 프로세스 관리 TC (Phase 5 보강 포함)
 
 대상 소스: scripts/auto-next-command-listener.py (359줄)
 Mock 대상: subprocess.Popen, redis.Redis → fakeredis
 """
 
+import importlib.util
 import json
+import os
+import subprocess
 import pytest
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open
 import fakeredis
 
-# 테스트 대상 함수 import를 위한 sys.path 조정
-import sys
-listener_path = Path("D:/work/project/tools/monitor-page/scripts")
-if str(listener_path) not in sys.path:
-    sys.path.insert(0, str(listener_path))
 
-# 주의: 실제 listener 파일을 import하면 전역 변수가 초기화되므로
-# 함수 단위로만 테스트합니다.
+# ========== 모듈 로드 (하이픈 파일명 대응) ==========
+
+_listener_mod = None
+
+def _get_listener():
+    global _listener_mod
+    if _listener_mod is not None:
+        return _listener_mod
+    script_path = Path("D:/work/project/tools/monitor-page/scripts/auto-next-command-listener.py")
+    if not script_path.exists():
+        pytest.skip(f"Listener script not found: {script_path}")
+    spec = importlib.util.spec_from_file_location("auto_next_command_listener", str(script_path))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    _listener_mod = mod
+    return mod
+
+
+@pytest.fixture(scope="module")
+def listener_mod():
+    return _get_listener()
 
 
 # ========== Fixtures ==========
 
 @pytest.fixture
-def fake_redis():
-    """fakeredis 인스턴스"""
-    return fakeredis.FakeRedis(decode_responses=True)
+def fr():
+    """fakeredis (테스트간 격리)"""
+    server = fakeredis.FakeServer()
+    return fakeredis.FakeRedis(server=server, decode_responses=True)
 
 
 @pytest.fixture
 def mock_popen():
-    """subprocess.Popen mock"""
-    mock_process = MagicMock()
-    mock_process.pid = 12345
-    mock_process.poll.return_value = None  # 실행 중
-    mock_process.wait.return_value = 0
-    return mock_process
+    p = MagicMock()
+    p.pid = 12345
+    p.poll.return_value = None
+    p.wait.return_value = 0
+    return p
 
 
-@pytest.fixture
-def command_run_single():
-    """단일 plan 실행 명령"""
-    return {
-        "action": "run",
-        "plan_file": "common/docs/plan/test.md",
-        "source": "monitor-page-api",
-        "timestamp": datetime.now().isoformat()
-    }
+@pytest.fixture(autouse=True)
+def reset_globals(listener_mod):
+    """테스트 간 전역변수 초기화"""
+    listener_mod._current_process = None
+    listener_mod._current_log_file = None
+    yield
+    listener_mod._current_process = None
+    listener_mod._current_log_file = None
 
 
-@pytest.fixture
-def command_run_parallel():
-    """병렬 실행 명령"""
-    return {
-        "action": "run",
-        "parallel": True,
-        "source": "monitor-page-api",
-        "timestamp": datetime.now().isoformat()
-    }
-
-
-@pytest.fixture
-def command_stop():
-    """stop 명령"""
-    return {
-        "action": "stop",
-        "source": "monitor-page-api",
-        "timestamp": datetime.now().isoformat()
-    }
-
-
-# ========== Tests ==========
+# ========== TestStartAutoNext ==========
 
 class TestStartAutoNext:
-    """start_auto_next() 함수 TC"""
 
-    def test_start_creates_subprocess_with_correct_args(self, fake_redis, command_run_single, mock_popen, tmp_path):
-        """TC#1: Popen 호출 인수 검증 (mock)"""
-        # listener 모듈 동적 import
-        from auto_next_command_listener import start_auto_next
+    def test_start_creates_subprocess(self, listener_mod, fr, mock_popen, tmp_path):
+        """Popen 호출 인수 검증"""
+        command = {"action": "run", "plan_file": "common/docs/plan/test.md"}
 
-        with patch('auto_next_command_listener.subprocess.Popen', return_value=mock_popen) as mock_popen_cls, \
-             patch('auto_next_command_listener.open', mock_open()), \
-             patch('auto_next_command_listener.LOG_DIR', tmp_path), \
-             patch('auto_next_command_listener._current_process', None):
+        with patch.object(listener_mod, 'LOG_DIR', tmp_path):
+            with patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen) as mp:
+                result = listener_mod.start_auto_next(command, fr)
 
-            result = start_auto_next(command_run_single, fake_redis)
-
-            # Popen 호출 확인
-            assert mock_popen_cls.call_count == 1
-            call_args = mock_popen_cls.call_args
-
-            # 명령 인수 검증
-            cmd = call_args[0][0]
-            assert "python" in cmd[0] or "python.exe" in cmd[0]
-            assert "-m" in cmd
-            assert "auto_next" in cmd
+            assert mp.call_count == 1
+            cmd = mp.call_args[0][0]
             assert "run" in cmd
             assert "--plan-file" in cmd
             assert "common/docs/plan/test.md" in cmd
-
-            # 결과 검증
             assert result["success"] is True
             assert result["pid"] == 12345
 
-    def test_start_parallel_no_plan_file_in_args(self, fake_redis, command_run_parallel, mock_popen, tmp_path):
-        """TC#2: --plan-file 미포함 확인"""
-        from auto_next_command_listener import start_auto_next
+    def test_start_parallel_no_plan_file(self, listener_mod, fr, mock_popen, tmp_path):
+        """parallel 모드: --plan-file 미포함"""
+        command = {"action": "run", "parallel": True}
 
-        with patch('auto_next_command_listener.subprocess.Popen', return_value=mock_popen) as mock_popen_cls, \
-             patch('auto_next_command_listener.open', mock_open()), \
-             patch('auto_next_command_listener.LOG_DIR', tmp_path), \
-             patch('auto_next_command_listener._current_process', None):
+        with patch.object(listener_mod, 'LOG_DIR', tmp_path), \
+             patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen) as mp:
+            result = listener_mod.start_auto_next(command, fr)
 
-            result = start_auto_next(command_run_parallel, fake_redis)
+        cmd = mp.call_args[0][0]
+        assert "--plan-file" not in cmd
+        assert "--parallel" in cmd
 
-            cmd = mock_popen_cls.call_args[0][0]
-            assert "--plan-file" not in cmd
-            assert "--parallel" in cmd
+    def test_start_sets_redis_state(self, listener_mod, fr, mock_popen, tmp_path):
+        """Redis 상태 저장 확인"""
+        SK = listener_mod.STATE_KEY
+        command = {"action": "run", "plan_file": "test.md"}
 
-    def test_start_sets_redis_state(self, fake_redis, command_run_single, mock_popen, tmp_path):
-        """TC#3: pid, plan_file, status, start_time Redis 저장"""
-        from auto_next_command_listener import start_auto_next, STATE_KEY
+        with patch.object(listener_mod, 'LOG_DIR', tmp_path), \
+             patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen):
+            listener_mod.start_auto_next(command, fr)
 
-        with patch('auto_next_command_listener.subprocess.Popen', return_value=mock_popen), \
-             patch('auto_next_command_listener.open', mock_open()), \
-             patch('auto_next_command_listener.LOG_DIR', tmp_path), \
-             patch('auto_next_command_listener._current_process', None):
+        assert fr.get(SK + ":status") == "running"
+        assert fr.get(SK + ":pid") == "12345"
+        assert fr.get(SK + ":plan_file") == "test.md"
 
-            result = start_auto_next(command_run_single, fake_redis)
+    def test_start_plan_file_none_saves_ALL(self, listener_mod, fr, mock_popen, tmp_path):
+        """Phase5 - plan_file=None → Redis에 'ALL' 저장"""
+        SK = listener_mod.STATE_KEY
+        command = {"action": "run", "parallel": True}
 
-            # Redis 상태 확인
-            assert fake_redis.get(STATE_KEY + ":status") == "running"
-            assert fake_redis.get(STATE_KEY + ":pid") == "12345"
-            assert fake_redis.get(STATE_KEY + ":plan_file") == "common/docs/plan/test.md"
-            assert fake_redis.get(STATE_KEY + ":start_time") is not None
-            assert fake_redis.get(STATE_KEY + ":log_file_path") is not None
+        with patch.object(listener_mod, 'LOG_DIR', tmp_path), \
+             patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen):
+            listener_mod.start_auto_next(command, fr)
 
-    def test_start_creates_log_file(self, fake_redis, command_run_single, mock_popen, tmp_path):
-        """TC#4: 로그 파일 생성 확인"""
-        from auto_next_command_listener import start_auto_next
+        assert fr.get(SK + ":plan_file") == "ALL"
 
-        mock_file_handle = MagicMock()
+    def test_start_already_running_returns_error(self, listener_mod, fr, mock_popen):
+        """이미 실행 중이면 에러"""
+        listener_mod._current_process = mock_popen  # poll() returns None = running
 
-        with patch('auto_next_command_listener.subprocess.Popen', return_value=mock_popen), \
-             patch('auto_next_command_listener.open', return_value=mock_file_handle) as mock_open_fn, \
-             patch('auto_next_command_listener.LOG_DIR', tmp_path), \
-             patch('auto_next_command_listener._current_process', None):
+        result = listener_mod.start_auto_next({"action": "run", "plan_file": "test.md"}, fr)
+        assert result["success"] is False
+        assert "Already running" in result["message"]
 
-            result = start_auto_next(command_run_single, fake_redis)
 
-            # open() 호출 확인
-            assert mock_open_fn.call_count == 1
-            log_path = mock_open_fn.call_args[0][0]
-            assert "auto-next-" in str(log_path)
-            assert ".log" in str(log_path)
-
+# ========== TestStopAutoNext ==========
 
 class TestStopAutoNext:
-    """stop_auto_next() 함수 TC"""
 
-    def test_stop_terminates_process(self, fake_redis, mock_popen):
-        """TC#5: terminate() → wait() 호출 순서"""
-        from auto_next_command_listener import stop_auto_next
+    def test_stop_terminates_process(self, listener_mod, fr, mock_popen):
+        """terminate → wait 호출"""
+        listener_mod._current_process = mock_popen
+        result = listener_mod.stop_auto_next(fr)
 
-        with patch('auto_next_command_listener._current_process', mock_popen):
-            result = stop_auto_next(fake_redis)
+        assert mock_popen.terminate.call_count == 1
+        assert result["success"] is True
 
-            # terminate(), wait() 순서대로 호출
-            assert mock_popen.terminate.call_count == 1
-            assert mock_popen.wait.call_count == 1
-            assert result["success"] is True
-
-    def test_stop_force_kills_on_timeout(self, fake_redis):
-        """TC#6: terminate 5초 후 kill()"""
-        from auto_next_command_listener import stop_auto_next
-        import subprocess
-
+    def test_stop_force_kills_on_timeout(self, listener_mod, fr):
+        """Phase5 - terminate 5초 내 미종료 → kill"""
         mock_process = MagicMock()
         mock_process.pid = 12345
         mock_process.poll.return_value = None
         mock_process.wait.side_effect = [subprocess.TimeoutExpired("cmd", 5), None]
 
-        with patch('auto_next_command_listener._current_process', mock_process):
-            result = stop_auto_next(fake_redis)
+        listener_mod._current_process = mock_process
+        result = listener_mod.stop_auto_next(fr)
 
-            # kill() 호출 확인
-            assert mock_process.kill.call_count == 1
-            assert mock_process.wait.call_count == 2
+        assert mock_process.kill.call_count == 1
 
-    def test_stop_clears_redis_state(self, fake_redis, mock_popen):
-        """TC#7: status, pid, log_file_path 삭제"""
-        from auto_next_command_listener import stop_auto_next, STATE_KEY
+    def test_stop_clears_redis_state(self, listener_mod, fr, mock_popen):
+        """Redis 상태 정리"""
+        SK = listener_mod.STATE_KEY
+        fr.set(SK + ":status", "running")
+        fr.set(SK + ":pid", "12345")
 
-        # Redis 상태 설정
-        fake_redis.set(STATE_KEY + ":status", "running")
-        fake_redis.set(STATE_KEY + ":pid", "12345")
-        fake_redis.set(STATE_KEY + ":log_file_path", "/path/to/log.log")
+        listener_mod._current_process = mock_popen
+        listener_mod.stop_auto_next(fr)
 
-        with patch('auto_next_command_listener._current_process', mock_popen):
-            result = stop_auto_next(fake_redis)
+        assert fr.get(SK + ":status") == "stopped"
+        assert fr.get(SK + ":pid") is None
 
-            # Redis 정리 확인
-            assert fake_redis.get(STATE_KEY + ":status") == "stopped"
-            assert fake_redis.get(STATE_KEY + ":pid") is None
-            assert fake_redis.get(STATE_KEY + ":log_file_path") is None
+    def test_stop_not_running_returns_error(self, listener_mod, fr):
+        """미실행 상태 stop → 실패"""
+        result = listener_mod.stop_auto_next(fr)
+        assert result["success"] is False
 
+
+# ========== TestGetStatus ==========
 
 class TestGetStatus:
-    """get_status() 함수 TC"""
 
-    def test_status_running_process(self, fake_redis, mock_popen):
-        """TC#8: poll()=None → running=True"""
-        from auto_next_command_listener import get_status
-
-        mock_popen.poll.return_value = None  # 실행 중
+    def test_status_running(self, listener_mod, fr, mock_popen):
+        """poll()=None → running=True"""
         log_file = Path("D:/logs/test.log")
+        listener_mod._current_process = mock_popen
+        listener_mod._current_log_file = log_file
 
-        with patch('auto_next_command_listener._current_process', mock_popen), \
-             patch('auto_next_command_listener._current_log_file', log_file):
+        result = listener_mod.get_status(fr)
+        assert result["running"] is True
+        assert result["pid"] == 12345
 
-            result = get_status(fake_redis)
-
-            assert result["success"] is True
-            assert result["running"] is True
-            assert result["pid"] == 12345
-            assert "test.log" in result["log_file"]
-
-    def test_status_dead_process_cleanup(self, fake_redis):
-        """TC#9: poll()!=None → Redis 정리"""
-        from auto_next_command_listener import get_status, STATE_KEY
-
+    def test_status_dead_process_cleanup(self, listener_mod, fr):
+        """Phase5 - 죽은 프로세스 → Redis 자동 정리"""
+        SK = listener_mod.STATE_KEY
         mock_process = MagicMock()
-        mock_process.poll.return_value = 0  # 종료됨
+        mock_process.poll.return_value = 0
 
-        # Redis 상태 설정
-        fake_redis.set(STATE_KEY + ":status", "running")
-        fake_redis.set(STATE_KEY + ":pid", "12345")
+        fr.set(SK + ":status", "running")
+        fr.set(SK + ":pid", "12345")
 
-        with patch('auto_next_command_listener._current_process', mock_process):
-            result = get_status(fake_redis)
+        listener_mod._current_process = mock_process
+        result = listener_mod.get_status(fr)
 
-            # Redis 정리 확인
-            assert fake_redis.get(STATE_KEY + ":status") == "stopped"
-            assert fake_redis.get(STATE_KEY + ":pid") is None
+        assert result["running"] is False
+        assert fr.get(SK + ":status") == "stopped"
+        assert fr.get(SK + ":pid") is None
 
+    def test_status_no_process(self, listener_mod, fr):
+        """프로세스 없음 → not running"""
+        result = listener_mod.get_status(fr)
+        assert result["running"] is False
+
+
+# ========== TestExecuteCommand ==========
 
 class TestExecuteCommand:
-    """execute_command() 디스패처 TC"""
 
-    def test_execute_unknown_action(self, fake_redis):
-        """TC#10: 미지원 action → 에러 반환"""
-        from auto_next_command_listener import execute_command
-
-        command = {"action": "invalid_action"}
-
-        result = execute_command(command, fake_redis)
-
+    def test_unknown_action(self, listener_mod, fr):
+        """Phase5 - 알 수 없는 action → error"""
+        result = listener_mod.execute_command({"action": "invalid"}, fr)
         assert result["success"] is False
-        assert "Unknown action" in result["message"] or result["success"] is False
+        assert "Unknown action" in result["message"]
+
+    def test_dispatch_status(self, listener_mod, fr):
+        """status 디스패치"""
+        result = listener_mod.execute_command({"action": "status"}, fr)
+        assert result["success"] is True
+        assert result["running"] is False

@@ -230,7 +230,7 @@ def get_status(redis_client: redis.Redis) -> Dict:
     Returns:
         dict: {success: bool, running: bool, pid: int|None, log_file: str|None}
     """
-    global _current_process
+    global _current_process, _current_log_file
 
     if _current_process and _current_process.poll() is None:
         return {
