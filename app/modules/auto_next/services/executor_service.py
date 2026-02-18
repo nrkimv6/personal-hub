@@ -281,16 +281,21 @@ class ExecutorService:
             raise HTTPException(status_code=500, detail=f"Failed to stop: {str(e)}")
 
     def _is_pid_alive(self, pid: int) -> bool:
-        """PID가 실제로 살아있는지 확인"""
+        """PID가 실제로 살아있는지 확인 (Windows: GetExitCodeProcess로 검증)"""
         try:
             import ctypes
             kernel32 = ctypes.windll.kernel32
             PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
             handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-            if handle:
-                kernel32.CloseHandle(handle)
-                return True
-            return False
+            if not handle:
+                return False
+            # OpenProcess는 종료된 프로세스도 핸들을 반환할 수 있으므로
+            # GetExitCodeProcess로 실제 생존 여부 확인
+            STILL_ACTIVE = 259
+            exit_code = ctypes.c_ulong()
+            kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+            kernel32.CloseHandle(handle)
+            return exit_code.value == STILL_ACTIVE
         except Exception:
             return False
 
