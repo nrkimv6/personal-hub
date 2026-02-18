@@ -17,32 +17,30 @@
 	let expandedId = $state<string | null>(null);
 
 	const statusFilters = [
-		{ value: undefined, label: '전체' },
-		{ value: 'pending', label: '대기' },
-		{ value: 'running', label: '실행 중' },
-		{ value: 'success', label: '성공' },
-		{ value: 'failed', label: '실패' },
-		{ value: 'skipped', label: '스킵' }
+		{ value: undefined, label: 'all' },
+		{ value: 'pending', label: 'pending' },
+		{ value: 'running', label: 'running' },
+		{ value: 'success', label: 'success' },
+		{ value: 'failed', label: 'failed' },
+		{ value: 'skipped', label: 'skipped' }
 	];
 
 	let hasCompletedTasks = $derived(
 		tasks.some((t) => t.status === 'success' || t.status === 'failed' || t.status === 'skipped')
 	);
 
-	// 자동 정리 옵션 상태
+	// 자동 정리
 	let autoCleanup = $state(
 		typeof window !== 'undefined'
 			? localStorage.getItem('autoNext_autoCleanup') === 'true'
 			: false
 	);
-
 	let autoCleanupHours = $state(
 		typeof window !== 'undefined'
 			? parseInt(localStorage.getItem('autoNext_autoCleanupHours') || '24')
 			: 24
 	);
 
-	// localStorage 동기화
 	$effect(() => {
 		if (typeof window !== 'undefined') {
 			localStorage.setItem('autoNext_autoCleanup', String(autoCleanup));
@@ -50,41 +48,30 @@
 		}
 	});
 
-	// 자동 정리 실행 (활성화 시 1시간마다)
 	$effect(() => {
 		if (!autoCleanup || !onDeleteOld) return;
-		onDeleteOld(autoCleanupHours);  // 즉시 1회
+		onDeleteOld(autoCleanupHours);
 		const interval = setInterval(() => onDeleteOld!(autoCleanupHours), 3600000);
 		return () => clearInterval(interval);
 	});
 
-	let showCleanupMenu = $state(false);
-
-	function handleDeleteOldManual(hours: number) {
-		if (confirm(`${hours}시간 이상 된 완료 작업을 삭제하시겠습니까?`)) {
-			onDeleteOld?.(hours);
-		}
-		showCleanupMenu = false;
-	}
-
-	function statusBadge(status: string): string {
-		const map: Record<string, string> = {
-			pending: 'bg-gray-100 text-gray-700',
-			running: 'bg-blue-100 text-blue-700',
-			success: 'bg-green-100 text-green-700',
-			failed: 'bg-red-100 text-red-700',
-			skipped: 'bg-yellow-100 text-yellow-700'
+	function statusConfig(status: string): { label: string; className: string } {
+		const map: Record<string, { label: string; className: string }> = {
+			pending: { label: 'Pending', className: 'bg-gray-100 text-gray-600' },
+			running: { label: 'Running', className: 'bg-blue-100 text-blue-700 border border-blue-200' },
+			success: { label: 'Success', className: 'bg-green-100 text-green-700 border border-green-200' },
+			failed: { label: 'Failed', className: 'bg-red-100 text-red-700 border border-red-200' },
+			skipped: { label: 'Skipped', className: 'bg-gray-200 text-gray-600 border border-gray-300' }
 		};
-		return map[status] || 'bg-gray-100 text-gray-700';
+		return map[status] || map.pending;
 	}
 
 	function formatDate(d: string | null): string {
 		if (!d) return '-';
-		return new Date(d).toLocaleString('ko-KR', {
-			month: '2-digit',
-			day: '2-digit',
+		return new Date(d).toLocaleTimeString('ko-KR', {
 			hour: '2-digit',
-			minute: '2-digit'
+			minute: '2-digit',
+			second: '2-digit'
 		});
 	}
 
@@ -110,180 +97,143 @@
 			onDeleteCompleted();
 		}
 	}
+
+	function countByStatus(status: string): number {
+		return tasks.filter(t => t.status === status).length;
+	}
 </script>
 
-<div class="bg-white rounded-lg border">
-	<!-- Phase 5: 헤더 패딩 축소 -->
-	<div class="px-3 py-2 border-b flex items-center justify-between flex-wrap gap-2">
-		<div class="flex items-center gap-3">
-			<h2 class="font-semibold text-sm">
-				작업 목록 <span class="text-xs text-gray-400 font-normal">({total})</span>
-			</h2>
-		</div>
-		<!-- 자동 정리 설정 -->
-		<div class="flex items-center gap-2 text-xs">
-			<label class="flex items-center gap-1.5 text-gray-600 cursor-pointer">
-				<input
-					type="checkbox"
-					bind:checked={autoCleanup}
-					class="rounded"
-				/>
-				<span>자동 정리</span>
-			</label>
-			{#if autoCleanup}
-				<select
-					bind:value={autoCleanupHours}
-					class="border rounded px-1.5 py-0.5"
-					title="지정한 시간 이상 된 완료 작업을 자동 삭제합니다"
-				>
-					<option value={12}>12시간</option>
-					<option value={24}>24시간</option>
-					<option value={48}>48시간</option>
-					<option value={72}>3일</option>
-					<option value={168}>7일</option>
-				</select>
-			{/if}
-		</div>
-		<div class="flex items-center gap-2">
-			<div class="flex gap-1">
-				{#each statusFilters as f}
-					<!-- Phase 5: 필터 버튼 컴팩트화 -->
+<div class="flex flex-col gap-3 h-full">
+	<!-- Filter Bar -->
+	<div class="flex items-center justify-between flex-wrap gap-2">
+		<div class="flex items-center gap-1">
+			{#each statusFilters as f}
 				<button
-						class="px-1.5 py-0.5 text-[10px] rounded-full border transition-colors {currentFilter === f.value ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}"
-						onclick={() => onFilterChange(f.value)}
-					>
-						{f.label}
-					</button>
-				{/each}
-			</div>
-			{#if hasCompletedTasks}
-				<div class="relative">
-					<button
-						class="px-2.5 py-1 text-xs rounded-full border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
-						onclick={() => showCleanupMenu = !showCleanupMenu}
-					>
-						이력 정리 ▾
-					</button>
-
-					{#if showCleanupMenu}
-						<div class="absolute right-0 mt-1 bg-white border rounded-lg shadow-lg z-10 text-xs">
-							<button class="block px-3 py-1.5 hover:bg-gray-50 w-full text-left" onclick={handleDeleteCompleted}>
-								현재 plan 전체 삭제
-							</button>
-							<button class="block px-3 py-1.5 hover:bg-gray-50 w-full text-left" onclick={() => handleDeleteOldManual(24)}>
-								24시간 이상
-							</button>
-							<button class="block px-3 py-1.5 hover:bg-gray-50 w-full text-left" onclick={() => handleDeleteOldManual(48)}>
-								48시간 이상
-							</button>
-							<button class="block px-3 py-1.5 hover:bg-gray-50 w-full text-left" onclick={() => handleDeleteOldManual(168)}>
-								7일 이상
-							</button>
-						</div>
+					class="h-6 px-2 text-[10px] rounded capitalize transition-colors {currentFilter === f.value ? 'bg-gray-100 font-medium' : 'text-gray-400 hover:text-gray-600'}"
+					onclick={() => onFilterChange(f.value)}
+				>
+					{f.label}
+					{#if f.value !== undefined}
+						<span class="ml-1 font-mono">{countByStatus(f.value)}</span>
 					{/if}
-				</div>
+				</button>
+			{/each}
+		</div>
+
+		<div class="flex items-center gap-3">
+			{#if hasCompletedTasks}
+				<button
+					class="h-6 px-2 text-[10px] text-gray-500 hover:text-red-600 transition-colors inline-flex items-center gap-1"
+					onclick={handleDeleteCompleted}
+				>
+					<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+					Clear Done
+				</button>
 			{/if}
+
+			<div class="flex items-center gap-1.5">
+				<label class="relative inline-flex items-center cursor-pointer">
+					<input type="checkbox" bind:checked={autoCleanup} class="sr-only peer" />
+					<div class="w-7 h-3.5 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-2.5 after:w-2.5 after:transition-all peer-checked:bg-blue-500"></div>
+				</label>
+				<span class="text-[10px] text-gray-500">Auto</span>
+				{#if autoCleanup}
+					<select
+						bind:value={autoCleanupHours}
+						class="text-[10px] h-6 w-[60px] border rounded px-1"
+					>
+						<option value={12}>12h</option>
+						<option value={24}>24h</option>
+						<option value={48}>48h</option>
+						<option value={72}>72h</option>
+						<option value={168}>7d</option>
+					</select>
+				{/if}
+			</div>
 		</div>
 	</div>
 
-	{#if tasks.length === 0}
-		<div class="p-8 text-center text-gray-400">작업이 없습니다</div>
-	{:else}
-		<div class="overflow-x-auto">
-			<table class="w-full text-sm">
-				<thead>
-					<tr class="border-b text-left text-gray-500">
-						<th class="px-4 py-2 font-medium">상태</th>
-						<th class="px-4 py-2 font-medium">작업</th>
-						<th class="px-4 py-2 font-medium hidden md:table-cell">모델</th>
-						<th class="px-4 py-2 font-medium hidden md:table-cell">시간</th>
-						<th class="px-4 py-2 font-medium hidden lg:table-cell">토큰</th>
-						<th class="px-4 py-2 font-medium">생성일</th>
-						<th class="px-4 py-2 font-medium w-10"></th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each tasks as task (task.id)}
-						<tr
-							class="border-b hover:bg-gray-50 cursor-pointer transition-colors"
+	<!-- Task List (card style) -->
+	<div class="flex-1 overflow-y-auto">
+		{#if tasks.length === 0}
+			<div class="text-center py-8 text-sm text-gray-400">
+				No tasks matching filter
+			</div>
+		{:else}
+			<div class="flex flex-col gap-1.5 pr-2">
+				{#each tasks as task (task.id)}
+					<div class="border rounded-md overflow-hidden">
+						<!-- Collapsed row -->
+						<button
 							onclick={() => toggleExpand(task.id)}
+							class="flex items-center gap-3 w-full px-3 py-2.5 hover:bg-gray-50 transition-colors text-left"
 						>
-							<td class="px-4 py-2">
-								<span
-									class="inline-block px-2 py-0.5 rounded text-xs font-medium {statusBadge(task.status)}"
-								>
-									{task.status}
+							<span class="text-[10px] px-1.5 py-0 h-4 inline-flex items-center rounded shrink-0 {statusConfig(task.status).className}">
+								{statusConfig(task.status).label}
+							</span>
+							{#if task.source_path}
+								<span class="text-xs text-gray-500 font-mono shrink-0 w-[130px] truncate">
+									{task.source_path.split(/[\\/]/).pop()}
 								</span>
-							</td>
-							<td class="px-4 py-2 max-w-xs truncate" title={task.text}>{task.text}</td>
-							<td class="px-4 py-2 hidden md:table-cell text-gray-500"
-								>{task.model_used || '-'}</td
-							>
-							<td class="px-4 py-2 hidden md:table-cell text-gray-500"
-								>{formatDuration(task.duration_seconds)}</td
-							>
-							<td class="px-4 py-2 hidden lg:table-cell text-gray-500"
-								>{task.input_tokens + task.output_tokens}</td
-							>
-							<td class="px-4 py-2 text-gray-500">{formatDate(task.created_at)}</td>
-							<td class="px-4 py-2">
-								<button
-									class="text-red-400 hover:text-red-600 text-xs"
-									onclick={(e) => handleDelete(e, task.id)}
-									title="삭제"
+							{/if}
+							<span class="text-xs truncate flex-1 min-w-0">{task.text}</span>
+							<div class="flex items-center gap-3 shrink-0 text-xs text-gray-500">
+								{#if task.duration_seconds !== null}
+									<span class="font-mono tabular-nums">{formatDuration(task.duration_seconds)}</span>
+								{/if}
+								{#if task.input_tokens > 0}
+									<span class="font-mono tabular-nums hidden lg:inline">
+										{(task.input_tokens / 1000).toFixed(1)}k
+									</span>
+								{/if}
+								<svg
+									class="w-3.5 h-3.5 transition-transform {expandedId === task.id ? 'rotate-180' : ''}"
+									viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 								>
-									삭제
-								</button>
-							</td>
-						</tr>
+									<path d="M6 9l6 6 6-6" />
+								</svg>
+							</div>
+						</button>
+
+						<!-- Expanded detail -->
 						{#if expandedId === task.id}
-							<tr class="bg-gray-50">
-								<td colspan="7" class="px-4 py-3">
-									<div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-										<div><span class="text-gray-400">ID:</span> {task.id}</div>
-										<div><span class="text-gray-400">타입:</span> {task.type}</div>
-										<div><span class="text-gray-400">우선순위:</span> {task.priority}</div>
-										<div>
-											<span class="text-gray-400">소스:</span> {task.source_path}
-										</div>
-										<div>
-											<span class="text-gray-400">입력 토큰:</span> {task.input_tokens}
-										</div>
-										<div>
-											<span class="text-gray-400">출력 토큰:</span> {task.output_tokens}
-										</div>
-										<div>
-											<span class="text-gray-400">캐시(읽기):</span>
-											{task.cache_read_tokens}
-										</div>
-										<div>
-											<span class="text-gray-400">캐시(생성):</span>
-											{task.cache_creation_tokens}
-										</div>
-										{#if task.error_message}
-											<div class="col-span-full text-red-600">
-												<span class="text-gray-400">에러:</span> {task.error_message}
-											</div>
-										{/if}
-										{#if task.started_at}
-											<div>
-												<span class="text-gray-400">시작:</span>
-												{formatDate(task.started_at)}
-											</div>
-										{/if}
-										{#if task.finished_at}
-											<div>
-												<span class="text-gray-400">완료:</span>
-												{formatDate(task.finished_at)}
-											</div>
-										{/if}
+							<div class="border-t bg-gray-50 px-3 py-3 flex flex-col gap-2">
+								<p class="text-xs leading-relaxed">{task.text}</p>
+
+								<div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+									<span>Model: <span class="font-mono">{task.model_used || '-'}</span></span>
+									{#if task.started_at}
+										<span>Started: <span class="font-mono">{formatDate(task.started_at)}</span></span>
+									{/if}
+									{#if task.finished_at}
+										<span>Completed: <span class="font-mono">{formatDate(task.finished_at)}</span></span>
+									{/if}
+									<span>
+										Tokens: <span class="font-mono">{task.input_tokens.toLocaleString()} in / {task.output_tokens.toLocaleString()} out / {task.cache_read_tokens.toLocaleString()} cached</span>
+									</span>
+								</div>
+
+								{#if task.error_message}
+									<div class="flex items-start gap-2 rounded-md bg-red-50 border border-red-200 p-2.5 mt-1">
+										<svg class="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+										<p class="text-xs text-red-600 leading-relaxed">{task.error_message}</p>
 									</div>
-								</td>
-							</tr>
+								{/if}
+
+								<div class="flex justify-end mt-1">
+									<button
+										class="h-6 px-2 text-xs text-gray-400 hover:text-red-500 transition-colors inline-flex items-center gap-1"
+										onclick={(e) => handleDelete(e, task.id)}
+									>
+										<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+										삭제
+									</button>
+								</div>
+							</div>
 						{/if}
-					{/each}
-				</tbody>
-			</table>
-		</div>
-	{/if}
+					</div>
+				{/each}
+			</div>
+		{/if}
+	</div>
 </div>

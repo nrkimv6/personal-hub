@@ -20,15 +20,13 @@
 	let actionLoading = $state(false);
 	let actionError = $state<string | null>(null);
 
-	// Phase 2: elapsed 타이머
-	let elapsed = $state('');
+	// Elapsed timer
+	let elapsed = $state('00:00:00');
 	let elapsedInterval: ReturnType<typeof setInterval> | null = null;
 
 	$effect(() => {
 		if (status?.running && status.start_time) {
-			// 즉시 1회 계산
 			updateElapsed(status.start_time);
-			// 매 초 업데이트
 			if (elapsedInterval) clearInterval(elapsedInterval);
 			elapsedInterval = setInterval(() => updateElapsed(status.start_time!), 1000);
 		} else {
@@ -36,7 +34,7 @@
 				clearInterval(elapsedInterval);
 				elapsedInterval = null;
 			}
-			elapsed = '';
+			elapsed = '00:00:00';
 		}
 		return () => {
 			if (elapsedInterval) {
@@ -48,17 +46,10 @@
 
 	function updateElapsed(startTime: string) {
 		const diff = Date.now() - new Date(startTime).getTime();
-		const totalSec = Math.floor(diff / 1000);
-		const h = Math.floor(totalSec / 3600);
-		const m = Math.floor((totalSec % 3600) / 60);
-		const s = totalSec % 60;
-		if (h > 0) {
-			elapsed = `${h}h ${m}m ${s}s`;
-		} else if (m > 0) {
-			elapsed = `${m}m ${s}s`;
-		} else {
-			elapsed = `${s}s`;
-		}
+		const h = Math.floor(diff / 3600000);
+		const m = Math.floor((diff % 3600000) / 60000);
+		const s = Math.floor((diff % 60000) / 1000);
+		elapsed = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 	}
 
 	async function handleStart() {
@@ -131,155 +122,170 @@
 	}
 </script>
 
-<div class="bg-white rounded-lg border p-3">
-	<h2 class="font-semibold mb-2 text-sm">실행 제어</h2>
-
+<div class="flex flex-col gap-4">
 	{#if actionError}
-		<div class="text-xs text-red-600 bg-red-50 rounded p-2 mb-2">{actionError}</div>
+		<div class="text-xs text-red-600 bg-red-50 rounded p-2">{actionError}</div>
 	{/if}
 
-	{#if status?.running}
-		<!-- Phase 2: 실행 중 상태를 한 줄 헤더로 압축 -->
-		<div class="space-y-2">
-			<div class="flex items-center gap-3 text-sm bg-green-50 rounded px-3 py-2">
-				<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0"></span>
-				<span class="font-medium text-green-800">Running</span>
-				<span class="text-gray-500">●</span>
-				<span class="text-gray-600">PID: <span class="font-mono">{status.pid}</span></span>
-				<span class="text-gray-400">|</span>
-				<span class="text-gray-600">Cycle: {status.current_cycle ?? '-'}</span>
-				<span class="text-gray-400">|</span>
-				<span class="text-gray-600">Elapsed: <span class="font-mono">{elapsed || '...'}</span></span>
-				{#if status.plan_file}
-					<span class="text-gray-400">|</span>
-					<span class="text-gray-500 truncate text-xs" title={status.plan_file}>{status.plan_file.split(/[\\/]/).pop()}</span>
-				{/if}
-			</div>
-			<!-- Phase 2: 버튼 행을 한 줄로 압축 -->
-			<div class="flex items-center gap-2">
-				<button
-					class="px-3 py-1.5 rounded text-sm font-medium text-white bg-red-500 hover:bg-red-600 disabled:opacity-50 transition-colors"
-					onclick={handleStop}
-					disabled={actionLoading}
-				>
-					{actionLoading ? '중지 중...' : '■ 중지'}
-				</button>
-				<span class="text-gray-300">|</span>
-				<button
-					class="px-3 py-1.5 rounded text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 disabled:opacity-50 transition-colors"
-					onclick={handleSync}
-					disabled={actionLoading}
-				>
-					{actionLoading ? '동기화 중...' : '↻ 재동기화'}
-				</button>
-			</div>
-		</div>
-	{:else}
-		<!-- Phase 2: 중지 상태 - 한 줄 압축 폼 -->
-		<div class="space-y-2">
-			<!-- Phase 2: 버튼 행 + 모드 선택 한 줄 -->
-			<div class="flex items-center gap-2 flex-wrap">
-				<!-- 모드 Select (탭 UI → 인라인 Select) -->
-				<select
-					class="border rounded px-2 py-1.5 text-xs bg-white"
-					bind:value={mode}
-				>
-					<option value="single">단일 Plan</option>
-					<option value="all">전체 실행</option>
-				</select>
-
-				<button
-					class="px-3 py-1.5 rounded text-sm font-medium text-white bg-green-500 hover:bg-green-600 disabled:opacity-50 transition-colors"
-					onclick={handleStart}
-					disabled={actionLoading || (mode === 'single' && !selectedPlan)}
-				>
-					{actionLoading ? '시작 중...' : mode === 'all' ? '▶ 전체 실행' : '▶ 시작'}
-				</button>
-				<span class="text-gray-300">|</span>
-				<button
-					class="px-3 py-1.5 rounded text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 disabled:opacity-50 transition-colors"
-					onclick={handleSync}
-					disabled={actionLoading}
-					title="Plan 파일과 TODO.md를 SQLite 큐에 동기화합니다"
-				>
-					{actionLoading ? '동기화 중...' : '↻ 동기화'}
-				</button>
-				<button
-					class="px-3 py-1.5 rounded text-sm font-medium text-white bg-yellow-500 hover:bg-yellow-600 disabled:opacity-50 transition-colors"
-					onclick={() => handleResetState(false)}
-					disabled={actionLoading}
-					title="RUNNING 상태를 강제로 초기화하고 미완료 작업을 PENDING으로 복구합니다."
-				>
-					{actionLoading ? '초기화 중...' : '초기화'}
-				</button>
-				<button
-					class="px-3 py-1.5 rounded text-sm font-medium text-white bg-red-500 hover:bg-red-600 disabled:opacity-50 transition-colors"
-					onclick={() => handleResetState(true)}
-					disabled={actionLoading}
-					title="모든 작업 기록을 삭제하고 완전히 초기화합니다."
-				>
-					{actionLoading ? '삭제 중...' : '전체 리셋'}
-				</button>
-			</div>
-
-			<!-- Phase 2: 옵션 행을 한 줄로 압축 -->
-			<div class="flex items-center gap-3 text-xs flex-wrap">
-				{#if mode === 'single'}
-					<!-- Plan Select compact -->
-					<select
-						class="border rounded px-2 py-1 text-xs w-40 bg-white"
-						bind:value={selectedPlan}
-					>
-						<option value="">Plan 선택...</option>
-						{#each plans as plan}
-							<option value={plan.path}>{plan.filename} ({plan.progress.percent}%)</option>
-						{/each}
-					</select>
-				{:else}
-					<span class="text-gray-400 text-xs">모든 미완료 Plan 자동 실행</span>
-				{/if}
-				<span class="text-gray-300">|</span>
-				<label class="flex items-center gap-1 text-gray-600">
-					<span>Max:</span>
-					<input
-						type="number"
-						class="border rounded px-1.5 py-0.5 w-16 text-xs"
-						bind:value={maxCycles}
-						min="0"
-						placeholder="∞"
-					/>
-				</label>
-				<label class="flex items-center gap-1 text-gray-600">
-					<span>Until:</span>
-					<input
-						type="time"
-						class="border rounded px-1.5 py-0.5 text-xs"
-						bind:value={until}
-					/>
-				</label>
-				<label class="flex items-center gap-1.5 text-gray-600 cursor-pointer">
-					<input type="checkbox" bind:checked={dryRun} class="rounded" />
-					<span>Dry Run</span>
-				</label>
-				{#if mode === 'single'}
-					<label class="flex items-center gap-1.5 text-gray-600 cursor-pointer">
-						<input type="checkbox" bind:checked={parallel} class="rounded" />
-						<span>병렬</span>
-					</label>
-				{/if}
-			</div>
-
-			{#if (mode === 'single' && parallel) || mode === 'all'}
-				<div class="flex items-center gap-2 text-xs">
-					<label class="text-gray-600 shrink-0">프로젝트:</label>
-					<input
-						type="text"
-						class="flex-1 border rounded px-2 py-1 text-xs"
-						bind:value={projects}
-						placeholder="쉼표 구분 (비우면 전체)"
-					/>
-				</div>
+	<!-- Status Header -->
+	<div class="flex items-center justify-between">
+		<div class="flex items-center gap-3">
+			<div class="w-2.5 h-2.5 rounded-full {status?.running ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}"></div>
+			<span class="text-sm font-medium">{status?.running ? '실행 중' : '중지'}</span>
+			{#if status?.pid}
+				<span class="text-xs text-gray-500 font-mono">PID {status.pid}</span>
 			{/if}
+		</div>
+		{#if status?.running}
+			<div class="flex items-center gap-3 text-xs text-gray-500">
+				<span class="flex items-center gap-1">
+					<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
+					Cycle {status.current_cycle ?? '-'}
+				</span>
+				<span class="flex items-center gap-1">
+					<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+					{elapsed}
+				</span>
+			</div>
+		{/if}
+	</div>
+
+	<!-- Controls Row -->
+	<div class="flex items-center gap-2 flex-wrap">
+		{#if status?.running}
+			<button
+				class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 disabled:opacity-50 transition-colors"
+				onclick={handleStop}
+				disabled={actionLoading}
+			>
+				<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+				{actionLoading ? '중지 중...' : '중지'}
+			</button>
+		{:else}
+			<button
+				class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 disabled:opacity-50 transition-colors"
+				onclick={handleStart}
+				disabled={actionLoading || (mode === 'single' && !selectedPlan)}
+			>
+				<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+				{actionLoading ? '시작 중...' : mode === 'all' ? '전체 실행' : '시작'}
+			</button>
+		{/if}
+
+		<button
+			class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+			onclick={handleSync}
+			disabled={actionLoading}
+			title="Plan 파일과 TODO.md를 SQLite 큐에 동기화합니다"
+		>
+			<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+			{actionLoading ? '동기화 중...' : '동기화'}
+		</button>
+
+		{#if !status?.running}
+			<button
+				class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+				onclick={() => handleResetState(false)}
+				disabled={actionLoading}
+				title="RUNNING 상태를 강제로 초기화하고 미완료 작업을 PENDING으로 복구합니다."
+			>
+				<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v6h6"/><path d="M3 13a9 9 0 1 0 3-7.7L3 8"/></svg>
+				{actionLoading ? '초기화 중...' : '초기화'}
+			</button>
+
+			<button
+				class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+				onclick={() => handleResetState(true)}
+				disabled={actionLoading}
+				title="모든 작업 기록을 삭제하고 완전히 초기화합니다."
+			>
+				{actionLoading ? '삭제 중...' : '전체 리셋'}
+			</button>
+		{/if}
+
+		<div class="h-4 w-px bg-gray-200 mx-1"></div>
+
+		<!-- Mode Select -->
+		<select
+			class="border rounded px-2 py-1.5 text-xs h-8 w-[120px]"
+			bind:value={mode}
+		>
+			<option value="single">단일 Plan</option>
+			<option value="all">전체 실행</option>
+		</select>
+	</div>
+
+	<!-- Options Row -->
+	<div class="flex items-center gap-4 flex-wrap text-xs">
+		{#if mode === 'single'}
+			<div class="flex items-center gap-2">
+				<label for="plan-select" class="text-gray-500 text-xs">Plan</label>
+				<select
+					id="plan-select"
+					class="border rounded px-2 py-1 text-xs w-[200px] h-7 font-mono"
+					bind:value={selectedPlan}
+				>
+					<option value="">Plan 선택...</option>
+					{#each plans as plan}
+						<option value={plan.path}>{plan.filename} ({plan.progress.percent}%)</option>
+					{/each}
+				</select>
+			</div>
+		{:else}
+			<span class="text-gray-400 text-xs">모든 미완료 Plan 자동 실행</span>
+		{/if}
+
+		<div class="flex items-center gap-2">
+			<label for="max-cycles" class="text-gray-500 text-xs">Max Cycles</label>
+			<input
+				id="max-cycles"
+				type="number"
+				class="border rounded px-1.5 py-0.5 w-16 h-7 text-xs font-mono"
+				bind:value={maxCycles}
+				min="0"
+				placeholder="∞"
+			/>
+		</div>
+
+		<div class="flex items-center gap-2">
+			<label for="end-time" class="text-gray-500 text-xs">End Time</label>
+			<input
+				id="end-time"
+				type="time"
+				class="border rounded px-1.5 py-0.5 w-24 h-7 text-xs font-mono"
+				bind:value={until}
+			/>
+		</div>
+
+		<div class="flex items-center gap-2">
+			<label class="relative inline-flex items-center cursor-pointer">
+				<input type="checkbox" bind:checked={dryRun} class="sr-only peer" />
+				<div class="w-8 h-4 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-500"></div>
+			</label>
+			<span class="text-gray-500 text-xs flex items-center gap-1">
+				<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>
+				Dry Run
+			</span>
+		</div>
+
+		{#if mode === 'single'}
+			<label class="flex items-center gap-1.5 text-gray-500 cursor-pointer text-xs">
+				<input type="checkbox" bind:checked={parallel} class="rounded" />
+				<span>병렬</span>
+			</label>
+		{/if}
+	</div>
+
+	{#if (mode === 'single' && parallel) || mode === 'all'}
+		<div class="flex items-center gap-2 text-xs">
+			<label class="text-gray-500 shrink-0" for="projects-input">프로젝트:</label>
+			<input
+				id="projects-input"
+				type="text"
+				class="flex-1 border rounded px-2 py-1 text-xs"
+				bind:value={projects}
+				placeholder="쉼표 구분 (비우면 전체)"
+			/>
 		</div>
 	{/if}
 </div>

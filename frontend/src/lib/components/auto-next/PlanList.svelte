@@ -6,11 +6,9 @@
 	interface Props {
 		plans: AutoNextPlanFileResponse[];
 		onPlansChange?: () => void;
-		onPlanSelect?: (plan: AutoNextPlanFileResponse) => void;
-		selectedPath?: string | null;
 	}
 
-	let { plans, onPlansChange, onPlanSelect, selectedPath = null }: Props = $props();
+	let { plans, onPlansChange }: Props = $props();
 
 	let showIgnored = $state(false);
 	let ignoredPlans = $state<AutoNextPlanFileResponse[]>([]);
@@ -20,22 +18,24 @@
 	let addError = $state<string | null>(null);
 	let addLoading = $state(false);
 
-	// Phase 5: plan detail 로드를 PlanList 내부로 이동
-	let internalSelectedPath = $state<string | null>(selectedPath ?? null);
+	// Plan detail (inline accordion)
+	let selectedPath = $state<string | null>(null);
 	let planDetail = $state<AutoNextPlanDetailResponse | null>(null);
 	let planDetailLoading = $state(false);
+	// Phase accordion state
+	let openPhases = $state<Set<number>>(new Set());
 
-	async function handlePlanSelectInternal(plan: AutoNextPlanFileResponse) {
-		if (internalSelectedPath === plan.path) {
-			// 같은 plan 클릭 시 토글 닫기
-			internalSelectedPath = null;
+	async function handlePlanSelect(plan: AutoNextPlanFileResponse) {
+		if (selectedPath === plan.path) {
+			selectedPath = null;
 			planDetail = null;
-			onPlanSelect?.(plan);
+			openPhases = new Set();
 			return;
 		}
-		internalSelectedPath = plan.path;
+		selectedPath = plan.path;
 		planDetailLoading = true;
 		planDetail = null;
+		openPhases = new Set();
 		try {
 			const encoded = encodePathToBase64(plan.path);
 			planDetail = await autoNextPlanApi.items(encoded);
@@ -44,14 +44,23 @@
 		} finally {
 			planDetailLoading = false;
 		}
-		onPlanSelect?.(plan);
+	}
+
+	function togglePhase(index: number) {
+		const next = new Set(openPhases);
+		if (next.has(index)) {
+			next.delete(index);
+		} else {
+			next.add(index);
+		}
+		openPhases = next;
 	}
 
 	async function loadIgnored() {
 		ignoredLoading = true;
 		try {
 			ignoredPlans = await autoNextPlanApi.ignored();
-		} catch (e) {
+		} catch {
 			ignoredPlans = [];
 		} finally {
 			ignoredLoading = false;
@@ -86,9 +95,7 @@
 		try {
 			await autoNextPlanApi.removeExternal(path);
 			onPlansChange?.();
-		} catch {
-			// ignore
-		}
+		} catch { /* ignore */ }
 	}
 
 	async function handleIgnore(e: Event, path: string) {
@@ -96,9 +103,7 @@
 		try {
 			await autoNextPlanApi.ignore(encodePathToBase64(path));
 			onPlansChange?.();
-		} catch {
-			// ignore
-		}
+		} catch { /* ignore */ }
 	}
 
 	async function handleUnignore(e: Event, path: string) {
@@ -107,58 +112,52 @@
 			await autoNextPlanApi.unignore(encodePathToBase64(path));
 			onPlansChange?.();
 			await loadIgnored();
-		} catch {
-			// ignore
-		}
+		} catch { /* ignore */ }
 	}
 
 	function statusBadge(status: string): string {
 		const map: Record<string, string> = {
-			'구현중': 'bg-blue-100 text-blue-700',
-			'구현완료': 'bg-green-100 text-green-700',
-			'검토완료': 'bg-purple-100 text-purple-700',
-			'초안': 'bg-gray-100 text-gray-700',
-			'보류': 'bg-yellow-100 text-yellow-700'
+			'구현중': 'bg-blue-100 text-blue-700 border border-blue-200',
+			'구현완료': 'bg-green-100 text-green-700 border border-green-200',
+			'검토완료': 'bg-purple-100 text-purple-700 border border-purple-200',
+			'초안': 'bg-gray-100 text-gray-600',
+			'보류': 'bg-yellow-100 text-yellow-700 border border-yellow-200'
 		};
-		return map[status] || 'bg-gray-100 text-gray-700';
-	}
-
-	function sourceBadge(source: string): string {
-		if (source === 'external') return 'bg-orange-100 text-orange-700';
-		if (source === 'common') return 'bg-gray-100 text-gray-500';
-		return 'bg-indigo-100 text-indigo-700';
+		return map[status] || 'bg-gray-100 text-gray-600';
 	}
 
 	let displayPlans = $derived(showIgnored ? ignoredPlans : plans);
 </script>
 
-<div class="bg-white rounded-lg border p-4">
-	<div class="flex items-center justify-between mb-3">
-		<h2 class="font-semibold">Plan 목록</h2>
-		<div class="flex gap-2">
+<div class="flex flex-col gap-3 h-full">
+	<!-- Header -->
+	<div class="flex items-center justify-between">
+		<span class="text-xs text-gray-500 font-medium uppercase tracking-wider">Plan Files</span>
+		<div class="flex gap-1">
 			<button
-				class="text-xs px-2 py-1 rounded {showIgnored ? 'bg-gray-200 text-gray-700' : 'bg-gray-100 text-gray-500'} hover:bg-gray-200 transition-colors"
+				class="h-6 px-2 text-[10px] rounded text-gray-500 hover:bg-gray-100 transition-colors"
 				onclick={toggleIgnored}
 			>
 				{showIgnored ? '활성 보기' : '무시 목록'}
 			</button>
 			<button
-				class="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
+				class="h-6 px-2 text-[10px] rounded text-gray-500 hover:bg-gray-100 transition-colors inline-flex items-center gap-1"
 				onclick={() => showAddForm = !showAddForm}
 			>
-				+ 외부 추가
+				<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+				추가
 			</button>
 		</div>
 	</div>
 
 	{#if showAddForm}
-		<div class="mb-3 p-3 bg-gray-50 rounded-lg space-y-2">
+		<div class="p-2.5 bg-gray-50 rounded-lg space-y-2">
 			{#if addError}
 				<div class="text-xs text-red-600">{addError}</div>
 			{/if}
 			<input
 				type="text"
-				class="w-full border rounded px-2 py-1 text-sm"
+				class="w-full border rounded px-2 py-1 text-xs"
 				bind:value={externalPath}
 				placeholder="Plan 파일 경로 (예: D:\work\project\...)"
 			/>
@@ -187,98 +186,104 @@
 			{showIgnored ? '무시된 Plan이 없습니다' : 'Plan 파일이 없습니다'}
 		</p>
 	{:else}
-		<div class="space-y-2 max-h-96 overflow-y-auto">
-			{#each displayPlans as plan}
-				<div class="border rounded-lg overflow-hidden">
+		<!-- Plan list (scrollable) -->
+		<div class="flex-1 overflow-y-auto -mx-1 px-1">
+			<div class="flex flex-col gap-1">
+				{#each displayPlans as plan}
 					<button
-						class="w-full text-left p-3 hover:bg-gray-50 transition-colors {internalSelectedPath === plan.path ? 'bg-blue-50 ring-1 ring-blue-300' : ''}"
-						onclick={() => handlePlanSelectInternal(plan)}
+						onclick={() => handlePlanSelect(plan)}
+						class="flex items-center gap-2 rounded-md px-2.5 py-2 text-left transition-colors w-full {selectedPath === plan.path ? 'bg-blue-50' : 'hover:bg-gray-50'}"
 					>
-						<div class="flex items-center justify-between mb-1">
-							<span class="text-sm font-medium truncate flex-1" title={plan.path}>{plan.filename}</span>
-							<div class="flex gap-1 ml-2 shrink-0 items-center">
-								<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium {sourceBadge(plan.source)}">
-									{plan.source}
-								</span>
-								<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium {statusBadge(plan.status)}">
-									{plan.status}
-								</span>
-								{#if showIgnored}
-									<button
-										class="text-[10px] text-blue-400 hover:text-blue-600 ml-1"
-										onclick={(e) => handleUnignore(e, plan.path)}
-										title="무시 해제"
-									>복원</button>
-								{:else}
-									<button
-										class="text-[10px] text-gray-400 hover:text-red-500 ml-1"
-										onclick={(e) => handleIgnore(e, plan.path)}
-										title="무시 목록에 추가"
-									>무시</button>
-								{/if}
-								{#if plan.source === 'external'}
-									<button
-										class="text-[10px] text-red-400 hover:text-red-600 ml-1"
-										onclick={(e) => handleRemoveExternal(e, plan.path)}
-										title="외부 plan 제거"
-									>x</button>
-								{/if}
-								<!-- 펼치기/접기 chevron -->
-								<svg
-									class="w-3.5 h-3.5 text-gray-400 ml-1 transition-transform {internalSelectedPath === plan.path ? 'rotate-180' : ''}"
-									viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-								>
-									<path d="M6 9l6 6 6-6" />
-								</svg>
+						<!-- File icon -->
+						<svg class="w-3.5 h-3.5 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+
+						<!-- Content -->
+						<div class="flex flex-col gap-0.5 min-w-0 flex-1">
+							<span class="text-xs font-medium truncate">{plan.filename}</span>
+							<div class="flex items-center gap-2">
+								<span class="text-[10px] px-1.5 py-0 h-4 inline-flex items-center rounded {statusBadge(plan.status)}">{plan.status}</span>
+								<span class="text-[10px] text-gray-500 font-mono">{plan.progress.done}/{plan.progress.total}</span>
 							</div>
 						</div>
-						<div class="flex items-center gap-2">
-							<div class="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-								<div
-									class="h-full rounded-full transition-all {plan.progress.percent >= 100 ? 'bg-green-500' : 'bg-blue-500'}"
-									style="width: {plan.progress.percent}%"
-								></div>
-							</div>
-							<span class="text-xs text-gray-500 whitespace-nowrap">
-								{plan.progress.done}/{plan.progress.total} ({plan.progress.percent}%)
-							</span>
-						</div>
+
+						<!-- Eye/EyeOff toggle -->
+						{#if showIgnored}
+							<button
+								class="shrink-0 p-1 rounded hover:bg-gray-200"
+								onclick={(e) => handleUnignore(e, plan.path)}
+								title="무시 해제"
+							>
+								<svg class="w-3 h-3 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+							</button>
+						{:else}
+							<button
+								class="shrink-0 p-1 rounded hover:bg-gray-200"
+								onclick={(e) => handleIgnore(e, plan.path)}
+								title="무시"
+							>
+								<svg class="w-3 h-3 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+							</button>
+						{/if}
+
+						{#if plan.source === 'external'}
+							<button
+								class="shrink-0 p-1 rounded hover:bg-gray-200 text-[10px] text-red-400 hover:text-red-600"
+								onclick={(e) => handleRemoveExternal(e, plan.path)}
+								title="외부 plan 제거"
+							>×</button>
+						{/if}
 					</button>
 
-					<!-- Phase 5: 아코디언 인라인 상세 표시 -->
-					{#if internalSelectedPath === plan.path}
-						<div class="border-t bg-gray-50 px-3 py-2">
+					<!-- Plan Detail (inline accordion) -->
+					{#if selectedPath === plan.path}
+						<div class="border-t pt-3 mt-1 ml-6">
 							{#if planDetailLoading}
 								<div class="flex items-center justify-center py-4">
 									<div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
 								</div>
 							{:else if planDetail}
-								<!-- Progress bar -->
-								<div class="h-1 bg-gray-200 rounded-full overflow-hidden mb-2">
-									<div
-										class="h-full rounded-full {planDetail.progress.percent >= 100 ? 'bg-green-500' : 'bg-blue-500'}"
-										style="width: {planDetail.progress.percent}%"
-									></div>
-								</div>
-								<!-- Phases -->
-								<div class="space-y-1.5 max-h-64 overflow-y-auto">
-									{#each planDetail.phases as phase}
-										<div class="text-xs">
-											<div class="font-medium text-gray-700 mb-0.5">{phase.name} ({phase.done_count}/{phase.total_count})</div>
-											<div class="space-y-0.5 ml-2">
-												{#each phase.items as item}
-													<div class="flex items-start gap-1.5 {item.checked ? 'opacity-50' : ''}">
-														<span class="shrink-0 mt-0.5">{item.checked ? '✓' : '○'}</span>
-														<span class="{item.checked ? 'line-through text-gray-400' : 'text-gray-700'}">{item.text}</span>
-													</div>
-													{#each item.children as child}
-														<div class="flex items-start gap-1.5 ml-4 {child.checked ? 'opacity-50' : ''}">
-															<span class="shrink-0 mt-0.5">{child.checked ? '✓' : '○'}</span>
-															<span class="{child.checked ? 'line-through text-gray-400' : 'text-gray-600'}">{child.text}</span>
+								<div class="max-h-48 overflow-y-auto">
+									{#each planDetail.phases as phase, i}
+										<div class="mb-1">
+											<!-- Phase trigger -->
+											<button
+												class="py-2 text-xs text-gray-500 hover:text-gray-700 w-full text-left flex items-center gap-1"
+												onclick={() => togglePhase(i)}
+											>
+												<svg
+													class="w-3 h-3 transition-transform {openPhases.has(i) ? 'rotate-90' : ''}"
+													viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+												>
+													<path d="M9 18l6-6-6-6" />
+												</svg>
+												{phase.name}
+											</button>
+
+											<!-- Phase content -->
+											{#if openPhases.has(i)}
+												<div class="flex flex-col gap-1.5 pl-4 pb-2">
+													{#each phase.items as item}
+														<div class="flex items-start gap-2 text-xs">
+															{#if item.checked}
+																<svg class="w-3.5 h-3.5 shrink-0 text-green-500 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+															{:else}
+																<svg class="w-3.5 h-3.5 shrink-0 text-gray-400 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>
+															{/if}
+															<span class="{item.checked ? 'text-gray-400 line-through' : ''}">{item.text}</span>
 														</div>
+														{#each item.children as child}
+															<div class="flex items-start gap-2 text-xs ml-4">
+																{#if child.checked}
+																	<svg class="w-3.5 h-3.5 shrink-0 text-green-500 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+																{:else}
+																	<svg class="w-3.5 h-3.5 shrink-0 text-gray-400 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>
+																{/if}
+																<span class="{child.checked ? 'text-gray-400 line-through' : ''}">{child.text}</span>
+															</div>
+														{/each}
 													{/each}
-												{/each}
-											</div>
+												</div>
+											{/if}
 										</div>
 									{/each}
 								</div>
@@ -287,8 +292,8 @@
 							{/if}
 						</div>
 					{/if}
-				</div>
-			{/each}
+				{/each}
+			</div>
 		</div>
 	{/if}
 </div>
