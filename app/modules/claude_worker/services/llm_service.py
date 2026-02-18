@@ -221,6 +221,8 @@ class LLMService:
 
             # PATH에 npm bin 경로 추가 (Windows)
             env = os.environ.copy()
+            # Claude Code 세션 내에서 워커가 시작된 경우 nested session 방지
+            env.pop("CLAUDECODE", None)
             if sys.platform == "win32":
                 npm_path = os.path.expanduser("~/AppData/Roaming/npm")
                 if npm_path not in env.get("PATH", ""):
@@ -362,6 +364,8 @@ class LLMService:
 
             # PATH에 npm bin 경로 추가 (Windows)
             env = os.environ.copy()
+            # Claude Code 세션 내에서 워커가 시작된 경우 nested session 방지
+            env.pop("CLAUDECODE", None)
             if sys.platform == "win32":
                 npm_path = os.path.expanduser("~/AppData/Roaming/npm")
                 if npm_path not in env.get("PATH", ""):
