@@ -140,9 +140,16 @@ if ($waited -ge $maxWait) {
 
 Write-Log "Starting browser workers..."
 
-# browser-workers.ps1 호출
+# browser_workers.py 호출 (browser-workers.ps1에서 마이그레이션됨)
+# See: docs/plan/2026-02-18_service-runner-python-migration.md
+$VenvPython = Join-Path (Split-Path -Parent $ScriptDir) ".venv\Scripts\python.exe"
+if (-not (Test-Path $VenvPython)) {
+    $VenvPython = Join-Path (Split-Path -Parent $ScriptDir) "venv\Scripts\python.exe"
+}
+$browserWorkersScript = Join-Path $ScriptDir "browser_workers.py"
+
 try {
-    & $browserWorkersScript -Action start
+    & $VenvPython $browserWorkersScript start
     Write-Log "Browser workers start command completed"
 } catch {
     Write-Log "ERROR: Failed to start browser workers: $_"

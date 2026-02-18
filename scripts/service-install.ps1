@@ -30,14 +30,21 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 . "$ScriptDir\port-utils.ps1"
 
 # Service configuration
-# Each service runs service-run.ps1 which starts API (foreground) + Frontend + Workers (background)
+# Python service runner: service_run.py (service-run.ps1에서 마이그레이션됨)
+# See: docs/plan/2026-02-18_service-runner-python-migration.md
+$VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+if (-not (Test-Path $VenvPython)) {
+    $VenvPython = Join-Path $ProjectRoot "venv\Scripts\python.exe"
+}
+$ServiceScript = Join-Path $ScriptDir "service_run.py"
+
 $services = @(
     @{
         Name = "MonitorPage"
         DisplayName = "Monitor Page (Production)"
         Description = "Monitor Page Production Server - API(8000) + Frontend(6100)"
-        Script = "$ScriptDir\service-run.ps1"
-        Args = ""
+        Application = $VenvPython
+        AppArgs = "`"$ServiceScript`""
         LogDir = Join-Path $ProjectRoot "logs"
     }
 )
@@ -47,8 +54,8 @@ if ($IncludeDev -and ($Action -eq "install" -or $Action -eq "uninstall")) {
         Name = "MonitorPage-Dev"
         DisplayName = "Monitor Page (Development)"
         Description = "Monitor Page Development Server - API(8001) + Frontend(6101) + Workers"
-        Script = "$ScriptDir\service-run.ps1"
-        Args = "-Dev"
+        Application = $VenvPython
+        AppArgs = "`"$ServiceScript`" --dev"
         LogDir = Join-Path $ProjectRoot "logs\dev"
     }
 }
@@ -60,8 +67,8 @@ if ($Dev -and ($Action -in @("start", "stop", "restart"))) {
             Name = "MonitorPage-Dev"
             DisplayName = "Monitor Page (Development)"
             Description = "Monitor Page Development Server - API(8001) + Frontend(6101) + Workers"
-            Script = "$ScriptDir\service-run.ps1"
-            Args = "-Dev"
+            Application = $VenvPython
+            AppArgs = "`"$ServiceScript`" --dev"
             LogDir = Join-Path $ProjectRoot "logs\dev"
         }
     )
@@ -101,9 +108,9 @@ function Install-MonitorService {
         $null = nssm remove $svc.Name confirm 2>&1
     }
 
-    # Install service - run.ps1 via PowerShell
-    nssm install $svc.Name powershell.exe
-    nssm set $svc.Name AppParameters "-ExecutionPolicy Bypass -File `"$($svc.Script)`" $($svc.Args)"
+    # Install service - Python service runner
+    nssm install $svc.Name $svc.Application
+    nssm set $svc.Name AppParameters $svc.AppArgs
     nssm set $svc.Name AppDirectory $ProjectRoot
 
     # Set display name and description
