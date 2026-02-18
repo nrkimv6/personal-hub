@@ -475,15 +475,7 @@ class HealthMonitorService:
         ))
 
         if self.notification_service:
-            try:
-                await asyncio.wait_for(
-                    self.notification_service.send_telegram(message, force_send=True),
-                    timeout=5
-                )
-            except asyncio.TimeoutError:
-                logger.warning(f"PID 장애 알림 전송 타임아웃 (5초): {health.name}")
-            except Exception as e:
-                logger.warning(f"PID 장애 알림 전송 실패: {health.name} - {e}")
+            await self.notification_service.send_telegram(message, force_send=True)
         else:
             logger.warning(f"PID 장애 감지 (알림 서비스 없음): {health.name} - {health.error_message}")
 
@@ -505,15 +497,7 @@ class HealthMonitorService:
         ))
 
         if self.notification_service:
-            try:
-                await asyncio.wait_for(
-                    self.notification_service.send_telegram(message, force_send=True),
-                    timeout=5
-                )
-            except asyncio.TimeoutError:
-                logger.warning(f"HTTP 장애 알림 전송 타임아웃 (5초): {health.name}")
-            except Exception as e:
-                logger.warning(f"HTTP 장애 알림 전송 실패: {health.name} - {e}")
+            await self.notification_service.send_telegram(message, force_send=True)
         else:
             logger.warning(f"HTTP 장애 감지 (알림 서비스 없음): {health.name} - {health.error_message}")
 
@@ -541,15 +525,7 @@ class HealthMonitorService:
         ))
 
         if self.notification_service:
-            try:
-                await asyncio.wait_for(
-                    self.notification_service.send_telegram(message, force_send=True),
-                    timeout=5
-                )
-            except asyncio.TimeoutError:
-                logger.warning(f"복구 알림 전송 타임아웃 (5초): {health.name}")
-            except Exception as e:
-                logger.warning(f"복구 알림 전송 실패: {health.name} - {e}")
+            await self.notification_service.send_telegram(message, force_send=True)
         else:
             logger.info(f"서비스 복구 (알림 서비스 없음): {health.name}")
 
