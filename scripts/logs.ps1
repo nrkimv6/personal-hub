@@ -179,7 +179,7 @@ if (-not $apiLogFile) {
     }
 }
 $workerLogFile = Get-LatestLogFileMultiPattern @("stdout_worker_", "worker_", "unified_worker_")
-$frontendLogFile = Get-LatestLogFileMultiPattern @("frontend_", "frontend_err_")
+$frontendLogFile = Get-LatestLogFileMultiPattern @("frontend_2")
 $igWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_instagram_", "instagram_")
 $claudeWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_llm_worker_", "llm_worker_")
 $videoDownloadWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_video_download_worker_", "video_download_worker_")
@@ -410,7 +410,7 @@ function Start-CombinedLogTail {
         "CLAUDE"      = @("stdout_llm_worker_*.log", "llm_worker_*.log")
         "VIDEO-DL"    = @("stdout_video_download_worker_*.log", "video_download_worker_*.log")
         "CRAWL"       = @("stdout_crawl_*.log", "crawl_worker_*.log")
-        "FRONTEND"    = @("frontend_*.log", "frontend_err_*.log")
+        "FRONTEND"    = @("frontend_2*.log")
     }
 
     # Helper to find latest log from multiple patterns
