@@ -493,16 +493,38 @@ try {
         }
         $exitCode = 1
     } else {
-        # 포트 기반 Heartbeat 루프
+        # HTTP 기반 Heartbeat 루프
+        # netstat는 Session 0에서 간헐적으로 포트를 감지 못하므로 HTTP로 교체
+        $consecutiveFailures = 0
+        $maxConsecutiveFailures = 3  # 3회 연속 실패 시 종료 판단
         while ($true) {
             Start-Sleep -Seconds $heartbeatInterval
-            $pids = Get-ListeningPids -Port $ApiPort
-            if ($pids.Count -eq 0) {
-                Write-ServiceLog "API Server no longer listening on port $ApiPort"
-                break
+            $alive = $false
+            try {
+                $response = Invoke-WebRequest -Uri "http://localhost:${ApiPort}/api/v1/system/status" -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop
+                if ($response.StatusCode -eq 200) {
+                    $alive = $true
+                }
+            } catch {
+                # HTTP 실패 시 포트 체크로 fallback
+                $pids = Get-ListeningPids -Port $ApiPort
+                if ($pids.Count -gt 0) {
+                    $alive = $true
+                }
             }
-            $uptimeMin = [int](New-TimeSpan -Start $startTime -End (Get-Date)).TotalMinutes
-            Write-ServiceLog "Heartbeat: API running on port $ApiPort (PIDs: $($pids -join ', '), Uptime: ${uptimeMin}m)"
+
+            if ($alive) {
+                $consecutiveFailures = 0
+                $uptimeMin = [int](New-TimeSpan -Start $startTime -End (Get-Date)).TotalMinutes
+                Write-ServiceLog "Heartbeat: API running on port $ApiPort (Uptime: ${uptimeMin}m)"
+            } else {
+                $consecutiveFailures++
+                Write-ServiceLog "Heartbeat FAIL ($consecutiveFailures/$maxConsecutiveFailures): API not responding on port $ApiPort"
+                if ($consecutiveFailures -ge $maxConsecutiveFailures) {
+                    Write-ServiceLog "API Server not responding after $maxConsecutiveFailures consecutive checks"
+                    break
+                }
+            }
         }
         $exitCode = $apiProcess.ExitCode
     }
