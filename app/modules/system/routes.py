@@ -34,6 +34,11 @@ async def get_all_services_status():
     """
     if _cache_collector:
         return _cache_collector.get_cached_status()
+    # Session 0에서는 cache_collector가 비활성화됨 — subprocess fallback 방지
+    # (매 요청마다 nssm/Get-Service subprocess 실행 → Session 0에서 hang/리소스 소진)
+    from app.shared.notification.notification_service import _IN_SESSION_0
+    if _IN_SESSION_0:
+        return {"projects": {}, "collected_at": None, "collection_duration_ms": 0, "note": "Session 0: cache collector disabled"}
     # fallback: 캐시 수집기가 없으면 직접 수집 (느림)
     return await _service.get_all_services_status()
 
