@@ -443,15 +443,42 @@ try {
     Write-ServiceLog "API Server started (PID: $($apiProcess.Id))"
     Write-ServiceLog "Waiting for API Server to exit..."
 
-    # Heartbeat 루프로 API 프로세스 대기 (행 감지 용이화)
+    # 포트 기반 헬스체크 루프 (HasExited 대신 포트 LISTENING 여부로 판단)
+    # 근거: Start-Process -PassThru가 추적하는 부모 PID와 실제 uvicorn PID가
+    #       다를 수 있어, HasExited가 API가 살아있는데도 True를 반환하는 문제 해결
     $heartbeatInterval = 30  # 초
-    while (-not $apiProcess.HasExited) {
-        Start-Sleep -Seconds $heartbeatInterval
-        if (-not $apiProcess.HasExited) {
-            Write-ServiceLog "Heartbeat: API running (PID: $($apiProcess.Id), Uptime: $([int](New-TimeSpan -Start $apiProcess.StartTime -End (Get-Date)).TotalMinutes)m)"
+    $startTime = Get-Date
+
+    # API가 포트를 열 때까지 최초 대기 (최대 60초)
+    $waitStart = Get-Date
+    $portReady = $false
+    while ((New-TimeSpan -Start $waitStart -End (Get-Date)).TotalSeconds -lt 60) {
+        $pids = Get-ListeningPids -Port $ApiPort
+        if ($pids.Count -gt 0) {
+            $portReady = $true
+            Write-ServiceLog "API Server listening on port $ApiPort (PIDs: $($pids -join ', '))"
+            break
         }
+        Start-Sleep -Seconds 2
     }
-    $exitCode = $apiProcess.ExitCode
+
+    if (-not $portReady) {
+        Write-ServiceLog "ERROR: API Server failed to start listening on port $ApiPort within 60 seconds"
+        $exitCode = 1
+    } else {
+        # 포트 기반 Heartbeat 루프
+        while ($true) {
+            Start-Sleep -Seconds $heartbeatInterval
+            $pids = Get-ListeningPids -Port $ApiPort
+            if ($pids.Count -eq 0) {
+                Write-ServiceLog "API Server no longer listening on port $ApiPort"
+                break
+            }
+            $uptimeMin = [int](New-TimeSpan -Start $startTime -End (Get-Date)).TotalMinutes
+            Write-ServiceLog "Heartbeat: API running on port $ApiPort (PIDs: $($pids -join ', '), Uptime: ${uptimeMin}m)"
+        }
+        $exitCode = $apiProcess.ExitCode
+    }
 
     Write-ServiceLog "API Server exited with code: $exitCode"
 
