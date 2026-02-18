@@ -89,9 +89,8 @@ def init_db():
         db.close()
 
 
-# 모듈 임포트 시 자동 초기화
-# 테이블이 없으면 자동 생성, 이미 있으면 skip (멱등성)
-try:
-    init_db()
-except Exception as e:
-    print(f"[경고] DB 자동 초기화 실패 (무시됨): {e}")
+# 모듈 임포트 시 자동 초기화 - 비활성화 (매번 불필요하게 실행됨)
+# try:
+#     init_db()
+# except Exception as e:
+#     print(f"[경고] DB 자동 초기화 실패 (무시됨): {e}")
