@@ -61,7 +61,7 @@ class SystemService:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        stdout, _ = await proc.communicate()
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
 
         if not stdout:
             return []
@@ -90,7 +90,7 @@ class SystemService:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        stdout, _ = await proc.communicate()
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
 
         if not stdout:
             return None
@@ -175,7 +175,7 @@ if ($tasks) {{
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        stdout, _ = await proc.communicate()
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
 
         if not stdout:
             return []
@@ -348,7 +348,7 @@ if ($tasks) {{
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            stdout, stderr = await proc.communicate()
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
 
             if proc.returncode == 0:
                 return {"success": True, "message": success_msg}

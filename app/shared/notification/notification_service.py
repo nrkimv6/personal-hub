@@ -278,9 +278,13 @@ class NotificationService:
                 "parse_mode": "HTML"
             }
 
-            async with aiohttp.ClientSession() as session:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(url, json=data) as response:
                     return response.status == 200
+        except asyncio.TimeoutError:
+            logger.warning("텔레그램 알림 전송 타임아웃 (10초)")
+            return False
         except Exception as e:
             logger.error(f"텔레그램 알림 전송 실패: {str(e)}")
             return False
@@ -463,7 +467,8 @@ class NotificationService:
             return
             
         try:
-            async with aiohttp.ClientSession() as session:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
                 data = {
                     "chat_id": self.telegram_chat_id,
@@ -473,5 +478,7 @@ class NotificationService:
                 async with session.post(url, json=data) as response:
                     if response.status != 200:
                         logger.error(f"텔레그램 알림 전송 실패: {await response.text()}")
+        except asyncio.TimeoutError:
+            logger.warning("텔레그램 알림 전송 타임아웃 (10초)")
         except Exception as e:
             logger.error(f"텔레그램 알림 전송 중 오류 발생: {str(e)}") 

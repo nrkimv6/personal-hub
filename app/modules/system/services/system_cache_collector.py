@@ -110,13 +110,18 @@ class SystemCacheCollector:
         """
         logger.info(f"시스템 상태 수집기 시작 (간격: {self.interval}초)")
 
-        # 시작 시 즉시 수집
-        await self.collect_and_cache()
+        # 시작 시 즉시 수집 (타임아웃 30초 — PowerShell subprocess가 Session 0에서 hang 가능)
+        try:
+            await asyncio.wait_for(self.collect_and_cache(), timeout=30)
+        except asyncio.TimeoutError:
+            logger.warning("시스템 상태 초기 수집 타임아웃 (30초) — 스킵")
+        except Exception as e:
+            logger.error(f"시스템 상태 초기 수집 실패: {e}")
 
         while True:
             try:
                 await asyncio.sleep(self.interval)
-                await self.collect_and_cache()
+                await asyncio.wait_for(self.collect_and_cache(), timeout=30)
             except asyncio.CancelledError:
                 logger.info("시스템 상태 수집기 종료")
                 break
