@@ -71,37 +71,27 @@
 	{/if}
 </div>
 
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-	<div class="bg-white rounded-lg border p-4">
-		<div class="text-sm text-gray-500">전체 작업</div>
-		<div class="text-2xl font-bold mt-1">{displayStats.total}</div>
-		<div class="text-xs text-gray-400 mt-1">완료 {displayStats.completed}</div>
+<!-- Phase 3: 3-column 큰 숫자 요약 -->
+<div class="grid grid-cols-3 gap-4 mb-4">
+	<div class="bg-white rounded-lg border p-4 text-center">
+		<div class="text-3xl font-bold mt-1">{displayStats.total}</div>
+		<div class="text-xs text-gray-500 mt-1">전체 작업</div>
+		<div class="text-xs text-gray-400 mt-0.5">완료 {displayStats.completed}</div>
 	</div>
-	<div class="bg-white rounded-lg border p-4">
-		<div class="text-sm text-gray-500">성공률</div>
-		<div class="text-2xl font-bold mt-1">{displayStats.success_rate.toFixed(1)}%</div>
-		<div class="text-xs text-gray-400 mt-1">
-			성공 {displayStats.success} / 실패 {displayStats.failed}
-		</div>
+	<div class="bg-white rounded-lg border p-4 text-center">
+		<div class="text-3xl font-bold mt-1">{displayStats.completion_rate.toFixed(1)}%</div>
+		<div class="text-xs text-gray-500 mt-1">완료율</div>
+		<div class="text-xs text-gray-400 mt-0.5">대기 {displayStats.pending}</div>
 	</div>
-	<div class="bg-white rounded-lg border p-4">
-		<div class="text-sm text-gray-500">총 토큰</div>
-		<div class="text-2xl font-bold mt-1">{formatTokens(displayStats.total_tokens)}</div>
-		<div class="text-xs text-gray-400 mt-1">
-			입력 {formatTokens(displayStats.total_input_tokens)} / 출력 {formatTokens(displayStats.total_output_tokens)}
-		</div>
-	</div>
-	<div class="bg-white rounded-lg border p-4">
-		<div class="text-sm text-gray-500">총 실행시간</div>
-		<div class="text-2xl font-bold mt-1">{formatDuration(displayStats.total_duration_ms)}</div>
-		<div class="text-xs text-gray-400 mt-1">
-			캐시 {formatTokens(displayStats.total_cache_tokens)}
-		</div>
+	<div class="bg-white rounded-lg border p-4 text-center">
+		<div class="text-3xl font-bold mt-1">{displayStats.success_rate.toFixed(1)}%</div>
+		<div class="text-xs text-gray-500 mt-1">성공률</div>
+		<div class="text-xs text-gray-400 mt-0.5">성공 {displayStats.success} / 실패 {displayStats.failed}</div>
 	</div>
 </div>
 
-<!-- Progress Bar -->
-<div class="mt-4 bg-white rounded-lg border p-4">
+<!-- Phase 3: Progress Bar (순서 변경: 3-column 요약 바로 아래) -->
+<div class="bg-white rounded-lg border p-4 mb-4">
 	<div class="flex items-center justify-between text-sm text-gray-500 mb-2">
 		<span>진행 상황</span>
 		<span>{displayStats.completion_rate.toFixed(1)}% 완료</span>
@@ -139,5 +129,25 @@
 		<span class="flex items-center gap-1"
 			><span class="w-2 h-2 rounded-full bg-gray-300 inline-block"></span> 대기 {displayStats.pending}</span
 		>
+	</div>
+</div>
+
+<!-- Phase 3: 2x2 토큰 그리드 박스 (Progress Bar 아래) -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+	<div class="bg-gray-50 rounded p-2 text-center">
+		<div class="text-xs text-gray-500">Tokens In</div>
+		<div class="text-sm font-semibold mt-0.5">{formatTokens(displayStats.total_input_tokens)}</div>
+	</div>
+	<div class="bg-gray-50 rounded p-2 text-center">
+		<div class="text-xs text-gray-500">Tokens Out</div>
+		<div class="text-sm font-semibold mt-0.5">{formatTokens(displayStats.total_output_tokens)}</div>
+	</div>
+	<div class="bg-gray-50 rounded p-2 text-center">
+		<div class="text-xs text-gray-500">Cached</div>
+		<div class="text-sm font-semibold mt-0.5">{formatTokens(displayStats.total_cache_tokens)}</div>
+	</div>
+	<div class="bg-gray-50 rounded p-2 text-center">
+		<div class="text-xs text-gray-500">Duration</div>
+		<div class="text-sm font-semibold mt-0.5">{formatDuration(displayStats.total_duration_ms)}</div>
 	</div>
 </div>

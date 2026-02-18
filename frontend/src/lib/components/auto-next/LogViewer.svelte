@@ -9,7 +9,11 @@
 
 	let lines = $state<LogLine[]>([]);
 	let connected = $state(false);
+	// Phase 4: autoScroll 상태 유지 (Pause/Resume + Bottom 버튼으로 제어)
 	let autoScroll = $state(true);
+	// Phase 4: Pause/Resume 상태
+	let paused = $state(false);
+	let pauseBuffer = $state<LogLine[]>([]);
 	let logContainer: HTMLDivElement;
 	let eventSource: EventSource | null = null;
 	let sseStarted = $state(false);
@@ -27,6 +31,12 @@
 			lines = lines.map((l) => ({ ...l, isStale: true }));
 		}
 
+		// Phase 4: paused 상태면 버퍼에 저장
+		if (paused && !isStale) {
+			pauseBuffer.push({ text, isStale });
+			return;
+		}
+
 		lines.push({ text, isStale });
 		if (lines.length > MAX_LINES) {
 			lines = lines.slice(lines.length - MAX_LINES);
@@ -35,6 +45,33 @@
 			requestAnimationFrame(() => {
 				logContainer.scrollTop = logContainer.scrollHeight;
 			});
+		}
+	}
+
+	// Phase 4: Resume 시 버퍼 일괄 반영
+	function resumeLog() {
+		paused = false;
+		if (pauseBuffer.length > 0) {
+			for (const line of pauseBuffer) {
+				lines.push(line);
+			}
+			pauseBuffer = [];
+			if (lines.length > MAX_LINES) {
+				lines = lines.slice(lines.length - MAX_LINES);
+			}
+			if (autoScroll && logContainer) {
+				requestAnimationFrame(() => {
+					logContainer.scrollTop = logContainer.scrollHeight;
+				});
+			}
+		}
+	}
+
+	// Phase 4: 맨 아래로 스크롤
+	function scrollToBottom() {
+		if (logContainer) {
+			logContainer.scrollTop = logContainer.scrollHeight;
+			autoScroll = true;
 		}
 	}
 
@@ -98,12 +135,24 @@
 			eventSource = null;
 		}
 	});
+
+	// Phase 4: 구분자 라인 여부 감지 함수
+	function isSeparator(text: string): boolean {
+		return text.includes(SEPARATOR_PATTERN);
+	}
+
+	// 구분자에서 세션 정보 텍스트 추출
+	function extractSeparatorText(text: string): string {
+		// 구분자 패턴 제거 후 남은 텍스트 정리
+		return text.replace(/[═=\s]+/g, ' ').trim() || '새 세션';
+	}
 </script>
 
-<div class="bg-white rounded-lg border">
-	<div class="p-4 border-b flex items-center justify-between">
+<!-- Phase 4: 외부 컨테이너를 flex column h-full로 변경 -->
+<div class="bg-white rounded-lg border flex flex-col h-full">
+	<div class="p-3 border-b flex items-center justify-between shrink-0">
 		<div class="flex items-center gap-2">
-			<h2 class="font-semibold">로그</h2>
+			<h2 class="font-semibold text-sm">로그</h2>
 			{#if connected}
 				<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-green-100 text-green-700">
 					<span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
@@ -126,30 +175,56 @@
 					끊김 (재시도 {reconnectCount}/{MAX_RECONNECT})
 				</span>
 			{/if}
+			{#if paused && pauseBuffer.length > 0}
+				<span class="text-xs text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded">
+					+{pauseBuffer.length} 버퍼
+				</span>
+			{/if}
 		</div>
-		<label class="flex items-center gap-1.5 text-xs text-gray-500">
-			<input type="checkbox" bind:checked={autoScroll} />
-			자동 스크롤
-		</label>
+		<!-- Phase 4: Pause/Resume + Bottom 버튼 (checkbox 대체) -->
+		<div class="flex items-center gap-1">
+			<button
+				onclick={() => paused ? resumeLog() : (paused = true)}
+				class="px-2 py-1 text-xs rounded transition-colors {paused ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}"
+				title={paused ? 'Resume: 버퍼된 로그를 일괄 반영합니다' : 'Pause: 화면 업데이트를 일시 중지합니다'}
+			>
+				{paused ? '▶ Resume' : '⏸ Pause'}
+			</button>
+			<button
+				onclick={scrollToBottom}
+				class="px-2 py-1 text-xs rounded bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+				title="맨 아래로 스크롤"
+			>
+				↓ Bottom
+			</button>
+		</div>
 	</div>
+	<!-- Phase 4: h-64 → flex-1 min-h-0 -->
 	<div
 		bind:this={logContainer}
-		class="h-64 overflow-auto bg-gray-900 text-gray-200 text-xs font-mono p-3 leading-5"
+		class="flex-1 min-h-0 overflow-y-auto bg-gray-900 text-gray-200 text-xs font-mono p-3 leading-5"
 	>
 		{#if lines.length === 0}
 			<span class="text-gray-500">로그가 없습니다</span>
 		{:else}
 			{#each lines as line}
-				{@const tagColor = line.isStale ? '' :
-					line.text.includes('[AI]') ? 'text-cyan-400' :
-					line.text.includes('[TOOL]') ? 'text-yellow-400' :
-					line.text.includes('[DONE]') ? 'text-green-400' :
-					line.text.includes('[ERROR]') ? 'text-red-400' : ''}
-				<div
-					class="whitespace-pre-wrap break-all {line.isStale ? 'opacity-40 text-gray-500' : tagColor}"
-				>
-					{line.text}
-				</div>
+				{#if isSeparator(line.text)}
+					<!-- Phase 4: 세션 구분자를 가운데 정렬 텍스트로 렌더링 -->
+					<div class="text-center text-gray-500 text-xs py-2 border-y border-gray-700 my-1">
+						{extractSeparatorText(line.text)}
+					</div>
+				{:else}
+					{@const tagColor = line.isStale ? '' :
+						line.text.includes('[AI]') ? 'text-cyan-400' :
+						line.text.includes('[TOOL]') ? 'text-yellow-400' :
+						line.text.includes('[DONE]') ? 'text-green-400' :
+						line.text.includes('[ERROR]') ? 'text-red-400' : ''}
+					<div
+						class="whitespace-pre-wrap break-all {line.isStale ? 'opacity-40 text-gray-500' : tagColor}"
+					>
+						{line.text}
+					</div>
+				{/if}
 			{/each}
 		{/if}
 	</div>

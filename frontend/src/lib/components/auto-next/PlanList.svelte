@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { autoNextPlanApi } from '$lib/api';
-	import type { AutoNextPlanFileResponse } from '$lib/api';
+	import type { AutoNextPlanFileResponse, AutoNextPlanDetailResponse } from '$lib/api';
 	import { encodePathToBase64 } from '$lib/utils/encoding';
 
 	interface Props {
@@ -19,6 +19,33 @@
 	let externalPath = $state('');
 	let addError = $state<string | null>(null);
 	let addLoading = $state(false);
+
+	// Phase 5: plan detail 로드를 PlanList 내부로 이동
+	let internalSelectedPath = $state<string | null>(selectedPath ?? null);
+	let planDetail = $state<AutoNextPlanDetailResponse | null>(null);
+	let planDetailLoading = $state(false);
+
+	async function handlePlanSelectInternal(plan: AutoNextPlanFileResponse) {
+		if (internalSelectedPath === plan.path) {
+			// 같은 plan 클릭 시 토글 닫기
+			internalSelectedPath = null;
+			planDetail = null;
+			onPlanSelect?.(plan);
+			return;
+		}
+		internalSelectedPath = plan.path;
+		planDetailLoading = true;
+		planDetail = null;
+		try {
+			const encoded = encodePathToBase64(plan.path);
+			planDetail = await autoNextPlanApi.items(encoded);
+		} catch {
+			planDetail = null;
+		} finally {
+			planDetailLoading = false;
+		}
+		onPlanSelect?.(plan);
+	}
 
 	async function loadIgnored() {
 		ignoredLoading = true;
@@ -162,53 +189,105 @@
 	{:else}
 		<div class="space-y-2 max-h-96 overflow-y-auto">
 			{#each displayPlans as plan}
-				<button
-					class="w-full text-left border rounded-lg p-3 hover:bg-gray-50 transition-colors {selectedPath === plan.path ? 'ring-2 ring-blue-400 bg-blue-50' : ''}"
-					onclick={() => onPlanSelect?.(plan)}
-				>
-					<div class="flex items-center justify-between mb-1">
-						<span class="text-sm font-medium truncate flex-1" title={plan.path}>{plan.filename}</span>
-						<div class="flex gap-1 ml-2 shrink-0">
-							<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium {sourceBadge(plan.source)}">
-								{plan.source}
+				<div class="border rounded-lg overflow-hidden">
+					<button
+						class="w-full text-left p-3 hover:bg-gray-50 transition-colors {internalSelectedPath === plan.path ? 'bg-blue-50 ring-1 ring-blue-300' : ''}"
+						onclick={() => handlePlanSelectInternal(plan)}
+					>
+						<div class="flex items-center justify-between mb-1">
+							<span class="text-sm font-medium truncate flex-1" title={plan.path}>{plan.filename}</span>
+							<div class="flex gap-1 ml-2 shrink-0 items-center">
+								<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium {sourceBadge(plan.source)}">
+									{plan.source}
+								</span>
+								<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium {statusBadge(plan.status)}">
+									{plan.status}
+								</span>
+								{#if showIgnored}
+									<button
+										class="text-[10px] text-blue-400 hover:text-blue-600 ml-1"
+										onclick={(e) => handleUnignore(e, plan.path)}
+										title="무시 해제"
+									>복원</button>
+								{:else}
+									<button
+										class="text-[10px] text-gray-400 hover:text-red-500 ml-1"
+										onclick={(e) => handleIgnore(e, plan.path)}
+										title="무시 목록에 추가"
+									>무시</button>
+								{/if}
+								{#if plan.source === 'external'}
+									<button
+										class="text-[10px] text-red-400 hover:text-red-600 ml-1"
+										onclick={(e) => handleRemoveExternal(e, plan.path)}
+										title="외부 plan 제거"
+									>x</button>
+								{/if}
+								<!-- 펼치기/접기 chevron -->
+								<svg
+									class="w-3.5 h-3.5 text-gray-400 ml-1 transition-transform {internalSelectedPath === plan.path ? 'rotate-180' : ''}"
+									viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+								>
+									<path d="M6 9l6 6 6-6" />
+								</svg>
+							</div>
+						</div>
+						<div class="flex items-center gap-2">
+							<div class="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+								<div
+									class="h-full rounded-full transition-all {plan.progress.percent >= 100 ? 'bg-green-500' : 'bg-blue-500'}"
+									style="width: {plan.progress.percent}%"
+								></div>
+							</div>
+							<span class="text-xs text-gray-500 whitespace-nowrap">
+								{plan.progress.done}/{plan.progress.total} ({plan.progress.percent}%)
 							</span>
-							<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium {statusBadge(plan.status)}">
-								{plan.status}
-							</span>
-							{#if showIgnored}
-								<button
-									class="text-[10px] text-blue-400 hover:text-blue-600 ml-1"
-									onclick={(e) => handleUnignore(e, plan.path)}
-									title="무시 해제"
-								>복원</button>
+						</div>
+					</button>
+
+					<!-- Phase 5: 아코디언 인라인 상세 표시 -->
+					{#if internalSelectedPath === plan.path}
+						<div class="border-t bg-gray-50 px-3 py-2">
+							{#if planDetailLoading}
+								<div class="flex items-center justify-center py-4">
+									<div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+								</div>
+							{:else if planDetail}
+								<!-- Progress bar -->
+								<div class="h-1 bg-gray-200 rounded-full overflow-hidden mb-2">
+									<div
+										class="h-full rounded-full {planDetail.progress.percent >= 100 ? 'bg-green-500' : 'bg-blue-500'}"
+										style="width: {planDetail.progress.percent}%"
+									></div>
+								</div>
+								<!-- Phases -->
+								<div class="space-y-1.5 max-h-64 overflow-y-auto">
+									{#each planDetail.phases as phase}
+										<div class="text-xs">
+											<div class="font-medium text-gray-700 mb-0.5">{phase.name} ({phase.done_count}/{phase.total_count})</div>
+											<div class="space-y-0.5 ml-2">
+												{#each phase.items as item}
+													<div class="flex items-start gap-1.5 {item.checked ? 'opacity-50' : ''}">
+														<span class="shrink-0 mt-0.5">{item.checked ? '✓' : '○'}</span>
+														<span class="{item.checked ? 'line-through text-gray-400' : 'text-gray-700'}">{item.text}</span>
+													</div>
+													{#each item.children as child}
+														<div class="flex items-start gap-1.5 ml-4 {child.checked ? 'opacity-50' : ''}">
+															<span class="shrink-0 mt-0.5">{child.checked ? '✓' : '○'}</span>
+															<span class="{child.checked ? 'line-through text-gray-400' : 'text-gray-600'}">{child.text}</span>
+														</div>
+													{/each}
+												{/each}
+											</div>
+										</div>
+									{/each}
+								</div>
 							{:else}
-								<button
-									class="text-[10px] text-gray-400 hover:text-red-500 ml-1"
-									onclick={(e) => handleIgnore(e, plan.path)}
-									title="무시 목록에 추가"
-								>무시</button>
-							{/if}
-							{#if plan.source === 'external'}
-								<button
-									class="text-[10px] text-red-400 hover:text-red-600 ml-1"
-									onclick={(e) => handleRemoveExternal(e, plan.path)}
-									title="외부 plan 제거"
-								>x</button>
+								<div class="text-xs text-gray-400 py-2 text-center">상세 정보를 불러올 수 없습니다</div>
 							{/if}
 						</div>
-					</div>
-					<div class="flex items-center gap-2">
-						<div class="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-							<div
-								class="h-full rounded-full transition-all {plan.progress.percent >= 100 ? 'bg-green-500' : 'bg-blue-500'}"
-								style="width: {plan.progress.percent}%"
-							></div>
-						</div>
-						<span class="text-xs text-gray-500 whitespace-nowrap">
-							{plan.progress.done}/{plan.progress.total} ({plan.progress.percent}%)
-						</span>
-					</div>
-				</button>
+					{/if}
+				</div>
 			{/each}
 		</div>
 	{/if}

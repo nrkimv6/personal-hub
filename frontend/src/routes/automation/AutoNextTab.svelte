@@ -4,11 +4,9 @@
 	import TaskList from '$lib/components/auto-next/TaskList.svelte';
 	import RunControl from '$lib/components/auto-next/RunControl.svelte';
 	import PlanList from '$lib/components/auto-next/PlanList.svelte';
-	import PlanItems from '$lib/components/auto-next/PlanItems.svelte';
 	import LogViewer from '$lib/components/auto-next/LogViewer.svelte';
 	import CurrentTaskCard from '$lib/components/auto-next/CurrentTaskCard.svelte';
 	import { createSmartPolling } from '$lib/utils/smart-polling';
-	import { encodePathToBase64 } from '$lib/utils/encoding';
 	import {
 		autoNextStatsApi,
 		autoNextTaskApi,
@@ -19,8 +17,7 @@
 		AutoNextStatsResponse,
 		AutoNextTaskListResponse,
 		AutoNextRunStatusResponse,
-		AutoNextPlanFileResponse,
-		AutoNextPlanDetailResponse
+		AutoNextPlanFileResponse
 	} from '$lib/api';
 
 	let stats = $state<AutoNextStatsResponse | null>(null);
@@ -36,37 +33,8 @@
 	let justCompleted = $state(false);
 	let completedTimer: ReturnType<typeof setTimeout> | null = null;
 	let lastStartTime = $state<string | null>(null);
-	let selectedPlan = $state<AutoNextPlanFileResponse | null>(null);
-	let planDetail = $state<AutoNextPlanDetailResponse | null>(null);
-	let planDetailLoading = $state(false);
-	let showTaskHistory = $state(
-		typeof window !== 'undefined'
-			? localStorage.getItem('autoNext_showTaskHistory') === 'true'
-			: false
-	);
-
-	async function handlePlanSelect(plan: AutoNextPlanFileResponse) {
-		if (selectedPlan?.path === plan.path) {
-			selectedPlan = null;
-			planDetail = null;
-			return;
-		}
-		selectedPlan = plan;
-		planDetailLoading = true;
-		try {
-			const encoded = encodePathToBase64(plan.path);
-			planDetail = await autoNextPlanApi.items(encoded);
-		} catch {
-			planDetail = null;
-		} finally {
-			planDetailLoading = false;
-		}
-	}
-
-	function closePlanDetail() {
-		selectedPlan = null;
-		planDetail = null;
-	}
+	// Phase 1: Collapsible 제어 패널 상태 변수
+	let collapsed = $state(false);
 
 	async function loadData() {
 		try {
@@ -75,7 +43,7 @@
 				autoNextTaskApi.list({
 					status: statusFilter,
 					limit: 50,
-					source_path: runStatus?.plan_file ?? selectedPlan?.path ?? undefined
+					source_path: runStatus?.plan_file ?? undefined
 				}),
 				autoNextRunnerApi.status(),
 				autoNextPlanApi.list()
@@ -173,17 +141,12 @@
 		}
 		if (runStatus) prevRunning = runStatus.running;
 	});
-
-	// localStorage에 showTaskHistory 상태 저장
-	$effect(() => {
-		if (typeof window !== 'undefined') {
-			localStorage.setItem('autoNext_showTaskHistory', String(showTaskHistory));
-		}
-	});
 </script>
 
-<div class="space-y-6">
-	<div class="flex items-center justify-between">
+<!-- Phase 1: flex column 전체 높이 구조 -->
+<div class="flex flex-col h-[calc(100vh-4rem)] overflow-hidden">
+	<!-- 헤더 -->
+	<div class="flex items-center justify-between px-4 py-2 shrink-0">
 		<div class="flex items-center gap-3">
 			<h1 class="text-2xl font-bold">Auto Next</h1>
 			<button
@@ -208,6 +171,27 @@
 					<path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
 					<path d="M3 22v-6h6" />
 					<path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+				</svg>
+			</button>
+			<!-- Phase 1: 접기/펼치기 토글 버튼 -->
+			<button
+				onclick={() => (collapsed = !collapsed)}
+				class="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+				title={collapsed ? '제어 패널 펼치기' : '제어 패널 접기'}
+			>
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					width="20"
+					height="20"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					class="transition-transform {collapsed ? 'rotate-180' : ''}"
+				>
+					<path d="M18 15l-6-6-6 6" />
 				</svg>
 			</button>
 		</div>
@@ -235,7 +219,7 @@
 	</div>
 
 	{#if error}
-		<div class="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">
+		<div class="mx-4 bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm shrink-0">
 			{error}
 		</div>
 	{/if}
@@ -245,55 +229,81 @@
 			<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
 		</div>
 	{:else}
-		<!-- Stats -->
-		{#if stats}
-			<StatsCard {stats} {currentRunStats} isRunning={runStatus?.running ?? false} />
-		{/if}
-
-		<!-- Current Task Card -->
-		{#if runStatus?.running && taskList?.tasks}
-			{@const currentTask = taskList.tasks.find(t => t.status === 'running')}
-			{#if currentTask}
-				<CurrentTaskCard
-					task={currentTask}
-					onShowDetail={() => { showTaskHistory = true; }}
-				/>
-			{/if}
-		{/if}
-
-		<!-- Run Control + Plans -->
-		<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-			<RunControl status={runStatus} {plans} onStatusChange={handleRunStatusChange} />
-			<PlanList {plans} onPlansChange={loadData} onPlanSelect={handlePlanSelect} selectedPath={selectedPlan?.path ?? null} />
-		</div>
-
-		<!-- Plan Detail -->
-		{#if planDetailLoading}
-			<div class="flex items-center justify-center py-8">
-				<div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
+		<!-- Phase 1: 접힌 상태 요약 바 -->
+		{#if collapsed}
+			<div class="flex items-center gap-3 px-4 py-2 bg-gray-50 border-b shrink-0">
+				{#if runStatus?.running}
+					<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+						<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+						실행 중
+					</span>
+				{:else}
+					<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+						<span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
+						대기
+					</span>
+				{/if}
+				{#if taskList?.tasks}
+					{@const runningTask = taskList.tasks.find(t => t.status === 'running')}
+					{#if runningTask}
+						<span class="text-xs text-gray-600 truncate flex-1">{runningTask.text}</span>
+					{/if}
+				{/if}
+				{#if stats}
+					<span class="text-xs text-gray-500 shrink-0">{stats.completion_rate.toFixed(1)}%</span>
+				{/if}
+				{#if runStatus?.current_cycle}
+					<span class="text-xs text-gray-500 shrink-0">Cycle {runStatus.current_cycle}</span>
+				{/if}
 			</div>
-		{:else if planDetail}
-			<PlanItems detail={planDetail} onClose={closePlanDetail} />
 		{/if}
 
-		<!-- Task History Toggle -->
-		<div class="flex items-center gap-2">
-			<label class="flex items-center gap-2 text-sm text-gray-600 cursor-pointer hover:text-gray-800 transition-colors">
-				<input
-					type="checkbox"
-					bind:checked={showTaskHistory}
-					class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-				/>
-				<span>작업 이력 보기</span>
-				<span class="text-xs text-gray-400">(개발자용)</span>
-			</label>
+		<!-- Phase 1: 제어 패널 (접기/펼치기) -->
+		{#if !collapsed}
+			<div class="px-4 py-3 shrink-0 space-y-3">
+				<!-- Stats -->
+				{#if stats}
+					<StatsCard {stats} {currentRunStats} isRunning={runStatus?.running ?? false} />
+				{/if}
+
+				<!-- RunControl 전체 너비 -->
+				<RunControl status={runStatus} {plans} onStatusChange={handleRunStatusChange} />
+
+				<!-- 3-column 그리드: CurrentTaskCard + PlanList -->
+				<div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+					<!-- Current Task Card -->
+					{#if runStatus?.running && taskList?.tasks}
+						{@const currentTask = taskList.tasks.find(t => t.status === 'running')}
+						{#if currentTask}
+							<CurrentTaskCard
+								task={currentTask}
+								onShowDetail={() => {}}
+							/>
+						{:else}
+							<div></div>
+						{/if}
+					{:else}
+						<div></div>
+					{/if}
+
+					<!-- PlanList (2 cols span) -->
+					<div class="lg:col-span-2">
+						<PlanList {plans} onPlansChange={loadData} />
+					</div>
+				</div>
+			</div>
+		{/if}
+
+		<!-- Phase 1: LogViewer flex-1 영역 -->
+		<div class="flex-1 min-h-0 px-4 pb-2">
+			<LogViewer />
 		</div>
 
-		<!-- Task List -->
-		{#if showTaskHistory}
-			{#if !runStatus?.plan_file && !selectedPlan}
-				<div class="bg-gray-50 border border-gray-200 rounded-lg p-6 text-center text-sm text-gray-500">
-					Plan을 선택하면 관련 작업 이력이 표시됩니다.
+		<!-- Phase 1: TaskHistory 하단 고정 패널 (항상 표시) -->
+		<div class="h-[280px] shrink-0 overflow-hidden px-4 pb-3">
+			{#if !runStatus?.plan_file}
+				<div class="bg-gray-50 border border-gray-200 rounded-lg p-6 text-center text-sm text-gray-500 h-full flex items-center justify-center">
+					Plan을 실행하면 관련 작업 이력이 표시됩니다.
 				</div>
 			{:else if taskList}
 				<TaskList
@@ -306,9 +316,6 @@
 					onDeleteOld={handleDeleteOld}
 				/>
 			{/if}
-		{/if}
-
-		<!-- Log Viewer -->
-		<LogViewer />
+		</div>
 	{/if}
 </div>

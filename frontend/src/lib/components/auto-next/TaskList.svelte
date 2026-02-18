@@ -113,10 +113,11 @@
 </script>
 
 <div class="bg-white rounded-lg border">
-	<div class="p-4 border-b flex items-center justify-between flex-wrap gap-2">
+	<!-- Phase 5: 헤더 패딩 축소 -->
+	<div class="px-3 py-2 border-b flex items-center justify-between flex-wrap gap-2">
 		<div class="flex items-center gap-3">
-			<h2 class="font-semibold">
-				작업 목록 <span class="text-sm text-gray-400 font-normal">({total})</span>
+			<h2 class="font-semibold text-sm">
+				작업 목록 <span class="text-xs text-gray-400 font-normal">({total})</span>
 			</h2>
 		</div>
 		<!-- 자동 정리 설정 -->
@@ -146,8 +147,9 @@
 		<div class="flex items-center gap-2">
 			<div class="flex gap-1">
 				{#each statusFilters as f}
-					<button
-						class="px-2.5 py-1 text-xs rounded-full border transition-colors {currentFilter === f.value ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}"
+					<!-- Phase 5: 필터 버튼 컴팩트화 -->
+				<button
+						class="px-1.5 py-0.5 text-[10px] rounded-full border transition-colors {currentFilter === f.value ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}"
 						onclick={() => onFilterChange(f.value)}
 					>
 						{f.label}
