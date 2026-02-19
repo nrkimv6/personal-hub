@@ -36,12 +36,13 @@ class ImageClassifierSettings(BaseSettings):
     # === 썸네일 설정 ===
     THUMBNAIL_SIZE: tuple[int, int] = (300, 300)  # 썸네일 크기
     THUMBNAIL_QUALITY: int = 85  # JPEG 품질 (1-100)
-    THUMBNAIL_DIR: Path = Path(__file__).parents[4] / "data" / "image_classifier" / "thumbnails"
+    THUMBNAIL_DIR: Path = Path(__file__).parents[3] / "data" / "image_classifier" / "thumbnails"
 
     # === AI 분류 설정 (CLI 우선) ===
     AI_MODE: str = "cli"  # "cli" | "api"
     CLAUDE_CLI_PATH: str = "claude"  # claude CLI 실행 경로
-    CLAUDE_MODEL: str = "claude-sonnet-4-5-20250929"  # Claude CLI 모델 ID
+    # CLAUDE_MODEL: str = "claude-sonnet-4-5-20250929"  # Claude CLI 모델 ID
+    CLAUDE_MODEL: str = "sonnet"  # Claude CLI 모델 ID
     GEMINI_CLI_PATH: str = "gemini"  # gemini CLI 실행 경로
 
     # API 키 (선택적 — API 모드 시에만 사용)
@@ -130,6 +131,7 @@ def save_settings_to_file():
         "SCAN_ROOT_FOLDERS": settings.SCAN_ROOT_FOLDERS,
         "AI_MODE": settings.AI_MODE,
         "CLAUDE_CLI_PATH": settings.CLAUDE_CLI_PATH,
+        "CLAUDE_MODEL": settings.CLAUDE_MODEL,
         "GEMINI_CLI_PATH": settings.GEMINI_CLI_PATH,
         "CLI_MAX_WORKERS": settings.CLI_MAX_WORKERS,
         "CLI_TIMEOUT_SECONDS": settings.CLI_TIMEOUT_SECONDS,
