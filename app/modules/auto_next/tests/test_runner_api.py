@@ -39,14 +39,66 @@ class TestGetStatus:
         fake_sync.set("auto-next:state:pid", "12345")
         fake_sync.set("auto-next:state:plan_file", "test.md")
         fake_sync.set("auto-next:state:start_time", "2026-02-18T10:00:00")
+        fake_sync.set("auto-next:listener:heartbeat", "2026-02-18T10:00:00")
 
-        with patch.object(executor_service, '_is_pid_alive', return_value=True):
-            response = await client.get("/api/v1/auto-next/status")
+        response = await client.get("/api/v1/auto-next/status")
 
         assert response.status_code == 200
         data = response.json()
         assert data["running"] is True
         assert data["pid"] == 12345
+        assert data["listener_alive"] is True
+
+
+class TestGetStatusListenerAlive:
+    """listener_alive 필드 테스트"""
+
+    async def test_listener_alive_true_when_heartbeat_exists(self, client, mock_executor_redis):
+        fake_sync = mock_executor_redis["sync"]
+        fake_sync.set("auto-next:listener:heartbeat", "2026-02-19T10:00:00")
+        # running=False이지만 listener는 살아있음
+
+        response = await client.get("/api/v1/auto-next/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["listener_alive"] is True
+        assert data["running"] is False
+
+    async def test_listener_alive_false_when_no_heartbeat(self, client, mock_executor_redis):
+        # heartbeat 없음
+
+        response = await client.get("/api/v1/auto-next/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["listener_alive"] is False
+        assert data["running"] is False
+
+    async def test_running_true_with_heartbeat(self, client, mock_executor_redis):
+        fake_sync = mock_executor_redis["sync"]
+        fake_sync.set("auto-next:listener:heartbeat", "2026-02-19T10:00:00")
+        fake_sync.set("auto-next:state:status", "running")
+        fake_sync.set("auto-next:state:pid", "12345")
+        fake_sync.set("auto-next:state:start_time", "2026-02-19T10:00:00")
+
+        response = await client.get("/api/v1/auto-next/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["listener_alive"] is True
+        assert data["running"] is True
+        assert data["pid"] == 12345
+
+    async def test_stale_running_without_heartbeat(self, client, mock_executor_redis):
+        """running=True이지만 heartbeat 없음 → stale 정리 → running=False"""
+        fake_sync = mock_executor_redis["sync"]
+        fake_sync.set("auto-next:state:status", "running")
+        fake_sync.set("auto-next:state:pid", "12345")
+        # heartbeat 없음
+
+        response = await client.get("/api/v1/auto-next/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["listener_alive"] is False
+        assert data["running"] is False
 
 
 class TestStartRun:
