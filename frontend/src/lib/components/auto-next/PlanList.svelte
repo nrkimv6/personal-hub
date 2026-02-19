@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { autoNextPlanApi } from '$lib/api';
-	import type { AutoNextPlanFileResponse, AutoNextPlanDetailResponse } from '$lib/api';
+	import type { AutoNextPlanFileResponse, AutoNextPlanDetailResponse, AutoNextExternalPathResponse } from '$lib/api';
 	import { encodePathToBase64 } from '$lib/utils/encoding';
 
 	interface Props {
@@ -17,6 +17,10 @@
 	let externalPath = $state('');
 	let addError = $state<string | null>(null);
 	let addLoading = $state(false);
+
+	// 외부 경로 목록
+	let externalPaths = $state<AutoNextExternalPathResponse[]>([]);
+	let externalPathsLoading = $state(false);
 
 	// Plan detail (inline accordion)
 	let selectedPath = $state<string | null>(null);
@@ -74,6 +78,17 @@
 		}
 	}
 
+	async function loadExternalPaths() {
+		externalPathsLoading = true;
+		try {
+			externalPaths = await autoNextPlanApi.listExternalPaths();
+		} catch {
+			externalPaths = [];
+		} finally {
+			externalPathsLoading = false;
+		}
+	}
+
 	async function handleAddExternal() {
 		if (!externalPath.trim()) return;
 		addLoading = true;
@@ -81,8 +96,8 @@
 		try {
 			await autoNextPlanApi.addExternal(externalPath.trim());
 			externalPath = '';
-			showAddForm = false;
 			onPlansChange?.();
+			await loadExternalPaths();
 		} catch (e) {
 			addError = e instanceof Error ? e.message : '추가 실패';
 		} finally {
@@ -95,6 +110,15 @@
 		try {
 			await autoNextPlanApi.removeExternal(path);
 			onPlansChange?.();
+			await loadExternalPaths();
+		} catch { /* ignore */ }
+	}
+
+	async function handleRemoveExternalPath(path: string) {
+		try {
+			await autoNextPlanApi.removeExternal(path);
+			onPlansChange?.();
+			await loadExternalPaths();
 		} catch { /* ignore */ }
 	}
 
@@ -142,7 +166,7 @@
 			</button>
 			<button
 				class="h-6 px-2 text-[10px] rounded text-gray-500 hover:bg-gray-100 transition-colors inline-flex items-center gap-1"
-				onclick={() => showAddForm = !showAddForm}
+				onclick={() => { showAddForm = !showAddForm; if (showAddForm) loadExternalPaths(); }}
 			>
 				<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
 				추가
@@ -159,7 +183,7 @@
 				type="text"
 				class="w-full border rounded px-2 py-1 text-xs"
 				bind:value={externalPath}
-				placeholder="Plan 파일 경로 (예: D:\work\project\...)"
+				placeholder="Plan 파일 또는 폴더 경로 (예: D:\work\project\...)"
 			/>
 			<div class="flex gap-2">
 				<button
@@ -176,6 +200,32 @@
 					취소
 				</button>
 			</div>
+
+		<!-- 등록된 외부 경로 목록 -->
+		{#if externalPathsLoading}
+			<div class="text-[10px] text-gray-400">로딩 중...</div>
+		{:else if externalPaths.length > 0}
+			<div class="border-t pt-2 mt-1 space-y-1">
+				<div class="text-[10px] text-gray-400 font-medium uppercase tracking-wider">등록된 외부 경로</div>
+				{#each externalPaths as ep}
+					<div class="flex items-center gap-1.5 text-[10px]">
+						<!-- 파일/폴더 아이콘 -->
+						{#if ep.type === 'folder'}
+							<svg class="w-3 h-3 shrink-0 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+						{:else}
+							<svg class="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+						{/if}
+						<span class="truncate flex-1 text-gray-600" title={ep.path}>{ep.path}</span>
+						<span class="shrink-0 text-gray-400 font-mono">{ep.plan_count}개</span>
+						<button
+							class="shrink-0 text-red-400 hover:text-red-600 px-1"
+							onclick={() => handleRemoveExternalPath(ep.path)}
+							title="제거"
+						>×</button>
+					</div>
+				{/each}
+			</div>
+		{/if}
 		</div>
 	{/if}
 
@@ -194,8 +244,12 @@
 						onclick={() => handlePlanSelect(plan)}
 						class="flex items-center gap-2 rounded-md px-2.5 py-2 text-left transition-colors w-full {selectedPath === plan.path ? 'bg-blue-50' : 'hover:bg-gray-50'}"
 					>
-						<!-- File icon -->
-						<svg class="w-3.5 h-3.5 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+						<!-- File/Folder icon -->
+						{#if plan.external_type === 'folder'}
+							<svg class="w-3.5 h-3.5 shrink-0 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+						{:else}
+							<svg class="w-3.5 h-3.5 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+						{/if}
 
 						<!-- Content -->
 						<div class="flex flex-col gap-0.5 min-w-0 flex-1">

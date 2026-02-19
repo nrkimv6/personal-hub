@@ -9,6 +9,7 @@ from app.modules.auto_next.config import config
 from app.modules.auto_next.schemas import (
     PlanFileResponse, PlanProgressResponse,
     PlanDetailResponse, PlanPhaseResponse, PlanItemResponse,
+    ExternalPathResponse,
 )
 
 
@@ -108,25 +109,34 @@ class PlanService:
             project_plan_dir = config.WTOOLS_BASE_DIR / project / "docs" / "plan"
             self._scan_plan_dir(project_plan_dir, seen, results, include_ignored)
 
-        # Step 3: 외부 plan 파일
+        # Step 3: 외부 plan 파일/폴더
         for ext_path in self._external_plans:
             p = Path(ext_path)
-            if str(p) not in seen and p.exists():
-                seen.add(str(p))
-                status = self.get_plan_status(p)
-                progress = self.get_plan_progress(p)
-                is_ignored = self._is_ignored_plan(p, status, progress)
-                if include_ignored or not is_ignored:
-                    results.append(
-                        PlanFileResponse(
-                            path=str(p),
-                            filename=p.name,
-                            status=status,
-                            progress=progress,
-                            source="external",
-                            ignored=is_ignored,
+            if not p.exists():
+                continue
+            if p.is_dir():
+                # 폴더이면 내부 *.md 전체 스캔 (source_override="external", external_type="folder")
+                self._scan_plan_dir(p, seen, results, include_ignored,
+                                    source_override="external", external_type="folder")
+            else:
+                # 파일이면 기존 로직 유지
+                if str(p) not in seen:
+                    seen.add(str(p))
+                    status = self.get_plan_status(p)
+                    progress = self.get_plan_progress(p)
+                    is_ignored = self._is_ignored_plan(p, status, progress)
+                    if include_ignored or not is_ignored:
+                        results.append(
+                            PlanFileResponse(
+                                path=str(p),
+                                filename=p.name,
+                                status=status,
+                                progress=progress,
+                                source="external",
+                                ignored=is_ignored,
+                                external_type="file",
+                            )
                         )
-                    )
 
         results.sort(key=lambda x: x.filename, reverse=True)
         return results
@@ -142,19 +152,34 @@ class PlanService:
         seen: set,
         results: List[PlanFileResponse],
         include_ignored: bool,
+        source_override: Optional[str] = None,
+        external_type: Optional[str] = None,
     ):
-        """plan 디렉토리 스캔"""
+        """plan 디렉토리 스캔
+
+        Args:
+            plan_dir: 스캔할 디렉토리
+            seen: 이미 처리된 경로 집합 (중복 방지)
+            results: 결과 목록 (append)
+            include_ignored: True이면 무시된 plan도 포함
+            source_override: None이면 자동 결정, 문자열이면 해당 값 사용
+                (외부 폴더는 WTOOLS_BASE_DIR 바깥이라 relative_to 실패 → "external" 강제 지정)
+            external_type: "folder" | None — PlanFileResponse.external_type에 설정할 값
+        """
         if not plan_dir.exists():
             return
 
-        # source 결정
-        base = config.WTOOLS_BASE_DIR
-        rel = ""
-        try:
-            rel = str(plan_dir.relative_to(base))
-        except ValueError:
-            pass
-        source = rel.split("\\")[0] if "\\" in rel else rel.split("/")[0] if "/" in rel else "common"
+        # source 결정: override가 없으면 WTOOLS_BASE_DIR 상대경로에서 추출
+        if source_override is not None:
+            source = source_override
+        else:
+            base = config.WTOOLS_BASE_DIR
+            rel = ""
+            try:
+                rel = str(plan_dir.relative_to(base))
+            except ValueError:
+                pass
+            source = rel.split("\\")[0] if "\\" in rel else rel.split("/")[0] if "/" in rel else "common"
 
         for plan_file in plan_dir.glob("*.md"):
             if plan_file.stem.endswith("_todo"):
@@ -177,6 +202,7 @@ class PlanService:
                         progress=progress,
                         source=source,
                         ignored=is_ignored,
+                        external_type=external_type,
                     )
                 )
 
@@ -323,6 +349,21 @@ class PlanService:
             phases=phases,
             progress=progress,
         )
+
+    def list_external_paths(self) -> List[ExternalPathResponse]:
+        """등록된 외부 경로 목록 조회 (타입 + plan_count 포함)"""
+        result = []
+        for ext_path in self._external_plans:
+            p = Path(ext_path)
+            if p.is_dir():
+                # 폴더: _todo 제외 *.md 개수
+                plan_count = sum(
+                    1 for f in p.glob("*.md") if not f.stem.endswith("_todo")
+                ) if p.exists() else 0
+                result.append(ExternalPathResponse(path=ext_path, type="folder", plan_count=plan_count))
+            else:
+                result.append(ExternalPathResponse(path=ext_path, type="file", plan_count=1 if p.exists() else 0))
+        return result
 
     def validate_external_path(self, path: str) -> bool:
         """외부 경로 화이트리스트 검증"""

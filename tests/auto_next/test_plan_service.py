@@ -306,3 +306,85 @@ class TestExternalPlanManagement:
         filenames = [r.filename for r in results]
         assert "2026-01-01_test.md" in filenames
         assert "external_plan.md" in filenames
+
+
+# ========== 폴더 단위 외부 plan 추가 ==========
+
+class TestExternalFolderPlan:
+
+    def _make_folder_with_plans(self, base: Path, folder_name: str, plan_names: list[str]) -> Path:
+        """임시 plan 폴더 생성 헬퍼"""
+        folder = base / folder_name
+        folder.mkdir(parents=True, exist_ok=True)
+        for name in plan_names:
+            (folder / name).write_text("> 상태: 대기\n\n1. [ ] task", encoding="utf-8")
+        return folder
+
+    def test_add_external_folder(self, svc, tmp_path):
+        """폴더 추가 → list_plans()에서 내부 md 파일 전부 source='external', external_type='folder'"""
+        folder = self._make_folder_with_plans(
+            tmp_path, "plans_folder", ["plan_a.md", "plan_b.md"]
+        )
+        svc._external_plans = [str(folder)]
+
+        results = svc.list_plans(include_ignored=True)
+        external = [r for r in results if r.source == "external"]
+
+        filenames = {r.filename for r in external}
+        assert "plan_a.md" in filenames
+        assert "plan_b.md" in filenames
+        for r in external:
+            assert r.external_type == "folder"
+
+    def test_folder_skips_todo(self, svc, tmp_path):
+        """폴더 내 _todo.md 파일은 list_plans() 결과에서 제외"""
+        folder = self._make_folder_with_plans(
+            tmp_path, "plans_folder", ["plan_a.md", "plan_a_todo.md"]
+        )
+        svc._external_plans = [str(folder)]
+
+        results = svc.list_plans(include_ignored=True)
+        filenames = [r.filename for r in results]
+
+        assert "plan_a.md" in filenames
+        assert "plan_a_todo.md" not in filenames
+
+    def test_nonexistent_folder_ignored(self, svc, tmp_path):
+        """존재하지 않는 폴더 경로 → list_plans()에서 무시 (에러 없음)"""
+        nonexistent = str(tmp_path / "does_not_exist")
+        svc._external_plans = [nonexistent]
+
+        # 에러 없이 빈 결과 반환
+        results = svc.list_plans(include_ignored=True)
+        assert all(r.source != "external" for r in results)
+
+    def test_folder_add_remove_roundtrip(self, svc, tmp_path):
+        """폴더 경로 add → remove → list_plans()에서 사라짐"""
+        folder = self._make_folder_with_plans(tmp_path, "plans_folder", ["plan_c.md"])
+
+        svc.add_external_plan(str(folder))
+        after_add = svc.list_plans(include_ignored=True)
+        assert any(r.filename == "plan_c.md" for r in after_add)
+
+        svc.remove_external_plan(str(folder))
+        after_remove = svc.list_plans(include_ignored=True)
+        assert not any(r.filename == "plan_c.md" for r in after_remove)
+
+    def test_mixed_file_and_folder(self, svc, tmp_path):
+        """파일 1개 + 폴더 1개 동시 등록 → 모두 정상 반환"""
+        folder = self._make_folder_with_plans(tmp_path, "folder1", ["folder_plan.md"])
+        single_file = tmp_path / "file_plan.md"
+        single_file.write_text("> 상태: 대기\n\n1. [ ] task", encoding="utf-8")
+
+        svc._external_plans = [str(folder), str(single_file)]
+
+        results = svc.list_plans(include_ignored=True)
+        filenames = {r.filename for r in results if r.source == "external"}
+
+        assert "folder_plan.md" in filenames
+        assert "file_plan.md" in filenames
+
+        folder_plans = [r for r in results if r.filename == "folder_plan.md"]
+        file_plans = [r for r in results if r.filename == "file_plan.md"]
+        assert folder_plans[0].external_type == "folder"
+        assert file_plans[0].external_type == "file"
