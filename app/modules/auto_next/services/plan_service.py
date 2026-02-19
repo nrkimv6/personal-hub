@@ -206,13 +206,16 @@ class PlanService:
                     )
                 )
 
+    # 자동 무시 대상 상태 (정확히 일치해야 함)
+    _IGNORED_STATUSES = {"완료", "구현완료"}
+
     def _is_ignored_plan(self, path: Path, status: str, progress: PlanProgressResponse) -> bool:
         """plan이 무시 대상인지 판단"""
         # 수동 무시 목록
         if str(path.resolve()) in self._ignored_plans:
             return True
-        # 완료 상태
-        if "완료" in status or "구현완료" in status:
+        # 완료 상태 (정확히 일치하는 경우만)
+        if status in self._IGNORED_STATUSES:
             return True
         # 모든 체크박스 완료
         if progress.total > 0 and progress.done == progress.total:
