@@ -15,12 +15,14 @@
 		TrendingUp,
 		RefreshCw,
 		Loader2,
-		LayoutDashboard
+		LayoutDashboard,
+		AlertCircle
 	} from 'lucide-svelte';
 
 	function getStatusLabel(status: string): string {
 		if (status === 'done') return '완료';
 		if (status === 'running') return '실행 중';
+		if (status === 'error') return '오류';
 		return '대기';
 	}
 
@@ -118,6 +120,132 @@
 
 	async function handleRefresh() {
 		await Promise.all([loadHealth(), loadStats(), loadActivity()]);
+	}
+
+	// === 파이프라인 실행 ===
+	let pipelineRunning = $state(false);
+	let pipelineAbort: AbortController | null = $state(null);
+
+	const stageStatusUrls: Record<string, string> = {
+		scan: '/api/ic/scan/status',
+		extract: '/api/ic/scan/thumbnails/status',
+		duplicates: '/api/ic/duplicates/detect/status',
+		classify: '/api/ic/classify/status'
+	};
+
+	function updateStage(id: string, status: string) {
+		pipelineStages = pipelineStages.map((s) => (s.id === id ? { ...s, status } : s));
+	}
+
+	function resetStages() {
+		pipelineStages = pipelineStages.map((s) => ({ ...s, status: 'idle' }));
+	}
+
+	async function pollUntilDone(stageId: string, signal?: AbortSignal): Promise<boolean> {
+		const url = stageStatusUrls[stageId];
+		if (!url) return true;
+
+		updateStage(stageId, 'running');
+
+		while (true) {
+			if (signal?.aborted) return false;
+			await new Promise((r) => setTimeout(r, 2000));
+
+			try {
+				const res = await fetchWithTimeout(url);
+				if (!res.ok) continue;
+				const data = await res.json();
+
+				// 각 API의 running 판정 필드가 다름
+				const isRunning =
+					data.is_running === true || data.running === true || data.status === 'running';
+
+				if (!isRunning) {
+					const hasError = data.error || data.error_message || data.status === 'failed';
+					updateStage(stageId, hasError ? 'error' : 'done');
+					return !hasError;
+				}
+			} catch {
+				// 네트워크 에러는 무시하고 재시도
+			}
+		}
+	}
+
+	async function startFullPipeline() {
+		if (pipelineRunning) return;
+		pipelineRunning = true;
+		const abort = new AbortController();
+		pipelineAbort = abort;
+		resetStages();
+
+		const steps = [
+			{ id: 'scan', url: '/api/ic/scan/start', method: 'POST' },
+			{ id: 'extract', url: '/api/ic/scan/thumbnails', method: 'POST' },
+			{ id: 'duplicates', url: '/api/ic/duplicates/detect', method: 'POST' },
+			{ id: 'classify', url: '/api/ic/classify/start', method: 'POST' }
+		];
+
+		try {
+			for (const step of steps) {
+				if (abort.signal.aborted) break;
+				updateStage(step.id, 'running');
+
+				const res = await fetchWithTimeout(step.url, { method: step.method });
+				if (!res.ok) {
+					updateStage(step.id, 'error');
+					break;
+				}
+
+				const ok = await pollUntilDone(step.id, abort.signal);
+				if (!ok) break;
+			}
+		} finally {
+			pipelineRunning = false;
+			pipelineAbort = null;
+			loadStats();
+		}
+	}
+
+	function stopPipeline() {
+		pipelineAbort?.abort();
+		pipelineRunning = false;
+		pipelineAbort = null;
+	}
+
+	let classifyRunning = $state(false);
+	async function startClassification() {
+		if (classifyRunning) return;
+		classifyRunning = true;
+		updateStage('classify', 'running');
+		try {
+			const res = await fetchWithTimeout('/api/ic/classify/start', { method: 'POST' });
+			if (!res.ok) {
+				updateStage('classify', 'error');
+				return;
+			}
+			await pollUntilDone('classify');
+		} finally {
+			classifyRunning = false;
+			loadStats();
+		}
+	}
+
+	let duplicateRunning = $state(false);
+	async function startDuplicateDetect() {
+		if (duplicateRunning) return;
+		duplicateRunning = true;
+		updateStage('duplicates', 'running');
+		try {
+			const res = await fetchWithTimeout('/api/ic/duplicates/detect', { method: 'POST' });
+			if (!res.ok) {
+				updateStage('duplicates', 'error');
+				return;
+			}
+			await pollUntilDone('duplicates');
+		} finally {
+			duplicateRunning = false;
+			loadStats();
+		}
 	}
 </script>
 
@@ -285,7 +413,9 @@
 							? 'bg-emerald-500/10 border-emerald-500/30'
 							: stage.status === 'running'
 								? 'bg-primary/10 border-primary/30'
-								: 'bg-secondary border-border'}"
+								: stage.status === 'error'
+									? 'bg-destructive/10 border-destructive/30'
+									: 'bg-secondary border-border'}"
 					>
 						{#if stage.status === 'done'}
 							<CheckCircle2 class="h-4 w-4 text-emerald-600 shrink-0" />
@@ -297,6 +427,8 @@
 									style="transform: scale(0.6)"
 								></span>
 							</div>
+						{:else if stage.status === 'error'}
+							<AlertCircle class="h-4 w-4 text-destructive shrink-0" />
 						{:else}
 							<div class="h-4 w-4 shrink-0 rounded-full border-2 border-muted-foreground/30"></div>
 						{/if}
@@ -306,7 +438,9 @@
 								? 'text-emerald-700'
 								: stage.status === 'running'
 									? 'text-primary'
-									: 'text-muted-foreground'}"
+									: stage.status === 'error'
+										? 'text-destructive'
+										: 'text-muted-foreground'}"
 						>
 							{stage.label}
 						</span>
@@ -316,7 +450,9 @@
 								? 'bg-emerald-100 text-emerald-700'
 								: stage.status === 'running'
 									? 'bg-primary/20 text-primary'
-									: 'bg-muted text-muted-foreground'}"
+									: stage.status === 'error'
+										? 'bg-destructive/20 text-destructive'
+										: 'bg-muted text-muted-foreground'}"
 						>
 							{getStatusLabel(stage.status)}
 						</span>
@@ -338,22 +474,46 @@
 			<div class="rounded-lg border bg-card p-5 col-span-1">
 				<h2 class="text-sm font-semibold mb-4">빠른 실행</h2>
 				<div class="space-y-2">
+					{#if pipelineRunning}
+						<button
+							onclick={stopPipeline}
+							class="w-full inline-flex items-center justify-center gap-2 rounded-md bg-destructive px-3 py-2.5 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 transition-colors"
+						>
+							<Loader2 class="h-4 w-4 animate-spin" />
+							파이프라인 중지
+						</button>
+					{:else}
+						<button
+							onclick={startFullPipeline}
+							disabled={classifyRunning || duplicateRunning}
+							class="w-full inline-flex items-center justify-center gap-2 rounded-md bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+						>
+							<Play class="h-4 w-4" />
+							전체 파이프라인 시작
+						</button>
+					{/if}
 					<button
-						class="w-full inline-flex items-center justify-center gap-2 rounded-md bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+						onclick={startClassification}
+						disabled={classifyRunning || pipelineRunning}
+						class="w-full inline-flex items-center justify-center gap-2 rounded-md border bg-background px-3 py-2.5 text-sm font-medium hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
 					>
-						<Play class="h-4 w-4" />
-						전체 파이프라인 시작
-					</button>
-					<button
-						class="w-full inline-flex items-center justify-center gap-2 rounded-md border bg-background px-3 py-2.5 text-sm font-medium hover:bg-accent transition-colors"
-					>
-						<Brain class="h-4 w-4" />
+						{#if classifyRunning}
+							<Loader2 class="h-4 w-4 animate-spin" />
+						{:else}
+							<Brain class="h-4 w-4" />
+						{/if}
 						AI 분류 시작
 					</button>
 					<button
-						class="w-full inline-flex items-center justify-center gap-2 rounded-md border bg-background px-3 py-2.5 text-sm font-medium hover:bg-accent transition-colors"
+						onclick={startDuplicateDetect}
+						disabled={duplicateRunning || pipelineRunning}
+						class="w-full inline-flex items-center justify-center gap-2 rounded-md border bg-background px-3 py-2.5 text-sm font-medium hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
 					>
-						<Database class="h-4 w-4" />
+						{#if duplicateRunning}
+							<Loader2 class="h-4 w-4 animate-spin" />
+						{:else}
+							<Database class="h-4 w-4" />
+						{/if}
 						중복 이미지 찾기
 					</button>
 				</div>
