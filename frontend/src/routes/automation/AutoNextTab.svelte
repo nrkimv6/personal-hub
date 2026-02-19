@@ -5,7 +5,6 @@
 	import RunControl from '$lib/components/auto-next/RunControl.svelte';
 	import PlanList from '$lib/components/auto-next/PlanList.svelte';
 	import LogViewer from '$lib/components/auto-next/LogViewer.svelte';
-	import CurrentTaskCard from '$lib/components/auto-next/CurrentTaskCard.svelte';
 	import { createSmartPolling } from '$lib/utils/smart-polling';
 	import {
 		autoNextStatsApi,
@@ -34,7 +33,23 @@
 	let completedTimer: ReturnType<typeof setTimeout> | null = null;
 	let lastStartTime = $state<string | null>(null);
 	let panelOpen = $state(true);
-	let taskHistoryOpen = $state(false);
+	let taskHistoryOpen = $state(true);
+
+	// Phase 4: 종료 시 상태 보존
+	let lastRunStats = $state<AutoNextStatsResponse | null>(null);
+	let lastPlanFile = $state<string | null>(null);
+
+	// Phase 1: elapsed 타이머 (RunControl에서 이동)
+	let elapsed = $state('00:00:00');
+	let elapsedInterval: ReturnType<typeof setInterval> | null = null;
+
+	function updateElapsed(startTime: string) {
+		const diff = Date.now() - new Date(startTime).getTime();
+		const h = Math.floor(diff / 3600000);
+		const m = Math.floor((diff % 3600000) / 60000);
+		const s = Math.floor((diff % 60000) / 1000);
+		elapsed = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+	}
 
 	async function loadData() {
 		try {
@@ -43,7 +58,7 @@
 				autoNextTaskApi.list({
 					status: statusFilter,
 					limit: 50,
-					source_path: runStatus?.plan_file ?? undefined
+					source_path: runStatus?.plan_file ?? lastPlanFile ?? undefined
 				}),
 				autoNextRunnerApi.status(),
 				autoNextPlanApi.list()
@@ -64,6 +79,13 @@
 				lastStartTime = runStatus.start_time;
 				currentRunStats = await autoNextStatsApi.stats(runStatus.start_time);
 			} else if (!runStatus?.running) {
+				// Phase 4: 종료 시 마지막 상태 보존
+				if (currentRunStats) {
+					lastRunStats = currentRunStats;
+				}
+				if (runStatus?.plan_file) {
+					lastPlanFile = runStatus.plan_file;
+				}
 				currentRunStats = null;
 				lastStartTime = null;
 			}
@@ -90,7 +112,7 @@
 
 	async function handleDeleteCompleted() {
 		try {
-			await autoNextTaskApi.deleteCompleted(runStatus?.plan_file ?? undefined);
+			await autoNextTaskApi.deleteCompleted(runStatus?.plan_file ?? lastPlanFile ?? undefined);
 			await loadData();
 		} catch (e) {
 			error = e instanceof Error ? e.message : '일괄 삭제 실패';
@@ -99,7 +121,7 @@
 
 	async function handleDeleteOld(hours: number) {
 		try {
-			await autoNextTaskApi.deleteOld(hours, runStatus?.plan_file ?? undefined);
+			await autoNextTaskApi.deleteOld(hours, runStatus?.plan_file ?? lastPlanFile ?? undefined);
 			await loadData();
 		} catch (e) {
 			error = e instanceof Error ? e.message : '이력 정리 실패';
@@ -123,23 +145,51 @@
 			pollingController.cleanup();
 			pollingController = null;
 		}
+		if (elapsedInterval) {
+			clearInterval(elapsedInterval);
+			elapsedInterval = null;
+		}
 	});
 
 	$effect(() => {
 		if (runStatus && pollingController) {
 			pollingController.refresh();
 		}
+
+		// Phase 4: 시작 감지 → 이전 데이터 청소
+		if (runStatus && !prevRunning && runStatus.running) {
+			lastRunStats = null;
+			lastPlanFile = null;
+		}
+
 		if (runStatus && prevRunning && !runStatus.running) {
 			justCompleted = true;
 			if (completedTimer) clearTimeout(completedTimer);
 			completedTimer = setTimeout(() => { justCompleted = false; }, 10000);
 		}
+
+		// Phase 1: elapsed 타이머 관리
+		if (runStatus?.running && runStatus.start_time) {
+			updateElapsed(runStatus.start_time);
+			if (elapsedInterval) clearInterval(elapsedInterval);
+			elapsedInterval = setInterval(() => updateElapsed(runStatus!.start_time!), 1000);
+		} else {
+			if (elapsedInterval) {
+				clearInterval(elapsedInterval);
+				elapsedInterval = null;
+			}
+			elapsed = '00:00:00';
+		}
+
 		if (runStatus) prevRunning = runStatus.running;
 	});
 
-	// 접힌 요약 바용 파생 데이터
+	// 파생 데이터
 	let currentTask = $derived(taskList?.tasks?.find(t => t.status === 'running') ?? null);
 	let activePlan = $derived(plans?.find(p => p.path === runStatus?.plan_file) ?? null);
+	// Phase 4: 종료 후에도 plan 정보 유지
+	let effectivePlanFile = $derived(runStatus?.plan_file ?? lastPlanFile);
+	let effectiveRunStats = $derived(currentRunStats ?? lastRunStats);
 </script>
 
 <div class="flex flex-col h-full overflow-hidden">
@@ -165,11 +215,19 @@
 					class="flex items-center justify-between w-full px-4 py-2.5 hover:bg-gray-50 transition-colors"
 				>
 					<div class="flex items-center gap-4 min-w-0">
-						<!-- Status indicator -->
+						<!-- Status indicator (Phase 1: 통합 상태 표시) -->
 						<div class="flex items-center gap-2 shrink-0">
 							{#if runStatus?.running}
 								<div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
 								<span class="text-xs font-medium">실행 중</span>
+								{#if runStatus?.pid}
+									<span class="text-[10px] text-gray-500 font-mono">PID {runStatus.pid}</span>
+								{/if}
+								<span class="text-[10px] text-gray-500 flex items-center gap-1">
+									<svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
+									Cycle {runStatus.current_cycle ?? '-'}
+								</span>
+								<span class="text-[10px] text-gray-500 font-mono">{elapsed}</span>
 							{:else if runStatus?.crashed}
 								<div class="w-2 h-2 rounded-full bg-red-500"></div>
 								<span class="text-xs font-medium text-red-700">비정상 종료</span>
@@ -196,6 +254,8 @@
 											{activePlan.progress.done}/{activePlan.progress.total}
 										</span>
 									</div>
+								{:else if effectivePlanFile === 'ALL'}
+									<span class="text-xs text-gray-500">전체 실행</span>
 								{/if}
 
 								<div class="h-3.5 w-px bg-gray-200 shrink-0"></div>
@@ -218,16 +278,6 @@
 										</span>
 									</div>
 								{/if}
-
-								<div class="h-3.5 w-px bg-gray-200 shrink-0"></div>
-
-								<!-- Cycle -->
-								{#if runStatus?.current_cycle}
-									<div class="flex items-center gap-1 shrink-0 text-[10px] text-gray-500">
-										<svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
-										Cycle {runStatus.current_cycle}
-									</div>
-								{/if}
 							</div>
 						{/if}
 					</div>
@@ -247,17 +297,8 @@
 							<RunControl status={runStatus} {plans} onStatusChange={handleRunStatusChange} />
 						</div>
 
-						<!-- Grid: Active Task + Stats + Plans -->
-						<div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-							<!-- Active Task -->
-							<div class="bg-white border rounded-lg p-4">
-								{#if runStatus?.running && currentTask}
-									<CurrentTaskCard task={currentTask} />
-								{:else}
-									<CurrentTaskCard task={null} />
-								{/if}
-							</div>
-
+						<!-- Grid: Stats + Plans (Phase 3: CurrentTaskCard 제거) -->
+						<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
 							<!-- Stats -->
 							<div class="bg-white border rounded-lg p-4">
 								<div class="flex items-center gap-2 mb-3">
@@ -265,7 +306,7 @@
 									<span class="text-xs font-medium uppercase tracking-wider">Statistics</span>
 								</div>
 								{#if stats}
-									<StatsCard {stats} {currentRunStats} isRunning={runStatus?.running ?? false} />
+									<StatsCard {stats} currentRunStats={effectiveRunStats} isRunning={runStatus?.running ?? false} />
 								{/if}
 							</div>
 
@@ -280,12 +321,12 @@
 
 			<!-- Log Viewer + Task History -->
 			<div class="flex flex-col flex-1 overflow-hidden">
-				<!-- Log Viewer -->
+				<!-- Log Viewer (Phase 2: planFile prop 전달) -->
 				<div class="flex-1 min-h-0">
-					<LogViewer />
+					<LogViewer planFile={effectivePlanFile ?? undefined} />
 				</div>
 
-				<!-- Task History (collapsible, default collapsed) -->
+				<!-- Task History (Phase 3: 기본 열림) -->
 				<div class="shrink-0 border-t">
 					<button
 						onclick={() => (taskHistoryOpen = !taskHistoryOpen)}
@@ -305,7 +346,7 @@
 						<div class="h-[280px] overflow-hidden">
 							<div class="px-4 pb-4 h-full flex flex-col">
 								<div class="flex-1 min-h-0">
-									{#if !runStatus?.plan_file}
+									{#if !effectivePlanFile}
 										<div class="flex items-center justify-center h-full text-sm text-gray-400">
 											Plan을 실행하면 관련 작업 이력이 표시됩니다.
 										</div>

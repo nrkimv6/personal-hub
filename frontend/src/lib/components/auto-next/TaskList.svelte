@@ -101,6 +101,18 @@
 	function countByStatus(status: string): number {
 		return tasks.filter(t => t.status === status).length;
 	}
+
+	// Phase 3: running 항목 최상위 + 최신순 정렬
+	let sortedTasks = $derived(
+		[...tasks].sort((a, b) => {
+			if (a.status === 'running' && b.status !== 'running') return -1;
+			if (a.status !== 'running' && b.status === 'running') return 1;
+			// 최신이 위 (started_at 내림차순)
+			const aTime = a.started_at ? new Date(a.started_at).getTime() : 0;
+			const bTime = b.started_at ? new Date(b.started_at).getTime() : 0;
+			return bTime - aTime;
+		})
+	);
 </script>
 
 <div class="flex flex-col gap-3 h-full">
@@ -155,14 +167,14 @@
 
 	<!-- Task List (card style) -->
 	<div class="flex-1 overflow-y-auto">
-		{#if tasks.length === 0}
+		{#if sortedTasks.length === 0}
 			<div class="text-center py-8 text-sm text-gray-400">
 				No tasks matching filter
 			</div>
 		{:else}
 			<div class="flex flex-col gap-1.5 pr-2">
-				{#each tasks as task (task.id)}
-					<div class="border rounded-md overflow-hidden">
+				{#each sortedTasks as task (task.id)}
+					<div class="border rounded-md overflow-hidden {task.status === 'running' ? 'border-l-2 border-l-blue-500 bg-blue-50/50' : ''}">
 						<!-- Collapsed row -->
 						<button
 							onclick={() => toggleExpand(task.id)}

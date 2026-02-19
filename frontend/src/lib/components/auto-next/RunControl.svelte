@@ -20,38 +20,6 @@
 	let actionLoading = $state(false);
 	let actionError = $state<string | null>(null);
 
-	// Elapsed timer
-	let elapsed = $state('00:00:00');
-	let elapsedInterval: ReturnType<typeof setInterval> | null = null;
-
-	$effect(() => {
-		if (status?.running && status.start_time) {
-			updateElapsed(status.start_time);
-			if (elapsedInterval) clearInterval(elapsedInterval);
-			elapsedInterval = setInterval(() => updateElapsed(status.start_time!), 1000);
-		} else {
-			if (elapsedInterval) {
-				clearInterval(elapsedInterval);
-				elapsedInterval = null;
-			}
-			elapsed = '00:00:00';
-		}
-		return () => {
-			if (elapsedInterval) {
-				clearInterval(elapsedInterval);
-				elapsedInterval = null;
-			}
-		};
-	});
-
-	function updateElapsed(startTime: string) {
-		const diff = Date.now() - new Date(startTime).getTime();
-		const h = Math.floor(diff / 3600000);
-		const m = Math.floor((diff % 3600000) / 60000);
-		const s = Math.floor((diff % 60000) / 1000);
-		elapsed = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-	}
-
 	async function handleStart() {
 		if (mode === 'single' && !selectedPlan) {
 			actionError = 'Plan 파일을 선택하세요';
@@ -132,29 +100,6 @@
 		<div class="text-xs text-red-600 bg-red-50 rounded p-2">{actionError}</div>
 	{/if}
 
-	<!-- Status Header -->
-	<div class="flex items-center justify-between">
-		<div class="flex items-center gap-3">
-			<div class="w-2.5 h-2.5 rounded-full {status?.running ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}"></div>
-			<span class="text-sm font-medium">{status?.running ? '실행 중' : '중지'}</span>
-			{#if status?.pid}
-				<span class="text-xs text-gray-500 font-mono">PID {status.pid}</span>
-			{/if}
-		</div>
-		{#if status?.running}
-			<div class="flex items-center gap-3 text-xs text-gray-500">
-				<span class="flex items-center gap-1">
-					<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
-					Cycle {status.current_cycle ?? '-'}
-				</span>
-				<span class="flex items-center gap-1">
-					<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-					{elapsed}
-				</span>
-			</div>
-		{/if}
-	</div>
-
 	<!-- Controls Row -->
 	<div class="flex items-center gap-2 flex-wrap">
 		{#if status?.running}
@@ -214,14 +159,15 @@
 		<select
 			class="border rounded px-2 py-1.5 text-xs h-8 w-[120px]"
 			bind:value={mode}
+			disabled={status?.running}
 		>
 			<option value="single">단일 Plan</option>
 			<option value="all">전체 실행</option>
 		</select>
 	</div>
 
-	<!-- Options Row -->
-	<div class="flex items-center gap-4 flex-wrap text-xs">
+	<!-- Options Row (Phase 1: 실행 중 disable) -->
+	<div class="flex items-center gap-4 flex-wrap text-xs {status?.running ? 'opacity-50 pointer-events-none' : ''}">
 		{#if mode === 'single'}
 			<div class="flex items-center gap-2">
 				<label for="plan-select" class="text-gray-500 text-xs">Plan</label>
@@ -282,7 +228,7 @@
 	</div>
 
 	{#if (mode === 'single' && parallel) || mode === 'all'}
-		<div class="flex items-center gap-2 text-xs">
+		<div class="flex items-center gap-2 text-xs {status?.running ? 'opacity-50 pointer-events-none' : ''}">
 			<label class="text-gray-500 shrink-0" for="projects-input">프로젝트:</label>
 			<input
 				id="projects-input"

@@ -2,6 +2,12 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { autoNextLogApi } from '$lib/api';
 
+	interface Props {
+		planFile?: string;
+	}
+
+	let { planFile }: Props = $props();
+
 	interface ParsedLine {
 		timestamp: string;
 		tag: string;
@@ -24,6 +30,7 @@
 	let listenerAlive = $state<boolean | null>(null);
 	let cliRunning = $state<boolean | null>(null);
 	let processPid = $state<number | null>(null);
+	let pendingStale = $state(false);
 	const MAX_LINES = 500;
 	const SEPARATOR_PATTERN = '════════════════';
 	const BASE_DELAY = 3000;
@@ -66,8 +73,12 @@
 	}
 
 	function addLine(text: string, isStale: boolean) {
+		// Phase 2: 그레이아웃 타이밍 변경 — 새 세션 시작 시에만 stale 마크
 		if (text.includes(SEPARATOR_PATTERN) && !isStale) {
-			lines = lines.map((l) => ({ ...l, isStale: true }));
+			if (pendingStale) {
+				lines = lines.map((l) => ({ ...l, isStale: true }));
+			}
+			pendingStale = true;
 		}
 
 		const parsed = parseLine(text, isStale);
@@ -222,9 +233,10 @@
 		return tagColors[tag] ?? tagColors.INFO;
 	}
 
-	// Max session ID for dimming old sessions
-	let maxSessionLine = $derived(
-		lines.findLastIndex(l => isSeparator(l.raw) && !l.isStale)
+	// Plan 파일명 표시용
+	let planDisplayName = $derived(
+		planFile === 'ALL' ? '전체 실행' :
+		planFile ? planFile.split(/[\\/]/).pop() ?? '' : ''
 	);
 </script>
 
@@ -233,6 +245,11 @@
 	<div class="flex items-center justify-between px-3 py-2 border-b border-gray-700 shrink-0 bg-gray-900">
 		<div class="flex items-center gap-2">
 			<span class="text-xs font-medium uppercase tracking-wider text-gray-300">Live Logs</span>
+			<!-- Phase 2: Plan 파일명 표시 -->
+			{#if planDisplayName}
+				<div class="h-3.5 w-px bg-gray-600 shrink-0"></div>
+				<span class="text-[10px] text-gray-400 font-mono truncate max-w-[200px]">{planDisplayName}</span>
+			{/if}
 			<div class="flex items-center gap-1.5">
 				{#if connected === 'connected' && redisAvailable}
 					<div class="w-2 h-2 rounded-full bg-green-500"></div>
@@ -308,11 +325,11 @@
 		</div>
 	</div>
 
-	<!-- Log Content -->
+	<!-- Log Content (Phase 2: text-sm for body) -->
 	<div
 		bind:this={logContainer}
 		onscroll={handleScroll}
-		class="flex-1 overflow-y-auto font-mono text-xs p-3 bg-gray-950 text-gray-300"
+		class="flex-1 overflow-y-auto font-mono text-sm p-3 bg-gray-950 text-gray-300"
 	>
 		{#if lines.length === 0}
 			<span class="text-gray-600">로그가 없습니다</span>
@@ -325,8 +342,8 @@
 				{:else if line.tag}
 					{@const style = getTagStyle(line.tag)}
 					<div class="flex items-start gap-2 py-0.5 leading-5 {line.isStale ? 'opacity-30' : ''} {line.tag === 'ERROR' ? 'bg-red-950/50 -mx-3 px-3 rounded' : ''}">
-						<span class="text-gray-400/60 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
-						<span class="shrink-0 w-[42px] text-right font-semibold {style.text}">
+						<span class="text-xs text-gray-400/60 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
+						<span class="text-xs shrink-0 w-[42px] text-right font-semibold {style.text}">
 							<span class="rounded px-1 py-0.5 {style.bg}">{line.tag}</span>
 						</span>
 						<span class="flex-1 min-w-0 break-all {line.tag === 'ERROR' ? 'text-red-400' : line.tag === 'DONE' ? 'text-green-400' : 'text-gray-300'}">
