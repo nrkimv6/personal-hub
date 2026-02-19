@@ -117,7 +117,7 @@ async def assign_cluster_category(
     )
     # 소속 파일도 업데이트
     db.execute(
-        text("UPDATE file_classifications SET final_category_id = :cat_id, status = 'user_classified' WHERE cluster_id = :cid"),
+        text("UPDATE file_classifications SET final_category_id = :cat_id, status = 'approved' WHERE cluster_id = :cid"),
         {"cat_id": request.category_id, "cid": cluster_id}
     )
     db.commit()

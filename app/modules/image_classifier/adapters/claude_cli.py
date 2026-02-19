@@ -7,19 +7,22 @@ Claude CLI 어댑터 (subprocess 기반)
 
 import asyncio
 import json
-import subprocess
-from typing import Optional
+import logging
+from typing import Optional, Callable
 
 from .base import ClassifierAdapter, ClassifyResult
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class ClaudeCLIAdapter(ClassifierAdapter):
     """Claude CLI 어댑터"""
 
-    def __init__(self, cli_path: Optional[str] = None):
+    def __init__(self, cli_path: Optional[str] = None, on_output: Optional[Callable[[str], None]] = None):
         self.cli_path = cli_path or settings.CLAUDE_CLI_PATH
         self.timeout = settings.CLI_TIMEOUT_SECONDS
+        self.on_output = on_output  # 실시간 stderr 콜백
 
     async def classify_image(
         self,
@@ -131,7 +134,7 @@ class ClaudeCLIAdapter(ClassifierAdapter):
             ]
 
     async def _run_cli(self, prompt: str, json_schema: dict) -> dict:
-        """Claude CLI subprocess 실행"""
+        """Claude CLI subprocess 실행 — stderr 실시간 스트리밍"""
         cmd = [
             self.cli_path,
             "-p", prompt,
@@ -147,12 +150,35 @@ class ClaudeCLIAdapter(ClassifierAdapter):
             stderr=asyncio.subprocess.PIPE
         )
 
-        stdout, stderr = await proc.communicate()
+        # stderr 실시간 읽기 (CLI 진행 출력)
+        stderr_lines = []
+
+        async def _stream_stderr():
+            while True:
+                line = await proc.stderr.readline()
+                if not line:
+                    break
+                decoded = line.decode("utf-8", errors="replace").strip()
+                if decoded:
+                    stderr_lines.append(decoded)
+                    if self.on_output:
+                        self.on_output(decoded)
+
+        # stderr 스트리밍과 stdout 수집을 병렬 실행
+        stderr_task = asyncio.create_task(_stream_stderr())
+        stdout_data = await proc.stdout.read()
+        await stderr_task
+        await proc.wait()
 
         if proc.returncode != 0:
-            raise RuntimeError(f"Claude CLI 오류: {stderr.decode()}")
+            stderr_text = "\n".join(stderr_lines) if stderr_lines else "(no stderr)"
+            raise RuntimeError(f"Claude CLI exit {proc.returncode}: {stderr_text}")
 
-        return json.loads(stdout.decode())
+        try:
+            return json.loads(stdout_data.decode("utf-8", errors="replace"))
+        except json.JSONDecodeError as e:
+            stdout_preview = stdout_data.decode("utf-8", errors="replace")[:200]
+            raise RuntimeError(f"JSON 파싱 실패: {e} — stdout: {stdout_preview}")
 
     def _build_prompt(self, context: str, categories: list[str], image_paths: list[str]) -> str:
         """프롬프트 생성"""
