@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount, onDestroy } from 'svelte';
 	import type { AutoNextTaskResponse } from '$lib/api';
 
 	interface Props {
@@ -12,6 +13,36 @@
 		if (n >= 1_000) return (n / 1_000).toFixed(1) + 'k';
 		return String(n);
 	}
+
+	let elapsed = $state('');
+	let timer: ReturnType<typeof setInterval> | null = null;
+
+	function updateElapsed() {
+		if (task?.started_at) {
+			const start = new Date(task.started_at).getTime();
+			const diff = Math.floor((Date.now() - start) / 1000);
+			const m = Math.floor(diff / 60);
+			const s = diff % 60;
+			elapsed = m > 0 ? `${m}m ${s}s` : `${s}s`;
+		} else {
+			elapsed = '';
+		}
+	}
+
+	onMount(() => {
+		updateElapsed();
+		timer = setInterval(updateElapsed, 1000);
+	});
+
+	onDestroy(() => {
+		if (timer) clearInterval(timer);
+	});
+
+	$effect(() => {
+		// task가 바뀌면 즉시 재계산
+		void task;
+		updateElapsed();
+	});
 </script>
 
 {#if !task}
@@ -23,8 +54,16 @@
 		<!-- Header -->
 		<div class="flex items-center justify-between">
 			<div class="flex items-center gap-2">
-				<div class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
-				<span class="text-xs font-medium text-blue-600 uppercase tracking-wider">Active Task</span>
+				{#if task.status === 'success'}
+					<div class="w-2 h-2 rounded-full bg-green-500"></div>
+				{:else if task.status === 'failed'}
+					<div class="w-2 h-2 rounded-full bg-red-500"></div>
+				{:else}
+					<div class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
+				{/if}
+				<span class="text-xs font-medium uppercase tracking-wider {task.status === 'success' ? 'text-green-600' : task.status === 'failed' ? 'text-red-600' : 'text-blue-600'}">
+					{task.status === 'success' ? 'Completed' : task.status === 'failed' ? 'Failed' : 'Active Task'}
+				</span>
 			</div>
 			<span class="bg-blue-100 text-blue-600 border border-blue-200 text-[10px] px-1.5 py-0 h-4 inline-flex items-center rounded">
 				{task.id.slice(0, 8)}
@@ -48,7 +87,7 @@
 			{/if}
 			<span class="flex items-center gap-1.5">
 				<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-				<span class="font-mono tabular-nums">Running...</span>
+				<span class="font-mono tabular-nums">{elapsed || 'Starting...'}</span>
 			</span>
 		</div>
 
