@@ -34,7 +34,9 @@ REDIS_PORT = 6379
 COMMANDS_KEY = "auto-next:commands"
 RESULTS_KEY = "auto-next:command_results"
 STATE_KEY = "auto-next:state"
-BRPOP_TIMEOUT = 0  # 0 = 무한 대기
+HEARTBEAT_KEY = "auto-next:listener:heartbeat"
+HEARTBEAT_INTERVAL = 10  # heartbeat 갱신 주기 (초)
+HEARTBEAT_TTL = 30  # heartbeat 만료 시간 (초, 3회 미갱신 시 만료)
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
@@ -342,9 +344,18 @@ def main():
             logger.info("Redis 연결 성공")
             reconnect_delay = 1  # 연결 성공 시 리셋
 
+            # 초기 heartbeat 설정
+            last_heartbeat = 0
+
             # BRPOP 루프 (블로킹 대기)
             while True:
-                result = r.brpop(COMMANDS_KEY, timeout=BRPOP_TIMEOUT)
+                # heartbeat 갱신
+                now = time.time()
+                if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                    r.set(HEARTBEAT_KEY, datetime.now().isoformat(), ex=HEARTBEAT_TTL)
+                    last_heartbeat = now
+
+                result = r.brpop(COMMANDS_KEY, timeout=HEARTBEAT_INTERVAL)
 
                 if result is None:
                     continue
@@ -381,6 +392,10 @@ def main():
             reconnect_delay = min(reconnect_delay * 2, 30)
 
         except KeyboardInterrupt:
+            try:
+                r.delete(HEARTBEAT_KEY)
+            except Exception:
+                pass
             logger.info("Ctrl+C로 종료")
             break
 
