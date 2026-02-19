@@ -1,4 +1,4 @@
-<svelte:head><title>클러스터 — Image Classifier</title></svelte:head>
+<svelte:head><title>클러스터 — 이미지 분류기</title></svelte:head>
 
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -6,14 +6,13 @@
 	import { Clock, Calendar, RotateCcw, Tag, Eye, CheckCircle2 } from 'lucide-svelte';
 
 	interface Cluster {
-		id: number;
-		date: string;
+		cluster_id: number;
 		start_time: string;
 		end_time: string;
 		file_count: number;
-		category_name: string | null;
-		is_classified: boolean;
-		files: any[];
+		duration_minutes: number;
+		category_path: string | null;
+		files?: any[];
 	}
 
 	let clusters: Cluster[] = $state([]);
@@ -30,12 +29,14 @@
 	async function loadClusters() {
 		loading = true;
 		try {
-			const response = await fetchWithTimeout('/api/ic/clusters');
+			const params = new URLSearchParams();
+			if (gapMinutes) params.set('gap_minutes', String(gapMinutes));
+			const response = await fetchWithTimeout(`/api/ic/clusters?${params}`);
 			if (response.ok) {
 				clusters = await response.json();
 			}
 		} catch (err) {
-			console.error('Failed to load clusters:', err);
+			console.error('클러스터 로드 실패:', err);
 		} finally {
 			loading = false;
 		}
@@ -127,18 +128,19 @@
 					<div class="flex items-center justify-between border-b px-4 py-3">
 						<div class="flex items-center gap-2">
 							<Calendar class="size-4 text-muted-foreground" />
-							<span class="text-sm font-semibold">{cluster.date}</span>
+							<span class="text-sm font-semibold">{new Date(cluster.start_time).toLocaleDateString('ko-KR')}</span>
 							<span class="text-xs text-muted-foreground">
-								{cluster.start_time} – {cluster.end_time}
+								{new Date(cluster.start_time).toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit'})} – {new Date(cluster.end_time).toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit'})}
 							</span>
+							<span class="text-xs text-muted-foreground">({cluster.duration_minutes}분)</span>
 						</div>
 						<div class="flex items-center gap-2">
 							<span class="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium">
 								{cluster.file_count}장
 							</span>
-							{#if cluster.is_classified}
+							{#if cluster.category_path}
 								<span class="rounded-full bg-green-500/10 px-2.5 py-0.5 text-xs font-medium text-green-600">
-									검토 완료
+									{cluster.category_path}
 								</span>
 							{/if}
 						</div>
@@ -191,9 +193,9 @@
 	<!-- 선택된 클러스터 상세 -->
 	{#if selectedCluster}
 		<div class="rounded-xl border bg-card p-4">
-			<h2 class="mb-1 text-sm font-semibold">클러스터 #{selectedCluster.id}</h2>
+			<h2 class="mb-1 text-sm font-semibold">클러스터 #{selectedCluster.cluster_id}</h2>
 			<p class="text-xs text-muted-foreground">
-				{selectedCluster.date} · {selectedCluster.start_time} – {selectedCluster.end_time} · {selectedCluster.file_count}장
+				{new Date(selectedCluster.start_time).toLocaleDateString('ko-KR')} · {new Date(selectedCluster.start_time).toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit'})} – {new Date(selectedCluster.end_time).toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit'})} · {selectedCluster.file_count}장
 			</p>
 		</div>
 	{/if}
