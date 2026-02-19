@@ -29,6 +29,7 @@
 	let statusFilter = $state<string | undefined>(undefined);
 	let pollingController: ReturnType<typeof createSmartPolling> | null = null;
 	let prevRunning = $state(false);
+	let prevCycle = $state<number | null>(null);
 	let justCompleted = $state(false);
 	let completedTimer: ReturnType<typeof setTimeout> | null = null;
 	let lastStartTime = $state<string | null>(null);
@@ -51,60 +52,73 @@
 		elapsed = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 	}
 
-	async function loadData() {
+	async function pollStatus() {
 		try {
-			const results = await Promise.allSettled([
-				autoNextStatsApi.stats(),
-				autoNextTaskApi.list({
-					status: statusFilter,
-					limit: 50,
-					source_path: runStatus?.plan_file ?? lastPlanFile ?? undefined
-				}),
-				autoNextRunnerApi.status(),
-				autoNextPlanApi.list()
-			]);
+			const status = await autoNextRunnerApi.status();
+			runStatus = status;
 
-			stats = results[0].status === 'fulfilled' ? results[0].value : null;
-			taskList = results[1].status === 'fulfilled' ? results[1].value : null;
-			runStatus = results[2].status === 'fulfilled' ? results[2].value : null;
-			plans = results[3].status === 'fulfilled' ? results[3].value : [];
-
-			const failedCount = results.filter(r => r.status === 'rejected').length;
-			if (failedCount > 0) {
-				console.warn(`[AutoNext] ${failedCount}개 API 호출 실패 - 일부 데이터 없음`);
-			}
-			error = null;
-
-			if (runStatus?.running && runStatus.start_time) {
-				lastStartTime = runStatus.start_time;
-				currentRunStats = await autoNextStatsApi.stats(runStatus.start_time);
-			} else if (!runStatus?.running) {
-				// Phase 4: 종료 시 마지막 상태 보존
+			if (status.running && status.start_time) {
+				lastStartTime = status.start_time;
+				currentRunStats = await autoNextStatsApi.stats(status.start_time);
+			} else if (!status.running) {
+				// 종료 시 마지막 상태 보존
 				if (currentRunStats) {
 					lastRunStats = currentRunStats;
 				}
-				if (runStatus?.plan_file) {
-					lastPlanFile = runStatus.plan_file;
+				if (status.plan_file) {
+					lastPlanFile = status.plan_file;
 				}
 				currentRunStats = null;
 				lastStartTime = null;
 			}
 		} catch (e) {
-			error = e instanceof Error ? e.message : '데이터 로드 실패';
-		} finally {
-			loading = false;
+			console.warn('[AutoNext] status API 호출 실패', e);
 		}
+	}
+
+	async function fetchStats() {
+		try {
+			stats = await autoNextStatsApi.stats();
+		} catch (e) {
+			console.warn('[AutoNext] stats API 호출 실패', e);
+		}
+	}
+
+	async function fetchTasks() {
+		try {
+			taskList = await autoNextTaskApi.list({
+				status: statusFilter,
+				limit: 50,
+				source_path: runStatus?.plan_file ?? lastPlanFile ?? undefined
+			});
+		} catch (e) {
+			console.warn('[AutoNext] tasks API 호출 실패', e);
+		}
+	}
+
+	async function fetchPlans() {
+		try {
+			plans = await autoNextPlanApi.list();
+		} catch (e) {
+			console.warn('[AutoNext] plans API 호출 실패', e);
+		}
+	}
+
+	async function loadData() {
+		await Promise.all([pollStatus(), fetchStats(), fetchTasks(), fetchPlans()]);
+		error = null;
 	}
 
 	function handleFilterChange(newFilter: string | undefined) {
 		statusFilter = newFilter;
-		loadData();
+		void fetchTasks();
 	}
 
 	async function handleDeleteTask(id: string) {
 		try {
 			await autoNextTaskApi.delete(id);
-			await loadData();
+			await fetchTasks();
+			void fetchStats();
 		} catch (e) {
 			error = e instanceof Error ? e.message : '삭제 실패';
 		}
@@ -113,7 +127,8 @@
 	async function handleDeleteCompleted() {
 		try {
 			await autoNextTaskApi.deleteCompleted(runStatus?.plan_file ?? lastPlanFile ?? undefined);
-			await loadData();
+			await fetchTasks();
+			void fetchStats();
 		} catch (e) {
 			error = e instanceof Error ? e.message : '일괄 삭제 실패';
 		}
@@ -122,20 +137,28 @@
 	async function handleDeleteOld(hours: number) {
 		try {
 			await autoNextTaskApi.deleteOld(hours, runStatus?.plan_file ?? lastPlanFile ?? undefined);
-			await loadData();
+			await fetchTasks();
+			void fetchStats();
 		} catch (e) {
 			error = e instanceof Error ? e.message : '이력 정리 실패';
 		}
 	}
 
 	async function handleRunStatusChange() {
-		await loadData();
+		await pollStatus();
+		void fetchStats();
+		void fetchTasks();
 	}
 
-	onMount(() => {
-		loadData();
+	onMount(async () => {
+		// 초기 로드: 모든 데이터 병렬로 한 번에 가져오기
+		await Promise.all([pollStatus(), fetchStats(), fetchTasks(), fetchPlans()]);
+		loading = false;
+		error = null;
+
+		// 폴링은 status만 (3초/15초 간격)
 		pollingController = createSmartPolling(
-			loadData,
+			pollStatus,
 			() => ({ running: runStatus?.running ?? false })
 		);
 	});
@@ -156,16 +179,29 @@
 			pollingController.refresh();
 		}
 
-		// Phase 4: 시작 감지 → 이전 데이터 청소
+		// Phase 3: current_cycle 변화 감지 → stats + tasks 갱신 (fire-and-forget)
+		const currentCycle = runStatus?.current_cycle ?? null;
+		if (currentCycle !== null && prevCycle !== null && currentCycle !== prevCycle) {
+			void fetchStats();
+			void fetchTasks();
+		}
+		prevCycle = currentCycle;
+
+		// Phase 4: 시작 감지 → 이전 데이터 청소 + stats/tasks 갱신
 		if (runStatus && !prevRunning && runStatus.running) {
 			lastRunStats = null;
 			lastPlanFile = null;
+			void fetchStats();
+			void fetchTasks();
 		}
 
+		// 종료 감지 + stats/tasks 갱신
 		if (runStatus && prevRunning && !runStatus.running) {
 			justCompleted = true;
 			if (completedTimer) clearTimeout(completedTimer);
 			completedTimer = setTimeout(() => { justCompleted = false; }, 10000);
+			void fetchStats();
+			void fetchTasks();
 		}
 
 		// Phase 1: elapsed 타이머 관리
@@ -312,7 +348,7 @@
 
 							<!-- Plan Files -->
 							<div class="bg-white border rounded-lg p-4 max-h-[50vh] sm:max-h-[340px] overflow-hidden flex flex-col">
-								<PlanList {plans} onPlansChange={loadData} />
+								<PlanList {plans} onPlansChange={fetchPlans} />
 							</div>
 						</div>
 					</div>
