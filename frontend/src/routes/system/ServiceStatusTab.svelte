@@ -215,8 +215,8 @@
         autoNextRunnerApi.status().catch(() => null),
         serviceDashboardApi.redisStatus().catch(() => null),
       ]);
-      autoNextStatus = anStatus;
-      redisStatus = rStatus;
+      if (anStatus !== null) autoNextStatus = anStatus;
+      if (rStatus !== null) redisStatus = rStatus;
     } catch { /* graceful */ }
   }
 
@@ -358,6 +358,16 @@
     }
   }
 
+  async function startAutoNext() {
+    actionLoading = 'auto-next-start';
+    try {
+      await autoNextRunnerApi.start({});
+      await fetchExtraStatus();
+    } catch (e) {
+      alert(`시작 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
+    } finally { actionLoading = null; }
+  }
+
   async function stopAutoNext() {
     actionLoading = 'auto-next-stop';
     try {
@@ -365,6 +375,17 @@
       await fetchExtraStatus();
     } catch (e) {
       alert(`중지 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
+    } finally { actionLoading = null; }
+  }
+
+  async function restartAutoNext() {
+    actionLoading = 'auto-next-restart';
+    try {
+      await autoNextRunnerApi.stop();
+      await autoNextRunnerApi.start({});
+      await fetchExtraStatus();
+    } catch (e) {
+      alert(`재시작 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
     } finally { actionLoading = null; }
   }
 
@@ -788,6 +809,13 @@
               <div class="flex gap-1">
                 {#if autoNextStatus.running}
                   <button
+                    onclick={() => showConfirm('Auto-Next 재시작', 'Auto-Next를 재시작합니다.', restartAutoNext, false, '재시작')}
+                    disabled={actionLoading === 'auto-next-restart'}
+                    class="h-6 px-1.5 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                  >
+                    재시작
+                  </button>
+                  <button
                     onclick={() => showConfirm('Auto-Next 중지', 'Auto-Next를 중지합니다.', stopAutoNext, true, '중지')}
                     disabled={actionLoading === 'auto-next-stop'}
                     class="h-6 px-1.5 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
@@ -801,6 +829,14 @@
                     class="h-6 px-1.5 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
                   >
                     리셋
+                  </button>
+                {:else}
+                  <button
+                    onclick={() => showConfirm('Auto-Next 시작', 'Auto-Next를 시작합니다.', startAutoNext, false, '시작')}
+                    disabled={actionLoading === 'auto-next-start'}
+                    class="h-6 px-1.5 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                  >
+                    시작
                   </button>
                 {/if}
               </div>
