@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fetchWithTimeout } from '$lib/api/client';
-  import { Search, Tag, Trash2, Check, X, Loader2, Images } from 'lucide-svelte';
+  import { Search, Tag, Trash2, Check, X, Loader2, Images, ImagePlus } from 'lucide-svelte';
 
   // 이미지 타입
   interface GalleryImage {
@@ -155,6 +155,69 @@
     if (bytes > 0) return `${(bytes / 1024).toFixed(0)} KB`;
     return '—';
   }
+
+  // === 썸네일 생성 ===
+  let thumbGenerating = $state(false);
+  let thumbProgress = $state({ processed: 0, total: 0, progress_percent: 0 });
+  let thumbPollTimer: ReturnType<typeof setInterval> | null = null;
+
+  async function startThumbnailGeneration() {
+    try {
+      const res = await fetchWithTimeout('/api/ic/scan/thumbnails', { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.detail || '썸네일 생성 시작 실패');
+        return;
+      }
+      thumbGenerating = true;
+      pollThumbnailStatus();
+    } catch (err: any) {
+      alert(`썸네일 생성 오류: ${err.message}`);
+    }
+  }
+
+  function pollThumbnailStatus() {
+    if (thumbPollTimer) clearInterval(thumbPollTimer);
+    thumbPollTimer = setInterval(async () => {
+      try {
+        const res = await fetchWithTimeout('/api/ic/scan/thumbnails/status');
+        if (!res.ok) return;
+        const data = await res.json();
+        thumbProgress = data;
+        if (!data.is_running) {
+          thumbGenerating = false;
+          if (thumbPollTimer) clearInterval(thumbPollTimer);
+          thumbPollTimer = null;
+          // 완료 후 갤러리 새로고침
+          loadImages(true);
+        }
+      } catch { /* ignore */ }
+    }, 1000);
+  }
+
+  async function stopThumbnailGeneration() {
+    try {
+      await fetchWithTimeout('/api/ic/scan/thumbnails/stop', { method: 'POST' });
+    } catch { /* ignore */ }
+  }
+
+  // 페이지 진입 시 썸네일 상태 체크
+  onMount(() => {
+    fetchWithTimeout('/api/ic/scan/thumbnails/status')
+      .then(r => r.json())
+      .then(data => {
+        if (data.is_running) {
+          thumbGenerating = true;
+          thumbProgress = data;
+          pollThumbnailStatus();
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      if (thumbPollTimer) clearInterval(thumbPollTimer);
+    };
+  });
 </script>
 
 <svelte:head>
@@ -173,6 +236,38 @@
         </span>
       </div>
       <p class="mt-1 text-sm text-muted-foreground">이미지를 탐색하고 분류 상태를 관리합니다.</p>
+    </div>
+    <div class="flex items-center gap-2">
+      {#if thumbGenerating}
+        <div class="flex items-center gap-2">
+          <div class="flex flex-col items-end gap-0.5">
+            <span class="text-[10px] text-muted-foreground">
+              썸네일 {thumbProgress.processed}/{thumbProgress.total} ({thumbProgress.progress_percent}%)
+            </span>
+            <div class="h-1.5 w-32 overflow-hidden rounded-full bg-muted">
+              <div
+                class="h-full rounded-full bg-primary transition-all"
+                style="width: {thumbProgress.progress_percent}%"
+              ></div>
+            </div>
+          </div>
+          <button
+            onclick={stopThumbnailGeneration}
+            class="flex items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
+          >
+            <X class="size-3" />
+            중지
+          </button>
+        </div>
+      {:else}
+        <button
+          onclick={startThumbnailGeneration}
+          class="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
+        >
+          <ImagePlus class="size-3.5" />
+          썸네일 생성
+        </button>
+      {/if}
     </div>
   </div>
 

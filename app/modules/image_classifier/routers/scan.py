@@ -4,6 +4,9 @@
 - POST /api/ic/scan/start: 폴더 트리 스캔 시작
 - GET /api/ic/scan/status: 스캔 진행 상태 조회
 - GET /api/ic/scan/folders: 폴더 목록 조회
+- POST /api/ic/scan/thumbnails: 썸네일 생성 시작
+- GET /api/ic/scan/thumbnails/status: 썸네일 생성 상태
+- POST /api/ic/scan/thumbnails/stop: 썸네일 생성 중지
 """
 
 import asyncio
@@ -61,6 +64,16 @@ scan_state = {
 
 # 스캔 취소 이벤트
 cancel_event = asyncio.Event()
+
+# === 전역 썸네일 상태 ===
+thumb_state = {
+    "is_running": False,
+    "processed": 0,
+    "total": 0,
+    "error": None,
+}
+
+thumb_cancel_event = asyncio.Event()
 
 
 # === 엔드포인트 ===
@@ -322,12 +335,98 @@ async def run_scan_task(root_folders: list[str], resume: bool = False):
         progress_mgr.complete_task(task_id)
         print(f"[스캔 완료] 폴더: {scanned_count}/{total}, 파일: {scanner.total_files}")
 
+        # 스캔 완료 후 자동 썸네일 생성
+        if not cancel_event.is_set():
+            print("[스캔→썸네일] 자동 썸네일 생성 시작")
+            await run_thumbnail_task()
+
     except Exception as e:
         scan_state["error"] = str(e)
         scan_state["is_running"] = False
         if task_id:
             progress_mgr.fail_task(task_id, str(e))
         print(f"[스캔 오류] {e}")
+    finally:
+        db.close()
+
+
+# === 썸네일 엔드포인트 ===
+@router.post("/thumbnails")
+async def start_thumbnails(
+    background_tasks: BackgroundTasks,
+):
+    """썸네일 생성 시작 (백그라운드)"""
+    global thumb_state
+
+    if thumb_state["is_running"]:
+        raise HTTPException(status_code=409, detail="썸네일 생성이 이미 실행 중입니다.")
+
+    thumb_cancel_event.clear()
+    thumb_state.update({
+        "is_running": True,
+        "processed": 0,
+        "total": 0,
+        "error": None,
+    })
+
+    background_tasks.add_task(run_thumbnail_task)
+
+    return {"status": "started", "message": "썸네일 생성이 시작되었습니다."}
+
+
+@router.get("/thumbnails/status")
+async def get_thumbnail_status():
+    """썸네일 생성 진행 상태 조회"""
+    total = thumb_state["total"]
+    processed = thumb_state["processed"]
+    progress = (processed / total * 100) if total > 0 else 0.0
+    return {
+        "is_running": thumb_state["is_running"],
+        "processed": processed,
+        "total": total,
+        "progress_percent": round(progress, 2),
+        "error": thumb_state["error"],
+    }
+
+
+@router.post("/thumbnails/stop")
+async def stop_thumbnails():
+    """썸네일 생성 중지"""
+    if not thumb_state["is_running"]:
+        raise HTTPException(status_code=400, detail="실행 중인 썸네일 작업이 없습니다.")
+
+    thumb_cancel_event.set()
+    return {"status": "stopping", "message": "썸네일 생성 중지 요청이 전송되었습니다."}
+
+
+async def run_thumbnail_task():
+    """썸네일 생성 백그라운드 태스크"""
+    global thumb_state
+
+    from ..database import SessionLocal
+    from ..workers.thumbnail import ThumbnailWorker
+
+    db = SessionLocal()
+    try:
+        worker = ThumbnailWorker(db, settings)
+
+        def on_progress(processed, total):
+            thumb_state["processed"] = processed
+            thumb_state["total"] = total
+
+        result = await worker.process_all_pending(
+            batch_size=500,
+            cancel_event=thumb_cancel_event,
+            on_progress=on_progress,
+        )
+
+        thumb_state["is_running"] = False
+        print(f"[썸네일 태스크 완료] {result}")
+
+    except Exception as e:
+        thumb_state["error"] = str(e)
+        thumb_state["is_running"] = False
+        print(f"[썸네일 태스크 오류] {e}")
     finally:
         db.close()
 
