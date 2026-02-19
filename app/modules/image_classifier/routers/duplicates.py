@@ -1,22 +1,75 @@
 """
 중복 이미지 관리 API
 
+- POST /api/ic/duplicates/detect: 중복 탐지 시작
+- GET /api/ic/duplicates/detect/status: 중복 탐지 진행 상태
 - GET /api/ic/duplicates: 중복 그룹 목록
 - GET /api/ic/duplicates/{group_id}: 특정 그룹 조회
 - POST /api/ic/duplicates/{group_id}/resolve: 중복 해결 (keep/delete 결정)
 """
 
+import asyncio
+import logging
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from pathlib import Path
 from send2trash import send2trash
 
-from ..database import get_db
+from ..database import get_db, SessionLocal
+from ..workers.task_progress import TaskProgressManager
 
 router = APIRouter(prefix="/duplicates", tags=["Duplicates"])
+logger = logging.getLogger(__name__)
+
+# 실행 중인 detector 참조 (취소용)
+_active_detector = None
+
+
+class DetectRequest(BaseModel):
+    """중복 탐지 요청"""
+    resume: bool = True  # True: 이미 처리된 파일 스킵
+
+
+@router.post("/detect")
+async def start_detect_duplicates(
+    request: DetectRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """중복 탐지 시작 (백그라운드)"""
+    global _active_detector
+
+    # 이미 실행 중인지 확인
+    progress_mgr = TaskProgressManager(db)
+    running = progress_mgr.get_running('duplicate')
+    if running:
+        raise HTTPException(status_code=400, detail="중복 탐지가 이미 실행 중입니다.")
+
+    background_tasks.add_task(_run_detect, request.resume)
+    return {"message": "중복 탐지 시작", "resume": request.resume}
+
+
+@router.post("/detect/stop")
+async def stop_detect_duplicates():
+    """중복 탐지 중지"""
+    global _active_detector
+    if _active_detector:
+        _active_detector.cancel()
+        return {"message": "중복 탐지 중지 요청됨"}
+    raise HTTPException(status_code=400, detail="실행 중인 중복 탐지가 없습니다.")
+
+
+@router.get("/detect/status")
+async def get_detect_status(db: Session = Depends(get_db)):
+    """중복 탐지 진행 상태 조회"""
+    progress_mgr = TaskProgressManager(db)
+    latest = progress_mgr.get_latest('duplicate')
+    if latest:
+        return latest
+    return {"status": "none", "message": "중복 탐지 이력 없음"}
 
 
 class ResolveRequest(BaseModel):
@@ -232,3 +285,25 @@ async def resolve_duplicate_group(
         "kept_file_id": request.keep_file_id,
         "deleted_count": deleted_count,
     }
+
+
+async def _run_detect(resume: bool):
+    """백그라운드 중복 탐지 실행"""
+    global _active_detector
+
+    from ..config import ImageClassifierSettings
+    settings = ImageClassifierSettings()
+    db = SessionLocal()
+    progress_db = SessionLocal()
+
+    try:
+        from ..workers.duplicate_detector import DuplicateDetector
+        detector = DuplicateDetector(db, settings)
+        _active_detector = detector
+        await detector.detect_duplicates(resume=resume, progress_db=progress_db)
+    except Exception as e:
+        logger.error(f"[중복 감지] 오류: {e}")
+    finally:
+        _active_detector = None
+        db.close()
+        progress_db.close()

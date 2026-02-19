@@ -29,12 +29,16 @@ classification_status = {
 }
 
 
+CLI_MAX_WORKERS = 2  # CLI 동시 호출 수
+
+
 class ClassifyRequest(BaseModel):
     """AI 분류 요청"""
     file_ids: Optional[List[int]] = None  # None이면 전체 미분류 파일
     model: str = "claude_cli"  # claude_cli, gemini_cli, api
     batch_size: int = 10
     gap_minutes: int = 60  # 시간 클러스터링 간격
+    max_workers: int = CLI_MAX_WORKERS  # CLI 동시 호출 수
 
 
 class ClassifyResponse(BaseModel):
@@ -58,20 +62,20 @@ async def start_classification(
     if classification_status["running"]:
         raise HTTPException(status_code=400, detail="Classification already running")
 
-    # 분류할 파일 조회
+    # 분류할 파일 조회 (이미 AI 분류 완료된 파일 제외 = resume 지원)
     if request.file_ids:
         query = text("""
             SELECT id, file_path
             FROM file_classifications
             WHERE id IN :file_ids
-              AND (status = 'pending' OR status = 'folder_mapped')
+              AND (status = 'pending' OR (status = 'folder_mapped' AND ai_category_id IS NULL))
         """)
         files = db.execute(query, {"file_ids": tuple(request.file_ids)}).fetchall()
     else:
         query = text("""
             SELECT id, file_path
             FROM file_classifications
-            WHERE status = 'pending' OR status = 'folder_mapped'
+            WHERE status = 'pending' OR (status = 'folder_mapped' AND ai_category_id IS NULL)
             ORDER BY id
         """)
         files = db.execute(query).fetchall()
@@ -98,6 +102,7 @@ async def start_classification(
         request.model,
         request.batch_size,
         request.gap_minutes,
+        request.max_workers,
     )
 
     return ClassifyResponse(
@@ -151,9 +156,10 @@ async def run_classification(
     model: str,
     batch_size: int,
     gap_minutes: int,
+    max_workers: int = CLI_MAX_WORKERS,
 ):
     """
-    실제 분류 실행 (백그라운드) — DB 진행 추적 포함
+    실제 분류 실행 (백그라운드) — 병렬 CLI 호출 + DB 진행 추적
     """
     global classification_status
 
@@ -177,14 +183,14 @@ async def run_classification(
         progress_db.close()
         return
 
-    try:
-        for file in files:
-            if not classification_status["running"]:
-                logger.info("Classification stopped by user")
-                progress_mgr.pause_task(task_id)
-                break
+    semaphore = asyncio.Semaphore(max_workers)
 
-            file_id, file_path = file
+    async def classify_one(file_id: int, file_path: str):
+        """단일 파일 분류 (세마포어 제어)"""
+        async with semaphore:
+            if not classification_status["running"]:
+                return
+
             classification_status["current_file"] = file_path
 
             try:
@@ -222,19 +228,28 @@ async def run_classification(
                 logger.error(f"Classification failed for {file_path}: {e}")
                 classification_status["failed"] += 1
 
+    try:
+        # 배치 단위로 병렬 처리
+        for i in range(0, len(files), batch_size):
+            if not classification_status["running"]:
+                logger.info("Classification stopped by user")
+                progress_mgr.pause_task(task_id)
+                break
+
+            batch = files[i:i + batch_size]
+            tasks = [classify_one(f.id, f.file_path) for f in batch]
+            await asyncio.gather(*tasks)
+
             # DB 진행 업데이트
             try:
+                processed_total = classification_status["processed"] + classification_status["failed"]
                 progress_mgr.update_progress(
-                    task_id,
-                    classification_status["processed"] + classification_status["failed"],
-                    file_path,
+                    task_id, processed_total,
+                    f"배치 {i // batch_size + 1} 완료"
                 )
             except Exception:
                 pass
-
-            await asyncio.sleep(0.5)
         else:
-            # 루프 정상 완료 (break 없이)
             progress_mgr.complete_task(task_id)
 
     except Exception as e:
