@@ -15,6 +15,8 @@ from PIL import Image, ImageOps
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from .phash import PHashWorker
+
 
 class ThumbnailWorker:
     """썸네일 생성 백그라운드 워커"""
@@ -203,7 +205,7 @@ class ThumbnailWorker:
 
     def _create_thumbnail(self, file_id: int, file_path: Path):
         """
-        썸네일 생성 및 저장
+        썸네일 생성 및 저장 (pHash 동시 계산 포함)
 
         Args:
             file_id: file_classifications.id
@@ -216,6 +218,23 @@ class ThumbnailWorker:
             # RGB 변환 (RGBA, P 모드 등 처리)
             if img.mode not in ("RGB", "L"):
                 img = img.convert("RGB")
+
+            # pHash 계산 — 썸네일 리사이즈 전 원본 해상도에서 계산해야 정확도 높음
+            try:
+                phash_hex = PHashWorker.compute_phash_from_image(img)
+                self.db.execute(
+                    text("""
+                        INSERT INTO image_features (file_id, phash)
+                        VALUES (:file_id, :phash)
+                        ON CONFLICT(file_id)
+                        DO UPDATE SET phash = :phash
+                    """),
+                    {"file_id": file_id, "phash": phash_hex}
+                )
+                self.db.commit()
+            except Exception as e:
+                print(f"[pHash 오류] file_id={file_id}: {e}")
+                # pHash 실패해도 썸네일 생성은 계속 진행
 
             # 썸네일 생성 (비율 유지하며 리사이즈)
             img.thumbnail(self.thumbnail_size, Image.Resampling.LANCZOS)
