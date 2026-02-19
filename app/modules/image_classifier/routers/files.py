@@ -149,13 +149,13 @@ async def approve_files(
     db: Session = Depends(get_db),
 ):
     """
-    선택된 파일들을 승인 (status → user_classified)
+    선택된 파일들을 승인 (status → approved)
     """
     if not request.file_ids:
         raise HTTPException(status_code=400, detail="파일 ID가 필요합니다.")
 
     db.execute(
-        text("UPDATE file_classifications SET status = 'user_classified' WHERE id IN :ids"),
+        text("UPDATE file_classifications SET status = 'approved' WHERE id IN :ids"),
         {"ids": tuple(request.file_ids)}
     )
     db.commit()
@@ -175,7 +175,7 @@ async def bulk_classify_files(
     db: Session = Depends(get_db),
 ):
     """
-    선택된 파일들에 카테고리 지정 (status → user_classified)
+    선택된 파일들에 카테고리 지정 (status → approved)
     """
     if not request.file_ids:
         raise HTTPException(status_code=400, detail="파일 ID가 필요합니다.")
@@ -183,7 +183,7 @@ async def bulk_classify_files(
     db.execute(
         text("""
             UPDATE file_classifications
-            SET final_category_id = :cat_id, status = 'user_classified'
+            SET final_category_id = :cat_id, status = 'approved'
             WHERE id IN :ids
         """),
         {"cat_id": request.category_id, "ids": tuple(request.file_ids)}
@@ -250,11 +250,11 @@ async def rollback_file(
     if not result:
         raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
 
-    # moved → ai_classified, user_classified → ai_classified, ai_classified → pending
+    # moved → ai_classified, approved → ai_classified, ai_classified → pending
     current = result[0]
     rollback_map = {
         "moved": "ai_classified",
-        "user_classified": "ai_classified",
+        "approved": "ai_classified",
         "ai_classified": "folder_mapped",
         "folder_mapped": "pending",
     }

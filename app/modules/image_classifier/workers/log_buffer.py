@@ -12,7 +12,7 @@ from datetime import datetime
 class PipelineLogBuffer:
     """파이프라인 실행 로그를 메모리 링버퍼에 수집"""
 
-    def __init__(self, maxlen: int = 50):
+    def __init__(self, maxlen: int = 200):
         self._buffer: deque = deque(maxlen=maxlen)
 
     def add(self, stage: str, message: str):

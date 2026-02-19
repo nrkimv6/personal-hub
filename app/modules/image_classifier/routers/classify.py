@@ -126,11 +126,15 @@ async def get_status(db: Session = Depends(get_db)):
     latest = progress_mgr.get_latest('ai_classify')
 
     if latest:
+        total = latest["total_items"] or 0
+        processed = latest["processed_items"] or 0
+        # 완료된 작업이면 실패 건수 = total - processed
+        failed = max(0, total - processed) if latest["status"] in ("completed", "failed") else 0
         return {
             "running": latest["status"] == "running",
-            "total": latest["total_items"] or 0,
-            "processed": latest["processed_items"] or 0,
-            "failed": 0,
+            "total": total,
+            "processed": processed,
+            "failed": failed,
             "current_file": latest["current_item"],
             "model": None,
             "status": latest["status"],
@@ -173,11 +177,41 @@ async def run_classification(
     task_id = progress_mgr.start_task('ai_classify', len(files))
     classification_status["task_id"] = task_id
 
+    # 카테고리 목록 조회
+    cat_db = SessionLocal()
+    try:
+        categories = [
+            row[0] for row in cat_db.execute(
+                text("SELECT full_path FROM categories ORDER BY full_path")
+            ).fetchall()
+        ]
+    finally:
+        cat_db.close()
+
+    if not categories:
+        logger.error("No categories found. Create categories first.")
+        classification_status["running"] = False
+        progress_mgr.fail_task(task_id, "카테고리가 없습니다.")
+        progress_db.close()
+        return
+
+    # 프롬프트 구성
+    classify_prompt = "이미지의 내용을 분석하여 가장 적합한 카테고리로 분류하세요."
+
+    # CLI 실시간 출력 → 파이프라인 로그
+    def on_cli_output(line: str):
+        # 노이즈 필터 (진행바, 빈 줄 등)
+        if not line or len(line) < 3:
+            return
+        # 너무 긴 줄 자르기
+        display = line[:120] + "..." if len(line) > 120 else line
+        pipeline_logs.add("classify", f"[CLI] {display}")
+
     # 모델 어댑터 선택
     if model == "claude_cli":
-        adapter = ClaudeCLIAdapter()
+        adapter = ClaudeCLIAdapter(on_output=on_cli_output)
     elif model == "gemini_cli":
-        adapter = GeminiCLIAdapter()
+        adapter = GeminiCLIAdapter(on_output=on_cli_output)
     else:
         logger.error(f"Unknown model: {model}")
         classification_status["running"] = False
@@ -185,7 +219,12 @@ async def run_classification(
         progress_db.close()
         return
 
+    from ..workers.log_buffer import pipeline_logs
+
     semaphore = asyncio.Semaphore(max_workers)
+
+    # 시작 로그
+    pipeline_logs.add("classify", f"[시작] {len(files)}건 분류 시작 (모델: {model}, 카테고리: {len(categories)}개)")
 
     async def classify_one(file_id: int, file_path: str):
         """단일 파일 분류 (세마포어 제어)"""
@@ -194,41 +233,68 @@ async def run_classification(
                 return
 
             classification_status["current_file"] = file_path
+            filename = file_path.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
 
             try:
-                result = await adapter.classify_image(file_path)
+                result = await adapter.classify_image(file_path, classify_prompt, categories)
 
-                if result and result.category:
+                if result and result.category_path and not result.category_path.startswith("error/"):
                     db = SessionLocal()
                     try:
-                        update_query = text("""
-                            UPDATE file_classifications
-                            SET ai_category_id = :category_id,
-                                ai_confidence = :confidence,
-                                ai_reasoning = :reasoning,
-                                ai_model = :model,
-                                final_category_id = :category_id,
-                                status = 'ai_classified',
-                                classified_at = datetime('now')
-                            WHERE id = :file_id
-                        """)
-                        db.execute(update_query, {
-                            "file_id": file_id,
-                            "category_id": result.category_id,
-                            "confidence": result.confidence,
-                            "reasoning": result.reasoning,
-                            "model": model,
-                        })
-                        db.commit()
-                        classification_status["processed"] += 1
+                        # category_path로 category_id 조회
+                        cat_row = db.execute(
+                            text("SELECT id FROM categories WHERE full_path = :path"),
+                            {"path": result.category_path}
+                        ).fetchone()
+
+                        if cat_row:
+                            category_id = cat_row[0]
+                        else:
+                            # 정확히 일치하지 않으면 LIKE로 부분 매칭
+                            cat_row = db.execute(
+                                text("SELECT id FROM categories WHERE full_path LIKE :path ORDER BY LENGTH(full_path) LIMIT 1"),
+                                {"path": f"%{result.category_path}%"}
+                            ).fetchone()
+                            category_id = cat_row[0] if cat_row else None
+
+                        if category_id:
+                            update_query = text("""
+                                UPDATE file_classifications
+                                SET ai_category_id = :category_id,
+                                    ai_confidence = :confidence,
+                                    ai_reasoning = :reasoning,
+                                    ai_model = :model,
+                                    final_category_id = :category_id,
+                                    status = 'ai_classified',
+                                    classified_at = datetime('now')
+                                WHERE id = :file_id
+                            """)
+                            db.execute(update_query, {
+                                "file_id": file_id,
+                                "category_id": category_id,
+                                "confidence": result.confidence,
+                                "reasoning": result.reasoning,
+                                "model": model,
+                            })
+                            db.commit()
+                            classification_status["processed"] += 1
+                            conf_pct = round(result.confidence * 100)
+                            pipeline_logs.add("classify", f"[OK] {filename} → {result.category_path} ({conf_pct}%)")
+                        else:
+                            logger.warning(f"Category not found: {result.category_path} for {file_path}")
+                            classification_status["failed"] += 1
+                            pipeline_logs.add("classify", f"[FAIL] {filename} — 카테고리 매칭 실패: {result.category_path}")
                     finally:
                         db.close()
                 else:
                     classification_status["failed"] += 1
+                    reason = result.reasoning if result else "결과 없음"
+                    pipeline_logs.add("classify", f"[FAIL] {filename} — {reason}")
 
             except Exception as e:
                 logger.error(f"Classification failed for {file_path}: {e}")
                 classification_status["failed"] += 1
+                pipeline_logs.add("classify", f"[ERROR] {filename} — {type(e).__name__}: {e}")
 
     try:
         # 배치 단위로 병렬 처리
@@ -236,7 +302,6 @@ async def run_classification(
             if not classification_status["running"]:
                 msg = "Classification stopped by user"
                 logger.info(msg)
-                from ..workers.log_buffer import pipeline_logs
                 pipeline_logs.add("classify", msg)
                 progress_mgr.pause_task(task_id)
                 break
@@ -245,17 +310,31 @@ async def run_classification(
             tasks = [classify_one(f.id, f.file_path) for f in batch]
             await asyncio.gather(*tasks)
 
-            # DB 진행 업데이트
+            # DB 진행 업데이트 (성공 건수만 processed로 기록)
             try:
-                processed_total = classification_status["processed"] + classification_status["failed"]
+                succeeded = classification_status["processed"]
+                failed = classification_status["failed"]
+                total = classification_status["total"]
+                batch_num = i // batch_size + 1
+                total_batches = (total + batch_size - 1) // batch_size
                 progress_mgr.update_progress(
-                    task_id, processed_total,
-                    f"배치 {i // batch_size + 1} 완료"
+                    task_id, succeeded,
+                    f"배치 {batch_num}/{total_batches} (성공: {succeeded}, 실패: {failed})"
                 )
+                pipeline_logs.add("classify", f"[배치 {batch_num}/{total_batches}] 성공: {succeeded}, 실패: {failed}, 남은: {total - succeeded - failed}")
             except Exception:
                 pass
         else:
-            progress_mgr.complete_task(task_id)
+            # 전부 실패했으면 실패로 기록
+            succeeded = classification_status["processed"]
+            failed = classification_status["failed"]
+            if succeeded == 0 and failed > 0:
+                progress_mgr.fail_task(task_id, f"전체 실패: {failed}건 모두 분류 실패")
+            elif failed > 0:
+                progress_mgr.complete_task(task_id)
+                logger.warning(f"Classification done with {failed} failures out of {succeeded + failed}")
+            else:
+                progress_mgr.complete_task(task_id)
 
     except Exception as e:
         progress_mgr.fail_task(task_id, str(e))
@@ -265,10 +344,16 @@ async def run_classification(
         classification_status["current_file"] = None
         progress_db.close()
 
-        msg = (
-            f"Classification completed: {classification_status['processed']}/{classification_status['total']} "
-            f"(failed: {classification_status['failed']})"
-        )
-        logger.info(msg)
-        from ..workers.log_buffer import pipeline_logs
+        succeeded = classification_status['processed']
+        failed = classification_status['failed']
+        total = classification_status['total']
+        if failed > 0 and succeeded == 0:
+            msg = f"Classification FAILED: {failed}/{total}건 전부 실패"
+            logger.error(msg)
+        elif failed > 0:
+            msg = f"Classification done: 성공 {succeeded}/{total}, 실패 {failed}건"
+            logger.warning(msg)
+        else:
+            msg = f"Classification completed: {succeeded}/{total}건 성공"
+            logger.info(msg)
         pipeline_logs.add("classify", msg)
