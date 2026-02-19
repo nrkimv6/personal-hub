@@ -106,13 +106,13 @@ async def get_pipeline_status(db: Session = Depends(get_db)):
     """
     통합 파이프라인 상태 반환 (Dashboard 진행률 UI 용)
 
-    4단계(scan, thumbnail, duplicate, classify) 각각의:
+    5단계(scan, thumbnail, phash, duplicate, classify) 각각의:
     - 실행 상태, 진행률, 현재 처리 항목
     - ETA (실행 중일 때)
     - last_run (비실행 시 DB에서 마지막 기록)
     + 최근 로그 메시지
     """
-    from .scan import scan_state, thumb_state
+    from .scan import scan_state, thumb_state, phash_state
     from .classify import classification_status
     from ..workers.task_progress import TaskProgressManager
     from ..workers.log_buffer import pipeline_logs, calc_eta
@@ -180,6 +180,19 @@ async def get_pipeline_status(db: Session = Depends(get_db)):
         thumb_state["total"],
     )
 
+    # --- pHash ---
+    phash_started = None
+    if phash_state["is_running"]:
+        running_task = progress_mgr.get_running("phash")
+        phash_started = running_task["started_at"] if running_task else None
+    phash = _build_stage(
+        "phash",
+        phash_state["is_running"],
+        phash_state["processed"],
+        phash_state["total"],
+        started_at=phash_started,
+    )
+
     # --- Duplicate ---
     dup_task = progress_mgr.get_running("duplicate")
     if dup_task:
@@ -215,6 +228,7 @@ async def get_pipeline_status(db: Session = Depends(get_db)):
     return {
         "scan": scan,
         "thumbnail": thumb,
+        "phash": phash,
         "duplicate": dup,
         "classify": classify,
         "logs": pipeline_logs.get_recent(20),

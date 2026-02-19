@@ -156,6 +156,70 @@
     return '—';
   }
 
+  // === 승인/카테고리/삭제 ===
+  async function approveSelected(ids?: number[]) {
+    const fileIds = ids ?? selectedImages;
+    if (fileIds.length === 0) return;
+    try {
+      const res = await fetchWithTimeout('/api/ic/files/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_ids: fileIds }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      selectedImages = [];
+      detailImage = null;
+      loadImages(true);
+    } catch (err: any) {
+      alert(`승인 실패: ${err.message}`);
+    }
+  }
+
+  interface Category { id: number; name: string; }
+  let categories = $state<Category[]>([]);
+  let showCategoryPicker = $state(false);
+
+  async function loadCategories() {
+    try {
+      const res = await fetchWithTimeout('/api/ic/categories');
+      if (res.ok) categories = await res.json();
+    } catch { /* ignore */ }
+  }
+
+  async function assignCategory(categoryId: number) {
+    if (selectedImages.length === 0) return;
+    try {
+      const res = await fetchWithTimeout('/api/ic/files/bulk-classify', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_ids: selectedImages, category_id: categoryId }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      selectedImages = [];
+      showCategoryPicker = false;
+      loadImages(true);
+    } catch (err: any) {
+      alert(`카테고리 지정 실패: ${err.message}`);
+    }
+  }
+
+  async function deleteSelected() {
+    if (selectedImages.length === 0) return;
+    if (!confirm(`선택한 ${selectedImages.length}개 이미지를 삭제하시겠습니까?`)) return;
+    try {
+      const res = await fetchWithTimeout('/api/ic/files/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_ids: selectedImages }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      selectedImages = [];
+      loadImages(true);
+    } catch (err: any) {
+      alert(`삭제 실패: ${err.message}`);
+    }
+  }
+
   // === 썸네일 생성 ===
   let thumbGenerating = $state(false);
   let thumbProgress = $state({ processed: 0, total: 0, progress_percent: 0 });
@@ -317,15 +381,15 @@
     <div class="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
       <span class="text-xs font-medium text-primary">{selectedImages.length} 이미지 선택됨</span>
       <div class="mx-1 h-4 w-px bg-border"></div>
-      <button class="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent">
+      <button onclick={() => { loadCategories(); showCategoryPicker = true; }} class="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent">
         <Tag class="size-3" />
         카테고리 지정
       </button>
-      <button class="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent">
+      <button onclick={() => approveSelected()} class="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent">
         <Check class="size-3" />
         승인
       </button>
-      <button class="flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/10">
+      <button onclick={deleteSelected} class="flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/10">
         <Trash2 class="size-3" />
         삭제
       </button>
@@ -504,7 +568,7 @@
 
     <!-- Footer -->
     <div class="flex items-center gap-2 border-t border-border p-3">
-      <button class="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90">
+      <button onclick={() => detailData && approveSelected([detailData.id])} class="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90">
         <Check class="size-3" />
         승인
       </button>
@@ -515,5 +579,39 @@
         닫기
       </button>
     </div>
+  </div>
+{/if}
+
+<!-- Category Picker Modal -->
+{#if showCategoryPicker}
+  <div
+    role="button"
+    tabindex="-1"
+    class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
+    onclick={() => (showCategoryPicker = false)}
+    onkeydown={(e) => e.key === 'Escape' && (showCategoryPicker = false)}
+  ></div>
+  <div class="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-card p-4 shadow-2xl">
+    <h3 class="mb-3 text-sm font-semibold text-foreground">카테고리 선택</h3>
+    {#if categories.length === 0}
+      <p class="text-xs text-muted-foreground">카테고리가 없습니다.</p>
+    {:else}
+      <div class="max-h-60 space-y-1 overflow-y-auto">
+        {#each categories as cat}
+          <button
+            onclick={() => assignCategory(cat.id)}
+            class="flex w-full items-center rounded-md px-3 py-2 text-left text-xs font-medium text-foreground hover:bg-accent"
+          >
+            {cat.name}
+          </button>
+        {/each}
+      </div>
+    {/if}
+    <button
+      onclick={() => (showCategoryPicker = false)}
+      class="mt-3 w-full rounded-md border border-border bg-card py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent"
+    >
+      취소
+    </button>
   </div>
 {/if}

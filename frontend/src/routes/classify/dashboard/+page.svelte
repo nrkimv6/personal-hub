@@ -100,6 +100,7 @@
 	interface PipelineDetail {
 		scan: StageDetail;
 		thumbnail: StageDetail;
+		phash: StageDetail;
 		duplicate: StageDetail;
 		classify: StageDetail;
 		logs: { stage: string; message: string; timestamp: string }[];
@@ -120,6 +121,7 @@
 				const stageMap: Record<string, StageDetail> = {
 					scan: pipelineDetail.scan,
 					extract: pipelineDetail.thumbnail,
+					phash: pipelineDetail.phash,
 					duplicates: pipelineDetail.duplicate,
 					classify: pipelineDetail.classify
 				};
@@ -177,6 +179,7 @@
 	let pipelineStages = $state([
 		{ id: 'scan', label: '스캔', status: 'idle' },
 		{ id: 'extract', label: '추출', status: 'idle' },
+		{ id: 'phash', label: 'pHash', status: 'idle' },
 		{ id: 'duplicates', label: '중복 검출', status: 'idle' },
 		{ id: 'classify', label: 'AI 분류', status: 'idle' },
 		{ id: 'review', label: '검토', status: 'idle' }
@@ -218,6 +221,7 @@
 	const stageStatusUrls: Record<string, string> = {
 		scan: '/api/ic/scan/status',
 		extract: '/api/ic/scan/thumbnails/status',
+		phash: '/api/ic/scan/phash/status',
 		duplicates: '/api/ic/duplicates/detect/status',
 		classify: '/api/ic/classify/status'
 	};
@@ -275,6 +279,7 @@
 		const steps = [
 			{ id: 'scan', url: '/api/ic/scan/start', method: 'POST' },
 			{ id: 'extract', url: '/api/ic/scan/thumbnails', method: 'POST' },
+			{ id: 'phash', url: '/api/ic/scan/phash', method: 'POST' },
 			{ id: 'duplicates', url: '/api/ic/duplicates/detect', method: 'POST' },
 			{ id: 'classify', url: '/api/ic/classify/start', method: 'POST' }
 		];
@@ -378,6 +383,7 @@
 		const map: Record<string, StageDetail> = {
 			scan: pipelineDetail.scan,
 			extract: pipelineDetail.thumbnail,
+			phash: pipelineDetail.phash,
 			duplicates: pipelineDetail.duplicate,
 			classify: pipelineDetail.classify
 		};

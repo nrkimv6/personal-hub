@@ -12,8 +12,12 @@
 		file_count: number;
 		duration_minutes: number;
 		category_path: string | null;
+		reviewed?: boolean;
+		preview_file_ids?: number[];
 		files?: any[];
 	}
+
+	interface Category { id: number; name: string; }
 
 	let clusters: Cluster[] = $state([]);
 	let selectedCluster: Cluster | null = $state(null);
@@ -21,6 +25,10 @@
 	let gapMinutes = $state(60);
 	let dateFrom = $state('');
 	let dateTo = $state('');
+
+	let categories = $state<Category[]>([]);
+	let showCategoryPicker = $state(false);
+	let categoryTarget: Cluster | null = $state(null);
 
 	onMount(() => {
 		loadClusters();
@@ -42,8 +50,44 @@
 		}
 	}
 
+	async function loadCategories() {
+		try {
+			const res = await fetchWithTimeout('/api/ic/categories');
+			if (res.ok) categories = await res.json();
+		} catch { /* ignore */ }
+	}
+
 	function selectCluster(cluster: Cluster) {
-		selectedCluster = cluster;
+		categoryTarget = cluster;
+		loadCategories();
+		showCategoryPicker = true;
+	}
+
+	async function assignCategory(categoryId: number) {
+		if (!categoryTarget) return;
+		try {
+			const res = await fetchWithTimeout(`/api/ic/clusters/${categoryTarget.cluster_id}/assign`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ category_id: categoryId }),
+			});
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			showCategoryPicker = false;
+			categoryTarget = null;
+			loadClusters();
+		} catch (err: any) {
+			alert(`카테고리 지정 실패: ${err.message}`);
+		}
+	}
+
+	async function reviewCluster(clusterId: number) {
+		try {
+			const res = await fetchWithTimeout(`/api/ic/clusters/${clusterId}/review`, { method: 'POST' });
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			loadClusters();
+		} catch (err: any) {
+			alert(`검토 완료 실패: ${err.message}`);
+		}
 	}
 </script>
 
@@ -149,14 +193,17 @@
 					<!-- 카드 바디 -->
 					<div class="p-4">
 						<div class="flex gap-2">
-							{#each { length: Math.min(5, cluster.file_count) } as _}
-								<div class="flex size-16 items-center justify-center rounded-md bg-muted">
-									<span class="text-[10px] text-muted-foreground">IMG</span>
-								</div>
+							{#each (cluster.preview_file_ids ?? []) as fileId}
+								<img
+									src="/api/ic/files/{fileId}/thumbnail"
+									alt=""
+									class="size-16 rounded-md object-cover"
+									onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+								/>
 							{/each}
-							{#if cluster.file_count > 5}
+							{#if cluster.file_count > (cluster.preview_file_ids?.length ?? 0)}
 								<div class="flex size-16 items-center justify-center rounded-md border border-dashed text-xs text-muted-foreground">
-									+{cluster.file_count - 5}
+									+{cluster.file_count - (cluster.preview_file_ids?.length ?? 0)}
 								</div>
 							{/if}
 						</div>
@@ -178,11 +225,12 @@
 							전체 보기
 						</button>
 						<button
-							disabled={!!cluster.category_path}
-							class="flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+							onclick={() => reviewCluster(cluster.cluster_id)}
+							disabled={cluster.reviewed}
+							class="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors {cluster.reviewed ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30' : 'bg-card hover:bg-muted'} disabled:cursor-not-allowed"
 						>
 							<CheckCircle2 class="size-3" />
-							검토 완료
+							{cluster.reviewed ? '검토됨' : '검토 완료'}
 						</button>
 					</div>
 				</div>
@@ -190,13 +238,40 @@
 		</div>
 	{/if}
 
-	<!-- 선택된 클러스터 상세 -->
-	{#if selectedCluster}
-		<div class="rounded-xl border bg-card p-4">
-			<h2 class="mb-1 text-sm font-semibold">클러스터 #{selectedCluster.cluster_id}</h2>
-			<p class="text-xs text-muted-foreground">
-				{new Date(selectedCluster.start_time).toLocaleDateString('ko-KR')} · {new Date(selectedCluster.start_time).toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit'})} – {new Date(selectedCluster.end_time).toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit'})} · {selectedCluster.file_count}장
-			</p>
-		</div>
-	{/if}
 </div>
+
+<!-- Category Picker Modal -->
+{#if showCategoryPicker}
+	<div
+		role="button"
+		tabindex="-1"
+		class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
+		onclick={() => (showCategoryPicker = false)}
+		onkeydown={(e) => e.key === 'Escape' && (showCategoryPicker = false)}
+	></div>
+	<div class="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-card p-4 shadow-2xl">
+		<h3 class="mb-3 text-sm font-semibold text-foreground">
+			클러스터 #{categoryTarget?.cluster_id} 카테고리 선택
+		</h3>
+		{#if categories.length === 0}
+			<p class="text-xs text-muted-foreground">카테고리가 없습니다.</p>
+		{:else}
+			<div class="max-h-60 space-y-1 overflow-y-auto">
+				{#each categories as cat}
+					<button
+						onclick={() => assignCategory(cat.id)}
+						class="flex w-full items-center rounded-md px-3 py-2 text-left text-xs font-medium text-foreground hover:bg-accent"
+					>
+						{cat.name}
+					</button>
+				{/each}
+			</div>
+		{/if}
+		<button
+			onclick={() => (showCategoryPicker = false)}
+			class="mt-3 w-full rounded-md border border-border bg-card py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent"
+		>
+			취소
+		</button>
+	</div>
+{/if}
