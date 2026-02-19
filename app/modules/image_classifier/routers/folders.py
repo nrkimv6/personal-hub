@@ -80,16 +80,42 @@ def update_classify_progress(total: int, processed: int, current_folder: str):
 
 
 async def run_classify_task(force: bool):
-    """분류 백그라운드 태스크"""
+    """분류 백그라운드 태스크 — DB 진행 추적 포함"""
     global classify_state
     db = SessionLocal()
+
+    from ..workers.task_progress import TaskProgressManager
+    progress_mgr = TaskProgressManager(db)
+    task_id = None
+
     try:
         classifier = FolderClassifier(db)
-        classifier.classify_all_folders(force=force, on_progress=update_classify_progress)
+
+        # 대상 폴더 수 사전 파악
+        from sqlalchemy import text
+        if force:
+            count = db.execute(text("SELECT COUNT(*) FROM folder_mappings")).scalar() or 0
+        else:
+            count = db.execute(text("SELECT COUNT(*) FROM folder_mappings WHERE folder_status = 'unknown' OR folder_status IS NULL")).scalar() or 0
+
+        task_id = progress_mgr.start_task('classify', count)
+        classify_state["task_id"] = task_id
+
+        def progress_callback(total, processed, current_folder):
+            update_classify_progress(total, processed, current_folder)
+            try:
+                progress_mgr.update_progress(task_id, processed, current_folder)
+            except Exception:
+                pass
+
+        classifier.classify_all_folders(force=force, on_progress=progress_callback)
         classify_state["is_running"] = False
+        progress_mgr.complete_task(task_id)
     except Exception as e:
         classify_state["error"] = str(e)
         classify_state["is_running"] = False
+        if task_id:
+            progress_mgr.fail_task(task_id, str(e))
     finally:
         db.close()
 
@@ -132,21 +158,49 @@ async def classify_folders(
 
 
 @router.get("/classify/status")
-async def get_classify_status():
-    """폴더 분류 진행 상태 조회"""
+async def get_classify_status(db: Session = Depends(get_db)):
+    """폴더 분류 진행 상태 조회 — DB 우선, 메모리 fallback"""
     global classify_state
 
-    progress = 0.0
-    if classify_state["total"] > 0:
-        progress = (classify_state["processed"] / classify_state["total"]) * 100
+    # 메모리에서 실행 중이면 실시간 데이터 사용
+    if classify_state["is_running"]:
+        progress = 0.0
+        if classify_state["total"] > 0:
+            progress = (classify_state["processed"] / classify_state["total"]) * 100
+        return {
+            "is_running": True,
+            "total": classify_state["total"],
+            "processed": classify_state["processed"],
+            "progress_percent": round(progress, 2),
+            "current_folder": classify_state["current_folder"],
+            "error": classify_state["error"],
+        }
+
+    # DB에서 최신 작업 조회
+    from ..workers.task_progress import TaskProgressManager
+    progress_mgr = TaskProgressManager(db)
+    latest = progress_mgr.get_latest('classify')
+
+    if latest:
+        total = latest["total_items"] or 0
+        processed = latest["processed_items"] or 0
+        progress = (processed / total * 100) if total > 0 else 0.0
+        return {
+            "is_running": latest["status"] == "running",
+            "total": total,
+            "processed": processed,
+            "progress_percent": round(progress, 2),
+            "current_folder": latest["current_item"],
+            "error": latest["error_message"],
+        }
 
     return {
-        "is_running": classify_state["is_running"],
-        "total": classify_state["total"],
-        "processed": classify_state["processed"],
-        "progress_percent": round(progress, 2),
-        "current_folder": classify_state["current_folder"],
-        "error": classify_state["error"],
+        "is_running": False,
+        "total": 0,
+        "processed": 0,
+        "progress_percent": 0.0,
+        "current_folder": None,
+        "error": None,
     }
 
 
@@ -401,3 +455,11 @@ async def inherit_mapping(
         "category_id": category_id,
         "message": f"{updated_count}개 하위 폴더에 카테고리 상속 완료"
     }
+
+
+@router.get("/classify/history")
+async def get_classify_history(db: Session = Depends(get_db)):
+    """폴더 분류 작업 이력 조회 (최근 10건)"""
+    from ..workers.task_progress import TaskProgressManager
+    progress_mgr = TaskProgressManager(db)
+    return {"history": progress_mgr.get_history('classify', limit=10)}

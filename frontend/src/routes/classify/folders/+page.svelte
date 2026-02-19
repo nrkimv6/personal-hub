@@ -51,21 +51,40 @@
 	let scanDone = $state(false);
 	let newFolderInput = $state('');
 
+	// === pagination 상태 ===
+	let currentPage = $state(1);
+	let pageSize = 50;
+	let totalFolderCount = $state(0);
+	let scanPaused = $state(false);
+
 	const mappedCount = $derived(folders.filter((f) => f.category_id !== null).length);
 	const totalCount = $derived(folders.length);
 	const unmappedCount = $derived(totalCount - mappedCount);
 	const mappingPct = $derived(totalCount > 0 ? Math.round((mappedCount / totalCount) * 100) : 0);
 
-	const filteredFolders = $derived(
-		statusFilter === 'all' ? folders : folders.filter((f) => f.folder_status === statusFilter)
-	);
+	const filteredFolders = $derived(folders);
+	const totalPages = $derived(Math.ceil(totalFolderCount / pageSize) || 1);
 
 	// === 마운트 ===
 	onMount(async () => {
 		await loadSettings();
 		await loadCategories();
 		await loadFolders();
+		await checkPausedScan();
 	});
+
+	async function checkPausedScan() {
+		try {
+			const res = await fetchWithTimeout('/api/ic/scan/status');
+			const status = await res.json();
+			// DB에서 paused 상태이거나 진행 중이 아닌데 폴더가 처리된 경우
+			if (!status.is_running && status.scanned_folders > 0 && status.scanned_folders < status.total_folders) {
+				scanPaused = true;
+			}
+		} catch {
+			// 무시
+		}
+	}
 
 	// === 보존된 API 호출 ===
 	async function loadCategories() {
@@ -78,18 +97,22 @@
 		}
 	}
 
-	async function loadFolders() {
+	async function loadFolders(page: number = currentPage) {
 		loading = true;
 		try {
 			const params = new URLSearchParams();
 			if (statusFilter !== 'all') {
 				params.append('folder_status', statusFilter);
 			}
-			params.append('limit', '500');
+			const skip = (page - 1) * pageSize;
+			params.append('skip', String(skip));
+			params.append('limit', String(pageSize));
 
 			const res = await fetchWithTimeout(`/api/ic/scan/folders?${params}`);
 			const data = await res.json();
 			folders = data.folders || [];
+			totalFolderCount = data.total || 0;
+			currentPage = page;
 		} catch (e) {
 			console.error('폴더 로드 실패:', e);
 		} finally {
@@ -356,6 +379,72 @@
 			scanning = false;
 		}
 	}
+
+	async function stopScan() {
+		try {
+			const res = await fetchWithTimeout('/api/ic/scan/stop', { method: 'POST' });
+			if (res.ok) {
+				scanning = false;
+				classifyLoading = false;
+				scanPaused = true;
+			}
+		} catch (e) {
+			console.error('스캔 중지 실패:', e);
+			scanning = false;
+		}
+	}
+
+	async function resumeScan() {
+		if (scanRoots.length === 0) {
+			alert('스캔 대상 폴더를 추가하세요.');
+			return;
+		}
+		scanning = true;
+		scanDone = false;
+		scanPaused = false;
+		progress = 0;
+
+		try {
+			const res = await fetchWithTimeout('/api/ic/scan/start', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ root_folders: scanRoots, resume: true })
+			});
+
+			if (!res.ok) {
+				const err = await res.json();
+				throw new Error(err.detail || '이어서 스캔 시작 실패');
+			}
+
+			const pollInterval = setInterval(async () => {
+				try {
+					const statusRes = await fetchWithTimeout('/api/ic/scan/status');
+					const status = await statusRes.json();
+
+					if (status.total_files > 0) {
+						progress = Math.round((status.scanned_files / status.total_files) * 100);
+					} else if (status.total_folders > 0) {
+						progress = Math.round((status.scanned_folders / status.total_folders) * 100);
+					}
+
+					if (!status.is_running) {
+						clearInterval(pollInterval);
+						progress = 100;
+						scanDone = true;
+						scanning = false;
+						scanPaused = false;
+						await loadFolders();
+					}
+				} catch {
+					clearInterval(pollInterval);
+					scanning = false;
+				}
+			}, 1000);
+		} catch (e: any) {
+			alert(e.message);
+			scanning = false;
+		}
+	}
 </script>
 
 <svelte:head>
@@ -492,14 +581,28 @@
 			<div class="flex gap-2">
 				{#if scanning}
 					<button
-						onclick={() => {
-							scanning = false;
-							classifyLoading = false;
-						}}
+						onclick={stopScan}
 						class="inline-flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors"
 					>
 						<Square class="h-4 w-4" />
 						스캔 중지
+					</button>
+				{:else if scanPaused}
+					<button
+						onclick={resumeScan}
+						disabled={classifyLoading}
+						class="inline-flex items-center gap-2 rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50 transition-colors"
+					>
+						<Play class="h-4 w-4" />
+						이어서 스캔
+					</button>
+					<button
+						onclick={startScan}
+						disabled={classifyLoading}
+						class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50 transition-colors"
+					>
+						<Play class="h-4 w-4" />
+						새로 스캔
 					</button>
 				{:else}
 					<button
@@ -512,7 +615,7 @@
 					</button>
 				{/if}
 				<button
-					onclick={loadFolders}
+					onclick={() => loadFolders()}
 					disabled={loading}
 					class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50 transition-colors"
 				>
@@ -574,10 +677,13 @@
 	<!-- 폴더 목록 카드 -->
 	<div class="rounded-lg border bg-card">
 		<div class="flex items-center justify-between p-5 border-b">
-			<h2 class="text-sm font-semibold">폴더 목록</h2>
+			<div class="flex items-center gap-2">
+				<h2 class="text-sm font-semibold">폴더 목록</h2>
+				<span class="text-xs text-muted-foreground">({totalFolderCount.toLocaleString()}개)</span>
+			</div>
 			<select
 				bind:value={statusFilter}
-				onchange={loadFolders}
+				onchange={() => loadFolders(1)}
 				class="rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
 			>
 				<option value="all">전체 상태</option>
@@ -677,6 +783,58 @@
 					</div>
 				{/each}
 			</div>
+
+			<!-- pagination -->
+			{#if totalPages > 1}
+				<div class="flex items-center justify-between px-5 py-3 border-t">
+					<span class="text-xs text-muted-foreground">
+						{((currentPage - 1) * pageSize + 1).toLocaleString()}–{Math.min(currentPage * pageSize, totalFolderCount).toLocaleString()} / {totalFolderCount.toLocaleString()}
+					</span>
+					<div class="flex items-center gap-1">
+						<button
+							onclick={() => loadFolders(1)}
+							disabled={currentPage === 1}
+							class="px-2 py-1 rounded text-xs border hover:bg-accent disabled:opacity-30 transition-colors"
+						>
+							«
+						</button>
+						<button
+							onclick={() => loadFolders(currentPage - 1)}
+							disabled={currentPage === 1}
+							class="px-2 py-1 rounded text-xs border hover:bg-accent disabled:opacity-30 transition-colors"
+						>
+							‹
+						</button>
+						{#each Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+							if (totalPages <= 7) return i + 1;
+							if (currentPage <= 4) return i + 1;
+							if (currentPage >= totalPages - 3) return totalPages - 6 + i;
+							return currentPage - 3 + i;
+						}) as page}
+							<button
+								onclick={() => loadFolders(page)}
+								class="px-2.5 py-1 rounded text-xs border transition-colors {page === currentPage ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-accent'}"
+							>
+								{page}
+							</button>
+						{/each}
+						<button
+							onclick={() => loadFolders(currentPage + 1)}
+							disabled={currentPage === totalPages}
+							class="px-2 py-1 rounded text-xs border hover:bg-accent disabled:opacity-30 transition-colors"
+						>
+							›
+						</button>
+						<button
+							onclick={() => loadFolders(totalPages)}
+							disabled={currentPage === totalPages}
+							class="px-2 py-1 rounded text-xs border hover:bg-accent disabled:opacity-30 transition-colors"
+						>
+							»
+						</button>
+					</div>
+				</div>
+			{/if}
 		{/if}
 	</div>
 </div>

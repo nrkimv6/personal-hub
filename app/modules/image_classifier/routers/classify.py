@@ -108,8 +108,28 @@ async def start_classification(
 
 
 @router.get("/status")
-async def get_status():
-    """분류 진행 상태 조회"""
+async def get_status(db: Session = Depends(get_db)):
+    """분류 진행 상태 조회 — 메모리 우선, DB fallback"""
+    if classification_status["running"]:
+        return classification_status
+
+    # DB에서 최신 작업 조회
+    from ..workers.task_progress import TaskProgressManager
+    progress_mgr = TaskProgressManager(db)
+    latest = progress_mgr.get_latest('ai_classify')
+
+    if latest:
+        return {
+            "running": latest["status"] == "running",
+            "total": latest["total_items"] or 0,
+            "processed": latest["processed_items"] or 0,
+            "failed": 0,
+            "current_file": latest["current_item"],
+            "model": None,
+            "status": latest["status"],
+            "error": latest["error_message"],
+        }
+
     return classification_status
 
 
@@ -133,9 +153,17 @@ async def run_classification(
     gap_minutes: int,
 ):
     """
-    실제 분류 실행 (백그라운드)
+    실제 분류 실행 (백그라운드) — DB 진행 추적 포함
     """
     global classification_status
+
+    from ..database import SessionLocal
+    from ..workers.task_progress import TaskProgressManager
+
+    progress_db = SessionLocal()
+    progress_mgr = TaskProgressManager(progress_db)
+    task_id = progress_mgr.start_task('ai_classify', len(files))
+    classification_status["task_id"] = task_id
 
     # 모델 어댑터 선택
     if model == "claude_cli":
@@ -145,25 +173,24 @@ async def run_classification(
     else:
         logger.error(f"Unknown model: {model}")
         classification_status["running"] = False
+        progress_mgr.fail_task(task_id, f"Unknown model: {model}")
+        progress_db.close()
         return
 
     try:
         for file in files:
             if not classification_status["running"]:
                 logger.info("Classification stopped by user")
+                progress_mgr.pause_task(task_id)
                 break
 
             file_id, file_path = file
             classification_status["current_file"] = file_path
 
             try:
-                # CLI로 분류 실행
                 result = await adapter.classify_image(file_path)
 
                 if result and result.category:
-                    # DB 업데이트 (새 세션 사용)
-                    from ..database import SessionLocal
-
                     db = SessionLocal()
                     try:
                         update_query = text("""
@@ -185,7 +212,6 @@ async def run_classification(
                             "model": model,
                         })
                         db.commit()
-
                         classification_status["processed"] += 1
                     finally:
                         db.close()
@@ -196,12 +222,28 @@ async def run_classification(
                 logger.error(f"Classification failed for {file_path}: {e}")
                 classification_status["failed"] += 1
 
-            # 짧은 딜레이
-            await asyncio.sleep(0.5)
+            # DB 진행 업데이트
+            try:
+                progress_mgr.update_progress(
+                    task_id,
+                    classification_status["processed"] + classification_status["failed"],
+                    file_path,
+                )
+            except Exception:
+                pass
 
+            await asyncio.sleep(0.5)
+        else:
+            # 루프 정상 완료 (break 없이)
+            progress_mgr.complete_task(task_id)
+
+    except Exception as e:
+        progress_mgr.fail_task(task_id, str(e))
+        raise
     finally:
         classification_status["running"] = False
         classification_status["current_file"] = None
+        progress_db.close()
 
         logger.info(
             f"Classification completed: {classification_status['processed']}/{classification_status['total']} "
