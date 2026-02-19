@@ -3,6 +3,7 @@
 	import { fetchWithTimeout } from '$lib/api/client';
 	import {
 		FolderOpen,
+		FolderSearch,
 		Plus,
 		Trash2,
 		Play,
@@ -258,26 +259,29 @@
 </script>
 
 <svelte:head>
-	<title>Scanner — Image Classifier</title>
+	<title>스캐너 — Image Classifier</title>
 </svelte:head>
 
 <div class="space-y-6">
 	<!-- 헤더 -->
 	<div>
-		<h1 class="text-2xl font-bold tracking-tight">Scanner</h1>
-		<p class="text-sm text-muted-foreground mt-0.5">
+		<div class="flex items-center gap-2">
+			<FolderSearch class="size-5 text-primary" />
+			<h1 class="text-2xl font-bold tracking-tight">스캐너</h1>
+		</div>
+		<p class="mt-1 text-sm text-muted-foreground">
 			폴더를 카테고리에 매핑하여 전체 파일의 ~70%를 자동 분류합니다.
 		</p>
 	</div>
 
 	<!-- 상단 2열 -->
 	<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-		<!-- Target Folders 카드 -->
+		<!-- 스캔 대상 폴더 카드 -->
 		<div class="rounded-lg border bg-card p-5">
 			<div class="flex items-center justify-between mb-4">
 				<div class="flex items-center gap-2">
 					<FolderOpen class="h-4 w-4 text-primary" />
-					<h2 class="text-sm font-semibold">Target Folders</h2>
+					<h2 class="text-sm font-semibold">스캔 대상 폴더</h2>
 				</div>
 				<button
 					onclick={() => {
@@ -286,7 +290,7 @@
 					class="inline-flex items-center gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium hover:bg-accent transition-colors"
 				>
 					<Plus class="h-3.5 w-3.5" />
-					Add Folder
+					폴더 추가
 				</button>
 			</div>
 
@@ -302,13 +306,13 @@
 						onclick={addScanRoot}
 						class="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
 					>
-						Add
+						추가
 					</button>
 					<button
 						onclick={() => (newFolderInput = '')}
 						class="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors"
 					>
-						Cancel
+						취소
 					</button>
 				</div>
 			{/if}
@@ -318,8 +322,8 @@
 					class="rounded-lg border-2 border-dashed border-border p-8 text-center text-muted-foreground"
 				>
 					<Folder class="h-8 w-8 mx-auto mb-2 opacity-30" />
-					<p class="text-sm">No folders configured</p>
-					<p class="text-xs mt-1">Click "Add Folder" to get started</p>
+					<p class="text-sm">폴더가 없습니다</p>
+					<p class="text-xs mt-1">"폴더 추가"를 클릭하세요</p>
 				</div>
 			{:else}
 				<div class="space-y-1">
@@ -340,13 +344,13 @@
 			{/if}
 		</div>
 
-		<!-- Scan Options 카드 -->
+		<!-- 스캔 옵션 카드 -->
 		<div class="rounded-lg border bg-card p-5">
-			<h2 class="text-sm font-semibold mb-4">Scan Options</h2>
+			<h2 class="text-sm font-semibold mb-4">스캔 옵션</h2>
 
 			<div class="mb-5">
 				<p class="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wide">
-					File Extensions
+					파일 확장자
 				</p>
 				<div class="flex flex-wrap gap-1.5">
 					{#each ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'raw', 'bmp', 'tiff'] as ext}
@@ -366,9 +370,9 @@
 			<div>
 				<div class="flex items-center justify-between mb-1.5">
 					<p class="text-xs text-muted-foreground font-medium uppercase tracking-wide">
-						Mapping Progress
+						매핑 진행률
 					</p>
-					<span class="text-xs font-medium">{mappedCount}/{totalCount} folders</span>
+					<span class="text-xs font-medium">{mappedCount}/{totalCount}개 폴더</span>
 				</div>
 				<div class="h-2 w-full rounded-full bg-muted overflow-hidden">
 					<div
@@ -376,15 +380,15 @@
 						style="width: {mappingPct}%"
 					></div>
 				</div>
-				<p class="text-xs text-muted-foreground mt-1">{mappingPct}% mapped</p>
+				<p class="text-xs text-muted-foreground mt-1">{mappingPct}% 매핑됨</p>
 			</div>
 		</div>
 	</div>
 
-	<!-- Scan Execution 카드 -->
+	<!-- 스캔 실행 카드 -->
 	<div class="rounded-lg border bg-card p-5">
 		<div class="flex items-center justify-between mb-4">
-			<h2 class="text-sm font-semibold">Scan Execution</h2>
+			<h2 class="text-sm font-semibold">스캔 실행</h2>
 			<div class="flex gap-2">
 				{#if scanning}
 					<button
@@ -395,7 +399,7 @@
 						class="inline-flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors"
 					>
 						<Square class="h-4 w-4" />
-						Stop Scan
+						스캔 중지
 					</button>
 				{:else}
 					<button
@@ -404,7 +408,7 @@
 						class="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
 					>
 						<Play class="h-4 w-4" />
-						Start Scan
+						스캔 시작
 					</button>
 				{/if}
 				<button
@@ -413,7 +417,7 @@
 					class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50 transition-colors"
 				>
 					<RefreshCw class="h-4 w-4 {loading ? 'animate-spin' : ''}" />
-					Refresh
+					새로고침
 				</button>
 			</div>
 		</div>
@@ -421,7 +425,7 @@
 		{#if scanning}
 			<div class="mb-4">
 				<div class="flex justify-between text-xs text-muted-foreground mb-1">
-					<span>Scanning folders...</span>
+					<span>폴더 스캔 중...</span>
 					<span>{progress}%</span>
 				</div>
 				<div class="h-2 w-full rounded-full bg-muted overflow-hidden">
@@ -438,7 +442,7 @@
 				class="mb-4 rounded-md border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 flex items-center gap-2"
 			>
 				<CheckCircle2 class="h-4 w-4 text-emerald-600 shrink-0" />
-				<p class="text-sm text-emerald-700 font-medium">Scan completed successfully</p>
+				<p class="text-sm text-emerald-700 font-medium">스캔 완료</p>
 			</div>
 		{/if}
 
@@ -446,15 +450,15 @@
 		<div class="grid grid-cols-3 gap-4">
 			<div class="rounded-md bg-muted/50 p-4 text-center">
 				<div class="text-2xl font-bold">{totalCount.toLocaleString()}</div>
-				<div class="text-xs text-muted-foreground mt-1">Total Folders</div>
+				<div class="text-xs text-muted-foreground mt-1">전체 폴더</div>
 			</div>
 			<div class="rounded-md bg-emerald-500/10 p-4 text-center">
 				<div class="text-2xl font-bold text-emerald-700">{mappedCount.toLocaleString()}</div>
-				<div class="text-xs text-muted-foreground mt-1">Mapped</div>
+				<div class="text-xs text-muted-foreground mt-1">매핑됨</div>
 			</div>
 			<div class="rounded-md bg-amber-500/10 p-4 text-center">
 				<div class="text-2xl font-bold text-amber-700">{unmappedCount.toLocaleString()}</div>
-				<div class="text-xs text-muted-foreground mt-1">Unmapped</div>
+				<div class="text-xs text-muted-foreground mt-1">미매핑</div>
 			</div>
 		</div>
 	</div>
@@ -462,31 +466,31 @@
 	<!-- 폴더 목록 카드 -->
 	<div class="rounded-lg border bg-card">
 		<div class="flex items-center justify-between p-5 border-b">
-			<h2 class="text-sm font-semibold">Folder List</h2>
+			<h2 class="text-sm font-semibold">폴더 목록</h2>
 			<select
 				bind:value={statusFilter}
 				onchange={loadFolders}
 				class="rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
 			>
-				<option value="all">All Statuses</option>
-				<option value="unknown">Unclassified</option>
-				<option value="clear">Clear</option>
-				<option value="unclear">Unclear</option>
-				<option value="flat">Flat</option>
-				<option value="nested">Nested</option>
+				<option value="all">전체 상태</option>
+				<option value="unknown">미분류</option>
+				<option value="clear">명확</option>
+				<option value="unclear">불명확</option>
+				<option value="flat">플랫</option>
+				<option value="nested">중첩</option>
 			</select>
 		</div>
 
 		{#if loading}
 			<div class="p-8 text-center">
 				<RefreshCw class="h-6 w-6 animate-spin mx-auto mb-2 text-muted-foreground" />
-				<p class="text-sm text-muted-foreground">Loading folders...</p>
+				<p class="text-sm text-muted-foreground">폴더 로딩 중...</p>
 			</div>
 		{:else if filteredFolders.length === 0}
 			<div class="p-8 text-center">
 				<Folder class="h-8 w-8 mx-auto mb-2 opacity-30" />
-				<p class="text-sm text-muted-foreground">No folders found</p>
-				<p class="text-xs text-muted-foreground mt-1">Run a scan to index folders</p>
+				<p class="text-sm text-muted-foreground">폴더가 없습니다</p>
+				<p class="text-xs text-muted-foreground mt-1">스캔을 실행하여 폴더를 인덱싱하세요</p>
 			</div>
 		{:else}
 			<div class="divide-y divide-border">

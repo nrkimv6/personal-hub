@@ -141,16 +141,16 @@
 </script>
 
 <svelte:head>
-	<title>Duplicate Images</title>
+	<title>중복 이미지 — Image Classifier</title>
 </svelte:head>
 
 <!-- 헤더 -->
-<div class="mb-6">
-	<div class="flex items-center gap-3 mb-1">
-		<Copy class="size-6 text-primary" />
-		<h1 class="text-2xl font-bold">Duplicate Images</h1>
+<div class="mb-4">
+	<div class="flex items-center gap-2">
+		<Copy class="size-5 text-primary" />
+		<h1 class="text-2xl font-bold tracking-tight">중복 이미지</h1>
 	</div>
-	<p class="text-muted-foreground text-sm ml-9">pHash 기반 중복 이미지 탐지 및 정리</p>
+	<p class="mt-1 text-sm text-muted-foreground">pHash 기반 중복 이미지 탐지 및 정리</p>
 </div>
 
 <!-- 컨트롤 바 -->
@@ -158,14 +158,14 @@
 	<div class="flex items-center gap-4 flex-wrap">
 		<!-- 통계 -->
 		<div class="flex items-center gap-2 text-sm">
-			<span class="font-medium">{groups.length} groups</span>
+			<span class="font-medium">{groups.length}개 그룹</span>
 			<span class="text-muted-foreground">|</span>
-			<span class="text-muted-foreground">{resolvedCount} resolved</span>
+			<span class="text-muted-foreground">{resolvedCount}개 해결됨</span>
 		</div>
 
 		<!-- 필터 버튼 그룹 -->
 		<div class="flex items-center rounded-lg border bg-muted/40 p-0.5 gap-0.5">
-			{#each [['all', 'All'], ['unresolved', 'Unresolved'], ['resolved', 'Resolved']] as [val, label]}
+			{#each [['all', '전체'], ['unresolved', '미해결'], ['resolved', '해결됨']] as [val, label]}
 				<button
 					class="px-3 py-1.5 text-xs font-medium rounded-md transition-colors {filterStatus === val
 						? 'bg-background text-foreground shadow-sm'
@@ -183,7 +183,7 @@
 			onclick={loadGroups}
 		>
 			<Wand2 class="size-3.5" />
-			Refresh
+			새로고침
 		</button>
 	</div>
 </div>
@@ -200,7 +200,7 @@
 {:else if allResolved}
 	<div class="rounded-xl border bg-card p-12 text-center">
 		<PartyPopper class="size-12 text-primary mx-auto mb-3" />
-		<p class="font-semibold text-lg">All duplicates resolved!</p>
+		<p class="font-semibold text-lg">모든 중복 이미지 처리 완료!</p>
 		<p class="text-muted-foreground text-sm mt-1">모든 중복 그룹이 처리되었습니다.</p>
 	</div>
 {:else if filteredGroups.length === 0}
@@ -222,9 +222,9 @@
 								? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
 								: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'}"
 						>
-							{group.status === 'pending' ? 'Pending' : 'Resolved'}
+							{group.status === 'pending' ? '대기 중' : '해결됨'}
 						</span>
-						<span class="text-xs text-muted-foreground">{group.member_count} images</span>
+						<span class="text-xs text-muted-foreground">{group.member_count}이미지</span>
 					</div>
 					<div class="flex items-center gap-2">
 						<button
@@ -232,7 +232,7 @@
 							onclick={() => toggleGroupDetail(group.group_id)}
 						>
 							<SkipForward class="size-3.5" />
-							{detail ? 'Collapse' : 'Expand'}
+							{detail ? '접기' : '펼치기'}
 						</button>
 						{#if group.status === 'pending' && detail}
 							{@const keepId = selections[group.group_id] ?? getBestMember(detail.members)}
@@ -241,7 +241,7 @@
 								onclick={() => resolveGroup(group.group_id, keepId)}
 							>
 								<Check class="size-3.5" />
-								Confirm Keep
+								보관 확정
 							</button>
 						{/if}
 					</div>
@@ -325,7 +325,7 @@
 													}}
 												>
 													<Check class="size-3" />
-													Keep
+													보관
 												</button>
 												<button
 													class="flex-1 flex items-center justify-center gap-1 rounded py-1 text-[11px] font-medium transition-colors {isTrashed
@@ -342,7 +342,7 @@
 													}}
 												>
 													<Trash2 class="size-3" />
-													Trash
+													버리기
 												</button>
 											</div>
 										{/if}
@@ -354,10 +354,10 @@
 
 					<!-- 카드 푸터 (resolved) -->
 					{#if group.status === 'resolved'}
-						<div class="px-4 py-3 border-t bg-green-50/50 dark:bg-green-900/10">
+						<div class="px-4 py-3 border-t bg-emerald-500/5 dark:bg-emerald-900/10">
 							<p class="text-xs text-green-700 dark:text-green-400 flex items-center gap-1.5">
 								<Check class="size-3.5" />
-								Resolved: keeping file ID {group.kept_file_id}
+								해결 완료: 파일 ID {group.kept_file_id} 보관
 							</p>
 						</div>
 					{/if}

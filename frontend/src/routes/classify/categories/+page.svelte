@@ -249,11 +249,11 @@
 	function getImportanceBadge(importance: string): { label: string; color: string } {
 		switch (importance) {
 			case 'high':
-				return { label: '높음', color: 'bg-red-100 text-red-700' };
+				return { label: '높음', color: 'bg-destructive/10 text-destructive' };
 			case 'low':
-				return { label: '낮음', color: 'bg-gray-100 text-gray-600' };
+				return { label: '낮음', color: 'bg-muted text-muted-foreground' };
 			default:
-				return { label: '보통', color: 'bg-blue-100 text-blue-700' };
+				return { label: '보통', color: 'bg-primary/10 text-primary' };
 		}
 	}
 
@@ -293,32 +293,32 @@
 </script>
 
 <svelte:head>
-	<title>Categories</title>
+	<title>카테고리 — Image Classifier</title>
 </svelte:head>
 
 <!-- 헤더 -->
-<div class="mb-6">
-	<div class="flex items-center gap-3 mb-1">
-		<FolderTree class="size-6 text-primary" />
-		<h1 class="text-2xl font-bold">Categories</h1>
+<div class="mb-4">
+	<div class="flex items-center gap-2">
+		<FolderTree class="size-5 text-primary" />
+		<h1 class="text-2xl font-bold tracking-tight">카테고리</h1>
 	</div>
-	<p class="text-muted-foreground text-sm ml-9">멀티레벨 카테고리 트리를 생성하고 편집합니다.</p>
+	<p class="mt-1 text-sm text-muted-foreground">멀티레벨 카테고리 트리를 생성하고 편집합니다.</p>
 </div>
 
 <!-- 2패널 레이아웃 -->
 <div class="flex flex-col lg:flex-row gap-6">
-	<!-- 패널 a: Category Tree -->
+	<!-- 패널 a: 카테고리 트리 -->
 	<div class="lg:w-96 flex-shrink-0">
 		<div class="rounded-xl border bg-card overflow-hidden">
 			<!-- 트리 헤더 -->
 			<div class="flex items-center justify-between px-4 py-3 border-b bg-muted/20">
-				<span class="text-sm font-semibold">Category Tree</span>
+				<span class="text-sm font-semibold">카테고리 트리</span>
 				<button
 					class="flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
 					onclick={openAddRoot}
 				>
 					<Plus class="size-3.5" />
-					Add Root
+					루트 추가
 				</button>
 			</div>
 
@@ -396,7 +396,7 @@
 					onclick={openAddRoot}
 				>
 					<Plus class="size-3 inline mr-1" />
-					Add Root Category
+					루트 카테고리 추가
 				</button>
 			</div>
 		</div>
@@ -409,7 +409,7 @@
 				<!-- 미선택 상태 -->
 				<div class="flex flex-col items-center justify-center h-full min-h-[400px] gap-3 text-muted-foreground">
 					<FolderTree class="size-10 opacity-30" />
-					<p class="text-sm">Select a category to view details</p>
+					<p class="text-sm">카테고리를 선택하면 상세 정보를 볼 수 있습니다</p>
 				</div>
 			{:else if !editing}
 				<!-- View 모드 -->
@@ -429,21 +429,21 @@
 								}}
 							>
 								<Pencil class="size-3.5" />
-								Edit
+								편집
 							</button>
 							<button
 								class="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors"
 								onclick={() => openAddChild(selected!)}
 							>
 								<Plus class="size-3.5" />
-								Add Child
+								하위 추가
 							</button>
 							<button
 								class="flex items-center gap-1.5 rounded-lg border border-destructive/40 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors"
 								onclick={() => deleteCategory(selected!.id)}
 							>
 								<Trash2 class="size-3.5" />
-								Delete
+								삭제
 							</button>
 						</div>
 					</div>
@@ -451,7 +451,7 @@
 					<!-- 상세 정보 -->
 					<div class="space-y-4">
 						<div class="flex items-center gap-2">
-							<span class="text-xs font-medium text-muted-foreground w-28">Importance</span>
+							<span class="text-xs font-medium text-muted-foreground w-28">중요도</span>
 							<span
 								class="text-xs px-2 py-0.5 rounded-full {importanceClass(selected.importance)}"
 							>
@@ -461,7 +461,7 @@
 
 						{#if selected.target_folder_template}
 							<div class="flex items-start gap-2">
-								<span class="text-xs font-medium text-muted-foreground w-28 pt-0.5">Folder Template</span>
+								<span class="text-xs font-medium text-muted-foreground w-28 pt-0.5">폴더 템플릿</span>
 								<code class="text-xs bg-muted px-2 py-1 rounded font-mono break-all">
 									{selected.target_folder_template}
 								</code>
@@ -470,13 +470,13 @@
 
 						{#if selected.description}
 							<div class="flex items-start gap-2">
-								<span class="text-xs font-medium text-muted-foreground w-28 pt-0.5">Description</span>
+								<span class="text-xs font-medium text-muted-foreground w-28 pt-0.5">설명</span>
 								<p class="text-sm">{selected.description}</p>
 							</div>
 						{/if}
 
 						<div class="flex items-center gap-2">
-							<span class="text-xs font-medium text-muted-foreground w-28">Children</span>
+							<span class="text-xs font-medium text-muted-foreground w-28">하위</span>
 							<span class="text-xs bg-muted px-2 py-0.5 rounded-full">
 								{selected.children.length}
 							</span>
@@ -503,21 +503,21 @@
 				<!-- Edit 모드 -->
 				<div class="p-6">
 					<div class="flex items-center justify-between mb-5">
-						<h2 class="text-base font-semibold">Edit Category</h2>
+						<h2 class="text-base font-semibold">카테고리 편집</h2>
 						<div class="flex items-center gap-2">
 							<button
 								class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground border hover:bg-accent transition-colors"
 								onclick={() => (editing = false)}
 							>
 								<X class="size-3.5" />
-								Cancel
+								취소
 							</button>
 							<button
 								class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
 								onclick={saveEdit}
 							>
 								<Save class="size-3.5" />
-								Save
+								저장
 							</button>
 						</div>
 					</div>
@@ -525,7 +525,7 @@
 					<div class="space-y-4 max-w-md">
 						<!-- 이름 -->
 						<div>
-							<label for="edit-name" class="block text-xs font-medium text-muted-foreground mb-1.5">Name</label>
+							<label for="edit-name" class="block text-xs font-medium text-muted-foreground mb-1.5">이름</label>
 							<input
 								id="edit-name"
 								type="text"
@@ -537,9 +537,9 @@
 
 						<!-- Importance 세그먼트 -->
 						<div>
-							<p class="text-xs font-medium text-muted-foreground mb-1.5">Importance</p>
+							<p class="text-xs font-medium text-muted-foreground mb-1.5">중요도</p>
 							<div class="flex rounded-lg border bg-muted/40 p-0.5 gap-0.5 w-fit">
-								{#each [['high', 'High'], ['medium', 'Medium'], ['low', 'Low']] as [val, label]}
+								{#each [['high', '높음'], ['medium', '보통'], ['low', '낮음']] as [val, label]}
 									<button
 										class="px-4 py-1.5 text-xs font-medium rounded-md transition-colors {editForm.importance === val
 											? 'bg-background text-foreground shadow-sm'
@@ -555,7 +555,7 @@
 						<!-- Folder Template -->
 						<div>
 							<label for="edit-folder-template" class="block text-xs font-medium text-muted-foreground mb-1.5">
-								Folder Template
+								폴더 템플릿
 							</label>
 							<input
 								id="edit-folder-template"
@@ -571,7 +571,7 @@
 
 						<!-- Description -->
 						<div>
-							<label for="edit-description" class="block text-xs font-medium text-muted-foreground mb-1.5">Description</label>
+							<label for="edit-description" class="block text-xs font-medium text-muted-foreground mb-1.5">설명</label>
 							<textarea
 								id="edit-description"
 								class="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
@@ -605,7 +605,7 @@
 		>
 			<div class="flex items-center justify-between mb-4">
 				<h2 class="text-base font-semibold">
-					{createParentId ? 'Add Child Category' : 'Add Root Category'}
+					{createParentId ? '하위 카테고리 추가' : '루트 카테고리 추가'}
 				</h2>
 				<button
 					class="text-muted-foreground hover:text-foreground transition-colors"
@@ -620,14 +620,14 @@
 					{@const parentCat = flattenCategories(categories).find((c) => c.id === createParentId)}
 					{#if parentCat}
 						<div>
-							<p class="text-xs font-medium text-muted-foreground mb-1.5">Parent</p>
+							<p class="text-xs font-medium text-muted-foreground mb-1.5">상위</p>
 							<div class="px-3 py-2 text-sm bg-muted rounded-lg font-mono">{parentCat.full_path}</div>
 						</div>
 					{/if}
 				{/if}
 
 				<div>
-					<label for="create-name" class="block text-xs font-medium text-muted-foreground mb-1.5">Name *</label>
+					<label for="create-name" class="block text-xs font-medium text-muted-foreground mb-1.5">이름 *</label>
 					<input
 						id="create-name"
 						type="text"
@@ -638,9 +638,9 @@
 				</div>
 
 				<div>
-					<p class="text-xs font-medium text-muted-foreground mb-1.5">Importance</p>
+					<p class="text-xs font-medium text-muted-foreground mb-1.5">중요도</p>
 					<div class="flex rounded-lg border bg-muted/40 p-0.5 gap-0.5 w-fit">
-						{#each [['high', 'High'], ['medium', 'Medium'], ['low', 'Low']] as [val, label]}
+						{#each [['high', '높음'], ['medium', '보통'], ['low', '낮음']] as [val, label]}
 							<button
 								class="px-4 py-1.5 text-xs font-medium rounded-md transition-colors {createForm.importance === val
 									? 'bg-background text-foreground shadow-sm'
@@ -655,7 +655,7 @@
 
 				<div>
 					<label for="create-folder-template" class="block text-xs font-medium text-muted-foreground mb-1.5">
-						Folder Template
+						폴더 템플릿
 					</label>
 					<input
 						id="create-folder-template"
@@ -667,7 +667,7 @@
 				</div>
 
 				<div>
-					<label for="create-description" class="block text-xs font-medium text-muted-foreground mb-1.5">Description</label>
+					<label for="create-description" class="block text-xs font-medium text-muted-foreground mb-1.5">설명</label>
 					<textarea
 						id="create-description"
 						class="w-full px-3 py-2 text-sm border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
@@ -682,13 +682,13 @@
 						class="px-4 py-2 text-sm border rounded-lg hover:bg-accent transition-colors"
 						onclick={() => (showCreateForm = false)}
 					>
-						Cancel
+						취소
 					</button>
 					<button
 						class="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors font-medium"
 						onclick={submitCreate}
 					>
-						Create
+						만들기
 					</button>
 				</div>
 			</div>
