@@ -11,3 +11,6 @@ export { default as Pagination } from './Pagination.svelte';
 export { default as Gauge } from './Gauge.svelte';
 export { default as ProgressBar } from './ProgressBar.svelte';
 export { default as StatusBadge } from './StatusBadge.svelte';
+export { default as StatusDot } from './StatusDot.svelte';
+export { default as ConfirmDialog } from './ConfirmDialog.svelte';
+export { default as SectionSkeleton } from './SectionSkeleton.svelte';
