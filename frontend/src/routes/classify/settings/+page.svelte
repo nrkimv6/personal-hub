@@ -29,6 +29,7 @@
 		thumbnail_quality: number;
 		ai_mode: string;
 		claude_cli_path: string;
+		claude_model: string;
 		gemini_cli_path: string;
 		cli_max_workers: number;
 		cli_timeout_seconds: number;
@@ -52,6 +53,7 @@
 		thumbnail_quality: 85,
 		ai_mode: 'cli',
 		claude_cli_path: 'claude',
+		claude_model: 'claude-sonnet-4-5-20250929',
 		gemini_cli_path: 'gemini',
 		cli_max_workers: 2,
 		cli_timeout_seconds: 30,
@@ -111,6 +113,7 @@
 					clip_use_gpu: settings.clip_use_gpu,
 					faiss_similarity_threshold: settings.faiss_similarity_threshold,
 					ai_mode: settings.ai_mode,
+					claude_model: settings.claude_model,
 					cli_max_workers: settings.cli_max_workers,
 					cli_timeout_seconds: settings.cli_timeout_seconds,
 					cluster_gap_minutes: settings.cluster_gap_minutes,
@@ -299,6 +302,16 @@
 								>{opt}</button>
 							{/each}
 						</div>
+					</div>
+					<div class="flex flex-col gap-1">
+						<label class="text-xs font-medium" for="claude-model">모델명</label>
+						<input
+							id="claude-model"
+							type="text"
+							bind:value={settings.claude_model}
+							placeholder="claude-sonnet-4-6-20250929"
+							class="rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+						/>
 					</div>
 					<div class="flex flex-col gap-1">
 						<label class="text-xs font-medium" for="timeout">Timeout (초)</label>

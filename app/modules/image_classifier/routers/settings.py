@@ -29,6 +29,7 @@ class SettingsResponse(BaseModel):
     thumbnail_quality: int
     ai_mode: str
     claude_cli_path: str
+    claude_model: str
     gemini_cli_path: str
     cli_max_workers: int
     cli_timeout_seconds: int
@@ -47,6 +48,7 @@ class SettingsUpdateRequest(BaseModel):
     clip_use_gpu: Optional[bool] = None
     faiss_similarity_threshold: Optional[float] = None
     ai_mode: Optional[str] = None
+    claude_model: Optional[str] = None
     cli_max_workers: Optional[int] = None
     cli_timeout_seconds: Optional[int] = None
     cluster_gap_minutes: Optional[int] = None
@@ -71,6 +73,7 @@ async def get_settings() -> SettingsResponse:
         thumbnail_quality=settings.THUMBNAIL_QUALITY,
         ai_mode=settings.AI_MODE,
         claude_cli_path=settings.CLAUDE_CLI_PATH,
+        claude_model=settings.CLAUDE_MODEL,
         gemini_cli_path=settings.GEMINI_CLI_PATH,
         cli_max_workers=settings.CLI_MAX_WORKERS,
         cli_timeout_seconds=settings.CLI_TIMEOUT_SECONDS,
@@ -105,6 +108,9 @@ async def update_settings(request: SettingsUpdateRequest):
 
     if request.ai_mode is not None:
         settings.AI_MODE = request.ai_mode
+
+    if request.claude_model is not None:
+        settings.CLAUDE_MODEL = request.claude_model
 
     if request.cli_max_workers is not None:
         settings.CLI_MAX_WORKERS = request.cli_max_workers

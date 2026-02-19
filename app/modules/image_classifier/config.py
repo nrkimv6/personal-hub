@@ -72,6 +72,7 @@ class ImageClassifierSettings(BaseSettings):
             "SCAN_ROOT_FOLDERS": self.SCAN_ROOT_FOLDERS,
             "AI_MODE": self.AI_MODE,
             "CLAUDE_CLI_PATH": self.CLAUDE_CLI_PATH,
+            "CLAUDE_MODEL": self.CLAUDE_MODEL,
             "GEMINI_CLI_PATH": self.GEMINI_CLI_PATH,
             "CLI_MAX_WORKERS": self.CLI_MAX_WORKERS,
             "CLI_TIMEOUT_SECONDS": self.CLI_TIMEOUT_SECONDS,
