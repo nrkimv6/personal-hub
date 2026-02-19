@@ -152,7 +152,7 @@
   }
 
   async function restartWorkers() {
-    if (!confirm('모든 워커를 재시작하시겠습니까?')) return;
+    if (!confirm('워커 프로세스를 재시작하시겠습니까?\n(watchdog가 자동으로 재시작합니다)')) return;
     actionLoading = 'workers';
     try {
       await serviceDashboardApi.restartWorkers();
@@ -469,7 +469,7 @@
                   class="px-3 py-1 text-xs bg-primary text-white rounded hover:bg-primary-hover disabled:opacity-50"
                   disabled={actionLoading === 'workers'}
                   onclick={restartWorkers}>
-                  전체 재시작
+                  워커 재시작
                 </button>
               </div>
               <div class="grid grid-cols-2 md:grid-cols-4 gap-4">

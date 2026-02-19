@@ -303,42 +303,67 @@ if ($tasks) {{
         return await self._run_admin_command(ps_cmd, f"Unregistered task: {folder}/{name}")
 
     async def restart_worker(self, name: str) -> dict:
-        """Restart a worker process (Redis 명령 → Session 1 리스너)
+        """워커 프로세스를 PID 파일 기반으로 kill (watchdog가 자동 재시작)
 
-        API(Session 0)에서 직접 subprocess로 워커를 실행하면 Session 0에서 뜨므로
-        GUI 브라우저가 표시되지 않음. Redis를 통해 Session 1의 리스너에 명령 전달.
+        command_listener, api_watchdog는 워커가 아니므로 제외.
+        watchdog_pid_file과 worker_pid_file이 모두 있는 항목만 kill 대상.
         """
-        from app.shared.redis.client import RedisClient
+        killed = []
+        failed = []
 
-        redis_client = await RedisClient.get_client()
-        if not redis_client:
-            return {"success": False, "message": "Redis 연결 없음. Session 1에서 수동 실행: browser-workers.ps1 -Action restart"}
+        for proj_key, proj in MANAGED_PROJECTS.items():
+            workers_config = proj.get("workers")
+            if not workers_config:
+                continue
 
-        try:
-            from datetime import datetime
-            command = json.dumps({
-                "action": "restart",
-                "timestamp": datetime.now().isoformat(),
-                "source": "system-api",
-            })
+            proj_path = proj.get("path")
+            if not proj_path:
+                continue
 
-            # 이전 결과 비우기
-            await redis_client.delete("worker:command_results")
-            # 명령 전송
-            await redis_client.lpush("worker:commands", command)
+            pid_dir = Path(proj_path) / workers_config["pid_dir"]
 
-            # 결과 대기 (최대 60초)
-            result = await redis_client.brpop("worker:command_results", timeout=60)
+            for item in workers_config["items"]:
+                # watchdog가 있는 워커만 kill 대상 (watchdog가 자동 재시작함)
+                if not item.get("watchdog_pid_file") or not item.get("worker_pid_file"):
+                    continue
 
-            if result:
-                _, result_data = result
-                result_json = json.loads(result_data) if isinstance(result_data, str) else json.loads(result_data.decode())
-                return {"success": result_json.get("success", False), "message": result_json.get("message", "완료")}
-            else:
-                return {"success": False, "message": "리스너 응답 타임아웃 (60초). 리스너가 실행 중인지 확인하세요."}
+                if name != "all" and item["name"] != name:
+                    continue
 
-        except Exception as e:
-            return {"success": False, "message": f"Redis 명령 전송 실패: {str(e)}"}
+                pid_file = pid_dir / item["worker_pid_file"]
+                label = item["label"]
+
+                if not pid_file.exists():
+                    failed.append(f"{label}: PID 파일 없음")
+                    continue
+
+                try:
+                    pid = int(pid_file.read_text().strip())
+                    proc = await asyncio.create_subprocess_exec(
+                        "taskkill", "/PID", str(pid), "/F",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    await proc.wait()
+                    if proc.returncode == 0:
+                        killed.append(f"{label} (PID {pid})")
+                    else:
+                        stderr = (await proc.stderr.read()).decode().strip()
+                        failed.append(f"{label} (PID {pid}): {stderr}")
+                except Exception as e:
+                    failed.append(f"{label}: {str(e)}")
+
+        if not killed and not failed:
+            return {"success": False, "message": "kill 대상 워커가 없습니다."}
+
+        parts = []
+        if killed:
+            parts.append(f"종료됨: {', '.join(killed)}")
+        if failed:
+            parts.append(f"실패: {', '.join(failed)}")
+        parts.append("watchdog가 자동 재시작합니다.")
+
+        return {"success": len(killed) > 0, "message": " | ".join(parts)}
 
     async def _run_admin_command(self, ps_cmd: str, success_msg: str) -> dict:
         """Execute a PowerShell command (may require admin privileges)"""
