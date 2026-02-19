@@ -27,7 +27,7 @@
 
   // Auto-Next + Redis 상태
   let autoNextStatus = $state<RunStatusResponse | null>(null);
-  let redisStatus = $state<RedisStatus | null>(null);
+  let redisStatus = $state<RedisStatus | null>({ connected: false, container_running: null, uptime_seconds: null, used_memory_mb: null, connected_clients: null });
 
   // ConfirmDialog 상태
   let confirmDialog = $state({ open: false, title: '', description: '', confirmText: '확인', destructive: false, action: () => {} });
@@ -216,7 +216,7 @@
         serviceDashboardApi.redisStatus().catch(() => null),
       ]);
       if (anStatus !== null) autoNextStatus = anStatus;
-      if (rStatus !== null) redisStatus = rStatus;
+      redisStatus = rStatus ?? { connected: false, container_running: null, uptime_seconds: null, used_memory_mb: null, connected_clients: null };
     } catch { /* graceful */ }
   }
 

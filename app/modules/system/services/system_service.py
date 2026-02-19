@@ -449,24 +449,28 @@ if ($tasks) {{
             "connected_clients": None,
         }
 
-        # 1. Redis ping + info
-        try:
+        # 1. Redis ping + info (동기 라이브러리이므로 executor에서 실행)
+        def _sync_redis_check():
             import redis as redis_lib
-            r = redis_lib.Redis(host="localhost", port=6379, socket_connect_timeout=3, decode_responses=True)
-            r.ping()
-            result["connected"] = True
+            r = redis_lib.Redis(host="localhost", port=6379, socket_connect_timeout=1, decode_responses=True)
+            try:
+                r.ping()
+                info = r.info(section="server")
+                mem_info = r.info(section="memory")
+                clients_info = r.info(section="clients")
+                return {
+                    "connected": True,
+                    "uptime_seconds": info.get("uptime_in_seconds"),
+                    "used_memory_mb": round(mem_info.get("used_memory", 0) / 1024 / 1024, 1),
+                    "connected_clients": clients_info.get("connected_clients"),
+                }
+            finally:
+                r.close()
 
-            info = r.info(section="server")
-            result["uptime_seconds"] = info.get("uptime_in_seconds")
-
-            mem_info = r.info(section="memory")
-            used_bytes = mem_info.get("used_memory", 0)
-            result["used_memory_mb"] = round(used_bytes / 1024 / 1024, 1)
-
-            clients_info = r.info(section="clients")
-            result["connected_clients"] = clients_info.get("connected_clients")
-
-            r.close()
+        try:
+            loop = asyncio.get_event_loop()
+            redis_info = await loop.run_in_executor(None, _sync_redis_check)
+            result.update(redis_info)
         except Exception:
             pass
 
