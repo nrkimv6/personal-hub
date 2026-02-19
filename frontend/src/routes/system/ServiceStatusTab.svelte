@@ -223,7 +223,7 @@
   onMount(() => {
     fetchStatus();
     fetchExtraStatus();
-    const interval = setInterval(() => { fetchStatus(); fetchExtraStatus(); }, REFRESH_INTERVAL);
+    const interval = setInterval(() => { if (selfRestartState !== 'idle') return; fetchStatus(); fetchExtraStatus(); }, REFRESH_INTERVAL);
     return () => clearInterval(interval);
   });
 
