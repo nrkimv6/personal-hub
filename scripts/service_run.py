@@ -52,7 +52,7 @@ class ServiceRunner:
 
         self.log = setup_service_logger(
             "service_runner",
-            self.log_dir / "service_runner.log",
+            self.log_dir,
         )
 
         self._frontend_proc: subprocess.Popen | None = None

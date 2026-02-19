@@ -10,6 +10,7 @@ import socket
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 import psutil
@@ -121,12 +122,20 @@ def remove_pid_file(path: Path | str) -> None:
 # ── 로깅 유틸 ───────────────────────────────────────────────────
 def setup_service_logger(
     name: str,
-    log_path: Path | str,
+    log_dir: Path | str,
     level: int = logging.INFO,
 ) -> logging.Logger:
-    """파일 + 콘솔 듀얼 핸들러 로거를 생성한다."""
-    log_path = Path(log_path)
-    log_path.parent.mkdir(parents=True, exist_ok=True)
+    """파일 + 콘솔 듀얼 핸들러 로거를 생성한다.
+
+    Args:
+        name: 로거 이름 (파일명 접두사로도 사용)
+        log_dir: 로그 디렉토리 경로
+        level: 로깅 레벨
+    """
+    log_dir = Path(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = log_dir / f"{name}_{timestamp}.log"
 
     logger = logging.getLogger(name)
     logger.setLevel(level)

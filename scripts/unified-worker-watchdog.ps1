@@ -49,6 +49,9 @@ if (-not (Test-Path $PidDir)) {
 $restartCount = 0
 $lastRestartTime = Get-Date
 
+# Watchdog 로그 파일 (스크립트 시작 시 1회 결정)
+$script:watchdogLogFile = Join-Path $LogDir "unified_watchdog_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+
 function Write-Log {
     param([string]$Message, [string]$Level = "INFO")
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -62,8 +65,7 @@ function Write-Log {
         }
     )
     # Also log to file
-    $logFile = Join-Path $LogDir "unified_watchdog.log"
-    Add-Content -Path $logFile -Value $logMessage -Encoding UTF8
+    Add-Content -Path $script:watchdogLogFile -Value $logMessage -Encoding UTF8
 }
 
 function Start-UnifiedWorker {

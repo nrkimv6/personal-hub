@@ -36,6 +36,8 @@ if (-not (Test-Path $PidDir)) {
 $restartCount = 0
 $lastRestartTime = Get-Date
 
+$script:watchdogLogFile = Join-Path $LogDir "claude_watchdog_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+
 function Write-Log {
     param([string]$Message, [string]$Level = "INFO")
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -48,9 +50,7 @@ function Write-Log {
             default { "White" }
         }
     )
-    # Also log to file
-    $logFile = Join-Path $LogDir "claude_watchdog.log"
-    Add-Content -Path $logFile -Value $logMessage -Encoding UTF8
+    Add-Content -Path $script:watchdogLogFile -Value $logMessage -Encoding UTF8
 }
 
 function Start-ClaudeWorker {

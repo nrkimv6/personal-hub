@@ -19,7 +19,6 @@ class SchedulerService:
 
     # 허용된 작업명 목록 (보안: 명령어 인젝션 방지)
     ALLOWED_TASKS = frozenset([
-        "InstagramWatchdog",
         "DailyMaintenance",
         "WeeklyVacuum",
         "LogCleanup",

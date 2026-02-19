@@ -222,13 +222,18 @@ $claudeWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_llm_worker_", "ll
 $videoDownloadWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_video_download_worker_", "video_download_worker_")
 $crawlWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_crawl_", "crawl_worker_")
 
-# Static log files (not timestamped)
-$serviceRunnerLogFile = Join-Path $LogDir "service_runner.log"
-$watchdogLogFile = Join-Path $LogDir "watchdog.log"
-$igWatchdogLogFile = Join-Path $LogDir "instagram_watchdog.log"
-$claudeWatchdogLogFile = Join-Path $LogDir "claude_watchdog.log"
-$videoDownloadWatchdogLogFile = Join-Path $LogDir "video_download_watchdog.log"
-$crawlWatchdogLogFile = Join-Path $LogDir "crawl_watchdog.log"
+# Watchdog/Service 로그도 타임스탬프 파일명으로 전환됨 — 패턴 탐색으로 최신 파일 선택
+$serviceRunnerLogFile = Get-LatestLogFileMultiPattern @("service_runner_")
+$watchdogLogFile = Get-LatestLogFileMultiPattern @("watchdog_")
+# unified_watchdog는 watchdog와 별도로 탐색
+$unifiedWatchdogLogFile = Get-LatestLogFileMultiPattern @("unified_watchdog_")
+# unified가 있으면 우선, 없으면 legacy watchdog 사용
+if ($unifiedWatchdogLogFile) { $watchdogLogFile = $unifiedWatchdogLogFile }
+$igWatchdogLogFile = $null  # 폐기됨
+$claudeWatchdogLogFile = Get-LatestLogFileMultiPattern @("claude_watchdog_")
+$videoDownloadWatchdogLogFile = Get-LatestLogFileMultiPattern @("video_download_watchdog_")
+$crawlWatchdogLogFile = Get-LatestLogFileMultiPattern @("crawl_watchdog_")
+$commandListenerWatchdogLogFile = Get-LatestLogFileMultiPattern @("command_listener_watchdog_")
 $cloudflaredLogFile = Join-Path (Join-Path $ProjectRoot "logs") "cloudflared.log"
 
 # Auto-next 로그: wtools/common/logs/ 에서 최신 파일
@@ -280,17 +285,17 @@ if ($apiLogFile) {
         }
     }
 
-    # Static log files (watchdog, service_runner) - check LastWriteTime directly
-    $staticLogs = @(
+    # Watchdog/Service 로그도 타임스탬프 기반으로 전환됨 — stale 체크 통일
+    $extraTimestampedLogs = @(
         @{ Name = "Watchdog"; Var = "watchdogLogFile" },
-        @{ Name = "IG-Watchdog"; Var = "igWatchdogLogFile" },
         @{ Name = "Claude-Watchdog"; Var = "claudeWatchdogLogFile" },
         @{ Name = "Video-DL-Watchdog"; Var = "videoDownloadWatchdogLogFile" },
         @{ Name = "Crawl-Watchdog"; Var = "crawlWatchdogLogFile" },
-        @{ Name = "Service Runner"; Var = "serviceRunnerLogFile" }
+        @{ Name = "Service Runner"; Var = "serviceRunnerLogFile" },
+        @{ Name = "CMD-Watchdog"; Var = "commandListenerWatchdogLogFile" }
     )
 
-    foreach ($log in $staticLogs) {
+    foreach ($log in $extraTimestampedLogs) {
         $logFile = Get-Variable -Name $log.Var -ValueOnly -ErrorAction SilentlyContinue
         if ($logFile -and (Test-StaleLogFile $logFile $apiLogFile)) {
             Write-Host "[!] $($log.Name) log may be stale (from previous session)" -ForegroundColor Yellow
@@ -389,10 +394,10 @@ function Start-CombinedLogTail {
         [string]$CrawlWorkerLog,
         [string]$ServiceRunnerLog,
         [string]$WatchdogLog,
-        [string]$IgWatchdogLog,
         [string]$ClaudeWatchdogLog,
         [string]$VideoDownloadWatchdogLog,
         [string]$CrawlWatchdogLog,
+        [string]$CommandListenerWatchdogLog,
         [string]$CloudflaredLog
     )
 
@@ -414,10 +419,10 @@ function Start-CombinedLogTail {
         "CRAWL"       = @{ Path = $CrawlWorkerLog;    Color = "DarkBlue";    Tail = 5 }
         "FRONTEND"    = @{ Path = $FrontendLog;       Color = "Green";       Tail = 3 }
         "WATCHDOG"    = @{ Path = $WatchdogLog;       Color = "DarkYellow";  Tail = 2 }
-        "IG-WD"       = @{ Path = $IgWatchdogLog;     Color = "DarkYellow";  Tail = 2 }
         "CLAUDE-WD"   = @{ Path = $ClaudeWatchdogLog; Color = "DarkYellow";  Tail = 2 }
         "VIDEO-DL-WD" = @{ Path = $VideoDownloadWatchdogLog; Color = "DarkYellow"; Tail = 2 }
         "CRAWL-WD"    = @{ Path = $CrawlWatchdogLog;  Color = "DarkYellow";  Tail = 2 }
+        "CMD-WD"      = @{ Path = $CommandListenerWatchdogLog; Color = "DarkYellow"; Tail = 2 }
         "AUTO-NEXT"   = @{ Path = $autoNextLogFile;    Color = "White";       Tail = 10 }
         "AN-STREAM"   = @{ Path = $autoNextStreamLogFile; Color = "DarkGray"; Tail = 5 }
     }
@@ -434,12 +439,20 @@ function Start-CombinedLogTail {
         if ($filePath -and (Test-Path $filePath)) {
             $logFiles[$source] = $filePath
             $logColors[$source] = $config.Color
-            $filePositions[$source] = (Get-Item $filePath).Length
 
-            # Show last N lines initially
-            $initLines = Get-Content $filePath -Tail $config.Tail -Encoding UTF8 -ErrorAction SilentlyContinue
-            foreach ($line in $initLines) {
-                Write-Host "[$source] $line" -ForegroundColor $config.Color
+            $fileItem = Get-Item $filePath
+            $lastWrite = $fileItem.LastWriteTime.Date
+            if ($lastWrite -eq (Get-Date).Date) {
+                # 오늘 수정된 파일: 초기 tail 표시
+                $filePositions[$source] = $fileItem.Length
+                $initLines = Get-Content $filePath -Tail $config.Tail -Encoding UTF8 -ErrorAction SilentlyContinue
+                foreach ($line in $initLines) {
+                    Write-Host "[$source] $line" -ForegroundColor $config.Color
+                }
+            } else {
+                # 오래된 파일: 초기 표시 스킵, 파일 끝으로 이동
+                Write-Host "[$source] (waiting for new logs...)" -ForegroundColor DarkGray
+                $filePositions[$source] = $fileItem.Length
             }
         }
     }
@@ -466,6 +479,13 @@ function Start-CombinedLogTail {
         "VIDEO-DL"    = @("stdout_video_download_worker_*.log", "video_download_worker_*.log")
         "CRAWL"       = @("stdout_crawl_*.log", "crawl_worker_*.log")
         "FRONTEND"    = @("frontend_2*.log")
+        "SERVICE"     = @("service_runner_*.log")
+        "WATCHDOG"    = @("watchdog_*.log", "unified_watchdog_*.log")
+        "CLAUDE-WD"   = @("claude_watchdog_*.log")
+        "VIDEO-DL-WD" = @("video_download_watchdog_*.log")
+        "CRAWL-WD"    = @("crawl_watchdog_*.log")
+        "CMD-WD"      = @("command_listener_watchdog_*.log")
+        "TUNNEL"      = @("cloudflared_*.log")
     }
 
     # Helper to find latest log from multiple patterns
@@ -612,10 +632,10 @@ if ($Follow) {
                 -CrawlWorkerLog $crawlWorkerLogFile `
                 -ServiceRunnerLog $serviceRunnerLogFile `
                 -WatchdogLog $watchdogLogFile `
-                -IgWatchdogLog $igWatchdogLogFile `
                 -ClaudeWatchdogLog $claudeWatchdogLogFile `
                 -VideoDownloadWatchdogLog $videoDownloadWatchdogLogFile `
                 -CrawlWatchdogLog $crawlWatchdogLogFile `
+                -CommandListenerWatchdogLog $commandListenerWatchdogLogFile `
                 -CloudflaredLog $cloudflaredLogFile
         }
     }
