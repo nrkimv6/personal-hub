@@ -6,9 +6,10 @@
   import IntegrityTab from './IntegrityTab.svelte';
   import BrowsersTab from './BrowsersTab.svelte';
   import SettingsTab from './SettingsTab.svelte';
+  import DiagnosticTab from './DiagnosticTab.svelte';
 
   // 탭 정의
-  type TabId = 'status' | 'errors' | 'integrity' | 'browsers' | 'settings';
+  type TabId = 'status' | 'errors' | 'integrity' | 'browsers' | 'settings' | 'diagnostic';
 
   interface Tab {
     id: TabId;
@@ -21,7 +22,8 @@
     { id: 'errors', label: '에러 로그', icon: '⚠️' },
     { id: 'integrity', label: '데이터 정합성', icon: '🔍' },
     { id: 'browsers', label: '브라우저/프록시', icon: '🌐' },
-    { id: 'settings', label: '설정', icon: '⚙️' }
+    { id: 'settings', label: '설정', icon: '⚙️' },
+    { id: 'diagnostic', label: '진단', icon: '🩺' }
   ];
 
   // 배지 상태
@@ -32,7 +34,7 @@
   // URL 파라미터에서 탭 읽기
   let activeTab = $derived.by((): TabId => {
     const tabParam = $page.url.searchParams.get('tab');
-    if (tabParam === 'errors' || tabParam === 'integrity' || tabParam === 'browsers' || tabParam === 'settings') {
+    if (tabParam === 'errors' || tabParam === 'integrity' || tabParam === 'browsers' || tabParam === 'settings' || tabParam === 'diagnostic') {
       return tabParam;
     }
     return 'status';
@@ -145,6 +147,8 @@
       <BrowsersTab />
     {:else if activeTab === 'settings'}
       <SettingsTab />
+    {:else if activeTab === 'diagnostic'}
+      <DiagnosticTab />
     {/if}
   </div>
 </div>

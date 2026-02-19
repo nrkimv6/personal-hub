@@ -25,6 +25,7 @@ htmlcov/
 .coverage
 .coverage.*
 data/image_classifier/settings.json
+frontend/static/diagnostics.json
 
 *cwd
 data/image_classifier

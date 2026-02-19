@@ -40,6 +40,8 @@ $healthEndpoint = "http://localhost:$port/api/v1/system/status"
 $failureCount = 0
 $lastSuccessTime = Get-Date
 $totalRestarts = 0
+$diagScriptPath = Join-Path $ScriptDir "diagnose-api.ps1"
+$diagJsonPath = Join-Path $ProjectRoot "frontend\static\diagnostics.json"
 
 function Write-WatchdogLog {
     param(
@@ -188,25 +190,65 @@ while ($true) {
         $failureCount = 0
         $lastSuccessTime = Get-Date
         Write-WatchdogLog "Health check passed" "DEBUG"
+
+        # API 정상 → diagnostics.json 삭제 (배너 자동 숨김)
+        if (Test-Path $diagJsonPath) {
+            Remove-Item $diagJsonPath -ErrorAction SilentlyContinue
+            Write-WatchdogLog "diagnostics.json deleted (API healthy)" "DEBUG"
+        }
     } else {
         $failureCount++
         $downtime = [int]((Get-Date) - $lastSuccessTime).TotalSeconds
         Write-WatchdogLog "Health check FAILED ($failureCount/9) - Downtime: ${downtime}s" "WARN"
 
+        # Run diagnostics on every failure to update JSON for frontend
+        $diagStatus = $null
+        if (Test-Path $diagScriptPath) {
+            Write-WatchdogLog "Running diagnostics..." "INFO"
+            try {
+                & $diagScriptPath -Dev:$Dev -OutputJson $diagJsonPath 2>&1 | Out-Null
+                if (Test-Path $diagJsonPath) {
+                    $diagData = Get-Content $diagJsonPath -Raw | ConvertFrom-Json
+                    $diagStatus = $diagData.status
+                    Write-WatchdogLog "Diagnosis: $diagStatus — $($diagData.message)" "INFO"
+                }
+            } catch {
+                Write-WatchdogLog "Diagnostics failed: $_" "WARN"
+            }
+        }
+
+        $diagLabel = if ($diagStatus) { " — 원인: $diagStatus" } else { "" }
+
         # Staged recovery
         switch ($failureCount) {
             3 {
-                # Stage 1: NSSM restart
-                Send-TelegramAlert "⚠️ <b>API Hang 감지</b>`n`n환경: $mode`n포트: $port`n실패: $failureCount회 연속`n조치: 프로세스 재시작 시도"
+                # Stage 1: Diagnosis-aware restart
+                $alertMsg = "⚠️ <b>API Hang 감지</b>`n`n환경: $mode`n포트: $port`n실패: $failureCount회 연속$diagLabel"
 
-                if (Restart-ApiService "Stage 1: 3 consecutive failures") {
-                    $totalRestarts++
+                # Diagnosis-based recovery strategy
+                if ($diagStatus -eq "sqlalchemy_hang") {
+                    $alertMsg += "`n조치: 재부팅 필요 (자동 재시작 무의미)"
+                    Send-TelegramAlert $alertMsg
+                    # Skip restart — sqlalchemy hang needs reboot
+                } elseif ($diagStatus -eq "db_migration_error") {
+                    $alertMsg += "`n조치: 마이그레이션 SQL 실행 필요"
+                    Send-TelegramAlert $alertMsg
+                } elseif ($diagStatus -eq "port_zombie") {
+                    $alertMsg += "`n조치: zombie PID kill 후 재시작"
+                    Send-TelegramAlert $alertMsg
+                    Force-KillPortOwner
+                    Start-Sleep -Seconds 3
+                    if (Restart-ApiService "Stage 1: port_zombie recovery") { $totalRestarts++ }
+                } else {
+                    $alertMsg += "`n조치: 프로세스 재시작 시도"
+                    Send-TelegramAlert $alertMsg
+                    if (Restart-ApiService "Stage 1: 3 consecutive failures$diagLabel") { $totalRestarts++ }
                 }
-                Start-Sleep -Seconds 10  # Wait for restart
+                Start-Sleep -Seconds 10
             }
             6 {
                 # Stage 2: Force kill + NSSM restart
-                Send-TelegramAlert "🟠 <b>API 복구 실패</b>`n`n환경: $mode`n포트: $port`n실패: $failureCount회 연속`n조치: 포트 강제 해제 시도"
+                Send-TelegramAlert "🟠 <b>API 복구 실패</b>`n`n환경: $mode`n포트: $port`n실패: $failureCount회 연속$diagLabel`n조치: 포트 강제 해제 시도"
 
                 Force-KillPortOwner
                 Start-Sleep -Seconds 5
@@ -218,7 +260,7 @@ while ($true) {
             }
             { $_ -ge 9 } {
                 # Stage 3: System reboot (last resort)
-                Request-SystemReboot "API 복구 불가 (9회 연속 실패, $totalRestarts회 재시작 시도 후)"
+                Request-SystemReboot "API 복구 불가 (9회 연속 실패, $totalRestarts회 재시작 시도 후)$diagLabel"
 
                 # Reset counter (shouldn't reach here if reboot works)
                 $failureCount = 0
