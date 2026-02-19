@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { autoNextPlanApi } from '$lib/api';
-	import type { AutoNextPlanFileResponse, AutoNextPlanDetailResponse, AutoNextExternalPathResponse } from '$lib/api';
+	import type { AutoNextPlanFileResponse, AutoNextPlanDetailResponse, AutoNextRegisteredPathResponse } from '$lib/api';
 	import { encodePathToBase64 } from '$lib/utils/encoding';
 
 	interface Props {
@@ -14,13 +14,13 @@
 	let ignoredPlans = $state<AutoNextPlanFileResponse[]>([]);
 	let ignoredLoading = $state(false);
 	let showAddForm = $state(false);
-	let externalPath = $state('');
+	let newPath = $state('');
 	let addError = $state<string | null>(null);
 	let addLoading = $state(false);
 
-	// 외부 경로 목록
-	let externalPaths = $state<AutoNextExternalPathResponse[]>([]);
-	let externalPathsLoading = $state(false);
+	// 등록된 경로 목록
+	let registeredPaths = $state<AutoNextRegisteredPathResponse[]>([]);
+	let registeredPathsLoading = $state(false);
 
 	// Plan detail (inline accordion)
 	let selectedPath = $state<string | null>(null);
@@ -78,26 +78,26 @@
 		}
 	}
 
-	async function loadExternalPaths() {
-		externalPathsLoading = true;
+	async function loadRegisteredPaths() {
+		registeredPathsLoading = true;
 		try {
-			externalPaths = await autoNextPlanApi.listExternalPaths();
+			registeredPaths = await autoNextPlanApi.listPaths();
 		} catch {
-			externalPaths = [];
+			registeredPaths = [];
 		} finally {
-			externalPathsLoading = false;
+			registeredPathsLoading = false;
 		}
 	}
 
-	async function handleAddExternal() {
-		if (!externalPath.trim()) return;
+	async function handleAddPath() {
+		if (!newPath.trim()) return;
 		addLoading = true;
 		addError = null;
 		try {
-			await autoNextPlanApi.addExternal(externalPath.trim());
-			externalPath = '';
+			await autoNextPlanApi.addPath(newPath.trim());
+			newPath = '';
 			onPlansChange?.();
-			await loadExternalPaths();
+			await loadRegisteredPaths();
 		} catch (e) {
 			addError = e instanceof Error ? e.message : '추가 실패';
 		} finally {
@@ -105,20 +105,20 @@
 		}
 	}
 
-	async function handleRemoveExternal(e: Event, path: string) {
+	async function handleRemovePath(e: Event, path: string) {
 		e.stopPropagation();
 		try {
-			await autoNextPlanApi.removeExternal(path);
+			await autoNextPlanApi.removePath(path);
 			onPlansChange?.();
-			await loadExternalPaths();
+			await loadRegisteredPaths();
 		} catch { /* ignore */ }
 	}
 
-	async function handleRemoveExternalPath(path: string) {
+	async function handleRemoveRegisteredPath(path: string) {
 		try {
-			await autoNextPlanApi.removeExternal(path);
+			await autoNextPlanApi.removePath(path);
 			onPlansChange?.();
-			await loadExternalPaths();
+			await loadRegisteredPaths();
 		} catch { /* ignore */ }
 	}
 
@@ -153,7 +153,7 @@
 	let displayPlans = $derived(showIgnored ? ignoredPlans : (plans ?? []));
 </script>
 
-<div class="flex flex-col gap-3 h-full">
+<div class="flex flex-col gap-3 min-h-0 flex-1">
 	<!-- Header -->
 	<div class="flex items-center justify-between">
 		<span class="text-xs text-gray-500 font-medium uppercase tracking-wider">Plan Files</span>
@@ -166,7 +166,7 @@
 			</button>
 			<button
 				class="h-6 px-2 text-[10px] rounded text-gray-500 hover:bg-gray-100 transition-colors inline-flex items-center gap-1"
-				onclick={() => { showAddForm = !showAddForm; if (showAddForm) loadExternalPaths(); }}
+				onclick={() => { showAddForm = !showAddForm; if (showAddForm) loadRegisteredPaths(); }}
 			>
 				<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
 				추가
@@ -182,14 +182,14 @@
 			<input
 				type="text"
 				class="w-full border rounded px-2 py-1 text-xs"
-				bind:value={externalPath}
+				bind:value={newPath}
 				placeholder="Plan 파일 또는 폴더 경로 (예: D:\work\project\...)"
 			/>
 			<div class="flex gap-2">
 				<button
 					class="text-xs px-3 py-1 rounded bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
-					onclick={handleAddExternal}
-					disabled={addLoading || !externalPath.trim()}
+					onclick={handleAddPath}
+					disabled={addLoading || !newPath.trim()}
 				>
 					{addLoading ? '추가 중...' : '추가'}
 				</button>
@@ -201,13 +201,13 @@
 				</button>
 			</div>
 
-		<!-- 등록된 외부 경로 목록 -->
-		{#if externalPathsLoading}
+		<!-- 등록된 경로 목록 -->
+		{#if registeredPathsLoading}
 			<div class="text-[10px] text-gray-400">로딩 중...</div>
-		{:else if externalPaths.length > 0}
+		{:else if registeredPaths.length > 0}
 			<div class="border-t pt-2 mt-1 space-y-1">
-				<div class="text-[10px] text-gray-400 font-medium uppercase tracking-wider">등록된 외부 경로</div>
-				{#each externalPaths as ep}
+				<div class="text-[10px] text-gray-400 font-medium uppercase tracking-wider">등록된 경로</div>
+				{#each registeredPaths as ep}
 					<div class="flex items-center gap-1.5 text-[10px]">
 						<!-- 파일/폴더 아이콘 -->
 						{#if ep.type === 'folder'}
@@ -219,8 +219,8 @@
 						<span class="shrink-0 text-gray-400 font-mono">{ep.plan_count}개</span>
 						<button
 							class="shrink-0 text-red-400 hover:text-red-600 px-1"
-							onclick={() => handleRemoveExternalPath(ep.path)}
-							title="제거"
+							onclick={() => handleRemoveRegisteredPath(ep.path)}
+							title="등록 해제"
 						>×</button>
 					</div>
 				{/each}
@@ -245,7 +245,7 @@
 						class="flex items-center gap-2 rounded-md px-2.5 py-2 text-left transition-colors w-full {selectedPath === plan.path ? 'bg-blue-50' : 'hover:bg-gray-50'}"
 					>
 						<!-- File/Folder icon -->
-						{#if plan.external_type === 'folder'}
+						{#if plan.path_type === 'folder'}
 							<svg class="w-3.5 h-3.5 shrink-0 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
 						{:else}
 							<svg class="w-3.5 h-3.5 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -279,11 +279,11 @@
 							</button>
 						{/if}
 
-						{#if plan.source === 'external'}
+						{#if plan.path_type !== null}
 							<button
 								class="shrink-0 p-1 rounded hover:bg-gray-200 text-[10px] text-red-400 hover:text-red-600"
-								onclick={(e) => handleRemoveExternal(e, plan.path)}
-								title="외부 plan 제거"
+								onclick={(e) => handleRemovePath(e, plan.path)}
+								title="등록 해제"
 							>×</button>
 						{/if}
 					</button>

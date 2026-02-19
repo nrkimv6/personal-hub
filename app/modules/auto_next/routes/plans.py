@@ -8,7 +8,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.modules.auto_next.schemas import PlanFileResponse, PlanProgressResponse, PlanDetailResponse, ExternalPathResponse
+from app.modules.auto_next.schemas import PlanFileResponse, PlanProgressResponse, PlanDetailResponse, RegisteredPathResponse
 from app.modules.auto_next.services.plan_service import plan_service
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ def _decode_path(encoded: str) -> str:
 
 @router.get("/plans", response_model=List[PlanFileResponse])
 async def get_plans():
-    """plan 목록 조회 (프로젝트별 탐색 포함)"""
+    """plan 목록 조회 (등록된 경로 탐색)"""
     return plan_service.list_plans()
 
 
@@ -34,10 +34,10 @@ async def get_ignored_plans():
     return plan_service.list_ignored_plans()
 
 
-@router.get("/plans/external-paths", response_model=List[ExternalPathResponse])
-async def get_external_paths():
-    """등록된 외부 경로 목록 조회 (타입 + plan_count 포함)"""
-    return plan_service.list_external_paths()
+@router.get("/plans/paths", response_model=List[RegisteredPathResponse])
+async def get_paths():
+    """등록된 경로 목록 조회 (타입 + plan_count 포함)"""
+    return plan_service.list_registered_paths()
 
 
 @router.get("/plans/{encoded_path}", response_model=PlanProgressResponse)
@@ -49,7 +49,7 @@ async def get_plan_progress(encoded_path: str):
         logger.error(f"Base64 디코딩 실패: encoded_path={encoded_path}, error={e}")
         raise HTTPException(status_code=400, detail=f"Invalid encoded path: {str(e)}")
 
-    if not plan_service.validate_external_path(decoded_path):
+    if not plan_service.validate_path(decoded_path):
         raise HTTPException(status_code=403, detail="Path not allowed")
 
     path = Path(decoded_path)
@@ -68,7 +68,7 @@ async def get_plan_items(encoded_path: str):
         logger.error(f"Base64 디코딩 실패: encoded_path={encoded_path}, error={e}")
         raise HTTPException(status_code=400, detail=f"Invalid encoded path: {str(e)}")
 
-    if not plan_service.validate_external_path(decoded_path):
+    if not plan_service.validate_path(decoded_path):
         raise HTTPException(status_code=403, detail="Path not allowed")
 
     path = Path(decoded_path)
@@ -78,32 +78,32 @@ async def get_plan_items(encoded_path: str):
     return plan_service.parse_plan_items(path)
 
 
-class AddExternalPlanRequest(BaseModel):
-    """외부 plan 추가 요청"""
+class AddPathRequest(BaseModel):
+    """경로 등록 요청"""
     path: str
 
 
-@router.post("/plans/add-external")
-async def add_external_plan(request: AddExternalPlanRequest):
-    """외부 plan 경로 추가 (JSON 파일로 영구 저장)"""
-    if not plan_service.validate_external_path(request.path):
+@router.post("/plans/paths")
+async def add_path(request: AddPathRequest):
+    """경로 등록 (JSON 파일로 영구 저장)"""
+    if not plan_service.validate_path(request.path):
         raise HTTPException(status_code=403, detail="Path not allowed")
 
     path = Path(request.path)
     if not path.exists():
         raise HTTPException(status_code=404, detail="Plan file not found")
 
-    added = plan_service.add_external_plan(request.path)
+    added = plan_service.add_path(request.path)
     path_type = "folder" if path.is_dir() else "file"
     return {"success": added, "path": request.path, "type": path_type}
 
 
-@router.delete("/plans/external")
-async def remove_external_plan(request: AddExternalPlanRequest):
-    """외부 plan 경로 제거"""
-    removed = plan_service.remove_external_plan(request.path)
+@router.delete("/plans/paths")
+async def remove_path(request: AddPathRequest):
+    """등록 경로 제거"""
+    removed = plan_service.remove_path(request.path)
     if not removed:
-        raise HTTPException(status_code=404, detail="External plan not found")
+        raise HTTPException(status_code=404, detail="Registered path not found")
     return {"success": True}
 
 
