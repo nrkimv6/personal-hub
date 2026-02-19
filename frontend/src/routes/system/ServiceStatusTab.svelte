@@ -322,39 +322,80 @@
     } finally { actionLoading = null; }
   }
 
-  async function selfRestartApi() {
+  let selfRestartTarget = $state('');
+
+  async function selfRestartApi(port: number, label: string) {
+    // 자기 자신 재시작인지 판별 (프론트엔드 프록시 대상 포트와 비교)
+    const isSelf = (location.port === '6101' && port === 8001) || (location.port === '6100' && port === 8000);
+    const MAX_POLL = 36;       // 최대 36회 × 5초 = 3분
+    const POLL_INTERVAL = 5000;
+    const INITIAL_WAIT = isSelf ? 20000 : 10000; // 자기 자신이면 좀 더 대기
+
     selfRestartState = 'requested';
-    selfRestartMessage = 'Self-restart 요청 중...';
+    selfRestartTarget = label;
+    selfRestartMessage = `${label} Self-restart 요청 중...`;
     try {
-      const response = await systemApi.selfRestart(2.0);
+      const response = await systemApi.selfRestartByPort(port, 2.0);
       selfRestartState = 'waiting';
-      selfRestartMessage = `PID ${response.pid} 종료 대기 중...`;
-      await new Promise(r => setTimeout(r, 15000));
+      selfRestartMessage = `${label} PID ${response.pid} 종료 대기 중...`;
+      await new Promise(r => setTimeout(r, INITIAL_WAIT));
       selfRestartState = 'checking';
-      selfRestartMessage = 'API 재시작 확인 중...';
+      selfRestartMessage = `${label} 재시작 확인 중...`;
       let success = false;
-      for (let i = 1; i <= 6; i++) {
+      const startTime = Date.now();
+      for (let i = 1; i <= MAX_POLL; i++) {
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
         try {
-          await systemApi.status();
-          success = true;
-          break;
+          const checkUrl = `http://${location.hostname}:${port}/api/v1/system/status`;
+          const res = await fetch(checkUrl);
+          if (res.ok) { success = true; break; }
         } catch {
-          selfRestartMessage = `API 응답 대기 중... (${i}/6)`;
-          if (i < 6) await new Promise(r => setTimeout(r, 5000));
+          selfRestartMessage = `${label} 응답 대기 중... ${elapsed}초 (${i}/${MAX_POLL})`;
+          if (i < MAX_POLL) await new Promise(r => setTimeout(r, POLL_INTERVAL));
         }
       }
       if (success) {
         selfRestartState = 'done';
-        selfRestartMessage = 'API 재시작 완료';
+        selfRestartMessage = `${label} 재시작 완료`;
         await fetchStatus();
-        setTimeout(() => { selfRestartState = 'idle'; selfRestartMessage = ''; }, 3000);
+        setTimeout(() => { selfRestartState = 'idle'; selfRestartMessage = ''; selfRestartTarget = ''; }, 3000);
       } else {
         selfRestartState = 'failed';
-        selfRestartMessage = 'API 재시작 확인 실패. 수동 확인 필요.';
+        selfRestartMessage = `${label} 재시작 확인 실패 (3분 초과). 수동 확인 필요.`;
       }
     } catch (e) {
-      selfRestartState = 'failed';
-      selfRestartMessage = `요청 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`;
+      // 자기 자신 재시작 시 요청 자체가 끊길 수 있음 → 정상 동작
+      if (isSelf) {
+        selfRestartState = 'waiting';
+        selfRestartMessage = `${label} 연결 끊김 (정상) — 재시작 대기 중...`;
+        await new Promise(r => setTimeout(r, INITIAL_WAIT));
+        selfRestartState = 'checking';
+        let success = false;
+        const startTime = Date.now();
+        for (let i = 1; i <= MAX_POLL; i++) {
+          const elapsed = Math.round((Date.now() - startTime) / 1000);
+          try {
+            const checkUrl = `http://${location.hostname}:${port}/api/v1/system/status`;
+            const res = await fetch(checkUrl);
+            if (res.ok) { success = true; break; }
+          } catch {
+            selfRestartMessage = `${label} 응답 대기 중... ${elapsed}초 (${i}/${MAX_POLL})`;
+            if (i < MAX_POLL) await new Promise(r => setTimeout(r, POLL_INTERVAL));
+          }
+        }
+        if (success) {
+          selfRestartState = 'done';
+          selfRestartMessage = `${label} 재시작 완료`;
+          await fetchStatus();
+          setTimeout(() => { selfRestartState = 'idle'; selfRestartMessage = ''; selfRestartTarget = ''; }, 3000);
+        } else {
+          selfRestartState = 'failed';
+          selfRestartMessage = `${label} 재시작 확인 실패 (3분 초과). 수동 확인 필요.`;
+        }
+      } else {
+        selfRestartState = 'failed';
+        selfRestartMessage = `${label} 요청 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`;
+      }
     }
   }
 
@@ -533,13 +574,22 @@
             <h3 class="text-sm font-semibold text-foreground">Windows 서비스</h3>
             <span class="text-[10px] px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground font-medium">{allServices.length}</span>
           </div>
-          <button
-            onclick={() => showConfirm('Graceful 재시작', 'API 서버를 재시작합니다. 약 15초간 서비스가 중단됩니다.', selfRestartApi, true, '재시작')}
-            disabled={selfRestartState !== 'idle'}
-            class="h-7 px-2 text-[11px] rounded-md font-medium border border-input bg-background hover:bg-accent transition-colors disabled:opacity-50"
-          >
-            Graceful 재시작
-          </button>
+          <div class="flex gap-1">
+            <button
+              onclick={() => showConfirm('Dev API 재시작', 'Dev API(:8001)를 재시작합니다. 약 15초간 중단됩니다.', () => selfRestartApi(8001, 'Dev'), true, '재시작')}
+              disabled={selfRestartState !== 'idle'}
+              class="h-7 px-2 text-[11px] rounded-md font-medium border border-input bg-background hover:bg-accent transition-colors disabled:opacity-50"
+            >
+              Dev 재시작
+            </button>
+            <button
+              onclick={() => showConfirm('Prod API 재시작', 'Prod API(:8000)를 재시작합니다. 약 15초간 중단됩니다.', () => selfRestartApi(8000, 'Prod'), true, '재시작')}
+              disabled={selfRestartState !== 'idle'}
+              class="h-7 px-2 text-[11px] rounded-md font-medium border border-input bg-background hover:bg-accent transition-colors disabled:opacity-50"
+            >
+              Prod 재시작
+            </button>
+          </div>
         </div>
 
         <!-- Graceful Restart 진행바 -->
