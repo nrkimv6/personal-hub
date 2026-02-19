@@ -468,6 +468,16 @@ function Start-CombinedLogTail {
         "FRONTEND"    = @("frontend_2*.log")
     }
 
+    # Dev 전용 소스 — Production에서 제외 (Worker는 항상 APP_MODE=development로 실행되어 logs/dev/에 기록됨)
+    $devOnlySources = @("WORKER", "IG-WORKER", "CLAUDE", "VIDEO-DL", "CRAWL",
+                         "IG-WD", "CLAUDE-WD", "VIDEO-DL-WD", "CRAWL-WD")
+    if (-not $Dev) {
+        foreach ($source in $devOnlySources) {
+            $logConfig.Remove($source)
+            $timestampedLogPatterns.Remove($source)
+        }
+    }
+
     # Helper to find latest log from multiple patterns
     # Dev 모드일 때 base logs/ 디렉토리도 탐색 (API 앱의 LOG_DIR가 logs/ 고정)
     function Get-LatestLogFromPatterns {
