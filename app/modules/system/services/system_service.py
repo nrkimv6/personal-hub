@@ -386,14 +386,17 @@ if ($tasks) {{
             (killed if success else failed).append(msg)
 
         if not killed and not failed:
-            return {"success": False, "message": "실행 중인 watchdog가 없습니다."}
+            return {"success": True, "message": "모든 watchdog가 이미 중지 상태입니다."}
 
         parts = []
         if killed:
             parts.append(f"종료됨: {', '.join(killed)}")
         if failed:
-            parts.append(f"실패: {', '.join(failed)}")
-        return {"success": len(killed) > 0, "message": " | ".join(parts)}
+            # PID 파일 없음은 이미 중지된 상태 — 실패가 아님
+            all_pid_missing = all("PID 파일 없음" in f for f in failed)
+            if not all_pid_missing:
+                parts.append(f"실패: {', '.join(failed)}")
+        return {"success": len(killed) > 0 or all("PID 파일 없음" in f for f in failed), "message": " | ".join(parts) if parts else "모든 watchdog가 이미 중지 상태입니다."}
 
     async def start_watchdogs(self) -> dict:
         """Redis Command Listener를 통해 watchdog 시작 요청.

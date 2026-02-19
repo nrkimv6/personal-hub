@@ -159,8 +159,6 @@ async def restart_single_worker(name: str):
 async def stop_watchdogs():
     """Stop all watchdog processes"""
     result = await _service.stop_watchdogs()
-    if not result["success"]:
-        raise HTTPException(status_code=500, detail=result["message"])
     return result
 
 
@@ -168,8 +166,6 @@ async def stop_watchdogs():
 async def start_watchdogs():
     """Start watchdog processes via Redis Command Listener"""
     result = await _service.start_watchdogs()
-    if not result["success"]:
-        raise HTTPException(status_code=500, detail=result["message"])
     return result
 
 

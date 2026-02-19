@@ -50,13 +50,6 @@ class GitRepoService:
         db.add(repo)
         db.commit()
         db.refresh(repo)
-
-        # 초기 상태 조회
-        try:
-            await self.refresh_status(db, repo)
-        except Exception:
-            pass
-
         return repo
 
     def update_repo(

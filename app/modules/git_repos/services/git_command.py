@@ -1,6 +1,8 @@
 """Git CLI 래퍼 서비스."""
 import asyncio
+import os
 import re
+import shutil
 from typing import List, Tuple, Optional
 
 from app.modules.git_repos.schemas import LogEntry, RepoStatus
@@ -12,11 +14,14 @@ _DANGEROUS_ARGS = {
     "--delete",
 }
 
+# git 실행 파일 경로 (NSSM Session 0에서 PATH가 다를 수 있으므로 절대 경로 사용)
+_GIT_EXE = shutil.which("git") or r"C:\Program Files\Git\cmd\git.exe"
+
 
 class GitCommandService:
     """git CLI를 asyncio로 실행하는 래퍼."""
 
-    TIMEOUT = 30  # 초
+    TIMEOUT = 10  # 초
 
     async def _run_git(self, repo_path: str, *args: str) -> Tuple[int, str, str]:
         """git 명령어 실행. 위험 인자 포함 시 거부."""
@@ -27,7 +32,7 @@ class GitCommandService:
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                "git", *args,
+                _GIT_EXE, *args,
                 cwd=repo_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -48,6 +53,8 @@ class GitCommandService:
             )
         except FileNotFoundError:
             return -1, "", "git 명령어를 찾을 수 없습니다."
+        except (NotADirectoryError, OSError):
+            return -1, "", f"유효하지 않은 경로입니다: {repo_path}"
 
     # ─────────────────────────────────────────────
     # 읽기 작업
