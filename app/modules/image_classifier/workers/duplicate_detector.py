@@ -37,7 +37,15 @@ class DuplicateDetector:
         """외부에서 취소 요청"""
         self._cancelled = True
 
+    def detect_duplicates_sync(self, resume: bool = True, progress_db: Session = None):
+        """detect_duplicates 동기 버전 (BackgroundTasks 스레드 풀용)"""
+        return self._detect_duplicates_impl(resume=resume, progress_db=progress_db)
+
     async def detect_duplicates(self, resume: bool = True, progress_db: Session = None):
+        """async 호환 래퍼 (기존 호출 호환)"""
+        return self._detect_duplicates_impl(resume=resume, progress_db=progress_db)
+
+    def _detect_duplicates_impl(self, resume: bool = True, progress_db: Session = None):
         """
         전체 이미지에서 중복 그룹 탐지 (버킷 기반)
 

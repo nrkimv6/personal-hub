@@ -123,6 +123,33 @@ class FolderScanner:
         except Exception as e:
             print(f"[오류] 파일 스캔 실패: {folder_path} - {e}")
 
+    def _scan_folder_files_sync(self, folder_path: Path):
+        """
+        _scan_folder_files의 동기 버전 (to_thread에서 호출용)
+        이벤트 루프 블로킹 방지를 위해 스레드 풀에서 실행
+        """
+        try:
+            image_files = [
+                f for f in folder_path.iterdir()
+                if f.is_file() and f.suffix.lower() in self.image_extensions
+            ]
+
+            if not image_files:
+                return
+
+            folder_id = self._save_folder_mapping(folder_path, len(image_files))
+
+            for file_path in image_files:
+                self._save_file_info_sync(file_path, folder_id)
+                self.scanned_files += 1
+
+            self.total_files += len(image_files)
+
+        except PermissionError:
+            print(f"[경고] 접근 권한 없음: {folder_path}")
+        except Exception as e:
+            print(f"[오류] 파일 스캔 실패: {folder_path} - {e}")
+
     def _save_folder_mapping(self, folder_path: Path, file_count: int) -> int:
         """
         folder_mappings 테이블에 폴더 정보 저장
@@ -173,6 +200,12 @@ class FolderScanner:
         Args:
             file_path: 파일 경로
             folder_id: 소속 폴더 ID
+        """
+        self._save_file_info_sync(file_path, folder_id)
+
+    def _save_file_info_sync(self, file_path: Path, folder_id: int):
+        """
+        _save_file_info의 동기 버전 (to_thread에서 호출용)
         """
         file_str = str(file_path)
 

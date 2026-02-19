@@ -287,8 +287,8 @@ async def resolve_duplicate_group(
     }
 
 
-async def _run_detect(resume: bool):
-    """백그라운드 중복 탐지 실행"""
+def _run_detect(resume: bool):
+    """백그라운드 중복 탐지 실행 (동기 → 스레드 풀에서 실행)"""
     global _active_detector
 
     from ..config import ImageClassifierSettings
@@ -300,7 +300,7 @@ async def _run_detect(resume: bool):
         from ..workers.duplicate_detector import DuplicateDetector
         detector = DuplicateDetector(db, settings)
         _active_detector = detector
-        await detector.detect_duplicates(resume=resume, progress_db=progress_db)
+        detector.detect_duplicates_sync(resume=resume, progress_db=progress_db)
     except Exception as e:
         logger.error(f"[중복 감지] 오류: {e}")
     finally:

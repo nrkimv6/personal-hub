@@ -9,7 +9,7 @@
 - POST /api/ic/scan/thumbnails/stop: 썸네일 생성 중지
 """
 
-import asyncio
+import threading
 from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
@@ -62,8 +62,8 @@ scan_state = {
     "error": None,
 }
 
-# 스캔 취소 이벤트
-cancel_event = asyncio.Event()
+# 스캔 취소 이벤트 (스레드 안전)
+cancel_event = threading.Event()
 
 # === 전역 썸네일 상태 ===
 thumb_state = {
@@ -73,20 +73,20 @@ thumb_state = {
     "error": None,
 }
 
-thumb_cancel_event = asyncio.Event()
+thumb_cancel_event = threading.Event()
 
 
 # === 엔드포인트 ===
 @router.post("/start")
 async def start_scan(
-    request: ScanStartRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
+    request: ScanStartRequest = ScanStartRequest(),
 ):
     """
     폴더 트리 스캔 시작
 
-    - 비동기 백그라운드 태스크로 실행
+    - 동기 백그라운드 태스크로 실행 (스레드 풀 → 이벤트 루프 블로킹 없음)
     - 이미지 파일 재귀 검색 (jpg/png/gif/bmp/webp/heic/tiff)
     - DB에 파일 정보 저장
     """
@@ -115,7 +115,7 @@ async def start_scan(
         "error": None,
     })
 
-    # 백그라운드에서 스캔 실행
+    # 동기 함수 → FastAPI가 자동으로 스레드 풀에서 실행 (즉시 반환)
     background_tasks.add_task(run_scan_task, root_folders, request.resume)
 
     return {
@@ -263,15 +263,13 @@ async def get_folders(
     }
 
 
-# === 백그라운드 태스크 ===
-async def run_scan_task(root_folders: list[str], resume: bool = False):
+# === 백그라운드 태스크 (동기 함수 → FastAPI가 스레드 풀에서 실행) ===
+def run_scan_task(root_folders: list[str], resume: bool = False):
     """
-    스캔 백그라운드 태스크
+    스캔 백그라운드 태스크 (동기)
 
-    - FolderScanner를 사용하여 재귀 스캔
-    - 진행 상태를 scan_state + DB(task_progress)에 업데이트
-    - cancel_event 감시하여 중지 지원
-    - resume=True 시 이미 스캔된 폴더의 파일 스캔 스킵
+    FastAPI BackgroundTasks가 동기 함수를 스레드 풀에서 실행하므로
+    이벤트 루프를 블로킹하지 않음 → 트리거 API 즉시 반환 보장
     """
     global scan_state
 
@@ -319,7 +317,7 @@ async def run_scan_task(root_folders: list[str], resume: bool = False):
                 scanned_count += 1
                 continue
 
-            await scanner._scan_folder_files(folder_path)
+            scanner._scan_folder_files_sync(folder_path)
             scanned_count += 1
             scanner.scanned_folders = scanned_count
             scanner.total_folders = total
@@ -338,7 +336,7 @@ async def run_scan_task(root_folders: list[str], resume: bool = False):
         # 스캔 완료 후 자동 썸네일 생성
         if not cancel_event.is_set():
             print("[스캔→썸네일] 자동 썸네일 생성 시작")
-            await run_thumbnail_task()
+            run_thumbnail_task()
 
     except Exception as e:
         scan_state["error"] = str(e)
@@ -369,6 +367,7 @@ async def start_thumbnails(
         "error": None,
     })
 
+    # 동기 함수 → FastAPI가 자동으로 스레드 풀에서 실행
     background_tasks.add_task(run_thumbnail_task)
 
     return {"status": "started", "message": "썸네일 생성이 시작되었습니다."}
@@ -399,8 +398,8 @@ async def stop_thumbnails():
     return {"status": "stopping", "message": "썸네일 생성 중지 요청이 전송되었습니다."}
 
 
-async def run_thumbnail_task():
-    """썸네일 생성 백그라운드 태스크"""
+def run_thumbnail_task():
+    """썸네일 생성 백그라운드 태스크 (동기)"""
     global thumb_state
 
     from ..database import SessionLocal
@@ -414,7 +413,7 @@ async def run_thumbnail_task():
             thumb_state["processed"] = processed
             thumb_state["total"] = total
 
-        result = await worker.process_all_pending(
+        result = worker.process_all_pending_sync(
             batch_size=500,
             cancel_event=thumb_cancel_event,
             on_progress=on_progress,
