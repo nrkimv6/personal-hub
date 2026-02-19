@@ -97,29 +97,53 @@
 		}
 	}
 
+	let classifyStatus = $state('');
+
 	async function classifyAllFolders() {
 		classifyLoading = true;
 		scanning = true;
 		scanDone = false;
 		progress = 0;
-
-		// 진행 시뮬레이션 (실제 API 완료 전까지)
-		const timer = setInterval(() => {
-			if (progress < 90) progress += 5;
-		}, 300);
+		classifyStatus = '';
 
 		try {
 			const res = await fetchWithTimeout('/api/ic/folders/classify', { method: 'POST' });
-			const data = await res.json();
-			progress = 100;
-			scanDone = true;
-			await loadFolders();
-		} catch (e) {
-			console.error('폴더 분류 실패:', e);
-		} finally {
-			clearInterval(timer);
-			classifyLoading = false;
+
+			if (!res.ok) {
+				const err = await res.json();
+				throw new Error(err.detail || '폴더 분류 시작 실패');
+			}
+
+			// 폴링으로 진행률 확인
+			const pollInterval = setInterval(async () => {
+				try {
+					const statusRes = await fetchWithTimeout('/api/ic/folders/classify/status');
+					const status = await statusRes.json();
+
+					if (status.total > 0) {
+						progress = Math.round((status.processed / status.total) * 100);
+						classifyStatus = `폴더 분류 중... (${status.processed}/${status.total})`;
+					}
+
+					if (!status.is_running) {
+						clearInterval(pollInterval);
+						progress = 100;
+						scanDone = true;
+						scanning = false;
+						classifyLoading = false;
+						classifyStatus = '';
+						await loadFolders();
+					}
+				} catch {
+					clearInterval(pollInterval);
+					scanning = false;
+					classifyLoading = false;
+				}
+			}, 1000);
+		} catch (e: any) {
+			alert(e.message);
 			scanning = false;
+			classifyLoading = false;
 		}
 	}
 
@@ -509,7 +533,7 @@
 		{#if scanning}
 			<div class="mb-4">
 				<div class="flex justify-between text-xs text-muted-foreground mb-1">
-					<span>폴더 스캔 중...</span>
+					<span>{classifyStatus || '폴더 스캔 중...'}</span>
 					<span>{progress}%</span>
 				</div>
 				<div class="h-2 w-full rounded-full bg-muted overflow-hidden">

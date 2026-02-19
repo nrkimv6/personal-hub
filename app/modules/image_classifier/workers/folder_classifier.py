@@ -120,12 +120,13 @@ class FolderClassifier:
 
         return "unclear"
 
-    def classify_all_folders(self, force: bool = False):
+    def classify_all_folders(self, force: bool = False, on_progress=None):
         """
         DB의 모든 폴더에 대해 자동 분류 실행
 
         Args:
             force: True면 이미 분류된 폴더도 재분류 (기본: False)
+            on_progress: 진행 콜백 (total, processed, current_folder)
 
         Returns:
             분류 결과 통계
@@ -187,6 +188,9 @@ class FolderClassifier:
             self.db.execute(update_query, {"status": status, "folder_id": folder_id})
 
             stats[status] += 1
+
+            if on_progress:
+                on_progress(len(folders), stats["clear"] + stats["unclear"] + stats["flat"] + stats["nested"], folder_path)
 
         self.db.commit()
 

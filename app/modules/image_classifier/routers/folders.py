@@ -10,12 +10,13 @@
 
 import asyncio
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from ..database import get_db
+from ..database import get_db, SessionLocal
 from ..workers.folder_classifier import FolderClassifier
 from ..adapters.base import ClassifyRequest
 from ..adapters.claude_cli import ClaudeCLIAdapter
@@ -58,24 +59,94 @@ class InheritRequest(BaseModel):
     apply_to_children: bool = True
 
 
+# === 전역 분류 상태 ===
+classify_state = {
+    "is_running": False,
+    "total": 0,
+    "processed": 0,
+    "current_folder": None,
+    "error": None,
+}
+
+
+def update_classify_progress(total: int, processed: int, current_folder: str):
+    """분류 진행 상태 업데이트 콜백"""
+    global classify_state
+    classify_state.update({
+        "total": total,
+        "processed": processed,
+        "current_folder": current_folder,
+    })
+
+
+async def run_classify_task(force: bool):
+    """분류 백그라운드 태스크"""
+    global classify_state
+    db = SessionLocal()
+    try:
+        classifier = FolderClassifier(db)
+        classifier.classify_all_folders(force=force, on_progress=update_classify_progress)
+        classify_state["is_running"] = False
+    except Exception as e:
+        classify_state["error"] = str(e)
+        classify_state["is_running"] = False
+    finally:
+        db.close()
+
+
 # === 엔드포인트 ===
 @router.post("/classify")
-async def classify_folders(force: bool = False, db: Session = Depends(get_db)):
+async def classify_folders(
+    background_tasks: BackgroundTasks,
+    force: bool = False,
+):
     """
-    폴더 자동 분류 실행
+    폴더 자동 분류 실행 (비동기)
 
     - force=False (기본): unknown 폴더만 분류
     - force=True: 이미 분류된 폴더도 재분류
-    - 폴더명 패턴 매칭 사용
+    - 백그라운드에서 실행, /classify/status로 진행률 확인
     """
-    classifier = FolderClassifier(db)
-    stats = classifier.classify_all_folders(force=force)
+    global classify_state
 
-    mode = "재분류" if force else "신규 분류"
+    if classify_state["is_running"]:
+        raise HTTPException(status_code=409, detail="폴더 분류가 이미 실행 중입니다.")
+
+    classify_state.update({
+        "is_running": True,
+        "total": 0,
+        "processed": 0,
+        "current_folder": None,
+        "error": None,
+    })
+
+    background_tasks.add_task(run_classify_task, force)
+
+    return JSONResponse(
+        status_code=202,
+        content={
+            "status": "started",
+            "message": "폴더 분류가 시작되었습니다.",
+        }
+    )
+
+
+@router.get("/classify/status")
+async def get_classify_status():
+    """폴더 분류 진행 상태 조회"""
+    global classify_state
+
+    progress = 0.0
+    if classify_state["total"] > 0:
+        progress = (classify_state["processed"] / classify_state["total"]) * 100
+
     return {
-        "status": "completed",
-        "stats": stats,
-        "message": f"총 {stats['total']}개 폴더 {mode} 완료"
+        "is_running": classify_state["is_running"],
+        "total": classify_state["total"],
+        "processed": classify_state["processed"],
+        "progress_percent": round(progress, 2),
+        "current_folder": classify_state["current_folder"],
+        "error": classify_state["error"],
     }
 
 
