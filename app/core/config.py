@@ -208,6 +208,10 @@ class Settings(BaseSettings):
     EXTERNAL_FRONTEND_URL: str = ""  # 외부 프론트엔드 URL (Cloudflare Tunnel)
     PID_DIR: str = ".pids"  # PID 파일 디렉토리
 
+    # Git Repository Manager 설정
+    GIT_REPOS_ALLOWED_PATHS: List[str] = ["D:\\work\\"]  # 등록 가능 기본 경로
+    GIT_REPOS_AUTO_REFRESH_INTERVAL: int = 300  # 자동 상태 갱신 간격 (초)
+
     # Redis 설정 (Queue Migration)
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
