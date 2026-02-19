@@ -1,12 +1,14 @@
 """로그 스트리밍 서비스 - Redis Pub/Sub 기반 실시간 로그"""
 
 import asyncio
+import time
 from collections import deque
 from pathlib import Path
 from typing import Optional, AsyncGenerator
 import glob
 
 import redis
+import redis.asyncio as aioredis
 
 from app.modules.auto_next.config import config
 from app.modules.auto_next.schemas import LogResponse
@@ -18,13 +20,23 @@ REDIS_PORT = 6379
 STATE_KEY = "auto-next:state"
 LOG_CHANNEL = "auto-next:logs"
 
+HEARTBEAT_INTERVAL = 30  # 초
+
 
 class LogService:
     """로그 스트리밍 서비스 - Redis Pub/Sub 기반"""
 
     def __init__(self):
         """Redis 클라이언트 초기화"""
+        # 동기 클라이언트 (tail_log_file, _find_current_log 용)
         self.redis_client = redis.Redis(
+            host=REDIS_HOST,
+            port=REDIS_PORT,
+            decode_responses=True,
+            socket_connect_timeout=5,
+        )
+        # 비동기 클라이언트 (stream_log_file 용 — 이벤트 루프 블로킹 방지)
+        self.async_redis = aioredis.Redis(
             host=REDIS_HOST,
             port=REDIS_PORT,
             decode_responses=True,
@@ -69,46 +81,58 @@ class LogService:
     async def stream_log_file(self) -> AsyncGenerator[str, None]:
         """Redis Pub/Sub 기반 실시간 로그 스트리밍 (SSE 형식)
 
+        redis.asyncio를 사용하여 이벤트 루프 블로킹 없이 메시지를 수신합니다.
         Redis 미연결 시에도 generator를 유지하여 SSE 연결이 끊기지 않도록 함.
         """
         # 초기 연결 이벤트 — EventSource가 MIME type 검증을 통과하도록 보장
         yield "event: connected\ndata: ok\n\n"
 
         pubsub = None
+        last_heartbeat = time.monotonic()
+
         while True:
             try:
                 if pubsub is None:
-                    pubsub = self.redis_client.pubsub()
-                    pubsub.subscribe(LOG_CHANNEL)
+                    pubsub = self.async_redis.pubsub()
+                    await pubsub.subscribe(LOG_CHANNEL)
 
-                message = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                message = await pubsub.get_message(
+                    ignore_subscribe_messages=True, timeout=0.5
+                )
                 if message and message["type"] == "message":
                     yield f"data: {message['data']}\n\n"
+                    last_heartbeat = time.monotonic()
                 else:
+                    # 메시지 없으면 heartbeat 체크
+                    now = time.monotonic()
+                    if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                        yield ": heartbeat\n\n"
+                        last_heartbeat = now
                     await asyncio.sleep(0.3)
 
-            except redis.ConnectionError:
+            except (redis.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError):
                 # Redis 연결 실패 — generator 종료 대신 heartbeat 유지 + 재연결 대기
                 if pubsub:
                     try:
-                        pubsub.unsubscribe(LOG_CHANNEL)
-                        pubsub.close()
+                        await pubsub.unsubscribe(LOG_CHANNEL)
+                        await pubsub.aclose()
                     except Exception:
                         pass
                     pubsub = None
                 yield "event: redis_disconnected\ndata: Redis not available\n\n"
+                last_heartbeat = time.monotonic()
                 await asyncio.sleep(5)
-                # while 루프로 돌아가서 재연결 시도
 
             except Exception as e:
                 yield f"data: [Error: {str(e)}]\n\n"
                 if pubsub:
                     try:
-                        pubsub.unsubscribe(LOG_CHANNEL)
-                        pubsub.close()
+                        await pubsub.unsubscribe(LOG_CHANNEL)
+                        await pubsub.aclose()
                     except Exception:
                         pass
                     pubsub = None
+                last_heartbeat = time.monotonic()
                 await asyncio.sleep(5)
 
 
