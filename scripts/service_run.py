@@ -244,11 +244,60 @@ class ServiceRunner:
         self.log.info(f"Frontend started (PID: {proc.pid})")
         return proc
 
+    # ── 크래시 루프 감지 ─────────────────────────────────────────
+    def check_crash_loop(self) -> bool:
+        """최근 5분 내 death 이벤트가 3회 이상이면 True 반환.
+
+        Returns:
+            True  — 크래시 루프 감지 (백오프 필요)
+            False — 정상
+        """
+        try:
+            from app.core.death_log import read_recent_deaths, record_crash_loop
+            deaths = read_recent_deaths(window_minutes=5)
+            count = len(deaths)
+            if count >= 3:
+                first_err = None
+                for d in deaths:
+                    if d.get("details"):
+                        first_err = d["details"][:200]
+                        break
+                self.log.warning(
+                    f"CRASH LOOP DETECTED: {count} deaths in last 5 minutes"
+                )
+                record_crash_loop(
+                    restart_count=count,
+                    window_minutes=5,
+                    first_error=first_err,
+                )
+                return True
+        except Exception as e:
+            self.log.warning(f"Crash loop check failed: {e}")
+        return False
+
     # ── API 실행 (in-process) ────────────────────────────────────
     def run_api(self):
         self.log.info("Starting API Server in-process...")
         if self.dev:
             self.log.info("Development mode (hot reload disabled for stability)")
+
+        # 크래시 루프 감지 — 백오프
+        if self.check_crash_loop():
+            death_count = 0
+            try:
+                from app.core.death_log import read_recent_deaths
+                death_count = len(read_recent_deaths(window_minutes=5))
+            except Exception:
+                pass
+
+            if death_count >= 5:
+                self.log.error(
+                    f"CRASH LOOP CRITICAL: {death_count} deaths in 5 min. Stopping service."
+                )
+                sys.exit(2)
+
+            self.log.warning("Crash loop backoff: waiting 30 seconds before restart...")
+            time.sleep(30)
 
         # 환경변수
         os.environ["API_PORT"] = str(self.api_port)
@@ -294,7 +343,26 @@ class ServiceRunner:
         # 블로킹 — uvicorn 이벤트 루프 실행
         server.run()
 
-        self.log.info("API Server exited")
+        # server.run() 반환 → exit code로 외부 kill 여부 판단
+        # uvicorn 정상 종료 시 0, 외부 kill/강제 종료 시 음수 또는 비0
+        exit_code = getattr(server, "exit_code", None)
+        self.log.info(f"API Server exited (exit_code={exit_code})")
+
+        # 외부 kill 추정 기록 (death_log에 아직 기록이 없는 경우)
+        try:
+            from app.core.death_log import read_recent_deaths, record_death
+            recent = read_recent_deaths(window_minutes=1)
+            has_recent_death = any(
+                d.get("cause") not in (None, "") for d in recent
+            )
+            if not has_recent_death and exit_code is not None and exit_code != 0:
+                record_death(
+                    cause="external_kill",
+                    exit_code=exit_code,
+                    details=f"server.run() returned with exit_code={exit_code} (TerminateProcess 추정)",
+                )
+        except Exception:
+            pass
 
     # ── Cleanup ──────────────────────────────────────────────────
     def cleanup(self):
