@@ -1,3 +1,5 @@
+<svelte:head><title>AI 분류 — Image Classifier</title></svelte:head>
+
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { fetchWithTimeout } from '$lib/api/client';
@@ -149,7 +151,7 @@
           const parts = (f.file_path || '').replace(/\\/g, '/').split('/');
           return {
             file: parts[parts.length - 1] || `file_${f.id}`,
-            error: 'Classification failed',
+            error: '분류 실패',
           };
         });
       }
@@ -192,14 +194,14 @@
 </script>
 
 <div class="space-y-6">
-  <!-- Header -->
-  <div class="flex items-start gap-3">
-    <div class="flex size-10 items-center justify-center rounded-xl bg-primary/10">
-      <Brain class="size-5 text-primary" />
-    </div>
+  <!-- 헤더 -->
+  <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-2xl font-bold text-foreground">AI Classification</h1>
-      <p class="text-sm text-muted-foreground">Automatically classify images using AI models</p>
+      <div class="flex items-center gap-2">
+        <Brain class="size-5 text-primary" />
+        <h1 class="text-2xl font-bold tracking-tight">AI 분류</h1>
+      </div>
+      <p class="mt-1 text-sm text-muted-foreground">AI 모델로 이미지를 자동 분류합니다</p>
     </div>
   </div>
 
@@ -207,11 +209,11 @@
   <div class="grid gap-6 lg:grid-cols-2">
     <!-- AI Engine Settings -->
     <div class="rounded-xl border border-border bg-card p-4 space-y-4">
-      <h2 class="text-sm font-semibold text-foreground">AI Engine Settings</h2>
+      <h2 class="text-sm font-semibold text-foreground">AI 엔진 설정</h2>
 
       <!-- Engine Selector -->
       <div class="space-y-1.5">
-        <p class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Engine</p>
+        <p class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">엔진</p>
         <div class="flex rounded-lg border border-border bg-muted p-0.5">
           <button
             onclick={() => { engine = 'claude'; modelName = 'claude-opus-4-5'; cliPath = 'claude'; }}
@@ -251,7 +253,7 @@
 
       <!-- Model Name -->
       <div class="space-y-1.5">
-        <label for="model-name" class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Model Name</label>
+        <label for="model-name" class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">모델 이름</label>
         <input
           id="model-name"
           type="text"
@@ -293,13 +295,13 @@
 
     <!-- Batch Processing -->
     <div class="rounded-xl border border-border bg-card p-4 space-y-4">
-      <h2 class="text-sm font-semibold text-foreground">Batch Processing</h2>
+      <h2 class="text-sm font-semibold text-foreground">배치 처리</h2>
 
       <!-- Target Images -->
       <div class="space-y-1.5">
-        <label class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Target Images</label>
+        <label class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">대상 이미지</label>
         <div class="flex gap-2">
-          {#each [{ key: 'unclassified', label: 'Unclassified' }, { key: 'all', label: 'All' }, { key: 'failed', label: 'Failed' }] as opt}
+          {#each [{ key: 'unclassified', label: '미분류' }, { key: 'all', label: '전체' }, { key: 'failed', label: '실패' }] as opt}
             <button
               onclick={() => (targetImages = opt.key as typeof targetImages)}
               disabled={running}
@@ -316,8 +318,8 @@
       <!-- Skip already classified -->
       <div class="flex items-center justify-between rounded-lg border border-border bg-secondary/50 px-3 py-2.5">
         <div>
-          <div class="text-xs font-medium text-foreground">Skip already classified</div>
-          <div class="text-[10px] text-muted-foreground">Don't re-process images with existing classification</div>
+          <div class="text-xs font-medium text-foreground">이미 분류된 이미지 제외</div>
+          <div class="text-[10px] text-muted-foreground">기존 분류가 있는 이미지를 재처리하지 않습니다</div>
         </div>
         <input
           type="checkbox"
@@ -330,8 +332,8 @@
       <!-- Apply rules after AI -->
       <div class="flex items-center justify-between rounded-lg border border-border bg-secondary/50 px-3 py-2.5">
         <div>
-          <div class="text-xs font-medium text-foreground">Apply rules after AI</div>
-          <div class="text-[10px] text-muted-foreground">Run classification rules on AI results</div>
+          <div class="text-xs font-medium text-foreground">AI 후 규칙 적용</div>
+          <div class="text-[10px] text-muted-foreground">AI 결과에 분류 규칙을 실행합니다</div>
         </div>
         <input
           type="checkbox"
@@ -346,14 +348,14 @@
   <!-- Execution Card -->
   <div class="rounded-xl border border-border bg-card p-4 space-y-4">
     <div class="flex items-center justify-between">
-      <h2 class="text-sm font-semibold text-foreground">Execution</h2>
+      <h2 class="text-sm font-semibold text-foreground">실행</h2>
       {#if running}
         <span class="flex items-center gap-1.5 text-xs text-primary">
           <span class="relative flex size-2">
             <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75"></span>
             <span class="relative inline-flex size-2 rounded-full bg-primary"></span>
           </span>
-          Running... ({processedCount}/{totalCount})
+          실행 중... ({processedCount}/{totalCount})
         </span>
       {/if}
     </div>
@@ -373,7 +375,7 @@
           class="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
         >
           <Play class="size-4" />
-          Start Classification
+          분류 시작
         </button>
       {:else}
         <button
@@ -381,7 +383,7 @@
           class="flex items-center gap-2 rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 transition-colors"
         >
           <Square class="size-4" />
-          Stop
+          중지
         </button>
       {/if}
     </div>
@@ -392,8 +394,8 @@
         <div class="flex items-center justify-between text-xs text-muted-foreground">
           <span>
             {currentFile
-              ? (currentFile.split('/').pop()?.split('\\').pop() ?? 'Processing...')
-              : 'Processing...'}
+              ? (currentFile.split('/').pop()?.split('\\').pop() ?? '처리 중...')
+              : '처리 중...'}
           </span>
           <span>{progress}%</span>
         </div>
@@ -409,7 +411,7 @@
     <!-- Live Results -->
     {#if results.length > 0}
       <div>
-        <p class="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Recent Classified</p>
+        <p class="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">최근 분류 결과</p>
         <div class="max-h-48 divide-y divide-border overflow-y-auto rounded-lg border border-border">
           {#each results as result (result.file)}
             <div class="flex items-center gap-3 px-3 py-2">
@@ -445,7 +447,7 @@
         >
           <span class="flex items-center gap-2">
             <AlertCircle class="size-3.5" />
-            {errors.length} error{errors.length > 1 ? 's' : ''}
+            오류 {errors.length}건
           </span>
           {#if errorsExpanded}
             <ChevronUp class="size-3.5" />
@@ -470,7 +472,7 @@
     {#if showSummary && !running}
       <div class="rounded-lg border border-border bg-secondary/30 p-3 space-y-2">
         <p class="text-xs font-semibold text-foreground">
-          Classification Complete — {processedCount}/{totalCount} files processed
+          분류 완료 — {processedCount}/{totalCount}개 처리됨
         </p>
         <p class="text-xs text-muted-foreground">결과를 갤러리에서 확인하세요.</p>
       </div>

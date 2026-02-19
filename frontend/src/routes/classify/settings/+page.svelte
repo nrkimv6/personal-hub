@@ -1,3 +1,5 @@
+<svelte:head><title>설정 — Image Classifier</title></svelte:head>
+
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
@@ -134,13 +136,13 @@
 	const faissTypeOptions = ['Flat', 'IVF', 'HNSW'];
 </script>
 
-<div class="mx-auto max-w-6xl space-y-6 p-6">
+<div class="space-y-6">
 	<!-- 헤더 -->
 	<div class="flex items-center justify-between">
 		<div>
 			<div class="flex items-center gap-2">
-				<SettingsIcon class="size-6 text-primary" />
-				<h1 class="text-2xl font-bold tracking-tight">Settings</h1>
+				<SettingsIcon class="size-5 text-primary" />
+				<h1 class="text-2xl font-bold tracking-tight">설정</h1>
 			</div>
 			<p class="mt-1 text-sm text-muted-foreground">
 				이미지 분류기 동작 방식을 세부적으로 조정합니다.
@@ -152,7 +154,7 @@
 				class="flex items-center gap-1.5 rounded-lg border px-4 py-2 text-sm font-medium transition-colors hover:bg-muted"
 			>
 				<RotateCcw class="size-3.5" />
-				Reset to Defaults
+				기본값 초기화
 			</button>
 			<button
 				onclick={saveSettings}
@@ -160,7 +162,7 @@
 				class="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
 			>
 				<Save class="size-3.5" />
-				{saving ? 'Saving...' : 'Save Settings'}
+				{saving ? '저장 중...' : '설정 저장'}
 			</button>
 		</div>
 	</div>
@@ -169,7 +171,7 @@
 		<div class="flex items-center justify-center py-16 text-sm text-muted-foreground">
 			<div class="flex items-center gap-2">
 				<div class="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
-				Loading settings...
+				로딩 중...
 			</div>
 		</div>
 	{:else}
@@ -182,11 +184,11 @@
 					<div class="rounded-md bg-primary/10 p-1.5">
 						<FolderSearch class="size-4 text-primary" />
 					</div>
-					<h3 class="text-sm font-semibold">Scan Defaults</h3>
+					<h3 class="text-sm font-semibold">스캔 기본값</h3>
 				</div>
 				<div class="space-y-3">
 					<div class="flex flex-col gap-1">
-						<label class="text-xs font-medium" for="max-files">Max Files per Scan</label>
+						<label class="text-xs font-medium" for="max-files">스캔당 최대 파일 수</label>
 						<input
 							id="max-files"
 							type="number"
@@ -197,7 +199,7 @@
 						/>
 					</div>
 					<div class="flex flex-col gap-1">
-						<label class="text-xs font-medium" for="scan-depth">Scan Depth</label>
+						<label class="text-xs font-medium" for="scan-depth">스캔 깊이</label>
 						<input
 							id="scan-depth"
 							type="number"
@@ -209,7 +211,7 @@
 					</div>
 					<div class="flex items-center justify-between rounded-lg border bg-secondary/50 px-3 py-2.5">
 						<div>
-							<div class="text-xs font-medium">Recursive Scan</div>
+							<div class="text-xs font-medium">재귀 스캔</div>
 							<div class="text-[10px] text-muted-foreground">하위 폴더 포함하여 스캔</div>
 						</div>
 						<input
@@ -220,7 +222,7 @@
 					</div>
 					<div class="flex items-center justify-between rounded-lg border bg-secondary/50 px-3 py-2.5">
 						<div>
-							<div class="text-xs font-medium">Follow Symlinks</div>
+							<div class="text-xs font-medium">심볼릭 링크 탐색</div>
 							<div class="text-[10px] text-muted-foreground">심볼릭 링크 경로도 탐색</div>
 						</div>
 						<input
@@ -238,12 +240,12 @@
 					<div class="rounded-md bg-primary/10 p-1.5">
 						<Cpu class="size-4 text-primary" />
 					</div>
-					<h3 class="text-sm font-semibold">Feature Extraction</h3>
+					<h3 class="text-sm font-semibold">특징 추출</h3>
 				</div>
 				<div class="space-y-3">
 					<div class="flex items-center justify-between rounded-lg border bg-secondary/50 px-3 py-2.5">
 						<div>
-							<div class="text-xs font-medium">Use GPU</div>
+							<div class="text-xs font-medium">GPU 사용</div>
 							<div class="text-[10px] text-muted-foreground">CUDA 가속 활성화 (GPU 필요)</div>
 						</div>
 						<input
@@ -253,7 +255,7 @@
 						/>
 					</div>
 					<div class="flex flex-col gap-1.5">
-						<label class="text-xs font-medium">Hash Size</label>
+						<label class="text-xs font-medium">해시 크기</label>
 						<div class="flex overflow-hidden rounded-md border">
 							{#each hashSizeOptions as opt}
 								<button
@@ -264,7 +266,7 @@
 						</div>
 					</div>
 					<div class="flex flex-col gap-1">
-						<label class="text-xs font-medium" for="vector-dims">Vector Dims</label>
+						<label class="text-xs font-medium" for="vector-dims">벡터 차원</label>
 						<input
 							id="vector-dims"
 							type="number"
@@ -284,11 +286,11 @@
 					<div class="rounded-md bg-primary/10 p-1.5">
 						<Brain class="size-4 text-primary" />
 					</div>
-					<h3 class="text-sm font-semibold">AI Configuration</h3>
+					<h3 class="text-sm font-semibold">AI 설정</h3>
 				</div>
 				<div class="space-y-3">
 					<div class="flex flex-col gap-1.5">
-						<label class="text-xs font-medium">Engine</label>
+						<label class="text-xs font-medium">엔진</label>
 						<div class="flex overflow-hidden rounded-md border">
 							{#each aiEngineOptions as opt}
 								<button
@@ -299,7 +301,7 @@
 						</div>
 					</div>
 					<div class="flex flex-col gap-1">
-						<label class="text-xs font-medium" for="timeout">Timeout (seconds)</label>
+						<label class="text-xs font-medium" for="timeout">Timeout (초)</label>
 						<input
 							id="timeout"
 							type="number"
@@ -322,7 +324,7 @@
 						/>
 					</div>
 					<div class="flex flex-col gap-1">
-						<label class="text-xs font-medium" for="confidence">Confidence Threshold</label>
+						<label class="text-xs font-medium" for="confidence">신뢰도 임계값</label>
 						<input
 							id="confidence"
 							type="number"
@@ -342,12 +344,12 @@
 					<div class="rounded-md bg-primary/10 p-1.5">
 						<Clock class="size-4 text-primary" />
 					</div>
-					<h3 class="text-sm font-semibold">Clustering</h3>
+					<h3 class="text-sm font-semibold">클러스터링</h3>
 				</div>
 				<div class="space-y-3">
 					<div class="flex flex-col gap-1.5">
 						<div class="flex items-center justify-between">
-							<label class="text-xs font-medium" for="gap-slider">Cluster Gap</label>
+							<label class="text-xs font-medium" for="gap-slider">클러스터 간격</label>
 							<span class="text-xs font-bold text-primary">{settings.cluster_gap_minutes}min</span>
 						</div>
 						<input
@@ -366,7 +368,7 @@
 					</div>
 					<div class="flex items-center justify-between rounded-lg border bg-secondary/50 px-3 py-2.5">
 						<div>
-							<div class="text-xs font-medium">Auto-cluster on Scan</div>
+							<div class="text-xs font-medium">스캔 후 자동 클러스터링</div>
 							<div class="text-[10px] text-muted-foreground">스캔 완료 후 자동 클러스터링</div>
 						</div>
 						<input
@@ -384,12 +386,12 @@
 					<div class="rounded-md bg-primary/10 p-1.5">
 						<ImageIcon class="size-4 text-primary" />
 					</div>
-					<h3 class="text-sm font-semibold">Thumbnails</h3>
+					<h3 class="text-sm font-semibold">썸네일</h3>
 				</div>
 				<div class="space-y-3">
 					<div class="flex flex-col gap-1.5">
 						<div class="flex items-center justify-between">
-							<label class="text-xs font-medium" for="quality-slider">Quality</label>
+							<label class="text-xs font-medium" for="quality-slider">품질</label>
 							<span class="text-xs font-bold text-primary">{settings.thumbnail_quality}</span>
 						</div>
 						<input
@@ -404,7 +406,7 @@
 					</div>
 					<div class="flex flex-col gap-1.5">
 						<div class="flex items-center justify-between">
-							<label class="text-xs font-medium" for="size-slider">Max Size (px)</label>
+							<label class="text-xs font-medium" for="size-slider">최대 크기(px)</label>
 							<span class="text-xs font-bold text-primary">{thumbnailMaxSize}px</span>
 						</div>
 						<input
@@ -418,7 +420,7 @@
 						/>
 					</div>
 					<div class="flex flex-col gap-1.5">
-						<label class="text-xs font-medium">Format</label>
+						<label class="text-xs font-medium">형식</label>
 						<div class="flex overflow-hidden rounded-md border">
 							{#each thumbnailFormatOptions as opt}
 								<button
@@ -437,11 +439,11 @@
 					<div class="rounded-md bg-primary/10 p-1.5">
 						<Database class="size-4 text-primary" />
 					</div>
-					<h3 class="text-sm font-semibold">FAISS Index</h3>
+					<h3 class="text-sm font-semibold">FAISS 인덱스</h3>
 				</div>
 				<div class="space-y-3">
 					<div class="flex flex-col gap-1.5">
-						<label class="text-xs font-medium">Index Type</label>
+						<label class="text-xs font-medium">인덱스 타입</label>
 						<div class="flex overflow-hidden rounded-md border">
 							{#each faissTypeOptions as opt}
 								<button
@@ -477,7 +479,7 @@
 					</div>
 					<div class="flex items-center justify-between rounded-lg border bg-secondary/50 px-3 py-2.5">
 						<div>
-							<div class="text-xs font-medium">Memory Map</div>
+							<div class="text-xs font-medium">메모리 맵</div>
 							<div class="text-[10px] text-muted-foreground">mmap으로 인덱스 파일 로드 (대용량)</div>
 						</div>
 						<input

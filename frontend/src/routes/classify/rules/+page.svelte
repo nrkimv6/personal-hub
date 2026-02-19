@@ -1,3 +1,5 @@
+<svelte:head><title>분류 규칙 — Image Classifier</title></svelte:head>
+
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
@@ -67,13 +69,13 @@
 	const ruleTypeOptions = ['keyword', 'pattern', 'regex'];
 </script>
 
-<div class="mx-auto max-w-5xl space-y-6 p-6">
+<div class="space-y-6">
 	<!-- 헤더 -->
 	<div class="flex items-center justify-between">
 		<div>
 			<div class="flex items-center gap-2">
-				<ListChecks class="size-6 text-primary" />
-				<h1 class="text-2xl font-bold tracking-tight">Classification Rules</h1>
+				<ListChecks class="size-5 text-primary" />
+				<h1 class="text-2xl font-bold tracking-tight">분류 규칙</h1>
 			</div>
 			<p class="mt-1 text-sm text-muted-foreground">
 				학습된 규칙과 사용자 정의 규칙을 관리합니다.
@@ -84,7 +86,7 @@
 			class="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
 		>
 			<Plus class="size-4" />
-			Add Rule
+			규칙 추가
 		</button>
 	</div>
 
@@ -94,12 +96,12 @@
 			<div class="flex items-center justify-center py-16 text-sm text-muted-foreground">
 				<div class="flex items-center gap-2">
 					<div class="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
-					Loading rules...
+					로딩 중...
 				</div>
 			</div>
 		{:else if rules.length === 0}
 			<div class="py-16 text-center text-sm text-muted-foreground">
-				No rules found. Add your first classification rule.
+				규칙이 없습니다. 첫 번째 분류 규칙을 추가하세요.
 			</div>
 		{:else}
 			<div class="divide-y divide-border">
@@ -121,7 +123,7 @@
 							<input
 								type="text"
 								bind:value={editForm.rule_content}
-								placeholder="Pattern..."
+								placeholder="패턴..."
 								class="min-w-0 flex-1 rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
 							/>
 
@@ -131,7 +133,7 @@
 							<input
 								type="text"
 								bind:value={editForm.category_name}
-								placeholder="Category..."
+								placeholder="카테고리..."
 								class="w-40 rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
 							/>
 
@@ -141,7 +143,7 @@
 								class="flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
 							>
 								<Save class="size-3" />
-								Save
+								저장
 							</button>
 
 							<!-- Cancel -->
@@ -180,7 +182,7 @@
 
 							<!-- 히트 수 -->
 							<span class="ml-auto shrink-0 text-xs text-muted-foreground">
-								{rule.hit_count} hits
+								적중 {rule.hit_count}회
 							</span>
 
 							<!-- 활성 토글 -->

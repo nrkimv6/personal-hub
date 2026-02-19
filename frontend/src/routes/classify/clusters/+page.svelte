@@ -1,3 +1,5 @@
+<svelte:head><title>클러스터 — Image Classifier</title></svelte:head>
+
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
@@ -44,23 +46,25 @@
 	}
 </script>
 
-<div class="mx-auto max-w-5xl space-y-6 p-6">
+<div class="space-y-6">
 	<!-- 헤더 -->
-	<div>
-		<div class="flex items-center gap-2">
-			<Clock class="size-6 text-primary" />
-			<h1 class="text-2xl font-bold tracking-tight">Time Clusters</h1>
+	<div class="flex items-center justify-between">
+		<div>
+			<div class="flex items-center gap-2">
+				<Clock class="size-5 text-primary" />
+				<h1 class="text-2xl font-bold tracking-tight">클러스터</h1>
+			</div>
+			<p class="mt-1 text-sm text-muted-foreground">
+				1시간 이내 촬영된 사진을 시간대별로 묶어 검토합니다.
+			</p>
 		</div>
-		<p class="mt-1 text-sm text-muted-foreground">
-			1시간 이내 촬영된 사진을 시간대별로 묶어 검토합니다.
-		</p>
 	</div>
 
 	<!-- 컨트롤 카드 -->
 	<div class="rounded-xl border bg-card p-4">
 		<div class="flex flex-wrap items-end gap-4">
 			<div class="flex flex-col gap-1">
-				<label class="text-xs font-medium text-muted-foreground" for="date-from">Date From</label>
+				<label class="text-xs font-medium text-muted-foreground" for="date-from">시작 날짜</label>
 				<input
 					id="date-from"
 					type="date"
@@ -69,7 +73,7 @@
 				/>
 			</div>
 			<div class="flex flex-col gap-1">
-				<label class="text-xs font-medium text-muted-foreground" for="date-to">Date To</label>
+				<label class="text-xs font-medium text-muted-foreground" for="date-to">종료 날짜</label>
 				<input
 					id="date-to"
 					type="date"
@@ -79,7 +83,7 @@
 			</div>
 			<div class="flex flex-col gap-1">
 				<label class="text-xs font-medium text-muted-foreground" for="gap-range">
-					Cluster Gap — <span class="text-foreground font-semibold">{gapMinutes}min</span>
+					클러스터 간격 — <span class="text-foreground font-semibold">{gapMinutes}min</span>
 				</label>
 				<input
 					id="gap-range"
@@ -97,7 +101,7 @@
 				class="flex items-center gap-1.5 rounded-lg border bg-card px-4 py-2 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-50"
 			>
 				<RotateCcw class="size-3.5" />
-				Re-cluster
+				재클러스터링
 			</button>
 		</div>
 	</div>
@@ -107,12 +111,12 @@
 		<div class="flex items-center justify-center py-16 text-sm text-muted-foreground">
 			<div class="flex items-center gap-2">
 				<div class="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
-				Loading clusters...
+				로딩 중...
 			</div>
 		</div>
 	{:else if clusters.length === 0}
 		<div class="rounded-xl border bg-card py-16 text-center text-sm text-muted-foreground">
-			No clusters found. Try adjusting the gap or date range.
+			클러스터를 찾을 수 없습니다. 간격이나 날짜 범위를 조정해보세요.
 		</div>
 	{:else}
 		<!-- 클러스터 카드 리스트 -->
@@ -130,11 +134,11 @@
 						</div>
 						<div class="flex items-center gap-2">
 							<span class="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium">
-								{cluster.file_count} images
+								{cluster.file_count}장
 							</span>
 							{#if cluster.is_classified}
 								<span class="rounded-full bg-green-500/10 px-2.5 py-0.5 text-xs font-medium text-green-600">
-									Reviewed
+									검토 완료
 								</span>
 							{/if}
 						</div>
@@ -163,20 +167,20 @@
 							class="flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
 						>
 							<Tag class="size-3" />
-							Assign Category
+							카테고리 지정
 						</button>
 						<button
 							class="flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
 						>
 							<Eye class="size-3" />
-							View All
+							전체 보기
 						</button>
 						<button
 							disabled={cluster.is_classified}
 							class="flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
 						>
 							<CheckCircle2 class="size-3" />
-							Mark Reviewed
+							검토 완료
 						</button>
 					</div>
 				</div>
@@ -187,9 +191,9 @@
 	<!-- 선택된 클러스터 상세 -->
 	{#if selectedCluster}
 		<div class="rounded-xl border bg-card p-4">
-			<h2 class="mb-1 text-sm font-semibold">Cluster #{selectedCluster.id}</h2>
+			<h2 class="mb-1 text-sm font-semibold">클러스터 #{selectedCluster.id}</h2>
 			<p class="text-xs text-muted-foreground">
-				{selectedCluster.date} · {selectedCluster.start_time} – {selectedCluster.end_time} · {selectedCluster.file_count} images
+				{selectedCluster.date} · {selectedCluster.start_time} – {selectedCluster.end_time} · {selectedCluster.file_count}장
 			</p>
 		</div>
 	{/if}

@@ -1,3 +1,5 @@
+<svelte:head><title>태그 관리 — Image Classifier</title></svelte:head>
+
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fetchWithTimeout } from '$lib/api/client';
@@ -90,14 +92,14 @@
 </script>
 
 <div class="space-y-6">
-  <!-- Header -->
-  <div class="flex items-start gap-3">
-    <div class="flex size-10 items-center justify-center rounded-xl bg-primary/10">
-      <Tags class="size-5 text-primary" />
-    </div>
+  <!-- 헤더 -->
+  <div class="flex items-center justify-between">
     <div>
-      <h1 class="text-2xl font-bold text-foreground">Tag Management</h1>
-      <p class="text-sm text-muted-foreground">Organize and manage image tags across your library</p>
+      <div class="flex items-center gap-2">
+        <Tags class="size-5 text-primary" />
+        <h1 class="text-2xl font-bold tracking-tight">태그 관리</h1>
+      </div>
+      <p class="mt-1 text-sm text-muted-foreground">이미지 라이브러리의 태그를 구성하고 관리합니다</p>
     </div>
   </div>
 
@@ -106,13 +108,13 @@
     <!-- Panel A: Tag Directory -->
     <div class="flex flex-shrink-0 flex-col rounded-xl border border-border bg-card lg:w-80">
       <div class="border-b border-border p-3">
-        <h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tag Directory</h2>
+        <h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">태그 목록</h2>
         <!-- Search -->
         <div class="relative">
           <Search class="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Search tags..."
+            placeholder="태그 검색..."
             bind:value={searchQuery}
             class="h-8 w-full rounded-md border border-border bg-background pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
           />
@@ -124,7 +126,7 @@
         {#if loadingTags}
           <div class="flex items-center justify-center py-8 gap-2 text-xs text-muted-foreground">
             <Loader2 class="size-3.5 animate-spin" />
-            Loading tags...
+            로딩 중...
           </div>
         {:else if tagsError}
           <div class="flex flex-col items-center justify-center py-8 gap-2 text-xs text-muted-foreground">
@@ -133,7 +135,7 @@
           </div>
         {:else if filteredTags.length === 0}
           <div class="flex items-center justify-center py-8 text-xs text-muted-foreground">
-            {searchQuery ? 'No matching tags' : 'No tags yet'}
+            {searchQuery ? '검색 결과 없음' : '태그 없음'}
           </div>
         {:else}
           {#each filteredTags as tag (tag.id)}
@@ -169,7 +171,7 @@
           <div class="flex gap-2">
             <input
               type="text"
-              placeholder="Tag name..."
+              placeholder="태그 이름..."
               bind:value={newTagName}
               disabled={creatingTag}
               class="h-8 flex-1 rounded-md border border-border bg-background px-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
@@ -203,7 +205,7 @@
             class="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-xs font-medium text-muted-foreground hover:border-primary hover:text-primary transition-colors"
           >
             <Plus class="size-3.5" />
-            Create New Tag
+            새 태그 만들기
           </button>
         {/if}
       </div>
@@ -218,8 +220,8 @@
             <Tag class="size-6 text-muted-foreground" />
           </div>
           <div>
-            <p class="text-sm font-medium text-foreground">Select a tag to view details</p>
-            <p class="mt-1 text-xs text-muted-foreground">Choose a tag from the directory to see its information</p>
+            <p class="text-sm font-medium text-foreground">태그를 선택하세요</p>
+            <p class="mt-1 text-xs text-muted-foreground">목록에서 태그를 선택하면 정보를 확인할 수 있습니다</p>
           </div>
         </div>
       {:else}
@@ -229,7 +231,7 @@
             <Tag class="size-4 text-primary" />
             <h2 class="text-sm font-semibold text-foreground">{selectedTag.name}</h2>
             <span class="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-              {selectedTag.usage_count.toLocaleString()} uses
+              {selectedTag.usage_count.toLocaleString()}번 사용
             </span>
           </div>
           <button
@@ -242,7 +244,7 @@
             {:else}
               <Trash2 class="size-3" />
             {/if}
-            Delete Tag
+            태그 삭제
           </button>
         </div>
 
@@ -250,16 +252,16 @@
         <div class="p-4">
           <div class="rounded-lg border border-border bg-secondary/30 p-4 space-y-2 text-xs">
             <div class="flex justify-between">
-              <span class="text-muted-foreground">Tag ID</span>
+              <span class="text-muted-foreground">태그 ID</span>
               <span class="font-medium text-foreground">{selectedTag.id}</span>
             </div>
             <div class="flex justify-between">
-              <span class="text-muted-foreground">Usage Count</span>
+              <span class="text-muted-foreground">사용 횟수</span>
               <span class="font-medium text-foreground">{selectedTag.usage_count.toLocaleString()}</span>
             </div>
             {#if selectedTag.created_at}
               <div class="flex justify-between">
-                <span class="text-muted-foreground">Created</span>
+                <span class="text-muted-foreground">생성일</span>
                 <span class="font-medium text-foreground">{selectedTag.created_at.slice(0, 10)}</span>
               </div>
             {/if}

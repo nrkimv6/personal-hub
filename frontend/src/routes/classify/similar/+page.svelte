@@ -1,3 +1,5 @@
+<svelte:head><title>유사 이미지 — Image Classifier</title></svelte:head>
+
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
@@ -127,23 +129,25 @@
 	let totalResults = $derived(groups.reduce((sum, g) => sum + g.similar_count, 0));
 </script>
 
-<div class="mx-auto max-w-7xl space-y-6 p-6">
+<div class="space-y-6">
 	<!-- 헤더 -->
-	<div>
-		<div class="flex items-center gap-2">
-			<Search class="size-6 text-primary" />
-			<h1 class="text-2xl font-bold tracking-tight">Similar Images</h1>
+	<div class="flex items-center justify-between">
+		<div>
+			<div class="flex items-center gap-2">
+				<Search class="size-5 text-primary" />
+				<h1 class="text-2xl font-bold tracking-tight">유사 이미지</h1>
+			</div>
+			<p class="mt-1 text-sm text-muted-foreground">
+				이미 분류된 이미지와 유사한 미분류 이미지를 찾아 자동으로 분류 제안합니다.
+			</p>
 		</div>
-		<p class="mt-1 text-sm text-muted-foreground">
-			이미 분류된 이미지와 유사한 미분류 이미지를 찾아 자동으로 분류 제안합니다.
-		</p>
 	</div>
 
 	<!-- 상단 3열 카드 -->
 	<div class="grid gap-4 lg:grid-cols-3">
 		<!-- Reference Image 카드 -->
 		<div class="rounded-xl border bg-card p-4">
-			<h3 class="mb-3 text-sm font-semibold">Reference Image</h3>
+			<h3 class="mb-3 text-sm font-semibold">기준 이미지</h3>
 			<div class="relative aspect-video overflow-hidden rounded-lg bg-muted">
 				{#if referenceImageId !== null}
 					<img
@@ -154,13 +158,13 @@
 				{:else}
 					<div class="flex h-full flex-col items-center justify-center gap-2">
 						<ImageIcon class="size-8 text-muted-foreground/50" />
-						<span class="text-xs text-muted-foreground">No reference</span>
+						<span class="text-xs text-muted-foreground">선택 없음</span>
 					</div>
 				{/if}
 			</div>
 			{#if referenceImageId !== null}
 				<div class="mt-2 space-y-0.5">
-					<p class="text-xs font-medium">Image #{referenceImageId}</p>
+					<p class="text-xs font-medium">이미지 #{referenceImageId}</p>
 					<p class="text-[10px] text-muted-foreground">ID: {referenceImageId}</p>
 				</div>
 			{/if}
@@ -168,17 +172,17 @@
 				onclick={() => (referenceImageId = null)}
 				class="mt-3 w-full rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
 			>
-				Change Reference
+				기준 이미지 변경
 			</button>
 		</div>
 
 		<!-- Search Controls 카드 -->
 		<div class="rounded-xl border bg-card p-4 lg:col-span-2">
-			<h3 class="mb-4 text-sm font-semibold">Search Controls</h3>
+			<h3 class="mb-4 text-sm font-semibold">검색 설정</h3>
 			<div class="space-y-4">
 				<div>
 					<div class="mb-1.5 flex items-center justify-between">
-						<label class="text-xs font-medium" for="threshold-range">Similarity Threshold</label>
+						<label class="text-xs font-medium" for="threshold-range">유사도 기준</label>
 						<span class="text-sm font-bold {getThresholdColorClass(threshold)}">
 							{(threshold * 100).toFixed(0)}%
 						</span>
@@ -193,14 +197,14 @@
 						class="w-full accent-primary"
 					/>
 					<div class="mt-1 flex justify-between text-[10px] text-muted-foreground">
-						<span>70% (loose)</span>
-						<span>100% (exact)</span>
+						<span>70% (낮음)</span>
+						<span>100% (정확)</span>
 					</div>
 				</div>
 
 				<div class="flex items-end gap-3">
 					<div class="flex flex-col gap-1">
-						<label class="text-xs font-medium" for="match-count">Max Matches</label>
+						<label class="text-xs font-medium" for="match-count">최대 결과 수</label>
 						<input
 							id="match-count"
 							type="number"
@@ -217,13 +221,13 @@
 						class="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
 					>
 						<RefreshCw class="size-3.5 {loading ? 'animate-spin' : ''}" />
-						{loading ? 'Searching...' : 'Search'}
+						{loading ? '검색 중...' : '검색'}
 					</button>
 				</div>
 
 				{#if !loading}
 					<p class="text-xs text-muted-foreground">
-						{totalResults} similar image{totalResults !== 1 ? 's' : ''} found across {groups.length} group{groups.length !== 1 ? 's' : ''}
+						{groups.length}개 그룹에서 {totalResults}개 유사 이미지 발견
 					</p>
 				{/if}
 			</div>
@@ -242,12 +246,12 @@
 		<div class="flex items-center justify-center py-16 text-sm text-muted-foreground">
 			<div class="flex items-center gap-2">
 				<div class="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
-				Searching similar images...
+				유사 이미지 검색 중...
 			</div>
 		</div>
 	{:else if groups.length === 0}
 		<div class="rounded-xl border bg-card py-16 text-center text-sm text-muted-foreground">
-			No similar image suggestions found. Try lowering the threshold.
+			유사 이미지를 찾을 수 없습니다. 임계값을 낮춰보세요.
 		</div>
 	{:else}
 		<!-- 그룹별 결과 -->
@@ -261,9 +265,9 @@
 							<span class="font-semibold text-sm">{group.category_name}</span>
 						</div>
 						<div class="flex items-center gap-2 text-xs text-muted-foreground">
-							<span>{group.similar_count} similar</span>
+							<span>유사 {group.similar_count}개</span>
 							<span>·</span>
-							<span>{group.file_count} classified</span>
+							<span>분류 {group.file_count}개</span>
 						</div>
 						<div class="ml-auto flex items-center gap-2">
 							<button
@@ -271,8 +275,8 @@
 								class="rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
 							>
 								{group.similar_files.every((f) => selectedFiles.has(f.file_id))
-									? 'Deselect All'
-									: 'Select All'}
+									? '전체 해제'
+									: '전체 선택'}
 							</button>
 							<button
 								onclick={() => applyClassification(group.category)}
@@ -280,7 +284,7 @@
 								class="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
 							>
 								<Tag class="size-3" />
-								Apply to {group.category_name}
+								{group.category_name}에 적용
 							</button>
 						</div>
 					</div>
@@ -341,19 +345,19 @@
 {#if selectedFiles.size > 0}
 	<div class="fixed bottom-10 left-1/2 z-50 -translate-x-1/2">
 		<div class="flex items-center gap-4 rounded-full border bg-card px-5 py-2.5 shadow-xl">
-			<span class="text-sm font-semibold">{selectedFiles.size} selected</span>
+			<span class="text-sm font-semibold">{selectedFiles.size}개 선택됨</span>
 			<button
 				onclick={() => applyClassification('')}
 				class="flex items-center gap-1.5 rounded-full bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
 			>
 				<Tag class="size-3" />
-				Apply
+				적용
 			</button>
 			<button
 				onclick={() => { selectedFiles.clear(); selectedFiles = selectedFiles; }}
 				class="rounded-full border px-4 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
 			>
-				Deselect
+				전체 해제
 			</button>
 		</div>
 	</div>
