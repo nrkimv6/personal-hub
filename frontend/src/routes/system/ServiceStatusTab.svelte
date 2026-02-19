@@ -176,7 +176,11 @@
       error = null;
       updateServiceCounts();
     } catch (e) {
-      error = e instanceof Error ? e.message : '데이터 로드 실패';
+      if (!status) {
+        error = e instanceof Error ? e.message : '데이터 로드 실패';
+      } else {
+        console.warn('[ServiceStatus] 폴링 실패 (이전 데이터 유지):', e);
+      }
     } finally {
       loading = false;
     }
@@ -190,7 +194,11 @@
       error = null;
       updateServiceCounts();
     } catch (e) {
-      error = e instanceof Error ? e.message : '새로고침 실패';
+      if (!status) {
+        error = e instanceof Error ? e.message : '새로고침 실패';
+      } else {
+        console.warn('[ServiceStatus] 새로고침 실패 (이전 데이터 유지):', e);
+      }
     } finally {
       refreshing = false;
     }
