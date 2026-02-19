@@ -170,3 +170,18 @@ def load_settings_from_file():
 
 # 모듈 로드 시 저장된 설정 복원
 load_settings_from_file()
+
+
+# 설정값 유효성 검증
+def validate_settings():
+    """비정상 설정값 교정"""
+    if settings.AI_MODE not in ("cli", "api"):
+        settings.AI_MODE = "cli"
+    if settings.CLI_MAX_WORKERS <= 0:
+        settings.CLI_MAX_WORKERS = 2
+    if settings.FAISS_SIMILARITY_THRESHOLD > 0.99 or settings.FAISS_SIMILARITY_THRESHOLD < 0.1:
+        settings.FAISS_SIMILARITY_THRESHOLD = 0.85
+    if settings.PHASH_DUPLICATE_THRESHOLD > 50:
+        settings.PHASH_DUPLICATE_THRESHOLD = 10
+
+validate_settings()

@@ -46,7 +46,7 @@
 	// === 추가 상태 ===
 	let scanning = $state(false);
 	let progress = $state(0);
-	let scanRoots = $state<string[]>(['D:\\Photos', 'D:\\Downloads']);
+	let scanRoots = $state<string[]>([]);
 	let extensions = $state(['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'raw']);
 	let scanDone = $state(false);
 	let newFolderInput = $state('');
@@ -62,6 +62,7 @@
 
 	// === 마운트 ===
 	onMount(async () => {
+		await loadSettings();
 		await loadCategories();
 		await loadFolders();
 	});
@@ -247,19 +248,94 @@
 
 	function removeScanRoot(path: string) {
 		scanRoots = scanRoots.filter((r) => r !== path);
+		saveScanRoots();
 	}
 
 	function addScanRoot() {
 		const val = newFolderInput.trim();
 		if (val && !scanRoots.includes(val)) {
 			scanRoots = [...scanRoots, val];
+			saveScanRoots();
 		}
 		newFolderInput = '';
+	}
+
+	async function loadSettings() {
+		try {
+			const res = await fetchWithTimeout('/api/ic/settings');
+			if (res.ok) {
+				const data = await res.json();
+				scanRoots = data.scan_root_folders || [];
+			}
+		} catch (e) {
+			console.error('설정 로드 실패:', e);
+		}
+	}
+
+	async function saveScanRoots() {
+		try {
+			await fetchWithTimeout('/api/ic/settings', {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ scan_root_folders: scanRoots })
+			});
+		} catch (e) {
+			console.error('스캔 루트 저장 실패:', e);
+		}
+	}
+
+	async function startScan() {
+		if (scanRoots.length === 0) {
+			alert('스캔 대상 폴더를 추가하세요.');
+			return;
+		}
+		scanning = true;
+		scanDone = false;
+		progress = 0;
+
+		try {
+			const res = await fetchWithTimeout('/api/ic/scan/start', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ root_folders: scanRoots })
+			});
+
+			if (!res.ok) {
+				const err = await res.json();
+				throw new Error(err.detail || '스캔 시작 실패');
+			}
+
+			// 폴링으로 진행률 확인
+			const pollInterval = setInterval(async () => {
+				try {
+					const statusRes = await fetchWithTimeout('/api/ic/scan/status');
+					const status = await statusRes.json();
+
+					if (status.total_files > 0) {
+						progress = Math.round((status.scanned_files / status.total_files) * 100);
+					}
+
+					if (!status.is_running) {
+						clearInterval(pollInterval);
+						progress = 100;
+						scanDone = true;
+						scanning = false;
+						await loadFolders();
+					}
+				} catch {
+					clearInterval(pollInterval);
+					scanning = false;
+				}
+			}, 1000);
+		} catch (e: any) {
+			alert(e.message);
+			scanning = false;
+		}
 	}
 </script>
 
 <svelte:head>
-	<title>스캐너 — Image Classifier</title>
+	<title>스캐너 — 이미지 분류기</title>
 </svelte:head>
 
 <div class="space-y-6">
@@ -403,7 +479,7 @@
 					</button>
 				{:else}
 					<button
-						onclick={classifyAllFolders}
+						onclick={startScan}
 						disabled={classifyLoading}
 						class="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
 					>
@@ -418,6 +494,14 @@
 				>
 					<RefreshCw class="h-4 w-4 {loading ? 'animate-spin' : ''}" />
 					새로고침
+				</button>
+				<button
+					onclick={classifyAllFolders}
+					disabled={classifyLoading || totalCount === 0}
+					class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50 transition-colors"
+				>
+					<Brain class="h-4 w-4" />
+					폴더 분류
 				</button>
 			</div>
 		</div>
