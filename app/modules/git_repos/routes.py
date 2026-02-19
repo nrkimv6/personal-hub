@@ -137,6 +137,19 @@ async def stage_files(repo_id: int, body: schemas.StageRequest, db: Session = De
     return schemas.OperationResult(success=ok, stdout=stdout, stderr=stderr)
 
 
+@router.post("/{repo_id}/unstage", response_model=schemas.OperationResult)
+async def unstage_files(repo_id: int, body: schemas.StageRequest, db: Session = Depends(get_db)):
+    """파일 언스테이징."""
+    from app.modules.git_repos.services.git_command import GitCommandService
+    svc = GitRepoService()
+    repo = svc.get_repo(db, repo_id)
+    if not repo:
+        raise HTTPException(status_code=404, detail="레포지토리를 찾을 수 없습니다.")
+    git = GitCommandService()
+    ok, stdout, stderr = await git.unstage_files(repo.path, body.files)
+    return schemas.OperationResult(success=ok, stdout=stdout, stderr=stderr)
+
+
 @router.post("/{repo_id}/commit", response_model=schemas.OperationResult)
 async def commit(repo_id: int, body: schemas.CommitRequest, db: Session = Depends(get_db)):
     """커밋 실행."""
