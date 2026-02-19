@@ -291,7 +291,7 @@
 
 				<!-- Expanded panel content -->
 				{#if panelOpen}
-					<div class="px-4 pb-4 flex flex-col gap-4 bg-gray-50">
+					<div class="px-4 pb-4 flex flex-col gap-4 bg-gray-50 overflow-y-auto max-h-[calc(100vh-8rem)] sm:max-h-none sm:overflow-visible">
 						<!-- RunControl - full width card -->
 						<div class="bg-white border rounded-lg p-4">
 							<RunControl status={runStatus} {plans} onStatusChange={handleRunStatusChange} />
@@ -311,7 +311,7 @@
 							</div>
 
 							<!-- Plan Files -->
-							<div class="bg-white border rounded-lg p-4 max-h-[340px] overflow-hidden flex flex-col">
+							<div class="bg-white border rounded-lg p-4 max-h-[50vh] sm:max-h-[340px] overflow-hidden flex flex-col">
 								<PlanList {plans} onPlansChange={loadData} />
 							</div>
 						</div>

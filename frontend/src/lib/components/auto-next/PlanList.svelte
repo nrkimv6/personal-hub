@@ -153,7 +153,7 @@
 	let displayPlans = $derived(showIgnored ? ignoredPlans : (plans ?? []));
 </script>
 
-<div class="flex flex-col gap-3 h-full">
+<div class="flex flex-col gap-3 min-h-0 flex-1">
 	<!-- Header -->
 	<div class="flex items-center justify-between">
 		<span class="text-xs text-gray-500 font-medium uppercase tracking-wider">Plan Files</span>
