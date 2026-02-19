@@ -1,4 +1,4 @@
-<svelte:head><title>설정 — Image Classifier</title></svelte:head>
+<svelte:head><title>설정 — 이미지 분류기</title></svelte:head>
 
 <script lang="ts">
 	import { onMount } from 'svelte';

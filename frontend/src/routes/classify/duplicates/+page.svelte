@@ -141,7 +141,7 @@
 </script>
 
 <svelte:head>
-	<title>중복 이미지 — Image Classifier</title>
+	<title>중복 이미지 — 이미지 분류기</title>
 </svelte:head>
 
 <!-- 헤더 -->

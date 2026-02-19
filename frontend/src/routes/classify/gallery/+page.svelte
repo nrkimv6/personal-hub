@@ -158,7 +158,7 @@
 </script>
 
 <svelte:head>
-  <title>갤러리 — Image Classifier</title>
+  <title>갤러리 — 이미지 분류기</title>
 </svelte:head>
 
 <div class="space-y-4">
@@ -248,17 +248,17 @@
   {#if loadingImages}
     <div class="flex items-center justify-center py-16 text-sm text-muted-foreground gap-2">
       <Loader2 class="size-4 animate-spin" />
-      Loading images...
+      이미지 로딩 중...
     </div>
   {:else if loadError}
     <div class="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-center">
-      <p class="text-sm font-medium text-destructive mb-2">Failed to load images</p>
+      <p class="text-sm font-medium text-destructive mb-2">이미지 로드 실패</p>
       <p class="text-xs text-muted-foreground mb-3">{loadError}</p>
       <button
         onclick={() => loadImages(true)}
         class="inline-flex items-center gap-1.5 rounded-md bg-destructive px-3 py-1.5 text-xs font-medium text-destructive-foreground hover:bg-destructive/90"
       >
-        Retry
+        재시도
       </button>
     </div>
   {:else if filteredImages.length === 0}
@@ -333,9 +333,9 @@
         >
           {#if loadingMore}
             <Loader2 class="size-4 animate-spin" />
-            Loading...
+            로딩 중...
           {:else}
-            Load More
+            더 보기
           {/if}
         </button>
       </div>

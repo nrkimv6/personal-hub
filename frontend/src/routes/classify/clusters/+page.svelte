@@ -178,7 +178,7 @@
 							전체 보기
 						</button>
 						<button
-							disabled={cluster.is_classified}
+							disabled={!!cluster.category_path}
 							class="flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
 						>
 							<CheckCircle2 class="size-3" />

@@ -1,4 +1,4 @@
-<svelte:head><title>분류 규칙 — Image Classifier</title></svelte:head>
+<svelte:head><title>분류 규칙 — 이미지 분류기</title></svelte:head>
 
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -20,6 +20,8 @@
 	let loading = $state(false);
 	let editingId = $state<number | null>(null);
 	let editForm = $state<Partial<Rule>>({});
+	let showAddForm = $state(false);
+	let newRule = $state({ rule_type: 'keyword', rule_content: '', category_name: '', priority: 0 });
 
 	onMount(() => {
 		loadRules();
@@ -45,6 +47,43 @@
 			await loadRules();
 		} catch (err) {
 			alert('규칙 토글 실패');
+		}
+	}
+
+	async function saveRule(id: number) {
+		try {
+			await fetchWithTimeout(`/api/ic/rules/${id}`, {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					rule_type: editForm.rule_type,
+					rule_content: editForm.rule_content,
+					category_name: editForm.category_name
+				})
+			});
+			editingId = null;
+			await loadRules();
+		} catch (err) {
+			alert('규칙 저장 실패');
+		}
+	}
+
+	async function addRule() {
+		if (!newRule.rule_content || !newRule.category_name) {
+			alert('패턴과 카테고리를 입력하세요.');
+			return;
+		}
+		try {
+			await fetchWithTimeout('/api/ic/rules', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(newRule)
+			});
+			showAddForm = false;
+			newRule = { rule_type: 'keyword', rule_content: '', category_name: '', priority: 0 };
+			await loadRules();
+		} catch (err) {
+			alert('규칙 추가 실패');
 		}
 	}
 
@@ -82,13 +121,56 @@
 			</p>
 		</div>
 		<button
-			onclick={loadRules}
+			onclick={() => (showAddForm = !showAddForm)}
 			class="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
 		>
 			<Plus class="size-4" />
 			규칙 추가
 		</button>
 	</div>
+
+	<!-- 규칙 추가 폼 -->
+	{#if showAddForm}
+		<div class="rounded-xl border bg-card p-4">
+			<h3 class="text-sm font-semibold mb-3">새 규칙 추가</h3>
+			<div class="flex items-center gap-2">
+				<div class="flex overflow-hidden rounded-md border">
+					{#each ruleTypeOptions as opt}
+						<button
+							class="px-2.5 py-1 text-xs font-medium transition-colors {newRule.rule_type === opt ? 'bg-primary text-primary-foreground' : 'bg-card text-muted-foreground hover:bg-muted'}"
+							onclick={() => (newRule.rule_type = opt)}
+						>{opt}</button>
+					{/each}
+				</div>
+				<input
+					type="text"
+					bind:value={newRule.rule_content}
+					placeholder="패턴..."
+					class="min-w-0 flex-1 rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+				/>
+				<ArrowRight class="size-3.5 shrink-0 text-muted-foreground" />
+				<input
+					type="text"
+					bind:value={newRule.category_name}
+					placeholder="카테고리..."
+					class="w-40 rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+				/>
+				<button
+					onclick={addRule}
+					class="flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
+				>
+					<Plus class="size-3" />
+					추가
+				</button>
+				<button
+					onclick={() => (showAddForm = false)}
+					class="flex items-center gap-1 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
+				>
+					<X class="size-3" />
+				</button>
+			</div>
+		</div>
+	{/if}
 
 	<!-- 규칙 리스트 카드 -->
 	<div class="rounded-xl border bg-card">
@@ -139,7 +221,7 @@
 
 							<!-- Save -->
 							<button
-								onclick={() => (editingId = null)}
+								onclick={() => saveRule(rule.id)}
 								class="flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
 							>
 								<Save class="size-3" />

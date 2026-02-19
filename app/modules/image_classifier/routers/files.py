@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -129,3 +130,69 @@ async def get_files(
         "limit": limit,
         "total": len(files),
     }
+
+
+class ApproveRequest(BaseModel):
+    """파일 승인 요청"""
+    file_ids: list[int]
+
+
+class RollbackResponse(BaseModel):
+    """롤백 응답"""
+    status: str
+    file_id: int
+
+
+@router.post("/approve")
+async def approve_files(
+    request: ApproveRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    선택된 파일들을 승인 (status → user_classified)
+    """
+    if not request.file_ids:
+        raise HTTPException(status_code=400, detail="파일 ID가 필요합니다.")
+
+    db.execute(
+        text("UPDATE file_classifications SET status = 'user_classified' WHERE id IN :ids"),
+        {"ids": tuple(request.file_ids)}
+    )
+    db.commit()
+
+    return {"status": "ok", "approved_count": len(request.file_ids)}
+
+
+@router.post("/{file_id}/rollback")
+async def rollback_file(
+    file_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    파일을 이전 상태로 롤백 (moved → ai_classified)
+    """
+    result = db.execute(
+        text("SELECT status FROM file_classifications WHERE id = :id"),
+        {"id": file_id}
+    ).fetchone()
+
+    if not result:
+        raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
+
+    # moved → ai_classified, user_classified → ai_classified, ai_classified → pending
+    current = result[0]
+    rollback_map = {
+        "moved": "ai_classified",
+        "user_classified": "ai_classified",
+        "ai_classified": "folder_mapped",
+        "folder_mapped": "pending",
+    }
+    new_status = rollback_map.get(current, "pending")
+
+    db.execute(
+        text("UPDATE file_classifications SET status = :status WHERE id = :id"),
+        {"status": new_status, "id": file_id}
+    )
+    db.commit()
+
+    return {"status": "ok", "file_id": file_id, "new_status": new_status}

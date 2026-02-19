@@ -293,7 +293,7 @@
 </script>
 
 <svelte:head>
-	<title>카테고리 — Image Classifier</title>
+	<title>카테고리 — 이미지 분류기</title>
 </svelte:head>
 
 <!-- 헤더 -->
@@ -370,7 +370,7 @@
 									<span
 										class="text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 {importanceClass(cat.importance)}"
 									>
-										{cat.importance}
+										{cat.importance === 'high' ? '높음' : cat.importance === 'low' ? '낮음' : '보통'}
 									</span>
 								</button>
 							</div>
@@ -455,7 +455,7 @@
 							<span
 								class="text-xs px-2 py-0.5 rounded-full {importanceClass(selected.importance)}"
 							>
-								{selected.importance}
+								{selected.importance === 'high' ? '높음' : selected.importance === 'low' ? '낮음' : '보통'}
 							</span>
 						</div>
 

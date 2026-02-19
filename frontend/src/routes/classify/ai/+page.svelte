@@ -1,4 +1,4 @@
-<svelte:head><title>AI 분류 — Image Classifier</title></svelte:head>
+<svelte:head><title>AI 분류 — 이미지 분류기</title></svelte:head>
 
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
@@ -60,7 +60,7 @@
       const res = await fetchWithTimeout('/api/ic/classify/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, batch_size: workers }),
+        body: JSON.stringify({ model, batch_size: workers, timeout, skip_classified: skipClassified, target: targetImages }),
       });
 
       if (!res.ok) {
@@ -240,7 +240,7 @@
 
       <!-- CLI Path -->
       <div class="space-y-1.5">
-        <label for="cli-path" class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">CLI Path</label>
+        <label for="cli-path" class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">CLI 경로</label>
         <input
           id="cli-path"
           type="text"
@@ -267,7 +267,7 @@
       <!-- Workers & Timeout -->
       <div class="grid grid-cols-2 gap-3">
         <div class="space-y-1.5">
-          <label for="workers-count" class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Workers</label>
+          <label for="workers-count" class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">워커 수</label>
           <input
             id="workers-count"
             type="number"
@@ -279,7 +279,7 @@
           />
         </div>
         <div class="space-y-1.5">
-          <label for="timeout-sec" class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Timeout (s)</label>
+          <label for="timeout-sec" class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">타임아웃 (초)</label>
           <input
             id="timeout-sec"
             type="number"

@@ -84,11 +84,11 @@
 
 	// pipelineStages: 기본 idle, 추후 stats/tasks 기반으로 파생
 	let pipelineStages = $state([
-		{ id: 'scan', label: 'Scan', status: 'idle' },
-		{ id: 'extract', label: 'Extract', status: 'idle' },
-		{ id: 'duplicates', label: 'Duplicates', status: 'idle' },
-		{ id: 'classify', label: 'AI Classify', status: 'idle' },
-		{ id: 'review', label: 'Review', status: 'idle' }
+		{ id: 'scan', label: '스캔', status: 'idle' },
+		{ id: 'extract', label: '추출', status: 'idle' },
+		{ id: 'duplicates', label: '중복 검출', status: 'idle' },
+		{ id: 'classify', label: 'AI 분류', status: 'idle' },
+		{ id: 'review', label: '검토', status: 'idle' }
 	]);
 
 	let recentActivity = $state<{ id: number; time: string; message: string; type: string }[]>([]);
@@ -122,7 +122,7 @@
 </script>
 
 <svelte:head>
-	<title>대시보드 — Image Classifier</title>
+	<title>대시보드 — 이미지 분류기</title>
 </svelte:head>
 
 {#snippet miniSparkline(data: number[])}
@@ -202,7 +202,7 @@
 				{/if}
 				<div class="text-xs text-muted-foreground mt-1">전체 이미지</div>
 				<div class="flex items-center justify-between mt-3">
-					<span class="text-xs text-muted-foreground">이번 달 +2.4k</span>
+					<span class="text-xs text-muted-foreground">&nbsp;</span>
 					{@render miniSparkline([])}
 				</div>
 			</div>
@@ -248,7 +248,7 @@
 				{/if}
 				<div class="text-xs text-muted-foreground mt-1">중복</div>
 				<div class="flex items-center justify-between mt-3">
-					<span class="text-xs text-muted-foreground">검토 대기 156건</span>
+					<span class="text-xs text-muted-foreground">&nbsp;</span>
 					{@render miniSparkline([])}
 				</div>
 			</div>
@@ -268,7 +268,7 @@
 				{/if}
 				<div class="text-xs text-muted-foreground mt-1">클러스터</div>
 				<div class="flex items-center justify-between mt-3">
-					<span class="text-xs text-muted-foreground">오늘 +5</span>
+					<span class="text-xs text-muted-foreground">&nbsp;</span>
 					{@render miniSparkline([])}
 				</div>
 			</div>

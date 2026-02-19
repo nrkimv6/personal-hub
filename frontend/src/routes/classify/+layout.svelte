@@ -14,7 +14,8 @@
 		ListChecks,
 		Settings,
 		Menu,
-		X
+		X,
+		CheckCircle2
 	} from 'lucide-svelte';
 
 	const modules = [
@@ -28,7 +29,9 @@
 		{ id: 'similar', label: '유사도', path: '/classify/similar', icon: Search },
 		{ id: 'tags', label: '태그', path: '/classify/tags', icon: Tags },
 		{ id: 'rules', label: '규칙', path: '/classify/rules', icon: ListChecks },
-		{ id: 'settings', label: '설정', path: '/classify/settings', icon: Settings }
+		{ id: 'settings', label: '설정', path: '/classify/settings', icon: Settings },
+		{ id: 'history', label: '이력', path: '/classify/history', icon: Clock },
+		{ id: 'review', label: '검토', path: '/classify/review', icon: CheckCircle2 }
 	];
 
 	let mobileMenuOpen = $state(false);
@@ -46,7 +49,7 @@
 				<div class="flex size-8 items-center justify-center rounded-lg bg-primary">
 					<Brain class="size-4 text-primary-foreground" />
 				</div>
-				<h1 class="text-base font-semibold text-foreground">Image Classifier</h1>
+				<h1 class="text-base font-semibold text-foreground">이미지 분류기</h1>
 			</div>
 
 			<!-- Desktop nav -->
