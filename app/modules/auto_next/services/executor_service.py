@@ -182,12 +182,38 @@ class ExecutorService:
         except Exception:
             pass
 
+    def _send_force_stop(self):
+        """listener에 force-stop 명령 전송 (_current_process 변수까지 정리)"""
+        try:
+            command = {
+                "action": "force-stop",
+                "source": "monitor-page-api-reset",
+                "timestamp": datetime.now().isoformat(),
+            }
+            self.redis_client.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
+            # 결과 대기 (짧은 타임아웃)
+            result = self.redis_client.brpop(RESULTS_KEY, timeout=5)
+            if result:
+                _, raw = result
+                data = json.loads(raw)
+                logger.info(f"[auto-next] force-stop 결과: {data.get('message', '')}")
+                return True
+            else:
+                logger.warning("[auto-next] force-stop 타임아웃 (listener 무응답)")
+                return False
+        except Exception as e:
+            logger.warning(f"[auto-next] force-stop 전송 실패: {e}")
+            return False
+
     def reset_running_state(self, full_reset: bool = False) -> Dict:
         """RUNNING 상태 강제 초기화 - Redis + auto-next DB
 
         full_reset=True이면 모든 작업을 삭제하여 완전 초기화
         """
         try:
+            # 0. listener에 force-stop 전송 (메모리 내 _current_process 정리)
+            self._send_force_stop()
+
             # 1. Redis 상태 정리
             self._force_cleanup_state()
             logger.info("[auto-next] Redis 상태 정리 완료")

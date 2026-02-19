@@ -67,6 +67,48 @@ _current_log_file: Optional[Path] = None
 _stream_thread: Optional[threading.Thread] = None
 
 
+def _is_pid_alive(pid: int) -> bool:
+    """PID가 실제로 살아있는지 OS 레벨 확인 (Windows)"""
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        STILL_ACTIVE = 259
+        exit_code = ctypes.c_ulong()
+        kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+        kernel32.CloseHandle(handle)
+        return exit_code.value == STILL_ACTIVE
+    except Exception:
+        return False
+
+
+def _cleanup_process_state(redis_client: redis.Redis):
+    """전역 프로세스 변수 + Redis 상태 정리"""
+    global _current_process, _current_log_file, _stream_thread
+
+    _current_process = None
+    _current_log_file = None
+
+    if _stream_thread and _stream_thread.is_alive():
+        _stream_thread.join(timeout=3)
+    _stream_thread = None
+
+    try:
+        redis_client.set(STATE_KEY + ":status", "stopped")
+        redis_client.delete(
+            STATE_KEY + ":pid",
+            STATE_KEY + ":plan_file",
+            STATE_KEY + ":start_time",
+            STATE_KEY + ":log_file_path",
+            STATE_KEY + ":stream_log_path",
+        )
+    except Exception:
+        pass
+
+
 def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Redis):
     """프로세스 stdout을 라인별로 읽어 파일 기록 + Redis publish 동시 수행"""
     try:
@@ -88,7 +130,14 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
             log_handle.close()
         except Exception:
             pass
-        logger.info("Output streaming thread finished")
+
+        # 프로세스 종료 대기 + 전역 상태 정리
+        try:
+            process.wait(timeout=10)
+        except Exception:
+            pass
+        logger.info(f"Output streaming thread finished (exit code: {process.returncode})")
+        _cleanup_process_state(redis_client)
 
 
 def start_auto_next(command: Dict, redis_client: redis.Redis) -> Dict:
@@ -103,12 +152,21 @@ def start_auto_next(command: Dict, redis_client: redis.Redis) -> Dict:
     """
     global _current_process, _current_log_file
 
-    # 이미 실행 중이면 에러
+    # 이미 실행 중이면 에러 (stale 프로세스 자동 정리 포함)
     if _current_process and _current_process.poll() is None:
-        return {
-            "success": False,
-            "message": f"Already running (PID: {_current_process.pid})"
-        }
+        if not _is_pid_alive(_current_process.pid):
+            # OS 레벨에서 죽은 프로세스 → 자동 정리
+            logger.warning(f"Stale process detected (PID: {_current_process.pid}), cleaning up")
+            _cleanup_process_state(redis_client)
+        else:
+            return {
+                "success": False,
+                "message": f"Already running (PID: {_current_process.pid})"
+            }
+    elif _current_process and _current_process.poll() is not None:
+        # 종료되었지만 정리 안 된 경우
+        logger.info(f"Previous process ended (exit code: {_current_process.returncode}), cleaning up")
+        _cleanup_process_state(redis_client)
 
     # 명령어 구성
     plan_file = command.get("plan_file")
@@ -300,6 +358,30 @@ def get_status(redis_client: redis.Redis) -> Dict:
         }
 
 
+def force_stop_auto_next(redis_client: redis.Redis) -> Dict:
+    """강제 종료 - kill 후 전역 상태 초기화 (리셋용)
+
+    Returns:
+        dict: {success: bool, message: str}
+    """
+    global _current_process, _current_log_file, _stream_thread
+
+    pid = _current_process.pid if _current_process else None
+
+    if _current_process:
+        try:
+            _current_process.kill()
+            _current_process.wait(timeout=5)
+        except Exception:
+            pass
+
+    _cleanup_process_state(redis_client)
+
+    msg = f"Force stopped (PID: {pid})" if pid else "Force cleaned (no process)"
+    logger.info(msg)
+    return {"success": True, "message": msg}
+
+
 def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
     """명령 실행
 
@@ -316,6 +398,8 @@ def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
         return start_auto_next(command, redis_client)
     elif action == "stop":
         return stop_auto_next(redis_client)
+    elif action == "force-stop":
+        return force_stop_auto_next(redis_client)
     elif action == "status":
         return get_status(redis_client)
     else:
