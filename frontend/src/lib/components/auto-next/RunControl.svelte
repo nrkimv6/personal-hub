@@ -20,6 +20,7 @@
 	let actionLoading = $state(false);
 	let actionError = $state<string | null>(null);
 	let syncMessage = $state<string | null>(null);
+	let forceStopNeeded = $state(false);
 
 	async function handleStart() {
 		if (mode === 'single' && !selectedPlan) {
@@ -28,6 +29,7 @@
 		}
 		actionLoading = true;
 		actionError = null;
+		forceStopNeeded = false;
 		try {
 			await autoNextRunnerApi.start({
 				plan_file: mode === 'single' ? selectedPlan : null,
@@ -40,11 +42,30 @@
 			onStatusChange();
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : '시작 실패';
-			if (msg.includes('Redis') || msg.includes('listener') || msg.includes('503') || msg.includes('504')) {
+			if (msg.includes('Already running')) {
+				// 실제 실행 중 → 상태 즉시 새로고침 (중지 버튼이 자동으로 표시됨)
+				onStatusChange();
+				actionError = msg;
+				forceStopNeeded = true;
+			} else if (msg.includes('Redis') || msg.includes('listener') || msg.includes('503') || msg.includes('504')) {
 				actionError = `${msg} — Redis와 auto-next listener가 실행 중인지 확인하세요.`;
 			} else {
 				actionError = msg;
 			}
+		} finally {
+			actionLoading = false;
+		}
+	}
+
+	async function handleForceStop() {
+		actionLoading = true;
+		actionError = null;
+		forceStopNeeded = false;
+		try {
+			await autoNextRunnerApi.resetState(false);
+			onStatusChange();
+		} catch (e) {
+			actionError = e instanceof Error ? e.message : '강제 중지 실패';
 		} finally {
 			actionLoading = false;
 		}
@@ -107,7 +128,18 @@
 
 <div class="flex flex-col gap-4">
 	{#if actionError}
-		<div class="text-xs text-red-600 bg-red-50 rounded p-2">{actionError}</div>
+		<div class="text-xs text-red-600 bg-red-50 rounded p-2 flex items-center justify-between gap-2">
+			<span>{actionError}</span>
+			{#if forceStopNeeded}
+				<button
+					class="shrink-0 px-2 py-0.5 rounded border border-red-400 text-red-700 hover:bg-red-100 disabled:opacity-50 transition-colors"
+					onclick={handleForceStop}
+					disabled={actionLoading}
+				>
+					강제 중지
+				</button>
+			{/if}
+		</div>
 	{/if}
 	{#if syncMessage}
 		<div class="text-xs text-green-700 bg-green-50 rounded p-2">{syncMessage}</div>
