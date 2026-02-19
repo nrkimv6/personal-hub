@@ -20,17 +20,28 @@ pytestmark = [
 ]
 
 
+# CLIP 모델을 session scope로 1번만 로드 (torch 반복 로드 시 access violation 방지)
+_clip_model = None
+
+def _get_clip_model():
+    global _clip_model
+    if _clip_model is None:
+        from sentence_transformers import SentenceTransformer
+        _clip_model = SentenceTransformer("clip-ViT-B-32", device="cpu")
+    return _clip_model
+
+
 @pytest.fixture
 def clip_worker(test_db):
-    """CLIP worker 생성 (CPU 모드)"""
+    """CLIP worker 생성 (CPU 모드, 모델 재사용)"""
     from app.modules.image_classifier.workers.clip import CLIPEmbeddingWorker
 
-    worker = CLIPEmbeddingWorker(
-        db=test_db,
-        model_name="clip-ViT-B-32",
-        batch_size=64,
-        device="cpu"  # 테스트는 CPU 모드
-    )
+    worker = CLIPEmbeddingWorker.__new__(CLIPEmbeddingWorker)
+    worker.db = test_db
+    worker.model_name = "clip-ViT-B-32"
+    worker.batch_size = 64
+    worker.device = "cpu"
+    worker.model = _get_clip_model()
     return worker
 
 
