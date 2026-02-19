@@ -257,7 +257,7 @@ export const autoNextPlanApi = {
 	get: (encodedPath: string) =>
 		autoNextRequest<PlanProgressResponse>(`/plans/${encodedPath}`),
 
-	sync: () => autoNextRequest<{ synced: number }>('/plans/sync', { method: 'POST' }),
+	sync: () => autoNextRequest<{ synced: number; added: number; removed: number; updated: number }>('/plans/sync', { method: 'POST' }),
 
 	addPath: (path: string) =>
 		autoNextRequest<{ success: boolean; path: string; type: 'file' | 'folder' }>('/plans/paths', {
