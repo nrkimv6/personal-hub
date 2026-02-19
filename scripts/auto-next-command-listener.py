@@ -161,6 +161,8 @@ def start_auto_next(command: Dict, redis_client: redis.Redis) -> Dict:
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUTF8"] = "1"
+        env["PYTHONUNBUFFERED"] = "1"
+        env.pop("CLAUDECODE", None)  # 중첩 세션 감지 방지
 
         process = subprocess.Popen(
             cmd,

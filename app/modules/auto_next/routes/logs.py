@@ -30,4 +30,10 @@ async def stream_logs():
     )
 
 
+@router.get("/logs/diagnostics")
+async def get_diagnostics():
+    """파이프라인 진단 (1회성) — LogViewer 시작 시 호출"""
+    return log_service.run_diagnostics()
+
+
 __all__ = ['router']

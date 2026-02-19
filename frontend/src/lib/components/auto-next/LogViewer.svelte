@@ -38,15 +38,21 @@
 		SYSTEM: { text: 'text-purple-400', bg: 'bg-purple-500/20' },
 		WARN: { text: 'text-orange-400', bg: 'bg-orange-500/20' },
 		STDERR: { text: 'text-red-400', bg: 'bg-red-500/30' },
-		LINE: { text: 'text-gray-600', bg: 'bg-transparent' }
+		LINE: { text: 'text-gray-600', bg: 'bg-transparent' },
+		DIAG: { text: 'text-cyan-400', bg: 'bg-cyan-500/20' }
 	};
 
 	const LINE_PATTERN = /^\[?(\d{2}:\d{2}:\d{2})\]?\s*\[(\w+)\]\s*(.*)/;
+	const DIAG_PATTERN = /^\[(\w+)\]\s*(.*)/;
 
 	function parseLine(text: string, isStale: boolean): ParsedLine {
 		const match = text.match(LINE_PATTERN);
 		if (match) {
 			return { timestamp: match[1], tag: match[2], message: match[3], raw: text, isStale };
+		}
+		const diagMatch = text.match(DIAG_PATTERN);
+		if (diagMatch) {
+			return { timestamp: '', tag: diagMatch[1], message: diagMatch[2], raw: text, isStale };
 		}
 		return { timestamp: '', tag: '', message: text, raw: text, isStale };
 	}
@@ -187,7 +193,20 @@
 		}
 	}
 
+	async function runDiagnostics() {
+		try {
+			const diag = await autoNextLogApi.diagnostics();
+			for (const s of diag.steps) {
+				const icon = s.ok ? '✓' : '✗';
+				addLine(`[DIAG] ${s.step}. ${s.name} ... ${icon} ${s.detail}`, false);
+			}
+		} catch {
+			addLine('[DIAG] 진단 API 호출 실패 (API 서버 미응답)', false);
+		}
+	}
+
 	onMount(async () => {
+		await runDiagnostics();
 		await loadRecent();
 		connectSSE();
 	});

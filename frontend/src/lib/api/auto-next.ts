@@ -288,9 +288,19 @@ export const autoNextPlanApi = {
 // Logs API
 // ============================================================
 
+export interface DiagStep {
+	step: number;
+	name: string;
+	ok: boolean;
+	detail: string;
+}
+
 export const autoNextLogApi = {
 	recent: (lines: number = 100) =>
 		autoNextRequest<LogResponse>(`/logs/recent?lines=${lines}`),
+
+	diagnostics: () =>
+		autoNextRequest<{ steps: DiagStep[] }>('/logs/diagnostics'),
 
 	connectStream: (): EventSource => {
 		return new EventSource(`${AUTO_NEXT_BASE}/logs/stream`);

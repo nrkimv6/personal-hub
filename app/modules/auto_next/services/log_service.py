@@ -136,6 +136,60 @@ class LogService:
                 await asyncio.sleep(5)
 
 
+    def run_diagnostics(self) -> dict:
+        """파이프라인 진단 (1회성) — 4단계 순차 점검"""
+        steps = []
+
+        # 1. Redis 연결
+        try:
+            self.redis_client.ping()
+            steps.append({"step": 1, "name": "Redis 연결", "ok": True, "detail": "연결됨"})
+        except Exception:
+            steps.append({"step": 1, "name": "Redis 연결", "ok": False, "detail": "연결 실패"})
+            return {"steps": steps}
+
+        # 2. Listener heartbeat
+        hb = self.redis_client.get("auto-next:listener:heartbeat")
+        steps.append({
+            "step": 2, "name": "Listener heartbeat", "ok": hb is not None,
+            "detail": "활성" if hb else "heartbeat 키 없음 (리스너 꺼짐)"
+        })
+
+        # 3. 로그 파일
+        log_path = self.redis_client.get(STATE_KEY + ":stream_log_path")
+        if not log_path:
+            log_path = self.redis_client.get(STATE_KEY + ":log_file_path")
+        if log_path and Path(log_path).exists():
+            size = Path(log_path).stat().st_size
+            steps.append({
+                "step": 3, "name": "로그 파일", "ok": True,
+                "detail": f"{Path(log_path).name} ({size:,}B)"
+            })
+        elif log_path:
+            steps.append({
+                "step": 3, "name": "로그 파일", "ok": False,
+                "detail": f"경로 있으나 파일 없음: {log_path}"
+            })
+        else:
+            steps.append({
+                "step": 3, "name": "로그 파일", "ok": False,
+                "detail": "stream_log_path / log_file_path 키 없음"
+            })
+
+        # 4. CLI 프로세스
+        status = self.redis_client.get(STATE_KEY + ":status")
+        pid = self.redis_client.get(STATE_KEY + ":pid")
+        if status == "running" and pid:
+            steps.append({"step": 4, "name": "CLI 프로세스", "ok": True, "detail": f"PID {pid}"})
+        else:
+            steps.append({
+                "step": 4, "name": "CLI 프로세스", "ok": False,
+                "detail": "미실행" if not status else f"status={status}"
+            })
+
+        return {"steps": steps}
+
+
 # 싱글톤 인스턴스
 log_service = LogService()
 
