@@ -1,4 +1,4 @@
-# API Down Diagnostics Script
+﻿# API Down Diagnostics Script
 # Diagnoses why the API server is down by running step-by-step tests
 #
 # Diagnosis flow:
@@ -102,10 +102,12 @@ function Get-ZombieProcesses {
     $pythonProcesses = Get-Process -Name "python*" -ErrorAction SilentlyContinue
 
     foreach ($proc in $pythonProcesses) {
-        $runtime = (Get-Date) - $proc.StartTime
+        try { $startTime = $proc.StartTime } catch { continue }
+        if (-not $startTime) { continue }
+        $runtime = (Get-Date) - $startTime
         $zombies += @{
             pid        = $proc.Id
-            started    = $proc.StartTime.ToString("yyyy-MM-ddTHH:mm:ss")
+            started    = $startTime.ToString("yyyy-MM-ddTHH:mm:ss")
             memory_mb  = [math]::Round($proc.WorkingSet64 / 1MB, 1)
             runtime_hours = [math]::Round($runtime.TotalHours, 1)
             is_zombie  = ($runtime.TotalHours -ge 24)
@@ -326,7 +328,10 @@ function Invoke-Diagnosis {
     # Step 5: DB connection test
     Write-DiagLog "Step 5/7: DB 연결 테스트..." "STEP"
     $dbPath = Join-Path $ProjectRoot "data\monitor.db"
-    $dbTestCode = "import sqlite3; conn = sqlite3.connect(r'$dbPath', timeout=3); conn.execute('SELECT 1'); conn.close(); print('ok')"
+    $dbPathFwd = $dbPath -replace '\\', '/'
+    $dbTestCode = @'
+import sqlite3; conn = sqlite3.connect('DB_PATH', timeout=3); conn.execute('SELECT 1'); conn.close(); print('ok')
+'@ -replace 'DB_PATH', $dbPathFwd
     $dbTest = Test-WithTimeout "sqlite3 connect" $dbTestCode 5
     if ($dbTest.success) {
         $result.details.db_ok = $true
@@ -350,7 +355,10 @@ function Invoke-Diagnosis {
 
     # Step 6: app.main import test
     Write-DiagLog "Step 6/7: app.main import 테스트..." "STEP"
-    $importCode = "import sys; sys.path.insert(0, r'$ProjectRoot'); from app.main import app; print('ok')"
+    $projectRootFwd = $ProjectRoot -replace '\\', '/'
+    $importCode = @'
+import sys; sys.path.insert(0, 'PROJECT_ROOT'); from app.main import app; print('ok')
+'@ -replace 'PROJECT_ROOT', $projectRootFwd
     $importTest = Test-WithTimeout "from app.main import app" $importCode 15
     if ($importTest.success) {
         $result.details.import_ok = $true
@@ -457,8 +465,8 @@ function Write-FinalResult {
     $severityIcon = switch ($Result.severity) {
         "ok"       { [char]0x2705 }  # green check
         "warning"  { [char]0x26A0 }  # warning
-        "error"    { [char]0x1F7E0 } # orange
-        "critical" { [char]0x1F534 } # red circle
+        "error"    { [char]::ConvertFromUtf32(0x1F7E0) } # orange
+        "critical" { [char]::ConvertFromUtf32(0x1F534) } # red circle
         default    { "?" }
     }
 
