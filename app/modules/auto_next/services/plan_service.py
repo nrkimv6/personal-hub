@@ -399,6 +399,39 @@ class PlanService:
             progress=progress,
         )
 
+    # ========== 동기화 ==========
+
+    def sync_plans(self) -> dict:
+        """plan 동기화 — 이전 상태와 비교하여 변경 요약 반환"""
+        # 이전 상태 스냅샷 (path → {status, done, total})
+        old_plans = {p.path: p for p in self.list_plans(include_ignored=True)}
+        old_keys = set(old_plans.keys())
+
+        # 디스크에서 다시 스캔 (캐시 무효화)
+        self._load_registered_paths()
+        new_plans_list = self.list_plans(include_ignored=True)
+        new_plans = {p.path: p for p in new_plans_list}
+        new_keys = set(new_plans.keys())
+
+        added = len(new_keys - old_keys)
+        removed = len(old_keys - new_keys)
+
+        updated = 0
+        for key in old_keys & new_keys:
+            old_p = old_plans[key]
+            new_p = new_plans[key]
+            if (old_p.status != new_p.status
+                    or old_p.progress.done != new_p.progress.done
+                    or old_p.progress.total != new_p.progress.total):
+                updated += 1
+
+        return {
+            "synced": len(new_plans_list),
+            "added": added,
+            "removed": removed,
+            "updated": updated,
+        }
+
     # ========== 등록 경로 관리 ==========
 
     def list_registered_paths(self) -> List[RegisteredPathResponse]:

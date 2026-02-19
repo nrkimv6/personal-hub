@@ -19,6 +19,7 @@
 	let projects = $state('');
 	let actionLoading = $state(false);
 	let actionError = $state<string | null>(null);
+	let syncMessage = $state<string | null>(null);
 
 	async function handleStart() {
 		if (mode === 'single' && !selectedPlan) {
@@ -66,9 +67,18 @@
 	async function handleSync() {
 		actionLoading = true;
 		actionError = null;
+		syncMessage = null;
 		try {
-			await autoNextPlanApi.sync();
+			const result = await autoNextPlanApi.sync();
 			onStatusChange();
+			const parts: string[] = [];
+			if (result.added > 0) parts.push(`${result.added}개 추가`);
+			if (result.removed > 0) parts.push(`${result.removed}개 제거`);
+			if (result.updated > 0) parts.push(`${result.updated}개 변경`);
+			syncMessage = parts.length > 0
+				? `동기화 완료: ${parts.join(', ')} (총 ${result.synced}개)`
+				: `동기화 완료: 변경 없음 (총 ${result.synced}개)`;
+			setTimeout(() => { syncMessage = null; }, 5000);
 		} catch (e) {
 			actionError = e instanceof Error ? e.message : '동기화 실패';
 		} finally {
@@ -98,6 +108,9 @@
 <div class="flex flex-col gap-4">
 	{#if actionError}
 		<div class="text-xs text-red-600 bg-red-50 rounded p-2">{actionError}</div>
+	{/if}
+	{#if syncMessage}
+		<div class="text-xs text-green-700 bg-green-50 rounded p-2">{syncMessage}</div>
 	{/if}
 
 	<!-- Controls Row -->

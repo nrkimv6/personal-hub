@@ -205,7 +205,7 @@
 		{#if registeredPathsLoading}
 			<div class="text-[10px] text-gray-400">로딩 중...</div>
 		{:else if registeredPaths.length > 0}
-			<div class="border-t pt-2 mt-1 space-y-1">
+			<div class="border-t pt-2 mt-1 space-y-1 max-h-40 overflow-y-auto">
 				<div class="text-[10px] text-gray-400 font-medium uppercase tracking-wider">등록된 경로</div>
 				{#each registeredPaths as ep}
 					<div class="flex items-center gap-1.5 text-[10px]">

@@ -135,9 +135,8 @@ async def unignore_plan(encoded_path: str):
 
 @router.post("/plans/sync")
 async def sync_plans():
-    """plan 동기화 (재스캔)"""
-    plans = plan_service.list_plans()
-    return {"synced": len(plans)}
+    """plan 동기화 (재스캔) — 변경 요약 반환"""
+    return plan_service.sync_plans()
 
 
 __all__ = ['router']
