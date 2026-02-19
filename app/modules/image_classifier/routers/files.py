@@ -48,7 +48,7 @@ async def get_files(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     importance: Optional[str] = None,
-    order_by: str = "id",  # id, extracted_date, importance
+    order_by: str = "id",  # id, extracted_date, importance, ai_confidence
     order_dir: str = "asc",  # asc, desc
     db: Session = Depends(get_db),
 ):
@@ -92,7 +92,7 @@ async def get_files(
         params["importance"] = importance
 
     # 정렬
-    valid_order_by = {"id", "extracted_date", "importance"}
+    valid_order_by = {"id", "extracted_date", "importance", "ai_confidence"}
     valid_order_dir = {"asc", "desc"}
 
     if order_by not in valid_order_by:
@@ -100,7 +100,12 @@ async def get_files(
     if order_dir not in valid_order_dir:
         order_dir = "asc"
 
-    query += f" ORDER BY {order_by} {order_dir.upper()}"
+    # ai_confidence는 NULL이 있을 수 있으므로 NULLS LAST 처리
+    # SQLite: ORDER BY (ai_confidence IS NULL), ai_confidence ASC
+    if order_by == "ai_confidence":
+        query += f" ORDER BY (ai_confidence IS NULL), ai_confidence {order_dir.upper()}"
+    else:
+        query += f" ORDER BY {order_by} {order_dir.upper()}"
 
     # 페이지네이션
     query += " LIMIT :limit OFFSET :skip"
