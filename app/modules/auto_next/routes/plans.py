@@ -34,6 +34,12 @@ async def get_ignored_plans():
     return plan_service.list_ignored_plans()
 
 
+@router.get("/plans/external-paths", response_model=List[ExternalPathResponse])
+async def get_external_paths():
+    """등록된 외부 경로 목록 조회 (타입 + plan_count 포함)"""
+    return plan_service.list_external_paths()
+
+
 @router.get("/plans/{encoded_path}", response_model=PlanProgressResponse)
 async def get_plan_progress(encoded_path: str):
     """특정 plan 진행률 조회 (base64 인코딩된 경로)"""
@@ -90,12 +96,6 @@ async def add_external_plan(request: AddExternalPlanRequest):
     added = plan_service.add_external_plan(request.path)
     path_type = "folder" if path.is_dir() else "file"
     return {"success": added, "path": request.path, "type": path_type}
-
-
-@router.get("/plans/external-paths", response_model=List[ExternalPathResponse])
-async def get_external_paths():
-    """등록된 외부 경로 목록 조회 (타입 + plan_count 포함)"""
-    return plan_service.list_external_paths()
 
 
 @router.delete("/plans/external")
