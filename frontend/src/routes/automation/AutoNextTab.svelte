@@ -52,7 +52,7 @@
 			stats = results[0].status === 'fulfilled' ? results[0].value : null;
 			taskList = results[1].status === 'fulfilled' ? results[1].value : null;
 			runStatus = results[2].status === 'fulfilled' ? results[2].value : null;
-			plans = results[3].status === 'fulfilled' ? results[3].value : null;
+			plans = results[3].status === 'fulfilled' ? results[3].value : [];
 
 			const failedCount = results.filter(r => r.status === 'rejected').length;
 			if (failedCount > 0) {

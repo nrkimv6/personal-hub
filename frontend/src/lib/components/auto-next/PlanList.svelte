@@ -150,7 +150,7 @@
 		return map[status] || 'bg-gray-100 text-gray-600';
 	}
 
-	let displayPlans = $derived(showIgnored ? ignoredPlans : plans);
+	let displayPlans = $derived(showIgnored ? ignoredPlans : (plans ?? []));
 </script>
 
 <div class="flex flex-col gap-3 h-full">
