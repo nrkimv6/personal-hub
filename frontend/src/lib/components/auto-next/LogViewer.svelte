@@ -21,7 +21,8 @@
 	let reconnectCount = $state(0);
 	let consecutiveErrors = $state(0);
 	let redisAvailable = $state(true);
-	let processRunning = $state<boolean | null>(null);
+	let listenerAlive = $state<boolean | null>(null);
+	let cliRunning = $state<boolean | null>(null);
 	let processPid = $state<number | null>(null);
 	const MAX_LINES = 500;
 	const SEPARATOR_PATTERN = '════════════════';
@@ -34,7 +35,10 @@
 		DONE: { text: 'text-green-400', bg: 'bg-green-500/20' },
 		ERROR: { text: 'text-red-400', bg: 'bg-red-500/20' },
 		INFO: { text: 'text-gray-500', bg: 'bg-transparent' },
-		SYSTEM: { text: 'text-purple-400', bg: 'bg-purple-500/20' }
+		SYSTEM: { text: 'text-purple-400', bg: 'bg-purple-500/20' },
+		WARN: { text: 'text-orange-400', bg: 'bg-orange-500/20' },
+		STDERR: { text: 'text-red-400', bg: 'bg-red-500/30' },
+		LINE: { text: 'text-gray-600', bg: 'bg-transparent' }
 	};
 
 	const LINE_PATTERN = /^\[?(\d{2}:\d{2}:\d{2})\]?\s*\[(\w+)\]\s*(.*)/;
@@ -127,7 +131,8 @@
 			if (statusRes.ok) {
 				redisAvailable = true;
 				const data = await statusRes.json();
-				processRunning = data.running ?? null;
+				listenerAlive = data.listener_alive ?? null;
+				cliRunning = data.running ?? null;
 				processPid = data.pid ?? null;
 			} else {
 				redisAvailable = false;
@@ -221,10 +226,20 @@
 					<span class="text-[10px] text-gray-500">재연결 중... ({reconnectCount})</span>
 				{/if}
 			</div>
-			{#if processRunning !== null}
-				<span class="text-[10px] px-1.5 py-0.5 rounded {processRunning ? 'text-cyan-400 bg-cyan-500/20' : 'text-gray-500 bg-gray-500/20'}">
-					{processRunning ? `실행 중${processPid ? ` (PID: ${processPid})` : ''}` : '정지됨'}
-				</span>
+			{#if listenerAlive !== null}
+				{#if listenerAlive && cliRunning}
+					<span class="text-[10px] px-1.5 py-0.5 rounded text-cyan-400 bg-cyan-500/20">
+						실행 중{processPid ? ` (PID: ${processPid})` : ''}
+					</span>
+				{:else if listenerAlive}
+					<span class="text-[10px] px-1.5 py-0.5 rounded text-green-400 bg-green-500/20">
+						대기 중
+					</span>
+				{:else}
+					<span class="text-[10px] px-1.5 py-0.5 rounded text-gray-500 bg-gray-500/20">
+						리스너 꺼짐
+					</span>
+				{/if}
 			{/if}
 			{#if paused && pauseBuffer.length > 0}
 				<span class="text-[10px] text-yellow-400 bg-yellow-500/20 px-1.5 py-0.5 rounded">
