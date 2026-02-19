@@ -6,6 +6,7 @@ WorkerOrchestrator를 사용하여 모든 워커를 관리합니다:
 - ScheduledCrawlWorker: 스케줄 기반 Instagram 피드 크롤링
 - OnDemandCrawlWorker: 온디맨드 (Instagram 개별 + Universal) 크롤링
 - GoogleSearchWorker: Google 검색 큐 처리
+- VideoDownloadWorker: YouTube/Vimeo 비디오 다운로드 처리 (브라우저 불필요)
 
 실행 방법:
     python -m app.worker.main                  # 모든 워커 실행
@@ -14,6 +15,7 @@ WorkerOrchestrator를 사용하여 모든 워커를 관리합니다:
     python -m app.worker.main --ondemand       # 온디맨드 워커만
     python -m app.worker.main --google         # Google 검색 워커만
     python -m app.worker.main --crawl          # 크롤 워커만 (scheduled + ondemand)
+    python -m app.worker.main --video-dl       # 비디오 다운로드 워커만
 
 주요 기능:
     - WorkerOrchestrator를 통한 중앙 집중식 워커 관리
@@ -60,6 +62,7 @@ try:
     from app.worker.google_search_worker import GoogleSearchWorker
     from app.worker.activity_worker import ActivityWorker
     from app.worker.mobile_crawl_worker import MobileCrawlWorker
+    from app.worker.video_download_worker import VideoDownloadWorker
 
     # 크롤러 및 워커 관련 로거들이 워커 로거와 같은 핸들러를 사용하도록 설정
     worker_handlers = logger.handlers
@@ -74,6 +77,7 @@ try:
         'app.worker.ondemand_worker',
         'app.worker.google_search_worker',
         'app.worker.activity_worker',
+        'app.worker.video_download_worker',
         'app.worker.crawl_worker_base',
         'instagram.worker_status',
         # 브라우저 관련
@@ -121,6 +125,7 @@ async def run_with_orchestrator(
     run_google: bool = True,
     run_activity: bool = True,
     run_mobile: bool = True,
+    run_video_dl: bool = True,
 ):
     """WorkerOrchestrator를 사용하여 워커들을 실행합니다.
 
@@ -130,6 +135,8 @@ async def run_with_orchestrator(
         run_ondemand: 온디맨드 워커 실행 여부
         run_google: Google 검색 워커 실행 여부
         run_activity: Activity 워커 실행 여부
+        run_mobile: Mobile 크롤링 워커 실행 여부
+        run_video_dl: 비디오 다운로드 워커 실행 여부
     """
     orchestrator = WorkerOrchestrator()
 
@@ -188,6 +195,11 @@ async def run_with_orchestrator(
             orchestrator.register_worker("mobile_crawl", mobile_worker)
             logger.info("MobileCrawlWorker 등록됨")
 
+        if run_video_dl:
+            video_dl_worker = VideoDownloadWorker()
+            orchestrator.register_worker("video_dl", video_dl_worker)
+            logger.info("VideoDownloadWorker 등록됨")
+
         if not orchestrator.workers:
             logger.error("실행할 워커가 없습니다.")
             return
@@ -218,7 +230,8 @@ async def main(args):
         f"ondemand={args.ondemand or args.crawl or args.all}, "
         f"google={args.google or args.all}, "
         f"activity={args.activity or args.all}, "
-        f"mobile={args.mobile or args.all}"
+        f"mobile={args.mobile or args.all}, "
+        f"video_dl={args.video_dl or args.all}"
     )
     logger.info("=" * 50)
 
@@ -230,6 +243,7 @@ async def main(args):
             run_google=args.google or args.all,
             run_activity=args.activity or args.all,
             run_mobile=args.mobile or args.all,
+            run_video_dl=args.video_dl or args.all,
         )
     except Exception as e:
         logger.critical(f"워커 치명적 오류: {e}", exc_info=True)
@@ -278,6 +292,12 @@ def parse_args():
         help="Mobile 크롤링 워커만 실행",
     )
     parser.add_argument(
+        "--video-dl",
+        action="store_true",
+        dest="video_dl",
+        help="비디오 다운로드 워커만 실행 (YouTube/Vimeo)",
+    )
+    parser.add_argument(
         "--all",
         action="store_true",
         default=True,
@@ -287,7 +307,7 @@ def parse_args():
     args = parser.parse_args()
 
     # 개별 옵션이 지정되면 --all은 False
-    if args.naver or args.scheduled or args.ondemand or args.google or args.crawl or args.activity or args.mobile:
+    if args.naver or args.scheduled or args.ondemand or args.google or args.crawl or args.activity or args.mobile or args.video_dl:
         args.all = False
 
     return args
