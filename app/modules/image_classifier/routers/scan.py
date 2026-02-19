@@ -307,7 +307,10 @@ def run_scan_task(root_folders: list[str], resume: bool = False):
         for folder_path in all_folders:
             # 취소 확인
             if cancel_event.is_set():
-                print(f"[스캔 중지] {scanned_count}/{total} 폴더 완료 시점에서 중지됨")
+                msg = f"[스캔 중지] {scanned_count}/{total} 폴더 완료 시점에서 중지됨"
+            print(msg)
+            from ..workers.log_buffer import pipeline_logs
+            pipeline_logs.add("scan", msg)
                 scan_state["is_running"] = False
                 progress_mgr.pause_task(task_id)
                 return
@@ -331,11 +334,16 @@ def run_scan_task(root_folders: list[str], resume: bool = False):
 
         scan_state["is_running"] = False
         progress_mgr.complete_task(task_id)
-        print(f"[스캔 완료] 폴더: {scanned_count}/{total}, 파일: {scanner.total_files}")
+        msg = f"[스캔 완료] 폴더: {scanned_count}/{total}, 파일: {scanner.total_files}"
+        print(msg)
+        from ..workers.log_buffer import pipeline_logs
+        pipeline_logs.add("scan", msg)
 
         # 스캔 완료 후 자동 썸네일 생성
         if not cancel_event.is_set():
-            print("[스캔→썸네일] 자동 썸네일 생성 시작")
+            msg = "[스캔→썸네일] 자동 썸네일 생성 시작"
+            print(msg)
+            pipeline_logs.add("scan", msg)
             run_thumbnail_task()
 
     except Exception as e:
@@ -343,7 +351,10 @@ def run_scan_task(root_folders: list[str], resume: bool = False):
         scan_state["is_running"] = False
         if task_id:
             progress_mgr.fail_task(task_id, str(e))
-        print(f"[스캔 오류] {e}")
+        msg = f"[스캔 오류] {e}"
+        print(msg)
+        from ..workers.log_buffer import pipeline_logs
+        pipeline_logs.add("scan", msg)
     finally:
         db.close()
 
@@ -420,12 +431,18 @@ def run_thumbnail_task():
         )
 
         thumb_state["is_running"] = False
-        print(f"[썸네일 태스크 완료] {result}")
+        msg = f"[썸네일 완료] {result}"
+        print(msg)
+        from ..workers.log_buffer import pipeline_logs
+        pipeline_logs.add("thumbnail", msg)
 
     except Exception as e:
         thumb_state["error"] = str(e)
         thumb_state["is_running"] = False
-        print(f"[썸네일 태스크 오류] {e}")
+        msg = f"[썸네일 오류] {e}"
+        print(msg)
+        from ..workers.log_buffer import pipeline_logs
+        pipeline_logs.add("thumbnail", msg)
     finally:
         db.close()
 

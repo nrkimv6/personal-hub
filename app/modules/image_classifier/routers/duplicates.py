@@ -296,13 +296,19 @@ def _run_detect(resume: bool):
     db = SessionLocal()
     progress_db = SessionLocal()
 
+    from ..workers.log_buffer import pipeline_logs
+
     try:
         from ..workers.duplicate_detector import DuplicateDetector
         detector = DuplicateDetector(db, settings)
         _active_detector = detector
+        pipeline_logs.add("duplicate", "[중복 감지] 시작")
         detector.detect_duplicates_sync(resume=resume, progress_db=progress_db)
+        pipeline_logs.add("duplicate", "[중복 감지] 완료")
     except Exception as e:
-        logger.error(f"[중복 감지] 오류: {e}")
+        msg = f"[중복 감지] 오류: {e}"
+        logger.error(msg)
+        pipeline_logs.add("duplicate", msg)
     finally:
         _active_detector = None
         db.close()

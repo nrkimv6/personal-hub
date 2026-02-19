@@ -4,6 +4,7 @@
 - GET /api/ic/stats          : 전체 통계 (카드 4개 + 카테고리 분포)
 - GET /api/ic/stats/tasks    : 백그라운드 태스크 상태 (StatusBar)
 - GET /api/ic/stats/activity : 최근 활동 피드 (Dashboard)
+- GET /api/ic/stats/pipeline : 통합 파이프라인 상태 (진행률 + ETA + 로그)
 """
 
 from fastapi import APIRouter, Depends
@@ -97,11 +98,135 @@ async def get_stats(db: Session = Depends(get_db)):
 
 
 # =========================================================
+# GET /api/ic/stats/pipeline
+# =========================================================
+
+@router.get("/pipeline")
+async def get_pipeline_status(db: Session = Depends(get_db)):
+    """
+    통합 파이프라인 상태 반환 (Dashboard 진행률 UI 용)
+
+    4단계(scan, thumbnail, duplicate, classify) 각각의:
+    - 실행 상태, 진행률, 현재 처리 항목
+    - ETA (실행 중일 때)
+    - last_run (비실행 시 DB에서 마지막 기록)
+    + 최근 로그 메시지
+    """
+    from .scan import scan_state, thumb_state
+    from .classify import classification_status
+    from ..workers.task_progress import TaskProgressManager
+    from ..workers.log_buffer import pipeline_logs, calc_eta
+
+    progress_mgr = TaskProgressManager(db)
+
+    def _build_stage(task_type: str, is_running: bool, processed: int, total: int,
+                     current_item: str | None = None, started_at: str | None = None,
+                     extra: dict | None = None) -> dict:
+        """단계별 상태 딕셔너리 생성"""
+        pct = round(processed / total * 100, 1) if total > 0 else 0.0
+        result = {
+            "is_running": is_running,
+            "processed": processed,
+            "total": total,
+            "progress_percent": pct,
+            "current_item": current_item,
+            "eta": None,
+            "last_run": None,
+        }
+        if extra:
+            result.update(extra)
+
+        # ETA (실행 중일 때만)
+        if is_running and started_at and processed > 0:
+            result["eta"] = calc_eta(started_at, processed, total)
+
+        # last_run (비실행 시 DB에서 마지막 기록)
+        if not is_running:
+            latest = progress_mgr.get_latest(task_type)
+            if latest:
+                result["last_run"] = {
+                    "status": latest["status"],
+                    "total_items": latest["total_items"],
+                    "processed_items": latest["processed_items"],
+                    "completed_at": latest["completed_at"],
+                    "started_at": latest["started_at"],
+                }
+
+        return result
+
+    # --- Scan ---
+    scan_started = None
+    if scan_state["is_running"]:
+        running_task = progress_mgr.get_running("scan")
+        scan_started = running_task["started_at"] if running_task else None
+    scan = _build_stage(
+        "scan",
+        scan_state["is_running"],
+        scan_state["scanned_folders"],
+        scan_state["total_folders"],
+        scan_state["current_folder"],
+        scan_started,
+        extra={
+            "total_files": scan_state["total_files"],
+            "scanned_files": scan_state["scanned_files"],
+        },
+    )
+
+    # --- Thumbnail ---
+    thumb = _build_stage(
+        "thumbnail",
+        thumb_state["is_running"],
+        thumb_state["processed"],
+        thumb_state["total"],
+    )
+
+    # --- Duplicate ---
+    dup_task = progress_mgr.get_running("duplicate")
+    if dup_task:
+        dup = _build_stage(
+            "duplicate",
+            True,
+            dup_task["processed_items"] or 0,
+            dup_task["total_items"] or 0,
+            dup_task["current_item"],
+            dup_task["started_at"],
+        )
+    else:
+        dup = _build_stage("duplicate", False, 0, 0)
+
+    # --- Classify ---
+    classify_started = None
+    if classification_status["running"]:
+        running_task = progress_mgr.get_running("ai_classify")
+        classify_started = running_task["started_at"] if running_task else None
+    classify = _build_stage(
+        "ai_classify",
+        classification_status["running"],
+        classification_status["processed"],
+        classification_status["total"],
+        classification_status["current_file"],
+        classify_started,
+        extra={
+            "failed": classification_status["failed"],
+            "model": classification_status["model"],
+        },
+    )
+
+    return {
+        "scan": scan,
+        "thumbnail": thumb,
+        "duplicate": dup,
+        "classify": classify,
+        "logs": pipeline_logs.get_recent(20),
+    }
+
+
+# =========================================================
 # GET /api/ic/stats/tasks
 # =========================================================
 
 @router.get("/tasks")
-async def get_tasks():
+async def get_tasks(db: Session = Depends(get_db)):
     """
     백그라운드 태스크 현황 반환 (StatusBar 용)
 
@@ -112,21 +237,48 @@ async def get_tasks():
         tasks: [{id, name, status, progress}]
     """
     from .classify import classification_status
+    from .scan import scan_state, thumb_state
+    from ..workers.task_progress import TaskProgressManager
 
     tasks = []
+    task_id = 1
 
+    # Scan
+    if scan_state.get("is_running"):
+        total = scan_state.get("total_folders", 0)
+        processed = scan_state.get("scanned_folders", 0)
+        progress = round(processed / total * 100) if total > 0 else 0
+        tasks.append({"id": task_id, "name": "Folder Scan", "status": "running", "progress": progress})
+        task_id += 1
+
+    # Thumbnail
+    if thumb_state.get("is_running"):
+        total = thumb_state.get("total", 0)
+        processed = thumb_state.get("processed", 0)
+        progress = round(processed / total * 100) if total > 0 else 0
+        tasks.append({"id": task_id, "name": "Thumbnail Generation", "status": "running", "progress": progress})
+        task_id += 1
+
+    # Duplicate
+    try:
+        progress_mgr = TaskProgressManager(db)
+        dup_task = progress_mgr.get_running("duplicate")
+        if dup_task:
+            total = dup_task["total_items"] or 0
+            processed = dup_task["processed_items"] or 0
+            progress = round(processed / total * 100) if total > 0 else 0
+            tasks.append({"id": task_id, "name": "Duplicate Detection", "status": "running", "progress": progress})
+            task_id += 1
+    except Exception:
+        pass
+
+    # Classify
     if classification_status.get("running"):
         total = classification_status.get("total", 0)
         processed = classification_status.get("processed", 0)
         progress = round(processed / total * 100) if total > 0 else 0
         model = classification_status.get("model", "AI")
-
-        tasks.append({
-            "id": 1,
-            "name": f"AI Classification ({model})",
-            "status": "running",
-            "progress": progress,
-        })
+        tasks.append({"id": task_id, "name": f"AI Classification ({model})", "status": "running", "progress": progress})
 
     return {"tasks": tasks}
 

@@ -232,7 +232,10 @@ async def run_classification(
         # 배치 단위로 병렬 처리
         for i in range(0, len(files), batch_size):
             if not classification_status["running"]:
-                logger.info("Classification stopped by user")
+                msg = "Classification stopped by user"
+                logger.info(msg)
+                from ..workers.log_buffer import pipeline_logs
+                pipeline_logs.add("classify", msg)
                 progress_mgr.pause_task(task_id)
                 break
 
@@ -260,7 +263,10 @@ async def run_classification(
         classification_status["current_file"] = None
         progress_db.close()
 
-        logger.info(
+        msg = (
             f"Classification completed: {classification_status['processed']}/{classification_status['total']} "
             f"(failed: {classification_status['failed']})"
         )
+        logger.info(msg)
+        from ..workers.log_buffer import pipeline_logs
+        pipeline_logs.add("classify", msg)

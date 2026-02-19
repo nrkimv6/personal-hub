@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
 	import {
 		Images,
@@ -16,7 +16,11 @@
 		RefreshCw,
 		Loader2,
 		LayoutDashboard,
-		AlertCircle
+		AlertCircle,
+		Terminal,
+		ChevronDown,
+		ChevronUp,
+		Timer
 	} from 'lucide-svelte';
 
 	function getStatusLabel(status: string): string {
@@ -75,16 +79,101 @@
 		}
 	}
 
+	// === 파이프라인 상세 상태 (통합 API) ===
+	interface StageDetail {
+		is_running: boolean;
+		processed: number;
+		total: number;
+		progress_percent: number;
+		current_item: string | null;
+		eta: { eta_display: string; elapsed_seconds: number; items_per_second: number } | null;
+		last_run: {
+			status: string;
+			total_items: number;
+			processed_items: number;
+			completed_at: string | null;
+			started_at: string | null;
+		} | null;
+		[key: string]: any;
+	}
+
+	interface PipelineDetail {
+		scan: StageDetail;
+		thumbnail: StageDetail;
+		duplicate: StageDetail;
+		classify: StageDetail;
+		logs: { stage: string; message: string; timestamp: string }[];
+	}
+
+	let pipelineDetail: PipelineDetail | null = $state(null);
+	let pipelinePollingId: ReturnType<typeof setInterval> | null = null;
+
+	/** 파이프라인 API에서 상세 데이터 가져와 pipelineDetail + pipelineStages 업데이트 */
+	async function pollPipelineStatus() {
+		try {
+			const res = await fetchWithTimeout('/api/ic/stats/pipeline');
+			if (!res.ok) return;
+			pipelineDetail = await res.json();
+
+			// pipelineStages 동기화
+			if (pipelineDetail) {
+				const stageMap: Record<string, StageDetail> = {
+					scan: pipelineDetail.scan,
+					extract: pipelineDetail.thumbnail,
+					duplicates: pipelineDetail.duplicate,
+					classify: pipelineDetail.classify
+				};
+
+				pipelineStages = pipelineStages.map((s) => {
+					const detail = stageMap[s.id];
+					if (!detail) return s;
+
+					let status = s.status;
+					// 폴링 중 실행상태 감지: 파이프라인 실행 중이면 pollUntilDone이 관리하므로 스킵
+					if (!pipelineRunning) {
+						if (detail.is_running) {
+							status = 'running';
+						} else if (detail.last_run) {
+							if (detail.last_run.status === 'completed') status = 'done';
+							else if (detail.last_run.status === 'failed') status = 'error';
+						}
+					}
+					return { ...s, status };
+				});
+			}
+		} catch {
+			// 폴링 실패 무시
+		}
+	}
+
+	function startPipelinePolling() {
+		if (pipelinePollingId) return;
+		pollPipelineStatus();
+		pipelinePollingId = setInterval(pollPipelineStatus, 2000);
+	}
+
+	function stopPipelinePolling() {
+		if (pipelinePollingId) {
+			clearInterval(pipelinePollingId);
+			pipelinePollingId = null;
+		}
+	}
+
 	onMount(() => {
 		loadHealth();
 		loadStats();
 		loadActivity();
+		// 초기 로드: 이전 진행률 복원
+		pollPipelineStatus();
+	});
+
+	onDestroy(() => {
+		stopPipelinePolling();
 	});
 
 	// === UI 상태 ===
 	let activityFilter = $state('all');
 
-	// pipelineStages: 기본 idle, 추후 stats/tasks 기반으로 파생
 	let pipelineStages = $state([
 		{ id: 'scan', label: '스캔', status: 'idle' },
 		{ id: 'extract', label: '추출', status: 'idle' },
@@ -119,7 +208,7 @@
 	);
 
 	async function handleRefresh() {
-		await Promise.all([loadHealth(), loadStats(), loadActivity()]);
+		await Promise.all([loadHealth(), loadStats(), loadActivity(), pollPipelineStatus()]);
 	}
 
 	// === 파이프라인 실행 ===
@@ -177,6 +266,10 @@
 		const abort = new AbortController();
 		pipelineAbort = abort;
 		resetStages();
+		logPanelExpanded = true;
+
+		// 폴링 시작
+		startPipelinePolling();
 
 		const steps = [
 			{ id: 'scan', url: '/api/ic/scan/start', method: 'POST' },
@@ -202,6 +295,9 @@
 		} finally {
 			pipelineRunning = false;
 			pipelineAbort = null;
+			stopPipelinePolling();
+			// 최종 상태 반영
+			await pollPipelineStatus();
 			loadStats();
 		}
 	}
@@ -210,6 +306,7 @@
 		pipelineAbort?.abort();
 		pipelineRunning = false;
 		pipelineAbort = null;
+		stopPipelinePolling();
 	}
 
 	let classifyRunning = $state(false);
@@ -217,6 +314,7 @@
 		if (classifyRunning) return;
 		classifyRunning = true;
 		updateStage('classify', 'running');
+		startPipelinePolling();
 		try {
 			const res = await fetchWithTimeout('/api/ic/classify/start', { method: 'POST' });
 			if (!res.ok) {
@@ -226,6 +324,7 @@
 			await pollUntilDone('classify');
 		} finally {
 			classifyRunning = false;
+			stopPipelinePolling();
 			loadStats();
 		}
 	}
@@ -235,6 +334,7 @@
 		if (duplicateRunning) return;
 		duplicateRunning = true;
 		updateStage('duplicates', 'running');
+		startPipelinePolling();
 		try {
 			const res = await fetchWithTimeout('/api/ic/duplicates/detect', { method: 'POST' });
 			if (!res.ok) {
@@ -244,8 +344,67 @@
 			await pollUntilDone('duplicates');
 		} finally {
 			duplicateRunning = false;
+			stopPipelinePolling();
 			loadStats();
 		}
+	}
+
+	// === 로그 패널 ===
+	let logPanelExpanded = $state(false);
+
+	// 단계별 상세 데이터 헬퍼
+	function getStageDetail(stageId: string): StageDetail | null {
+		if (!pipelineDetail) return null;
+		const map: Record<string, StageDetail> = {
+			scan: pipelineDetail.scan,
+			extract: pipelineDetail.thumbnail,
+			duplicates: pipelineDetail.duplicate,
+			classify: pipelineDetail.classify
+		};
+		return map[stageId] ?? null;
+	}
+
+	function getStageProgressText(stageId: string): string {
+		const detail = getStageDetail(stageId);
+		if (!detail) return '';
+
+		if (detail.is_running) {
+			if (stageId === 'scan') {
+				return `${detail.processed}/${detail.total} 폴더`;
+			}
+			return `${detail.processed.toLocaleString()}/${detail.total.toLocaleString()}`;
+		}
+
+		// 비실행 시 last_run 요약
+		if (detail.last_run && detail.last_run.processed_items > 0) {
+			return `${detail.last_run.processed_items.toLocaleString()}건 처리 완료`;
+		}
+		return '';
+	}
+
+	function getStageCurrentItem(stageId: string): string {
+		const detail = getStageDetail(stageId);
+		if (!detail?.is_running || !detail.current_item) return '';
+		// 파일명만 추출
+		const parts = detail.current_item.replace(/\\/g, '/').split('/');
+		const name = parts[parts.length - 1];
+		return name.length > 30 ? name.slice(0, 27) + '...' : name;
+	}
+
+	function getStageEta(stageId: string): string {
+		const detail = getStageDetail(stageId);
+		if (!detail?.is_running) return '';
+		if (detail.eta) return detail.eta.eta_display;
+		if (detail.processed > 0) return '계산 중...';
+		return '';
+	}
+
+	function getStageProgressPercent(stageId: string): number {
+		const detail = getStageDetail(stageId);
+		if (!detail) return 0;
+		if (detail.is_running) return detail.progress_percent;
+		if (detail.last_run?.status === 'completed') return 100;
+		return 0;
 	}
 </script>
 
@@ -402,71 +561,161 @@
 			</div>
 		</div>
 
-		<!-- Pipeline Status -->
+		<!-- Pipeline Status (확장된 진행률 UI) -->
 		<div class="rounded-lg border bg-card p-5">
 			<h2 class="text-sm font-semibold mb-4">파이프라인 상태</h2>
-			<div class="flex items-center gap-0 overflow-x-auto">
-				{#each pipelineStages as stage, i}
-					<div
-						class="flex items-center gap-2 rounded-md border px-3 py-2 min-w-fit text-sm
-						{stage.status === 'done'
-							? 'bg-emerald-500/10 border-emerald-500/30'
-							: stage.status === 'running'
-								? 'bg-primary/10 border-primary/30'
-								: stage.status === 'error'
-									? 'bg-destructive/10 border-destructive/30'
-									: 'bg-secondary border-border'}"
-					>
-						{#if stage.status === 'done'}
-							<CheckCircle2 class="h-4 w-4 text-emerald-600 shrink-0" />
-						{:else if stage.status === 'running'}
-							<div class="relative h-4 w-4 shrink-0">
-								<Loader2 class="h-4 w-4 text-primary animate-spin" />
+			<div class="flex flex-col gap-3">
+				<div class="flex items-center gap-0 overflow-x-auto">
+					{#each pipelineStages as stage, i}
+						<div class="flex flex-col items-center min-w-fit">
+							<div
+								class="flex items-center gap-2 rounded-md border px-3 py-2 text-sm
+								{stage.status === 'done'
+									? 'bg-emerald-500/10 border-emerald-500/30'
+									: stage.status === 'running'
+										? 'bg-primary/10 border-primary/30'
+										: stage.status === 'error'
+											? 'bg-destructive/10 border-destructive/30'
+											: 'bg-secondary border-border'}"
+							>
+								{#if stage.status === 'done'}
+									<CheckCircle2 class="h-4 w-4 text-emerald-600 shrink-0" />
+								{:else if stage.status === 'running'}
+									<div class="relative h-4 w-4 shrink-0">
+										<Loader2 class="h-4 w-4 text-primary animate-spin" />
+										<span
+											class="absolute inset-0 rounded-full bg-primary/30 animate-ping"
+											style="transform: scale(0.6)"
+										></span>
+									</div>
+								{:else if stage.status === 'error'}
+									<AlertCircle class="h-4 w-4 text-destructive shrink-0" />
+								{:else}
+									<div class="h-4 w-4 shrink-0 rounded-full border-2 border-muted-foreground/30"></div>
+								{/if}
 								<span
-									class="absolute inset-0 rounded-full bg-primary/30 animate-ping"
-									style="transform: scale(0.6)"
-								></span>
+									class="font-medium
+									{stage.status === 'done'
+										? 'text-emerald-700'
+										: stage.status === 'running'
+											? 'text-primary'
+											: stage.status === 'error'
+												? 'text-destructive'
+												: 'text-muted-foreground'}"
+								>
+									{stage.label}
+								</span>
+								<span
+									class="text-xs px-1.5 py-0.5 rounded-full
+									{stage.status === 'done'
+										? 'bg-emerald-100 text-emerald-700'
+										: stage.status === 'running'
+											? 'bg-primary/20 text-primary'
+											: stage.status === 'error'
+												? 'bg-destructive/20 text-destructive'
+												: 'bg-muted text-muted-foreground'}"
+								>
+									{getStatusLabel(stage.status)}
+								</span>
 							</div>
-						{:else if stage.status === 'error'}
-							<AlertCircle class="h-4 w-4 text-destructive shrink-0" />
-						{:else}
-							<div class="h-4 w-4 shrink-0 rounded-full border-2 border-muted-foreground/30"></div>
-						{/if}
-						<span
-							class="font-medium
-							{stage.status === 'done'
-								? 'text-emerald-700'
-								: stage.status === 'running'
-									? 'text-primary'
-									: stage.status === 'error'
-										? 'text-destructive'
-										: 'text-muted-foreground'}"
-						>
-							{stage.label}
-						</span>
-						<span
-							class="text-xs px-1.5 py-0.5 rounded-full
-							{stage.status === 'done'
-								? 'bg-emerald-100 text-emerald-700'
-								: stage.status === 'running'
-									? 'bg-primary/20 text-primary'
-									: stage.status === 'error'
-										? 'bg-destructive/20 text-destructive'
-										: 'bg-muted text-muted-foreground'}"
-						>
-							{getStatusLabel(stage.status)}
-						</span>
-					</div>
-					{#if i < pipelineStages.length - 1}
-						<div class="flex items-center px-2 text-muted-foreground">
-							<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-							</svg>
+							<!-- 진행률 상세 (running 또는 done일 때) -->
+							{#if stage.id !== 'review' && (stage.status === 'running' || stage.status === 'done')}
+								{@const progressText = getStageProgressText(stage.id)}
+								{@const currentItem = getStageCurrentItem(stage.id)}
+								{@const eta = getStageEta(stage.id)}
+								{@const pct = getStageProgressPercent(stage.id)}
+								<div class="mt-1.5 w-full px-1 space-y-0.5">
+									<!-- 프로그레스바 -->
+									<div class="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+										<div
+											class="h-full rounded-full transition-all duration-500
+											{stage.status === 'done' ? 'bg-emerald-500' : 'bg-primary'}"
+											style="width: {pct}%"
+										></div>
+									</div>
+									<!-- 진행 텍스트 -->
+									{#if progressText}
+										<div class="flex items-center justify-between text-[10px] text-muted-foreground">
+											<span>{progressText}</span>
+											{#if eta}
+												<span class="flex items-center gap-0.5">
+													<Timer class="h-2.5 w-2.5" />
+													{eta}
+												</span>
+											{/if}
+										</div>
+									{/if}
+									<!-- 현재 처리 항목 -->
+									{#if currentItem}
+										<div class="text-[10px] text-muted-foreground/70 truncate" title={getStageDetail(stage.id)?.current_item ?? ''}>
+											{currentItem}
+										</div>
+									{/if}
+								</div>
+							{/if}
 						</div>
-					{/if}
-				{/each}
+						{#if i < pipelineStages.length - 1}
+							<div class="flex items-center px-2 text-muted-foreground self-start mt-2.5">
+								<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+								</svg>
+							</div>
+						{/if}
+					{/each}
+				</div>
 			</div>
 		</div>
+
+		<!-- 파이프라인 로그 패널 (실행 중이거나 로그가 있을 때) -->
+		{#if pipelineRunning || (pipelineDetail?.logs && pipelineDetail.logs.length > 0)}
+			<div class="rounded-lg border bg-card">
+				<button
+					onclick={() => (logPanelExpanded = !logPanelExpanded)}
+					class="flex w-full items-center justify-between px-5 py-3 text-sm font-semibold hover:bg-accent/50 transition-colors"
+				>
+					<div class="flex items-center gap-2">
+						<Terminal class="h-4 w-4 text-muted-foreground" />
+						<span>파이프라인 로그</span>
+						{#if pipelineDetail?.logs}
+							<span class="text-xs text-muted-foreground font-normal">
+								({pipelineDetail.logs.length}건)
+							</span>
+						{/if}
+					</div>
+					{#if logPanelExpanded}
+						<ChevronUp class="h-4 w-4 text-muted-foreground" />
+					{:else}
+						<ChevronDown class="h-4 w-4 text-muted-foreground" />
+					{/if}
+				</button>
+				{#if logPanelExpanded && pipelineDetail?.logs}
+					<div class="border-t px-5 py-3 max-h-[200px] overflow-y-auto">
+						<div class="space-y-1 font-mono text-xs">
+							{#each pipelineDetail.logs as log}
+								{@const stageColor =
+									log.stage === 'scan'
+										? 'text-blue-500'
+										: log.stage === 'thumbnail'
+											? 'text-violet-500'
+											: log.stage === 'duplicate'
+												? 'text-amber-500'
+												: 'text-emerald-500'}
+								<div class="flex gap-2">
+									<span class="text-muted-foreground/50 shrink-0">
+										{log.timestamp?.slice(11, 19) ?? ''}
+									</span>
+									<span class="{stageColor} shrink-0 w-16">[{log.stage}]</span>
+									<span class="text-foreground/80">{log.message}</span>
+								</div>
+							{/each}
+							{#if pipelineDetail.logs.length === 0}
+								<p class="text-muted-foreground text-center py-2">로그 없음</p>
+							{/if}
+						</div>
+					</div>
+				{/if}
+			</div>
+		{/if}
 
 		<!-- 하단 3열 -->
 		<div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
