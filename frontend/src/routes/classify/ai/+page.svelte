@@ -3,12 +3,11 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { fetchWithTimeout } from '$lib/api/client';
-  import { Brain, Play, Square, AlertCircle, ChevronDown, ChevronUp, Sparkles, Loader2 } from 'lucide-svelte';
+  import { Brain, Play, Square, AlertCircle, ChevronDown, ChevronUp, Sparkles, Loader2, Settings } from 'lucide-svelte';
 
-  // 분류 설정
+  // 분류 설정 (settings API에서 로드)
   let engine = $state<'claude' | 'gemini'>('claude');
-  let cliPath = $state('claude');
-  let modelName = $state('claude-opus-4-5');
+  let modelName = $state('');
   let workers = $state(2);
   let timeout = $state(30);
   let skipClassified = $state(true);
@@ -160,6 +159,21 @@
     }
   }
 
+  // settings API에서 AI 설정 로드
+  async function loadSettings() {
+    try {
+      const res = await fetchWithTimeout('/api/ic/settings');
+      if (!res.ok) return;
+      const data = await res.json();
+      engine = data.ai_mode === 'gemini' ? 'gemini' : 'claude';
+      modelName = data.claude_model ?? '';
+      workers = data.cli_max_workers ?? 2;
+      timeout = data.cli_timeout_seconds ?? 30;
+    } catch {
+      // 무시
+    }
+  }
+
   // 초기 상태 확인 (이미 실행 중일 수 있음)
   async function checkInitialStatus() {
     try {
@@ -179,6 +193,7 @@
   }
 
   onMount(() => {
+    loadSettings();
     checkInitialStatus();
   });
 
@@ -209,14 +224,20 @@
   <div class="grid gap-6 lg:grid-cols-2">
     <!-- AI Engine Settings -->
     <div class="rounded-xl border border-border bg-card p-4 space-y-4">
-      <h2 class="text-sm font-semibold text-foreground">AI 엔진 설정</h2>
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-semibold text-foreground">AI 엔진 설정</h2>
+        <a href="/classify/settings" class="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors">
+          <Settings class="size-3" />
+          설정 변경
+        </a>
+      </div>
 
-      <!-- Engine Selector -->
+      <!-- Engine Selector (유일한 편집 가능 항목) -->
       <div class="space-y-1.5">
         <p class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">엔진</p>
         <div class="flex rounded-lg border border-border bg-muted p-0.5">
           <button
-            onclick={() => { engine = 'claude'; modelName = 'claude-opus-4-5'; cliPath = 'claude'; }}
+            onclick={() => { engine = 'claude'; }}
             disabled={running}
             class="flex flex-1 items-center justify-center gap-2 rounded-md py-1.5 text-xs font-medium transition-all disabled:opacity-50 {engine === 'claude'
               ? 'bg-card text-foreground shadow-sm'
@@ -226,7 +247,7 @@
             Claude
           </button>
           <button
-            onclick={() => { engine = 'gemini'; modelName = 'gemini-1.5-pro'; cliPath = 'gemini'; }}
+            onclick={() => { engine = 'gemini'; }}
             disabled={running}
             class="flex flex-1 items-center justify-center gap-2 rounded-md py-1.5 text-xs font-medium transition-all disabled:opacity-50 {engine === 'gemini'
               ? 'bg-card text-foreground shadow-sm'
@@ -238,57 +259,19 @@
         </div>
       </div>
 
-      <!-- CLI Path -->
-      <div class="space-y-1.5">
-        <label for="cli-path" class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">CLI 경로</label>
-        <input
-          id="cli-path"
-          type="text"
-          bind:value={cliPath}
-          disabled={running}
-          class="h-9 w-full rounded-md border border-border bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
-          placeholder="claude"
-        />
-      </div>
-
-      <!-- Model Name -->
-      <div class="space-y-1.5">
-        <label for="model-name" class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">모델 이름</label>
-        <input
-          id="model-name"
-          type="text"
-          bind:value={modelName}
-          disabled={running}
-          class="h-9 w-full rounded-md border border-border bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
-          placeholder="claude-opus-4-5"
-        />
-      </div>
-
-      <!-- Workers & Timeout -->
-      <div class="grid grid-cols-2 gap-3">
-        <div class="space-y-1.5">
-          <label for="workers-count" class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">워커 수</label>
-          <input
-            id="workers-count"
-            type="number"
-            bind:value={workers}
-            min="1"
-            max="8"
-            disabled={running}
-            class="h-9 w-full rounded-md border border-border bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
-          />
+      <!-- 읽기전용 설정 요약 -->
+      <div class="space-y-2 rounded-lg border border-border bg-secondary/30 px-3 py-2.5">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] text-muted-foreground">모델</span>
+          <span class="text-xs font-medium text-foreground">{modelName || '(미설정)'}</span>
         </div>
-        <div class="space-y-1.5">
-          <label for="timeout-sec" class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">타임아웃 (초)</label>
-          <input
-            id="timeout-sec"
-            type="number"
-            bind:value={timeout}
-            min="5"
-            max="300"
-            disabled={running}
-            class="h-9 w-full rounded-md border border-border bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
-          />
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] text-muted-foreground">워커 수</span>
+          <span class="text-xs font-medium text-foreground">{workers}</span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] text-muted-foreground">타임아웃</span>
+          <span class="text-xs font-medium text-foreground">{timeout}초</span>
         </div>
       </div>
     </div>
