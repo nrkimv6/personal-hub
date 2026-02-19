@@ -109,7 +109,11 @@ class ServiceRunner:
         self._cleanup_ports()
 
     def _cleanup_stale_pids(self):
+        # 자기 suffix에 해당하는 PID 파일만 처리 (prod: api.pid, dev: api_dev.pid)
+        own_patterns = [f"api{self.pid_suffix}.pid", f"frontend{self.pid_suffix}.pid"]
         for pid_file in self.pid_dir.glob("*.pid"):
+            if pid_file.name not in own_patterns:
+                continue
             pid = read_pid_file(pid_file)
             if pid is None:
                 remove_pid_file(pid_file)
@@ -122,6 +126,8 @@ class ServiceRunner:
             remove_pid_file(pid_file)
 
     def _cleanup_orphan_vite(self):
+        # 자기 포트의 vite만 정리, 다른 포트(dev/prod)의 vite는 건드리지 않음
+        other_port = 6101 if self.frontend_port == 6100 else 6100
         for proc in psutil.process_iter(["pid", "name", "cmdline"]):
             try:
                 if proc.info["name"] != "node.exe":
@@ -130,7 +136,9 @@ class ServiceRunner:
                 if "vite" not in cmdline:
                     continue
                 if f"--port {self.frontend_port}" in cmdline:
-                    continue  # 올바른 포트의 vite는 건드리지 않음
+                    continue  # 자기 포트의 정상 vite → 스킵
+                if f"--port {other_port}" in cmdline:
+                    continue  # 상대 서비스(dev/prod)의 vite → 스킵
                 self.log.info(f"  Killing orphan Vite (PID: {proc.pid})")
                 kill_pid(proc.pid, logger=self.log)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
