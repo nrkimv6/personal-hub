@@ -491,7 +491,7 @@ if ($tasks) {{
 
     async def restart_redis(self) -> dict:
         """Redis 컨테이너 재시작 (podman-compose 경유)"""
-        project_root = Path(__file__).resolve().parent.parent.parent.parent
+        project_root = Path(__file__).resolve().parent.parent.parent.parent.parent
         compose_path = project_root / ".venv" / "Scripts" / "podman-compose.exe"
         if not compose_path.exists():
             compose_path = "podman-compose"

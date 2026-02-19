@@ -7,6 +7,8 @@
 - POST /api/ic/scan/thumbnails: 썸네일 생성 시작
 - GET /api/ic/scan/thumbnails/status: 썸네일 생성 상태
 - POST /api/ic/scan/thumbnails/stop: 썸네일 생성 중지
+- POST /api/ic/scan/phash: pHash 일괄 계산 시작 (기존 파일 대상)
+- GET /api/ic/scan/phash/status: pHash 계산 진행 상태
 """
 
 import threading
@@ -74,6 +76,14 @@ thumb_state = {
 }
 
 thumb_cancel_event = threading.Event()
+
+# === 전역 pHash 상태 ===
+phash_state = {
+    "is_running": False,
+    "processed": 0,
+    "total": 0,
+    "error": None,
+}
 
 
 # === 엔드포인트 ===
@@ -445,6 +455,82 @@ def run_thumbnail_task():
         print(msg)
         from ..workers.log_buffer import pipeline_logs
         pipeline_logs.add("thumbnail", msg)
+    finally:
+        db.close()
+
+
+# === pHash 엔드포인트 ===
+@router.post("/phash")
+async def start_phash(
+    background_tasks: BackgroundTasks,
+):
+    """pHash 일괄 계산 시작 (썸네일이 있으나 pHash가 없는 파일 대상, 백그라운드)"""
+    global phash_state
+
+    if phash_state["is_running"]:
+        raise HTTPException(status_code=409, detail="pHash 계산이 이미 실행 중입니다.")
+
+    phash_state.update({
+        "is_running": True,
+        "processed": 0,
+        "total": 0,
+        "error": None,
+    })
+
+    # 동기 함수 → FastAPI가 자동으로 스레드 풀에서 실행
+    background_tasks.add_task(run_phash_task)
+
+    return {"status": "started", "message": "pHash 계산이 시작되었습니다."}
+
+
+@router.get("/phash/status")
+async def get_phash_status():
+    """pHash 계산 진행 상태 조회"""
+    total = phash_state["total"]
+    processed = phash_state["processed"]
+    progress = (processed / total * 100) if total > 0 else 0.0
+    return {
+        "is_running": phash_state["is_running"],
+        "processed": processed,
+        "total": total,
+        "progress_percent": round(progress, 2),
+        "error": phash_state["error"],
+    }
+
+
+def run_phash_task():
+    """pHash 일괄 계산 백그라운드 태스크 (동기)"""
+    global phash_state
+
+    from ..database import SessionLocal
+    from ..workers.phash import PHashWorker
+
+    db = SessionLocal()
+    try:
+        worker = PHashWorker(db, settings)
+
+        def on_progress(processed, total):
+            phash_state["processed"] = processed
+            phash_state["total"] = total
+
+        worker.process_pending_files(
+            batch_size=100,
+            on_progress=on_progress,
+        )
+
+        phash_state["is_running"] = False
+        msg = f"[pHash 완료] {phash_state['processed']}/{phash_state['total']}"
+        print(msg)
+        from ..workers.log_buffer import pipeline_logs
+        pipeline_logs.add("phash", msg)
+
+    except Exception as e:
+        phash_state["error"] = str(e)
+        phash_state["is_running"] = False
+        msg = f"[pHash 오류] {e}"
+        print(msg)
+        from ..workers.log_buffer import pipeline_logs
+        pipeline_logs.add("phash", msg)
     finally:
         db.close()
 

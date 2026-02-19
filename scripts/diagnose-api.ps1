@@ -48,7 +48,6 @@ $SeverityMap = @{
     "db_locked"         = "error"
     "db_migration_error" = "warning"
     "import_error"      = "error"
-    "port_zombie"       = "error"
     "unknown"           = "critical"
 }
 
@@ -60,7 +59,6 @@ $ActionMap = @{
     "db_locked"         = "DB lock 보유 프로세스를 kill하세요."
     "db_migration_error" = "마이그레이션 SQL을 실행하세요."
     "import_error"      = "코드 수정이 필요합니다."
-    "port_zombie"       = "포트 점유 프로세스(PID)를 kill하세요."
     "unknown"           = "로그를 확인하세요."
 }
 
@@ -72,7 +70,6 @@ $MessageMap = @{
     "db_locked"         = "SQLite DB가 잠겨 있습니다."
     "db_migration_error" = "DB 마이그레이션 실패로 서버를 시작할 수 없습니다."
     "import_error"      = "app.main import 중 에러가 발생했습니다."
-    "port_zombie"       = "포트가 점유되어 있지만 API가 응답하지 않습니다."
     "unknown"           = "원인을 분류할 수 없습니다."
 }
 
@@ -253,18 +250,7 @@ function Invoke-Diagnosis {
     if ($conn) {
         $result.details.port_listening = $true
         $ownerPid = $conn.OwningProcess
-        Write-DiagLog "  포트 $port LISTEN 중 (PID: $ownerPid) — 응답 없음 = zombie" "WARN"
-        $result.status = "port_zombie"
-        $result.severity = $SeverityMap["port_zombie"]
-        $result.message = "$($MessageMap['port_zombie']) (PID: $ownerPid)"
-        $result.action = $ActionMap["port_zombie"]
-
-        # Collect zombie info and finish
-        $result.details.zombie_processes = @(Get-ZombieProcesses)
-        $result.details.last_death = Get-DeathLogInfo
-        Write-OutputJson $result
-        Write-FinalResult $result
-        return $result
+        Write-DiagLog "  포트 $port LISTEN 중 (PID: $ownerPid) — 응답은 느린 상태, 추가 진단 진행" "INFO"
     } else {
         $result.details.port_listening = $false
         Write-DiagLog "  포트 $port 미사용" "INFO"
