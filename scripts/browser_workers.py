@@ -328,6 +328,9 @@ class BrowserWorkerManager:
         print(f"  (WorkerOrchestrator Architecture){RESET}")
         print(f"{CYAN}{'=' * 40}{RESET}\n")
 
+        # Redis 상태
+        self._print_redis_status()
+
         # Watchdog/Listener 상태
         for w in self.workers:
             pid_path = self.pid_dir / w["pid_file"]
@@ -378,6 +381,105 @@ class BrowserWorkerManager:
             print(f"    {GRAY}Run 'python scripts/browser_workers.py restart' to clean up{RESET}")
         print()
 
+    # ── redis helpers ────────────────────────────────────────────
+    def _print_redis_status(self):
+        """Redis 상태 한 줄 출력"""
+        try:
+            import redis as redis_lib
+            r = redis_lib.Redis(host="localhost", port=6379, socket_connect_timeout=3, decode_responses=True)
+            r.ping()
+            info = r.info(section="server")
+            uptime = info.get("uptime_in_seconds", 0)
+            mem_info = r.info(section="memory")
+            used_mb = round(mem_info.get("used_memory", 0) / 1024 / 1024, 1)
+            clients = r.info(section="clients").get("connected_clients", 0)
+            r.close()
+            print(f"  {GREEN}[+] Redis (uptime: {uptime}s, mem: {used_mb}MB, clients: {clients}){RESET}")
+        except Exception:
+            print(f"  {RED}[-] Redis: Not connected{RESET}")
+
+    def redis_status(self):
+        """Redis 상태 상세 조회"""
+        print(f"\n{CYAN}{'=' * 40}")
+        print(f"  Redis Status")
+        print(f"{'=' * 40}{RESET}\n")
+
+        # 1. Redis 연결
+        try:
+            import redis as redis_lib
+            r = redis_lib.Redis(host="localhost", port=6379, socket_connect_timeout=3, decode_responses=True)
+            r.ping()
+            print(f"  {GREEN}[+] Redis connection: OK (PONG){RESET}")
+
+            info = r.info(section="server")
+            print(f"      Uptime: {info.get('uptime_in_seconds', '?')}s")
+            print(f"      Version: {info.get('redis_version', '?')}")
+
+            mem_info = r.info(section="memory")
+            used_mb = round(mem_info.get("used_memory", 0) / 1024 / 1024, 1)
+            print(f"      Memory: {used_mb}MB")
+
+            clients = r.info(section="clients").get("connected_clients", 0)
+            print(f"      Clients: {clients}")
+            r.close()
+        except Exception as e:
+            print(f"  {RED}[-] Redis connection: FAILED ({e}){RESET}")
+
+        # 2. Podman 컨테이너
+        try:
+            result = subprocess.run(
+                ["podman", "inspect", "--format", "{{.State.Running}}", "monitor-redis"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                running = result.stdout.strip().lower() == "true"
+                color = GREEN if running else RED
+                print(f"  {color}{'[+]' if running else '[-]'} Container monitor-redis: {'Running' if running else 'Stopped'}{RESET}")
+            else:
+                print(f"  {YELLOW}[?] Container monitor-redis: not found{RESET}")
+        except Exception as e:
+            print(f"  {YELLOW}[?] Podman check failed: {e}{RESET}")
+        print()
+
+    def redis_restart(self):
+        """Redis 컨테이너 재시작"""
+        print(f"\n{YELLOW}{'=' * 40}")
+        print(f"  Restarting Redis")
+        print(f"{'=' * 40}{RESET}\n")
+
+        compose_path = PROJECT_ROOT / ".venv" / "Scripts" / "podman-compose.exe"
+        if not compose_path.exists():
+            compose_cmd = "podman-compose"
+        else:
+            compose_cmd = str(compose_path)
+
+        cprint("Starting Redis container via podman-compose...")
+        try:
+            result = subprocess.run(
+                [compose_cmd, "up", "-d", "redis"],
+                cwd=str(PROJECT_ROOT),
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode != 0:
+                cprint(f"podman-compose failed: {result.stderr.strip()}", RED)
+                return
+            cprint("Container started, waiting 3s...", YELLOW)
+            time.sleep(3)
+
+            # Ping 확인
+            try:
+                import redis as redis_lib
+                r = redis_lib.Redis(host="localhost", port=6379, socket_connect_timeout=3)
+                r.ping()
+                r.close()
+                cprint("Redis is healthy (PONG)", GREEN)
+            except Exception:
+                cprint("Redis container started but connection not ready yet", YELLOW)
+        except subprocess.TimeoutExpired:
+            cprint("podman-compose timed out (30s)", RED)
+        except Exception as e:
+            cprint(f"Failed to restart Redis: {e}", RED)
+
     # ── legacy cleanup ───────────────────────────────────────────
     def _cleanup_legacy(self):
         for pf in self.legacy_pid_files:
@@ -393,7 +495,7 @@ def main():
     parser = argparse.ArgumentParser(description="Browser Workers Management")
     parser.add_argument(
         "action",
-        choices=["start", "stop", "restart", "status", "restart-api", "restart-frontend"],
+        choices=["start", "stop", "restart", "status", "restart-api", "restart-frontend", "redis-status", "redis-restart"],
         help="Action to perform",
     )
     args = parser.parse_args()
@@ -406,6 +508,8 @@ def main():
         "status": mgr.status,
         "restart-api": mgr.restart_api,
         "restart-frontend": mgr.restart_frontend,
+        "redis-status": mgr.redis_status,
+        "redis-restart": mgr.redis_restart,
     }
     action_map[args.action]()
 

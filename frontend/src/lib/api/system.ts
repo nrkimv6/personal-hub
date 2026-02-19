@@ -994,5 +994,23 @@ export const serviceDashboardApi = {
   restartWorkers: () =>
     request<{ success: boolean; message: string }>('/system/services/workers/restart', {
       method: 'POST'
+    }),
+
+  // Redis 상태 조회
+  redisStatus: () =>
+    request<RedisStatus>('/system/services/redis'),
+
+  // Redis 재시작
+  restartRedis: () =>
+    request<{ success: boolean; message: string }>('/system/services/redis/restart', {
+      method: 'POST'
     })
 };
+
+export interface RedisStatus {
+  connected: boolean;
+  container_running: boolean | null;
+  uptime_seconds: number | null;
+  used_memory_mb: number | null;
+  connected_clients: number | null;
+}

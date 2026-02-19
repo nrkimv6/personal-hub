@@ -61,6 +61,8 @@ export interface RunRequest {
 
 export interface RunStatusResponse {
 	running: boolean;
+	listener_alive: boolean;
+	redis_connected: boolean;
 	pid: number | null;
 	plan_file: string | null;
 	start_time: string | null;

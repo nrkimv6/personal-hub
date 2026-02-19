@@ -337,6 +337,14 @@ class ExecutorService:
     def get_process_status(self) -> RunStatusResponse:
         """프로세스 상태 조회 - Redis에서 조회 + stale 상태 자동 정리"""
         try:
+            # Redis 연결 확인
+            redis_connected = False
+            try:
+                self.redis_client.ping()
+                redis_connected = True
+            except (redis.ConnectionError, ConnectionRefusedError, OSError):
+                return RunStatusResponse(running=False, listener_alive=False, redis_connected=False, pid=None, plan_file=None)
+
             heartbeat = self.redis_client.get("auto-next:listener:heartbeat")
             listener_alive = heartbeat is not None
 
@@ -350,21 +358,22 @@ class ExecutorService:
                 if not listener_alive:
                     logger.warning("[auto-next] heartbeat 없음 → stale 상태 자동 정리")
                     self._force_cleanup_state()
-                    return RunStatusResponse(running=False, listener_alive=False, pid=None, plan_file=None)
+                    return RunStatusResponse(running=False, listener_alive=False, redis_connected=True, pid=None, plan_file=None)
 
                 return RunStatusResponse(
                     running=True,
                     listener_alive=True,
+                    redis_connected=True,
                     pid=int(pid_str) if pid_str else None,
                     plan_file=plan_file,
                     start_time=datetime.fromisoformat(start_time_str) if start_time_str else None,
                     current_cycle=0,
                 )
             else:
-                return RunStatusResponse(running=False, listener_alive=listener_alive, pid=None, plan_file=None)
+                return RunStatusResponse(running=False, listener_alive=listener_alive, redis_connected=True, pid=None, plan_file=None)
 
         except redis.ConnectionError:
-            return RunStatusResponse(running=False, listener_alive=False, pid=None, plan_file=None)
+            return RunStatusResponse(running=False, listener_alive=False, redis_connected=False, pid=None, plan_file=None)
         except Exception as e:
             logger.error(f"[auto-next] status 조회 실패: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")

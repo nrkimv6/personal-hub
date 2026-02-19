@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { serviceDashboardApi, systemApi } from '$lib/api';
-  import type { ServiceDashboardStatus } from '$lib/api';
+  import type { ServiceDashboardStatus, RedisStatus } from '$lib/api';
+  import { autoNextRunnerApi } from '$lib/api/auto-next';
+  import type { RunStatusResponse } from '$lib/api/auto-next';
 
   // Props
   interface Props {
@@ -18,6 +20,10 @@
   // Self-restart 상태
   let selfRestartState = $state<'idle' | 'requested' | 'waiting' | 'checking' | 'done' | 'failed'>('idle');
   let selfRestartMessage = $state('');
+
+  // Auto-Next + Redis 상태
+  let autoNextStatus = $state<RunStatusResponse | null>(null);
+  let redisStatus = $state<RedisStatus | null>(null);
 
   const REFRESH_INTERVAL = 30000;
 
@@ -80,9 +86,23 @@
     }
   }
 
+  async function fetchExtraStatus() {
+    try {
+      const [anStatus, rStatus] = await Promise.all([
+        autoNextRunnerApi.status().catch(() => null),
+        serviceDashboardApi.redisStatus().catch(() => null),
+      ]);
+      autoNextStatus = anStatus;
+      redisStatus = rStatus;
+    } catch {
+      // graceful — 둘 다 실패해도 기존 UI에 영향 없음
+    }
+  }
+
   onMount(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, REFRESH_INTERVAL);
+    fetchExtraStatus();
+    const interval = setInterval(() => { fetchStatus(); fetchExtraStatus(); }, REFRESH_INTERVAL);
     return () => clearInterval(interval);
   });
 
@@ -229,6 +249,55 @@
     } catch {
       return isoString;
     }
+  }
+
+  async function stopAutoNext() {
+    if (!confirm('Auto-Next를 중지하시겠습니까?')) return;
+    actionLoading = 'auto-next-stop';
+    try {
+      await autoNextRunnerApi.stop();
+      await fetchExtraStatus();
+    } catch (e) {
+      alert(`중지 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
+    } finally {
+      actionLoading = null;
+    }
+  }
+
+  async function resetAutoNext() {
+    if (!confirm('Auto-Next 상태를 리셋하시겠습니까?\n(RUNNING → PENDING 변경)')) return;
+    actionLoading = 'auto-next-reset';
+    try {
+      await autoNextRunnerApi.resetState();
+      await fetchExtraStatus();
+    } catch (e) {
+      alert(`리셋 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
+    } finally {
+      actionLoading = null;
+    }
+  }
+
+  async function restartRedis() {
+    if (!confirm('Redis를 재시작하시겠습니까?\n\nSession 0 (NSSM)에서는 실패할 수 있습니다.\n실패 시 CLI: browser_workers.py redis-restart')) return;
+    actionLoading = 'redis-restart';
+    try {
+      const result = await serviceDashboardApi.restartRedis();
+      alert(result.message);
+      await fetchExtraStatus();
+    } catch (e) {
+      alert(`재시작 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}\n\nCLI에서 실행:\nbrowser_workers.py redis-restart`);
+    } finally {
+      actionLoading = null;
+    }
+  }
+
+  function formatUptime(seconds: number | null): string {
+    if (seconds === null) return '-';
+    if (seconds < 60) return `${seconds}초`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}분`;
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return `${h}시간 ${m}분`;
   }
 
   function getTaskResultText(result: number | null): string {
@@ -454,6 +523,43 @@
             </section>
           {/if}
 
+          <!-- Redis Status (monitor-page only) -->
+          {#if projectName === 'monitor-page' && redisStatus}
+            <section class="mb-4">
+              <div class="flex justify-between items-center mb-2">
+                <h3 class="text-lg font-medium text-foreground dark:text-gray-300">Redis</h3>
+                <button
+                  class="px-3 py-1 text-xs bg-warning text-white rounded hover:bg-warning/90 disabled:opacity-50"
+                  disabled={actionLoading === 'redis-restart'}
+                  onclick={restartRedis}>
+                  재시작
+                </button>
+              </div>
+              <div class="p-3 rounded border {redisStatus.connected ? 'border-green-500 dark:border-green-600' : 'border-red-500 dark:border-red-600'}">
+                <div class="flex justify-between items-center">
+                  <div class="flex items-center gap-2">
+                    <span class="inline-block w-2.5 h-2.5 rounded-full {redisStatus.connected ? 'bg-green-500' : 'bg-red-500'}"></span>
+                    <span class="font-medium text-foreground dark:text-white">
+                      {redisStatus.connected ? 'Connected' : 'Disconnected'}
+                    </span>
+                  </div>
+                  {#if redisStatus.container_running !== null}
+                    <span class="text-xs px-2 py-0.5 rounded {redisStatus.container_running ? 'bg-green-200 dark:bg-green-800 text-success dark:text-green-200' : 'bg-red-200 dark:bg-red-800 text-error dark:text-red-200'}">
+                      Container {redisStatus.container_running ? 'Running' : 'Stopped'}
+                    </span>
+                  {/if}
+                </div>
+                {#if redisStatus.connected}
+                  <div class="mt-2 flex gap-4 text-xs text-muted-foreground dark:text-muted-foreground">
+                    <span>Uptime: {formatUptime(redisStatus.uptime_seconds)}</span>
+                    <span>Memory: {redisStatus.used_memory_mb ?? '-'}MB</span>
+                    <span>Clients: {redisStatus.connected_clients ?? '-'}</span>
+                  </div>
+                {/if}
+              </div>
+            </section>
+          {/if}
+
           <!-- Worker Processes -->
           {#if project.worker_processes.length > 0}
             <section>
@@ -506,6 +612,69 @@
                     </div>
                   </div>
                 {/each}
+              </div>
+            </section>
+          {/if}
+
+          <!-- Auto-Next Status (monitor-page only) -->
+          {#if projectName === 'monitor-page' && autoNextStatus}
+            <section class="mt-4">
+              <div class="flex justify-between items-center mb-2">
+                <h3 class="text-lg font-medium text-foreground dark:text-gray-300">Auto-Next</h3>
+                <div class="flex gap-1">
+                  {#if autoNextStatus.running}
+                    <button
+                      class="px-3 py-1 text-xs bg-warning text-white rounded hover:bg-warning/90 disabled:opacity-50"
+                      disabled={actionLoading === 'auto-next-stop'}
+                      onclick={stopAutoNext}>
+                      중지
+                    </button>
+                  {:else if autoNextStatus.crashed}
+                    <button
+                      class="px-3 py-1 text-xs bg-error text-white rounded hover:bg-error/90 disabled:opacity-50"
+                      disabled={actionLoading === 'auto-next-reset'}
+                      onclick={resetAutoNext}>
+                      리셋
+                    </button>
+                  {/if}
+                </div>
+              </div>
+              <div class="p-3 rounded border {autoNextStatus.running ? 'border-green-500 dark:border-green-600' :
+                autoNextStatus.crashed ? 'border-red-500 dark:border-red-600' : 'border-border dark:border-gray-600'}">
+                <div class="flex justify-between items-center">
+                  <div class="flex items-center gap-2">
+                    <span class="inline-block w-2.5 h-2.5 rounded-full
+                      {autoNextStatus.running ? 'bg-green-500' : autoNextStatus.crashed ? 'bg-red-500' : 'bg-gray-400'}"></span>
+                    <span class="font-medium text-foreground dark:text-white">
+                      {autoNextStatus.running ? 'Running' : autoNextStatus.crashed ? 'Crashed' : 'Stopped'}
+                    </span>
+                    {#if autoNextStatus.pid}
+                      <span class="text-xs text-muted-foreground dark:text-muted-foreground">(PID: {autoNextStatus.pid})</span>
+                    {/if}
+                  </div>
+                  {#if autoNextStatus.plan_file}
+                    <span class="text-xs text-muted-foreground dark:text-muted-foreground truncate max-w-48" title={autoNextStatus.plan_file}>
+                      {autoNextStatus.plan_file}
+                    </span>
+                  {/if}
+                </div>
+
+                {#if autoNextStatus.running && autoNextStatus.start_time}
+                  <div class="mt-2 text-xs text-muted-foreground dark:text-muted-foreground">
+                    시작: {formatCollectedAt(autoNextStatus.start_time)}
+                  </div>
+                {/if}
+
+                <!-- 경고 메시지 -->
+                {#if !autoNextStatus.running && !autoNextStatus.redis_connected}
+                  <div class="mt-2 text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
+                    <span>!</span> Redis 미연결 — Redis 상태를 확인하세요
+                  </div>
+                {:else if !autoNextStatus.running && !autoNextStatus.listener_alive && autoNextStatus.redis_connected}
+                  <div class="mt-2 text-xs text-yellow-600 dark:text-yellow-400 flex items-center gap-1">
+                    <span>!</span> Command Listener 미실행 — 워커 재시작 필요
+                  </div>
+                {/if}
               </div>
             </section>
           {/if}
