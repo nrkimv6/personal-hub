@@ -72,10 +72,12 @@
     try {
       const res = await fetch('/diagnostics.json?t=' + Date.now());
       if (res.ok) {
-        diagnostic = await res.json();
-        error = null;
-      } else if (res.status === 404) {
-        diagnostic = null;
+        const data = await res.json();
+        if (data.status === 'api_healthy') {
+          diagnostic = null;
+        } else {
+          diagnostic = data;
+        }
         error = null;
       } else {
         error = `HTTP ${res.status}`;

@@ -42,10 +42,13 @@
     try {
       const res = await fetch('/diagnostics.json?t=' + Date.now());
       if (res.ok) {
-        diagnostic = await res.json();
-        dismissed = false;
-      } else if (res.status === 404) {
-        diagnostic = null;
+        const data = await res.json();
+        if (data.status === 'api_healthy') {
+          diagnostic = null;
+        } else {
+          diagnostic = data;
+          dismissed = false;
+        }
       }
     } catch {
       // File doesn't exist or server down — no diagnostic available
