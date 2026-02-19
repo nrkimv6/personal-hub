@@ -227,7 +227,12 @@ class PlanService:
 
         for plan_file in plan_dir.glob("*.md"):
             if plan_file.stem.endswith("_todo"):
-                continue
+                pass  # _todo.md는 항상 표시 (체크박스가 있는 작업 파일)
+            else:
+                # 대응 _todo.md가 있으면 메인 파일 스킵 (_todo가 대표)
+                todo_file = plan_file.parent / (plan_file.stem + "_todo.md")
+                if todo_file.exists():
+                    continue
             key = str(plan_file)
             if key in seen:
                 continue
@@ -441,7 +446,9 @@ class PlanService:
             p = Path(reg_path)
             if p.is_dir():
                 plan_count = sum(
-                    1 for f in p.glob("*.md") if not f.stem.endswith("_todo")
+                    1 for f in p.glob("*.md")
+                    if f.stem.endswith("_todo")
+                    or not (f.parent / (f.stem + "_todo.md")).exists()
                 ) if p.exists() else 0
                 result.append(RegisteredPathResponse(path=reg_path, type="folder", plan_count=plan_count))
             else:
