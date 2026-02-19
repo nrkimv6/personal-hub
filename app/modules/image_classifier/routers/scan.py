@@ -308,9 +308,9 @@ def run_scan_task(root_folders: list[str], resume: bool = False):
             # 취소 확인
             if cancel_event.is_set():
                 msg = f"[스캔 중지] {scanned_count}/{total} 폴더 완료 시점에서 중지됨"
-            print(msg)
-            from ..workers.log_buffer import pipeline_logs
-            pipeline_logs.add("scan", msg)
+                print(msg)
+                from ..workers.log_buffer import pipeline_logs
+                pipeline_logs.add("scan", msg)
                 scan_state["is_running"] = False
                 progress_mgr.pause_task(task_id)
                 return
