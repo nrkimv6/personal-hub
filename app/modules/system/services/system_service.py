@@ -343,8 +343,8 @@ if ($tasks) {{
         for item in items:
             if not item.get("worker_pid_file"):
                 continue
-            # api_watchdog 제외
-            if item["name"] == "api_watchdog":
+            # infra tier 제외 (command_listener, api_watchdog)
+            if item.get("tier") == "infra":
                 continue
             if name != "all" and item["name"] != name:
                 continue
@@ -371,19 +371,28 @@ if ($tasks) {{
         return {"success": len(killed) > 0, "message": " | ".join(parts)}
 
     async def stop_watchdogs(self) -> dict:
-        """모든 watchdog 프로세스를 kill. 워커는 유지."""
+        """worker tier watchdog + 워커 프로세스를 kill. infra tier는 유지."""
         pid_dir, items = self._get_monitor_page_workers()
         if not items:
             return {"success": False, "message": "워커 설정을 찾을 수 없습니다."}
 
         killed, failed = [], []
         for item in items:
+            if item.get("tier") == "infra":
+                continue
             if not item.get("watchdog_pid_file"):
                 continue
+            # 와치독 종료
             success, msg = await self._kill_pid_file(
                 pid_dir / item["watchdog_pid_file"], f"{item['label']} watchdog"
             )
             (killed if success else failed).append(msg)
+            # 워커도 함께 종료 (고아 방지)
+            if item.get("worker_pid_file"):
+                w_success, w_msg = await self._kill_pid_file(
+                    pid_dir / item["worker_pid_file"], f"{item['label']} worker"
+                )
+                (killed if w_success else failed).append(w_msg)
 
         if not killed and not failed:
             return {"success": True, "message": "모든 watchdog가 이미 중지 상태입니다."}
@@ -392,10 +401,13 @@ if ($tasks) {{
         if killed:
             parts.append(f"종료됨: {', '.join(killed)}")
         if failed:
-            # PID 파일 없음은 이미 중지된 상태 — 실패가 아님
             all_pid_missing = all("PID 파일 없음" in f for f in failed)
             if not all_pid_missing:
                 parts.append(f"실패: {', '.join(failed)}")
+        # 인프라 유지 안내
+        infra_names = [item["label"] for item in items if item.get("tier") == "infra"]
+        if infra_names:
+            parts.append(f"인프라 유지: {', '.join(infra_names)}")
         return {"success": len(killed) > 0 or all("PID 파일 없음" in f for f in failed), "message": " | ".join(parts) if parts else "모든 watchdog가 이미 중지 상태입니다."}
 
     async def start_watchdogs(self) -> dict:
