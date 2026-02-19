@@ -19,11 +19,13 @@
 	let eventSource: EventSource | null = null;
 	let sseStarted = $state(false);
 	let reconnectCount = $state(0);
+	let redisAvailable = $state(true);
+	let consecutiveErrors = $state(0);
 
 	const MAX_LINES = 500;
 	const SEPARATOR_PATTERN = '════════════════';
-	const MAX_RECONNECT = 10;
-	const BASE_DELAY = 5000;
+	const MAX_RECONNECT = 3;
+	const BASE_DELAY = 3000;
 
 	// Tag colors for dark background
 	const tagColors: Record<string, { text: string; bg: string }> = {
@@ -116,27 +118,56 @@
 
 	function manualReconnect() {
 		reconnectCount = 0;
+		consecutiveErrors = 0;
 		connectSSE();
 	}
 
-	function connectSSE() {
+	async function connectSSE() {
 		if (eventSource) eventSource.close();
+
+		// SSE 연결 전 status API로 Redis 상태 확인
+		try {
+			const statusRes = await fetch('/api/v1/auto-next/status');
+			if (!statusRes.ok && statusRes.status === 503) {
+				redisAvailable = false;
+				connected = 'error';
+				return;
+			}
+			redisAvailable = true;
+		} catch {
+			// status API 실패해도 SSE 연결은 시도 (API 서버 문제일 수 있음)
+		}
 
 		eventSource = autoNextLogApi.connectStream();
 		eventSource.onopen = () => {
 			connected = 'connected';
 			sseStarted = true;
 			reconnectCount = 0;
+			consecutiveErrors = 0;
 		};
 		eventSource.onmessage = (event) => {
 			addLine(event.data, false);
 		};
+		// Redis 연결 끊김 이벤트 처리
+		eventSource.addEventListener('redis_disconnected', () => {
+			redisAvailable = false;
+		});
+		// Redis 재연결 시 connected 이벤트로 복구
+		eventSource.addEventListener('connected', () => {
+			redisAvailable = true;
+		});
 		eventSource.onerror = () => {
-			connected = reconnectCount >= MAX_RECONNECT ? 'error' : 'disconnected';
+			consecutiveErrors++;
 			eventSource?.close();
 			eventSource = null;
 
-			if (reconnectCount >= MAX_RECONNECT) return;
+			if (consecutiveErrors >= MAX_RECONNECT) {
+				connected = 'error';
+				redisAvailable = false;
+				return;
+			}
+
+			connected = 'disconnected';
 			reconnectCount++;
 			setTimeout(connectSSE, getReconnectDelay());
 		};
@@ -179,12 +210,15 @@
 		<div class="flex items-center gap-2">
 			<span class="text-xs font-medium uppercase tracking-wider text-gray-300">Live Logs</span>
 			<div class="flex items-center gap-1.5">
-				{#if connected === 'connected'}
+				{#if connected === 'connected' && redisAvailable}
 					<div class="w-2 h-2 rounded-full bg-green-500"></div>
 					<span class="text-[10px] text-green-400">SSE 연결됨</span>
+				{:else if connected === 'connected' && !redisAvailable}
+					<div class="w-2 h-2 rounded-full bg-yellow-500"></div>
+					<span class="text-[10px] text-yellow-400">Redis 미연결</span>
 				{:else if connected === 'error'}
 					<div class="w-2 h-2 rounded-full bg-red-500"></div>
-					<span class="text-[10px] text-red-400">연결 실패</span>
+					<span class="text-[10px] text-red-400">{!redisAvailable ? 'Redis 미연결' : '연결 실패'}</span>
 				{:else}
 					<div class="w-2 h-2 rounded-full bg-gray-400"></div>
 					<span class="text-[10px] text-gray-500">재시도 {reconnectCount}/{MAX_RECONNECT}</span>
@@ -197,7 +231,7 @@
 			{/if}
 		</div>
 		<div class="flex items-center gap-1">
-			{#if connected !== 'connected'}
+			{#if connected !== 'connected' || !redisAvailable}
 				<button
 					class="h-6 px-2 text-[10px] text-gray-500 hover:bg-gray-700 rounded transition-colors inline-flex items-center gap-1"
 					onclick={manualReconnect}

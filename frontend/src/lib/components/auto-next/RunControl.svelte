@@ -70,7 +70,12 @@
 			});
 			onStatusChange();
 		} catch (e) {
-			actionError = e instanceof Error ? e.message : '시작 실패';
+			const msg = e instanceof Error ? e.message : '시작 실패';
+			if (msg.includes('Redis') || msg.includes('listener') || msg.includes('503') || msg.includes('504')) {
+				actionError = `${msg} — Redis와 auto-next listener가 실행 중인지 확인하세요.`;
+			} else {
+				actionError = msg;
+			}
 		} finally {
 			actionLoading = false;
 		}

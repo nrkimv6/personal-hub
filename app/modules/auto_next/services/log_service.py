@@ -67,30 +67,49 @@ class LogService:
             )
 
     async def stream_log_file(self) -> AsyncGenerator[str, None]:
-        """Redis Pub/Sub 기반 실시간 로그 스트리밍 (SSE 형식)"""
-        pubsub = None
-        try:
-            pubsub = self.redis_client.pubsub()
-            pubsub.subscribe(LOG_CHANNEL)
+        """Redis Pub/Sub 기반 실시간 로그 스트리밍 (SSE 형식)
 
-            while True:
+        Redis 미연결 시에도 generator를 유지하여 SSE 연결이 끊기지 않도록 함.
+        """
+        # 초기 연결 이벤트 — EventSource가 MIME type 검증을 통과하도록 보장
+        yield "event: connected\ndata: ok\n\n"
+
+        pubsub = None
+        while True:
+            try:
+                if pubsub is None:
+                    pubsub = self.redis_client.pubsub()
+                    pubsub.subscribe(LOG_CHANNEL)
+
                 message = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
                 if message and message["type"] == "message":
                     yield f"data: {message['data']}\n\n"
                 else:
-                    # 메시지 없으면 짧게 대기 (CPU 절약)
                     await asyncio.sleep(0.3)
-        except redis.ConnectionError:
-            yield "data: [Redis connection lost]\n\n"
-        except Exception as e:
-            yield f"data: [Error: {str(e)}]\n\n"
-        finally:
-            if pubsub:
-                try:
-                    pubsub.unsubscribe(LOG_CHANNEL)
-                    pubsub.close()
-                except Exception:
-                    pass
+
+            except redis.ConnectionError:
+                # Redis 연결 실패 — generator 종료 대신 heartbeat 유지 + 재연결 대기
+                if pubsub:
+                    try:
+                        pubsub.unsubscribe(LOG_CHANNEL)
+                        pubsub.close()
+                    except Exception:
+                        pass
+                    pubsub = None
+                yield "event: redis_disconnected\ndata: Redis not available\n\n"
+                await asyncio.sleep(5)
+                # while 루프로 돌아가서 재연결 시도
+
+            except Exception as e:
+                yield f"data: [Error: {str(e)}]\n\n"
+                if pubsub:
+                    try:
+                        pubsub.unsubscribe(LOG_CHANNEL)
+                        pubsub.close()
+                    except Exception:
+                        pass
+                    pubsub = None
+                await asyncio.sleep(5)
 
 
 # 싱글톤 인스턴스

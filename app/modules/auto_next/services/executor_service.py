@@ -45,8 +45,29 @@ class ExecutorService:
             socket_connect_timeout=5,
         )
 
+    async def _check_redis_and_listener(self):
+        """Redis 연결 + command listener 존재 여부 사전 확인"""
+        try:
+            await self.async_redis.ping()
+        except (redis.ConnectionError, ConnectionRefusedError, OSError):
+            raise HTTPException(
+                status_code=503,
+                detail="Redis에 연결할 수 없습니다. Redis 서버가 실행 중인지 확인하세요."
+            )
+
+        # listener 프로세스 존재 확인: listener가 주기적으로 갱신하는 heartbeat 키 체크
+        heartbeat = await self.async_redis.get("auto-next:listener:heartbeat")
+        if heartbeat is None:
+            raise HTTPException(
+                status_code=503,
+                detail="auto-next command listener가 실행 중이지 않습니다. 워커를 시작하세요."
+            )
+
     async def start_auto_next(self, request: RunRequest) -> RunStatusResponse:
         """auto-next 실행 시작 - Redis 명령 전송 (비동기)"""
+        # Redis + listener 사전 확인
+        await self._check_redis_and_listener()
+
         # Redis를 통해 상태 확인
         try:
             status = await self.async_redis.get(STATE_KEY + ":status")
@@ -59,7 +80,7 @@ class ExecutorService:
         except redis.ConnectionError:
             raise HTTPException(
                 status_code=503,
-                detail="Redis connection failed - command listener may not be running"
+                detail="Redis에 연결할 수 없습니다. Redis 서버가 실행 중인지 확인하세요."
             )
 
         # Redis 명령 생성
@@ -231,6 +252,15 @@ class ExecutorService:
     async def stop_auto_next(self) -> Dict:
         """auto-next 실행 중지 - Redis 명령 전송 (비동기)"""
         try:
+            # Redis 사전 확인 (ping만 — listener는 stop 시에는 없을 수도 있음)
+            try:
+                await self.async_redis.ping()
+            except (redis.ConnectionError, ConnectionRefusedError, OSError):
+                raise HTTPException(
+                    status_code=503,
+                    detail="Redis에 연결할 수 없습니다."
+                )
+
             # Redis를 통해 상태 확인
             status = await self.async_redis.get(STATE_KEY + ":status")
             if status != "running":
