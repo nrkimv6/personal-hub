@@ -52,6 +52,7 @@ def run_request_parallel():
 async def _setup_listener_success(fake_async_redis, plan_file="common/docs/plan/test.md"):
     """listener 성공 응답 세팅"""
     result_data = {"success": True, "pid": 12345}
+    await fake_async_redis.set("auto-next:listener:heartbeat", "alive")
     await fake_async_redis.set("auto-next:state:status", "idle")
     await fake_async_redis.set("auto-next:state:pid", "12345")
     await fake_async_redis.set("auto-next:state:plan_file", plan_file)
@@ -128,7 +129,8 @@ class TestStartAutoNext:
         assert command["projects"] == "activity-hub,wtools"
 
     async def test_start_already_running_409(self, executor, run_request_single, fake_async_redis):
-        """Boundary - status=running → 409"""
+        """Boundary - status=running + heartbeat 있음 → 409"""
+        await fake_async_redis.set("auto-next:listener:heartbeat", "alive")
         await fake_async_redis.set("auto-next:state:status", "running")
         await fake_async_redis.set("auto-next:state:pid", "12345")
 
@@ -137,10 +139,10 @@ class TestStartAutoNext:
         assert exc_info.value.status_code == 409
 
     async def test_start_redis_down_503(self, executor, run_request_single):
-        """Boundary - Redis ConnectionError → 503"""
+        """Boundary - Redis ping ConnectionError → 503"""
         import redis
         executor.async_redis = AsyncMock()
-        executor.async_redis.get.side_effect = redis.ConnectionError("Connection refused")
+        executor.async_redis.ping.side_effect = redis.ConnectionError("Connection refused")
 
         with pytest.raises(HTTPException) as exc_info:
             await executor.start_auto_next(run_request_single)
@@ -148,7 +150,7 @@ class TestStartAutoNext:
 
     async def test_start_brpop_timeout_504(self, executor, run_request_single, fake_async_redis):
         """Boundary - BRPOP 타임아웃 → 504"""
-        # status not running so check passes
+        await fake_async_redis.set("auto-next:listener:heartbeat", "alive")
         with patch.object(executor.async_redis, 'brpop', new_callable=AsyncMock, return_value=None):
             with pytest.raises(HTTPException) as exc_info:
                 await executor.start_auto_next(run_request_single)
@@ -156,6 +158,7 @@ class TestStartAutoNext:
 
     async def test_start_listener_failure_500(self, executor, run_request_single, fake_async_redis):
         """Error - listener success=False → 500"""
+        await fake_async_redis.set("auto-next:listener:heartbeat", "alive")
         result_data = {"success": False, "message": "Failed to spawn process"}
         await fake_async_redis.rpush("auto-next:command_results", json.dumps(result_data))
 
@@ -166,7 +169,7 @@ class TestStartAutoNext:
 
     async def test_start_json_decode_error_500(self, executor, run_request_single, fake_async_redis):
         """Phase3 - JSON decode 실패 → 500"""
-        # brpop returns invalid JSON
+        await fake_async_redis.set("auto-next:listener:heartbeat", "alive")
         with patch.object(
             executor.async_redis, 'brpop',
             new_callable=AsyncMock,
@@ -244,26 +247,26 @@ class TestStopAutoNext:
 
 class TestGetProcessStatus:
 
-    def test_status_running_alive_pid(self, executor, fake_redis):
-        """Right - running + PID 살아있음 → running=True"""
+    def test_status_running_with_heartbeat(self, executor, fake_redis):
+        """Right - running + heartbeat 있음 → running=True"""
+        fake_redis.set("auto-next:listener:heartbeat", "alive")
         fake_redis.set("auto-next:state:status", "running")
         fake_redis.set("auto-next:state:pid", "12345")
         fake_redis.set("auto-next:state:plan_file", "test.md")
         fake_redis.set("auto-next:state:start_time", datetime.now().isoformat())
 
-        with patch.object(executor, '_is_pid_alive', return_value=True):
-            result = executor.get_process_status()
+        result = executor.get_process_status()
         assert result.running is True
         assert result.pid == 12345
         assert result.plan_file == "test.md"
 
-    def test_status_running_dead_pid_auto_cleanup(self, executor, fake_redis):
-        """Cross-check - PID 죽음 → 자동 정리"""
+    def test_status_running_no_heartbeat_auto_cleanup(self, executor, fake_redis):
+        """Cross-check - heartbeat 없음 → stale 자동 정리"""
         fake_redis.set("auto-next:state:status", "running")
         fake_redis.set("auto-next:state:pid", "99999")
+        # heartbeat 없음 → stale
 
-        with patch.object(executor, '_is_pid_alive', return_value=False):
-            result = executor.get_process_status()
+        result = executor.get_process_status()
         assert result.running is False
         assert fake_redis.get("auto-next:state:status") is None
 
@@ -364,10 +367,15 @@ class TestResetRunningState:
 class TestIsPidAlive:
 
     def test_valid_pid_returns_true(self, executor):
-        """Phase3 - 유효 PID → True (handle 반환)"""
+        """Phase3 - 유효 PID → True (handle 반환 + exit_code=STILL_ACTIVE)"""
+        import ctypes
         mock_kernel32 = MagicMock()
         mock_kernel32.OpenProcess.return_value = 1234  # nonzero handle
         mock_kernel32.CloseHandle.return_value = True
+        # GetExitCodeProcess가 exit_code를 259(STILL_ACTIVE)로 채우도록 설정
+        def set_exit_code_alive(handle, ptr):
+            ctypes.cast(ptr, ctypes.POINTER(ctypes.c_ulong)).contents.value = 259
+        mock_kernel32.GetExitCodeProcess.side_effect = set_exit_code_alive
 
         with patch('ctypes.windll') as mock_windll:
             mock_windll.kernel32 = mock_kernel32

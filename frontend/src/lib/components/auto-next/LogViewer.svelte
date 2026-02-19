@@ -11,7 +11,7 @@
 	}
 
 	let lines = $state<ParsedLine[]>([]);
-	let connected = $state<'connected' | 'disconnected' | 'error'>('disconnected');
+	let connected = $state<'connected' | 'disconnected'>('disconnected');
 	let autoScroll = $state(true);
 	let paused = $state(false);
 	let pauseBuffer = $state<ParsedLine[]>([]);
@@ -20,11 +20,8 @@
 	let sseStarted = $state(false);
 	let reconnectCount = $state(0);
 	let redisAvailable = $state(true);
-	let consecutiveErrors = $state(0);
-
 	const MAX_LINES = 500;
 	const SEPARATOR_PATTERN = '════════════════';
-	const MAX_RECONNECT = 3;
 	const BASE_DELAY = 3000;
 
 	// Tag colors for dark background
@@ -118,24 +115,18 @@
 
 	function manualReconnect() {
 		reconnectCount = 0;
-		consecutiveErrors = 0;
 		connectSSE();
 	}
 
 	async function connectSSE() {
 		if (eventSource) eventSource.close();
 
-		// SSE 연결 전 status API로 Redis 상태 확인
+		// SSE 연결 전 status API로 Redis 상태 확인 (실패해도 SSE 연결은 시도)
 		try {
 			const statusRes = await fetch('/api/v1/auto-next/status');
-			if (!statusRes.ok && statusRes.status === 503) {
-				redisAvailable = false;
-				connected = 'error';
-				return;
-			}
-			redisAvailable = true;
+			redisAvailable = statusRes.ok;
 		} catch {
-			// status API 실패해도 SSE 연결은 시도 (API 서버 문제일 수 있음)
+			// API 서버 오프라인이어도 SSE 연결 시도 — onerror에서 재연결 처리
 		}
 
 		eventSource = autoNextLogApi.connectStream();
@@ -143,7 +134,6 @@
 			connected = 'connected';
 			sseStarted = true;
 			reconnectCount = 0;
-			consecutiveErrors = 0;
 		};
 		eventSource.onmessage = (event) => {
 			addLine(event.data, false);
@@ -160,12 +150,6 @@
 			consecutiveErrors++;
 			eventSource?.close();
 			eventSource = null;
-
-			if (consecutiveErrors >= MAX_RECONNECT) {
-				connected = 'error';
-				redisAvailable = false;
-				return;
-			}
 
 			connected = 'disconnected';
 			reconnectCount++;
@@ -216,12 +200,9 @@
 				{:else if connected === 'connected' && !redisAvailable}
 					<div class="w-2 h-2 rounded-full bg-yellow-500"></div>
 					<span class="text-[10px] text-yellow-400">Redis 미연결</span>
-				{:else if connected === 'error'}
-					<div class="w-2 h-2 rounded-full bg-red-500"></div>
-					<span class="text-[10px] text-red-400">{!redisAvailable ? 'Redis 미연결' : '연결 실패'}</span>
 				{:else}
-					<div class="w-2 h-2 rounded-full bg-gray-400"></div>
-					<span class="text-[10px] text-gray-500">재시도 {reconnectCount}/{MAX_RECONNECT}</span>
+					<div class="w-2 h-2 rounded-full bg-gray-400 animate-pulse"></div>
+					<span class="text-[10px] text-gray-500">재연결 중... ({reconnectCount})</span>
 				{/if}
 			</div>
 			{#if paused && pauseBuffer.length > 0}

@@ -72,11 +72,16 @@ class ExecutorService:
         try:
             status = await self.async_redis.get(STATE_KEY + ":status")
             if status == "running":
-                pid = await self.async_redis.get(STATE_KEY + ":pid")
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Already running (PID: {pid})"
-                )
+                # heartbeat가 없으면 stale → 자동 정리 후 시작 진행
+                heartbeat = await self.async_redis.get("auto-next:listener:heartbeat")
+                if heartbeat is None:
+                    logger.warning("[auto-next] running 상태이지만 heartbeat 없음 → stale 정리 후 시작")
+                    self._force_cleanup_state()
+                else:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Already running"
+                    )
         except redis.ConnectionError:
             raise HTTPException(
                 status_code=503,
@@ -340,9 +345,10 @@ class ExecutorService:
                 plan_file = self.redis_client.get(STATE_KEY + ":plan_file")
                 start_time_str = self.redis_client.get(STATE_KEY + ":start_time")
 
-                # PID 생존 확인 → 죽었으면 상태 자동 정리
-                if pid_str and not self._is_pid_alive(int(pid_str)):
-                    logger.warning(f"[auto-next] PID {pid_str} 죽음 감지, 상태 자동 정리")
+                # heartbeat 없으면 stale → 상태 자동 정리
+                heartbeat = self.redis_client.get("auto-next:listener:heartbeat")
+                if heartbeat is None:
+                    logger.warning("[auto-next] heartbeat 없음 → stale 상태 자동 정리")
                     self._force_cleanup_state()
                     return RunStatusResponse(
                         running=False,
