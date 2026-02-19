@@ -8,36 +8,24 @@
 		Copy,
 		Brain,
 		FolderTree,
-		Clock,
-		Search,
-		Tags,
-		ListChecks,
 		Settings,
 		Menu,
-		X,
-		CheckCircle2
+		X
 	} from 'lucide-svelte';
 
 	const modules = [
 		{ id: 'dashboard', label: '대시보드', path: '/classify/dashboard', icon: LayoutDashboard },
 		{ id: 'scanner', label: '스캐너', path: '/classify/folders', icon: FolderSearch },
-		{ id: 'gallery', label: '갤러리', path: '/classify/gallery', icon: Images },
-		{ id: 'duplicates', label: '중복', path: '/classify/duplicates', icon: Copy },
-		{ id: 'ai', label: 'AI 분류', path: '/classify/ai', icon: Brain },
+		{ id: 'images', label: '이미지', path: '/classify/images', icon: Images },
+		{ id: 'duplicates', label: '중복/유사', path: '/classify/duplicates', icon: Copy },
 		{ id: 'categories', label: '카테고리', path: '/classify/categories', icon: FolderTree },
-		{ id: 'clusters', label: '클러스터', path: '/classify/clusters', icon: Clock },
-		{ id: 'similar', label: '유사도', path: '/classify/similar', icon: Search },
-		{ id: 'tags', label: '태그', path: '/classify/tags', icon: Tags },
-		{ id: 'rules', label: '규칙', path: '/classify/rules', icon: ListChecks },
-		{ id: 'settings', label: '설정', path: '/classify/settings', icon: Settings },
-		{ id: 'history', label: '이력', path: '/classify/history', icon: Clock },
-		{ id: 'review', label: '검토', path: '/classify/review', icon: CheckCircle2 }
+		{ id: 'settings', label: '설정', path: '/classify/settings', icon: Settings }
 	];
 
 	let mobileMenuOpen = $state(false);
 
 	function isActive(path: string): boolean {
-		return $page.url.pathname === path;
+		return $page.url.pathname.startsWith(path);
 	}
 </script>
 

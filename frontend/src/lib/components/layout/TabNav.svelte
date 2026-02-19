@@ -4,8 +4,10 @@
    * - variant='primary': 언더라인 스타일 (기존 PrimaryTabNav)
    * - variant='secondary': 배경색 스타일 (기존 SecondaryTabNav)
    * - variant='underline': 간단한 언더라인 스타일
+   * - queryParam: URL 쿼리파라미터 동기화 (예: 'tab' → ?tab=gallery)
    */
   import { page } from '$app/stores';
+  import { goto } from '$app/navigation';
 
   type Tab = {
     id: string;
@@ -20,9 +22,18 @@
     activeTab?: string;
     variant?: 'primary' | 'secondary' | 'underline';
     urlBased?: boolean;
+    queryParam?: string;
   }
 
-  let { tabs, activeTab = $bindable(), variant = 'primary', urlBased = false }: Props = $props();
+  let { tabs, activeTab = $bindable(), variant = 'primary', urlBased = false, queryParam }: Props = $props();
+
+  // queryParam 모드: URL searchParams → activeTab 양방향 동기화
+  $effect(() => {
+    if (queryParam) {
+      const paramValue = $page.url.searchParams.get(queryParam);
+      activeTab = paramValue || tabs[0]?.id;
+    }
+  });
 
   const primaryStyles = {
     active: 'border-primary text-primary',
@@ -39,21 +50,33 @@
     inactive: 'border-transparent text-muted-foreground hover:text-primary',
   };
 
-  function getStyles(isActive: boolean) {
+  function getStyles(active: boolean) {
     if (variant === 'secondary') {
-      return isActive ? secondaryStyles.active : secondaryStyles.inactive;
+      return active ? secondaryStyles.active : secondaryStyles.inactive;
     }
     if (variant === 'underline') {
-      return isActive ? underlineStyles.active : underlineStyles.inactive;
+      return active ? underlineStyles.active : underlineStyles.inactive;
     }
-    return isActive ? primaryStyles.active : primaryStyles.inactive;
+    return active ? primaryStyles.active : primaryStyles.inactive;
   }
 
-  function isActive(tab: Tab): boolean {
+  function isTabActive(tab: Tab): boolean {
+    if (queryParam) {
+      const paramValue = $page.url.searchParams.get(queryParam);
+      return (paramValue || tabs[0]?.id) === tab.id;
+    }
     if (urlBased && tab.href) {
       return $page.url.pathname === tab.href;
     }
     return activeTab === tab.id;
+  }
+
+  function handleTabClick(tab: Tab) {
+    if (queryParam) {
+      goto(`${$page.url.pathname}?${queryParam}=${tab.id}`, { replaceState: true });
+    } else {
+      activeTab = tab.id;
+    }
   }
 </script>
 
@@ -63,7 +86,7 @@
       {#if urlBased && tab.href}
         <a
           href={tab.href}
-          class="py-1.5 px-3 rounded-md text-sm font-medium transition-colors {getStyles(isActive(tab))}"
+          class="py-1.5 px-3 rounded-md text-sm font-medium transition-colors {getStyles(isTabActive(tab))}"
         >
           {#if tab.icon}<span class="mr-1">{tab.icon}</span>{/if}
           {tab.label}
@@ -73,8 +96,8 @@
         </a>
       {:else}
         <button
-          onclick={() => activeTab = tab.id}
-          class="py-1.5 px-3 rounded-md text-sm font-medium transition-colors {getStyles(isActive(tab))}"
+          onclick={() => handleTabClick(tab)}
+          class="py-1.5 px-3 rounded-md text-sm font-medium transition-colors {getStyles(isTabActive(tab))}"
         >
           {#if tab.icon}<span class="mr-1">{tab.icon}</span>{/if}
           {tab.label}
@@ -92,7 +115,7 @@
         {#if urlBased && tab.href}
           <a
             href={tab.href}
-            class="py-3 px-5 border-b-2 font-medium text-base transition-colors {getStyles(isActive(tab))}"
+            class="py-3 px-5 border-b-2 font-medium text-base transition-colors {getStyles(isTabActive(tab))}"
           >
             {#if tab.icon}<span class="mr-2">{tab.icon}</span>{/if}
             {tab.label}
@@ -102,8 +125,8 @@
           </a>
         {:else}
           <button
-            onclick={() => activeTab = tab.id}
-            class="py-3 px-5 border-b-2 font-medium text-base transition-colors {getStyles(isActive(tab))}"
+            onclick={() => handleTabClick(tab)}
+            class="py-3 px-5 border-b-2 font-medium text-base transition-colors {getStyles(isTabActive(tab))}"
           >
             {#if tab.icon}<span class="mr-2">{tab.icon}</span>{/if}
             {tab.label}
