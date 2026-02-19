@@ -163,6 +163,77 @@ async def approve_files(
     return {"status": "ok", "approved_count": len(request.file_ids)}
 
 
+class BulkClassifyRequest(BaseModel):
+    """파일 일괄 카테고리 지정 요청"""
+    file_ids: list[int]
+    category_id: int
+
+
+@router.put("/bulk-classify")
+async def bulk_classify_files(
+    request: BulkClassifyRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    선택된 파일들에 카테고리 지정 (status → user_classified)
+    """
+    if not request.file_ids:
+        raise HTTPException(status_code=400, detail="파일 ID가 필요합니다.")
+
+    db.execute(
+        text("""
+            UPDATE file_classifications
+            SET final_category_id = :cat_id, status = 'user_classified'
+            WHERE id IN :ids
+        """),
+        {"cat_id": request.category_id, "ids": tuple(request.file_ids)}
+    )
+    db.commit()
+
+    return {"status": "ok", "classified_count": len(request.file_ids)}
+
+
+class BulkDeleteRequest(BaseModel):
+    """파일 일괄 삭제 요청"""
+    file_ids: list[int]
+
+
+@router.post("/bulk-delete")
+async def bulk_delete_files(
+    request: BulkDeleteRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    선택된 파일들을 DB에서 삭제 (연관 데이터 포함)
+    """
+    if not request.file_ids:
+        raise HTTPException(status_code=400, detail="파일 ID가 필요합니다.")
+
+    ids = tuple(request.file_ids)
+
+    # 연관 데이터 정리
+    for table in ["image_features", "file_tags", "duplicate_members"]:
+        try:
+            db.execute(text(f"DELETE FROM {table} WHERE file_id IN :ids"), {"ids": ids})
+        except Exception:
+            pass
+
+    # 썸네일 파일 삭제
+    for file_id in request.file_ids:
+        thumb = get_thumbnail_path(file_id, settings)
+        if thumb.exists():
+            try:
+                thumb.unlink()
+            except Exception:
+                pass
+
+    # 본 테이블 삭제
+    db.execute(text("DELETE FROM file_classifications WHERE id IN :ids"), {"ids": ids})
+    db.commit()
+
+    return {"status": "ok", "deleted_count": len(request.file_ids)}
+
+
 @router.post("/{file_id}/rollback")
 async def rollback_file(
     file_id: int,
