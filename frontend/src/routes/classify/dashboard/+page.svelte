@@ -228,6 +228,7 @@
 
 	function resetStages() {
 		pipelineStages = pipelineStages.map((s) => ({ ...s, status: 'idle' }));
+		clientLogs = [];
 	}
 
 	async function pollUntilDone(stageId: string, signal?: AbortSignal): Promise<boolean> {
@@ -285,6 +286,8 @@
 
 				const res = await fetchWithTimeout(step.url, { method: step.method });
 				if (!res.ok) {
+					const detail = await res.text().catch(() => '');
+					addClientLog(step.id, `${res.status} ${res.statusText}${detail ? ' — ' + detail.slice(0, 200) : ''}`);
 					updateStage(step.id, 'error');
 					break;
 				}
@@ -318,6 +321,9 @@
 		try {
 			const res = await fetchWithTimeout('/api/ic/classify/start', { method: 'POST' });
 			if (!res.ok) {
+				const detail = await res.text().catch(() => '');
+				addClientLog('classify', `${res.status} ${res.statusText}${detail ? ' — ' + detail.slice(0, 200) : ''}`);
+				logPanelExpanded = true;
 				updateStage('classify', 'error');
 				return;
 			}
@@ -338,6 +344,9 @@
 		try {
 			const res = await fetchWithTimeout('/api/ic/duplicates/detect', { method: 'POST' });
 			if (!res.ok) {
+				const detail = await res.text().catch(() => '');
+				addClientLog('duplicate', `${res.status} ${res.statusText}${detail ? ' — ' + detail.slice(0, 200) : ''}`);
+				logPanelExpanded = true;
 				updateStage('duplicates', 'error');
 				return;
 			}
@@ -351,6 +360,17 @@
 
 	// === 로그 패널 ===
 	let logPanelExpanded = $state(false);
+	let clientLogs = $state<{ stage: string; message: string; timestamp: string }[]>([]);
+
+	function addClientLog(stage: string, message: string) {
+		clientLogs.push({ stage, message, timestamp: new Date().toISOString() });
+	}
+
+	let mergedLogs = $derived(
+		[...(pipelineDetail?.logs ?? []), ...clientLogs].sort((a, b) =>
+			a.timestamp.localeCompare(b.timestamp)
+		)
+	);
 
 	// 단계별 상세 데이터 헬퍼
 	function getStageDetail(stageId: string): StageDetail | null {
@@ -667,7 +687,7 @@
 		</div>
 
 		<!-- 파이프라인 로그 패널 (실행 중이거나 로그가 있을 때) -->
-		{#if pipelineRunning || (pipelineDetail?.logs && pipelineDetail.logs.length > 0)}
+		{#if pipelineRunning || mergedLogs.length > 0}
 			<div class="rounded-lg border bg-card">
 				<button
 					onclick={() => (logPanelExpanded = !logPanelExpanded)}
@@ -676,9 +696,9 @@
 					<div class="flex items-center gap-2">
 						<Terminal class="h-4 w-4 text-muted-foreground" />
 						<span>파이프라인 로그</span>
-						{#if pipelineDetail?.logs}
+						{#if mergedLogs.length > 0}
 							<span class="text-xs text-muted-foreground font-normal">
-								({pipelineDetail.logs.length}건)
+								({mergedLogs.length}건)
 							</span>
 						{/if}
 					</div>
@@ -688,27 +708,29 @@
 						<ChevronDown class="h-4 w-4 text-muted-foreground" />
 					{/if}
 				</button>
-				{#if logPanelExpanded && pipelineDetail?.logs}
+				{#if logPanelExpanded}
 					<div class="border-t px-5 py-3 max-h-[200px] overflow-y-auto">
 						<div class="space-y-1 font-mono text-xs">
-							{#each pipelineDetail.logs as log}
-								{@const stageColor =
-									log.stage === 'scan'
+							{#each mergedLogs as log}
+								{@const isError = /^\d{3}\s/.test(log.message)}
+								{@const stageColor = isError
+									? 'text-red-500'
+									: log.stage === 'scan'
 										? 'text-blue-500'
 										: log.stage === 'thumbnail'
 											? 'text-violet-500'
 											: log.stage === 'duplicate'
 												? 'text-amber-500'
 												: 'text-emerald-500'}
-								<div class="flex gap-2">
+								<div class="flex gap-2 {isError ? 'bg-red-500/10 rounded px-1 -mx-1' : ''}">
 									<span class="text-muted-foreground/50 shrink-0">
 										{log.timestamp?.slice(11, 19) ?? ''}
 									</span>
 									<span class="{stageColor} shrink-0 w-16">[{log.stage}]</span>
-									<span class="text-foreground/80">{log.message}</span>
+									<span class="{isError ? 'text-red-400' : 'text-foreground/80'}">{log.message}</span>
 								</div>
 							{/each}
-							{#if pipelineDetail.logs.length === 0}
+							{#if mergedLogs.length === 0}
 								<p class="text-muted-foreground text-center py-2">로그 없음</p>
 							{/if}
 						</div>

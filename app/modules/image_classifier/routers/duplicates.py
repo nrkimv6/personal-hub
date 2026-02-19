@@ -35,8 +35,8 @@ class DetectRequest(BaseModel):
 
 @router.post("/detect")
 async def start_detect_duplicates(
-    request: DetectRequest,
     background_tasks: BackgroundTasks,
+    request: DetectRequest = DetectRequest(),
     db: Session = Depends(get_db),
 ):
     """중복 탐지 시작 (백그라운드)"""
