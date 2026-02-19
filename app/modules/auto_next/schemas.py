@@ -94,13 +94,13 @@ class PlanFileResponse(BaseModel):
     filename: str
     status: str
     progress: PlanProgressResponse
-    source: str = "common"  # common, 프로젝트명, external
+    source: str = "common"  # 경로 기반 자동 결정 (common, 프로젝트명, 폴더명)
     ignored: bool = False  # 완료/빈 plan
-    external_type: Optional[str] = None  # "file" | "folder" | None (external source일 때만 설정)
+    path_type: Optional[str] = None  # "file" | "folder" | None (등록된 경로일 때만 설정)
 
 
-class ExternalPathResponse(BaseModel):
-    """등록된 외부 경로 응답 스키마"""
+class RegisteredPathResponse(BaseModel):
+    """등록된 경로 응답 스키마"""
     path: str
     type: str  # "file" | "folder"
     plan_count: int
@@ -161,7 +161,7 @@ __all__ = [
     'RunStatusResponse',
     'PlanFileResponse',
     'PlanProgressResponse',
-    'ExternalPathResponse',
+    'RegisteredPathResponse',
     'HistoryEntry',
     'DuplicateTaskResponse',
     'LogResponse',

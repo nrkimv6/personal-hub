@@ -84,10 +84,10 @@ export interface PlanFileResponse {
 	progress: PlanProgressResponse;
 	source: string;
 	ignored: boolean;
-	external_type: 'file' | 'folder' | null;
+	path_type: 'file' | 'folder' | null;
 }
 
-export interface ExternalPathResponse {
+export interface RegisteredPathResponse {
 	path: string;
 	type: 'file' | 'folder';
 	plan_count: number;
@@ -259,20 +259,20 @@ export const autoNextPlanApi = {
 
 	sync: () => autoNextRequest<{ synced: number }>('/plans/sync', { method: 'POST' }),
 
-	addExternal: (path: string) =>
-		autoNextRequest<{ success: boolean; path: string; type: 'file' | 'folder' }>('/plans/add-external', {
+	addPath: (path: string) =>
+		autoNextRequest<{ success: boolean; path: string; type: 'file' | 'folder' }>('/plans/paths', {
 			method: 'POST',
 			body: JSON.stringify({ path })
 		}),
 
-	removeExternal: (path: string) =>
-		autoNextRequest<{ success: boolean }>('/plans/external', {
+	removePath: (path: string) =>
+		autoNextRequest<{ success: boolean }>('/plans/paths', {
 			method: 'DELETE',
 			body: JSON.stringify({ path })
 		}),
 
-	listExternalPaths: () =>
-		autoNextRequest<ExternalPathResponse[]>('/plans/external-paths'),
+	listPaths: () =>
+		autoNextRequest<RegisteredPathResponse[]>('/plans/paths'),
 
 	items: (encodedPath: string) =>
 		autoNextRequest<PlanDetailResponse>(`/plans/${encodedPath}/items`),

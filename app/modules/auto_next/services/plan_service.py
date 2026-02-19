@@ -1,6 +1,7 @@
 """plan 문서 관리 서비스"""
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import List, Optional
@@ -9,33 +10,84 @@ from app.modules.auto_next.config import config
 from app.modules.auto_next.schemas import (
     PlanFileResponse, PlanProgressResponse,
     PlanDetailResponse, PlanPhaseResponse, PlanItemResponse,
-    ExternalPathResponse,
+    RegisteredPathResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class PlanService:
     """plan 문서 탐색 및 파싱 서비스"""
 
     def __init__(self):
-        self._external_plans: List[str] = []
+        self._registered_paths: List[str] = []
         self._ignored_plans: List[str] = []
-        self._load_external_plans()
+        self._migrate_to_registered_paths()
+        self._load_registered_paths()
         self._load_ignored_plans()
 
-    def _load_external_plans(self):
-        """외부 plan 목록 로드 (JSON 파일)"""
-        path = config.EXTERNAL_PLANS_FILE
+    # ========== 경로 저장/로드 ==========
+
+    def _migrate_to_registered_paths(self):
+        """external_plans.json → registered_paths.json 마이그레이션 (1회성)"""
+        reg_path = config.REGISTERED_PATHS_FILE
+        if reg_path.exists():
+            return  # 이미 마이그레이션 완료
+
+        paths: List[str] = []
+
+        # 기존 external_plans.json에서 가져오기
+        ext_path = config.EXTERNAL_PLANS_FILE
+        if ext_path.exists():
+            try:
+                paths = json.loads(ext_path.read_text(encoding="utf-8"))
+                logger.info(f"[마이그레이션] external_plans.json에서 {len(paths)}개 경로 로드")
+            except Exception:
+                paths = []
+
+        # WTOOLS_BASE_DIR 시드: 존재하는 프로젝트 plan 폴더를 자동 등록
+        existing = set(paths)
+        base = config.WTOOLS_BASE_DIR
+        if base.exists():
+            # common/docs/plan
+            common_dir = base / config.PLAN_DIR
+            if common_dir.exists():
+                resolved = str(common_dir.resolve())
+                if resolved not in existing:
+                    paths.append(resolved)
+                    existing.add(resolved)
+
+            # 각 프로젝트의 docs/plan
+            for project in config.PROJECT_DIRS:
+                project_dir = base / project / "docs" / "plan"
+                if project_dir.exists():
+                    resolved = str(project_dir.resolve())
+                    if resolved not in existing:
+                        paths.append(resolved)
+                        existing.add(resolved)
+
+            logger.info(f"[마이그레이션] WTOOLS 시드 완료 — 총 {len(paths)}개 경로")
+
+        # 저장
+        if paths:
+            reg_path.parent.mkdir(parents=True, exist_ok=True)
+            reg_path.write_text(json.dumps(paths, ensure_ascii=False, indent=2), encoding="utf-8")
+            logger.info(f"[마이그레이션] registered_paths.json 생성 완료 ({len(paths)}개)")
+
+    def _load_registered_paths(self):
+        """등록된 경로 목록 로드 (JSON 파일)"""
+        path = config.REGISTERED_PATHS_FILE
         if path.exists():
             try:
-                self._external_plans = json.loads(path.read_text(encoding="utf-8"))
+                self._registered_paths = json.loads(path.read_text(encoding="utf-8"))
             except Exception:
-                self._external_plans = []
+                self._registered_paths = []
 
-    def _save_external_plans(self):
-        """외부 plan 목록 저장"""
-        path = config.EXTERNAL_PLANS_FILE
+    def _save_registered_paths(self):
+        """등록된 경로 목록 저장"""
+        path = config.REGISTERED_PATHS_FILE
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self._external_plans, ensure_ascii=False, indent=2), encoding="utf-8")
+        path.write_text(json.dumps(self._registered_paths, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _load_ignored_plans(self):
         """수동 무시 plan 목록 로드"""
@@ -51,6 +103,8 @@ class PlanService:
         path = config.IGNORED_PLANS_FILE
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self._ignored_plans, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # ========== 경로 관리 ==========
 
     def add_to_ignore(self, plan_path: str) -> bool:
         """plan을 수동 무시 목록에 추가"""
@@ -70,56 +124,42 @@ class PlanService:
             return True
         return False
 
-    def add_external_plan(self, plan_path: str) -> bool:
-        """외부 plan 경로 추가 (영구 저장)"""
+    def add_path(self, plan_path: str) -> bool:
+        """등록 경로 추가 (영구 저장)"""
         resolved = str(Path(plan_path).resolve())
-        if resolved not in self._external_plans:
-            self._external_plans.append(resolved)
-            self._save_external_plans()
+        if resolved not in self._registered_paths:
+            self._registered_paths.append(resolved)
+            self._save_registered_paths()
             return True
         return False
 
-    def remove_external_plan(self, plan_path: str) -> bool:
-        """외부 plan 경로 제거"""
+    def remove_path(self, plan_path: str) -> bool:
+        """등록 경로 제거"""
         resolved = str(Path(plan_path).resolve())
-        if resolved in self._external_plans:
-            self._external_plans.remove(resolved)
-            self._save_external_plans()
+        if resolved in self._registered_paths:
+            self._registered_paths.remove(resolved)
+            self._save_registered_paths()
             return True
         return False
+
+    # ========== plan 목록 ==========
 
     def list_plans(self, include_ignored: bool = False) -> List[PlanFileResponse]:
         """
-        plan 목록 조회 (프로젝트별 탐색 포함)
+        plan 목록 조회 — 등록된 경로(폴더/파일) 순회
 
-        탐색 범위:
-        1. common/docs/plan/*.md
-        2. 각 프로젝트의 docs/plan/*.md
-        3. 외부 추가된 plan 파일
+        모든 경로를 동등하게 취급 (고정/외부 구분 없음)
         """
         seen: set[str] = set()
         results: List[PlanFileResponse] = []
 
-        # Step 1: common/docs/plan
-        common_plan_dir = config.WTOOLS_BASE_DIR / config.PLAN_DIR
-        self._scan_plan_dir(common_plan_dir, seen, results, include_ignored)
-
-        # Step 2: 각 프로젝트의 docs/plan
-        for project in config.PROJECT_DIRS:
-            project_plan_dir = config.WTOOLS_BASE_DIR / project / "docs" / "plan"
-            self._scan_plan_dir(project_plan_dir, seen, results, include_ignored)
-
-        # Step 3: 외부 plan 파일/폴더
-        for ext_path in self._external_plans:
-            p = Path(ext_path)
+        for reg_path in self._registered_paths:
+            p = Path(reg_path)
             if not p.exists():
                 continue
             if p.is_dir():
-                # 폴더이면 내부 *.md 전체 스캔 (source_override="external", external_type="folder")
-                self._scan_plan_dir(p, seen, results, include_ignored,
-                                    source_override="external", external_type="folder")
-            else:
-                # 파일이면 기존 로직 유지
+                self._scan_plan_dir(p, seen, results, include_ignored, path_type="folder")
+            elif p.is_file():
                 if str(p) not in seen:
                     seen.add(str(p))
                     status = self.get_plan_status(p)
@@ -132,9 +172,9 @@ class PlanService:
                                 filename=p.name,
                                 status=status,
                                 progress=progress,
-                                source="external",
+                                source=self._resolve_source(p.parent),
                                 ignored=is_ignored,
-                                external_type="file",
+                                path_type="file",
                             )
                         )
 
@@ -146,14 +186,30 @@ class PlanService:
         all_plans = self.list_plans(include_ignored=True)
         return [p for p in all_plans if p.ignored]
 
+    def _resolve_source(self, path: Path) -> str:
+        """경로에서 source 자동 결정
+
+        - .../프로젝트/docs/plan → 프로젝트명
+        - .../common/docs/plan → "common"
+        - .../폴더명 → 폴더명
+        """
+        parts = path.parts
+        for i, part in enumerate(parts):
+            if part == "docs" and i + 1 < len(parts) and parts[i + 1] == "plan":
+                # docs/plan 직전 디렉토리 = 프로젝트명
+                if i > 0:
+                    return parts[i - 1]
+                return "common"
+        # docs/plan 패턴 없음 → 폴더명 자체
+        return path.name or "unknown"
+
     def _scan_plan_dir(
         self,
         plan_dir: Path,
         seen: set,
         results: List[PlanFileResponse],
         include_ignored: bool,
-        source_override: Optional[str] = None,
-        external_type: Optional[str] = None,
+        path_type: Optional[str] = None,
     ):
         """plan 디렉토리 스캔
 
@@ -162,24 +218,12 @@ class PlanService:
             seen: 이미 처리된 경로 집합 (중복 방지)
             results: 결과 목록 (append)
             include_ignored: True이면 무시된 plan도 포함
-            source_override: None이면 자동 결정, 문자열이면 해당 값 사용
-                (외부 폴더는 WTOOLS_BASE_DIR 바깥이라 relative_to 실패 → "external" 강제 지정)
-            external_type: "folder" | None — PlanFileResponse.external_type에 설정할 값
+            path_type: "folder" | None — PlanFileResponse.path_type에 설정할 값
         """
         if not plan_dir.exists():
             return
 
-        # source 결정: override가 없으면 WTOOLS_BASE_DIR 상대경로에서 추출
-        if source_override is not None:
-            source = source_override
-        else:
-            base = config.WTOOLS_BASE_DIR
-            rel = ""
-            try:
-                rel = str(plan_dir.relative_to(base))
-            except ValueError:
-                pass
-            source = rel.split("\\")[0] if "\\" in rel else rel.split("/")[0] if "/" in rel else "common"
+        source = self._resolve_source(plan_dir)
 
         for plan_file in plan_dir.glob("*.md"):
             if plan_file.stem.endswith("_todo"):
@@ -202,7 +246,7 @@ class PlanService:
                         progress=progress,
                         source=source,
                         ignored=is_ignored,
-                        external_type=external_type,
+                        path_type=path_type,
                     )
                 )
 
@@ -218,6 +262,8 @@ class PlanService:
         if progress.total > 0 and progress.done == progress.total:
             return True
         return False
+
+    # ========== plan 파싱 ==========
 
     def get_plan_progress(self, path: Path) -> PlanProgressResponse:
         """plan 진행률 파싱"""
@@ -350,27 +396,28 @@ class PlanService:
             progress=progress,
         )
 
-    def list_external_paths(self) -> List[ExternalPathResponse]:
-        """등록된 외부 경로 목록 조회 (타입 + plan_count 포함)"""
+    # ========== 등록 경로 관리 ==========
+
+    def list_registered_paths(self) -> List[RegisteredPathResponse]:
+        """등록된 경로 목록 조회 (타입 + plan_count 포함)"""
         result = []
-        for ext_path in self._external_plans:
-            p = Path(ext_path)
+        for reg_path in self._registered_paths:
+            p = Path(reg_path)
             if p.is_dir():
-                # 폴더: _todo 제외 *.md 개수
                 plan_count = sum(
                     1 for f in p.glob("*.md") if not f.stem.endswith("_todo")
                 ) if p.exists() else 0
-                result.append(ExternalPathResponse(path=ext_path, type="folder", plan_count=plan_count))
+                result.append(RegisteredPathResponse(path=reg_path, type="folder", plan_count=plan_count))
             else:
-                result.append(ExternalPathResponse(path=ext_path, type="file", plan_count=1 if p.exists() else 0))
+                result.append(RegisteredPathResponse(path=reg_path, type="file", plan_count=1 if p.exists() else 0))
         return result
 
-    def validate_external_path(self, path: str) -> bool:
-        """외부 경로 화이트리스트 검증"""
+    def validate_path(self, path: str) -> bool:
+        """경로 화이트리스트 검증"""
         path_obj = Path(path).resolve()
         path_str = str(path_obj)
 
-        for allowed in config.ALLOWED_EXTERNAL_PATHS:
+        for allowed in config.ALLOWED_PATHS:
             if path_str.startswith(allowed):
                 return True
         return False
