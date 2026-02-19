@@ -20,6 +20,7 @@ import json
 import logging
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -56,9 +57,36 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+LOG_CHANNEL = "auto-next:logs"
+
 # 전역 프로세스 관리
 _current_process: Optional[subprocess.Popen] = None
 _current_log_file: Optional[Path] = None
+_stream_thread: Optional[threading.Thread] = None
+
+
+def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Redis):
+    """프로세스 stdout을 라인별로 읽어 파일 기록 + Redis publish 동시 수행"""
+    try:
+        for line in process.stdout:
+            stripped = line.rstrip('\n')
+            # 파일에 기록
+            log_handle.write(line)
+            log_handle.flush()
+            # Redis Pub/Sub으로 publish
+            try:
+                redis_client.publish(LOG_CHANNEL, stripped)
+            except redis.ConnectionError:
+                pass  # Redis 끊겨도 파일 기록은 계속
+    except Exception as e:
+        logger.error(f"Output streaming error: {e}")
+    finally:
+        try:
+            log_handle.flush()
+            log_handle.close()
+        except Exception:
+            pass
+        logger.info("Output streaming thread finished")
 
 
 def start_auto_next(command: Dict, redis_client: redis.Redis) -> Dict:
@@ -123,7 +151,7 @@ def start_auto_next(command: Dict, redis_client: redis.Redis) -> Dict:
     log_file = LOG_DIR / f"auto-next-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
 
     try:
-        # subprocess 실행
+        # subprocess 실행 — stdout을 PIPE로 받아 스레드에서 파일+Redis 동시 기록
         log_handle = open(log_file, "w", encoding="utf-8")
 
         # UTF-8 강제
@@ -135,7 +163,7 @@ def start_auto_next(command: Dict, redis_client: redis.Redis) -> Dict:
         process = subprocess.Popen(
             cmd,
             cwd=str(AUTO_NEXT_MODULE_PATH),
-            stdout=log_handle,
+            stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             env=env,
@@ -144,18 +172,21 @@ def start_auto_next(command: Dict, redis_client: redis.Redis) -> Dict:
         _current_process = process
         _current_log_file = log_file
 
+        # 별도 스레드에서 stdout → 파일 + Redis publish
+        global _stream_thread
+        _stream_thread = threading.Thread(
+            target=_stream_output,
+            args=(process, log_handle, redis_client),
+            daemon=True,
+        )
+        _stream_thread.start()
+
         # Redis에 상태 저장
-        state = {
-            "pid": process.pid,
-            "plan_file": plan_file or "ALL",
-            "log_file_path": str(log_file),
-            "start_time": datetime.now().isoformat(),
-            "status": "running",
-        }
         redis_client.set(STATE_KEY + ":log_file_path", str(log_file))
+        redis_client.set(STATE_KEY + ":stream_log_path", str(log_file))
         redis_client.set(STATE_KEY + ":pid", process.pid)
         redis_client.set(STATE_KEY + ":plan_file", plan_file or "ALL")
-        redis_client.set(STATE_KEY + ":start_time", state["start_time"])
+        redis_client.set(STATE_KEY + ":start_time", datetime.now().isoformat())
         redis_client.set(STATE_KEY + ":status", "running")
 
         logger.info(f"auto-next started (PID: {process.pid}, log: {log_file})")
@@ -201,6 +232,12 @@ def stop_auto_next(redis_client: redis.Redis) -> Dict:
             _current_process.wait()
 
         logger.info("auto-next stopped")
+
+        # 스트리밍 스레드 정리
+        global _stream_thread
+        if _stream_thread and _stream_thread.is_alive():
+            _stream_thread.join(timeout=5)
+        _stream_thread = None
 
         # Redis 상태 업데이트
         redis_client.set(STATE_KEY + ":status", "stopped")

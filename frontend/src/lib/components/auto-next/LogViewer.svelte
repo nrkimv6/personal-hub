@@ -19,7 +19,10 @@
 	let eventSource: EventSource | null = null;
 	let sseStarted = $state(false);
 	let reconnectCount = $state(0);
+	let consecutiveErrors = $state(0);
 	let redisAvailable = $state(true);
+	let processRunning = $state<boolean | null>(null);
+	let processPid = $state<number | null>(null);
 	const MAX_LINES = 500;
 	const SEPARATOR_PATTERN = '════════════════';
 	const BASE_DELAY = 3000;
@@ -118,22 +121,34 @@
 		connectSSE();
 	}
 
+	async function fetchStatus() {
+		try {
+			const statusRes = await fetch('/api/v1/auto-next/status');
+			if (statusRes.ok) {
+				redisAvailable = true;
+				const data = await statusRes.json();
+				processRunning = data.running ?? null;
+				processPid = data.pid ?? null;
+			} else {
+				redisAvailable = false;
+			}
+		} catch {
+			// API 서버 오프라인
+		}
+	}
+
 	async function connectSSE() {
 		if (eventSource) eventSource.close();
 
-		// SSE 연결 전 status API로 Redis 상태 확인 (실패해도 SSE 연결은 시도)
-		try {
-			const statusRes = await fetch('/api/v1/auto-next/status');
-			redisAvailable = statusRes.ok;
-		} catch {
-			// API 서버 오프라인이어도 SSE 연결 시도 — onerror에서 재연결 처리
-		}
+		// SSE 연결 전 status API로 실행 상태 + Redis 상태 확인
+		await fetchStatus();
 
 		eventSource = autoNextLogApi.connectStream();
 		eventSource.onopen = () => {
 			connected = 'connected';
 			sseStarted = true;
 			reconnectCount = 0;
+			consecutiveErrors = 0;
 		};
 		eventSource.onmessage = (event) => {
 			addLine(event.data, false);
@@ -146,13 +161,14 @@
 		eventSource.addEventListener('connected', () => {
 			redisAvailable = true;
 		});
-		eventSource.onerror = () => {
+		eventSource.onerror = async () => {
 			consecutiveErrors++;
 			eventSource?.close();
 			eventSource = null;
 
 			connected = 'disconnected';
 			reconnectCount++;
+			await fetchStatus();
 			setTimeout(connectSSE, getReconnectDelay());
 		};
 	}
@@ -205,6 +221,11 @@
 					<span class="text-[10px] text-gray-500">재연결 중... ({reconnectCount})</span>
 				{/if}
 			</div>
+			{#if processRunning !== null}
+				<span class="text-[10px] px-1.5 py-0.5 rounded {processRunning ? 'text-cyan-400 bg-cyan-500/20' : 'text-gray-500 bg-gray-500/20'}">
+					{processRunning ? `실행 중${processPid ? ` (PID: ${processPid})` : ''}` : '정지됨'}
+				</span>
+			{/if}
 			{#if paused && pauseBuffer.length > 0}
 				<span class="text-[10px] text-yellow-400 bg-yellow-500/20 px-1.5 py-0.5 rounded">
 					+{pauseBuffer.length} 버퍼
