@@ -142,7 +142,7 @@ class FeedbackLearner:
                 folder_hint = '/'.join(parts[-3:-1])  # 상위 2개 폴더
 
                 patterns.append({
-                    "type": "folder",
+                    "type": "folder_path",
                     "pattern": folder_hint,
                     "category_id": category_id,
                     "confidence": min(count / 20.0, 1.0),
@@ -267,7 +267,7 @@ class FeedbackLearner:
             if rule_type == "filename":
                 if pattern.lower() in filename.lower():
                     matched = True
-            elif rule_type == "folder":
+            elif rule_type == "folder_path":
                 if pattern in file_path:
                     matched = True
             elif rule_type == "keyword":

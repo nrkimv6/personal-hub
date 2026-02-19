@@ -66,6 +66,49 @@ class ImageClassifierSettings(BaseSettings):
         env_prefix = "IC_"  # 환경변수 접두사: IC_SCAN_ROOT_FOLDERS 등
         case_sensitive = False
 
+    def save_settings_to_file(self, file_path: str):
+        """설정을 지정한 경로의 JSON 파일에 저장"""
+        settings_dict = {
+            "SCAN_ROOT_FOLDERS": self.SCAN_ROOT_FOLDERS,
+            "AI_MODE": self.AI_MODE,
+            "CLAUDE_CLI_PATH": self.CLAUDE_CLI_PATH,
+            "GEMINI_CLI_PATH": self.GEMINI_CLI_PATH,
+            "CLI_MAX_WORKERS": self.CLI_MAX_WORKERS,
+            "CLI_TIMEOUT_SECONDS": self.CLI_TIMEOUT_SECONDS,
+            "CLUSTER_GAP_MINUTES": self.CLUSTER_GAP_MINUTES,
+            "TARGET_ROOT_FOLDER": self.TARGET_ROOT_FOLDER,
+            "USE_TRASH": self.USE_TRASH,
+            "MAX_FILES_PER_SCAN": self.MAX_FILES_PER_SCAN,
+            "PHASH_DUPLICATE_THRESHOLD": self.PHASH_DUPLICATE_THRESHOLD,
+            "CLIP_BATCH_SIZE": self.CLIP_BATCH_SIZE,
+            "CLIP_USE_GPU": self.CLIP_USE_GPU,
+            "FAISS_SIMILARITY_THRESHOLD": self.FAISS_SIMILARITY_THRESHOLD,
+        }
+
+        target = Path(file_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(target, "w", encoding="utf-8") as f:
+            json.dump(settings_dict, f, indent=2, ensure_ascii=False)
+
+    def load_settings_from_file(self, file_path: str):
+        """지정한 경로의 JSON 파일에서 설정 로드"""
+        target = Path(file_path)
+
+        if not target.exists():
+            return
+
+        try:
+            with open(target, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+
+            # 런타임 설정 덮어쓰기
+            for key, value in saved.items():
+                if hasattr(self, key):
+                    setattr(self, key, value)
+        except Exception as e:
+            print(f"[경고] 설정 파일 로드 실패: {e}")
+
 
 # 전역 설정 인스턴스
 settings = ImageClassifierSettings()
