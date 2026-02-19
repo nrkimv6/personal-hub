@@ -172,13 +172,61 @@
   }
 
   async function restartWorkers() {
-    if (!confirm('워커 프로세스를 재시작하시겠습니까?\n(watchdog가 자동으로 재시작합니다)')) return;
+    if (!confirm('모든 워커를 재시작하시겠습니까?\n(watchdog가 자동으로 재시작합니다)')) return;
     actionLoading = 'workers';
     try {
-      await serviceDashboardApi.restartWorkers();
+      const result = await serviceDashboardApi.restartWorkers();
+      alert(result.message);
       await fetchStatus();
     } catch (e) {
       alert(`재시작 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
+    } finally {
+      actionLoading = null;
+    }
+  }
+
+  async function restartSingleWorker(name: string, label: string) {
+    if (!confirm(`"${label}" 워커를 재시작하시겠습니까?`)) return;
+    actionLoading = `worker-${name}`;
+    try {
+      const result = await serviceDashboardApi.restartWorker(name);
+      alert(result.message);
+      await fetchStatus();
+    } catch (e) {
+      alert(`재시작 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
+    } finally {
+      actionLoading = null;
+    }
+  }
+
+  async function stopWatchdogs() {
+    if (!confirm('모든 watchdog를 중지하시겠습니까?\n\n워커는 유지되지만, 워커가 죽어도 자동 재시작되지 않습니다.')) return;
+    actionLoading = 'watchdogs-stop';
+    try {
+      const result = await serviceDashboardApi.stopWatchdogs();
+      alert(result.message);
+      await fetchStatus();
+    } catch (e) {
+      alert(`중지 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
+    } finally {
+      actionLoading = null;
+    }
+  }
+
+  async function startWatchdogs() {
+    // Redis 상태 확인
+    if (redisStatus && !redisStatus.connected) {
+      alert('Redis가 연결되지 않았습니다.\nwatchdog 시작은 Redis Command Listener를 경유합니다.\n\nCLI에서 실행: python scripts/browser_workers.py start');
+      return;
+    }
+    if (!confirm('watchdog를 시작하시겠습니까?\n(Redis Command Listener 경유)')) return;
+    actionLoading = 'watchdogs-start';
+    try {
+      const result = await serviceDashboardApi.startWatchdogs();
+      alert(result.message);
+      await fetchStatus();
+    } catch (e) {
+      alert(`시작 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}\n\nCLI에서 실행: python scripts/browser_workers.py start`);
     } finally {
       actionLoading = null;
     }
@@ -571,12 +619,27 @@
                     <span class="flex items-center gap-0.5"><span class="inline-block w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600"></span> 워커</span>
                   </span>
                 </div>
-                <button
-                  class="px-3 py-1 text-xs bg-primary text-white rounded hover:bg-primary-hover disabled:opacity-50"
-                  disabled={actionLoading === 'workers'}
-                  onclick={restartWorkers}>
-                  워커 재시작
-                </button>
+                <div class="flex items-center gap-1">
+                  <button
+                    class="px-3 py-1 text-xs bg-primary text-white rounded hover:bg-primary-hover disabled:opacity-50"
+                    disabled={actionLoading === 'workers'}
+                    onclick={restartWorkers}>
+                    모든 워커 재시작
+                  </button>
+                  <button
+                    class="px-3 py-1 text-xs bg-warning text-white rounded hover:bg-warning/90 disabled:opacity-50"
+                    disabled={actionLoading === 'watchdogs-stop'}
+                    onclick={stopWatchdogs}>
+                    watchdog 중지
+                  </button>
+                  <button
+                    class="px-3 py-1 text-xs bg-success text-white rounded hover:bg-success/90 disabled:opacity-50"
+                    disabled={actionLoading === 'watchdogs-start'}
+                    onclick={startWatchdogs}
+                    title={redisStatus && !redisStatus.connected ? 'Redis 연결 필요' : ''}>
+                    watchdog 시작
+                  </button>
+                </div>
               </div>
               <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {#each project.worker_processes as proc}
@@ -600,14 +663,24 @@
                         {/if}
                       </span>
                     </div>
-                    <div class="text-sm">
-                      {#if isRunning}
-                        <span class="text-success dark:text-green-400">Running</span>
-                        {#if primaryStatus?.pid}
-                          <span class="text-xs text-muted-foreground dark:text-muted-foreground ml-1">(PID: {primaryStatus.pid})</span>
+                    <div class="flex justify-between items-center text-sm">
+                      <div>
+                        {#if isRunning}
+                          <span class="text-success dark:text-green-400">Running</span>
+                          {#if primaryStatus?.pid}
+                            <span class="text-xs text-muted-foreground dark:text-muted-foreground ml-1">(PID: {primaryStatus.pid})</span>
+                          {/if}
+                        {:else}
+                          <span class="text-muted-foreground dark:text-muted-foreground">Stopped</span>
                         {/if}
-                      {:else}
-                        <span class="text-muted-foreground dark:text-muted-foreground">Stopped</span>
+                      </div>
+                      {#if proc.worker && proc.name !== 'api_watchdog'}
+                        <button
+                          class="px-1.5 py-0.5 text-[10px] text-muted-foreground border border-border rounded hover:bg-muted disabled:opacity-50"
+                          disabled={actionLoading === `worker-${proc.name}`}
+                          onclick={() => restartSingleWorker(proc.name, proc.label)}>
+                          재시작
+                        </button>
                       {/if}
                     </div>
                   </div>

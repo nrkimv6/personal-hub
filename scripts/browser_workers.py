@@ -91,11 +91,11 @@ class BrowserWorkerManager:
                 "env": {"APP_MODE": "development"},
             },
             {
-                "name": "Redis Command Listener",
-                "pid_file": f"command_listener{self.pid_suffix}.pid",
-                "cmd": [str(self.python_exe),
-                        str(self.scripts_dir / "worker-command-listener.py")],
-                "env": {},
+                "name": "Command Listener Watchdog",
+                "pid_file": f"command_listener_watchdog{self.pid_suffix}.pid",
+                "cmd": ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File",
+                        str(self.scripts_dir / "command-listener-watchdog.ps1")],
+                "env": {"APP_MODE": "development"},
             },
             {
                 "name": "Auto-Next Command Listener",

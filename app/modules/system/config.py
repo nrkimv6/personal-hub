@@ -33,7 +33,7 @@ MANAGED_PROJECTS = {
                 {
                     "name": "command_listener",
                     "label": "명령 리스너",
-                    "watchdog_pid_file": None,
+                    "watchdog_pid_file": "command_listener_watchdog_dev.pid",
                     "worker_pid_file": "command_listener_dev.pid",
                 },
                 {

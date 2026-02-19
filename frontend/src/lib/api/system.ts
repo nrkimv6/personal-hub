@@ -990,9 +990,27 @@ export const serviceDashboardApi = {
       method: 'DELETE'
     }),
 
-  // 워커 재시작
+  // 워커 재시작 (전체)
   restartWorkers: () =>
     request<{ success: boolean; message: string }>('/system/services/workers/restart', {
+      method: 'POST'
+    }),
+
+  // 워커 단위 재시작
+  restartWorker: (name: string) =>
+    request<{ success: boolean; message: string }>(`/system/services/workers/${name}/restart`, {
+      method: 'POST'
+    }),
+
+  // watchdog 중지
+  stopWatchdogs: () =>
+    request<{ success: boolean; message: string }>('/system/services/watchdogs/stop', {
+      method: 'POST'
+    }),
+
+  // watchdog 시작 (Redis 경유)
+  startWatchdogs: () =>
+    request<{ success: boolean; message: string }>('/system/services/watchdogs/start', {
       method: 'POST'
     }),
 

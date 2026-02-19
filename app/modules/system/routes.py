@@ -139,8 +139,35 @@ async def unregister_scheduled_task(folder: str, name: str):
 
 @router.post("/services/workers/restart")
 async def restart_workers():
-    """Restart all worker processes"""
+    """Restart all worker processes (watchdog가 자동 재시작)"""
     result = await _service.restart_worker("all")
+    if not result["success"]:
+        raise HTTPException(status_code=500, detail=result["message"])
+    return result
+
+
+@router.post("/services/workers/{name}/restart")
+async def restart_single_worker(name: str):
+    """Restart a single worker process by name"""
+    result = await _service.restart_worker(name)
+    if not result["success"]:
+        raise HTTPException(status_code=500, detail=result["message"])
+    return result
+
+
+@router.post("/services/watchdogs/stop")
+async def stop_watchdogs():
+    """Stop all watchdog processes"""
+    result = await _service.stop_watchdogs()
+    if not result["success"]:
+        raise HTTPException(status_code=500, detail=result["message"])
+    return result
+
+
+@router.post("/services/watchdogs/start")
+async def start_watchdogs():
+    """Start watchdog processes via Redis Command Listener"""
+    result = await _service.start_watchdogs()
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result["message"])
     return result

@@ -302,56 +302,62 @@ if ($tasks) {{
         ps_cmd = f"Unregister-ScheduledTask -TaskName '{name}' -TaskPath '\\{folder}\\' -Confirm:$false -ErrorAction Stop"
         return await self._run_admin_command(ps_cmd, f"Unregistered task: {folder}/{name}")
 
+    async def _kill_pid_file(self, pid_file: Path, label: str) -> tuple[bool, str]:
+        """PID 파일을 읽어 프로세스를 kill. (성공여부, 메시지) 반환."""
+        if not pid_file.exists():
+            return False, f"{label}: PID 파일 없음"
+        try:
+            pid = int(pid_file.read_text().strip())
+            proc = await asyncio.create_subprocess_exec(
+                "taskkill", "/PID", str(pid), "/F",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await proc.wait()
+            if proc.returncode == 0:
+                return True, f"{label} (PID {pid})"
+            else:
+                stderr = (await proc.stderr.read()).decode().strip()
+                return False, f"{label} (PID {pid}): {stderr}"
+        except Exception as e:
+            return False, f"{label}: {str(e)}"
+
+    def _get_monitor_page_workers(self) -> tuple[Path, list]:
+        """monitor-page 프로젝트의 workers config와 pid_dir 반환."""
+        proj = MANAGED_PROJECTS.get("monitor-page", {})
+        workers_config = proj.get("workers")
+        if not workers_config or not proj.get("path"):
+            return Path(), []
+        pid_dir = Path(proj["path"]) / workers_config["pid_dir"]
+        return pid_dir, workers_config["items"]
+
     async def restart_worker(self, name: str) -> dict:
-        """워커 프로세스를 PID 파일 기반으로 kill (watchdog가 자동 재시작)
-
-        command_listener, api_watchdog는 워커가 아니므로 제외.
-        watchdog_pid_file과 worker_pid_file이 모두 있는 항목만 kill 대상.
+        """워커 프로세스를 kill (watchdog가 자동 재시작).
+        api_watchdog는 제외. name="all"이면 전체 워커.
         """
-        killed = []
-        failed = []
+        pid_dir, items = self._get_monitor_page_workers()
+        if not items:
+            return {"success": False, "message": "워커 설정을 찾을 수 없습니다."}
 
-        for proj_key, proj in MANAGED_PROJECTS.items():
-            workers_config = proj.get("workers")
-            if not workers_config:
+        killed, failed = [], []
+        for item in items:
+            if not item.get("worker_pid_file"):
+                continue
+            # api_watchdog 제외
+            if item["name"] == "api_watchdog":
+                continue
+            if name != "all" and item["name"] != name:
                 continue
 
-            proj_path = proj.get("path")
-            if not proj_path:
+            # watchdog 없으면 재시작 불가 경고
+            if not item.get("watchdog_pid_file"):
+                failed.append(f"{item['label']}: watchdog 없음 (재시작 불가)")
                 continue
 
-            pid_dir = Path(proj_path) / workers_config["pid_dir"]
-
-            for item in workers_config["items"]:
-                # watchdog가 있는 워커만 kill 대상 (watchdog가 자동 재시작함)
-                if not item.get("watchdog_pid_file") or not item.get("worker_pid_file"):
-                    continue
-
-                if name != "all" and item["name"] != name:
-                    continue
-
-                pid_file = pid_dir / item["worker_pid_file"]
-                label = item["label"]
-
-                if not pid_file.exists():
-                    failed.append(f"{label}: PID 파일 없음")
-                    continue
-
-                try:
-                    pid = int(pid_file.read_text().strip())
-                    proc = await asyncio.create_subprocess_exec(
-                        "taskkill", "/PID", str(pid), "/F",
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    await proc.wait()
-                    if proc.returncode == 0:
-                        killed.append(f"{label} (PID {pid})")
-                    else:
-                        stderr = (await proc.stderr.read()).decode().strip()
-                        failed.append(f"{label} (PID {pid}): {stderr}")
-                except Exception as e:
-                    failed.append(f"{label}: {str(e)}")
+            success, msg = await self._kill_pid_file(
+                pid_dir / item["worker_pid_file"], item["label"]
+            )
+            (killed if success else failed).append(msg)
 
         if not killed and not failed:
             return {"success": False, "message": "kill 대상 워커가 없습니다."}
@@ -362,8 +368,61 @@ if ($tasks) {{
         if failed:
             parts.append(f"실패: {', '.join(failed)}")
         parts.append("watchdog가 자동 재시작합니다.")
-
         return {"success": len(killed) > 0, "message": " | ".join(parts)}
+
+    async def stop_watchdogs(self) -> dict:
+        """모든 watchdog 프로세스를 kill. 워커는 유지."""
+        pid_dir, items = self._get_monitor_page_workers()
+        if not items:
+            return {"success": False, "message": "워커 설정을 찾을 수 없습니다."}
+
+        killed, failed = [], []
+        for item in items:
+            if not item.get("watchdog_pid_file"):
+                continue
+            success, msg = await self._kill_pid_file(
+                pid_dir / item["watchdog_pid_file"], f"{item['label']} watchdog"
+            )
+            (killed if success else failed).append(msg)
+
+        if not killed and not failed:
+            return {"success": False, "message": "실행 중인 watchdog가 없습니다."}
+
+        parts = []
+        if killed:
+            parts.append(f"종료됨: {', '.join(killed)}")
+        if failed:
+            parts.append(f"실패: {', '.join(failed)}")
+        return {"success": len(killed) > 0, "message": " | ".join(parts)}
+
+    async def start_watchdogs(self) -> dict:
+        """Redis Command Listener를 통해 watchdog 시작 요청.
+        API는 Session 0(NSSM)이므로 직접 subprocess 불가 → Redis 경유.
+        """
+        from app.shared.redis.client import RedisClient
+
+        redis_client = await RedisClient.get_client()
+        if not redis_client:
+            return {"success": False, "message": "Redis 연결 없음. CLI에서 실행: python scripts/browser_workers.py start"}
+
+        try:
+            command = json.dumps({
+                "action": "start",
+                "timestamp": __import__("datetime").datetime.now().isoformat(),
+                "source": "system-api",
+            })
+            await redis_client.delete("worker:command_results")
+            await redis_client.lpush("worker:commands", command)
+
+            result = await redis_client.brpop("worker:command_results", timeout=30)
+            if result:
+                _, result_data = result
+                result_json = json.loads(result_data) if isinstance(result_data, str) else json.loads(result_data.decode())
+                return {"success": result_json.get("success", False), "message": result_json.get("message", "완료")}
+            else:
+                return {"success": False, "message": "Command Listener 응답 타임아웃 (30초). CLI에서 실행: python scripts/browser_workers.py start"}
+        except Exception as e:
+            return {"success": False, "message": f"Redis 명령 전송 실패: {str(e)}. CLI에서 실행: python scripts/browser_workers.py start"}
 
     async def get_redis_status(self) -> dict:
         """Redis 연결 상태 및 info 조회"""
