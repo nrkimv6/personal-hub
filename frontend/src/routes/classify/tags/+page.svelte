@@ -1,47 +1,92 @@
 <script lang="ts">
-  import { Tags, Search, Plus, Trash2, X, Tag } from 'lucide-svelte';
+  import { onMount } from 'svelte';
+  import { fetchWithTimeout } from '$lib/api/client';
+  import { Tags, Search, Plus, Trash2, X, Tag, Loader2 } from 'lucide-svelte';
+
+  interface TagItem {
+    id: number;
+    name: string;
+    usage_count: number;
+    created_at: string | null;
+  }
+
+  let tags = $state<TagItem[]>([]);
+  let loadingTags = $state(true);
+  let tagsError = $state<string | null>(null);
 
   let searchQuery = $state('');
-  let selectedTag = $state<string | null>(null);
+  let selectedTag = $state<TagItem | null>(null);
   let showNewTagInput = $state(false);
   let newTagName = $state('');
+  let creatingTag = $state(false);
+  let deletingTagId = $state<number | null>(null);
 
-  const mockTags = [
-    { name: 'travel', count: 234, color: 'primary' },
-    { name: 'family', count: 189, color: 'success' },
-    { name: 'nature', count: 156, color: 'warning' },
-    { name: 'food', count: 98, color: 'destructive' },
-    { name: 'work', count: 67, color: 'muted' },
-    { name: 'birthday', count: 45, color: 'primary' },
-    { name: 'vacation', count: 38, color: 'success' },
-    { name: 'pets', count: 29, color: 'warning' },
-  ];
-
-  const filteredTags = $derived(
+  // 필터된 태그 목록
+  let filteredTags = $derived(
     searchQuery
-      ? mockTags.filter(t => t.name.includes(searchQuery.toLowerCase()))
-      : mockTags
+      ? tags.filter(t => t.name.toLowerCase().includes(searchQuery.toLowerCase()))
+      : tags
   );
 
-  const maxCount = $derived(Math.max(...mockTags.map(t => t.count)));
+  // 최대 usage_count (바 너비 계산용)
+  let maxCount = $derived(Math.max(...tags.map(t => t.usage_count), 1));
 
-  const tagImages = $derived(
-    selectedTag
-      ? Array.from({ length: 12 }, (_, i) => ({
-          id: i + 1,
-          filename: `photo_${String(i + 1).padStart(3, '0')}.jpg`
-        }))
-      : []
-  );
-
-  function getTagBadgeClass(color: string): string {
-    switch (color) {
-      case 'success': return 'bg-green-500/10 text-green-600 dark:text-green-400';
-      case 'warning': return 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400';
-      case 'destructive': return 'bg-destructive/10 text-destructive';
-      default: return 'bg-primary/10 text-primary';
+  async function loadTags() {
+    loadingTags = true;
+    tagsError = null;
+    try {
+      const res = await fetchWithTimeout('/api/ic/tags/?sort_by=usage&limit=100');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      tags = data.tags ?? [];
+    } catch (err: any) {
+      tagsError = err.message;
+    } finally {
+      loadingTags = false;
     }
   }
+
+  async function createTag() {
+    const name = newTagName.trim();
+    if (!name) return;
+    creatingTag = true;
+    try {
+      const res = await fetchWithTimeout('/api/ic/tags/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      showNewTagInput = false;
+      newTagName = '';
+      await loadTags(); // 재로드
+    } catch (err: any) {
+      alert(`태그 생성 실패: ${err.message}`);
+    } finally {
+      creatingTag = false;
+    }
+  }
+
+  async function deleteTag(tag: TagItem) {
+    if (!confirm(`태그 "${tag.name}"를 삭제하시겠습니까?`)) return;
+    deletingTagId = tag.id;
+    try {
+      const res = await fetchWithTimeout(`/api/ic/tags/${tag.id}?force=true`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (selectedTag?.id === tag.id) selectedTag = null;
+      await loadTags();
+    } catch (err: any) {
+      alert(`태그 삭제 실패: ${err.message}`);
+    } finally {
+      deletingTagId = null;
+    }
+  }
+
+  onMount(() => {
+    loadTags();
+  });
 </script>
 
 <div class="space-y-6">
@@ -76,15 +121,25 @@
 
       <!-- Tag List -->
       <div class="flex-1 divide-y divide-border overflow-y-auto">
-        {#if filteredTags.length === 0}
+        {#if loadingTags}
+          <div class="flex items-center justify-center py-8 gap-2 text-xs text-muted-foreground">
+            <Loader2 class="size-3.5 animate-spin" />
+            Loading tags...
+          </div>
+        {:else if tagsError}
+          <div class="flex flex-col items-center justify-center py-8 gap-2 text-xs text-muted-foreground">
+            <p class="text-destructive">로드 실패: {tagsError}</p>
+            <button onclick={loadTags} class="text-primary hover:underline">재시도</button>
+          </div>
+        {:else if filteredTags.length === 0}
           <div class="flex items-center justify-center py-8 text-xs text-muted-foreground">
-            No tags found
+            {searchQuery ? 'No matching tags' : 'No tags yet'}
           </div>
         {:else}
-          {#each filteredTags as tag}
-            {@const isSelected = selectedTag === tag.name}
+          {#each filteredTags as tag (tag.id)}
+            {@const isSelected = selectedTag?.id === tag.id}
             <button
-              onclick={() => (selectedTag = isSelected ? null : tag.name)}
+              onclick={() => (selectedTag = isSelected ? null : tag)}
               class="group flex w-full flex-col px-3 py-2.5 text-left transition-colors {isSelected
                 ? 'border-l-2 border-primary bg-primary/10'
                 : 'border-l-2 border-transparent hover:bg-accent'}"
@@ -94,13 +149,13 @@
                   <Tag class="size-3 {isSelected ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground'}" />
                   <span class="text-xs font-medium {isSelected ? 'text-primary' : 'text-foreground'}">{tag.name}</span>
                 </div>
-                <span class="text-[10px] text-muted-foreground">{tag.count.toLocaleString()}</span>
+                <span class="text-[10px] text-muted-foreground">{tag.usage_count.toLocaleString()}</span>
               </div>
               <!-- Mini Usage Bar -->
               <div class="mt-1.5 h-0.5 w-full overflow-hidden rounded-full bg-muted">
                 <div
                   class="h-full rounded-full bg-primary/30"
-                  style="width: {(tag.count / maxCount) * 100}%"
+                  style="width: {(tag.usage_count / maxCount) * 100}%"
                 ></div>
               </div>
             </button>
@@ -116,17 +171,30 @@
               type="text"
               placeholder="Tag name..."
               bind:value={newTagName}
-              class="h-8 flex-1 rounded-md border border-border bg-background px-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              disabled={creatingTag}
+              class="h-8 flex-1 rounded-md border border-border bg-background px-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
               onkeydown={(e) => {
-                if (e.key === 'Enter') { showNewTagInput = false; newTagName = ''; }
+                if (e.key === 'Enter') createTag();
                 if (e.key === 'Escape') { showNewTagInput = false; newTagName = ''; }
               }}
             />
             <button
               onclick={() => { showNewTagInput = false; newTagName = ''; }}
-              class="flex size-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-accent"
+              disabled={creatingTag}
+              class="flex size-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-accent disabled:opacity-50"
             >
               <X class="size-3.5" />
+            </button>
+            <button
+              onclick={createTag}
+              disabled={creatingTag || !newTagName.trim()}
+              class="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {#if creatingTag}
+                <Loader2 class="size-3.5 animate-spin" />
+              {:else}
+                <Plus class="size-3.5" />
+              {/if}
             </button>
           </div>
         {:else}
@@ -141,7 +209,7 @@
       </div>
     </div>
 
-    <!-- Panel B: Tag Images -->
+    <!-- Panel B: Tag Detail -->
     <div class="flex flex-1 flex-col rounded-xl border border-border bg-card">
       {#if selectedTag === null}
         <!-- Empty State -->
@@ -150,8 +218,8 @@
             <Tag class="size-6 text-muted-foreground" />
           </div>
           <div>
-            <p class="text-sm font-medium text-foreground">Select a tag to view images</p>
-            <p class="mt-1 text-xs text-muted-foreground">Choose a tag from the directory to browse its images</p>
+            <p class="text-sm font-medium text-foreground">Select a tag to view details</p>
+            <p class="mt-1 text-xs text-muted-foreground">Choose a tag from the directory to see its information</p>
           </div>
         </div>
       {:else}
@@ -159,44 +227,46 @@
         <div class="flex items-center justify-between border-b border-border px-4 py-3">
           <div class="flex items-center gap-2">
             <Tag class="size-4 text-primary" />
-            <h2 class="text-sm font-semibold text-foreground">{selectedTag}</h2>
+            <h2 class="text-sm font-semibold text-foreground">{selectedTag.name}</h2>
             <span class="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-              {tagImages.length} images
+              {selectedTag.usage_count.toLocaleString()} uses
             </span>
           </div>
           <button
-            class="flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors"
+            onclick={() => deleteTag(selectedTag!)}
+            disabled={deletingTagId === selectedTag.id}
+            class="flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
           >
-            <Trash2 class="size-3" />
+            {#if deletingTagId === selectedTag.id}
+              <Loader2 class="size-3 animate-spin" />
+            {:else}
+              <Trash2 class="size-3" />
+            {/if}
             Delete Tag
           </button>
         </div>
 
-        <!-- Image Grid -->
+        <!-- Tag Info -->
         <div class="p-4">
-          <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-            {#each tagImages as img (img.id)}
-              <div class="group relative aspect-square overflow-hidden rounded-lg bg-muted">
-                <!-- Placeholder -->
-                <div class="flex h-full w-full items-center justify-center bg-gradient-to-br from-muted to-muted/50 text-[10px] text-muted-foreground/50">
-                  {img.id}
-                </div>
-
-                <!-- Hover: Remove X button -->
-                <button
-                  class="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-destructive"
-                  aria-label="Remove tag from image"
-                >
-                  <X class="size-3" />
-                </button>
-
-                <!-- Bottom filename overlay -->
-                <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-1.5">
-                  <p class="truncate text-[10px] text-white">{img.filename}</p>
-                </div>
+          <div class="rounded-lg border border-border bg-secondary/30 p-4 space-y-2 text-xs">
+            <div class="flex justify-between">
+              <span class="text-muted-foreground">Tag ID</span>
+              <span class="font-medium text-foreground">{selectedTag.id}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-muted-foreground">Usage Count</span>
+              <span class="font-medium text-foreground">{selectedTag.usage_count.toLocaleString()}</span>
+            </div>
+            {#if selectedTag.created_at}
+              <div class="flex justify-between">
+                <span class="text-muted-foreground">Created</span>
+                <span class="font-medium text-foreground">{selectedTag.created_at.slice(0, 10)}</span>
               </div>
-            {/each}
+            {/if}
           </div>
+          <p class="mt-4 text-xs text-muted-foreground text-center">
+            갤러리에서 이 태그로 필터링된 이미지를 확인하세요.
+          </p>
         </div>
       {/if}
     </div>

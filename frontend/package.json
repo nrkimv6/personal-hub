@@ -1,7 +1,7 @@
 {
 	"name": "frontend",
 	"private": true,
-	"version": "0.0.1",
+	"version": "0.1.0",
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
@@ -31,6 +31,7 @@
 		"@capacitor/core": "^8.0.0",
 		"@tailwindcss/postcss": "^4.1.17",
 		"chart.js": "^4.5.1",
-		"html-to-image": "^1.11.13"
+		"html-to-image": "^1.11.13",
+		"lucide-svelte": "^0.574.0"
 	}
 }

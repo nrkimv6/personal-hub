@@ -17,10 +17,15 @@
 		Loader2
 	} from 'lucide-svelte';
 
-	// === 보존된 기존 API 로직 ===
+	// === Health API 상태 ===
 	let health: any = $state(null);
 	let loading = $state(true);
 	let error: string | null = $state(null);
+
+	// === Stats API 상태 ===
+	let statsData: any = $state(null);
+	let statsLoading = $state(true);
+	let statsError: string | null = $state(null);
 
 	async function loadHealth() {
 		loading = true;
@@ -36,44 +41,63 @@
 		}
 	}
 
+	async function loadStats() {
+		statsLoading = true;
+		statsError = null;
+		try {
+			const res = await fetchWithTimeout('/api/ic/stats');
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			statsData = await res.json();
+		} catch (err: any) {
+			statsError = err.message;
+		} finally {
+			statsLoading = false;
+		}
+	}
+
+	async function loadActivity() {
+		try {
+			const res = await fetchWithTimeout('/api/ic/stats/activity?limit=10');
+			if (!res.ok) return;
+			const data = await res.json();
+			recentActivity = data.activity ?? [];
+		} catch {
+			// 실패해도 빈 배열 유지
+		}
+	}
+
 	onMount(() => {
 		loadHealth();
+		loadStats();
+		loadActivity();
 	});
 
-	// === 추가 UI 상태 ===
+	// === UI 상태 ===
 	let activityFilter = $state('all');
 
+	// pipelineStages: 기본 idle, 추후 stats/tasks 기반으로 파생
 	let pipelineStages = $state([
-		{ id: 'scan', label: 'Scan', status: 'done' },
-		{ id: 'extract', label: 'Extract', status: 'done' },
-		{ id: 'duplicates', label: 'Duplicates', status: 'running' },
+		{ id: 'scan', label: 'Scan', status: 'idle' },
+		{ id: 'extract', label: 'Extract', status: 'idle' },
+		{ id: 'duplicates', label: 'Duplicates', status: 'idle' },
 		{ id: 'classify', label: 'AI Classify', status: 'idle' },
 		{ id: 'review', label: 'Review', status: 'idle' }
 	]);
 
-	let recentActivity = $state([
-		{ id: 1, time: '2분 전', message: 'Duplicate scan started on D:\\Photos', type: 'info' },
-		{ id: 2, time: '5분 전', message: 'Extraction completed: 12,482 images', type: 'info' },
-		{ id: 3, time: '12분 전', message: 'Failed to read HEIC file: IMG_2034.HEIC', type: 'error' },
-		{ id: 4, time: '18분 전', message: 'Scan completed: 3 folders indexed', type: 'info' },
-		{ id: 5, time: '1시간 전', message: 'Pipeline initialized', type: 'info' }
-	]);
+	let recentActivity = $state<{ id: number; time: string; message: string; type: string }[]>([]);
 
-	let mockCategories = [
-		{ name: 'Travel', count: 42300, pct: 32 },
-		{ name: 'Family', count: 28100, pct: 21 },
-		{ name: 'Food', count: 18700, pct: 14 },
-		{ name: 'Pets', count: 12400, pct: 9 },
-		{ name: 'Others', count: 31200, pct: 24 }
-	];
-
-	// health 기반 통계 (없으면 mock)
+	// 통계 카드 (API 응답 기반, 없으면 0)
 	let stats = $derived({
-		totalImages: health?.settings ? 132600 : 132600,
-		classified: health?.settings ? 103800 : 103800,
-		duplicates: health?.settings ? 8240 : 8240,
-		clusters: health?.settings ? 284 : 284
+		totalImages: statsData?.total_images ?? 0,
+		classified: statsData?.classified ?? 0,
+		duplicates: statsData?.duplicates ?? 0,
+		clusters: statsData?.clusters ?? 0
 	});
+
+	// 카테고리 분포 (API 응답 기반)
+	let categories = $derived<{ name: string; count: number; pct: number }[]>(
+		statsData?.category_distribution ?? []
+	);
 
 	let filteredActivity = $derived(
 		activityFilter === 'all'
@@ -84,6 +108,10 @@
 	let lastUpdated = $derived(
 		new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
 	);
+
+	async function handleRefresh() {
+		await Promise.all([loadHealth(), loadStats(), loadActivity()]);
+	}
 </script>
 
 <svelte:head>
@@ -92,15 +120,17 @@
 
 {#snippet miniSparkline(data: number[])}
 	<svg class="h-7 w-20" viewBox="0 0 80 28">
-		<polyline
-			points={data
-				.map((v, i) => `${(i / (data.length - 1)) * 80},${28 - (v / Math.max(...data)) * 24}`)
-				.join(' ')}
-			fill="none"
-			stroke="currentColor"
-			stroke-width="1.5"
-			class="text-primary"
-		/>
+		{#if data.length > 1}
+			<polyline
+				points={data
+					.map((v, i) => `${(i / (data.length - 1)) * 80},${28 - (v / Math.max(...data)) * 24}`)
+					.join(' ')}
+				fill="none"
+				stroke="currentColor"
+				stroke-width="1.5"
+				class="text-primary"
+			/>
+		{/if}
 	</svg>
 {/snippet}
 
@@ -112,15 +142,15 @@
 			<p class="text-sm text-muted-foreground mt-0.5">Last updated {lastUpdated}</p>
 		</div>
 		<button
-			onclick={loadHealth}
+			onclick={handleRefresh}
 			class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm font-medium shadow-sm hover:bg-accent transition-colors"
 		>
-			<RefreshCw class="h-4 w-4 {loading ? 'animate-spin' : ''}" />
+			<RefreshCw class="h-4 w-4 {loading || statsLoading ? 'animate-spin' : ''}" />
 			Refresh
 		</button>
 	</div>
 
-	{#if loading}
+	{#if loading && statsLoading}
 		<!-- 로딩 상태 -->
 		<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
 			{#each [1, 2, 3, 4] as _}
@@ -131,13 +161,13 @@
 				</div>
 			{/each}
 		</div>
-	{:else if error}
-		<!-- 에러 상태 -->
+	{:else if error && statsError}
+		<!-- 에러 상태 (health + stats 모두 실패) -->
 		<div class="rounded-lg border border-destructive/30 bg-destructive/5 p-6">
 			<h3 class="font-semibold text-destructive mb-1">Connection Error</h3>
 			<p class="text-sm text-muted-foreground mb-4">{error}</p>
 			<button
-				onclick={loadHealth}
+				onclick={handleRefresh}
 				class="inline-flex items-center gap-2 rounded-md bg-destructive px-3 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 transition-colors"
 			>
 				<RefreshCw class="h-4 w-4" />
@@ -155,11 +185,15 @@
 					</div>
 					<ArrowUpRight class="h-4 w-4 text-muted-foreground" />
 				</div>
-				<div class="text-2xl font-bold">{stats.totalImages.toLocaleString()}</div>
+				{#if statsLoading}
+					<div class="h-8 w-16 bg-muted rounded animate-pulse mb-2"></div>
+				{:else}
+					<div class="text-2xl font-bold">{stats.totalImages.toLocaleString()}</div>
+				{/if}
 				<div class="text-xs text-muted-foreground mt-1">Total Images</div>
 				<div class="flex items-center justify-between mt-3">
-					<span class="text-xs text-emerald-600 font-medium">+2.4k this month</span>
-					{@render miniSparkline([40, 55, 45, 70, 60, 85, 75, 90, 80, 100])}
+					<span class="text-xs text-muted-foreground">전체 스캔 파일</span>
+					{@render miniSparkline([])}
 				</div>
 			</div>
 
@@ -171,11 +205,21 @@
 					</div>
 					<ArrowUpRight class="h-4 w-4 text-muted-foreground" />
 				</div>
-				<div class="text-2xl font-bold">{stats.classified.toLocaleString()}</div>
+				{#if statsLoading}
+					<div class="h-8 w-16 bg-muted rounded animate-pulse mb-2"></div>
+				{:else}
+					<div class="text-2xl font-bold">{stats.classified.toLocaleString()}</div>
+				{/if}
 				<div class="text-xs text-muted-foreground mt-1">Classified</div>
 				<div class="flex items-center justify-between mt-3">
-					<span class="text-xs text-emerald-600 font-medium">78.3% complete</span>
-					{@render miniSparkline([20, 30, 45, 40, 60, 55, 75, 70, 85, 78])}
+					{#if stats.totalImages > 0}
+						<span class="text-xs text-emerald-600 font-medium">
+							{Math.round((stats.classified / stats.totalImages) * 100)}% complete
+						</span>
+					{:else}
+						<span class="text-xs text-muted-foreground">데이터 없음</span>
+					{/if}
+					{@render miniSparkline([])}
 				</div>
 			</div>
 
@@ -187,11 +231,15 @@
 					</div>
 					<ArrowDownRight class="h-4 w-4 text-muted-foreground" />
 				</div>
-				<div class="text-2xl font-bold">{stats.duplicates.toLocaleString()}</div>
+				{#if statsLoading}
+					<div class="h-8 w-16 bg-muted rounded animate-pulse mb-2"></div>
+				{:else}
+					<div class="text-2xl font-bold">{stats.duplicates.toLocaleString()}</div>
+				{/if}
 				<div class="text-xs text-muted-foreground mt-1">Duplicates</div>
 				<div class="flex items-center justify-between mt-3">
-					<span class="text-xs text-muted-foreground">-156 pending review</span>
-					{@render miniSparkline([90, 80, 70, 85, 65, 60, 50, 55, 45, 40])}
+					<span class="text-xs text-muted-foreground">중복 해시 그룹</span>
+					{@render miniSparkline([])}
 				</div>
 			</div>
 
@@ -203,11 +251,15 @@
 					</div>
 					<TrendingUp class="h-4 w-4 text-muted-foreground" />
 				</div>
-				<div class="text-2xl font-bold">{stats.clusters.toLocaleString()}</div>
+				{#if statsLoading}
+					<div class="h-8 w-16 bg-muted rounded animate-pulse mb-2"></div>
+				{:else}
+					<div class="text-2xl font-bold">{stats.clusters.toLocaleString()}</div>
+				{/if}
 				<div class="text-xs text-muted-foreground mt-1">Clusters</div>
 				<div class="flex items-center justify-between mt-3">
-					<span class="text-xs text-emerald-600 font-medium">+5 today</span>
-					{@render miniSparkline([10, 20, 15, 30, 25, 40, 35, 50, 45, 60])}
+					<span class="text-xs text-muted-foreground">타임 클러스터</span>
+					{@render miniSparkline([])}
 				</div>
 			</div>
 		</div>
@@ -355,23 +407,37 @@
 		<!-- Classification Distribution -->
 		<div class="rounded-lg border bg-card p-5">
 			<h2 class="text-sm font-semibold mb-4">Classification Distribution</h2>
-			<div class="space-y-3">
-				{#each mockCategories as cat}
-					<div class="flex items-center gap-3">
-						<span class="text-sm text-foreground w-24 shrink-0 truncate">{cat.name}</span>
-						<div class="flex-1 h-2 rounded-full bg-muted overflow-hidden">
-							<div
-								class="h-full rounded-full bg-primary transition-all"
-								style="width: {cat.pct}%"
-							></div>
+			{#if statsLoading}
+				<div class="space-y-3">
+					{#each [1, 2, 3] as _}
+						<div class="flex items-center gap-3 animate-pulse">
+							<div class="h-4 w-24 bg-muted rounded shrink-0"></div>
+							<div class="flex-1 h-2 bg-muted rounded-full"></div>
+							<div class="h-3 w-10 bg-muted rounded"></div>
 						</div>
-						<span class="text-xs text-muted-foreground w-10 text-right shrink-0">{cat.pct}%</span>
-						<span class="text-xs text-muted-foreground w-16 text-right shrink-0">
-							{cat.count.toLocaleString()}
-						</span>
-					</div>
-				{/each}
-			</div>
+					{/each}
+				</div>
+			{:else if categories.length === 0}
+				<p class="text-sm text-muted-foreground text-center py-4">분류된 데이터가 없습니다</p>
+			{:else}
+				<div class="space-y-3">
+					{#each categories as cat}
+						<div class="flex items-center gap-3">
+							<span class="text-sm text-foreground w-24 shrink-0 truncate">{cat.name}</span>
+							<div class="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+								<div
+									class="h-full rounded-full bg-primary transition-all"
+									style="width: {cat.pct}%"
+								></div>
+							</div>
+							<span class="text-xs text-muted-foreground w-10 text-right shrink-0">{cat.pct}%</span>
+							<span class="text-xs text-muted-foreground w-16 text-right shrink-0">
+								{cat.count.toLocaleString()}
+							</span>
+						</div>
+					{/each}
+				</div>
+			{/if}
 		</div>
 	{/if}
 </div>

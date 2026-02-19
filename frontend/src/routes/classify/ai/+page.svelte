@@ -1,6 +1,9 @@
 <script lang="ts">
-  import { Brain, Play, Square, AlertCircle, ChevronDown, ChevronUp, Sparkles } from 'lucide-svelte';
+  import { onMount, onDestroy } from 'svelte';
+  import { fetchWithTimeout } from '$lib/api/client';
+  import { Brain, Play, Square, AlertCircle, ChevronDown, ChevronUp, Sparkles, Loader2 } from 'lucide-svelte';
 
+  // 분류 설정
   let engine = $state<'claude' | 'gemini'>('claude');
   let cliPath = $state('claude');
   let modelName = $state('claude-opus-4-5');
@@ -8,54 +11,178 @@
   let timeout = $state(30);
   let skipClassified = $state(true);
   let applyRules = $state(true);
-  let running = $state(false);
-  let progress = $state(0);
-  let errorsExpanded = $state(false);
-  let showSummary = $state(false);
   let targetImages = $state<'unclassified' | 'all' | 'failed'>('unclassified');
 
-  let intervalId: ReturnType<typeof setInterval> | null = null;
+  // 실행 상태
+  let running = $state(false);
+  let progress = $state(0);
+  let processedCount = $state(0);
+  let totalCount = $state(0);
+  let currentFile = $state<string | null>(null);
+  let errorsExpanded = $state(false);
+  let showSummary = $state(false);
+  let startError = $state<string | null>(null);
 
-  const mockResults = [
-    { file: 'IMG_0001.jpg', category: 'outdoor/travel', confidence: 0.94, thumbnail: '/api/ic/files/1/thumbnail' },
-    { file: 'IMG_0002.jpg', category: 'indoor/home', confidence: 0.87, thumbnail: '/api/ic/files/2/thumbnail' },
-    { file: 'IMG_0003.jpg', category: 'personal/family', confidence: 0.91, thumbnail: '/api/ic/files/3/thumbnail' },
-  ];
+  // 결과 / 에러
+  interface ClassifyResult {
+    file: string;
+    category: string;
+    confidence: number;
+    thumbnail: string;
+  }
 
-  const mockErrors = [
-    { file: 'IMG_9999.jpg', error: 'Timeout after 30s' },
-  ];
+  interface ClassifyError {
+    file: string;
+    error: string;
+  }
 
-  const categorySummary = [
-    { label: 'outdoor / travel', count: 45, pct: 38 },
-    { label: 'indoor / home', count: 32, pct: 27 },
-    { label: 'personal / family', count: 28, pct: 23 },
-    { label: 'other', count: 14, pct: 12 },
-  ];
+  let results = $state<ClassifyResult[]>([]);
+  let errors = $state<ClassifyError[]>([]);
 
+  let pollingId: ReturnType<typeof setInterval> | null = null;
+
+  // 분류 시작
   async function startClassification() {
+    startError = null;
     running = true;
     progress = 0;
+    processedCount = 0;
+    totalCount = 0;
+    currentFile = null;
     showSummary = false;
+    results = [];
+    errors = [];
 
-    intervalId = setInterval(() => {
-      progress = Math.min(progress + Math.random() * 4 + 1, 100);
-      if (progress >= 100) {
-        if (intervalId) clearInterval(intervalId);
-        intervalId = null;
-        running = false;
-        showSummary = true;
+    try {
+      const model = engine === 'claude' ? 'claude_cli' : 'gemini_cli';
+      const res = await fetchWithTimeout('/api/ic/classify/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, batch_size: workers }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail ?? `HTTP ${res.status}`);
       }
-    }, 200);
+
+      // 폴링 시작
+      startPolling();
+    } catch (err: any) {
+      startError = err.message;
+      running = false;
+    }
   }
 
-  function stopClassification() {
-    if (intervalId) {
-      clearInterval(intervalId);
-      intervalId = null;
+  // 분류 중지
+  async function stopClassification() {
+    try {
+      await fetchWithTimeout('/api/ic/classify/stop', { method: 'POST' });
+    } catch {
+      // 무시
     }
+    stopPolling();
     running = false;
   }
+
+  // 상태 폴링 (2초 간격)
+  function startPolling() {
+    if (pollingId) clearInterval(pollingId);
+    pollingId = setInterval(pollStatus, 2000);
+  }
+
+  function stopPolling() {
+    if (pollingId) {
+      clearInterval(pollingId);
+      pollingId = null;
+    }
+  }
+
+  async function pollStatus() {
+    try {
+      const res = await fetchWithTimeout('/api/ic/classify/status');
+      if (!res.ok) return;
+      const data = await res.json();
+
+      running = data.running ?? false;
+      totalCount = data.total ?? 0;
+      processedCount = data.processed ?? 0;
+      currentFile = data.current_file ?? null;
+      progress = totalCount > 0 ? Math.round((processedCount / totalCount) * 100) : 0;
+
+      // 분류 완료
+      if (!running && totalCount > 0) {
+        stopPolling();
+        showSummary = true;
+        await loadResults();
+      }
+    } catch {
+      // 폴링 실패 무시
+    }
+  }
+
+  // 분류 완료 후 결과 로드
+  async function loadResults() {
+    try {
+      const res = await fetchWithTimeout('/api/ic/files?status=ai_classified&limit=50&order_by=id&order_dir=desc');
+      if (!res.ok) return;
+      const data = await res.json();
+      results = (data.files ?? []).slice(0, 20).map((f: any) => {
+        const parts = (f.file_path || '').replace(/\\/g, '/').split('/');
+        return {
+          file: parts[parts.length - 1] || `file_${f.id}`,
+          category: f.final_category_id ? `category ${f.final_category_id}` : '—',
+          confidence: f.ai_confidence ?? 0,
+          thumbnail: `/api/ic/files/${f.id}/thumbnail`,
+        };
+      });
+    } catch {
+      // 무시
+    }
+
+    // 에러 파일 로드
+    try {
+      const errRes = await fetchWithTimeout('/api/ic/files?status=error&limit=20');
+      if (errRes.ok) {
+        const errData = await errRes.json();
+        errors = (errData.files ?? []).map((f: any) => {
+          const parts = (f.file_path || '').replace(/\\/g, '/').split('/');
+          return {
+            file: parts[parts.length - 1] || `file_${f.id}`,
+            error: 'Classification failed',
+          };
+        });
+      }
+    } catch {
+      // 무시
+    }
+  }
+
+  // 초기 상태 확인 (이미 실행 중일 수 있음)
+  async function checkInitialStatus() {
+    try {
+      const res = await fetchWithTimeout('/api/ic/classify/status');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.running) {
+        running = true;
+        totalCount = data.total ?? 0;
+        processedCount = data.processed ?? 0;
+        progress = totalCount > 0 ? Math.round((processedCount / totalCount) * 100) : 0;
+        startPolling();
+      }
+    } catch {
+      // 무시
+    }
+  }
+
+  onMount(() => {
+    checkInitialStatus();
+  });
+
+  onDestroy(() => {
+    stopPolling();
+  });
 
   function getConfidenceColor(conf: number): string {
     if (conf >= 0.9) return 'text-green-600 dark:text-green-400';
@@ -88,7 +215,8 @@
         <div class="flex rounded-lg border border-border bg-muted p-0.5">
           <button
             onclick={() => { engine = 'claude'; modelName = 'claude-opus-4-5'; cliPath = 'claude'; }}
-            class="flex flex-1 items-center justify-center gap-2 rounded-md py-1.5 text-xs font-medium transition-all {engine === 'claude'
+            disabled={running}
+            class="flex flex-1 items-center justify-center gap-2 rounded-md py-1.5 text-xs font-medium transition-all disabled:opacity-50 {engine === 'claude'
               ? 'bg-card text-foreground shadow-sm'
               : 'text-muted-foreground hover:text-foreground'}"
           >
@@ -97,7 +225,8 @@
           </button>
           <button
             onclick={() => { engine = 'gemini'; modelName = 'gemini-1.5-pro'; cliPath = 'gemini'; }}
-            class="flex flex-1 items-center justify-center gap-2 rounded-md py-1.5 text-xs font-medium transition-all {engine === 'gemini'
+            disabled={running}
+            class="flex flex-1 items-center justify-center gap-2 rounded-md py-1.5 text-xs font-medium transition-all disabled:opacity-50 {engine === 'gemini'
               ? 'bg-card text-foreground shadow-sm'
               : 'text-muted-foreground hover:text-foreground'}"
           >
@@ -114,7 +243,8 @@
           id="cli-path"
           type="text"
           bind:value={cliPath}
-          class="h-9 w-full rounded-md border border-border bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          disabled={running}
+          class="h-9 w-full rounded-md border border-border bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
           placeholder="claude"
         />
       </div>
@@ -126,7 +256,8 @@
           id="model-name"
           type="text"
           bind:value={modelName}
-          class="h-9 w-full rounded-md border border-border bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          disabled={running}
+          class="h-9 w-full rounded-md border border-border bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
           placeholder="claude-opus-4-5"
         />
       </div>
@@ -141,7 +272,8 @@
             bind:value={workers}
             min="1"
             max="8"
-            class="h-9 w-full rounded-md border border-border bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            disabled={running}
+            class="h-9 w-full rounded-md border border-border bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
           />
         </div>
         <div class="space-y-1.5">
@@ -152,7 +284,8 @@
             bind:value={timeout}
             min="5"
             max="300"
-            class="h-9 w-full rounded-md border border-border bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            disabled={running}
+            class="h-9 w-full rounded-md border border-border bg-background px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
           />
         </div>
       </div>
@@ -169,7 +302,8 @@
           {#each [{ key: 'unclassified', label: 'Unclassified' }, { key: 'all', label: 'All' }, { key: 'failed', label: 'Failed' }] as opt}
             <button
               onclick={() => (targetImages = opt.key as typeof targetImages)}
-              class="flex-1 rounded-md border px-2 py-1.5 text-xs font-medium transition-all {targetImages === opt.key
+              disabled={running}
+              class="flex-1 rounded-md border px-2 py-1.5 text-xs font-medium transition-all disabled:opacity-50 {targetImages === opt.key
                 ? 'border-primary bg-primary/10 text-primary'
                 : 'border-border bg-secondary/30 text-muted-foreground hover:text-foreground'}"
             >
@@ -188,7 +322,8 @@
         <input
           type="checkbox"
           bind:checked={skipClassified}
-          class="h-4 w-4 rounded accent-primary"
+          disabled={running}
+          class="h-4 w-4 rounded accent-primary disabled:opacity-50"
         />
       </div>
 
@@ -201,7 +336,8 @@
         <input
           type="checkbox"
           bind:checked={applyRules}
-          class="h-4 w-4 rounded accent-primary"
+          disabled={running}
+          class="h-4 w-4 rounded accent-primary disabled:opacity-50"
         />
       </div>
     </div>
@@ -217,10 +353,17 @@
             <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75"></span>
             <span class="relative inline-flex size-2 rounded-full bg-primary"></span>
           </span>
-          Running...
+          Running... ({processedCount}/{totalCount})
         </span>
       {/if}
     </div>
+
+    <!-- Start Error -->
+    {#if startError}
+      <div class="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-xs text-destructive">
+        {startError}
+      </div>
+    {/if}
 
     <!-- Start / Stop Button -->
     <div class="flex gap-2">
@@ -247,8 +390,12 @@
     {#if running}
       <div class="space-y-1.5">
         <div class="flex items-center justify-between text-xs text-muted-foreground">
-          <span>Processing...</span>
-          <span>{Math.round(progress)}%</span>
+          <span>
+            {currentFile
+              ? (currentFile.split('/').pop()?.split('\\').pop() ?? 'Processing...')
+              : 'Processing...'}
+          </span>
+          <span>{progress}%</span>
         </div>
         <div class="h-2.5 w-full overflow-hidden rounded-full bg-muted">
           <div
@@ -260,11 +407,11 @@
     {/if}
 
     <!-- Live Results -->
-    {#if mockResults.length > 0}
+    {#if results.length > 0}
       <div>
-        <p class="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Live Results</p>
+        <p class="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Recent Classified</p>
         <div class="max-h-48 divide-y divide-border overflow-y-auto rounded-lg border border-border">
-          {#each mockResults as result}
+          {#each results as result (result.file)}
             <div class="flex items-center gap-3 px-3 py-2">
               <div class="size-8 flex-shrink-0 overflow-hidden rounded bg-muted">
                 <img
@@ -278,9 +425,11 @@
                 <p class="truncate text-[11px] font-medium text-foreground">{result.file}</p>
                 <p class="text-[10px] text-muted-foreground">{result.category}</p>
               </div>
-              <span class="flex-shrink-0 text-xs font-semibold {getConfidenceColor(result.confidence)}">
-                {Math.round(result.confidence * 100)}%
-              </span>
+              {#if result.confidence > 0}
+                <span class="flex-shrink-0 text-xs font-semibold {getConfidenceColor(result.confidence)}">
+                  {Math.round(result.confidence * 100)}%
+                </span>
+              {/if}
             </div>
           {/each}
         </div>
@@ -288,7 +437,7 @@
     {/if}
 
     <!-- Errors -->
-    {#if mockErrors.length > 0}
+    {#if errors.length > 0}
       <div class="rounded-lg border border-destructive/30 bg-destructive/5">
         <button
           onclick={() => (errorsExpanded = !errorsExpanded)}
@@ -296,7 +445,7 @@
         >
           <span class="flex items-center gap-2">
             <AlertCircle class="size-3.5" />
-            {mockErrors.length} error{mockErrors.length > 1 ? 's' : ''}
+            {errors.length} error{errors.length > 1 ? 's' : ''}
           </span>
           {#if errorsExpanded}
             <ChevronUp class="size-3.5" />
@@ -306,7 +455,7 @@
         </button>
         {#if errorsExpanded}
           <div class="border-t border-destructive/20 px-3 py-2 space-y-1">
-            {#each mockErrors as err}
+            {#each errors as err}
               <div class="flex items-center justify-between text-[10px]">
                 <span class="font-medium text-foreground">{err.file}</span>
                 <span class="text-destructive">{err.error}</span>
@@ -318,25 +467,12 @@
     {/if}
 
     <!-- Summary -->
-    {#if showSummary}
-      <div class="rounded-lg border border-border bg-secondary/30 p-3 space-y-3">
-        <p class="text-xs font-semibold text-foreground">Classification Complete</p>
-        <div class="space-y-2">
-          {#each categorySummary as cat}
-            <div>
-              <div class="flex items-center justify-between text-[10px]">
-                <span class="text-foreground">{cat.label}</span>
-                <span class="font-medium text-muted-foreground">{cat.count} ({cat.pct}%)</span>
-              </div>
-              <div class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                <div
-                  class="h-full rounded-full bg-primary"
-                  style="width: {cat.pct}%"
-                ></div>
-              </div>
-            </div>
-          {/each}
-        </div>
+    {#if showSummary && !running}
+      <div class="rounded-lg border border-border bg-secondary/30 p-3 space-y-2">
+        <p class="text-xs font-semibold text-foreground">
+          Classification Complete — {processedCount}/{totalCount} files processed
+        </p>
+        <p class="text-xs text-muted-foreground">결과를 갤러리에서 확인하세요.</p>
       </div>
     {/if}
   </div>
