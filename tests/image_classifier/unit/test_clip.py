@@ -11,10 +11,13 @@ try:
 except ImportError:
     HAS_SENTENCE_TRANSFORMERS = False
 
-pytestmark = pytest.mark.skipif(
-    not HAS_SENTENCE_TRANSFORMERS,
-    reason="sentence-transformers not installed"
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not HAS_SENTENCE_TRANSFORMERS,
+        reason="sentence-transformers not installed"
+    ),
+    pytest.mark.gpu,  # CLIP 모델 로딩이 무거움 - 기본 실행에서 제외
+]
 
 
 @pytest.fixture

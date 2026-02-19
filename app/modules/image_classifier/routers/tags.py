@@ -80,6 +80,11 @@ async def create_tag(
 
     - 중복 확인 후 생성
     """
+    # 빈 이름 검증
+    if not request.name or not request.name.strip():
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="태그 이름은 비어있을 수 없습니다.")
+
     # 중복 확인
     dup_query = text("SELECT id FROM tags WHERE name = :name")
     duplicate = db.execute(dup_query, {"name": request.name}).fetchone()

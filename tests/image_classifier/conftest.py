@@ -89,6 +89,21 @@ def seeded_db(test_db):
 @pytest.fixture(scope="function")
 def client(test_db, monkeypatch):
     """FastAPI TestClient (테스트 DB 주입)"""
+    from unittest.mock import MagicMock, AsyncMock
+
+    # NotificationService mock (lifespan에서 실제 DB 연결 방지)
+    mock_notif = MagicMock()
+    mock_notif.should_notify.return_value = False
+    mock_notif.send_notification_message = AsyncMock()
+    monkeypatch.setattr(
+        "app.services.notification_service.NotificationService",
+        lambda *a, **kw: mock_notif,
+    )
+    monkeypatch.setattr(
+        "app.shared.notification.notification_service.NotificationService",
+        lambda *a, **kw: mock_notif,
+    )
+
     from app.modules.image_classifier.database import get_db
     from app.main import app
 
