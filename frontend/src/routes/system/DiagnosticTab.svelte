@@ -35,7 +35,23 @@
     };
   }
 
+  interface ProcessStatus {
+    timestamp: string;
+    healthy: boolean;
+    pid: number;
+    connections: {
+      listen: number;
+      established: number;
+      close_wait: number;
+      time_wait: number;
+    };
+    memory_mb: number;
+    cpu_seconds: number;
+    uptime_hours: number;
+  }
+
   let diagnostic = $state<DiagnosticResult | null>(null);
+  let processStatus = $state<ProcessStatus | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
   let pollTimer: ReturnType<typeof setInterval> | undefined;
@@ -68,6 +84,19 @@
 
   const stepIcons: Record<StepStatus, string> = { pass: '✅', fail: '❌', skip: '⬜' };
 
+  async function fetchProcessStatus() {
+    try {
+      const res = await fetch('/process-status.json?t=' + Date.now());
+      if (res.ok) {
+        processStatus = await res.json();
+      } else {
+        processStatus = null;
+      }
+    } catch {
+      processStatus = null;
+    }
+  }
+
   async function fetchDiagnostics() {
     try {
       const res = await fetch('/diagnostics.json?t=' + Date.now());
@@ -91,7 +120,8 @@
 
   onMount(() => {
     fetchDiagnostics();
-    pollTimer = setInterval(fetchDiagnostics, 30000);
+    fetchProcessStatus();
+    pollTimer = setInterval(() => { fetchDiagnostics(); fetchProcessStatus(); }, 30000);
   });
 
   onDestroy(() => {
@@ -233,6 +263,50 @@
       >
         다시 진단 (JSON 리로드)
       </button>
+    </div>
+  {/if}
+
+  <!-- 프로세스 상태 (watchdog에서 수집) -->
+  {#if processStatus}
+    <div class="bg-card rounded-lg border border-border p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-semibold text-foreground">프로세스 상태</h3>
+        <div class="flex items-center gap-2">
+          <span class="inline-block w-2 h-2 rounded-full {processStatus.healthy ? 'bg-green-500' : 'bg-red-500'}"></span>
+          <span class="text-xs text-muted-foreground">{processStatus.timestamp}</span>
+        </div>
+      </div>
+
+      <dl class="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+        <div>
+          <dt class="text-muted-foreground">PID</dt>
+          <dd class="text-foreground font-mono">{processStatus.pid || '-'}</dd>
+        </div>
+        <div>
+          <dt class="text-muted-foreground">가동시간</dt>
+          <dd class="text-foreground">{processStatus.uptime_hours}h</dd>
+        </div>
+        <div>
+          <dt class="text-muted-foreground">메모리</dt>
+          <dd class="text-foreground {processStatus.memory_mb >= 500 ? 'text-red-600 font-bold' : ''}">{processStatus.memory_mb} MB</dd>
+        </div>
+        <div>
+          <dt class="text-muted-foreground">CPU</dt>
+          <dd class="text-foreground">{processStatus.cpu_seconds}s</dd>
+        </div>
+      </dl>
+
+      {#if processStatus.pid}
+        <div class="mt-4">
+          <h4 class="text-sm font-medium text-muted-foreground mb-2">TCP 연결</h4>
+          <div class="flex gap-4 text-sm">
+            <span class="px-2 py-1 rounded bg-muted">Listen <strong>{processStatus.connections.listen}</strong></span>
+            <span class="px-2 py-1 rounded bg-muted">Established <strong>{processStatus.connections.established}</strong></span>
+            <span class="px-2 py-1 rounded {processStatus.connections.close_wait > 10 ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300' : 'bg-muted'}">CloseWait <strong>{processStatus.connections.close_wait}</strong></span>
+            <span class="px-2 py-1 rounded bg-muted">TimeWait <strong>{processStatus.connections.time_wait}</strong></span>
+          </div>
+        </div>
+      {/if}
     </div>
   {/if}
 </div>

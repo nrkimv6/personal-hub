@@ -42,6 +42,7 @@ $lastSuccessTime = Get-Date
 $totalRestarts = 0
 $diagScriptPath = Join-Path $ScriptDir "diagnose-api.ps1"
 $diagJsonPath = Join-Path $ProjectRoot "frontend\static\diagnostics.json"
+$processStatusPath = Join-Path $ProjectRoot "frontend\static\process-status.json"
 
 function Write-WatchdogLog {
     param(
@@ -64,6 +65,63 @@ function Write-WatchdogLog {
     }
 
     Write-Host "[$timestamp] [$Level] $Message" -ForegroundColor $color
+}
+
+function Write-ProcessStatus {
+    param(
+        [bool]$Healthy,
+        [int]$Pid = 0
+    )
+
+    try {
+        $status = @{
+            timestamp = (Get-Date -Format "yyyy-MM-ddTHH:mm:ss")
+            healthy = $Healthy
+            pid = $Pid
+            connections = @{ listen = 0; established = 0; close_wait = 0; time_wait = 0 }
+            memory_mb = 0
+            cpu_seconds = 0
+            uptime_hours = 0
+        }
+
+        if ($Pid -gt 0) {
+            # TCP 연결 상태 수집
+            try {
+                $conns = Get-NetTCPConnection -OwningProcess $Pid -ErrorAction SilentlyContinue
+                if ($conns) {
+                    $grouped = $conns | Group-Object State
+                    foreach ($g in $grouped) {
+                        switch ($g.Name) {
+                            "Listen"      { $status.connections.listen = $g.Count }
+                            "Established" { $status.connections.established = $g.Count }
+                            "CloseWait"   { $status.connections.close_wait = $g.Count }
+                            "TimeWait"    { $status.connections.time_wait = $g.Count }
+                        }
+                    }
+                }
+            } catch {
+                Write-WatchdogLog "TCP connection query failed: $_" "DEBUG"
+            }
+
+            # 프로세스 정보 수집
+            try {
+                $proc = Get-Process -Id $Pid -ErrorAction SilentlyContinue
+                if ($proc) {
+                    $status.memory_mb = [math]::Round($proc.WorkingSet64 / 1MB, 1)
+                    $status.cpu_seconds = [math]::Round($proc.CPU, 1)
+                    if ($proc.StartTime) {
+                        $status.uptime_hours = [math]::Round(((Get-Date) - $proc.StartTime).TotalHours, 1)
+                    }
+                }
+            } catch {
+                Write-WatchdogLog "Process info query failed: $_" "DEBUG"
+            }
+        }
+
+        $status | ConvertTo-Json -Depth 3 | Out-File -FilePath $processStatusPath -Encoding UTF8 -Force
+    } catch {
+        Write-WatchdogLog "Failed to write process-status.json: $_" "DEBUG"
+    }
 }
 
 function Test-ApiHealth {
@@ -182,6 +240,12 @@ if (Test-ApiHealth) {
 while ($true) {
     $isHealthy = Test-ApiHealth
 
+    # 프로세스 상태 JSON 기록 (성공/실패 무관)
+    $apiPid = 0
+    $conn = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue | Where-Object { $_.State -eq 'Listen' } | Select-Object -First 1
+    if ($conn) { $apiPid = $conn.OwningProcess }
+    Write-ProcessStatus -Healthy $isHealthy -Pid $apiPid
+
     if ($isHealthy) {
         if ($failureCount -gt 0) {
             Write-WatchdogLog "API recovered after $failureCount failures" "OK"
@@ -233,12 +297,6 @@ while ($true) {
                 } elseif ($diagStatus -eq "db_migration_error") {
                     $alertMsg += "`n조치: 마이그레이션 SQL 실행 필요"
                     Send-TelegramAlert $alertMsg
-                } elseif ($diagStatus -eq "port_zombie") {
-                    $alertMsg += "`n조치: zombie PID kill 후 재시작"
-                    Send-TelegramAlert $alertMsg
-                    Force-KillPortOwner
-                    Start-Sleep -Seconds 3
-                    if (Restart-ApiService "Stage 1: port_zombie recovery") { $totalRestarts++ }
                 } else {
                     $alertMsg += "`n조치: 프로세스 재시작 시도"
                     Send-TelegramAlert $alertMsg

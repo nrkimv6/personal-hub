@@ -110,6 +110,19 @@ class HealthMonitorService:
         self.notification_service = notification_service
         self.recent_alerts: list[RecentAlert] = []
         self._max_alerts = 50  # 최근 알림 최대 저장 개수
+        self._session: Optional[aiohttp.ClientSession] = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """재사용 가능한 aiohttp 세션 반환"""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def close(self):
+        """리소스 정리"""
+        if self._session and not self._session.closed:
+            await self._session.close()
+            self._session = None
 
     def read_pid_file(self, service_name: str) -> Optional[int]:
         """PID 파일에서 PID 읽기"""
@@ -344,31 +357,31 @@ class HealthMonitorService:
         """HTTP 엔드포인트 헬스 체크"""
         start = time.time()
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url,
-                    timeout=aiohttp.ClientTimeout(total=settings.HEALTH_CHECK_TIMEOUT)
-                ) as response:
-                    elapsed = (time.time() - start) * 1000
+            session = await self._get_session()
+            async with session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=settings.HEALTH_CHECK_TIMEOUT)
+            ) as response:
+                elapsed = (time.time() - start) * 1000
 
-                    if response.status == expected_status:
-                        return ServiceHealth(
-                            name=name,
-                            status=ServiceStatus.HEALTHY,
-                            last_check=datetime.now(),
-                            failure_count=0,
-                            response_time_ms=elapsed,
-                            error_message=None
-                        )
-                    else:
-                        return ServiceHealth(
-                            name=name,
-                            status=ServiceStatus.UNHEALTHY,
-                            last_check=datetime.now(),
-                            failure_count=self._get_failure_count(name) + 1,
-                            response_time_ms=elapsed,
-                            error_message=f"HTTP {response.status}"
-                        )
+                if response.status == expected_status:
+                    return ServiceHealth(
+                        name=name,
+                        status=ServiceStatus.HEALTHY,
+                        last_check=datetime.now(),
+                        failure_count=0,
+                        response_time_ms=elapsed,
+                        error_message=None
+                    )
+                else:
+                    return ServiceHealth(
+                        name=name,
+                        status=ServiceStatus.UNHEALTHY,
+                        last_check=datetime.now(),
+                        failure_count=self._get_failure_count(name) + 1,
+                        response_time_ms=elapsed,
+                        error_message=f"HTTP {response.status}"
+                    )
         except asyncio.TimeoutError:
             return ServiceHealth(
                 name=name,
@@ -392,30 +405,30 @@ class HealthMonitorService:
         """워커 헬스 체크 (API 경유)"""
         port = 8001 if settings.APP_MODE == "development" else 8000
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"http://localhost:{port}/api/v1/worker/health",
-                    timeout=aiohttp.ClientTimeout(total=5)
-                ) as response:
-                    data = await response.json()
-                    is_healthy = data.get("is_healthy", False)
+            session = await self._get_session()
+            async with session.get(
+                f"http://localhost:{port}/api/v1/worker/health",
+                timeout=aiohttp.ClientTimeout(total=5)
+            ) as response:
+                data = await response.json()
+                is_healthy = data.get("is_healthy", False)
 
-                    if is_healthy:
-                        return ServiceHealth(
-                            name="worker_http",
-                            status=ServiceStatus.HEALTHY,
-                            last_check=datetime.now(),
-                            failure_count=0,
-                            error_message=None
-                        )
-                    else:
-                        return ServiceHealth(
-                            name="worker_http",
-                            status=ServiceStatus.UNHEALTHY,
-                            last_check=datetime.now(),
-                            failure_count=self._get_failure_count("worker_http") + 1,
-                            error_message=data.get("details", {}).get("error", "Worker unhealthy")
-                        )
+                if is_healthy:
+                    return ServiceHealth(
+                        name="worker_http",
+                        status=ServiceStatus.HEALTHY,
+                        last_check=datetime.now(),
+                        failure_count=0,
+                        error_message=None
+                    )
+                else:
+                    return ServiceHealth(
+                        name="worker_http",
+                        status=ServiceStatus.UNHEALTHY,
+                        last_check=datetime.now(),
+                        failure_count=self._get_failure_count("worker_http") + 1,
+                        error_message=data.get("details", {}).get("error", "Worker unhealthy")
+                    )
         except Exception as e:
             return ServiceHealth(
                 name="worker_http",
