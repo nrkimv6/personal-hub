@@ -27,13 +27,6 @@ MANAGED_PROJECTS = {
                     "worker_pid_file": "claude_worker_dev.pid",
                 },
                 {
-                    "name": "video_download",
-                    "label": "동영상 다운로드",
-                    "tier": "worker",
-                    "watchdog_pid_file": "video_download_watchdog_dev.pid",
-                    "worker_pid_file": "video_download_worker_dev.pid",
-                },
-                {
                     "name": "command_listener",
                     "label": "명령 리스너",
                     "tier": "infra",
