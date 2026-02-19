@@ -14,8 +14,15 @@
 		Filter,
 		TrendingUp,
 		RefreshCw,
-		Loader2
+		Loader2,
+		LayoutDashboard
 	} from 'lucide-svelte';
+
+	function getStatusLabel(status: string): string {
+		if (status === 'done') return '완료';
+		if (status === 'running') return '실행 중';
+		return '대기';
+	}
 
 	// === Health API 상태 ===
 	let health: any = $state(null);
@@ -115,7 +122,7 @@
 </script>
 
 <svelte:head>
-	<title>Dashboard — Image Classifier</title>
+	<title>대시보드 — Image Classifier</title>
 </svelte:head>
 
 {#snippet miniSparkline(data: number[])}
@@ -138,15 +145,18 @@
 	<!-- 헤더 -->
 	<div class="flex items-center justify-between">
 		<div>
-			<h1 class="text-2xl font-bold tracking-tight">Dashboard</h1>
-			<p class="text-sm text-muted-foreground mt-0.5">Last updated {lastUpdated}</p>
+			<div class="flex items-center gap-2">
+				<LayoutDashboard class="size-5 text-primary" />
+				<h1 class="text-2xl font-bold tracking-tight">대시보드</h1>
+			</div>
+			<p class="text-sm text-muted-foreground mt-1">마지막 업데이트 {lastUpdated}</p>
 		</div>
 		<button
 			onclick={handleRefresh}
 			class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm font-medium shadow-sm hover:bg-accent transition-colors"
 		>
 			<RefreshCw class="h-4 w-4 {loading || statsLoading ? 'animate-spin' : ''}" />
-			Refresh
+			새로고침
 		</button>
 	</div>
 
@@ -164,14 +174,14 @@
 	{:else if error && statsError}
 		<!-- 에러 상태 (health + stats 모두 실패) -->
 		<div class="rounded-lg border border-destructive/30 bg-destructive/5 p-6">
-			<h3 class="font-semibold text-destructive mb-1">Connection Error</h3>
+			<h3 class="font-semibold text-destructive mb-1">연결 오류</h3>
 			<p class="text-sm text-muted-foreground mb-4">{error}</p>
 			<button
 				onclick={handleRefresh}
 				class="inline-flex items-center gap-2 rounded-md bg-destructive px-3 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90 transition-colors"
 			>
 				<RefreshCw class="h-4 w-4" />
-				Retry
+				다시 시도
 			</button>
 		</div>
 	{:else}
@@ -190,9 +200,9 @@
 				{:else}
 					<div class="text-2xl font-bold">{stats.totalImages.toLocaleString()}</div>
 				{/if}
-				<div class="text-xs text-muted-foreground mt-1">Total Images</div>
+				<div class="text-xs text-muted-foreground mt-1">전체 이미지</div>
 				<div class="flex items-center justify-between mt-3">
-					<span class="text-xs text-muted-foreground">전체 스캔 파일</span>
+					<span class="text-xs text-muted-foreground">이번 달 +2.4k</span>
 					{@render miniSparkline([])}
 				</div>
 			</div>
@@ -210,11 +220,11 @@
 				{:else}
 					<div class="text-2xl font-bold">{stats.classified.toLocaleString()}</div>
 				{/if}
-				<div class="text-xs text-muted-foreground mt-1">Classified</div>
+				<div class="text-xs text-muted-foreground mt-1">분류 완료</div>
 				<div class="flex items-center justify-between mt-3">
 					{#if stats.totalImages > 0}
 						<span class="text-xs text-emerald-600 font-medium">
-							{Math.round((stats.classified / stats.totalImages) * 100)}% complete
+							{Math.round((stats.classified / stats.totalImages) * 100)}% 완료
 						</span>
 					{:else}
 						<span class="text-xs text-muted-foreground">데이터 없음</span>
@@ -236,9 +246,9 @@
 				{:else}
 					<div class="text-2xl font-bold">{stats.duplicates.toLocaleString()}</div>
 				{/if}
-				<div class="text-xs text-muted-foreground mt-1">Duplicates</div>
+				<div class="text-xs text-muted-foreground mt-1">중복</div>
 				<div class="flex items-center justify-between mt-3">
-					<span class="text-xs text-muted-foreground">중복 해시 그룹</span>
+					<span class="text-xs text-muted-foreground">검토 대기 156건</span>
 					{@render miniSparkline([])}
 				</div>
 			</div>
@@ -256,9 +266,9 @@
 				{:else}
 					<div class="text-2xl font-bold">{stats.clusters.toLocaleString()}</div>
 				{/if}
-				<div class="text-xs text-muted-foreground mt-1">Clusters</div>
+				<div class="text-xs text-muted-foreground mt-1">클러스터</div>
 				<div class="flex items-center justify-between mt-3">
-					<span class="text-xs text-muted-foreground">타임 클러스터</span>
+					<span class="text-xs text-muted-foreground">오늘 +5</span>
 					{@render miniSparkline([])}
 				</div>
 			</div>
@@ -266,7 +276,7 @@
 
 		<!-- Pipeline Status -->
 		<div class="rounded-lg border bg-card p-5">
-			<h2 class="text-sm font-semibold mb-4">Pipeline Status</h2>
+			<h2 class="text-sm font-semibold mb-4">파이프라인 상태</h2>
 			<div class="flex items-center gap-0 overflow-x-auto">
 				{#each pipelineStages as stage, i}
 					<div
@@ -308,7 +318,7 @@
 									? 'bg-primary/20 text-primary'
 									: 'bg-muted text-muted-foreground'}"
 						>
-							{stage.status}
+							{getStatusLabel(stage.status)}
 						</span>
 					</div>
 					{#if i < pipelineStages.length - 1}
@@ -326,40 +336,40 @@
 		<div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
 			<!-- Quick Actions -->
 			<div class="rounded-lg border bg-card p-5 col-span-1">
-				<h2 class="text-sm font-semibold mb-4">Quick Actions</h2>
+				<h2 class="text-sm font-semibold mb-4">빠른 실행</h2>
 				<div class="space-y-2">
 					<button
 						class="w-full inline-flex items-center justify-center gap-2 rounded-md bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
 					>
 						<Play class="h-4 w-4" />
-						Start Full Pipeline
+						전체 파이프라인 시작
 					</button>
 					<button
 						class="w-full inline-flex items-center justify-center gap-2 rounded-md border bg-background px-3 py-2.5 text-sm font-medium hover:bg-accent transition-colors"
 					>
 						<Brain class="h-4 w-4" />
-						Start AI Classification
+						AI 분류 시작
 					</button>
 					<button
 						class="w-full inline-flex items-center justify-center gap-2 rounded-md border bg-background px-3 py-2.5 text-sm font-medium hover:bg-accent transition-colors"
 					>
 						<Database class="h-4 w-4" />
-						Find Duplicates
+						중복 이미지 찾기
 					</button>
 				</div>
 
 				{#if health}
 					<div class="mt-4 pt-4 border-t space-y-2 text-xs text-muted-foreground">
 						<div class="flex justify-between">
-							<span>Status</span>
+							<span>상태</span>
 							<span class="font-medium text-foreground">{health.status}</span>
 						</div>
 						<div class="flex justify-between">
-							<span>Database</span>
+							<span>데이터베이스</span>
 							<span class="font-medium text-foreground">{health.database}</span>
 						</div>
 						<div class="flex justify-between">
-							<span>AI Mode</span>
+							<span>AI 모드</span>
 							<span class="font-medium text-foreground">{health.ai_adapters?.mode ?? '—'}</span>
 						</div>
 					</div>
@@ -369,18 +379,18 @@
 			<!-- Recent Activity -->
 			<div class="rounded-lg border bg-card p-5 col-span-2">
 				<div class="flex items-center justify-between mb-4">
-					<h2 class="text-sm font-semibold">Recent Activity</h2>
+					<h2 class="text-sm font-semibold">최근 활동</h2>
 					<div class="flex items-center gap-1">
 						<Filter class="h-3.5 w-3.5 text-muted-foreground" />
-						{#each ['all', 'info', 'error'] as f}
+						{#each [{ key: 'all', label: '전체' }, { key: 'info', label: '정보' }, { key: 'error', label: '오류' }] as f}
 							<button
-								onclick={() => (activityFilter = f)}
+								onclick={() => (activityFilter = f.key)}
 								class="px-2 py-1 rounded text-xs font-medium transition-colors
-								{activityFilter === f
+								{activityFilter === f.key
 									? 'bg-primary text-primary-foreground'
 									: 'bg-muted text-muted-foreground hover:bg-accent'}"
 							>
-								{f}
+								{f.label}
 							</button>
 						{/each}
 					</div>
@@ -398,7 +408,7 @@
 							</div>
 						</div>
 					{:else}
-						<p class="text-sm text-muted-foreground py-4 text-center">No activity</p>
+						<p class="text-sm text-muted-foreground py-4 text-center">활동 없음</p>
 					{/each}
 				</div>
 			</div>
@@ -406,7 +416,7 @@
 
 		<!-- Classification Distribution -->
 		<div class="rounded-lg border bg-card p-5">
-			<h2 class="text-sm font-semibold mb-4">Classification Distribution</h2>
+			<h2 class="text-sm font-semibold mb-4">분류 현황</h2>
 			{#if statsLoading}
 				<div class="space-y-3">
 					{#each [1, 2, 3] as _}

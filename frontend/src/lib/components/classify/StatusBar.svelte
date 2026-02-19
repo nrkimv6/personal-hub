@@ -48,10 +48,9 @@
 			<Activity class="size-3 text-primary" />
 			<span class="text-muted-foreground">
 				{#if runningCount > 0}
-					<span class="font-medium text-primary">{runningCount}</span> background
-					{runningCount === 1 ? 'task' : 'tasks'} running
+					<span class="font-medium text-primary">{runningCount}</span>개 백그라운드 작업 실행 중
 				{:else}
-					All systems idle
+					모든 시스템 대기 중
 				{/if}
 			</span>
 		</div>

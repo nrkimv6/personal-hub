@@ -18,17 +18,17 @@
 	} from 'lucide-svelte';
 
 	const modules = [
-		{ id: 'dashboard', label: 'Dashboard', path: '/classify/dashboard', icon: LayoutDashboard },
-		{ id: 'scanner', label: 'Scanner', path: '/classify/folders', icon: FolderSearch },
-		{ id: 'gallery', label: 'Gallery', path: '/classify/gallery', icon: Images },
-		{ id: 'duplicates', label: 'Duplicates', path: '/classify/duplicates', icon: Copy },
-		{ id: 'ai', label: 'AI Classify', path: '/classify/ai', icon: Brain },
-		{ id: 'categories', label: 'Categories', path: '/classify/categories', icon: FolderTree },
-		{ id: 'clusters', label: 'Clusters', path: '/classify/clusters', icon: Clock },
-		{ id: 'similar', label: 'Similar', path: '/classify/similar', icon: Search },
-		{ id: 'tags', label: 'Tags', path: '/classify/tags', icon: Tags },
-		{ id: 'rules', label: 'Rules', path: '/classify/rules', icon: ListChecks },
-		{ id: 'settings', label: 'Settings', path: '/classify/settings', icon: Settings }
+		{ id: 'dashboard', label: '대시보드', path: '/classify/dashboard', icon: LayoutDashboard },
+		{ id: 'scanner', label: '스캐너', path: '/classify/folders', icon: FolderSearch },
+		{ id: 'gallery', label: '갤러리', path: '/classify/gallery', icon: Images },
+		{ id: 'duplicates', label: '중복', path: '/classify/duplicates', icon: Copy },
+		{ id: 'ai', label: 'AI 분류', path: '/classify/ai', icon: Brain },
+		{ id: 'categories', label: '카테고리', path: '/classify/categories', icon: FolderTree },
+		{ id: 'clusters', label: '클러스터', path: '/classify/clusters', icon: Clock },
+		{ id: 'similar', label: '유사도', path: '/classify/similar', icon: Search },
+		{ id: 'tags', label: '태그', path: '/classify/tags', icon: Tags },
+		{ id: 'rules', label: '규칙', path: '/classify/rules', icon: ListChecks },
+		{ id: 'settings', label: '설정', path: '/classify/settings', icon: Settings }
 	];
 
 	let mobileMenuOpen = $state(false);

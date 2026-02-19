@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fetchWithTimeout } from '$lib/api/client';
-  import { Search, Tag, Trash2, Check, X, Loader2 } from 'lucide-svelte';
+  import { Search, Tag, Trash2, Check, X, Loader2, Images } from 'lucide-svelte';
 
   // 이미지 타입
   interface GalleryImage {
@@ -29,7 +29,17 @@
   let currentOffset = $state(0);
   let hasMore = $state(false);
 
-  const statusFilters = ['All', 'Pending', 'Mapped', 'AI Classified', 'Approved'];
+  const statusFilters = ['전체', '대기 중', '매핑됨', 'AI 분류', '승인됨'];
+  const statusFilterMap: Record<string, string> = {
+    '전체': 'all', '대기 중': 'pending', '매핑됨': 'mapped', 'AI 분류': 'ai_classified', '승인됨': 'approved'
+  };
+
+  function getStatusLabel(status: string): string {
+    const map: Record<string, string> = {
+      pending: '대기', mapped: '매핑됨', ai_classified: 'AI 분류', approved: '승인됨'
+    };
+    return map[status] ?? status;
+  }
 
   // API 필터 → 쿼리 파라미터 변환
   function buildQuery(offset: number): string {
@@ -131,10 +141,10 @@
 
   function getStatusBadgeClass(status: string): string {
     switch (status) {
-      case 'approved': return 'bg-green-500/20 text-green-600 dark:text-green-400';
+      case 'approved': return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400';
       case 'folder_mapped':
-      case 'mapped': return 'bg-primary/20 text-primary';
-      case 'ai_classified': return 'bg-yellow-500/20 text-yellow-700 dark:text-yellow-400';
+      case 'mapped': return 'bg-primary/10 text-primary';
+      case 'ai_classified': return 'bg-amber-500/10 text-amber-700 dark:text-amber-400';
       case 'moved': return 'bg-violet-500/20 text-violet-700';
       default: return 'bg-muted text-muted-foreground';
     }
@@ -147,13 +157,23 @@
   }
 </script>
 
+<svelte:head>
+  <title>갤러리 — Image Classifier</title>
+</svelte:head>
+
 <div class="space-y-4">
   <!-- Header -->
-  <div class="flex items-center gap-3">
-    <h1 class="text-2xl font-bold text-foreground">Gallery</h1>
-    <span class="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
-      {filteredImages.length}{hasMore ? '+' : ''} images
-    </span>
+  <div class="flex items-center justify-between">
+    <div>
+      <div class="flex items-center gap-2">
+        <Images class="size-5 text-primary" />
+        <h1 class="text-2xl font-bold tracking-tight">갤러리</h1>
+        <span class="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+          {filteredImages.length}{hasMore ? '+' : ''}이미지
+        </span>
+      </div>
+      <p class="mt-1 text-sm text-muted-foreground">이미지를 탐색하고 분류 상태를 관리합니다.</p>
+    </div>
   </div>
 
   <!-- Filter Bar -->
@@ -164,7 +184,7 @@
         <Search class="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
         <input
           type="text"
-          placeholder="Search images..."
+          placeholder="이미지 검색..."
           bind:value={searchQuery}
           class="h-8 w-full rounded-md border border-border bg-background pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
         />
@@ -173,7 +193,7 @@
       <!-- Status Filter Buttons -->
       <div class="flex items-center gap-0.5 rounded-md border border-border bg-muted p-0.5">
         {#each statusFilters as filter}
-          {@const filterKey = filter === 'All' ? 'all' : filter.toLowerCase().replace(' ', '_')}
+          {@const filterKey = statusFilterMap[filter] ?? 'all'}
           <button
             onclick={() => (statusFilter = filterKey)}
             class="rounded px-2.5 py-1 text-[11px] font-medium transition-all {statusFilter === filterKey
@@ -190,9 +210,9 @@
         bind:value={sortBy}
         class="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
       >
-        <option value="date">Date</option>
-        <option value="name">Name</option>
-        <option value="size">Size</option>
+        <option value="date">날짜</option>
+        <option value="name">이름</option>
+        <option value="size">크기</option>
       </select>
     </div>
   </div>
@@ -200,26 +220,26 @@
   <!-- Bulk Action Bar -->
   {#if selectedImages.length > 0}
     <div class="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
-      <span class="text-xs font-medium text-primary">{selectedImages.length} images selected</span>
+      <span class="text-xs font-medium text-primary">{selectedImages.length} 이미지 선택됨</span>
       <div class="mx-1 h-4 w-px bg-border"></div>
       <button class="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent">
         <Tag class="size-3" />
-        Assign Category
+        카테고리 지정
       </button>
       <button class="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent">
         <Check class="size-3" />
-        Approve
+        승인
       </button>
       <button class="flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/10">
         <Trash2 class="size-3" />
-        Delete
+        삭제
       </button>
       <button
         onclick={() => (selectedImages = [])}
         class="ml-auto flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
       >
         <X class="size-3" />
-        Deselect All
+        전체 해제
       </button>
     </div>
   {/if}
@@ -296,7 +316,7 @@
           <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent p-1.5 pt-5">
             <p class="truncate text-[10px] font-medium text-white">{img.filename}</p>
             <span class="mt-0.5 inline-block rounded px-1 py-0.5 text-[9px] font-medium capitalize {getStatusBadgeClass(img.status)}">
-              {img.status.replace(/_/g, ' ')}
+              {getStatusLabel(img.status)}
             </span>
           </div>
         </div>
@@ -338,7 +358,7 @@
   <div class="fixed inset-y-0 right-0 z-50 flex w-full max-w-lg flex-col border-l border-border bg-card shadow-2xl">
     <!-- Header -->
     <div class="flex items-center justify-between border-b border-border px-4 py-3">
-      <h2 class="text-sm font-semibold text-foreground">Image Detail</h2>
+      <h2 class="text-sm font-semibold text-foreground">이미지 상세</h2>
       <button
         onclick={() => (detailImage = null)}
         class="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -363,24 +383,24 @@
 
       <!-- Metadata -->
       <div class="rounded-lg border border-border bg-secondary/30 p-3">
-        <h3 class="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Metadata</h3>
+        <h3 class="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">메타데이터</h3>
         <div class="grid grid-cols-2 gap-2">
           <div>
-            <p class="text-[10px] text-muted-foreground">Filename</p>
+            <p class="text-[10px] text-muted-foreground">파일명</p>
             <p class="truncate text-xs font-medium text-foreground">{detailData.filename}</p>
           </div>
           <div>
-            <p class="text-[10px] text-muted-foreground">Size</p>
+            <p class="text-[10px] text-muted-foreground">크기</p>
             <p class="text-xs font-medium text-foreground">{formatSize(detailData.size)}</p>
           </div>
           <div>
-            <p class="text-[10px] text-muted-foreground">Status</p>
+            <p class="text-[10px] text-muted-foreground">상태</p>
             <span class="inline-block rounded px-1.5 py-0.5 text-[10px] font-medium capitalize {getStatusBadgeClass(detailData.status)}">
-              {detailData.status.replace(/_/g, ' ')}
+              {getStatusLabel(detailData.status)}
             </span>
           </div>
           <div>
-            <p class="text-[10px] text-muted-foreground">Category ID</p>
+            <p class="text-[10px] text-muted-foreground">카테고리</p>
             <p class="text-xs font-medium text-foreground">{detailData.category ?? '—'}</p>
           </div>
         </div>
@@ -391,13 +411,13 @@
     <div class="flex items-center gap-2 border-t border-border p-3">
       <button class="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90">
         <Check class="size-3" />
-        Approve
+        승인
       </button>
       <button
         onclick={() => (detailImage = null)}
         class="rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-foreground hover:bg-accent"
       >
-        Close
+        닫기
       </button>
     </div>
   </div>
