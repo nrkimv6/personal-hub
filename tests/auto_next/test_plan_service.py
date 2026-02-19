@@ -84,6 +84,12 @@ class TestIsIgnoredPlan:
         progress = PlanProgressResponse(done=3, total=5, percent=60)
         assert svc._is_ignored_plan(path, "구현중", progress) is False
 
+    def test_review_complete_not_ignored(self, svc, tmp_path):
+        """상태가 '검토완료'인 plan → False (검토완료는 구현 완료가 아님)"""
+        path = tmp_path / "test.md"
+        progress = PlanProgressResponse(done=0, total=5, percent=0)
+        assert svc._is_ignored_plan(path, "검토완료", progress) is False
+
 
 # ========== parse_plan_items() ==========
 
