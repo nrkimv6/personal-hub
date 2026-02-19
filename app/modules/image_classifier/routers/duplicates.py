@@ -36,11 +36,13 @@ class DetectRequest(BaseModel):
 @router.post("/detect")
 async def start_detect_duplicates(
     background_tasks: BackgroundTasks,
-    request: DetectRequest = DetectRequest(),
+    request: Optional[DetectRequest] = None,
     db: Session = Depends(get_db),
 ):
     """중복 탐지 시작 (백그라운드)"""
     global _active_detector
+    if request is None:
+        request = DetectRequest()
 
     # 이미 실행 중인지 확인
     progress_mgr = TaskProgressManager(db)
