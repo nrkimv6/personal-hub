@@ -84,13 +84,6 @@ class BrowserWorkerManager:
                 "env": {"APP_MODE": "development"},
             },
             {
-                "name": "Video Download Watchdog",
-                "pid_file": f"video_download_watchdog{self.pid_suffix}.pid",
-                "cmd": ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File",
-                        str(self.scripts_dir / "video-download-watchdog.ps1")],
-                "env": {"APP_MODE": "development"},
-            },
-            {
                 "name": "Command Listener Watchdog",
                 "pid_file": f"command_listener_watchdog{self.pid_suffix}.pid",
                 "cmd": ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File",
@@ -110,7 +103,6 @@ class BrowserWorkerManager:
         self.worker_pid_files = [
             f"unified_worker{self.pid_suffix}.pid",
             f"claude_worker{self.pid_suffix}.pid",
-            f"video_download_worker{self.pid_suffix}.pid",
         ]
 
         # Legacy PID 파일
@@ -119,6 +111,9 @@ class BrowserWorkerManager:
             f"crawl_watchdog{self.pid_suffix}.pid",
             f"worker{self.pid_suffix}.pid",
             f"crawl_worker{self.pid_suffix}.pid",
+            # video-dl이 orchestrator로 통합됨 (이전 별도 watchdog 정리용)
+            f"video_download_watchdog{self.pid_suffix}.pid",
+            f"video_download_worker{self.pid_suffix}.pid",
         ]
 
     # ── start ────────────────────────────────────────────────────
@@ -355,9 +350,8 @@ class BrowserWorkerManager:
         # 실제 워커 프로세스
         print(f"\n  {BOLD}Worker Processes:{RESET}")
         worker_names = {
-            f"unified_worker{self.pid_suffix}.pid": "Unified Worker (via Orchestrator)",
+            f"unified_worker{self.pid_suffix}.pid": "Unified Worker (via Orchestrator, incl. video-dl)",
             f"claude_worker{self.pid_suffix}.pid": "Claude Worker",
-            f"video_download_worker{self.pid_suffix}.pid": "Video Download Worker",
         }
         for pf, name in worker_names.items():
             pid_path = self.pid_dir / pf
