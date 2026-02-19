@@ -50,14 +50,16 @@ class ClassifyResponse(BaseModel):
 
 @router.post("/start", response_model=ClassifyResponse)
 async def start_classification(
-    request: ClassifyRequest,
     background_tasks: BackgroundTasks,
+    request: Optional[ClassifyRequest] = None,
     db: Session = Depends(get_db),
 ):
     """
     AI 분류 시작 (백그라운드 작업)
     """
     global classification_status
+    if request is None:
+        request = ClassifyRequest()
 
     if classification_status["running"]:
         raise HTTPException(status_code=400, detail="Classification already running")

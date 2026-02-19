@@ -81,7 +81,7 @@ thumb_cancel_event = threading.Event()
 async def start_scan(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    request: ScanStartRequest = ScanStartRequest(),
+    request: Optional[ScanStartRequest] = None,
 ):
     """
     폴더 트리 스캔 시작
@@ -91,6 +91,8 @@ async def start_scan(
     - DB에 파일 정보 저장
     """
     global scan_state
+    if request is None:
+        request = ScanStartRequest()
 
     if scan_state["is_running"]:
         raise HTTPException(status_code=409, detail="스캔이 이미 실행 중입니다.")
