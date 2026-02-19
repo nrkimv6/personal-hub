@@ -71,6 +71,7 @@ class RunRequest(BaseModel):
 class RunStatusResponse(BaseModel):
     """실행 상태 응답 스키마"""
     running: bool
+    listener_alive: bool = False
     pid: Optional[int] = None
     plan_file: Optional[str] = None
     start_time: Optional[datetime] = None

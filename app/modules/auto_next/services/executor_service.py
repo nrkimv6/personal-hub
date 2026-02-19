@@ -337,7 +337,9 @@ class ExecutorService:
     def get_process_status(self) -> RunStatusResponse:
         """프로세스 상태 조회 - Redis에서 조회 + stale 상태 자동 정리"""
         try:
-            # Redis에서 상태 조회
+            heartbeat = self.redis_client.get("auto-next:listener:heartbeat")
+            listener_alive = heartbeat is not None
+
             status = self.redis_client.get(STATE_KEY + ":status")
 
             if status == "running":
@@ -345,39 +347,24 @@ class ExecutorService:
                 plan_file = self.redis_client.get(STATE_KEY + ":plan_file")
                 start_time_str = self.redis_client.get(STATE_KEY + ":start_time")
 
-                # heartbeat 없으면 stale → 상태 자동 정리
-                heartbeat = self.redis_client.get("auto-next:listener:heartbeat")
-                if heartbeat is None:
+                if not listener_alive:
                     logger.warning("[auto-next] heartbeat 없음 → stale 상태 자동 정리")
                     self._force_cleanup_state()
-                    return RunStatusResponse(
-                        running=False,
-                        pid=None,
-                        plan_file=None,
-                    )
+                    return RunStatusResponse(running=False, listener_alive=False, pid=None, plan_file=None)
 
                 return RunStatusResponse(
                     running=True,
+                    listener_alive=True,
                     pid=int(pid_str) if pid_str else None,
                     plan_file=plan_file,
                     start_time=datetime.fromisoformat(start_time_str) if start_time_str else None,
                     current_cycle=0,
                 )
             else:
-                # 실행 중이 아님
-                return RunStatusResponse(
-                    running=False,
-                    pid=None,
-                    plan_file=None,
-                )
+                return RunStatusResponse(running=False, listener_alive=listener_alive, pid=None, plan_file=None)
 
         except redis.ConnectionError:
-            # Redis 연결 실패 시 - 실행 중이 아닌 것으로 간주
-            return RunStatusResponse(
-                running=False,
-                pid=None,
-                plan_file=None,
-            )
+            return RunStatusResponse(running=False, listener_alive=False, pid=None, plan_file=None)
         except Exception as e:
             logger.error(f"[auto-next] status 조회 실패: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")
