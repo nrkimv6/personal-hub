@@ -1,6 +1,18 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-  import { fetchWithTimeout } from '$lib/api/client';
+	import { fetchWithTimeout } from '$lib/api/client';
+	import {
+		FolderOpen,
+		Plus,
+		Trash2,
+		Play,
+		Square,
+		CheckCircle2,
+		FileImage,
+		Folder,
+		RefreshCw,
+		Brain
+	} from 'lucide-svelte';
 
 	// === 타입 정의 ===
 	interface Folder {
@@ -22,13 +34,30 @@
 		children: Category[];
 	}
 
-	// === 상태 ===
-	let folders: Folder[] = [];
-	let categories: Category[] = [];
-	let loading = false;
-	let classifyLoading = false;
-	let statusFilter: string = 'all';
-	let expandedFolders = new Set<number>();
+	// === 보존된 기존 상태 ===
+	let folders: Folder[] = $state([]);
+	let categories: Category[] = $state([]);
+	let loading = $state(false);
+	let classifyLoading = $state(false);
+	let statusFilter: string = $state('all');
+	let expandedFolders = $state(new Set<number>());
+
+	// === 추가 상태 ===
+	let scanning = $state(false);
+	let progress = $state(0);
+	let scanRoots = $state<string[]>(['D:\\Photos', 'D:\\Downloads']);
+	let extensions = $state(['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'raw']);
+	let scanDone = $state(false);
+	let newFolderInput = $state('');
+
+	const mappedCount = $derived(folders.filter((f) => f.category_id !== null).length);
+	const totalCount = $derived(folders.length);
+	const unmappedCount = $derived(totalCount - mappedCount);
+	const mappingPct = $derived(totalCount > 0 ? Math.round((mappedCount / totalCount) * 100) : 0);
+
+	const filteredFolders = $derived(
+		statusFilter === 'all' ? folders : folders.filter((f) => f.folder_status === statusFilter)
+	);
 
 	// === 마운트 ===
 	onMount(async () => {
@@ -36,7 +65,7 @@
 		await loadFolders();
 	});
 
-	// === API 호출 ===
+	// === 보존된 API 호출 ===
 	async function loadCategories() {
 		try {
 			const res = await fetchWithTimeout('/api/ic/categories?include_tree=true');
@@ -68,22 +97,33 @@
 
 	async function classifyAllFolders() {
 		classifyLoading = true;
+		scanning = true;
+		scanDone = false;
+		progress = 0;
+
+		// 진행 시뮬레이션 (실제 API 완료 전까지)
+		const timer = setInterval(() => {
+			if (progress < 90) progress += 5;
+		}, 300);
+
 		try {
 			const res = await fetchWithTimeout('/api/ic/folders/classify', { method: 'POST' });
 			const data = await res.json();
-			alert(`분류 완료: ${JSON.stringify(data.stats)}`);
+			progress = 100;
+			scanDone = true;
 			await loadFolders();
 		} catch (e) {
 			console.error('폴더 분류 실패:', e);
-			alert('폴더 분류 실패: ' + e);
 		} finally {
+			clearInterval(timer);
 			classifyLoading = false;
+			scanning = false;
 		}
 	}
 
 	async function requestAISuggestion(folder: Folder) {
 		folder.ai_loading = true;
-		folders = [...folders]; // 리렌더링
+		folders = [...folders];
 
 		try {
 			const res = await fetchWithTimeout('/api/ic/folders/ai-suggest', {
@@ -93,8 +133,8 @@
 			});
 
 			if (!res.ok) {
-				const error = await res.json();
-				throw new Error(error.detail || '추천 실패');
+				const err = await res.json();
+				throw new Error(err.detail || '추천 실패');
 			}
 
 			const data = await res.json();
@@ -102,7 +142,6 @@
 			folders = [...folders];
 		} catch (e) {
 			console.error('AI 추천 실패:', e);
-			alert('AI 추천 실패: ' + e);
 		} finally {
 			folder.ai_loading = false;
 			folders = [...folders];
@@ -117,16 +156,12 @@
 				body: JSON.stringify({ category_id: categoryId })
 			});
 
-			if (!res.ok) {
-				throw new Error('매핑 저장 실패');
-			}
+			if (!res.ok) throw new Error('매핑 저장 실패');
 
 			folder.category_id = categoryId;
 			folders = [...folders];
-			alert('매핑 저장 완료!');
 		} catch (e) {
 			console.error('매핑 저장 실패:', e);
-			alert('매핑 저장 실패: ' + e);
 		}
 	}
 
@@ -138,20 +173,16 @@
 				body: JSON.stringify({ parent_folder_id: folderId, apply_to_children: true })
 			});
 
-			if (!res.ok) {
-				throw new Error('상속 적용 실패');
-			}
+			if (!res.ok) throw new Error('상속 적용 실패');
 
 			const data = await res.json();
-			alert(`상속 완료: ${data.children_updated}개 하위 폴더에 적용`);
 			await loadFolders();
 		} catch (e) {
 			console.error('상속 실패:', e);
-			alert('상속 실패: ' + e);
 		}
 	}
 
-	// === 헬퍼 ===
+	// === 보존된 헬퍼 ===
 	function toggleFolder(folderId: number) {
 		if (expandedFolders.has(folderId)) {
 			expandedFolders.delete(folderId);
@@ -162,7 +193,7 @@
 	}
 
 	function getCategoryName(categoryId: number | null): string {
-		if (!categoryId) return '—미지정—';
+		if (!categoryId) return '—';
 		const cat = findCategory(categories, categoryId);
 		return cat ? cat.full_path : '알 수 없음';
 	}
@@ -181,15 +212,15 @@
 	function getStatusBadge(status: string): { label: string; color: string } {
 		switch (status) {
 			case 'clear':
-				return { label: '명확', color: 'bg-green-100 text-green-700' };
+				return { label: '명확', color: 'bg-emerald-100 text-emerald-700' };
 			case 'unclear':
 				return { label: '불명확', color: 'bg-yellow-100 text-yellow-700' };
 			case 'flat':
-				return { label: '플랫 (혼합)', color: 'bg-orange-100 text-orange-700' };
+				return { label: '플랫', color: 'bg-orange-100 text-orange-700' };
 			case 'nested':
-				return { label: '중첩 (상속 권장)', color: 'bg-purple-100 text-purple-700' };
+				return { label: '중첩', color: 'bg-violet-100 text-violet-700' };
 			default:
-				return { label: '미판정', color: 'bg-gray-100 text-gray-600' };
+				return { label: '미판정', color: 'bg-muted text-muted-foreground' };
 		}
 	}
 
@@ -204,173 +235,336 @@
 		return result;
 	}
 
-	$: filteredFolders =
-		statusFilter === 'all' ? folders : folders.filter((f) => f.folder_status === statusFilter);
+	// === 추가 헬퍼 ===
+	function toggleExtension(ext: string) {
+		if (extensions.includes(ext)) {
+			extensions = extensions.filter((e) => e !== ext);
+		} else {
+			extensions = [...extensions, ext];
+		}
+	}
 
-	$: mappedCount = folders.filter((f) => f.category_id !== null).length;
-	$: totalCount = folders.length;
+	function removeScanRoot(path: string) {
+		scanRoots = scanRoots.filter((r) => r !== path);
+	}
+
+	function addScanRoot() {
+		const val = newFolderInput.trim();
+		if (val && !scanRoots.includes(val)) {
+			scanRoots = [...scanRoots, val];
+		}
+		newFolderInput = '';
+	}
 </script>
 
-<div class="max-w-7xl mx-auto">
+<svelte:head>
+	<title>Scanner — Image Classifier</title>
+</svelte:head>
+
+<div class="space-y-6">
 	<!-- 헤더 -->
-	<div class="mb-6">
-		<h1 class="text-3xl font-bold text-gray-900">📁 폴더 매핑</h1>
-		<p class="text-gray-600 mt-2">
+	<div>
+		<h1 class="text-2xl font-bold tracking-tight">Scanner</h1>
+		<p class="text-sm text-muted-foreground mt-0.5">
 			폴더를 카테고리에 매핑하여 전체 파일의 ~70%를 자동 분류합니다.
 		</p>
 	</div>
 
-	<!-- 진행률 -->
-	<div class="bg-white rounded-lg shadow p-6 mb-6">
-		<div class="flex items-center justify-between mb-2">
-			<span class="text-sm font-medium text-gray-700">매핑 진행률</span>
-			<span class="text-sm text-gray-500">
-				{mappedCount} / {totalCount} 폴더
-			</span>
+	<!-- 상단 2열 -->
+	<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+		<!-- Target Folders 카드 -->
+		<div class="rounded-lg border bg-card p-5">
+			<div class="flex items-center justify-between mb-4">
+				<div class="flex items-center gap-2">
+					<FolderOpen class="h-4 w-4 text-primary" />
+					<h2 class="text-sm font-semibold">Target Folders</h2>
+				</div>
+				<button
+					onclick={() => {
+						newFolderInput = 'D:\\';
+					}}
+					class="inline-flex items-center gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium hover:bg-accent transition-colors"
+				>
+					<Plus class="h-3.5 w-3.5" />
+					Add Folder
+				</button>
+			</div>
+
+			{#if newFolderInput !== ''}
+				<div class="flex gap-2 mb-3">
+					<input
+						bind:value={newFolderInput}
+						placeholder="D:\Photos"
+						class="flex-1 rounded-md border bg-background px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/50"
+						onkeydown={(e) => e.key === 'Enter' && addScanRoot()}
+					/>
+					<button
+						onclick={addScanRoot}
+						class="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+					>
+						Add
+					</button>
+					<button
+						onclick={() => (newFolderInput = '')}
+						class="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors"
+					>
+						Cancel
+					</button>
+				</div>
+			{/if}
+
+			{#if scanRoots.length === 0}
+				<div
+					class="rounded-lg border-2 border-dashed border-border p-8 text-center text-muted-foreground"
+				>
+					<Folder class="h-8 w-8 mx-auto mb-2 opacity-30" />
+					<p class="text-sm">No folders configured</p>
+					<p class="text-xs mt-1">Click "Add Folder" to get started</p>
+				</div>
+			{:else}
+				<div class="space-y-1">
+					{#each scanRoots as root}
+						<div
+							class="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2 group"
+						>
+							<span class="font-mono text-sm text-foreground truncate flex-1">{root}</span>
+							<button
+								onclick={() => removeScanRoot(root)}
+								class="ml-2 shrink-0 rounded p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100"
+							>
+								<Trash2 class="h-3.5 w-3.5" />
+							</button>
+						</div>
+					{/each}
+				</div>
+			{/if}
 		</div>
-		<div class="w-full bg-gray-200 rounded-full h-3">
+
+		<!-- Scan Options 카드 -->
+		<div class="rounded-lg border bg-card p-5">
+			<h2 class="text-sm font-semibold mb-4">Scan Options</h2>
+
+			<div class="mb-5">
+				<p class="text-xs text-muted-foreground mb-2 font-medium uppercase tracking-wide">
+					File Extensions
+				</p>
+				<div class="flex flex-wrap gap-1.5">
+					{#each ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'raw', 'bmp', 'tiff'] as ext}
+						<button
+							onclick={() => toggleExtension(ext)}
+							class="px-2.5 py-1 rounded-full text-xs font-medium border transition-colors
+							{extensions.includes(ext)
+								? 'bg-primary text-primary-foreground border-primary'
+								: 'bg-background text-muted-foreground border-border hover:border-primary/50'}"
+						>
+							.{ext}
+						</button>
+					{/each}
+				</div>
+			</div>
+
+			<div>
+				<div class="flex items-center justify-between mb-1.5">
+					<p class="text-xs text-muted-foreground font-medium uppercase tracking-wide">
+						Mapping Progress
+					</p>
+					<span class="text-xs font-medium">{mappedCount}/{totalCount} folders</span>
+				</div>
+				<div class="h-2 w-full rounded-full bg-muted overflow-hidden">
+					<div
+						class="h-full rounded-full bg-primary transition-all duration-500"
+						style="width: {mappingPct}%"
+					></div>
+				</div>
+				<p class="text-xs text-muted-foreground mt-1">{mappingPct}% mapped</p>
+			</div>
+		</div>
+	</div>
+
+	<!-- Scan Execution 카드 -->
+	<div class="rounded-lg border bg-card p-5">
+		<div class="flex items-center justify-between mb-4">
+			<h2 class="text-sm font-semibold">Scan Execution</h2>
+			<div class="flex gap-2">
+				{#if scanning}
+					<button
+						onclick={() => {
+							scanning = false;
+							classifyLoading = false;
+						}}
+						class="inline-flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors"
+					>
+						<Square class="h-4 w-4" />
+						Stop Scan
+					</button>
+				{:else}
+					<button
+						onclick={classifyAllFolders}
+						disabled={classifyLoading}
+						class="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+					>
+						<Play class="h-4 w-4" />
+						Start Scan
+					</button>
+				{/if}
+				<button
+					onclick={loadFolders}
+					disabled={loading}
+					class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50 transition-colors"
+				>
+					<RefreshCw class="h-4 w-4 {loading ? 'animate-spin' : ''}" />
+					Refresh
+				</button>
+			</div>
+		</div>
+
+		{#if scanning}
+			<div class="mb-4">
+				<div class="flex justify-between text-xs text-muted-foreground mb-1">
+					<span>Scanning folders...</span>
+					<span>{progress}%</span>
+				</div>
+				<div class="h-2 w-full rounded-full bg-muted overflow-hidden">
+					<div
+						class="h-full rounded-full bg-primary transition-all duration-300"
+						style="width: {progress}%"
+					></div>
+				</div>
+			</div>
+		{/if}
+
+		{#if scanDone}
 			<div
-				class="bg-blue-600 h-3 rounded-full transition-all"
-				style="width: {totalCount > 0 ? (mappedCount / totalCount) * 100 : 0}%"
-			></div>
+				class="mb-4 rounded-md border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 flex items-center gap-2"
+			>
+				<CheckCircle2 class="h-4 w-4 text-emerald-600 shrink-0" />
+				<p class="text-sm text-emerald-700 font-medium">Scan completed successfully</p>
+			</div>
+		{/if}
+
+		<!-- 카운터 3열 -->
+		<div class="grid grid-cols-3 gap-4">
+			<div class="rounded-md bg-muted/50 p-4 text-center">
+				<div class="text-2xl font-bold">{totalCount.toLocaleString()}</div>
+				<div class="text-xs text-muted-foreground mt-1">Total Folders</div>
+			</div>
+			<div class="rounded-md bg-emerald-500/10 p-4 text-center">
+				<div class="text-2xl font-bold text-emerald-700">{mappedCount.toLocaleString()}</div>
+				<div class="text-xs text-muted-foreground mt-1">Mapped</div>
+			</div>
+			<div class="rounded-md bg-amber-500/10 p-4 text-center">
+				<div class="text-2xl font-bold text-amber-700">{unmappedCount.toLocaleString()}</div>
+				<div class="text-xs text-muted-foreground mt-1">Unmapped</div>
+			</div>
 		</div>
 	</div>
 
-	<!-- 액션 바 -->
-	<div class="bg-white rounded-lg shadow p-4 mb-6 flex items-center gap-4">
-		<button
-			on:click={classifyAllFolders}
-			disabled={classifyLoading}
-			class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-		>
-			{classifyLoading ? '분류 중...' : '🔍 폴더 자동 분류'}
-		</button>
+	<!-- 폴더 목록 카드 -->
+	<div class="rounded-lg border bg-card">
+		<div class="flex items-center justify-between p-5 border-b">
+			<h2 class="text-sm font-semibold">Folder List</h2>
+			<select
+				bind:value={statusFilter}
+				onchange={loadFolders}
+				class="rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+			>
+				<option value="all">All Statuses</option>
+				<option value="unknown">Unclassified</option>
+				<option value="clear">Clear</option>
+				<option value="unclear">Unclear</option>
+				<option value="flat">Flat</option>
+				<option value="nested">Nested</option>
+			</select>
+		</div>
 
-		<select
-			bind:value={statusFilter}
-			on:change={loadFolders}
-			class="px-4 py-2 border border-gray-300 rounded"
-		>
-			<option value="all">전체 폴더</option>
-			<option value="unknown">미판정</option>
-			<option value="clear">명확</option>
-			<option value="unclear">불명확</option>
-			<option value="flat">플랫</option>
-			<option value="nested">중첩</option>
-		</select>
-
-		<button
-			on:click={loadFolders}
-			class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-50"
-		>
-			🔄 새로고침
-		</button>
-	</div>
-
-	<!-- 폴더 리스트 -->
-	<div class="bg-white rounded-lg shadow">
 		{#if loading}
-			<div class="p-8 text-center text-gray-500">로딩 중...</div>
+			<div class="p-8 text-center">
+				<RefreshCw class="h-6 w-6 animate-spin mx-auto mb-2 text-muted-foreground" />
+				<p class="text-sm text-muted-foreground">Loading folders...</p>
+			</div>
 		{:else if filteredFolders.length === 0}
-			<div class="p-8 text-center text-gray-500">폴더가 없습니다.</div>
+			<div class="p-8 text-center">
+				<Folder class="h-8 w-8 mx-auto mb-2 opacity-30" />
+				<p class="text-sm text-muted-foreground">No folders found</p>
+				<p class="text-xs text-muted-foreground mt-1">Run a scan to index folders</p>
+			</div>
 		{:else}
-			<div class="overflow-x-auto">
-				<table class="w-full">
-					<thead class="bg-gray-50 border-b">
-						<tr>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">폴더</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"
-								>파일 수</th
+			<div class="divide-y divide-border">
+				{#each filteredFolders as folder}
+					{@const badge = getStatusBadge(folder.folder_status)}
+					<div class="flex items-center gap-4 px-5 py-3 hover:bg-muted/30 transition-colors">
+						<!-- 아이콘 + 경로 -->
+						<div class="flex items-center gap-2 flex-1 min-w-0">
+							<Folder class="h-4 w-4 text-muted-foreground shrink-0" />
+							<span class="font-mono text-xs text-foreground truncate">{folder.folder_path}</span>
+						</div>
+
+						<!-- 파일 수 -->
+						<div class="flex items-center gap-1 shrink-0 text-xs text-muted-foreground w-20 justify-end">
+							<FileImage class="h-3.5 w-3.5" />
+							{folder.file_count.toLocaleString()}
+						</div>
+
+						<!-- 상태 뱃지 -->
+						<div class="shrink-0 w-20">
+							<span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium {badge.color}">
+								{badge.label}
+							</span>
+						</div>
+
+						<!-- AI 추천 -->
+						<div class="shrink-0 w-28 text-xs">
+							{#if folder.ai_loading}
+								<span class="text-muted-foreground flex items-center gap-1">
+									<RefreshCw class="h-3 w-3 animate-spin" />
+									분석 중
+								</span>
+							{:else if folder.suggested_category}
+								<span class="text-primary font-medium truncate block" title={folder.suggested_category}>
+									{folder.suggested_category}
+								</span>
+							{:else}
+								<button
+									onclick={() => requestAISuggestion(folder)}
+									class="flex items-center gap-1 text-muted-foreground hover:text-primary transition-colors"
+								>
+									<Brain class="h-3.5 w-3.5" />
+									AI 추천
+								</button>
+							{/if}
+						</div>
+
+						<!-- 카테고리 드롭다운 -->
+						<div class="shrink-0 w-40">
+							<select
+								value={folder.category_id || ''}
+								onchange={(e) => {
+									const val = (e.currentTarget as HTMLSelectElement).value;
+									if (val) saveMapping(folder, parseInt(val));
+								}}
+								class="w-full rounded border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50"
 							>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">상태</th>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"
-								>AI 추천</th
-							>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"
-								>카테고리</th
-							>
-							<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">액션</th>
-						</tr>
-					</thead>
-					<tbody class="divide-y divide-gray-200">
-						{#each filteredFolders as folder}
-							{@const badge = getStatusBadge(folder.folder_status)}
-							<tr class="hover:bg-gray-50">
-								<td class="px-4 py-3 text-sm">
-									<div class="font-mono text-xs text-gray-600">{folder.folder_path}</div>
-								</td>
-								<td class="px-4 py-3 text-sm text-gray-700">
-									{folder.file_count.toLocaleString()}장
-								</td>
-								<td class="px-4 py-3 text-sm">
-									<span class="px-2 py-1 text-xs rounded {badge.color}">
-										{badge.label}
-									</span>
-								</td>
-								<td class="px-4 py-3 text-sm">
-									{#if folder.ai_loading}
-										<span class="text-gray-500">분석 중...</span>
-									{:else if folder.suggested_category}
-										<span class="text-blue-600 font-medium">{folder.suggested_category}</span>
-									{:else}
-										<button
-											on:click={() => requestAISuggestion(folder)}
-											class="text-blue-600 hover:underline text-xs"
-										>
-											🔍 AI 추천
-										</button>
-									{/if}
-								</td>
-								<td class="px-4 py-3 text-sm">
-									<select
-										value={folder.category_id || ''}
-										on:change={(e) => {
-											const val = e.currentTarget.value;
-											if (val) saveMapping(folder, parseInt(val));
-										}}
-										class="px-2 py-1 border border-gray-300 rounded text-sm"
-									>
-										<option value="">—선택—</option>
-										{#each flattenCategories(categories) as cat}
-											<option value={cat.id}>{cat.full_path}</option>
-										{/each}
-									</select>
-								</td>
-								<td class="px-4 py-3 text-sm">
-									{#if folder.category_id && folder.folder_status === 'nested'}
-										<button
-											on:click={() => applyInheritance(folder.id)}
-											class="text-purple-600 hover:underline text-xs"
-										>
-											⬇️ 하위 상속
-										</button>
-									{/if}
-								</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
+								<option value="">— 선택 —</option>
+								{#each flattenCategories(categories) as cat}
+									<option value={cat.id}>{cat.full_path}</option>
+								{/each}
+							</select>
+						</div>
+
+						<!-- 하위 상속 버튼 -->
+						<div class="shrink-0 w-20 text-right">
+							{#if folder.category_id && folder.folder_status === 'nested'}
+								<button
+									onclick={() => applyInheritance(folder.id)}
+									class="text-xs text-violet-600 hover:text-violet-800 hover:underline transition-colors"
+								>
+									하위 상속
+								</button>
+							{/if}
+						</div>
+					</div>
+				{/each}
 			</div>
 		{/if}
 	</div>
-
-	<!-- 도움말 -->
-	<div class="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-		<h3 class="font-medium text-blue-900 mb-2">💡 사용 팁</h3>
-		<ul class="text-sm text-blue-800 space-y-1">
-			<li>1. 먼저 "폴더 자동 분류" 버튼으로 모든 폴더의 상태를 판정합니다.</li>
-			<li>2. 명확한 폴더는 카테고리 드롭다운에서 직접 선택하거나 AI 추천을 사용하세요.</li>
-			<li>3. 불명확한 폴더는 AI 추천 기능이 샘플 이미지를 분석하여 추천합니다.</li>
-			<li>
-				4. 중첩 폴더는 상위 폴더에 매핑 후 "하위 상속" 버튼으로 한 번에 적용할 수 있습니다.
-			</li>
-			<li>5. 플랫 폴더(파일 500개+ 서브폴더 없음)는 혼합 폴더로 시간 클러스터링으로 넘어갑니다.</li>
-		</ul>
-	</div>
 </div>
-
-<style>
-	table {
-		min-width: 900px;
-	}
-</style>
