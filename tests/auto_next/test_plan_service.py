@@ -342,8 +342,8 @@ class TestFolderPath:
         assert "plan_a.md" in filenames
         assert "plan_b.md" in filenames
 
-    def test_folder_skips_todo(self, svc, tmp_path):
-        """폴더 내 _todo.md 파일은 list_plans() 결과에서 제외"""
+    def test_folder_todo_takes_priority_over_main(self, svc, tmp_path):
+        """_todo.md가 있으면 메인 파일 스킵, _todo.md가 대표로 표시"""
         folder = self._make_folder_with_plans(
             tmp_path, "plans_folder", ["plan_a.md", "plan_a_todo.md"]
         )
@@ -352,8 +352,32 @@ class TestFolderPath:
         results = svc.list_plans(include_ignored=True)
         filenames = [r.filename for r in results]
 
-        assert "plan_a.md" in filenames
-        assert "plan_a_todo.md" not in filenames
+        assert "plan_a_todo.md" in filenames
+        assert "plan_a.md" not in filenames
+
+    def test_folder_shows_orphan_todo(self, svc, tmp_path):
+        """메인 파일 없이 _todo.md만 있으면 독립 항목으로 표시"""
+        folder = self._make_folder_with_plans(
+            tmp_path, "plans_folder", ["plan_b_todo.md"]
+        )
+        svc._registered_paths = [str(folder)]
+
+        results = svc.list_plans(include_ignored=True)
+        filenames = [r.filename for r in results]
+
+        assert "plan_b_todo.md" in filenames
+
+    def test_folder_shows_main_when_no_todo(self, svc, tmp_path):
+        """_todo.md가 없으면 메인 파일 그대로 표시"""
+        folder = self._make_folder_with_plans(
+            tmp_path, "plans_folder", ["plan_c.md"]
+        )
+        svc._registered_paths = [str(folder)]
+
+        results = svc.list_plans(include_ignored=True)
+        filenames = [r.filename for r in results]
+
+        assert "plan_c.md" in filenames
 
     def test_nonexistent_folder_ignored(self, svc, tmp_path):
         """존재하지 않는 폴더 경로 → list_plans()에서 무시 (에러 없음)"""
