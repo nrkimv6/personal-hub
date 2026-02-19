@@ -60,6 +60,8 @@ class ServiceRunner:
 
     # ── 메인 실행 흐름 ──────────────────────────────────────────
     def run(self):
+        os.environ["PYTHONIOENCODING"] = "utf-8"
+
         self.log.info("=" * 50)
         self.log.info("Monitor Page Service Starting")
         self.log.info(f"Mode: {self.app_mode} | API: {self.api_port} | Frontend: {self.frontend_port}")
@@ -175,7 +177,8 @@ class ServiceRunner:
         # node_modules 확인
         if not (frontend_dir / "node_modules").exists():
             self.log.info("Running npm install...")
-            subprocess.run(["npm.cmd", "install"], cwd=str(frontend_dir), check=False)
+            subprocess.run(["npm.cmd", "install"], cwd=str(frontend_dir), check=False,
+                           encoding="utf-8", errors="replace")
 
         if self.dev:
             # Stale build 삭제
@@ -206,12 +209,19 @@ class ServiceRunner:
                 ["npm.cmd", "run", "build"],
                 cwd=str(frontend_dir),
                 capture_output=True,
-                text=True,
+                encoding="utf-8",
+                errors="replace",
             )
             if build_result.returncode != 0:
-                self.log.error(f"Frontend build failed: {build_result.stderr[-500:]}")
-                raise RuntimeError("Frontend build failed")
-            self.log.info("Frontend build completed")
+                err_msg = (build_result.stderr or "")[-500:] or "(no stderr output)"
+                self.log.error(f"Frontend build failed (rc={build_result.returncode}): {err_msg}")
+                # graceful degradation: 이전 빌드가 있으면 그것으로 preview, 없으면 API-only
+                if not (frontend_dir / "build").exists():
+                    self.log.warning("No previous build found — Frontend unavailable, API-only mode")
+                    return None
+                self.log.warning("Using previous build for preview")
+            else:
+                self.log.info("Frontend build completed")
 
             # .env.local 제거 (production에서 dev 설정 방지)
             env_local = frontend_dir / ".env.local"
@@ -244,7 +254,6 @@ class ServiceRunner:
         os.environ["API_PORT"] = str(self.api_port)
         os.environ["WORKER_AUTO_START"] = "false"
         os.environ["APP_MODE"] = self.app_mode
-        os.environ["PYTHONIOENCODING"] = "utf-8"
 
         # 단계별 import (hang 진단용)
         t = time.time()
