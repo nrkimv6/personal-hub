@@ -39,6 +39,7 @@ class LLMService:
         request_source: str = None,
         provider: str = "claude",
         model: str = "",
+        cli_options: dict = None,
     ) -> LLMRequest:
         """요청을 큐에 추가 (non-blocking).
 
@@ -50,6 +51,7 @@ class LLMService:
             request_source: 요청 출처 (예: 'instagram_crawl', 'manual_test')
             provider: LLM Provider ('claude' 또는 'gemini')
             model: 모델명 (빈 문자열이면 기본 모델 사용)
+            cli_options: CLI 옵션 dict (output_format, json_schema, allowed_tools, use_prompt_flag 등)
 
         Returns:
             생성된 LLMRequest
@@ -79,6 +81,7 @@ class LLMService:
             request_source=request_source,
             provider=provider,
             model=model,
+            cli_options=json.dumps(cli_options, ensure_ascii=False) if cli_options else None,
         )
         self.db.add(request)
         self.db.commit()
@@ -192,7 +195,7 @@ class LLMService:
 
     # ========== Claude 실행 ==========
 
-    def execute_claude(self, prompt: str, model: str = "", timeout: int = 120, parse_json: bool = True, enable_tools: bool = False) -> dict:
+    def execute_claude(self, prompt: str, model: str = "", timeout: int = 120, parse_json: bool = True, enable_tools: bool = False, cli_options: dict = None) -> dict:
         """Claude CLI 실행 (동기).
 
         Args:
@@ -201,12 +204,16 @@ class LLMService:
             timeout: 타임아웃 (초)
             parse_json: True면 JSON 파싱 시도, False면 raw_response만 반환
             enable_tools: True면 Read 도구 활성화 (이미지 분석 등), False면 도구 없이 실행
+            cli_options: CLI 옵션 dict (use_prompt_flag, output_format, json_schema, allowed_tools 등)
 
         Returns:
             {"success": True, "result": {...}, "raw_response": "..."}
             또는
             {"success": False, "error": "..."}
         """
+        if cli_options is None:
+            cli_options = {}
+
         try:
             import sys
             import tempfile
@@ -223,6 +230,10 @@ class LLMService:
             env = os.environ.copy()
             # Claude Code 세션 내에서 워커가 시작된 경우 nested session 방지
             env.pop("CLAUDECODE", None)
+            # 중첩 세션 방지 — Claude CLI가 감지하는 환경변수 전부 제거
+            for var in ("CLAUDE_CODE_SESSION", "CLAUDE_CODE_ENTRYPOINT"):
+                env.pop(var, None)
+
             if sys.platform == "win32":
                 npm_path = os.path.expanduser("~/AppData/Roaming/npm")
                 if npm_path not in env.get("PATH", ""):
@@ -239,48 +250,80 @@ class LLMService:
                 logger.debug(f"Claude CLI 실행 환경: HOME={env.get('HOME')}, USERPROFILE={env.get('USERPROFILE')}")
 
             try:
-                # 파일에서 프롬프트 읽어서 실행
-                # enable_tools=True일 때만 --tools "Read" 추가 (이미지 분석 등)
-                # enable_tools에 따라 명령어 구성
-                # -p (prompt mode)는 Claude Code 컨텍스트를 활성화하므로 사용하지 않음
-                if enable_tools:
+                # cli_options 기반 명령어 빌드
+                use_prompt_flag = cli_options.get("use_prompt_flag", False)
+                output_format = cli_options.get("output_format")
+                json_schema = cli_options.get("json_schema")
+                allowed_tools = cli_options.get("allowed_tools")
+
+                # 도구 옵션 결정: cli_options.allowed_tools 우선, 없으면 enable_tools 기반
+                if allowed_tools:
+                    tools_opt = " ".join(f'--allowedTools {t}' for t in allowed_tools)
+                elif enable_tools:
                     tools_opt = '--tools "Read"'
                 else:
                     tools_opt = ''
 
                 # model 옵션 추가
-                if model:
-                    model_opt = f'--model {model}'
-                else:
-                    model_opt = ''
+                model_opt = f'--model {model}' if model else ''
 
-                if sys.platform == "win32":
-                    # Windows: shell=True 필요
-                    cmd = f'type "{prompt_file}" | claude {tools_opt} {model_opt}'
-                    result = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=timeout,
-                        encoding="utf-8",
-                        shell=True,
-                        env=env,
-                    )
+                # output format 옵션
+                format_opt = f'--output-format {output_format}' if output_format else ''
+
+                # json schema 옵션
+                if json_schema:
+                    schema_str = json.dumps(json_schema, ensure_ascii=False)
+                    # Windows shell에서 안전하게 전달하기 위해 임시파일 사용
+                    schema_file = None
+                    with tempfile.NamedTemporaryFile(
+                        mode="w", suffix=".json", delete=False, encoding="utf-8"
+                    ) as sf:
+                        sf.write(schema_str)
+                        schema_file = sf.name
+                    # powershell로 파일 내용을 인라인 전달
+                    schema_opt = f'--json-schema "$(type \\"{schema_file}\\")"' if sys.platform == "win32" else f"--json-schema '$(cat \"{schema_file}\")'"
                 else:
-                    # Unix: cat으로 파이프
-                    cmd = f'cat "{prompt_file}" | claude {tools_opt} {model_opt}'
-                    result = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=timeout,
-                        encoding="utf-8",
-                        shell=True,
-                        env=env,
-                    )
+                    schema_opt = ''
+                    schema_file = None
+
+                # 명령어 빌드
+                opts = ' '.join(part for part in [tools_opt, model_opt, format_opt, schema_opt] if part)
+
+                if use_prompt_flag:
+                    # -p 플래그 사용: 프롬프트 파일을 직접 전달
+                    if sys.platform == "win32":
+                        # Windows: -p 에 프롬프트 파일 내용을 파이프 대신 직접 전달
+                        # 긴 프롬프트는 임시파일에서 읽어서 전달
+                        cmd = f'powershell.exe -Command "claude -p (Get-Content -Raw \'{prompt_file}\') {opts}"'
+                    else:
+                        cmd = f'claude -p "$(cat \'{prompt_file}\')" {opts}'
+                else:
+                    # 기존 방식: stdin pipe
+                    if sys.platform == "win32":
+                        cmd = f'type "{prompt_file}" | claude {opts}'
+                    else:
+                        cmd = f'cat "{prompt_file}" | claude {opts}'
+
+                logger.debug(f"Claude CLI 명령: {cmd[:200]}...")
+
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    encoding="utf-8",
+                    shell=True,
+                    env=env,
+                    stdin=subprocess.DEVNULL if use_prompt_flag else None,
+                )
             finally:
                 # 임시 파일 삭제
                 os.unlink(prompt_file)
+                if schema_file:
+                    try:
+                        os.unlink(schema_file)
+                    except Exception:
+                        pass
 
             if result.returncode != 0:
                 # stderr가 비어있을 수 있으므로 stdout도 확인
@@ -295,6 +338,47 @@ class LLMService:
                 }
 
             raw_response = result.stdout.strip()
+
+            # --output-format json + --json-schema 사용 시 structured_output 파싱
+            if output_format == "json" and json_schema:
+                try:
+                    raw_json = json.loads(raw_response)
+                    # structured_output 필드 우선
+                    if "structured_output" in raw_json and raw_json["structured_output"]:
+                        return {
+                            "success": True,
+                            "result": raw_json["structured_output"],
+                            "raw_response": raw_response,
+                        }
+                    # fallback: result 필드
+                    result_field = raw_json.get("result", "")
+                    if isinstance(result_field, dict):
+                        return {
+                            "success": True,
+                            "result": result_field,
+                            "raw_response": raw_response,
+                        }
+                    if isinstance(result_field, str) and result_field.strip().startswith("{"):
+                        try:
+                            return {
+                                "success": True,
+                                "result": json.loads(result_field),
+                                "raw_response": raw_response,
+                            }
+                        except json.JSONDecodeError:
+                            pass
+                    # 전체 JSON을 결과로 사용
+                    return {
+                        "success": True,
+                        "result": raw_json,
+                        "raw_response": raw_response,
+                    }
+                except json.JSONDecodeError as e:
+                    return {
+                        "success": False,
+                        "error": f"structured output JSON 파싱 실패: {e}",
+                        "raw_response": raw_response,
+                    }
 
             # JSON 파싱 (선택적)
             if parse_json:
@@ -477,7 +561,8 @@ class LLMService:
         model: str = "",
         timeout: int = 120,
         parse_json: bool = True,
-        enable_tools: bool = False
+        enable_tools: bool = False,
+        cli_options: dict = None,
     ) -> dict:
         """LLM 통합 실행 메서드.
 
@@ -488,6 +573,7 @@ class LLMService:
             timeout: 타임아웃 (초)
             parse_json: True면 JSON 파싱 시도, False면 raw_response만 반환
             enable_tools: True면 도구 활성화 (Claude, Gemini 모두 지원)
+            cli_options: CLI 옵션 dict (use_prompt_flag, output_format, json_schema, allowed_tools 등)
 
         Returns:
             {"success": True, "result": {...}, "raw_response": "..."}
@@ -499,7 +585,7 @@ class LLMService:
             return self.execute_gemini(prompt, model, timeout, parse_json, enable_tools)
         else:
             # 기본값은 Claude
-            return self.execute_claude(prompt, model, timeout, parse_json, enable_tools)
+            return self.execute_claude(prompt, model, timeout, parse_json, enable_tools, cli_options=cli_options)
 
     def _parse_json_response(self, text: str) -> dict:
         """Claude 응답에서 JSON 추출.

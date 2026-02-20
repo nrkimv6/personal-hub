@@ -13,6 +13,7 @@ API 서버와 분리되어 독립적으로 LLM 작업을 수행합니다.
     - caller_type별 결과 저장 (instagram -> instagram_posts)
 """
 import asyncio
+import json
 import sys
 import os
 import signal
@@ -1351,8 +1352,17 @@ class LLMWorker:
 
             logger.info(f"LLM 실행 시작: id={request.id}, caller_type={request.caller_type}")
 
+            # cli_options 파싱 (JSON 문자열 → dict)
+            cli_options = None
+            if getattr(request, "cli_options", None):
+                try:
+                    cli_options = json.loads(request.cli_options)
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning(f"cli_options 파싱 실패: id={request.id}")
+
             # caller_type에 따라 도구 활성화 결정
             # - instagram, universal_crawl: Read 도구로 이미지 분석 가능
+            # - image_classify: cli_options에서 allowed_tools 지정
             # - writing 관련: 도구 사용 금지 (도구 사용 시 글 작성 대신 프롬프트 분석만 함)
             enable_tools = request.caller_type in ["instagram", "universal_crawl"]
 
@@ -1368,7 +1378,8 @@ class LLMWorker:
                     prompt=request.prompt,
                     provider=provider,
                     model=model,
-                    enable_tools=enable_tools
+                    enable_tools=enable_tools,
+                    cli_options=cli_options,
                 )
             )
 
