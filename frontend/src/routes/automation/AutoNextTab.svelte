@@ -5,6 +5,7 @@
 	import RunControl from '$lib/components/auto-next/RunControl.svelte';
 	import PlanList from '$lib/components/auto-next/PlanList.svelte';
 	import LogViewer from '$lib/components/auto-next/LogViewer.svelte';
+	import CurrentTrackingCard from '$lib/components/auto-next/CurrentTrackingCard.svelte';
 	import { createSmartPolling } from '$lib/utils/smart-polling';
 	import {
 		autoNextStatsApi,
@@ -16,7 +17,8 @@
 		AutoNextStatsResponse,
 		AutoNextTaskListResponse,
 		AutoNextRunStatusResponse,
-		AutoNextPlanFileResponse
+		AutoNextPlanFileResponse,
+		CurrentTrackingResponse
 	} from '$lib/api';
 
 	let stats = $state<AutoNextStatsResponse | null>(null);
@@ -35,6 +37,8 @@
 	let lastStartTime = $state<string | null>(null);
 	let panelOpen = $state(true);
 	let taskHistoryOpen = $state(true);
+	let currentTracking = $state<CurrentTrackingResponse | null>(null);
+	let trackingInterval: ReturnType<typeof setInterval> | null = null;
 
 	// Phase 4: 종료 시 상태 보존
 	let lastRunStats = $state<AutoNextStatsResponse | null>(null);
@@ -161,6 +165,15 @@
 			pollStatus,
 			() => ({ running: runStatus?.running ?? false })
 		);
+
+		// TaskTracker tracking 정보 폴링 (5초 간격, 실행 중일 때만 의미있음)
+		trackingInterval = setInterval(async () => {
+			try {
+				currentTracking = await autoNextTaskApi.currentTracking();
+			} catch {
+				currentTracking = null;
+			}
+		}, 5000);
 	});
 
 	onDestroy(() => {
@@ -171,6 +184,10 @@
 		if (elapsedInterval) {
 			clearInterval(elapsedInterval);
 			elapsedInterval = null;
+		}
+		if (trackingInterval) {
+			clearInterval(trackingInterval);
+			trackingInterval = null;
 		}
 	});
 
@@ -381,6 +398,9 @@
 					{#if taskHistoryOpen}
 						<div class="h-[280px] overflow-hidden">
 							<div class="px-4 pb-4 h-full flex flex-col">
+								{#if runStatus?.running && currentTracking}
+									<CurrentTrackingCard tracking={currentTracking} />
+								{/if}
 								<div class="flex-1 min-h-0">
 									{#if !effectivePlanFile}
 										<div class="flex items-center justify-center h-full text-sm text-gray-400">

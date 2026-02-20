@@ -30,11 +30,10 @@ class GeminiCLIAdapter(ClassifierAdapter):
         """단일 이미지 분류"""
         full_prompt = self._build_prompt(prompt, categories, [image_path])
 
+        proc = None
         try:
-            result = await asyncio.wait_for(
-                self._run_cli(full_prompt),
-                timeout=self.timeout
-            )
+            proc, coro = self._run_cli_with_proc(full_prompt)
+            result = await asyncio.wait_for(coro, timeout=self.timeout)
 
             return ClassifyResult(
                 category_path=result.get("category", "unknown"),
@@ -43,7 +42,20 @@ class GeminiCLIAdapter(ClassifierAdapter):
                 model="gemini-1.5-flash (CLI)"
             )
 
+        except asyncio.TimeoutError:
+            if proc and proc.returncode is None:
+                proc.kill()
+                logger.warning(f"Gemini CLI 타임아웃 — 프로세스 kill: {image_path}")
+            return ClassifyResult(
+                category_path="error/timeout",
+                confidence=0.0,
+                reasoning=f"CLI 호출 타임아웃 ({self.timeout}초)",
+                model="gemini (CLI)"
+            )
+
         except Exception as e:
+            if proc and proc.returncode is None:
+                proc.kill()
             return ClassifyResult(
                 category_path="error/exception",
                 confidence=0.0,
@@ -64,48 +76,77 @@ class GeminiCLIAdapter(ClassifierAdapter):
             results.append(result)
         return results
 
-    async def _run_cli(self, prompt: str) -> dict:
-        """Gemini CLI subprocess 실행 — stderr 실시간 스트리밍"""
+    def _run_cli_with_proc(self, prompt: str) -> tuple:
+        """Gemini CLI subprocess 생성 — (proc_proxy, coroutine) 반환"""
+        import os
+
         cmd = [
             self.cli_path,
             "-p", prompt,
             "--output-format", "json"
         ]
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
+        # 중첩 세션 방지 — Claude CLI 관련 환경변수 전부 제거
+        env = os.environ.copy()
+        for var in ("CLAUDECODE", "CLAUDE_CODE_SESSION", "CLAUDE_CODE_ENTRYPOINT"):
+            env.pop(var, None)
 
-        # stderr 실시간 읽기
-        stderr_lines = []
+        proc_holder = [None]
 
-        async def _stream_stderr():
-            while True:
-                line = await proc.stderr.readline()
-                if not line:
-                    break
-                decoded = line.decode("utf-8", errors="replace").strip()
-                if decoded:
-                    stderr_lines.append(decoded)
-                    if self.on_output:
-                        self.on_output(decoded)
+        async def _execute():
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+            proc_holder[0] = proc
 
-        stderr_task = asyncio.create_task(_stream_stderr())
-        stdout_data = await proc.stdout.read()
-        await stderr_task
-        await proc.wait()
+            stderr_lines = []
 
-        if proc.returncode != 0:
-            stderr_text = "\n".join(stderr_lines) if stderr_lines else "(no stderr)"
-            raise RuntimeError(f"Gemini CLI exit {proc.returncode}: {stderr_text}")
+            async def _stream_stderr():
+                try:
+                    while True:
+                        line = await proc.stderr.readline()
+                        if not line:
+                            break
+                        decoded = line.decode("utf-8", errors="replace").strip()
+                        if decoded:
+                            stderr_lines.append(decoded)
+                            if self.on_output:
+                                self.on_output(decoded)
+                except Exception:
+                    pass
 
-        try:
-            return json.loads(stdout_data.decode("utf-8", errors="replace"))
-        except json.JSONDecodeError as e:
-            stdout_preview = stdout_data.decode("utf-8", errors="replace")[:200]
-            raise RuntimeError(f"JSON 파싱 실패: {e} — stdout: {stdout_preview}")
+            stderr_task = asyncio.create_task(_stream_stderr())
+            stdout_data = await proc.stdout.read()
+            await stderr_task
+            await proc.wait()
+
+            if proc.returncode != 0:
+                stderr_text = "\n".join(stderr_lines[-5:]) if stderr_lines else "(no stderr)"
+                raise RuntimeError(f"Gemini CLI exit {proc.returncode}: {stderr_text}")
+
+            try:
+                return json.loads(stdout_data.decode("utf-8", errors="replace"))
+            except json.JSONDecodeError as e:
+                stdout_preview = stdout_data.decode("utf-8", errors="replace")[:200]
+                raise RuntimeError(f"JSON 파싱 실패: {e} — stdout: {stdout_preview}")
+
+        class ProcProxy:
+            @property
+            def returncode(self):
+                p = proc_holder[0]
+                return p.returncode if p else None
+            def kill(self):
+                p = proc_holder[0]
+                if p and p.returncode is None:
+                    try:
+                        p.kill()
+                    except Exception:
+                        pass
+
+        return ProcProxy(), _execute()
 
     def _build_prompt(self, context: str, categories: list[str], image_paths: list[str]) -> str:
         """프롬프트 생성"""

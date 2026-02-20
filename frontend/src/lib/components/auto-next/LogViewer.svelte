@@ -33,6 +33,9 @@
 	let pendingStale = $state(false);
 	const MAX_LINES = 500;
 	const SEPARATOR_PATTERN = '════════════════';
+
+	// TaskTracker 실시간 추적 정보 (SSE 스트림에서 [TRACK] 태그 파싱)
+	let trackingInfo = $state<{ lineNum: string; text: string } | null>(null);
 	const BASE_DELAY = 3000;
 
 	// Tag colors for dark background
@@ -46,7 +49,12 @@
 		WARN: { text: 'text-orange-400', bg: 'bg-orange-500/20' },
 		STDERR: { text: 'text-red-400', bg: 'bg-red-500/30' },
 		LINE: { text: 'text-gray-600', bg: 'bg-transparent' },
-		DIAG: { text: 'text-cyan-400', bg: 'bg-cyan-500/20' }
+		DIAG: { text: 'text-cyan-400', bg: 'bg-cyan-500/20' },
+		PHASE: { text: 'text-indigo-400', bg: 'bg-indigo-500/20' },
+		TRACK: { text: 'text-purple-400', bg: 'bg-purple-500/20' },
+		CYCLE: { text: 'text-white', bg: 'bg-gray-600' },
+		SKIP: { text: 'text-gray-500', bg: 'bg-gray-500/20' },
+		GIT: { text: 'text-orange-400', bg: 'bg-orange-500/20' }
 	};
 
 	const LINE_PATTERN = /^\[?(\d{2}:\d{2}:\d{2})\]?\s*\[(\w+)\]\s*(.*)/;
@@ -82,6 +90,19 @@
 		}
 
 		const parsed = parseLine(text, isStale);
+
+		// TRACK 태그 감지 → trackingInfo 갱신
+		if (parsed.tag === 'TRACK' && !isStale) {
+			// 형식: "HIGH: L{num} {text}" 또는 "MEDIUM: L{num} {text}"
+			const trackMatch = parsed.message.match(/^(?:\w+):\s*L(\d+)\s+(.+)$/);
+			if (trackMatch) {
+				trackingInfo = { lineNum: trackMatch[1], text: trackMatch[2] };
+			}
+		}
+		// SEPARATOR 감지 → trackingInfo 초기화 (새 세션)
+		if (text.includes(SEPARATOR_PATTERN) && !isStale) {
+			trackingInfo = null;
+		}
 
 		if (paused && !isStale) {
 			pauseBuffer.push(parsed);
@@ -276,6 +297,14 @@
 						리스너 꺼짐
 					</span>
 				{/if}
+			{/if}
+			{#if trackingInfo}
+				<span
+					class="text-[10px] text-purple-400 bg-purple-500/20 px-1.5 py-0.5 rounded max-w-[200px] truncate"
+					title="L{trackingInfo.lineNum} {trackingInfo.text}"
+				>
+					추적: L{trackingInfo.lineNum} {trackingInfo.text.slice(0, 30)}{trackingInfo.text.length > 30 ? '…' : ''}
+				</span>
 			{/if}
 			{#if paused && pauseBuffer.length > 0}
 				<span class="text-[10px] text-yellow-400 bg-yellow-500/20 px-1.5 py-0.5 rounded">

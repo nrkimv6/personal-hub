@@ -51,7 +51,7 @@ class ImageClassifierSettings(BaseSettings):
 
     # CLI 병렬 실행 수
     CLI_MAX_WORKERS: int = 2  # 동시 CLI 호출 수 (2~3개 권장)
-    CLI_TIMEOUT_SECONDS: int = 30  # CLI 호출 타임아웃
+    CLI_TIMEOUT_SECONDS: int = 120  # CLI 호출 타임아웃 (이미지 읽기+분류에 시간 필요)
 
     # === 시간 클러스터링 설정 ===
     CLUSTER_GAP_MINUTES: int = 60  # 1시간 이내 촬영 = 같은 클러스터

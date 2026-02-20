@@ -99,14 +99,17 @@ async def get_duplicate_groups(
             "kept_file_id": int | null
         }]
     """
-    query = "SELECT * FROM duplicate_groups WHERE 1=1"
+    where = "WHERE 1=1"
     params = {}
 
     if status:
-        query += " AND status = :status"
+        where += " AND status = :status"
         params["status"] = status
 
-    query += " ORDER BY id DESC LIMIT :limit OFFSET :skip"
+    # 전체 개수 조회
+    count_result = db.execute(text(f"SELECT COUNT(*) FROM duplicate_groups {where}"), params).scalar()
+
+    query = f"SELECT * FROM duplicate_groups {where} ORDER BY id DESC LIMIT :limit OFFSET :skip"
     params["limit"] = limit
     params["skip"] = skip
 
@@ -126,7 +129,7 @@ async def get_duplicate_groups(
         "groups": groups,
         "skip": skip,
         "limit": limit,
-        "total": len(groups),
+        "total": count_result,
     }
 
 

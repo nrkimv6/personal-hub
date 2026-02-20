@@ -45,12 +45,11 @@ class ClaudeCLIAdapter(ClassifierAdapter):
             "required": ["category", "confidence"]
         }
 
+        proc = None
         try:
-            # Claude CLI 호출
-            result = await asyncio.wait_for(
-                self._run_cli(full_prompt, json_schema),
-                timeout=self.timeout
-            )
+            # Claude CLI 호출 — proc 참조를 유지하여 타임아웃 시 kill 가능
+            proc, coro = self._run_cli_with_proc(full_prompt, json_schema)
+            result = await asyncio.wait_for(coro, timeout=self.timeout)
 
             return ClassifyResult(
                 category_path=result.get("category", "unknown"),
@@ -60,14 +59,19 @@ class ClaudeCLIAdapter(ClassifierAdapter):
             )
 
         except asyncio.TimeoutError:
+            if proc and proc.returncode is None:
+                proc.kill()
+                logger.warning(f"CLI 타임아웃 — 프로세스 kill: {image_path}")
             return ClassifyResult(
                 category_path="error/timeout",
                 confidence=0.0,
-                reasoning="CLI 호출 타임아웃",
+                reasoning=f"CLI 호출 타임아웃 ({self.timeout}초)",
                 model=f"{settings.CLAUDE_MODEL} (CLI)"
             )
 
         except Exception as e:
+            if proc and proc.returncode is None:
+                proc.kill()
             return ClassifyResult(
                 category_path="error/exception",
                 confidence=0.0,
@@ -133,8 +137,10 @@ class ClaudeCLIAdapter(ClassifierAdapter):
                 for _ in image_paths
             ]
 
-    async def _run_cli(self, prompt: str, json_schema: dict) -> dict:
-        """Claude CLI subprocess 실행 — stderr 실시간 스트리밍"""
+    def _run_cli_with_proc(self, prompt: str, json_schema: dict) -> tuple:
+        """Claude CLI subprocess 생성 — (proc, coroutine) 반환하여 외부에서 kill 가능"""
+        import os
+
         cmd = [
             self.cli_path,
             "-p", prompt,
@@ -144,41 +150,89 @@ class ClaudeCLIAdapter(ClassifierAdapter):
             "--model", settings.CLAUDE_MODEL
         ]
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
+        # 중첩 세션 방지 — Claude CLI가 감지하는 환경변수 전부 제거
+        env = os.environ.copy()
+        for var in ("CLAUDECODE", "CLAUDE_CODE_SESSION", "CLAUDE_CODE_ENTRYPOINT"):
+            env.pop(var, None)
 
-        # stderr 실시간 읽기 (CLI 진행 출력)
-        stderr_lines = []
+        # proc 참조를 저장할 컨테이너
+        proc_holder = [None]
 
-        async def _stream_stderr():
-            while True:
-                line = await proc.stderr.readline()
-                if not line:
-                    break
-                decoded = line.decode("utf-8", errors="replace").strip()
-                if decoded:
-                    stderr_lines.append(decoded)
-                    if self.on_output:
-                        self.on_output(decoded)
+        async def _execute():
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+            proc_holder[0] = proc
 
-        # stderr 스트리밍과 stdout 수집을 병렬 실행
-        stderr_task = asyncio.create_task(_stream_stderr())
-        stdout_data = await proc.stdout.read()
-        await stderr_task
-        await proc.wait()
+            # stderr 실시간 읽기 (CLI 진행 출력)
+            stderr_lines = []
 
-        if proc.returncode != 0:
-            stderr_text = "\n".join(stderr_lines) if stderr_lines else "(no stderr)"
-            raise RuntimeError(f"Claude CLI exit {proc.returncode}: {stderr_text}")
+            async def _stream_stderr():
+                try:
+                    while True:
+                        line = await proc.stderr.readline()
+                        if not line:
+                            break
+                        decoded = line.decode("utf-8", errors="replace").strip()
+                        if decoded:
+                            stderr_lines.append(decoded)
+                            if self.on_output:
+                                self.on_output(decoded)
+                except Exception:
+                    pass
 
-        try:
-            return json.loads(stdout_data.decode("utf-8", errors="replace"))
-        except json.JSONDecodeError as e:
-            stdout_preview = stdout_data.decode("utf-8", errors="replace")[:200]
-            raise RuntimeError(f"JSON 파싱 실패: {e} — stdout: {stdout_preview}")
+            # stderr 스트리밍과 stdout 수집을 병렬 실행
+            stderr_task = asyncio.create_task(_stream_stderr())
+            stdout_data = await proc.stdout.read()
+            await stderr_task
+            await proc.wait()
+
+            if proc.returncode != 0:
+                stderr_text = "\n".join(stderr_lines) if stderr_lines else "(no stderr)"
+                raise RuntimeError(f"Claude CLI exit {proc.returncode}: {stderr_text}")
+
+            try:
+                raw = json.loads(stdout_data.decode("utf-8", errors="replace"))
+            except json.JSONDecodeError as e:
+                stdout_preview = stdout_data.decode("utf-8", errors="replace")[:500]
+                raise RuntimeError(f"JSON 파싱 실패: {e} — stdout: {stdout_preview}")
+
+            # --json-schema 사용 시 structured_output 필드에 결과가 옴
+            if "structured_output" in raw and raw["structured_output"]:
+                return raw["structured_output"]
+            # fallback: result 필드 (문자열일 수 있음)
+            result_field = raw.get("result", "")
+            if isinstance(result_field, dict):
+                return result_field
+            # result가 JSON 문자열인 경우
+            if isinstance(result_field, str) and result_field.strip().startswith("{"):
+                try:
+                    return json.loads(result_field)
+                except json.JSONDecodeError:
+                    pass
+            raise RuntimeError(f"CLI 응답에 structured_output/result 없음: {str(raw)[:500]}")
+
+        # _execute를 호출하면 proc_holder[0]에 proc이 저장됨
+        # 하지만 proc은 await 후에만 생성되므로, 여기서는 holder를 반환
+        class ProcProxy:
+            """proc이 나중에 생성되므로 proxy 객체로 접근"""
+            @property
+            def returncode(self):
+                p = proc_holder[0]
+                return p.returncode if p else None
+            def kill(self):
+                p = proc_holder[0]
+                if p and p.returncode is None:
+                    try:
+                        p.kill()
+                    except Exception:
+                        pass
+
+        return ProcProxy(), _execute()
 
     def _build_prompt(self, context: str, categories: list[str], image_paths: list[str]) -> str:
         """프롬프트 생성"""

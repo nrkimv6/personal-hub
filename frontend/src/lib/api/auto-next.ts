@@ -111,6 +111,14 @@ export interface LogResponse {
 	total_lines: number;
 }
 
+export interface CurrentTrackingResponse {
+	text: string;
+	confidence: 'HIGH' | 'MEDIUM' | string;
+	line_num: number | null;
+	plan_file: string | null;
+	stale: boolean;
+}
+
 export interface PlanItemResponse {
 	level: number;
 	text: string;
@@ -186,6 +194,9 @@ export const autoNextTaskApi = {
 		const qs = search.toString();
 		return autoNextRequest<TaskListResponse>(`/tasks${qs ? '?' + qs : ''}`);
 	},
+
+	currentTracking: () =>
+		autoNextRequest<CurrentTrackingResponse | null>('/tasks/current-tracking'),
 
 	get: (id: string) => autoNextRequest<TaskResponse>(`/tasks/${id}`),
 

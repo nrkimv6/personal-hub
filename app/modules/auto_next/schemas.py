@@ -153,6 +153,15 @@ class LogResponse(BaseModel):
     total_lines: int
 
 
+class CurrentTrackingResponse(BaseModel):
+    """현재 TaskTracker 추적 중인 체크박스 응답 스키마 (Redis 기반)"""
+    text: str
+    confidence: str         # HIGH / MEDIUM
+    line_num: Optional[int] = None
+    plan_file: Optional[str] = None
+    stale: bool = False     # TTL 만료 여부 (60초 TTL 기반)
+
+
 __all__ = [
     'TaskResponse',
     'TaskListResponse',
@@ -165,6 +174,7 @@ __all__ = [
     'HistoryEntry',
     'DuplicateTaskResponse',
     'LogResponse',
+    'CurrentTrackingResponse',
     'PlanItemResponse',
     'PlanPhaseResponse',
     'PlanDetailResponse',
