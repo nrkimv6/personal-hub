@@ -41,7 +41,7 @@
 					? 'bg-blue-50 text-blue-700'
 					: 'text-muted-foreground hover:text-foreground hover:bg-gray-50'}"
 			>
-				Auto Next
+				🚀 Dev Runner
 			</button>
 			<button
 				onclick={() => setMainTab('sleep-now')}

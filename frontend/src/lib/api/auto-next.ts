@@ -149,10 +149,10 @@ export interface TaskListParams {
 }
 
 // ============================================================
-// API prefix (백엔드 라우터: /api/v1/auto-next)
+// API prefix (백엔드 라우터: /api/v1/plan-runner)
 // ============================================================
 
-const AUTO_NEXT_BASE = '/api/v1/auto-next';
+const AUTO_NEXT_BASE = '/api/v1/plan-runner';
 
 async function autoNextRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
 	const url = `${AUTO_NEXT_BASE}${endpoint}`;

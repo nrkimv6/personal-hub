@@ -14,11 +14,11 @@ class AutoNextModule(ModuleInterface):
 
     @property
     def display_name(self) -> str:
-        return 'Auto Next'
+        return 'Dev Runner'
 
     @property
     def api_prefix(self) -> str:
-        return '/auto-next'
+        return '/plan-runner'
 
     def get_router(self) -> APIRouter:
         """FastAPI 라우터 반환"""

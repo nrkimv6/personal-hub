@@ -5,9 +5,9 @@ Session 1 (사용자 세션)에서 실행되는 auto-next 명령 리스너입니
 API 서버(Session 0)에서 Redis를 통해 전달된 명령을 수신하고 실행합니다.
 
 동작 방식:
-    - BRPOP으로 auto-next:commands 키를 블로킹 대기 (CPU 0%)
+    - BRPOP으로 plan-runner:commands 키를 블로킹 대기 (CPU 0%)
     - 명령 수신 시 auto-next CLI 실행
-    - 실행 결과/PID를 auto-next:command_results에 반환
+    - 실행 결과/PID를 plan-runner:command_results에 반환
     - stop 명령 시 프로세스 terminate
 
 사용법:
@@ -31,17 +31,17 @@ import redis
 # 설정
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
-COMMANDS_KEY = "auto-next:commands"
-RESULTS_KEY = "auto-next:command_results"
-STATE_KEY = "auto-next:state"
-HEARTBEAT_KEY = "auto-next:listener:heartbeat"
+COMMANDS_KEY = "plan-runner:commands"
+RESULTS_KEY = "plan-runner:command_results"
+STATE_KEY = "plan-runner:state"
+HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
 HEARTBEAT_INTERVAL = 10  # heartbeat 갱신 주기 (초)
 HEARTBEAT_TTL = 30  # heartbeat 만료 시간 (초, 3회 미갱신 시 만료)
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 WTOOLS_BASE_DIR = Path("D:/work/project/service/wtools")
-AUTO_NEXT_MODULE_PATH = WTOOLS_BASE_DIR / "common/tools/auto-next"
+AUTO_NEXT_MODULE_PATH = WTOOLS_BASE_DIR / "common/tools/plan-runner"
 AUTO_NEXT_PYTHON = AUTO_NEXT_MODULE_PATH / ".venv/Scripts/python.exe"
 LOG_DIR = WTOOLS_BASE_DIR / "common/logs"
 
@@ -59,7 +59,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-LOG_CHANNEL = "auto-next:logs"
+LOG_CHANNEL = "plan-runner:logs"
 
 # 전역 프로세스 관리
 _current_process: Optional[subprocess.Popen] = None
@@ -263,7 +263,7 @@ def start_auto_next(command: Dict, redis_client: redis.Redis) -> Dict:
         }
 
     except Exception as e:
-        logger.error(f"Failed to start auto-next: {e}")
+        logger.error(f"Failed to start plan-runner: {e}")
         return {
             "success": False,
             "message": f"Failed to start: {str(e)}"
@@ -318,7 +318,7 @@ def stop_auto_next(redis_client: redis.Redis) -> Dict:
         }
 
     except Exception as e:
-        logger.error(f"Failed to stop auto-next: {e}")
+        logger.error(f"Failed to stop plan-runner: {e}")
         return {
             "success": False,
             "message": f"Failed to stop: {str(e)}"
