@@ -1,4 +1,4 @@
-"""auto-next command listener 테스트
+"""dev-runner command listener 테스트
 
 전체실행(parallel) 모드에서 plan_file 없이도 정상 동작하는지 검증.
 """
@@ -10,8 +10,8 @@ import pytest
 # command listener는 스크립트이므로 함수를 직접 import하기 어려움 → 로직 재현 테스트
 
 
-class TestStartAutoNextValidation:
-    """start_auto_next 함수의 plan_file 검증 로직 테스트"""
+class TestStartDevRunnerValidation:
+    """start_plan_runner 함수의 plan_file 검증 로직 테스트"""
 
     def _validate_plan_file(self, command: dict) -> dict | None:
         """command listener의 plan_file 검증 로직 재현"""
@@ -62,7 +62,7 @@ class TestCommandBuilding:
         """command listener의 CLI 명령어 구성 로직 재현"""
         plan_file = command.get("plan_file")
 
-        cmd = ["python", "-m", "auto_next", "run"]
+        cmd = ["python", "-m", "plan_runner", "run"]
 
         if plan_file:
             cmd.extend(["--plan-file", plan_file])
@@ -102,7 +102,7 @@ class TestExecutorServiceCommand:
     """executor_service가 Redis에 보내는 command 구조 테스트"""
 
     def _build_command(self, plan_file=None, parallel=False, projects=None):
-        """executor_service.start_auto_next의 command 구성 로직 재현"""
+        """executor_service.start_plan_runner의 command 구성 로직 재현"""
         command = {
             "action": "run",
             "source": "monitor-page-api",
@@ -149,11 +149,11 @@ class TestRedisStateSaving:
             "start_time": "2026-02-14T00:00:00",
             "status": "running",
         }
-        redis_client.set("auto-next:state:log_file_path", state["log_file_path"])
-        redis_client.set("auto-next:state:pid", state["pid"])
-        redis_client.set("auto-next:state:plan_file", plan_file or "ALL")
-        redis_client.set("auto-next:state:start_time", state["start_time"])
-        redis_client.set("auto-next:state:status", state["status"])
+        redis_client.set("dev-runner:state:log_file_path", state["log_file_path"])
+        redis_client.set("dev-runner:state:pid", state["pid"])
+        redis_client.set("dev-runner:state:plan_file", plan_file or "ALL")
+        redis_client.set("dev-runner:state:start_time", state["start_time"])
+        redis_client.set("dev-runner:state:status", state["status"])
         return state
 
     def test_parallel_mode_saves_ALL_as_plan_file(self):
@@ -165,7 +165,7 @@ class TestRedisStateSaving:
         assert state["plan_file"] == "ALL"
 
         # Redis 저장 확인
-        redis_client.set.assert_any_call("auto-next:state:plan_file", "ALL")
+        redis_client.set.assert_any_call("dev-runner:state:plan_file", "ALL")
 
     def test_single_mode_saves_actual_plan_file(self):
         """plan_file="test.md" → Redis에 "test.md" 저장"""
@@ -173,7 +173,7 @@ class TestRedisStateSaving:
         state = self._save_state(plan_file="test.md", redis_client=redis_client)
 
         assert state["plan_file"] == "test.md"
-        redis_client.set.assert_any_call("auto-next:state:plan_file", "test.md")
+        redis_client.set.assert_any_call("dev-runner:state:plan_file", "test.md")
 
     def test_parallel_with_plan_file_saves_plan_file(self):
         """parallel=True + plan_file="test.md" → "test.md" 저장 (plan_file 우선)"""
@@ -181,4 +181,4 @@ class TestRedisStateSaving:
         state = self._save_state(plan_file="test.md", redis_client=redis_client)
 
         assert state["plan_file"] == "test.md"
-        redis_client.set.assert_any_call("auto-next:state:plan_file", "test.md")
+        redis_client.set.assert_any_call("dev-runner:state:plan_file", "test.md")

@@ -1,24 +1,24 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import AutoNextTab from './AutoNextTab.svelte';
+	import DevRunnerTab from './DevRunnerTab.svelte';
 	import SleepNowTab from './SleepNowTab.svelte';
 
-	type MainTab = 'auto-next' | 'sleep-now';
-	let mainTab: MainTab = $state('auto-next');
+	type MainTab = 'dev-runner' | 'sleep-now';
+	let mainTab: MainTab = $state('dev-runner');
 
 	$effect(() => {
 		const tabParam = $page.url.searchParams.get('tab');
 		if (tabParam === 'sleep-now') {
 			mainTab = tabParam;
 		} else {
-			mainTab = 'auto-next';
+			mainTab = 'dev-runner';
 		}
 	});
 
 	function setMainTab(tab: MainTab) {
 		const url = new URL($page.url);
-		if (tab === 'auto-next') {
+		if (tab === 'dev-runner') {
 			url.searchParams.delete('tab');
 		} else {
 			url.searchParams.set('tab', tab);
@@ -36,8 +36,8 @@
 		<h1 class="text-sm font-semibold text-foreground">시스템 자동화</h1>
 		<nav class="flex gap-1">
 			<button
-				onclick={() => setMainTab('auto-next')}
-				class="px-3 py-1 text-xs font-medium rounded transition-colors {mainTab === 'auto-next'
+				onclick={() => setMainTab('dev-runner')}
+				class="px-3 py-1 text-xs font-medium rounded transition-colors {mainTab === 'dev-runner'
 					? 'bg-blue-50 text-blue-700'
 					: 'text-muted-foreground hover:text-foreground hover:bg-gray-50'}"
 			>
@@ -55,8 +55,8 @@
 	</div>
 
 	<div class="flex-1 overflow-hidden">
-		{#if mainTab === 'auto-next'}
-			<AutoNextTab />
+		{#if mainTab === 'dev-runner'}
+			<DevRunnerTab />
 		{:else if mainTab === 'sleep-now'}
 			<div class="p-6 overflow-auto h-full">
 				<SleepNowTab />

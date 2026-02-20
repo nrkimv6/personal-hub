@@ -1,6 +1,6 @@
 """DBService 단위 테스트 - RIGHT-BICEP 원칙 적용
 
-대상 소스: app/modules/auto_next/services/db_service.py
+대상 소스: app/modules/dev_runner/services/db_service.py
 Phase 2 of auto-next-test-enhancement plan
 """
 
@@ -8,7 +8,7 @@ import sqlite3
 import pytest
 from datetime import datetime, timedelta
 
-from app.modules.auto_next.services.db_service import DBService
+from app.modules.dev_runner.services.db_service import DBService
 
 
 # ========== Fixtures ==========

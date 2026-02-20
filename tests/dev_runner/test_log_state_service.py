@@ -8,9 +8,9 @@ from unittest.mock import patch, MagicMock, PropertyMock
 import pytest
 import redis
 
-from app.modules.auto_next.services.log_service import LogService
-from app.modules.auto_next.services.state import RunState
-from app.modules.auto_next.schemas import LogResponse
+from app.modules.dev_runner.services.log_service import LogService
+from app.modules.dev_runner.services.state import RunState
+from app.modules.dev_runner.schemas import LogResponse
 
 
 # ========== LogService 테스트 ==========
@@ -95,8 +95,8 @@ class TestLogServiceFindCurrentLog:
         service = LogService.__new__(LogService)
         mock_redis = MagicMock()
         mock_redis.get.side_effect = lambda key: {
-            "auto-next:state:stream_log_path": str(stream_log),
-            "auto-next:state:log_file_path": str(fallback_log),
+            "plan-runner:state:stream_log_path": str(stream_log),
+            "plan-runner:state:log_file_path": str(fallback_log),
         }.get(key)
         service.redis_client = mock_redis
 
@@ -111,8 +111,8 @@ class TestLogServiceFindCurrentLog:
         service = LogService.__new__(LogService)
         mock_redis = MagicMock()
         mock_redis.get.side_effect = lambda key: {
-            "auto-next:state:stream_log_path": None,
-            "auto-next:state:log_file_path": str(fallback_log),
+            "plan-runner:state:stream_log_path": None,
+            "plan-runner:state:log_file_path": str(fallback_log),
         }.get(key)
         service.redis_client = mock_redis
 
@@ -144,8 +144,8 @@ class TestLogServiceFindCurrentLog:
         service = LogService.__new__(LogService)
         mock_redis = MagicMock()
         mock_redis.get.side_effect = lambda key: {
-            "auto-next:state:stream_log_path": str(tmp_path / "gone.log"),
-            "auto-next:state:log_file_path": None,
+            "plan-runner:state:stream_log_path": str(tmp_path / "gone.log"),
+            "plan-runner:state:log_file_path": None,
         }.get(key)
         service.redis_client = mock_redis
 

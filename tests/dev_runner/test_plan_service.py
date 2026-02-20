@@ -1,6 +1,6 @@
 """PlanService 단위 테스트 - RIGHT-BICEP 원칙 적용
 
-대상 소스: app/modules/auto_next/services/plan_service.py
+대상 소스: app/modules/dev_runner/services/plan_service.py
 """
 
 import json
@@ -8,7 +8,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.modules.auto_next.schemas import PlanProgressResponse
+from app.modules.dev_runner.schemas import PlanProgressResponse
 
 
 # ========== Fixtures ==========
@@ -22,11 +22,11 @@ def tmp_plan_dir(tmp_path):
 
 
 @pytest.fixture
-def svc(tmp_path, auto_next_config_isolation):
+def svc(tmp_path, dev_runner_config_isolation):
     """격리된 PlanService 인스턴스"""
-    from app.modules.auto_next.services.plan_service import PlanService
+    from app.modules.dev_runner.services.plan_service import PlanService
 
-    cfg = auto_next_config_isolation
+    cfg = dev_runner_config_isolation
     cfg.REGISTERED_PATHS_FILE = tmp_path / "registered_paths.json"
     cfg.IGNORED_PLANS_FILE = tmp_path / "ignored_plans.json"
     (tmp_path / "registered_paths.json").write_text("[]", encoding="utf-8")
@@ -290,9 +290,9 @@ class TestPathManagement:
         assert svc.remove_from_ignore(str(plan_file)) is True
         assert svc.remove_from_ignore(str(plan_file)) is False
 
-    def test_list_plans_scans_registered_paths(self, svc, auto_next_config_isolation, tmp_path):
+    def test_list_plans_scans_registered_paths(self, svc, dev_runner_config_isolation, tmp_path):
         """등록된 경로 통합 스캔"""
-        cfg = auto_next_config_isolation
+        cfg = dev_runner_config_isolation
 
         folder = tmp_path / "my-project" / "docs" / "plan"
         folder.mkdir(parents=True)
@@ -443,11 +443,11 @@ class TestResolveSource:
 
 class TestMigration:
 
-    def test_migration_from_external_plans(self, auto_next_config_isolation, tmp_path):
+    def test_migration_from_external_plans(self, dev_runner_config_isolation, tmp_path):
         """external_plans.json만 있고 registered_paths.json이 없을 때 → 마이그레이션"""
-        from app.modules.auto_next.services.plan_service import PlanService
+        from app.modules.dev_runner.services.plan_service import PlanService
 
-        cfg = auto_next_config_isolation
+        cfg = dev_runner_config_isolation
         cfg.REGISTERED_PATHS_FILE = tmp_path / "registered_paths.json"
         cfg.EXTERNAL_PLANS_FILE = tmp_path / "external_plans.json"
         cfg.IGNORED_PLANS_FILE = tmp_path / "ignored_plans.json"
@@ -465,11 +465,11 @@ class TestMigration:
         data = json.loads(cfg.REGISTERED_PATHS_FILE.read_text(encoding="utf-8"))
         assert "/some/path" in data
 
-    def test_migration_preserves_data(self, auto_next_config_isolation, tmp_path):
+    def test_migration_preserves_data(self, dev_runner_config_isolation, tmp_path):
         """마이그레이션 후 기존 경로가 모두 보존"""
-        from app.modules.auto_next.services.plan_service import PlanService
+        from app.modules.dev_runner.services.plan_service import PlanService
 
-        cfg = auto_next_config_isolation
+        cfg = dev_runner_config_isolation
         cfg.REGISTERED_PATHS_FILE = tmp_path / "registered_paths.json"
         cfg.EXTERNAL_PLANS_FILE = tmp_path / "external_plans.json"
         cfg.IGNORED_PLANS_FILE = tmp_path / "ignored_plans.json"
@@ -487,11 +487,11 @@ class TestMigration:
         for p in paths:
             assert p in data
 
-    def test_seed_from_wtools(self, auto_next_config_isolation, tmp_path):
+    def test_seed_from_wtools(self, dev_runner_config_isolation, tmp_path):
         """WTOOLS_BASE_DIR 존재 시 프로젝트 경로 자동 등록"""
-        from app.modules.auto_next.services.plan_service import PlanService
+        from app.modules.dev_runner.services.plan_service import PlanService
 
-        cfg = auto_next_config_isolation
+        cfg = dev_runner_config_isolation
         cfg.REGISTERED_PATHS_FILE = tmp_path / "registered_paths.json"
         cfg.EXTERNAL_PLANS_FILE = tmp_path / "external_plans.json"
         cfg.IGNORED_PLANS_FILE = tmp_path / "ignored_plans.json"
@@ -514,11 +514,11 @@ class TestMigration:
         data = json.loads(cfg.REGISTERED_PATHS_FILE.read_text(encoding="utf-8"))
         assert any("project-a" in p for p in data)
 
-    def test_no_wtools_no_seed(self, auto_next_config_isolation, tmp_path):
+    def test_no_wtools_no_seed(self, dev_runner_config_isolation, tmp_path):
         """WTOOLS_BASE_DIR 미존재 시 빈 상태 시작"""
-        from app.modules.auto_next.services.plan_service import PlanService
+        from app.modules.dev_runner.services.plan_service import PlanService
 
-        cfg = auto_next_config_isolation
+        cfg = dev_runner_config_isolation
         cfg.REGISTERED_PATHS_FILE = tmp_path / "registered_paths.json"
         cfg.EXTERNAL_PLANS_FILE = tmp_path / "external_plans.json"
         cfg.IGNORED_PLANS_FILE = tmp_path / "ignored_plans.json"
@@ -532,11 +532,11 @@ class TestMigration:
 
         assert svc._registered_paths == []
 
-    def test_skip_if_already_migrated(self, auto_next_config_isolation, tmp_path):
+    def test_skip_if_already_migrated(self, dev_runner_config_isolation, tmp_path):
         """registered_paths.json이 이미 있으면 마이그레이션 스킵"""
-        from app.modules.auto_next.services.plan_service import PlanService
+        from app.modules.dev_runner.services.plan_service import PlanService
 
-        cfg = auto_next_config_isolation
+        cfg = dev_runner_config_isolation
         cfg.REGISTERED_PATHS_FILE = tmp_path / "registered_paths.json"
         cfg.EXTERNAL_PLANS_FILE = tmp_path / "external_plans.json"
         cfg.IGNORED_PLANS_FILE = tmp_path / "ignored_plans.json"

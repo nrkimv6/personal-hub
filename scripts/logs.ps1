@@ -162,10 +162,10 @@ if ($Target -eq "list") {
 
     Write-Host ""
 
-    # Auto-next logs (별도 디렉토리)
-    Write-Host "[Auto-Next Logs] ($autoNextLogDir)" -ForegroundColor Yellow
-    if (Test-Path $autoNextLogDir) {
-        $anLogs = Get-ChildItem -Path $autoNextLogDir -Filter "auto-next-*.log" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+    # Plan-runner logs (별도 디렉토리)
+    Write-Host "[Plan-Runner Logs] ($planRunnerLogDir)" -ForegroundColor Yellow
+    if (Test-Path $planRunnerLogDir) {
+        $anLogs = Get-ChildItem -Path $planRunnerLogDir -Filter "plan-runner-*.log" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
         if ($anLogs) {
             foreach ($log in $anLogs | Select-Object -First 5) {
                 $size = "{0:N2} KB" -f ($log.Length / 1KB)
@@ -236,20 +236,20 @@ $crawlWatchdogLogFile = Get-LatestLogFileMultiPattern @("crawl_watchdog_")
 $commandListenerWatchdogLogFile = Get-LatestLogFileMultiPattern @("command_listener_watchdog_")
 $cloudflaredLogFile = Get-LatestLogFileMultiPattern @("cloudflared_err", "cloudflared")
 
-# Auto-next 로그: wtools/common/logs/ 에서 최신 파일
-$autoNextLogDir = "D:\work\project\service\wtools\common\logs"
-$autoNextLogFile = $null
-if (Test-Path $autoNextLogDir) {
-    $found = Get-ChildItem -Path $autoNextLogDir -Filter "auto-next-*.log" -ErrorAction SilentlyContinue |
+# Plan-runner 로그: wtools/common/logs/ 에서 최신 파일
+$planRunnerLogDir = "D:\work\project\service\wtools\common\logs"
+$planRunnerLogFile = $null
+if (Test-Path $planRunnerLogDir) {
+    $found = Get-ChildItem -Path $planRunnerLogDir -Filter "plan-runner-*.log" -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -notmatch "stream" } |
         Sort-Object Name -Descending | Select-Object -First 1
-    if ($found) { $autoNextLogFile = $found.FullName }
+    if ($found) { $planRunnerLogFile = $found.FullName }
 }
-$autoNextStreamLogFile = $null
-if (Test-Path $autoNextLogDir) {
-    $found = Get-ChildItem -Path $autoNextLogDir -Filter "auto-next-stream-*.log" -ErrorAction SilentlyContinue |
+$planRunnerStreamLogFile = $null
+if (Test-Path $planRunnerLogDir) {
+    $found = Get-ChildItem -Path $planRunnerLogDir -Filter "plan-runner-stream-*.log" -ErrorAction SilentlyContinue |
         Sort-Object Name -Descending | Select-Object -First 1
-    if ($found) { $autoNextStreamLogFile = $found.FullName }
+    if ($found) { $planRunnerStreamLogFile = $found.FullName }
 }
 
 # Check if log files are stale (created more than 1 hour before the latest API log)
@@ -423,8 +423,8 @@ function Start-CombinedLogTail {
         "VIDEO-DL-WD" = @{ Path = $VideoDownloadWatchdogLog; Color = "DarkYellow"; Tail = 2 }
         "CRAWL-WD"    = @{ Path = $CrawlWatchdogLog;  Color = "DarkYellow";  Tail = 2 }
         "CMD-WD"      = @{ Path = $CommandListenerWatchdogLog; Color = "DarkYellow"; Tail = 2 }
-        "AUTO-NEXT"   = @{ Path = $autoNextLogFile;    Color = "White";       Tail = 10 }
-        "AN-STREAM"   = @{ Path = $autoNextStreamLogFile; Color = "DarkGray"; Tail = 5 }
+        "PLAN-RUNNER"   = @{ Path = $planRunnerLogFile;    Color = "White";       Tail = 10 }
+        "PR-STREAM"   = @{ Path = $planRunnerStreamLogFile; Color = "DarkGray"; Tail = 5 }
     }
 
     # Sources that only show errors/warnings (suppress verbose output)
@@ -527,17 +527,17 @@ function Start-CombinedLogTail {
         return $latestLog
     }
 
-    # Auto-next 로그 전용 패턴 (별도 디렉토리)
-    $autoNextLogPatterns = @{
-        "AUTO-NEXT" = @{ Dir = $autoNextLogDir; Filter = "auto-next-*.log"; Exclude = "stream" }
-        "AN-STREAM" = @{ Dir = $autoNextLogDir; Filter = "auto-next-stream-*.log"; Exclude = $null }
+    # Plan-runner 로그 전용 패턴 (별도 디렉토리)
+    $planRunnerLogPatterns = @{
+        "PLAN-RUNNER" = @{ Dir = $planRunnerLogDir; Filter = "plan-runner-*.log"; Exclude = "stream" }
+        "PR-STREAM" = @{ Dir = $planRunnerLogDir; Filter = "plan-runner-stream-*.log"; Exclude = $null }
     }
 
     try {
         while ($true) {
-            # Auto-next 로그 자동 감지 (별도 디렉토리)
-            foreach ($source in $autoNextLogPatterns.Keys) {
-                $cfg = $autoNextLogPatterns[$source]
+            # Plan-runner 로그 자동 감지 (별도 디렉토리)
+            foreach ($source in $planRunnerLogPatterns.Keys) {
+                $cfg = $planRunnerLogPatterns[$source]
                 if (-not (Test-Path $cfg.Dir)) { continue }
                 $candidates = Get-ChildItem -Path $cfg.Dir -Filter $cfg.Filter -ErrorAction SilentlyContinue
                 if ($cfg.Exclude) { $candidates = $candidates | Where-Object { $_.Name -notmatch $cfg.Exclude } }

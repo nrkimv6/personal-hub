@@ -1,6 +1,6 @@
 """ExecutorService TC - RIGHT-BICEP 원칙 적용 (Phase 3 보강)
 
-대상 소스: app/modules/auto_next/services/executor_service.py
+대상 소스: app/modules/dev_runner/services/executor_service.py
 Mock 대상: redis.Redis → fakeredis, redis.asyncio → fakeredis.aioredis
 """
 
@@ -11,8 +11,8 @@ from unittest.mock import patch, MagicMock, AsyncMock
 import fakeredis
 import fakeredis.aioredis
 
-from app.modules.auto_next.services.executor_service import ExecutorService
-from app.modules.auto_next.schemas import RunRequest, RunStatusResponse
+from app.modules.dev_runner.services.executor_service import ExecutorService
+from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse
 from fastapi import HTTPException
 
 
@@ -52,17 +52,17 @@ def run_request_parallel():
 async def _setup_listener_success(fake_async_redis, plan_file="common/docs/plan/test.md"):
     """listener 성공 응답 세팅"""
     result_data = {"success": True, "pid": 12345}
-    await fake_async_redis.set("auto-next:listener:heartbeat", "alive")
-    await fake_async_redis.set("auto-next:state:status", "idle")
-    await fake_async_redis.set("auto-next:state:pid", "12345")
-    await fake_async_redis.set("auto-next:state:plan_file", plan_file)
-    await fake_async_redis.set("auto-next:state:start_time", datetime.now().isoformat())
-    await fake_async_redis.rpush("auto-next:command_results", json.dumps(result_data))
+    await fake_async_redis.set("plan-runner:listener:heartbeat", "alive")
+    await fake_async_redis.set("plan-runner:state:status", "idle")
+    await fake_async_redis.set("plan-runner:state:pid", "12345")
+    await fake_async_redis.set("plan-runner:state:plan_file", plan_file)
+    await fake_async_redis.set("plan-runner:state:start_time", datetime.now().isoformat())
+    await fake_async_redis.rpush("plan-runner:command_results", json.dumps(result_data))
 
 
-# ========== TestStartAutoNext ==========
+# ========== TestStartDevRunner ==========
 
-class TestStartAutoNext:
+class TestStartDevRunner:
 
     async def test_start_single_plan_command(self, executor, run_request_single, fake_async_redis):
         """Right - plan_file 포함된 command 전송"""
@@ -76,7 +76,7 @@ class TestStartAutoNext:
             return await original_lpush(key, *values)
 
         with patch.object(executor.async_redis, 'lpush', side_effect=capture_lpush):
-            result = await executor.start_auto_next(run_request_single)
+            result = await executor.start_dev_runner(run_request_single)
 
         assert len(captured) == 1
         command = json.loads(captured[0])
@@ -95,7 +95,7 @@ class TestStartAutoNext:
             return await original_lpush(key, *values)
 
         with patch.object(executor.async_redis, 'lpush', side_effect=capture_lpush):
-            await executor.start_auto_next(run_request_parallel)
+            await executor.start_dev_runner(run_request_parallel)
 
         command = json.loads(captured[0])
         assert command.get("parallel") is True
@@ -118,7 +118,7 @@ class TestStartAutoNext:
             return await original_lpush(key, *values)
 
         with patch.object(executor.async_redis, 'lpush', side_effect=capture_lpush):
-            await executor.start_auto_next(request)
+            await executor.start_dev_runner(request)
 
         command = json.loads(captured[0])
         assert command["max_cycles"] == 5
@@ -130,12 +130,12 @@ class TestStartAutoNext:
 
     async def test_start_already_running_409(self, executor, run_request_single, fake_async_redis):
         """Boundary - status=running + heartbeat 있음 → 409"""
-        await fake_async_redis.set("auto-next:listener:heartbeat", "alive")
-        await fake_async_redis.set("auto-next:state:status", "running")
-        await fake_async_redis.set("auto-next:state:pid", "12345")
+        await fake_async_redis.set("plan-runner:listener:heartbeat", "alive")
+        await fake_async_redis.set("plan-runner:state:status", "running")
+        await fake_async_redis.set("plan-runner:state:pid", "12345")
 
         with pytest.raises(HTTPException) as exc_info:
-            await executor.start_auto_next(run_request_single)
+            await executor.start_dev_runner(run_request_single)
         assert exc_info.value.status_code == 409
 
     async def test_start_redis_down_503(self, executor, run_request_single):
@@ -145,70 +145,70 @@ class TestStartAutoNext:
         executor.async_redis.ping.side_effect = redis.ConnectionError("Connection refused")
 
         with pytest.raises(HTTPException) as exc_info:
-            await executor.start_auto_next(run_request_single)
+            await executor.start_dev_runner(run_request_single)
         assert exc_info.value.status_code == 503
 
     async def test_start_brpop_timeout_504(self, executor, run_request_single, fake_async_redis):
         """Boundary - BRPOP 타임아웃 → 504"""
-        await fake_async_redis.set("auto-next:listener:heartbeat", "alive")
+        await fake_async_redis.set("plan-runner:listener:heartbeat", "alive")
         with patch.object(executor.async_redis, 'brpop', new_callable=AsyncMock, return_value=None):
             with pytest.raises(HTTPException) as exc_info:
-                await executor.start_auto_next(run_request_single)
+                await executor.start_dev_runner(run_request_single)
             assert exc_info.value.status_code == 504
 
     async def test_start_listener_failure_500(self, executor, run_request_single, fake_async_redis):
         """Error - listener success=False → 500"""
-        await fake_async_redis.set("auto-next:listener:heartbeat", "alive")
+        await fake_async_redis.set("plan-runner:listener:heartbeat", "alive")
         result_data = {"success": False, "message": "Failed to spawn process"}
-        await fake_async_redis.rpush("auto-next:command_results", json.dumps(result_data))
+        await fake_async_redis.rpush("plan-runner:command_results", json.dumps(result_data))
 
         with pytest.raises(HTTPException) as exc_info:
-            await executor.start_auto_next(run_request_single)
+            await executor.start_dev_runner(run_request_single)
         assert exc_info.value.status_code == 500
         assert "Failed to spawn process" in exc_info.value.detail or "Failed to start" in exc_info.value.detail
 
     async def test_start_json_decode_error_500(self, executor, run_request_single, fake_async_redis):
         """Phase3 - JSON decode 실패 → 500"""
-        await fake_async_redis.set("auto-next:listener:heartbeat", "alive")
+        await fake_async_redis.set("plan-runner:listener:heartbeat", "alive")
         with patch.object(
             executor.async_redis, 'brpop',
             new_callable=AsyncMock,
-            return_value=("auto-next:command_results", "not-valid-json{{{")
+            return_value=("plan-runner:command_results", "not-valid-json{{{")
         ):
             with pytest.raises(HTTPException) as exc_info:
-                await executor.start_auto_next(run_request_single)
+                await executor.start_dev_runner(run_request_single)
             assert exc_info.value.status_code == 500
             assert "Invalid response" in exc_info.value.detail
 
 
-# ========== TestStopAutoNext ==========
+# ========== TestStopDevRunner ==========
 
-class TestStopAutoNext:
+class TestStopDevRunner:
 
     async def test_stop_not_running_404(self, executor, fake_async_redis):
         """Boundary - 미실행 상태 stop → 404"""
-        await fake_async_redis.set("auto-next:state:status", "stopped")
+        await fake_async_redis.set("plan-runner:state:status", "stopped")
 
         with pytest.raises(HTTPException) as exc_info:
-            await executor.stop_auto_next()
+            await executor.stop_dev_runner()
         assert exc_info.value.status_code == 404
 
     async def test_stop_success(self, executor, fake_async_redis):
         """Right - 정상 stop"""
-        await fake_async_redis.set("auto-next:state:status", "running")
+        await fake_async_redis.set("plan-runner:state:status", "running")
         result_data = {"success": True, "message": "Stopped"}
-        await fake_async_redis.rpush("auto-next:command_results", json.dumps(result_data))
+        await fake_async_redis.rpush("plan-runner:command_results", json.dumps(result_data))
 
-        result = await executor.stop_auto_next()
+        result = await executor.stop_dev_runner()
         assert result["message"] == "Stopped successfully"
 
     async def test_stop_listener_timeout_force_cleanup(self, executor, fake_async_redis):
         """Error - listener 무응답 → Redis 상태 강제 정리"""
-        await fake_async_redis.set("auto-next:state:status", "running")
-        await fake_async_redis.set("auto-next:state:pid", "12345")
+        await fake_async_redis.set("plan-runner:state:status", "running")
+        await fake_async_redis.set("plan-runner:state:pid", "12345")
 
         with patch.object(executor.async_redis, 'brpop', new_callable=AsyncMock, return_value=None):
-            result = await executor.stop_auto_next()
+            result = await executor.stop_dev_runner()
 
         assert "Force cleaned" in result["message"]
         # cleanup은 sync redis_client에서 실행
@@ -222,25 +222,25 @@ class TestStopAutoNext:
         executor.async_redis.get.side_effect = redis.ConnectionError("Connection refused")
 
         with pytest.raises(HTTPException) as exc_info:
-            await executor.stop_auto_next()
+            await executor.stop_dev_runner()
         assert exc_info.value.status_code == 503
 
     async def test_stop_json_decode_force_cleanup(self, executor, fake_async_redis, fake_redis):
         """Phase3 - stop시 JSON decode 실패 → force cleanup"""
-        await fake_async_redis.set("auto-next:state:status", "running")
-        fake_redis.set("auto-next:state:status", "running")
-        fake_redis.set("auto-next:state:pid", "12345")
+        await fake_async_redis.set("plan-runner:state:status", "running")
+        fake_redis.set("plan-runner:state:status", "running")
+        fake_redis.set("plan-runner:state:pid", "12345")
 
         with patch.object(
             executor.async_redis, 'brpop',
             new_callable=AsyncMock,
-            return_value=("auto-next:command_results", "invalid-json!!!")
+            return_value=("plan-runner:command_results", "invalid-json!!!")
         ):
-            result = await executor.stop_auto_next()
+            result = await executor.stop_dev_runner()
 
         assert "Force cleaned" in result["message"]
         # sync redis에서 상태 정리 확인
-        assert fake_redis.get("auto-next:state:status") is None
+        assert fake_redis.get("plan-runner:state:status") is None
 
 
 # ========== TestGetProcessStatus ==========
@@ -249,11 +249,11 @@ class TestGetProcessStatus:
 
     def test_status_running_with_heartbeat(self, executor, fake_redis):
         """Right - running + heartbeat 있음 → running=True"""
-        fake_redis.set("auto-next:listener:heartbeat", "alive")
-        fake_redis.set("auto-next:state:status", "running")
-        fake_redis.set("auto-next:state:pid", "12345")
-        fake_redis.set("auto-next:state:plan_file", "test.md")
-        fake_redis.set("auto-next:state:start_time", datetime.now().isoformat())
+        fake_redis.set("plan-runner:listener:heartbeat", "alive")
+        fake_redis.set("plan-runner:state:status", "running")
+        fake_redis.set("plan-runner:state:pid", "12345")
+        fake_redis.set("plan-runner:state:plan_file", "test.md")
+        fake_redis.set("plan-runner:state:start_time", datetime.now().isoformat())
 
         result = executor.get_process_status()
         assert result.running is True
@@ -262,13 +262,13 @@ class TestGetProcessStatus:
 
     def test_status_running_no_heartbeat_auto_cleanup(self, executor, fake_redis):
         """Cross-check - heartbeat 없음 → stale 자동 정리"""
-        fake_redis.set("auto-next:state:status", "running")
-        fake_redis.set("auto-next:state:pid", "99999")
+        fake_redis.set("plan-runner:state:status", "running")
+        fake_redis.set("plan-runner:state:pid", "99999")
         # heartbeat 없음 → stale
 
         result = executor.get_process_status()
         assert result.running is False
-        assert fake_redis.get("auto-next:state:status") is None
+        assert fake_redis.get("plan-runner:state:status") is None
 
     def test_status_not_running(self, executor, fake_redis):
         """Right - 미실행 → running=False"""
@@ -292,7 +292,7 @@ class TestResetRunningState:
     def _make_db(self, tmp_path, rows):
         """테스트용 SQLite DB 생성"""
         import sqlite3
-        db_path = tmp_path / "auto_next.db"
+        db_path = tmp_path / "dev_runner.db"
         conn = sqlite3.connect(str(db_path))
         cursor = conn.cursor()
         cursor.execute("CREATE TABLE tasks (id TEXT PRIMARY KEY, status TEXT, started_at TEXT)")
@@ -309,8 +309,8 @@ class TestResetRunningState:
             ("task2", "pending", None),
         ])
 
-        with patch('app.modules.auto_next.services.executor_service.config') as mc:
-            mc.AUTO_NEXT_DB_PATH = str(db_path)
+        with patch('app.modules.dev_runner.services.executor_service.config') as mc:
+            mc.DEV_RUNNER_DB_PATH = str(db_path)
             result = executor.reset_running_state(full_reset=False)
 
         assert result["success"] is True
@@ -329,8 +329,8 @@ class TestResetRunningState:
             ("task2", "success", None),
         ])
 
-        with patch('app.modules.auto_next.services.executor_service.config') as mc:
-            mc.AUTO_NEXT_DB_PATH = str(db_path)
+        with patch('app.modules.dev_runner.services.executor_service.config') as mc:
+            mc.DEV_RUNNER_DB_PATH = str(db_path)
             result = executor.reset_running_state(full_reset=True)
 
         assert result["reset_count"] == 2
@@ -346,16 +346,16 @@ class TestResetRunningState:
         """Boundary - RUNNING 0건"""
         db_path = self._make_db(tmp_path, [("task1", "success", None)])
 
-        with patch('app.modules.auto_next.services.executor_service.config') as mc:
-            mc.AUTO_NEXT_DB_PATH = str(db_path)
+        with patch('app.modules.dev_runner.services.executor_service.config') as mc:
+            mc.DEV_RUNNER_DB_PATH = str(db_path)
             result = executor.reset_running_state(full_reset=False)
 
         assert result["reset_count"] == 0
 
     def test_reset_db_not_found(self, executor, tmp_path):
         """Boundary - DB 파일 없음 → 정상 반환"""
-        with patch('app.modules.auto_next.services.executor_service.config') as mc:
-            mc.AUTO_NEXT_DB_PATH = str(tmp_path / "nonexistent.db")
+        with patch('app.modules.dev_runner.services.executor_service.config') as mc:
+            mc.DEV_RUNNER_DB_PATH = str(tmp_path / "nonexistent.db")
             result = executor.reset_running_state()
 
         assert result["success"] is True
@@ -431,7 +431,7 @@ class TestCORRECTConformance:
                 return await original_lpush(key, *values)
 
             with patch.object(executor.async_redis, 'lpush', side_effect=capture_lpush):
-                await executor.start_auto_next(RunRequest(plan_file=plan_val))
+                await executor.start_dev_runner(RunRequest(plan_file=plan_val))
 
             command = json.loads(captured[0])
             assert "plan_file" not in command, f"plan_file={plan_val!r} should not be in command"

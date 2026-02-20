@@ -2,8 +2,8 @@
   import { onMount } from 'svelte';
   import { serviceDashboardApi, systemApi } from '$lib/api';
   import type { ServiceDashboardStatus, RedisStatus, NssmService, WorkerProcess, ScheduledTask, StartupProgram } from '$lib/api';
-  import { autoNextRunnerApi } from '$lib/api/auto-next';
-  import type { RunStatusResponse } from '$lib/api/auto-next';
+  import { devRunnerRunnerApi } from '$lib/api/dev-runner';
+  import type { RunStatusResponse } from '$lib/api/dev-runner';
   import StatusDot from '$lib/components/ui/StatusDot.svelte';
   import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
   import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
@@ -25,8 +25,8 @@
   let selfRestartState = $state<'idle' | 'requested' | 'waiting' | 'checking' | 'done' | 'failed'>('idle');
   let selfRestartMessage = $state('');
 
-  // Auto-Next + Redis 상태
-  let autoNextStatus = $state<RunStatusResponse | null>(null);
+  // Dev Runner + Redis 상태
+  let devRunnerStatus = $state<RunStatusResponse | null>(null);
   let redisStatus = $state<RedisStatus | null>({ connected: false, container_running: null, uptime_seconds: null, used_memory_mb: null, connected_clients: null });
 
   // ConfirmDialog 상태
@@ -220,10 +220,10 @@
   async function fetchExtraStatus() {
     try {
       const [anStatus, rStatus] = await Promise.all([
-        autoNextRunnerApi.status().catch(() => null),
+        devRunnerRunnerApi.status().catch(() => null),
         serviceDashboardApi.redisStatus().catch(() => null),
       ]);
-      if (anStatus !== null) autoNextStatus = anStatus;
+      if (anStatus !== null) devRunnerStatus = anStatus;
       redisStatus = rStatus ?? { connected: false, container_running: null, uptime_seconds: null, used_memory_mb: null, connected_clients: null };
     } catch { /* graceful */ }
   }
@@ -407,41 +407,41 @@
     }
   }
 
-  async function startAutoNext() {
-    actionLoading = 'auto-next-start';
+  async function startDevRunner() {
+    actionLoading = 'dev-runner-start';
     try {
-      await autoNextRunnerApi.start({});
+      await devRunnerRunnerApi.start({});
       await fetchExtraStatus();
     } catch (e) {
       alert(`시작 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
     } finally { actionLoading = null; }
   }
 
-  async function stopAutoNext() {
-    actionLoading = 'auto-next-stop';
+  async function stopDevRunner() {
+    actionLoading = 'dev-runner-stop';
     try {
-      await autoNextRunnerApi.stop();
+      await devRunnerRunnerApi.stop();
       await fetchExtraStatus();
     } catch (e) {
       alert(`중지 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
     } finally { actionLoading = null; }
   }
 
-  async function restartAutoNext() {
-    actionLoading = 'auto-next-restart';
+  async function restartDevRunner() {
+    actionLoading = 'dev-runner-restart';
     try {
-      await autoNextRunnerApi.stop();
-      await autoNextRunnerApi.start({});
+      await devRunnerRunnerApi.stop();
+      await devRunnerRunnerApi.start({});
       await fetchExtraStatus();
     } catch (e) {
       alert(`재시작 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
     } finally { actionLoading = null; }
   }
 
-  async function resetAutoNext() {
-    actionLoading = 'auto-next-reset';
+  async function resetDevRunner() {
+    actionLoading = 'dev-runner-reset';
     try {
-      await autoNextRunnerApi.resetState();
+      await devRunnerRunnerApi.resetState();
       await fetchExtraStatus();
     } catch (e) {
       alert(`리셋 실패: ${e instanceof Error ? e.message : '알 수 없는 오류'}`);
@@ -846,52 +846,52 @@
           </div>
         {/if}
 
-        <!-- Auto-Next -->
-        {#if autoNextStatus}
+        <!-- Dev Runner -->
+        {#if devRunnerStatus}
           <div class="mb-3 pb-3 border-b border-border">
             <div class="flex items-center justify-between mb-2">
               <div class="flex items-center gap-2">
                 <StatusDot
-                  variant={autoNextStatus.running ? 'success' : autoNextStatus.crashed ? 'error' : 'gray'}
+                  variant={devRunnerStatus.running ? 'success' : devRunnerStatus.crashed ? 'error' : 'gray'}
                   size="md"
-                  pulse={autoNextStatus.running}
+                  pulse={devRunnerStatus.running}
                 />
-                <span class="font-medium text-sm">Auto-Next</span>
+                <span class="font-medium text-sm">Dev Runner</span>
                 <StatusBadge
-                  variant={autoNextStatus.running ? 'success' : autoNextStatus.crashed ? 'error' : 'gray'}
+                  variant={devRunnerStatus.running ? 'success' : devRunnerStatus.crashed ? 'error' : 'gray'}
                   size="sm"
                 >
-                  {autoNextStatus.running ? 'Running' : autoNextStatus.crashed ? 'Crashed' : 'Stopped'}
+                  {devRunnerStatus.running ? 'Running' : devRunnerStatus.crashed ? 'Crashed' : 'Stopped'}
                 </StatusBadge>
               </div>
               <div class="flex gap-1">
-                {#if autoNextStatus.running}
+                {#if devRunnerStatus.running}
                   <button
-                    onclick={() => showConfirm('Auto-Next 재시작', 'Auto-Next를 재시작합니다.', restartAutoNext, false, '재시작')}
-                    disabled={actionLoading === 'auto-next-restart'}
+                    onclick={() => showConfirm('Dev Runner 재시작', 'Dev Runner를 재시작합니다.', restartDevRunner, false, '재시작')}
+                    disabled={actionLoading === 'dev-runner-restart'}
                     class="h-6 px-1.5 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
                   >
                     재시작
                   </button>
                   <button
-                    onclick={() => showConfirm('Auto-Next 중지', 'Auto-Next를 중지합니다.', stopAutoNext, true, '중지')}
-                    disabled={actionLoading === 'auto-next-stop'}
+                    onclick={() => showConfirm('Dev Runner 중지', 'Dev Runner를 중지합니다.', stopDevRunner, true, '중지')}
+                    disabled={actionLoading === 'dev-runner-stop'}
                     class="h-6 px-1.5 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
                   >
                     중지
                   </button>
-                {:else if autoNextStatus.crashed}
+                {:else if devRunnerStatus.crashed}
                   <button
-                    onclick={() => showConfirm('Auto-Next 리셋', 'RUNNING → PENDING 상태로 리셋합니다.', resetAutoNext)}
-                    disabled={actionLoading === 'auto-next-reset'}
+                    onclick={() => showConfirm('Dev Runner 리셋', 'RUNNING → PENDING 상태로 리셋합니다.', resetDevRunner)}
+                    disabled={actionLoading === 'dev-runner-reset'}
                     class="h-6 px-1.5 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
                   >
                     리셋
                   </button>
                 {:else}
                   <button
-                    onclick={() => showConfirm('Auto-Next 시작', 'Auto-Next를 시작합니다.', startAutoNext, false, '시작')}
-                    disabled={actionLoading === 'auto-next-start'}
+                    onclick={() => showConfirm('Dev Runner 시작', 'Dev Runner를 시작합니다.', startDevRunner, false, '시작')}
+                    disabled={actionLoading === 'dev-runner-start'}
                     class="h-6 px-1.5 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
                   >
                     시작
@@ -899,24 +899,24 @@
                 {/if}
               </div>
             </div>
-            {#if autoNextStatus.pid}
-              <div class="text-[10px] text-muted-foreground px-1">PID: {autoNextStatus.pid}</div>
+            {#if devRunnerStatus.pid}
+              <div class="text-[10px] text-muted-foreground px-1">PID: {devRunnerStatus.pid}</div>
             {/if}
-            {#if autoNextStatus.plan_file}
-              <div class="text-[10px] text-muted-foreground px-1 truncate" title={autoNextStatus.plan_file}>
-                {autoNextStatus.plan_file}
+            {#if devRunnerStatus.plan_file}
+              <div class="text-[10px] text-muted-foreground px-1 truncate" title={devRunnerStatus.plan_file}>
+                {devRunnerStatus.plan_file}
               </div>
             {/if}
-            {#if autoNextStatus.running && autoNextStatus.start_time}
-              <div class="text-[10px] text-muted-foreground px-1">시작: {formatCollectedAt(autoNextStatus.start_time)}</div>
+            {#if devRunnerStatus.running && devRunnerStatus.start_time}
+              <div class="text-[10px] text-muted-foreground px-1">시작: {formatCollectedAt(devRunnerStatus.start_time)}</div>
             {/if}
             <!-- 경고 -->
-            {#if !autoNextStatus.running && !autoNextStatus.redis_connected}
+            {#if !devRunnerStatus.running && !devRunnerStatus.redis_connected}
               <div class="mt-1 text-[10px] text-error px-1 flex items-center gap-1">
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2"/><line x1="12" y1="8" x2="12" y2="12" stroke-width="2"/><line x1="12" y1="16" x2="12.01" y2="16" stroke-width="2"/></svg>
                 Redis 미연결
               </div>
-            {:else if !autoNextStatus.running && !autoNextStatus.listener_alive && autoNextStatus.redis_connected}
+            {:else if !devRunnerStatus.running && !devRunnerStatus.listener_alive && devRunnerStatus.redis_connected}
               <div class="mt-1 text-[10px] text-warning px-1 flex items-center gap-1">
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2"/><line x1="12" y1="8" x2="12" y2="12" stroke-width="2"/><line x1="12" y1="16" x2="12.01" y2="16" stroke-width="2"/></svg>
                 Command Listener 미실행

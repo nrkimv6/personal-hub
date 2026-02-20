@@ -43,12 +43,12 @@ if (-not (Test-Path $PidDir)) {
     New-Item -ItemType Directory -Path $PidDir -Force | Out-Null
 }
 
-# PID files - unified worker watchdog + Claude + Video Download + Redis Command Listener + Auto-Next Command Listener
+# PID files - unified worker watchdog + Claude + Video Download + Redis Command Listener + Dev Runner Command Listener
 $WorkerWatchdogPidFile = Join-Path $PidDir "worker_watchdog$PidSuffix.pid"
 $ClaudeWatchdogPidFile = Join-Path $PidDir "claude_watchdog$PidSuffix.pid"
 $VideoDownloadWatchdogPidFile = Join-Path $PidDir "video_download_watchdog$PidSuffix.pid"
 $CommandListenerPidFile = Join-Path $PidDir "command_listener$PidSuffix.pid"
-$AutoNextCommandListenerPidFile = Join-Path $PidDir "auto_next_command_listener$PidSuffix.pid"
+$DevRunnerCommandListenerPidFile = Join-Path $PidDir "dev_runner_command_listener$PidSuffix.pid"
 
 # Legacy PID files (for cleanup)
 $LegacyWatchdogPidFile = Join-Path $PidDir "watchdog$PidSuffix.pid"
@@ -209,28 +209,28 @@ function Start-BrowserWorkers {
         }
     }
 
-    # Start Auto-Next Command Listener (BRPOP-based, near-zero CPU)
-    if (Test-ProcessRunning $AutoNextCommandListenerPidFile) {
-        Write-Log "Auto-Next Command Listener already running" "WARN"
+    # Start Dev Runner Command Listener (BRPOP-based, near-zero CPU)
+    if (Test-ProcessRunning $DevRunnerCommandListenerPidFile) {
+        Write-Log "Dev Runner Command Listener already running" "WARN"
     } else {
-        Write-Log "Starting Auto-Next Command Listener..."
+        Write-Log "Starting Dev Runner Command Listener..."
         $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
         if (-not (Test-Path $VenvPython)) {
             $VenvPython = Join-Path $ProjectRoot "venv\Scripts\python.exe"
         }
 
         if (Test-Path $VenvPython) {
-            $autoNextListenerScript = Join-Path $ScriptDir "auto-next-command-listener.py"
-            $autoNextListenerProcess = Start-Process -FilePath $VenvPython `
-                -ArgumentList $autoNextListenerScript `
+            $devRunnerListenerScript = Join-Path $ScriptDir "dev-runner-command-listener.py"
+            $devRunnerListenerProcess = Start-Process -FilePath $VenvPython `
+                -ArgumentList $devRunnerListenerScript `
                 -WorkingDirectory $ProjectRoot `
                 -WindowStyle Hidden `
                 -PassThru
-            $autoNextListenerProcess.Id | Out-File $AutoNextCommandListenerPidFile -Encoding ascii
-            Write-Log "Auto-Next Command Listener started (PID: $($autoNextListenerProcess.Id))" "OK"
+            $devRunnerListenerProcess.Id | Out-File $DevRunnerCommandListenerPidFile -Encoding ascii
+            Write-Log "Dev Runner Command Listener started (PID: $($devRunnerListenerProcess.Id))" "OK"
             $started++
         } else {
-            Write-Log "Python venv not found, skipping Auto-Next Command Listener" "ERROR"
+            Write-Log "Python venv not found, skipping Dev Runner Command Listener" "ERROR"
         }
     }
 
@@ -312,19 +312,19 @@ function Stop-BrowserWorkers {
         Remove-Item $CommandListenerPidFile -Force -ErrorAction SilentlyContinue
     }
 
-    # Stop Auto-Next Command Listener
-    if (Test-Path $AutoNextCommandListenerPidFile) {
-        $savedPid = Get-Content $AutoNextCommandListenerPidFile -ErrorAction SilentlyContinue
+    # Stop Dev Runner Command Listener
+    if (Test-Path $DevRunnerCommandListenerPidFile) {
+        $savedPid = Get-Content $DevRunnerCommandListenerPidFile -ErrorAction SilentlyContinue
         if ($savedPid) {
             $proc = Get-Process -Id $savedPid -ErrorAction SilentlyContinue
             if ($proc) {
-                Write-Log "Stopping Auto-Next Command Listener (PID: $savedPid)..."
+                Write-Log "Stopping Dev Runner Command Listener (PID: $savedPid)..."
                 Stop-Process -Id $savedPid -Force -ErrorAction SilentlyContinue
-                Write-Log "Auto-Next Command Listener stopped" "OK"
+                Write-Log "Dev Runner Command Listener stopped" "OK"
                 $stopped++
             }
         }
-        Remove-Item $AutoNextCommandListenerPidFile -Force -ErrorAction SilentlyContinue
+        Remove-Item $DevRunnerCommandListenerPidFile -Force -ErrorAction SilentlyContinue
     }
 
     # Stop actual worker processes
@@ -555,10 +555,10 @@ function Show-Status {
         Write-Host "  [-] Not running" -ForegroundColor Yellow
     }
 
-    # Auto-Next Command Listener
-    Write-Host "Auto-Next Command Listener:" -ForegroundColor White
-    if (Test-ProcessRunning $AutoNextCommandListenerPidFile) {
-        $savedPid = Get-Content $AutoNextCommandListenerPidFile
+    # Dev Runner Command Listener
+    Write-Host "Dev Runner Command Listener:" -ForegroundColor White
+    if (Test-ProcessRunning $DevRunnerCommandListenerPidFile) {
+        $savedPid = Get-Content $DevRunnerCommandListenerPidFile
         Write-Host "  [+] Running (PID: $savedPid)" -ForegroundColor Green
     } else {
         Write-Host "  [-] Not running" -ForegroundColor Yellow

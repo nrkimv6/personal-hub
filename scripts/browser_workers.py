@@ -91,10 +91,10 @@ class BrowserWorkerManager:
                 "env": {"APP_MODE": "development"},
             },
             {
-                "name": "Auto-Next Command Listener",
-                "pid_file": f"auto_next_command_listener{self.pid_suffix}.pid",
+                "name": "Dev Runner Command Listener",
+                "pid_file": f"dev_runner_command_listener{self.pid_suffix}.pid",
                 "cmd": [str(self.python_exe),
-                        str(self.scripts_dir / "auto-next-command-listener.py")],
+                        str(self.scripts_dir / "dev-runner-command-listener.py")],
                 "env": {},
             },
         ]

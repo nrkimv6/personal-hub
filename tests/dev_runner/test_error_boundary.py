@@ -9,7 +9,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.modules.auto_next.schemas import RunRequest, PlanProgressResponse
+from app.modules.dev_runner.schemas import RunRequest, PlanProgressResponse
 
 
 # ========== UTF-8 인코딩 에러 ==========
@@ -17,9 +17,9 @@ from app.modules.auto_next.schemas import RunRequest, PlanProgressResponse
 class TestUTF8Encoding:
     """Windows cp949 plan 파일 읽기 테스트"""
 
-    def test_cp949_plan_file_no_crash(self, tmp_path, auto_next_config_isolation):
+    def test_cp949_plan_file_no_crash(self, tmp_path, dev_runner_config_isolation):
         """cp949 인코딩 파일 → errors='ignore'로 크래시 없이 처리"""
-        from app.modules.auto_next.services.plan_service import PlanService
+        from app.modules.dev_runner.services.plan_service import PlanService
 
         plan_file = tmp_path / "plan" / "test.md"
         plan_file.parent.mkdir(parents=True, exist_ok=True)
@@ -27,7 +27,7 @@ class TestUTF8Encoding:
         content = "> 상태: 구현중\n- [x] 한글 체크\n- [ ] 미완료 항목\n"
         plan_file.write_bytes(content.encode("cp949"))
 
-        cfg = auto_next_config_isolation
+        cfg = dev_runner_config_isolation
         cfg.WTOOLS_BASE_DIR = tmp_path
         cfg.PLAN_DIR = Path("plan")
 
@@ -37,9 +37,9 @@ class TestUTF8Encoding:
         assert progress.total == 2
         assert progress.done == 1
 
-    def test_mixed_encoding_plan(self, tmp_path, auto_next_config_isolation):
+    def test_mixed_encoding_plan(self, tmp_path, dev_runner_config_isolation):
         """혼합 인코딩(UTF-8 BOM + cp949) → 크래시 없음"""
-        from app.modules.auto_next.services.plan_service import PlanService
+        from app.modules.dev_runner.services.plan_service import PlanService
 
         plan_file = tmp_path / "plan" / "mixed.md"
         plan_file.parent.mkdir(parents=True, exist_ok=True)
@@ -56,9 +56,9 @@ class TestUTF8Encoding:
 
 class TestLargePlanFile:
 
-    def test_large_plan_many_checkboxes(self, tmp_path, auto_next_config_isolation):
+    def test_large_plan_many_checkboxes(self, tmp_path, dev_runner_config_isolation):
         """수백 개 체크박스 plan → 정상 파싱"""
-        from app.modules.auto_next.services.plan_service import PlanService
+        from app.modules.dev_runner.services.plan_service import PlanService
 
         plan_file = tmp_path / "plan" / "large.md"
         plan_file.parent.mkdir(parents=True, exist_ok=True)
@@ -76,9 +76,9 @@ class TestLargePlanFile:
         assert progress.done == 167  # 0,3,6,...,498 → 500/3 = 166.67 → ceil = 167
         assert 0 < progress.percent < 100
 
-    def test_large_plan_parse_items(self, tmp_path, auto_next_config_isolation):
+    def test_large_plan_parse_items(self, tmp_path, dev_runner_config_isolation):
         """대용량 parse_plan_items → Phase 구조 정상"""
-        from app.modules.auto_next.services.plan_service import PlanService
+        from app.modules.dev_runner.services.plan_service import PlanService
 
         plan_file = tmp_path / "plan" / "large2.md"
         plan_file.parent.mkdir(parents=True, exist_ok=True)
@@ -102,13 +102,13 @@ class TestLargePlanFile:
 class TestDBServiceBoundary:
 
     @pytest.fixture
-    def db_svc(self, tmp_path, auto_next_config_isolation):
+    def db_svc(self, tmp_path, dev_runner_config_isolation):
         """격리된 DBService"""
         import sqlite3
-        from app.modules.auto_next.services.db_service import DBService
+        from app.modules.dev_runner.services.db_service import DBService
 
-        cfg = auto_next_config_isolation
-        db_path = cfg.AUTO_NEXT_DB_PATH
+        cfg = dev_runner_config_isolation
+        db_path = cfg.DEV_RUNNER_DB_PATH
         conn = sqlite3.connect(str(db_path))
         conn.execute("""CREATE TABLE IF NOT EXISTS tasks (
             id TEXT PRIMARY KEY, type TEXT, source_path TEXT, text TEXT,
@@ -194,7 +194,7 @@ class TestBase64Decoding:
 
     def test_standard_base64_path(self):
         """정상 base64 경로 디코딩"""
-        from app.modules.auto_next.routes.plans import _decode_path
+        from app.modules.dev_runner.routes.plans import _decode_path
 
         path = r"D:\work\project\tools\monitor-page\docs\plan\test.md"
         encoded = base64.urlsafe_b64encode(path.encode("utf-8")).decode("ascii")
@@ -202,7 +202,7 @@ class TestBase64Decoding:
 
     def test_base64_no_padding(self):
         """패딩 없는 base64 → 자동 복원"""
-        from app.modules.auto_next.routes.plans import _decode_path
+        from app.modules.dev_runner.routes.plans import _decode_path
 
         path = "common/docs/plan/test.md"
         encoded = base64.urlsafe_b64encode(path.encode("utf-8")).decode("ascii")
@@ -212,7 +212,7 @@ class TestBase64Decoding:
 
     def test_base64_with_special_chars(self):
         """특수문자 포함 경로"""
-        from app.modules.auto_next.routes.plans import _decode_path
+        from app.modules.dev_runner.routes.plans import _decode_path
 
         path = r"D:\work\project\2026-02-18_한글-plan.md"
         encoded = base64.urlsafe_b64encode(path.encode("utf-8")).decode("ascii")
@@ -220,14 +220,14 @@ class TestBase64Decoding:
 
     def test_invalid_base64_raises(self):
         """유효하지 않은 base64 → 예외"""
-        from app.modules.auto_next.routes.plans import _decode_path
+        from app.modules.dev_runner.routes.plans import _decode_path
 
         with pytest.raises(Exception):
             _decode_path("!!!not-valid-base64!!!")
 
     def test_empty_string_decodes(self):
         """빈 문자열 → 빈 결과"""
-        from app.modules.auto_next.routes.plans import _decode_path
+        from app.modules.dev_runner.routes.plans import _decode_path
 
         result = _decode_path("")
         assert result == ""

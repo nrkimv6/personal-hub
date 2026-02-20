@@ -1,6 +1,6 @@
 """Command Listener 프로세스 관리 TC (Phase 5 보강 포함)
 
-대상 소스: scripts/auto-next-command-listener.py (359줄)
+대상 소스: scripts/dev-runner-command-listener.py (359줄)
 Mock 대상: subprocess.Popen, redis.Redis → fakeredis
 """
 
@@ -23,10 +23,10 @@ def _get_listener():
     global _listener_mod
     if _listener_mod is not None:
         return _listener_mod
-    script_path = Path("D:/work/project/tools/monitor-page/scripts/auto-next-command-listener.py")
+    script_path = Path("D:/work/project/tools/monitor-page/scripts/dev-runner-command-listener.py")
     if not script_path.exists():
         pytest.skip(f"Listener script not found: {script_path}")
-    spec = importlib.util.spec_from_file_location("auto_next_command_listener", str(script_path))
+    spec = importlib.util.spec_from_file_location("dev_runner_command_listener", str(script_path))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     _listener_mod = mod
@@ -66,9 +66,9 @@ def reset_globals(listener_mod):
     listener_mod._current_log_file = None
 
 
-# ========== TestStartAutoNext ==========
+# ========== TestStartPlanRunner ==========
 
-class TestStartAutoNext:
+class TestStartPlanRunner:
 
     def test_start_creates_subprocess(self, listener_mod, fr, mock_popen, tmp_path):
         """Popen 호출 인수 검증"""
@@ -76,7 +76,7 @@ class TestStartAutoNext:
 
         with patch.object(listener_mod, 'LOG_DIR', tmp_path):
             with patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen) as mp:
-                result = listener_mod.start_auto_next(command, fr)
+                result = listener_mod.start_plan_runner(command, fr)
 
             assert mp.call_count == 1
             cmd = mp.call_args[0][0]
@@ -92,7 +92,7 @@ class TestStartAutoNext:
 
         with patch.object(listener_mod, 'LOG_DIR', tmp_path), \
              patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen) as mp:
-            result = listener_mod.start_auto_next(command, fr)
+            result = listener_mod.start_plan_runner(command, fr)
 
         cmd = mp.call_args[0][0]
         assert "--plan-file" not in cmd
@@ -105,7 +105,7 @@ class TestStartAutoNext:
 
         with patch.object(listener_mod, 'LOG_DIR', tmp_path), \
              patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen):
-            listener_mod.start_auto_next(command, fr)
+            listener_mod.start_plan_runner(command, fr)
 
         assert fr.get(SK + ":status") == "running"
         assert fr.get(SK + ":pid") == "12345"
@@ -118,7 +118,7 @@ class TestStartAutoNext:
 
         with patch.object(listener_mod, 'LOG_DIR', tmp_path), \
              patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen):
-            listener_mod.start_auto_next(command, fr)
+            listener_mod.start_plan_runner(command, fr)
 
         assert fr.get(SK + ":plan_file") == "ALL"
 
@@ -126,19 +126,19 @@ class TestStartAutoNext:
         """이미 실행 중이면 에러"""
         listener_mod._current_process = mock_popen  # poll() returns None = running
 
-        result = listener_mod.start_auto_next({"action": "run", "plan_file": "test.md"}, fr)
+        result = listener_mod.start_plan_runner({"action": "run", "plan_file": "test.md"}, fr)
         assert result["success"] is False
         assert "Already running" in result["message"]
 
 
-# ========== TestStopAutoNext ==========
+# ========== TestStopPlanRunner ==========
 
-class TestStopAutoNext:
+class TestStopPlanRunner:
 
     def test_stop_terminates_process(self, listener_mod, fr, mock_popen):
         """terminate → wait 호출"""
         listener_mod._current_process = mock_popen
-        result = listener_mod.stop_auto_next(fr)
+        result = listener_mod.stop_plan_runner(fr)
 
         assert mock_popen.terminate.call_count == 1
         assert result["success"] is True
@@ -151,7 +151,7 @@ class TestStopAutoNext:
         mock_process.wait.side_effect = [subprocess.TimeoutExpired("cmd", 5), None]
 
         listener_mod._current_process = mock_process
-        result = listener_mod.stop_auto_next(fr)
+        result = listener_mod.stop_plan_runner(fr)
 
         assert mock_process.kill.call_count == 1
 
@@ -162,14 +162,14 @@ class TestStopAutoNext:
         fr.set(SK + ":pid", "12345")
 
         listener_mod._current_process = mock_popen
-        listener_mod.stop_auto_next(fr)
+        listener_mod.stop_plan_runner(fr)
 
         assert fr.get(SK + ":status") == "stopped"
         assert fr.get(SK + ":pid") is None
 
     def test_stop_not_running_returns_error(self, listener_mod, fr):
         """미실행 상태 stop → 실패"""
-        result = listener_mod.stop_auto_next(fr)
+        result = listener_mod.stop_plan_runner(fr)
         assert result["success"] is False
 
 
