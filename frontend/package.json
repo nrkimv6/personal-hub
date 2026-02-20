@@ -30,8 +30,12 @@
 		"@capacitor/cli": "^8.0.0",
 		"@capacitor/core": "^8.0.0",
 		"@tailwindcss/postcss": "^4.1.17",
+		"@types/dompurify": "^3.0.5",
 		"chart.js": "^4.5.1",
+		"dompurify": "^3.3.1",
+		"highlight.js": "^11.11.1",
 		"html-to-image": "^1.11.13",
-		"lucide-svelte": "^0.574.0"
+		"lucide-svelte": "^0.574.0",
+		"marked": "^17.0.3"
 	}
 }
