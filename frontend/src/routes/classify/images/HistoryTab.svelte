@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
-	import { History, RotateCcw, RefreshCw, ScanLine, ChevronDown, ChevronRight } from 'lucide-svelte';
+	import { History, RotateCcw, RefreshCw, ScanLine, ChevronDown, ChevronRight, FileImage, ArrowRight } from 'lucide-svelte';
 
 	interface MoveHistory {
 		id: number;
@@ -10,6 +10,9 @@
 		status: string;
 		final_category_id: number | null;
 		extracted_date: string | null;
+		moved_path: string | null;
+		moved_at: string | null;
+		category_path: string | null;
 	}
 
 	interface ScanHistory {
@@ -201,16 +204,46 @@
 		{:else}
 			<div class="divide-y divide-border">
 				{#each history as item}
-					<div class="flex items-center gap-4 px-5 py-3 hover:bg-muted/30 transition-colors">
+					<div class="flex items-start gap-3 px-5 py-3 hover:bg-muted/30 transition-colors">
+						<!-- 썸네일 -->
+						<div class="shrink-0 size-16 rounded-md overflow-hidden bg-muted/50 flex items-center justify-center">
+							<img
+								src="/api/ic/files/{item.id}/thumbnail"
+								alt=""
+								class="size-16 object-cover"
+								onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }}
+							/>
+							<div class="hidden flex-col items-center justify-center text-muted-foreground">
+								<FileImage class="size-5" />
+							</div>
+						</div>
+
+						<!-- 파일 정보 -->
 						<div class="flex-1 min-w-0">
-							<p class="font-mono text-xs text-foreground truncate">{item.file_path}</p>
-							<p class="text-[10px] text-muted-foreground mt-0.5">
-								ID: {item.id} · 카테고리: {item.final_category_id ?? '—'}
+							{#if item.moved_path}
+								<div class="flex items-center gap-1.5 text-xs">
+									<span class="font-mono text-muted-foreground truncate max-w-[40%]" title={item.file_path}>{item.file_path.split(/[/\\]/).pop()}</span>
+									<ArrowRight class="size-3 shrink-0 text-primary" />
+									<span class="font-mono text-foreground truncate max-w-[55%]" title={item.moved_path}>{item.moved_path}</span>
+								</div>
+							{:else}
+								<p class="font-mono text-xs text-foreground truncate">{item.file_path}</p>
+							{/if}
+							<p class="text-[10px] text-muted-foreground mt-1">
+								{#if item.category_path}
+									<span class="rounded bg-green-500/10 px-1.5 py-0.5 text-green-600">{item.category_path}</span>
+								{:else if item.final_category_id}
+									카테고리 #{item.final_category_id}
+								{/if}
+								{#if item.moved_at}
+									· 이동: {formatDateTime(item.moved_at)}
+								{/if}
 								{#if item.extracted_date}
-									· {item.extracted_date}
+									· 촬영: {item.extracted_date}
 								{/if}
 							</p>
 						</div>
+
 						<span class="shrink-0 rounded-full bg-violet-500/10 px-2.5 py-0.5 text-xs font-medium text-violet-700">
 							{item.status}
 						</span>

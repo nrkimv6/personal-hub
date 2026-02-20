@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
-	import { Clock, Calendar, RotateCcw, Tag, Eye, CheckCircle2 } from 'lucide-svelte';
+	import { Clock, Calendar, RotateCcw, Tag, Eye, CheckCircle2, FileImage, X } from 'lucide-svelte';
 
 	interface Cluster {
 		cluster_id: number;
@@ -27,6 +27,11 @@
 	let categories = $state<Category[]>([]);
 	let showCategoryPicker = $state(false);
 	let categoryTarget: Cluster | null = $state(null);
+
+	// 전체 보기 모달
+	let showDetail = $state(false);
+	let detailCluster: any = $state(null);
+	let detailLoading = $state(false);
 
 	onMount(() => {
 		loadClusters();
@@ -75,6 +80,21 @@
 			loadClusters();
 		} catch (err: any) {
 			alert(`카테고리 지정 실패: ${err.message}`);
+		}
+	}
+
+	async function viewClusterDetail(clusterId: number) {
+		detailLoading = true;
+		showDetail = true;
+		try {
+			const res = await fetchWithTimeout(`/api/ic/clusters/${clusterId}`);
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			detailCluster = await res.json();
+		} catch (err: any) {
+			alert(`클러스터 상세 로드 실패: ${err.message}`);
+			showDetail = false;
+		} finally {
+			detailLoading = false;
 		}
 	}
 
@@ -192,12 +212,17 @@
 					<div class="p-4">
 						<div class="flex gap-2">
 							{#each (cluster.preview_file_ids ?? []) as fileId}
-								<img
-									src="/api/ic/files/{fileId}/thumbnail"
-									alt=""
-									class="size-16 rounded-md object-cover"
-									onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-								/>
+								<div class="size-16 rounded-md overflow-hidden bg-muted/50 flex items-center justify-center shrink-0">
+									<img
+										src="/api/ic/files/{fileId}/thumbnail"
+										alt=""
+										class="size-16 object-cover"
+										onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }}
+									/>
+									<div class="hidden flex-col items-center justify-center text-muted-foreground">
+										<FileImage class="size-5" />
+									</div>
+								</div>
 							{/each}
 							{#if cluster.file_count > (cluster.preview_file_ids?.length ?? 0)}
 								<div class="flex size-16 items-center justify-center rounded-md border border-dashed text-xs text-muted-foreground">
@@ -217,6 +242,7 @@
 							카테고리 지정
 						</button>
 						<button
+							onclick={() => viewClusterDetail(cluster.cluster_id)}
 							class="flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
 						>
 							<Eye class="size-3" />
@@ -271,5 +297,55 @@
 		>
 			취소
 		</button>
+	</div>
+{/if}
+
+<!-- Cluster Detail Modal -->
+{#if showDetail}
+	<div
+		role="button"
+		tabindex="-1"
+		class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
+		onclick={() => (showDetail = false)}
+		onkeydown={(e) => e.key === 'Escape' && (showDetail = false)}
+	></div>
+	<div class="fixed left-1/2 top-1/2 z-50 w-full max-w-2xl max-h-[80vh] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-card shadow-2xl overflow-hidden flex flex-col">
+		<div class="flex items-center justify-between border-b px-4 py-3">
+			<h3 class="text-sm font-semibold">클러스터 상세</h3>
+			<button onclick={() => (showDetail = false)} class="rounded-md p-1 hover:bg-muted">
+				<X class="size-4" />
+			</button>
+		</div>
+		{#if detailLoading}
+			<div class="flex items-center justify-center py-16 text-sm text-muted-foreground">
+				<div class="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+			</div>
+		{:else if detailCluster}
+			<div class="overflow-y-auto p-4">
+				<p class="text-xs text-muted-foreground mb-3">
+					{detailCluster.category_path ?? '미분류'} · {detailCluster.files?.length ?? 0}장
+				</p>
+				<div class="grid grid-cols-4 gap-2">
+					{#each (detailCluster.files ?? []) as file}
+						<div class="group relative">
+							<div class="aspect-square rounded-md overflow-hidden bg-muted/50 flex items-center justify-center">
+								<img
+									src={file.thumbnail_url}
+									alt=""
+									class="w-full h-full object-cover"
+									onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden'); }}
+								/>
+								<div class="hidden flex-col items-center justify-center text-muted-foreground">
+									<FileImage class="size-6" />
+								</div>
+							</div>
+							<p class="mt-1 text-[10px] text-muted-foreground truncate" title={file.file_path}>
+								{file.file_path?.split(/[/\\]/).pop()}
+							</p>
+						</div>
+					{/each}
+				</div>
+			</div>
+		{/if}
 	</div>
 {/if}

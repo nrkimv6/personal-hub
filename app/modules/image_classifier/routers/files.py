@@ -149,36 +149,61 @@ async def get_files(
     # 기본 쿼리 (tag_id 필터 시 JOIN 필요)
     if tag_id is not None:
         query = """
-            SELECT fc.*
+            SELECT fc.*, c.full_path AS category_path
             FROM file_classifications fc
+            JOIN file_tags ft ON ft.file_id = fc.id
+            LEFT JOIN categories c ON c.id = fc.final_category_id
+            WHERE ft.tag_id = :tag_id
+        """
+        count_query = """
+            SELECT COUNT(*) FROM file_classifications fc
             JOIN file_tags ft ON ft.file_id = fc.id
             WHERE ft.tag_id = :tag_id
         """
         params: dict = {"tag_id": tag_id}
+        count_params: dict = {"tag_id": tag_id}
     else:
-        query = "SELECT * FROM file_classifications WHERE 1=1"
+        query = """
+            SELECT fc.*, c.full_path AS category_path
+            FROM file_classifications fc
+            LEFT JOIN categories c ON c.id = fc.final_category_id
+            WHERE 1=1
+        """
+        count_query = "SELECT COUNT(*) FROM file_classifications fc WHERE 1=1"
         params = {}
+        count_params = {}
 
     # 필터 조건
+    col_prefix = "fc."
     if status:
-        query += " AND status = :status"
+        query += f" AND {col_prefix}status = :status"
+        count_query += f" AND {col_prefix}status = :status"
         params["status"] = status
+        count_params["status"] = status
 
     if category_id is not None:
-        query += " AND final_category_id = :cat_id"
+        query += f" AND {col_prefix}final_category_id = :cat_id"
+        count_query += f" AND {col_prefix}final_category_id = :cat_id"
         params["cat_id"] = category_id
+        count_params["cat_id"] = category_id
 
     if date_from:
-        query += " AND extracted_date >= :date_from"
+        query += f" AND {col_prefix}extracted_date >= :date_from"
+        count_query += f" AND {col_prefix}extracted_date >= :date_from"
         params["date_from"] = date_from
+        count_params["date_from"] = date_from
 
     if date_to:
-        query += " AND extracted_date <= :date_to"
+        query += f" AND {col_prefix}extracted_date <= :date_to"
+        count_query += f" AND {col_prefix}extracted_date <= :date_to"
         params["date_to"] = date_to
+        count_params["date_to"] = date_to
 
     if importance:
-        query += " AND importance = :importance"
+        query += f" AND {col_prefix}importance = :importance"
+        count_query += f" AND {col_prefix}importance = :importance"
         params["importance"] = importance
+        count_params["importance"] = importance
 
     # 정렬
     valid_order_by = {"id", "extracted_date", "importance", "ai_confidence"}
@@ -189,10 +214,6 @@ async def get_files(
     if order_dir not in valid_order_dir:
         order_dir = "asc"
 
-    # ai_confidence는 NULL이 있을 수 있으므로 NULLS LAST 처리
-    # SQLite: ORDER BY (ai_confidence IS NULL), ai_confidence ASC
-    # tag_id JOIN 시 fc. 접두사로 모호성 방지
-    col_prefix = "fc." if tag_id is not None else ""
     if order_by == "ai_confidence":
         query += f" ORDER BY ({col_prefix}ai_confidence IS NULL), {col_prefix}ai_confidence {order_dir.upper()}"
     else:
@@ -202,6 +223,9 @@ async def get_files(
     query += " LIMIT :limit OFFSET :skip"
     params["limit"] = limit
     params["skip"] = skip
+
+    # total 카운트 (페이지네이션 전 전체 개수)
+    total = db.execute(text(count_query), count_params).scalar()
 
     result = db.execute(text(query), params).fetchall()
 
@@ -218,13 +242,16 @@ async def get_files(
             "status": row.status,
             "importance": row.importance,
             "ai_confidence": row.ai_confidence,
+            "moved_path": getattr(row, "moved_path", None),
+            "moved_at": getattr(row, "moved_at", None),
+            "category_path": getattr(row, "category_path", None),
         })
 
     return {
         "files": files,
         "skip": skip,
         "limit": limit,
-        "total": len(files),
+        "total": total,
     }
 
 
