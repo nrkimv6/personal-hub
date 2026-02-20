@@ -1,7 +1,8 @@
 """
 AI 분류 라우터
 
-CLI 기반 (Claude CLI / Gemini CLI) 또는 API 기반 이미지 분류
+LLMWorker 큐 방식으로 이미지 분류 수행.
+API(Session 0)에서 enqueue → LLMWorker(Session 1)에서 CLI 실행 → 결과 폴링.
 """
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
@@ -9,11 +10,12 @@ from sqlalchemy import text
 from pydantic import BaseModel
 from typing import Optional, List
 import asyncio
+import json
 import logging
+import time
 
 from ..database import get_db
-from ..adapters.claude_cli import ClaudeCLIAdapter
-from ..adapters.gemini_cli import GeminiCLIAdapter
+from ..config import settings as ic_settings
 
 router = APIRouter(prefix="/classify", tags=["classify"])
 logger = logging.getLogger(__name__)
@@ -29,16 +31,20 @@ classification_status = {
 }
 
 
-CLI_MAX_WORKERS = 2  # CLI 동시 호출 수
+CLI_MAX_WORKERS = 2  # 동시 enqueue 수 (폴링 병렬 제어)
+
+# 폴링 설정
+POLL_INTERVAL_SECONDS = 2
+POLL_TIMEOUT_SECONDS = 180  # 3분
 
 
 class ClassifyRequest(BaseModel):
     """AI 분류 요청"""
     file_ids: Optional[List[int]] = None  # None이면 전체 미분류 파일
-    model: str = "claude_cli"  # claude_cli, gemini_cli, api
+    model: str = "claude_cli"  # claude_cli, gemini_cli
     batch_size: int = 10
     gap_minutes: int = 60  # 시간 클러스터링 간격
-    max_workers: int = CLI_MAX_WORKERS  # CLI 동시 호출 수
+    max_workers: int = CLI_MAX_WORKERS  # 동시 호출 수
 
 
 class ClassifyResponse(BaseModel):
@@ -66,13 +72,14 @@ async def start_classification(
 
     # 분류할 파일 조회 (이미 AI 분류 완료된 파일 제외 = resume 지원)
     if request.file_ids:
-        query = text("""
+        placeholders = ",".join(str(int(fid)) for fid in request.file_ids)
+        query = text(f"""
             SELECT id, file_path
             FROM file_classifications
-            WHERE id IN :file_ids
+            WHERE id IN ({placeholders})
               AND (status = 'pending' OR (status = 'folder_mapped' AND ai_category_id IS NULL))
         """)
-        files = db.execute(query, {"file_ids": tuple(request.file_ids)}).fetchall()
+        files = db.execute(query).fetchall()
     else:
         query = text("""
             SELECT id, file_path
@@ -157,6 +164,49 @@ async def stop_classification():
     return {"message": "Classification stopped"}
 
 
+def _get_monitor_db_session():
+    """monitor.db (메인 DB) 세션 생성."""
+    from app.database import SessionLocal as MonitorSessionLocal
+    return MonitorSessionLocal()
+
+
+def _build_classify_prompt(categories: list[str], image_path: str) -> str:
+    """이미지 분류 프롬프트 생성."""
+    cat_list = "\n".join(f"- {cat}" for cat in categories)
+    return f"""다음 이미지를 아래 카테고리 중 하나로 분류하세요.
+
+**컨텍스트:**
+이미지의 내용을 분석하여 가장 적합한 카테고리로 분류하세요.
+
+**가능한 카테고리:**
+{cat_list}
+
+**이미지 파일:**
+- {image_path}
+
+각 이미지 파일을 Read 도구로 읽어서 분석하고, 가장 적합한 카테고리를 선택하세요.
+응답은 반드시 지정된 JSON 스키마 형식으로만 출력하세요.
+"""
+
+
+def _build_cli_options() -> dict:
+    """이미지 분류용 CLI 옵션."""
+    return {
+        "use_prompt_flag": True,
+        "output_format": "json",
+        "json_schema": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string"},
+                "confidence": {"type": "number"},
+                "reasoning": {"type": "string"}
+            },
+            "required": ["category", "confidence"]
+        },
+        "allowed_tools": ["Read"],
+    }
+
+
 async def run_classification(
     files: List[tuple],
     model: str,
@@ -165,12 +215,14 @@ async def run_classification(
     max_workers: int = CLI_MAX_WORKERS,
 ):
     """
-    실제 분류 실행 (백그라운드) — 병렬 CLI 호출 + DB 진행 추적
+    실제 분류 실행 (백그라운드) — LLMWorker 큐 방식 + DB 진행 추적
     """
     global classification_status
 
     from ..database import SessionLocal
     from ..workers.task_progress import TaskProgressManager
+    from ..workers.log_buffer import pipeline_logs
+    from app.modules.claude_worker.services.llm_service import LLMService
 
     progress_db = SessionLocal()
     progress_mgr = TaskProgressManager(progress_db)
@@ -195,39 +247,66 @@ async def run_classification(
         progress_db.close()
         return
 
-    # 프롬프트 구성
-    classify_prompt = "이미지의 내용을 분석하여 가장 적합한 카테고리로 분류하세요."
-
-    # CLI 실시간 출력 → 파이프라인 로그
-    def on_cli_output(line: str):
-        # 노이즈 필터 (진행바, 빈 줄 등)
-        if not line or len(line) < 3:
-            return
-        # 너무 긴 줄 자르기
-        display = line[:120] + "..." if len(line) > 120 else line
-        pipeline_logs.add("classify", f"[CLI] {display}")
-
-    # 모델 어댑터 선택
-    if model == "claude_cli":
-        adapter = ClaudeCLIAdapter(on_output=on_cli_output)
-    elif model == "gemini_cli":
-        adapter = GeminiCLIAdapter(on_output=on_cli_output)
+    # provider 결정
+    if model == "gemini_cli":
+        provider = "gemini"
     else:
-        logger.error(f"Unknown model: {model}")
-        classification_status["running"] = False
-        progress_mgr.fail_task(task_id, f"Unknown model: {model}")
-        progress_db.close()
-        return
+        provider = "claude"
 
-    from ..workers.log_buffer import pipeline_logs
+    # CLI 옵션 (claude_cli용)
+    cli_options = _build_cli_options() if provider == "claude" else None
+
+    # model명 변환: claude_cli → sonnet (LLMWorker에서 사용하는 모델명)
+    llm_model = ic_settings.CLAUDE_MODEL if provider == "claude" else ""
+
+    # pHash 중복 그룹 기반 최적화: 대표 1장만 분류 → 나머지 일괄 적용
+    file_ids = [f.id for f in files]
+    group_db = SessionLocal()
+    try:
+        placeholders = ",".join(str(fid) for fid in file_ids)
+        group_rows = group_db.execute(text(f"""
+            SELECT dm.file_id, dm.group_id, dm.quality_score
+            FROM duplicate_members dm
+            WHERE dm.file_id IN ({placeholders})
+            ORDER BY dm.group_id, dm.quality_score DESC NULLS LAST
+        """)).fetchall()
+    finally:
+        group_db.close()
+
+    # 그룹별 대표 파일 선정 (quality_score 최고)
+    group_map = {}  # group_id → [file_ids]
+    representative_ids = set()  # 대표 파일 ID
+    member_to_group = {}  # file_id → group_id
+    for row in group_rows:
+        fid, gid, _ = row
+        member_to_group[fid] = gid
+        if gid not in group_map:
+            group_map[gid] = []
+            representative_ids.add(fid)  # 첫 번째 (quality_score 최고) = 대표
+        group_map[gid].append(fid)
+
+    # 분류 대상 분리: 대표 파일 + 그룹 미소속 파일만 LLM 큐에 등록
+    files_to_classify = []
+    files_skip = []  # 대표가 아닌 그룹 멤버 (나중에 일괄 적용)
+    for f in files:
+        if f.id in member_to_group and f.id not in representative_ids:
+            files_skip.append(f)
+        else:
+            files_to_classify.append(f)
+
+    skip_count = len(files_skip)
+    total_groups = len(group_map)
+
+    # 시작 로그
+    if skip_count > 0:
+        pipeline_logs.add("classify", f"[시작] {len(files)}건 중 {len(files_to_classify)}건 LLM 큐 분류 (pHash 그룹 {total_groups}개, {skip_count}건 대표 결과 복사)")
+    else:
+        pipeline_logs.add("classify", f"[시작] {len(files)}건 분류 시작 (모델: {model}, 카테고리: {len(categories)}개, LLM 큐 방식)")
 
     semaphore = asyncio.Semaphore(max_workers)
 
-    # 시작 로그
-    pipeline_logs.add("classify", f"[시작] {len(files)}건 분류 시작 (모델: {model}, 카테고리: {len(categories)}개)")
-
-    async def classify_one(file_id: int, file_path: str):
-        """단일 파일 분류 (세마포어 제어)"""
+    async def enqueue_and_poll(file_id: int, file_path: str):
+        """단일 파일: enqueue → 폴링 → 결과 저장"""
         async with semaphore:
             if not classification_status["running"]:
                 return
@@ -236,60 +315,120 @@ async def run_classification(
             filename = file_path.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
 
             try:
-                result = await adapter.classify_image(file_path, classify_prompt, categories)
+                # 썸네일 우선 전달
+                thumb_path = ic_settings.THUMBNAIL_DIR / f"{file_id}.jpg"
+                classify_path = str(thumb_path) if thumb_path.exists() else file_path
 
-                if result and result.category_path and not result.category_path.startswith("error/"):
-                    db = SessionLocal()
+                # 프롬프트 생성
+                prompt = _build_classify_prompt(categories, classify_path)
+
+                # LLM 큐에 등록 (monitor.db 사용)
+                monitor_db = _get_monitor_db_session()
+                try:
+                    llm_service = LLMService(monitor_db)
+                    llm_request = llm_service.enqueue(
+                        caller_type="image_classify",
+                        caller_id=str(file_id),
+                        prompt=prompt,
+                        requested_by="api",
+                        request_source="image_classifier",
+                        provider=provider,
+                        model=llm_model,
+                        cli_options=cli_options,
+                    )
+                    request_id = llm_request.id
+                    logger.debug(f"Enqueued: file_id={file_id}, request_id={request_id}")
+                finally:
+                    monitor_db.close()
+
+                # 폴링으로 결과 대기
+                start_time = time.time()
+                result_data = None
+
+                while time.time() - start_time < POLL_TIMEOUT_SECONDS:
+                    if not classification_status["running"]:
+                        return
+
+                    await asyncio.sleep(POLL_INTERVAL_SECONDS)
+
+                    poll_db = _get_monitor_db_session()
                     try:
-                        # category_path로 category_id 조회
-                        cat_row = db.execute(
-                            text("SELECT id FROM categories WHERE full_path = :path"),
-                            {"path": result.category_path}
-                        ).fetchone()
-
-                        if cat_row:
-                            category_id = cat_row[0]
-                        else:
-                            # 정확히 일치하지 않으면 LIKE로 부분 매칭
-                            cat_row = db.execute(
-                                text("SELECT id FROM categories WHERE full_path LIKE :path ORDER BY LENGTH(full_path) LIMIT 1"),
-                                {"path": f"%{result.category_path}%"}
-                            ).fetchone()
-                            category_id = cat_row[0] if cat_row else None
-
-                        if category_id:
-                            update_query = text("""
-                                UPDATE file_classifications
-                                SET ai_category_id = :category_id,
-                                    ai_confidence = :confidence,
-                                    ai_reasoning = :reasoning,
-                                    ai_model = :model,
-                                    final_category_id = :category_id,
-                                    status = 'ai_classified',
-                                    classified_at = datetime('now')
-                                WHERE id = :file_id
-                            """)
-                            db.execute(update_query, {
-                                "file_id": file_id,
-                                "category_id": category_id,
-                                "confidence": result.confidence,
-                                "reasoning": result.reasoning,
-                                "model": model,
-                            })
-                            db.commit()
-                            classification_status["processed"] += 1
-                            conf_pct = round(result.confidence * 100)
-                            pipeline_logs.add("classify", f"[OK] {filename} → {result.category_path} ({conf_pct}%)")
-                        else:
-                            logger.warning(f"Category not found: {result.category_path} for {file_path}")
+                        llm_service = LLMService(poll_db)
+                        req = llm_service.get_request_by_id(request_id)
+                        if req and req.status == "completed":
+                            if req.result:
+                                result_data = json.loads(req.result)
+                            break
+                        elif req and req.status == "failed":
                             classification_status["failed"] += 1
-                            pipeline_logs.add("classify", f"[FAIL] {filename} — 카테고리 매칭 실패: {result.category_path}")
+                            error_msg = req.error_message or "Unknown error"
+                            pipeline_logs.add("classify", f"[FAIL] {filename} — {error_msg[:100]}")
+                            return
                     finally:
-                        db.close()
+                        poll_db.close()
+                else:
+                    # 타임아웃
+                    classification_status["failed"] += 1
+                    pipeline_logs.add("classify", f"[TIMEOUT] {filename} — {POLL_TIMEOUT_SECONDS}초 대기 초과")
+                    return
+
+                # 결과 저장 (image_classifier.db)
+                if result_data:
+                    category_path = result_data.get("category", "")
+                    confidence = float(result_data.get("confidence", 0.5))
+                    reasoning = result_data.get("reasoning", "")
+
+                    if category_path and not category_path.startswith("error/"):
+                        ic_db = SessionLocal()
+                        try:
+                            # category_path로 category_id 조회
+                            cat_row = ic_db.execute(
+                                text("SELECT id FROM categories WHERE full_path = :path"),
+                                {"path": category_path}
+                            ).fetchone()
+
+                            if not cat_row:
+                                # 부분 매칭
+                                cat_row = ic_db.execute(
+                                    text("SELECT id FROM categories WHERE full_path LIKE :path ORDER BY LENGTH(full_path) LIMIT 1"),
+                                    {"path": f"%{category_path}%"}
+                                ).fetchone()
+
+                            if cat_row:
+                                category_id = cat_row[0]
+                                ic_db.execute(text("""
+                                    UPDATE file_classifications
+                                    SET ai_category_id = :category_id,
+                                        ai_confidence = :confidence,
+                                        ai_reasoning = :reasoning,
+                                        ai_model = :model,
+                                        final_category_id = :category_id,
+                                        status = 'ai_classified',
+                                        classified_at = datetime('now')
+                                    WHERE id = :file_id
+                                """), {
+                                    "file_id": file_id,
+                                    "category_id": category_id,
+                                    "confidence": confidence,
+                                    "reasoning": reasoning,
+                                    "model": model,
+                                })
+                                ic_db.commit()
+                                classification_status["processed"] += 1
+                                conf_pct = round(confidence * 100)
+                                pipeline_logs.add("classify", f"[OK] {filename} → {category_path} ({conf_pct}%)")
+                            else:
+                                logger.warning(f"Category not found: {category_path} for {file_path}")
+                                classification_status["failed"] += 1
+                                pipeline_logs.add("classify", f"[FAIL] {filename} — 카테고리 매칭 실패: {category_path}")
+                        finally:
+                            ic_db.close()
+                    else:
+                        classification_status["failed"] += 1
+                        pipeline_logs.add("classify", f"[FAIL] {filename} — 분류 결과 없음")
                 else:
                     classification_status["failed"] += 1
-                    reason = result.reasoning if result else "결과 없음"
-                    pipeline_logs.add("classify", f"[FAIL] {filename} — {reason}")
+                    pipeline_logs.add("classify", f"[FAIL] {filename} — 결과 데이터 없음")
 
             except Exception as e:
                 logger.error(f"Classification failed for {file_path}: {e}")
@@ -297,8 +436,8 @@ async def run_classification(
                 pipeline_logs.add("classify", f"[ERROR] {filename} — {type(e).__name__}: {e}")
 
     try:
-        # 배치 단위로 병렬 처리
-        for i in range(0, len(files), batch_size):
+        # 배치 단위로 병렬 처리 (대표 파일 + 그룹 미소속 파일만)
+        for i in range(0, len(files_to_classify), batch_size):
             if not classification_status["running"]:
                 msg = "Classification stopped by user"
                 logger.info(msg)
@@ -306,26 +445,65 @@ async def run_classification(
                 progress_mgr.pause_task(task_id)
                 break
 
-            batch = files[i:i + batch_size]
-            tasks = [classify_one(f.id, f.file_path) for f in batch]
+            batch = files_to_classify[i:i + batch_size]
+            tasks = [enqueue_and_poll(f.id, f.file_path) for f in batch]
             await asyncio.gather(*tasks)
 
-            # DB 진행 업데이트 (성공 건수만 processed로 기록)
+            # DB 진행 업데이트
             try:
                 succeeded = classification_status["processed"]
                 failed = classification_status["failed"]
-                total = classification_status["total"]
                 batch_num = i // batch_size + 1
-                total_batches = (total + batch_size - 1) // batch_size
+                total_batches = (len(files_to_classify) + batch_size - 1) // batch_size
                 progress_mgr.update_progress(
                     task_id, succeeded,
                     f"배치 {batch_num}/{total_batches} (성공: {succeeded}, 실패: {failed})"
                 )
-                pipeline_logs.add("classify", f"[배치 {batch_num}/{total_batches}] 성공: {succeeded}, 실패: {failed}, 남은: {total - succeeded - failed}")
+                pipeline_logs.add("classify", f"[배치 {batch_num}/{total_batches}] 성공: {succeeded}, 실패: {failed}, 남은: {len(files_to_classify) - i - len(batch)}")
             except Exception:
                 pass
         else:
-            # 전부 실패했으면 실패로 기록
+            # pHash 그룹 멤버에 대표 결과 일괄 복사
+            if files_skip and classification_status["running"]:
+                copy_db = SessionLocal()
+                copied = 0
+                try:
+                    for f in files_skip:
+                        gid = member_to_group.get(f.id)
+                        if not gid:
+                            continue
+                        # 대표 파일의 분류 결과 조회
+                        rep_id = [fid for fid in group_map[gid] if fid in representative_ids][0]
+                        rep_row = copy_db.execute(text("""
+                            SELECT ai_category_id, ai_confidence, ai_reasoning, ai_model
+                            FROM file_classifications WHERE id = :rep_id AND ai_category_id IS NOT NULL
+                        """), {"rep_id": rep_id}).fetchone()
+
+                        if rep_row:
+                            copy_db.execute(text("""
+                                UPDATE file_classifications
+                                SET ai_category_id = :cat_id, ai_confidence = :conf,
+                                    ai_reasoning = :reason, ai_model = :model,
+                                    final_category_id = :cat_id, status = 'ai_classified',
+                                    classified_at = datetime('now')
+                                WHERE id = :file_id
+                            """), {
+                                "file_id": f.id, "cat_id": rep_row[0],
+                                "conf": rep_row[1], "reason": f"[그룹 복사] {rep_row[2] or ''}",
+                                "model": rep_row[3],
+                            })
+                            copied += 1
+                            classification_status["processed"] += 1
+                    copy_db.commit()
+                    if copied > 0:
+                        pipeline_logs.add("classify", f"[그룹 복사] {copied}건 대표 결과 일괄 적용")
+                except Exception as e:
+                    logger.error(f"Group copy failed: {e}")
+                    copy_db.rollback()
+                finally:
+                    copy_db.close()
+
+            # 최종 결과 판정
             succeeded = classification_status["processed"]
             failed = classification_status["failed"]
             if succeeded == 0 and failed > 0:

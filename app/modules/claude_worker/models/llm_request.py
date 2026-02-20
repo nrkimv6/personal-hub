@@ -50,6 +50,9 @@ class LLMRequest(Base):
     error_message = Column(Text)
     retry_count = Column(Integer, default=0)
 
+    # CLI 옵션 (JSON) — caller별 CLI 파라미터 유연 전달
+    cli_options = Column(Text)  # JSON: output_format, json_schema, allowed_tools, use_prompt_flag
+
     # Soft delete
     deleted_at = Column(DateTime)
 
