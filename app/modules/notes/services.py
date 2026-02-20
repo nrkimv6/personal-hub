@@ -211,22 +211,32 @@ def archive_note(db: Session, note_id: int) -> NoteArchive:
     db.add(archive)
     db.flush()
 
-    # NoteTag 이전: source='note' → 'archive', note_id → archive.id
+    # NoteTag 이전: 새로 생성 후 기존 삭제 (relationship 충돌 방지)
     note_tags = db.query(NoteTag).filter(
         NoteTag.note_id == note.id, NoteTag.source == "note"
     ).all()
-    for nt in note_tags:
-        nt.note_id = archive.id
-        nt.source = "archive"
+    tag_ids = [nt.tag_id for nt in note_tags]
+    db.query(NoteTag).filter(
+        NoteTag.note_id == note.id, NoteTag.source == "note"
+    ).delete(synchronize_session=False)
+    for tid in tag_ids:
+        db.add(NoteTag(note_id=archive.id, tag_id=tid, source="archive"))
 
-    # NoteHistory 이전: source='note' → 'archive', note_id → archive.id
+    # NoteHistory 이전: 새로 생성 후 기존 삭제
     histories = db.query(NoteHistory).filter(
         NoteHistory.note_id == note.id, NoteHistory.source == "note"
     ).all()
-    for h in histories:
-        h.note_id = archive.id
-        h.source = "archive"
+    hist_data = [(h.title, h.content, h.remark, h.changed_at) for h in histories]
+    db.query(NoteHistory).filter(
+        NoteHistory.note_id == note.id, NoteHistory.source == "note"
+    ).delete(synchronize_session=False)
+    for title, content, remark, changed_at in hist_data:
+        db.add(NoteHistory(
+            note_id=archive.id, source="archive",
+            title=title, content=content, remark=remark, changed_at=changed_at,
+        ))
 
+    db.expire(note)
     db.delete(note)
     db.commit()
     db.refresh(archive)
@@ -283,21 +293,30 @@ def restore_archive(db: Session, archive_id: int) -> Note:
     db.add(note)
     db.flush()
 
-    # NoteTag 복원: source='archive' → 'note', note_id → note.id
+    # NoteTag 복원: 새로 생성 후 기존 삭제
     archive_tags = db.query(NoteTag).filter(
         NoteTag.note_id == archive.id, NoteTag.source == "archive"
     ).all()
-    for nt in archive_tags:
-        nt.note_id = note.id
-        nt.source = "note"
+    tag_ids = [nt.tag_id for nt in archive_tags]
+    db.query(NoteTag).filter(
+        NoteTag.note_id == archive.id, NoteTag.source == "archive"
+    ).delete(synchronize_session=False)
+    for tid in tag_ids:
+        db.add(NoteTag(note_id=note.id, tag_id=tid, source="note"))
 
-    # NoteHistory 복원: source='archive' → 'note', note_id → note.id
+    # NoteHistory 복원: 새로 생성 후 기존 삭제
     histories = db.query(NoteHistory).filter(
         NoteHistory.note_id == archive.id, NoteHistory.source == "archive"
     ).all()
-    for h in histories:
-        h.note_id = note.id
-        h.source = "note"
+    hist_data = [(h.title, h.content, h.remark, h.changed_at) for h in histories]
+    db.query(NoteHistory).filter(
+        NoteHistory.note_id == archive.id, NoteHistory.source == "archive"
+    ).delete(synchronize_session=False)
+    for title, content, remark, changed_at in hist_data:
+        db.add(NoteHistory(
+            note_id=note.id, source="note",
+            title=title, content=content, remark=remark, changed_at=changed_at,
+        ))
 
     db.delete(archive)
     db.commit()

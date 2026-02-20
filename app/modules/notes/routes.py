@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.modules.notes import services as svc
+from app.modules.notes.services import _note_to_dict, _archive_to_dict
 from app.modules.notes.schemas import (
     NoteCreate, NoteUpdate,
     NoteListResponse, NoteResponse,
@@ -42,14 +43,14 @@ def get_archive_item(archive_id: int, db: Session = Depends(get_db)):
     archive = svc.get_archive(db, archive_id)
     if not archive:
         raise HTTPException(status_code=404, detail="아카이브를 찾을 수 없습니다.")
-    return archive
+    return _archive_to_dict(archive)
 
 
 @router.post("/archive/{archive_id}/restore", response_model=NoteResponse)
 def restore_archive(archive_id: int, db: Session = Depends(get_db)):
     """아카이브 복원 → 활성 메모로."""
     note = svc.restore_archive(db, archive_id)
-    return note
+    return _note_to_dict(note)
 
 
 @router.delete("/archive/{archive_id}")
@@ -114,7 +115,7 @@ def create_note(data: NoteCreate, db: Session = Depends(get_db)):
         remark=data.remark,
         tag_ids=data.tag_ids,
     )
-    return note
+    return _note_to_dict(note)
 
 
 @router.get("/{note_id}", response_model=NoteResponse)
@@ -123,13 +124,13 @@ def get_note(note_id: int, db: Session = Depends(get_db)):
     note = svc.get_note(db, note_id)
     if not note:
         raise HTTPException(status_code=404, detail="메모를 찾을 수 없습니다.")
-    return note
+    return _note_to_dict(note)
 
 
 @router.put("/{note_id}", response_model=NoteResponse)
 def update_note(note_id: int, data: NoteUpdate, db: Session = Depends(get_db)):
     """메모 수정 (변경 전 스냅샷 자동 저장)."""
-    return svc.update_note(
+    note = svc.update_note(
         db,
         note_id=note_id,
         title=data.title,
@@ -137,6 +138,7 @@ def update_note(note_id: int, data: NoteUpdate, db: Session = Depends(get_db)):
         remark=data.remark,
         tag_ids=data.tag_ids,
     )
+    return _note_to_dict(note)
 
 
 @router.delete("/{note_id}")
@@ -153,13 +155,15 @@ def delete_note(
 @router.post("/{note_id}/pin", response_model=NoteResponse)
 def toggle_pin(note_id: int, db: Session = Depends(get_db)):
     """메모 고정/고정해제 토글."""
-    return svc.toggle_pin(db, note_id)
+    note = svc.toggle_pin(db, note_id)
+    return _note_to_dict(note)
 
 
 @router.post("/{note_id}/archive", response_model=NoteArchiveResponse)
 def archive_note(note_id: int, db: Session = Depends(get_db)):
     """메모 아카이브 이동 (태그·이력 함께 이전)."""
-    return svc.archive_note(db, note_id)
+    archive = svc.archive_note(db, note_id)
+    return _archive_to_dict(archive)
 
 
 # ══════════════════════════════════════════
