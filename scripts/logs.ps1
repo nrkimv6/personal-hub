@@ -234,7 +234,7 @@ $claudeWatchdogLogFile = Get-LatestLogFileMultiPattern @("claude_watchdog_")
 $videoDownloadWatchdogLogFile = Get-LatestLogFileMultiPattern @("video_download_watchdog_")
 $crawlWatchdogLogFile = Get-LatestLogFileMultiPattern @("crawl_watchdog_")
 $commandListenerWatchdogLogFile = Get-LatestLogFileMultiPattern @("command_listener_watchdog_")
-$cloudflaredLogFile = Join-Path (Join-Path $ProjectRoot "logs") "cloudflared.log"
+$cloudflaredLogFile = Get-LatestLogFileMultiPattern @("cloudflared_err", "cloudflared")
 
 # Auto-next 로그: wtools/common/logs/ 에서 최신 파일
 $autoNextLogDir = "D:\work\project\service\wtools\common\logs"
@@ -427,6 +427,9 @@ function Start-CombinedLogTail {
         "AN-STREAM"   = @{ Path = $autoNextStreamLogFile; Color = "DarkGray"; Tail = 5 }
     }
 
+    # Sources that only show errors/warnings (suppress verbose output)
+    $errorOnlySources = @("FRONTEND")
+
     # Track file positions
     $filePositions = @{}
     $logFiles = @{}
@@ -447,6 +450,10 @@ function Start-CombinedLogTail {
                 $filePositions[$source] = $fileItem.Length
                 $initLines = Get-Content $filePath -Tail $config.Tail -Encoding UTF8 -ErrorAction SilentlyContinue
                 foreach ($line in $initLines) {
+                    # Error-only sources: skip non-error lines
+                    if ($errorOnlySources -contains $source) {
+                        if ($line -notmatch "ERROR|CRITICAL|Exception|WARN|error|fail|ERR_|TypeError|ReferenceError|SyntaxError") { continue }
+                    }
                     Write-Host "[$source] $line" -ForegroundColor $config.Color
                 }
             } else {
@@ -485,7 +492,7 @@ function Start-CombinedLogTail {
         "VIDEO-DL-WD" = @("video_download_watchdog_*.log")
         "CRAWL-WD"    = @("crawl_watchdog_*.log")
         "CMD-WD"      = @("command_listener_watchdog_*.log")
-        "TUNNEL"      = @("cloudflared_*.log")
+        "TUNNEL"      = @("cloudflared_err_*.log", "cloudflared_err-*.log", "cloudflared_*.log")
     }
 
     # Dev 전용 소스 — Production에서 제외 (Worker는 항상 APP_MODE=development로 실행되어 logs/dev/에 기록됨)
@@ -589,6 +596,11 @@ function Start-CombinedLogTail {
                     $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::UTF8)
 
                     while ($null -ne ($line = $reader.ReadLine())) {
+                        # Error-only sources: skip non-error lines
+                        if ($errorOnlySources -contains $source) {
+                            if ($line -notmatch "ERROR|CRITICAL|Exception|WARN|error|fail|ERR_|TypeError|ReferenceError|SyntaxError") { continue }
+                        }
+
                         # Get base color for this source (null-safe)
                         $sourceColor = if ($null -ne $logColors[$source]) { $logColors[$source] } else { "White" }
 

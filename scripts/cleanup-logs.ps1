@@ -31,7 +31,10 @@ $Patterns = @(
     "video_download_watchdog_*.log",
     "crawl_watchdog_*.log",
     "command_listener_watchdog_*.log",
-    "cloudflared_*.log"
+    "cloudflared_*.log",
+    "cloudflared_err-*.log",
+    "cloudflared-*.log",
+    "cloudflared_err_*.log"
 )
 
 $CutoffDate = (Get-Date).AddDays(-$RetentionDays)
