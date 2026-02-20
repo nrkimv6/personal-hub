@@ -1,0 +1,411 @@
+"""subprocess 실행 서비스 - Redis 기반 크로스 세션 실행"""
+
+import json
+import subprocess
+import sys
+import traceback
+from datetime import datetime
+from pathlib import Path
+from typing import Dict
+
+import redis
+import redis.asyncio as aioredis
+from fastapi import HTTPException
+
+from app.config import logger
+from app.modules.dev_runner.config import config
+from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse
+from app.modules.dev_runner.services.state import get_state
+
+# Redis 설정
+REDIS_HOST = "localhost"
+REDIS_PORT = 6379
+COMMANDS_KEY = "plan-runner:commands"
+RESULTS_KEY = "plan-runner:command_results"
+STATE_KEY = "plan-runner:state"
+COMMAND_TIMEOUT = 10  # 명령 결과 대기 타임아웃 (초)
+
+
+class ExecutorService:
+    """plan-runner CLI 실행 서비스 - Redis 기반 크로스 세션"""
+
+    def __init__(self):
+        """Redis 클라이언트 초기화"""
+        self.redis_client = redis.Redis(
+            host=REDIS_HOST,
+            port=REDIS_PORT,
+            decode_responses=True,
+            socket_connect_timeout=5,
+        )
+        # 비동기 클라이언트 (brpop 등 블로킹 호출용)
+        self.async_redis = aioredis.Redis(
+            host=REDIS_HOST,
+            port=REDIS_PORT,
+            decode_responses=True,
+            socket_connect_timeout=5,
+        )
+
+    async def _check_redis_and_listener(self):
+        """Redis 연결 + command listener 존재 여부 사전 확인"""
+        try:
+            await self.async_redis.ping()
+        except (redis.ConnectionError, ConnectionRefusedError, OSError):
+            raise HTTPException(
+                status_code=503,
+                detail="Redis에 연결할 수 없습니다. Redis 서버가 실행 중인지 확인하세요."
+            )
+
+        # listener 프로세스 존재 확인: listener가 주기적으로 갱신하는 heartbeat 키 체크
+        heartbeat = await self.async_redis.get("plan-runner:listener:heartbeat")
+        if heartbeat is None:
+            raise HTTPException(
+                status_code=503,
+                detail="dev-runner command listener가 실행 중이지 않습니다. 워커를 시작하세요."
+            )
+
+    async def start_dev_runner(self, request: RunRequest) -> RunStatusResponse:
+        """plan-runner 실행 시작 - Redis 명령 전송 (비동기)"""
+        # Redis + listener 사전 확인
+        await self._check_redis_and_listener()
+
+        # Redis를 통해 상태 확인
+        try:
+            status = await self.async_redis.get(STATE_KEY + ":status")
+            if status == "running":
+                # heartbeat가 없으면 stale → 자동 정리 후 시작 진행
+                heartbeat = await self.async_redis.get("plan-runner:listener:heartbeat")
+                if heartbeat is None:
+                    logger.warning("[dev-runner] running 상태이지만 heartbeat 없음 → stale 정리 후 시작")
+                    self._force_cleanup_state()
+                else:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Already running"
+                    )
+        except redis.ConnectionError:
+            raise HTTPException(
+                status_code=503,
+                detail="Redis에 연결할 수 없습니다. Redis 서버가 실행 중인지 확인하세요."
+            )
+
+        # Redis 명령 생성
+        command = {
+            "action": "run",
+            "source": "monitor-page-api",
+            "timestamp": datetime.now().isoformat(),
+        }
+
+        if request.plan_file:
+            command["plan_file"] = request.plan_file
+
+        # 옵션 추가
+        if request.max_cycles and request.max_cycles > 0:
+            command["max_cycles"] = request.max_cycles
+
+        if request.max_tokens and request.max_tokens > 0:
+            command["max_tokens"] = request.max_tokens
+
+        if request.until:
+            command["until"] = request.until
+
+        if request.dry_run:
+            command["dry_run"] = True
+
+        if request.skip_plan:
+            command["skip_plan"] = True
+
+        if request.parallel:
+            command["parallel"] = True
+
+        if request.projects:
+            command["projects"] = request.projects
+
+        try:
+            # Redis LPUSH - 명령 전송
+            await self.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
+
+            # BRPOP으로 결과 대기 (비동기, 이벤트 루프 블로킹 없음)
+            result = await self.async_redis.brpop(RESULTS_KEY, timeout=COMMAND_TIMEOUT)
+
+            if result is None:
+                raise HTTPException(
+                    status_code=504,
+                    detail="Command timeout - listener may not be responding"
+                )
+
+            _, raw_result = result
+            result_data = json.loads(raw_result)
+
+            if not result_data.get("success"):
+                raise HTTPException(
+                    status_code=500,
+                    detail=result_data.get("message", "Failed to start")
+                )
+
+            # Redis에서 상태 조회
+            pid = await self.async_redis.get(STATE_KEY + ":pid")
+            plan_file = await self.async_redis.get(STATE_KEY + ":plan_file")
+            start_time_str = await self.async_redis.get(STATE_KEY + ":start_time")
+
+            return RunStatusResponse(
+                running=True,
+                pid=int(pid) if pid else None,
+                plan_file=plan_file,
+                start_time=datetime.fromisoformat(start_time_str) if start_time_str else None,
+                current_cycle=0,
+            )
+
+        except redis.ConnectionError:
+            raise HTTPException(
+                status_code=503,
+                detail="Redis connection failed - command listener may not be running"
+            )
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Invalid response from listener: {str(e)}"
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[dev-runner] start 실패: {traceback.format_exc()}")
+            raise HTTPException(status_code=500, detail=f"Failed to start: {str(e)}")
+
+    def _force_cleanup_state(self):
+        """Redis 상태 강제 정리 (listener 무응답 시 fallback)"""
+        try:
+            self.redis_client.delete(STATE_KEY + ":status")
+            self.redis_client.delete(STATE_KEY + ":pid")
+            self.redis_client.delete(STATE_KEY + ":plan_file")
+            self.redis_client.delete(STATE_KEY + ":start_time")
+            self.redis_client.delete(STATE_KEY + ":log_file_path")
+        except Exception:
+            pass
+
+    def _send_force_stop(self):
+        """listener에 force-stop 명령 전송 (_current_process 변수까지 정리)"""
+        try:
+            command = {
+                "action": "force-stop",
+                "source": "monitor-page-api-reset",
+                "timestamp": datetime.now().isoformat(),
+            }
+            self.redis_client.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
+            # 결과 대기 (짧은 타임아웃)
+            result = self.redis_client.brpop(RESULTS_KEY, timeout=5)
+            if result:
+                _, raw = result
+                data = json.loads(raw)
+                logger.info(f"[dev-runner] force-stop 결과: {data.get('message', '')}")
+                return True
+            else:
+                logger.warning("[dev-runner] force-stop 타임아웃 (listener 무응답)")
+                return False
+        except Exception as e:
+            logger.warning(f"[dev-runner] force-stop 전송 실패: {e}")
+            return False
+
+    def reset_running_state(self, full_reset: bool = False) -> Dict:
+        """RUNNING 상태 강제 초기화 - Redis + plan-runner DB
+
+        full_reset=True이면 모든 작업을 삭제하여 완전 초기화
+        """
+        try:
+            # 0. listener에 force-stop 전송 (메모리 내 _current_process 정리)
+            self._send_force_stop()
+
+            # 1. Redis 상태 정리
+            self._force_cleanup_state()
+            logger.info("[dev-runner] Redis 상태 정리 완료")
+
+            # 2. plan-runner SQLite DB 정리
+            import sqlite3
+
+            db_path = Path(config.DEV_RUNNER_DB_PATH)
+
+            if not db_path.exists():
+                logger.warning(f"[dev-runner] DB 파일을 찾을 수 없음: {db_path}")
+                return {
+                    "success": True,
+                    "reset_count": 0,
+                    "message": f"plan-runner DB not found at {db_path}"
+                }
+
+            try:
+                conn = sqlite3.connect(str(db_path))
+                cursor = conn.cursor()
+            except sqlite3.Error as e:
+                logger.error(f"[dev-runner] DB 연결 실패: {db_path}, error: {e}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to connect to plan-runner DB: {str(e)}"
+                )
+
+            try:
+                if full_reset:
+                    # 전체 리셋: 모든 작업 삭제
+                    cursor.execute("SELECT COUNT(*) FROM tasks")
+                    result = cursor.fetchone()
+                    reset_count = result[0] if result else 0
+                    cursor.execute("DELETE FROM tasks")
+                    conn.commit()
+                    logger.info(f"[dev-runner] 전체 리셋: {reset_count}개 작업 삭제")
+                else:
+                    # RUNNING → PENDING 변경만
+                    cursor.execute("SELECT COUNT(*) FROM tasks WHERE status='running'")
+                    result = cursor.fetchone()
+                    reset_count = result[0] if result else 0
+
+                    if reset_count > 0:
+                        cursor.execute(
+                            "UPDATE tasks SET status='pending', started_at=NULL WHERE status='running'"
+                        )
+                        conn.commit()
+                        logger.info(f"[dev-runner] {reset_count}개 작업을 RUNNING → PENDING으로 변경")
+                    else:
+                        logger.info("[dev-runner] RUNNING 상태의 작업이 없음")
+
+                return {"success": True, "reset_count": reset_count, "full_reset": full_reset}
+
+            except sqlite3.Error as e:
+                logger.error(f"[dev-runner] DB 쿼리 실패: {e}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Database query failed: {str(e)}"
+                )
+            finally:
+                conn.close()
+
+        except Exception as e:
+            logger.error(f"[dev-runner] reset_running_state 실패: {traceback.format_exc()}")
+            raise HTTPException(status_code=500, detail=f"Failed to reset state: {str(e)}")
+
+    async def stop_dev_runner(self) -> Dict:
+        """plan-runner 실행 중지 - Redis 명령 전송 (비동기)"""
+        try:
+            # Redis 사전 확인 (ping만 — listener는 stop 시에는 없을 수도 있음)
+            try:
+                await self.async_redis.ping()
+            except (redis.ConnectionError, ConnectionRefusedError, OSError):
+                raise HTTPException(
+                    status_code=503,
+                    detail="Redis에 연결할 수 없습니다."
+                )
+
+            # Redis를 통해 상태 확인
+            status = await self.async_redis.get(STATE_KEY + ":status")
+            if status != "running":
+                raise HTTPException(status_code=404, detail="Not running")
+
+            # Redis 명령 생성
+            command = {
+                "action": "stop",
+                "source": "monitor-page-api",
+                "timestamp": datetime.now().isoformat(),
+            }
+
+            # Redis LPUSH - 명령 전송
+            await self.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
+
+            # BRPOP으로 결과 대기 (비동기, 이벤트 루프 블로킹 없음)
+            result = await self.async_redis.brpop(RESULTS_KEY, timeout=COMMAND_TIMEOUT)
+
+            if result is None:
+                # listener 무응답 → 프로세스가 죽었을 가능성 → 상태 강제 정리
+                logger.warning("[dev-runner] listener 무응답, Redis 상태 강제 정리")
+                self._force_cleanup_state()
+                return {"message": "Force cleaned (listener not responding)"}
+
+            _, raw_result = result
+            result_data = json.loads(raw_result)
+
+            if not result_data.get("success"):
+                # stop 실패해도 상태 정리
+                self._force_cleanup_state()
+                return {"message": f"Force cleaned: {result_data.get('message', '')}"}
+
+            return {"message": "Stopped successfully"}
+
+        except redis.ConnectionError:
+            raise HTTPException(
+                status_code=503,
+                detail="Redis connection failed - command listener may not be running"
+            )
+        except json.JSONDecodeError as e:
+            self._force_cleanup_state()
+            return {"message": "Force cleaned (invalid listener response)"}
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[dev-runner] stop 실패: {traceback.format_exc()}")
+            self._force_cleanup_state()
+            raise HTTPException(status_code=500, detail=f"Failed to stop: {str(e)}")
+
+    def _is_pid_alive(self, pid: int) -> bool:
+        """PID가 실제로 살아있는지 확인 (Windows: GetExitCodeProcess로 검증)"""
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if not handle:
+                return False
+            # OpenProcess는 종료된 프로세스도 핸들을 반환할 수 있으므로
+            # GetExitCodeProcess로 실제 생존 여부 확인
+            STILL_ACTIVE = 259
+            exit_code = ctypes.c_ulong()
+            kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+            kernel32.CloseHandle(handle)
+            return exit_code.value == STILL_ACTIVE
+        except Exception:
+            return False
+
+    def get_process_status(self) -> RunStatusResponse:
+        """프로세스 상태 조회 - Redis에서 조회 + stale 상태 자동 정리"""
+        try:
+            # Redis 연결 확인
+            redis_connected = False
+            try:
+                self.redis_client.ping()
+                redis_connected = True
+            except (redis.ConnectionError, ConnectionRefusedError, OSError):
+                return RunStatusResponse(running=False, listener_alive=False, redis_connected=False, pid=None, plan_file=None)
+
+            heartbeat = self.redis_client.get("plan-runner:listener:heartbeat")
+            listener_alive = heartbeat is not None
+
+            status = self.redis_client.get(STATE_KEY + ":status")
+
+            if status == "running":
+                pid_str = self.redis_client.get(STATE_KEY + ":pid")
+                plan_file = self.redis_client.get(STATE_KEY + ":plan_file")
+                start_time_str = self.redis_client.get(STATE_KEY + ":start_time")
+
+                if not listener_alive:
+                    logger.warning("[dev-runner] heartbeat 없음 → stale 상태 자동 정리")
+                    self._force_cleanup_state()
+                    return RunStatusResponse(running=False, listener_alive=False, redis_connected=True, pid=None, plan_file=None)
+
+                return RunStatusResponse(
+                    running=True,
+                    listener_alive=True,
+                    redis_connected=True,
+                    pid=int(pid_str) if pid_str else None,
+                    plan_file=plan_file,
+                    start_time=datetime.fromisoformat(start_time_str) if start_time_str else None,
+                    current_cycle=0,
+                )
+            else:
+                return RunStatusResponse(running=False, listener_alive=listener_alive, redis_connected=True, pid=None, plan_file=None)
+
+        except redis.ConnectionError:
+            return RunStatusResponse(running=False, listener_alive=False, redis_connected=False, pid=None, plan_file=None)
+        except Exception as e:
+            logger.error(f"[dev-runner] status 조회 실패: {traceback.format_exc()}")
+            raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")
+
+
+# 싱글톤 인스턴스
+executor_service = ExecutorService()
+
+__all__ = ['executor_service', 'ExecutorService']

@@ -190,9 +190,14 @@ def _build_classify_prompt(categories: list[str], image_path: str) -> str:
 
 
 def _build_cli_options() -> dict:
-    """이미지 분류용 CLI 옵션."""
+    """이미지 분류용 CLI 옵션.
+
+    exec_mode=True: shell 경유 없이 subprocess 직접 실행.
+    이미지 분류는 --allowedTools Read + --json-schema 등 복잡한 옵션이 필요하므로
+    shell 이스케이프 문제를 피하기 위해 exec 모드 사용.
+    """
     return {
-        "use_prompt_flag": True,
+        "exec_mode": True,
         "output_format": "json",
         "json_schema": {
             "type": "object",

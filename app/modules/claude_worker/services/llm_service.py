@@ -251,71 +251,91 @@ class LLMService:
 
             try:
                 # cli_options 기반 명령어 빌드
-                use_prompt_flag = cli_options.get("use_prompt_flag", False)
+                exec_mode = cli_options.get("exec_mode", False)
                 output_format = cli_options.get("output_format")
                 json_schema = cli_options.get("json_schema")
                 allowed_tools = cli_options.get("allowed_tools")
+                schema_file = None
 
-                # 도구 옵션 결정: cli_options.allowed_tools 우선, 없으면 enable_tools 기반
-                if allowed_tools:
-                    tools_opt = " ".join(f'--allowedTools {t}' for t in allowed_tools)
-                elif enable_tools:
-                    tools_opt = '--tools "Read"'
+                if exec_mode:
+                    # ========== B 방식: exec 모드 (shell=False) ==========
+                    # 이미지 분류 등 복잡한 CLI 옵션용. 프로세스 직접 실행.
+                    # timeout kill이 claude 프로세스에 직접 적용됨 (좀비 방지).
+                    cmd_args = ["claude", "-p", prompt]
+
+                    if allowed_tools:
+                        for tool in allowed_tools:
+                            cmd_args.extend(["--allowedTools", tool])
+                    elif enable_tools:
+                        cmd_args.extend(["--allowedTools", "Read"])
+
+                    if model:
+                        cmd_args.extend(["--model", model])
+                    if output_format:
+                        cmd_args.extend(["--output-format", output_format])
+                    if json_schema:
+                        cmd_args.extend(["--json-schema", json.dumps(json_schema, ensure_ascii=False)])
+
+                    logger.debug(f"Claude CLI exec 명령: {' '.join(cmd_args[:6])}... ({len(cmd_args)} args)")
+
+                    result = subprocess.run(
+                        cmd_args,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                        encoding="utf-8",
+                        env=env,
+                        stdin=subprocess.DEVNULL,
+                    )
                 else:
-                    tools_opt = ''
+                    # ========== A 방식: shell 모드 (stdin pipe, 2단계) ==========
+                    # 텍스트 프롬프트용. cmd.exe → type file | claude opts
 
-                # model 옵션 추가
-                model_opt = f'--model {model}' if model else ''
-
-                # output format 옵션
-                format_opt = f'--output-format {output_format}' if output_format else ''
-
-                # json schema 옵션
-                if json_schema:
-                    schema_str = json.dumps(json_schema, ensure_ascii=False)
-                    # Windows shell에서 안전하게 전달하기 위해 임시파일 사용
-                    schema_file = None
-                    with tempfile.NamedTemporaryFile(
-                        mode="w", suffix=".json", delete=False, encoding="utf-8"
-                    ) as sf:
-                        sf.write(schema_str)
-                        schema_file = sf.name
-                    # powershell로 파일 내용을 인라인 전달
-                    schema_opt = f'--json-schema "$(type \\"{schema_file}\\")"' if sys.platform == "win32" else f"--json-schema '$(cat \"{schema_file}\")'"
-                else:
-                    schema_opt = ''
-                    schema_file = None
-
-                # 명령어 빌드
-                opts = ' '.join(part for part in [tools_opt, model_opt, format_opt, schema_opt] if part)
-
-                if use_prompt_flag:
-                    # -p 플래그 사용: 프롬프트 파일을 직접 전달
-                    if sys.platform == "win32":
-                        # Windows: -p 에 프롬프트 파일 내용을 파이프 대신 직접 전달
-                        # 긴 프롬프트는 임시파일에서 읽어서 전달
-                        cmd = f'powershell.exe -Command "claude -p (Get-Content -Raw \'{prompt_file}\') {opts}"'
+                    # 도구 옵션
+                    if allowed_tools:
+                        tools_opt = " ".join(f'--allowedTools {t}' for t in allowed_tools)
+                    elif enable_tools:
+                        tools_opt = '--tools "Read"'
                     else:
-                        cmd = f'claude -p "$(cat \'{prompt_file}\')" {opts}'
-                else:
-                    # 기존 방식: stdin pipe
+                        tools_opt = ''
+
+                    model_opt = f'--model {model}' if model else ''
+                    format_opt = f'--output-format {output_format}' if output_format else ''
+
+                    # json schema: 임시파일로 전달 (shell 이스케이프 문제 방지)
+                    if json_schema:
+                        schema_str = json.dumps(json_schema, ensure_ascii=False)
+                        with tempfile.NamedTemporaryFile(
+                            mode="w", suffix=".json", delete=False, encoding="utf-8"
+                        ) as sf:
+                            sf.write(schema_str)
+                            schema_file = sf.name
+                        if sys.platform == "win32":
+                            schema_opt = f'--json-schema "$(type \\"{schema_file}\\")"'
+                        else:
+                            schema_opt = f"--json-schema '$(cat \"{schema_file}\")'"
+                    else:
+                        schema_opt = ''
+
+                    opts = ' '.join(part for part in [tools_opt, model_opt, format_opt, schema_opt] if part)
+
+                    # stdin pipe: type file | claude opts (2단계: cmd.exe → claude)
                     if sys.platform == "win32":
                         cmd = f'type "{prompt_file}" | claude {opts}'
                     else:
                         cmd = f'cat "{prompt_file}" | claude {opts}'
 
-                logger.debug(f"Claude CLI 명령: {cmd[:200]}...")
+                    logger.debug(f"Claude CLI shell 명령: {cmd[:200]}...")
 
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout,
-                    encoding="utf-8",
-                    shell=True,
-                    env=env,
-                    stdin=subprocess.DEVNULL if use_prompt_flag else None,
-                )
+                    result = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout,
+                        encoding="utf-8",
+                        shell=True,
+                        env=env,
+                    )
             finally:
                 # 임시 파일 삭제
                 os.unlink(prompt_file)
