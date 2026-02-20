@@ -263,14 +263,12 @@ async def ai_suggest_category(
         prompt += f"\n\n**샘플 이미지**: {len(sample_images)}장이 제공되었습니다. 이미지 내용을 참고하여 판단하세요."
 
     try:
-        # AI 분류 요청
-        classify_req = ClassifyRequest(
-            image_paths=sample_images,
+        # AI 분류 요청 (어댑터 시그니처: image_path, prompt, categories)
+        result = await adapter.classify_image(
+            image_path=sample_images[0] if sample_images else "",
             prompt=prompt,
             categories=categories,
         )
-
-        result = await adapter.classify_image(classify_req)
 
         return AISuggestResponse(
             folder_id=request.folder_id,

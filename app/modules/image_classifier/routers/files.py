@@ -50,6 +50,7 @@ async def get_files(
     importance: Optional[str] = None,
     order_by: str = "id",  # id, extracted_date, importance, ai_confidence
     order_dir: str = "asc",  # asc, desc
+    tag_id: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
     """
@@ -65,10 +66,20 @@ async def get_files(
         importance: 중요도 필터 (high/medium/low)
         order_by: 정렬 필드
         order_dir: 정렬 방향
+        tag_id: 태그 ID 필터
     """
-    # 기본 쿼리
-    query = "SELECT * FROM file_classifications WHERE 1=1"
-    params = {}
+    # 기본 쿼리 (tag_id 필터 시 JOIN 필요)
+    if tag_id is not None:
+        query = """
+            SELECT fc.*
+            FROM file_classifications fc
+            JOIN file_tags ft ON ft.file_id = fc.id
+            WHERE ft.tag_id = :tag_id
+        """
+        params: dict = {"tag_id": tag_id}
+    else:
+        query = "SELECT * FROM file_classifications WHERE 1=1"
+        params = {}
 
     # 필터 조건
     if status:
@@ -102,10 +113,12 @@ async def get_files(
 
     # ai_confidence는 NULL이 있을 수 있으므로 NULLS LAST 처리
     # SQLite: ORDER BY (ai_confidence IS NULL), ai_confidence ASC
+    # tag_id JOIN 시 fc. 접두사로 모호성 방지
+    col_prefix = "fc." if tag_id is not None else ""
     if order_by == "ai_confidence":
-        query += f" ORDER BY (ai_confidence IS NULL), ai_confidence {order_dir.upper()}"
+        query += f" ORDER BY ({col_prefix}ai_confidence IS NULL), {col_prefix}ai_confidence {order_dir.upper()}"
     else:
-        query += f" ORDER BY {order_by} {order_dir.upper()}"
+        query += f" ORDER BY {col_prefix}{order_by} {order_dir.upper()}"
 
     # 페이지네이션
     query += " LIMIT :limit OFFSET :skip"

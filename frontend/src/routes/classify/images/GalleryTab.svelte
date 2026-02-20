@@ -49,6 +49,9 @@
     if (statusFilter !== 'all') {
       params.set('status', statusFilter.toLowerCase().replace(' ', '_'));
     }
+    if (tagFilter !== null) {
+      params.set('tag_id', String(tagFilter));
+    }
     if (sortBy === 'date') params.set('order_by', 'extracted_date');
     else if (sortBy === 'name') params.set('order_by', 'id');
     else if (sortBy === 'size') params.set('order_by', 'id');
@@ -106,14 +109,16 @@
 
   // 필터/정렬 변경 시 재로드
   $effect(() => {
-    // statusFilter, sortBy 의존
+    // statusFilter, sortBy, tagFilter 의존
     void statusFilter;
     void sortBy;
+    void tagFilter;
     loadImages(true);
   });
 
   onMount(() => {
     // $effect가 초기에도 실행되므로 별도 호출 불필요
+    void loadTags();
   });
 
   // 클라이언트 사이드 검색 (이름 필터)
@@ -137,6 +142,7 @@
 
   function openDetail(id: number) {
     detailImage = id;
+    void loadDetailTags(id);
   }
 
   function getStatusBadgeClass(status: string): string {
@@ -179,10 +185,57 @@
   let categories = $state<Category[]>([]);
   let showCategoryPicker = $state(false);
 
+  // 태그 상태
+  interface TagItem { id: number; name: string; }
+  let tags = $state<TagItem[]>([]);
+  let showTagPicker = $state(false);
+  let tagFilter = $state<number | null>(null);  // null = 전체
+  let detailTags = $state<TagItem[]>([]);  // 디테일 패널용
+
+  async function loadTags() {
+    try {
+      const res = await fetchWithTimeout('/api/ic/tags');
+      if (res.ok) tags = (await res.json()).tags ?? [];
+    } catch { /* ignore */ }
+  }
+
+  async function bulkTagFiles(tagName: string) {
+    if (selectedImages.length === 0) return;
+    try {
+      const res = await fetchWithTimeout('/api/ic/tags/bulk-tag', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_ids: selectedImages, tag_names: [tagName] }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      showTagPicker = false;
+      await loadTags();
+    } catch (err: any) {
+      alert(`태그 부여 실패: ${err.message}`);
+    }
+  }
+
+  async function loadDetailTags(fileId: number) {
+    try {
+      const res = await fetchWithTimeout(`/api/ic/tags/files/${fileId}`);
+      if (res.ok) detailTags = (await res.json()).tags ?? [];
+    } catch { detailTags = []; }
+  }
+
+  async function removeDetailTag(fileId: number, tagId: number) {
+    try {
+      const res = await fetchWithTimeout(`/api/ic/tags/files/${fileId}/${tagId}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      detailTags = detailTags.filter(t => t.id !== tagId);
+    } catch (err: any) {
+      alert(`태그 제거 실패: ${err.message}`);
+    }
+  }
+
   async function loadCategories() {
     try {
       const res = await fetchWithTimeout('/api/ic/categories');
-      if (res.ok) categories = await res.json();
+      if (res.ok) categories = (await res.json()).categories ?? [];
     } catch { /* ignore */ }
   }
 
@@ -360,6 +413,18 @@
         {/each}
       </div>
 
+      <!-- Tag Filter -->
+      <select
+        bind:value={tagFilter}
+        class="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        onchange={() => { tagFilter = tagFilter === null ? null : Number(tagFilter); }}
+      >
+        <option value={null}>전체 태그</option>
+        {#each tags as tag}
+          <option value={tag.id}>{tag.name}</option>
+        {/each}
+      </select>
+
       <!-- Sort -->
       <select
         bind:value={sortBy}
@@ -381,6 +446,33 @@
         <Tag class="size-3" />
         카테고리 지정
       </button>
+      <div class="relative">
+        <button onclick={() => { loadTags(); showTagPicker = !showTagPicker; }} class="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent">
+          <Tag class="size-3" />
+          태그 부여
+        </button>
+        {#if showTagPicker}
+          <div class="absolute left-0 top-full z-50 mt-1 w-48 rounded-lg border border-border bg-card shadow-lg">
+            <div class="p-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">태그 선택</div>
+            {#if tags.length === 0}
+              <p class="px-3 py-2 text-xs text-muted-foreground">태그 없음</p>
+            {:else}
+              {#each tags as tag}
+                <button
+                  onclick={() => bulkTagFiles(tag.name)}
+                  class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-foreground hover:bg-accent"
+                >
+                  <span class="truncate">{tag.name}</span>
+                  <span class="ml-auto text-[10px] text-muted-foreground">{tag.usage_count ?? 0}</span>
+                </button>
+              {/each}
+            {/if}
+            <div class="border-t border-border p-2">
+              <button onclick={() => (showTagPicker = false)} class="w-full rounded px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground">닫기</button>
+            </div>
+          </div>
+        {/if}
+      </div>
       <button onclick={() => approveSelected()} class="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent">
         <Check class="size-3" />
         승인
@@ -533,6 +625,28 @@
         />
         <div class="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground/50">
           {detailData.filename}
+        </div>
+      </div>
+
+      <!-- Tags -->
+      <div class="rounded-lg border border-border bg-secondary/30 p-3">
+        <h3 class="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">태그</h3>
+        <div class="flex flex-wrap gap-1.5">
+          {#if detailTags.length === 0}
+            <p class="text-xs text-muted-foreground">태그 없음</p>
+          {:else}
+            {#each detailTags as tag}
+              <span class="flex items-center gap-1 rounded-full border border-border bg-card px-2 py-0.5 text-[11px] font-medium text-foreground">
+                {tag.name}
+                <button
+                  onclick={() => detailImage !== null && removeDetailTag(detailImage, tag.id)}
+                  class="ml-0.5 flex size-3.5 items-center justify-center rounded-full text-muted-foreground hover:bg-destructive/20 hover:text-destructive"
+                >
+                  <X class="size-2.5" />
+                </button>
+              </span>
+            {/each}
+          {/if}
         </div>
       </div>
 
