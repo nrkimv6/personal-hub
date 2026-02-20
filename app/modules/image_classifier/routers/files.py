@@ -390,3 +390,28 @@ async def rollback_file(
     db.commit()
 
     return {"status": "ok", "file_id": file_id, "new_status": new_status}
+
+
+class OpenLocalRequest(BaseModel):
+    path: Optional[str] = None
+    folder: Optional[str] = None
+
+
+@router.post("/open-local")
+async def open_local_file_or_folder(request: OpenLocalRequest):
+    """로컬 파일/폴더를 기본 뷰어/탐색기로 열기 (개발 환경 전용)"""
+    import os
+
+    target = request.path or request.folder
+    if not target:
+        raise HTTPException(status_code=400, detail="path 또는 folder를 지정하세요.")
+
+    target_path = Path(target)
+    if not target_path.exists():
+        raise HTTPException(status_code=404, detail=f"경로를 찾을 수 없습니다: {target}")
+
+    try:
+        os.startfile(str(target_path))
+        return {"status": "ok", "opened": str(target_path)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"열기 실패: {e}")
