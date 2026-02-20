@@ -26,6 +26,20 @@
 	let error = $state('');
 	let matchCount = $state(50);
 	let totalUnclassified = $state(0);
+	let buildingIndex = $state(false);
+
+	async function buildFaissIndex() {
+		buildingIndex = true;
+		try {
+			const res = await fetchWithTimeout('/api/ic/similar/build-index', { method: 'POST' });
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			alert('FAISS 인덱스 빌드 완료!');
+		} catch (err: any) {
+			alert(`인덱스 빌드 실패: ${err.message}`);
+		} finally {
+			buildingIndex = false;
+		}
+	}
 
 	onMount(() => {
 		loadSimilarSuggestions();
@@ -165,6 +179,14 @@
 				이미 분류된 이미지와 유사한 미분류 이미지를 찾아 자동으로 분류 제안합니다.
 			</p>
 		</div>
+		<button
+			onclick={buildFaissIndex}
+			disabled={buildingIndex}
+			class="flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50 transition-colors"
+		>
+			<RefreshCw class="size-3.5 {buildingIndex ? 'animate-spin' : ''}" />
+			{buildingIndex ? '빌드 중...' : '인덱스 빌드'}
+		</button>
 	</div>
 
 	<!-- 검색 설정 -->

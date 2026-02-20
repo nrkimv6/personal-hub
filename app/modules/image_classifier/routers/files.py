@@ -39,6 +39,84 @@ async def get_thumbnail(file_id: int):
     return FileResponse(thumbnail_path, media_type="image/jpeg")
 
 
+@router.get("/{file_id}")
+async def get_file_detail(
+    file_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    파일 상세 조회
+
+    Args:
+        file_id: file_classifications.id
+
+    Returns:
+        { file: {...}, classifications: [{category_name, confidence, engine, reasoning}], tags: [{id, name}] }
+    """
+    # 기본 파일 정보
+    file_row = db.execute(
+        text("SELECT * FROM file_classifications WHERE id = :id"),
+        {"id": file_id}
+    ).fetchone()
+
+    if not file_row:
+        raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
+
+    file_data = {
+        "id": file_row.id,
+        "file_path": file_row.file_path,
+        "file_size": file_row.file_size,
+        "extracted_date": file_row.extracted_date,
+        "date_source": file_row.date_source,
+        "final_category_id": file_row.final_category_id,
+        "status": file_row.status,
+        "importance": file_row.importance,
+        "ai_confidence": file_row.ai_confidence,
+    }
+
+    # 분류 이력 (카테고리 JOIN)
+    classification_rows = db.execute(
+        text("""
+            SELECT fc_hist.confidence, fc_hist.engine, fc_hist.reasoning,
+                   c.name AS category_name, c.full_path AS category_path
+            FROM file_classification_history fc_hist
+            LEFT JOIN categories c ON c.id = fc_hist.category_id
+            WHERE fc_hist.file_id = :id
+            ORDER BY fc_hist.id DESC
+        """),
+        {"id": file_id}
+    ).fetchall()
+
+    classifications = []
+    for row in classification_rows:
+        classifications.append({
+            "category_name": row.category_name,
+            "category_path": row.category_path,
+            "confidence": row.confidence,
+            "engine": row.engine,
+            "reasoning": row.reasoning,
+        })
+
+    # 태그 목록
+    tag_rows = db.execute(
+        text("""
+            SELECT t.id, t.name
+            FROM file_tags ft
+            JOIN tags t ON t.id = ft.tag_id
+            WHERE ft.file_id = :id
+        """),
+        {"id": file_id}
+    ).fetchall()
+
+    tags = [{"id": row.id, "name": row.name} for row in tag_rows]
+
+    return {
+        "file": file_data,
+        "classifications": classifications,
+        "tags": tags,
+    }
+
+
 @router.get("")
 async def get_files(
     skip: int = 0,

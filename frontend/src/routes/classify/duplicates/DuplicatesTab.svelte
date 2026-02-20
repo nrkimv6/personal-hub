@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
-	import { Copy, Wand2, Check, Trash2, SkipForward, Crown, PartyPopper } from 'lucide-svelte';
+	import { Copy, Wand2, Check, Trash2, SkipForward, Crown, PartyPopper, Square } from 'lucide-svelte';
 
 	interface DuplicateGroup {
 		group_id: number;
@@ -35,6 +35,31 @@
 	let selections = $state<Record<number, number | null>>({});
 
 	let filterStatus = $state('unresolved');
+	let detectRunning = $state(false);
+	let detectStatusPoller: ReturnType<typeof setInterval> | null = null;
+
+	async function checkDetectStatus() {
+		try {
+			const res = await fetchWithTimeout('/api/ic/duplicates/detect/status');
+			if (!res.ok) return;
+			const data = await res.json();
+			detectRunning = data.is_running ?? false;
+		} catch {
+			// ignore
+		}
+	}
+
+	async function stopDetect() {
+		try {
+			const res = await fetchWithTimeout('/api/ic/duplicates/detect/stop', { method: 'POST' });
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			detectRunning = false;
+			alert('중복탐지가 중지되었습니다.');
+			await loadGroups();
+		} catch (err: any) {
+			alert(`중지 실패: ${err.message}`);
+		}
+	}
 
 	const filteredGroups = $derived(
 		filterStatus === 'all'
@@ -137,6 +162,11 @@
 
 	onMount(() => {
 		loadGroups();
+		checkDetectStatus();
+		detectStatusPoller = setInterval(checkDetectStatus, 3000);
+		return () => {
+			if (detectStatusPoller) clearInterval(detectStatusPoller);
+		};
 	});
 </script>
 
@@ -172,6 +202,17 @@
 				</button>
 			{/each}
 		</div>
+
+		<!-- 중지 버튼 (탐지 실행 중일 때만 표시) -->
+		{#if detectRunning}
+			<button
+				class="flex items-center gap-1.5 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-1.5 text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors"
+				onclick={stopDetect}
+			>
+				<Square class="size-3.5" />
+				탐지 중지
+			</button>
+		{/if}
 
 		<!-- 새로고침 -->
 		<button

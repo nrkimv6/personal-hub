@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
-	import { History, RotateCcw, RefreshCw } from 'lucide-svelte';
+	import { History, RotateCcw, RefreshCw, ScanLine, ChevronDown, ChevronRight } from 'lucide-svelte';
 
 	interface MoveHistory {
 		id: number;
@@ -12,8 +12,22 @@
 		extracted_date: string | null;
 	}
 
+	interface ScanHistory {
+		id: number;
+		started_at: string;
+		finished_at: string | null;
+		scanned_files: number;
+		total_files: number;
+		status: string;
+	}
+
 	let history: MoveHistory[] = $state([]);
 	let loading = $state(false);
+
+	// 스캔 이력 상태
+	let scanHistory: ScanHistory[] = $state([]);
+	let scanHistoryLoading = $state(false);
+	let scanHistoryOpen = $state(false);
 
 	onMount(() => {
 		loadHistory();
@@ -45,6 +59,48 @@
 			alert('복원 실패');
 		}
 	}
+
+	async function loadScanHistory() {
+		if (scanHistory.length > 0) return; // 이미 로드됨
+		scanHistoryLoading = true;
+		try {
+			const res = await fetchWithTimeout('/api/ic/scan/history');
+			if (res.ok) {
+				const data = await res.json();
+				scanHistory = data.history || data || [];
+			}
+		} catch (err) {
+			console.error('스캔 이력 로드 실패:', err);
+		} finally {
+			scanHistoryLoading = false;
+		}
+	}
+
+	async function toggleScanHistory() {
+		scanHistoryOpen = !scanHistoryOpen;
+		if (scanHistoryOpen) await loadScanHistory();
+	}
+
+	function formatDateTime(dt: string | null): string {
+		if (!dt) return '—';
+		try {
+			return new Date(dt).toLocaleString('ko-KR', {
+				year: 'numeric', month: '2-digit', day: '2-digit',
+				hour: '2-digit', minute: '2-digit'
+			});
+		} catch {
+			return dt;
+		}
+	}
+
+	function formatElapsed(start: string, end: string | null): string {
+		if (!end) return '진행 중';
+		const diff = new Date(end).getTime() - new Date(start).getTime();
+		const s = Math.floor(diff / 1000);
+		if (s < 60) return `${s}초`;
+		const m = Math.floor(s / 60);
+		return `${m}분 ${s % 60}초`;
+	}
 </script>
 
 <div class="space-y-6">
@@ -67,7 +123,69 @@
 		</button>
 	</div>
 
-	<!-- 테이블 -->
+	<!-- 스캔 이력 접이식 섹션 -->
+	<div class="rounded-xl border bg-card overflow-hidden">
+		<button
+			onclick={toggleScanHistory}
+			class="flex w-full items-center justify-between px-5 py-3 text-left hover:bg-muted/30 transition-colors"
+		>
+			<div class="flex items-center gap-2">
+				<ScanLine class="size-4 text-primary" />
+				<span class="text-sm font-semibold">스캔 이력</span>
+			</div>
+			{#if scanHistoryOpen}
+				<ChevronDown class="size-4 text-muted-foreground" />
+			{:else}
+				<ChevronRight class="size-4 text-muted-foreground" />
+			{/if}
+		</button>
+
+		{#if scanHistoryOpen}
+			{#if scanHistoryLoading}
+				<div class="flex items-center justify-center py-8 text-sm text-muted-foreground border-t">
+					<div class="flex items-center gap-2">
+						<div class="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+						로딩 중...
+					</div>
+				</div>
+			{:else if scanHistory.length === 0}
+				<div class="border-t py-8 text-center text-sm text-muted-foreground">
+					스캔 이력이 없습니다.
+				</div>
+			{:else}
+				<div class="border-t">
+					<table class="w-full text-xs">
+						<thead class="border-b bg-muted/40">
+							<tr>
+								<th class="px-4 py-2 text-left font-medium text-muted-foreground">시작일시</th>
+								<th class="px-4 py-2 text-left font-medium text-muted-foreground">종료일시</th>
+								<th class="px-4 py-2 text-right font-medium text-muted-foreground">스캔 파일</th>
+								<th class="px-4 py-2 text-right font-medium text-muted-foreground">소요시간</th>
+								<th class="px-4 py-2 text-center font-medium text-muted-foreground">상태</th>
+							</tr>
+						</thead>
+						<tbody class="divide-y divide-border">
+							{#each scanHistory as scan}
+								<tr class="hover:bg-muted/20 transition-colors">
+									<td class="px-4 py-2 font-mono">{formatDateTime(scan.started_at)}</td>
+									<td class="px-4 py-2 font-mono">{formatDateTime(scan.finished_at)}</td>
+									<td class="px-4 py-2 text-right">{scan.scanned_files?.toLocaleString() ?? '—'} / {scan.total_files?.toLocaleString() ?? '—'}</td>
+									<td class="px-4 py-2 text-right">{formatElapsed(scan.started_at, scan.finished_at)}</td>
+									<td class="px-4 py-2 text-center">
+										<span class="rounded-full px-2 py-0.5 font-medium {scan.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : scan.status === 'running' ? 'bg-blue-100 text-blue-700' : 'bg-muted text-muted-foreground'}">
+											{scan.status === 'completed' ? '완료' : scan.status === 'running' ? '진행 중' : scan.status ?? '중단'}
+										</span>
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
+		{/if}
+	</div>
+
+	<!-- 파일 이동 이력 테이블 -->
 	<div class="rounded-xl border bg-card">
 		{#if loading}
 			<div class="flex items-center justify-center py-16 text-sm text-muted-foreground">

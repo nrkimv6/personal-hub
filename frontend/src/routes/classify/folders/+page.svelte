@@ -12,7 +12,10 @@
 		FileImage,
 		Folder,
 		RefreshCw,
-		Brain
+		Brain,
+		ChevronDown,
+		ChevronRight,
+		ClipboardList
 	} from 'lucide-svelte';
 
 	// === 타입 정의 ===
@@ -50,6 +53,64 @@
 	let extensions = $state(['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'raw']);
 	let scanDone = $state(false);
 	let newFolderInput = $state('');
+
+	// === 폴더 분류 이력 상태 ===
+	let classifyHistoryOpen = $state(false);
+	let classifyHistoryLoading = $state(false);
+
+	interface ClassifyHistoryItem {
+		id: number;
+		started_at: string;
+		finished_at: string | null;
+		processed_folders: number;
+		mapped_count: number;
+		status: string;
+	}
+
+	let classifyHistoryList: ClassifyHistoryItem[] = $state([]);
+
+	async function toggleClassifyHistory() {
+		classifyHistoryOpen = !classifyHistoryOpen;
+		if (classifyHistoryOpen && classifyHistoryList.length === 0) {
+			await loadClassifyHistory();
+		}
+	}
+
+	async function loadClassifyHistory() {
+		classifyHistoryLoading = true;
+		try {
+			const res = await fetchWithTimeout('/api/ic/folders/classify/history');
+			if (res.ok) {
+				const data = await res.json();
+				classifyHistoryList = data.history || data || [];
+			}
+		} catch (e) {
+			console.error('분류 이력 로드 실패:', e);
+		} finally {
+			classifyHistoryLoading = false;
+		}
+	}
+
+	function formatDateTime(dt: string | null): string {
+		if (!dt) return '—';
+		try {
+			return new Date(dt).toLocaleString('ko-KR', {
+				year: 'numeric', month: '2-digit', day: '2-digit',
+				hour: '2-digit', minute: '2-digit'
+			});
+		} catch {
+			return dt;
+		}
+	}
+
+	function formatElapsed(start: string, end: string | null): string {
+		if (!end) return '진행 중';
+		const diff = new Date(end).getTime() - new Date(start).getTime();
+		const s = Math.floor(diff / 1000);
+		if (s < 60) return `${s}초`;
+		const m = Math.floor(s / 60);
+		return `${m}분 ${s % 60}초`;
+	}
 
 	// === pagination 상태 ===
 	let currentPage = $state(1);
@@ -833,6 +894,68 @@
 							»
 						</button>
 					</div>
+				</div>
+			{/if}
+		{/if}
+	</div>
+
+	<!-- 폴더 분류 이력 섹션 -->
+	<div class="rounded-lg border bg-card overflow-hidden">
+		<button
+			onclick={toggleClassifyHistory}
+			class="flex w-full items-center justify-between px-5 py-3 text-left hover:bg-muted/30 transition-colors"
+		>
+			<div class="flex items-center gap-2">
+				<ClipboardList class="h-4 w-4 text-primary" />
+				<span class="text-sm font-semibold">분류 이력</span>
+			</div>
+			{#if classifyHistoryOpen}
+				<ChevronDown class="h-4 w-4 text-muted-foreground" />
+			{:else}
+				<ChevronRight class="h-4 w-4 text-muted-foreground" />
+			{/if}
+		</button>
+
+		{#if classifyHistoryOpen}
+			{#if classifyHistoryLoading}
+				<div class="flex items-center justify-center py-8 text-sm text-muted-foreground border-t">
+					<div class="flex items-center gap-2">
+						<RefreshCw class="h-4 w-4 animate-spin" />
+						로딩 중...
+					</div>
+				</div>
+			{:else if classifyHistoryList.length === 0}
+				<div class="border-t py-8 text-center text-sm text-muted-foreground">
+					분류 이력이 없습니다.
+				</div>
+			{:else}
+				<div class="border-t">
+					<table class="w-full text-xs">
+						<thead class="border-b bg-muted/40">
+							<tr>
+								<th class="px-4 py-2 text-left font-medium text-muted-foreground">실행일시</th>
+								<th class="px-4 py-2 text-right font-medium text-muted-foreground">처리 폴더</th>
+								<th class="px-4 py-2 text-right font-medium text-muted-foreground">매핑 수</th>
+								<th class="px-4 py-2 text-right font-medium text-muted-foreground">소요시간</th>
+								<th class="px-4 py-2 text-center font-medium text-muted-foreground">상태</th>
+							</tr>
+						</thead>
+						<tbody class="divide-y divide-border">
+							{#each classifyHistoryList as item}
+								<tr class="hover:bg-muted/20 transition-colors">
+									<td class="px-4 py-2 font-mono">{formatDateTime(item.started_at)}</td>
+									<td class="px-4 py-2 text-right">{item.processed_folders?.toLocaleString() ?? '—'}</td>
+									<td class="px-4 py-2 text-right">{item.mapped_count?.toLocaleString() ?? '—'}</td>
+									<td class="px-4 py-2 text-right">{formatElapsed(item.started_at, item.finished_at)}</td>
+									<td class="px-4 py-2 text-center">
+										<span class="rounded-full px-2 py-0.5 font-medium {item.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : item.status === 'running' ? 'bg-blue-100 text-blue-700' : 'bg-muted text-muted-foreground'}">
+											{item.status === 'completed' ? '완료' : item.status === 'running' ? '진행 중' : item.status ?? '중단'}
+										</span>
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
 				</div>
 			{/if}
 		{/if}
