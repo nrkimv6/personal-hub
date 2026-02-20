@@ -85,6 +85,14 @@ phash_state = {
     "error": None,
 }
 
+# === 전역 CLIP 상태 ===
+clip_state = {
+    "is_running": False,
+    "processed": 0,
+    "total": 0,
+    "error": None,
+}
+
 
 # === 엔드포인트 ===
 @router.post("/start")
@@ -531,6 +539,86 @@ def run_phash_task():
         print(msg)
         from ..workers.log_buffer import pipeline_logs
         pipeline_logs.add("phash", msg)
+    finally:
+        db.close()
+
+
+# === CLIP 엔드포인트 ===
+@router.post("/clip")
+async def start_clip(
+    background_tasks: BackgroundTasks,
+):
+    """CLIP 임베딩 일괄 계산 시작 (백그라운드)"""
+    global clip_state
+
+    if clip_state["is_running"]:
+        raise HTTPException(status_code=409, detail="CLIP 임베딩 계산이 이미 실행 중입니다.")
+
+    clip_state.update({
+        "is_running": True,
+        "processed": 0,
+        "total": 0,
+        "error": None,
+    })
+
+    background_tasks.add_task(run_clip_task)
+
+    return {"status": "started", "message": "CLIP 임베딩 계산이 시작되었습니다."}
+
+
+@router.get("/clip/status")
+async def get_clip_status():
+    """CLIP 임베딩 계산 진행 상태 조회"""
+    total = clip_state["total"]
+    processed = clip_state["processed"]
+    progress = (processed / total * 100) if total > 0 else 0.0
+    return {
+        "is_running": clip_state["is_running"],
+        "processed": processed,
+        "total": total,
+        "progress_percent": round(progress, 2),
+        "error": clip_state["error"],
+    }
+
+
+def run_clip_task():
+    """CLIP 임베딩 일괄 계산 백그라운드 태스크 (동기)"""
+    global clip_state
+    import asyncio
+
+    from ..database import SessionLocal
+    from ..workers.clip import CLIPEmbeddingWorker
+
+    db = SessionLocal()
+    try:
+        worker = CLIPEmbeddingWorker(
+            db,
+            model_name=settings.CLIP_MODEL_NAME,
+            batch_size=settings.CLIP_BATCH_SIZE,
+        )
+
+        def on_progress(total, processed, current_file):
+            clip_state["processed"] = processed
+            clip_state["total"] = total
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(worker.compute_all_embeddings(on_progress=on_progress))
+        loop.close()
+
+        clip_state["is_running"] = False
+        msg = f"[CLIP 완료] {result.get('processed', 0)}/{result.get('total', 0)}"
+        print(msg)
+        from ..workers.log_buffer import pipeline_logs
+        pipeline_logs.add("clip", msg)
+
+    except Exception as e:
+        clip_state["error"] = str(e)
+        clip_state["is_running"] = False
+        msg = f"[CLIP 오류] {e}"
+        print(msg)
+        from ..workers.log_buffer import pipeline_logs
+        pipeline_logs.add("clip", msg)
     finally:
         db.close()
 

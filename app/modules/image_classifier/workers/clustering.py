@@ -24,9 +24,42 @@ class TimeClusteringWorker:
         self.db = db
         self.gap_minutes = gap_minutes
 
-    def cluster_all_unclassified(self) -> dict:
+    def cluster_all(self, on_progress: Optional[callable] = None) -> dict:
+        """
+        전체 파일 재클러스터링 (기존 클러스터 삭제 후 전체 재생성)
+
+        기존 final_category_id는 보존 (클러스터만 재생성, 분류는 유지)
+
+        Args:
+            on_progress: 진행 콜백 (processed, total)
+
+        Returns:
+            통계 정보
+        """
+        print(f"[시간 클러스터링] 전체 재생성 시작 (갭: {self.gap_minutes}분)")
+
+        # 기존 클러스터 삭제
+        self.db.execute(text("UPDATE file_classifications SET cluster_id = NULL"))
+        self.db.execute(text("DELETE FROM time_clusters"))
+        self.db.flush()
+
+        # 날짜 정보가 있는 모든 파일 조회
+        query = text("""
+            SELECT id, file_path, user_date, extracted_date
+            FROM file_classifications
+            WHERE (user_date IS NOT NULL OR extracted_date IS NOT NULL)
+            ORDER BY COALESCE(user_date, extracted_date)
+        """)
+        files = self.db.execute(query).fetchall()
+
+        return self._do_clustering(files, on_progress=on_progress, label="전체 재생성")
+
+    def cluster_all_unclassified(self, on_progress: Optional[callable] = None) -> dict:
         """
         미분류 파일을 시간 기준으로 클러스터링
+
+        Args:
+            on_progress: 진행 콜백 (processed, total)
 
         Returns:
             통계 정보
@@ -44,11 +77,31 @@ class TimeClusteringWorker:
         """)
         files = self.db.execute(query).fetchall()
 
+        return self._do_clustering(files, on_progress=on_progress, label="미분류")
+
+    def _do_clustering(
+        self,
+        files,
+        on_progress: Optional[callable] = None,
+        label: str = "",
+    ) -> dict:
+        """
+        클러스터링 공통 로직
+
+        Args:
+            files: 파일 목록 (id, file_path, user_date, extracted_date)
+            on_progress: 진행 콜백 (processed, total)
+            label: 로그용 라벨
+
+        Returns:
+            통계 정보
+        """
         if not files:
-            print("[시간 클러스터링] 클러스터링할 파일이 없습니다.")
+            print(f"[시간 클러스터링] 클러스터링할 파일이 없습니다. ({label})")
             return {"total": 0, "clusters": 0, "clustered_files": 0}
 
-        print(f"[시간 클러스터링] 대상 파일: {len(files)}개")
+        total = len(files)
+        print(f"[시간 클러스터링] 대상 파일: {total}개 ({label})")
 
         # 클러스터링
         clusters = []
@@ -63,8 +116,7 @@ class TimeClusteringWorker:
             if isinstance(file_date, str):
                 try:
                     file_time = datetime.fromisoformat(file_date)
-                except:
-                    # 날짜만 있는 경우 (YYYY-MM-DD)
+                except Exception:
                     file_time = datetime.strptime(file_date, "%Y-%m-%d")
             else:
                 file_time = file_date
@@ -139,12 +191,15 @@ class TimeClusteringWorker:
                 self.db.execute(update_query, {"cluster_id": cluster_id, "file_id": file_id})
                 clustered_files += 1
 
+            if on_progress:
+                on_progress(clustered_files, total)
+
         self.db.commit()
 
-        print(f"[시간 클러스터링] 완료: {clustered_files}개 파일을 {len(clusters)}개 클러스터로 분류")
+        print(f"[시간 클러스터링] 완료: {clustered_files}개 파일을 {len(clusters)}개 클러스터로 분류 ({label})")
 
         return {
-            "total": len(files),
+            "total": total,
             "clusters": len(clusters),
             "clustered_files": clustered_files,
         }

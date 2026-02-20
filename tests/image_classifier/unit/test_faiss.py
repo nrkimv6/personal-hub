@@ -250,6 +250,50 @@ def test_load_nonexistent_index(faiss_manager):
     assert loaded is False
 
 
+def test_search_by_embedding_returns_results(faiss_manager, seeded_embeddings):
+    """11.14 Right: search_by_embedding() — 임베딩 벡터로 검색"""
+    faiss_manager.build_index()
+
+    # file 1의 임베딩 가져오기
+    query = text("SELECT clip_embedding FROM image_features WHERE file_id = 1")
+    result = faiss_manager.db.execute(query).fetchone()
+    embedding = np.frombuffer(result.clip_embedding, dtype=np.float32)
+
+    # search_by_embedding으로 검색
+    results = faiss_manager.search_by_embedding(embedding, k=5, threshold=0.0)
+
+    assert len(results) > 0
+    # 모든 결과가 (file_id, similarity) 튜플
+    for file_id, similarity in results:
+        assert isinstance(file_id, int)
+        assert 0.0 <= similarity <= 1.0
+
+
+def test_search_by_embedding_threshold(faiss_manager, seeded_embeddings):
+    """11.15 Right: search_by_embedding() — threshold 필터링"""
+    faiss_manager.build_index()
+
+    # file 1의 임베딩
+    query = text("SELECT clip_embedding FROM image_features WHERE file_id = 1")
+    result = faiss_manager.db.execute(query).fetchone()
+    embedding = np.frombuffer(result.clip_embedding, dtype=np.float32)
+
+    results_low = faiss_manager.search_by_embedding(embedding, k=5, threshold=0.0)
+    results_high = faiss_manager.search_by_embedding(embedding, k=5, threshold=0.95)
+
+    assert len(results_high) <= len(results_low)
+
+    for _, similarity in results_high:
+        assert similarity >= 0.95
+
+
+def test_search_by_embedding_without_index(faiss_manager):
+    """11.16 Error: search_by_embedding() — 인덱스 없음 → 빈 결과"""
+    embedding = np.random.rand(512).astype(np.float32)
+    results = faiss_manager.search_by_embedding(embedding, k=5, threshold=0.0)
+    assert results == []
+
+
 def test_search_without_index(faiss_manager, seeded_embeddings):
     """11.13 Error: 인덱스 없이 검색 → 빈 결과"""
     # 인덱스를 빌드하지 않은 상태에서 검색 시도

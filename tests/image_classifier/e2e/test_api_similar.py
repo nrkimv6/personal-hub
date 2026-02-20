@@ -64,7 +64,7 @@ def seeded_similar_data(test_db):
     faiss_manager = FAISSIndexManager(test_db, dimension=512)
     faiss_manager.build_index()
 
-    return {"file_ids": [1, 2, 3, 4, 5]}
+    return {"file_ids": [1, 2, 3, 4, 5], "db": test_db}
 
 
 # ================================================
@@ -106,12 +106,16 @@ def test_search_similar(seeded_similar_data, client):
 
 def test_bulk_suggest(seeded_similar_data, client):
     """12.3 Right: GET /bulk-suggest → 미분류 파일 제안"""
-    # 미분류 파일(file 4, 5)에 대한 제안
-    response = client.get("/api/ic/similar/bulk-suggest?threshold=0.7&max_results=50")
+    # FAISS 매니저를 테스트용으로 주입
+    from app.modules.image_classifier.routers import similar
+    from app.modules.image_classifier.workers.faiss_index import FAISSIndexManager
 
-    # 422 에러가 발생하면 응답 출력
-    if response.status_code == 422:
-        print(f"422 Error response: {response.json()}")
+    faiss_mgr = FAISSIndexManager(seeded_similar_data["db"], dimension=512)
+    faiss_mgr.build_index()
+    similar.faiss_manager = faiss_mgr
+
+    # 미분류 파일(file 4, 5)에 대한 제안
+    response = client.get("/api/ic/similar/bulk-suggest?threshold=0.5&max_results=50")
 
     assert response.status_code == 200
     data = response.json()
@@ -122,7 +126,7 @@ def test_bulk_suggest(seeded_similar_data, client):
     # file 4, 5가 미분류이므로 total_unclassified=2
     assert data["total_unclassified"] == 2
 
-    # 제안이 있을 수도, 없을 수도 있음 (유사도 threshold에 따라)
+    # 제안 구조 확인
     if data["suggestions"]:
         suggestion = data["suggestions"][0]
         assert "file_id" in suggestion

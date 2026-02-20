@@ -5,7 +5,7 @@
 - GET /api/ic/clusters/{id}: 클러스터 상세 조회
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -13,8 +13,17 @@ from typing import Optional
 from datetime import datetime
 
 from ..database import get_db
+from ..config import settings
 
 router = APIRouter(prefix="/clusters", tags=["Clusters"])
+
+# === 전역 클러스터링 상태 ===
+cluster_run_state = {
+    "is_running": False,
+    "processed": 0,
+    "total": 0,
+    "error": None,
+}
 
 
 class ClusterSummary(BaseModel):
@@ -44,6 +53,96 @@ class ClusterDetailResponse(BaseModel):
     duration_minutes: int
     category_path: Optional[str]
     files: list[ClusterFileResponse]
+
+
+@router.post("/run")
+async def run_clustering(
+    background_tasks: BackgroundTasks,
+    mode: str = "all",
+    gap_minutes: int = 60,
+):
+    """
+    클러스터링 실행 (백그라운드)
+
+    Args:
+        mode: "all" (전체 재생성) 또는 "new" (미분류만)
+        gap_minutes: 클러스터 간 최소 시간 갭 (분)
+    """
+    global cluster_run_state
+
+    if cluster_run_state["is_running"]:
+        raise HTTPException(status_code=409, detail="클러스터링이 이미 실행 중입니다.")
+
+    if mode not in ("all", "new"):
+        raise HTTPException(status_code=400, detail="mode는 'all' 또는 'new'만 가능합니다.")
+
+    cluster_run_state.update({
+        "is_running": True,
+        "processed": 0,
+        "total": 0,
+        "error": None,
+    })
+
+    background_tasks.add_task(_run_clustering_task, mode, gap_minutes)
+
+    return {
+        "status": "started",
+        "mode": mode,
+        "gap_minutes": gap_minutes,
+        "message": f"클러스터링이 시작되었습니다. (모드: {mode})"
+    }
+
+
+@router.get("/run/status")
+async def get_clustering_status():
+    """클러스터링 진행 상태 조회"""
+    total = cluster_run_state["total"]
+    processed = cluster_run_state["processed"]
+    progress = (processed / total * 100) if total > 0 else 0.0
+    return {
+        "is_running": cluster_run_state["is_running"],
+        "processed": processed,
+        "total": total,
+        "progress_percent": round(progress, 2),
+        "error": cluster_run_state["error"],
+    }
+
+
+def _run_clustering_task(mode: str, gap_minutes: int):
+    """클러스터링 백그라운드 태스크"""
+    global cluster_run_state
+
+    from ..database import SessionLocal
+    from ..workers.clustering import TimeClusteringWorker
+
+    db = SessionLocal()
+    try:
+        worker = TimeClusteringWorker(db, gap_minutes=gap_minutes)
+
+        def on_progress(processed, total):
+            cluster_run_state["processed"] = processed
+            cluster_run_state["total"] = total
+
+        if mode == "all":
+            result = worker.cluster_all(on_progress=on_progress)
+        else:
+            result = worker.cluster_all_unclassified(on_progress=on_progress)
+
+        cluster_run_state["is_running"] = False
+        msg = f"[클러스터링 완료] {result}"
+        print(msg)
+        from ..workers.log_buffer import pipeline_logs
+        pipeline_logs.add("cluster", msg)
+
+    except Exception as e:
+        cluster_run_state["error"] = str(e)
+        cluster_run_state["is_running"] = False
+        msg = f"[클러스터링 오류] {e}"
+        print(msg)
+        from ..workers.log_buffer import pipeline_logs
+        pipeline_logs.add("cluster", msg)
+    finally:
+        db.close()
 
 
 @router.get("")

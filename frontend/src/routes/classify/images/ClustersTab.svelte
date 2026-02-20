@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
-	import { Clock, Calendar, RotateCcw, Tag, Eye, CheckCircle2, FileImage, X } from 'lucide-svelte';
+	import { Clock, Calendar, RotateCcw, Tag, Eye, CheckCircle2, FileImage, X, Play } from 'lucide-svelte';
 
 	interface Cluster {
 		cluster_id: number;
@@ -33,9 +33,69 @@
 	let detailCluster: any = $state(null);
 	let detailLoading = $state(false);
 
+	// 클러스터링 실행 상태
+	let clusterRunning = $state(false);
+	let clusterRunPollTimer: ReturnType<typeof setInterval> | null = null;
+	let clusterRunProcessed = $state(0);
+	let clusterRunTotal = $state(0);
+
 	onMount(() => {
 		loadClusters();
+		checkClusteringStatus();
 	});
+
+	async function runClustering(mode: 'all' | 'new') {
+		if (!confirm(mode === 'all'
+			? '기존 클러스터를 삭제하고 전체 재클러스터링합니다. 진행하시겠습니까?'
+			: '미분류 파일만 클러스터링합니다. 진행하시겠습니까?'))
+			return;
+
+		try {
+			const res = await fetchWithTimeout(
+				`/api/ic/clusters/run?mode=${mode}&gap_minutes=${gapMinutes}`,
+				{ method: 'POST' }
+			);
+			if (!res.ok) {
+				const data = await res.json();
+				throw new Error(data.detail || `HTTP ${res.status}`);
+			}
+			clusterRunning = true;
+			startClusterPolling();
+		} catch (err: any) {
+			alert(`클러스터링 시작 실패: ${err.message}`);
+		}
+	}
+
+	async function checkClusteringStatus() {
+		try {
+			const res = await fetchWithTimeout('/api/ic/clusters/run/status');
+			if (!res.ok) return;
+			const data = await res.json();
+			clusterRunning = data.is_running;
+			clusterRunProcessed = data.processed;
+			clusterRunTotal = data.total;
+			if (clusterRunning) startClusterPolling();
+		} catch { /* ignore */ }
+	}
+
+	function startClusterPolling() {
+		if (clusterRunPollTimer) return;
+		clusterRunPollTimer = setInterval(async () => {
+			try {
+				const res = await fetchWithTimeout('/api/ic/clusters/run/status');
+				if (!res.ok) return;
+				const data = await res.json();
+				clusterRunning = data.is_running;
+				clusterRunProcessed = data.processed;
+				clusterRunTotal = data.total;
+				if (!data.is_running) {
+					clearInterval(clusterRunPollTimer!);
+					clusterRunPollTimer = null;
+					loadClusters();
+				}
+			} catch { /* ignore */ }
+		}, 2000);
+	}
 
 	async function loadClusters() {
 		loading = true;
@@ -120,6 +180,29 @@
 			<p class="mt-1 text-sm text-muted-foreground">
 				1시간 이내 촬영된 사진을 시간대별로 묶어 검토합니다.
 			</p>
+		</div>
+		<div class="flex items-center gap-2">
+			{#if clusterRunning}
+				<span class="text-xs text-muted-foreground">
+					{clusterRunProcessed}/{clusterRunTotal}
+				</span>
+			{/if}
+			<button
+				onclick={() => runClustering('new')}
+				disabled={clusterRunning}
+				class="flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50 transition-colors"
+			>
+				<Play class="size-3.5 {clusterRunning ? 'animate-pulse' : ''}" />
+				{clusterRunning ? '실행 중...' : '신규만'}
+			</button>
+			<button
+				onclick={() => runClustering('all')}
+				disabled={clusterRunning}
+				class="flex items-center gap-1.5 rounded-lg border border-amber-500/30 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50 transition-colors dark:text-amber-400 dark:hover:bg-amber-950/20"
+			>
+				<RotateCcw class="size-3.5" />
+				전체 재생성
+			</button>
 		</div>
 	</div>
 

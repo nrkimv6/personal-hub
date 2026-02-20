@@ -236,8 +236,69 @@ def test_cluster_file_count_consistent(client, seeded_clusters):
     assert data["file_count"] == len(data["files"])
 
 
+def test_run_clustering_all(client, test_db):
+    """4.2 Right: POST /clusters/run?mode=all → 전체 재클러스터링"""
+    from datetime import datetime, timedelta
+
+    base_time = datetime(2023, 4, 15, 10, 0, 0)
+
+    # 파일 3개 생성 (날짜 있음)
+    for i in range(3):
+        time = base_time + timedelta(minutes=i * 10)
+        test_db.execute(text("""
+            INSERT INTO file_classifications (id, file_path, file_hash, status, extracted_date)
+            VALUES (:id, :path, 'hash', 'pending', :date)
+        """), {"id": i+1, "path": f"/test/file{i+1}.jpg", "date": time.isoformat()})
+    test_db.commit()
+
+    response = client.post("/api/ic/clusters/run?mode=all&gap_minutes=60")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "started"
+    assert data["mode"] == "all"
+
+
+def test_run_clustering_invalid_mode(client):
+    """4.3 Error: POST /clusters/run?mode=invalid → 400"""
+    response = client.post("/api/ic/clusters/run?mode=invalid")
+    assert response.status_code == 400
+
+
+def test_run_clustering_status(client):
+    """4.4 Right: GET /clusters/run/status → 상태 조회"""
+    response = client.get("/api/ic/clusters/run/status")
+    assert response.status_code == 200
+    data = response.json()
+    assert "is_running" in data
+    assert "processed" in data
+    assert "total" in data
+
+
+def test_run_clustering_preserves_category(client, test_db):
+    """4.5 CrossCheck: 재클러스터링 후 final_category_id 보존"""
+    from datetime import datetime
+
+    base_time = datetime(2023, 4, 15, 10, 0, 0)
+
+    test_db.execute(text("INSERT INTO categories (id, name, full_path) VALUES (1, 'Travel', 'Travel')"))
+    test_db.execute(text("""
+        INSERT INTO file_classifications (id, file_path, file_hash, status, extracted_date, final_category_id)
+        VALUES (1, '/test/file1.jpg', 'hash', 'ai_classified', :date, 1)
+    """), {"date": base_time.isoformat()})
+    test_db.commit()
+
+    # 재클러스터링 트리거
+    client.post("/api/ic/clusters/run?mode=all&gap_minutes=60")
+
+    # 약간 대기 후 카테고리 보존 확인 (백그라운드 태스크이므로 직접 DB 확인)
+    import time
+    time.sleep(1)
+    row = test_db.execute(text("SELECT final_category_id FROM file_classifications WHERE id = 1")).fetchone()
+    assert row.final_category_id == 1
+
+
 def test_cluster_ordering_by_start_time(client, seeded_clusters):
-    """4.2 CrossCheck: 클러스터 목록이 start_time DESC 정렬"""
+    """5.1 CrossCheck: 클러스터 목록이 start_time DESC 정렬"""
     response = client.get("/api/ic/clusters")
 
     assert response.status_code == 200

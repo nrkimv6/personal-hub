@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
-	import { Search, RefreshCw, Tag, ArrowRight } from 'lucide-svelte';
+	import { Search, RefreshCw, Tag, ArrowRight, Cpu, AlertTriangle } from 'lucide-svelte';
 
 	interface SimilarSuggestion {
 		file_id: number;
@@ -28,6 +28,93 @@
 	let totalUnclassified = $state(0);
 	let buildingIndex = $state(false);
 
+	// CLIP 임베딩 상태
+	let clipReady = $state(false);
+	let clipChecking = $state(true);
+	let clipRunning = $state(false);
+	let clipProcessed = $state(0);
+	let clipTotal = $state(0);
+	let clipPollTimer: ReturnType<typeof setInterval> | null = null;
+
+	async function checkClipStatus() {
+		try {
+			const res = await fetchWithTimeout('/api/ic/scan/clip/status');
+			if (!res.ok) return;
+			const data = await res.json();
+			clipRunning = data.is_running;
+			clipProcessed = data.processed;
+			clipTotal = data.total;
+
+			// CLIP이 실행 완료된 적이 있는지 pipeline에서 확인
+			const pipeRes = await fetchWithTimeout('/api/ic/stats/pipeline');
+			if (pipeRes.ok) {
+				const pipeline = await pipeRes.json();
+				const clipStage = pipeline.clip;
+				// last_run이 있거나 실행 중이면 CLIP이 준비된 것
+				if (clipStage?.last_run || clipStage?.is_running) {
+					clipReady = true;
+				} else {
+					// DB에서 clip_embedding 존재 여부 직접 확인
+					const statsRes = await fetchWithTimeout('/api/ic/stats');
+					if (statsRes.ok) {
+						const stats = await statsRes.json();
+						// clip_embeddings 카운트가 있으면 준비됨
+						clipReady = (stats.clip_embeddings ?? 0) > 0;
+					}
+				}
+			}
+		} catch {
+			// 무시
+		} finally {
+			clipChecking = false;
+		}
+	}
+
+	async function startClipEmbedding() {
+		try {
+			const res = await fetchWithTimeout('/api/ic/scan/clip', { method: 'POST' });
+			if (!res.ok) {
+				const data = await res.json();
+				throw new Error(data.detail || `HTTP ${res.status}`);
+			}
+			clipRunning = true;
+			startClipPolling();
+		} catch (err: any) {
+			alert(`CLIP 임베딩 계산 시작 실패: ${err.message}`);
+		}
+	}
+
+	function startClipPolling() {
+		if (clipPollTimer) return;
+		clipPollTimer = setInterval(async () => {
+			try {
+				const res = await fetchWithTimeout('/api/ic/scan/clip/status');
+				if (!res.ok) return;
+				const data = await res.json();
+				clipRunning = data.is_running;
+				clipProcessed = data.processed;
+				clipTotal = data.total;
+
+				if (!data.is_running) {
+					stopClipPolling();
+					clipReady = true;
+					if (data.error) {
+						alert(`CLIP 임베딩 오류: ${data.error}`);
+					}
+				}
+			} catch {
+				// 무시
+			}
+		}, 3000);
+	}
+
+	function stopClipPolling() {
+		if (clipPollTimer) {
+			clearInterval(clipPollTimer);
+			clipPollTimer = null;
+		}
+	}
+
 	async function buildFaissIndex() {
 		buildingIndex = true;
 		try {
@@ -41,8 +128,18 @@
 		}
 	}
 
-	onMount(() => {
-		loadSimilarSuggestions();
+	onMount(async () => {
+		await checkClipStatus();
+		if (clipRunning) {
+			startClipPolling();
+		}
+		if (clipReady) {
+			loadSimilarSuggestions();
+		}
+	});
+
+	onDestroy(() => {
+		stopClipPolling();
 	});
 
 	async function loadSimilarSuggestions() {
@@ -179,15 +276,58 @@
 				이미 분류된 이미지와 유사한 미분류 이미지를 찾아 자동으로 분류 제안합니다.
 			</p>
 		</div>
-		<button
-			onclick={buildFaissIndex}
-			disabled={buildingIndex}
-			class="flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50 transition-colors"
-		>
-			<RefreshCw class="size-3.5 {buildingIndex ? 'animate-spin' : ''}" />
-			{buildingIndex ? '빌드 중...' : '인덱스 빌드'}
-		</button>
+		<div class="flex items-center gap-2">
+			<button
+				onclick={startClipEmbedding}
+				disabled={clipRunning || clipChecking}
+				class="flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50 transition-colors"
+			>
+				<Cpu class="size-3.5 {clipRunning ? 'animate-pulse' : ''}" />
+				{clipRunning ? `CLIP ${clipTotal > 0 ? Math.round(clipProcessed / clipTotal * 100) : 0}%` : 'CLIP 계산'}
+			</button>
+			<button
+				onclick={buildFaissIndex}
+				disabled={buildingIndex || !clipReady}
+				class="flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50 transition-colors"
+			>
+				<RefreshCw class="size-3.5 {buildingIndex ? 'animate-spin' : ''}" />
+				{buildingIndex ? '빌드 중...' : '인덱스 빌드'}
+			</button>
+		</div>
 	</div>
+
+	<!-- CLIP 임베딩 미계산 배너 -->
+	{#if clipChecking}
+		<div class="flex items-center gap-2 rounded-lg border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
+			<div class="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+			CLIP 임베딩 상태 확인 중...
+		</div>
+	{:else if clipRunning}
+		<div class="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+			<div class="flex items-center gap-2 text-sm font-medium text-primary">
+				<Cpu class="size-4 animate-pulse" />
+				CLIP 임베딩 계산 중... ({clipProcessed}/{clipTotal})
+			</div>
+			{#if clipTotal > 0}
+				<div class="mt-2 h-2 w-full rounded-full bg-muted">
+					<div
+						class="h-2 rounded-full bg-primary transition-all"
+						style="width: {Math.round(clipProcessed / clipTotal * 100)}%"
+					></div>
+				</div>
+			{/if}
+		</div>
+	{:else if !clipReady}
+		<div class="rounded-lg border border-amber-500/30 bg-amber-50 px-4 py-3 dark:bg-amber-950/20">
+			<div class="flex items-center gap-2 text-sm font-medium text-amber-700 dark:text-amber-400">
+				<AlertTriangle class="size-4" />
+				CLIP 임베딩이 필요합니다
+			</div>
+			<p class="mt-1 text-xs text-amber-600 dark:text-amber-500">
+				유사 이미지 검색을 위해 CLIP 임베딩을 먼저 계산해야 합니다. 상단의 "CLIP 계산" 버튼을 클릭하세요.
+			</p>
+		</div>
+	{/if}
 
 	<!-- 검색 설정 -->
 	<div class="rounded-xl border bg-card p-4">
@@ -221,7 +361,7 @@
 			</div>
 			<button
 				onclick={loadSimilarSuggestions}
-				disabled={loading}
+				disabled={loading || !clipReady}
 				class="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
 			>
 				<RefreshCw class="size-3.5 {loading ? 'animate-spin' : ''}" />

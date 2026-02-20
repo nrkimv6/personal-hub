@@ -112,7 +112,7 @@ async def get_pipeline_status(db: Session = Depends(get_db)):
     - last_run (비실행 시 DB에서 마지막 기록)
     + 최근 로그 메시지
     """
-    from .scan import scan_state, thumb_state, phash_state
+    from .scan import scan_state, thumb_state, phash_state, clip_state
     from .classify import classification_status
     from ..workers.task_progress import TaskProgressManager
     from ..workers.log_buffer import pipeline_logs, calc_eta
@@ -193,6 +193,14 @@ async def get_pipeline_status(db: Session = Depends(get_db)):
         started_at=phash_started,
     )
 
+    # --- CLIP ---
+    clip = _build_stage(
+        "clip",
+        clip_state["is_running"],
+        clip_state["processed"],
+        clip_state["total"],
+    )
+
     # --- Duplicate ---
     dup_task = progress_mgr.get_running("duplicate")
     if dup_task:
@@ -229,6 +237,7 @@ async def get_pipeline_status(db: Session = Depends(get_db)):
         "scan": scan,
         "thumbnail": thumb,
         "phash": phash,
+        "clip": clip,
         "duplicate": dup,
         "classify": classify,
         "logs": pipeline_logs.get_recent(20),
