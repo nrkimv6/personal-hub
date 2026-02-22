@@ -386,6 +386,13 @@ class ExecutorService:
                     self._force_cleanup_state()
                     return RunStatusResponse(running=False, listener_alive=False, redis_connected=True, pid=None, plan_file=None)
 
+                # 전체실행 시 현재 실행 중인 plan 이름 조회
+                current_plan_name = None
+                if plan_file == "ALL":
+                    current_task_text = self.redis_client.get(STATE_KEY + ":current_task_text")
+                    if current_task_text and current_task_text.startswith("[batch] "):
+                        current_plan_name = current_task_text[len("[batch] "):]
+
                 return RunStatusResponse(
                     running=True,
                     listener_alive=True,
@@ -394,6 +401,7 @@ class ExecutorService:
                     plan_file=plan_file,
                     start_time=datetime.fromisoformat(start_time_str) if start_time_str else None,
                     current_cycle=0,
+                    current_plan_name=current_plan_name,
                 )
             else:
                 return RunStatusResponse(running=False, listener_alive=listener_alive, redis_connected=True, pid=None, plan_file=None)
