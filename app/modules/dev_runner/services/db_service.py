@@ -281,6 +281,45 @@ class DBService:
             return results
 
 
+    # ──────────────────────────────────────────────────────────────────
+    # stream_logs 조회
+    # ──────────────────────────────────────────────────────────────────
+
+    def get_stream_logs(self, cycle_id: str, limit: int = 500) -> List[dict]:
+        """cycle별 stream_logs 조회 (id 오름차순)"""
+        with self._get_connection() as conn:
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT id, cycle_id, tag, message, created_at
+                    FROM stream_logs
+                    WHERE cycle_id = ?
+                    ORDER BY id ASC
+                    LIMIT ?
+                    """,
+                    (cycle_id, limit),
+                ).fetchall()
+                return [dict(row) for row in rows]
+            except Exception:
+                # stream_logs 테이블이 없는 경우 (구버전 DB)
+                return []
+
+    def get_latest_cycle_id(self) -> Optional[str]:
+        """stream_logs에서 가장 최근 cycle_id 반환"""
+        with self._get_connection() as conn:
+            try:
+                row = conn.execute(
+                    """
+                    SELECT cycle_id FROM stream_logs
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """
+                ).fetchone()
+                return row["cycle_id"] if row else None
+            except Exception:
+                return None
+
+
 # 싱글톤 인스턴스
 db_service = DBService()
 
