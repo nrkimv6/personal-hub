@@ -294,7 +294,7 @@
 	}
 
 	// Plan 파일명 표시용
-	let planDisplayName = $derived(() => {
+	let planDisplayName = $derived.by(() => {
 		if (planFile === 'ALL') {
 			if (currentPlanName && batchPlans.length > 0) {
 				return `전체 실행 › ${currentPlanName} (${batchDoneCount}/${batchPlans.length})`;
