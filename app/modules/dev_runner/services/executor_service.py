@@ -120,6 +120,13 @@ class ExecutorService:
         if request.projects:
             command["projects"] = request.projects
 
+        # registered_paths에서 wtools 외부 경로 추출
+        if request.parallel:
+            from app.modules.dev_runner.services.plan_service import plan_service
+            extra_dirs = plan_service.get_extra_plan_dirs()
+            if extra_dirs:
+                command["extra_plan_dirs"] = ",".join(extra_dirs)
+
         try:
             # Redis LPUSH - 명령 전송
             await self.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))

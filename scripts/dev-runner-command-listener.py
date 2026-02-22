@@ -206,6 +206,9 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
     if command.get("projects"):
         cmd.extend(["--projects", command["projects"]])
 
+    if command.get("extra_plan_dirs"):
+        cmd.extend(["--extra-plan-dirs", command["extra_plan_dirs"]])
+
     # 로그 파일 생성
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_file = LOG_DIR / f"plan-runner-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
