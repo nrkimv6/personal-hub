@@ -391,9 +391,23 @@ Write-ServiceLog "All workers will be started via startup program (requires user
 # ============================================================
 Write-ServiceLog "Starting API Server in foreground..."
 
-$VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
-if (-not (Test-Path $VenvPython)) {
-    $VenvPython = Join-Path $ProjectRoot "venv\Scripts\python.exe"
+$VenvScripts = Join-Path $ProjectRoot ".venv\Scripts"
+if (-not (Test-Path $VenvScripts)) {
+    $VenvScripts = Join-Path $ProjectRoot "venv\Scripts"
+}
+$VenvPython = Join-Path $VenvScripts "python.exe"
+
+# alias exe 사용: monitorpage-api.exe 또는 monitorpage-dev.exe (fallback: python.exe)
+$ApiAliasExe = if ($Dev) {
+    Join-Path $VenvScripts "monitorpage-dev.exe"
+} else {
+    Join-Path $VenvScripts "monitorpage-api.exe"
+}
+if (Test-Path $ApiAliasExe) {
+    Write-ServiceLog "Using alias exe: $(Split-Path $ApiAliasExe -Leaf)"
+    $VenvPython = $ApiAliasExe
+} else {
+    Write-ServiceLog "Alias exe not found, using python.exe (run setup-exe-aliases.ps1 to enable process identification)"
 }
 
 $ApiPidFile = Join-Path $PidDir "api$PidSuffix.pid"
