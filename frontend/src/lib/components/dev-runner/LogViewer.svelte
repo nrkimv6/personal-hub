@@ -380,7 +380,7 @@
 						</span>
 					</div>
 				{:else}
-					<div class="py-0.5 leading-5 {line.isStale ? 'opacity-30' : ''} text-gray-400 break-all whitespace-pre-wrap">
+					<div class="py-0.5 leading-5 {line.isStale ? 'opacity-30' : ''} text-gray-400 break-all whitespace-pre-wrap max-h-[120px] overflow-y-auto">
 						{line.raw}
 					</div>
 				{/if}

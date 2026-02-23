@@ -6,9 +6,10 @@
 	interface Props {
 		plans: DevRunnerPlanFileResponse[];
 		onPlansChange?: () => void;
+		runningPlanFile?: string | null;
 	}
 
-	let { plans, onPlansChange }: Props = $props();
+	let { plans, onPlansChange, runningPlanFile = null }: Props = $props();
 
 	let showIgnored = $state(false);
 	let ignoredPlans = $state<DevRunnerPlanFileResponse[]>([]);
@@ -158,6 +159,15 @@
 	<div class="flex items-center justify-between">
 		<span class="text-xs text-gray-500 font-medium uppercase tracking-wider">Plan Files</span>
 		<div class="flex gap-1">
+			{#if selectedPath}
+				<button
+					class="h-6 px-2 text-[10px] rounded text-gray-500 hover:bg-gray-100 transition-colors"
+					onclick={() => { selectedPath = null; planDetail = null; openPhases = new Set(); }}
+					title="모두 접기"
+				>
+					접기
+				</button>
+			{/if}
 			<button
 				class="h-6 px-2 text-[10px] rounded text-gray-500 hover:bg-gray-100 transition-colors"
 				onclick={toggleIgnored}
@@ -240,25 +250,25 @@
 		<div class="flex-1 overflow-y-auto -mx-1 px-1">
 			<div class="flex flex-col gap-1">
 				{#each displayPlans as plan}
+					{@const isRunning = runningPlanFile === plan.path}
+					{@const isSelected = selectedPath === plan.path}
 					<button
 						onclick={() => handlePlanSelect(plan)}
-						class="flex items-center gap-2 rounded-md px-2.5 py-2 text-left transition-colors w-full {selectedPath === plan.path ? 'bg-blue-50' : 'hover:bg-gray-50'}"
+						class="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors w-full
+							{isRunning ? 'border border-green-300 bg-green-50' : isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}"
 					>
-						<!-- File/Folder icon -->
-						{#if plan.path_type === 'folder'}
+						<!-- Running indicator dot -->
+						{#if isRunning}
+							<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0"></span>
+						{:else if plan.path_type === 'folder'}
 							<svg class="w-3.5 h-3.5 shrink-0 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
 						{:else}
 							<svg class="w-3.5 h-3.5 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
 						{/if}
 
-						<!-- Content -->
-						<div class="flex flex-col gap-0.5 min-w-0 flex-1">
-							<span class="text-xs font-medium truncate">{plan.filename}</span>
-							<div class="flex items-center gap-2">
-								<span class="text-[10px] px-1.5 py-0 h-4 inline-flex items-center rounded {statusBadge(plan.status)}">{plan.status}</span>
-								<span class="text-[10px] text-gray-500 font-mono">{plan.progress.done}/{plan.progress.total}</span>
-							</div>
-						</div>
+						<!-- Compact 1-line: filename + done/total -->
+						<span class="text-xs font-medium truncate flex-1 min-w-0 {isRunning ? 'text-green-800' : ''}">{plan.filename}</span>
+						<span class="text-[10px] font-mono shrink-0 {isRunning ? 'text-green-600' : 'text-gray-400'}">{plan.progress.done}/{plan.progress.total}</span>
 
 						<!-- Eye/EyeOff toggle -->
 						{#if showIgnored}

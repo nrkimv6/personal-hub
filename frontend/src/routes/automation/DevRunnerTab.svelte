@@ -36,7 +36,7 @@
 	let completedTimer: ReturnType<typeof setTimeout> | null = null;
 	let lastStartTime = $state<string | null>(null);
 	let panelOpen = $state(true);
-	let taskHistoryOpen = $state(true);
+	let taskHistoryOpen = $state(false);
 	let currentTracking = $state<CurrentTrackingResponse | null>(null);
 	let trackingInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -64,6 +64,10 @@
 			if (status.running && status.start_time) {
 				lastStartTime = status.start_time;
 				currentRunStats = await devRunnerStatsApi.stats(status.start_time);
+				// 다른 기기/새 브라우저에서 접속해도 실행 중인 plan 정보 복원
+				if (status.plan_file) {
+					lastPlanFile = status.plan_file;
+				}
 			} else if (!status.running) {
 				// 종료 시 마지막 상태 보존
 				if (currentRunStats) {
@@ -152,6 +156,7 @@
 		await pollStatus();
 		void fetchStats();
 		void fetchTasks();
+		void fetchPlans();
 	}
 
 	onMount(async () => {
@@ -196,11 +201,12 @@
 			pollingController.refresh();
 		}
 
-		// Phase 3: current_cycle 변화 감지 → stats + tasks 갱신 (fire-and-forget)
+		// Phase 3: current_cycle 변화 감지 → stats + tasks + plans 갱신 (fire-and-forget)
 		const currentCycle = runStatus?.current_cycle ?? null;
 		if (currentCycle !== null && prevCycle !== null && currentCycle !== prevCycle) {
 			void fetchStats();
 			void fetchTasks();
+			void fetchPlans();
 		}
 		prevCycle = currentCycle;
 
@@ -212,13 +218,14 @@
 			void fetchTasks();
 		}
 
-		// 종료 감지 + stats/tasks 갱신
+		// 종료 감지 + stats/tasks/plans 갱신
 		if (runStatus && prevRunning && !runStatus.running) {
 			justCompleted = true;
 			if (completedTimer) clearTimeout(completedTimer);
 			completedTimer = setTimeout(() => { justCompleted = false; }, 10000);
 			void fetchStats();
 			void fetchTasks();
+			void fetchPlans();
 		}
 
 		// Phase 1: elapsed 타이머 관리
@@ -243,6 +250,16 @@
 	// Phase 4: 종료 후에도 plan 정보 유지
 	let effectivePlanFile = $derived(runStatus?.plan_file ?? lastPlanFile);
 	let effectiveRunStats = $derived(currentRunStats ?? lastRunStats);
+	// Task History 헤더 카운트 (로드된 tasks 기준)
+	let taskSuccessCount = $derived(taskList?.tasks.filter(t => t.status === 'success').length ?? 0);
+	let taskFailedCount = $derived(taskList?.tasks.filter(t => t.status === 'failed').length ?? 0);
+	let taskSkippedCount = $derived(taskList?.tasks.filter(t => t.status === 'skipped').length ?? 0);
+	// Task History 범위 라벨
+	let taskScopeLabel = $derived(
+		effectivePlanFile === 'ALL' ? '전체 실행' :
+		effectivePlanFile ? effectivePlanFile.split(/[\\/]/).pop() ?? '' :
+		'전체 작업'
+	);
 </script>
 
 <div class="flex flex-col h-full overflow-y-auto sm:overflow-hidden">
@@ -309,6 +326,14 @@
 									</div>
 								{:else if effectivePlanFile === 'ALL'}
 									<span class="text-xs text-gray-500">전체 실행</span>
+								{:else if effectivePlanFile}
+									<!-- 다른 기기 접속 등 plans 목록에 없는 경우 fallback -->
+									<div class="flex items-center gap-1.5 shrink-0">
+										<svg class="w-3 h-3 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+										<span class="text-xs text-gray-500 font-mono truncate max-w-[200px]">
+											{effectivePlanFile.split(/[\\/]/).pop()}
+										</span>
+									</div>
 								{/if}
 
 								<div class="h-3.5 w-px bg-gray-200 shrink-0"></div>
@@ -365,7 +390,7 @@
 
 							<!-- Plan Files -->
 							<div class="bg-white border rounded-lg p-4 max-h-[50vh] sm:max-h-[340px] overflow-hidden flex flex-col">
-								<PlanList {plans} onPlansChange={fetchPlans} />
+								<PlanList {plans} onPlansChange={fetchPlans} runningPlanFile={runStatus?.plan_file ?? null} />
 							</div>
 						</div>
 					</div>
@@ -379,7 +404,7 @@
 					<LogViewer planFile={effectivePlanFile ?? undefined} />
 				</div>
 
-				<!-- Task History (Phase 3: 기본 열림) -->
+				<!-- Task History (기본 접힘) -->
 				<div class="shrink-0 border-t">
 					<button
 						onclick={() => (taskHistoryOpen = !taskHistoryOpen)}
@@ -387,9 +412,22 @@
 					>
 						<svg class="w-3.5 h-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
 						<span class="text-xs font-medium uppercase tracking-wider">Task History</span>
-						<span class="text-[10px] text-gray-500 font-mono">{taskList?.total ?? 0} tasks</span>
+						<!-- 범위 라벨 -->
+						<span class="text-[10px] text-gray-400 font-mono truncate max-w-[160px]">{taskScopeLabel}</span>
+						<div class="h-3 w-px bg-gray-200 shrink-0"></div>
+						<!-- 총 건수 + 성공/실패/스킵 요약 -->
+						<span class="text-[10px] text-gray-500 font-mono shrink-0">{taskList?.total ?? 0} tasks</span>
+						{#if taskSuccessCount > 0}
+							<span class="text-[10px] text-green-600 font-mono shrink-0">✓{taskSuccessCount}</span>
+						{/if}
+						{#if taskFailedCount > 0}
+							<span class="text-[10px] text-red-500 font-mono shrink-0">✗{taskFailedCount}</span>
+						{/if}
+						{#if taskSkippedCount > 0}
+							<span class="text-[10px] text-gray-400 font-mono shrink-0">⏭{taskSkippedCount}</span>
+						{/if}
 						<svg
-							class="w-3.5 h-3.5 text-gray-400 ml-auto transition-transform {taskHistoryOpen ? '' : 'rotate-180'}"
+							class="w-3.5 h-3.5 text-gray-400 ml-auto shrink-0 transition-transform {taskHistoryOpen ? '' : 'rotate-180'}"
 							viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
 						>
 							<path d="M18 15l-6-6-6 6" />
@@ -402,11 +440,7 @@
 									<CurrentTrackingCard tracking={currentTracking} />
 								{/if}
 								<div class="flex-1 min-h-0">
-									{#if !effectivePlanFile}
-										<div class="flex items-center justify-center h-full text-sm text-gray-400">
-											Plan을 실행하면 관련 작업 이력이 표시됩니다.
-										</div>
-									{:else if taskList}
+									{#if taskList}
 										<TaskList
 											tasks={taskList.tasks}
 											total={taskList.total}
@@ -416,6 +450,10 @@
 											onDeleteCompleted={handleDeleteCompleted}
 											onDeleteOld={handleDeleteOld}
 										/>
+									{:else}
+										<div class="flex items-center justify-center h-full text-sm text-gray-400">
+											로딩 중...
+										</div>
 									{/if}
 								</div>
 							</div>

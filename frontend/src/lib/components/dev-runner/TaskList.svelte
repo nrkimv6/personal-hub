@@ -55,6 +55,21 @@
 		return () => clearInterval(interval);
 	});
 
+	// source_path별 결정론적 색상 (같은 plan → 같은 색)
+	const PATH_COLORS = [
+		'bg-violet-100 text-violet-700',
+		'bg-sky-100 text-sky-700',
+		'bg-amber-100 text-amber-700',
+		'bg-pink-100 text-pink-700',
+		'bg-teal-100 text-teal-700',
+		'bg-orange-100 text-orange-700',
+	];
+	function pathColor(path: string): string {
+		let hash = 0;
+		for (let i = 0; i < path.length; i++) hash = (hash * 31 + path.charCodeAt(i)) >>> 0;
+		return PATH_COLORS[hash % PATH_COLORS.length];
+	}
+
 	function statusConfig(status: string): { label: string; className: string } {
 		const map: Record<string, { label: string; className: string }> = {
 			pending: { label: 'Pending', className: 'bg-gray-100 text-gray-600' },
@@ -184,7 +199,7 @@
 								{statusConfig(task.status).label}
 							</span>
 							{#if task.source_path}
-								<span class="text-xs text-gray-500 font-mono shrink-0 w-[130px] truncate">
+								<span class="text-[10px] px-1.5 py-0 h-4 inline-flex items-center rounded shrink-0 max-w-[120px] truncate font-mono {pathColor(task.source_path)}">
 									{task.source_path.split(/[\\/]/).pop()}
 								</span>
 							{/if}
@@ -210,7 +225,7 @@
 						<!-- Expanded detail -->
 						{#if expandedId === task.id}
 							<div class="border-t bg-gray-50 px-3 py-3 flex flex-col gap-2">
-								<p class="text-xs leading-relaxed">{task.text}</p>
+								<p class="text-xs leading-relaxed max-h-[200px] overflow-y-auto">{task.text}</p>
 
 								<div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
 									<span>Model: <span class="font-mono">{task.model_used || '-'}</span></span>
@@ -228,7 +243,7 @@
 								{#if task.error_message}
 									<div class="flex items-start gap-2 rounded-md bg-red-50 border border-red-200 p-2.5 mt-1">
 										<svg class="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-										<p class="text-xs text-red-600 leading-relaxed">{task.error_message}</p>
+										<p class="text-xs text-red-600 leading-relaxed max-h-[100px] overflow-y-auto">{task.error_message}</p>
 									</div>
 								{/if}
 

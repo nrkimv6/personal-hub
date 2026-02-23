@@ -386,6 +386,9 @@ class ExecutorService:
                     self._force_cleanup_state()
                     return RunStatusResponse(running=False, listener_alive=False, redis_connected=True, pid=None, plan_file=None)
 
+                cycle_str = self.redis_client.get(STATE_KEY + ":current_cycle")
+                current_cycle = int(cycle_str) if cycle_str else None
+
                 return RunStatusResponse(
                     running=True,
                     listener_alive=True,
@@ -393,7 +396,7 @@ class ExecutorService:
                     pid=int(pid_str) if pid_str else None,
                     plan_file=plan_file,
                     start_time=datetime.fromisoformat(start_time_str) if start_time_str else None,
-                    current_cycle=0,
+                    current_cycle=current_cycle,
                 )
             else:
                 return RunStatusResponse(running=False, listener_alive=listener_alive, redis_connected=True, pid=None, plan_file=None)
