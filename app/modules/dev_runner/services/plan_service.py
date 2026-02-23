@@ -287,7 +287,7 @@ class PlanService:
                 )
 
     # 자동 무시 대상 상태 (정확히 일치해야 함)
-    _IGNORED_STATUSES = {"완료", "보류"}
+    _IGNORED_STATUSES = {"보류"}
 
     def _is_ignored_plan(self, path: Path, status: str, progress: PlanProgressResponse) -> bool:
         """plan이 무시 대상인지 판단"""
