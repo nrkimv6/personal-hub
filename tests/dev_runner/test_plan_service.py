@@ -876,3 +876,95 @@ class TestRunDone:
         assert result["remaining_tasks"] == 0
         assert result["total_tasks"] == 0
         assert result["plan_status"] == ""
+
+
+# ========== batch_done Redis publish 테스트 ==========
+
+class TestBatchDoneRedisPublish:
+    """batch_done() Redis publish 검증"""
+
+    @pytest.fixture
+    def svc(self, tmp_plan_dir):
+        from app.modules.dev_runner.services.plan_service import PlanService
+        s = PlanService.__new__(PlanService)
+        s._registered_paths = [str(tmp_plan_dir)]
+        s._ignored_plans = []
+        return s
+
+    @pytest.fixture
+    def tmp_plan_dir(self, tmp_path):
+        d = tmp_path / "plan"
+        d.mkdir()
+        return d
+
+    @pytest.mark.asyncio
+    async def test_batch_done_publishes_plan_list_and_events(self, svc, tmp_plan_dir):
+        """batch_done: PLAN_LIST, PLAN_START, PLAN_DONE 순서대로 publish"""
+        # 완료 가능한 plan 2개 생성 (모든 체크박스 완료 상태)
+        p1 = tmp_plan_dir / "plan-a.md"
+        p2 = tmp_plan_dir / "plan-b.md"
+        p1.write_text("> 상태: 검토완료\n\n- [x] task1\n", encoding="utf-8")
+        p2.write_text("> 상태: 검토완료\n\n- [x] task1\n", encoding="utf-8")
+
+        published = []
+
+        import app.modules.dev_runner.services.plan_service as ps_module
+
+        def fake_publish(tag, message):
+            published.append((tag, message))
+
+        with patch.object(ps_module, "_publish_log", side_effect=fake_publish), \
+             patch.object(svc, "run_done", new=AsyncMock(return_value={"success": True, "message": "ok", "remaining_tasks": 0, "total_tasks": 1, "plan_status": "완료"})):
+
+            result = await svc.batch_done()
+
+        assert result["total"] == 2
+        assert result["success"] == 2
+
+        tags = [t for t, _ in published]
+        messages = [m for _, m in published]
+
+        # PLAN_LIST 첫 번째 publish
+        assert tags[0] == "BATCH"
+        assert messages[0].startswith("PLAN_LIST ")
+        assert "plan-a.md" in messages[0]
+        assert "plan-b.md" in messages[0]
+
+        # PLAN_START, PLAN_DONE 쌍이 2번 나와야 함
+        assert tags.count("BATCH") >= 5  # PLAN_LIST + 2*PLAN_START + 2*PLAN_DONE
+
+        # 최종 INFO 요약
+        assert "INFO" in tags
+        assert any("성공" in m for _, m in published if _ == "INFO" or True)
+
+    @pytest.mark.asyncio
+    async def test_batch_done_no_targets_no_publish(self, svc, tmp_plan_dir):
+        """batch_done: 대상 0개일 때 publish 미호출"""
+        import app.modules.dev_runner.services.plan_service as ps_module
+
+        published = []
+        with patch.object(ps_module, "_publish_log", side_effect=lambda t, m: published.append((t, m))):
+            result = await svc.batch_done()
+
+        assert result["total"] == 0
+        assert published == []
+
+    @pytest.mark.asyncio
+    async def test_batch_done_failure_publishes_error(self, svc, tmp_plan_dir):
+        """batch_done: run_done 실패 시 ERROR 태그로 publish"""
+        p1 = tmp_plan_dir / "plan-fail.md"
+        p1.write_text("> 상태: 검토완료\n\n- [x] task\n", encoding="utf-8")
+
+        import app.modules.dev_runner.services.plan_service as ps_module
+        published = []
+
+        with patch.object(ps_module, "_publish_log", side_effect=lambda t, m: published.append((t, m))), \
+             patch.object(svc, "run_done", new=AsyncMock(return_value={"success": False, "message": "스크립트 오류", "remaining_tasks": 0, "total_tasks": 1, "plan_status": ""})):
+
+            result = await svc.batch_done()
+
+        assert result["failed"] == 1
+        error_tags = [t for t, _ in published if t == "ERROR"]
+        assert len(error_tags) >= 1
+        error_messages = [m for t, m in published if t == "ERROR"]
+        assert any("스크립트 오류" in m for m in error_messages)

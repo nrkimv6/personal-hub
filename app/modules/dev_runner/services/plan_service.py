@@ -4,10 +4,12 @@ import asyncio
 import json
 import logging
 import re
+import redis
 from pathlib import Path
 from typing import List, Optional
 
 from app.modules.dev_runner.config import config
+from app.modules.dev_runner.services.log_service import LOG_CHANNEL, REDIS_HOST, REDIS_PORT
 from app.modules.dev_runner.schemas import (
     PlanFileResponse, PlanProgressResponse,
     PlanDetailResponse, PlanPhaseResponse, PlanItemResponse,
@@ -15,6 +17,34 @@ from app.modules.dev_runner.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+# 모듈 레벨 Redis 연결 (lazy — 첫 호출 시 생성)
+_redis_client: Optional[redis.Redis] = None
+
+
+def _get_redis() -> Optional[redis.Redis]:
+    global _redis_client
+    if _redis_client is None:
+        try:
+            _redis_client = redis.Redis(
+                host=REDIS_HOST, port=REDIS_PORT,
+                decode_responses=True, socket_connect_timeout=2
+            )
+        except Exception:
+            return None
+    return _redis_client
+
+
+def _publish_log(tag: str, message: str):
+    """Redis pub/sub으로 로그 publish (LogViewer에 실시간 표시)"""
+    from datetime import datetime
+    try:
+        r = _get_redis()
+        if r:
+            ts = datetime.now().strftime("%H:%M:%S")
+            r.publish(LOG_CHANNEL, f"[{ts}] [{tag}] {message}")
+    except Exception:
+        pass  # Redis 미연결 시 무시
 
 
 class PlanService:
@@ -492,11 +522,19 @@ class PlanService:
         all_plans = self.list_plans(include_ignored=True)
         targets = [p for p in all_plans if self._can_done(p)]
 
+        if not targets:
+            return {"total": 0, "success": 0, "failed": 0, "results": []}
+
         results = []
         success_count = 0
         failed_count = 0
 
+        # PLAN_LIST: 쉼표 구분 파일명 (숫자 아님!)
+        filenames = ",".join(p.filename for p in targets)
+        _publish_log("BATCH", f"PLAN_LIST {filenames}")
+
         for plan in targets:
+            _publish_log("BATCH", f"PLAN_START {plan.filename}")
             result = await self.run_done(plan.path)
             results.append({
                 "path": plan.path,
@@ -506,8 +544,13 @@ class PlanService:
             })
             if result["success"]:
                 success_count += 1
+                _publish_log("BATCH", f"PLAN_DONE {plan.filename}")
             else:
                 failed_count += 1
+                _publish_log("BATCH", f"PLAN_DONE {plan.filename}")
+                _publish_log("ERROR", f"{plan.filename}: {result['message']}")
+
+        _publish_log("INFO", f"일괄완료 종료: {success_count}개 성공, {failed_count}개 실패")
 
         return {
             "total": len(targets),
