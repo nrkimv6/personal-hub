@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { fetchWithTimeout } from '$lib/api/client';
+  import { toast } from '$lib/stores/toast';
   import { Brain, Play, Square, AlertCircle, ChevronDown, ChevronUp, Sparkles, Settings, Zap, FolderSearch } from 'lucide-svelte';
 
   // 분류 설정 (settings API에서 로드)
@@ -166,7 +167,7 @@
       if (!running && totalCount > 0) {
         stopPolling();
         showSummary = true;
-        await loadResults();
+        await loadResults(true);
       }
     } catch {
       // 폴링 실패 무시
@@ -202,13 +203,20 @@
   }
 
   // 분류 완료 후 결과 로드
-  async function loadResults() {
-    resultsOffset = 0;
+  async function loadResults(merge = false) {
+    if (!merge) { resultsOffset = 0; }
     try {
       const res = await fetchWithTimeout('/api/ic/files?status=ai_classified&limit=20&skip=0&order_by=id&order_dir=desc');
       if (!res.ok) return;
       const data = await res.json();
-      results = (data.files ?? []).map(mapResultFile);
+      const newItems = (data.files ?? []).map(mapResultFile);
+      if (merge && results.length > 0) {
+        const existingNames = new Set(results.map(r => r.file));
+        const freshItems = newItems.filter(r => !existingNames.has(r.file));
+        results = [...freshItems, ...results];
+      } else {
+        results = newItems;
+      }
       resultsOffset = results.length;
       resultsHasMore = (data.total ?? 0) > resultsOffset;
     } catch {

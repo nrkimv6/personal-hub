@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fetchWithTimeout } from '$lib/api/client';
+  import { toast } from '$lib/stores/toast';
   import { Search, Tag, Trash2, Check, X, Loader2, Images, ImagePlus, Eye, FolderOpen, Clipboard } from 'lucide-svelte';
 
   // 이미지 타입
@@ -88,10 +89,10 @@
       });
       if (!res.ok) {
         const err = await res.json();
-        alert(err.detail || '뷰어 열기 실패');
+        toast.error(err.detail || '뷰어 열기 실패');
       }
     } catch (err: any) {
-      alert(`뷰어 열기 실패: ${err.message}`);
+      toast.error(`뷰어 열기 실패: ${err.message}`);
     }
   }
 
@@ -104,10 +105,10 @@
       });
       if (!res.ok) {
         const err = await res.json();
-        alert(err.detail || '탐색기 열기 실패');
+        toast.error(err.detail || '탐색기 열기 실패');
       }
     } catch (err: any) {
-      alert(`탐색기 열기 실패: ${err.message}`);
+      toast.error(`탐색기 열기 실패: ${err.message}`);
     }
   }
 
@@ -115,7 +116,7 @@
     try {
       await navigator.clipboard.writeText(text);
     } catch {
-      alert('클립보드 복사 실패');
+      toast.error('클립보드 복사 실패');
     }
   }
 
@@ -220,11 +221,14 @@
         body: JSON.stringify({ file_ids: fileIds }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      images = images.map(img =>
+        fileIds.includes(img.id) ? { ...img, status: 'approved' } : img
+      );
       selectedImages = [];
       detailImage = null;
-      loadImages(true);
+      toast.success(`${fileIds.length}개 이미지를 승인했습니다.`);
     } catch (err: any) {
-      alert(`승인 실패: ${err.message}`);
+      toast.error(`승인 실패: ${err.message}`);
     }
   }
 
@@ -268,6 +272,7 @@
 
   async function bulkTagFiles(tagName: string) {
     if (selectedImages.length === 0) return;
+    const taggedCount = selectedImages.length;
     try {
       const res = await fetchWithTimeout('/api/ic/tags/bulk-tag', {
         method: 'POST',
@@ -277,8 +282,9 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       showTagPicker = false;
       await loadTags();
+      toast.success(`${taggedCount}개 이미지에 태그를 부여했습니다.`);
     } catch (err: any) {
-      alert(`태그 부여 실패: ${err.message}`);
+      toast.error(`태그 부여 실패: ${err.message}`);
     }
   }
 
@@ -295,7 +301,7 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       detailTags = detailTags.filter(t => t.id !== tagId);
     } catch (err: any) {
-      alert(`태그 제거 실패: ${err.message}`);
+      toast.error(`태그 제거 실패: ${err.message}`);
     }
   }
 
@@ -319,11 +325,16 @@
         body: JSON.stringify({ file_ids: selectedImages, category_id: categoryId }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const categoryStr = String(categoryId);
+      images = images.map(img =>
+        selectedImages.includes(img.id) ? { ...img, category: categoryStr } : img
+      );
+      const updatedCount = selectedImages.length;
       selectedImages = [];
       showCategoryPicker = false;
-      loadImages(true);
+      toast.success(`${updatedCount}개 이미지의 카테고리를 지정했습니다.`);
     } catch (err: any) {
-      alert(`카테고리 지정 실패: ${err.message}`);
+      toast.error(`카테고리 지정 실패: ${err.message}`);
     }
   }
 
@@ -337,10 +348,13 @@
         body: JSON.stringify({ file_ids: selectedImages }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const deletedCount = selectedImages.length;
+      images = images.filter(img => !selectedImages.includes(img.id));
+      totalCount = Math.max(0, totalCount - deletedCount);
       selectedImages = [];
-      loadImages(true);
+      toast.success(`${deletedCount}개 이미지를 삭제했습니다.`);
     } catch (err: any) {
-      alert(`삭제 실패: ${err.message}`);
+      toast.error(`삭제 실패: ${err.message}`);
     }
   }
 
@@ -354,13 +368,13 @@
       const res = await fetchWithTimeout('/api/ic/scan/thumbnails', { method: 'POST' });
       if (!res.ok) {
         const data = await res.json();
-        alert(data.detail || '썸네일 생성 시작 실패');
+        toast.error(data.detail || '썸네일 생성 시작 실패');
         return;
       }
       thumbGenerating = true;
       pollThumbnailStatus();
     } catch (err: any) {
-      alert(`썸네일 생성 오류: ${err.message}`);
+      toast.error(`썸네일 생성 오류: ${err.message}`);
     }
   }
 
@@ -376,8 +390,13 @@
           thumbGenerating = false;
           if (thumbPollTimer) clearInterval(thumbPollTimer);
           thumbPollTimer = null;
-          // 완료 후 갤러리 새로고침
-          loadImages(true);
+          // 완료 후 로컬 캐시버스팅
+          const ts = Date.now();
+          images = images.map(img => ({
+            ...img,
+            thumbnail: `/api/ic/files/${img.id}/thumbnail?t=${ts}`
+          }));
+          toast.success('썸네일 생성이 완료되었습니다.');
         }
       } catch { /* ignore */ }
     }, 1000);
