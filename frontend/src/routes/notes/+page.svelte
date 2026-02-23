@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { Plus } from 'lucide-svelte';
@@ -31,6 +31,44 @@
   function handleNoteCreated() {
     showCreateModal = false;
   }
+
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    const ctrl = e.ctrlKey || e.metaKey;
+    const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+    const isInputFocused = tag === 'input' || tag === 'textarea';
+
+    // Escape: 모달 닫기
+    if (e.key === 'Escape' && showCreateModal) {
+      showCreateModal = false;
+      return;
+    }
+
+    // 입력창 포커스 중이면 나머지 글로벌 단축키 스킵
+    if (isInputFocused) return;
+
+    // Ctrl+N: 새 메모 모달 열기
+    if (ctrl && e.key === 'n' && !showCreateModal) {
+      e.preventDefault();
+      if (activeTab === 'notes') showCreateModal = true;
+      return;
+    }
+
+    // Ctrl+K: 검색 input 포커스
+    if (ctrl && e.key === 'k') {
+      e.preventDefault();
+      const searchInput = document.querySelector<HTMLInputElement>('input[type="search"], input[placeholder*="검색"]');
+      searchInput?.focus();
+      return;
+    }
+  }
+
+  onMount(() => {
+    document.addEventListener('keydown', handleGlobalKeydown);
+  });
+
+  onDestroy(() => {
+    document.removeEventListener('keydown', handleGlobalKeydown);
+  });
 </script>
 
 <div class="flex flex-col h-full">

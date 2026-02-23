@@ -1,9 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { marked } from 'marked';
-  import hljs from 'highlight.js';
-  import DOMPurify from 'dompurify';
   import type { Note, NoteHistoryItem } from '$lib/api/notes';
+  import { renderMarkdown } from '../utils/markdown';
   import { notesApi } from '$lib/api/notes';
   import { ArrowLeft, Copy, Archive, Pencil, Pin, ChevronDown, ChevronUp, Check, X } from 'lucide-svelte';
   import TagBadge from './TagBadge.svelte';
@@ -24,19 +22,8 @@
   let copied = $state(false);
   let showArchiveConfirm = $state(false);
 
-  // marked 설정 (highlight.js 연동)
-  marked.setOptions({
-    highlight: (code, lang) => {
-      if (lang && hljs.getLanguage(lang)) {
-        return hljs.highlight(code, { language: lang }).value;
-      }
-      return hljs.highlightAuto(code).value;
-    },
-  } as any);
-
   $effect(() => {
-    const raw = marked.parse(note.content || '') as string;
-    renderedHtml = DOMPurify.sanitize(raw);
+    renderedHtml = renderMarkdown(note.content || '');
   });
 
   async function loadHistory() {

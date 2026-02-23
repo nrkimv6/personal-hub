@@ -4,6 +4,8 @@
   import type { Note, TagDef } from '$lib/api/notes';
   import { X, Loader2 } from 'lucide-svelte';
   import TagInput from './TagInput.svelte';
+  import { isCodeLike, detectLanguage } from '../utils/codeDetect';
+  import { renderMarkdown } from '../utils/markdown';
 
   interface Props {
     mode: 'create' | 'edit';
@@ -21,6 +23,10 @@
   let allTags = $state<TagDef[]>([]);
   let saving = $state(false);
   let error = $state('');
+  let showPreview = $state(false);
+  let textareaEl: HTMLTextAreaElement;
+
+  let previewHtml = $derived(renderMarkdown(content));
 
   async function loadTags() {
     allTags = await notesApi.listTags().catch(() => []);
@@ -48,6 +54,129 @@
     }
   }
 
+  /** textarea에서 선택 영역을 앞뒤 마커로 감쌉니다. */
+  function wrapSelection(before: string, after: string) {
+    const start = textareaEl.selectionStart;
+    const end = textareaEl.selectionEnd;
+    const selected = content.slice(start, end);
+    const wrapped = before + (selected || '') + after;
+    content = content.slice(0, start) + wrapped + content.slice(end);
+    requestAnimationFrame(() => {
+      if (selected) {
+        textareaEl.selectionStart = start + before.length;
+        textareaEl.selectionEnd = start + before.length + selected.length;
+      } else {
+        const cursor = start + before.length;
+        textareaEl.selectionStart = cursor;
+        textareaEl.selectionEnd = cursor;
+      }
+      textareaEl.focus();
+    });
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    const ctrl = e.ctrlKey || e.metaKey;
+
+    if (ctrl && e.key === 's') {
+      e.preventDefault();
+      handleSave();
+      return;
+    }
+
+    if (ctrl && !e.shiftKey && e.key === 'b') {
+      e.preventDefault();
+      wrapSelection('**', '**');
+      return;
+    }
+
+    if (ctrl && !e.shiftKey && e.key === 'i') {
+      e.preventDefault();
+      wrapSelection('*', '*');
+      return;
+    }
+
+    if (ctrl && e.shiftKey && e.key === 'K') {
+      e.preventDefault();
+      const start = textareaEl.selectionStart;
+      const block = '```\n\n```';
+      content = content.slice(0, start) + block + content.slice(start);
+      requestAnimationFrame(() => {
+        const cursor = start + 4; // 코드블록 내부
+        textareaEl.selectionStart = cursor;
+        textareaEl.selectionEnd = cursor;
+        textareaEl.focus();
+      });
+      return;
+    }
+
+    if (ctrl && e.key === 'p') {
+      e.preventDefault();
+      showPreview = !showPreview;
+      return;
+    }
+
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const start = textareaEl.selectionStart;
+      const end = textareaEl.selectionEnd;
+      const lines = content.split('\n');
+
+      // 선택된 줄 범위 계산
+      let charCount = 0;
+      let startLine = 0;
+      let endLine = 0;
+      for (let i = 0; i < lines.length; i++) {
+        if (charCount + lines[i].length >= start && startLine === 0 && i > 0 ? charCount <= start : charCount <= start) {
+          startLine = i;
+        }
+        if (charCount <= end) endLine = i;
+        charCount += lines[i].length + 1; // +1 for \n
+      }
+
+      if (e.shiftKey) {
+        // Shift+Tab: 앞 공백 2개 제거
+        for (let i = startLine; i <= endLine; i++) {
+          lines[i] = lines[i].replace(/^  /, '');
+        }
+      } else {
+        // Tab: 앞에 2 spaces 추가
+        for (let i = startLine; i <= endLine; i++) {
+          lines[i] = '  ' + lines[i];
+        }
+      }
+      content = lines.join('\n');
+      return;
+    }
+  }
+
+  function handlePaste(e: ClipboardEvent) {
+    const text = e.clipboardData?.getData('text/plain') ?? '';
+    if (!text || !isCodeLike(text)) return;
+
+    e.preventDefault();
+    const lang = detectLanguage(text);
+    const codeBlock = `\`\`\`${lang}\n${text}\n\`\`\``;
+
+    const start = textareaEl.selectionStart ?? content.length;
+    const end = textareaEl.selectionEnd ?? content.length;
+    const before = content.slice(0, start);
+    const after = content.slice(end);
+
+    // 앞에 내용이 있으면 줄바꿈 추가
+    const prefix = before.length > 0 && !before.endsWith('\n') ? '\n' : '';
+    const suffix = after.length > 0 && !after.startsWith('\n') ? '\n' : '';
+
+    content = before + prefix + codeBlock + suffix + after;
+
+    // 커서를 코드블록 뒤로
+    const newPos = start + prefix.length + codeBlock.length + suffix.length;
+    requestAnimationFrame(() => {
+      textareaEl.selectionStart = newPos;
+      textareaEl.selectionEnd = newPos;
+      textareaEl.focus();
+    });
+  }
+
   onMount(loadTags);
 </script>
 
@@ -56,7 +185,7 @@
   onclick={onClose}
 >
   <div
-    class="relative w-full max-w-2xl max-h-[90vh] bg-card rounded-xl shadow-modal flex flex-col overflow-hidden"
+    class="relative w-full max-h-[90vh] bg-card rounded-xl shadow-modal flex flex-col overflow-hidden transition-all duration-200 {showPreview ? 'max-w-4xl' : 'max-w-2xl'}"
     onclick={(e) => e.stopPropagation()}
     role="dialog"
     aria-modal="true"
@@ -92,14 +221,40 @@
 
       <!-- 본문 -->
       <div>
-        <label class="block text-xs font-medium text-muted-foreground mb-1">내용 (마크다운 지원)</label>
-        <textarea
-          bind:value={content}
-          placeholder="마크다운 또는 코드블록 입력..."
-          class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground
-            focus:outline-none focus:ring-2 focus:ring-ring/30 font-mono resize-y"
-          style="min-height: 240px"
-        ></textarea>
+        <div class="flex items-center justify-between mb-1">
+          <label class="block text-xs font-medium text-muted-foreground">내용 (마크다운 지원)</label>
+          <button
+            type="button"
+            onclick={() => (showPreview = !showPreview)}
+            class="flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors
+              {showPreview
+                ? 'border-primary text-primary bg-primary/10'
+                : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted'}"
+            title="미리보기 토글 (Ctrl+P)"
+          >
+            👁 미리보기
+          </button>
+        </div>
+        <div class="{showPreview ? 'grid grid-cols-2 gap-3' : ''}">
+          <textarea
+            bind:value={content}
+            bind:this={textareaEl}
+            onpaste={handlePaste}
+            onkeydown={handleKeydown}
+            placeholder="마크다운 또는 코드블록 입력..."
+            class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground
+              focus:outline-none focus:ring-2 focus:ring-ring/30 font-mono resize-y"
+            style="min-height: 240px"
+          ></textarea>
+          {#if showPreview}
+            <div
+              class="prose prose-sm dark:prose-invert overflow-y-auto border border-border rounded-lg p-3 max-h-[40vh] bg-background text-foreground"
+              style="min-height: 240px"
+            >
+              {@html previewHtml}
+            </div>
+          {/if}
+        </div>
       </div>
 
       <!-- 비고 -->
