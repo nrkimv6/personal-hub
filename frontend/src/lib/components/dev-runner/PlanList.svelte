@@ -106,43 +106,32 @@
 	let registeredPaths = $state<DevRunnerRegisteredPathResponse[]>([]);
 	let registeredPathsLoading = $state(false);
 
-	// Plan detail (inline accordion)
-	let selectedPath = $state<string | null>(null);
+	// Plan detail view (overlay)
+	let showDetailView = $state(false);
 	let planDetail = $state<DevRunnerPlanDetailResponse | null>(null);
 	let planDetailLoading = $state(false);
-	// Phase accordion state
-	let openPhases = $state<Set<number>>(new Set());
+	let planDetailStatus = $state('');
 
 	async function handlePlanSelect(plan: DevRunnerPlanFileResponse) {
-		if (selectedPath === plan.path) {
-			selectedPath = null;
-			planDetail = null;
-			openPhases = new Set();
-			return;
-		}
-		selectedPath = plan.path;
-		onPlanSelect?.(plan.path);
 		planDetailLoading = true;
 		planDetail = null;
-		openPhases = new Set();
+		planDetailStatus = plan.status;
+		showDetailView = true;
+		onPlanSelect?.(plan.path);
 		try {
 			const encoded = encodePathToBase64(plan.path);
 			planDetail = await devRunnerPlanApi.items(encoded);
 		} catch {
 			planDetail = null;
+			showDetailView = false;
 		} finally {
 			planDetailLoading = false;
 		}
 	}
 
-	function togglePhase(index: number) {
-		const next = new Set(openPhases);
-		if (next.has(index)) {
-			next.delete(index);
-		} else {
-			next.add(index);
-		}
-		openPhases = next;
+	function closeDetailView() {
+		showDetailView = false;
+		planDetail = null;
 	}
 
 	async function loadIgnored() {
@@ -259,15 +248,6 @@
 					일괄 완료
 				</button>
 			{/if}
-			{#if selectedPath}
-				<button
-					class="h-6 px-2 text-[10px] rounded text-gray-500 hover:bg-gray-100 transition-colors"
-					onclick={() => { selectedPath = null; planDetail = null; openPhases = new Set(); }}
-					title="모두 접기"
-				>
-					접기
-				</button>
-			{/if}
 			<button
 				class="h-6 px-2 text-[10px] rounded text-gray-500 hover:bg-gray-100 transition-colors"
 				onclick={toggleIgnored}
@@ -369,11 +349,10 @@
 				{#each displayPlans as plan}
 					{@const isRunning = runningPlanFile === plan.path}
 					{@const isLastRun = !isRunning && lastPlanFile === plan.path}
-					{@const isSelected = selectedPath === plan.path}
 					<button
 						onclick={() => handlePlanSelect(plan)}
 						class="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors w-full
-							{isRunning ? 'border border-green-300 bg-green-50' : isLastRun ? 'bg-gray-50 opacity-60' : isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}"
+							{isRunning ? 'border border-green-300 bg-green-50' : isLastRun ? 'bg-gray-50 opacity-60' : 'hover:bg-gray-50'}"
 					>
 						<!-- Running indicator dot -->
 						{#if isRunning}
@@ -458,66 +437,19 @@
 						{/if}
 					</button>
 
-					<!-- Plan Detail (inline accordion) -->
-					{#if selectedPath === plan.path}
-						<div class="border-t pt-3 mt-1 ml-6">
-							{#if planDetailLoading}
-								<div class="flex items-center justify-center py-4">
-									<div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
-								</div>
-							{:else if planDetail}
-								<div class="max-h-48 overflow-y-auto">
-									{#each planDetail.phases as phase, i}
-										<div class="mb-1">
-											<!-- Phase trigger -->
-											<button
-												class="py-2 text-xs text-gray-500 hover:text-gray-700 w-full text-left flex items-center gap-1"
-												onclick={() => togglePhase(i)}
-											>
-												<svg
-													class="w-3 h-3 transition-transform {openPhases.has(i) ? 'rotate-90' : ''}"
-													viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-												>
-													<path d="M9 18l6-6-6-6" />
-												</svg>
-												{phase.name}
-											</button>
-
-											<!-- Phase content -->
-											{#if openPhases.has(i)}
-												<div class="flex flex-col gap-1.5 pl-4 pb-2">
-													{#each phase.items as item}
-														<div class="flex items-start gap-2 text-xs">
-															{#if item.checked}
-																<svg class="w-3.5 h-3.5 shrink-0 text-green-500 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-															{:else}
-																<svg class="w-3.5 h-3.5 shrink-0 text-gray-400 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>
-															{/if}
-															<span class="{item.checked ? 'text-gray-400 line-through' : ''}">{item.text}</span>
-														</div>
-														{#each item.children as child}
-															<div class="flex items-start gap-2 text-xs ml-4">
-																{#if child.checked}
-																	<svg class="w-3.5 h-3.5 shrink-0 text-green-500 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-																{:else}
-																	<svg class="w-3.5 h-3.5 shrink-0 text-gray-400 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>
-																{/if}
-																<span class="{child.checked ? 'text-gray-400 line-through' : ''}">{child.text}</span>
-															</div>
-														{/each}
-													{/each}
-												</div>
-											{/if}
-										</div>
-									{/each}
-								</div>
-							{:else}
-								<div class="text-xs text-gray-400 py-2 text-center">상세 정보를 불러올 수 없습니다</div>
-							{/if}
-						</div>
-					{/if}
-				{/each}
+					{/each}
 			</div>
 		</div>
 	{/if}
 </div>
+
+<!-- Plan Detail Overlay -->
+{#if showDetailView}
+	{#if planDetailLoading}
+		<div class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center">
+			<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+		</div>
+	{:else if planDetail}
+		<PlanDetailView detail={planDetail} status={planDetailStatus} onClose={closeDetailView} />
+	{/if}
+{/if}
