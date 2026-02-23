@@ -1,6 +1,8 @@
 <script lang="ts">
   import { notesApi } from '$lib/api/notes';
   import type { TagDef } from '$lib/api/notes';
+  import { Plus } from 'lucide-svelte';
+  import TagBadge from './TagBadge.svelte';
 
   interface Props {
     selectedTagIds: number[];
@@ -14,6 +16,10 @@
   let query = $state('');
   let showDropdown = $state(false);
   let creating = $state(false);
+
+  // 새 태그 inline 생성 폼
+  let showCreateForm = $state(false);
+  let newTagColor = $state('#6b7280');
 
   let filteredTags = $derived(
     allTags.filter(
@@ -39,11 +45,13 @@
     if (!query.trim()) return;
     creating = true;
     try {
-      const newTag = await notesApi.createTag({ name: query.trim() });
+      const newTag = await notesApi.createTag({ name: query.trim(), color: newTagColor });
       onTagsRefresh();
       onChange([...selectedTagIds, newTag.id]);
       query = '';
       showDropdown = false;
+      showCreateForm = false;
+      newTagColor = '#6b7280';
     } catch (e: any) {
       alert(e.message);
     } finally {
@@ -57,10 +65,7 @@
   {#if selectedTags.length > 0}
     <div class="flex flex-wrap gap-1 mb-2">
       {#each selectedTags as tag}
-        <span class="flex items-center gap-1 px-2 py-0.5 text-xs rounded-full text-white" style="background-color: {tag.color}">
-          {tag.name}
-          <button onclick={() => removeTag(tag.id)} class="hover:opacity-70 leading-none">✕</button>
-        </span>
+        <TagBadge {tag} size="sm" removable onRemove={() => removeTag(tag.id)} />
       {/each}
     </div>
   {/if}
@@ -73,33 +78,65 @@
     onblur={() => setTimeout(() => (showDropdown = false), 150)}
     oninput={() => (showDropdown = true)}
     placeholder="태그 검색 또는 새로 만들기..."
-    class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+    class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground
+      focus:outline-none focus:ring-2 focus:ring-ring/30"
   />
 
   <!-- 드롭다운 -->
   {#if showDropdown}
-    <div class="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-40 overflow-y-auto">
-      {#each filteredTags as tag}
-        <button
-          onclick={() => selectTag(tag)}
-          class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 text-left"
-        >
-          <span class="w-3 h-3 rounded-full" style="background-color: {tag.color}"></span>
-          {tag.name}
-        </button>
-      {/each}
-      {#if query.trim() && !allTags.some((t) => t.name === query.trim())}
-        <button
-          onclick={createAndSelect}
-          disabled={creating}
-          class="w-full px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left"
-        >
-          + "{query.trim()}" 태그 만들기
-        </button>
-      {/if}
-      {#if filteredTags.length === 0 && !query.trim()}
-        <p class="px-3 py-2 text-xs text-gray-400">사용 가능한 태그 없음</p>
-      {/if}
+    <div class="absolute z-10 w-full mt-1 bg-card border border-border rounded-lg shadow-modal max-h-48 overflow-y-auto flex flex-col">
+      <div class="overflow-y-auto flex-1">
+        {#each filteredTags as tag}
+          <button
+            onclick={() => selectTag(tag)}
+            class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted text-left transition-colors"
+          >
+            <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background-color: {tag.color}"></span>
+            {tag.name}
+          </button>
+        {/each}
+
+        {#if query.trim() && !allTags.some((t) => t.name === query.trim())}
+          {#if showCreateForm}
+            <!-- inline 생성 폼 -->
+            <div class="flex items-center gap-2 px-3 py-2 border-t border-border">
+              <input
+                type="color"
+                bind:value={newTagColor}
+                class="h-6 w-6 rounded cursor-pointer border-0 flex-shrink-0"
+              />
+              <span class="text-sm text-foreground flex-1 truncate">"{query.trim()}"</span>
+              <button
+                onclick={createAndSelect}
+                disabled={creating}
+                class="px-2 py-0.5 text-xs rounded bg-primary text-primary-foreground hover:bg-primary-hover disabled:opacity-50"
+              >Add</button>
+              <button
+                onclick={() => (showCreateForm = false)}
+                class="px-2 py-0.5 text-xs rounded bg-muted text-muted-foreground"
+              >✕</button>
+            </div>
+          {:else}
+            <button
+              onclick={() => (showCreateForm = true)}
+              class="w-full flex items-center gap-1.5 px-3 py-2 text-sm text-primary hover:bg-primary/10 text-left transition-colors"
+            >
+              <Plus class="w-3.5 h-3.5" />
+              "{query.trim()}" 태그 만들기
+            </button>
+          {/if}
+        {/if}
+
+        {#if filteredTags.length === 0 && !query.trim()}
+          <p class="px-3 py-2 text-xs text-muted-foreground">사용 가능한 태그 없음</p>
+        {/if}
+      </div>
+
+      <!-- 닫기 버튼 -->
+      <button
+        onclick={() => (showDropdown = false)}
+        class="w-full text-xs text-muted-foreground border-t border-border px-3 py-1.5 hover:bg-muted text-center transition-colors"
+      >닫기</button>
     </div>
   {/if}
 </div>

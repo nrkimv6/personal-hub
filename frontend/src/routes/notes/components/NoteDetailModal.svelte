@@ -5,6 +5,8 @@
   import DOMPurify from 'dompurify';
   import type { Note, NoteHistoryItem } from '$lib/api/notes';
   import { notesApi } from '$lib/api/notes';
+  import { ArrowLeft, Copy, Archive, Pencil, Pin, ChevronDown, ChevronUp, Check, X } from 'lucide-svelte';
+  import TagBadge from './TagBadge.svelte';
 
   interface Props {
     note: Note;
@@ -19,6 +21,8 @@
   let showHistory = $state(false);
   let archiving = $state(false);
   let renderedHtml = $state('');
+  let copied = $state(false);
+  let showArchiveConfirm = $state(false);
 
   // marked 설정 (highlight.js 연동)
   marked.setOptions({
@@ -42,9 +46,9 @@
     }
   }
 
-  async function handleArchive() {
-    if (!confirm('아카이브로 이동하시겠습니까?')) return;
+  async function handleArchiveConfirm() {
     archiving = true;
+    showArchiveConfirm = false;
     try {
       await notesApi.archive(note.id);
       onRefresh();
@@ -57,7 +61,10 @@
   }
 
   function handleCopyAll() {
-    navigator.clipboard.writeText(note.content).catch(() => {});
+    navigator.clipboard.writeText(note.content).then(() => {
+      copied = true;
+      setTimeout(() => (copied = false), 1500);
+    }).catch(() => {});
   }
 
   function formatDate(iso: string): string {
@@ -69,13 +76,13 @@
     el.querySelectorAll('pre').forEach((pre) => {
       if (pre.querySelector('.copy-btn')) return;
       const btn = document.createElement('button');
-      btn.textContent = '복사';
-      btn.className = 'copy-btn absolute top-2 right-2 text-xs px-2 py-0.5 bg-gray-700 text-white rounded hover:bg-gray-500';
+      btn.textContent = 'Copy';
+      btn.className = 'copy-btn absolute top-2 right-2 text-xs px-2 py-1 bg-muted text-muted-foreground rounded hover:bg-border transition-colors';
       btn.onclick = () => {
         const code = pre.querySelector('code')?.textContent || '';
         navigator.clipboard.writeText(code).catch(() => {});
-        btn.textContent = '복사됨!';
-        setTimeout(() => (btn.textContent = '복사'), 1200);
+        btn.textContent = 'Copied!';
+        setTimeout(() => (btn.textContent = 'Copy'), 1200);
       };
       pre.style.position = 'relative';
       pre.appendChild(btn);
@@ -85,70 +92,84 @@
   let contentEl = $state<HTMLElement | null>(null);
   $effect(() => {
     if (contentEl && renderedHtml) {
-      // 다음 틱에 실행해 DOM이 업데이트된 후 처리
       setTimeout(() => contentEl && addCopyButtons(contentEl), 50);
     }
   });
 </script>
 
 <!-- 오버레이 -->
-<div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onclick={onClose}>
+<div
+  class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-foreground/20 backdrop-blur-sm animate-fade-in"
+  onclick={onClose}
+>
   <div
-    class="relative w-full max-w-2xl max-h-[90vh] bg-white dark:bg-gray-800 rounded-2xl shadow-xl flex flex-col overflow-hidden"
+    class="relative w-full max-w-2xl max-h-[90vh] bg-card rounded-xl shadow-modal flex flex-col overflow-hidden"
     onclick={(e) => e.stopPropagation()}
     role="dialog"
     aria-modal="true"
   >
     <!-- 헤더 -->
-    <div class="flex items-start justify-between p-5 border-b border-gray-200 dark:border-gray-700">
+    <div class="flex items-start justify-between p-5 border-b border-border">
       <div class="flex-1 pr-4">
-        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{note.title}</h2>
-        <p class="text-xs text-gray-400 mt-1">
+        <div class="flex items-center gap-2">
+          <h2 class="text-lg font-semibold text-foreground">{note.title}</h2>
+          {#if note.is_pinned}
+            <Pin class="w-4 h-4 text-primary fill-current flex-shrink-0" />
+          {/if}
+        </div>
+        <p class="text-xs text-muted-foreground mt-1">
           수정: {formatDate(note.updated_at)}
-          {#if note.is_pinned} · 📌 고정{/if}
         </p>
         {#if note.tags.length > 0}
           <div class="flex flex-wrap gap-1 mt-2">
             {#each note.tags as tag}
-              <span class="px-2 py-0.5 text-xs rounded-full text-white" style="background-color: {tag.color}">{tag.name}</span>
+              <TagBadge {tag} />
             {/each}
           </div>
         {/if}
       </div>
-      <button onclick={onClose} class="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+      <button
+        onclick={onClose}
+        class="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+      ><X class="w-4 h-4" /></button>
     </div>
 
     <!-- 본문 -->
     <div class="flex-1 overflow-y-auto p-5">
       {#if note.remark}
-        <div class="mb-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm text-blue-700 dark:text-blue-300">
-          📎 {note.remark}
+        <div class="mb-3 p-3 bg-info-light rounded-lg text-sm text-info">
+          {note.remark}
         </div>
       {/if}
       <div
         bind:this={contentEl}
-        class="prose prose-sm dark:prose-invert max-w-none"
+        class="prose-notes"
       >
         <!-- eslint-disable-next-line svelte/no-at-html-tags -->
         {@html renderedHtml}
       </div>
 
       <!-- 수정 이력 -->
-      <div class="mt-4 border-t border-gray-200 dark:border-gray-700 pt-3">
+      <div class="mt-4 border-t border-border pt-3">
         <button
           onclick={loadHistory}
-          class="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400"
+          class="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
-          {showHistory ? '▲' : '▼'} 수정 이력 {history.length > 0 ? `(${history.length}건)` : ''}
+          {#if showHistory}
+            <ChevronUp class="w-4 h-4" />
+          {:else}
+            <ChevronDown class="w-4 h-4" />
+          {/if}
+          수정 이력 {history.length > 0 ? `(${history.length}건)` : ''}
         </button>
         {#if showHistory}
           {#if history.length === 0}
-            <p class="text-xs text-gray-400 mt-2">이력 없음</p>
+            <p class="text-xs text-muted-foreground mt-2">이력 없음</p>
           {:else}
             <ul class="mt-2 space-y-2">
               {#each history as h}
-                <li class="text-xs text-gray-500 dark:text-gray-400 border-l-2 border-gray-300 pl-3">
-                  <span class="font-medium text-gray-700 dark:text-gray-300">{h.title}</span>
+                <li class="text-xs text-muted-foreground border-l-2 border-border pl-3">
+                  <span class="font-medium text-foreground">{h.title}</span>
                   <span class="ml-2">{formatDate(h.changed_at)}</span>
                 </li>
               {/each}
@@ -159,18 +180,44 @@
     </div>
 
     <!-- 하단 액션 -->
-    <div class="flex gap-2 p-4 border-t border-gray-200 dark:border-gray-700">
-      <button onclick={handleCopyAll} class="px-3 py-2 text-sm rounded-lg border hover:bg-gray-50 dark:hover:bg-gray-700">전체 복사</button>
-      <div class="flex-1"></div>
+    <div class="flex gap-2 p-4 border-t border-border">
       <button
-        onclick={handleArchive}
-        disabled={archiving}
-        class="px-3 py-2 text-sm rounded-lg border text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20"
-      >아카이브</button>
+        onclick={handleCopyAll}
+        class="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-border hover:bg-muted transition-colors"
+      >
+        {#if copied}
+          <Check class="w-4 h-4 text-success" />
+          <span class="text-success">Copied!</span>
+        {:else}
+          <Copy class="w-4 h-4" />
+          Copy All
+        {/if}
+      </button>
+      <div class="flex-1"></div>
+
+      {#if showArchiveConfirm}
+        <span class="flex items-center gap-1">
+          <button
+            onclick={handleArchiveConfirm}
+            class="px-3 py-2 text-sm rounded-lg bg-warning/20 text-warning border border-warning/30 hover:bg-warning/30 transition-colors"
+          >Confirm</button>
+          <button
+            onclick={() => (showArchiveConfirm = false)}
+            class="px-3 py-2 text-sm rounded-lg bg-muted text-muted-foreground hover:bg-border transition-colors"
+          >Cancel</button>
+        </span>
+      {:else}
+        <button
+          onclick={() => (showArchiveConfirm = true)}
+          disabled={archiving}
+          class="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-border text-warning hover:bg-warning/10 transition-colors"
+        ><Archive class="w-4 h-4" /> Archive</button>
+      {/if}
+
       <button
         onclick={() => onEdit(note)}
-        class="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700"
-      >수정</button>
+        class="flex items-center gap-1.5 px-4 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary-hover transition-colors"
+      ><Pencil class="w-4 h-4" /> Edit</button>
     </div>
   </div>
 </div>
