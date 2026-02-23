@@ -35,14 +35,8 @@
 	}
 
 	async function handleBatchDone() {
-		const doneable = (plans ?? []).filter(p => canDone(p));
-		if (doneable.length === 0) {
-			doneMessage = { path: '', success: false, text: '완료 가능한 plan이 없습니다' };
-			setTimeout(() => { doneMessage = null; }, 3000);
-			return;
-		}
-		const names = doneable.map(p => p.filename).join('\n  ');
-		if (!confirm(`${doneable.length}개 plan을 일괄 완료 처리하시겠습니까?\n  ${names}\n\n아카이브 이동, TODO→DONE, 커밋이 수행됩니다.`)) return;
+		// 백엔드가 무시 목록(구현완료 등) 포함 전체 대상 처리
+		if (!confirm('완료 가능한 plan을 일괄 완료 처리하시겠습니까?\n(구현완료 상태 포함)\n\n아카이브 이동, TODO→DONE, 커밋이 수행됩니다.')) return;
 		batchDoneLoading = true;
 		doneMessage = null;
 		try {
