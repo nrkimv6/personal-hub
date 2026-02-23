@@ -165,6 +165,7 @@
   onMount(() => {
     // $effect가 초기에도 실행되므로 별도 호출 불필요
     void loadTags();
+    void loadCategories();
   });
 
   // 클라이언트 사이드 검색 (이름 필터)
@@ -227,9 +228,29 @@
     }
   }
 
-  interface Category { id: number; name: string; }
+  interface Category { id: number; name: string; full_path: string; parent_id: number | null; children: Category[]; }
   let categories = $state<Category[]>([]);
+  let flatCategories = $state<Category[]>([]);
+  let categoryMap = $derived(new Map(flatCategories.map((c) => [c.id, c.full_path])));
   let showCategoryPicker = $state(false);
+
+  function flattenCategories(cats: any[]): Category[] {
+    let result: Category[] = [];
+    for (const cat of cats) {
+      result.push({ id: cat.id, name: cat.name, full_path: cat.full_path, parent_id: cat.parent_id ?? null, children: cat.children ?? [] });
+      if (cat.children?.length > 0) {
+        result = result.concat(flattenCategories(cat.children));
+      }
+    }
+    return result;
+  }
+
+  function getCategoryName(categoryId: string | null): string {
+    if (!categoryId) return '—';
+    const id = Number(categoryId);
+    if (isNaN(id)) return categoryId;
+    return categoryMap.get(id) ?? `#${categoryId}`;
+  }
 
   // 태그 상태
   interface TagItem { id: number; name: string; }
@@ -280,8 +301,12 @@
 
   async function loadCategories() {
     try {
-      const res = await fetchWithTimeout('/api/ic/categories');
-      if (res.ok) categories = (await res.json()).categories ?? [];
+      const res = await fetchWithTimeout('/api/ic/categories?include_tree=true');
+      if (res.ok) {
+        const data = await res.json();
+        categories = data.categories ?? [];
+        flatCategories = flattenCategories(categories);
+      }
     } catch { /* ignore */ }
   }
 
@@ -616,6 +641,9 @@
             <span class="mt-0.5 inline-block rounded px-1 py-0.5 text-[9px] font-medium capitalize {getStatusBadgeClass(img.status)}">
               {getStatusLabel(img.status)}
             </span>
+            {#if img.category}
+              <p class="truncate text-[9px] text-white/70 mt-0.5">{getCategoryName(img.category)}</p>
+            {/if}
           </div>
         </div>
       {/each}
@@ -721,7 +749,7 @@
           </div>
           <div>
             <p class="text-[10px] text-muted-foreground">카테고리</p>
-            <p class="text-xs font-medium text-foreground">{detailData.category ?? '—'}</p>
+            <p class="text-xs font-medium text-foreground">{getCategoryName(detailData.category)}</p>
           </div>
         </div>
         <!-- 전체 경로 표시 + 복사 버튼 -->
@@ -792,12 +820,12 @@
       <p class="text-xs text-muted-foreground">카테고리가 없습니다.</p>
     {:else}
       <div class="max-h-60 space-y-1 overflow-y-auto">
-        {#each categories as cat}
+        {#each flatCategories as cat}
           <button
             onclick={() => assignCategory(cat.id)}
             class="flex w-full items-center rounded-md px-3 py-2 text-left text-xs font-medium text-foreground hover:bg-accent"
           >
-            {cat.name}
+            {cat.full_path}
           </button>
         {/each}
       </div>

@@ -44,7 +44,16 @@
   }
 
   let results = $state<ClassifyResult[]>([]);
+  let resultsOffset = $state(0);
+  let resultsHasMore = $state(false);
+  let loadingMoreResults = $state(false);
   let errors = $state<ClassifyError[]>([]);
+  let errorsOffset = $state(0);
+  let errorsHasMore = $state(false);
+  let loadingMoreErrors = $state(false);
+
+  // 카테고리 맵
+  let categoryMap = $state(new Map<number, string>());
 
   let pollingId: ReturnType<typeof setInterval> | null = null;
 
@@ -164,41 +173,95 @@
     }
   }
 
-  // 분류 완료 후 결과 로드
-  async function loadResults() {
+  async function loadCategoryMap() {
     try {
-      const res = await fetchWithTimeout('/api/ic/files?status=ai_classified&limit=50&order_by=id&order_dir=desc');
+      const res = await fetchWithTimeout('/api/ic/categories?include_tree=true');
       if (!res.ok) return;
       const data = await res.json();
-      results = (data.files ?? []).slice(0, 20).map((f: any) => {
-        const parts = (f.file_path || '').replace(/\\/g, '/').split('/');
-        return {
-          file: parts[parts.length - 1] || `file_${f.id}`,
-          category: f.final_category_id ? `category ${f.final_category_id}` : '—',
-          confidence: f.ai_confidence ?? 0,
-          thumbnail: `/api/ic/files/${f.id}/thumbnail`,
-        };
-      });
+      const map = new Map<number, string>();
+      function flatten(cats: any[]) {
+        for (const c of cats) {
+          map.set(c.id, c.full_path);
+          if (c.children?.length) flatten(c.children);
+        }
+      }
+      flatten(data.categories ?? []);
+      categoryMap = map;
+    } catch { /* ignore */ }
+  }
+
+  function mapResultFile(f: any): ClassifyResult {
+    const parts = (f.file_path || '').replace(/\\/g, '/').split('/');
+    const catId = f.final_category_id;
+    return {
+      file: parts[parts.length - 1] || `file_${f.id}`,
+      category: catId ? (categoryMap.get(catId) ?? `#${catId}`) : '—',
+      confidence: f.ai_confidence ?? 0,
+      thumbnail: `/api/ic/files/${f.id}/thumbnail`,
+    };
+  }
+
+  // 분류 완료 후 결과 로드
+  async function loadResults() {
+    resultsOffset = 0;
+    try {
+      const res = await fetchWithTimeout('/api/ic/files?status=ai_classified&limit=20&skip=0&order_by=id&order_dir=desc');
+      if (!res.ok) return;
+      const data = await res.json();
+      results = (data.files ?? []).map(mapResultFile);
+      resultsOffset = results.length;
+      resultsHasMore = (data.total ?? 0) > resultsOffset;
     } catch {
       // 무시
     }
 
     // 에러 파일 로드
+    errorsOffset = 0;
     try {
-      const errRes = await fetchWithTimeout('/api/ic/files?status=error&limit=20');
+      const errRes = await fetchWithTimeout('/api/ic/files?status=error&limit=20&skip=0');
       if (errRes.ok) {
         const errData = await errRes.json();
         errors = (errData.files ?? []).map((f: any) => {
           const parts = (f.file_path || '').replace(/\\/g, '/').split('/');
-          return {
-            file: parts[parts.length - 1] || `file_${f.id}`,
-            error: '분류 실패',
-          };
+          return { file: parts[parts.length - 1] || `file_${f.id}`, error: '분류 실패' };
         });
+        errorsOffset = errors.length;
+        errorsHasMore = (errData.total ?? 0) > errorsOffset;
       }
     } catch {
       // 무시
     }
+  }
+
+  async function loadMoreResults() {
+    loadingMoreResults = true;
+    try {
+      const res = await fetchWithTimeout(`/api/ic/files?status=ai_classified&limit=20&skip=${resultsOffset}&order_by=id&order_dir=desc`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const newResults = (data.files ?? []).map(mapResultFile);
+      results = [...results, ...newResults];
+      resultsOffset += newResults.length;
+      resultsHasMore = (data.total ?? 0) > resultsOffset;
+    } catch { /* ignore */ }
+    finally { loadingMoreResults = false; }
+  }
+
+  async function loadMoreErrors() {
+    loadingMoreErrors = true;
+    try {
+      const res = await fetchWithTimeout(`/api/ic/files?status=error&limit=20&skip=${errorsOffset}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const newErrors = (data.files ?? []).map((f: any) => {
+        const parts = (f.file_path || '').replace(/\\/g, '/').split('/');
+        return { file: parts[parts.length - 1] || `file_${f.id}`, error: '분류 실패' };
+      });
+      errors = [...errors, ...newErrors];
+      errorsOffset += newErrors.length;
+      errorsHasMore = (data.total ?? 0) > errorsOffset;
+    } catch { /* ignore */ }
+    finally { loadingMoreErrors = false; }
   }
 
   // settings API에서 AI 설정 로드
@@ -239,6 +302,7 @@
 
   onMount(() => {
     loadSettings();
+    loadCategoryMap();
     checkInitialStatus();
   });
 
@@ -539,6 +603,15 @@
             </div>
           {/each}
         </div>
+        {#if resultsHasMore}
+          <button
+            onclick={loadMoreResults}
+            disabled={loadingMoreResults}
+            class="mt-2 w-full rounded-md border border-border py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-50 transition-colors"
+          >
+            {loadingMoreResults ? '로딩 중...' : '더 보기'}
+          </button>
+        {/if}
       </div>
     {/if}
 
@@ -567,6 +640,15 @@
                 <span class="text-destructive">{err.error}</span>
               </div>
             {/each}
+            {#if errorsHasMore}
+              <button
+                onclick={loadMoreErrors}
+                disabled={loadingMoreErrors}
+                class="w-full border-t border-destructive/20 py-1.5 text-[10px] font-medium text-destructive hover:bg-destructive/10 transition-colors"
+              >
+                {loadingMoreErrors ? '로딩 중...' : '더 보기'}
+              </button>
+            {/if}
           </div>
         {/if}
       </div>

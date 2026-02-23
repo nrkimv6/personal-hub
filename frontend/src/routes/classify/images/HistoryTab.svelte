@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
-	import { History, RotateCcw, RefreshCw, ScanLine, ChevronDown, ChevronRight, FileImage, ArrowRight } from 'lucide-svelte';
+	import { History, RotateCcw, RefreshCw, ScanLine, ChevronDown, ChevronRight, ChevronLeft, FileImage, ArrowRight } from 'lucide-svelte';
 
 	interface MoveHistory {
 		id: number;
@@ -26,29 +26,68 @@
 
 	let history: MoveHistory[] = $state([]);
 	let loading = $state(false);
+	let totalCount = $state(0);
+	const PAGE_SIZE = 50;
+	let currentPage = $state(1);
+	let totalPages = $derived(Math.max(1, Math.ceil(totalCount / PAGE_SIZE)));
 
 	// 스캔 이력 상태
 	let scanHistory: ScanHistory[] = $state([]);
 	let scanHistoryLoading = $state(false);
 	let scanHistoryOpen = $state(false);
 
+	// 카테고리 맵 (fallback용)
+	let categoryMap = $state(new Map<number, string>());
+
+	async function loadCategories() {
+		try {
+			const res = await fetchWithTimeout('/api/ic/categories?include_tree=true');
+			if (!res.ok) return;
+			const data = await res.json();
+			const map = new Map<number, string>();
+			function flatten(cats: any[]) {
+				for (const c of cats) {
+					map.set(c.id, c.full_path);
+					if (c.children?.length) flatten(c.children);
+				}
+			}
+			flatten(data.categories ?? []);
+			categoryMap = map;
+		} catch { /* ignore */ }
+	}
+
+	function getCategoryDisplay(item: MoveHistory): string {
+		if (item.category_path) return item.category_path;
+		if (item.final_category_id) return categoryMap.get(item.final_category_id) ?? `#${item.final_category_id}`;
+		return '';
+	}
+
 	onMount(() => {
 		loadHistory();
+		loadCategories();
 	});
 
 	async function loadHistory() {
 		loading = true;
 		try {
-			const response = await fetchWithTimeout('/api/ic/files?status=moved&limit=100');
+			const skip = (currentPage - 1) * PAGE_SIZE;
+			const response = await fetchWithTimeout(`/api/ic/files?status=moved&limit=${PAGE_SIZE}&skip=${skip}&order_by=id&order_dir=desc`);
 			if (response.ok) {
 				const data = await response.json();
 				history = data.files || [];
+				totalCount = data.total ?? history.length;
 			}
 		} catch (err) {
 			console.error('이력 로드 실패:', err);
 		} finally {
 			loading = false;
 		}
+	}
+
+	function goToPage(page: number) {
+		if (page < 1 || page > totalPages) return;
+		currentPage = page;
+		loadHistory();
 	}
 
 	async function rollback(id: number) {
@@ -230,10 +269,8 @@
 								<p class="font-mono text-xs text-foreground truncate">{item.file_path}</p>
 							{/if}
 							<p class="text-[10px] text-muted-foreground mt-1">
-								{#if item.category_path}
-									<span class="rounded bg-green-500/10 px-1.5 py-0.5 text-green-600">{item.category_path}</span>
-								{:else if item.final_category_id}
-									카테고리 #{item.final_category_id}
+								{#if getCategoryDisplay(item)}
+									<span class="rounded bg-green-500/10 px-1.5 py-0.5 text-green-600">{getCategoryDisplay(item)}</span>
 								{/if}
 								{#if item.moved_at}
 									· 이동: {formatDateTime(item.moved_at)}
@@ -256,6 +293,32 @@
 						</button>
 					</div>
 				{/each}
+			</div>
+		{/if}
+
+		<!-- 페이지네이션 -->
+		{#if totalPages > 1}
+			<div class="flex items-center justify-between border-t px-5 py-3">
+				<span class="text-xs text-muted-foreground">
+					총 {totalCount.toLocaleString()}건
+				</span>
+				<div class="flex items-center gap-1">
+					<button
+						onclick={() => goToPage(currentPage - 1)}
+						disabled={currentPage <= 1}
+						class="rounded-md border p-1.5 text-xs hover:bg-accent disabled:opacity-30 transition-colors"
+					>
+						<ChevronLeft class="size-3.5" />
+					</button>
+					<span class="px-2 text-xs font-medium">{currentPage} / {totalPages}</span>
+					<button
+						onclick={() => goToPage(currentPage + 1)}
+						disabled={currentPage >= totalPages}
+						class="rounded-md border p-1.5 text-xs hover:bg-accent disabled:opacity-30 transition-colors"
+					>
+						<ChevronRight class="size-3.5" />
+					</button>
+				</div>
 			</div>
 		{/if}
 	</div>

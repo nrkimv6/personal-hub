@@ -15,7 +15,7 @@
 		files?: any[];
 	}
 
-	interface Category { id: number; name: string; }
+	interface Category { id: number; name: string; full_path: string; parent_id: number | null; children: Category[]; }
 
 	let clusters: Cluster[] = $state([]);
 	let selectedCluster: Cluster | null = $state(null);
@@ -25,8 +25,31 @@
 	let dateTo = $state('');
 
 	let categories = $state<Category[]>([]);
+	let flatCategories = $state<Category[]>([]);
 	let showCategoryPicker = $state(false);
 	let categoryTarget: Cluster | null = $state(null);
+	let bulkAssignMode = $state(false);
+	let toastMessage = $state<string | null>(null);
+	let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function flattenCategories(cats: any[]): Category[] {
+		let result: Category[] = [];
+		for (const cat of cats) {
+			result.push({ id: cat.id, name: cat.name, full_path: cat.full_path, parent_id: cat.parent_id ?? null, children: cat.children ?? [] });
+			if (cat.children?.length > 0) {
+				result = result.concat(flattenCategories(cat.children));
+			}
+		}
+		return result;
+	}
+
+	function showToast(msg: string) {
+		toastMessage = msg;
+		if (toastTimer) clearTimeout(toastTimer);
+		toastTimer = setTimeout(() => { toastMessage = null; }, 3000);
+	}
+
+	let unassignedClusters = $derived(clusters.filter(c => !c.category_path));
 
 	// 전체 보기 모달
 	let showDetail = $state(false);
@@ -117,8 +140,12 @@
 
 	async function loadCategories() {
 		try {
-			const res = await fetchWithTimeout('/api/ic/categories');
-			if (res.ok) categories = await res.json();
+			const res = await fetchWithTimeout('/api/ic/categories?include_tree=true');
+			if (res.ok) {
+				const data = await res.json();
+				categories = data.categories ?? [];
+				flatCategories = flattenCategories(categories);
+			}
 		} catch { /* ignore */ }
 	}
 
@@ -129,6 +156,30 @@
 	}
 
 	async function assignCategory(categoryId: number) {
+		if (bulkAssignMode) {
+			// 미할당 클러스터 일괄 할당
+			let successCount = 0;
+			let failCount = 0;
+			for (const cluster of unassignedClusters) {
+				try {
+					const res = await fetchWithTimeout(`/api/ic/clusters/${cluster.cluster_id}/assign`, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ category_id: categoryId }),
+					});
+					if (res.ok) successCount++;
+					else failCount++;
+				} catch {
+					failCount++;
+				}
+			}
+			showCategoryPicker = false;
+			bulkAssignMode = false;
+			showToast(`일괄 할당 완료: ${successCount}개 성공${failCount > 0 ? `, ${failCount}개 실패` : ''}`);
+			loadClusters();
+			return;
+		}
+
 		if (!categoryTarget) return;
 		try {
 			const res = await fetchWithTimeout(`/api/ic/clusters/${categoryTarget.cluster_id}/assign`, {
@@ -139,6 +190,8 @@
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			showCategoryPicker = false;
 			categoryTarget = null;
+			const catName = flatCategories.find(c => c.id === categoryId)?.full_path ?? '';
+			showToast(`카테고리 할당 완료: ${catName}`);
 			loadClusters();
 		} catch (err: any) {
 			alert(`카테고리 지정 실패: ${err.message}`);
@@ -164,7 +217,13 @@
 		try {
 			const res = await fetchWithTimeout(`/api/ic/clusters/${clusterId}/review`, { method: 'POST' });
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			loadClusters();
+			// UI 즉시 반영
+			const idx = clusters.findIndex(c => c.cluster_id === clusterId);
+			if (idx >= 0) {
+				clusters[idx] = { ...clusters[idx], reviewed: true };
+				clusters = [...clusters];
+			}
+			showToast(`클러스터 #${clusterId} 검토 완료`);
 		} catch (err: any) {
 			alert(`검토 완료 실패: ${err.message}`);
 		}
@@ -184,6 +243,15 @@
 			</p>
 		</div>
 		<div class="flex items-center gap-2">
+			{#if unassignedClusters.length > 0}
+				<button
+					onclick={() => { bulkAssignMode = true; loadCategories(); showCategoryPicker = true; }}
+					class="flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
+				>
+					<Tag class="size-3.5" />
+					미할당 일괄 분류 ({unassignedClusters.length})
+				</button>
+			{/if}
 			{#if clusterRunning}
 				<span class="text-xs text-muted-foreground">
 					{clusterRunProcessed}/{clusterRunTotal}
@@ -360,24 +428,28 @@
 	></div>
 	<div class="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-card p-4 shadow-2xl">
 		<h3 class="mb-3 text-sm font-semibold text-foreground">
-			클러스터 #{categoryTarget?.cluster_id} 카테고리 선택
+			{#if bulkAssignMode}
+				미할당 클러스터 일괄 카테고리 선택 ({unassignedClusters.length}개)
+			{:else}
+				클러스터 #{categoryTarget?.cluster_id} 카테고리 선택
+			{/if}
 		</h3>
-		{#if categories.length === 0}
+		{#if flatCategories.length === 0}
 			<p class="text-xs text-muted-foreground">카테고리가 없습니다.</p>
 		{:else}
 			<div class="max-h-60 space-y-1 overflow-y-auto">
-				{#each categories as cat}
+				{#each flatCategories as cat}
 					<button
 						onclick={() => assignCategory(cat.id)}
 						class="flex w-full items-center rounded-md px-3 py-2 text-left text-xs font-medium text-foreground hover:bg-accent"
 					>
-						{cat.name}
+						{cat.full_path}
 					</button>
 				{/each}
 			</div>
 		{/if}
 		<button
-			onclick={() => (showCategoryPicker = false)}
+			onclick={() => { showCategoryPicker = false; bulkAssignMode = false; }}
 			class="mt-3 w-full rounded-md border border-border bg-card py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent"
 		>
 			취소
@@ -432,5 +504,12 @@
 				</div>
 			</div>
 		{/if}
+	</div>
+{/if}
+
+<!-- Toast -->
+{#if toastMessage}
+	<div class="fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-lg">
+		{toastMessage}
 	</div>
 {/if}

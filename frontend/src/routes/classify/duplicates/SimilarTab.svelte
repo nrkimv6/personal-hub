@@ -27,6 +27,14 @@
 	let matchCount = $state(50);
 	let totalUnclassified = $state(0);
 	let buildingIndex = $state(false);
+	let toastMessage = $state<string | null>(null);
+	let toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function showToast(msg: string) {
+		toastMessage = msg;
+		if (toastTimer) clearTimeout(toastTimer);
+		toastTimer = setTimeout(() => { toastMessage = null; }, 3000);
+	}
 
 	// CLIP 임베딩 상태
 	let clipReady = $state(false);
@@ -234,7 +242,7 @@
 				}
 			}
 
-			alert(`${fileIds.length}개 파일이 분류되었습니다.`);
+			showToast(`${fileIds.length}개 파일이 "${group.category_path}"로 분류되었습니다.`);
 			selectedFiles.clear();
 			selectedFiles = selectedFiles;
 			await loadSimilarSuggestions();
@@ -573,5 +581,12 @@
 				전체 해제
 			</button>
 		</div>
+	</div>
+{/if}
+
+<!-- Toast -->
+{#if toastMessage}
+	<div class="fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-lg">
+		{toastMessage}
 	</div>
 {/if}
