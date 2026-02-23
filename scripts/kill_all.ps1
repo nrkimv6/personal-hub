@@ -77,4 +77,4 @@ Write-Host "  Remaining Playwright Chrome: $remainingChrome" -ForegroundColor $(
 
 Write-Host ""
 Write-Host "=== DONE ===" -ForegroundColor Green
-Write-Host "Now run: .\scripts\run.ps1 -Dev" -ForegroundColor Cyan
+Write-Host "Now run: .\scripts\run.ps1 -Admin" -ForegroundColor Cyan

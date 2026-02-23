@@ -40,8 +40,8 @@ sys.path.insert(0, str(project_root))
 from app.utils.async_logger import AsyncLoggerManager
 
 # APP_MODE에 따라 로그 디렉토리 결정
-is_dev = os.environ.get("APP_MODE") == "development"
-log_dir = Path("logs/dev") if is_dev else Path("logs")
+is_dev = os.environ.get("APP_MODE") == "admin"
+log_dir = Path("logs/admin") if is_dev else Path("logs")
 log_dir.mkdir(parents=True, exist_ok=True)
 
 # 워커 전용 비동기 로거 설정

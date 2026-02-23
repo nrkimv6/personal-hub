@@ -52,13 +52,13 @@ def cprint(msg: str, color: str = RESET):
 class BrowserWorkerManager:
     def __init__(self):
         self.pid_dir = PROJECT_ROOT / ".pids"
-        self.log_dir = PROJECT_ROOT / "logs" / "dev"
+        self.log_dir = PROJECT_ROOT / "logs" / "admin"
         self.scripts_dir = PROJECT_ROOT / "scripts"
         self.frontend_dir = PROJECT_ROOT / "frontend"
         self.pid_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
-        self.pid_suffix = "_dev"
+        self.pid_suffix = "_admin"
         self.api_port = 8001
         self.frontend_port = 6101
 
@@ -74,21 +74,21 @@ class BrowserWorkerManager:
                 "pid_file": f"worker_watchdog{self.pid_suffix}.pid",
                 "cmd": ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File",
                         str(self.scripts_dir / "unified-worker-watchdog.ps1")],
-                "env": {"APP_MODE": "development"},
+                "env": {"APP_MODE": "admin"},
             },
             {
                 "name": "Claude Worker Watchdog",
                 "pid_file": f"claude_watchdog{self.pid_suffix}.pid",
                 "cmd": ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File",
                         str(self.scripts_dir / "claude-watchdog.ps1")],
-                "env": {"APP_MODE": "development"},
+                "env": {"APP_MODE": "admin"},
             },
             {
                 "name": "Command Listener Watchdog",
                 "pid_file": f"command_listener_watchdog{self.pid_suffix}.pid",
                 "cmd": ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File",
                         str(self.scripts_dir / "command-listener-watchdog.ps1")],
-                "env": {"APP_MODE": "development"},
+                "env": {"APP_MODE": "admin"},
             },
             {
                 "name": "Dev Runner Command Listener",

@@ -88,11 +88,11 @@ class RecentAlert:
 # expected_process: PID 파일의 프로세스가 이 이름인지 검증 (잘못된 PID 감지용)
 SERVICE_CONFIG = {
     "api": {"pid_file": "api.pid", "port": 8000, "expected_process": "python"},
-    "api_dev": {"pid_file": "api_dev.pid", "port": 8001, "expected_process": "python"},
+    "api_admin": {"pid_file": "api_admin.pid", "port": 8001, "expected_process": "python"},
     "frontend": {"pid_file": "frontend.pid", "port": 6100, "expected_process": "node"},
-    "frontend_dev": {"pid_file": "frontend_dev.pid", "port": 6101, "expected_process": "node"},
-    # worker는 개발 모드에서만 실행됨 (운영 모드는 워커 비활성화)
-    "worker_dev": {"pid_file": "unified_worker_dev.pid", "port": None, "expected_process": "python"},
+    "frontend_admin": {"pid_file": "frontend_admin.pid", "port": 6101, "expected_process": "node"},
+    # worker는 admin 모드에서만 실행됨 (public 모드는 워커 비활성화)
+    "worker_admin": {"pid_file": "unified_worker_admin.pid", "port": None, "expected_process": "python"},
     "cloudflared": {"process_name": "cloudflared", "port": None},  # Windows 서비스로 관리됨
 }
 
@@ -331,11 +331,11 @@ class HealthMonitorService:
         results = []
         for service_name in SERVICE_CONFIG:
             # 현재 모드에 따라 체크 대상 필터링
-            if settings.APP_MODE == "development":
-                if not service_name.endswith("_dev") and service_name not in ["cloudflared"]:
+            if settings.APP_MODE == "admin":
+                if not service_name.endswith("_admin") and service_name not in ["cloudflared"]:
                     continue
             else:
-                if service_name.endswith("_dev"):
+                if service_name.endswith("_admin"):
                     continue
 
             health = self.check_pid_and_port(service_name)
@@ -403,7 +403,7 @@ class HealthMonitorService:
 
     async def check_worker_health(self) -> ServiceHealth:
         """워커 헬스 체크 (API 경유)"""
-        port = 8001 if settings.APP_MODE == "development" else 8000
+        port = 8001 if settings.APP_MODE == "admin" else 8000
         try:
             session = await self._get_session()
             async with session.get(
@@ -440,8 +440,8 @@ class HealthMonitorService:
 
     async def check_all_http_endpoints(self) -> list[ServiceHealth]:
         """모든 서비스 HTTP 헬스 체크"""
-        port = 8001 if settings.APP_MODE == "development" else 8000
-        frontend_port = 6101 if settings.APP_MODE == "development" else 6100
+        port = 8001 if settings.APP_MODE == "admin" else 8000
+        frontend_port = 6101 if settings.APP_MODE == "admin" else 6100
 
         checks = [
             self.check_http_endpoint("api_internal", f"http://localhost:{port}/api/v1/system/status"),

@@ -9,7 +9,7 @@
 # This ensures all the cleanup logic from run.ps1 is preserved.
 
 param(
-    [switch]$Dev  # Dev mode: different ports + workers
+    [switch]$Admin  # Admin mode: different ports + workers
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,16 +17,16 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 
 # Mode and port settings
-if ($Dev) {
+if ($Admin) {
     $ApiPort = 8001
     $FrontendPort = 6101
-    $AppMode = "development"
-    $LogDir = Join-Path $ProjectRoot "logs\dev"
-    $PidSuffix = "_dev"
+    $AppMode = "admin"
+    $LogDir = Join-Path $ProjectRoot "logs\admin"
+    $PidSuffix = "_admin"
 } else {
     $ApiPort = 8000
     $FrontendPort = 6100
-    $AppMode = "production"
+    $AppMode = "public"
     $LogDir = Join-Path $ProjectRoot "logs"
     $PidSuffix = ""
 }
@@ -299,9 +299,9 @@ if (-not (Test-Path $nodeModules)) {
     }
 }
 
-# Start frontend - different modes for dev/production
-if ($Dev) {
-    # ---- Development: npm run dev (HMR, hot reload) ----
+# Start frontend - different modes for admin/public
+if ($Admin) {
+    # ---- Admin: npm run dev (HMR, hot reload) ----
     # Stale build 디렉토리 제거 (lstat 에러 방지)
     $buildDir = Join-Path $FrontendDir "build"
     if (Test-Path $buildDir) {
@@ -324,7 +324,7 @@ if ($Dev) {
         -RedirectStandardError $frontendErrLogFile `
         -PassThru
 } else {
-    # ---- Production: npm run build + npm run preview ----
+    # ---- Public: npm run build + npm run preview ----
     # Remove .env.local if exists (prevents dev settings from affecting production)
     $envLocalFile = Join-Path $FrontendDir ".env.local"
     if (Test-Path $envLocalFile) {
@@ -333,7 +333,7 @@ if ($Dev) {
     }
 
     # Build frontend using cmd.exe for proper output redirection
-    Write-ServiceLog "Building frontend for production..."
+    Write-ServiceLog "Building frontend for public..."
     $buildLogFile = Join-Path $LogDir "frontend_build_$Timestamp.log"
 
     # Use cmd /c to run npm build with output redirection
@@ -398,7 +398,7 @@ if (-not (Test-Path $VenvScripts)) {
 $VenvPython = Join-Path $VenvScripts "python.exe"
 
 # alias exe 사용: monitorpage-api.exe 또는 monitorpage-dev.exe (fallback: python.exe)
-$ApiAliasExe = if ($Dev) {
+$ApiAliasExe = if ($Admin) {
     Join-Path $VenvScripts "monitorpage-dev.exe"
 } else {
     Join-Path $VenvScripts "monitorpage-api.exe"
@@ -430,7 +430,7 @@ try {
     #   - timeout_graceful_shutdown=30: shutdown 타임아웃 설정
     #   - signal.raise_signal(SIGINT) 의 Windows 호환성 이슈 회피
     $uvicornArgs = @("-m", "app.main")
-    if ($Dev) {
+    if ($Admin) {
         # Hot reload disabled - causes hang in Windows NSSM environment (Session 0)
         # See: docs/2026-01-04-api-stability-improvements.md
         # Manual reload: browser-workers.ps1 -Action restart-api
@@ -543,8 +543,8 @@ try {
     # -SkipWatchdog: Don't kill watchdog processes (they run in user session, not service)
     # -SkipWorkers: Don't kill worker processes (they run separately via browser-workers.ps1)
     try {
-        if ($Dev) {
-            & $stopScript -Force -Dev -SkipWatchdog -SkipWorkers 2>&1 | ForEach-Object { Write-ServiceLog $_ }
+        if ($Admin) {
+            & $stopScript -Force -Admin -SkipWatchdog -SkipWorkers 2>&1 | ForEach-Object { Write-ServiceLog $_ }
         } else {
             & $stopScript -Force -SkipWatchdog -SkipWorkers 2>&1 | ForEach-Object { Write-ServiceLog $_ }
         }

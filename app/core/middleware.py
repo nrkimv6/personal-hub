@@ -43,8 +43,8 @@ class ProductionModeMiddleware(BaseHTTPMiddleware):
     - localhost: 자동 관리자로 모든 API 허용
     - 관리자 로그인: 모든 API 허용
     - 비관리자:
-      - 운영 모드: 이벤트 관리, 인증만 허용
-      - 개발 모드: 이벤트 관리, 인증만 허용 (관리자 로그인 필요)
+      - Public 모드: 이벤트 관리, 인증만 허용
+      - Admin 모드: 이벤트 관리, 인증만 허용 (관리자 로그인 필요)
     """
 
     async def dispatch(self, request: Request, call_next):

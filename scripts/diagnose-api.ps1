@@ -11,10 +11,10 @@
 #   7. death_log.json reference (if exists)
 #
 # Usage:
-#   .\scripts\diagnose-api.ps1 -Dev                    # Diagnose dev API (port 8001)
-#   .\scripts\diagnose-api.ps1                         # Diagnose prod API (port 8000)
-#   .\scripts\diagnose-api.ps1 -Dev -OutputJson path   # Output JSON to file
-#   .\scripts\diagnose-api.ps1 -Dev -Watch             # Watch mode (30s interval)
+#   .\scripts\diagnose-api.ps1 -Admin                    # Diagnose dev API (port 8001)
+#   .\scripts\diagnose-api.ps1                           # Diagnose prod API (port 8000)
+#   .\scripts\diagnose-api.ps1 -Admin -OutputJson path   # Output JSON to file
+#   .\scripts\diagnose-api.ps1 -Admin -Watch             # Watch mode (30s interval)
 
 param(
     [switch]$Dev,

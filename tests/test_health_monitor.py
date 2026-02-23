@@ -80,7 +80,7 @@ class TestHealthMonitorService:
 
         with patch('app.services.health_monitor_service.settings') as mock_settings:
             mock_settings.PID_DIR = str(temp_pid_dir)
-            mock_settings.APP_MODE = "production"
+            mock_settings.APP_MODE = "public"
             mock_settings.HEALTH_CHECK_TIMEOUT = 5
             mock_settings.HEALTH_FAILURE_THRESHOLD = 3
             mock_settings.HEALTH_RECOVERY_NOTIFY = True

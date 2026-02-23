@@ -3,7 +3,7 @@
 #
 # Usage:
 #   .\service-install.ps1 -Action install           # Install production service
-#   .\service-install.ps1 -Action install -IncludeDev  # Install prod + dev services
+#   .\service-install.ps1 -Action install -IncludeAdmin  # Install prod + admin services
 #   .\service-install.ps1 -Action start -WithLogs   # Start service and open log window
 #   .\service-install.ps1 -Action status            # Show service status
 #   .\service-install.ps1 -Action stop              # Stop service
@@ -15,9 +15,9 @@ param(
     [ValidateSet("install", "uninstall", "start", "stop", "restart", "status")]
     [string]$Action,
 
-    [switch]$IncludeDev,   # Include development service (for install/uninstall)
+    [switch]$IncludeAdmin,  # Include admin service (for install/uninstall)
     [switch]$WithLogs,     # Open log window after start/restart
-    [switch]$Dev,          # Target development service instead of production
+    [switch]$Admin,        # Target admin service instead of production
     [string]$ServiceUser,  # Service account username (e.g., ".\Narang")
     [string]$ServicePass   # Service account password
 )
@@ -40,36 +40,36 @@ $ServiceScript = Join-Path $ScriptDir "service_run.py"
 
 $services = @(
     @{
-        Name = "MonitorPage"
-        DisplayName = "Monitor Page (Production)"
-        Description = "Monitor Page Production Server - API(8000) + Frontend(6100)"
+        Name = "MonitorPage-Public"
+        DisplayName = "Monitor Page (Public)"
+        Description = "Monitor Page Public Server - API(8000) + Frontend(6100)"
         Application = $VenvPython
         AppArgs = "`"$ServiceScript`""
         LogDir = Join-Path $ProjectRoot "logs"
     }
 )
 
-if ($IncludeDev -and ($Action -eq "install" -or $Action -eq "uninstall")) {
+if ($IncludeAdmin -and ($Action -eq "install" -or $Action -eq "uninstall")) {
     $services += @{
-        Name = "MonitorPage-Dev"
-        DisplayName = "Monitor Page (Development)"
-        Description = "Monitor Page Development Server - API(8001) + Frontend(6101) + Workers"
+        Name = "MonitorPage-Admin"
+        DisplayName = "Monitor Page (Admin)"
+        Description = "Monitor Page Admin Server - API(8001) + Frontend(6101) + Workers"
         Application = $VenvPython
-        AppArgs = "`"$ServiceScript`" --dev"
-        LogDir = Join-Path $ProjectRoot "logs\dev"
+        AppArgs = "`"$ServiceScript`" --admin"
+        LogDir = Join-Path $ProjectRoot "logs\admin"
     }
 }
 
 # Determine target services for start/stop/restart
-if ($Dev -and ($Action -in @("start", "stop", "restart"))) {
+if ($Admin -and ($Action -in @("start", "stop", "restart"))) {
     $targetServices = @(
         @{
-            Name = "MonitorPage-Dev"
-            DisplayName = "Monitor Page (Development)"
-            Description = "Monitor Page Development Server - API(8001) + Frontend(6101) + Workers"
+            Name = "MonitorPage-Admin"
+            DisplayName = "Monitor Page (Admin)"
+            Description = "Monitor Page Admin Server - API(8001) + Frontend(6101) + Workers"
             Application = $VenvPython
-            AppArgs = "`"$ServiceScript`" --dev"
-            LogDir = Join-Path $ProjectRoot "logs\dev"
+            AppArgs = "`"$ServiceScript`" --admin"
+            LogDir = Join-Path $ProjectRoot "logs\admin"
         }
     )
 } else {
@@ -187,7 +187,7 @@ function Start-MonitorService {
     Write-Host "[*] Starting service: $($svc.DisplayName)" -ForegroundColor Cyan
 
     # Determine ports based on service type
-    $portsToCheck = if ($svc.Name -eq "MonitorPage-Dev") {
+    $portsToCheck = if ($svc.Name -eq "MonitorPage-Admin") {
         @(8001, 5174)  # Dev API + Frontend
     } else {
         @(8000, 5173)  # Prod API + Frontend
@@ -303,14 +303,14 @@ function Open-ServiceLogs {
 
     Write-Host "[*] Opening unified log window..." -ForegroundColor Cyan
 
-    # Determine if this is Dev service
-    $isDev = $svc.Args -like "*-Dev*"
-    $modeLabel = if ($isDev) { "DEV" } else { "PROD" }
+    # Determine if this is Admin service
+    $isAdmin = $svc.Args -like "*-Admin*"
+    $modeLabel = if ($isAdmin) { "ADMIN" } else { "PUBLIC" }
     $logsScript = Join-Path $ScriptDir "logs.ps1"
 
     # Build command string for wt (needs proper quoting)
-    $devFlag = if ($isDev) { " -Dev" } else { "" }
-    $psCmd = "& '$logsScript' -Follow$devFlag"
+    $adminFlag = if ($isAdmin) { " -Admin" } else { "" }
+    $psCmd = "& '$logsScript' -Follow$adminFlag"
 
     # Check if Windows Terminal is available
     $wtPath = Get-Command wt -ErrorAction SilentlyContinue
@@ -388,14 +388,14 @@ switch ($Action) {
         # Always show both services for status
         $allServices = @(
             @{
-                Name = "MonitorPage"
-                DisplayName = "Monitor Page (Production)"
+                Name = "MonitorPage-Public"
+                DisplayName = "Monitor Page (Public)"
                 LogDir = Join-Path $ProjectRoot "logs"
             },
             @{
-                Name = "MonitorPage-Dev"
-                DisplayName = "Monitor Page (Development)"
-                LogDir = Join-Path $ProjectRoot "logs\dev"
+                Name = "MonitorPage-Admin"
+                DisplayName = "Monitor Page (Admin)"
+                LogDir = Join-Path $ProjectRoot "logs\admin"
             }
         )
         foreach ($svc in $allServices) {

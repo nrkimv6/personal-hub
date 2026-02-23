@@ -16,7 +16,7 @@ param(
     [switch]$FromStart,  # Show logs from beginning of file (not just tail)
 
     [Parameter()]
-    [switch]$Dev,  # Use development log directory (logs/dev/)
+    [switch]$Admin,  # Use admin log directory (logs/admin/)
 
     [Parameter()]
     [switch]$Help
@@ -30,9 +30,9 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 
 # Log directory based on mode
-if ($Dev) {
-    $LogDir = Join-Path $ProjectRoot "logs\dev"
-    # Create dev log directory if it doesn't exist
+if ($Admin) {
+    $LogDir = Join-Path $ProjectRoot "logs\admin"
+    # Create admin log directory if it doesn't exist
     if (-not (Test-Path $LogDir)) {
         New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
     }
@@ -103,7 +103,7 @@ if ($Target -eq "list") {
     function Get-LogsMultiPattern {
         param([string[]]$Patterns)
         $searchDirs = @($LogDir)
-        if ($Dev) {
+        if ($Admin) {
             $baseLogDir = Join-Path $ProjectRoot "logs"
             if ($baseLogDir -ne $LogDir) { $searchDirs += $baseLogDir }
         }
@@ -119,7 +119,7 @@ if ($Target -eq "list") {
 
     # API logs
     Write-Host "[API Server Logs]" -ForegroundColor Yellow
-    $apiLogs = Get-LogsMultiPattern @("stdout_api_*.log", "api_*.log", "service_MonitorPage-Dev.log", "service_MonitorPage.log")
+    $apiLogs = Get-LogsMultiPattern @("stdout_api_*.log", "api_*.log", "service_MonitorPage-Admin.log", "service_MonitorPage-Public.log")
     if ($apiLogs) {
         foreach ($log in $apiLogs) {
             $size = "{0:N2} KB" -f ($log.Length / 1KB)
@@ -219,8 +219,8 @@ foreach ($prefix in @("stdout_api_*.log", "api_*.log")) {
     $found = Get-ChildItem (Join-Path $LogDir $prefix) -ErrorAction SilentlyContinue
     if ($found) { $apiCandidates += $found }
 }
-# 2) Dev 모드: base logs/ 디렉토리의 api_* (앱의 LOG_DIR가 logs/ 고정)
-if ($Dev) {
+# 2) Admin 모드: base logs/ 디렉토리의 api_* (앱의 LOG_DIR가 logs/ 고정)
+if ($Admin) {
     $baseLogDir = Join-Path $ProjectRoot "logs"
     if ($baseLogDir -ne $LogDir) {
         $found = Get-ChildItem (Join-Path $baseLogDir "api_*.log") -ErrorAction SilentlyContinue
@@ -514,10 +514,10 @@ function Start-CombinedLogTail {
         "TUNNEL"      = @("cloudflared_err_*.log", "cloudflared_err-*.log", "cloudflared_*.log")
     }
 
-    # Dev 전용 소스 — Production에서 제외 (Worker는 항상 APP_MODE=development로 실행되어 logs/dev/에 기록됨)
+    # Admin 전용 소스 — Production에서 제외 (Worker는 항상 APP_MODE=development로 실행되어 logs/admin/에 기록됨)
     $devOnlySources = @("WORKER", "IG-WORKER", "CLAUDE", "VIDEO-DL", "CRAWL",
                          "IG-WD", "CLAUDE-WD", "VIDEO-DL-WD", "CRAWL-WD", "DEV-RUNNER")
-    if (-not $Dev) {
+    if (-not $Admin) {
         foreach ($source in $devOnlySources) {
             $logConfig.Remove($source)
             $timestampedLogPatterns.Remove($source)
@@ -525,11 +525,11 @@ function Start-CombinedLogTail {
     }
 
     # Helper to find latest log from multiple patterns
-    # Dev 모드일 때 base logs/ 디렉토리도 탐색 (API 앱의 LOG_DIR가 logs/ 고정)
+    # Admin 모드일 때 base logs/ 디렉토리도 탐색 (API 앱의 LOG_DIR가 logs/ 고정)
     function Get-LatestLogFromPatterns {
         param([string[]]$Patterns)
         $searchDirs = @($LogDir)
-        if ($Dev) {
+        if ($Admin) {
             $baseLogDir = Join-Path $ProjectRoot "logs"
             if ($baseLogDir -ne $LogDir) { $searchDirs += $baseLogDir }
         }

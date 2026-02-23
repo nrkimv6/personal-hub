@@ -10,14 +10,14 @@
 #   Stage 3 (9 failures): System reboot (last resort)
 #
 # Usage:
-#   .\scripts\api-watchdog.ps1 -Dev           # Monitor development API (port 8001)
-#   .\scripts\api-watchdog.ps1                # Monitor production API (port 8000)
-#   .\scripts\api-watchdog.ps1 -Dev -Verbose  # With verbose output
+#   .\scripts\api-watchdog.ps1 -Admin           # Monitor development API (port 8001)
+#   .\scripts\api-watchdog.ps1                  # Monitor production API (port 8000)
+#   .\scripts\api-watchdog.ps1 -Admin -Verbose  # With verbose output
 #
 # See: docs/2026-01-04-api-stability-improvements.md
 
 param(
-    [switch]$Dev,
+    [switch]$Admin,
     [int]$CheckInterval = 30,
     [int]$Timeout = 10,
     [switch]$Verbose
@@ -31,9 +31,9 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 . (Join-Path $ScriptDir "Send-TelegramAlert.ps1")
 
 # Configuration
-$port = if ($Dev) { 8001 } else { 8000 }
-$serviceName = if ($Dev) { "Monitor Page (Development)" } else { "Monitor Page (Production)" }
-$mode = if ($Dev) { "Development" } else { "Production" }
+$port = if ($Admin) { 8001 } else { 8000 }
+$serviceName = if ($Admin) { "Monitor Page (Development)" } else { "Monitor Page (Production)" }
+$mode = if ($Admin) { "Development" } else { "Production" }
 $healthEndpoint = "http://localhost:$port/api/v1/system/status"
 
 # State tracking
@@ -270,7 +270,7 @@ while ($true) {
         if (Test-Path $diagScriptPath) {
             Write-WatchdogLog "Running diagnostics..." "INFO"
             try {
-                & $diagScriptPath -Dev:$Dev -OutputJson $diagJsonPath 2>&1 | Out-Null
+                & $diagScriptPath -Dev:$Admin -OutputJson $diagJsonPath 2>&1 | Out-Null
                 if (Test-Path $diagJsonPath) {
                     $diagData = Get-Content $diagJsonPath -Raw | ConvertFrom-Json
                     $diagStatus = $diagData.status

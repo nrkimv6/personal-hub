@@ -15,8 +15,8 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 # Use APP_MODE environment variable to determine log directory
 $isDev = $env:APP_MODE -eq "development"
 if ($isDev) {
-    $LogDir = Join-Path $ProjectRoot "logs\dev"
-    $PidSuffix = "_dev"
+    $LogDir = Join-Path $ProjectRoot "logs\admin"
+    $PidSuffix = "_admin"
 } else {
     $LogDir = Join-Path $ProjectRoot "logs"
     $PidSuffix = ""

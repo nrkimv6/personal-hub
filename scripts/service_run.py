@@ -1,11 +1,11 @@
 """Monitor Page 서비스 러너 (service-run.ps1 Python 교체).
 
 NSSM 서비스로 등록되어 실행된다:
-  nssm set MonitorPage-Dev Application python.exe
-  nssm set MonitorPage-Dev AppParameters "scripts\\service_run.py --dev"
+  nssm set MonitorPage-Admin Application python.exe
+  nssm set MonitorPage-Admin AppParameters "scripts\\service_run.py --admin"
 
 수동 실행:
-  .venv\\Scripts\\python.exe scripts/service_run.py --dev
+  .venv\\Scripts\\python.exe scripts/service_run.py --admin
 """
 import argparse
 import atexit
@@ -42,10 +42,10 @@ class ServiceRunner:
         self.dev = dev
         self.api_port = 8001 if dev else 8000
         self.frontend_port = 6101 if dev else 6100
-        self.app_mode = "development" if dev else "production"
-        self.pid_suffix = "_dev" if dev else ""
+        self.app_mode = "admin" if dev else "public"
+        self.pid_suffix = "_admin" if dev else ""
 
-        self.log_dir = PROJECT_ROOT / "logs" / ("dev" if dev else "")
+        self.log_dir = PROJECT_ROOT / "logs" / ("admin" if dev else "")
         self.pid_dir = PROJECT_ROOT / ".pids"
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.pid_dir.mkdir(parents=True, exist_ok=True)
@@ -391,10 +391,10 @@ class ServiceRunner:
 
 def main():
     parser = argparse.ArgumentParser(description="Monitor Page Service Runner")
-    parser.add_argument("--dev", action="store_true", help="Development mode (port 8001/6101)")
+    parser.add_argument("--admin", action="store_true", help="Admin mode (port 8001/6101)")
     args = parser.parse_args()
 
-    runner = ServiceRunner(dev=args.dev)
+    runner = ServiceRunner(dev=args.admin)
     runner.run()
 
 

@@ -5,7 +5,7 @@
 # Development mode (-Dev): All features enabled including workers
 
 param(
-    [switch]$Dev,        # Dev mode: use different ports (API: 8001, Frontend: 6101) + workers
+    [switch]$Admin,      # Admin mode: use different ports (API: 8001, Frontend: 6101) + workers
     [switch]$SkipWorker  # Skip worker even in Dev mode (for PyCharm debugger)
 )
 
@@ -14,7 +14,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 
 # Mode and port settings
-if ($Dev) {
+if ($Admin) {
     $ApiPort = 8001
     $FrontendPort = 6101
     $AppMode = "development"
@@ -41,8 +41,8 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Show mode info
-if ($Dev) {
-    Write-Host "[MODE] Development - All features enabled" -ForegroundColor Green
+if ($Admin) {
+    Write-Host "[MODE] Admin - All features enabled" -ForegroundColor Green
     Write-Host "       API: $ApiPort, Frontend: $FrontendPort, Workers: $(if ($RunWorkers) { 'ON' } else { 'OFF' })" -ForegroundColor Green
 } else {
     Write-Host "[MODE] Production - View only (workers disabled)" -ForegroundColor Yellow
@@ -70,7 +70,7 @@ foreach ($port in $portsToClean) {
 
 # Clean up browser profiles before starting (Dev mode only)
 # Production mode doesn't use browsers - don't touch anything
-if ($Dev) {
+if ($Admin) {
     $browserProfilesPath = Join-Path $ProjectRoot "data\browser_profiles"
 
     Write-Host "[*] Cleaning up Playwright browsers..." -ForegroundColor Yellow
@@ -147,9 +147,9 @@ try {
 
     $startScript = Join-Path $ScriptDir "start.ps1"
 
-    if ($Dev) {
-        # In Dev mode: API/Worker background + Frontend foreground + show all logs
-        Write-Host "[!] Dev mode: Frontend in foreground + backend logs" -ForegroundColor Yellow
+    if ($Admin) {
+        # In Admin mode: API/Worker background + Frontend foreground + show all logs
+        Write-Host "[!] Admin mode: Frontend in foreground + backend logs" -ForegroundColor Yellow
         Write-Host ""
 
         # Start API and Worker only (not frontend) with Dev flag
@@ -159,7 +159,7 @@ try {
             $env:SKIP_CRAWL_WORKER = "true"
             $env:SKIP_CLAUDE_WORKER = "true"
         }
-        & $startScript -Dev
+        & $startScript -Admin
         $env:SKIP_FRONTEND = $null
         $env:SKIP_WORKER = $null
         $env:SKIP_CRAWL_WORKER = $null
@@ -170,7 +170,7 @@ try {
 
         # Find the most recent log files by filename (contains timestamp like worker_20251211_094846.log)
         # Using Name sort instead of LastWriteTime because old log files may be updated when processes stop
-        $LogDir = Join-Path $ProjectRoot "logs\dev"
+        $LogDir = Join-Path $ProjectRoot "logs\admin"
 
         $apiLog = Get-ChildItem -Path $LogDir -Filter "stdout_api_*.log" -ErrorAction SilentlyContinue |
             Sort-Object Name -Descending | Select-Object -First 1
@@ -518,8 +518,8 @@ try {
     }
 
     # Stop the rest (workers, watchdogs, etc.) via stop.ps1
-    if ($Dev) {
-        & $stopScript -Force -Dev
+    if ($Admin) {
+        & $stopScript -Force -Admin
     } else {
         & $stopScript -Force
     }

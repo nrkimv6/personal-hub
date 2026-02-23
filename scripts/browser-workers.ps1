@@ -31,9 +31,9 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 
 # Dev mode only - browser workers need user session
 $env:APP_MODE = "development"
-$LogDir = Join-Path $ProjectRoot "logs\dev"
+$LogDir = Join-Path $ProjectRoot "logs\admin"
 $PidDir = Join-Path $ProjectRoot ".pids"
-$PidSuffix = "_dev"
+$PidSuffix = "_admin"
 
 # Ensure directories exist
 if (-not (Test-Path $LogDir)) {

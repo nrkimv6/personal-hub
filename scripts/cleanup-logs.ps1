@@ -11,10 +11,10 @@ param(
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 
-# 정리 대상 디렉토리 (logs/ + logs/dev/)
+# 정리 대상 디렉토리 (logs/ + logs/admin/)
 $LogDirs = @(
     (Join-Path $ProjectRoot "logs"),
-    (Join-Path $ProjectRoot "logs\dev")
+    (Join-Path $ProjectRoot "logs\admin")
 )
 
 # 삭제 대상 패턴

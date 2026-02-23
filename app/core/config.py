@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # 기본 설정
     APP_NAME: str = "모니터링 시스템 API"
     DEBUG: bool = True
-    APP_MODE: str = "production"  # "production" | "development"
+    APP_MODE: str = "public"  # "public" | "admin"
 
     @validator("APP_MODE", pre=True)
     def strip_app_mode(cls, v):

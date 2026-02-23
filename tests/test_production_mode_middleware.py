@@ -44,7 +44,7 @@ class TestAppModeEndpoint:
 
         data = response.json()
         assert "mode" in data
-        assert data["mode"] in ["production", "development"]
+        assert data["mode"] in ["public", "admin"]
         assert "is_dev" in data
         assert "features" in data
 
@@ -71,7 +71,7 @@ class TestProductionModeMiddleware:
     @patch("app.core.middleware.settings")
     def test_production_anonymous_blocked_naver_post(self, mock_settings, client):
         """운영 모드에서 비관리자는 naver API POST 차단"""
-        mock_settings.APP_MODE = "production"
+        mock_settings.APP_MODE = "public"
 
         # 비관리자 (토큰 없음, localhost 아님)
         response = client.post(
@@ -86,7 +86,7 @@ class TestProductionModeMiddleware:
     @patch("app.core.middleware.settings")
     def test_production_anonymous_allowed_events_post(self, mock_settings, client):
         """운영 모드에서 비관리자도 events API POST 허용"""
-        mock_settings.APP_MODE = "production"
+        mock_settings.APP_MODE = "public"
 
         response = client.post(
             "/api/v1/events",
@@ -99,7 +99,7 @@ class TestProductionModeMiddleware:
     @patch("app.core.middleware.settings")
     def test_production_anonymous_allowed_popups_post(self, mock_settings, client):
         """운영 모드에서 비관리자도 popups API POST 허용"""
-        mock_settings.APP_MODE = "production"
+        mock_settings.APP_MODE = "public"
 
         response = client.post(
             "/api/v1/popups",
@@ -111,7 +111,7 @@ class TestProductionModeMiddleware:
     @patch("app.core.middleware.settings")
     def test_production_anonymous_allowed_auth_post(self, mock_settings, client):
         """운영 모드에서 비관리자도 auth API POST 허용"""
-        mock_settings.APP_MODE = "production"
+        mock_settings.APP_MODE = "public"
 
         response = client.post(
             "/api/v1/auth/logout",
@@ -122,7 +122,7 @@ class TestProductionModeMiddleware:
     @patch("app.core.middleware.settings")
     def test_production_admin_allowed_all(self, mock_settings, client, admin_token):
         """운영 모드에서 관리자는 모든 API 허용"""
-        mock_settings.APP_MODE = "production"
+        mock_settings.APP_MODE = "public"
 
         response = client.post(
             "/api/v1/naver/businesses",
@@ -138,7 +138,7 @@ class TestProductionModeMiddleware:
     @patch("app.core.middleware.settings")
     def test_production_localhost_treated_as_admin(self, mock_settings, client):
         """운영 모드에서 localhost는 자동 관리자"""
-        mock_settings.APP_MODE = "production"
+        mock_settings.APP_MODE = "public"
 
         # localhost 요청 (CF-Connecting-IP 없음)
         response = client.post(
@@ -151,7 +151,7 @@ class TestProductionModeMiddleware:
     @patch("app.core.middleware.settings")
     def test_development_anonymous_blocked(self, mock_settings, client):
         """개발 모드에서도 비관리자는 차단"""
-        mock_settings.APP_MODE = "development"
+        mock_settings.APP_MODE = "admin"
 
         response = client.post(
             "/api/v1/naver/businesses",
@@ -164,7 +164,7 @@ class TestProductionModeMiddleware:
     @patch("app.core.middleware.settings")
     def test_development_localhost_allowed(self, mock_settings, client):
         """개발 모드에서 localhost는 자동 관리자"""
-        mock_settings.APP_MODE = "development"
+        mock_settings.APP_MODE = "admin"
 
         # localhost 요청 (CF-Connecting-IP 없음)
         response = client.post(
@@ -177,7 +177,7 @@ class TestProductionModeMiddleware:
     @patch("app.core.middleware.settings")
     def test_development_admin_allowed(self, mock_settings, client, admin_token):
         """개발 모드에서 관리자는 모든 API 허용"""
-        mock_settings.APP_MODE = "development"
+        mock_settings.APP_MODE = "admin"
 
         response = client.post(
             "/api/v1/naver/businesses",
@@ -224,7 +224,7 @@ class TestMiddlewareIntegration:
         """미들웨어 차단 시 응답 형식"""
         from app.core.config import settings
 
-        if settings.APP_MODE == "production":
+        if settings.APP_MODE == "public":
             response = client.post(
                 "/api/v1/naver/businesses",
                 json={},

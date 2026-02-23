@@ -11,7 +11,7 @@ from app.database import get_db
 @pytest.fixture(autouse=True)
 def set_dev_mode(monkeypatch):
     """개발 모드 강제 설정."""
-    monkeypatch.setenv("APP_MODE", "development")
+    monkeypatch.setenv("APP_MODE", "admin")
 
 
 @pytest.fixture
