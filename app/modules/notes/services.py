@@ -514,6 +514,17 @@ def bulk_star(db: Session, note_ids: List[int], starred: bool) -> int:
     return count
 
 
+def search_titles(db: Session, q: str, limit: int = 10) -> List[dict]:
+    """제목 부분 일치 검색 — 자동완성용 경량 API."""
+    results = (
+        db.query(Note.id, Note.title)
+        .filter(Note.deleted_at.is_(None), Note.title.ilike(f"%{q}%"))
+        .limit(limit)
+        .all()
+    )
+    return [{"id": r.id, "title": r.title} for r in results]
+
+
 def delete_tag(db: Session, tag_id: int) -> bool:
     tag = db.query(NoteTagDef).filter(NoteTagDef.id == tag_id).first()
     if not tag:

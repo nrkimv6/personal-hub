@@ -170,3 +170,35 @@ class TestBulkTag:
         note_res = client.get(f"/api/notes/{nid}")
         tags = [t["id"] for t in note_res.json()["tags"]]
         assert tags.count(tag_a) == 1  # 중복 없음
+
+
+class TestSearchTitles:
+    """제목 검색 API 테스트."""
+
+    def test_search_titles(self, client):
+        """제목 검색 — 부분 일치 결과 반환."""
+        create_note(client, "파이썬 기초")
+        create_note(client, "파이썬 고급")
+        create_note(client, "자바스크립트")
+
+        res = client.get("/api/notes/search/titles?q=파이썬")
+        assert res.status_code == 200
+        data = res.json()
+        assert len(data) == 2
+        titles = [d["title"] for d in data]
+        assert "파이썬 기초" in titles
+        assert "파이썬 고급" in titles
+        for item in data:
+            assert "id" in item
+            assert "title" in item
+
+    def test_search_titles_empty(self, client):
+        """검색 결과 없을 때 빈 배열 반환."""
+        res = client.get("/api/notes/search/titles?q=존재하지않는제목xyz")
+        assert res.status_code == 200
+        assert res.json() == []
+
+    def test_search_titles_missing_q_returns_422(self, client):
+        """q 파라미터 없으면 422."""
+        res = client.get("/api/notes/search/titles")
+        assert res.status_code == 422

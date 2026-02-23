@@ -56,6 +56,20 @@ def bulk_star(data: BulkStarAction, db: Session = Depends(get_db)):
 
 
 # ══════════════════════════════════════════
+# Search 라우트 (⚠️ /{id} 보다 먼저 정의)
+# ══════════════════════════════════════════
+
+@router.get("/search/titles")
+def search_titles(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(10, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """제목 부분 일치 검색 — 자동완성용."""
+    return svc.search_titles(db, q=q, limit=limit)
+
+
+# ══════════════════════════════════════════
 # Archive 라우트 (⚠️ /{id} 보다 먼저 정의)
 # ══════════════════════════════════════════
 

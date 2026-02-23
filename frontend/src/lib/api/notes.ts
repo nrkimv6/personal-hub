@@ -148,6 +148,12 @@ export const notesApi = {
     return req('GET', `?${q}`);
   },
 
+  searchTitles(q: string, limit?: number): Promise<{ id: number; title: string }[]> {
+    const params = new URLSearchParams({ q });
+    if (limit) params.set('limit', String(limit));
+    return req('GET', `/search/titles?${params}`);
+  },
+
   get(id: number): Promise<Note> {
     return req('GET', `/${id}`);
   },

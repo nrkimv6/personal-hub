@@ -245,10 +245,10 @@
 	let effectiveRunStats = $derived(currentRunStats ?? lastRunStats);
 </script>
 
-<div class="flex flex-col h-full overflow-hidden">
+<div class="flex flex-col h-full overflow-y-auto sm:overflow-hidden">
 
 	<!-- Main content -->
-	<div class="flex-1 flex flex-col overflow-hidden">
+	<div class="flex-1 flex flex-col sm:overflow-hidden">
 		{#if error}
 			<div class="mx-4 mt-2 bg-red-50 border border-red-200 rounded-lg p-3 text-red-700 text-xs shrink-0">
 				{error}
@@ -344,7 +344,7 @@
 
 				<!-- Expanded panel content -->
 				{#if panelOpen}
-					<div class="px-4 pb-4 flex flex-col gap-4 bg-gray-50 overflow-y-auto max-h-[calc(100vh-8rem)] sm:max-h-none sm:overflow-visible">
+					<div class="px-4 pb-4 flex flex-col gap-4 bg-gray-50">
 						<!-- RunControl - full width card -->
 						<div class="bg-white border rounded-lg p-4">
 							<RunControl status={runStatus} {plans} onStatusChange={handleRunStatusChange} />
@@ -373,7 +373,7 @@
 			</div>
 
 			<!-- Log Viewer + Task History -->
-			<div class="flex flex-col flex-1 overflow-hidden">
+			<div class="flex flex-col flex-none sm:flex-1 sm:overflow-hidden">
 				<!-- Log Viewer (Phase 2: planFile prop 전달) -->
 				<div class="flex-1 min-h-0">
 					<LogViewer planFile={effectivePlanFile ?? undefined} currentPlanName={runStatus?.current_plan_name ?? undefined} />

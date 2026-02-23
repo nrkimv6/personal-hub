@@ -6,6 +6,7 @@
   import TagInput from './TagInput.svelte';
   import { isCodeLike, detectLanguage } from '../utils/codeDetect';
   import { renderMarkdown } from '../utils/markdown';
+  import { extractNoteLinkAtCursor } from '../utils/noteLink';
 
   interface Props {
     mode: 'create' | 'edit';
@@ -25,6 +26,13 @@
   let error = $state('');
   let showPreview = $state(false);
   let textareaEl: HTMLTextAreaElement;
+
+  // 자동완성 상태
+  let autocompleteResults = $state<{ id: number; title: string }[]>([]);
+  let showAutocomplete = $state(false);
+  let autocompleteQuery = $state('');
+  let autocompleteSelectedIdx = $state(-1);
+  let _acDebounce: ReturnType<typeof setTimeout> | null = null;
 
   let previewHtml = $derived(renderMarkdown(content));
 
@@ -177,6 +185,66 @@
     });
   }
 
+  function handleInput() {
+    const cursorPos = textareaEl?.selectionStart ?? 0;
+    const match = extractNoteLinkAtCursor(content, cursorPos);
+    if (match) {
+      autocompleteQuery = match.query;
+      showAutocomplete = true;
+      autocompleteSelectedIdx = -1;
+      if (_acDebounce) clearTimeout(_acDebounce);
+      _acDebounce = setTimeout(async () => {
+        if (autocompleteQuery.length === 0) {
+          autocompleteResults = [];
+          return;
+        }
+        autocompleteResults = await notesApi.searchTitles(autocompleteQuery, 5).catch(() => []);
+      }, 300);
+    } else {
+      showAutocomplete = false;
+      autocompleteResults = [];
+    }
+  }
+
+  function handleAutocompleteSelect(item: { id: number; title: string }) {
+    const cursorPos = textareaEl?.selectionStart ?? 0;
+    const match = extractNoteLinkAtCursor(content, cursorPos);
+    if (!match) return;
+    const replacement = `[[${item.title}]]`;
+    content = content.slice(0, match.start) + replacement + content.slice(match.end);
+    showAutocomplete = false;
+    autocompleteResults = [];
+    requestAnimationFrame(() => {
+      const newPos = match.start + replacement.length;
+      textareaEl.selectionStart = newPos;
+      textareaEl.selectionEnd = newPos;
+      textareaEl.focus();
+    });
+  }
+
+  function handleAutocompleteKeydown(e: KeyboardEvent) {
+    if (!showAutocomplete) return;
+    if (e.key === 'Escape') {
+      showAutocomplete = false;
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      autocompleteSelectedIdx = Math.min(autocompleteSelectedIdx + 1, autocompleteResults.length - 1);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      autocompleteSelectedIdx = Math.max(autocompleteSelectedIdx - 1, 0);
+      return;
+    }
+    if (e.key === 'Enter' && autocompleteSelectedIdx >= 0) {
+      e.preventDefault();
+      handleAutocompleteSelect(autocompleteResults[autocompleteSelectedIdx]);
+      return;
+    }
+  }
+
   onMount(loadTags);
 </script>
 
@@ -236,16 +304,37 @@
           </button>
         </div>
         <div class="{showPreview ? 'grid grid-cols-2 gap-3' : ''}">
-          <textarea
-            bind:value={content}
-            bind:this={textareaEl}
-            onpaste={handlePaste}
-            onkeydown={handleKeydown}
-            placeholder="마크다운 또는 코드블록 입력..."
-            class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground
-              focus:outline-none focus:ring-2 focus:ring-ring/30 font-mono resize-y"
-            style="min-height: 240px"
-          ></textarea>
+          <div class="relative">
+            <textarea
+              bind:value={content}
+              bind:this={textareaEl}
+              onpaste={handlePaste}
+              onkeydown={(e) => { handleAutocompleteKeydown(e); handleKeydown(e); }}
+              oninput={handleInput}
+              placeholder="마크다운 또는 코드블록 입력... ([[제목]]으로 메모 링크)"
+              class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground
+                focus:outline-none focus:ring-2 focus:ring-ring/30 font-mono resize-y"
+              style="min-height: 240px"
+            ></textarea>
+            {#if showAutocomplete && autocompleteResults.length > 0}
+              <ul
+                class="absolute left-0 z-20 mt-1 w-full max-w-xs bg-card border border-border rounded-lg shadow-lg overflow-hidden"
+                style="top: 100%"
+              >
+                {#each autocompleteResults as item, idx}
+                  <li>
+                    <button
+                      type="button"
+                      class="w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors {idx === autocompleteSelectedIdx ? 'bg-muted' : ''}"
+                      onmousedown={(e) => { e.preventDefault(); handleAutocompleteSelect(item); }}
+                    >
+                      {item.title}
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </div>
           {#if showPreview}
             <div
               class="prose prose-sm dark:prose-invert overflow-y-auto border border-border rounded-lg p-3 max-h-[40vh] bg-background text-foreground"

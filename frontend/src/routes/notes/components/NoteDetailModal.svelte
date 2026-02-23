@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import type { Note, NoteHistoryItem } from '$lib/api/notes';
   import { renderMarkdown } from '../utils/markdown';
+  import { renderNoteLinks } from '../utils/noteLink';
   import { notesApi } from '$lib/api/notes';
   import { ArrowLeft, Copy, Archive, Pencil, Pin, ChevronDown, ChevronUp, Check, X } from 'lucide-svelte';
   import TagBadge from './TagBadge.svelte';
@@ -13,7 +14,14 @@
     onRefresh: () => void;
   }
 
-  let { note, onClose, onEdit, onRefresh }: Props = $props();
+  let { note: noteProp, onClose, onEdit, onRefresh }: Props = $props();
+
+  // 모달 내 네비게이션을 위해 로컬 state로 관리
+  let note = $state<Note>(noteProp);
+
+  $effect(() => {
+    note = noteProp;
+  });
 
   let history = $state<NoteHistoryItem[]>([]);
   let showHistory = $state(false);
@@ -23,7 +31,7 @@
   let showArchiveConfirm = $state(false);
 
   $effect(() => {
-    renderedHtml = renderMarkdown(note.content || '');
+    renderedHtml = renderNoteLinks(renderMarkdown(note.content || ''));
   });
 
   async function loadHistory() {
@@ -76,11 +84,45 @@
     });
   }
 
+  async function handleNoteLinkClick(e: MouseEvent) {
+    const target = (e.target as HTMLElement).closest('.note-link');
+    if (!target) return;
+    e.preventDefault();
+    const title = (target as HTMLElement).dataset.noteTitle;
+    if (!title) return;
+
+    try {
+      const results = await notesApi.list({ search: title });
+      const found = results.items.find((n) => n.title === title) ?? results.items[0];
+      if (found) {
+        note = found;
+        history = [];
+        showHistory = false;
+      } else {
+        const ok = confirm(`"${title}" 제목의 메모가 없습니다. 새로 만드시겠습니까?`);
+        if (ok) {
+          const created = await notesApi.create({ title });
+          onRefresh();
+          note = created;
+        }
+      }
+    } catch (e: any) {
+      alert(e.message);
+    }
+  }
+
   let contentEl = $state<HTMLElement | null>(null);
   $effect(() => {
     if (contentEl && renderedHtml) {
-      setTimeout(() => contentEl && addCopyButtons(contentEl), 50);
+      setTimeout(() => {
+        if (!contentEl) return;
+        addCopyButtons(contentEl);
+        contentEl.addEventListener('click', handleNoteLinkClick);
+      }, 50);
     }
+    return () => {
+      contentEl?.removeEventListener('click', handleNoteLinkClick);
+    };
   });
 </script>
 
