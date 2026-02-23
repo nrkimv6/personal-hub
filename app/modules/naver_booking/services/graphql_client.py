@@ -798,8 +798,11 @@ class NaverGraphQLClient:
         Returns:
             Dict: {"business": BusinessInfo, "items": List[BizItemInfo], "item": BizItemInfo|None}
         """
-        business_info = await self.fetch_business_info(business_id)
-        items = await self.fetch_biz_items(business_id)
+        # fetch_business_info와 fetch_biz_items는 서로 독립적 → 병렬 호출
+        business_info, items = await asyncio.gather(
+            self.fetch_business_info(business_id),
+            self.fetch_biz_items(business_id),
+        )
 
         target_item = None
         if biz_item_id:

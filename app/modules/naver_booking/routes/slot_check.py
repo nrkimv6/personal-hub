@@ -5,6 +5,7 @@
 
 scripts/check_slots.py의 기능을 API 엔드포인트로 제공합니다.
 """
+import asyncio
 import re
 from datetime import datetime, timedelta
 from typing import Optional
@@ -244,13 +245,22 @@ async def check_slots(
 
     client = get_naver_graphql_client()
 
-    # 1. 업체 정보: 로컬 DB → GraphQL → 기본값
-    # bookingAvailableCode/Value는 항상 GraphQL에서 조회 (실시간 정책)
+    # 1 & 2. 업체/상품 정보 병렬 조회 (두 호출은 서로 독립적)
     booking_available_code = None
     booking_available_value = None
 
     business = db.query(Business).filter(Business.business_id == business_id).first()
-    business_info = await client.fetch_business_info(business_id)
+    biz_item = db.query(BizItem).filter(BizItem.biz_item_id == biz_item_id).first()
+
+    # fetch_business_info는 항상 호출 (실시간 정책 조회), fetch_biz_item은 DB 미등록 시만
+    if biz_item:
+        business_info = await client.fetch_business_info(business_id)
+        biz_item_info = None
+    else:
+        business_info, biz_item_info = await asyncio.gather(
+            client.fetch_business_info(business_id),
+            client.fetch_biz_item(business_id, biz_item_id),
+        )
 
     if business_info:
         business_name = business_info.name
@@ -265,16 +275,12 @@ async def check_slots(
         business_name = "(미등록 업체)"
         business_type_id = 13
 
-    # 2. 상품 정보: 로컬 DB → GraphQL → 기본값
-    biz_item = db.query(BizItem).filter(BizItem.biz_item_id == biz_item_id).first()
-    if not biz_item:
-        # DB에 없으면 GraphQL 조회
-        biz_item_info = await client.fetch_biz_item(business_id, biz_item_id)
-        biz_item_name = biz_item_info.name if biz_item_info else "(미등록 상품)"
-    else:
+    if biz_item:
         biz_item_name = biz_item.name
+    else:
+        biz_item_name = biz_item_info.name if biz_item_info else "(미등록 상품)"
 
-    # 3. GraphQL로 스케줄 조회 (핵심 - 실패 시 에러)
+    # 3. GraphQL로 스케줄 조회 (핵심 - 실패 시 에러, business_type_id 의존)
     start_date = target_date or datetime.now().strftime("%Y-%m-%d")
     schedule = await client.fetch_schedule(
         business_type_id=business_type_id,

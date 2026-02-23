@@ -227,7 +227,7 @@ async def trigger_activity_hub_sync(
     return {"message": "activity-hub 동기화가 시작되었습니다.", "status": "pending"}
 
 
-@router.post("/sync-hub/test")
+@router.post("/sync-hub/test", include_in_schema=False)
 async def test_sync_hub(
     db: Session = Depends(get_db),
 ):

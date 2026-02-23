@@ -1,13 +1,18 @@
 """Writing API Routes - 글 생성 관리 API."""
 
+import json
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from starlette.responses import JSONResponse
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
+from app.modules.writing.models.collection_task import CollectionTask
+from app.modules.writing.schemas import CollectionStatusResponse, CollectionTaskResponse
 from app.modules.writing.services.writing_service import WritingService
 
 router = APIRouter(prefix="/api/writing", tags=["writing"])
@@ -659,22 +664,73 @@ def delete_feed(
     return {"deleted": True}
 
 
-@router.post("/feeds/collect")
+async def _collect_feeds_background(task_id: UUID, min_length: int, max_length: int):
+    """RSS 피드 수집 백그라운드 작업."""
+    db = SessionLocal()
+    try:
+        task = db.query(CollectionTask).filter(CollectionTask.task_id == task_id).first()
+        if task is None:
+            return
+        task.mark_started()
+        db.commit()
+
+        service = WritingService(db)
+        result = await service.collect_from_feeds(min_length=min_length, max_length=max_length)
+        task.mark_completed(result_json=json.dumps(result, ensure_ascii=False))
+        db.commit()
+    except Exception as e:
+        task = db.query(CollectionTask).filter(CollectionTask.task_id == task_id).first()
+        if task:
+            task.mark_failed(error_message=str(e))
+            db.commit()
+    finally:
+        db.close()
+
+
+@router.post("/feeds/collect", status_code=202, response_model=CollectionTaskResponse)
 async def collect_from_feeds(
+    background_tasks: BackgroundTasks,
     min_length: int = Query(300, ge=100, le=1000),
     max_length: int = Query(3000, ge=500, le=10000),
     db: Session = Depends(get_db),
 ):
-    """모든 활성 RSS 피드에서 글 수집."""
-    service = WritingService(db)
-    try:
-        result = await service.collect_from_feeds(
-            min_length=min_length,
-            max_length=max_length,
-        )
-        return result
-    except Exception as e:
-        raise HTTPException(500, f"Collection failed: {e}")
+    """모든 활성 RSS 피드에서 글 수집 (비동기 202 Accepted)."""
+    task = CollectionTask(type=CollectionTask.TYPE_FEEDS)
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    background_tasks.add_task(_collect_feeds_background, task.task_id, min_length, max_length)
+
+    return CollectionTaskResponse(
+        task_id=task.task_id,
+        type=task.type,
+        status=task.status,
+        created_at=task.created_at,
+        status_url=f"/api/writing/feeds/collect/{task.task_id}/status",
+    )
+
+
+@router.get("/feeds/collect/{task_id}/status", response_model=CollectionStatusResponse)
+async def get_feeds_collect_status(
+    task_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """RSS 피드 수집 작업 상태 폴링."""
+    task = db.query(CollectionTask).filter(CollectionTask.task_id == task_id).first()
+    if task is None:
+        raise HTTPException(404, f"Task {task_id} not found")
+    return CollectionStatusResponse(
+        task_id=task.task_id,
+        type=task.type,
+        status=task.status,
+        progress=json.loads(task.progress_json) if task.progress_json else None,
+        result=json.loads(task.result_json) if task.result_json else None,
+        error_message=task.error_message,
+        created_at=task.created_at,
+        started_at=task.started_at,
+        completed_at=task.completed_at,
+    )
 
 
 # ========== 검색 쿼리 관리 ==========
@@ -778,51 +834,165 @@ def delete_search_query(
     return {"deleted": True}
 
 
-@router.post("/search-queries/collect")
-async def collect_from_searches(
-    source_type: Optional[str] = None,
-    min_length: int = Query(100, ge=50, le=1000),
-    max_length: int = Query(5000, ge=500, le=10000),
-    max_queries: int = Query(10, ge=1, le=50),
-    db: Session = Depends(get_db),
+async def _collect_searches_background(
+    task_id: UUID, source_type: Optional[str], min_length: int, max_length: int, max_queries: int
 ):
-    """검색 API에서 글 수집."""
-    service = WritingService(db)
+    """검색 쿼리 수집 백그라운드 작업."""
+    db = SessionLocal()
     try:
+        task = db.query(CollectionTask).filter(CollectionTask.task_id == task_id).first()
+        if task is None:
+            return
+        task.mark_started()
+        db.commit()
+
+        service = WritingService(db)
         result = await service.collect_from_searches(
             source_type=source_type,
             min_length=min_length,
             max_length=max_length,
             max_queries=max_queries,
         )
-        return result
+        task.mark_completed(result_json=json.dumps(result, ensure_ascii=False))
+        db.commit()
     except Exception as e:
-        raise HTTPException(500, f"Collection failed: {e}")
+        task = db.query(CollectionTask).filter(CollectionTask.task_id == task_id).first()
+        if task:
+            task.mark_failed(error_message=str(e))
+            db.commit()
+    finally:
+        db.close()
+
+
+@router.post("/search-queries/collect", status_code=202, response_model=CollectionTaskResponse)
+async def collect_from_searches(
+    background_tasks: BackgroundTasks,
+    source_type: Optional[str] = None,
+    min_length: int = Query(100, ge=50, le=1000),
+    max_length: int = Query(5000, ge=500, le=10000),
+    max_queries: int = Query(10, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """검색 API에서 글 수집 (비동기 202 Accepted)."""
+    task = CollectionTask(type=CollectionTask.TYPE_SEARCH_QUERIES)
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    background_tasks.add_task(
+        _collect_searches_background, task.task_id, source_type, min_length, max_length, max_queries
+    )
+
+    return CollectionTaskResponse(
+        task_id=task.task_id,
+        type=task.type,
+        status=task.status,
+        created_at=task.created_at,
+        status_url=f"/api/writing/search-queries/collect/{task.task_id}/status",
+    )
+
+
+@router.get("/search-queries/collect/{task_id}/status", response_model=CollectionStatusResponse)
+async def get_searches_collect_status(
+    task_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """검색 쿼리 수집 작업 상태 폴링."""
+    task = db.query(CollectionTask).filter(CollectionTask.task_id == task_id).first()
+    if task is None:
+        raise HTTPException(404, f"Task {task_id} not found")
+    return CollectionStatusResponse(
+        task_id=task.task_id,
+        type=task.type,
+        status=task.status,
+        progress=json.loads(task.progress_json) if task.progress_json else None,
+        result=json.loads(task.result_json) if task.result_json else None,
+        error_message=task.error_message,
+        created_at=task.created_at,
+        started_at=task.started_at,
+        completed_at=task.completed_at,
+    )
 
 
 # ========== 위키문헌 수집 ==========
 
 
-@router.post("/wikisource/collect")
+async def _collect_wikisource_background(
+    task_id: UUID, categories: Optional[list], min_length: int, max_length: int
+):
+    """위키문헌 수집 백그라운드 작업."""
+    db = SessionLocal()
+    try:
+        task = db.query(CollectionTask).filter(CollectionTask.task_id == task_id).first()
+        if task is None:
+            return
+        task.mark_started()
+        db.commit()
+
+        service = WritingService(db)
+        result = await service.collect_from_wikisource(
+            categories=categories,
+            min_length=min_length,
+            max_length=max_length,
+        )
+        task.mark_completed(result_json=json.dumps(result, ensure_ascii=False))
+        db.commit()
+    except Exception as e:
+        task = db.query(CollectionTask).filter(CollectionTask.task_id == task_id).first()
+        if task:
+            task.mark_failed(error_message=str(e))
+            db.commit()
+    finally:
+        db.close()
+
+
+@router.post("/wikisource/collect", status_code=202, response_model=CollectionTaskResponse)
 async def collect_from_wikisource(
+    background_tasks: BackgroundTasks,
     categories: Optional[str] = Query(None, description="쉼표로 구분된 카테고리 목록"),
     min_length: int = Query(200, ge=100, le=1000),
     max_length: int = Query(10000, ge=500, le=50000),
     db: Session = Depends(get_db),
 ):
-    """위키문헌에서 글 수집."""
-    service = WritingService(db)
-    try:
-        # 카테고리 파싱
-        cat_list = None
-        if categories:
-            cat_list = [c.strip() for c in categories.split(",") if c.strip()]
+    """위키문헌에서 글 수집 (비동기 202 Accepted)."""
+    # 카테고리 파싱
+    cat_list = None
+    if categories:
+        cat_list = [c.strip() for c in categories.split(",") if c.strip()]
 
-        result = await service.collect_from_wikisource(
-            categories=cat_list,
-            min_length=min_length,
-            max_length=max_length,
-        )
-        return result
-    except Exception as e:
-        raise HTTPException(500, f"Collection failed: {e}")
+    task = CollectionTask(type=CollectionTask.TYPE_WIKISOURCE)
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    background_tasks.add_task(_collect_wikisource_background, task.task_id, cat_list, min_length, max_length)
+
+    return CollectionTaskResponse(
+        task_id=task.task_id,
+        type=task.type,
+        status=task.status,
+        created_at=task.created_at,
+        status_url=f"/api/writing/wikisource/collect/{task.task_id}/status",
+    )
+
+
+@router.get("/wikisource/collect/{task_id}/status", response_model=CollectionStatusResponse)
+async def get_wikisource_collect_status(
+    task_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """위키문헌 수집 작업 상태 폴링."""
+    task = db.query(CollectionTask).filter(CollectionTask.task_id == task_id).first()
+    if task is None:
+        raise HTTPException(404, f"Task {task_id} not found")
+    return CollectionStatusResponse(
+        task_id=task.task_id,
+        type=task.type,
+        status=task.status,
+        progress=json.loads(task.progress_json) if task.progress_json else None,
+        result=json.loads(task.result_json) if task.result_json else None,
+        error_message=task.error_message,
+        created_at=task.created_at,
+        started_at=task.started_at,
+        completed_at=task.completed_at,
+    )

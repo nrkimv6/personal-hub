@@ -14,14 +14,19 @@ logger = logging.getLogger(__name__)
 class MobileServerClient:
     """모바일 서버 HTTP 클라이언트"""
 
-    def __init__(self, base_url: Optional[str] = None, timeout: int = 60):
+    # 클라이언트 연결 타임아웃 (고정: 서버 연결 확립까지 대기)
+    CONNECT_TIMEOUT = 10.0
+    # 서버 측 처리 후 응답 버퍼 (wait_timeout에 추가할 여유 시간, 초)
+    READ_BUFFER_SECONDS = 15.0
+    # 최대 허용 read 타임아웃 (초)
+    MAX_READ_TIMEOUT = 135.0  # wait_timeout 120s + 15s 버퍼
+
+    def __init__(self, base_url: Optional[str] = None):
         """
         Args:
             base_url: 모바일 서버 URL (기본값: 환경변수 MOBILE_SERVER_URL)
-            timeout: 요청 타임아웃 (초)
         """
         self.base_url = base_url or os.getenv("MOBILE_SERVER_URL", "http://localhost:8080")
-        self.timeout = timeout
         logger.info(f"MobileServerClient 초기화: {self.base_url}")
 
     async def health_check(self) -> Dict[str, Any]:
@@ -74,8 +79,16 @@ class MobileServerClient:
             "screenshot": screenshot
         }
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            logger.info(f"모바일 서버에 HTML 수집 요청: {url}")
+        # read 타임아웃 = wait_timeout(ms→s) + 버퍼 (서버 렌더링 완료 후 응답 전송 시간)
+        read_timeout = min(wait_timeout / 1000.0 + self.READ_BUFFER_SECONDS, self.MAX_READ_TIMEOUT)
+        timeout_config = httpx.Timeout(
+            connect=self.CONNECT_TIMEOUT,
+            read=read_timeout,
+            write=10.0,
+            pool=5.0,
+        )
+        async with httpx.AsyncClient(timeout=timeout_config) as client:
+            logger.info(f"모바일 서버에 HTML 수집 요청: {url} (read_timeout={read_timeout:.0f}s)")
             response = await client.post(
                 f"{self.base_url}/api/fetch-html",
                 json=payload

@@ -3,7 +3,7 @@ System dashboard API routes
 Provides endpoints for querying and managing Windows services, startup programs, and scheduled tasks
 """
 from typing import Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from .services.system_service import SystemService
 from .services.system_cache_collector import SystemCacheCollector
@@ -38,23 +38,26 @@ async def get_all_services_status():
     return await _service.get_all_services_status()
 
 
-@router.post("/services/refresh")
-async def refresh_services_status():
-    """즉시 상태 수집 후 반환
+@router.post("/services/refresh", status_code=202)
+async def refresh_services_status(background_tasks: BackgroundTasks):
+    """백그라운드에서 상태 수집을 시작하고 즉시 반환 (202 Accepted)
+
+    수집 완료 후 GET /services/status가 자동으로 새 캐시를 반환합니다.
 
     Returns:
-        projects: 프로젝트별 서비스 상태
-        collected_at: 수집 시각 (ISO 8601)
-        collection_duration_ms: 수집 소요 시간 (ms)
+        status: "refreshing"
+        last_cached: 현재 캐시 수집 시각 (수집 전 마지막 값)
     """
     if not _cache_collector:
         raise HTTPException(status_code=503, detail="Cache collector not initialized")
 
-    result = await _cache_collector.collect_and_cache()
-    if result is None:
-        raise HTTPException(status_code=503, detail="Collection in progress or failed")
+    cached = _cache_collector.get_cached_status()
+    background_tasks.add_task(_cache_collector.collect_and_cache)
 
-    return result
+    return {
+        "status": "refreshing",
+        "last_cached": cached.get("collected_at"),
+    }
 
 
 @router.get("/services/nssm")
