@@ -5,6 +5,8 @@ import json
 import logging
 import re
 import redis
+import shutil
+from datetime import date
 from pathlib import Path
 from typing import List, Optional
 
@@ -470,54 +472,249 @@ class PlanService:
             progress=progress,
         )
 
-    # ========== done 처리 ==========
+    # ========== done 처리 (Python 네이티브) ==========
 
-    AUTO_DONE_SCRIPT = Path("D:/work/project/service/wtools/common/tools/auto-done.ps1")
+    COMMIT_SH = Path("D:/work/project/tools/common/commit.sh")
+
+    @staticmethod
+    def _remove_code_blocks(content: str) -> str:
+        """코드블록/인라인 코드 제거 (체크박스 오인식 방지)"""
+        content = re.sub(r'```.*?```', '', content, flags=re.DOTALL)
+        content = re.sub(r'`[^`\n]+`', '', content)
+        return content
+
+    @staticmethod
+    def _extract_plan_title(content: str) -> str:
+        """첫 번째 # 헤더에서 제목 추출"""
+        match = re.search(r'^#\s+(.+)', content, re.MULTILINE)
+        if match:
+            return match.group(1).strip()
+        return "Unknown Plan"
+
+    @staticmethod
+    def _resolve_project_dir(plan_path: str) -> Optional[Path]:
+        """plan 경로에서 프로젝트 디렉토리 추론
+
+        - docs/plan 패턴 감지 → plan 디렉토리의 3단계 위 (file → plan → docs → project_root)
+        - 패턴 불일치 시 파일 기준 상위 3단계 fallback
+        """
+        p = Path(plan_path).resolve()
+        parts = p.parts
+        for i, part in enumerate(parts):
+            if part == "plan" and i > 0 and parts[i - 1] == "docs":
+                # parts[0..i-2] = project root
+                project_root = Path(*parts[:i - 1])
+                if project_root.exists():
+                    return project_root
+        # fallback: 파일 기준 상위 3단계
+        try:
+            candidate = p.parent.parent.parent
+            if candidate.exists():
+                return candidate
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _update_plan_headers(content: str, total: int) -> str:
+        """상태→구현완료, 진행률→100%, [→ID]→[x] 치환, 푸터 갱신"""
+        content = re.sub(r'^(>\s*상태:\s*).*$', r'\1구현완료', content, flags=re.MULTILINE)
+        content = re.sub(
+            r'^(>\s*진행률:\s*)[\d/\s()%]+$',
+            f'> 진행률: {total}/{total} (100%)',
+            content, flags=re.MULTILINE
+        )
+        # [→ID] 형태 → [x]
+        content = re.sub(r'\[→[^\]]*\]', '[x]', content)
+        # 푸터 갱신: *상태: ... | 진행률: ...*
+        content = re.sub(
+            r'\*상태:[^|*]+\|[^*]*진행률:[^*]*\*',
+            f'*상태: 구현완료 | 진행률: {total}/{total} (100%)*',
+            content
+        )
+        return content
+
+    @staticmethod
+    def _archive_plan(plan_path: str, content: str) -> Path:
+        """완료일 헤더 삽입 후 archive 디렉토리로 이동, 원본 삭제"""
+        p = Path(plan_path)
+        today = date.today().isoformat()
+
+        # 완료일 헤더 삽입 (> 상태: 줄 다음에)
+        lines = content.splitlines(keepends=True)
+        inserted = False
+        for i, line in enumerate(lines):
+            if re.match(r'^>\s*상태:', line):
+                lines.insert(i + 1, f'> 완료일: {today}\n')
+                inserted = True
+                break
+        if not inserted:
+            for i, line in enumerate(lines):
+                if line.startswith('#'):
+                    lines.insert(i + 1, f'\n> 완료일: {today}\n')
+                    break
+        final_content = "".join(lines)
+
+        # archive 디렉토리 생성
+        archive_dir = p.parent.parent / "archive"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        archive_path = archive_dir / p.name
+
+        archive_path.write_text(final_content, encoding="utf-8")
+        p.unlink()
+        return archive_path
+
+    @staticmethod
+    def _update_todo_done(project_dir: Path, plan_title: str) -> None:
+        """TODO.md에서 plan_title 관련 항목 제거, DONE.md 상단에 추가"""
+        today = date.today().isoformat()
+
+        # TODO.md: plan_title을 포함하는 체크박스 줄 제거
+        todo_path = project_dir / "TODO.md"
+        if todo_path.exists():
+            lines = todo_path.read_text(encoding="utf-8").splitlines(keepends=True)
+            filtered = [
+                l for l in lines
+                if not (plan_title in l and re.search(r'\[[ x→]\]', l))
+            ]
+            if len(filtered) < len(lines):
+                todo_path.write_text("".join(filtered), encoding="utf-8")
+
+        # DONE.md 상단에 추가
+        done_path = project_dir / "docs" / "DONE.md"
+        done_path.parent.mkdir(parents=True, exist_ok=True)
+        new_entry = f"- [x] {today}: {plan_title}\n"
+
+        if done_path.exists():
+            existing = done_path.read_text(encoding="utf-8")
+            header_match = re.match(r'(#[^\n]+\n\n?)', existing)
+            if header_match:
+                pos = header_match.end()
+                done_path.write_text(existing[:pos] + new_entry + existing[pos:], encoding="utf-8")
+            else:
+                done_path.write_text(new_entry + existing, encoding="utf-8")
+        else:
+            done_path.write_text(f"# DONE (최근 20개)\n\n{new_entry}", encoding="utf-8")
+
+    @staticmethod
+    def _archive_done_if_needed(done_path: Path) -> None:
+        """DONE.md 항목 5개 초과 시 월별 아카이브"""
+        if not done_path.exists():
+            return
+
+        content = done_path.read_text(encoding="utf-8")
+        lines = content.splitlines(keepends=True)
+        item_lines = [l for l in lines if re.match(r'^-\s*\[', l)]
+
+        if len(item_lines) <= 5:
+            return
+
+        keep = item_lines[:5]
+        overflow = item_lines[5:]
+
+        today = date.today()
+        archive_dir = done_path.parent / "history"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        week_str = f"{today.year}-W{today.isocalendar()[1]:02d}"
+        archive_path = archive_dir / f"DONE-{week_str}.md"
+
+        if archive_path.exists():
+            archive_path.write_text(
+                archive_path.read_text(encoding="utf-8") + "".join(overflow),
+                encoding="utf-8"
+            )
+        else:
+            archive_path.write_text(
+                f"# DONE Archive {week_str}\n\n" + "".join(overflow),
+                encoding="utf-8"
+            )
+
+        # DONE.md 갱신 (최근 5개만 유지)
+        header_match = re.match(r'(#[^\n]+\n\n?)', content)
+        header = header_match.group(1) if header_match else "# DONE (최근 20개)\n\n"
+        done_path.write_text(header + "".join(keep), encoding="utf-8")
+
+    async def _git_commit(
+        self, project_dir: Optional[Path], files_to_add: List[Path], commit_msg: str
+    ) -> str:
+        """git add + commit.sh 호출"""
+        if not self.COMMIT_SH.exists():
+            return f"commit.sh not found: {self.COMMIT_SH}"
+
+        existing_files = [str(f) for f in files_to_add if f.exists()]
+        if not existing_files:
+            return "커밋할 파일 없음"
+
+        cwd = str(project_dir) if project_dir and project_dir.exists() else None
+
+        # git add
+        add_proc = await asyncio.create_subprocess_exec(
+            "git", "add", *existing_files,
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        await add_proc.communicate()
+
+        # commit.sh
+        commit_proc = await asyncio.create_subprocess_exec(
+            "bash", str(self.COMMIT_SH), commit_msg,
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout, _ = await asyncio.wait_for(commit_proc.communicate(), timeout=60)
+        return stdout.decode("utf-8", errors="replace") if stdout else ""
 
     async def run_done(self, plan_path: str) -> dict:
-        """auto-done.ps1 실행하여 plan 완료 처리 (아카이브, TODO→DONE, 커밋)"""
-        if not self.AUTO_DONE_SCRIPT.exists():
-            return {"success": False, "message": f"auto-done.ps1 not found: {self.AUTO_DONE_SCRIPT}", "output": None,
-                    "remaining_tasks": 0, "total_tasks": 0, "plan_status": ""}
-
+        """Python 네이티브 plan 완료 처리 (아카이브, TODO→DONE, git commit)"""
         path = Path(plan_path)
         if not path.exists():
             return {"success": False, "message": f"Plan file not found: {plan_path}", "output": None,
                     "remaining_tasks": 0, "total_tasks": 0, "plan_status": ""}
 
-        # done 실행 전 현재 progress/status 캡처
         pre_progress = self.get_plan_progress(path)
         pre_status = self.get_plan_status(path)
 
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "powershell.exe", "-ExecutionPolicy", "Bypass",
-                "-File", str(self.AUTO_DONE_SCRIPT),
-                "-PlanFile", plan_path,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
-            output = stdout.decode("utf-8", errors="replace") if stdout else ""
+            content = path.read_text(encoding="utf-8", errors="ignore")
+            title = self._extract_plan_title(content)
+            total = pre_progress.total
 
-            if proc.returncode == 0:
-                self.sync_plans()
-                return {
-                    "success": True, "message": "완료 처리 성공", "output": output,
-                    "remaining_tasks": pre_progress.total - pre_progress.done,
-                    "total_tasks": pre_progress.total,
-                    "plan_status": pre_status,
-                }
-            else:
-                return {
-                    "success": False, "message": f"auto-done.ps1 실패 (exit={proc.returncode})", "output": output,
-                    "remaining_tasks": pre_progress.total - pre_progress.done,
-                    "total_tasks": pre_progress.total,
-                    "plan_status": pre_status,
-                }
-        except asyncio.TimeoutError:
-            return {"success": False, "message": "auto-done.ps1 타임아웃 (120초)", "output": None,
-                    "remaining_tasks": 0, "total_tasks": 0, "plan_status": ""}
+            # 1. 헤더/푸터 갱신
+            updated_content = self._update_plan_headers(content, total)
+
+            # 2. 아카이브 이동
+            archive_path = self._archive_plan(plan_path, updated_content)
+
+            # 3. TODO.md / DONE.md 업데이트
+            project_dir = self._resolve_project_dir(plan_path)
+            if project_dir:
+                self._update_todo_done(project_dir, title)
+                done_path = project_dir / "docs" / "DONE.md"
+                self._archive_done_if_needed(done_path)
+
+            # 4. git commit
+            files_to_commit: List[Path] = [archive_path]
+            if project_dir:
+                files_to_commit += [
+                    project_dir / "TODO.md",
+                    project_dir / "docs" / "DONE.md",
+                ]
+            commit_output = await self._git_commit(
+                project_dir, files_to_commit, f"docs: {title} 완료 처리"
+            )
+
+            self.sync_plans()
+            return {
+                "success": True,
+                "message": "완료 처리 성공",
+                "output": f"아카이브: {archive_path}\n{commit_output}",
+                "remaining_tasks": pre_progress.total - pre_progress.done,
+                "total_tasks": pre_progress.total,
+                "plan_status": pre_status,
+            }
+
         except Exception as e:
             logger.error(f"run_done 실패: {e}")
             return {"success": False, "message": str(e), "output": None,
@@ -547,7 +744,6 @@ class PlanService:
         success_count = 0
         failed_count = 0
 
-        # PLAN_LIST: 쉼표 구분 파일명 (숫자 아님!)
         filenames = ",".join(p.filename for p in targets)
         _publish_log("BATCH", f"PLAN_LIST {filenames}")
 
@@ -565,7 +761,7 @@ class PlanService:
                 _publish_log("BATCH", f"PLAN_DONE {plan.filename}")
             else:
                 failed_count += 1
-                _publish_log("BATCH", f"PLAN_DONE {plan.filename}")
+                _publish_log("BATCH", f"PLAN_FAILED {plan.filename}")  # 버그 수정: PLAN_DONE → PLAN_FAILED
                 _publish_log("ERROR", f"{plan.filename}: {result['message']}")
 
         _publish_log("INFO", f"일괄완료 종료: {success_count}개 성공, {failed_count}개 실패")
