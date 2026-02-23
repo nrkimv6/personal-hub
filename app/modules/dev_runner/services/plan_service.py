@@ -416,7 +416,12 @@ class PlanService:
 
         path = Path(plan_path)
         if not path.exists():
-            return {"success": False, "message": f"Plan file not found: {plan_path}", "output": None}
+            return {"success": False, "message": f"Plan file not found: {plan_path}", "output": None,
+                    "remaining_tasks": 0, "total_tasks": 0, "plan_status": ""}
+
+        # done 실행 전 현재 progress/status 캡처
+        pre_progress = self.get_plan_progress(path)
+        pre_status = self.get_plan_status(path)
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -431,14 +436,26 @@ class PlanService:
 
             if proc.returncode == 0:
                 self.sync_plans()
-                return {"success": True, "message": "완료 처리 성공", "output": output}
+                return {
+                    "success": True, "message": "완료 처리 성공", "output": output,
+                    "remaining_tasks": pre_progress.total - pre_progress.done,
+                    "total_tasks": pre_progress.total,
+                    "plan_status": pre_status,
+                }
             else:
-                return {"success": False, "message": f"auto-done.ps1 실패 (exit={proc.returncode})", "output": output}
+                return {
+                    "success": False, "message": f"auto-done.ps1 실패 (exit={proc.returncode})", "output": output,
+                    "remaining_tasks": pre_progress.total - pre_progress.done,
+                    "total_tasks": pre_progress.total,
+                    "plan_status": pre_status,
+                }
         except asyncio.TimeoutError:
-            return {"success": False, "message": "auto-done.ps1 타임아웃 (120초)", "output": None}
+            return {"success": False, "message": "auto-done.ps1 타임아웃 (120초)", "output": None,
+                    "remaining_tasks": 0, "total_tasks": 0, "plan_status": ""}
         except Exception as e:
             logger.error(f"run_done 실패: {e}")
-            return {"success": False, "message": str(e), "output": None}
+            return {"success": False, "message": str(e), "output": None,
+                    "remaining_tasks": 0, "total_tasks": 0, "plan_status": ""}
 
     # ========== 동기화 ==========
 
