@@ -18,7 +18,8 @@ class FileClassifierSettings(BaseSettings):
     EXCLUDE_FOLDERS: list[str] = [
         "Windows", "Program Files", "Program Files (x86)",
         "$Recycle.Bin", "System Volume Information",
-        ".git", "node_modules", "__pycache__", ".venv"
+        ".git", "node_modules", "__pycache__", ".venv",
+        ".obsidian", ".smart-env", ".claude"
     ]
     MAX_FILES_PER_SCAN: int = 100000
 

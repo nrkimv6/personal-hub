@@ -17,6 +17,8 @@
 	const FILE_GROUP_OPTIONS = [
 		{ value: '', label: '전체' },
 		{ value: 'music', label: '음악' },
+		{ value: 'video', label: '동영상' },
+		{ value: 'image', label: '이미지' },
 		{ value: 'archive', label: '압축파일' },
 		{ value: 'document', label: '문서' },
 		{ value: 'installer', label: '설치파일' },

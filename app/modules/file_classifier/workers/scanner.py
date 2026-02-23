@@ -20,12 +20,15 @@ FILE_GROUP_MAP: dict[str, str] = {}
 
 _GROUP_EXTENSIONS = {
     "music": {".mp3", ".flac", ".ogg", ".wav", ".wma", ".aac", ".m4a", ".mid", ".midi"},
+    "video": {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v"},
+    "image": {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".psd", ".svg", ".tiff", ".tif", ".ico"},
     "archive": {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2"},
     "document": {
         ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-        ".hwp", ".txt", ".csv", ".json", ".xml", ".md", ".rtf"
+        ".hwp", ".hwpx", ".txt", ".csv", ".json", ".xml", ".md", ".rtf",
+        ".ics", ".html", ".htm", ".mhtml"
     },
-    "installer": {".exe", ".msi", ".bat", ".ps1", ".cmd"},
+    "installer": {".exe", ".msi", ".bat", ".ps1", ".cmd", ".apk", ".ipa", ".vsix", ".appx", ".msix"},
     "game": {".dtx", ".gda", ".g2d", ".bms", ".bme", ".bml"},
 }
 

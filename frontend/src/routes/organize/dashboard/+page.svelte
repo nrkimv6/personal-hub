@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { Play, Square, RefreshCw, HardDrive, Music, Archive, FileText, Terminal, Gamepad2, FolderQuestion } from 'lucide-svelte';
+	import { Play, Square, RefreshCw, HardDrive, Music, Archive, FileText, Terminal, Gamepad2, Folder, Video, Image } from 'lucide-svelte';
 
 	// 상태
 	let stats = $state<any>(null);
@@ -14,15 +14,19 @@
 
 	const FILE_GROUP_ICONS: Record<string, any> = {
 		music: Music,
+		video: Video,
+		image: Image,
 		archive: Archive,
 		document: FileText,
 		installer: Terminal,
 		game: Gamepad2,
-		misc: FolderQuestion
+		misc: Folder
 	};
 
 	const FILE_GROUP_LABELS: Record<string, string> = {
 		music: '음악',
+		video: '동영상',
+		image: '이미지',
 		archive: '압축파일',
 		document: '문서',
 		installer: '설치파일',
@@ -162,7 +166,7 @@
 	{:else if stats}
 		<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
 			{#each (stats.by_group ?? []) as group}
-				{@const Icon = FILE_GROUP_ICONS[group.file_group] ?? FolderQuestion}
+				{@const Icon = FILE_GROUP_ICONS[group.file_group] ?? Folder}
 				<div class="rounded-lg border border-border bg-card p-3">
 					<div class="mb-2 flex items-center gap-2">
 						<Icon class="size-4 text-primary" />
