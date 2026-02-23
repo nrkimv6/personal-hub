@@ -37,7 +37,7 @@
 	let lastStartTime = $state<string | null>(null);
 	let panelOpen = $state(true);
 	let taskHistoryOpen = $state(false);
-	let taskHistoryTab = $state<'tasks' | 'plans'>('tasks');
+	let taskHistoryTab = $state<'tasks' | 'plans'>('plans');
 	let currentTracking = $state<CurrentTrackingResponse | null>(null);
 	let selectedPlanPath = $state('');
 	let trackingInterval: ReturnType<typeof setInterval> | null = null;
@@ -165,6 +165,9 @@
 		// 모바일(< 640px)이면 Control Panel 기본 접힘
 		if (window.innerWidth < 640) {
 			panelOpen = false;
+		} else {
+			// 데스크톱: Task History(Plans 탭) 기본 펼침
+			taskHistoryOpen = true;
 		}
 
 		// 초기 로드: 모든 데이터 병렬로 한 번에 가져오기
@@ -399,12 +402,12 @@
 			<!-- Log Viewer + Task History -->
 			<div class="flex flex-col flex-none sm:flex-1 sm:overflow-hidden">
 				<!-- Log Viewer (Phase 2: planFile prop 전달) -->
-				<div class="flex-1 min-h-0">
+				<div class="flex-1 min-h-[200px]">
 					<LogViewer planFile={effectivePlanFile ?? undefined} currentPlanName={runStatus?.current_plan_name ?? undefined} />
 				</div>
 
-				<!-- Task History (기본 접힘) -->
-				<div class="shrink-0 border-t">
+				<!-- Task History (데스크톱: 기본 펼침, 모바일: 기본 접힘) -->
+				<div class="shrink-0 border-t overflow-auto">
 					<button
 						onclick={() => (taskHistoryOpen = !taskHistoryOpen)}
 						class="flex items-center gap-2 w-full px-4 py-2 hover:bg-gray-50 transition-colors"

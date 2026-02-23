@@ -55,6 +55,13 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
 	if (event.request.method !== 'GET') return;
 
+	const url = new URL(event.request.url);
+
+	// API 요청, SSE 스트림, 외부 URL은 Service Worker가 가로채지 않음
+	if (url.pathname.startsWith('/api/')) return;
+	if (event.request.headers.get('accept')?.includes('text/event-stream')) return;
+	if (url.origin !== self.location.origin) return;
+
 	event.respondWith(
 		fetchWithTimeout(event.request)
 			.then((response) => {
