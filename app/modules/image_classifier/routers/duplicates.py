@@ -489,6 +489,85 @@ async def discard_all_in_group(
     return {"status": "resolved", "group_id": group_id, "deleted_count": deleted_count}
 
 
+class BulkResolveItem(BaseModel):
+    group_id: int
+    keep_file_id: int
+
+
+class BulkResolveRequest(BaseModel):
+    resolutions: list[BulkResolveItem]
+
+
+@router.post("/bulk-resolve")
+async def bulk_resolve(
+    request: BulkResolveRequest,
+    db: Session = Depends(get_db),
+):
+    """여러 그룹 일괄 확정 (keep 파일 보관, 나머지 휴지통)"""
+    resolved = 0
+    failed = 0
+    errors: list[str] = []
+    resolved_group_ids: list[int] = []
+
+    for item in request.resolutions:
+        try:
+            members = db.execute(
+                text("""
+                    SELECT dm.file_id, fc.file_path
+                    FROM duplicate_members dm
+                    JOIN file_classifications fc ON dm.file_id = fc.id
+                    WHERE dm.group_id = :gid
+                """),
+                {"gid": item.group_id}
+            ).fetchall()
+
+            if not members:
+                errors.append(f"Group {item.group_id}: 멤버 없음")
+                failed += 1
+                continue
+
+            member_ids = [m.file_id for m in members]
+            if item.keep_file_id not in member_ids:
+                errors.append(f"Group {item.group_id}: keep_file_id {item.keep_file_id}가 멤버가 아님")
+                failed += 1
+                continue
+
+            db.execute(
+                text("UPDATE duplicate_groups SET status = 'resolved', kept_file_id = :keep_id WHERE id = :gid"),
+                {"gid": item.group_id, "keep_id": item.keep_file_id}
+            )
+
+            for member in members:
+                if member.file_id == item.keep_file_id:
+                    continue
+                file_path = Path(member.file_path)
+                if file_path.exists():
+                    try:
+                        send2trash(str(file_path))
+                        db.execute(
+                            text("UPDATE file_classifications SET status = 'moved', moved_path = :trash WHERE id = :fid"),
+                            {"fid": member.file_id, "trash": "휴지통"}
+                        )
+                    except Exception as e:
+                        logger.error(f"파일 삭제 실패: {file_path} - {e}")
+
+            resolved += 1
+            resolved_group_ids.append(item.group_id)
+
+        except Exception as e:
+            errors.append(f"Group {item.group_id}: {str(e)}")
+            failed += 1
+
+    db.commit()
+
+    return {
+        "resolved": resolved,
+        "failed": failed,
+        "errors": errors,
+        "resolved_group_ids": resolved_group_ids,
+    }
+
+
 class MergeGroupsRequest(BaseModel):
     """그룹 병합 요청"""
     group_ids: list[int]

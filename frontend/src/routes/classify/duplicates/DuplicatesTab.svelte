@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
+	import { toast } from '$lib/stores/toast';
 	import { Copy, Wand2, Check, Trash2, SkipForward, Crown, PartyPopper, Square, ChevronLeft, ChevronRight, FolderOpen, X, ExternalLink, Eye, Clipboard, Merge, Archive } from 'lucide-svelte';
 
 	interface DuplicateGroup {
@@ -53,8 +54,8 @@
 
 	let filterStatus = $state('unresolved');
 
-	// 그룹 선택 (병합용)
-	let selectedGroupIds = $state(new Set<number>());
+	// 그룹 선택 (병합 + 일괄 확정 공용)
+	let checkedGroups = $state(new Set<number>());
 
 	// 카테고리 (보관 시 설정용)
 	interface CategoryItem {
@@ -97,10 +98,10 @@
 			const res = await fetchWithTimeout('/api/ic/duplicates/detect/stop', { method: 'POST' });
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			detectRunning = false;
-			alert('중복탐지가 중지되었습니다.');
+			toast.success('중복탐지가 중지되었습니다.');
 			await loadGroups();
 		} catch (err: any) {
-			alert(`중지 실패: ${err.message}`);
+			toast.error(`중지 실패: ${err.message}`);
 		}
 	}
 
@@ -150,7 +151,7 @@
 			const detail = await res.json();
 			groupDetails = { ...groupDetails, [groupId]: detail };
 		} catch (err: any) {
-			alert(`그룹 로드 실패: ${err.message}`);
+			toast.error(`그룹 로드 실패: ${err.message}`);
 		}
 	}
 
@@ -175,11 +176,19 @@
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const result = await res.json();
 
-			alert(`해결 완료!\n보관: ${result.kept_file_id}\n삭제: ${result.deleted_count}개`);
+			toast.success(`해결 완료! 보관: ${result.kept_file_id}, 삭제: ${result.deleted_count}개`);
 
-			await loadGroups();
+			// 로컬 상태 업데이트 (loadGroups() 전체 재호출 대신)
+			groups = groups.filter((g) => g.group_id !== groupId);
+			totalGroups = Math.max(0, totalGroups - 1);
+			const { [groupId]: _detail, ...restDetails } = groupDetails;
+			groupDetails = restDetails;
+			const { [groupId]: _sel, ...restSel } = selections;
+			selections = restSel;
+			checkedGroups.delete(groupId);
+			checkedGroups = new Set(checkedGroups);
 		} catch (err: any) {
-			alert(`해결 실패: ${err.message}`);
+			toast.error(`해결 실패: ${err.message}`);
 		}
 	}
 
@@ -258,10 +267,18 @@
 			const res = await fetchWithTimeout(`/api/ic/duplicates/${groupId}/discard-all`, { method: 'POST' });
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const result = await res.json();
-			alert(`모두 삭제 완료!\n삭제: ${result.deleted_count}개`);
-			await loadGroups();
+			toast.success(`모두 삭제 완료! 삭제: ${result.deleted_count}개`);
+			// 로컬 상태 업데이트 (loadGroups() 전체 재호출 대신)
+			groups = groups.filter((g) => g.group_id !== groupId);
+			totalGroups = Math.max(0, totalGroups - 1);
+			const { [groupId]: _detail, ...restDetails } = groupDetails;
+			groupDetails = restDetails;
+			const { [groupId]: _sel, ...restSel } = selections;
+			selections = restSel;
+			checkedGroups.delete(groupId);
+			checkedGroups = new Set(checkedGroups);
 		} catch (err: any) {
-			alert(`삭제 실패: ${err.message}`);
+			toast.error(`삭제 실패: ${err.message}`);
 		}
 	}
 
@@ -287,18 +304,19 @@
 			});
 			if (!res.ok) {
 				const err = await res.json();
-				alert(err.detail || '탐색기 열기 실패');
+				toast.error(err.detail || '탐색기 열기 실패');
 			}
 		} catch (err: any) {
-			alert(`탐색기 열기 실패: ${err.message}`);
+			toast.error(`탐색기 열기 실패: ${err.message}`);
 		}
 	}
 
 	async function copyPathToClipboard(path: string) {
 		try {
 			await navigator.clipboard.writeText(path);
+			toast.success('경로 복사됨');
 		} catch {
-			alert('클립보드 복사 실패');
+			toast.error('클립보드 복사 실패');
 		}
 	}
 
@@ -310,17 +328,25 @@
 			const res = await fetchWithTimeout(`/api/ic/duplicates/${groupId}/keep-all`, { method: 'POST' });
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const result = await res.json();
-			alert(`모두 보관 완료! ${result.kept_count}개 파일 보관됨`);
-			await loadGroups();
+			toast.success(`모두 보관 완료! ${result.kept_count}개 파일 보관됨`);
+			// 로컬 상태 업데이트 (loadGroups() 전체 재호출 대신)
+			groups = groups.filter((g) => g.group_id !== groupId);
+			totalGroups = Math.max(0, totalGroups - 1);
+			const { [groupId]: _detail, ...restDetails } = groupDetails;
+			groupDetails = restDetails;
+			const { [groupId]: _sel, ...restSel } = selections;
+			selections = restSel;
+			checkedGroups.delete(groupId);
+			checkedGroups = new Set(checkedGroups);
 		} catch (err: any) {
-			alert(`모두 보관 실패: ${err.message}`);
+			toast.error(`모두 보관 실패: ${err.message}`);
 		}
 	}
 
 	async function mergeSelectedGroups() {
-		const ids = Array.from(selectedGroupIds);
+		const ids = Array.from(checkedGroups);
 		if (ids.length < 2) {
-			alert('병합하려면 2개 이상의 그룹을 선택하세요.');
+			toast.warning('병합하려면 2개 이상의 그룹을 선택하세요.');
 			return;
 		}
 		if (!confirm(`선택한 ${ids.length}개 그룹을 그룹 #${ids[0]}으로 병합하시겠습니까?`)) return;
@@ -335,11 +361,70 @@
 				throw new Error(err.detail || '병합 실패');
 			}
 			const result = await res.json();
-			alert(`병합 완료! 그룹 #${result.target_group_id}으로 ${ids.length - 1}개 그룹 병합됨`);
-			selectedGroupIds = new Set();
-			await loadGroups();
+			toast.success(`병합 완료! 그룹 #${result.target_group_id}으로 ${ids.length - 1}개 그룹 병합됨`);
+			// 로컬 상태 업데이트: 소스 그룹 제거, 타겟 그룹 상세 재로드
+			const targetId = ids[0];
+			const mergedIds = ids.slice(1);
+			groups = groups.filter((g) => !mergedIds.includes(g.group_id));
+			totalGroups = Math.max(0, totalGroups - mergedIds.length);
+			mergedIds.forEach((id) => {
+				const { [id]: _d, ...restD } = groupDetails; groupDetails = restD;
+				const { [id]: _s, ...restS } = selections; selections = restS;
+			});
+			await loadGroupDetail(targetId);
+			checkedGroups = new Set();
 		} catch (err: any) {
-			alert(`병합 실패: ${err.message}`);
+			toast.error(`병합 실패: ${err.message}`);
+		}
+	}
+
+	async function bulkResolve() {
+		const ids = Array.from(checkedGroups);
+		if (ids.length === 0) return;
+
+		const resolutions = ids
+			.map((gid) => {
+				const detail = groupDetails[gid];
+				const keepId = selections[gid] ?? (detail ? getBestMember(detail.members) : null);
+				return { group_id: gid, keep_file_id: keepId };
+			})
+			.filter((r) => r.keep_file_id !== null);
+
+		if (resolutions.length === 0) {
+			toast.warning('확정할 그룹이 없습니다. 그룹을 펼쳐 보관 파일이 자동 선택되도록 하세요.');
+			return;
+		}
+		if (resolutions.length < ids.length) {
+			if (!confirm(`${ids.length}개 선택 중 ${resolutions.length}개만 확정 가능합니다.\n(나머지는 상세 로드 필요)\n\n계속하시겠습니까?`)) return;
+		} else {
+			if (!confirm(`선택한 ${resolutions.length}개 그룹을 일괄 확정하시겠습니까?`)) return;
+		}
+
+		try {
+			const res = await fetchWithTimeout('/api/ic/duplicates/bulk-resolve', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ resolutions })
+			});
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const result = await res.json();
+
+			const msg = result.failed > 0
+				? `일괄 확정 완료! 성공: ${result.resolved}개, 실패: ${result.failed}개`
+				: `일괄 확정 완료! ${result.resolved}개 그룹 처리됨`;
+			result.failed > 0 ? toast.warning(msg) : toast.success(msg);
+
+			// 로컬 상태에서 resolved 그룹 제거
+			const resolvedIds: number[] = result.resolved_group_ids ?? [];
+			groups = groups.filter((g) => !resolvedIds.includes(g.group_id));
+			totalGroups = Math.max(0, totalGroups - resolvedIds.length);
+			resolvedIds.forEach((id) => {
+				const { [id]: _d, ...restD } = groupDetails; groupDetails = restD;
+				const { [id]: _s, ...restS } = selections; selections = restS;
+			});
+			checkedGroups = new Set();
+		} catch (err: any) {
+			toast.error(`일괄 확정 실패: ${err.message}`);
 		}
 	}
 
@@ -357,7 +442,7 @@
 				selectedKeepFolder = data.folders[0].folder_path;
 			}
 		} catch (err: any) {
-			alert(`폴더 분석 실패: ${err.message}`);
+			toast.error(`폴더 분석 실패: ${err.message}`);
 			showFolderModal = false;
 		} finally {
 			folderAnalysisLoading = false;
@@ -391,11 +476,20 @@
 			});
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const result = await res.json();
-			alert(`일괄 해결 완료!\n\n보관: ${result.resolved_count}개 그룹\n삭제: ${result.deleted_count}개 파일\n스킵: ${result.skipped_count}개\n실패: ${result.failed_count}개`);
+			toast.success(`일괄 해결 완료! 보관: ${result.resolved_count}개 그룹, 삭제: ${result.deleted_count}개 파일`);
 			showFolderModal = false;
-			await loadGroups();
+			// 로컬 상태 업데이트: resolved 그룹 목록으로 필터링
+			const resolvedIds = (result.details ?? []).map((d: { group_id: number }) => d.group_id);
+			groups = groups.filter((g) => !resolvedIds.includes(g.group_id));
+			totalGroups = Math.max(0, totalGroups - resolvedIds.length);
+			resolvedIds.forEach((id: number) => {
+				const { [id]: _d, ...restD } = groupDetails; groupDetails = restD;
+				const { [id]: _s, ...restS } = selections; selections = restS;
+				checkedGroups.delete(id);
+			});
+			checkedGroups = new Set(checkedGroups);
 		} catch (err: any) {
-			alert(`일괄 해결 실패: ${err.message}`);
+			toast.error(`일괄 해결 실패: ${err.message}`);
 		} finally {
 			folderResolving = false;
 		}
@@ -493,6 +587,26 @@
 			폴더 기준 일괄 해결
 		</button>
 
+		<!-- 전체 선택 -->
+		{#if filteredGroups.length > 0}
+			<label class="flex items-center gap-1.5 cursor-pointer text-sm text-muted-foreground hover:text-foreground transition-colors">
+				<input
+					type="checkbox"
+					checked={filteredGroups.every((g) => checkedGroups.has(g.group_id))}
+					indeterminate={filteredGroups.some((g) => checkedGroups.has(g.group_id)) && !filteredGroups.every((g) => checkedGroups.has(g.group_id))}
+					onchange={(e) => {
+						if ((e.currentTarget as HTMLInputElement).checked) {
+							checkedGroups = new Set(filteredGroups.map((g) => g.group_id));
+						} else {
+							checkedGroups = new Set();
+						}
+					}}
+					class="h-4 w-4 rounded border-border cursor-pointer"
+				/>
+				전체 선택
+			</label>
+		{/if}
+
 		<!-- 새로고침 -->
 		<button
 			class="ml-auto flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm hover:bg-accent transition-colors"
@@ -503,13 +617,20 @@
 		</button>
 	</div>
 
-	<!-- 그룹 선택 액션 바 (2개 이상 선택 시) -->
-	{#if selectedGroupIds.size >= 1}
-		<div class="mt-3 flex items-center gap-3 rounded-lg bg-primary/5 border border-primary/20 px-4 py-2">
-			<span class="text-sm font-medium text-primary">{selectedGroupIds.size}개 그룹 선택됨</span>
-			{#if selectedGroupIds.size >= 2}
+	<!-- 그룹 선택 액션 바 (1개 이상 선택 시) -->
+	{#if checkedGroups.size >= 1}
+		<div class="mt-3 flex items-center gap-3 rounded-lg bg-primary/5 border border-primary/20 px-4 py-2 flex-wrap">
+			<span class="text-sm font-medium text-primary">{checkedGroups.size}개 그룹 선택됨</span>
+			<button
+				class="flex items-center gap-1.5 rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-xs font-medium hover:bg-primary/90 transition-colors"
+				onclick={bulkResolve}
+			>
+				<Check class="size-3.5" />
+				{checkedGroups.size}개 일괄 확정
+			</button>
+			{#if checkedGroups.size >= 2}
 				<button
-					class="flex items-center gap-1.5 rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-xs font-medium hover:bg-primary/90 transition-colors"
+					class="flex items-center gap-1.5 rounded-md bg-sky-600 text-white px-3 py-1.5 text-xs font-medium hover:bg-sky-700 transition-colors"
 					onclick={mergeSelectedGroups}
 				>
 					<Merge class="size-3.5" />
@@ -518,7 +639,7 @@
 			{/if}
 			<button
 				class="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent transition-colors"
-				onclick={() => (selectedGroupIds = new Set())}
+				onclick={() => (checkedGroups = new Set())}
 			>
 				선택 해제
 			</button>
@@ -546,24 +667,7 @@
 		<p class="text-muted-foreground text-sm">표시할 그룹이 없습니다.</p>
 	</div>
 {:else}
-	<!-- 그룹 선택 병합 액션 바 -->
-	{#if selectedGroupIds.size >= 2}
-		<div class="flex items-center gap-3 rounded-lg border border-sky-500/30 bg-sky-500/5 px-4 py-2.5 mb-4">
-			<span class="text-sm font-medium text-sky-700">{selectedGroupIds.size}개 그룹 선택됨</span>
-			<button
-				onclick={mergeSelectedGroups}
-				class="flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700 transition-colors"
-			>
-				선택된 {selectedGroupIds.size}개 그룹 병합
-			</button>
-			<button
-				onclick={() => { selectedGroupIds = new Set(); }}
-				class="text-sm text-muted-foreground hover:text-foreground transition-colors"
-			>
-				선택 해제
-			</button>
-		</div>
-	{/if}
+	<!-- 카드 리스트 내 액션 바는 컨트롤 바에 통합되어 제거 -->
 
 	<!-- 그룹 카드 리스트 -->
 	<div class="space-y-4">
@@ -573,21 +677,21 @@
 				<!-- 카드 헤더 -->
 				<div class="flex items-center justify-between px-4 py-3 border-b bg-muted/20">
 					<div class="flex items-center gap-3">
-						<!-- 병합용 그룹 체크박스 -->
+						<!-- 그룹 선택 체크박스 (일괄 확정 + 병합 공용) -->
 						{#if group.status === 'pending'}
 							<input
 								type="checkbox"
-								checked={selectedGroupIds.has(group.group_id)}
+								checked={checkedGroups.has(group.group_id)}
 								onchange={() => {
-									if (selectedGroupIds.has(group.group_id)) {
-										selectedGroupIds.delete(group.group_id);
+									if (checkedGroups.has(group.group_id)) {
+										checkedGroups.delete(group.group_id);
 									} else {
-										selectedGroupIds.add(group.group_id);
+										checkedGroups.add(group.group_id);
 									}
-									selectedGroupIds = new Set(selectedGroupIds);
+									checkedGroups = new Set(checkedGroups);
 								}}
 								class="h-4 w-4 rounded border-border cursor-pointer"
-								title="병합용 그룹 선택"
+								title="그룹 선택 (일괄 확정/병합)"
 							/>
 						{/if}
 						<span class="font-mono text-sm font-semibold">Group #{group.group_id}</span>
