@@ -162,6 +162,21 @@ if ($Target -eq "list") {
 
     Write-Host ""
 
+    # Dev-Runner logs
+    Write-Host "[Dev-Runner Logs]" -ForegroundColor Yellow
+    $devRunnerLogs = Get-LogsMultiPattern @("dev_runner_command_listener*.log")
+    if ($devRunnerLogs) {
+        foreach ($log in $devRunnerLogs) {
+            $size = "{0:N2} KB" -f ($log.Length / 1KB)
+            $date = $log.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")
+            Write-Host "  $($log.Name) - $size - $date"
+        }
+    } else {
+        Write-Host "  (none)" -ForegroundColor Gray
+    }
+
+    Write-Host ""
+
     # Plan-runner logs (별도 디렉토리)
     Write-Host "[Plan-Runner Logs] ($planRunnerLogDir)" -ForegroundColor Yellow
     if (Test-Path $planRunnerLogDir) {
@@ -234,6 +249,7 @@ $claudeWatchdogLogFile = Get-LatestLogFileMultiPattern @("claude_watchdog_")
 $videoDownloadWatchdogLogFile = Get-LatestLogFileMultiPattern @("video_download_watchdog_")
 $crawlWatchdogLogFile = Get-LatestLogFileMultiPattern @("crawl_watchdog_")
 $commandListenerWatchdogLogFile = Get-LatestLogFileMultiPattern @("command_listener_watchdog_")
+$devRunnerLogFile = Get-LatestLogFileMultiPattern @("dev_runner_command_listener")
 $cloudflaredLogFile = Get-LatestLogFileMultiPattern @("cloudflared_err", "cloudflared")
 
 # Plan-runner 로그: wtools/common/logs/ 에서 최신 파일
@@ -398,6 +414,7 @@ function Start-CombinedLogTail {
         [string]$VideoDownloadWatchdogLog,
         [string]$CrawlWatchdogLog,
         [string]$CommandListenerWatchdogLog,
+        [string]$DevRunnerLog,
         [string]$CloudflaredLog
     )
 
@@ -423,6 +440,7 @@ function Start-CombinedLogTail {
         "VIDEO-DL-WD" = @{ Path = $VideoDownloadWatchdogLog; Color = "DarkYellow"; Tail = 2 }
         "CRAWL-WD"    = @{ Path = $CrawlWatchdogLog;  Color = "DarkYellow";  Tail = 2 }
         "CMD-WD"      = @{ Path = $CommandListenerWatchdogLog; Color = "DarkYellow"; Tail = 2 }
+        "DEV-RUNNER"  = @{ Path = $DevRunnerLog;           Color = "DarkCyan";    Tail = 10 }
         "PLAN-RUNNER"   = @{ Path = $planRunnerLogFile;    Color = "White";       Tail = 10 }
         "PR-STREAM"   = @{ Path = $planRunnerStreamLogFile; Color = "DarkGray"; Tail = 5 }
     }
@@ -492,12 +510,13 @@ function Start-CombinedLogTail {
         "VIDEO-DL-WD" = @("video_download_watchdog_*.log")
         "CRAWL-WD"    = @("crawl_watchdog_*.log")
         "CMD-WD"      = @("command_listener_watchdog_*.log")
+        "DEV-RUNNER"  = @("dev_runner_command_listener*.log")
         "TUNNEL"      = @("cloudflared_err_*.log", "cloudflared_err-*.log", "cloudflared_*.log")
     }
 
     # Dev 전용 소스 — Production에서 제외 (Worker는 항상 APP_MODE=development로 실행되어 logs/dev/에 기록됨)
     $devOnlySources = @("WORKER", "IG-WORKER", "CLAUDE", "VIDEO-DL", "CRAWL",
-                         "IG-WD", "CLAUDE-WD", "VIDEO-DL-WD", "CRAWL-WD")
+                         "IG-WD", "CLAUDE-WD", "VIDEO-DL-WD", "CRAWL-WD", "DEV-RUNNER")
     if (-not $Dev) {
         foreach ($source in $devOnlySources) {
             $logConfig.Remove($source)
@@ -658,6 +677,7 @@ if ($Follow) {
                 -VideoDownloadWatchdogLog $videoDownloadWatchdogLogFile `
                 -CrawlWatchdogLog $crawlWatchdogLogFile `
                 -CommandListenerWatchdogLog $commandListenerWatchdogLogFile `
+                -DevRunnerLog $devRunnerLogFile `
                 -CloudflaredLog $cloudflaredLogFile
         }
     }

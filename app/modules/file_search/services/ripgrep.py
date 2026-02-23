@@ -38,6 +38,8 @@ class RipgrepService:
         """winget 설치 경로 등에서 rg.exe를 탐색."""
         patterns = [
             os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Packages\*ripgrep*\*\rg.exe"),
+            # NSSM 서비스(Session 0)에서는 LOCALAPPDATA가 시스템 경로이므로 유저 경로도 탐색
+            os.path.expandvars(r"%USERPROFILE%\AppData\Local\Microsoft\WinGet\Packages\*ripgrep*\*\rg.exe"),
             r"C:\ProgramData\chocolatey\bin\rg.exe",
         ]
         for pat in patterns:

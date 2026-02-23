@@ -2,14 +2,19 @@
 파일 검색 API 통합 테스트
 
 Right-BICEP / CORRECT 패턴:
-- Right:       mode별 분기(filename/content/both), presets, status
+- Right:       202 비동기 수락, 폴링 엔드포인트, presets, status
 - Boundary:    빈 query → 422, 잘못된 mode → 422, max_results 음수 → 422
 - Inverse:     preset 적용 시 paths/extensions 오버라이드
-- Error:       없는 파일 open → 404, 전체 실패 → 부분 결과
+- Error:       없는 파일 open → 404, 없는 search_id → 404
 - CORRECT-Conformance: 잘못된 mode enum → 422
 - CORRECT-Range:       max_results 음수 → 422
 - CORRECT-Existence:   null query → 422
+
+변경 사항 (2026-02-23):
+  POST /search: 동기 → 비동기 (202 + search_id)
+  GET /search/{id}: 폴링 엔드포인트 신규 추가
 """
+import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
@@ -43,81 +48,61 @@ def _mock_ripgrep_results(n: int = 1):
     ]
 
 
-# ── Right: mode별 분기 ───────────────────────────────────────────────────
+# ── Right: POST /search 비동기 수락 ────────────────────────────────────────
 
 class TestSearchRight:
-    """Right — 정상 검색 응답."""
+    """Right — POST /search 202 수락 + 폴링 응답."""
 
-    def test_mode_filename_calls_everything_only(self, client):
-        """Right: mode=filename → Everything만 호출, ripgrep 호출 안 함."""
-        ev_results = _mock_everything_results(2)
-
-        with patch(
-            "app.modules.file_search.services.search_service._everything.search",
-            new_callable=AsyncMock, return_value=ev_results
-        ) as mock_ev, patch(
-            "app.modules.file_search.services.search_service._ripgrep.search",
-            new_callable=AsyncMock
-        ) as mock_rg:
-            resp = client.post("/api/v1/file-search/search", json={
-                "query": "routes",
-                "mode": "filename",
-            })
-
-        assert resp.status_code == 200
+    def test_mode_filename_returns_202(self, client):
+        """Right: POST /search mode=filename → 202 Accepted + search_id."""
+        resp = client.post("/api/v1/file-search/search", json={
+            "query": "routes",
+            "mode": "filename",
+        })
+        assert resp.status_code == 202
         data = resp.json()
-        assert data["total_count"] == 2
-        assert data["mode"] == "filename"
-        mock_ev.assert_awaited_once()
-        mock_rg.assert_not_awaited()
+        assert "search_id" in data
+        assert data["status"] in ("pending", "queued")
 
-    def test_mode_content_calls_ripgrep_only(self, client):
-        """Right: mode=content → ripgrep만 호출, Everything 호출 안 함."""
-        rg_results = _mock_ripgrep_results(1)
-
-        with patch(
-            "app.modules.file_search.services.search_service._everything.search",
-            new_callable=AsyncMock
-        ) as mock_ev, patch(
-            "app.modules.file_search.services.search_service._ripgrep.search",
-            new_callable=AsyncMock, return_value=rg_results
-        ) as mock_rg:
-            resp = client.post("/api/v1/file-search/search", json={
-                "query": "def search",
-                "mode": "content",
-            })
-
-        assert resp.status_code == 200
+    def test_mode_content_returns_202(self, client):
+        """Right: POST /search mode=content → 202 Accepted + search_id."""
+        resp = client.post("/api/v1/file-search/search", json={
+            "query": "def search",
+            "mode": "content",
+        })
+        assert resp.status_code == 202
         data = resp.json()
-        assert data["mode"] == "content"
-        assert data["total_count"] == 1
-        mock_ev.assert_not_awaited()
-        mock_rg.assert_awaited_once()
+        assert "search_id" in data
 
-    def test_mode_both_calls_both_services(self, client):
-        """Right: mode=both → 두 서비스 모두 호출, 결과 병합."""
-        ev_results = _mock_everything_results(1)
-        rg_results = _mock_ripgrep_results(1)
-
-        with patch(
-            "app.modules.file_search.services.search_service._everything.search",
-            new_callable=AsyncMock, return_value=ev_results
-        ) as mock_ev, patch(
-            "app.modules.file_search.services.search_service._ripgrep.search",
-            new_callable=AsyncMock, return_value=rg_results
-        ) as mock_rg:
-            resp = client.post("/api/v1/file-search/search", json={
-                "query": "search",
-                "mode": "both",
-            })
-
-        assert resp.status_code == 200
+    def test_mode_both_returns_202(self, client):
+        """Right: POST /search mode=both → 202 Accepted + search_id."""
+        resp = client.post("/api/v1/file-search/search", json={
+            "query": "search",
+            "mode": "both",
+        })
+        assert resp.status_code == 202
         data = resp.json()
-        assert data["mode"] == "both"
-        mock_ev.assert_awaited_once()
-        mock_rg.assert_awaited_once()
-        # 두 결과 모두 포함 (경로가 다름)
-        assert data["total_count"] >= 1
+        assert "search_id" in data
+
+    def test_poll_nonexistent_returns_404(self, client):
+        """Right: GET /search/{unknown_id} → 404."""
+        resp = client.get("/api/v1/file-search/search/nonexistent-uuid")
+        assert resp.status_code == 404
+
+    def test_poll_pending_returns_status(self, client):
+        """Right: POST /search 후 즉시 GET → status=pending/queued."""
+        post_resp = client.post("/api/v1/file-search/search", json={
+            "query": "routes",
+            "mode": "filename",
+        })
+        assert post_resp.status_code == 202
+        search_id = post_resp.json()["search_id"]
+
+        poll_resp = client.get(f"/api/v1/file-search/search/{search_id}")
+        assert poll_resp.status_code == 200
+        data = poll_resp.json()
+        assert data["search_id"] == search_id
+        assert data["status"] in ("pending", "queued", "processing", "completed", "failed")
 
     def test_get_presets_returns_six(self, client):
         """Right: GET /presets → 6개 프리셋."""
@@ -131,15 +116,7 @@ class TestSearchRight:
 
     def test_get_status_returns_status_object(self, client):
         """Right: GET /status → everything_ok, ripgrep_ok 필드 포함."""
-        with patch(
-            "app.modules.file_search.services.search_service._everything.is_available",
-            new_callable=AsyncMock, return_value=(False, "연결 실패")
-        ), patch(
-            "app.modules.file_search.services.search_service._ripgrep.is_available",
-            return_value=(True, "/usr/bin/rg")
-        ):
-            resp = client.get("/api/v1/file-search/status")
-
+        resp = client.get("/api/v1/file-search/status")
         assert resp.status_code == 200
         data = resp.json()
         assert "everything_ok" in data
@@ -191,53 +168,27 @@ class TestSearchBoundary:
 class TestPresetInverse:
     """Inverse — 프리셋 적용 시 paths/extensions 오버라이드 검증."""
 
-    def test_preset_overrides_paths_and_extensions(self, client):
-        """Inverse: preset 지정 시 요청의 paths/extensions 무시됨."""
-        captured = {}
+    def test_preset_search_returns_202(self, client):
+        """Inverse: preset 지정 시에도 202 반환."""
+        resp = client.post("/api/v1/file-search/search", json={
+            "query": "test",
+            "mode": "filename",
+            "preset": "python_backend",
+            "paths": ["C:\\custom\\path"],
+            "extensions": ["txt"],
+        })
+        assert resp.status_code == 202
+        assert "search_id" in resp.json()
 
-        async def fake_ev_search(**kwargs):
-            captured.update(kwargs)
-            return []
-
-        with patch(
-            "app.modules.file_search.services.search_service._everything.search",
-            side_effect=fake_ev_search
-        ):
-            client.post("/api/v1/file-search/search", json={
-                "query": "test",
-                "mode": "filename",
-                "preset": "python_backend",
-                "paths": ["C:\\custom\\path"],       # 무시되어야 함
-                "extensions": ["txt"],               # 무시되어야 함
-            })
-
-        # python_backend 프리셋의 extensions 포함 여부
-        if captured:
-            # 프리셋의 extensions는 python 관련 확장자
-            assert "txt" not in captured.get("extensions", [])
-            assert "py" in captured.get("extensions", [])
-
-    def test_unknown_preset_uses_manual_values(self, client):
-        """Inverse: 존재하지 않는 preset → 수동 paths/extensions 사용."""
-        captured = {}
-
-        async def fake_ev_search(**kwargs):
-            captured.update(kwargs)
-            return []
-
-        with patch(
-            "app.modules.file_search.services.search_service._everything.search",
-            side_effect=fake_ev_search
-        ):
-            client.post("/api/v1/file-search/search", json={
-                "query": "test",
-                "mode": "filename",
-                "preset": "nonexistent_preset",
-                "extensions": ["custom_ext"],
-            })
-
-        if captured:
-            assert "custom_ext" in captured.get("extensions", [])
+    def test_unknown_preset_returns_202(self, client):
+        """Inverse: 존재하지 않는 preset도 202 반환 (워커에서 처리)."""
+        resp = client.post("/api/v1/file-search/search", json={
+            "query": "test",
+            "mode": "filename",
+            "preset": "nonexistent_preset",
+            "extensions": ["custom_ext"],
+        })
+        assert resp.status_code == 202
 
 
 # ── Error: 에러 처리 ─────────────────────────────────────────────────────
@@ -252,53 +203,87 @@ class TestSearchError:
         })
         assert resp.status_code == 404
 
-    def test_both_services_fail_returns_empty_not_500(self, client):
-        """Error: Everything + ripgrep 둘 다 실패 → 500이 아닌 빈 결과."""
-        import httpx
+    def test_poll_nonexistent_search_id_returns_404(self, client):
+        """Error: GET /search/{id} — 존재하지 않는 search_id → 404."""
+        resp = client.get("/api/v1/file-search/search/totally-invalid-uuid-123")
+        assert resp.status_code == 404
 
-        with patch(
-            "app.modules.file_search.services.search_service._everything.search",
-            new_callable=AsyncMock, side_effect=Exception("Everything 서버 다운")
-        ), patch(
-            "app.modules.file_search.services.search_service._ripgrep.search",
-            new_callable=AsyncMock, side_effect=Exception("ripgrep 오류")
-        ):
-            resp = client.post("/api/v1/file-search/search", json={
-                "query": "test",
-                "mode": "both",
-            })
+    def test_poll_completed_with_result(self, client):
+        """Error/Right: 완료된 검색 결과 폴링 → result 필드 포함."""
+        from app.database import SessionLocal
+        from app.models.file_search_request import FileSearchRequest
+        from app.modules.file_search.schemas import SearchResponse
 
-        # both 모드에서 gather(return_exceptions=True)로 처리 → 빈 결과 반환
+        # 직접 DB에 완료된 요청 삽입
+        db = SessionLocal()
+        try:
+            mock_result = SearchResponse(
+                results=[],
+                total_count=0,
+                search_time_ms=123,
+                mode="filename",
+                truncated=False,
+            )
+            req = FileSearchRequest(
+                search_id="test-completed-uuid",
+                status=FileSearchRequest.STATUS_COMPLETED,
+                request_json='{"query":"test","mode":"filename","regex":false,"case_sensitive":false,'
+                             '"paths":[],"extensions":[],"excludes":[],"max_results":100,"context_lines":2}',
+                result_json=mock_result.model_dump_json(),
+                search_time_ms=123,
+            )
+            db.add(req)
+            db.commit()
+        finally:
+            db.close()
+
+        resp = client.get("/api/v1/file-search/search/test-completed-uuid")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["total_count"] == 0
+        assert data["status"] == "completed"
+        assert data["result"] is not None
+        assert data["result"]["total_count"] == 0
 
-    def test_ripgrep_timeout_returns_504(self, client):
-        """Error: ripgrep 타임아웃 → 504."""
-        with patch(
-            "app.modules.file_search.services.search_service._ripgrep.search",
-            new_callable=AsyncMock, side_effect=TimeoutError("ripgrep 타임아웃")
-        ):
-            resp = client.post("/api/v1/file-search/search", json={
-                "query": "test",
-                "mode": "content",
-            })
+        # 정리
+        db = SessionLocal()
+        try:
+            db.query(FileSearchRequest).filter_by(search_id="test-completed-uuid").delete()
+            db.commit()
+        finally:
+            db.close()
 
-        assert resp.status_code == 504
+    def test_poll_failed_with_error_message(self, client):
+        """Error: 실패한 검색 결과 폴링 → error_message 필드."""
+        from app.database import SessionLocal
+        from app.models.file_search_request import FileSearchRequest
 
-    def test_invalid_regex_returns_422(self, client):
-        """Error: 잘못된 정규식 → 422."""
-        with patch(
-            "app.modules.file_search.services.search_service._ripgrep.search",
-            new_callable=AsyncMock, side_effect=ValueError("잘못된 정규식: [unclosed")
-        ):
-            resp = client.post("/api/v1/file-search/search", json={
-                "query": "[unclosed",
-                "mode": "content",
-                "regex": True,
-            })
+        db = SessionLocal()
+        try:
+            req = FileSearchRequest(
+                search_id="test-failed-uuid",
+                status=FileSearchRequest.STATUS_FAILED,
+                request_json='{"query":"test","mode":"content","regex":false,"case_sensitive":false,'
+                             '"paths":[],"extensions":[],"excludes":[],"max_results":100,"context_lines":2}',
+                error_message="ripgrep not found",
+            )
+            db.add(req)
+            db.commit()
+        finally:
+            db.close()
 
-        assert resp.status_code == 422
+        resp = client.get("/api/v1/file-search/search/test-failed-uuid")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "failed"
+        assert data["error_message"] == "ripgrep not found"
+
+        # 정리
+        db = SessionLocal()
+        try:
+            db.query(FileSearchRequest).filter_by(search_id="test-failed-uuid").delete()
+            db.commit()
+        finally:
+            db.close()
 
 
 # ── browse 엔드포인트 ────────────────────────────────────────────────────

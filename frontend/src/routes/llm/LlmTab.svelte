@@ -63,7 +63,9 @@
 		requested_by: 'manual',
 		request_source: 'manual_test',
 		provider: 'claude',
-		model: ''
+		model: '',
+		systemPrompt: '',
+		userInput: ''
 	};
 	let createLoading = false;
 	let createError: string | null = null;
@@ -71,9 +73,73 @@
 
 	// Provider별 모델 목록
 	const providerModels: Record<string, string[]> = {
-		claude: ['(기본)', 'claude-sonnet-4-20250514', 'claude-opus-4-20250514'],
+		claude: ['(기본)', 'sonnet', 'opus', 'haiku'],
 		gemini: ['(기본)', 'gemini-2.5-pro', 'gemini-2.5-flash']
 	};
+
+	// 프리셋 타입 정의
+	interface Preset {
+		label: string;
+		caller_type?: string;
+		caller_id_prefix?: string;
+		queue_name?: string;
+		provider?: string;
+		model?: string;
+		systemPrompt?: string;
+		userPromptPlaceholder?: string;
+	}
+
+	const PLAN_SYSTEM_PROMPT = `당신은 소프트웨어 개발 계획 문서를 작성하는 전문가입니다.
+사용자의 아이디어를 받아 다음 형식으로 계획 문서를 작성하세요.
+
+## 형식
+- 제목 및 메타 정보 (우선순위, 난이도, 대상)
+- 배경 및 현재 상태
+- 설계 (핵심 결정 사항)
+- 구현 순서 (Phase별 원자 단위 TODO 체크박스)
+
+## 규칙
+- TODO 체크박스는 \`- [ ]\` 형식 사용
+- 각 TODO에 대상 파일 경로 명시
+- Phase는 의존성 순서로 정렬
+- 복잡한 작업은 하위 체크박스로 분해`;
+
+	const presets: Preset[] = [
+		{ label: '(직접 입력)' },
+		{
+			label: '계획서 작성',
+			caller_type: 'test',
+			caller_id_prefix: 'plan',
+			queue_name: 'system',
+			provider: 'claude',
+			model: 'opus',
+			systemPrompt: PLAN_SYSTEM_PROMPT,
+			userPromptPlaceholder: '아이디어나 요구사항을 입력하세요...'
+		}
+	];
+
+	let selectedPreset: Preset = presets[0];
+	let userInput = '';
+
+	function applyPreset(preset: Preset) {
+		selectedPreset = preset;
+		if (preset.caller_id_prefix) {
+			const now = new Date();
+			const pad = (n: number) => String(n).padStart(2, '0');
+			const dateStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+			createForm.caller_id = `${preset.caller_id_prefix}-${dateStr}`;
+		} else {
+			createForm.caller_id = '';
+		}
+		if (preset.queue_name) createForm.queue_name = preset.queue_name;
+		if (preset.provider) createForm.provider = preset.provider;
+		if (preset.model) createForm.model = preset.model;
+		if (preset.caller_type) createForm.caller_type = preset.caller_type;
+		createForm.systemPrompt = preset.systemPrompt ?? '';
+		userInput = '';
+		createForm.userInput = '';
+		createForm.prompt = '';
+	}
 
 	// Provider 변경 시 model 초기화
 	$: if (createForm.provider) {
@@ -373,6 +439,15 @@
 	}
 
 	async function createRequest() {
+		// 프리셋 사용 시 prompt 합성
+		if (selectedPreset.label !== '(직접 입력)') {
+			if (!createForm.userInput.trim()) {
+				createError = '사용자 입력을 입력해주세요.';
+				return;
+			}
+			createForm.prompt = createForm.systemPrompt + '\n\n---\n\n' + createForm.userInput;
+		}
+
 		if (!createForm.caller_id.trim() || !createForm.prompt.trim()) {
 			createError = '호출자 ID와 프롬프트를 입력해주세요.';
 			return;
@@ -398,8 +473,12 @@
 				requested_by: 'manual',
 				request_source: 'manual_test',
 				provider: 'claude',
-				model: ''
+				model: '',
+				systemPrompt: '',
+				userInput: ''
 			};
+			selectedPreset = presets[0];
+			userInput = '';
 			// 대기열 탭으로 전환
 			setTimeout(() => {
 				activeTab = 'queue';
@@ -959,6 +1038,23 @@
 				{/if}
 
 				<div class="space-y-4">
+					<!-- 프리셋 선택 -->
+					<div>
+						<label class="block text-sm font-medium text-foreground mb-1">프리셋</label>
+						<select
+							value={selectedPreset.label}
+							onchange={(e) => {
+								const found = presets.find(p => p.label === (e.target as HTMLSelectElement).value);
+								if (found) applyPreset(found);
+							}}
+							class="w-full px-3 py-2 border border-border rounded-lg"
+						>
+							{#each presets as preset}
+								<option value={preset.label}>{preset.label}</option>
+							{/each}
+						</select>
+					</div>
+
 					<div>
 						<label class="block text-sm font-medium text-foreground mb-1">큐</label>
 						<select bind:value={createForm.queue_name} class="w-full px-3 py-2 border border-border rounded-lg">
@@ -1005,6 +1101,7 @@
 						</div>
 					</div>
 
+					{#if selectedPreset.label === '(직접 입력)'}
 					<div>
 						<label class="block text-sm font-medium text-foreground mb-1">프롬프트 *</label>
 						<textarea
@@ -1014,6 +1111,28 @@
 							class="w-full px-3 py-2 border border-border rounded-lg resize-none"
 						></textarea>
 					</div>
+					{:else}
+					<div>
+						<label class="block text-sm font-medium text-foreground mb-1">시스템 지시문</label>
+						<textarea
+							value={createForm.systemPrompt}
+							readonly
+							rows="8"
+							class="w-full px-3 py-2 border border-border rounded-lg resize-none bg-muted text-muted-foreground text-xs font-mono"
+						></textarea>
+						<div class="my-2 flex items-center gap-2">
+							<hr class="flex-1 border-border" />
+							<span class="text-xs text-muted-foreground">사용자 입력</span>
+							<hr class="flex-1 border-border" />
+						</div>
+						<textarea
+							bind:value={createForm.userInput}
+							rows="4"
+							placeholder={selectedPreset.userPromptPlaceholder ?? '내용을 입력하세요...'}
+							class="w-full px-3 py-2 border border-border rounded-lg resize-none"
+						></textarea>
+					</div>
+					{/if}
 
 					<div class="grid grid-cols-2 gap-4">
 						<div>

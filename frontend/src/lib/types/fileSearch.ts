@@ -75,3 +75,18 @@ export interface Preset {
 	extensions: string[];
 	excludes: string[];
 }
+
+/** POST /search 202 응답 — 비동기 검색 수락 */
+export interface SearchAcceptedResponse {
+	search_id: string;
+	status: string;
+}
+
+/** GET /search/{search_id} 폴링 응답 */
+export interface SearchPollResponse {
+	search_id: string;
+	/** pending | queued | processing | completed | failed */
+	status: string;
+	result?: SearchResponse;
+	error_message?: string | null;
+}

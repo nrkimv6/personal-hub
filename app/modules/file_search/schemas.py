@@ -98,3 +98,22 @@ class PresetResponse(BaseModel):
     paths: List[str]
     extensions: List[str]
     excludes: List[str]
+
+
+# ============================================================
+# Async (Redis worker) 응답 스키마
+# ============================================================
+
+
+class SearchAcceptedResponse(BaseModel):
+    """POST /search 202 응답 — Redis 워커로 비동기 처리 시작."""
+    search_id: str
+    status: str  # "queued"
+
+
+class SearchPollResponse(BaseModel):
+    """GET /search/{search_id} 폴링 응답."""
+    search_id: str
+    status: str  # pending / queued / processing / completed / failed
+    result: Optional[SearchResponse] = None
+    error_message: Optional[str] = None

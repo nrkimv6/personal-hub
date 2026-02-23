@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { search, getPresets, getStatus } from '$lib/api/fileSearch';
+	import { onDestroy } from 'svelte';
+	import { search, pollSearchResult, getPresets, getStatus } from '$lib/api/fileSearch';
 	import type {
 		FileMatch,
 		Preset,
@@ -42,6 +43,18 @@
 	// 검색 AbortController
 	let abortController: AbortController | null = null;
 
+	// 폴링 상태
+	let pollInterval: ReturnType<typeof setInterval> | null = null;
+	let pollStatus = $state<string>(''); // pending / queued / processing / completed / failed
+
+	const POLL_STATUS_LABELS: Record<string, string> = {
+		pending: '큐 대기중',
+		queued: '큐 대기중',
+		processing: '검색 중...',
+		completed: '완료',
+		failed: '실패'
+	};
+
 	// ────────────────────────────────────────────────────────────
 	// 초기화
 	// ────────────────────────────────────────────────────────────
@@ -79,21 +92,39 @@
 	}
 
 	// ────────────────────────────────────────────────────────────
+	// 폴링 정리
+	// ────────────────────────────────────────────────────────────
+	function clearPolling() {
+		if (pollInterval !== null) {
+			clearInterval(pollInterval);
+			pollInterval = null;
+		}
+	}
+
+	onDestroy(() => {
+		clearPolling();
+		abortController?.abort();
+	});
+
+	// ────────────────────────────────────────────────────────────
 	// 검색 실행
 	// ────────────────────────────────────────────────────────────
 	async function handleSearch() {
 		if (!query.trim() || loading) return;
 
-		// 이전 요청 취소
+		// 이전 요청 취소 및 폴링 정리
 		abortController?.abort();
+		clearPolling();
 		abortController = new AbortController();
 
 		loading = true;
 		error = '';
 		hasSearched = true;
+		pollStatus = '';
 
 		try {
-			const res: SearchResponse = await search(
+			// 202 비동기 → search_id 수신
+			const accepted = await search(
 				{
 					query: query.trim(),
 					mode,
@@ -108,10 +139,40 @@
 				},
 				abortController.signal
 			);
-			results = res.results;
-			searchTimeMs = res.search_time_ms;
-			truncated = res.truncated;
+
+			pollStatus = accepted.status;
+
+			// 폴링 시작 (200ms 간격)
+			await new Promise<void>((resolve, reject) => {
+				pollInterval = setInterval(async () => {
+					try {
+						const poll = await pollSearchResult(accepted.search_id);
+						pollStatus = poll.status;
+
+						if (poll.status === 'completed') {
+							clearPolling();
+							if (poll.result) {
+								results = poll.result.results;
+								searchTimeMs = poll.result.search_time_ms;
+								truncated = poll.result.truncated;
+							} else {
+								results = [];
+							}
+							resolve();
+						} else if (poll.status === 'failed') {
+							clearPolling();
+							error = poll.error_message ?? '검색 중 오류가 발생했습니다.';
+							results = [];
+							resolve();
+						}
+					} catch (e) {
+						clearPolling();
+						reject(e);
+					}
+				}, 200);
+			});
 		} catch (err: unknown) {
+			clearPolling();
 			if (err instanceof Error && err.name === 'AbortError') return; // 취소됨
 			if (err instanceof Error && err.message.includes('타임아웃')) {
 				error = '검색 시간이 초과되었습니다. RIPGREP_TIMEOUT 설정을 확인하세요.';
@@ -123,12 +184,15 @@
 			results = [];
 		} finally {
 			loading = false;
+			pollStatus = '';
 		}
 	}
 
 	function handleCancel() {
 		abortController?.abort();
+		clearPolling();
 		loading = false;
+		pollStatus = '';
 	}
 </script>
 
@@ -239,8 +303,14 @@
 	<!-- 결과 영역 -->
 	<div class="flex-1 overflow-y-auto">
 		{#if loading}
-			<!-- 스켈레톤 -->
+			<!-- 폴링 상태 표시 -->
 			<div class="space-y-2">
+				{#if pollStatus}
+					<div class="flex items-center gap-2 text-sm text-muted-foreground px-2 py-1">
+						<span class="animate-spin text-base">⏳</span>
+						<span>{POLL_STATUS_LABELS[pollStatus] ?? pollStatus}</span>
+					</div>
+				{/if}
 				{#each Array(4) as _}
 					<div class="h-14 rounded-lg border border-border bg-card animate-skeleton-shimmer"></div>
 				{/each}

@@ -5,6 +5,8 @@ import { request } from './client';
 import type {
 	BrowseResponse,
 	Preset,
+	SearchAcceptedResponse,
+	SearchPollResponse,
 	SearchRequest,
 	SearchResponse,
 	StatusResponse
@@ -12,12 +14,27 @@ import type {
 
 const BASE = '/file-search';
 
-export async function search(req: SearchRequest, signal?: AbortSignal): Promise<SearchResponse> {
-	return request<SearchResponse>(`${BASE}/search`, {
+/**
+ * 파일 검색 요청 (비동기, 202 반환).
+ * 반환된 search_id로 pollSearchResult()를 호출하여 결과를 폴링.
+ */
+export async function search(
+	req: SearchRequest,
+	signal?: AbortSignal
+): Promise<SearchAcceptedResponse> {
+	return request<SearchAcceptedResponse>(`${BASE}/search`, {
 		method: 'POST',
 		body: JSON.stringify(req),
 		signal
 	});
+}
+
+/**
+ * 검색 결과 폴링.
+ * status가 completed/failed가 될 때까지 200ms 간격으로 호출.
+ */
+export async function pollSearchResult(searchId: string): Promise<SearchPollResponse> {
+	return request<SearchPollResponse>(`${BASE}/search/${searchId}`);
 }
 
 export async function getPresets(): Promise<Preset[]> {

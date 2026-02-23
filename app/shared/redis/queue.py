@@ -20,6 +20,8 @@ CRAWL_REQUEST_QUEUE = "crawl:requests"
 GOOGLE_SEARCH_QUEUE = "google:searches"
 LLM_REQUEST_QUEUE = "llm:requests"
 GIT_REPOS_TASK_QUEUE = "git_repos:tasks"
+FILE_SEARCH_QUEUE = "file_search:requests"
+FILE_SEARCH_OPEN_QUEUE = "file_search:open"  # fire-and-forget (VSCode 파일 열기)
 
 
 class RedisQueue:
