@@ -35,11 +35,21 @@
     loading = true;
     error = '';
     try {
+      // 캐시된 목록 즉시 표시
       repos = await gitReposApi.listRepos();
     } catch (e) {
       error = e instanceof Error ? e.message : '로드 실패';
     } finally {
       loading = false;
+    }
+    // 백그라운드로 실제 git status 갱신
+    refreshing = true;
+    try {
+      repos = await gitReposApi.refreshAll();
+    } catch {
+      // 갱신 실패는 조용히 무시 (캐시 데이터 유지)
+    } finally {
+      refreshing = false;
     }
   }
 
@@ -157,7 +167,7 @@
         onclick={handleRefreshAll}
         disabled={refreshing}
       >
-        {refreshing ? '갱신 중…' : '🔄 전체 새로고침'}
+        {refreshing ? '🔄 갱신 중…' : '🔄 전체 새로고침'}
       </button>
       <button
         class="px-3 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700"
