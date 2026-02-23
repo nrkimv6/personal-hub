@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Note } from '$lib/api/notes';
   import { notesApi } from '$lib/api/notes';
-  import { Pin, Copy, Pencil, Archive, Trash2 } from 'lucide-svelte';
+  import { Pin, Star, Copy, Pencil, Archive, Trash2 } from 'lucide-svelte';
   import TagBadge from './TagBadge.svelte';
 
   interface Props {
@@ -19,8 +19,20 @@
   let archiving = $state(false);
   let deleting = $state(false);
   let pinning = $state(false);
+  let starring = $state(false);
   let showArchiveConfirm = $state(false);
   let showDeleteConfirm = $state(false);
+
+  async function handleStar(e: Event) {
+    e.stopPropagation();
+    starring = true;
+    try {
+      await notesApi.toggleStar(note.id);
+      onRefresh();
+    } finally {
+      starring = false;
+    }
+  }
 
   async function handlePin(e: Event) {
     e.stopPropagation();
@@ -115,7 +127,10 @@
   {/if}
 
   <!-- 제목 -->
-  <h3 class="font-semibold text-foreground text-sm mb-1 pr-6 line-clamp-1">
+  <h3 class="font-semibold text-foreground text-sm mb-1 pr-6 line-clamp-1 flex items-center gap-1">
+    {#if note.is_starred}
+      <Star class="w-3.5 h-3.5 text-yellow-400 fill-yellow-400 shrink-0" />
+    {/if}
     {note.title}
   </h3>
 
@@ -157,6 +172,14 @@
       class="p-1.5 text-muted-foreground hover:text-foreground rounded-md hover:bg-muted transition-colors"
       title="복사"
     ><Copy class="w-3.5 h-3.5" /></button>
+
+    <button
+      onclick={handleStar}
+      disabled={starring}
+      class="p-1.5 rounded-md hover:bg-muted transition-colors
+        {note.is_starred ? 'text-yellow-400' : 'text-muted-foreground hover:text-foreground'}"
+      title={note.is_starred ? '별표 해제' : '별표'}
+    ><Star class="w-3.5 h-3.5 {note.is_starred ? 'fill-current' : ''}" /></button>
 
     <button
       onclick={handlePin}

@@ -57,6 +57,7 @@ class NoteResponse(BaseModel):
     content: str
     remark: Optional[str]
     is_pinned: bool
+    is_starred: bool
     tags: List[NoteTagInfo] = []
     created_at: datetime
     updated_at: datetime

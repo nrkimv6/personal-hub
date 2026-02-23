@@ -202,3 +202,67 @@ class TestSearchTitles:
         """q 파라미터 없으면 422."""
         res = client.get("/api/notes/search/titles")
         assert res.status_code == 422
+
+
+class TestToggleStar:
+    """별표 토글 테스트."""
+
+    def test_toggle_star(self, client):
+        """별표 토글: 기본값 False → True → False."""
+        note_id = create_note(client, "별표 테스트 메모")
+
+        # 기본값 확인
+        res = client.get(f"/api/notes/{note_id}")
+        assert res.status_code == 200
+        assert res.json()["is_starred"] is False
+
+        # 별표 ON
+        res = client.post(f"/api/notes/{note_id}/star")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["is_starred"] is True
+
+        # 별표 OFF
+        res = client.post(f"/api/notes/{note_id}/star")
+        assert res.status_code == 200
+        assert res.json()["is_starred"] is False
+
+    def test_filter_starred(self, client):
+        """?starred=true 필터: 별표 메모만 반환."""
+        id1 = create_note(client, "별표 A")
+        create_note(client, "일반 B")
+
+        # id1만 별표
+        client.post(f"/api/notes/{id1}/star")
+
+        res = client.get("/api/notes?starred=true")
+        assert res.status_code == 200
+        items = res.json()["items"]
+        assert len(items) == 1
+        assert items[0]["id"] == id1
+        assert items[0]["is_starred"] is True
+
+    def test_filter_not_starred(self, client):
+        """?starred=false 필터: 별표 없는 메모만 반환."""
+        id1 = create_note(client, "별표 A")
+        id2 = create_note(client, "일반 B")
+
+        client.post(f"/api/notes/{id1}/star")
+
+        res = client.get("/api/notes?starred=false")
+        assert res.status_code == 200
+        items = res.json()["items"]
+        ids = [i["id"] for i in items]
+        assert id1 not in ids
+        assert id2 in ids
+
+    def test_starred_not_in_archive(self, client):
+        """아카이브 응답에는 is_starred 필드 미포함 (NoteArchiveResponse)."""
+        note_id = create_note(client, "아카이브용 메모")
+        client.post(f"/api/notes/{note_id}/star")
+
+        # 아카이브 이동
+        res = client.post(f"/api/notes/{note_id}/archive")
+        assert res.status_code == 200
+        archive_data = res.json()
+        assert "is_starred" not in archive_data

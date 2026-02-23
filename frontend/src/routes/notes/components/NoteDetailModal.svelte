@@ -4,7 +4,7 @@
   import { renderMarkdown } from '../utils/markdown';
   import { renderNoteLinks } from '../utils/noteLink';
   import { notesApi } from '$lib/api/notes';
-  import { ArrowLeft, Copy, Archive, Pencil, Pin, ChevronDown, ChevronUp, Check, X } from 'lucide-svelte';
+  import { ArrowLeft, Copy, Archive, Pencil, Pin, Star, ChevronDown, ChevronUp, Check, X } from 'lucide-svelte';
   import TagBadge from './TagBadge.svelte';
 
   interface Props {
@@ -26,6 +26,17 @@
   let history = $state<NoteHistoryItem[]>([]);
   let showHistory = $state(false);
   let archiving = $state(false);
+  let starring = $state(false);
+
+  async function handleStar() {
+    starring = true;
+    try {
+      note = await notesApi.toggleStar(note.id);
+      onRefresh();
+    } finally {
+      starring = false;
+    }
+  }
   let renderedHtml = $state('');
   let copied = $state(false);
   let showArchiveConfirm = $state(false);
@@ -145,6 +156,13 @@
           {#if note.is_pinned}
             <Pin class="w-4 h-4 text-primary fill-current flex-shrink-0" />
           {/if}
+          <button
+            onclick={handleStar}
+            disabled={starring}
+            class="p-0.5 rounded transition-colors hover:bg-muted
+              {note.is_starred ? 'text-yellow-400' : 'text-muted-foreground hover:text-yellow-400'}"
+            title={note.is_starred ? '별표 해제' : '별표'}
+          ><Star class="w-4 h-4 {note.is_starred ? 'fill-current' : ''}" /></button>
         </div>
         <p class="text-xs text-muted-foreground mt-1">
           수정: {formatDate(note.updated_at)}

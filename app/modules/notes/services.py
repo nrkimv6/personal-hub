@@ -24,6 +24,7 @@ def _note_to_dict(note: Note) -> dict:
         "content": note.content,
         "remark": note.remark,
         "is_pinned": bool(note.is_pinned),
+        "is_starred": bool(note.is_starred),
         "tags": [_tag_info(t) for t in note.tags],
         "created_at": note.created_at,
         "updated_at": note.updated_at,
@@ -78,6 +79,7 @@ def list_notes(
     order: str = "desc",
     page: int = 1,
     page_size: int = 20,
+    starred: Optional[bool] = None,
 ) -> dict:
     query = db.query(Note).filter(Note.deleted_at.is_(None))
 
@@ -113,6 +115,9 @@ def list_notes(
 
     if date_to:
         query = query.filter(Note.created_at <= datetime.fromisoformat(date_to))
+
+    if starred is not None:
+        query = query.filter(Note.is_starred == (1 if starred else 0))
 
     total = query.count()
     pages = max(1, math.ceil(total / page_size))
@@ -217,6 +222,18 @@ def delete_note(db: Session, note_id: int, hard: bool = False) -> bool:
 
     db.commit()
     return True
+
+
+def toggle_star(db: Session, note_id: int) -> Note:
+    note = get_note(db, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="메모를 찾을 수 없습니다.")
+
+    note.is_starred = 0 if note.is_starred else 1
+    note.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(note)
+    return note
 
 
 def toggle_pin(db: Session, note_id: int) -> Note:

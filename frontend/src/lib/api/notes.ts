@@ -19,6 +19,7 @@ export interface Note {
   content: string;
   remark: string | null;
   is_pinned: boolean;
+  is_starred: boolean;
   tags: NoteTag[];
   created_at: string;
   updated_at: string;
@@ -133,6 +134,7 @@ export const notesApi = {
     order?: string;
     page?: number;
     page_size?: number;
+    starred?: boolean;
   }): Promise<NoteListResponse> {
     const q = new URLSearchParams();
     if (params?.tag) q.set('tags', params.tag);
@@ -145,6 +147,7 @@ export const notesApi = {
     if (params?.order) q.set('order', params.order);
     if (params?.page) q.set('page', String(params.page));
     if (params?.page_size) q.set('page_size', String(params.page_size));
+    if (params?.starred !== undefined) q.set('starred', String(params.starred));
     return req('GET', `?${q}`);
   },
 
@@ -172,6 +175,10 @@ export const notesApi = {
 
   togglePin(id: number): Promise<Note> {
     return req('POST', `/${id}/pin`);
+  },
+
+  toggleStar(id: number): Promise<Note> {
+    return req('POST', `/${id}/star`);
   },
 
   // ── Archive ──

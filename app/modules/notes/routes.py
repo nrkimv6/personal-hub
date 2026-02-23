@@ -151,6 +151,7 @@ def get_notes(
     order: Optional[str] = Query("desc"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    starred: Optional[bool] = Query(None),
     db: Session = Depends(get_db),
 ):
     """메모 목록 조회 (태그/검색/날짜 범위 필터, 정렬, 페이지네이션)."""
@@ -166,6 +167,7 @@ def get_notes(
         order=order or "desc",
         page=page,
         page_size=page_size,
+        starred=starred,
     )
 
 
@@ -220,6 +222,13 @@ def delete_note(
 def toggle_pin(note_id: int, db: Session = Depends(get_db)):
     """메모 고정/고정해제 토글."""
     note = svc.toggle_pin(db, note_id)
+    return _note_to_dict(note)
+
+
+@router.post("/{note_id}/star", response_model=NoteResponse)
+def toggle_star(note_id: int, db: Session = Depends(get_db)):
+    """메모 별표/별표해제 토글."""
+    note = svc.toggle_star(db, note_id)
     return _note_to_dict(note)
 
 

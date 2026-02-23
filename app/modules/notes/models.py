@@ -31,6 +31,7 @@ class Note(Base):
     content = Column(Text, nullable=False, default="")
     remark = Column(Text, nullable=True)
     is_pinned = Column(Integer, nullable=False, default=0)
+    is_starred = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
     deleted_at = Column(DateTime, nullable=True)

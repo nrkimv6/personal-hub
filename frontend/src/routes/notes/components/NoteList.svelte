@@ -23,6 +23,7 @@
   let sortBy = $state('created_at');
   let sortOrder = $state<'asc' | 'desc'>('desc');
   let page = $state(1);
+  let starredFilter = $state<boolean | undefined>(undefined);
 
   let openNote = $state<Note | null>(null);
   let editNote = $state<Note | null>(null);
@@ -99,6 +100,7 @@
           sort: sortBy,
           order: sortOrder,
           page,
+          starred: starredFilter,
         }),
         notesApi.listTags(),
       ]);
@@ -298,6 +300,20 @@
             bg-amber-500/10 text-amber-700 border-amber-300 hover:bg-amber-500/20"
         >{tagMode.toUpperCase()}</button>
       {/if}
+    </div>
+
+    <!-- 별표 필터 -->
+    <div class="flex items-center gap-2">
+      <button
+        onclick={() => { starredFilter = starredFilter === true ? undefined : true; page = 1; load(); }}
+        class="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-colors
+          {starredFilter === true
+            ? 'bg-yellow-100 text-yellow-700 border-yellow-300 dark:bg-yellow-900/20 dark:text-yellow-400 dark:border-yellow-700'
+            : 'bg-card text-muted-foreground border-border hover:border-yellow-400/50'}"
+      >
+        <Star class="w-3.5 h-3.5 {starredFilter === true ? 'fill-current' : ''}" />
+        즐겨찾기
+      </button>
     </div>
 
     <!-- 정렬 옵션 -->
