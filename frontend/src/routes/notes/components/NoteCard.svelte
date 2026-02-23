@@ -3,6 +3,7 @@
   import { notesApi } from '$lib/api/notes';
   import { Pin, Star, Copy, Pencil, Archive, Trash2 } from 'lucide-svelte';
   import TagBadge from './TagBadge.svelte';
+  import { extractUrls, getDomain } from '../utils/url';
 
   interface Props {
     note: Note;
@@ -141,7 +142,19 @@
 
   <!-- 비고 -->
   {#if note.remark}
-    <p class="text-info text-xs mb-2 truncate max-w-[120px]">{note.remark}</p>
+    {#if extractUrls(note.remark).length > 0}
+      {@const firstUrl = extractUrls(note.remark)[0]}
+      <p class="text-info text-xs mb-2">
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <span
+          class="inline-flex items-center gap-0.5 underline cursor-pointer hover:text-blue-700"
+          onclick={(e) => { e.stopPropagation(); window.open(firstUrl, '_blank', 'noopener,noreferrer'); }}
+        >🔗 {getDomain(firstUrl)}</span>
+      </p>
+    {:else}
+      <p class="text-info text-xs mb-2 truncate max-w-[120px]">📎 {note.remark}</p>
+    {/if}
   {/if}
 
   <!-- 태그 -->

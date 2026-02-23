@@ -3,6 +3,7 @@
   import type { Note, NoteHistoryItem } from '$lib/api/notes';
   import { renderMarkdown } from '../utils/markdown';
   import { renderNoteLinks } from '../utils/noteLink';
+  import { linkifyText } from '../utils/url';
   import { notesApi } from '$lib/api/notes';
   import { ArrowLeft, Copy, Archive, Pencil, Pin, Star, ChevronDown, ChevronUp, Check, X } from 'lucide-svelte';
   import TagBadge from './TagBadge.svelte';
@@ -184,8 +185,9 @@
     <!-- 본문 -->
     <div class="flex-1 overflow-y-auto p-5">
       {#if note.remark}
-        <div class="mb-3 p-3 bg-info-light rounded-lg text-sm text-info">
-          {note.remark}
+        <div class="mb-3 p-3 bg-info-light rounded-lg text-sm text-info [&_a]:text-blue-600 [&_a]:underline [&_a]:hover:text-blue-800">
+          <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+          {@html linkifyText(note.remark)}
         </div>
       {/if}
       <div
