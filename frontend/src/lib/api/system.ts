@@ -363,6 +363,7 @@ export interface LLMRequest {
   caller_type: string;
   caller_id: string;
   status: string;
+  queue_name?: string;
   requested_by?: string;
   request_source?: string;
   provider?: string;
@@ -372,6 +373,11 @@ export interface LLMRequest {
   result?: Record<string, unknown>;
   error_message?: string;
   retry_count: number;
+}
+
+export interface LLMQueueStats {
+  system: { pending: number; processing?: number; completed?: number; failed?: number };
+  utility: { pending: number; processing?: number; completed?: number; failed?: number };
 }
 
 export interface LLMRequestListResponse {
@@ -445,6 +451,7 @@ export interface LLMRequestListParams {
   status?: string;
   caller_type?: string;
   requested_by?: string;
+  queue_name?: string;
   include_deleted?: boolean;
   page?: number;
   page_size?: number;
@@ -492,6 +499,7 @@ export const llmApi = {
     if (params?.status) searchParams.append('status', params.status);
     if (params?.caller_type) searchParams.append('caller_type', params.caller_type);
     if (params?.requested_by) searchParams.append('requested_by', params.requested_by);
+    if (params?.queue_name) searchParams.append('queue_name', params.queue_name);
     if (params?.include_deleted) searchParams.append('include_deleted', String(params.include_deleted));
     if (params?.page) searchParams.append('page', String(params.page));
     if (params?.page_size) searchParams.append('page_size', String(params.page_size));
@@ -562,6 +570,7 @@ export const llmApi = {
     caller_type: string;
     caller_id: string;
     prompt: string;
+    queue_name?: string;
     requested_by?: string;
     request_source?: string;
     provider?: string;
@@ -571,6 +580,9 @@ export const llmApi = {
       method: 'POST',
       body: JSON.stringify(data)
     }),
+
+  // 큐별 통계 조회
+  getQueueStats: (options?: RequestInit) => request<LLMQueueStats>('/llm/queue-stats', options),
 
   // Cleanup (stale 및 old history 정리)
   cleanup: () =>

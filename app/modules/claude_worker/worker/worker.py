@@ -1323,14 +1323,17 @@ class LLMWorker:
                 await asyncio.sleep(5)
 
     async def _process_pending_requests(self):
-        """Pending 요청 처리."""
+        """Pending 요청 처리 (우선순위 큐 기반)."""
         db = SessionLocal()
         try:
             service = LLMService(db)
-            request = service.get_pending_request()
+            request = service.get_next_request()
 
             if request:
-                logger.info(f"Pending 요청 발견: id={request.id}, caller={request.caller_type}:{request.caller_id}")
+                logger.info(
+                    f"Pending 요청 발견: id={request.id}, queue={request.queue_name}, "
+                    f"caller={request.caller_type}:{request.caller_id}"
+                )
                 await self._execute_request(request, db, service)
 
         except Exception as e:
@@ -1350,7 +1353,7 @@ class LLMWorker:
             service.mark_processing(request.id)
             self._update_worker_state("processing", request.id)
 
-            logger.info(f"LLM 실행 시작: id={request.id}, caller_type={request.caller_type}")
+            logger.info(f"LLM 실행 시작: id={request.id}, queue={request.queue_name}, caller_type={request.caller_type}")
 
             # cli_options 파싱 (JSON 문자열 → dict)
             cli_options = None

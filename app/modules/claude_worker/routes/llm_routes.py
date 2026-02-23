@@ -27,6 +27,7 @@ class LLMRequestCreate(BaseModel):
     request_source: Optional[str] = None
     provider: str = "claude"
     model: str = ""
+    queue_name: str = "utility"
 
 
 class LLMRequestResponse(BaseModel):
@@ -38,6 +39,7 @@ class LLMRequestResponse(BaseModel):
     request_source: Optional[str] = None
     provider: str = "claude"
     model: str = ""
+    queue_name: str = "utility"
     requested_at: Optional[datetime] = None
     processed_at: Optional[datetime] = None
     result: Optional[dict] = None
@@ -106,12 +108,24 @@ def _to_response(request) -> LLMRequestResponse:
         request_source=request.request_source,
         provider=getattr(request, "provider", "claude"),
         model=getattr(request, "model", ""),
+        queue_name=getattr(request, "queue_name", "utility"),
         requested_at=request.requested_at,
         processed_at=request.processed_at,
         result=result,
         error_message=request.error_message,
         retry_count=request.retry_count,
     )
+
+
+@router.get("/queue-stats")
+def get_queue_stats(db: Session = Depends(get_db)):
+    """큐별 상태 통계 조회.
+
+    Returns:
+        {"system": {"pending": N, "processing": N, ...}, "utility": {...}}
+    """
+    service = LLMService(db)
+    return service.get_queue_stats()
 
 
 @router.get("/requests", response_model=LLMRequestListResponse)
@@ -122,6 +136,7 @@ def list_requests(
     include_deleted: bool = Query(False, description="삭제된 요청 포함"),
     page: int = Query(1, ge=1, description="페이지 번호"),
     page_size: int = Query(20, ge=1, le=100, description="페이지 크기"),
+    queue_name: Optional[str] = Query(None, description="큐 이름 필터 (utility / system)"),
     db: Session = Depends(get_db),
 ):
     """요청 목록 조회."""
@@ -133,6 +148,7 @@ def list_requests(
         include_deleted=include_deleted,
         page=page,
         page_size=page_size,
+        queue_name=queue_name,
     )
 
     return LLMRequestListResponse(
@@ -159,6 +175,7 @@ def create_request(
         request_source=data.request_source,
         provider=data.provider,
         model=data.model,
+        queue_name=data.queue_name,
     )
     return _to_response(request)
 
