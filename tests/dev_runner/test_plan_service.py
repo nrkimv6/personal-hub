@@ -597,13 +597,16 @@ class TestRunDone:
         assert result["success"] is True
         assert "성공" in result["message"]
         assert result["output"] == "Done OK\n"
+        assert result["remaining_tasks"] == 0
+        assert result["total_tasks"] == 1
+        assert result["plan_status"] == "구현완료"
         mock_sync.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_failure_returns_false(self, svc, tmp_plan_dir):
-        """Inverse: auto-done.ps1 실패 (exit=1) → success=False"""
+        """Inverse: auto-done.ps1 실패 (exit=1) → success=False, progress 포함"""
         plan = tmp_plan_dir / "fail_test.md"
-        plan.write_text("> 상태: 구현완료\n\n1. [x] task", encoding="utf-8")
+        plan.write_text("> 상태: 구현완료\n\n1. [x] task\n2. [ ] pending", encoding="utf-8")
 
         mock_proc = AsyncMock()
         mock_proc.communicate = AsyncMock(return_value=(b"Error occurred\n", None))
@@ -618,10 +621,13 @@ class TestRunDone:
         assert result["success"] is False
         assert "실패" in result["message"]
         assert "Error occurred" in result["output"]
+        assert result["remaining_tasks"] == 1
+        assert result["total_tasks"] == 2
+        assert result["plan_status"] == "구현완료"
 
     @pytest.mark.asyncio
     async def test_nonexistent_plan_file(self, svc, tmp_path):
-        """Existence: plan 파일 미존재 → success=False"""
+        """Existence: plan 파일 미존재 → success=False, progress 기본값"""
         svc.AUTO_DONE_SCRIPT = tmp_path / "auto-done.ps1"
         (svc.AUTO_DONE_SCRIPT).write_text("# fake", encoding="utf-8")
 
@@ -629,6 +635,9 @@ class TestRunDone:
 
         assert result["success"] is False
         assert "not found" in result["message"]
+        assert result["remaining_tasks"] == 0
+        assert result["total_tasks"] == 0
+        assert result["plan_status"] == ""
 
     @pytest.mark.asyncio
     async def test_nonexistent_script(self, svc, tmp_plan_dir):
@@ -645,7 +654,7 @@ class TestRunDone:
 
     @pytest.mark.asyncio
     async def test_timeout_handling(self, svc, tmp_plan_dir):
-        """Time: 타임아웃 시 success=False"""
+        """Time: 타임아웃 시 success=False, progress 기본값"""
         plan = tmp_plan_dir / "timeout_test.md"
         plan.write_text("content", encoding="utf-8")
 
@@ -660,10 +669,13 @@ class TestRunDone:
 
         assert result["success"] is False
         assert "타임아웃" in result["message"]
+        assert result["remaining_tasks"] == 0
+        assert result["total_tasks"] == 0
+        assert result["plan_status"] == ""
 
     @pytest.mark.asyncio
     async def test_exception_handling(self, svc, tmp_plan_dir):
-        """Error: 예외 발생 시 success=False + 에러 메시지"""
+        """Error: 예외 발생 시 success=False + 에러 메시지, progress 기본값"""
         plan = tmp_plan_dir / "exc_test.md"
         plan.write_text("content", encoding="utf-8")
 
@@ -675,12 +687,15 @@ class TestRunDone:
 
         assert result["success"] is False
         assert "spawn failed" in result["message"]
+        assert result["remaining_tasks"] == 0
+        assert result["total_tasks"] == 0
+        assert result["plan_status"] == ""
 
     @pytest.mark.asyncio
     async def test_response_conformance(self, svc, tmp_plan_dir):
-        """Conformance: 반환 dict에 success, message, output 키가 항상 존재"""
+        """Conformance: 반환 dict에 success, message, output, remaining_tasks, total_tasks, plan_status 키가 항상 존재"""
         plan = tmp_plan_dir / "conform_test.md"
-        plan.write_text("content", encoding="utf-8")
+        plan.write_text("> 상태: 구현중\n\n1. [x] a\n2. [ ] b", encoding="utf-8")
 
         mock_proc = AsyncMock()
         mock_proc.communicate = AsyncMock(return_value=(b"output", None))
@@ -696,6 +711,9 @@ class TestRunDone:
         assert "success" in result
         assert "message" in result
         assert "output" in result
+        assert "remaining_tasks" in result
+        assert "total_tasks" in result
+        assert "plan_status" in result
 
     @pytest.mark.asyncio
     async def test_no_sync_on_failure(self, svc, tmp_plan_dir):
@@ -715,3 +733,146 @@ class TestRunDone:
             await svc.run_done(str(plan))
 
         mock_sync.assert_not_called()
+
+    # ---- progress 필드 추가 TC (RIGHT-BICEP + CORRECT) ----
+
+    @pytest.mark.asyncio
+    async def test_progress_partial_completion(self, svc, tmp_plan_dir):
+        """Boundary: 부분 완료 plan (3/5) → remaining_tasks=2, total_tasks=5"""
+        plan = tmp_plan_dir / "partial.md"
+        plan.write_text(
+            "> 상태: 구현중\n\n"
+            "1. [x] done1\n2. [x] done2\n3. [x] done3\n"
+            "4. [ ] pending1\n5. [ ] pending2\n",
+            encoding="utf-8",
+        )
+
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"ok", None))
+        mock_proc.returncode = 0
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
+             patch.object(svc, "sync_plans"):
+            svc.AUTO_DONE_SCRIPT = tmp_plan_dir / "auto-done.ps1"
+            (svc.AUTO_DONE_SCRIPT).write_text("# fake", encoding="utf-8")
+
+            result = await svc.run_done(str(plan))
+
+        assert result["remaining_tasks"] == 2
+        assert result["total_tasks"] == 5
+        assert result["plan_status"] == "구현중"
+
+    @pytest.mark.asyncio
+    async def test_progress_all_done(self, svc, tmp_plan_dir):
+        """Boundary: 전체 완료 plan → remaining_tasks=0"""
+        plan = tmp_plan_dir / "all_done.md"
+        plan.write_text(
+            "> 상태: 구현완료\n\n1. [x] a\n2. [x] b\n- [x] c\n",
+            encoding="utf-8",
+        )
+
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"ok", None))
+        mock_proc.returncode = 0
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
+             patch.object(svc, "sync_plans"):
+            svc.AUTO_DONE_SCRIPT = tmp_plan_dir / "auto-done.ps1"
+            (svc.AUTO_DONE_SCRIPT).write_text("# fake", encoding="utf-8")
+
+            result = await svc.run_done(str(plan))
+
+        assert result["remaining_tasks"] == 0
+        assert result["total_tasks"] == 3
+        assert result["plan_status"] == "구현완료"
+
+    @pytest.mark.asyncio
+    async def test_progress_no_checkboxes(self, svc, tmp_plan_dir):
+        """Boundary: 체크박스 없는 plan → total=0, remaining=0"""
+        plan = tmp_plan_dir / "no_cb.md"
+        plan.write_text("> 상태: 초안\n\nSome text only.", encoding="utf-8")
+
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"ok", None))
+        mock_proc.returncode = 0
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
+             patch.object(svc, "sync_plans"):
+            svc.AUTO_DONE_SCRIPT = tmp_plan_dir / "auto-done.ps1"
+            (svc.AUTO_DONE_SCRIPT).write_text("# fake", encoding="utf-8")
+
+            result = await svc.run_done(str(plan))
+
+        assert result["remaining_tasks"] == 0
+        assert result["total_tasks"] == 0
+        assert result["plan_status"] == "초안"
+
+    @pytest.mark.asyncio
+    async def test_progress_no_status_line(self, svc, tmp_plan_dir):
+        """Boundary: 상태 라인 없는 plan → plan_status='unknown'"""
+        plan = tmp_plan_dir / "no_status.md"
+        plan.write_text("# No status\n\n1. [ ] task\n2. [x] done\n", encoding="utf-8")
+
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"ok", None))
+        mock_proc.returncode = 0
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
+             patch.object(svc, "sync_plans"):
+            svc.AUTO_DONE_SCRIPT = tmp_plan_dir / "auto-done.ps1"
+            (svc.AUTO_DONE_SCRIPT).write_text("# fake", encoding="utf-8")
+
+            result = await svc.run_done(str(plan))
+
+        assert result["remaining_tasks"] == 1
+        assert result["total_tasks"] == 2
+        assert result["plan_status"] == "unknown"
+
+    @pytest.mark.asyncio
+    async def test_progress_captured_before_execution(self, svc, tmp_plan_dir):
+        """Cross-check: progress는 auto-done.ps1 실행 전 캡처됨"""
+        plan = tmp_plan_dir / "pre_capture.md"
+        plan.write_text("> 상태: 구현중\n\n1. [ ] task1\n2. [ ] task2\n", encoding="utf-8")
+
+        call_order = []
+
+        original_progress = svc.get_plan_progress
+
+        def track_progress(path):
+            call_order.append("progress")
+            return original_progress(path)
+
+        async def mock_communicate():
+            call_order.append("subprocess")
+            return (b"ok", None)
+
+        mock_proc = AsyncMock()
+        mock_proc.communicate = mock_communicate
+        mock_proc.returncode = 0
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
+             patch.object(svc, "sync_plans"), \
+             patch.object(svc, "get_plan_progress", side_effect=track_progress):
+            svc.AUTO_DONE_SCRIPT = tmp_plan_dir / "auto-done.ps1"
+            (svc.AUTO_DONE_SCRIPT).write_text("# fake", encoding="utf-8")
+
+            result = await svc.run_done(str(plan))
+
+        assert call_order.index("progress") < call_order.index("subprocess")
+        assert result["remaining_tasks"] == 2
+        assert result["total_tasks"] == 2
+
+    @pytest.mark.asyncio
+    async def test_nonexistent_script_has_default_progress(self, svc, tmp_plan_dir):
+        """Existence: auto-done.ps1 미존재 → progress 기본값 (subprocess 전 단계에서 반환)"""
+        plan = tmp_plan_dir / "test.md"
+        plan.write_text("> 상태: 대기\n\n1. [ ] task", encoding="utf-8")
+
+        svc.AUTO_DONE_SCRIPT = tmp_plan_dir / "no_script.ps1"
+
+        result = await svc.run_done(str(plan))
+
+        assert result["success"] is False
+        assert result["remaining_tasks"] == 0
+        assert result["total_tasks"] == 0
+        assert result["plan_status"] == ""

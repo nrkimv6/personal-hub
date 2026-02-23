@@ -412,7 +412,8 @@ class PlanService:
     async def run_done(self, plan_path: str) -> dict:
         """auto-done.ps1 실행하여 plan 완료 처리 (아카이브, TODO→DONE, 커밋)"""
         if not self.AUTO_DONE_SCRIPT.exists():
-            return {"success": False, "message": f"auto-done.ps1 not found: {self.AUTO_DONE_SCRIPT}", "output": None}
+            return {"success": False, "message": f"auto-done.ps1 not found: {self.AUTO_DONE_SCRIPT}", "output": None,
+                    "remaining_tasks": 0, "total_tasks": 0, "plan_status": ""}
 
         path = Path(plan_path)
         if not path.exists():
