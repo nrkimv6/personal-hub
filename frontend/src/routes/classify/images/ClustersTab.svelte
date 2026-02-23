@@ -102,6 +102,8 @@
 		try {
 			const params = new URLSearchParams();
 			if (gapMinutes) params.set('gap_minutes', String(gapMinutes));
+			if (dateFrom) params.set('date_from', dateFrom);
+			if (dateTo) params.set('date_to', dateTo);
 			const response = await fetchWithTimeout(`/api/ic/clusters?${params}`);
 			if (response.ok) {
 				clusters = await response.json();
