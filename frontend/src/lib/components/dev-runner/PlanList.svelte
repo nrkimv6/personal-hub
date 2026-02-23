@@ -2,6 +2,7 @@
 	import { devRunnerPlanApi } from '$lib/api';
 	import type { DevRunnerPlanFileResponse, DevRunnerPlanDetailResponse, DevRunnerRegisteredPathResponse } from '$lib/api';
 	import { encodePathToBase64 } from '$lib/utils/encoding';
+	import PlanDetailView from './PlanDetailView.svelte';
 
 	let doneLoadingPath = $state<string | null>(null);
 	let doneMessage = $state<{ path: string; success: boolean; text: string; remaining?: number; total?: number; planStatus?: string } | null>(null);
