@@ -22,7 +22,6 @@ def dev_runner_config_isolation(tmp_path):
     mock_config.REGISTERED_PATHS_FILE = reg_file
     mock_config.EXTERNAL_PLANS_FILE = tmp_path / "external_plans.json"
     mock_config.IGNORED_PLANS_FILE = ign_file
-    mock_config.DEV_RUNNER_DB_PATH = tmp_path / "tasks.db"
     mock_config.WTOOLS_BASE_DIR = tmp_path / "wtools"
     mock_config.PLAN_DIR = Path("common/docs/plan")
     mock_config.PROJECT_DIRS = []
@@ -30,6 +29,5 @@ def dev_runner_config_isolation(tmp_path):
     mock_config.LOG_DIR = Path("common/logs")
     mock_config.LOG_FILE_PATTERN = "plan-runner-*.log"
 
-    with patch("app.modules.dev_runner.services.plan_service.config", mock_config), \
-         patch("app.modules.dev_runner.services.db_service.config", mock_config):
+    with patch("app.modules.dev_runner.services.plan_service.config", mock_config):
         yield mock_config

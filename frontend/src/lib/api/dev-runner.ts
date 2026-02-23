@@ -7,47 +7,6 @@ import { request, API_BASE, getAuthToken, fetchWithTimeout } from './client';
 // Types
 // ============================================================
 
-export interface TaskResponse {
-	id: string;
-	type: string;
-	source_path: string;
-	text: string;
-	priority: number;
-	status: string;
-	created_at: string;
-	started_at: string | null;
-	finished_at: string | null;
-	duration_seconds: number | null;
-	output_tokens: number;
-	input_tokens: number;
-	cache_read_tokens: number;
-	cache_creation_tokens: number;
-	error_message: string | null;
-	model_used: string | null;
-}
-
-export interface TaskListResponse {
-	tasks: TaskResponse[];
-	total: number;
-}
-
-export interface StatsResponse {
-	total: number;
-	pending: number;
-	running: number;
-	success: number;
-	failed: number;
-	skipped: number;
-	completed: number;
-	completion_rate: number;
-	success_rate: number;
-	total_input_tokens: number;
-	total_output_tokens: number;
-	total_cache_tokens: number;
-	total_tokens: number;
-	total_duration_ms: number;
-}
-
 export interface RunRequest {
 	plan_file?: string | null;
 	max_cycles?: number;
@@ -92,19 +51,6 @@ export interface RegisteredPathResponse {
 	path: string;
 	type: 'file' | 'folder';
 	plan_count: number;
-}
-
-export interface HistoryEntry {
-	date: string;
-	count: number;
-	success: number;
-	failed: number;
-}
-
-export interface DuplicateTaskResponse {
-	text: string;
-	count: number;
-	tasks: TaskResponse[];
 }
 
 export interface LogResponse {
@@ -166,12 +112,6 @@ export interface BatchDoneResponse {
 	results: BatchDoneResultItem[];
 }
 
-export interface TaskListParams {
-	status?: string;
-	limit?: number;
-	offset?: number;
-}
-
 // ============================================================
 // API prefix (백엔드 라우터: /api/v1/dev-runner)
 // ============================================================
@@ -209,53 +149,8 @@ async function devRunnerRequest<T>(endpoint: string, options: RequestInit = {}):
 // ============================================================
 
 export const devRunnerTaskApi = {
-	list: (params?: TaskListParams & { source_path?: string }) => {
-		const search = new URLSearchParams();
-		if (params?.status) search.set('status', params.status);
-		if (params?.limit) search.set('limit', String(params.limit));
-		if (params?.offset) search.set('offset', String(params.offset));
-		if (params?.source_path) search.set('source_path', params.source_path);
-		const qs = search.toString();
-		return devRunnerRequest<TaskListResponse>(`/tasks${qs ? '?' + qs : ''}`);
-	},
-
 	currentTracking: () =>
 		devRunnerRequest<CurrentTrackingResponse | null>('/tasks/current-tracking'),
-
-	get: (id: string) => devRunnerRequest<TaskResponse>(`/tasks/${id}`),
-
-	delete: (id: string) =>
-		devRunnerRequest<{ success: boolean }>(`/tasks/${id}`, { method: 'DELETE' }),
-
-	deleteCompleted: (source_path?: string) => {
-		const qs = source_path ? `?source_path=${encodeURIComponent(source_path)}` : '';
-		return devRunnerRequest<{ deleted: number }>(`/tasks${qs}`, { method: 'DELETE' });
-	},
-
-	deleteOld: (hours: number = 24, source_path?: string) => {
-		const search = new URLSearchParams({ hours: String(hours) });
-		if (source_path) search.set('source_path', source_path);
-		return devRunnerRequest<{ deleted: number; hours: number; message: string }>(
-			`/tasks/old?${search}`,
-			{ method: 'DELETE' }
-		);
-	}
-};
-
-// ============================================================
-// Stats API
-// ============================================================
-
-export const devRunnerStatsApi = {
-	stats: (since?: string) => {
-		const qs = since ? `?since=${encodeURIComponent(since)}` : '';
-		return devRunnerRequest<StatsResponse>(`/stats${qs}`);
-	},
-
-	history: (days: number = 30) => devRunnerRequest<HistoryEntry[]>(`/history?days=${days}`),
-
-	duplicates: (minCount: number = 2) =>
-		devRunnerRequest<DuplicateTaskResponse[]>(`/duplicates?min_count=${minCount}`)
 };
 
 // ============================================================

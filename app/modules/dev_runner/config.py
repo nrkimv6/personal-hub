@@ -8,9 +8,6 @@ from typing import List
 class DevRunnerConfig(BaseSettings):
     """dev-runner 모듈 설정"""
 
-    # DB 경로
-    DEV_RUNNER_DB_PATH: Path = Path(r"D:\work\project\service\wtools\common\tools\plan-runner\data\tasks.db")
-
     # [초기 시드용] wtools 프로젝트 기본 경로 — 최초 실행 시 하위 프로젝트를 registered_paths.json에 자동 등록
     WTOOLS_BASE_DIR: Path = Path(r"D:\work\project\service\wtools")
 

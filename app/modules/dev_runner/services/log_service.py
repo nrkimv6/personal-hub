@@ -13,8 +13,6 @@ import redis.asyncio as aioredis
 from app.modules.dev_runner.config import config
 from app.modules.dev_runner.schemas import LogResponse
 from app.modules.dev_runner.services.state import get_state
-from app.modules.dev_runner.services.db_service import db_service
-
 # Redis 설정
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
@@ -80,17 +78,6 @@ class LogService:
                     lines=[f"Error reading log: {str(e)}"],
                     total_lines=1
                 )
-
-        # fallback: SQLite stream_logs 조회
-        try:
-            cycle_id = db_service.get_latest_cycle_id()
-            if cycle_id:
-                log_rows = db_service.get_stream_logs(cycle_id, limit=n_lines)
-                if log_rows:
-                    lines = [row["message"] for row in log_rows]
-                    return LogResponse(lines=lines, total_lines=len(lines))
-        except Exception:
-            pass
 
         return LogResponse(lines=[], total_lines=0)
 

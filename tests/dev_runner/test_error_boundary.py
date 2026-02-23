@@ -97,60 +97,6 @@ class TestLargePlanFile:
         assert detail.phases[0].total_count == 50
 
 
-# ========== DBService limit/offset 경계값 ==========
-
-class TestDBServiceBoundary:
-
-    @pytest.fixture
-    def db_svc(self, tmp_path, dev_runner_config_isolation):
-        """격리된 DBService"""
-        import sqlite3
-        from app.modules.dev_runner.services.db_service import DBService
-
-        cfg = dev_runner_config_isolation
-        db_path = cfg.DEV_RUNNER_DB_PATH
-        conn = sqlite3.connect(str(db_path))
-        conn.execute("""CREATE TABLE IF NOT EXISTS tasks (
-            id TEXT PRIMARY KEY, type TEXT, source_path TEXT, text TEXT,
-            priority INTEGER DEFAULT 0, status TEXT DEFAULT 'pending',
-            created_at TEXT, started_at TEXT, finished_at TEXT,
-            duration_seconds REAL, output_tokens INTEGER DEFAULT 0,
-            input_tokens INTEGER DEFAULT 0, cache_read_tokens INTEGER DEFAULT 0,
-            cache_create_tokens INTEGER DEFAULT 0,
-            error_message TEXT, model_used TEXT
-        )""")
-        # 10개 레코드 삽입
-        for i in range(10):
-            conn.execute(
-                "INSERT INTO tasks (id, type, source_path, text, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (f"t{i}", "implement", "proj/plan.md", f"Task {i}", "success", "2026-02-18T10:00:00")
-            )
-        conn.commit()
-        conn.close()
-        return DBService()
-
-    def test_limit_zero(self, db_svc):
-        """limit=0 → 빈 리스트 (또는 전체)"""
-        result = db_svc.get_tasks(limit=0)
-        assert isinstance(result.tasks, list)
-
-    def test_limit_one(self, db_svc):
-        """limit=1 → 정확히 1개"""
-        result = db_svc.get_tasks(limit=1)
-        assert len(result.tasks) == 1
-
-    def test_limit_large(self, db_svc):
-        """limit=200 (전체보다 큼) → 전체 반환"""
-        result = db_svc.get_tasks(limit=200)
-        assert len(result.tasks) == 10
-        assert result.total == 10
-
-    def test_offset_beyond_total(self, db_svc):
-        """offset > total → 빈 리스트"""
-        result = db_svc.get_tasks(limit=10, offset=100)
-        assert len(result.tasks) == 0
-
-
 # ========== RunRequest 유효성 ==========
 
 class TestRunRequestValidation:

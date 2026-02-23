@@ -216,10 +216,7 @@ class ExecutorService:
             return False
 
     def reset_running_state(self, full_reset: bool = False) -> Dict:
-        """RUNNING 상태 강제 초기화 - Redis + plan-runner DB
-
-        full_reset=True이면 모든 작업을 삭제하여 완전 초기화
-        """
+        """RUNNING 상태 강제 초기화 - Redis 정리만 수행"""
         try:
             # 0. listener에 force-stop 전송 (메모리 내 _current_process 정리)
             self._send_force_stop()
@@ -228,63 +225,7 @@ class ExecutorService:
             self._force_cleanup_state()
             logger.info("[dev-runner] Redis 상태 정리 완료")
 
-            # 2. plan-runner SQLite DB 정리
-            import sqlite3
-
-            db_path = Path(config.DEV_RUNNER_DB_PATH)
-
-            if not db_path.exists():
-                logger.warning(f"[dev-runner] DB 파일을 찾을 수 없음: {db_path}")
-                return {
-                    "success": True,
-                    "reset_count": 0,
-                    "message": f"plan-runner DB not found at {db_path}"
-                }
-
-            try:
-                conn = sqlite3.connect(str(db_path))
-                cursor = conn.cursor()
-            except sqlite3.Error as e:
-                logger.error(f"[dev-runner] DB 연결 실패: {db_path}, error: {e}")
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to connect to plan-runner DB: {str(e)}"
-                )
-
-            try:
-                if full_reset:
-                    # 전체 리셋: 모든 작업 삭제
-                    cursor.execute("SELECT COUNT(*) FROM tasks")
-                    result = cursor.fetchone()
-                    reset_count = result[0] if result else 0
-                    cursor.execute("DELETE FROM tasks")
-                    conn.commit()
-                    logger.info(f"[dev-runner] 전체 리셋: {reset_count}개 작업 삭제")
-                else:
-                    # RUNNING → PENDING 변경만
-                    cursor.execute("SELECT COUNT(*) FROM tasks WHERE status='running'")
-                    result = cursor.fetchone()
-                    reset_count = result[0] if result else 0
-
-                    if reset_count > 0:
-                        cursor.execute(
-                            "UPDATE tasks SET status='pending', started_at=NULL WHERE status='running'"
-                        )
-                        conn.commit()
-                        logger.info(f"[dev-runner] {reset_count}개 작업을 RUNNING → PENDING으로 변경")
-                    else:
-                        logger.info("[dev-runner] RUNNING 상태의 작업이 없음")
-
-                return {"success": True, "reset_count": reset_count, "full_reset": full_reset}
-
-            except sqlite3.Error as e:
-                logger.error(f"[dev-runner] DB 쿼리 실패: {e}")
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Database query failed: {str(e)}"
-                )
-            finally:
-                conn.close()
+            return {"success": True, "reset_count": 0, "full_reset": full_reset}
 
         except Exception as e:
             logger.error(f"[dev-runner] reset_running_state 실패: {traceback.format_exc()}")
