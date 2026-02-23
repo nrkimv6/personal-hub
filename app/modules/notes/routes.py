@@ -128,14 +128,31 @@ def delete_tag(tag_id: int, db: Session = Depends(get_db)):
 
 @router.get("", response_model=NoteListResponse)
 def get_notes(
-    tag: Optional[str] = Query(None),
+    tags: Optional[str] = Query(None),
+    tag_mode: Optional[str] = Query("or"),
     search: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    sort: Optional[str] = Query("created_at"),
+    order: Optional[str] = Query("desc"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    """메모 목록 조회 (태그/검색 필터, 페이지네이션)."""
-    return svc.list_notes(db, tag=tag, search=search, page=page, page_size=page_size)
+    """메모 목록 조회 (태그/검색/날짜 범위 필터, 정렬, 페이지네이션)."""
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
+    return svc.list_notes(
+        db,
+        tags=tag_list,
+        tag_mode=tag_mode or "or",
+        search=search,
+        date_from=date_from,
+        date_to=date_to,
+        sort=sort or "created_at",
+        order=order or "desc",
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.post("", response_model=NoteResponse, status_code=201)

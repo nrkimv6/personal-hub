@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { notesApi } from '$lib/api/notes';
   import type { Note, TagDef } from '$lib/api/notes';
-  import { Search, X, ChevronLeft, ChevronRight, FileText, CheckSquare, Trash2, Archive, Tag, Star } from 'lucide-svelte';
+  import { Search, X, ChevronLeft, ChevronRight, FileText, CheckSquare, Trash2, Archive, Tag, Star, ArrowUpDown } from 'lucide-svelte';
   import NoteCard from './NoteCard.svelte';
   import NoteDetailModal from './NoteDetailModal.svelte';
   import NoteFormModal from './NoteFormModal.svelte';
@@ -16,7 +16,12 @@
   let error = $state('');
 
   let search = $state('');
-  let selectedTag = $state('');
+  let selectedTags = $state<string[]>([]);
+  let tagMode = $state<'or' | 'and'>('or');
+  let dateFrom = $state('');
+  let dateTo = $state('');
+  let sortBy = $state('created_at');
+  let sortOrder = $state<'asc' | 'desc'>('desc');
   let page = $state(1);
 
   let openNote = $state<Note | null>(null);
@@ -29,12 +34,72 @@
 
   let searchTimer: ReturnType<typeof setTimeout>;
 
+  function getTodayRange(): { from: string; to: string } {
+    const d = new Date();
+    const date = d.toISOString().split('T')[0];
+    return { from: `${date}T00:00:00`, to: `${date}T23:59:59` };
+  }
+
+  function getWeekRange(): { from: string; to: string } {
+    const d = new Date();
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    const mon = new Date(d.setDate(diff));
+    const sun = new Date(mon);
+    sun.setDate(mon.getDate() + 6);
+    return {
+      from: `${mon.toISOString().split('T')[0]}T00:00:00`,
+      to: `${sun.toISOString().split('T')[0]}T23:59:59`,
+    };
+  }
+
+  function getMonthRange(): { from: string; to: string } {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const lastDay = new Date(year, d.getMonth() + 1, 0).getDate();
+    return {
+      from: `${year}-${month}-01T00:00:00`,
+      to: `${year}-${month}-${lastDay}T23:59:59`,
+    };
+  }
+
+  function setDatePreset(preset: 'today' | 'week' | 'month' | 'all') {
+    if (preset === 'all') {
+      dateFrom = '';
+      dateTo = '';
+    } else if (preset === 'today') {
+      const r = getTodayRange();
+      dateFrom = r.from;
+      dateTo = r.to;
+    } else if (preset === 'week') {
+      const r = getWeekRange();
+      dateFrom = r.from;
+      dateTo = r.to;
+    } else if (preset === 'month') {
+      const r = getMonthRange();
+      dateFrom = r.from;
+      dateTo = r.to;
+    }
+    page = 1;
+    load();
+  }
+
   async function load() {
     loading = true;
     error = '';
     try {
       const [res, tagRes] = await Promise.all([
-        notesApi.list({ search: search || undefined, tag: selectedTag || undefined, page }),
+        notesApi.list({
+          search: search || undefined,
+          tags: selectedTags.length ? selectedTags.join(',') : undefined,
+          tag_mode: tagMode,
+          date_from: dateFrom || undefined,
+          date_to: dateTo || undefined,
+          sort: sortBy,
+          order: sortOrder,
+          page,
+        }),
         notesApi.listTags(),
       ]);
       notes = res.items;
@@ -53,8 +118,31 @@
     searchTimer = setTimeout(() => { page = 1; load(); }, 400);
   }
 
+  function toggleTagSelection(tagName: string) {
+    if (selectedTags.includes(tagName)) {
+      selectedTags = selectedTags.filter(t => t !== tagName);
+    } else {
+      selectedTags = [...selectedTags, tagName];
+    }
+    page = 1;
+    load();
+  }
+
+  function clearTags() {
+    selectedTags = [];
+    page = 1;
+    load();
+  }
+
+  function toggleSortOrder() {
+    sortOrder = sortOrder === 'desc' ? 'asc' : 'desc';
+    page = 1;
+    load();
+  }
+
+  /** @deprecated 하위호환 — 단일 태그 선택 */
   function selectTag(tagName: string) {
-    selectedTag = tagName;
+    selectedTags = tagName ? [tagName] : [];
     page = 1;
     load();
   }
@@ -149,24 +237,90 @@
       </div>
     {/if}
 
-    <!-- 태그 pill 필터 -->
-    <div class="flex flex-wrap gap-1.5">
+    <!-- 날짜 범위 필터 -->
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="text-xs text-muted-foreground shrink-0">날짜:</span>
+      {#each [['오늘', 'today'], ['이번 주', 'week'], ['이번 달', 'month'], ['전체', 'all']] as [label, preset]}
+        <button
+          onclick={() => setDatePreset(preset as any)}
+          class="px-2.5 py-1 text-xs rounded-md border transition-colors
+            {(preset === 'all' && !dateFrom && !dateTo) ||
+             (preset !== 'all' && dateFrom)
+              ? 'bg-primary/10 text-primary border-primary/30'
+              : 'bg-card text-muted-foreground border-border hover:border-primary/30'}"
+        >{label}</button>
+      {/each}
+      <input
+        type="date"
+        bind:value={dateFrom}
+        onchange={() => { page = 1; load(); }}
+        class="text-xs px-2 py-1 rounded-md border border-border bg-card text-foreground
+          focus:outline-none focus:ring-1 focus:ring-ring/30"
+      />
+      <span class="text-xs text-muted-foreground">~</span>
+      <input
+        type="date"
+        bind:value={dateTo}
+        onchange={() => { page = 1; load(); }}
+        class="text-xs px-2 py-1 rounded-md border border-border bg-card text-foreground
+          focus:outline-none focus:ring-1 focus:ring-ring/30"
+      />
+    </div>
+
+    <!-- 태그 pill 필터 + AND/OR 토글 -->
+    <div class="flex flex-wrap gap-1.5 items-center">
       <button
-        onclick={() => selectTag('')}
+        onclick={clearTags}
         class="px-3 py-1.5 text-xs rounded-full border transition-colors
-          {selectedTag === ''
+          {selectedTags.length === 0
             ? 'bg-primary text-primary-foreground border-primary'
             : 'bg-card text-muted-foreground border-border hover:border-primary/50'}"
       >All</button>
       {#each tags as tag}
         <button
-          onclick={() => selectTag(tag.name)}
-          class="px-3 py-1.5 text-xs rounded-full border transition-colors
-            {selectedTag === tag.name
+          onclick={() => toggleTagSelection(tag.name)}
+          class="flex items-center gap-1 px-3 py-1.5 text-xs rounded-full border transition-colors
+            {selectedTags.includes(tag.name)
               ? 'bg-primary text-primary-foreground border-primary'
               : 'bg-card text-muted-foreground border-border hover:border-primary/50'}"
-        >{tag.name}</button>
+        >
+          <span
+            class="w-2 h-2 rounded-full shrink-0"
+            style="background-color: {tag.color}"
+          ></span>
+          {tag.name}
+        </button>
       {/each}
+      {#if selectedTags.length > 1}
+        <button
+          onclick={() => { tagMode = tagMode === 'or' ? 'and' : 'or'; page = 1; load(); }}
+          class="ml-1 px-2.5 py-1 text-xs rounded-md border font-medium transition-colors
+            bg-amber-500/10 text-amber-700 border-amber-300 hover:bg-amber-500/20"
+        >{tagMode.toUpperCase()}</button>
+      {/if}
+    </div>
+
+    <!-- 정렬 옵션 -->
+    <div class="flex items-center gap-2">
+      <span class="text-xs text-muted-foreground">정렬:</span>
+      <select
+        bind:value={sortBy}
+        onchange={() => { page = 1; load(); }}
+        class="text-xs px-2 py-1 rounded-md border border-border bg-card text-foreground
+          focus:outline-none focus:ring-1 focus:ring-ring/30"
+      >
+        <option value="created_at">생성일</option>
+        <option value="updated_at">수정일</option>
+        <option value="title">제목</option>
+      </select>
+      <button
+        onclick={toggleSortOrder}
+        class="flex items-center gap-1 px-2 py-1 text-xs rounded-md border border-border
+          bg-card text-muted-foreground hover:border-primary/50 transition-colors"
+      >
+        <ArrowUpDown class="w-3 h-3" />
+        {sortOrder === 'desc' ? '내림차순' : '오름차순'}
+      </button>
     </div>
   </div>
 

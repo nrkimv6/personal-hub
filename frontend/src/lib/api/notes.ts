@@ -122,10 +122,27 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 
 export const notesApi = {
   // ── Notes ──
-  list(params?: { tag?: string; search?: string; page?: number; page_size?: number }): Promise<NoteListResponse> {
+  list(params?: {
+    tag?: string;
+    tags?: string;
+    tag_mode?: string;
+    search?: string;
+    date_from?: string;
+    date_to?: string;
+    sort?: string;
+    order?: string;
+    page?: number;
+    page_size?: number;
+  }): Promise<NoteListResponse> {
     const q = new URLSearchParams();
-    if (params?.tag) q.set('tag', params.tag);
+    if (params?.tag) q.set('tags', params.tag);
+    if (params?.tags) q.set('tags', params.tags);
+    if (params?.tag_mode) q.set('tag_mode', params.tag_mode);
     if (params?.search) q.set('search', params.search);
+    if (params?.date_from) q.set('date_from', params.date_from);
+    if (params?.date_to) q.set('date_to', params.date_to);
+    if (params?.sort) q.set('sort', params.sort);
+    if (params?.order) q.set('order', params.order);
     if (params?.page) q.set('page', String(params.page));
     if (params?.page_size) q.set('page_size', String(params.page_size));
     return req('GET', `?${q}`);

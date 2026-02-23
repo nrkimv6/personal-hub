@@ -6,7 +6,7 @@ from typing import Optional, List
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, func, distinct
 
 from app.modules.notes.models import Note, NoteArchive, NoteTag, NoteTagDef, NoteHistory
 
@@ -69,16 +69,38 @@ def _set_tags(db: Session, note_id: int, tag_ids: List[int], source: str = "note
 def list_notes(
     db: Session,
     tag: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    tag_mode: str = "or",
     search: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    sort: str = "created_at",
+    order: str = "desc",
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
     query = db.query(Note).filter(Note.deleted_at.is_(None))
 
-    if tag:
+    # 하위호환: 단일 tag → tags 리스트로 변환
+    effective_tags = tags
+    if not effective_tags and tag:
+        effective_tags = [tag]
+
+    if effective_tags:
         query = query.join(
             NoteTag, and_(NoteTag.note_id == Note.id, NoteTag.source == "note")
-        ).join(NoteTagDef, NoteTagDef.id == NoteTag.tag_id).filter(NoteTagDef.name == tag)
+        ).join(NoteTagDef, NoteTagDef.id == NoteTag.tag_id)
+
+        if tag_mode == "and":
+            # AND 모드: 모든 태그를 가진 메모만
+            query = (
+                query.filter(NoteTagDef.name.in_(effective_tags))
+                .group_by(Note.id)
+                .having(func.count(distinct(NoteTagDef.name)) == len(effective_tags))
+            )
+        else:
+            # OR 모드: 태그 중 하나라도 가진 메모
+            query = query.filter(NoteTagDef.name.in_(effective_tags)).distinct()
 
     if search and search.strip():
         pattern = f"%{search.strip()}%"
@@ -86,10 +108,26 @@ def list_notes(
             Note.title.ilike(pattern) | Note.content.ilike(pattern)
         )
 
+    if date_from:
+        query = query.filter(Note.created_at >= datetime.fromisoformat(date_from))
+
+    if date_to:
+        query = query.filter(Note.created_at <= datetime.fromisoformat(date_to))
+
     total = query.count()
     pages = max(1, math.ceil(total / page_size))
+
+    # 정렬 컬럼 매핑 (허용 목록 외 기본값 적용)
+    sort_columns = {
+        "created_at": Note.created_at,
+        "updated_at": Note.updated_at,
+        "title": Note.title,
+    }
+    sort_col = sort_columns.get(sort, Note.created_at)
+    sort_expr = sort_col.asc() if order == "asc" else sort_col.desc()
+
     items = (
-        query.order_by(Note.is_pinned.desc(), Note.created_at.desc())
+        query.order_by(Note.is_pinned.desc(), sort_expr)
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
