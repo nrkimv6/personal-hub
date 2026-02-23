@@ -143,6 +143,12 @@ export interface PlanDetailResponse {
 	progress: PlanProgressResponse;
 }
 
+export interface DoneResponse {
+	success: boolean;
+	message: string;
+	output: string | null;
+}
+
 export interface TaskListParams {
 	status?: string;
 	limit?: number;
@@ -293,7 +299,10 @@ export const devRunnerPlanApi = {
 		devRunnerRequest<{ success: boolean }>(`/plans/${encodedPath}/ignore`, { method: 'POST' }),
 
 	unignore: (encodedPath: string) =>
-		devRunnerRequest<{ success: boolean }>(`/plans/${encodedPath}/ignore`, { method: 'DELETE' })
+		devRunnerRequest<{ success: boolean }>(`/plans/${encodedPath}/ignore`, { method: 'DELETE' }),
+
+	done: (encodedPath: string) =>
+		devRunnerRequest<DoneResponse>(`/plans/${encodedPath}/done`, { method: 'POST' })
 };
 
 // ============================================================

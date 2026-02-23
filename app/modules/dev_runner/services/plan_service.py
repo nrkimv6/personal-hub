@@ -1,5 +1,6 @@
 """plan 문서 관리 서비스"""
 
+import asyncio
 import json
 import logging
 import re
@@ -403,6 +404,41 @@ class PlanService:
             phases=phases,
             progress=progress,
         )
+
+    # ========== done 처리 ==========
+
+    AUTO_DONE_SCRIPT = Path("D:/work/project/service/wtools/common/tools/auto-done.ps1")
+
+    async def run_done(self, plan_path: str) -> dict:
+        """auto-done.ps1 실행하여 plan 완료 처리 (아카이브, TODO→DONE, 커밋)"""
+        if not self.AUTO_DONE_SCRIPT.exists():
+            return {"success": False, "message": f"auto-done.ps1 not found: {self.AUTO_DONE_SCRIPT}", "output": None}
+
+        path = Path(plan_path)
+        if not path.exists():
+            return {"success": False, "message": f"Plan file not found: {plan_path}", "output": None}
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "powershell.exe", "-ExecutionPolicy", "Bypass",
+                "-File", str(self.AUTO_DONE_SCRIPT),
+                "-PlanFile", plan_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
+            output = stdout.decode("utf-8", errors="replace") if stdout else ""
+
+            if proc.returncode == 0:
+                self.sync_plans()
+                return {"success": True, "message": "완료 처리 성공", "output": output}
+            else:
+                return {"success": False, "message": f"auto-done.ps1 실패 (exit={proc.returncode})", "output": output}
+        except asyncio.TimeoutError:
+            return {"success": False, "message": "auto-done.ps1 타임아웃 (120초)", "output": None}
+        except Exception as e:
+            logger.error(f"run_done 실패: {e}")
+            return {"success": False, "message": str(e), "output": None}
 
     # ========== 동기화 ==========
 

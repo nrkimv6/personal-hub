@@ -3,10 +3,11 @@
 대상 소스: app/modules/dev_runner/services/plan_service.py
 """
 
+import asyncio
 import json
 import pytest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock, MagicMock
 
 from app.modules.dev_runner.schemas import PlanProgressResponse
 
@@ -552,3 +553,165 @@ class TestMigration:
         # external의 내용이 추가되지 않음 (마이그레이션 스킵)
         assert "/existing/path" in svc._registered_paths
         assert "/should/not/appear" not in svc._registered_paths
+
+
+# ========== run_done() ==========
+
+class TestRunDone:
+    """run_done() 테스트 - RIGHT-BICEP + CORRECT
+
+    Right: 정상 실행 시 success=True
+    Boundary: 존재하지 않는 plan, 존재하지 않는 스크립트
+    Inverse: 실패 시 success=False + 에러 메시지
+    Cross-check: sync_plans() 호출 여부
+    Error: 타임아웃, 예외 발생
+    Performance: N/A (subprocess)
+
+    CORRECT:
+    Conformance: 반환 dict 구조 검증
+    Ordering: N/A
+    Range: exit code 0 vs non-zero
+    Reference: sync_plans 호출 확인
+    Existence: plan 파일 미존재
+    Cardinality: N/A
+    Time: 타임아웃 처리
+    """
+
+    @pytest.mark.asyncio
+    async def test_success_returns_true(self, svc, tmp_plan_dir):
+        """Right: auto-done.ps1 성공 (exit=0) → success=True, sync 호출"""
+        plan = tmp_plan_dir / "done_test.md"
+        plan.write_text("> 상태: 구현완료\n\n1. [x] task", encoding="utf-8")
+
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"Done OK\n", None))
+        mock_proc.returncode = 0
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec, \
+             patch.object(svc, "sync_plans") as mock_sync:
+            svc.AUTO_DONE_SCRIPT = tmp_plan_dir / "auto-done.ps1"
+            (svc.AUTO_DONE_SCRIPT).write_text("# fake", encoding="utf-8")
+
+            result = await svc.run_done(str(plan))
+
+        assert result["success"] is True
+        assert "성공" in result["message"]
+        assert result["output"] == "Done OK\n"
+        mock_sync.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_failure_returns_false(self, svc, tmp_plan_dir):
+        """Inverse: auto-done.ps1 실패 (exit=1) → success=False"""
+        plan = tmp_plan_dir / "fail_test.md"
+        plan.write_text("> 상태: 구현완료\n\n1. [x] task", encoding="utf-8")
+
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"Error occurred\n", None))
+        mock_proc.returncode = 1
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            svc.AUTO_DONE_SCRIPT = tmp_plan_dir / "auto-done.ps1"
+            (svc.AUTO_DONE_SCRIPT).write_text("# fake", encoding="utf-8")
+
+            result = await svc.run_done(str(plan))
+
+        assert result["success"] is False
+        assert "실패" in result["message"]
+        assert "Error occurred" in result["output"]
+
+    @pytest.mark.asyncio
+    async def test_nonexistent_plan_file(self, svc, tmp_path):
+        """Existence: plan 파일 미존재 → success=False"""
+        svc.AUTO_DONE_SCRIPT = tmp_path / "auto-done.ps1"
+        (svc.AUTO_DONE_SCRIPT).write_text("# fake", encoding="utf-8")
+
+        result = await svc.run_done(str(tmp_path / "nonexistent.md"))
+
+        assert result["success"] is False
+        assert "not found" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_nonexistent_script(self, svc, tmp_plan_dir):
+        """Existence: auto-done.ps1 미존재 → success=False"""
+        plan = tmp_plan_dir / "test.md"
+        plan.write_text("content", encoding="utf-8")
+
+        svc.AUTO_DONE_SCRIPT = tmp_plan_dir / "no_script.ps1"
+
+        result = await svc.run_done(str(plan))
+
+        assert result["success"] is False
+        assert "not found" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_timeout_handling(self, svc, tmp_plan_dir):
+        """Time: 타임아웃 시 success=False"""
+        plan = tmp_plan_dir / "timeout_test.md"
+        plan.write_text("content", encoding="utf-8")
+
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            svc.AUTO_DONE_SCRIPT = tmp_plan_dir / "auto-done.ps1"
+            (svc.AUTO_DONE_SCRIPT).write_text("# fake", encoding="utf-8")
+
+            result = await svc.run_done(str(plan))
+
+        assert result["success"] is False
+        assert "타임아웃" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_exception_handling(self, svc, tmp_plan_dir):
+        """Error: 예외 발생 시 success=False + 에러 메시지"""
+        plan = tmp_plan_dir / "exc_test.md"
+        plan.write_text("content", encoding="utf-8")
+
+        with patch("asyncio.create_subprocess_exec", side_effect=OSError("spawn failed")):
+            svc.AUTO_DONE_SCRIPT = tmp_plan_dir / "auto-done.ps1"
+            (svc.AUTO_DONE_SCRIPT).write_text("# fake", encoding="utf-8")
+
+            result = await svc.run_done(str(plan))
+
+        assert result["success"] is False
+        assert "spawn failed" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_response_conformance(self, svc, tmp_plan_dir):
+        """Conformance: 반환 dict에 success, message, output 키가 항상 존재"""
+        plan = tmp_plan_dir / "conform_test.md"
+        plan.write_text("content", encoding="utf-8")
+
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"output", None))
+        mock_proc.returncode = 0
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
+             patch.object(svc, "sync_plans"):
+            svc.AUTO_DONE_SCRIPT = tmp_plan_dir / "auto-done.ps1"
+            (svc.AUTO_DONE_SCRIPT).write_text("# fake", encoding="utf-8")
+
+            result = await svc.run_done(str(plan))
+
+        assert "success" in result
+        assert "message" in result
+        assert "output" in result
+
+    @pytest.mark.asyncio
+    async def test_no_sync_on_failure(self, svc, tmp_plan_dir):
+        """Cross-check: 실패 시 sync_plans 호출 안 됨"""
+        plan = tmp_plan_dir / "nosync_test.md"
+        plan.write_text("content", encoding="utf-8")
+
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"fail", None))
+        mock_proc.returncode = 1
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
+             patch.object(svc, "sync_plans") as mock_sync:
+            svc.AUTO_DONE_SCRIPT = tmp_plan_dir / "auto-done.ps1"
+            (svc.AUTO_DONE_SCRIPT).write_text("# fake", encoding="utf-8")
+
+            await svc.run_done(str(plan))
+
+        mock_sync.assert_not_called()

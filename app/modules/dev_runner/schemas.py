@@ -148,6 +148,13 @@ class DuplicateTaskResponse(BaseModel):
     tasks: List[TaskResponse]
 
 
+class DoneResponse(BaseModel):
+    """완료 처리 응답 스키마"""
+    success: bool
+    message: str
+    output: Optional[str] = None
+
+
 class LogResponse(BaseModel):
     """로그 응답 스키마"""
     lines: List[str]
@@ -179,4 +186,5 @@ __all__ = [
     'PlanItemResponse',
     'PlanPhaseResponse',
     'PlanDetailResponse',
+    'DoneResponse',
 ]

@@ -8,7 +8,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.modules.dev_runner.schemas import PlanFileResponse, PlanProgressResponse, PlanDetailResponse, RegisteredPathResponse
+from app.modules.dev_runner.schemas import PlanFileResponse, PlanProgressResponse, PlanDetailResponse, RegisteredPathResponse, DoneResponse
 from app.modules.dev_runner.services.plan_service import plan_service
 
 logger = logging.getLogger(__name__)
@@ -131,6 +131,25 @@ async def unignore_plan(encoded_path: str):
     if not removed:
         raise HTTPException(status_code=404, detail="Plan not in ignore list")
     return {"success": True}
+
+
+@router.post("/plans/{encoded_path}/done", response_model=DoneResponse)
+async def run_plan_done(encoded_path: str):
+    """plan 완료 처리 (아카이브, TODO→DONE, 커밋)"""
+    try:
+        decoded_path = _decode_path(encoded_path)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid encoded path: {str(e)}")
+
+    if not plan_service.validate_path(decoded_path):
+        raise HTTPException(status_code=403, detail="Path not allowed")
+
+    path = Path(decoded_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Plan file not found")
+
+    result = await plan_service.run_done(decoded_path)
+    return DoneResponse(**result)
 
 
 @router.post("/plans/sync")

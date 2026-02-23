@@ -3,6 +3,34 @@
 	import type { DevRunnerPlanFileResponse, DevRunnerPlanDetailResponse, DevRunnerRegisteredPathResponse } from '$lib/api';
 	import { encodePathToBase64 } from '$lib/utils/encoding';
 
+	let doneLoadingPath = $state<string | null>(null);
+	let doneMessage = $state<{ path: string; success: boolean; text: string } | null>(null);
+
+	async function handleDone(e: Event, plan: DevRunnerPlanFileResponse) {
+		e.stopPropagation();
+		if (!confirm('완료 처리를 실행하시겠습니까?\n아카이브 이동, TODO→DONE, 커밋이 수행됩니다.')) return;
+		doneLoadingPath = plan.path;
+		doneMessage = null;
+		try {
+			const result = await devRunnerPlanApi.done(encodePathToBase64(plan.path));
+			doneMessage = { path: plan.path, success: result.success, text: result.message };
+			if (result.success) {
+				onPlansChange?.();
+				setTimeout(() => { doneMessage = null; }, 5000);
+			}
+		} catch (err) {
+			doneMessage = { path: plan.path, success: false, text: err instanceof Error ? err.message : '완료 처리 실패' };
+		} finally {
+			doneLoadingPath = null;
+		}
+	}
+
+	function canDone(plan: DevRunnerPlanFileResponse): boolean {
+		if (plan.path.includes('archive')) return false;
+		return (plan.progress.total > 0 && plan.progress.done === plan.progress.total)
+			|| plan.status === '구현완료';
+	}
+
 	interface Props {
 		plans: DevRunnerPlanFileResponse[];
 		onPlansChange?: () => void;
@@ -239,6 +267,12 @@
 		</div>
 	{/if}
 
+	{#if doneMessage}
+		<div class="text-xs rounded p-2 {doneMessage.success ? 'text-green-700 bg-green-50' : 'text-red-600 bg-red-50'}">
+			{doneMessage.text}
+		</div>
+	{/if}
+
 	{#if ignoredLoading}
 		<div class="text-gray-400 text-sm text-center py-4">로딩 중...</div>
 	{:else if displayPlans.length === 0}
@@ -271,6 +305,21 @@
 						<span class="text-[10px] font-mono shrink-0 {isRunning ? 'text-green-600' : 'text-gray-400'}">{plan.progress.done}/{plan.progress.total}</span>
 
 						<!-- Eye/EyeOff toggle -->
+						{#if canDone(plan)}
+							<button
+								class="shrink-0 p-1 rounded hover:bg-green-100 disabled:opacity-50"
+								onclick={(e) => handleDone(e, plan)}
+								disabled={doneLoadingPath === plan.path}
+								title="완료 처리 (아카이브, TODO→DONE, 커밋)"
+							>
+								{#if doneLoadingPath === plan.path}
+									<svg class="w-3.5 h-3.5 animate-spin text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-dasharray="31.4 31.4" stroke-dashoffset="10"/></svg>
+								{:else}
+									<svg class="w-3.5 h-3.5 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+								{/if}
+							</button>
+						{/if}
+
 						{#if showIgnored}
 							<button
 								class="shrink-0 p-1 rounded hover:bg-gray-200"
