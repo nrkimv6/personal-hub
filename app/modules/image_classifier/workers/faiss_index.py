@@ -266,7 +266,7 @@ class FAISSIndexManager:
                 continue
 
             result_file_id = self.file_ids[idx]
-            similarity = float(dist)
+            similarity = min(1.0, float(dist))  # 부동소수점 오차 클립
 
             if similarity >= threshold:
                 results.append((result_file_id, similarity))

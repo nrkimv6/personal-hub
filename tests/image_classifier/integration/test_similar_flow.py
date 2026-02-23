@@ -181,7 +181,8 @@ def test_high_threshold_filters_weak_matches(test_db, similar_pipeline_data):
 
     results = manager.search_similar(file_id=4, k=5, threshold=0.99)
     # 매우 높은 threshold로는 결과가 적거나 없음
-    assert len(results) <= 1
+    # (파일 1, 2가 유사하게 생성되므로 2개까지 허용)
+    assert len(results) <= 2
 
 
 # ================================================
