@@ -126,6 +126,9 @@ class ExecutorService:
             extra_dirs = plan_service.get_extra_plan_dirs()
             if extra_dirs:
                 command["extra_plan_dirs"] = ",".join(extra_dirs)
+            ignored_paths = plan_service.get_ignored_plan_paths()
+            if ignored_paths:
+                command["ignored_plans"] = ",".join(ignored_paths)
 
         try:
             # Redis LPUSH - 명령 전송

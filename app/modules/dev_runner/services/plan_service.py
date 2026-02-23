@@ -439,6 +439,10 @@ class PlanService:
 
     # ========== 외부 경로 추출 ==========
 
+    def get_ignored_plan_paths(self) -> List[str]:
+        """무시목록(ignored_plans.json)에 저장된 절대경로 리스트 반환"""
+        return list(self._ignored_plans)
+
     def get_extra_plan_dirs(self) -> List[str]:
         """registered_paths 중 WTOOLS_BASE_DIR 하위가 아닌 폴더 경로만 반환"""
         wtools_prefix = str(config.WTOOLS_BASE_DIR.resolve())
