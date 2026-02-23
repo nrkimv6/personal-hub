@@ -21,9 +21,9 @@ from app.modules.claude_worker.services.llm_service import QUEUE_PRIORITY, LLMSe
 
 @pytest.fixture(scope="module")
 def engine():
-    """In-memory SQLite 엔진 (모듈 범위)."""
+    """In-memory SQLite 엔진 (모듈 범위) — LLMRequest 테이블만 생성."""
     e = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(bind=e)
+    LLMRequest.__table__.create(bind=e, checkfirst=True)
     return e
 
 
@@ -67,19 +67,22 @@ def make_request(session, queue_name="utility", status="pending", seconds_ago=0,
 class TestRight:
     """Right — 핵심 동작이 정확히 동작하는가."""
 
-    def test_enqueue_system_saves_queue_name(self, session):
-        """system 큐로 enqueue 시 DB에 queue_name='system' 저장."""
-        req = make_request(session, queue_name="system", caller_id="sys-r-1")
+    def test_enqueue_system_saves_queue_name(self, svc, session):
+        """system 큐로 enqueue() 호출 시 DB에 queue_name='system' 저장."""
+        req = svc.enqueue("test", "sys-r-1", "prompt", queue_name="system")
+        session.refresh(req)
         assert req.queue_name == "system"
 
-    def test_enqueue_default_is_utility(self, session):
-        """queue_name 생략(utility) 기본값 저장 (하위호환)."""
-        req = make_request(session, queue_name="utility", caller_id="util-r-1")
+    def test_enqueue_default_is_utility(self, svc, session):
+        """queue_name 생략 시 기본값 'utility' 저장 (하위호환)."""
+        req = svc.enqueue("test", "util-r-1", "prompt")
+        session.refresh(req)
         assert req.queue_name == "utility"
 
-    def test_enqueue_explicit_utility(self, session):
+    def test_enqueue_explicit_utility(self, svc, session):
         """utility를 명시적으로 지정해도 동일하게 저장."""
-        req = make_request(session, queue_name="utility", caller_id="util-r-2")
+        req = svc.enqueue("test", "util-r-2", "prompt", queue_name="utility")
+        session.refresh(req)
         assert req.queue_name == "utility"
 
 
@@ -194,7 +197,7 @@ class TestPerformance:
         """1000건 pending 요청이 있을 때 get_next_request() < 100ms."""
         # 독립 in-memory engine으로 격리 (다른 테스트에 영향 없음)
         perf_engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
-        Base.metadata.create_all(bind=perf_engine)
+        LLMRequest.__table__.create(bind=perf_engine, checkfirst=True)
         Session = sessionmaker(bind=perf_engine)
         perf_session = Session()
 
@@ -258,26 +261,93 @@ class TestCorrectScheduling:
         assert result is not None
         assert result.id == older.id
 
-    def test_duplicate_check_within_same_queue(self, session, svc):
-        """같은 (caller_type, caller_id, queue_name) pending 존재 시 기존 반환.
-        LLMService.enqueue()의 중복 체크 로직 검증."""
-        first = make_request(session, queue_name="system", caller_id="dup-1")
-        # 같은 caller_id, queue_name으로 다시 요청 → 기존 반환
-        existing = (
-            session.query(LLMRequest)
-            .filter(
-                LLMRequest.caller_type == "test",
-                LLMRequest.caller_id == "dup-1",
-                LLMRequest.queue_name == "system",
-                LLMRequest.status == "pending",
-            )
-            .first()
-        )
-        assert existing is not None
-        assert existing.id == first.id
+    def test_duplicate_check_within_same_queue(self, svc, session):
+        """같은 (caller_type, caller_id, queue_name) pending 존재 시 enqueue()가 기존 반환."""
+        first = svc.enqueue("test", "dup-1", "prompt", queue_name="system")
+        second = svc.enqueue("test", "dup-1", "prompt", queue_name="system")
+        assert second.id == first.id
 
-    def test_different_queue_same_caller_allowed(self, session):
+    def test_different_queue_same_caller_allowed(self, svc, session):
         """같은 caller_id라도 다른 queue_name이면 별도 요청 허용."""
-        utility_req = make_request(session, queue_name="utility", caller_id="cross-q-1")
-        system_req = make_request(session, queue_name="system", caller_id="cross-q-1")
+        utility_req = svc.enqueue("test", "cross-q-1", "prompt", queue_name="utility")
+        system_req = svc.enqueue("test", "cross-q-1", "prompt", queue_name="system")
         assert utility_req.id != system_req.id
+
+
+# ========== CORRECT: 누락 보충 ==========
+
+class TestCorrectReference:
+    """Reference — get_next_request()가 non-pending 상태를 올바르게 제외하는가."""
+
+    def test_skips_processing_status(self, svc, session):
+        """processing 상태 요청은 get_next_request()에서 제외."""
+        make_request(session, queue_name="system", status="processing", caller_id="ref-proc-1")
+        result = svc.get_next_request()
+        assert result is None
+
+    def test_skips_completed_status(self, svc, session):
+        """completed 상태 요청은 get_next_request()에서 제외."""
+        make_request(session, queue_name="system", status="completed", caller_id="ref-done-1")
+        result = svc.get_next_request()
+        assert result is None
+
+    def test_skips_failed_status(self, svc, session):
+        """failed 상태 요청은 get_next_request()에서 제외."""
+        make_request(session, queue_name="utility", status="failed", caller_id="ref-fail-1")
+        result = svc.get_next_request()
+        assert result is None
+
+
+class TestCorrectExistence:
+    """Existence — soft-deleted 요청이 올바르게 제외되는가."""
+
+    def test_deleted_request_excluded_from_get_next(self, svc, session):
+        """deleted_at이 설정된 pending 요청은 get_next_request()에서 제외."""
+        req = make_request(session, queue_name="system", caller_id="exist-del-1")
+        req.deleted_at = datetime.now()
+        session.flush()
+
+        result = svc.get_next_request()
+        assert result is None
+
+    def test_deleted_request_excluded_from_queue_stats(self, svc, session):
+        """deleted_at이 설정된 요청은 get_queue_stats()에서 제외."""
+        req = make_request(session, queue_name="system", caller_id="exist-del-2")
+        req.deleted_at = datetime.now()
+        session.flush()
+
+        stats = svc.get_queue_stats()
+        assert stats["system"]["pending"] == 0
+
+
+class TestCorrectCardinality:
+    """Cardinality — 큐별 0/1/N건 조합에서 올바른 동작."""
+
+    def test_system_1_utility_0(self, svc, session):
+        """system 1건, utility 0건 → system 반환."""
+        make_request(session, queue_name="system", caller_id="card-s-1")
+        result = svc.get_next_request()
+        assert result is not None
+        assert result.queue_name == "system"
+
+    def test_system_0_utility_1(self, svc, session):
+        """system 0건, utility 1건 → utility 반환."""
+        make_request(session, queue_name="utility", caller_id="card-u-1")
+        result = svc.get_next_request()
+        assert result is not None
+        assert result.queue_name == "utility"
+
+    def test_system_0_utility_0(self, svc, session):
+        """양쪽 모두 0건 → None."""
+        result = svc.get_next_request()
+        assert result is None
+
+    def test_system_n_utility_n(self, svc, session):
+        """양쪽 N건 → system 우선, 그 중 FIFO."""
+        for i in range(3):
+            make_request(session, queue_name="utility", seconds_ago=300 - i * 10, caller_id=f"card-un-{i}")
+        oldest_sys = make_request(session, queue_name="system", seconds_ago=100, caller_id="card-sn-0")
+        make_request(session, queue_name="system", seconds_ago=10, caller_id="card-sn-1")
+
+        result = svc.get_next_request()
+        assert result.id == oldest_sys.id
