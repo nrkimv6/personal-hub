@@ -18,6 +18,9 @@ logger = logging.getLogger("claude_worker.llm_service")
 HEARTBEAT_WARNING_THRESHOLD = 120  # 2분: warning 상태
 HEARTBEAT_UNHEALTHY_THRESHOLD = 600  # 10분: unhealthy 상태
 
+# 큐 우선순위 — 앞에 있을수록 먼저 처리
+QUEUE_PRIORITY = ["system", "utility"]
+
 
 class LLMService:
     """범용 LLM 서비스.
@@ -40,6 +43,7 @@ class LLMService:
         provider: str = "claude",
         model: str = "",
         cli_options: dict = None,
+        queue_name: str = "utility",
     ) -> LLMRequest:
         """요청을 큐에 추가 (non-blocking).
 
@@ -52,16 +56,18 @@ class LLMService:
             provider: LLM Provider ('claude' 또는 'gemini')
             model: 모델명 (빈 문자열이면 기본 모델 사용)
             cli_options: CLI 옵션 dict (output_format, json_schema, allowed_tools, use_prompt_flag 등)
+            queue_name: 큐 이름 ('utility' 또는 'system', 기본값: 'utility')
 
         Returns:
             생성된 LLMRequest
         """
-        # 중복 pending 요청 확인
+        # 중복 pending 요청 확인 (같은 queue_name 내에서만)
         existing = (
             self.db.query(LLMRequest)
             .filter(
                 LLMRequest.caller_type == caller_type,
                 LLMRequest.caller_id == caller_id,
+                LLMRequest.queue_name == queue_name,
                 LLMRequest.status == "pending",
                 LLMRequest.deleted_at.is_(None),
             )
@@ -69,7 +75,7 @@ class LLMService:
         )
 
         if existing:
-            logger.debug(f"이미 pending 요청 존재: {caller_type}:{caller_id}")
+            logger.debug(f"이미 pending 요청 존재: {caller_type}:{caller_id} (queue={queue_name})")
             return existing
 
         request = LLMRequest(
@@ -82,12 +88,13 @@ class LLMService:
             provider=provider,
             model=model,
             cli_options=json.dumps(cli_options, ensure_ascii=False) if cli_options else None,
+            queue_name=queue_name,
         )
         self.db.add(request)
         self.db.commit()
         self.db.refresh(request)
 
-        logger.info(f"LLM 요청 생성: id={request.id}, caller={caller_type}:{caller_id}, by={requested_by}")
+        logger.info(f"LLM 요청 생성: id={request.id}, caller={caller_type}:{caller_id}, queue={queue_name}, by={requested_by}")
         return request
 
     def get_result(
@@ -115,7 +122,7 @@ class LLMService:
         )
 
     def get_pending_request(self) -> Optional[LLMRequest]:
-        """가장 오래된 pending 요청 조회 (워커용).
+        """가장 오래된 pending 요청 조회 (워커용, 레거시 — get_next_request() 사용 권장).
 
         Returns:
             pending 요청 또는 None
@@ -129,6 +136,62 @@ class LLMService:
             .order_by(LLMRequest.requested_at.asc())
             .first()
         )
+
+    def get_next_request(self) -> Optional[LLMRequest]:
+        """우선순위 기반으로 다음 처리할 요청 조회 (워커용).
+
+        QUEUE_PRIORITY 순서로 각 큐를 확인하여 가장 오래된 pending 요청 반환.
+        현재 우선순위: system → utility
+
+        Returns:
+            pending 요청 또는 None
+        """
+        for queue in QUEUE_PRIORITY:
+            request = (
+                self.db.query(LLMRequest)
+                .filter(
+                    LLMRequest.queue_name == queue,
+                    LLMRequest.status == "pending",
+                    LLMRequest.deleted_at.is_(None),
+                )
+                .order_by(LLMRequest.requested_at.asc())
+                .first()
+            )
+            if request:
+                return request
+        return None
+
+    def get_queue_stats(self) -> dict:
+        """큐별 상태 카운트 통계.
+
+        Returns:
+            {"system": {"pending": N, "processing": N, ...}, "utility": {...}}
+        """
+        rows = (
+            self.db.query(
+                LLMRequest.queue_name,
+                LLMRequest.status,
+                func.count(LLMRequest.id).label("cnt"),
+            )
+            .filter(LLMRequest.deleted_at.is_(None))
+            .group_by(LLMRequest.queue_name, LLMRequest.status)
+            .all()
+        )
+
+        # 모든 큐에 대해 기본값 0으로 초기화
+        result: dict = {}
+        for queue in QUEUE_PRIORITY:
+            result[queue] = {"pending": 0, "processing": 0, "completed": 0, "failed": 0, "cancelled": 0}
+
+        for row in rows:
+            queue = row.queue_name or "utility"
+            if queue not in result:
+                result[queue] = {"pending": 0, "processing": 0, "completed": 0, "failed": 0, "cancelled": 0}
+            status = row.status
+            if status in result[queue]:
+                result[queue][status] = row.cnt
+
+        return result
 
     def get_pending_count(self) -> int:
         """Pending 요청 수 조회."""
@@ -779,6 +842,7 @@ class LLMService:
         include_deleted: bool = False,
         page: int = 1,
         page_size: int = 20,
+        queue_name: str = None,
     ) -> dict:
         """요청 목록 조회 (페이지네이션).
 
@@ -790,6 +854,7 @@ class LLMService:
             include_deleted: 삭제된 요청 포함 여부
             page: 페이지 번호 (1부터 시작)
             page_size: 페이지 크기
+            queue_name: 큐 이름 필터 ('utility' 또는 'system')
 
         Returns:
             {"items": [...], "total": n, "page": n, "page_size": n, "pages": n}
@@ -809,6 +874,8 @@ class LLMService:
             query = query.filter(LLMRequest.caller_type == caller_type)
         if requested_by:
             query = query.filter(LLMRequest.requested_by == requested_by)
+        if queue_name:
+            query = query.filter(LLMRequest.queue_name == queue_name)
 
         total = query.count()
         pages = (total + page_size - 1) // page_size

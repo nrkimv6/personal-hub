@@ -53,6 +53,9 @@ class LLMRequest(Base):
     # CLI 옵션 (JSON) — caller별 CLI 파라미터 유연 전달
     cli_options = Column(Text)  # JSON: output_format, json_schema, allowed_tools, use_prompt_flag
 
+    # 큐 구분 — 'utility'(기존 자동화 기본값) / 'system'(시스템/개발 우선순위 높음)
+    queue_name = Column(String(30), default="utility", nullable=False, index=True)
+
     # Soft delete
     deleted_at = Column(DateTime)
 
