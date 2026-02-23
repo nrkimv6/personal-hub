@@ -185,12 +185,7 @@
 	}
 
 	function handleScroll() {
-		if (!logContainer) return;
-		const { scrollTop, scrollHeight, clientHeight } = logContainer;
-		const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
-		if (!isAtBottom && autoScroll) {
-			autoScroll = false;
-		}
+		// 스크롤 위치는 추적하지만, autoScroll 해제는 Pause 버튼으로만
 	}
 
 	function getReconnectDelay() {
@@ -279,6 +274,8 @@
 	onMount(async () => {
 		await runDiagnostics();
 		await loadRecent();
+		// 초기 로드 후 스크롤을 맨 아래로 이동
+		requestAnimationFrame(() => scrollToBottom());
 		connectSSE();
 	});
 
@@ -392,15 +389,6 @@
 					Resume
 				{/if}
 			</button>
-			{#if !autoScroll}
-				<button
-					class="h-6 px-2 text-[10px] text-gray-500 hover:bg-gray-700 rounded transition-colors inline-flex items-center gap-1"
-					onclick={scrollToBottom}
-				>
-					<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/><line x1="5" y1="19" x2="19" y2="19"/></svg>
-					Bottom
-				</button>
-			{/if}
 		</div>
 	</div>
 
