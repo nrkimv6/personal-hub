@@ -218,7 +218,14 @@
 		return map[status] || 'bg-gray-100 text-gray-600';
 	}
 
-	let displayPlans = $derived(showIgnored ? ignoredPlans : (plans ?? []));
+	let displayPlans = $derived.by(() => {
+		const list = showIgnored ? ignoredPlans : (plans ?? []);
+		return [...list].sort((a, b) => {
+			const aDone = a.status === '구현완료' ? 1 : 0;
+			const bDone = b.status === '구현완료' ? 1 : 0;
+			return aDone - bDone;
+		});
+	});
 	let hasDoneablePlans = $derived((plans ?? []).some(p => canDone(p)));
 </script>
 
@@ -343,10 +350,11 @@
 				{#each displayPlans as plan}
 					{@const isRunning = runningPlanFile === plan.path}
 					{@const isLastRun = !isRunning && lastPlanFile === plan.path}
+					{@const isDone = plan.status === '구현완료'}
 					<button
 						onclick={() => handlePlanSelect(plan)}
 						class="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors w-full
-							{isRunning ? 'border border-green-300 bg-green-50' : isLastRun ? 'bg-gray-50 opacity-60' : 'hover:bg-gray-50'}"
+							{isRunning ? 'border border-green-300 bg-green-50' : isLastRun ? 'bg-gray-50 opacity-60' : isDone ? 'hover:bg-gray-50 opacity-50' : 'hover:bg-gray-50'}"
 					>
 						<!-- Running indicator dot -->
 						{#if isRunning}
@@ -358,9 +366,11 @@
 						{/if}
 
 						<!-- Compact 1-line: filename + status badge + done/total -->
-						<span class="text-xs font-medium truncate flex-1 min-w-0 {isRunning ? 'text-green-800' : isLastRun ? 'text-gray-400 line-through' : ''}">{plan.filename}</span>
+						<span class="text-xs font-medium truncate flex-1 min-w-0 {isRunning ? 'text-green-800' : isLastRun ? 'text-gray-400 line-through' : isDone ? 'text-gray-400' : ''}">{plan.filename}</span>
 
-						{#if showIgnored && plan.status === '보류'}
+						{#if plan.status === '구현완료'}
+							<span class="text-[10px] px-1.5 py-0 h-4 inline-flex items-center rounded {statusBadge('구현완료')}">구현완료</span>
+						{:else if showIgnored && plan.status === '보류'}
 							<span class="text-[10px] px-1.5 py-0 h-4 inline-flex items-center rounded {statusBadge('보류')}">보류</span>
 						{/if}
 

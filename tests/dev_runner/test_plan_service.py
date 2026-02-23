@@ -52,11 +52,11 @@ class TestIsIgnoredPlan:
         progress = PlanProgressResponse(done=0, total=1, percent=0)
         assert svc._is_ignored_plan(path, "완료", progress) is True
 
-    def test_status_impl_complete_is_ignored(self, svc, tmp_path):
-        """상태가 '구현완료'인 plan → True"""
+    def test_status_impl_complete_is_not_ignored(self, svc, tmp_path):
+        """상태가 '구현완료'인 plan → False (grayout 표시, 무시 아님)"""
         path = tmp_path / "test.md"
         progress = PlanProgressResponse(done=0, total=1, percent=0)
-        assert svc._is_ignored_plan(path, "구현완료", progress) is True
+        assert svc._is_ignored_plan(path, "구현완료", progress) is False
 
     def test_all_checkboxes_done_is_ignored(self, svc, tmp_path):
         """100% 체크박스 완료 (done == total > 0) → True"""

@@ -23,10 +23,13 @@
 	}
 </script>
 
-<div class="bg-white rounded-lg border p-4">
+<div class="bg-white rounded-lg border p-4 {detail.status === '구현완료' ? 'opacity-50' : ''}">
 	<div class="flex items-center justify-between mb-3">
 		<div class="flex items-center gap-2 min-w-0">
 			<h3 class="font-semibold text-sm truncate" title={detail.path}>{detail.filename}</h3>
+			{#if detail.status === '구현완료'}
+				<span class="text-[10px] px-1.5 py-0 h-4 inline-flex items-center rounded bg-green-100 text-green-700 shrink-0">구현완료</span>
+			{/if}
 			<span class="text-xs text-gray-500 shrink-0">
 				{detail.progress.done}/{detail.progress.total} ({detail.progress.percent}%)
 			</span>
