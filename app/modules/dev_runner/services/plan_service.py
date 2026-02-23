@@ -547,8 +547,29 @@ class PlanService:
     # ========== 외부 경로 추출 ==========
 
     def get_ignored_plan_paths(self) -> List[str]:
-        """무시목록(ignored_plans.json)에 저장된 절대경로 리스트 반환"""
-        return list(self._ignored_plans)
+        """UI와 동일한 기준으로 무시 대상 plan 절대경로 리스트 반환
+
+        수동 목록(ignored_plans.json) + 상태 완료/보류 + 체크박스 전체 완료
+        """
+        ignored = set(self._ignored_plans)
+
+        for reg_path in self._registered_paths:
+            p = Path(reg_path)
+            if not p.exists():
+                continue
+            files = p.glob("*.md") if p.is_dir() else [p]
+            for plan_file in files:
+                if not plan_file.is_file():
+                    continue
+                resolved = str(plan_file.resolve())
+                if resolved in ignored:
+                    continue
+                status = self.get_plan_status(plan_file)
+                progress = self.get_plan_progress(plan_file)
+                if self._is_ignored_plan(plan_file, status, progress):
+                    ignored.add(resolved)
+
+        return list(ignored)
 
     def get_extra_plan_dirs(self) -> List[str]:
         """registered_paths 중 WTOOLS_BASE_DIR 하위가 아닌 폴더 경로만 반환"""
