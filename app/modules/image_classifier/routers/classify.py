@@ -612,6 +612,18 @@ async def run_classification(
                                 classification_status["processed"] += 1
                                 conf_pct = round(confidence * 100)
                                 pipeline_logs.add("classify", f"[OK] {filename} → {category_path} ({conf_pct}%)")
+
+                                # API 사용량 기록
+                                try:
+                                    from ..workers.cost_tracker import CostTracker
+                                    cost_db = SessionLocal()
+                                    try:
+                                        tracker = CostTracker(cost_db)
+                                        tracker.record_usage(model=model, image_count=1)
+                                    finally:
+                                        cost_db.close()
+                                except Exception as cost_err:
+                                    logger.warning(f"Cost tracking failed for file {file_id}: {cost_err}")
                             else:
                                 logger.warning(f"Category not found: {category_path} for {file_path}")
                                 classification_status["failed"] += 1

@@ -5,9 +5,12 @@
 - GET /api/ic/files: 파일 리스트 조회
 """
 
+import logging
 from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
+
+logger = logging.getLogger(__name__)
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -16,6 +19,7 @@ from sqlalchemy import text
 from ..database import get_db
 from ..config import settings
 from ..workers.thumbnail import get_thumbnail_path
+from ..workers.feedback import FeedbackLearner
 
 router = APIRouter(prefix="/files", tags=["Files"])
 
@@ -303,17 +307,37 @@ async def bulk_classify_files(
     if not request.file_ids:
         raise HTTPException(status_code=400, detail="파일 ID가 필요합니다.")
 
+    # 카테고리 변경 전 원래 카테고리 조회 (feedback 기록용)
+    ids_tuple = tuple(request.file_ids)
+    original_rows = db.execute(
+        text("SELECT id, final_category_id FROM file_classifications WHERE id IN :ids"),
+        {"ids": ids_tuple}
+    ).fetchall()
+    original_map = {row.id: row.final_category_id for row in original_rows}
+
     db.execute(
         text("""
             UPDATE file_classifications
             SET final_category_id = :cat_id, status = 'approved'
             WHERE id IN :ids
         """),
-        {"cat_id": request.category_id, "ids": tuple(request.file_ids)}
+        {"cat_id": request.category_id, "ids": ids_tuple}
     )
     db.commit()
 
-    return {"status": "ok", "classified_count": len(request.file_ids)}
+    # 카테고리가 실제로 변경된 파일에 대해 feedback 기록
+    learner = FeedbackLearner(db)
+    feedback_count = 0
+    for file_id in request.file_ids:
+        original_cat = original_map.get(file_id)
+        if original_cat is not None and original_cat != request.category_id:
+            try:
+                learner.record_correction(file_id, original_cat, request.category_id)
+                feedback_count += 1
+            except Exception as e:
+                logger.warning(f"Failed to record feedback for file {file_id}: {e}")
+
+    return {"status": "ok", "classified_count": len(request.file_ids), "feedback_recorded": feedback_count}
 
 
 class BulkDeleteRequest(BaseModel):

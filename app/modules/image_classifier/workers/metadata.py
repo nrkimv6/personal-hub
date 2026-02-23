@@ -50,6 +50,32 @@ class MetadataExtractor:
 
     def __init__(self, db: Session):
         self.db = db
+        self._db_patterns: Optional[list] = None  # 캐시 (요청 당 1회 로드)
+
+    def _load_db_patterns(self) -> list:
+        """
+        filename_patterns 테이블에서 패턴 목록 로드 (우선순위 내림차순)
+
+        Returns:
+            [(regex_pattern, date_format_or_None), ...]
+        """
+        if self._db_patterns is not None:
+            return self._db_patterns
+
+        try:
+            rows = self.db.execute(
+                text("""
+                    SELECT pattern, date_format
+                    FROM filename_patterns
+                    WHERE is_active = 1
+                    ORDER BY priority DESC, id
+                """)
+            ).fetchall()
+            self._db_patterns = [(row.pattern, row.date_format) for row in rows]
+        except Exception:
+            self._db_patterns = []
+
+        return self._db_patterns
 
     def extract_and_save(self, file_id: int, file_path: Path):
         """
@@ -97,10 +123,17 @@ class MetadataExtractor:
         """
         파일명에서 날짜 추출
 
+        DB의 filename_patterns를 우선순위 순으로 먼저 시도하고,
+        매칭 실패 시 하드코딩된 FILENAME_DATE_PATTERNS로 fallback.
+
         Returns:
             (추출된 datetime, 매칭된 패턴) 또는 (None, None)
         """
-        for pattern, date_format in FILENAME_DATE_PATTERNS:
+        # DB 패턴 우선 시도
+        db_patterns = self._load_db_patterns()
+        all_patterns = db_patterns + FILENAME_DATE_PATTERNS
+
+        for pattern, date_format in all_patterns:
             match = re.search(pattern, filename, re.IGNORECASE)
             if match:
                 if date_format is None:
