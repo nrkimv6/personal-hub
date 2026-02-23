@@ -397,7 +397,7 @@
         </div>
         <p class="text-foreground font-medium text-sm">No notes yet</p>
         <p class="text-muted-foreground text-xs">
-          {selectedTag ? `"${selectedTag}" 태그에 메모가 없습니다.` : '새 메모를 추가해보세요.'}
+          {selectedTags.length > 0 ? `선택한 태그에 해당하는 메모가 없습니다.` : '새 메모를 추가해보세요.'}
         </p>
       </div>
     {:else}
