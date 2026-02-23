@@ -458,6 +458,10 @@ def main():
                             r.set(STATE_KEY + ":status", "running")
                             r.set(STATE_KEY + ":pid", _current_process.pid)
                             logger.info(f"heartbeat: Redis 상태 복원 (PID: {_current_process.pid})")
+                    elif _current_process and _current_process.poll() is not None:
+                        # 프로세스가 종료됐는데 전역변수가 남아있는 경우 → 즉시 cleanup
+                        logger.warning(f"heartbeat: 프로세스 종료 감지 (exit code: {_current_process.returncode}), 상태 정리")
+                        _cleanup_process_state(r)
                     last_heartbeat = now
 
                 result = r.brpop(COMMANDS_KEY, timeout=HEARTBEAT_INTERVAL)

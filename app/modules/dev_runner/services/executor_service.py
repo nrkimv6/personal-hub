@@ -388,6 +388,17 @@ class ExecutorService:
                 plan_file = self.redis_client.get(STATE_KEY + ":plan_file")
                 start_time_str = self.redis_client.get(STATE_KEY + ":start_time")
 
+                # PID 생존 확인 (프로세스가 에러 종료 후 상태가 stale로 남는 경우 대응)
+                if pid_str:
+                    try:
+                        import psutil
+                        if not psutil.pid_exists(int(pid_str)):
+                            logger.warning(f"[dev-runner] PID {pid_str} 종료됨 → stale 상태 자동 정리")
+                            self._force_cleanup_state()
+                            return RunStatusResponse(running=False, listener_alive=listener_alive, redis_connected=True, pid=None, plan_file=None)
+                    except (ValueError, ImportError):
+                        pass
+
                 if not listener_alive:
                     logger.warning("[dev-runner] heartbeat 없음 → stale 상태 자동 정리")
                     self._force_cleanup_state()
