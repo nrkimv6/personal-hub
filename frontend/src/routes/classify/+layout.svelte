@@ -31,7 +31,7 @@
 
 <div class="flex min-h-screen flex-col bg-background text-foreground">
 	<!-- Top Navigation Bar -->
-	<header class="sticky top-0 z-50 border-b border-border bg-card/80 backdrop-blur-xl">
+	<header class="sticky top-0 z-30 border-b border-border bg-card/80 backdrop-blur-xl">
 		<div class="flex items-center justify-between px-4 py-2 lg:px-6">
 			<div class="flex items-center gap-3">
 				<div class="flex size-8 items-center justify-center rounded-lg bg-primary">
