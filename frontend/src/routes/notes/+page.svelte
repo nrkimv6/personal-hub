@@ -12,6 +12,7 @@
 
   let activeTab: Tab = 'notes';
   let showCreateModal = false;
+  let noteListRef: NoteList;
 
   $: {
     const tabParam = $page.url.searchParams.get('tab') as Tab | null;
@@ -30,6 +31,7 @@
 
   function handleNoteCreated() {
     showCreateModal = false;
+    noteListRef?.refresh();
   }
 
   function handleGlobalKeydown(e: KeyboardEvent) {
@@ -107,7 +109,7 @@
   <!-- 탭 콘텐츠 -->
   <div class="flex-1 overflow-hidden">
     {#if activeTab === 'notes'}
-      <NoteList />
+      <NoteList bind:this={noteListRef} />
     {:else if activeTab === 'archive'}
       <NoteArchiveList />
     {:else if activeTab === 'tags'}
