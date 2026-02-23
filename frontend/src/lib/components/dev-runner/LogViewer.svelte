@@ -311,7 +311,7 @@
 	});
 </script>
 
-<div class="flex flex-col h-full">
+<div class="flex flex-col h-full min-h-0">
 	<!-- Toolbar -->
 	<div class="flex items-center justify-between px-3 py-2 border-b border-gray-700 shrink-0 bg-gray-900">
 		<div class="flex items-center gap-2">
@@ -424,7 +424,7 @@
 	<div
 		bind:this={logContainer}
 		onscroll={handleScroll}
-		class="flex-1 overflow-y-auto font-mono text-sm p-3 bg-gray-950 text-gray-300"
+		class="flex-1 min-h-0 overflow-y-auto font-mono text-sm p-3 bg-gray-950 text-gray-300"
 	>
 		{#if lines.length === 0}
 			<span class="text-gray-600">로그가 없습니다</span>

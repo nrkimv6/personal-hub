@@ -276,7 +276,7 @@
 			</div>
 
 			<!-- Log Viewer + Task History (2-grid on desktop, stack on mobile) -->
-			<div class="flex-1 min-h-0 flex flex-col md:grid md:grid-cols-2 md:gap-0">
+			<div class="flex-1 min-h-0 flex flex-col md:grid md:grid-cols-2 md:gap-0 overflow-hidden">
 				<!-- Log Viewer -->
 				<div class="flex-1 min-h-[300px] md:min-h-0 overflow-hidden">
 					<LogViewer planFile={effectivePlanFile ?? undefined} currentPlanName={runStatus?.current_plan_name ?? undefined} />
