@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 CRAWL_REQUEST_QUEUE = "crawl:requests"
 GOOGLE_SEARCH_QUEUE = "google:searches"
 LLM_REQUEST_QUEUE = "llm:requests"
+GIT_REPOS_TASK_QUEUE = "git_repos:tasks"
 
 
 class RedisQueue:

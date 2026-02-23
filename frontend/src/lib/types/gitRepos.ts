@@ -74,3 +74,15 @@ export interface DiscoverResult {
   paths: string[];
   count: number;
 }
+
+export interface GitTaskResponse {
+  task_id: string;
+  status: 'pending' | 'completed' | 'failed';
+}
+
+export interface GitTaskResult {
+  task_id: string;
+  status: string;
+  result?: OperationResult;
+  completed_at?: string;
+}
