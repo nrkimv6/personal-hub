@@ -152,6 +152,7 @@ def get_notes(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     starred: Optional[bool] = Query(None),
+    linked_menu_id: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     """메모 목록 조회 (태그/검색/날짜 범위 필터, 정렬, 페이지네이션)."""
@@ -168,6 +169,7 @@ def get_notes(
         page=page,
         page_size=page_size,
         starred=starred,
+        linked_menu_id=linked_menu_id,
     )
 
 
@@ -180,6 +182,8 @@ def create_note(data: NoteCreate, db: Session = Depends(get_db)):
         content=data.content,
         remark=data.remark,
         tag_ids=data.tag_ids,
+        linked_menu_id=data.linked_menu_id,
+        linked_tab=data.linked_tab,
     )
     return _note_to_dict(note)
 
@@ -203,6 +207,8 @@ def update_note(note_id: int, data: NoteUpdate, db: Session = Depends(get_db)):
         content=data.content,
         remark=data.remark,
         tag_ids=data.tag_ids,
+        linked_menu_id=data.linked_menu_id,
+        linked_tab=data.linked_tab,
     )
     return _note_to_dict(note)
 

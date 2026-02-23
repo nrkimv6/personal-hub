@@ -42,6 +42,8 @@ class NoteCreate(BaseModel):
     content: str = Field(default="")
     remark: Optional[str] = None
     tag_ids: Optional[List[int]] = None
+    linked_menu_id: Optional[str] = None
+    linked_tab: Optional[str] = None
 
 
 class NoteUpdate(BaseModel):
@@ -49,6 +51,8 @@ class NoteUpdate(BaseModel):
     content: Optional[str] = None
     remark: Optional[str] = None
     tag_ids: Optional[List[int]] = None
+    linked_menu_id: Optional[str] = None
+    linked_tab: Optional[str] = None
 
 
 class NoteResponse(BaseModel):
@@ -58,6 +62,8 @@ class NoteResponse(BaseModel):
     remark: Optional[str]
     is_pinned: bool
     is_starred: bool
+    linked_menu_id: Optional[str] = None
+    linked_tab: Optional[str] = None
     tags: List[NoteTagInfo] = []
     created_at: datetime
     updated_at: datetime
@@ -81,6 +87,8 @@ class NoteArchiveResponse(BaseModel):
     title: str
     content: str
     remark: Optional[str]
+    linked_menu_id: Optional[str] = None
+    linked_tab: Optional[str] = None
     tags: List[NoteTagInfo] = []
     created_at: datetime
     updated_at: datetime

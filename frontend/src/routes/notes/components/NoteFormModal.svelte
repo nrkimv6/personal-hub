@@ -4,6 +4,8 @@
   import type { Note, TagDef } from '$lib/api/notes';
   import { X, Loader2 } from 'lucide-svelte';
   import TagInput from './TagInput.svelte';
+  import MenuPicker from './MenuPicker.svelte';
+  import { navEntries, isNavGroup, type NavSingleItem } from '$lib/navigation';
   import { isCodeLike, detectLanguage } from '../utils/codeDetect';
   import { renderMarkdown } from '../utils/markdown';
   import { extractNoteLinkAtCursor } from '../utils/noteLink';
@@ -21,6 +23,9 @@
   let content = $state(note?.content ?? '');
   let remark = $state(note?.remark ?? '');
   let tagIds = $state<number[]>(note?.tags.map((t) => t.id) ?? []);
+  let linkedMenuId = $state<string | null>(note?.linked_menu_id ?? null);
+  let linkedTab = $state(note?.linked_tab ?? '');
+  let showMenuPicker = $state(false);
   let allTags = $state<TagDef[]>([]);
   let saving = $state(false);
   let error = $state('');
@@ -50,9 +55,17 @@
     error = '';
     try {
       if (mode === 'create') {
-        await notesApi.create({ title: title.trim(), content, remark: remark || undefined, tag_ids: tagIds });
+        await notesApi.create({
+          title: title.trim(), content, remark: remark || undefined, tag_ids: tagIds,
+          linked_menu_id: linkedMenuId ?? undefined,
+          linked_tab: linkedTab || undefined,
+        });
       } else if (note) {
-        await notesApi.update(note.id, { title: title.trim(), content, remark: remark || undefined, tag_ids: tagIds });
+        await notesApi.update(note.id, {
+          title: title.trim(), content, remark: remark || undefined, tag_ids: tagIds,
+          linked_menu_id: linkedMenuId ?? undefined,
+          linked_tab: linkedTab || undefined,
+        });
       }
       onSave();
     } catch (e: any) {
@@ -245,6 +258,15 @@
     }
   }
 
+  // 선택된 메뉴의 icon+label 조회
+  function getMenuInfo(id: string | null): { icon: string; label: string } | null {
+    if (!id) return null;
+    const entry = navEntries.find((e) => !isNavGroup(e) && (e as NavSingleItem).id === id);
+    if (!entry || isNavGroup(entry)) return null;
+    const item = entry as NavSingleItem;
+    return { icon: item.icon, label: item.label };
+  }
+
   onMount(loadTags);
 </script>
 
@@ -356,6 +378,58 @@
           class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground
             focus:outline-none focus:ring-2 focus:ring-ring/30"
         />
+      </div>
+
+      <!-- 연결 메뉴 -->
+      <div>
+        <label class="block text-xs font-medium text-muted-foreground mb-1">연결 메뉴</label>
+        <div class="relative">
+          <button
+            type="button"
+            onclick={() => (showMenuPicker = !showMenuPicker)}
+            class="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground
+              hover:bg-muted transition-colors text-left"
+          >
+            {#if linkedMenuId && getMenuInfo(linkedMenuId)}
+              {@const info = getMenuInfo(linkedMenuId)!}
+              <span>{info.icon}</span>
+              <span>{info.label}</span>
+            {:else}
+              <span class="text-muted-foreground">메뉴 선택...</span>
+            {/if}
+          </button>
+          {#if showMenuPicker}
+            <!-- svelte-ignore a11y-no-static-element-interactions -->
+            <div
+              class="absolute top-full left-0 mt-1 z-30"
+              onmouseleave={() => {}}
+            >
+              <MenuPicker
+                selectedMenuId={linkedMenuId}
+                onSelect={(id) => {
+                  linkedMenuId = id;
+                  if (!id) linkedTab = '';
+                  showMenuPicker = false;
+                }}
+              />
+            </div>
+            <!-- 외부 클릭 닫기 -->
+            <!-- svelte-ignore a11y-no-static-element-interactions -->
+            <div
+              class="fixed inset-0 z-20"
+              onclick={() => (showMenuPicker = false)}
+            ></div>
+          {/if}
+        </div>
+        {#if linkedMenuId}
+          <input
+            type="text"
+            bind:value={linkedTab}
+            placeholder="탭 이름 (선택)"
+            class="mt-2 w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground
+              focus:outline-none focus:ring-2 focus:ring-ring/30"
+          />
+        {/if}
       </div>
 
       <!-- 태그 -->

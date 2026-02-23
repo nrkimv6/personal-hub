@@ -3,6 +3,7 @@
   import { notesApi } from '$lib/api/notes';
   import type { Note, TagDef } from '$lib/api/notes';
   import { Search, X, ChevronLeft, ChevronRight, FileText, CheckSquare, Trash2, Archive, Tag, Star, ArrowUpDown } from 'lucide-svelte';
+  import { navEntries, isNavGroup, type NavSingleItem } from '$lib/navigation';
   import NoteCard from './NoteCard.svelte';
   import NoteDetailModal from './NoteDetailModal.svelte';
   import NoteFormModal from './NoteFormModal.svelte';
@@ -24,6 +25,9 @@
   let sortOrder = $state<'asc' | 'desc'>('desc');
   let page = $state(1);
   let starredFilter = $state<boolean | undefined>(undefined);
+  let linkedMenuFilter = $state<string | undefined>(undefined);
+
+  const menuItems = navEntries.filter((e): e is NavSingleItem => !isNavGroup(e));
 
   let openNote = $state<Note | null>(null);
   let editNote = $state<Note | null>(null);
@@ -101,6 +105,7 @@
           order: sortOrder,
           page,
           starred: starredFilter,
+          linked_menu_id: linkedMenuFilter,
         }),
         notesApi.listTags(),
       ]);
@@ -314,6 +319,28 @@
         <Star class="w-3.5 h-3.5 {starredFilter === true ? 'fill-current' : ''}" />
         즐겨찾기
       </button>
+    </div>
+
+    <!-- 메뉴 필터 -->
+    <div class="flex items-center gap-2">
+      <span class="text-xs text-muted-foreground shrink-0">메뉴:</span>
+      <select
+        bind:value={linkedMenuFilter}
+        onchange={() => { page = 1; load(); }}
+        class="text-xs px-2 py-1 rounded-md border border-border bg-card text-foreground
+          focus:outline-none focus:ring-1 focus:ring-ring/30"
+      >
+        <option value={undefined}>전체</option>
+        {#each menuItems as item}
+          <option value={item.id}>{item.icon} {item.label}</option>
+        {/each}
+      </select>
+      {#if linkedMenuFilter}
+        <button
+          onclick={() => { linkedMenuFilter = undefined; page = 1; load(); }}
+          class="text-xs text-muted-foreground hover:text-foreground transition-colors"
+        ><X class="w-3.5 h-3.5" /></button>
+      {/if}
     </div>
 
     <!-- 정렬 옵션 -->

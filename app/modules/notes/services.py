@@ -25,6 +25,8 @@ def _note_to_dict(note: Note) -> dict:
         "remark": note.remark,
         "is_pinned": bool(note.is_pinned),
         "is_starred": bool(note.is_starred),
+        "linked_menu_id": note.linked_menu_id,
+        "linked_tab": note.linked_tab,
         "tags": [_tag_info(t) for t in note.tags],
         "created_at": note.created_at,
         "updated_at": note.updated_at,
@@ -38,6 +40,8 @@ def _archive_to_dict(archive: NoteArchive) -> dict:
         "title": archive.title,
         "content": archive.content,
         "remark": archive.remark,
+        "linked_menu_id": archive.linked_menu_id,
+        "linked_tab": archive.linked_tab,
         "tags": [_tag_info(t) for t in archive.tags],
         "created_at": archive.created_at,
         "updated_at": archive.updated_at,
@@ -80,6 +84,7 @@ def list_notes(
     page: int = 1,
     page_size: int = 20,
     starred: Optional[bool] = None,
+    linked_menu_id: Optional[str] = None,
 ) -> dict:
     query = db.query(Note).filter(Note.deleted_at.is_(None))
 
@@ -119,6 +124,9 @@ def list_notes(
     if starred is not None:
         query = query.filter(Note.is_starred == (1 if starred else 0))
 
+    if linked_menu_id is not None:
+        query = query.filter(Note.linked_menu_id == linked_menu_id)
+
     total = query.count()
     pages = max(1, math.ceil(total / page_size))
 
@@ -157,11 +165,14 @@ def create_note(
     content: str = "",
     remark: Optional[str] = None,
     tag_ids: Optional[List[int]] = None,
+    linked_menu_id: Optional[str] = None,
+    linked_tab: Optional[str] = None,
 ) -> Note:
     tag_ids = tag_ids or []
     _validate_tag_ids(db, tag_ids)
 
-    note = Note(title=title, content=content, remark=remark)
+    note = Note(title=title, content=content, remark=remark,
+                linked_menu_id=linked_menu_id, linked_tab=linked_tab)
     db.add(note)
     db.flush()  # id 확보
 
@@ -178,6 +189,8 @@ def update_note(
     content: Optional[str] = None,
     remark: Optional[str] = None,
     tag_ids: Optional[List[int]] = None,
+    linked_menu_id: Optional[str] = None,
+    linked_tab: Optional[str] = None,
 ) -> Note:
     note = get_note(db, note_id)
     if not note:
@@ -199,6 +212,10 @@ def update_note(
         note.content = content
     if remark is not None:
         note.remark = remark
+    if linked_menu_id is not None:
+        note.linked_menu_id = linked_menu_id
+    if linked_tab is not None:
+        note.linked_tab = linked_tab
     note.updated_at = datetime.utcnow()
 
     if tag_ids is not None:
@@ -260,6 +277,8 @@ def archive_note(db: Session, note_id: int) -> NoteArchive:
         title=note.title,
         content=note.content,
         remark=note.remark,
+        linked_menu_id=note.linked_menu_id,
+        linked_tab=note.linked_tab,
         created_at=note.created_at,
         updated_at=note.updated_at,
     )

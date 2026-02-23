@@ -20,6 +20,8 @@ export interface Note {
   remark: string | null;
   is_pinned: boolean;
   is_starred: boolean;
+  linked_menu_id: string | null;
+  linked_tab: string | null;
   tags: NoteTag[];
   created_at: string;
   updated_at: string;
@@ -30,6 +32,8 @@ export interface NoteCreate {
   content?: string;
   remark?: string;
   tag_ids?: number[];
+  linked_menu_id?: string;
+  linked_tab?: string;
 }
 
 export interface NoteUpdate {
@@ -37,6 +41,8 @@ export interface NoteUpdate {
   content?: string;
   remark?: string;
   tag_ids?: number[];
+  linked_menu_id?: string;
+  linked_tab?: string;
 }
 
 export interface NoteListResponse {
@@ -53,6 +59,8 @@ export interface NoteArchive {
   title: string;
   content: string;
   remark: string | null;
+  linked_menu_id: string | null;
+  linked_tab: string | null;
   tags: NoteTag[];
   created_at: string;
   updated_at: string;
@@ -135,6 +143,7 @@ export const notesApi = {
     page?: number;
     page_size?: number;
     starred?: boolean;
+    linked_menu_id?: string;
   }): Promise<NoteListResponse> {
     const q = new URLSearchParams();
     if (params?.tag) q.set('tags', params.tag);
@@ -148,6 +157,7 @@ export const notesApi = {
     if (params?.page) q.set('page', String(params.page));
     if (params?.page_size) q.set('page_size', String(params.page_size));
     if (params?.starred !== undefined) q.set('starred', String(params.starred));
+    if (params?.linked_menu_id) q.set('linked_menu_id', params.linked_menu_id);
     return req('GET', `?${q}`);
   },
 

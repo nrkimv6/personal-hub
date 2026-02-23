@@ -4,6 +4,15 @@
   import { Pin, Star, Copy, Pencil, Archive, Trash2 } from 'lucide-svelte';
   import TagBadge from './TagBadge.svelte';
   import { extractUrls, getDomain } from '../utils/url';
+  import { navEntries, isNavGroup, type NavSingleItem } from '$lib/navigation';
+
+  function getMenuInfo(id: string | null): { icon: string; label: string; href: string } | null {
+    if (!id) return null;
+    const entry = navEntries.find((e) => !isNavGroup(e) && (e as NavSingleItem).id === id);
+    if (!entry || isNavGroup(entry)) return null;
+    const item = entry as NavSingleItem;
+    return { icon: item.icon, label: item.label, href: item.href };
+  }
 
   interface Props {
     note: Note;
@@ -164,6 +173,20 @@
         <TagBadge {tag} size="sm" />
       {/each}
     </div>
+  {/if}
+
+  <!-- 연결 메뉴 배지 -->
+  {#if note.linked_menu_id && getMenuInfo(note.linked_menu_id)}
+    {@const menuInfo = getMenuInfo(note.linked_menu_id)!}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <span
+      class="inline-flex items-center gap-1 text-xs text-info mb-2 cursor-pointer hover:underline"
+      onclick={(e) => { e.stopPropagation(); window.location.href = menuInfo.href; }}
+      title={menuInfo.href}
+    >
+      🔗 {menuInfo.icon} {menuInfo.label}{note.linked_tab ? ` > ${note.linked_tab}` : ''}
+    </span>
   {/if}
 
   <!-- 날짜 -->
