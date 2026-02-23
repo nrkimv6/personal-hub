@@ -27,6 +27,14 @@ sentence-transformers>=2.2.0
 faiss-cpu>=1.7.4
 send2trash>=1.8.0
 
+# File Classifier Dependencies (optional - Phase 2 메타데이터 추출용)
+# Phase 1 (스캔/분류)는 미설치 시에도 정상 작동
+# Phase 2 (메타데이터 추출) 사용 시 설치 필요
+mutagen>=1.47.0       # 음악 태그 (ID3, FLAC, OGG, WMA)
+py7zr>=0.21.0         # 7z 압축 지원
+rarfile>=4.1          # RAR 압축 지원 (unrar 바이너리 필요)
+pefile>=2023.2.7      # PE 헤더 분석 (Windows 설치파일, Windows 전용)
+
 # Writing Module (optional - 키워드 분석 기능용)
 # 키워드 분석 API (/api/writing/keywords/analyze)를 사용하려면 설치 필요
 # 미설치 시 다른 writing 기능은 정상 작동하며, 해당 엔드포인트만 503 반환
