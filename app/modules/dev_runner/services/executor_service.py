@@ -120,6 +120,13 @@ class ExecutorService:
         if request.projects:
             command["projects"] = request.projects
 
+        # registered_paths에서 wtools 외부 경로 추출
+        if request.parallel:
+            from app.modules.dev_runner.services.plan_service import plan_service
+            extra_dirs = plan_service.get_extra_plan_dirs()
+            if extra_dirs:
+                command["extra_plan_dirs"] = ",".join(extra_dirs)
+
         try:
             # Redis LPUSH - 명령 전송
             await self.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
@@ -381,13 +388,28 @@ class ExecutorService:
                 plan_file = self.redis_client.get(STATE_KEY + ":plan_file")
                 start_time_str = self.redis_client.get(STATE_KEY + ":start_time")
 
+                # PID 생존 확인 (프로세스가 에러 종료 후 상태가 stale로 남는 경우 대응)
+                if pid_str:
+                    try:
+                        import psutil
+                        if not psutil.pid_exists(int(pid_str)):
+                            logger.warning(f"[dev-runner] PID {pid_str} 종료됨 → stale 상태 자동 정리")
+                            self._force_cleanup_state()
+                            return RunStatusResponse(running=False, listener_alive=listener_alive, redis_connected=True, pid=None, plan_file=None)
+                    except (ValueError, ImportError):
+                        pass
+
                 if not listener_alive:
                     logger.warning("[dev-runner] heartbeat 없음 → stale 상태 자동 정리")
                     self._force_cleanup_state()
                     return RunStatusResponse(running=False, listener_alive=False, redis_connected=True, pid=None, plan_file=None)
 
-                cycle_str = self.redis_client.get(STATE_KEY + ":current_cycle")
-                current_cycle = int(cycle_str) if cycle_str else None
+                # 전체실행 시 현재 실행 중인 plan 이름 조회
+                current_plan_name = None
+                if plan_file == "ALL":
+                    current_task_text = self.redis_client.get(STATE_KEY + ":current_task_text")
+                    if current_task_text and current_task_text.startswith("[batch] "):
+                        current_plan_name = current_task_text[len("[batch] "):]
 
                 return RunStatusResponse(
                     running=True,
@@ -396,7 +418,8 @@ class ExecutorService:
                     pid=int(pid_str) if pid_str else None,
                     plan_file=plan_file,
                     start_time=datetime.fromisoformat(start_time_str) if start_time_str else None,
-                    current_cycle=current_cycle,
+                    current_cycle=0,
+                    current_plan_name=current_plan_name,
                 )
             else:
                 return RunStatusResponse(running=False, listener_alive=listener_alive, redis_connected=True, pid=None, plan_file=None)

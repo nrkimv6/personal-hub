@@ -437,6 +437,21 @@ class PlanService:
             "updated": updated,
         }
 
+    # ========== 외부 경로 추출 ==========
+
+    def get_extra_plan_dirs(self) -> List[str]:
+        """registered_paths 중 WTOOLS_BASE_DIR 하위가 아닌 폴더 경로만 반환"""
+        wtools_prefix = str(config.WTOOLS_BASE_DIR.resolve())
+        extra_dirs = []
+        for reg_path in self._registered_paths:
+            p = Path(reg_path)
+            if not p.is_dir():
+                continue
+            resolved = str(p.resolve())
+            if not resolved.startswith(wtools_prefix):
+                extra_dirs.append(resolved)
+        return extra_dirs
+
     # ========== 등록 경로 관리 ==========
 
     def list_registered_paths(self) -> List[RegisteredPathResponse]:

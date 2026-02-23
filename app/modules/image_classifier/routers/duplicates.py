@@ -133,6 +133,148 @@ async def get_duplicate_groups(
     }
 
 
+@router.get("/folder-analysis")
+async def get_folder_analysis(db: Session = Depends(get_db)):
+    """pending 그룹의 멤버를 폴더별로 분석"""
+    rows = db.execute(text("""
+        SELECT dg.id as group_id, dm.file_id, fc.file_path, dm.file_size, dm.resolution, dm.quality_score
+        FROM duplicate_groups dg
+        JOIN duplicate_members dm ON dg.id = dm.group_id
+        JOIN file_classifications fc ON dm.file_id = fc.id
+        WHERE dg.status = 'pending'
+        ORDER BY dg.id, dm.quality_score DESC
+    """)).fetchall()
+
+    from collections import defaultdict
+    folder_map = defaultdict(lambda: {"files": [], "group_ids": set()})
+
+    for row in rows:
+        fp = row.file_path
+        sep_idx = max(fp.rfind('\\'), fp.rfind('/'))
+        folder = fp[:sep_idx] if sep_idx >= 0 else fp
+
+        entry = folder_map[folder]
+        entry["group_ids"].add(row.group_id)
+        entry["files"].append({
+            "file_id": row.file_id,
+            "file_path": row.file_path,
+            "file_size": row.file_size,
+            "resolution": row.resolution,
+            "quality_score": row.quality_score,
+            "group_id": row.group_id,
+        })
+
+    folders = []
+    for folder_path, data in sorted(folder_map.items(), key=lambda x: -len(x[1]["files"])):
+        folders.append({
+            "folder_path": folder_path,
+            "file_count": len(data["files"]),
+            "group_ids": sorted(data["group_ids"]),
+            "files": data["files"],
+        })
+
+    total_pending = db.execute(text("SELECT COUNT(*) FROM duplicate_groups WHERE status = 'pending'")).scalar()
+
+    return {"folders": folders, "total_pending_groups": total_pending}
+
+
+class ResolveByFolderRequest(BaseModel):
+    keep_folder: str
+    group_ids: list[int]
+
+
+@router.post("/resolve-by-folder")
+async def resolve_by_folder(
+    request: ResolveByFolderRequest,
+    db: Session = Depends(get_db),
+):
+    """폴더 기준 일괄 해결: keep_folder의 파일 보관, 나머지 삭제"""
+    resolved_count = 0
+    deleted_count = 0
+    skipped_count = 0
+    failed_count = 0
+    details = []
+
+    keep_folder_normalized = request.keep_folder.replace('/', '\\')
+
+    for gid in request.group_ids:
+        members = db.execute(
+            text("""
+                SELECT dm.file_id, fc.file_path, dm.quality_score
+                FROM duplicate_members dm
+                JOIN file_classifications fc ON dm.file_id = fc.id
+                WHERE dm.group_id = :gid
+            """),
+            {"gid": gid}
+        ).fetchall()
+
+        if not members:
+            skipped_count += 1
+            continue
+
+        # keep_folder에 속한 파일 찾기
+        keep_candidates = []
+        delete_candidates = []
+        for m in members:
+            fp_normalized = m.file_path.replace('/', '\\')
+            sep_idx = max(fp_normalized.rfind('\\'), fp_normalized.rfind('/'))
+            m_folder = fp_normalized[:sep_idx] if sep_idx >= 0 else fp_normalized
+
+            if m_folder == keep_folder_normalized:
+                keep_candidates.append(m)
+            else:
+                delete_candidates.append(m)
+
+        if not keep_candidates:
+            skipped_count += 1
+            continue
+
+        # quality_score 가장 높은 것 보관
+        keep_file = max(keep_candidates, key=lambda x: x.quality_score or 0)
+        # keep_candidates 중 보관 파일 외의 것도 삭제 대상에 추가
+        for kc in keep_candidates:
+            if kc.file_id != keep_file.file_id:
+                delete_candidates.append(kc)
+
+        db.execute(
+            text("UPDATE duplicate_groups SET status = 'resolved', kept_file_id = :keep_id WHERE id = :gid"),
+            {"gid": gid, "keep_id": keep_file.file_id}
+        )
+
+        deleted_file_ids = []
+        for dc in delete_candidates:
+            file_path = Path(dc.file_path)
+            if file_path.exists():
+                try:
+                    send2trash(str(file_path))
+                    db.execute(
+                        text("UPDATE file_classifications SET status = 'moved', moved_path = :trash WHERE id = :fid"),
+                        {"fid": dc.file_id, "trash": "휴지통"}
+                    )
+                    deleted_file_ids.append(dc.file_id)
+                    deleted_count += 1
+                except Exception as e:
+                    logger.error(f"파일 삭제 실패: {file_path} - {e}")
+                    failed_count += 1
+
+        resolved_count += 1
+        details.append({
+            "group_id": gid,
+            "kept_file_id": keep_file.file_id,
+            "deleted_file_ids": deleted_file_ids,
+        })
+
+    db.commit()
+
+    return {
+        "resolved_count": resolved_count,
+        "deleted_count": deleted_count,
+        "skipped_count": skipped_count,
+        "failed_count": failed_count,
+        "details": details,
+    }
+
+
 @router.get("/{group_id}")
 async def get_duplicate_group_detail(
     group_id: int,
@@ -290,6 +432,48 @@ async def resolve_duplicate_group(
         "kept_file_id": request.keep_file_id,
         "deleted_count": deleted_count,
     }
+
+
+@router.post("/{group_id}/discard-all")
+async def discard_all_in_group(
+    group_id: int,
+    db: Session = Depends(get_db),
+):
+    """그룹의 모든 멤버를 휴지통으로 이동 (보관 없이)"""
+    members = db.execute(
+        text("""
+            SELECT dm.file_id, fc.file_path
+            FROM duplicate_members dm
+            JOIN file_classifications fc ON dm.file_id = fc.id
+            WHERE dm.group_id = :gid
+        """),
+        {"gid": group_id}
+    ).fetchall()
+
+    if not members:
+        raise HTTPException(status_code=404, detail="중복 그룹을 찾을 수 없습니다.")
+
+    deleted_count = 0
+    for member in members:
+        file_path = Path(member.file_path)
+        if file_path.exists():
+            try:
+                send2trash(str(file_path))
+                db.execute(
+                    text("UPDATE file_classifications SET status = 'moved', moved_path = :trash WHERE id = :fid"),
+                    {"fid": member.file_id, "trash": "휴지통"}
+                )
+                deleted_count += 1
+            except Exception as e:
+                logger.error(f"파일 삭제 실패: {file_path} - {e}")
+
+    db.execute(
+        text("UPDATE duplicate_groups SET status = 'resolved', kept_file_id = NULL WHERE id = :gid"),
+        {"gid": group_id}
+    )
+    db.commit()
+
+    return {"status": "resolved", "group_id": group_id, "deleted_count": deleted_count}
 
 
 def _run_detect(resume: bool):

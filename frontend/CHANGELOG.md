@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0] - 2026-02-23
+### Added
+- 메모 별표(즐겨찾기) 기능: 별표 토글 버튼 (NoteCard, NoteDetailModal)
+- 별표 필터 (NoteList 필터 바에 즐겨찾기 토글 버튼 추가)
+- POST /api/notes/{id}/star 엔드포인트
+- GET /api/notes?starred=true|false 필터 지원
+
 ## [0.3.0] - 2026-02-20
 ### Added
 - 중복 이미지 탭 페이지네이션 (이전/다음 버튼, 전체 그룹 수 표시)

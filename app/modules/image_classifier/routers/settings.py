@@ -5,11 +5,14 @@
 - PUT /api/ic/settings: 설정 업데이트
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from ..config import settings, save_settings_to_file
+from ..database import get_db
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
 
@@ -139,3 +142,95 @@ async def update_settings(request: SettingsUpdateRequest):
             "status": "error",
             "message": f"설정 저장 실패: {str(e)}"
         }
+
+
+# =========================================================
+# year_annotations CRUD
+# =========================================================
+
+class YearAnnotationCreate(BaseModel):
+    year: int
+    annotation: str
+    color: Optional[str] = None
+
+
+class YearAnnotationUpdate(BaseModel):
+    annotation: Optional[str] = None
+    color: Optional[str] = None
+
+
+@router.get("/year-annotations")
+async def list_year_annotations(db: Session = Depends(get_db)):
+    """연도 메모 목록 조회"""
+    rows = db.execute(
+        text("SELECT id, year, annotation, color FROM year_annotations ORDER BY year")
+    ).fetchall()
+    return {
+        "year_annotations": [
+            {"id": r.id, "year": r.year, "annotation": r.annotation, "color": r.color}
+            for r in rows
+        ]
+    }
+
+
+@router.post("/year-annotations", status_code=201)
+async def create_year_annotation(body: YearAnnotationCreate, db: Session = Depends(get_db)):
+    """연도 메모 생성"""
+    existing = db.execute(
+        text("SELECT id FROM year_annotations WHERE year = :year"),
+        {"year": body.year}
+    ).fetchone()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"{body.year}년 메모가 이미 존재합니다.")
+
+    db.execute(
+        text("INSERT INTO year_annotations (year, annotation, color) VALUES (:year, :annotation, :color)"),
+        {"year": body.year, "annotation": body.annotation, "color": body.color}
+    )
+    db.commit()
+
+    row = db.execute(
+        text("SELECT id, year, annotation, color FROM year_annotations WHERE year = :year"),
+        {"year": body.year}
+    ).fetchone()
+    return {"id": row.id, "year": row.year, "annotation": row.annotation, "color": row.color}
+
+
+@router.put("/year-annotations/{annotation_id}")
+async def update_year_annotation(
+    annotation_id: int,
+    body: YearAnnotationUpdate,
+    db: Session = Depends(get_db),
+):
+    """연도 메모 수정"""
+    row = db.execute(
+        text("SELECT id, year, annotation, color FROM year_annotations WHERE id = :id"),
+        {"id": annotation_id}
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="연도 메모를 찾을 수 없습니다.")
+
+    new_annotation = body.annotation if body.annotation is not None else row.annotation
+    new_color = body.color if body.color is not None else row.color
+
+    db.execute(
+        text("UPDATE year_annotations SET annotation = :annotation, color = :color WHERE id = :id"),
+        {"annotation": new_annotation, "color": new_color, "id": annotation_id}
+    )
+    db.commit()
+    return {"id": annotation_id, "year": row.year, "annotation": new_annotation, "color": new_color}
+
+
+@router.delete("/year-annotations/{annotation_id}", status_code=204)
+async def delete_year_annotation(annotation_id: int, db: Session = Depends(get_db)):
+    """연도 메모 삭제"""
+    row = db.execute(
+        text("SELECT id FROM year_annotations WHERE id = :id"),
+        {"id": annotation_id}
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="연도 메모를 찾을 수 없습니다.")
+
+    db.execute(text("DELETE FROM year_annotations WHERE id = :id"), {"id": annotation_id})
+    db.commit()
+    return None

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
-	import { Copy, Wand2, Check, Trash2, SkipForward, Crown, PartyPopper, Square, ChevronLeft, ChevronRight } from 'lucide-svelte';
+	import { Copy, Wand2, Check, Trash2, SkipForward, Crown, PartyPopper, Square, ChevronLeft, ChevronRight, FolderOpen, X, ExternalLink } from 'lucide-svelte';
 
 	interface DuplicateGroup {
 		group_id: number;
@@ -35,9 +35,33 @@
 	// 각 그룹에서 선택된 keep 파일 ID
 	let selections = $state<Record<number, number | null>>({});
 
+	interface FolderFile {
+		file_id: number;
+		file_path: string;
+		file_size: number;
+		resolution: string;
+		quality_score: number;
+		group_id: number;
+	}
+
+	interface FolderInfo {
+		folder_path: string;
+		file_count: number;
+		group_ids: number[];
+		files: FolderFile[];
+	}
+
 	let filterStatus = $state('unresolved');
 	let detectRunning = $state(false);
 	let detectStatusPoller: ReturnType<typeof setInterval> | null = null;
+
+	// 폴더 기준 일괄 해결 모달
+	let showFolderModal = $state(false);
+	let folderAnalysis = $state<FolderInfo[]>([]);
+	let folderAnalysisLoading = $state(false);
+	let selectedKeepFolder = $state<string | null>(null);
+	let folderResolving = $state(false);
+	let folderTotalPending = $state(0);
 
 	const currentPage = $derived(Math.floor(filter.skip / filter.limit) + 1);
 	const totalPages = $derived(Math.ceil(totalGroups / filter.limit));
@@ -207,6 +231,92 @@
 		}
 	}
 
+	async function discardAll(groupId: number) {
+		const detail = groupDetails[groupId];
+		const count = detail?.members?.length ?? '?';
+		if (!confirm(`이 그룹의 모든 이미지(${count}개)를 휴지통으로 이동하시겠습니까?\n\n⚠️ 보관하는 파일 없이 전부 삭제됩니다.`)) return;
+
+		try {
+			const res = await fetchWithTimeout(`/api/ic/duplicates/${groupId}/discard-all`, { method: 'POST' });
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const result = await res.json();
+			alert(`모두 삭제 완료!\n삭제: ${result.deleted_count}개`);
+			await loadGroups();
+		} catch (err: any) {
+			alert(`삭제 실패: ${err.message}`);
+		}
+	}
+
+	async function openLocal(path?: string, folder?: string) {
+		try {
+			await fetchWithTimeout('/api/ic/files/open-local', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ path, folder })
+			});
+		} catch {
+			// ignore
+		}
+	}
+
+	async function openFolderModal() {
+		showFolderModal = true;
+		folderAnalysisLoading = true;
+		selectedKeepFolder = null;
+		try {
+			const res = await fetchWithTimeout('/api/ic/duplicates/folder-analysis');
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const data = await res.json();
+			folderAnalysis = data.folders;
+			folderTotalPending = data.total_pending_groups;
+			if (data.folders.length > 0) {
+				selectedKeepFolder = data.folders[0].folder_path;
+			}
+		} catch (err: any) {
+			alert(`폴더 분석 실패: ${err.message}`);
+			showFolderModal = false;
+		} finally {
+			folderAnalysisLoading = false;
+		}
+	}
+
+	const selectedFolderInfo = $derived(folderAnalysis.find((f) => f.folder_path === selectedKeepFolder));
+	const folderKeepFiles = $derived(selectedFolderInfo?.files ?? []);
+	const folderDeleteFiles = $derived(
+		selectedKeepFolder
+			? folderAnalysis
+					.filter((f) => f.folder_path !== selectedKeepFolder)
+					.flatMap((f) => f.files.filter((file) => selectedFolderInfo?.group_ids.includes(file.group_id)))
+			: []
+	);
+	const folderAffectedGroupIds = $derived(selectedFolderInfo?.group_ids ?? []);
+
+	async function resolveByFolder() {
+		if (!selectedKeepFolder || folderAffectedGroupIds.length === 0) return;
+		if (!confirm(`${folderAffectedGroupIds.length}개 그룹을 일괄 해결하시겠습니까?\n\n보관 폴더: ${selectedKeepFolder}\n삭제 예정: ${folderDeleteFiles.length}개 파일`)) return;
+
+		folderResolving = true;
+		try {
+			const res = await fetchWithTimeout('/api/ic/duplicates/resolve-by-folder', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					keep_folder: selectedKeepFolder,
+					group_ids: folderAffectedGroupIds
+				})
+			});
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const result = await res.json();
+			alert(`일괄 해결 완료!\n\n보관: ${result.resolved_count}개 그룹\n삭제: ${result.deleted_count}개 파일\n스킵: ${result.skipped_count}개\n실패: ${result.failed_count}개`);
+			showFolderModal = false;
+			await loadGroups();
+		} catch (err: any) {
+			alert(`일괄 해결 실패: ${err.message}`);
+		} finally {
+			folderResolving = false;
+		}
+	}
+
 	onMount(() => {
 		loadGroups();
 		checkDetectStatus();
@@ -271,6 +381,15 @@
 			</button>
 		{/if}
 
+		<!-- 폴더 기준 일괄 해결 -->
+		<button
+			class="flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-3 py-1.5 text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
+			onclick={openFolderModal}
+		>
+			<FolderOpen class="size-3.5" />
+			폴더 기준 일괄 해결
+		</button>
+
 		<!-- 새로고침 -->
 		<button
 			class="ml-auto flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm hover:bg-accent transition-colors"
@@ -334,6 +453,13 @@
 							{detail ? '접기' : '펼치기'}
 						</button>
 						{#if group.status === 'pending' && detail}
+							<button
+								class="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-destructive bg-destructive/10 hover:bg-destructive/20 transition-colors"
+								onclick={() => discardAll(group.group_id)}
+							>
+								<Trash2 class="size-3.5" />
+								모두 버리기
+							</button>
 							{@const keepId = selections[group.group_id] ?? getBestMember(detail.members)}
 							<button
 								class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
@@ -562,4 +688,154 @@
 			</button>
 		</div>
 	{/if}
+{/if}
+
+<!-- 폴더 기준 일괄 해결 모달 -->
+{#if showFolderModal}
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onclick={() => (showFolderModal = false)}>
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="bg-card border rounded-2xl shadow-2xl w-[900px] max-h-[85vh] flex flex-col" onclick={(e) => e.stopPropagation()}>
+			<!-- 모달 헤더 -->
+			<div class="flex items-center justify-between px-6 py-4 border-b">
+				<div>
+					<h3 class="text-lg font-bold">폴더 기준 일괄 해결</h3>
+					<p class="text-sm text-muted-foreground mt-0.5">보관할 폴더를 선택하면 나머지 폴더의 중복 파일이 삭제됩니다</p>
+				</div>
+				<button class="rounded-md p-1.5 hover:bg-muted transition-colors" onclick={() => (showFolderModal = false)}>
+					<X class="size-5" />
+				</button>
+			</div>
+
+			{#if folderAnalysisLoading}
+				<div class="p-12 text-center">
+					<div class="text-muted-foreground text-sm animate-pulse">폴더 분석 중...</div>
+				</div>
+			{:else if folderAnalysis.length === 0}
+				<div class="p-12 text-center">
+					<p class="text-muted-foreground text-sm">분석할 pending 그룹이 없습니다.</p>
+				</div>
+			{:else}
+				<div class="flex-1 overflow-y-auto p-6 space-y-6">
+					<!-- 폴더 선택 -->
+					<div>
+						<p class="text-sm font-semibold mb-3">보관할 폴더 선택</p>
+						<div class="space-y-2">
+							{#each folderAnalysis as folder}
+								<label class="flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-muted/50 {selectedKeepFolder === folder.folder_path ? 'border-primary bg-primary/5' : ''}">
+									<input
+										type="radio"
+										name="keep-folder"
+										value={folder.folder_path}
+										checked={selectedKeepFolder === folder.folder_path}
+										onchange={() => (selectedKeepFolder = folder.folder_path)}
+										class="accent-primary"
+									/>
+									<div class="flex-1 min-w-0">
+										<p class="text-sm font-mono truncate" title={folder.folder_path}>{folder.folder_path}</p>
+										<p class="text-xs text-muted-foreground mt-0.5">{folder.file_count}개 파일 · {folder.group_ids.length}개 그룹</p>
+									</div>
+									<button
+										class="flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-accent transition-colors"
+										onclick={(e) => { e.preventDefault(); openLocal(undefined, folder.folder_path); }}
+									>
+										<ExternalLink class="size-3" />
+										폴더 열기
+									</button>
+								</label>
+							{/each}
+						</div>
+					</div>
+
+					<!-- 미리보기 -->
+					{#if selectedKeepFolder}
+						<div class="grid grid-cols-2 gap-4">
+							<!-- 보관될 이미지 -->
+							<div>
+								<p class="text-sm font-semibold text-green-700 dark:text-green-400 mb-2">
+									보관 ({folderKeepFiles.length}개)
+								</p>
+								<div class="grid grid-cols-3 gap-2 max-h-[300px] overflow-y-auto">
+									{#each folderKeepFiles as file (file.file_id)}
+										<button
+											class="rounded-lg border-2 border-green-400/50 overflow-hidden text-left hover:border-green-400 transition-colors"
+											onclick={() => openLocal(file.file_path)}
+										>
+											<div class="aspect-square bg-muted relative">
+												<img
+													src={getThumbnailUrl(file.file_id)}
+													alt="file {file.file_id}"
+													class="w-full h-full object-cover"
+													loading="lazy"
+												/>
+												<div class="absolute top-1 left-1 rounded-full bg-green-500 text-white p-0.5">
+													<Check class="size-2.5" />
+												</div>
+											</div>
+											<div class="p-1">
+												<p class="text-[9px] font-mono truncate text-muted-foreground" title={file.file_path}>
+													{getFileName(file.file_path)}
+												</p>
+												<p class="text-[9px] text-muted-foreground">{formatFileSize(file.file_size)}</p>
+											</div>
+										</button>
+									{/each}
+								</div>
+							</div>
+
+							<!-- 삭제될 이미지 -->
+							<div>
+								<p class="text-sm font-semibold text-destructive mb-2">
+									삭제 ({folderDeleteFiles.length}개)
+								</p>
+								<div class="grid grid-cols-3 gap-2 max-h-[300px] overflow-y-auto">
+									{#each folderDeleteFiles as file (file.file_id)}
+										<button
+											class="rounded-lg border-2 border-destructive/30 overflow-hidden opacity-60 text-left hover:opacity-80 transition-opacity"
+											onclick={() => openLocal(file.file_path)}
+										>
+											<div class="aspect-square bg-muted relative">
+												<img
+													src={getThumbnailUrl(file.file_id)}
+													alt="file {file.file_id}"
+													class="w-full h-full object-cover"
+													loading="lazy"
+												/>
+												<div class="absolute top-1 left-1 rounded-full bg-destructive text-destructive-foreground p-0.5">
+													<Trash2 class="size-2.5" />
+												</div>
+											</div>
+											<div class="p-1">
+												<p class="text-[9px] font-mono truncate text-muted-foreground" title={file.file_path}>
+													{getFileName(file.file_path)}
+												</p>
+												<p class="text-[9px] text-muted-foreground">{formatFileSize(file.file_size)}</p>
+											</div>
+										</button>
+									{/each}
+								</div>
+							</div>
+						</div>
+					{/if}
+				</div>
+
+				<!-- 모달 푸터 -->
+				<div class="flex items-center justify-end gap-3 px-6 py-4 border-t">
+					<button
+						class="rounded-lg border px-4 py-2 text-sm hover:bg-accent transition-colors"
+						onclick={() => (showFolderModal = false)}
+					>
+						취소
+					</button>
+					<button
+						class="rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+						onclick={resolveByFolder}
+						disabled={!selectedKeepFolder || folderAffectedGroupIds.length === 0 || folderResolving}
+					>
+						{folderResolving ? '처리 중...' : `일괄 해결 (${folderAffectedGroupIds.length}그룹)`}
+					</button>
+				</div>
+			{/if}
+		</div>
+	</div>
 {/if}

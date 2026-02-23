@@ -10,15 +10,63 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.modules.notes import services as svc
+from app.modules.notes.services import _note_to_dict, _archive_to_dict
 from app.modules.notes.schemas import (
     NoteCreate, NoteUpdate,
     NoteListResponse, NoteResponse,
     NoteArchiveResponse, ArchiveListResponse,
     TagCreate, TagUpdate, TagResponse,
     HistoryResponse,
+    BulkNoteIds, BulkTagAction, BulkStarAction,
 )
 
 router = APIRouter(prefix="/api/notes", tags=["Notes"])
+
+
+# ══════════════════════════════════════════
+# Bulk 라우트 (⚠️ /{note_id} 보다 먼저 정의)
+# ══════════════════════════════════════════
+
+@router.post("/bulk/delete")
+def bulk_delete(data: BulkNoteIds, db: Session = Depends(get_db)):
+    """여러 메모 일괄 삭제 (soft delete)."""
+    count = svc.bulk_delete(db, data.note_ids)
+    return {"ok": True, "count": count}
+
+
+@router.post("/bulk/archive")
+def bulk_archive(data: BulkNoteIds, db: Session = Depends(get_db)):
+    """여러 메모 일괄 아카이브."""
+    count = svc.bulk_archive(db, data.note_ids)
+    return {"ok": True, "count": count}
+
+
+@router.post("/bulk/tag")
+def bulk_tag(data: BulkTagAction, db: Session = Depends(get_db)):
+    """여러 메모에 태그 일괄 추가/제거."""
+    count = svc.bulk_tag(db, data.note_ids, data.add_tag_ids, data.remove_tag_ids)
+    return {"ok": True, "count": count}
+
+
+@router.post("/bulk/star")
+def bulk_star(data: BulkStarAction, db: Session = Depends(get_db)):
+    """여러 메모 별표 일괄 설정."""
+    count = svc.bulk_star(db, data.note_ids, data.starred)
+    return {"ok": True, "count": count}
+
+
+# ══════════════════════════════════════════
+# Search 라우트 (⚠️ /{id} 보다 먼저 정의)
+# ══════════════════════════════════════════
+
+@router.get("/search/titles")
+def search_titles(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(10, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """제목 부분 일치 검색 — 자동완성용."""
+    return svc.search_titles(db, q=q, limit=limit)
 
 
 # ══════════════════════════════════════════
@@ -42,14 +90,14 @@ def get_archive_item(archive_id: int, db: Session = Depends(get_db)):
     archive = svc.get_archive(db, archive_id)
     if not archive:
         raise HTTPException(status_code=404, detail="아카이브를 찾을 수 없습니다.")
-    return archive
+    return _archive_to_dict(archive)
 
 
 @router.post("/archive/{archive_id}/restore", response_model=NoteResponse)
 def restore_archive(archive_id: int, db: Session = Depends(get_db)):
     """아카이브 복원 → 활성 메모로."""
     note = svc.restore_archive(db, archive_id)
-    return note
+    return _note_to_dict(note)
 
 
 @router.delete("/archive/{archive_id}")
@@ -94,14 +142,33 @@ def delete_tag(tag_id: int, db: Session = Depends(get_db)):
 
 @router.get("", response_model=NoteListResponse)
 def get_notes(
-    tag: Optional[str] = Query(None),
+    tags: Optional[str] = Query(None),
+    tag_mode: Optional[str] = Query("or"),
     search: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    sort: Optional[str] = Query("created_at"),
+    order: Optional[str] = Query("desc"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    starred: Optional[bool] = Query(None),
     db: Session = Depends(get_db),
 ):
-    """메모 목록 조회 (태그/검색 필터, 페이지네이션)."""
-    return svc.list_notes(db, tag=tag, search=search, page=page, page_size=page_size)
+    """메모 목록 조회 (태그/검색/날짜 범위 필터, 정렬, 페이지네이션)."""
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
+    return svc.list_notes(
+        db,
+        tags=tag_list,
+        tag_mode=tag_mode or "or",
+        search=search,
+        date_from=date_from,
+        date_to=date_to,
+        sort=sort or "created_at",
+        order=order or "desc",
+        page=page,
+        page_size=page_size,
+        starred=starred,
+    )
 
 
 @router.post("", response_model=NoteResponse, status_code=201)
@@ -114,7 +181,7 @@ def create_note(data: NoteCreate, db: Session = Depends(get_db)):
         remark=data.remark,
         tag_ids=data.tag_ids,
     )
-    return note
+    return _note_to_dict(note)
 
 
 @router.get("/{note_id}", response_model=NoteResponse)
@@ -123,13 +190,13 @@ def get_note(note_id: int, db: Session = Depends(get_db)):
     note = svc.get_note(db, note_id)
     if not note:
         raise HTTPException(status_code=404, detail="메모를 찾을 수 없습니다.")
-    return note
+    return _note_to_dict(note)
 
 
 @router.put("/{note_id}", response_model=NoteResponse)
 def update_note(note_id: int, data: NoteUpdate, db: Session = Depends(get_db)):
     """메모 수정 (변경 전 스냅샷 자동 저장)."""
-    return svc.update_note(
+    note = svc.update_note(
         db,
         note_id=note_id,
         title=data.title,
@@ -137,6 +204,7 @@ def update_note(note_id: int, data: NoteUpdate, db: Session = Depends(get_db)):
         remark=data.remark,
         tag_ids=data.tag_ids,
     )
+    return _note_to_dict(note)
 
 
 @router.delete("/{note_id}")
@@ -153,13 +221,22 @@ def delete_note(
 @router.post("/{note_id}/pin", response_model=NoteResponse)
 def toggle_pin(note_id: int, db: Session = Depends(get_db)):
     """메모 고정/고정해제 토글."""
-    return svc.toggle_pin(db, note_id)
+    note = svc.toggle_pin(db, note_id)
+    return _note_to_dict(note)
+
+
+@router.post("/{note_id}/star", response_model=NoteResponse)
+def toggle_star(note_id: int, db: Session = Depends(get_db)):
+    """메모 별표/별표해제 토글."""
+    note = svc.toggle_star(db, note_id)
+    return _note_to_dict(note)
 
 
 @router.post("/{note_id}/archive", response_model=NoteArchiveResponse)
 def archive_note(note_id: int, db: Session = Depends(get_db)):
     """메모 아카이브 이동 (태그·이력 함께 이전)."""
-    return svc.archive_note(db, note_id)
+    archive = svc.archive_note(db, note_id)
+    return _archive_to_dict(archive)
 
 
 # ══════════════════════════════════════════

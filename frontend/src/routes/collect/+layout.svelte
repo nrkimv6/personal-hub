@@ -9,12 +9,14 @@
     { id: 'posts', label: '게시물', path: '/collect' },
     { id: 'rules', label: '분류 규칙', path: '/collect/rules' },
     { id: 'history', label: '크롤링 이력', path: '/collect/history' },
-    { id: 'schedule', label: '스케줄 설정', path: '/collect/schedule' }
+    { id: 'schedule', label: '스케줄 설정', path: '/collect/schedule' },
+    { id: 'google', label: '구글 검색', path: '/collect/google' }
   ];
 
   // 현재 경로에서 활성 탭 결정
   let activeTab = $derived.by(() => {
     const pathname = $page.url.pathname;
+    if (pathname.startsWith('/collect/google')) return 'google';
     if (pathname.startsWith('/collect/rules')) return 'rules';
     if (pathname.startsWith('/collect/history')) return 'history';
     if (pathname.startsWith('/collect/schedule')) return 'schedule';

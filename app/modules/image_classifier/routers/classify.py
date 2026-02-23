@@ -47,6 +47,15 @@ class ClassifyRequest(BaseModel):
     max_workers: int = CLI_MAX_WORKERS  # 동시 호출 수
 
 
+class SmartClassifyRequest(BaseModel):
+    """스마트 AI 분류 요청"""
+    model: str = "claude_cli"
+    batch_size: int = 10
+    gap_minutes: int = 60
+    max_workers: int = CLI_MAX_WORKERS
+    similarity_threshold: float = 0.85  # CLIP 유사도 임계값
+
+
 class ClassifyResponse(BaseModel):
     """분류 응답"""
     message: str
@@ -162,6 +171,80 @@ async def stop_classification():
     classification_status["running"] = False
 
     return {"message": "Classification stopped"}
+
+
+@router.post("/smart-start", response_model=ClassifyResponse)
+async def smart_start_classification(
+    background_tasks: BackgroundTasks,
+    request: Optional[SmartClassifyRequest] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    스마트 AI 분류: 폴더 자동 매핑 → unclear 파일만 추출 → (향후) 유사도 그룹핑 → AI 분류.
+    기존 start와 달리 전체가 아닌 unclear 폴더 파일만 AI 분류 대상으로 선별합니다.
+    """
+    global classification_status
+    if request is None:
+        request = SmartClassifyRequest()
+
+    if classification_status["running"]:
+        raise HTTPException(status_code=400, detail="Classification already running")
+
+    # Phase 1: 폴더 자동 매핑
+    from ..workers.folder_classifier import FolderClassifier
+    classifier = FolderClassifier(db)
+    auto_map_result = classifier.auto_map_folders()
+
+    # Phase 2: unclear 폴더 파일만 추출 (pending이고 source_folder가 unclear인 파일)
+    # + source_folder가 NULL인 파일 (폴더 미매핑)
+    files = db.execute(text("""
+        SELECT fc.id, fc.file_path
+        FROM file_classifications fc
+        LEFT JOIN folder_mappings fm ON fc.source_folder_id = fm.id
+        WHERE fc.status = 'pending'
+          AND fc.ai_category_id IS NULL
+          AND (fm.folder_status IN ('unclear', 'flat', 'nested') OR fc.source_folder_id IS NULL)
+        ORDER BY fc.id
+    """)).fetchall()
+
+    total = len(files)
+
+    if total == 0:
+        return ClassifyResponse(
+            message=f"스마트 분류: 폴더 매핑 {auto_map_result['files_mapped']}건 완료, AI 분석 대상 없음",
+            total=0,
+            status="completed",
+        )
+
+    # 상태 초기화 (phase 추가)
+    classification_status = {
+        "running": True,
+        "total": total,
+        "processed": 0,
+        "failed": 0,
+        "current_file": None,
+        "model": request.model,
+        "phase": "ai_classifying",
+        "smart": True,
+        "auto_map_result": auto_map_result,
+        "similarity_threshold": request.similarity_threshold,
+    }
+
+    # 백그라운드 작업 시작 (기존 run_classification 재활용)
+    background_tasks.add_task(
+        run_classification,
+        files,
+        request.model,
+        request.batch_size,
+        request.gap_minutes,
+        request.max_workers,
+    )
+
+    return ClassifyResponse(
+        message=f"스마트 분류: 폴더 매핑 {auto_map_result['files_mapped']}건, AI 분석 {total}건 시작",
+        total=total,
+        status="running",
+    )
 
 
 def _get_monitor_db_session():
@@ -302,9 +385,116 @@ async def run_classification(
     skip_count = len(files_skip)
     total_groups = len(group_map)
 
+    # CLIP 유사도 기반 추가 그룹핑 (smart 모드일 때만)
+    clip_group_map = {}  # clip_group_id → [file_ids]
+    clip_representative_ids = set()
+    clip_skip_count = 0
+
+    if classification_status.get("smart"):
+        try:
+            clip_db = SessionLocal()
+            clip_file_ids = [f.id for f in files_to_classify]
+            if clip_file_ids:
+                placeholders_clip = ",".join(str(fid) for fid in clip_file_ids)
+                # CLIP 임베딩이 있는 파일 조회
+                clip_rows = clip_db.execute(text(f"""
+                    SELECT file_id, clip_embedding
+                    FROM image_features
+                    WHERE file_id IN ({placeholders_clip})
+                      AND clip_embedding IS NOT NULL
+                """)).fetchall()
+
+                if len(clip_rows) >= 2:
+                    import numpy as np
+                    try:
+                        import faiss
+                        # 임베딩 로드
+                        embeddings = []
+                        embed_file_ids = []
+                        for row in clip_rows:
+                            emb = np.frombuffer(row.clip_embedding, dtype=np.float32)
+                            if emb.shape[0] == 512:
+                                embeddings.append(emb)
+                                embed_file_ids.append(row.file_id)
+
+                        if len(embeddings) >= 2:
+                            emb_np = np.vstack(embeddings).astype("float32")
+                            faiss.normalize_L2(emb_np)
+
+                            # 유사도 매트릭스로 그룹핑 (threshold=0.85)
+                            threshold = classification_status.get("similarity_threshold", 0.85)
+                            index = faiss.IndexFlatIP(512)
+                            index.add(emb_np)
+                            k = min(20, len(embeddings))
+                            distances, indices = index.search(emb_np, k)
+
+                            # Union-Find로 그룹 구성
+                            parent = list(range(len(embeddings)))
+
+                            def find(x):
+                                while parent[x] != x:
+                                    parent[x] = parent[parent[x]]
+                                    x = parent[x]
+                                return x
+
+                            def union(a, b):
+                                ra, rb = find(a), find(b)
+                                if ra != rb:
+                                    parent[ra] = rb
+
+                            for i in range(len(embeddings)):
+                                for j_idx in range(k):
+                                    j = indices[i][j_idx]
+                                    if j == -1 or j == i:
+                                        continue
+                                    if distances[i][j_idx] >= threshold:
+                                        union(i, j)
+
+                            # 그룹 구성
+                            groups = {}
+                            for i in range(len(embeddings)):
+                                root = find(i)
+                                if root not in groups:
+                                    groups[root] = []
+                                groups[root].append(embed_file_ids[i])
+
+                            # 2개 이상 멤버 그룹만 처리
+                            clip_gid = 0
+                            for root, members in groups.items():
+                                if len(members) < 2:
+                                    continue
+                                clip_group_map[clip_gid] = members
+                                clip_representative_ids.add(members[0])  # 첫 번째 = 대표
+                                clip_gid += 1
+
+                            # files_to_classify에서 CLIP 그룹 비대표 제거
+                            clip_non_rep = set()
+                            for members in clip_group_map.values():
+                                for m in members[1:]:
+                                    clip_non_rep.add(m)
+
+                            new_files_to_classify = []
+                            clip_files_skip = []
+                            for f in files_to_classify:
+                                if f.id in clip_non_rep:
+                                    clip_files_skip.append(f)
+                                else:
+                                    new_files_to_classify.append(f)
+
+                            clip_skip_count = len(clip_files_skip)
+                            files_skip.extend(clip_files_skip)
+                            files_to_classify = new_files_to_classify
+
+                            pipeline_logs.add("classify", f"[CLIP] 유사 그룹 {len(clip_group_map)}개, {clip_skip_count}건 대표 결과 복사 예정")
+                    except ImportError:
+                        pipeline_logs.add("classify", "[CLIP] faiss-cpu 미설치, 유사도 그룹핑 건너뜀")
+            clip_db.close()
+        except Exception as e:
+            pipeline_logs.add("classify", f"[CLIP] 그룹핑 오류: {e}")
+
     # 시작 로그
-    if skip_count > 0:
-        pipeline_logs.add("classify", f"[시작] {len(files)}건 중 {len(files_to_classify)}건 LLM 큐 분류 (pHash 그룹 {total_groups}개, {skip_count}건 대표 결과 복사)")
+    if skip_count > 0 or clip_skip_count > 0:
+        pipeline_logs.add("classify", f"[시작] {len(files)}건 중 {len(files_to_classify)}건 LLM 큐 분류 (pHash 그룹 {total_groups}개/{skip_count}건, CLIP 그룹 {len(clip_group_map)}개/{clip_skip_count}건 대표 결과 복사)")
     else:
         pipeline_logs.add("classify", f"[시작] {len(files)}건 분류 시작 (모델: {model}, 카테고리: {len(categories)}개, LLM 큐 방식)")
 
@@ -422,6 +612,18 @@ async def run_classification(
                                 classification_status["processed"] += 1
                                 conf_pct = round(confidence * 100)
                                 pipeline_logs.add("classify", f"[OK] {filename} → {category_path} ({conf_pct}%)")
+
+                                # API 사용량 기록
+                                try:
+                                    from ..workers.cost_tracker import CostTracker
+                                    cost_db = SessionLocal()
+                                    try:
+                                        tracker = CostTracker(cost_db)
+                                        tracker.record_usage(model=model, image_count=1)
+                                    finally:
+                                        cost_db.close()
+                                except Exception as cost_err:
+                                    logger.warning(f"Cost tracking failed for file {file_id}: {cost_err}")
                             else:
                                 logger.warning(f"Category not found: {category_path} for {file_path}")
                                 classification_status["failed"] += 1
@@ -501,12 +703,49 @@ async def run_classification(
                             classification_status["processed"] += 1
                     copy_db.commit()
                     if copied > 0:
-                        pipeline_logs.add("classify", f"[그룹 복사] {copied}건 대표 결과 일괄 적용")
+                        pipeline_logs.add("classify", f"[pHash 그룹 복사] {copied}건 대표 결과 일괄 적용")
                 except Exception as e:
                     logger.error(f"Group copy failed: {e}")
                     copy_db.rollback()
                 finally:
                     copy_db.close()
+
+            # CLIP 유사도 그룹 멤버에 대표 결과 일괄 복사
+            if clip_group_map and classification_status["running"]:
+                clip_copy_db = SessionLocal()
+                clip_copied = 0
+                try:
+                    for gid, members in clip_group_map.items():
+                        rep_id = members[0]  # 대표
+                        rep_row = clip_copy_db.execute(text("""
+                            SELECT ai_category_id, ai_confidence, ai_reasoning, ai_model
+                            FROM file_classifications WHERE id = :rep_id AND ai_category_id IS NOT NULL
+                        """), {"rep_id": rep_id}).fetchone()
+
+                        if rep_row:
+                            for member_id in members[1:]:
+                                clip_copy_db.execute(text("""
+                                    UPDATE file_classifications
+                                    SET ai_category_id = :cat_id, ai_confidence = :conf,
+                                        ai_reasoning = :reason, ai_model = :model,
+                                        final_category_id = :cat_id, status = 'ai_classified',
+                                        classified_at = datetime('now')
+                                    WHERE id = :file_id
+                                """), {
+                                    "file_id": member_id, "cat_id": rep_row[0],
+                                    "conf": rep_row[1], "reason": f"[CLIP 유사 복사] {rep_row[2] or ''}",
+                                    "model": rep_row[3],
+                                })
+                                clip_copied += 1
+                                classification_status["processed"] += 1
+                    clip_copy_db.commit()
+                    if clip_copied > 0:
+                        pipeline_logs.add("classify", f"[CLIP 그룹 복사] {clip_copied}건 대표 결과 일괄 적용")
+                except Exception as e:
+                    logger.error(f"CLIP group copy failed: {e}")
+                    clip_copy_db.rollback()
+                finally:
+                    clip_copy_db.close()
 
             # 최종 결과 판정
             succeeded = classification_status["processed"]

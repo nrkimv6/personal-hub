@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
 	import { Button } from '$lib/components/ui';
 
 	/**
@@ -272,81 +272,81 @@
 	<div class="flex flex-wrap gap-2">
 		<span class="text-sm text-muted-foreground py-1.5">상태:</span>
 		<button
-			onclick={() => handleStatusFilter(null)}
+			on:click={() => handleStatusFilter(null)}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === null
 				? 'bg-gray-800 text-white'
 				: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 		>
 			전체
-		</button>
+		</Button>
 		<button
-			onclick={() => handleStatusFilter('pending')}
+			on:click={() => handleStatusFilter('pending')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'pending'
 				? 'bg-yellow-600 text-white'
 				: 'bg-warning-light text-warning-foreground hover:bg-yellow-200'}"
 		>
 			대기
-		</button>
+		</Button>
 		<button
-			onclick={() => handleStatusFilter('processing')}
+			on:click={() => handleStatusFilter('processing')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'processing'
 				? 'bg-primary text-white'
 				: 'bg-primary-light text-primary hover:bg-blue-200'}"
 		>
 			처리 중
-		</button>
+		</Button>
 		<button
-			onclick={() => handleStatusFilter('completed')}
+			on:click={() => handleStatusFilter('completed')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'completed'
 				? 'bg-success text-white'
 				: 'bg-success-light text-success hover:bg-green-200'}"
 		>
 			완료
-		</button>
+		</Button>
 		<button
-			onclick={() => handleStatusFilter('failed')}
+			on:click={() => handleStatusFilter('failed')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'failed'
 				? 'bg-error text-white'
 				: 'bg-error-light text-error hover:bg-red-200'}"
 		>
 			실패
-		</button>
+		</Button>
 	</div>
 	<!-- 분석 상태 필터 -->
 	<div class="flex flex-wrap gap-2">
 		<span class="text-sm text-muted-foreground py-1.5">분석:</span>
 		<button
-			onclick={() => handleAnalysisFilter(null)}
+			on:click={() => handleAnalysisFilter(null)}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterAnalysis === null
 				? 'bg-gray-800 text-white'
 				: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 		>
 			전체
-		</button>
+		</Button>
 		<button
-			onclick={() => handleAnalysisFilter('event')}
+			on:click={() => handleAnalysisFilter('event')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterAnalysis === 'event'
 				? 'bg-purple-600 text-white'
 				: 'bg-purple-light text-purple hover:bg-purple-200'}"
 		>
 			이벤트
-		</button>
+		</Button>
 		<button
-			onclick={() => handleAnalysisFilter('uncategorized')}
+			on:click={() => handleAnalysisFilter('uncategorized')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterAnalysis === 'uncategorized'
 				? 'bg-orange-600 text-white'
 				: 'bg-warning-light text-warning hover:bg-orange-200'}"
 		>
 			미분류
-		</button>
+		</Button>
 		<button
-			onclick={() => handleAnalysisFilter('unanalyzed')}
+			on:click={() => handleAnalysisFilter('unanalyzed')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterAnalysis === 'unanalyzed'
 				? 'bg-gray-600 text-white'
 				: 'bg-secondary text-muted-foreground hover:bg-gray-300'}"
 		>
 			미분석
-		</button>
+		</Button>
 	</div>
 </div>
 
@@ -363,9 +363,9 @@
 	<div class="text-center py-12 text-muted-foreground">
 		<p class="text-lg">크롤링 요청 이력이 없습니다</p>
 		{#if $isAdmin}
-			<button onclick={() => (showAddModal = true)} class="mt-4 btn btn-primary btn-sm">
+			<Button on:click={() => (showAddModal = true)} class="mt-4" variant="primary" size="sm">
 				+ URL 크롤링 요청
-			</button>
+			</Button>
 		{/if}
 	</div>
 {:else}
@@ -398,7 +398,7 @@
 					<div class="flex gap-2">
 						{#if canAnalyze(req) && $isAdmin}
 							<button
-								onclick={(e) => {
+								on:click={(e) => {
 									e.stopPropagation();
 									handleAnalyze(req);
 								}}
@@ -410,18 +410,18 @@
 								{:else}
 									AI 분석
 								{/if}
-							</button>
+							</Button>
 						{/if}
 						{#if (req.status === 'failed' || req.status === 'completed') && $isAdmin}
 							<button
-								onclick={(e) => {
+								on:click={(e) => {
 									e.stopPropagation();
 									handleRetry(req.id);
 								}}
 								class="text-primary hover:underline"
 							>
 								재시도
-							</button>
+							</Button>
 						{/if}
 					</div>
 				</div>
@@ -477,7 +477,7 @@
 							<div class="flex gap-2">
 								{#if canAnalyze(req) && $isAdmin}
 									<button
-										onclick={(e) => {
+										on:click={(e) => {
 											e.stopPropagation();
 											handleAnalyze(req);
 										}}
@@ -489,18 +489,18 @@
 										{:else}
 											AI 분석
 										{/if}
-									</button>
+									</Button>
 								{/if}
 								{#if (req.status === 'failed' || req.status === 'completed') && $isAdmin}
 									<button
-										onclick={(e) => {
+										on:click={(e) => {
 											e.stopPropagation();
 											handleRetry(req.id);
 										}}
 										class="text-sm text-primary hover:underline"
 									>
 										재시도
-									</button>
+									</Button>
 								{/if}
 							</div>
 						</td>
@@ -518,22 +518,22 @@
 			</span>
 			<div class="flex gap-2 items-center">
 				<button
-					onclick={() => goToPage(currentPage - 1)}
+					on:click={() => goToPage(currentPage - 1)}
 					disabled={currentPage === 1}
 					class="px-3 py-1.5 text-sm rounded border disabled:opacity-50 disabled:cursor-not-allowed hover:bg-muted"
 				>
 					이전
-				</button>
+				</Button>
 				<span class="text-sm text-muted-foreground">
 					{currentPage} / {totalPages}
 				</span>
 				<button
-					onclick={() => goToPage(currentPage + 1)}
+					on:click={() => goToPage(currentPage + 1)}
 					disabled={currentPage >= totalPages}
 					class="px-3 py-1.5 text-sm rounded border disabled:opacity-50 disabled:cursor-not-allowed hover:bg-muted"
 				>
 					다음
-				</button>
+				</Button>
 			</div>
 		</div>
 	{/if}
@@ -551,9 +551,9 @@
 		<div class="bg-white rounded-xl w-full max-w-lg p-6" onclick={(e) => e.stopPropagation()}>
 			<div class="flex justify-between items-center mb-4">
 				<h3 class="text-lg font-bold">URL 크롤링 요청</h3>
-				<button onclick={() => (showAddModal = false)} class="text-muted-foreground hover:text-muted-foreground text-2xl">
+				<button on:click={() => (showAddModal = false)} class="text-muted-foreground hover:text-muted-foreground text-2xl">
 					&times;
-				</button>
+				</Button>
 			</div>
 
 			<div class="space-y-4">
@@ -575,7 +575,7 @@
 
 			<div class="mt-6 flex gap-2 justify-end">
 				<Button variant="secondary" size="sm" on:click={() => (showAddModal = false)}>취소</Button>
-				<button onclick={handleAddRequest} disabled={submitting} class="btn btn-primary btn-sm disabled:opacity-50">
+				<Button on:click={handleAddRequest} disabled={submitting} variant="primary" size="sm">
 					{#if submitting}
 						<span class="flex items-center gap-2">
 							<span class="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
@@ -584,7 +584,7 @@
 					{:else}
 						요청
 					{/if}
-				</button>
+				</Button>
 			</div>
 		</div>
 	</div>
@@ -610,9 +610,9 @@
 						{getStatusText(selectedRequest.status)}
 					</span>
 				</div>
-				<button onclick={() => (showDetailModal = false)} class="text-muted-foreground hover:text-muted-foreground text-2xl">
+				<button on:click={() => (showDetailModal = false)} class="text-muted-foreground hover:text-muted-foreground text-2xl">
 					&times;
-				</button>
+				</Button>
 			</div>
 
 			<div class="space-y-4">
@@ -733,11 +733,11 @@
 
 			<div class="mt-6 flex gap-2 justify-end">
 				{#if selectedRequest && canAnalyze(selectedRequest) && $isAdmin}
-					<button
-						onclick={() => selectedRequest && handleAnalyze(selectedRequest)}
+					<Button
+						on:click={() => selectedRequest && handleAnalyze(selectedRequest)}
 						disabled={Boolean(selectedRequest.crawled_page_id && analyzingPages.has(selectedRequest.crawled_page_id))}
-						class="btn btn-outline btn-sm text-purple border-purple-300 hover:bg-purple-light disabled:opacity-50"
-					>
+						variant="outline" size="sm" class="					>"
+$9
 						{#if selectedRequest.crawled_page_id && analyzingPages.has(selectedRequest.crawled_page_id)}
 							<span class="flex items-center gap-2">
 								<span class="animate-spin h-4 w-4 border-2 border-purple-600 border-t-transparent rounded-full"></span>
@@ -746,12 +746,12 @@
 						{:else}
 							AI 분석
 						{/if}
-					</button>
+					</Button>
 				{/if}
 				{#if (selectedRequest.status === 'failed' || selectedRequest.status === 'completed') && $isAdmin}
-					<button onclick={() => selectedRequest && handleRetry(selectedRequest.id)} class="btn btn-outline btn-sm">
+					<Button on:click={() => selectedRequest && handleRetry(selectedRequest.id)} variant="outline" size="sm">
 						재시도
-					</button>
+					</Button>
 				{/if}
 				<Button variant="secondary" size="sm" on:click={() => (showDetailModal = false)}>닫기</Button>
 			</div>

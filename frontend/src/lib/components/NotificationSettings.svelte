@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
 	import { onMount } from 'svelte';
 	import { notificationApi } from '$lib/api';
 	import type { NotificationSettings } from '$lib/types';
@@ -126,13 +126,13 @@
 							</div>
 						</div>
 
-						<button
-							class="btn btn-primary w-full"
-							onclick={saveNotificationSettings}
+						<Button
+							variant="primary" class="w-full"
+							on:click={saveNotificationSettings}
 							disabled={saving}
 						>
 							{saving ? '저장 중...' : '설정 저장'}
-						</button>
+						</Button>
 					</div>
 				{/if}
 			</div>
@@ -141,8 +141,8 @@
 			<div class="card">
 				<h3 class="text-lg font-semibold text-foreground mb-4">API 문서</h3>
 				<div class="flex gap-4">
-					<a href="/docs" target="_blank" class="btn btn-secondary"> Swagger UI </a>
-					<a href="/redoc" target="_blank" class="btn btn-secondary"> ReDoc </a>
+					<a href="/docs" target="_blank" class="inline-flex items-center px-4 py-2 rounded bg-secondary text-secondary-foreground hover:bg-secondary/80"> Swagger UI </a>
+					<a href="/redoc" target="_blank" class="inline-flex items-center px-4 py-2 rounded bg-secondary text-secondary-foreground hover:bg-secondary/80"> ReDoc </a>
 				</div>
 			</div>
 		</div>

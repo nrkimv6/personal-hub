@@ -2,6 +2,8 @@
   import { onMount } from 'svelte';
   import { notesApi } from '$lib/api/notes';
   import type { NoteArchive, TagDef } from '$lib/api/notes';
+  import { RotateCcw, Trash2, Archive, FileText, ChevronLeft, ChevronRight } from 'lucide-svelte';
+  import TagBadge from './TagBadge.svelte';
 
   let items = $state<NoteArchive[]>([]);
   let tags = $state<TagDef[]>([]);
@@ -11,6 +13,7 @@
   let selectedTag = $state('');
   let loading = $state(false);
   let error = $state('');
+  let deleteConfirmId = $state<number | null>(null);
 
   async function load() {
     loading = true;
@@ -32,7 +35,6 @@
   }
 
   async function restore(id: number) {
-    if (!confirm('메모를 복원하시겠습니까?')) return;
     try {
       await notesApi.restoreArchive(id);
       load();
@@ -41,14 +43,20 @@
     }
   }
 
-  async function remove(id: number) {
-    if (!confirm('영구 삭제하시겠습니까? 되돌릴 수 없습니다.')) return;
+  async function removeConfirm(id: number) {
+    deleteConfirmId = null;
     try {
       await notesApi.deleteArchive(id);
       load();
     } catch (e: any) {
       alert(e.message);
     }
+  }
+
+  function selectTag(tagName: string) {
+    selectedTag = tagName;
+    page = 1;
+    load();
   }
 
   function formatDate(iso: string) {
@@ -60,56 +68,100 @@
 
 <div class="flex flex-col h-full overflow-hidden">
   <!-- 필터 -->
-  <div class="flex gap-2 p-4 border-b border-gray-200 dark:border-gray-700">
-    <select
-      bind:value={selectedTag}
-      onchange={() => { page = 1; load(); }}
-      class="px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
-    >
-      <option value="">전체 태그</option>
+  <div class="flex flex-col gap-3 p-4 border-b border-border">
+    <div class="flex flex-wrap gap-1.5">
+      <button
+        onclick={() => selectTag('')}
+        class="px-3 py-1.5 text-xs rounded-full border transition-colors
+          {selectedTag === ''
+            ? 'bg-primary text-primary-foreground border-primary'
+            : 'bg-card text-muted-foreground border-border hover:border-primary/50'}"
+      >All</button>
       {#each tags as tag}
-        <option value={tag.name}>{tag.name}</option>
+        <button
+          onclick={() => selectTag(tag.name)}
+          class="px-3 py-1.5 text-xs rounded-full border transition-colors
+            {selectedTag === tag.name
+              ? 'bg-primary text-primary-foreground border-primary'
+              : 'bg-card text-muted-foreground border-border hover:border-primary/50'}"
+        >{tag.name}</button>
       {/each}
-    </select>
-    <span class="ml-auto text-sm text-gray-400 self-center">총 {total}개</span>
+      <span class="ml-auto text-xs text-muted-foreground self-center">총 {total}개</span>
+    </div>
   </div>
 
   <!-- 목록 -->
   <div class="flex-1 overflow-y-auto p-4">
     {#if loading}
-      <div class="text-center text-gray-400 py-8">불러오는 중...</div>
-    {:else if error}
-      <div class="text-center text-red-400 py-8">{error}</div>
-    {:else if items.length === 0}
-      <div class="text-center text-gray-400 py-8">아카이브된 메모가 없습니다.</div>
-    {:else}
       <div class="space-y-3">
+        {#each Array(4) as _}
+          <div class="rounded-lg border border-border p-4 space-y-2">
+            <div class="animate-skeleton-shimmer h-4 w-1/2 rounded"></div>
+            <div class="animate-skeleton-shimmer h-3 w-full rounded"></div>
+          </div>
+        {/each}
+      </div>
+    {:else if error}
+      <div class="text-center text-destructive text-sm py-8">{error}</div>
+    {:else if items.length === 0}
+      <div class="flex flex-col items-center justify-center py-16 gap-3">
+        <div class="w-14 h-14 bg-muted rounded-2xl flex items-center justify-center">
+          <Archive class="w-7 h-7 text-muted-foreground" />
+        </div>
+        <p class="text-foreground font-medium text-sm">No archived notes</p>
+        <p class="text-muted-foreground text-xs">
+          {selectedTag ? `"${selectedTag}" 태그에 아카이브된 메모가 없습니다.` : '아카이브된 메모가 없습니다.'}
+        </p>
+      </div>
+    {:else}
+      <div class="space-y-2">
         {#each items as item (item.id)}
-          <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
-            <div class="flex items-start justify-between gap-3">
+          <div class="group bg-card border border-border shadow-card hover:shadow-card-hover rounded-lg p-4 transition-all">
+            <div class="flex items-start gap-3">
+              <!-- FileText 아이콘 -->
+              <div class="w-8 h-8 bg-muted rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                <FileText class="w-4 h-4 text-muted-foreground" />
+              </div>
               <div class="flex-1 min-w-0">
-                <h3 class="font-medium text-gray-900 dark:text-white text-sm">{item.title}</h3>
-                <p class="text-xs text-gray-400 mt-0.5">아카이브: {formatDate(item.archived_at)}</p>
-                <p class="text-gray-500 dark:text-gray-400 text-xs mt-1 line-clamp-2">
+                <h3 class="font-medium text-foreground text-sm">{item.title}</h3>
+                <p class="text-xs text-muted-foreground mt-0.5">아카이브: {formatDate(item.archived_at)}</p>
+                <p class="text-muted-foreground text-xs mt-1 line-clamp-2">
                   {item.content.replace(/[#*`>\-]/g, '').slice(0, 100) || '내용 없음'}
                 </p>
                 {#if item.tags.length > 0}
                   <div class="flex flex-wrap gap-1 mt-2">
                     {#each item.tags as tag}
-                      <span class="px-2 py-0.5 text-xs rounded-full text-white" style="background-color: {tag.color}">{tag.name}</span>
+                      <TagBadge {tag} size="sm" />
                     {/each}
                   </div>
                 {/if}
               </div>
-              <div class="flex gap-1 shrink-0">
+              <!-- 액션 버튼 -->
+              <div class="flex gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button
                   onclick={() => restore(item.id)}
-                  class="px-3 py-1.5 text-xs rounded-lg border text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20"
-                >복원</button>
-                <button
-                  onclick={() => remove(item.id)}
-                  class="px-3 py-1.5 text-xs rounded-lg border text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
-                >삭제</button>
+                  class="p-1.5 rounded-lg text-muted-foreground hover:text-success hover:bg-success-light transition-colors"
+                  title="복원"
+                ><RotateCcw class="w-4 h-4" /></button>
+
+                {#if deleteConfirmId === item.id}
+                  <span class="flex gap-1 items-center">
+                    <button
+                      onclick={() => removeConfirm(item.id)}
+                      class="px-2 py-1 text-xs rounded bg-destructive/20 text-destructive border border-destructive/30 hover:bg-destructive/30"
+                    >Delete</button>
+                    <button
+                      onclick={() => (deleteConfirmId = null)}
+                      class="px-2 py-1 text-xs rounded bg-muted text-muted-foreground"
+                    >Cancel</button>
+                  </span>
+                {:else}
+                  <button
+                    onclick={() => (deleteConfirmId = item.id)}
+                    class="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-error-light transition-colors"
+                    title="삭제"
+                  ><Trash2 class="w-4 h-4" /></button>
+                {/if}
               </div>
             </div>
           </div>
@@ -120,10 +172,18 @@
 
   <!-- 페이지네이션 -->
   {#if pages > 1}
-    <div class="flex items-center justify-center gap-3 p-3 border-t border-gray-200 dark:border-gray-700">
-      <button onclick={() => { page--; load(); }} disabled={page <= 1} class="px-3 py-1 text-sm rounded border disabled:opacity-40">이전</button>
-      <span class="text-sm text-gray-600 dark:text-gray-400">{page} / {pages}</span>
-      <button onclick={() => { page++; load(); }} disabled={page >= pages} class="px-3 py-1 text-sm rounded border disabled:opacity-40">다음</button>
+    <div class="flex items-center justify-center gap-2 p-3 border-t border-border">
+      <button
+        onclick={() => { page--; load(); }}
+        disabled={page <= 1}
+        class="p-2 rounded-lg hover:bg-muted disabled:opacity-40 transition-colors"
+      ><ChevronLeft class="w-4 h-4" /></button>
+      <span class="text-xs text-muted-foreground">{page} / {pages}</span>
+      <button
+        onclick={() => { page++; load(); }}
+        disabled={page >= pages}
+        class="p-2 rounded-lg hover:bg-muted disabled:opacity-40 transition-colors"
+      ><ChevronRight class="w-4 h-4" /></button>
     </div>
   {/if}
 </div>

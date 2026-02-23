@@ -4,9 +4,18 @@
 
 	interface Props {
 		planFile?: string;
+		currentPlanName?: string;
 	}
 
-	let { planFile }: Props = $props();
+	let { planFile, currentPlanName }: Props = $props();
+
+	// Phase 2: 전체실행 시 Plan 파일 리스트 추적
+	interface BatchPlanItem {
+		name: string;
+		status: 'pending' | 'running' | 'done';
+	}
+	let batchPlans = $state<BatchPlanItem[]>([]);
+	let batchDoneCount = $derived(batchPlans.filter(p => p.status === 'done').length);
 
 	interface ParsedLine {
 		timestamp: string;
@@ -54,7 +63,8 @@
 		TRACK: { text: 'text-purple-400', bg: 'bg-purple-500/20' },
 		CYCLE: { text: 'text-white', bg: 'bg-gray-600' },
 		SKIP: { text: 'text-gray-500', bg: 'bg-gray-500/20' },
-		GIT: { text: 'text-orange-400', bg: 'bg-orange-500/20' }
+		GIT: { text: 'text-orange-400', bg: 'bg-orange-500/20' },
+		BATCH: { text: 'text-teal-400', bg: 'bg-teal-500/20' }
 	};
 
 	const LINE_PATTERN = /^\[?(\d{2}:\d{2}:\d{2})\]?\s*\[(\w+)\]\s*(.*)/;
@@ -90,6 +100,35 @@
 		}
 
 		const parsed = parseLine(text, isStale);
+
+		// BATCH 마커 감지 → 전체실행 파일 리스트 추적
+		if (parsed.tag === 'BATCH' && !isStale) {
+			const listMatch = parsed.message.match(/^PLAN_LIST\s+(.+)$/);
+			if (listMatch) {
+				batchPlans = listMatch[1].split(',').map(n => ({
+					name: n.trim(),
+					status: 'pending' as const
+				}));
+			}
+			const startMatch = parsed.message.match(/^PLAN_START\s+(.+)$/);
+			if (startMatch) {
+				const name = startMatch[1].trim();
+				batchPlans = batchPlans.map(p =>
+					p.name === name ? { ...p, status: 'running' as const } : p
+				);
+			}
+			const doneMatch = parsed.message.match(/^PLAN_DONE\s+(.+)$/);
+			if (doneMatch) {
+				const name = doneMatch[1].trim();
+				batchPlans = batchPlans.map(p =>
+					p.name === name ? { ...p, status: 'done' as const } : p
+				);
+			}
+		}
+		// SEPARATOR 감지 시 배치 리스트 초기화
+		if (text.includes(SEPARATOR_PATTERN) && !isStale) {
+			batchPlans = [];
+		}
 
 		// TRACK 태그 감지 → trackingInfo 갱신
 		if (parsed.tag === 'TRACK' && !isStale) {
@@ -255,10 +294,21 @@
 	}
 
 	// Plan 파일명 표시용
-	let planDisplayName = $derived(
-		planFile === 'ALL' ? '전체 실행' :
-		planFile ? planFile.split(/[\\/]/).pop() ?? '' : ''
-	);
+	let planDisplayName = $derived.by(() => {
+		if (planFile === 'ALL') {
+			if (currentPlanName && batchPlans.length > 0) {
+				return `전체 실행 › ${currentPlanName} (${batchDoneCount}/${batchPlans.length})`;
+			}
+			if (currentPlanName) {
+				return `전체 실행 › ${currentPlanName}`;
+			}
+			if (batchPlans.length > 0) {
+				return `전체 실행 (${batchDoneCount}/${batchPlans.length})`;
+			}
+			return '전체 실행';
+		}
+		return planFile ? planFile.split(/[\\/]/).pop() ?? '' : '';
+	});
 </script>
 
 <div class="flex flex-col h-full">
@@ -269,7 +319,7 @@
 			<!-- Phase 2: Plan 파일명 표시 -->
 			{#if planDisplayName}
 				<div class="h-3.5 w-px bg-gray-600 shrink-0"></div>
-				<span class="text-[10px] text-gray-400 font-mono truncate max-w-[200px]">{planDisplayName}</span>
+				<span class="text-[10px] text-gray-400 font-mono truncate max-w-[350px]">{planDisplayName}</span>
 			{/if}
 			<div class="flex items-center gap-1.5">
 				{#if connected === 'connected' && redisAvailable}
@@ -354,6 +404,22 @@
 		</div>
 	</div>
 
+	<!-- Batch Plan List (전체실행 시 파일 리스트) -->
+	{#if batchPlans.length > 0}
+		<div class="flex items-center gap-1.5 px-3 py-1.5 border-b border-gray-700 bg-gray-900/50 flex-wrap shrink-0">
+			<span class="text-[10px] text-gray-500 mr-1">Plans:</span>
+			{#each batchPlans as plan}
+				<span class="text-[10px] px-1.5 py-0.5 rounded font-mono {
+					plan.status === 'done' ? 'text-green-400 bg-green-500/15 line-through opacity-60' :
+					plan.status === 'running' ? 'text-cyan-400 bg-cyan-500/20' :
+					'text-gray-500 bg-gray-500/10'
+				}">
+					{plan.status === 'running' ? '▶ ' : plan.status === 'done' ? '✓ ' : ''}{plan.name}
+				</span>
+			{/each}
+		</div>
+	{/if}
+
 	<!-- Log Content (Phase 2: text-sm for body) -->
 	<div
 		bind:this={logContainer}
@@ -367,6 +433,21 @@
 				{#if isSeparator(line.raw)}
 					<div class="py-2 text-center select-none {line.isStale ? 'opacity-25' : 'opacity-60'}">
 						<span class="text-gray-500 text-[10px]">{extractSeparatorText(line.raw)}</span><!-- separator -->
+					</div>
+				{:else if line.tag === 'CYCLE'}
+					<div class="py-1.5 -mx-3 px-3 mt-2 bg-gray-700/60 border-l-2 border-gray-400 {line.isStale ? 'opacity-30' : ''}">
+						<span class="font-bold text-white text-xs tracking-wider">{line.message}</span>
+					</div>
+				{:else if line.tag === 'PHASE'}
+					{@const style = getTagStyle(line.tag)}
+					<div class="flex items-start gap-2 py-0.5 leading-5 mt-1.5 border-t border-indigo-900/40 {line.isStale ? 'opacity-30' : ''}">
+						<span class="text-xs text-gray-400/60 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
+						<span class="text-xs shrink-0 w-[42px] text-right font-semibold {style.text}">
+							<span class="rounded px-1 py-0.5 {style.bg}">{line.tag}</span>
+						</span>
+						<span class="flex-1 min-w-0 break-all text-indigo-300 font-medium">
+							{line.message}
+						</span>
 					</div>
 				{:else if line.tag}
 					{@const style = getTagStyle(line.tag)}

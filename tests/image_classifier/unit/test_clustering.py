@@ -365,13 +365,14 @@ def test_cluster_all_includes_classified_files(test_db):
     base_time = datetime(2023, 4, 15, 10, 0, 0)
     worker = TimeClusteringWorker(test_db, gap_minutes=60)
 
+    # FK 제약: 카테고리 먼저 생성
+    test_db.execute(text("INSERT INTO categories (id, name, full_path) VALUES (1, 'A', 'A')"))
     # 분류된 파일 + 미분류 파일
     test_db.execute(text("""
         INSERT INTO file_classifications (id, file_path, file_hash, status, extracted_date, final_category_id)
         VALUES (1, '/test/file1.jpg', 'h1', 'ai_classified', :date1, 1),
                (2, '/test/file2.jpg', 'h2', 'pending', :date2, NULL)
     """), {"date1": base_time.isoformat(), "date2": (base_time + timedelta(minutes=10)).isoformat()})
-    test_db.execute(text("INSERT INTO categories (id, name, full_path) VALUES (1, 'A', 'A')"))
     test_db.commit()
 
     # cluster_all_unclassified는 분류된 파일 제외

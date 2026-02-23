@@ -31,6 +31,7 @@ class Note(Base):
     content = Column(Text, nullable=False, default="")
     remark = Column(Text, nullable=True)
     is_pinned = Column(Integer, nullable=False, default=0)
+    is_starred = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
     deleted_at = Column(DateTime, nullable=True)
@@ -65,12 +66,14 @@ class NoteArchive(Base):
     updated_at = Column(DateTime, nullable=False)
     archived_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
-    # relationships
+    # relationships (viewonly: archive/restore는 서비스에서 직접 처리)
     tags = relationship(
         "NoteTag",
         primaryjoin="and_(NoteTag.note_id == NoteArchive.id, NoteTag.source == 'archive')",
         foreign_keys="NoteTag.note_id",
         lazy="selectin",
+        viewonly=True,
+        overlaps="tags",
     )
     histories = relationship(
         "NoteHistory",
@@ -78,6 +81,8 @@ class NoteArchive(Base):
         foreign_keys="NoteHistory.note_id",
         order_by="NoteHistory.changed_at.desc()",
         lazy="selectin",
+        viewonly=True,
+        overlaps="histories",
     )
 
 

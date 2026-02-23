@@ -5,9 +5,12 @@
 - GET /api/ic/files: 파일 리스트 조회
 """
 
+import logging
 from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
+
+logger = logging.getLogger(__name__)
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -16,6 +19,7 @@ from sqlalchemy import text
 from ..database import get_db
 from ..config import settings
 from ..workers.thumbnail import get_thumbnail_path
+from ..workers.feedback import FeedbackLearner
 
 router = APIRouter(prefix="/files", tags=["Files"])
 
@@ -303,17 +307,37 @@ async def bulk_classify_files(
     if not request.file_ids:
         raise HTTPException(status_code=400, detail="파일 ID가 필요합니다.")
 
+    # 카테고리 변경 전 원래 카테고리 조회 (feedback 기록용)
+    ids_tuple = tuple(request.file_ids)
+    original_rows = db.execute(
+        text("SELECT id, final_category_id FROM file_classifications WHERE id IN :ids"),
+        {"ids": ids_tuple}
+    ).fetchall()
+    original_map = {row.id: row.final_category_id for row in original_rows}
+
     db.execute(
         text("""
             UPDATE file_classifications
             SET final_category_id = :cat_id, status = 'approved'
             WHERE id IN :ids
         """),
-        {"cat_id": request.category_id, "ids": tuple(request.file_ids)}
+        {"cat_id": request.category_id, "ids": ids_tuple}
     )
     db.commit()
 
-    return {"status": "ok", "classified_count": len(request.file_ids)}
+    # 카테고리가 실제로 변경된 파일에 대해 feedback 기록
+    learner = FeedbackLearner(db)
+    feedback_count = 0
+    for file_id in request.file_ids:
+        original_cat = original_map.get(file_id)
+        if original_cat is not None and original_cat != request.category_id:
+            try:
+                learner.record_correction(file_id, original_cat, request.category_id)
+                feedback_count += 1
+            except Exception as e:
+                logger.warning(f"Failed to record feedback for file {file_id}: {e}")
+
+    return {"status": "ok", "classified_count": len(request.file_ids), "feedback_recorded": feedback_count}
 
 
 class BulkDeleteRequest(BaseModel):
@@ -390,3 +414,28 @@ async def rollback_file(
     db.commit()
 
     return {"status": "ok", "file_id": file_id, "new_status": new_status}
+
+
+class OpenLocalRequest(BaseModel):
+    path: Optional[str] = None
+    folder: Optional[str] = None
+
+
+@router.post("/open-local")
+async def open_local_file_or_folder(request: OpenLocalRequest):
+    """로컬 파일/폴더를 기본 뷰어/탐색기로 열기 (개발 환경 전용)"""
+    import os
+
+    target = request.path or request.folder
+    if not target:
+        raise HTTPException(status_code=400, detail="path 또는 folder를 지정하세요.")
+
+    target_path = Path(target)
+    if not target_path.exists():
+        raise HTTPException(status_code=404, detail=f"경로를 찾을 수 없습니다: {target}")
+
+    try:
+        os.startfile(str(target_path))
+        return {"status": "ok", "opened": str(target_path)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"열기 실패: {e}")

@@ -69,6 +69,7 @@ export interface RunStatusResponse {
 	current_cycle: number | null;
 	exit_code: number | null;
 	crashed: boolean;
+	current_plan_name: string | null;
 }
 
 export interface PlanProgressResponse {
@@ -149,10 +150,10 @@ export interface TaskListParams {
 }
 
 // ============================================================
-// API prefix (백엔드 라우터: /api/v1/plan-runner)
+// API prefix (백엔드 라우터: /api/v1/dev-runner)
 // ============================================================
 
-const DEV_RUNNER_BASE = '/api/v1/plan-runner';
+const DEV_RUNNER_BASE = '/api/v1/dev-runner';
 
 async function devRunnerRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
 	const url = `${DEV_RUNNER_BASE}${endpoint}`;

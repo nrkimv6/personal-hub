@@ -13,6 +13,7 @@ import redis.asyncio as aioredis
 from app.modules.dev_runner.config import config
 from app.modules.dev_runner.schemas import LogResponse
 from app.modules.dev_runner.services.state import get_state
+from app.modules.dev_runner.services.db_service import db_service
 
 # Redis 설정
 REDIS_HOST = "localhost"
@@ -59,24 +60,39 @@ class LogService:
         return None
 
     def tail_log_file(self, n_lines: int = 100) -> LogResponse:
-        """로그 파일 끝에서 N줄 읽기 (초기 로드용)"""
+        """로그 파일 끝에서 N줄 읽기 (초기 로드용).
+
+        로그 파일이 없거나 비어있을 때 SQLite stream_logs fallback을 시도합니다.
+        """
         log_file = self._find_current_log()
 
-        if not log_file or not log_file.exists():
-            return LogResponse(lines=[], total_lines=0)
-
-        try:
-            with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
-                lines = deque(f, maxlen=n_lines)
+        if log_file and log_file.exists():
+            try:
+                with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
+                    lines = deque(f, maxlen=n_lines)
+                    if lines:
+                        return LogResponse(
+                            lines=[line.rstrip('\n') for line in lines],
+                            total_lines=len(lines)
+                        )
+            except Exception as e:
                 return LogResponse(
-                    lines=[line.rstrip('\n') for line in lines],
-                    total_lines=len(lines)
+                    lines=[f"Error reading log: {str(e)}"],
+                    total_lines=1
                 )
-        except Exception as e:
-            return LogResponse(
-                lines=[f"Error reading log: {str(e)}"],
-                total_lines=1
-            )
+
+        # fallback: SQLite stream_logs 조회
+        try:
+            cycle_id = db_service.get_latest_cycle_id()
+            if cycle_id:
+                log_rows = db_service.get_stream_logs(cycle_id, limit=n_lines)
+                if log_rows:
+                    lines = [row["message"] for row in log_rows]
+                    return LogResponse(lines=lines, total_lines=len(lines))
+        except Exception:
+            pass
+
+        return LogResponse(lines=[], total_lines=0)
 
     async def stream_log_file(self) -> AsyncGenerator[str, None]:
         """Redis Pub/Sub 기반 실시간 로그 스트리밍 (SSE 형식)

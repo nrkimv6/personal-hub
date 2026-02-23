@@ -1040,3 +1040,34 @@ export interface RedisStatus {
   used_memory_mb: number | null;
   connected_clients: number | null;
 }
+
+// ============================================================
+// Python 프로세스 모니터
+// ============================================================
+
+export interface PythonProcess {
+  pid: number;
+  role: string;
+  memory_mb: number;
+  cpu_percent: number;
+  cmdline: string;
+  create_time: string;
+  status: string;
+  uptime: string;
+}
+
+export interface KillProcessResponse {
+  success: boolean;
+  message: string;
+}
+
+export const processMonitorApi = {
+  getPythonProcesses: () =>
+    request<PythonProcess[]>('/system/python-processes'),
+
+  killProcess: (pid: number) =>
+    request<KillProcessResponse>('/system/kill-process', {
+      method: 'POST',
+      body: JSON.stringify({ pid })
+    })
+};

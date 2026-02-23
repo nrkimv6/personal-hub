@@ -57,6 +57,7 @@ class NoteResponse(BaseModel):
     content: str
     remark: Optional[str]
     is_pinned: bool
+    is_starred: bool
     tags: List[NoteTagInfo] = []
     created_at: datetime
     updated_at: datetime
@@ -94,6 +95,23 @@ class ArchiveListResponse(BaseModel):
     page: int
     page_size: int
     pages: int
+
+
+# ──────────────── Bulk 스키마 ────────────────
+
+class BulkNoteIds(BaseModel):
+    note_ids: List[int] = Field(..., min_length=1)
+
+
+class BulkTagAction(BaseModel):
+    note_ids: List[int] = Field(..., min_length=1)
+    add_tag_ids: List[int] = []
+    remove_tag_ids: List[int] = []
+
+
+class BulkStarAction(BaseModel):
+    note_ids: List[int] = Field(..., min_length=1)
+    starred: bool
 
 
 # ──────────────── History 스키마 ────────────────

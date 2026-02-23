@@ -6,7 +6,7 @@ from typing import Optional, List
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, func, distinct
 
 from app.modules.notes.models import Note, NoteArchive, NoteTag, NoteTagDef, NoteHistory
 
@@ -24,6 +24,7 @@ def _note_to_dict(note: Note) -> dict:
         "content": note.content,
         "remark": note.remark,
         "is_pinned": bool(note.is_pinned),
+        "is_starred": bool(note.is_starred),
         "tags": [_tag_info(t) for t in note.tags],
         "created_at": note.created_at,
         "updated_at": note.updated_at,
@@ -69,16 +70,39 @@ def _set_tags(db: Session, note_id: int, tag_ids: List[int], source: str = "note
 def list_notes(
     db: Session,
     tag: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    tag_mode: str = "or",
     search: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    sort: str = "created_at",
+    order: str = "desc",
     page: int = 1,
     page_size: int = 20,
+    starred: Optional[bool] = None,
 ) -> dict:
     query = db.query(Note).filter(Note.deleted_at.is_(None))
 
-    if tag:
+    # 하위호환: 단일 tag → tags 리스트로 변환
+    effective_tags = tags
+    if not effective_tags and tag:
+        effective_tags = [tag]
+
+    if effective_tags:
         query = query.join(
             NoteTag, and_(NoteTag.note_id == Note.id, NoteTag.source == "note")
-        ).join(NoteTagDef, NoteTagDef.id == NoteTag.tag_id).filter(NoteTagDef.name == tag)
+        ).join(NoteTagDef, NoteTagDef.id == NoteTag.tag_id)
+
+        if tag_mode == "and":
+            # AND 모드: 모든 태그를 가진 메모만
+            query = (
+                query.filter(NoteTagDef.name.in_(effective_tags))
+                .group_by(Note.id)
+                .having(func.count(distinct(NoteTagDef.name)) == len(effective_tags))
+            )
+        else:
+            # OR 모드: 태그 중 하나라도 가진 메모
+            query = query.filter(NoteTagDef.name.in_(effective_tags)).distinct()
 
     if search and search.strip():
         pattern = f"%{search.strip()}%"
@@ -86,10 +110,29 @@ def list_notes(
             Note.title.ilike(pattern) | Note.content.ilike(pattern)
         )
 
+    if date_from:
+        query = query.filter(Note.created_at >= datetime.fromisoformat(date_from))
+
+    if date_to:
+        query = query.filter(Note.created_at <= datetime.fromisoformat(date_to))
+
+    if starred is not None:
+        query = query.filter(Note.is_starred == (1 if starred else 0))
+
     total = query.count()
     pages = max(1, math.ceil(total / page_size))
+
+    # 정렬 컬럼 매핑 (허용 목록 외 기본값 적용)
+    sort_columns = {
+        "created_at": Note.created_at,
+        "updated_at": Note.updated_at,
+        "title": Note.title,
+    }
+    sort_col = sort_columns.get(sort, Note.created_at)
+    sort_expr = sort_col.asc() if order == "asc" else sort_col.desc()
+
     items = (
-        query.order_by(Note.is_pinned.desc(), Note.created_at.desc())
+        query.order_by(Note.is_pinned.desc(), sort_expr)
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
@@ -181,6 +224,18 @@ def delete_note(db: Session, note_id: int, hard: bool = False) -> bool:
     return True
 
 
+def toggle_star(db: Session, note_id: int) -> Note:
+    note = get_note(db, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="메모를 찾을 수 없습니다.")
+
+    note.is_starred = 0 if note.is_starred else 1
+    note.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(note)
+    return note
+
+
 def toggle_pin(db: Session, note_id: int) -> Note:
     note = get_note(db, note_id)
     if not note:
@@ -211,22 +266,32 @@ def archive_note(db: Session, note_id: int) -> NoteArchive:
     db.add(archive)
     db.flush()
 
-    # NoteTag 이전: source='note' → 'archive', note_id → archive.id
+    # NoteTag 이전: 새로 생성 후 기존 삭제 (relationship 충돌 방지)
     note_tags = db.query(NoteTag).filter(
         NoteTag.note_id == note.id, NoteTag.source == "note"
     ).all()
-    for nt in note_tags:
-        nt.note_id = archive.id
-        nt.source = "archive"
+    tag_ids = [nt.tag_id for nt in note_tags]
+    db.query(NoteTag).filter(
+        NoteTag.note_id == note.id, NoteTag.source == "note"
+    ).delete(synchronize_session=False)
+    for tid in tag_ids:
+        db.add(NoteTag(note_id=archive.id, tag_id=tid, source="archive"))
 
-    # NoteHistory 이전: source='note' → 'archive', note_id → archive.id
+    # NoteHistory 이전: 새로 생성 후 기존 삭제
     histories = db.query(NoteHistory).filter(
         NoteHistory.note_id == note.id, NoteHistory.source == "note"
     ).all()
-    for h in histories:
-        h.note_id = archive.id
-        h.source = "archive"
+    hist_data = [(h.title, h.content, h.remark, h.changed_at) for h in histories]
+    db.query(NoteHistory).filter(
+        NoteHistory.note_id == note.id, NoteHistory.source == "note"
+    ).delete(synchronize_session=False)
+    for title, content, remark, changed_at in hist_data:
+        db.add(NoteHistory(
+            note_id=archive.id, source="archive",
+            title=title, content=content, remark=remark, changed_at=changed_at,
+        ))
 
+    db.expire(note)
     db.delete(note)
     db.commit()
     db.refresh(archive)
@@ -283,21 +348,30 @@ def restore_archive(db: Session, archive_id: int) -> Note:
     db.add(note)
     db.flush()
 
-    # NoteTag 복원: source='archive' → 'note', note_id → note.id
+    # NoteTag 복원: 새로 생성 후 기존 삭제
     archive_tags = db.query(NoteTag).filter(
         NoteTag.note_id == archive.id, NoteTag.source == "archive"
     ).all()
-    for nt in archive_tags:
-        nt.note_id = note.id
-        nt.source = "note"
+    tag_ids = [nt.tag_id for nt in archive_tags]
+    db.query(NoteTag).filter(
+        NoteTag.note_id == archive.id, NoteTag.source == "archive"
+    ).delete(synchronize_session=False)
+    for tid in tag_ids:
+        db.add(NoteTag(note_id=note.id, tag_id=tid, source="note"))
 
-    # NoteHistory 복원: source='archive' → 'note', note_id → note.id
+    # NoteHistory 복원: 새로 생성 후 기존 삭제
     histories = db.query(NoteHistory).filter(
         NoteHistory.note_id == archive.id, NoteHistory.source == "archive"
     ).all()
-    for h in histories:
-        h.note_id = note.id
-        h.source = "note"
+    hist_data = [(h.title, h.content, h.remark, h.changed_at) for h in histories]
+    db.query(NoteHistory).filter(
+        NoteHistory.note_id == archive.id, NoteHistory.source == "archive"
+    ).delete(synchronize_session=False)
+    for title, content, remark, changed_at in hist_data:
+        db.add(NoteHistory(
+            note_id=note.id, source="note",
+            title=title, content=content, remark=remark, changed_at=changed_at,
+        ))
 
     db.delete(archive)
     db.commit()
@@ -384,6 +458,88 @@ def update_tag(
     db.commit()
     db.refresh(tag)
     return tag
+
+
+# ──────────────── Bulk 서비스 ────────────────
+
+def bulk_delete(db: Session, note_ids: List[int]) -> int:
+    """여러 메모 일괄 soft delete. 영향 받은 건수 반환."""
+    now = datetime.utcnow()
+    count = (
+        db.query(Note)
+        .filter(Note.id.in_(note_ids), Note.deleted_at.is_(None))
+        .update({"deleted_at": now}, synchronize_session=False)
+    )
+    db.commit()
+    return count
+
+
+def bulk_archive(db: Session, note_ids: List[int]) -> int:
+    """여러 메모 일괄 아카이브. 성공 건수 반환."""
+    count = 0
+    for note_id in note_ids:
+        try:
+            archive_note(db, note_id)
+            count += 1
+        except HTTPException:
+            pass  # 존재하지 않는 메모는 스킵
+    return count
+
+
+def bulk_tag(
+    db: Session,
+    note_ids: List[int],
+    add_tag_ids: List[int],
+    remove_tag_ids: List[int],
+) -> int:
+    """여러 메모에 태그 일괄 추가/제거. 처리된 메모 건수 반환."""
+    notes = db.query(Note).filter(
+        Note.id.in_(note_ids), Note.deleted_at.is_(None)
+    ).all()
+
+    for note in notes:
+        # 추가: 미존재 시에만 INSERT
+        for tid in add_tag_ids:
+            exists = db.query(NoteTag).filter(
+                NoteTag.note_id == note.id,
+                NoteTag.tag_id == tid,
+                NoteTag.source == "note",
+            ).first()
+            if not exists:
+                db.add(NoteTag(note_id=note.id, tag_id=tid, source="note"))
+
+        # 제거: 존재하면 DELETE
+        if remove_tag_ids:
+            db.query(NoteTag).filter(
+                NoteTag.note_id == note.id,
+                NoteTag.tag_id.in_(remove_tag_ids),
+                NoteTag.source == "note",
+            ).delete(synchronize_session=False)
+
+    db.commit()
+    return len(notes)
+
+
+def bulk_star(db: Session, note_ids: List[int], starred: bool) -> int:
+    """여러 메모 별표 일괄 설정. 영향 받은 건수 반환."""
+    count = (
+        db.query(Note)
+        .filter(Note.id.in_(note_ids), Note.deleted_at.is_(None))
+        .update({"is_starred": 1 if starred else 0}, synchronize_session=False)
+    )
+    db.commit()
+    return count
+
+
+def search_titles(db: Session, q: str, limit: int = 10) -> List[dict]:
+    """제목 부분 일치 검색 — 자동완성용 경량 API."""
+    results = (
+        db.query(Note.id, Note.title)
+        .filter(Note.deleted_at.is_(None), Note.title.ilike(f"%{q}%"))
+        .limit(limit)
+        .all()
+    )
+    return [{"id": r.id, "title": r.title} for r in results]
 
 
 def delete_tag(db: Session, tag_id: int) -> bool:

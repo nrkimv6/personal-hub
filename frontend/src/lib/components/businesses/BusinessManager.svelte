@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
 	import { Badge, Button } from '$lib/components/ui';
 
   import { onMount } from 'svelte';
@@ -429,13 +429,13 @@
                       >
                         ✏
                       </Button>
-                      <button
-                        class="btn btn-danger btn-xs"
+                      <Button
+                        variant="destructive" size="xs"
                         on:click={(e) => { e.stopPropagation(); handleDeleteBusiness(business) }}
                         title="삭제"
                       >
                         🗑
-                      </button>
+                      </Button>
                     </div>
                   </td>
                 </tr>
@@ -521,13 +521,13 @@
                       >
                         ✏
                       </Button>
-                      <button
-                        class="btn btn-danger btn-xs"
+                      <Button
+                        variant="destructive" size="xs"
                         on:click={(e) => { e.stopPropagation(); handleDeleteItem(item) }}
                         title="삭제"
                       >
                         🗑
-                      </button>
+                      </Button>
                     </div>
                   </td>
                 </tr>
@@ -639,10 +639,10 @@
           <span class="text-sm font-medium text-foreground">활성화</span>
         </label>
         <div class="flex justify-end gap-2 pt-4">
-          <button type="button" class="btn btn-secondary" on:click={() => showAddBusinessModal = false}>
+          <Button type="button" variant="secondary" on:click={() => showAddBusinessModal = false}>
             취소
-          </button>
-          <button type="submit" class="btn btn-primary">추가</button>
+          </Button>
+          <Button type="submit" variant="primary">추가</Button>
         </div>
       </form>
     </div>
@@ -674,10 +674,10 @@
           <span class="text-sm font-medium text-foreground">활성화</span>
         </label>
         <div class="flex justify-end gap-2 pt-4">
-          <button type="button" class="btn btn-secondary" on:click={() => { showEditBusinessModal = false; editBusiness = null; }}>
+          <Button type="button" variant="secondary" on:click={() => { showEditBusinessModal = false; editBusiness = null; }}>
             취소
-          </button>
-          <button type="submit" class="btn btn-primary">저장</button>
+          </Button>
+          <Button type="submit" variant="primary">저장</Button>
         </div>
       </form>
     </div>
@@ -728,10 +728,10 @@
           {/if}
         </div>
         <div class="flex justify-end gap-2 pt-4">
-          <button type="button" class="btn btn-secondary" on:click={() => showAddItemModal = false}>
+          <Button type="button" variant="secondary" on:click={() => showAddItemModal = false}>
             취소
-          </button>
-          <button type="submit" class="btn btn-primary">추가</button>
+          </Button>
+          <Button type="submit" variant="primary">추가</Button>
         </div>
       </form>
     </div>
@@ -782,10 +782,10 @@
           {/if}
         </div>
         <div class="flex justify-end gap-2 pt-4">
-          <button type="button" class="btn btn-secondary" on:click={() => { showEditItemModal = false; editItem = null; }}>
+          <Button type="button" variant="secondary" on:click={() => { showEditItemModal = false; editItem = null; }}>
             취소
-          </button>
-          <button type="submit" class="btn btn-primary">저장</button>
+          </Button>
+          <Button type="submit" variant="primary">저장</Button>
         </div>
       </form>
     </div>
@@ -823,10 +823,10 @@
           <span class="text-sm font-medium text-foreground">활성화</span>
         </label>
         <div class="flex justify-end gap-2 pt-4">
-          <button type="button" class="btn btn-secondary" on:click={() => showAddScheduleModal = false}>
+          <Button type="button" variant="secondary" on:click={() => showAddScheduleModal = false}>
             취소
-          </button>
-          <button type="submit" class="btn btn-primary">추가</button>
+          </Button>
+          <Button type="submit" variant="primary">추가</Button>
         </div>
       </form>
     </div>
@@ -941,16 +941,16 @@
         {/if}
 
         <div class="flex justify-end gap-2 pt-4">
-          <button
+          <Button
             type="button"
-            class="btn btn-secondary"
+            variant="secondary"
             on:click={() => { showUrlImportModal = false; urlImportResult = null; }}
           >
             닫기
-          </button>
-          <button type="submit" class="btn btn-primary" disabled={urlImportLoading}>
+          </Button>
+          <Button type="submit" variant="primary" disabled={urlImportLoading}>
             {urlImportLoading ? '처리 중...' : '임포트'}
-          </button>
+          </Button>
         </div>
       </form>
     </div>

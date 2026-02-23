@@ -142,10 +142,21 @@ Write-Log "Starting browser workers..."
 
 # browser_workers.py 호출 (browser-workers.ps1에서 마이그레이션됨)
 # See: docs/plan/2026-02-18_service-runner-python-migration.md
-$VenvPython = Join-Path (Split-Path -Parent $ScriptDir) ".venv\Scripts\python.exe"
-if (-not (Test-Path $VenvPython)) {
-    $VenvPython = Join-Path (Split-Path -Parent $ScriptDir) "venv\Scripts\python.exe"
+$VenvScripts = Join-Path (Split-Path -Parent $ScriptDir) ".venv\Scripts"
+if (-not (Test-Path $VenvScripts)) {
+    $VenvScripts = Join-Path (Split-Path -Parent $ScriptDir) "venv\Scripts"
 }
+$VenvPython = Join-Path $VenvScripts "python.exe"
+
+# alias exe 사용: monitorpage-worker.exe (fallback: python.exe)
+$WorkerAliasExe = Join-Path $VenvScripts "monitorpage-worker.exe"
+if (Test-Path $WorkerAliasExe) {
+    Write-Log "Using alias exe: monitorpage-worker.exe"
+    $VenvPython = $WorkerAliasExe
+} else {
+    Write-Log "Alias exe not found, using python.exe (run setup-exe-aliases.ps1 to enable process identification)"
+}
+
 $browserWorkersScript = Join-Path $ScriptDir "browser_workers.py"
 
 try {

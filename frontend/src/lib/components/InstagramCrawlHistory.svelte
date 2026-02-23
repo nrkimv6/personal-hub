@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { collectApi } from '$lib/api';
 	import type { CrawlHistoryItem } from '$lib/types';
+	import { Button } from '$lib/components/ui';
 
 	let items: CrawlHistoryItem[] = [];
 	let loading = true;
@@ -420,29 +421,31 @@
 		<!-- 페이지네이션 -->
 		{#if totalPages > 1}
 			<div class="flex justify-center items-center gap-2 mt-6">
-				<button
-					onclick={() => {
+				<Button
+					on:click={() => {
 						page = Math.max(1, page - 1);
 						fetchHistory();
 					}}
 					disabled={page === 1}
-					class="btn btn-secondary btn-sm"
+					variant="secondary"
+					size="sm"
 				>
 					이전
-				</button>
+				</Button>
 				<span class="text-sm text-muted-foreground">
 					{page} / {totalPages}
 				</span>
-				<button
-					onclick={() => {
+				<Button
+					on:click={() => {
 						page = Math.min(totalPages, page + 1);
 						fetchHistory();
 					}}
 					disabled={page === totalPages}
-					class="btn btn-secondary btn-sm"
+					variant="secondary"
+					size="sm"
 				>
 					다음
-				</button>
+				</Button>
 			</div>
 		{/if}
 	{/if}

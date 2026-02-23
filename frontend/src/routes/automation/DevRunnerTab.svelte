@@ -400,8 +400,8 @@
 			<!-- Log Viewer + Task History -->
 			<div class="flex flex-col flex-none sm:flex-1 sm:overflow-hidden">
 				<!-- Log Viewer (Phase 2: planFile prop 전달) -->
-				<div class="h-[50vh] sm:flex-1 sm:h-auto sm:min-h-0">
-					<LogViewer planFile={effectivePlanFile ?? undefined} />
+				<div class="flex-1 min-h-0">
+					<LogViewer planFile={effectivePlanFile ?? undefined} currentPlanName={runStatus?.current_plan_name ?? undefined} />
 				</div>
 
 				<!-- Task History (기본 접힘) -->

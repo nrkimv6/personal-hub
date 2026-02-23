@@ -117,3 +117,19 @@ class BatchResult(BaseModel):
     repo_id: int
     success: bool
     message: Optional[str] = None
+
+
+# ───────────────────────────────────────────
+# 비동기 작업 응답 스키마
+# ───────────────────────────────────────────
+
+class GitTaskResponse(BaseModel):
+    task_id: str
+    status: str = "pending"
+
+
+class GitTaskResult(BaseModel):
+    task_id: str
+    status: str
+    result: Optional[OperationResult] = None
+    completed_at: Optional[str] = None

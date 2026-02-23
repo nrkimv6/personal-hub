@@ -397,3 +397,57 @@ async def get_activity(
         })
 
     return {"activity": activity}
+
+
+# =========================================================
+# GET /api/ic/stats/usage
+# =========================================================
+
+@router.get("/usage")
+async def get_usage(db: Session = Depends(get_db)):
+    """
+    API 사용량/비용 조회
+
+    일별 집계 + api_limits 대비 현황 반환.
+
+    Returns:
+        daily_rows: 최근 30일 일별 사용량
+        limits: 일일/월간 리밋 및 현재 사용률
+    """
+    from ..workers.cost_tracker import CostTracker
+
+    tracker = CostTracker(db)
+    limits = tracker.check_limits()
+
+    # 최근 30일 일별 집계
+    daily_rows = db.execute(
+        text("""
+            SELECT date,
+                   SUM(input_tokens) AS input_tokens,
+                   SUM(output_tokens) AS output_tokens,
+                   SUM(image_count) AS image_count,
+                   SUM(estimated_cost_usd) AS cost_usd,
+                   GROUP_CONCAT(DISTINCT model) AS models
+            FROM api_usage
+            WHERE date >= date('now', '-30 days')
+            GROUP BY date
+            ORDER BY date DESC
+        """)
+    ).fetchall()
+
+    rows = [
+        {
+            "date": row.date,
+            "input_tokens": row.input_tokens or 0,
+            "output_tokens": row.output_tokens or 0,
+            "image_count": row.image_count or 0,
+            "cost_usd": round(float(row.cost_usd or 0), 6),
+            "models": row.models or "",
+        }
+        for row in daily_rows
+    ]
+
+    return {
+        "daily_rows": rows,
+        "limits": limits,
+    }
