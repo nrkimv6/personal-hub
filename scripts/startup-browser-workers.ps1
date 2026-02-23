@@ -11,7 +11,7 @@ param(
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $browserWorkersScript = Join-Path $ScriptDir "browser-workers.ps1"
-$LogFile = Join-Path (Split-Path -Parent $ScriptDir) "logs\dev\startup_browser_workers.log"
+$LogFile = Join-Path (Split-Path -Parent $ScriptDir) "logs\admin\startup_browser_workers.log"
 
 function Write-Log {
     param([string]$Message)

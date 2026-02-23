@@ -270,7 +270,7 @@ while ($true) {
         if (Test-Path $diagScriptPath) {
             Write-WatchdogLog "Running diagnostics..." "INFO"
             try {
-                & $diagScriptPath -Dev:$Admin -OutputJson $diagJsonPath 2>&1 | Out-Null
+                & $diagScriptPath -Admin:$Admin -OutputJson $diagJsonPath 2>&1 | Out-Null
                 if (Test-Path $diagJsonPath) {
                     $diagData = Get-Content $diagJsonPath -Raw | ConvertFrom-Json
                     $diagStatus = $diagData.status

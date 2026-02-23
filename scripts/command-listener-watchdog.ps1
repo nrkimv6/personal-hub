@@ -13,8 +13,8 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 
-$isDev = $env:APP_MODE -eq "development"
-if ($isDev) {
+$isAdmin = $env:APP_MODE -eq "admin"
+if ($isAdmin) {
     $LogDir = Join-Path $ProjectRoot "logs\admin"
     $PidSuffix = "_admin"
 } else {

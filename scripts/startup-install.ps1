@@ -153,8 +153,8 @@ switch ($Action) {
         # 브라우저 워커 프로세스 상태
         Write-Host "Browser Workers Status:" -ForegroundColor Cyan
         $PidDir = Join-Path $ProjectRoot ".pids"
-        $watchdogPid = Join-Path $PidDir "watchdog_dev.pid"
-        $igWatchdogPid = Join-Path $PidDir "instagram_watchdog_dev.pid"
+        $watchdogPid = Join-Path $PidDir "watchdog_admin.pid"
+        $igWatchdogPid = Join-Path $PidDir "instagram_watchdog_admin.pid"
 
         Write-Host "  Monitor Worker Watchdog:" -ForegroundColor White
         if ((Test-Path $watchdogPid) -and (Get-Process -Id (Get-Content $watchdogPid -ErrorAction SilentlyContinue) -ErrorAction SilentlyContinue)) {
@@ -172,7 +172,7 @@ switch ($Action) {
             Write-Host "    [-] Not running" -ForegroundColor Yellow
         }
 
-        $apiWatchdogPid = Join-Path $PidDir "api_watchdog_dev.pid"
+        $apiWatchdogPid = Join-Path $PidDir "api_watchdog_admin.pid"
         Write-Host "  API Watchdog:" -ForegroundColor White
         if ((Test-Path $apiWatchdogPid) -and (Get-Process -Id (Get-Content $apiWatchdogPid -ErrorAction SilentlyContinue) -ErrorAction SilentlyContinue)) {
             $savedPid = Get-Content $apiWatchdogPid
@@ -184,7 +184,7 @@ switch ($Action) {
 
         # 서비스 상태도 함께 표시
         Write-Host "Windows Services:" -ForegroundColor Cyan
-        $services = @("MonitorPage", "MonitorPage-Dev", "cloudflared")
+        $services = @("MonitorPage-Public", "MonitorPage-Admin", "cloudflared")
         foreach ($svcName in $services) {
             $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
             if ($svc) {

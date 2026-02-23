@@ -22,26 +22,26 @@ Start-Sleep -Seconds 3
 & '$logsScript' -Follow
 "@
 
-$devLogsCmd = @"
-Write-Host '[DEV] Monitor Page - Unified Log Viewer' -ForegroundColor Green
+$adminLogsCmd = @"
+Write-Host '[ADMIN] Monitor Page - Unified Log Viewer' -ForegroundColor Green
 Write-Host 'Waiting for services to initialize...' -ForegroundColor Yellow
 Start-Sleep -Seconds 3
-& '$logsScript' -Follow -Dev
+& '$logsScript' -Follow -Admin
 "@
 
 # Windows Terminal 확인
 $wt = Get-Command wt -ErrorAction SilentlyContinue
 
 if ($wt) {
-    # Windows Terminal: 2탭 (운영 | 개발)
+    # Windows Terminal: 2탭 (운영 | 관리)
     wt new-tab `
-        --title "Production Logs" `
+        --title "Public Logs" `
         powershell -NoExit -Command $prodLogsCmd `; `
     new-tab `
-        --title "Development Logs" `
-        powershell -NoExit -Command $devLogsCmd
+        --title "Admin Logs" `
+        powershell -NoExit -Command $adminLogsCmd
 } else {
     # Fallback: PowerShell 창 2개
     Start-Process powershell -ArgumentList "-NoExit", "-Command", $prodLogsCmd
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", $devLogsCmd
+    Start-Process powershell -ArgumentList "-NoExit", "-Command", $adminLogsCmd
 }

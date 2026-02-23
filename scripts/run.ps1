@@ -1,8 +1,8 @@
 # Monitor Page - Integrated Run Script
 # Starts all processes, shows logs, and stops on exit (Ctrl+C)
 #
-# Production mode (default): API + Frontend only, workers disabled
-# Development mode (-Dev): All features enabled including workers
+# Public mode (default): API + Frontend only, workers disabled
+# Admin mode (-Admin): All features enabled including workers
 
 param(
     [switch]$Admin,      # Admin mode: use different ports (API: 8001, Frontend: 6101) + workers
@@ -17,13 +17,13 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 if ($Admin) {
     $ApiPort = 8001
     $FrontendPort = 6101
-    $AppMode = "development"
+    $AppMode = "admin"
     $RunWorkers = -not $SkipWorker  # Run workers unless explicitly skipped
 } else {
     $ApiPort = 8000
     $FrontendPort = 6100
-    $AppMode = "production"
-    $RunWorkers = $false  # Production mode: no workers
+    $AppMode = "public"
+    $RunWorkers = $false  # Public mode: no workers
 }
 
 # Set APP_MODE environment variable for backend
@@ -45,7 +45,7 @@ if ($Admin) {
     Write-Host "[MODE] Admin - All features enabled" -ForegroundColor Green
     Write-Host "       API: $ApiPort, Frontend: $FrontendPort, Workers: $(if ($RunWorkers) { 'ON' } else { 'OFF' })" -ForegroundColor Green
 } else {
-    Write-Host "[MODE] Production - View only (workers disabled)" -ForegroundColor Yellow
+    Write-Host "[MODE] Public - View only (workers disabled)" -ForegroundColor Yellow
     Write-Host "       API: $ApiPort, Frontend: $FrontendPort, Workers: OFF" -ForegroundColor Yellow
 }
 Write-Host ""
@@ -69,7 +69,7 @@ foreach ($port in $portsToClean) {
 }
 
 # Clean up browser profiles before starting (Dev mode only)
-# Production mode doesn't use browsers - don't touch anything
+# Public mode doesn't use browsers - don't touch anything
 if ($Admin) {
     $browserProfilesPath = Join-Path $ProjectRoot "data\browser_profiles"
 
@@ -240,10 +240,10 @@ try {
 
         # Start frontend in background (so we can tail logs)
         $FrontendDir = Join-Path $ProjectRoot "frontend"
-        $frontendLogFile = Join-Path $LogDir "frontend_dev.log"
+        $frontendLogFile = Join-Path $LogDir "frontend_admin.log"
 
         # Start frontend and capture its actual PID via port
-        $FrontendPidFile = Join-Path $ProjectRoot ".pids\frontend_dev.pid"
+        $FrontendPidFile = Join-Path $ProjectRoot ".pids\frontend_admin.pid"
         "DEV_MODE" | Out-File $FrontendPidFile -Encoding ascii
         $frontendPos = 0
 

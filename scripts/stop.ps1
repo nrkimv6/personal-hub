@@ -3,7 +3,7 @@
 
 param(
     [switch]$Force,        # Skip confirmations
-    [switch]$Dev,          # Stop dev environment (ports 8001, 6101)
+    [switch]$Admin,          # Stop admin environment (ports 8001, 6101)
     [switch]$All,          # Stop both dev and production environments
     [switch]$SkipWatchdog, # Don't kill watchdog processes (for service restart)
     [switch]$SkipWorkers   # Don't kill worker processes (for service restart - workers run separately)
@@ -26,18 +26,18 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 if ($All) {
     $ApiPorts = @(8000, 8001)
     $FrontendPorts = @(6100, 6101)
-    $PidSuffixes = @("", "_dev")
-    Write-Host "[MODE] Stopping ALL environments (production + dev)" -ForegroundColor Yellow
-} elseif ($Dev) {
+    $PidSuffixes = @("", "_admin")
+    Write-Host "[MODE] Stopping ALL environments (public + admin)" -ForegroundColor Yellow
+} elseif ($Admin) {
     $ApiPorts = @(8001)
     $FrontendPorts = @(6101)
-    $PidSuffixes = @("_dev")
-    Write-Host "[MODE] Stopping DEV environment only" -ForegroundColor Yellow
+    $PidSuffixes = @("_admin")
+    Write-Host "[MODE] Stopping ADMIN environment only" -ForegroundColor Yellow
 } else {
     $ApiPorts = @(8000)
     $FrontendPorts = @(6100)
     $PidSuffixes = @("")
-    Write-Host "[MODE] Stopping PRODUCTION environment only" -ForegroundColor Yellow
+    Write-Host "[MODE] Stopping PUBLIC environment only" -ForegroundColor Yellow
 }
 
 # PID file paths (collect all based on mode)
@@ -63,7 +63,7 @@ Write-Host ""
 # ============================================================
 # STEP 0: Kill Watchdog Processes (only for target environment)
 # ============================================================
-$envLabel = if ($All) { "all environments" } elseif ($Dev) { "dev" } else { "production" }
+$envLabel = if ($All) { "all environments" } elseif ($Admin) { "admin" } else { "public" }
 
 if ($SkipWatchdog) {
     Write-Host "[0] Skipping Watchdog processes (-SkipWatchdog)" -ForegroundColor Gray
@@ -330,15 +330,15 @@ foreach ($pidFile in $PidFiles) {
 
 # ============================================================
 # STEP 5: Playwright Browser Cleanup (Dev mode only)
-# Production mode doesn't use browsers (workers disabled)
+# Public mode doesn't use browsers (workers disabled)
 # ============================================================
 Write-Host ""
 Write-Host "[5] Cleaning up Playwright browsers" -ForegroundColor Cyan
 Write-Host "----------------------------------------"
 
 # Only clean up browsers in Dev mode or when stopping All
-# Production mode doesn't run workers, so no browsers to clean
-if (($Dev -or $All) -and (-not $SkipWorkers)) {
+# Public mode doesn't run workers, so no browsers to clean
+if (($Admin -or $All) -and (-not $SkipWorkers)) {
     $browserProfilesPath = Join-Path $ProjectRoot "data\browser_profiles"
 
     # 5-1: Kill Playwright Chromium processes (identified by ms-playwright path)

@@ -211,7 +211,7 @@ function Get-LatestLogFileMultiPattern {
 
 # API 로그: 모든 후보에서 LastWriteTime이 가장 최신인 파일 선택
 # Python 마이그레이션 후 API 앱은 LOG_DIR="logs" (하드코딩)에 api_*.log를 기록.
-# Dev 모드: $LogDir=logs/dev/ (stdout_api_*, NSSM log) + logs/ (api_*)
+# Admin 모드: $LogDir=logs/admin/ (stdout_api_*, NSSM log) + logs/ (api_*)
 # 운영 모드: $LogDir=logs/ (stdout_api_*, api_*, NSSM log) 모두 동일 디렉토리
 $apiCandidates = @()
 # 1) $LogDir 내 stdout_api_*, api_*

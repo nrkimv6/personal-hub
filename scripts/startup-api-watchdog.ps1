@@ -13,7 +13,7 @@ param(
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $apiWatchdogScript = Join-Path $ScriptDir "api-watchdog.ps1"
-$LogFile = Join-Path (Split-Path -Parent $ScriptDir) "logs\dev\startup_api_watchdog.log"
+$LogFile = Join-Path (Split-Path -Parent $ScriptDir) "logs\admin\startup_api_watchdog.log"
 
 function Write-Log {
     param([string]$Message)
@@ -62,13 +62,13 @@ if ($waited -ge $maxWait) {
     Write-Log "WARNING: API server not ready after $maxWait seconds, starting watchdog anyway"
 }
 
-Write-Log "Starting API watchdog (Development mode)..."
+Write-Log "Starting API watchdog (Admin mode)..."
 
-# api-watchdog.ps1 호출 (Development 모드)
+# api-watchdog.ps1 호출 (Admin 모드)
 try {
     # Run in a new hidden window to keep it running
     $process = Start-Process -FilePath "powershell.exe" `
-        -ArgumentList "-ExecutionPolicy", "Bypass", "-File", $apiWatchdogScript, "-Dev" `
+        -ArgumentList "-ExecutionPolicy", "Bypass", "-File", $apiWatchdogScript, "-Admin" `
         -WorkingDirectory (Split-Path -Parent $ScriptDir) `
         -WindowStyle Hidden `
         -PassThru
@@ -76,7 +76,7 @@ try {
     Write-Log "API watchdog started (PID: $($process.Id))"
 
     # Save PID for management
-    $pidFile = Join-Path (Split-Path -Parent $ScriptDir) ".pids\api_watchdog_dev.pid"
+    $pidFile = Join-Path (Split-Path -Parent $ScriptDir) ".pids\api_watchdog_admin.pid"
     $pidDir = Split-Path -Parent $pidFile
     if (-not (Test-Path $pidDir)) {
         New-Item -ItemType Directory -Path $pidDir -Force | Out-Null

@@ -2,7 +2,7 @@
 # Starts FastAPI server, monitoring worker, and Frontend in background
 
 param(
-    [switch]$Dev  # Dev mode: use different ports (8001, 6101) for development
+    [switch]$Admin  # Admin mode: use different ports (8001, 6101) for admin
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,16 +11,16 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 $FrontendDir = Join-Path $ProjectRoot "frontend"
 
 # Port and mode settings - Dev mode uses different ports to avoid affecting production
-if ($Dev) {
+if ($Admin) {
     $ApiPort = 8001
     $FrontendPort = 6101
-    $AppMode = "development"
-    $LogDir = Join-Path $ProjectRoot "logs\dev"
-    Write-Host "[DEV MODE] Using development ports (API: $ApiPort, Frontend: $FrontendPort)" -ForegroundColor Yellow
+    $AppMode = "admin"
+    $LogDir = Join-Path $ProjectRoot "logs\admin"
+    Write-Host "[ADMIN MODE] Using development ports (API: $ApiPort, Frontend: $FrontendPort)" -ForegroundColor Yellow
 } else {
     $ApiPort = 8000
     $FrontendPort = 6100
-    $AppMode = "production"
+    $AppMode = "public"
     $LogDir = Join-Path $ProjectRoot "logs"
 }
 
@@ -39,7 +39,7 @@ if (-not (Test-Path $PidDir)) {
 }
 
 # PID files - Dev mode uses separate files to allow both environments to run
-$PidSuffix = if ($Dev) { "_dev" } else { "" }
+$PidSuffix = if ($Admin) { "_admin" } else { "" }
 $ApiPidFile = Join-Path $PidDir "api$PidSuffix.pid"
 $WorkerPidFile = Join-Path $PidDir "worker$PidSuffix.pid"
 $ClaudeWorkerPidFile = Join-Path $PidDir "claude_worker$PidSuffix.pid"
@@ -201,7 +201,7 @@ if ($runApi) {
     # Start python directly (NOT via cmd.exe) to get correct PID
     # Dev mode: add --reload for hot reload (auto-restart on file changes)
     $uvicornArgs = @("-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "$ApiPort")
-    if ($Dev) {
+    if ($Admin) {
         $uvicornArgs += @("--reload", "--reload-dir", "app")
         Write-Host "    [*] Hot reload enabled (--reload)" -ForegroundColor Yellow
     }
@@ -328,7 +328,7 @@ if ($runFrontend) {
             -PassThru
     }
 
-    if ($Dev) {
+    if ($Admin) {
         # Dev mode: Run npm run dev in foreground (interactive)
         Write-Host "[+] Frontend starting in DEV mode (foreground)..." -ForegroundColor Green
         Write-Host "    Port: $FrontendPort"
@@ -372,7 +372,7 @@ if ($runFrontend) {
 }
 
 # Skip summary if we were in Dev mode (frontend ran in foreground and already exited)
-if (-not $Dev) {
+if (-not $Admin) {
     Write-Host "`n========================================" -ForegroundColor Green
     Write-Host "  All processes started" -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green

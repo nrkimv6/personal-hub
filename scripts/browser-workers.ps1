@@ -30,7 +30,7 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 . "$ScriptDir\port-utils.ps1"
 
 # Dev mode only - browser workers need user session
-$env:APP_MODE = "development"
+$env:APP_MODE = "admin"
 $LogDir = Join-Path $ProjectRoot "logs\admin"
 $PidDir = Join-Path $ProjectRoot ".pids"
 $PidSuffix = "_admin"
@@ -141,7 +141,7 @@ function Start-BrowserWorkers {
         Write-Log "Worker Watchdog already running" "WARN"
     } else {
         Write-Log "Starting Worker Watchdog (all workers via WorkerOrchestrator)..."
-        $env:APP_MODE = "development"
+        $env:APP_MODE = "admin"
         $watchdogProcess = Start-Process -FilePath "powershell.exe" `
             -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\unified-worker-watchdog.ps1" `
             -WorkingDirectory $ProjectRoot `
@@ -157,7 +157,7 @@ function Start-BrowserWorkers {
         Write-Log "Claude Worker Watchdog already running" "WARN"
     } else {
         Write-Log "Starting Claude Worker Watchdog..."
-        $env:APP_MODE = "development"
+        $env:APP_MODE = "admin"
         $claudeWatchdogProcess = Start-Process -FilePath "powershell.exe" `
             -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\claude-watchdog.ps1" `
             -WorkingDirectory $ProjectRoot `
@@ -173,7 +173,7 @@ function Start-BrowserWorkers {
         Write-Log "Video Download Watchdog already running" "WARN"
     } else {
         Write-Log "Starting Video Download Watchdog..."
-        $env:APP_MODE = "development"
+        $env:APP_MODE = "admin"
         $videoDownloadWatchdogProcess = Start-Process -FilePath "powershell.exe" `
             -ArgumentList "-ExecutionPolicy", "Bypass", "-File", "$ScriptDir\video-download-watchdog.ps1" `
             -WorkingDirectory $ProjectRoot `

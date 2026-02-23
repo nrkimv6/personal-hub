@@ -17,7 +17,7 @@
 #   .\scripts\diagnose-api.ps1 -Admin -Watch             # Watch mode (30s interval)
 
 param(
-    [switch]$Dev,
+    [switch]$Admin,
     [string]$OutputJson,
     [switch]$Watch,
     [int]$WatchInterval = 30,
@@ -30,8 +30,8 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 $PythonExe = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 
 # Configuration
-$port = if ($Dev) { 8001 } else { 8000 }
-$mode = if ($Dev) { "Development" } else { "Production" }
+$port = if ($Admin) { 8001 } else { 8000 }
+$mode = if ($Admin) { "Admin" } else { "Public" }
 $healthEndpoint = "http://localhost:$port/api/v1/system/status"
 
 # Default OutputJson path
