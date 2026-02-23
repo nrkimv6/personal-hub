@@ -233,7 +233,7 @@
 	<div class="flex items-center justify-between">
 		<span class="text-xs text-gray-500 font-medium uppercase tracking-wider">Plan Files</span>
 		<div class="flex gap-1">
-			{#if hasDoneablePlans}
+			{#if !showIgnored}
 				<button
 					class="h-6 px-2 text-[10px] rounded text-green-600 hover:bg-green-50 transition-colors inline-flex items-center gap-1 disabled:opacity-50"
 					onclick={handleBatchDone}
