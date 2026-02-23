@@ -416,18 +416,31 @@ class PlanService:
                 current_parent = item
                 continue
 
-            # 대시 체크박스 (하위): - [ ] or - [x]
-            dash_match = re.match(r'^\s+-\s*\[([ x→])\]\s*(.*)', line)
-            if dash_match and current_parent is not None:
-                text = dash_match.group(2).strip()
+            # 대시 체크박스: - [ ] or - [x] (최상위 + 하위 모두)
+            dash_match = re.match(r'^(\s*)-\s*\[([ x→])\]\s*(.*)', line)
+            if dash_match:
+                indent = len(dash_match.group(1))
+                text = dash_match.group(3).strip()
                 fp = file_path_pattern.search(text)
-                child = PlanItemResponse(
-                    level=1,
-                    text=text,
-                    checked=dash_match.group(1) == 'x',
-                    file_path=fp.group(1) if fp else None,
-                )
-                current_parent.children.append(child)
+                if indent > 0 and current_parent is not None:
+                    # 들여쓰기 있음 → 하위 항목
+                    child = PlanItemResponse(
+                        level=1,
+                        text=text,
+                        checked=dash_match.group(2) == 'x',
+                        file_path=fp.group(1) if fp else None,
+                    )
+                    current_parent.children.append(child)
+                else:
+                    # 들여쓰기 없음 → 상위 항목
+                    item = PlanItemResponse(
+                        level=0,
+                        text=text,
+                        checked=dash_match.group(2) == 'x',
+                        file_path=fp.group(1) if fp else None,
+                    )
+                    current_items.append(item)
+                    current_parent = item
 
         # 마지막 phase 저장
         if current_items:
