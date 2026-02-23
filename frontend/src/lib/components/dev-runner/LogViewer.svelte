@@ -434,6 +434,21 @@
 					<div class="py-2 text-center select-none {line.isStale ? 'opacity-25' : 'opacity-60'}">
 						<span class="text-gray-500 text-[10px]">{extractSeparatorText(line.raw)}</span><!-- separator -->
 					</div>
+				{:else if line.tag === 'CYCLE'}
+					<div class="py-1.5 -mx-3 px-3 mt-2 bg-gray-700/60 border-l-2 border-gray-400 {line.isStale ? 'opacity-30' : ''}">
+						<span class="font-bold text-white text-xs tracking-wider">{line.message}</span>
+					</div>
+				{:else if line.tag === 'PHASE'}
+					{@const style = getTagStyle(line.tag)}
+					<div class="flex items-start gap-2 py-0.5 leading-5 mt-1.5 border-t border-indigo-900/40 {line.isStale ? 'opacity-30' : ''}">
+						<span class="text-xs text-gray-400/60 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
+						<span class="text-xs shrink-0 w-[42px] text-right font-semibold {style.text}">
+							<span class="rounded px-1 py-0.5 {style.bg}">{line.tag}</span>
+						</span>
+						<span class="flex-1 min-w-0 break-all text-indigo-300 font-medium">
+							{line.message}
+						</span>
+					</div>
 				{:else if line.tag}
 					{@const style = getTagStyle(line.tag)}
 					<div class="flex items-start gap-2 py-0.5 leading-5 {line.isStale ? 'opacity-30' : ''} {line.tag === 'ERROR' ? 'bg-red-950/50 -mx-3 px-3 rounded' : ''}">
