@@ -1,16 +1,26 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { Play, Square, RefreshCw, HardDrive, Music, Archive, FileText, Terminal, Gamepad2, Folder, Video, Image } from 'lucide-svelte';
+	import { Play, Square, RefreshCw, HardDrive, Music, Archive, FileText, Terminal, Gamepad2, Folder, Video, Image, Zap } from 'lucide-svelte';
 
 	// 상태
 	let stats = $state<any>(null);
 	let scanStatus = $state<any>(null);
+	let pipelineStatus = $state<any>(null);
 	let isLoading = $state(true);
 	let isScanRunning = $state(false);
+	let isPipelineRunning = $state(false);
 	let scanRootInput = $state('');
 	let error = $state<string | null>(null);
 
 	let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+	const PIPELINE_STAGE_LABELS: Record<string, string> = {
+		scan: '1. 파일 스캔',
+		metadata: '2. 메타데이터 추출',
+		rule_classify: '3. 규칙 분류',
+		llm_classify: '4. LLM 분류',
+		done: '완료'
+	};
 
 	const FILE_GROUP_ICONS: Record<string, any> = {
 		music: Music,
@@ -36,20 +46,45 @@
 
 	async function fetchStats() {
 		try {
-			const [statsRes, scanRes] = await Promise.all([
+			const [statsRes, scanRes, pipelineRes] = await Promise.all([
 				fetch('/api/fc/stats'),
-				fetch('/api/fc/scan/status')
+				fetch('/api/fc/scan/status'),
+				fetch('/api/fc/pipeline/status')
 			]);
 			if (statsRes.ok) stats = await statsRes.json();
 			if (scanRes.ok) {
 				scanStatus = await scanRes.json();
 				isScanRunning = scanStatus?.is_running ?? false;
 			}
+			if (pipelineRes.ok) {
+				pipelineStatus = await pipelineRes.json();
+				isPipelineRunning = pipelineStatus?.is_running ?? false;
+			}
 		} catch (e) {
 			error = '데이터 로드 실패';
 		} finally {
 			isLoading = false;
 		}
+	}
+
+	async function startPipeline() {
+		const rootFolders = scanRootInput
+			.split('\n')
+			.map((s: string) => s.trim())
+			.filter(Boolean);
+		const res = await fetch('/api/fc/pipeline/start', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ root_folders: rootFolders.length > 0 ? rootFolders : null })
+		});
+		const data = await res.json();
+		if (data.status === 'started' || data.status === 'already_running') {
+			isPipelineRunning = true;
+		}
+	}
+
+	async function stopPipeline() {
+		await fetch('/api/fc/pipeline/stop', { method: 'POST' });
 	}
 
 	async function startScan() {
@@ -108,6 +143,49 @@
 			<RefreshCw class="size-4" />
 			새로고침
 		</button>
+	</div>
+
+	<!-- 파이프라인 원클릭 실행 -->
+	<div class="rounded-lg border border-primary/30 bg-primary/5 p-4">
+		<div class="mb-3 flex items-center justify-between">
+			<div class="flex items-center gap-2">
+				<Zap class="size-4 text-primary" />
+				<h3 class="text-sm font-semibold text-foreground">전체 파이프라인 실행</h3>
+			</div>
+			{#if isPipelineRunning}
+				<button
+					onclick={stopPipeline}
+					class="flex items-center gap-1.5 rounded-md bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
+				>
+					<Square class="size-4" />
+					중지
+				</button>
+			{:else}
+				<button
+					onclick={startPipeline}
+					class="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+				>
+					<Zap class="size-4" />
+					전체 실행
+				</button>
+			{/if}
+		</div>
+		<p class="mb-3 text-xs text-muted-foreground">스캔 → 메타데이터 추출 → 규칙 분류 → LLM 분류를 순서대로 실행합니다</p>
+
+		<!-- 파이프라인 단계 진행률 -->
+		<div class="flex gap-2">
+			{#each ['scan', 'metadata', 'rule_classify', 'llm_classify'] as stage}
+				{@const isCurrent = pipelineStatus?.current_stage === stage}
+				{@const isDone = pipelineStatus?.results?.[stage] !== undefined}
+				<div class="flex-1 rounded-md border p-2 text-center text-xs
+					{isCurrent ? 'border-primary bg-primary/10 text-primary font-medium' :
+					 isDone ? 'border-green-500/30 bg-green-500/10 text-green-600' :
+					 'border-border text-muted-foreground'}">
+					{PIPELINE_STAGE_LABELS[stage]}
+					{#if isDone && !isCurrent}✓{/if}
+				</div>
+			{/each}
+		</div>
 	</div>
 
 	<!-- 스캔 컨트롤 -->

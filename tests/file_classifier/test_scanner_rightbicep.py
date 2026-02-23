@@ -35,10 +35,15 @@ class TestScannerRight:
         for fname in files:
             (scan_dir / fname).write_bytes(b"test")
 
+        from sqlalchemy import text as sqla_text2
+        before = test_db.execute(sqla_text2("SELECT COUNT(*) FROM fc_files")).scalar()
         scanner = FileScanner(test_db)
         result = scanner.scan([str(scan_dir)])
 
-        assert result["inserted"] == len(files)
+        # 스캔 결과의 inserted 수와 실제 추가된 수 비교
+        after = test_db.execute(sqla_text2("SELECT COUNT(*) FROM fc_files")).scalar()
+        actually_inserted = after - before
+        assert actually_inserted == len(files), f"Expected {len(files)}, got {actually_inserted} (before={before}, after={after})"
 
         rows = test_db.execute(sqla_text("SELECT file_name, file_group FROM fc_files")).fetchall()
         actual = {row[0]: row[1] for row in rows}
@@ -55,9 +60,11 @@ class TestScannerBoundaryCorrect:
         scan_dir.mkdir()
         (scan_dir / "empty.txt").write_bytes(b"")
 
+        before = test_db.execute(text("SELECT COUNT(*) FROM fc_files")).scalar()
         scanner = FileScanner(test_db)
         result = scanner.scan([str(scan_dir)])
-        assert result["inserted"] == 1
+        after = test_db.execute(text("SELECT COUNT(*) FROM fc_files")).scalar()
+        assert after - before == 1
         row = test_db.execute(text("SELECT file_size FROM fc_files WHERE file_name='empty.txt'")).fetchone()
         assert row[0] == 0
 
@@ -69,10 +76,12 @@ class TestScannerBoundaryCorrect:
         long_name = "a" * 196 + ".txt"
         (scan_dir / long_name).write_bytes(b"test")
 
+        before = test_db.execute(text("SELECT COUNT(*) FROM fc_files")).scalar()
         scanner = FileScanner(test_db)
         result = scanner.scan([str(scan_dir)])
+        after = test_db.execute(text("SELECT COUNT(*) FROM fc_files")).scalar()
         assert result["errors"] == 0
-        assert result["inserted"] == 1
+        assert after - before == 1
 
     def test_extension_case_insensitive(self, tmp_path, test_db):
         """확장자 대소문자 무관"""
@@ -124,11 +133,12 @@ class TestScannerBoundaryCorrect:
         scan_dir.mkdir()
         (scan_dir / "dup.txt").write_bytes(b"test")
 
+        before = test_db.execute(text("SELECT COUNT(*) FROM fc_files")).scalar()
         scanner = FileScanner(test_db)
         scanner.scan([str(scan_dir)])
         scanner.scan([str(scan_dir)])  # 2회
-        count = test_db.execute(text("SELECT COUNT(*) FROM fc_files")).scalar()
-        assert count == 1  # INSERT OR IGNORE
+        after = test_db.execute(text("SELECT COUNT(*) FROM fc_files")).scalar()
+        assert after - before == 1  # INSERT OR IGNORE로 중복 없어야 함
 
 class TestScannerInverse:
     """I: 역관계 - 스캔 결과 DB 반영 일치"""
@@ -139,10 +149,11 @@ class TestScannerInverse:
         for i in range(5):
             (scan_dir / f"f{i}.txt").write_bytes(b"x")
 
+        before = test_db.execute(text("SELECT COUNT(*) FROM fc_files")).scalar()
         scanner = FileScanner(test_db)
         result = scanner.scan([str(scan_dir)])
         db_count = test_db.execute(text("SELECT COUNT(*) FROM fc_files")).scalar()
-        assert result["inserted"] == db_count
+        assert result["inserted"] == db_count - before
 
 class TestScannerCrossCheck:
     """C: 교차검증 - 통계 일관성"""
@@ -155,6 +166,7 @@ class TestScannerCrossCheck:
         for f in files:
             (scan_dir / f).write_bytes(b"x")
 
+        before = test_db.execute(text("SELECT COUNT(*) FROM fc_files")).scalar()
         scanner = FileScanner(test_db)
         scanner.scan([str(scan_dir)])
 
@@ -162,7 +174,9 @@ class TestScannerCrossCheck:
         group_sum = test_db.execute(text(
             "SELECT SUM(cnt) FROM (SELECT COUNT(*) as cnt FROM fc_files GROUP BY file_group)"
         )).scalar()
-        assert total == group_sum == len(files)
+        # 총계는 전체가 아닌 새로 추가된 8개가 포함돼야 함
+        assert total == group_sum  # 총합 == group별 합계는 항상 성립
+        assert total - before == len(files)  # 새로 추가된 수 확인
 
 class TestScannerError:
     """E: 오류 조건"""

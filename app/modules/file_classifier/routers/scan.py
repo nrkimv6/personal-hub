@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db, SessionLocal
 from ..workers.scanner import FileScanner
+from ..workers.metadata_extractor import MetadataExtractor
+from ..workers.pipeline import PipelineWorker
 from ..workers.task_progress import TaskProgressManager
 from ..config import settings
 
@@ -144,3 +146,143 @@ async def scan_status():
             error=scan_state["error"],
             task_id=scan_state["task_id"],
         )
+
+
+# === 메타데이터 추출 상태 ===
+metadata_state = {
+    "is_running": False,
+    "total": 0,
+    "processed": 0,
+    "error": None,
+}
+_metadata_lock = threading.Lock()
+_metadata_extractor: Optional[MetadataExtractor] = None
+
+
+def _run_metadata_background():
+    global _metadata_extractor
+    db = SessionLocal()
+    try:
+        with _metadata_lock:
+            metadata_state["is_running"] = True
+            metadata_state["error"] = None
+            metadata_state["processed"] = 0
+
+        extractor = MetadataExtractor(db)
+        _metadata_extractor = extractor
+        stats = extractor.extract()
+
+        with _metadata_lock:
+            metadata_state["is_running"] = False
+            metadata_state["total"] = stats["total"]
+            metadata_state["processed"] = stats["processed"]
+    except Exception as e:
+        with _metadata_lock:
+            metadata_state["is_running"] = False
+            metadata_state["error"] = str(e)
+    finally:
+        _metadata_extractor = None
+        db.close()
+
+
+@router.post("/scan/metadata/start")
+async def metadata_start(background_tasks: BackgroundTasks):
+    """메타데이터 추출 시작"""
+    with _metadata_lock:
+        if metadata_state["is_running"]:
+            return {"status": "already_running"}
+    background_tasks.add_task(_run_metadata_background)
+    return {"status": "started"}
+
+
+@router.get("/scan/metadata/status")
+async def metadata_status():
+    """메타데이터 추출 상태 조회"""
+    with _metadata_lock:
+        return {
+            "is_running": metadata_state["is_running"],
+            "total": metadata_state["total"],
+            "processed": metadata_state["processed"],
+            "error": metadata_state["error"],
+        }
+
+
+# === 파이프라인 상태 ===
+pipeline_state = {
+    "is_running": False,
+    "current_stage": None,
+    "results": {},
+    "error": None,
+}
+_pipeline_lock = threading.Lock()
+_pipeline_worker: Optional[PipelineWorker] = None
+
+
+def _run_pipeline_background(root_folders):
+    global _pipeline_worker
+    db = SessionLocal()
+    try:
+        with _pipeline_lock:
+            pipeline_state["is_running"] = True
+            pipeline_state["error"] = None
+            pipeline_state["results"] = {}
+            pipeline_state["current_stage"] = None
+
+        worker = PipelineWorker(db)
+        _pipeline_worker = worker
+
+        def on_progress(stage, processed, total):
+            with _pipeline_lock:
+                pipeline_state["current_stage"] = stage
+
+        results = worker.run(root_folders, progress_callback=on_progress)
+
+        with _pipeline_lock:
+            pipeline_state["is_running"] = False
+            pipeline_state["results"] = results
+            pipeline_state["current_stage"] = "done"
+    except Exception as e:
+        with _pipeline_lock:
+            pipeline_state["is_running"] = False
+            pipeline_state["error"] = str(e)
+    finally:
+        _pipeline_worker = None
+        db.close()
+
+
+class PipelineStartRequest(BaseModel):
+    root_folders: Optional[list[str]] = None
+
+
+@router.post("/pipeline/start")
+async def pipeline_start(request: PipelineStartRequest, background_tasks: BackgroundTasks):
+    """파이프라인 전체 실행 시작"""
+    with _pipeline_lock:
+        if pipeline_state["is_running"]:
+            return {"status": "already_running"}
+    root_folders = request.root_folders or settings.SCAN_ROOT_FOLDERS
+    background_tasks.add_task(_run_pipeline_background, root_folders)
+    return {"status": "started"}
+
+
+@router.post("/pipeline/stop")
+async def pipeline_stop():
+    """파이프라인 중지"""
+    global _pipeline_worker
+    if not pipeline_state["is_running"]:
+        return {"status": "not_running"}
+    if _pipeline_worker:
+        _pipeline_worker.stop()
+    return {"status": "stop_requested"}
+
+
+@router.get("/pipeline/status")
+async def pipeline_status():
+    """파이프라인 상태 조회"""
+    with _pipeline_lock:
+        return {
+            "is_running": pipeline_state["is_running"],
+            "current_stage": pipeline_state["current_stage"],
+            "results": pipeline_state["results"],
+            "error": pipeline_state["error"],
+        }
