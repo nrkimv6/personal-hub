@@ -38,6 +38,7 @@
 	let panelOpen = $state(true);
 	let taskHistoryOpen = $state(false);
 	let currentTracking = $state<CurrentTrackingResponse | null>(null);
+	let selectedPlanPath = $state('');
 	let trackingInterval: ReturnType<typeof setInterval> | null = null;
 
 	// Phase 4: 종료 시 상태 보존
@@ -372,7 +373,7 @@
 					<div class="px-4 pb-4 flex flex-col gap-4 bg-gray-50">
 						<!-- RunControl - full width card -->
 						<div class="bg-white border rounded-lg p-4">
-							<RunControl status={runStatus} {plans} onStatusChange={handleRunStatusChange} />
+							<RunControl status={runStatus} {plans} onStatusChange={handleRunStatusChange} bind:selectedPlan={selectedPlanPath} />
 						</div>
 
 						<!-- Grid: Stats + Plans (Phase 3: CurrentTaskCard 제거) -->
@@ -390,7 +391,7 @@
 
 							<!-- Plan Files -->
 							<div class="bg-white border rounded-lg p-4 max-h-[50vh] sm:max-h-[340px] overflow-hidden flex flex-col">
-								<PlanList {plans} onPlansChange={fetchPlans} runningPlanFile={runStatus?.plan_file ?? null} />
+								<PlanList {plans} onPlansChange={fetchPlans} runningPlanFile={runStatus?.plan_file ?? null} onPlanSelect={(path) => { selectedPlanPath = path; }} />
 							</div>
 						</div>
 					</div>

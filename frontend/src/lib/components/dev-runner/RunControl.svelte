@@ -6,12 +6,12 @@
 		status: DevRunnerRunStatusResponse | null;
 		plans: DevRunnerPlanFileResponse[];
 		onStatusChange: () => void;
+		selectedPlan?: string;
 	}
 
-	let { status, plans, onStatusChange }: Props = $props();
+	let { status, plans, onStatusChange, selectedPlan = $bindable('') }: Props = $props();
 
 	let mode = $state<'single' | 'all'>('single');
-	let selectedPlan = $state('');
 	let maxCycles = $state(0);
 
 	// 실행 중인 plan 표시 정보

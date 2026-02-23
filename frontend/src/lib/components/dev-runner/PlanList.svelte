@@ -4,7 +4,7 @@
 	import { encodePathToBase64 } from '$lib/utils/encoding';
 
 	let doneLoadingPath = $state<string | null>(null);
-	let doneMessage = $state<{ path: string; success: boolean; text: string } | null>(null);
+	let doneMessage = $state<{ path: string; success: boolean; text: string; remaining?: number; total?: number; planStatus?: string } | null>(null);
 
 	async function handleDone(e: Event, plan: DevRunnerPlanFileResponse) {
 		e.stopPropagation();
@@ -13,7 +13,14 @@
 		doneMessage = null;
 		try {
 			const result = await devRunnerPlanApi.done(encodePathToBase64(plan.path));
-			doneMessage = { path: plan.path, success: result.success, text: result.message };
+			doneMessage = {
+				path: plan.path,
+				success: result.success,
+				text: result.message,
+				remaining: result.remaining_tasks,
+				total: result.total_tasks,
+				planStatus: result.plan_status,
+			};
 			if (result.success) {
 				onPlansChange?.();
 				setTimeout(() => { doneMessage = null; }, 5000);
@@ -35,9 +42,10 @@
 		plans: DevRunnerPlanFileResponse[];
 		onPlansChange?: () => void;
 		runningPlanFile?: string | null;
+		onPlanSelect?: (path: string) => void;
 	}
 
-	let { plans, onPlansChange, runningPlanFile = null }: Props = $props();
+	let { plans, onPlansChange, runningPlanFile = null, onPlanSelect }: Props = $props();
 
 	let showIgnored = $state(false);
 	let ignoredPlans = $state<DevRunnerPlanFileResponse[]>([]);
@@ -66,6 +74,7 @@
 			return;
 		}
 		selectedPath = plan.path;
+		onPlanSelect?.(plan.path);
 		planDetailLoading = true;
 		planDetail = null;
 		openPhases = new Set();
@@ -268,8 +277,19 @@
 	{/if}
 
 	{#if doneMessage}
-		<div class="text-xs rounded p-2 {doneMessage.success ? 'text-green-700 bg-green-50' : 'text-red-600 bg-red-50'}">
-			{doneMessage.text}
+		{@const hasRemaining = doneMessage.remaining !== undefined && doneMessage.remaining > 0}
+		<div class="text-xs rounded p-2 {doneMessage.success
+			? (hasRemaining ? 'text-amber-700 bg-amber-50' : 'text-green-700 bg-green-50')
+			: 'text-red-600 bg-red-50'}">
+			{#if doneMessage.success && doneMessage.total !== undefined}
+				{#if hasRemaining}
+					완료 처리 성공 — 남은 task: {doneMessage.remaining}/{doneMessage.total}
+				{:else}
+					완료 처리 성공 — 상태: {doneMessage.planStatus || '완료'}, {doneMessage.total}/{doneMessage.total} 완료
+				{/if}
+			{:else}
+				{doneMessage.text}
+			{/if}
 		</div>
 	{/if}
 
