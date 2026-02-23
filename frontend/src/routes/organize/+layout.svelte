@@ -9,7 +9,8 @@
 		Settings,
 		Menu,
 		X,
-		FolderSearch
+		FolderSearch,
+		BookOpen
 	} from 'lucide-svelte';
 
 	const modules = [
@@ -18,7 +19,8 @@
 		{ id: 'review', label: '분류 리뷰', path: '/organize/review', icon: CheckSquare },
 		{ id: 'move', label: '이동', path: '/organize/move', icon: FolderOutput },
 		{ id: 'rules', label: '규칙', path: '/organize/rules', icon: ListFilter },
-		{ id: 'settings', label: '설정', path: '/organize/settings', icon: Settings }
+		{ id: 'settings', label: '설정', path: '/organize/settings', icon: Settings },
+		{ id: 'obsidian', label: '옵시디언', path: '/organize/obsidian', icon: BookOpen }
 	];
 
 	let mobileMenuOpen = $state(false);
