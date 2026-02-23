@@ -205,7 +205,7 @@
 		aria-modal="true"
 		tabindex="-1"
 	>
-		<div class="bg-white rounded-lg shadow-xl w-full max-w-5xl mx-4 max-h-[90vh] overflow-hidden">
+		<div class="bg-white rounded-lg shadow-xl w-full max-w-5xl mx-4 max-h-[90dvh] flex flex-col overflow-hidden">
 			<!-- 헤더 -->
 			<div class="p-4 border-b flex items-center justify-between bg-background">
 				<div>
@@ -231,7 +231,7 @@
 			</div>
 
 			<!-- 컨텐츠 -->
-			<div class="p-4 overflow-y-auto" style="max-height: calc(90vh - 120px);">
+			<div class="p-4 flex-1 overflow-y-auto">
 				<!-- 옵션 및 조회 버튼 -->
 				<div class="bg-background rounded-lg p-4 mb-4">
 					<div class="flex flex-wrap items-center gap-4">
