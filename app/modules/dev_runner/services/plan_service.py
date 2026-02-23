@@ -294,17 +294,34 @@ class PlanService:
         except Exception:
             return PlanProgressResponse(done=0, total=0, percent=0)
 
+    @staticmethod
+    def _strip_markdown_inline(text: str) -> str:
+        """마크다운 인라인 스타일 제거 (**굵게**, *기울임*, ~~취소선~~, `코드`)"""
+        return re.sub(r'[*_~`]+', '', text).strip()
+
     def get_plan_status(self, path: Path) -> str:
-        """plan 상태 파싱 (> 상태: ...)"""
+        """plan 상태 파싱 (> 상태: ...), 없으면 유형으로 판단"""
         if not path.exists():
             return "unknown"
 
         try:
+            doc_type = None
             with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
+                for i, line in enumerate(f):
+                    if i >= 20:
+                        break
                     match = re.match(r">\s*상태:\s*(.+)", line)
                     if match:
-                        return match.group(1).strip()
+                        return self._strip_markdown_inline(match.group(1))
+                    type_match = re.match(r">\s*유형:\s*(.+)", line)
+                    if type_match:
+                        doc_type = self._strip_markdown_inline(type_match.group(1))
+            # 상태 라인이 없고, 보고서 유형이면 완료로 간주
+            if doc_type and re.search(r'보고서|report', doc_type, re.IGNORECASE):
+                return "완료"
+            # 파일명에 -report 포함 시 완료로 간주
+            if '-report' in path.stem.lower():
+                return "완료"
             return "unknown"
         except Exception:
             return "unknown"
@@ -466,7 +483,7 @@ class PlanService:
             return False
         if plan.progress.total > 0 and plan.progress.done == plan.progress.total:
             return True
-        if plan.status == "구현완료":
+        if plan.status in ("구현완료", "완료"):
             return True
         return False
 

@@ -93,7 +93,7 @@
 		if (window.innerWidth < 640) {
 			panelOpen = false;
 		} else {
-			// 데스크톱: Task History(Plans 탭) 기본 펼침
+			// 데스크톱: Plans & Tasks(Plans 탭) 기본 펼침
 			taskHistoryOpen = true;
 		}
 
@@ -275,22 +275,22 @@
 				{/if}
 			</div>
 
-			<!-- Log Viewer + Task History (2-grid on desktop, stack on mobile) -->
+			<!-- Log Viewer + Plans & Tasks (2-grid on desktop, stack on mobile) -->
 			<div class="flex-1 min-h-0 flex flex-col md:grid md:grid-cols-2 md:gap-0 overflow-hidden">
 				<!-- Log Viewer -->
-				<div class="flex-1 min-h-[300px] md:min-h-0 overflow-hidden">
+				<div class="flex-1 min-h-0 overflow-hidden">
 					<LogViewer planFile={effectivePlanFile ?? undefined} currentPlanName={runStatus?.current_plan_name ?? undefined} />
 				</div>
 
-				<!-- Task History -->
-				<div class="shrink-0 md:shrink border-t md:border-t-0 md:border-l overflow-auto flex flex-col">
+				<!-- Plans & Tasks: 모바일=하단 고정+접힘/펼침, 데스크톱=우측 패널 -->
+				<div class="shrink-0 md:shrink {taskHistoryOpen ? 'max-h-[50dvh]' : ''} md:max-h-none border-t md:border-t-0 md:border-l overflow-hidden flex flex-col">
 					<!-- 모바일: 토글 버튼 표시 / 데스크톱: 숨김 (항상 펼침) -->
 					<button
 						onclick={() => (taskHistoryOpen = !taskHistoryOpen)}
 						class="md:hidden flex items-center gap-2 w-full px-4 py-2 hover:bg-gray-50 transition-colors"
 					>
 						<svg class="w-3.5 h-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-						<span class="text-xs font-medium uppercase tracking-wider">Task History</span>
+						<span class="text-xs font-medium uppercase tracking-wider">Plans & Tasks</span>
 						{#if taskHistoryTab === 'tasks'}
 							{#if taskListPlanPath}
 								<span class="text-[10px] text-gray-400 font-mono truncate max-w-[160px]">{taskListPlanPath.split(/[\\/]/).pop()}</span>
@@ -309,7 +309,7 @@
 					<!-- 데스크톱 헤더 (항상 표시) -->
 					<div class="hidden md:flex items-center gap-2 px-4 py-2 border-b">
 						<svg class="w-3.5 h-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-						<span class="text-xs font-medium uppercase tracking-wider">Task History</span>
+						<span class="text-xs font-medium uppercase tracking-wider">Plans & Tasks</span>
 						{#if taskHistoryTab === 'tasks'}
 							{#if taskListPlanPath}
 								<span class="text-[10px] text-gray-400 font-mono truncate max-w-[160px]">{taskListPlanPath.split(/[\\/]/).pop()}</span>
@@ -320,7 +320,7 @@
 						{/if}
 					</div>
 					<!-- 콘텐츠: 데스크톱은 항상 표시, 모바일은 토글 -->
-					<div class="{taskHistoryOpen ? 'flex' : 'hidden'} md:flex flex-col flex-1 min-h-0 h-[280px] md:h-auto">
+					<div class="{taskHistoryOpen ? 'flex' : 'hidden'} md:flex flex-col flex-1 min-h-0 md:h-auto">
 						<!-- 탭 버튼 -->
 						<div class="flex gap-0 px-4 pt-2 border-b shrink-0">
 							<button

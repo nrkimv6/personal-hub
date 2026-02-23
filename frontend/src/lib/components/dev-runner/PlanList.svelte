@@ -58,7 +58,8 @@
 	function canDone(plan: DevRunnerPlanFileResponse): boolean {
 		if (plan.path.includes('archive')) return false;
 		return (plan.progress.total > 0 && plan.progress.done === plan.progress.total)
-			|| plan.status === '구현완료';
+			|| plan.status === '구현완료'
+			|| plan.status === '완료';
 	}
 
 	async function handleHold(e: Event, plan: DevRunnerPlanFileResponse) {
