@@ -14,8 +14,10 @@ rg JSON 출력 타입:
 from __future__ import annotations
 
 import asyncio
+import glob
 import json
 import logging
+import os
 import shutil
 from collections import defaultdict
 from typing import List, Optional, Tuple
@@ -29,7 +31,20 @@ class RipgrepService:
     """ripgrep CLI를 subprocess로 실행하는 파일 내용 검색 서비스."""
 
     def __init__(self) -> None:
-        self._rg_path: Optional[str] = shutil.which("rg")
+        self._rg_path: Optional[str] = shutil.which("rg") or self._find_rg_fallback()
+
+    @staticmethod
+    def _find_rg_fallback() -> Optional[str]:
+        """winget 설치 경로 등에서 rg.exe를 탐색."""
+        patterns = [
+            os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Packages\*ripgrep*\*\rg.exe"),
+            r"C:\ProgramData\chocolatey\bin\rg.exe",
+        ]
+        for pat in patterns:
+            found = glob.glob(pat)
+            if found:
+                return found[0]
+        return None
 
     # ------------------------------------------------------------------
     # Public API

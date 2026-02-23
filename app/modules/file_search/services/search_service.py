@@ -107,6 +107,9 @@ class SearchService:
     def browse_directory(self, path: str) -> BrowseResponse:
         """서버 측 디렉토리 목록 반환."""
         path = path.rstrip("\\/")
+        # 드라이브 루트 보정: "D:" → "D:\" (Windows에서 "D:"는 상대경로)
+        if len(path) == 2 and path[1] == ':' and path[0].isalpha():
+            path = path + "\\"
         if not path:
             # 드라이브 목록 반환 (Windows)
             import string
