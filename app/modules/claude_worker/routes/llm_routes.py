@@ -28,6 +28,7 @@ class LLMRequestCreate(BaseModel):
     provider: str = "claude"
     model: str = ""
     queue_name: str = "utility"
+    cli_options: Optional[dict] = None
 
 
 class LLMRequestResponse(BaseModel):
@@ -176,6 +177,7 @@ def create_request(
         provider=data.provider,
         model=data.model,
         queue_name=data.queue_name,
+        cli_options=data.cli_options,
     )
     return _to_response(request)
 

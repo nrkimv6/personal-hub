@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0] - 2026-02-24
+### Added
+- LLM 프리셋: cwd 지원 추가 — Claude CLI가 wtools 디렉토리에서 실행되어 /plan 스킬 자동 로드
+- LLM 프리셋: PLAN_SYSTEM_PROMPT 하드코딩 제거, promptPrefix + cliOptions 구조로 교체
+- 백엔드: execute_claude에 cwd 파라미터 지원 및 허용 경로 검증 추가
+- API 스키마: LLMRequestCreate에 cli_options 필드 노출
+
 ## [0.10.0] - 2026-02-23
 ### Added
 - Dev Runner: 데스크톱 2-grid 레이아웃 (LogViewer + Task History 좌우 분할, md 브레이크포인트)

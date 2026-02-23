@@ -64,7 +64,7 @@
 		request_source: 'manual_test',
 		provider: 'claude',
 		model: '',
-		systemPrompt: '',
+		cli_options: null as Record<string, unknown> | null,
 		userInput: ''
 	};
 	let createLoading = false;
@@ -85,24 +85,10 @@
 		queue_name?: string;
 		provider?: string;
 		model?: string;
-		systemPrompt?: string;
+		cliOptions?: Record<string, unknown>;
+		promptPrefix?: string;
 		userPromptPlaceholder?: string;
 	}
-
-	const PLAN_SYSTEM_PROMPT = `당신은 소프트웨어 개발 계획 문서를 작성하는 전문가입니다.
-사용자의 아이디어를 받아 다음 형식으로 계획 문서를 작성하세요.
-
-## 형식
-- 제목 및 메타 정보 (우선순위, 난이도, 대상)
-- 배경 및 현재 상태
-- 설계 (핵심 결정 사항)
-- 구현 순서 (Phase별 원자 단위 TODO 체크박스)
-
-## 규칙
-- TODO 체크박스는 \`- [ ]\` 형식 사용
-- 각 TODO에 대상 파일 경로 명시
-- Phase는 의존성 순서로 정렬
-- 복잡한 작업은 하위 체크박스로 분해`;
 
 	const presets: Preset[] = [
 		{ label: '(직접 입력)' },
@@ -113,7 +99,8 @@
 			queue_name: 'system',
 			provider: 'claude',
 			model: 'opus',
-			systemPrompt: PLAN_SYSTEM_PROMPT,
+			cliOptions: { cwd: 'D:/work/project/service/wtools' },
+			promptPrefix: '/plan ',
 			userPromptPlaceholder: '아이디어나 요구사항을 입력하세요...'
 		}
 	];
@@ -135,7 +122,7 @@
 		if (preset.provider) createForm.provider = preset.provider;
 		if (preset.model) createForm.model = preset.model;
 		if (preset.caller_type) createForm.caller_type = preset.caller_type;
-		createForm.systemPrompt = preset.systemPrompt ?? '';
+		createForm.cli_options = preset.cliOptions ?? null;
 		userInput = '';
 		createForm.userInput = '';
 		createForm.prompt = '';
@@ -445,7 +432,8 @@
 				createError = '사용자 입력을 입력해주세요.';
 				return;
 			}
-			createForm.prompt = createForm.systemPrompt + '\n\n---\n\n' + createForm.userInput;
+			const prefix = selectedPreset.promptPrefix ?? '';
+		createForm.prompt = prefix + createForm.userInput;
 		}
 
 		if (!createForm.caller_id.trim() || !createForm.prompt.trim()) {
@@ -458,9 +446,10 @@
 		createSuccess = false;
 
 		try {
-			// model이 "(기본)"이면 빈 문자열로 변환
+			// model이 "(기본)"이면 빈 문자열로 변환. userInput은 API 전송 제외.
+			const { userInput: _userInput, ...formData } = createForm;
 			const requestData = {
-				...createForm,
+				...formData,
 				model: createForm.model === '(기본)' ? '' : createForm.model
 			};
 			await llmApi.create(requestData);
@@ -474,7 +463,7 @@
 				request_source: 'manual_test',
 				provider: 'claude',
 				model: '',
-				systemPrompt: '',
+				cli_options: null,
 				userInput: ''
 			};
 			selectedPreset = presets[0];
@@ -1113,21 +1102,9 @@
 					</div>
 					{:else}
 					<div>
-						<label class="block text-sm font-medium text-foreground mb-1">시스템 지시문</label>
-						<textarea
-							value={createForm.systemPrompt}
-							readonly
-							rows="8"
-							class="w-full px-3 py-2 border border-border rounded-lg resize-none bg-muted text-muted-foreground text-xs font-mono"
-						></textarea>
-						<div class="my-2 flex items-center gap-2">
-							<hr class="flex-1 border-border" />
-							<span class="text-xs text-muted-foreground">사용자 입력</span>
-							<hr class="flex-1 border-border" />
-						</div>
 						<textarea
 							bind:value={createForm.userInput}
-							rows="4"
+							rows="6"
 							placeholder={selectedPreset.userPromptPlaceholder ?? '내용을 입력하세요...'}
 							class="w-full px-3 py-2 border border-border rounded-lg resize-none"
 						></textarea>

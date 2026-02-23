@@ -320,6 +320,23 @@ class LLMService:
                 allowed_tools = cli_options.get("allowed_tools")
                 schema_file = None
 
+                # cwd 처리 — 허용 경로 검증 후 subprocess cwd로 전달
+                cwd_opt = cli_options.get("cwd")
+                if cwd_opt:
+                    import pathlib
+                    ALLOWED_CWD_PREFIX = r"D:\work\project"
+                    cwd_path = pathlib.Path(cwd_opt)
+                    try:
+                        cwd_path.relative_to(ALLOWED_CWD_PREFIX)
+                    except ValueError:
+                        raise ValueError(f"허용되지 않은 cwd 경로: {cwd_opt} (허용: {ALLOWED_CWD_PREFIX} 하위만)")
+                    if not cwd_path.exists():
+                        raise ValueError(f"cwd 경로가 존재하지 않음: {cwd_opt}")
+                    cwd_value = str(cwd_path)
+                    logger.debug(f"Claude CLI cwd 설정: {cwd_value}")
+                else:
+                    cwd_value = None
+
                 if exec_mode:
                     # ========== B 방식: exec 모드 (shell=False) ==========
                     # 이미지 분류 등 복잡한 CLI 옵션용. 프로세스 직접 실행.
@@ -349,6 +366,7 @@ class LLMService:
                         encoding="utf-8",
                         env=env,
                         stdin=subprocess.DEVNULL,
+                        cwd=cwd_value,
                     )
                 else:
                     # ========== A 방식: shell 모드 (stdin pipe, 2단계) ==========
@@ -398,6 +416,7 @@ class LLMService:
                         encoding="utf-8",
                         shell=True,
                         env=env,
+                        cwd=cwd_value,
                     )
             finally:
                 # 임시 파일 삭제
