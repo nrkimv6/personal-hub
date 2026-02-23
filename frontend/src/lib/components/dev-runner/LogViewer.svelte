@@ -52,6 +52,7 @@
 		AI: { text: 'text-blue-400', bg: 'bg-blue-500/20' },
 		TOOL: { text: 'text-yellow-400', bg: 'bg-yellow-500/20' },
 		DONE: { text: 'text-green-400', bg: 'bg-green-500/20' },
+		RESULT: { text: 'text-emerald-400', bg: 'bg-emerald-500/20' },
 		ERROR: { text: 'text-red-400', bg: 'bg-red-500/20' },
 		INFO: { text: 'text-gray-500', bg: 'bg-transparent' },
 		SYSTEM: { text: 'text-purple-400', bg: 'bg-purple-500/20' },
