@@ -343,7 +343,7 @@
 									{#if runStatus?.running && currentTracking}
 										<CurrentTrackingCard tracking={currentTracking} />
 									{/if}
-									<div class="flex-1 min-h-0">
+									<div class="flex-1 min-h-0 overflow-hidden">
 										<TaskList planPath={taskListPlanPath} />
 									</div>
 								</div>

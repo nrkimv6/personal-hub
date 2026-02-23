@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { devRunnerPlanApi } from '$lib/api';
 	import type { PlanDetailResponse } from '$lib/api';
+	import { encodePathToBase64 } from '$lib/utils/encoding';
 
 	interface Props {
 		planPath?: string | null;
@@ -16,7 +17,7 @@
 		loading = true;
 		error = null;
 		try {
-			const encoded = encodeURIComponent(path);
+			const encoded = encodePathToBase64(path);
 			detail = await devRunnerPlanApi.items(encoded);
 		} catch (e) {
 			error = e instanceof Error ? e.message : '로딩 실패';
