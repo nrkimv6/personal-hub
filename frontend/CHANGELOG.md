@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.9.0] - 2026-02-23
+### Added
+- Dev Runner: Plans Card를 Task History 탭으로 이동 (Tasks/Plans 탭 전환)
+- Dev Runner: 모바일(< 640px)에서 Control Panel 기본 접힘
+
 ## [0.6.0] - 2026-02-23
 ### Added
 - 메모 별표(즐겨찾기) 기능: 별표 토글 버튼 (NoteCard, NoteDetailModal)

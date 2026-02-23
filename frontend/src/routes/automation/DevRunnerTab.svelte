@@ -37,6 +37,7 @@
 	let lastStartTime = $state<string | null>(null);
 	let panelOpen = $state(true);
 	let taskHistoryOpen = $state(false);
+	let taskHistoryTab = $state<'tasks' | 'plans'>('tasks');
 	let currentTracking = $state<CurrentTrackingResponse | null>(null);
 	let selectedPlanPath = $state('');
 	let trackingInterval: ReturnType<typeof setInterval> | null = null;
@@ -161,6 +162,11 @@
 	}
 
 	onMount(async () => {
+		// 모바일(< 640px)이면 Control Panel 기본 접힘
+		if (window.innerWidth < 640) {
+			panelOpen = false;
+		}
+
 		// 초기 로드: 모든 데이터 병렬로 한 번에 가져오기
 		await Promise.all([pollStatus(), fetchStats(), fetchTasks(), fetchPlans()]);
 		loading = false;
@@ -376,23 +382,15 @@
 							<RunControl status={runStatus} {plans} onStatusChange={handleRunStatusChange} bind:selectedPlan={selectedPlanPath} />
 						</div>
 
-						<!-- Grid: Stats + Plans (Phase 3: CurrentTaskCard 제거) -->
-						<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-							<!-- Stats -->
-							<div class="bg-white border rounded-lg p-4">
-								<div class="flex items-center gap-2 mb-3">
-									<svg class="w-3.5 h-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
-									<span class="text-xs font-medium uppercase tracking-wider">Statistics</span>
-								</div>
-								{#if stats}
-									<StatsCard {stats} currentRunStats={effectiveRunStats} isRunning={runStatus?.running ?? false} />
-								{/if}
+						<!-- Stats (full width) -->
+						<div class="bg-white border rounded-lg p-4">
+							<div class="flex items-center gap-2 mb-3">
+								<svg class="w-3.5 h-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+								<span class="text-xs font-medium uppercase tracking-wider">Statistics</span>
 							</div>
-
-							<!-- Plan Files -->
-							<div class="bg-white border rounded-lg p-4 max-h-[50vh] sm:max-h-[340px] overflow-hidden flex flex-col">
-								<PlanList {plans} onPlansChange={fetchPlans} runningPlanFile={runStatus?.plan_file ?? null} {lastPlanFile} onPlanSelect={(path) => { selectedPlanPath = path; }} />
-							</div>
+							{#if stats}
+								<StatsCard {stats} currentRunStats={effectiveRunStats} isRunning={runStatus?.running ?? false} />
+							{/if}
 						</div>
 					</div>
 				{/if}
@@ -413,19 +411,24 @@
 					>
 						<svg class="w-3.5 h-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
 						<span class="text-xs font-medium uppercase tracking-wider">Task History</span>
-						<!-- 범위 라벨 -->
-						<span class="text-[10px] text-gray-400 font-mono truncate max-w-[160px]">{taskScopeLabel}</span>
-						<div class="h-3 w-px bg-gray-200 shrink-0"></div>
-						<!-- 총 건수 + 성공/실패/스킵 요약 -->
-						<span class="text-[10px] text-gray-500 font-mono shrink-0">{taskList?.total ?? 0} tasks</span>
-						{#if taskSuccessCount > 0}
-							<span class="text-[10px] text-green-600 font-mono shrink-0">✓{taskSuccessCount}</span>
-						{/if}
-						{#if taskFailedCount > 0}
-							<span class="text-[10px] text-red-500 font-mono shrink-0">✗{taskFailedCount}</span>
-						{/if}
-						{#if taskSkippedCount > 0}
-							<span class="text-[10px] text-gray-400 font-mono shrink-0">⏭{taskSkippedCount}</span>
+						<!-- 범위 라벨 (tasks 탭일 때만) -->
+						{#if taskHistoryTab === 'tasks'}
+							<span class="text-[10px] text-gray-400 font-mono truncate max-w-[160px]">{taskScopeLabel}</span>
+							<div class="h-3 w-px bg-gray-200 shrink-0"></div>
+							<!-- 총 건수 + 성공/실패/스킵 요약 -->
+							<span class="text-[10px] text-gray-500 font-mono shrink-0">{taskList?.total ?? 0} tasks</span>
+							{#if taskSuccessCount > 0}
+								<span class="text-[10px] text-green-600 font-mono shrink-0">✓{taskSuccessCount}</span>
+							{/if}
+							{#if taskFailedCount > 0}
+								<span class="text-[10px] text-red-500 font-mono shrink-0">✗{taskFailedCount}</span>
+							{/if}
+							{#if taskSkippedCount > 0}
+								<span class="text-[10px] text-gray-400 font-mono shrink-0">⏭{taskSkippedCount}</span>
+							{/if}
+						{:else}
+							<div class="h-3 w-px bg-gray-200 shrink-0"></div>
+							<span class="text-[10px] text-gray-500 font-mono shrink-0">{plans.length} plans</span>
 						{/if}
 						<svg
 							class="w-3.5 h-3.5 text-gray-400 ml-auto shrink-0 transition-transform {taskHistoryOpen ? '' : 'rotate-180'}"
@@ -435,28 +438,52 @@
 						</svg>
 					</button>
 					{#if taskHistoryOpen}
-						<div class="h-[280px] overflow-hidden">
-							<div class="px-4 pb-4 h-full flex flex-col">
-								{#if runStatus?.running && currentTracking}
-									<CurrentTrackingCard tracking={currentTracking} />
-								{/if}
-								<div class="flex-1 min-h-0">
-									{#if taskList}
-										<TaskList
-											tasks={taskList.tasks}
-											total={taskList.total}
-											currentFilter={statusFilter}
-											onFilterChange={handleFilterChange}
-											onDelete={handleDeleteTask}
-											onDeleteCompleted={handleDeleteCompleted}
-											onDeleteOld={handleDeleteOld}
-										/>
-									{:else}
-										<div class="flex items-center justify-center h-full text-sm text-gray-400">
-											로딩 중...
+						<div class="h-[280px] overflow-hidden flex flex-col">
+							<!-- 탭 버튼 -->
+							<div class="flex gap-0 px-4 pt-2 border-b shrink-0">
+								<button
+									onclick={() => (taskHistoryTab = 'tasks')}
+									class="px-3 py-1.5 text-xs font-medium transition-colors border-b-2 -mb-px {taskHistoryTab === 'tasks' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+								>
+									Tasks
+								</button>
+								<button
+									onclick={() => (taskHistoryTab = 'plans')}
+									class="px-3 py-1.5 text-xs font-medium transition-colors border-b-2 -mb-px {taskHistoryTab === 'plans' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+								>
+									Plans
+								</button>
+							</div>
+							<!-- 탭 콘텐츠 -->
+							<div class="flex-1 min-h-0 overflow-hidden">
+								{#if taskHistoryTab === 'tasks'}
+									<div class="px-4 pb-4 h-full flex flex-col">
+										{#if runStatus?.running && currentTracking}
+											<CurrentTrackingCard tracking={currentTracking} />
+										{/if}
+										<div class="flex-1 min-h-0">
+											{#if taskList}
+												<TaskList
+													tasks={taskList.tasks}
+													total={taskList.total}
+													currentFilter={statusFilter}
+													onFilterChange={handleFilterChange}
+													onDelete={handleDeleteTask}
+													onDeleteCompleted={handleDeleteCompleted}
+													onDeleteOld={handleDeleteOld}
+												/>
+											{:else}
+												<div class="flex items-center justify-center h-full text-sm text-gray-400">
+													로딩 중...
+												</div>
+											{/if}
 										</div>
-									{/if}
-								</div>
+									</div>
+								{:else}
+									<div class="px-4 pb-4 h-full overflow-hidden flex flex-col">
+										<PlanList {plans} onPlansChange={fetchPlans} runningPlanFile={runStatus?.plan_file ?? null} {lastPlanFile} onPlanSelect={(path) => { selectedPlanPath = path; }} />
+									</div>
+								{/if}
 							</div>
 						</div>
 					{/if}
