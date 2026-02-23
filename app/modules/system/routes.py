@@ -169,6 +169,22 @@ async def start_watchdogs():
     return result
 
 
+# ===== Nightly Cleanup Stats =====
+
+@router.get("/nightly-cleanup/stats")
+async def get_nightly_cleanup_stats(days: int = 14):
+    """Nightly done-cleanup 로그 파일에서 통계 조회
+
+    Args:
+        days: 조회할 최근 일수 (기본 14일)
+
+    Returns:
+        runs: 실행 이력 (날짜별)
+        summary: 전체 요약
+    """
+    return await _service.get_nightly_cleanup_stats(days)
+
+
 # ===== Redis Operations =====
 
 @router.get("/services/redis")

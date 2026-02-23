@@ -147,6 +147,9 @@ export interface DoneResponse {
 	success: boolean;
 	message: string;
 	output: string | null;
+	remaining_tasks: number;
+	total_tasks: number;
+	plan_status: string;
 }
 
 export interface BatchDoneResultItem {

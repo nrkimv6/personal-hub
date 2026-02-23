@@ -90,8 +90,8 @@
     load();
   }
 
-  async function load() {
-    loading = true;
+  async function load(silent = false) {
+    if (!silent) loading = true;
     error = '';
     try {
       const [res, tagRes] = await Promise.all([
@@ -194,6 +194,10 @@
     await notesApi.bulkStar([...selectedIds], true);
     selectedIds = new Set();
     load();
+  }
+
+  export function refresh() {
+    return load(true);
   }
 
   onMount(load);

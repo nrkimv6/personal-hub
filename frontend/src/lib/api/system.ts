@@ -1030,8 +1030,32 @@ export const serviceDashboardApi = {
   restartRedis: () =>
     request<{ success: boolean; message: string }>('/system/services/redis/restart', {
       method: 'POST'
-    })
+    }),
+
+  // Nightly cleanup 통계
+  nightlyCleanupStats: (days = 14) =>
+    request<NightlyCleanupStats>(`/system/nightly-cleanup/stats?days=${days}`)
 };
+
+export interface NightlyCleanupRun {
+  date: string;
+  total_items: number;
+  processed: number;
+  failed: number;
+  skipped: number;
+  duration: string | null;
+  projects: Record<string, number>;
+}
+
+export interface NightlyCleanupStats {
+  runs: NightlyCleanupRun[];
+  summary: {
+    total_runs: number;
+    total_items_archived: number;
+    avg_items_per_run: number;
+    by_project: Record<string, number>;
+  };
+}
 
 export interface RedisStatus {
   connected: boolean;
