@@ -51,7 +51,7 @@
 		class="
 			relative bg-white flex flex-col
 			w-full h-full
-			sm:w-full sm:max-w-lg sm:h-auto sm:max-h-[85vh]
+			sm:w-full sm:max-w-lg sm:h-auto sm:max-h-[85dvh]
 			sm:rounded-xl sm:shadow-xl sm:my-8
 		"
 	>
@@ -95,7 +95,7 @@
 
 		<!-- 스크롤 콘텐츠 영역 -->
 		<div
-			class="flex-1 overflow-y-auto"
+			class="flex-1 min-h-0 overflow-y-auto"
 			style="padding-bottom: max(1rem, env(safe-area-inset-bottom))"
 		>
 			{#each detail.phases as phase, i}

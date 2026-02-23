@@ -125,7 +125,7 @@
 </div>
 
 <!-- 네비게이션 -->
-<nav class="flex-1 p-2 lg:p-4 overflow-y-auto">
+<nav class="flex-1 min-h-0 p-2 lg:p-4 overflow-y-auto">
 	{#each categoryGroups as group, groupIdx}
 		<!-- 카테고리 헤더 -->
 		{#if group.category}

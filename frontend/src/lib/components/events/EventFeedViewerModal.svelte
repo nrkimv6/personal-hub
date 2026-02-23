@@ -179,7 +179,7 @@
 			<!-- 데스크톱 레이아웃: lg 이상 -->
 			<div class="hidden lg:flex gap-4">
 				<!-- 왼쪽: AI 분석 패널 -->
-				<div class="bg-white rounded-xl p-4 w-80 shrink-0 max-h-[85vh] overflow-y-auto">
+				<div class="bg-white rounded-xl p-4 w-80 shrink-0 max-h-[85dvh] overflow-y-auto">
 					<div class="flex items-center justify-between mb-3">
 						<h4 class="font-semibold text-sm text-foreground flex items-center gap-2">
 							<svg
@@ -547,7 +547,7 @@
 				<!-- 탭 내용 -->
 				{#if mobileViewerTab === 'info'}
 					<!-- AI 분석 탭 -->
-					<div class="bg-white rounded-b-xl p-4 max-h-[70vh] overflow-y-auto">
+					<div class="bg-white rounded-b-xl p-4 max-h-[80dvh] overflow-y-auto">
 						<div class="flex items-center justify-between mb-3">
 							<h4 class="font-semibold text-sm text-foreground flex items-center gap-2">
 								<svg

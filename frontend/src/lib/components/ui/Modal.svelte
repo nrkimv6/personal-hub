@@ -50,7 +50,7 @@
     <div class="absolute inset-0 bg-foreground/50 backdrop-blur-sm"></div>
 
     <!-- Modal -->
-    <div class="relative bg-card text-card-foreground rounded-lg shadow-modal {sizes[size]} w-full mx-4 max-h-[85vh] flex flex-col border border-border">
+    <div class="relative bg-card text-card-foreground rounded-lg shadow-modal {sizes[size]} w-full mx-4 max-h-[95dvh] sm:max-h-[85dvh] flex flex-col border border-border">
       <!-- Header -->
       <div class="flex items-center justify-between p-4 border-b border-border">
         <h3 id="modal-title" class="text-lg font-semibold text-foreground">{title}</h3>

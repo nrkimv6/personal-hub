@@ -227,7 +227,7 @@
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<div
-			class="bg-white rounded-t-xl sm:rounded-xl w-full sm:max-w-2xl max-h-[90vh] overflow-auto"
+			class="bg-white rounded-t-xl sm:rounded-xl w-full sm:max-w-2xl max-h-[90dvh] overflow-auto"
 			onclick={(e) => e.stopPropagation()}
 		>
 			<div class="p-6">

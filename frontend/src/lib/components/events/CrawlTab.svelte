@@ -600,7 +600,7 @@
 		tabindex="-1"
 	>
 		<div
-			class="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-auto p-6"
+			class="bg-white rounded-xl w-full max-w-2xl max-h-[90dvh] overflow-auto p-6"
 			onclick={(e) => e.stopPropagation()}
 		>
 			<div class="flex justify-between items-center mb-4">

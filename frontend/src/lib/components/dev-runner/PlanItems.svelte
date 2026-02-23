@@ -49,7 +49,7 @@
 	</div>
 
 	<!-- Phases -->
-	<div class="space-y-2 max-h-[500px] overflow-y-auto">
+	<div class="space-y-2 max-h-[300px] sm:max-h-[500px] overflow-y-auto">
 		{#each detail.phases as phase, i}
 			<div class="border rounded">
 				<!-- Phase header (accordion) -->
