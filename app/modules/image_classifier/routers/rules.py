@@ -107,6 +107,106 @@ async def delete_rule(rule_id: int, db: Session = Depends(get_db)):
     return {"status": "ok", "message": "규칙이 삭제되었습니다"}
 
 
+class RulePreviewRequest(BaseModel):
+    """규칙 미리보기 요청"""
+    category_id: Optional[int] = None
+    tag_id: Optional[int] = None
+    limit: int = 10
+
+
+@router.post("/preview")
+async def preview_rule(
+    request: RulePreviewRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    폴더 규칙 미리보기
+
+    카테고리 또는 태그 ID로 해당 규칙의 적용 대상 파일 목록과
+    이동 예상 경로를 반환합니다.
+
+    Request: { category_id or tag_id, limit: 10 }
+    Response: [{ file_path: 원본, target_path: 이동 예상 경로 }]
+    """
+    if not request.category_id and not request.tag_id:
+        raise HTTPException(status_code=400, detail="category_id 또는 tag_id 중 하나를 지정하세요.")
+
+    folder_template = None
+    folder_action = None
+
+    if request.category_id:
+        row = db.execute(
+            text("SELECT folder_template, folder_action FROM categories WHERE id = :id"),
+            {"id": request.category_id}
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="카테고리를 찾을 수 없습니다.")
+        folder_template = row.folder_template
+        folder_action = row.folder_action
+
+        # 해당 카테고리의 파일 목록
+        files = db.execute(text("""
+            SELECT id, file_path FROM file_classifications
+            WHERE final_category_id = :category_id AND status = 'classified'
+            LIMIT :limit
+        """), {"category_id": request.category_id, "limit": request.limit}).fetchall()
+
+    else:
+        try:
+            row = db.execute(
+                text("SELECT folder_template, folder_action FROM tags WHERE id = :id"),
+                {"id": request.tag_id}
+            ).fetchone()
+        except Exception:
+            raise HTTPException(status_code=500, detail="태그 폴더 규칙 조회 실패 (마이그레이션 007 필요)")
+        if not row:
+            raise HTTPException(status_code=404, detail="태그를 찾을 수 없습니다.")
+        folder_template = row.folder_template
+        folder_action = row.folder_action
+
+        # 해당 태그의 파일 목록
+        files = db.execute(text("""
+            SELECT fc.id, fc.file_path FROM file_classifications fc
+            JOIN file_tags ft ON ft.file_id = fc.id
+            WHERE ft.tag_id = :tag_id
+            LIMIT :limit
+        """), {"tag_id": request.tag_id, "limit": request.limit}).fetchall()
+
+    if not folder_template:
+        return {"previews": [], "message": "폴더 규칙이 설정되지 않았습니다.", "folder_action": folder_action}
+
+    import os
+    import re
+    from datetime import datetime
+
+    previews = []
+    for file in files:
+        file_path = file.file_path or ""
+        filename = os.path.basename(file_path)
+        # 간단한 템플릿 변수 치환 (실제 적용 시에는 DB 정보 활용)
+        now = datetime.now()
+        target = folder_template
+        target = target.replace("{year}", str(now.year))
+        target = target.replace("{month}", f"{now.month:02d}")
+        target = target.replace("{tag}", "")
+        target = target.replace("{category}", "")
+        # 중복 슬래시 제거
+        target = re.sub(r"[/\\]+", "/", target).strip("/")
+        target_path = f"{target}/{filename}" if target else filename
+
+        previews.append({
+            "file_id": file.id,
+            "file_path": file_path,
+            "target_path": target_path,
+        })
+
+    return {
+        "previews": previews,
+        "folder_template": folder_template,
+        "folder_action": folder_action or "move",
+    }
+
+
 class RuleUpdateRequest(BaseModel):
     """규칙 수정 요청"""
     rule_type: Optional[str] = None

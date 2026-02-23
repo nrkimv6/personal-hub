@@ -112,6 +112,60 @@
 		return `${m}분 ${s % 60}초`;
 	}
 
+	// === 멀티 선택 상태 ===
+	let selectedFolderIds = $state(new Set<number>());
+	let bulkCategoryId = $state<number | ''>('');
+	let bulkApplying = $state(false);
+
+	const allSelected = $derived(
+		filteredFolders.length > 0 && filteredFolders.every((f) => selectedFolderIds.has(f.id))
+	);
+
+	function toggleSelectFolder(folderId: number) {
+		if (selectedFolderIds.has(folderId)) {
+			selectedFolderIds.delete(folderId);
+		} else {
+			selectedFolderIds.add(folderId);
+		}
+		selectedFolderIds = new Set(selectedFolderIds);
+	}
+
+	function toggleSelectAll() {
+		if (allSelected) {
+			selectedFolderIds = new Set();
+		} else {
+			selectedFolderIds = new Set(filteredFolders.map((f) => f.id));
+		}
+	}
+
+	async function applyBulkCategory() {
+		if (selectedFolderIds.size === 0 || !bulkCategoryId) return;
+		bulkApplying = true;
+		try {
+			const res = await fetchWithTimeout('/api/ic/folders/bulk-map', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					folder_ids: Array.from(selectedFolderIds),
+					category_id: Number(bulkCategoryId)
+				})
+			});
+			if (!res.ok) {
+				const err = await res.json();
+				throw new Error(err.detail || '일괄 적용 실패');
+			}
+			const data = await res.json();
+			alert(`${data.folders_updated}개 폴더에 카테고리 적용 완료`);
+			selectedFolderIds = new Set();
+			bulkCategoryId = '';
+			await loadFolders();
+		} catch (e: any) {
+			alert(e.message || '일괄 적용 실패');
+		} finally {
+			bulkApplying = false;
+		}
+	}
+
 	// === pagination 상태 ===
 	let currentPage = $state(1);
 	let pageSize = 50;
@@ -289,6 +343,66 @@
 			await loadFolders();
 		} catch (e) {
 			console.error('상속 실패:', e);
+		}
+	}
+
+	async function propagateParent(folder: Folder) {
+		const categoryName = getCategoryName(folder.category_id);
+		const confirmed = window.confirm(
+			`상위(부모) 폴더에 '${categoryName}' 카테고리를 적용하시겠습니까?\n(부모 폴더에 이미 카테고리가 있으면 적용되지 않습니다)`
+		);
+		if (!confirmed) return;
+
+		try {
+			const res = await fetchWithTimeout('/api/ic/folders/propagate-parent', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ folder_id: folder.id, apply_to_files: true })
+			});
+
+			if (!res.ok) {
+				const err = await res.json();
+				throw new Error(err.detail || '상위 전파 실패');
+			}
+
+			const data = await res.json();
+			if (data.already_set) {
+				alert('부모 폴더에 이미 카테고리가 설정되어 있습니다.');
+			} else {
+				alert(`부모 폴더에 카테고리 전파 완료`);
+				await loadFolders();
+			}
+		} catch (e: any) {
+			alert(e.message || '상위 전파 실패');
+			console.error('상위 전파 실패:', e);
+		}
+	}
+
+	async function propagateSiblings(folder: Folder) {
+		const categoryName = getCategoryName(folder.category_id);
+		const confirmed = window.confirm(
+			`같은 레벨의 미분류 폴더에 '${categoryName}' 카테고리를 적용하시겠습니까?\n(카테고리가 없는 형제 폴더에만 적용됩니다)`
+		);
+		if (!confirmed) return;
+
+		try {
+			const res = await fetchWithTimeout('/api/ic/folders/propagate-siblings', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ folder_id: folder.id, apply_to_files: true })
+			});
+
+			if (!res.ok) {
+				const err = await res.json();
+				throw new Error(err.detail || '형제 전파 실패');
+			}
+
+			const data = await res.json();
+			alert(`${data.siblings_updated}개 형제 폴더에 카테고리 전파 완료`);
+			await loadFolders();
+		} catch (e: any) {
+			alert(e.message || '형제 전파 실패');
+			console.error('형제 전파 실패:', e);
 		}
 	}
 
@@ -756,6 +870,38 @@
 			</select>
 		</div>
 
+		<!-- 멀티 선택 액션 바 -->
+		{#if selectedFolderIds.size > 0}
+			<div class="flex items-center gap-3 px-5 py-3 bg-primary/5 border-b">
+				<span class="text-sm font-medium text-primary">선택된 {selectedFolderIds.size}개 폴더</span>
+				<select
+					bind:value={bulkCategoryId}
+					class="rounded-md border bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+				>
+					<option value="">— 카테고리 선택 —</option>
+					{#each flattenCategories(categories) as cat}
+						<option value={cat.id}>{cat.full_path}</option>
+					{/each}
+				</select>
+				<button
+					onclick={applyBulkCategory}
+					disabled={!bulkCategoryId || bulkApplying}
+					class="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+				>
+					{#if bulkApplying}
+						<RefreshCw class="h-3.5 w-3.5 animate-spin" />
+					{/if}
+					적용
+				</button>
+				<button
+					onclick={() => { selectedFolderIds = new Set(); }}
+					class="text-sm text-muted-foreground hover:text-foreground transition-colors"
+				>
+					선택 해제
+				</button>
+			</div>
+		{/if}
+
 		{#if loading}
 			<div class="p-8 text-center">
 				<RefreshCw class="h-6 w-6 animate-spin mx-auto mb-2 text-muted-foreground" />
@@ -768,10 +914,28 @@
 				<p class="text-xs text-muted-foreground mt-1">스캔을 실행하여 폴더를 인덱싱하세요</p>
 			</div>
 		{:else}
+			<!-- 전체 선택 헤더 -->
+			<div class="flex items-center gap-3 px-5 py-2 border-b bg-muted/20">
+				<input
+					type="checkbox"
+					checked={allSelected}
+					onchange={toggleSelectAll}
+					class="h-4 w-4 rounded border-border cursor-pointer"
+					title="전체 선택/해제"
+				/>
+				<span class="text-xs text-muted-foreground">전체 선택</span>
+			</div>
 			<div class="divide-y divide-border">
 				{#each filteredFolders as folder}
 					{@const badge = getStatusBadge(folder.folder_status)}
 					<div class="flex items-center gap-4 px-5 py-3 hover:bg-muted/30 transition-colors">
+						<!-- 체크박스 -->
+						<input
+							type="checkbox"
+							checked={selectedFolderIds.has(folder.id)}
+							onchange={() => toggleSelectFolder(folder.id)}
+							class="h-4 w-4 rounded border-border cursor-pointer shrink-0"
+						/>
 						<!-- 아이콘 + 경로 -->
 						<div class="flex items-center gap-2 flex-1 min-w-0">
 							<Folder class="h-4 w-4 text-muted-foreground shrink-0" />
@@ -830,14 +994,28 @@
 							</select>
 						</div>
 
-						<!-- 하위 상속 버튼 -->
-						<div class="shrink-0 w-20 text-right">
+						<!-- 전파 버튼들 -->
+						<div class="shrink-0 flex flex-col items-end gap-1 w-20 text-right">
 							{#if folder.category_id && folder.folder_status === 'nested'}
 								<button
 									onclick={() => applyInheritance(folder.id)}
 									class="text-xs text-violet-600 hover:text-violet-800 hover:underline transition-colors"
 								>
 									하위 상속
+								</button>
+							{/if}
+							{#if folder.category_id}
+								<button
+									onclick={() => propagateSiblings(folder)}
+									class="text-xs text-sky-600 hover:text-sky-800 hover:underline transition-colors"
+								>
+									형제 전파
+								</button>
+								<button
+									onclick={() => propagateParent(folder)}
+									class="text-xs text-amber-600 hover:text-amber-800 hover:underline transition-colors"
+								>
+									상위 전파
 								</button>
 							{/if}
 						</div>

@@ -10,7 +10,8 @@
 		Trash2,
 		Save,
 		X,
-		FolderOpen
+		FolderOpen,
+		FolderSymlink
 	} from 'lucide-svelte';
 
 	// === 타입 정의 ===
@@ -290,6 +291,96 @@
 		createForm = { name: '', importance: 'medium', target_folder_template: null, description: null };
 		showCreateForm = true;
 	}
+
+	// === 다중 폴더 규칙 ===
+	interface CategoryFolderRule {
+		id: number;
+		category_id: number;
+		condition_type: string | null;
+		condition_value: string | null;
+		folder_template: string;
+		priority: number;
+		created_at: string;
+	}
+
+	let folderRules = $state<CategoryFolderRule[]>([]);
+	let folderRulesLoading = $state(false);
+	let showAddRuleForm = $state(false);
+	let newRuleForm = $state({ condition_type: '', condition_value: '', folder_template: '', priority: 0 });
+	let editingRuleId = $state<number | null>(null);
+	let editRuleForm = $state({ condition_type: '', condition_value: '', folder_template: '', priority: 0 });
+
+	async function loadFolderRules(categoryId: number) {
+		folderRulesLoading = true;
+		try {
+			const res = await fetchWithTimeout(`/api/ic/categories/${categoryId}/folder-rules`);
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const data = await res.json();
+			folderRules = data.rules || [];
+		} catch (e) {
+			console.error('폴더 규칙 로드 실패:', e);
+		} finally {
+			folderRulesLoading = false;
+		}
+	}
+
+	async function addFolderRule(categoryId: number) {
+		if (!newRuleForm.folder_template) { alert('폴더 템플릿을 입력하세요.'); return; }
+		try {
+			const res = await fetchWithTimeout(`/api/ic/categories/${categoryId}/folder-rules`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					condition_type: newRuleForm.condition_type || null,
+					condition_value: newRuleForm.condition_value || null,
+					folder_template: newRuleForm.folder_template,
+					priority: newRuleForm.priority,
+				})
+			});
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			showAddRuleForm = false;
+			newRuleForm = { condition_type: '', condition_value: '', folder_template: '', priority: 0 };
+			await loadFolderRules(categoryId);
+		} catch (e) { alert('추가 실패: ' + e); }
+	}
+
+	async function updateFolderRule(categoryId: number, ruleId: number) {
+		try {
+			const res = await fetchWithTimeout(`/api/ic/categories/${categoryId}/folder-rules/${ruleId}`, {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					condition_type: editRuleForm.condition_type || null,
+					condition_value: editRuleForm.condition_value || null,
+					folder_template: editRuleForm.folder_template,
+					priority: editRuleForm.priority,
+				})
+			});
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			editingRuleId = null;
+			await loadFolderRules(categoryId);
+		} catch (e) { alert('수정 실패: ' + e); }
+	}
+
+	async function deleteFolderRule(categoryId: number, ruleId: number) {
+		if (!confirm('이 폴더 규칙을 삭제하시겠습니까?')) return;
+		try {
+			const res = await fetchWithTimeout(`/api/ic/categories/${categoryId}/folder-rules/${ruleId}`, { method: 'DELETE' });
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			await loadFolderRules(categoryId);
+		} catch (e) { alert('삭제 실패: ' + e); }
+	}
+
+	// selected 변경 시 폴더 규칙 자동 로드
+	$effect(() => {
+		if (selected) {
+			loadFolderRules(selected.id);
+			showAddRuleForm = false;
+			editingRuleId = null;
+		} else {
+			folderRules = [];
+		}
+	});
 </script>
 
 <svelte:head>
@@ -495,6 +586,126 @@
 										{child.name}
 									</button>
 								{/each}
+							</div>
+						{/if}
+					</div>
+
+					<!-- 다중 폴더 규칙 섹션 -->
+					<div class="mt-6 pt-5 border-t">
+						<div class="flex items-center justify-between mb-3">
+							<div class="flex items-center gap-1.5">
+								<FolderSymlink class="size-4 text-muted-foreground" />
+								<h3 class="text-sm font-semibold">폴더 규칙</h3>
+								<span class="text-[11px] bg-muted px-1.5 py-0.5 rounded-full">{folderRules.length}</span>
+							</div>
+							<button
+								class="flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+								onclick={() => (showAddRuleForm = !showAddRuleForm)}
+							>
+								<Plus class="size-3" />
+								규칙 추가
+							</button>
+						</div>
+
+						{#if folderRulesLoading}
+							<div class="text-xs text-muted-foreground animate-pulse">로딩 중...</div>
+						{:else if folderRules.length === 0 && !showAddRuleForm}
+							<div class="text-xs text-muted-foreground">폴더 규칙이 없습니다. 추가 버튼으로 조건별 출력 폴더를 설정할 수 있습니다.</div>
+						{:else}
+							<div class="space-y-2">
+								{#each folderRules as rule (rule.id)}
+									{#if editingRuleId === rule.id}
+										<div class="rounded-lg border border-primary/30 p-3 space-y-2 bg-primary/5">
+											<div class="grid grid-cols-2 gap-2">
+												<div>
+													<label class="block text-[11px] text-muted-foreground mb-1">조건 유형</label>
+													<select class="w-full text-xs border rounded px-2 py-1.5 bg-background" bind:value={editRuleForm.condition_type}>
+														<option value="">무조건 (기본)</option>
+														<option value="extension">확장자</option>
+														<option value="file_size">파일 크기</option>
+														<option value="date_range">날짜 범위</option>
+													</select>
+												</div>
+												<div>
+													<label class="block text-[11px] text-muted-foreground mb-1">조건 값</label>
+													<input type="text" class="w-full text-xs border rounded px-2 py-1.5 bg-background font-mono" bind:value={editRuleForm.condition_value} placeholder=".jpg,.png | >10MB" />
+												</div>
+											</div>
+											<div class="grid grid-cols-2 gap-2">
+												<div>
+													<label class="block text-[11px] text-muted-foreground mb-1">폴더 템플릿 *</label>
+													<input type="text" class="w-full text-xs border rounded px-2 py-1.5 bg-background font-mono" bind:value={editRuleForm.folder_template} placeholder="{'{'}category{'}'}/{'{'}year{'}'}" />
+												</div>
+												<div>
+													<label class="block text-[11px] text-muted-foreground mb-1">우선순위</label>
+													<input type="number" class="w-full text-xs border rounded px-2 py-1.5 bg-background" bind:value={editRuleForm.priority} />
+												</div>
+											</div>
+											<div class="flex gap-2 justify-end">
+												<button class="text-xs px-2.5 py-1 border rounded hover:bg-accent" onclick={() => (editingRuleId = null)}>취소</button>
+												<button class="text-xs px-2.5 py-1 bg-primary text-primary-foreground rounded hover:bg-primary/90" onclick={() => updateFolderRule(selected!.id, rule.id)}>저장</button>
+											</div>
+										</div>
+									{:else}
+										<div class="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs bg-muted/20">
+											<span class="flex-1 font-mono truncate text-primary">{rule.folder_template}</span>
+											{#if rule.condition_type}
+												<span class="flex-shrink-0 px-1.5 py-0.5 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded text-[11px]">
+													{rule.condition_type}: {rule.condition_value}
+												</span>
+											{:else}
+												<span class="flex-shrink-0 px-1.5 py-0.5 bg-muted text-muted-foreground rounded text-[11px]">기본</span>
+											{/if}
+											<span class="flex-shrink-0 text-[11px] text-muted-foreground">P{rule.priority}</span>
+											<button
+												class="flex-shrink-0 p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+												onclick={() => { editingRuleId = rule.id; editRuleForm = { condition_type: rule.condition_type || '', condition_value: rule.condition_value || '', folder_template: rule.folder_template, priority: rule.priority }; }}
+											>
+												<Pencil class="size-3" />
+											</button>
+											<button
+												class="flex-shrink-0 p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+												onclick={() => deleteFolderRule(selected!.id, rule.id)}
+											>
+												<Trash2 class="size-3" />
+											</button>
+										</div>
+									{/if}
+								{/each}
+							</div>
+						{/if}
+
+						{#if showAddRuleForm}
+							<div class="mt-2 rounded-lg border border-dashed p-3 space-y-2">
+								<div class="grid grid-cols-2 gap-2">
+									<div>
+										<label class="block text-[11px] text-muted-foreground mb-1">조건 유형</label>
+										<select class="w-full text-xs border rounded px-2 py-1.5 bg-background" bind:value={newRuleForm.condition_type}>
+											<option value="">무조건 (기본)</option>
+											<option value="extension">확장자</option>
+											<option value="file_size">파일 크기</option>
+											<option value="date_range">날짜 범위</option>
+										</select>
+									</div>
+									<div>
+										<label class="block text-[11px] text-muted-foreground mb-1">조건 값</label>
+										<input type="text" class="w-full text-xs border rounded px-2 py-1.5 bg-background font-mono" bind:value={newRuleForm.condition_value} placeholder=".jpg,.png | >10MB" />
+									</div>
+								</div>
+								<div class="grid grid-cols-2 gap-2">
+									<div>
+										<label class="block text-[11px] text-muted-foreground mb-1">폴더 템플릿 *</label>
+										<input type="text" class="w-full text-xs border rounded px-2 py-1.5 bg-background font-mono" bind:value={newRuleForm.folder_template} placeholder="{'{'}category{'}'}/{'{'}year{'}'}" />
+									</div>
+									<div>
+										<label class="block text-[11px] text-muted-foreground mb-1">우선순위</label>
+										<input type="number" class="w-full text-xs border rounded px-2 py-1.5 bg-background" bind:value={newRuleForm.priority} />
+									</div>
+								</div>
+								<div class="flex gap-2 justify-end">
+									<button class="text-xs px-2.5 py-1 border rounded hover:bg-accent" onclick={() => (showAddRuleForm = false)}>취소</button>
+									<button class="text-xs px-2.5 py-1 bg-primary text-primary-foreground rounded hover:bg-primary/90" onclick={() => addFolderRule(selected!.id)}>추가</button>
+								</div>
 							</div>
 						{/if}
 					</div>

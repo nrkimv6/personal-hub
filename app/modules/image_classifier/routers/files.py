@@ -419,16 +419,29 @@ async def rollback_file(
 class OpenLocalRequest(BaseModel):
     path: Optional[str] = None
     folder: Optional[str] = None
+    file_id: Optional[int] = None
 
 
 @router.post("/open-local")
-async def open_local_file_or_folder(request: OpenLocalRequest):
+async def open_local_file_or_folder(
+    request: OpenLocalRequest,
+    db: Session = Depends(get_db)
+):
     """로컬 파일/폴더를 기본 뷰어/탐색기로 열기 (개발 환경 전용)"""
     import os
 
-    target = request.path or request.folder
+    # file_id로 경로 조회
+    if request.file_id is not None:
+        file_query = text("SELECT file_path FROM file_classifications WHERE id = :file_id")
+        row = db.execute(file_query, {"file_id": request.file_id}).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
+        target = row.file_path
+    else:
+        target = request.path or request.folder
+
     if not target:
-        raise HTTPException(status_code=400, detail="path 또는 folder를 지정하세요.")
+        raise HTTPException(status_code=400, detail="path, folder 또는 file_id를 지정하세요.")
 
     target_path = Path(target)
     if not target_path.exists():
@@ -439,3 +452,57 @@ async def open_local_file_or_folder(request: OpenLocalRequest):
         return {"status": "ok", "opened": str(target_path)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"열기 실패: {e}")
+
+
+class OpenFolderRequest(BaseModel):
+    file_id: int
+
+
+@router.post("/open-folder")
+async def open_folder_in_explorer(
+    request: OpenFolderRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    파일이 있는 폴더를 탐색기에서 열기 (파일 선택 상태로)
+
+    - DB에서 file_id → file_path 조회
+    - Windows explorer /select, 명령으로 파일을 선택한 상태로 탐색기 열기
+    - 보안: SCAN_ROOT_FOLDERS 내 경로만 허용, 경로 트래버설 차단
+    """
+    import os
+    import subprocess
+
+    # 파일 경로 조회
+    file_query = text("SELECT file_path FROM file_classifications WHERE id = :file_id")
+    row = db.execute(file_query, {"file_id": request.file_id}).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
+
+    raw_path = row.file_path
+    # 경로 정규화 (심볼릭 링크 해결)
+    try:
+        file_path = os.path.realpath(raw_path)
+    except Exception:
+        file_path = raw_path
+
+    # 보안: SCAN_ROOT_FOLDERS 내 경로만 허용
+    scan_roots = settings.SCAN_ROOT_FOLDERS
+    if scan_roots:
+        allowed = any(
+            os.path.commonpath([file_path, os.path.realpath(root)]) == os.path.realpath(root)
+            for root in scan_roots
+        )
+        if not allowed:
+            raise HTTPException(status_code=403, detail="허용된 스캔 루트 외부 경로입니다.")
+
+    # 파일 존재 확인
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=f"파일이 존재하지 않습니다: {file_path}")
+
+    try:
+        # Windows: explorer /select, "파일경로"
+        subprocess.Popen(['explorer', '/select,', file_path])
+        return {"status": "ok", "file_path": file_path}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"탐색기 열기 실패: {e}")

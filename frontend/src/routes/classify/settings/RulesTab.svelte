@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
-	import { ListChecks, Plus, GripVertical, Pencil, Trash2, Save, X, ArrowRight } from 'lucide-svelte';
+	import { ListChecks, Plus, GripVertical, Pencil, Trash2, Save, X, ArrowRight, Eye, Loader2 } from 'lucide-svelte';
 
 	interface Rule {
 		id: number;
@@ -104,6 +104,56 @@
 	}
 
 	const ruleTypeOptions = ['keyword', 'pattern', 'regex'];
+
+	// 폴더 규칙 미리보기
+	interface PreviewItem {
+		file_id: number;
+		file_path: string;
+		target_path: string;
+	}
+	let showPreview = $state(false);
+	let previewCategoryId = $state('');
+	let previewTagId = $state('');
+	let previewLoading = $state(false);
+	let previewItems = $state<PreviewItem[]>([]);
+	let previewTemplate = $state('');
+	let previewAction = $state('');
+	let previewError = $state<string | null>(null);
+
+	async function runPreview() {
+		const catId = previewCategoryId ? parseInt(previewCategoryId) : null;
+		const tagId = previewTagId ? parseInt(previewTagId) : null;
+		if (!catId && !tagId) {
+			previewError = 'category_id 또는 tag_id를 입력하세요.';
+			return;
+		}
+		previewLoading = true;
+		previewError = null;
+		previewItems = [];
+		try {
+			const body: Record<string, number> = {};
+			if (catId) body.category_id = catId;
+			if (tagId) body.tag_id = tagId;
+			const res = await fetchWithTimeout('/api/ic/rules/preview', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ ...body, limit: 10 }),
+			});
+			if (!res.ok) {
+				const err = await res.json().catch(() => ({}));
+				throw new Error(err.detail ?? `HTTP ${res.status}`);
+			}
+			const data = await res.json();
+			previewItems = data.previews ?? [];
+			previewTemplate = data.folder_template ?? '';
+			previewAction = data.folder_action ?? '';
+			if (data.message) previewError = data.message;
+		} catch (err: any) {
+			previewError = err.message;
+		} finally {
+			previewLoading = false;
+		}
+	}
 </script>
 
 <div class="space-y-6">
@@ -118,14 +168,89 @@
 				학습된 규칙과 사용자 정의 규칙을 관리합니다.
 			</p>
 		</div>
-		<button
-			onclick={() => (showAddForm = !showAddForm)}
-			class="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
-		>
-			<Plus class="size-4" />
-			규칙 추가
-		</button>
+		<div class="flex items-center gap-2">
+			<button
+				onclick={() => (showPreview = !showPreview)}
+				class="flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent"
+			>
+				<Eye class="size-4" />
+				미리보기
+			</button>
+			<button
+				onclick={() => (showAddForm = !showAddForm)}
+				class="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+			>
+				<Plus class="size-4" />
+				규칙 추가
+			</button>
+		</div>
 	</div>
+
+	<!-- 폴더 규칙 미리보기 패널 -->
+	{#if showPreview}
+		<div class="rounded-xl border bg-card p-4 space-y-3">
+			<h3 class="text-sm font-semibold">폴더 규칙 미리보기</h3>
+			<div class="flex items-center gap-2 flex-wrap">
+				<input
+					type="number"
+					bind:value={previewCategoryId}
+					placeholder="카테고리 ID"
+					class="h-8 w-36 rounded-md border border-border bg-background px-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+				/>
+				<span class="text-xs text-muted-foreground">또는</span>
+				<input
+					type="number"
+					bind:value={previewTagId}
+					placeholder="태그 ID"
+					class="h-8 w-36 rounded-md border border-border bg-background px-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+				/>
+				<button
+					onclick={runPreview}
+					disabled={previewLoading}
+					class="flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+				>
+					{#if previewLoading}
+						<Loader2 class="size-3 animate-spin" />
+					{:else}
+						<Eye class="size-3" />
+					{/if}
+					미리보기 실행
+				</button>
+			</div>
+
+			{#if previewError}
+				<p class="text-xs text-amber-600">{previewError}</p>
+			{/if}
+
+			{#if previewTemplate}
+				<p class="text-xs text-muted-foreground">
+					템플릿: <code class="rounded bg-muted px-1 font-mono">{previewTemplate}</code>
+					&nbsp;방식: <span class="font-medium">{previewAction}</span>
+				</p>
+			{/if}
+
+			{#if previewItems.length > 0}
+				<div class="overflow-x-auto rounded-lg border border-border">
+					<table class="w-full text-xs">
+						<thead class="bg-muted/50">
+							<tr>
+								<th class="px-3 py-2 text-left font-medium text-muted-foreground">원본 경로</th>
+								<th class="px-3 py-2 text-left font-medium text-muted-foreground">이동 예정 경로</th>
+							</tr>
+						</thead>
+						<tbody class="divide-y divide-border">
+							{#each previewItems as item}
+								<tr class="hover:bg-muted/30">
+									<td class="max-w-xs truncate px-3 py-2 font-mono text-[11px] text-muted-foreground">{item.file_path}</td>
+									<td class="max-w-xs truncate px-3 py-2 font-mono text-[11px] text-foreground">{item.target_path}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
+		</div>
+	{/if}
 
 	<!-- 규칙 추가 폼 -->
 	{#if showAddForm}

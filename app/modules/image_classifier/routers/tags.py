@@ -3,10 +3,12 @@
 
 - GET /api/ic/tags: 태그 목록 조회
 - POST /api/ic/tags: 태그 추가
+- PUT /api/ic/tags/{id}: 태그 수정 (폴더 규칙 포함)
 - POST /api/ic/files/bulk-tag: 파일에 일괄 태그 부여
 - DELETE /api/ic/tags/{id}: 태그 삭제
 """
 
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -21,6 +23,14 @@ router = APIRouter(prefix="/tags", tags=["Tags"])
 class TagCreate(BaseModel):
     """태그 생성 요청"""
     name: str
+    folder_template: Optional[str] = None  # 예: {category}/{year}/{tag}
+    folder_action: Optional[str] = None    # move/copy/link
+
+
+class TagFolderRuleUpdate(BaseModel):
+    """태그 폴더 규칙 업데이트 요청"""
+    folder_template: Optional[str] = None
+    folder_action: Optional[str] = None  # move/copy/link
 
 
 class BulkTagRequest(BaseModel):
@@ -50,12 +60,27 @@ async def get_tags(
         order_clause = "created_at DESC"
 
     query = text(f"""
-        SELECT id, name, usage_count, created_at
+        SELECT id, name, usage_count, created_at, folder_template, folder_action
         FROM tags
         ORDER BY {order_clause}
         LIMIT :limit
     """)
-    tags = db.execute(query, {"limit": limit}).fetchall()
+    try:
+        tags = db.execute(query, {"limit": limit}).fetchall()
+    except Exception:
+        # folder_template/folder_action 컬럼 없을 경우 fallback
+        fallback_query = text(f"""
+            SELECT id, name, usage_count, created_at
+            FROM tags ORDER BY {order_clause} LIMIT :limit
+        """)
+        tags = db.execute(fallback_query, {"limit": limit}).fetchall()
+        return {
+            "tags": [
+                {"id": t.id, "name": t.name, "usage_count": t.usage_count or 0, "created_at": t.created_at,
+                 "folder_template": None, "folder_action": None}
+                for t in tags
+            ]
+        }
 
     return {
         "tags": [
@@ -64,6 +89,8 @@ async def get_tags(
                 "name": tag.name,
                 "usage_count": tag.usage_count or 0,
                 "created_at": tag.created_at,
+                "folder_template": getattr(tag, 'folder_template', None),
+                "folder_action": getattr(tag, 'folder_action', None),
             }
             for tag in tags
         ]
@@ -96,12 +123,21 @@ async def create_tag(
             "message": "이미 존재하는 태그입니다."
         }
 
-    # 태그 생성
-    insert_query = text("""
-        INSERT INTO tags (name, usage_count)
-        VALUES (:name, 0)
-    """)
-    db.execute(insert_query, {"name": request.name})
+    # 태그 생성 (folder_template, folder_action 포함)
+    try:
+        insert_query = text("""
+            INSERT INTO tags (name, usage_count, folder_template, folder_action)
+            VALUES (:name, 0, :folder_template, :folder_action)
+        """)
+        db.execute(insert_query, {
+            "name": request.name,
+            "folder_template": request.folder_template,
+            "folder_action": request.folder_action
+        })
+    except Exception:
+        # folder_template/folder_action 컬럼이 없는 경우 fallback (migration 007 전)
+        insert_query = text("INSERT INTO tags (name, usage_count) VALUES (:name, 0)")
+        db.execute(insert_query, {"name": request.name})
     db.commit()
 
     # 생성된 태그 조회
@@ -256,6 +292,48 @@ async def remove_file_tag(
     }
 
 
+@router.put("/{tag_id}")
+async def update_tag(
+    tag_id: int,
+    request: TagFolderRuleUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    태그 수정 (폴더 규칙 포함)
+
+    - folder_template: 출력 폴더 경로 템플릿
+    - folder_action: move/copy/link
+    """
+    tag = db.execute(text("SELECT id FROM tags WHERE id = :tag_id"), {"tag_id": tag_id}).fetchone()
+    if not tag:
+        raise HTTPException(status_code=404, detail="태그를 찾을 수 없습니다.")
+
+    updates = []
+    params: dict = {"tag_id": tag_id}
+
+    if request.folder_template is not None:
+        updates.append("folder_template = :folder_template")
+        params["folder_template"] = request.folder_template or None
+
+    if request.folder_action is not None:
+        valid_actions = ["move", "copy", "link"]
+        if request.folder_action and request.folder_action not in valid_actions:
+            raise HTTPException(status_code=400, detail=f"folder_action은 {valid_actions} 중 하나여야 합니다.")
+        updates.append("folder_action = :folder_action")
+        params["folder_action"] = request.folder_action or None
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="수정할 내용이 없습니다.")
+
+    try:
+        db.execute(text(f"UPDATE tags SET {', '.join(updates)} WHERE id = :tag_id"), params)
+        db.commit()
+    except Exception:
+        raise HTTPException(status_code=500, detail="태그 수정 실패 (마이그레이션 007 적용 필요)")
+
+    return {"status": "success", "tag_id": tag_id}
+
+
 @router.get("/{tag_id}/files")
 async def get_tag_files(
     tag_id: int,
@@ -316,6 +394,48 @@ async def get_tag_files(
         "skip": skip,
         "limit": limit,
     }
+
+
+@router.put("/{tag_id}/folder-rule")
+async def update_tag_folder_rule(
+    tag_id: int,
+    request: TagFolderRuleUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    태그 폴더 규칙 수정
+
+    - folder_template: 출력 폴더 경로 템플릿 ({category}, {year}, {tag} 등)
+    - folder_action: move/copy/link
+    """
+    tag = db.execute(text("SELECT id FROM tags WHERE id = :tag_id"), {"tag_id": tag_id}).fetchone()
+    if not tag:
+        raise HTTPException(status_code=404, detail="태그를 찾을 수 없습니다.")
+
+    updates = []
+    params: dict = {"tag_id": tag_id}
+
+    if request.folder_template is not None:
+        updates.append("folder_template = :folder_template")
+        params["folder_template"] = request.folder_template or None
+
+    if request.folder_action is not None:
+        valid_actions = ["move", "copy", "link"]
+        if request.folder_action and request.folder_action not in valid_actions:
+            raise HTTPException(status_code=400, detail=f"folder_action은 {valid_actions} 중 하나여야 합니다.")
+        updates.append("folder_action = :folder_action")
+        params["folder_action"] = request.folder_action or None
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="수정할 내용이 없습니다.")
+
+    try:
+        db.execute(text(f"UPDATE tags SET {', '.join(updates)} WHERE id = :tag_id"), params)
+        db.commit()
+    except Exception:
+        raise HTTPException(status_code=500, detail="폴더 규칙 수정 실패 (마이그레이션 007 적용 필요)")
+
+    return {"status": "success", "tag_id": tag_id}
 
 
 @router.delete("/{tag_id}")

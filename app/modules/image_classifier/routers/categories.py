@@ -5,6 +5,10 @@
 - POST /api/ic/categories: 카테고리 추가
 - PUT /api/ic/categories/{id}: 카테고리 수정
 - DELETE /api/ic/categories/{id}: 카테고리 삭제
+- GET /api/ic/categories/{id}/folder-rules: 다중 폴더 규칙 조회
+- POST /api/ic/categories/{id}/folder-rules: 다중 폴더 규칙 추가
+- PUT /api/ic/categories/{id}/folder-rules/{rule_id}: 다중 폴더 규칙 수정
+- DELETE /api/ic/categories/{id}/folder-rules/{rule_id}: 다중 폴더 규칙 삭제
 """
 
 from typing import Optional
@@ -341,6 +345,159 @@ async def delete_category(
         "children_deleted": children_count if force else 0,
         "message": "카테고리 삭제 완료"
     }
+
+
+# === 다중 폴더 규칙 CRUD ===
+
+class CategoryFolderRuleCreate(BaseModel):
+    """카테고리 폴더 규칙 생성 요청"""
+    condition_type: Optional[str] = None  # file_size/extension/date_range/None(무조건)
+    condition_value: Optional[str] = None  # 조건값 (예: ">10MB", ".jpg,.png", "2024-01-01~2024-12-31")
+    folder_template: str  # 출력 폴더 경로 템플릿 (예: "{category}/{year}/{month}")
+    priority: int = 0  # 우선순위 (높을수록 먼저 적용)
+
+
+class CategoryFolderRuleUpdate(BaseModel):
+    """카테고리 폴더 규칙 수정 요청"""
+    condition_type: Optional[str] = None
+    condition_value: Optional[str] = None
+    folder_template: Optional[str] = None
+    priority: Optional[int] = None
+
+
+@router.get("/{category_id}/folder-rules")
+async def get_category_folder_rules(
+    category_id: int,
+    db: Session = Depends(get_db),
+):
+    """카테고리의 다중 폴더 규칙 목록 조회"""
+    # 카테고리 존재 확인
+    cat = db.execute(text("SELECT id FROM categories WHERE id = :id"), {"id": category_id}).fetchone()
+    if not cat:
+        raise HTTPException(status_code=404, detail="카테고리를 찾을 수 없습니다.")
+
+    rows = db.execute(text("""
+        SELECT id, category_id, condition_type, condition_value, folder_template, priority, created_at
+        FROM category_folder_rules
+        WHERE category_id = :cat_id
+        ORDER BY priority DESC, id ASC
+    """), {"cat_id": category_id}).fetchall()
+
+    return {
+        "category_id": category_id,
+        "rules": [
+            {
+                "id": row.id,
+                "category_id": row.category_id,
+                "condition_type": row.condition_type,
+                "condition_value": row.condition_value,
+                "folder_template": row.folder_template,
+                "priority": row.priority,
+                "created_at": row.created_at,
+            }
+            for row in rows
+        ]
+    }
+
+
+@router.post("/{category_id}/folder-rules")
+async def create_category_folder_rule(
+    category_id: int,
+    request: CategoryFolderRuleCreate,
+    db: Session = Depends(get_db),
+):
+    """카테고리에 폴더 규칙 추가"""
+    cat = db.execute(text("SELECT id FROM categories WHERE id = :id"), {"id": category_id}).fetchone()
+    if not cat:
+        raise HTTPException(status_code=404, detail="카테고리를 찾을 수 없습니다.")
+
+    db.execute(text("""
+        INSERT INTO category_folder_rules (category_id, condition_type, condition_value, folder_template, priority)
+        VALUES (:cat_id, :condition_type, :condition_value, :folder_template, :priority)
+    """), {
+        "cat_id": category_id,
+        "condition_type": request.condition_type,
+        "condition_value": request.condition_value,
+        "folder_template": request.folder_template,
+        "priority": request.priority,
+    })
+    db.commit()
+
+    new_rule = db.execute(text("""
+        SELECT id, category_id, condition_type, condition_value, folder_template, priority, created_at
+        FROM category_folder_rules
+        WHERE category_id = :cat_id
+        ORDER BY id DESC LIMIT 1
+    """), {"cat_id": category_id}).fetchone()
+
+    return {
+        "id": new_rule.id,
+        "category_id": new_rule.category_id,
+        "condition_type": new_rule.condition_type,
+        "condition_value": new_rule.condition_value,
+        "folder_template": new_rule.folder_template,
+        "priority": new_rule.priority,
+        "created_at": new_rule.created_at,
+    }
+
+
+@router.put("/{category_id}/folder-rules/{rule_id}")
+async def update_category_folder_rule(
+    category_id: int,
+    rule_id: int,
+    request: CategoryFolderRuleUpdate,
+    db: Session = Depends(get_db),
+):
+    """카테고리 폴더 규칙 수정"""
+    rule = db.execute(
+        text("SELECT id FROM category_folder_rules WHERE id = :id AND category_id = :cat_id"),
+        {"id": rule_id, "cat_id": category_id}
+    ).fetchone()
+    if not rule:
+        raise HTTPException(status_code=404, detail="폴더 규칙을 찾을 수 없습니다.")
+
+    updates = []
+    params = {"id": rule_id}
+    if request.condition_type is not None:
+        updates.append("condition_type = :condition_type")
+        params["condition_type"] = request.condition_type
+    if request.condition_value is not None:
+        updates.append("condition_value = :condition_value")
+        params["condition_value"] = request.condition_value
+    if request.folder_template is not None:
+        updates.append("folder_template = :folder_template")
+        params["folder_template"] = request.folder_template
+    if request.priority is not None:
+        updates.append("priority = :priority")
+        params["priority"] = request.priority
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="수정할 내용이 없습니다.")
+
+    db.execute(text(f"UPDATE category_folder_rules SET {', '.join(updates)} WHERE id = :id"), params)
+    db.commit()
+
+    return {"status": "success", "rule_id": rule_id}
+
+
+@router.delete("/{category_id}/folder-rules/{rule_id}")
+async def delete_category_folder_rule(
+    category_id: int,
+    rule_id: int,
+    db: Session = Depends(get_db),
+):
+    """카테고리 폴더 규칙 삭제"""
+    rule = db.execute(
+        text("SELECT id FROM category_folder_rules WHERE id = :id AND category_id = :cat_id"),
+        {"id": rule_id, "cat_id": category_id}
+    ).fetchone()
+    if not rule:
+        raise HTTPException(status_code=404, detail="폴더 규칙을 찾을 수 없습니다.")
+
+    db.execute(text("DELETE FROM category_folder_rules WHERE id = :id"), {"id": rule_id})
+    db.commit()
+
+    return {"status": "success", "rule_id": rule_id}
 
 
 # === 헬퍼 함수 ===

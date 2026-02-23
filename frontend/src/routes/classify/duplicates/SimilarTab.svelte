@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
-	import { Search, RefreshCw, Tag, ArrowRight, Cpu, AlertTriangle } from 'lucide-svelte';
+	import { Search, RefreshCw, Tag, ArrowRight, Cpu, AlertTriangle, Eye, FolderOpen, Clipboard } from 'lucide-svelte';
 
 	interface SimilarSuggestion {
 		file_id: number;
@@ -262,6 +262,55 @@
 	}
 
 	let totalResults = $derived(groups.reduce((sum, g) => sum + g.suggestions.length, 0));
+
+	async function openLocalViewer(fileId: number) {
+		try {
+			const res = await fetchWithTimeout('/api/ic/files/open-local', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ file_id: fileId })
+			});
+			if (!res.ok) {
+				const err = await res.json();
+				alert(err.detail || '뷰어 열기 실패');
+			}
+		} catch (err: any) {
+			alert(`뷰어 열기 실패: ${err.message}`);
+		}
+	}
+
+	async function openInExplorer(fileId: number) {
+		try {
+			const res = await fetchWithTimeout('/api/ic/files/open-folder', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ file_id: fileId })
+			});
+			if (!res.ok) {
+				const err = await res.json();
+				alert(err.detail || '탐색기 열기 실패');
+			}
+		} catch (err: any) {
+			alert(`탐색기 열기 실패: ${err.message}`);
+		}
+	}
+
+	async function copyToClipboard(text: string) {
+		try {
+			await navigator.clipboard.writeText(text);
+		} catch {
+			alert('클립보드 복사 실패');
+		}
+	}
+
+	function getFileName(path: string): string {
+		return path.split(/[/\\]/).pop() ?? path;
+	}
+
+	function getFolderPath(path: string): string {
+		const idx = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+		return idx >= 0 ? path.substring(0, idx) : path;
+	}
 </script>
 
 <div class="space-y-6">
@@ -432,39 +481,76 @@
 					<div class="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
 						{#each group.suggestions as item}
 							<div
-								class="relative aspect-square cursor-pointer overflow-hidden rounded-lg border transition-all {selectedFiles.has(item.file_id) ? 'ring-2 ring-primary' : 'hover:ring-1 hover:ring-primary/50'}"
+								class="cursor-pointer overflow-hidden rounded-lg border transition-all {selectedFiles.has(item.file_id) ? 'ring-2 ring-primary' : 'hover:ring-1 hover:ring-primary/50'}"
 								onclick={() => toggleFile(item.file_id)}
 							>
-								<img
-									src={getThumbnailUrl(item.file_id)}
-									alt={item.file_path}
-									loading="lazy"
-									decoding="async"
-									class="h-full w-full object-cover"
-								/>
-
-								<!-- 체크박스 -->
-								<div class="absolute left-2 top-2 {selectedFiles.has(item.file_id) ? 'opacity-100' : 'opacity-0 hover:opacity-100'} transition-opacity">
-									<input
-										type="checkbox"
-										checked={selectedFiles.has(item.file_id)}
-										onchange={() => toggleFile(item.file_id)}
-										class="size-4 accent-primary"
+								<div class="relative aspect-square">
+									<img
+										src={getThumbnailUrl(item.file_id)}
+										alt={item.file_path}
+										loading="lazy"
+										decoding="async"
+										class="h-full w-full object-cover"
 									/>
+
+									<!-- 체크박스 -->
+									<div class="absolute left-2 top-2 {selectedFiles.has(item.file_id) ? 'opacity-100' : 'opacity-0 hover:opacity-100'} transition-opacity">
+										<input
+											type="checkbox"
+											checked={selectedFiles.has(item.file_id)}
+											onchange={() => toggleFile(item.file_id)}
+											class="size-4 accent-primary"
+										/>
+									</div>
+
+									<!-- 점수 뱃지 -->
+									<div class="absolute right-2 top-2">
+										<span class="rounded px-1.5 py-0.5 text-[10px] font-bold {getScoreBadgeClass(item.similarity)}">
+											{(item.similarity * 100).toFixed(0)}%
+										</span>
+									</div>
 								</div>
 
-								<!-- 점수 뱃지 -->
-								<div class="absolute right-2 top-2">
-									<span class="rounded px-1.5 py-0.5 text-[10px] font-bold {getScoreBadgeClass(item.similarity)}">
-										{(item.similarity * 100).toFixed(0)}%
-									</span>
-								</div>
-
-								<!-- 하단 정보 -->
-								<div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
-									<p class="truncate text-[10px] text-white">
-										{item.file_path.split(/[/\\]/).pop() ?? item.file_path}
+								<!-- 파일 정보 -->
+								<div class="p-1.5 space-y-0.5 bg-card">
+									<p class="truncate text-[10px] font-medium text-foreground" title={item.file_path}>
+										{getFileName(item.file_path)}
 									</p>
+									<p class="truncate text-[9px] text-muted-foreground" title={getFolderPath(item.file_path)}>
+										{getFolderPath(item.file_path).length > 28
+											? '...' + getFolderPath(item.file_path).slice(-25)
+											: getFolderPath(item.file_path)}
+									</p>
+									{#if item.reference_file_path}
+										<p class="truncate text-[9px] text-primary/70" title={`참조: ${item.reference_file_path}`}>
+											참조: {getFileName(item.reference_file_path)}
+										</p>
+									{/if}
+									<!-- svelte-ignore a11y_click_events_have_key_events -->
+									<!-- svelte-ignore a11y_no_static_element_interactions -->
+									<div class="flex gap-0.5 pt-0.5" onclick={(e) => e.stopPropagation()}>
+										<button
+											onclick={() => openLocalViewer(item.file_id)}
+											class="flex-1 flex items-center justify-center rounded py-0.5 text-[9px] text-muted-foreground hover:bg-muted transition-colors"
+											title="뷰어로 열기"
+										>
+											<Eye class="size-3" />
+										</button>
+										<button
+											onclick={() => openInExplorer(item.file_id)}
+											class="flex-1 flex items-center justify-center rounded py-0.5 text-[9px] text-muted-foreground hover:bg-muted transition-colors"
+											title="탐색기로 열기"
+										>
+											<FolderOpen class="size-3" />
+										</button>
+										<button
+											onclick={() => copyToClipboard(item.file_path)}
+											class="flex-1 flex items-center justify-center rounded py-0.5 text-[9px] text-muted-foreground hover:bg-muted transition-colors"
+											title="경로 복사"
+										>
+											<Clipboard class="size-3" />
+										</button>
+									</div>
 								</div>
 							</div>
 						{/each}

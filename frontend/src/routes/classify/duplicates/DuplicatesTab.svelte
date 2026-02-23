@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
-	import { Copy, Wand2, Check, Trash2, SkipForward, Crown, PartyPopper, Square, ChevronLeft, ChevronRight, FolderOpen, X, ExternalLink } from 'lucide-svelte';
+	import { Copy, Wand2, Check, Trash2, SkipForward, Crown, PartyPopper, Square, ChevronLeft, ChevronRight, FolderOpen, X, ExternalLink, Eye, Clipboard, Merge, Archive } from 'lucide-svelte';
 
 	interface DuplicateGroup {
 		group_id: number;
@@ -52,6 +52,21 @@
 	}
 
 	let filterStatus = $state('unresolved');
+
+	// 그룹 선택 (병합용)
+	let selectedGroupIds = $state(new Set<number>());
+
+	// 카테고리 (보관 시 설정용)
+	interface CategoryItem {
+		id: number;
+		name: string;
+		full_path: string;
+		children: CategoryItem[];
+	}
+	let flatCategoriesList = $state<CategoryItem[]>([]);
+	// 그룹별 선택된 카테고리 ID
+	let groupCategorySelections = $state<Record<number, number | ''>>({});
+
 	let detectRunning = $state(false);
 	let detectStatusPoller: ReturnType<typeof setInterval> | null = null;
 
@@ -144,13 +159,16 @@
 			return;
 		}
 
+		const categoryId = groupCategorySelections[groupId] || undefined;
+
 		try {
 			const res = await fetchWithTimeout(`/api/ic/duplicates/${groupId}/resolve`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					keep_file_id: keepFileId,
-					delete_others: true
+					delete_others: true,
+					...(categoryId ? { category_id: Number(categoryId) } : {})
 				})
 			});
 
@@ -247,15 +265,81 @@
 		}
 	}
 
-	async function openLocal(path?: string, folder?: string) {
+	async function openLocal(path?: string, folder?: string, fileId?: number) {
 		try {
+			const body = fileId !== undefined ? { file_id: fileId } : { path, folder };
 			await fetchWithTimeout('/api/ic/files/open-local', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ path, folder })
+				body: JSON.stringify(body)
 			});
 		} catch {
 			// ignore
+		}
+	}
+
+	async function openFolderExplorer(fileId: number) {
+		try {
+			const res = await fetchWithTimeout('/api/ic/files/open-folder', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ file_id: fileId })
+			});
+			if (!res.ok) {
+				const err = await res.json();
+				alert(err.detail || '탐색기 열기 실패');
+			}
+		} catch (err: any) {
+			alert(`탐색기 열기 실패: ${err.message}`);
+		}
+	}
+
+	async function copyPathToClipboard(path: string) {
+		try {
+			await navigator.clipboard.writeText(path);
+		} catch {
+			alert('클립보드 복사 실패');
+		}
+	}
+
+	async function keepAll(groupId: number) {
+		const detail = groupDetails[groupId];
+		const count = detail?.members?.length ?? '?';
+		if (!confirm(`이 그룹의 모든 이미지(${count}개)를 보관하시겠습니까?\n(삭제 없이 해결됩니다)`)) return;
+		try {
+			const res = await fetchWithTimeout(`/api/ic/duplicates/${groupId}/keep-all`, { method: 'POST' });
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const result = await res.json();
+			alert(`모두 보관 완료! ${result.kept_count}개 파일 보관됨`);
+			await loadGroups();
+		} catch (err: any) {
+			alert(`모두 보관 실패: ${err.message}`);
+		}
+	}
+
+	async function mergeSelectedGroups() {
+		const ids = Array.from(selectedGroupIds);
+		if (ids.length < 2) {
+			alert('병합하려면 2개 이상의 그룹을 선택하세요.');
+			return;
+		}
+		if (!confirm(`선택한 ${ids.length}개 그룹을 그룹 #${ids[0]}으로 병합하시겠습니까?`)) return;
+		try {
+			const res = await fetchWithTimeout('/api/ic/duplicates/merge', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ group_ids: ids })
+			});
+			if (!res.ok) {
+				const err = await res.json();
+				throw new Error(err.detail || '병합 실패');
+			}
+			const result = await res.json();
+			alert(`병합 완료! 그룹 #${result.target_group_id}으로 ${ids.length - 1}개 그룹 병합됨`);
+			selectedGroupIds = new Set();
+			await loadGroups();
+		} catch (err: any) {
+			alert(`병합 실패: ${err.message}`);
 		}
 	}
 
@@ -317,8 +401,27 @@
 		}
 	}
 
+	async function loadCategories() {
+		try {
+			const res = await fetchWithTimeout('/api/ic/categories?include_tree=true');
+			if (res.ok) {
+				const data = await res.json();
+				const flat: CategoryItem[] = [];
+				function flatten(cats: CategoryItem[]) {
+					for (const cat of cats) {
+						flat.push(cat);
+						if (cat.children?.length) flatten(cat.children);
+					}
+				}
+				flatten(data.categories || []);
+				flatCategoriesList = flat;
+			}
+		} catch { /* ignore */ }
+	}
+
 	onMount(() => {
 		loadGroups();
+		loadCategories();
 		checkDetectStatus();
 		detectStatusPoller = setInterval(checkDetectStatus, 3000);
 		return () => {
@@ -399,6 +502,28 @@
 			새로고침
 		</button>
 	</div>
+
+	<!-- 그룹 선택 액션 바 (2개 이상 선택 시) -->
+	{#if selectedGroupIds.size >= 1}
+		<div class="mt-3 flex items-center gap-3 rounded-lg bg-primary/5 border border-primary/20 px-4 py-2">
+			<span class="text-sm font-medium text-primary">{selectedGroupIds.size}개 그룹 선택됨</span>
+			{#if selectedGroupIds.size >= 2}
+				<button
+					class="flex items-center gap-1.5 rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-xs font-medium hover:bg-primary/90 transition-colors"
+					onclick={mergeSelectedGroups}
+				>
+					<Merge class="size-3.5" />
+					선택 그룹 병합
+				</button>
+			{/if}
+			<button
+				class="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent transition-colors"
+				onclick={() => (selectedGroupIds = new Set())}
+			>
+				선택 해제
+			</button>
+		</div>
+	{/if}
 </div>
 
 <!-- 로딩/에러 -->
@@ -421,6 +546,25 @@
 		<p class="text-muted-foreground text-sm">표시할 그룹이 없습니다.</p>
 	</div>
 {:else}
+	<!-- 그룹 선택 병합 액션 바 -->
+	{#if selectedGroupIds.size >= 2}
+		<div class="flex items-center gap-3 rounded-lg border border-sky-500/30 bg-sky-500/5 px-4 py-2.5 mb-4">
+			<span class="text-sm font-medium text-sky-700">{selectedGroupIds.size}개 그룹 선택됨</span>
+			<button
+				onclick={mergeSelectedGroups}
+				class="flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-700 transition-colors"
+			>
+				선택된 {selectedGroupIds.size}개 그룹 병합
+			</button>
+			<button
+				onclick={() => { selectedGroupIds = new Set(); }}
+				class="text-sm text-muted-foreground hover:text-foreground transition-colors"
+			>
+				선택 해제
+			</button>
+		</div>
+	{/if}
+
 	<!-- 그룹 카드 리스트 -->
 	<div class="space-y-4">
 		{#each filteredGroups as group (group.group_id)}
@@ -429,6 +573,23 @@
 				<!-- 카드 헤더 -->
 				<div class="flex items-center justify-between px-4 py-3 border-b bg-muted/20">
 					<div class="flex items-center gap-3">
+						<!-- 병합용 그룹 체크박스 -->
+						{#if group.status === 'pending'}
+							<input
+								type="checkbox"
+								checked={selectedGroupIds.has(group.group_id)}
+								onchange={() => {
+									if (selectedGroupIds.has(group.group_id)) {
+										selectedGroupIds.delete(group.group_id);
+									} else {
+										selectedGroupIds.add(group.group_id);
+									}
+									selectedGroupIds = new Set(selectedGroupIds);
+								}}
+								class="h-4 w-4 rounded border-border cursor-pointer"
+								title="병합용 그룹 선택"
+							/>
+						{/if}
 						<span class="font-mono text-sm font-semibold">Group #{group.group_id}</span>
 						<span
 							class="text-[11px] px-2 py-0.5 rounded-full font-medium {group.status === 'pending'
@@ -460,7 +621,26 @@
 								<Trash2 class="size-3.5" />
 								모두 버리기
 							</button>
+							<button
+								class="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-500/10 hover:bg-emerald-500/20 transition-colors"
+								onclick={() => keepAll(group.group_id)}
+							>
+								<Check class="size-3.5" />
+								모두 보관
+							</button>
 							{@const keepId = selections[group.group_id] ?? getBestMember(detail.members)}
+							<!-- 카테고리 선택 드롭다운 -->
+							{#if flatCategoriesList.length > 0}
+								<select
+									bind:value={groupCategorySelections[group.group_id]}
+									class="rounded-md border bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
+								>
+									<option value="">— 카테고리 —</option>
+									{#each flatCategoriesList as cat}
+										<option value={cat.id}>{cat.full_path}</option>
+									{/each}
+								</select>
+							{/if}
 							<button
 								class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
 								onclick={() => resolveGroup(group.group_id, keepId)}
@@ -639,6 +819,32 @@
 													</button>
 												</div>
 											{/if}
+											<!-- 경로/뷰어 액션 버튼 -->
+											<div class="flex gap-1 pt-0.5">
+												<button
+													onclick={() => openLocal(undefined, undefined, member.file_id)}
+													class="flex-1 flex items-center justify-center gap-0.5 rounded py-1 text-[10px] text-muted-foreground hover:bg-muted transition-colors"
+													title="뷰어로 열기"
+												>
+													<Eye class="size-3" />
+													뷰어
+												</button>
+												<button
+													onclick={() => openFolderExplorer(member.file_id)}
+													class="flex-1 flex items-center justify-center gap-0.5 rounded py-1 text-[10px] text-muted-foreground hover:bg-muted transition-colors"
+													title="탐색기로 열기"
+												>
+													<FolderOpen class="size-3" />
+													탐색기
+												</button>
+												<button
+													onclick={() => copyPathToClipboard(member.file_path)}
+													class="flex items-center justify-center rounded p-1 text-muted-foreground hover:bg-muted transition-colors"
+													title="경로 복사"
+												>
+													<Clipboard class="size-3" />
+												</button>
+											</div>
 										</div>
 									</div>
 								{/each}

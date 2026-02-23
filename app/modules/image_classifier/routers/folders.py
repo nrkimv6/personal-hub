@@ -59,6 +59,18 @@ class InheritRequest(BaseModel):
     apply_to_children: bool = True
 
 
+class PropagateSiblingsRequest(BaseModel):
+    """형제 전파 요청"""
+    folder_id: int
+    apply_to_files: bool = True  # 형제 폴더 내 파일도 업데이트
+
+
+class PropagateParentRequest(BaseModel):
+    """부모 전파 요청"""
+    folder_id: int
+    apply_to_files: bool = True  # 부모 폴더 내 미분류 파일도 업데이트
+
+
 # === 전역 분류 상태 ===
 classify_state = {
     "is_running": False,
@@ -452,6 +464,197 @@ async def inherit_mapping(
         "children_updated": updated_count,
         "category_id": category_id,
         "message": f"{updated_count}개 하위 폴더에 카테고리 상속 완료"
+    }
+
+
+@router.post("/propagate-siblings")
+async def propagate_siblings(
+    request: PropagateSiblingsRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    형제 전파
+
+    - 해당 폴더의 카테고리를 같은 레벨(같은 부모)의 형제 폴더에 전파
+    - 카테고리가 미설정된 형제 폴더에만 적용
+    - apply_to_files=True 시 형제 폴더 내 미분류 파일에도 적용
+    - mapped_by = 'sibling_propagated' 기록
+    """
+    import os
+
+    # 소스 폴더 조회
+    folder_query = text("""
+        SELECT id, folder_path, category_id
+        FROM folder_mappings
+        WHERE id = :folder_id
+    """)
+    folder = db.execute(folder_query, {"folder_id": request.folder_id}).fetchone()
+
+    if not folder:
+        raise HTTPException(status_code=404, detail="폴더를 찾을 수 없습니다.")
+
+    if not folder.category_id:
+        raise HTTPException(status_code=400, detail="해당 폴더에 카테고리가 설정되지 않았습니다.")
+
+    folder_path = folder.folder_path
+    category_id = folder.category_id
+
+    # 부모 경로 추출
+    parent_path = os.path.dirname(folder_path)
+
+    # 같은 부모를 가진 형제 폴더 조회 (카테고리 미설정인 것만)
+    # 직접 자식(parent_path의 바로 아래 1단계)만 대상으로 함
+    siblings_query = text("""
+        SELECT id, folder_path
+        FROM folder_mappings
+        WHERE id != :folder_id
+        AND category_id IS NULL
+        AND folder_path LIKE :parent_pattern
+    """)
+    all_candidates = db.execute(
+        siblings_query,
+        {
+            "folder_id": request.folder_id,
+            "parent_pattern": f"{parent_path}%",
+        }
+    ).fetchall()
+
+    # 정확한 형제: parent_path의 바로 아래 1단계 폴더만 필터링
+    siblings = [
+        row for row in all_candidates
+        if os.path.dirname(row.folder_path) == parent_path
+    ]
+
+    updated_count = 0
+    files_updated = 0
+
+    for sibling in siblings:
+        # 폴더 카테고리 설정
+        update_query = text("""
+            UPDATE folder_mappings
+            SET category_id = :cat_id,
+                mapped_by = 'sibling_propagated'
+            WHERE id = :sibling_id
+        """)
+        db.execute(update_query, {"cat_id": category_id, "sibling_id": sibling.id})
+
+        # 파일 업데이트
+        if request.apply_to_files:
+            files_update_query = text("""
+                UPDATE file_classifications
+                SET final_category_id = :cat_id,
+                    status = 'folder_mapped'
+                WHERE source_folder_id = :sibling_id
+                AND (status = 'pending' OR final_category_id IS NULL)
+            """)
+            result = db.execute(files_update_query, {"cat_id": category_id, "sibling_id": sibling.id})
+            files_updated += result.rowcount
+
+        updated_count += 1
+
+    db.commit()
+
+    return {
+        "status": "success",
+        "source_folder_id": request.folder_id,
+        "category_id": category_id,
+        "siblings_updated": updated_count,
+        "files_updated": files_updated,
+        "message": f"{updated_count}개 형제 폴더에 카테고리 전파 완료"
+    }
+
+
+@router.post("/propagate-parent")
+async def propagate_parent(
+    request: PropagateParentRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    부모 전파 (역전파)
+
+    - 해당 폴더의 카테고리를 상위(부모) 폴더에 전파
+    - 부모 폴더에 카테고리가 이미 설정된 경우 적용하지 않음
+    - apply_to_files=True 시 부모 폴더 내 미분류 파일에도 적용
+    - mapped_by = 'child_propagated' 기록
+    """
+    import os
+
+    # 소스 폴더 조회
+    folder_query = text("""
+        SELECT id, folder_path, category_id
+        FROM folder_mappings
+        WHERE id = :folder_id
+    """)
+    folder = db.execute(folder_query, {"folder_id": request.folder_id}).fetchone()
+
+    if not folder:
+        raise HTTPException(status_code=404, detail="폴더를 찾을 수 없습니다.")
+
+    if not folder.category_id:
+        raise HTTPException(status_code=400, detail="해당 폴더에 카테고리가 설정되지 않았습니다.")
+
+    folder_path = folder.folder_path
+    category_id = folder.category_id
+
+    # 부모 경로 추출
+    parent_path = os.path.dirname(folder_path)
+
+    if parent_path == folder_path:
+        # 루트 폴더인 경우 (부모가 없음)
+        raise HTTPException(status_code=400, detail="루트 폴더는 부모 전파를 할 수 없습니다.")
+
+    # 부모 폴더 조회 (카테고리 미설정인 것만 적용)
+    parent_query = text("""
+        SELECT id, folder_path, category_id
+        FROM folder_mappings
+        WHERE folder_path = :parent_path
+    """)
+    parent = db.execute(parent_query, {"parent_path": parent_path}).fetchone()
+
+    if not parent:
+        raise HTTPException(status_code=404, detail="부모 폴더가 DB에 없습니다.")
+
+    parents_updated = 0
+    files_updated = 0
+    already_set = parent.category_id is not None
+
+    if not already_set:
+        # 부모 폴더 카테고리 설정
+        update_query = text("""
+            UPDATE folder_mappings
+            SET category_id = :cat_id,
+                mapped_by = 'child_propagated'
+            WHERE id = :parent_id
+        """)
+        db.execute(update_query, {"cat_id": category_id, "parent_id": parent.id})
+        parents_updated = 1
+
+        # 부모 폴더 내 미분류 파일에도 적용
+        if request.apply_to_files:
+            files_update_query = text("""
+                UPDATE file_classifications
+                SET final_category_id = :cat_id,
+                    status = 'folder_mapped'
+                WHERE source_folder_id = :parent_id
+                AND (status = 'pending' OR final_category_id IS NULL)
+            """)
+            result = db.execute(files_update_query, {"cat_id": category_id, "parent_id": parent.id})
+            files_updated = result.rowcount
+
+        db.commit()
+
+    return {
+        "status": "success",
+        "source_folder_id": request.folder_id,
+        "parent_folder_id": parent.id,
+        "category_id": category_id,
+        "parents_updated": parents_updated,
+        "files_updated": files_updated,
+        "already_set": already_set,
+        "message": (
+            "부모 폴더에 이미 카테고리가 설정되어 있습니다." if already_set
+            else f"부모 폴더에 카테고리 전파 완료"
+        )
     }
 
 

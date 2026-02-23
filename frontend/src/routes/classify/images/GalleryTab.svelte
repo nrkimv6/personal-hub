@@ -1,12 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fetchWithTimeout } from '$lib/api/client';
-  import { Search, Tag, Trash2, Check, X, Loader2, Images, ImagePlus } from 'lucide-svelte';
+  import { Search, Tag, Trash2, Check, X, Loader2, Images, ImagePlus, Eye, FolderOpen, Clipboard } from 'lucide-svelte';
 
   // 이미지 타입
   interface GalleryImage {
     id: number;
     filename: string;
+    file_path: string;
+    folder_path: string;
     status: string;
     category: string | null;
     size: number;
@@ -61,16 +63,60 @@
 
   // API 응답 → GalleryImage 변환
   function mapFile(f: any): GalleryImage {
-    const parts = (f.file_path || '').replace(/\\/g, '/').split('/');
+    const rawPath = f.file_path || '';
+    const parts = rawPath.replace(/\\/g, '/').split('/');
     const filename = parts[parts.length - 1] || `file_${f.id}`;
+    const folderPath = parts.slice(0, -1).join('/');
     return {
       id: f.id,
       filename,
+      file_path: rawPath,
+      folder_path: folderPath,
       status: f.status || 'pending',
       category: f.final_category_id ? String(f.final_category_id) : null,
       size: f.file_size || 0,
       thumbnail: `/api/ic/files/${f.id}/thumbnail`,
     };
+  }
+
+  async function openLocalViewer(fileId: number) {
+    try {
+      const res = await fetchWithTimeout('/api/ic/files/open-local', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_id: fileId })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.detail || '뷰어 열기 실패');
+      }
+    } catch (err: any) {
+      alert(`뷰어 열기 실패: ${err.message}`);
+    }
+  }
+
+  async function openFolder(fileId: number) {
+    try {
+      const res = await fetchWithTimeout('/api/ic/files/open-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_id: fileId })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.detail || '탐색기 열기 실패');
+      }
+    } catch (err: any) {
+      alert(`탐색기 열기 실패: ${err.message}`);
+    }
+  }
+
+  async function copyToClipboard(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      alert('클립보드 복사 실패');
+    }
   }
 
   async function loadImages(reset = false) {
@@ -561,7 +607,12 @@
 
           <!-- Bottom Gradient Overlay -->
           <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent p-1.5 pt-5">
-            <p class="truncate text-[10px] font-medium text-white">{img.filename}</p>
+            <p class="truncate text-[10px] font-medium text-white" title={img.file_path}>{img.filename}</p>
+            {#if img.folder_path}
+              <p class="truncate text-[9px] text-white/60" title={img.folder_path}>
+                {img.folder_path.length > 30 ? '...' + img.folder_path.slice(-27) : img.folder_path}
+              </p>
+            {/if}
             <span class="mt-0.5 inline-block rounded px-1 py-0.5 text-[9px] font-medium capitalize {getStatusBadgeClass(img.status)}">
               {getStatusLabel(img.status)}
             </span>
@@ -673,6 +724,40 @@
             <p class="text-xs font-medium text-foreground">{detailData.category ?? '—'}</p>
           </div>
         </div>
+        <!-- 전체 경로 표시 + 복사 버튼 -->
+        {#if detailData.file_path}
+          <div class="mt-2">
+            <p class="text-[10px] text-muted-foreground mb-0.5">전체 경로</p>
+            <div class="flex items-start gap-1">
+              <p class="flex-1 break-all text-[10px] font-mono text-foreground">{detailData.file_path}</p>
+              <button
+                onclick={() => copyToClipboard(detailData!.file_path)}
+                class="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                title="경로 복사"
+              >
+                <Clipboard class="size-3" />
+              </button>
+            </div>
+          </div>
+        {/if}
+      </div>
+
+      <!-- 로컬 실행 버튼 -->
+      <div class="flex gap-2">
+        <button
+          onclick={() => openLocalViewer(detailData!.id)}
+          class="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-foreground hover:bg-accent transition-colors"
+        >
+          <Eye class="size-3.5" />
+          뷰어로 열기
+        </button>
+        <button
+          onclick={() => openFolder(detailData!.id)}
+          class="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-foreground hover:bg-accent transition-colors"
+        >
+          <FolderOpen class="size-3.5" />
+          폴더에서 열기
+        </button>
       </div>
     </div>
 

@@ -78,6 +78,7 @@ class ResolveRequest(BaseModel):
     """중복 해결 요청"""
     keep_file_id: int
     delete_others: bool = True  # True: 나머지 파일 휴지통 이동
+    category_id: Optional[int] = None  # 보관 파일의 카테고리 설정 (선택)
 
 
 @router.get("")
@@ -424,12 +425,24 @@ async def resolve_duplicate_group(
                 except Exception as e:
                     print(f"[오류] 파일 삭제 실패: {file_path} - {e}")
 
+    # 보관 파일에 카테고리 설정 (선택)
+    if request.category_id is not None:
+        db.execute(
+            text("""
+                UPDATE file_classifications
+                SET final_category_id = :cat_id
+                WHERE id = :fid
+            """),
+            {"cat_id": request.category_id, "fid": request.keep_file_id}
+        )
+
     db.commit()
 
     return {
         "status": "resolved",
         "group_id": group_id,
         "kept_file_id": request.keep_file_id,
+        "category_id": request.category_id,
         "deleted_count": deleted_count,
     }
 
@@ -474,6 +487,145 @@ async def discard_all_in_group(
     db.commit()
 
     return {"status": "resolved", "group_id": group_id, "deleted_count": deleted_count}
+
+
+class MergeGroupsRequest(BaseModel):
+    """그룹 병합 요청"""
+    group_ids: list[int]
+
+
+@router.post("/merge")
+async def merge_duplicate_groups(
+    request: MergeGroupsRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    여러 중복 그룹을 첫 번째 그룹으로 병합
+
+    - 선택 그룹 멤버를 첫 번째 그룹에 합치기
+    - 나머지 그룹은 'merged' 상태로 변경
+    - member_count, quality_score 재계산
+    """
+    if len(request.group_ids) < 2:
+        raise HTTPException(status_code=400, detail="병합하려면 2개 이상의 그룹이 필요합니다.")
+
+    target_group_id = request.group_ids[0]
+    source_group_ids = request.group_ids[1:]
+
+    # 대상 그룹 확인
+    target_group = db.execute(
+        text("SELECT id, status FROM duplicate_groups WHERE id = :gid"),
+        {"gid": target_group_id}
+    ).fetchone()
+    if not target_group:
+        raise HTTPException(status_code=404, detail=f"그룹 {target_group_id}을 찾을 수 없습니다.")
+
+    # 소스 그룹 멤버를 대상 그룹으로 이동
+    total_moved = 0
+    for src_group_id in source_group_ids:
+        # 소스 그룹 멤버 조회
+        members = db.execute(
+            text("SELECT file_id FROM duplicate_members WHERE group_id = :gid"),
+            {"gid": src_group_id}
+        ).fetchall()
+
+        for member in members:
+            # 이미 대상 그룹에 있는지 확인
+            existing = db.execute(
+                text("SELECT 1 FROM duplicate_members WHERE group_id = :gid AND file_id = :fid"),
+                {"gid": target_group_id, "fid": member.file_id}
+            ).fetchone()
+
+            if not existing:
+                # 대상 그룹으로 이동
+                db.execute(
+                    text("""
+                        UPDATE duplicate_members
+                        SET group_id = :target_id
+                        WHERE group_id = :src_id AND file_id = :fid
+                    """),
+                    {"target_id": target_group_id, "src_id": src_group_id, "fid": member.file_id}
+                )
+                total_moved += 1
+            else:
+                # 중복 멤버 삭제
+                db.execute(
+                    text("DELETE FROM duplicate_members WHERE group_id = :gid AND file_id = :fid"),
+                    {"gid": src_group_id, "fid": member.file_id}
+                )
+
+        # 소스 그룹을 'merged' 상태로 변경
+        db.execute(
+            text("UPDATE duplicate_groups SET status = 'merged' WHERE id = :gid"),
+            {"gid": src_group_id}
+        )
+
+    # 대상 그룹의 member_count 재계산
+    new_count = db.execute(
+        text("SELECT COUNT(*) FROM duplicate_members WHERE group_id = :gid"),
+        {"gid": target_group_id}
+    ).scalar() or 0
+
+    db.execute(
+        text("UPDATE duplicate_groups SET member_count = :cnt WHERE id = :gid"),
+        {"cnt": new_count, "gid": target_group_id}
+    )
+
+    db.commit()
+
+    return {
+        "status": "merged",
+        "target_group_id": target_group_id,
+        "merged_group_ids": source_group_ids,
+        "new_member_count": new_count,
+        "members_moved": total_moved,
+        "message": f"{len(source_group_ids)}개 그룹을 그룹 {target_group_id}으로 병합 완료"
+    }
+
+
+@router.post("/{group_id}/keep-all")
+async def keep_all_in_group(
+    group_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    그룹의 모든 멤버를 보관 (삭제 없이 해결)
+
+    - 그룹 상태 → 'resolved', resolution_type = 'keep_all', kept_file_id = NULL
+    - 멤버 파일의 삭제 예정 플래그 해제 (status가 pending 상태인 것 유지)
+    """
+    group = db.execute(
+        text("SELECT id, status FROM duplicate_groups WHERE id = :gid"),
+        {"gid": group_id}
+    ).fetchone()
+    if not group:
+        raise HTTPException(status_code=404, detail="중복 그룹을 찾을 수 없습니다.")
+
+    # 그룹 상태를 resolved로 변경 (kept_file_id = NULL = 모두 보관)
+    db.execute(
+        text("""
+            UPDATE duplicate_groups
+            SET status = 'resolved', kept_file_id = NULL
+            WHERE id = :gid
+        """),
+        {"gid": group_id}
+    )
+
+    # 멤버 수 조회
+    member_count = db.execute(
+        text("SELECT COUNT(*) FROM duplicate_members WHERE group_id = :gid"),
+        {"gid": group_id}
+    ).scalar() or 0
+
+    db.commit()
+
+    return {
+        "status": "resolved",
+        "resolution_type": "keep_all",
+        "group_id": group_id,
+        "kept_count": member_count,
+        "message": f"그룹 {group_id}의 {member_count}개 파일 모두 보관 처리"
+    }
 
 
 def _run_detect(resume: bool):

@@ -1,14 +1,21 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fetchWithTimeout } from '$lib/api/client';
-  import { Tags, Search, Plus, Trash2, X, Tag, Loader2 } from 'lucide-svelte';
+  import { Tags, Search, Plus, Trash2, X, Tag, Loader2, FolderSymlink, Save } from 'lucide-svelte';
 
   interface TagItem {
     id: number;
     name: string;
     usage_count: number;
     created_at: string | null;
+    folder_template?: string | null;
+    folder_action?: string | null;
   }
+
+  // 폴더 규칙 편집 상태
+  let editingFolderRule = $state(false);
+  let folderRuleForm = $state({ folder_template: '', folder_action: 'move' });
+  let savingFolderRule = $state(false);
 
   let tags = $state<TagItem[]>([]);
   let loadingTags = $state(true);
@@ -81,6 +88,32 @@
       alert(`태그 삭제 실패: ${err.message}`);
     } finally {
       deletingTagId = null;
+    }
+  }
+
+  async function saveFolderRule() {
+    if (!selectedTag) return;
+    savingFolderRule = true;
+    try {
+      const res = await fetchWithTimeout(`/api/ic/tags/${selectedTag.id}/folder-rule`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          folder_template: folderRuleForm.folder_template || null,
+          folder_action: folderRuleForm.folder_action || null,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      editingFolderRule = false;
+      // 태그 목록 갱신
+      await loadTags();
+      // selectedTag 갱신
+      const updated = tags.find(t => t.id === selectedTag!.id);
+      if (updated) selectedTag = updated;
+    } catch (err: any) {
+      alert(`폴더 규칙 저장 실패: ${err.message}`);
+    } finally {
+      savingFolderRule = false;
     }
   }
 
@@ -247,7 +280,7 @@
         </div>
 
         <!-- Tag Info -->
-        <div class="p-4">
+        <div class="p-4 space-y-4">
           <div class="rounded-lg border border-border bg-secondary/30 p-4 space-y-2 text-xs">
             <div class="flex justify-between">
               <span class="text-muted-foreground">태그 ID</span>
@@ -264,9 +297,102 @@
               </div>
             {/if}
           </div>
-          <p class="mt-4 text-xs text-muted-foreground text-center">
-            갤러리에서 이 태그로 필터링된 이미지를 확인하세요.
-          </p>
+
+          <!-- 폴더 규칙 섹션 -->
+          <div class="rounded-lg border border-border bg-card p-4">
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2">
+                <FolderSymlink class="size-4 text-primary" />
+                <h3 class="text-sm font-semibold text-foreground">폴더 규칙</h3>
+              </div>
+              {#if !editingFolderRule}
+                <button
+                  onclick={() => {
+                    folderRuleForm = {
+                      folder_template: selectedTag!.folder_template ?? '',
+                      folder_action: selectedTag!.folder_action ?? 'move',
+                    };
+                    editingFolderRule = true;
+                  }}
+                  class="flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent transition-colors"
+                >
+                  <Save class="size-3" />
+                  편집
+                </button>
+              {/if}
+            </div>
+
+            {#if editingFolderRule}
+              <div class="space-y-3">
+                <div>
+                  <label class="mb-1 block text-xs font-medium text-muted-foreground">
+                    폴더 경로 템플릿
+                  </label>
+                  <input
+                    type="text"
+                    bind:value={folderRuleForm.folder_template}
+                    placeholder="{category}/{year}/{tag}"
+                    class="h-8 w-full rounded-md border border-border bg-background px-3 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <p class="mt-1 text-[10px] text-muted-foreground">
+                    사용 가능 변수: {'{category}'}, {'{year}'}, {'{month}'}, {'{tag}'}
+                  </p>
+                </div>
+                <div>
+                  <label class="mb-1 block text-xs font-medium text-muted-foreground">
+                    파일 처리 방식
+                  </label>
+                  <div class="flex gap-1">
+                    {#each [['move', '이동'], ['copy', '복사'], ['link', '링크']] as [val, label]}
+                      <button
+                        onclick={() => (folderRuleForm.folder_action = val)}
+                        class="rounded-md border px-3 py-1 text-xs transition-colors {folderRuleForm.folder_action === val
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border text-muted-foreground hover:bg-accent'}"
+                      >
+                        {label}
+                      </button>
+                    {/each}
+                  </div>
+                </div>
+                <div class="flex justify-end gap-2">
+                  <button
+                    onclick={() => (editingFolderRule = false)}
+                    class="rounded-md border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-accent"
+                  >
+                    취소
+                  </button>
+                  <button
+                    onclick={saveFolderRule}
+                    disabled={savingFolderRule}
+                    class="flex items-center gap-1 rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {#if savingFolderRule}
+                      <Loader2 class="size-3 animate-spin" />
+                    {:else}
+                      <Save class="size-3" />
+                    {/if}
+                    저장
+                  </button>
+                </div>
+              </div>
+            {:else}
+              <div class="space-y-2 text-xs">
+                {#if selectedTag.folder_template}
+                  <div class="flex justify-between">
+                    <span class="text-muted-foreground">경로 템플릿</span>
+                    <code class="rounded bg-muted px-2 py-0.5 font-mono text-[11px]">{selectedTag.folder_template}</code>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-muted-foreground">처리 방식</span>
+                    <span class="font-medium">{selectedTag.folder_action ?? 'move'}</span>
+                  </div>
+                {:else}
+                  <p class="text-center text-muted-foreground">폴더 규칙이 설정되지 않았습니다.</p>
+                {/if}
+              </div>
+            {/if}
+          </div>
         </div>
       {/if}
     </div>
