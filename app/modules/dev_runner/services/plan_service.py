@@ -343,14 +343,19 @@ class PlanService:
                     match = re.match(r">\s*상태:\s*(.+)", line)
                     if match:
                         return self._strip_markdown_inline(match.group(1))
+                    # - **상태**: ... (리스트+bold 형식)
+                    match2 = re.match(r"-\s*\*{0,2}상태\*{0,2}:\s*(.+)", line)
+                    if match2:
+                        return self._strip_markdown_inline(match2.group(1))
                     type_match = re.match(r">\s*유형:\s*(.+)", line)
                     if type_match:
                         doc_type = self._strip_markdown_inline(type_match.group(1))
             # 상태 라인이 없고, 보고서 유형이면 완료로 간주
             if doc_type and re.search(r'보고서|report', doc_type, re.IGNORECASE):
                 return "완료"
-            # 파일명에 -report 포함 시 완료로 간주
-            if '-report' in path.stem.lower():
+            # 파일명에 -report, -postmortem 포함 시 완료로 간주
+            stem = path.stem.lower()
+            if '-report' in stem or '-postmortem' in stem:
                 return "완료"
             return "unknown"
         except Exception:
@@ -526,7 +531,7 @@ class PlanService:
             return False
         if plan.progress.total > 0 and plan.progress.done == plan.progress.total:
             return True
-        if plan.status in ("구현완료", "완료"):
+        if "완료" in plan.status:
             return True
         return False
 
