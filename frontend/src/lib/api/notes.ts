@@ -197,4 +197,21 @@ export const notesApi = {
   getHistory(noteId: number): Promise<NoteHistoryItem[]> {
     return req('GET', `/${noteId}/history`);
   },
+
+  // ── Bulk ──
+  bulkDelete(noteIds: number[]): Promise<{ ok: boolean; count: number }> {
+    return req('POST', '/bulk/delete', { note_ids: noteIds });
+  },
+
+  bulkArchive(noteIds: number[]): Promise<{ ok: boolean; count: number }> {
+    return req('POST', '/bulk/archive', { note_ids: noteIds });
+  },
+
+  bulkTag(noteIds: number[], addTagIds: number[], removeTagIds: number[]): Promise<{ ok: boolean; count: number }> {
+    return req('POST', '/bulk/tag', { note_ids: noteIds, add_tag_ids: addTagIds, remove_tag_ids: removeTagIds });
+  },
+
+  bulkStar(noteIds: number[], starred: boolean): Promise<{ ok: boolean; count: number }> {
+    return req('POST', '/bulk/star', { note_ids: noteIds, starred });
+  },
 };

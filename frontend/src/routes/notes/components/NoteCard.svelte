@@ -9,9 +9,12 @@
     onOpen: (note: Note) => void;
     onEdit: (note: Note) => void;
     onRefresh: () => void;
+    selectMode?: boolean;
+    selected?: boolean;
+    onToggleSelect?: (id: number) => void;
   }
 
-  let { note, onOpen, onEdit, onRefresh }: Props = $props();
+  let { note, onOpen, onEdit, onRefresh, selectMode = false, selected = false, onToggleSelect }: Props = $props();
 
   let archiving = $state(false);
   let deleting = $state(false);
@@ -82,16 +85,30 @@
 <div
   role="button"
   tabindex="0"
-  onclick={() => onOpen(note)}
-  onkeydown={(e) => e.key === 'Enter' && onOpen(note)}
+  onclick={() => selectMode ? onToggleSelect?.(note.id) : onOpen(note)}
+  onkeydown={(e) => e.key === 'Enter' && (selectMode ? onToggleSelect?.(note.id) : onOpen(note))}
   class="group relative flex flex-col border rounded-lg p-4 transition-all cursor-pointer
-    {note.is_pinned
-      ? 'bg-pinned border-primary/20'
-      : 'bg-card border-border'}
+    {selected
+      ? 'border-blue-400 bg-blue-50 dark:bg-blue-900/10'
+      : note.is_pinned
+        ? 'bg-pinned border-primary/20'
+        : 'bg-card border-border'}
     shadow-card hover:shadow-card-hover"
 >
+  <!-- 선택 모드 체크박스 -->
+  {#if selectMode}
+    <span class="absolute top-2 left-2 z-10">
+      <input
+        type="checkbox"
+        checked={selected}
+        onclick={(e) => { e.stopPropagation(); onToggleSelect?.(note.id); }}
+        class="w-4 h-4 rounded accent-blue-500 cursor-pointer"
+      />
+    </span>
+  {/if}
+
   <!-- 핀 아이콘 -->
-  {#if note.is_pinned}
+  {#if note.is_pinned && !selectMode}
     <span class="absolute top-2 right-2 text-primary">
       <Pin class="w-3.5 h-3.5 fill-current" />
     </span>

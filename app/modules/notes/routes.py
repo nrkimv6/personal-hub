@@ -17,9 +17,42 @@ from app.modules.notes.schemas import (
     NoteArchiveResponse, ArchiveListResponse,
     TagCreate, TagUpdate, TagResponse,
     HistoryResponse,
+    BulkNoteIds, BulkTagAction, BulkStarAction,
 )
 
 router = APIRouter(prefix="/api/notes", tags=["Notes"])
+
+
+# ══════════════════════════════════════════
+# Bulk 라우트 (⚠️ /{note_id} 보다 먼저 정의)
+# ══════════════════════════════════════════
+
+@router.post("/bulk/delete")
+def bulk_delete(data: BulkNoteIds, db: Session = Depends(get_db)):
+    """여러 메모 일괄 삭제 (soft delete)."""
+    count = svc.bulk_delete(db, data.note_ids)
+    return {"ok": True, "count": count}
+
+
+@router.post("/bulk/archive")
+def bulk_archive(data: BulkNoteIds, db: Session = Depends(get_db)):
+    """여러 메모 일괄 아카이브."""
+    count = svc.bulk_archive(db, data.note_ids)
+    return {"ok": True, "count": count}
+
+
+@router.post("/bulk/tag")
+def bulk_tag(data: BulkTagAction, db: Session = Depends(get_db)):
+    """여러 메모에 태그 일괄 추가/제거."""
+    count = svc.bulk_tag(db, data.note_ids, data.add_tag_ids, data.remove_tag_ids)
+    return {"ok": True, "count": count}
+
+
+@router.post("/bulk/star")
+def bulk_star(data: BulkStarAction, db: Session = Depends(get_db)):
+    """여러 메모 별표 일괄 설정."""
+    count = svc.bulk_star(db, data.note_ids, data.starred)
+    return {"ok": True, "count": count}
 
 
 # ══════════════════════════════════════════

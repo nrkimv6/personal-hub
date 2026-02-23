@@ -96,6 +96,23 @@ class ArchiveListResponse(BaseModel):
     pages: int
 
 
+# ──────────────── Bulk 스키마 ────────────────
+
+class BulkNoteIds(BaseModel):
+    note_ids: List[int] = Field(..., min_length=1)
+
+
+class BulkTagAction(BaseModel):
+    note_ids: List[int] = Field(..., min_length=1)
+    add_tag_ids: List[int] = []
+    remove_tag_ids: List[int] = []
+
+
+class BulkStarAction(BaseModel):
+    note_ids: List[int] = Field(..., min_length=1)
+    starred: bool
+
+
 # ──────────────── History 스키마 ────────────────
 
 class HistoryResponse(BaseModel):

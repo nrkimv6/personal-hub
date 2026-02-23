@@ -405,6 +405,77 @@ def update_tag(
     return tag
 
 
+# ──────────────── Bulk 서비스 ────────────────
+
+def bulk_delete(db: Session, note_ids: List[int]) -> int:
+    """여러 메모 일괄 soft delete. 영향 받은 건수 반환."""
+    now = datetime.utcnow()
+    count = (
+        db.query(Note)
+        .filter(Note.id.in_(note_ids), Note.deleted_at.is_(None))
+        .update({"deleted_at": now}, synchronize_session=False)
+    )
+    db.commit()
+    return count
+
+
+def bulk_archive(db: Session, note_ids: List[int]) -> int:
+    """여러 메모 일괄 아카이브. 성공 건수 반환."""
+    count = 0
+    for note_id in note_ids:
+        try:
+            archive_note(db, note_id)
+            count += 1
+        except HTTPException:
+            pass  # 존재하지 않는 메모는 스킵
+    return count
+
+
+def bulk_tag(
+    db: Session,
+    note_ids: List[int],
+    add_tag_ids: List[int],
+    remove_tag_ids: List[int],
+) -> int:
+    """여러 메모에 태그 일괄 추가/제거. 처리된 메모 건수 반환."""
+    notes = db.query(Note).filter(
+        Note.id.in_(note_ids), Note.deleted_at.is_(None)
+    ).all()
+
+    for note in notes:
+        # 추가: 미존재 시에만 INSERT
+        for tid in add_tag_ids:
+            exists = db.query(NoteTag).filter(
+                NoteTag.note_id == note.id,
+                NoteTag.tag_id == tid,
+                NoteTag.source == "note",
+            ).first()
+            if not exists:
+                db.add(NoteTag(note_id=note.id, tag_id=tid, source="note"))
+
+        # 제거: 존재하면 DELETE
+        if remove_tag_ids:
+            db.query(NoteTag).filter(
+                NoteTag.note_id == note.id,
+                NoteTag.tag_id.in_(remove_tag_ids),
+                NoteTag.source == "note",
+            ).delete(synchronize_session=False)
+
+    db.commit()
+    return len(notes)
+
+
+def bulk_star(db: Session, note_ids: List[int], starred: bool) -> int:
+    """여러 메모 별표 일괄 설정. 영향 받은 건수 반환."""
+    count = (
+        db.query(Note)
+        .filter(Note.id.in_(note_ids), Note.deleted_at.is_(None))
+        .update({"is_starred": 1 if starred else 0}, synchronize_session=False)
+    )
+    db.commit()
+    return count
+
+
 def delete_tag(db: Session, tag_id: int) -> bool:
     tag = db.query(NoteTagDef).filter(NoteTagDef.id == tag_id).first()
     if not tag:
