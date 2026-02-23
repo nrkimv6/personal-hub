@@ -181,10 +181,10 @@
 	let taskListPlanPath = $derived(effectivePlanFile ?? selectedPlanPath ?? null);
 </script>
 
-<div class="flex flex-col h-full overflow-y-auto sm:overflow-hidden">
+<div class="flex flex-col h-full overflow-hidden">
 
 	<!-- Main content -->
-	<div class="flex-1 flex flex-col sm:overflow-hidden">
+	<div class="flex-1 min-h-0 flex flex-col sm:overflow-hidden">
 		{#if error}
 			<div class="mx-4 mt-2 bg-red-50 border border-red-200 rounded-lg p-3 text-red-700 text-xs shrink-0">
 				{error}
@@ -275,18 +275,19 @@
 				{/if}
 			</div>
 
-			<!-- Log Viewer + Task History -->
-			<div class="flex flex-col flex-none sm:flex-1 sm:overflow-hidden">
+			<!-- Log Viewer + Task History (2-grid on desktop, stack on mobile) -->
+			<div class="flex-1 min-h-0 flex flex-col md:grid md:grid-cols-2 md:gap-0">
 				<!-- Log Viewer -->
-				<div class="flex-1 min-h-[200px]">
+				<div class="flex-1 min-h-[300px] md:min-h-0 overflow-hidden">
 					<LogViewer planFile={effectivePlanFile ?? undefined} currentPlanName={runStatus?.current_plan_name ?? undefined} />
 				</div>
 
 				<!-- Task History -->
-				<div class="shrink-0 border-t overflow-auto">
+				<div class="shrink-0 md:shrink border-t md:border-t-0 md:border-l overflow-auto flex flex-col">
+					<!-- 모바일: 토글 버튼 표시 / 데스크톱: 숨김 (항상 펼침) -->
 					<button
 						onclick={() => (taskHistoryOpen = !taskHistoryOpen)}
-						class="flex items-center gap-2 w-full px-4 py-2 hover:bg-gray-50 transition-colors"
+						class="md:hidden flex items-center gap-2 w-full px-4 py-2 hover:bg-gray-50 transition-colors"
 					>
 						<svg class="w-3.5 h-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
 						<span class="text-xs font-medium uppercase tracking-wider">Task History</span>
@@ -305,42 +306,54 @@
 							<path d="M18 15l-6-6-6 6" />
 						</svg>
 					</button>
-					{#if taskHistoryOpen}
-						<div class="h-[280px] overflow-hidden flex flex-col">
-							<!-- 탭 버튼 -->
-							<div class="flex gap-0 px-4 pt-2 border-b shrink-0">
-								<button
-									onclick={() => (taskHistoryTab = 'tasks')}
-									class="px-3 py-1.5 text-xs font-medium transition-colors border-b-2 -mb-px {taskHistoryTab === 'tasks' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
-								>
-									Tasks
-								</button>
-								<button
-									onclick={() => (taskHistoryTab = 'plans')}
-									class="px-3 py-1.5 text-xs font-medium transition-colors border-b-2 -mb-px {taskHistoryTab === 'plans' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
-								>
-									Plans
-								</button>
-							</div>
-							<!-- 탭 콘텐츠 -->
-							<div class="flex-1 min-h-0 overflow-hidden">
-								{#if taskHistoryTab === 'tasks'}
-									<div class="px-4 pb-4 h-full flex flex-col">
-										{#if runStatus?.running && currentTracking}
-											<CurrentTrackingCard tracking={currentTracking} />
-										{/if}
-										<div class="flex-1 min-h-0">
-											<TaskList planPath={taskListPlanPath} />
-										</div>
-									</div>
-								{:else}
-									<div class="px-4 pb-4 h-full overflow-hidden flex flex-col">
-										<PlanList {plans} onPlansChange={fetchPlans} runningPlanFile={runStatus?.plan_file ?? null} {lastPlanFile} onPlanSelect={(path) => { selectedPlanPath = path; }} />
-									</div>
-								{/if}
-							</div>
+					<!-- 데스크톱 헤더 (항상 표시) -->
+					<div class="hidden md:flex items-center gap-2 px-4 py-2 border-b">
+						<svg class="w-3.5 h-3.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+						<span class="text-xs font-medium uppercase tracking-wider">Task History</span>
+						{#if taskHistoryTab === 'tasks'}
+							{#if taskListPlanPath}
+								<span class="text-[10px] text-gray-400 font-mono truncate max-w-[160px]">{taskListPlanPath.split(/[\\/]/).pop()}</span>
+							{/if}
+						{:else}
+							<div class="h-3 w-px bg-gray-200 shrink-0"></div>
+							<span class="text-[10px] text-gray-500 font-mono shrink-0">{plans.length} plans</span>
+						{/if}
+					</div>
+					<!-- 콘텐츠: 데스크톱은 항상 표시, 모바일은 토글 -->
+					<div class="{taskHistoryOpen ? 'flex' : 'hidden'} md:flex flex-col flex-1 min-h-0 h-[280px] md:h-auto">
+						<!-- 탭 버튼 -->
+						<div class="flex gap-0 px-4 pt-2 border-b shrink-0">
+							<button
+								onclick={() => (taskHistoryTab = 'tasks')}
+								class="px-3 py-1.5 text-xs font-medium transition-colors border-b-2 -mb-px {taskHistoryTab === 'tasks' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+							>
+								Tasks
+							</button>
+							<button
+								onclick={() => (taskHistoryTab = 'plans')}
+								class="px-3 py-1.5 text-xs font-medium transition-colors border-b-2 -mb-px {taskHistoryTab === 'plans' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
+							>
+								Plans
+							</button>
 						</div>
-					{/if}
+						<!-- 탭 콘텐츠 -->
+						<div class="flex-1 min-h-0 overflow-hidden">
+							{#if taskHistoryTab === 'tasks'}
+								<div class="px-4 pb-4 h-full flex flex-col">
+									{#if runStatus?.running && currentTracking}
+										<CurrentTrackingCard tracking={currentTracking} />
+									{/if}
+									<div class="flex-1 min-h-0">
+										<TaskList planPath={taskListPlanPath} />
+									</div>
+								</div>
+							{:else}
+								<div class="px-4 pb-4 h-full overflow-hidden flex flex-col">
+									<PlanList {plans} onPlansChange={fetchPlans} runningPlanFile={runStatus?.plan_file ?? null} {lastPlanFile} onPlanSelect={(path) => { selectedPlanPath = path; }} />
+								</div>
+							{/if}
+						</div>
+					</div>
 				</div>
 			</div>
 		{/if}

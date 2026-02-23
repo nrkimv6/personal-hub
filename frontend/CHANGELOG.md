@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.10.0] - 2026-02-23
+### Added
+- Dev Runner: 데스크톱 2-grid 레이아웃 (LogViewer + Task History 좌우 분할, md 브레이크포인트)
+- Dev Runner: 데스크톱에서 Task History 항상 펼침, 모바일에서 토글 유지
+
 ## [0.9.0] - 2026-02-23
 ### Added
 - Dev Runner: Plans Card를 Task History 탭으로 이동 (Tasks/Plans 탭 전환)
