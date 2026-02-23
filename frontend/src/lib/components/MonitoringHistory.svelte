@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
 	import { Badge, Button } from '$lib/components/ui';
 
 	import { onMount } from 'svelte';
@@ -337,7 +337,7 @@
 									{#if event.graphql_response}
 										<button
 											class="w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-primary-light rounded transition-colors"
-											onclick={() => toggleEventExpand(event.id)}
+											on:click={() => toggleEventExpand(event.id)}
 											title={expandedEventIds[event.id] ? '접기' : '펼치기'}
 										>
 											<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -477,12 +477,12 @@
 													class="flex items-center justify-between px-4 py-2 border-b border-border bg-background rounded-t-lg"
 												>
 													<span class="text-sm font-medium text-foreground">GraphQL 응답</span>
-													<button
-														class="btn btn-xs btn-secondary"
-														onclick={() => copyGraphqlResponse(event.graphql_response)}
+													<Button
+														variant="secondary" size="xs"
+														on:click={() => copyGraphqlResponse(event.graphql_response)}
 													>
 														복사
-													</button>
+													</Button>
 												</div>
 												<div class="p-4 max-h-80 overflow-auto">
 													<pre
@@ -510,7 +510,7 @@
 				<div class="flex gap-2">
 					<Button variant="secondary" size="sm"
 						disabled={page === 1}
-						onclick={() => {
+						on:click={() => {
 							page--;
 							fetchData();
 						}}
@@ -520,7 +520,7 @@
 					<span class="px-3 py-1 text-sm">{page} / {totalPages}</span>
 					<Button variant="secondary" size="sm"
 						disabled={page === totalPages}
-						onclick={() => {
+						on:click={() => {
 							page++;
 							fetchData();
 						}}

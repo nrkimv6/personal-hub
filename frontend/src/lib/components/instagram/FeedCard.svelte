@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
 	import { Button } from '$lib/components/ui';
 
 	import { toPng } from 'html-to-image';
@@ -638,7 +638,7 @@
 						<div class="text-center py-4">
 							<p class="text-sm text-muted-foreground mb-3">AI 분석 결과가 없습니다.</p>
 							{#if onRequestLlmAnalysis}
-								<Button variant="primary" size="sm" on:click={() => onRequestLlmAnalysis && onRequestLlmAnalysis(post.id)}
+								<Button variant="primary" size="sm" onclick={() => onRequestLlmAnalysis && onRequestLlmAnalysis(post.id)}
 								>
 									AI 분석 요청
 								</Button>
@@ -693,14 +693,14 @@
 								{/each}
 							</div>
 							<div class="flex gap-2">
-								<button
+								<Button
 									onclick={saveTags}
 									disabled={savingTags}
-									class="btn btn-primary btn-sm disabled:opacity-50"
+									variant="primary" size="sm"
 								>
 									{savingTags ? '저장 중...' : '저장'}
-								</button>
-								<Button variant="secondary" size="sm" on:click={cancelEditTags}> 취소 </Button>
+								</Button>
+								<Button variant="secondary" size="sm" onclick={cancelEditTags}> 취소 </Button>
 							</div>
 						{:else}
 							<!-- 보기 모드 -->
@@ -737,15 +737,15 @@
 							href={post.url}
 							target="_blank"
 							rel="noopener noreferrer"
-							class="btn btn-primary btn-sm"
+							class="btn-primary-link"
 						>
 							원본 보기
 						</a>
 						{#if onRecrawl}
-						<button
+						<Button
 							onclick={handleRecrawl}
 							disabled={isRecrawling}
-							class="btn btn-secondary btn-sm disabled:opacity-50"
+							variant="secondary" size="sm" class="disabled:opacity-50"
 							title="게시물 URL로 다시 크롤링"
 						>
 							{#if isRecrawling}
@@ -754,15 +754,15 @@
 							{:else}
 								&#8635; 재크롤링
 							{/if}
-						</button>
+						</Button>
 						{/if}
 					{/if}
 					<!-- AI 분석 요청 버튼 -->
 					{#if onRequestLlmAnalysis}
-						<button
+						<Button
 							onclick={handleRequestLlmAnalysis}
 							disabled={isRequestingAnalysis}
-							class="btn btn-secondary btn-sm disabled:opacity-50"
+							variant="secondary" size="sm" class="disabled:opacity-50"
 							title="AI 분석 요청 (Event/Popup 분류)"
 						>
 							{#if isRequestingAnalysis}
@@ -774,13 +774,13 @@
 								</svg>
 								AI 분석
 							{/if}
-						</button>
+						</Button>
 					{/if}
 					<!-- 캡쳐 다운로드 버튼 -->
-					<button
+					<Button
 						onclick={handleCapture}
 						disabled={isCapturing}
-						class="btn btn-secondary btn-sm disabled:opacity-50"
+						variant="secondary" size="sm" class="disabled:opacity-50"
 						title="피드 캡쳐 다운로드"
 					>
 						{#if isCapturing}
@@ -792,12 +792,12 @@
 							</svg>
 							캡쳐
 						{/if}
-					</button>
+					</Button>
 					<!-- 공유 버튼 -->
-					<button
+					<Button
 						onclick={handleShare}
 						disabled={isSharing}
-						class="btn btn-secondary btn-sm disabled:opacity-50"
+						variant="secondary" size="sm" class="disabled:opacity-50"
 						title={isKakaoAvailable() ? '카카오톡으로 공유' : '공유하기'}
 					>
 						{#if isSharing}
@@ -809,9 +809,9 @@
 							</svg>
 							공유
 						{/if}
-					</button>
+					</Button>
 					{#if onDelete}
-					<button onclick={handleDelete} class="btn btn-danger btn-sm"> 삭제 </button>
+					<Button onclick={handleDelete} variant="destructive" size="sm"> 삭제 </Button>
 					{/if}
 				</div>
 			{/if}

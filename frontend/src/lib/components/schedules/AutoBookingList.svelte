@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
 	import { Badge, Button } from '$lib/components/ui';
 
   import { onMount } from 'svelte';
@@ -240,13 +240,13 @@
                 <td class="px-3 py-2">
                   <div class="flex justify-center gap-1">
                     <Button variant="secondary" size="xs"
-                      onclick={() => openEditModal(schedule)}
+                      on:click={() => openEditModal(schedule)}
                       title="수정"
                     >
                       ✏
                     </Button>
                     <Button variant="secondary" size="xs"
-                      onclick={() => handleResetBookingCount(schedule)}
+                      on:click={() => handleResetBookingCount(schedule)}
                       title="예약 횟수 초기화"
                     >
                       0
@@ -294,7 +294,7 @@
             required
             placeholder="18:00-21:00"
           />
-          <button type="submit" class="btn btn-secondary w-full mt-4">테스트</button>
+          <Button type="submit" variant="secondary" class="w-full mt-4">테스트</Button>
 
           {#if filterTest.result}
             <div class="mt-4 p-3 bg-background rounded-lg text-sm">
@@ -373,10 +373,10 @@
           <span class="text-sm font-medium text-foreground">모니터링 활성화</span>
         </label>
         <div class="flex justify-end gap-2 pt-4">
-          <button type="button" class="btn btn-secondary" onclick={() => editingSchedule = null}>
+          <Button type="button" variant="secondary" on:click={() => editingSchedule = null}>
             취소
-          </button>
-          <button type="submit" class="btn btn-primary">저장</button>
+          </Button>
+          <Button type="submit" variant="primary">저장</Button>
         </div>
       </form>
     </div>
