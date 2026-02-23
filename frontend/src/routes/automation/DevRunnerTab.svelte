@@ -390,7 +390,7 @@
 
 							<!-- Plan Files -->
 							<div class="bg-white border rounded-lg p-4 max-h-[50vh] sm:max-h-[340px] overflow-hidden flex flex-col">
-								<PlanList {plans} onPlansChange={fetchPlans} runningPlanFile={runStatus?.plan_file ?? null} />
+								<PlanList {plans} onPlansChange={fetchPlans} runningPlanFile={runStatus?.plan_file ?? null} {lastPlanFile} />
 							</div>
 						</div>
 					</div>

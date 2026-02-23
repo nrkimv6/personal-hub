@@ -8,7 +8,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.modules.dev_runner.schemas import PlanFileResponse, PlanProgressResponse, PlanDetailResponse, RegisteredPathResponse, DoneResponse
+from app.modules.dev_runner.schemas import PlanFileResponse, PlanProgressResponse, PlanDetailResponse, RegisteredPathResponse, DoneResponse, BatchDoneResponse
 from app.modules.dev_runner.services.plan_service import plan_service
 
 logger = logging.getLogger(__name__)
@@ -150,6 +150,47 @@ async def run_plan_done(encoded_path: str):
 
     result = await plan_service.run_done(decoded_path)
     return DoneResponse(**result)
+
+
+@router.post("/plans/batch-done", response_model=BatchDoneResponse)
+async def batch_done():
+    """완료 가능한 plan 일괄 done 처리 (아카이브, TODO→DONE, 커밋)"""
+    result = await plan_service.batch_done()
+    return BatchDoneResponse(**result)
+
+
+@router.post("/plans/{encoded_path}/hold")
+async def hold_plan(encoded_path: str):
+    """plan 상태를 '보류'로 변경"""
+    try:
+        decoded_path = _decode_path(encoded_path)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid encoded path: {str(e)}")
+
+    if not plan_service.validate_path(decoded_path):
+        raise HTTPException(status_code=403, detail="Path not allowed")
+
+    success = plan_service.set_plan_status(decoded_path, "보류")
+    if not success:
+        raise HTTPException(status_code=404, detail="Plan file not found or no title")
+    return {"success": True}
+
+
+@router.delete("/plans/{encoded_path}/hold")
+async def unhold_plan(encoded_path: str):
+    """plan 보류 해제 (상태를 '구현중'으로 변경)"""
+    try:
+        decoded_path = _decode_path(encoded_path)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid encoded path: {str(e)}")
+
+    if not plan_service.validate_path(decoded_path):
+        raise HTTPException(status_code=403, detail="Path not allowed")
+
+    success = plan_service.set_plan_status(decoded_path, "구현중")
+    if not success:
+        raise HTTPException(status_code=404, detail="Plan file not found or no title")
+    return {"success": True}
 
 
 @router.post("/plans/sync")

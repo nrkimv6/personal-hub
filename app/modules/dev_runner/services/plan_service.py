@@ -257,7 +257,7 @@ class PlanService:
                 )
 
     # 자동 무시 대상 상태 (정확히 일치해야 함)
-    _IGNORED_STATUSES = {"완료", "구현완료"}
+    _IGNORED_STATUSES = {"완료", "구현완료", "보류"}
 
     def _is_ignored_plan(self, path: Path, status: str, progress: PlanProgressResponse) -> bool:
         """plan이 무시 대상인지 판단"""
@@ -439,6 +439,77 @@ class PlanService:
         except Exception as e:
             logger.error(f"run_done 실패: {e}")
             return {"success": False, "message": str(e), "output": None}
+
+    # ========== 일괄 완료 ==========
+
+    def _can_done(self, plan: PlanFileResponse) -> bool:
+        """plan이 done 처리 가능한지 판단"""
+        if "archive" in plan.path:
+            return False
+        if plan.progress.total > 0 and plan.progress.done == plan.progress.total:
+            return True
+        if plan.status == "구현완료":
+            return True
+        return False
+
+    async def batch_done(self) -> dict:
+        """완료 가능한 plan을 일괄 done 처리"""
+        all_plans = self.list_plans(include_ignored=True)
+        targets = [p for p in all_plans if self._can_done(p)]
+
+        results = []
+        success_count = 0
+        failed_count = 0
+
+        for plan in targets:
+            result = await self.run_done(plan.path)
+            results.append({
+                "path": plan.path,
+                "filename": plan.filename,
+                "success": result["success"],
+                "message": result["message"],
+            })
+            if result["success"]:
+                success_count += 1
+            else:
+                failed_count += 1
+
+        return {
+            "total": len(targets),
+            "success": success_count,
+            "failed": failed_count,
+            "results": results,
+        }
+
+    # ========== 상태 변경 ==========
+
+    def set_plan_status(self, plan_path: str, new_status: str) -> bool:
+        """plan 파일의 '> 상태: ...' 줄을 변경 (없으면 제목 아래에 추가)"""
+        path = Path(plan_path)
+        if not path.exists():
+            return False
+
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines(keepends=True)
+        status_pattern = re.compile(r"^>\s*상태:\s*(.+)")
+        found = False
+
+        for i, line in enumerate(lines):
+            if status_pattern.match(line):
+                lines[i] = f"> 상태: {new_status}\n"
+                found = True
+                break
+
+        if not found:
+            # 제목(#) 바로 아래에 삽입
+            for i, line in enumerate(lines):
+                if line.startswith("#"):
+                    lines.insert(i + 1, f"\n> 상태: {new_status}\n")
+                    found = True
+                    break
+
+        if found:
+            path.write_text("".join(lines), encoding="utf-8")
+        return found
 
     # ========== 동기화 ==========
 

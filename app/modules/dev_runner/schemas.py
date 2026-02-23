@@ -155,6 +155,22 @@ class DoneResponse(BaseModel):
     output: Optional[str] = None
 
 
+class BatchDoneResultItem(BaseModel):
+    """일괄 완료 처리 개별 결과"""
+    path: str
+    filename: str
+    success: bool
+    message: str
+
+
+class BatchDoneResponse(BaseModel):
+    """일괄 완료 처리 응답 스키마"""
+    total: int
+    success: int
+    failed: int
+    results: List[BatchDoneResultItem]
+
+
 class LogResponse(BaseModel):
     """로그 응답 스키마"""
     lines: List[str]
@@ -187,4 +203,6 @@ __all__ = [
     'PlanPhaseResponse',
     'PlanDetailResponse',
     'DoneResponse',
+    'BatchDoneResponse',
+    'BatchDoneResultItem',
 ]

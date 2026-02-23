@@ -149,6 +149,20 @@ export interface DoneResponse {
 	output: string | null;
 }
 
+export interface BatchDoneResultItem {
+	path: string;
+	filename: string;
+	success: boolean;
+	message: string;
+}
+
+export interface BatchDoneResponse {
+	total: number;
+	success: number;
+	failed: number;
+	results: BatchDoneResultItem[];
+}
+
 export interface TaskListParams {
 	status?: string;
 	limit?: number;
@@ -302,7 +316,16 @@ export const devRunnerPlanApi = {
 		devRunnerRequest<{ success: boolean }>(`/plans/${encodedPath}/ignore`, { method: 'DELETE' }),
 
 	done: (encodedPath: string) =>
-		devRunnerRequest<DoneResponse>(`/plans/${encodedPath}/done`, { method: 'POST' })
+		devRunnerRequest<DoneResponse>(`/plans/${encodedPath}/done`, { method: 'POST' }),
+
+	batchDone: () =>
+		devRunnerRequest<BatchDoneResponse>('/plans/batch-done', { method: 'POST' }),
+
+	hold: (encodedPath: string) =>
+		devRunnerRequest<{ success: boolean }>(`/plans/${encodedPath}/hold`, { method: 'POST' }),
+
+	unhold: (encodedPath: string) =>
+		devRunnerRequest<{ success: boolean }>(`/plans/${encodedPath}/hold`, { method: 'DELETE' })
 };
 
 // ============================================================

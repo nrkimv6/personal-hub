@@ -5,6 +5,7 @@
 
 	let doneLoadingPath = $state<string | null>(null);
 	let doneMessage = $state<{ path: string; success: boolean; text: string } | null>(null);
+	let batchDoneLoading = $state(false);
 
 	async function handleDone(e: Event, plan: DevRunnerPlanFileResponse) {
 		e.stopPropagation();
@@ -25,19 +26,64 @@
 		}
 	}
 
+	async function handleBatchDone() {
+		const doneable = (plans ?? []).filter(p => canDone(p));
+		if (doneable.length === 0) {
+			doneMessage = { path: '', success: false, text: '완료 가능한 plan이 없습니다' };
+			setTimeout(() => { doneMessage = null; }, 3000);
+			return;
+		}
+		const names = doneable.map(p => p.filename).join('\n  ');
+		if (!confirm(`${doneable.length}개 plan을 일괄 완료 처리하시겠습니까?\n  ${names}\n\n아카이브 이동, TODO→DONE, 커밋이 수행됩니다.`)) return;
+		batchDoneLoading = true;
+		doneMessage = null;
+		try {
+			const result = await devRunnerPlanApi.batchDone();
+			doneMessage = {
+				path: '',
+				success: result.failed === 0,
+				text: `일괄 완료: ${result.success}개 성공${result.failed > 0 ? `, ${result.failed}개 실패` : ''}`
+			};
+			onPlansChange?.();
+			setTimeout(() => { doneMessage = null; }, 5000);
+		} catch (err) {
+			doneMessage = { path: '', success: false, text: err instanceof Error ? err.message : '일괄 완료 실패' };
+		} finally {
+			batchDoneLoading = false;
+		}
+	}
+
 	function canDone(plan: DevRunnerPlanFileResponse): boolean {
 		if (plan.path.includes('archive')) return false;
 		return (plan.progress.total > 0 && plan.progress.done === plan.progress.total)
 			|| plan.status === '구현완료';
 	}
 
+	async function handleHold(e: Event, plan: DevRunnerPlanFileResponse) {
+		e.stopPropagation();
+		try {
+			await devRunnerPlanApi.hold(encodePathToBase64(plan.path));
+			onPlansChange?.();
+		} catch { /* ignore */ }
+	}
+
+	async function handleUnhold(e: Event, plan: DevRunnerPlanFileResponse) {
+		e.stopPropagation();
+		try {
+			await devRunnerPlanApi.unhold(encodePathToBase64(plan.path));
+			onPlansChange?.();
+			if (showIgnored) await loadIgnored();
+		} catch { /* ignore */ }
+	}
+
 	interface Props {
 		plans: DevRunnerPlanFileResponse[];
 		onPlansChange?: () => void;
 		runningPlanFile?: string | null;
+		lastPlanFile?: string | null;
 	}
 
-	let { plans, onPlansChange, runningPlanFile = null }: Props = $props();
+	let { plans, onPlansChange, runningPlanFile = null, lastPlanFile = null }: Props = $props();
 
 	let showIgnored = $state(false);
 	let ignoredPlans = $state<DevRunnerPlanFileResponse[]>([]);
@@ -180,6 +226,7 @@
 	}
 
 	let displayPlans = $derived(showIgnored ? ignoredPlans : (plans ?? []));
+	let hasDoneablePlans = $derived((plans ?? []).some(p => canDone(p)));
 </script>
 
 <div class="flex flex-col gap-3 min-h-0 flex-1">
@@ -187,6 +234,21 @@
 	<div class="flex items-center justify-between">
 		<span class="text-xs text-gray-500 font-medium uppercase tracking-wider">Plan Files</span>
 		<div class="flex gap-1">
+			{#if hasDoneablePlans}
+				<button
+					class="h-6 px-2 text-[10px] rounded text-green-600 hover:bg-green-50 transition-colors inline-flex items-center gap-1 disabled:opacity-50"
+					onclick={handleBatchDone}
+					disabled={batchDoneLoading}
+					title="완료 가능한 plan 일괄 아카이브"
+				>
+					{#if batchDoneLoading}
+						<svg class="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-dasharray="31.4 31.4" stroke-dashoffset="10"/></svg>
+					{:else}
+						<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+					{/if}
+					일괄 완료
+				</button>
+			{/if}
 			{#if selectedPath}
 				<button
 					class="h-6 px-2 text-[10px] rounded text-gray-500 hover:bg-gray-100 transition-colors"
@@ -285,11 +347,12 @@
 			<div class="flex flex-col gap-1">
 				{#each displayPlans as plan}
 					{@const isRunning = runningPlanFile === plan.path}
+					{@const isLastRun = !isRunning && lastPlanFile === plan.path}
 					{@const isSelected = selectedPath === plan.path}
 					<button
 						onclick={() => handlePlanSelect(plan)}
 						class="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors w-full
-							{isRunning ? 'border border-green-300 bg-green-50' : isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}"
+							{isRunning ? 'border border-green-300 bg-green-50' : isLastRun ? 'bg-gray-50 opacity-60' : isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}"
 					>
 						<!-- Running indicator dot -->
 						{#if isRunning}
@@ -297,15 +360,20 @@
 						{:else if plan.path_type === 'folder'}
 							<svg class="w-3.5 h-3.5 shrink-0 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
 						{:else}
-							<svg class="w-3.5 h-3.5 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+							<svg class="w-3.5 h-3.5 shrink-0 {isLastRun ? 'text-gray-300' : 'text-gray-400'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
 						{/if}
 
-						<!-- Compact 1-line: filename + done/total -->
-						<span class="text-xs font-medium truncate flex-1 min-w-0 {isRunning ? 'text-green-800' : ''}">{plan.filename}</span>
+						<!-- Compact 1-line: filename + status badge + done/total -->
+						<span class="text-xs font-medium truncate flex-1 min-w-0 {isRunning ? 'text-green-800' : isLastRun ? 'text-gray-400 line-through' : ''}">{plan.filename}</span>
+
+						{#if showIgnored && plan.status === '보류'}
+							<span class="text-[10px] px-1.5 py-0 h-4 inline-flex items-center rounded {statusBadge('보류')}">보류</span>
+						{/if}
+
 						<span class="text-[10px] font-mono shrink-0 {isRunning ? 'text-green-600' : 'text-gray-400'}">{plan.progress.done}/{plan.progress.total}</span>
 
-						<!-- Eye/EyeOff toggle -->
-						{#if canDone(plan)}
+						<!-- Done button: canDone OR lastPlanFile -->
+						{#if canDone(plan) || (isLastRun && !plan.path.includes('archive'))}
 							<button
 								class="shrink-0 p-1 rounded hover:bg-green-100 disabled:opacity-50"
 								onclick={(e) => handleDone(e, plan)}
@@ -317,6 +385,28 @@
 								{:else}
 									<svg class="w-3.5 h-3.5 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
 								{/if}
+							</button>
+						{/if}
+
+						<!-- Hold button (활성 목록에서만, 무시 목록 아닐 때) -->
+						{#if !showIgnored && !isRunning && plan.status !== '보류'}
+							<button
+								class="shrink-0 p-1 rounded hover:bg-yellow-100"
+								onclick={(e) => handleHold(e, plan)}
+								title="보류"
+							>
+								<svg class="w-3 h-3 text-yellow-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+							</button>
+						{/if}
+
+						<!-- Unhold button (무시 목록에서 보류 상태일 때) -->
+						{#if showIgnored && plan.status === '보류'}
+							<button
+								class="shrink-0 p-1 rounded hover:bg-blue-100"
+								onclick={(e) => handleUnhold(e, plan)}
+								title="보류 해제"
+							>
+								<svg class="w-3 h-3 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
 							</button>
 						{/if}
 
