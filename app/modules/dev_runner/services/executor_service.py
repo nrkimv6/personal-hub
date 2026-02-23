@@ -414,6 +414,9 @@ class ExecutorService:
                     if current_task_text and current_task_text.startswith("[batch] "):
                         current_plan_name = current_task_text[len("[batch] "):]
 
+                cycle_str = self.redis_client.get(STATE_KEY + ":current_cycle")
+                current_cycle = int(cycle_str) if cycle_str else None
+
                 return RunStatusResponse(
                     running=True,
                     listener_alive=True,
@@ -421,7 +424,7 @@ class ExecutorService:
                     pid=int(pid_str) if pid_str else None,
                     plan_file=plan_file,
                     start_time=datetime.fromisoformat(start_time_str) if start_time_str else None,
-                    current_cycle=0,
+                    current_cycle=current_cycle,
                     current_plan_name=current_plan_name,
                 )
             else:

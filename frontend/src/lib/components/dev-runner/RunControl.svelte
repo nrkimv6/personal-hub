@@ -13,6 +13,18 @@
 	let mode = $state<'single' | 'all'>('single');
 	let selectedPlan = $state('');
 	let maxCycles = $state(0);
+
+	// 실행 중인 plan 표시 정보
+	let runningPlanName = $derived(
+		!status?.running ? '' :
+		status.plan_file === 'ALL' ? '전체 실행' :
+		status.plan_file ? status.plan_file.split(/[\\/]/).pop() ?? '' : '실행 중'
+	);
+	let runningPlanProgress = $derived(
+		status?.running && status.plan_file && status.plan_file !== 'ALL'
+			? (plans.find(p => p.path === status!.plan_file)?.progress ?? null)
+			: null
+	);
 	let until = $state('');
 	let dryRun = $state(false);
 	let parallel = $state(false);
@@ -211,9 +223,21 @@
 		</select>
 	</div>
 
-	<!-- Options Row (Phase 1: 실행 중 disable) -->
+	<!-- Options Row -->
 	<div class="flex items-center gap-4 flex-wrap text-xs {status?.running ? 'opacity-50 pointer-events-none' : ''}">
-		{#if mode === 'single'}
+		{#if status?.running}
+			<!-- 실행 중: Plan 선택 대신 실행 정보 표시 -->
+			<div class="flex items-center gap-2 opacity-100 pointer-events-none" style="opacity:1">
+				<span class="text-gray-500 text-xs">Plan</span>
+				<span class="inline-flex items-center gap-1.5 border border-green-200 bg-green-50 rounded px-2 py-1 text-xs font-mono text-green-700 h-7">
+					<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse shrink-0"></span>
+					{runningPlanName}
+					{#if runningPlanProgress}
+						<span class="text-green-600 opacity-70">({runningPlanProgress.done}/{runningPlanProgress.total})</span>
+					{/if}
+				</span>
+			</div>
+		{:else if mode === 'single'}
 			<div class="flex items-center gap-2">
 				<label for="plan-select" class="text-gray-500 text-xs">Plan</label>
 				<select

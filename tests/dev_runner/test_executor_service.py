@@ -284,6 +284,32 @@ class TestGetProcessStatus:
         result = executor.get_process_status()
         assert result.running is False
 
+    def test_current_cycle_key_absent_returns_none(self, executor, fake_redis):
+        """Phase 2 TC3 - current_cycle Redis key 없음 → current_cycle=None (0 아님)"""
+        fake_redis.set("plan-runner:listener:heartbeat", "alive")
+        fake_redis.set("plan-runner:state:status", "running")
+        fake_redis.set("plan-runner:state:pid", "12345")
+        fake_redis.set("plan-runner:state:plan_file", "test.md")
+        fake_redis.set("plan-runner:state:start_time", datetime.now().isoformat())
+        # current_cycle key 미설정
+
+        result = executor.get_process_status()
+        assert result.running is True
+        assert result.current_cycle is None  # 0이 아니라 None
+
+    def test_current_cycle_key_present_returns_int(self, executor, fake_redis):
+        """Phase 2 TC3 - current_cycle Redis key 존재 → int 값 반환"""
+        fake_redis.set("plan-runner:listener:heartbeat", "alive")
+        fake_redis.set("plan-runner:state:status", "running")
+        fake_redis.set("plan-runner:state:pid", "12345")
+        fake_redis.set("plan-runner:state:plan_file", "test.md")
+        fake_redis.set("plan-runner:state:start_time", datetime.now().isoformat())
+        fake_redis.set("plan-runner:state:current_cycle", "7")
+
+        result = executor.get_process_status()
+        assert result.running is True
+        assert result.current_cycle == 7
+
 
 # ========== TestResetRunningState ==========
 
