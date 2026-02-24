@@ -1,4 +1,4 @@
-# Monitor Page - 시작 프로그램 등록/해제
+﻿# Monitor Page - 시작 프로그램 등록/해제
 # 부팅 후 자동으로 서비스 로그 창을 엽니다.
 # -IncludeWorkers 옵션으로 브라우저 워커도 등록할 수 있습니다.
 # -IncludeApiWatchdog 옵션으로 API Watchdog도 등록할 수 있습니다.

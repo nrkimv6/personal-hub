@@ -1,4 +1,4 @@
-# Port Utilities Module
+﻿# Port Utilities Module
 # Provides functions for port status checking including zombie port detection
 #
 # Usage:

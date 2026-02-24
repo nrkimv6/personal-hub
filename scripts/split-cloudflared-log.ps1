@@ -1,4 +1,4 @@
-# scripts/split-cloudflared-log.ps1
+﻿# scripts/split-cloudflared-log.ps1
 # cloudflared_err.log를 날짜별 파일로 분리하는 1회성 스크립트
 # 사용법: .\scripts\split-cloudflared-log.ps1 [-DryRun]
 #

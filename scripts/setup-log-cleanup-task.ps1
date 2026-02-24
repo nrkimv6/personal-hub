@@ -1,4 +1,4 @@
-# scripts/setup-log-cleanup-task.ps1
+﻿# scripts/setup-log-cleanup-task.ps1
 # Windows Task Scheduler에 로그 정리 작업 등록
 # 사용법: .\scripts\setup-log-cleanup-task.ps1 [-Time "01:00"] [-RetentionDays 3] [-Remove]
 # 주의: 관리자 권한 필요

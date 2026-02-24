@@ -1,4 +1,4 @@
-# Monitor Page - Startup Log Viewer
+﻿# Monitor Page - Startup Log Viewer
 # Windows 부팅 후 서비스 로그 창을 자동으로 엽니다.
 # 시작 프로그램에 등록하여 사용합니다.
 #

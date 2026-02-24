@@ -1,4 +1,4 @@
-# Monitor Page - Windows Service Management Script
+﻿# Monitor Page - Windows Service Management Script
 # Uses NSSM (Non-Sucking Service Manager) for service installation
 #
 # Usage:

@@ -1,4 +1,4 @@
-# scripts/cleanup-logs.ps1
+﻿# scripts/cleanup-logs.ps1
 # 로그 파일 자동 정리 스크립트
 # 사용법: .\scripts\cleanup-logs.ps1 [-RetentionDays 2] [-DryRun] [-Verbose]
 

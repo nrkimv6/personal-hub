@@ -1,4 +1,4 @@
-# Monitor Page - Git Commit Script
+﻿# Monitor Page - Git Commit Script
 # Usage: .\scripts\commit.ps1 "커밋 메시지"
 
 param(

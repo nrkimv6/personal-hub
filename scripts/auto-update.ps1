@@ -1,4 +1,4 @@
-# Auto-Update Script
+﻿# Auto-Update Script
 # Git pull 후 변경된 코드에 따라 API/워커를 자동 재시작합니다.
 #
 # Usage:

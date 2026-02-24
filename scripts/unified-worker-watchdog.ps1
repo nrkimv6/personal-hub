@@ -1,4 +1,4 @@
-# Unified Worker Watchdog Script
+﻿# Unified Worker Watchdog Script
 # Monitors the unified worker process (all workers via WorkerOrchestrator) and automatically restarts if it crashes
 #
 # Workers managed:

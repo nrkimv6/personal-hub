@@ -1,4 +1,4 @@
-# Browser Workers Management Script
+﻿# Browser Workers Management Script
 # Manages browser-based workers via WorkerOrchestrator for user session execution
 #
 # Usage:

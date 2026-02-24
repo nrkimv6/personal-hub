@@ -1,4 +1,4 @@
-# MEMORY.DMP 크래시 덤프 자동 분석 스크립트
+﻿# MEMORY.DMP 크래시 덤프 자동 분석 스크립트
 # 관리자 권한으로 실행 필요
 # 사용법: powershell -ExecutionPolicy Bypass -File analyze-dump.ps1
 

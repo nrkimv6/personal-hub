@@ -1,4 +1,4 @@
-# Monitor Page - Startup Browser Workers
+﻿# Monitor Page - Startup Browser Workers
 # Windows 로그인 시 브라우저 기반 워커를 자동으로 시작합니다.
 # 시작 프로그램에 등록하여 사용합니다.
 #

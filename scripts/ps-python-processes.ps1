@@ -1,4 +1,4 @@
-# Monitor Page - Python 프로세스 CommandLine 필터링 유틸리티
+﻿# Monitor Page - Python 프로세스 CommandLine 필터링 유틸리티
 #
 # Task Manager에서 python.exe로만 표시되는 프로세스를 역할별로 구별하여 관리합니다.
 # exe alias(setup-exe-aliases.ps1) 없이도 즉시 사용 가능.

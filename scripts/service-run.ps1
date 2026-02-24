@@ -1,4 +1,4 @@
-# Monitor Page - Service Runner Script
+﻿# Monitor Page - Service Runner Script
 # This script is designed to run as a Windows service via NSSM
 #
 # It performs the same initialization as run.ps1 but:

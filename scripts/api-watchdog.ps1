@@ -1,4 +1,4 @@
-# API Watchdog Script
+﻿# API Watchdog Script
 # External health checker for API server with staged recovery
 #
 # Runs independently of API server to detect hangs that internal health monitor cannot detect

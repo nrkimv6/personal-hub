@@ -1,4 +1,4 @@
-# Monitor Page - exe alias 설정 스크립트
+﻿# Monitor Page - exe alias 설정 스크립트
 #
 # python.exe를 역할별 이름으로 복사하여 Task Manager에서 프로세스 구별 가능하게 합니다.
 # Python/가상환경 업데이트 후 재실행이 필요합니다.

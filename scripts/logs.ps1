@@ -1,4 +1,4 @@
-# Monitor Page - Log Viewer Script
+﻿# Monitor Page - Log Viewer Script
 # View logs for API server, worker, and frontend in real-time
 
 param(
