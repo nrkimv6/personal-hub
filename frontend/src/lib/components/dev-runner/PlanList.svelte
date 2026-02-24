@@ -79,15 +79,37 @@
 		} catch { /* ignore */ }
 	}
 
+	interface BatchPlanItem {
+		name: string;
+		status: 'pending' | 'running' | 'done';
+	}
+
 	interface Props {
 		plans: DevRunnerPlanFileResponse[];
 		onPlansChange?: () => void;
 		runningPlanFile?: string | null;
 		lastPlanFile?: string | null;
+		batchPlans?: BatchPlanItem[];
 		onPlanSelect?: (path: string) => void;
 	}
 
-	let { plans, onPlansChange, runningPlanFile = null, lastPlanFile = null, onPlanSelect }: Props = $props();
+	let { plans, onPlansChange, runningPlanFile = null, lastPlanFile = null, batchPlans = [], onPlanSelect }: Props = $props();
+
+	// batch plan name → status 매핑
+	let batchStatusMap = $derived.by(() => {
+		const map = new Map<string, 'pending' | 'running' | 'done'>();
+		for (const bp of batchPlans) {
+			map.set(bp.name, bp.status);
+		}
+		return map;
+	});
+
+	function getBatchStatus(plan: DevRunnerPlanFileResponse): 'pending' | 'running' | 'done' | null {
+		if (batchPlans.length === 0) return null;
+		// filename에서 확장자 제거하여 매칭
+		const name = plan.filename.replace(/\.md$/, '');
+		return batchStatusMap.get(name) ?? batchStatusMap.get(plan.filename) ?? null;
+	}
 
 	let showIgnored = $state(false);
 	let ignoredPlans = $state<DevRunnerPlanFileResponse[]>([]);
@@ -352,10 +374,11 @@
 					{@const isRunning = runningPlanFile === plan.path}
 					{@const isLastRun = !isRunning && lastPlanFile === plan.path}
 					{@const isDone = plan.status === '구현완료'}
+					{@const batchStatus = getBatchStatus(plan)}
 					<button
 						onclick={() => handlePlanSelect(plan)}
 						class="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors w-full
-							{isRunning ? 'border border-green-300 bg-green-50' : isLastRun ? 'bg-gray-50 opacity-60' : isDone ? 'hover:bg-gray-50 opacity-50' : 'hover:bg-gray-50'}"
+							{batchStatus === 'done' ? 'opacity-40' : batchStatus === 'running' ? 'border border-cyan-300 bg-cyan-50' : isRunning ? 'border border-green-300 bg-green-50' : isLastRun ? 'bg-gray-50 opacity-60' : isDone ? 'hover:bg-gray-50 opacity-50' : 'hover:bg-gray-50'}"
 					>
 						<!-- Running indicator dot -->
 						{#if isRunning}
@@ -367,7 +390,7 @@
 						{/if}
 
 						<!-- Compact 1-line: filename + status badge + done/total -->
-						<span class="text-xs font-medium truncate flex-1 min-w-0 {isRunning ? 'text-green-800' : isLastRun ? 'text-gray-400 line-through' : isDone ? 'text-gray-400' : ''}">{plan.filename}</span>
+						<span class="text-xs font-medium truncate flex-1 min-w-0 {batchStatus === 'done' ? 'text-gray-400 line-through' : batchStatus === 'running' ? 'text-cyan-700' : isRunning ? 'text-green-800' : isLastRun ? 'text-gray-400 line-through' : isDone ? 'text-gray-400' : ''}">{plan.filename}</span>
 
 						{#if plan.status === '구현완료'}
 							<span class="text-[10px] px-1.5 py-0 h-4 inline-flex items-center rounded {statusBadge('구현완료')}">구현완료</span>
@@ -375,7 +398,12 @@
 							<span class="text-[10px] px-1.5 py-0 h-4 inline-flex items-center rounded {statusBadge('보류')}">보류</span>
 						{/if}
 
-						<span class="text-[10px] font-mono shrink-0 {isRunning ? 'text-green-600' : 'text-gray-400'}">{plan.progress.done}/{plan.progress.total}</span>
+						{#if batchStatus === 'running'}
+							<span class="text-[10px] px-1 py-0 rounded text-cyan-600 bg-cyan-100">실행중</span>
+						{:else if batchStatus === 'done'}
+							<span class="text-[10px] text-gray-400">✓</span>
+						{/if}
+						<span class="text-[10px] font-mono shrink-0 {batchStatus === 'running' ? 'text-cyan-600' : isRunning ? 'text-green-600' : 'text-gray-400'}">{plan.progress.done}/{plan.progress.total}</span>
 
 						<!-- Done button: canDone OR lastPlanFile -->
 						{#if canDone(plan) || (isLastRun && !plan.path.includes('archive'))}

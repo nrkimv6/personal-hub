@@ -5,9 +5,10 @@
 	interface Props {
 		planFile?: string;
 		currentPlanName?: string;
+		onBatchPlansChange?: (plans: BatchPlanItem[]) => void;
 	}
 
-	let { planFile, currentPlanName }: Props = $props();
+	let { planFile, currentPlanName, onBatchPlansChange }: Props = $props();
 
 	// Phase 2: 전체실행 시 Plan 파일 리스트 추적
 	interface BatchPlanItem {
@@ -291,6 +292,11 @@
 		return tagColors[tag] ?? tagColors.INFO;
 	}
 
+	// batchPlans 변경 시 부모에 알림
+	$effect(() => {
+		onBatchPlansChange?.(batchPlans);
+	});
+
 	// Plan 파일명 표시용
 	let planDisplayName = $derived.by(() => {
 		if (planFile === 'ALL') {
@@ -392,22 +398,6 @@
 			</button>
 		</div>
 	</div>
-
-	<!-- Batch Plan List (전체실행 시 파일 리스트) -->
-	{#if batchPlans.length > 0}
-		<div class="flex items-center gap-1.5 px-3 py-1.5 border-b border-gray-700 bg-gray-900/50 flex-wrap shrink-0">
-			<span class="text-[10px] text-gray-500 mr-1">Plans:</span>
-			{#each batchPlans as plan}
-				<span class="text-[10px] px-1.5 py-0.5 rounded font-mono {
-					plan.status === 'done' ? 'text-green-400 bg-green-500/15 line-through opacity-60' :
-					plan.status === 'running' ? 'text-cyan-400 bg-cyan-500/20' :
-					'text-gray-500 bg-gray-500/10'
-				}">
-					{plan.status === 'running' ? '▶ ' : plan.status === 'done' ? '✓ ' : ''}{plan.name}
-				</span>
-			{/each}
-		</div>
-	{/if}
 
 	<!-- Log Content (Phase 2: text-sm for body) -->
 	<div

@@ -37,6 +37,9 @@
 	// Phase 4: 종료 시 상태 보존
 	let lastPlanFile = $state<string | null>(null);
 
+	// Batch plan 상태 (LogViewer SSE에서 수신)
+	let batchPlans = $state<{ name: string; status: 'pending' | 'running' | 'done' }[]>([]);
+
 	// Phase 1: elapsed 타이머
 	let elapsed = $state('00:00:00');
 	let elapsedInterval: ReturnType<typeof setInterval> | null = null;
@@ -279,7 +282,7 @@
 			<div class="flex-1 min-h-0 flex flex-col md:grid md:grid-cols-2 md:gap-0 overflow-hidden">
 				<!-- Log Viewer -->
 				<div class="flex-1 min-h-0 overflow-hidden">
-					<LogViewer planFile={effectivePlanFile ?? undefined} currentPlanName={runStatus?.current_plan_name ?? undefined} />
+					<LogViewer planFile={effectivePlanFile ?? undefined} currentPlanName={runStatus?.current_plan_name ?? undefined} onBatchPlansChange={(plans) => { batchPlans = plans; }} />
 				</div>
 
 				<!-- Plans & Tasks: 모바일=하단 고정+접힘/펼침, 데스크톱=우측 패널 -->
@@ -349,7 +352,7 @@
 								</div>
 							{:else}
 								<div class="px-4 pb-4 h-full overflow-hidden flex flex-col">
-									<PlanList {plans} onPlansChange={fetchPlans} runningPlanFile={runStatus?.plan_file ?? null} {lastPlanFile} onPlanSelect={(path) => { selectedPlanPath = path; }} />
+									<PlanList {plans} onPlansChange={fetchPlans} runningPlanFile={runStatus?.plan_file ?? null} {lastPlanFile} {batchPlans} onPlanSelect={(path) => { selectedPlanPath = path; }} />
 								</div>
 							{/if}
 						</div>
