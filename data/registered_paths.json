@@ -1,17 +1,62 @@
 [
-  "D:\\work\\project\\tools\\monitor-page",
-  "D:\\work\\project\\service\\wtools\\common\\docs\\plan",
-  "D:\\work\\project\\service\\wtools\\activity-hub\\docs\\plan",
-  "D:\\work\\project\\service\\wtools\\auth-worker\\docs\\plan",
-  "D:\\work\\project\\service\\wtools\\cross-noti\\docs\\plan",
-  "D:\\work\\project\\service\\wtools\\gentle-words\\docs\\plan",
-  "D:\\work\\project\\service\\wtools\\line-minder\\docs\\plan",
-  "D:\\work\\project\\service\\wtools\\memo-alarm\\docs\\plan",
-  "D:\\work\\project\\service\\wtools\\sacred-hours\\docs\\plan",
-  "D:\\work\\project\\service\\wtools\\screenshot-generator\\docs\\plan",
-  "D:\\work\\project\\service\\wtools\\story-weaver\\docs\\plan",
-  "D:\\work\\project\\service\\wtools\\tool-view\\docs\\plan",
-  "D:\\work\\project\\service\\wtools\\wedding-mass-guide\\docs\\plan",
-  "D:\\work\\project\\tools\\monitor-page\\docs\\plan",
-  "D:\\work\\project\\service\\wtools\\common\\tools\\plan-runner\\docs\\plan"
+  {
+    "path": "D:\\work\\project\\tools\\monitor-page",
+    "type": "plan"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\common\\docs\\plan",
+    "type": "plan"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\activity-hub\\docs\\plan",
+    "type": "plan"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\auth-worker\\docs\\plan",
+    "type": "plan"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\cross-noti\\docs\\plan",
+    "type": "plan"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\gentle-words\\docs\\plan",
+    "type": "plan"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\line-minder\\docs\\plan",
+    "type": "plan"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\memo-alarm\\docs\\plan",
+    "type": "plan"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\sacred-hours\\docs\\plan",
+    "type": "plan"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\screenshot-generator\\docs\\plan",
+    "type": "plan"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\story-weaver\\docs\\plan",
+    "type": "plan"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\tool-view\\docs\\plan",
+    "type": "plan"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\wedding-mass-guide\\docs\\plan",
+    "type": "plan"
+  },
+  {
+    "path": "D:\\work\\project\\tools\\monitor-page\\docs\\plan",
+    "type": "plan"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\common\\tools\\plan-runner\\docs\\plan",
+    "type": "plan"
+  }
 ]

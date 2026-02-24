@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.modules.dev_runner.services.plan_service import PlanService
+from app.models.plan_record import PlanRecord, PlanEvent
 
 
 # ========== Fixtures ==========
@@ -348,3 +349,76 @@ class TestRunDone:
         content = done_path.read_text(encoding="utf-8")
         assert "테스트 플랜" in content
         assert today in content
+
+
+# ========== run_done DB 연동 Cross-check ==========
+
+class TestRunDoneDBIntegration:
+    """Cross-check: run_done 완료 후 plan_records DB에 기록되는지 검증"""
+
+    @pytest.fixture
+    def plan_setup_with_db(self, tmp_path):
+        """plan 파일 + 프로젝트 구조 + in-memory DB 설정"""
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from app.models.plan_record import PlanRecord, PlanEvent
+
+        plan_dir = tmp_path / "docs" / "plan"
+        plan_dir.mkdir(parents=True)
+        (tmp_path / "docs").mkdir(exist_ok=True)
+
+        plan_content = (
+            "# DB연동 테스트 플랜\n\n"
+            "> 상태: 구현중\n"
+            "> 진행률: 2/2 (100%)\n\n"
+            "1. [x] 항목1\n"
+            "2. [x] 항목2\n\n"
+            "*상태: 구현중 | 진행률: 2/2 (100%)*\n"
+        )
+        plan_file = plan_dir / "2026-03-01-db-test.md"
+        plan_file.write_text(plan_content, encoding="utf-8")
+
+        # in-memory DB
+        engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+        PlanRecord.__table__.create(bind=engine, checkfirst=True)
+        PlanEvent.__table__.create(bind=engine, checkfirst=True)
+        TestSession = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+
+        return plan_file, tmp_path, TestSession
+
+    @pytest.mark.asyncio
+    async def test_run_done_creates_plan_record(self, plan_setup_with_db, dev_runner_config_isolation):
+        """done 완료 후 plan_records에 레코드 존재 (Cross-check)"""
+        plan_file, project_dir, TestSession = plan_setup_with_db
+        svc = PlanService()
+
+        # SessionLocal을 in-memory DB로 mock
+        with patch.object(svc, "_git_commit", new=AsyncMock(return_value="commit ok")), \
+             patch("app.database.SessionLocal", TestSession):
+            result = await svc.run_done(str(plan_file))
+
+        assert result["success"] is True
+
+        # DB에 레코드 존재 확인
+        with TestSession() as db:
+            records = db.query(PlanRecord).all()
+            assert len(records) == 1
+            record = records[0]
+            assert record.archived_at is not None
+            assert "archive" in record.file_path
+
+    @pytest.mark.asyncio
+    async def test_run_done_archived_event(self, plan_setup_with_db, dev_runner_config_isolation):
+        """done 완료 후 plan_events에 archived 이벤트 존재 (Cross-check)"""
+        plan_file, project_dir, TestSession = plan_setup_with_db
+        svc = PlanService()
+
+        with patch.object(svc, "_git_commit", new=AsyncMock(return_value="commit ok")), \
+             patch("app.database.SessionLocal", TestSession):
+            await svc.run_done(str(plan_file))
+
+        with TestSession() as db:
+            events = db.query(PlanEvent).all()
+            archived_events = [e for e in events if e.event_type == "archived"]
+            assert len(archived_events) == 1
+            assert "archive" in archived_events[0].detail.get("archive_path", "")

@@ -304,7 +304,7 @@ class TestPathManagement:
         ext_plan = tmp_path / "single_plan.md"
         ext_plan.write_text("> 상태: 대기\n\n1. [ ] ext task", encoding="utf-8")
 
-        svc._registered_paths = [str(folder), str(ext_plan)]
+        svc._registered_paths = [{"path": str(folder), "type": "plan"}, {"path": str(ext_plan), "type": "plan"}]
 
         results = svc.list_plans()
 
@@ -334,7 +334,7 @@ class TestFolderPath:
         folder = self._make_folder_with_plans(
             tmp_path, "plans_folder", ["plan_a.md", "plan_b.md"]
         )
-        svc._registered_paths = [str(folder)]
+        svc._registered_paths = [{"path": str(folder), "type": "plan"}]
 
         results = svc.list_plans(include_ignored=True)
         folder_plans = [r for r in results if r.path_type == "folder"]
@@ -348,7 +348,7 @@ class TestFolderPath:
         folder = self._make_folder_with_plans(
             tmp_path, "plans_folder", ["plan_a.md", "plan_a_todo.md"]
         )
-        svc._registered_paths = [str(folder)]
+        svc._registered_paths = [{"path": str(folder), "type": "plan"}]
 
         results = svc.list_plans(include_ignored=True)
         filenames = [r.filename for r in results]
@@ -361,7 +361,7 @@ class TestFolderPath:
         folder = self._make_folder_with_plans(
             tmp_path, "plans_folder", ["plan_b_todo.md"]
         )
-        svc._registered_paths = [str(folder)]
+        svc._registered_paths = [{"path": str(folder), "type": "plan"}]
 
         results = svc.list_plans(include_ignored=True)
         filenames = [r.filename for r in results]
@@ -373,7 +373,7 @@ class TestFolderPath:
         folder = self._make_folder_with_plans(
             tmp_path, "plans_folder", ["plan_c.md"]
         )
-        svc._registered_paths = [str(folder)]
+        svc._registered_paths = [{"path": str(folder), "type": "plan"}]
 
         results = svc.list_plans(include_ignored=True)
         filenames = [r.filename for r in results]
@@ -383,7 +383,7 @@ class TestFolderPath:
     def test_nonexistent_folder_ignored(self, svc, tmp_path):
         """존재하지 않는 폴더 경로 → list_plans()에서 무시 (에러 없음)"""
         nonexistent = str(tmp_path / "does_not_exist")
-        svc._registered_paths = [nonexistent]
+        svc._registered_paths = [{"path": nonexistent, "type": "plan"}]
 
         results = svc.list_plans(include_ignored=True)
         assert len(results) == 0
@@ -406,7 +406,7 @@ class TestFolderPath:
         single_file = tmp_path / "file_plan.md"
         single_file.write_text("> 상태: 대기\n\n1. [ ] task", encoding="utf-8")
 
-        svc._registered_paths = [str(folder), str(single_file)]
+        svc._registered_paths = [{"path": str(folder), "type": "plan"}, {"path": str(single_file), "type": "plan"}]
 
         results = svc.list_plans(include_ignored=True)
         filenames = {r.filename for r in results}
@@ -464,7 +464,8 @@ class TestMigration:
 
         assert cfg.REGISTERED_PATHS_FILE.exists()
         data = json.loads(cfg.REGISTERED_PATHS_FILE.read_text(encoding="utf-8"))
-        assert "/some/path" in data
+        data_paths = [e["path"] if isinstance(e, dict) else e for e in data]
+        assert "/some/path" in data_paths
 
     def test_migration_preserves_data(self, dev_runner_config_isolation, tmp_path):
         """마이그레이션 후 기존 경로가 모두 보존"""
@@ -485,8 +486,9 @@ class TestMigration:
         svc = PlanService()
 
         data = json.loads(cfg.REGISTERED_PATHS_FILE.read_text(encoding="utf-8"))
+        data_paths = [e["path"] if isinstance(e, dict) else e for e in data]
         for p in paths:
-            assert p in data
+            assert p in data_paths
 
     def test_seed_from_wtools(self, dev_runner_config_isolation, tmp_path):
         """WTOOLS_BASE_DIR 존재 시 프로젝트 경로 자동 등록"""
@@ -513,7 +515,8 @@ class TestMigration:
         svc = PlanService()
 
         data = json.loads(cfg.REGISTERED_PATHS_FILE.read_text(encoding="utf-8"))
-        assert any("project-a" in p for p in data)
+        data_paths = [e["path"] if isinstance(e, dict) else e for e in data]
+        assert any("project-a" in p for p in data_paths)
 
     def test_no_wtools_no_seed(self, dev_runner_config_isolation, tmp_path):
         """WTOOLS_BASE_DIR 미존재 시 빈 상태 시작"""
@@ -551,8 +554,9 @@ class TestMigration:
         svc = PlanService()
 
         # external의 내용이 추가되지 않음 (마이그레이션 스킵)
-        assert "/existing/path" in svc._registered_paths
-        assert "/should/not/appear" not in svc._registered_paths
+        reg_paths = [e["path"] if isinstance(e, dict) else e for e in svc._registered_paths]
+        assert "/existing/path" in reg_paths
+        assert "/should/not/appear" not in reg_paths
 
 
 # ========== run_done() ==========
@@ -860,7 +864,7 @@ class TestBatchDoneRedisPublish:
     def svc(self, tmp_plan_dir):
         from app.modules.dev_runner.services.plan_service import PlanService
         s = PlanService.__new__(PlanService)
-        s._registered_paths = [str(tmp_plan_dir)]
+        s._registered_paths = [{"path": str(tmp_plan_dir), "type": "plan"}]
         s._ignored_plans = []
         return s
 
