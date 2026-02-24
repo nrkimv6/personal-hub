@@ -56,6 +56,7 @@ class RegisteredPathResponse(BaseModel):
     path: str
     type: str  # "file" | "folder"
     plan_count: int
+    path_type: str = "plan"  # "plan" | "archive"
 
 
 class PlanItemResponse(BaseModel):
@@ -110,6 +111,40 @@ class BatchDoneResponse(BaseModel):
     results: List[BatchDoneResultItem]
 
 
+class PlanEventResponse(BaseModel):
+    """계획서 이벤트 응답"""
+    id: int
+    event_type: str
+    detail: Optional[dict] = None
+    created_at: datetime
+
+
+class PlanRecordResponse(BaseModel):
+    """계획서 레코드 응답"""
+    id: int
+    filename_hash: str
+    file_path: str
+    project: Optional[str] = None
+    title: Optional[str] = None
+    status: Optional[str] = None
+    memo: Optional[str] = None
+    memo_draft: Optional[str] = None
+    archived_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class PlanRecordWithEventsResponse(PlanRecordResponse):
+    """계획서 레코드 + 이벤트 목록"""
+    events: List[PlanEventResponse] = []
+
+
+class MemoUpdateRequest(BaseModel):
+    """메모 업데이트 요청"""
+    action: str  # "draft" | "confirm" | "rollback"
+    text: Optional[str] = None  # draft 저장 시 사용
+
+
 class LogResponse(BaseModel):
     """로그 응답 스키마"""
     lines: List[str]
@@ -126,6 +161,10 @@ class CurrentTrackingResponse(BaseModel):
 
 
 __all__ = [
+    'PlanEventResponse',
+    'PlanRecordResponse',
+    'PlanRecordWithEventsResponse',
+    'MemoUpdateRequest',
     'RunRequest',
     'RunStatusResponse',
     'PlanFileResponse',

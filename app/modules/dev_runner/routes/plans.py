@@ -81,6 +81,7 @@ async def get_plan_items(encoded_path: str):
 class AddPathRequest(BaseModel):
     """경로 등록 요청"""
     path: str
+    path_type: str = "plan"  # "plan" | "archive"
 
 
 @router.post("/plans/paths")
@@ -93,9 +94,9 @@ async def add_path(request: AddPathRequest):
     if not path.exists():
         raise HTTPException(status_code=404, detail="Plan file not found")
 
-    added = plan_service.add_path(request.path)
-    path_type = "folder" if path.is_dir() else "file"
-    return {"success": added, "path": request.path, "type": path_type}
+    added = plan_service.add_path(request.path, path_type=request.path_type)
+    fs_type = "folder" if path.is_dir() else "file"
+    return {"success": added, "path": request.path, "type": fs_type, "path_type": request.path_type}
 
 
 @router.delete("/plans/paths")

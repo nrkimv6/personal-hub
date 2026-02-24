@@ -53,7 +53,7 @@ class PlanService:
     """plan 문서 탐색 및 파싱 서비스"""
 
     def __init__(self):
-        self._registered_paths: List[str] = []
+        self._registered_paths: List[dict] = []  # {"path": str, "type": "plan"|"archive"}
         self._ignored_plans: List[str] = []
         self._migrate_to_registered_paths()
         self._load_registered_paths()
@@ -62,10 +62,22 @@ class PlanService:
     # ========== 경로 저장/로드 ==========
 
     def _migrate_to_registered_paths(self):
-        """external_plans.json → registered_paths.json 마이그레이션 (1회성)"""
+        """external_plans.json → registered_paths.json 마이그레이션 (1회성)
+        + 문자열 배열 → 객체 배열 마이그레이션 (스키마 변경 대응)
+        """
         reg_path = config.REGISTERED_PATHS_FILE
+
         if reg_path.exists():
-            return  # 이미 마이그레이션 완료
+            # 기존 파일이 문자열 배열이면 객체 배열로 마이그레이션
+            try:
+                data = json.loads(reg_path.read_text(encoding="utf-8"))
+                if data and isinstance(data[0], str):
+                    migrated = [{"path": p, "type": "plan"} for p in data]
+                    reg_path.write_text(json.dumps(migrated, ensure_ascii=False, indent=2), encoding="utf-8")
+                    logger.info(f"[마이그레이션] 문자열→객체 배열 변환 완료 ({len(migrated)}개)")
+            except Exception:
+                pass
+            return
 
         paths: List[str] = []
 
@@ -101,14 +113,15 @@ class PlanService:
 
             logger.info(f"[마이그레이션] WTOOLS 시드 완료 — 총 {len(paths)}개 경로")
 
-        # 저장
+        # 객체 배열로 저장
         if paths:
+            entries = [{"path": p, "type": "plan"} for p in paths]
             reg_path.parent.mkdir(parents=True, exist_ok=True)
-            reg_path.write_text(json.dumps(paths, ensure_ascii=False, indent=2), encoding="utf-8")
-            logger.info(f"[마이그레이션] registered_paths.json 생성 완료 ({len(paths)}개)")
+            reg_path.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
+            logger.info(f"[마이그레이션] registered_paths.json 생성 완료 ({len(entries)}개)")
 
     def _load_registered_paths(self):
-        """등록된 경로 목록 로드 (JSON 파일)"""
+        """등록된 경로 목록 로드 (JSON 파일) — 객체 배열 {"path", "type"}"""
         path = config.REGISTERED_PATHS_FILE
         if path.exists():
             try:
@@ -117,10 +130,14 @@ class PlanService:
                 self._registered_paths = []
 
     def _save_registered_paths(self):
-        """등록된 경로 목록 저장"""
+        """등록된 경로 목록 저장 — 객체 배열 {"path", "type"}"""
         path = config.REGISTERED_PATHS_FILE
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self._registered_paths, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _get_registered_path_strs(self) -> List[str]:
+        """등록 경로를 문자열 목록으로 반환 (내부 탐색용)"""
+        return [entry["path"] for entry in self._registered_paths]
 
     def _load_ignored_plans(self):
         """수동 무시 plan 목록 로드"""
@@ -157,11 +174,17 @@ class PlanService:
             return True
         return False
 
-    def add_path(self, plan_path: str) -> bool:
-        """등록 경로 추가 (영구 저장)"""
+    def add_path(self, plan_path: str, path_type: str = "plan") -> bool:
+        """등록 경로 추가 (영구 저장)
+
+        Args:
+            plan_path: 등록할 경로
+            path_type: "plan" | "archive" (기본값: "plan")
+        """
         resolved = str(Path(plan_path).resolve())
-        if resolved not in self._registered_paths:
-            self._registered_paths.append(resolved)
+        existing_paths = self._get_registered_path_strs()
+        if resolved not in existing_paths:
+            self._registered_paths.append({"path": resolved, "type": path_type})
             self._save_registered_paths()
             return True
         return False
@@ -169,10 +192,11 @@ class PlanService:
     def remove_path(self, plan_path: str) -> bool:
         """등록 경로 제거"""
         resolved = str(Path(plan_path).resolve())
-        if resolved in self._registered_paths:
-            self._registered_paths.remove(resolved)
-            self._save_registered_paths()
-            return True
+        for i, entry in enumerate(self._registered_paths):
+            if entry["path"] == resolved:
+                self._registered_paths.pop(i)
+                self._save_registered_paths()
+                return True
         return False
 
     # ========== plan 목록 ==========
@@ -186,7 +210,8 @@ class PlanService:
         seen: set[str] = set()
         results: List[PlanFileResponse] = []
 
-        for reg_path in self._registered_paths:
+        for entry in self._registered_paths:
+            reg_path = entry["path"]
             p = Path(reg_path)
             if not p.exists():
                 continue
@@ -776,6 +801,18 @@ class PlanService:
             )
 
             self.sync_plans()
+
+            # DB 기록: plan_records에 archive 완료 기록
+            try:
+                from app.database import SessionLocal
+                from app.modules.dev_runner.services.plan_record_service import PlanRecordService
+                with SessionLocal() as db:
+                    svc = PlanRecordService(db)
+                    svc.mark_archived(plan_path, str(archive_path))
+                    db.commit()
+            except Exception as db_err:
+                logger.warning(f"plan_record DB 기록 실패 (무시): {db_err}")
+
             return {
                 "success": True,
                 "message": "완료 처리 성공",
@@ -915,8 +952,8 @@ class PlanService:
         """
         ignored = set(self._ignored_plans)
 
-        for reg_path in self._registered_paths:
-            p = Path(reg_path)
+        for entry in self._registered_paths:
+            p = Path(entry["path"])
             if not p.exists():
                 continue
             files = p.glob("*.md") if p.is_dir() else [p]
@@ -937,7 +974,8 @@ class PlanService:
         """registered_paths 중 WTOOLS_BASE_DIR 하위가 아닌 폴더 경로만 반환"""
         wtools_prefix = str(config.WTOOLS_BASE_DIR.resolve())
         extra_dirs = []
-        for reg_path in self._registered_paths:
+        for entry in self._registered_paths:
+            reg_path = entry["path"]
             p = Path(reg_path)
             if not p.is_dir():
                 continue
@@ -949,9 +987,11 @@ class PlanService:
     # ========== 등록 경로 관리 ==========
 
     def list_registered_paths(self) -> List[RegisteredPathResponse]:
-        """등록된 경로 목록 조회 (타입 + plan_count 포함)"""
+        """등록된 경로 목록 조회 (타입 + plan_count + path_type 포함)"""
         result = []
-        for reg_path in self._registered_paths:
+        for entry in self._registered_paths:
+            reg_path = entry["path"]
+            path_type = entry.get("type", "plan")
             p = Path(reg_path)
             if p.is_dir():
                 plan_count = sum(
@@ -959,9 +999,9 @@ class PlanService:
                     if f.stem.endswith("_todo")
                     or not (f.parent / (f.stem + "_todo.md")).exists()
                 ) if p.exists() else 0
-                result.append(RegisteredPathResponse(path=reg_path, type="folder", plan_count=plan_count))
+                result.append(RegisteredPathResponse(path=reg_path, type="folder", plan_count=plan_count, path_type=path_type))
             else:
-                result.append(RegisteredPathResponse(path=reg_path, type="file", plan_count=1 if p.exists() else 0))
+                result.append(RegisteredPathResponse(path=reg_path, type="file", plan_count=1 if p.exists() else 0, path_type=path_type))
         return result
 
     def validate_path(self, path: str) -> bool:
