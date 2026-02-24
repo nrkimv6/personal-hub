@@ -154,6 +154,11 @@ export async function request<T>(
 ): Promise<T> {
   const url = `${API_BASE}${endpoint}`;
 
+  // 401 처리 중이면 불필요한 폴링 API 호출 차단 (토스트 폭탄 및 반복 401 방지)
+  if (isHandling401) {
+    throw new Error('인증이 만료되었습니다');
+  }
+
   // 인증 헤더 추가
   const token = getAuthToken();
   const headers: HeadersInit = {
@@ -192,6 +197,7 @@ export async function request<T>(
         setTimeout(() => { isHandling401 = false; }, 3000);
         globalErrorHandler?.('인증이 만료되었습니다. 재로그인이 필요합니다.', 'auth');
         onUnauthorized?.();
+        window.dispatchEvent(new CustomEvent('auth-expired'));
       }
     }
     throw new Error('인증이 필요합니다');

@@ -16,6 +16,7 @@ export interface AuthState {
 	isAdmin: boolean;
 	email: string | null;
 	isLoading: boolean;
+	isExpired: boolean;
 }
 
 // 초기 상태
@@ -23,7 +24,8 @@ const initialState: AuthState = {
 	isLoggedIn: false,
 	isAdmin: false,
 	email: null,
-	isLoading: true
+	isLoading: true,
+	isExpired: false
 };
 
 // 스토어 생성
@@ -166,6 +168,14 @@ function createAuthStore() {
 		 */
 		reset(): void {
 			set({ ...initialState, isLoading: false });
+		},
+
+		/**
+		 * 토큰 만료 처리 (401 응답 시 호출)
+		 * reset()과 동일하나 isExpired: true로 배너 표시
+		 */
+		expire(): void {
+			set({ ...initialState, isLoading: false, isExpired: true });
 		}
 	};
 }
