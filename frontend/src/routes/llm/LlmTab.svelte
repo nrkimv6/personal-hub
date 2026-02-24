@@ -123,9 +123,11 @@
 		if (preset.model) createForm.model = preset.model;
 		if (preset.caller_type) createForm.caller_type = preset.caller_type;
 		createForm.cli_options = preset.cliOptions ?? null;
-		userInput = '';
-		createForm.userInput = '';
-		createForm.prompt = '';
+		// 프리셋 변경 시 사용자 입력은 보존 (이미 작성한 텍스트 유실 방지)
+		// 직접 입력 ↔ 프리셋 전환 시에만 prompt 초기화
+		if (preset.label === '(직접 입력)') {
+			createForm.prompt = '';
+		}
 	}
 
 	// Provider 변경 시 model 초기화
@@ -468,11 +470,6 @@
 			};
 			selectedPreset = presets[0];
 			userInput = '';
-			// 대기열 탭으로 전환
-			setTimeout(() => {
-				activeTab = 'queue';
-				fetchData();
-			}, 1500);
 		} catch (e) {
 			createError = e instanceof Error ? e.message : '요청 생성 실패';
 		} finally {
@@ -528,6 +525,13 @@
 	}
 
 	function switchTab(tab: Tab) {
+		// create 탭에서 작성 중인 내용이 있으면 경고
+		if (activeTab === 'create' && tab !== 'create') {
+			const hasContent = createForm.prompt.trim() || createForm.userInput.trim();
+			if (hasContent && !confirm('작성 중인 내용이 있습니다. 탭을 전환하시겠습니까?')) {
+				return;
+			}
+		}
 		activeTab = tab;
 		if (tab === 'queue' || tab === 'history') {
 			currentPage = 1;
@@ -598,19 +602,19 @@
 					<div class="text-sm text-muted-foreground">전체</div>
 					<div class="text-2xl font-bold text-foreground">{stats.total}</div>
 				</div>
-				<div class="card p-4 cursor-pointer hover:bg-warning-light" onclick={() => switchTab('queue')}>
+				<div class="card p-4 {activeTab !== 'create' ? 'cursor-pointer hover:bg-warning-light' : ''}" onclick={() => activeTab !== 'create' && switchTab('queue')}>
 					<div class="text-sm text-muted-foreground">대기중</div>
 					<div class="text-2xl font-bold text-warning-foreground">{stats.pending}</div>
 				</div>
-				<div class="card p-4 cursor-pointer hover:bg-primary-light" onclick={() => switchTab('queue')}>
+				<div class="card p-4 {activeTab !== 'create' ? 'cursor-pointer hover:bg-primary-light' : ''}" onclick={() => activeTab !== 'create' && switchTab('queue')}>
 					<div class="text-sm text-muted-foreground">처리중</div>
 					<div class="text-2xl font-bold text-primary">{stats.processing}</div>
 				</div>
-				<div class="card p-4 cursor-pointer hover:bg-success-light" onclick={() => switchTab('history')}>
+				<div class="card p-4 {activeTab !== 'create' ? 'cursor-pointer hover:bg-success-light' : ''}" onclick={() => activeTab !== 'create' && switchTab('history')}>
 					<div class="text-sm text-muted-foreground">완료</div>
 					<div class="text-2xl font-bold text-success">{stats.completed}</div>
 				</div>
-				<div class="card p-4 cursor-pointer hover:bg-error-light" onclick={() => switchTab('history')}>
+				<div class="card p-4 {activeTab !== 'create' ? 'cursor-pointer hover:bg-error-light' : ''}" onclick={() => activeTab !== 'create' && switchTab('history')}>
 					<div class="text-sm text-muted-foreground">실패</div>
 					<div class="text-2xl font-bold text-error">{stats.failed}</div>
 				</div>
@@ -1015,8 +1019,13 @@
 				<p class="text-sm text-muted-foreground mb-6">테스트 또는 디버깅 목적으로 수동으로 LLM 요청을 생성합니다.</p>
 
 				{#if createSuccess}
-					<div class="mb-4 p-4 bg-success-light border border-green-200 text-success rounded-lg">
-						요청이 성공적으로 생성되었습니다. 대기열 탭으로 이동합니다...
+					<div class="mb-4 p-4 bg-success-light border border-green-200 text-success rounded-lg flex items-center justify-between">
+						<span>요청이 성공적으로 생성되었습니다.</span>
+						<button
+							type="button"
+							onclick={() => { createSuccess = false; activeTab = 'queue'; fetchData(); }}
+							class="text-sm underline hover:no-underline font-medium"
+						>대기열에서 확인</button>
 					</div>
 				{/if}
 
