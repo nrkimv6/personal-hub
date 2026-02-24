@@ -75,10 +75,10 @@
   };
 
   const statusClass: Record<string, string> = {
-    idle: 'text-gray-400',
+    idle: 'text-muted-foreground',
     saving: 'text-yellow-500',
-    saved: 'text-green-500',
-    draft: 'text-blue-400',
+    saved: 'text-green-600',
+    draft: 'text-primary',
     error: 'text-red-500',
   };
 </script>
@@ -86,24 +86,24 @@
 {#if error}
   <p class="text-sm text-red-500">{error}</p>
 {:else if !record}
-  <p class="text-sm text-gray-400">로드 중...</p>
+  <p class="text-sm text-muted-foreground">로드 중...</p>
 {:else}
   <div class="flex flex-col gap-2 h-full">
     <div class="flex items-center justify-between text-xs">
       <span class={statusClass[saveStatus]}>{statusLabel[saveStatus]}</span>
       <div class="flex gap-2">
         <button
-          class="px-2 py-1 rounded text-xs bg-gray-700 hover:bg-gray-600 text-gray-300"
+          class="px-2 py-1 rounded text-xs bg-muted hover:bg-secondary text-muted-foreground"
           on:click={rollbackMemo}
         >롤백</button>
         <button
-          class="px-2 py-1 rounded text-xs bg-blue-600 hover:bg-blue-500 text-white"
+          class="px-2 py-1 rounded text-xs bg-primary hover:bg-primary-hover text-primary-foreground"
           on:click={confirmMemo}
         >저장</button>
       </div>
     </div>
     <textarea
-      class="flex-1 w-full p-2 rounded bg-gray-800 text-gray-100 text-sm border border-gray-700 resize-none focus:outline-none focus:border-blue-500"
+      class="flex-1 w-full p-2 rounded bg-background text-foreground text-sm border border-border resize-none focus:outline-none focus:border-primary"
       placeholder="메모를 입력하세요..."
       bind:value={draftText}
       on:input={handleInput}

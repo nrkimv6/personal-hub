@@ -662,7 +662,7 @@
 			<div class="flex gap-1">
 				<button
 					onclick={() => { filterQueueName = ''; handleFilter(); }}
-					class="px-2 py-1 text-xs rounded-full border transition-colors {filterQueueName === '' ? 'bg-gray-700 text-white border-gray-700' : 'border-border text-muted-foreground hover:border-gray-400'}"
+					class="px-2 py-1 text-xs rounded-full border transition-colors {filterQueueName === '' ? 'bg-foreground text-background border-foreground' : 'border-border text-muted-foreground hover:border-gray-400'}"
 				>전체</button>
 				<button
 					onclick={() => { filterQueueName = 'system'; handleFilter(); }}

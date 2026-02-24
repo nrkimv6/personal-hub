@@ -214,7 +214,7 @@
 		<button
 			onclick={() => handleStatusFilter(null)}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === null
-				? 'bg-gray-800 text-white'
+				? 'bg-foreground text-background'
 				: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 		>
 			전체

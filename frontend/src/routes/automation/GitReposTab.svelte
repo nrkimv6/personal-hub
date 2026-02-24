@@ -202,9 +202,9 @@
 
   <!-- 테이블 -->
   {#if loading}
-    <div class="text-center py-16 text-gray-400">로딩 중…</div>
+    <div class="text-center py-16 text-muted-foreground">로딩 중…</div>
   {:else if repos.length === 0}
-    <div class="text-center py-16 text-gray-400">
+    <div class="text-center py-16 text-muted-foreground">
       <p class="text-4xl mb-3">📂</p>
       <p>등록된 레포지토리가 없습니다.</p>
       <button

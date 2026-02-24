@@ -79,9 +79,9 @@
 <div class="flex flex-col h-full">
   <!-- 필터 + 컨트롤 -->
   <div class="flex items-center gap-3 mb-3">
-    <h2 class="text-sm font-semibold text-gray-300">이벤트 타임라인</h2>
+    <h2 class="text-sm font-semibold text-foreground">이벤트 타임라인</h2>
     <select
-      class="text-xs bg-gray-800 border border-gray-700 text-gray-300 rounded px-2 py-1"
+      class="text-xs bg-background border border-border text-foreground rounded px-2 py-1"
       bind:value={filterType}
       on:change={() => loadEvents()}
     >
@@ -91,44 +91,44 @@
       {/each}
     </select>
     <button
-      class="px-3 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300"
+      class="px-3 py-1 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground"
       on:click={() => loadEvents()}
     >새로고침</button>
   </div>
 
   {#if error}
-    <p class="text-sm text-red-400 mb-2">{error}</p>
+    <p class="text-sm text-red-500 mb-2">{error}</p>
   {/if}
 
   {#if loading && events.length === 0}
-    <p class="text-sm text-gray-400">로드 중...</p>
+    <p class="text-sm text-muted-foreground">로드 중...</p>
   {:else if monthGroups.length === 0}
-    <p class="text-sm text-gray-500">이벤트가 없습니다.</p>
+    <p class="text-sm text-muted-foreground">이벤트가 없습니다.</p>
   {:else}
     <div class="overflow-auto flex-1 space-y-4">
       {#each monthGroups as group (group.month)}
         <div>
           <button
-            class="flex items-center gap-2 text-xs font-semibold text-gray-400 mb-2 hover:text-gray-200"
+            class="flex items-center gap-2 text-xs font-semibold text-muted-foreground mb-2 hover:text-foreground"
             on:click={() => toggleMonth(group)}
           >
             <span>{group.collapsed ? '▶' : '▼'}</span>
             <span>{group.month}</span>
-            <span class="text-gray-600">({group.events.length}건)</span>
+            <span class="text-muted-foreground/50">({group.events.length}건)</span>
           </button>
 
           {#if !group.collapsed}
-            <div class="space-y-1 ml-4 border-l border-gray-700 pl-4">
+            <div class="space-y-1 ml-4 border-l border-border pl-4">
               {#each group.events as event (event.id)}
                 <div class="flex items-start gap-3 text-xs">
                   <span class="mt-0.5">{typeIcon[event.event_type] ?? '⚪'}</span>
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2">
-                      <span class="text-gray-300 font-medium">{typeLabel[event.event_type] ?? event.event_type}</span>
-                      <span class="text-gray-500">{formatTime(event.created_at)}</span>
+                      <span class="text-foreground font-medium">{typeLabel[event.event_type] ?? event.event_type}</span>
+                      <span class="text-muted-foreground">{formatTime(event.created_at)}</span>
                     </div>
                     {#if event.detail}
-                      <p class="text-gray-500 font-mono truncate mt-0.5" title={JSON.stringify(event.detail)}>
+                      <p class="text-muted-foreground font-mono truncate mt-0.5" title={JSON.stringify(event.detail)}>
                         {#if event.detail.file_path}
                           {String(event.detail.file_path).split(/[\\/]/).pop()}
                         {:else if event.detail.to}
@@ -150,7 +150,7 @@
 
       {#if hasMore}
         <button
-          class="px-4 py-2 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300 mx-auto block"
+          class="px-4 py-2 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground mx-auto block"
           disabled={loading}
           on:click={() => loadEvents(true)}
         >

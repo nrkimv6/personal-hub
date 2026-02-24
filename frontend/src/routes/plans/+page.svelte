@@ -31,19 +31,19 @@
   ];
 </script>
 
-<div class="flex flex-col h-full p-4 gap-4">
+<div class="flex flex-col h-full p-4 gap-4 bg-background">
   <!-- 헤더 -->
   <div class="flex items-center justify-between">
-    <h1 class="text-lg font-bold text-gray-100">계획서 관리</h1>
+    <h1 class="text-lg font-bold text-foreground">계획서 관리</h1>
   </div>
 
   <!-- 탭 -->
-  <div class="flex gap-1 border-b border-gray-700">
+  <div class="flex gap-1 border-b border-border">
     {#each tabs as tab}
       <button
         class="px-4 py-2 text-sm transition-colors {activeTab === tab.id
-          ? 'text-blue-400 border-b-2 border-blue-400 font-medium'
-          : 'text-gray-400 hover:text-gray-200'}"
+          ? 'text-primary border-b-2 border-primary font-medium'
+          : 'text-muted-foreground hover:text-foreground'}"
         on:click={() => setTab(tab.id)}
       >
         {tab.label}

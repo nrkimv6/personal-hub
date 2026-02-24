@@ -14,6 +14,7 @@
 	} from '$lib/navigation';
 	import { authStore, isAdmin, isLoggedIn, isAuthLoading } from '$lib/stores/auth';
 	import { hiddenItems, collapsedCategories } from '$lib/stores/sidebarPrefs';
+	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 
 	// Props
 	let {
@@ -327,8 +328,13 @@
 		</button>
 	{/if}
 
+	<!-- 다크 모드 토글 -->
+	<div class="mt-3">
+		<ThemeToggle {collapsed} />
+	</div>
+
 	<!-- API 문서 링크 -->
-	<div class="mt-3 text-sidebar-muted text-sm">
+	<div class="mt-3 text-sidebar-muted text-sm {collapsed ? 'lg:hidden' : ''}">
 		<a href="/docs" target="_blank" class="hover:text-sidebar-foreground">API 문서 &rarr;</a>
 	</div>
 </div>
