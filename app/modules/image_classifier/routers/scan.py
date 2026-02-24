@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..workers.scanner import FolderScanner
 from ..config import settings
+from ..utils.pagination import apply_pagination
 
 router = APIRouter(prefix="/scan", tags=["Scan"])
 
@@ -256,9 +257,10 @@ async def get_folders(
     total = db.execute(text(count_query), params).scalar() or 0
 
     # 데이터 쿼리
-    query = f"SELECT * FROM folder_mappings {where_clause} ORDER BY folder_path LIMIT :limit OFFSET :skip"
-    params["limit"] = limit
-    params["skip"] = skip
+    query = apply_pagination(
+        f"SELECT * FROM folder_mappings {where_clause} ORDER BY folder_path",
+        params, skip, limit,
+    )
 
     result = db.execute(text(query), params).fetchall()
 

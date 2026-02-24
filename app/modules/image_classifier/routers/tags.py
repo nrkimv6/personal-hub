@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from ..database import get_db
+from ..utils.pagination import apply_pagination
 
 router = APIRouter(prefix="/tags", tags=["Tags"])
 
@@ -65,6 +66,8 @@ async def get_tags(
         ORDER BY {order_clause}
         LIMIT :limit
     """)
+    total = db.execute(text("SELECT COUNT(*) FROM tags")).scalar() or 0
+
     try:
         tags = db.execute(query, {"limit": limit}).fetchall()
     except Exception:
@@ -79,7 +82,8 @@ async def get_tags(
                 {"id": t.id, "name": t.name, "usage_count": t.usage_count or 0, "created_at": t.created_at,
                  "folder_template": None, "folder_action": None}
                 for t in tags
-            ]
+            ],
+            "total": total,
         }
 
     return {
@@ -93,7 +97,8 @@ async def get_tags(
                 "folder_action": getattr(tag, 'folder_action', None),
             }
             for tag in tags
-        ]
+        ],
+        "total": total,
     }
 
 
@@ -356,14 +361,14 @@ async def get_tag_files(
         raise HTTPException(status_code=404, detail="태그를 찾을 수 없습니다.")
 
     # 파일 목록 조회
-    files_query = text("""
-        SELECT fc.*
-        FROM file_classifications fc
-        JOIN file_tags ft ON ft.file_id = fc.id
-        WHERE ft.tag_id = :tag_id
-        LIMIT :limit OFFSET :skip
-    """)
-    rows = db.execute(files_query, {"tag_id": tag_id, "limit": limit, "skip": skip}).fetchall()
+    _fq_params: dict = {"tag_id": tag_id}
+    _fq_sql = apply_pagination(
+        "SELECT fc.* FROM file_classifications fc"
+        " JOIN file_tags ft ON ft.file_id = fc.id"
+        " WHERE ft.tag_id = :tag_id",
+        _fq_params, skip, limit,
+    )
+    rows = db.execute(text(_fq_sql), _fq_params).fetchall()
 
     # 총 개수 조회
     count_query = text("""

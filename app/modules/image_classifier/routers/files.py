@@ -20,6 +20,7 @@ from ..database import get_db
 from ..config import settings
 from ..workers.thumbnail import get_thumbnail_path
 from ..workers.feedback import FeedbackLearner
+from ..utils.pagination import validate_sort, apply_pagination
 
 router = APIRouter(prefix="/files", tags=["Files"])
 
@@ -210,13 +211,10 @@ async def get_files(
         count_params["importance"] = importance
 
     # 정렬
-    valid_order_by = {"id", "extracted_date", "importance", "ai_confidence"}
-    valid_order_dir = {"asc", "desc"}
-
-    if order_by not in valid_order_by:
-        order_by = "id"
-    if order_dir not in valid_order_dir:
-        order_dir = "asc"
+    order_by, order_dir = validate_sort(
+        order_by, order_dir,
+        {"id", "extracted_date", "importance", "ai_confidence"},
+    )
 
     if order_by == "ai_confidence":
         query += f" ORDER BY ({col_prefix}ai_confidence IS NULL), {col_prefix}ai_confidence {order_dir.upper()}"
@@ -224,9 +222,7 @@ async def get_files(
         query += f" ORDER BY {col_prefix}{order_by} {order_dir.upper()}"
 
     # 페이지네이션
-    query += " LIMIT :limit OFFSET :skip"
-    params["limit"] = limit
-    params["skip"] = skip
+    query = apply_pagination(query, params, skip, limit)
 
     # total 카운트 (페이지네이션 전 전체 개수)
     total = db.execute(text(count_query), count_params).scalar()
@@ -256,6 +252,7 @@ async def get_files(
         "skip": skip,
         "limit": limit,
         "total": total,
+        "has_more": skip + len(files) < total,
     }
 
 

@@ -20,6 +20,7 @@ from send2trash import send2trash
 
 from ..database import get_db, SessionLocal
 from ..workers.task_progress import TaskProgressManager
+from ..utils.pagination import apply_pagination
 
 router = APIRouter(prefix="/duplicates", tags=["Duplicates"])
 logger = logging.getLogger(__name__)
@@ -110,9 +111,10 @@ async def get_duplicate_groups(
     # 전체 개수 조회
     count_result = db.execute(text(f"SELECT COUNT(*) FROM duplicate_groups {where}"), params).scalar()
 
-    query = f"SELECT * FROM duplicate_groups {where} ORDER BY id DESC LIMIT :limit OFFSET :skip"
-    params["limit"] = limit
-    params["skip"] = skip
+    query = apply_pagination(
+        f"SELECT * FROM duplicate_groups {where} ORDER BY id DESC",
+        params, skip, limit,
+    )
 
     result = db.execute(text(query), params).fetchall()
 
@@ -131,6 +133,7 @@ async def get_duplicate_groups(
         "skip": skip,
         "limit": limit,
         "total": count_result,
+        "has_more": skip + len(groups) < count_result,
     }
 
 
