@@ -2,6 +2,7 @@
 
 <script lang="ts">
   import TabNav from '$lib/components/layout/TabNav.svelte';
+  import PageHeader from '$lib/components/layout/PageHeader.svelte';
   import PipelineTab from './PipelineTab.svelte';
   import AiClassifyTab from './AiClassifyTab.svelte';
 
@@ -15,10 +16,7 @@
 
 <div class="space-y-4">
   <!-- 헤더 -->
-  <div>
-    <h1 class="text-2xl font-bold tracking-tight">대시보드</h1>
-    <p class="mt-1 text-sm text-muted-foreground">파이프라인 상태와 AI 분류를 관리합니다</p>
-  </div>
+  <PageHeader title="대시보드" subtitle="파이프라인 상태와 AI 분류를 관리합니다" />
 
   <!-- 서브탭 -->
   <TabNav tabs={subTabs} bind:activeTab variant="secondary" queryParam="tab" />

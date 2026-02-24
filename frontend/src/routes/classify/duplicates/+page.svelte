@@ -2,6 +2,7 @@
 
 <script lang="ts">
   import TabNav from '$lib/components/layout/TabNav.svelte';
+  import PageHeader from '$lib/components/layout/PageHeader.svelte';
   import DuplicatesTab from './DuplicatesTab.svelte';
   import SimilarTab from './SimilarTab.svelte';
 
@@ -15,10 +16,7 @@
 
 <div class="space-y-4">
   <!-- 헤더 -->
-  <div>
-    <h1 class="text-2xl font-bold tracking-tight">중복/유사</h1>
-    <p class="mt-1 text-sm text-muted-foreground">중복 이미지 제거와 유사 이미지 분류를 관리합니다</p>
-  </div>
+  <PageHeader title="중복/유사" subtitle="중복 이미지 제거와 유사 이미지 분류를 관리합니다" />
 
   <!-- 서브탭 -->
   <TabNav tabs={subTabs} bind:activeTab variant="secondary" queryParam="tab" />

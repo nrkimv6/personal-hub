@@ -2,6 +2,7 @@
 
 <script lang="ts">
   import TabNav from '$lib/components/layout/TabNav.svelte';
+  import PageHeader from '$lib/components/layout/PageHeader.svelte';
   import GeneralTab from './GeneralTab.svelte';
   import TagsTab from './TagsTab.svelte';
   import RulesTab from './RulesTab.svelte';
@@ -17,10 +18,7 @@
 
 <div class="space-y-4">
   <!-- 헤더 -->
-  <div>
-    <h1 class="text-2xl font-bold tracking-tight">설정</h1>
-    <p class="mt-1 text-sm text-muted-foreground">이미지 분류기 동작 방식과 태그, 규칙을 관리합니다</p>
-  </div>
+  <PageHeader title="설정" subtitle="이미지 분류기 동작 방식과 태그, 규칙을 관리합니다" />
 
   <!-- 서브탭 -->
   <TabNav tabs={subTabs} bind:activeTab variant="secondary" queryParam="tab" />

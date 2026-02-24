@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import {
 		FolderTree,
 		ChevronRight,
@@ -388,13 +389,11 @@
 </svelte:head>
 
 <!-- 헤더 -->
-<div class="mb-4">
-	<div class="flex items-center gap-2">
+<PageHeader title="카테고리" subtitle="멀티레벨 카테고리 트리를 생성하고 편집합니다.">
+	{#snippet children()}
 		<FolderTree class="size-5 text-primary" />
-		<h1 class="text-2xl font-bold tracking-tight">카테고리</h1>
-	</div>
-	<p class="mt-1 text-sm text-muted-foreground">멀티레벨 카테고리 트리를 생성하고 편집합니다.</p>
-</div>
+	{/snippet}
+</PageHeader>
 
 <!-- 2패널 레이아웃 -->
 <div class="flex flex-col lg:flex-row gap-6">

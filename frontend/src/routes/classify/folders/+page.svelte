@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import {
 		FolderOpen,
 		FolderSearch,
@@ -628,15 +629,11 @@
 
 <div class="space-y-6">
 	<!-- 헤더 -->
-	<div>
-		<div class="flex items-center gap-2">
+	<PageHeader title="스캐너" subtitle="폴더를 카테고리에 매핑하여 전체 파일의 ~70%를 자동 분류합니다.">
+		{#snippet children()}
 			<FolderSearch class="size-5 text-primary" />
-			<h1 class="text-2xl font-bold tracking-tight">스캐너</h1>
-		</div>
-		<p class="mt-1 text-sm text-muted-foreground">
-			폴더를 카테고리에 매핑하여 전체 파일의 ~70%를 자동 분류합니다.
-		</p>
-	</div>
+		{/snippet}
+	</PageHeader>
 
 	<!-- 상단 2열 -->
 	<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">

@@ -2,6 +2,7 @@
 
 <script lang="ts">
   import TabNav from '$lib/components/layout/TabNav.svelte';
+  import PageHeader from '$lib/components/layout/PageHeader.svelte';
   import GalleryTab from './GalleryTab.svelte';
   import ClustersTab from './ClustersTab.svelte';
   import ReviewTab from './ReviewTab.svelte';
@@ -19,10 +20,7 @@
 
 <div class="space-y-4">
   <!-- 헤더 -->
-  <div>
-    <h1 class="text-2xl font-bold tracking-tight">이미지</h1>
-    <p class="mt-1 text-sm text-muted-foreground">이미지를 갤러리, 클러스터, 검토, 이력으로 관리합니다</p>
-  </div>
+  <PageHeader title="이미지" subtitle="이미지를 갤러리, 클러스터, 검토, 이력으로 관리합니다" />
 
   <!-- 서브탭 -->
   <TabNav tabs={subTabs} bind:activeTab variant="secondary" queryParam="tab" />
