@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import { Play, Square, RefreshCw, HardDrive, Music, Archive, FileText, Terminal, Gamepad2, Folder, Video, Image, Zap } from 'lucide-svelte';
 
 	// 상태
@@ -131,11 +132,7 @@
 
 <div class="space-y-6">
 	<!-- 헤더 -->
-	<div class="flex items-center justify-between">
-		<div>
-			<h2 class="text-xl font-bold text-foreground">파일 정리기 대시보드</h2>
-			<p class="text-sm text-muted-foreground">PC 파일을 스캔하고 자동 분류합니다</p>
-		</div>
+	<PageHeader title="파일 정리기 대시보드" subtitle="PC 파일을 스캔하고 자동 분류합니다">
 		<button
 			onclick={fetchStats}
 			class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent"
@@ -143,7 +140,7 @@
 			<RefreshCw class="size-4" />
 			새로고침
 		</button>
-	</div>
+	</PageHeader>
 
 	<!-- 파이프라인 원클릭 실행 -->
 	<div class="rounded-lg border border-primary/30 bg-primary/5 p-4">

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import PageHeader from '$lib/components/layout/PageHeader.svelte';
   import { dashboardApi } from '$lib/api';
   import { ApiConnectionError } from '$lib/api/client';
   import type { UnifiedDashboard } from '$lib/types';
@@ -49,19 +50,18 @@
 
 <div class="p-6 space-y-6">
   <!-- 헤더 -->
-  <div class="flex justify-between items-center">
-    <h1 class="text-2xl font-bold text-foreground dark:text-white">통합 대시보드</h1>
+  <PageHeader title="통합 대시보드" subtitle="서비스 상태와 모니터링 현황을 한눈에 확인합니다">
     <div class="flex items-center gap-4">
       {#if lastUpdated}
-        <span class="text-sm text-muted-foreground dark:text-muted-foreground">
+        <span class="text-sm text-muted-foreground">
           마지막 업데이트: {lastUpdated.toLocaleTimeString()}
         </span>
       {/if}
-      <span class="text-xs text-muted-foreground dark:text-muted-foreground bg-muted dark:bg-gray-800 px-2 py-1 rounded">
+      <span class="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
         10초 자동 새로고침
       </span>
     </div>
-  </div>
+  </PageHeader>
 
   {#if loading}
     <div class="text-center py-20">

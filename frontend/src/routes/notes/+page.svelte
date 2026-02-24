@@ -76,7 +76,7 @@
 <div class="flex flex-col h-full">
   <!-- 헤더 -->
   <div class="flex items-center justify-between px-6 py-4 border-b border-border bg-card">
-    <h1 class="text-lg font-bold text-foreground">메모</h1>
+    <h1 class="text-xl font-bold tracking-tight text-foreground">메모</h1>
     {#if activeTab === 'notes'}
       <button
         onclick={() => (showCreateModal = true)}

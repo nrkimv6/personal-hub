@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import { crawlApi, collectApi } from '$lib/api';
 	import { toast } from '$lib/stores/toast';
 
@@ -185,8 +186,8 @@
 	<title>공유 받기 - Monitor Page</title>
 </svelte:head>
 
-<div class="p-4 max-w-lg mx-auto">
-	<h1 class="text-2xl font-bold mb-6">공유 받은 URL</h1>
+<div class="p-4 max-w-lg mx-auto space-y-4">
+	<PageHeader title="공유 받은 URL" subtitle="공유된 URL을 크롤링하고 수집합니다" />
 
 	{#if shareCompleted}
 		<!-- 공유 완료 (창 닫기 실패 시) -->

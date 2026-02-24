@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { onDestroy } from 'svelte';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import { search, pollSearchResult, getPresets, getStatus } from '$lib/api/fileSearch';
 	import type {
 		FileMatch,
@@ -200,10 +201,9 @@
 
 <div class="flex h-full flex-col gap-4 p-6">
 	<!-- 페이지 제목 + 상태 뱃지 -->
-	<div class="flex items-center justify-between">
-		<h1 class="text-xl font-bold">🔎 파일 검색</h1>
-		<div class="flex items-center gap-2">
-			{#if status}
+	<PageHeader title="파일 검색" subtitle="로컬 파일을 빠르게 검색합니다">
+		{#if status}
+			<div class="flex items-center gap-2">
 				<span
 					class="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium
 						   {status.everything_ok ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'}"
@@ -220,9 +220,9 @@
 					<span class="h-1.5 w-1.5 rounded-full {status.ripgrep_ok ? 'bg-success' : 'bg-destructive'}"></span>
 					ripgrep
 				</span>
-			{/if}
-		</div>
-	</div>
+			</div>
+		{/if}
+	</PageHeader>
 
 	<!-- 도구 문제 경고 -->
 	{#if status && (!status.everything_ok || !status.ripgrep_ok)}

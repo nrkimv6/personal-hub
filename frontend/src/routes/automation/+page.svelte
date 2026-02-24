@@ -36,7 +36,7 @@
 
 <div class="flex flex-col h-full overflow-hidden">
 	<div class="flex items-center gap-4 px-4 lg:px-6 h-12 border-b shrink-0">
-		<h1 class="text-sm font-semibold text-foreground">시스템 자동화</h1>
+		<h1 class="text-base font-bold tracking-tight text-foreground">시스템 자동화</h1>
 		<nav class="flex gap-1">
 			<button
 				onclick={() => setMainTab('dev-runner')}

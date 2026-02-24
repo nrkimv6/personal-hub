@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import { Search, ChevronLeft, ChevronRight } from 'lucide-svelte';
 
 	// 필터 상태
@@ -72,7 +73,7 @@
 </script>
 
 <div class="space-y-4">
-	<h2 class="text-xl font-bold text-foreground">파일 목록</h2>
+	<PageHeader title="파일 목록" subtitle="분류된 파일 목록을 관리합니다" />
 
 	<!-- 필터 -->
 	<div class="flex flex-wrap gap-2">

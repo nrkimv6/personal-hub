@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import LlmTab from './LlmTab.svelte';
 </script>
 
@@ -6,7 +7,7 @@
 	<title>LLM 관리 | Monitor Page</title>
 </svelte:head>
 
-<div class="p-6">
-	<h1 class="text-2xl font-bold text-foreground mb-6">LLM 관리</h1>
+<div class="space-y-4">
+	<PageHeader title="LLM 관리" subtitle="LLM 모델과 프롬프트를 관리합니다" />
 	<LlmTab />
 </div>

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import { crawlApi } from '$lib/api';
 	import type { CrawlSchedule, CrawlRunStats } from '$lib/types';
 
@@ -92,10 +93,7 @@
 </script>
 
 <div class="p-6 max-w-7xl mx-auto">
-	<div class="mb-6">
-		<h2 class="text-2xl font-bold text-foreground">크롤링 스케줄</h2>
-		<p class="text-sm text-muted-foreground mt-1">정기 크롤링 스케줄 관리</p>
-	</div>
+	<PageHeader title="크롤링 스케줄" subtitle="정기 크롤링 스케줄 관리" />
 
 	<!-- 필터 -->
 	<div class="card mb-6">

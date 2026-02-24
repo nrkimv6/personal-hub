@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 
 	let settings = $state<any>(null);
 	let message = $state('');
@@ -46,7 +47,7 @@
 </script>
 
 <div class="space-y-6">
-	<h2 class="text-xl font-bold text-foreground">설정</h2>
+	<PageHeader title="설정" subtitle="파일 정리기 설정을 관리합니다" />
 
 	{#if message}
 		<div class="rounded-md bg-green-500/10 px-3 py-2 text-sm text-green-600">{message}</div>

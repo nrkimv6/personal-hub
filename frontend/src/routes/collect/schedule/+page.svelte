@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 
 	import { onMount } from 'svelte';
 	import { collectApi } from '$lib/api';
@@ -479,12 +480,11 @@
 
 <div>
 	<!-- 헤더 -->
-	<div class="flex justify-between items-center mb-6">
-		<h2 class="text-xl font-bold text-foreground">스케줄 설정</h2>
+	<PageHeader title="스케줄 설정" subtitle="수집 스케줄을 관리합니다">
 		<Button variant="primary" on:click={openAddModal}>
 			+ 스케줄 추가
 		</Button>
-	</div>
+	</PageHeader>
 
 	{#if successMessage}
 		<div class="bg-success-light border border-green-200 text-success px-4 py-3 rounded-lg mb-4">

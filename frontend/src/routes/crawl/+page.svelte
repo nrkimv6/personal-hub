@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 
 	/**
 	 * 크롤링 요청 이력 페이지
@@ -196,18 +197,13 @@
 
 <div class="p-4 md:p-6">
 	<!-- 헤더 -->
-	<div class="mb-4 md:mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-		<div class="flex items-center gap-3">
-			<h2 class="text-xl md:text-2xl font-bold text-foreground">크롤링 이력</h2>
-			<span class="text-sm text-muted-foreground">총 {total}건</span>
-		</div>
-
+	<PageHeader title="크롤링 이력" subtitle="총 {total}건">
 		{#if $isAdmin}
 			<Button variant="primary" size="sm" on:click={() => (showAddModal = true)}>
 				+ URL 크롤링 요청
 			</Button>
 		{/if}
-	</div>
+	</PageHeader>
 
 	<!-- 필터 -->
 	<div class="mb-4 flex flex-wrap gap-2">

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 
 	// 탭
 	type TabId = 'explore' | 'classify' | 'extract';
@@ -207,9 +208,7 @@
 </script>
 
 <div class="space-y-4">
-	<div class="flex items-center justify-between">
-		<h2 class="text-xl font-bold text-foreground">옵시디언 분석기</h2>
-	</div>
+	<PageHeader title="옵시디언 분석기" subtitle="옵시디언 파일을 탐색하고 분류합니다" />
 
 	<!-- 탭 -->
 	<div class="flex gap-1 rounded-lg border border-border bg-card p-1">

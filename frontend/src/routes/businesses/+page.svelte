@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Badge, Button } from '$lib/components/ui';
+  import PageHeader from '$lib/components/layout/PageHeader.svelte';
 
   import { onMount } from 'svelte';
   import { businessApi, itemApi, scheduleApi, serviceAccountApi } from '$lib/api';
@@ -354,8 +355,7 @@
 </script>
 
 <div class="p-6">
-  <div class="mb-6 flex justify-between items-center">
-    <h2 class="text-2xl font-bold text-foreground">업체 관리</h2>
+  <PageHeader title="업체 관리" subtitle="모니터링 업체와 일정을 관리합니다">
     <div class="flex gap-2">
       <Button variant="secondary" size="sm" on:click={fetchBusinesses}>
         새로고침
@@ -367,7 +367,7 @@
         + 업체 추가
       </Button>
     </div>
-  </div>
+  </PageHeader>
 
   {#if loading}
     <div class="flex justify-center items-center h-64">

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 
 	let rules = $state<any[]>([]);
 	let categories = $state<any[]>([]);
@@ -90,7 +91,7 @@
 </script>
 
 <div class="space-y-6">
-	<h2 class="text-xl font-bold text-foreground">규칙 관리</h2>
+	<PageHeader title="규칙 관리" subtitle="파일 분류 규칙을 관리합니다" />
 
 	{#if message}
 		<div class="rounded-md bg-blue-500/10 px-3 py-2 text-sm text-blue-600">{message}</div>

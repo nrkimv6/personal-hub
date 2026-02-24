@@ -609,6 +609,14 @@
 		window.history.replaceState(null, '', url.toString());
 	}
 
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
+
+	const googleMainTabs = [
+		{ id: 'search', label: '🔎 검색 실행' },
+		{ id: 'results', label: '📋 검색결과 관리' }
+	];
+
 	onMount(() => {
 		// URL 파라미터에서 탭 상태 복원
 		const urlParams = new URLSearchParams(window.location.search);
@@ -639,30 +647,10 @@
 	</style>
 </svelte:head>
 
-<div class="container mx-auto p-4">
-	<h1 class="mb-4 text-2xl font-bold">구글 검색</h1>
+<div class="container mx-auto p-4 space-y-4">
+	<PageHeader title="구글 검색" subtitle="Google 검색 결과를 수집하고 관리합니다" />
 
-	<!-- 최상위 탭 -->
-	<div class="mb-6 border-b border-border">
-		<nav class="flex gap-4">
-			<button
-				onclick={() => setMainTab('search')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {mainTab === 'search'
-					? 'border-blue-500 text-primary'
-					: 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				🔎 검색 실행
-			</button>
-			<button
-				onclick={() => setMainTab('results')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {mainTab === 'results'
-					? 'border-blue-500 text-primary'
-					: 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				📋 검색결과 관리
-			</button>
-		</nav>
-	</div>
+	<TabNav tabs={googleMainTabs} bind:activeTab={mainTab} variant="primary" queryParam="tab" />
 
 	{#if mainTab === 'results'}
 		<GoogleResultsTab />

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 
 	let previews = $state<any[]>([]);
 	let moveStatus = $state<any>(null);
@@ -70,16 +71,13 @@
 </script>
 
 <div class="space-y-4">
-	<div class="flex items-center justify-between">
-		<h2 class="text-xl font-bold text-foreground">파일 이동</h2>
-		<div class="flex gap-2">
-			{#if moveStatus}
-				<span class="text-sm text-muted-foreground">
-					이동됨: {moveStatus.moved}개 | 대기: {moveStatus.pending_move}개
-				</span>
-			{/if}
-		</div>
-	</div>
+	<PageHeader title="파일 이동" subtitle="분류된 파일을 지정 경로로 이동합니다">
+		{#if moveStatus}
+			<span class="text-sm text-muted-foreground">
+				이동됨: {moveStatus.moved}개 | 대기: {moveStatus.pending_move}개
+			</span>
+		{/if}
+	</PageHeader>
 
 	{#if message}
 		<div class="rounded-md bg-blue-500/10 px-3 py-2 text-sm text-blue-600">{message}</div>

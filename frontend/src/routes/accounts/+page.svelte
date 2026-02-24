@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import PageHeader from '$lib/components/layout/PageHeader.svelte';
   import { fetchWithTimeout } from '$lib/api/client';
 
   interface Account {
@@ -362,18 +363,14 @@
 <div class="p-6">
   <div class="max-w-7xl mx-auto">
     <!-- 헤더 -->
-    <div class="mb-6 flex items-center justify-between">
-      <div>
-        <h1 class="text-3xl font-bold text-foreground">계정 관리</h1>
-        <p class="text-muted-foreground mt-1">네이버 계정별 브라우저 프로필 관리</p>
-      </div>
+    <PageHeader title="계정 관리" subtitle="네이버 계정별 브라우저 프로필 관리">
       <button
         on:click={openCreateModal}
         class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors"
       >
         + 계정 추가
       </button>
-    </div>
+    </PageHeader>
 
     <!-- 워커 브라우저 상태 -->
     {#if browserStatus}

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 
 	let files = $state<any[]>([]);
 	let categories = $state<any[]>([]);
@@ -84,15 +85,14 @@
 </script>
 
 <div class="space-y-4">
-	<div class="flex items-center justify-between">
-		<h2 class="text-xl font-bold text-foreground">분류 결과 리뷰</h2>
+	<PageHeader title="분류 결과 리뷰" subtitle="파일 분류 결과를 검토하고 승인합니다">
 		<button
 			onclick={startRuleClassify}
 			class="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
 		>
 			규칙 분류 실행
 		</button>
-	</div>
+	</PageHeader>
 
 	{#if message}
 		<div class="rounded-md bg-blue-500/10 px-3 py-2 text-sm text-blue-600">{message}</div>

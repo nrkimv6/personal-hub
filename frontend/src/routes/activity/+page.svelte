@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { toast } from '$lib/stores/toast';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
   import { fetchWithTimeout } from '$lib/api/client';
 
 	// 타입 정의
@@ -261,8 +262,8 @@
 	<title>문화/체육센터 | Monitor Page</title>
 </svelte:head>
 
-<div class="container mx-auto p-4">
-	<h1 class="mb-4 text-2xl font-bold">문화/체육센터 강좌</h1>
+<div class="p-4 space-y-4">
+	<PageHeader title="문화/체육센터 강좌" subtitle="문화/체육센터 강좌 수강 신청을 모니터링합니다" />
 
 	{#if error}
 		<div class="mb-4 rounded-lg bg-error-light p-4 text-error">{error}</div>

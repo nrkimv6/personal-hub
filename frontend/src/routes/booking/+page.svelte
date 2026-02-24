@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Badge, Button } from '$lib/components/ui';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 
   import { onMount } from 'svelte';
   import { scheduleApi, bookingApi, itemApi } from '$lib/api';
@@ -149,12 +150,11 @@
 </script>
 
 <div class="p-6">
-  <div class="mb-6 flex justify-between items-center">
-    <h2 class="text-2xl font-bold text-foreground">예약 관리</h2>
+  <PageHeader title="예약 관리" subtitle="자동 예약 스케줄을 관리합니다">
     <Button variant="secondary" size="sm" on:click={fetchSchedules}>
       새로고침
     </Button>
-  </div>
+  </PageHeader>
 
   <!-- 자동 예약 대상 목록 -->
   <div class="card">

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
+  import PageHeader from '$lib/components/layout/PageHeader.svelte';
   import ServiceStatusTab from './ServiceStatusTab.svelte';
   import ErrorLogTab from './ErrorLogTab.svelte';
   import IntegrityTab from './IntegrityTab.svelte';
@@ -105,9 +106,7 @@
 
 <div class="p-6 space-y-6">
   <!-- 헤더 -->
-  <div class="flex justify-between items-center">
-    <h1 class="text-2xl font-bold text-foreground dark:text-white">시스템 / 설정</h1>
-  </div>
+  <PageHeader title="시스템 / 설정" subtitle="서비스 상태, 오류 로그, 시스템 설정을 관리합니다" />
 
   <!-- 탭 네비게이션 -->
   <div class="border-b border-border dark:border-gray-700">

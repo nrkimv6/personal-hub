@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 
 	import { onMount } from 'svelte';
 	import { crawlApi } from '$lib/api';
@@ -103,10 +104,7 @@
 </script>
 
 <div class="p-6 max-w-7xl mx-auto">
-	<div class="mb-6">
-		<h2 class="text-2xl font-bold text-foreground">단건 크롤링 요청</h2>
-		<p class="text-sm text-muted-foreground mt-1">개별 URL 크롤링 요청 목록</p>
-	</div>
+	<PageHeader title="단건 크롤링 요청" subtitle="개별 URL 크롤링 요청 목록" />
 
 	<!-- 필터 -->
 	<div class="card mb-6">

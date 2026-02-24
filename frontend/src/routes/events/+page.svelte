@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 
 	/**
 	 * 이벤트/팝업 관리 페이지
@@ -623,20 +624,18 @@
 
 <div class="p-4 md:p-6">
 	<!-- 헤더 -->
-	<div class="mb-4 md:mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-		<div class="flex items-center justify-between sm:justify-start gap-3">
-			<h2 class="text-xl md:text-2xl font-bold text-foreground">이벤트 관리</h2>
-			{#if $isAdmin}
-				<div class="flex gap-2">
-					<Button variant="primary" size="sm" on:click={openCreateModal}> + 새 이벤트 </Button>
-					<button onclick={openUrlImportModal} class="btn btn-outline btn-sm" title="URL에서 이벤트 가져오기">
-						🔗 URL 가져오기
-					</button>
-				</div>
-			{/if}
-		</div>
-
-		<!-- 필터 요약 + 모바일 필터 토글 -->
+	<PageHeader title="이벤트 관리" subtitle="이벤트와 팝업을 관리합니다">
+		{#if $isAdmin}
+			<div class="flex gap-2">
+				<Button variant="primary" size="sm" on:click={openCreateModal}> + 새 이벤트 </Button>
+				<button onclick={openUrlImportModal} class="btn btn-outline btn-sm" title="URL에서 이벤트 가져오기">
+					🔗 URL 가져오기
+				</button>
+			</div>
+		{/if}
+	</PageHeader>
+	<!-- 필터 요약 + 모바일 필터 토글 -->
+	<div class="mb-4 md:mb-6 flex flex-col sm:flex-row sm:justify-end sm:items-center gap-3">
 		<div class="flex items-center gap-2">
 			{#if isAnonymous}
 				<!-- 익명 사용자: 필터 비활성화, 고정 배지만 표시 -->

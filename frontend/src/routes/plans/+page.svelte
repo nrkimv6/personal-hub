@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
+  import PageHeader from '$lib/components/layout/PageHeader.svelte';
   import PlanListTab from './PlanListTab.svelte';
   import ArchiveTab from './ArchiveTab.svelte';
   import HistoryTab from './HistoryTab.svelte';
@@ -33,9 +34,7 @@
 
 <div class="flex flex-col h-full p-4 gap-4 bg-background">
   <!-- 헤더 -->
-  <div class="flex items-center justify-between">
-    <h1 class="text-lg font-bold text-foreground">계획서 관리</h1>
-  </div>
+  <PageHeader title="계획서 관리" subtitle="개발 계획서를 관리합니다" />
 
   <!-- 탭 -->
   <div class="flex gap-1 border-b border-border">
