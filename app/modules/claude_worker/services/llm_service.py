@@ -1107,7 +1107,7 @@ class LLMService:
     # ========== Cleanup ==========
 
     # 상수 정의
-    STALE_PROCESSING_TIMEOUT_MINUTES = 10
+    STALE_PROCESSING_TIMEOUT_MINUTES = 65  # 시스템건 타임아웃(60분) + 여유 5분
     HISTORY_RETENTION_DAYS = 7
 
     def cleanup_stale_processing(self, timeout_minutes: int = None) -> int:

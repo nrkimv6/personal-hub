@@ -1381,6 +1381,7 @@ class LLMWorker:
                     prompt=request.prompt,
                     provider=provider,
                     model=model,
+                    timeout=3600,
                     enable_tools=enable_tools,
                     cli_options=cli_options,
                 )
