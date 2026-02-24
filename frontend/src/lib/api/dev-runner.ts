@@ -51,6 +51,7 @@ export interface RegisteredPathResponse {
 	path: string;
 	type: 'file' | 'folder';
 	plan_count: number;
+	path_type: string; // "plan" | "archive"
 }
 
 export interface LogResponse {
