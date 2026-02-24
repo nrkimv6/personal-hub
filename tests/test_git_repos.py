@@ -745,32 +745,46 @@ class TestAPIRouteStatus:
         assert "short_hash" in logs[0]
         assert "message" in logs[0]
 
-    def test_refresh_single(self, api_client, temp_git_repo):
-        """단일 레포 refresh (Right + Time)."""
+    def test_refresh_single_returns_task(self, api_client, temp_git_repo):
+        """단일 레포 refresh → task_id 즉시 반환 (비동기 전환 후)."""
         create = api_client.post("/api/v1/git-repos", json={"path": temp_git_repo})
         repo_id = create.json()["id"]
 
         resp = api_client.post(f"/api/v1/git-repos/{repo_id}/refresh")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["last_status"] is not None
-        assert data["last_checked_at"] is not None
+        # Redis 미연결 시 503, 연결 시 200
+        assert resp.status_code in (200, 503)
+        if resp.status_code == 200:
+            data = resp.json()
+            assert "task_id" in data
+            assert data["status"] == "pending"
 
-    def test_refresh_all(self, api_client, temp_git_repo):
-        """전체 refresh (Right)."""
+    def test_refresh_all_returns_task(self, api_client, temp_git_repo):
+        """전체 refresh → task_id 즉시 반환 (비동기 전환 후)."""
         api_client.post("/api/v1/git-repos", json={"path": temp_git_repo})
 
         resp = api_client.post("/api/v1/git-repos/refresh-all")
-        assert resp.status_code == 200
+        assert resp.status_code in (200, 503)
+        if resp.status_code == 200:
+            data = resp.json()
+            assert "task_id" in data
+            assert data["status"] == "pending"
+
+
+def _assert_task_response(resp):
+    """SLOW 엔드포인트는 task_id 즉시 반환 또는 503(Redis 미연결) 허용."""
+    assert resp.status_code in (200, 503)
+    if resp.status_code == 200:
         data = resp.json()
-        assert isinstance(data, list)
+        assert "task_id" in data
+        assert data["status"] == "pending"
+    return resp.status_code == 200
 
 
 class TestAPIRouteOperations:
-    """작업 실행 엔드포인트."""
+    """작업 실행 엔드포인트 — 비동기 큐 발행 방식."""
 
-    def test_stage_files(self, api_client, temp_git_repo):
-        """파일 스테이징 (Right)."""
+    def test_stage_files_returns_task(self, api_client, temp_git_repo):
+        """파일 스테이징 → task_id 즉시 반환 (Right)."""
         with open(os.path.join(temp_git_repo, "stage_test.txt"), "w") as f:
             f.write("stage me\n")
 
@@ -778,15 +792,10 @@ class TestAPIRouteOperations:
         repo_id = create.json()["id"]
 
         resp = api_client.post(f"/api/v1/git-repos/{repo_id}/stage", json={"files": ["stage_test.txt"]})
-        assert resp.status_code == 200
-        assert resp.json()["success"] is True
+        _assert_task_response(resp)
 
-        # Cross-check: status에서 staged 확인
-        status = api_client.get(f"/api/v1/git-repos/{repo_id}/status").json()
-        assert "stage_test.txt" in status["staged"]
-
-    def test_unstage_files(self, api_client, temp_git_repo):
-        """파일 언스테이징 (Inverse)."""
+    def test_unstage_files_returns_task(self, api_client, temp_git_repo):
+        """파일 언스테이징 → task_id 즉시 반환 (Right)."""
         with open(os.path.join(temp_git_repo, "unstage_test.txt"), "w") as f:
             f.write("unstage me\n")
         subprocess.run(["git", "add", "unstage_test.txt"], cwd=temp_git_repo, capture_output=True)
@@ -795,11 +804,10 @@ class TestAPIRouteOperations:
         repo_id = create.json()["id"]
 
         resp = api_client.post(f"/api/v1/git-repos/{repo_id}/unstage", json={"files": ["unstage_test.txt"]})
-        assert resp.status_code == 200
-        assert resp.json()["success"] is True
+        _assert_task_response(resp)
 
-    def test_commit(self, api_client, temp_git_repo):
-        """커밋 (Right + Cross-check)."""
+    def test_commit_returns_task(self, api_client, temp_git_repo):
+        """커밋 → task_id 즉시 반환 (Right)."""
         with open(os.path.join(temp_git_repo, "commit_api.txt"), "w") as f:
             f.write("commit via api\n")
 
@@ -810,92 +818,73 @@ class TestAPIRouteOperations:
             "message": "test: api commit",
             "stage_all": True
         })
-        assert resp.status_code == 200
-        assert resp.json()["success"] is True
+        _assert_task_response(resp)
 
-        # Cross-check: log에 반영
-        logs = api_client.get(f"/api/v1/git-repos/{repo_id}/log").json()
-        assert any("api commit" in l["message"] for l in logs)
-
-    def test_commit_empty_fails(self, api_client, temp_git_repo):
-        """커밋할 것 없으면 실패 (Error)."""
+    def test_push_returns_task(self, api_client, temp_git_repo):
+        """푸시 → task_id 즉시 반환 (Right)."""
         create = api_client.post("/api/v1/git-repos", json={"path": temp_git_repo})
         repo_id = create.json()["id"]
+        resp = api_client.post(f"/api/v1/git-repos/{repo_id}/push")
+        _assert_task_response(resp)
 
-        resp = api_client.post(f"/api/v1/git-repos/{repo_id}/commit", json={
-            "message": "empty",
-            "stage_all": False
-        })
-        assert resp.status_code == 200
-        assert resp.json()["success"] is False
+    def test_pull_returns_task(self, api_client, temp_git_repo):
+        """풀 → task_id 즉시 반환 (Right)."""
+        create = api_client.post("/api/v1/git-repos", json={"path": temp_git_repo})
+        repo_id = create.json()["id"]
+        resp = api_client.post(f"/api/v1/git-repos/{repo_id}/pull")
+        _assert_task_response(resp)
 
-    def test_stash_and_stash_pop(self, api_client, temp_git_repo):
-        """stash → stash-pop 사이클 (Inverse)."""
+    def test_fetch_returns_task(self, api_client, temp_git_repo):
+        """페치 → task_id 즉시 반환 (Right)."""
+        create = api_client.post("/api/v1/git-repos", json={"path": temp_git_repo})
+        repo_id = create.json()["id"]
+        resp = api_client.post(f"/api/v1/git-repos/{repo_id}/fetch")
+        _assert_task_response(resp)
+
+    def test_stash_returns_task(self, api_client, temp_git_repo):
+        """스태시 → task_id 즉시 반환 (Right)."""
         with open(os.path.join(temp_git_repo, "README.md"), "a") as f:
             f.write("stash api test\n")
-
         create = api_client.post("/api/v1/git-repos", json={"path": temp_git_repo})
         repo_id = create.json()["id"]
-
-        # stash
         resp = api_client.post(f"/api/v1/git-repos/{repo_id}/stash", json={"message": "api stash"})
-        assert resp.status_code == 200
-        assert resp.json()["success"] is True
+        _assert_task_response(resp)
 
-        status = api_client.get(f"/api/v1/git-repos/{repo_id}/status").json()
-        assert status["status"] == "clean"
-
-        # pop
-        resp = api_client.post(f"/api/v1/git-repos/{repo_id}/stash-pop")
-        assert resp.status_code == 200
-        assert resp.json()["success"] is True
-
-        status = api_client.get(f"/api/v1/git-repos/{repo_id}/status").json()
-        assert status["status"] == "dirty"
-
-    def test_fetch(self, api_client, temp_git_repo):
-        """fetch 실행 (Right — remote 없어도 에러 아님)."""
+    def test_stash_pop_returns_task(self, api_client, temp_git_repo):
+        """스태시 복원 → task_id 즉시 반환 (Right)."""
         create = api_client.post("/api/v1/git-repos", json={"path": temp_git_repo})
         repo_id = create.json()["id"]
-
-        resp = api_client.post(f"/api/v1/git-repos/{repo_id}/fetch")
-        assert resp.status_code == 200
-        # remote이 없으면 성공이지만 아무 일도 안 함
-        # (git fetch with no remote → returncode 0 or 128)
+        resp = api_client.post(f"/api/v1/git-repos/{repo_id}/stash-pop")
+        _assert_task_response(resp)
 
     def test_operations_log(self, api_client, temp_git_repo):
-        """작업 이력 조회 (Cross-check + Cardinality)."""
-        with open(os.path.join(temp_git_repo, "ops_test.txt"), "w") as f:
-            f.write("ops\n")
-
+        """작업 이력 조회 엔드포인트 응답 확인."""
         create = api_client.post("/api/v1/git-repos", json={"path": temp_git_repo})
         repo_id = create.json()["id"]
-
-        # 커밋 실행
-        api_client.post(f"/api/v1/git-repos/{repo_id}/commit", json={
-            "message": "ops test commit",
-            "stage_all": True
-        })
 
         resp = api_client.get(f"/api/v1/git-repos/{repo_id}/operations", params={"limit": 50})
         assert resp.status_code == 200
         logs = resp.json()
-        assert len(logs) >= 1
-        assert logs[0]["operation"] == "commit"
+        assert isinstance(logs, list)
+
+    def test_task_result_pending(self, api_client):
+        """존재하지 않는 task_id 조회 → pending 반환 (Existence)."""
+        resp = api_client.get("/api/v1/git-repos/tasks/nonexistent-task-id-12345")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["task_id"] == "nonexistent-task-id-12345"
+        assert data["status"] == "pending"
 
 
 class TestAPIRouteBatch:
-    """일괄 작업 엔드포인트."""
+    """일괄 작업 엔드포인트 — 비동기 큐 발행 방식."""
 
-    def test_batch_commit(self, api_client, temp_git_repo_base):
-        """일괄 커밋 (Right + Cardinality)."""
+    def test_batch_commit_returns_task(self, api_client, temp_git_repo_base):
+        """일괄 커밋 → task_id 즉시 반환 (Right)."""
         repo_ids = []
         for i in range(2):
             path = os.path.join(temp_git_repo_base, f"batch_commit_{i}")
             _init_git_repo(path)
-            # dirty 파일 추가
-            with open(os.path.join(path, f"batch_{i}.txt"), "w") as f:
-                f.write(f"batch {i}\n")
             create = api_client.post("/api/v1/git-repos", json={"path": path, "alias": f"batch-{i}"})
             repo_ids.append(create.json()["id"])
 
@@ -903,39 +892,29 @@ class TestAPIRouteBatch:
             "repo_ids": repo_ids,
             "message": "test: batch commit"
         })
-        assert resp.status_code == 200
-        results = resp.json()["results"]
-        assert len(results) == 2
-        assert all(r["success"] for r in results)
+        _assert_task_response(resp)
 
         # cleanup
         for i in range(2):
             shutil.rmtree(os.path.join(temp_git_repo_base, f"batch_commit_{i}"), ignore_errors=True)
 
-    def test_batch_commit_partial_failure(self, api_client, temp_git_repo):
-        """존재하지 않는 repo ID 포함 → 부분 실패 (Error + Cardinality)."""
+    def test_batch_push_returns_task(self, api_client, temp_git_repo):
+        """일괄 푸시 → task_id 즉시 반환 (Right)."""
         create = api_client.post("/api/v1/git-repos", json={"path": temp_git_repo})
         repo_id = create.json()["id"]
 
-        # dirty 파일 추가
-        with open(os.path.join(temp_git_repo, "partial.txt"), "w") as f:
-            f.write("partial\n")
-
-        resp = api_client.post("/api/v1/git-repos/batch-commit", json={
-            "repo_ids": [repo_id, 99999],
-            "message": "test: partial"
+        resp = api_client.post("/api/v1/git-repos/batch-push", json={
+            "repo_ids": [repo_id]
         })
-        assert resp.status_code == 200
-        results = resp.json()["results"]
-        assert len(results) == 2
-        # 하나는 성공, 하나는 실패
-        success_count = sum(1 for r in results if r["success"])
-        failure_count = sum(1 for r in results if not r["success"])
-        assert failure_count >= 1  # 99999는 반드시 실패
+        _assert_task_response(resp)
 
 
 class TestAPIRouteNonexistent:
-    """존재하지 않는 repo에 대한 모든 엔드포인트 404 검증 (Existence)."""
+    """존재하지 않는 repo에 대한 엔드포인트 응답 검증 (Existence).
+
+    SLOW 엔드포인트는 repo 검증 후 큐 발행하므로 404 반환.
+    Redis 미연결 시 503 반환 가능.
+    """
 
     def test_status_404(self, api_client):
         assert api_client.get("/api/v1/git-repos/99999/status").status_code == 404

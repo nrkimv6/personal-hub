@@ -12,6 +12,8 @@ import type {
   OperationResult,
   BatchResult,
   DiscoverResult,
+  GitTaskResponse,
+  GitTaskResult,
 } from '../types/gitRepos';
 
 const BASE = '/git-repos';
@@ -71,79 +73,87 @@ export const gitReposApi = {
     return request<GitLogEntry[]>(`${BASE}/${id}/log?n=${n}`);
   },
 
-  /** 단일 상태 갱신 */
-  refreshRepo(id: number): Promise<GitRepo> {
-    return request<GitRepo>(`${BASE}/${id}/refresh`, { method: 'POST' });
+  /** 단일 상태 갱신 (큐 발행) */
+  refreshRepo(id: number): Promise<GitTaskResponse> {
+    return request<GitTaskResponse>(`${BASE}/${id}/refresh`, { method: 'POST' });
   },
 
-  /** 전체 상태 갱신 */
-  refreshAll(): Promise<GitRepo[]> {
-    return request<GitRepo[]>(`${BASE}/refresh-all`, { method: 'POST' });
+  /** 전체 상태 갱신 (큐 발행) */
+  refreshAll(): Promise<GitTaskResponse> {
+    return request<GitTaskResponse>(`${BASE}/refresh-all`, { method: 'POST' });
   },
 
   // ─────────────────────────────────────────────
-  // 작업 실행
+  // 작업 실행 (큐 발행)
   // ─────────────────────────────────────────────
 
   /** 파일 스테이징 */
-  stageFiles(id: number, files: string[]): Promise<OperationResult> {
-    return request<OperationResult>(`${BASE}/${id}/stage`, {
+  stageFiles(id: number, files: string[]): Promise<GitTaskResponse> {
+    return request<GitTaskResponse>(`${BASE}/${id}/stage`, {
+      method: 'POST',
+      body: JSON.stringify({ files }),
+    });
+  },
+
+  /** 파일 언스테이징 */
+  unstageFiles(id: number, files: string[]): Promise<GitTaskResponse> {
+    return request<GitTaskResponse>(`${BASE}/${id}/unstage`, {
       method: 'POST',
       body: JSON.stringify({ files }),
     });
   },
 
   /** 커밋 */
-  commit(id: number, message: string, stageAll = false): Promise<OperationResult> {
-    return request<OperationResult>(`${BASE}/${id}/commit`, {
+  commit(id: number, message: string, stageAll = false): Promise<GitTaskResponse> {
+    return request<GitTaskResponse>(`${BASE}/${id}/commit`, {
       method: 'POST',
       body: JSON.stringify({ message, stage_all: stageAll }),
     });
   },
 
   /** 푸시 */
-  push(id: number): Promise<OperationResult> {
-    return request<OperationResult>(`${BASE}/${id}/push`, { method: 'POST' });
+  push(id: number): Promise<GitTaskResponse> {
+    return request<GitTaskResponse>(`${BASE}/${id}/push`, { method: 'POST' });
   },
 
   /** 풀 */
-  pull(id: number): Promise<OperationResult> {
-    return request<OperationResult>(`${BASE}/${id}/pull`, { method: 'POST' });
+  pull(id: number): Promise<GitTaskResponse> {
+    return request<GitTaskResponse>(`${BASE}/${id}/pull`, { method: 'POST' });
   },
 
   /** 페치 */
-  fetch(id: number): Promise<OperationResult> {
-    return request<OperationResult>(`${BASE}/${id}/fetch`, { method: 'POST' });
+  fetch(id: number): Promise<GitTaskResponse> {
+    return request<GitTaskResponse>(`${BASE}/${id}/fetch`, { method: 'POST' });
   },
 
   /** 스태시 저장 */
-  stash(id: number, message?: string): Promise<OperationResult> {
-    return request<OperationResult>(`${BASE}/${id}/stash`, {
+  stash(id: number, message?: string): Promise<GitTaskResponse> {
+    return request<GitTaskResponse>(`${BASE}/${id}/stash`, {
       method: 'POST',
       body: JSON.stringify({ message }),
     });
   },
 
   /** 스태시 복원 */
-  stashPop(id: number): Promise<OperationResult> {
-    return request<OperationResult>(`${BASE}/${id}/stash-pop`, { method: 'POST' });
+  stashPop(id: number): Promise<GitTaskResponse> {
+    return request<GitTaskResponse>(`${BASE}/${id}/stash-pop`, { method: 'POST' });
   },
 
   // ─────────────────────────────────────────────
   // 일괄 작업 + LLM
   // ─────────────────────────────────────────────
 
-  /** 일괄 커밋 */
-  batchCommit(repoIds: number[], message: string): Promise<{ results: BatchResult[] }> {
-    return request<{ results: BatchResult[] }>(`${BASE}/batch-commit`, {
+  /** 일괄 커밋 (큐 발행) */
+  batchCommit(repoIds: number[], message: string): Promise<GitTaskResponse> {
+    return request<GitTaskResponse>(`${BASE}/batch-commit`, {
       method: 'POST',
       body: JSON.stringify({ repo_ids: repoIds, message }),
     });
   },
 
-  /** 일괄 푸시 */
-  batchPush(repoIds: number[]): Promise<{ results: BatchResult[] }> {
-    return request<{ results: BatchResult[] }>(`${BASE}/batch-push`, {
+  /** 일괄 푸시 (큐 발행) */
+  batchPush(repoIds: number[]): Promise<GitTaskResponse> {
+    return request<GitTaskResponse>(`${BASE}/batch-push`, {
       method: 'POST',
       body: JSON.stringify({ repo_ids: repoIds }),
     });
@@ -157,5 +167,43 @@ export const gitReposApi = {
   /** 작업 이력 조회 */
   getOperations(id: number, limit = 50): Promise<OperationLog[]> {
     return request<OperationLog[]>(`${BASE}/${id}/operations?limit=${limit}`);
+  },
+
+  // ─────────────────────────────────────────────
+  // 비동기 작업 결과 폴링
+  // ─────────────────────────────────────────────
+
+  /** 작업 결과 단일 조회 */
+  getTaskResult(taskId: string): Promise<GitTaskResult> {
+    return request<GitTaskResult>(`${BASE}/tasks/${taskId}`);
+  },
+
+  /**
+   * 작업 발행 후 완료될 때까지 폴링.
+   *
+   * @param action - task를 발행하는 API 호출 함수
+   * @param options - interval(ms, 기본 1000), maxRetries(기본 60)
+   * @returns 완료된 GitTaskResult
+   * @throws Error - maxRetries 초과 또는 failed 상태
+   */
+  async executeAndPoll(
+    action: () => Promise<GitTaskResponse>,
+    options?: { interval?: number; maxRetries?: number }
+  ): Promise<GitTaskResult> {
+    const interval = options?.interval ?? 1000;
+    const maxRetries = options?.maxRetries ?? 60;
+
+    const taskResponse = await action();
+    const taskId = taskResponse.task_id;
+
+    for (let i = 0; i < maxRetries; i++) {
+      await new Promise((resolve) => setTimeout(resolve, interval));
+      const result = await gitReposApi.getTaskResult(taskId);
+      if (result.status !== 'pending') {
+        return result;
+      }
+    }
+
+    throw new Error(`작업 타임아웃: task_id=${taskId} (${maxRetries}회 폴링 초과)`);
   },
 };

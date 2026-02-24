@@ -1,13 +1,54 @@
 """Git Repository 관리 API 라우트."""
+import json
+from datetime import datetime
+from uuid import uuid4
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.core.database import get_db
 from app.modules.git_repos import schemas
+from app.modules.git_repos.schemas import GitTaskResponse
 from app.modules.git_repos.services.repo_service import GitRepoService
+from app.shared.redis.client import RedisClient
+from app.shared.redis.queue import RedisQueue, GIT_REPOS_TASK_QUEUE
 
 router = APIRouter(prefix="/api/v1/git-repos", tags=["git-repos"])
+
+
+# ───────────────────────────────────────────
+# 내부 헬퍼
+# ───────────────────────────────────────────
+
+async def _enqueue_task(action: str, repo_id: Optional[int], params: dict) -> GitTaskResponse:
+    """Redis 큐에 git 작업 발행 후 task_id 반환.
+
+    Args:
+        action: 수행할 작업 이름
+        repo_id: 대상 레포지토리 ID (없으면 None)
+        params: 작업별 추가 파라미터
+
+    Returns:
+        GitTaskResponse: task_id와 status="pending"
+
+    Raises:
+        HTTPException(503): Redis 미연결 시
+    """
+    client = await RedisClient.get_client()
+    if client is None:
+        raise HTTPException(status_code=503, detail="워커 서비스 미사용 (Redis 미연결)")
+
+    task_id = str(uuid4())
+    queue = RedisQueue(client, GIT_REPOS_TASK_QUEUE)
+    await queue.push({
+        "task_id": task_id,
+        "action": action,
+        "repo_id": repo_id,
+        "params": params,
+        "requested_at": datetime.now().isoformat(),
+    })
+    return GitTaskResponse(task_id=task_id, status="pending")
 
 
 # ───────────────────────────────────────────
@@ -62,6 +103,39 @@ async def discover_repos(base_path: str = Query(..., description="탐색할 기�
 
 
 # ───────────────────────────────────────────
+# 비동기 작업 결과 폴링
+# ───────────────────────────────────────────
+
+@router.get("/tasks/{task_id}", response_model=schemas.GitTaskResult)
+async def get_task_result(task_id: str):
+    """비동기 작업 결과 폴링.
+
+    Redis에서 git_repos:result:{task_id} 키를 조회합니다.
+    아직 처리 중이면 status="pending"을 반환합니다.
+    """
+    client = await RedisClient.get_client()
+    if client is None:
+        return schemas.GitTaskResult(task_id=task_id, status="pending")
+
+    key = f"git_repos:result:{task_id}"
+    try:
+        data = await client.get(key)
+        if data is None:
+            return schemas.GitTaskResult(task_id=task_id, status="pending")
+        parsed = json.loads(data)
+        result_dict = parsed.get("result")
+        result_obj = schemas.OperationResult(**result_dict) if result_dict and isinstance(result_dict, dict) and "success" in result_dict else None
+        return schemas.GitTaskResult(
+            task_id=parsed.get("task_id", task_id),
+            status=parsed.get("status", "completed"),
+            result=result_obj,
+            completed_at=parsed.get("completed_at"),
+        )
+    except Exception:
+        return schemas.GitTaskResult(task_id=task_id, status="pending")
+
+
+# ───────────────────────────────────────────
 # 상태 조회 엔드포인트
 # ───────────────────────────────────────────
 
@@ -103,162 +177,129 @@ async def get_log(repo_id: int, n: int = Query(20, ge=1, le=100), db: Session = 
     return await git.get_log(repo.path, n=n)
 
 
-@router.post("/{repo_id}/refresh", response_model=schemas.RepoResponse)
+@router.post("/{repo_id}/refresh", response_model=schemas.GitTaskResponse)
 async def refresh_status(repo_id: int, db: Session = Depends(get_db)):
-    """단일 레포지토리 상태 갱신."""
+    """단일 레포지토리 상태 갱신 (큐 발행)."""
     svc = GitRepoService()
     repo = svc.get_repo(db, repo_id)
     if not repo:
         raise HTTPException(status_code=404, detail="레포지토리를 찾을 수 없습니다.")
-    return await svc.refresh_status(db, repo)
+    return await _enqueue_task("refresh", repo_id, {})
 
 
-@router.post("/refresh-all", response_model=List[schemas.RepoResponse])
+@router.post("/refresh-all", response_model=schemas.GitTaskResponse)
 async def refresh_all(db: Session = Depends(get_db)):
-    """전체 레포지토리 상태 갱신."""
-    svc = GitRepoService()
-    return await svc.refresh_all(db)
+    """전체 레포지토리 상태 갱신 (큐 발행)."""
+    return await _enqueue_task("refresh-all", None, {})
 
 
 # ───────────────────────────────────────────
-# 작업 실행 엔드포인트
+# 작업 실행 엔드포인트 (큐 발행)
 # ───────────────────────────────────────────
 
-@router.post("/{repo_id}/stage", response_model=schemas.OperationResult)
+@router.post("/{repo_id}/stage", response_model=schemas.GitTaskResponse)
 async def stage_files(repo_id: int, body: schemas.StageRequest, db: Session = Depends(get_db)):
-    """파일 스테이징."""
-    from app.modules.git_repos.services.git_command import GitCommandService
+    """파일 스테이징 (큐 발행)."""
     svc = GitRepoService()
     repo = svc.get_repo(db, repo_id)
     if not repo:
         raise HTTPException(status_code=404, detail="레포지토리를 찾을 수 없습니다.")
-    git = GitCommandService()
-    ok, stdout, stderr = await git.stage_files(repo.path, body.files)
-    return schemas.OperationResult(success=ok, stdout=stdout, stderr=stderr)
+    return await _enqueue_task("stage", repo_id, {"files": body.files})
 
 
-@router.post("/{repo_id}/unstage", response_model=schemas.OperationResult)
+@router.post("/{repo_id}/unstage", response_model=schemas.GitTaskResponse)
 async def unstage_files(repo_id: int, body: schemas.StageRequest, db: Session = Depends(get_db)):
-    """파일 언스테이징."""
-    from app.modules.git_repos.services.git_command import GitCommandService
+    """파일 언스테이징 (큐 발행)."""
     svc = GitRepoService()
     repo = svc.get_repo(db, repo_id)
     if not repo:
         raise HTTPException(status_code=404, detail="레포지토리를 찾을 수 없습니다.")
-    git = GitCommandService()
-    ok, stdout, stderr = await git.unstage_files(repo.path, body.files)
-    return schemas.OperationResult(success=ok, stdout=stdout, stderr=stderr)
+    return await _enqueue_task("unstage", repo_id, {"files": body.files})
 
 
-@router.post("/{repo_id}/commit", response_model=schemas.OperationResult)
+@router.post("/{repo_id}/commit", response_model=schemas.GitTaskResponse)
 async def commit(repo_id: int, body: schemas.CommitRequest, db: Session = Depends(get_db)):
-    """커밋 실행."""
+    """커밋 실행 (큐 발행)."""
     svc = GitRepoService()
     repo = svc.get_repo(db, repo_id)
     if not repo:
         raise HTTPException(status_code=404, detail="레포지토리를 찾을 수 없습니다.")
-    result = await svc.commit_repo(db, repo, body.message, body.stage_all)
-    return result
+    return await _enqueue_task("commit", repo_id, {"message": body.message, "stage_all": body.stage_all})
 
 
-@router.post("/{repo_id}/push", response_model=schemas.OperationResult)
+@router.post("/{repo_id}/push", response_model=schemas.GitTaskResponse)
 async def push(repo_id: int, db: Session = Depends(get_db)):
-    """푸시 실행."""
+    """푸시 실행 (큐 발행)."""
     svc = GitRepoService()
     repo = svc.get_repo(db, repo_id)
     if not repo:
         raise HTTPException(status_code=404, detail="레포지토리를 찾을 수 없습니다.")
-    result = await svc.push_repo(db, repo)
-    return result
+    return await _enqueue_task("push", repo_id, {})
 
 
-@router.post("/{repo_id}/pull", response_model=schemas.OperationResult)
+@router.post("/{repo_id}/pull", response_model=schemas.GitTaskResponse)
 async def pull(repo_id: int, db: Session = Depends(get_db)):
-    """풀 실행."""
+    """풀 실행 (큐 발행)."""
     svc = GitRepoService()
     repo = svc.get_repo(db, repo_id)
     if not repo:
         raise HTTPException(status_code=404, detail="레포지토리를 찾을 수 없습니다.")
-    result = await svc.pull_repo(db, repo)
-    return result
+    return await _enqueue_task("pull", repo_id, {})
 
 
-@router.post("/{repo_id}/fetch", response_model=schemas.OperationResult)
+@router.post("/{repo_id}/fetch", response_model=schemas.GitTaskResponse)
 async def fetch(repo_id: int, db: Session = Depends(get_db)):
-    """페치 실행."""
+    """페치 실행 (큐 발행)."""
     svc = GitRepoService()
     repo = svc.get_repo(db, repo_id)
     if not repo:
         raise HTTPException(status_code=404, detail="레포지토리를 찾을 수 없습니다.")
-    result = await svc.fetch_repo(db, repo)
-    return result
+    return await _enqueue_task("fetch", repo_id, {})
 
 
-@router.post("/{repo_id}/stash", response_model=schemas.OperationResult)
+@router.post("/{repo_id}/stash", response_model=schemas.GitTaskResponse)
 async def stash_save(repo_id: int, body: schemas.StashRequest, db: Session = Depends(get_db)):
-    """스태시 저장."""
-    from app.modules.git_repos.services.git_command import GitCommandService
+    """스태시 저장 (큐 발행)."""
     svc = GitRepoService()
     repo = svc.get_repo(db, repo_id)
     if not repo:
         raise HTTPException(status_code=404, detail="레포지토리를 찾을 수 없습니다.")
-    git = GitCommandService()
-    ok, stdout, stderr = await git.stash_save(repo.path, body.message)
-    svc.log_operation(db, repo.id, "stash", "success" if ok else "failure", body.message, stderr or stdout)
-    return schemas.OperationResult(success=ok, stdout=stdout, stderr=stderr)
+    return await _enqueue_task("stash", repo_id, {"message": body.message})
 
 
-@router.post("/{repo_id}/stash-pop", response_model=schemas.OperationResult)
+@router.post("/{repo_id}/stash-pop", response_model=schemas.GitTaskResponse)
 async def stash_pop(repo_id: int, db: Session = Depends(get_db)):
-    """스태시 복원."""
-    from app.modules.git_repos.services.git_command import GitCommandService
+    """스태시 복원 (큐 발행)."""
     svc = GitRepoService()
     repo = svc.get_repo(db, repo_id)
     if not repo:
         raise HTTPException(status_code=404, detail="레포지토리를 찾을 수 없습니다.")
-    git = GitCommandService()
-    ok, stdout, stderr = await git.stash_pop(repo.path)
-    svc.log_operation(db, repo.id, "stash_pop", "success" if ok else "failure", None, stderr or stdout)
-    return schemas.OperationResult(success=ok, stdout=stdout, stderr=stderr)
+    return await _enqueue_task("stash-pop", repo_id, {})
 
 
 # ───────────────────────────────────────────
 # 일괄 작업 + LLM 메시지 생성
 # ───────────────────────────────────────────
 
-@router.post("/batch-commit")
+@router.post("/batch-commit", response_model=schemas.GitTaskResponse)
 async def batch_commit(body: schemas.BatchCommitRequest, db: Session = Depends(get_db)):
-    """여러 레포 일괄 커밋."""
-    svc = GitRepoService()
-    results = []
-    for repo_id in body.repo_ids:
-        repo = svc.get_repo(db, repo_id)
-        if not repo:
-            results.append(schemas.BatchResult(repo_id=repo_id, success=False, message="레포지토리를 찾을 수 없습니다."))
-            continue
-        result = await svc.commit_repo(db, repo, body.message, stage_all=True)
-        results.append(schemas.BatchResult(repo_id=repo_id, success=result.success, message=result.stdout or result.stderr))
-    return {"results": results}
+    """여러 레포 일괄 커밋 (큐 발행)."""
+    return await _enqueue_task("batch-commit", None, {"repo_ids": body.repo_ids, "message": body.message})
 
 
-@router.post("/batch-push")
+@router.post("/batch-push", response_model=schemas.GitTaskResponse)
 async def batch_push(body: schemas.BatchPushRequest, db: Session = Depends(get_db)):
-    """여러 레포 일괄 푸시."""
-    svc = GitRepoService()
-    results = []
-    for repo_id in body.repo_ids:
-        repo = svc.get_repo(db, repo_id)
-        if not repo:
-            results.append(schemas.BatchResult(repo_id=repo_id, success=False, message="레포지토리를 찾을 수 없습니다."))
-            continue
-        result = await svc.push_repo(db, repo)
-        results.append(schemas.BatchResult(repo_id=repo_id, success=result.success, message=result.stdout or result.stderr))
-    return {"results": results}
+    """여러 레포 일괄 푸시 (큐 발행)."""
+    return await _enqueue_task("batch-push", None, {"repo_ids": body.repo_ids})
 
 
 @router.post("/{repo_id}/generate-message")
 async def generate_commit_message(repo_id: int, db: Session = Depends(get_db)):
-    """diff를 LLM에 전달해 커밋 메시지 자동 생성."""
+    """diff를 LLM에 전달해 커밋 메시지 자동 생성.
+
+    diff 조회는 route에서 직접 수행하고,
+    LLM 요청/폴링은 기존 코드(LLM 큐) 방식 유지.
+    """
     from app.modules.git_repos.services.git_command import GitCommandService
     svc = GitRepoService()
     repo = svc.get_repo(db, repo_id)
@@ -275,7 +316,7 @@ async def generate_commit_message(repo_id: int, db: Session = Depends(get_db)):
     try:
         from app.modules.claude_worker.services.llm_service import LLMService
         from app.modules.claude_worker.models import LLMRequest
-        import json
+        import asyncio as _asyncio
 
         prompt = f"""아래 git diff를 분석하고 Conventional Commits 형식의 한국어 커밋 메시지를 1줄로 작성하세요.
 
@@ -297,9 +338,8 @@ diff:
         db.commit()
 
         # 동기 처리 시도 (빠른 응답)
-        import asyncio
         for _ in range(30):
-            await asyncio.sleep(1)
+            await _asyncio.sleep(1)
             db.refresh(req)
             if req.status in ("completed", "failed"):
                 break

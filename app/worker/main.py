@@ -65,6 +65,7 @@ try:
     from app.worker.mobile_crawl_worker import MobileCrawlWorker
     from app.worker.video_download_worker import VideoDownloadWorker
     from app.worker.file_search_worker import FileSearchWorker
+    from app.modules.git_repos.worker import GitRepoWorker
 
     # 크롤러 및 워커 관련 로거들이 워커 로거와 같은 핸들러를 사용하도록 설정
     worker_handlers = logger.handlers
@@ -82,6 +83,7 @@ try:
         'app.worker.video_download_worker',
         'app.worker.file_search_worker',
         'app.worker.crawl_worker_base',
+        'app.modules.git_repos.worker',
         'instagram.worker_status',
         # 브라우저 관련
         'app.shared.browser.browser_manager',
@@ -130,6 +132,7 @@ async def run_with_orchestrator(
     run_mobile: bool = True,
     run_video_dl: bool = True,
     run_file_search: bool = True,
+    run_git: bool = True,
 ):
     """WorkerOrchestrator를 사용하여 워커들을 실행합니다.
 
@@ -209,6 +212,11 @@ async def run_with_orchestrator(
             orchestrator.register_worker("file_search", file_search_worker)
             logger.info("FileSearchWorker 등록됨")
 
+        if run_git:
+            git_worker = GitRepoWorker()
+            orchestrator.register_worker("git_repos", git_worker)
+            logger.info("GitRepoWorker 등록됨")
+
         if not orchestrator.workers:
             logger.error("실행할 워커가 없습니다.")
             return
@@ -240,7 +248,8 @@ async def main(args):
         f"google={args.google or args.all}, "
         f"activity={args.activity or args.all}, "
         f"mobile={args.mobile or args.all}, "
-        f"video_dl={args.video_dl or args.all}"
+        f"video_dl={args.video_dl or args.all}, "
+        f"git={args.git or args.all}"
     )
     logger.info("=" * 50)
 
@@ -254,6 +263,7 @@ async def main(args):
             run_mobile=args.mobile or args.all,
             run_video_dl=args.video_dl or args.all,
             run_file_search=args.file_search or args.all,
+            run_git=args.git or args.all,
         )
     except Exception as e:
         logger.critical(f"워커 치명적 오류: {e}", exc_info=True)
@@ -314,6 +324,11 @@ def parse_args():
         help="파일 검색 워커만 실행 (ripgrep/Everything)",
     )
     parser.add_argument(
+        "--git",
+        action="store_true",
+        help="Git 레포 워커만 실행",
+    )
+    parser.add_argument(
         "--all",
         action="store_true",
         default=True,
@@ -323,7 +338,7 @@ def parse_args():
     args = parser.parse_args()
 
     # 개별 옵션이 지정되면 --all은 False
-    if args.naver or args.scheduled or args.ondemand or args.google or args.crawl or args.activity or args.mobile or args.video_dl or args.file_search:
+    if args.naver or args.scheduled or args.ondemand or args.google or args.crawl or args.activity or args.mobile or args.video_dl or args.file_search or args.git:
         args.all = False
 
     return args

@@ -42,9 +42,11 @@
     loading = true;
     error = '';
     try {
-      // repo 기본 정보는 list에서 가져오거나 refresh로 얻음
-      const refreshed = await gitReposApi.refreshRepo(repoId);
-      repo = refreshed;
+      // refreshRepo는 이제 task_id를 반환 — 폴링 후 상태 재로드
+      await gitReposApi.executeAndPoll(
+        () => gitReposApi.refreshRepo(repoId),
+        { interval: 500, maxRetries: 30 }
+      );
 
       await Promise.all([loadStatus(), loadLog(), loadOperations()]);
     } catch (e) {
@@ -86,24 +88,27 @@
   }
 
   async function handleStageFile(file: string) {
+    working = true;
     try {
-      await gitReposApi.stageFiles(repoId, [file]);
+      await gitReposApi.executeAndPoll(
+        () => gitReposApi.stageFiles(repoId, [file]),
+        { interval: 500, maxRetries: 30 }
+      );
       await loadStatus();
     } catch (e) {
       showToast('스테이징 실패', 'error');
+    } finally {
+      working = false;
     }
   }
 
   async function handleUnstageFile(file: string) {
     working = true;
     try {
-      // unstage는 restore --staged 사용
-      const result = await fetch(`/api/v1/git-repos/${repoId}/stage`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ files: [file] }),
-      });
-      // 백엔드에 unstage 엔드포인트가 없으면 stage 취소
+      await gitReposApi.executeAndPoll(
+        () => gitReposApi.unstageFiles(repoId, [file]),
+        { interval: 500, maxRetries: 30 }
+      );
       await loadStatus();
     } catch {
       showToast('언스테이징 실패', 'error');
@@ -116,14 +121,19 @@
     if (!commitMsg.trim()) return;
     working = true;
     try {
-      const result = await gitReposApi.commit(repoId, commitMsg);
-      if (result.success) {
+      const result = await gitReposApi.executeAndPoll(
+        () => gitReposApi.commit(repoId, commitMsg),
+        { interval: 1000, maxRetries: 60 }
+      );
+      if (result.result?.success) {
         showToast('커밋 완료');
         commitMsg = '';
         await loadAll();
       } else {
-        showToast(result.stderr || result.stdout || '커밋 실패', 'error');
+        showToast(result.result?.stderr || result.result?.stdout || '커밋 실패', 'error');
       }
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '커밋 실패', 'error');
     } finally {
       working = false;
     }
@@ -132,13 +142,18 @@
   async function handlePush() {
     working = true;
     try {
-      const result = await gitReposApi.push(repoId);
-      if (result.success) {
+      const result = await gitReposApi.executeAndPoll(
+        () => gitReposApi.push(repoId),
+        { interval: 1000, maxRetries: 60 }
+      );
+      if (result.result?.success) {
         showToast('푸시 완료');
         await loadAll();
       } else {
-        showToast(result.stderr || '푸시 실패', 'error');
+        showToast(result.result?.stderr || '푸시 실패', 'error');
       }
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '푸시 실패', 'error');
     } finally {
       working = false;
     }
@@ -147,13 +162,18 @@
   async function handlePull() {
     working = true;
     try {
-      const result = await gitReposApi.pull(repoId);
-      if (result.success) {
+      const result = await gitReposApi.executeAndPoll(
+        () => gitReposApi.pull(repoId),
+        { interval: 1000, maxRetries: 60 }
+      );
+      if (result.result?.success) {
         showToast('풀 완료');
         await loadAll();
       } else {
-        showToast(result.stderr || '풀 실패', 'error');
+        showToast(result.result?.stderr || '풀 실패', 'error');
       }
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '풀 실패', 'error');
     } finally {
       working = false;
     }
@@ -162,13 +182,18 @@
   async function handleFetch() {
     working = true;
     try {
-      const result = await gitReposApi.fetch(repoId);
-      if (result.success) {
+      const result = await gitReposApi.executeAndPoll(
+        () => gitReposApi.fetch(repoId),
+        { interval: 1000, maxRetries: 60 }
+      );
+      if (result.result?.success) {
         showToast('페치 완료');
         await loadStatus();
       } else {
-        showToast(result.stderr || '페치 실패', 'error');
+        showToast(result.result?.stderr || '페치 실패', 'error');
       }
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '페치 실패', 'error');
     } finally {
       working = false;
     }
