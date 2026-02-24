@@ -31,8 +31,10 @@ class GitCommandService:
                 raise PermissionError(f"금지된 git 인자입니다: {arg}")
 
         try:
+            # Session 0(NSSM)에서 실행 시 폴더 소유권 불일치 우회
+            full_args = ("-c", "safe.directory=*", *args)
             proc = await asyncio.create_subprocess_exec(
-                _GIT_EXE, *args,
+                _GIT_EXE, *full_args,
                 cwd=repo_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
