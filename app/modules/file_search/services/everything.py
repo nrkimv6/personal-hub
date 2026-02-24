@@ -138,9 +138,9 @@ class EverythingService:
             cleaned = [ext.lstrip(".") for ext in extensions]
             parts.append(f"ext:{';'.join(cleaned)}")
 
-        # 경로 필터
+        # 경로 필터 — Everything은 backslash 필요
         for path in paths:
-            parts.append(f"path:{path}")
+            parts.append(f"path:{path.replace('/', '\\')}")
 
         # 제외 패턴
         for exc in excludes:

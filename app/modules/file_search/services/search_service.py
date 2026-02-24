@@ -165,11 +165,17 @@ class SearchService:
         )
         truncated = len(raw) >= request.max_results
 
+        def _safe_int(v):
+            try:
+                return int(v) if v not in (None, "") else None
+            except (ValueError, TypeError):
+                return None
+
         results = [
             FileMatch(
                 file_path=r["file_path"],
                 file_name=r["file_name"],
-                file_size=r.get("file_size"),
+                file_size=_safe_int(r.get("file_size")),
                 modified=r.get("modified"),
                 matches=[],
                 match_source="filename",
@@ -278,6 +284,12 @@ class SearchService:
                 match_source="content",
             )
 
+        def _safe_int(v):
+            try:
+                return int(v) if v not in (None, "") else None
+            except (ValueError, TypeError):
+                return None
+
         # filename 결과 병합 (content에 없는 파일만 추가)
         for r in fn_raw:
             fp = r["file_path"]
@@ -285,7 +297,7 @@ class SearchService:
                 merged[fp] = FileMatch(
                     file_path=fp,
                     file_name=r["file_name"],
-                    file_size=r.get("file_size"),
+                    file_size=_safe_int(r.get("file_size")),
                     modified=r.get("modified"),
                     matches=[],
                     match_source="filename",
