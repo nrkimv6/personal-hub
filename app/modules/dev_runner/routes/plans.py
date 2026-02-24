@@ -3,13 +3,17 @@
 import base64
 import logging
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
+from app.database import get_db
 from app.modules.dev_runner.schemas import PlanFileResponse, PlanProgressResponse, PlanDetailResponse, RegisteredPathResponse, DoneResponse, BatchDoneResponse, VerifyResult
 from app.modules.dev_runner.services.plan_service import plan_service
+from app.modules.dev_runner.services import archive_service
+from app.modules.dev_runner.services.plan_record_service import PlanRecordService
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +262,109 @@ async def unhold_plan(encoded_path: str):
 async def sync_plans():
     """plan 동기화 (재스캔) — 변경 요약 반환"""
     return plan_service.sync_plans()
+
+
+# ── Archive 정리 ──────────────────────────────────────────────
+
+def _get_archive_dirs() -> list[Path]:
+    """등록된 경로 중 type='archive'인 디렉토리 목록을 반환한다."""
+    paths = plan_service.list_registered_paths()
+    return [Path(p.path) for p in paths if p.path_type == "archive" and Path(p.path).is_dir()]
+
+
+@router.get("/plans/archive/preview")
+async def archive_preview():
+    """archive 폴더 정리 미리보기 — 이동 계획 반환 (실제 이동 없음)
+
+    Returns:
+        {"dirs": [{"archive_dir": str, "items": [...]}]}
+    """
+    dirs = _get_archive_dirs()
+    if not dirs:
+        return {"dirs": [], "message": "등록된 archive 경로가 없습니다."}
+
+    result = []
+    for d in dirs:
+        items = archive_service.preview_organize(d)
+        result.append({"archive_dir": str(d), "items": items})
+
+    return {"dirs": result}
+
+
+class OrganizeRequest(BaseModel):
+    """정리 실행 요청 (선택 항목만 이동)"""
+    archive_dir: Optional[str] = None  # None이면 등록된 모든 archive 경로 대상
+    items: Optional[list[dict]] = None  # None이면 전체 이동
+
+
+@router.post("/plans/archive/organize")
+async def archive_organize(
+    request: OrganizeRequest = OrganizeRequest(),
+    db: Session = Depends(get_db),
+):
+    """archive 폴더 정리 실행 — 파일 이동 + DB file_path 업데이트 + path_changed 이벤트 기록
+
+    Returns:
+        {"results": [{"archive_dir": str, "moved": [...], "skipped": int, "errors": [...], "removed_dirs": [...]}]}
+    """
+    if request.archive_dir:
+        target_dir = Path(request.archive_dir)
+        if not plan_service.validate_path(request.archive_dir):
+            raise HTTPException(status_code=403, detail="Path not allowed")
+        if not target_dir.is_dir():
+            raise HTTPException(status_code=404, detail="Archive directory not found")
+        dirs = [target_dir]
+    else:
+        dirs = _get_archive_dirs()
+
+    if not dirs:
+        return {"results": [], "message": "등록된 archive 경로가 없습니다."}
+
+    svc = PlanRecordService(db)
+    all_results = []
+
+    for d in dirs:
+        org_result = archive_service.organize_archive(d)
+
+        # DB 업데이트: 이동된 파일에 대해 file_path 갱신 + path_changed 이벤트
+        for move in org_result["moved"]:
+            try:
+                record = svc.get_or_create(move["source"])
+                old_path = record.file_path
+                record.file_path = move["dest"]
+                from datetime import datetime
+                record.updated_at = datetime.now()
+                from app.modules.dev_runner.services.plan_record_service import _add_event
+                _add_event(db, record, "path_changed", {"from": old_path, "to": move["dest"]})
+            except Exception as e:
+                logger.warning(f"DB 업데이트 실패: {move['source']} → {move['dest']}: {e}")
+
+        db.commit()
+        all_results.append({"archive_dir": str(d), **org_result})
+
+    return {"results": all_results}
+
+
+@router.get("/plans/archive/duplicates")
+async def archive_duplicates(similarity: float = 0.85):
+    """archive 폴더 내 중복 파일 후보 감지
+
+    Args:
+        similarity: 유사도 임계값 (0~1, 기본 0.85)
+
+    Returns:
+        {"dirs": [{"archive_dir": str, "duplicates": [...]}]}
+    """
+    dirs = _get_archive_dirs()
+    if not dirs:
+        return {"dirs": [], "message": "등록된 archive 경로가 없습니다."}
+
+    result = []
+    for d in dirs:
+        dupes = archive_service.detect_duplicates(d, similarity_threshold=similarity)
+        result.append({"archive_dir": str(d), "duplicates": dupes})
+
+    return {"dirs": result}
 
 
 __all__ = ['router']
