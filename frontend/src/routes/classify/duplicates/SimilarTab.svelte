@@ -30,6 +30,26 @@
 	let toastMessage = $state<string | null>(null);
 	let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
+	// 카테고리 맵 (폴백용)
+	let categoryMap = $state(new Map<number, string>());
+
+	async function loadCategoryMap() {
+		try {
+			const res = await fetchWithTimeout('/api/ic/categories?include_tree=true');
+			if (!res.ok) return;
+			const data = await res.json();
+			const map = new Map<number, string>();
+			function flatten(cats: any[]) {
+				for (const c of cats) {
+					map.set(c.id, c.full_path);
+					if (c.children?.length) flatten(c.children);
+				}
+			}
+			flatten(data.categories ?? []);
+			categoryMap = map;
+		} catch { /* ignore */ }
+	}
+
 	function showToast(msg: string) {
 		toastMessage = msg;
 		if (toastTimer) clearTimeout(toastTimer);
@@ -137,6 +157,7 @@
 	}
 
 	onMount(async () => {
+		void loadCategoryMap();
 		await checkClipStatus();
 		if (clipRunning) {
 			startClipPolling();
@@ -174,7 +195,7 @@
 				if (!groupMap.has(s.suggested_category_id)) {
 					groupMap.set(s.suggested_category_id, {
 						category_id: s.suggested_category_id,
-						category_path: s.suggested_category_path || `카테고리 ${s.suggested_category_id}`,
+						category_path: s.suggested_category_path || (categoryMap.get(s.suggested_category_id) ?? '(카테고리 정보 없음)'),
 						suggestions: []
 					});
 				}
