@@ -33,21 +33,21 @@ async function fetchWithTimeout(request: Request, timeout = 5000): Promise<Respo
 	}
 }
 
-// 설치 시 정적 자산 캐시 + 즉시 활성화
+// 설치 시 정적 자산 캐시 (skipWaiting 제거 → 자연스러운 업데이트)
 self.addEventListener('install', (event) => {
 	event.waitUntil(
-		caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())
+		caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
 	);
 });
 
-// 활성화 시 이전 캐시 정리 + 즉시 제어권 획득
+// 활성화 시 이전 캐시 정리 (clients.claim 제거 → 새 탭에서만 적용)
 self.addEventListener('activate', (event) => {
 	event.waitUntil(
 		caches.keys().then((keys) =>
 			Promise.all(
 				keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
 			)
-		).then(() => self.clients.claim())
+		)
 	);
 });
 

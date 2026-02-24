@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.11.2] - 2026-02-24
+### Fixed
+- Vite HMR WebSocket 안정화 (timeout 60s, watch 최적화)
+- Service Worker dev 모드 자동 해제, prod 수동 등록으로 변경
+- SW skipWaiting/clients.claim 제거 → 자연스러운 업데이트 전략
+
 ## [0.11.1] - 2026-02-24
 ### Fixed
 - ReviewTab 카테고리 표시 race condition 수정 — category_path 직접 사용, getCategoryDisplay() 패턴 적용
