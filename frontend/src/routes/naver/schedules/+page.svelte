@@ -7,6 +7,7 @@
   import AutoBookingList from '$lib/components/schedules/AutoBookingList.svelte';
   import MonitoringHistory from '$lib/components/MonitoringHistory.svelte';
   import BusinessManager from '$lib/components/businesses/BusinessManager.svelte';
+  import { createSelection } from '$lib/utils/selection.svelte';
 
   let schedules: ScheduleWithContext[] = [];
   let businesses: Business[] = [];
@@ -15,37 +16,20 @@
   let error: string | null = null;
 
   // 멀티 선택
-  let selectedIds: Set<number> = new Set();
-
-  function toggleSelect(id: number) {
-    if (selectedIds.has(id)) {
-      selectedIds.delete(id);
-    } else {
-      selectedIds.add(id);
-    }
-    selectedIds = selectedIds; // trigger reactivity
-  }
-
-  function toggleSelectAll() {
-    if (selectedIds.size === schedules.length) {
-      selectedIds = new Set();
-    } else {
-      selectedIds = new Set(schedules.map(s => s.id));
-    }
-  }
+  const selection = createSelection();
 
   async function bulkToggleEnabled(enable: boolean) {
-    if (selectedIds.size === 0) return;
-    if (!confirm(`선택한 ${selectedIds.size}개 일정을 ${enable ? '활성화' : '비활성화'}하시겠습니까?`)) return;
+    if (selection.count === 0) return;
+    if (!confirm(`선택한 ${selection.count}개 일정을 ${enable ? '활성화' : '비활성화'}하시겠습니까?`)) return;
     try {
-      for (const id of selectedIds) {
+      for (const id of selection.toArray()) {
         if (enable) {
           await scheduleApi.enable(id);
         } else {
           await scheduleApi.disable(id);
         }
       }
-      selectedIds = new Set();
+      selection.clear();
       await fetchSchedules();
     } catch (e) {
       alert('일괄 처리 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
@@ -53,13 +37,13 @@
   }
 
   async function bulkDelete() {
-    if (selectedIds.size === 0) return;
-    if (!confirm(`선택한 ${selectedIds.size}개 일정을 삭제하시겠습니까?`)) return;
+    if (selection.count === 0) return;
+    if (!confirm(`선택한 ${selection.count}개 일정을 삭제하시겠습니까?`)) return;
     try {
-      for (const id of selectedIds) {
+      for (const id of selection.toArray()) {
         await scheduleApi.delete(id);
       }
-      selectedIds = new Set();
+      selection.clear();
       await fetchSchedules();
     } catch (e) {
       alert('일괄 삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
@@ -971,11 +955,11 @@
       <div class="mb-4 flex items-center justify-between">
         <div class="text-sm text-muted-foreground">
           총 {schedules.length}개의 일정
-          {#if selectedIds.size > 0}
-            <span class="ml-2 text-primary">({selectedIds.size}개 선택)</span>
+          {#if selection.count > 0}
+            <span class="ml-2 text-primary">({selection.count}개 선택)</span>
           {/if}
         </div>
-        {#if selectedIds.size > 0}
+        {#if selection.count > 0}
           <div class="flex gap-2">
             <Button variant="secondary" size="sm" on:click={() => bulkToggleEnabled(true)}>
               일괄 활성화
@@ -997,9 +981,9 @@
                 <input
                   type="checkbox"
                   class="w-4 h-4 cursor-pointer"
-                  checked={schedules.length > 0 && selectedIds.size === schedules.length}
-                  indeterminate={selectedIds.size > 0 && selectedIds.size < schedules.length}
-                  on:change={toggleSelectAll}
+                  checked={selection.isAllSelected(schedules.map(s => s.id))}
+                  indeterminate={selection.count > 0 && !selection.isAllSelected(schedules.map(s => s.id))}
+                  on:change={() => selection.selectAll(schedules.map(s => s.id))}
                   title="전체 선택/해제"
                 />
               </th>
@@ -1016,14 +1000,14 @@
             {#each schedules as schedule (schedule.id)}
               {@const status = getStatusBadge(schedule.run_status, schedule.is_enabled)}
               {@const dateInfo = formatDate(schedule.date)}
-              <tr class="{!schedule.is_enabled ? 'opacity-60' : ''} {schedule.error_count > 0 ? 'bg-error-light' : ''} {selectedIds.has(schedule.id) ? 'bg-primary-light' : ''}">
+              <tr class="{!schedule.is_enabled ? 'opacity-60' : ''} {schedule.error_count > 0 ? 'bg-error-light' : ''} {selection.has(schedule.id) ? 'bg-primary-light' : ''}">
                 <!-- 체크박스 -->
                 <td>
                   <input
                     type="checkbox"
                     class="w-4 h-4 cursor-pointer"
-                    checked={selectedIds.has(schedule.id)}
-                    on:change={() => toggleSelect(schedule.id)}
+                    checked={selection.has(schedule.id)}
+                    on:change={() => selection.toggle(schedule.id)}
                   />
                 </td>
                 <!-- 상태 (간격 포함) -->

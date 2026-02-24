@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
+	import { createSelection } from '$lib/utils/selection.svelte';
 	import {
 		CheckCircle2,
 		RefreshCw,
@@ -32,7 +33,7 @@
 
 	let files: FileReview[] = $state([]);
 	let totalCount = $state(0);
-	let selectedIds = $state<number[]>([]);
+	const selection = createSelection();
 	let loading = $state(false);
 	let loadingMore = $state(false);
 	let sortBy = $state('confidence');
@@ -44,12 +45,12 @@
 	let currentOffset = $state(0);
 	let hasMore = $state(false);
 
-	// 카테고리 목록 (이름 표시용)
+	// 카테고리 목록 (?�름 ?�시??
 	let categories = $state<Category[]>([]);
 	let flatCategories = $state<Category[]>([]);
 	let categoryMap = $derived(new Map(flatCategories.map((c) => [c.id, c.full_path])));
 
-	// 카테고리 변경 모달
+	// 카테고리 변�?모달
 	let showCategoryPicker = $state(false);
 
 	onMount(() => {
@@ -115,14 +116,14 @@
 				totalCount = data.total ?? files.length;
 			}
 		} catch (err) {
-			console.error('파일 로드 실패:', err);
+			console.error('?�일 로드 ?�패:', err);
 		} finally {
 			loading = false;
 			loadingMore = false;
 		}
 	}
 
-	// 신뢰도 필터링 (클라이언트)
+	// ?�뢰???�터�?(?�라?�언??
 	let filteredFiles = $derived(
 		confidenceFilter === 'all'
 			? files
@@ -134,80 +135,57 @@
 				})
 	);
 
-	function toggleFile(id: number) {
-		if (selectedIds.includes(id)) {
-			selectedIds = selectedIds.filter((x) => x !== id);
-		} else {
-			selectedIds = [...selectedIds, id];
-		}
-	}
-
-	function selectAll() {
-		const allIds = filteredFiles.map((f) => f.id);
-		const allSelected = allIds.every((id) => selectedIds.includes(id));
-		if (allSelected) {
-			// 현재 필터된 항목 전체 해제
-			const filterSet = new Set(allIds);
-			selectedIds = selectedIds.filter((id) => !filterSet.has(id));
-		} else {
-			// 현재 필터된 항목 전체 선택
-			const existing = new Set(selectedIds);
-			for (const id of allIds) existing.add(id);
-			selectedIds = Array.from(existing);
-		}
-	}
-
 	let allSelected = $derived(
-		filteredFiles.length > 0 && filteredFiles.every((f) => selectedIds.includes(f.id))
+		filteredFiles.length > 0 && selection.isAllSelected(filteredFiles.map((f) => f.id))
 	);
 
 	async function approveSelected() {
-		if (selectedIds.length === 0) return;
+		if (selection.count === 0) return;
 		try {
 			const res = await fetchWithTimeout('/api/ic/files/approve', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ file_ids: selectedIds })
+				body: JSON.stringify({ file_ids: selection.toArray() })
 			});
-			if (!res.ok) throw new Error('승인 실패');
-			selectedIds = [];
+			if (!res.ok) throw new Error('?�인 ?�패');
+			selection.clear();
 			await loadFiles(true);
 		} catch (err) {
-			alert('승인 실패');
+			alert('?�인 ?�패');
 		}
 	}
 
 	async function deleteSelected() {
-		if (selectedIds.length === 0) return;
-		if (!confirm(`선택한 ${selectedIds.length}개 이미지를 삭제하시겠습니까?`)) return;
+		if (selection.count === 0) return;
+		if (!confirm(`?�택??${selection.count}�??��?지�???��?�시겠습?�까?`)) return;
 		try {
 			const res = await fetchWithTimeout('/api/ic/files/bulk-delete', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ file_ids: selectedIds })
+				body: JSON.stringify({ file_ids: selection.toArray() })
 			});
-			if (!res.ok) throw new Error('삭제 실패');
-			selectedIds = [];
+			if (!res.ok) throw new Error('??�� ?�패');
+			selection.clear();
 			await loadFiles(true);
 		} catch (err: any) {
-			alert(`삭제 실패: ${err.message}`);
+			alert(`??�� ?�패: ${err.message}`);
 		}
 	}
 
 	async function assignCategory(categoryId: number) {
-		if (selectedIds.length === 0) return;
+		if (selection.count === 0) return;
 		try {
 			const res = await fetchWithTimeout('/api/ic/files/bulk-classify', {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ file_ids: selectedIds, category_id: categoryId })
+				body: JSON.stringify({ file_ids: selection.toArray(), category_id: categoryId })
 			});
-			if (!res.ok) throw new Error('카테고리 지정 실패');
-			selectedIds = [];
+			if (!res.ok) throw new Error('카테고리 지???�패');
+			selection.clear();
 			showCategoryPicker = false;
 			await loadFiles(true);
 		} catch (err: any) {
-			alert(`카테고리 지정 실패: ${err.message}`);
+			alert(`카테고리 지???�패: ${err.message}`);
 		}
 	}
 
@@ -221,11 +199,11 @@
 					is_user_corrected: true
 				})
 			});
-			if (!res.ok) throw new Error('카테고리 변경 실패');
+			if (!res.ok) throw new Error('카테고리 변�??�패');
 			file.final_category_id = newCategoryId;
 			files = [...files];
 		} catch (err) {
-			console.error('카테고리 변경 실패:', err);
+			console.error('카테고리 변�??�패:', err);
 		}
 	}
 
@@ -236,7 +214,7 @@
 	function getCategoryDisplay(file: FileReview): string {
 		if (file.category_path) return file.category_path;
 		if (file.final_category_id) return categoryMap.get(file.final_category_id) ?? `#${file.final_category_id}`;
-		return '—';
+		return '미분류';
 	}
 
 	function getConfidenceColor(conf: number | null): string {
@@ -253,26 +231,26 @@
 		return 'bg-red-500/20';
 	}
 
-	// 정렬/필터 변경 시 재로드
+	// ?�렬/?�터 변�????�로??
 	function handleFilterChange() {
 		loadFiles(true);
 	}
 </script>
 
 <div class="space-y-4">
-	<!-- 헤더 -->
+	<!-- ?�더 -->
 	<div class="flex flex-wrap items-center justify-between gap-3">
 		<div>
 			<div class="flex items-center gap-2">
 				<CheckCircle2 class="size-5 text-primary" />
-				<h2 class="text-xl font-bold tracking-tight">검토 및 승인</h2>
+				<h2 class="text-xl font-bold tracking-tight">검??�??�인</h2>
 				{#if totalCount > 0}
 					<span class="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
-						{totalCount.toLocaleString()}건
+						{totalCount.toLocaleString()}�?
 					</span>
 				{/if}
 			</div>
-			<p class="mt-1 text-sm text-muted-foreground">AI가 분류한 결과를 검토하고 승인합니다.</p>
+			<p class="mt-1 text-sm text-muted-foreground">AI가 분류??결과�?검?�하�??�인?�니??</p>
 		</div>
 		<button
 			onclick={() => loadFiles(true)}
@@ -280,20 +258,20 @@
 			class="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-50 transition-colors"
 		>
 			<RefreshCw class="size-3.5 {loading ? 'animate-spin' : ''}" />
-			새로고침
+			?�로고침
 		</button>
 	</div>
 
-	<!-- 필터 바 -->
+	<!-- ?�터 �?-->
 	<div class="rounded-xl border border-border bg-card p-3">
 		<div class="flex flex-wrap items-center gap-3">
-			<!-- 신뢰도 필터 -->
+			<!-- ?�뢰???�터 -->
 			<div class="flex items-center gap-0.5 rounded-md border border-border bg-muted p-0.5">
 				{#each [
-					{ key: 'all', label: '전체' },
-					{ key: 'low', label: '낮음 <70%', color: 'text-red-600' },
+					{ key: 'all', label: '?�체' },
+					{ key: 'low', label: '??�� <70%', color: 'text-red-600' },
 					{ key: 'mid', label: '중간 70-90%', color: 'text-yellow-600' },
-					{ key: 'high', label: '높음 ≥90%', color: 'text-green-600' }
+					{ key: 'high', label: '?�음 ??0%', color: 'text-green-600' }
 				] as filter}
 					<button
 						onclick={() => {
@@ -308,63 +286,63 @@
 				{/each}
 			</div>
 
-			<!-- 카테고리 필터 -->
+			<!-- 카테고리 ?�터 -->
 			<select
 				bind:value={filterCategoryId}
 				onchange={() => handleFilterChange()}
 				class="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
 			>
-				<option value="">전체 카테고리</option>
+				<option value="">?�체 카테고리</option>
 				{#each flatCategories as cat}
 					<option value={cat.id}>{cat.full_path}</option>
 				{/each}
 			</select>
 
-			<!-- 정렬 -->
+			<!-- ?�렬 -->
 			<select
 				bind:value={sortBy}
 				onchange={handleFilterChange}
 				class="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
 			>
-				<option value="confidence">신뢰도순</option>
-				<option value="date">날짜순</option>
+				<option value="confidence">?�뢰?�순</option>
+				<option value="date">?�짜??/option>
 			</select>
 			<select
 				bind:value={sortDir}
 				onchange={handleFilterChange}
 				class="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
 			>
-				<option value="asc">오름차순</option>
-				<option value="desc">내림차순</option>
+				<option value="asc">?�름차순</option>
+				<option value="desc">?�림차순</option>
 			</select>
 
-			<!-- 전체 선택 -->
+			<!-- ?�체 ?�택 -->
 			<button
-				onclick={selectAll}
+				onclick={() => selection.selectAll(filteredFiles.map((f) => f.id))}
 				class="ml-auto flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-accent transition-colors"
 			>
 				{#if allSelected}
 					<SquareCheck class="size-3.5 text-primary" />
-					전체 해제
+					?�체 ?�제
 				{:else}
 					<Square class="size-3.5" />
-					전체 선택 ({filteredFiles.length})
+					?�체 ?�택 ({filteredFiles.length})
 				{/if}
 			</button>
 		</div>
 	</div>
 
-	<!-- 벌크 액션 바 -->
-	{#if selectedIds.length > 0}
+	<!-- 벌크 ?�션 �?-->
+	{#if selection.count > 0}
 		<div class="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
-			<span class="text-xs font-medium text-primary">{selectedIds.length}개 선택됨</span>
+			<span class="text-xs font-medium text-primary">{selection.count}�??�택??/span>
 			<div class="mx-1 h-4 w-px bg-border"></div>
 			<button
 				onclick={approveSelected}
 				class="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent"
 			>
 				<Check class="size-3" />
-				승인
+				?�인
 			</button>
 			<button
 				onclick={() => {
@@ -374,50 +352,50 @@
 				class="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent"
 			>
 				<Tag class="size-3" />
-				카테고리 변경
+				카테고리 변�?
 			</button>
 			<button
 				onclick={deleteSelected}
 				class="flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/10"
 			>
 				<Trash2 class="size-3" />
-				삭제
+				??��
 			</button>
 			<button
-				onclick={() => (selectedIds = [])}
+				onclick={() => selection.clear()}
 				class="ml-auto flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
 			>
 				<X class="size-3" />
-				선택 해제
+				?�택 ?�제
 			</button>
 		</div>
 	{/if}
 
-	<!-- 콘텐츠 -->
+	<!-- 콘텐�?-->
 	<div class="rounded-xl border bg-card">
 		{#if loading}
 			<div class="flex items-center justify-center py-16 text-sm text-muted-foreground gap-2">
 				<Loader2 class="size-4 animate-spin" />
-				로딩 중...
+				로딩 �?..
 			</div>
 		{:else if filteredFiles.length === 0}
 			<div class="py-16 text-center text-sm text-muted-foreground">
-				{confidenceFilter !== 'all' ? '해당 신뢰도 범위의 파일이 없습니다.' : '검토할 파일이 없습니다.'}
+				{confidenceFilter !== 'all' ? '?�당 ?�뢰??범위???�일???�습?�다.' : '검?�할 ?�일???�습?�다.'}
 			</div>
 		{:else}
 			<div
 				class="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
 			>
 				{#each filteredFiles as file (file.id)}
-					{@const isSelected = selectedIds.includes(file.id)}
+					{@const isSelected = selection.has(file.id)}
 					<div
 						role="button"
 						tabindex="0"
 						class="group relative aspect-square cursor-pointer overflow-hidden rounded-lg border bg-muted transition-all {isSelected
 							? 'ring-2 ring-primary'
 							: 'hover:ring-1 hover:ring-primary/50'}"
-						onclick={() => toggleFile(file.id)}
-						onkeydown={(e) => e.key === 'Enter' && toggleFile(file.id)}
+						onclick={() => selection.toggle(file.id)}
+						onkeydown={(e) => e.key === 'Enter' && selection.toggle(file.id)}
 					>
 						<img
 							src={getThumbnailUrl(file.id)}
@@ -444,7 +422,7 @@
 								: ''}"
 							onclick={(e) => {
 								e.stopPropagation();
-								toggleFile(file.id);
+								selection.toggle(file.id);
 							}}
 							aria-label="Select image"
 						>
@@ -453,7 +431,7 @@
 							{/if}
 						</button>
 
-						<!-- 신뢰도 -->
+						<!-- ?�뢰??-->
 						{#if file.ai_confidence}
 							<div class="absolute right-1.5 top-1.5">
 								<span
@@ -464,7 +442,7 @@
 							</div>
 						{/if}
 
-						<!-- 하단 정보 -->
+						<!-- ?�단 ?�보 -->
 						<div
 							class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent p-1.5 pt-5"
 						>
@@ -474,7 +452,7 @@
 							<p class="truncate text-[9px] text-white/70">
 								{getCategoryDisplay(file)}
 							</p>
-							<!-- 개별 카테고리 변경 드롭다운 -->
+							<!-- 개별 카테고리 변�??�롭?�운 -->
 							<!-- svelte-ignore a11y_click_events_have_key_events -->
 							<!-- svelte-ignore a11y_no_static_element_interactions -->
 							<div onclick={(e) => e.stopPropagation()} class="mt-1">
@@ -486,7 +464,7 @@
 									}}
 									class="w-full rounded border border-white/20 bg-black/50 px-1 py-0.5 text-[9px] text-white focus:outline-none"
 								>
-									<option value="">— 변경 —</option>
+									<option value="">??변�???/option>
 									{#each flatCategories as cat}
 										<option value={cat.id}>{cat.full_path}</option>
 									{/each}
@@ -497,7 +475,7 @@
 				{/each}
 			</div>
 
-			<!-- 더 보기 -->
+			<!-- ??보기 -->
 			{#if hasMore}
 				<div class="flex justify-center border-t py-3">
 					<button
@@ -507,9 +485,9 @@
 					>
 						{#if loadingMore}
 							<Loader2 class="size-4 animate-spin" />
-							로딩 중...
+							로딩 �?..
 						{:else}
-							더 보기 ({files.length}/{totalCount})
+							??보기 ({files.length}/{totalCount})
 						{/if}
 					</button>
 				</div>
@@ -518,7 +496,7 @@
 	</div>
 </div>
 
-<!-- 카테고리 선택 모달 -->
+<!-- 카테고리 ?�택 모달 -->
 {#if showCategoryPicker}
 	<div
 		role="button"
@@ -530,9 +508,9 @@
 	<div
 		class="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-card p-4 shadow-2xl"
 	>
-		<h3 class="mb-3 text-sm font-semibold text-foreground">카테고리 선택</h3>
+		<h3 class="mb-3 text-sm font-semibold text-foreground">카테고리 ?�택</h3>
 		{#if categories.length === 0}
-			<p class="text-xs text-muted-foreground">카테고리가 없습니다.</p>
+			<p class="text-xs text-muted-foreground">카테고리가 ?�습?�다.</p>
 		{:else}
 			<div class="max-h-60 space-y-1 overflow-y-auto">
 				{#each flatCategories as cat}

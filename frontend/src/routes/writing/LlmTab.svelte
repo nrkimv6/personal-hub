@@ -4,6 +4,7 @@
 	import { onMount } from 'svelte';
 	import { llmApi, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMCallerGroup, type LLMGroupedListResponse } from '$lib/api';
 	import LLMPerformance from '$lib/components/LLMPerformance.svelte';
+	import { createSelection } from '$lib/utils/selection.svelte';
 
 	// 상태
 	let requests: LLMRequest[] = [];
@@ -41,8 +42,7 @@
 	let filterRequestedBy = '';
 
 	// 선택
-	let selectedIds: number[] = [];
-	let selectAll = false;
+	const selection = createSelection();
 
 	// 탭: queue(대기열), history(이력), create(수동생성), performance(성능)
 	type Tab = 'queue' | 'history' | 'create' | 'performance';
@@ -252,8 +252,7 @@
 
 	function handleFilter() {
 		currentPage = 1;
-		selectedIds = [];
-		selectAll = false;
+		selection.clear();
 		fetchData();
 	}
 
@@ -279,23 +278,6 @@
 		if (currentPage < pages) {
 			currentPage++;
 			fetchData();
-		}
-	}
-
-	function toggleSelectAll() {
-		selectAll = !selectAll;
-		if (selectAll) {
-			selectedIds = requests.map(r => r.id);
-		} else {
-			selectedIds = [];
-		}
-	}
-
-	function toggleSelect(id: number) {
-		if (selectedIds.includes(id)) {
-			selectedIds = selectedIds.filter(i => i !== id);
-		} else {
-			selectedIds = [...selectedIds, id];
 		}
 	}
 
@@ -328,12 +310,11 @@
 	}
 
 	async function batchRetry() {
-		if (selectedIds.length === 0) return;
+		if (selection.count === 0) return;
 		try {
-			const result = await llmApi.batchRetry(selectedIds);
+			const result = await llmApi.batchRetry(selection.toArray());
 			alert(`재시도 완료: 성공 ${result.success}개, 스킵 ${result.skipped}개`);
-			selectedIds = [];
-			selectAll = false;
+			selection.clear();
 			await fetchData();
 		} catch (e) {
 			alert('일괄 재시도 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
@@ -341,13 +322,12 @@
 	}
 
 	async function batchDelete() {
-		if (selectedIds.length === 0) return;
-		if (!confirm(`선택한 ${selectedIds.length}개 요청을 삭제하시겠습니까?`)) return;
+		if (selection.count === 0) return;
+		if (!confirm(`선택한 ${selection.count}개 요청을 삭제하시겠습니까?`)) return;
 		try {
-			const result = await llmApi.batchDelete(selectedIds);
+			const result = await llmApi.batchDelete(selection.toArray());
 			alert(`삭제 완료: ${result.deleted}개`);
-			selectedIds = [];
-			selectAll = false;
+			selection.clear();
 			await fetchData();
 		} catch (e) {
 			alert('일괄 삭제 실패: ' + (e instanceof Error ? e.message : '알 수 없는 오류'));
@@ -455,8 +435,7 @@
 		activeTab = tab;
 		if (tab === 'queue' || tab === 'history') {
 			currentPage = 1;
-			selectedIds = [];
-			selectAll = false;
+			selection.clear();
 			fetchData();
 		}
 		if (tab === 'history') {
@@ -642,9 +621,9 @@
 		{/if}
 
 		<!-- 일괄 작업 버튼 (개별 뷰) -->
-		{#if viewMode === 'individual' && selectedIds.length > 0}
+		{#if viewMode === 'individual' && selection.count > 0}
 			<div class="mb-4 flex gap-2 items-center">
-				<span class="text-sm text-muted-foreground">{selectedIds.length}개 선택</span>
+				<span class="text-sm text-muted-foreground">{selection.count}개 선택</span>
 				{#if activeTab === 'history'}
 					<Button variant="secondary" size="sm" on:click={batchRetry}>일괄 재시도</Button>
 				{/if}
@@ -767,8 +746,8 @@
 							<th class="px-4 py-3 text-left whitespace-nowrap">
 								<input
 									type="checkbox"
-									checked={selectAll}
-									onchange={toggleSelectAll}
+									checked={selection.isAllSelected(requests.map(r => r.id))}
+									onchange={() => selection.selectAll(requests.map(r => r.id))}
 									class="rounded"
 								/>
 							</th>
@@ -791,8 +770,8 @@
 								<td class="px-4 py-3" onclick={(e) => e.stopPropagation()}>
 									<input
 										type="checkbox"
-										checked={selectedIds.includes(request.id)}
-										onchange={() => toggleSelect(request.id)}
+										checked={selection.has(request.id)}
+										onchange={() => selection.toggle(request.id)}
 										class="rounded"
 									/>
 								</td>

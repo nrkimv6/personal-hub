@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
+	import { createSelection } from '$lib/utils/selection.svelte';
 	import { Search, RefreshCw, Tag, ArrowRight, Cpu, AlertTriangle, Eye, FolderOpen, Clipboard } from 'lucide-svelte';
 
 	interface SimilarSuggestion {
@@ -20,7 +21,7 @@
 	}
 
 	let groups: SuggestionGroup[] = $state([]);
-	let selectedFiles: Set<number> = $state(new Set());
+	const selection = createSelection();
 	let threshold = $state(0.85);
 	let loading = $state(false);
 	let error = $state('');
@@ -30,7 +31,7 @@
 	let toastMessage = $state<string | null>(null);
 	let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
-	// 카테고리 맵 (폴백용)
+	// 카테고리 �?(?�백??
 	let categoryMap = $state(new Map<number, string>());
 
 	async function loadCategoryMap() {
@@ -56,7 +57,7 @@
 		toastTimer = setTimeout(() => { toastMessage = null; }, 3000);
 	}
 
-	// CLIP 임베딩 상태
+	// CLIP ?�베???�태
 	let clipReady = $state(false);
 	let clipChecking = $state(true);
 	let clipRunning = $state(false);
@@ -73,20 +74,20 @@
 			clipProcessed = data.processed;
 			clipTotal = data.total;
 
-			// CLIP이 실행 완료된 적이 있는지 pipeline에서 확인
+			// CLIP???�행 ?�료???�이 ?�는지 pipeline?�서 ?�인
 			const pipeRes = await fetchWithTimeout('/api/ic/stats/pipeline');
 			if (pipeRes.ok) {
 				const pipeline = await pipeRes.json();
 				const clipStage = pipeline.clip;
-				// last_run이 있거나 실행 중이면 CLIP이 준비된 것
+				// last_run???�거???�행 중이�?CLIP??준비된 �?
 				if (clipStage?.last_run || clipStage?.is_running) {
 					clipReady = true;
 				} else {
-					// DB에서 clip_embedding 존재 여부 직접 확인
+					// DB?�서 clip_embedding 존재 ?��? 직접 ?�인
 					const statsRes = await fetchWithTimeout('/api/ic/stats');
 					if (statsRes.ok) {
 						const stats = await statsRes.json();
-						// clip_embeddings 카운트가 있으면 준비됨
+						// clip_embeddings 카운?��? ?�으�?준비됨
 						clipReady = (stats.clip_embeddings ?? 0) > 0;
 					}
 				}
@@ -108,7 +109,7 @@
 			clipRunning = true;
 			startClipPolling();
 		} catch (err: any) {
-			alert(`CLIP 임베딩 계산 시작 실패: ${err.message}`);
+			alert(`CLIP ?�베??계산 ?�작 ?�패: ${err.message}`);
 		}
 	}
 
@@ -127,7 +128,7 @@
 					stopClipPolling();
 					clipReady = true;
 					if (data.error) {
-						alert(`CLIP 임베딩 오류: ${data.error}`);
+						alert(`CLIP ?�베???�류: ${data.error}`);
 					}
 				}
 			} catch {
@@ -148,9 +149,9 @@
 		try {
 			const res = await fetchWithTimeout('/api/ic/similar/build-index', { method: 'POST' });
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			alert('FAISS 인덱스 빌드 완료!');
+			alert('FAISS ?�덱??빌드 ?�료!');
 		} catch (err: any) {
-			alert(`인덱스 빌드 실패: ${err.message}`);
+			alert(`?�덱??빌드 ?�패: ${err.message}`);
 		} finally {
 			buildingIndex = false;
 		}
@@ -181,13 +182,13 @@
 			);
 
 			if (!response.ok) {
-				throw new Error('유사 이미지 로드 실패');
+				throw new Error('?�사 ?��?지 로드 ?�패');
 			}
 
 			const data = await response.json();
 			totalUnclassified = data.total_unclassified ?? 0;
 
-			// suggestions를 category별로 그룹핑
+			// suggestions�?category별로 그룹??
 			const suggestions: SimilarSuggestion[] = data.suggestions || [];
 			const groupMap = new Map<number, SuggestionGroup>();
 
@@ -195,7 +196,7 @@
 				if (!groupMap.has(s.suggested_category_id)) {
 					groupMap.set(s.suggested_category_id, {
 						category_id: s.suggested_category_id,
-						category_path: s.suggested_category_path || (categoryMap.get(s.suggested_category_id) ?? '(카테고리 정보 없음)'),
+						category_path: s.suggested_category_path || (categoryMap.get(s.suggested_category_id) ?? '(카테고리 ?�보 ?�음)'),
 						suggestions: []
 					});
 				}
@@ -210,37 +211,21 @@
 		}
 	}
 
-	function toggleFile(fileId: number) {
-		if (selectedFiles.has(fileId)) {
-			selectedFiles.delete(fileId);
-		} else {
-			selectedFiles.add(fileId);
-		}
-		selectedFiles = selectedFiles;
-	}
-
 	function toggleGroup(group: SuggestionGroup) {
-		const allSelected = group.suggestions.every((s) => selectedFiles.has(s.file_id));
-
-		if (allSelected) {
-			group.suggestions.forEach((s) => selectedFiles.delete(s.file_id));
-		} else {
-			group.suggestions.forEach((s) => selectedFiles.add(s.file_id));
-		}
-		selectedFiles = selectedFiles;
+		selection.selectAll(group.suggestions.map((s) => s.file_id));
 	}
 
 	async function applyGroupClassification(group: SuggestionGroup) {
 		const fileIds = group.suggestions
-			.filter((s) => selectedFiles.has(s.file_id))
+			.filter((s) => selection.has(s.file_id))
 			.map((s) => s.file_id);
 
 		if (fileIds.length === 0) {
-			alert('파일을 선택해주세요.');
+			alert('?�일???�택?�주?�요.');
 			return;
 		}
 
-		if (!confirm(`선택한 ${fileIds.length}개 파일을 "${group.category_path}"로 분류하시겠습니까?`)) {
+		if (!confirm(`?�택??${fileIds.length}�??�일??"${group.category_path}"�?분류?�시겠습?�까?`)) {
 			return;
 		}
 
@@ -259,13 +244,12 @@
 				});
 
 				if (!response.ok) {
-					throw new Error(`파일 ${fileId} 분류 실패`);
+					throw new Error(`?�일 ${fileId} 분류 ?�패`);
 				}
 			}
 
-			showToast(`${fileIds.length}개 파일이 "${group.category_path}"로 분류되었습니다.`);
-			selectedFiles.clear();
-			selectedFiles = selectedFiles;
+			showToast(`${fileIds.length}�??�일??"${group.category_path}"�?분류?�었?�니??`);
+			selection.clear();
 			await loadSimilarSuggestions();
 		} catch (err: any) {
 			error = err.message;
@@ -301,10 +285,10 @@
 			});
 			if (!res.ok) {
 				const err = await res.json();
-				alert(err.detail || '뷰어 열기 실패');
+				alert(err.detail || '뷰어 ?�기 ?�패');
 			}
 		} catch (err: any) {
-			alert(`뷰어 열기 실패: ${err.message}`);
+			alert(`뷰어 ?�기 ?�패: ${err.message}`);
 		}
 	}
 
@@ -317,10 +301,10 @@
 			});
 			if (!res.ok) {
 				const err = await res.json();
-				alert(err.detail || '탐색기 열기 실패');
+				alert(err.detail || '?�색�??�기 ?�패');
 			}
 		} catch (err: any) {
-			alert(`탐색기 열기 실패: ${err.message}`);
+			alert(`?�색�??�기 ?�패: ${err.message}`);
 		}
 	}
 
@@ -328,7 +312,7 @@
 		try {
 			await navigator.clipboard.writeText(text);
 		} catch {
-			alert('클립보드 복사 실패');
+			alert('?�립보드 복사 ?�패');
 		}
 	}
 
@@ -343,15 +327,15 @@
 </script>
 
 <div class="space-y-6">
-	<!-- 헤더 -->
+	<!-- ?�더 -->
 	<div class="flex items-center justify-between">
 		<div>
 			<div class="flex items-center gap-2">
 				<Search class="size-5 text-primary" />
-				<h2 class="text-xl font-bold tracking-tight">유사 이미지</h2>
+				<h2 class="text-xl font-bold tracking-tight">?�사 ?��?지</h2>
 			</div>
 			<p class="mt-1 text-sm text-muted-foreground">
-				이미 분류된 이미지와 유사한 미분류 이미지를 찾아 자동으로 분류 제안합니다.
+				?��? 분류???��?지?� ?�사??미분�??��?지�?찾아 ?�동?�로 분류 ?�안?�니??
 			</p>
 		</div>
 		<div class="flex items-center gap-2">
@@ -369,22 +353,22 @@
 				class="flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50 transition-colors"
 			>
 				<RefreshCw class="size-3.5 {buildingIndex ? 'animate-spin' : ''}" />
-				{buildingIndex ? '빌드 중...' : '인덱스 빌드'}
+				{buildingIndex ? '빌드 �?..' : '?�덱??빌드'}
 			</button>
 		</div>
 	</div>
 
-	<!-- CLIP 임베딩 미계산 배너 -->
+	<!-- CLIP ?�베??미계??배너 -->
 	{#if clipChecking}
 		<div class="flex items-center gap-2 rounded-lg border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
 			<div class="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
-			CLIP 임베딩 상태 확인 중...
+			CLIP ?�베???�태 ?�인 �?..
 		</div>
 	{:else if clipRunning}
 		<div class="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
 			<div class="flex items-center gap-2 text-sm font-medium text-primary">
 				<Cpu class="size-4 animate-pulse" />
-				CLIP 임베딩 계산 중... ({clipProcessed}/{clipTotal})
+				CLIP ?�베??계산 �?.. ({clipProcessed}/{clipTotal})
 			</div>
 			{#if clipTotal > 0}
 				<div class="mt-2 h-2 w-full rounded-full bg-muted">
@@ -399,21 +383,21 @@
 		<div class="rounded-lg border border-amber-500/30 bg-amber-50 px-4 py-3 dark:bg-amber-950/20">
 			<div class="flex items-center gap-2 text-sm font-medium text-amber-700 dark:text-amber-400">
 				<AlertTriangle class="size-4" />
-				CLIP 임베딩이 필요합니다
+				CLIP ?�베?�이 ?�요?�니??
 			</div>
 			<p class="mt-1 text-xs text-amber-600 dark:text-amber-500">
-				유사 이미지 검색을 위해 CLIP 임베딩을 먼저 계산해야 합니다. 상단의 "CLIP 계산" 버튼을 클릭하세요.
+				?�사 ?��?지 검?�을 ?�해 CLIP ?�베?�을 먼�? 계산?�야 ?�니?? ?�단??"CLIP 계산" 버튼???�릭?�세??
 			</p>
 		</div>
 	{/if}
 
-	<!-- 검색 설정 -->
+	<!-- 검???�정 -->
 	<div class="rounded-xl border bg-card p-4">
-		<h3 class="mb-4 text-sm font-semibold">검색 설정</h3>
+		<h3 class="mb-4 text-sm font-semibold">검???�정</h3>
 		<div class="flex flex-wrap items-end gap-4">
 			<div class="flex flex-col gap-1">
 				<label class="text-xs font-medium" for="threshold-range">
-					유사도 기준 — <span class="font-bold {getThresholdColorClass(threshold)}">{(threshold * 100).toFixed(0)}%</span>
+					?�사??기�? ??<span class="font-bold {getThresholdColorClass(threshold)}">{(threshold * 100).toFixed(0)}%</span>
 				</label>
 				<input
 					id="threshold-range"
@@ -426,7 +410,7 @@
 				/>
 			</div>
 			<div class="flex flex-col gap-1">
-				<label class="text-xs font-medium" for="match-count">최대 결과 수</label>
+				<label class="text-xs font-medium" for="match-count">최�? 결과 ??/label>
 				<input
 					id="match-count"
 					type="number"
@@ -443,17 +427,17 @@
 				class="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
 			>
 				<RefreshCw class="size-3.5 {loading ? 'animate-spin' : ''}" />
-				{loading ? '검색 중...' : '검색'}
+				{loading ? '검색 중..': '검색'}
 			</button>
 		</div>
 		{#if !loading}
 			<p class="mt-2 text-xs text-muted-foreground">
-				미분류 {totalUnclassified}개 중 {totalResults}개 유사 이미지 발견 ({groups.length}개 그룹)
+				미분�?{totalUnclassified}�?�?{totalResults}�??�사 ?��?지 발견 ({groups.length}�?그룹)
 			</p>
 		{/if}
 	</div>
 
-	<!-- 에러 -->
+	<!-- ?�러 -->
 	{#if error}
 		<div class="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
 			{error}
@@ -465,53 +449,53 @@
 		<div class="flex items-center justify-center py-16 text-sm text-muted-foreground">
 			<div class="flex items-center gap-2">
 				<div class="size-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
-				유사 이미지 검색 중...
+				?�사 ?��?지 검??�?..
 			</div>
 		</div>
 	{:else if groups.length === 0}
 		<div class="rounded-xl border bg-card py-16 text-center text-sm text-muted-foreground">
-			유사 이미지를 찾을 수 없습니다. 임계값을 낮춰보세요.
+			?�사 ?��?지�?찾을 ???�습?�다. ?�계값을 ??��보세??
 		</div>
 	{:else}
-		<!-- 그룹별 결과 -->
+		<!-- 그룹�?결과 -->
 		<div class="space-y-6">
 			{#each groups as group}
 				<div class="rounded-xl border bg-card">
-					<!-- 그룹 헤더 -->
+					<!-- 그룹 ?�더 -->
 					<div class="flex flex-wrap items-center gap-3 border-b px-4 py-3">
 						<div class="flex items-center gap-1.5">
 							<ArrowRight class="size-4 text-primary" />
 							<span class="font-semibold text-sm">{group.category_path}</span>
 						</div>
 						<div class="flex items-center gap-2 text-xs text-muted-foreground">
-							<span>유사 {group.suggestions.length}개</span>
+							<span>?�사 {group.suggestions.length}�?/span>
 						</div>
 						<div class="ml-auto flex items-center gap-2">
 							<button
 								onclick={() => toggleGroup(group)}
 								class="rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
 							>
-								{group.suggestions.every((s) => selectedFiles.has(s.file_id))
-									? '전체 해제'
-									: '전체 선택'}
+								{group.suggestions.every((s) => selection.has(s.file_id))
+									? '?�체 ?�제'
+									: '?�체 ?�택'}
 							</button>
 							<button
 								onclick={() => applyGroupClassification(group)}
-								disabled={!group.suggestions.some((s) => selectedFiles.has(s.file_id))}
+								disabled={!group.suggestions.some((s) => selection.has(s.file_id))}
 								class="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
 							>
 								<Tag class="size-3" />
-								{group.category_path}에 적용
+								{group.category_path}???�용
 							</button>
 						</div>
 					</div>
 
-					<!-- 이미지 그리드 -->
+					<!-- ?��?지 그리??-->
 					<div class="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
 						{#each group.suggestions as item}
 							<div
-								class="cursor-pointer overflow-hidden rounded-lg border transition-all {selectedFiles.has(item.file_id) ? 'ring-2 ring-primary' : 'hover:ring-1 hover:ring-primary/50'}"
-								onclick={() => toggleFile(item.file_id)}
+								class="cursor-pointer overflow-hidden rounded-lg border transition-all {selection.has(item.file_id) ? 'ring-2 ring-primary' : 'hover:ring-1 hover:ring-primary/50'}"
+								onclick={() => selection.toggle(item.file_id)}
 							>
 								<div class="relative aspect-square">
 									<img
@@ -523,16 +507,16 @@
 									/>
 
 									<!-- 체크박스 -->
-									<div class="absolute left-2 top-2 {selectedFiles.has(item.file_id) ? 'opacity-100' : 'opacity-0 hover:opacity-100'} transition-opacity">
+									<div class="absolute left-2 top-2 {selection.has(item.file_id) ? 'opacity-100' : 'opacity-0 hover:opacity-100'} transition-opacity">
 										<input
 											type="checkbox"
-											checked={selectedFiles.has(item.file_id)}
-											onchange={() => toggleFile(item.file_id)}
+											checked={selection.has(item.file_id)}
+											onchange={() => selection.toggle(item.file_id)}
 											class="size-4 accent-primary"
 										/>
 									</div>
 
-									<!-- 점수 뱃지 -->
+									<!-- ?�수 뱃�? -->
 									<div class="absolute right-2 top-2">
 										<span class="rounded px-1.5 py-0.5 text-[10px] font-bold {getScoreBadgeClass(item.similarity)}">
 											{(item.similarity * 100).toFixed(0)}%
@@ -540,7 +524,7 @@
 									</div>
 								</div>
 
-								<!-- 파일 정보 -->
+								<!-- ?�일 ?�보 -->
 								<div class="p-1.5 space-y-0.5 bg-card">
 									<p class="truncate text-[10px] font-medium text-foreground" title={item.file_path}>
 										{getFileName(item.file_path)}
@@ -561,14 +545,14 @@
 										<button
 											onclick={() => openLocalViewer(item.file_id)}
 											class="flex-1 flex items-center justify-center rounded py-0.5 text-[9px] text-muted-foreground hover:bg-muted transition-colors"
-											title="뷰어로 열기"
+											title="뷰어�??�기"
 										>
 											<Eye class="size-3" />
 										</button>
 										<button
 											onclick={() => openInExplorer(item.file_id)}
 											class="flex-1 flex items-center justify-center rounded py-0.5 text-[9px] text-muted-foreground hover:bg-muted transition-colors"
-											title="탐색기로 열기"
+											title="?�색기로 ?�기"
 										>
 											<FolderOpen class="size-3" />
 										</button>
@@ -590,16 +574,16 @@
 	{/if}
 </div>
 
-<!-- Sticky 액션 바 -->
-{#if selectedFiles.size > 0}
+<!-- Sticky ?�션 �?-->
+{#if selection.count > 0}
 	<div class="fixed bottom-10 left-1/2 z-50 -translate-x-1/2">
 		<div class="flex items-center gap-4 rounded-full border bg-card px-5 py-2.5 shadow-xl">
-			<span class="text-sm font-semibold">{selectedFiles.size}개 선택됨</span>
+			<span class="text-sm font-semibold">{selection.count}�??�택??/span>
 			<button
-				onclick={() => { selectedFiles.clear(); selectedFiles = selectedFiles; }}
+				onclick={() => { selection.clear(); }}
 				class="rounded-full border px-4 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
 			>
-				전체 해제
+				?�체 ?�제
 			</button>
 		</div>
 	</div>

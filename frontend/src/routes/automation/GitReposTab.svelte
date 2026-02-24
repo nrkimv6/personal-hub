@@ -4,6 +4,7 @@
   import { gitReposApi } from '$lib/api/gitRepos';
   import type { GitRepo } from '$lib/types/gitRepos';
   import AddRepoModal from './AddRepoModal.svelte';
+  import { createSelection } from '$lib/utils/selection.svelte';
 
   let repos: GitRepo[] = $state([]);
   let loading = $state(true);
@@ -11,7 +12,7 @@
   let showAddModal = $state(false);
 
   // 선택 상태
-  let selectedIds: Set<number> = $state(new Set());
+  const selection = createSelection();
 
   // 일괄 작업 모달
   let batchCommitMsg = $state('');
@@ -79,7 +80,7 @@
     try {
       await gitReposApi.deleteRepo(id);
       repos = repos.filter((r) => r.id !== id);
-      selectedIds.delete(id);
+      if (selection.has(id)) selection.toggle(id);
     } catch (e) {
       showToast('삭제 실패: ' + (e instanceof Error ? e.message : ''), 'error');
     }
@@ -89,26 +90,11 @@
     repos = [...repos, repo];
   }
 
-  function toggleSelectAll() {
-    if (selectedIds.size === repos.length) {
-      selectedIds = new Set();
-    } else {
-      selectedIds = new Set(repos.map((r) => r.id));
-    }
-  }
-
-  function toggleSelect(id: number) {
-    const next = new Set(selectedIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    selectedIds = next;
-  }
-
   async function handleBatchCommit() {
     if (!batchCommitMsg.trim()) return;
     batchWorking = true;
     try {
-      const result = await gitReposApi.batchCommit([...selectedIds], batchCommitMsg);
+      const result = await gitReposApi.batchCommit(selection.toArray(), batchCommitMsg);
       const failed = result.results.filter((r) => !r.success);
       if (failed.length) {
         showToast(`${failed.length}개 레포 커밋 실패`, 'error');
@@ -126,11 +112,11 @@
   }
 
   async function handleBatchPush() {
-    if (selectedIds.size === 0) return;
-    if (!confirm(`선택한 ${selectedIds.size}개 레포지토리를 푸시하시겠습니까?`)) return;
+    if (selection.count === 0) return;
+    if (!confirm(`선택한 ${selection.count}개 레포지토리를 푸시하시겠습니까?`)) return;
     batchWorking = true;
     try {
-      const result = await gitReposApi.batchPush([...selectedIds]);
+      const result = await gitReposApi.batchPush(selection.toArray());
       const failed = result.results.filter((r) => !r.success);
       if (failed.length) showToast(`${failed.length}개 레포 푸시 실패`, 'error');
       else showToast('일괄 푸시 완료');
@@ -175,17 +161,17 @@
       >
         ➕ 폴더 추가
       </button>
-      {#if selectedIds.size > 0}
+      {#if selection.count > 0}
         <button
           class="px-3 py-2 text-sm rounded-lg bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-50"
           onclick={() => (showBatchCommitModal = true)}
           disabled={batchWorking}
-        >커밋 ({selectedIds.size})</button>
+        >커밋 ({selection.count})</button>
         <button
           class="px-3 py-2 text-sm rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
           onclick={handleBatchPush}
           disabled={batchWorking}
-        >푸시 ({selectedIds.size})</button>
+        >푸시 ({selection.count})</button>
       {/if}
     </div>
   </div>
@@ -234,8 +220,8 @@
             <th class="px-4 py-3 text-left">
               <input
                 type="checkbox"
-                checked={selectedIds.size === repos.length && repos.length > 0}
-                onchange={toggleSelectAll}
+                checked={selection.isAllSelected(repos.map(r => r.id))}
+                onchange={() => selection.selectAll(repos.map(r => r.id))}
                 class="rounded"
               />
             </th>
@@ -255,8 +241,8 @@
               <td class="px-4 py-3">
                 <input
                   type="checkbox"
-                  checked={selectedIds.has(repo.id)}
-                  onchange={() => toggleSelect(repo.id)}
+                  checked={selection.has(repo.id)}
+                  onchange={() => selection.toggle(repo.id)}
                   class="rounded"
                 />
               </td>
@@ -341,7 +327,7 @@
       onkeydown={(e) => e.stopPropagation()}
       role="presentation"
     >
-      <h2 class="text-lg font-semibold mb-4 text-gray-800 dark:text-gray-100">일괄 커밋 ({selectedIds.size}개)</h2>
+      <h2 class="text-lg font-semibold mb-4 text-gray-800 dark:text-gray-100">일괄 커밋 ({selection.count}개)</h2>
       <input
         class="w-full border rounded-lg px-3 py-2 text-sm mb-4 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100"
         placeholder="커밋 메시지"

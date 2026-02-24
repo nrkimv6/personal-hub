@@ -2,7 +2,8 @@
   import { onMount } from 'svelte';
   import { fetchWithTimeout } from '$lib/api/client';
   import { toast } from '$lib/stores/toast';
-  import { Search, Tag, Trash2, Check, X, Loader2, Images, ImagePlus, Eye, FolderOpen, Clipboard } from 'lucide-svelte';
+  import { createSelection } from '$lib/utils/selection.svelte';
+  import { Search, Tag, Trash2, Check, X, Loader2, Images, ImagePlus, Eye, FolderOpen, Clipboard, Square, SquareCheck } from 'lucide-svelte';
 
   // 태그 타입 (GalleryImage에서 사용하므로 먼저 선언)
   interface TagItem { id: number; name: string; }
@@ -26,7 +27,7 @@
   let loadError = $state<string | null>(null);
   let loadingMore = $state(false);
 
-  let selectedImages = $state<number[]>([]);
+  const selection = createSelection();
   let searchQuery = $state('');
   let statusFilter = $state('all');
   let sortBy = $state('date');
@@ -185,13 +186,9 @@
     detailImage !== null ? images.find(img => img.id === detailImage) ?? null : null
   );
 
-  function toggleSelect(id: number) {
-    if (selectedImages.includes(id)) {
-      selectedImages = selectedImages.filter(x => x !== id);
-    } else {
-      selectedImages = [...selectedImages, id];
-    }
-  }
+  let allSelected = $derived(
+    filteredImages.length > 0 && selection.isAllSelected(filteredImages.map((img) => img.id))
+  );
 
   function openDetail(id: number) {
     detailImage = id;
@@ -217,7 +214,7 @@
 
   // === 승인/카테고리/삭제 ===
   async function approveSelected(ids?: number[]) {
-    const fileIds = ids ?? selectedImages;
+    const fileIds = ids ?? selection.toArray();
     if (fileIds.length === 0) return;
     try {
       const res = await fetchWithTimeout('/api/ic/files/approve', {
@@ -229,7 +226,7 @@
       images = images.map(img =>
         fileIds.includes(img.id) ? { ...img, status: 'approved' } : img
       );
-      selectedImages = [];
+      selection.clear();
       detailImage = null;
       toast.success(`${fileIds.length}개 이미지를 승인했습니다.`);
     } catch (err: any) {
@@ -275,13 +272,14 @@
   }
 
   async function bulkTagFiles(tagName: string) {
-    if (selectedImages.length === 0) return;
-    const taggedCount = selectedImages.length;
+    if (selection.count === 0) return;
+    const fileIds = selection.toArray();
+    const taggedCount = fileIds.length;
     try {
       const res = await fetchWithTimeout('/api/ic/tags/bulk-tag', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_ids: selectedImages, tag_names: [tagName] }),
+        body: JSON.stringify({ file_ids: fileIds, tag_names: [tagName] }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       showTagPicker = false;
@@ -289,9 +287,8 @@
       // 로컬 이미지 배열에서 선택된 이미지의 tags 업데이트
       const appliedTag = tags.find(t => t.name === tagName);
       if (appliedTag) {
-        const taggedIds = [...selectedImages];
         images = images.map(img => {
-          if (!taggedIds.includes(img.id)) return img;
+          if (!fileIds.includes(img.id)) return img;
           const alreadyHas = img.tags.some(t => t.id === appliedTag.id);
           if (alreadyHas) return img;
           return { ...img, tags: [...img.tags, appliedTag] };
@@ -332,20 +329,21 @@
   }
 
   async function assignCategory(categoryId: number) {
-    if (selectedImages.length === 0) return;
+    if (selection.count === 0) return;
+    const fileIds = selection.toArray();
     try {
       const res = await fetchWithTimeout('/api/ic/files/bulk-classify', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_ids: selectedImages, category_id: categoryId }),
+        body: JSON.stringify({ file_ids: fileIds, category_id: categoryId }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const categoryStr = String(categoryId);
       images = images.map(img =>
-        selectedImages.includes(img.id) ? { ...img, category: categoryStr } : img
+        fileIds.includes(img.id) ? { ...img, category: categoryStr } : img
       );
-      const updatedCount = selectedImages.length;
-      selectedImages = [];
+      const updatedCount = fileIds.length;
+      selection.clear();
       showCategoryPicker = false;
       toast.success(`${updatedCount}개 이미지의 카테고리를 지정했습니다.`);
     } catch (err: any) {
@@ -354,19 +352,20 @@
   }
 
   async function deleteSelected() {
-    if (selectedImages.length === 0) return;
-    if (!confirm(`선택한 ${selectedImages.length}개 이미지를 삭제하시겠습니까?`)) return;
+    if (selection.count === 0) return;
+    const fileIds = selection.toArray();
+    if (!confirm(`선택한 ${fileIds.length}개 이미지를 삭제하시겠습니까?`)) return;
     try {
       const res = await fetchWithTimeout('/api/ic/files/bulk-delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_ids: selectedImages }),
+        body: JSON.stringify({ file_ids: fileIds }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const deletedCount = selectedImages.length;
-      images = images.filter(img => !selectedImages.includes(img.id));
+      const deletedCount = fileIds.length;
+      images = images.filter(img => !fileIds.includes(img.id));
       totalCount = Math.max(0, totalCount - deletedCount);
-      selectedImages = [];
+      selection.clear();
       toast.success(`${deletedCount}개 이미지를 삭제했습니다.`);
     } catch (err: any) {
       toast.error(`삭제 실패: ${err.message}`);
@@ -543,9 +542,9 @@
   </div>
 
   <!-- Bulk Action Bar -->
-  {#if selectedImages.length > 0}
+  {#if selection.count > 0}
     <div class="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
-      <span class="text-xs font-medium text-primary">{selectedImages.length} 이미지 선택됨</span>
+      <span class="text-xs font-medium text-primary">{selection.count} 이미지 선택됨</span>
       <div class="mx-1 h-4 w-px bg-border"></div>
       <button onclick={() => { loadCategories(); showCategoryPicker = true; }} class="flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground hover:bg-accent">
         <Tag class="size-3" />
@@ -587,11 +586,23 @@
         삭제
       </button>
       <button
-        onclick={() => (selectedImages = [])}
+        onclick={() => selection.selectAll(filteredImages.map((img) => img.id))}
+        class="flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-accent transition-colors"
+      >
+        {#if allSelected}
+          <SquareCheck class="size-3.5 text-primary" />
+          전체 해제
+        {:else}
+          <Square class="size-3.5" />
+          전체 선택 ({filteredImages.length})
+        {/if}
+      </button>
+      <button
+        onclick={() => selection.clear()}
         class="ml-auto flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
       >
         <X class="size-3" />
-        전체 해제
+        선택 해제
       </button>
     </div>
   {/if}
@@ -628,7 +639,7 @@
     <!-- Image Grid -->
     <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
       {#each filteredImages as img (img.id)}
-        {@const isSelected = selectedImages.includes(img.id)}
+        {@const isSelected = selection.has(img.id)}
         <div
           role="button"
           tabindex="0"
@@ -656,7 +667,7 @@
             class="absolute left-1.5 top-1.5 z-10 flex size-5 items-center justify-center rounded border border-white/50 bg-black/40 opacity-0 transition-all group-hover:opacity-100 {isSelected
               ? '!opacity-100 border-primary bg-primary text-white'
               : ''}"
-            onclick={(e) => { e.stopPropagation(); toggleSelect(img.id); }}
+            onclick={(e) => { e.stopPropagation(); selection.toggle(img.id); }}
             aria-label="Select image"
           >
             {#if isSelected}

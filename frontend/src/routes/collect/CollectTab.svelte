@@ -5,6 +5,7 @@
   import { collectApi, type CollectedPost, type CollectedPostFilters } from '$lib/api';
   import type { LLMRequest, UrlParseResponse, ServiceAccountWithProfile } from '$lib/types';
   import { Button } from '$lib/components/ui';
+  import { createSelection } from '$lib/utils/selection.svelte';
 
   let posts: CollectedPost[] = [];
   let loading = true;
@@ -36,7 +37,7 @@
   const STORAGE_KEY_VIEW_MODE = 'collect_view_mode';
 
   // 선택 모드
-  let selectedPostIds: Set<number> = new Set();
+  const selection = createSelection();
   let isSelectMode = false;
   let isBatchProcessing = false;
   let showBatchActionMenu = false;
@@ -215,35 +216,17 @@
   function toggleSelectMode() {
     isSelectMode = !isSelectMode;
     if (!isSelectMode) {
-      selectedPostIds = new Set();
+      selection.clear();
       showBatchActionMenu = false;
     }
   }
 
-  function togglePostSelection(postId: number, event?: Event) {
-    if (event) event.stopPropagation();
-    if (selectedPostIds.has(postId)) {
-      selectedPostIds.delete(postId);
-    } else {
-      selectedPostIds.add(postId);
-    }
-    selectedPostIds = selectedPostIds;  // 반응형 트리거
-  }
-
-  function toggleSelectAll() {
-    if (selectedPostIds.size === posts.length) {
-      selectedPostIds = new Set();
-    } else {
-      selectedPostIds = new Set(posts.map(p => p.source_id).filter((id): id is number => id !== null));
-    }
-  }
-
   async function runBatchAnalysis() {
-    if (selectedPostIds.size === 0) return;
+    if (selection.count === 0) return;
     isBatchProcessing = true;
     showBatchActionMenu = false;
     try {
-      const result = await collectApi.batchAnalyze([...selectedPostIds]);
+      const result = await collectApi.batchAnalyze(selection.toArray());
       alert(`${result.created_count}개 게시물 AI 분석 요청 완료`);
       toggleSelectMode();
     } catch (e) {
@@ -255,11 +238,11 @@
   }
 
   async function runBatchDeactivate() {
-    if (selectedPostIds.size === 0) return;
+    if (selection.count === 0) return;
     isBatchProcessing = true;
     showBatchActionMenu = false;
     try {
-      const result = await collectApi.batchDeactivate([...selectedPostIds]);
+      const result = await collectApi.batchDeactivate(selection.toArray());
       alert(`${result.updated}개 게시물 비활성화 완료`);
       await fetchPosts();
       toggleSelectMode();
@@ -277,11 +260,11 @@
   }
 
   async function runBatchDelete() {
-    if (selectedPostIds.size === 0) return;
+    if (selection.count === 0) return;
     isBatchProcessing = true;
     showDeleteConfirmModal = false;
     try {
-      const result = await collectApi.batchDelete([...selectedPostIds]);
+      const result = await collectApi.batchDelete(selection.toArray());
       alert(`${result.deleted}개 게시물 삭제 완료`);
       await fetchPosts();
       toggleSelectMode();
@@ -526,9 +509,9 @@
     <div class="flex items-center gap-4">
       <span class="text-sm text-muted-foreground">총 {total}개</span>
       {#if isSelectMode}
-        <span class="text-sm text-primary font-medium">{selectedPostIds.size}개 선택됨</span>
-        <Button on:click={toggleSelectAll} variant="secondary" size="xs">
-          {selectedPostIds.size === posts.length ? '전체 해제' : '전체 선택'}
+        <span class="text-sm text-primary font-medium">{selection.count}개 선택됨</span>
+        <Button on:click={() => selection.selectAll(posts.map(p => p.source_id).filter((id): id is number => id !== null))} variant="secondary" size="xs">
+          {selection.isAllSelected(posts.map(p => p.source_id).filter((id): id is number => id !== null)) ? '전체 해제' : '전체 선택'}
         </Button>
       {/if}
     </div>
@@ -536,7 +519,7 @@
     <!-- 오른쪽: 액션 버튼들 -->
     <div class="flex items-center gap-2">
       <!-- 일괄 작업 메뉴 (선택 모드에서만) -->
-      {#if isSelectMode && selectedPostIds.size > 0}
+      {#if isSelectMode && selection.count > 0}
         <div class="relative">
           <Button
             on:click={() => showBatchActionMenu = !showBatchActionMenu}
@@ -632,9 +615,9 @@
           {@const sourceBadge = getSourceBadge(post.source_type)}
           {@const classificationBadge = getClassificationBadge(post.classification)}
           <div
-            class="card hover:shadow-lg transition-shadow cursor-pointer relative {isSelectMode && post.source_id && selectedPostIds.has(post.source_id) ? 'ring-2 ring-blue-500' : ''}"
-            onclick={() => isSelectMode && post.source_id ? togglePostSelection(post.source_id) : openDetail(post)}
-            onkeydown={(e) => e.key === 'Enter' && (isSelectMode && post.source_id ? togglePostSelection(post.source_id) : openDetail(post))}
+            class="card hover:shadow-lg transition-shadow cursor-pointer relative {isSelectMode && post.source_id && selection.has(post.source_id) ? 'ring-2 ring-blue-500' : ''}"
+            onclick={() => isSelectMode && post.source_id ? selection.toggle(post.source_id) : openDetail(post)}
+            onkeydown={(e) => e.key === 'Enter' && (isSelectMode && post.source_id ? selection.toggle(post.source_id) : openDetail(post))}
             role="button"
             tabindex="0"
           >
@@ -643,8 +626,8 @@
               <div class="absolute top-2 left-2 z-10">
                 <input
                   type="checkbox"
-                  checked={selectedPostIds.has(post.source_id)}
-                  onclick={(e) => { e.stopPropagation(); togglePostSelection(post.source_id!); }}
+                  checked={selection.has(post.source_id)}
+                  onclick={(e) => { e.stopPropagation(); selection.toggle(post.source_id!); }}
                   class="w-5 h-5 rounded border-border text-primary focus:ring-ring"
                 />
               </div>
@@ -727,9 +710,9 @@
           {@const sourceBadge = getSourceBadge(post.source_type)}
           {@const classificationBadge = getClassificationBadge(post.classification)}
           <div
-            class="card flex items-center gap-4 p-3 hover:shadow-md transition-shadow cursor-pointer {isSelectMode && post.source_id && selectedPostIds.has(post.source_id) ? 'ring-2 ring-blue-500' : ''}"
-            onclick={() => isSelectMode && post.source_id ? togglePostSelection(post.source_id) : openDetail(post)}
-            onkeydown={(e) => e.key === 'Enter' && (isSelectMode && post.source_id ? togglePostSelection(post.source_id) : openDetail(post))}
+            class="card flex items-center gap-4 p-3 hover:shadow-md transition-shadow cursor-pointer {isSelectMode && post.source_id && selection.has(post.source_id) ? 'ring-2 ring-blue-500' : ''}"
+            onclick={() => isSelectMode && post.source_id ? selection.toggle(post.source_id) : openDetail(post)}
+            onkeydown={(e) => e.key === 'Enter' && (isSelectMode && post.source_id ? selection.toggle(post.source_id) : openDetail(post))}
             role="button"
             tabindex="0"
           >
@@ -737,8 +720,8 @@
             {#if isSelectMode && post.source_id}
               <input
                 type="checkbox"
-                checked={selectedPostIds.has(post.source_id)}
-                onclick={(e) => { e.stopPropagation(); togglePostSelection(post.source_id!); }}
+                checked={selection.has(post.source_id)}
+                onclick={(e) => { e.stopPropagation(); selection.toggle(post.source_id!); }}
                 class="w-5 h-5 rounded border-border text-primary focus:ring-ring"
               />
             {/if}
@@ -1107,7 +1090,7 @@
     >
       <h3 class="text-lg font-semibold mb-4">삭제 확인</h3>
       <p class="text-muted-foreground mb-6">
-        선택한 {selectedPostIds.size}개 게시물을 삭제하시겠습니까?<br/>
+        선택한 {selection.count}개 게시물을 삭제하시겠습니까?<br/>
         이 작업은 되돌릴 수 없습니다.
       </p>
       <div class="flex gap-2 justify-end">

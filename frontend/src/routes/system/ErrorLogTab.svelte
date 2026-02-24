@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { errorApi, type ErrorLog, type ErrorLogStatsResponse, type ErrorListParams } from '$lib/api';
+  import { createSelection } from '$lib/utils/selection.svelte';
 
   // Props
   interface Props {
@@ -24,8 +25,7 @@
   let pageSize = $state(50);
 
   // 선택 상태
-  let selectedIds = $state<Set<number>>(new Set());
-  let selectAll = $state(false);
+  const selection = createSelection();
 
   // 모달
   let detailModal = $state<ErrorLog | null>(null);
@@ -76,8 +76,7 @@
 
   function handleFilterChange() {
     page = 1;
-    selectedIds = new Set();
-    selectAll = false;
+    selection.clear();
     fetchErrors();
   }
 
@@ -92,36 +91,15 @@
   }
 
   async function resolveBulk() {
-    if (selectedIds.size === 0) return;
+    if (selection.count === 0) return;
     try {
-      await errorApi.resolveBulk(Array.from(selectedIds), 'user');
-      selectedIds = new Set();
-      selectAll = false;
+      await errorApi.resolveBulk(selection.toArray(), 'user');
+      selection.clear();
       fetchErrors();
       fetchStats();
     } catch (e) {
       console.error('Failed to resolve errors:', e);
     }
-  }
-
-  function toggleSelect(id: number) {
-    const newSet = new Set(selectedIds);
-    if (newSet.has(id)) {
-      newSet.delete(id);
-    } else {
-      newSet.add(id);
-    }
-    selectedIds = newSet;
-    selectAll = errors.every(e => selectedIds.has(e.id));
-  }
-
-  function toggleSelectAll() {
-    if (selectAll) {
-      selectedIds = new Set();
-    } else {
-      selectedIds = new Set(errors.map(e => e.id));
-    }
-    selectAll = !selectAll;
   }
 
   function formatDate(dateStr: string): string {
@@ -263,12 +241,12 @@
           class="w-full px-3 py-2 border border-border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-foreground dark:text-white text-sm"
         />
       </div>
-      {#if selectedIds.size > 0}
+      {#if selection.count > 0}
         <button
           onclick={resolveBulk}
           class="px-4 py-2 bg-success text-white rounded-lg hover:bg-success/90 text-sm"
         >
-          {selectedIds.size}개 해결 처리
+          {selection.count}개 해결 처리
         </button>
       {/if}
     </div>
@@ -280,7 +258,7 @@
       <thead class="bg-background dark:bg-gray-900">
         <tr>
           <th class="w-10 px-4 py-3">
-            <input type="checkbox" checked={selectAll} onchange={toggleSelectAll} />
+            <input type="checkbox" checked={selection.isAllSelected(errors.map(e => e.id))} onchange={() => selection.selectAll(errors.map(e => e.id))} />
           </th>
           <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground dark:text-muted-foreground uppercase">시간</th>
           <th class="px-4 py-3 text-left text-xs font-medium text-muted-foreground dark:text-muted-foreground uppercase">소스</th>
@@ -310,8 +288,8 @@
               <td class="px-4 py-3">
                 <input
                   type="checkbox"
-                  checked={selectedIds.has(error.id)}
-                  onchange={() => toggleSelect(error.id)}
+                  checked={selection.has(error.id)}
+                  onchange={() => selection.toggle(error.id)}
                 />
               </td>
               <td class="px-4 py-3 text-sm text-muted-foreground dark:text-muted-foreground whitespace-nowrap">
