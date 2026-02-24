@@ -3,6 +3,8 @@
   import { fetchWithTimeout } from '$lib/api/client';
   import { toast } from '$lib/stores/toast';
   import { createSelection } from '$lib/utils/selection.svelte';
+  import { loadCategoryMap, type Category } from '../lib/categoryUtils';
+  import CategoryPickerModal from '../components/CategoryPicker.svelte';
   import { Search, Tag, Trash2, Check, X, Loader2, Images, ImagePlus, Eye, FolderOpen, Clipboard, Square, SquareCheck } from 'lucide-svelte';
 
   // 태그 타입 (GalleryImage에서 사용하므로 먼저 선언)
@@ -234,22 +236,10 @@
     }
   }
 
-  interface Category { id: number; name: string; full_path: string; parent_id: number | null; children: Category[]; }
   let categories = $state<Category[]>([]);
   let flatCategories = $state<Category[]>([]);
-  let categoryMap = $derived(new Map(flatCategories.map((c) => [c.id, c.full_path])));
+  let categoryMap = $state(new Map<number, string>());
   let showCategoryPicker = $state(false);
-
-  function flattenCategories(cats: any[]): Category[] {
-    let result: Category[] = [];
-    for (const cat of cats) {
-      result.push({ id: cat.id, name: cat.name, full_path: cat.full_path, parent_id: cat.parent_id ?? null, children: cat.children ?? [] });
-      if (cat.children?.length > 0) {
-        result = result.concat(flattenCategories(cat.children));
-      }
-    }
-    return result;
-  }
 
   function getCategoryName(categoryId: string | null): string {
     if (!categoryId) return '—';
@@ -319,11 +309,17 @@
 
   async function loadCategories() {
     try {
+      categoryMap = await loadCategoryMap();
       const res = await fetchWithTimeout('/api/ic/categories?include_tree=true');
       if (res.ok) {
         const data = await res.json();
         categories = data.categories ?? [];
-        flatCategories = flattenCategories(categories);
+        const flat: Category[] = [];
+        function walkFlat(cats: Category[]) {
+          for (const cat of cats) { flat.push(cat); if (cat.children?.length) walkFlat(cat.children); }
+        }
+        walkFlat(categories);
+        flatCategories = flat;
       }
     } catch { /* ignore */ }
   }
@@ -852,34 +848,10 @@
 
 <!-- Category Picker Modal -->
 {#if showCategoryPicker}
-  <div
-    role="button"
-    tabindex="-1"
-    class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
-    onclick={() => (showCategoryPicker = false)}
-    onkeydown={(e) => e.key === 'Escape' && (showCategoryPicker = false)}
-  ></div>
-  <div class="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-card p-4 shadow-2xl">
-    <h3 class="mb-3 text-sm font-semibold text-foreground">카테고리 선택</h3>
-    {#if categories.length === 0}
-      <p class="text-xs text-muted-foreground">카테고리가 없습니다.</p>
-    {:else}
-      <div class="max-h-60 space-y-1 overflow-y-auto">
-        {#each flatCategories as cat}
-          <button
-            onclick={() => assignCategory(cat.id)}
-            class="flex w-full items-center rounded-md px-3 py-2 text-left text-xs font-medium text-foreground hover:bg-accent"
-          >
-            {cat.full_path}
-          </button>
-        {/each}
-      </div>
-    {/if}
-    <button
-      onclick={() => (showCategoryPicker = false)}
-      class="mt-3 w-full rounded-md border border-border bg-card py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent"
-    >
-      취소
-    </button>
-  </div>
+  <CategoryPickerModal
+    {categories}
+    {flatCategories}
+    onSelect={assignCategory}
+    onClose={() => (showCategoryPicker = false)}
+  />
 {/if}

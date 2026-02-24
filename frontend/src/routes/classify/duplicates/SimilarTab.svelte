@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
 	import { createSelection } from '$lib/utils/selection.svelte';
+	import { loadCategoryMap as loadCategoryMapUtil } from '../lib/categoryUtils';
 	import { Search, RefreshCw, Tag, ArrowRight, Cpu, AlertTriangle, Eye, FolderOpen, Clipboard } from 'lucide-svelte';
 
 	interface SimilarSuggestion {
@@ -31,23 +32,12 @@
 	let toastMessage = $state<string | null>(null);
 	let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
-	// 카테고리 �?(?�백??
+	// 카테고리 맵 (폴백용)
 	let categoryMap = $state(new Map<number, string>());
 
 	async function loadCategoryMap() {
 		try {
-			const res = await fetchWithTimeout('/api/ic/categories?include_tree=true');
-			if (!res.ok) return;
-			const data = await res.json();
-			const map = new Map<number, string>();
-			function flatten(cats: any[]) {
-				for (const c of cats) {
-					map.set(c.id, c.full_path);
-					if (c.children?.length) flatten(c.children);
-				}
-			}
-			flatten(data.categories ?? []);
-			categoryMap = map;
+			categoryMap = await loadCategoryMapUtil();
 		} catch { /* ignore */ }
 	}
 

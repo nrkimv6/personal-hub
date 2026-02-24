@@ -2,6 +2,8 @@
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
 	import { createSelection } from '$lib/utils/selection.svelte';
+	import { loadCategoryMap, getCategoryName, type Category } from '../lib/categoryUtils';
+	import CategoryPickerModal from '../components/CategoryPicker.svelte';
 	import {
 		CheckCircle2,
 		RefreshCw,
@@ -23,14 +25,6 @@
 		status: string;
 	}
 
-	interface Category {
-		id: number;
-		name: string;
-		full_path: string;
-		parent_id: number | null;
-		children: Category[];
-	}
-
 	let files: FileReview[] = $state([]);
 	let totalCount = $state(0);
 	const selection = createSelection();
@@ -45,10 +39,10 @@
 	let currentOffset = $state(0);
 	let hasMore = $state(false);
 
-	// 카테고리 목록 (?�름 ?�시??
+	// 카테고리 목록 (이름 표시용)
 	let categories = $state<Category[]>([]);
 	let flatCategories = $state<Category[]>([]);
-	let categoryMap = $derived(new Map(flatCategories.map((c) => [c.id, c.full_path])));
+	let categoryMap = $state(new Map<number, string>());
 
 	// 카테고리 변�?모달
 	let showCategoryPicker = $state(false);
@@ -60,26 +54,27 @@
 
 	async function loadCategories() {
 		try {
+			// 공통 유틸로 categoryMap 로드 (/api/ic/categories/tree)
+			categoryMap = await loadCategoryMap();
+			// CategoryPicker용 트리/플랫 목록은 별도 엔드포인트 유지
 			const res = await fetchWithTimeout('/api/ic/categories?include_tree=true');
 			if (res.ok) {
 				const data = await res.json();
 				categories = data.categories ?? [];
-				flatCategories = flattenCategories(categories);
+				// 인라인 플랫 변환 (CategoryPicker 전용)
+				const flat: Category[] = [];
+				function walkFlat(cats: Category[]) {
+					for (const cat of cats) {
+						flat.push(cat);
+						if (cat.children?.length) walkFlat(cat.children);
+					}
+				}
+				walkFlat(categories);
+				flatCategories = flat;
 			}
 		} catch {
 			/* ignore */
 		}
-	}
-
-	function flattenCategories(cats: any[]): Category[] {
-		let result: Category[] = [];
-		for (const cat of cats) {
-			result.push({ id: cat.id, name: cat.name, full_path: cat.full_path, parent_id: cat.parent_id ?? null, children: cat.children ?? [] });
-			if (cat.children?.length > 0) {
-				result = result.concat(flattenCategories(cat.children));
-			}
-		}
-		return result;
 	}
 
 	async function loadFiles(reset = false) {
@@ -213,7 +208,7 @@
 
 	function getCategoryDisplay(file: FileReview): string {
 		if (file.category_path) return file.category_path;
-		if (file.final_category_id) return categoryMap.get(file.final_category_id) ?? `#${file.final_category_id}`;
+		if (file.final_category_id) return getCategoryName(categoryMap, file.final_category_id);
 		return '미분류';
 	}
 
@@ -498,36 +493,10 @@
 
 <!-- 카테고리 ?�택 모달 -->
 {#if showCategoryPicker}
-	<div
-		role="button"
-		tabindex="-1"
-		class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
-		onclick={() => (showCategoryPicker = false)}
-		onkeydown={(e) => e.key === 'Escape' && (showCategoryPicker = false)}
-	></div>
-	<div
-		class="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-card p-4 shadow-2xl"
-	>
-		<h3 class="mb-3 text-sm font-semibold text-foreground">카테고리 ?�택</h3>
-		{#if categories.length === 0}
-			<p class="text-xs text-muted-foreground">카테고리가 ?�습?�다.</p>
-		{:else}
-			<div class="max-h-60 space-y-1 overflow-y-auto">
-				{#each flatCategories as cat}
-					<button
-						onclick={() => assignCategory(cat.id)}
-						class="flex w-full items-center rounded-md px-3 py-2 text-left text-xs font-medium text-foreground hover:bg-accent"
-					>
-						{cat.full_path}
-					</button>
-				{/each}
-			</div>
-		{/if}
-		<button
-			onclick={() => (showCategoryPicker = false)}
-			class="mt-3 w-full rounded-md border border-border bg-card py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent"
-		>
-			취소
-		</button>
-	</div>
+	<CategoryPickerModal
+		{categories}
+		{flatCategories}
+		onSelect={assignCategory}
+		onClose={() => (showCategoryPicker = false)}
+	/>
 {/if}

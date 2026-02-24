@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { fetchWithTimeout } from '$lib/api/client';
   import { toast } from '$lib/stores/toast';
+  import { loadCategoryMap as loadCategoryMapUtil, getCategoryName } from '../lib/categoryUtils';
   import { Brain, Play, Square, AlertCircle, ChevronDown, ChevronUp, Sparkles, Settings, Zap, FolderSearch } from 'lucide-svelte';
 
   // 분류 설정 (settings API에서 로드)
@@ -176,18 +177,7 @@
 
   async function loadCategoryMap() {
     try {
-      const res = await fetchWithTimeout('/api/ic/categories?include_tree=true');
-      if (!res.ok) return;
-      const data = await res.json();
-      const map = new Map<number, string>();
-      function flatten(cats: any[]) {
-        for (const c of cats) {
-          map.set(c.id, c.full_path);
-          if (c.children?.length) flatten(c.children);
-        }
-      }
-      flatten(data.categories ?? []);
-      categoryMap = map;
+      categoryMap = await loadCategoryMapUtil();
     } catch { /* ignore */ }
   }
 
@@ -196,7 +186,7 @@
     const catId = f.final_category_id;
     return {
       file: parts[parts.length - 1] || `file_${f.id}`,
-      category: catId ? (categoryMap.get(catId) ?? `#${catId}`) : '—',
+      category: catId ? getCategoryName(categoryMap, catId) : '—',
       confidence: f.ai_confidence ?? 0,
       thumbnail: `/api/ic/files/${f.id}/thumbnail`,
     };

@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
 	import { History, RotateCcw, RefreshCw, ScanLine, ChevronDown, ChevronRight, ChevronLeft, FileImage, ArrowRight } from 'lucide-svelte';
+	import { loadCategoryMap, getCategoryName } from '../lib/categoryUtils';
 
 	interface MoveHistory {
 		id: number;
@@ -41,24 +42,13 @@
 
 	async function loadCategories() {
 		try {
-			const res = await fetchWithTimeout('/api/ic/categories?include_tree=true');
-			if (!res.ok) return;
-			const data = await res.json();
-			const map = new Map<number, string>();
-			function flatten(cats: any[]) {
-				for (const c of cats) {
-					map.set(c.id, c.full_path);
-					if (c.children?.length) flatten(c.children);
-				}
-			}
-			flatten(data.categories ?? []);
-			categoryMap = map;
+			categoryMap = await loadCategoryMap();
 		} catch { /* ignore */ }
 	}
 
 	function getCategoryDisplay(item: MoveHistory): string {
 		if (item.category_path) return item.category_path;
-		if (item.final_category_id) return categoryMap.get(item.final_category_id) ?? `#${item.final_category_id}`;
+		if (item.final_category_id) return getCategoryName(categoryMap, item.final_category_id);
 		return '';
 	}
 
