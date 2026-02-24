@@ -227,23 +227,19 @@
 
   /* Dark Mode */
   .dark {
-    /* Primary - Slightly brighter for dark mode */
+    /* === Legacy CSS variables (hsl(var(--x)) 패턴용) === */
     --primary: 226 60% 60%;
     --primary-foreground: 224 30% 8%;
     --primary-hover: 226 60% 65%;
     --primary-active: 226 60% 55%;
     --primary-light: 226 40% 18%;
     --primary-muted: 226 40% 50%;
-
-    /* Background & Surface */
     --background: 224 30% 8%;
     --foreground: 220 15% 92%;
     --card: 224 25% 12%;
     --card-foreground: 220 15% 92%;
     --popover: 224 25% 12%;
     --popover-foreground: 220 15% 92%;
-
-    /* Sidebar */
     --sidebar-background: 224 30% 6%;
     --sidebar-foreground: 220 15% 70%;
     --sidebar-primary: 226 60% 60%;
@@ -253,16 +249,12 @@
     --sidebar-border: 224 20% 16%;
     --sidebar-ring: 226 60% 60%;
     --sidebar-muted: 220 15% 50%;
-
-    /* Secondary & Muted */
     --secondary: 224 20% 18%;
     --secondary-foreground: 220 15% 85%;
     --muted: 224 20% 16%;
     --muted-foreground: 220 10% 55%;
     --accent: 224 20% 18%;
     --accent-foreground: 220 15% 85%;
-
-    /* Semantic - adjusted for dark */
     --success: 152 55% 50%;
     --success-light: 152 40% 15%;
     --warning: 38 92% 55%;
@@ -272,27 +264,17 @@
     --error-light: 0 50% 15%;
     --info: 199 89% 55%;
     --info-light: 199 60% 15%;
-
-    /* Category Colors */
     --purple: 270 60% 60%;
     --purple-light: 270 40% 18%;
     --pink: 330 70% 60%;
     --pink-light: 330 50% 18%;
-
-    /* Border & Input */
     --border: 224 20% 20%;
     --input: 224 20% 20%;
     --ring: 226 60% 60%;
-
-    /* Pinned note background - dark */
     --pinned-bg: 226 40% 16%;
-
-    /* Shadows - more subtle in dark */
     --shadow-sm: 0 1px 2px 0 hsl(0 0% 0% / 0.2);
     --shadow-md: 0 4px 6px -1px hsl(0 0% 0% / 0.3), 0 2px 4px -2px hsl(0 0% 0% / 0.2);
     --shadow-lg: 0 10px 15px -3px hsl(0 0% 0% / 0.4), 0 4px 6px -4px hsl(0 0% 0% / 0.3);
-
-    /* Gray Scale - Dark (Legacy) */
     --gray-50: 221 39% 11%;
     --gray-100: 215 28% 17%;
     --gray-200: 217 19% 27%;
@@ -303,6 +285,61 @@
     --gray-700: 220 13% 91%;
     --gray-800: 220 14% 96%;
     --gray-900: 210 20% 98%;
+
+    /* === Tailwind v4 --color-* 변수 오버라이드 (bg-background 등 유틸리티용) === */
+    --color-primary: hsl(226 60% 60%);
+    --color-primary-foreground: hsl(224 30% 8%);
+    --color-primary-hover: hsl(226 60% 65%);
+    --color-primary-active: hsl(226 60% 55%);
+    --color-primary-light: hsl(226 40% 18%);
+    --color-primary-muted: hsl(226 40% 50%);
+    --color-background: hsl(224 30% 8%);
+    --color-foreground: hsl(220 15% 92%);
+    --color-card: hsl(224 25% 12%);
+    --color-card-foreground: hsl(220 15% 92%);
+    --color-popover: hsl(224 25% 12%);
+    --color-popover-foreground: hsl(220 15% 92%);
+    --color-secondary: hsl(224 20% 18%);
+    --color-secondary-foreground: hsl(220 15% 85%);
+    --color-muted: hsl(224 20% 16%);
+    --color-muted-foreground: hsl(220 10% 55%);
+    --color-accent: hsl(224 20% 18%);
+    --color-accent-foreground: hsl(220 15% 85%);
+    --color-border: hsl(224 20% 20%);
+    --color-input: hsl(224 20% 20%);
+    --color-ring: hsl(226 60% 60%);
+    --color-sidebar: hsl(224 30% 6%);
+    --color-sidebar-foreground: hsl(220 15% 70%);
+    --color-sidebar-primary: hsl(226 60% 60%);
+    --color-sidebar-primary-foreground: hsl(0 0% 100%);
+    --color-sidebar-accent: hsl(224 25% 15%);
+    --color-sidebar-accent-foreground: hsl(220 15% 92%);
+    --color-sidebar-border: hsl(224 20% 16%);
+    --color-sidebar-muted: hsl(220 15% 50%);
+    --color-success: hsl(152 55% 50%);
+    --color-success-light: hsl(152 40% 15%);
+    --color-warning: hsl(38 92% 55%);
+    --color-warning-light: hsl(38 60% 15%);
+    --color-destructive: hsl(0 72% 55%);
+    --color-error: hsl(0 72% 55%);
+    --color-error-light: hsl(0 50% 15%);
+    --color-info: hsl(199 89% 55%);
+    --color-info-light: hsl(199 60% 15%);
+    --color-purple: hsl(270 60% 60%);
+    --color-purple-light: hsl(270 40% 18%);
+    --color-pink: hsl(330 70% 60%);
+    --color-pink-light: hsl(330 50% 18%);
+    --color-pinned: hsl(226 40% 16%);
+    --color-gray-50: hsl(221 39% 11%);
+    --color-gray-100: hsl(215 28% 17%);
+    --color-gray-200: hsl(217 19% 27%);
+    --color-gray-300: hsl(215 14% 34%);
+    --color-gray-400: hsl(220 9% 46%);
+    --color-gray-500: hsl(218 11% 65%);
+    --color-gray-600: hsl(216 12% 84%);
+    --color-gray-700: hsl(220 13% 91%);
+    --color-gray-800: hsl(220 14% 96%);
+    --color-gray-900: hsl(210 20% 98%);
   }
 }
 
