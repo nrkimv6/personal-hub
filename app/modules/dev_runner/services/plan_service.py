@@ -620,9 +620,8 @@ class PlanService:
         )
         return content
 
-    @staticmethod
-    def _archive_plan(plan_path: str, content: str) -> Path:
-        """완료일 헤더 삽입 후 archive 디렉토리로 이동, 원본 삭제"""
+    async def _archive_plan(self, plan_path: str, content: str) -> Path:
+        """완료일 헤더 삽입 후 git mv로 archive 디렉토리로 이동"""
         p = Path(plan_path)
         today = date.today().isoformat()
 
@@ -641,13 +640,27 @@ class PlanService:
                     break
         final_content = "".join(lines)
 
-        # archive 디렉토리 생성
+        # 1. 원본 파일에 수정된 내용 덮어쓰기 (git mv 전에 내용 반영)
+        p.write_text(final_content, encoding="utf-8")
+
+        # 2. archive 디렉토리 생성
         archive_dir = p.parent.parent / "archive"
         archive_dir.mkdir(parents=True, exist_ok=True)
         archive_path = archive_dir / p.name
 
-        archive_path.write_text(final_content, encoding="utf-8")
-        p.unlink()
+        # 3. git mv로 이동 (rename 이력 보존 + staging 자동)
+        mv_proc = await asyncio.create_subprocess_exec(
+            "git", "mv", str(p), str(archive_path),
+            cwd=str(p.parent),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await mv_proc.communicate()
+        if mv_proc.returncode != 0:
+            # git mv 실패 시 fallback: 파일시스템 이동
+            archive_path.write_text(final_content, encoding="utf-8")
+            p.unlink()
+
         return archive_path
 
     @staticmethod
@@ -727,15 +740,19 @@ class PlanService:
         if not self.COMMIT_SH.exists():
             return f"commit.sh not found: {self.COMMIT_SH}"
 
+        # 존재하는 파일(신규/수정) + 삭제된 파일(git mv로 이미 staged된 경우도 포함)을 모두 add
+        # git add는 삭제된 파일 경로도 처리 가능 (staging에 반영)
         existing_files = [str(f) for f in files_to_add if f.exists()]
-        if not existing_files:
+        deleted_files = [str(f) for f in files_to_add if not f.exists()]
+        all_files = existing_files + deleted_files
+        if not all_files:
             return "커밋할 파일 없음"
 
         cwd = str(project_dir) if project_dir and project_dir.exists() else None
 
-        # git add
+        # git add (존재하는 파일 먼저, 삭제된 파일은 별도 처리)
         add_proc = await asyncio.create_subprocess_exec(
-            "git", "add", *existing_files,
+            "git", "add", *all_files,
             cwd=cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
@@ -779,7 +796,7 @@ class PlanService:
                 has_manual = True
 
             # 3. 아카이브 이동
-            archive_path = self._archive_plan(plan_path, updated_content)
+            archive_path = await self._archive_plan(plan_path, updated_content)
 
             # 4. TODO.md / DONE.md 업데이트
             if project_dir:

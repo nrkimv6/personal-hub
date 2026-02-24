@@ -1,0 +1,29 @@
+{
+  "SCAN_ROOT_FOLDERS": [],
+  "EXCLUDE_FOLDERS": [
+    "Windows",
+    "Program Files",
+    "Program Files (x86)",
+    "$Recycle.Bin",
+    "System Volume Information",
+    ".git",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    ".obsidian",
+    ".smart-env",
+    ".claude"
+  ],
+  "MAX_FILES_PER_SCAN": 100000,
+  "ARCHIVE_TIMEOUT_SECONDS": 10,
+  "PE_ANALYSIS_ENABLED": true,
+  "LLM_MODE": "cli",
+  "LLM_MAX_WORKERS": 2,
+  "LLM_TIMEOUT_SECONDS": 60,
+  "TARGET_ROOT_FOLDER": null,
+  "DRY_RUN_DEFAULT": true,
+  "USE_TRASH": true,
+  "LOG_MAX_AGE_DAYS": 90,
+  "TEMP_MAX_AGE_DAYS": 30,
+  "OBSIDIAN_VAULT_PATH": null
+}
