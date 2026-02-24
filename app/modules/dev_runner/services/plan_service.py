@@ -290,14 +290,19 @@ class PlanService:
 
     # 자동 무시 대상 상태 (정확히 일치해야 함)
     _IGNORED_STATUSES = {"보류"}
+    # 완료 계열 상태 (아카이브 허용 + 목록 숨김)
+    _DONE_STATUSES = {"구현완료", "완료", "수정 완료", "배포완료", "수정완료"}
 
     def _is_ignored_plan(self, path: Path, status: str, progress: PlanProgressResponse) -> bool:
         """plan이 무시 대상인지 판단"""
         # 수동 무시 목록
         if str(path.resolve()) in self._ignored_plans:
             return True
-        # 완료 상태 (정확히 일치하는 경우만)
+        # 보류 상태
         if status in self._IGNORED_STATUSES:
+            return True
+        # 완료 계열 상태
+        if status in self._DONE_STATUSES:
             return True
         # 모든 체크박스 완료
         if progress.total > 0 and progress.done == progress.total:
@@ -315,6 +320,7 @@ class PlanService:
             with open(path, "r", encoding="utf-8", errors="ignore") as f:
                 content = f.read()
 
+            content = self._remove_code_blocks(content)
             checkbox_pattern = r"^(?:\d+\.|-)\s*\[([ x→])\]"
             matches = re.findall(checkbox_pattern, content, re.MULTILINE)
 
@@ -482,6 +488,61 @@ class PlanService:
         content = re.sub(r'```.*?```', '', content, flags=re.DOTALL)
         content = re.sub(r'`[^`\n]+`', '', content)
         return content
+
+    @staticmethod
+    def _extract_pending_checkboxes(content: str) -> List[str]:
+        """문서 전체에서 미완료 체크박스 텍스트 추출 (코드블록 제외)"""
+        cleaned = PlanService._remove_code_blocks(content)
+        matches = re.findall(r'^[-*]\s*\[ \]\s*(.+)$', cleaned, re.MULTILINE)
+        return [PlanService._strip_markdown_inline(m) for m in matches]
+
+    @staticmethod
+    def _update_manual_tasks(
+        project_dir: Path, items: List[str], plan_filename: str
+    ) -> None:
+        """미완료 체크박스를 MANUAL_TASKS.md로 이관"""
+        manual_path = project_dir / "MANUAL_TASKS.md"
+        today = date.today().isoformat()
+
+        if manual_path.exists():
+            existing = manual_path.read_text(encoding="utf-8")
+        else:
+            existing = ""
+
+        # 중복 체크: 이미 이 plan에서 이관된 항목이 있으면 스킵
+        if f"from: {plan_filename}" in existing:
+            return
+
+        # 새 항목 생성
+        new_lines = []
+        for item in items:
+            new_lines.append(f"- [ ] {item} — from: {plan_filename} ({today})")
+
+        if not existing:
+            # 파일 신규 생성
+            content = (
+                "# MANUAL_TASKS\n\n"
+                "> 자동화가 어렵거나 사람의 판단이 필요한 수동 작업 목록\n\n"
+                "## 미완료\n\n"
+                + "\n".join(new_lines) + "\n\n"
+                "## 완료\n"
+            )
+            manual_path.write_text(content, encoding="utf-8")
+        else:
+            # 기존 파일의 ## 미완료 섹션 직후에 삽입
+            lines = existing.splitlines()
+            insert_idx = None
+            for i, line in enumerate(lines):
+                if line.strip() == "## 미완료":
+                    insert_idx = i + 1
+                    # 빈 줄 건너뜀
+                    while insert_idx < len(lines) and lines[insert_idx].strip() == "":
+                        insert_idx += 1
+                    break
+            if insert_idx is not None:
+                for j, item_line in enumerate(new_lines):
+                    lines.insert(insert_idx + j, item_line)
+                manual_path.write_text("\n".join(lines), encoding="utf-8")
 
     @staticmethod
     def _extract_plan_title(content: str) -> str:
@@ -684,23 +745,32 @@ class PlanService:
             # 1. 헤더/푸터 갱신
             updated_content = self._update_plan_headers(content, total)
 
-            # 2. 아카이브 이동
+            # 2. 미완료 체크박스 → MANUAL_TASKS.md 이관
+            project_dir = self._resolve_project_dir(plan_path)
+            pending_items = self._extract_pending_checkboxes(updated_content)
+            has_manual = False
+            if pending_items and project_dir:
+                self._update_manual_tasks(project_dir, pending_items, path.name)
+                has_manual = True
+
+            # 3. 아카이브 이동
             archive_path = self._archive_plan(plan_path, updated_content)
 
-            # 3. TODO.md / DONE.md 업데이트
-            project_dir = self._resolve_project_dir(plan_path)
+            # 4. TODO.md / DONE.md 업데이트
             if project_dir:
                 self._update_todo_done(project_dir, title)
                 done_path = project_dir / "docs" / "DONE.md"
                 self._archive_done_if_needed(done_path)
 
-            # 4. git commit
+            # 5. git commit
             files_to_commit: List[Path] = [archive_path]
             if project_dir:
                 files_to_commit += [
                     project_dir / "TODO.md",
                     project_dir / "docs" / "DONE.md",
                 ]
+                if has_manual:
+                    files_to_commit.append(project_dir / "MANUAL_TASKS.md")
             commit_output = await self._git_commit(
                 project_dir, files_to_commit, f"docs: {title} 완료 처리"
             )
@@ -723,10 +793,12 @@ class PlanService:
     # ========== 일괄 완료 ==========
 
     def _can_done(self, plan: PlanFileResponse) -> bool:
-        """plan이 done 처리 가능한지 판단 — 체크박스 전체 완료인 경우만"""
+        """plan이 done 처리 가능한지 판단 — 체크박스 전체 완료 OR 상태 헤더 완료 계열"""
         if "archive" in plan.path:
             return False
         if plan.progress.total > 0 and plan.progress.done == plan.progress.total:
+            return True
+        if plan.status in self._DONE_STATUSES:
             return True
         return False
 
