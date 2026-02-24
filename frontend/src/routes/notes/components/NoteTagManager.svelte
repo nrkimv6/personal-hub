@@ -117,7 +117,7 @@
         placeholder="태그 이름..."
         class="flex-1 px-3 py-1.5 text-sm rounded-lg border border-border bg-background text-foreground
           focus:outline-none focus:ring-2 focus:ring-ring/30"
-        onkeydown={(e) => e.key === 'Enter' && createTag()}
+        onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); createTag(); } }}
       />
       <button
         onclick={createTag}

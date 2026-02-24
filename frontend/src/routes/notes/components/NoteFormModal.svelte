@@ -17,7 +17,12 @@
     onClose: () => void;
   }
 
-  let { mode, note, onSave, onClose }: Props = $props();
+  let { mode, note, onSave, onClose: _onClose }: Props = $props();
+
+  function onClose() {
+    clearDraft();
+    _onClose();
+  }
 
   let title = $state(note?.title ?? '');
   let content = $state(note?.content ?? '');
@@ -31,6 +36,24 @@
   let error = $state('');
   let showPreview = $state(false);
   let textareaEl: HTMLTextAreaElement;
+
+  // 임시 저장 (sessionStorage)
+  const draftKey = mode === 'create' ? 'note-draft-create' : `note-draft-edit-${note?.id}`;
+  let _draftTimer: ReturnType<typeof setTimeout> | null = null;
+
+  $effect(() => {
+    const t = title;
+    const c = content;
+    if (_draftTimer) clearTimeout(_draftTimer);
+    _draftTimer = setTimeout(() => {
+      sessionStorage.setItem(draftKey, JSON.stringify({ title: t, content: c }));
+    }, 1000);
+  });
+
+  function clearDraft() {
+    if (_draftTimer) clearTimeout(_draftTimer);
+    sessionStorage.removeItem(draftKey);
+  }
 
   // 자동완성 상태
   let autocompleteResults = $state<{ id: number; title: string }[]>([]);
@@ -67,6 +90,7 @@
           linked_tab: linkedTab || undefined,
         });
       }
+      clearDraft();
       onSave();
     } catch (e: any) {
       error = e.message;
@@ -267,7 +291,28 @@
     return { icon: item.icon, label: item.label };
   }
 
-  onMount(loadTags);
+  onMount(() => {
+    loadTags();
+    // draft 복원 (create 모드만)
+    if (mode === 'create') {
+      const raw = sessionStorage.getItem(draftKey);
+      if (raw) {
+        try {
+          const draft = JSON.parse(raw) as { title: string; content: string };
+          if (draft.title || draft.content) {
+            if (confirm('임시 저장된 내용을 복원하시겠습니까?')) {
+              title = draft.title ?? '';
+              content = draft.content ?? '';
+            } else {
+              clearDraft();
+            }
+          }
+        } catch {
+          sessionStorage.removeItem(draftKey);
+        }
+      }
+    }
+  });
 </script>
 
 <div
