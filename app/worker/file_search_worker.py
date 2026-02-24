@@ -300,15 +300,16 @@ class FileSearchWorker(BaseWorker):
         # Everything 연결 테스트
         try:
             svc = EverythingService()
-            everything_ok = await svc.is_available()
+            ok, _msg = await svc.is_available()
+            everything_ok = bool(ok)
         except Exception as e:
             logger.debug(f"[{self.name}] Everything 상태 체크 실패: {e}")
 
         # ripgrep 경로/버전 확인
         try:
             svc = RipgrepService()
-            rg_path = svc._find_rg()
-            if rg_path and os.path.exists(rg_path):
+            rg_ok, rg_path = svc.is_available()
+            if rg_ok and rg_path and os.path.exists(rg_path):
                 ripgrep_ok = True
                 ripgrep_path = rg_path
         except Exception as e:
