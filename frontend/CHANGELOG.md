@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.11.1] - 2026-02-24
+### Fixed
+- ReviewTab 카테고리 표시 race condition 수정 — category_path 직접 사용, getCategoryDisplay() 패턴 적용
+
 ## [0.11.0] - 2026-02-24
 ### Added
 - LLM 프리셋: cwd 지원 추가 — Claude CLI가 wtools 디렉토리에서 실행되어 /plan 스킬 자동 로드

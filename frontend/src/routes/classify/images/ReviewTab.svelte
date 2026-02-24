@@ -17,6 +17,7 @@
 		id: number;
 		file_path: string;
 		final_category_id: number | null;
+		category_path: string | null;
 		ai_confidence: number | null;
 		status: string;
 	}
@@ -232,9 +233,10 @@
 		return `/api/ic/files/${fileId}/thumbnail`;
 	}
 
-	function getCategoryName(categoryId: number | null): string {
-		if (!categoryId) return '—';
-		return categoryMap.get(categoryId) ?? `#${categoryId}`;
+	function getCategoryDisplay(file: FileReview): string {
+		if (file.category_path) return file.category_path;
+		if (file.final_category_id) return categoryMap.get(file.final_category_id) ?? `#${file.final_category_id}`;
+		return '—';
 	}
 
 	function getConfidenceColor(conf: number | null): string {
@@ -470,7 +472,7 @@
 								{file.file_path.split(/[/\\]/).pop() ?? `file_${file.id}`}
 							</p>
 							<p class="truncate text-[9px] text-white/70">
-								{getCategoryName(file.final_category_id)}
+								{getCategoryDisplay(file)}
 							</p>
 							<!-- 개별 카테고리 변경 드롭다운 -->
 							<!-- svelte-ignore a11y_click_events_have_key_events -->
