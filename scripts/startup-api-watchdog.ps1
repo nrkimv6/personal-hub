@@ -62,28 +62,29 @@ if ($waited -ge $maxWait) {
     Write-Log "WARNING: API server not ready after $maxWait seconds, starting watchdog anyway"
 }
 
-Write-Log "Starting API watchdog (Admin mode)..."
+Write-Log "Starting API watchdog with auto-restart loop..."
 
-# api-watchdog.ps1 호출 (Admin 모드)
-try {
-    # Run in a new hidden window to keep it running
-    $process = Start-Process -FilePath "powershell.exe" `
-        -ArgumentList "-ExecutionPolicy", "Bypass", "-File", $apiWatchdogScript, "-Admin" `
-        -WorkingDirectory (Split-Path -Parent $ScriptDir) `
-        -WindowStyle Hidden `
-        -PassThru
+# PID 기록 (자기 자신 = supervisor)
+$pidFile = Join-Path (Split-Path -Parent $ScriptDir) ".pids\api_watchdog_admin.pid"
+$pidDir = Split-Path -Parent $pidFile
+if (-not (Test-Path $pidDir)) {
+    New-Item -ItemType Directory -Path $pidDir -Force | Out-Null
+}
+$PID | Out-File $pidFile -Encoding ascii
+Write-Log "Supervisor PID ($PID) saved to $pidFile"
 
-    Write-Log "API watchdog started (PID: $($process.Id))"
+# 무한 감시 루프
+$restartCount = 0
+while ($true) {
+    $restartCount++
+    Write-Log "Starting api-watchdog.ps1 (attempt #$restartCount)..."
 
-    # Save PID for management
-    $pidFile = Join-Path (Split-Path -Parent $ScriptDir) ".pids\api_watchdog_admin.pid"
-    $pidDir = Split-Path -Parent $pidFile
-    if (-not (Test-Path $pidDir)) {
-        New-Item -ItemType Directory -Path $pidDir -Force | Out-Null
+    try {
+        & $apiWatchdogScript -Admin
+    } catch {
+        Write-Log "ERROR: api-watchdog.ps1 crashed: $_"
     }
-    $process.Id | Out-File $pidFile -Encoding ascii
 
-    Write-Log "PID saved to $pidFile"
-} catch {
-    Write-Log "ERROR: Failed to start API watchdog: $_"
+    Write-Log "WARNING: api-watchdog.ps1 exited unexpectedly. Restarting in 5 seconds..."
+    Start-Sleep -Seconds 5
 }
