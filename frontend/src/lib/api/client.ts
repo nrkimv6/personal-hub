@@ -132,6 +132,20 @@ export function setApiErrorHandler(handler: ApiErrorHandler): void {
 }
 
 /**
+ * 401 Unauthorized 콜백 (페이지 reload 대신 사용)
+ * - 순환 의존성 방지를 위해 콜백 패턴 사용 (auth.ts → client.ts → auth.ts 불가)
+ * - 레이아웃에서 authStore.reset() + toast 알림으로 등록
+ */
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: () => void): void {
+  onUnauthorized = handler;
+}
+
+// 중복 401 처리 방지 (폴링 다수가 동시에 401 받을 때 토스트 폭탄 방지)
+let isHandling401 = false;
+
+/**
  * API 요청 함수
  */
 export async function request<T>(
@@ -170,11 +184,15 @@ export async function request<T>(
 
   // 401 Unauthorized 처리
   if (response.status === 401) {
-    // 토큰이 유효하지 않으면 로컬스토리지에서 삭제
     if (isBrowser && token) {
       localStorage.removeItem(TOKEN_KEY);
-      // 페이지 새로고침하여 인증 상태 갱신
-      window.location.reload();
+      // 중복 401 처리 방지 (3초 쿨다운)
+      if (!isHandling401) {
+        isHandling401 = true;
+        setTimeout(() => { isHandling401 = false; }, 3000);
+        globalErrorHandler?.('인증이 만료되었습니다. 재로그인이 필요합니다.', 'auth');
+        onUnauthorized?.();
+      }
     }
     throw new Error('인증이 필요합니다');
   }
