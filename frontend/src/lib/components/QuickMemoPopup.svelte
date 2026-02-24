@@ -102,6 +102,20 @@
 		}
 	}
 
+	function handleTitleKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			save();
+		}
+	}
+
+	function handleTextareaKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+			e.preventDefault();
+			save();
+		}
+	}
+
 	function handleMenuPickerSelect(menuId: string | null) {
 		linkedMenuId = menuId;
 		if (menuId) {
@@ -160,15 +174,17 @@
 				placeholder="제목 (필수)"
 				maxlength={200}
 				bind:value={title}
+				onkeydown={handleTitleKeydown}
 				autofocus
 			/>
 
 			<!-- 내용 -->
 			<textarea
 				class="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-				placeholder="내용 (선택)"
+				placeholder="내용 (선택, Shift+Enter=줄바꿈)"
 				style="min-height: 120px;"
 				bind:value={content}
+				onkeydown={handleTextareaKeydown}
 			></textarea>
 
 			<!-- 태그 빠른 선택 -->
@@ -227,7 +243,7 @@
 					onclick={save}
 					disabled={saving}
 				>
-					{saving ? '저장 중...' : 'Ctrl+Enter 저장'}
+					{saving ? '저장 중...' : 'Enter 저장'}
 				</button>
 			</div>
 		</div>
