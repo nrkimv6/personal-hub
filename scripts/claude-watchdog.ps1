@@ -60,14 +60,19 @@ function Start-ClaudeWorker {
 
     Write-Log "Starting Claude worker process..."
 
-    # Use venv python explicitly
-    $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
-    if (-not (Test-Path $VenvPython)) {
-        $VenvPython = Join-Path $ProjectRoot "venv\Scripts\python.exe"
-    }
-    if (-not (Test-Path $VenvPython)) {
-        Write-Log "ERROR: Virtual environment python not found!" "ERROR"
-        return $null
+    # Use exe alias if available, fallback to venv python
+    $AliasExe = Join-Path $ProjectRoot ".venv\Scripts\monitorpage-claude.exe"
+    if (Test-Path $AliasExe) {
+        $VenvPython = $AliasExe
+    } else {
+        $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+        if (-not (Test-Path $VenvPython)) {
+            $VenvPython = Join-Path $ProjectRoot "venv\Scripts\python.exe"
+        }
+        if (-not (Test-Path $VenvPython)) {
+            Write-Log "ERROR: Virtual environment python not found!" "ERROR"
+            return $null
+        }
     }
 
     Write-Log "Using Python: $VenvPython"

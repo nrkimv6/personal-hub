@@ -62,10 +62,14 @@ class BrowserWorkerManager:
         self.api_port = 8001
         self.frontend_port = 6101
 
-        # venv python
-        self.python_exe = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
-        if not self.python_exe.exists():
-            self.python_exe = PROJECT_ROOT / "venv" / "Scripts" / "python.exe"
+        # venv python — use exe alias if available, fallback to python.exe
+        alias_exe = PROJECT_ROOT / ".venv" / "Scripts" / "monitorpage-worker.exe"
+        if alias_exe.exists():
+            self.python_exe = alias_exe
+        else:
+            self.python_exe = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+            if not self.python_exe.exists():
+                self.python_exe = PROJECT_ROOT / "venv" / "Scripts" / "python.exe"
 
         # Watchdog/Listener 정의: (이름, PID파일명, 시작 명령)
         self.workers = [

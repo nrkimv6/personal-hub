@@ -28,11 +28,13 @@ $PythonExe = Join-Path $VenvScripts "python.exe"
 # 역할별 exe alias 정의
 # key: exe 이름 (확장자 제외), value: 역할 설명
 $Aliases = [ordered]@{
-    "monitorpage-api"        = "API 서버 (prod/dev)"
-    "monitorpage-worker"     = "통합 브라우저 워커"
-    "monitorpage-claude"     = "Claude Worker"
-    "monitorpage-classifier" = "Image Classifier"
-    "monitorpage-proxy"      = "Proxy Manager"
+    "monitorpage-api"         = "API 서버 (prod/dev)"
+    "monitorpage-dev"         = "API 서버 (dev 전용)"
+    "monitorpage-worker"      = "통합 브라우저 워커"
+    "monitorpage-claude"      = "Claude Worker"
+    "monitorpage-cmdlistener" = "Redis Command Listener"
+    "monitorpage-classifier"  = "Image Classifier"
+    "monitorpage-proxy"       = "Proxy Manager"
 }
 
 Write-Host ""

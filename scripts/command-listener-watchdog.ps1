@@ -58,13 +58,19 @@ function Start-CommandListener {
 
     Write-Log "Starting command listener process..."
 
-    $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
-    if (-not (Test-Path $VenvPython)) {
-        $VenvPython = Join-Path $ProjectRoot "venv\Scripts\python.exe"
-    }
-    if (-not (Test-Path $VenvPython)) {
-        Write-Log "ERROR: Virtual environment python not found!" "ERROR"
-        return $null
+    # Use exe alias if available, fallback to venv python
+    $AliasExe = Join-Path $ProjectRoot ".venv\Scripts\monitorpage-cmdlistener.exe"
+    if (Test-Path $AliasExe) {
+        $VenvPython = $AliasExe
+    } else {
+        $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+        if (-not (Test-Path $VenvPython)) {
+            $VenvPython = Join-Path $ProjectRoot "venv\Scripts\python.exe"
+        }
+        if (-not (Test-Path $VenvPython)) {
+            Write-Log "ERROR: Virtual environment python not found!" "ERROR"
+            return $null
+        }
     }
 
     Write-Log "Using Python: $VenvPython"

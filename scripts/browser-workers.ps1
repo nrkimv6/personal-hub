@@ -189,9 +189,14 @@ function Start-BrowserWorkers {
         Write-Log "Redis Command Listener already running" "WARN"
     } else {
         Write-Log "Starting Redis Worker Command Listener..."
-        $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
-        if (-not (Test-Path $VenvPython)) {
-            $VenvPython = Join-Path $ProjectRoot "venv\Scripts\python.exe"
+        $AliasExe = Join-Path $ProjectRoot ".venv\Scripts\monitorpage-cmdlistener.exe"
+        if (Test-Path $AliasExe) {
+            $VenvPython = $AliasExe
+        } else {
+            $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+            if (-not (Test-Path $VenvPython)) {
+                $VenvPython = Join-Path $ProjectRoot "venv\Scripts\python.exe"
+            }
         }
 
         if (Test-Path $VenvPython) {
@@ -214,9 +219,14 @@ function Start-BrowserWorkers {
         Write-Log "Dev Runner Command Listener already running" "WARN"
     } else {
         Write-Log "Starting Dev Runner Command Listener..."
-        $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
-        if (-not (Test-Path $VenvPython)) {
-            $VenvPython = Join-Path $ProjectRoot "venv\Scripts\python.exe"
+        $AliasExe = Join-Path $ProjectRoot ".venv\Scripts\monitorpage-cmdlistener.exe"
+        if (Test-Path $AliasExe) {
+            $VenvPython = $AliasExe
+        } else {
+            $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+            if (-not (Test-Path $VenvPython)) {
+                $VenvPython = Join-Path $ProjectRoot "venv\Scripts\python.exe"
+            }
         }
 
         if (Test-Path $VenvPython) {
