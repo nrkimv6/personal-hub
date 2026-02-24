@@ -723,12 +723,10 @@ class PlanService:
     # ========== 일괄 완료 ==========
 
     def _can_done(self, plan: PlanFileResponse) -> bool:
-        """plan이 done 처리 가능한지 판단"""
+        """plan이 done 처리 가능한지 판단 — 체크박스 전체 완료인 경우만"""
         if "archive" in plan.path:
             return False
         if plan.progress.total > 0 and plan.progress.done == plan.progress.total:
-            return True
-        if "완료" in plan.status:
             return True
         return False
 
