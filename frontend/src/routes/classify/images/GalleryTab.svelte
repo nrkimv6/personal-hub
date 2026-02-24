@@ -4,6 +4,9 @@
   import { toast } from '$lib/stores/toast';
   import { Search, Tag, Trash2, Check, X, Loader2, Images, ImagePlus, Eye, FolderOpen, Clipboard } from 'lucide-svelte';
 
+  // 태그 타입 (GalleryImage에서 사용하므로 먼저 선언)
+  interface TagItem { id: number; name: string; }
+
   // 이미지 타입
   interface GalleryImage {
     id: number;
@@ -14,6 +17,7 @@
     category: string | null;
     size: number;
     thumbnail: string;
+    tags: TagItem[];
   }
 
   let images = $state<GalleryImage[]>([]);
@@ -77,6 +81,7 @@
       category: f.final_category_id ? String(f.final_category_id) : null,
       size: f.file_size || 0,
       thumbnail: `/api/ic/files/${f.id}/thumbnail`,
+      tags: Array.isArray(f.tags) ? f.tags.map((t: any) => ({ id: t.id, name: t.name })) : [],
     };
   }
 
@@ -257,7 +262,6 @@
   }
 
   // 태그 상태
-  interface TagItem { id: number; name: string; }
   let tags = $state<TagItem[]>([]);
   let showTagPicker = $state(false);
   let tagFilter = $state<number | null>(null);  // null = 전체
@@ -282,6 +286,17 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       showTagPicker = false;
       await loadTags();
+      // 로컬 이미지 배열에서 선택된 이미지의 tags 업데이트
+      const appliedTag = tags.find(t => t.name === tagName);
+      if (appliedTag) {
+        const taggedIds = [...selectedImages];
+        images = images.map(img => {
+          if (!taggedIds.includes(img.id)) return img;
+          const alreadyHas = img.tags.some(t => t.id === appliedTag.id);
+          if (alreadyHas) return img;
+          return { ...img, tags: [...img.tags, appliedTag] };
+        });
+      }
       toast.success(`${taggedCount}개 이미지에 태그를 부여했습니다.`);
     } catch (err: any) {
       toast.error(`태그 부여 실패: ${err.message}`);

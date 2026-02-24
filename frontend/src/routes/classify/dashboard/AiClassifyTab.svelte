@@ -204,9 +204,10 @@
 
   // 분류 완료 후 결과 로드
   async function loadResults(merge = false) {
+    const skip = merge ? resultsOffset : 0;
     if (!merge) { resultsOffset = 0; }
     try {
-      const res = await fetchWithTimeout('/api/ic/files?status=ai_classified&limit=20&skip=0&order_by=id&order_dir=desc');
+      const res = await fetchWithTimeout(`/api/ic/files?status=ai_classified&limit=20&skip=${skip}&order_by=id&order_dir=desc`);
       if (!res.ok) return;
       const data = await res.json();
       const newItems = (data.files ?? []).map(mapResultFile);
