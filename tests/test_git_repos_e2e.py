@@ -6,6 +6,7 @@ RIGHT-BICEP 원칙 적용.
 """
 
 import os
+import time
 import requests
 import pytest
 
@@ -19,6 +20,27 @@ def api(method, path="", json=None, params=None):
     url = f"{BASE}{path}"
     resp = getattr(requests, method)(url, json=json, params=params, timeout=TIMEOUT)
     return resp
+
+
+def poll_task(task_id: str, interval: float = 0.5, max_retries: int = 30) -> dict:
+    """비동기 task 결과를 폴링하여 반환."""
+    for _ in range(max_retries):
+        resp = api("get", f"/tasks/{task_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        if data["status"] != "pending":
+            return data
+        time.sleep(interval)
+    raise TimeoutError(f"Task {task_id} did not complete within {max_retries * interval}s")
+
+
+def execute_and_poll(method, path, json=None, **poll_kwargs) -> dict:
+    """비동기 엔드포인트 호출 → 폴링 → 결과 반환."""
+    resp = api(method, path, json=json)
+    assert resp.status_code == 200
+    task_data = resp.json()
+    assert "task_id" in task_data
+    return poll_task(task_data["task_id"], **poll_kwargs)
 
 
 # ============================================================
@@ -166,20 +188,16 @@ class TestStatus:
         assert all("message" in l for l in logs)
 
     def test_refresh_single(self, any_repo):
-        """단일 refresh — last_status 갱신 (Time)."""
-        resp = api("post", f"/{any_repo['id']}/refresh")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["last_status"] is not None
-        assert data["last_checked_at"] is not None
+        """단일 refresh — 비동기 큐 발행 후 폴링 (Time)."""
+        result = execute_and_poll("post", f"/{any_repo['id']}/refresh")
+        assert result["status"] == "completed"
+        assert result["result"]["success"] is True
 
     def test_refresh_all(self, registered_repos):
-        """전체 refresh (Cardinality)."""
-        resp = api("post", "/refresh-all")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data) >= 10
-        assert all(r["last_status"] is not None for r in data)
+        """전체 refresh — 비동기 큐 발행 후 폴링 (Cardinality)."""
+        result = execute_and_poll("post", "/refresh-all", interval=1.0, max_retries=60)
+        assert result["status"] == "completed"
+        assert result["result"]["success"] is True
 
 
 # ============================================================
@@ -215,22 +233,22 @@ class TestGitOperations:
             assert status["status"] == "dirty"
             assert self.DUMMY_FILE in status["untracked"]
 
-            # 3. stage
-            resp = api("post", f"/{repo['id']}/stage", json={"files": [self.DUMMY_FILE]})
-            assert resp.status_code == 200
-            assert resp.json()["success"] is True
+            # 3. stage (비동기)
+            result = execute_and_poll("post", f"/{repo['id']}/stage", json={"files": [self.DUMMY_FILE]})
+            assert result["status"] == "completed"
+            assert result["result"]["success"] is True
 
             # Cross-check: staged에 포함
             status = api("get", f"/{repo['id']}/status").json()
             assert self.DUMMY_FILE in status["staged"]
 
-            # 4. commit
-            resp = api("post", f"/{repo['id']}/commit", json={
+            # 4. commit (비동기)
+            result = execute_and_poll("post", f"/{repo['id']}/commit", json={
                 "message": "test: e2e dummy commit (will be reverted)",
                 "stage_all": False
             })
-            assert resp.status_code == 200
-            assert resp.json()["success"] is True
+            assert result["status"] == "completed"
+            assert result["result"]["success"] is True
 
             # Cross-check: log에 반영
             logs = api("get", f"/{repo['id']}/log", params={"n": 1}).json()
@@ -245,13 +263,16 @@ class TestGitOperations:
             assert any(o["operation"] == "commit" and o["status"] == "success" for o in ops)
 
         finally:
-            # 정리: 더미 파일 삭제 후 커밋
+            # 정리: 더미 파일 삭제 후 커밋 (비동기)
             if os.path.exists(dummy_path):
                 os.remove(dummy_path)
-                api("post", f"/{repo['id']}/commit", json={
-                    "message": "test: revert e2e dummy commit",
-                    "stage_all": True
-                })
+                try:
+                    execute_and_poll("post", f"/{repo['id']}/commit", json={
+                        "message": "test: revert e2e dummy commit",
+                        "stage_all": True
+                    })
+                except Exception:
+                    pass
 
     def test_stash_and_pop(self, registered_repos):
         """stash save → pop 사이클 (Inverse)."""
@@ -263,20 +284,20 @@ class TestGitOperations:
             # 더미 파일로 dirty 만들기
             with open(dummy_path, "w") as f:
                 f.write("stash test\n")
-            api("post", f"/{repo['id']}/stage", json={"files": [self.DUMMY_FILE]})
+            execute_and_poll("post", f"/{repo['id']}/stage", json={"files": [self.DUMMY_FILE]})
 
-            # stash
-            resp = api("post", f"/{repo['id']}/stash", json={"message": "e2e stash test"})
-            assert resp.status_code == 200
-            assert resp.json()["success"] is True
+            # stash (비동기)
+            result = execute_and_poll("post", f"/{repo['id']}/stash", json={"message": "e2e stash test"})
+            assert result["status"] == "completed"
+            assert result["result"]["success"] is True
 
             status = api("get", f"/{repo['id']}/status").json()
             assert status["status"] == "clean"
 
-            # pop (Inverse)
-            resp = api("post", f"/{repo['id']}/stash-pop")
-            assert resp.status_code == 200
-            assert resp.json()["success"] is True
+            # pop (Inverse, 비동기)
+            result = execute_and_poll("post", f"/{repo['id']}/stash-pop")
+            assert result["status"] == "completed"
+            assert result["result"]["success"] is True
 
             status = api("get", f"/{repo['id']}/status").json()
             assert status["status"] == "dirty"
@@ -284,17 +305,18 @@ class TestGitOperations:
         finally:
             if os.path.exists(dummy_path):
                 os.remove(dummy_path)
-                # unstage if needed
-                api("post", f"/{repo['id']}/commit", json={
-                    "message": "test: cleanup stash test",
-                    "stage_all": True
-                })
+                try:
+                    execute_and_poll("post", f"/{repo['id']}/commit", json={
+                        "message": "test: cleanup stash test",
+                        "stage_all": True
+                    })
+                except Exception:
+                    pass
 
     def test_fetch(self, any_repo):
-        """fetch 실행 — 에러 없이 완료."""
-        resp = api("post", f"/{any_repo['id']}/fetch")
-        assert resp.status_code == 200
-        # remote이 있으면 success, 없어도 에러는 아님
+        """fetch 실행 — 비동기 큐 발행 후 폴링."""
+        result = execute_and_poll("post", f"/{any_repo['id']}/fetch")
+        assert result["status"] == "completed"
 
     def test_unstage(self, registered_repos):
         """stage → unstage (Inverse)."""
@@ -306,15 +328,15 @@ class TestGitOperations:
             with open(dummy_path, "w") as f:
                 f.write("unstage test\n")
 
-            # stage
-            api("post", f"/{repo['id']}/stage", json={"files": [self.DUMMY_FILE]})
+            # stage (비동기)
+            execute_and_poll("post", f"/{repo['id']}/stage", json={"files": [self.DUMMY_FILE]})
             status = api("get", f"/{repo['id']}/status").json()
             assert self.DUMMY_FILE in status["staged"]
 
-            # unstage (Inverse)
-            resp = api("post", f"/{repo['id']}/unstage", json={"files": [self.DUMMY_FILE]})
-            assert resp.status_code == 200
-            assert resp.json()["success"] is True
+            # unstage (Inverse, 비동기)
+            result = execute_and_poll("post", f"/{repo['id']}/unstage", json={"files": [self.DUMMY_FILE]})
+            assert result["status"] == "completed"
+            assert result["result"]["success"] is True
 
             status = api("get", f"/{repo['id']}/status").json()
             assert self.DUMMY_FILE not in status["staged"]
@@ -355,27 +377,28 @@ class TestBatchOperations:
                     f.write(f"batch test for {repo['alias']}\n")
                 dummy_paths.append(p)
 
-            # 일괄 커밋
+            # 일괄 커밋 (비동기)
             repo_ids = [r["id"] for r in clean_repos]
-            resp = api("post", "/batch-commit", json={
+            result = execute_and_poll("post", "/batch-commit", json={
                 "repo_ids": repo_ids,
                 "message": "test: e2e batch commit (will be reverted)"
-            })
-            assert resp.status_code == 200
-            results = resp.json()["results"]
-            assert len(results) == 2
-            assert all(r["success"] for r in results)
+            }, interval=1.0, max_retries=60)
+            assert result["status"] == "completed"
+            assert result["result"]["success"] is True
 
         finally:
-            # 정리
+            # 정리 (비동기)
             for i, repo in enumerate(clean_repos):
                 p = dummy_paths[i] if i < len(dummy_paths) else None
                 if p and os.path.exists(p):
                     os.remove(p)
-                api("post", f"/{repo['id']}/commit", json={
-                    "message": "test: revert batch commit",
-                    "stage_all": True
-                })
+                try:
+                    execute_and_poll("post", f"/{repo['id']}/commit", json={
+                        "message": "test: revert batch commit",
+                        "stage_all": True
+                    })
+                except Exception:
+                    pass
 
 
 # ============================================================
