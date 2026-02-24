@@ -1,9 +1,19 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import type { DevRunnerTaskResponse } from '$lib/api';
+	interface TaskInfo {
+		id: string;
+		status: string;
+		text: string;
+		model_used?: string;
+		source_path?: string;
+		started_at?: string;
+		input_tokens: number;
+		output_tokens: number;
+		cache_read_tokens: number;
+	}
 
 	interface Props {
-		task: DevRunnerTaskResponse | null;
+		task: TaskInfo | null;
 	}
 
 	let { task }: Props = $props();

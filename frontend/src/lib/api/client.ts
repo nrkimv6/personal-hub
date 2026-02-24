@@ -98,7 +98,7 @@ export async function fetchWithTimeout(
   const timeoutId = setTimeout(() => controller.abort(), timeout);
 
   // 기존 signal이 있으면 합침 (AbortController signal 충돌 방지)
-  const mergedSignal = mergeSignals(options.signal, controller.signal);
+  const mergedSignal = mergeSignals(options.signal ?? undefined, controller.signal);
 
   try {
     const response = await fetch(url, {
