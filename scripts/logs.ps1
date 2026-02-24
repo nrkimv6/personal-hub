@@ -320,6 +320,23 @@ if ($apiLogFile) {
     }
 }
 
+# Public 모드: 워커/watchdog/dev-runner 로그 제외 (Admin 아닐 때)
+if (-not $Admin) {
+    $workerLogFile = $null
+    $igWorkerLogFile = $null
+    $claudeWorkerLogFile = $null
+    $videoDownloadWorkerLogFile = $null
+    $crawlWorkerLogFile = $null
+    $watchdogLogFile = $null
+    $claudeWatchdogLogFile = $null
+    $videoDownloadWatchdogLogFile = $null
+    $crawlWatchdogLogFile = $null
+    $commandListenerWatchdogLogFile = $null
+    $devRunnerLogFile = $null
+    $planRunnerLogFile = $null
+    $planRunnerStreamLogFile = $null
+}
+
 # Show log content function
 function Show-LogContent {
     param(
@@ -516,7 +533,8 @@ function Start-CombinedLogTail {
 
     # Admin 전용 소스 — Production에서 제외 (Worker는 항상 APP_MODE=development로 실행되어 logs/admin/에 기록됨)
     $devOnlySources = @("WORKER", "IG-WORKER", "CLAUDE", "VIDEO-DL", "CRAWL",
-                         "IG-WD", "CLAUDE-WD", "VIDEO-DL-WD", "CRAWL-WD", "DEV-RUNNER")
+                         "IG-WD", "CLAUDE-WD", "VIDEO-DL-WD", "CRAWL-WD", "CMD-WD",
+                         "WATCHDOG", "DEV-RUNNER", "PLAN-RUNNER", "PR-STREAM")
     if (-not $Admin) {
         foreach ($source in $devOnlySources) {
             $logConfig.Remove($source)
@@ -657,7 +675,11 @@ if ($Follow) {
             Start-LogTail -FilePath $apiLogFile -Prefix "API"
         }
         "worker" {
-            Start-LogTail -FilePath $workerLogFile -Prefix "Worker"
+            if (-not $Admin) {
+                Write-Host "[!] Worker 로그는 Admin 모드에서만 사용 가능합니다. (-Admin 스위치를 추가하세요)" -ForegroundColor Red
+            } else {
+                Start-LogTail -FilePath $workerLogFile -Prefix "Worker"
+            }
         }
         "frontend" {
             Start-LogTail -FilePath $frontendLogFile -Prefix "Frontend"
@@ -688,14 +710,20 @@ if ($Follow) {
             Show-LogContent -FilePath $apiLogFile -Label "API Server" -Color Cyan -TailLines $Lines
         }
         "worker" {
-            Show-LogContent -FilePath $workerLogFile -Label "Worker" -Color Magenta -TailLines $Lines
+            if (-not $Admin) {
+                Write-Host "[!] Worker 로그는 Admin 모드에서만 사용 가능합니다. (-Admin 스위치를 추가하세요)" -ForegroundColor Red
+            } else {
+                Show-LogContent -FilePath $workerLogFile -Label "Worker" -Color Magenta -TailLines $Lines
+            }
         }
         "frontend" {
             Show-LogContent -FilePath $frontendLogFile -Label "Frontend" -Color Green -TailLines $Lines
         }
         default {
             Show-LogContent -FilePath $apiLogFile -Label "API Server" -Color Cyan -TailLines $Lines
-            Show-LogContent -FilePath $workerLogFile -Label "Worker" -Color Magenta -TailLines $Lines
+            if ($Admin) {
+                Show-LogContent -FilePath $workerLogFile -Label "Worker" -Color Magenta -TailLines $Lines
+            }
             Show-LogContent -FilePath $frontendLogFile -Label "Frontend" -Color Green -TailLines $Lines
         }
     }
