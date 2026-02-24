@@ -8,7 +8,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.modules.dev_runner.schemas import PlanFileResponse, PlanProgressResponse, PlanDetailResponse, RegisteredPathResponse, DoneResponse, BatchDoneResponse
+from app.modules.dev_runner.schemas import PlanFileResponse, PlanProgressResponse, PlanDetailResponse, RegisteredPathResponse, DoneResponse, BatchDoneResponse, VerifyResult
 from app.modules.dev_runner.services.plan_service import plan_service
 
 logger = logging.getLogger(__name__)
@@ -158,6 +158,66 @@ async def batch_done():
     """완료 가능한 plan 일괄 done 처리 (아카이브, TODO→DONE, 커밋)"""
     result = await plan_service.batch_done()
     return BatchDoneResponse(**result)
+
+
+@router.get("/plans/{encoded_path}/verify", response_model=VerifyResult)
+async def verify_plan(encoded_path: str):
+    """plan 완료 검증 — 코드베이스와 체크박스를 대조하여 완료 여부 판정"""
+    try:
+        decoded_path = _decode_path(encoded_path)
+    except Exception as e:
+        logger.error(f"Base64 디코딩 실패: encoded_path={encoded_path}, error={e}")
+        raise HTTPException(status_code=400, detail=f"Invalid encoded path: {str(e)}")
+
+    if not plan_service.validate_path(decoded_path):
+        raise HTTPException(status_code=403, detail="Path not allowed")
+
+    path = Path(decoded_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Plan file not found")
+
+    return plan_service.verify_completion(path)
+
+
+@router.post("/plans/batch-verify-done", response_model=BatchDoneResponse)
+async def batch_verify_done():
+    """코드베이스 검증 기반으로 완료 가능한 plan 일괄 done 처리"""
+    all_plans = plan_service.list_plans(include_ignored=True)
+    targets = []
+    for plan in all_plans:
+        path = Path(plan.path)
+        if not path.exists():
+            continue
+        result = plan_service.verify_completion(path)
+        if result.can_done:
+            targets.append(plan)
+
+    if not targets:
+        return BatchDoneResponse(total=0, success=0, failed=0, results=[])
+
+    results = []
+    success_count = 0
+    failed_count = 0
+
+    for plan in targets:
+        done_result = await plan_service.run_done(plan.path)
+        results.append({
+            "path": plan.path,
+            "filename": plan.filename,
+            "success": done_result["success"],
+            "message": done_result["message"],
+        })
+        if done_result["success"]:
+            success_count += 1
+        else:
+            failed_count += 1
+
+    return BatchDoneResponse(
+        total=len(targets),
+        success=success_count,
+        failed=failed_count,
+        results=results,
+    )
 
 
 @router.post("/plans/{encoded_path}/hold")

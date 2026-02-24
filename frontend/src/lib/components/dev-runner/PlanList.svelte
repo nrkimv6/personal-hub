@@ -7,6 +7,7 @@
 	let doneLoadingPath = $state<string | null>(null);
 	let doneMessage = $state<{ path: string; success: boolean; text: string; remaining?: number; total?: number; planStatus?: string } | null>(null);
 	let batchDoneLoading = $state(false);
+	let batchVerifyDoneLoading = $state(false);
 
 	async function handleDone(e: Event, plan: DevRunnerPlanFileResponse) {
 		e.stopPropagation();
@@ -55,11 +56,31 @@
 		}
 	}
 
+	async function handleBatchVerifyDone() {
+		if (!confirm('코드베이스 검증 기반으로 완료 가능한 plan을 일괄 처리하시겠습니까?\n(파일 존재 여부 + 체크박스 기반 판정)\n\n아카이브 이동, TODO→DONE, 커밋이 수행됩니다.')) return;
+		batchVerifyDoneLoading = true;
+		doneMessage = null;
+		try {
+			const result = await devRunnerPlanApi.batchVerifyDone();
+			doneMessage = {
+				path: '',
+				success: result.failed === 0,
+				text: `검증 완료: ${result.success}개 성공${result.failed > 0 ? `, ${result.failed}개 실패` : ''}${result.total === 0 ? ' (대상 없음)' : ''}`
+			};
+			onPlansChange?.();
+			setTimeout(() => { doneMessage = null; }, 5000);
+		} catch (err) {
+			doneMessage = { path: '', success: false, text: err instanceof Error ? err.message : '검증 완료 실패' };
+		} finally {
+			batchVerifyDoneLoading = false;
+		}
+	}
+
 	function canDone(plan: DevRunnerPlanFileResponse): boolean {
 		if (plan.path.includes('archive')) return false;
+		const doneStatuses = ['구현완료', '완료', '수정 완료', '배포완료', '수정완료', '검토완료'];
 		return (plan.progress.total > 0 && plan.progress.done === plan.progress.total)
-			|| plan.status === '구현완료'
-			|| plan.status === '완료';
+			|| doneStatuses.includes(plan.status);
 	}
 
 	async function handleHold(e: Event, plan: DevRunnerPlanFileResponse) {
@@ -270,6 +291,19 @@
 						<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
 					{/if}
 					일괄 완료
+				</button>
+				<button
+					class="h-6 px-2 text-[10px] rounded text-blue-600 hover:bg-blue-50 transition-colors inline-flex items-center gap-1 disabled:opacity-50"
+					onclick={handleBatchVerifyDone}
+					disabled={batchVerifyDoneLoading}
+					title="코드베이스 검증 기반으로 완료 가능한 plan 일괄 처리"
+				>
+					{#if batchVerifyDoneLoading}
+						<svg class="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-dasharray="31.4 31.4" stroke-dashoffset="10"/></svg>
+					{:else}
+						<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
+					{/if}
+					검증 완료
 				</button>
 			{/if}
 			<button

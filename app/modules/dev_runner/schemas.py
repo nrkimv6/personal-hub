@@ -111,6 +111,15 @@ class BatchDoneResponse(BaseModel):
     results: List[BatchDoneResultItem]
 
 
+class VerifyResult(BaseModel):
+    """코드베이스 검증 기반 완료 판정 결과"""
+    total: int
+    verified: int
+    unverified_items: List[str]
+    percent: float
+    can_done: bool
+
+
 class PlanEventResponse(BaseModel):
     """계획서 이벤트 응답"""
     id: int
@@ -178,4 +187,5 @@ __all__ = [
     'DoneResponse',
     'BatchDoneResponse',
     'BatchDoneResultItem',
+    'VerifyResult',
 ]

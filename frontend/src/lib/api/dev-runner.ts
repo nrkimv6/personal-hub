@@ -113,6 +113,14 @@ export interface BatchDoneResponse {
 	results: BatchDoneResultItem[];
 }
 
+export interface VerifyResult {
+	total: number;
+	verified: number;
+	unverified_items: string[];
+	percent: number;
+	can_done: boolean;
+}
+
 // ============================================================
 // API prefix (백엔드 라우터: /api/v1/dev-runner)
 // ============================================================
@@ -219,6 +227,12 @@ export const devRunnerPlanApi = {
 
 	batchDone: () =>
 		devRunnerRequest<BatchDoneResponse>('/plans/batch-done', { method: 'POST' }),
+
+	verify: (encodedPath: string) =>
+		devRunnerRequest<VerifyResult>(`/plans/${encodedPath}/verify`),
+
+	batchVerifyDone: () =>
+		devRunnerRequest<BatchDoneResponse>('/plans/batch-verify-done', { method: 'POST' }),
 
 	hold: (encodedPath: string) =>
 		devRunnerRequest<{ success: boolean }>(`/plans/${encodedPath}/hold`, { method: 'POST' }),

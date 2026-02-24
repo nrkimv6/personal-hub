@@ -316,7 +316,7 @@ class PlanService:
     # 자동 무시 대상 상태 (정확히 일치해야 함)
     _IGNORED_STATUSES = {"보류"}
     # 완료 계열 상태 (아카이브 허용 + 목록 숨김)
-    _DONE_STATUSES = {"구현완료", "완료", "수정 완료", "배포완료", "수정완료"}
+    _DONE_STATUSES = {"구현완료", "완료", "수정 완료", "배포완료", "수정완료", "검토완료"}
 
     def _is_ignored_plan(self, path: Path, status: str, progress: PlanProgressResponse) -> bool:
         """plan이 무시 대상인지 판단"""
@@ -845,6 +845,51 @@ class PlanService:
                     "remaining_tasks": 0, "total_tasks": 0, "plan_status": ""}
 
     # ========== 일괄 완료 ==========
+
+    def verify_completion(self, plan_path: Path) -> "VerifyResult":
+        """코드베이스와 계획서를 대조하여 완료 여부 판정"""
+        from app.modules.dev_runner.schemas import VerifyResult
+
+        # archive 경로이면 즉시 can_done=False
+        if "archive" in str(plan_path):
+            return VerifyResult(total=0, verified=0, unverified_items=[], percent=0.0, can_done=False)
+
+        detail = self.parse_plan_items(plan_path)
+
+        total = 0
+        verified = 0
+        unverified_items: list[str] = []
+
+        def process_item(item) -> None:
+            nonlocal total, verified
+            total += 1
+            if item.file_path:
+                if Path(item.file_path).exists():
+                    verified += 1
+                else:
+                    unverified_items.append(item.text)
+            else:
+                if item.checked:
+                    verified += 1
+                else:
+                    unverified_items.append(item.text)
+            for child in item.children:
+                process_item(child)
+
+        for phase in detail.phases:
+            for item in phase.items:
+                process_item(item)
+
+        percent = round(verified / total * 100, 1) if total > 0 else 0.0
+        can_done = total > 0 and verified == total
+
+        return VerifyResult(
+            total=total,
+            verified=verified,
+            unverified_items=unverified_items,
+            percent=percent,
+            can_done=can_done,
+        )
 
     def _can_done(self, plan: PlanFileResponse) -> bool:
         """plan이 done 처리 가능한지 판단 — 체크박스 전체 완료 OR 상태 헤더 완료 계열"""
