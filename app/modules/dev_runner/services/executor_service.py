@@ -95,8 +95,13 @@ class ExecutorService:
             "timestamp": datetime.now().isoformat(),
         }
 
+        logger.info(f"[dev-runner] Request engine: {request.engine}")
+
         if request.plan_file:
             command["plan_file"] = request.plan_file
+
+        if request.engine:
+            command["engine"] = request.engine
 
         # 옵션 추가
         if request.max_cycles and request.max_cycles > 0:
@@ -159,6 +164,7 @@ class ExecutorService:
 
             return RunStatusResponse(
                 running=True,
+                engine=request.engine,
                 pid=int(pid) if pid else None,
                 plan_file=plan_file,
                 start_time=datetime.fromisoformat(start_time_str) if start_time_str else None,
@@ -324,6 +330,7 @@ class ExecutorService:
 
             heartbeat = self.redis_client.get("plan-runner:listener:heartbeat")
             listener_alive = heartbeat is not None
+            engine = self.redis_client.get(STATE_KEY + ":engine") or "claude"
 
             status = self.redis_client.get(STATE_KEY + ":status")
 
@@ -339,14 +346,14 @@ class ExecutorService:
                         if not psutil.pid_exists(int(pid_str)):
                             logger.warning(f"[dev-runner] PID {pid_str} 종료됨 → stale 상태 자동 정리")
                             self._force_cleanup_state()
-                            return RunStatusResponse(running=False, listener_alive=listener_alive, redis_connected=True, pid=None, plan_file=None)
+                            return RunStatusResponse(running=False, engine=engine, listener_alive=listener_alive, redis_connected=True, pid=None, plan_file=None)
                     except (ValueError, ImportError):
                         pass
 
                 if not listener_alive:
                     logger.warning("[dev-runner] heartbeat 없음 → stale 상태 자동 정리")
                     self._force_cleanup_state()
-                    return RunStatusResponse(running=False, listener_alive=False, redis_connected=True, pid=None, plan_file=None)
+                    return RunStatusResponse(running=False, engine=engine, listener_alive=False, redis_connected=True, pid=None, plan_file=None)
 
                 # 전체실행 시 현재 실행 중인 plan 이름 조회
                 current_plan_name = None
@@ -360,6 +367,7 @@ class ExecutorService:
 
                 return RunStatusResponse(
                     running=True,
+                    engine=engine,
                     listener_alive=True,
                     redis_connected=True,
                     pid=int(pid_str) if pid_str else None,
@@ -369,7 +377,7 @@ class ExecutorService:
                     current_plan_name=current_plan_name,
                 )
             else:
-                return RunStatusResponse(running=False, listener_alive=listener_alive, redis_connected=True, pid=None, plan_file=None)
+                return RunStatusResponse(running=False, engine=engine, listener_alive=listener_alive, redis_connected=True, pid=None, plan_file=None)
 
         except redis.ConnectionError:
             return RunStatusResponse(running=False, listener_alive=False, redis_connected=False, pid=None, plan_file=None)

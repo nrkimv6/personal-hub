@@ -9,6 +9,7 @@ import { request, API_BASE, getAuthToken, fetchWithTimeout } from './client';
 
 export interface RunRequest {
 	plan_file?: string | null;
+	engine?: string;
 	max_cycles?: number;
 	max_tokens?: number;
 	until?: string | null;
@@ -20,6 +21,7 @@ export interface RunRequest {
 
 export interface RunStatusResponse {
 	running: boolean;
+	engine?: string;
 	listener_alive: boolean;
 	redis_connected: boolean;
 	pid: number | null;

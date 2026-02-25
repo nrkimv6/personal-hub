@@ -282,7 +282,12 @@
 			<div class="flex-1 min-h-0 flex flex-col md:grid md:grid-cols-2 md:gap-0 overflow-hidden">
 				<!-- Log Viewer -->
 				<div class="flex-1 min-h-0 overflow-hidden">
-					<LogViewer planFile={effectivePlanFile ?? undefined} currentPlanName={runStatus?.current_plan_name ?? undefined} onBatchPlansChange={(plans) => { batchPlans = plans; }} />
+					<LogViewer
+						planFile={effectivePlanFile ?? undefined}
+						engine={runStatus?.engine ?? undefined}
+						currentPlanName={runStatus?.current_plan_name ?? undefined}
+						onBatchPlansChange={(plans) => { batchPlans = plans; }}
+					/>
 				</div>
 
 				<!-- Plans & Tasks: 모바일=하단 고정+접힘/펼침, 데스크톱=우측 패널 -->

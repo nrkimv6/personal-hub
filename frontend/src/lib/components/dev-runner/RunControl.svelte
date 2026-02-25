@@ -12,6 +12,7 @@
 	let { status, plans, onStatusChange, selectedPlan = $bindable('') }: Props = $props();
 
 	let mode = $state<'single' | 'all'>('single');
+	let selectedEngine = $state('claude');
 	let maxCycles = $state(0);
 
 	// 실행 중인 plan 표시 정보
@@ -20,6 +21,7 @@
 		status.plan_file === 'ALL' ? '전체 실행' :
 		status.plan_file ? status.plan_file.split(/[\\/]/).pop() ?? '' : '실행 중'
 	);
+	let runningEngine = $derived(status?.engine ?? 'claude');
 	let runningPlanProgress = $derived(
 		status?.running && status.plan_file && status.plan_file !== 'ALL'
 			? (plans.find(p => p.path === status!.plan_file)?.progress ?? null)
@@ -45,6 +47,7 @@
 		try {
 			await devRunnerRunnerApi.start({
 				plan_file: mode === 'single' ? selectedPlan : null,
+				engine: selectedEngine,
 				max_cycles: maxCycles || 0,
 				until: until || null,
 				dry_run: dryRun,
@@ -212,15 +215,28 @@
 
 		<div class="h-4 w-px bg-gray-200 mx-1"></div>
 
-		<!-- Mode Select -->
-		<select
-			class="border rounded px-2 py-1.5 text-xs h-8 w-[120px]"
-			bind:value={mode}
-			disabled={status?.running}
-		>
-			<option value="single">단일 Plan</option>
-			<option value="all">전체 실행</option>
-		</select>
+		<!-- Mode & Engine Select -->
+		<div class="flex items-center gap-2">
+			<select
+				class="border rounded px-2 py-1.5 text-xs h-8 w-[120px]"
+				bind:value={mode}
+				disabled={status?.running}
+			>
+				<option value="single">단일 Plan</option>
+				<option value="all">전체 실행</option>
+			</select>
+
+			<select
+				class="border rounded px-2 py-1.5 text-xs h-8 w-[100px] font-medium"
+				class:text-orange-700={selectedEngine === 'gemini'}
+				class:bg-orange-50={selectedEngine === 'gemini'}
+				bind:value={selectedEngine}
+				disabled={status?.running}
+			>
+				<option value="claude">Claude</option>
+				<option value="gemini">Gemini</option>
+			</select>
+		</div>
 	</div>
 
 	<!-- Options Row -->
@@ -228,12 +244,13 @@
 		{#if status?.running}
 			<!-- 실행 중: Plan 선택 대신 실행 정보 표시 -->
 			<div class="flex items-center gap-2 opacity-100 pointer-events-none" style="opacity:1">
-				<span class="text-gray-500 text-xs">Plan</span>
-				<span class="inline-flex items-center gap-1.5 border border-green-200 bg-green-50 rounded px-2 py-1 text-xs font-mono text-green-700 h-7">
-					<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse shrink-0"></span>
+				<span class="text-gray-500 text-xs">Running</span>
+				<span class="inline-flex items-center gap-1.5 border rounded px-2 py-1 text-xs font-mono h-7 {runningEngine === 'gemini' ? 'border-orange-200 bg-orange-50 text-orange-700' : 'border-green-200 bg-green-50 text-green-700'}">
+					<span class="w-1.5 h-1.5 rounded-full animate-pulse shrink-0 {runningEngine === 'gemini' ? 'bg-orange-500' : 'bg-green-500'}"></span>
+					<span class="uppercase text-[10px] font-bold opacity-70">[{runningEngine}]</span>
 					{runningPlanName}
 					{#if runningPlanProgress}
-						<span class="text-green-600 opacity-70">({runningPlanProgress.done}/{runningPlanProgress.total})</span>
+						<span class="opacity-70">({runningPlanProgress.done}/{runningPlanProgress.total})</span>
 					{/if}
 				</span>
 			</div>

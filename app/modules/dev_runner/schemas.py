@@ -10,6 +10,7 @@ from typing import Optional, List
 class RunRequest(BaseModel):
     """실행 요청 스키마"""
     plan_file: Optional[str] = Field(None, description="Plan 파일 경로 (null=전체 실행)")
+    engine: Optional[str] = Field("claude", description="AI 실행 엔진 (claude | gemini)")
     max_cycles: Optional[int] = Field(0, description="최대 사이클 수 (0=무제한)")
     max_tokens: Optional[int] = Field(0, description="최대 토큰 수 (0=무제한)")
     until: Optional[str] = Field(None, description="종료 시각 (HH:MM 형식)")
@@ -22,6 +23,7 @@ class RunRequest(BaseModel):
 class RunStatusResponse(BaseModel):
     """실행 상태 응답 스키마"""
     running: bool
+    engine: Optional[str] = None
     listener_alive: bool = False
     redis_connected: bool = False
     pid: Optional[int] = None

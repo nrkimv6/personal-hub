@@ -247,6 +247,11 @@ class TestStopDevRunner:
 
 class TestGetProcessStatus:
 
+    @pytest.fixture(autouse=True)
+    def mock_psutil(self):
+        with patch("psutil.pid_exists", return_value=True):
+            yield
+
     def test_status_running_with_heartbeat(self, executor, fake_redis):
         """Right - running + heartbeat 있음 → running=True"""
         fake_redis.set("plan-runner:listener:heartbeat", "alive")
@@ -384,3 +389,62 @@ class TestCORRECTConformance:
 
             command = json.loads(captured[0])
             assert "plan_file" not in command, f"plan_file={plan_val!r} should not be in command"
+
+    async def test_engine_parameter_passing(self, executor, fake_async_redis, fake_redis):
+        """Phase 1 - engine 파라미터가 Redis 명령에 포함되고 상태 조회 시 반환됨"""
+        await _setup_listener_success(fake_async_redis)
+        
+        # 1. Start 시 engine 포함 확인
+        captured = []
+        original_lpush = executor.async_redis.lpush
+        
+        async def capture_lpush(key, *values):
+            captured.extend(values)
+            return await original_lpush(key, *values)
+
+        with patch.object(executor.async_redis, 'lpush', side_effect=capture_lpush):
+            await executor.start_dev_runner(RunRequest(engine="gemini"))
+
+        command = json.loads(captured[0])
+        assert command["engine"] == "gemini"
+
+        # 2. Status 조회 시 engine 포함 확인
+        fake_redis.set("plan-runner:listener:heartbeat", "alive")
+        fake_redis.set("plan-runner:state:status", "running")
+        fake_redis.set("plan-runner:state:pid", "12345")
+        fake_redis.set("plan-runner:state:engine", "gemini")
+        
+        with patch("psutil.pid_exists", return_value=True):
+            status = executor.get_process_status()
+            assert status.engine == "gemini"
+
+    async def test_start_dev_runner_returns_immediate_engine(self, executor, fake_async_redis):
+        """Phase 8/9 - start_dev_runner는 Redis 동기화와 무관하게 요청된 엔진명을 즉시 반환함"""
+        await _setup_listener_success(fake_async_redis)
+        # Redis에는 claude가 있다고 가정 (stale)
+        await fake_async_redis.set("plan-runner:state:engine", "claude")
+        
+        request = RunRequest(engine="gemini", plan_file="test.md")
+        result = await executor.start_dev_runner(request)
+        
+        # 응답에는 요청한 gemini가 포함되어야 함
+        assert result.engine == "gemini"
+
+    def test_get_process_status_returns_engine_when_not_running(self, executor, fake_redis):
+        """Phase 8/9 - running=False인 상태에서도 엔진 정보가 반환됨"""
+        fake_redis.set("plan-runner:listener:heartbeat", "alive")
+        fake_redis.set("plan-runner:state:status", "stopped")
+        fake_redis.set("plan-runner:state:engine", "gemini")
+        
+        status = executor.get_process_status()
+        assert status.running is False
+        assert status.engine == "gemini"
+
+    def test_get_process_status_fallback_to_claude(self, executor, fake_redis):
+        """Phase 8/9 - Redis에 엔진 정보가 없을 때 기본값 claude 반환"""
+        fake_redis.set("plan-runner:listener:heartbeat", "alive")
+        fake_redis.set("plan-runner:state:status", "idle")
+        # engine key 없음
+        
+        status = executor.get_process_status()
+        assert status.engine == "claude"

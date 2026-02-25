@@ -4,11 +4,12 @@
 
 	interface Props {
 		planFile?: string;
+		engine?: string;
 		currentPlanName?: string;
 		onBatchPlansChange?: (plans: BatchPlanItem[]) => void;
 	}
 
-	let { planFile, currentPlanName, onBatchPlansChange }: Props = $props();
+	let { planFile, engine, currentPlanName, onBatchPlansChange }: Props = $props();
 
 	// Phase 2: 전체실행 시 Plan 파일 리스트 추적
 	interface BatchPlanItem {
@@ -329,6 +330,11 @@
 				{#if connected === 'connected' && redisAvailable}
 					<div class="w-2 h-2 rounded-full bg-green-500"></div>
 					<span class="text-[10px] text-green-400">SSE 연결됨</span>
+					{#if engine}
+						<span class="text-[10px] px-1.5 py-0.5 rounded font-bold uppercase {engine === 'gemini' ? 'bg-orange-500/20 text-orange-400' : 'bg-blue-500/20 text-blue-400'}">
+							{engine}
+						</span>
+					{/if}
 				{:else if connected === 'connected' && !redisAvailable}
 					<div class="w-2 h-2 rounded-full bg-yellow-500"></div>
 					<span class="text-[10px] text-yellow-400">Redis 미연결</span>
