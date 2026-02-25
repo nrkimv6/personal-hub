@@ -59,8 +59,13 @@ class TopicExtractWorker:
         logger.info(f"TopicExtractWorker 시작: schedule_id={schedule.id}, run_id={run.id}")
 
         try:
+            # target_config에서 LLM provider/model 읽기
+            config = schedule.get_target_config() if schedule.target_config else {}
+            llm_provider = config.get("llm_provider", "claude")
+            llm_model = config.get("llm_model", "")
+
             # 비동기 요청 생성 (create_extract_requests 사용)
-            request_count = self.create_extract_requests(limit=self.DAILY_LIMIT)
+            request_count = self.create_extract_requests(limit=self.DAILY_LIMIT, llm_provider=llm_provider, llm_model=llm_model)
 
             # 완료 처리 (Worker가 실제 추출 수행)
             run.mark_completed(
@@ -230,7 +235,7 @@ class TopicExtractWorker:
 
         return saved_count
 
-    def create_extract_requests(self, limit: int = 100) -> int:
+    def create_extract_requests(self, limit: int = 100, llm_provider: str = "claude", llm_model: str = "") -> int:
         """소재 추출 LLM 요청 생성 (시범용).
 
         스케줄 없이 직접 LLMRequest를 생성합니다.
@@ -272,6 +277,8 @@ class TopicExtractWorker:
                 status="pending",  # Claude Worker가 처리
                 requested_by="manual",
                 request_source="topic_extract_worker",
+                provider=llm_provider,
+                model=llm_model,
             )
             self.db.add(llm_request)
             request_count += 1

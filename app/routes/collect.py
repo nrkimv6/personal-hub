@@ -141,6 +141,7 @@ class CollectScheduleUpdate(BaseModel):
     display_name: Optional[str] = None
     schedule_value: Optional[Dict[str, Any]] = None  # 시간대 설정
     google_search_params: Optional[Dict[str, Any]] = None  # Google 검색 전용: query, date_filter, max_pages, search_params
+    target_config: Optional[Dict[str, Any]] = None  # LLM provider/model 등 target 설정
 
 
 def _generate_schedule_name(data: CollectScheduleCreate) -> str:
@@ -386,6 +387,13 @@ async def update_schedule(
 
     if updates:
         schedule_service.update_schedule(schedule_id, **updates)
+
+    # target_config 수정 (LLM provider/model 등)
+    if data.target_config is not None:
+        existing_config = schedule.get_target_config() if schedule.target_config else {}
+        merged = {**existing_config, **data.target_config}
+        schedule.set_target_config(merged)
+        db.flush()
 
     # Google 검색 파라미터 수정
     if data.google_search_params and schedule.target_type == "google_search":

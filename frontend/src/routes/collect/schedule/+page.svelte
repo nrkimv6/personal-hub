@@ -65,6 +65,11 @@
 	let editGoogleCr = '';
 	let editGoogleSitesearch = '';
 	let editShowAdvanced = false;
+	// LLM 설정 (instagram_feed, writing_task, topic_extract 전용)
+	let editLlmProvider = 'claude';
+	let editLlmModel = '';
+
+	const LLM_TARGET_TYPES = ['instagram_feed', 'writing_task', 'topic_extract'];
 
 	const scheduleTypes = [
 		{ value: 'instagram_feed', label: 'Instagram 피드', icon: '📸', color: 'pink' },
@@ -278,6 +283,16 @@
 				editGoogleCr = '';
 				editGoogleSitesearch = '';
 			}
+
+			// LLM 설정 복원 (instagram_feed, writing_task, topic_extract)
+			if (LLM_TARGET_TYPES.includes(schedule.target_type) && detail.target_config) {
+				const tc = detail.target_config as Record<string, string>;
+				editLlmProvider = tc.llm_provider || 'claude';
+				editLlmModel = tc.llm_model || '';
+			} else {
+				editLlmProvider = 'claude';
+				editLlmModel = '';
+			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : '스케줄 정보 로드 실패';
 			showEditModal = false;
@@ -302,6 +317,7 @@
 				display_name?: string;
 				schedule_value?: Record<string, unknown>;
 				google_search_params?: Record<string, unknown>;
+				target_config?: Record<string, unknown>;
 			} = {};
 
 			// 표시 이름
@@ -328,6 +344,14 @@
 					date_filter: editGoogleDateFilter || null,
 					max_pages: editGoogleMaxPages,
 					search_params: Object.keys(searchParams).length > 0 ? searchParams : {}
+				};
+			}
+
+			// LLM 설정 (instagram_feed, writing_task, topic_extract)
+			if (LLM_TARGET_TYPES.includes(editSchedule.target_type)) {
+				updateData.target_config = {
+					llm_provider: editLlmProvider,
+					llm_model: editLlmModel
 				};
 			}
 
@@ -1022,6 +1046,36 @@
 											</div>
 										</div>
 									{/if}
+								</div>
+							</div>
+						{/if}
+
+						<!-- LLM 설정 (instagram_feed, writing_task, topic_extract) -->
+						{#if LLM_TARGET_TYPES.includes(editSchedule.target_type)}
+							<div class="border-t border-border pt-4">
+								<h3 class="font-medium text-foreground mb-3">LLM 설정</h3>
+								<div class="space-y-3">
+									<div>
+										<label for="edit-llm-provider" class="block text-sm font-medium text-foreground mb-1">LLM Provider</label>
+										<select
+											id="edit-llm-provider"
+											bind:value={editLlmProvider}
+											class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+										>
+											<option value="claude">Claude (기본)</option>
+											<option value="gemini">Gemini</option>
+										</select>
+									</div>
+									<div>
+										<label for="edit-llm-model" class="block text-sm font-medium text-foreground mb-1">모델명</label>
+										<input
+											id="edit-llm-model"
+											type="text"
+											bind:value={editLlmModel}
+											placeholder="비워두면 기본 모델 사용"
+											class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+										/>
+									</div>
 								</div>
 							</div>
 						{/if}

@@ -212,6 +212,8 @@ class LLMClassifierService:
         post_id: int,
         trigger_tag: str,
         requested_by: str = "auto",
+        provider: str = "claude",
+        model: str = "",
     ) -> Optional[object]:
         """LLM 분류 요청 생성 (claude_worker에 위임).
 
@@ -258,6 +260,8 @@ class LLMClassifierService:
             prompt=prompt,
             requested_by=requested_by,
             request_source=f"instagram_{trigger_tag}",
+            provider=provider,
+            model=model,
         )
 
         logger.info(
@@ -271,11 +275,13 @@ class LLMClassifierService:
         post_ids: list[int],
         trigger_tag: str = "manual",
         requested_by: str = "manual",
+        provider: str = "claude",
+        model: str = "",
     ) -> list:
         """여러 게시물에 대해 LLM 분류 요청 생성."""
         requests = []
         for post_id in post_ids:
-            request = self.create_request(post_id, trigger_tag, requested_by)
+            request = self.create_request(post_id, trigger_tag, requested_by, provider=provider, model=model)
             if request:
                 requests.append(request)
         return requests

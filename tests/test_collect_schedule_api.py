@@ -432,3 +432,83 @@ class TestDeleteSchedule:
         response = client.delete(f"{API_PREFIX}/collect/schedules/99999?delete_runs=true")
 
         assert response.status_code == 404
+
+
+# ============================================================
+# target_config (LLM provider/model) 저장 테스트
+# ============================================================
+
+class TestUpdateScheduleTargetConfig:
+    """PUT /collect/schedules/{id} - target_config 저장 검증"""
+
+    def _create_writing_schedule(self, client):
+        """writing_task 스케줄 생성 헬퍼"""
+        resp = client.post(f"{API_PREFIX}/collect/schedules", json={
+            "target_type": "writing_task",
+            "schedule_type": "time_window",
+            "schedule_value": {
+                "daily_runs": 1,
+                "time_windows": [{"start": "09:00", "end": "09:00"}]
+            }
+        })
+        assert resp.status_code == 200
+        return resp.json()["id"]
+
+    def test_update_schedule_target_config_right(self, client, test_db):
+        """TC-Right: writing_task 스케줄에 llm_provider=gemini 저장"""
+        schedule_id = self._create_writing_schedule(client)
+
+        response = client.put(f"{API_PREFIX}/collect/schedules/{schedule_id}", json={
+            "target_config": {"llm_provider": "gemini", "llm_model": ""}
+        })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("target_config", {}).get("llm_provider") == "gemini"
+
+    def test_update_schedule_target_config_merge(self, client, test_db, sample_service_account):
+        """TC-Merge: 기존 service_account_id가 있는 스케줄에 llm_provider 추가 시 기존 값 보존"""
+        # instagram_feed 스케줄 생성 (service_account_id 포함)
+        resp = client.post(f"{API_PREFIX}/collect/schedules", json={
+            "target_type": "instagram_feed",
+            "target_config": {"service_account_id": sample_service_account.id},
+            "schedule_type": "time_window",
+            "schedule_value": {
+                "daily_runs": 1,
+                "time_windows": [{"start": "09:00", "end": "09:00"}]
+            }
+        })
+        schedule_id = resp.json()["id"]
+
+        # llm_provider 추가
+        response = client.put(f"{API_PREFIX}/collect/schedules/{schedule_id}", json={
+            "target_config": {"llm_provider": "gemini", "llm_model": "gemini-2.0-flash"}
+        })
+
+        assert response.status_code == 200
+        data = response.json()
+        tc = data.get("target_config", {})
+        assert tc.get("llm_provider") == "gemini"
+        # 기존 service_account_id 보존 확인
+        assert tc.get("service_account_id") == sample_service_account.id
+
+    def test_update_schedule_target_config_null(self, client, test_db):
+        """TC-Boundary: target_config=null PUT → 기존 target_config 변경 없음"""
+        schedule_id = self._create_writing_schedule(client)
+
+        # 먼저 llm_provider 설정
+        client.put(f"{API_PREFIX}/collect/schedules/{schedule_id}", json={
+            "target_config": {"llm_provider": "gemini"}
+        })
+
+        # target_config=None (생략) PUT
+        response = client.put(f"{API_PREFIX}/collect/schedules/{schedule_id}", json={
+            "display_name": "변경된이름"
+        })
+
+        assert response.status_code == 200
+        data = response.json()
+        # target_config 변경 없음
+        tc = data.get("target_config", {})
+        assert tc.get("llm_provider") == "gemini"
+
