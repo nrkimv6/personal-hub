@@ -40,10 +40,22 @@ Write-Host ""
 
 switch ($Action) {
     "install" {
+        $VenvScripts = Join-Path $ProjectRoot ".venv\Scripts"
+        
+        # Alias exe 경로 확인 및 fallback
+        $ExeLogs = Join-Path $VenvScripts "monitorpage-logs.exe"
+        if (-not (Test-Path $ExeLogs)) { $ExeLogs = "powershell.exe" }
+        
+        $ExeStartup = Join-Path $VenvScripts "monitorpage-startup.exe"
+        if (-not (Test-Path $ExeStartup)) { $ExeStartup = "powershell.exe" }
+        
+        $ExeApiWatchdog = Join-Path $VenvScripts "monitorpage-apiwatchdog.exe"
+        if (-not (Test-Path $ExeApiWatchdog)) { $ExeApiWatchdog = "powershell.exe" }
+
         # 로그 뷰어 바로가기 생성
         $WshShell = New-Object -ComObject WScript.Shell
         $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
-        $Shortcut.TargetPath = "powershell.exe"
+        $Shortcut.TargetPath = $ExeLogs
         $Shortcut.Arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$StartupScript`""
         $Shortcut.WorkingDirectory = $ProjectRoot
         $Shortcut.Description = "Monitor Page - Auto open service logs on startup"
@@ -51,11 +63,12 @@ switch ($Action) {
 
         Write-Host "[+] Log viewer startup registered" -ForegroundColor Green
         Write-Host "    Location: $ShortcutPath" -ForegroundColor Gray
+        Write-Host "    Target:   $ExeLogs" -ForegroundColor Gray
 
         # 브라우저 워커 바로가기 생성 (옵션)
         if ($IncludeWorkers) {
             $WorkerShortcut = $WshShell.CreateShortcut($WorkerShortcutPath)
-            $WorkerShortcut.TargetPath = "powershell.exe"
+            $WorkerShortcut.TargetPath = $ExeStartup
             $WorkerShortcut.Arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$WorkerStartupScript`""
             $WorkerShortcut.WorkingDirectory = $ProjectRoot
             $WorkerShortcut.Description = "Monitor Page - Auto start browser workers on login"
@@ -63,12 +76,13 @@ switch ($Action) {
 
             Write-Host "[+] Browser workers startup registered" -ForegroundColor Green
             Write-Host "    Location: $WorkerShortcutPath" -ForegroundColor Gray
+            Write-Host "    Target:   $ExeStartup" -ForegroundColor Gray
         }
 
         # API Watchdog 바로가기 생성 (옵션)
         if ($IncludeApiWatchdog) {
             $ApiWatchdogShortcut = $WshShell.CreateShortcut($ApiWatchdogShortcutPath)
-            $ApiWatchdogShortcut.TargetPath = "powershell.exe"
+            $ApiWatchdogShortcut.TargetPath = $ExeApiWatchdog
             $ApiWatchdogShortcut.Arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ApiWatchdogStartupScript`""
             $ApiWatchdogShortcut.WorkingDirectory = $ProjectRoot
             $ApiWatchdogShortcut.Description = "Monitor Page - API Watchdog (hang detection + staged recovery)"
@@ -76,6 +90,7 @@ switch ($Action) {
 
             Write-Host "[+] API Watchdog startup registered" -ForegroundColor Green
             Write-Host "    Location: $ApiWatchdogShortcutPath" -ForegroundColor Gray
+            Write-Host "    Target:   $ExeApiWatchdog" -ForegroundColor Gray
         }
 
         Write-Host ""

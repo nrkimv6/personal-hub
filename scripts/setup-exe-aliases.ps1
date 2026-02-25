@@ -24,8 +24,9 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 $VenvScripts = Join-Path $ProjectRoot ".venv\Scripts"
 $PythonExe = Join-Path $VenvScripts "python.exe"
+$PowershellExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
 
-# 역할별 exe alias 정의
+# 역할별 exe alias 정의 (Python)
 # key: exe 이름 (확장자 제외), value: 역할 설명
 $Aliases = [ordered]@{
     "monitorpage-api"         = "API 서버 (prod/dev)"
@@ -35,6 +36,16 @@ $Aliases = [ordered]@{
     "monitorpage-cmdlistener" = "Redis Command Listener"
     "monitorpage-classifier"  = "Image Classifier"
     "monitorpage-proxy"       = "Proxy Manager"
+}
+
+# 역할별 exe alias 정의 (PowerShell)
+$PsAliases = [ordered]@{
+    "monitorpage-logs"          = "로그 뷰어 supervisor"
+    "monitorpage-startup"       = "브라우저 워커 시작 supervisor"
+    "monitorpage-apiwatchdog"   = "API Watchdog supervisor"
+    "monitorpage-wdog-worker"   = "Worker Watchdog (unified)"
+    "monitorpage-wdog-claude"   = "Claude Worker Watchdog"
+    "monitorpage-wdog-cmd"      = "Command Listener Watchdog"
 }
 
 Write-Host ""
@@ -55,7 +66,7 @@ if (-not (Test-Path $PythonExe)) {
 if ($Status) {
     Write-Host "Virtual Env: $VenvScripts" -ForegroundColor Gray
     Write-Host ""
-    Write-Host "Alias Status:" -ForegroundColor Cyan
+    Write-Host "Python Alias Status:" -ForegroundColor Cyan
     foreach ($name in $Aliases.Keys) {
         $dest = Join-Path $VenvScripts "$name.exe"
         $role = $Aliases[$name]
@@ -72,11 +83,29 @@ if ($Status) {
         }
     }
     Write-Host ""
+    
+    Write-Host "PowerShell Alias Status:" -ForegroundColor Cyan
+    foreach ($name in $PsAliases.Keys) {
+        $dest = Join-Path $VenvScripts "$name.exe"
+        $role = $PsAliases[$name]
+        if (Test-Path $dest) {
+            $srcHash = (Get-FileHash $PowershellExe -Algorithm MD5).Hash
+            $dstHash = (Get-FileHash $dest -Algorithm MD5).Hash
+            if ($srcHash -eq $dstHash) {
+                Write-Host "  [OK] $name.exe  ($role)" -ForegroundColor Green
+            } else {
+                Write-Host "  [OUTDATED] $name.exe  ($role) — powershell.exe가 업데이트됨, 재실행 필요" -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "  [ ] $name.exe  ($role)" -ForegroundColor Gray
+        }
+    }
+    Write-Host ""
 
     # 현재 실행 중인 alias 프로세스 확인
     Write-Host "Running Processes:" -ForegroundColor Cyan
     $found = $false
-    foreach ($name in $Aliases.Keys) {
+    foreach ($name in ($Aliases.Keys + $PsAliases.Keys)) {
         $procs = Get-Process -Name $name -ErrorAction SilentlyContinue
         if ($procs) {
             foreach ($p in $procs) {
@@ -95,7 +124,7 @@ if ($Status) {
 # 삭제 모드
 if ($Remove) {
     Write-Host "Removing aliases..." -ForegroundColor Yellow
-    foreach ($name in $Aliases.Keys) {
+    foreach ($name in ($Aliases.Keys + $PsAliases.Keys)) {
         $dest = Join-Path $VenvScripts "$name.exe"
         if (Test-Path $dest) {
             Remove-Item $dest -Force
@@ -113,7 +142,10 @@ if ($Remove) {
 
 # 생성/업데이트 모드
 Write-Host "Virtual Env: $VenvScripts" -ForegroundColor Gray
-Write-Host "Source:      python.exe ($((Get-Item $PythonExe).Length / 1KB -as [int]) KB)" -ForegroundColor Gray
+Write-Host "Source (Python):      python.exe ($((Get-Item $PythonExe).Length / 1KB -as [int]) KB)" -ForegroundColor Gray
+if (Test-Path $PowershellExe) {
+    Write-Host "Source (PowerShell):  powershell.exe ($((Get-Item $PowershellExe).Length / 1KB -as [int]) KB)" -ForegroundColor Gray
+}
 Write-Host ""
 Write-Host "Creating aliases..." -ForegroundColor Cyan
 
@@ -145,6 +177,40 @@ foreach ($name in $Aliases.Keys) {
         }
     } else {
         Copy-Item $PythonExe $dest
+        Write-Host "  [CREATED] $name.exe  ($role)" -ForegroundColor Green
+        $created++
+    }
+}
+
+foreach ($name in $PsAliases.Keys) {
+    $dest = Join-Path $VenvScripts "$name.exe"
+    $role = $PsAliases[$name]
+
+    if (-not (Test-Path $PowershellExe)) {
+        Write-Host "  [ERROR]   powershell.exe not found at $PowershellExe" -ForegroundColor Red
+        continue
+    }
+
+    if (Test-Path $dest) {
+        if ($Force) {
+            Copy-Item $PowershellExe $dest -Force
+            Write-Host "  [UPDATED] $name.exe  ($role)" -ForegroundColor Yellow
+            $updated++
+        } else {
+            # MD5 체크로 outdated 여부 판단
+            $srcHash = (Get-FileHash $PowershellExe -Algorithm MD5).Hash
+            $dstHash = (Get-FileHash $dest -Algorithm MD5).Hash
+            if ($srcHash -ne $dstHash) {
+                Copy-Item $PowershellExe $dest -Force
+                Write-Host "  [UPDATED] $name.exe  ($role) — powershell.exe 변경 감지" -ForegroundColor Yellow
+                $updated++
+            } else {
+                Write-Host "  [SKIP]    $name.exe  ($role) — 이미 최신" -ForegroundColor Gray
+                $skipped++
+            }
+        }
+    } else {
+        Copy-Item $PowershellExe $dest
         Write-Host "  [CREATED] $name.exe  ($role)" -ForegroundColor Green
         $created++
     }

@@ -71,26 +71,30 @@ class BrowserWorkerManager:
             if not self.python_exe.exists():
                 self.python_exe = PROJECT_ROOT / "venv" / "Scripts" / "python.exe"
 
+        def _ps_alias(name: str) -> str:
+            ps_alias_exe = PROJECT_ROOT / ".venv" / "Scripts" / name
+            return str(ps_alias_exe) if ps_alias_exe.exists() else "powershell.exe"
+
         # Watchdog/Listener 정의: (이름, PID파일명, 시작 명령)
         self.workers = [
             {
                 "name": "Worker Watchdog (all workers via WorkerOrchestrator)",
                 "pid_file": f"worker_watchdog{self.pid_suffix}.pid",
-                "cmd": ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File",
+                "cmd": [_ps_alias("monitorpage-wdog-worker.exe"), "-ExecutionPolicy", "Bypass", "-File",
                         str(self.scripts_dir / "unified-worker-watchdog.ps1")],
                 "env": {"APP_MODE": "admin"},
             },
             {
                 "name": "Claude Worker Watchdog",
                 "pid_file": f"claude_watchdog{self.pid_suffix}.pid",
-                "cmd": ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File",
+                "cmd": [_ps_alias("monitorpage-wdog-claude.exe"), "-ExecutionPolicy", "Bypass", "-File",
                         str(self.scripts_dir / "claude-watchdog.ps1")],
                 "env": {"APP_MODE": "admin"},
             },
             {
                 "name": "Command Listener Watchdog",
                 "pid_file": f"command_listener_watchdog{self.pid_suffix}.pid",
-                "cmd": ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File",
+                "cmd": [_ps_alias("monitorpage-wdog-cmd.exe"), "-ExecutionPolicy", "Bypass", "-File",
                         str(self.scripts_dir / "command-listener-watchdog.ps1")],
                 "env": {"APP_MODE": "admin"},
             },
