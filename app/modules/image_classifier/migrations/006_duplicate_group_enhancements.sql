@@ -25,9 +25,9 @@ CREATE TABLE duplicate_groups (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 4. 임시 테이블에서 데이터 복원
-INSERT INTO duplicate_groups (id, group_hash, duplicate_type, status, member_count, kept_file_id, quality_score, created_at, updated_at)
-SELECT id, group_hash, duplicate_type, status, member_count, kept_file_id, quality_score, created_at, updated_at
+-- 4. 임시 테이블에서 데이터 복원 (컬럼 명시 — 추가된 duplicate_type/resolution_type/quality_score/updated_at은 DEFAULT 사용)
+INSERT INTO duplicate_groups (id, group_hash, status, member_count, kept_file_id, created_at)
+SELECT id, group_hash, status, member_count, kept_file_id, created_at
 FROM duplicate_groups_new;
 
 -- 5. 임시 테이블 삭제

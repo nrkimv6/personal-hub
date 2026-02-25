@@ -583,10 +583,25 @@ async def run_classification(
                             ).fetchone()
 
                             if not cat_row:
-                                # 부분 매칭
+                                # Bug #5 수정: LIKE 부분 매칭 — 정확히 끝나는 경로 우선, 그 다음 포함 경로
+                                # ORDER BY: 정확 suffix 일치(0) 우선, 그 다음 길이 짧은 순
                                 cat_row = ic_db.execute(
-                                    text("SELECT id FROM categories WHERE full_path LIKE :path ORDER BY LENGTH(full_path) LIMIT 1"),
-                                    {"path": f"%{category_path}%"}
+                                    text("""
+                                        SELECT id FROM categories
+                                        WHERE full_path LIKE :path
+                                        ORDER BY
+                                            CASE WHEN full_path = :exact THEN 0
+                                                 WHEN full_path LIKE :suffix THEN 1
+                                                 ELSE 2
+                                            END,
+                                            LENGTH(full_path)
+                                        LIMIT 1
+                                    """),
+                                    {
+                                        "path": f"%{category_path}%",
+                                        "exact": category_path,
+                                        "suffix": f"%/{category_path}",
+                                    }
                                 ).fetchone()
 
                             if cat_row:
@@ -680,7 +695,11 @@ async def run_classification(
                         if not gid:
                             continue
                         # 대표 파일의 분류 결과 조회
-                        rep_id = [fid for fid in group_map[gid] if fid in representative_ids][0]
+                        reps = [fid for fid in group_map[gid] if fid in representative_ids]
+                        if not reps:
+                            # Bug #4 수정: 대표 파일이 group_map에 없으면(이미 분류됨 등) skip
+                            continue
+                        rep_id = reps[0]
                         rep_row = copy_db.execute(text("""
                             SELECT ai_category_id, ai_confidence, ai_reasoning, ai_model
                             FROM file_classifications WHERE id = :rep_id AND ai_category_id IS NOT NULL

@@ -3,6 +3,7 @@
   import { fetchWithTimeout } from '$lib/api/client';
   import { toast } from '$lib/stores/toast';
   import { createSelection } from '$lib/utils/selection.svelte';
+  import { createOffsetPagination } from '$lib/utils/pagination.svelte';
   import { loadCategoryMap, type Category } from '../lib/categoryUtils';
   import CategoryPickerModal from '../components/CategoryPicker.svelte';
   import { Search, Tag, Trash2, Check, X, Loader2, Images, ImagePlus, Eye, FolderOpen, Clipboard, Square, SquareCheck } from 'lucide-svelte';
@@ -36,9 +37,7 @@
   let tagFilter = $state<number | null>(null);  // Bug #6 수정: 미선언으로 ReferenceError 발생
   let detailImage = $state<number | null>(null);
 
-  const PAGE_SIZE = 24;
-  let currentOffset = $state(0);
-  let hasMore = $state(false);
+  const pager = createOffsetPagination(24);
 
   const statusFilters = ['전체', '대기 중', '매핑됨', 'AI 분류', '승인됨'];
   const statusFilterMap: Record<string, string> = {
@@ -53,10 +52,8 @@
   }
 
   // API 필터 → 쿼리 파라미터 변환
-  function buildQuery(offset: number): string {
-    const params = new URLSearchParams();
-    params.set('limit', String(PAGE_SIZE));
-    params.set('skip', String(offset));
+  function buildQuery(): string {
+    const params = new URLSearchParams(pager.toParams());
     if (statusFilter !== 'all') {
       params.set('status', statusFilter.toLowerCase().replace(' ', '_'));
     }
@@ -133,15 +130,14 @@
     if (reset) {
       loadingImages = true;
       loadError = null;
-      currentOffset = 0;
+      pager.reset();
       images = [];
     } else {
       loadingMore = true;
     }
 
     try {
-      const offset = reset ? 0 : currentOffset;
-      const qs = buildQuery(offset);
+      const qs = buildQuery();
       const res = await fetchWithTimeout(`/api/ic/files?${qs}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -152,9 +148,8 @@
       } else {
         images = [...images, ...newImages];
       }
-      currentOffset = offset + newImages.length;
-      hasMore = newImages.length === PAGE_SIZE;
-      totalCount = data.total ?? images.length;
+      pager.advance(newImages.length, data.total ?? images.length);
+      totalCount = pager.total;
     } catch (err: any) {
       loadError = err.message;
     } finally {
@@ -445,7 +440,7 @@
         <Images class="size-5 text-primary" />
         <h2 class="text-xl font-bold tracking-tight">갤러리</h2>
         <span class="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
-          {filteredImages.length}{hasMore ? '+' : ''}이미지
+          {filteredImages.length}{pager.hasMore ? '+' : ''}이미지
         </span>
       </div>
       <p class="mt-1 text-sm text-muted-foreground">이미지를 탐색하고 분류 상태를 관리합니다.</p>
@@ -691,7 +686,7 @@
     </div>
 
     <!-- Load More -->
-    {#if hasMore}
+    {#if pager.hasMore}
       <div class="flex justify-center pt-2">
         <button
           onclick={() => loadImages(false)}

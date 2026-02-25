@@ -781,3 +781,332 @@ class TestLLMServiceRequestedBy:
         test_session.refresh(request)
         assert request.requested_by == "unknown"
         assert request.request_source is None
+
+
+# ==================== Bug Fix 공통 Fixture ====================
+# Base.metadata.create_all이 writing_collection_tasks.UUID 타입을 SQLite에서
+# 처리하지 못하는 기존 문제 우회 — LLMRequest/LLMWorkerStatus만 생성하는 독립 엔진 사용.
+
+@pytest.fixture
+def llm_service_minimal():
+    """LLMRequest/LLMWorkerStatus 테이블만 생성하는 최소 DB fixture."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.modules.claude_worker.models.llm_request import LLMRequest, LLMWorkerStatus
+    from sqlalchemy import MetaData
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    # LLMRequest/LLMWorkerStatus 테이블만 생성
+    LLMRequest.__table__.create(bind=engine, checkfirst=True)
+    LLMWorkerStatus.__table__.create(bind=engine, checkfirst=True)
+
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    service = LLMService(session)
+    yield service
+    session.close()
+    engine.dispose()
+
+
+# ==================== Bug Fix: exec_mode Windows 호환성 ====================
+
+class TestExecModeWindows:
+    """Bug #1 + #2: exec_mode에서 Windows .cmd 실행 및 프롬프트 임시파일 전달 검증.
+
+    Right-BICEP + CORRECT 기반 8케이스.
+    """
+
+    def test_right_exec_mode_uses_shell_true(self, llm_service_minimal):
+        """TC-1-1 Right: exec_mode=True에서 shell=True로 실행됨 (Windows .cmd 호환)."""
+        import subprocess as sp
+
+        captured = {}
+
+        def mock_run(cmd, **kwargs):
+            captured["shell"] = kwargs.get("shell")
+            captured["cmd"] = cmd
+            m = MagicMock()
+            m.returncode = 0
+            m.stdout = '{"structured_output": {"category": "여행", "confidence": 0.9}}'
+            m.stderr = ""
+            return m
+
+        with patch("subprocess.run", side_effect=mock_run):
+            result = llm_service_minimal.execute_claude(
+                prompt="테스트 프롬프트",
+                cli_options={
+                    "exec_mode": True,
+                    "output_format": "json",
+                    "json_schema": {"type": "object", "properties": {"category": {"type": "string"}}},
+                },
+            )
+
+        assert captured["shell"] is True, "exec_mode에서 shell=True 이어야 함 (Windows .cmd 호환)"
+        assert result["success"] is True
+
+    def test_right_exec_mode_prompt_not_in_args(self, llm_service_minimal):
+        """TC-1-2 Right: exec_mode에서 프롬프트가 -p 인수로 직접 전달되지 않음 (임시파일 경유)."""
+        import subprocess as sp
+
+        captured = {}
+
+        def mock_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            m = MagicMock()
+            m.returncode = 0
+            m.stdout = '{"structured_output": {"category": "테스트", "confidence": 0.8}}'
+            m.stderr = ""
+            return m
+
+        long_prompt = "카테고리 분류 " * 200  # 1200자 이상 한글 프롬프트
+
+        with patch("subprocess.run", side_effect=mock_run):
+            llm_service_minimal.execute_claude(
+                prompt=long_prompt,
+                cli_options={"exec_mode": True, "output_format": "json"},
+            )
+
+        # 명령에 프롬프트 텍스트가 직접 포함되지 않아야 함 (type file | claude 방식)
+        cmd = captured.get("cmd", "")
+        assert "카테고리 분류" not in cmd, "프롬프트가 명령행에 직접 포함되면 안 됨 (임시파일 경유 필요)"
+        assert "type" in cmd or "cat" in cmd, "임시파일을 stdin으로 전달하는 명령 형식이어야 함"
+
+    def test_boundary_exec_mode_long_prompt_8000chars(self, llm_service_minimal):
+        """TC-1-3 Boundary: 8000자 초과 프롬프트 — Windows CMD 한계 초과해도 정상 처리."""
+
+        def mock_run(cmd, **kwargs):
+            m = MagicMock()
+            m.returncode = 0
+            m.stdout = '{"structured_output": {"category": "test", "confidence": 0.7}}'
+            m.stderr = ""
+            return m
+
+        long_prompt = "가" * 8200  # Windows CMD 8191자 한계 초과
+
+        with patch("subprocess.run", side_effect=mock_run):
+            result = llm_service_minimal.execute_claude(
+                prompt=long_prompt,
+                cli_options={"exec_mode": True, "output_format": "json"},
+            )
+
+        # 오류 없이 처리됨
+        assert result["success"] is True
+
+    def test_boundary_exec_mode_korean_special_chars(self, llm_service_minimal):
+        """TC-1-4 Boundary: 한글+특수문자+경로 혼합 프롬프트 — 인코딩 오류 없음."""
+        called = {}
+
+        def mock_run(cmd, **kwargs):
+            called["encoding"] = kwargs.get("encoding")
+            m = MagicMock()
+            m.returncode = 0
+            m.stdout = '{"structured_output": {"category": "음식/한식", "confidence": 0.85}}'
+            m.stderr = ""
+            return m
+
+        prompt = "이미지 분류\n카테고리: 여행/2023\n파일: C:\\Users\\홍길동\\사진\\IMG_001.jpg\n\"따옴표\" & <태그>"
+
+        with patch("subprocess.run", side_effect=mock_run):
+            result = llm_service_minimal.execute_claude(
+                prompt=prompt,
+                cli_options={"exec_mode": True, "output_format": "json"},
+            )
+
+        assert called.get("encoding") == "utf-8", "UTF-8 인코딩 강제되어야 함"
+        assert result["success"] is True
+
+    def test_error_exec_mode_nonzero_returncode(self, llm_service_minimal):
+        """TC-1-5 Error: exec_mode subprocess returncode=1 → success=False."""
+
+        def mock_run(cmd, **kwargs):
+            m = MagicMock()
+            m.returncode = 1
+            m.stdout = ""
+            m.stderr = "Error: Invalid model specified"
+            return m
+
+        with patch("subprocess.run", side_effect=mock_run):
+            result = llm_service_minimal.execute_claude(
+                prompt="test",
+                cli_options={"exec_mode": True, "output_format": "json"},
+            )
+
+        assert result["success"] is False
+        assert "Invalid model" in result.get("error", "")
+
+    def test_error_exec_mode_file_not_found(self, llm_service_minimal):
+        """TC-1-6 Error: exec_mode에서 claude 명령 없음 → success=False."""
+
+        with patch("subprocess.run", side_effect=FileNotFoundError("claude not found")):
+            result = llm_service_minimal.execute_claude(
+                prompt="test",
+                cli_options={"exec_mode": True, "output_format": "json"},
+            )
+
+        assert result["success"] is False
+
+    def test_correct_env_vars_cleaned(self, llm_service_minimal):
+        """TC-1-7 CORRECT: exec_mode에서 nested session 방지 환경변수 제거됨."""
+        import os
+
+        captured_env = {}
+
+        def mock_run(cmd, **kwargs):
+            captured_env.update(kwargs.get("env", {}))
+            m = MagicMock()
+            m.returncode = 0
+            m.stdout = '{"structured_output": {"category": "test", "confidence": 0.9}}'
+            m.stderr = ""
+            return m
+
+        original_env = os.environ.copy()
+        os.environ["CLAUDECODE"] = "1"
+        os.environ["CLAUDE_CODE_SESSION"] = "abc123"
+        os.environ["CLAUDE_CODE_ENTRYPOINT"] = "test"
+
+        try:
+            with patch("subprocess.run", side_effect=mock_run):
+                llm_service_minimal.execute_claude(
+                    prompt="test",
+                    cli_options={"exec_mode": True, "output_format": "json"},
+                )
+        finally:
+            # 환경 복구
+            for k in ("CLAUDECODE", "CLAUDE_CODE_SESSION", "CLAUDE_CODE_ENTRYPOINT"):
+                os.environ.pop(k, None)
+            os.environ.update(original_env)
+
+        assert "CLAUDECODE" not in captured_env, "CLAUDECODE가 subprocess env에 있으면 안 됨"
+        assert "CLAUDE_CODE_SESSION" not in captured_env
+        assert "CLAUDE_CODE_ENTRYPOINT" not in captured_env
+
+    def test_inverse_non_exec_mode_uses_shell_true(self, llm_service_minimal):
+        """TC-1-8 Inverse: exec_mode=False(기본)일 때도 shell=True 사용."""
+        captured = {}
+
+        def mock_run(cmd, **kwargs):
+            captured["shell"] = kwargs.get("shell")
+            m = MagicMock()
+            m.returncode = 0
+            m.stdout = '{"category": "test", "confidence": 0.9}'
+            m.stderr = ""
+            return m
+
+        with patch("subprocess.run", side_effect=mock_run):
+            llm_service_minimal.execute_claude(
+                prompt="test",
+                parse_json=True,
+            )
+
+        assert captured["shell"] is True, "기본(A 방식)도 shell=True이어야 함"
+
+
+# ==================== Bug Fix: structured_output fallback ====================
+
+class TestStructuredOutputFallback:
+    """Bug #3: structured_output 없는 경우 전체 JSON fallback 수정 검증.
+
+    Right-BICEP + CORRECT 기반 7케이스.
+    """
+
+    def _run_with_stdout(self, stdout_str: str) -> dict:
+        """공통 헬퍼: 주어진 stdout 응답으로 execute_claude 실행 (LLMService 내부 생성)."""
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from app.modules.claude_worker.models.llm_request import LLMRequest, LLMWorkerStatus
+        from app.modules.claude_worker.services.llm_service import LLMService
+
+        engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+        LLMRequest.__table__.create(bind=engine, checkfirst=True)
+        LLMWorkerStatus.__table__.create(bind=engine, checkfirst=True)
+        session = sessionmaker(bind=engine)()
+        service = LLMService(session)
+
+        def mock_run(cmd, **kwargs):
+            m = MagicMock()
+            m.returncode = 0
+            m.stdout = stdout_str
+            m.stderr = ""
+            return m
+
+        try:
+            with patch("subprocess.run", side_effect=mock_run):
+                return service.execute_claude(
+                    prompt="test",
+                    cli_options={
+                        "exec_mode": True,
+                        "output_format": "json",
+                        "json_schema": {"type": "object", "properties": {"category": {"type": "string"}}},
+                    },
+                )
+        finally:
+            session.close()
+            engine.dispose()
+
+    def test_right_structured_output_present(self):
+        """TC-2-1 Right: structured_output 필드 정상 존재 → 해당 값 반환."""
+        result = self._run_with_stdout(
+            '{"structured_output": {"category": "여행", "confidence": 0.9}, "type": "result"}',
+        )
+
+        assert result["success"] is True
+        assert result["result"]["category"] == "여행"
+        assert result["result"]["confidence"] == 0.9
+
+    def test_right_result_field_is_dict(self):
+        """TC-2-2 Right: result 필드가 dict → 해당 값 반환."""
+        result = self._run_with_stdout(
+            '{"result": {"category": "음식", "confidence": 0.8}, "type": "result"}',
+        )
+
+        assert result["success"] is True
+        assert result["result"]["category"] == "음식"
+
+    def test_right_result_field_is_json_string(self):
+        """TC-2-3 Right: result 필드가 JSON 문자열 → 파싱 후 반환."""
+        result = self._run_with_stdout(
+            '{"result": "{\\"category\\": \\"가족\\", \\"confidence\\": 0.7}", "type": "result"}',
+        )
+
+        assert result["success"] is True
+        assert result["result"]["category"] == "가족"
+
+    def test_error_no_structured_output_no_result(self):
+        """TC-2-4 Error: structured_output/result 모두 없음 → success=False (Bug #3 핵심)."""
+        result = self._run_with_stdout(
+            '{"type": "result", "subtype": "success", "cost_usd": 0.001, "is_error": false}',
+        )
+
+        # Bug #3 수정 전: success=True, result=전체JSON → category="" → 분류 실패
+        # Bug #3 수정 후: success=False → 명시적 실패
+        assert result["success"] is False
+        assert "structured_output" in result.get("error", "") or "result" in result.get("error", "")
+
+    def test_error_structured_output_empty_dict(self):
+        """TC-2-5 Error: structured_output == {} (빈 딕셔너리) → fallback 시도."""
+        result = self._run_with_stdout(
+            '{"structured_output": {}, "type": "result"}',
+        )
+
+        # {} 는 falsy → result 필드 fallback → 없으면 success=False
+        assert result["success"] is False or result.get("result") == {}
+
+    def test_boundary_raw_response_not_json(self):
+        """TC-2-6 Boundary: stdout 자체가 JSON 아님 → success=False."""
+        result = self._run_with_stdout(
+            "Processing image... please wait",
+        )
+
+        assert result["success"] is False
+        assert "JSON" in result.get("error", "") or "파싱" in result.get("error", "")
+
+    def test_correct_category_extracted_end_to_end(self):
+        """TC-2-7 CORRECT: exec_mode → structured_output → category 정상 추출 E2E."""
+        result = self._run_with_stdout(
+            '{"structured_output": {"category": "여행/국내/서울", "confidence": 0.95, "reasoning": "서울 풍경"}, "type": "result", "cost_usd": 0.002}',
+        )
+
+        assert result["success"] is True
+        assert result["result"]["category"] == "여행/국내/서울"
+        assert result["result"]["confidence"] == 0.95
+        assert result["result"]["reasoning"] == "서울 풍경"

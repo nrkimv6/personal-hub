@@ -338,36 +338,62 @@ class LLMService:
                     cwd_value = None
 
                 if exec_mode:
-                    # ========== B 방식: exec 모드 (shell=False) ==========
-                    # 이미지 분류 등 복잡한 CLI 옵션용. 프로세스 직접 실행.
-                    # timeout kill이 claude 프로세스에 직접 적용됨 (좀비 방지).
-                    cmd_args = ["claude", "-p", prompt]
+                    # ========== B 방식: exec 모드 ==========
+                    # 이미지 분류 등 복잡한 CLI 옵션용.
+                    # Bug #1 수정: Windows에서 claude는 .cmd 파일이므로 shell=True 필요.
+                    # Bug #2 수정: 긴 프롬프트(한글+경로)를 -p 직접 전달 대신
+                    #              임시파일 stdin으로 전달하여 인코딩/길이 문제 방지.
+                    # json_schema도 임시파일로 전달 (shell 이스케이프 문제 방지).
+                    schema_file_exec = None
+                    try:
+                        # json_schema → 임시파일
+                        if json_schema:
+                            schema_str = json.dumps(json_schema, ensure_ascii=False)
+                            with tempfile.NamedTemporaryFile(
+                                mode="w", suffix=".json", delete=False, encoding="utf-8"
+                            ) as sf:
+                                sf.write(schema_str)
+                                schema_file_exec = sf.name
+                            schema_opt = f'--json-schema "@{schema_file_exec}"'
+                        else:
+                            schema_opt = ""
 
-                    if allowed_tools:
-                        for tool in allowed_tools:
-                            cmd_args.extend(["--allowedTools", tool])
-                    elif enable_tools:
-                        cmd_args.extend(["--allowedTools", "Read"])
+                        # CLI 옵션 문자열 조립
+                        tools_parts = []
+                        if allowed_tools:
+                            for tool in allowed_tools:
+                                tools_parts.append(f"--allowedTools {tool}")
+                        elif enable_tools:
+                            tools_parts.append("--allowedTools Read")
 
-                    if model:
-                        cmd_args.extend(["--model", model])
-                    if output_format:
-                        cmd_args.extend(["--output-format", output_format])
-                    if json_schema:
-                        cmd_args.extend(["--json-schema", json.dumps(json_schema, ensure_ascii=False)])
+                        model_opt = f"--model {model}" if model else ""
+                        format_opt = f"--output-format {output_format}" if output_format else ""
+                        opts = " ".join(p for p in [*tools_parts, model_opt, format_opt, schema_opt] if p)
 
-                    logger.debug(f"Claude CLI exec 명령: {' '.join(cmd_args[:6])}... ({len(cmd_args)} args)")
+                        # 프롬프트를 stdin으로 전달 (type file | claude opts)
+                        if sys.platform == "win32":
+                            cmd = f'type "{prompt_file}" | claude {opts}'
+                        else:
+                            cmd = f'cat "{prompt_file}" | claude {opts}'
 
-                    result = subprocess.run(
-                        cmd_args,
-                        capture_output=True,
-                        text=True,
-                        timeout=timeout,
-                        encoding="utf-8",
-                        env=env,
-                        stdin=subprocess.DEVNULL,
-                        cwd=cwd_value,
-                    )
+                        logger.debug(f"Claude CLI exec(shell) 명령: {cmd[:200]}...")
+
+                        result = subprocess.run(
+                            cmd,
+                            capture_output=True,
+                            text=True,
+                            timeout=timeout,
+                            encoding="utf-8",
+                            shell=True,
+                            env=env,
+                            cwd=cwd_value,
+                        )
+                    finally:
+                        if schema_file_exec:
+                            try:
+                                os.unlink(schema_file_exec)
+                            except Exception:
+                                pass
                 else:
                     # ========== A 방식: shell 모드 (stdin pipe, 2단계) ==========
                     # 텍스트 프롬프트용. cmd.exe → type file | claude opts
@@ -469,10 +495,12 @@ class LLMService:
                             }
                         except json.JSONDecodeError:
                             pass
-                    # 전체 JSON을 결과로 사용
+                    # Bug #3 수정: 전체 CLI JSON(type/cost_usd 등)을 result로 반환하면
+                    # classify.py에서 result_data.get("category") → "" 가 되어 분류 실패.
+                    # structured_output/result 모두 없는 경우 명시적 실패 반환.
                     return {
-                        "success": True,
-                        "result": raw_json,
+                        "success": False,
+                        "error": f"structured_output/result 필드 없음. raw: {str(raw_json)[:200]}",
                         "raw_response": raw_response,
                     }
                 except json.JSONDecodeError as e:

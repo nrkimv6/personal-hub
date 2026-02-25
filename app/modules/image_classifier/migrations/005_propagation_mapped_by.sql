@@ -36,8 +36,10 @@ CREATE TABLE folder_mappings (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 4. 임시 테이블에서 데이터 복원
-INSERT INTO folder_mappings SELECT * FROM folder_mappings_new;
+-- 4. 임시 테이블에서 데이터 복원 (컬럼 명시 — 새 테이블에 추가된 confidence/last_scanned_at/updated_at은 DEFAULT 사용)
+INSERT INTO folder_mappings (id, folder_path, category_id, mapped_by, parent_mapping_id, file_count, folder_status, is_mixed, created_at)
+SELECT id, folder_path, category_id, mapped_by, parent_mapping_id, file_count, folder_status, is_mixed, created_at
+FROM folder_mappings_new;
 
 -- 5. 임시 테이블 삭제
 DROP TABLE folder_mappings_new;
