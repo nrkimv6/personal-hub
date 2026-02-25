@@ -229,13 +229,15 @@ class LLMService:
             request.error_message = None
             self.db.commit()
 
-    def mark_failed(self, request_id: int, error_message: str) -> None:
+    def mark_failed(self, request_id: int, error_message: str, raw_response: str = "") -> None:
         """요청을 failed 상태로 변경."""
         request = self.db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
         if request:
             request.status = "failed"
             request.processed_at = datetime.now()
             request.error_message = error_message
+            if raw_response:
+                request.raw_response = raw_response
             request.retry_count += 1
             self.db.commit()
 
@@ -729,22 +731,56 @@ class LLMService:
         Raises:
             ValueError: JSON 파싱 실패
         """
-        # ```json ... ``` 블록 추출
+        errors = []
+
+        # Tier 1: ```json ... ``` 블록 추출
         json_match = re.search(r"```json\s*([\s\S]*?)\s*```", text)
         if json_match:
-            return json.loads(json_match.group(1))
+            try:
+                return json.loads(json_match.group(1))
+            except json.JSONDecodeError as e:
+                errors.append(f"markdown block: {e}")
 
-        # 순수 JSON 시도
-        text = text.strip()
-        if text.startswith("{"):
-            return json.loads(text)
+        # Tier 2: 순수 JSON 시도
+        stripped = text.strip()
+        if stripped.startswith("{"):
+            try:
+                return json.loads(stripped)
+            except json.JSONDecodeError as e:
+                errors.append(f"pure JSON: {e}")
 
-        # { } 블록 추출
-        brace_match = re.search(r"\{[\s\S]*\}", text)
-        if brace_match:
-            return json.loads(brace_match.group())
+        # Tier 3: { } 블록 추출 (brace counting으로 정확한 범위)
+        start = text.find("{")
+        if start != -1:
+            depth = 0
+            in_string = False
+            escape = False
+            for i in range(start, len(text)):
+                ch = text[i]
+                if escape:
+                    escape = False
+                    continue
+                if ch == "\\":
+                    escape = True
+                    continue
+                if ch == '"' and not escape:
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            return json.loads(text[start:i + 1])
+                        except json.JSONDecodeError as e:
+                            errors.append(f"brace extraction: {e}")
+                        break
 
-        raise ValueError("No valid JSON found in response")
+        detail = "; ".join(errors) if errors else "no JSON structure found"
+        raise ValueError(f"No valid JSON found in response ({detail})")
 
     # ========== 워커 상태 관리 ==========
 

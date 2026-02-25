@@ -1449,8 +1449,8 @@ class LLMWorker:
                         elif request.caller_type == "report":
                             save_report_result(db, request, fallback_result)
                     else:
-                        # 다른 타입은 실패 처리
-                        service.mark_failed(request.id, result["error"])
+                        # 다른 타입은 실패 처리 (raw_response 보존)
+                        service.mark_failed(request.id, result["error"], result.get("raw_response", ""))
                         self._increment_error()
                         logger.warning(f"LLM 실행 실패: {result['error']}")
 

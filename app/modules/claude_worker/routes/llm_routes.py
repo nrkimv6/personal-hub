@@ -51,6 +51,11 @@ class LLMRequestResponse(BaseModel):
         from_attributes = True
 
 
+class LLMRequestDetailResponse(LLMRequestResponse):
+    """상세 조회용 응답 (raw_response 포함)."""
+    raw_response: Optional[str] = None
+
+
 class LLMRequestListResponse(BaseModel):
     items: List[LLMRequestResponse]
     total: int
@@ -91,8 +96,13 @@ class HistoryStatsResponse(BaseModel):
 
 # ========== Endpoints ==========
 
-def _to_response(request) -> LLMRequestResponse:
-    """LLMRequest를 LLMRequestResponse로 변환."""
+def _to_response(request, include_raw: bool = False) -> LLMRequestResponse:
+    """LLMRequest를 LLMRequestResponse로 변환.
+
+    Args:
+        request: LLMRequest 모델 인스턴스
+        include_raw: True면 raw_response 포함 (상세 조회용)
+    """
     result = None
     if request.result:
         try:
@@ -100,7 +110,7 @@ def _to_response(request) -> LLMRequestResponse:
         except json.JSONDecodeError:
             pass
 
-    return LLMRequestResponse(
+    fields = dict(
         id=request.id,
         caller_type=request.caller_type,
         caller_id=request.caller_id,
@@ -116,6 +126,12 @@ def _to_response(request) -> LLMRequestResponse:
         error_message=request.error_message,
         retry_count=request.retry_count,
     )
+
+    if include_raw:
+        fields["raw_response"] = getattr(request, "raw_response", None)
+        return LLMRequestDetailResponse(**fields)
+
+    return LLMRequestResponse(**fields)
 
 
 @router.get("/queue-stats")
@@ -203,17 +219,17 @@ def list_requests_grouped_by_caller(
     )
 
 
-@router.get("/requests/{request_id}", response_model=LLMRequestResponse)
+@router.get("/requests/{request_id}", response_model=LLMRequestDetailResponse)
 def get_request_by_id(
     request_id: int,
     db: Session = Depends(get_db),
 ):
-    """단일 요청 조회 (ID로)."""
+    """단일 요청 조회 (ID로, raw_response 포함)."""
     service = LLMService(db)
     request = service.get_request_by_id(request_id)
     if not request:
         raise HTTPException(status_code=404, detail="Request not found")
-    return _to_response(request)
+    return _to_response(request, include_raw=True)
 
 
 @router.get("/requests/by-caller/{caller_type}/{caller_id}", response_model=Optional[LLMRequestResponse])
