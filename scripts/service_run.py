@@ -181,7 +181,7 @@ class ServiceRunner:
                            encoding="utf-8", errors="replace")
 
         if self.dev:
-            # Stale build 삭제
+            # Stale build ??
             build_dir = frontend_dir / "build"
             if build_dir.exists():
                 shutil.rmtree(build_dir, ignore_errors=True)
@@ -194,6 +194,44 @@ class ServiceRunner:
 
             stdout_log = open(self.log_dir / f"frontend_{timestamp}.log", "w", encoding="utf-8")
             stderr_log = open(self.log_dir / f"frontend_err_{timestamp}.log", "w", encoding="utf-8")
+
+            # --- Placeholder & Warmup Start ---
+            from scripts.frontend_placeholder import PlaceholderServer
+            placeholder = PlaceholderServer(self.frontend_port, logger=self.log)
+            placeholder.start()
+
+            temp_port = self.frontend_port + 10000
+            self.log.info(f"Starting Vite on temporary port {temp_port} for warmup...")
+            
+            warmup_proc = subprocess.Popen(
+                ["npm.cmd", "run", "dev", "--", "--host", "--port", str(temp_port)],
+                cwd=str(frontend_dir),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+
+            # Wait for Vite to be ready
+            start_time = time.time()
+            is_ready = False
+            while time.time() - start_time < 120:  # 2 min timeout
+                if is_port_listening(temp_port):
+                    is_ready = True
+                    break
+                if warmup_proc.poll() is not None:
+                    self.log.error("Vite warmup process crashed")
+                    break
+                time.sleep(1)
+            
+            if is_ready:
+                self.log.info(f"Vite is ready on {temp_port}, switching to {self.frontend_port}")
+            else:
+                self.log.warning("Vite warmup timed out or failed, proceeding with direct start")
+
+            # Stop placeholder & kill warmup proc
+            placeholder.stop()
+            kill_pid(warmup_proc.pid, logger=self.log)
+            # ----------------------------------
 
             proc = subprocess.Popen(
                 ["npm.cmd", "run", "dev", "--", "--host", "--port", str(self.frontend_port)],
