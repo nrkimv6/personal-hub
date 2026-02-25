@@ -5,20 +5,16 @@
 ## 1. 필수 규칙 (Critical Rules)
 
 ### 1.1 보안 및 시스템 무결성
-- **Credential 보호**: .env 파일, .git 폴더, 그리고 data/*.db 파일은 절대 외부로 유출되거나 커밋되지 않도록 보호합니다.
-- **Git 조작 주의**: git clean -fd나 git reset --hard와 같은 파괴적인 명령은 사용자의 명시적인 요청 없이는 수행하지 않습니다.
-- **API Key 관리**: Claude/Gemini API Key, Naver 로그인 정보 등은 .env 파일에서 관리하며 코드에 하드코딩하지 않습니다.
+- **Credential 보호**: `.env` 파일, `.git` 폴더, 그리고 `data\*.db` 파일은 절대 외부로 유출하거나 커밋하지 않도록 보호합니다.
+- **Git 조작 주의**: `git clean -fd`나 `git reset --hard`와 같은 파괴적인 명령은 사용자의 명시적인 요청 없이 수행하지 않습니다.
+- **커밋 규칙**: `git commit`을 직접 사용하지 않고 반드시 `& "D:\work\project\tools\common\commit.ps1"` 스크립트를 사용하여 커밋합니다.
 
 ### 1.2 실행 환경 (Windows/PowerShell)
-- **PowerShell 기반**: 모든 쉘 명령은 PowerShell 문법을 따릅니다. ls, m, export 대신 Get-ChildItem, Remove-Item, $env:VAR를 사용합니다.
+- **PowerShell 전용**: 모든 쉘 명령은 PowerShell 문법을 따릅니다. bash 문법(ls, rm, export 등) 사용을 금지하며, PowerShell 명령어(Get-ChildItem, Remove-Item, $env:VAR 등)를 사용합니다.
 - **경로 규칙**: 
-  - 경로 구분자는 반드시 **백슬래시(\)**를 사용합니다.
-  - 공백이 포함될 수 있으므로 모든 경로는 **큰따옴표(")**로 감쌉니다.
-- **인코딩**: 모든 파일은 **UTF-8 (BOM 없음)** 인코딩으로 저장해야 한글 깨짐을 방지할 수 있습니다.
-
-### 1.3 서비스 구조
-- **Session 0 (NSSM)**: 백그라운드 서비스(API, Workers)는 NSSM을 통해 Windows 서비스로 등록되어 실행될 수 있습니다.
-- **Session 1 (Interactive)**: Playwright GUI가 필요한 작업은 사용자 세션(Session 1)에서 실행되어야 브라우저 창이 보입니다.
+  - 경로 구분자에는 반드시 **백슬래시(\)**를 사용합니다.
+  - 모든 경로는 **따옴표(")**로 감싸서 공백 및 특수문자 문제를 방지합니다.
+- **인코딩**: 모든 파일은 **UTF-8 (BOM 없음)** 인코딩으로 저장하여 한글 깨짐을 방지해야 합니다.
 
 ---
 
@@ -26,70 +22,76 @@
 
 네이버 예약 및 각종 사이트 모니터링을 자동화하고, LLM(Claude/Gemini)을 활용하여 데이터를 분석하거나 예약을 시도하는 시스템입니다.
 
-- **Backend**: FastAPI (Python 3.12+), SQLAlchemy, Alembic, Playwright
+- **Backend**: FastAPI (Python 3.12+), SQLAlchemy, Playwright
 - **Frontend**: SvelteKit 2 (Svelte 5), TailwindCSS 4, TypeScript
-- **Database**: SQLite (data/monitor.db)
+- **Database**: SQLite (data\monitor.db)
 - **Messaging**: Redis (Task Queue 및 상태 공유)
-- **Process Management**: scripts/browser_workers.py를 통한 통합 관리
+- **Process Management**: NSSM(Session 0) 및 `scripts\browser_workers.py`(Session 1) 통합 관리
 
 ---
 
-## 3. 디렉토리 구조
+## 3. 디렉토리 구조 (Directory Structure)
 
-- pp/: FastAPI 백엔드 소스
-  - modules/: 모니터링/예약 로직 (Booking, Instagram 등)
-  - worker/: Playwright 기반 워커 프로세스
-- rontend/: SvelteKit 프론트엔드
-- data/: SQLite DB 및 Alembic 마이그레이션 파일
-- scripts/: 서비스 관리용 PowerShell/Python 스크립트
-- docs/: 프로젝트 문서 및 계획(plan), 아카이브
-- .agent/: Gemini CLI 전용 워크플로우 및 설정
-
----
-
-## 4. 모니터링 상태 관리 (State Machine)
-
-모니터링 대상(Target)은 다음 세 가지 상태 변수로 관리됩니다.
-
-| 필드 | 관리 주체 | 설명 |
-|:---|:---|:---|
-| is_enabled | **사용자(API)** | 모니터링 사용 여부 (On/Off) |
-| is_active | **워커(Worker)** | 실제 워커 프로세스가 해당 대상을 감시 중인지 여부 |
-| un_status | **워커(Worker)** | 상세 실행 상태 (idle, unning, paused, stopped, error) |
-
-- **동작 원리**: 사용자가 is_enabled=true로 설정하면 워커가 이를 감지하여 is_active=true로 전환하고 모니터링을 시작합니다.
+- `app\`: FastAPI 백엔드 소스
+  - `modules\`: 도메인별 로직 (naver_booking, instagram, writing, file_search 등)
+  - `worker\`: 통합 브라우저 워커 (`orchestrator.py` 및 각종 모니터링 워커)
+  - `models\`: SQLAlchemy 데이터베이스 모델
+  - `migrations\`: DB 마이그레이션 SQL 파일
+- `frontend\`: SvelteKit 프론트엔드
+- `data\`: SQLite DB 파일 및 데이터 보관
+- `scripts\`: 서비스 관리 및 자동화용 PowerShell/Python 스크립트
+- `docs\`: 프로젝트 문서, 가이드, 계획(plan) 및 아카이브
+- `tests\`: 테스트 수트 (Unit, Integration, E2E, dev_runner 등)
+- `logs\`: 실행 로그 관리
+- `.agent\`: Gemini CLI 전용 설정 및 워크플로우
 
 ---
 
-## 5. 주요 운영 명령 (Operation Guide)
+## 4. 프로세스 및 운영 (Operations)
 
-`powershell
-# 전체 시스템 재시작 (API + Workers)
-python "scripts\browser_workers.py" restart
+### 4.1 프로세스 별칭 (Exe Aliases)
+관리 편의를 위해 `python.exe`를 각 역할별 별칭(`monitorpage-*.exe`)으로 복사하여 사용합니다. (`scripts\setup-exe-aliases.ps1`)
 
-# 워커 상태 확인
+| 프로세스 별칭 | 역할 |
+|:---|:---|
+| `monitorpage-api.exe` | FastAPI API 서버 |
+| `monitorpage-worker.exe` | 통합 브라우저 워커 |
+| `monitorpage-claude.exe` | Claude/LLM 워커 |
+| `monitorpage-cmdlistener.exe` | Redis 커맨드 리스너 |
+
+### 4.2 주요 운영 명령
+```powershell
+# 시스템 상태 확인
 python "scripts\browser_workers.py" status
 
-# 테스트 실행
-pytest
-`
+# 워커 재시작
+python "scripts\browser_workers.py" restart
+
+# API 재시작 (Self-Restart)
+python "scripts\browser_workers.py" restart-api
+
+# DB 마이그레이션 실행 (SQL 파일 적용 후)
+# app\migrations\XXX.sql 파일을 생성한 후 즉시 실행 필요
+```
 
 ---
 
-## 6. Gemini CLI 워크플로우
+## 5. Gemini CLI 워크플로우
 
 | 명령 | 설명 |
 |:---|:---|
-| /plan | 새로운 기능 설계 및 docs/plan/에 문서 생성 |
-| /implement | 계획에 따른 코드 구현 및 단위 테스트 수행 |
-| /webapp-testing | 프론트엔드/백엔드 통합 테스트 및 빌드 확인 |
-| /done | 작업 완료 후 TODO 업데이트 및 변경사항 정리 |
-| /codebase-audit | 코드 품질 점검 및 아키텍처 분석 |
+| `/plan` | `docs\plan\`에 새로운 기능 설계 및 단계별 계획 수립 |
+| `/implement` | 수립된 계획에 따라 구현 및 단위 테스트 수행 |
+| `/webapp-testing` | 프론트엔드/백엔드 통합 테스트 및 빌드 확인 |
+| `/done` | 구현 완료 후 TODO 업데이트 및 문서 정리 |
+| `/codebase-audit` | 코드 품질 및 아키텍처 점검 (명시적 요청 시 실행) |
 
 ---
 
-## 7. 주의 사항 (Notes)
+## 6. 개발 가이드라인 (Dev Guidelines)
 
-- **Playwright Anti-Detection**: 네이버 등 보안이 강화된 사이트 대응을 위해 stealth 모드 및 적절한 User-Agent 설정이 필수입니다.
-- **LLM 비용 관리**: 불필요한 API 호출을 최소화하고, 캐싱 로직을 적극 활용합니다.
-- **Log 관리**: logs/ 폴더에 생성되는 로그 파일이 비대해지지 않도록 주기적으로 관리합니다 (scripts/cleanup-logs.ps1).
+- **UI 구현**: 100건 이상의 데이터 처리 시 반드시 페이지네이션(`$lib\utils\pagination.svelte`)을 적용합니다.
+- **이벤트 처리**: 카드 내 버튼 클릭 등 중첩 클릭 시 `e.stopPropagation()`을 잊지 않습니다.
+- **비동기 주의**: FastAPI와 asyncio 사용 시 리소스(transport 등)가 제대로 닫히지 않는 누수에 주의합니다.
+- **타입 안전성**: 프론트엔드 수정 후 `npm run check`를 통해 TypeScript 에러가 없는지 확인합니다.
+- **마이그레이션**: 모델 변경 시 `app\migrations\`에 SQL 파일을 생성하고 즉시 DB에 적용해야 합니다.
