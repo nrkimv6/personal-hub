@@ -263,7 +263,8 @@
 	}
 
 	let displayPlans = $derived.by(() => {
-		const list = showIgnored ? ignoredPlans : (plans ?? []);
+		const list = (showIgnored ? ignoredPlans : (plans ?? []))
+			.filter(p => !/[\\/]archive[\\/]/i.test(p.path));
 		return [...list].sort((a, b) => {
 			const aDone = a.status === '구현완료' ? 1 : 0;
 			const bDone = b.status === '구현완료' ? 1 : 0;

@@ -211,6 +211,8 @@ class PlanService:
         results: List[PlanFileResponse] = []
 
         for entry in self._registered_paths:
+            if entry.get("type") == "archive":
+                continue
             reg_path = entry["path"]
             p = Path(reg_path)
             if not p.exists():

@@ -114,6 +114,7 @@ class PlanRecordService:
 
         record.file_path = new_path
         record.archived_at = datetime.now()
+        record.status = 'archived'
         record.updated_at = datetime.now()
         _add_event(self.db, record, "archived", {"archive_path": new_path})
         return record
@@ -134,7 +135,10 @@ class PlanRecordService:
         if project:
             q = q.filter(PlanRecord.project == project)
         if status:
-            q = q.filter(PlanRecord.status == status)
+            if status == 'archived':
+                q = q.filter(PlanRecord.archived_at.isnot(None))
+            else:
+                q = q.filter(PlanRecord.status == status)
         q = q.order_by(PlanRecord.updated_at.desc())
         return q.offset(skip).limit(limit).all()
 

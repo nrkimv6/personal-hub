@@ -1,13 +1,13 @@
 <script>
 	import MobileServerStatus from '$lib/components/MobileServerStatus.svelte';
-	import { page } from '$app/stores';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
 
-	const navItems = [
-		{ path: '/mobile/targets', label: '크롤링 대상' },
-		{ path: '/mobile/items', label: '수집 아이템' },
-		{ path: '/mobile/history', label: '실행 이력' },
-		{ path: '/mobile/fetch', label: 'HTML 수집 도구' },
-		{ path: '/mobile/analyze', label: 'HTML 분석 도구' }
+	const navTabs = [
+		{ id: 'targets', label: '크롤링 대상', href: '/mobile/targets' },
+		{ id: 'items', label: '수집 아이템', href: '/mobile/items' },
+		{ id: 'history', label: '실행 이력', href: '/mobile/history' },
+		{ id: 'fetch', label: 'HTML 수집 도구', href: '/mobile/fetch' },
+		{ id: 'analyze', label: 'HTML 분석 도구', href: '/mobile/analyze' }
 	];
 </script>
 
@@ -17,17 +17,7 @@
 		<MobileServerStatus />
 	</div>
 
-	<div class="tabs tabs-boxed overflow-x-auto flex-nowrap whitespace-nowrap">
-		{#each navItems as item}
-			<a
-				href={item.path}
-				class="tab"
-				class:tab-active={$page.url.pathname === item.path || $page.url.pathname.startsWith(item.path + '/')}
-			>
-				{item.label}
-			</a>
-		{/each}
-	</div>
+	<TabNav tabs={navTabs} variant="primary" urlBased />
 </div>
 
 <slot />
