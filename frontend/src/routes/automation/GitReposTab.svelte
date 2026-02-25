@@ -46,7 +46,8 @@
     // 백그라운드로 실제 git status 갱신
     refreshing = true;
     try {
-      repos = await gitReposApi.refreshAll();
+      await gitReposApi.executeAndPoll(() => gitReposApi.refreshAll(), { maxRetries: 30 });
+      repos = await gitReposApi.listRepos();
     } catch {
       // 갱신 실패는 조용히 무시 (캐시 데이터 유지)
     } finally {
@@ -57,7 +58,8 @@
   async function handleRefreshAll() {
     refreshing = true;
     try {
-      repos = await gitReposApi.refreshAll();
+      await gitReposApi.executeAndPoll(() => gitReposApi.refreshAll());
+      repos = await gitReposApi.listRepos();
       showToast('전체 상태가 갱신되었습니다.');
     } catch (e) {
       error = e instanceof Error ? e.message : '갱신 실패';
@@ -68,8 +70,8 @@
 
   async function handleRefreshOne(id: number) {
     try {
-      const updated = await gitReposApi.refreshRepo(id);
-      repos = repos.map((r) => (r.id === id ? updated : r));
+      await gitReposApi.executeAndPoll(() => gitReposApi.refreshRepo(id));
+      repos = await gitReposApi.listRepos();
     } catch (e) {
       showToast('상태 갱신 실패: ' + (e instanceof Error ? e.message : ''), 'error');
     }
