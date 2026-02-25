@@ -14,9 +14,8 @@ _BLOCK_START = (
     "xterm.js:",
 )
 
-# 단일 줄 노이즈 패턴
+# 단일 줄 노이즈 패턴 — startswith 체크
 _SINGLE_NOISE = (
-    "node_modules\\@lydell\\node-pty\\conpty_console_list_agent",
     "Error: AttachConsole failed",
     "    at Object.<anonymous>",
     "    at Module._compile",
@@ -29,6 +28,13 @@ _SINGLE_NOISE = (
     "    at node:internal",
     "    at node:diagnostics_channel",
     "Node.js v",
+    "var consoleProcessList",
+)
+
+# 단일 줄 노이즈 패턴 — contains 체크 (절대경로 등 startswith 불가)
+_CONTAINS_NOISE = (
+    "conpty_console_list_agent",
+    "node_modules\\@lydell\\node-pty",
 )
 
 # 하위 호환: 기존 코드가 NOISE_BLOCK_MARKERS를 참조하는 경우
@@ -54,11 +60,20 @@ def is_noise_line(stripped: str) -> bool:
     """
     content = _extract_content(stripped)
 
-    # 공백 보존 체크 (4-space 들여쓰기 마커) + lstrip 체크 (공백 제거 후)
+    # startswith 체크 (공백 보존 + lstrip 버전)
     if content.startswith(_ALL_NOISE) or content.lstrip().startswith(_ALL_NOISE_LSTRIPPED):
         return True
 
-    # xterm.js JSON 바디 줄 — 블록 시작 없이도 도달할 수 있음
+    # contains 체크 (절대경로 등)
+    if any(p in content for p in _CONTAINS_NOISE):
+        return True
+
+    # 캐럿 포인터 줄 (공백 + ^ 만으로 구성)
+    c = content.strip()
+    if c and all(ch in ' ^' for ch in c):
+        return True
+
+    # xterm.js JSON 바디 줄
     if _is_xterm_json_body(content.lstrip()):
         return True
 

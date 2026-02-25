@@ -86,10 +86,10 @@ class TestIsNoiseLine:
     def test_nodejs_version_suppressed(self):
         assert is_noise_line("Node.js v24.7.0")
 
-    def test_node_pty_path_not_suppressed(self):
-        """경로 줄 자체는 노이즈 마커에 해당하지 않음"""
+    def test_node_pty_path_suppressed(self):
+        """node-pty conpty 경로 줄은 억제 대상"""
         line = r"C:\Users\...\node_modules\@lydell\node-pty\conpty_console_list_agent.js:11"
-        assert not is_noise_line(line)
+        assert is_noise_line(line)
 
     def test_normal_line_not_suppressed(self):
         assert not is_noise_line("[Claude] 작업 시작")
@@ -137,6 +137,20 @@ class TestIsNoiseLine:
 
     def test_xterm_json_uint32array_suppressed(self):
         assert is_noise_line("  [20:12:15] [STDERR]     _subParamsIdx: Uint16Array(32) [")
+
+    # ── conpty / node-pty 경로 및 관련 줄 ──────────────────────────────────
+    def test_conpty_path_suppressed(self):
+        line = r"  [20:18:54] [STDERR] C:\Users\Narang\AppData\Roaming\npm\node_modules\@google\gemini-cli\node_modules\@lydell\node-pty\conpty_console_list_agent.js:11"
+        assert is_noise_line(line)
+
+    def test_var_console_process_list_suppressed(self):
+        assert is_noise_line("  [20:18:54] [STDERR] var consoleProcessList = getConsoleProcessList(shellPid);")
+
+    def test_caret_pointer_suppressed(self):
+        assert is_noise_line("  [20:18:54] [STDERR]                          ^")
+
+    def test_caret_only_suppressed(self):
+        assert is_noise_line("  [20:18:54] [STDERR] ^")
 
 
 # ── _stream_output 통합 테스트 ───────────────────────────────────────────────
