@@ -9,6 +9,7 @@ import { browser } from '$app/environment';
 
 const HIDDEN_ITEMS_KEY = 'sidebar-hidden-items';
 const COLLAPSED_CATS_KEY = 'sidebar-collapsed-categories';
+const COLLAPSED_GROUPS_KEY = 'sidebar-collapsed-groups';
 
 function load<T>(key: string, fallback: T): T {
 	if (!browser) return fallback;
@@ -61,5 +62,30 @@ function createCollapsedCategories() {
 	};
 }
 
+function createCollapsedGroups() {
+	const { subscribe, update } = writable<string[]>(load(COLLAPSED_GROUPS_KEY, []));
+
+	return {
+		subscribe,
+		toggle(groupId: string) {
+			update((groups) => {
+				const next = groups.includes(groupId)
+					? groups.filter((g) => g !== groupId)
+					: [...groups, groupId];
+				save(COLLAPSED_GROUPS_KEY, next);
+				return next;
+			});
+		},
+		expand(groupId: string) {
+			update((groups) => {
+				const next = groups.filter((g) => g !== groupId);
+				save(COLLAPSED_GROUPS_KEY, next);
+				return next;
+			});
+		}
+	};
+}
+
 export const hiddenItems = createHiddenItems();
 export const collapsedCategories = createCollapsedCategories();
+export const collapsedGroups = createCollapsedGroups();

@@ -1,63 +1,16 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
-  import PageHeader from '$lib/components/layout/PageHeader.svelte';
-  import PlanListTab from './PlanListTab.svelte';
-  import ArchiveTab from './ArchiveTab.svelte';
-  import HistoryTab from './HistoryTab.svelte';
+  import { onMount } from 'svelte';
 
-  type Tab = 'plans' | 'archive' | 'history';
-
-  let activeTab: Tab = 'plans';
-
-  $: {
-    const tabParam = $page.url.searchParams.get('tab') as Tab | null;
-    activeTab = tabParam && ['plans', 'archive', 'history'].includes(tabParam) ? tabParam : 'plans';
-  }
-
-  function setTab(tab: Tab) {
-    const url = new URL(window.location.href);
-    if (tab === 'plans') {
-      url.searchParams.delete('tab');
-    } else {
-      url.searchParams.set('tab', tab);
+  onMount(() => {
+    // /plans?tab=archive → /automation?tab=plans&subtab=archive 매핑
+    const tabParam = $page.url.searchParams.get('tab');
+    const url = new URL('/automation', window.location.origin);
+    url.searchParams.set('tab', 'plans');
+    if (tabParam && ['archive', 'history'].includes(tabParam)) {
+      url.searchParams.set('subtab', tabParam);
     }
-    goto(url.toString(), { replaceState: true, noScroll: true });
-  }
-
-  const tabs: { id: Tab; label: string }[] = [
-    { id: 'plans', label: '계획서 목록' },
-    { id: 'archive', label: '아카이브' },
-    { id: 'history', label: '이벤트 이력' },
-  ];
+    goto(url.toString(), { replaceState: true });
+  });
 </script>
-
-<div class="flex flex-col h-full p-4 gap-4 bg-background">
-  <!-- 헤더 -->
-  <PageHeader title="계획서 관리" subtitle="개발 계획서를 관리합니다" />
-
-  <!-- 탭 -->
-  <div class="flex gap-1 border-b border-border">
-    {#each tabs as tab}
-      <button
-        class="px-4 py-2 text-sm transition-colors {activeTab === tab.id
-          ? 'text-primary border-b-2 border-primary font-medium'
-          : 'text-muted-foreground hover:text-foreground'}"
-        on:click={() => setTab(tab.id)}
-      >
-        {tab.label}
-      </button>
-    {/each}
-  </div>
-
-  <!-- 탭 컨텐츠 -->
-  <div class="flex-1 min-h-0 overflow-hidden">
-    {#if activeTab === 'plans'}
-      <PlanListTab />
-    {:else if activeTab === 'archive'}
-      <ArchiveTab />
-    {:else if activeTab === 'history'}
-      <HistoryTab />
-    {/if}
-  </div>
-</div>

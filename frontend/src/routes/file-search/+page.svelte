@@ -16,6 +16,27 @@
 	import ExtensionFilter from './ExtensionFilter.svelte';
 	import PathInput from './PathInput.svelte';
 	import ResultList from './ResultList.svelte';
+	import EncodingFixer from '../utils/EncodingFixer.svelte';
+	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
+
+	type PageTab = 'search' | 'encoding';
+	let pageTab: PageTab = $state('search');
+
+	$effect(() => {
+		const t = $page.url.searchParams.get('tab');
+		pageTab = t === 'encoding' ? 'encoding' : 'search';
+	});
+
+	function setPageTab(tab: PageTab) {
+		const url = new URL($page.url);
+		if (tab === 'search') {
+			url.searchParams.delete('tab');
+		} else {
+			url.searchParams.set('tab', tab);
+		}
+		goto(url.toString(), { replaceState: true, keepFocus: true });
+	}
 
 	// ────────────────────────────────────────────────────────────
 	// 상태
@@ -200,6 +221,31 @@
 <svelte:window onkeydown={handleGlobalKeydown} />
 
 <div class="flex h-full flex-col gap-4 p-6">
+	<!-- 탭 네비게이션 -->
+	<div class="flex items-center gap-1 border-b border-border pb-2">
+		<button
+			onclick={() => setPageTab('search')}
+			class="px-3 py-1.5 text-sm font-medium rounded-t transition-colors {pageTab === 'search'
+				? 'bg-primary/10 text-primary'
+				: 'text-muted-foreground hover:text-foreground hover:bg-muted/40'}"
+		>
+			🔎 파일 검색
+		</button>
+		<button
+			onclick={() => setPageTab('encoding')}
+			class="px-3 py-1.5 text-sm font-medium rounded-t transition-colors {pageTab === 'encoding'
+				? 'bg-primary/10 text-primary'
+				: 'text-muted-foreground hover:text-foreground hover:bg-muted/40'}"
+		>
+			🔠 인코딩 변환
+		</button>
+	</div>
+
+	{#if pageTab === 'encoding'}
+		<EncodingFixer />
+	{/if}
+
+	{#if pageTab === 'search'}
 	<!-- 페이지 제목 + 상태 뱃지 -->
 	<PageHeader title="파일 검색" subtitle="로컬 파일을 빠르게 검색합니다">
 		{#if status}
@@ -333,4 +379,5 @@
 			<ResultList {results} {query} {searchTimeMs} {truncated} />
 		{/if}
 	</div>
+	{/if}
 </div>
