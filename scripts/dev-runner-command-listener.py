@@ -252,10 +252,10 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
         cmd.extend(["--engine", engine])
 
     # 옵션 추가
-    if command.get("max_cycles"):
+    if command.get("max_cycles") is not None:
         cmd.extend(["--max-cycles", str(command["max_cycles"])])
 
-    if command.get("max_tokens"):
+    if command.get("max_tokens") is not None:
         cmd.extend(["--max-tokens", str(command["max_tokens"])])
 
     if command.get("until"):

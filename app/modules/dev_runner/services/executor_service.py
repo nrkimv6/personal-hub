@@ -107,10 +107,10 @@ class ExecutorService:
             command["engine"] = request.engine
 
         # 옵션 추가
-        if request.max_cycles and request.max_cycles > 0:
+        if request.max_cycles is not None:
             command["max_cycles"] = request.max_cycles
 
-        if request.max_tokens and request.max_tokens > 0:
+        if request.max_tokens is not None:
             command["max_tokens"] = request.max_tokens
 
         if request.until:
