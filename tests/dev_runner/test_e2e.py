@@ -37,10 +37,14 @@ def dev_runner_listener():
     )
     
     # Wait for listener to register heartbeat
-    for _ in range(10):
+    for i in range(20):
         if r.get("plan-runner:listener:heartbeat"):
+            print(f"Listener heartbeat detected after {i*0.5}s")
             break
         time.sleep(0.5)
+    else:
+        out, err = process.communicate(timeout=1)
+        pytest.fail(f"Listener failed to start. Stdout: {out}, Stderr: {err}")
         
     yield process
     

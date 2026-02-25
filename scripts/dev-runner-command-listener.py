@@ -442,15 +442,11 @@ def main():
             logger.info("Redis 연결 성공")
             reconnect_delay = 1  # 연결 성공 시 리셋
 
-            # Redis 재연결 시 현재 프로세스 상태 복원
-            # (Redis 캐시 등으로 데이터가 날아갈 경우 status: running 복원)
-            if _current_process and _current_process.poll() is None and _is_pid_alive(_current_process.pid):
-                r.set(STATE_KEY + ":status", "running")
-                r.set(STATE_KEY + ":pid", _current_process.pid)
-                logger.info(f"Redis 재연결: 프로세스 상태 복원 (PID: {_current_process.pid})")
+            # 초기 heartbeat 설정 (시작 즉시 한 번 찍음)
+            r.set(HEARTBEAT_KEY, datetime.now().isoformat(), ex=HEARTBEAT_TTL)
+            last_heartbeat = time.time()
 
-            # 초기 heartbeat 설정
-            last_heartbeat = 0
+            # Redis 재연결 시 현재 프로세스 상태 복원
 
             # BRPOP 루프 (블로킹 대기)
             while True:
