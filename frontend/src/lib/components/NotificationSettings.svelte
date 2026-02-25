@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { notificationApi } from '$lib/api';
 	import type { NotificationSettings } from '$lib/types';
+	import Button from '$lib/components/ui/Button.svelte';
 
 	let notificationSettings: NotificationSettings | null = null;
 	let loading = true;
@@ -128,7 +129,7 @@
 
 						<Button
 							variant="primary" class="w-full"
-							on:click={saveNotificationSettings}
+							onclick={saveNotificationSettings}
 							disabled={saving}
 						>
 							{saving ? '저장 중...' : '설정 저장'}
