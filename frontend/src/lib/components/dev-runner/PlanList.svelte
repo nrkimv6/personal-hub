@@ -28,7 +28,7 @@
 				onPlansChange?.();
 				setTimeout(() => { doneMessage = null; }, 5000);
 			}
-		} catch (err) {
+		} catch (err: unknown) {
 			doneMessage = { path: plan.path, success: false, text: err instanceof Error ? err.message : '완료 처리 실패' };
 		} finally {
 			doneLoadingPath = null;
@@ -49,7 +49,7 @@
 			};
 			onPlansChange?.();
 			setTimeout(() => { doneMessage = null; }, 5000);
-		} catch (err) {
+		} catch (err: unknown) {
 			doneMessage = { path: '', success: false, text: err instanceof Error ? err.message : '일괄 완료 실패' };
 		} finally {
 			batchDoneLoading = false;
@@ -69,7 +69,7 @@
 			};
 			onPlansChange?.();
 			setTimeout(() => { doneMessage = null; }, 5000);
-		} catch (err) {
+		} catch (err: unknown) {
 			doneMessage = { path: '', success: false, text: err instanceof Error ? err.message : '검증 완료 실패' };
 		} finally {
 			batchVerifyDoneLoading = false;

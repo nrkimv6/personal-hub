@@ -71,7 +71,7 @@
 			reports = data.items;
 			total = data.total;
 			totalPages = data.total_pages;
-		} catch (err) {
+		} catch (err: unknown) {
 			error = err instanceof Error ? err.message : 'Unknown error';
 		} finally {
 			loading = false;

@@ -48,7 +48,7 @@
 			}
 
 			report = await response.json();
-		} catch (err) {
+		} catch (err: unknown) {
 			error = err instanceof Error ? err.message : 'Unknown error';
 		} finally {
 			loading = false;
@@ -73,7 +73,7 @@
 			}
 
 			goto('/reports');
-		} catch (err) {
+		} catch (err: unknown) {
 			alert(err instanceof Error ? err.message : '삭제 중 오류가 발생했습니다.');
 		} finally {
 			deleting = false;

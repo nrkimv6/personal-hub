@@ -162,8 +162,8 @@
 			if (!res.ok) throw new Error('??�� ?�패');
 			selection.clear();
 			await loadFiles(true);
-		} catch (err: any) {
-			alert(`??�� ?�패: ${err.message}`);
+		} catch (err: unknown) {
+			alert(`??�� ?�패: ${(err as Error).message}`);
 		}
 	}
 
@@ -179,8 +179,8 @@
 			selection.clear();
 			showCategoryPicker = false;
 			await loadFiles(true);
-		} catch (err: any) {
-			alert(`카테고리 지???�패: ${err.message}`);
+		} catch (err: unknown) {
+			alert(`카테고리 지???�패: ${(err as Error).message}`);
 		}
 	}
 

@@ -73,8 +73,8 @@
 			}
 			clusterRunning = true;
 			startClusterPolling();
-		} catch (err: any) {
-			alert(`클러스터링 시작 실패: ${err.message}`);
+		} catch (err: unknown) {
+			alert(`클러스터링 시작 실패: ${(err as Error).message}`);
 		}
 	}
 
@@ -187,8 +187,8 @@
 			const catName = flatCategories.find(c => c.id === categoryId)?.full_path ?? '';
 			showToast(`카테고리 할당 완료: ${catName}`);
 			loadClusters();
-		} catch (err: any) {
-			alert(`카테고리 지정 실패: ${err.message}`);
+		} catch (err: unknown) {
+			alert(`카테고리 지정 실패: ${(err as Error).message}`);
 		}
 	}
 
@@ -199,8 +199,8 @@
 			const res = await fetchWithTimeout(`/api/ic/clusters/${clusterId}`);
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			detailCluster = await res.json();
-		} catch (err: any) {
-			alert(`클러스터 상세 로드 실패: ${err.message}`);
+		} catch (err: unknown) {
+			alert(`클러스터 상세 로드 실패: ${(err as Error).message}`);
 			showDetail = false;
 		} finally {
 			detailLoading = false;
@@ -218,8 +218,8 @@
 				clusters = [...clusters];
 			}
 			showToast(`클러스터 #${clusterId} 검토 완료`);
-		} catch (err: any) {
-			alert(`검토 완료 실패: ${err.message}`);
+		} catch (err: unknown) {
+			alert(`검토 완료 실패: ${(err as Error).message}`);
 		}
 	}
 </script>
