@@ -1,20 +1,20 @@
 ﻿"""
 Redis Dev Runner Command Listener
 
-Session 1 (?ъ슜???몄뀡)?먯꽌 ?ㅽ뻾?섎뒗 dev-runner 紐낅졊 由ъ뒪?덉엯?덈떎.
-API ?쒕쾭(Session 0)?먯꽌 Redis瑜??듯빐 ?꾨떖??紐낅졊???섏떊?섍퀬 ?ㅽ뻾?⑸땲??
+Session 1 (사용자 세션)에서 실행되는 dev-runner 명령 리스너입니다.
+API 서버(Session 0)에서 Redis를 통해 전달된 명령을 수신하고 실행합니다.
 
-?숈옉 諛⑹떇:
-    - BRPOP?쇰줈 plan-runner:commands ?ㅻ? 釉붾줈???湲?(CPU 0%)
-    - 紐낅졊 ?섏떊 ??plan-runner CLI ?ㅽ뻾
-    - ?ㅽ뻾 寃곌낵/PID瑜?plan-runner:command_results??諛섑솚
-    - stop 紐낅졊 ???꾨줈?몄뒪 terminate
+동작 방식:
+    - BRPOP으로 plan-runner:commands 큐를 블로킹 대기 (CPU 0%)
+    - 명령 수신 시 plan-runner CLI 실행
+    - 실행 결과/PID를 plan-runner:command_results에 반환
+    - stop 명령 시 프로세스 terminate
 
-?ъ슜踰?
+사용법:
     python scripts/dev-runner-command-listener.py
 
-?꾪궎?띿쿂:
-    API (Session 0) ??Redis LPUSH ??[??由ъ뒪??(Session 1)] ??plan-runner CLI
+아키텍처:
+    API (Session 0) -> Redis LPUSH -> [이 리스너 (Session 1)] -> plan-runner CLI
 """
 import json
 import logging
@@ -28,15 +28,15 @@ from typing import Optional, Dict
 
 import redis
 
-# ?ㅼ젙
+# 설정
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
 COMMANDS_KEY = "plan-runner:commands"
 RESULTS_KEY = "plan-runner:command_results"
 STATE_KEY = "plan-runner:state"
 HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
-HEARTBEAT_INTERVAL = 10  # heartbeat 媛깆떊 二쇨린 (珥?
-HEARTBEAT_TTL = 30  # heartbeat 留뚮즺 ?쒓컙 (珥? 3??誘멸갚????留뚮즺)
+HEARTBEAT_INTERVAL = 10  # heartbeat 갱신 주기 (초)
+HEARTBEAT_TTL = 30  # heartbeat 만료 시간 (초, 3회 미갱신 시 만료)
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
@@ -45,7 +45,7 @@ PLAN_RUNNER_MODULE_PATH = WTOOLS_BASE_DIR / "common/tools/plan-runner"
 PLAN_RUNNER_PYTHON = PLAN_RUNNER_MODULE_PATH / ".venv/Scripts/python.exe"
 LOG_DIR = WTOOLS_BASE_DIR / "common/logs"
 
-# 濡쒓퉭 ?ㅼ젙
+# 로깅 설정
 log_dir = PROJECT_ROOT / "logs" / "dev"
 log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -61,14 +61,14 @@ logger = logging.getLogger(__name__)
 
 LOG_CHANNEL = "plan-runner:logs"
 
-# ?꾩뿭 ?꾨줈?몄뒪 愿由?
+# 전역 프로세스 관리
 _current_process: Optional[subprocess.Popen] = None
 _current_log_file: Optional[Path] = None
 _stream_thread: Optional[threading.Thread] = None
 
 
 def _is_pid_alive(pid: int) -> bool:
-    """PID媛 ?ㅼ젣濡??댁븘?덈뒗吏 OS ?덈꺼 ?뺤씤 (Windows)"""
+    """PID가 실제로 살아있는지 OS 레벨 확인 (Windows)"""
     try:
         import ctypes
         kernel32 = ctypes.windll.kernel32
@@ -86,7 +86,7 @@ def _is_pid_alive(pid: int) -> bool:
 
 
 def _cleanup_process_state(redis_client: redis.Redis):
-    """?꾩뿭 ?꾨줈?몄뒪 蹂??+ Redis ?곹깭 ?뺣━"""
+    """전역 프로세스 변수 + Redis 상태 정리"""
     global _current_process, _current_log_file, _stream_thread
 
     _current_process = None
@@ -110,18 +110,18 @@ def _cleanup_process_state(redis_client: redis.Redis):
 
 
 def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Redis):
-    """?꾨줈?몄뒪 stdout???쇱씤蹂꾨줈 ?쎌뼱 ?뚯씪 湲곕줉 + Redis publish ?숈떆 ?섑뻾"""
+    """프로세스 stdout을 라인별로 읽어 파일 기록 + Redis publish 동시 수행"""
     try:
         for line in process.stdout:
             stripped = line.rstrip('\n')
-            # ?뚯씪??湲곕줉
+            # 파일에 기록
             log_handle.write(line)
             log_handle.flush()
-            # Redis Pub/Sub?쇰줈 publish
+            # Redis Pub/Sub으로 publish
             try:
                 redis_client.publish(LOG_CHANNEL, stripped)
             except redis.ConnectionError:
-                pass  # Redis ?딄꺼???뚯씪 湲곕줉? 怨꾩냽
+                pass  # Redis 끊겨도 파일 기록은 계속
     except Exception as e:
         logger.error(f"Output streaming error: {e}")
     finally:
@@ -131,7 +131,7 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
         except Exception:
             pass
 
-        # ?꾨줈?몄뒪 醫낅즺 ?湲?+ ?꾩뿭 ?곹깭 ?뺣━
+        # 프로세스 종료 대기 + 전역 상태 정리
         try:
             process.wait(timeout=10)
         except Exception:
@@ -141,21 +141,21 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
 
 
 def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
-    """plan-runner CLI ?ㅽ뻾 ?쒖옉
+    """plan-runner CLI 실행 시작
 
     Args:
         command: {action: "run", plan_file: str, max_cycles: int, ...}
-        redis_client: Redis ?대씪?댁뼵??
+        redis_client: Redis 클라이언트
 
     Returns:
         dict: {success: bool, message: str, pid: int|None, log_file: str|None}
     """
     global _current_process, _current_log_file
 
-    # ?대? ?ㅽ뻾 以묒씠硫??먮윭 (stale ?꾨줈?몄뒪 ?먮룞 ?뺣━ ?ы븿)
+    # 이미 실행 중이면 에러 (stale 프로세스 자동 정리 포함)
     if _current_process and _current_process.poll() is None:
         if not _is_pid_alive(_current_process.pid):
-            # OS ?덈꺼?먯꽌 二쎌? ?꾨줈?몄뒪 ???먮룞 ?뺣━
+            # OS 레벨에서 죽은 프로세스 면 자동 정리
             logger.warning(f"Stale process detected (PID: {_current_process.pid}), cleaning up")
             _cleanup_process_state(redis_client)
         else:
@@ -164,11 +164,11 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
                 "message": f"Already running (PID: {_current_process.pid})"
             }
     elif _current_process and _current_process.poll() is not None:
-        # 醫낅즺?섏뿀吏留??뺣━ ????寃쎌슦
+        # 종료되었지만 정리 안 된 경우
         logger.info(f"Previous process ended (exit code: {_current_process.returncode}), cleaning up")
         _cleanup_process_state(redis_client)
 
-    # 紐낅졊??援ъ꽦
+    # 명령어 구성
     plan_file = command.get("plan_file")
     engine = command.get("engine")
     is_parallel = command.get("parallel", False)
@@ -183,11 +183,11 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
     ]
 
     if plan_file:
-        cmd.extend(["占쏙옙plan-file", plan_file])
+        cmd.extend(["--plan-file", plan_file])
     if engine:
-        cmd.extend(["占쏙옙engine", engine])
+        cmd.extend(["--engine", engine])
 
-    # ?듭뀡 異붽?
+    # 옵션 추가
     if command.get("max_cycles"):
         cmd.extend(["--max-cycles", str(command["max_cycles"])])
 
@@ -215,21 +215,21 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
     if command.get("ignored_plans"):
         cmd.extend(["--ignored-plans", command["ignored_plans"]])
 
-    # 濡쒓렇 ?뚯씪 ?앹꽦
+    # 로그 파일 생성
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_file = LOG_DIR / f"plan-runner-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
 
     try:
-        # subprocess ?ㅽ뻾 ??stdout??PIPE濡?諛쏆븘 ?ㅻ젅?쒖뿉???뚯씪+Redis ?숈떆 湲곕줉
+        # subprocess 실행 및 stdout을 PIPE로 받아 스레드에서 파일+Redis 동시 기록
         log_handle = open(log_file, "w", encoding="utf-8")
 
-        # UTF-8 媛뺤젣
+        # UTF-8 강제
         import os
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUTF8"] = "1"
         env["PYTHONUNBUFFERED"] = "1"
-        env.pop("CLAUDECODE", None)  # 以묒꺽 ?몄뀡 媛먯? 諛⑹?
+        env.pop("CLAUDECODE", None)  # 중첩 세션 감지 방지
 
         process = subprocess.Popen(
             cmd,
@@ -245,7 +245,7 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
         _current_process = process
         _current_log_file = log_file
 
-        # 蹂꾨룄 ?ㅻ젅?쒖뿉??stdout ???뚯씪 + Redis publish
+        # 별도 스레드에서 stdout 을 파일 + Redis publish
         global _stream_thread
         _stream_thread = threading.Thread(
             target=_stream_output,
@@ -254,7 +254,7 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
         )
         _stream_thread.start()
 
-        # Redis???곹깭 ???
+        # Redis에 상태 저장
         redis_client.set(STATE_KEY + ":log_file_path", str(log_file))
         redis_client.set(STATE_KEY + ":stream_log_path", str(log_file))
         redis_client.set(STATE_KEY + ":pid", process.pid)
@@ -281,7 +281,7 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
 
 
 def stop_plan_runner(redis_client: redis.Redis) -> Dict:
-    """plan-runner ?꾨줈?몄뒪 醫낅즺
+    """plan-runner 프로세스 종료
 
     Returns:
         dict: {success: bool, message: str}
@@ -294,26 +294,26 @@ def stop_plan_runner(redis_client: redis.Redis) -> Dict:
     try:
         logger.info(f"Stopping plan-runner (PID: {_current_process.pid})...")
 
-        # Windows: terminate() ?몄텧
+        # Windows: terminate() 호출
         _current_process.terminate()
 
-        # 5珥??湲?
+        # 5초 대기
         try:
             _current_process.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            # 媛뺤젣 醫낅즺
+            # 강제 종료
             _current_process.kill()
             _current_process.wait()
 
         logger.info("plan-runner stopped")
 
-        # ?ㅽ듃由щ컢 ?ㅻ젅???뺣━
+        # 스트리밍 스레드 정리
         global _stream_thread
         if _stream_thread and _stream_thread.is_alive():
             _stream_thread.join(timeout=5)
         _stream_thread = None
 
-        # Redis ?곹깭 ?낅뜲?댄듃
+        # Redis 상태 업데이트
         redis_client.set(STATE_KEY + ":status", "stopped")
         redis_client.delete(STATE_KEY + ":pid")
         redis_client.delete(STATE_KEY + ":log_file_path")
@@ -336,7 +336,7 @@ def stop_plan_runner(redis_client: redis.Redis) -> Dict:
 
 
 def get_status(redis_client: redis.Redis) -> Dict:
-    """?꾩옱 ?ㅽ뻾 ?곹깭 議고쉶
+    """현재 실행 상태 조회
 
     Returns:
         dict: {success: bool, running: bool, pid: int|None, log_file: str|None}
@@ -351,7 +351,7 @@ def get_status(redis_client: redis.Redis) -> Dict:
             "log_file": str(_current_log_file) if _current_log_file else None,
         }
     else:
-        # 醫낅즺??寃쎌슦 Redis ?곹깭 ?뺣━
+        # 종료된 경우 Redis 상태 정리
         if _current_process:
             redis_client.set(STATE_KEY + ":status", "stopped")
             redis_client.delete(STATE_KEY + ":pid")
@@ -369,7 +369,7 @@ def get_status(redis_client: redis.Redis) -> Dict:
 
 
 def force_stop_plan_runner(redis_client: redis.Redis) -> Dict:
-    """媛뺤젣 醫낅즺 - kill ???꾩뿭 ?곹깭 珥덇린??(由ъ뀑??
+    """강제 종료 - kill 및 전역 상태 초기화 (리셋용)
 
     Returns:
         dict: {success: bool, message: str}
@@ -393,11 +393,11 @@ def force_stop_plan_runner(redis_client: redis.Redis) -> Dict:
 
 
 def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
-    """紐낅졊 ?ㅽ뻾
+    """명령 실행
 
     Args:
         command: {action: str, ...}
-        redis_client: Redis ?대씪?댁뼵??
+        redis_client: Redis 클라이언트
 
     Returns:
         dict: {success: bool, message: str, ...}
@@ -417,21 +417,21 @@ def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
 
 
 def main():
-    """硫붿씤 猷⑦봽: Redis BRPOP?쇰줈 紐낅졊 ?湲?諛??ㅽ뻾."""
+    """메인 루프: Redis BRPOP으로 명령 대기 및 실행."""
     logger.info("=" * 50)
-    logger.info("Dev Runner Command Listener ?쒖옉")
+    logger.info("Dev Runner Command Listener 시작")
     logger.info(f"Redis: {REDIS_HOST}:{REDIS_PORT}")
-    logger.info(f"紐낅졊 ?? {COMMANDS_KEY}")
-    logger.info(f"寃곌낵 ?? {RESULTS_KEY}")
-    logger.info(f"?곹깭 ?? {STATE_KEY}")
-    logger.info(f"plan-runner 紐⑤뱢: {PLAN_RUNNER_MODULE_PATH}")
+    logger.info(f"명령 큐: {COMMANDS_KEY}")
+    logger.info(f"결과 큐: {RESULTS_KEY}")
+    logger.info(f"상태 키: {STATE_KEY}")
+    logger.info(f"plan-runner 모듈: {PLAN_RUNNER_MODULE_PATH}")
     logger.info("=" * 50)
 
     reconnect_delay = 1
 
     while True:
         try:
-            # Redis ?곌껐
+            # Redis 연결
             r = redis.Redis(
                 host=REDIS_HOST,
                 port=REDIS_PORT,
@@ -439,35 +439,35 @@ def main():
                 socket_connect_timeout=5,
             )
             r.ping()
-            logger.info("Redis ?곌껐 ?깃났")
-            reconnect_delay = 1  # ?곌껐 ?깃났 ??由ъ뀑
+            logger.info("Redis 연결 성공")
+            reconnect_delay = 1  # 연결 성공 시 리셋
 
-            # Redis ?ъ뿰寃????꾩옱 ?꾨줈?몄뒪 ?곹깭 蹂듭썝
-            # (Redis ?ъ떆???깆쑝濡??ㅺ? ?좎븘媛?寃쎌슦 status: running 蹂듭썝)
+            # Redis 재연결 시 현재 프로세스 상태 복원
+            # (Redis 캐시 등으로 데이터가 날아갈 경우 status: running 복원)
             if _current_process and _current_process.poll() is None and _is_pid_alive(_current_process.pid):
                 r.set(STATE_KEY + ":status", "running")
                 r.set(STATE_KEY + ":pid", _current_process.pid)
-                logger.info(f"Redis ?ъ뿰寃? ?꾨줈?몄뒪 ?곹깭 蹂듭썝 (PID: {_current_process.pid})")
+                logger.info(f"Redis 재연결: 프로세스 상태 복원 (PID: {_current_process.pid})")
 
-            # 珥덇린 heartbeat ?ㅼ젙
+            # 초기 heartbeat 설정
             last_heartbeat = 0
 
-            # BRPOP 猷⑦봽 (釉붾줈???湲?
+            # BRPOP 루프 (블로킹 대기)
             while True:
-                # heartbeat 媛깆떊
+                # heartbeat 갱신
                 now = time.time()
                 if now - last_heartbeat >= HEARTBEAT_INTERVAL:
                     r.set(HEARTBEAT_KEY, datetime.now().isoformat(), ex=HEARTBEAT_TTL)
-                    # ?꾨줈?몄뒪 ?ㅽ뻾 以묒씠硫?Redis ?곹깭 ?숆린??
-                    # (Redis ??留뚮즺 ?먮뒗 ?ъ떆?묒쑝濡??좎븘媛?寃쎌슦 10珥???蹂듭썝)
+                    # 프로세스 실행 중이면 Redis 상태 동기화
+                    # (Redis 키 만료 또는 재시작으로 날아갈 경우 10초마다 복원)
                     if _current_process and _current_process.poll() is None:
                         if r.get(STATE_KEY + ":status") != "running":
                             r.set(STATE_KEY + ":status", "running")
                             r.set(STATE_KEY + ":pid", _current_process.pid)
-                            logger.info(f"heartbeat: Redis ?곹깭 蹂듭썝 (PID: {_current_process.pid})")
+                            logger.info(f"heartbeat: Redis 상태 복원 (PID: {_current_process.pid})")
                     elif _current_process and _current_process.poll() is not None:
-                        # ?꾨줈?몄뒪媛 醫낅즺?먮뒗???꾩뿭蹂?섍? ?⑥븘?덈뒗 寃쎌슦 ??利됱떆 cleanup
-                        logger.warning(f"heartbeat: ?꾨줈?몄뒪 醫낅즺 媛먯? (exit code: {_current_process.returncode}), ?곹깭 ?뺣━")
+                        # 프로세스가 종료되었는데 전역변수가 남아있는 경우 즉시 cleanup
+                        logger.warning(f"heartbeat: 프로세스 종료 감지 (exit code: {_current_process.returncode}), 상태 정리")
                         _cleanup_process_state(r)
                     last_heartbeat = now
 
@@ -481,26 +481,26 @@ def main():
                 try:
                     command = json.loads(raw_command)
                 except json.JSONDecodeError:
-                    logger.warning(f"?섎せ??紐낅졊 ?뺤떇: {raw_command}")
+                    logger.warning(f"잘못된 명령 형식: {raw_command}")
                     continue
 
                 action = command.get("action")
                 source = command.get("source", "unknown")
                 timestamp = command.get("timestamp", "")
 
-                logger.info(f"紐낅졊 ?섏떊: action={action}, source={source}, time={timestamp}")
+                logger.info(f"명령 수신: action={action}, source={source}, time={timestamp}")
 
-                # 紐낅졊 ?ㅽ뻾
+                # 명령 실행
                 command_result = execute_command(command, r)
                 command_result["action"] = action
                 command_result["executed_at"] = datetime.now().isoformat()
 
-                # 寃곌낵 諛섑솚 (API媛 BRPOP?쇰줈 ?湲?以?
+                # 결과 반환 (API가 BRPOP으로 대기 중)
                 r.lpush(RESULTS_KEY, json.dumps(command_result, ensure_ascii=False))
-                # 寃곌낵 ??留뚮즺 ?ㅼ젙 (30珥????먮룞 ??젣, ?꾩쟻 諛⑹?)
+                # 결과 키 만료 설정 (30초 후 자동 삭제, 누적 방지)
                 r.expire(RESULTS_KEY, 30)
 
-                logger.info(f"紐낅졊 寃곌낵 諛섑솚: {command_result}")
+                logger.info(f"명령 결과 반환: {command_result}")
 
         except redis.ConnectionError as e:
             logger.warning(f"Redis connection error: {e}, retrying in {reconnect_delay}s")
@@ -512,18 +512,15 @@ def main():
                 r.delete(HEARTBEAT_KEY)
             except Exception:
                 pass
-            logger.info("Ctrl+C濡?醫낅즺")
+            logger.info("Ctrl+C로 종료")
             break
 
         except Exception as e:
-            logger.error(f"?덉긽移?紐삵븳 ?ㅻ쪟: {e}", exc_info=True)
+            logger.error(f"예상치 못한 오류: {e}", exc_info=True)
             time.sleep(5)
 
-    logger.info("Dev Runner Command Listener 醫낅즺")
+    logger.info("Dev Runner Command Listener 종료")
 
 
 if __name__ == "__main__":
     main()
-
-
-

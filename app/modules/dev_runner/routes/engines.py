@@ -15,8 +15,8 @@ async def get_engines_config():
         raise HTTPException(status_code=404, detail="engines.json file not found")
     
     try:
-        with open(ENGINES_JSON_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+        content = ENGINES_JSON_PATH.read_text(encoding="utf-8-sig")
+        return json.loads(content)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read settings: {str(e)}")
 
@@ -27,8 +27,8 @@ async def update_engine_config(engine: str, config: Dict[str, Any]):
         raise HTTPException(status_code=404, detail="engines.json file not found")
     
     try:
-        with open(ENGINES_JSON_PATH, "r", encoding="utf-8") as f:
-            full_config = json.load(f)
+        content = ENGINES_JSON_PATH.read_text(encoding="utf-8-sig")
+        full_config = json.loads(content)
         
         if engine not in full_config:
             full_config[engine] = {}
