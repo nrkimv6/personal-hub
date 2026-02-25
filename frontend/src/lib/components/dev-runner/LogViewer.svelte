@@ -62,6 +62,7 @@
 		STDERR: { text: 'text-red-400', bg: 'bg-red-500/30' },
 		LINE: { text: 'text-gray-600', bg: 'bg-transparent' },
 		DIAG: { text: 'text-cyan-400', bg: 'bg-cyan-500/20' },
+		THINK: { text: 'text-violet-400', bg: 'bg-violet-500/20' },
 		PHASE: { text: 'text-indigo-400', bg: 'bg-indigo-500/20' },
 		TRACK: { text: 'text-purple-400', bg: 'bg-purple-500/20' },
 		CYCLE: { text: 'text-white', bg: 'bg-gray-600' },
@@ -70,7 +71,7 @@
 		BATCH: { text: 'text-teal-400', bg: 'bg-teal-500/20' }
 	};
 
-	const LINE_PATTERN = /^\[?(\d{2}:\d{2}:\d{2})\]?\s*\[(\w+)\]\s*(.*)/;
+	const LINE_PATTERN = /^\s*\[?(\d{2}:\d{2}:\d{2})\]?\s*\[(\w+)\]\s*(.*)/;
 	const DIAG_PATTERN = /^\[(\w+)\]\s*(.*)/;
 
 	function parseLine(text: string, isStale: boolean): ParsedLine {

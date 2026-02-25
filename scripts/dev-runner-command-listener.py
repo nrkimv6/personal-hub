@@ -18,6 +18,7 @@ API 서버(Session 0)에서 Redis를 통해 전달된 명령을 수신하고 실
 """
 import json
 import logging
+import re
 import subprocess
 import sys
 import threading
@@ -25,6 +26,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict
+
+_ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
 import redis
 
@@ -170,9 +173,9 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                     pass
                 suppressed_count = 0
 
-            # 5. 정상 라인 publish
+            # 5. 정상 라인 publish (ANSI 이스케이프 코드 제거)
             try:
-                redis_client.publish(LOG_CHANNEL, stripped)
+                redis_client.publish(LOG_CHANNEL, _ANSI_ESCAPE.sub('', stripped))
             except redis.ConnectionError:
                 pass  # Redis 끊겨도 파일 기록은 계속
 
