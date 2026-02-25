@@ -447,6 +447,11 @@ def main():
             last_heartbeat = time.time()
 
             # Redis 재연결 시 현재 프로세스 상태 복원
+            # (Redis 캐시 등으로 데이터가 날아갈 경우 status: running 복원)
+            if _current_process and _current_process.poll() is None and _is_pid_alive(_current_process.pid):
+                r.set(STATE_KEY + ":status", "running")
+                r.set(STATE_KEY + ":pid", _current_process.pid)
+                logger.info(f"Redis 재연결: 프로세스 상태 복원 (PID: {_current_process.pid})")
 
             # BRPOP 루프 (블로킹 대기)
             while True:
