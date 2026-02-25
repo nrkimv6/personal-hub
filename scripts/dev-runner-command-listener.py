@@ -28,6 +28,12 @@ from typing import Optional, Dict
 
 import redis
 
+# listener_noise_filter는 scripts/ 디렉토리에 위치 — sys.path로 직접 로드
+_SCRIPTS_DIR = Path(__file__).parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+from listener_noise_filter import NOISE_BLOCK_MARKERS as _NOISE_BLOCK_MARKERS, is_noise_line as _is_noise_line
+
 # 설정
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
@@ -110,18 +116,73 @@ def _cleanup_process_state(redis_client: redis.Redis):
 
 
 def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Redis):
-    """프로세스 stdout을 라인별로 읽어 파일 기록 + Redis publish 동시 수행"""
+    """프로세스 stdout을 라인별로 읽어 파일 기록 + Redis publish 동시 수행
+
+    노이즈 필터:
+    - xterm.js: Parsing error 블록 → 파일 기록만, publish 억제
+    - node-pty AttachConsole failed 스택트레이스 → 파일 기록만, publish 억제
+    - 억제된 줄이 있으면 정상 라인 직전에 요약 1줄 publish
+    - rate-limiter: 동일 라인 0.5초 내 10회 이상 반복 시 burst 억제
+    """
+    suppressed_count = 0
+    # rate-limiter 상태
+    last_line = ""
+    repeat_count = 0
+    repeat_start = 0.0
+    BURST_WINDOW = 0.5   # 초
+    BURST_LIMIT = 10     # 같은 내용 N회 이상이면 억제
+
     try:
         for line in process.stdout:
             stripped = line.rstrip('\n')
-            # 파일에 기록
+
+            # 1. 파일 기록 (노이즈 포함 전체 보존)
             log_handle.write(line)
             log_handle.flush()
-            # Redis Pub/Sub으로 publish
+
+            # 2. 노이즈 필터: 억제 대상이면 카운트 후 skip
+            if _is_noise_line(stripped):
+                suppressed_count += 1
+                continue
+
+            # 3. rate-limiter: 동일 내용 burst 감지
+            now = time.time()
+            if stripped == last_line:
+                if now - repeat_start <= BURST_WINDOW:
+                    repeat_count += 1
+                else:
+                    repeat_count = 1
+                    repeat_start = now
+            else:
+                last_line = stripped
+                repeat_count = 1
+                repeat_start = now
+
+            if repeat_count > BURST_LIMIT:
+                suppressed_count += 1
+                continue
+
+            # 4. 직전 억제 요약 먼저 publish
+            if suppressed_count > 0:
+                try:
+                    redis_client.publish(LOG_CHANNEL, f"[{suppressed_count} noise lines suppressed]")
+                except redis.ConnectionError:
+                    pass
+                suppressed_count = 0
+
+            # 5. 정상 라인 publish
             try:
                 redis_client.publish(LOG_CHANNEL, stripped)
             except redis.ConnectionError:
                 pass  # Redis 끊겨도 파일 기록은 계속
+
+        # 루프 종료 후 잔여 억제 요약
+        if suppressed_count > 0:
+            try:
+                redis_client.publish(LOG_CHANNEL, f"[{suppressed_count} noise lines suppressed]")
+            except redis.ConnectionError:
+                pass
+
     except Exception as e:
         logger.error(f"Output streaming error: {e}")
     finally:
