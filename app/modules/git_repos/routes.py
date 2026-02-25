@@ -329,11 +329,15 @@ diff:
 커밋 메시지만 출력하세요."""
 
         llm_svc = LLMService(db)
-        req = llm_svc.create_request(
-            request_type="commit_message",
+        req = llm_svc.enqueue(
+            caller_type="git_repos",
+            caller_id=f"generate-message-{repo_id}",
             prompt=prompt,
-            model="claude-haiku-4-5",
-            max_tokens=100,
+            requested_by="api",
+            request_source="git_commit_message",
+            model="claude-haiku-4-5-20251001",
+            cli_options={"parse_json": False},
+            queue_name="utility",
         )
         db.commit()
 
@@ -344,9 +348,8 @@ diff:
             if req.status in ("completed", "failed"):
                 break
 
-        if req.status == "completed" and req.response:
-            resp = json.loads(req.response)
-            msg = resp.get("content", [{}])[0].get("text", "").strip()
+        if req.status == "completed" and req.raw_response:
+            msg = req.raw_response.strip()
             return {"message": msg, "request_id": req.id}
         else:
             return {"message": "", "request_id": req.id, "status": req.status}

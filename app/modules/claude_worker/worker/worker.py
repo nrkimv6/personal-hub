@@ -1375,6 +1375,11 @@ class LLMWorker:
 
             # LLM 실행 (비동기 실행을 위해 run_in_executor 사용)
             loop = asyncio.get_event_loop()
+            # cli_options에서 parse_json 옵션 읽기 (기본값: True)
+            parse_json = True
+            if cli_options and "parse_json" in cli_options:
+                parse_json = bool(cli_options["parse_json"])
+
             result = await loop.run_in_executor(
                 None,
                 lambda: service.execute_llm(
@@ -1382,6 +1387,7 @@ class LLMWorker:
                     provider=provider,
                     model=model,
                     timeout=3600,
+                    parse_json=parse_json,
                     enable_tools=enable_tools,
                     cli_options=cli_options,
                 )
