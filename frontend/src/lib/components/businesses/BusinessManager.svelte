@@ -360,13 +360,13 @@
     <p class="text-sm text-muted-foreground">업체, 아이템, 모니터링 일정을 관리합니다</p>
   </div>
   <div class="flex gap-2">
-    <Button variant="secondary" size="sm" on:click={fetchBusinesses}>
+    <Button variant="secondary" size="sm" onclick={fetchBusinesses}>
       새로고침
     </Button>
-    <Button variant="success" size="sm" on:click={() => showUrlImportModal = true}>
+    <Button variant="success" size="sm" onclick={() => showUrlImportModal = true}>
       URL 임포트
     </Button>
-    <Button variant="primary" size="sm" on:click={() => showAddBusinessModal = true}>
+    <Button variant="primary" size="sm" onclick={() => showAddBusinessModal = true}>
       + 업체 추가
     </Button>
   </div>
@@ -403,14 +403,14 @@
               {#each businesses as business (business.id)}
                 <tr
                   class="cursor-pointer hover:bg-muted {selectedBusiness?.id === business.id ? 'bg-primary-light' : ''} {!business.is_enabled ? 'opacity-50' : ''}"
-                  on:click={() => selectBusiness(business)}
+                  onclick={() => selectBusiness(business)}
                 >
                   <td>
                     <input
                       type="checkbox"
                       checked={business.is_enabled}
-                      on:click|stopPropagation
-                      on:change={() => handleToggleBusinessEnabled(business)}
+                      onclick={(e) => e.stopPropagation()}
+                      onchange={() => handleToggleBusinessEnabled(business)}
                       title={business.is_enabled ? '비활성화' : '활성화'}
                     />
                   </td>
@@ -424,14 +424,14 @@
                   <td>
                     <div class="flex gap-1">
                       <Button variant="secondary" size="xs"
-                        on:click={(e) => { e.stopPropagation(); { editBusiness = {...business }}; showEditBusinessModal = true; }}
+                        onclick={(e) => { e.stopPropagation(); { editBusiness = {...business }}; showEditBusinessModal = true; }}
                         title="수정"
                       >
                         ✏
                       </Button>
                       <Button
                         variant="destructive" size="xs"
-                        on:click={(e) => { e.stopPropagation(); handleDeleteBusiness(business) }}
+                        onclick={(e) => { e.stopPropagation(); handleDeleteBusiness(business) }}
                         title="삭제"
                       >
                         🗑
@@ -453,7 +453,7 @@
           아이템 {#if selectedBusiness}({selectedBusiness.items?.length || 0}){/if}
         </h3>
         {#if selectedBusiness}
-          <Button variant="secondary" size="sm" on:click={() => showAddItemModal = true}>
+          <Button variant="secondary" size="sm" onclick={() => showAddItemModal = true}>
             + 추가
           </Button>
         {/if}
@@ -482,14 +482,14 @@
               {#each selectedBusiness.items as item (item.id)}
                 <tr
                   class="cursor-pointer hover:bg-muted {selectedItem?.id === item.id ? 'bg-primary-light' : ''} {!item.is_enabled ? 'opacity-50' : ''}"
-                  on:click={() => selectItem(item)}
+                  onclick={() => selectItem(item)}
                 >
                   <td>
                     <input
                       type="checkbox"
                       checked={item.is_enabled}
-                      on:click|stopPropagation
-                      on:change={() => handleToggleItemEnabled(item)}
+                      onclick={(e) => e.stopPropagation()}
+                      onchange={() => handleToggleItemEnabled(item)}
                       title={item.is_enabled ? '비활성화' : '활성화'}
                     />
                   </td>
@@ -507,7 +507,7 @@
                   <td>
                     <div class="flex gap-1">
                       <Button variant="secondary" size="xs"
-                        on:click={(e) => { e.stopPropagation(); {
+                        onclick={(e) => { e.stopPropagation(); {
                           slotCheckBusiness = selectedBusiness;
                           slotCheckItem = item;
                           showSlotCheckModal = true; }}}
@@ -516,14 +516,14 @@
                         🔍
                       </Button>
                       <Button variant="secondary" size="xs"
-                        on:click={(e) => { e.stopPropagation(); { editItem = {...item }}; showEditItemModal = true; }}
+                        onclick={(e) => { e.stopPropagation(); { editItem = {...item }}; showEditItemModal = true; }}
                         title="수정"
                       >
                         ✏
                       </Button>
                       <Button
                         variant="destructive" size="xs"
-                        on:click={(e) => { e.stopPropagation(); handleDeleteItem(item) }}
+                        onclick={(e) => { e.stopPropagation(); handleDeleteItem(item) }}
                         title="삭제"
                       >
                         🗑
@@ -545,7 +545,7 @@
           일정 {#if selectedItem}({itemSchedules.length}){/if}
         </h3>
         {#if selectedItem}
-          <Button variant="secondary" size="sm" on:click={() => showAddScheduleModal = true}>
+          <Button variant="secondary" size="sm" onclick={() => showAddScheduleModal = true}>
             + 추가
           </Button>
         {/if}
@@ -568,7 +568,7 @@
                 <input
                   type="checkbox"
                   checked={schedule.is_enabled}
-                  on:change={() => handleToggleSchedule(schedule)}
+                  onchange={() => handleToggleSchedule(schedule)}
                 />
                 <div>
                   <div class="font-medium text-sm">{schedule.date}</div>
@@ -587,7 +587,7 @@
                 {/if}
                 <button
                   class="text-error hover:text-error text-sm"
-                  on:click={() => handleDeleteSchedule(schedule)}
+                  onclick={() => handleDeleteSchedule(schedule)}
                   title="삭제"
                 >
                   ✕
@@ -608,7 +608,7 @@
       <div class="p-4 border-b">
         <h3 class="text-lg font-semibold">새 업체 추가</h3>
       </div>
-      <form on:submit|preventDefault={handleCreateBusiness} class="p-4 space-y-4">
+      <form onsubmit={(e) => { e.preventDefault(); handleCreateBusiness(); }} class="p-4 space-y-4">
         <div>
           <label for="business_id" class="block text-sm font-medium text-foreground mb-1">Business ID (네이버)</label>
           <input id="business_id" type="text" class="input" bind:value={newBusiness.business_id} required placeholder="예: 1234567" />
@@ -639,7 +639,7 @@
           <span class="text-sm font-medium text-foreground">활성화</span>
         </label>
         <div class="flex justify-end gap-2 pt-4">
-          <Button type="button" variant="secondary" on:click={() => showAddBusinessModal = false}>
+          <Button type="button" variant="secondary" onclick={() => showAddBusinessModal = false}>
             취소
           </Button>
           <Button type="submit" variant="primary">추가</Button>
@@ -656,7 +656,7 @@
       <div class="p-4 border-b">
         <h3 class="text-lg font-semibold">업체 수정</h3>
       </div>
-      <form on:submit|preventDefault={handleUpdateBusiness} class="p-4 space-y-4">
+      <form onsubmit={(e) => { e.preventDefault(); handleUpdateBusiness(); }} class="p-4 space-y-4">
         <div>
           <label class="block text-sm font-medium text-foreground mb-1">Business ID</label>
           <input type="text" class="input bg-muted" value={editBusiness.business_id} disabled />
@@ -674,7 +674,7 @@
           <span class="text-sm font-medium text-foreground">활성화</span>
         </label>
         <div class="flex justify-end gap-2 pt-4">
-          <Button type="button" variant="secondary" on:click={() => { showEditBusinessModal = false; editBusiness = null; }}>
+          <Button type="button" variant="secondary" onclick={() => { showEditBusinessModal = false; editBusiness = null; }}>
             취소
           </Button>
           <Button type="submit" variant="primary">저장</Button>
@@ -691,7 +691,7 @@
       <div class="p-4 border-b">
         <h3 class="text-lg font-semibold">새 아이템 추가</h3>
       </div>
-      <form on:submit|preventDefault={handleCreateItem} class="p-4 space-y-4">
+      <form onsubmit={(e) => { e.preventDefault(); handleCreateItem(); }} class="p-4 space-y-4">
         <div>
           <label for="biz_item_id" class="block text-sm font-medium text-foreground mb-1">Biz Item ID (네이버)</label>
           <input id="biz_item_id" type="text" class="input" bind:value={newItem.biz_item_id} required placeholder="예: 5001234" />
@@ -728,7 +728,7 @@
           {/if}
         </div>
         <div class="flex justify-end gap-2 pt-4">
-          <Button type="button" variant="secondary" on:click={() => showAddItemModal = false}>
+          <Button type="button" variant="secondary" onclick={() => showAddItemModal = false}>
             취소
           </Button>
           <Button type="submit" variant="primary">추가</Button>
@@ -745,7 +745,7 @@
       <div class="p-4 border-b">
         <h3 class="text-lg font-semibold">아이템 수정</h3>
       </div>
-      <form on:submit|preventDefault={handleUpdateItem} class="p-4 space-y-4">
+      <form onsubmit={(e) => { e.preventDefault(); handleUpdateItem(); }} class="p-4 space-y-4">
         <div>
           <label class="block text-sm font-medium text-foreground mb-1">Biz Item ID</label>
           <input type="text" class="input bg-muted" value={editItem.biz_item_id} disabled />
@@ -782,7 +782,7 @@
           {/if}
         </div>
         <div class="flex justify-end gap-2 pt-4">
-          <Button type="button" variant="secondary" on:click={() => { showEditItemModal = false; editItem = null; }}>
+          <Button type="button" variant="secondary" onclick={() => { showEditItemModal = false; editItem = null; }}>
             취소
           </Button>
           <Button type="submit" variant="primary">저장</Button>
@@ -799,7 +799,7 @@
       <div class="p-4 border-b">
         <h3 class="text-lg font-semibold">새 일정 추가</h3>
       </div>
-      <form on:submit|preventDefault={handleCreateSchedule} class="p-4 space-y-4">
+      <form onsubmit={(e) => { e.preventDefault(); handleCreateSchedule(); }} class="p-4 space-y-4">
         <div>
           <label for="schedule_date" class="block text-sm font-medium text-foreground mb-1">날짜</label>
           <input id="schedule_date" type="date" class="input" bind:value={newSchedule.date} required />
@@ -823,7 +823,7 @@
           <span class="text-sm font-medium text-foreground">활성화</span>
         </label>
         <div class="flex justify-end gap-2 pt-4">
-          <Button type="button" variant="secondary" on:click={() => showAddScheduleModal = false}>
+          <Button type="button" variant="secondary" onclick={() => showAddScheduleModal = false}>
             취소
           </Button>
           <Button type="submit" variant="primary">추가</Button>
@@ -843,7 +843,7 @@
           네이버 예약 URL에서 업체/아이템/일정을 자동 생성합니다.
         </p>
       </div>
-      <form on:submit|preventDefault={handleUrlImport} class="p-4 space-y-4">
+      <form onsubmit={(e) => { e.preventDefault(); handleUrlImport(); }} class="p-4 space-y-4">
         <div>
           <label for="import-url" class="block text-sm font-medium text-foreground mb-1">
             URL <span class="text-error">*</span>
@@ -944,7 +944,7 @@
           <Button
             type="button"
             variant="secondary"
-            on:click={() => { showUrlImportModal = false; urlImportResult = null; }}
+            onclick={() => { showUrlImportModal = false; urlImportResult = null; }}
           >
             닫기
           </Button>

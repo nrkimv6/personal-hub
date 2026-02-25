@@ -365,7 +365,7 @@
     <!-- 헤더 -->
     <PageHeader title="계정 관리" subtitle="네이버 계정별 브라우저 프로필 관리">
       <button
-        on:click={openCreateModal}
+        onclick={openCreateModal}
         class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors"
       >
         + 계정 추가
@@ -397,7 +397,7 @@
             {/if}
           </div>
           <button
-            on:click={toggleCommands}
+            onclick={toggleCommands}
             class="px-3 py-1 text-sm bg-card border border-border rounded hover:bg-muted transition-colors"
           >
             {showCommands ? '▲ 명령 이력 닫기' : '▼ 명령 이력 보기'}
@@ -421,7 +421,7 @@
         <div class="p-3 bg-background border-b border-border flex items-center justify-between">
           <h3 class="font-medium text-foreground">브라우저 명령 이력</h3>
           <button
-            on:click={loadBrowserCommands}
+            onclick={loadBrowserCommands}
             disabled={commandsLoading}
             class="px-2 py-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50"
           >
@@ -491,7 +491,7 @@
       <div class="text-center py-12 bg-background rounded-lg">
         <p class="text-muted-foreground">등록된 계정이 없습니다</p>
         <button
-          on:click={openCreateModal}
+          onclick={openCreateModal}
           class="mt-4 text-primary hover:underline"
         >
           첫 계정 추가하기 →
@@ -531,7 +531,7 @@
                 <!-- 브라우저 제어 버튼 -->
                 <div class="mt-3 flex flex-wrap gap-2">
                   <button
-                    on:click={() => openBrowser(account)}
+                    onclick={() => openBrowser(account)}
                     disabled={!!browserLoading[account.id]}
                     class="px-3 py-1.5 text-sm bg-slate-100 text-slate-700 rounded hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
                     title="브라우저 열기"
@@ -539,7 +539,7 @@
                     {browserLoading[account.id] === 'open' ? '...' : '🌐 브라우저'}
                   </button>
                   <button
-                    on:click={() => openNaverLogin(account)}
+                    onclick={() => openNaverLogin(account)}
                     disabled={!!browserLoading[account.id]}
                     class="px-3 py-1.5 text-sm bg-success-light text-success rounded hover:bg-green-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
                     title="네이버 로그인 페이지 열기"
@@ -547,7 +547,7 @@
                     {browserLoading[account.id] === 'login' ? '...' : '🔐 네이버 로그인'}
                   </button>
                   <button
-                    on:click={() => checkLoginStatus(account)}
+                    onclick={() => checkLoginStatus(account)}
                     disabled={!!browserLoading[account.id]}
                     class="px-3 py-1.5 text-sm bg-primary-light text-primary rounded hover:bg-blue-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
                     title="로그인 상태 확인"
@@ -555,7 +555,7 @@
                     {browserLoading[account.id] === 'check' ? '...' : '🔄 상태 확인'}
                   </button>
                   <button
-                    on:click={() => closeBrowser(account)}
+                    onclick={() => closeBrowser(account)}
                     disabled={!!browserLoading[account.id]}
                     class="px-3 py-1.5 text-sm bg-warning-light text-warning rounded hover:bg-orange-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
                     title="브라우저 세션 종료"
@@ -567,20 +567,20 @@
 
               <div class="flex items-start gap-2">
                 <button
-                  on:click={() => toggleActive(account)}
+                  onclick={() => toggleActive(account)}
                   class="px-3 py-1.5 text-sm border border-border rounded hover:bg-muted transition-colors"
                   title={account.is_active ? '비활성화' : '활성화'}
                 >
                   {account.is_active ? '⏸️' : '▶️'}
                 </button>
                 <button
-                  on:click={() => openEditModal(account)}
+                  onclick={() => openEditModal(account)}
                   class="px-3 py-1.5 text-sm bg-muted text-foreground rounded hover:bg-secondary transition-colors"
                 >
                   수정
                 </button>
                 <button
-                  on:click={() => deleteAccount(account.id, account.name)}
+                  onclick={() => deleteAccount(account.id, account.name)}
                   class="px-3 py-1.5 text-sm bg-error-light text-error rounded hover:bg-error-light transition-colors"
                 >
                   삭제
@@ -596,13 +596,13 @@
 
 <!-- 생성/수정 모달 -->
 {#if showCreateModal}
-  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" on:click={closeModal}>
-    <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4" on:click|stopPropagation>
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick={closeModal}>
+    <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4" onclick={(e) => e.stopPropagation()}>
       <h2 class="text-xl font-bold mb-4">
         {editingAccount ? '계정 수정' : '계정 추가'}
       </h2>
 
-      <form on:submit|preventDefault={handleSubmit} class="space-y-4">
+      <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }} class="space-y-4">
         <div>
           <label class="block text-sm font-medium text-foreground mb-1">
             계정명 <span class="text-error">*</span>
@@ -668,7 +668,7 @@
         <div class="flex gap-2 pt-4">
           <button
             type="button"
-            on:click={closeModal}
+            onclick={closeModal}
             class="flex-1 px-4 py-2 border border-border rounded-lg hover:bg-muted transition-colors"
           >
             취소

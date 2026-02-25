@@ -268,7 +268,10 @@ export const devRunnerPlanApi = {
 		devRunnerRequest<{ success: boolean }>(`/plans/${encodedPath}/hold`, { method: 'POST' }),
 
 	unhold: (encodedPath: string) =>
-		devRunnerRequest<{ success: boolean }>(`/plans/${encodedPath}/hold`, { method: 'DELETE' })
+		devRunnerRequest<{ success: boolean }>(`/plans/${encodedPath}/hold`, { method: 'DELETE' }),
+
+	content: (encodedPath: string) =>
+		devRunnerRequest<{ content: string; path: string }>(`/plans/${encodedPath}/content`)
 };
 
 // ============================================================

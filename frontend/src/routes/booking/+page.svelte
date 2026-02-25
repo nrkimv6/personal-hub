@@ -151,7 +151,7 @@
 
 <div class="p-6">
   <PageHeader title="예약 관리" subtitle="자동 예약 스케줄을 관리합니다">
-    <Button variant="secondary" size="sm" on:click={fetchSchedules}>
+    <Button variant="secondary" size="sm" onclick={fetchSchedules}>
       새로고침
     </Button>
   </PageHeader>
@@ -200,7 +200,7 @@
                     <input
                       type="checkbox"
                       checked={schedule.is_enabled}
-                      on:change={() => handleToggleEnabled(schedule)}
+                      onchange={() => handleToggleEnabled(schedule)}
                       title={schedule.is_enabled ? '비활성화' : '활성화'}
                     />
                     <div>
@@ -242,13 +242,13 @@
                 <td class="px-3 py-2">
                   <div class="flex justify-center gap-1">
                     <Button variant="secondary" size="xs"
-                      on:click={() => openEditModal(schedule)}
+                      onclick={() => openEditModal(schedule)}
                       title="수정"
                     >
                       ✏
                     </Button>
                     <Button variant="secondary" size="xs"
-                      on:click={() => handleResetBookingCount(schedule)}
+                      onclick={() => handleResetBookingCount(schedule)}
                       title="예약 횟수 초기화"
                     >
                       0
@@ -256,7 +256,7 @@
                     <Button
                       variant={schedule.auto_booking_enabled ? 'warning' : 'success'}
                       size="xs"
-                      on:click={() => handleToggleAutoBooking(schedule)}
+                      onclick={() => handleToggleAutoBooking(schedule)}
                       title={schedule.auto_booking_enabled ? '자동예약 중지' : '자동예약 활성화'}
                     >
                       {schedule.auto_booking_enabled ? '⏸' : '▶'}
@@ -274,7 +274,7 @@
   <!-- 슬롯 필터링 테스트 -->
   <div class="card mt-6">
     <h3 class="text-lg font-semibold text-foreground mb-4">슬롯 필터링 테스트</h3>
-    <form on:submit|preventDefault={handleFilterTest} class="space-y-4">
+    <form onsubmit={(e) => { e.preventDefault(); handleFilterTest(); }} class="space-y-4">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label class="block text-sm font-medium text-foreground mb-1">
@@ -330,7 +330,7 @@
           {editingSchedule.business_name} - {editingSchedule.item_name} ({editingSchedule.date})
         </p>
       </div>
-      <form on:submit|preventDefault={handleUpdateSchedule} class="p-4 space-y-4">
+      <form onsubmit={(e) => { e.preventDefault(); handleUpdateSchedule(); }} class="p-4 space-y-4">
         <div>
           <label for="edit-times" class="block text-sm font-medium text-foreground mb-1">
             시간 필터 (쉼표 구분)
@@ -375,7 +375,7 @@
           <span class="text-sm font-medium text-foreground">모니터링 활성화</span>
         </label>
         <div class="flex justify-end gap-2 pt-4">
-          <button type="button" class="btn btn-secondary" on:click={() => editingSchedule = null}>
+          <button type="button" class="btn btn-secondary" onclick={() => editingSchedule = null}>
             취소
           </button>
           <button type="submit" class="btn btn-primary">저장</button>

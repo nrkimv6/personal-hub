@@ -189,15 +189,15 @@
       <div class="flex items-center gap-2">
         <button
           class="px-3 py-1 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground"
-          on:click={openDuplicatesModal}
+          onclick={openDuplicatesModal}
         >중복 감지</button>
         <button
           class="px-3 py-1 text-xs rounded bg-blue-100 hover:bg-blue-200 text-blue-700 dark:bg-blue-900 dark:hover:bg-blue-800 dark:text-blue-200"
-          on:click={openOrganizeModal}
+          onclick={openOrganizeModal}
         >정리</button>
         <button
           class="px-3 py-1 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground"
-          on:click={() => loadRecords()}
+          onclick={() => loadRecords()}
         >새로고침</button>
       </div>
     </div>
@@ -218,11 +218,11 @@
         <button
           class="px-2 py-0.5 rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
           disabled={!bulkCategory}
-          on:click={applyBulkCategory}
+          onclick={applyBulkCategory}
         >적용</button>
         <button
           class="px-2 py-0.5 rounded bg-muted hover:bg-secondary text-muted-foreground ml-auto"
-          on:click={() => { selectedIds = new Set(); }}
+          onclick={() => { selectedIds = new Set(); }}
         >선택 해제</button>
       </div>
     {/if}
@@ -244,7 +244,7 @@
                 <input
                   type="checkbox"
                   checked={selectedIds.size === records.length && records.length > 0}
-                  on:change={toggleSelectAll}
+                  onchange={toggleSelectAll}
                   class="cursor-pointer"
                 />
               </th>
@@ -258,13 +258,13 @@
             {#each records as record (record.id)}
               <tr
                 class="border-b border-border hover:bg-muted cursor-pointer transition-colors {selectedRecord?.id === record.id ? 'bg-muted' : ''}"
-                on:click={() => selectRecord(record)}
+                onclick={() => selectRecord(record)}
               >
-                <td class="py-2 pr-2" on:click|stopPropagation>
+                <td class="py-2 pr-2" onclick={(e) => e.stopPropagation()}>
                   <input
                     type="checkbox"
                     checked={selectedIds.has(record.id)}
-                    on:change={(e) => toggleSelect(record.id, e)}
+                    onchange={(e) => toggleSelect(record.id, e)}
                     class="cursor-pointer"
                   />
                 </td>
@@ -287,7 +287,7 @@
                   {:else}
                     <button
                       class="px-2 py-0.5 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground"
-                      on:click|stopPropagation={() => selectRecord(record)}
+                      onclick={(e) => { e.stopPropagation(); (() => selectRecord(record))(e); }}
                     >메모 추가</button>
                   {/if}
                 </td>
@@ -301,7 +301,7 @@
         <button
           class="mt-3 px-4 py-2 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground self-center"
           disabled={loading}
-          on:click={() => loadRecords(true)}
+          onclick={() => loadRecords(true)}
         >
           {loading ? '로드 중...' : '더 보기'}
         </button>
@@ -318,7 +318,7 @@
         </h3>
         <button
           class="text-muted-foreground hover:text-foreground text-xs"
-          on:click={() => { selectedRecord = null; }}
+          onclick={() => { selectedRecord = null; }}
         >닫기</button>
       </div>
       <p class="text-xs text-muted-foreground">완료일: {formatDate(selectedRecord.archived_at)}</p>
@@ -336,7 +336,7 @@
 {#if showOrganizeModal}
   <div
     class="fixed inset-0 z-40 bg-black/40 flex items-center justify-center"
-    on:click|self={() => { if (!organizeLoading) showOrganizeModal = false; }}
+    onclick={(e) => { if (e.target === e.currentTarget) { () => { if (!organizeLoading) showOrganizeModal = false; ; } }}}
     role="dialog"
     aria-modal="true"
   >
@@ -345,7 +345,7 @@
         <h2 class="text-sm font-semibold text-foreground">Archive 폴더 정리 미리보기</h2>
         <button
           class="text-muted-foreground hover:text-foreground text-xs"
-          on:click={() => { showOrganizeModal = false; }}
+          onclick={() => { showOrganizeModal = false; }}
           disabled={organizeLoading}
         >닫기</button>
       </div>
@@ -397,13 +397,13 @@
       <div class="flex justify-end gap-2 mt-4">
         <button
           class="px-3 py-1.5 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground"
-          on:click={() => { showOrganizeModal = false; }}
+          onclick={() => { showOrganizeModal = false; }}
           disabled={organizeLoading}
         >취소</button>
         <button
           class="px-3 py-1.5 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
           disabled={organizeLoading || previewLoading || previewDirs.every(d => d.items.every(i => !i.needs_move))}
-          on:click={runOrganize}
+          onclick={runOrganize}
         >
           {organizeLoading ? '정리 중...' : '정리 실행'}
         </button>
@@ -416,7 +416,7 @@
 {#if showDuplicatesModal}
   <div
     class="fixed inset-0 z-40 bg-black/40 flex items-center justify-center"
-    on:click|self={() => { showDuplicatesModal = false; }}
+    onclick={(e) => { if (e.target === e.currentTarget) { () => { showDuplicatesModal = false; ; } }}}
     role="dialog"
     aria-modal="true"
   >
@@ -425,7 +425,7 @@
         <h2 class="text-sm font-semibold text-foreground">중복 파일 감지 결과</h2>
         <button
           class="text-muted-foreground hover:text-foreground text-xs"
-          on:click={() => { showDuplicatesModal = false; }}
+          onclick={() => { showDuplicatesModal = false; }}
         >닫기</button>
       </div>
 
@@ -476,7 +476,7 @@
       <div class="flex justify-end mt-4">
         <button
           class="px-3 py-1.5 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground"
-          on:click={() => { showDuplicatesModal = false; }}
+          onclick={() => { showDuplicatesModal = false; }}
         >닫기</button>
       </div>
     </div>
