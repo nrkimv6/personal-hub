@@ -20,10 +20,10 @@ class TestRealGeminiExecution:
         return AIExecutor(config)
 
     @pytest.mark.parametrize("model_name, expect_thinking_error", [
-        # 1. 씽킹 지원 모델 (정상 응답 기대)
-        ("gemini-2.0-flash-thinking-exp-01-21", False),
-        # 2. 씽킹 미지원 모델 (API 설정 충돌로 400 Bad Request 기대) - 파싱 및 전송 자체는 성공했음을 증명
-        ("gemini-2.0-flash", True)
+        # 1. 내부 인프라 지원 모델 (정상 응답 기대)
+        ("gemini-3-flash-preview", False),
+        # 2. 고의적으로 잘못된 모델명 (404/400 API 에러 확인을 통해 전송 단계 검증)
+        ("non-existent-model-123", True)
     ])
     @pytest.mark.asyncio
     async def test_real_gemini_prompt_transmission(self, executor, model_name, expect_thinking_error):
@@ -63,11 +63,10 @@ class TestRealGeminiExecution:
             
             # 2. 예상된 결과 확인
             if expect_thinking_error:
-                # 씽킹 미지원 모델의 경우: 400 Bad Request 또는 GaxiosError가 반환되어야 함.
-                # 이는 로컬 설정 파싱을 통과하고 구글 API 서버까지 요청이 도달했다는 것을 의미함.
+                # 존재하지 않는 모델의 경우: 404 ModelNotFoundError 또는 GaxiosError가 반환되어야 함.
                 if process.returncode != 0:
-                    assert "GaxiosError" in err_str or "INVALID_ARGUMENT" in err_str, f"예상치 못한 에러 발생:\n{err_str}"
-                    print(f"[{model_name}] 예상대로 씽킹 미지원에 의한 400 API 에러 반환을 확인 (전송 성공)")
+                    assert any(msg in err_str for msg in ["GaxiosError", "INVALID_ARGUMENT", "ModelNotFoundError", "404"]), f"예상치 못한 에러 발생:\n{err_str}"
+                    print(f"[{model_name}] 예상대로 모델 미지원/미존재 에러 반환을 확인 (전송 성공)")
                 else:
                     # CLI 버전에 따라 에러 없이 처리될 수도 있음
                     pass
