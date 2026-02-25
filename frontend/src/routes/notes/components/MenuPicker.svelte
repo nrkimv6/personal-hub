@@ -60,7 +60,7 @@
   role="listbox"
   aria-label="메뉴 선택"
   tabindex="-1"
-  on:keydown={handleKeydown}
+  onkeydown={handleKeydown}
 >
   <!-- 검색 -->
   <div class="search-wrap">
@@ -69,7 +69,7 @@
       class="search-input"
       placeholder="메뉴 검색..."
       bind:value={searchQuery}
-      on:keydown={handleKeydown}
+      onkeydown={handleKeydown}
       autocomplete="off"
     />
   </div>
@@ -81,8 +81,8 @@
       class:focused={focusedIndex === 0}
       role="option"
       aria-selected={selectedMenuId === null}
-      on:click={() => selectItem(null)}
-      on:mouseenter={() => (focusedIndex = 0)}
+      onclick={() => selectItem(null)}
+      onmouseenter={() => (focusedIndex = 0)}
     >
       <span class="item-icon">✕</span>
       <span class="item-label">연결 해제</span>
@@ -102,8 +102,8 @@
           class:focused={focusedIndex === flatIdx}
           role="option"
           aria-selected={selectedMenuId === item.id}
-          on:click={() => selectItem(item.id)}
-          on:mouseenter={() => (focusedIndex = flatIdx)}
+          onclick={() => selectItem(item.id)}
+          onmouseenter={() => (focusedIndex = flatIdx)}
         >
           <span class="item-icon">{item.icon}</span>
           <span class="item-label">{item.label}</span>
