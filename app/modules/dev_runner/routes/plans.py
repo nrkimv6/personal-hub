@@ -127,6 +127,37 @@ async def add_path(request: AddPathRequest):
     return {"success": added, "path": request.path, "type": fs_type, "path_type": request.path_type}
 
 
+class AddProjectRequest(BaseModel):
+    """프로젝트 등록 요청 (plan + archive 경로 동시 등록)"""
+    path: str
+
+
+@router.post("/plans/paths/project")
+async def add_project(request: AddProjectRequest):
+    """프로젝트 루트 경로 등록 — docs/plan(plan) + docs/archive(archive) 동시 등록"""
+    if not plan_service.validate_path(request.path):
+        raise HTTPException(status_code=403, detail="Path not allowed")
+
+    root = Path(request.path)
+    if not root.exists():
+        raise HTTPException(status_code=404, detail="Path not found")
+
+    added = []
+    skipped = []
+
+    for sub, path_type in [("docs/plan", "plan"), ("docs/archive", "archive")]:
+        sub_path = root / sub
+        if not sub_path.exists():
+            skipped.append(f"{sub_path} ({path_type}, not found)")
+            continue
+        if plan_service.add_path(str(sub_path), path_type=path_type):
+            added.append(f"{sub_path} ({path_type})")
+        else:
+            skipped.append(f"{sub_path} ({path_type}, already registered)")
+
+    return {"added": added, "skipped": skipped}
+
+
 @router.delete("/plans/paths")
 async def remove_path(request: AddPathRequest):
     """등록 경로 제거"""

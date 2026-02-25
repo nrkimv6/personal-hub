@@ -123,6 +123,11 @@ export interface VerifyResult {
 	can_done: boolean;
 }
 
+export interface AddProjectResponse {
+	added: string[];
+	skipped: string[];
+}
+
 // ============================================================
 // API prefix (백엔드 라우터: /api/v1/dev-runner)
 // ============================================================
@@ -271,7 +276,13 @@ export const devRunnerPlanApi = {
 		devRunnerRequest<{ success: boolean }>(`/plans/${encodedPath}/hold`, { method: 'DELETE' }),
 
 	content: (encodedPath: string) =>
-		devRunnerRequest<{ content: string; path: string }>(`/plans/${encodedPath}/content`)
+		devRunnerRequest<{ content: string; path: string }>(`/plans/${encodedPath}/content`),
+
+	addProject: (path: string) =>
+		devRunnerRequest<AddProjectResponse>('/plans/paths/project', {
+			method: 'POST',
+			body: JSON.stringify({ path })
+		})
 };
 
 // ============================================================
