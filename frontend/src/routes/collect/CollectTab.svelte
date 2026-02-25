@@ -6,16 +6,14 @@
   import type { LLMRequest, UrlParseResponse, ServiceAccountWithProfile } from '$lib/types';
   import { Button } from '$lib/components/ui';
   import { createSelection } from '$lib/utils/selection.svelte';
+  import { createPagePagination } from '$lib/utils/pagination.svelte';
 
   let posts: CollectedPost[] = [];
   let loading = true;
   let error: string | null = null;
 
   // 페이지네이션
-  let page = 1;
-  let limit = 20;
-  let total = 0;
-  let totalPages = 0;
+  const pager = createPagePagination(20);
 
   // 필터
   let sourceType: string = '';
@@ -71,16 +69,16 @@
   // 피드 타입인지 (추가 옵션 표시용)
   $: isFeedType = parsedUrl && ['account_profile', 'account_reels', 'hashtag', 'reels_explore'].includes(parsedUrl.url_type);
 
-  $: canPrevPage = page > 1;
-  $: canNextPage = page < totalPages;
+  $: canPrevPage = pager.page > 1;
+  $: canNextPage = pager.page < pager.totalPages;
 
   async function fetchPosts() {
     loading = true;
     error = null;
     try {
       const params: CollectedPostFilters = {
-        page,
-        limit,
+        page: pager.page,
+        limit: pager.pageSize,
       };
       if (sourceType) params.source_type = sourceType;
       if (urlType) params.url_type = urlType;
@@ -89,8 +87,7 @@
 
       const result = await collectApi.getPosts(params);
       posts = result.items;
-      total = result.total;
-      totalPages = result.total_pages;
+      pager.total = result.total;
     } catch (e) {
       error = e instanceof Error ? e.message : '데이터 로드 실패';
     } finally {
@@ -107,25 +104,25 @@
   }
 
   function handleFilterChange() {
-    page = 1;
+    pager.reset();
     fetchPosts();
   }
 
   function handleSearch() {
-    page = 1;
+    pager.reset();
     fetchPosts();
   }
 
   function prevPage() {
     if (canPrevPage) {
-      page--;
+      pager.prev();
       fetchPosts();
     }
   }
 
   function nextPage() {
     if (canNextPage) {
-      page++;
+      pager.next();
       fetchPosts();
     }
   }
@@ -507,7 +504,7 @@
   <div class="flex justify-between items-center">
     <!-- 왼쪽: 통계 + 선택 모드 -->
     <div class="flex items-center gap-4">
-      <span class="text-sm text-muted-foreground">총 {total}개</span>
+      <span class="text-sm text-muted-foreground">총 {pager.total}개</span>
       {#if isSelectMode}
         <span class="text-sm text-primary font-medium">{selection.count}개 선택됨</span>
         <Button on:click={() => selection.selectAll(posts.map(p => p.source_id).filter((id): id is number => id !== null))} variant="secondary" size="xs">
@@ -590,7 +587,7 @@
         </button>
       </div>
 
-      <span class="text-sm text-muted-foreground">{page} / {totalPages} 페이지</span>
+      <span class="text-sm text-muted-foreground">{pager.page} / {pager.totalPages} 페이지</span>
     </div>
   </div>
 
@@ -779,7 +776,7 @@
     {/if}
 
     <!-- 페이지네이션 -->
-    {#if totalPages > 1}
+    {#if pager.totalPages > 1}
       <div class="flex justify-center items-center gap-4 mt-6">
         <Button
           on:click={prevPage}
@@ -790,7 +787,7 @@
           이전
         </Button>
         <span class="text-sm text-muted-foreground">
-          {page} / {totalPages}
+          {pager.page} / {pager.totalPages}
         </span>
         <Button
           on:click={nextPage}

@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
 	import { createSelection } from '$lib/utils/selection.svelte';
+	import { createOffsetPagination } from '$lib/utils/pagination.svelte';
 	import { loadCategoryMap, getCategoryName, type Category } from '../lib/categoryUtils';
 	import CategoryPickerModal from '../components/CategoryPicker.svelte';
 	import {
@@ -35,9 +36,7 @@
 	let confidenceFilter = $state<'all' | 'low' | 'mid' | 'high'>('all');
 	let filterCategoryId = $state<number | ''>('');
 
-	const PAGE_SIZE = 100;
-	let currentOffset = $state(0);
-	let hasMore = $state(false);
+	const pager = createOffsetPagination(100);
 
 	// 카테고리 목록 (이름 표시용)
 	let categories = $state<Category[]>([]);
@@ -80,7 +79,7 @@
 	async function loadFiles(reset = false) {
 		if (reset) {
 			loading = true;
-			currentOffset = 0;
+			pager.reset();
 			files = [];
 		} else {
 			loadingMore = true;
@@ -91,8 +90,7 @@
 				status: 'ai_classified',
 				order_by: sortBy === 'date' ? 'extracted_date' : 'ai_confidence',
 				order_dir: sortDir,
-				limit: String(PAGE_SIZE),
-				skip: String(reset ? 0 : currentOffset)
+				...pager.toParams()
 			});
 			if (filterCategoryId !== '') {
 				params.append('category_id', String(filterCategoryId));
@@ -106,12 +104,11 @@
 				} else {
 					files = [...files, ...newFiles];
 				}
-				currentOffset = (reset ? 0 : currentOffset) + newFiles.length;
-				hasMore = newFiles.length === PAGE_SIZE;
-				totalCount = data.total ?? files.length;
+				pager.advance(newFiles.length, data.total ?? files.length);
+				totalCount = pager.total;
 			}
 		} catch (err) {
-			console.error('?�일 로드 ?�패:', err);
+			console.error('파일 로드 실패:', err);
 		} finally {
 			loading = false;
 			loadingMore = false;
@@ -471,7 +468,7 @@
 			</div>
 
 			<!-- ??보기 -->
-			{#if hasMore}
+			{#if pager.hasMore}
 				<div class="flex justify-center border-t py-3">
 					<button
 						onclick={() => loadFiles(false)}

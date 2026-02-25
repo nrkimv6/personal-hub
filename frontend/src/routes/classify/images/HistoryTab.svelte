@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
 	import { History, RotateCcw, RefreshCw, ScanLine, ChevronDown, ChevronRight, ChevronLeft, FileImage, ArrowRight } from 'lucide-svelte';
+	import { createPagePagination } from '$lib/utils/pagination.svelte';
 	import { loadCategoryMap, getCategoryName } from '../lib/categoryUtils';
 
 	interface MoveHistory {
@@ -27,10 +28,7 @@
 
 	let history: MoveHistory[] = $state([]);
 	let loading = $state(false);
-	let totalCount = $state(0);
-	const PAGE_SIZE = 50;
-	let currentPage = $state(1);
-	let totalPages = $derived(Math.max(1, Math.ceil(totalCount / PAGE_SIZE)));
+	const pager = createPagePagination(50);
 
 	// 스캔 이력 상태
 	let scanHistory: ScanHistory[] = $state([]);
@@ -60,12 +58,17 @@
 	async function loadHistory() {
 		loading = true;
 		try {
-			const skip = (currentPage - 1) * PAGE_SIZE;
-			const response = await fetchWithTimeout(`/api/ic/files?status=moved&limit=${PAGE_SIZE}&skip=${skip}&order_by=id&order_dir=desc`);
+			const params = new URLSearchParams({
+				status: 'moved',
+				order_by: 'id',
+				order_dir: 'desc',
+				...pager.toParams()
+			});
+			const response = await fetchWithTimeout(`/api/ic/files?${params}`);
 			if (response.ok) {
 				const data = await response.json();
 				history = data.files || [];
-				totalCount = data.total ?? history.length;
+				pager.total = data.total ?? history.length;
 			}
 		} catch (err) {
 			console.error('이력 로드 실패:', err);
@@ -75,8 +78,7 @@
 	}
 
 	function goToPage(page: number) {
-		if (page < 1 || page > totalPages) return;
-		currentPage = page;
+		pager.goTo(page);
 		loadHistory();
 	}
 
@@ -287,23 +289,23 @@
 		{/if}
 
 		<!-- 페이지네이션 -->
-		{#if totalPages > 1}
+		{#if pager.totalPages > 1}
 			<div class="flex items-center justify-between border-t px-5 py-3">
 				<span class="text-xs text-muted-foreground">
-					총 {totalCount.toLocaleString()}건
+					총 {pager.total.toLocaleString()}건
 				</span>
 				<div class="flex items-center gap-1">
 					<button
-						onclick={() => goToPage(currentPage - 1)}
-						disabled={currentPage <= 1}
+						onclick={() => goToPage(pager.page - 1)}
+						disabled={pager.page <= 1}
 						class="rounded-md border p-1.5 text-xs hover:bg-accent disabled:opacity-30 transition-colors"
 					>
 						<ChevronLeft class="size-3.5" />
 					</button>
-					<span class="px-2 text-xs font-medium">{currentPage} / {totalPages}</span>
+					<span class="px-2 text-xs font-medium">{pager.page} / {pager.totalPages}</span>
 					<button
-						onclick={() => goToPage(currentPage + 1)}
-						disabled={currentPage >= totalPages}
+						onclick={() => goToPage(pager.page + 1)}
+						disabled={pager.page >= pager.totalPages}
 						class="rounded-md border p-1.5 text-xs hover:bg-accent disabled:opacity-30 transition-colors"
 					>
 						<ChevronRight class="size-3.5" />

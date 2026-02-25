@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { writingApi, keywordApi, type GeneratedWriting, type WritingStats, type WritingSource, type KeywordStats, type KeywordStatsResponse, type Stopword, type WritingElement, type WritingElementStats, type WritingBatch, type WritingBatchStatus } from '$lib/api';
 	import { Button } from '$lib/components/ui';
+	import { createOffsetPagination, createPagePagination } from '$lib/utils/pagination.svelte';
 
 	// 상태
 	let writings: GeneratedWriting[] = [];
@@ -12,10 +13,7 @@
 
 	// 배치 상태
 	let batches: WritingBatch[] = [];
-	let batchTotal = 0;
-	let batchPage = 1;
-	let batchPageSize = 10;
-	let batchPages = 0;
+	const batchPager = createPagePagination(10);
 	let activeBatch: WritingBatchStatus | null = null;
 	let batchPolling: ReturnType<typeof setInterval> | null = null;
 	let creatingBatch = false;
@@ -24,9 +22,7 @@
 	let keywords: KeywordStats[] = [];
 	let keywordStats: KeywordStatsResponse | null = null;
 	let stopwords: Stopword[] = [];
-	let keywordOffset = 0;
-	let keywordLimit = 100;
-	let keywordTotal = 0;
+	const keywordPager = createOffsetPagination(100);
 	let keywordMinFreq = 10;
 	let analyzing = false;
 	let analyzeResult: { mode: string; saved_keywords?: number; new_keywords?: number; updated_keywords?: number } | null = null;
@@ -34,10 +30,7 @@
 	// 소재 상태
 	let elements: WritingElement[] = [];
 	let elementStats: WritingElementStats | null = null;
-	let elementCurrentPage = 1;
-	let elementPageSize = 50;
-	let elementTotal = 0;
-	let elementPages = 0;
+	const elementPager = createPagePagination(50);
 	let elementFilterCategory = '';
 	let elementFilterSourceType = '';
 	let extracting = false;
@@ -52,16 +45,10 @@
 	let filterRating = '';
 
 	// 페이지네이션
-	let currentPage = 1;
-	let pageSize = 20;
-	let total = 0;
-	let pages = 0;
+	const writingPager = createPagePagination(20);
 
 	// 소스 페이지네이션
-	let sourceCurrentPage = 1;
-	let sourcePageSize = 50;
-	let sourceTotal = 0;
-	let sourcePages = 0;
+	const sourcePager = createPagePagination(50);
 
 	// 모달
 	let selectedWriting: GeneratedWriting | null = null;
@@ -85,15 +72,14 @@
 				writingApi.listGenerated({
 					task_type: filterTaskType || undefined,
 					rating: filterRating || undefined,
-					page: currentPage,
-					page_size: pageSize
+					page: writingPager.page,
+					page_size: writingPager.pageSize
 				}),
 				writingApi.getStats()
 			]);
 
 			writings = listRes.items;
-			total = listRes.total;
-			pages = listRes.pages;
+			writingPager.total = listRes.total;
 			stats = statsRes;
 		} catch (e) {
 			error = e instanceof Error ? e.message : '데이터 로드 실패';
@@ -107,12 +93,11 @@
 		error = null;
 		try {
 			const res = await writingApi.listSources({
-				page: sourceCurrentPage,
-				page_size: sourcePageSize
+				page: sourcePager.page,
+				page_size: sourcePager.pageSize
 			});
 			sources = res.items;
-			sourceTotal = res.total;
-			sourcePages = res.pages;
+			sourcePager.total = res.total;
 		} catch (e) {
 			error = e instanceof Error ? e.message : '소스 로드 실패';
 		} finally {
@@ -148,14 +133,13 @@
 				writingApi.listElements({
 					category: elementFilterCategory || undefined,
 					source_type: elementFilterSourceType || undefined,
-					page: elementCurrentPage,
-					page_size: elementPageSize
+					page: elementPager.page,
+					page_size: elementPager.pageSize
 				}),
 				writingApi.getElementsStats()
 			]);
 			elements = listRes.items;
-			elementTotal = listRes.total;
-			elementPages = listRes.pages;
+			elementPager.total = listRes.total;
 			elementStats = statsRes;
 		} catch (e) {
 			error = e instanceof Error ? e.message : '소재 로드 실패';
@@ -165,22 +149,18 @@
 	}
 
 	function handleElementFilter() {
-		elementCurrentPage = 1;
+		elementPager.reset();
 		fetchElements();
 	}
 
 	function elementPrevPage() {
-		if (elementCurrentPage > 1) {
-			elementCurrentPage--;
-			fetchElements();
-		}
+		elementPager.prev();
+		fetchElements();
 	}
 
 	function elementNextPage() {
-		if (elementCurrentPage < elementPages) {
-			elementCurrentPage++;
-			fetchElements();
-		}
+		elementPager.next();
+		fetchElements();
 	}
 
 	async function deleteElement(id: number, name: string) {
@@ -234,8 +214,8 @@
 		try {
 			const [listRes, statsRes] = await Promise.all([
 				keywordApi.list({
-					limit: keywordLimit,
-					offset: keywordOffset,
+					limit: keywordPager.limit,
+					offset: keywordPager.offset,
 					min_frequency: keywordMinFreq,
 					include_stopwords: false,
 					include_promoted: true
@@ -243,7 +223,7 @@
 				keywordApi.stats()
 			]);
 			keywords = listRes.items;
-			keywordTotal = listRes.total;
+			keywordPager.total = listRes.total;
 			keywordStats = statsRes;
 		} catch (e) {
 			error = e instanceof Error ? e.message : '키워드 로드 실패';
@@ -324,26 +304,26 @@
 	}
 
 	function keywordPrevPage() {
-		if (keywordOffset > 0) {
-			keywordOffset = Math.max(0, keywordOffset - keywordLimit);
+		if (keywordPager.offset > 0) {
+			keywordPager.offset = Math.max(0, keywordPager.offset - keywordPager.limit);
 			fetchKeywords();
 		}
 	}
 
 	function keywordNextPage() {
-		if (keywordOffset + keywordLimit < keywordTotal) {
-			keywordOffset += keywordLimit;
+		if (keywordPager.hasMore) {
+			keywordPager.offset += keywordPager.limit;
 			fetchKeywords();
 		}
 	}
 
 	function handleKeywordFilter() {
-		keywordOffset = 0;
+		keywordPager.reset();
 		fetchKeywords();
 	}
 
 	function handleFilter() {
-		currentPage = 1;
+		writingPager.reset();
 		fetchData();
 	}
 
@@ -354,31 +334,23 @@
 	}
 
 	function prevPage() {
-		if (currentPage > 1) {
-			currentPage--;
-			fetchData();
-		}
+		writingPager.prev();
+		fetchData();
 	}
 
 	function nextPage() {
-		if (currentPage < pages) {
-			currentPage++;
-			fetchData();
-		}
+		writingPager.next();
+		fetchData();
 	}
 
 	function sourcePrevPage() {
-		if (sourceCurrentPage > 1) {
-			sourceCurrentPage--;
-			fetchSources();
-		}
+		sourcePager.prev();
+		fetchSources();
 	}
 
 	function sourceNextPage() {
-		if (sourceCurrentPage < sourcePages) {
-			sourceCurrentPage++;
-			fetchSources();
-		}
+		sourcePager.next();
+		fetchSources();
 	}
 
 	async function openWritingModal(writing: GeneratedWriting) {
@@ -509,12 +481,11 @@
 		error = null;
 		try {
 			const res = await writingApi.listBatches({
-				page: batchPage,
-				page_size: batchPageSize
+				page: batchPager.page,
+				page_size: batchPager.pageSize
 			});
 			batches = res.items;
-			batchTotal = res.total;
-			batchPages = res.pages;
+			batchPager.total = res.total;
 		} catch (e) {
 			error = e instanceof Error ? e.message : '배치 로드 실패';
 		} finally {
@@ -602,17 +573,13 @@
 	}
 
 	function batchPrevPage() {
-		if (batchPage > 1) {
-			batchPage--;
-			fetchBatches();
-		}
+		batchPager.prev();
+		fetchBatches();
 	}
 
 	function batchNextPage() {
-		if (batchPage < batchPages) {
-			batchPage++;
-			fetchBatches();
-		}
+		batchPager.next();
+		fetchBatches();
 	}
 
 	function getRatingIcon(rating: number | null): string {
@@ -710,7 +677,7 @@
 				onclick={() => switchTab('batches')}
 				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'batches' ? 'border-blue-600 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 			>
-				배치 ({batchTotal})
+				배치 ({batchPager.total})
 			</button>
 		</nav>
 	</div>
@@ -779,17 +746,17 @@
 			</div>
 
 			<!-- 페이지네이션 -->
-			{#if pages > 1}
+			{#if writingPager.totalPages > 1}
 				<div class="flex justify-between items-center">
 					<span class="text-sm text-muted-foreground">
-						전체 {total}개 중 {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, total)}
+						전체 {writingPager.total}개 중 {(writingPager.page - 1) * writingPager.pageSize + 1} - {Math.min(writingPager.page * writingPager.pageSize, writingPager.total)}
 					</span>
 					<div class="flex gap-2">
-						<Button on:click={prevPage} disabled={currentPage === 1} variant="secondary" size="sm">
+						<Button on:click={prevPage} disabled={writingPager.page === 1} variant="secondary" size="sm">
 							이전
 						</Button>
-						<span class="px-3 py-1.5 text-sm">{currentPage} / {pages}</span>
-						<Button on:click={nextPage} disabled={currentPage >= pages} variant="secondary" size="sm">
+						<span class="px-3 py-1.5 text-sm">{writingPager.page} / {writingPager.totalPages}</span>
+						<Button on:click={nextPage} disabled={writingPager.page >= writingPager.totalPages} variant="secondary" size="sm">
 							다음
 						</Button>
 					</div>
@@ -839,17 +806,17 @@
 			</div>
 
 			<!-- 소스 페이지네이션 -->
-			{#if sourcePages > 1}
+			{#if sourcePager.totalPages > 1}
 				<div class="flex justify-between items-center">
 					<span class="text-sm text-muted-foreground">
-						전체 {sourceTotal}개 중 {(sourceCurrentPage - 1) * sourcePageSize + 1} - {Math.min(sourceCurrentPage * sourcePageSize, sourceTotal)}
+						전체 {sourcePager.total}개 중 {(sourcePager.page - 1) * sourcePager.pageSize + 1} - {Math.min(sourcePager.page * sourcePager.pageSize, sourcePager.total)}
 					</span>
 					<div class="flex gap-2">
-						<Button on:click={sourcePrevPage} disabled={sourceCurrentPage === 1} variant="secondary" size="sm">
+						<Button on:click={sourcePrevPage} disabled={sourcePager.page === 1} variant="secondary" size="sm">
 							이전
 						</Button>
-						<span class="px-3 py-1.5 text-sm">{sourceCurrentPage} / {sourcePages}</span>
-						<Button on:click={sourceNextPage} disabled={sourceCurrentPage >= sourcePages} variant="secondary" size="sm">
+						<span class="px-3 py-1.5 text-sm">{sourcePager.page} / {sourcePager.totalPages}</span>
+						<Button on:click={sourceNextPage} disabled={sourcePager.page >= sourcePager.totalPages} variant="secondary" size="sm">
 							다음
 						</Button>
 					</div>
@@ -1002,19 +969,19 @@
 			</div>
 
 			<!-- 페이지네이션 -->
-			{#if keywordTotal > keywordLimit}
+			{#if keywordPager.total > keywordPager.limit}
 				<div class="flex justify-between items-center">
 					<span class="text-sm text-muted-foreground">
-						전체 {keywordTotal.toLocaleString()}개 중 {keywordOffset + 1} - {Math.min(keywordOffset + keywordLimit, keywordTotal)}
+						전체 {keywordPager.total.toLocaleString()}개 중 {keywordPager.offset + 1} - {Math.min(keywordPager.offset + keywordPager.limit, keywordPager.total)}
 					</span>
 					<div class="flex gap-2">
-						<Button on:click={keywordPrevPage} disabled={keywordOffset === 0} variant="secondary" size="sm">
+						<Button on:click={keywordPrevPage} disabled={keywordPager.offset === 0} variant="secondary" size="sm">
 							이전
 						</Button>
 						<span class="px-3 py-1.5 text-sm">
-							{Math.floor(keywordOffset / keywordLimit) + 1} / {Math.ceil(keywordTotal / keywordLimit)}
+							{Math.floor(keywordPager.offset / keywordPager.limit) + 1} / {Math.ceil(keywordPager.total / keywordPager.limit)}
 						</span>
-						<Button on:click={keywordNextPage} disabled={keywordOffset + keywordLimit >= keywordTotal} variant="secondary" size="sm">
+						<Button on:click={keywordNextPage} disabled={!keywordPager.hasMore} variant="secondary" size="sm">
 							다음
 						</Button>
 					</div>
@@ -1121,17 +1088,17 @@
 			</div>
 
 			<!-- 페이지네이션 -->
-			{#if elementPages > 1}
+			{#if elementPager.totalPages > 1}
 				<div class="flex justify-between items-center">
 					<span class="text-sm text-muted-foreground">
-						전체 {elementTotal}개 중 {(elementCurrentPage - 1) * elementPageSize + 1} - {Math.min(elementCurrentPage * elementPageSize, elementTotal)}
+						전체 {elementPager.total}개 중 {(elementPager.page - 1) * elementPager.pageSize + 1} - {Math.min(elementPager.page * elementPager.pageSize, elementPager.total)}
 					</span>
 					<div class="flex gap-2">
-						<Button on:click={elementPrevPage} disabled={elementCurrentPage === 1} variant="secondary" size="sm">
+						<Button on:click={elementPrevPage} disabled={elementPager.page === 1} variant="secondary" size="sm">
 							이전
 						</Button>
-						<span class="px-3 py-1.5 text-sm">{elementCurrentPage} / {elementPages}</span>
-						<Button on:click={elementNextPage} disabled={elementCurrentPage >= elementPages} variant="secondary" size="sm">
+						<span class="px-3 py-1.5 text-sm">{elementPager.page} / {elementPager.totalPages}</span>
+						<Button on:click={elementNextPage} disabled={elementPager.page >= elementPager.totalPages} variant="secondary" size="sm">
 							다음
 						</Button>
 					</div>
@@ -1216,17 +1183,17 @@
 			</div>
 
 			<!-- 페이지네이션 -->
-			{#if batchPages > 1}
+			{#if batchPager.totalPages > 1}
 				<div class="flex justify-between items-center">
 					<span class="text-sm text-muted-foreground">
-						전체 {batchTotal}개 중 {(batchPage - 1) * batchPageSize + 1} - {Math.min(batchPage * batchPageSize, batchTotal)}
+						전체 {batchPager.total}개 중 {(batchPager.page - 1) * batchPager.pageSize + 1} - {Math.min(batchPager.page * batchPager.pageSize, batchPager.total)}
 					</span>
 					<div class="flex gap-2">
-						<Button on:click={batchPrevPage} disabled={batchPage === 1} variant="secondary" size="sm">
+						<Button on:click={batchPrevPage} disabled={batchPager.page === 1} variant="secondary" size="sm">
 							이전
 						</Button>
-						<span class="px-3 py-1.5 text-sm">{batchPage} / {batchPages}</span>
-						<Button on:click={batchNextPage} disabled={batchPage >= batchPages} variant="secondary" size="sm">
+						<span class="px-3 py-1.5 text-sm">{batchPager.page} / {batchPager.totalPages}</span>
+						<Button on:click={batchNextPage} disabled={batchPager.page >= batchPager.totalPages} variant="secondary" size="sm">
 							다음
 						</Button>
 					</div>
