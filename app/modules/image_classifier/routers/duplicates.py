@@ -174,6 +174,11 @@ def get_folder_analysis(db: Session = Depends(get_db)):
     return {"folders": folders, "total_pending_groups": total_pending}
 
 
+def _escape_like(value: str) -> str:
+    """SQLite LIKE 와일드카드 문자를 '!' 이스케이프로 처리"""
+    return value.replace('!', '!!').replace('%', '!%').replace('_', '!_')
+
+
 @router.get("/folder-analysis/files")
 def get_folder_analysis_files(
     folder: str,
@@ -181,8 +186,8 @@ def get_folder_analysis_files(
 ):
     """특정 폴더 선택 시 보관/삭제 대상 파일 상세 정보 반환"""
     folder_normalized = folder.replace('/', '\\')
-    like_backslash = folder_normalized + '\\%'
-    like_slash = folder.replace('\\', '/') + '/%'
+    like_backslash = _escape_like(folder_normalized) + '\\%'
+    like_slash = _escape_like(folder.replace('\\', '/')) + '/%'
 
     # 1단계: 이 폴더에 파일이 있는 pending 그룹 ID 찾기
     group_rows = db.execute(text("""
@@ -191,7 +196,7 @@ def get_folder_analysis_files(
         JOIN file_classifications fc ON dm.file_id = fc.id
         JOIN duplicate_groups dg ON dm.group_id = dg.id
         WHERE dg.status = 'pending'
-        AND (fc.file_path LIKE :like_bs OR fc.file_path LIKE :like_sl)
+        AND (fc.file_path LIKE :like_bs ESCAPE '!' OR fc.file_path LIKE :like_sl ESCAPE '!')
     """), {"like_bs": like_backslash, "like_sl": like_slash}).fetchall()
 
     group_ids = [r.group_id for r in group_rows]

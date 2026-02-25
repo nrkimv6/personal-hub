@@ -13,6 +13,7 @@
 	let tasks = $state<Task[]>([]);
 	let expanded = $state(false);
 	let pollingId: ReturnType<typeof setInterval> | null = null;
+	let pollFailCount = 0;
 
 	let runningCount = $derived(tasks.filter((t) => t.status === 'running').length);
 
@@ -22,8 +23,13 @@
 			if (!res.ok) return;
 			const data = await res.json();
 			tasks = data.tasks ?? [];
+			pollFailCount = 0;
 		} catch {
-			// 폴링 중 실패 무시
+			pollFailCount += 1;
+			if (pollFailCount >= 3 && pollingId) {
+				clearInterval(pollingId);
+				pollingId = setInterval(loadTasks, 30000);
+			}
 		}
 	}
 

@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
 	import { toast } from '$lib/stores/toast';
+	import { getErrorMessage } from '$lib/utils/error';
 	import { Copy, Wand2, Check, Trash2, SkipForward, Crown, PartyPopper, Square, ChevronLeft, ChevronRight, FolderOpen, X, ExternalLink, Eye, Clipboard, Merge, Archive } from 'lucide-svelte';
 
 	interface DuplicateGroup {
@@ -70,6 +71,7 @@
 
 	let detectRunning = $state(false);
 	let detectStatusPoller: ReturnType<typeof setInterval> | null = null;
+	let detectPollFailCount = $state(0);
 
 	// 폴더 기준 일괄 해결 모달
 	let showFolderModal = $state(false);
@@ -93,8 +95,13 @@
 			if (!res.ok) return;
 			const data = await res.json();
 			detectRunning = data.is_running ?? false;
+			detectPollFailCount = 0;
 		} catch {
-			// ignore
+			detectPollFailCount += 1;
+			if (detectPollFailCount >= 3 && detectStatusPoller) {
+				clearInterval(detectStatusPoller);
+				detectStatusPoller = setInterval(checkDetectStatus, 15000);
+			}
 		}
 	}
 
@@ -106,7 +113,7 @@
 			toast.success('중복탐지가 중지되었습니다.');
 			await loadGroups();
 		} catch (err: any) {
-			toast.error(`중지 실패: ${err.message}`);
+			toast.error(`중지 실패: ${getErrorMessage(err)}`);
 		}
 	}
 
@@ -143,7 +150,7 @@
 			await Promise.all(pendingGroups.map((g: DuplicateGroup) => loadGroupDetail(g.group_id)));
 			autoSelectBySize();
 		} catch (err: any) {
-			error = err.message;
+			error = getErrorMessage(err);
 		} finally {
 			loading = false;
 		}
@@ -156,7 +163,7 @@
 			const detail = await res.json();
 			groupDetails = { ...groupDetails, [groupId]: detail };
 		} catch (err: any) {
-			toast.error(`그룹 로드 실패: ${err.message}`);
+			toast.error(`그룹 로드 실패: ${getErrorMessage(err)}`);
 		}
 	}
 
@@ -193,7 +200,7 @@
 			checkedGroups.delete(groupId);
 			checkedGroups = new Set(checkedGroups);
 		} catch (err: any) {
-			toast.error(`해결 실패: ${err.message}`);
+			toast.error(`해결 실패: ${getErrorMessage(err)}`);
 		}
 	}
 
@@ -283,7 +290,7 @@
 			checkedGroups.delete(groupId);
 			checkedGroups = new Set(checkedGroups);
 		} catch (err: any) {
-			toast.error(`삭제 실패: ${err.message}`);
+			toast.error(`삭제 실패: ${getErrorMessage(err)}`);
 		}
 	}
 
@@ -312,7 +319,7 @@
 				toast.error(err.detail || '탐색기 열기 실패');
 			}
 		} catch (err: any) {
-			toast.error(`탐색기 열기 실패: ${err.message}`);
+			toast.error(`탐색기 열기 실패: ${getErrorMessage(err)}`);
 		}
 	}
 
@@ -344,7 +351,7 @@
 			checkedGroups.delete(groupId);
 			checkedGroups = new Set(checkedGroups);
 		} catch (err: any) {
-			toast.error(`모두 보관 실패: ${err.message}`);
+			toast.error(`모두 보관 실패: ${getErrorMessage(err)}`);
 		}
 	}
 
@@ -379,7 +386,7 @@
 			await loadGroupDetail(targetId);
 			checkedGroups = new Set();
 		} catch (err: any) {
-			toast.error(`병합 실패: ${err.message}`);
+			toast.error(`병합 실패: ${getErrorMessage(err)}`);
 		}
 	}
 
@@ -429,7 +436,7 @@
 			});
 			checkedGroups = new Set();
 		} catch (err: any) {
-			toast.error(`일괄 확정 실패: ${err.message}`);
+			toast.error(`일괄 확정 실패: ${getErrorMessage(err)}`);
 		}
 	}
 
@@ -448,7 +455,7 @@
 			folderAnalysis = data.folders;
 			folderTotalPending = data.total_pending_groups;
 		} catch (err: any) {
-			toast.error(`폴더 분석 실패: ${err.message}`);
+			toast.error(`폴더 분석 실패: ${getErrorMessage(err)}`);
 			showFolderModal = false;
 		} finally {
 			folderAnalysisLoading = false;
@@ -473,7 +480,7 @@
 			folderDeleteFilesData = data.delete_files;
 			folderFileGroupIds = data.group_ids;
 		} catch (err: any) {
-			toast.error(`파일 목록 로드 실패: ${err.message}`);
+			toast.error(`파일 목록 로드 실패: ${getErrorMessage(err)}`);
 		} finally {
 			folderFilesLoading = false;
 		}
@@ -513,7 +520,7 @@
 			});
 			checkedGroups = new Set(checkedGroups);
 		} catch (err: any) {
-			toast.error(`일괄 해결 실패: ${err.message}`);
+			toast.error(`일괄 해결 실패: ${getErrorMessage(err)}`);
 		} finally {
 			folderResolving = false;
 		}

@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
 	import { createSelection } from '$lib/utils/selection.svelte';
+	import { getErrorMessage } from '$lib/utils/error';
 	import { loadCategoryMap as loadCategoryMapUtil } from '../lib/categoryUtils';
 	import { Search, RefreshCw, Tag, ArrowRight, Cpu, AlertTriangle, Eye, FolderOpen, Clipboard } from 'lucide-svelte';
 
@@ -54,6 +55,7 @@
 	let clipProcessed = $state(0);
 	let clipTotal = $state(0);
 	let clipPollTimer: ReturnType<typeof setInterval> | null = null;
+	let clipPollFailCount = 0;
 
 	async function checkClipStatus() {
 		try {
@@ -63,6 +65,7 @@
 			clipRunning = data.is_running;
 			clipProcessed = data.processed;
 			clipTotal = data.total;
+			clipPollFailCount = 0;
 
 			// CLIP???�행 ?�료???�이 ?�는지 pipeline?�서 ?�인
 			const pipeRes = await fetchWithTimeout('/api/ic/stats/pipeline');
@@ -83,7 +86,11 @@
 				}
 			}
 		} catch {
-			// 무시
+			clipPollFailCount += 1;
+			if (clipPollFailCount >= 3 && clipPollTimer) {
+				clearInterval(clipPollTimer);
+				clipPollTimer = setInterval(checkClipStatus, 15000);
+			}
 		} finally {
 			clipChecking = false;
 		}
@@ -99,7 +106,7 @@
 			clipRunning = true;
 			startClipPolling();
 		} catch (err: any) {
-			alert(`CLIP ?�베??계산 ?�작 ?�패: ${err.message}`);
+			alert(`CLIP ?�베??계산 ?�작 ?�패: ${getErrorMessage(err)}`);
 		}
 	}
 
@@ -141,7 +148,7 @@
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			alert('FAISS ?�덱??빌드 ?�료!');
 		} catch (err: any) {
-			alert(`?�덱??빌드 ?�패: ${err.message}`);
+			alert(`?�덱??빌드 ?�패: ${getErrorMessage(err)}`);
 		} finally {
 			buildingIndex = false;
 		}
@@ -195,7 +202,7 @@
 
 			groups = Array.from(groupMap.values());
 		} catch (err: any) {
-			error = err.message;
+			error = getErrorMessage(err);
 		} finally {
 			loading = false;
 		}
@@ -242,7 +249,7 @@
 			selection.clear();
 			await loadSimilarSuggestions();
 		} catch (err: any) {
-			error = err.message;
+			error = getErrorMessage(err);
 		} finally {
 			loading = false;
 		}
@@ -278,7 +285,7 @@
 				alert(err.detail || '뷰어 ?�기 ?�패');
 			}
 		} catch (err: any) {
-			alert(`뷰어 ?�기 ?�패: ${err.message}`);
+			alert(`뷰어 ?�기 ?�패: ${getErrorMessage(err)}`);
 		}
 	}
 
@@ -294,7 +301,7 @@
 				alert(err.detail || '?�색�??�기 ?�패');
 			}
 		} catch (err: any) {
-			alert(`?�색�??�기 ?�패: ${err.message}`);
+			alert(`?�색�??�기 ?�패: ${getErrorMessage(err)}`);
 		}
 	}
 
