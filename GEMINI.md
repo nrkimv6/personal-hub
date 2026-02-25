@@ -1,95 +1,99 @@
-# GEMINI.md - Project Context & Instructions
+﻿# GEMINI.md - Monitor Page Project Context
 
-프로젝트: **Monitor Page** (네이버 예약, 쿠팡, 인스타그램 모니터링 및 자동화 서비스)
+이 문서는 Monitor Page 프로젝트의 아키텍처, 환경 규칙 및 Gemini CLI를 위한 작업 지침을 정의합니다.
 
-## ⚠️ Critical Core Rules (필수 규칙 - Gemini CLI 전용)
+## 1. 필수 규칙 (Critical Rules)
 
-### 1. 보안 및 데이터 보호 (Security First)
-- **.git 보호**: .git 디렉토리와 내부 데이터를 절대 수정하거나 삭제하지 마세요. git clean -fd, git reset --hard 등 파괴적 명령어 사용 금지.
-- **비밀번호/키 보호**: .env 파일과 API 키(Claude, Naver 등)를 절대 로그에 노출하거나 커밋하지 마세요.
-- **데이터베이스 보호**: data/monitor.db는 실제 운영 데이터가 포함되어 있으므로 삭제나 초기화 시 반드시 백업을 확인하세요.
+### 1.1 보안 및 시스템 무결성 (Security First)
+- **Credential 보호**: `.env` 파일, `.git` 폴더, 그리고 `data/*.db` 파일은 절대 외부로 유출하거나 출력하지 마십시오. Claude API Key, Naver 계정 정보 등이 포함되어 있습니다.
+- **Git 안전**: `git clean -fd` 또는 `git reset --hard`와 같은 파괴적인 명령어는 사용자의 명시적 요청 없이 실행하지 마십시오.
+- **환경 변수**: 신규 API 키나 설정 추가 시 반드시 `.env` 파일을 업데이트하고 `app/core/config.py` 등에 반영 여부를 확인하십시오.
 
-### 2. 환경 및 실행 표준 (Windows/PowerShell)
-- **Windows + PowerShell**: 반드시 PowerShell 문법을 사용하세요. bash 명령어(ls, rm, export, cd ~ 등) 사용 금지.
+### 1.2 실행 환경 (Windows/PowerShell)
+- **PowerShell 전용**: 모든 쉘 명령은 PowerShell 문법을 따릅니다. `ls`, `rm`, `export` 대신 `Get-ChildItem`, `Remove-Item`, `$env:VAR`를 사용하십시오.
 - **경로 규칙**: 
-  - 경로를 인자로 전달할 때는 반드시 **큰따옴표(" ")**로 감싸세요.
-  - 슬래시(/) 대신 **백슬래시(\\)**를 사용하세요 (Python 내부 코드 제외).
-  - 파일 조작 시 가능한 **절대 경로**(D:\work\project\tools\monitor-page\...)를 사용하세요.
-- **파일 인코딩**: 모든 텍스트 파일(코드, JSON, Markdown 등)은 반드시 **UTF-8 (BOM 없음)**로 저장하세요. 한글 깨짐 방지를 위해 필수입니다.
+  - 경로에는 반드시 **백슬래시(`\`)**를 사용하십시오.
+  - 공백이 포함될 수 있으므로 모든 경로는 **큰따옴표(`"`)**로 감싸십시오. (예: `Get-Content "D:\path\to\file"`)
+- **인코딩**: 모든 소스 코드와 문서는 **UTF-8 (BOM 없음)** 인코딩으로 저장되어야 합니다. 한글 깨짐 방지를 위해 필수적입니다.
 
-### 3. 개발 가이드라인
-- **리팩토링**: 단일 파일 700줄 초과 시 모듈화를 제안하되, 기존의 작동하는 로직을 불필요하게 대규모로 변경하지 마세요.
-- **버그 수정**: 버그 수정 시 반드시 **재현 스크립트(Reproduction script)**를 먼저 작성하여 실패를 확인한 후 수정을 진행하세요.
-- **테스트**: 기능 추가 시 	ests/ 디렉토리에 대응하는 테스트 코드를 작성하거나 기존 테스트를 업데이트하세요.
-
----
-
-## 🏗️ Project Overview (프로젝트 개요)
-
-네이버 예약 상태 모니터링, 쿠팡 가격 추적, 인스타그램 데이터 추출을 위한 통합 자동화 시스템입니다.
-
-- **Stack**: 
-  - Backend: FastAPI (Python 3.12+), SQLAlchemy, Playwright.
-  - LLM: Claude API (Content Generation & Classification).
-  - Frontend: SvelteKit 2 (Svelte 5), TailwindCSS 4, TypeScript.
-  - Infrastructure: Windows NSSM Service (Session 0 - API), User Session Worker (Session 1 - GUI Browser).
-
-### 주요 디렉토리 구조
-- pp/: FastAPI 백엔드
-  - modules/: 핵심 비즈니스 로직 (Booking, Instagram, Product)
-  - worker/: Playwright 기반 오케스트레이터 및 워커
-- rontend/: SvelteKit 웹 인터페이스
-- data/: SQLite DB 및 로그, 크롤링 결과물
-- scripts/: 서비스 관리(Restart, Alias)를 위한 스크립트
-- .pids/: 실행 중인 워커 프로세스 ID 관리
+### 1.3 아키텍처 및 세션 관리
+- **Session 0 (Service)**: API 서버 및 백그라운드 서비스가 실행되는 환경입니다. GUI가 없는 `NSSM` 서비스로 관리됩니다.
+- **Session 1 (User)**: Playwright GUI 브라우저 워커가 실행되는 환경입니다. 실제 사용자 화면에서 브라우저가 동작해야 하므로 수동 실행 또는 스케줄러를 통해 Session 1에서 구동됩니다.
+- **프로세스 제어**: `scripts/browser_workers.py` 또는 `scripts/run.ps1`을 사용하여 서비스를 통합 관리합니다.
 
 ---
 
-## 🚀 Execution & Management (실행 및 관리)
+## 2. 프로젝트 개요 (Project Overview)
 
-### 핵심 실행 명령어 (PowerShell)
-- **전체 서비스 재시작**: python scripts/browser_workers.py restart
-- **API 서버만 재시작**: python scripts/browser_workers.py restart-api
-- **DB 스키마 적용**:
-  `powershell
-  python -c "import sqlite3; conn = sqlite3.connect('D:/work/project/tools/monitor-page/data/monitor.db'); sql = open('data/migrations/latest.sql', encoding='utf-8').read(); conn.executescript(sql); conn.commit(); conn.close();"
-  `
+네이버 예약, 인스타그램, 상품 정보 등을 모니터링하고 Claude AI를 통해 내용을 분류 및 자동 생성하는 자동화 시스템입니다.
 
-### 프로세스 관리 (Exe Aliases)
-Task Manager에서 프로세스를 쉽게 구분하기 위해 별칭을 사용합니다.
-- monitorpage-api.exe, monitorpage-worker.exe, monitorpage-claude.exe
-- 설정: .\scripts\setup-exe-aliases.ps1 실행
+- **Stack**:
+  - **Backend**: FastAPI (Python 3.12+), SQLAlchemy, Alembic, Playwright.
+  - **Frontend**: SvelteKit 2 (Svelte 5), TailwindCSS 4, TypeScript.
+  - **Database**: SQLite (D:\work\project\tools\monitor-page\data\monitor.db).
+  - **Service**: Windows NSSM Service, Redis (Queue 관리).
 
 ---
 
-## 🛠️ Workflows & Skills (Gemini 워크플로우)
+## 3. 디렉토리 구조 및 주요 파일
 
-| 명령어 | 워크플로우 | 용도 |
+- `app/`: FastAPI 백엔드 코드.
+  - `modules/`: 모니터링 대상별 로직 (Booking, Instagram, Product).
+  - `worker/`: Playwright 기반 크롤러 및 LLM 워커.
+- `frontend/`: SvelteKit 프론트엔드.
+- `data/`: SQLite DB 파일 및 Alembic 마이그레이션.
+- `scripts/`: 서비스 관리 및 자동화를 위한 PowerShell/Python 스크립트.
+  - `browser_workers.py`: 워커 및 API 통합 관리 도구.
+  - `service-install.ps1`: NSSM 서비스 설치 스크립트.
+- `tests/`: Pytest 기반의 방대한 테스트 스위트.
+- `.pids/`: 실행 중인 프로세스의 PID 저장소.
+
+---
+
+## 4. 실행 및 관리 지침 (Operation Guide)
+
+### 4.1 서비스 제어
+```powershell
+# 전체 서비스 재시작 (API + Workers)
+python "scripts\browser_workers.py" restart
+
+# API 서버만 재시작
+python "scripts\browser_workers.py" restart-api
+
+# 특정 워커 로그 확인
+Get-Content "logs\worker_unified.log" -Wait
+```
+
+### 4.2 데이터베이스 관리
+- **마이그레이션**: `alembic upgrade head`를 사용하여 스키마를 최신으로 유지하십시오.
+- **DB 체크**: `python check_db.py`를 실행하여 데이터 무결성을 확인할 수 있습니다.
+
+### 4.3 테스트 실행
+```powershell
+# 전체 테스트 실행
+pytest
+
+# 특정 모듈 테스트
+pytest "tests\modules\test_instagram_service.py"
+```
+
+---
+
+## 5. Gemini 워크플로우 (Workflows)
+
+| 명령어 | 대상 파일 | 목적 |
 |:---|:---|:---|
-| /plan | plan.md | 구현 계획 수립 및 TODO.md 업데이트 |
-| /next | 
-ext.md | TODO.md에서 다음 우선순위 작업 자동 선택 |
-| /implement | implement.md | 실제 코드 작성 및 단위 테스트 |
-| /done | done.md | 완료 처리, 검증 및 변경사항 문서화 |
-| /webapp-testing | webapp-testing.md | SvelteKit/FastAPI 통합 테스트 및 빌드 확인 |
-| /codebase-audit | codebase-audit.md | 전체 시스템 아키텍처 및 보안 점검 |
+| `/plan` | `docs\plan\*.md` | 신규 기능 설계 및 작업 순서 정의 |
+| `/implement` | `app\`, `frontend\` | 계획에 기반한 코드 구현 |
+| `/webapp-testing` | `tests\` | 빌드 확인 및 Pytest 실행 |
+| `/done` | `docs\DONE.md` | 작업 완료 기록 및 아카이브 |
+| `/codebase-audit` | - | 전체 코드 구조 및 성능 점검 |
 
 ---
 
-## 🧩 Capabilities (주요 기능)
+## 6. 특이사항 및 주의사항 (Notes)
 
-- **naver_booking**: 네이버 예약 슬롯 실시간 모니터링 및 상태 변경 감지.
-- **instagram**: 포스팅 크롤링, 데이터 분석 및 트렌드 추적.
-- **writing**: Claude API를 활용한 컨텐츠 생성 및 요약 자동화.
-- **dev_runner**: plan-runner를 통한 자동화된 개발 및 테스트 루프.
-- **image/file_classifier**: 머신러닝 기반 이미지 분류 및 파일 정리.
-
----
-
-## 📚 Rules Reference (참조 규칙)
-상세 규칙은 .agent/rules/ 디렉토리의 개별 파일을 확인하세요.
-- git-safety.md: Git 조작 시 안전 수칙
-- path-conventions.md: Windows 환경 경로 가이드
-- commit.md: 커밋 메시지 규칙
-- 
-o-file-deps.md: 의존성 관리 원칙
+- **Playwright Anti-Detection**: `tests\test_anti_detection.py`에 정의된 지침을 준수하여 봇 탐지를 회피하십시오.
+- **LLM Cost 관리**: Claude API 호출 시 `writing` 서비스의 토큰 사용량을 모니터링하십시오.
+- **Log Cleanup**: 로그 파일이 비대해질 수 있으므로 `scripts\cleanup-logs.ps1`을 주기적으로 검토하십시오.
+- **Mobile Server**: `mobile-server/` 디렉토리는 별도의 FastAPI 서버로 동작하며 모바일 연동 기능을 담당합니다.
