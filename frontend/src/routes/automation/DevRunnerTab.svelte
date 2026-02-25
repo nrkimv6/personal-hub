@@ -7,6 +7,7 @@
 	import LogViewer from '$lib/components/dev-runner/LogViewer.svelte';
 	import CurrentTrackingCard from '$lib/components/dev-runner/CurrentTrackingCard.svelte';
 	import { createSmartPolling } from '$lib/utils/smart-polling';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
 	import {
 		devRunnerTaskApi,
 		devRunnerRunnerApi,
@@ -347,19 +348,16 @@
 					<!-- 콘텐츠: 데스크톱은 항상 표시, 모바일은 토글 -->
 					<div class="{taskHistoryOpen ? 'flex' : 'hidden'} md:flex flex-col flex-1 min-h-0 md:h-auto">
 						<!-- 탭 버튼 -->
-						<div class="flex gap-0 px-4 pt-2 border-b shrink-0">
-							<button
-								onclick={() => (taskHistoryTab = 'tasks')}
-								class="px-3 py-1.5 text-xs font-medium transition-colors border-b-2 -mb-px {taskHistoryTab === 'tasks' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
-							>
-								Tasks
-							</button>
-							<button
-								onclick={() => (taskHistoryTab = 'plans')}
-								class="px-3 py-1.5 text-xs font-medium transition-colors border-b-2 -mb-px {taskHistoryTab === 'plans' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}"
-							>
-								Plans
-							</button>
+						<div class="px-4 pt-2 shrink-0">
+							<TabNav
+								tabs={[
+									{ id: 'tasks', label: 'Tasks' },
+									{ id: 'plans', label: 'Plans' },
+								]}
+								bind:activeTab={taskHistoryTab}
+								variant="primary"
+								size="compact"
+							/>
 						</div>
 						<!-- 탭 콘텐츠 -->
 						<div class="flex-1 min-h-0 overflow-hidden">
