@@ -138,19 +138,19 @@ async def get_duplicate_groups(
 
 
 @router.get("/folder-analysis")
-async def get_folder_analysis(db: Session = Depends(get_db)):
-    """pending 그룹의 멤버를 폴더별로 분석"""
+def get_folder_analysis(db: Session = Depends(get_db)):
+    """pending 그룹의 멤버를 폴더별로 분석 (요약만 반환, 파일 상세는 별도 엔드포인트)"""
+    # 최소한의 컬럼만 조회 (file_size, resolution, quality_score 제외)
     rows = db.execute(text("""
-        SELECT dg.id as group_id, dm.file_id, fc.file_path, dm.file_size, dm.resolution, dm.quality_score
+        SELECT dg.id as group_id, fc.file_path
         FROM duplicate_groups dg
         JOIN duplicate_members dm ON dg.id = dm.group_id
         JOIN file_classifications fc ON dm.file_id = fc.id
         WHERE dg.status = 'pending'
-        ORDER BY dg.id, dm.quality_score DESC
     """)).fetchall()
 
     from collections import defaultdict
-    folder_map = defaultdict(lambda: {"files": [], "group_ids": set()})
+    folder_map = defaultdict(lambda: {"file_count": 0, "group_ids": set()})
 
     for row in rows:
         fp = row.file_path
@@ -159,27 +159,78 @@ async def get_folder_analysis(db: Session = Depends(get_db)):
 
         entry = folder_map[folder]
         entry["group_ids"].add(row.group_id)
-        entry["files"].append({
+        entry["file_count"] += 1
+
+    folders = []
+    for folder_path, data in sorted(folder_map.items(), key=lambda x: -x[1]["file_count"]):
+        folders.append({
+            "folder_path": folder_path,
+            "file_count": data["file_count"],
+            "group_ids": sorted(data["group_ids"]),
+        })
+
+    total_pending = db.execute(text("SELECT COUNT(*) FROM duplicate_groups WHERE status = 'pending'")).scalar()
+
+    return {"folders": folders, "total_pending_groups": total_pending}
+
+
+@router.get("/folder-analysis/files")
+def get_folder_analysis_files(
+    folder: str,
+    db: Session = Depends(get_db),
+):
+    """특정 폴더 선택 시 보관/삭제 대상 파일 상세 정보 반환"""
+    folder_normalized = folder.replace('/', '\\')
+    like_backslash = folder_normalized + '\\%'
+    like_slash = folder.replace('\\', '/') + '/%'
+
+    # 1단계: 이 폴더에 파일이 있는 pending 그룹 ID 찾기
+    group_rows = db.execute(text("""
+        SELECT DISTINCT dm.group_id
+        FROM duplicate_members dm
+        JOIN file_classifications fc ON dm.file_id = fc.id
+        JOIN duplicate_groups dg ON dm.group_id = dg.id
+        WHERE dg.status = 'pending'
+        AND (fc.file_path LIKE :like_bs OR fc.file_path LIKE :like_sl)
+    """), {"like_bs": like_backslash, "like_sl": like_slash}).fetchall()
+
+    group_ids = [r.group_id for r in group_rows]
+    if not group_ids:
+        return {"keep_files": [], "delete_files": [], "group_ids": []}
+
+    # 2단계: 해당 그룹들의 모든 멤버 조회
+    placeholders = ",".join(str(gid) for gid in group_ids)
+    rows = db.execute(text(f"""
+        SELECT dg.id as group_id, dm.file_id, fc.file_path, dm.file_size, dm.resolution, dm.quality_score
+        FROM duplicate_groups dg
+        JOIN duplicate_members dm ON dg.id = dm.group_id
+        JOIN file_classifications fc ON dm.file_id = fc.id
+        WHERE dg.id IN ({placeholders})
+        ORDER BY dg.id, dm.quality_score DESC
+    """)).fetchall()
+
+    keep_files = []
+    delete_files = []
+    for row in rows:
+        fp_normalized = row.file_path.replace('/', '\\')
+        sep_idx = max(fp_normalized.rfind('\\'), fp_normalized.rfind('/'))
+        m_folder = fp_normalized[:sep_idx] if sep_idx >= 0 else fp_normalized
+
+        file_info = {
             "file_id": row.file_id,
             "file_path": row.file_path,
             "file_size": row.file_size,
             "resolution": row.resolution,
             "quality_score": row.quality_score,
             "group_id": row.group_id,
-        })
+        }
 
-    folders = []
-    for folder_path, data in sorted(folder_map.items(), key=lambda x: -len(x[1]["files"])):
-        folders.append({
-            "folder_path": folder_path,
-            "file_count": len(data["files"]),
-            "group_ids": sorted(data["group_ids"]),
-            "files": data["files"],
-        })
+        if m_folder == folder_normalized:
+            keep_files.append(file_info)
+        else:
+            delete_files.append(file_info)
 
-    total_pending = db.execute(text("SELECT COUNT(*) FROM duplicate_groups WHERE status = 'pending'")).scalar()
-
-    return {"folders": folders, "total_pending_groups": total_pending}
+    return {"keep_files": keep_files, "delete_files": delete_files, "group_ids": sorted(group_ids)}
 
 
 class ResolveByFolderRequest(BaseModel):

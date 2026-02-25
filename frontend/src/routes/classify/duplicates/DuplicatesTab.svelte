@@ -78,6 +78,11 @@
 	let selectedKeepFolder = $state<string | null>(null);
 	let folderResolving = $state(false);
 	let folderTotalPending = $state(0);
+	// 폴더 선택 시 로드되는 파일 상세 (on-demand)
+	let folderFilesLoading = $state(false);
+	let folderKeepFilesData = $state<FolderFile[]>([]);
+	let folderDeleteFilesData = $state<FolderFile[]>([]);
+	let folderFileGroupIds = $state<number[]>([]);
 
 	const currentPage = $derived(Math.floor(filter.skip / filter.limit) + 1);
 	const totalPages = $derived(Math.ceil(totalGroups / filter.limit));
@@ -432,15 +437,16 @@
 		showFolderModal = true;
 		folderAnalysisLoading = true;
 		selectedKeepFolder = null;
+		folderKeepFilesData = [];
+		folderDeleteFilesData = [];
+		folderFileGroupIds = [];
 		try {
-			const res = await fetchWithTimeout('/api/ic/duplicates/folder-analysis');
+			// 요약만 로드 (파일 상세 없이 폴더 목록 + 카운트만)
+			const res = await fetchWithTimeout('/api/ic/duplicates/folder-analysis', {}, 60000);
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const data = await res.json();
 			folderAnalysis = data.folders;
 			folderTotalPending = data.total_pending_groups;
-			if (data.folders.length > 0) {
-				selectedKeepFolder = data.folders[0].folder_path;
-			}
 		} catch (err: any) {
 			toast.error(`폴더 분석 실패: ${err.message}`);
 			showFolderModal = false;
@@ -449,16 +455,34 @@
 		}
 	}
 
+	async function loadFolderFiles(folderPath: string) {
+		selectedKeepFolder = folderPath;
+		folderFilesLoading = true;
+		folderKeepFilesData = [];
+		folderDeleteFilesData = [];
+		folderFileGroupIds = [];
+		try {
+			const res = await fetchWithTimeout(
+				`/api/ic/duplicates/folder-analysis/files?folder=${encodeURIComponent(folderPath)}`,
+				{},
+				60000
+			);
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const data = await res.json();
+			folderKeepFilesData = data.keep_files;
+			folderDeleteFilesData = data.delete_files;
+			folderFileGroupIds = data.group_ids;
+		} catch (err: any) {
+			toast.error(`파일 목록 로드 실패: ${err.message}`);
+		} finally {
+			folderFilesLoading = false;
+		}
+	}
+
 	const selectedFolderInfo = $derived(folderAnalysis.find((f) => f.folder_path === selectedKeepFolder));
-	const folderKeepFiles = $derived(selectedFolderInfo?.files ?? []);
-	const folderDeleteFiles = $derived(
-		selectedKeepFolder
-			? folderAnalysis
-					.filter((f) => f.folder_path !== selectedKeepFolder)
-					.flatMap((f) => f.files.filter((file) => selectedFolderInfo?.group_ids.includes(file.group_id)))
-			: []
-	);
-	const folderAffectedGroupIds = $derived(selectedFolderInfo?.group_ids ?? []);
+	const folderKeepFiles = $derived(folderKeepFilesData);
+	const folderDeleteFiles = $derived(folderDeleteFilesData);
+	const folderAffectedGroupIds = $derived(folderFileGroupIds);
 
 	async function resolveByFolder() {
 		if (!selectedKeepFolder || folderAffectedGroupIds.length === 0) return;
@@ -473,7 +497,7 @@
 					keep_folder: selectedKeepFolder,
 					group_ids: folderAffectedGroupIds
 				})
-			});
+			}, 120000);
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const result = await res.json();
 			toast.success(`일괄 해결 완료! 보관: ${result.resolved_count}개 그룹, 삭제: ${result.deleted_count}개 파일`);
@@ -1038,7 +1062,7 @@
 										name="keep-folder"
 										value={folder.folder_path}
 										checked={selectedKeepFolder === folder.folder_path}
-										onchange={() => (selectedKeepFolder = folder.folder_path)}
+										onchange={() => loadFolderFiles(folder.folder_path)}
 										class="accent-primary"
 									/>
 									<div class="flex-1 min-w-0">
@@ -1058,7 +1082,11 @@
 					</div>
 
 					<!-- 미리보기 -->
-					{#if selectedKeepFolder}
+					{#if selectedKeepFolder && folderFilesLoading}
+						<div class="p-8 text-center">
+							<div class="text-muted-foreground text-sm animate-pulse">파일 목록 로드 중...</div>
+						</div>
+					{:else if selectedKeepFolder && (folderKeepFiles.length > 0 || folderDeleteFiles.length > 0)}
 						<div class="grid grid-cols-2 gap-4">
 							<!-- 보관될 이미지 -->
 							<div>
@@ -1140,9 +1168,9 @@
 					<button
 						class="rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
 						onclick={resolveByFolder}
-						disabled={!selectedKeepFolder || folderAffectedGroupIds.length === 0 || folderResolving}
+						disabled={!selectedKeepFolder || folderAffectedGroupIds.length === 0 || folderResolving || folderFilesLoading}
 					>
-						{folderResolving ? '처리 중...' : `일괄 해결 (${folderAffectedGroupIds.length}그룹)`}
+						{folderResolving ? '처리 중...' : folderFilesLoading ? '파일 로드 중...' : `일괄 해결 (${folderAffectedGroupIds.length}그룹)`}
 					</button>
 				</div>
 			{/if}
