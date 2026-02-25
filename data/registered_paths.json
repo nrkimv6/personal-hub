@@ -1,9 +1,5 @@
 [
   {
-    "path": "D:\\work\\project\\tools\\monitor-page",
-    "type": "plan"
-  },
-  {
     "path": "D:\\work\\project\\service\\wtools\\common\\docs\\plan",
     "type": "plan"
   },
@@ -56,7 +52,63 @@
     "type": "plan"
   },
   {
+    "path": "D:\\work\\project\\tools\\monitor-page\\docs\\archive",
+    "type": "archive"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\common\\docs\\archive",
+    "type": "archive"
+  },
+  {
     "path": "D:\\work\\project\\service\\wtools\\common\\tools\\plan-runner\\docs\\plan",
     "type": "plan"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\common\\tools\\plan-runner\\docs\\archive",
+    "type": "archive"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\wedding-mass-guide\\docs\\archive",
+    "type": "archive"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\tool-view\\docs\\archive",
+    "type": "archive"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\story-weaver\\docs\\archive",
+    "type": "archive"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\screenshot-generator\\docs\\archive",
+    "type": "archive"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\sacred-hours\\docs\\archive",
+    "type": "archive"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\memo-alarm\\docs\\archive",
+    "type": "archive"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\line-minder\\docs\\archive",
+    "type": "archive"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\gentle-words\\docs\\archive",
+    "type": "archive"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\cross-noti\\docs\\archive",
+    "type": "archive"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\auth-worker\\docs\\archive",
+    "type": "archive"
+  },
+  {
+    "path": "D:\\work\\project\\service\\wtools\\activity-hub\\docs\\archive",
+    "type": "archive"
   }
 ]

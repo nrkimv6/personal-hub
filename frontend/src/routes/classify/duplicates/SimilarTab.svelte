@@ -5,6 +5,7 @@
 	import { getErrorMessage } from '$lib/utils/error';
 	import { loadCategoryMap as loadCategoryMapUtil } from '../lib/categoryUtils';
 	import { Search, RefreshCw, Tag, ArrowRight, Cpu, AlertTriangle, Eye, FolderOpen, Clipboard } from 'lucide-svelte';
+	import { toast } from '$lib/stores/toast';
 
 	interface SimilarSuggestion {
 		file_id: number;
@@ -30,9 +31,6 @@
 	let matchCount = $state(50);
 	let totalUnclassified = $state(0);
 	let buildingIndex = $state(false);
-	let toastMessage = $state<string | null>(null);
-	let toastTimer: ReturnType<typeof setTimeout> | null = null;
-
 	// 카테고리 맵 (폴백용)
 	let categoryMap = $state(new Map<number, string>());
 
@@ -40,12 +38,6 @@
 		try {
 			categoryMap = await loadCategoryMapUtil();
 		} catch { /* ignore */ }
-	}
-
-	function showToast(msg: string) {
-		toastMessage = msg;
-		if (toastTimer) clearTimeout(toastTimer);
-		toastTimer = setTimeout(() => { toastMessage = null; }, 3000);
 	}
 
 	// CLIP 임베딩 상태
@@ -106,7 +98,7 @@
 			clipRunning = true;
 			startClipPolling();
 		} catch (err: any) {
-			alert(`CLIP 임베딩 계산 시작 실패: ${getErrorMessage(err)}`);
+			toast.error(`CLIP 임베딩 계산 시작 실패: ${getErrorMessage(err)}`);
 		}
 	}
 
@@ -125,7 +117,7 @@
 					stopClipPolling();
 					clipReady = true;
 					if (data.error) {
-						alert(`CLIP 임베딩 오류: ${data.error}`);
+						toast.error(`CLIP 임베딩 오류: ${data.error}`);
 					}
 				}
 			} catch {
@@ -146,9 +138,9 @@
 		try {
 			const res = await fetchWithTimeout('/api/ic/similar/build-index', { method: 'POST' });
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			alert('FAISS 인덱스 빌드 완료!');
+			toast.success('FAISS 인덱스 빌드 완료!');
 		} catch (err: any) {
-			alert(`인덱스 빌드 실패: ${getErrorMessage(err)}`);
+			toast.error(`인덱스 빌드 실패: ${getErrorMessage(err)}`);
 		} finally {
 			buildingIndex = false;
 		}
@@ -218,7 +210,7 @@
 			.map((s) => s.file_id);
 
 		if (fileIds.length === 0) {
-			alert('파일을 선택해주세요.');
+			toast.warning('파일을 선택해주세요.');
 			return;
 		}
 
@@ -245,7 +237,7 @@
 				}
 			}
 
-			showToast(`${fileIds.length}개 파일이 "${group.category_path}"로 분류되었습니다.`);
+			toast.success(`${fileIds.length}개 파일이 "${group.category_path}"로 분류되었습니다.`);
 			selection.clear();
 			await loadSimilarSuggestions();
 		} catch (err: any) {
@@ -282,10 +274,10 @@
 			});
 			if (!res.ok) {
 				const err = await res.json();
-				alert(err.detail || '뷰어 열기 실패');
+				toast.error(err.detail || '뷰어 열기 실패');
 			}
 		} catch (err: any) {
-			alert(`뷰어 열기 실패: ${getErrorMessage(err)}`);
+			toast.error(`뷰어 열기 실패: ${getErrorMessage(err)}`);
 		}
 	}
 
@@ -298,10 +290,10 @@
 			});
 			if (!res.ok) {
 				const err = await res.json();
-				alert(err.detail || '탐색기 열기 실패');
+				toast.error(err.detail || '탐색기 열기 실패');
 			}
 		} catch (err: any) {
-			alert(`탐색기 열기 실패: ${getErrorMessage(err)}`);
+			toast.error(`탐색기 열기 실패: ${getErrorMessage(err)}`);
 		}
 	}
 
@@ -309,7 +301,7 @@
 		try {
 			await navigator.clipboard.writeText(text);
 		} catch {
-			alert('클립보드 복사 실패');
+			toast.error('클립보드 복사 실패');
 		}
 	}
 
@@ -586,9 +578,3 @@
 	</div>
 {/if}
 
-<!-- Toast -->
-{#if toastMessage}
-	<div class="fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-lg">
-		{toastMessage}
-	</div>
-{/if}

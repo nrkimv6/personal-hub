@@ -4,6 +4,7 @@
 	import { Clock, Calendar, RotateCcw, Tag, Eye, CheckCircle2, FileImage, X, Play } from 'lucide-svelte';
 	import { type Category } from '../lib/categoryUtils';
 	import CategoryPickerModal from '../components/CategoryPicker.svelte';
+	import { toast } from '$lib/stores/toast';
 
 	interface Cluster {
 		cluster_id: number;
@@ -29,14 +30,6 @@
 	let showCategoryPicker = $state(false);
 	let categoryTarget: Cluster | null = $state(null);
 	let bulkAssignMode = $state(false);
-	let toastMessage = $state<string | null>(null);
-	let toastTimer: ReturnType<typeof setTimeout> | null = null;
-
-	function showToast(msg: string) {
-		toastMessage = msg;
-		if (toastTimer) clearTimeout(toastTimer);
-		toastTimer = setTimeout(() => { toastMessage = null; }, 3000);
-	}
 
 	let unassignedClusters = $derived(clusters.filter(c => !c.category_path));
 
@@ -74,7 +67,7 @@
 			clusterRunning = true;
 			startClusterPolling();
 		} catch (err: unknown) {
-			alert(`클러스터링 시작 실패: ${(err as Error).message}`);
+			toast.error(`클러스터링 시작 실패: ${(err as Error).message}`);
 		}
 	}
 
@@ -169,7 +162,7 @@
 			}
 			showCategoryPicker = false;
 			bulkAssignMode = false;
-			showToast(`일괄 할당 완료: ${successCount}개 성공${failCount > 0 ? `, ${failCount}개 실패` : ''}`);
+			toast.success(`일괄 할당 완료: ${successCount}개 성공${failCount > 0 ? `, ${failCount}개 실패` : ''}`);
 			loadClusters();
 			return;
 		}
@@ -185,10 +178,10 @@
 			showCategoryPicker = false;
 			categoryTarget = null;
 			const catName = flatCategories.find(c => c.id === categoryId)?.full_path ?? '';
-			showToast(`카테고리 할당 완료: ${catName}`);
+			toast.success(`카테고리 할당 완료: ${catName}`);
 			loadClusters();
 		} catch (err: unknown) {
-			alert(`카테고리 지정 실패: ${(err as Error).message}`);
+			toast.error(`카테고리 지정 실패: ${(err as Error).message}`);
 		}
 	}
 
@@ -200,7 +193,7 @@
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			detailCluster = await res.json();
 		} catch (err: unknown) {
-			alert(`클러스터 상세 로드 실패: ${(err as Error).message}`);
+			toast.error(`클러스터 상세 로드 실패: ${(err as Error).message}`);
 			showDetail = false;
 		} finally {
 			detailLoading = false;
@@ -217,9 +210,9 @@
 				clusters[idx] = { ...clusters[idx], reviewed: true };
 				clusters = [...clusters];
 			}
-			showToast(`클러스터 #${clusterId} 검토 완료`);
+			toast.success(`클러스터 #${clusterId} 검토 완료`);
 		} catch (err: unknown) {
-			alert(`검토 완료 실패: ${(err as Error).message}`);
+			toast.error(`검토 완료 실패: ${(err as Error).message}`);
 		}
 	}
 </script>
@@ -474,9 +467,3 @@
 	</div>
 {/if}
 
-<!-- Toast -->
-{#if toastMessage}
-	<div class="fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-foreground shadow-lg">
-		{toastMessage}
-	</div>
-{/if}
