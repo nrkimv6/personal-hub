@@ -575,6 +575,7 @@ export const llmApi = {
     request_source?: string;
     provider?: string;
     model?: string;
+    cli_options?: Record<string, unknown>;
   }) =>
     request<LLMRequest>('/llm/requests', {
       method: 'POST',
