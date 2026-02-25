@@ -90,24 +90,32 @@
 		error = null;
 	}
 
-	async function handleRunStatusChange() {
+	function handleRunStart() {
+                if (window.innerWidth < 640) {
+                        taskHistoryOpen = false;
+                } else {
+                        taskHistoryTab = 'tasks';
+                }
+        }
+
+        async function handleRunStatusChange() {
 		await pollStatus();
 		void fetchPlans();
 	}
 
 	onMount(async () => {
-		// 모바일(< 640px)이면 Control Panel 기본 접힘
-		if (window.innerWidth < 640) {
-			panelOpen = false;
-		} else {
-			// 데스크톱: Plans & Tasks(Plans 탭) 기본 펼침
-			taskHistoryOpen = true;
-		}
+                if (window.innerWidth >= 640) {
+                        taskHistoryOpen = true;
+                }
 
-		// 초기 로드
-		await Promise.all([pollStatus(), fetchPlans()]);
-		loading = false;
-		error = null;
+                // 초기 로드
+                await Promise.all([pollStatus(), fetchPlans()]);
+
+                if (window.innerWidth < 640) {
+                        panelOpen = !runStatus?.running;
+                }
+                loading = false;
+                error = null;
 
 		// Phase 4: initialPlan이 있으면 자동 실행
 		if (initialPlan) {
@@ -169,7 +177,8 @@
 
 		// 시작 감지
 		if (runStatus && !prevRunning && runStatus.running) {
-			lastPlanFile = null;
+                        lastPlanFile = null;
+                        if (window.innerWidth < 640) panelOpen = false;
 		}
 
 		// 종료 감지 → plans 갱신
@@ -177,8 +186,9 @@
 			justCompleted = true;
 			if (completedTimer) clearTimeout(completedTimer);
 			completedTimer = setTimeout(() => { justCompleted = false; }, 10000);
-			void fetchPlans();
-		}
+                        void fetchPlans();
+                        if (window.innerWidth < 640) panelOpen = true;
+                }
 
 		// elapsed 타이머 관리
 		if (runStatus?.running && runStatus.start_time) {
@@ -291,7 +301,7 @@
 					<div class="px-4 pb-4 flex flex-col gap-4 bg-gray-50">
 						<!-- RunControl - full width card -->
 						<div class="bg-white border rounded-lg p-4">
-							<RunControl status={runStatus} {plans} onStatusChange={handleRunStatusChange} bind:selectedPlan={selectedPlanPath} />
+							<RunControl status={runStatus} {plans} onStatusChange={handleRunStatusChange} onStart={handleRunStart} bind:selectedPlan={selectedPlanPath} />
 						</div>
 					</div>
 				{/if}

@@ -7,10 +7,11 @@
 		status: DevRunnerRunStatusResponse | null;
 		plans: DevRunnerPlanFileResponse[];
 		onStatusChange: () => void;
-		selectedPlan?: string;
+                onStart?: () => void;
+                selectedPlan?: string;
 	}
 
-	let { status, plans, onStatusChange, selectedPlan = $bindable('') }: Props = $props();
+	let { status, plans, onStatusChange, onStart, selectedPlan = $bindable('') }: Props = $props();
 
 	let mode = $state<'single' | 'all'>('single');
 	let selectedEngine = $state('claude');
@@ -100,6 +101,7 @@
 				projects: projects || null
 			});
 			onStatusChange();
+                        onStart?.();
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : '시작 실패';
 			if (msg.includes('Already running')) {
