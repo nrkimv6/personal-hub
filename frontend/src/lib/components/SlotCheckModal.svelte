@@ -217,6 +217,7 @@
 				<button
 					type="button"
 					onclick={onClose}
+					aria-label="닫기"
 					class="text-muted-foreground hover:text-muted-foreground transition-colors"
 				>
 					<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -236,8 +237,9 @@
 				<div class="bg-background rounded-lg p-4 mb-4">
 					<div class="flex flex-wrap items-center gap-4">
 						<div class="flex items-center gap-2">
-							<label class="text-sm text-foreground">시작일:</label>
+							<label for="slot-start-date" class="text-sm text-foreground">시작일:</label>
 							<input
+								id="slot-start-date"
 								type="date"
 								bind:value={targetDate}
 								min={getTodayDate()}
@@ -246,8 +248,9 @@
 						</div>
 
 						<div class="flex items-center gap-2">
-							<label class="text-sm text-foreground">조회 기간:</label>
+							<label for="slot-days-ahead" class="text-sm text-foreground">조회 기간:</label>
 							<select
+								id="slot-days-ahead"
 								bind:value={daysAhead}
 								class="px-3 py-1.5 border border-border rounded-lg text-sm focus:ring-2 focus:ring-ring focus:border-transparent"
 							>

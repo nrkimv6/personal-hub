@@ -42,9 +42,11 @@
   <div
     class="fixed inset-0 z-50 flex items-center justify-center animate-fade-in"
     on:click={handleBackdropClick}
+    on:keydown={handleKeydown}
     role="dialog"
     aria-modal="true"
     aria-labelledby="modal-title"
+    tabindex="-1"
   >
     <!-- Overlay -->
     <div class="absolute inset-0 bg-foreground/50 backdrop-blur-sm"></div>
