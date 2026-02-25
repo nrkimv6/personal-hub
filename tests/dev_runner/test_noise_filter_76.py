@@ -116,6 +116,28 @@ class TestIsNoiseLine:
     def test_stderr_prefixed_normal_line_not_suppressed(self):
         assert not is_noise_line("  [20:03:37] [STDERR] BOM이 제거되었습니다")
 
+    # ── xterm.js JSON 바디 줄 ───────────────────────────────────────────────
+    def test_xterm_json_numbers_suppressed(self):
+        assert is_noise_line("  [20:12:15] [STDERR]        0, 0, 0, 0, 0")
+
+    def test_xterm_json_closing_bracket_suppressed(self):
+        assert is_noise_line("  [20:12:15] [STDERR]     ],")
+
+    def test_xterm_json_length_prop_suppressed(self):
+        assert is_noise_line("  [20:12:15] [STDERR]     length: 2,")
+
+    def test_xterm_json_sub_params_suppressed(self):
+        assert is_noise_line("  [20:12:15] [STDERR]     _subParams: Int32Array(32) [")
+
+    def test_xterm_json_reject_digits_suppressed(self):
+        assert is_noise_line("  [20:12:15] [STDERR]     _rejectDigits: false,")
+
+    def test_xterm_json_abort_suppressed(self):
+        assert is_noise_line("  [20:12:15] [STDERR]   abort: false")
+
+    def test_xterm_json_uint32array_suppressed(self):
+        assert is_noise_line("  [20:12:15] [STDERR]     _subParamsIdx: Uint16Array(32) [")
+
 
 # ── _stream_output 통합 테스트 ───────────────────────────────────────────────
 
