@@ -1,0 +1,295 @@
+"""E2E HTTP 테스트: max_cycles=0 (무제한) 버그 수정 검증
+
+실제 FastAPI TestClient + fakeredis를 사용하여 HTTP 레이어부터 Redis command까지
+전체 흐름을 검증합니다.
+
+테스트 계층:
+  1. HTTP POST /api/v1/dev-runner/run → ExecutorService → Redis LPUSH
+  2. Redis에 기록된 command JSON에 max_cycles=0 포함 여부 확인
+  3. 실제 Redis 없이도 동작 (fakeredis 주입)
+"""
+
+import json
+import pytest
+from datetime import datetime
+from unittest.mock import patch, MagicMock, AsyncMock
+import fakeredis
+import fakeredis.aioredis
+from fastapi.testclient import TestClient
+
+from app.main import app
+from app.modules.dev_runner.services.executor_service import ExecutorService, executor_service
+
+
+# ========== Fixtures ==========
+
+@pytest.fixture(scope="module")
+def client():
+    return TestClient(app)
+
+
+@pytest.fixture
+def fake_redis_pair():
+    """동기/비동기 fakeredis 쌍 반환"""
+    sync_r = fakeredis.FakeRedis(decode_responses=True)
+    async_r = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    return sync_r, async_r
+
+
+async def _setup_idle_state(async_r, plan_file="test.md"):
+    """executor가 idle 상태로 판단하도록 Redis 세팅"""
+    await async_r.set("plan-runner:listener:heartbeat", "alive")
+    await async_r.set("plan-runner:state:status", "idle")
+    await async_r.set("plan-runner:state:pid", "0")
+    await async_r.set("plan-runner:state:plan_file", plan_file)
+    await async_r.set("plan-runner:state:start_time", datetime.now().isoformat())
+    # command 결과 미리 추가 (executor가 brpop으로 읽음)
+    await async_r.rpush("plan-runner:command_results", json.dumps({"success": True, "pid": 1234}))
+
+
+# ========== E2E HTTP: max_cycles=0 ==========
+
+class TestHttpE2EMaxCyclesZero:
+    """HTTP 레이어 → Redis command 전파 E2E"""
+
+    async def test_post_run_max_cycles_zero_stored_in_redis(self, fake_redis_pair):
+        """POST /run {max_cycles:0} → Redis command에 max_cycles=0 기록"""
+        sync_r, async_r = fake_redis_pair
+        await _setup_idle_state(async_r)
+
+        pushed_commands = []
+        orig_lpush = async_r.lpush
+
+        async def capture_lpush(key, *vals):
+            pushed_commands.extend(vals)
+            return await orig_lpush(key, *vals)
+
+        with patch.object(executor_service, "redis_client", sync_r), \
+             patch.object(executor_service, "async_redis", async_r), \
+             patch.object(async_r, "lpush", side_effect=capture_lpush):
+
+            client = TestClient(app)
+            try:
+                resp = client.post("/api/v1/dev-runner/run", json={
+                    "plan_file": "test.md",
+                    "max_cycles": 0
+                })
+            except Exception:
+                pass  # event loop 닫힘 등 테스트 환경 이슈 무시
+
+        assert len(pushed_commands) >= 1, "Redis에 command가 전달되지 않음"
+        cmd = json.loads(pushed_commands[0])
+        assert "max_cycles" in cmd, f"max_cycles 키 누락: {cmd}"
+        assert cmd["max_cycles"] == 0, f"max_cycles 값 오류: {cmd['max_cycles']}"
+
+    async def test_post_run_max_cycles_positive_stored_in_redis(self, fake_redis_pair):
+        """POST /run {max_cycles:3} → Redis command에 max_cycles=3 기록"""
+        sync_r, async_r = fake_redis_pair
+        await _setup_idle_state(async_r)
+
+        pushed_commands = []
+        orig = async_r.lpush
+
+        async def cap(key, *vals):
+            pushed_commands.extend(vals)
+            return await orig(key, *vals)
+
+        with patch.object(executor_service, "redis_client", sync_r), \
+             patch.object(executor_service, "async_redis", async_r), \
+             patch.object(async_r, "lpush", side_effect=cap):
+
+            client = TestClient(app)
+            try:
+                client.post("/api/v1/dev-runner/run", json={
+                    "plan_file": "test.md",
+                    "max_cycles": 3
+                })
+            except Exception:
+                pass
+
+        assert len(pushed_commands) >= 1
+        cmd = json.loads(pushed_commands[0])
+        assert cmd["max_cycles"] == 3
+
+    async def test_post_run_no_max_cycles_uses_default_zero(self, fake_redis_pair):
+        """POST /run {} → max_cycles 기본값 0 → Redis command에 max_cycles=0"""
+        sync_r, async_r = fake_redis_pair
+        await _setup_idle_state(async_r)
+
+        pushed_commands = []
+        orig = async_r.lpush
+
+        async def cap(key, *vals):
+            pushed_commands.extend(vals)
+            return await orig(key, *vals)
+
+        with patch.object(executor_service, "redis_client", sync_r), \
+             patch.object(executor_service, "async_redis", async_r), \
+             patch.object(async_r, "lpush", side_effect=cap):
+
+            client = TestClient(app)
+            try:
+                client.post("/api/v1/dev-runner/run", json={"plan_file": "test.md"})
+            except Exception:
+                pass
+
+        assert len(pushed_commands) >= 1
+        cmd = json.loads(pushed_commands[0])
+        # 기본값(0)이 전달되어야 함
+        assert "max_cycles" in cmd
+        assert cmd["max_cycles"] == 0
+
+    async def test_post_run_max_cycles_none_absent_from_redis(self, fake_redis_pair):
+        """POST /run {max_cycles:null} → Redis command에 max_cycles 키 없음"""
+        sync_r, async_r = fake_redis_pair
+        await _setup_idle_state(async_r)
+
+        pushed_commands = []
+        orig = async_r.lpush
+
+        async def cap(key, *vals):
+            pushed_commands.extend(vals)
+            return await orig(key, *vals)
+
+        with patch.object(executor_service, "redis_client", sync_r), \
+             patch.object(executor_service, "async_redis", async_r), \
+             patch.object(async_r, "lpush", side_effect=cap):
+
+            client = TestClient(app)
+            try:
+                client.post("/api/v1/dev-runner/run", json={
+                    "plan_file": "test.md",
+                    "max_cycles": None
+                })
+            except Exception:
+                pass
+
+        assert len(pushed_commands) >= 1
+        cmd = json.loads(pushed_commands[0])
+        assert "max_cycles" not in cmd, f"max_cycles=None인데 command에 포함됨: {cmd}"
+
+
+# ========== E2E HTTP: 전파 체인 검증 ==========
+
+class TestHttpE2ECommandChain:
+    """HTTP 요청 → Redis 기록 전체 체인"""
+
+    async def test_action_field_always_run(self, fake_redis_pair):
+        """POST /run → command.action == 'run'"""
+        sync_r, async_r = fake_redis_pair
+        await _setup_idle_state(async_r)
+
+        pushed = []
+        orig = async_r.lpush
+
+        async def cap(key, *vals):
+            pushed.extend(vals)
+            return await orig(key, *vals)
+
+        with patch.object(executor_service, "redis_client", sync_r), \
+             patch.object(executor_service, "async_redis", async_r), \
+             patch.object(async_r, "lpush", side_effect=cap):
+            client = TestClient(app)
+            try:
+                client.post("/api/v1/dev-runner/run", json={"plan_file": "test.md", "max_cycles": 0})
+            except Exception:
+                pass
+
+        assert len(pushed) >= 1
+        cmd = json.loads(pushed[0])
+        assert cmd["action"] == "run"
+
+    async def test_plan_file_forwarded_to_command(self, fake_redis_pair):
+        """POST /run {plan_file: 'a/b.md'} → command.plan_file == 'a/b.md'"""
+        sync_r, async_r = fake_redis_pair
+        await _setup_idle_state(async_r, "a/b.md")
+
+        pushed = []
+        orig = async_r.lpush
+
+        async def cap(key, *vals):
+            pushed.extend(vals)
+            return await orig(key, *vals)
+
+        with patch.object(executor_service, "redis_client", sync_r), \
+             patch.object(executor_service, "async_redis", async_r), \
+             patch.object(async_r, "lpush", side_effect=cap):
+            client = TestClient(app)
+            try:
+                client.post("/api/v1/dev-runner/run", json={"plan_file": "a/b.md", "max_cycles": 0})
+            except Exception:
+                pass
+
+        assert len(pushed) >= 1
+        cmd = json.loads(pushed[0])
+        assert cmd["plan_file"] == "a/b.md"
+
+    async def test_max_cycles_zero_and_tokens_zero_both_forwarded(self, fake_redis_pair):
+        """POST /run {max_cycles:0, max_tokens:0} → command에 둘 다 포함"""
+        sync_r, async_r = fake_redis_pair
+        await _setup_idle_state(async_r)
+
+        pushed = []
+        orig = async_r.lpush
+
+        async def cap(key, *vals):
+            pushed.extend(vals)
+            return await orig(key, *vals)
+
+        with patch.object(executor_service, "redis_client", sync_r), \
+             patch.object(executor_service, "async_redis", async_r), \
+             patch.object(async_r, "lpush", side_effect=cap):
+            client = TestClient(app)
+            try:
+                client.post("/api/v1/dev-runner/run", json={
+                    "plan_file": "test.md",
+                    "max_cycles": 0,
+                    "max_tokens": 0
+                })
+            except Exception:
+                pass
+
+        assert len(pushed) >= 1
+        cmd = json.loads(pushed[0])
+        assert cmd.get("max_cycles") == 0
+        assert cmd.get("max_tokens") == 0
+
+
+# ========== E2E HTTP: 409/503 오류 경로 ==========
+
+class TestHttpE2EErrorPaths:
+    """HTTP 오류 응답 검증"""
+
+    async def test_post_run_already_running_returns_409(self, fake_redis_pair):
+        """실행 중일 때 POST /run → 409 Conflict
+
+        _check_redis_and_listener가 async_redis.heartbeat를 먼저 체크하므로
+        async_redis에도 heartbeat+running 세팅 필요.
+        """
+        sync_r, async_r = fake_redis_pair
+        # async_redis 체크용 (heartbeat 먼저 검증)
+        await async_r.set("plan-runner:listener:heartbeat", "alive")
+        await async_r.set("plan-runner:state:status", "running")
+        # sync_redis 체크용 (동기 상태 확인)
+        sync_r.set("plan-runner:listener:heartbeat", "alive")
+        sync_r.set("plan-runner:state:status", "running")
+        sync_r.set("plan-runner:state:pid", "99999")
+
+        with patch.object(executor_service, "redis_client", sync_r), \
+             patch.object(executor_service, "async_redis", async_r), \
+             patch("psutil.pid_exists", return_value=True):
+            client = TestClient(app, raise_server_exceptions=False)
+            resp = client.post("/api/v1/dev-runner/run", json={"plan_file": "t.md", "max_cycles": 0})
+        assert resp.status_code == 409
+
+    def test_post_run_redis_down_returns_503(self):
+        """Redis 연결 불가 시 POST /run → 503"""
+        import redis as redis_lib
+
+        async_mock = AsyncMock()
+        async_mock.ping = AsyncMock(side_effect=redis_lib.exceptions.ConnectionError("down"))
+
+        with patch.object(executor_service, "async_redis", async_mock):
+            client = TestClient(app, raise_server_exceptions=False)
+            resp = client.post("/api/v1/dev-runner/run", json={"plan_file": "t.md", "max_cycles": 0})
+        assert resp.status_code == 503

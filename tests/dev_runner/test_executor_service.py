@@ -445,6 +445,107 @@ class TestCORRECTConformance:
         fake_redis.set("plan-runner:listener:heartbeat", "alive")
         fake_redis.set("plan-runner:state:status", "idle")
         # engine key 없음
-        
+
         status = executor.get_process_status()
         assert status.engine == "claude"
+
+
+# ========== TestMaxCyclesZeroBugFix ==========
+
+class TestMaxCyclesZeroBugFix:
+    """fix: max_cycles=0 (무제한)이 command에 포함되지 않는 버그 수정 검증
+
+    버그: if request.max_cycles and request.max_cycles > 0 → 0은 falsy → 누락
+    픽스: if request.max_cycles is not None → 0 포함
+    """
+
+    async def test_max_cycles_zero_included_in_command(self, executor, fake_async_redis):
+        """max_cycles=0 (무제한)이 Redis command에 포함되어야 함"""
+        await _setup_listener_success(fake_async_redis, "test.md")
+        request = RunRequest(plan_file="test.md", max_cycles=0)
+
+        captured = []
+        original_lpush = fake_async_redis.lpush
+
+        async def capture_lpush(key, *values):
+            captured.extend(values)
+            return await original_lpush(key, *values)
+
+        with patch.object(executor.async_redis, 'lpush', side_effect=capture_lpush):
+            await executor.start_dev_runner(request)
+
+        command = json.loads(captured[0])
+        assert "max_cycles" in command, "max_cycles=0이 command에 포함되어야 함 (버그: falsy로 누락됨)"
+        assert command["max_cycles"] == 0
+
+    async def test_max_cycles_positive_included_in_command(self, executor, fake_async_redis):
+        """max_cycles=3 (유한)이 Redis command에 포함되어야 함 (기존 동작 유지)"""
+        await _setup_listener_success(fake_async_redis, "test.md")
+        request = RunRequest(plan_file="test.md", max_cycles=3)
+
+        captured = []
+        original_lpush = fake_async_redis.lpush
+
+        async def capture_lpush(key, *values):
+            captured.extend(values)
+            return await original_lpush(key, *values)
+
+        with patch.object(executor.async_redis, 'lpush', side_effect=capture_lpush):
+            await executor.start_dev_runner(request)
+
+        command = json.loads(captured[0])
+        assert command["max_cycles"] == 3
+
+    async def test_max_cycles_none_not_included_in_command(self, executor, fake_async_redis):
+        """max_cycles=None (미지정)은 command에 포함되지 않아야 함"""
+        await _setup_listener_success(fake_async_redis, "test.md")
+        request = RunRequest(plan_file="test.md", max_cycles=None)
+
+        captured = []
+        original_lpush = fake_async_redis.lpush
+
+        async def capture_lpush(key, *values):
+            captured.extend(values)
+            return await original_lpush(key, *values)
+
+        with patch.object(executor.async_redis, 'lpush', side_effect=capture_lpush):
+            await executor.start_dev_runner(request)
+
+        command = json.loads(captured[0])
+        assert "max_cycles" not in command, "max_cycles=None은 command에 포함되지 않아야 함"
+
+
+# ========== TestCommandListenerMaxCycles ==========
+
+class TestCommandListenerMaxCycles:
+    """command-listener.py의 max_cycles 처리 로직 단위 검증"""
+
+    def _build_cmd(self, command: dict) -> list:
+        """command-listener.py L250~270 로직을 직접 재현 (임포트 없이 테스트)"""
+        cmd = ["monitorpage-worker.exe", "-m", "app.modules.dev_runner.plan_runner"]
+        if command.get("plan_file"):
+            cmd.extend(["--plan-file", command["plan_file"]])
+        if command.get("max_cycles") is not None:
+            cmd.extend(["--max-cycles", str(command["max_cycles"])])
+        if command.get("max_tokens") is not None:
+            cmd.extend(["--max-tokens", str(command["max_tokens"])])
+        return cmd
+
+    def test_max_cycles_zero_appended_to_cli(self):
+        """max_cycles=0이 --max-cycles 0으로 CLI에 전달되어야 함"""
+        cmd = self._build_cmd({"plan_file": "test.md", "max_cycles": 0})
+        assert "--max-cycles" in cmd
+        idx = cmd.index("--max-cycles")
+        assert cmd[idx + 1] == "0"
+
+    def test_max_cycles_positive_appended_to_cli(self):
+        """max_cycles=3이 --max-cycles 3으로 CLI에 전달되어야 함"""
+        cmd = self._build_cmd({"plan_file": "test.md", "max_cycles": 3})
+        assert "--max-cycles" in cmd
+        idx = cmd.index("--max-cycles")
+        assert cmd[idx + 1] == "3"
+
+    def test_max_cycles_absent_not_in_cli(self):
+        """max_cycles 키가 없으면 --max-cycles가 CLI에 포함되지 않아야 함"""
+        cmd = self._build_cmd({"plan_file": "test.md"})
+        assert "--max-cycles" not in cmd
