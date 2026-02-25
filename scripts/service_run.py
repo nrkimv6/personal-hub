@@ -292,7 +292,7 @@ class ServiceRunner:
         """
         try:
             from app.core.death_log import read_recent_deaths, record_crash_loop
-            deaths = read_recent_deaths(window_minutes=5)
+            deaths = read_recent_deaths(window_minutes=5, exclude_causes=["normal_shutdown"])
             count = len(deaths)
             if count >= 3:
                 first_err = None
@@ -324,7 +324,7 @@ class ServiceRunner:
             death_count = 0
             try:
                 from app.core.death_log import read_recent_deaths
-                death_count = len(read_recent_deaths(window_minutes=5))
+                death_count = len(read_recent_deaths(window_minutes=5, exclude_causes=["normal_shutdown"]))
             except Exception:
                 pass
 

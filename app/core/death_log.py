@@ -141,8 +141,18 @@ def read_recent_entries(limit: int = 50) -> list[dict[str, Any]]:
         return []
 
 
-def read_recent_deaths(window_minutes: int = 5) -> list[dict[str, Any]]:
-    """최근 N분 내 death 이벤트 목록을 반환합니다 (크래시 루프 감지용)."""
+def read_recent_deaths(
+    window_minutes: int = 5,
+    exclude_causes: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """최근 N분 내 death 이벤트 목록을 반환합니다 (크래시 루프 감지용).
+
+    Args:
+        window_minutes: 탐색 윈도우 (분 단위).
+        exclude_causes: 제외할 cause 값 목록. 해당 cause의 이벤트는 결과에서 제외된다.
+            예: ``["normal_shutdown"]`` — 정상 종료는 크래시 카운트에서 제외.
+            ``None``(기본값)이면 모든 death 이벤트를 반환한다 (하위 호환).
+    """
     try:
         if not _LOG_PATH.exists():
             return []
@@ -158,6 +168,8 @@ def read_recent_deaths(window_minutes: int = 5) -> list[dict[str, Any]]:
             except json.JSONDecodeError:
                 continue
             if entry.get("event") != "death":
+                continue
+            if exclude_causes and entry.get("cause") in exclude_causes:
                 continue
             try:
                 ts = datetime.fromisoformat(entry["timestamp"]).timestamp()
