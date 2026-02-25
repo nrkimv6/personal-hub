@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { goto } from '$app/navigation';
 	import TaskList from '$lib/components/dev-runner/TaskList.svelte';
 	import RunControl from '$lib/components/dev-runner/RunControl.svelte';
 	import PlanList from '$lib/components/dev-runner/PlanList.svelte';
@@ -16,6 +17,8 @@
 		DevRunnerPlanFileResponse,
 		CurrentTrackingResponse
 	} from '$lib/api';
+
+	let { initialPlan = '' }: { initialPlan?: string } = $props();
 
 	let runStatus = $state<DevRunnerRunStatusResponse | null>(null);
 	let plans = $state<DevRunnerPlanFileResponse[]>([]);
@@ -104,6 +107,21 @@
 		await Promise.all([pollStatus(), fetchPlans()]);
 		loading = false;
 		error = null;
+
+		// Phase 4: initialPlan이 있으면 자동 실행
+		if (initialPlan) {
+			try {
+				const decodedPath = atob(initialPlan);
+				await devRunnerRunnerApi.start({ plan_file: decodedPath });
+				await pollStatus();
+				// URL에서 plan param 제거
+				const url = new URL(window.location.href);
+				url.searchParams.delete('plan');
+				goto(url.toString(), { replaceState: true, keepFocus: true });
+			} catch (e) {
+				console.warn('[DevRunner] initialPlan 자동 실행 실패', e);
+			}
+		}
 
 		// 폴링은 status만 (3초/15초 간격)
 		pollingController = createSmartPolling(

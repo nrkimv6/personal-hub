@@ -7,6 +7,7 @@
 
 	type MainTab = 'dev-runner' | 'sleep-now' | 'git-repos';
 	let mainTab: MainTab = $state('dev-runner');
+	let initialPlan = $state('');
 
 	$effect(() => {
 		const tabParam = $page.url.searchParams.get('tab');
@@ -17,6 +18,7 @@
 		} else {
 			mainTab = 'dev-runner';
 		}
+		initialPlan = $page.url.searchParams.get('plan') ?? '';
 	});
 
 	function setMainTab(tab: MainTab) {
@@ -67,7 +69,7 @@
 
 	<div class="flex-1 overflow-hidden">
 		{#if mainTab === 'dev-runner'}
-			<DevRunnerTab />
+			<DevRunnerTab {initialPlan} />
 		{:else if mainTab === 'sleep-now'}
 			<div class="p-6 overflow-auto h-full">
 				<SleepNowTab />
