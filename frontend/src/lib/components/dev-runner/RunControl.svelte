@@ -68,10 +68,9 @@
 	// 엔진별 사전 정의 모델 리스트
 	const PREDEFINED_MODELS: Record<string, string[]> = {
 		claude: [
-			'claude-3-5-sonnet-20241022',
-			'claude-3-opus-20240229',
-			'claude-3-haiku-20240307',
-			'claude-3-5-haiku-20241022'
+			'opus',
+			'sonnet',
+			'haiku'
 		],
 		gemini: [
 			'gemini-3.1-pro-preview',
@@ -294,13 +293,13 @@
 	</div>
 
 	{#if showModelSettings && engineConfigs && engineConfigs[selectedEngine]}
-		<div class="flex items-center gap-4 px-3 py-2 bg-gray-50 rounded-lg border border-gray-100 animate-in fade-in slide-in-from-top-1 duration-200">
-			<span class="text-[10px] font-bold text-gray-400 uppercase">Phase Models:</span>
+		<div class="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2 bg-gray-50 rounded-lg border border-gray-100 animate-in fade-in slide-in-from-top-1 duration-200">
+			<span class="text-[10px] font-bold text-gray-400 uppercase shrink-0 w-full sm:w-auto">Phase Models:</span>
 			{#each ['plan', 'impl', 'done'] as phase}
-				<div class="flex items-center gap-1.5">
-					<label class="text-[10px] text-gray-500 uppercase">{phase}</label>
+				<div class="flex items-center gap-1.5 flex-1 sm:flex-none">
+					<label class="text-[10px] text-gray-500 uppercase shrink-0">{phase}</label>
 					<select
-						class="border rounded px-1.5 py-0.5 w-40 h-6 text-[10px] font-mono bg-white"
+						class="border rounded px-1.5 py-0.5 flex-1 sm:w-40 h-6 text-[10px] font-mono bg-white"
 						value={engineConfigs[selectedEngine].models[phase]}
 						onchange={(e) => updateModel(phase as any, e.currentTarget.value)}
 						disabled={status?.running}
