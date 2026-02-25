@@ -33,6 +33,7 @@
   let searchQuery = $state('');
   let statusFilter = $state('all');
   let sortBy = $state('date');
+  let tagFilter = $state<number | null>(null);  // Bug #6 수정: 미선언으로 ReferenceError 발생
   let detailImage = $state<number | null>(null);
 
   const PAGE_SIZE = 24;
@@ -251,7 +252,6 @@
   // 태그 상태
   let tags = $state<TagItem[]>([]);
   let showTagPicker = $state(false);
-  let tagFilter = $state<number | null>(null);  // null = 전체
   let detailTags = $state<TagItem[]>([]);  // 디테일 패널용
 
   async function loadTags() {
