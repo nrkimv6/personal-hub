@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
 	import { ListChecks, Plus, GripVertical, Pencil, Trash2, Save, X, ArrowRight, Eye, Loader2 } from 'lucide-svelte';
+	import { toast } from '$lib/stores/toast';
 
 	interface Rule {
 		id: number;
@@ -44,7 +45,7 @@
 			await fetchWithTimeout(`/api/ic/rules/${id}/toggle`, { method: 'POST' });
 			await loadRules();
 		} catch (err) {
-			alert('규칙 토글 실패');
+			toast.error('규칙 토글 실패');
 		}
 	}
 
@@ -62,13 +63,13 @@
 			editingId = null;
 			await loadRules();
 		} catch (err) {
-			alert('규칙 저장 실패');
+			toast.error('규칙 저장 실패');
 		}
 	}
 
 	async function addRule() {
 		if (!newRule.rule_content || !newRule.category_name) {
-			alert('패턴과 카테고리를 입력하세요.');
+			toast.warning('패턴과 카테고리를 입력하세요.');
 			return;
 		}
 		try {
@@ -81,7 +82,7 @@
 			newRule = { rule_type: 'keyword', rule_content: '', category_name: '', priority: 0 };
 			await loadRules();
 		} catch (err) {
-			alert('규칙 추가 실패');
+			toast.error('규칙 추가 실패');
 		}
 	}
 
@@ -92,7 +93,7 @@
 			await fetchWithTimeout(`/api/ic/rules/${id}`, { method: 'DELETE' });
 			await loadRules();
 		} catch (err) {
-			alert('규칙 삭제 실패');
+			toast.error('규칙 삭제 실패');
 		}
 	}
 

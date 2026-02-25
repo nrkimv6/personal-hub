@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { fetchWithTimeout } from '$lib/api/client';
 	import { History, RotateCcw, RefreshCw, ScanLine, ChevronDown, ChevronRight, ChevronLeft, FileImage, ArrowRight } from 'lucide-svelte';
+	import { toast } from '$lib/stores/toast';
 	import { createPagePagination } from '$lib/utils/pagination.svelte';
 	import { loadCategoryMap, getCategoryName } from '../lib/categoryUtils';
 
@@ -90,7 +91,7 @@
 			if (!res.ok) throw new Error('복원 실패');
 			await loadHistory();
 		} catch (err) {
-			alert('복원 실패');
+			toast.error('복원 실패');
 		}
 	}
 

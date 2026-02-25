@@ -16,6 +16,7 @@
 		SquareCheck,
 		Square
 	} from 'lucide-svelte';
+	import { toast } from '$lib/stores/toast';
 
 	interface FileReview {
 		id: number;
@@ -143,7 +144,7 @@
 			selection.clear();
 			await loadFiles(true);
 		} catch (err) {
-			alert('?�인 ?�패');
+			toast.error('승인 실패');
 		}
 	}
 
@@ -160,7 +161,7 @@
 			selection.clear();
 			await loadFiles(true);
 		} catch (err: unknown) {
-			alert(`??�� ?�패: ${(err as Error).message}`);
+			toast.error(`삭제 실패: ${(err as Error).message}`);
 		}
 	}
 
@@ -177,7 +178,7 @@
 			showCategoryPicker = false;
 			await loadFiles(true);
 		} catch (err: unknown) {
-			alert(`카테고리 지???�패: ${(err as Error).message}`);
+			toast.error(`카테고리 지정 실패: ${(err as Error).message}`);
 		}
 	}
 

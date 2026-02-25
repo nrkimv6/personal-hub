@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { fetchWithTimeout } from '$lib/api/client';
   import { Tags, Search, Plus, Trash2, X, Tag, Loader2, FolderSymlink, Save } from 'lucide-svelte';
+  import { toast } from '$lib/stores/toast';
 
   interface TagItem {
     id: number;
@@ -68,7 +69,7 @@
       newTagName = '';
       await loadTags(); // 재로드
     } catch (err: any) {
-      alert(`태그 생성 실패: ${err.message}`);
+      toast.error(`태그 생성 실패: ${err.message}`);
     } finally {
       creatingTag = false;
     }
@@ -85,7 +86,7 @@
       if (selectedTag?.id === tag.id) selectedTag = null;
       await loadTags();
     } catch (err: any) {
-      alert(`태그 삭제 실패: ${err.message}`);
+      toast.error(`태그 삭제 실패: ${err.message}`);
     } finally {
       deletingTagId = null;
     }
@@ -111,7 +112,7 @@
       const updated = tags.find(t => t.id === selectedTag!.id);
       if (updated) selectedTag = updated;
     } catch (err: any) {
-      alert(`폴더 규칙 저장 실패: ${err.message}`);
+      toast.error(`폴더 규칙 저장 실패: ${err.message}`);
     } finally {
       savingFolderRule = false;
     }

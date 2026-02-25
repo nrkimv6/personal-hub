@@ -12,6 +12,7 @@
 		ImageIcon,
 		Database
 	} from 'lucide-svelte';
+	import { toast } from '$lib/stores/toast';
 
 	interface Settings {
 		scan_root_folders: string[];
@@ -120,12 +121,12 @@
 				})
 			});
 			if (response.ok) {
-				alert('설정이 저장되었습니다.');
+				toast.success('설정이 저장되었습니다.');
 			} else {
-				alert('설정 저장 실패');
+				toast.error('설정 저장 실패');
 			}
 		} catch (err) {
-			alert('설정 저장 실패');
+			toast.error('설정 저장 실패');
 		} finally {
 			saving = false;
 		}

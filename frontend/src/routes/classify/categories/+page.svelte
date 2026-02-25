@@ -14,6 +14,7 @@
 		FolderOpen,
 		FolderSymlink
 	} from 'lucide-svelte';
+	import { toast } from '$lib/stores/toast';
 
 	// === 타입 정의 ===
 	interface Category {
@@ -94,10 +95,10 @@
 
 			await loadCategories();
 			closeModal();
-			alert('카테고리 생성 완료!');
+			toast.success('카테고리 생성 완료!');
 		} catch (e) {
 			console.error('카테고리 생성 실패:', e);
-			alert('생성 실패: ' + e);
+			toast.error('생성 실패: ' + e);
 		}
 	}
 
@@ -124,10 +125,10 @@
 
 			await loadCategories();
 			closeModal();
-			alert('카테고리 수정 완료!');
+			toast.success('카테고리 수정 완료!');
 		} catch (e) {
 			console.error('카테고리 수정 실패:', e);
-			alert('수정 실패: ' + e);
+			toast.error('수정 실패: ' + e);
 		}
 	}
 
@@ -170,10 +171,10 @@
 
 			if (selected?.id === categoryId) selected = null;
 			await loadCategories();
-			alert('카테고리 삭제 완료!');
+			toast.success('카테고리 삭제 완료!');
 		} catch (e) {
 			console.error('카테고리 삭제 실패:', e);
-			alert('삭제 실패: ' + e);
+			toast.error('삭제 실패: ' + e);
 		}
 	}
 
@@ -201,7 +202,7 @@
 			createParentId = null;
 			await loadCategories();
 		} catch (e) {
-			alert('생성 실패: ' + e);
+			toast.error('생성 실패: ' + e);
 		}
 	}
 
@@ -326,7 +327,7 @@
 	}
 
 	async function addFolderRule(categoryId: number) {
-		if (!newRuleForm.folder_template) { alert('폴더 템플릿을 입력하세요.'); return; }
+		if (!newRuleForm.folder_template) { toast.warning('폴더 템플릿을 입력하세요.'); return; }
 		try {
 			const res = await fetchWithTimeout(`/api/ic/categories/${categoryId}/folder-rules`, {
 				method: 'POST',
@@ -342,7 +343,7 @@
 			showAddRuleForm = false;
 			newRuleForm = { condition_type: '', condition_value: '', folder_template: '', priority: 0 };
 			await loadFolderRules(categoryId);
-		} catch (e) { alert('추가 실패: ' + e); }
+		} catch (e) { toast.error('추가 실패: ' + e); }
 	}
 
 	async function updateFolderRule(categoryId: number, ruleId: number) {
@@ -360,7 +361,7 @@
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			editingRuleId = null;
 			await loadFolderRules(categoryId);
-		} catch (e) { alert('수정 실패: ' + e); }
+		} catch (e) { toast.error('수정 실패: ' + e); }
 	}
 
 	async function deleteFolderRule(categoryId: number, ruleId: number) {
@@ -369,7 +370,7 @@
 			const res = await fetchWithTimeout(`/api/ic/categories/${categoryId}/folder-rules/${ruleId}`, { method: 'DELETE' });
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			await loadFolderRules(categoryId);
-		} catch (e) { alert('삭제 실패: ' + e); }
+		} catch (e) { toast.error('삭제 실패: ' + e); }
 	}
 
 	// selected 변경 시 폴더 규칙 자동 로드
