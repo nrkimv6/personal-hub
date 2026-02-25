@@ -8,7 +8,9 @@
 	let screenshot = $state(false);
 
 	let loading = $state(false);
+	/** @type {{ html: string; final_url: string; screenshot_base64?: string; fetched_at: string; [key: string]: unknown } | null} */
 	let result = $state(null);
+	/** @type {string | null} */
 	let error = $state(null);
 
 	async function fetchHtml() {
@@ -41,7 +43,7 @@
 			}
 
 			result = await response.json();
-		} catch (err) {
+		} catch (/** @type {any} */ err) {
 			error = err.message;
 		} finally {
 			loading = false;

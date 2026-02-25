@@ -1,6 +1,8 @@
 <script lang="ts">
   export let variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning' | 'error' | 'info' | 'gray' | 'purple' | 'pink' | 'primary' = 'default';
   export let size: 'sm' | 'md' | 'lg' = 'sm';
+  export let className: string | undefined = undefined;
+  export { className as class };
 
   const variants: Record<string, string> = {
     default: 'border-transparent bg-primary text-primary-foreground hover:bg-primary/80',
@@ -27,7 +29,7 @@
 <span
   class="inline-flex items-center rounded-full border font-semibold transition-colors
          focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2
-         {sizes[size]} {variants[variant]}"
+         {sizes[size]} {variants[variant]} {className ?? ''}"
 >
   <slot />
 </span>

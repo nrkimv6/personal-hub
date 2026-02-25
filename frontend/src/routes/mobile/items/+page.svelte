@@ -3,13 +3,17 @@
 	import { page } from "$app/stores";
   import { fetchWithTimeout } from '$lib/api/client';
 
+	/** @type {Record<string, unknown>[]} */
 	let items = $state([]);
 	let loading = $state(true);
+	/** @type {string | null} */
 	let error = $state(null);
 
 	// 필터
+	/** @type {number | null} */
 	let targetFilter = $state(null);
 	let showOnlyChanged = $state(false);
+	/** @type {Record<string, unknown>[]} */
 	let targets = $state([]);
 
 	// 페이지네이션
@@ -17,6 +21,7 @@
 	let itemsPerPage = 20;
 
 	// 선택된 아이템 (모달용)
+	/** @type {Record<string, unknown> | null} */
 	let selectedItem = $state(null);
 
 	async function loadData() {

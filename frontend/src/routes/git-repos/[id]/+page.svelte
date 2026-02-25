@@ -245,13 +245,14 @@
       onclick={() => goto('/git-repos')}
     >← 목록</button>
     {#if repo}
+      {@const r = repo as GitRepo}
       <h1 class="text-xl font-bold text-gray-800 dark:text-gray-100">
-        {repo.alias || repo.path.split(/[/\\]/).pop()}
+        {r.alias || r.path.split(/[/\\]/).pop()}
       </h1>
-      <span class="text-sm text-gray-400 dark:text-gray-500 truncate">{repo.path}</span>
-      {#if repo.last_branch}
+      <span class="text-sm text-gray-400 dark:text-gray-500 truncate">{r.path}</span>
+      {#if r.last_branch}
         <span class="ml-auto font-mono text-xs bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-gray-600 dark:text-gray-300">
-          🌿 {repo.last_branch}
+          🌿 {r.last_branch}
         </span>
       {/if}
     {/if}
@@ -267,11 +268,11 @@
       <button class="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50" onclick={handleFetch} disabled={working}>페치</button>
       <button class="px-3 py-1.5 text-sm rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50" onclick={handlePull} disabled={working}>풀</button>
       <button class="px-3 py-1.5 text-sm rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50" onclick={handlePush} disabled={working}>푸시</button>
-      {#if repo?.last_ahead != null && repo.last_ahead > 0}
-        <span class="text-xs text-green-600 dark:text-green-400 self-center">↑{repo.last_ahead} ahead</span>
+      {#if (repo as GitRepo | null)?.last_ahead != null && (repo as GitRepo).last_ahead > 0}
+        <span class="text-xs text-green-600 dark:text-green-400 self-center">↑{(repo as GitRepo).last_ahead} ahead</span>
       {/if}
-      {#if repo?.last_behind != null && repo.last_behind > 0}
-        <span class="text-xs text-red-500 dark:text-red-400 self-center">↓{repo.last_behind} behind</span>
+      {#if (repo as GitRepo | null)?.last_behind != null && (repo as GitRepo).last_behind > 0}
+        <span class="text-xs text-red-500 dark:text-red-400 self-center">↓{(repo as GitRepo).last_behind} behind</span>
       {/if}
     </div>
 

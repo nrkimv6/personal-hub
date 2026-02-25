@@ -33,7 +33,9 @@
 
 	let html = $state(SAMPLE_HTML);
 	let testSelector = $state(".product-card");
+	/** @type {{ count: number; message: string; samples?: { tagName: string; textContent: string; innerHTML: string }[] } | null} */
 	let testResult = $state(null);
+	/** @type {string | null} */
 	let testError = $state(null);
 
 	// Parse config builder

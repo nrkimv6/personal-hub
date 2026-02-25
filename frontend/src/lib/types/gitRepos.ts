@@ -78,6 +78,7 @@ export interface DiscoverResult {
 export interface GitTaskResponse {
   task_id: string;
   status: 'pending' | 'completed' | 'failed';
+  results?: BatchResult[];
 }
 
 export interface GitTaskResult {

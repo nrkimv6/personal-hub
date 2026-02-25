@@ -6,9 +6,12 @@
 
 	const targetId = $derived($page.params.id);
 
+	/** @type {{ name: string; url: string; [key: string]: unknown } | null} */
 	let target = $state(null);
+	/** @type {Record<string, unknown>[]} */
 	let schedules = $state([]);
 	let loading = $state(true);
+	/** @type {string | null} */
 	let error = $state(null);
 
 	// 새 스케줄 폼

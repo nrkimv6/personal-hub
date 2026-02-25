@@ -6,10 +6,14 @@
 
 	const targetId = $derived($page.params.id);
 
+	/** @type {Record<string, unknown> | null} */
 	let target = $state(null);
+	/** @type {Record<string, unknown> | null} */
 	let stats = $state(null);
+	/** @type {Record<string, unknown>[]} */
 	let items = $state([]);
 	let loading = $state(true);
+	/** @type {string | null} */
 	let error = $state(null);
 
 	async function loadData() {

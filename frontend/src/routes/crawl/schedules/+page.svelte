@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
+	import Button from '$lib/components/ui/Button.svelte';
 	import { crawlApi } from '$lib/api';
 	import type { CrawlSchedule, CrawlRunStats } from '$lib/types';
 

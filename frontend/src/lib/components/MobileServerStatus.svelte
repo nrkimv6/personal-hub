@@ -3,8 +3,11 @@
   import { fetchWithTimeout } from '$lib/api/client';
 
 	let status = $state('unknown'); // 'connected', 'disconnected', 'unknown'
+	/** @type {{ uptime_human?: string; [key: string]: unknown } | null} */
 	let health = $state(null);
+	/** @type {string | null} */
 	let error = $state(null);
+	/** @type {ReturnType<typeof setInterval> | null} */
 	let checkInterval = null;
 
 	async function checkHealth() {
@@ -22,7 +25,7 @@
 				error = '모바일 서버 응답 오류';
 				health = null;
 			}
-		} catch (err) {
+		} catch (/** @type {any} */ err) {
 			status = 'disconnected';
 			error = err.name === 'TimeoutError' ? '연결 시간 초과' : '서버 연결 불가';
 			health = null;

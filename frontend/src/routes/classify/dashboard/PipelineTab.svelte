@@ -372,7 +372,7 @@
 	}
 
 	let mergedLogs = $derived(
-		[...(pipelineDetail?.logs ?? []), ...clientLogs].sort((a, b) =>
+		[...((pipelineDetail as PipelineDetail | null)?.logs ?? []), ...clientLogs].sort((a, b) =>
 			a.timestamp.localeCompare(b.timestamp)
 		)
 	);
