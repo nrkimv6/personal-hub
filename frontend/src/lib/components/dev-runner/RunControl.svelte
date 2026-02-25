@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { devRunnerRunnerApi, devRunnerPlanApi } from '$lib/api';
-	import type { DevRunnerRunStatusResponse, DevRunnerPlanFileResponse } from '$lib/api';
+	import { devRunnerRunnerApi, devRunnerPlanApi, devRunnerEngineApi } from '$lib/api';
+	import type { DevRunnerRunStatusResponse, DevRunnerPlanFileResponse, AllEnginesConfig } from '$lib/api';
+	import { onMount } from 'svelte';
 
 	interface Props {
 		status: DevRunnerRunStatusResponse | null;
@@ -13,6 +14,8 @@
 
 	let mode = $state<'single' | 'all'>('single');
 	let selectedEngine = $state('claude');
+	let engineConfigs = $state<AllEnginesConfig | null>(null);
+	let showModelSettings = $state(false);
 	let maxCycles = $state(0);
 
 	// 실행 중인 plan 표시 정보
@@ -35,6 +38,49 @@
 	let actionError = $state<string | null>(null);
 	let syncMessage = $state<string | null>(null);
 	let forceStopNeeded = $state(false);
+
+	async function fetchEngineConfigs() {
+		try {
+			engineConfigs = await devRunnerEngineApi.list();
+		} catch (e) {
+			console.warn('Failed to fetch engine configs', e);
+		}
+	}
+
+	onMount(() => {
+		fetchEngineConfigs();
+	});
+
+	async function updateModel(phase: 'plan' | 'impl' | 'done', model: string) {
+		if (!engineConfigs || !selectedEngine) return;
+		try {
+			const currentModels = engineConfigs[selectedEngine].models;
+			await devRunnerEngineApi.update(selectedEngine, {
+				models: { ...currentModels, [phase]: model }
+			});
+			// 로컬 상태 즉시 반영 (낙관적 업데이트)
+			engineConfigs[selectedEngine].models[phase] = model;
+		} catch (e) {
+			actionError = '모델 변경 실패';
+		}
+	}
+
+	// 엔진별 사전 정의 모델 리스트
+	const PREDEFINED_MODELS: Record<string, string[]> = {
+		claude: [
+			'claude-3-5-sonnet-20241022',
+			'claude-3-opus-20240229',
+			'claude-3-haiku-20240307',
+			'claude-3-5-haiku-20241022'
+		],
+		gemini: [
+			'gemini-3.1-pro-preview',
+			'gemini-3-flash-preview',
+			'gemini-3-pro-preview',
+			'gemini-2.0-flash-thinking-exp',
+			'gemini-2.0-flash'
+		]
+	};
 
 	async function handleStart() {
 		if (mode === 'single' && !selectedPlan) {
@@ -236,8 +282,44 @@
 				<option value="claude">Claude</option>
 				<option value="gemini">Gemini</option>
 			</select>
+
+			<button
+				class="h-8 px-2 rounded border border-gray-200 text-[10px] font-medium hover:bg-gray-50 transition-colors {showModelSettings ? 'bg-blue-50 text-blue-600 border-blue-200' : 'text-gray-500'}"
+				onclick={() => (showModelSettings = !showModelSettings)}
+				title="AI 모델 설정"
+			>
+				AI Settings
+			</button>
 		</div>
 	</div>
+
+	{#if showModelSettings && engineConfigs && engineConfigs[selectedEngine]}
+		<div class="flex items-center gap-4 px-3 py-2 bg-gray-50 rounded-lg border border-gray-100 animate-in fade-in slide-in-from-top-1 duration-200">
+			<span class="text-[10px] font-bold text-gray-400 uppercase">Phase Models:</span>
+			{#each ['plan', 'impl', 'done'] as phase}
+				<div class="flex items-center gap-1.5">
+					<label class="text-[10px] text-gray-500 uppercase">{phase}</label>
+					<select
+						class="border rounded px-1.5 py-0.5 w-40 h-6 text-[10px] font-mono bg-white"
+						value={engineConfigs[selectedEngine].models[phase]}
+						onchange={(e) => updateModel(phase as any, e.currentTarget.value)}
+						disabled={status?.running}
+					>
+						<!-- 사전 정의된 모델 목록 -->
+						{#each PREDEFINED_MODELS[selectedEngine] || [] as model}
+							<option value={model}>{model}</option>
+						{/each}
+						<!-- 현재 설정된 값이 리스트에 없으면 추가 표시 -->
+						{#if !PREDEFINED_MODELS[selectedEngine]?.includes(engineConfigs[selectedEngine].models[phase])}
+							<option value={engineConfigs[selectedEngine].models[phase]}>
+								{engineConfigs[selectedEngine].models[phase]} (Custom)
+							</option>
+						{/if}
+					</select>
+				</div>
+			{/each}
+		</div>
+	{/if}
 
 	<!-- Options Row -->
 	<div class="flex items-center gap-4 flex-wrap text-xs {status?.running ? 'opacity-50 pointer-events-none' : ''}">

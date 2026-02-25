@@ -156,6 +156,34 @@ async function devRunnerRequest<T>(endpoint: string, options: RequestInit = {}):
 }
 
 // ============================================================
+// Engines API
+// ============================================================
+
+export interface EngineConfig {
+	default_model: string;
+	flags: string[];
+	models: {
+		plan: string;
+		impl: string;
+		done: string;
+		[key: string]: string;
+	};
+}
+
+export interface AllEnginesConfig {
+	[engine: string]: EngineConfig;
+}
+
+export const devRunnerEngineApi = {
+	list: () => devRunnerRequest<AllEnginesConfig>('/engines'),
+	update: (engine: string, config: Partial<EngineConfig>) =>
+		devRunnerRequest<{ success: boolean; message: string }>(`/engines/${engine}`, {
+			method: 'PUT',
+			body: JSON.stringify(config)
+		})
+};
+
+// ============================================================
 // Tasks API
 // ============================================================
 
