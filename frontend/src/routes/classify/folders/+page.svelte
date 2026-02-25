@@ -18,6 +18,7 @@
 		ChevronRight,
 		ClipboardList
 	} from 'lucide-svelte';
+	import { toast } from '$lib/stores/toast';
 
 	// === 타입 정의 ===
 	interface Folder {
@@ -156,12 +157,12 @@
 				throw new Error(err.detail || '일괄 적용 실패');
 			}
 			const data = await res.json();
-			alert(`${data.folders_updated}개 폴더에 카테고리 적용 완료`);
+			toast.success(`${data.folders_updated}개 폴더에 카테고리 적용 완료`);
 			selectedFolderIds = new Set();
 			bulkCategoryId = '';
 			await loadFolders();
 		} catch (e: any) {
-			alert(e.message || '일괄 적용 실패');
+			toast.error(e.message || '일괄 적용 실패');
 		} finally {
 			bulkApplying = false;
 		}
@@ -280,7 +281,7 @@
 				}
 			}, 1000);
 		} catch (e: any) {
-			alert(e.message);
+			toast.error(e.message);
 			scanning = false;
 			classifyLoading = false;
 		}
@@ -368,13 +369,13 @@
 
 			const data = await res.json();
 			if (data.already_set) {
-				alert('부모 폴더에 이미 카테고리가 설정되어 있습니다.');
+				toast.warning('부모 폴더에 이미 카테고리가 설정되어 있습니다.');
 			} else {
-				alert(`부모 폴더에 카테고리 전파 완료`);
+				toast.success(`부모 폴더에 카테고리 전파 완료`);
 				await loadFolders();
 			}
 		} catch (e: any) {
-			alert(e.message || '상위 전파 실패');
+			toast.error(e.message || '상위 전파 실패');
 			console.error('상위 전파 실패:', e);
 		}
 	}
@@ -399,10 +400,10 @@
 			}
 
 			const data = await res.json();
-			alert(`${data.siblings_updated}개 형제 폴더에 카테고리 전파 완료`);
+			toast.success(`${data.siblings_updated}개 형제 폴더에 카테고리 전파 완료`);
 			await loadFolders();
 		} catch (e: any) {
-			alert(e.message || '형제 전파 실패');
+			toast.error(e.message || '형제 전파 실패');
 			console.error('형제 전파 실패:', e);
 		}
 	}
@@ -509,7 +510,7 @@
 
 	async function startScan() {
 		if (scanRoots.length === 0) {
-			alert('스캔 대상 폴더를 추가하세요.');
+			toast.warning('스캔 대상 폴더를 추가하세요.');
 			return;
 		}
 		scanning = true;
@@ -551,7 +552,7 @@
 				}
 			}, 1000);
 		} catch (e: any) {
-			alert(e.message);
+			toast.error(e.message);
 			scanning = false;
 		}
 	}
@@ -572,7 +573,7 @@
 
 	async function resumeScan() {
 		if (scanRoots.length === 0) {
-			alert('스캔 대상 폴더를 추가하세요.');
+			toast.warning('스캔 대상 폴더를 추가하세요.');
 			return;
 		}
 		scanning = true;
@@ -617,7 +618,7 @@
 				}
 			}, 1000);
 		} catch (e: any) {
-			alert(e.message);
+			toast.error(e.message);
 			scanning = false;
 		}
 	}
