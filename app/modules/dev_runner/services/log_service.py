@@ -92,6 +92,8 @@ class LogService:
 
         pubsub = None
         last_heartbeat = time.monotonic()
+        consecutive_errors = 0
+        MAX_CONSECUTIVE_ERRORS = 5
 
         while True:
             try:
@@ -105,6 +107,7 @@ class LogService:
                 if message and message["type"] == "message":
                     yield f"data: {message['data']}\n\n"
                     last_heartbeat = time.monotonic()
+                    consecutive_errors = 0  # 정상 수신 시 카운터 리셋
                 else:
                     # 메시지 없으면 heartbeat 체크
                     now = time.monotonic()
@@ -115,10 +118,16 @@ class LogService:
 
             except (redis.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError):
                 # Redis 연결 실패 — generator 종료 대신 heartbeat 유지 + 재연결 대기
+                # consecutive_errors 증가 없음 (연결 문제는 별도 처리)
                 if pubsub:
                     try:
                         await pubsub.unsubscribe(LOG_CHANNEL)
                         await pubsub.aclose()
+                    except AttributeError:
+                        try:
+                            await pubsub.close()
+                        except Exception:
+                            pass
                     except Exception:
                         pass
                     pubsub = None
@@ -127,15 +136,26 @@ class LogService:
                 await asyncio.sleep(5)
 
             except Exception as e:
-                yield f"data: [Error: {str(e)}]\n\n"
+                consecutive_errors += 1
                 if pubsub:
                     try:
                         await pubsub.unsubscribe(LOG_CHANNEL)
                         await pubsub.aclose()
+                    except AttributeError:
+                        try:
+                            await pubsub.close()
+                        except Exception:
+                            pass
                     except Exception:
                         pass
                     pubsub = None
                 last_heartbeat = time.monotonic()
+
+                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                    yield "event: stream_error\ndata: Too many consecutive errors, stream stopped\n\n"
+                    return
+
+                yield f"data: [Stream error #{consecutive_errors}: {str(e)}]\n\n"
                 await asyncio.sleep(5)
 
 

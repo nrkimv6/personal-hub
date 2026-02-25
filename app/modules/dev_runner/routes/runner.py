@@ -32,4 +32,10 @@ async def reset_state(full_reset: bool = False):
     return executor_service.reset_running_state(full_reset=full_reset)
 
 
+@router.post("/restart-listener")
+def restart_listener():
+    """command-listener 프로세스 재시작"""
+    return executor_service.restart_listener()
+
+
 __all__ = ['router']
