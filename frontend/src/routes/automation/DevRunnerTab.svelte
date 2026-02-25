@@ -302,7 +302,6 @@
 				<div class="flex-1 min-h-0 overflow-hidden">
 					<LogViewer
 						planFile={effectivePlanFile ?? undefined}
-						engine={runStatus?.engine ?? undefined}
 						currentPlanName={runStatus?.current_plan_name ?? undefined}
 						onBatchPlansChange={(plans) => { batchPlans = plans; }}
 					/>

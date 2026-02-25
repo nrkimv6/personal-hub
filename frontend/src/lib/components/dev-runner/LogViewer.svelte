@@ -4,12 +4,11 @@
 
 	interface Props {
 		planFile?: string;
-		engine?: string;
 		currentPlanName?: string;
 		onBatchPlansChange?: (plans: BatchPlanItem[]) => void;
 	}
 
-	let { planFile, engine, currentPlanName, onBatchPlansChange }: Props = $props();
+	let { planFile, currentPlanName, onBatchPlansChange }: Props = $props();
 
 	// Phase 2: 전체실행 시 Plan 파일 리스트 추적
 	interface BatchPlanItem {
@@ -38,15 +37,10 @@
 	let reconnectCount = $state(0);
 	let consecutiveErrors = $state(0);
 	let redisAvailable = $state(true);
-	let listenerAlive = $state<boolean | null>(null);
-	let cliRunning = $state<boolean | null>(null);
-	let processPid = $state<number | null>(null);
 	let pendingStale = $state(false);
 	const MAX_LINES = 500;
 	const SEPARATOR_PATTERN = '════════════════';
 
-	// TaskTracker 실시간 추적 정보 (SSE 스트림에서 [TRACK] 태그 파싱)
-	let trackingInfo = $state<{ lineNum: string; text: string } | null>(null);
 	const BASE_DELAY = 3000;
 
 	// Tag colors for dark background
@@ -134,19 +128,6 @@
 			batchPlans = [];
 		}
 
-		// TRACK 태그 감지 → trackingInfo 갱신
-		if (parsed.tag === 'TRACK' && !isStale) {
-			// 형식: "HIGH: L{num} {text}" 또는 "MEDIUM: L{num} {text}"
-			const trackMatch = parsed.message.match(/^(?:\w+):\s*L(\d+)\s+(.+)$/);
-			if (trackMatch) {
-				trackingInfo = { lineNum: trackMatch[1], text: trackMatch[2] };
-			}
-		}
-		// SEPARATOR 감지 → trackingInfo 초기화 (새 세션)
-		if (text.includes(SEPARATOR_PATTERN) && !isStale) {
-			trackingInfo = null;
-		}
-
 		if (paused && !isStale) {
 			pauseBuffer.push(parsed);
 			return;
@@ -206,10 +187,7 @@
 			const statusRes = await fetch('/api/v1/dev-runner/status');
 			if (statusRes.ok) {
 				redisAvailable = true;
-				const data = await statusRes.json();
-				listenerAlive = data.listener_alive ?? null;
-				cliRunning = data.running ?? null;
-				processPid = data.pid ?? null;
+				await statusRes.json();
 			} else {
 				redisAvailable = false;
 			}
@@ -299,22 +277,6 @@
 		onBatchPlansChange?.(batchPlans);
 	});
 
-	// Plan 파일명 표시용
-	let planDisplayName = $derived.by(() => {
-		if (planFile === 'ALL') {
-			if (currentPlanName && batchPlans.length > 0) {
-				return `전체 실행 › ${currentPlanName} (${batchDoneCount}/${batchPlans.length})`;
-			}
-			if (currentPlanName) {
-				return `전체 실행 › ${currentPlanName}`;
-			}
-			if (batchPlans.length > 0) {
-				return `전체 실행 (${batchDoneCount}/${batchPlans.length})`;
-			}
-			return '전체 실행';
-		}
-		return planFile ? planFile.split(/[\\/]/).pop() ?? '' : '';
-	});
 </script>
 
 <div class="flex flex-col h-full min-h-0">
@@ -322,56 +284,20 @@
 	<div class="flex items-center justify-between px-3 py-2 border-b border-gray-700 shrink-0 bg-gray-900">
 		<div class="flex items-center gap-2">
 			<span class="text-xs font-medium uppercase tracking-wider text-gray-300">Live Logs</span>
-			<!-- Phase 2: Plan 파일명 표시 -->
-			{#if planDisplayName}
-				<div class="h-3.5 w-px bg-gray-600 shrink-0"></div>
-				<span class="text-[10px] text-gray-400 font-mono truncate max-w-[350px]">{planDisplayName}</span>
-			{/if}
-			<div class="flex items-center gap-1.5">
-				{#if connected === 'connected' && redisAvailable}
-					<div class="w-2 h-2 rounded-full bg-green-500"></div>
-					<span class="text-[10px] text-green-400">SSE 연결됨</span>
-					{#if engine}
-						<span class="text-[10px] px-1.5 py-0.5 rounded font-bold uppercase {engine === 'gemini' ? 'bg-orange-500/20 text-orange-400' : 'bg-blue-500/20 text-blue-400'}">
-							{engine}
-						</span>
-					{/if}
-				{:else if connected === 'connected' && !redisAvailable}
-					<div class="w-2 h-2 rounded-full bg-yellow-500"></div>
-					<span class="text-[10px] text-yellow-400">Redis 미연결</span>
-				{:else}
-					<div class="w-2 h-2 rounded-full bg-gray-400 animate-pulse"></div>
-					<span class="text-[10px] text-gray-500">재연결 중... ({reconnectCount})</span>
+			<div class="flex items-center gap-1">
+				<!-- SSE 상태 원 -->
+				<div
+					class="w-2 h-2 rounded-full {connected === 'connected' ? 'bg-green-500' : 'bg-gray-400 animate-pulse'}"
+					title={connected === 'connected' ? 'SSE 연결됨' : `재연결 중... (${reconnectCount})`}
+				></div>
+				<!-- Redis 상태 원 (SSE 연결 시에만 표시) -->
+				{#if connected === 'connected'}
+					<div
+						class="w-2 h-2 rounded-full {redisAvailable ? 'bg-green-500' : 'bg-yellow-500'}"
+						title={redisAvailable ? 'Redis 연결됨' : 'Redis 미연결'}
+					></div>
 				{/if}
 			</div>
-			{#if listenerAlive !== null}
-				{#if listenerAlive && cliRunning}
-					<span class="text-[10px] px-1.5 py-0.5 rounded text-cyan-400 bg-cyan-500/20">
-						실행 중{processPid ? ` (PID: ${processPid})` : ''}
-					</span>
-				{:else if listenerAlive}
-					<span class="text-[10px] px-1.5 py-0.5 rounded text-green-400 bg-green-500/20">
-						대기 중
-					</span>
-				{:else}
-					<span class="text-[10px] px-1.5 py-0.5 rounded text-gray-500 bg-gray-500/20">
-						리스너 꺼짐
-					</span>
-				{/if}
-			{/if}
-			{#if trackingInfo}
-				<span
-					class="text-[10px] text-purple-400 bg-purple-500/20 px-1.5 py-0.5 rounded max-w-[200px] truncate"
-					title="L{trackingInfo.lineNum} {trackingInfo.text}"
-				>
-					추적: L{trackingInfo.lineNum} {trackingInfo.text.slice(0, 30)}{trackingInfo.text.length > 30 ? '…' : ''}
-				</span>
-			{/if}
-			{#if paused && pauseBuffer.length > 0}
-				<span class="text-[10px] text-yellow-400 bg-yellow-500/20 px-1.5 py-0.5 rounded">
-					+{pauseBuffer.length} 버퍼
-				</span>
-			{/if}
 		</div>
 		<div class="flex items-center gap-1">
 			{#if connected !== 'connected' || !redisAvailable}
@@ -401,6 +327,11 @@
 				{:else}
 					<svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
 					Resume
+					{#if pauseBuffer.length > 0}
+						<span class="ml-0.5 text-[9px] bg-yellow-500/30 text-yellow-300 px-1 rounded-full leading-none py-0.5">
+							{pauseBuffer.length}
+						</span>
+					{/if}
 				{/if}
 			</button>
 		</div>
