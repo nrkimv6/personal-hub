@@ -54,8 +54,15 @@ def test_db():
     )
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-    # 테이블 생성
-    Base.metadata.create_all(bind=engine)
+    # 테이블 생성 — postgresql.UUID 컬럼이 있는 테이블은 SQLite에서 실패하므로
+    # 스케줄 API 테스트에 필요한 테이블만 명시적으로 생성
+    _NEEDED = {
+        "task_schedules", "task_schedule_runs",
+        "service_accounts", "browser_profiles",
+        "google_saved_searches",
+    }
+    tables = [t for name, t in Base.metadata.tables.items() if name in _NEEDED]
+    Base.metadata.create_all(bind=engine, tables=tables)
 
     session = TestingSessionLocal()
 
@@ -454,7 +461,7 @@ class TestUpdateScheduleTargetConfig:
         assert resp.status_code == 200
         return resp.json()["id"]
 
-    def test_update_schedule_target_config_right(self, client, test_db):
+    def test_update_schedule_target_config_right(self, client):
         """TC-Right: writing_task 스케줄에 llm_provider=gemini 저장"""
         schedule_id = self._create_writing_schedule(client)
 
@@ -466,7 +473,7 @@ class TestUpdateScheduleTargetConfig:
         data = response.json()
         assert data.get("target_config", {}).get("llm_provider") == "gemini"
 
-    def test_update_schedule_target_config_merge(self, client, test_db, sample_service_account):
+    def test_update_schedule_target_config_merge(self, client, sample_service_account):
         """TC-Merge: 기존 service_account_id가 있는 스케줄에 llm_provider 추가 시 기존 값 보존"""
         # instagram_feed 스케줄 생성 (service_account_id 포함)
         resp = client.post(f"{API_PREFIX}/collect/schedules", json={
@@ -492,7 +499,7 @@ class TestUpdateScheduleTargetConfig:
         # 기존 service_account_id 보존 확인
         assert tc.get("service_account_id") == sample_service_account.id
 
-    def test_update_schedule_target_config_null(self, client, test_db):
+    def test_update_schedule_target_config_null(self, client):
         """TC-Boundary: target_config=null PUT → 기존 target_config 변경 없음"""
         schedule_id = self._create_writing_schedule(client)
 
