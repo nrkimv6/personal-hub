@@ -63,6 +63,30 @@ async def get_plan_progress(encoded_path: str):
     return plan_service.get_plan_progress(path)
 
 
+@router.get("/plans/{encoded_path}/content")
+async def get_plan_content(encoded_path: str):
+    """plan 파일 원본 내용 조회 (Markdown 텍스트)"""
+    try:
+        decoded_path = _decode_path(encoded_path)
+    except Exception as e:
+        logger.error(f"Base64 디코딩 실패: encoded_path={encoded_path}, error={e}")
+        raise HTTPException(status_code=400, detail=f"Invalid encoded path: {str(e)}")
+
+    if not plan_service.validate_path(decoded_path):
+        raise HTTPException(status_code=403, detail="Path not allowed")
+
+    path = Path(decoded_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Plan file not found")
+
+    try:
+        content = path.read_text(encoding="utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read file: {str(e)}")
+
+    return {"content": content, "path": decoded_path}
+
+
 @router.get("/plans/{encoded_path}/items", response_model=PlanDetailResponse)
 async def get_plan_items(encoded_path: str):
     """plan 항목 상세 조회 (Phase별 체크박스 파싱)"""
