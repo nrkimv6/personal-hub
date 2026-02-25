@@ -100,6 +100,22 @@ class TestIsNoiseLine:
     def test_korean_line_not_suppressed(self):
         assert not is_noise_line("BOM이 제거되었는지 확인합니다")
 
+    def test_stderr_prefixed_xterm_suppressed(self):
+        """plan-runner가 '[ts] [STDERR] xterm.js:...' 형태로 감싼 경우도 억제"""
+        assert is_noise_line("  [20:03:37] [STDERR] xterm.js: Parsing error: {")
+
+    def test_stderr_prefixed_attach_console_suppressed(self):
+        assert is_noise_line("  [20:03:37] [STDERR] Error: AttachConsole failed")
+
+    def test_stderr_prefixed_at_stacktrace_suppressed(self):
+        assert is_noise_line("  [20:03:37] [STDERR]     at Object.<anonymous> (file.js:1:1)")
+
+    def test_stderr_prefixed_nodejs_version_suppressed(self):
+        assert is_noise_line("  [20:03:37] [STDERR] Node.js v24.7.0")
+
+    def test_stderr_prefixed_normal_line_not_suppressed(self):
+        assert not is_noise_line("  [20:03:37] [STDERR] BOM이 제거되었습니다")
+
 
 # ── _stream_output 통합 테스트 ───────────────────────────────────────────────
 
