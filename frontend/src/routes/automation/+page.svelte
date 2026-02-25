@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
 	import DevRunnerTab from './DevRunnerTab.svelte';
 	import SleepNowTab from './SleepNowTab.svelte';
 	import GitReposTab from './GitReposTab.svelte';
@@ -43,6 +44,13 @@
 		goto(url.toString(), { replaceState: true, keepFocus: true });
 	}
 
+	const autoTabs = [
+		{ id: 'dev-runner', label: '🚀 Dev Runner' },
+		{ id: 'sleep-now', label: 'Sleep Now' },
+		{ id: 'git-repos', label: '📂 Git 관리' },
+		{ id: 'plans', label: '📋 계획서' },
+	];
+
 	function setMainTab(tab: MainTab) {
 		const url = new URL($page.url);
 		if (tab === 'dev-runner') {
@@ -63,40 +71,7 @@
 <div class="flex flex-col h-full overflow-hidden">
 	<div class="flex items-center gap-4 px-4 lg:px-6 h-12 border-b shrink-0">
 		<h1 class="text-base font-bold tracking-tight text-foreground">시스템 자동화</h1>
-		<nav class="flex gap-1">
-			<button
-				onclick={() => setMainTab('dev-runner')}
-				class="px-3 py-1 text-xs font-medium rounded transition-colors {mainTab === 'dev-runner'
-					? 'bg-blue-50 text-blue-700'
-					: 'text-muted-foreground hover:text-foreground hover:bg-gray-50'}"
-			>
-				🚀 Dev Runner
-			</button>
-			<button
-				onclick={() => setMainTab('sleep-now')}
-				class="px-3 py-1 text-xs font-medium rounded transition-colors {mainTab === 'sleep-now'
-					? 'bg-blue-50 text-blue-700'
-					: 'text-muted-foreground hover:text-foreground hover:bg-gray-50'}"
-			>
-				Sleep Now
-			</button>
-			<button
-				onclick={() => setMainTab('git-repos')}
-				class="px-3 py-1 text-xs font-medium rounded transition-colors {mainTab === 'git-repos'
-					? 'bg-blue-50 text-blue-700'
-					: 'text-muted-foreground hover:text-foreground hover:bg-gray-50'}"
-			>
-				📂 Git 관리
-			</button>
-			<button
-				onclick={() => setMainTab('plans')}
-				class="px-3 py-1 text-xs font-medium rounded transition-colors {mainTab === 'plans'
-					? 'bg-blue-50 text-blue-700'
-					: 'text-muted-foreground hover:text-foreground hover:bg-gray-50'}"
-			>
-				📋 계획서
-			</button>
-		</nav>
+		<TabNav tabs={autoTabs} bind:activeTab={mainTab} variant="primary" size="compact" queryParam="tab" />
 	</div>
 
 	<div class="flex-1 overflow-hidden">

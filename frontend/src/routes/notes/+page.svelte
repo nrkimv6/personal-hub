@@ -1,12 +1,11 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { page } from '$app/stores';
-  import { goto } from '$app/navigation';
   import { Plus } from 'lucide-svelte';
   import NoteList from './components/NoteList.svelte';
   import NoteArchiveList from './components/NoteArchiveList.svelte';
   import NoteTagManager from './components/NoteTagManager.svelte';
   import NoteFormModal from './components/NoteFormModal.svelte';
+  import TabNav from '$lib/components/layout/TabNav.svelte';
 
   type Tab = 'notes' | 'archive' | 'tags';
 
@@ -14,20 +13,11 @@
   let showCreateModal = false;
   let noteListRef: NoteList;
 
-  $: {
-    const tabParam = $page.url.searchParams.get('tab') as Tab | null;
-    activeTab = tabParam && ['notes', 'archive', 'tags'].includes(tabParam) ? tabParam : 'notes';
-  }
-
-  function setTab(tab: Tab) {
-    const url = new URL(window.location.href);
-    if (tab === 'notes') {
-      url.searchParams.delete('tab');
-    } else {
-      url.searchParams.set('tab', tab);
-    }
-    goto(url.toString(), { replaceState: true, noScroll: true });
-  }
+  const noteTabs = [
+    { id: 'notes', label: '메모' },
+    { id: 'archive', label: '아카이브' },
+    { id: 'tags', label: '태그 관리' },
+  ];
 
   function handleNoteCreated() {
     showCreateModal = false;
@@ -89,22 +79,7 @@
   </div>
 
   <!-- 탭 -->
-  <div class="flex gap-6 px-6 border-b border-border bg-card">
-    {#each [['notes', '메모'], ['archive', '아카이브'], ['tags', '태그 관리']] as [id, label]}
-      <button
-        onclick={() => setTab(id as Tab)}
-        class="relative py-3 text-sm font-medium transition-colors
-          {activeTab === id
-            ? 'text-primary'
-            : 'text-muted-foreground hover:text-foreground'}"
-      >
-        {label}
-        {#if activeTab === id}
-          <span class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-full"></span>
-        {/if}
-      </button>
-    {/each}
-  </div>
+  <TabNav tabs={noteTabs} bind:activeTab variant="primary" queryParam="tab" />
 
   <!-- 탭 콘텐츠 -->
   <div class="flex-1 overflow-hidden">

@@ -2,7 +2,8 @@
 	import { onMount } from 'svelte';
 	import { toast } from '$lib/stores/toast';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
-  import { fetchWithTimeout } from '$lib/api/client';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
+	import { fetchWithTimeout } from '$lib/api/client';
 
 	// 타입 정의
 	interface WorkerStatus {
@@ -234,13 +235,12 @@
 		return `${fee.toLocaleString()}원`;
 	}
 
-	// 탭 변경 시 데이터 로드
-	async function handleTabChange(tab: 'centers' | 'courses') {
-		activeTab = tab;
-		if (tab === 'courses' && courses.length === 0) {
-			await loadCourses();
+	// 탭 변경 시 강좌 lazy loading
+	$effect(() => {
+		if (activeTab === 'courses' && courses.length === 0) {
+			loadCourses();
 		}
-	}
+	});
 
 	// 페이지 변경
 	async function changePage(newPage: number) {
@@ -256,6 +256,12 @@
 
 	// 총 페이지 수 계산
 	const totalPages = $derived(Math.ceil(courseTotal / coursePageSize));
+
+	// 탭 목록 (강좌 카운트 동적 반영)
+	const activityTabs = $derived([
+		{ id: 'centers', label: '문화센터' },
+		{ id: 'courses', label: courseTotal ? `강좌 목록 (${courseTotal})` : '강좌 목록' },
+	]);
 </script>
 
 <svelte:head>
@@ -270,26 +276,7 @@
 	{/if}
 
 	<!-- 탭 네비게이션 -->
-	<div class="mb-6 border-b">
-		<nav class="-mb-px flex space-x-8">
-			<button
-				onclick={() => handleTabChange('centers')}
-				class="border-b-2 px-1 py-2 text-sm font-medium {activeTab === 'centers'
-					? 'border-blue-500 text-primary'
-					: 'border-transparent text-muted-foreground hover:border-border hover:text-foreground'}"
-			>
-				센터 관리
-			</button>
-			<button
-				onclick={() => handleTabChange('courses')}
-				class="border-b-2 px-1 py-2 text-sm font-medium {activeTab === 'courses'
-					? 'border-blue-500 text-primary'
-					: 'border-transparent text-muted-foreground hover:border-border hover:text-foreground'}"
-			>
-				강좌 목록 ({courseTotal || '...'})
-			</button>
-		</nav>
-	</div>
+	<TabNav tabs={activityTabs} bind:activeTab variant="primary" queryParam="tab" />
 
 	{#if loading}
 		<div class="text-muted-foreground">로딩 중...</div>

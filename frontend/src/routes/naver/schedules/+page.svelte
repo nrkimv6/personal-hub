@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { Badge, Button } from '$lib/components/ui';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
 
-  import { onMount } from 'svelte';
+	import { onMount } from 'svelte';
   import { scheduleApi, businessApi, serviceAccountApi, itemApi, scheduleRecurringApi } from '$lib/api';
   import type { ScheduleWithContext, Business, BusinessWithItems, BizItem, ServiceAccountWithProfile, MonitorScheduleUpdate, MonitorScheduleCreate, RecurringRuleWithContext, RecurringRuleCreate, TargetPattern } from '$lib/types';
   import AutoBookingList from '$lib/components/schedules/AutoBookingList.svelte';
@@ -62,8 +63,19 @@
     const tab = $page.url.searchParams.get('tab');
     if (tab === 'booking' || tab === 'recurring' || tab === 'history' || tab === 'businesses') {
       activeTab = tab;
+    } else if (tab === null || tab === 'schedules') {
+      activeTab = 'schedules';
     }
   }
+
+  // 탭 목록 (카운트 포함)
+  $: scheduleTabs = [
+    { id: 'schedules', label: '전체 일정', count: schedules.length || undefined },
+    { id: 'booking', label: '자동 예약' },
+    { id: 'recurring', label: '반복 규칙', count: recurringRules.length || undefined },
+    { id: 'history', label: '실행 내역' },
+    { id: 'businesses', label: '업체 관리' },
+  ];
 
   // 반복 규칙 관련 상태
   let recurringRules: RecurringRuleWithContext[] = [];
@@ -853,42 +865,7 @@
   </div>
 
   <!-- 탭 네비게이션 -->
-  <div class="border-b border-border mb-6">
-    <nav class="flex space-x-8">
-      <button
-        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'schedules' ? 'border-blue-500 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
-        onclick={() => activeTab = 'schedules'}
-      >
-        전체 일정
-        <span class="ml-2 px-2 py-0.5 text-xs rounded-full {activeTab === 'schedules' ? 'bg-primary-light text-primary' : 'bg-muted text-muted-foreground'}">{schedules.length}</span>
-      </button>
-      <button
-        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'booking' ? 'border-blue-500 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
-        onclick={() => activeTab = 'booking'}
-      >
-        자동 예약
-      </button>
-      <button
-        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'recurring' ? 'border-blue-500 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
-        onclick={() => activeTab = 'recurring'}
-      >
-        반복 규칙
-        <span class="ml-2 px-2 py-0.5 text-xs rounded-full {activeTab === 'recurring' ? 'bg-primary-light text-primary' : 'bg-muted text-muted-foreground'}">{recurringRules.length}</span>
-      </button>
-      <button
-        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'history' ? 'border-blue-500 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
-        onclick={() => activeTab = 'history'}
-      >
-        실행 내역
-      </button>
-      <button
-        class="py-2 px-1 border-b-2 font-medium text-sm {activeTab === 'businesses' ? 'border-blue-500 text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'}"
-        onclick={() => activeTab = 'businesses'}
-      >
-        업체 관리
-      </button>
-    </nav>
-  </div>
+  <TabNav tabs={scheduleTabs} bind:activeTab variant="primary" queryParam="tab" />
 
   {#if activeTab === 'schedules'}
   <!-- 필터 영역 -->

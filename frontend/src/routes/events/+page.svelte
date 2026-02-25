@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
+	import TabNav from '$lib/components/layout/TabNav.svelte';
 
 	/**
 	 * 이벤트/팝업 관리 페이지
@@ -91,6 +92,36 @@
 	// =========================================================
 	// 탭/필터 관련 함수
 	// =========================================================
+
+	// 탭 전환 탭 목록 (TabNav용)
+	const eventTabs = [
+		{ id: 'online', label: '온라인 이벤트', color: 'purple' },
+		{ id: 'offline', label: '오프라인 이벤트', color: 'green' },
+		{ id: 'popup', label: '팝업', color: 'pink' },
+		{ id: 'uncategorized', label: '미분류', color: 'gray' },
+	];
+
+	// URL 변경 감지 → 탭 전환 사이드이펙트 적용
+	$effect(() => {
+		const urlTab = $pageStore.url.searchParams.get('tab') as TabMode | null;
+		const validTabs: TabMode[] = ['online', 'offline', 'popup', 'uncategorized'];
+		const targetTab: TabMode = urlTab && validTabs.includes(urlTab) ? urlTab : 'online';
+		if (activeTab !== targetTab) {
+			activeTab = targetTab;
+		}
+		currentPage = 1;
+		if (isAnonymous) {
+			if (targetTab === 'online') filterEventStatus = 'ending_tomorrow';
+			else if (targetTab === 'offline') filterEventStatus = 'ongoing';
+			else filterEventStatus = null;
+		} else if (targetTab === 'online' || targetTab === 'offline') {
+			filterEventStatus = 'ongoing';
+		} else if (targetTab === 'popup') {
+			filterEventStatus = 'ongoing_or_upcoming';
+		} else if (targetTab === 'uncategorized') {
+			filterEventStatus = null;
+		}
+	});
 
 	function switchTab(tab: TabMode, updateUrl: boolean = true) {
 		activeTab = tab;
@@ -685,42 +716,7 @@
 	</div>
 
 	<!-- 탭 -->
-	<div class="mb-4 border-b border-border">
-		<nav class="flex gap-4">
-			<button
-				onclick={() => switchTab('online')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'online'
-					? 'border-purple-600 text-purple'
-					: 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				온라인 이벤트
-			</button>
-			<button
-				onclick={() => switchTab('offline')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'offline'
-					? 'border-green-600 text-success'
-					: 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				오프라인 이벤트
-			</button>
-			<button
-				onclick={() => switchTab('popup')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'popup'
-					? 'border-pink-600 text-pink'
-					: 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				팝업
-			</button>
-			<button
-				onclick={() => switchTab('uncategorized')}
-				class="pb-2 px-1 text-sm font-medium border-b-2 transition-colors {activeTab === 'uncategorized'
-					? 'border-gray-600 text-muted-foreground'
-					: 'border-transparent text-muted-foreground hover:text-foreground'}"
-			>
-				미분류
-			</button>
-		</nav>
-	</div>
+	<TabNav tabs={eventTabs} bind:activeTab variant="primary" queryParam="tab" replaceState={false} />
 
 	<!-- 필터 패널 (로그인 사용자만) -->
 	{#if !isAnonymous}
