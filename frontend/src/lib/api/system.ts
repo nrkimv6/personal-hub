@@ -493,6 +493,14 @@ export interface LLMGroupedListParams {
   page_size?: number;
 }
 
+export interface QuotaProviderStatus {
+  paused: boolean;
+  until?: string;
+  remaining_seconds?: number;
+  pending_blocked_count: number;
+}
+export type QuotaStatusMap = Record<string, QuotaProviderStatus>;
+
 export const llmApi = {
   // 요청 목록 조회
   list: (params?: LLMRequestListParams, options?: RequestInit) => {
@@ -612,7 +620,9 @@ export const llmApi = {
     request<{ retried: number; callers: number }>('/llm/requests/batch/retry-failed-callers', {
       method: 'POST',
       body: JSON.stringify({ caller_type: callerType || null })
-    })
+    }),
+
+  getQuotaStatus: () => request<QuotaStatusMap>('/llm/quota-status')
 };
 
 // ============================================================

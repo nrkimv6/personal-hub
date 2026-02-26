@@ -2,7 +2,7 @@
 	import { Button } from '$lib/components/ui';
 
 	import { onMount } from 'svelte';
-	import { llmApi, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMQueueStats, type LLMCallerGroup, type LLMGroupedListResponse } from '$lib/api';
+	import { llmApi, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMQueueStats, type LLMCallerGroup, type LLMGroupedListResponse, type QuotaStatusMap } from '$lib/api';
 	import LLMPerformance from '$lib/components/LLMPerformance.svelte';
 	import { toast } from '$lib/stores/toast';
 	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
@@ -55,6 +55,9 @@
 	// 모달
 	let selectedRequest: LLMRequest | null = null;
 	let showModal = false;
+	let quotaStatus: QuotaStatusMap = {};
+	let countdownSeconds: number = 0;
+	let countdownTimer: ReturnType<typeof setInterval> | null = null;
 
 	// 수동 요청 생성 폼
 	let createForm = {
@@ -505,11 +508,38 @@
 		} catch {
 			// 실패해도 기본 데이터로 모달 유지
 		}
+		// pending 상태일 때 quota-status fetch
+		if (request.status === 'pending') {
+			try {
+				quotaStatus = await llmApi.getQuotaStatus();
+				const provider = request.provider || 'claude';
+				const ps = quotaStatus[provider];
+				if (ps?.paused && ps.remaining_seconds) {
+					countdownSeconds = ps.remaining_seconds;
+					countdownTimer = setInterval(() => {
+						if (countdownSeconds > 0) countdownSeconds--;
+					}, 1000);
+				}
+			} catch { /* 네트워크 오류 시 배너 미표시 */ }
+		}
 	}
 
 	function closeModal() {
 		showModal = false;
 		selectedRequest = null;
+		quotaStatus = {};
+		countdownSeconds = 0;
+		if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+	}
+
+	function formatWaitTime(seconds: number): string {
+		if (seconds <= 0) return '곧 재개';
+		const h = Math.floor(seconds / 3600);
+		const m = Math.floor((seconds % 3600) / 60);
+		const s = seconds % 60;
+		if (h > 0) return `${h}시간 ${m}분`;
+		if (m > 0) return `${m}분 ${s}초`;
+		return `${s}초`;
 	}
 
 	function formatDateTime(isoString: string | null | undefined): string {
@@ -1246,6 +1276,21 @@
 						<span class="ml-1">{selectedRequest.retry_count}</span>
 					</div>
 				</div>
+
+				{#if selectedRequest.status === 'pending'}
+					{@const provider = selectedRequest.provider || 'claude'}
+					{@const ps = quotaStatus[provider]}
+					{#if ps?.paused}
+						<div class="mb-4 p-3 bg-warning-light rounded-lg flex items-start gap-2">
+							<span class="text-warning-foreground text-sm font-medium">⏸ {provider === 'gemini' ? 'Gemini' : 'Claude'} 쿼터 소진</span>
+							<span class="text-warning-foreground text-sm ml-auto">{formatWaitTime(countdownSeconds)} 후 재개</span>
+						</div>
+					{:else}
+						<div class="mb-4 p-3 bg-muted rounded-lg">
+							<span class="text-muted-foreground text-sm">⏳ 처리 대기 중</span>
+						</div>
+					{/if}
+				{/if}
 
 				{#if selectedRequest.error_message}
 					<div class="mb-4 p-3 bg-error-light rounded-lg">
