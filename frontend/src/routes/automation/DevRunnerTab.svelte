@@ -4,7 +4,7 @@
 	import TaskList from '$lib/components/dev-runner/TaskList.svelte';
 	import RunControl from '$lib/components/dev-runner/RunControl.svelte';
 	import PlanList from '$lib/components/dev-runner/PlanList.svelte';
-	import LogViewer from '$lib/components/dev-runner/LogViewer.svelte';
+	import RunnerInstanceTab from '$lib/components/dev-runner/RunnerInstanceTab.svelte';
 	import CurrentTrackingCard from '$lib/components/dev-runner/CurrentTrackingCard.svelte';
 	import { createSmartPolling } from '$lib/utils/smart-polling';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
@@ -15,6 +15,7 @@
 	} from '$lib/api';
 	import type {
 		DevRunnerRunStatusResponse,
+		DevRunnerRunnerListItem,
 		DevRunnerPlanFileResponse,
 		CurrentTrackingResponse
 	} from '$lib/api';
@@ -44,6 +45,17 @@
 	// Batch plan 상태 (LogViewer SSE에서 수신)
 	let batchPlans = $state<{ name: string; status: 'pending' | 'running' | 'done' }[]>([]);
 
+	// Runner 탭 관리 (멀티 runner 지원)
+	interface RunnerTab {
+		id: string;
+		plan_file: string | null;
+		engine: string | null;
+		running: boolean;
+		start_time: string | null;
+	}
+	let runnerTabs = $state<RunnerTab[]>([]);
+	let activeTabId = $state<string | null>(null);
+
 	// Phase 1: elapsed 타이머
 	let elapsed = $state('00:00:00');
 	let elapsedInterval: ReturnType<typeof setInterval> | null = null;
@@ -72,9 +84,51 @@
 				}
 				lastStartTime = null;
 			}
+
+			// runner 탭 running 상태 동기화
+			try {
+				const runners = await devRunnerRunnerApi.runners();
+				const runnerMap = new Map(runners.map(r => [r.runner_id, r]));
+				runnerTabs = runnerTabs.map(tab => {
+					const runner = runnerMap.get(tab.id);
+					return runner ? { ...tab, running: runner.running } : { ...tab, running: false };
+				});
+			} catch {
+				// runners API 실패 시 무시
+			}
 		} catch (e) {
 			console.warn('[DevRunner] status API 호출 실패', e);
 		}
+	}
+
+	function handleRunSuccess(response: DevRunnerRunStatusResponse) {
+		if (!response.runner_id) return;
+		const newTab: RunnerTab = {
+			id: response.runner_id,
+			plan_file: response.plan_file,
+			engine: response.engine ?? null,
+			running: true,
+			start_time: response.start_time,
+		};
+		runnerTabs = [...runnerTabs, newTab];
+		activeTabId = response.runner_id;
+		if (window.innerWidth < 640) {
+			taskHistoryOpen = false;
+		} else {
+			taskHistoryTab = 'tasks';
+		}
+	}
+
+	function handleCloseTab(runnerId: string) {
+		runnerTabs = runnerTabs.filter(t => t.id !== runnerId);
+		if (activeTabId === runnerId) {
+			activeTabId = runnerTabs.length > 0 ? runnerTabs[runnerTabs.length - 1].id : null;
+		}
+	}
+
+	function handleTabStop(runnerId: string) {
+		runnerTabs = runnerTabs.map(t => t.id === runnerId ? { ...t, running: false } : t);
+		void pollStatus();
 	}
 
 	async function fetchPlans() {
@@ -90,13 +144,9 @@
 		error = null;
 	}
 
-	function handleRunStart() {
-                if (window.innerWidth < 640) {
-                        taskHistoryOpen = false;
-                } else {
-                        taskHistoryTab = 'tasks';
-                }
-        }
+	function handleRunStart(response: DevRunnerRunStatusResponse) {
+		handleRunSuccess(response);
+	}
 
         async function handleRunStatusChange() {
 		await pollStatus();
@@ -303,19 +353,52 @@
 						<div class="bg-white border rounded-lg p-4">
 							<RunControl status={runStatus} {plans} onStatusChange={handleRunStatusChange} onStart={handleRunStart} bind:selectedPlan={selectedPlanPath} />
 						</div>
+
+						<!-- Runner 서브탭 바 -->
+						{#if runnerTabs.length > 0}
+							<div class="flex items-center gap-1 bg-white border rounded-lg px-2 py-1 overflow-x-auto">
+								{#each runnerTabs as tab (tab.id)}
+									<button
+										class="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono whitespace-nowrap transition-colors {activeTabId === tab.id ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-gray-600 hover:bg-gray-100'}"
+										onclick={() => { activeTabId = tab.id; }}
+									>
+										<span>{tab.running ? '⏳' : '✅'}</span>
+										<span class="max-w-[120px] truncate">{tab.plan_file ? tab.plan_file.split(/[\\/]/).pop() : '전체 실행'}</span>
+										<button
+											class="ml-0.5 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-300 text-gray-400 hover:text-gray-600 text-[10px]"
+											onclick={(e) => { e.stopPropagation(); handleCloseTab(tab.id); }}
+											title="탭 닫기"
+										>×</button>
+									</button>
+								{/each}
+							</div>
+						{/if}
 					</div>
 				{/if}
 			</div>
 
 			<!-- Log Viewer + Plans & Tasks (2-grid on desktop, stack on mobile) -->
 			<div class="flex-1 min-h-0 flex flex-col md:grid md:grid-cols-2 md:gap-0 overflow-hidden">
-				<!-- Log Viewer -->
+				<!-- Runner 탭 or 안내 -->
 				<div class="flex-1 min-h-0 overflow-hidden">
-					<LogViewer
-						planFile={effectivePlanFile ?? undefined}
-						currentPlanName={runStatus?.current_plan_name ?? undefined}
-						onBatchPlansChange={(plans) => { batchPlans = plans; }}
-					/>
+					{#if activeTabId}
+						{@const activeTab = runnerTabs.find(t => t.id === activeTabId)}
+						{#if activeTab}
+							<RunnerInstanceTab
+								runnerId={activeTab.id}
+								planFile={activeTab.plan_file}
+								running={activeTab.running}
+								engine={activeTab.engine}
+								startTime={activeTab.start_time}
+								onStop={() => handleTabStop(activeTab.id)}
+								onClose={() => handleCloseTab(activeTab.id)}
+							/>
+						{/if}
+					{:else}
+						<div class="flex items-center justify-center h-full text-sm text-gray-400">
+							실행 버튼을 눌러 plan-runner를 시작하세요
+						</div>
+					{/if}
 				</div>
 
 				<!-- Plans & Tasks: 모바일=하단 고정+접힘/펼침, 데스크톱=우측 패널 -->
