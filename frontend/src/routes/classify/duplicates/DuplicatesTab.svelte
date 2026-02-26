@@ -3,7 +3,8 @@
 	import { fetchWithTimeout } from '$lib/api/client';
 	import { toast } from '$lib/stores/toast';
 	import { getErrorMessage } from '$lib/utils/error';
-	import { Copy, Wand2, Check, Trash2, SkipForward, Crown, PartyPopper, Square, ChevronLeft, ChevronRight, FolderOpen, X, ExternalLink, Eye, Clipboard, Merge, Archive } from 'lucide-svelte';
+	import { createSelection } from '$lib/utils/selection.svelte';
+	import { Copy, Wand2, Check, Trash2, SkipForward, Crown, PartyPopper, Square, ChevronLeft, ChevronRight, FolderOpen, X, ExternalLink, Eye, Clipboard, Merge, Archive, LayoutGrid, LayoutList, HelpCircle } from 'lucide-svelte';
 
 	interface DuplicateGroup {
 		group_id: number;
@@ -55,8 +56,53 @@
 
 	let filterStatus = $state('unresolved');
 
-	// 그룹 선택 (병합 + 일괄 확정 공용)
-	let checkedGroups = $state(new Set<number>());
+	// 뷰 모드: 카드뷰 | 갤러리뷰
+	let viewMode = $state<'card' | 'gallery'>('card');
+
+	// 갤러리 뷰 관련 state
+	interface GalleryMember {
+		file_id: number;
+		file_path: string;
+		file_size: number;
+		resolution: string;
+		quality_score: number;
+		phash_distance: number;
+		is_exact: boolean;
+	}
+	interface GalleryGroup {
+		group_id: number;
+		group_hash: string;
+		member_count: number;
+		status: string;
+		members: GalleryMember[];
+		auto_keep_file_id: number | null;
+		confidence: 'high' | 'medium' | 'low';
+	}
+	interface GalleryStats {
+		total: number;
+		auto_resolvable: number;
+		needs_review: number;
+	}
+
+	let galleryGroups = $state<GalleryGroup[]>([]);
+	let galleryStats = $state<GalleryStats>({ total: 0, auto_resolvable: 0, needs_review: 0 });
+	let galleryLoading = $state(false);
+	let galleryFilter = $state<'all' | 'exact' | 'near'>('all');
+	let gallerySkip = $state(0);
+	const galleryLimit = 100;
+	let expandedGroups = $state(new Set<number>());
+	let galleryCurentSkip = $state(0); // 보충용 skip 추적
+
+	// 진행률 표시
+	let bulkProcessing = $state(false);
+	let bulkResolved = $state(0);
+	let bulkTotal = $state(0);
+
+	// 그룹 선택 (병합 + 일괄 확정 공용) — Selection 유틸리티 사용
+	const groupSelection = createSelection();
+
+	// 스크롤 위치 유지
+	let savedScrollY = $state(0);
 
 	// 카테고리 (보관 시 설정용)
 	interface CategoryItem {
@@ -156,6 +202,44 @@
 		}
 	}
 
+	async function loadGalleryGroups() {
+		galleryLoading = true;
+		try {
+			const params = new URLSearchParams();
+			params.set('skip', gallerySkip.toString());
+			params.set('limit', galleryLimit.toString());
+			params.set('filter', galleryFilter);
+			params.set('auto_strategy', 'quality_best');
+
+			const res = await fetchWithTimeout(`/api/ic/duplicates/review?${params}`);
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const data = await res.json();
+			galleryGroups = data.groups ?? [];
+			galleryStats = { total: data.total ?? 0, auto_resolvable: data.auto_resolvable ?? 0, needs_review: data.needs_review ?? 0 };
+			galleryCurentSkip = gallerySkip + galleryGroups.length;
+		} catch (err: any) {
+			toast.error(`갤러리 로드 실패: ${getErrorMessage(err)}`);
+		} finally {
+			galleryLoading = false;
+		}
+	}
+
+	async function fetchMoreGalleryGroups(skip: number, needed: number): Promise<GalleryGroup[]> {
+		try {
+			const params = new URLSearchParams();
+			params.set('skip', skip.toString());
+			params.set('limit', needed.toString());
+			params.set('filter', galleryFilter);
+			params.set('auto_strategy', 'quality_best');
+			const res = await fetchWithTimeout(`/api/ic/duplicates/review?${params}`);
+			if (!res.ok) return [];
+			const data = await res.json();
+			return data.groups ?? [];
+		} catch {
+			return [];
+		}
+	}
+
 	async function loadGroupDetail(groupId: number) {
 		try {
 			const res = await fetchWithTimeout(`/api/ic/duplicates/${groupId}`);
@@ -165,6 +249,64 @@
 		} catch (err: any) {
 			toast.error(`그룹 로드 실패: ${getErrorMessage(err)}`);
 		}
+	}
+
+	// 카드뷰: resolvedIds를 로컬에서 제거하고 부족분을 서버에서 보충
+	async function removeAndFill(resolvedIds: number[]) {
+		savedScrollY = window.scrollY;
+
+		// 로컬 state에서 제거
+		groups = groups.filter((g) => !resolvedIds.includes(g.group_id));
+		totalGroups = Math.max(0, totalGroups - resolvedIds.length);
+		resolvedIds.forEach((id) => {
+			const { [id]: _d, ...restD } = groupDetails; groupDetails = restD;
+			const { [id]: _s, ...restS } = selections; selections = restS;
+			groupSelection.ids.delete(id);
+		});
+		groupSelection.ids = new Set(groupSelection.ids);
+
+		// 현재 표시 수가 limit 미만이면 서버에서 추가 fetch
+		if (groups.length < filter.limit && totalGroups > groups.length) {
+			try {
+				const needed = filter.limit - groups.length;
+				const params = new URLSearchParams();
+				params.set('skip', (filter.skip + groups.length).toString());
+				params.set('limit', needed.toString());
+				if (filter.status !== 'all') params.set('status', filter.status);
+
+				const res = await fetchWithTimeout(`/api/ic/duplicates?${params}`);
+				if (res.ok) {
+					const data = await res.json();
+					const moreGroups: DuplicateGroup[] = data.groups ?? [];
+					groups = [...groups, ...moreGroups];
+
+					// 추가된 그룹의 상세 fetch
+					const morePending = moreGroups.filter((g) => g.status === 'pending');
+					await Promise.all(morePending.map((g) => loadGroupDetail(g.group_id)));
+					autoSelectBySize();
+				}
+			} catch { /* 보충 실패 무시 */ }
+		}
+
+		window.scrollTo(0, savedScrollY);
+	}
+
+	// 갤러리뷰: resolvedIds를 제거하고 보충
+	async function galleryRemoveAndFill(resolvedIds: number[]) {
+		savedScrollY = window.scrollY;
+
+		const prevCount = galleryGroups.length;
+		galleryGroups = galleryGroups.filter((g) => !resolvedIds.includes(g.group_id));
+		galleryStats.total = Math.max(0, galleryStats.total - resolvedIds.length);
+
+		if (galleryGroups.length < galleryLimit && galleryGroups.length < galleryStats.total) {
+			const needed = galleryLimit - galleryGroups.length;
+			const more = await fetchMoreGalleryGroups(galleryCurentSkip, needed);
+			galleryGroups = [...galleryGroups, ...more];
+			galleryCurentSkip += more.length;
+		}
+
+		window.scrollTo(0, savedScrollY);
 	}
 
 	async function resolveGroup(groupId: number, keepFileId: number) {
@@ -189,16 +331,7 @@
 			const result = await res.json();
 
 			toast.success(`해결 완료! 보관: ${result.kept_file_id}, 삭제: ${result.deleted_count}개`);
-
-			// 로컬 상태 업데이트 (loadGroups() 전체 재호출 대신)
-			groups = groups.filter((g) => g.group_id !== groupId);
-			totalGroups = Math.max(0, totalGroups - 1);
-			const { [groupId]: _detail, ...restDetails } = groupDetails;
-			groupDetails = restDetails;
-			const { [groupId]: _sel, ...restSel } = selections;
-			selections = restSel;
-			checkedGroups.delete(groupId);
-			checkedGroups = new Set(checkedGroups);
+			await removeAndFill([groupId]);
 		} catch (err: any) {
 			toast.error(`해결 실패: ${getErrorMessage(err)}`);
 		}
@@ -280,15 +413,7 @@
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const result = await res.json();
 			toast.success(`모두 삭제 완료! 삭제: ${result.deleted_count}개`);
-			// 로컬 상태 업데이트 (loadGroups() 전체 재호출 대신)
-			groups = groups.filter((g) => g.group_id !== groupId);
-			totalGroups = Math.max(0, totalGroups - 1);
-			const { [groupId]: _detail, ...restDetails } = groupDetails;
-			groupDetails = restDetails;
-			const { [groupId]: _sel, ...restSel } = selections;
-			selections = restSel;
-			checkedGroups.delete(groupId);
-			checkedGroups = new Set(checkedGroups);
+			await removeAndFill([groupId]);
 		} catch (err: any) {
 			toast.error(`삭제 실패: ${getErrorMessage(err)}`);
 		}
@@ -341,22 +466,14 @@
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const result = await res.json();
 			toast.success(`모두 보관 완료! ${result.kept_count}개 파일 보관됨`);
-			// 로컬 상태 업데이트 (loadGroups() 전체 재호출 대신)
-			groups = groups.filter((g) => g.group_id !== groupId);
-			totalGroups = Math.max(0, totalGroups - 1);
-			const { [groupId]: _detail, ...restDetails } = groupDetails;
-			groupDetails = restDetails;
-			const { [groupId]: _sel, ...restSel } = selections;
-			selections = restSel;
-			checkedGroups.delete(groupId);
-			checkedGroups = new Set(checkedGroups);
+			await removeAndFill([groupId]);
 		} catch (err: any) {
 			toast.error(`모두 보관 실패: ${getErrorMessage(err)}`);
 		}
 	}
 
 	async function mergeSelectedGroups() {
-		const ids = Array.from(checkedGroups);
+		const ids = groupSelection.toArray();
 		if (ids.length < 2) {
 			toast.warning('병합하려면 2개 이상의 그룹을 선택하세요.');
 			return;
@@ -384,14 +501,14 @@
 				const { [id]: _s, ...restS } = selections; selections = restS;
 			});
 			await loadGroupDetail(targetId);
-			checkedGroups = new Set();
+			groupSelection.clear();
 		} catch (err: any) {
 			toast.error(`병합 실패: ${getErrorMessage(err)}`);
 		}
 	}
 
 	async function bulkResolve() {
-		const ids = Array.from(checkedGroups);
+		const ids = groupSelection.toArray();
 		if (ids.length === 0) return;
 
 		const resolutions = ids
@@ -426,17 +543,67 @@
 				: `일괄 확정 완료! ${result.resolved}개 그룹 처리됨`;
 			result.failed > 0 ? toast.warning(msg) : toast.success(msg);
 
-			// 로컬 상태에서 resolved 그룹 제거
 			const resolvedIds: number[] = result.resolved_group_ids ?? [];
-			groups = groups.filter((g) => !resolvedIds.includes(g.group_id));
-			totalGroups = Math.max(0, totalGroups - resolvedIds.length);
-			resolvedIds.forEach((id) => {
-				const { [id]: _d, ...restD } = groupDetails; groupDetails = restD;
-				const { [id]: _s, ...restS } = selections; selections = restS;
-			});
-			checkedGroups = new Set();
+			await removeAndFill(resolvedIds);
 		} catch (err: any) {
 			toast.error(`일괄 확정 실패: ${getErrorMessage(err)}`);
+		}
+	}
+
+	// 갤러리: 자동선택 전체 확정 (confidence=high 그룹)
+	async function galleryAutoResolveAll() {
+		const highIds = galleryGroups.filter((g) => g.confidence === 'high').map((g) => g.group_id);
+		if (highIds.length === 0) {
+			toast.warning('자동 확정 가능한 그룹이 없습니다.');
+			return;
+		}
+		bulkProcessing = true;
+		bulkTotal = highIds.length;
+		bulkResolved = 0;
+		try {
+			const res = await fetchWithTimeout('/api/ic/duplicates/auto-resolve', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ filter: galleryFilter, strategy: 'quality_best', group_ids: highIds })
+			});
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const result = await res.json();
+			bulkResolved = result.resolved ?? 0;
+			toast.success(`자동 확정 완료! ${result.resolved}개 그룹 처리됨`);
+			await galleryRemoveAndFill(highIds);
+		} catch (err: any) {
+			toast.error(`자동 확정 실패: ${getErrorMessage(err)}`);
+		} finally {
+			bulkProcessing = false;
+		}
+	}
+
+	// 갤러리: 선택된 그룹 확정
+	async function galleryResolveSelected() {
+		const ids = groupSelection.toArray();
+		if (ids.length === 0) {
+			toast.warning('선택된 그룹이 없습니다.');
+			return;
+		}
+		bulkProcessing = true;
+		bulkTotal = ids.length;
+		bulkResolved = 0;
+		try {
+			const res = await fetchWithTimeout('/api/ic/duplicates/auto-resolve', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ filter: galleryFilter, strategy: 'quality_best', group_ids: ids })
+			});
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const result = await res.json();
+			bulkResolved = result.resolved ?? 0;
+			toast.success(`선택 확정 완료! ${result.resolved}개 그룹 처리됨`);
+			groupSelection.clear();
+			await galleryRemoveAndFill(ids);
+		} catch (err: any) {
+			toast.error(`선택 확정 실패: ${getErrorMessage(err)}`);
+		} finally {
+			bulkProcessing = false;
 		}
 	}
 
@@ -509,16 +676,8 @@
 			const result = await res.json();
 			toast.success(`일괄 해결 완료! 보관: ${result.resolved_count}개 그룹, 삭제: ${result.deleted_count}개 파일`);
 			showFolderModal = false;
-			// 로컬 상태 업데이트: resolved 그룹 목록으로 필터링
 			const resolvedIds = (result.details ?? []).map((d: { group_id: number }) => d.group_id);
-			groups = groups.filter((g) => !resolvedIds.includes(g.group_id));
-			totalGroups = Math.max(0, totalGroups - resolvedIds.length);
-			resolvedIds.forEach((id: number) => {
-				const { [id]: _d, ...restD } = groupDetails; groupDetails = restD;
-				const { [id]: _s, ...restS } = selections; selections = restS;
-				checkedGroups.delete(id);
-			});
-			checkedGroups = new Set(checkedGroups);
+			await removeAndFill(resolvedIds);
 		} catch (err: any) {
 			toast.error(`일괄 해결 실패: ${getErrorMessage(err)}`);
 		} finally {
@@ -557,9 +716,28 @@
 
 <!-- 헤더 -->
 <div class="mb-4">
-	<div class="flex items-center gap-2">
-		<Copy class="size-5 text-primary" />
-		<h2 class="text-xl font-bold tracking-tight">중복 이미지</h2>
+	<div class="flex items-center justify-between gap-2">
+		<div class="flex items-center gap-2">
+			<Copy class="size-5 text-primary" />
+			<h2 class="text-xl font-bold tracking-tight">중복 이미지</h2>
+		</div>
+		<!-- 뷰 모드 토글 -->
+		<div class="flex items-center rounded-lg border bg-muted/40 p-0.5 gap-0.5">
+			<button
+				class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors {viewMode === 'card' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
+				onclick={() => { viewMode = 'card'; }}
+			>
+				<LayoutList class="size-3.5" />
+				카드뷰
+			</button>
+			<button
+				class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors {viewMode === 'gallery' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
+				onclick={() => { viewMode = 'gallery'; gallerySkip = 0; loadGalleryGroups(); }}
+			>
+				<LayoutGrid class="size-3.5" />
+				갤러리뷰
+			</button>
+		</div>
 	</div>
 	<p class="mt-1 text-sm text-muted-foreground">pHash 기반 중복 이미지 탐지 및 정리</p>
 </div>
@@ -618,20 +796,14 @@
 			폴더 기준 일괄 해결
 		</button>
 
-		<!-- 전체 선택 -->
-		{#if filteredGroups.length > 0}
+		<!-- 전체 선택 (카드뷰만) -->
+		{#if viewMode === 'card' && filteredGroups.length > 0}
 			<label class="flex items-center gap-1.5 cursor-pointer text-sm text-muted-foreground hover:text-foreground transition-colors">
 				<input
 					type="checkbox"
-					checked={filteredGroups.every((g) => checkedGroups.has(g.group_id))}
-					indeterminate={filteredGroups.some((g) => checkedGroups.has(g.group_id)) && !filteredGroups.every((g) => checkedGroups.has(g.group_id))}
-					onchange={(e) => {
-						if ((e.currentTarget as HTMLInputElement).checked) {
-							checkedGroups = new Set(filteredGroups.map((g) => g.group_id));
-						} else {
-							checkedGroups = new Set();
-						}
-					}}
+					checked={groupSelection.isAllSelected(filteredGroups.map((g) => g.group_id))}
+					indeterminate={filteredGroups.some((g) => groupSelection.has(g.group_id)) && !groupSelection.isAllSelected(filteredGroups.map((g) => g.group_id))}
+					onchange={() => groupSelection.selectAll(filteredGroups.map((g) => g.group_id))}
 					class="h-4 w-4 rounded border-border cursor-pointer"
 				/>
 				전체 선택
@@ -648,18 +820,18 @@
 		</button>
 	</div>
 
-	<!-- 그룹 선택 액션 바 (1개 이상 선택 시) -->
-	{#if checkedGroups.size >= 1}
+	<!-- 그룹 선택 액션 바 (1개 이상 선택 시, 카드뷰) -->
+	{#if viewMode === 'card' && groupSelection.count >= 1}
 		<div class="mt-3 flex items-center gap-3 rounded-lg bg-primary/5 border border-primary/20 px-4 py-2 flex-wrap">
-			<span class="text-sm font-medium text-primary">{checkedGroups.size}개 그룹 선택됨</span>
+			<span class="text-sm font-medium text-primary">{groupSelection.count}개 그룹 선택됨</span>
 			<button
 				class="flex items-center gap-1.5 rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-xs font-medium hover:bg-primary/90 transition-colors"
 				onclick={bulkResolve}
 			>
 				<Check class="size-3.5" />
-				{checkedGroups.size}개 일괄 확정
+				{groupSelection.count}개 일괄 확정
 			</button>
-			{#if checkedGroups.size >= 2}
+			{#if groupSelection.count >= 2}
 				<button
 					class="flex items-center gap-1.5 rounded-md bg-sky-600 text-white px-3 py-1.5 text-xs font-medium hover:bg-sky-700 transition-colors"
 					onclick={mergeSelectedGroups}
@@ -670,13 +842,232 @@
 			{/if}
 			<button
 				class="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent transition-colors"
-				onclick={() => (checkedGroups = new Set())}
+				onclick={() => groupSelection.clear()}
 			>
 				선택 해제
 			</button>
 		</div>
 	{/if}
 </div>
+
+<!-- 갤러리 뷰 -->
+{#if viewMode === 'gallery'}
+	<!-- 갤러리 컨트롤 바 -->
+	<div class="rounded-xl border bg-card p-4 mb-4">
+		<div class="flex items-center gap-4 flex-wrap">
+			<!-- 통계 -->
+			<div class="text-sm text-muted-foreground">
+				전체 <span class="font-medium text-foreground">{galleryStats.total}</span>개 |
+				자동확정가능 <span class="font-medium text-green-600">{galleryStats.auto_resolvable}</span>개 |
+				수동검토필요 <span class="font-medium text-red-500">{galleryStats.needs_review}</span>개
+			</div>
+
+			<!-- 필터 버튼 그룹 -->
+			<div class="flex items-center rounded-lg border bg-muted/40 p-0.5 gap-0.5">
+				{#each [['all', '전체'], ['exact', 'Exact'], ['near', 'Near']] as [val, label]}
+					<button
+						class="px-3 py-1.5 text-xs font-medium rounded-md transition-colors {galleryFilter === val ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
+						onclick={() => { galleryFilter = val as 'all' | 'exact' | 'near'; gallerySkip = 0; loadGalleryGroups(); }}
+					>{label}</button>
+				{/each}
+			</div>
+
+			<!-- 일괄 액션 -->
+			{#if bulkProcessing}
+				<span class="text-sm text-muted-foreground animate-pulse">처리 중... {bulkResolved}/{bulkTotal} 그룹</span>
+			{:else}
+				<button
+					class="flex items-center gap-1.5 rounded-lg bg-green-600 text-white px-3 py-1.5 text-sm font-medium hover:bg-green-700 transition-colors"
+					onclick={galleryAutoResolveAll}
+				>
+					<Check class="size-3.5" />
+					자동선택 전체 확정
+				</button>
+				{#if groupSelection.count > 0}
+					<button
+						class="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-1.5 text-sm font-medium hover:bg-primary/90 transition-colors"
+						onclick={galleryResolveSelected}
+					>
+						<Check class="size-3.5" />
+						선택 확정 ({groupSelection.count}개)
+					</button>
+					<button
+						class="rounded-lg border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent transition-colors"
+						onclick={() => groupSelection.clear()}
+					>선택 해제</button>
+				{/if}
+			{/if}
+
+			<button
+				class="ml-auto flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm hover:bg-accent transition-colors"
+				onclick={() => { gallerySkip = 0; loadGalleryGroups(); }}
+			>
+				<Wand2 class="size-3.5" />
+				새로고침
+			</button>
+		</div>
+	</div>
+
+	<!-- 갤러리 그룹 목록 -->
+	{#if galleryLoading}
+		<div class="rounded-xl border bg-card p-12 text-center">
+			<div class="text-muted-foreground text-sm animate-pulse">갤러리 로딩 중...</div>
+		</div>
+	{:else if galleryGroups.length === 0}
+		<div class="rounded-xl border bg-card p-12 text-center">
+			<p class="text-muted-foreground text-sm">표시할 그룹이 없습니다.</p>
+		</div>
+	{:else}
+		<div class="space-y-2">
+			{#each galleryGroups as gGroup (gGroup.group_id)}
+				{@const isExpanded = expandedGroups.has(gGroup.group_id)}
+				{@const keepMember = gGroup.members.find((m) => m.file_id === gGroup.auto_keep_file_id)}
+				{@const deleteMembers = gGroup.members.filter((m) => m.file_id !== gGroup.auto_keep_file_id)}
+
+				<!-- 갤러리 행 -->
+				<div class="rounded-xl border bg-card overflow-hidden">
+					<!-- 컴팩트 행 -->
+					<!-- svelte-ignore a11y_click_events_have_key_events -->
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
+					<div
+						class="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/30 transition-colors"
+						onclick={() => {
+							const next = new Set(expandedGroups);
+							if (next.has(gGroup.group_id)) { next.delete(gGroup.group_id); } else { next.add(gGroup.group_id); }
+							expandedGroups = next;
+						}}
+					>
+						<!-- 선택 체크박스 -->
+						<!-- svelte-ignore a11y_click_events_have_key_events -->
+						<div onclick={(e) => e.stopPropagation()}>
+							<input
+								type="checkbox"
+								checked={groupSelection.has(gGroup.group_id)}
+								onchange={() => groupSelection.toggle(gGroup.group_id)}
+								class="h-4 w-4 rounded border-border cursor-pointer"
+							/>
+						</div>
+
+						<!-- confidence 뱃지 -->
+						{#if gGroup.confidence === 'high'}
+							<div class="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" title="자동 선택 가능">
+								<Check class="size-3.5" />
+							</div>
+						{:else if gGroup.confidence === 'medium'}
+							<div class="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400" title="추천 선택">
+								<Check class="size-3.5" />
+							</div>
+						{:else}
+							<div class="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400" title="수동 선택 필요">
+								<HelpCircle class="size-3.5" />
+							</div>
+						{/if}
+
+						<!-- 보관 파일 (좌측) -->
+						{#if keepMember}
+							<div class="flex items-center gap-2 flex-shrink-0 w-52">
+								<div class="relative w-12 h-12 rounded-md overflow-hidden border-2 border-green-400 flex-shrink-0">
+									<img src={getThumbnailUrl(keepMember.file_id)} alt="keep" class="w-full h-full object-cover" loading="lazy" />
+								</div>
+								<div class="min-w-0">
+									<p class="text-xs font-mono truncate text-green-700 dark:text-green-400" title={keepMember.file_path}>{getFileName(keepMember.file_path)}</p>
+									<p class="text-[10px] text-muted-foreground">{formatFileSize(keepMember.file_size)}</p>
+								</div>
+							</div>
+						{/if}
+
+						<!-- 구분선 -->
+						<div class="text-muted-foreground text-xs">→</div>
+
+						<!-- 삭제 파일들 (우측) -->
+						<div class="flex items-center gap-1.5 flex-1 overflow-x-auto">
+							{#each deleteMembers.slice(0, 6) as dm (dm.file_id)}
+								<div class="relative flex-shrink-0 w-10 h-10 rounded overflow-hidden border border-muted opacity-50">
+									<img src={getThumbnailUrl(dm.file_id)} alt="delete" class="w-full h-full object-cover" loading="lazy" />
+								</div>
+							{/each}
+							{#if deleteMembers.length > 6}
+								<span class="text-xs text-muted-foreground flex-shrink-0">+{deleteMembers.length - 6}</span>
+							{/if}
+						</div>
+
+						<!-- 정보 -->
+						<div class="flex-shrink-0 text-right">
+							<p class="text-xs text-muted-foreground">#{gGroup.group_id}</p>
+							<p class="text-[10px] text-muted-foreground">{gGroup.member_count}이미지</p>
+						</div>
+
+						<!-- 액션 버튼 (개별) -->
+						<!-- svelte-ignore a11y_click_events_have_key_events -->
+						<div class="flex items-center gap-1.5 flex-shrink-0" onclick={(e) => e.stopPropagation()}>
+							{#if gGroup.auto_keep_file_id}
+								<button
+									class="flex items-center gap-1 rounded-md bg-primary text-primary-foreground px-2 py-1 text-xs font-medium hover:bg-primary/90 transition-colors"
+									onclick={async () => {
+										try {
+											const res = await fetchWithTimeout(`/api/ic/duplicates/${gGroup.group_id}/resolve`, {
+												method: 'POST',
+												headers: { 'Content-Type': 'application/json' },
+												body: JSON.stringify({ keep_file_id: gGroup.auto_keep_file_id, delete_others: true })
+											});
+											if (!res.ok) throw new Error(`HTTP ${res.status}`);
+											toast.success('확정 완료');
+											await galleryRemoveAndFill([gGroup.group_id]);
+										} catch (err: any) {
+											toast.error(`확정 실패: ${getErrorMessage(err)}`);
+										}
+									}}
+								>
+									<Check class="size-3" />
+									확정
+								</button>
+							{/if}
+							<button
+								class="flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-accent transition-colors"
+								onclick={() => {
+									const next = new Set(expandedGroups);
+									if (next.has(gGroup.group_id)) { next.delete(gGroup.group_id); } else { next.add(gGroup.group_id); }
+									expandedGroups = next;
+								}}
+							>
+								{isExpanded ? '접기' : '상세'}
+							</button>
+						</div>
+					</div>
+
+					<!-- 인라인 확장: 기존 카드뷰 상세 -->
+					{#if isExpanded}
+						<div class="border-t p-4">
+							<p class="text-xs text-muted-foreground mb-3">그룹 #{gGroup.group_id} 상세 — 보관 파일을 선택하고 확정하세요</p>
+							<div class="flex gap-3 flex-wrap">
+								{#each gGroup.members as member (member.file_id)}
+									{@const isKeep = member.file_id === gGroup.auto_keep_file_id}
+									<div class="w-32 rounded-lg border {isKeep ? 'border-green-400 ring-2 ring-green-400/30' : 'border-border opacity-70'} overflow-hidden">
+										<div class="relative aspect-square bg-muted">
+											<img src={getThumbnailUrl(member.file_id)} alt="file {member.file_id}" class="w-full h-full object-cover" loading="lazy" />
+											{#if isKeep}
+												<div class="absolute top-1 left-1 rounded-full bg-green-500 text-white p-0.5"><Check class="size-2.5" /></div>
+											{/if}
+										</div>
+										<div class="p-1.5 space-y-0.5">
+											<p class="text-[10px] font-mono truncate text-muted-foreground" title={member.file_path}>{getFileName(member.file_path)}</p>
+											<p class="text-[10px] text-muted-foreground">{formatFileSize(member.file_size)}</p>
+											{#if member.resolution}
+												<p class="text-[10px] text-muted-foreground">{member.resolution}</p>
+											{/if}
+										</div>
+									</div>
+								{/each}
+							</div>
+						</div>
+					{/if}
+				</div>
+			{/each}
+		</div>
+	{/if}
+
+<!-- 카드 뷰 -->
+{:else}
 
 <!-- 로딩/에러 -->
 {#if loading}
@@ -712,15 +1103,8 @@
 						{#if group.status === 'pending'}
 							<input
 								type="checkbox"
-								checked={checkedGroups.has(group.group_id)}
-								onchange={() => {
-									if (checkedGroups.has(group.group_id)) {
-										checkedGroups.delete(group.group_id);
-									} else {
-										checkedGroups.add(group.group_id);
-									}
-									checkedGroups = new Set(checkedGroups);
-								}}
+								checked={groupSelection.has(group.group_id)}
+								onchange={() => groupSelection.toggle(group.group_id)}
 								class="h-4 w-4 rounded border-border cursor-pointer"
 								title="그룹 선택 (일괄 확정/병합)"
 							/>
@@ -1029,6 +1413,7 @@
 			</button>
 		</div>
 	{/if}
+{/if}
 {/if}
 
 <!-- 폴더 기준 일괄 해결 모달 -->

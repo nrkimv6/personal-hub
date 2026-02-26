@@ -29,6 +29,243 @@ logger = logging.getLogger(__name__)
 _active_detector = None
 
 
+def _batch_delete_files(
+    db: Session,
+    file_ids: list[int],
+    file_paths: list[str],
+) -> tuple[int, int]:
+    """
+    파일 리스트를 send2trash로 배치 삭제하고 DB를 IN절로 일괄 업데이트.
+
+    Args:
+        db: SQLAlchemy 세션
+        file_ids: 삭제 대상 파일 ID 목록 (file_paths와 1:1 대응)
+        file_paths: 삭제 대상 파일 경로 목록
+
+    Returns:
+        (deleted_count, failed_count)
+    """
+    if not file_ids:
+        return 0, 0
+
+    # 존재하는 파일만 필터링
+    existing_paths: list[str] = []
+    existing_ids: list[int] = []
+    failed_count = 0
+
+    for fid, fpath in zip(file_ids, file_paths):
+        if Path(fpath).exists():
+            existing_paths.append(fpath)
+            existing_ids.append(fid)
+
+    if not existing_paths:
+        return 0, 0
+
+    # send2trash 배치 호출 (리스트 한 번에 전달)
+    try:
+        send2trash(existing_paths)
+    except Exception as e:
+        logger.error(f"send2trash 배치 삭제 실패: {e}")
+        # 개별 재시도
+        successfully_deleted: list[int] = []
+        for fid, fpath in zip(existing_ids, existing_paths):
+            try:
+                send2trash(fpath)
+                successfully_deleted.append(fid)
+            except Exception as e2:
+                logger.error(f"파일 삭제 실패: {fpath} - {e2}")
+                failed_count += 1
+        existing_ids = successfully_deleted
+
+    if not existing_ids:
+        return 0, failed_count
+
+    # DB IN절 단일 쿼리 업데이트
+    placeholders = ",".join(str(fid) for fid in existing_ids)
+    db.execute(
+        text(f"""
+            UPDATE file_classifications
+            SET status = 'moved', moved_path = '휴지통'
+            WHERE id IN ({placeholders})
+        """)
+    )
+
+    return len(existing_ids), failed_count
+
+
+def _merge_metadata(
+    db: Session,
+    keep_file_id: int,
+    delete_file_ids: list[int],
+) -> int:
+    """
+    삭제 파일들의 메타데이터를 보관 파일로 병합.
+
+    병합 규칙:
+    - file_tags: INSERT OR IGNORE (중복 방지)
+    - final_category_id: 보관 파일이 NULL이면 삭제 파일 중 non-NULL 사용
+    - ai_category_id / ai_confidence: 보관 파일이 NULL이면 삭제 파일 중 max(ai_confidence) 기준
+    - importance: high=3 > medium=2 > low=1 기준 MAX 값 적용
+    - extracted_date / date_source: 보관 파일이 unknown/NULL이면 신뢰도 높은 값 사용
+    - user_date / user_location: 보관 파일이 NULL이면 삭제 파일 것 사용
+    - file_attributes: INSERT OR IGNORE (attr_key 중복 방지)
+
+    Returns:
+        병합이 실제로 수행된 경우 1, 스킵인 경우 0
+    """
+    if not delete_file_ids:
+        return 0
+
+    placeholders = ",".join(str(fid) for fid in delete_file_ids)
+
+    # 1. file_tags 병합
+    db.execute(text(f"""
+        INSERT OR IGNORE INTO file_tags (file_id, tag_id)
+        SELECT :keep_id, tag_id
+        FROM file_tags
+        WHERE file_id IN ({placeholders})
+    """), {"keep_id": keep_file_id})
+
+    # 2. final_category_id: 보관 파일이 NULL이면 삭제 파일 중 non-NULL 값
+    db.execute(text(f"""
+        UPDATE file_classifications
+        SET final_category_id = (
+            SELECT final_category_id FROM file_classifications
+            WHERE id IN ({placeholders}) AND final_category_id IS NOT NULL
+            LIMIT 1
+        )
+        WHERE id = :keep_id
+          AND final_category_id IS NULL
+    """), {"keep_id": keep_file_id})
+
+    # 3. ai_category_id / ai_confidence: 보관 파일이 NULL이면 max(ai_confidence) 기준
+    db.execute(text(f"""
+        UPDATE file_classifications
+        SET
+            ai_category_id = (
+                SELECT ai_category_id FROM file_classifications
+                WHERE id IN ({placeholders}) AND ai_confidence IS NOT NULL
+                ORDER BY ai_confidence DESC
+                LIMIT 1
+            ),
+            ai_confidence = (
+                SELECT ai_confidence FROM file_classifications
+                WHERE id IN ({placeholders}) AND ai_confidence IS NOT NULL
+                ORDER BY ai_confidence DESC
+                LIMIT 1
+            )
+        WHERE id = :keep_id
+          AND ai_category_id IS NULL
+    """), {"keep_id": keep_file_id})
+
+    # 4. importance: high=3 > medium=2 > low=1 기준 MAX 적용
+    db.execute(text(f"""
+        UPDATE file_classifications
+        SET importance = (
+            SELECT importance FROM (
+                SELECT importance,
+                    CASE importance
+                        WHEN 'high'   THEN 3
+                        WHEN 'medium' THEN 2
+                        WHEN 'low'    THEN 1
+                        ELSE 0
+                    END AS imp_rank
+                FROM file_classifications
+                WHERE id IN (:keep_id, {placeholders})
+                  AND importance IS NOT NULL
+                ORDER BY imp_rank DESC
+                LIMIT 1
+            )
+        )
+        WHERE id = :keep_id
+    """), {"keep_id": keep_file_id})
+
+    # 5. extracted_date / date_source:
+    #    date_source 신뢰도 순서: exif_original > exif_digitized > filename > folder_name > file_modified > user_input > unknown
+    #    보관 파일이 'unknown' 또는 NULL이면 삭제 파일 중 가장 신뢰도 높은 것으로 교체
+    db.execute(text(f"""
+        UPDATE file_classifications
+        SET
+            extracted_date = (
+                SELECT extracted_date FROM file_classifications
+                WHERE id IN ({placeholders}) AND date_source NOT IN ('unknown') AND extracted_date IS NOT NULL
+                ORDER BY CASE date_source
+                    WHEN 'exif_original'  THEN 1
+                    WHEN 'exif_digitized' THEN 2
+                    WHEN 'filename'       THEN 3
+                    WHEN 'folder_name'    THEN 4
+                    WHEN 'file_modified'  THEN 5
+                    WHEN 'user_input'     THEN 6
+                    ELSE 99
+                END
+                LIMIT 1
+            ),
+            date_source = (
+                SELECT date_source FROM file_classifications
+                WHERE id IN ({placeholders}) AND date_source NOT IN ('unknown') AND extracted_date IS NOT NULL
+                ORDER BY CASE date_source
+                    WHEN 'exif_original'  THEN 1
+                    WHEN 'exif_digitized' THEN 2
+                    WHEN 'filename'       THEN 3
+                    WHEN 'folder_name'    THEN 4
+                    WHEN 'file_modified'  THEN 5
+                    WHEN 'user_input'     THEN 6
+                    ELSE 99
+                END
+                LIMIT 1
+            ),
+            date_trust_level = (
+                SELECT date_trust_level FROM file_classifications
+                WHERE id IN ({placeholders}) AND date_source NOT IN ('unknown') AND extracted_date IS NOT NULL
+                ORDER BY CASE date_source
+                    WHEN 'exif_original'  THEN 1
+                    WHEN 'exif_digitized' THEN 2
+                    WHEN 'filename'       THEN 3
+                    WHEN 'folder_name'    THEN 4
+                    WHEN 'file_modified'  THEN 5
+                    WHEN 'user_input'     THEN 6
+                    ELSE 99
+                END
+                LIMIT 1
+            )
+        WHERE id = :keep_id
+          AND (date_source = 'unknown' OR date_source IS NULL OR extracted_date IS NULL)
+    """), {"keep_id": keep_file_id})
+
+    # 6. user_date / user_location: 보관 파일이 NULL이면 삭제 파일 것 사용
+    db.execute(text(f"""
+        UPDATE file_classifications
+        SET user_date = (
+            SELECT user_date FROM file_classifications
+            WHERE id IN ({placeholders}) AND user_date IS NOT NULL
+            LIMIT 1
+        )
+        WHERE id = :keep_id
+          AND user_date IS NULL
+    """), {"keep_id": keep_file_id})
+
+    db.execute(text(f"""
+        UPDATE file_classifications
+        SET user_location = (
+            SELECT user_location FROM file_classifications
+            WHERE id IN ({placeholders}) AND user_location IS NOT NULL
+            LIMIT 1
+        )
+        WHERE id = :keep_id
+          AND user_location IS NULL
+    """), {"keep_id": keep_file_id})
+
+    # 7. file_attributes: INSERT OR IGNORE (attr_key 중복 방지)
+    db.execute(text(f"""
+        INSERT OR IGNORE INTO file_attributes (file_id, attr_key, attr_value)
+        SELECT :keep_id, attr_key, attr_value
+        FROM file_attributes
+        WHERE file_id IN ({placeholders})
+    """), {"keep_id": keep_file_id})
+
+    return 1
+
+
 class DetectRequest(BaseModel):
     """중복 탐지 요청"""
     resume: bool = True  # True: 이미 처리된 파일 스킵
@@ -301,27 +538,18 @@ async def resolve_by_folder(
             {"gid": gid, "keep_id": keep_file.file_id}
         )
 
-        deleted_file_ids = []
-        for dc in delete_candidates:
-            file_path = Path(dc.file_path)
-            if file_path.exists():
-                try:
-                    send2trash(str(file_path))
-                    db.execute(
-                        text("UPDATE file_classifications SET status = 'moved', moved_path = :trash WHERE id = :fid"),
-                        {"fid": dc.file_id, "trash": "휴지통"}
-                    )
-                    deleted_file_ids.append(dc.file_id)
-                    deleted_count += 1
-                except Exception as e:
-                    logger.error(f"파일 삭제 실패: {file_path} - {e}")
-                    failed_count += 1
+        delete_ids = [dc.file_id for dc in delete_candidates]
+        delete_paths = [dc.file_path for dc in delete_candidates]
+        _merge_metadata(db, keep_file.file_id, delete_ids)
+        batch_deleted, batch_failed = _batch_delete_files(db, delete_ids, delete_paths)
+        deleted_count += batch_deleted
+        failed_count += batch_failed
 
         resolved_count += 1
         details.append({
             "group_id": gid,
             "kept_file_id": keep_file.file_id,
-            "deleted_file_ids": deleted_file_ids,
+            "deleted_file_ids": delete_ids,
         })
 
     db.commit()
@@ -459,30 +687,10 @@ async def resolve_duplicate_group(
 
     # 나머지 파일 삭제 (선택)
     if request.delete_others:
-        for member in members:
-            if member.file_id == request.keep_file_id:
-                continue  # 보관 파일은 스킵
-
-            file_path = Path(member.file_path)
-            if file_path.exists():
-                try:
-                    # 휴지통으로 이동
-                    send2trash(str(file_path))
-
-                    # DB 상태 업데이트
-                    db.execute(
-                        text("""
-                            UPDATE file_classifications
-                            SET status = 'moved', moved_path = :trash
-                            WHERE id = :fid
-                        """),
-                        {"fid": member.file_id, "trash": "휴지통"}
-                    )
-
-                    deleted_count += 1
-
-                except Exception as e:
-                    print(f"[오류] 파일 삭제 실패: {file_path} - {e}")
+        delete_ids = [m.file_id for m in members if m.file_id != request.keep_file_id]
+        delete_paths = [m.file_path for m in members if m.file_id != request.keep_file_id]
+        _merge_metadata(db, request.keep_file_id, delete_ids)
+        deleted_count, _ = _batch_delete_files(db, delete_ids, delete_paths)
 
     # 보관 파일에 카테고리 설정 (선택)
     if request.category_id is not None:
@@ -525,19 +733,9 @@ async def discard_all_in_group(
     if not members:
         raise HTTPException(status_code=404, detail="중복 그룹을 찾을 수 없습니다.")
 
-    deleted_count = 0
-    for member in members:
-        file_path = Path(member.file_path)
-        if file_path.exists():
-            try:
-                send2trash(str(file_path))
-                db.execute(
-                    text("UPDATE file_classifications SET status = 'moved', moved_path = :trash WHERE id = :fid"),
-                    {"fid": member.file_id, "trash": "휴지통"}
-                )
-                deleted_count += 1
-            except Exception as e:
-                logger.error(f"파일 삭제 실패: {file_path} - {e}")
+    delete_ids = [m.file_id for m in members]
+    delete_paths = [m.file_path for m in members]
+    deleted_count, _ = _batch_delete_files(db, delete_ids, delete_paths)
 
     db.execute(
         text("UPDATE duplicate_groups SET status = 'resolved', kept_file_id = NULL WHERE id = :gid"),
@@ -546,6 +744,301 @@ async def discard_all_in_group(
     db.commit()
 
     return {"status": "resolved", "group_id": group_id, "deleted_count": deleted_count}
+
+
+def _select_keep_file(
+    members: list,
+    strategy: str = "quality_best",
+) -> tuple[int, str]:
+    """
+    멤버 목록에서 자동 선택 로직 실행.
+
+    Returns:
+        (auto_keep_file_id, confidence)
+        confidence: "high" | "medium" | "low"
+    """
+    if not members:
+        return members[0]["file_id"], "low"
+
+    # exact 여부: 모든 멤버가 is_exact=True이면 exact 그룹
+    is_exact_group = all(m.get("is_exact", False) for m in members)
+
+    if strategy == "largest_file":
+        # near도 크기 기준
+        best = max(members, key=lambda m: m.get("file_size") or 0)
+        confidence = "high" if is_exact_group else "medium"
+        return best["file_id"], confidence
+
+    # quality_best 전략 (기본)
+    if is_exact_group:
+        sizes = [m.get("file_size") or 0 for m in members]
+        if len(set(sizes)) > 1:
+            # 크기 차이 있음 → largest_file 자동 선택, confidence=high
+            best = max(members, key=lambda m: m.get("file_size") or 0)
+            return best["file_id"], "high"
+        else:
+            # 크기 동일 → 첫 번째, confidence=low
+            return members[0]["file_id"], "low"
+    else:
+        # near 그룹 → quality_score 기반
+        best = max(members, key=lambda m: m.get("quality_score") or 0)
+        return best["file_id"], "medium"
+
+
+@router.get("/review")
+async def get_review(
+    skip: int = 0,
+    limit: int = 100,
+    filter: str = "all",  # exact/near/all
+    auto_strategy: str = "quality_best",  # quality_best/largest_file
+    db: Session = Depends(get_db),
+):
+    """
+    중복 그룹 Review API — pending 그룹 + 멤버 + 자동선택을 한번에 반환 (N+1 없음)
+
+    Returns:
+        {
+            "groups": [{
+                "group_id", "group_hash", "member_count", "status",
+                "auto_keep_file_id", "confidence",
+                "members": [{"file_id","file_path","file_size","resolution","quality_score","phash_distance","is_exact"}]
+            }],
+            "skip", "limit", "total",
+            "auto_resolvable": confidence=high 수,
+            "needs_review": confidence=low 수
+        }
+    """
+    where = "WHERE dg.status = 'pending'"
+    params: dict = {}
+
+    if filter == "exact":
+        where += " AND dm.is_exact = 1"
+    elif filter == "near":
+        where += " AND dm.is_exact = 0"
+
+    # 전체 pending 그룹 수 (filter 조건 적용)
+    if filter == "all":
+        count_result = db.execute(
+            text("SELECT COUNT(*) FROM duplicate_groups WHERE status = 'pending'")
+        ).scalar() or 0
+    else:
+        is_exact_val = 1 if filter == "exact" else 0
+        count_result = db.execute(
+            text("""
+                SELECT COUNT(DISTINCT dg.id) FROM duplicate_groups dg
+                JOIN duplicate_members dm ON dg.id = dm.group_id
+                WHERE dg.status = 'pending' AND dm.is_exact = :is_exact
+            """),
+            {"is_exact": is_exact_val}
+        ).scalar() or 0
+
+    # pending 그룹 ID 페이지네이션 (서브쿼리)
+    if filter == "all":
+        group_ids_rows = db.execute(
+            text(f"""
+                SELECT id FROM duplicate_groups WHERE status = 'pending'
+                ORDER BY id DESC
+                LIMIT :limit OFFSET :skip
+            """),
+            {"limit": limit, "skip": skip}
+        ).fetchall()
+    else:
+        is_exact_val = 1 if filter == "exact" else 0
+        group_ids_rows = db.execute(
+            text(f"""
+                SELECT DISTINCT dg.id FROM duplicate_groups dg
+                JOIN duplicate_members dm ON dg.id = dm.group_id
+                WHERE dg.status = 'pending' AND dm.is_exact = :is_exact
+                ORDER BY dg.id DESC
+                LIMIT :limit OFFSET :skip
+            """),
+            {"is_exact": is_exact_val, "limit": limit, "skip": skip}
+        ).fetchall()
+
+    page_group_ids = [r.id for r in group_ids_rows]
+
+    if not page_group_ids:
+        return {
+            "groups": [],
+            "skip": skip,
+            "limit": limit,
+            "total": count_result,
+            "auto_resolvable": 0,
+            "needs_review": 0,
+        }
+
+    # 단일 JOIN 쿼리로 그룹 + 멤버 + file_path 일괄 조회
+    placeholders = ",".join(str(gid) for gid in page_group_ids)
+    rows = db.execute(text(f"""
+        SELECT
+            dg.id        AS group_id,
+            dg.group_hash,
+            dg.member_count,
+            dg.status,
+            dm.file_id,
+            dm.phash_distance,
+            dm.is_exact,
+            dm.file_size,
+            dm.resolution,
+            dm.quality_score,
+            fc.file_path
+        FROM duplicate_groups dg
+        JOIN duplicate_members dm ON dg.id = dm.group_id
+        JOIN file_classifications fc ON dm.file_id = fc.id
+        WHERE dg.id IN ({placeholders})
+        ORDER BY dg.id DESC, dm.quality_score DESC
+    """)).fetchall()
+
+    # Python에서 그룹별 멤버 집합 구성
+    from collections import OrderedDict
+    group_map: dict = OrderedDict()
+    for row in rows:
+        gid = row.group_id
+        if gid not in group_map:
+            group_map[gid] = {
+                "group_id": gid,
+                "group_hash": row.group_hash,
+                "member_count": row.member_count,
+                "status": row.status,
+                "members": [],
+            }
+        group_map[gid]["members"].append({
+            "file_id": row.file_id,
+            "file_path": row.file_path,
+            "file_size": row.file_size,
+            "resolution": row.resolution,
+            "quality_score": row.quality_score,
+            "phash_distance": row.phash_distance,
+            "is_exact": bool(row.is_exact),
+        })
+
+    # 각 그룹별 auto_keep_file_id + confidence 계산
+    auto_resolvable = 0
+    needs_review = 0
+    groups = []
+    for gid, gdata in group_map.items():
+        keep_id, confidence = _select_keep_file(gdata["members"], auto_strategy)
+        gdata["auto_keep_file_id"] = keep_id
+        gdata["confidence"] = confidence
+        if confidence == "high":
+            auto_resolvable += 1
+        elif confidence == "low":
+            needs_review += 1
+        groups.append(gdata)
+
+    return {
+        "groups": groups,
+        "skip": skip,
+        "limit": limit,
+        "total": count_result,
+        "auto_resolvable": auto_resolvable,
+        "needs_review": needs_review,
+    }
+
+
+class AutoResolveRequest(BaseModel):
+    filter: str = "all"  # exact/near/all
+    strategy: str = "quality_best"  # quality_best/largest_file
+    group_ids: list[int] = []  # 비어있으면 해당 filter의 모든 pending
+    exclude_group_ids: list[int] = []
+
+
+@router.post("/auto-resolve")
+async def auto_resolve(
+    request: AutoResolveRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    자동선택 로직으로 중복 그룹 일괄 해결.
+
+    - group_ids 비어있으면 filter 조건의 모든 pending 그룹 처리
+    - exclude_group_ids에 포함된 그룹은 제외
+    - 각 그룹: _merge_metadata → _batch_delete_files → status='resolved'
+    """
+    # 대상 그룹 ID 결정
+    if request.group_ids:
+        candidate_ids = request.group_ids
+    else:
+        # filter 조건의 모든 pending 그룹 조회
+        if request.filter == "all":
+            rows = db.execute(
+                text("SELECT id FROM duplicate_groups WHERE status = 'pending'")
+            ).fetchall()
+        else:
+            is_exact_val = 1 if request.filter == "exact" else 0
+            rows = db.execute(
+                text("""
+                    SELECT DISTINCT dg.id FROM duplicate_groups dg
+                    JOIN duplicate_members dm ON dg.id = dm.group_id
+                    WHERE dg.status = 'pending' AND dm.is_exact = :is_exact
+                """),
+                {"is_exact": is_exact_val}
+            ).fetchall()
+        candidate_ids = [r.id for r in rows]
+
+    # exclude 적용
+    exclude_set = set(request.exclude_group_ids)
+    target_ids = [gid for gid in candidate_ids if gid not in exclude_set]
+
+    resolved = 0
+    deleted_files = 0
+    merged_metadata = 0
+    failed = 0
+
+    for gid in target_ids:
+        try:
+            members = db.execute(
+                text("""
+                    SELECT dm.file_id, dm.is_exact, dm.file_size, dm.quality_score, fc.file_path
+                    FROM duplicate_members dm
+                    JOIN file_classifications fc ON dm.file_id = fc.id
+                    WHERE dm.group_id = :gid
+                """),
+                {"gid": gid}
+            ).fetchall()
+
+            if not members:
+                failed += 1
+                continue
+
+            member_list = [
+                {
+                    "file_id": m.file_id,
+                    "file_path": m.file_path,
+                    "file_size": m.file_size,
+                    "quality_score": m.quality_score,
+                    "is_exact": bool(m.is_exact),
+                }
+                for m in members
+            ]
+
+            keep_id, _confidence = _select_keep_file(member_list, request.strategy)
+
+            delete_ids = [m["file_id"] for m in member_list if m["file_id"] != keep_id]
+            delete_paths = [m["file_path"] for m in member_list if m["file_id"] != keep_id]
+
+            merged_metadata += _merge_metadata(db, keep_id, delete_ids)
+            batch_deleted, _ = _batch_delete_files(db, delete_ids, delete_paths)
+            deleted_files += batch_deleted
+
+            db.execute(
+                text("UPDATE duplicate_groups SET status = 'resolved', kept_file_id = :keep_id WHERE id = :gid"),
+                {"gid": gid, "keep_id": keep_id}
+            )
+            resolved += 1
+
+        except Exception as e:
+            logger.error(f"auto_resolve group {gid}: {e}")
+            failed += 1
+
+    db.commit()
+
+    return {
+        "resolved": resolved,
+        "deleted_files": deleted_files,
+        "merged_metadata": merged_metadata,
+        "failed": failed,
+    }
 
 
 class BulkResolveItem(BaseModel):
@@ -596,19 +1089,10 @@ async def bulk_resolve(
                 {"gid": item.group_id, "keep_id": item.keep_file_id}
             )
 
-            for member in members:
-                if member.file_id == item.keep_file_id:
-                    continue
-                file_path = Path(member.file_path)
-                if file_path.exists():
-                    try:
-                        send2trash(str(file_path))
-                        db.execute(
-                            text("UPDATE file_classifications SET status = 'moved', moved_path = :trash WHERE id = :fid"),
-                            {"fid": member.file_id, "trash": "휴지통"}
-                        )
-                    except Exception as e:
-                        logger.error(f"파일 삭제 실패: {file_path} - {e}")
+            delete_ids = [m.file_id for m in members if m.file_id != item.keep_file_id]
+            delete_paths = [m.file_path for m in members if m.file_id != item.keep_file_id]
+            _merge_metadata(db, item.keep_file_id, delete_ids)
+            _batch_delete_files(db, delete_ids, delete_paths)
 
             resolved += 1
             resolved_group_ids.append(item.group_id)

@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.62.0] - 2026-02-26
+### Added
+- 중복 감지 배치 처리 리팩토링: `_batch_delete_files` + `_merge_metadata` 헬퍼 함수
+- Review API (`GET /duplicates/review`): N+1 쿼리 없이 그룹+멤버+자동선택 일괄 반환
+- Auto-resolve API (`POST /duplicates/auto-resolve`): 자동선택 로직으로 일괄 해결
+- DuplicatesTab 갤러리 뷰 모드: confidence 시각화 + 인라인 확장 + 일괄 확정
+- removeAndFill(): 확정 후 자동 보충 + 스크롤 위치 유지
+
 ## [2.57.0] - 2026-02-25
 ### Added
 - PlanViewer 컴포넌트: 마크다운 렌더링으로 plan 파일 내용 표시
