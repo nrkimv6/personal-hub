@@ -211,14 +211,17 @@ class PlanService:
         results: List[PlanFileResponse] = []
 
         for entry in self._registered_paths:
-            if entry.get("type") == "archive":
-                continue
+            is_archive = entry.get("type") == "archive"
             reg_path = entry["path"]
             p = Path(reg_path)
             if not p.exists():
                 continue
             if p.is_dir():
-                self._scan_plan_dir(p, seen, results, include_ignored, path_type="folder")
+                self._scan_plan_dir(
+                    p, seen, results, include_ignored,
+                    path_type="folder",
+                    recursive=is_archive,
+                )
             elif p.is_file():
                 if str(p) not in seen:
                     seen.add(str(p))
@@ -270,6 +273,7 @@ class PlanService:
         results: List[PlanFileResponse],
         include_ignored: bool,
         path_type: Optional[str] = None,
+        recursive: bool = False,
     ):
         """plan 디렉토리 스캔
 
@@ -279,13 +283,15 @@ class PlanService:
             results: 결과 목록 (append)
             include_ignored: True이면 무시된 plan도 포함
             path_type: "folder" | None — PlanFileResponse.path_type에 설정할 값
+            recursive: True이면 하위 폴더까지 재귀 스캔 (archive 타입에 사용)
         """
         if not plan_dir.exists():
             return
 
         source = self._resolve_source(plan_dir)
 
-        for plan_file in plan_dir.glob("*.md"):
+        glob_fn = plan_dir.rglob if recursive else plan_dir.glob
+        for plan_file in glob_fn("*.md"):
             if plan_file.stem.endswith("_todo"):
                 pass  # _todo.md는 항상 표시 (체크박스가 있는 작업 파일)
             else:
@@ -1093,8 +1099,9 @@ class PlanService:
             path_type = entry.get("type", "plan")
             p = Path(reg_path)
             if p.is_dir():
+                glob_fn = p.rglob if path_type == "archive" else p.glob
                 plan_count = sum(
-                    1 for f in p.glob("*.md")
+                    1 for f in glob_fn("*.md")
                     if f.stem.endswith("_todo")
                     or not (f.parent / (f.stem + "_todo.md")).exists()
                 ) if p.exists() else 0

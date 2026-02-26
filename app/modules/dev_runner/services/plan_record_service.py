@@ -183,7 +183,13 @@ class PlanRecordService:
             folder = Path(entry["path"])
             if not folder.exists():
                 continue
-            files = list(folder.glob("*.md")) if folder.is_dir() else [folder]
+            if folder.is_dir():
+                if entry.get("type") == "archive":
+                    files = list(folder.rglob("*.md"))
+                else:
+                    files = list(folder.glob("*.md"))
+            else:
+                files = [folder]
             for f in files:
                 if not f.is_file():
                     continue
