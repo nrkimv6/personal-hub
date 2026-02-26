@@ -19,6 +19,7 @@ REDIS_PORT = 6379
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 LOG_CHANNEL_PREFIX = "plan-runner:logs"
+LOG_CHANNEL = "plan-runner:logs"  # 하위호환 — plan_service 등 단일 채널 publish용
 
 HEARTBEAT_INTERVAL = 30  # 초
 
