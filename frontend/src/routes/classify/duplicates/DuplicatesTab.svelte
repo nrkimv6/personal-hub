@@ -121,6 +121,25 @@
 
 	// 폴더 기준 일괄 해결 모달
 	let showFolderModal = $state(false);
+
+	// 폴더 쌍 기준 해결 모달
+	interface FolderPair {
+		folder_a: string;
+		folder_b: string;
+		group_count: number;
+		file_count: number;
+		group_ids: number[];
+	}
+	let showFolderPairModal = $state(false);
+	let folderPairs = $state<FolderPair[]>([]);
+	let folderPairsLoading = $state(false);
+	let selectedPair = $state<FolderPair | null>(null);
+	let pairFilesA = $state<FolderFile[]>([]);
+	let pairFilesB = $state<FolderFile[]>([]);
+	let pairGroupIds = $state<number[]>([]);
+	let loadingPairFiles = $state(false);
+	let pairKeepFolder = $state<'a' | 'b' | null>(null);
+	let pairResolving = $state(false);
 	let folderAnalysis = $state<FolderInfo[]>([]);
 	let folderAnalysisLoading = $state(false);
 	let selectedKeepFolder = $state<string | null>(null);
@@ -610,6 +629,83 @@
 		}
 	}
 
+	async function openFolderPairModal() {
+		showFolderPairModal = true;
+		folderPairsLoading = true;
+		folderPairs = [];
+		selectedPair = null;
+		pairFilesA = [];
+		pairFilesB = [];
+		pairGroupIds = [];
+		pairKeepFolder = null;
+		try {
+			const res = await fetchWithTimeout('/api/ic/duplicates/folder-pair-analysis', {}, 60000);
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const data = await res.json();
+			folderPairs = data.pairs;
+		} catch (err: any) {
+			toast.error(`폴더 쌍 분석 실패: ${getErrorMessage(err)}`);
+			showFolderPairModal = false;
+		} finally {
+			folderPairsLoading = false;
+		}
+	}
+
+	async function loadFolderPairFiles(pair: FolderPair) {
+		selectedPair = pair;
+		pairFilesA = [];
+		pairFilesB = [];
+		pairGroupIds = [];
+		pairKeepFolder = null;
+		loadingPairFiles = true;
+		try {
+			const params = new URLSearchParams({
+				folder_a: pair.folder_a,
+				folder_b: pair.folder_b,
+			});
+			const res = await fetchWithTimeout(`/api/ic/duplicates/folder-pair-analysis/files?${params}`, {}, 60000);
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const data = await res.json();
+			pairFilesA = data.files_a;
+			pairFilesB = data.files_b;
+			pairGroupIds = data.group_ids;
+		} catch (err: any) {
+			toast.error(`파일 목록 로드 실패: ${getErrorMessage(err)}`);
+		} finally {
+			loadingPairFiles = false;
+		}
+	}
+
+	async function resolveByFolderPair() {
+		if (!selectedPair || !pairKeepFolder || pairGroupIds.length === 0) return;
+		const keepFolder = pairKeepFolder === 'a' ? selectedPair.folder_a : selectedPair.folder_b;
+		const otherFolder = pairKeepFolder === 'a' ? selectedPair.folder_b : selectedPair.folder_a;
+		if (!confirm(`${pairGroupIds.length}개 그룹을 일괄 해결하시겠습니까?\n\n보관 폴더: ${keepFolder}\n삭제 대상 폴더: ${otherFolder}`)) return;
+
+		pairResolving = true;
+		try {
+			const res = await fetchWithTimeout('/api/ic/duplicates/resolve-by-folder-pair', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					keep_folder: keepFolder,
+					other_folder: otherFolder,
+					group_ids: pairGroupIds,
+				})
+			}, 120000);
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const result = await res.json();
+			toast.success(`폴더 쌍 해결 완료! 보관: ${result.resolved_count}개 그룹, 삭제: ${result.deleted_count}개 파일`);
+			showFolderPairModal = false;
+			const resolvedIds = (result.details ?? []).map((d: { group_id: number }) => d.group_id);
+			await removeAndFill(resolvedIds);
+		} catch (err: any) {
+			toast.error(`폴더 쌍 해결 실패: ${getErrorMessage(err)}`);
+		} finally {
+			pairResolving = false;
+		}
+	}
+
 	async function openFolderModal() {
 		showFolderModal = true;
 		folderAnalysisLoading = true;
@@ -797,6 +893,15 @@
 		>
 			<FolderOpen class="size-3.5" />
 			폴더 기준 일괄 해결
+		</button>
+
+		<!-- 폴더 쌍 기준 해결 -->
+		<button
+			class="flex items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/5 px-3 py-1.5 text-sm font-medium text-sky-600 hover:bg-sky-500/10 transition-colors"
+			onclick={openFolderPairModal}
+		>
+			<FolderOpen class="size-3.5" />
+			폴더 쌍 기준 해결
 		</button>
 
 		<!-- 전체 선택 (카드뷰만) -->
@@ -1566,6 +1671,173 @@
 						disabled={!selectedKeepFolder || folderAffectedGroupIds.length === 0 || folderResolving || folderFilesLoading}
 					>
 						{folderResolving ? '처리 중...' : folderFilesLoading ? '파일 로드 중...' : `일괄 해결 (${folderAffectedGroupIds.length}그룹)`}
+					</button>
+				</div>
+			{/if}
+		</div>
+	</div>
+{/if}
+
+<!-- 폴더 쌍 기준 해결 모달 -->
+{#if showFolderPairModal}
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onclick={() => (showFolderPairModal = false)}>
+		<div class="relative bg-background rounded-xl shadow-2xl border w-[900px] max-h-[85vh] flex flex-col" onclick={(e) => e.stopPropagation()}>
+			<!-- 모달 헤더 -->
+			<div class="flex items-center justify-between px-6 py-4 border-b">
+				<div>
+					<h3 class="text-lg font-bold">폴더 쌍 기준 해결</h3>
+					<p class="text-xs text-muted-foreground mt-0.5">두 폴더 간 중복 이미지를 쌍 단위로 확인하고 해결합니다</p>
+				</div>
+				<button class="rounded-md p-1.5 hover:bg-muted transition-colors" onclick={() => (showFolderPairModal = false)}>
+					<X class="size-4" />
+				</button>
+			</div>
+
+			<!-- 모달 본문 -->
+			<div class="flex-1 overflow-y-auto p-6">
+				{#if folderPairsLoading}
+					<div class="flex items-center justify-center py-12 text-muted-foreground">
+						<span class="animate-pulse">폴더 쌍 분석 중...</span>
+					</div>
+				{:else if folderPairs.length === 0}
+					<div class="flex items-center justify-center py-12 text-muted-foreground">
+						해결 가능한 폴더 쌍이 없습니다.
+					</div>
+				{:else if !selectedPair}
+					<!-- 쌍 목록 -->
+					<div class="space-y-2">
+						<p class="text-sm font-medium text-muted-foreground mb-3">폴더 쌍을 선택하면 이미지 목록이 표시됩니다</p>
+						{#each folderPairs as pair}
+							<button
+								class="w-full text-left rounded-lg border p-4 hover:bg-accent transition-colors"
+								onclick={() => loadFolderPairFiles(pair)}
+							>
+								<div class="flex items-center justify-between gap-4">
+									<div class="flex-1 min-w-0">
+										<div class="flex items-center gap-2 text-sm">
+											<span class="font-medium truncate text-sky-600">{pair.folder_a.split('\\').slice(-2).join('\\')}</span>
+											<span class="text-muted-foreground shrink-0">↔</span>
+											<span class="font-medium truncate text-sky-600">{pair.folder_b.split('\\').slice(-2).join('\\')}</span>
+										</div>
+										<div class="text-xs text-muted-foreground mt-1 truncate">{pair.folder_a}</div>
+										<div class="text-xs text-muted-foreground truncate">{pair.folder_b}</div>
+									</div>
+									<div class="text-right shrink-0">
+										<div class="text-sm font-semibold">{pair.group_count}그룹</div>
+										<div class="text-xs text-muted-foreground">{pair.file_count}파일</div>
+									</div>
+								</div>
+							</button>
+						{/each}
+					</div>
+				{:else}
+					<!-- 쌍 상세 + 이미지 목록 -->
+					<div>
+						<button
+							class="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4 transition-colors"
+							onclick={() => { selectedPair = null; pairFilesA = []; pairFilesB = []; pairGroupIds = []; pairKeepFolder = null; }}
+						>
+							<ChevronLeft class="size-4" />
+							목록으로 돌아가기
+						</button>
+
+						<div class="text-sm mb-4">
+							<span class="font-medium text-sky-600">{selectedPair.folder_a.split('\\').slice(-2).join('\\')}</span>
+							<span class="text-muted-foreground mx-2">↔</span>
+							<span class="font-medium text-sky-600">{selectedPair.folder_b.split('\\').slice(-2).join('\\')}</span>
+							<span class="text-muted-foreground ml-3">{selectedPair.group_count}그룹 · {selectedPair.file_count}파일</span>
+						</div>
+
+						{#if loadingPairFiles}
+							<div class="text-center py-8 text-muted-foreground animate-pulse">파일 목록 로드 중...</div>
+						{:else}
+							<!-- 보관 폴더 선택 -->
+							<div class="flex gap-3 mb-4">
+								<label class="flex-1 flex items-center gap-2 rounded-lg border p-3 cursor-pointer hover:bg-accent transition-colors {pairKeepFolder === 'a' ? 'border-primary bg-primary/5' : ''}">
+									<input type="radio" name="pairKeep" value="a" bind:group={pairKeepFolder} class="sr-only" />
+									<div class="size-4 rounded-full border-2 {pairKeepFolder === 'a' ? 'border-primary bg-primary' : 'border-muted-foreground'} shrink-0"></div>
+									<div class="min-w-0">
+										<div class="text-sm font-medium">A 폴더 보관</div>
+										<div class="text-xs text-muted-foreground truncate">{selectedPair.folder_a}</div>
+										<div class="text-xs text-muted-foreground">{pairFilesA.length}개 파일</div>
+									</div>
+								</label>
+								<label class="flex-1 flex items-center gap-2 rounded-lg border p-3 cursor-pointer hover:bg-accent transition-colors {pairKeepFolder === 'b' ? 'border-primary bg-primary/5' : ''}">
+									<input type="radio" name="pairKeep" value="b" bind:group={pairKeepFolder} class="sr-only" />
+									<div class="size-4 rounded-full border-2 {pairKeepFolder === 'b' ? 'border-primary bg-primary' : 'border-muted-foreground'} shrink-0"></div>
+									<div class="min-w-0">
+										<div class="text-sm font-medium">B 폴더 보관</div>
+										<div class="text-xs text-muted-foreground truncate">{selectedPair.folder_b}</div>
+										<div class="text-xs text-muted-foreground">{pairFilesB.length}개 파일</div>
+									</div>
+								</label>
+							</div>
+
+							<!-- 이미지 2열 비교 -->
+							<div class="grid grid-cols-2 gap-4">
+								<div>
+									<p class="text-sm font-semibold mb-2">
+										A 폴더 <span class="text-muted-foreground font-normal">({pairFilesA.length}개)</span>
+										{#if pairKeepFolder === 'a'}<span class="ml-1 text-xs text-green-600 font-medium">보관</span>{/if}
+										{#if pairKeepFolder === 'b'}<span class="ml-1 text-xs text-destructive font-medium">삭제</span>{/if}
+									</p>
+									<div class="grid grid-cols-3 gap-2 max-h-[300px] overflow-y-auto">
+										{#each pairFilesA as f}
+											<div class="rounded border bg-muted/30 p-1">
+												<img
+													src="/api/ic/files/{f.file_id}/thumbnail"
+													alt=""
+													class="w-full aspect-square object-cover rounded"
+													loading="lazy"
+													onerror={(e) => { (e.target as HTMLImageElement).style.display='none'; }}
+												/>
+												<p class="text-[10px] text-muted-foreground mt-1 truncate">{f.file_path.split('\\').pop()}</p>
+											</div>
+										{/each}
+									</div>
+								</div>
+								<div>
+									<p class="text-sm font-semibold mb-2">
+										B 폴더 <span class="text-muted-foreground font-normal">({pairFilesB.length}개)</span>
+										{#if pairKeepFolder === 'b'}<span class="ml-1 text-xs text-green-600 font-medium">보관</span>{/if}
+										{#if pairKeepFolder === 'a'}<span class="ml-1 text-xs text-destructive font-medium">삭제</span>{/if}
+									</p>
+									<div class="grid grid-cols-3 gap-2 max-h-[300px] overflow-y-auto">
+										{#each pairFilesB as f}
+											<div class="rounded border bg-muted/30 p-1">
+												<img
+													src="/api/ic/files/{f.file_id}/thumbnail"
+													alt=""
+													class="w-full aspect-square object-cover rounded"
+													loading="lazy"
+													onerror={(e) => { (e.target as HTMLImageElement).style.display='none'; }}
+												/>
+												<p class="text-[10px] text-muted-foreground mt-1 truncate">{f.file_path.split('\\').pop()}</p>
+											</div>
+										{/each}
+									</div>
+								</div>
+							</div>
+						{/if}
+					</div>
+				{/if}
+			</div>
+
+			<!-- 모달 푸터 -->
+			{#if selectedPair && !loadingPairFiles}
+				<div class="flex items-center justify-end gap-3 px-6 py-4 border-t">
+					<button
+						class="rounded-lg border px-4 py-2 text-sm hover:bg-accent transition-colors"
+						onclick={() => (showFolderPairModal = false)}
+					>
+						취소
+					</button>
+					<button
+						class="rounded-lg bg-sky-600 text-white px-4 py-2 text-sm font-medium hover:bg-sky-700 transition-colors disabled:opacity-50"
+						onclick={resolveByFolderPair}
+						disabled={!pairKeepFolder || pairGroupIds.length === 0 || pairResolving}
+					>
+						{pairResolving ? '처리 중...' : `폴더 쌍 해결 (${pairGroupIds.length}그룹)`}
 					</button>
 				</div>
 			{/if}

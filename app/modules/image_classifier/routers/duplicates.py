@@ -263,6 +263,14 @@ def _merge_metadata(
         WHERE file_id IN ({placeholders})
     """), {"keep_id": keep_file_id})
 
+    # 8. file_path_aliases: 삭제 파일의 경로를 보관 파일의 alias로 저장
+    db.execute(text(f"""
+        INSERT OR IGNORE INTO file_path_aliases (file_id, alias_path, source)
+        SELECT :keep_id, file_path, 'duplicate_merge'
+        FROM file_classifications
+        WHERE id IN ({placeholders})
+    """), {"keep_id": keep_file_id})
+
     return 1
 
 
@@ -486,6 +494,245 @@ async def resolve_by_folder(
     db: Session = Depends(get_db),
 ):
     """폴더 기준 일괄 해결: keep_folder의 파일 보관, 나머지 삭제"""
+    resolved_count = 0
+    deleted_count = 0
+    skipped_count = 0
+    failed_count = 0
+    details = []
+
+    keep_folder_normalized = request.keep_folder.replace('/', '\\')
+
+    for gid in request.group_ids:
+        members = db.execute(
+            text("""
+                SELECT dm.file_id, fc.file_path, dm.quality_score
+                FROM duplicate_members dm
+                JOIN file_classifications fc ON dm.file_id = fc.id
+                WHERE dm.group_id = :gid
+            """),
+            {"gid": gid}
+        ).fetchall()
+
+        if not members:
+            skipped_count += 1
+            continue
+
+        # keep_folder에 속한 파일 찾기
+        keep_candidates = []
+        delete_candidates = []
+        for m in members:
+            fp_normalized = m.file_path.replace('/', '\\')
+            sep_idx = max(fp_normalized.rfind('\\'), fp_normalized.rfind('/'))
+            m_folder = fp_normalized[:sep_idx] if sep_idx >= 0 else fp_normalized
+
+            if m_folder == keep_folder_normalized:
+                keep_candidates.append(m)
+            else:
+                delete_candidates.append(m)
+
+        if not keep_candidates:
+            skipped_count += 1
+            continue
+
+        # quality_score 가장 높은 것 보관
+        keep_file = max(keep_candidates, key=lambda x: x.quality_score or 0)
+        # keep_candidates 중 보관 파일 외의 것도 삭제 대상에 추가
+        for kc in keep_candidates:
+            if kc.file_id != keep_file.file_id:
+                delete_candidates.append(kc)
+
+        db.execute(
+            text("UPDATE duplicate_groups SET status = 'resolved', kept_file_id = :keep_id WHERE id = :gid"),
+            {"gid": gid, "keep_id": keep_file.file_id}
+        )
+
+        delete_ids = [dc.file_id for dc in delete_candidates]
+        delete_paths = [dc.file_path for dc in delete_candidates]
+        _merge_metadata(db, keep_file.file_id, delete_ids)
+        batch_deleted, batch_failed = _batch_delete_files(db, delete_ids, delete_paths)
+        deleted_count += batch_deleted
+        failed_count += batch_failed
+
+        resolved_count += 1
+        details.append({
+            "group_id": gid,
+            "kept_file_id": keep_file.file_id,
+            "deleted_file_ids": delete_ids,
+        })
+
+    db.commit()
+
+    return {
+        "resolved_count": resolved_count,
+        "deleted_count": deleted_count,
+        "skipped_count": skipped_count,
+        "failed_count": failed_count,
+        "details": details,
+    }
+
+
+@router.get("/folder-pair-analysis")
+def get_folder_pair_analysis(db: Session = Depends(get_db)):
+    """
+    pending 그룹의 멤버를 폴더 쌍별로 분석.
+
+    각 pending 그룹의 멤버 폴더 집합을 2-조합으로 쌍별 집계.
+    3개+ 폴더 그룹은 모든 2-조합 쌍에 포함.
+
+    Returns:
+        {pairs: [{folder_a, folder_b, group_count, file_count, group_ids}]}
+    """
+    from itertools import combinations
+    from collections import defaultdict
+
+    rows = db.execute(text("""
+        SELECT dg.id as group_id, fc.file_path
+        FROM duplicate_groups dg
+        JOIN duplicate_members dm ON dg.id = dm.group_id
+        JOIN file_classifications fc ON dm.file_id = fc.id
+        WHERE dg.status = 'pending'
+    """)).fetchall()
+
+    # 그룹별 파일 수집: group_id -> {folder: file_count}
+    group_folders: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    group_file_count: dict[int, int] = defaultdict(int)
+
+    for row in rows:
+        fp = row.file_path
+        sep_idx = max(fp.rfind('\\'), fp.rfind('/'))
+        folder = fp[:sep_idx] if sep_idx >= 0 else fp
+
+        group_folders[row.group_id][folder] += 1
+        group_file_count[row.group_id] += 1
+
+    # 쌍별 집계: (folder_a, folder_b) -> {group_ids, file_count}
+    pair_map: dict[tuple[str, str], dict] = defaultdict(lambda: {"group_ids": set(), "file_count": 0})
+
+    for group_id, folders_dict in group_folders.items():
+        folders = sorted(folders_dict.keys())
+        if len(folders) < 2:
+            continue  # 단일 폴더 그룹은 쌍 분석 대상 아님
+
+        # 2-조합 생성
+        for fa, fb in combinations(folders, 2):
+            pair_key = (fa, fb)
+            pair_map[pair_key]["group_ids"].add(group_id)
+            pair_map[pair_key]["file_count"] += group_file_count[group_id]
+
+    pairs = []
+    for (folder_a, folder_b), data in sorted(
+        pair_map.items(), key=lambda x: -len(x[1]["group_ids"])
+    ):
+        pairs.append({
+            "folder_a": folder_a,
+            "folder_b": folder_b,
+            "group_count": len(data["group_ids"]),
+            "file_count": data["file_count"],
+            "group_ids": sorted(data["group_ids"]),
+        })
+
+    return {"pairs": pairs}
+
+
+@router.get("/folder-pair-analysis/files")
+def get_folder_pair_analysis_files(
+    folder_a: str,
+    folder_b: str,
+    db: Session = Depends(get_db),
+):
+    """
+    특정 폴더 쌍의 이미지 리스트 반환.
+
+    folder_a / folder_b 소속으로 분류하여 반환.
+    Returns:
+        {files_a: [...], files_b: [...], group_ids: [...]}
+    """
+    folder_a_norm = folder_a.replace('/', '\\')
+    folder_b_norm = folder_b.replace('/', '\\')
+
+    # 1단계: 두 폴더에 모두 파일이 있는 pending 그룹 찾기
+    like_a_bs = _escape_like(folder_a_norm) + '\\%'
+    like_a_sl = _escape_like(folder_a.replace('\\', '/')) + '/%'
+    like_b_bs = _escape_like(folder_b_norm) + '\\%'
+    like_b_sl = _escape_like(folder_b.replace('\\', '/')) + '/%'
+
+    group_rows_a = db.execute(text("""
+        SELECT DISTINCT dm.group_id
+        FROM duplicate_members dm
+        JOIN file_classifications fc ON dm.file_id = fc.id
+        JOIN duplicate_groups dg ON dm.group_id = dg.id
+        WHERE dg.status = 'pending'
+        AND (fc.file_path LIKE :like_bs ESCAPE '!' OR fc.file_path LIKE :like_sl ESCAPE '!')
+    """), {"like_bs": like_a_bs, "like_sl": like_a_sl}).fetchall()
+
+    group_ids_a = set(r.group_id for r in group_rows_a)
+
+    group_rows_b = db.execute(text("""
+        SELECT DISTINCT dm.group_id
+        FROM duplicate_members dm
+        JOIN file_classifications fc ON dm.file_id = fc.id
+        JOIN duplicate_groups dg ON dm.group_id = dg.id
+        WHERE dg.status = 'pending'
+        AND (fc.file_path LIKE :like_bs ESCAPE '!' OR fc.file_path LIKE :like_sl ESCAPE '!')
+    """), {"like_bs": like_b_bs, "like_sl": like_b_sl}).fetchall()
+
+    group_ids_b = set(r.group_id for r in group_rows_b)
+
+    # 두 폴더에 모두 속한 그룹
+    group_ids = sorted(group_ids_a & group_ids_b)
+    if not group_ids:
+        return {"files_a": [], "files_b": [], "group_ids": []}
+
+    # 2단계: 해당 그룹들의 모든 멤버 조회
+    placeholders = ",".join(str(gid) for gid in group_ids)
+    rows = db.execute(text(f"""
+        SELECT dg.id as group_id, dm.file_id, fc.file_path, dm.file_size, dm.resolution, dm.quality_score
+        FROM duplicate_groups dg
+        JOIN duplicate_members dm ON dg.id = dm.group_id
+        JOIN file_classifications fc ON dm.file_id = fc.id
+        WHERE dg.id IN ({placeholders})
+        ORDER BY dg.id, dm.quality_score DESC
+    """)).fetchall()
+
+    files_a = []
+    files_b = []
+    for row in rows:
+        fp_normalized = row.file_path.replace('/', '\\')
+        sep_idx = max(fp_normalized.rfind('\\'), fp_normalized.rfind('/'))
+        m_folder = fp_normalized[:sep_idx] if sep_idx >= 0 else fp_normalized
+
+        file_info = {
+            "file_id": row.file_id,
+            "file_path": row.file_path,
+            "file_size": row.file_size,
+            "resolution": row.resolution,
+            "quality_score": row.quality_score,
+            "group_id": row.group_id,
+        }
+
+        if m_folder == folder_a_norm:
+            files_a.append(file_info)
+        elif m_folder == folder_b_norm:
+            files_b.append(file_info)
+
+    return {"files_a": files_a, "files_b": files_b, "group_ids": group_ids}
+
+
+class ResolveByFolderPairRequest(BaseModel):
+    keep_folder: str
+    other_folder: str
+    group_ids: list[int]
+
+
+@router.post("/resolve-by-folder-pair")
+async def resolve_by_folder_pair(
+    request: ResolveByFolderPairRequest,
+    db: Session = Depends(get_db),
+):
+    """폴더 쌍 기준 일괄 해결: keep_folder의 파일 보관, other_folder 파일 삭제 (group_ids 필터링 포함)"""
+    if not request.group_ids:
+        raise HTTPException(status_code=400, detail="group_ids가 비어있습니다.")
+
     resolved_count = 0
     deleted_count = 0
     skipped_count = 0

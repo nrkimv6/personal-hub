@@ -176,3 +176,101 @@ async def test_resolve_non_member_file(seeded_duplicates, client, test_db):
 
     assert response.status_code == 400
     assert "멤버가 아닙니다" in response.json()["detail"]
+
+
+# ===========================================================================
+# 폴더 쌍 분석 e2e 테스트
+# ===========================================================================
+
+def _insert_e2e_file(test_db, file_id: int, file_path: str):
+    """e2e 테스트용 파일 레코드 삽입"""
+    import hashlib
+    file_hash = hashlib.md5(file_path.encode()).hexdigest()
+    test_db.execute(text("""
+        INSERT OR IGNORE INTO file_classifications (id, file_path, file_hash, status)
+        VALUES (:id, :fp, :fh, 'pending')
+    """), {"id": file_id, "fp": file_path, "fh": file_hash})
+    test_db.commit()
+
+
+def _setup_e2e_pair_data(test_db, base_id=100):
+    """폴더 쌍 테스트 데이터 셋업 (ID 충돌 방지용 base_id)"""
+    files = [
+        (base_id + 0, "D:\folderA\img1.jpg"),
+        (base_id + 1, "D:\folderA\img2.jpg"),
+        (base_id + 2, "D:\folderB\img1.jpg"),
+        (base_id + 3, "D:\folderB\img2.jpg"),
+    ]
+    for fid, fp in files:
+        _insert_e2e_file(test_db, fid, fp)
+
+    # A-B 쌍 그룹 2개
+    for i in range(2):
+        test_db.execute(text("INSERT INTO duplicate_groups (group_hash, status, member_count) VALUES (:h, 'pending', 2)"),
+                        {"h": f"e2e_ab_hash_{i}"})
+        test_db.commit()
+        gid = test_db.execute(text("SELECT id FROM duplicate_groups ORDER BY id DESC LIMIT 1")).scalar()
+        test_db.execute(text("INSERT INTO duplicate_members (group_id, file_id, phash_distance) VALUES (:g, :f, 0)"),
+                        {"g": gid, "f": base_id + i})
+        test_db.execute(text("INSERT INTO duplicate_members (group_id, file_id, phash_distance) VALUES (:g, :f, 0)"),
+                        {"g": gid, "f": base_id + 2 + i})
+        test_db.commit()
+
+    return [gid - 1, gid]
+
+
+@pytest.mark.asyncio
+async def test_get_folder_pair_analysis_http(client, test_db):
+    """GET /folder-pair-analysis → 200 응답 + pairs 구조 확인"""
+    _setup_e2e_pair_data(test_db)
+
+    response = client.get("/api/ic/duplicates/folder-pair-analysis")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "pairs" in data
+    pairs = data["pairs"]
+    assert len(pairs) >= 1
+
+    pair = pairs[0]
+    assert "folder_a" in pair
+    assert "folder_b" in pair
+    assert "group_count" in pair
+    assert "file_count" in pair
+    assert "group_ids" in pair
+    assert isinstance(pair["group_ids"], list)
+
+
+@pytest.mark.asyncio
+async def test_resolve_by_folder_pair_http(client, test_db):
+    """POST /resolve-by-folder-pair → 정상 해결 + file_path_aliases 저장 확인"""
+    group_ids = _setup_e2e_pair_data(test_db, base_id=200)
+
+    response = client.post("/api/ic/duplicates/resolve-by-folder-pair", json={
+        "keep_folder": "D:\folderA",
+        "other_folder": "D:\folderB",
+        "group_ids": group_ids,
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["resolved_count"] > 0
+
+    # file_path_aliases가 저장됐는지 확인
+    alias_count = test_db.execute(text(
+        "SELECT COUNT(*) FROM file_path_aliases WHERE source = 'duplicate_merge'"
+    )).scalar()
+    assert alias_count > 0
+
+
+@pytest.mark.asyncio
+async def test_resolve_by_folder_pair_empty_groups(client):
+    """POST /resolve-by-folder-pair with empty group_ids → 400 에러 응답"""
+    response = client.post("/api/ic/duplicates/resolve-by-folder-pair", json={
+        "keep_folder": "D:\folderA",
+        "other_folder": "D:\folderB",
+        "group_ids": [],
+    })
+
+    assert response.status_code == 400
+    assert "group_ids" in response.json()["detail"].lower() or "비어있" in response.json()["detail"]
