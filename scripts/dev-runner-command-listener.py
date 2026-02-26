@@ -42,7 +42,8 @@ REDIS_HOST = "localhost"
 REDIS_PORT = 6379
 COMMANDS_KEY = "plan-runner:commands"
 RESULTS_KEY = "plan-runner:command_results"
-STATE_KEY = "plan-runner:state"
+RUNNER_KEY_PREFIX = "plan-runner:runners"
+ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
 HEARTBEAT_INTERVAL = 10  # heartbeat 갱신 주기 (초)
 HEARTBEAT_TTL = 30  # heartbeat 만료 시간 (초, 3회 미갱신 시 만료)
@@ -70,12 +71,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-LOG_CHANNEL = "plan-runner:logs"
+LOG_CHANNEL_PREFIX = "plan-runner:logs"
 
 # 전역 프로세스 관리
-_current_process: Optional[subprocess.Popen] = None
-_current_log_file: Optional[Path] = None
-_stream_thread: Optional[threading.Thread] = None
+_running_processes: dict = {}
+_running_log_files: dict = {}
+_stream_threads: dict = {}
 
 
 def _is_pid_alive(pid: int) -> bool:

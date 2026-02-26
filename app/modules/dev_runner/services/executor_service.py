@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 import traceback
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict
@@ -25,7 +26,8 @@ REDIS_HOST = "localhost"
 REDIS_PORT = 6379
 COMMANDS_KEY = "plan-runner:commands"
 RESULTS_KEY = "plan-runner:command_results"
-STATE_KEY = "plan-runner:state"
+RUNNER_KEY_PREFIX = "plan-runner:runners"
+ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 COMMAND_TIMEOUT = 10  # 명령 결과 대기 타임아웃 (초)
 
 

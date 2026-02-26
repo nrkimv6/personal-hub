@@ -16,8 +16,9 @@ from app.modules.dev_runner.services.state import get_state
 # Redis 설정
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
-STATE_KEY = "plan-runner:state"
-LOG_CHANNEL = "plan-runner:logs"
+RUNNER_KEY_PREFIX = "plan-runner:runners"
+ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
+LOG_CHANNEL_PREFIX = "plan-runner:logs"
 
 HEARTBEAT_INTERVAL = 30  # 초
 
