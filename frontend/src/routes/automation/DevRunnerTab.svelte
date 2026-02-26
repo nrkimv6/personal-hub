@@ -36,7 +36,7 @@
 	let lastStartTime = $state<string | null>(null);
 	let panelOpen = $state(true);
 	let taskHistoryOpen = $state(false);
-	let taskHistoryTab = $state<'tasks' | 'plans'>('plans');
+	let taskHistoryTab = $state<'tasks' | 'plans' | 'merge'>('plans');
 	let currentTracking = $state<CurrentTrackingResponse | null>(null);
 	let selectedPlanPath = $state('');
 	let trackingInterval: ReturnType<typeof setInterval> | null = null;
@@ -304,7 +304,8 @@
 		if (initialPlan) {
 			try {
 				const decodedPath = atob(initialPlan);
-				await devRunnerRunnerApi.start({ plan_file: decodedPath });
+				const initResponse = await devRunnerRunnerApi.start({ plan_file: decodedPath });
+				handleRunStart(initResponse);
 				await pollStatus();
 				// URL에서 plan param 제거
 				const url = new URL(window.location.href);
@@ -359,26 +360,26 @@
 		}
 		prevCycle = currentCycle;
 
-		// 시작 감지
-		if (runStatus && !prevRunning && runStatus.running) {
-                        lastPlanFile = null;
-                        if (window.innerWidth < 640) panelOpen = false;
+		// 시작 감지 (runningCount 0 → 1+)
+		if (!prevRunning && runningCount > 0) {
+			lastPlanFile = null;
+			if (window.innerWidth < 640) panelOpen = false;
 		}
 
-		// 종료 감지 → plans 갱신
-		if (runStatus && prevRunning && !runStatus.running) {
+		// 종료 감지 → 모든 runner 종료 시만 plans 갱신
+		if (prevRunning && runningCount === 0) {
 			justCompleted = true;
 			if (completedTimer) clearTimeout(completedTimer);
 			completedTimer = setTimeout(() => { justCompleted = false; }, 10000);
-                        void fetchPlans();
-                        if (window.innerWidth < 640) panelOpen = true;
-                }
+			void fetchPlans();
+			if (window.innerWidth < 640) panelOpen = true;
+		}
 
-		// elapsed 타이머 관리
-		if (runStatus?.running && runStatus.start_time) {
-			updateElapsed(runStatus.start_time);
+		// elapsed 타이머 관리 (활성 탭 기준)
+		if (activeTabRunner?.running && activeTabRunner.start_time) {
+			updateElapsed(activeTabRunner.start_time);
 			if (elapsedInterval) clearInterval(elapsedInterval);
-			elapsedInterval = setInterval(() => updateElapsed(runStatus!.start_time!), 1000);
+			elapsedInterval = setInterval(() => updateElapsed(activeTabRunner!.start_time!), 1000);
 		} else {
 			if (elapsedInterval) {
 				clearInterval(elapsedInterval);
@@ -387,13 +388,15 @@
 			elapsed = '00:00:00';
 		}
 
-		if (runStatus) prevRunning = runStatus.running;
+		prevRunning = runningCount > 0;
 	});
 
 	// 파생 데이터
-	let activePlan = $derived(plans?.find(p => p.path === runStatus?.plan_file) ?? null);
-	let effectivePlanFile = $derived(runStatus?.plan_file ?? lastPlanFile);
-	// TaskList에 표시할 plan path (실행 중인 plan 또는 사용자가 선택한 plan)
+	let activeTabRunner = $derived(runnerTabs.find(t => t.id === activeTabId) ?? null);
+	let runningCount = $derived(runnerTabs.filter(t => t.running).length);
+	let activePlan = $derived(plans?.find(p => p.path === activeTabRunner?.plan_file) ?? null);
+	let effectivePlanFile = $derived(activeTabRunner?.plan_file ?? lastPlanFile);
+	// TaskList에 표시할 plan path (활성 탭의 plan 또는 사용자가 선택한 plan)
 	let taskListPlanPath = $derived(effectivePlanFile ?? selectedPlanPath ?? null);
 </script>
 
@@ -422,16 +425,12 @@
 					<div class="flex items-center gap-4 min-w-0">
 						<!-- Status indicator -->
 						<div class="flex items-center gap-2 shrink-0">
-							{#if runStatus?.running}
+							{#if activeTabRunner?.running}
 								<div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
 								<span class="text-xs font-medium">실행 중</span>
-								{#if runStatus?.pid}
-									<span class="text-[10px] text-gray-500 font-mono">PID {runStatus.pid}</span>
+								{#if runningCount > 1}
+									<span class="text-[10px] bg-green-100 text-green-700 px-1 rounded">{runningCount}개</span>
 								{/if}
-								<span class="text-[10px] text-gray-500 flex items-center gap-1">
-									<svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
-									Cycle {runStatus.current_cycle ?? '-'}
-								</span>
 								<span class="text-[10px] text-gray-500 font-mono">{elapsed}</span>
 							{:else if runStatus?.crashed}
 								<div class="w-2 h-2 rounded-full bg-red-500"></div>
@@ -585,6 +584,7 @@
 								tabs={[
 									{ id: 'tasks', label: 'Tasks' },
 									{ id: 'plans', label: 'Plans' },
+									{ id: 'merge', label: 'Merge Queue' },
 								]}
 								bind:activeTab={taskHistoryTab}
 								variant="primary"
@@ -595,16 +595,20 @@
 						<div class="flex-1 min-h-0 overflow-hidden">
 							{#if taskHistoryTab === 'tasks'}
 								<div class="px-4 pb-4 h-full flex flex-col">
-									{#if runStatus?.running && currentTracking}
+									{#if activeTabRunner?.running && currentTracking}
 										<CurrentTrackingCard tracking={currentTracking} />
 									{/if}
 									<div class="flex-1 min-h-0 overflow-hidden">
 										<TaskList planPath={taskListPlanPath} />
 									</div>
 								</div>
-							{:else}
+							{:else if taskHistoryTab === 'plans'}
 								<div class="px-4 pb-4 h-full overflow-hidden flex flex-col">
 									<PlanList {plans} onPlansChange={fetchPlans} runningPlanFile={runStatus?.plan_file ?? null} {lastPlanFile} {batchPlans} onPlanSelect={(path) => { selectedPlanPath = path; }} />
+								</div>
+							{:else}
+								<div class="px-4 pb-4 h-full overflow-hidden flex flex-col">
+									<MergeQueuePanel />
 								</div>
 							{/if}
 						</div>
@@ -612,9 +616,5 @@
 				</div>
 			</div>
 		{/if}
-	</div>
-	<!-- Merge Queue Panel -->
-	<div class="px-4 pb-4">
-		<MergeQueuePanel />
 	</div>
 </div>
