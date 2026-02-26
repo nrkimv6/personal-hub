@@ -519,3 +519,28 @@ class TestUpdateScheduleTargetConfig:
         tc = data.get("target_config", {})
         assert tc.get("llm_provider") == "gemini"
 
+    def test_get_schedules_returns_target_config(self, client):
+        """TC-GET: writing_task 스케줄에 llm_provider=gemini PUT 후 GET 목록에서 target_config 확인.
+
+        프론트엔드 폼 초기값 설정에 필요한 데이터가 목록 응답에 포함되는지 검증.
+        """
+        schedule_id = self._create_writing_schedule(client)
+
+        # llm_provider=gemini 설정
+        client.put(f"{API_PREFIX}/collect/schedules/{schedule_id}", json={
+            "target_config": {"llm_provider": "gemini", "llm_model": ""}
+        })
+
+        # GET 목록에서 확인
+        response = client.get(f"{API_PREFIX}/collect/schedules")
+        assert response.status_code == 200
+        schedules = response.json()
+        assert len(schedules) >= 1
+
+        found = next((s for s in schedules if s["id"] == schedule_id), None)
+        assert found is not None, "생성한 스케줄이 목록에 없음"
+        tc = found.get("target_config") or {}
+        assert tc.get("llm_provider") == "gemini", (
+            f"GET /collect/schedules 응답에 llm_provider=gemini 없음: {tc}"
+        )
+

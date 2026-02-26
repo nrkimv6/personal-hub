@@ -115,6 +115,7 @@ class ScheduleResponse(BaseModel):
     enabled: bool
     last_run_at: Optional[datetime] = None
     next_run_at: Optional[datetime] = None
+    target_config: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True
@@ -174,6 +175,7 @@ async def get_schedules(
             enabled=s.enabled,
             last_run_at=s.last_run_at,
             next_run_at=s.next_run_at,
+            target_config=s.get_target_config() if s.target_config else None,
         )
         for s in schedules
     ]
@@ -325,7 +327,13 @@ async def get_schedule_detail(
         raise HTTPException(status_code=404, detail="Schedule not found")
 
     target_config = schedule.get_target_config() if schedule.target_config else None
-    schedule_value = json.loads(schedule.schedule_value) if schedule.schedule_value else None
+    if schedule.schedule_value:
+        try:
+            schedule_value = json.loads(schedule.schedule_value)
+        except (json.JSONDecodeError, ValueError):
+            schedule_value = {"cron": schedule.schedule_value}
+    else:
+        schedule_value = None
 
     # Google 검색인 경우 SavedSearch 정보 포함
     saved_search_info = None
@@ -393,7 +401,7 @@ async def update_schedule(
         existing_config = schedule.get_target_config() if schedule.target_config else {}
         merged = {**existing_config, **data.target_config}
         schedule.set_target_config(merged)
-        db.flush()
+        db.commit()
 
     # Google 검색 파라미터 수정
     if data.google_search_params and schedule.target_type == "google_search":
@@ -419,7 +427,14 @@ async def update_schedule(
     # 상세 응답 반환 (get_schedule_detail과 동일)
     schedule = db.query(TaskSchedule).filter_by(id=schedule_id).first()
     target_config = schedule.get_target_config() if schedule.target_config else None
-    schedule_value = json.loads(schedule.schedule_value) if schedule.schedule_value else None
+    if schedule.schedule_value:
+        try:
+            schedule_value = json.loads(schedule.schedule_value)
+        except (json.JSONDecodeError, ValueError):
+            # cron 표현식 등 JSON이 아닌 값이 저장된 경우
+            schedule_value = {"cron": schedule.schedule_value}
+    else:
+        schedule_value = None
 
     saved_search_info = None
     if schedule.target_type == "google_search" and target_config:
