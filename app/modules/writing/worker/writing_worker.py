@@ -181,6 +181,11 @@ class WritingWorker:
 
         logger.info(f"WritingWorker 시작: schedule_id={schedule.id}, run_id={run.id}")
 
+        # target_config에서 LLM provider/model 읽기
+        config = schedule.get_target_config() if schedule.target_config else {}
+        llm_provider = config.get("llm_provider", "claude")
+        llm_model = config.get("llm_model", "")
+
         # 당일 슬롯 컨텍스트 생성
         slot_context = SlotContext()
         current_season = self._get_current_season()
@@ -199,7 +204,7 @@ class WritingWorker:
             # 1. 믹스 글쓰기 (5회) - 비동기 큐에 요청
             for i in range(self.MIX_COUNT):
                 logger.info(f"믹스 글쓰기 요청 {i + 1}/{self.MIX_COUNT}")
-                if self._queue_mix_writing(run.id, slot_context, index=i):
+                if self._queue_mix_writing(run.id, slot_context, index=i, llm_provider=llm_provider, llm_model=llm_model):
                     success += 1
                 else:
                     failed += 1
@@ -208,7 +213,7 @@ class WritingWorker:
             # 2. 랜덤 소재+키워드 글쓰기 (3회) - 비동기 큐에 요청
             for i in range(self.RANDOM_TOPIC_COUNT):
                 logger.info(f"랜덤 글쓰기 요청 {i + 1}/{self.RANDOM_TOPIC_COUNT}")
-                if self._queue_random_writing(run.id, slot_context, current_season, index=i):
+                if self._queue_random_writing(run.id, slot_context, current_season, index=i, llm_provider=llm_provider, llm_model=llm_model):
                     success += 1
                 else:
                     failed += 1
@@ -217,7 +222,7 @@ class WritingWorker:
             # 3. 랜덤 키워드만 글쓰기 (3회) - 비동기 큐에 요청
             for i in range(self.RANDOM_KEYWORD_COUNT):
                 logger.info(f"키워드 전용 글쓰기 요청 {i + 1}/{self.RANDOM_KEYWORD_COUNT}")
-                if self._queue_keyword_writing(run.id, slot_context, current_season, index=i):
+                if self._queue_keyword_writing(run.id, slot_context, current_season, index=i, llm_provider=llm_provider, llm_model=llm_model):
                     success += 1
                 else:
                     failed += 1
@@ -248,6 +253,8 @@ class WritingWorker:
         run_id: int,
         slot_context: SlotContext,
         index: int = 0,
+        llm_provider: str = "claude",
+        llm_model: str = "",
     ) -> bool:
         """믹스 글쓰기 LLM 요청 생성 (비동기 큐 패턴).
 
@@ -291,6 +298,8 @@ class WritingWorker:
                 status="pending",
                 requested_by="scheduler",
                 request_source="writing_worker",
+                provider=llm_provider,
+                model=llm_model,
                 writing_metadata=json.dumps({
                     "task_type": "mix",
                     "source_ids": [s.id for s in sources],
@@ -314,6 +323,8 @@ class WritingWorker:
         slot_context: SlotContext,
         season: Optional[str],
         index: int = 0,
+        llm_provider: str = "claude",
+        llm_model: str = "",
     ) -> bool:
         """랜덤 프롬프트 글쓰기 LLM 요청 생성 (비동기 큐 패턴).
 
@@ -371,6 +382,8 @@ class WritingWorker:
                 status="pending",
                 requested_by="scheduler",
                 request_source="writing_worker",
+                provider=llm_provider,
+                model=llm_model,
                 writing_metadata=json.dumps({
                     "task_type": "random",
                     "selected_elements": selected_json,
@@ -397,6 +410,8 @@ class WritingWorker:
         slot_context: SlotContext,
         season: Optional[str],
         index: int = 0,
+        llm_provider: str = "claude",
+        llm_model: str = "",
     ) -> bool:
         """키워드 전용 글쓰기 LLM 요청 생성 (비동기 큐 패턴).
 
@@ -452,6 +467,8 @@ class WritingWorker:
                 status="pending",
                 requested_by="scheduler",
                 request_source="writing_worker",
+                provider=llm_provider,
+                model=llm_model,
                 writing_metadata=json.dumps({
                     "task_type": "keyword",
                     "selected_elements": selected_json,

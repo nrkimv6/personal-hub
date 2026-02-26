@@ -54,8 +54,15 @@ def test_db():
     )
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-    # 테이블 생성
-    Base.metadata.create_all(bind=engine)
+    # 테이블 생성 — postgresql.UUID 컬럼이 있는 테이블은 SQLite에서 실패하므로
+    # 스케줄 API 테스트에 필요한 테이블만 명시적으로 생성
+    _NEEDED = {
+        "task_schedules", "task_schedule_runs",
+        "service_accounts", "browser_profiles",
+        "google_saved_searches",
+    }
+    tables = [t for name, t in Base.metadata.tables.items() if name in _NEEDED]
+    Base.metadata.create_all(bind=engine, tables=tables)
 
     session = TestingSessionLocal()
 
@@ -432,3 +439,108 @@ class TestDeleteSchedule:
         response = client.delete(f"{API_PREFIX}/collect/schedules/99999?delete_runs=true")
 
         assert response.status_code == 404
+
+
+# ============================================================
+# target_config (LLM provider/model) 저장 테스트
+# ============================================================
+
+class TestUpdateScheduleTargetConfig:
+    """PUT /collect/schedules/{id} - target_config 저장 검증"""
+
+    def _create_writing_schedule(self, client):
+        """writing_task 스케줄 생성 헬퍼"""
+        resp = client.post(f"{API_PREFIX}/collect/schedules", json={
+            "target_type": "writing_task",
+            "schedule_type": "time_window",
+            "schedule_value": {
+                "daily_runs": 1,
+                "time_windows": [{"start": "09:00", "end": "09:00"}]
+            }
+        })
+        assert resp.status_code == 200
+        return resp.json()["id"]
+
+    def test_update_schedule_target_config_right(self, client):
+        """TC-Right: writing_task 스케줄에 llm_provider=gemini 저장"""
+        schedule_id = self._create_writing_schedule(client)
+
+        response = client.put(f"{API_PREFIX}/collect/schedules/{schedule_id}", json={
+            "target_config": {"llm_provider": "gemini", "llm_model": ""}
+        })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("target_config", {}).get("llm_provider") == "gemini"
+
+    def test_update_schedule_target_config_merge(self, client, sample_service_account):
+        """TC-Merge: 기존 service_account_id가 있는 스케줄에 llm_provider 추가 시 기존 값 보존"""
+        # instagram_feed 스케줄 생성 (service_account_id 포함)
+        resp = client.post(f"{API_PREFIX}/collect/schedules", json={
+            "target_type": "instagram_feed",
+            "target_config": {"service_account_id": sample_service_account.id},
+            "schedule_type": "time_window",
+            "schedule_value": {
+                "daily_runs": 1,
+                "time_windows": [{"start": "09:00", "end": "09:00"}]
+            }
+        })
+        schedule_id = resp.json()["id"]
+
+        # llm_provider 추가
+        response = client.put(f"{API_PREFIX}/collect/schedules/{schedule_id}", json={
+            "target_config": {"llm_provider": "gemini", "llm_model": "gemini-2.0-flash"}
+        })
+
+        assert response.status_code == 200
+        data = response.json()
+        tc = data.get("target_config", {})
+        assert tc.get("llm_provider") == "gemini"
+        # 기존 service_account_id 보존 확인
+        assert tc.get("service_account_id") == sample_service_account.id
+
+    def test_update_schedule_target_config_null(self, client):
+        """TC-Boundary: target_config=null PUT → 기존 target_config 변경 없음"""
+        schedule_id = self._create_writing_schedule(client)
+
+        # 먼저 llm_provider 설정
+        client.put(f"{API_PREFIX}/collect/schedules/{schedule_id}", json={
+            "target_config": {"llm_provider": "gemini"}
+        })
+
+        # target_config=None (생략) PUT
+        response = client.put(f"{API_PREFIX}/collect/schedules/{schedule_id}", json={
+            "display_name": "변경된이름"
+        })
+
+        assert response.status_code == 200
+        data = response.json()
+        # target_config 변경 없음
+        tc = data.get("target_config", {})
+        assert tc.get("llm_provider") == "gemini"
+
+    def test_get_schedules_returns_target_config(self, client):
+        """TC-GET: writing_task 스케줄에 llm_provider=gemini PUT 후 GET 목록에서 target_config 확인.
+
+        프론트엔드 폼 초기값 설정에 필요한 데이터가 목록 응답에 포함되는지 검증.
+        """
+        schedule_id = self._create_writing_schedule(client)
+
+        # llm_provider=gemini 설정
+        client.put(f"{API_PREFIX}/collect/schedules/{schedule_id}", json={
+            "target_config": {"llm_provider": "gemini", "llm_model": ""}
+        })
+
+        # GET 목록에서 확인
+        response = client.get(f"{API_PREFIX}/collect/schedules")
+        assert response.status_code == 200
+        schedules = response.json()
+        assert len(schedules) >= 1
+
+        found = next((s for s in schedules if s["id"] == schedule_id), None)
+        assert found is not None, "생성한 스케줄이 목록에 없음"
+        tc = found.get("target_config") or {}
+        assert tc.get("llm_provider") == "gemini", (
+            f"GET /collect/schedules 응답에 llm_provider=gemini 없음: {tc}"
+        )
+

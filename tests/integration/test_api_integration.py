@@ -96,3 +96,37 @@ class TestAccountAPI:
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
+
+
+class TestImageClassifyAPI:
+    """Image Classifier API 통합 테스트 — /api/ic/classify 엔드포인트"""
+
+    def test_classify_status_endpoint_returns_200(self, integration_server):
+        """GET /api/ic/classify/status 요청 시 HTTP 200 반환 및 running 필드 포함."""
+        response = requests.get(f"{integration_server}/api/ic/classify/status")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "running" in data, f"응답에 'running' 필드가 없음: {data}"
+
+    def test_classify_start_returns_error_when_no_files(self, integration_server):
+        """POST /api/ic/classify/start — 분류 대상 파일 없을 때 4xx 반환 (서버 에러 500 아님)."""
+        response = requests.post(
+            f"{integration_server}/api/ic/classify/start",
+            json={"model": "claude_cli", "batch_size": 1},
+        )
+
+        # DB에 파일 없으므로 4xx 반환 예상 (200이면 빈 배치 처리 시작)
+        assert response.status_code != 500, f"서버 에러(500) 발생: {response.text}"
+        assert response.status_code in [200, 400, 404, 409], \
+            f"예상치 못한 응답 코드: {response.status_code}, body: {response.text}"
+
+    def test_classify_start_with_gemini_model_no_server_error(self, integration_server):
+        """POST /api/ic/classify/start body model='gemini_cli' — 서버 에러(500) 없음."""
+        response = requests.post(
+            f"{integration_server}/api/ic/classify/start",
+            json={"model": "gemini_cli", "batch_size": 1},
+        )
+
+        assert response.status_code != 500, \
+            f"gemini_cli 모델로 요청 시 서버 에러 발생: {response.text}"

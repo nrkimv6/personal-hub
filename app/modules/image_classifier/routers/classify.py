@@ -253,10 +253,32 @@ def _get_monitor_db_session():
     return MonitorSessionLocal()
 
 
-def _build_classify_prompt(categories: list[str], image_path: str) -> str:
-    """이미지 분류 프롬프트 생성."""
+def _build_classify_prompt(categories: list[str], image_path: str, provider: str = "claude") -> str:
+    """이미지 분류 프롬프트 생성.
+
+    Args:
+        categories: 분류 카테고리 목록
+        image_path: 이미지 파일 경로 (claude: 프롬프트에 포함, gemini: cli_options["image_path"]로 별도 전달)
+        provider: 'claude' 또는 'gemini'
+    """
     cat_list = "\n".join(f"- {cat}" for cat in categories)
-    return f"""다음 이미지를 아래 카테고리 중 하나로 분류하세요.
+
+    if provider == "gemini":
+        # Gemini CLI는 @경로 문법으로 이미지를 직접 첨부 — Read 도구 불필요
+        return f"""다음 이미지를 아래 카테고리 중 하나로 분류하세요.
+
+**컨텍스트:**
+이미지의 내용을 분석하여 가장 적합한 카테고리로 분류하세요.
+
+**가능한 카테고리:**
+{cat_list}
+
+첨부된 이미지를 분석하여 가장 적합한 카테고리를 선택하세요.
+응답은 반드시 지정된 JSON 스키마 형식으로만 출력하세요.
+"""
+    else:
+        # Claude CLI: Read 도구로 이미지 파일 읽기
+        return f"""다음 이미지를 아래 카테고리 중 하나로 분류하세요.
 
 **컨텍스트:**
 이미지의 내용을 분석하여 가장 적합한 카테고리로 분류하세요.
@@ -341,8 +363,13 @@ async def run_classification(
     else:
         provider = "claude"
 
-    # CLI 옵션 (claude_cli용)
-    cli_options = _build_cli_options() if provider == "claude" else None
+    # CLI 옵션 구성
+    # - claude: exec_mode + json_schema 등 Claude CLI 전용 옵션
+    # - gemini: image_path는 enqueue_and_poll 내부에서 classify_path 확정 후 설정
+    if provider == "claude":
+        cli_options = _build_cli_options()
+    else:
+        cli_options = {}  # gemini: enqueue_and_poll에서 image_path 주입
 
     # model명 변환: claude_cli → sonnet (LLMWorker에서 사용하는 모델명)
     llm_model = ic_settings.CLAUDE_MODEL if provider == "claude" else ""
@@ -514,8 +541,14 @@ async def run_classification(
                 thumb_path = ic_settings.THUMBNAIL_DIR / f"{file_id}.jpg"
                 classify_path = str(thumb_path) if thumb_path.exists() else file_path
 
-                # 프롬프트 생성
-                prompt = _build_classify_prompt(categories, classify_path)
+                # gemini: classify_path 확정 후 cli_options에 image_path 주입
+                # (cli_options는 외부 클로저에서 참조하므로 새 dict 생성)
+                effective_cli_options = cli_options
+                if provider == "gemini":
+                    effective_cli_options = {**(cli_options or {}), "image_path": classify_path}
+
+                # 프롬프트 생성 (provider에 따라 분기)
+                prompt = _build_classify_prompt(categories, classify_path, provider)
 
                 # LLM 큐에 등록 (monitor.db 사용)
                 monitor_db = _get_monitor_db_session()
@@ -529,7 +562,7 @@ async def run_classification(
                         request_source="image_classifier",
                         provider=provider,
                         model=llm_model,
-                        cli_options=cli_options,
+                        cli_options=effective_cli_options,
                     )
                     request_id = llm_request.id
                     logger.debug(f"Enqueued: file_id={file_id}, request_id={request_id}")

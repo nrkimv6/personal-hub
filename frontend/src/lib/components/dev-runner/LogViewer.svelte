@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { devRunnerLogApi } from '$lib/api';
 
@@ -24,9 +24,13 @@
 		message: string;
 		raw: string;
 		isStale: boolean;
+		noiseCount?: number;
 	}
 
 	let lines = $state<ParsedLine[]>([]);
+	let expandedNoiseIndices = $state<number[]>([]);
+        let showNoiseIndicator = $state(false);
+        let noiseTimer: ReturnType<typeof setTimeout> | null = null;
 	let connected = $state<'connected' | 'disconnected'>('disconnected');
 	let autoScroll = $state(true);
 	let paused = $state(false);
@@ -62,7 +66,8 @@
 		CYCLE: { text: 'text-white', bg: 'bg-gray-600' },
 		SKIP: { text: 'text-gray-500', bg: 'bg-gray-500/20' },
 		GIT: { text: 'text-orange-400', bg: 'bg-orange-500/20' },
-		BATCH: { text: 'text-teal-400', bg: 'bg-teal-500/20' }
+		BATCH: { text: 'text-teal-400', bg: 'bg-teal-500/20' },
+		NOISE: { text: 'text-gray-600', bg: 'bg-gray-700/20' }
 	};
 
 	const LINE_PATTERN = /^\s*\[?(\d{2}:\d{2}:\d{2})\]?\s*\[(\w+)\]\s*(.*)/;
@@ -75,7 +80,13 @@
 		}
 		const diagMatch = text.match(DIAG_PATTERN);
 		if (diagMatch) {
-			return { timestamp: '', tag: diagMatch[1], message: diagMatch[2], raw: text, isStale };
+			const tag = diagMatch[1];
+			const message = diagMatch[2];
+			if (tag === 'NOISE') {
+				const noiseCount = parseInt(message) || 0;
+				return { timestamp: '', tag, message, raw: text, isStale, noiseCount };
+			}
+			return { timestamp: '', tag, message, raw: text, isStale };
 		}
 		return { timestamp: '', tag: '', message: text, raw: text, isStale };
 	}
@@ -99,7 +110,16 @@
 
 		const parsed = parseLine(text, isStale);
 
-		// BATCH 마커 감지 → 전체실행 파일 리스트 추적
+                if (parsed.tag === 'NOISE' && !isStale) {
+                        showNoiseIndicator = true;
+                        if (noiseTimer) { clearTimeout(noiseTimer); }
+                        noiseTimer = setTimeout(() => { showNoiseIndicator = false; noiseTimer = null; }, 2000);
+                } else if (!isStale) {
+                        showNoiseIndicator = false;
+                        if (noiseTimer) { clearTimeout(noiseTimer); noiseTimer = null; }
+                }
+
+                // BATCH 마커 감지 → 전체실행 파일 리스트 추적
 		if (parsed.tag === 'BATCH' && !isStale) {
 			const listMatch = parsed.message.match(/^PLAN_LIST\s+(.+)$/);
 			if (listMatch) {
@@ -198,6 +218,7 @@
 
 	async function connectSSE() {
 		if (eventSource) eventSource.close();
+                        if (noiseTimer) clearTimeout(noiseTimer);
 
 		// SSE 연결 전 status API로 실행 상태 + Redis 상태 확인
 		await fetchStatus();
@@ -264,6 +285,7 @@
 	onDestroy(() => {
 		if (eventSource) {
 			eventSource.close();
+                        if (noiseTimer) clearTimeout(noiseTimer);
 			eventSource = null;
 		}
 	});
@@ -346,8 +368,23 @@
 		{#if lines.length === 0}
 			<span class="text-gray-600">로그가 없습니다</span>
 		{:else}
-			{#each lines as line}
-				{#if isSeparator(line.raw)}
+			{#each lines as line, i}
+				{#if line.tag === 'NOISE'}
+					<div class="py-0.5 leading-5 {line.isStale ? 'opacity-30' : ''}">
+						{#if expandedNoiseIndices.includes(i)}
+							<span class="text-gray-600 text-xs italic">[NOISE] {line.noiseCount} lines suppressed</span>
+							<button
+								onclick={() => expandedNoiseIndices = expandedNoiseIndices.filter(n => n !== i)}
+								class="ml-1 text-gray-700 hover:text-gray-500 text-xs"
+							>▲</button>
+						{:else}
+							<button
+								onclick={() => expandedNoiseIndices = [...expandedNoiseIndices, i]}
+								class="text-gray-700 hover:text-gray-500 text-xs italic"
+							>... ({line.noiseCount} lines suppressed)</button>
+						{/if}
+					</div>
+				{:else if isSeparator(line.raw)}
 					<div class="py-2 text-center select-none {line.isStale ? 'opacity-25' : 'opacity-60'}">
 						<span class="text-gray-500 text-[10px]">{extractSeparatorText(line.raw)}</span><!-- separator -->
 					</div>
@@ -386,3 +423,6 @@
 		{/if}
 	</div>
 </div>
+
+
+

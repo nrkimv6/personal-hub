@@ -217,13 +217,27 @@ class ClassifierService:
             matched_tags: 매칭된 태그 이름 목록
         """
         from app.modules.instagram.services.llm_classifier_service import LLMClassifierService
+        from app.models.task_schedule import TaskSchedule
 
         llm_service = LLMClassifierService(self.db)
         if llm_service.should_trigger_llm(matched_tags):
             trigger_tag = llm_service.get_trigger_tag(matched_tags)
             if trigger_tag:
-                llm_service.create_request(post_id, trigger_tag)
-                logger.info(f"LLM classification queued for post {post_id} (trigger: {trigger_tag})")
+                # instagram_feed 스케줄에서 LLM provider/model 설정 읽기
+                schedule = (
+                    self.db.query(TaskSchedule)
+                    .filter_by(target_type="instagram_feed", enabled=True)
+                    .first()
+                )
+                provider = "claude"
+                model = ""
+                if schedule:
+                    config = schedule.get_target_config()
+                    provider = config.get("llm_provider", "claude")
+                    model = config.get("llm_model", "")
+
+                llm_service.create_request(post_id, trigger_tag, provider=provider, model=model)
+                logger.info(f"LLM classification queued for post {post_id} (trigger: {trigger_tag}, provider: {provider})")
 
     def get_post_tags(self, post_id: int) -> list[dict]:
         """게시물의 태그 목록 조회.

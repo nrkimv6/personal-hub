@@ -448,7 +448,7 @@ function Start-CombinedLogTail {
         "API"         = @{ Path = $ApiLog;            Color = "Cyan";        Tail = 5 }
         "WORKER"      = @{ Path = $WorkerLog;         Color = "Magenta";     Tail = 5 }
         "IG-WORKER"   = @{ Path = $IgWorkerLog;       Color = "DarkMagenta"; Tail = 3 }
-        "CLAUDE"      = @{ Path = $ClaudeWorkerLog;   Color = "Blue";        Tail = 3 }
+        "LLM"         = @{ Path = $ClaudeWorkerLog;   Color = "Blue";        Tail = 3 }
         "VIDEO-DL"    = @{ Path = $VideoDownloadLog;  Color = "DarkGreen";   Tail = 5 }
         "CRAWL"       = @{ Path = $CrawlWorkerLog;    Color = "DarkBlue";    Tail = 5 }
         "FRONTEND"    = @{ Path = $FrontendLog;       Color = "Green";       Tail = 3 }
@@ -517,7 +517,7 @@ function Start-CombinedLogTail {
         "API"         = @("stdout_api_*.log", "api_*.log")
         "WORKER"      = @("stdout_worker_*.log", "worker_*.log", "unified_worker_*.log")
         "IG-WORKER"   = @("stdout_instagram_*.log", "instagram_*.log")
-        "CLAUDE"      = @("stdout_llm_worker_*.log", "llm_worker_*.log")
+        "LLM"         = @("stdout_llm_worker_*.log", "llm_worker_*.log")
         "VIDEO-DL"    = @("stdout_video_download_worker_*.log", "video_download_worker_*.log")
         "CRAWL"       = @("stdout_crawl_*.log", "crawl_worker_*.log")
         "FRONTEND"    = @("frontend_2*.log")
@@ -532,7 +532,7 @@ function Start-CombinedLogTail {
     }
 
     # Admin 전용 소스 — Production에서 제외 (Worker는 항상 APP_MODE=development로 실행되어 logs/admin/에 기록됨)
-    $devOnlySources = @("WORKER", "IG-WORKER", "CLAUDE", "VIDEO-DL", "CRAWL",
+    $devOnlySources = @("WORKER", "IG-WORKER", "LLM", "VIDEO-DL", "CRAWL",
                          "IG-WD", "CLAUDE-WD", "VIDEO-DL-WD", "CRAWL-WD", "CMD-WD",
                          "WATCHDOG", "DEV-RUNNER", "PLAN-RUNNER", "PR-STREAM")
     if (-not $Admin) {

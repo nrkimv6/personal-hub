@@ -426,3 +426,51 @@ def cleanup_old_history(
     service = LLMService(db)
     count = service.cleanup_old_history(days=days, hard_delete=hard_delete)
     return {"deleted": count}
+
+
+# ========== Quota 관리 ==========
+
+@router.get("/quota-status")
+def get_quota_status(db: Session = Depends(get_db)):
+    """provider별 quota pause 상태 조회.
+
+    Returns:
+        {"gemini": {"paused": true, "until": "...", "reason": "...", "remaining_seconds": N, "pending_blocked_count": M},
+         "claude": {"paused": false, "pending_blocked_count": 0}}
+    """
+    service = LLMService(db)
+    result = {}
+    for provider in ["gemini", "claude"]:
+        paused_until = service.get_provider_quota_pause(provider)
+        blocked = service.get_blocked_pending_count(provider)
+        if paused_until:
+            remaining = int((paused_until - datetime.now()).total_seconds())
+            result[provider] = {
+                "paused": True,
+                "until": paused_until.isoformat(),
+                "remaining_seconds": max(0, remaining),
+                "pending_blocked_count": blocked,
+            }
+        else:
+            result[provider] = {
+                "paused": False,
+                "pending_blocked_count": blocked,
+            }
+    return result
+
+
+@router.delete("/quota-pause/{provider}")
+def clear_quota_pause(provider: str, db: Session = Depends(get_db)):
+    """provider의 quota pause 수동 해제.
+
+    pause 해제 후 quota 에러로 failed된 요청을 pending으로 재전환합니다.
+
+    Returns:
+        {"cleared": true, "reset_count": N}
+    """
+    service = LLMService(db)
+    cleared = service.clear_provider_quota_pause(provider)
+    reset_count = 0
+    if cleared:
+        reset_count = service.reset_quota_failed_requests(provider)
+    return {"cleared": cleared, "reset_count": reset_count}
