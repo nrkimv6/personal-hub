@@ -1290,6 +1290,9 @@ class LLMWorker:
                 # Heartbeat 업데이트
                 self._update_heartbeat()
 
+                # Quota pause 자동 해제 체크
+                await self._check_quota_resume()
+
                 # Pending 요청 처리
                 await self._process_pending_requests()
 
@@ -1322,12 +1325,52 @@ class LLMWorker:
                 logger.error(f"메인 루프 오류: {e}", exc_info=True)
                 await asyncio.sleep(5)
 
+    async def _check_quota_resume(self):
+        """만료된 quota pause 자동 해제 및 failed → pending 전환."""
+        db = SessionLocal()
+        try:
+            service = LLMService(db)
+            for provider in ["gemini", "claude"]:
+                paused_until = service.get_provider_quota_pause(provider)
+                if paused_until is None:
+                    # None이지만 DB에 pause 레코드가 있을 수 있으므로 (만료된 경우) clear 시도
+                    from app.modules.claude_worker.models.llm_request import LLMWorkerStatus
+                    from datetime import datetime as _dt
+                    stale = (
+                        db.query(LLMWorkerStatus)
+                        .filter(
+                            LLMWorkerStatus.quota_paused_provider == provider,
+                            LLMWorkerStatus.quota_paused_until <= _dt.now(),
+                        )
+                        .first()
+                    )
+                    if stale:
+                        cleared = service.clear_provider_quota_pause(provider)
+                        if cleared:
+                            count = service.reset_quota_failed_requests(provider)
+                            logger.info(f"[QUOTA] {provider} 쿼터 재개. {count}건 요청 pending 전환")
+        except Exception as e:
+            logger.error(f"quota resume 체크 오류: {e}", exc_info=True)
+        finally:
+            db.close()
+
     async def _process_pending_requests(self):
         """Pending 요청 처리 (우선순위 큐 기반)."""
         db = SessionLocal()
         try:
             service = LLMService(db)
-            request = service.get_next_request()
+
+            # pause 중인 provider 조회
+            exclude_providers = []
+            for provider in ["gemini", "claude"]:
+                paused_until = service.get_provider_quota_pause(provider)
+                if paused_until:
+                    exclude_providers.append(provider)
+                    blocked = service.get_blocked_pending_count(provider)
+                    if blocked > 0:
+                        logger.info(f"[QUOTA] {provider} 요청 {blocked}건 차단 중 (재개: {paused_until})")
+
+            request = service.get_next_request(exclude_providers=exclude_providers)
 
             if request:
                 logger.info(
@@ -1449,6 +1492,15 @@ class LLMWorker:
                         elif request.caller_type == "report":
                             save_report_result(db, request, fallback_result)
                     else:
+                        # Quota 에러 감지 및 provider pause 설정
+                        quota_retry_ms = result.get("quota_retry_ms")
+                        if quota_retry_ms is not None:
+                            provider = getattr(request, "provider", None) or "claude"
+                            paused_until = service.set_provider_quota_pause(
+                                provider, quota_retry_ms, reason=result.get("error", "")
+                            )
+                            logger.warning(f"[QUOTA] {provider} 쿼터 소진. {paused_until}까지 일시중지")
+
                         # 다른 타입은 실패 처리
                         service.mark_failed(request.id, result["error"])
                         self._increment_error()
@@ -1462,6 +1514,15 @@ class LLMWorker:
                         elif request.caller_type == "writing":
                             mark_writing_failed(db, request, result["error"])
                 else:
+                    # Quota 에러 감지 및 provider pause 설정
+                    quota_retry_ms = result.get("quota_retry_ms")
+                    if quota_retry_ms is not None:
+                        provider = getattr(request, "provider", None) or "claude"
+                        paused_until = service.set_provider_quota_pause(
+                            provider, quota_retry_ms, reason=result.get("error", "")
+                        )
+                        logger.warning(f"[QUOTA] {provider} 쿼터 소진. {paused_until}까지 일시중지")
+
                     # raw_response도 없으면 실패 처리
                     service.mark_failed(request.id, result["error"])
                     self._increment_error()

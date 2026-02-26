@@ -86,6 +86,11 @@ class LLMWorkerStatus(Base):
     processed_count = Column(Integer, default=0)
     error_count = Column(Integer, default=0)
 
+    # Quota pause 상태
+    quota_paused_provider = Column(String(50))  # 'gemini', 'claude' 등
+    quota_paused_until = Column(DateTime)
+    quota_pause_reason = Column(Text)
+
     # Relationships
     current_request = relationship("LLMRequest")
 

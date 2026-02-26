@@ -47,6 +47,8 @@ HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
 HEARTBEAT_INTERVAL = 10  # heartbeat 갱신 주기 (초)
 HEARTBEAT_TTL = 30  # heartbeat 만료 시간 (초, 3회 미갱신 시 만료)
 
+QUOTA_ERROR_MARKERS = ["TerminalQuotaError", "exhausted your capacity", "[QUOTA]"]
+
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 WTOOLS_BASE_DIR = Path("D:/work/project/service/wtools")
@@ -173,7 +175,18 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                     pass
                 suppressed_count = 0
 
-            # 5. 정상 라인 publish (ANSI 이스케이프 코드 제거)
+            # 5. Quota 에러 감지 → 자동 종료
+            if any(marker in stripped for marker in QUOTA_ERROR_MARKERS):
+                logger.warning("[DEV-RUNNER] quota 에러 감지, plan-runner 자동 종료")
+                try:
+                    redis_client.publish(LOG_CHANNEL, "[DEV-RUNNER] quota 에러 감지. 자동 종료.")
+                    redis_client.set(STATE_KEY + ":quota_stopped", "1", ex=3600)
+                except redis.ConnectionError:
+                    pass
+                process.terminate()
+                break
+
+            # 6. 정상 라인 publish (ANSI 이스케이프 코드 제거)
             try:
                 redis_client.publish(LOG_CHANNEL, _ANSI_ESCAPE.sub('', stripped))
             except redis.ConnectionError:
@@ -326,6 +339,7 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
         redis_client.set(STATE_KEY + ":start_time", datetime.now().isoformat())
         redis_client.set(STATE_KEY + ":status", "running")
         redis_client.set(STATE_KEY + ":engine", command.get("engine", "claude"))
+        redis_client.delete(STATE_KEY + ":quota_stopped")
 
         logger.info(f"plan-runner started (PID: {process.pid}, log: {log_file})")
 
@@ -407,12 +421,15 @@ def get_status(redis_client: redis.Redis) -> Dict:
     """
     global _current_process, _current_log_file
 
+    quota_stopped = bool(redis_client.get(STATE_KEY + ":quota_stopped"))
+
     if _current_process and _current_process.poll() is None:
         return {
             "success": True,
             "running": True,
             "pid": _current_process.pid,
             "log_file": str(_current_log_file) if _current_log_file else None,
+            "quota_stopped": quota_stopped,
         }
     else:
         # 종료된 경우 Redis 상태 정리
@@ -429,6 +446,7 @@ def get_status(redis_client: redis.Redis) -> Dict:
             "running": False,
             "pid": None,
             "log_file": None,
+            "quota_stopped": quota_stopped,
         }
 
 

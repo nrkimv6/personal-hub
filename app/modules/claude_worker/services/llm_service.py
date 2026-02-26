@@ -21,6 +21,33 @@ HEARTBEAT_UNHEALTHY_THRESHOLD = 600  # 10분: unhealthy 상태
 # 큐 우선순위 — 앞에 있을수록 먼저 처리
 QUEUE_PRIORITY = ["system", "utility"]
 
+# Quota pause 기본 대기 시간 (ms) — 6시간
+QUOTA_PAUSE_DEFAULT_MS = 6 * 60 * 60 * 1000
+
+
+def _parse_quota_retry_ms(text: str) -> Optional[int]:
+    """stderr/stdout에서 quota 재시도 대기 시간(ms) 파싱.
+
+    1순위: retryDelayMs: 숫자 정규식 파싱
+    2순위: reset after Xh Ym Zs 텍스트 파싱
+    미감지: None 반환
+    """
+    if not text:
+        return None
+
+    # 1순위: retryDelayMs 파싱
+    m = re.search(r"retryDelayMs:\s*([\d.]+)", text)
+    if m:
+        return int(float(m.group(1)))
+
+    # 2순위: "reset after Xh Ym Zs" 파싱
+    m = re.search(r"reset after (\d+)h(\d+)m(\d+)s", text)
+    if m:
+        h, mn, s = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        return (h * 3600 + mn * 60 + s) * 1000
+
+    return None
+
 
 class LLMService:
     """범용 LLM 서비스.
@@ -137,29 +164,136 @@ class LLMService:
             .first()
         )
 
-    def get_next_request(self) -> Optional[LLMRequest]:
+    def get_next_request(self, exclude_providers: list = None) -> Optional[LLMRequest]:
         """우선순위 기반으로 다음 처리할 요청 조회 (워커용).
 
         QUEUE_PRIORITY 순서로 각 큐를 확인하여 가장 오래된 pending 요청 반환.
         현재 우선순위: system → utility
 
+        Args:
+            exclude_providers: 제외할 provider 목록 (예: ["gemini"])
+
         Returns:
             pending 요청 또는 None
         """
+        if exclude_providers is None:
+            exclude_providers = []
+
         for queue in QUEUE_PRIORITY:
-            request = (
+            query = (
                 self.db.query(LLMRequest)
                 .filter(
                     LLMRequest.queue_name == queue,
                     LLMRequest.status == "pending",
                     LLMRequest.deleted_at.is_(None),
                 )
-                .order_by(LLMRequest.requested_at.asc())
-                .first()
             )
+            if exclude_providers:
+                query = query.filter(LLMRequest.provider.notin_(exclude_providers))
+
+            request = query.order_by(LLMRequest.requested_at.asc()).first()
             if request:
                 return request
         return None
+
+    # ========== Quota 상태 관리 ==========
+
+    def set_provider_quota_pause(self, provider: str, retry_after_ms: int, reason: str = "") -> "datetime":
+        """provider quota pause 상태 DB 저장.
+
+        모든 활성 worker_status 레코드에 저장 (quota는 시스템 전역 상태).
+
+        Returns:
+            paused_until datetime
+        """
+        paused_until = datetime.now() + timedelta(milliseconds=retry_after_ms)
+
+        statuses = (
+            self.db.query(LLMWorkerStatus)
+            .all()
+        )
+        for status in statuses:
+            status.quota_paused_provider = provider
+            status.quota_paused_until = paused_until
+            status.quota_pause_reason = reason
+
+        self.db.commit()
+        return paused_until
+
+    def get_provider_quota_pause(self, provider: str) -> Optional["datetime"]:
+        """provider quota pause 만료 시각 조회.
+
+        만료되지 않은 경우 paused_until 반환, 만료/없으면 None.
+        """
+        status = (
+            self.db.query(LLMWorkerStatus)
+            .filter(LLMWorkerStatus.quota_paused_provider == provider)
+            .first()
+        )
+        if status and status.quota_paused_until:
+            if status.quota_paused_until > datetime.now():
+                return status.quota_paused_until
+        return None
+
+    def clear_provider_quota_pause(self, provider: str) -> bool:
+        """provider quota pause 수동 해제."""
+        statuses = (
+            self.db.query(LLMWorkerStatus)
+            .filter(LLMWorkerStatus.quota_paused_provider == provider)
+            .all()
+        )
+        if not statuses:
+            return False
+        for status in statuses:
+            status.quota_paused_provider = None
+            status.quota_paused_until = None
+            status.quota_pause_reason = None
+        self.db.commit()
+        return True
+
+    def reset_quota_failed_requests(self, provider: str) -> int:
+        """quota 에러로 실패한 요청을 pending으로 전환.
+
+        Returns:
+            전환된 요청 수
+        """
+        quota_messages = ["%TerminalQuotaError%", "%exhausted your capacity%"]
+        targets = (
+            self.db.query(LLMRequest)
+            .filter(
+                LLMRequest.status == "failed",
+                LLMRequest.provider == provider,
+                LLMRequest.deleted_at.is_(None),
+            )
+            .filter(
+                (LLMRequest.error_message.like("%TerminalQuotaError%"))
+                | (LLMRequest.error_message.like("%exhausted your capacity%"))
+            )
+            .all()
+        )
+        count = 0
+        for req in targets:
+            req.status = "pending"
+            req.error_message = None
+            req.result = None
+            req.raw_response = None
+            req.processed_at = None
+            count += 1
+        if count:
+            self.db.commit()
+        return count
+
+    def get_blocked_pending_count(self, provider: str) -> int:
+        """pause 중인 provider로 막힌 pending 요청 수 조회."""
+        return (
+            self.db.query(LLMRequest)
+            .filter(
+                LLMRequest.status == "pending",
+                LLMRequest.provider == provider,
+                LLMRequest.deleted_at.is_(None),
+            )
+            .count()
+        )
 
     def get_queue_stats(self) -> dict:
         """큐별 상태 카운트 통계.
@@ -460,6 +594,20 @@ class LLMService:
                     error_details = result.stdout.strip()[:500]  # stdout에서 에러 메시지 추출
                 if not error_details:
                     error_details = f"returncode={result.returncode}"
+
+                # Quota/rate limit 에러 감지
+                combined_output = (result.stderr or "") + (result.stdout or "")
+                quota_keywords = ["overloaded_error", "rate_limit_error"]
+                if any(kw in combined_output for kw in quota_keywords):
+                    retry_ms = _parse_quota_retry_ms(combined_output)
+                    if retry_ms is None:
+                        retry_ms = QUOTA_PAUSE_DEFAULT_MS
+                    return {
+                        "success": False,
+                        "error": f"Claude CLI error: {error_details}",
+                        "quota_retry_ms": retry_ms,
+                    }
+
                 return {
                     "success": False,
                     "error": f"Claude CLI error: {error_details}",
@@ -638,6 +786,20 @@ class LLMService:
                     error_details = result.stdout.strip()[:500]  # stdout에서 에러 메시지 추출
                 if not error_details:
                     error_details = f"returncode={result.returncode}"
+
+                # Quota 에러 감지
+                combined_output = (result.stderr or "") + (result.stdout or "")
+                quota_keywords = ["TerminalQuotaError", "exhausted your capacity"]
+                if any(kw in combined_output for kw in quota_keywords):
+                    retry_ms = _parse_quota_retry_ms(combined_output)
+                    if retry_ms is None:
+                        retry_ms = QUOTA_PAUSE_DEFAULT_MS
+                    return {
+                        "success": False,
+                        "error": f"Gemini CLI error: {error_details}",
+                        "quota_retry_ms": retry_ms,
+                    }
+
                 return {
                     "success": False,
                     "error": f"Gemini CLI error: {error_details}",
