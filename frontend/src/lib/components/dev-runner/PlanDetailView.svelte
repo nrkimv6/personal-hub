@@ -93,6 +93,14 @@
 			</div>
 		</div>
 
+		<!-- 배경 및 요약 -->
+		{#if detail.summary}
+			<div class="shrink-0 bg-blue-50 border-b border-blue-100 px-4 py-2.5">
+				<p class="text-[10px] font-medium text-blue-600 mb-1">배경 및 요약</p>
+				<p class="text-[11px] text-gray-600 leading-relaxed whitespace-pre-wrap">{detail.summary}</p>
+			</div>
+		{/if}
+
 		<!-- 스크롤 콘텐츠 영역 -->
 		<div
 			class="flex-1 min-h-0 overflow-y-auto"

@@ -404,6 +404,24 @@ class PlanService:
             return todo_path
         return None
 
+    @staticmethod
+    def _extract_summary(content: str) -> Optional[str]:
+        """## 배경 및 요약 섹션의 텍스트를 추출한다."""
+        lines = content.split("\n")
+        in_section = False
+        collected: List[str] = []
+        for line in lines:
+            if re.match(r'^##\s+배경 및 요약', line):
+                in_section = True
+                continue
+            if in_section:
+                if re.match(r'^##\s+', line):
+                    break
+                collected.append(line)
+        # 앞뒤 빈 줄 제거 후 내용이 있으면 반환
+        text = "\n".join(collected).strip()
+        return text if text else None
+
     def parse_plan_items(self, path: Path) -> PlanDetailResponse:
         """plan 파일을 Phase별 항목으로 파싱"""
         # _todo 파일이 있으면 우선 사용
@@ -411,6 +429,11 @@ class PlanService:
         parse_path = todo_file if todo_file else path
 
         content = parse_path.read_text(encoding="utf-8", errors="ignore")
+        # 요약: todo 파일 우선, 없으면 원본 plan에서 fallback
+        summary = self._extract_summary(content)
+        if summary is None and todo_file is not None:
+            orig_content = path.read_text(encoding="utf-8", errors="ignore")
+            summary = self._extract_summary(orig_content)
         lines = content.split("\n")
 
         phases: List[PlanPhaseResponse] = []
@@ -503,6 +526,7 @@ class PlanService:
             status=status,
             phases=phases,
             progress=progress,
+            summary=summary,
         )
 
     # ========== done 처리 (Python 네이티브) ==========

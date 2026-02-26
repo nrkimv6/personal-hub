@@ -12,6 +12,7 @@
 	let detail = $state<PlanDetailResponse | null>(null);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
+	let summaryExpanded = $state(false);
 
 	async function fetchItems(path: string) {
 		loading = true;
@@ -53,6 +54,32 @@
 			<span class="text-[10px] text-gray-500 font-mono truncate max-w-[200px]">{detail.filename}</span>
 			<span class="text-[10px] font-mono text-gray-500">{detail.progress.done}/{detail.progress.total} ({detail.progress.percent}%)</span>
 		</div>
+
+		<!-- Summary card -->
+		{#if detail.summary}
+			<div class="bg-blue-50 border border-blue-100 rounded-md px-3 py-2 shrink-0">
+				<button
+					class="w-full text-left"
+					onclick={() => (summaryExpanded = !summaryExpanded)}
+				>
+					<div class="flex items-center justify-between gap-2">
+						<span class="text-[10px] font-medium text-blue-600 shrink-0">배경 및 요약</span>
+						<svg
+							class="w-3 h-3 text-blue-400 shrink-0 transition-transform {summaryExpanded ? 'rotate-180' : ''}"
+							viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+						>
+							<polyline points="6 9 12 15 18 9" />
+						</svg>
+					</div>
+					{#if !summaryExpanded}
+						<p class="text-[10px] text-gray-500 mt-1 line-clamp-1">{detail.summary.split('\n')[0]}</p>
+					{/if}
+				</button>
+				{#if summaryExpanded}
+					<p class="text-[11px] text-gray-600 mt-1.5 leading-relaxed whitespace-pre-wrap">{detail.summary}</p>
+				{/if}
+			</div>
+		{/if}
 
 		<!-- Phases -->
 		{#each detail.phases as phase}
