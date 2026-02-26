@@ -36,6 +36,7 @@ _SCRIPTS_DIR = Path(__file__).parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 from listener_noise_filter import NOISE_BLOCK_MARKERS as _NOISE_BLOCK_MARKERS, is_noise_line as _is_noise_line
+from worktree_manager import WorktreeManager, WorktreeError
 
 # 설정
 REDIS_HOST = "localhost"
@@ -52,6 +53,7 @@ QUOTA_ERROR_MARKERS = ["TerminalQuotaError", "exhausted your capacity", "[QUOTA]
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
+WORKTREE_BASE_DIR = PROJECT_ROOT / ".worktrees"
 WTOOLS_BASE_DIR = Path("D:/work/project/service/wtools")
 PLAN_RUNNER_MODULE_PATH = WTOOLS_BASE_DIR / "common/tools/plan-runner"
 PLAN_RUNNER_PYTHON = PLAN_RUNNER_MODULE_PATH / ".venv/Scripts/python.exe"
@@ -109,6 +111,16 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis):
             t.join(timeout=3)
 
     try:
+        # worktree 정리 (머지 완료 또는 실패로 정리 필요한 경우)
+        merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+        # merge_status가 없거나 "merged"가 아닌 경우에만 worktree 정리 시도
+        # (머지 워크플로가 별도로 관리하는 경우 스킵)
+        if merge_status not in ("pending_merge", "conflict"):
+            try:
+                WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR)
+            except Exception as wt_e:
+                logger.warning(f"worktree 정리 실패 (runner_id: {runner_id}): {wt_e}")
+
         redis_client.delete(
             f"{RUNNER_KEY_PREFIX}:{runner_id}:status",
             f"{RUNNER_KEY_PREFIX}:{runner_id}:pid",
@@ -117,6 +129,7 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis):
             f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path",
             f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path",
             f"{RUNNER_KEY_PREFIX}:{runner_id}:engine",
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path",
         )
         redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
     except Exception:
@@ -220,6 +233,28 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
         except Exception:
             pass
         logger.info(f"Output streaming thread finished (exit code: {process.returncode})")
+
+        # runner 성공 종료 시 머지 워크플로 트리거
+        if process.returncode == 0 and runner_id:
+            try:
+                worktree_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
+                if worktree_path_str:
+                    worktree_path = Path(worktree_path_str)
+                    # 머지 중 상태 표시 (cleanup에서 worktree 정리 스킵되도록)
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "pending_merge")
+                    from merge_workflow import MergeWorkflow
+                    wf = MergeWorkflow(PROJECT_ROOT, redis_client, str(PLAN_RUNNER_PYTHON))
+                    result = wf.run(runner_id, worktree_path, WORKTREE_BASE_DIR)
+                    log_line = f"[MERGE] {'success' if result.merged else 'failed'}: {result.message[:200]}"
+                    log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+                    try:
+                        redis_client.publish(log_channel, log_line)
+                    except Exception:
+                        pass
+                    logger.info(log_line)
+            except Exception as e:
+                logger.error(f"[MergeWorkflow] 실패: {e}")
+
         _cleanup_process_state(runner_id, redis_client)
 
 
@@ -236,6 +271,13 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
     runner_id = command.get("runner_id")
     if not runner_id:
         return {"success": False, "message": "runner_id required"}
+
+    # worktree 생성
+    try:
+        worktree_path = WorktreeManager.create(runner_id, WORKTREE_BASE_DIR)
+    except WorktreeError as e:
+        logger.error(f"worktree 생성 실패 (runner_id: {runner_id}): {e}")
+        return {"success": False, "message": f"worktree 생성 실패: {e}"}
 
     # 동일 runner_id로 이미 실행 중이면 에러 (stale 프로세스 자동 정리 포함)
     proc = _running_processes.get(runner_id)
@@ -316,6 +358,9 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
         env["PYTHONUTF8"] = "1"
         env["PYTHONUNBUFFERED"] = "1"
         env.pop("CLAUDECODE", None)  # 중첩 세션 감지 방지
+        env["PLAN_RUNNER_WORK_DIR"] = str(worktree_path)
+        env["PLAN_RUNNER_RUNNER_ID"] = runner_id
+        env["TEST_DB_DIR"] = str(worktree_path / "data")
 
         process = subprocess.Popen(
             cmd,
@@ -348,6 +393,7 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", datetime.now().isoformat())
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine", command.get("engine", "claude"))
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path", str(worktree_path))
         redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:quota_stopped")
         redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
 
@@ -485,6 +531,42 @@ def force_stop_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
     return {"success": True, "message": msg}
 
 
+def retry_merge(runner_id: str, redis_client: redis.Redis) -> Dict:
+    """머지 충돌 후 재머지 시도"""
+    if not runner_id:
+        return {"success": False, "message": "runner_id required"}
+    worktree_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
+    if not worktree_path_str:
+        return {"success": False, "message": f"worktree_path not found for runner {runner_id}"}
+    try:
+        from merge_workflow import MergeWorkflow
+        worktree_path = Path(worktree_path_str)
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "pending_merge")
+        wf = MergeWorkflow(PROJECT_ROOT, redis_client, str(PLAN_RUNNER_PYTHON))
+        result = wf.run(runner_id, worktree_path, WORKTREE_BASE_DIR)
+        return {"success": result.merged, "message": result.message, "conflict": result.conflict}
+    except Exception as e:
+        logger.error(f"[retry_merge] 실패: {e}")
+        return {"success": False, "message": str(e)}
+
+
+def cleanup_worktree(runner_id: str, redis_client: redis.Redis) -> Dict:
+    """worktree 수동 정리"""
+    if not runner_id:
+        return {"success": False, "message": "runner_id required"}
+    try:
+        WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR)
+        redis_client.delete(
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path",
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status",
+        )
+        logger.info(f"[cleanup_worktree] 정리 완료: {runner_id}")
+        return {"success": True, "message": f"worktree {runner_id} 정리 완료"}
+    except Exception as e:
+        logger.error(f"[cleanup_worktree] 실패: {e}")
+        return {"success": False, "message": str(e)}
+
+
 def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
     """명령 실행
 
@@ -507,6 +589,12 @@ def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
         return force_stop_plan_runner(runner_id, redis_client)
     elif action == "status":
         return get_status(redis_client)
+    elif action == "retry-merge":
+        runner_id = command.get("runner_id", "")
+        return retry_merge(runner_id, redis_client)
+    elif action == "cleanup-worktree":
+        runner_id = command.get("runner_id", "")
+        return cleanup_worktree(runner_id, redis_client)
     else:
         return {"success": False, "message": f"Unknown action: {action}"}
 

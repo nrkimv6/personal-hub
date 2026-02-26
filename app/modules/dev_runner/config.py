@@ -47,6 +47,12 @@ class DevRunnerConfig(BaseSettings):
     # plan-runner 전용 Python 실행 파일 (monitor-page venv가 아닌 plan-runner venv 사용)
     PLAN_RUNNER_PYTHON: Path = Path(r"D:\work\project\service\wtools\common\tools\plan-runner\.venv\Scripts\python.exe")
 
+    # 동시 실행 가능한 최대 runner 수
+    MAX_CONCURRENT_RUNNERS: int = 3
+
+    # worktree 기본 디렉토리
+    WORKTREE_BASE_DIR: Path = Path(r"D:\work\project\tools\monitor-page\.worktrees")
+
     class Config:
         env_prefix = "DEV_RUNNER_"
         case_sensitive = True

@@ -73,6 +73,14 @@ class ExecutorService:
         # Redis + listener 사전 확인
         await self._check_redis_and_listener()
 
+        # 동시 실행 개수 제한 확인
+        count = await self.async_redis.scard(ACTIVE_RUNNERS_KEY)
+        if count >= config.MAX_CONCURRENT_RUNNERS:
+            raise HTTPException(
+                status_code=429,
+                detail=f"최대 {config.MAX_CONCURRENT_RUNNERS}개 동시 실행 가능 (현재 {count}개)"
+            )
+
         # 새 runner_id 생성 (멀티 실행 지원 - 409 체크 없음)
         runner_id = uuid.uuid4().hex[:8]
 
@@ -358,6 +366,9 @@ class ExecutorService:
                 plan_file = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file")
                 engine = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{rid}:engine")
                 start_time_str = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{rid}:start_time")
+                worktree_path = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{rid}:worktree_path")
+                merge_status = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{rid}:merge_status")
+                branch = f"runner/{rid}" if worktree_path else None
                 start_time = None
                 if start_time_str:
                     try:
@@ -371,6 +382,9 @@ class ExecutorService:
                     engine=engine,
                     start_time=start_time,
                     pid=int(pid_str) if pid_str else None,
+                    worktree_path=worktree_path,
+                    branch=branch,
+                    merge_status=merge_status,
                 ))
             return result
         except redis.ConnectionError:
@@ -423,6 +437,26 @@ class ExecutorService:
             logger.error(f"[dev-runner] status 조회 실패: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")
 
+
+    async def send_runner_command(self, runner_id: str, action: str) -> dict:
+        """runner에 명령 전송 (retry-merge, cleanup-worktree 등)"""
+        try:
+            await self.async_redis.ping()
+        except (redis.ConnectionError, ConnectionRefusedError, OSError):
+            raise HTTPException(status_code=503, detail="Redis에 연결할 수 없습니다.")
+
+        command = {
+            "action": action,
+            "runner_id": runner_id,
+            "source": "monitor-page-api",
+            "timestamp": datetime.now().isoformat(),
+        }
+        await self.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
+        result = await self.async_redis.brpop(RESULTS_KEY, timeout=COMMAND_TIMEOUT)
+        if result is None:
+            return {"success": False, "message": "Command timeout"}
+        _, raw = result
+        return json.loads(raw)
 
     def restart_listener(self) -> dict:
         """command-listener 프로세스를 재시작합니다.

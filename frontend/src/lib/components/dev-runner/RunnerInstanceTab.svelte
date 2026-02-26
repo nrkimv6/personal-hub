@@ -10,15 +10,20 @@
 		running: boolean;
 		engine: string | null;
 		startTime: string | null;
+		worktreePath?: string | null;
+		branch?: string | null;
+		mergeStatus?: string | null;
 		onStop: () => void;
 		onClose: () => void;
 	}
 
-	let { runnerId, planFile, running, engine, startTime, onStop, onClose }: Props = $props();
+	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, onStop, onClose }: Props = $props();
 
 	let elapsed = $state('');
 	let stopping = $state(false);
 	let stopError = $state<string | null>(null);
+	let retryingMerge = $state(false);
+	let mergeError = $state<string | null>(null);
 	let intervalId: ReturnType<typeof setInterval> | null = null;
 
 	function formatElapsed(startIso: string | null): string {
@@ -58,6 +63,27 @@
 		}
 	}
 
+	async function handleRetryMerge() {
+		retryingMerge = true;
+		mergeError = null;
+		try {
+			await devRunnerRunnerApi.retryMerge(runnerId);
+		} catch (e) {
+			mergeError = e instanceof Error ? e.message : '머지 재시도 실패';
+		} finally {
+			retryingMerge = false;
+		}
+	}
+
+	async function handleCleanupWorktree() {
+		if (!confirm('worktree를 정리하시겠습니까? 미저장 변경사항이 삭제됩니다.')) return;
+		try {
+			await devRunnerRunnerApi.cleanupWorktree(runnerId);
+		} catch (e) {
+			mergeError = e instanceof Error ? e.message : 'worktree 정리 실패';
+		}
+	}
+
 	let planBasename = $derived(
 		planFile ? planFile.split(/[\\/]/).pop() ?? planFile : '전체 실행'
 	);
@@ -81,6 +107,18 @@
 		{/if}
 
 		<span class="text-gray-400 font-mono text-[10px]">{runnerId}</span>
+
+		{#if branch}
+			<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-purple-100 text-purple-700" title={worktreePath ?? branch}>
+				{branch}
+			</span>
+		{/if}
+
+		{#if mergeStatus === 'merged'}
+			<span class="px-1.5 py-0.5 rounded text-[10px] bg-green-100 text-green-700">머지됨</span>
+		{:else if mergeStatus === 'conflict'}
+			<span class="px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700">충돌</span>
+		{/if}
 
 		{#if elapsed}
 			<span class="text-gray-400 text-[10px] ml-auto shrink-0">{elapsed}</span>
@@ -107,6 +145,29 @@
 
 	{#if stopError}
 		<div class="px-3 py-1 text-xs text-red-600 bg-red-50 border-b border-red-100">{stopError}</div>
+	{/if}
+
+	{#if mergeStatus === 'conflict'}
+		<div class="flex items-center gap-2 px-3 py-2 bg-red-50 border-b border-red-200 text-xs">
+			<span class="text-red-700 font-medium">머지 충돌이 발생했습니다.</span>
+			<button
+				class="px-2 py-0.5 rounded border border-red-300 text-red-700 hover:bg-red-100 disabled:opacity-50 transition-colors"
+				onclick={handleRetryMerge}
+				disabled={retryingMerge}
+			>
+				{retryingMerge ? '재시도 중...' : '머지 재시도'}
+			</button>
+			<button
+				class="px-2 py-0.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors"
+				onclick={handleCleanupWorktree}
+			>
+				Worktree 정리
+			</button>
+		</div>
+	{/if}
+
+	{#if mergeError}
+		<div class="px-3 py-1 text-xs text-red-600 bg-red-50 border-b border-red-100">{mergeError}</div>
 	{/if}
 
 	<!-- 로그 뷰어 -->

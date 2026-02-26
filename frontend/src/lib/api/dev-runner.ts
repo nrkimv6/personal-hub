@@ -41,6 +41,9 @@ export interface RunnerListItem {
 	engine: string | null;
 	start_time: string | null;
 	pid: number | null;
+	worktree_path: string | null;
+	branch: string | null;
+	merge_status: string | null;
 }
 
 export interface PlanProgressResponse {
@@ -231,6 +234,18 @@ export const devRunnerRunnerApi = {
 		devRunnerRequest<{ success: boolean; reset_count: number; full_reset: boolean }>(
 			`/reset-state?full_reset=${fullReset}`,
 			{ method: 'POST' }
+		),
+
+	retryMerge: (runnerId: string) =>
+		devRunnerRequest<{ success: boolean; message: string; conflict?: boolean }>(
+			`/runners/${runnerId}/retry-merge`,
+			{ method: 'POST' }
+		),
+
+	cleanupWorktree: (runnerId: string) =>
+		devRunnerRequest<{ success: boolean; message: string }>(
+			`/runners/${runnerId}/worktree`,
+			{ method: 'DELETE' }
 		)
 };
 

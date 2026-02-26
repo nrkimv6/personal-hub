@@ -44,6 +44,9 @@ class RunnerListItem(BaseModel):
     engine: Optional[str] = None
     start_time: Optional[datetime] = None
     pid: Optional[int] = None
+    worktree_path: Optional[str] = None
+    branch: Optional[str] = None
+    merge_status: Optional[str] = None
 
 
 class PlanProgressResponse(BaseModel):
