@@ -33,6 +33,17 @@ class RunStatusResponse(BaseModel):
     exit_code: Optional[int] = None  # None=실행중/미시작, 0=정상종료, 그 외=crash
     crashed: bool = False  # exit_code != 0일 때 True
     current_plan_name: Optional[str] = None  # 전체실행 시 현재 실행 중인 plan 파일명
+    runner_id: Optional[str] = None
+
+
+class RunnerListItem(BaseModel):
+    """활성 runner 목록 항목"""
+    runner_id: str
+    running: bool
+    plan_file: Optional[str] = None
+    engine: Optional[str] = None
+    start_time: Optional[datetime] = None
+    pid: Optional[int] = None
 
 
 class PlanProgressResponse(BaseModel):
@@ -178,6 +189,7 @@ __all__ = [
     'MemoUpdateRequest',
     'RunRequest',
     'RunStatusResponse',
+    'RunnerListItem',
     'PlanFileResponse',
     'PlanProgressResponse',
     'RegisteredPathResponse',

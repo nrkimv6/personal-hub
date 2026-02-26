@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 import traceback
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict
@@ -25,7 +26,8 @@ REDIS_HOST = "localhost"
 REDIS_PORT = 6379
 COMMANDS_KEY = "plan-runner:commands"
 RESULTS_KEY = "plan-runner:command_results"
-STATE_KEY = "plan-runner:state"
+RUNNER_KEY_PREFIX = "plan-runner:runners"
+ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 COMMAND_TIMEOUT = 10  # 명령 결과 대기 타임아웃 (초)
 
 
@@ -67,38 +69,22 @@ class ExecutorService:
             )
 
     async def start_dev_runner(self, request: RunRequest) -> RunStatusResponse:
-        """plan-runner 실행 시작 - Redis 명령 전송 (비동기)"""
+        """plan-runner 실행 시작 - Redis 명령 전송 (비동기, 멀티 runner 지원)"""
         # Redis + listener 사전 확인
         await self._check_redis_and_listener()
 
-        # Redis를 통해 상태 확인
-        try:
-            status = await self.async_redis.get(STATE_KEY + ":status")
-            if status == "running":
-                # heartbeat가 없으면 stale → 자동 정리 후 시작 진행
-                heartbeat = await self.async_redis.get("plan-runner:listener:heartbeat")
-                if heartbeat is None:
-                    logger.warning("[dev-runner] running 상태이지만 heartbeat 없음 → stale 정리 후 시작")
-                    self._force_cleanup_state()
-                else:
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Already running"
-                    )
-        except redis.ConnectionError:
-            raise HTTPException(
-                status_code=503,
-                detail="Redis에 연결할 수 없습니다. Redis 서버가 실행 중인지 확인하세요."
-            )
+        # 새 runner_id 생성 (멀티 실행 지원 - 409 체크 없음)
+        runner_id = uuid.uuid4().hex[:8]
 
         # Redis 명령 생성
         command = {
             "action": "run",
+            "runner_id": runner_id,
             "source": "monitor-page-api",
             "timestamp": datetime.now().isoformat(),
         }
 
-        logger.info(f"[dev-runner] Request engine: {request.engine}")
+        logger.info(f"[dev-runner] Request engine: {request.engine}, runner_id: {runner_id}")
 
         if request.plan_file:
             command["plan_file"] = request.plan_file
@@ -160,18 +146,21 @@ class ExecutorService:
                     detail=result_data.get("message", "Failed to start")
                 )
 
-            # Redis에서 상태 조회
-            pid = await self.async_redis.get(STATE_KEY + ":pid")
-            plan_file = await self.async_redis.get(STATE_KEY + ":plan_file")
-            start_time_str = await self.async_redis.get(STATE_KEY + ":start_time")
+            # Redis에서 per-runner 상태 조회
+            pid = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
+            plan_file = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+            start_time_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time")
 
             return RunStatusResponse(
                 running=True,
+                runner_id=runner_id,
                 engine=request.engine,
                 pid=int(pid) if pid else None,
                 plan_file=plan_file,
                 start_time=datetime.fromisoformat(start_time_str) if start_time_str else None,
                 current_cycle=0,
+                listener_alive=True,
+                redis_connected=True,
             )
 
         except redis.ConnectionError:
@@ -190,22 +179,41 @@ class ExecutorService:
             logger.error(f"[dev-runner] start 실패: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Failed to start: {str(e)}")
 
-    def _force_cleanup_state(self):
+    def _force_cleanup_state(self, runner_id: str = ""):
         """Redis 상태 강제 정리 (listener 무응답 시 fallback)"""
         try:
-            self.redis_client.delete(STATE_KEY + ":status")
-            self.redis_client.delete(STATE_KEY + ":pid")
-            self.redis_client.delete(STATE_KEY + ":plan_file")
-            self.redis_client.delete(STATE_KEY + ":start_time")
-            self.redis_client.delete(STATE_KEY + ":log_file_path")
+            if runner_id:
+                self.redis_client.delete(
+                    f"{RUNNER_KEY_PREFIX}:{runner_id}:status",
+                    f"{RUNNER_KEY_PREFIX}:{runner_id}:pid",
+                    f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file",
+                    f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time",
+                    f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path",
+                    f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path",
+                )
+                self.redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
+            else:
+                # 모든 active runner 정리 (레거시 fallback)
+                runner_ids = self.redis_client.smembers(ACTIVE_RUNNERS_KEY)
+                for rid in runner_ids:
+                    self.redis_client.delete(
+                        f"{RUNNER_KEY_PREFIX}:{rid}:status",
+                        f"{RUNNER_KEY_PREFIX}:{rid}:pid",
+                        f"{RUNNER_KEY_PREFIX}:{rid}:plan_file",
+                        f"{RUNNER_KEY_PREFIX}:{rid}:start_time",
+                        f"{RUNNER_KEY_PREFIX}:{rid}:log_file_path",
+                        f"{RUNNER_KEY_PREFIX}:{rid}:stream_log_path",
+                    )
+                self.redis_client.delete(ACTIVE_RUNNERS_KEY)
         except Exception:
             pass
 
-    def _send_force_stop(self):
-        """listener에 force-stop 명령 전송 (_current_process 변수까지 정리)"""
+    def _send_force_stop(self, runner_id: str = ""):
+        """listener에 force-stop 명령 전송 (_running_processes 변수까지 정리)"""
         try:
             command = {
                 "action": "force-stop",
+                "runner_id": runner_id,
                 "source": "monitor-page-api-reset",
                 "timestamp": datetime.now().isoformat(),
             }
@@ -227,10 +235,10 @@ class ExecutorService:
     def reset_running_state(self, full_reset: bool = False) -> Dict:
         """RUNNING 상태 강제 초기화 - Redis 정리만 수행"""
         try:
-            # 0. listener에 force-stop 전송 (메모리 내 _current_process 정리)
+            # 0. listener에 force-stop 전송 (메모리 내 _running_processes 정리)
             self._send_force_stop()
 
-            # 1. Redis 상태 정리
+            # 1. Redis 상태 정리 (모든 runner)
             self._force_cleanup_state()
             logger.info("[dev-runner] Redis 상태 정리 완료")
 
@@ -240,7 +248,7 @@ class ExecutorService:
             logger.error(f"[dev-runner] reset_running_state 실패: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Failed to reset state: {str(e)}")
 
-    async def stop_dev_runner(self) -> Dict:
+    async def stop_dev_runner(self, runner_id: str) -> Dict:
         """plan-runner 실행 중지 - Redis 명령 전송 (비동기)"""
         try:
             # Redis 사전 확인 (ping만 — listener는 stop 시에는 없을 수도 있음)
@@ -252,14 +260,15 @@ class ExecutorService:
                     detail="Redis에 연결할 수 없습니다."
                 )
 
-            # Redis를 통해 상태 확인
-            status = await self.async_redis.get(STATE_KEY + ":status")
+            # Redis를 통해 해당 runner 상태 확인
+            status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
             if status != "running":
                 raise HTTPException(status_code=404, detail="Not running")
 
             # Redis 명령 생성
             command = {
                 "action": "stop",
+                "runner_id": runner_id,
                 "source": "monitor-page-api",
                 "timestamp": datetime.now().isoformat(),
             }
@@ -273,7 +282,7 @@ class ExecutorService:
             if result is None:
                 # listener 무응답 → 프로세스가 죽었을 가능성 → 상태 강제 정리
                 logger.warning("[dev-runner] listener 무응답, Redis 상태 강제 정리")
-                self._force_cleanup_state()
+                self._force_cleanup_state(runner_id)
                 return {"message": "Force cleaned (listener not responding)"}
 
             _, raw_result = result
@@ -281,7 +290,7 @@ class ExecutorService:
 
             if not result_data.get("success"):
                 # stop 실패해도 상태 정리
-                self._force_cleanup_state()
+                self._force_cleanup_state(runner_id)
                 return {"message": f"Force cleaned: {result_data.get('message', '')}"}
 
             return {"message": "Stopped successfully"}
@@ -291,15 +300,77 @@ class ExecutorService:
                 status_code=503,
                 detail="Redis connection failed - command listener may not be running"
             )
-        except json.JSONDecodeError as e:
-            self._force_cleanup_state()
+        except json.JSONDecodeError:
+            self._force_cleanup_state(runner_id)
             return {"message": "Force cleaned (invalid listener response)"}
         except HTTPException:
             raise
         except Exception as e:
             logger.error(f"[dev-runner] stop 실패: {traceback.format_exc()}")
-            self._force_cleanup_state()
+            self._force_cleanup_state(runner_id)
             raise HTTPException(status_code=500, detail=f"Failed to stop: {str(e)}")
+
+    def get_runner_status(self, runner_id: str) -> RunStatusResponse:
+        """특정 runner 상태 조회 (per-runner Redis 키 기반)"""
+        status = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
+        pid_str = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
+        plan_file = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+        start_time_str = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time")
+        engine = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine") or "claude"
+        running = status == "running"
+
+        # PID stale 감지
+        if running and pid_str:
+            try:
+                import psutil
+                if not psutil.pid_exists(int(pid_str)):
+                    logger.warning(f"[dev-runner] runner {runner_id} PID {pid_str} 종료됨 → stale 정리")
+                    self._force_cleanup_state(runner_id)
+                    running = False
+                    pid_str = None
+            except (ValueError, ImportError):
+                pass
+
+        return RunStatusResponse(
+            runner_id=runner_id,
+            running=running,
+            engine=engine,
+            pid=int(pid_str) if pid_str else None,
+            plan_file=plan_file,
+            start_time=datetime.fromisoformat(start_time_str) if start_time_str else None,
+            listener_alive=True,
+            redis_connected=True,
+        )
+
+    def get_all_runners(self) -> list:
+        """활성 runner 목록 조회"""
+        from app.modules.dev_runner.schemas import RunnerListItem
+        try:
+            runner_ids = self.redis_client.smembers(ACTIVE_RUNNERS_KEY)
+            result = []
+            for rid in runner_ids:
+                status = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{rid}:status")
+                pid_str = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{rid}:pid")
+                plan_file = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file")
+                engine = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{rid}:engine")
+                start_time_str = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{rid}:start_time")
+                start_time = None
+                if start_time_str:
+                    try:
+                        start_time = datetime.fromisoformat(start_time_str)
+                    except ValueError:
+                        pass
+                result.append(RunnerListItem(
+                    runner_id=rid,
+                    running=status == "running",
+                    plan_file=plan_file,
+                    engine=engine,
+                    start_time=start_time,
+                    pid=int(pid_str) if pid_str else None,
+                ))
+            return result
+        except redis.ConnectionError:
+            return []
 
     def _is_pid_alive(self, pid: int) -> bool:
         """PID가 실제로 살아있는지 확인 (Windows: GetExitCodeProcess로 검증)"""
@@ -321,66 +392,26 @@ class ExecutorService:
             return False
 
     def get_process_status(self) -> RunStatusResponse:
-        """프로세스 상태 조회 - Redis에서 조회 + stale 상태 자동 정리"""
+        """프로세스 상태 조회 - 하위호환 (첫 번째 active runner 반환)"""
         try:
             # Redis 연결 확인
-            redis_connected = False
             try:
                 self.redis_client.ping()
-                redis_connected = True
             except (redis.ConnectionError, ConnectionRefusedError, OSError):
                 return RunStatusResponse(running=False, listener_alive=False, redis_connected=False, pid=None, plan_file=None)
 
             heartbeat = self.redis_client.get("plan-runner:listener:heartbeat")
             listener_alive = heartbeat is not None
-            engine = self.redis_client.get(STATE_KEY + ":engine") or "claude"
 
-            status = self.redis_client.get(STATE_KEY + ":status")
+            runner_ids = self.redis_client.smembers(ACTIVE_RUNNERS_KEY)
+            if runner_ids:
+                first_id = next(iter(runner_ids))
+                r = self.get_runner_status(first_id)
+                r.listener_alive = listener_alive
+                return r
 
-            if status == "running":
-                pid_str = self.redis_client.get(STATE_KEY + ":pid")
-                plan_file = self.redis_client.get(STATE_KEY + ":plan_file")
-                start_time_str = self.redis_client.get(STATE_KEY + ":start_time")
-
-                # PID 생존 확인 (프로세스가 에러 종료 후 상태가 stale로 남는 경우 대응)
-                if pid_str:
-                    try:
-                        import psutil
-                        if not psutil.pid_exists(int(pid_str)):
-                            logger.warning(f"[dev-runner] PID {pid_str} 종료됨 → stale 상태 자동 정리")
-                            self._force_cleanup_state()
-                            return RunStatusResponse(running=False, engine=engine, listener_alive=listener_alive, redis_connected=True, pid=None, plan_file=None)
-                    except (ValueError, ImportError):
-                        pass
-
-                if not listener_alive:
-                    logger.warning("[dev-runner] heartbeat 없음 → stale 상태 자동 정리")
-                    self._force_cleanup_state()
-                    return RunStatusResponse(running=False, engine=engine, listener_alive=False, redis_connected=True, pid=None, plan_file=None)
-
-                # 전체실행 시 현재 실행 중인 plan 이름 조회
-                current_plan_name = None
-                if plan_file == "ALL":
-                    current_task_text = self.redis_client.get(STATE_KEY + ":current_task_text")
-                    if current_task_text and current_task_text.startswith("[batch] "):
-                        current_plan_name = current_task_text[len("[batch] "):]
-
-                cycle_str = self.redis_client.get(STATE_KEY + ":current_cycle")
-                current_cycle = int(cycle_str) if cycle_str else None
-
-                return RunStatusResponse(
-                    running=True,
-                    engine=engine,
-                    listener_alive=True,
-                    redis_connected=True,
-                    pid=int(pid_str) if pid_str else None,
-                    plan_file=plan_file,
-                    start_time=datetime.fromisoformat(start_time_str) if start_time_str else None,
-                    current_cycle=current_cycle,
-                    current_plan_name=current_plan_name,
-                )
-            else:
-                return RunStatusResponse(running=False, engine=engine, listener_alive=listener_alive, redis_connected=True, pid=None, plan_file=None)
+            # 실행 중인 runner 없음
+            return RunStatusResponse(running=False, engine="claude", listener_alive=listener_alive, redis_connected=True, pid=None, plan_file=None)
 
         except redis.ConnectionError:
             return RunStatusResponse(running=False, listener_alive=False, redis_connected=False, pid=None, plan_file=None)
@@ -436,4 +467,4 @@ class ExecutorService:
 # 싱글톤 인스턴스
 executor_service = ExecutorService()
 
-__all__ = ['executor_service', 'ExecutorService']
+__all__ = ['executor_service', 'ExecutorService', 'ACTIVE_RUNNERS_KEY', 'RUNNER_KEY_PREFIX']

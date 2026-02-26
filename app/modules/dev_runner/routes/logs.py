@@ -11,17 +11,20 @@ router = APIRouter()
 
 @router.get("/logs/recent", response_model=LogResponse)
 async def get_recent_logs(
-    lines: int = Query(100, ge=1, le=1000, description="조회할 줄 수")
+    runner_id: str = Query(..., description="runner ID"),
+    lines: int = Query(100, ge=1, le=1000, description="조회할 줄 수"),
 ):
     """최근 로그 조회 (끝에서 N줄)"""
-    return log_service.tail_log_file(n_lines=lines)
+    return log_service.tail_log_file(runner_id=runner_id, n_lines=lines)
 
 
 @router.get("/logs/stream")
-async def stream_logs():
+async def stream_logs(
+    runner_id: str = Query(..., description="runner ID"),
+):
     """로그 실시간 스트리밍 (SSE)"""
     return StreamingResponse(
-        log_service.stream_log_file(),
+        log_service.stream_log_file(runner_id=runner_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

@@ -31,6 +31,16 @@ export interface RunStatusResponse {
 	exit_code: number | null;
 	crashed: boolean;
 	current_plan_name: string | null;
+	runner_id: string | null;
+}
+
+export interface RunnerListItem {
+	runner_id: string;
+	running: boolean;
+	plan_file: string | null;
+	engine: string | null;
+	start_time: string | null;
+	pid: number | null;
 }
 
 export interface PlanProgressResponse {
@@ -208,9 +218,14 @@ export const devRunnerRunnerApi = {
 			body: JSON.stringify(data)
 		}),
 
-	stop: () => devRunnerRequest<{ success: boolean }>('/stop', { method: 'POST' }),
+	stop: (runnerId: string) =>
+		devRunnerRequest<{ message: string }>(`/runners/${runnerId}/stop`, { method: 'POST' }),
+
+	stopLegacy: () => devRunnerRequest<{ message: string }>('/stop', { method: 'POST' }),
 
 	status: () => devRunnerRequest<RunStatusResponse>('/status'),
+
+	runners: () => devRunnerRequest<RunnerListItem[]>('/runners'),
 
 	resetState: (fullReset: boolean = false) =>
 		devRunnerRequest<{ success: boolean; reset_count: number; full_reset: boolean }>(
@@ -297,13 +312,13 @@ export interface DiagStep {
 }
 
 export const devRunnerLogApi = {
-	recent: (lines: number = 100) =>
-		devRunnerRequest<LogResponse>(`/logs/recent?lines=${lines}`),
+	recent: (runnerId: string, lines: number = 100) =>
+		devRunnerRequest<LogResponse>(`/logs/recent?runner_id=${runnerId}&lines=${lines}`),
 
 	diagnostics: () =>
 		devRunnerRequest<{ steps: DiagStep[] }>('/logs/diagnostics'),
 
-	connectStream: (): EventSource => {
-		return new EventSource(`${DEV_RUNNER_BASE}/logs/stream`);
+	connectStream: (runnerId: string): EventSource => {
+		return new EventSource(`${DEV_RUNNER_BASE}/logs/stream?runner_id=${runnerId}`);
 	}
 };
