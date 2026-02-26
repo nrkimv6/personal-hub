@@ -162,7 +162,8 @@ class AsyncLoggerManager:
         cls,
         log_prefix: str = "worker",
         log_dir: Path = Path("logs"),
-        level: int = logging.DEBUG
+        level: int = logging.DEBUG,
+        console_output: bool = False
     ) -> logging.Logger:
         """
         워커용 비동기 로거 설정 (타임스탬프 포함 파일명)
@@ -171,6 +172,7 @@ class AsyncLoggerManager:
             log_prefix: 로그 파일 접두사
             log_dir: 로그 디렉토리
             level: 로그 레벨
+            console_output: 콘솔 출력 여부 (기본 False — watchdog 기동 시 stdout 중복 방지)
 
         Returns:
             설정된 Logger 인스턴스
@@ -183,7 +185,7 @@ class AsyncLoggerManager:
             log_file=log_file,
             level=level,
             log_format=f'%(asctime)s - [{log_prefix.upper()}] %(levelname)s - %(message)s',
-            console_output=True
+            console_output=console_output
         )
 
         # 추가 메타데이터

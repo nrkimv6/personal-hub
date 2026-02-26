@@ -55,7 +55,6 @@ function Write-Log {
 
 function Start-ClaudeWorker {
     $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $stdoutLogFile = Join-Path $LogDir "stdout_llm_worker_$Timestamp.log"
     $stderrLogFile = Join-Path $LogDir "stderr_llm_worker_$Timestamp.log"
 
     Write-Log "Starting Claude worker process..."
@@ -86,7 +85,6 @@ function Start-ClaudeWorker {
         -ArgumentList "-m", "app.modules.claude_worker.worker.worker" `
         -WorkingDirectory $ProjectRoot `
         -WindowStyle Hidden `
-        -RedirectStandardOutput $stdoutLogFile `
         -RedirectStandardError $stderrLogFile `
         -PassThru
 

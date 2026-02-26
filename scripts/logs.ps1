@@ -233,7 +233,7 @@ if ($apiLogFile) { $apiLogFile = $apiLogFile.FullName }
 $workerLogFile = Get-LatestLogFileMultiPattern @("stdout_worker_", "worker_", "unified_worker_")
 $frontendLogFile = Get-LatestLogFileMultiPattern @("frontend_2")
 $igWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_instagram_", "instagram_")
-$claudeWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_llm_worker_", "llm_worker_")
+$claudeWorkerLogFile = Get-LatestLogFileMultiPattern @("llm_worker_")
 $videoDownloadWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_video_download_worker_", "video_download_worker_")
 $crawlWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_crawl_", "crawl_worker_")
 
@@ -517,7 +517,7 @@ function Start-CombinedLogTail {
         "API"         = @("stdout_api_*.log", "api_*.log")
         "WORKER"      = @("stdout_worker_*.log", "worker_*.log", "unified_worker_*.log")
         "IG-WORKER"   = @("stdout_instagram_*.log", "instagram_*.log")
-        "LLM"         = @("stdout_llm_worker_*.log", "llm_worker_*.log")
+        "LLM"         = @("llm_worker_*.log")
         "VIDEO-DL"    = @("stdout_video_download_worker_*.log", "video_download_worker_*.log")
         "CRAWL"       = @("stdout_crawl_*.log", "crawl_worker_*.log")
         "FRONTEND"    = @("frontend_2*.log")
