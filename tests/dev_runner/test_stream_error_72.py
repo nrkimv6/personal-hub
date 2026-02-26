@@ -70,7 +70,7 @@ async def test_stream_stops_after_5_errors():
     try:
         with patch.object(svc.async_redis, "pubsub", return_value=pub):
             events = await asyncio.wait_for(
-                _drive_gen(svc.stream_log_file()), timeout=10.0
+                _drive_gen(svc.stream_log_file("test_runner")), timeout=10.0
             )
     finally:
         ls_module.asyncio.sleep = orig_sleep
@@ -110,7 +110,7 @@ async def test_consecutive_errors_reset_on_success():
     try:
         with patch.object(svc.async_redis, "pubsub", return_value=pub):
             events = await asyncio.wait_for(
-                _drive_gen(svc.stream_log_file(), max_events=20), timeout=10.0
+                _drive_gen(svc.stream_log_file("test_runner"), max_events=20), timeout=10.0
             )
     finally:
         ls_module.asyncio.sleep = orig_sleep
@@ -152,7 +152,7 @@ async def test_pubsub_close_fallback_when_no_aclose():
         with patch.object(svc.async_redis, "pubsub", return_value=pub):
             try:
                 events = await asyncio.wait_for(
-                    _drive_gen(svc.stream_log_file()), timeout=10.0
+                    _drive_gen(svc.stream_log_file("test_runner")), timeout=10.0
                 )
             except AttributeError as e:
                 pytest.fail(f"aclose 없는 pubsub에서 AttributeError 발생: {e}")
@@ -185,7 +185,7 @@ async def test_connection_error_no_counter_increment():
     try:
         with patch.object(svc.async_redis, "pubsub", return_value=pub):
             events = await asyncio.wait_for(
-                _drive_gen(svc.stream_log_file(), max_events=20), timeout=10.0
+                _drive_gen(svc.stream_log_file("test_runner"), max_events=20), timeout=10.0
             )
     finally:
         ls_module.asyncio.sleep = orig_sleep
