@@ -697,7 +697,7 @@ class LLMService:
                 "error": str(e),
             }
 
-    def execute_gemini(self, prompt: str, model: str = "", timeout: int = 120, parse_json: bool = True, enable_tools: bool = False) -> dict:
+    def execute_gemini(self, prompt: str, model: str = "", timeout: int = 120, parse_json: bool = True, enable_tools: bool = False, cli_options: dict = None) -> dict:
         """Gemini CLI 실행 (동기).
 
         Args:
@@ -706,6 +706,7 @@ class LLMService:
             timeout: 타임아웃 (초)
             parse_json: True면 JSON 파싱 시도, False면 raw_response만 반환
             enable_tools: True면 파일 도구 활성화 (Gemini는 built-in으로 지원)
+            cli_options: CLI 옵션 dict. 현재 지원: image_path (str) — `@경로` 이미지 첨부
 
         Returns:
             {"success": True, "result": {...}, "raw_response": "..."}
@@ -751,9 +752,13 @@ class LLMService:
                 else:
                     model_opt = ''
 
+                # image_path가 있으면 @경로 이미지 첨부 인수 구성
+                image_path = (cli_options or {}).get("image_path")
+                img_arg = f' @"{image_path}"' if image_path else ""
+
                 if sys.platform == "win32":
                     # Windows: shell=True 필요
-                    cmd = f'type "{prompt_file}" | gemini {model_opt}'
+                    cmd = f'type "{prompt_file}" | gemini {model_opt}{img_arg}'
                     result = subprocess.run(
                         cmd,
                         capture_output=True,
@@ -765,7 +770,7 @@ class LLMService:
                     )
                 else:
                     # Unix: cat으로 파이프
-                    cmd = f'cat "{prompt_file}" | gemini {model_opt}'
+                    cmd = f'cat "{prompt_file}" | gemini {model_opt}{img_arg}'
                     result = subprocess.run(
                         cmd,
                         capture_output=True,
@@ -874,7 +879,7 @@ class LLMService:
         """
         if provider == "gemini":
             # Gemini도 built-in file system tools 지원
-            return self.execute_gemini(prompt, model, timeout, parse_json, enable_tools)
+            return self.execute_gemini(prompt, model, timeout, parse_json, enable_tools, cli_options)
         else:
             # 기본값은 Claude
             return self.execute_claude(prompt, model, timeout, parse_json, enable_tools, cli_options=cli_options)

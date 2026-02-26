@@ -4,7 +4,7 @@
 1. execute_llm() provider 분기 (gemini/claude 라우팅)
 2. _parse_json_response() JSON 파싱 (코드블록, 순수 JSON, 텍스트 래핑, 실패)
 3. Instagram 분류 응답 저장 흐름 (mock 방식)
-4. execute_gemini()가 cli_options를 무시하는 동작 명시적 검증
+4. execute_gemini()가 cli_options를 수용하되 image_path만 사용하는 동작 명시적 검증
 """
 
 import inspect
@@ -246,16 +246,17 @@ class TestInstagramClassificationFlow(unittest.TestCase):
 
 
 # ===========================================================================
-# 4. execute_gemini()가 cli_options를 무시하는 것 명시적 검증
+# 4. execute_gemini()가 cli_options를 수용하되 image_path만 사용하는 동작 명시적 검증
 # ===========================================================================
 
-class TestGeminiIgnoresCliOptions(unittest.TestCase):
-    """execute_gemini()가 cli_options 파라미터를 받지 않음을 명시적으로 검증.
+class TestGeminiCliOptions(unittest.TestCase):
+    """execute_gemini()가 cli_options 파라미터를 수용하고 image_path만 사용함을 검증.
 
     설계 의도:
-        Gemini는 Claude CLI subprocess와 달리 자체 API를 통해 실행되므로
-        cli_options(output_format, json_schema 등 Claude CLI 전용 파라미터)를
-        사용할 수 없다. 대신 응답을 raw text로 받아 _parse_json_response()로 파싱한다.
+        Gemini는 Claude CLI subprocess와 달리 output_format, json_schema 등
+        Claude CLI 전용 파라미터를 사용할 수 없다.
+        단, image_path는 `@경로` 문법으로 이미지 첨부에 사용한다.
+        응답은 raw text로 받아 _parse_json_response()로 파싱한다.
 
         이 테스트는 그 동작 차이를 문서화한다.
     """
@@ -263,19 +264,18 @@ class TestGeminiIgnoresCliOptions(unittest.TestCase):
     def setUp(self):
         self.service = _make_service()
 
-    def test_execute_gemini_has_no_cli_options_parameter(self):
-        """execute_gemini() 시그니처에 cli_options 파라미터가 없어야 한다."""
+    def test_execute_gemini_has_cli_options_parameter(self):
+        """execute_gemini() 시그니처에 cli_options 파라미터가 있어야 한다 (image_path 전달용)."""
         from app.modules.claude_worker.services.llm_service import LLMService
 
         sig = inspect.signature(LLMService.execute_gemini)
         param_names = list(sig.parameters.keys())
 
-        # cli_options 파라미터가 존재하면 안 됨
-        self.assertNotIn(
+        # cli_options 파라미터가 존재해야 함
+        self.assertIn(
             "cli_options",
             param_names,
-            "execute_gemini()는 cli_options 파라미터를 갖지 않아야 한다. "
-            "Gemini는 CLI subprocess 방식이 아닌 자체 파싱 경로를 사용한다.",
+            "execute_gemini()는 cli_options 파라미터를 가져야 한다 (image_path 전달용).",
         )
 
     def test_execute_claude_has_cli_options_parameter(self):
@@ -291,14 +291,13 @@ class TestGeminiIgnoresCliOptions(unittest.TestCase):
             "execute_claude()는 cli_options 파라미터를 가져야 한다.",
         )
 
-    def test_execute_llm_with_gemini_and_cli_options_ignores_cli_options(self):
-        """provider='gemini' + cli_options 전달 시 cli_options가 무시되고
-        execute_gemini()가 호출돼야 한다 (cli_options 미전달).
+    def test_execute_llm_with_gemini_passes_cli_options_to_execute_gemini(self):
+        """provider='gemini' + cli_options 전달 시 cli_options가 execute_gemini()로 전달돼야 한다.
 
         설계 의도:
             execute_llm()이 gemini 분기에서 execute_gemini()를 호출할 때
-            cli_options를 전달하지 않는다. 이 테스트는 그 동작을 문서화하고
-            실수로 cli_options를 전달하는 코드 변경을 방지한다.
+            cli_options를 그대로 전달한다. (image_path 등 gemini 전용 옵션 활용)
+            이 테스트는 그 동작을 문서화한다.
         """
         mock_gemini_result = {
             "success": True,
@@ -310,20 +309,26 @@ class TestGeminiIgnoresCliOptions(unittest.TestCase):
             result = self.service.execute_llm(
                 prompt="분류해주세요",
                 provider="gemini",
-                cli_options={"output_format": "json"},  # gemini에서는 무시됨
+                cli_options={"image_path": "/test/57.jpg"},
             )
 
         # execute_gemini가 호출됐는지 확인
         mock_gemini.assert_called_once()
 
-        # execute_gemini 호출 시 cli_options가 전달되지 않았는지 확인
-        call_kwargs = mock_gemini.call_args[1]  # keyword arguments
+        # execute_gemini 호출 시 cli_options가 전달됐는지 확인
+        # positional(args) 또는 keyword(kwargs) 모두 허용
         call_args = mock_gemini.call_args[0]    # positional arguments
+        call_kwargs = mock_gemini.call_args[1]  # keyword arguments
 
-        self.assertNotIn(
-            "cli_options",
-            call_kwargs,
-            "execute_gemini() 호출에 cli_options가 전달되면 안 된다.",
+        # execute_gemini(prompt, model, timeout, parse_json, enable_tools, cli_options)
+        # positional 6번째(index 5) 또는 keyword "cli_options"로 전달됨
+        cli_options_passed = (
+            "cli_options" in call_kwargs
+            or len(call_args) >= 6  # positional 6개 이상이면 cli_options 포함
+        )
+        self.assertTrue(
+            cli_options_passed,
+            "execute_gemini() 호출에 cli_options가 전달돼야 한다 (image_path 포함).",
         )
 
         # 결과는 정상 반환
@@ -343,6 +348,70 @@ class TestGeminiIgnoresCliOptions(unittest.TestCase):
 
         self.assertEqual(parsed["tag"], "팝업")
         self.assertEqual(parsed["summary"], "신규 팝업")
+
+
+# ===========================================================================
+# 5. execute_gemini() image_path 동작 TC
+# ===========================================================================
+
+class TestGeminiImagePath(unittest.TestCase):
+    """execute_gemini()가 cli_options["image_path"]를 subprocess 명령어에 @경로로 추가하는지 검증."""
+
+    def setUp(self):
+        self.service = _make_service()
+
+    def _make_mock_run(self):
+        """subprocess.run mock — returncode=0, 유효한 JSON 응답."""
+        mock = MagicMock()
+        mock.returncode = 0
+        mock.stdout = '{"category": "test", "confidence": 0.9}'
+        mock.stderr = "Loaded cached credentials."
+        return mock
+
+    def test_image_path_appended_to_cmd(self):
+        """cli_options={"image_path": "C:/test/57.jpg"} 시 cmd에 @"C:/test/57.jpg" 포함."""
+        import sys
+        mock_result = self._make_mock_run()
+
+        with patch("subprocess.run", return_value=mock_result) as mock_run, \
+             patch("os.unlink"):
+            self.service.execute_gemini(
+                prompt="이미지를 분류하세요",
+                cli_options={"image_path": "C:/test/57.jpg"},
+                parse_json=False,
+            )
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]  # positional 첫 번째 인수 (cmd 문자열)
+        self.assertIn('@"C:/test/57.jpg"', cmd)
+
+    def test_no_image_path_no_append(self):
+        """cli_options=None 또는 image_path 없을 때 cmd에 @ 문자 없음."""
+        mock_result = self._make_mock_run()
+
+        with patch("subprocess.run", return_value=mock_result) as mock_run, \
+             patch("os.unlink"):
+            self.service.execute_gemini(
+                prompt="분류",
+                cli_options=None,
+                parse_json=False,
+            )
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        self.assertNotIn(" @", cmd)
+
+    def test_claude_unaffected(self):
+        """execute_claude() 시그니처에 cli_options 파라미터가 여전히 존재 (회귀 방지)."""
+        from app.modules.claude_worker.services.llm_service import LLMService
+
+        sig = inspect.signature(LLMService.execute_claude)
+        param_names = list(sig.parameters.keys())
+        self.assertIn(
+            "cli_options",
+            param_names,
+            "execute_claude()는 cli_options 파라미터를 유지해야 한다.",
+        )
 
 
 if __name__ == "__main__":
