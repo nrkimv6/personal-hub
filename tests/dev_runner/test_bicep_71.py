@@ -74,7 +74,7 @@ def test_command_listener_poll_on_popen_only():
         if ".poll()" in line
     ]
 
-    # 반드시 `_current_process.poll()` 형태 (subprocess.Popen 전역변수)
+    # proc.poll() 형태 (멀티 runner: dict에서 꺼낸 proc 변수 사용)
     for lineno, line in poll_lines:
-        assert "_current_process.poll()" in line or "process.poll()" in line, \
+        assert "proc.poll()" in line or "process.poll()" in line or "_current_process.poll()" in line, \
             f"line {lineno}: 예상치 않은 .poll() 호출: {line}"

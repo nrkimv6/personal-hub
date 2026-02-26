@@ -214,6 +214,7 @@ class LLMClassifierService:
         requested_by: str = "auto",
         provider: str = "claude",
         model: str = "",
+        _suppress_quota_warn: bool = False,
     ) -> Optional[object]:
         """LLM 분류 요청 생성 (claude_worker에 위임).
 
@@ -253,6 +254,17 @@ class LLMClassifierService:
             image_section=image_section,
         )
 
+        # quota pause 경고 로그 (batch 호출 시 중복 방지를 위해 suppress 가능)
+        if not _suppress_quota_warn:
+            paused_until = self._llm_service.get_provider_quota_pause(provider)
+            if paused_until:
+                logger.warning(
+                    "[QUOTA_WARN] instagram 분류 요청 — %s 쿼터 정지 중 (재개: %s), post_id=%s",
+                    provider,
+                    paused_until.isoformat(),
+                    post_id,
+                )
+
         # claude_worker에 요청 생성
         request = self._llm_service.enqueue(
             caller_type=self.CALLER_TYPE,
@@ -279,9 +291,19 @@ class LLMClassifierService:
         model: str = "",
     ) -> list:
         """여러 게시물에 대해 LLM 분류 요청 생성."""
+        # quota pause 경고 로그 — 루프 밖에서 1회만 출력 (중복 방지)
+        paused_until = self._llm_service.get_provider_quota_pause(provider)
+        if paused_until:
+            logger.warning(
+                "[QUOTA_WARN] instagram 일괄 분류 %d건 — %s 쿼터 정지 중 (재개: %s)",
+                len(post_ids),
+                provider,
+                paused_until.isoformat(),
+            )
+
         requests = []
         for post_id in post_ids:
-            request = self.create_request(post_id, trigger_tag, requested_by, provider=provider, model=model)
+            request = self.create_request(post_id, trigger_tag, requested_by, provider=provider, model=model, _suppress_quota_warn=True)
             if request:
                 requests.append(request)
         return requests

@@ -1109,4 +1109,75 @@ class TestStructuredOutputFallback:
         assert result["success"] is True
         assert result["result"]["category"] == "여행/국내/서울"
         assert result["result"]["confidence"] == 0.95
+
+
+class TestQuotaWarnLog:
+    """TC-Right/Boundary: quota pause 시 경고 로그 출력 검증."""
+
+    @pytest.fixture
+    def service(self, test_session):
+        return LLMClassifierService(test_session)
+
+    @pytest.fixture
+    def post(self, test_session):
+        p = InstagramPost(
+            post_id="qw_test_001",
+            caption="quota warn test caption",
+            username="test_user",
+        )
+        test_session.add(p)
+        test_session.commit()
+        return p
+
+    def test_create_request_logs_warning_when_quota_paused(self, service, post, caplog):
+        """TC-Right: create_request() 호출 시 quota pause 상태 → logger.warning 호출."""
+        from datetime import timedelta
+
+        paused_until = datetime.now() + timedelta(hours=3)
+
+        with patch.object(service._llm_service, "get_provider_quota_pause", return_value=paused_until):
+            with patch.object(service._llm_service, "enqueue", return_value=MagicMock(id=1)):
+                import logging
+                with caplog.at_level(logging.WARNING, logger="instagram.llm_classifier"):
+                    service.create_request(post.id, "event", provider="claude")
+
+        assert any("[QUOTA_WARN]" in r.message for r in caplog.records)
+
+    def test_create_requests_batch_logs_warning_once(self, service, test_session, caplog):
+        """TC-Right: create_requests_batch() 10건 → warning 로그 1회만 출력 (중복 방지)."""
+        from datetime import timedelta
+
+        paused_until = datetime.now() + timedelta(hours=3)
+
+        posts = []
+        for i in range(3):
+            p = InstagramPost(
+                post_id=f"batch_qw_{i}",
+                caption=f"caption {i}",
+                username="test_user",
+            )
+            test_session.add(p)
+            posts.append(p)
+        test_session.commit()
+        post_ids = [p.id for p in posts]
+
+        with patch.object(service._llm_service, "get_provider_quota_pause", return_value=paused_until):
+            with patch.object(service._llm_service, "enqueue", return_value=MagicMock(id=99)):
+                import logging
+                with caplog.at_level(logging.WARNING, logger="instagram.llm_classifier"):
+                    service.create_requests_batch(post_ids, provider="claude")
+
+        quota_warns = [r for r in caplog.records if "[QUOTA_WARN]" in r.message and "일괄" in r.message]
+        assert len(quota_warns) == 1
+
+    def test_create_request_no_warning_when_quota_not_paused(self, service, post, caplog):
+        """TC-Boundary: get_provider_quota_pause() None 반환 시 → warning 없음."""
+        with patch.object(service._llm_service, "get_provider_quota_pause", return_value=None):
+            with patch.object(service._llm_service, "enqueue", return_value=MagicMock(id=1)):
+                import logging
+                with caplog.at_level(logging.WARNING, logger="instagram.llm_classifier"):
+                    service.create_request(post.id, "event", provider="claude")
+
+        quota_warns = [r for r in caplog.records if "[QUOTA_WARN]" in r.message]
+        assert len(quota_warns) == 0
         assert result["result"]["reasoning"] == "서울 풍경"

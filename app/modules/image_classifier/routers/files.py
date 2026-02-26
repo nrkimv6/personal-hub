@@ -445,7 +445,11 @@ async def open_local_file_or_folder(
         raise HTTPException(status_code=404, detail=f"경로를 찾을 수 없습니다: {target}")
 
     try:
-        os.startfile(str(target_path))
+        import subprocess
+        if target_path.is_dir():
+            subprocess.Popen(['explorer', str(target_path)])
+        else:
+            subprocess.Popen(['explorer', '/select,', str(target_path)])
         return {"status": "ok", "opened": str(target_path)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"열기 실패: {e}")

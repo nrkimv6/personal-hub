@@ -1,7 +1,7 @@
-"""Command Listener 프로세스 관리 TC (Phase 5 보강 포함)
+"""Command Listener 프로세스 관리 TC — 멀티 runner 기반 업데이트
 
-대상 소스: scripts/dev-runner-command-listener.py (359줄)
-Mock 대상: subprocess.Popen, redis.Redis → fakeredis
+대상 소스: scripts/dev-runner-command-listener.py
+변경사항: _current_process → _running_processes dict, STATE_KEY → RUNNER_KEY_PREFIX
 """
 
 import importlib.util
@@ -56,14 +56,19 @@ def mock_popen():
     return p
 
 
+RUNNER_ID = "test1234"
+
+
 @pytest.fixture(autouse=True)
 def reset_globals(listener_mod):
-    """테스트 간 전역변수 초기화"""
-    listener_mod._current_process = None
-    listener_mod._current_log_file = None
+    """테스트 간 전역 dict 초기화"""
+    listener_mod._running_processes.clear()
+    listener_mod._running_log_files.clear()
+    listener_mod._stream_threads.clear()
     yield
-    listener_mod._current_process = None
-    listener_mod._current_log_file = None
+    listener_mod._running_processes.clear()
+    listener_mod._running_log_files.clear()
+    listener_mod._stream_threads.clear()
 
 
 # ========== TestStartPlanRunner ==========
@@ -72,7 +77,7 @@ class TestStartPlanRunner:
 
     def test_start_creates_subprocess(self, listener_mod, fr, mock_popen, tmp_path):
         """Popen 호출 인수 검증"""
-        command = {"action": "run", "plan_file": "common/docs/plan/test.md"}
+        command = {"action": "run", "runner_id": RUNNER_ID, "plan_file": "common/docs/plan/test.md"}
 
         with patch.object(listener_mod, 'LOG_DIR', tmp_path):
             with patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen) as mp:
@@ -88,7 +93,7 @@ class TestStartPlanRunner:
 
     def test_start_parallel_no_plan_file(self, listener_mod, fr, mock_popen, tmp_path):
         """parallel 모드: --plan-file 미포함"""
-        command = {"action": "run", "parallel": True}
+        command = {"action": "run", "runner_id": RUNNER_ID, "parallel": True}
 
         with patch.object(listener_mod, 'LOG_DIR', tmp_path), \
              patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen) as mp:
@@ -99,34 +104,35 @@ class TestStartPlanRunner:
         assert "--parallel" in cmd
 
     def test_start_sets_redis_state(self, listener_mod, fr, mock_popen, tmp_path):
-        """Redis 상태 저장 확인"""
-        SK = listener_mod.STATE_KEY
-        command = {"action": "run", "plan_file": "test.md"}
+        """Redis per-runner 상태 저장 확인"""
+        RKP = listener_mod.RUNNER_KEY_PREFIX
+        command = {"action": "run", "runner_id": RUNNER_ID, "plan_file": "test.md"}
 
         with patch.object(listener_mod, 'LOG_DIR', tmp_path), \
              patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen):
             listener_mod.start_plan_runner(command, fr)
 
-        assert fr.get(SK + ":status") == "running"
-        assert fr.get(SK + ":pid") == "12345"
-        assert fr.get(SK + ":plan_file") == "test.md"
+        assert fr.get(f"{RKP}:{RUNNER_ID}:status") == "running"
+        assert fr.get(f"{RKP}:{RUNNER_ID}:pid") == "12345"
+        assert fr.get(f"{RKP}:{RUNNER_ID}:plan_file") == "test.md"
 
     def test_start_plan_file_none_saves_ALL(self, listener_mod, fr, mock_popen, tmp_path):
-        """Phase5 - plan_file=None → Redis에 'ALL' 저장"""
-        SK = listener_mod.STATE_KEY
-        command = {"action": "run", "parallel": True}
+        """plan_file=None → Redis에 'ALL' 저장"""
+        RKP = listener_mod.RUNNER_KEY_PREFIX
+        command = {"action": "run", "runner_id": RUNNER_ID, "parallel": True}
 
         with patch.object(listener_mod, 'LOG_DIR', tmp_path), \
              patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen):
             listener_mod.start_plan_runner(command, fr)
 
-        assert fr.get(SK + ":plan_file") == "ALL"
+        assert fr.get(f"{RKP}:{RUNNER_ID}:plan_file") == "ALL"
 
     def test_start_already_running_returns_error(self, listener_mod, fr, mock_popen):
-        """이미 실행 중이면 에러"""
-        listener_mod._current_process = mock_popen  # poll() returns None = running
+        """같은 runner_id로 이미 실행 중이면 에러 (_is_pid_alive mocked)"""
+        listener_mod._running_processes[RUNNER_ID] = mock_popen  # poll() returns None = running
 
-        result = listener_mod.start_plan_runner({"action": "run", "plan_file": "test.md"}, fr)
+        with patch.object(listener_mod, '_is_pid_alive', return_value=True):
+            result = listener_mod.start_plan_runner({"action": "run", "runner_id": RUNNER_ID, "plan_file": "test.md"}, fr)
         assert result["success"] is False
         assert "Already running" in result["message"]
 
@@ -137,39 +143,41 @@ class TestStopPlanRunner:
 
     def test_stop_terminates_process(self, listener_mod, fr, mock_popen):
         """terminate → wait 호출"""
-        listener_mod._current_process = mock_popen
-        result = listener_mod.stop_plan_runner(fr)
+        listener_mod._running_processes[RUNNER_ID] = mock_popen
+        result = listener_mod.stop_plan_runner(RUNNER_ID, fr)
 
         assert mock_popen.terminate.call_count == 1
         assert result["success"] is True
 
     def test_stop_force_kills_on_timeout(self, listener_mod, fr):
-        """Phase5 - terminate 5초 내 미종료 → kill"""
+        """terminate 5초 내 미종료 → kill"""
         mock_process = MagicMock()
         mock_process.pid = 12345
         mock_process.poll.return_value = None
         mock_process.wait.side_effect = [subprocess.TimeoutExpired("cmd", 5), None]
 
-        listener_mod._current_process = mock_process
-        result = listener_mod.stop_plan_runner(fr)
+        listener_mod._running_processes[RUNNER_ID] = mock_process
+        result = listener_mod.stop_plan_runner(RUNNER_ID, fr)
 
         assert mock_process.kill.call_count == 1
 
     def test_stop_clears_redis_state(self, listener_mod, fr, mock_popen):
-        """Redis 상태 정리"""
-        SK = listener_mod.STATE_KEY
-        fr.set(SK + ":status", "running")
-        fr.set(SK + ":pid", "12345")
+        """Redis per-runner 상태 정리 (srem)"""
+        RKP = listener_mod.RUNNER_KEY_PREFIX
+        AK = listener_mod.ACTIVE_RUNNERS_KEY
+        fr.set(f"{RKP}:{RUNNER_ID}:status", "running")
+        fr.set(f"{RKP}:{RUNNER_ID}:pid", "12345")
+        fr.sadd(AK, RUNNER_ID)
 
-        listener_mod._current_process = mock_popen
-        listener_mod.stop_plan_runner(fr)
+        listener_mod._running_processes[RUNNER_ID] = mock_popen
+        listener_mod.stop_plan_runner(RUNNER_ID, fr)
 
-        assert fr.get(SK + ":status") == "stopped"
-        assert fr.get(SK + ":pid") is None
+        # runner가 active_runners에서 제거되어야 함
+        assert not fr.sismember(AK, RUNNER_ID)
 
     def test_stop_not_running_returns_error(self, listener_mod, fr):
-        """미실행 상태 stop → 실패"""
-        result = listener_mod.stop_plan_runner(fr)
+        """미실행 runner_id stop → 실패"""
+        result = listener_mod.stop_plan_runner(RUNNER_ID, fr)
         assert result["success"] is False
 
 
@@ -178,30 +186,23 @@ class TestStopPlanRunner:
 class TestGetStatus:
 
     def test_status_running(self, listener_mod, fr, mock_popen):
-        """poll()=None → running=True"""
-        log_file = Path("D:/logs/test.log")
-        listener_mod._current_process = mock_popen
-        listener_mod._current_log_file = log_file
+        """_running_processes에 실행 중 프로세스 → running=True"""
+        listener_mod._running_processes[RUNNER_ID] = mock_popen
 
         result = listener_mod.get_status(fr)
         assert result["running"] is True
         assert result["pid"] == 12345
 
     def test_status_dead_process_cleanup(self, listener_mod, fr):
-        """Phase5 - 죽은 프로세스 → Redis 자동 정리"""
-        SK = listener_mod.STATE_KEY
+        """죽은 프로세스 → dict에서 제거"""
         mock_process = MagicMock()
-        mock_process.poll.return_value = 0
+        mock_process.poll.return_value = 0  # 종료됨
 
-        fr.set(SK + ":status", "running")
-        fr.set(SK + ":pid", "12345")
-
-        listener_mod._current_process = mock_process
+        listener_mod._running_processes[RUNNER_ID] = mock_process
         result = listener_mod.get_status(fr)
 
         assert result["running"] is False
-        assert fr.get(SK + ":status") == "stopped"
-        assert fr.get(SK + ":pid") is None
+        assert RUNNER_ID not in listener_mod._running_processes
 
     def test_status_no_process(self, listener_mod, fr):
         """프로세스 없음 → not running"""
@@ -214,7 +215,7 @@ class TestGetStatus:
 class TestExecuteCommand:
 
     def test_unknown_action(self, listener_mod, fr):
-        """Phase5 - 알 수 없는 action → error"""
+        """알 수 없는 action → error"""
         result = listener_mod.execute_command({"action": "invalid"}, fr)
         assert result["success"] is False
         assert "Unknown action" in result["message"]

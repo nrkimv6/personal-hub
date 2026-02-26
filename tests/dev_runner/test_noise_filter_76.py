@@ -64,7 +64,7 @@ def _run_stream(lines: list):
     mock_redis = MagicMock()
     mock_redis.publish.side_effect = lambda ch, msg: published.append(msg)
 
-    _stream_output(proc, mock_log, mock_redis)
+    _stream_output(proc, mock_log, mock_redis, runner_id="test_runner")
     return published, written
 
 
@@ -171,7 +171,7 @@ class TestStreamOutputFilter:
             "정상 로그",
         ])
         assert not any("xterm.js" in p for p in published), "xterm.js 줄 publish 안 됨"
-        assert any("noise lines suppressed" in p for p in published), "억제 요약 publish"
+        assert any("lines suppressed" in p for p in published), "억제 요약 publish"
         assert "정상 로그" in published
 
     def test_attach_console_not_published(self):
@@ -185,7 +185,7 @@ class TestStreamOutputFilter:
         assert not any("AttachConsole" in p for p in published)
         assert not any("at Object.<anonymous>" in p for p in published)
         assert not any("Node.js v" in p for p in published)
-        assert any("noise lines suppressed" in p for p in published)
+        assert any("lines suppressed" in p for p in published)
         assert "작업 시작" in published
 
     def test_noise_lines_still_written_to_file(self):
@@ -200,7 +200,7 @@ class TestStreamOutputFilter:
     def test_suppression_summary_single_line(self):
         noise = ["xterm.js: Parsing error: {"] * 50 + ["정상"]
         published, _ = _run_stream(noise)
-        summary_lines = [p for p in published if "noise lines suppressed" in p]
+        summary_lines = [p for p in published if "lines suppressed" in p]
         assert len(summary_lines) == 1, f"요약은 1줄: {summary_lines}"
 
     def test_rate_limiter_burst(self):

@@ -14,6 +14,8 @@
 	import { eventApi, popupApi, uncategorizedApi, collectApi } from '$lib/api';
 	import type { Event, EventCreate, EventUpdate, InstagramPost, Popup, UncategorizedPost, InstagramTag } from '$lib/types';
 	import { isAdmin, isLoggedIn } from '$lib/stores/auth';
+	import { toast } from '$lib/stores/toast';
+	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
 	import { localParticipation } from '$lib/stores/localParticipation';
 
 	// 컴포넌트 import
@@ -548,6 +550,11 @@
 	}
 
 	async function handleRequestLlmAnalysis(postId: number): Promise<void> {
+		// quota 경고 체크 (collect 기본 provider: gemini)
+		const quotaWarn = getQuotaWarning('gemini');
+		if (quotaWarn) {
+			toast.warning(quotaWarn);
+		}
 		try {
 			await collectApi.requestLlmAnalysisSingle(postId);
 			alert('AI 분석 요청이 등록되었습니다.');
@@ -608,6 +615,7 @@
 
 	onMount(async () => {
 		localParticipation.load();
+		fetchQuotaStatus();
 
 		try {
 			availableTags = await collectApi.tags.getTags();

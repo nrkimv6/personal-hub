@@ -27,7 +27,7 @@ class TestLogServiceTailLogFile:
         service = LogService.__new__(LogService)
         service.redis_client = MagicMock()
         with patch.object(service, "_find_current_log", return_value=log_file):
-            result = service.tail_log_file(n_lines=50)
+            result = service.tail_log_file("test_runner", n_lines=50)
 
         assert isinstance(result, LogResponse)
         assert len(result.lines) == 50
@@ -39,7 +39,7 @@ class TestLogServiceTailLogFile:
         service = LogService.__new__(LogService)
         service.redis_client = MagicMock()
         with patch.object(service, "_find_current_log", return_value=None):
-            result = service.tail_log_file()
+            result = service.tail_log_file("test_runner")
 
         assert result.lines == []
         assert result.total_lines == 0
@@ -50,7 +50,7 @@ class TestLogServiceTailLogFile:
         service = LogService.__new__(LogService)
         service.redis_client = MagicMock()
         with patch.object(service, "_find_current_log", return_value=missing):
-            result = service.tail_log_file()
+            result = service.tail_log_file("test_runner")
 
         assert result.lines == []
         assert result.total_lines == 0
@@ -64,7 +64,7 @@ class TestLogServiceTailLogFile:
         service.redis_client = MagicMock()
         with patch.object(service, "_find_current_log", return_value=log_file), \
              patch("builtins.open", side_effect=PermissionError("Access denied")):
-            result = service.tail_log_file()
+            result = service.tail_log_file("test_runner")
 
         assert result.total_lines == 1
         assert "Error reading log" in result.lines[0]
@@ -77,7 +77,7 @@ class TestLogServiceTailLogFile:
         service = LogService.__new__(LogService)
         service.redis_client = MagicMock()
         with patch.object(service, "_find_current_log", return_value=log_file):
-            result = service.tail_log_file()
+            result = service.tail_log_file("test_runner")
 
         assert len(result.lines) == 100
 
@@ -95,12 +95,12 @@ class TestLogServiceFindCurrentLog:
         service = LogService.__new__(LogService)
         mock_redis = MagicMock()
         mock_redis.get.side_effect = lambda key: {
-            "plan-runner:state:stream_log_path": str(stream_log),
-            "plan-runner:state:log_file_path": str(fallback_log),
+            "plan-runner:runners:test_runner:stream_log_path": str(stream_log),
+            "plan-runner:runners:test_runner:log_file_path": str(fallback_log),
         }.get(key)
         service.redis_client = mock_redis
 
-        result = service._find_current_log()
+        result = service._find_current_log("test_runner")
         assert result == stream_log
 
     def test_fallback_to_log_file_path(self, tmp_path):
@@ -111,12 +111,12 @@ class TestLogServiceFindCurrentLog:
         service = LogService.__new__(LogService)
         mock_redis = MagicMock()
         mock_redis.get.side_effect = lambda key: {
-            "plan-runner:state:stream_log_path": None,
-            "plan-runner:state:log_file_path": str(fallback_log),
+            "plan-runner:runners:test_runner:stream_log_path": None,
+            "plan-runner:runners:test_runner:log_file_path": str(fallback_log),
         }.get(key)
         service.redis_client = mock_redis
 
-        result = service._find_current_log()
+        result = service._find_current_log("test_runner")
         assert result == fallback_log
 
     def test_redis_connection_error_returns_none(self):
@@ -126,7 +126,7 @@ class TestLogServiceFindCurrentLog:
         mock_redis.get.side_effect = redis.ConnectionError("Connection refused")
         service.redis_client = mock_redis
 
-        result = service._find_current_log()
+        result = service._find_current_log("test_runner")
         assert result is None
 
     def test_both_paths_missing_returns_none(self):
@@ -136,7 +136,7 @@ class TestLogServiceFindCurrentLog:
         mock_redis.get.return_value = None
         service.redis_client = mock_redis
 
-        result = service._find_current_log()
+        result = service._find_current_log("test_runner")
         assert result is None
 
     def test_path_exists_but_file_deleted(self, tmp_path):
@@ -144,12 +144,12 @@ class TestLogServiceFindCurrentLog:
         service = LogService.__new__(LogService)
         mock_redis = MagicMock()
         mock_redis.get.side_effect = lambda key: {
-            "plan-runner:state:stream_log_path": str(tmp_path / "gone.log"),
-            "plan-runner:state:log_file_path": None,
+            "plan-runner:runners:test_runner:stream_log_path": str(tmp_path / "gone.log"),
+            "plan-runner:runners:test_runner:log_file_path": None,
         }.get(key)
         service.redis_client = mock_redis
 
-        result = service._find_current_log()
+        result = service._find_current_log("test_runner")
         assert result is None
 
 

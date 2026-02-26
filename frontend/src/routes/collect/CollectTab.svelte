@@ -6,6 +6,8 @@
   import type { LLMRequest, UrlParseResponse, ServiceAccountWithProfile } from '$lib/types';
   import { Button } from '$lib/components/ui';
   import { createSelection } from '$lib/utils/selection.svelte';
+  import { toast } from '$lib/stores/toast';
+  import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
   import { createPagePagination } from '$lib/utils/pagination.svelte';
 
   let posts: CollectedPost[] = [];
@@ -220,6 +222,11 @@
 
   async function runBatchAnalysis() {
     if (selection.count === 0) return;
+    // quota 경고 체크 (collect 기본 provider: gemini)
+    const quotaWarn = getQuotaWarning('gemini');
+    if (quotaWarn) {
+      toast.warning(`${selection.count}건 큐 추가 — ${quotaWarn}`);
+    }
     isBatchProcessing = true;
     showBatchActionMenu = false;
     try {
@@ -375,6 +382,11 @@
   }
 
   async function requestLlmAnalysis(id: number) {
+    // quota 경고 체크 (collect 기본 provider: gemini)
+    const quotaWarn = getQuotaWarning('gemini');
+    if (quotaWarn) {
+      toast.warning(quotaWarn);
+    }
     try {
       await collectApi.requestLlmAnalysisSingle(id);
       alert('AI 분석 요청이 등록되었습니다.');
@@ -403,6 +415,7 @@
   }
 
   onMount(() => {
+    fetchQuotaStatus();
     // 저장된 뷰 모드 복원
     if (browser) {
       const savedMode = localStorage.getItem(STORAGE_KEY_VIEW_MODE);

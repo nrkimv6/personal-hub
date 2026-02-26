@@ -236,19 +236,17 @@ class TestCrossCheck:
 class TestErrorConditions:
     """E: 오류 조건이 올바르게 처리되는가"""
 
-    async def test_already_running_rejects_max_cycles_zero(self, executor, fake_async_redis, fake_redis):
-        """이미 실행 중일 때 max_cycles=0 요청도 409 반환"""
-        # executor._check_redis_and_listener는 async_redis.heartbeat를 먼저 체크하므로
-        # async_redis에도 heartbeat 세팅 필요
+    async def test_already_running_allows_additional_runner_with_max_cycles_zero(self, executor, fake_async_redis, fake_redis):
+        """멀티 runner: 이미 실행 중이어도 max_cycles=0 추가 실행 허용 (409 없음)"""
         await fake_async_redis.set("plan-runner:listener:heartbeat", "alive")
-        await fake_async_redis.set("plan-runner:state:status", "running")
-        fake_redis.set("plan-runner:listener:heartbeat", "alive")
-        fake_redis.set("plan-runner:state:status", "running")
-        fake_redis.set("plan-runner:state:pid", "99999")
-        with patch("psutil.pid_exists", return_value=True):
-            with pytest.raises(HTTPException) as exc:
-                await executor.start_dev_runner(RunRequest(plan_file="test.md", max_cycles=0))
-        assert exc.value.status_code == 409
+        # 성공 응답 추가 (listener가 살아있어야 하므로)
+        import json
+        result_data = {"success": True, "pid": 12345}
+        await fake_async_redis.rpush("plan-runner:command_results", json.dumps(result_data))
+
+        result = await executor.start_dev_runner(RunRequest(plan_file="test.md", max_cycles=0))
+        assert result.runner_id is not None  # 새 runner_id 발급됨
+        assert len(result.runner_id) == 8
 
     async def test_listener_dead_raises_503_regardless_of_max_cycles(self, executor, fake_async_redis):
         """listener 없을 때 max_cycles=0 요청도 503 반환"""

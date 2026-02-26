@@ -260,27 +260,23 @@ class TestHttpE2ECommandChain:
 class TestHttpE2EErrorPaths:
     """HTTP 오류 응답 검증"""
 
-    async def test_post_run_already_running_returns_409(self, fake_redis_pair):
-        """실행 중일 때 POST /run → 409 Conflict
-
-        _check_redis_and_listener가 async_redis.heartbeat를 먼저 체크하므로
-        async_redis에도 heartbeat+running 세팅 필요.
-        """
+    async def test_post_run_concurrent_creates_new_runner(self, fake_redis_pair):
+        """멀티 runner: 이미 실행 중이어도 POST /run → 200 + 새 runner_id (409 없음)"""
+        import json
         sync_r, async_r = fake_redis_pair
-        # async_redis 체크용 (heartbeat 먼저 검증)
         await async_r.set("plan-runner:listener:heartbeat", "alive")
-        await async_r.set("plan-runner:state:status", "running")
-        # sync_redis 체크용 (동기 상태 확인)
-        sync_r.set("plan-runner:listener:heartbeat", "alive")
-        sync_r.set("plan-runner:state:status", "running")
-        sync_r.set("plan-runner:state:pid", "99999")
+        # listener 성공 응답 세팅
+        result_data = {"success": True, "pid": 12345}
+        await async_r.rpush("plan-runner:command_results", json.dumps(result_data))
 
         with patch.object(executor_service, "redis_client", sync_r), \
-             patch.object(executor_service, "async_redis", async_r), \
-             patch("psutil.pid_exists", return_value=True):
+             patch.object(executor_service, "async_redis", async_r):
             client = TestClient(app, raise_server_exceptions=False)
             resp = client.post("/api/v1/dev-runner/run", json={"plan_file": "t.md", "max_cycles": 0})
-        assert resp.status_code == 409
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "runner_id" in body
+        assert len(body["runner_id"]) == 8
 
     def test_post_run_redis_down_returns_503(self):
         """Redis 연결 불가 시 POST /run → 503"""

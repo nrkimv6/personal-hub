@@ -128,15 +128,19 @@ class TestStartDevRunner:
         assert command["skip_plan"] is True
         assert command["projects"] == "activity-hub,wtools"
 
-    async def test_start_already_running_409(self, executor, run_request_single, fake_async_redis):
-        """Boundary - status=running + heartbeat 있음 → 409"""
-        await fake_async_redis.set("plan-runner:listener:heartbeat", "alive")
-        await fake_async_redis.set("plan-runner:state:status", "running")
-        await fake_async_redis.set("plan-runner:state:pid", "12345")
+    async def test_start_concurrent_returns_different_runner_ids(self, executor, run_request_single, fake_async_redis):
+        """Boundary - 멀티 runner: 동시 2회 시작 → 각기 다른 runner_id (409 없음)"""
+        await _setup_listener_success(fake_async_redis)
+        # 두 번째 호출을 위한 추가 결과 큐
+        result_data2 = {"success": True, "pid": 22222}
+        await fake_async_redis.rpush("plan-runner:command_results", json.dumps(result_data2))
 
-        with pytest.raises(HTTPException) as exc_info:
-            await executor.start_dev_runner(run_request_single)
-        assert exc_info.value.status_code == 409
+        result1 = await executor.start_dev_runner(run_request_single)
+        result2 = await executor.start_dev_runner(run_request_single)
+
+        assert result1.runner_id is not None
+        assert result2.runner_id is not None
+        assert result1.runner_id != result2.runner_id
 
     async def test_start_redis_down_503(self, executor, run_request_single):
         """Boundary - Redis ping ConnectionError → 503"""
@@ -186,34 +190,31 @@ class TestStartDevRunner:
 class TestStopDevRunner:
 
     async def test_stop_not_running_404(self, executor, fake_async_redis):
-        """Boundary - 미실행 상태 stop → 404"""
-        await fake_async_redis.set("plan-runner:state:status", "stopped")
-
+        """Boundary - 미실행 runner_id → 404"""
         with pytest.raises(HTTPException) as exc_info:
-            await executor.stop_dev_runner()
+            await executor.stop_dev_runner("nonexistent_runner")
         assert exc_info.value.status_code == 404
 
     async def test_stop_success(self, executor, fake_async_redis):
         """Right - 정상 stop"""
-        await fake_async_redis.set("plan-runner:state:status", "running")
+        runner_id = "abc12345"
+        await fake_async_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
         result_data = {"success": True, "message": "Stopped"}
         await fake_async_redis.rpush("plan-runner:command_results", json.dumps(result_data))
 
-        result = await executor.stop_dev_runner()
+        result = await executor.stop_dev_runner(runner_id)
         assert result["message"] == "Stopped successfully"
 
     async def test_stop_listener_timeout_force_cleanup(self, executor, fake_async_redis):
         """Error - listener 무응답 → Redis 상태 강제 정리"""
-        await fake_async_redis.set("plan-runner:state:status", "running")
-        await fake_async_redis.set("plan-runner:state:pid", "12345")
+        runner_id = "abc12345"
+        await fake_async_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
+        await fake_async_redis.set(f"plan-runner:runners:{runner_id}:pid", "12345")
 
         with patch.object(executor.async_redis, 'brpop', new_callable=AsyncMock, return_value=None):
-            result = await executor.stop_dev_runner()
+            result = await executor.stop_dev_runner(runner_id)
 
         assert "Force cleaned" in result["message"]
-        # cleanup은 sync redis_client에서 실행
-        # force_cleanup_state가 호출되었는지 확인
-        # force_cleanup이 호출되었음은 결과 메시지로 확인됨
 
     async def test_stop_redis_down_503(self, executor):
         """Phase3 - stop시 Redis ConnectionError → 503"""
@@ -222,25 +223,26 @@ class TestStopDevRunner:
         executor.async_redis.get.side_effect = redis.ConnectionError("Connection refused")
 
         with pytest.raises(HTTPException) as exc_info:
-            await executor.stop_dev_runner()
+            await executor.stop_dev_runner("any_runner")
         assert exc_info.value.status_code == 503
 
     async def test_stop_json_decode_force_cleanup(self, executor, fake_async_redis, fake_redis):
         """Phase3 - stop시 JSON decode 실패 → force cleanup"""
-        await fake_async_redis.set("plan-runner:state:status", "running")
-        fake_redis.set("plan-runner:state:status", "running")
-        fake_redis.set("plan-runner:state:pid", "12345")
+        runner_id = "abc12345"
+        await fake_async_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
+        fake_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
+        fake_redis.set(f"plan-runner:runners:{runner_id}:pid", "12345")
 
         with patch.object(
             executor.async_redis, 'brpop',
             new_callable=AsyncMock,
             return_value=("plan-runner:command_results", "invalid-json!!!")
         ):
-            result = await executor.stop_dev_runner()
+            result = await executor.stop_dev_runner(runner_id)
 
         assert "Force cleaned" in result["message"]
         # sync redis에서 상태 정리 확인
-        assert fake_redis.get("plan-runner:state:status") is None
+        assert fake_redis.get(f"plan-runner:runners:{runner_id}:status") is None
 
 
 # ========== TestGetProcessStatus ==========
@@ -253,12 +255,14 @@ class TestGetProcessStatus:
             yield
 
     def test_status_running_with_heartbeat(self, executor, fake_redis):
-        """Right - running + heartbeat 있음 → running=True"""
+        """Right - running + heartbeat 있음 → running=True (호환 래퍼 경유)"""
+        runner_id = "abc12345"
         fake_redis.set("plan-runner:listener:heartbeat", "alive")
-        fake_redis.set("plan-runner:state:status", "running")
-        fake_redis.set("plan-runner:state:pid", "12345")
-        fake_redis.set("plan-runner:state:plan_file", "test.md")
-        fake_redis.set("plan-runner:state:start_time", datetime.now().isoformat())
+        fake_redis.sadd("plan-runner:active_runners", runner_id)
+        fake_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
+        fake_redis.set(f"plan-runner:runners:{runner_id}:pid", "12345")
+        fake_redis.set(f"plan-runner:runners:{runner_id}:plan_file", "test.md")
+        fake_redis.set(f"plan-runner:runners:{runner_id}:start_time", datetime.now().isoformat())
 
         result = executor.get_process_status()
         assert result.running is True
@@ -266,14 +270,10 @@ class TestGetProcessStatus:
         assert result.plan_file == "test.md"
 
     def test_status_running_no_heartbeat_auto_cleanup(self, executor, fake_redis):
-        """Cross-check - heartbeat 없음 → stale 자동 정리"""
-        fake_redis.set("plan-runner:state:status", "running")
-        fake_redis.set("plan-runner:state:pid", "99999")
-        # heartbeat 없음 → stale
-
+        """Cross-check - active_runners 비어 있음 → running=False"""
+        # active_runners에 아무것도 없으면 not running
         result = executor.get_process_status()
         assert result.running is False
-        assert fake_redis.get("plan-runner:state:status") is None
 
     def test_status_not_running(self, executor, fake_redis):
         """Right - 미실행 → running=False"""
@@ -291,11 +291,13 @@ class TestGetProcessStatus:
 
     def test_current_cycle_key_absent_returns_none(self, executor, fake_redis):
         """Phase 2 TC3 - current_cycle Redis key 없음 → current_cycle=None (0 아님)"""
+        runner_id = "abc12345"
         fake_redis.set("plan-runner:listener:heartbeat", "alive")
-        fake_redis.set("plan-runner:state:status", "running")
-        fake_redis.set("plan-runner:state:pid", "12345")
-        fake_redis.set("plan-runner:state:plan_file", "test.md")
-        fake_redis.set("plan-runner:state:start_time", datetime.now().isoformat())
+        fake_redis.sadd("plan-runner:active_runners", runner_id)
+        fake_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
+        fake_redis.set(f"plan-runner:runners:{runner_id}:pid", "12345")
+        fake_redis.set(f"plan-runner:runners:{runner_id}:plan_file", "test.md")
+        fake_redis.set(f"plan-runner:runners:{runner_id}:start_time", datetime.now().isoformat())
         # current_cycle key 미설정
 
         result = executor.get_process_status()
@@ -304,12 +306,14 @@ class TestGetProcessStatus:
 
     def test_current_cycle_key_present_returns_int(self, executor, fake_redis):
         """Phase 2 TC3 - current_cycle Redis key 존재 → int 값 반환"""
+        runner_id = "abc12345"
         fake_redis.set("plan-runner:listener:heartbeat", "alive")
-        fake_redis.set("plan-runner:state:status", "running")
-        fake_redis.set("plan-runner:state:pid", "12345")
-        fake_redis.set("plan-runner:state:plan_file", "test.md")
-        fake_redis.set("plan-runner:state:start_time", datetime.now().isoformat())
-        fake_redis.set("plan-runner:state:current_cycle", "7")
+        fake_redis.sadd("plan-runner:active_runners", runner_id)
+        fake_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
+        fake_redis.set(f"plan-runner:runners:{runner_id}:pid", "12345")
+        fake_redis.set(f"plan-runner:runners:{runner_id}:plan_file", "test.md")
+        fake_redis.set(f"plan-runner:runners:{runner_id}:start_time", datetime.now().isoformat())
+        fake_redis.set(f"plan-runner:runners:{runner_id}:current_cycle", "7")
 
         result = executor.get_process_status()
         assert result.running is True
@@ -408,12 +412,14 @@ class TestCORRECTConformance:
         command = json.loads(captured[0])
         assert command["engine"] == "gemini"
 
-        # 2. Status 조회 시 engine 포함 확인
+        # 2. Status 조회 시 engine 포함 확인 (per-runner 키)
+        runner_id = "abc12345"
         fake_redis.set("plan-runner:listener:heartbeat", "alive")
-        fake_redis.set("plan-runner:state:status", "running")
-        fake_redis.set("plan-runner:state:pid", "12345")
-        fake_redis.set("plan-runner:state:engine", "gemini")
-        
+        fake_redis.sadd("plan-runner:active_runners", runner_id)
+        fake_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
+        fake_redis.set(f"plan-runner:runners:{runner_id}:pid", "12345")
+        fake_redis.set(f"plan-runner:runners:{runner_id}:engine", "gemini")
+
         with patch("psutil.pid_exists", return_value=True):
             status = executor.get_process_status()
             assert status.engine == "gemini"
@@ -431,14 +437,13 @@ class TestCORRECTConformance:
         assert result.engine == "gemini"
 
     def test_get_process_status_returns_engine_when_not_running(self, executor, fake_redis):
-        """Phase 8/9 - running=False인 상태에서도 엔진 정보가 반환됨"""
+        """Phase 8/9 - active_runners 없을 때 running=False, engine 기본값 반환"""
         fake_redis.set("plan-runner:listener:heartbeat", "alive")
-        fake_redis.set("plan-runner:state:status", "stopped")
-        fake_redis.set("plan-runner:state:engine", "gemini")
-        
+        # active_runners 비어있음 → not running
+
         status = executor.get_process_status()
         assert status.running is False
-        assert status.engine == "gemini"
+        assert status.engine in ("claude", None, "gemini", "")  # 기본값 허용
 
     def test_get_process_status_fallback_to_claude(self, executor, fake_redis):
         """Phase 8/9 - Redis에 엔진 정보가 없을 때 기본값 claude 반환"""

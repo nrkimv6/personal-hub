@@ -331,6 +331,9 @@ class ExecutorService:
             except (ValueError, ImportError):
                 pass
 
+        current_cycle_str = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:current_cycle")
+        current_cycle = int(current_cycle_str) if current_cycle_str is not None else None
+
         return RunStatusResponse(
             runner_id=runner_id,
             running=running,
@@ -338,6 +341,7 @@ class ExecutorService:
             pid=int(pid_str) if pid_str else None,
             plan_file=plan_file,
             start_time=datetime.fromisoformat(start_time_str) if start_time_str else None,
+            current_cycle=current_cycle,
             listener_alive=True,
             redis_connected=True,
         )

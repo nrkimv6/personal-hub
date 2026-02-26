@@ -5,6 +5,7 @@
   import { renderNoteLinks } from '../utils/noteLink';
   import { linkifyText } from '../utils/url';
   import { notesApi } from '$lib/api/notes';
+  import { llmApi } from '$lib/api/system';
   import { ArrowLeft, Copy, Archive, Pencil, Pin, Star, ChevronDown, ChevronUp, Check, X } from 'lucide-svelte';
   import TagBadge from './TagBadge.svelte';
 
@@ -123,6 +124,32 @@
     }
   }
 
+  let planRequestLoading = $state(false);
+  let planRequestMessage = $state('');
+
+  async function createPlanRequest() {
+    if (!note.content?.trim()) return;
+    planRequestLoading = true;
+    planRequestMessage = '';
+    try {
+      const dateStr = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
+      await llmApi.create({
+        caller_type: 'test',
+        caller_id: `plan-${dateStr}`,
+        prompt: `/plan ${note.content.trim()}`,
+        queue_name: 'system',
+        provider: 'claude',
+        model: 'opus',
+        cli_options: { cwd: 'D:/work/project/service/wtools' }
+      });
+      planRequestMessage = '✅ 계획서 작성 요청 완료 — /llm 페이지에서 확인';
+    } catch (e) {
+      planRequestMessage = e instanceof Error ? e.message : '요청 실패';
+    } finally {
+      planRequestLoading = false;
+    }
+  }
+
   let contentEl = $state<HTMLElement | null>(null);
   $effect(() => {
     if (contentEl && renderedHtml) {
@@ -226,6 +253,18 @@
           {/if}
         {/if}
       </div>
+    </div>
+
+    <!-- 계획서 작성하기 -->
+    <div class="px-4 pb-2 border-t border-border pt-3">
+      <button
+        class="w-full px-3 py-1.5 text-xs rounded bg-green-50 hover:bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 disabled:opacity-50"
+        disabled={planRequestLoading || !note.content?.trim()}
+        onclick={createPlanRequest}
+      >{planRequestLoading ? '요청 중...' : '계획서 작성하기'}</button>
+      {#if planRequestMessage}
+        <p class="text-xs mt-1 {planRequestMessage.startsWith('✅') ? 'text-green-600' : 'text-red-500'}">{planRequestMessage}</p>
+      {/if}
     </div>
 
     <!-- 하단 액션 -->

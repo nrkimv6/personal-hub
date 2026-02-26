@@ -4,6 +4,8 @@
 	import { onMount } from 'svelte';
 	import { llmApi, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMQueueStats, type LLMCallerGroup, type LLMGroupedListResponse } from '$lib/api';
 	import LLMPerformance from '$lib/components/LLMPerformance.svelte';
+	import { toast } from '$lib/stores/toast';
+	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
 
 	// 상태
 	let requests: LLMRequest[] = [];
@@ -371,6 +373,14 @@
 	}
 
 	async function retryRequest(id: number) {
+		// quota 경고 체크 — 재시도 대상 request의 provider 기준
+		const req = requests.find((r) => r.id === id);
+		const provider = req?.provider || 'claude';
+		const quotaWarn = getQuotaWarning(provider);
+		if (quotaWarn) {
+			toast.warning(quotaWarn);
+		}
+
 		try {
 			await llmApi.retry(id);
 			await fetchData();
@@ -428,6 +438,12 @@
 	}
 
 	async function createRequest() {
+		// quota 경고 체크
+		const quotaWarn = getQuotaWarning(createForm.provider);
+		if (quotaWarn) {
+			toast.warning(quotaWarn);
+		}
+
 		// 프리셋 사용 시 prompt 합성
 		if (selectedPreset.label !== '(직접 입력)') {
 			if (!createForm.userInput.trim()) {
@@ -555,6 +571,7 @@
 
 	onMount(() => {
 		fetchData();
+		fetchQuotaStatus();
 	});
 </script>
 

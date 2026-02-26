@@ -1,6 +1,6 @@
 """Git Repository Pydantic 스키마."""
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Literal
 from pydantic import BaseModel
 
 
@@ -100,6 +100,11 @@ class BatchCommitRequest(BaseModel):
 
 class BatchPushRequest(BaseModel):
     repo_ids: List[int]
+
+
+class GenerateMessageRequest(BaseModel):
+    provider: Literal["claude", "gemini"] = "claude"
+    model: str = ""
 
 
 # ───────────────────────────────────────────
