@@ -318,7 +318,7 @@ class PlanService:
     # 자동 무시 대상 상태 (정확히 일치해야 함)
     _IGNORED_STATUSES = {"보류"}
     # 완료 계열 상태 (아카이브 허용 + 목록 숨김)
-    _DONE_STATUSES = {"구현완료", "완료", "수정 완료", "배포완료", "수정완료", "검토완료"}
+    _DONE_STATUSES = {"구현완료", "완료", "수정 완료", "배포완료", "수정완료"}
 
     def _is_ignored_plan(self, path: Path, status: str, progress: PlanProgressResponse) -> bool:
         """plan이 무시 대상인지 판단"""
