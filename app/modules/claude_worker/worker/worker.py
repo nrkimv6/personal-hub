@@ -1466,7 +1466,7 @@ class LLMWorker:
                 # JSON 파싱 실패지만 raw_response가 있는 경우
                 if "raw_response" in result and result.get("raw_response"):
                     # writing_generate, writing_refine, report의 경우 raw_response만으로도 성공 처리
-                    if request.caller_type in ["writing_generate", "writing_refine", "report"]:
+                    if request.caller_type in ["writing_generate", "writing_refine", "report", "test"]:
                         logger.info(f"JSON 파싱 실패했지만 raw_response 사용: id={request.id}")
 
                         # 빈 result dict로 결과 재구성

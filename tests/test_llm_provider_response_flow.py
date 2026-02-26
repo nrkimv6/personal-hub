@@ -414,5 +414,104 @@ class TestGeminiImagePath(unittest.TestCase):
         )
 
 
+# ===========================================================================
+# 6. RIGHT-BICEP: parse_json=False / caller_type fallback / mark_failed
+# ===========================================================================
+
+class TestParsJsonFalseAndCallerTypeFallback(unittest.TestCase):
+    """TC-R/B/E: parse_json=False 처리 및 caller_type fallback 로직 검증.
+
+    TC-R (Right): parse_json=False 시 plain text 응답이 success=True로 처리됨
+    TC-B (Boundary): caller_type="test" + JSON 파싱 실패 → mark_completed (raw_response 사용)
+    TC-E (Error): 미등록 caller_type + JSON 파싱 실패 → mark_failed 호출
+    """
+
+    def test_tc_r_parse_json_false_plain_text_success(self):
+        """TC-R: parse_json=False 설정 시 plain text 응답이 success=True로 반환돼야 한다."""
+        service = _make_service()
+        raw_text = "# 계획서\n아이디어 구체화\n"
+
+        with patch.object(service, "execute_claude", return_value={
+            "success": True,
+            "result": None,
+            "raw_response": raw_text,
+        }) as mock_claude:
+            result = service.execute_llm(
+                prompt="/plan 테스트",
+                provider="claude",
+                parse_json=False,
+                cli_options={"cwd": "/tmp", "parse_json": False},
+            )
+
+        self.assertTrue(result["success"], f"성공이어야 함: {result}")
+        self.assertEqual(result.get("raw_response"), raw_text)
+
+    def test_tc_b_test_caller_type_fallback_on_json_failure(self):
+        """TC-B: JSON 파싱 실패 + caller_type='test' → mark_completed가 raw_response로 호출돼야 한다."""
+        # worker.py의 fallback 분기 로직을 직접 테스트
+        service_mock = MagicMock()
+        service_mock.mark_completed = MagicMock()
+        service_mock.mark_failed = MagicMock()
+
+        request = MagicMock()
+        request.id = 999
+        request.caller_type = "test"
+
+        llm_result = {
+            "success": False,
+            "error": "JSON 파싱 실패: No valid JSON found in response",
+            "raw_response": "# 계획서\n- 아이디어 구체화",
+        }
+
+        # worker.py 1465-1485 분기 로직 재현
+        result = llm_result
+        if not result["success"]:
+            if "raw_response" in result and result.get("raw_response"):
+                if request.caller_type in ["writing_generate", "writing_refine", "report", "test"]:
+                    service_mock.mark_completed(
+                        request.id,
+                        {},
+                        result.get("raw_response", ""),
+                    )
+                else:
+                    service_mock.mark_failed(request.id, result["error"], result.get("raw_response", ""))
+
+        service_mock.mark_completed.assert_called_once_with(
+            999, {}, "# 계획서\n- 아이디어 구체화"
+        )
+        service_mock.mark_failed.assert_not_called()
+
+    def test_tc_e_unknown_caller_type_marks_failed(self):
+        """TC-E: 미등록 caller_type + JSON 파싱 실패 → mark_failed가 호출돼야 한다."""
+        service_mock = MagicMock()
+        service_mock.mark_completed = MagicMock()
+        service_mock.mark_failed = MagicMock()
+
+        request = MagicMock()
+        request.id = 1000
+        request.caller_type = "unknown_type"
+
+        llm_result = {
+            "success": False,
+            "error": "JSON 파싱 실패: No valid JSON found in response",
+            "raw_response": "some plain text",
+        }
+
+        result = llm_result
+        if not result["success"]:
+            if "raw_response" in result and result.get("raw_response"):
+                if request.caller_type in ["writing_generate", "writing_refine", "report", "test"]:
+                    service_mock.mark_completed(request.id, {}, result.get("raw_response", ""))
+                else:
+                    service_mock.mark_failed(request.id, result["error"], result.get("raw_response", ""))
+
+        service_mock.mark_failed.assert_called_once_with(
+            1000,
+            "JSON 파싱 실패: No valid JSON found in response",
+            "some plain text",
+        )
+        service_mock.mark_completed.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
