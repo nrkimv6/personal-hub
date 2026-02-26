@@ -15,9 +15,10 @@
 		mergeStatus?: string | null;
 		onStop: () => void;
 		onClose: () => void;
+		onBatchPlansChange?: (plans: { name: string; status: 'pending' | 'running' | 'done' }[]) => void;
 	}
 
-	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, onStop, onClose }: Props = $props();
+	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, onStop, onClose, onBatchPlansChange }: Props = $props();
 
 	let elapsed = $state('');
 	let stopping = $state(false);
@@ -172,6 +173,6 @@
 
 	<!-- 로그 뷰어 -->
 	<div class="flex-1 min-h-0">
-		<LogViewer {runnerId} planFile={planFile ?? undefined} />
+		<LogViewer {runnerId} planFile={planFile ?? undefined} {onBatchPlansChange} />
 	</div>
 </div>

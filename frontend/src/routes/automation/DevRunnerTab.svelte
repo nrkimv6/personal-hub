@@ -199,13 +199,29 @@
 					// 모든 runner 종료
 					runStatus = { ...runStatus, running: false };
 				}
-				// runner 탭 running 상태 동기화
+				// runner 탭 running 상태 동기화 + 신규 runner 탭 추가
 				if (runners.length > 0) {
 					const runnerMap = new Map(runners.map(r => [r.runner_id, r]));
 					runnerTabs = runnerTabs.map(tab => {
 						const runner = runnerMap.get(tab.id);
 						return runner ? { ...tab, running: runner.status === 'running' } : { ...tab, running: false };
 					});
+					// SSE로 발견된 신규 runner 탭 추가
+					for (const runner of runners) {
+						if (!runnerTabs.some(t => t.id === runner.runner_id)) {
+							runnerTabs = [...runnerTabs, {
+								id: runner.runner_id,
+								plan_file: runner.plan_file ?? null,
+								engine: null,
+								running: runner.status === 'running',
+								start_time: runner.start_time ?? null,
+							}];
+						}
+					}
+					// activeTabId가 없으면 마지막 탭 선택
+					if (!activeTabId && runnerTabs.length > 0) {
+						activeTabId = runnerTabs[runnerTabs.length - 1].id;
+					}
 				}
 			} catch {
 				// JSON 파싱 오류 무시
