@@ -121,6 +121,16 @@ class UniversalCrawlAnalyzerService:
             content=content,
         )
 
+        # quota pause 경고 로그
+        provider = "claude"
+        paused_until = self._llm_service.get_provider_quota_pause(provider)
+        if paused_until:
+            logger.warning(
+                "[QUOTA_WARN] universal_crawl 요청 — %s 쿼터 정지 중 (재개: %s), 큐에 추가됨",
+                provider,
+                paused_until.isoformat(),
+            )
+
         # LLM 요청 생성
         request = self._llm_service.enqueue(
             caller_type=self.CALLER_TYPE,

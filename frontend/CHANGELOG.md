@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.64.0] - 2026-02-26
+### Added
+- LLM 요청 시 Quota 정지 경고 표시: LLM 관리/글쓰기/수집/이벤트 페이지에서 provider quota pause 중일 때 토스트 경고 표시
+- 백엔드 자동 요청 시 quota pause 경고 로그 출력 (universal_crawl_analyzer, instagram llm_classifier)
+- quota warn 유닛 테스트 추가 (create_request, create_requests_batch 중복 방지)
+
 ## [2.62.0] - 2026-02-26
 ### Added
 - 중복 감지 배치 처리 리팩토링: `_batch_delete_files` + `_merge_metadata` 헬퍼 함수

@@ -5,6 +5,8 @@
 	import { llmApi, type LLMRequest, type LLMStats, type LLMWorkerStatus, type LLMHistoryStats, type LLMCallerGroup, type LLMGroupedListResponse } from '$lib/api';
 	import LLMPerformance from '$lib/components/LLMPerformance.svelte';
 	import { createSelection } from '$lib/utils/selection.svelte';
+	import { toast } from '$lib/stores/toast';
+	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
 
 	// 상태
 	let requests: LLMRequest[] = [];
@@ -346,6 +348,12 @@
 	}
 
 	async function createRequest() {
+		// quota 경고 체크
+		const quotaWarn = getQuotaWarning(createForm.provider);
+		if (quotaWarn) {
+			toast.warning(quotaWarn);
+		}
+
 		if (!createForm.caller_id.trim() || !createForm.prompt.trim()) {
 			createError = '호출자 ID와 프롬프트를 입력해주세요.';
 			return;
@@ -445,6 +453,7 @@
 
 	onMount(() => {
 		fetchData();
+		fetchQuotaStatus();
 	});
 </script>
 
