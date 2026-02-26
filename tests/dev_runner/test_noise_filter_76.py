@@ -50,6 +50,12 @@ def _run_stream(lines: list):
     except Exception:
         pass  # 전역 초기화 실패 무시 (함수만 사용)
 
+    # 이전 테스트에서 오염된 프로세스 상태 초기화 (self-join RuntimeError 방지)
+    if hasattr(mod, '_running_processes'):
+        mod._running_processes.clear()
+    if hasattr(mod, '_stream_threads'):
+        mod._stream_threads.clear()
+
     _stream_output = getattr(mod, "_stream_output", None)
     if _stream_output is None:
         pytest.skip("_stream_output 로드 실패")

@@ -53,7 +53,7 @@ class TestApiPathSecurity:
         """path traversal 공격 차단 (403)"""
         malicious = self._encode(r"D:\work\project\..\..\Windows\System32\config")
         with patch("app.modules.dev_runner.routes.plans.plan_service") as mock_ps:
-            mock_ps.validate_external_path.return_value = False
+            mock_ps.validate_path.return_value = False
             resp = client.get(f"/api/v1/plan-runner/plans/{malicious}")
         assert resp.status_code == 403
 
@@ -88,7 +88,7 @@ class TestApiPathSecurity:
         """items 엔드포인트도 path traversal 차단"""
         malicious = self._encode(r"C:\Windows\System32\drivers\etc\hosts")
         with patch("app.modules.dev_runner.routes.plans.plan_service") as mock_ps:
-            mock_ps.validate_external_path.return_value = False
+            mock_ps.validate_path.return_value = False
             resp = client.get(f"/api/v1/plan-runner/plans/{malicious}/items")
         assert resp.status_code == 403
 
@@ -103,11 +103,11 @@ class TestApiPathSecurity:
         assert resp.status_code == 400
 
     def test_empty_string_path_blocked(self, client):
-        """빈 문자열 경로 → validate_external_path가 거부 → 403"""
+        """빈 문자열 경로 → validate_path가 거부 → 403"""
         # base64("") == "" → URL이 /plans/와 동일해 list 엔드포인트 매칭
         # 대신 공백 경로로 테스트
         encoded = self._encode(" ")
         with patch("app.modules.dev_runner.routes.plans.plan_service") as mock_ps:
-            mock_ps.validate_external_path.return_value = False
+            mock_ps.validate_path.return_value = False
             resp = client.get(f"/api/v1/plan-runner/plans/{encoded}")
         assert resp.status_code == 403

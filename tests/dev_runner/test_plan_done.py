@@ -155,45 +155,49 @@ class TestUpdatePlanHeaders:
 class TestArchivePlan:
     """RIGHT: 아카이브 이동 + 원본 삭제"""
 
-    def test_archive_file_created(self, tmp_path, today):
+    @pytest.mark.asyncio
+    async def test_archive_file_created(self, tmp_path, today, svc):
         plan_dir = tmp_path / "docs" / "plan"
         plan_dir.mkdir(parents=True)
         plan_file = plan_dir / "2026-01-01-test.md"
         plan_file.write_text("# 테스트\n> 상태: 구현완료\n", encoding="utf-8")
 
-        archive_path = PlanService._archive_plan(str(plan_file), plan_file.read_text(encoding="utf-8"))
+        archive_path = await svc._archive_plan(str(plan_file), plan_file.read_text(encoding="utf-8"))
 
         assert archive_path.exists()
         assert archive_path.parent.name == "archive"
 
-    def test_original_deleted(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_original_deleted(self, tmp_path, svc):
         plan_dir = tmp_path / "docs" / "plan"
         plan_dir.mkdir(parents=True)
         plan_file = plan_dir / "2026-01-01-test.md"
         plan_file.write_text("# 테스트\n", encoding="utf-8")
 
-        PlanService._archive_plan(str(plan_file), plan_file.read_text(encoding="utf-8"))
+        await svc._archive_plan(str(plan_file), plan_file.read_text(encoding="utf-8"))
 
         assert not plan_file.exists()
 
-    def test_completion_date_inserted(self, tmp_path, today):
+    @pytest.mark.asyncio
+    async def test_completion_date_inserted(self, tmp_path, today, svc):
         plan_dir = tmp_path / "docs" / "plan"
         plan_dir.mkdir(parents=True)
         plan_file = plan_dir / "plan.md"
         plan_file.write_text("# 테스트\n> 상태: 구현완료\n", encoding="utf-8")
 
-        archive_path = PlanService._archive_plan(str(plan_file), plan_file.read_text(encoding="utf-8"))
+        archive_path = await svc._archive_plan(str(plan_file), plan_file.read_text(encoding="utf-8"))
 
         archived_content = archive_path.read_text(encoding="utf-8")
         assert f"> 완료일: {today}" in archived_content
 
-    def test_archive_dir_auto_created(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_archive_dir_auto_created(self, tmp_path, svc):
         plan_dir = tmp_path / "docs" / "plan"
         plan_dir.mkdir(parents=True)
         plan_file = plan_dir / "plan.md"
         plan_file.write_text("# 테스트\n", encoding="utf-8")
 
-        archive_path = PlanService._archive_plan(str(plan_file), plan_file.read_text(encoding="utf-8"))
+        await svc._archive_plan(str(plan_file), plan_file.read_text(encoding="utf-8"))
 
         assert (tmp_path / "docs" / "archive").exists()
 
