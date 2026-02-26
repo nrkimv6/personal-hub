@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { devRunnerLogApi } from '$lib/api';
 
@@ -29,6 +29,8 @@
 
 	let lines = $state<ParsedLine[]>([]);
 	let expandedNoiseIndices = $state<number[]>([]);
+        let showNoiseIndicator = $state(false);
+        let noiseTimer: ReturnType<typeof setTimeout> | null = null;
 	let connected = $state<'connected' | 'disconnected'>('disconnected');
 	let autoScroll = $state(true);
 	let paused = $state(false);
@@ -108,7 +110,16 @@
 
 		const parsed = parseLine(text, isStale);
 
-		// BATCH 마커 감지 → 전체실행 파일 리스트 추적
+                if (parsed.tag === 'NOISE' && !isStale) {
+                        showNoiseIndicator = true;
+                        if (noiseTimer) { clearTimeout(noiseTimer); }
+                        noiseTimer = setTimeout(() => { showNoiseIndicator = false; noiseTimer = null; }, 2000);
+                } else if (!isStale) {
+                        showNoiseIndicator = false;
+                        if (noiseTimer) { clearTimeout(noiseTimer); noiseTimer = null; }
+                }
+
+                // BATCH 마커 감지 → 전체실행 파일 리스트 추적
 		if (parsed.tag === 'BATCH' && !isStale) {
 			const listMatch = parsed.message.match(/^PLAN_LIST\s+(.+)$/);
 			if (listMatch) {
@@ -207,6 +218,7 @@
 
 	async function connectSSE() {
 		if (eventSource) eventSource.close();
+                        if (noiseTimer) clearTimeout(noiseTimer);
 
 		// SSE 연결 전 status API로 실행 상태 + Redis 상태 확인
 		await fetchStatus();
@@ -273,6 +285,7 @@
 	onDestroy(() => {
 		if (eventSource) {
 			eventSource.close();
+                        if (noiseTimer) clearTimeout(noiseTimer);
 			eventSource = null;
 		}
 	});
@@ -410,3 +423,6 @@
 		{/if}
 	</div>
 </div>
+
+
+
