@@ -55,6 +55,8 @@
 	// 모달
 	let selectedRequest: LLMRequest | null = null;
 	let showModal = false;
+	let editCwd = $state('');
+	let editCwdSaving = $state(false);
 	let quotaStatus: QuotaStatusMap = {};
 	let countdownSeconds: number = 0;
 	let countdownTimer: ReturnType<typeof setInterval> | null = null;
@@ -499,11 +501,13 @@
 	async function openModal(request: LLMRequest) {
 		selectedRequest = request;
 		showModal = true;
+		editCwd = (request.cli_options?.cwd as string) ?? '';
 		// 상세 조회 API로 raw_response 포함된 데이터 로드
 		try {
 			const detail = await llmApi.get(request.id);
 			if (showModal && selectedRequest?.id === request.id) {
 				selectedRequest = detail;
+				editCwd = (detail.cli_options?.cwd as string) ?? editCwd;
 			}
 		} catch {
 			// 실패해도 기본 데이터로 모달 유지
@@ -530,6 +534,26 @@
 		quotaStatus = {};
 		countdownSeconds = 0;
 		if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+	}
+
+	async function updateCwd(andRetry = false) {
+		if (!selectedRequest) return;
+		editCwdSaving = true;
+		try {
+			const updated = await llmApi.update(selectedRequest.id, {
+				cli_options: { ...(selectedRequest.cli_options ?? {}), cwd: editCwd }
+			});
+			selectedRequest = updated;
+			toast.success('cwd 저장 완료');
+			if (andRetry) {
+				await retryRequest(selectedRequest.id);
+				closeModal();
+			}
+		} catch (e) {
+			toast.error(e instanceof Error ? e.message : '저장 실패');
+		} finally {
+			editCwdSaving = false;
+		}
 	}
 
 	function formatWaitTime(seconds: number): string {
@@ -1290,6 +1314,37 @@
 							<span class="text-muted-foreground text-sm">⏳ 처리 대기 중</span>
 						</div>
 					{/if}
+				{/if}
+
+				{#if selectedRequest.status === 'pending' || selectedRequest.status === 'failed'}
+					<div class="mb-4 p-3 bg-muted rounded-lg">
+						<div class="text-sm font-medium text-foreground mb-1">실행 경로 (cwd)</div>
+						<div class="flex gap-2">
+							<input
+								type="text"
+								bind:value={editCwd}
+								class="input input-sm flex-1 font-mono text-xs"
+								placeholder="D:/work/project/..."
+							/>
+							{#if selectedRequest.status === 'failed'}
+								<button
+									onclick={() => updateCwd(true)}
+									disabled={editCwdSaving}
+									class="btn btn-primary btn-sm whitespace-nowrap"
+								>
+									{editCwdSaving ? '저장중...' : '저장 후 재시도'}
+								</button>
+							{:else}
+								<button
+									onclick={() => updateCwd(false)}
+									disabled={editCwdSaving}
+									class="btn btn-secondary btn-sm"
+								>
+									{editCwdSaving ? '저장중...' : '저장'}
+								</button>
+							{/if}
+						</div>
+					</div>
 				{/if}
 
 				{#if selectedRequest.error_message}

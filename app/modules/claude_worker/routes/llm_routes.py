@@ -46,9 +46,16 @@ class LLMRequestResponse(BaseModel):
     result: Optional[dict] = None
     error_message: Optional[str] = None
     retry_count: int = 0
+    prompt: Optional[str] = None
+    cli_options: Optional[dict] = None
 
     class Config:
         from_attributes = True
+
+
+class LLMRequestUpdate(BaseModel):
+    cli_options: Optional[dict] = None
+    prompt: Optional[str] = None
 
 
 class LLMRequestDetailResponse(LLMRequestResponse):
@@ -125,6 +132,8 @@ def _to_response(request, include_raw: bool = False) -> LLMRequestResponse:
         result=result,
         error_message=request.error_message,
         retry_count=request.retry_count,
+        prompt=request.prompt,
+        cli_options=json.loads(request.cli_options) if request.cli_options else None,
     )
 
     if include_raw:
@@ -230,6 +239,25 @@ def get_request_by_id(
     if not request:
         raise HTTPException(status_code=404, detail="Request not found")
     return _to_response(request, include_raw=True)
+
+
+@router.patch("/requests/{request_id}", response_model=LLMRequestDetailResponse)
+def update_request(
+    request_id: int,
+    data: LLMRequestUpdate,
+    db: Session = Depends(get_db),
+):
+    """LLM 요청 수정 (pending/failed 상태만 허용)."""
+    service = LLMService(db)
+    request = service.get_request_by_id(request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if request.status not in ("pending", "failed"):
+        raise HTTPException(status_code=400, detail=f"Cannot update: status is {request.status}")
+    updated = service.update_request(request_id, cli_options=data.cli_options, prompt=data.prompt)
+    if not updated:
+        raise HTTPException(status_code=400, detail="Update failed")
+    return _to_response(updated, include_raw=True)
 
 
 @router.get("/requests/by-caller/{caller_type}/{caller_id}", response_model=Optional[LLMRequestResponse])

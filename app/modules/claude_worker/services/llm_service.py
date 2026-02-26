@@ -1149,6 +1149,20 @@ class LLMService:
         """단일 요청 조회."""
         return self.db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
 
+    def update_request(self, request_id: int, cli_options=None, prompt=None):
+        """pending/failed 요청의 cli_options 또는 prompt 갱신."""
+        import json as _json
+        request = self.db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+        if not request or request.status not in ("pending", "failed"):
+            return None
+        if cli_options is not None:
+            request.cli_options = _json.dumps(cli_options)
+        if prompt is not None:
+            request.prompt = prompt
+        self.db.commit()
+        self.db.refresh(request)
+        return request
+
     def cancel_request(self, request_id: int) -> bool:
         """pending 요청 취소.
 

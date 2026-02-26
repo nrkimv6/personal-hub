@@ -374,6 +374,8 @@ export interface LLMRequest {
   error_message?: string;
   retry_count: number;
   raw_response?: string;
+  prompt?: string;
+  cli_options?: Record<string, unknown>;
 }
 
 export interface LLMQueueStats {
@@ -588,6 +590,13 @@ export const llmApi = {
   }) =>
     request<LLMRequest>('/llm/requests', {
       method: 'POST',
+      body: JSON.stringify(data)
+    }),
+
+  // 요청 수정 (pending/failed 상태만)
+  update: (id: number, data: { cli_options?: Record<string, unknown>; prompt?: string }) =>
+    request<LLMRequest>(`/llm/requests/${id}`, {
+      method: 'PATCH',
       body: JSON.stringify(data)
     }),
 
