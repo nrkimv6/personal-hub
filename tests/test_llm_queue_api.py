@@ -140,6 +140,71 @@ class TestListRequestsQueueFilter:
         assert data["total"] >= 2
 
 
+class TestCliOptionsPassthrough:
+    """cli_options 파라미터 passthrough 및 계획서 작성 시나리오 테스트."""
+
+    def test_create_llm_request_with_cli_options(self, client, test_db_session):
+        """Right: cli_options 포함 요청 → 200, cli_options DB 저장 확인."""
+        import json as _json
+        response = client.post("/api/v1/llm/requests", json={
+            "caller_type": "test",
+            "caller_id": "cli-opt-1",
+            "prompt": "hello",
+            "queue_name": "system",
+            "cli_options": {"cwd": "D:/work/project/service/wtools"},
+        })
+        assert response.status_code in (200, 201)
+        data = response.json()
+        assert data["caller_id"] == "cli-opt-1"
+
+        # DB에서 cli_options 필드 확인
+        req = test_db_session.query(LLMRequest).filter_by(caller_id="cli-opt-1").first()
+        assert req is not None
+        assert req.cli_options is not None
+        stored = _json.loads(req.cli_options)
+        assert stored["cwd"] == "D:/work/project/service/wtools"
+
+    def test_create_llm_request_without_cli_options(self, client, test_db_session):
+        """Boundary: cli_options 생략 → 기존 동작 회귀 없음."""
+        response = client.post("/api/v1/llm/requests", json={
+            "caller_type": "test",
+            "caller_id": "cli-opt-none-1",
+            "prompt": "hello no cli",
+        })
+        assert response.status_code in (200, 201)
+
+        req = test_db_session.query(LLMRequest).filter_by(caller_id="cli-opt-none-1").first()
+        assert req is not None
+        assert req.cli_options is None
+
+    def test_plan_preset_conformance(self, client, test_db_session):
+        """Conformance: 계획서 작성 프리셋 전체 파라미터 통합 검증."""
+        import json as _json
+        date_str = "20260225120000"
+        response = client.post("/api/v1/llm/requests", json={
+            "caller_type": "test",
+            "caller_id": f"plan-{date_str}",
+            "prompt": f"/plan 메모 내용 테스트",
+            "queue_name": "system",
+            "provider": "claude",
+            "model": "opus",
+            "cli_options": {"cwd": "D:/work/project/service/wtools"},
+        })
+        assert response.status_code in (200, 201)
+        data = response.json()
+        assert data["caller_type"] == "test"
+        assert data["caller_id"] == f"plan-{date_str}"
+        assert data["queue_name"] == "system"
+
+        req = test_db_session.query(LLMRequest).filter_by(caller_id=f"plan-{date_str}").first()
+        assert req is not None
+        assert req.provider == "claude"
+        assert req.model == "opus"
+        stored = _json.loads(req.cli_options)
+        assert stored["cwd"] == "D:/work/project/service/wtools"
+        assert req.prompt.startswith("/plan")
+
+
 class TestQueueStats:
     """GET /api/v1/llm/queue-stats — 큐 통계 엔드포인트 테스트."""
 
