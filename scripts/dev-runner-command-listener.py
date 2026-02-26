@@ -168,7 +168,7 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
             # 4. 직전 억제 요약 먼저 publish
             if suppressed_count > 0:
                 try:
-                    redis_client.publish(LOG_CHANNEL, f"[{suppressed_count} noise lines suppressed]")
+                    redis_client.publish(LOG_CHANNEL, f"[NOISE] {suppressed_count} lines suppressed")
                 except redis.ConnectionError:
                     pass
                 suppressed_count = 0
@@ -182,7 +182,7 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
         # 루프 종료 후 잔여 억제 요약
         if suppressed_count > 0:
             try:
-                redis_client.publish(LOG_CHANNEL, f"[{suppressed_count} noise lines suppressed]")
+                redis_client.publish(LOG_CHANNEL, f"[NOISE] {suppressed_count} lines suppressed")
             except redis.ConnectionError:
                 pass
 

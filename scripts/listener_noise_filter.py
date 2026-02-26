@@ -40,7 +40,7 @@ _CONTAINS_NOISE = (
 # 하위 호환: 기존 코드가 NOISE_BLOCK_MARKERS를 참조하는 경우
 NOISE_BLOCK_MARKERS = _BLOCK_START + _SINGLE_NOISE
 
-_STDERR_PREFIX_RE = re.compile(r'^\s*\[\d{2}:\d{2}:\d{2}\]\s*\[STDERR\]')
+_STDERR_PREFIX_RE = re.compile(r'^\s*\[?\d{2}:\d{2}:\d{2}\]?\s*\[?STDERR\]?\s*')
 
 
 def _extract_content(line: str) -> str:
