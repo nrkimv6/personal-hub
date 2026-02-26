@@ -358,9 +358,13 @@
 						{#if runnerTabs.length > 0}
 							<div class="flex items-center gap-1 bg-white border rounded-lg px-2 py-1 overflow-x-auto">
 								{#each runnerTabs as tab (tab.id)}
-									<button
-										class="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono whitespace-nowrap transition-colors {activeTabId === tab.id ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-gray-600 hover:bg-gray-100'}"
+									<!-- svelte-ignore a11y_interactive_supports_focus -->
+									<div
+										class="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono whitespace-nowrap transition-colors cursor-pointer {activeTabId === tab.id ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-gray-600 hover:bg-gray-100'}"
+										role="tab"
+										aria-selected={activeTabId === tab.id}
 										onclick={() => { activeTabId = tab.id; }}
+										onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { activeTabId = tab.id; } }}
 									>
 										<span>{tab.running ? '⏳' : '✅'}</span>
 										<span class="max-w-[120px] truncate">{tab.plan_file ? tab.plan_file.split(/[\\/]/).pop() : '전체 실행'}</span>
@@ -369,7 +373,7 @@
 											onclick={(e) => { e.stopPropagation(); handleCloseTab(tab.id); }}
 											title="탭 닫기"
 										>×</button>
-									</button>
+									</div>
 								{/each}
 							</div>
 						{/if}
