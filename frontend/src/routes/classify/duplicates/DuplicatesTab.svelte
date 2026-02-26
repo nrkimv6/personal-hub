@@ -422,13 +422,16 @@
 	async function openLocal(path?: string, folder?: string, fileId?: number) {
 		try {
 			const body = fileId !== undefined ? { file_id: fileId } : { path, folder };
-			await fetchWithTimeout('/api/ic/files/open-local', {
+			const res = await fetchWithTimeout('/api/ic/files/open-local', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(body)
 			});
+			if (!res.ok) {
+				toast.error('폴더 열기 실패');
+			}
 		} catch {
-			// ignore
+			toast.error('폴더 열기 실패');
 		}
 	}
 
@@ -1463,7 +1466,7 @@
 									</div>
 									<button
 										class="flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-accent transition-colors"
-										onclick={(e) => { e.preventDefault(); openLocal(undefined, folder.folder_path); }}
+										onclick={(e) => { e.preventDefault(); e.stopPropagation(); openLocal(undefined, folder.folder_path); }}
 									>
 										<ExternalLink class="size-3" />
 										폴더 열기
