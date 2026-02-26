@@ -145,9 +145,11 @@ class TestStartPlanRunner:
             "engine": "claude",
         }
 
+        fake_worktree = Path("/tmp/worktrees/abc12345")
         with patch.object(Path, "mkdir"), \
              patch("builtins.open", MagicMock()), \
              patch("os.environ.copy", return_value={}), \
+             patch.object(listener.WorktreeManager, "create", return_value=fake_worktree), \
              patch("threading.Thread") as mock_thread_cls:
             mock_thread_inst = MagicMock()
             mock_thread_cls.return_value = mock_thread_inst
@@ -166,7 +168,9 @@ class TestStartPlanRunner:
         mock_proc.poll.return_value = None  # 실행 중
         listener._running_processes["dup11111"] = mock_proc
 
-        with patch.object(listener, "_is_pid_alive", return_value=True):
+        fake_worktree = Path("/tmp/worktrees/dup11111")
+        with patch.object(listener, "_is_pid_alive", return_value=True), \
+             patch.object(listener.WorktreeManager, "create", return_value=fake_worktree):
             r = _make_redis_mock()
             command = {
                 "action": "run",

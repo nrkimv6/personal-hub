@@ -94,7 +94,10 @@ class TestStartDevRunner:
             captured.extend(values)
             return await original_lpush(key, *values)
 
-        with patch.object(executor.async_redis, 'lpush', side_effect=capture_lpush):
+        with patch("app.modules.dev_runner.services.plan_service.plan_service") as mock_ps, \
+             patch.object(executor.async_redis, 'lpush', side_effect=capture_lpush):
+            mock_ps.get_extra_plan_dirs.return_value = []
+            mock_ps.get_ignored_plan_paths.return_value = []
             await executor.start_dev_runner(run_request_parallel)
 
         command = json.loads(captured[0])

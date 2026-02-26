@@ -40,6 +40,7 @@ def _make_async_redis_mock(**key_values):
     r.ping = AsyncMock()
     r.get = AsyncMock(side_effect=lambda k: key_values.get(k))
     r.lpush = AsyncMock()
+    r.scard = AsyncMock(return_value=0)
     r.brpop = AsyncMock(return_value=(b"key", json.dumps({"success": True, "message": "ok"}).encode()))
     return r
 

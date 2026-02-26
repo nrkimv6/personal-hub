@@ -71,63 +71,80 @@ def reset_globals(listener_mod):
     listener_mod._stream_threads.clear()
 
 
+@pytest.fixture
+def mock_worktree(listener_mod, tmp_path):
+    """WorktreeManager.create mock — start_plan_runner 테스트용"""
+    worktree_path = tmp_path / "worktree"
+    worktree_path.mkdir()
+    with patch.object(listener_mod.WorktreeManager, 'create', return_value=worktree_path):
+        yield worktree_path
+
+
 # ========== TestStartPlanRunner ==========
 
 class TestStartPlanRunner:
 
-    def test_start_creates_subprocess(self, listener_mod, fr, mock_popen, tmp_path):
+    def test_start_creates_subprocess(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
         """Popen 호출 인수 검증"""
         command = {"action": "run", "runner_id": RUNNER_ID, "plan_file": "common/docs/plan/test.md"}
 
-        with patch.object(listener_mod, 'LOG_DIR', tmp_path):
-            with patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen) as mp:
-                result = listener_mod.start_plan_runner(command, fr)
+        with patch.object(listener_mod, 'LOG_DIR', tmp_path), \
+             patch.object(listener_mod.threading, 'Thread') as mock_thread, \
+             patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen) as mp:
+            mock_thread.return_value = MagicMock()
+            result = listener_mod.start_plan_runner(command, fr)
 
-            assert mp.call_count == 1
-            cmd = mp.call_args[0][0]
-            assert "run" in cmd
-            assert "--plan-file" in cmd
-            assert "common/docs/plan/test.md" in cmd
-            assert result["success"] is True
-            assert result["pid"] == 12345
+        assert mp.call_count == 1
+        cmd = mp.call_args[0][0]
+        assert "run" in cmd
+        assert "--plan-file" in cmd
+        assert "common/docs/plan/test.md" in cmd
+        assert result["success"] is True
+        assert result["pid"] == 12345
 
-    def test_start_parallel_no_plan_file(self, listener_mod, fr, mock_popen, tmp_path):
+    def test_start_parallel_no_plan_file(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
         """parallel 모드: --plan-file 미포함"""
         command = {"action": "run", "runner_id": RUNNER_ID, "parallel": True}
 
         with patch.object(listener_mod, 'LOG_DIR', tmp_path), \
+             patch.object(listener_mod.threading, 'Thread') as mock_thread, \
              patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen) as mp:
+            mock_thread.return_value = MagicMock()
             result = listener_mod.start_plan_runner(command, fr)
 
         cmd = mp.call_args[0][0]
         assert "--plan-file" not in cmd
         assert "--parallel" in cmd
 
-    def test_start_sets_redis_state(self, listener_mod, fr, mock_popen, tmp_path):
+    def test_start_sets_redis_state(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
         """Redis per-runner 상태 저장 확인"""
         RKP = listener_mod.RUNNER_KEY_PREFIX
         command = {"action": "run", "runner_id": RUNNER_ID, "plan_file": "test.md"}
 
         with patch.object(listener_mod, 'LOG_DIR', tmp_path), \
+             patch.object(listener_mod.threading, 'Thread') as mock_thread, \
              patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen):
+            mock_thread.return_value = MagicMock()
             listener_mod.start_plan_runner(command, fr)
 
         assert fr.get(f"{RKP}:{RUNNER_ID}:status") == "running"
         assert fr.get(f"{RKP}:{RUNNER_ID}:pid") == "12345"
         assert fr.get(f"{RKP}:{RUNNER_ID}:plan_file") == "test.md"
 
-    def test_start_plan_file_none_saves_ALL(self, listener_mod, fr, mock_popen, tmp_path):
+    def test_start_plan_file_none_saves_ALL(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
         """plan_file=None → Redis에 'ALL' 저장"""
         RKP = listener_mod.RUNNER_KEY_PREFIX
         command = {"action": "run", "runner_id": RUNNER_ID, "parallel": True}
 
         with patch.object(listener_mod, 'LOG_DIR', tmp_path), \
+             patch.object(listener_mod.threading, 'Thread') as mock_thread, \
              patch.object(listener_mod.subprocess, 'Popen', return_value=mock_popen):
+            mock_thread.return_value = MagicMock()
             listener_mod.start_plan_runner(command, fr)
 
         assert fr.get(f"{RKP}:{RUNNER_ID}:plan_file") == "ALL"
 
-    def test_start_already_running_returns_error(self, listener_mod, fr, mock_popen):
+    def test_start_already_running_returns_error(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
         """같은 runner_id로 이미 실행 중이면 에러 (_is_pid_alive mocked)"""
         listener_mod._running_processes[RUNNER_ID] = mock_popen  # poll() returns None = running
 
