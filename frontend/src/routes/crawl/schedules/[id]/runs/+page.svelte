@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import { crawlApi } from '$lib/api';
 	import type { CrawlSchedule, CrawlScheduleRun, CrawlRunStats, RunPost } from '$lib/types';
 
@@ -68,6 +69,7 @@
 	function handleFilterChange() {
 		currentPage = 1;
 		fetchRuns();
+		syncUrlParams();
 	}
 
 	function formatDateTime(isoString: string | null): string {
@@ -152,7 +154,28 @@
 		runPosts = [];
 	}
 
+	function getUrlParams() {
+		const params = new URLSearchParams(window.location.search);
+		return {
+			status: params.get('status') ?? '',
+			page: parseInt(params.get('page') ?? '1', 10) || 1
+		};
+	}
+
+	function syncUrlParams() {
+		const params = new URLSearchParams(window.location.search);
+		if (status) params.set('status', status);
+		else params.delete('status');
+		if (currentPage > 1) params.set('page', String(currentPage));
+		else params.delete('page');
+		const newUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
+		goto(newUrl, { replaceState: true, noScroll: true, keepFocus: true });
+	}
+
 	onMount(() => {
+		const urlParams = getUrlParams();
+		status = urlParams.status;
+		currentPage = urlParams.page;
 		fetchSchedule();
 		fetchRuns();
 		fetchStats();
@@ -298,7 +321,7 @@
 		{#if totalPages > 1}
 			<div class="flex justify-center items-center gap-2 mt-6">
 				<button
-					onclick={() => { currentPage = Math.max(1, currentPage - 1); fetchRuns(); }}
+					onclick={() => { currentPage = Math.max(1, currentPage - 1); fetchRuns(); syncUrlParams(); }}
 					disabled={currentPage === 1}
 					class="btn btn-secondary btn-sm"
 				>
@@ -308,7 +331,7 @@
 					{currentPage} / {totalPages}
 				</span>
 				<button
-					onclick={() => { currentPage = Math.min(totalPages, currentPage + 1); fetchRuns(); }}
+					onclick={() => { currentPage = Math.min(totalPages, currentPage + 1); fetchRuns(); syncUrlParams(); }}
 					disabled={currentPage === totalPages}
 					class="btn btn-secondary btn-sm"
 				>

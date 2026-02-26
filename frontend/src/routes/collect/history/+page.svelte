@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { collectApi, type CrawlHistoryItem, type CrawlHistoryFilters } from '$lib/api';
 	import { Button } from '$lib/components/ui';
 
@@ -54,9 +55,30 @@
 		}
 	}
 
+	function getUrlParams() {
+		const params = new URLSearchParams(window.location.search);
+		return {
+			sourceType: params.get('sourceType') ?? '',
+			status: params.get('status') ?? '',
+			period: params.get('period') ?? 'week',
+			page: parseInt(params.get('page') ?? '1', 10) || 1
+		};
+	}
+
+	function syncUrlParams() {
+		const params = new URLSearchParams();
+		if (sourceType) params.set('sourceType', sourceType);
+		if (status) params.set('status', status);
+		if (period && period !== 'week') params.set('period', period);
+		if (page > 1) params.set('page', String(page));
+		const newUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
+		goto(newUrl, { replaceState: true, noScroll: true, keepFocus: true });
+	}
+
 	function handleFilterChange() {
 		page = 1;
 		fetchHistory();
+		syncUrlParams();
 	}
 
 	function formatDateTime(isoString: string | null): string {
@@ -173,6 +195,11 @@
 	}
 
 	onMount(() => {
+		const urlParams = getUrlParams();
+		sourceType = urlParams.sourceType;
+		status = urlParams.status;
+		period = urlParams.period;
+		page = urlParams.page;
 		fetchHistory();
 	});
 
@@ -360,6 +387,7 @@
 					on:click={() => {
 						page = Math.max(1, page - 1);
 						fetchHistory();
+						syncUrlParams();
 					}}
 					disabled={page === 1}
 				>
@@ -374,6 +402,7 @@
 					on:click={() => {
 						page = Math.min(totalPages, page + 1);
 						fetchHistory();
+						syncUrlParams();
 					}}
 					disabled={page === totalPages}
 				>

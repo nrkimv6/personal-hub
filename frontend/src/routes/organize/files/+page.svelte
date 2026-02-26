@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import { Search, ChevronLeft, ChevronRight } from 'lucide-svelte';
 
@@ -64,12 +65,40 @@
 		return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 	}
 
+	function getUrlParams() {
+		const params = new URLSearchParams(window.location.search);
+		return {
+			fileGroup: params.get('fileGroup') ?? '',
+			status: params.get('status') ?? '',
+			search: params.get('search') ?? '',
+			page: parseInt(params.get('page') ?? '1', 10) || 1
+		};
+	}
+
+	function syncUrlParams() {
+		const params = new URLSearchParams();
+		if (fileGroup) params.set('fileGroup', fileGroup);
+		if (status) params.set('status', status);
+		if (search) params.set('search', search);
+		if (page > 1) params.set('page', String(page));
+		const newUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
+		goto(newUrl, { replaceState: true, noScroll: true, keepFocus: true });
+	}
+
 	function onSearch() {
 		page = 1;
 		fetchFiles();
+		syncUrlParams();
 	}
 
-	onMount(() => fetchFiles());
+	onMount(() => {
+		const urlParams = getUrlParams();
+		fileGroup = urlParams.fileGroup;
+		status = urlParams.status;
+		search = urlParams.search;
+		page = urlParams.page;
+		fetchFiles();
+	});
 </script>
 
 <div class="space-y-4">
@@ -81,7 +110,7 @@
 		<div class="flex gap-1 rounded-lg border border-border bg-muted p-1">
 			{#each FILE_GROUP_OPTIONS as opt}
 				<button
-					onclick={() => { fileGroup = opt.value; page = 1; fetchFiles(); }}
+					onclick={() => { fileGroup = opt.value; page = 1; fetchFiles(); syncUrlParams(); }}
 					class="rounded px-3 py-1 text-xs font-medium transition-all {fileGroup === opt.value
 						? 'bg-card text-foreground shadow-sm'
 						: 'text-muted-foreground hover:text-foreground'}"
@@ -94,7 +123,7 @@
 		<!-- 상태 필터 -->
 		<select
 			bind:value={status}
-			onchange={() => { page = 1; fetchFiles(); }}
+			onchange={() => { page = 1; fetchFiles(); syncUrlParams(); }}
 			class="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
 		>
 			{#each STATUS_OPTIONS as opt}
@@ -167,7 +196,7 @@
 			<span>총 {result.total.toLocaleString()}개</span>
 			<div class="flex items-center gap-2">
 				<button
-					onclick={() => { page--; fetchFiles(); }}
+					onclick={() => { page--; fetchFiles(); syncUrlParams(); }}
 					disabled={page <= 1}
 					class="flex items-center rounded-md border border-border px-2 py-1 hover:bg-accent disabled:opacity-40"
 				>
@@ -175,7 +204,7 @@
 				</button>
 				<span>{page} / {result.total_pages}</span>
 				<button
-					onclick={() => { page++; fetchFiles(); }}
+					onclick={() => { page++; fetchFiles(); syncUrlParams(); }}
 					disabled={page >= result.total_pages}
 					class="flex items-center rounded-md border border-border px-2 py-1 hover:bg-accent disabled:opacity-40"
 				>
