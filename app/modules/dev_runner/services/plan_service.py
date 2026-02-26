@@ -348,7 +348,8 @@ class PlanService:
                 content = f.read()
 
             content = self._remove_code_blocks(content)
-            checkbox_pattern = r"^(?:\d+\.|-)\s*\[([ x→])\]"
+            # 멀티레벨 체크박스 지원: "- [x]", "  - [x]", "1. - [x]" 모두 인식
+            checkbox_pattern = r"^[ \t]*(?:\d+\.\s+)?[-*]\s*\[([ x→])\]"
             matches = re.findall(checkbox_pattern, content, re.MULTILINE)
 
             total = len(matches)
@@ -544,7 +545,8 @@ class PlanService:
     def _extract_pending_checkboxes(content: str) -> List[str]:
         """문서 전체에서 미완료 체크박스 텍스트 추출 (코드블록 제외)"""
         cleaned = PlanService._remove_code_blocks(content)
-        matches = re.findall(r'^[-*]\s*\[ \]\s*(.+)$', cleaned, re.MULTILINE)
+        # 멀티레벨 체크박스 지원: "- [ ]", "  - [ ]", "1. - [ ]" 모두 인식
+        matches = re.findall(r'^[ \t]*(?:\d+\.\s+)?[-*]\s*\[ \]\s*(.+)$', cleaned, re.MULTILINE)
         return [PlanService._strip_markdown_inline(m) for m in matches]
 
     @staticmethod
@@ -882,6 +884,12 @@ class PlanService:
 
         detail = self.parse_plan_items(plan_path)
 
+        # 체크박스가 없는 문서(분석서, 보고서 등): 아카이브 허용
+        if not detail.phases or all(len(p.items) == 0 for p in detail.phases):
+            progress = self.get_plan_progress(plan_path)
+            if progress.total == 0:
+                return VerifyResult(total=0, verified=0, unverified_items=[], percent=100.0, can_done=True)
+
         total = 0
         verified = 0
         unverified_items: list[str] = []
@@ -918,9 +926,12 @@ class PlanService:
         )
 
     def _can_done(self, plan: PlanFileResponse) -> bool:
-        """plan이 done 처리 가능한지 판단 — 체크박스 전체 완료 OR 상태 헤더 완료 계열"""
+        """plan이 done 처리 가능한지 판단 — 체크박스 전체 완료 OR 상태 헤더 완료 계열 OR 체크박스 없음"""
         if "archive" in plan.path:
             return False
+        # 체크박스 없는 문서(분석서, 보고서 등): 아카이브 허용
+        if plan.progress.total == 0:
+            return True
         if plan.progress.total > 0 and plan.progress.done == plan.progress.total:
             return True
         if plan.status in self._DONE_STATUSES:
