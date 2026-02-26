@@ -13,6 +13,8 @@ import subprocess
 import time
 from typing import List, Optional
 
+from sqlalchemy.orm import Session
+
 from app.modules.file_search.schemas import (
     BrowseResponse,
     ContentMatch,
@@ -39,12 +41,12 @@ class SearchService:
     # 검색
     # ------------------------------------------------------------------
 
-    async def search(self, request: SearchRequest) -> SearchResponse:
+    async def search(self, request: SearchRequest, db: Optional[Session] = None) -> SearchResponse:
         """통합 검색 실행."""
         start_ms = int(time.time() * 1000)
 
         # 프리셋 적용 (preset 있으면 paths/extensions/excludes 오버라이드)
-        paths, extensions, excludes = self._resolve_filters(request)
+        paths, extensions, excludes = self._resolve_filters(request, db)
 
         # mode별 실행
         if request.mode == "filename":
@@ -138,8 +140,8 @@ class SearchService:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _resolve_filters(self, request: SearchRequest):
-        """프리셋이 있으면 프리셋 값으로 오버라이드."""
+    def _resolve_filters(self, request: SearchRequest, db: Optional[Session] = None):
+        """프리셋이 있으면 프리셋 값으로 오버라이드. DB의 활성 ignore 패턴도 병합."""
         paths = list(request.paths)
         extensions = list(request.extensions)
         excludes = list(request.excludes)
@@ -149,6 +151,22 @@ class SearchService:
             paths = preset.paths
             extensions = preset.extensions
             excludes = preset.excludes
+
+        # DB의 활성 ignore 패턴 병합 (enabled=1)
+        if db is not None:
+            try:
+                from app.models.file_search_ignore_pattern import FileSearchIgnorePattern
+                db_patterns = (
+                    db.query(FileSearchIgnorePattern.pattern)
+                    .filter(FileSearchIgnorePattern.enabled == 1)
+                    .all()
+                )
+                db_excludes = [row.pattern for row in db_patterns]
+                # 중복 제거 후 병합
+                existing = set(excludes)
+                excludes = excludes + [p for p in db_excludes if p not in existing]
+            except Exception as e:
+                logger.warning(f"[search_service] ignore 패턴 조회 실패: {e}")
 
         return paths, extensions, excludes
 

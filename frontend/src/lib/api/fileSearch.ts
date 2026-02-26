@@ -4,6 +4,7 @@
 import { request } from './client';
 import type {
 	BrowseResponse,
+	IgnorePattern,
 	Preset,
 	SearchAcceptedResponse,
 	SearchPollResponse,
@@ -55,4 +56,28 @@ export async function getStatus(): Promise<StatusResponse> {
 export async function browseDirectory(path: string): Promise<BrowseResponse> {
 	const encoded = encodeURIComponent(path);
 	return request<BrowseResponse>(`${BASE}/browse?path=${encoded}`);
+}
+
+// ── 무시 패턴 CRUD ────────────────────────────────────────────────────
+
+export async function getIgnorePatterns(): Promise<IgnorePattern[]> {
+	return request<IgnorePattern[]>(`${BASE}/ignore-patterns`);
+}
+
+export async function addIgnorePattern(label: string, pattern: string): Promise<IgnorePattern> {
+	return request<IgnorePattern>(`${BASE}/ignore-patterns`, {
+		method: 'POST',
+		body: JSON.stringify({ label, pattern })
+	});
+}
+
+export async function toggleIgnorePattern(id: number, enabled: boolean): Promise<IgnorePattern> {
+	return request<IgnorePattern>(`${BASE}/ignore-patterns/${id}`, {
+		method: 'PATCH',
+		body: JSON.stringify({ enabled })
+	});
+}
+
+export async function deleteIgnorePattern(id: number): Promise<void> {
+	await request<void>(`${BASE}/ignore-patterns/${id}`, { method: 'DELETE' });
 }

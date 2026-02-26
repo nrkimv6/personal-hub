@@ -30,8 +30,12 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.file_search_request import FileSearchRequest
 from app.models.file_search_status import FileSearchStatus
+from app.models.file_search_ignore_pattern import FileSearchIgnorePattern
 from app.modules.file_search.schemas import (
     BrowseResponse,
+    IgnorePatternCreate,
+    IgnorePatternResponse,
+    IgnorePatternUpdate,
     OpenFileRequest,
     PresetResponse,
     SearchAcceptedResponse,
@@ -249,3 +253,93 @@ async def browse_directory(
 ):
     """서버 측 디렉토리 목록 조회 (폴더 브라우저 모달용)."""
     return _service.browse_directory(path)
+
+
+# ============================================================
+# Ignore Patterns CRUD
+# ============================================================
+
+
+@router.get("/ignore-patterns", response_model=List[IgnorePatternResponse])
+async def get_ignore_patterns(db: Session = Depends(get_db)):
+    """무시 패턴 목록 조회 (sort_order ASC)."""
+    rows = (
+        db.query(FileSearchIgnorePattern)
+        .order_by(FileSearchIgnorePattern.sort_order.asc())
+        .all()
+    )
+    return [
+        IgnorePatternResponse(
+            id=r.id,
+            label=r.label,
+            pattern=r.pattern,
+            enabled=bool(r.enabled),
+            sort_order=r.sort_order,
+        )
+        for r in rows
+    ]
+
+
+@router.post("/ignore-patterns", response_model=IgnorePatternResponse, status_code=201)
+async def add_ignore_pattern(body: IgnorePatternCreate, db: Session = Depends(get_db)):
+    """무시 패턴 추가. sort_order 미지정 시 현재 max+1 자동 설정."""
+    if body.sort_order is None:
+        max_row = db.query(FileSearchIgnorePattern).order_by(
+            FileSearchIgnorePattern.sort_order.desc()
+        ).first()
+        next_order = (max_row.sort_order + 1) if max_row else 1
+    else:
+        next_order = body.sort_order
+
+    row = FileSearchIgnorePattern(
+        label=body.label,
+        pattern=body.pattern,
+        enabled=1,
+        sort_order=next_order,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return IgnorePatternResponse(
+        id=row.id,
+        label=row.label,
+        pattern=row.pattern,
+        enabled=bool(row.enabled),
+        sort_order=row.sort_order,
+    )
+
+
+@router.patch("/ignore-patterns/{pattern_id}", response_model=IgnorePatternResponse)
+async def update_ignore_pattern(
+    pattern_id: int, body: IgnorePatternUpdate, db: Session = Depends(get_db)
+):
+    """무시 패턴 수정 (enabled 토글 또는 label 수정)."""
+    row = db.query(FileSearchIgnorePattern).filter_by(id=pattern_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"패턴을 찾을 수 없습니다: {pattern_id}")
+
+    if body.enabled is not None:
+        row.enabled = 1 if body.enabled else 0
+    if body.label is not None:
+        row.label = body.label
+
+    db.commit()
+    db.refresh(row)
+    return IgnorePatternResponse(
+        id=row.id,
+        label=row.label,
+        pattern=row.pattern,
+        enabled=bool(row.enabled),
+        sort_order=row.sort_order,
+    )
+
+
+@router.delete("/ignore-patterns/{pattern_id}", status_code=204)
+async def delete_ignore_pattern(pattern_id: int, db: Session = Depends(get_db)):
+    """무시 패턴 삭제."""
+    row = db.query(FileSearchIgnorePattern).filter_by(id=pattern_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"패턴을 찾을 수 없습니다: {pattern_id}")
+
+    db.delete(row)
+    db.commit()

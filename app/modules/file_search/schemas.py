@@ -117,3 +117,30 @@ class SearchPollResponse(BaseModel):
     status: str  # pending / queued / processing / completed / failed
     result: Optional[SearchResponse] = None
     error_message: Optional[str] = None
+
+
+# ============================================================
+# Ignore Patterns
+# ============================================================
+
+
+class IgnorePatternResponse(BaseModel):
+    """무시 패턴 응답 스키마."""
+    id: int
+    label: str
+    pattern: str
+    enabled: bool
+    sort_order: int
+
+
+class IgnorePatternCreate(BaseModel):
+    """무시 패턴 생성 스키마."""
+    label: str = Field(..., min_length=1, description="패턴 라벨 (표시용)")
+    pattern: str = Field(..., min_length=1, description="검색 제외 패턴 (glob 지원)")
+    sort_order: Optional[int] = Field(None, description="정렬 순서 (None = 자동 max+1)")
+
+
+class IgnorePatternUpdate(BaseModel):
+    """무시 패턴 수정 스키마 (PATCH용)."""
+    enabled: Optional[bool] = Field(None, description="활성화 여부 토글")
+    label: Optional[str] = Field(None, description="라벨 수정")

@@ -234,9 +234,9 @@ class FileSearchWorker(BaseWorker):
             request_data = json.loads(req.request_json)
             search_request = SearchRequest(**request_data)
 
-            # 검색 실행
+            # 검색 실행 (DB ignore 패턴 병합을 위해 db 세션 전달)
             service = SearchService()
-            result = await service.search(search_request)
+            result = await service.search(search_request, db=db)
 
             elapsed_ms = int(time.time() * 1000) - start_ms
 

@@ -14,6 +14,7 @@
 	import SearchForm from './SearchForm.svelte';
 	import PresetBar from './PresetBar.svelte';
 	import ExtensionFilter from './ExtensionFilter.svelte';
+	import IgnorePatterns from './IgnorePatterns.svelte';
 	import PathInput from './PathInput.svelte';
 	import ResultList from './ResultList.svelte';
 	import EncodingFixer from '../utils/EncodingFixer.svelte';
@@ -48,6 +49,7 @@
 	let path = $state('');
 	let extensions: string[] = $state([]);
 	let excludes: string[] = $state([]);
+	let ignorePatternExcludes: string[] = $state([]);
 	let selectedPresetId: string | null = $state(null);
 
 	let results: FileMatch[] = $state([]);
@@ -154,7 +156,7 @@
 					case_sensitive: caseSensitive,
 					paths: path ? [path] : [],
 					extensions,
-					excludes,
+					excludes: [...excludes, ...ignorePatternExcludes],
 					preset: selectedPresetId ?? undefined,
 					max_results: 100,
 					context_lines: 2
@@ -341,6 +343,11 @@
 						bind:extensions
 						onchange={(exts) => (extensions = exts)}
 					/>
+				</div>
+
+				<!-- 무시 패턴 -->
+				<div class="space-y-1.5">
+					<IgnorePatterns onchange={(patterns) => (ignorePatternExcludes = patterns)} />
 				</div>
 			</div>
 		{/if}

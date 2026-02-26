@@ -76,6 +76,15 @@ export interface Preset {
 	excludes: string[];
 }
 
+/** 파일 검색 무시 패턴 */
+export interface IgnorePattern {
+	id: number;
+	label: string;
+	pattern: string;
+	enabled: boolean;
+	sort_order: number;
+}
+
 /** POST /search 202 응답 — 비동기 검색 수락 */
 export interface SearchAcceptedResponse {
 	search_id: string;
