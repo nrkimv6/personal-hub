@@ -45,8 +45,28 @@ async def _setup_idle_state(async_r, plan_file="test.md"):
     await async_r.set("plan-runner:state:pid", "0")
     await async_r.set("plan-runner:state:plan_file", plan_file)
     await async_r.set("plan-runner:state:start_time", datetime.now().isoformat())
-    # command 결과 미리 추가 (executor가 brpop으로 읽음)
-    await async_r.rpush("plan-runner:command_results", json.dumps({"success": True, "pid": 1234}))
+    # 참고: per-command result key는 lpush 시점에 intercept하여 seed함
+
+
+def _make_capture_lpush(async_r, pushed_commands, result_data=None):
+    """per-command result key 자동 seed하는 capture_lpush 팩토리"""
+    if result_data is None:
+        result_data = {"success": True, "pid": 1234}
+    orig = async_r.lpush
+
+    async def capture_lpush(key, *vals):
+        pushed_commands.extend(vals)
+        for v in vals:
+            try:
+                cmd = json.loads(v)
+                if "command_id" in cmd:
+                    result_key = f"plan-runner:command_results:{cmd['command_id']}"
+                    await orig(result_key, json.dumps(result_data))
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return await orig(key, *vals)
+
+    return capture_lpush
 
 
 # ========== E2E HTTP: max_cycles=0 ==========
@@ -60,15 +80,10 @@ class TestHttpE2EMaxCyclesZero:
         await _setup_idle_state(async_r)
 
         pushed_commands = []
-        orig_lpush = async_r.lpush
-
-        async def capture_lpush(key, *vals):
-            pushed_commands.extend(vals)
-            return await orig_lpush(key, *vals)
 
         with patch.object(executor_service, "redis_client", sync_r), \
              patch.object(executor_service, "async_redis", async_r), \
-             patch.object(async_r, "lpush", side_effect=capture_lpush):
+             patch.object(async_r, "lpush", side_effect=_make_capture_lpush(async_r, pushed_commands)):
 
             client = TestClient(app)
             try:
@@ -90,15 +105,10 @@ class TestHttpE2EMaxCyclesZero:
         await _setup_idle_state(async_r)
 
         pushed_commands = []
-        orig = async_r.lpush
-
-        async def cap(key, *vals):
-            pushed_commands.extend(vals)
-            return await orig(key, *vals)
 
         with patch.object(executor_service, "redis_client", sync_r), \
              patch.object(executor_service, "async_redis", async_r), \
-             patch.object(async_r, "lpush", side_effect=cap):
+             patch.object(async_r, "lpush", side_effect=_make_capture_lpush(async_r, pushed_commands)):
 
             client = TestClient(app)
             try:
@@ -119,15 +129,10 @@ class TestHttpE2EMaxCyclesZero:
         await _setup_idle_state(async_r)
 
         pushed_commands = []
-        orig = async_r.lpush
-
-        async def cap(key, *vals):
-            pushed_commands.extend(vals)
-            return await orig(key, *vals)
 
         with patch.object(executor_service, "redis_client", sync_r), \
              patch.object(executor_service, "async_redis", async_r), \
-             patch.object(async_r, "lpush", side_effect=cap):
+             patch.object(async_r, "lpush", side_effect=_make_capture_lpush(async_r, pushed_commands)):
 
             client = TestClient(app)
             try:
@@ -147,15 +152,10 @@ class TestHttpE2EMaxCyclesZero:
         await _setup_idle_state(async_r)
 
         pushed_commands = []
-        orig = async_r.lpush
-
-        async def cap(key, *vals):
-            pushed_commands.extend(vals)
-            return await orig(key, *vals)
 
         with patch.object(executor_service, "redis_client", sync_r), \
              patch.object(executor_service, "async_redis", async_r), \
-             patch.object(async_r, "lpush", side_effect=cap):
+             patch.object(async_r, "lpush", side_effect=_make_capture_lpush(async_r, pushed_commands)):
 
             client = TestClient(app)
             try:
@@ -182,15 +182,10 @@ class TestHttpE2ECommandChain:
         await _setup_idle_state(async_r)
 
         pushed = []
-        orig = async_r.lpush
-
-        async def cap(key, *vals):
-            pushed.extend(vals)
-            return await orig(key, *vals)
 
         with patch.object(executor_service, "redis_client", sync_r), \
              patch.object(executor_service, "async_redis", async_r), \
-             patch.object(async_r, "lpush", side_effect=cap):
+             patch.object(async_r, "lpush", side_effect=_make_capture_lpush(async_r, pushed)):
             client = TestClient(app)
             try:
                 client.post("/api/v1/dev-runner/run", json={"plan_file": "test.md", "max_cycles": 0})
@@ -207,15 +202,10 @@ class TestHttpE2ECommandChain:
         await _setup_idle_state(async_r, "a/b.md")
 
         pushed = []
-        orig = async_r.lpush
-
-        async def cap(key, *vals):
-            pushed.extend(vals)
-            return await orig(key, *vals)
 
         with patch.object(executor_service, "redis_client", sync_r), \
              patch.object(executor_service, "async_redis", async_r), \
-             patch.object(async_r, "lpush", side_effect=cap):
+             patch.object(async_r, "lpush", side_effect=_make_capture_lpush(async_r, pushed)):
             client = TestClient(app)
             try:
                 client.post("/api/v1/dev-runner/run", json={"plan_file": "a/b.md", "max_cycles": 0})
@@ -232,15 +222,10 @@ class TestHttpE2ECommandChain:
         await _setup_idle_state(async_r)
 
         pushed = []
-        orig = async_r.lpush
-
-        async def cap(key, *vals):
-            pushed.extend(vals)
-            return await orig(key, *vals)
 
         with patch.object(executor_service, "redis_client", sync_r), \
              patch.object(executor_service, "async_redis", async_r), \
-             patch.object(async_r, "lpush", side_effect=cap):
+             patch.object(async_r, "lpush", side_effect=_make_capture_lpush(async_r, pushed)):
             client = TestClient(app)
             try:
                 client.post("/api/v1/dev-runner/run", json={
@@ -267,12 +252,11 @@ class TestHttpE2EErrorPaths:
         import json
         sync_r, async_r = fake_redis_pair
         await async_r.set("plan-runner:listener:heartbeat", "alive")
-        # listener 성공 응답 세팅
-        result_data = {"success": True, "pid": 12345}
-        await async_r.rpush("plan-runner:command_results", json.dumps(result_data))
 
+        pushed = []
         with patch.object(executor_service, "redis_client", sync_r), \
-             patch.object(executor_service, "async_redis", async_r):
+             patch.object(executor_service, "async_redis", async_r), \
+             patch.object(async_r, "lpush", side_effect=_make_capture_lpush(async_r, pushed)):
             client = TestClient(app, raise_server_exceptions=False)
             resp = client.post("/api/v1/dev-runner/run", json={"plan_file": "t.md", "max_cycles": 0})
         assert resp.status_code == 200
