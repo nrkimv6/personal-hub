@@ -140,7 +140,7 @@
         queue_name: 'system',
         provider: 'claude',
         model: 'opus',
-        cli_options: { cwd: 'D:/work/project/service/wtools', parse_json: false, allowed_tools: ['Read', 'Edit', 'Write', 'Glob', 'Grep'] }
+        cli_options: { cwd: 'D:/work/project/tools/monitor-page', parse_json: false, allowed_tools: ['Read', 'Edit', 'Write', 'Glob', 'Grep'] }
       });
       planRequestMessage = '✅ 계획서 작성 요청 완료 — /llm 페이지에서 확인';
     } catch (e) {

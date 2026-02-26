@@ -104,7 +104,7 @@
 			queue_name: 'system',
 			provider: 'claude',
 			model: 'opus',
-			cliOptions: { cwd: 'D:/work/project/service/wtools', parse_json: false, allowed_tools: ['Read', 'Edit', 'Write', 'Glob', 'Grep'] },
+			cliOptions: { cwd: 'D:/work/project/tools/monitor-page', parse_json: false, allowed_tools: ['Read', 'Edit', 'Write', 'Glob', 'Grep'] },
 			promptPrefix: '/plan ',
 			userPromptPlaceholder: '아이디어나 요구사항을 입력하세요...'
 		}
