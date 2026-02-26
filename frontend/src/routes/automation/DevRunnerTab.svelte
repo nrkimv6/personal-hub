@@ -6,6 +6,7 @@
 	import PlanList from '$lib/components/dev-runner/PlanList.svelte';
 	import RunnerInstanceTab from '$lib/components/dev-runner/RunnerInstanceTab.svelte';
 	import CurrentTrackingCard from '$lib/components/dev-runner/CurrentTrackingCard.svelte';
+	import MergeQueuePanel from '$lib/components/dev-runner/MergeQueuePanel.svelte';
 	import { createSmartPolling } from '$lib/utils/smart-polling';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
 	import {
@@ -593,5 +594,9 @@
 				</div>
 			</div>
 		{/if}
+	</div>
+	<!-- Merge Queue Panel -->
+	<div class="px-4 pb-4">
+		<MergeQueuePanel />
 	</div>
 </div>

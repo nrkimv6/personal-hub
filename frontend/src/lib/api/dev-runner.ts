@@ -103,6 +103,7 @@ export interface PlanDetailResponse {
 	status: string;
 	phases: PlanPhaseResponse[];
 	progress: PlanProgressResponse;
+	summary?: string | null;
 }
 
 export interface DoneResponse {
@@ -347,4 +348,40 @@ export const devRunnerEventApi = {
 	connectEvents: (): EventSource => {
 		return new EventSource(`${DEV_RUNNER_BASE}/events`);
 	}
+};
+
+// ============================================================
+// Merge Queue Types & API
+// ============================================================
+
+export interface MergeQueueItem {
+	runner_id: string;
+	branch: string;
+	plan_file: string;
+	project: string;
+	status: string;
+	timestamp: string;
+	worktree_path: string;
+}
+
+export interface MergeStatusResponse {
+	runner_id: string;
+	status: string;
+	test_passed: boolean | null;
+	fix_attempts: number;
+	message: string;
+}
+
+export const devRunnerMergeApi = {
+	queue: (): Promise<MergeQueueItem[]> =>
+		devRunnerRequest<MergeQueueItem[]>('/merge-queue'),
+
+	status: (runnerId: string): Promise<MergeStatusResponse> =>
+		devRunnerRequest<MergeStatusResponse>(`/merge/${runnerId}`),
+
+	retry: (runnerId: string): Promise<unknown> =>
+		devRunnerRequest(`/merge/${runnerId}/retry`, { method: 'POST' }),
+
+	revert: (runnerId: string): Promise<unknown> =>
+		devRunnerRequest(`/merge/${runnerId}/revert`, { method: 'POST' }),
 };

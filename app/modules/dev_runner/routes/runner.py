@@ -2,9 +2,10 @@
 
 import json
 from datetime import datetime
-from fastapi import APIRouter
+from typing import Optional
+from fastapi import APIRouter, HTTPException
 
-from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse, RunnerListItem
+from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse, RunnerListItem, MergeQueueItem, MergeStatusResponse
 from app.modules.dev_runner.services.executor_service import executor_service
 
 router = APIRouter()
@@ -65,6 +66,33 @@ async def retry_merge(runner_id: str):
 async def cleanup_worktree(runner_id: str):
     """runner worktree 수동 정리"""
     return await executor_service.send_runner_command(runner_id, "cleanup-worktree")
+
+
+@router.get("/merge-queue", response_model=list[MergeQueueItem])
+async def get_merge_queue():
+    """Merge Queue 목록 조회"""
+    return await executor_service.get_merge_queue()
+
+
+@router.get("/merge/{runner_id}", response_model=MergeStatusResponse)
+async def get_merge_status(runner_id: str):
+    """특정 runner의 merge 상태 조회"""
+    status = await executor_service.get_merge_status(runner_id)
+    if status is None:
+        raise HTTPException(status_code=404, detail=f"merge status not found for runner {runner_id}")
+    return status
+
+
+@router.post("/merge/{runner_id}/retry")
+async def retry_merge_request(runner_id: str):
+    """Merge 재시도 요청"""
+    return await executor_service.send_runner_command(runner_id, "retry-merge")
+
+
+@router.post("/merge/{runner_id}/revert")
+async def revert_merge_request(runner_id: str):
+    """Merge 되돌리기 요청"""
+    return await executor_service.send_runner_command(runner_id, "revert-merge")
 
 
 __all__ = ['router']

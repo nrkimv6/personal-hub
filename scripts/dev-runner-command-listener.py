@@ -79,6 +79,7 @@ LOG_CHANNEL_PREFIX = "plan-runner:logs"
 _running_processes: dict = {}
 _running_log_files: dict = {}
 _stream_threads: dict = {}
+_merge_orchestrator_process: Optional[subprocess.Popen] = None
 
 
 def _is_pid_alive(pid: int) -> bool:
@@ -343,6 +344,9 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
     if command.get("ignored_plans"):
         cmd.extend(["--ignored-plans", command["ignored_plans"]])
 
+    if command.get("worktree"):
+        cmd.append("--worktree")
+
     # 로그 파일 생성
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_file = LOG_DIR / f"plan-runner-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
@@ -359,6 +363,7 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
         env["PYTHONUNBUFFERED"] = "1"
         env.pop("CLAUDECODE", None)  # 중첩 세션 감지 방지
         env["PLAN_RUNNER_WORK_DIR"] = str(worktree_path)
+        env["PLAN_RUNNER_WORKTREE_PATH"] = str(worktree_path)
         env["PLAN_RUNNER_RUNNER_ID"] = runner_id
         env["TEST_DB_DIR"] = str(worktree_path / "data")
 
@@ -398,6 +403,12 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
         redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
 
         logger.info(f"plan-runner started (PID: {process.pid}, log: {log_file})")
+
+        # worktree 모드: orchestrator가 미실행이면 자동 spawn
+        if command.get("worktree"):
+            if not _merge_orchestrator_process or _merge_orchestrator_process.poll() is not None:
+                orch_result = start_merge_orchestrator(redis_client)
+                logger.info(f"Merge Orchestrator 자동 시작: {orch_result.get('message', '')}")
 
         return {
             "success": True,
@@ -567,6 +578,48 @@ def cleanup_worktree(runner_id: str, redis_client: redis.Redis) -> Dict:
         return {"success": False, "message": str(e)}
 
 
+def start_merge_orchestrator(redis_client: redis.Redis) -> Dict:
+    """plan-runner merge-orchestrator 프로세스 시작"""
+    global _merge_orchestrator_process
+    if _merge_orchestrator_process and _merge_orchestrator_process.poll() is None:
+        return {"success": False, "message": f"이미 실행 중 (PID: {_merge_orchestrator_process.pid})"}
+
+    try:
+        cmd = [str(PLAN_RUNNER_PYTHON), "-m", "plan_runner", "merge-orchestrator"]
+        LOGS_DIR = PROJECT_ROOT / "logs" / "dev"
+        LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        log_file = open(str(LOGS_DIR / "merge-orchestrator.log"), "a", encoding="utf-8")
+        import os as _os
+        env = _os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
+        _merge_orchestrator_process = subprocess.Popen(
+            cmd, stdout=log_file, stderr=log_file,
+            cwd=str(PLAN_RUNNER_MODULE_PATH), env=env
+        )
+        logger.info(f"Merge Orchestrator 시작 (PID: {_merge_orchestrator_process.pid})")
+        return {"success": True, "message": f"Orchestrator 시작 (PID: {_merge_orchestrator_process.pid})"}
+    except Exception as e:
+        logger.error(f"Merge Orchestrator 시작 실패: {e}")
+        return {"success": False, "message": str(e)}
+
+
+def stop_merge_orchestrator(redis_client: redis.Redis) -> Dict:
+    """plan-runner merge-orchestrator 프로세스 종료"""
+    global _merge_orchestrator_process
+    if not _merge_orchestrator_process or _merge_orchestrator_process.poll() is not None:
+        return {"success": False, "message": "Orchestrator가 실행 중이 아님"}
+    try:
+        _merge_orchestrator_process.terminate()
+        _merge_orchestrator_process.wait(timeout=5)
+        logger.info("Merge Orchestrator 종료")
+        _merge_orchestrator_process = None
+        return {"success": True, "message": "Orchestrator 종료"}
+    except Exception as e:
+        logger.error(f"Merge Orchestrator 종료 실패: {e}")
+        return {"success": False, "message": str(e)}
+
+
 def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
     """명령 실행
 
@@ -595,6 +648,10 @@ def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
     elif action == "cleanup-worktree":
         runner_id = command.get("runner_id", "")
         return cleanup_worktree(runner_id, redis_client)
+    elif action == "start-orchestrator":
+        return start_merge_orchestrator(redis_client)
+    elif action == "stop-orchestrator":
+        return stop_merge_orchestrator(redis_client)
     else:
         return {"success": False, "message": f"Unknown action: {action}"}
 

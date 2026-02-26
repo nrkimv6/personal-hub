@@ -438,6 +438,31 @@ class ExecutorService:
             raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")
 
 
+    async def get_merge_queue(self) -> list:
+        """Redis merge-queue 조회 → list[MergeQueueItem]"""
+        try:
+            raw_items = await self.async_redis.lrange("plan-runner:merge-queue", 0, -1)
+            result = []
+            for raw in raw_items:
+                try:
+                    item = json.loads(raw)
+                    result.append(item)
+                except Exception:
+                    pass
+            return result
+        except Exception:
+            return []
+
+    async def get_merge_status(self, runner_id: str) -> dict | None:
+        """Redis merge:{runner_id}:status 조회"""
+        try:
+            status = await self.async_redis.get(f"plan-runner:merge:{runner_id}:status")
+            if status is None:
+                return None
+            return {"runner_id": runner_id, "status": status, "fix_attempts": 0, "message": ""}
+        except Exception:
+            return None
+
     async def send_runner_command(self, runner_id: str, action: str) -> dict:
         """runner에 명령 전송 (retry-merge, cleanup-worktree 등)"""
         try:

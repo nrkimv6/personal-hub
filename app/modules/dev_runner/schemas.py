@@ -99,6 +99,7 @@ class PlanDetailResponse(BaseModel):
     status: str
     phases: List[PlanPhaseResponse]
     progress: PlanProgressResponse
+    summary: Optional[str] = None
 
 
 class DoneResponse(BaseModel):
@@ -185,6 +186,26 @@ class CurrentTrackingResponse(BaseModel):
     stale: bool = False     # TTL 만료 여부 (60초 TTL 기반)
 
 
+class MergeQueueItem(BaseModel):
+    """Merge Queue 항목 스키마"""
+    runner_id: str
+    branch: str
+    plan_file: str
+    project: str
+    status: str
+    timestamp: str
+    worktree_path: str = ""
+
+
+class MergeStatusResponse(BaseModel):
+    """Merge 상태 응답 스키마"""
+    runner_id: str
+    status: str
+    test_passed: Optional[bool] = None
+    fix_attempts: int = 0
+    message: str = ""
+
+
 __all__ = [
     'PlanEventResponse',
     'PlanRecordResponse',
@@ -205,4 +226,6 @@ __all__ = [
     'BatchDoneResponse',
     'BatchDoneResultItem',
     'VerifyResult',
+    'MergeQueueItem',
+    'MergeStatusResponse',
 ]
