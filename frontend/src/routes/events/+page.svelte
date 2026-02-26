@@ -59,6 +59,43 @@
 	let unknownPeriodFilter = $state('include');  // exclude/include/only
 	let showFilters = $state(false);
 
+	// =========================================================
+	// URL 파라미터 동기화 헬퍼
+	// =========================================================
+
+	const VALID_SORT_VALUES = ['event_end', 'event_start', 'created_at', 'announcement_date'];
+
+	function getUrlParams(searchParams: URLSearchParams) {
+		const page = Math.max(1, parseInt(searchParams.get('page') || '1') || 1);
+		const sort = VALID_SORT_VALUES.includes(searchParams.get('sort') || '')
+			? (searchParams.get('sort') as string)
+			: 'event_end';
+		const order = searchParams.get('order') === 'desc' ? 'desc' : 'asc';
+		const eventId = parseInt(searchParams.get('event') || '') || null;
+		return { page, sort, order, eventId };
+	}
+
+	/** 현재 page/sort/order/event 상태를 URL searchParams에 반영 (replaceState) */
+	function syncUrlParams(overrides: { eventId?: number | null } = {}) {
+		const url = new URL($pageStore.url);
+		url.searchParams.set('page', String(currentPage));
+		url.searchParams.set('sort', sortBy);
+		url.searchParams.set('order', sortOrder);
+		if ('eventId' in overrides) {
+			if (overrides.eventId != null) {
+				url.searchParams.set('event', String(overrides.eventId));
+			} else {
+				url.searchParams.delete('event');
+			}
+		} else if (showEventModal && editingEvent) {
+			// 모달이 열려 있는 상태에서 페이지/정렬 변경 시 event 파라미터 유지
+			url.searchParams.set('event', String(editingEvent.id));
+		} else {
+			url.searchParams.delete('event');
+		}
+		goto(url.toString(), { replaceState: true, noScroll: true, keepFocus: true });
+	}
+
 	// 활성 필터 카운트
 	const activeFilterCount = $derived(
 		[
@@ -103,25 +140,25 @@
 		{ id: 'uncategorized', label: '미분류', color: 'gray' },
 	];
 
-	// URL 변경 감지 → 탭 전환 사이드이펙트 적용
+	// URL 변경 감지 → 탭 전환 사이드이펙트 적용 (탭 변경 시에만 currentPage/필터 초기화)
 	$effect(() => {
 		const urlTab = $pageStore.url.searchParams.get('tab') as TabMode | null;
 		const validTabs: TabMode[] = ['online', 'offline', 'popup', 'uncategorized'];
 		const targetTab: TabMode = urlTab && validTabs.includes(urlTab) ? urlTab : 'online';
 		if (activeTab !== targetTab) {
 			activeTab = targetTab;
-		}
-		currentPage = 1;
-		if (isAnonymous) {
-			if (targetTab === 'online') filterEventStatus = 'ending_tomorrow';
-			else if (targetTab === 'offline') filterEventStatus = 'ongoing';
-			else filterEventStatus = null;
-		} else if (targetTab === 'online' || targetTab === 'offline') {
-			filterEventStatus = 'ongoing';
-		} else if (targetTab === 'popup') {
-			filterEventStatus = 'ongoing_or_upcoming';
-		} else if (targetTab === 'uncategorized') {
-			filterEventStatus = null;
+			currentPage = 1;
+			if (isAnonymous) {
+				if (targetTab === 'online') filterEventStatus = 'ending_tomorrow';
+				else if (targetTab === 'offline') filterEventStatus = 'ongoing';
+				else filterEventStatus = null;
+			} else if (targetTab === 'online' || targetTab === 'offline') {
+				filterEventStatus = 'ongoing';
+			} else if (targetTab === 'popup') {
+				filterEventStatus = 'ongoing_or_upcoming';
+			} else if (targetTab === 'uncategorized') {
+				filterEventStatus = null;
+			}
 		}
 	});
 
@@ -158,12 +195,14 @@
 		// Phase 2: 마감일 필터와 독립 동작 (초기화하지 않음)
 		currentPage = 1;
 		fetchEvents();
+		syncUrlParams();
 	}
 
 	function handleUnknownPeriodFilterChange(filter: string) {
 		unknownPeriodFilter = filter;
 		currentPage = 1;
 		fetchEvents();
+		syncUrlParams();
 	}
 
 	function handleSortChange(newSortBy: string, newSortOrder: string) {
@@ -171,6 +210,7 @@
 		sortOrder = newSortOrder;
 		currentPage = 1;
 		fetchEvents();
+		syncUrlParams();
 	}
 
 	function handleQuickFilter(preset: { filters: { eventStatus: string; sortBy: string; sortOrder: string; unknownPeriodFilter: string } }) {
@@ -181,18 +221,21 @@
 		filterDeadlineDate = null;  // 빠른 필터 시 마감일 초기화
 		currentPage = 1;
 		fetchEvents();
+		syncUrlParams();
 	}
 
 	function handleUrlTypeChange(urlType: string | null) {
 		filterUrlType = urlType;
 		currentPage = 1;
 		fetchEvents();
+		syncUrlParams();
 	}
 
 	function handleSourceTypeChange(sourceType: string | null) {
 		filterSourceType = sourceType;
 		currentPage = 1;
 		fetchEvents();
+		syncUrlParams();
 	}
 
 	function handleDeadlineDateChange(date: string | null) {
@@ -200,12 +243,14 @@
 		// Phase 2: 상태 필터와 독립 동작 (초기화하지 않음)
 		currentPage = 1;
 		fetchEvents();
+		syncUrlParams();
 	}
 
 	// 검색 실행
 	function handleSearch() {
 		currentPage = 1;
 		fetchEvents();
+		syncUrlParams();
 	}
 
 	function handleSort(column: string) {
@@ -219,6 +264,7 @@
 		}
 		currentPage = 1;
 		fetchEvents();
+		syncUrlParams();
 	}
 
 	// =========================================================
@@ -325,12 +371,14 @@
 		editingEvent = null;
 		importedEventData = null;
 		showEventModal = true;
+		syncUrlParams({ eventId: null });
 	}
 
 	function openEditModal(event: Event) {
 		editingEvent = event;
 		importedEventData = null;
 		showEventModal = true;
+		syncUrlParams({ eventId: event.id });
 	}
 
 	function openUrlImportModal() {
@@ -587,6 +635,7 @@
 		if (currentPage > 1) {
 			currentPage--;
 			fetchEvents();
+			syncUrlParams();
 		}
 	}
 
@@ -594,6 +643,7 @@
 		if (currentPage * pageSize < total) {
 			currentPage++;
 			fetchEvents();
+			syncUrlParams();
 		}
 	}
 
@@ -623,37 +673,56 @@
 			console.error('태그 목록 로드 실패:', e);
 		}
 
-		// 날짜별 마감 카운트 로드
 		fetchDeadlineCounts();
 
-		// URL의 tab 파라미터로 초기 탭 설정
-		const urlTab = $pageStore.url.searchParams.get('tab');
+		const searchParams = $pageStore.url.searchParams;
 		const validTabs: TabMode[] = ['online', 'offline', 'popup', 'uncategorized'];
+
+		// 1. 탭 설정 (URL → activeTab)
+		const urlTab = searchParams.get('tab');
 		if (urlTab && validTabs.includes(urlTab as TabMode)) {
-			// URL 파라미터로 탭 전환 (URL 업데이트 불필요)
-			switchTab(urlTab as TabMode, false);
-			return; // switchTab에서 fetchEvents 호출하므로 여기서 종료
+			activeTab = urlTab as TabMode;
 		}
 
-		// PWA Share Target 처리
-		const action = $pageStore.url.searchParams.get('action');
-		const sharedUrl = $pageStore.url.searchParams.get('url');
+		// 2. 탭별 기본 필터 설정
+		if (isAnonymous) {
+			if (activeTab === 'online') filterEventStatus = 'ending_tomorrow';
+			else if (activeTab === 'offline') filterEventStatus = 'ongoing';
+			else filterEventStatus = null;
+		} else if (activeTab === 'online' || activeTab === 'offline') {
+			filterEventStatus = 'ongoing';
+		} else if (activeTab === 'popup') {
+			filterEventStatus = 'ongoing_or_upcoming';
+		} else {
+			filterEventStatus = null;
+		}
+
+		// 3. URL 파라미터로 page/sort/order 복원 (탭 기본값보다 우선)
+		const { page, sort, order, eventId } = getUrlParams(searchParams);
+		currentPage = page;
+		sortBy = sort;
+		sortOrder = order;
+
+		// 4. PWA Share Target 처리
+		const action = searchParams.get('action');
+		const sharedUrl = searchParams.get('url');
 		if (action === 'add' && sharedUrl) {
 			showEventModal = true;
 		}
 
-		// 익명 사용자(운영모드) 필터 설정
-		if (!$isLoggedIn) {
-			if (activeTab === 'online') {
-				filterEventStatus = 'ending_tomorrow';
-			} else if (activeTab === 'offline') {
-				filterEventStatus = 'ongoing';
-			} else {
-				filterEventStatus = null;
+		// 5. 데이터 로드
+		await fetchEvents();
+
+		// 6. event 파라미터로 모달 자동 열기 (데이터 로드 완료 후)
+		if (eventId) {
+			try {
+				const event = await eventApi.get(eventId);
+				openEditModal(event);
+			} catch (e) {
+				// 존재하지 않는 이벤트 ID → URL에서 제거
+				syncUrlParams({ eventId: null });
 			}
 		}
-
-		fetchEvents();
 	});
 </script>
 
@@ -898,6 +967,7 @@
 	onClose={() => {
 		showEventModal = false;
 		importedEventData = null;
+		syncUrlParams({ eventId: null });
 	}}
 	onSave={handleSaveEvent}
 />
