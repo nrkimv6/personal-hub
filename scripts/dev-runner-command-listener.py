@@ -259,32 +259,71 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
         _cleanup_process_state(runner_id, redis_client)
 
 
+def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
+    """plan-runner CLI 실행 (백그라운드 스레드에서 호출 — worktree 생성 포함)
+
+    결과는 per-command result key로 Redis에 반환.
+    """
+    runner_id = command.get("runner_id")
+    command_id = command.get("command_id", "")
+    result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
+
+    def _push_result(result: Dict):
+        result["action"] = "run"
+        result["executed_at"] = datetime.now().isoformat()
+        redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
+        redis_client.expire(result_key, 60)
+
+    # worktree 생성 (시간이 걸릴 수 있음)
+    try:
+        worktree_path = WorktreeManager.create(runner_id, WORKTREE_BASE_DIR)
+    except WorktreeError as e:
+        logger.error(f"worktree 생성 실패 (runner_id: {runner_id}): {e}")
+        _push_result({"success": False, "message": f"worktree 생성 실패: {e}"})
+        return
+
+    # 명령어 구성
+    plan_file = command.get("plan_file")
+    engine = command.get("engine")
+    is_parallel = command.get("parallel", False)
+    if not plan_file and not is_parallel:
+        _push_result({"success": False, "message": "plan_file required (use parallel mode for batch execution)"})
+        return
+
+    result = _launch_plan_runner_process(command, redis_client, runner_id, worktree_path, plan_file, engine)
+    _push_result(result)
+
+
 def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
-    """plan-runner CLI 실행 시작
+    """plan-runner CLI 실행 시작 — 즉시 accepted 반환, worktree+프로세스는 백그라운드
 
     Args:
         command: {action: "run", runner_id: str, plan_file: str, max_cycles: int, ...}
         redis_client: Redis 클라이언트
 
     Returns:
-        dict: {success: bool, message: str, pid: int|None, log_file: str|None}
+        dict: {success: bool, message: str} — 즉시 반환 (실제 결과는 per-command key로 전달)
     """
     runner_id = command.get("runner_id")
     if not runner_id:
         return {"success": False, "message": "runner_id required"}
 
-    # worktree 생성
-    try:
-        worktree_path = WorktreeManager.create(runner_id, WORKTREE_BASE_DIR)
-    except WorktreeError as e:
-        logger.error(f"worktree 생성 실패 (runner_id: {runner_id}): {e}")
-        return {"success": False, "message": f"worktree 생성 실패: {e}"}
-
     # 동일 runner_id로 이미 실행 중이면 에러 (stale 프로세스 자동 정리 포함)
+    # _running_processes에 없더라도 Redis에 running 상태가 남아있고 PID가 살아있으면 중복 실행 방지
+    redis_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
+    redis_pid_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
+    if redis_status == "running" and redis_pid_str:
+        try:
+            redis_pid = int(redis_pid_str)
+            if _is_pid_alive(redis_pid):
+                logger.warning(f"[start_plan_runner] 중복 실행 감지: Redis status=running, PID={redis_pid} 살아있음 — 시작 거부")
+                return {"success": False, "message": f"Already running (PID: {redis_pid}) — detected via Redis"}
+        except (ValueError, TypeError):
+            pass
+
     proc = _running_processes.get(runner_id)
     if proc and proc.poll() is None:
         if not _is_pid_alive(proc.pid):
-            # OS 레벨에서 죽은 프로세스 면 자동 정리
             logger.warning(f"Stale process detected (PID: {proc.pid}), cleaning up")
             _cleanup_process_state(runner_id, redis_client)
         else:
@@ -293,16 +332,25 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
                 "message": f"Already running (PID: {proc.pid})"
             }
     elif proc and proc.poll() is not None:
-        # 종료되었지만 정리 안 된 경우
         logger.info(f"Previous process ended (exit code: {proc.returncode}), cleaning up")
         _cleanup_process_state(runner_id, redis_client)
 
-    # 명령어 구성
-    plan_file = command.get("plan_file")
-    engine = command.get("engine")
-    is_parallel = command.get("parallel", False)
-    if not plan_file and not is_parallel:
-        return {"success": False, "message": "plan_file required (use parallel mode for batch execution)"}
+    # 백그라운드 스레드에서 worktree 생성 + 프로세스 시작
+    # 결과는 per-command result key로 Redis에 반환됨
+    thread = threading.Thread(
+        target=_do_start_plan_runner,
+        args=(command, redis_client),
+        daemon=True,
+    )
+    thread.start()
+
+    # 즉시 반환하지 않음 — _do_start_plan_runner가 result key에 결과를 push
+    # 이 함수의 반환값은 main loop에서 사용하지 않음 (아래 execute_command에서 분기)
+    return None  # sentinel: main loop에서 결과 push 스킵
+
+
+def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner_id: str, worktree_path: Path, plan_file: str, engine: str) -> Dict:
+    """plan-runner CLI 프로세스 실행 (worktree 생성 이후 호출)"""
 
     cmd = [
         str(PLAN_RUNNER_PYTHON),
@@ -705,7 +753,8 @@ def main():
                     # (Redis 키 만료 또는 재시작으로 날아갈 경우 10초마다 복원)
                     for rid, proc in list(_running_processes.items()):
                         if proc.poll() is None:
-                            if r.get(f"{RUNNER_KEY_PREFIX}:{rid}:status") != "running":
+                            current_status = r.get(f"{RUNNER_KEY_PREFIX}:{rid}:status")
+                            if current_status not in (None, "stopped") and current_status != "running":
                                 r.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
                                 r.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", proc.pid)
                                 r.sadd(ACTIVE_RUNNERS_KEY, rid)
@@ -737,13 +786,21 @@ def main():
 
                 # 명령 실행
                 command_result = execute_command(command, r)
+
+                # run 명령은 백그라운드 스레드가 결과를 직접 push → main loop에서 스킵
+                if command_result is None:
+                    logger.info(f"명령 결과: run 명령 — 백그라운드 스레드가 결과 반환 예정")
+                    continue
+
                 command_result["action"] = action
                 command_result["executed_at"] = datetime.now().isoformat()
 
-                # 결과 반환 (API가 BRPOP으로 대기 중)
-                r.lpush(RESULTS_KEY, json.dumps(command_result, ensure_ascii=False))
-                # 결과 키 만료 설정 (30초 후 자동 삭제, 누적 방지)
-                r.expire(RESULTS_KEY, 30)
+                # 결과 반환 (per-command 키 우선, 하위호환으로 공유 키 fallback)
+                command_id = command.get("command_id", "")
+                result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
+                r.lpush(result_key, json.dumps(command_result, ensure_ascii=False))
+                # 결과 키 만료 설정 (60초 후 자동 삭제, 누적 방지)
+                r.expire(result_key, 60)
 
                 logger.info(f"명령 결과 반환: {command_result}")
 

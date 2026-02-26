@@ -28,7 +28,7 @@ COMMANDS_KEY = "plan-runner:commands"
 RESULTS_KEY = "plan-runner:command_results"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
-COMMAND_TIMEOUT = 10  # 명령 결과 대기 타임아웃 (초)
+COMMAND_TIMEOUT = 30  # 명령 결과 대기 타임아웃 (초) — worktree 생성 시간 고려
 
 
 class ExecutorService:
@@ -48,6 +48,7 @@ class ExecutorService:
             port=REDIS_PORT,
             decode_responses=True,
             socket_connect_timeout=5,
+            socket_timeout=COMMAND_TIMEOUT + 5,  # BRPOP 무한 대기 방지
         )
 
     async def _check_redis_and_listener(self):
@@ -84,10 +85,14 @@ class ExecutorService:
         # 새 runner_id 생성 (멀티 실행 지원 - 409 체크 없음)
         runner_id = uuid.uuid4().hex[:8]
 
+        # per-command 결과 키 (레이스 컨디션 방지)
+        command_id = uuid.uuid4().hex[:8]
+
         # Redis 명령 생성
         command = {
             "action": "run",
             "runner_id": runner_id,
+            "command_id": command_id,
             "source": "monitor-page-api",
             "timestamp": datetime.now().isoformat(),
         }
@@ -122,30 +127,36 @@ class ExecutorService:
         if request.projects:
             command["projects"] = request.projects
 
-        # registered_paths에서 wtools 외부 경로 추출
+        # registered_paths에서 wtools 외부 경로 추출 (asyncio.to_thread로 이벤트 루프 블로킹 방지)
         if request.parallel:
+            import asyncio
             from app.modules.dev_runner.services.plan_service import plan_service
-            extra_dirs = plan_service.get_extra_plan_dirs()
+            extra_dirs = await asyncio.to_thread(plan_service.get_extra_plan_dirs)
             if extra_dirs:
                 command["extra_plan_dirs"] = ",".join(extra_dirs)
-            ignored_paths = plan_service.get_ignored_plan_paths()
+            ignored_paths = await asyncio.to_thread(plan_service.get_ignored_plan_paths)
             if ignored_paths:
                 command["ignored_plans"] = ",".join(ignored_paths)
+
+        result_key = f"{RESULTS_KEY}:{command_id}"
 
         try:
             # Redis LPUSH - 명령 전송
             await self.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
 
-            # BRPOP으로 결과 대기 (비동기, 이벤트 루프 블로킹 없음)
-            result = await self.async_redis.brpop(RESULTS_KEY, timeout=COMMAND_TIMEOUT)
+            # BRPOP으로 결과 대기 (per-command 키, 레이스 컨디션 방지)
+            result = await self.async_redis.brpop(result_key, timeout=COMMAND_TIMEOUT)
 
             if result is None:
+                # cleanup
+                await self.async_redis.delete(result_key)
                 raise HTTPException(
                     status_code=504,
                     detail="Command timeout - listener may not be responding"
                 )
 
             _, raw_result = result
+            await self.async_redis.delete(result_key)
             result_data = json.loads(raw_result)
 
             if not result_data.get("success"):
@@ -219,15 +230,19 @@ class ExecutorService:
     def _send_force_stop(self, runner_id: str = ""):
         """listener에 force-stop 명령 전송 (_running_processes 변수까지 정리)"""
         try:
+            command_id = uuid.uuid4().hex[:8]
             command = {
                 "action": "force-stop",
                 "runner_id": runner_id,
+                "command_id": command_id,
                 "source": "monitor-page-api-reset",
                 "timestamp": datetime.now().isoformat(),
             }
+            result_key = f"{RESULTS_KEY}:{command_id}"
             self.redis_client.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
             # 결과 대기 (짧은 타임아웃)
-            result = self.redis_client.brpop(RESULTS_KEY, timeout=5)
+            result = self.redis_client.brpop(result_key, timeout=5)
+            self.redis_client.delete(result_key)
             if result:
                 _, raw = result
                 data = json.loads(raw)
@@ -273,27 +288,34 @@ class ExecutorService:
             if status != "running":
                 raise HTTPException(status_code=404, detail="Not running")
 
+            # per-command 결과 키
+            command_id = uuid.uuid4().hex[:8]
+
             # Redis 명령 생성
             command = {
                 "action": "stop",
                 "runner_id": runner_id,
+                "command_id": command_id,
                 "source": "monitor-page-api",
                 "timestamp": datetime.now().isoformat(),
             }
+            result_key = f"{RESULTS_KEY}:{command_id}"
 
             # Redis LPUSH - 명령 전송
             await self.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
 
-            # BRPOP으로 결과 대기 (비동기, 이벤트 루프 블로킹 없음)
-            result = await self.async_redis.brpop(RESULTS_KEY, timeout=COMMAND_TIMEOUT)
+            # BRPOP으로 결과 대기 (per-command 키)
+            result = await self.async_redis.brpop(result_key, timeout=COMMAND_TIMEOUT)
 
             if result is None:
                 # listener 무응답 → 프로세스가 죽었을 가능성 → 상태 강제 정리
                 logger.warning("[dev-runner] listener 무응답, Redis 상태 강제 정리")
+                await self.async_redis.delete(result_key)
                 self._force_cleanup_state(runner_id)
                 return {"message": "Force cleaned (listener not responding)"}
 
             _, raw_result = result
+            await self.async_redis.delete(result_key)
             result_data = json.loads(raw_result)
 
             if not result_data.get("success"):
@@ -328,16 +350,11 @@ class ExecutorService:
         running = status == "running"
 
         # PID stale 감지
-        if running and pid_str:
-            try:
-                import psutil
-                if not psutil.pid_exists(int(pid_str)):
-                    logger.warning(f"[dev-runner] runner {runner_id} PID {pid_str} 종료됨 → stale 정리")
-                    self._force_cleanup_state(runner_id)
-                    running = False
-                    pid_str = None
-            except (ValueError, ImportError):
-                pass
+        if running and pid_str and not self._is_pid_alive(int(pid_str)):
+            logger.warning(f"[dev-runner] runner {runner_id} PID {pid_str} 종료됨 → stale 정리")
+            self._force_cleanup_state(runner_id)
+            running = False
+            pid_str = None
 
         current_cycle_str = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:current_cycle")
         current_cycle = int(current_cycle_str) if current_cycle_str is not None else None
@@ -470,18 +487,45 @@ class ExecutorService:
         except (redis.ConnectionError, ConnectionRefusedError, OSError):
             raise HTTPException(status_code=503, detail="Redis에 연결할 수 없습니다.")
 
+        command_id = uuid.uuid4().hex[:8]
         command = {
             "action": action,
             "runner_id": runner_id,
+            "command_id": command_id,
             "source": "monitor-page-api",
             "timestamp": datetime.now().isoformat(),
         }
+        result_key = f"{RESULTS_KEY}:{command_id}"
         await self.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
-        result = await self.async_redis.brpop(RESULTS_KEY, timeout=COMMAND_TIMEOUT)
+        result = await self.async_redis.brpop(result_key, timeout=COMMAND_TIMEOUT)
         if result is None:
+            await self.async_redis.delete(result_key)
             return {"success": False, "message": "Command timeout"}
         _, raw = result
+        await self.async_redis.delete(result_key)
         return json.loads(raw)
+
+    async def stop_all_runners(self) -> dict:
+        """모든 active runner 일괄 중지 - asyncio.gather 병렬 호출"""
+        import asyncio
+
+        runners = self.get_all_runners()
+        runner_ids = [r.runner_id for r in runners if r.running]
+
+        if not runner_ids:
+            return {"stopped": 0}
+
+        async def _stop_one(runner_id: str):
+            try:
+                await self.stop_dev_runner(runner_id)
+                return True
+            except Exception as e:
+                logger.warning(f"[dev-runner] stop_all: runner {runner_id} 중지 실패: {e}")
+                return False
+
+        results = await asyncio.gather(*[_stop_one(rid) for rid in runner_ids], return_exceptions=False)
+        stopped = sum(1 for r in results if r)
+        return {"stopped": stopped}
 
     def restart_listener(self) -> dict:
         """command-listener 프로세스를 재시작합니다.

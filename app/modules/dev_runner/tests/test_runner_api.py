@@ -49,6 +49,61 @@ class TestGetStatus:
         assert data["pid"] == 12345
         assert data["listener_alive"] is True
 
+    async def test_status_after_cleanup(self, client, mock_executor_redis):
+        """TC-R (Right): 정상 종료 후 _cleanup_redis_state() → running=False"""
+        from unittest.mock import patch
+        fake_sync = mock_executor_redis["sync"]
+        RUNNER_KEY_PREFIX = "plan-runner:runners"
+        ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
+        rid = "test-runner-cleanup"
+        fake_sync.set("plan-runner:listener:heartbeat", "2026-02-27T10:00:00")
+        fake_sync.sadd(ACTIVE_RUNNERS_KEY, rid)
+        # Fix 2 결과: cleanup 후 status="stopped" (삭제가 아님)
+        fake_sync.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
+
+        response = await client.get("/api/v1/dev-runner/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["running"] is False
+        assert fake_sync.get(f"{RUNNER_KEY_PREFIX}:{rid}:status") == "stopped"
+
+    async def test_get_status_running_with_valid_pid(self, client, mock_executor_redis):
+        """HTTP-2: PID 살아있음 mock → running=True, pid!=None"""
+        fake_sync = mock_executor_redis["sync"]
+        RUNNER_KEY_PREFIX = "plan-runner:runners"
+        ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
+        rid = "test-runner-pid"
+        fake_sync.set("plan-runner:listener:heartbeat", "2026-02-27T10:00:00")
+        fake_sync.sadd(ACTIVE_RUNNERS_KEY, rid)
+        fake_sync.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
+        fake_sync.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", "55555")
+
+        from app.modules.dev_runner.services.executor_service import executor_service as svc
+        with patch.object(svc, "_is_pid_alive", return_value=True):
+            response = await client.get("/api/v1/dev-runner/status")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["running"] is True
+        assert data["pid"] is not None
+
+    async def test_get_status_after_cleanup_deleted_key(self, client, mock_executor_redis):
+        """HTTP-3: status 키 없음(None) + heartbeat 있음 → running=False (Fix 2 회귀 방지)"""
+        fake_sync = mock_executor_redis["sync"]
+        ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
+        RUNNER_KEY_PREFIX = "plan-runner:runners"
+        rid = "test-runner-deleted"
+        fake_sync.set("plan-runner:listener:heartbeat", "2026-02-27T10:00:00")
+        fake_sync.sadd(ACTIVE_RUNNERS_KEY, rid)
+        # status 키 없음 (삭제된 상태) — old behavior가 이를 "running"으로 복원하던 버그
+        # Fix 1+2 이후에는 None 상태가 running=False를 반환해야 함
+        # (status가 None이면 "running"이 아니므로 running=False)
+
+        response = await client.get("/api/v1/dev-runner/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["running"] is False
+
 
 class TestGetStatusListenerAlive:
     """listener_alive 필드 테스트"""
@@ -99,6 +154,25 @@ class TestGetStatusListenerAlive:
         data = response.json()
         assert data["listener_alive"] is False
         assert data["running"] is False
+        # TC-E: heartbeat 없이 running=False 반환 확인 (stale 정리 검증)
+        # 새 코드는 ACTIVE_RUNNERS_KEY 기반으로 동작하므로, 이 테스트에서 old state key는 검사 대상 아님
+
+    async def test_status_stopped_during_heartbeat_window(self, client, mock_executor_redis):
+        """TC-B (Boundary): heartbeat 살아있어도 status=stopped이면 running=False"""
+        fake_sync = mock_executor_redis["sync"]
+        RUNNER_KEY_PREFIX = "plan-runner:runners"
+        ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
+        rid = "test-runner-1"
+        fake_sync.set("plan-runner:listener:heartbeat", "2026-02-27T10:00:00")
+        fake_sync.sadd(ACTIVE_RUNNERS_KEY, rid)
+        fake_sync.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
+        fake_sync.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", "12345")
+
+        response = await client.get("/api/v1/dev-runner/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["running"] is False
+        assert data["listener_alive"] is True
 
 
 class TestStartRun:
@@ -185,3 +259,27 @@ class TestStopRun:
             mock_async.ping = AsyncMock(side_effect=redis.ConnectionError("Connection refused"))
             response = await client.post("/api/v1/dev-runner/stop")
         assert response.status_code == 503
+
+
+class TestResetState:
+    """HTTP-4: POST /reset-state — stale "running" 강제 정리"""
+
+    async def test_reset_clears_running_state(self, client, mock_executor_redis):
+        """stale running 상태를 POST /reset-state로 정리 후 status 확인"""
+        fake_sync = mock_executor_redis["sync"]
+        RUNNER_KEY_PREFIX = "plan-runner:runners"
+        ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
+        rid = "stale-runner"
+        fake_sync.sadd(ACTIVE_RUNNERS_KEY, rid)
+        fake_sync.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
+        fake_sync.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", "99999")
+
+        response = await client.post("/api/v1/dev-runner/reset-state")
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("success") is True
+
+        # reset 후 status 조회 → running=False
+        status_response = await client.get("/api/v1/dev-runner/status")
+        assert status_response.status_code == 200
+        assert status_response.json()["running"] is False

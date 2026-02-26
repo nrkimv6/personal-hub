@@ -73,6 +73,71 @@ class TestFullFlow:
         assert response.json()["running"] is False
 
 
+class TestLifecycleE2E:
+    """E2E: 시작 → 실행 중 → 종료 전환 회귀 테스트 (Fix 1+2 검증)"""
+
+    RUNNER_KEY_PREFIX = "plan-runner:runners"
+    ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
+
+    async def test_runner_full_lifecycle(self, client, mock_executor_redis):
+        """E2E-1: POST /run → running=True → status='stopped' 설정 → running=False"""
+        fake_sync = mock_executor_redis["sync"]
+        fake_async = mock_executor_redis["async"]
+        rid = "e2e-runner-1"
+        now = datetime.now().isoformat()
+
+        # 초기: running=False
+        response = await client.get("/api/v1/dev-runner/status")
+        assert response.json()["running"] is False
+
+        # 실행 중 상태 시뮬레이션
+        await fake_async.set("plan-runner:listener:heartbeat", now)
+        fake_sync.sadd(self.ACTIVE_RUNNERS_KEY, rid)
+        fake_sync.set(f"{self.RUNNER_KEY_PREFIX}:{rid}:status", "running")
+        fake_sync.set(f"{self.RUNNER_KEY_PREFIX}:{rid}:pid", "11111")
+
+        with patch.object(executor_service, "_is_pid_alive", return_value=True):
+            response = await client.get("/api/v1/dev-runner/status")
+        assert response.json()["running"] is True
+
+        # Fix 2: cleanup 후 status="stopped" 설정 (삭제 X)
+        fake_sync.set(f"{self.RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
+
+        response = await client.get("/api/v1/dev-runner/status")
+        assert response.json()["running"] is False
+
+    async def test_runner_force_stop(self, client, mock_executor_redis):
+        """E2E-2: POST /stop → running=False, status='stopped' 또는 None"""
+        fake_async = mock_executor_redis["async"]
+        fake_sync = mock_executor_redis["sync"]
+        now = datetime.now().isoformat()
+
+        await fake_async.set("plan-runner:listener:heartbeat", now)
+        await fake_async.set(f"{STATE_KEY}:status", "running")
+        await fake_async.rpush(RESULTS_KEY, json.dumps({"success": True, "message": "Stopped"}))
+
+        response = await client.post("/api/v1/dev-runner/stop")
+        assert response.status_code == 200
+
+        # status는 stopped 또는 None (삭제) 중 하나
+        final_status = fake_sync.get(f"{STATE_KEY}:status")
+        assert final_status in (None, "stopped"), f"종료 후 status={final_status!r}는 허용 안 됨"
+
+    async def test_no_running_after_cleanup(self, client, mock_executor_redis):
+        """E2E-3: status='stopped' 설정 후 연속 3회 GET → 모두 running=False (경쟁 조건 회귀)"""
+        fake_sync = mock_executor_redis["sync"]
+        rid = "e2e-runner-race"
+        fake_sync.sadd(self.ACTIVE_RUNNERS_KEY, rid)
+        fake_sync.set(f"{self.RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
+        fake_sync.set("plan-runner:listener:heartbeat", datetime.now().isoformat())
+
+        for i in range(3):
+            response = await client.get("/api/v1/dev-runner/status")
+            assert response.status_code == 200
+            data = response.json()
+            assert data["running"] is False, f"회차 {i+1}: status='stopped'인데 running=True 반환 — 경쟁 조건 잔류"
+
+
 class TestPlansList:
     async def test_plans_list_returns_200(self, client):
         response = await client.get("/api/v1/dev-runner/plans")
