@@ -97,31 +97,33 @@ def _is_pid_alive(pid: int) -> bool:
         return False
 
 
-def _cleanup_process_state(redis_client: redis.Redis):
-    """전역 프로세스 변수 + Redis 상태 정리"""
-    global _current_process, _current_log_file, _stream_thread
+def _cleanup_process_state(runner_id: str, redis_client: redis.Redis):
+    """전역 프로세스 변수 + Redis 상태 정리 (per-runner)"""
+    global _running_processes, _running_log_files, _stream_threads
 
-    _current_process = None
-    _current_log_file = None
-
-    if _stream_thread and _stream_thread.is_alive():
-        _stream_thread.join(timeout=3)
-    _stream_thread = None
+    _running_processes.pop(runner_id, None)
+    _running_log_files.pop(runner_id, None)
+    if runner_id in _stream_threads:
+        t = _stream_threads.pop(runner_id)
+        if t.is_alive():
+            t.join(timeout=3)
 
     try:
-        redis_client.set(STATE_KEY + ":status", "stopped")
         redis_client.delete(
-            STATE_KEY + ":pid",
-            STATE_KEY + ":plan_file",
-            STATE_KEY + ":start_time",
-            STATE_KEY + ":log_file_path",
-            STATE_KEY + ":stream_log_path",
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:status",
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:pid",
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file",
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time",
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path",
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path",
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:engine",
         )
+        redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
     except Exception:
         pass
 
 
-def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Redis):
+def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Redis, runner_id: str = ""):
     """프로세스 stdout을 라인별로 읽어 파일 기록 + Redis publish 동시 수행
 
     노이즈 필터:
@@ -168,10 +170,12 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                 suppressed_count += 1
                 continue
 
+            log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}" if runner_id else LOG_CHANNEL_PREFIX
+
             # 4. 직전 억제 요약 먼저 publish
             if suppressed_count > 0:
                 try:
-                    redis_client.publish(LOG_CHANNEL, f"[NOISE] {suppressed_count} lines suppressed")
+                    redis_client.publish(log_channel, f"[NOISE] {suppressed_count} lines suppressed")
                 except redis.ConnectionError:
                     pass
                 suppressed_count = 0
@@ -180,8 +184,8 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
             if any(marker in stripped for marker in QUOTA_ERROR_MARKERS):
                 logger.warning("[DEV-RUNNER] quota 에러 감지, plan-runner 자동 종료")
                 try:
-                    redis_client.publish(LOG_CHANNEL, "[DEV-RUNNER] quota 에러 감지. 자동 종료.")
-                    redis_client.set(STATE_KEY + ":quota_stopped", "1", ex=3600)
+                    redis_client.publish(log_channel, "[DEV-RUNNER] quota 에러 감지. 자동 종료.")
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:quota_stopped", "1", ex=3600)
                 except redis.ConnectionError:
                     pass
                 process.terminate()
@@ -189,14 +193,15 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
 
             # 6. 정상 라인 publish (ANSI 이스케이프 코드 제거)
             try:
-                redis_client.publish(LOG_CHANNEL, _ANSI_ESCAPE.sub('', stripped))
+                redis_client.publish(log_channel, _ANSI_ESCAPE.sub('', stripped))
             except redis.ConnectionError:
                 pass  # Redis 끊겨도 파일 기록은 계속
 
         # 루프 종료 후 잔여 억제 요약
         if suppressed_count > 0:
+            log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}" if runner_id else LOG_CHANNEL_PREFIX
             try:
-                redis_client.publish(LOG_CHANNEL, f"[NOISE] {suppressed_count} lines suppressed")
+                redis_client.publish(log_channel, f"[NOISE] {suppressed_count} lines suppressed")
             except redis.ConnectionError:
                 pass
 
@@ -215,36 +220,39 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
         except Exception:
             pass
         logger.info(f"Output streaming thread finished (exit code: {process.returncode})")
-        _cleanup_process_state(redis_client)
+        _cleanup_process_state(runner_id, redis_client)
 
 
 def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
     """plan-runner CLI 실행 시작
 
     Args:
-        command: {action: "run", plan_file: str, max_cycles: int, ...}
+        command: {action: "run", runner_id: str, plan_file: str, max_cycles: int, ...}
         redis_client: Redis 클라이언트
 
     Returns:
         dict: {success: bool, message: str, pid: int|None, log_file: str|None}
     """
-    global _current_process, _current_log_file
+    runner_id = command.get("runner_id")
+    if not runner_id:
+        return {"success": False, "message": "runner_id required"}
 
-    # 이미 실행 중이면 에러 (stale 프로세스 자동 정리 포함)
-    if _current_process and _current_process.poll() is None:
-        if not _is_pid_alive(_current_process.pid):
+    # 동일 runner_id로 이미 실행 중이면 에러 (stale 프로세스 자동 정리 포함)
+    proc = _running_processes.get(runner_id)
+    if proc and proc.poll() is None:
+        if not _is_pid_alive(proc.pid):
             # OS 레벨에서 죽은 프로세스 면 자동 정리
-            logger.warning(f"Stale process detected (PID: {_current_process.pid}), cleaning up")
-            _cleanup_process_state(redis_client)
+            logger.warning(f"Stale process detected (PID: {proc.pid}), cleaning up")
+            _cleanup_process_state(runner_id, redis_client)
         else:
             return {
                 "success": False,
-                "message": f"Already running (PID: {_current_process.pid})"
+                "message": f"Already running (PID: {proc.pid})"
             }
-    elif _current_process and _current_process.poll() is not None:
+    elif proc and proc.poll() is not None:
         # 종료되었지만 정리 안 된 경우
-        logger.info(f"Previous process ended (exit code: {_current_process.returncode}), cleaning up")
-        _cleanup_process_state(redis_client)
+        logger.info(f"Previous process ended (exit code: {proc.returncode}), cleaning up")
+        _cleanup_process_state(runner_id, redis_client)
 
     # 명령어 구성
     plan_file = command.get("plan_file")
@@ -320,27 +328,28 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
             env=env,
         )
 
-        _current_process = process
-        _current_log_file = log_file
+        _running_processes[runner_id] = process
+        _running_log_files[runner_id] = log_file
 
         # 별도 스레드에서 stdout 을 파일 + Redis publish
-        global _stream_thread
-        _stream_thread = threading.Thread(
+        thread = threading.Thread(
             target=_stream_output,
-            args=(process, log_handle, redis_client),
+            args=(process, log_handle, redis_client, runner_id),
             daemon=True,
         )
-        _stream_thread.start()
+        thread.start()
+        _stream_threads[runner_id] = thread
 
-        # Redis에 상태 저장
-        redis_client.set(STATE_KEY + ":log_file_path", str(log_file))
-        redis_client.set(STATE_KEY + ":stream_log_path", str(log_file))
-        redis_client.set(STATE_KEY + ":pid", process.pid)
-        redis_client.set(STATE_KEY + ":plan_file", plan_file or "ALL")
-        redis_client.set(STATE_KEY + ":start_time", datetime.now().isoformat())
-        redis_client.set(STATE_KEY + ":status", "running")
-        redis_client.set(STATE_KEY + ":engine", command.get("engine", "claude"))
-        redis_client.delete(STATE_KEY + ":quota_stopped")
+        # Redis에 상태 저장 (per-runner 키)
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path", str(log_file))
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path", str(log_file))
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid", process.pid)
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file or "ALL")
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", datetime.now().isoformat())
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine", command.get("engine", "claude"))
+        redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:quota_stopped")
+        redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
 
         logger.info(f"plan-runner started (PID: {process.pid}, log: {log_file})")
 
@@ -359,47 +368,38 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
         }
 
 
-def stop_plan_runner(redis_client: redis.Redis) -> Dict:
+def stop_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
     """plan-runner 프로세스 종료
+
+    Args:
+        runner_id: 종료할 runner의 ID
+        redis_client: Redis 클라이언트
 
     Returns:
         dict: {success: bool, message: str}
     """
-    global _current_process, _current_log_file
-
-    if not _current_process or _current_process.poll() is not None:
+    proc = _running_processes.get(runner_id)
+    if not proc or proc.poll() is not None:
         return {"success": False, "message": "Not running"}
 
     try:
-        logger.info(f"Stopping plan-runner (PID: {_current_process.pid})...")
+        logger.info(f"Stopping plan-runner (runner_id: {runner_id}, PID: {proc.pid})...")
 
         # Windows: terminate() 호출
-        _current_process.terminate()
+        proc.terminate()
 
         # 5초 대기
         try:
-            _current_process.wait(timeout=5)
+            proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             # 강제 종료
-            _current_process.kill()
-            _current_process.wait()
+            proc.kill()
+            proc.wait()
 
-        logger.info("plan-runner stopped")
+        logger.info(f"plan-runner stopped (runner_id: {runner_id})")
 
-        # 스트리밍 스레드 정리
-        global _stream_thread
-        if _stream_thread and _stream_thread.is_alive():
-            _stream_thread.join(timeout=5)
-        _stream_thread = None
-
-        # Redis 상태 업데이트
-        redis_client.set(STATE_KEY + ":status", "stopped")
-        redis_client.delete(STATE_KEY + ":pid")
-        redis_client.delete(STATE_KEY + ":log_file_path")
-        redis_client.delete(STATE_KEY + ":stream_log_path")
-
-        _current_process = None
-        _current_log_file = None
+        # 스트리밍 스레드 + Redis 상태 정리
+        _cleanup_process_state(runner_id, redis_client)
 
         return {
             "success": True,
@@ -415,62 +415,72 @@ def stop_plan_runner(redis_client: redis.Redis) -> Dict:
 
 
 def get_status(redis_client: redis.Redis) -> Dict:
-    """현재 실행 상태 조회
+    """현재 실행 상태 조회 (모든 runner 요약)
 
     Returns:
-        dict: {success: bool, running: bool, pid: int|None, log_file: str|None}
+        dict: {success: bool, running: bool, runners: list, ...}
     """
-    global _current_process, _current_log_file
+    running_runners = []
+    stale_runners = []
+    for rid, proc in list(_running_processes.items()):
+        if proc.poll() is None:
+            log_file = _running_log_files.get(rid)
+            running_runners.append({
+                "runner_id": rid,
+                "pid": proc.pid,
+                "log_file": str(log_file) if log_file else None,
+            })
+        else:
+            stale_runners.append(rid)
 
-    quota_stopped = bool(redis_client.get(STATE_KEY + ":quota_stopped"))
+    # stale 정리
+    for rid in stale_runners:
+        _cleanup_process_state(rid, redis_client)
 
-    if _current_process and _current_process.poll() is None:
-        return {
-            "success": True,
-            "running": True,
-            "pid": _current_process.pid,
-            "log_file": str(_current_log_file) if _current_log_file else None,
-            "quota_stopped": quota_stopped,
-        }
-    else:
-        # 종료된 경우 Redis 상태 정리
-        if _current_process:
-            redis_client.set(STATE_KEY + ":status", "stopped")
-            redis_client.delete(STATE_KEY + ":pid")
-            redis_client.delete(STATE_KEY + ":log_file_path")
-            redis_client.delete(STATE_KEY + ":stream_log_path")
-            _current_process = None
-            _current_log_file = None
-
-        return {
-            "success": True,
-            "running": False,
-            "pid": None,
-            "log_file": None,
-            "quota_stopped": quota_stopped,
-        }
+    return {
+        "success": True,
+        "running": len(running_runners) > 0,
+        "runners": running_runners,
+        "pid": running_runners[0]["pid"] if running_runners else None,
+        "log_file": running_runners[0]["log_file"] if running_runners else None,
+    }
 
 
-def force_stop_plan_runner(redis_client: redis.Redis) -> Dict:
+def force_stop_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
     """강제 종료 - kill 및 전역 상태 초기화 (리셋용)
+
+    Args:
+        runner_id: 강제 종료할 runner의 ID (비어있으면 모든 runner 정리)
+        redis_client: Redis 클라이언트
 
     Returns:
         dict: {success: bool, message: str}
     """
-    global _current_process, _current_log_file, _stream_thread
+    if runner_id:
+        proc = _running_processes.get(runner_id)
+        pid = proc.pid if proc else None
+        if proc:
+            try:
+                proc.kill()
+                proc.wait(timeout=5)
+            except Exception:
+                pass
+        _cleanup_process_state(runner_id, redis_client)
+        msg = f"Force stopped runner {runner_id} (PID: {pid})" if pid else f"Force cleaned runner {runner_id} (no process)"
+    else:
+        # 모든 runner 강제 종료
+        pids = []
+        for rid, proc in list(_running_processes.items()):
+            if proc:
+                pids.append(proc.pid)
+                try:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                except Exception:
+                    pass
+            _cleanup_process_state(rid, redis_client)
+        msg = f"Force stopped all runners (PIDs: {pids})" if pids else "Force cleaned (no processes)"
 
-    pid = _current_process.pid if _current_process else None
-
-    if _current_process:
-        try:
-            _current_process.kill()
-            _current_process.wait(timeout=5)
-        except Exception:
-            pass
-
-    _cleanup_process_state(redis_client)
-
-    msg = f"Force stopped (PID: {pid})" if pid else "Force cleaned (no process)"
     logger.info(msg)
     return {"success": True, "message": msg}
 
@@ -490,9 +500,11 @@ def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
     if action == "run":
         return start_plan_runner(command, redis_client)
     elif action == "stop":
-        return stop_plan_runner(redis_client)
+        runner_id = command.get("runner_id", "")
+        return stop_plan_runner(runner_id, redis_client)
     elif action == "force-stop":
-        return force_stop_plan_runner(redis_client)
+        runner_id = command.get("runner_id", "")
+        return force_stop_plan_runner(runner_id, redis_client)
     elif action == "status":
         return get_status(redis_client)
     else:
@@ -506,7 +518,7 @@ def main():
     logger.info(f"Redis: {REDIS_HOST}:{REDIS_PORT}")
     logger.info(f"명령 큐: {COMMANDS_KEY}")
     logger.info(f"결과 큐: {RESULTS_KEY}")
-    logger.info(f"상태 키: {STATE_KEY}")
+    logger.info(f"Runner Key Prefix: {RUNNER_KEY_PREFIX}")
     logger.info(f"plan-runner 모듈: {PLAN_RUNNER_MODULE_PATH}")
     logger.info("=" * 50)
 
@@ -531,10 +543,12 @@ def main():
 
             # Redis 재연결 시 현재 프로세스 상태 복원
             # (Redis 캐시 등으로 데이터가 날아갈 경우 status: running 복원)
-            if _current_process and _current_process.poll() is None and _is_pid_alive(_current_process.pid):
-                r.set(STATE_KEY + ":status", "running")
-                r.set(STATE_KEY + ":pid", _current_process.pid)
-                logger.info(f"Redis 재연결: 프로세스 상태 복원 (PID: {_current_process.pid})")
+            for rid, proc in list(_running_processes.items()):
+                if proc.poll() is None and _is_pid_alive(proc.pid):
+                    r.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
+                    r.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", proc.pid)
+                    r.sadd(ACTIVE_RUNNERS_KEY, rid)
+                    logger.info(f"Redis 재연결: 프로세스 상태 복원 (runner_id: {rid}, PID: {proc.pid})")
 
             # BRPOP 루프 (블로킹 대기)
             while True:
@@ -542,17 +556,19 @@ def main():
                 now = time.time()
                 if now - last_heartbeat >= HEARTBEAT_INTERVAL:
                     r.set(HEARTBEAT_KEY, datetime.now().isoformat(), ex=HEARTBEAT_TTL)
-                    # 프로세스 실행 중이면 Redis 상태 동기화
+                    # 각 runner 상태 동기화
                     # (Redis 키 만료 또는 재시작으로 날아갈 경우 10초마다 복원)
-                    if _current_process and _current_process.poll() is None:
-                        if r.get(STATE_KEY + ":status") != "running":
-                            r.set(STATE_KEY + ":status", "running")
-                            r.set(STATE_KEY + ":pid", _current_process.pid)
-                            logger.info(f"heartbeat: Redis 상태 복원 (PID: {_current_process.pid})")
-                    elif _current_process and _current_process.poll() is not None:
-                        # 프로세스가 종료되었는데 전역변수가 남아있는 경우 즉시 cleanup
-                        logger.warning(f"heartbeat: 프로세스 종료 감지 (exit code: {_current_process.returncode}), 상태 정리")
-                        _cleanup_process_state(r)
+                    for rid, proc in list(_running_processes.items()):
+                        if proc.poll() is None:
+                            if r.get(f"{RUNNER_KEY_PREFIX}:{rid}:status") != "running":
+                                r.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
+                                r.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", proc.pid)
+                                r.sadd(ACTIVE_RUNNERS_KEY, rid)
+                                logger.info(f"heartbeat: Redis 상태 복원 (runner_id: {rid}, PID: {proc.pid})")
+                        else:
+                            # 프로세스가 종료되었는데 전역변수가 남아있는 경우 즉시 cleanup
+                            logger.warning(f"heartbeat: 프로세스 종료 감지 (runner_id: {rid}, exit code: {proc.returncode}), 상태 정리")
+                            _cleanup_process_state(rid, r)
                     last_heartbeat = now
 
                 result = r.brpop(COMMANDS_KEY, timeout=HEARTBEAT_INTERVAL)
