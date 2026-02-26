@@ -319,6 +319,31 @@ async def sync_plans():
     return plan_service.sync_plans()
 
 
+class UpdateStatusRequest(BaseModel):
+    status: str
+
+
+@router.patch("/plans/{encoded_path}/status")
+async def update_plan_status(encoded_path: str, body: UpdateStatusRequest):
+    """plan 파일의 상태 필드를 업데이트한다."""
+    try:
+        decoded_path = _decode_path(encoded_path)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid encoded path: {str(e)}")
+
+    if not plan_service.validate_path(decoded_path):
+        raise HTTPException(status_code=403, detail="Path not allowed")
+
+    try:
+        new_status = plan_service.update_plan_status(decoded_path, body.status)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    return {"path": decoded_path, "status": new_status}
+
+
 # ── Archive 정리 ──────────────────────────────────────────────
 
 def _get_archive_dirs() -> list[Path]:

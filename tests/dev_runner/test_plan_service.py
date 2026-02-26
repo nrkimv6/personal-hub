@@ -945,3 +945,44 @@ class TestBatchDoneRedisPublish:
         assert len(error_tags) >= 1
         error_messages = [m for t, m in published if t == "ERROR"]
         assert any("스크립트 오류" in m for m in error_messages)
+
+
+class TestUpdatePlanStatus:
+    """update_plan_status() 메서드 테스트"""
+
+    @pytest.fixture
+    def svc(self):
+        from app.modules.dev_runner.services.plan_service import PlanService
+        return PlanService()
+
+    def test_replace_existing_status(self, svc, tmp_path):
+        """기존 > 상태: 라인 교체"""
+        f = tmp_path / "plan.md"
+        f.write_text("> 상태: 초안\n\n# 제목\n", encoding="utf-8")
+        result = svc.update_plan_status(str(f), "구현중")
+        assert result == "구현중"
+        assert "> 상태: 구현중" in f.read_text(encoding="utf-8")
+
+    def test_insert_status_after_title(self, svc, tmp_path):
+        """> 상태: 없을 때 첫 번째 # 제목 다음에 삽입"""
+        f = tmp_path / "plan.md"
+        f.write_text("# 제목\n\n내용\n", encoding="utf-8")
+        result = svc.update_plan_status(str(f), "보류")
+        assert result == "보류"
+        lines = f.read_text(encoding="utf-8").splitlines()
+        assert lines[0] == "# 제목"
+        assert lines[1] == "> 상태: 보류"
+
+    def test_invalid_status_raises_value_error(self, svc, tmp_path):
+        """허용되지 않은 상태 → ValueError"""
+        import pytest
+        f = tmp_path / "plan.md"
+        f.write_text("> 상태: 초안\n", encoding="utf-8")
+        with pytest.raises(ValueError):
+            svc.update_plan_status(str(f), "잘못된상태")
+
+    def test_file_not_found_raises(self, svc, tmp_path):
+        """파일 없음 → FileNotFoundError"""
+        import pytest
+        with pytest.raises(FileNotFoundError):
+            svc.update_plan_status(str(tmp_path / "missing.md"), "초안")

@@ -315,6 +315,12 @@ export const devRunnerPlanApi = {
 		devRunnerRequest<AddProjectResponse>('/plans/paths/project', {
 			method: 'POST',
 			body: JSON.stringify({ path })
+		}),
+
+	patchStatus: (encodedPath: string, status: string) =>
+		devRunnerRequest<{ path: string; status: string }>(`/plans/${encodedPath}/status`, {
+			method: 'PATCH',
+			body: JSON.stringify({ status })
 		})
 };
 

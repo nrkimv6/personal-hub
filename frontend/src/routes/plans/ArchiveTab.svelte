@@ -1,12 +1,31 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { planRecordsApi, archiveApi, type PlanRecord, type ArchivePreviewItem, type DuplicateItem } from '$lib/api/plan-records';
+  import { devRunnerPlanApi } from '$lib/api/dev-runner';
   import MemoEditor from './MemoEditor.svelte';
+  import PlanViewer from './PlanViewer.svelte';
 
   // ── 목록 상태 ──────────────────────────────────────────────
   let records: PlanRecord[] = [];
   let loading = true;
   let selectedRecord: PlanRecord | null = null;
+  let detailTab: 'content' | 'memo' = 'content';
+  let editingStatusId: number | null = null;
+
+  const EDITABLE_STATUSES = ['초안', '검토대기', '구현중', '보류'];
+
+  async function handleStatusChange(record: PlanRecord, newStatus: string) {
+    editingStatusId = null;
+    if (!newStatus || newStatus === record.status) return;
+    try {
+      const encoded = btoa(record.file_path);
+      await devRunnerPlanApi.patchStatus(encoded, newStatus);
+      record.status = newStatus;
+      records = records; // reactivity trigger
+    } catch (e) {
+      error = e instanceof Error ? e.message : '상태 변경 실패';
+    }
+  }
   let error = '';
   let skip = 0;
   const limit = 50;
@@ -163,6 +182,7 @@
 
   function selectRecord(record: PlanRecord) {
     selectedRecord = selectedRecord?.id === record.id ? null : record;
+    detailTab = 'content';
   }
 
   function formatDate(iso: string | null) {
@@ -251,6 +271,7 @@
               <th class="pb-2 pr-4 font-medium">파일명</th>
               <th class="pb-2 pr-3 font-medium whitespace-nowrap">카테고리</th>
               <th class="pb-2 pr-4 font-medium whitespace-nowrap">완료일</th>
+              <th class="pb-2 pr-4 font-medium whitespace-nowrap">상태</th>
               <th class="pb-2 font-medium">메모</th>
             </tr>
           </thead>
@@ -278,6 +299,29 @@
                 </td>
                 <td class="py-2 pr-4 text-muted-foreground text-xs whitespace-nowrap">
                   {formatDate(record.archived_at)}
+                </td>
+                <td class="py-2 pr-4" onclick={(e) => e.stopPropagation()}>
+                  {#if !record.status || record.status === 'unknown' || editingStatusId === record.id}
+                    <select
+                      class="text-xs rounded border border-border bg-background px-1 py-0.5 cursor-pointer"
+                      value={record.status && record.status !== 'unknown' ? record.status : ''}
+                      onchange={(e) => handleStatusChange(record, (e.target as HTMLSelectElement).value)}
+                      onblur={() => { if (editingStatusId === record.id) editingStatusId = null; }}
+                    >
+                      <option value="" disabled>상태 선택</option>
+                      {#each EDITABLE_STATUSES as s}
+                        <option value={s}>{s}</option>
+                      {/each}
+                    </select>
+                  {:else}
+                    <span
+                      class="px-2 py-0.5 rounded text-xs cursor-pointer bg-secondary text-secondary-foreground"
+                      title="클릭하여 상태 변경"
+                      onclick={() => { editingStatusId = record.id; }}
+                    >
+                      {record.status}
+                    </span>
+                  {/if}
                 </td>
                 <td class="py-2">
                   {#if record.memo}
@@ -309,7 +353,7 @@
     {/if}
   </div>
 
-  <!-- 메모 패널 -->
+  <!-- 상세 패널 -->
   {#if selectedRecord}
     <div class="w-80 flex-shrink-0 border-l border-border pl-4 flex flex-col gap-2">
       <div class="flex items-center justify-between">
@@ -325,8 +369,23 @@
       <p class="text-xs text-muted-foreground">
         카테고리: <span class="font-medium">{getCategoryFromPath(selectedRecord.file_path)}</span>
       </p>
-      <div class="flex-1">
-        <MemoEditor filePath={selectedRecord.file_path} />
+      <!-- 탭 버튼 -->
+      <div class="flex gap-1 border-b border-border pb-1">
+        <button
+          class="text-xs px-2 py-1 rounded-t transition-colors {detailTab === 'content' ? 'bg-muted font-semibold text-foreground' : 'text-muted-foreground hover:text-foreground'}"
+          onclick={() => { detailTab = 'content'; }}
+        >내용</button>
+        <button
+          class="text-xs px-2 py-1 rounded-t transition-colors {detailTab === 'memo' ? 'bg-muted font-semibold text-foreground' : 'text-muted-foreground hover:text-foreground'}"
+          onclick={() => { detailTab = 'memo'; }}
+        >메모</button>
+      </div>
+      <div class="flex-1 overflow-auto">
+        {#if detailTab === 'content'}
+          <PlanViewer filePath={selectedRecord.file_path} />
+        {:else}
+          <MemoEditor filePath={selectedRecord.file_path} />
+        {/if}
       </div>
     </div>
   {/if}

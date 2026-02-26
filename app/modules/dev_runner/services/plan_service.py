@@ -1120,6 +1120,49 @@ class PlanService:
                 return True
         return False
 
+    def update_plan_status(self, path: str, new_status: str) -> str:
+        """plan 파일의 상태 필드를 업데이트한다.
+
+        - 파일 상단 20줄에서 `> 상태: ...` 라인을 찾아 교체
+        - 라인이 없으면 첫 번째 `#` 제목 다음 줄에 삽입
+        - 허용 상태: 초안, 검토대기, 검토완료, 구현중, 구현완료, 보류
+        """
+        ALLOWED_STATUSES = ["초안", "검토대기", "검토완료", "구현중", "구현완료", "보류"]
+        if new_status not in ALLOWED_STATUSES:
+            raise ValueError(
+                f"허용되지 않은 상태: '{new_status}'. 허용 목록: {ALLOWED_STATUSES}"
+            )
+
+        file_path = Path(path)
+        if not file_path.exists():
+            raise FileNotFoundError(f"파일을 찾을 수 없습니다: {path}")
+
+        content = file_path.read_text(encoding="utf-8")
+        lines = content.splitlines(keepends=True)
+
+        import re
+
+        status_pattern = re.compile(r"^> 상태: .+")
+
+        # 상단 20줄에서 `> 상태:` 라인 교체
+        for i, line in enumerate(lines[:20]):
+            if status_pattern.match(line.rstrip("\n\r")):
+                lines[i] = f"> 상태: {new_status}\n"
+                file_path.write_text("".join(lines), encoding="utf-8")
+                return new_status
+
+        # `> 상태:` 라인 없음 → 첫 번째 `#` 제목 다음 줄에 삽입
+        for i, line in enumerate(lines):
+            if line.startswith("#"):
+                lines.insert(i + 1, f"> 상태: {new_status}\n")
+                file_path.write_text("".join(lines), encoding="utf-8")
+                return new_status
+
+        # 제목도 없으면 파일 맨 앞에 삽입
+        lines.insert(0, f"> 상태: {new_status}\n")
+        file_path.write_text("".join(lines), encoding="utf-8")
+        return new_status
+
 
 # 싱글톤 인스턴스
 plan_service = PlanService()
