@@ -25,6 +25,7 @@
   // 커밋
   let commitMsg = $state('');
   let generatingMsg = $state(false);
+  let llmProvider = $state<'claude' | 'gemini'>('claude');
 
   // 선택된 파일
   let selectedStaged: Set<string> = $state(new Set());
@@ -202,7 +203,7 @@
   async function handleGenerateMessage() {
     generatingMsg = true;
     try {
-      const result = await gitReposApi.generateMessage(repoId);
+      const result = await gitReposApi.generateMessage(repoId, { provider: llmProvider });
       if (result.message) {
         commitMsg = result.message;
         showToast('커밋 메시지가 생성되었습니다.');
@@ -347,6 +348,14 @@
                 bind:value={commitMsg}
                 onkeydown={(e) => e.key === 'Enter' && !e.shiftKey && handleCommit()}
               />
+              <select
+                class="px-2 py-2 text-xs rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-0"
+                bind:value={llmProvider}
+                title="LLM 엔진 선택"
+              >
+                <option value="claude">Claude Haiku</option>
+                <option value="gemini">Gemini Flash</option>
+              </select>
               <button
                 class="px-3 py-2 text-sm rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 disabled:opacity-50"
                 onclick={handleGenerateMessage}

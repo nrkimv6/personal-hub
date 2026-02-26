@@ -160,8 +160,15 @@ export const gitReposApi = {
   },
 
   /** LLM 커밋 메시지 자동 생성 */
-  generateMessage(id: number): Promise<{ message: string; request_id: number; status?: string }> {
-    return request(`${BASE}/${id}/generate-message`, { method: 'POST' });
+  generateMessage(
+    id: number,
+    opts?: { provider?: string; model?: string }
+  ): Promise<{ message: string; request_id: number; status?: string }> {
+    return request(`${BASE}/${id}/generate-message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(opts ?? {}),
+    });
   },
 
   /** 작업 이력 조회 */

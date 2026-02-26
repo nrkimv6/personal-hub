@@ -3,7 +3,7 @@ import json
 from datetime import datetime
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -294,7 +294,11 @@ async def batch_push(body: schemas.BatchPushRequest, db: Session = Depends(get_d
 
 
 @router.post("/{repo_id}/generate-message")
-async def generate_commit_message(repo_id: int, db: Session = Depends(get_db)):
+async def generate_commit_message(
+    repo_id: int,
+    body: schemas.GenerateMessageRequest = Body(default_factory=schemas.GenerateMessageRequest),
+    db: Session = Depends(get_db),
+):
     """diff를 LLM에 전달해 커밋 메시지 자동 생성.
 
     diff 조회는 route에서 직접 수행하고,
@@ -328,6 +332,13 @@ diff:
 
 커밋 메시지만 출력하세요."""
 
+        # model 기본값 해석
+        _default_models = {
+            "claude": "claude-haiku-4-5-20251001",
+            "gemini": "gemini-2.0-flash",
+        }
+        resolved_model = body.model if body.model else _default_models[body.provider]
+
         llm_svc = LLMService(db)
         req = llm_svc.enqueue(
             caller_type="git_repos",
@@ -335,7 +346,8 @@ diff:
             prompt=prompt,
             requested_by="api",
             request_source="git_commit_message",
-            model="claude-haiku-4-5-20251001",
+            provider=body.provider,
+            model=resolved_model,
             cli_options={"parse_json": False},
             queue_name="utility",
         )
