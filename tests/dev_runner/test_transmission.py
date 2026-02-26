@@ -20,6 +20,7 @@ class TestTransmissionPayload:
             return None
         
         svc.async_redis.get = mock_get
+        svc.async_redis.scard = AsyncMock(return_value=0)
         # Mocking the result of command start
         svc.async_redis.brpop.return_value = (
             "plan-runner:command_results", 

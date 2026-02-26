@@ -49,53 +49,58 @@ def background_listener():
 class TestHttpE2EChain:
     def test_http_start_to_process_execution(self, api_client, background_listener):
         r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
-        # Ensure IDLE state
-        r.set("plan-runner:state:status", "stopped")
-        
+
         payload = {
             "engine": "gemini",
             "plan_file": "docs/plan/test_e2e_plan.md",
             "dry_run": True
         }
-        
-        # We handle 500 error from TestClient event loop issues, as long as it sent the command to Redis
+
+        runner_id = None
         try:
             response = api_client.post(f"{BASE_URL}/run", json=payload)
-            # If 500, we check if it's because of event loop closing in test
-            if response.status_code == 500:
-                print("Got 500 from TestClient (expected due to loop), checking Redis...")
+            if response.status_code == 200:
+                runner_id = response.json().get("runner_id")
             else:
-                assert response.status_code == 200
+                print(f"Got {response.status_code} from TestClient, checking Redis...")
         except Exception as e:
             print(f"TestClient exception: {e}")
 
-        # VERIFY REDIS (The ultimate truth of E2E)
+        assert runner_id is not None, "API가 runner_id를 반환하지 않음 (500/504 오류)"
+
+        # VERIFY REDIS — per-runner 키 확인
+        from app.modules.dev_runner.services.executor_service import RUNNER_KEY_PREFIX
         executed = False
-        for _ in range(15):
-            status = r.get("plan-runner:state:status")
-            pid = r.get("plan-runner:state:pid")
+        for _ in range(20):
+            status = r.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
+            pid = r.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
             if status == "running" and pid:
                 executed = True
                 break
             time.sleep(1)
-            
-        assert executed is True, f"E2E Failed: Redis status is {r.get('plan-runner:state:status')}"
-        print(f"\n[SUCCESS] HTTP E2E Start Chain Verified (PID: {r.get('plan-runner:state:pid')})")
+
+        assert executed is True, f"E2E Failed: runner {runner_id} status={r.get(f'{RUNNER_KEY_PREFIX}:{runner_id}:status')}"
+        print(f"\n[SUCCESS] HTTP E2E Start Chain Verified (runner_id: {runner_id}, PID: {r.get(f'{RUNNER_KEY_PREFIX}:{runner_id}:pid')})")
 
     def test_http_stop_to_process_cleanup(self, api_client, background_listener):
-        try:
-            api_client.post(f"{BASE_URL}/stop")
-        except:
-            pass
-            
         r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+        from app.modules.dev_runner.services.executor_service import RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY
+
+        # active runners 확인 후 stop
+        active = r.smembers(ACTIVE_RUNNERS_KEY)
+        for runner_id in active:
+            try:
+                api_client.post(f"{BASE_URL}/stop/{runner_id}")
+            except Exception:
+                pass
+
+        # active_runners가 비어질 때까지 대기
         cleaned = False
         for _ in range(10):
-            status = r.get("plan-runner:state:status")
-            if status != "running":
+            if not r.smembers(ACTIVE_RUNNERS_KEY):
                 cleaned = True
                 break
             time.sleep(1)
-            
+
         assert cleaned is True
         print("\n[SUCCESS] HTTP E2E Stop Chain Verified")

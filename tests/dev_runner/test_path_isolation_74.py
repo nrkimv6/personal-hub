@@ -25,6 +25,8 @@ def test_external_plan_path_accepted():
         None  # status not running
     ))
     mock_r.lpush = AsyncMock(return_value=1)
+    mock_r.scard = AsyncMock(return_value=0)
+    mock_r.delete = AsyncMock(return_value=1)
 
     # brpop → success 결과 반환
     async def mock_brpop(key, timeout=10):

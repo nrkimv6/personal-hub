@@ -195,8 +195,8 @@ class TestGetRunnerStatus:
 
         executor.redis_client.get = MagicMock(side_effect=get_side_effect)
 
-        # psutil.pid_exists는 테스트 환경에서 PID 5678이 없어 stale 처리될 수 있으므로 mock
-        with patch("psutil.pid_exists", return_value=True):
+        # _is_pid_alive는 ctypes.windll를 사용하므로 executor_service 모듈에서 직접 패치
+        with patch.object(executor, "_is_pid_alive", return_value=True):
             result = executor.get_runner_status("abc12345")
 
         assert result.runner_id == "abc12345"

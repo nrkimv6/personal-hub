@@ -262,24 +262,24 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
 def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
     """plan-runner CLI 실행 (백그라운드 스레드에서 호출 — worktree 생성 포함)
 
-    결과는 per-command result key로 Redis에 반환.
+    API는 이미 "accepted"를 받았으므로 여기서는 result_key에 push하지 않음.
+    실패 시 runner 상태를 Redis에 기록.
     """
     runner_id = command.get("runner_id")
-    command_id = command.get("command_id", "")
-    result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
 
-    def _push_result(result: Dict):
-        result["action"] = "run"
-        result["executed_at"] = datetime.now().isoformat()
-        redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
-        redis_client.expire(result_key, 60)
+    def _set_error_status(message: str):
+        """실패 시 per-runner 상태를 Redis에 기록"""
+        if runner_id:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "error")
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", message)
+            logger.error(f"[_do_start_plan_runner] 실패 상태 기록 (runner_id: {runner_id}): {message}")
 
     # worktree 생성 (시간이 걸릴 수 있음)
     try:
         worktree_path = WorktreeManager.create(runner_id, WORKTREE_BASE_DIR)
     except WorktreeError as e:
         logger.error(f"worktree 생성 실패 (runner_id: {runner_id}): {e}")
-        _push_result({"success": False, "message": f"worktree 생성 실패: {e}"})
+        _set_error_status(f"worktree 생성 실패: {e}")
         return
 
     # 명령어 구성
@@ -287,11 +287,12 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
     engine = command.get("engine")
     is_parallel = command.get("parallel", False)
     if not plan_file and not is_parallel:
-        _push_result({"success": False, "message": "plan_file required (use parallel mode for batch execution)"})
+        _set_error_status("plan_file required (use parallel mode for batch execution)")
         return
 
     result = _launch_plan_runner_process(command, redis_client, runner_id, worktree_path, plan_file, engine)
-    _push_result(result)
+    if not result.get("success"):
+        _set_error_status(result.get("message", "Unknown error"))
 
 
 def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
@@ -335,8 +336,21 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
         logger.info(f"Previous process ended (exit code: {proc.returncode}), cleaning up")
         _cleanup_process_state(runner_id, redis_client)
 
+    # 즉시 "accepted" 결과를 per-command result key에 push → API 타임아웃 방지
+    command_id = command.get("command_id", "")
+    result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
+    accepted = {
+        "success": True,
+        "message": "accepted",
+        "runner_id": runner_id,
+        "action": "run",
+        "executed_at": datetime.now().isoformat(),
+    }
+    redis_client.lpush(result_key, json.dumps(accepted, ensure_ascii=False))
+    redis_client.expire(result_key, 60)
+    logger.info(f"[start_plan_runner] accepted 응답 즉시 반환 (runner_id: {runner_id})")
+
     # 백그라운드 스레드에서 worktree 생성 + 프로세스 시작
-    # 결과는 per-command result key로 Redis에 반환됨
     thread = threading.Thread(
         target=_do_start_plan_runner,
         args=(command, redis_client),
@@ -344,9 +358,7 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
     )
     thread.start()
 
-    # 즉시 반환하지 않음 — _do_start_plan_runner가 result key에 결과를 push
-    # 이 함수의 반환값은 main loop에서 사용하지 않음 (아래 execute_command에서 분기)
-    return None  # sentinel: main loop에서 결과 push 스킵
+    return None  # sentinel: main loop에서 결과 push 스킵 (이미 위에서 push)
 
 
 def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner_id: str, worktree_path: Path, plan_file: str, engine: str) -> Dict:
