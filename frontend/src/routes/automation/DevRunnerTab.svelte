@@ -94,14 +94,31 @@
 				lastStartTime = null;
 			}
 
-			// runner 탭 running 상태 동기화
+			// runner 탭 running 상태 동기화 + 신규 runner 추가
 			try {
 				const runners = await devRunnerRunnerApi.runners();
 				const runnerMap = new Map(runners.map(r => [r.runner_id, r]));
+				// 기존 탭 상태 갱신
 				runnerTabs = runnerTabs.map(tab => {
 					const runner = runnerMap.get(tab.id);
 					return runner ? { ...tab, running: runner.running } : { ...tab, running: false };
 				});
+				// 신규 runner 탭 추가 (페이지 로드 시 또는 외부에서 시작된 runner)
+				for (const runner of runners) {
+					if (!runnerTabs.some(t => t.id === runner.runner_id)) {
+						runnerTabs = [...runnerTabs, {
+							id: runner.runner_id,
+							plan_file: runner.plan_file,
+							engine: runner.engine,
+							running: runner.running,
+							start_time: runner.start_time ? new Date(runner.start_time).toISOString() : null,
+						}];
+					}
+				}
+				// activeTabId가 없으면 마지막 탭 선택
+				if (!activeTabId && runnerTabs.length > 0) {
+					activeTabId = runnerTabs[runnerTabs.length - 1].id;
+				}
 			} catch {
 				// runners API 실패 시 무시
 			}
@@ -471,32 +488,33 @@
 							<RunControl status={runStatus} {plans} onStatusChange={handleRunStatusChange} onStart={handleRunStart} bind:selectedPlan={selectedPlanPath} runnerTabs={runnerTabs.map(t => ({ id: t.id, running: t.running }))} />
 						</div>
 
-						<!-- Runner 서브탭 바 -->
-						{#if runnerTabs.length > 0}
-							<div class="flex items-center gap-1 bg-white border rounded-lg px-2 py-1 overflow-x-auto">
-								{#each runnerTabs as tab (tab.id)}
-									<!-- svelte-ignore a11y_interactive_supports_focus -->
-									<div
-										class="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono whitespace-nowrap transition-colors cursor-pointer {activeTabId === tab.id ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-gray-600 hover:bg-gray-100'}"
-										role="tab"
-										aria-selected={activeTabId === tab.id}
-										onclick={() => { activeTabId = tab.id; }}
-										onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { activeTabId = tab.id; } }}
-									>
-										<span>{tab.running ? '⏳' : '✅'}</span>
-										<span class="max-w-[120px] truncate">{tab.plan_file ? tab.plan_file.split(/[\\/]/).pop() : '전체 실행'}</span>
-										<button
-											class="ml-0.5 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-300 text-gray-400 hover:text-gray-600 text-[10px]"
-											onclick={(e) => { e.stopPropagation(); handleCloseTab(tab.id); }}
-											title="탭 닫기"
-										>×</button>
-									</div>
-								{/each}
-							</div>
-						{/if}
 					</div>
 				{/if}
 			</div>
+
+			<!-- Runner 탭 바 (항상 표시) -->
+			{#if runnerTabs.length > 0}
+				<div class="flex items-center gap-1 border-b px-2 py-1 overflow-x-auto shrink-0">
+					{#each runnerTabs as tab (tab.id)}
+						<!-- svelte-ignore a11y_interactive_supports_focus -->
+						<div
+							class="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono whitespace-nowrap transition-colors cursor-pointer {activeTabId === tab.id ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-gray-600 hover:bg-gray-100'}"
+							role="tab"
+							aria-selected={activeTabId === tab.id}
+							onclick={() => { activeTabId = tab.id; }}
+							onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { activeTabId = tab.id; } }}
+						>
+							<span>{tab.running ? '⏳' : '✅'}</span>
+							<span class="max-w-[120px] truncate">{tab.plan_file ? tab.plan_file.split(/[\\/]/).pop() : '전체 실행'}</span>
+							<button
+								class="ml-0.5 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-300 text-gray-400 hover:text-gray-600 text-[10px]"
+								onclick={(e) => { e.stopPropagation(); handleCloseTab(tab.id); }}
+								title="탭 닫기"
+							>×</button>
+						</div>
+					{/each}
+				</div>
+			{/if}
 
 			<!-- Log Viewer + Plans & Tasks (2-grid on desktop, stack on mobile) -->
 			<div class="flex-1 min-h-0 flex flex-col md:grid md:grid-cols-2 md:gap-0 overflow-hidden">
