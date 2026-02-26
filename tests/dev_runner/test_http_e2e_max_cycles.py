@@ -13,6 +13,8 @@ import json
 import pytest
 from datetime import datetime
 from unittest.mock import patch, MagicMock, AsyncMock
+
+pytestmark = pytest.mark.http
 import fakeredis
 import fakeredis.aioredis
 from fastapi.testclient import TestClient

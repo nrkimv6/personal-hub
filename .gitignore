@@ -28,4 +28,5 @@ data/image_classifier/settings.json
 frontend/static/diagnostics.json
 
 *cwd
+.worktrees/
 data/image_classifier

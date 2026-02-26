@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 from app.main import app
 import redis
 
+pytestmark = pytest.mark.http
+
 # Constants
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379

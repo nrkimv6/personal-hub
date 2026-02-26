@@ -36,8 +36,9 @@ from sqlalchemy.orm import sessionmaker
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# 테스트 DB 경로
-TEST_DB_PATH = PROJECT_ROOT / "data" / "test_monitor.db"
+# 테스트 DB 경로 (TEST_DB_DIR 환경변수로 워크트리 격리 지원)
+TEST_DB_DIR = Path(os.environ.get("TEST_DB_DIR", str(PROJECT_ROOT / "data")))
+TEST_DB_PATH = TEST_DB_DIR / "test_monitor.db"
 MIGRATIONS_DIR = PROJECT_ROOT / "app" / "migrations"
 
 
@@ -90,6 +91,9 @@ def test_db_engine():
     테스트 세션 종료 시 자동으로 정리됩니다.
     """
     from app.database import Base
+
+    # TEST_DB_DIR 자동 생성 (worktree 환경에서 data 디렉토리 없을 수 있음)
+    TEST_DB_DIR.mkdir(parents=True, exist_ok=True)
 
     # 기존 테스트 DB 삭제
     if TEST_DB_PATH.exists():

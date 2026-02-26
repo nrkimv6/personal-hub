@@ -20,7 +20,8 @@ except ImportError:
 
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
-TEST_DB_PATH = PROJECT_ROOT / "data" / "test_integration_monitor.db"
+TEST_DB_DIR = Path(os.environ.get("TEST_DB_DIR", str(PROJECT_ROOT / "data")))
+TEST_DB_PATH = TEST_DB_DIR / "test_integration_monitor.db"
 TEST_SERVER_PORT = 8001
 
 
@@ -35,6 +36,9 @@ def integration_server():
     """
     if not HAS_REQUESTS:
         pytest.skip("requests 모듈이 필요합니다: pip install requests")
+
+    # 0. TEST_DB_DIR 자동 생성 (worktree 환경에서 data 디렉토리 없을 수 있음)
+    TEST_DB_DIR.mkdir(parents=True, exist_ok=True)
 
     # 1. 기존 테스트 DB 삭제 (깨끗한 상태로 시작)
     if TEST_DB_PATH.exists():
