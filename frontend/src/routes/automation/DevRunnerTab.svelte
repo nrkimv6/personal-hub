@@ -11,7 +11,8 @@
 	import {
 		devRunnerTaskApi,
 		devRunnerRunnerApi,
-		devRunnerPlanApi
+		devRunnerPlanApi,
+		devRunnerEventApi
 	} from '$lib/api';
 	import type {
 		DevRunnerRunStatusResponse,
@@ -60,6 +61,13 @@
 	let elapsed = $state('00:00:00');
 	let elapsedInterval: ReturnType<typeof setInterval> | null = null;
 
+	// SSE 연결 상태
+	let eventSource: EventSource | null = null;
+	let sseConnected = $state(false);
+	let sseReconnectDelay = 1000; // 지수 백오프 초기값
+	let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	let fallbackTimer: ReturnType<typeof setInterval> | null = null;
+
 	function updateElapsed(startTime: string) {
 		const diff = Date.now() - new Date(startTime).getTime();
 		const h = Math.floor(diff / 3600000);
@@ -99,6 +107,113 @@
 		} catch (e) {
 			console.warn('[DevRunner] status API 호출 실패', e);
 		}
+	}
+
+	// ── SSE 연결 ────────────────────────────────────────────────────────────
+
+	function connectSSE() {
+		if (eventSource) {
+			eventSource.close();
+			eventSource = null;
+		}
+
+		eventSource = devRunnerEventApi.connectEvents();
+
+		eventSource.onopen = () => {
+			sseConnected = true;
+			sseReconnectDelay = 1000; // 성공 시 delay 리셋
+			// fallback 폴링 중단
+			if (fallbackTimer) {
+				clearInterval(fallbackTimer);
+				fallbackTimer = null;
+			}
+		};
+
+		eventSource.onerror = () => {
+			sseConnected = false;
+			eventSource?.close();
+			eventSource = null;
+
+			// 지수 백오프 재연결
+			if (sseReconnectTimer) clearTimeout(sseReconnectTimer);
+			sseReconnectTimer = setTimeout(() => {
+				sseReconnectDelay = Math.min(sseReconnectDelay * 2, 30000);
+				connectSSE();
+			}, sseReconnectDelay);
+
+			// fallback 폴링 시작 (10초 후)
+			if (!fallbackTimer) {
+				fallbackTimer = setInterval(async () => {
+					if (!sseConnected) {
+						void pollStatus();
+					} else {
+						if (fallbackTimer) {
+							clearInterval(fallbackTimer);
+							fallbackTimer = null;
+						}
+					}
+				}, 30000);
+				// 첫 fallback은 10초 후
+				setTimeout(() => { if (!sseConnected) void pollStatus(); }, 10000);
+			}
+		};
+
+		// status 이벤트: runner 상태 변경
+		eventSource.addEventListener('status', (e: MessageEvent) => {
+			try {
+				const data = JSON.parse(e.data) as { runners: { runner_id: string; status: string; pid: string | null; current_cycle: string | null; start_time: string | null; plan_file: string | null }[] };
+				// runners 배열에서 첫 번째 running runner로 runStatus 갱신
+				const runners = data.runners ?? [];
+				const runningRunner = runners.find(r => r.status === 'running');
+				const anyRunner = runners[0];
+				const r = runningRunner ?? anyRunner;
+				if (r) {
+					runStatus = {
+						...(runStatus ?? {} as DevRunnerRunStatusResponse),
+						running: r.status === 'running',
+						pid: r.pid ? parseInt(r.pid) : null,
+						current_cycle: r.current_cycle !== null ? parseInt(r.current_cycle) : null,
+						start_time: r.start_time ?? null,
+						plan_file: r.plan_file ?? null,
+						runner_id: r.runner_id,
+					} as DevRunnerRunStatusResponse;
+				} else if (runners.length === 0 && runStatus) {
+					// 모든 runner 종료
+					runStatus = { ...runStatus, running: false };
+				}
+				// runner 탭 running 상태 동기화
+				if (runners.length > 0) {
+					const runnerMap = new Map(runners.map(r => [r.runner_id, r]));
+					runnerTabs = runnerTabs.map(tab => {
+						const runner = runnerMap.get(tab.id);
+						return runner ? { ...tab, running: runner.status === 'running' } : { ...tab, running: false };
+					});
+				}
+			} catch {
+				// JSON 파싱 오류 무시
+			}
+		});
+
+		// tracking 이벤트: 현재 추적 태스크 변경
+		eventSource.addEventListener('tracking', (e: MessageEvent) => {
+			try {
+				currentTracking = JSON.parse(e.data) as CurrentTrackingResponse;
+			} catch {
+				// 무시
+			}
+		});
+
+		// plan_changed 이벤트: plan_file 변경 → plan 목록 갱신
+		eventSource.addEventListener('plan_changed', () => {
+			void fetchPlans();
+			if (taskListPlanPath) void fetchItems(taskListPlanPath);
+		});
+	}
+
+	// TaskList용 fetchItems (plan_changed 이벤트에서 호출)
+	// DevRunnerTab 자체에서 items를 갖진 않으므로 PlanList 갱신만 처리
+	async function fetchItems(_planPath: string) {
+		// PlanList는 내부적으로 plans 변경을 감지하므로 fetchPlans()만 호출하면 충분
 	}
 
 	function handleRunSuccess(response: DevRunnerRunStatusResponse) {
@@ -182,23 +297,27 @@
 			}
 		}
 
-		// 폴링은 status만 (3초/15초 간격)
-		pollingController = createSmartPolling(
-			pollStatus,
-			() => ({ running: runStatus?.running ?? false })
-		);
-
-		// TaskTracker tracking 정보 폴링 (5초 간격)
-		trackingInterval = setInterval(async () => {
-			try {
-				currentTracking = await devRunnerTaskApi.currentTracking();
-			} catch {
-				currentTracking = null;
-			}
-		}, 5000);
+		// SSE 연결 (폴링 대체)
+		connectSSE();
 	});
 
 	onDestroy(() => {
+		// SSE 정리
+		if (sseReconnectTimer) {
+			clearTimeout(sseReconnectTimer);
+			sseReconnectTimer = null;
+		}
+		if (fallbackTimer) {
+			clearInterval(fallbackTimer);
+			fallbackTimer = null;
+		}
+		if (eventSource) {
+			eventSource.close();
+			eventSource = null;
+		}
+		sseConnected = false;
+
+		// 레거시 폴링 정리 (혹시 남아있다면)
 		if (pollingController) {
 			pollingController.cleanup();
 			pollingController = null;
@@ -214,9 +333,6 @@
 	});
 
 	$effect(() => {
-		if (runStatus && pollingController) {
-			pollingController.refresh();
-		}
 
 		// current_cycle 변화 감지 → plans 갱신
 		const currentCycle = runStatus?.current_cycle ?? null;

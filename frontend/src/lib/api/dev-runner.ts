@@ -337,3 +337,14 @@ export const devRunnerLogApi = {
 		return new EventSource(`${DEV_RUNNER_BASE}/logs/stream?runner_id=${runnerId}`);
 	}
 };
+
+// ============================================================
+// Events API (SSE — Redis keyspace notifications 기반)
+// ============================================================
+
+export const devRunnerEventApi = {
+	/** Redis keyspace notifications 기반 실시간 SSE 스트림에 연결 */
+	connectEvents: (): EventSource => {
+		return new EventSource(`${DEV_RUNNER_BASE}/events`);
+	}
+};
