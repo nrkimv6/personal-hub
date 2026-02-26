@@ -373,6 +373,7 @@ export interface LLMRequest {
   result?: Record<string, unknown>;
   error_message?: string;
   retry_count: number;
+  raw_response?: string;
 }
 
 export interface LLMQueueStats {
