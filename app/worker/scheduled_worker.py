@@ -193,6 +193,14 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             for schedule in report_schedules:
                 await self._process_report_schedule(db, schedule, schedule_service)
 
+            # pytest_run 타입의 활성 스케줄 조회
+            pytest_schedules = schedule_service.get_schedules_by_type(
+                TaskSchedule.TARGET_TYPE_PYTEST_RUN,
+                enabled_only=True
+            )
+            for schedule in pytest_schedules:
+                await self._process_pytest_schedule(db, schedule, schedule_service)
+
         except Exception as e:
             logger.error(f"[{self.name}] 스케줄 디스패치 오류: {e}", exc_info=True)
         finally:
@@ -1387,6 +1395,129 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             try:
                 schedule_service = TaskScheduleService(db)
                 schedule_service.fail_run(run.id, str(e))
+            except Exception:
+                pass
+        finally:
+            self._update_worker_state("idle")
+            db.close()
+
+    # ========== pytest_run 스케줄 ==========
+
+    @staticmethod
+    def _should_run_cron(schedule: TaskSchedule, last_run_at: Optional[datetime]) -> bool:
+        """cron/time_window 스케줄이 지금 실행될 시간인지 판단.
+
+        playwright 미의존 유틸 `should_run_cron_now`에 위임.
+        """
+        from app.services.pytest_runner_service import should_run_cron_now
+        return should_run_cron_now(schedule.schedule_value or "", last_run_at)
+
+    async def _process_pytest_schedule(
+        self,
+        db,
+        schedule: TaskSchedule,
+        schedule_service: TaskScheduleService
+    ):
+        """pytest_run 스케줄 처리."""
+        try:
+            last_run = schedule_service.get_latest_run(schedule.id)
+            last_run_at = last_run.started_at if last_run else None
+
+            if not self._should_run_cron(schedule, last_run_at):
+                return
+
+            logger.info(f"[{self.name}] pytest_run 실행 시간 도래: schedule_id={schedule.id}")
+
+            if schedule_service.has_active_run(schedule.id):
+                logger.info(f"[{self.name}] 이미 활성 실행 존재, 스킵")
+                return
+
+            config = schedule.get_target_config()
+            run = schedule_service.start_run(
+                schedule_id=schedule.id,
+                worker_id=self.name,
+                config_snapshot=config
+            )
+
+            task_name = f"pytest_run_{schedule.id}_run_{run.id}"
+            if not self._is_task_running(task_name):
+                self._create_task(
+                    self._execute_pytest_run(schedule, run, config),
+                    task_name
+                )
+                logger.info(f"[{self.name}] pytest 실행 태스크 시작: run_id={run.id}")
+
+        except Exception as e:
+            logger.error(
+                f"[{self.name}] pytest_run 스케줄 처리 오류: schedule_id={schedule.id}, error={e}",
+                exc_info=True
+            )
+
+    async def _execute_pytest_run(
+        self,
+        schedule: TaskSchedule,
+        run: TaskScheduleRun,
+        config: dict
+    ):
+        """pytest 실행 + 결과 저장 + LLM 수정계획 요청 생성."""
+        import asyncio as _asyncio
+        from app.services.pytest_runner_service import PytestRunnerService
+
+        db = SessionLocal()
+        try:
+            schedule_service = TaskScheduleService(db)
+            self._update_worker_state("running_pytest", f"pytest_{schedule.id}")
+
+            test_path = config.get("test_path", "tests/")
+            extra_args_raw = config.get("extra_args", [])
+            extra_args = extra_args_raw if isinstance(extra_args_raw, list) else []
+            timeout = config.get("timeout", 1800)
+
+            runner = PytestRunnerService(db)
+            loop = _asyncio.get_event_loop()
+
+            test_run = await loop.run_in_executor(
+                None,
+                lambda: runner.run_tests(
+                    test_path=test_path,
+                    extra_args=extra_args,
+                    timeout=timeout,
+                    triggered_by="scheduler",
+                    schedule_run_id=run.id,
+                )
+            )
+
+            if config.get("auto_fix_plan", True) and (test_run.failed + test_run.errors) > 0:
+                provider = config.get("provider", "claude")
+                model = config.get("model", "")
+                await loop.run_in_executor(
+                    None,
+                    lambda: runner.create_fix_plan_requests(
+                        test_run_id=test_run.id,
+                        provider=provider,
+                        model=model,
+                    )
+                )
+
+            schedule_service.complete_run(
+                run.id,
+                collected_count=test_run.total_tests,
+                saved_count=test_run.failed + test_run.errors,
+                stop_reason=f"pytest_run_id_{test_run.id}"
+            )
+            schedule_service.update_schedule_after_run(run.schedule_id)
+            logger.info(
+                f"[{self.name}] pytest 완료: run_id={run.id}, "
+                f"total={test_run.total_tests}, failed={test_run.failed}"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"[{self.name}] pytest 실행 실패: run_id={run.id}, error={e}",
+                exc_info=True
+            )
+            try:
+                TaskScheduleService(db).fail_run(run.id, str(e))
             except Exception:
                 pass
         finally:
