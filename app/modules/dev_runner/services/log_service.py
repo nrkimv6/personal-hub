@@ -16,8 +16,10 @@ from app.modules.dev_runner.services.state import get_state
 # Redis 설정
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
-STATE_KEY = "plan-runner:state"
-LOG_CHANNEL = "plan-runner:logs"
+RUNNER_KEY_PREFIX = "plan-runner:runners"
+ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
+LOG_CHANNEL_PREFIX = "plan-runner:logs"
+LOG_CHANNEL = "plan-runner:logs"  # 하위호환 — plan_service 등 단일 채널 publish용
 
 HEARTBEAT_INTERVAL = 30  # 초
 
@@ -42,27 +44,24 @@ class LogService:
             socket_connect_timeout=5,
         )
 
-    def _find_current_log(self) -> Optional[Path]:
-        """현재 실행 중인 plan-runner의 stream 로그 파일 (Redis에서 조회)"""
+    def _find_current_log(self, runner_id: str) -> Optional[Path]:
+        """특정 runner의 stream 로그 파일 (Redis에서 조회)"""
         try:
             # stream 로그 경로 우선 (executor가 직접 기록한 파일)
-            log_path = self.redis_client.get(STATE_KEY + ":stream_log_path")
+            log_path = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
             if log_path and Path(log_path).exists():
                 return Path(log_path)
             # fallback: 기존 log_file_path
-            log_path = self.redis_client.get(STATE_KEY + ":log_file_path")
+            log_path = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path")
             if log_path and Path(log_path).exists():
                 return Path(log_path)
         except redis.ConnectionError:
             pass
         return None
 
-    def tail_log_file(self, n_lines: int = 100) -> LogResponse:
-        """로그 파일 끝에서 N줄 읽기 (초기 로드용).
-
-        로그 파일이 없거나 비어있을 때 SQLite stream_logs fallback을 시도합니다.
-        """
-        log_file = self._find_current_log()
+    def tail_log_file(self, runner_id: str, n_lines: int = 100) -> LogResponse:
+        """로그 파일 끝에서 N줄 읽기 (초기 로드용)."""
+        log_file = self._find_current_log(runner_id)
 
         if log_file and log_file.exists():
             try:
@@ -81,12 +80,10 @@ class LogService:
 
         return LogResponse(lines=[], total_lines=0)
 
-    async def stream_log_file(self) -> AsyncGenerator[str, None]:
-        """Redis Pub/Sub 기반 실시간 로그 스트리밍 (SSE 형식)
+    async def stream_log_file(self, runner_id: str) -> AsyncGenerator[str, None]:
+        """Redis Pub/Sub 기반 실시간 로그 스트리밍 (SSE 형식)"""
+        log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
 
-        redis.asyncio를 사용하여 이벤트 루프 블로킹 없이 메시지를 수신합니다.
-        Redis 미연결 시에도 generator를 유지하여 SSE 연결이 끊기지 않도록 함.
-        """
         # 초기 연결 이벤트 — EventSource가 MIME type 검증을 통과하도록 보장
         yield "event: connected\ndata: ok\n\n"
 
@@ -99,7 +96,7 @@ class LogService:
             try:
                 if pubsub is None:
                     pubsub = self.async_redis.pubsub()
-                    await pubsub.subscribe(LOG_CHANNEL)
+                    await pubsub.subscribe(log_channel)
 
                 message = await pubsub.get_message(
                     ignore_subscribe_messages=True, timeout=0.5
@@ -107,9 +104,8 @@ class LogService:
                 if message and message["type"] == "message":
                     yield f"data: {message['data']}\n\n"
                     last_heartbeat = time.monotonic()
-                    consecutive_errors = 0  # 정상 수신 시 카운터 리셋
+                    consecutive_errors = 0
                 else:
-                    # 메시지 없으면 heartbeat 체크
                     now = time.monotonic()
                     if now - last_heartbeat >= HEARTBEAT_INTERVAL:
                         yield ": heartbeat\n\n"
@@ -117,11 +113,9 @@ class LogService:
                     await asyncio.sleep(0.3)
 
             except (redis.ConnectionError, aioredis.ConnectionError, ConnectionError, OSError):
-                # Redis 연결 실패 — generator 종료 대신 heartbeat 유지 + 재연결 대기
-                # consecutive_errors 증가 없음 (연결 문제는 별도 처리)
                 if pubsub:
                     try:
-                        await pubsub.unsubscribe(LOG_CHANNEL)
+                        await pubsub.unsubscribe(log_channel)
                         await pubsub.aclose()
                     except AttributeError:
                         try:
@@ -139,7 +133,7 @@ class LogService:
                 consecutive_errors += 1
                 if pubsub:
                     try:
-                        await pubsub.unsubscribe(LOG_CHANNEL)
+                        await pubsub.unsubscribe(log_channel)
                         await pubsub.aclose()
                     except AttributeError:
                         try:
@@ -178,10 +172,15 @@ class LogService:
             "detail": "활성" if hb else "heartbeat 키 없음 (리스너 꺼짐)"
         })
 
-        # 3. 로그 파일
-        log_path = self.redis_client.get(STATE_KEY + ":stream_log_path")
-        if not log_path:
-            log_path = self.redis_client.get(STATE_KEY + ":log_file_path")
+        # 3. 로그 파일 — 첫 번째 active runner 기준
+        log_path = None
+        runner_ids = self.redis_client.smembers(ACTIVE_RUNNERS_KEY)
+        if runner_ids:
+            first_id = next(iter(runner_ids))
+            log_path = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{first_id}:stream_log_path")
+            if not log_path:
+                log_path = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{first_id}:log_file_path")
+
         if log_path and Path(log_path).exists():
             size = Path(log_path).stat().st_size
             steps.append({
@@ -199,15 +198,13 @@ class LogService:
                 "detail": "stream_log_path / log_file_path 키 없음"
             })
 
-        # 4. CLI 프로세스
-        status = self.redis_client.get(STATE_KEY + ":status")
-        pid = self.redis_client.get(STATE_KEY + ":pid")
-        if status == "running" and pid:
-            steps.append({"step": 4, "name": "CLI 프로세스", "ok": True, "detail": f"PID {pid}"})
+        # 4. CLI 프로세스 — active runners 수 기준
+        if runner_ids:
+            steps.append({"step": 4, "name": "CLI 프로세스", "ok": True, "detail": f"{len(runner_ids)} runner(s) active"})
         else:
             steps.append({
                 "step": 4, "name": "CLI 프로세스", "ok": False,
-                "detail": "미실행" if not status else f"status={status}"
+                "detail": "미실행"
             })
 
         return {"steps": steps}

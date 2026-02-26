@@ -3,12 +3,13 @@
 	import { devRunnerLogApi } from '$lib/api';
 
 	interface Props {
+		runnerId: string;
 		planFile?: string;
 		currentPlanName?: string;
 		onBatchPlansChange?: (plans: BatchPlanItem[]) => void;
 	}
 
-	let { planFile, currentPlanName, onBatchPlansChange }: Props = $props();
+	let { runnerId, planFile, currentPlanName, onBatchPlansChange }: Props = $props();
 
 	// Phase 2: 전체실행 시 Plan 파일 리스트 추적
 	interface BatchPlanItem {
@@ -223,7 +224,7 @@
 		// SSE 연결 전 status API로 실행 상태 + Redis 상태 확인
 		await fetchStatus();
 
-		eventSource = devRunnerLogApi.connectStream();
+		eventSource = devRunnerLogApi.connectStream(runnerId);
 		eventSource.onopen = () => {
 			connected = 'connected';
 			sseStarted = true;
@@ -255,7 +256,7 @@
 
 	async function loadRecent() {
 		try {
-			const res = await devRunnerLogApi.recent(100);
+			const res = await devRunnerLogApi.recent(runnerId, 100);
 			lines = res.lines.map((text: string) => parseLine(text, true));
 		} catch {
 			// 로그 없을 수 있음

@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { devRunnerRunnerApi, devRunnerPlanApi, devRunnerEngineApi } from '$lib/api';
-	import type { DevRunnerRunStatusResponse, DevRunnerPlanFileResponse, AllEnginesConfig } from '$lib/api';
+	import type { DevRunnerRunStatusResponse, DevRunnerPlanFileResponse, AllEnginesConfig, DevRunnerRunnerListItem } from '$lib/api';
 	import { onMount } from 'svelte';
 
 	interface Props {
 		status: DevRunnerRunStatusResponse | null;
 		plans: DevRunnerPlanFileResponse[];
 		onStatusChange: () => void;
-                onStart?: () => void;
-                selectedPlan?: string;
+		onStart?: (response: DevRunnerRunStatusResponse) => void;
+		selectedPlan?: string;
 	}
 
 	let { status, plans, onStatusChange, onStart, selectedPlan = $bindable('') }: Props = $props();
@@ -91,7 +91,7 @@
 		actionError = null;
 		forceStopNeeded = false;
 		try {
-			await devRunnerRunnerApi.start({
+			const response = await devRunnerRunnerApi.start({
 				plan_file: mode === 'single' ? selectedPlan : null,
 				engine: selectedEngine,
 				max_cycles: maxCycles || 0,
@@ -101,7 +101,7 @@
 				projects: projects || null
 			});
 			onStatusChange();
-                        onStart?.();
+			onStart?.(response);
 		} catch (e) {
 			const msg = e instanceof Error ? e.message : '시작 실패';
 			if (msg.includes('Already running')) {
@@ -138,7 +138,7 @@
 		actionLoading = true;
 		actionError = null;
 		try {
-			await devRunnerRunnerApi.stop();
+			await devRunnerRunnerApi.stopLegacy();
 			onStatusChange();
 		} catch (e) {
 			actionError = e instanceof Error ? e.message : '중지 실패';
