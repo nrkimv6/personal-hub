@@ -247,7 +247,9 @@ export const devRunnerRunnerApi = {
 		devRunnerRequest<{ success: boolean; message: string }>(
 			`/runners/${runnerId}/worktree`,
 			{ method: 'DELETE' }
-		)
+		),
+
+	stopAll: () => devRunnerRequest<{ stopped: number }>('/stop-all', { method: 'POST' })
 };
 
 // ============================================================

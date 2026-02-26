@@ -9,9 +9,10 @@
 		onStatusChange: () => void;
 		onStart?: (response: DevRunnerRunStatusResponse) => void;
 		selectedPlan?: string;
+		runnerTabs?: { id: string; running: boolean }[];
 	}
 
-	let { status, plans, onStatusChange, onStart, selectedPlan = $bindable('') }: Props = $props();
+	let { status, plans, onStatusChange, onStart, selectedPlan = $bindable(''), runnerTabs = [] }: Props = $props();
 
 	let mode = $state<'single' | 'all'>('single');
 	let selectedEngine = $state('claude');
@@ -35,6 +36,7 @@
 	let dryRun = $state(false);
 	let parallel = $state(false);
 	let projects = $state('');
+	let anyRunning = $derived(runnerTabs.some(t => t.running));
 	let actionLoading = $state(false);
 	let actionError = $state<string | null>(null);
 	let syncMessage = $state<string | null>(null);
@@ -138,7 +140,7 @@
 		actionLoading = true;
 		actionError = null;
 		try {
-			await devRunnerRunnerApi.stopLegacy();
+			await devRunnerRunnerApi.stopAll();
 			onStatusChange();
 		} catch (e) {
 			actionError = e instanceof Error ? e.message : '중지 실패';
@@ -209,7 +211,8 @@
 
 	<!-- Controls Row -->
 	<div class="flex items-center gap-2 flex-wrap">
-		{#if status?.running}
+		<!-- 중지 버튼: running 탭이 하나라도 있을 때 표시 -->
+		{#if anyRunning}
 			<button
 				class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 disabled:opacity-50 transition-colors"
 				onclick={handleStop}
@@ -218,16 +221,16 @@
 				<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
 				{actionLoading ? '중지 중...' : '중지'}
 			</button>
-		{:else}
-			<button
-				class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 disabled:opacity-50 transition-colors"
-				onclick={handleStart}
-				disabled={actionLoading || (mode === 'single' && !selectedPlan)}
-			>
-				<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-				{actionLoading ? '시작 중...' : mode === 'all' ? '전체 실행' : '시작'}
-			</button>
 		{/if}
+		<!-- 시작 버튼: 항상 표시 -->
+		<button
+			class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 disabled:opacity-50 transition-colors"
+			onclick={handleStart}
+			disabled={actionLoading || (mode === 'single' && !selectedPlan)}
+		>
+			<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+			{actionLoading ? '시작 중...' : mode === 'all' ? '전체 실행' : '시작'}
+		</button>
 
 		<button
 			class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
@@ -239,7 +242,7 @@
 			{actionLoading ? '동기화 중...' : '동기화'}
 		</button>
 
-		{#if !status?.running}
+		{#if !anyRunning}
 			<button
 				class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
 				onclick={() => handleResetState(false)}
@@ -267,7 +270,7 @@
 			<select
 				class="border rounded px-2 py-1.5 text-xs h-8 w-[120px]"
 				bind:value={mode}
-				disabled={status?.running}
+				disabled={anyRunning}
 			>
 				<option value="single">단일 Plan</option>
 				<option value="all">전체 실행</option>
@@ -278,7 +281,7 @@
 				class:text-orange-700={selectedEngine === 'gemini'}
 				class:bg-orange-50={selectedEngine === 'gemini'}
 				bind:value={selectedEngine}
-				disabled={status?.running}
+				disabled={anyRunning}
 			>
 				<option value="claude">Claude</option>
 				<option value="gemini">Gemini</option>
@@ -304,7 +307,7 @@
 						class="border rounded px-1.5 py-0.5 flex-1 sm:w-40 h-6 text-[10px] font-mono bg-white"
 						value={engineConfigs[selectedEngine].models[phase]}
 						onchange={(e) => updateModel(phase as any, e.currentTarget.value)}
-						disabled={status?.running}
+						disabled={anyRunning}
 					>
 						<!-- 사전 정의된 모델 목록 -->
 						{#each PREDEFINED_MODELS[selectedEngine] || [] as model}
@@ -323,8 +326,8 @@
 	{/if}
 
 	<!-- Options Row -->
-	<div class="flex items-center gap-4 flex-wrap text-xs {status?.running ? 'opacity-50 pointer-events-none' : ''}">
-		{#if status?.running}
+	<div class="flex items-center gap-4 flex-wrap text-xs {anyRunning ? 'opacity-50 pointer-events-none' : ''}">
+		{#if anyRunning}
 			<!-- 실행 중: Plan 선택 대신 실행 정보 표시 -->
 			<div class="flex items-center gap-2 opacity-100 pointer-events-none" style="opacity:1">
 				<span class="text-gray-500 text-xs">Running</span>
@@ -397,7 +400,7 @@
 	</div>
 
 	{#if (mode === 'single' && parallel) || mode === 'all'}
-		<div class="flex items-center gap-2 text-xs {status?.running ? 'opacity-50 pointer-events-none' : ''}">
+		<div class="flex items-center gap-2 text-xs {anyRunning ? 'opacity-50 pointer-events-none' : ''}">
 			<label class="text-gray-500 shrink-0" for="projects-input">프로젝트:</label>
 			<input
 				id="projects-input"

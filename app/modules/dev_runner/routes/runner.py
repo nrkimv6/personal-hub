@@ -29,6 +29,12 @@ async def start_run(request: RunRequest):
     return await executor_service.start_dev_runner(request)
 
 
+@router.post("/stop-all")
+async def stop_all_runners():
+    """모든 active runner 일괄 중지"""
+    return await executor_service.stop_all_runners()
+
+
 @router.post("/stop")
 async def stop_run():
     """plan-runner 실행 중지 (하위호환 — 첫 번째 active runner 종료)"""

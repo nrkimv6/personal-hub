@@ -468,7 +468,7 @@
 					<div class="px-4 pb-4 flex flex-col gap-4 bg-gray-50">
 						<!-- RunControl - full width card -->
 						<div class="bg-white border rounded-lg p-4">
-							<RunControl status={runStatus} {plans} onStatusChange={handleRunStatusChange} onStart={handleRunStart} bind:selectedPlan={selectedPlanPath} />
+							<RunControl status={runStatus} {plans} onStatusChange={handleRunStatusChange} onStart={handleRunStart} bind:selectedPlan={selectedPlanPath} runnerTabs={runnerTabs.map(t => ({ id: t.id, running: t.running }))} />
 						</div>
 
 						<!-- Runner 서브탭 바 -->
