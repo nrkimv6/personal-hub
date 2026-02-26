@@ -51,6 +51,7 @@ class TaskSchedule(Base):
     TARGET_TYPE_KEYWORD_ANALYSIS = "keyword_analysis"  # 키워드 분석
     TARGET_TYPE_TOPIC_EXTRACT = "topic_extract"  # 소재 자동 추출
     TARGET_TYPE_REPORT = "report"  # LLM 보고서 생성
+    TARGET_TYPE_PYTEST_RUN = "pytest_run"  # pytest 자동 실행
 
     SCHEDULE_TYPE_CRON = "cron"
     SCHEDULE_TYPE_INTERVAL = "interval"
