@@ -1501,8 +1501,8 @@ class LLMWorker:
                             )
                             logger.warning(f"[QUOTA] {provider} 쿼터 소진. {paused_until}까지 일시중지")
 
-                        # 다른 타입은 실패 처리
-                        service.mark_failed(request.id, result["error"])
+                        # 다른 타입은 실패 처리 (raw_response 보존)
+                        service.mark_failed(request.id, result["error"], result.get("raw_response", ""))
                         self._increment_error()
                         logger.warning(f"LLM 실행 실패: {result['error']}")
 

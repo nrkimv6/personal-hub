@@ -493,9 +493,18 @@
 		}
 	}
 
-	function openModal(request: LLMRequest) {
+	async function openModal(request: LLMRequest) {
 		selectedRequest = request;
 		showModal = true;
+		// 상세 조회 API로 raw_response 포함된 데이터 로드
+		try {
+			const detail = await llmApi.get(request.id);
+			if (showModal && selectedRequest?.id === request.id) {
+				selectedRequest = detail;
+			}
+		} catch {
+			// 실패해도 기본 데이터로 모달 유지
+		}
 	}
 
 	function closeModal() {
@@ -1249,6 +1258,16 @@
 					<div class="mb-4 p-3 bg-background rounded-lg">
 						<div class="text-sm font-medium text-foreground mb-1">결과</div>
 						<pre class="text-sm text-foreground whitespace-pre-wrap overflow-auto max-h-64">{JSON.stringify(selectedRequest.result, null, 2)}</pre>
+					</div>
+				{/if}
+
+				{#if selectedRequest.raw_response}
+					<div class="mb-4 p-3 bg-background rounded-lg">
+						<div class="flex items-center justify-between mb-1">
+							<div class="text-sm font-medium text-foreground">LLM 원본 응답</div>
+							<span class="text-xs text-muted-foreground">{selectedRequest.raw_response.length.toLocaleString()}자</span>
+						</div>
+						<pre class="text-xs text-muted-foreground whitespace-pre-wrap overflow-auto max-h-96 border border-border rounded p-2">{selectedRequest.raw_response}</pre>
 					</div>
 				{/if}
 
