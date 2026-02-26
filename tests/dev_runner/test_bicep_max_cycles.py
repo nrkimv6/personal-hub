@@ -51,19 +51,28 @@ async def _setup_idle(fake_async_redis, plan_file="test.md"):
     await fake_async_redis.set("plan-runner:state:pid", "0")
     await fake_async_redis.set("plan-runner:state:plan_file", plan_file)
     await fake_async_redis.set("plan-runner:state:start_time", datetime.now().isoformat())
-    await fake_async_redis.rpush("plan-runner:command_results", json.dumps({"success": True, "pid": 12345}))
 
 
 async def _capture_command(executor, fake_async_redis, request: RunRequest) -> dict:
-    """lpush 캡처 헬퍼"""
+    """lpush 캡처 헬퍼 — per-command result key 대응"""
     captured = []
-    original = fake_async_redis.lpush
+    original_lpush = fake_async_redis.lpush
+    original_brpop = fake_async_redis.brpop
 
-    async def capture(key, *values):
+    async def capture_lpush(key, *values):
         captured.extend(values)
-        return await original(key, *values)
+        # command에서 command_id를 추출하여 per-command result key에 결과 seed
+        for v in values:
+            try:
+                cmd = json.loads(v)
+                if "command_id" in cmd:
+                    result_key = f"plan-runner:command_results:{cmd['command_id']}"
+                    await original_lpush(result_key, json.dumps({"success": True, "pid": 12345}))
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return await original_lpush(key, *values)
 
-    with patch.object(executor.async_redis, "lpush", side_effect=capture):
+    with patch.object(executor.async_redis, "lpush", side_effect=capture_lpush):
         await executor.start_dev_runner(request)
 
     return json.loads(captured[0])
@@ -193,6 +202,15 @@ class TestCrossCheck:
 
         async def capture(key, *values):
             raw_captured.extend(values)
+            # per-command result key에 결과 seed
+            for v in values:
+                try:
+                    cmd = json.loads(v)
+                    if "command_id" in cmd:
+                        result_key = f"plan-runner:command_results:{cmd['command_id']}"
+                        await original(result_key, json.dumps({"success": True, "pid": 12345}))
+                except (json.JSONDecodeError, TypeError):
+                    pass
             return await original(key, *values)
 
         with patch.object(executor.async_redis, "lpush", side_effect=capture):
@@ -239,12 +257,24 @@ class TestErrorConditions:
     async def test_already_running_allows_additional_runner_with_max_cycles_zero(self, executor, fake_async_redis, fake_redis):
         """멀티 runner: 이미 실행 중이어도 max_cycles=0 추가 실행 허용 (409 없음)"""
         await fake_async_redis.set("plan-runner:listener:heartbeat", "alive")
-        # 성공 응답 추가 (listener가 살아있어야 하므로)
-        import json
-        result_data = {"success": True, "pid": 12345}
-        await fake_async_redis.rpush("plan-runner:command_results", json.dumps(result_data))
 
-        result = await executor.start_dev_runner(RunRequest(plan_file="test.md", max_cycles=0))
+        # per-command result key에 결과를 seed하기 위해 lpush를 가로챔
+        original_lpush = fake_async_redis.lpush
+
+        async def auto_seed_result(key, *values):
+            res = await original_lpush(key, *values)
+            for v in values:
+                try:
+                    cmd = json.loads(v)
+                    if "command_id" in cmd:
+                        result_key = f"plan-runner:command_results:{cmd['command_id']}"
+                        await original_lpush(result_key, json.dumps({"success": True, "pid": 12345}))
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            return res
+
+        with patch.object(executor.async_redis, "lpush", side_effect=auto_seed_result):
+            result = await executor.start_dev_runner(RunRequest(plan_file="test.md", max_cycles=0))
         assert result.runner_id is not None  # 새 runner_id 발급됨
         assert len(result.runner_id) == 8
 

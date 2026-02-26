@@ -148,7 +148,7 @@ export interface AddProjectResponse {
 
 const DEV_RUNNER_BASE = '/api/v1/dev-runner';
 
-async function devRunnerRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+async function devRunnerRequest<T>(endpoint: string, options: RequestInit = {}, timeout?: number): Promise<T> {
 	const url = `${DEV_RUNNER_BASE}${endpoint}`;
 
 	const token = getAuthToken();
@@ -158,7 +158,7 @@ async function devRunnerRequest<T>(endpoint: string, options: RequestInit = {}):
 		...options.headers
 	};
 
-	const response = await fetchWithTimeout(url, { ...options, headers, credentials: 'include' });
+	const response = await fetchWithTimeout(url, { ...options, headers, credentials: 'include' }, timeout);
 
 	if (!response.ok) {
 		const error = await response.json().catch(() => ({ detail: response.statusText }));
@@ -220,7 +220,7 @@ export const devRunnerRunnerApi = {
 		devRunnerRequest<RunStatusResponse>('/run', {
 			method: 'POST',
 			body: JSON.stringify(data)
-		}),
+		}, 60000),
 
 	stop: (runnerId: string) =>
 		devRunnerRequest<{ message: string }>(`/runners/${runnerId}/stop`, { method: 'POST' }),

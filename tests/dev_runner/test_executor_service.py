@@ -51,13 +51,32 @@ def run_request_parallel():
 
 async def _setup_listener_success(fake_async_redis, plan_file="common/docs/plan/test.md"):
     """listener 성공 응답 세팅"""
-    result_data = {"success": True, "pid": 12345}
     await fake_async_redis.set("plan-runner:listener:heartbeat", "alive")
     await fake_async_redis.set("plan-runner:state:status", "idle")
     await fake_async_redis.set("plan-runner:state:pid", "12345")
     await fake_async_redis.set("plan-runner:state:plan_file", plan_file)
     await fake_async_redis.set("plan-runner:state:start_time", datetime.now().isoformat())
-    await fake_async_redis.rpush("plan-runner:command_results", json.dumps(result_data))
+
+
+def _make_capture_lpush(fake_async_redis, captured, result_data=None):
+    """per-command result key 자동 seed하는 capture_lpush 팩토리"""
+    if result_data is None:
+        result_data = {"success": True, "pid": 12345}
+    original = fake_async_redis.lpush
+
+    async def capture_lpush(key, *values):
+        captured.extend(values)
+        for v in values:
+            try:
+                cmd = json.loads(v)
+                if "command_id" in cmd:
+                    result_key = f"plan-runner:command_results:{cmd['command_id']}"
+                    await original(result_key, json.dumps(result_data))
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return await original(key, *values)
+
+    return capture_lpush
 
 
 # ========== TestStartDevRunner ==========
@@ -68,14 +87,9 @@ class TestStartDevRunner:
         """Right - plan_file 포함된 command 전송"""
         await _setup_listener_success(fake_async_redis)
 
-        original_lpush = fake_async_redis.lpush
         captured = []
 
-        async def capture_lpush(key, *values):
-            captured.extend(values)
-            return await original_lpush(key, *values)
-
-        with patch.object(executor.async_redis, 'lpush', side_effect=capture_lpush):
+        with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(fake_async_redis, captured)):
             result = await executor.start_dev_runner(run_request_single)
 
         assert len(captured) == 1
@@ -88,14 +102,9 @@ class TestStartDevRunner:
         await _setup_listener_success(fake_async_redis)
 
         captured = []
-        original_lpush = fake_async_redis.lpush
-
-        async def capture_lpush(key, *values):
-            captured.extend(values)
-            return await original_lpush(key, *values)
 
         with patch("app.modules.dev_runner.services.plan_service.plan_service") as mock_ps, \
-             patch.object(executor.async_redis, 'lpush', side_effect=capture_lpush):
+             patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(fake_async_redis, captured)):
             mock_ps.get_extra_plan_dirs.return_value = []
             mock_ps.get_ignored_plan_paths.return_value = []
             await executor.start_dev_runner(run_request_parallel)
@@ -114,13 +123,8 @@ class TestStartDevRunner:
         await _setup_listener_success(fake_async_redis, "test.md")
 
         captured = []
-        original_lpush = fake_async_redis.lpush
 
-        async def capture_lpush(key, *values):
-            captured.extend(values)
-            return await original_lpush(key, *values)
-
-        with patch.object(executor.async_redis, 'lpush', side_effect=capture_lpush):
+        with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(fake_async_redis, captured)):
             await executor.start_dev_runner(request)
 
         command = json.loads(captured[0])
@@ -134,12 +138,12 @@ class TestStartDevRunner:
     async def test_start_concurrent_returns_different_runner_ids(self, executor, run_request_single, fake_async_redis):
         """Boundary - 멀티 runner: 동시 2회 시작 → 각기 다른 runner_id (409 없음)"""
         await _setup_listener_success(fake_async_redis)
-        # 두 번째 호출을 위한 추가 결과 큐
-        result_data2 = {"success": True, "pid": 22222}
-        await fake_async_redis.rpush("plan-runner:command_results", json.dumps(result_data2))
 
-        result1 = await executor.start_dev_runner(run_request_single)
-        result2 = await executor.start_dev_runner(run_request_single)
+        captured = []
+
+        with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(fake_async_redis, captured)):
+            result1 = await executor.start_dev_runner(run_request_single)
+            result2 = await executor.start_dev_runner(run_request_single)
 
         assert result1.runner_id is not None
         assert result2.runner_id is not None
@@ -167,10 +171,12 @@ class TestStartDevRunner:
         """Error - listener success=False → 500"""
         await fake_async_redis.set("plan-runner:listener:heartbeat", "alive")
         result_data = {"success": False, "message": "Failed to spawn process"}
-        await fake_async_redis.rpush("plan-runner:command_results", json.dumps(result_data))
 
-        with pytest.raises(HTTPException) as exc_info:
-            await executor.start_dev_runner(run_request_single)
+        captured = []
+
+        with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(fake_async_redis, captured, result_data)):
+            with pytest.raises(HTTPException) as exc_info:
+                await executor.start_dev_runner(run_request_single)
         assert exc_info.value.status_code == 500
         assert "Failed to spawn process" in exc_info.value.detail or "Failed to start" in exc_info.value.detail
 
@@ -203,9 +209,11 @@ class TestStopDevRunner:
         runner_id = "abc12345"
         await fake_async_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
         result_data = {"success": True, "message": "Stopped"}
-        await fake_async_redis.rpush("plan-runner:command_results", json.dumps(result_data))
 
-        result = await executor.stop_dev_runner(runner_id)
+        captured = []
+
+        with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(fake_async_redis, captured, result_data)):
+            result = await executor.stop_dev_runner(runner_id)
         assert result["message"] == "Stopped successfully"
 
     async def test_stop_listener_timeout_force_cleanup(self, executor, fake_async_redis):
@@ -253,8 +261,8 @@ class TestStopDevRunner:
 class TestGetProcessStatus:
 
     @pytest.fixture(autouse=True)
-    def mock_psutil(self):
-        with patch("psutil.pid_exists", return_value=True):
+    def mock_pid_alive(self, executor):
+        with patch.object(executor, "_is_pid_alive", return_value=True):
             yield
 
     def test_status_running_with_heartbeat(self, executor, fake_redis):
@@ -385,13 +393,8 @@ class TestCORRECTConformance:
         for plan_val in [None, ""]:
             await _setup_listener_success(fake_async_redis)
             captured = []
-            original_lpush = fake_async_redis.lpush
 
-            async def capture_lpush(key, *values):
-                captured.extend(values)
-                return await original_lpush(key, *values)
-
-            with patch.object(executor.async_redis, 'lpush', side_effect=capture_lpush):
+            with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(fake_async_redis, captured)):
                 await executor.start_dev_runner(RunRequest(plan_file=plan_val))
 
             command = json.loads(captured[0])
@@ -400,16 +403,11 @@ class TestCORRECTConformance:
     async def test_engine_parameter_passing(self, executor, fake_async_redis, fake_redis):
         """Phase 1 - engine 파라미터가 Redis 명령에 포함되고 상태 조회 시 반환됨"""
         await _setup_listener_success(fake_async_redis)
-        
+
         # 1. Start 시 engine 포함 확인
         captured = []
-        original_lpush = executor.async_redis.lpush
-        
-        async def capture_lpush(key, *values):
-            captured.extend(values)
-            return await original_lpush(key, *values)
 
-        with patch.object(executor.async_redis, 'lpush', side_effect=capture_lpush):
+        with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(fake_async_redis, captured)):
             await executor.start_dev_runner(RunRequest(engine="gemini"))
 
         command = json.loads(captured[0])
@@ -430,11 +428,13 @@ class TestCORRECTConformance:
     async def test_start_dev_runner_returns_immediate_engine(self, executor, fake_async_redis):
         """Phase 8/9 - start_dev_runner는 Redis 동기화와 무관하게 요청된 엔진명을 즉시 반환함"""
         await _setup_listener_success(fake_async_redis)
-        # Redis에는 claude가 있다고 가정 (stale)
         await fake_async_redis.set("plan-runner:state:engine", "claude")
-        
+
+        captured = []
         request = RunRequest(engine="gemini", plan_file="test.md")
-        result = await executor.start_dev_runner(request)
+
+        with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(fake_async_redis, captured)):
+            result = await executor.start_dev_runner(request)
         
         # 응답에는 요청한 gemini가 포함되어야 함
         assert result.engine == "gemini"
@@ -473,13 +473,8 @@ class TestMaxCyclesZeroBugFix:
         request = RunRequest(plan_file="test.md", max_cycles=0)
 
         captured = []
-        original_lpush = fake_async_redis.lpush
 
-        async def capture_lpush(key, *values):
-            captured.extend(values)
-            return await original_lpush(key, *values)
-
-        with patch.object(executor.async_redis, 'lpush', side_effect=capture_lpush):
+        with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(fake_async_redis, captured)):
             await executor.start_dev_runner(request)
 
         command = json.loads(captured[0])
@@ -492,13 +487,8 @@ class TestMaxCyclesZeroBugFix:
         request = RunRequest(plan_file="test.md", max_cycles=3)
 
         captured = []
-        original_lpush = fake_async_redis.lpush
 
-        async def capture_lpush(key, *values):
-            captured.extend(values)
-            return await original_lpush(key, *values)
-
-        with patch.object(executor.async_redis, 'lpush', side_effect=capture_lpush):
+        with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(fake_async_redis, captured)):
             await executor.start_dev_runner(request)
 
         command = json.loads(captured[0])
@@ -510,13 +500,8 @@ class TestMaxCyclesZeroBugFix:
         request = RunRequest(plan_file="test.md", max_cycles=None)
 
         captured = []
-        original_lpush = fake_async_redis.lpush
 
-        async def capture_lpush(key, *values):
-            captured.extend(values)
-            return await original_lpush(key, *values)
-
-        with patch.object(executor.async_redis, 'lpush', side_effect=capture_lpush):
+        with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(fake_async_redis, captured)):
             await executor.start_dev_runner(request)
 
         command = json.loads(captured[0])

@@ -155,9 +155,10 @@ class TestStartPlanRunner:
             mock_thread_cls.return_value = mock_thread_inst
             result = listener.start_plan_runner(command, r)
 
-        assert result["success"] is True
-        assert "abc12345" in listener._running_processes
-        r.sadd.assert_called_with(listener.ACTIVE_RUNNERS_KEY, "abc12345")
+        # start_plan_runner now returns None (background thread handles result)
+        assert result is None
+        mock_thread_cls.assert_called_once()
+        mock_thread_inst.start.assert_called_once()
 
     def test_boundary_same_runner_id_twice_returns_already_running(self):
         """TC-Boundary: 동일 runner_id로 두 번 start → 두 번째 Already running 반환"""

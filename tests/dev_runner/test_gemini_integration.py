@@ -15,6 +15,27 @@ def executor():
     service.async_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     return service
 
+
+def _make_capture_lpush(async_redis, captured, result_data=None):
+    """per-command result key 자동 seed하는 capture_lpush 팩토리"""
+    if result_data is None:
+        result_data = {"success": True, "pid": 12345}
+    original = async_redis.lpush
+
+    async def capture_lpush(key, *values):
+        captured.extend(values)
+        for v in values:
+            try:
+                cmd = json.loads(v)
+                if "command_id" in cmd:
+                    result_key = f"plan-runner:command_results:{cmd['command_id']}"
+                    await original(result_key, json.dumps(result_data))
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return await original(key, *values)
+
+    return capture_lpush
+
 # ==========================================
 # Phase 9: 버그 수정 검증 (API 응답 engine 필드)
 # ==========================================
@@ -24,15 +45,13 @@ class TestBugFixEngineReporting:
 
     async def test_start_dev_runner_returns_requested_engine_immediately(self, executor):
         """[Right] start_dev_runner가 Redis 상태와 무관하게 요청된 엔진을 즉시 반환하는가?"""
-        # Listener 성공 응답 시뮬레이션
         await executor.async_redis.set("plan-runner:listener:heartbeat", "alive")
-        result_data = {"success": True, "pid": 5555}
-        await executor.async_redis.rpush("plan-runner:command_results", json.dumps(result_data))
-        
-        req = RunRequest(engine="gemini", plan_file="test.md")
-        result = await executor.start_dev_runner(req)
-        
-        # 반환된 객체의 engine이 'gemini'여야 함 (버그 수정 확인)
+
+        captured = []
+        with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(executor.async_redis, captured, {"success": True, "pid": 5555})):
+            req = RunRequest(engine="gemini", plan_file="test.md")
+            result = await executor.start_dev_runner(req)
+
         assert result.engine == "gemini"
 
     def test_status_response_engine_is_none_by_default(self):
@@ -169,31 +188,22 @@ class TestGeminiDeepValidation:
     async def test_engine_parameter_passed_to_redis_command(self, executor):
         """[CORRECT: Conformance] engine 파라미터가 Redis LPush 명령에 포함되는가?"""
         await executor.async_redis.set("plan-runner:listener:heartbeat", "alive")
-        
-        captured_command = None
-        original_lpush = executor.async_redis.lpush
-        async def mock_lpush(key, val):
-            nonlocal captured_command
-            if key == "plan-runner:commands":
-                captured_command = json.loads(val)
-            return await original_lpush(key, val)
 
-        with patch.object(executor.async_redis, 'lpush', side_effect=mock_lpush):
-            # listener 응답용 결과 미리 삽입
-            await executor.async_redis.rpush("plan-runner:command_results", json.dumps({"success": True}))
+        captured = []
+        with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(executor.async_redis, captured)):
             await executor.start_dev_runner(RunRequest(engine="gemini"))
 
-        assert captured_command is not None
-        assert captured_command["engine"] == "gemini"
+        command = json.loads(captured[0])
+        assert command["engine"] == "gemini"
 
     async def test_concurrent_run_requests_allowed(self, executor):
         """[CORRECT: Time] 멀티 runner: 이미 실행 중이어도 추가 run 요청 가능 (409 없음)"""
         await executor.async_redis.set("plan-runner:listener:heartbeat", "alive")
-        result_data = {"success": True, "pid": 12345}
-        await executor.async_redis.rpush("plan-runner:command_results", json.dumps(result_data))
 
-        result = await executor.start_dev_runner(RunRequest(engine="claude"))
-        assert result.runner_id is not None  # 새 runner 발급
+        captured = []
+        with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(executor.async_redis, captured)):
+            result = await executor.start_dev_runner(RunRequest(engine="claude"))
+        assert result.runner_id is not None
         assert len(result.runner_id) == 8
 
     def test_status_reporting_with_stale_pid(self, executor):
@@ -213,14 +223,13 @@ class TestGeminiDeepValidation:
     async def test_engine_field_optional_conformance(self, executor):
         """[CORRECT: Conformance] engine 필드가 누락된 요청도 정상 처리(claude 기본값)되는가?"""
         await executor.async_redis.set("plan-runner:listener:heartbeat", "alive")
-        # listener 응답용 결과 미리 삽입
-        await executor.async_redis.rpush("plan-runner:command_results", json.dumps({"success": True}))
-        
-        # engine 필드 없이 요청
+
         req = RunRequest(plan_file="test.md")
-        assert req.engine == "claude" # Pydantic default
-        
-        result = await executor.start_dev_runner(req)
+        assert req.engine == "claude"
+
+        captured = []
+        with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(executor.async_redis, captured)):
+            result = await executor.start_dev_runner(req)
         assert result.engine == "claude"
 
     # ==========================================
@@ -258,13 +267,12 @@ class TestGeminiDeepValidation:
 
     async def test_error_invalid_model_name(self, executor):
         """[Right-BICEP: Error] 존재하지 않는 모델명으로 실행 요청 시의 처리 (Schema 검증)"""
-        # 실제로는 CLI 실행 단계에서 에러가 나겠지만, 
-        # 여기서는 유효하지 않은 모델명이 설정되었을 때의 흐름 확인
         await executor.async_redis.set("plan-runner:listener:heartbeat", "alive")
-        await executor.async_redis.rpush("plan-runner:command_results", json.dumps({"success": False, "message": "Invalid model"}))
-        
-        with pytest.raises(HTTPException) as exc:
-            await executor.start_dev_runner(RunRequest(engine="gemini", max_cycles=1))
+
+        captured = []
+        with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(executor.async_redis, captured, {"success": False, "message": "Invalid model"})):
+            with pytest.raises(HTTPException) as exc:
+                await executor.start_dev_runner(RunRequest(engine="gemini", max_cycles=1))
         assert exc.value.status_code == 500
 
     def test_boundary_empty_prompt(self, executor):

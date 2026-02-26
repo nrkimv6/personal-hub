@@ -60,6 +60,7 @@ def executor_service():
     svc = ExecutorService()
     return svc
 
+@pytest.mark.e2e
 @pytest.mark.asyncio
 async def test_e2e_full_lifecycle(dev_runner_listener, executor_service):
     """E2E Test: API -> Redis -> Listener -> plan-runner CLI -> success response"""

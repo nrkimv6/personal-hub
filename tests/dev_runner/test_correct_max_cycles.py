@@ -48,15 +48,23 @@ async def _setup_idle(r):
     await r.set("plan-runner:state:pid", "0")
     await r.set("plan-runner:state:plan_file", "test.md")
     await r.set("plan-runner:state:start_time", datetime.now().isoformat())
-    await r.rpush("plan-runner:command_results", json.dumps({"success": True, "pid": 1}))
 
 
 async def _capture(executor, r, req):
+    """lpush 캡처 헬퍼 — per-command result key 대응"""
     captured = []
     orig = r.lpush
 
     async def cap(key, *vals):
         captured.extend(vals)
+        for v in vals:
+            try:
+                cmd = json.loads(v)
+                if "command_id" in cmd:
+                    result_key = f"plan-runner:command_results:{cmd['command_id']}"
+                    await orig(result_key, json.dumps({"success": True, "pid": 1}))
+            except (json.JSONDecodeError, TypeError):
+                pass
         return await orig(key, *vals)
 
     with patch.object(executor.async_redis, "lpush", side_effect=cap):
@@ -182,6 +190,15 @@ class TestReference:
 
         async def cap(key, *vals):
             pushed_keys.append(key)
+            # per-command result key에 결과 seed
+            for v in vals:
+                try:
+                    cmd = json.loads(v)
+                    if "command_id" in cmd:
+                        result_key = f"plan-runner:command_results:{cmd['command_id']}"
+                        await orig(result_key, json.dumps({"success": True, "pid": 1}))
+                except (json.JSONDecodeError, TypeError):
+                    pass
             return await orig(key, *vals)
 
         with patch.object(executor.async_redis, "lpush", side_effect=cap):
@@ -245,6 +262,14 @@ class TestCardinality:
 
         async def cap(key, *vals):
             captured.extend(vals)
+            for v in vals:
+                try:
+                    cmd = json.loads(v)
+                    if "command_id" in cmd:
+                        result_key = f"plan-runner:command_results:{cmd['command_id']}"
+                        await orig(result_key, json.dumps({"success": True, "pid": 1}))
+                except (json.JSONDecodeError, TypeError):
+                    pass
             return await orig(key, *vals)
 
         with patch.object(executor.async_redis, "lpush", side_effect=cap):
@@ -260,6 +285,14 @@ class TestCardinality:
 
         async def cap(key, *vals):
             captured_raw.extend(vals)
+            for v in vals:
+                try:
+                    cmd = json.loads(v)
+                    if "command_id" in cmd:
+                        result_key = f"plan-runner:command_results:{cmd['command_id']}"
+                        await orig(result_key, json.dumps({"success": True, "pid": 1}))
+                except (json.JSONDecodeError, TypeError):
+                    pass
             return await orig(key, *vals)
 
         with patch.object(executor.async_redis, "lpush", side_effect=cap):

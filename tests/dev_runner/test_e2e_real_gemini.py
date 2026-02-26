@@ -11,6 +11,7 @@ sys.path.insert(0, str(PLAN_RUNNER_MODULE_PATH))
 from plan_runner.core.executor import AIExecutor
 from plan_runner.config import Settings
 
+@pytest.mark.e2e
 class TestRealGeminiExecution:
     """실제 Gemini CLI 프로세스를 띄워 프롬프트가 정상 전송 및 파싱되는지 확인하는 E2E 테스트"""
 
