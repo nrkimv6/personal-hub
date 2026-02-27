@@ -286,6 +286,8 @@ class ExecutorService:
             # Redis를 통해 해당 runner 상태 확인
             status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
             if status != "running":
+                # stale 상태 정리: active_runners set에서 제거
+                await self.async_redis.srem(ACTIVE_RUNNERS_KEY, runner_id)
                 raise HTTPException(status_code=404, detail="Not running")
 
             # per-command 결과 키

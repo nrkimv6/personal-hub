@@ -90,11 +90,14 @@ class TestHttpE2EChain:
         active = r.smembers(ACTIVE_RUNNERS_KEY)
         for runner_id in active:
             try:
-                api_client.post(f"{BASE_URL}/stop/{runner_id}")
+                resp = api_client.post(f"{BASE_URL}/stop/{runner_id}")
+                # 404: 이미 종료됨 → active_runners에서 직접 제거 (stale 정리)
+                if resp.status_code == 404:
+                    r.srem(ACTIVE_RUNNERS_KEY, runner_id)
             except Exception:
                 pass
 
-        # active_runners가 비어질 때까지 대기
+        # active_runners가 비어질 때까지 대기 (running 중인 runner는 listener가 정리)
         cleaned = False
         for _ in range(10):
             if not r.smembers(ACTIVE_RUNNERS_KEY):
