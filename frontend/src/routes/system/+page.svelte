@@ -7,9 +7,10 @@
   import BrowsersTab from './BrowsersTab.svelte';
   import SettingsTab from './SettingsTab.svelte';
   import DiagnosticTab from './DiagnosticTab.svelte';
+  import MemoryTab from './MemoryTab.svelte';
 
   // 탭 정의
-  type TabId = 'status' | 'errors' | 'integrity' | 'browsers' | 'settings' | 'diagnostic';
+  type TabId = 'status' | 'errors' | 'integrity' | 'browsers' | 'settings' | 'memory' | 'diagnostic';
 
   // 탭 상태
   let activeTab: TabId = $state('status');
@@ -18,6 +19,7 @@
   let serviceStatus = $state<{ running: number; total: number } | null>(null);
   let unresolvedErrors = $state<number | null>(null);
   let integrityIssues = $state<number | null>(null);
+  let memoryDangerLevel = $state<'normal' | 'warning' | 'critical'>('normal');
 
   // 동적 탭 목록 (배지 포함)
   const systemTabs = $derived([
@@ -40,6 +42,11 @@
     },
     { id: 'browsers', label: '🌐 브라우저/프록시' },
     { id: 'settings', label: '⚙️ 설정' },
+    {
+      id: 'memory',
+      label: '💾 메모리',
+      countVariant: memoryDangerLevel === 'critical' ? ('error' as const) : memoryDangerLevel === 'warning' ? ('warning' as const) : undefined,
+    },
     { id: 'diagnostic', label: '🩺 진단' },
   ]);
 
@@ -54,6 +61,10 @@
 
   function handleIssueCountChange(count: number) {
     integrityIssues = count;
+  }
+
+  function handleMemoryDangerChange(level: string) {
+    memoryDangerLevel = level as 'normal' | 'warning' | 'critical';
   }
 </script>
 
@@ -80,6 +91,8 @@
       <BrowsersTab />
     {:else if activeTab === 'settings'}
       <SettingsTab />
+    {:else if activeTab === 'memory'}
+      <MemoryTab onDangerChange={handleMemoryDangerChange} />
     {:else if activeTab === 'diagnostic'}
       <DiagnosticTab />
     {/if}

@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.68.0] - 2026-02-27
+### Added
+- 시스템 메모리 대시보드: `/system` 페이지에 `💾 메모리` 탭 추가
+- `GET /api/v1/system/memory` 엔드포인트: RAM/PageFile/프로세스 Top 15 + 위험도 판정
+- 위험도 배지: available < 2GB → 경고(amber), < 1GB → 위험(red)
+
 ## [2.67.1] - 2026-02-27
 ### Fixed
 - LlmTab.svelte runes 모드 오류 수정: `$:` → `$effect`, `createForm` → `$state`
