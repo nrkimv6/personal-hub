@@ -16,6 +16,7 @@ API 서버(Session 0)에서 Redis를 통해 전달된 명령을 수신하고 실
 아키텍처:
     API (Session 0) -> Redis LPUSH -> [이 리스너 (Session 1)] -> plan-runner CLI
 """
+import argparse
 import json
 import logging
 import re
@@ -41,6 +42,7 @@ from worktree_manager import WorktreeManager, WorktreeError
 # 설정
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
+REDIS_DB = 0  # --redis-db 인자로 오버라이드 가능 (테스트 격리용)
 COMMANDS_KEY = "plan-runner:commands"
 RESULTS_KEY = "plan-runner:command_results"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
@@ -941,6 +943,7 @@ def main():
             r = redis.Redis(
                 host=REDIS_HOST,
                 port=REDIS_PORT,
+                db=REDIS_DB,
                 decode_responses=True,
                 socket_connect_timeout=5,
             )
@@ -1046,4 +1049,13 @@ def main():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Dev Runner Command Listener")
+    parser.add_argument(
+        "--redis-db",
+        type=int,
+        default=0,
+        help="Redis DB 번호 (기본: 0, 테스트 격리 시 1 이상 사용)",
+    )
+    args = parser.parse_args()
+    REDIS_DB = args.redis_db
     main()
