@@ -7,7 +7,7 @@
 	import RunnerInstanceTab from '$lib/components/dev-runner/RunnerInstanceTab.svelte';
 	import CurrentTrackingCard from '$lib/components/dev-runner/CurrentTrackingCard.svelte';
 	import MergeQueuePanel from '$lib/components/dev-runner/MergeQueuePanel.svelte';
-	import LogsTab from '$lib/components/dev-runner/LogsTab.svelte';
+	import UnifiedLogsView from '$lib/components/dev-runner/UnifiedLogsView.svelte';
 	import { createSmartPolling } from '$lib/utils/smart-polling';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
 	import {
@@ -37,7 +37,7 @@
 	let lastStartTime = $state<string | null>(null);
 	let panelOpen = $state(true);
 	let taskHistoryOpen = $state(false);
-	let taskHistoryTab = $state<'tasks' | 'plans' | 'merge' | 'logs'>('plans');
+	let taskHistoryTab = $state<'tasks' | 'plans' | 'merge'>('plans');
 	let currentTracking = $state<CurrentTrackingResponse | null>(null);
 	let selectedPlanPath = $state('');
 	let trackingInterval: ReturnType<typeof setInterval> | null = null;
@@ -518,34 +518,47 @@
 			</div>
 
 			<!-- Runner 탭 바 (항상 표시) -->
-			{#if runnerTabs.length > 0}
-				<div class="flex items-center gap-1 border-b px-2 py-1 overflow-x-auto shrink-0">
-					{#each runnerTabs as tab (tab.id)}
-						<!-- svelte-ignore a11y_interactive_supports_focus -->
-						<div
-							class="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono whitespace-nowrap transition-colors cursor-pointer {activeTabId === tab.id ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-gray-600 hover:bg-gray-100'}"
-							role="tab"
-							aria-selected={activeTabId === tab.id}
-							onclick={() => { activeTabId = tab.id; }}
-							onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { activeTabId = tab.id; } }}
-						>
-							<span>{tab.running ? '⏳' : '✅'}</span>
-							<span class="max-w-[120px] truncate">{tab.plan_file ? tab.plan_file.split(/[\\/]/).pop() : '전체 실행'}</span>
-							<button
-								class="ml-0.5 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-300 text-gray-400 hover:text-gray-600 text-[10px]"
-								onclick={(e) => { e.stopPropagation(); handleCloseTab(tab.id); }}
-								title="탭 닫기"
-							>×</button>
-						</div>
-					{/each}
+			<div class="flex items-center gap-1 border-b px-2 py-1 overflow-x-auto shrink-0">
+				{#each runnerTabs as tab (tab.id)}
+					<!-- svelte-ignore a11y_interactive_supports_focus -->
+					<div
+						class="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono whitespace-nowrap transition-colors cursor-pointer {activeTabId === tab.id ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-gray-600 hover:bg-gray-100'}"
+						role="tab"
+						aria-selected={activeTabId === tab.id}
+						onclick={() => { activeTabId = tab.id; }}
+						onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { activeTabId = tab.id; } }}
+					>
+						<span>{tab.running ? '⏳' : '✅'}</span>
+						<span class="max-w-[120px] truncate">{tab.plan_file ? tab.plan_file.split(/[\\/]/).pop() : '전체 실행'}</span>
+						<button
+							class="ml-0.5 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-300 text-gray-400 hover:text-gray-600 text-[10px]"
+							onclick={(e) => { e.stopPropagation(); handleCloseTab(tab.id); }}
+							title="탭 닫기"
+						>×</button>
+					</div>
+				{/each}
+				<!-- 고정 Logs 버튼 (항상 표시, 닫기 버튼 없음) -->
+				<!-- svelte-ignore a11y_interactive_supports_focus -->
+				<div
+					class="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono whitespace-nowrap transition-colors cursor-pointer ml-auto {activeTabId === '__logs__' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-gray-500 hover:bg-gray-100'}"
+					role="tab"
+					aria-selected={activeTabId === '__logs__'}
+					onclick={() => { activeTabId = '__logs__'; }}
+					onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { activeTabId = '__logs__'; } }}
+					title="통합 실행 로그"
+				>
+					<span>📋</span>
+					<span>Logs</span>
 				</div>
-			{/if}
+			</div>
 
 			<!-- Log Viewer + Runner Panel (2-grid on desktop, stack on mobile) -->
 			<div class="flex-1 min-h-0 flex flex-col md:grid md:grid-cols-2 md:gap-0 overflow-hidden">
 				<!-- Runner 탭 or 안내 -->
 				<div class="flex-1 min-h-0 overflow-hidden">
-					{#if runnerTabs.length === 0}
+					{#if activeTabId === '__logs__'}
+						<UnifiedLogsView />
+					{:else if runnerTabs.length === 0}
 						<div class="flex items-center justify-center h-full text-sm text-gray-400">
 							실행 버튼을 눌러 plan-runner를 시작하세요
 						</div>
@@ -613,7 +626,6 @@
 									{ id: 'tasks', label: 'Tasks' },
 									{ id: 'plans', label: 'Plans' },
 									{ id: 'merge', label: 'Merge Queue' },
-									{ id: 'logs', label: '📋 Logs' },
 								]}
 								bind:activeTab={taskHistoryTab}
 								variant="primary"
@@ -638,10 +650,6 @@
 							{:else if taskHistoryTab === 'merge'}
 								<div class="px-4 pb-4 h-full overflow-hidden flex flex-col">
 									<MergeQueuePanel />
-								</div>
-							{:else if taskHistoryTab === 'logs'}
-								<div class="h-full overflow-hidden">
-									<LogsTab />
 								</div>
 							{/if}
 						</div>
