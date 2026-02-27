@@ -344,6 +344,14 @@
 			error = e instanceof Error ? e.message : '데이터 로드 실패';
 		} finally {
 			loading = false;
+			// 페이지 번호 보정: 요청한 페이지가 범위를 초과한 경우 마지막 페이지로 조정
+			if (total > 0) {
+				const maxPage = Math.ceil(total / pageSize);
+				if (currentPage > maxPage) {
+					currentPage = maxPage;
+					syncUrlParams();
+				}
+			}
 		}
 	}
 
