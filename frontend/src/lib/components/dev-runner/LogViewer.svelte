@@ -161,7 +161,7 @@
 		}
 		if (autoScroll && logContainer) {
 			requestAnimationFrame(() => {
-				logContainer.scrollTop = logContainer.scrollHeight;
+				if (logContainer) logContainer.scrollTop = logContainer.scrollHeight;
 			});
 		}
 	}
@@ -178,7 +178,7 @@
 			}
 			if (autoScroll && logContainer) {
 				requestAnimationFrame(() => {
-					logContainer.scrollTop = logContainer.scrollHeight;
+					if (logContainer) logContainer.scrollTop = logContainer.scrollHeight;
 				});
 			}
 		}
