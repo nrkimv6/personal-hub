@@ -118,6 +118,9 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         # 스케줄 기반 실행 디스패치
         await self._dispatch_scheduled_runs()
 
+        # 02:10 안전망: 미처리 plan archive LLM 큐 등록
+        await self._safe_execute("check_plan_archive_schedule", self._check_plan_archive_schedule)
+
     def _cleanup_stale_requests(self):
         """오래된 running 상태 실행 정리."""
         db = SessionLocal()
@@ -203,6 +206,95 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
         except Exception as e:
             logger.error(f"[{self.name}] 스케줄 디스패치 오류: {e}", exc_info=True)
+
+    async def _check_plan_archive_schedule(self):
+        """02:10 ± 5분 안전망 — 미처리 plan archive LLM 큐 등록"""
+        now = datetime.now()
+        # 02:10 ± 5분 범위 확인
+        target_minutes = 2 * 60 + 10  # 130분
+        current_minutes = now.hour * 60 + now.minute
+        if abs(current_minutes - target_minutes) > 5:
+            return
+
+        # 오늘 이미 실행했는지 확인
+        today_key = f"_plan_archive_schedule_last_run_{now.date()}"
+        if getattr(self, today_key, None):
+            return
+
+        count = await asyncio.get_event_loop().run_in_executor(None, self._process_unprocessed_plans)
+        setattr(self, today_key, True)
+        if count > 0:
+            logger.info(f"[{self.name}] plan archive 안전망: {count}개 LLM 큐 등록")
+
+    def _process_unprocessed_plans(self) -> int:
+        """DB에서 미처리 plan_records 조회 → LLM 큐 등록.
+
+        Returns:
+            등록된 LLMRequest 건수
+        """
+        from app.models.plan_record import PlanRecord
+        from app.modules.claude_worker.models.llm_request import LLMRequest
+        from app.modules.claude_worker.services.plan_analyze_handler import build_plan_analyze_prompt
+        from sqlalchemy import and_
+        from pathlib import Path
+
+        db = SessionLocal()
+        try:
+            records = db.query(PlanRecord).filter(
+                and_(
+                    PlanRecord.llm_processed_at.is_(None),
+                    PlanRecord.archived_at.isnot(None),
+                )
+            ).order_by(PlanRecord.archived_at.asc()).all()
+
+            if not records:
+                return 0
+
+            # 기존 pending 중복 체크
+            existing_pending = {
+                row[0]
+                for row in db.query(LLMRequest.caller_id).filter(
+                    and_(
+                        LLMRequest.caller_type == "plan_archive_analyze",
+                        LLMRequest.status == "pending",
+                    )
+                ).all()
+            }
+
+            inserted = 0
+            for record in records:
+                if record.filename_hash in existing_pending:
+                    continue
+
+                file_content = ""
+                try:
+                    fp = Path(record.file_path)
+                    if fp.exists():
+                        file_content = fp.read_text(encoding="utf-8", errors="replace")
+                except Exception:
+                    pass
+
+                prompt = build_plan_analyze_prompt(
+                    file_content=file_content,
+                    filename=Path(record.file_path).name,
+                )
+                llm_req = LLMRequest(
+                    caller_type="plan_archive_analyze",
+                    caller_id=record.filename_hash,
+                    prompt=prompt,
+                    queue_name="utility",
+                    requested_by="scheduler",
+                )
+                db.add(llm_req)
+                inserted += 1
+
+            if inserted > 0:
+                db.commit()
+            return inserted
+        except Exception as e:
+            logger.error(f"_process_unprocessed_plans error: {e}", exc_info=True)
+            db.rollback()
+            return 0
         finally:
             db.close()
 
