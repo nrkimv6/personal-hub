@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.75.0] - 2026-02-28
+### Added
+- dev-runner 최대 동시 실행 수 설정 UI 구현
+- `SettingsService`: JSON 파일 기반 `max_concurrent_runners` 읽기/쓰기 (`data/dev_runner_settings.json`)
+- `GET /api/v1/dev-runner/settings`, `PUT /api/v1/dev-runner/settings` 엔드포인트 추가
+- `DevRunnerSettingsPanel.svelte`: 숫자 입력 + 저장 버튼 + 토스트 UI
+- DevRunnerTab에 "설정" 탭 추가
+
 ## [2.74.0] - 2026-02-27
 ### Added
 - MergeQueue 완전 구현: Redis 큐 기반 순차 머지 (`plan-runner:merge-queue`)

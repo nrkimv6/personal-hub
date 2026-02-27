@@ -442,3 +442,21 @@ export const devRunnerMergeApi = {
 	revert: (runnerId: string): Promise<unknown> =>
 		devRunnerRequest(`/merge/${runnerId}/revert`, { method: 'POST' }),
 };
+
+
+export interface DevRunnerSettings {
+	max_concurrent_runners: number;
+	updated_at: string | null;
+}
+
+export const devRunnerSettingsApi = {
+	get: (): Promise<DevRunnerSettings> =>
+		devRunnerRequest<DevRunnerSettings>('/settings'),
+
+	update: (maxRunners: number): Promise<DevRunnerSettings> =>
+		devRunnerRequest<DevRunnerSettings>('/settings', {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ max_concurrent_runners: maxRunners }),
+		}),
+};

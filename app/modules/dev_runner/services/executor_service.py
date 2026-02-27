@@ -18,6 +18,7 @@ from fastapi import HTTPException
 
 from app.config import logger
 from app.modules.dev_runner.config import config
+from app.modules.dev_runner.services.settings_service import settings_service
 from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse
 from app.modules.dev_runner.services.state import get_state
 
@@ -117,10 +118,11 @@ class ExecutorService:
 
         # 동시 실행 개수 제한 확인
         count = await self.async_redis.scard(ACTIVE_RUNNERS_KEY)
-        if count >= config.MAX_CONCURRENT_RUNNERS:
+        settings = settings_service.get()
+        if count >= settings.max_concurrent_runners:
             raise HTTPException(
                 status_code=429,
-                detail=f"최대 {config.MAX_CONCURRENT_RUNNERS}개 동시 실행 가능 (현재 {count}개)"
+                detail=f"최대 {settings.max_concurrent_runners}개 동시 실행 가능 (현재 {count}개)"
             )
 
         # 새 runner_id 생성 (멀티 실행 지원 - 409 체크 없음)

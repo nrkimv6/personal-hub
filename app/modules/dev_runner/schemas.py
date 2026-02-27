@@ -147,6 +147,14 @@ class PlanEventResponse(BaseModel):
     created_at: datetime
 
 
+class ImportArchivedResponse(BaseModel):
+    """archived plan DB 이관 응답"""
+    created: int
+    updated: int
+    skipped: int
+    errors: List[str]
+
+
 class PlanRecordResponse(BaseModel):
     """계획서 레코드 응답"""
     id: int
@@ -158,6 +166,11 @@ class PlanRecordResponse(BaseModel):
     memo: Optional[str] = None
     memo_draft: Optional[str] = None
     archived_at: Optional[datetime] = None
+    category: Optional[str] = None
+    tags: Optional[list] = None
+    summary: Optional[str] = None
+    superseded_by: Optional[str] = None
+    llm_processed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -235,10 +248,22 @@ class MergeStatusResponse(BaseModel):
     message: str = ""
 
 
+class DevRunnerSettingsResponse(BaseModel):
+    """Dev Runner 설정 응답 스키마"""
+    max_concurrent_runners: int
+    updated_at: Optional[str] = None
+
+
+class DevRunnerSettingsUpdateRequest(BaseModel):
+    """Dev Runner 설정 업데이트 요청 스키마"""
+    max_concurrent_runners: int = Field(..., ge=1, le=10, description="최대 동시 실행 수 (1~10)")
+
+
 __all__ = [
     'PlanEventResponse',
     'PlanRecordResponse',
     'PlanRecordWithEventsResponse',
+    'ImportArchivedResponse',
     'MemoUpdateRequest',
     'RunRequest',
     'RunStatusResponse',
@@ -260,4 +285,6 @@ __all__ = [
     'RunHistoryItem',
     'RunHistoryResponse',
     'FullLogResponse',
+    'DevRunnerSettingsResponse',
+    'DevRunnerSettingsUpdateRequest',
 ]

@@ -12,6 +12,7 @@ from .logs import router as logs_router
 from .plans import router as plans_router
 from .engines import router as engines_router
 from .events import router as events_router
+from .settings import router as settings_router
 
 router.include_router(tasks_router)
 router.include_router(runner_router)
@@ -19,5 +20,6 @@ router.include_router(logs_router)
 router.include_router(plans_router)
 router.include_router(engines_router, prefix="/engines")
 router.include_router(events_router)
+router.include_router(settings_router, prefix="/settings")
 
 __all__ = ['router']
