@@ -44,6 +44,7 @@
 	let consecutiveErrors = $state(0);
 	let redisAvailable = $state(true);
 	let pendingStale = $state(false);
+	let completedBanner = $state(false); // runner 정상 완료 배너
 	const MAX_LINES = 500;
 	const SEPARATOR_PATTERN = '════════════════';
 
@@ -243,7 +244,16 @@
 		eventSource.addEventListener('connected', () => {
 			redisAvailable = true;
 		});
+		// runner 정상 완료 신호 — 배너 표시 후 재연결 중지
+		eventSource.addEventListener('completed', () => {
+			completedBanner = true;
+			eventSource?.close();
+			eventSource = null;
+			connected = 'disconnected';
+		});
 		eventSource.onerror = async () => {
+			// completed 후 eventSource가 닫혀서 발생한 error면 재연결 중지
+			if (completedBanner) return;
 			consecutiveErrors++;
 			eventSource?.close();
 			eventSource = null;
@@ -384,6 +394,12 @@
 			</button>
 		</div>
 	</div>
+
+	{#if completedBanner}
+		<div class="px-3 py-1.5 bg-green-900/40 border-b border-green-700/50 text-xs text-green-300 shrink-0 flex items-center gap-2">
+			<span>✅ 실행 완료 — 로그 파일에서 계속 볼 수 있습니다</span>
+		</div>
+	{/if}
 
 	<!-- Log Content (Phase 2: text-sm for body) -->
 	<div

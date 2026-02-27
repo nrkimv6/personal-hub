@@ -62,6 +62,12 @@ def restart_listener():
     return executor_service.restart_listener()
 
 
+@router.post("/runners/{runner_id}/kill")
+async def kill_runner(runner_id: str):
+    """특정 runner 강제 종료 (SIGKILL — 진행 중인 작업이 유실될 수 있음)"""
+    return await executor_service.send_runner_command(runner_id, "force-kill")
+
+
 @router.post("/runners/{runner_id}/retry-merge")
 async def retry_merge(runner_id: str):
     """머지 충돌 후 재머지 시도"""

@@ -256,6 +256,12 @@ export const devRunnerRunnerApi = {
 		devRunnerRequest<{ success: boolean; runner_id: string }>(
 			`/runners/${runnerId}/tab`,
 			{ method: 'DELETE' }
+		),
+
+	kill: (runnerId: string) =>
+		devRunnerRequest<{ success: boolean; message: string }>(
+			`/runners/${runnerId}/kill`,
+			{ method: 'POST' }
 		)
 };
 

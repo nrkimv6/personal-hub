@@ -104,7 +104,18 @@ class LogService:
                     ignore_subscribe_messages=True, timeout=0.5
                 )
                 if message and message["type"] == "message":
-                    yield f"data: {message['data']}\n\n"
+                    data = message["data"]
+                    if data == "__COMPLETED__":
+                        # runner 정상 종료 신호 — completed 이벤트 전송 후 스트림 종료
+                        yield "event: completed\ndata: done\n\n"
+                        if pubsub:
+                            try:
+                                await pubsub.unsubscribe(log_channel)
+                                await pubsub.aclose()
+                            except Exception:
+                                pass
+                        return
+                    yield f"data: {data}\n\n"
                     last_heartbeat = time.monotonic()
                     consecutive_errors = 0
                 else:

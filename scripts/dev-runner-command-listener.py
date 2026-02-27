@@ -104,6 +104,13 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis):
     """전역 프로세스 변수 + Redis 상태 정리 (per-runner)"""
     global _running_processes, _running_log_files, _stream_threads
 
+    # cleanup 직전 SSE 클라이언트에 완료 신호 publish
+    try:
+        log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+        redis_client.publish(log_channel, "__COMPLETED__")
+    except Exception:
+        pass
+
     _running_processes.pop(runner_id, None)
     _running_log_files.pop(runner_id, None)
     if runner_id in _stream_threads:

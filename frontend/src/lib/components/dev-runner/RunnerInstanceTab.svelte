@@ -22,6 +22,7 @@
 
 	let elapsed = $state('');
 	let stopping = $state(false);
+	let killing = $state(false);
 	let stopError = $state<string | null>(null);
 	let retryingMerge = $state(false);
 	let mergeError = $state<string | null>(null);
@@ -61,6 +62,20 @@
 			stopError = e instanceof Error ? e.message : '중지 실패';
 		} finally {
 			stopping = false;
+		}
+	}
+
+	async function handleKill() {
+		if (!confirm(`runner ${runnerId}를 강제 종료합니까? 진행 중인 작업이 유실됩니다.`)) return;
+		killing = true;
+		stopError = null;
+		try {
+			await devRunnerRunnerApi.kill(runnerId);
+			onStop();
+		} catch (e) {
+			stopError = e instanceof Error ? e.message : '강제 종료 실패';
+		} finally {
+			killing = false;
 		}
 	}
 
@@ -129,9 +144,17 @@
 			<button
 				class="shrink-0 px-2 py-0.5 rounded border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors text-[10px]"
 				onclick={handleStop}
-				disabled={stopping}
+				disabled={stopping || killing}
 			>
 				{stopping ? '중지 중...' : '중지'}
+			</button>
+			<button
+				class="shrink-0 px-2 py-0.5 rounded border border-red-400 text-red-700 hover:bg-red-100 disabled:opacity-50 transition-colors text-[10px] font-bold"
+				onclick={handleKill}
+				disabled={stopping || killing}
+				title="강제 종료 (SIGKILL) — 진행 중인 작업이 유실됩니다"
+			>
+				{killing ? '종료 중...' : '강제 종료'}
 			</button>
 		{/if}
 

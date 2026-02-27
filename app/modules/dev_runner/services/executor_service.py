@@ -71,10 +71,49 @@ class ExecutorService:
                 detail="dev-runner command listener가 실행 중이지 않습니다. 워커를 시작하세요."
             )
 
+    async def _cleanup_stale_runners(self) -> int:
+        """active_runners 중 PID가 없거나 죽어있는 stale 항목을 정리.
+
+        listener 재연결 실패 등으로 고아 상태가 된 runner를 제거하여
+        start_dev_runner()의 429 에러를 방지한다.
+
+        Returns:
+            정리된 stale runner 수
+        """
+        try:
+            runner_ids = await self.async_redis.smembers(ACTIVE_RUNNERS_KEY)
+        except Exception:
+            return 0
+
+        cleaned = 0
+        for rid in runner_ids:
+            pid_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:pid")
+            if not pid_str:
+                # PID 정보 없음 → stale
+                self._force_cleanup_state(rid)
+                cleaned += 1
+                continue
+            try:
+                pid = int(pid_str)
+            except ValueError:
+                self._force_cleanup_state(rid)
+                cleaned += 1
+                continue
+            if not self._is_pid_alive(pid):
+                self._force_cleanup_state(rid)
+                cleaned += 1
+
+        if cleaned:
+            logger.info(f"[dev-runner] stale 정리: {cleaned}개 제거")
+        return cleaned
+
     async def start_dev_runner(self, request: RunRequest) -> RunStatusResponse:
         """plan-runner 실행 시작 - Redis 명령 전송 (비동기, 멀티 runner 지원)"""
         # Redis + listener 사전 확인
         await self._check_redis_and_listener()
+
+        # stale runner 정리 (dead PID 항목을 제거하여 429 방지)
+        await self._cleanup_stale_runners()
 
         # 동시 실행 개수 제한 확인
         count = await self.async_redis.scard(ACTIVE_RUNNERS_KEY)
