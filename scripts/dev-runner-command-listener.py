@@ -118,7 +118,10 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis):
         # (머지 워크플로가 별도로 관리하는 경우 스킵)
         if merge_status not in ("pending_merge", "conflict"):
             try:
-                WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR)
+                plan_file_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+                if plan_file_val == "ALL":
+                    plan_file_val = None
+                WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file_val or None)
             except Exception as wt_e:
                 logger.warning(f"worktree 정리 실패 (runner_id: {runner_id}): {wt_e}")
 
@@ -135,6 +138,150 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis):
         redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
     except Exception:
         pass
+
+
+class _DummyProcess:
+    """재연결된 plan-runner 프로세스를 위한 래퍼.
+
+    기존 코드의 ``proc.poll()`` 호출과 호환되도록 poll() / wait() 인터페이스를 제공한다.
+    실제 stdout pipe는 없으므로 로그 tailing은 별도 스레드(_tail_log_and_publish)가 담당한다.
+    """
+
+    def __init__(self, pid: int):
+        self.pid = pid
+        self.returncode: Optional[int] = None
+
+    def poll(self) -> Optional[int]:
+        """프로세스가 살아있으면 None, 종료되었으면 -1 반환."""
+        if self.returncode is not None:
+            return self.returncode
+        if not _is_pid_alive(self.pid):
+            self.returncode = -1
+        return self.returncode
+
+
+def _tail_log_and_publish(runner_id: str, log_path: str, redis_client: redis.Redis):
+    """로그 파일 끝(EOF)부터 새 줄을 읽어 Redis log channel에 publish하는 스레드.
+
+    재연결된 runner에서 pipe가 없을 때 파일 tailing으로 대체 스트리밍한다.
+    PID 종료 + 더 이상 새 줄 없음 → 스레드 종료.
+    """
+    log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            # 파일 끝으로 이동 (재연결 전 기존 내용은 재발행하지 않음)
+            f.seek(0, 2)
+            while True:
+                # runner가 이미 cleanup됐으면 스레드 종료
+                if runner_id not in _running_processes:
+                    break
+                line = f.readline()
+                if line:
+                    stripped = line.rstrip('\n')
+                    try:
+                        redis_client.publish(log_channel, _ANSI_ESCAPE.sub('', stripped))
+                    except redis.ConnectionError:
+                        pass
+                else:
+                    # 더 읽을 내용 없음 — PID가 죽었는지 확인
+                    proc = _running_processes.get(runner_id)
+                    if proc is not None and proc.poll() is not None:
+                        # 프로세스 종료 후 잔여 내용 없음 → 스레드 종료
+                        break
+                    time.sleep(0.2)
+    except FileNotFoundError:
+        logger.warning(f"[tail_log] 로그 파일 없음: {log_path}")
+    except Exception as e:
+        logger.error(f"[tail_log] 스레드 오류 (runner_id={runner_id}): {e}")
+
+
+def _monitor_pid_until_exit(runner_id: str, pid: int, redis_client: redis.Redis):
+    """PID 종료를 1초 간격으로 감지하여 _cleanup_process_state()를 호출하는 스레드."""
+    while True:
+        # 이미 cleanup됐으면 즉시 종료 (중복 cleanup 방지)
+        if runner_id not in _running_processes:
+            break
+        if not _is_pid_alive(pid):
+            logger.info(f"[monitor_pid] runner {runner_id} PID {pid} 종료 감지 → cleanup")
+            _cleanup_process_state(runner_id, redis_client)
+            break
+        time.sleep(1)
+
+
+def _attach_to_running_process(runner_id: str, pid: int, redis_client: redis.Redis):
+    """listener 재시작 시 이미 살아있는 plan-runner에 재연결.
+
+    pipe가 없으므로 로그 파일 tailing + PID 모니터 스레드로 대체 연결한다.
+    """
+    # 로그 파일 경로 조회
+    log_file_path = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path")
+    if not log_file_path:
+        log_file_path = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
+    if not log_file_path or not Path(log_file_path).exists():
+        logger.warning(f"[attach] runner {runner_id} 로그 파일 없음 → cleanup")
+        _cleanup_process_state(runner_id, redis_client)
+        return
+
+    # _DummyProcess 등록 (기존 heartbeat 루프의 proc.poll() 호환)
+    dummy = _DummyProcess(pid)
+    _running_processes[runner_id] = dummy
+    _running_log_files[runner_id] = Path(log_file_path)
+
+    # tailing 스레드 시작
+    tail_thread = threading.Thread(
+        target=_tail_log_and_publish,
+        args=(runner_id, log_file_path, redis_client),
+        daemon=True,
+    )
+    tail_thread.start()
+    _stream_threads[runner_id] = tail_thread
+
+    # PID 모니터 스레드 시작
+    monitor_thread = threading.Thread(
+        target=_monitor_pid_until_exit,
+        args=(runner_id, pid, redis_client),
+        daemon=True,
+    )
+    monitor_thread.start()
+
+    logger.info(f"[listener] 재시작 감지: runner {runner_id} PID {pid} 생존 → 재연결")
+
+
+def _reconnect_surviving_runners(redis_client: redis.Redis):
+    """listener 시작(또는 재시작) 시 한 번 호출.
+
+    Redis active_runners 목록을 순회하여:
+    - PID가 살아있으면 → _attach_to_running_process() 로 재연결
+    - PID가 죽어있거나 없으면 → _cleanup_process_state() 로 정리
+    """
+    try:
+        runner_ids = redis_client.smembers(ACTIVE_RUNNERS_KEY)
+    except Exception as e:
+        logger.warning(f"[reconnect] active_runners 조회 실패: {e}")
+        return
+
+    for runner_id in runner_ids:
+        pid_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
+        if not pid_str:
+            logger.info(f"[listener] runner {runner_id} PID 정보 없음 → cleanup")
+            _cleanup_process_state(runner_id, redis_client)
+            continue
+        try:
+            pid = int(pid_str)
+        except ValueError:
+            logger.warning(f"[reconnect] runner {runner_id} 잘못된 PID 값: {pid_str!r} → cleanup")
+            _cleanup_process_state(runner_id, redis_client)
+            continue
+
+        # 이미 _running_processes에 등록된 경우(Redis 재연결 상황) 스킵
+        if runner_id in _running_processes:
+            continue
+
+        if _is_pid_alive(pid):
+            _attach_to_running_process(runner_id, pid, redis_client)
+        else:
+            logger.info(f"[listener] 재시작 감지: runner {runner_id} PID {pid} 종료됨 → cleanup")
+            _cleanup_process_state(runner_id, redis_client)
 
 
 def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Redis, runner_id: str = ""):
@@ -274,23 +421,23 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", message)
             logger.error(f"[_do_start_plan_runner] 실패 상태 기록 (runner_id: {runner_id}): {message}")
 
+    # 명령어 구성
+    plan_file = command.get("plan_file")
+
     # worktree 생성 (시간이 걸릴 수 있음)
     try:
-        worktree_path = WorktreeManager.create(runner_id, WORKTREE_BASE_DIR)
+        worktree_path, branch = WorktreeManager.create(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file)
     except WorktreeError as e:
         logger.error(f"worktree 생성 실패 (runner_id: {runner_id}): {e}")
         _set_error_status(f"worktree 생성 실패: {e}")
         return
-
-    # 명령어 구성
-    plan_file = command.get("plan_file")
     engine = command.get("engine")
     is_parallel = command.get("parallel", False)
     if not plan_file and not is_parallel:
         _set_error_status("plan_file required (use parallel mode for batch execution)")
         return
 
-    result = _launch_plan_runner_process(command, redis_client, runner_id, worktree_path, plan_file, engine)
+    result = _launch_plan_runner_process(command, redis_client, runner_id, worktree_path, plan_file, engine, branch=branch)
     if not result.get("success"):
         _set_error_status(result.get("message", "Unknown error"))
 
@@ -361,7 +508,7 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
     return None  # sentinel: main loop에서 결과 push 스킵 (이미 위에서 push)
 
 
-def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner_id: str, worktree_path: Path, plan_file: str, engine: str) -> Dict:
+def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner_id: str, worktree_path: Path, plan_file: str, engine: str, branch: str = "") -> Dict:
     """plan-runner CLI 프로세스 실행 (worktree 생성 이후 호출)"""
 
     cmd = [
@@ -426,6 +573,8 @@ def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner
         env["PLAN_RUNNER_WORKTREE_PATH"] = str(worktree_path)
         env["PLAN_RUNNER_RUNNER_ID"] = runner_id
         env["TEST_DB_DIR"] = str(worktree_path / "data")
+        if branch:
+            env["PLAN_RUNNER_BRANCH"] = branch
 
         process = subprocess.Popen(
             cmd,
@@ -603,6 +752,48 @@ def force_stop_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
     return {"success": True, "message": msg}
 
 
+def force_kill_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
+    """강제 종료 (SIGKILL) — graceful stop과 달리 즉시 프로세스 사망.
+
+    사용자가 "강제 종료" 버튼을 눌렀을 때 호출된다.
+    _DummyProcess(재연결된 프로세스)는 proc.kill()이 없으므로
+    Windows API(TerminateProcess)로 직접 종료한다.
+    """
+    if not runner_id:
+        return {"success": False, "message": "runner_id required"}
+
+    proc = _running_processes.get(runner_id)
+    pid_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
+    pid = None
+
+    # subprocess.Popen 인 경우
+    if proc and hasattr(proc, "kill") and not isinstance(proc, _DummyProcess):
+        pid = proc.pid
+        try:
+            proc.kill()
+            proc.wait(timeout=5)
+        except Exception:
+            pass
+    else:
+        # _DummyProcess 또는 proc 없음 → Redis PID로 직접 SIGKILL
+        if pid_str:
+            try:
+                pid = int(pid_str)
+                import ctypes
+                PROCESS_TERMINATE = 0x0001
+                handle = ctypes.windll.kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
+                if handle:
+                    ctypes.windll.kernel32.TerminateProcess(handle, 1)
+                    ctypes.windll.kernel32.CloseHandle(handle)
+            except Exception as e:
+                logger.warning(f"[force_kill] PID {pid} 직접 종료 실패: {e}")
+
+    _cleanup_process_state(runner_id, redis_client)
+    msg = f"Force killed runner {runner_id} (PID: {pid})" if pid else f"Force killed runner {runner_id} (no PID)"
+    logger.info(msg)
+    return {"success": True, "message": msg}
+
+
 def retry_merge(runner_id: str, redis_client: redis.Redis) -> Dict:
     """머지 충돌 후 재머지 시도"""
     if not runner_id:
@@ -627,7 +818,11 @@ def cleanup_worktree(runner_id: str, redis_client: redis.Redis) -> Dict:
     if not runner_id:
         return {"success": False, "message": "runner_id required"}
     try:
-        WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR)
+        plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+        # "ALL"은 parallel 모드 placeholder이므로 plan_file로 취급하지 않음
+        if plan_file == "ALL":
+            plan_file = None
+        WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file or None)
         redis_client.delete(
             f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path",
             f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status",
@@ -701,6 +896,9 @@ def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
     elif action == "force-stop":
         runner_id = command.get("runner_id", "")
         return force_stop_plan_runner(runner_id, redis_client)
+    elif action == "force-kill":
+        runner_id = command.get("runner_id", "")
+        return force_kill_plan_runner(runner_id, redis_client)
     elif action == "status":
         return get_status(redis_client)
     elif action == "retry-merge":
@@ -746,6 +944,9 @@ def main():
             # 초기 heartbeat 설정 (시작 즉시 한 번 찍음)
             r.set(HEARTBEAT_KEY, datetime.now().isoformat(), ex=HEARTBEAT_TTL)
             last_heartbeat = time.time()
+
+            # listener 시작/재시작 시 생존 plan-runner 재연결 (고아 프로세스 처리)
+            _reconnect_surviving_runners(r)
 
             # Redis 재연결 시 현재 프로세스 상태 복원
             # (Redis 캐시 등으로 데이터가 날아갈 경우 status: running 복원)

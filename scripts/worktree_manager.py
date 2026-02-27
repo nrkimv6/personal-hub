@@ -16,6 +16,30 @@ class WorktreeError(Exception):
     pass
 
 
+def parse_plan_filename(plan_file: str) -> tuple:
+    """plan 파일명에서 날짜와 slug 분리
+
+    '2026-02-27_activity-hub-fix.md' → ('2026-02-27', 'activity-hub-fix')
+    날짜 접두사가 없으면 ('', stem) 반환
+    """
+    stem = Path(plan_file).stem
+    # YYYY-MM-DD_ 패턴 감지
+    import re
+    m = re.match(r'^(\d{4}-\d{2}-\d{2})_(.+)$', stem)
+    if m:
+        return m.group(1), m.group(2)
+    return '', stem
+
+
+def branch_from_plan(plan_file: str) -> str:
+    """plan 파일명에서 브랜치명 생성
+
+    '2026-02-27_activity-hub-fix.md' → 'plan/2026-02-27_activity-hub-fix'
+    """
+    stem = Path(plan_file).stem
+    return f"plan/{stem}"
+
+
 @dataclass
 class MergeResult:
     success: bool
@@ -25,12 +49,21 @@ class MergeResult:
 
 class WorktreeManager:
     @staticmethod
-    def create(runner_id: str, base_dir: Path) -> Path:
-        """git worktree add {base_dir}/{runner_id} -b runner/{runner_id}"""
+    def create(runner_id: str, base_dir: Path, plan_file: Optional[str] = None) -> tuple:
+        """git worktree add 실행 후 (worktree_path, branch) 반환
+
+        plan_file 지정 시: branch='plan/{stem}', path=base_dir/{stem}
+        미지정 시: branch='runner/{runner_id}', path=base_dir/{runner_id}
+        """
         if not runner_id:
             raise WorktreeError("runner_id cannot be empty")
-        worktree_path = base_dir / runner_id
-        branch = f"runner/{runner_id}"
+        if plan_file:
+            stem = Path(plan_file).stem
+            worktree_path = base_dir / stem
+            branch = f"plan/{stem}"
+        else:
+            worktree_path = base_dir / runner_id
+            branch = f"runner/{runner_id}"
         try:
             base_dir.mkdir(parents=True, exist_ok=True)
             result = subprocess.run(
@@ -40,17 +73,25 @@ class WorktreeManager:
             if result.returncode != 0:
                 raise WorktreeError(f"git worktree add 실패: {result.stderr}")
             logger.info(f"[WorktreeManager] 생성: {worktree_path} (브랜치: {branch})")
-            return worktree_path
+            return worktree_path, branch
         except WorktreeError:
             raise
         except Exception as e:
             raise WorktreeError(f"worktree 생성 중 오류: {e}")
 
     @staticmethod
-    def remove(runner_id: str, base_dir: Path) -> bool:
-        """git worktree remove + git branch -D"""
-        worktree_path = base_dir / runner_id
-        branch = f"runner/{runner_id}"
+    def remove(runner_id: str, base_dir: Path, plan_file: Optional[str] = None) -> bool:
+        """git worktree remove + git branch -D
+
+        plan_file 지정 시 slug 기반 경로/브랜치 사용, 미지정 시 runner_id 기반
+        """
+        if plan_file:
+            stem = Path(plan_file).stem
+            worktree_path = base_dir / stem
+            branch = f"plan/{stem}"
+        else:
+            worktree_path = base_dir / runner_id
+            branch = f"runner/{runner_id}"
         try:
             result = subprocess.run(
                 ["git", "worktree", "remove", str(worktree_path), "--force"],
@@ -103,12 +144,14 @@ class WorktreeManager:
                 if line.startswith("worktree "):
                     if current:
                         worktrees.append(current)
-                    current = {"path": line[9:], "branch": None, "runner_id": None}
+                    current = {"path": line[9:], "branch": None, "runner_id": None, "plan_slug": None}
                 elif line.startswith("branch "):
                     branch = line[7:].replace("refs/heads/", "")
                     current["branch"] = branch
                     if branch.startswith("runner/"):
                         current["runner_id"] = branch[7:]
+                    elif branch.startswith("plan/"):
+                        current["plan_slug"] = branch[5:]
             if current:
                 worktrees.append(current)
             return worktrees
