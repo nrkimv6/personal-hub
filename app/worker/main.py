@@ -65,6 +65,7 @@ try:
     from app.worker.mobile_crawl_worker import MobileCrawlWorker
     from app.worker.video_download_worker import VideoDownloadWorker
     from app.worker.file_search_worker import FileSearchWorker
+    from app.worker.plan_archive_listener import PlanArchiveListener
     from app.modules.git_repos.worker import GitRepoWorker
 
     # 크롤러 및 워커 관련 로거들이 워커 로거와 같은 핸들러를 사용하도록 설정
@@ -82,6 +83,7 @@ try:
         'app.worker.activity_worker',
         'app.worker.video_download_worker',
         'app.worker.file_search_worker',
+        'app.worker.plan_archive_listener',
         'app.worker.crawl_worker_base',
         'app.modules.git_repos.worker',
         'instagram.worker_status',
@@ -133,6 +135,7 @@ async def run_with_orchestrator(
     run_video_dl: bool = True,
     run_file_search: bool = True,
     run_git: bool = True,
+    run_plan_archive_listener: bool = True,
 ):
     """WorkerOrchestrator를 사용하여 워커들을 실행합니다.
 
@@ -217,6 +220,11 @@ async def run_with_orchestrator(
             orchestrator.register_worker("git_repos", git_worker)
             logger.info("GitRepoWorker 등록됨")
 
+        if run_plan_archive_listener:
+            plan_archive_listener = PlanArchiveListener()
+            orchestrator.register_worker("plan_archive_listener", plan_archive_listener)
+            logger.info("PlanArchiveListener 등록됨")
+
         if not orchestrator.workers:
             logger.error("실행할 워커가 없습니다.")
             return
@@ -264,6 +272,7 @@ async def main(args):
             run_video_dl=args.video_dl or args.all,
             run_file_search=args.file_search or args.all,
             run_git=args.git or args.all,
+            run_plan_archive_listener=args.all,
         )
     except Exception as e:
         logger.critical(f"워커 치명적 오류: {e}", exc_info=True)
