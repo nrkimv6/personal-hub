@@ -78,13 +78,12 @@ if (-not (Test-Path $LogDir)) {
     exit 1
 }
 
-# Get latest log file function (by filename timestamp, not LastWriteTime)
+# Get latest log file function (by LastWriteTime, not filename)
 function Get-LatestLogFile {
     param([string]$Prefix)
 
     $pattern = Join-Path $LogDir "$Prefix*.log"
-    # Sort by Name descending - filenames contain timestamps like api_20251211_094846.log
-    $files = Get-ChildItem $pattern -ErrorAction SilentlyContinue | Sort-Object Name -Descending
+    $files = Get-ChildItem $pattern -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
     if ($files) {
         return $files[0].FullName
     }
@@ -216,14 +215,18 @@ if ($Target -eq "list") {
     exit 0
 }
 
-# Get log files - try both patterns (stdout_* for NSSM, plain for direct run)
+# Get log files - check all patterns and return newest by LastWriteTime
 function Get-LatestLogFileMultiPattern {
     param([string[]]$Prefixes)
 
+    $allCandidates = @()
     foreach ($prefix in $Prefixes) {
-        $file = Get-LatestLogFile $prefix
-        if ($file) { return $file }
+        $pattern = Join-Path $LogDir "$prefix*.log"
+        $found = Get-ChildItem $pattern -ErrorAction SilentlyContinue
+        if ($found) { $allCandidates += $found }
     }
+    $latest = $allCandidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($latest) { return $latest.FullName }
     return $null
 }
 
@@ -677,17 +680,15 @@ function Start-CombinedLogTail {
             $baseLogDir = Join-Path $ProjectRoot "logs"
             if ($baseLogDir -ne $LogDir) { $searchDirs += $baseLogDir }
         }
-        $latestLog = $null
+        $allCandidates = @()
         foreach ($dir in $searchDirs) {
             foreach ($pattern in $Patterns) {
-                $found = Get-ChildItem -Path $dir -Filter $pattern -ErrorAction SilentlyContinue |
-                    Sort-Object Name -Descending | Select-Object -First 1
-                if ($found -and (-not $latestLog -or $found.Name -gt $latestLog.Name)) {
-                    $latestLog = $found
-                }
+                $found = Get-ChildItem -Path $dir -Filter $pattern -ErrorAction SilentlyContinue
+                if ($found) { $allCandidates += $found }
             }
         }
-        return $latestLog
+        # LastWriteTime 기준 최신 파일 (파일명 비교 시 prefix 차이로 오판 방지)
+        return $allCandidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     }
 
     # Plan-runner 로그 전용 패턴 (폴백 전용 — Redis 미연결 시)
