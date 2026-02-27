@@ -173,6 +173,6 @@
 
 	<!-- 로그 뷰어 -->
 	<div class="flex-1 min-h-0">
-		<LogViewer {runnerId} planFile={planFile ?? undefined} {onBatchPlansChange} />
+		<LogViewer {runnerId} planFile={planFile ?? undefined} {running} {onBatchPlansChange} />
 	</div>
 </div>

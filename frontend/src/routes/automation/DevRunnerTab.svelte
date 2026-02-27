@@ -543,26 +543,25 @@
 			<div class="flex-1 min-h-0 flex flex-col md:grid md:grid-cols-2 md:gap-0 overflow-hidden">
 				<!-- Runner 탭 or 안내 -->
 				<div class="flex-1 min-h-0 overflow-hidden">
-					{#if activeTabId}
-						{@const activeTab = runnerTabs.find(t => t.id === activeTabId)}
-						{#if activeTab}
-							{#key activeTabId}
-								<RunnerInstanceTab
-									runnerId={activeTab.id}
-									planFile={activeTab.plan_file}
-									running={activeTab.running}
-									engine={activeTab.engine}
-									startTime={activeTab.start_time}
-									onStop={() => handleTabStop(activeTab.id)}
-									onClose={() => handleCloseTab(activeTab.id)}
-									onBatchPlansChange={(plans) => { batchPlans = plans; }}
-								/>
-							{/key}
-						{/if}
-					{:else}
+					{#if runnerTabs.length === 0}
 						<div class="flex items-center justify-center h-full text-sm text-gray-400">
 							실행 버튼을 눌러 plan-runner를 시작하세요
 						</div>
+					{:else}
+						{#each runnerTabs as tab (tab.id)}
+							<div class="h-full {activeTabId === tab.id ? '' : 'hidden'}">
+								<RunnerInstanceTab
+									runnerId={tab.id}
+									planFile={tab.plan_file}
+									running={tab.running}
+									engine={tab.engine}
+									startTime={tab.start_time}
+									onStop={() => handleTabStop(tab.id)}
+									onClose={() => handleCloseTab(tab.id)}
+									onBatchPlansChange={(plans) => { batchPlans = plans; }}
+								/>
+							</div>
+						{/each}
 					{/if}
 				</div>
 

@@ -6,10 +6,11 @@
 		runnerId: string;
 		planFile?: string;
 		currentPlanName?: string;
+		running?: boolean;
 		onBatchPlansChange?: (plans: BatchPlanItem[]) => void;
 	}
 
-	let { runnerId, planFile, currentPlanName, onBatchPlansChange }: Props = $props();
+	let { runnerId, planFile, currentPlanName, running = false, onBatchPlansChange }: Props = $props();
 
 	// Phase 2: 전체실행 시 Plan 파일 리스트 추적
 	interface BatchPlanItem {
@@ -257,7 +258,31 @@
 	async function loadRecent() {
 		try {
 			const res = await devRunnerLogApi.recent(runnerId, 100);
-			lines = res.lines.map((text: string) => parseLine(text, true));
+			const parsed = res.lines.map((text: string) => parseLine(text, true));
+
+			if (running) {
+				// running 중이면 마지막 SEPARATOR 이후 구간은 현재 세션 → isStale: false
+				const lastSepIdx = parsed.findLastIndex((l: ParsedLine) =>
+					l.raw.includes(SEPARATOR_PATTERN)
+				);
+				if (lastSepIdx === -1) {
+					// SEPARATOR 없으면 전체가 현재 세션
+					parsed.forEach((l: ParsedLine) => (l.isStale = false));
+				} else {
+					// SEPARATOR 이후 줄만 현재 세션
+					for (let i = lastSepIdx + 1; i < parsed.length; i++) {
+						parsed[i].isStale = false;
+					}
+				}
+			}
+
+			lines = parsed;
+
+			// Phase 3: 로드된 lines에 SEPARATOR가 있으면 pendingStale = true로 초기화
+			// → 다음 SSE SEPARATOR 수신 시 이전 로그를 정상적으로 grayout 처리하기 위함
+			if (parsed.some((l: ParsedLine) => l.raw.includes(SEPARATOR_PATTERN))) {
+				pendingStale = true;
+			}
 		} catch {
 			// 로그 없을 수 있음
 		}
