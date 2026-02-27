@@ -413,10 +413,51 @@ class PlanService:
 
     @staticmethod
     def _extract_summary(content: str) -> Optional[str]:
-        """## 배경 및 요약 섹션의 텍스트를 추출한다."""
+        """plan 파일에서 요약 텍스트를 추출한다.
+
+        우선순위:
+        1. `> 요약: {텍스트}` 헤더 블록쿼트
+        2. `## 개요` 섹션 첫 단락 (코드블럭 제외)
+        3. `## 배경 및 요약` 섹션 (구버전 하위 호환)
+        """
         lines = content.split("\n")
-        in_section = False
+
+        # 1. `> 요약:` 블록쿼트 탐색
+        for line in lines:
+            m = re.match(r'^>\s*요약:\s*(.+)', line)
+            if m:
+                text = m.group(1).strip()
+                if text:
+                    return text
+
+        # 2. `## 개요` 섹션 첫 단락
+        in_개요 = False
+        in_codeblock = False
         collected: List[str] = []
+        for line in lines:
+            if re.match(r'^##\s+개요', line):
+                in_개요 = True
+                continue
+            if in_개요:
+                if re.match(r'^##\s+', line):
+                    break
+                if line.strip().startswith('```'):
+                    in_codeblock = not in_codeblock
+                    continue
+                if in_codeblock:
+                    continue
+                # 빈 줄이 나오고 이미 내용이 있으면 첫 단락 종료
+                if not line.strip() and collected:
+                    break
+                if line.strip():
+                    collected.append(line.strip())
+        text = " ".join(collected).strip()
+        if text:
+            return text
+
+        # 3. `## 배경 및 요약` (구버전 하위 호환)
+        in_section = False
+        collected = []
         for line in lines:
             if re.match(r'^##\s+배경 및 요약', line):
                 in_section = True
@@ -425,7 +466,6 @@ class PlanService:
                 if re.match(r'^##\s+', line):
                     break
                 collected.append(line)
-        # 앞뒤 빈 줄 제거 후 내용이 있으면 반환
         text = "\n".join(collected).strip()
         return text if text else None
 
