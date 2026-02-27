@@ -7,6 +7,7 @@ import { build, files, version } from '$service-worker';
 
 const CACHE_NAME = `cache-${version}`;
 const ASSETS = [...build, ...files];
+const BUILD_ASSETS = new Set(build); // fetch 시 O(1) lookup — 해시 포함 불변 자산
 
 /**
  * Service Worker용 타임아웃 fetch
@@ -62,13 +63,31 @@ self.addEventListener('fetch', (event) => {
 	if (event.request.headers.get('accept')?.includes('text/event-stream')) return;
 	if (url.origin !== self.location.origin) return;
 
-	event.respondWith(
-		fetchWithTimeout(event.request)
-			.then((response) => {
-				const clone = response.clone();
-				caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-				return response;
+	// 쿼리스트링 포함 요청 바이패스 (/diagnostics.json?t=... 등 동적 리소스)
+	if (url.search) return;
+
+	if (BUILD_ASSETS.has(url.pathname)) {
+		// cache-first: 해시 포함 불변 빌드 자산 (/_app/immutable/*)
+		event.respondWith(
+			caches.match(event.request).then((cached) => {
+				if (cached) return cached;
+				return fetch(event.request).then((response) => {
+					const clone = response.clone();
+					caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+					return response;
+				});
 			})
-			.catch(() => caches.match(event.request).then((r) => r || new Response('Offline')))
-	);
+		);
+	} else {
+		// network-first: files 자산 (favicon, manifest 등 고정 파일명)
+		event.respondWith(
+			fetchWithTimeout(event.request)
+				.then((response) => {
+					const clone = response.clone();
+					caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+					return response;
+				})
+				.catch(() => caches.match(event.request).then((r) => r || new Response('Offline')))
+		);
+	}
 });
