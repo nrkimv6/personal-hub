@@ -302,6 +302,18 @@ function Get-PlanRunnerDisplayName {
     return $parts[0]
 }
 
+# plan-runner 로그 파일명에서 식별자 추출
+# plan-runner-{runner_id}-{YYYYMMDD-HHmmss}.log → "{runner_id}" (8자 hex)
+# 구버전 plan-runner-{YYYYMMDD-HHmmss}.log → "{HHmmss}"
+function Get-PlanRunnerFileId {
+    param([string]$FileName)
+    # 신규 형식: plan-runner-{8자hex}-YYYYMMDD-HHmmss.log → runner_id 추출
+    if ($FileName -match 'plan-runner-([0-9a-f]{8})-\d{8}-\d{6}') { return $Matches[1] }
+    # 구버전 형식: plan-runner-YYYYMMDD-HHmmss.log → HHmmss 추출
+    if ($FileName -match 'plan-runner-\d{8}-(\d{6})') { return $Matches[1] }
+    return "unknown"
+}
+
 # Redis에서 활성 plan-runner 목록 조회
 function Get-ActivePlanRunners {
     param([string]$LogDir)
@@ -560,14 +572,16 @@ function Start-CombinedLogTail {
                 $logConfig[$psKey] = @{ Path = $runner.StreamPath; Color = "DarkGray"; Tail = 5  }
             }
         } else {
-            # 활성 runner 없음 — 폴백: 최신 파일 1개
-            $logConfig["PLAN-RUNNER"] = @{ Path = $planRunnerLogFile;       Color = "White";    Tail = 10 }
-            $logConfig["PR-STREAM"]   = @{ Path = $planRunnerStreamLogFile; Color = "DarkGray"; Tail = 5  }
+            # 활성 runner 없음 — 폴백: 최신 파일 1개 (파일명 타임스탬프 식별자 사용)
+            $prFileId = Get-PlanRunnerFileId -FileName ([System.IO.Path]::GetFileName($planRunnerLogFile))
+            $logConfig["PR:$prFileId"] = @{ Path = $planRunnerLogFile;       Color = "White";    Tail = 10 }
+            $logConfig["PS:$prFileId"] = @{ Path = $planRunnerStreamLogFile; Color = "DarkGray"; Tail = 5  }
         }
     } else {
-        # Redis 없음 — 폴백: 최신 파일 1개
-        $logConfig["PLAN-RUNNER"] = @{ Path = $planRunnerLogFile;       Color = "White";    Tail = 10 }
-        $logConfig["PR-STREAM"]   = @{ Path = $planRunnerStreamLogFile; Color = "DarkGray"; Tail = 5  }
+        # Redis 없음 — 폴백: 최신 파일 1개 (파일명 타임스탬프 식별자 사용)
+        $prFileId = Get-PlanRunnerFileId -FileName ([System.IO.Path]::GetFileName($planRunnerLogFile))
+        $logConfig["PR:$prFileId"] = @{ Path = $planRunnerLogFile;       Color = "White";    Tail = 10 }
+        $logConfig["PS:$prFileId"] = @{ Path = $planRunnerStreamLogFile; Color = "DarkGray"; Tail = 5  }
     }
 
     # Sources that only show errors/warnings (suppress verbose output)
@@ -649,6 +663,9 @@ function Start-CombinedLogTail {
             $logConfig.Remove($source)
             $timestampedLogPatterns.Remove($source)
         }
+        # PR:xxx / PS:xxx 형태 동적 plan-runner key 제거 (Admin 아닐 때)
+        $prKeys = @($logConfig.Keys | Where-Object { $_ -like "PR:*" -or $_ -like "PS:*" })
+        foreach ($key in $prKeys) { $logConfig.Remove($key) }
     }
 
     # Helper to find latest log from multiple patterns
@@ -715,21 +732,47 @@ function Start-CombinedLogTail {
                     }
                 }
             } else {
-                # 폴백: 최신 파일 1개 추적 (기존 방식)
-                foreach ($source in $planRunnerLogPatterns.Keys) {
-                    $cfg = $planRunnerLogPatterns[$source]
-                    if (-not (Test-Path $cfg.Dir)) { continue }
+                # 폴백: 최신 파일 1개 추적 — 파일명 타임스탬프 기반 key 사용
+                $cfg = $planRunnerLogPatterns["PLAN-RUNNER"]
+                if (Test-Path $cfg.Dir) {
                     $candidates = Get-ChildItem -Path $cfg.Dir -Filter $cfg.Filter -ErrorAction SilentlyContinue
                     if ($cfg.Exclude) { $candidates = $candidates | Where-Object { $_.Name -notmatch $cfg.Exclude } }
                     $latest = $candidates | Sort-Object Name -Descending | Select-Object -First 1
                     if ($latest) {
-                        $currentName = $logFileNames[$source]
-                        if ($latest.Name -ne $currentName) {
-                            Write-Host "[$source] === Switched to new log: $($latest.Name) ===" -ForegroundColor Yellow
-                            $logFiles[$source] = $latest.FullName
-                            $logFileNames[$source] = $latest.Name
-                            $logColors[$source] = $logConfig[$source].Color
-                            $filePositions[$source] = 0
+                        $newFileId = Get-PlanRunnerFileId -FileName $latest.Name
+                        $newPrKey  = "PR:$newFileId"
+                        $newPsKey  = "PS:$newFileId"
+                        # 현재 추적 중인 PR: key 탐색
+                        $currentPrKey = ($logFiles.Keys | Where-Object { $_ -like "PR:*" -and $_ -notlike "PR:*#*" } | Select-Object -First 1)
+                        if ($currentPrKey -ne $newPrKey) {
+                            $oldId = if ($currentPrKey) { $currentPrKey } else { "(없음)" }
+                            Write-Host "[$newPrKey] === Switched: $oldId → $newPrKey ($($latest.Name)) ===" -ForegroundColor Yellow
+                            # 이전 key 제거
+                            if ($currentPrKey) {
+                                $oldPsKey = $currentPrKey -replace '^PR:', 'PS:'
+                                $logFiles.Remove($currentPrKey)
+                                $logFiles.Remove($oldPsKey)
+                                $logFileNames.Remove($currentPrKey)
+                                $logFileNames.Remove($oldPsKey)
+                                $logColors.Remove($currentPrKey)
+                                $logColors.Remove($oldPsKey)
+                                $filePositions.Remove($currentPrKey)
+                                $filePositions.Remove($oldPsKey)
+                            }
+                            # 새 key 추가
+                            $logFiles[$newPrKey]      = $latest.FullName
+                            $logFileNames[$newPrKey]  = $latest.Name
+                            $logColors[$newPrKey]     = "White"
+                            $filePositions[$newPrKey] = 0
+                            # stream 파일도 탐색
+                            $cfgS = $planRunnerLogPatterns["PR-STREAM"]
+                            $latestS = Get-ChildItem -Path $cfgS.Dir -Filter $cfgS.Filter -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+                            if ($latestS) {
+                                $logFiles[$newPsKey]      = $latestS.FullName
+                                $logFileNames[$newPsKey]  = $latestS.Name
+                                $logColors[$newPsKey]     = "DarkGray"
+                                $filePositions[$newPsKey] = 0
+                            }
                         }
                     }
                 }
@@ -905,12 +948,14 @@ if ($Follow) {
                             }
                         }
                     } else {
-                        Show-LogContent -FilePath $planRunnerLogFile -Label "PLAN-RUNNER" -Color White -TailLines $Lines
-                        Show-LogContent -FilePath $planRunnerStreamLogFile -Label "PR-STREAM" -Color DarkGray -TailLines ([Math]::Min($Lines, 20))
+                        $prFileId = Get-PlanRunnerFileId -FileName ([System.IO.Path]::GetFileName($planRunnerLogFile))
+                        Show-LogContent -FilePath $planRunnerLogFile -Label "PR:$prFileId" -Color White -TailLines $Lines
+                        Show-LogContent -FilePath $planRunnerStreamLogFile -Label "PS:$prFileId" -Color DarkGray -TailLines ([Math]::Min($Lines, 20))
                     }
                 } else {
-                    Show-LogContent -FilePath $planRunnerLogFile -Label "PLAN-RUNNER" -Color White -TailLines $Lines
-                    Show-LogContent -FilePath $planRunnerStreamLogFile -Label "PR-STREAM" -Color DarkGray -TailLines ([Math]::Min($Lines, 20))
+                    $prFileId = Get-PlanRunnerFileId -FileName ([System.IO.Path]::GetFileName($planRunnerLogFile))
+                    Show-LogContent -FilePath $planRunnerLogFile -Label "PR:$prFileId" -Color White -TailLines $Lines
+                    Show-LogContent -FilePath $planRunnerStreamLogFile -Label "PS:$prFileId" -Color DarkGray -TailLines ([Math]::Min($Lines, 20))
                 }
             }
             Show-LogContent -FilePath $frontendLogFile -Label "Frontend" -Color Green -TailLines $Lines

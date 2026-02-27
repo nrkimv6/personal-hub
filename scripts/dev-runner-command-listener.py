@@ -581,6 +581,12 @@ def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner
         env["PLAN_RUNNER_WORK_DIR"] = str(worktree_path)
         env["PLAN_RUNNER_WORKTREE_PATH"] = str(worktree_path)
         env["PLAN_RUNNER_RUNNER_ID"] = runner_id
+        # 로그 prefix 식별자: plan명(날짜 제거, 첫 2단어) + runner_id 앞 4자
+        _plan_basename = os.path.splitext(os.path.basename(plan_file or ""))[0]
+        _plan_basename = __import__('re').sub(r'^\d{4}-\d{2}-\d{2}[_-]', '', _plan_basename)
+        _plan_parts = _plan_basename.replace('_', '-').split('-')
+        _plan_short = '-'.join(_plan_parts[:2]) if len(_plan_parts) >= 2 else _plan_parts[0]
+        env["PLAN_RUNNER_NAME"] = f"PLAN-RUNNER#{_plan_short}@{runner_id[:4]}"
         env["TEST_DB_DIR"] = str(worktree_path / "data")
         if branch:
             env["PLAN_RUNNER_BRANCH"] = branch
