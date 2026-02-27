@@ -1,6 +1,7 @@
-<script>
+<script lang="ts">
 	import { goto } from '$app/navigation';
-  import { fetchWithTimeout } from '$lib/api/client';
+	import { fetchWithTimeout } from '$lib/api/client';
+	import type { MobileTarget } from '$lib/types/mobile';
 
 	let form = $state({
 		name: '',
@@ -10,7 +11,7 @@
 	});
 
 	let saving = $state(false);
-	let error = $state(null);
+	let error: string | null = $state(null);
 
 	async function handleSubmit() {
 		try {
@@ -28,10 +29,10 @@
 				throw new Error(data.detail || '생성 실패');
 			}
 
-			const target = await response.json();
+			const target: MobileTarget = await response.json();
 			goto(`/mobile/targets/${target.id}`);
 		} catch (err) {
-			error = err.message;
+			error = (err as Error).message;
 		} finally {
 			saving = false;
 		}

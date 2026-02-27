@@ -1,11 +1,12 @@
-<script>
+<script lang="ts">
 	import { onMount } from "svelte";
 	import { goto } from "$app/navigation";
-  import { fetchWithTimeout } from '$lib/api/client';
+	import { fetchWithTimeout } from '$lib/api/client';
+	import type { MobileTarget } from '$lib/types/mobile';
 
-	let targets = $state([]);
+	let targets: MobileTarget[] = $state([]);
 	let loading = $state(true);
-	let error = $state(null);
+	let error: string | null = $state(null);
 
 	async function loadTargets() {
 		try {
@@ -14,13 +15,13 @@
 			if (!response.ok) throw new Error("대상 목록 조회 실패");
 			targets = await response.json();
 		} catch (err) {
-			error = err.message;
+			error = (err as Error).message;
 		} finally {
 			loading = false;
 		}
 	}
 
-	async function deleteTarget(id) {
+	async function deleteTarget(id: number) {
 		if (!confirm("정말 삭제하시겠습니까?")) return;
 
 		try {
@@ -30,11 +31,11 @@
 			if (!response.ok) throw new Error("삭제 실패");
 			await loadTargets();
 		} catch (err) {
-			alert(err.message);
+			alert((err as Error).message);
 		}
 	}
 
-	async function executeTarget(id) {
+	async function executeTarget(id: number) {
 		if (!confirm("즉시 크롤링을 실행하시겠습니까?")) return;
 
 		try {
@@ -60,7 +61,7 @@
 				alert(`실행 실패: ${result.error}`);
 			}
 		} catch (err) {
-			alert(err.message);
+			alert((err as Error).message);
 		}
 	}
 

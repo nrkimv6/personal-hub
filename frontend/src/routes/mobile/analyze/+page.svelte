@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
 	import { onMount } from "svelte";
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 
@@ -33,10 +33,19 @@
 
 	let html = $state(SAMPLE_HTML);
 	let testSelector = $state(".product-card");
-	/** @type {{ count: number; message: string; samples?: { tagName: string; textContent: string; innerHTML: string }[] } | null} */
-	let testResult = $state(null);
-	/** @type {string | null} */
-	let testError = $state(null);
+
+	interface TestResult {
+		count: number;
+		message: string;
+		samples?: {
+			tagName: string;
+			textContent: string;
+			innerHTML: string;
+		}[];
+	}
+
+	let testResult = $state<TestResult | null>(null);
+	let testError = $state<string | null>(null);
 
 	// Parse config builder
 	let containerSelector = $state(".product-card");
@@ -98,7 +107,7 @@
 				};
 			}
 		} catch (err) {
-			testError = `셀렉터 오류: ${err.message}`;
+			testError = `셀렉터 오류: ${(err as Error).message}`;
 		}
 	}
 
@@ -109,7 +118,7 @@
 		];
 	}
 
-	function removeAttribute(index) {
+	function removeAttribute(index: number) {
 		attributes = attributes.filter((_, i) => i !== index);
 	}
 

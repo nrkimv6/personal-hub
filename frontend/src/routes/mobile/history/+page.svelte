@@ -1,16 +1,17 @@
-<script>
+<script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-  import { fetchWithTimeout } from '$lib/api/client';
+	import { fetchWithTimeout } from '$lib/api/client';
+	import type { MobileRun, MobileTarget } from '$lib/types/mobile';
 
-	let runs = $state([]);
+	let runs: MobileRun[] = $state([]);
 	let loading = $state(true);
-	let error = $state(null);
+	let error: string | null = $state(null);
 
 	// 필터
 	let statusFilter = $state('all'); // 'all', 'completed', 'failed'
-	let targetFilter = $state(null);
-	let targets = $state([]);
+	let targetFilter: string | null = $state(null);
+	let targets: MobileTarget[] = $state([]);
 
 	async function loadData() {
 		try {
@@ -26,15 +27,15 @@
 			// 실제로는 /api/v1/mobile/runs 같은 API를 호출해야 함
 			runs = generateMockRuns();
 		} catch (err) {
-			error = err.message;
+			error = (err as Error).message;
 		} finally {
 			loading = false;
 		}
 	}
 
-	function generateMockRuns() {
-		const statuses = ['completed', 'completed', 'completed', 'failed', 'completed'];
-		const mockRuns = [];
+	function generateMockRuns(): MobileRun[] {
+		const statuses: ('completed' | 'failed')[] = ['completed', 'completed', 'completed', 'failed', 'completed'];
+		const mockRuns: MobileRun[] = [];
 
 		for (let i = 0; i < 15; i++) {
 			const status = statuses[i % statuses.length];
@@ -68,13 +69,13 @@
 		}
 
 		if (targetFilter) {
-			result = result.filter((r) => r.target_id === parseInt(targetFilter));
+			result = result.filter((r) => r.target_id === parseInt(targetFilter as string));
 		}
 
 		return result;
 	});
 
-	function getStatusBadgeClass(status) {
+	function getStatusBadgeClass(status: string) {
 		switch (status) {
 			case 'completed':
 				return 'badge-success';
@@ -87,7 +88,7 @@
 		}
 	}
 
-	function getStatusText(status) {
+	function getStatusText(status: string) {
 		switch (status) {
 			case 'completed':
 				return '완료';
@@ -182,7 +183,7 @@
 							</td>
 							<td>{new Date(run.started_at).toLocaleString()}</td>
 							<td>
-								{#if run.status === 'completed'}
+								{#if run.status === 'completed' && run.result}
 									<div class="text-sm">
 										<div>총 {run.result.collected_count}건</div>
 										<div class="text-xs text-gray-500">
@@ -240,7 +241,7 @@
 							{new Date(run.started_at).toLocaleString()}
 						</div>
 
-						{#if run.status === 'completed'}
+						{#if run.status === 'completed' && run.result}
 							<div class="bg-base-200 rounded p-3 text-sm mb-3">
 								<div class="flex justify-between mb-1">
 									<span>수집:</span>

@@ -1,20 +1,17 @@
-<script>
+<script lang="ts">
 	import { page } from "$app/stores";
 	import { onMount } from "svelte";
 	import { goto } from "$app/navigation";
-  import { fetchWithTimeout } from '$lib/api/client';
+	import { fetchWithTimeout } from '$lib/api/client';
+	import type { MobileTarget, MobileStats, MobileItem } from '$lib/types/mobile';
 
 	const targetId = $derived($page.params.id);
 
-	/** @type {Record<string, unknown> | null} */
-	let target = $state(null);
-	/** @type {Record<string, unknown> | null} */
-	let stats = $state(null);
-	/** @type {Record<string, unknown>[]} */
-	let items = $state([]);
+	let target: MobileTarget | null = $state(null);
+	let stats: MobileStats | null = $state(null);
+	let items: MobileItem[] = $state([]);
 	let loading = $state(true);
-	/** @type {string | null} */
-	let error = $state(null);
+	let error: string | null = $state(null);
 
 	async function loadData() {
 		try {
@@ -41,7 +38,7 @@
 				items = await itemsRes.json();
 			}
 		} catch (err) {
-			error = err.message;
+			error = (err as Error).message;
 		} finally {
 			loading = false;
 		}
@@ -73,7 +70,7 @@
 				alert(`실행 실패: ${result.error}`);
 			}
 		} catch (err) {
-			alert(err.message);
+			alert((err as Error).message);
 		}
 	}
 

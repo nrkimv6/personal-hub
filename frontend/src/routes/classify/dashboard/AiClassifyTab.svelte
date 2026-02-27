@@ -200,10 +200,10 @@
       const res = await fetchWithTimeout(`/api/ic/files?status=ai_classified&limit=20&skip=${skip}&order_by=id&order_dir=desc`);
       if (!res.ok) return;
       const data = await res.json();
-      const newItems = (data.files ?? []).map(mapResultFile);
+      const newItems = (data.files ?? []).map((f: any) => mapResultFile(f));
       if (merge && results.length > 0) {
-        const existingNames = new Set(results.map(r => r.file));
-        const freshItems = newItems.filter(r => !existingNames.has(r.file));
+        const existingNames = new Set(results.map((r: ClassifyResult) => r.file));
+        const freshItems = newItems.filter((r: ClassifyResult) => !existingNames.has(r.file));
         results = [...freshItems, ...results];
       } else {
         results = newItems;

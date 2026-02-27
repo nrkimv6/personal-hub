@@ -1,18 +1,16 @@
-<script>
+<script lang="ts">
 	import { page } from "$app/stores";
 	import { onMount } from "svelte";
 	import { goto } from "$app/navigation";
-  import { fetchWithTimeout } from '$lib/api/client';
+	import { fetchWithTimeout } from '$lib/api/client';
+	import type { MobileTarget, MobileSchedule } from '$lib/types/mobile';
 
 	const targetId = $derived($page.params.id);
 
-	/** @type {{ name: string; url: string; [key: string]: unknown } | null} */
-	let target = $state(null);
-	/** @type {Record<string, unknown>[]} */
-	let schedules = $state([]);
+	let target: MobileTarget | null = $state(null);
+	let schedules: MobileSchedule[] = $state([]);
 	let loading = $state(true);
-	/** @type {string | null} */
-	let error = $state(null);
+	let error: string | null = $state(null);
 
 	// 새 스케줄 폼
 	let showNewScheduleForm = $state(false);
@@ -34,19 +32,19 @@
 			// 실제로는 /api/v1/schedules?target_type=mobile_crawl&target_id=${targetId} 같은 API를 호출
 			schedules = generateMockSchedules();
 		} catch (err) {
-			error = err.message;
+			error = (err as Error).message;
 		} finally {
 			loading = false;
 		}
 	}
 
-	function generateMockSchedules() {
+	function generateMockSchedules(): MobileSchedule[] {
 		// Mock 데이터: 실제로는 TaskSchedule API에서 가져와야 함
 		return [
 			{
 				id: 1,
 				target_type: "mobile_crawl",
-				target_config: { mobile_crawl_target_id: parseInt(targetId) },
+				target_config: { mobile_crawl_target_id: parseInt(targetId as string) },
 				interval_seconds: 7 * 24 * 3600, // 7일
 				enabled: true,
 				last_run: new Date(Date.now() - 2 * 24 * 3600000).toISOString(),
@@ -70,7 +68,7 @@
 				body: JSON.stringify({
 					target_type: "mobile_crawl",
 					target_config: {
-						mobile_crawl_target_id: parseInt(targetId),
+						mobile_crawl_target_id: parseInt(targetId as string),
 					},
 					interval_seconds: intervalSeconds,
 					enabled: newSchedule.enabled,
@@ -83,11 +81,11 @@
 			showNewScheduleForm = false;
 			await loadData();
 		} catch (err) {
-			alert(`스케줄 생성 실패: ${err.message}`);
+			alert(`스케줄 생성 실패: ${(err as Error).message}`);
 		}
 	}
 
-	async function toggleSchedule(schedule) {
+	async function toggleSchedule(schedule: MobileSchedule) {
 		try {
 			const response = await fetchWithTimeout(`/api/v1/schedules/${schedule.id}`, {
 				method: "PUT",
@@ -105,11 +103,11 @@
 			alert("스케줄 상태가 변경되었습니다.");
 			await loadData();
 		} catch (err) {
-			alert(`스케줄 업데이트 실패: ${err.message}`);
+			alert(`스케줄 업데이트 실패: ${(err as Error).message}`);
 		}
 	}
 
-	async function deleteSchedule(schedule) {
+	async function deleteSchedule(schedule: MobileSchedule) {
 		if (!confirm("스케줄을 삭제하시겠습니까?")) return;
 
 		try {
@@ -122,11 +120,11 @@
 			alert("스케줄이 삭제되었습니다.");
 			await loadData();
 		} catch (err) {
-			alert(`스케줄 삭제 실패: ${err.message}`);
+			alert(`스케줄 삭제 실패: ${(err as Error).message}`);
 		}
 	}
 
-	function formatInterval(seconds) {
+	function formatInterval(seconds: number) {
 		const days = Math.floor(seconds / 86400);
 		const hours = Math.floor((seconds % 86400) / 3600);
 		const minutes = Math.floor((seconds % 3600) / 60);

@@ -1,28 +1,23 @@
-<script>
+<script lang="ts">
 	import { onMount } from "svelte";
-	import { page } from "$app/stores";
-  import { fetchWithTimeout } from '$lib/api/client';
+	import { fetchWithTimeout } from '$lib/api/client';
+	import type { MobileItem, MobileTarget } from '$lib/types/mobile';
 
-	/** @type {Record<string, unknown>[]} */
-	let items = $state([]);
+	let items: MobileItem[] = $state([]);
 	let loading = $state(true);
-	/** @type {string | null} */
-	let error = $state(null);
+	let error: string | null = $state(null);
 
 	// 필터
-	/** @type {number | null} */
-	let targetFilter = $state(null);
+	let targetFilter: number | null = $state(null);
 	let showOnlyChanged = $state(false);
-	/** @type {Record<string, unknown>[]} */
-	let targets = $state([]);
+	let targets: MobileTarget[] = $state([]);
 
 	// 페이지네이션
 	let currentPage = $state(1);
 	let itemsPerPage = 20;
 
 	// 선택된 아이템 (모달용)
-	/** @type {Record<string, unknown> | null} */
-	let selectedItem = $state(null);
+	let selectedItem: MobileItem | null = $state(null);
 
 	async function loadData() {
 		try {
@@ -37,14 +32,14 @@
 			// Mock 아이템 데이터 생성
 			items = generateMockItems();
 		} catch (err) {
-			error = err.message;
+			error = (err as Error).message;
 		} finally {
 			loading = false;
 		}
 	}
 
-	function generateMockItems() {
-		const mockItems = [];
+	function generateMockItems(): MobileItem[] {
+		const mockItems: MobileItem[] = [];
 
 		for (let i = 0; i < 50; i++) {
 			const target = targets[i % Math.max(targets.length, 1)] || {
@@ -57,6 +52,7 @@
 				id: i + 1,
 				target_id: target.id,
 				target_name: target.name,
+				run_id: 1,
 				title: `Mock 아이템 ${i + 1}`,
 				item_url: `https://example.com/items/${i + 1}`,
 				image_url: `https://via.placeholder.com/300x200?text=Item+${i + 1}`,
@@ -68,10 +64,13 @@
 						.toISOString()
 						.split("T")[0],
 				},
+				raw_html: null,
 				first_seen_at: new Date(
 					Date.now() - i * 86400000 - 7 * 86400000,
 				).toISOString(),
 				last_seen_at: new Date(Date.now() - i * 86400000).toISOString(),
+				created_at: new Date().toISOString(),
+				updated_at: new Date().toISOString()
 			});
 		}
 
@@ -83,7 +82,7 @@
 
 		if (targetFilter) {
 			result = result.filter(
-				(item) => item.target_id === parseInt(targetFilter),
+				(item) => item.target_id === targetFilter,
 			);
 		}
 
@@ -104,7 +103,7 @@
 		Math.ceil(filteredItems().length / itemsPerPage),
 	);
 
-	function openItemDetail(item) {
+	function openItemDetail(item: MobileItem) {
 		selectedItem = item;
 	}
 
@@ -316,7 +315,7 @@
 				<div>
 					<h4 class="font-semibold mb-2">속성</h4>
 					<div class="bg-base-200 p-3 rounded text-sm">
-						{#each Object.entries(selectedItem.attributes) as [key, value]}
+						{#each Object.entries(selectedItem.attributes as Record<string, unknown>) as [key, value]}
 							<div
 								class="flex flex-col sm:flex-row sm:justify-between py-2 border-b last:border-0 border-base-300 gap-1"
 							>
