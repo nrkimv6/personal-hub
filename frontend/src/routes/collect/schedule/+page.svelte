@@ -30,6 +30,14 @@
 	let selectedTarget: { id: number; name: string } | null = null;
 	let scheduleTimes: string[] = ['09:00', '12:00', '18:00'];
 
+	// pytest_run 설정
+	let pytestTestPath = 'tests/';
+	let pytestExtraArgs = '';
+	let pytestAutoFixPlan = true;
+	let pytestLlmProvider = 'claude';
+	let pytestLlmModel = '';
+	let pytestCronTime = '02:00';
+
 	// Google 검색 새 검색어 입력 폼
 	let newSearchQuery = '';
 	let newSearchName = '';
@@ -74,7 +82,8 @@
 	const scheduleTypes = [
 		{ value: 'instagram_feed', label: 'Instagram 피드', icon: '📸', color: 'pink' },
 		{ value: 'google_search', label: 'Google 검색', icon: '🔍', color: 'yellow' },
-		{ value: 'writing_task', label: '글쓰기 태스크', icon: '✍️', color: 'purple' }
+		{ value: 'writing_task', label: '글쓰기 태스크', icon: '✍️', color: 'purple' },
+		{ value: 'pytest_run', label: 'pytest 자동 실행', icon: '🧪', color: 'green' }
 	];
 
 	const dateFilterOptions = [
@@ -150,6 +159,12 @@
 			return;
 		}
 
+		if (type === 'pytest_run') {
+			// pytest_run은 설정 폼(step 2)으로 이동
+			addStep = 2;
+			return;
+		}
+
 		if (type === 'google_search') {
 			// Google 검색은 항상 새 검색어 입력 폼으로 이동
 			addStep = 2;
@@ -205,14 +220,29 @@
 				schedule_value: Record<string, unknown>;
 			} = {
 				target_type: selectedType,
-				schedule_type: 'time_window',
-				schedule_value: {
-					daily_runs: scheduleTimes.length,
-					time_windows: scheduleTimes.map((t) => ({ start: t, end: t }))
-				}
+				schedule_type: selectedType === 'pytest_run' ? 'cron' : 'time_window',
+				schedule_value:
+					selectedType === 'pytest_run'
+						? { time: pytestCronTime }
+						: {
+								daily_runs: scheduleTimes.length,
+								time_windows: scheduleTimes.map((t) => ({ start: t, end: t }))
+							}
 			};
 
-			if (selectedType === 'instagram_feed' && selectedTarget) {
+			if (selectedType === 'pytest_run') {
+				const extraArgsList = pytestExtraArgs
+					.split(/\s+/)
+					.map((s) => s.trim())
+					.filter(Boolean);
+				data.target_config = {
+					test_path: pytestTestPath.trim() || 'tests/',
+					extra_args: extraArgsList,
+					auto_fix_plan: pytestAutoFixPlan,
+					llm_provider: pytestLlmProvider,
+					llm_model: pytestLlmModel.trim()
+				};
+			} else if (selectedType === 'instagram_feed' && selectedTarget) {
 				data.target_config = { service_account_id: selectedTarget.id };
 			} else if (selectedType === 'google_search') {
 				const searchParams: Record<string, unknown> = {};
@@ -477,6 +507,8 @@
 				return { class: 'bg-warning-light text-warning-foreground', text: 'Google' };
 			case 'writing_task':
 				return { class: 'bg-purple-light text-purple-800', text: '글쓰기' };
+			case 'pytest_run':
+				return { class: 'bg-green-100 text-green-800', text: 'pytest' };
 			default:
 				return { class: 'bg-muted text-foreground', text: type };
 		}
@@ -602,6 +634,17 @@
 								</Button>
 							{/if}
 
+							<!-- pytest_run 결과 보기 버튼 -->
+							{#if schedule.target_type === 'pytest_run'}
+								<a
+									href="/collect/test-runs"
+									class="btn btn-secondary btn-sm"
+									title="테스트 실행 결과 보기"
+								>
+									🧪 결과
+								</a>
+							{/if}
+
 							<!-- 즉시 실행 버튼 -->
 							<Button
 								variant="primary"
@@ -702,6 +745,8 @@
 											Instagram 피드를 주기적으로 수집합니다
 										{:else if st.value === 'google_search'}
 											Google 검색 결과를 주기적으로 수집합니다
+										{:else if st.value === 'pytest_run'}
+											테스트를 매일 자동 실행하고 실패 시 수정계획 생성
 										{:else}
 											글쓰기 태스크를 주기적으로 실행합니다
 										{/if}
@@ -716,6 +761,97 @@
 					{#if loadingTargets}
 						<div class="flex justify-center py-8">
 							<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+						</div>
+					{:else if selectedType === 'pytest_run'}
+						<!-- pytest_run 설정 폼 -->
+						<p class="text-muted-foreground mb-4">pytest 실행 설정을 입력하세요</p>
+						<div class="space-y-4">
+							<div>
+								<label for="pytest-path" class="block text-sm font-medium text-foreground mb-1">테스트 경로</label>
+								<input
+									id="pytest-path"
+									type="text"
+									bind:value={pytestTestPath}
+									placeholder="예: tests/"
+									class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring font-mono text-sm"
+								/>
+								<p class="text-xs text-muted-foreground mt-1">pytest가 실행할 경로 또는 파일</p>
+							</div>
+
+							<div>
+								<label for="pytest-args" class="block text-sm font-medium text-foreground mb-1">추가 인자</label>
+								<input
+									id="pytest-args"
+									type="text"
+									bind:value={pytestExtraArgs}
+									placeholder="예: -k test_api --ignore=tests/e2e"
+									class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring font-mono text-sm"
+								/>
+							</div>
+
+							<div>
+								<label for="pytest-cron" class="block text-sm font-medium text-foreground mb-1">실행 시각 (매일)</label>
+								<input
+									id="pytest-cron"
+									type="time"
+									bind:value={pytestCronTime}
+									class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+								/>
+								<p class="text-xs text-muted-foreground mt-1">매일 1회 실행 (±5분 허용)</p>
+							</div>
+
+							<div class="border-t border-border pt-4">
+								<h4 class="text-sm font-medium text-foreground mb-3">실패 시 자동 수정계획 생성</h4>
+								<div class="flex items-center gap-3 mb-3">
+									<button
+										onclick={() => (pytestAutoFixPlan = !pytestAutoFixPlan)}
+										class="relative inline-flex items-center h-6 rounded-full w-11 transition-colors {pytestAutoFixPlan ? 'bg-primary' : 'bg-secondary'}"
+									>
+										<span
+											class="inline-block w-4 h-4 transform bg-white rounded-full transition-transform {pytestAutoFixPlan ? 'translate-x-6' : 'translate-x-1'}"
+										></span>
+									</button>
+									<span class="text-sm text-foreground">
+										{pytestAutoFixPlan ? 'LLM 수정계획 자동 생성' : '수정계획 생성 안 함'}
+									</span>
+								</div>
+
+								{#if pytestAutoFixPlan}
+									<div class="space-y-3 pl-1">
+										<div>
+											<label for="pytest-provider" class="block text-sm font-medium text-foreground mb-1">LLM Provider</label>
+											<select
+												id="pytest-provider"
+												bind:value={pytestLlmProvider}
+												class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring text-sm"
+											>
+												<option value="claude">Claude (기본)</option>
+												<option value="gemini">Gemini</option>
+											</select>
+										</div>
+										<div>
+											<label for="pytest-model" class="block text-sm font-medium text-foreground mb-1">모델명</label>
+											<input
+												id="pytest-model"
+												type="text"
+												bind:value={pytestLlmModel}
+												placeholder="비워두면 기본 모델 사용"
+												class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring text-sm"
+											/>
+										</div>
+									</div>
+								{/if}
+							</div>
+
+							<div class="flex justify-end">
+								<button
+									onclick={createSchedule}
+									disabled={creating}
+									class="btn btn-primary"
+								>
+									{#if creating}생성 중...{:else}생성{/if}
+								</button>
+							</div>
 						</div>
 					{:else if selectedType === 'instagram_feed'}
 						<p class="text-muted-foreground mb-4">수집할 Instagram 계정을 선택하세요</p>

@@ -1045,6 +1045,61 @@ def _try_parse_json(text: str) -> Optional[dict]:
         return None
 
 
+def save_pytest_fix_result(db, request, result: dict) -> bool:
+    """pytest 실패 테스트 수정계획 LLM 결과를 TestResult.fix_plan에 저장.
+
+    Args:
+        db: DB 세션
+        request: LLMRequest 객체 (caller_id 형식: "{run_id}__{safe_test_name}")
+        result: LLM 결과 {"result": ..., "raw_response": "..."}
+
+    Returns:
+        성공 여부 (실패 시 False, 예외 미전파)
+    """
+    from app.models.test_run import TestResult
+
+    try:
+        raw_response = result.get("raw_response") or result.get("result") or ""
+        if isinstance(raw_response, dict):
+            raw_response = str(raw_response)
+
+        # caller_id 파싱: "{run_id}__{safe_test_name}"
+        caller_id = request.caller_id
+        if "__" not in caller_id:
+            logger.warning(f"pytest_fix: 잘못된 caller_id 형식: {caller_id}")
+            return False
+
+        run_id_str, _ = caller_id.split("__", 1)
+        try:
+            run_id = int(run_id_str)
+        except ValueError:
+            logger.warning(f"pytest_fix: run_id 파싱 실패: {caller_id}")
+            return False
+
+        # llm_request_id로 TestResult 조회
+        test_result = (
+            db.query(TestResult)
+            .filter(
+                TestResult.llm_request_id == request.id,
+                TestResult.test_run_id == run_id,
+            )
+            .first()
+        )
+
+        if not test_result:
+            logger.warning(f"pytest_fix: TestResult 미존재 (llm_request_id={request.id}, run_id={run_id})")
+            return False
+
+        test_result.fix_plan = raw_response
+        db.commit()
+        logger.info(f"pytest_fix: fix_plan 저장 완료 (test_result_id={test_result.id})")
+        return True
+
+    except Exception as e:
+        logger.error(f"pytest_fix: save_pytest_fix_result 오류: {e}", exc_info=True)
+        return False
+
+
 def save_report_result(db, request, result: dict) -> bool:
     """보고서 생성 LLM 결과를 generated_reports에 저장.
 
@@ -1462,11 +1517,13 @@ class LLMWorker:
                     save_event_import_result(db, request, result)
                 elif request.caller_type == "report":
                     save_report_result(db, request, result)
+                elif request.caller_type == "pytest_fix":
+                    save_pytest_fix_result(db, request, result)
             else:
                 # JSON 파싱 실패지만 raw_response가 있는 경우
                 if "raw_response" in result and result.get("raw_response"):
                     # writing_generate, writing_refine, report의 경우 raw_response만으로도 성공 처리
-                    if request.caller_type in ["writing_generate", "writing_refine", "report", "test"]:
+                    if request.caller_type in ["writing_generate", "writing_refine", "report", "test", "pytest_fix"]:
                         logger.info(f"JSON 파싱 실패했지만 raw_response 사용: id={request.id}")
 
                         # 빈 result dict로 결과 재구성
@@ -1491,6 +1548,8 @@ class LLMWorker:
                             save_writing_refine_result(db, request, fallback_result)
                         elif request.caller_type == "report":
                             save_report_result(db, request, fallback_result)
+                        elif request.caller_type == "pytest_fix":
+                            save_pytest_fix_result(db, request, fallback_result)
                     else:
                         # Quota 에러 감지 및 provider pause 설정
                         quota_retry_ms = result.get("quota_retry_ms")
