@@ -3,7 +3,7 @@
 
 param(
     [Parameter(Position=0)]
-    [ValidateSet("all", "api", "worker", "frontend", "list")]
+    [ValidateSet("all", "api", "worker", "frontend", "list", "watchdog")]
     [string]$Target = "all",
 
     [Parameter()]
@@ -267,6 +267,7 @@ $claudeWatchdogLogFile = Get-LatestLogFileMultiPattern @("claude_watchdog_")
 $videoDownloadWatchdogLogFile = Get-LatestLogFileMultiPattern @("video_download_watchdog_")
 $crawlWatchdogLogFile = Get-LatestLogFileMultiPattern @("crawl_watchdog_")
 $commandListenerWatchdogLogFile = Get-LatestLogFileMultiPattern @("command_listener_watchdog_")
+$apiWatchdogLogFile = Get-LatestLogFileMultiPattern @("api_watchdog_")
 $devRunnerLogFile = Get-LatestLogFileMultiPattern @("dev_runner_command_listener")
 $cloudflaredLogFile = Get-LatestLogFileMultiPattern @("cloudflared_err", "cloudflared")
 
@@ -391,7 +392,8 @@ if ($apiLogFile) {
         @{ Name = "Video-DL-Watchdog"; Var = "videoDownloadWatchdogLogFile" },
         @{ Name = "Crawl-Watchdog"; Var = "crawlWatchdogLogFile" },
         @{ Name = "Service Runner"; Var = "serviceRunnerLogFile" },
-        @{ Name = "CMD-Watchdog"; Var = "commandListenerWatchdogLogFile" }
+        @{ Name = "CMD-Watchdog"; Var = "commandListenerWatchdogLogFile" },
+        @{ Name = "API-Watchdog"; Var = "apiWatchdogLogFile" }
     )
 
     foreach ($log in $extraTimestampedLogs) {
@@ -415,6 +417,7 @@ if (-not $Admin) {
     $videoDownloadWatchdogLogFile = $null
     $crawlWatchdogLogFile = $null
     $commandListenerWatchdogLogFile = $null
+    $apiWatchdogLogFile = $null
     $devRunnerLogFile = $null
     $planRunnerLogFile = $null
     $planRunnerStreamLogFile = $null
@@ -514,6 +517,7 @@ function Start-CombinedLogTail {
         [string]$VideoDownloadWatchdogLog,
         [string]$CrawlWatchdogLog,
         [string]$CommandListenerWatchdogLog,
+        [string]$ApiWatchdogLog,
         [string]$DevRunnerLog,
         [string]$CloudflaredLog
     )
@@ -540,6 +544,7 @@ function Start-CombinedLogTail {
         "VIDEO-DL-WD" = @{ Path = $VideoDownloadWatchdogLog; Color = "DarkYellow"; Tail = 2 }
         "CRAWL-WD"    = @{ Path = $CrawlWatchdogLog;  Color = "DarkYellow";  Tail = 2 }
         "CMD-WD"      = @{ Path = $CommandListenerWatchdogLog; Color = "DarkYellow"; Tail = 2 }
+        "API-WD"      = @{ Path = $ApiWatchdogLog;          Color = "DarkYellow"; Tail = 3 }
         "DEV-RUNNER"  = @{ Path = $DevRunnerLog;           Color = "DarkCyan";    Tail = 10 }
     }
 
@@ -630,13 +635,14 @@ function Start-CombinedLogTail {
         "VIDEO-DL-WD" = @("video_download_watchdog_*.log")
         "CRAWL-WD"    = @("crawl_watchdog_*.log")
         "CMD-WD"      = @("command_listener_watchdog_*.log")
+        "API-WD"      = @("api_watchdog_*.log")
         "DEV-RUNNER"  = @("dev_runner_command_listener*.log")
         "TUNNEL"      = @("cloudflared_err_*.log", "cloudflared_err-*.log", "cloudflared_*.log")
     }
 
     # Admin 전용 소스 — Production에서 제외 (Worker는 항상 APP_MODE=development로 실행되어 logs/admin/에 기록됨)
     $devOnlySources = @("WORKER", "IG-WORKER", "LLM", "VIDEO-DL", "CRAWL",
-                         "IG-WD", "CLAUDE-WD", "VIDEO-DL-WD", "CRAWL-WD", "CMD-WD",
+                         "IG-WD", "CLAUDE-WD", "VIDEO-DL-WD", "CRAWL-WD", "CMD-WD", "API-WD",
                          "WATCHDOG", "DEV-RUNNER", "PLAN-RUNNER", "PR-STREAM")
     if (-not $Admin) {
         foreach ($source in $devOnlySources) {
@@ -822,6 +828,19 @@ if ($Follow) {
         "frontend" {
             Start-LogTail -FilePath $frontendLogFile -Prefix "Frontend"
         }
+        "watchdog" {
+            if (-not $Admin) {
+                Write-Host "[!] Watchdog 로그는 Admin 모드에서만 사용 가능합니다. (-Admin 스위치를 추가하세요)" -ForegroundColor Red
+            } else {
+                Start-CombinedLogTail `
+                    -WatchdogLog $watchdogLogFile `
+                    -ClaudeWatchdogLog $claudeWatchdogLogFile `
+                    -VideoDownloadWatchdogLog $videoDownloadWatchdogLogFile `
+                    -CrawlWatchdogLog $crawlWatchdogLogFile `
+                    -CommandListenerWatchdogLog $commandListenerWatchdogLogFile `
+                    -ApiWatchdogLog $apiWatchdogLogFile
+            }
+        }
         default {
             Start-CombinedLogTail `
                 -ApiLog $apiLogFile `
@@ -837,6 +856,7 @@ if ($Follow) {
                 -VideoDownloadWatchdogLog $videoDownloadWatchdogLogFile `
                 -CrawlWatchdogLog $crawlWatchdogLogFile `
                 -CommandListenerWatchdogLog $commandListenerWatchdogLogFile `
+                -ApiWatchdogLog $apiWatchdogLogFile `
                 -DevRunnerLog $devRunnerLogFile `
                 -CloudflaredLog $cloudflaredLogFile
         }
@@ -856,6 +876,18 @@ if ($Follow) {
         }
         "frontend" {
             Show-LogContent -FilePath $frontendLogFile -Label "Frontend" -Color Green -TailLines $Lines
+        }
+        "watchdog" {
+            if (-not $Admin) {
+                Write-Host "[!] Watchdog 로그는 Admin 모드에서만 사용 가능합니다. (-Admin 스위치를 추가하세요)" -ForegroundColor Red
+            } else {
+                Show-LogContent -FilePath $watchdogLogFile            -Label "WATCHDOG"  -Color DarkYellow -TailLines $Lines
+                Show-LogContent -FilePath $claudeWatchdogLogFile      -Label "CLAUDE-WD" -Color DarkYellow -TailLines $Lines
+                Show-LogContent -FilePath $videoDownloadWatchdogLogFile -Label "VIDEO-DL-WD" -Color DarkYellow -TailLines $Lines
+                Show-LogContent -FilePath $crawlWatchdogLogFile       -Label "CRAWL-WD"  -Color DarkYellow -TailLines $Lines
+                Show-LogContent -FilePath $commandListenerWatchdogLogFile -Label "CMD-WD" -Color DarkYellow -TailLines $Lines
+                Show-LogContent -FilePath $apiWatchdogLogFile         -Label "API-WD"    -Color DarkYellow -TailLines $Lines
+            }
         }
         default {
             Show-LogContent -FilePath $apiLogFile -Label "API Server" -Color Cyan -TailLines $Lines

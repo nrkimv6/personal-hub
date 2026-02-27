@@ -44,6 +44,13 @@ $diagScriptPath = Join-Path $ScriptDir "diagnose-api.ps1"
 $diagJsonPath = Join-Path $ProjectRoot "frontend\static\diagnostics.json"
 $processStatusPath = Join-Path $ProjectRoot "frontend\static\process-status.json"
 
+# Log file setup (same pattern as unified-worker-watchdog.ps1)
+$LogDir = if ($Admin) { Join-Path $ProjectRoot "logs\admin" } else { Join-Path $ProjectRoot "logs" }
+if (-not (Test-Path $LogDir)) {
+    New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+}
+$script:watchdogLogFile = Join-Path $LogDir "api_watchdog_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+
 function Write-WatchdogLog {
     param(
         [string]$Message,
@@ -64,7 +71,9 @@ function Write-WatchdogLog {
         return
     }
 
-    Write-Host "[$timestamp] [$Level] $Message" -ForegroundColor $color
+    $logLine = "[$timestamp] [$Level] $Message"
+    Write-Host $logLine -ForegroundColor $color
+    Add-Content -Path $script:watchdogLogFile -Value $logLine -Encoding UTF8
 }
 
 function Write-ProcessStatus {
@@ -219,14 +228,21 @@ function Request-SystemReboot {
 }
 
 # Main watchdog loop
-Write-Host ""
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  API Watchdog Started" -ForegroundColor Cyan
-Write-Host "  Mode: $mode (port $port)" -ForegroundColor Gray
-Write-Host "  Check Interval: ${CheckInterval}s" -ForegroundColor Gray
-Write-Host "  Health Endpoint: $healthEndpoint" -ForegroundColor Gray
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host ""
+$banner = @(
+    ""
+    "========================================"
+    "  API Watchdog Started"
+    "  Mode: $mode (port $port)"
+    "  Check Interval: ${CheckInterval}s"
+    "  Health Endpoint: $healthEndpoint"
+    "  Log File: $($script:watchdogLogFile)"
+    "========================================"
+    ""
+)
+foreach ($line in $banner) {
+    Write-Host $line -ForegroundColor Cyan
+    Add-Content -Path $script:watchdogLogFile -Value $line -Encoding UTF8
+}
 
 Write-WatchdogLog "Watchdog started for $mode API" "OK"
 
