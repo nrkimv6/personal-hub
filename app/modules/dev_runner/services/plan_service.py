@@ -354,8 +354,8 @@ class PlanService:
                 content = f.read()
 
             content = self._remove_code_blocks(content)
-            # 멀티레벨 체크박스 지원: "- [x]", "  - [x]", "1. - [x]" 모두 인식
-            checkbox_pattern = r"^[ \t]*(?:\d+\.\s+)?[-*]\s*\[([ x→])\]"
+            # 멀티레벨 체크박스 지원: "- [x]", "  - [x]", "1. - [x]", "1. [x]" 모두 인식
+            checkbox_pattern = r"^[ \t]*(?:\d+\.\s+(?:[-*]\s*)?|[-*]+\s*)\[([ x→])\]"
             matches = re.findall(checkbox_pattern, content, re.MULTILINE)
 
             total = len(matches)

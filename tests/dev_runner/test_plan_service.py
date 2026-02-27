@@ -243,6 +243,62 @@ class TestGetPlanProgress:
         """존재하지 않는 파일 → 'unknown'"""
         assert svc.get_plan_status(tmp_path / "no.md") == "unknown"
 
+    def test_progress_count_RIGHT_numbered_direct(self, svc, tmp_plan_dir):
+        """1. [x] 형태 번호 목록 직접 체크박스 total/done 정확성 검증"""
+        content = """\
+1. [x] done task
+2. [ ] pending task
+3. [x] another done
+"""
+        path = _write_plan(tmp_plan_dir, "test_numbered_direct.md", content)
+        result = svc.get_plan_progress(path)
+
+        assert result.total == 3
+        assert result.done == 2
+        assert result.percent == 66
+
+    def test_progress_count_RIGHT_mixed(self, svc, tmp_plan_dir):
+        """1. [x] + - [x] 혼합 형태 total/done 정확성"""
+        content = """\
+1. [x] numbered done
+2. [ ] numbered pending
+- [x] bullet done
+- [ ] bullet pending
+"""
+        path = _write_plan(tmp_plan_dir, "test_mixed.md", content)
+        result = svc.get_plan_progress(path)
+
+        assert result.total == 4
+        assert result.done == 2
+        assert result.percent == 50
+
+    def test_progress_count_BOUNDARY_nested(self, svc, tmp_plan_dir):
+        """1. - [x] (번호+대시 중첩) 형태 파싱 검증"""
+        content = """\
+1. - [x] nested done
+2. - [ ] nested pending
+- [x] bullet done
+"""
+        path = _write_plan(tmp_plan_dir, "test_nested.md", content)
+        result = svc.get_plan_progress(path)
+
+        assert result.total == 3
+        assert result.done == 2
+
+    def test_progress_count_BOUNDARY_empty(self, svc, tmp_plan_dir):
+        """체크박스 없는 content → total=0"""
+        content = """\
+# 체크박스 없는 문서
+
+일반 텍스트만 존재합니다.
+"""
+        path = _write_plan(tmp_plan_dir, "test_empty.md", content)
+        result = svc.get_plan_progress(path)
+
+        assert result.total == 0
+        assert result.done == 0
+        assert result.percent == 0
+
 
 # ========== validate_path() ==========
 
