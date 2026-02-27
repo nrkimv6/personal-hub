@@ -34,13 +34,13 @@
 
   // 선택된 메뉴가 NavGroup 내부 아이템인 경우, 해당 그룹의 items를 탭 옵션으로 제공
   const _allFlatItems = flattenNavEntries();
-  $: tabOptions = (() => {
+  const tabOptions = $derived((() => {
     if (!linkedMenuId) return [];
     const flatItem = _allFlatItems.find((e) => e.id === linkedMenuId);
     if (!flatItem?.category) return []; // NavSingleItem이면 탭 옵션 없음
     const group = navGroups.find((g) => g.label === flatItem.category);
     return group ? group.items : [];
-  })();
+  })());
   let showMenuPicker = $state(false);
   let allTags = $state<TagDef[]>([]);
   let saving = $state(false);
