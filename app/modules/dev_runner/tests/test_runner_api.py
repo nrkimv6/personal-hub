@@ -177,26 +177,45 @@ class TestGetStatusListenerAlive:
 
 class TestStartRun:
     async def test_start_run_success(self, client, mock_executor_redis):
+        """단일 Plan start → running=True, plan_file 정상 반환"""
         fake_async = mock_executor_redis["async"]
         now = datetime.now().isoformat()
 
-        # listener heartbeat 세팅 (사전 확인 통과용)
         await fake_async.set("plan-runner:listener:heartbeat", now)
-        # brpop 결과 미리 세팅 (listener 성공 응답)
-        await fake_async.rpush(RESULTS_KEY, json.dumps({"success": True, "message": "Started"}))
-        # start 후 상태 조회를 위한 상태 키 세팅
-        await fake_async.set("plan-runner:state:pid", "12345")
-        await fake_async.set("plan-runner:state:plan_file", "test-plan.md")
-        await fake_async.set("plan-runner:state:start_time", now)
+        brpop_result = ("plan-runner:command_results:abc123", json.dumps({"success": True, "message": "Started"}))
+        with patch.object(fake_async, 'brpop', new=AsyncMock(return_value=brpop_result)):
+            # per-runner 키는 runner_id가 랜덤이므로 pid는 None으로 검증
+            await fake_async.set("plan-runner:state:plan_file", "test-plan.md")
+            await fake_async.set("plan-runner:state:start_time", now)
 
-        response = await client.post("/api/v1/dev-runner/run", json={
-            "plan_file": "test-plan.md"
-        })
+            response = await client.post("/api/v1/dev-runner/run", json={
+                "plan_file": "test-plan.md"
+            })
 
         assert response.status_code == 200
         data = response.json()
         assert data["running"] is True
-        assert data["pid"] == 12345
+        assert data["plan_file"] == "test-plan.md"
+
+    async def test_start_run_plan_file_fallback_from_request(self, client, mock_executor_redis):
+        """Redis에 plan_file 키가 아직 없을 때 request.plan_file로 fallback되는지 확인"""
+        fake_async = mock_executor_redis["async"]
+        now = datetime.now().isoformat()
+
+        await fake_async.set("plan-runner:listener:heartbeat", now)
+        brpop_result = ("plan-runner:command_results:abc123", json.dumps({"success": True, "message": "Started"}))
+        with patch.object(fake_async, 'brpop', new=AsyncMock(return_value=brpop_result)):
+            await fake_async.set("plan-runner:state:pid", "12345")
+            # plan_file 키 미세팅 (race condition 시뮬레이션)
+            await fake_async.set("plan-runner:state:start_time", now)
+
+            response = await client.post("/api/v1/dev-runner/run", json={
+                "plan_file": "docs/plan/2026-02-27_test.md"
+            })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["plan_file"] == "docs/plan/2026-02-27_test.md"
 
     async def test_double_start_returns_409(self, client, mock_executor_redis):
         fake_async = mock_executor_redis["async"]

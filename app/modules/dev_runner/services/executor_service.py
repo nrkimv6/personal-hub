@@ -175,7 +175,7 @@ class ExecutorService:
                 runner_id=runner_id,
                 engine=request.engine,
                 pid=int(pid) if pid else None,
-                plan_file=plan_file,
+                plan_file=plan_file or request.plan_file,
                 start_time=datetime.fromisoformat(start_time_str) if start_time_str else None,
                 current_cycle=0,
                 listener_alive=True,
