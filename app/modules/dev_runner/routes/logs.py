@@ -58,6 +58,16 @@ async def get_full_log(
     return log_service.get_full_log(runner_id=runner_id, offset=offset, limit=limit)
 
 
+@router.get("/merge-log/stream")
+async def stream_merge_log(runner_id: str = Query(..., description="runner ID")):
+    """머지 진행 로그 SSE 스트리밍"""
+    return StreamingResponse(
+        log_service.stream_merge_log(runner_id=runner_id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
+
+
 @router.get("/logs/system", response_model=LogResponse)
 async def get_system_log(
     lines: int = Query(200, ge=1, le=2000, description="tail 줄 수"),

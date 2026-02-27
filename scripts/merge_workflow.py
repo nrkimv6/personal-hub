@@ -7,6 +7,7 @@ MergeWorkflow — plan-runner worktree 완료 후 머지 워크플로우
   3. HTTP 테스트 실행
   4. 성공 시 worktree 정리
 """
+import json
 import subprocess
 import logging
 from pathlib import Path
@@ -38,19 +39,51 @@ class MergeWorkflow:
         self.redis_client = redis_client
         self.python_path = python_path or "python"
 
+    def _publish_log(self, runner_id: str, tag: str, message: str) -> None:
+        """Redis pub/sub으로 머지 진행 로그를 SSE 스트림에 전달한다."""
+        try:
+            self.redis_client.publish(
+                f"plan-runner:merge-log:{runner_id}",
+                f"[MERGE][{tag}] {message}"
+            )
+        except Exception:
+            pass
+
+    def _update_queue_status(self, runner_id: str, new_status: str) -> None:
+        """plan-runner:merge-queue 내 해당 runner_id 항목의 status를 갱신한다."""
+        try:
+            items = self.redis_client.lrange("plan-runner:merge-queue", 0, -1)
+            for index, raw in enumerate(items):
+                try:
+                    item = json.loads(raw)
+                except Exception:
+                    continue
+                if item.get("runner_id") == runner_id:
+                    item["status"] = new_status
+                    self.redis_client.lset("plan-runner:merge-queue", index, json.dumps(item))
+                    break
+        except Exception:
+            pass
+
     def run(self, runner_id: str, worktree_path: Path, base_dir: Path) -> WorkflowResult:
         from worktree_manager import WorktreeManager
 
         # 1. 변경사항 커밋
+        self._publish_log(runner_id, "COMMIT", "변경사항 커밋 중...")
         subprocess.run(["git", "add", "-A"], cwd=str(worktree_path), capture_output=True)
         subprocess.run(
             ["git", "commit", "-m", f"feat: runner/{runner_id} 구현 완료"],
             cwd=str(worktree_path), capture_output=True
         )
+        self._publish_log(runner_id, "COMMIT", "커밋 완료")
 
         # 2. 머지
+        self._update_queue_status(runner_id, "merging")
+        self._publish_log(runner_id, "MERGE", "main 브랜치에 머지 중...")
         merge_result = WorktreeManager.merge_to_main(runner_id, base_dir, self.project_root)
         if not merge_result.success:
+            self._publish_log(runner_id, "ERROR", f"머지 충돌: {merge_result.message[:200]}")
+            self._update_queue_status(runner_id, "failed")
             if self.redis_client:
                 try:
                     self.redis_client.set(
@@ -64,10 +97,15 @@ class MergeWorkflow:
                 conflict=merge_result.conflict,
                 message=merge_result.message
             )
+        self._publish_log(runner_id, "MERGE", "머지 성공")
 
         # 3. HTTP 테스트
+        self._update_queue_status(runner_id, "testing")
+        self._publish_log(runner_id, "TEST", "HTTP 테스트 실행 중...")
         test_result = self.run_post_merge_tests()
         if not test_result.passed:
+            self._publish_log(runner_id, "ERROR", f"테스트 실패: {test_result.output[:200]}")
+            self._update_queue_status(runner_id, "failed")
             if self.redis_client:
                 try:
                     self.redis_client.set(
@@ -81,9 +119,13 @@ class MergeWorkflow:
                 conflict=False,
                 message=test_result.output[:500]
             )
+        self._publish_log(runner_id, "TEST", "테스트 통과")
 
         # 4. worktree 정리
         WorktreeManager.remove(runner_id, base_dir)
+        self._update_queue_status(runner_id, "done")
+        self._publish_log(runner_id, "DONE", "worktree 정리 완료")
+        self._publish_log(runner_id, "DONE", "__MERGE_COMPLETED__")
         if self.redis_client:
             try:
                 self.redis_client.set(

@@ -168,6 +168,9 @@ class ExecutorService:
         if request.projects:
             command["projects"] = request.projects
 
+        if request.worktree:
+            command["worktree"] = True
+
         # registered_paths에서 wtools 외부 경로 추출 (asyncio.to_thread로 이벤트 루프 블로킹 방지)
         if request.parallel:
             import asyncio

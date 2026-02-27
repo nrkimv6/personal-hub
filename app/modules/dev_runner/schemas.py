@@ -18,6 +18,7 @@ class RunRequest(BaseModel):
     skip_plan: bool = Field(False, description="plan 단계 스킵")
     parallel: bool = Field(False, description="병렬 실행 모드")
     projects: Optional[str] = Field(None, description="프로젝트 목록 (쉼표 구분)")
+    worktree: bool = Field(True, description="worktree 모드 (격리 실행 + 머지 큐)")
 
 
 class RunStatusResponse(BaseModel):

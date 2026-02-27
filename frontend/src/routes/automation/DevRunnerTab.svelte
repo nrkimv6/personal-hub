@@ -37,7 +37,7 @@
 	let lastStartTime = $state<string | null>(null);
 	let panelOpen = $state(true);
 	let taskHistoryOpen = $state(false);
-	let taskHistoryTab = $state<'tasks' | 'plans' | 'merge'>('plans');
+	let taskHistoryTab = $state<'tasks' | 'plans'>('plans');
 	let currentTracking = $state<CurrentTrackingResponse | null>(null);
 	let selectedPlanPath = $state('');
 	let trackingInterval: ReturnType<typeof setInterval> | null = null;
@@ -564,7 +564,7 @@
 				<!-- 고정 Logs 버튼 (항상 표시, 닫기 버튼 없음) -->
 				<!-- svelte-ignore a11y_interactive_supports_focus -->
 				<div
-					class="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono whitespace-nowrap transition-colors cursor-pointer ml-auto {activeTabId === '__logs__' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-gray-500 hover:bg-gray-100'}"
+					class="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono whitespace-nowrap transition-colors cursor-pointer {activeTabId === '__logs__' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-gray-500 hover:bg-gray-100'}"
 					role="tab"
 					aria-selected={activeTabId === '__logs__'}
 					onclick={() => { activeTabId = '__logs__'; }}
@@ -574,6 +574,19 @@
 					<span>📋</span>
 					<span>Logs</span>
 				</div>
+				<!-- 고정 Merge Queue 버튼 (항상 표시, 닫기 버튼 없음) -->
+				<!-- svelte-ignore a11y_interactive_supports_focus -->
+				<div
+					class="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono whitespace-nowrap transition-colors cursor-pointer ml-auto {activeTabId === '__merge__' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-gray-500 hover:bg-gray-100'}"
+					role="tab"
+					aria-selected={activeTabId === '__merge__'}
+					onclick={() => { activeTabId = '__merge__'; }}
+					onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { activeTabId = '__merge__'; } }}
+					title="Merge Queue"
+				>
+					<span>🔀</span>
+					<span>Merge</span>
+				</div>
 			</div>
 
 			<!-- Log Viewer + Runner Panel (2-grid on desktop, stack on mobile) -->
@@ -582,6 +595,8 @@
 				<div class="flex-1 min-h-0 overflow-hidden">
 					{#if activeTabId === '__logs__'}
 						<UnifiedLogsView />
+					{:else if activeTabId === '__merge__'}
+						<MergeQueuePanel />
 					{:else if runnerTabs.length === 0}
 						<div class="flex items-center justify-center h-full text-sm text-gray-400">
 							실행 버튼을 눌러 plan-runner를 시작하세요
@@ -649,7 +664,6 @@
 								tabs={[
 									{ id: 'tasks', label: 'Tasks' },
 									{ id: 'plans', label: 'Plans' },
-									{ id: 'merge', label: 'Merge Queue' },
 								]}
 								bind:activeTab={taskHistoryTab}
 								variant="primary"
@@ -670,10 +684,6 @@
 							{:else if taskHistoryTab === 'plans'}
 								<div class="px-4 pb-4 h-full overflow-hidden flex flex-col">
 									<PlanList {plans} onPlansChange={fetchPlans} runningPlanFile={runStatus?.plan_file ?? null} {lastPlanFile} {batchPlans} onPlanSelect={(path) => { selectedPlanPath = path; }} />
-								</div>
-							{:else if taskHistoryTab === 'merge'}
-								<div class="px-4 pb-4 h-full overflow-hidden flex flex-col">
-									<MergeQueuePanel />
 								</div>
 							{/if}
 						</div>

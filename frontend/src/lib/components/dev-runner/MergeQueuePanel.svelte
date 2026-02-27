@@ -7,6 +7,11 @@
 	let error = $state('');
 	let actionLoading: Record<string, boolean> = $state({});
 
+	// 로그뷰 state
+	let selectedRunnerId: string | null = $state(null);
+	let mergeLogLines: { tag: string; message: string }[] = $state([]);
+	let mergeEventSource: EventSource | null = $state(null);
+
 	const STATUS_LABEL: Record<string, string> = {
 		pending: '대기',
 		merging: '머지 중',
@@ -23,6 +28,14 @@
 		fixing: 'bg-orange-100 text-orange-800',
 		done: 'bg-green-100 text-green-800',
 		failed: 'bg-red-100 text-red-800',
+	};
+
+	const TAG_CLASS: Record<string, string> = {
+		COMMIT: 'text-blue-400',
+		MERGE: 'text-green-400',
+		TEST: 'text-purple-400',
+		ERROR: 'text-red-400',
+		DONE: 'text-emerald-400',
 	};
 
 	async function load() {
@@ -71,6 +84,20 @@
 		return parts[parts.length - 1] || item.runner_id;
 	}
 
+	function connectMergeLog(runnerId: string) {
+		mergeEventSource?.close();
+		mergeLogLines = [];
+		const es = new EventSource(`/api/dev-runner/merge-log/stream?runner_id=${runnerId}`);
+		es.onmessage = (e) => {
+			const match = e.data.match(/^\[MERGE\]\[(\w+)\] (.+)$/);
+			if (match) {
+				mergeLogLines = [...mergeLogLines, { tag: match[1], message: match[2] }].slice(-200);
+			}
+		};
+		es.addEventListener('completed', () => es.close());
+		mergeEventSource = es;
+	}
+
 	let pollInterval: ReturnType<typeof setInterval>;
 
 	onMount(() => {
@@ -80,6 +107,7 @@
 
 	onDestroy(() => {
 		clearInterval(pollInterval);
+		mergeEventSource?.close();
 	});
 </script>
 
@@ -104,7 +132,13 @@
 	{:else}
 		<div class="space-y-2">
 			{#each items as item (item.runner_id)}
-				<div class="rounded border border-gray-100 bg-gray-50 p-3">
+				<!-- svelte-ignore a11y_click_events_have_key_events -->
+				<!-- svelte-ignore a11y_interactive_supports_focus -->
+				<div
+					class="rounded border bg-gray-50 p-3 cursor-pointer {selectedRunnerId === item.runner_id ? 'border-blue-300 bg-blue-50' : 'border-gray-100'}"
+					role="button"
+					onclick={() => { selectedRunnerId = item.runner_id; connectMergeLog(item.runner_id); }}
+				>
 					<div class="flex items-start justify-between gap-2">
 						<div class="min-w-0 flex-1">
 							<p class="truncate text-xs font-medium text-gray-800">{planName(item)}</p>
@@ -120,14 +154,14 @@
 							{#if item.status === 'failed'}
 								<div class="flex gap-1">
 									<button
-										onclick={() => handleRetry(item.runner_id)}
+										onclick={(e) => { e.stopPropagation(); handleRetry(item.runner_id); }}
 										disabled={actionLoading[`retry-${item.runner_id}`]}
 										class="rounded bg-blue-50 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-100 disabled:opacity-50"
 									>
 										재시도
 									</button>
 									<button
-										onclick={() => handleRevert(item.runner_id)}
+										onclick={(e) => { e.stopPropagation(); handleRevert(item.runner_id); }}
 										disabled={actionLoading[`revert-${item.runner_id}`]}
 										class="rounded bg-red-50 px-2 py-0.5 text-xs text-red-600 hover:bg-red-100 disabled:opacity-50"
 									>
@@ -139,6 +173,21 @@
 					</div>
 				</div>
 			{/each}
+		</div>
+	{/if}
+
+	{#if selectedRunnerId}
+		<div class="mt-3 rounded bg-gray-900 p-3 font-mono text-xs text-gray-200 overflow-y-auto max-h-[400px]">
+			{#if mergeLogLines.length === 0}
+				<p class="text-gray-500">로그 대기 중...</p>
+			{:else}
+				{#each mergeLogLines as line}
+					<div>
+						<span class={TAG_CLASS[line.tag] ?? 'text-gray-300'}>[{line.tag}]</span>
+						<span class="ml-1 text-gray-200">{line.message}</span>
+					</div>
+				{/each}
+			{/if}
 		</div>
 	{/if}
 </div>

@@ -34,6 +34,7 @@
 	);
 	let until = $state('');
 	let dryRun = $state(false);
+	let worktree = $state(true);
 	let parallel = $state(false);
 	let projects = $state('');
 	let anyRunning = $derived(runnerTabs.some(t => t.running));
@@ -100,7 +101,8 @@
 				until: until || null,
 				dry_run: dryRun,
 				parallel: mode === 'all' ? true : parallel,
-				projects: projects || null
+				projects: projects || null,
+			worktree
 			});
 			onStatusChange();
 			onStart?.(response);
@@ -389,6 +391,14 @@
 				<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>
 				Dry Run
 			</span>
+		</div>
+
+		<div class="flex items-center gap-2">
+			<label class="relative inline-flex items-center cursor-pointer">
+				<input type="checkbox" bind:checked={worktree} class="sr-only peer" />
+				<div class="w-8 h-4 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-green-500"></div>
+			</label>
+			<span class="text-gray-500 text-xs">Worktree 모드</span>
 		</div>
 
 		{#if mode === 'single'}

@@ -17,6 +17,7 @@ export interface RunRequest {
 	skip_plan?: boolean;
 	parallel?: boolean;
 	projects?: string | null;
+	worktree?: boolean;
 }
 
 export interface RunStatusResponse {
