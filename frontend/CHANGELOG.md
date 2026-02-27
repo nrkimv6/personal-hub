@@ -1,5 +1,9 @@
 # Changelog
 
+## [2.67.1] - 2026-02-27
+### Fixed
+- LlmTab.svelte runes 모드 오류 수정: `$:` → `$effect`, `createForm` → `$state`
+
 ## [2.64.0] - 2026-02-26
 ### Added
 - LLM 요청 시 Quota 정지 경고 표시: LLM 관리/글쓰기/수집/이벤트 페이지에서 provider quota pause 중일 때 토스트 경고 표시

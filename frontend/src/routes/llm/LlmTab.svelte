@@ -62,7 +62,7 @@
 	let countdownTimer: ReturnType<typeof setInterval> | null = null;
 
 	// 수동 요청 생성 폼
-	let createForm = {
+	let createForm = $state({
 		caller_type: 'test',
 		caller_id: '',
 		prompt: '',
@@ -73,7 +73,7 @@
 		model: '',
 		cli_options: null as Record<string, unknown> | null,
 		userInput: ''
-	};
+	});
 	let createLoading = false;
 	let createError: string | null = null;
 	let createSuccess = false;
@@ -138,9 +138,11 @@
 	}
 
 	// Provider 변경 시 model 초기화
-	$: if (createForm.provider) {
-		createForm.model = '';
-	}
+	$effect(() => {
+		if (createForm.provider) {
+			createForm.model = '';
+		}
+	});
 
 	// 탭별 status 필터
 	function getStatusFilter(): string | undefined {
