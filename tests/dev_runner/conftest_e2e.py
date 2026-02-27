@@ -83,15 +83,22 @@ def test_plan_file(tmp_path):
     return plan
 
 
+_PRESERVE_KEYS = {
+    "plan-runner:listener:heartbeat",  # Listener 활성 상태 유지
+}
+
+
 @pytest.fixture
 def e2e_redis_cleanup(real_redis):
-    """plan-runner:* 키 패턴 cleanup (before + after)"""
-    # before cleanup
-    for key in real_redis.scan_iter("plan-runner:*"):
-        real_redis.delete(key)
+    """plan-runner:* 키 패턴 cleanup (before + after)
 
+    heartbeat 키는 삭제하지 않음 — Listener 프로세스가 활성 중임을 API가 확인해야 함.
+    """
+    def _cleanup():
+        for key in real_redis.scan_iter("plan-runner:*"):
+            if key not in _PRESERVE_KEYS:
+                real_redis.delete(key)
+
+    _cleanup()
     yield
-
-    # after cleanup
-    for key in real_redis.scan_iter("plan-runner:*"):
-        real_redis.delete(key)
+    _cleanup()

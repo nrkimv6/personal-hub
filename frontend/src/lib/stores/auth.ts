@@ -84,7 +84,8 @@ function createAuthStore() {
 						isLoggedIn: true,
 						isAdmin: data.user.isAdmin,
 						email: data.user.email,
-						isLoading: false
+						isLoading: false,
+						isExpired: false
 					});
 				} else if (isLocalhost) {
 					// 백엔드가 user를 반환하지 않아도 localhost면 관리자 처리
@@ -92,7 +93,8 @@ function createAuthStore() {
 						isLoggedIn: true,
 						isAdmin: true,
 						email: 'localhost@admin',
-						isLoading: false
+						isLoading: false,
+						isExpired: false
 					});
 				} else {
 					// 비로그인 상태 (토큰도 없고 Cookie도 없음)
@@ -109,7 +111,8 @@ function createAuthStore() {
 						isLoggedIn: true,
 						isAdmin: true,
 						email: 'localhost@admin',
-						isLoading: false
+						isLoading: false,
+						isExpired: false
 					});
 				} else {
 					// 토큰 삭제하지 않음 - 다음 요청에서 재시도

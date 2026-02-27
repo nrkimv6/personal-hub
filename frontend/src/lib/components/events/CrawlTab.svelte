@@ -278,7 +278,7 @@
 				: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 		>
 			전체
-		</Button>
+		</button>
 		<button
 			on:click={() => handleStatusFilter('pending')}
 			class="px-3 py-1.5 text-sm rounded-full transition-colors {filterStatus === 'pending'

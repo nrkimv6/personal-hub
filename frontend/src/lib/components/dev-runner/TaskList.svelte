@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { devRunnerPlanApi } from '$lib/api';
-	import type { PlanDetailResponse } from '$lib/api';
+	import type { DevRunnerPlanDetailResponse as PlanDetailResponse } from '$lib/api';
 	import { encodePathToBase64 } from '$lib/utils/encoding';
 
 	interface Props {

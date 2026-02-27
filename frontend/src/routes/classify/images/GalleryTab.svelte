@@ -9,7 +9,7 @@
   import { Search, Tag, Trash2, Check, X, Loader2, Images, ImagePlus, Eye, FolderOpen, Clipboard, Square, SquareCheck } from 'lucide-svelte';
 
   // 태그 타입 (GalleryImage에서 사용하므로 먼저 선언)
-  interface TagItem { id: number; name: string; }
+  interface TagItem { id: number; name: string; usage_count?: number; }
 
   // 이미지 타입
   interface GalleryImage {

@@ -19,7 +19,7 @@
 	let { show, editingEvent, importedData = null, activeTab = 'event', onClose, onSave }: Props = $props();
 
 	// 폼 상태
-	let eventForm: EventCreate = $state({
+	let eventForm: EventUpdate = $state({
 		title: '',
 		event_type: 'event'
 	});

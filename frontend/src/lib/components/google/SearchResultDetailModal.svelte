@@ -43,7 +43,7 @@
 	}
 </script>
 
-<Modal {isOpen} {onClose} title="검색결과 상세" size="lg">
+<Modal open={isOpen} {onClose} title="검색결과 상세" size="lg">
 	{#if result}
 		{@const rankStyle = getRankChangeStyle(result)}
 

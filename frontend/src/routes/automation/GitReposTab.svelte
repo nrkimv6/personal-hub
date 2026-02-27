@@ -97,7 +97,7 @@
     batchWorking = true;
     try {
       const result = await gitReposApi.batchCommit(selection.toArray(), batchCommitMsg);
-      const failed = result.results.filter((r) => !r.success);
+      const failed = (result.results ?? []).filter((r) => !r.success);
       if (failed.length) {
         showToast(`${failed.length}개 레포 커밋 실패`, 'error');
       } else {
@@ -119,7 +119,7 @@
     batchWorking = true;
     try {
       const result = await gitReposApi.batchPush(selection.toArray());
-      const failed = result.results.filter((r) => !r.success);
+      const failed = (result.results ?? []).filter((r) => !r.success);
       if (failed.length) showToast(`${failed.length}개 레포 푸시 실패`, 'error');
       else showToast('일괄 푸시 완료');
       await handleRefreshAll();

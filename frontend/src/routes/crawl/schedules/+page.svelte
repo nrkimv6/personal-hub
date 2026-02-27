@@ -185,7 +185,7 @@
 								실행 이력
 							</a>
 							<Button
-								variant={schedule.enabled ? 'error' : 'primary'}
+								variant={schedule.enabled ? 'destructive' : 'primary'}
 								size="sm"
 								on:click={() => handleToggle(schedule.id, !schedule.enabled)}
 							>

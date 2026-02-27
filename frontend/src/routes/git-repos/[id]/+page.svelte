@@ -269,11 +269,11 @@
       <button class="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50" onclick={handleFetch} disabled={working}>페치</button>
       <button class="px-3 py-1.5 text-sm rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50" onclick={handlePull} disabled={working}>풀</button>
       <button class="px-3 py-1.5 text-sm rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50" onclick={handlePush} disabled={working}>푸시</button>
-      {#if (repo as GitRepo | null)?.last_ahead != null && (repo as GitRepo).last_ahead > 0}
-        <span class="text-xs text-green-600 dark:text-green-400 self-center">↑{(repo as GitRepo).last_ahead} ahead</span>
+      {#if repo?.last_ahead != null && repo.last_ahead > 0}
+        <span class="text-xs text-green-600 dark:text-green-400 self-center">↑{repo.last_ahead} ahead</span>
       {/if}
-      {#if (repo as GitRepo | null)?.last_behind != null && (repo as GitRepo).last_behind > 0}
-        <span class="text-xs text-red-500 dark:text-red-400 self-center">↓{(repo as GitRepo).last_behind} behind</span>
+      {#if repo?.last_behind != null && repo.last_behind > 0}
+        <span class="text-xs text-red-500 dark:text-red-400 self-center">↓{repo.last_behind} behind</span>
       {/if}
     </div>
 

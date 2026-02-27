@@ -7,7 +7,7 @@
 	 */
 	import { onMount } from 'svelte';
 	import { crawlApi } from '$lib/api';
-	import type { CrawlSchedule, CrawlRunStats } from '$lib/types';
+	import type { CrawlSchedule, CrawlRunStats, CrawlScheduleRun } from '$lib/types';
 	import { isAdmin } from '$lib/stores/auth';
 
 	// Props
@@ -29,15 +29,7 @@
 	// 실행 이력 모달
 	let showRunsModal = $state(false);
 	let selectedSchedule: CrawlSchedule | null = $state(null);
-	let runs: Array<{
-		id: number;
-		status: string;
-		started_at: string;
-		completed_at: string | null;
-		items_found: number;
-		items_saved: number;
-		error_message: string | null;
-	}> = $state([]);
+	let runs: CrawlScheduleRun[] = $state([]);
 	let loadingRuns = $state(false);
 
 	$effect(() => {
@@ -91,7 +83,7 @@
 		runs = [];
 
 		try {
-			const response = await crawlApi.getScheduleRuns(schedule.id, { page: 1, page_size: 20 });
+			const response = await crawlApi.getScheduleRuns(schedule.id, { page: 1, limit: 20 });
 			runs = response.items;
 		} catch (e) {
 			console.error('실행 이력 로드 실패:', e);
@@ -239,7 +231,7 @@
 					</Button>
 					{#if $isAdmin}
 						<Button
-							variant={schedule.enabled ? 'error' : 'primary'}
+							variant={schedule.enabled ? 'destructive' : 'primary'}
 							size="sm"
 							on:click={() => handleToggle(schedule.id, !schedule.enabled)}
 						>
@@ -363,8 +355,8 @@
 									<span class="text-sm text-muted-foreground">{formatDateTime(run.started_at)}</span>
 								</div>
 								<div class="text-sm">
-									<span class="text-muted-foreground">발견: {run.items_found}</span>
-									<span class="text-primary ml-2">저장: {run.items_saved}</span>
+									<span class="text-muted-foreground">발견: {run.collected_count}</span>
+									<span class="text-primary ml-2">저장: {run.saved_count}</span>
 								</div>
 							</div>
 							{#if run.error_message}
