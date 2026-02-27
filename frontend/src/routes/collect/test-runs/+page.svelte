@@ -178,10 +178,11 @@
 				{@const expanded = expandedRunIds.has(run.id)}
 				<div class="card">
 					<!-- 실행 요약 행 -->
-					<button
-						class="w-full flex items-center justify-between text-left"
-						onclick={() => toggleExpand(run.id)}
-					>
+					<div class="w-full flex items-center justify-between">
+						<button
+							class="flex-1 flex items-center gap-3 text-left"
+							onclick={() => toggleExpand(run.id)}
+						>
 						<div class="flex items-center gap-3">
 							<span class="text-lg">{expanded ? '▼' : '▶'}</span>
 							<div>
@@ -202,6 +203,7 @@
 								</div>
 							</div>
 						</div>
+						</button>
 
 						<!-- 통계 -->
 						<div class="flex items-center gap-3 text-sm">
@@ -223,7 +225,7 @@
 								로그
 							</button>
 						</div>
-					</button>
+					</div>
 
 					<!-- 펼쳐진 결과 목록 -->
 					{#if expanded && run.results.length > 0}
