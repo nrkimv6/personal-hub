@@ -438,7 +438,7 @@
 						{:else if batchStatus === 'done'}
 							<span class="text-[10px] text-gray-400">✓</span>
 						{/if}
-						<span class="text-[10px] font-mono shrink-0 {batchStatus === 'running' ? 'text-cyan-600' : isRunning ? 'text-green-600' : 'text-gray-400'}">{plan.progress.done}/{plan.progress.total}</span>
+						<span class="text-[10px] font-mono shrink-0 {plan.progress.done === plan.progress.total && plan.progress.total > 0 ? 'text-emerald-600' : batchStatus === 'running' ? 'text-cyan-600' : isRunning ? 'text-green-600' : 'text-gray-400'}">{plan.progress.total > 0 ? `${plan.progress.done}/${plan.progress.total}` : '—'}</span>
 
 						<!-- Done button: canDone OR lastPlanFile -->
 						{#if canDone(plan) || (isLastRun && !plan.path.includes('archive'))}

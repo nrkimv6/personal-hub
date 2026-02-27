@@ -41,6 +41,7 @@
 	let currentTracking = $state<CurrentTrackingResponse | null>(null);
 	let selectedPlanPath = $state('');
 	let trackingInterval: ReturnType<typeof setInterval> | null = null;
+	let plansInterval: ReturnType<typeof setInterval> | null = null;
 
 	// Phase 4: 종료 시 상태 보존
 	let lastPlanFile = $state<string | null>(null);
@@ -375,6 +376,29 @@
 			clearInterval(trackingInterval);
 			trackingInterval = null;
 		}
+		if (plansInterval) {
+			clearInterval(plansInterval);
+			plansInterval = null;
+		}
+	});
+
+	// 실행 중 plan 목록 주기 갱신 (5초 폴링)
+	$effect(() => {
+		const running = runStatus?.running ?? false;
+		if (running) {
+			plansInterval = setInterval(() => { void fetchPlans(); }, 5000);
+		} else {
+			if (plansInterval) {
+				clearInterval(plansInterval);
+				plansInterval = null;
+			}
+		}
+		return () => {
+			if (plansInterval) {
+				clearInterval(plansInterval);
+				plansInterval = null;
+			}
+		};
 	});
 
 	$effect(() => {
@@ -640,7 +664,7 @@
 										<CurrentTrackingCard tracking={currentTracking} />
 									{/if}
 									<div class="flex-1 min-h-0 overflow-hidden">
-										<TaskList planPath={taskListPlanPath} />
+										<TaskList planPath={taskListPlanPath} isRunning={runStatus?.running ?? false} />
 									</div>
 								</div>
 							{:else if taskHistoryTab === 'plans'}

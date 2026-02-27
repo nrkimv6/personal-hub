@@ -5,9 +5,10 @@
 
 	interface Props {
 		planPath?: string | null;
+		isRunning?: boolean;
 	}
 
-	let { planPath = null }: Props = $props();
+	let { planPath = null, isRunning = false }: Props = $props();
 
 	let detail = $state<PlanDetailResponse | null>(null);
 	let loading = $state(false);
@@ -33,6 +34,14 @@
 			void fetchItems(planPath);
 		} else {
 			detail = null;
+		}
+	});
+
+	// 실행 중 체크박스 주기 갱신 (5초 폴링)
+	$effect(() => {
+		if (isRunning && planPath) {
+			const interval = setInterval(() => { void fetchItems(planPath!); }, 5000);
+			return () => clearInterval(interval);
 		}
 	});
 </script>
