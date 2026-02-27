@@ -61,11 +61,13 @@ class EventService:
     # ── 초기화 ──────────────────────────────────────────────────────────────
 
     async def _enable_keyspace_notifications(self) -> None:
-        """Redis keyspace notifications 활성화 (K: keyspace, E: keyevent, x: expired, s: set 계열)"""
+        """Redis keyspace notifications 활성화"""
         try:
-            # Kx: key-space + expired, E: key-event 접두사
-            # s(set), g(generic) 커맨드 포함. "KEx" = keyevent + set/del/expired
-            await self._async.config_set("notify-keyspace-events", "KEx")
+            # K: keyspace events 접두사 활성화
+            # E: keyevent events 접두사 활성화
+            # x: expired events
+            # $: string commands (SET, GETSET 등) — runner 상태 키 변경 감지에 필요
+            await self._async.config_set("notify-keyspace-events", "KEx$")
         except Exception:
             # CONFIG SET 권한 없는 환경(managed Redis 등)에서는 무시
             pass

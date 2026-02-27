@@ -253,6 +253,8 @@
 
 	function handleRunSuccess(response: DevRunnerRunStatusResponse) {
 		if (!response.runner_id) return;
+		// runStatus 즉시 업데이트 (시작 API 응답에서 확보) — 상단 바 "실행 중" 즉시 표시
+		runStatus = response;
 		const newTab: RunnerTab = {
 			id: response.runner_id,
 			plan_file: response.plan_file,
