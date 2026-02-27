@@ -151,7 +151,7 @@ class GitRepoWorker(BaseWorker):
             repo = svc.get_repo(db, repo_id)
             if not repo:
                 return {"success": False, "stderr": "레포지토리를 찾을 수 없습니다."}
-            result = await svc.push_repo(db, repo)
+            result = await svc.smart_push_repo(db, repo)
             return {"success": result.success, "stdout": result.stdout, "stderr": result.stderr}
         finally:
             db.close()
@@ -323,7 +323,7 @@ class GitRepoWorker(BaseWorker):
                 if not repo:
                     results.append({"repo_id": rid, "success": False, "message": "레포지토리를 찾을 수 없습니다."})
                     continue
-                result = await svc.push_repo(db, repo)
+                result = await svc.smart_push_repo(db, repo)
                 results.append({"repo_id": rid, "success": result.success, "message": result.stdout or result.stderr})
             return {"success": True, "results": results}
         finally:

@@ -164,6 +164,64 @@ class GitRepoService:
             await self.refresh_status(db, repo)
         return OperationResult(success=ok, stdout=stdout, stderr=stderr)
 
+    async def smart_push_repo(self, db: Session, repo: GitRepo) -> OperationResult:
+        """push 실패 시 자동 stash → pull --rebase → stash pop → push 재시도."""
+        _REBASE_ERRORS = ("rejected", "fetch first", "non-fast-forward")
+        log_detail: list[str] = []
+
+        # 1차 push 시도
+        ok, stdout, stderr = await self._git.push(repo.path)
+        if ok:
+            self.log_operation(db, repo.id, "smart_push", "success", None, stdout or stderr)
+            await self.refresh_status(db, repo)
+            return OperationResult(success=True, stdout=stdout, stderr=stderr)
+
+        push_err = stderr or stdout
+        log_detail.append(f"[push] {push_err}")
+
+        # push 실패가 rebase로 해결 가능한지 확인
+        if not any(kw in push_err for kw in _REBASE_ERRORS):
+            self.log_operation(db, repo.id, "smart_push", "failure", None, "\n".join(log_detail))
+            return OperationResult(success=False, stdout=stdout, stderr=stderr)
+
+        # dirty 여부 확인 → 필요 시 stash
+        status = await self._git.get_status(repo.path)
+        stashed = False
+        if status.status in ("dirty", "conflict"):
+            ok_s, s_out, s_err = await self._git.stash_save(repo.path, "smart-push-auto-stash", include_untracked=True)
+            log_detail.append(f"[stash] {s_out or s_err}")
+            if not ok_s:
+                self.log_operation(db, repo.id, "smart_push", "failure", None, "\n".join(log_detail))
+                return OperationResult(success=False, stdout=s_out, stderr=s_err)
+            stashed = True
+
+        # pull --rebase
+        ok_r, r_out, r_err = await self._git.pull_rebase(repo.path)
+        log_detail.append(f"[pull_rebase] {r_out or r_err}")
+        if not ok_r:
+            await self._git.rebase_abort(repo.path)
+            if stashed:
+                await self._git.stash_pop(repo.path)
+            self.log_operation(db, repo.id, "smart_push", "failure", None, "\n".join(log_detail))
+            return OperationResult(success=False, stdout=r_out, stderr=r_err)
+
+        # stash pop (필요 시)
+        if stashed:
+            ok_p, p_out, p_err = await self._git.stash_pop(repo.path)
+            log_detail.append(f"[stash_pop] {p_out or p_err}")
+            if not ok_p:
+                self.log_operation(db, repo.id, "smart_push", "failure", None, "\n".join(log_detail))
+                return OperationResult(success=False, stdout=p_out, stderr=p_err)
+
+        # push 재시도
+        ok2, out2, err2 = await self._git.push(repo.path)
+        log_detail.append(f"[push_retry] {out2 or err2}")
+        status_str = "success" if ok2 else "failure"
+        self.log_operation(db, repo.id, "smart_push", status_str, None, "\n".join(log_detail))
+        if ok2:
+            await self.refresh_status(db, repo)
+        return OperationResult(success=ok2, stdout=out2, stderr=err2)
+
     async def pull_repo(self, db: Session, repo: GitRepo) -> OperationResult:
         ok, stdout, stderr = await self._git.pull(repo.path)
         self.log_operation(db, repo.id, "pull", "success" if ok else "failure", None, stderr or stdout)

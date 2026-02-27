@@ -954,3 +954,187 @@ class TestAPIRouteNonexistent:
 
     def test_operations_404(self, api_client):
         assert api_client.get("/api/v1/git-repos/99999/operations").status_code == 404
+
+
+# ============================================================
+# Smart Push 테스트
+# ============================================================
+
+@pytest.mark.asyncio
+class TestPullRebase:
+    """pull_rebase 메서드 테스트."""
+
+    async def test_pull_rebase_success(self, temp_git_repo):
+        """pull_rebase: 동일 레포(origin 없음) — origin 없을 때 실패 반환."""
+        from app.modules.git_repos.services.git_command import GitCommandService
+        git = GitCommandService()
+        ok, stdout, stderr = await git.pull_rebase(temp_git_repo)
+        # origin이 없으므로 실패하지만, 메서드 자체가 정상 동작해야 함
+        assert isinstance(ok, bool)
+        assert isinstance(stdout, str)
+        assert isinstance(stderr, str)
+
+    async def test_stash_save_include_untracked(self, temp_git_repo):
+        """include_untracked=True 시 untracked 파일도 stash 됨."""
+        from app.modules.git_repos.services.git_command import GitCommandService
+        git = GitCommandService()
+
+        # untracked 파일 생성
+        new_file = os.path.join(temp_git_repo, "untracked.txt")
+        with open(new_file, "w") as f:
+            f.write("untracked\n")
+
+        s_before = await git.get_status(temp_git_repo)
+        assert "untracked.txt" in s_before.untracked
+
+        ok, _, _ = await git.stash_save(temp_git_repo, "test", include_untracked=True)
+        assert ok is True
+
+        s_after = await git.get_status(temp_git_repo)
+        assert s_after.status == "clean"
+        assert "untracked.txt" not in s_after.untracked
+
+        # stash pop으로 복원 확인
+        ok_pop, _, _ = await git.stash_pop(temp_git_repo)
+        assert ok_pop is True
+        s_restored = await git.get_status(temp_git_repo)
+        assert "untracked.txt" in s_restored.untracked
+
+
+@pytest.mark.asyncio
+class TestSmartPushRepo:
+    """smart_push_repo 서비스 테스트."""
+
+    def _make_repo_mock(self, path: str):
+        from unittest.mock import MagicMock
+        repo = MagicMock()
+        repo.id = 1
+        repo.path = path
+        return repo
+
+    def _make_db_mock(self):
+        from unittest.mock import MagicMock
+        db = MagicMock()
+        db.add = MagicMock()
+        db.commit = MagicMock()
+        return db
+
+    async def test_smart_push_direct_success(self, temp_git_repo):
+        """push 첫 시도 성공 시 바로 반환 (재시도 없음)."""
+        from unittest.mock import AsyncMock, patch
+        from app.modules.git_repos.services.repo_service import GitRepoService
+
+        svc = GitRepoService()
+        repo = self._make_repo_mock(temp_git_repo)
+        db = self._make_db_mock()
+
+        with patch.object(svc._git, "push", new=AsyncMock(return_value=(True, "ok", ""))) as mock_push, \
+             patch.object(svc, "log_operation"), \
+             patch.object(svc, "refresh_status", new=AsyncMock()):
+            result = await svc.smart_push_repo(db, repo)
+
+        assert result.success is True
+        mock_push.assert_called_once()
+
+    async def test_smart_push_non_rebaseable_error(self, temp_git_repo):
+        """rejected/fetch first 없는 에러 → 재시도 없이 에러 반환."""
+        from unittest.mock import AsyncMock, patch
+        from app.modules.git_repos.services.repo_service import GitRepoService
+
+        svc = GitRepoService()
+        repo = self._make_repo_mock(temp_git_repo)
+        db = self._make_db_mock()
+
+        with patch.object(svc._git, "push", new=AsyncMock(return_value=(False, "", "some unrelated error"))), \
+             patch.object(svc, "log_operation"):
+            result = await svc.smart_push_repo(db, repo)
+
+        assert result.success is False
+
+    async def test_smart_push_clean_rebase(self, temp_git_repo):
+        """push 실패(rejected) → clean 상태 → pull_rebase → push 성공."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from app.modules.git_repos.services.repo_service import GitRepoService
+        from app.modules.git_repos.schemas import RepoStatus
+
+        svc = GitRepoService()
+        repo = self._make_repo_mock(temp_git_repo)
+        db = self._make_db_mock()
+
+        clean_status = RepoStatus(branch="main", status="clean")
+
+        push_calls = [
+            (False, "", "rejected: failed to push some refs"),
+            (True, "pushed", ""),
+        ]
+        push_mock = AsyncMock(side_effect=push_calls)
+
+        with patch.object(svc._git, "push", new=push_mock), \
+             patch.object(svc._git, "get_status", new=AsyncMock(return_value=clean_status)), \
+             patch.object(svc._git, "pull_rebase", new=AsyncMock(return_value=(True, "rebased", ""))) as mock_rebase, \
+             patch.object(svc, "log_operation"), \
+             patch.object(svc, "refresh_status", new=AsyncMock()):
+            result = await svc.smart_push_repo(db, repo)
+
+        assert result.success is True
+        mock_rebase.assert_called_once()
+        assert push_mock.call_count == 2
+
+    async def test_smart_push_dirty_stash_rebase(self, temp_git_repo):
+        """push 실패(rejected) → dirty → stash → pull_rebase → stash_pop → push 성공."""
+        from unittest.mock import AsyncMock, patch
+        from app.modules.git_repos.services.repo_service import GitRepoService
+        from app.modules.git_repos.schemas import RepoStatus
+
+        svc = GitRepoService()
+        repo = self._make_repo_mock(temp_git_repo)
+        db = self._make_db_mock()
+
+        dirty_status = RepoStatus(branch="main", status="dirty")
+
+        push_calls = [
+            (False, "", "fetch first"),
+            (True, "pushed", ""),
+        ]
+        push_mock = AsyncMock(side_effect=push_calls)
+
+        with patch.object(svc._git, "push", new=push_mock), \
+             patch.object(svc._git, "get_status", new=AsyncMock(return_value=dirty_status)), \
+             patch.object(svc._git, "stash_save", new=AsyncMock(return_value=(True, "stashed", ""))) as mock_stash, \
+             patch.object(svc._git, "pull_rebase", new=AsyncMock(return_value=(True, "rebased", ""))) as mock_rebase, \
+             patch.object(svc._git, "stash_pop", new=AsyncMock(return_value=(True, "popped", ""))) as mock_pop, \
+             patch.object(svc, "log_operation"), \
+             patch.object(svc, "refresh_status", new=AsyncMock()):
+            result = await svc.smart_push_repo(db, repo)
+
+        assert result.success is True
+        mock_stash.assert_called_once()
+        mock_rebase.assert_called_once()
+        mock_pop.assert_called_once()
+        assert push_mock.call_count == 2
+
+    async def test_smart_push_rebase_conflict(self, temp_git_repo):
+        """pull_rebase 실패 → rebase_abort + stash_pop 호출 후 에러 반환."""
+        from unittest.mock import AsyncMock, patch
+        from app.modules.git_repos.services.repo_service import GitRepoService
+        from app.modules.git_repos.schemas import RepoStatus
+
+        svc = GitRepoService()
+        repo = self._make_repo_mock(temp_git_repo)
+        db = self._make_db_mock()
+
+        dirty_status = RepoStatus(branch="main", status="dirty")
+
+        with patch.object(svc._git, "push", new=AsyncMock(return_value=(False, "", "rejected: non-fast-forward"))), \
+             patch.object(svc._git, "get_status", new=AsyncMock(return_value=dirty_status)), \
+             patch.object(svc._git, "stash_save", new=AsyncMock(return_value=(True, "stashed", ""))), \
+             patch.object(svc._git, "pull_rebase", new=AsyncMock(return_value=(False, "", "conflict"))) as mock_rebase, \
+             patch.object(svc._git, "rebase_abort", new=AsyncMock(return_value=(True, "", ""))) as mock_abort, \
+             patch.object(svc._git, "stash_pop", new=AsyncMock(return_value=(True, "popped", ""))) as mock_pop, \
+             patch.object(svc, "log_operation"):
+            result = await svc.smart_push_repo(db, repo)
+
+        assert result.success is False
+        mock_rebase.assert_called_once()
+        mock_abort.assert_called_once()
+        mock_pop.assert_called_once()

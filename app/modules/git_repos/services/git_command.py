@@ -232,14 +232,21 @@ class GitCommandService:
         rc, stdout, stderr = await self._run_git(path, "pull", "--no-rebase")
         return rc == 0, stdout, stderr
 
+    async def pull_rebase(self, path: str) -> Tuple[bool, str, str]:
+        """git pull --rebase."""
+        rc, stdout, stderr = await self._run_git(path, "pull", "--rebase")
+        return rc == 0, stdout, stderr
+
     async def fetch(self, path: str) -> Tuple[bool, str, str]:
         """git fetch."""
         rc, stdout, stderr = await self._run_git(path, "fetch")
         return rc == 0, stdout, stderr
 
-    async def stash_save(self, path: str, message: Optional[str] = None) -> Tuple[bool, str, str]:
-        """git stash push -m <message>."""
+    async def stash_save(self, path: str, message: Optional[str] = None, include_untracked: bool = False) -> Tuple[bool, str, str]:
+        """git stash push [-u] [-m <message>]."""
         args = ["stash", "push"]
+        if include_untracked:
+            args.append("--include-untracked")
         if message:
             args += ["-m", message]
         rc, stdout, stderr = await self._run_git(path, *args)
@@ -248,4 +255,9 @@ class GitCommandService:
     async def stash_pop(self, path: str) -> Tuple[bool, str, str]:
         """git stash pop."""
         rc, stdout, stderr = await self._run_git(path, "stash", "pop")
+        return rc == 0, stdout, stderr
+
+    async def rebase_abort(self, path: str) -> Tuple[bool, str, str]:
+        """git rebase --abort."""
+        rc, stdout, stderr = await self._run_git(path, "rebase", "--abort")
         return rc == 0, stdout, stderr
