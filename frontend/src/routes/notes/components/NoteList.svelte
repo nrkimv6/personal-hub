@@ -3,7 +3,7 @@
   import { notesApi } from '$lib/api/notes';
   import type { Note, TagDef } from '$lib/api/notes';
   import { Search, X, ChevronLeft, ChevronRight, FileText, CheckSquare, Trash2, Archive, Tag, Star, ArrowUpDown } from 'lucide-svelte';
-  import { navEntries, isNavGroup, type NavSingleItem } from '$lib/navigation';
+  import { flattenNavEntries } from '$lib/navigation';
   import NoteCard from './NoteCard.svelte';
   import NoteDetailModal from './NoteDetailModal.svelte';
   import NoteFormModal from './NoteFormModal.svelte';
@@ -27,7 +27,7 @@
   let starredFilter = $state<boolean | undefined>(undefined);
   let linkedMenuFilter = $state<string | undefined>(undefined);
 
-  const menuItems = navEntries.filter((e): e is NavSingleItem => !isNavGroup(e));
+  const menuItems = flattenNavEntries();
 
   let openNote = $state<Note | null>(null);
   let editNote = $state<Note | null>(null);
@@ -335,8 +335,27 @@
           focus:outline-none focus:ring-1 focus:ring-ring/30"
       >
         <option value={undefined}>전체</option>
-        {#each menuItems as item}
-          <option value={item.id}>{item.icon} {item.label}</option>
+        {#each (() => {
+          const groups: { category: string | null; items: typeof menuItems }[] = [];
+          let currentCat: string | null = undefined as unknown as string | null;
+          for (const item of menuItems) {
+            const cat = item.category ?? null;
+            if (cat !== currentCat) { groups.push({ category: cat, items: [item] }); currentCat = cat; }
+            else { groups[groups.length - 1].items.push(item); }
+          }
+          return groups;
+        })() as group}
+          {#if group.category}
+            <optgroup label={group.category}>
+              {#each group.items as item}
+                <option value={item.id}>{item.icon} {item.label}</option>
+              {/each}
+            </optgroup>
+          {:else}
+            {#each group.items as item}
+              <option value={item.id}>{item.icon} {item.label}</option>
+            {/each}
+          {/if}
         {/each}
       </select>
       {#if linkedMenuFilter}

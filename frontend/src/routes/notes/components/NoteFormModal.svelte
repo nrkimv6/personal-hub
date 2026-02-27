@@ -5,7 +5,7 @@
   import { X, Loader2 } from 'lucide-svelte';
   import TagInput from './TagInput.svelte';
   import MenuPicker from './MenuPicker.svelte';
-  import { navEntries, isNavGroup, type NavSingleItem } from '$lib/navigation';
+  import { flattenNavEntries, navGroups, isNavGroup } from '$lib/navigation';
   import { isCodeLike, detectLanguage } from '../utils/codeDetect';
   import { renderMarkdown } from '../utils/markdown';
   import { extractNoteLinkAtCursor } from '../utils/noteLink';
@@ -30,6 +30,17 @@
   let tagIds = $state<number[]>(note?.tags.map((t) => t.id) ?? []);
   let linkedMenuId = $state<string | null>(note?.linked_menu_id ?? null);
   let linkedTab = $state(note?.linked_tab ?? '');
+  let linkedTabCustom = $state(false); // true면 select 대신 자유 텍스트 입력
+
+  // 선택된 메뉴가 NavGroup 내부 아이템인 경우, 해당 그룹의 items를 탭 옵션으로 제공
+  const _allFlatItems = flattenNavEntries();
+  $: tabOptions = (() => {
+    if (!linkedMenuId) return [];
+    const flatItem = _allFlatItems.find((e) => e.id === linkedMenuId);
+    if (!flatItem?.category) return []; // NavSingleItem이면 탭 옵션 없음
+    const group = navGroups.find((g) => g.label === flatItem.category);
+    return group ? group.items : [];
+  })();
   let showMenuPicker = $state(false);
   let allTags = $state<TagDef[]>([]);
   let saving = $state(false);
@@ -78,8 +89,20 @@
     error = '';
     try {
       if (mode === 'create') {
+        // 태그 미선택 시 #기능개선 태그 자동 부여
+        let finalTagIds = [...tagIds];
+        if (finalTagIds.length === 0) {
+          let tag = allTags.find((t) => t.name === '기능개선');
+          if (!tag) {
+            try {
+              tag = await notesApi.createTag({ name: '기능개선' });
+              allTags = [...allTags, tag];
+            } catch { /* 태그 생성 실패 시 무시 */ }
+          }
+          if (tag) finalTagIds = [tag.id];
+        }
         await notesApi.create({
-          title: title.trim(), content, remark: remark || undefined, tag_ids: tagIds,
+          title: title.trim(), content, remark: remark || undefined, tag_ids: finalTagIds,
           linked_menu_id: linkedMenuId ?? undefined,
           linked_tab: linkedTab || undefined,
         });
@@ -282,12 +305,11 @@
     }
   }
 
-  // 선택된 메뉴의 icon+label 조회
+  // 선택된 메뉴의 icon+label 조회 (NavGroup 내부 아이템 포함)
   function getMenuInfo(id: string | null): { icon: string; label: string } | null {
     if (!id) return null;
-    const entry = navEntries.find((e) => !isNavGroup(e) && (e as NavSingleItem).id === id);
-    if (!entry || isNavGroup(entry)) return null;
-    const item = entry as NavSingleItem;
+    const item = flattenNavEntries().find((e) => e.id === id);
+    if (!item) return null;
     return { icon: item.icon, label: item.label };
   }
 
@@ -467,13 +489,46 @@
           {/if}
         </div>
         {#if linkedMenuId}
-          <input
-            type="text"
-            bind:value={linkedTab}
-            placeholder="탭 이름 (선택)"
-            class="mt-2 w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground
-              focus:outline-none focus:ring-2 focus:ring-ring/30"
-          />
+          {#if tabOptions.length > 0 && !linkedTabCustom}
+            <!-- NavGroup 내부 아이템: select + "직접 입력" 옵션 -->
+            <div class="mt-2 flex gap-1">
+              <select
+                bind:value={linkedTab}
+                class="flex-1 px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground
+                  focus:outline-none focus:ring-2 focus:ring-ring/30"
+              >
+                <option value="">탭 선택 (선택)</option>
+                {#each tabOptions as opt}
+                  <option value={opt.label}>{opt.icon} {opt.label}</option>
+                {/each}
+              </select>
+              <button
+                type="button"
+                onclick={() => { linkedTabCustom = true; linkedTab = ''; }}
+                class="px-2 py-1 text-xs rounded-lg border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                title="직접 입력"
+              >✏️</button>
+            </div>
+          {:else}
+            <!-- NavSingleItem이거나 직접 입력 모드 -->
+            <div class="mt-2 flex gap-1">
+              <input
+                type="text"
+                bind:value={linkedTab}
+                placeholder="탭 이름 (선택)"
+                class="flex-1 px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground
+                  focus:outline-none focus:ring-2 focus:ring-ring/30"
+              />
+              {#if tabOptions.length > 0 && linkedTabCustom}
+                <button
+                  type="button"
+                  onclick={() => { linkedTabCustom = false; linkedTab = ''; }}
+                  class="px-2 py-1 text-xs rounded-lg border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  title="목록에서 선택"
+                >📋</button>
+              {/if}
+            </div>
+          {/if}
         {/if}
       </div>
 
