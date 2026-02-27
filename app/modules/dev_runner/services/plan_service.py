@@ -418,7 +418,7 @@ class PlanService:
         우선순위:
         1. `> 요약: {텍스트}` 헤더 블록쿼트
         2. `## 개요` 섹션 첫 단락 (코드블럭 제외)
-        3. `## 배경 및 요약` 섹션 (구버전 하위 호환)
+        3. `## 요약` 섹션 (구버전 하위 호환)
         """
         lines = content.split("\n")
 
@@ -455,11 +455,11 @@ class PlanService:
         if text:
             return text
 
-        # 3. `## 배경 및 요약` (구버전 하위 호환)
+        # 3. `## 요약` (구버전 하위 호환)
         in_section = False
         collected = []
         for line in lines:
-            if re.match(r'^##\s+배경 및 요약', line):
+            if re.match(r'^##\s+요약', line):
                 in_section = True
                 continue
             if in_section:

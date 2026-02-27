@@ -10,7 +10,7 @@ from app.modules.dev_runner.services.plan_service import PlanService
 CONTENT_WITH_SUMMARY = """\
 # 테스트 Plan
 
-## 배경 및 요약
+## 요약
 
 이것은 테스트 요약입니다.
 두 번째 줄도 있습니다.
@@ -31,7 +31,7 @@ CONTENT_NO_SUMMARY = """\
 CONTENT_EMPTY_SUMMARY = """\
 # 테스트 Plan
 
-## 배경 및 요약
+## 요약
 
 ## Phase 1: 구현
 
@@ -49,7 +49,7 @@ CONTENT_TODO_NO_SUMMARY = """\
 CONTENT_ORIG_WITH_SUMMARY = """\
 # 테스트 Plan
 
-## 배경 및 요약
+## 요약
 
 원본 파일에만 있는 요약입니다.
 
@@ -58,7 +58,7 @@ CONTENT_ORIG_WITH_SUMMARY = """\
 
 
 def test_parse_summary_RIGHT():
-    """## 배경 및 요약 섹션이 있는 파일에서 요약 텍스트가 정확히 추출된다."""
+    """## 요약 섹션이 있는 파일에서 요약 텍스트가 정확히 추출된다."""
     result = PlanService._extract_summary(CONTENT_WITH_SUMMARY)
     assert result is not None
     assert "이것은 테스트 요약입니다." in result
@@ -66,7 +66,7 @@ def test_parse_summary_RIGHT():
 
 
 def test_parse_summary_MISSING():
-    """## 배경 및 요약 섹션이 없으면 None을 반환한다."""
+    """## 요약 섹션이 없으면 None을 반환한다."""
     result = PlanService._extract_summary(CONTENT_NO_SUMMARY)
     assert result is None
 
@@ -184,7 +184,7 @@ def test_extract_summary_priority_RIGHT():
 
 
 def test_extract_summary_legacy_배경및요약_RIGHT():
-    """구형 `## 배경 및 요약` 포맷에서 여전히 요약을 추출한다."""
+    """구형 `## 요약` 포맷에서 여전히 요약을 추출한다."""
     result = PlanService._extract_summary(CONTENT_WITH_SUMMARY)
     assert result is not None
     assert "이것은 테스트 요약입니다." in result

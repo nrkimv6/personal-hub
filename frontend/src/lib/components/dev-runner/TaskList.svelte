@@ -63,7 +63,7 @@
 					onclick={() => (summaryExpanded = !summaryExpanded)}
 				>
 					<div class="flex items-center justify-between gap-2">
-						<span class="text-[10px] font-medium text-blue-600 shrink-0">배경 및 요약</span>
+						<span class="text-[10px] font-medium text-blue-600 shrink-0">요약</span>
 						<svg
 							class="w-3 h-3 text-blue-400 shrink-0 transition-transform {summaryExpanded ? 'rotate-180' : ''}"
 							viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
