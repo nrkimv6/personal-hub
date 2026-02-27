@@ -323,10 +323,12 @@ function Get-ActivePlanRunners {
         $logPath    = & redis-cli GET "plan-runner:runners:${rid}:log_file_path" 2>$null
         $planFile   = & redis-cli GET "plan-runner:runners:${rid}:plan_file"    2>$null
         $streamPath = & redis-cli GET "plan-runner:runners:${rid}:stream_log_path" 2>$null
+        $pidVal     = & redis-cli GET "plan-runner:runners:${rid}:pid"          2>$null
 
         $logPath    = if ($logPath)    { $logPath.Trim()    } else { $null }
         $planFile   = if ($planFile)   { $planFile.Trim()   } else { $null }
         $streamPath = if ($streamPath) { $streamPath.Trim() } else { $null }
+        $pidVal     = if ($pidVal)     { $pidVal.Trim()     } else { $null }
 
         $displayName = Get-PlanRunnerDisplayName -PlanFile ([System.IO.Path]::GetFileName($planFile))
         $shortId = $rid.Substring(0, [Math]::Min(4, $rid.Length))
@@ -338,6 +340,7 @@ function Get-ActivePlanRunners {
             LogPath     = $logPath
             StreamPath  = $streamPath
             PlanFile    = $planFile
+            PID         = $pidVal
         }
     }
     return $result
@@ -545,8 +548,9 @@ function Start-CombinedLogTail {
         $activeRunners = Get-ActivePlanRunners -LogDir $planRunnerLogDir
         if ($activeRunners.Count -gt 0) {
             foreach ($runner in $activeRunners) {
-                $prKey = "PR:$($runner.DisplayName)#$($runner.ShortId)"
-                $psKey = "PS:$($runner.DisplayName)#$($runner.ShortId)"
+                $pidSuffix = if ($runner.PID) { "|PID:$($runner.PID)" } else { "" }
+                $prKey = "PR:$($runner.DisplayName)#$($runner.ShortId)$pidSuffix"
+                $psKey = "PS:$($runner.DisplayName)#$($runner.ShortId)$pidSuffix"
                 $logConfig[$prKey] = @{ Path = $runner.LogPath;    Color = "White";    Tail = 10 }
                 $logConfig[$psKey] = @{ Path = $runner.StreamPath; Color = "DarkGray"; Tail = 5  }
             }
@@ -683,8 +687,9 @@ function Start-CombinedLogTail {
                     $lastRunnerRefresh = $now
                     $currentRunners = Get-ActivePlanRunners -LogDir $planRunnerLogDir
                     foreach ($runner in $currentRunners) {
-                        $prKey = "PR:$($runner.DisplayName)#$($runner.ShortId)"
-                        $psKey = "PS:$($runner.DisplayName)#$($runner.ShortId)"
+                        $pidSuffix = if ($runner.PID) { "|PID:$($runner.PID)" } else { "" }
+                        $prKey = "PR:$($runner.DisplayName)#$($runner.ShortId)$pidSuffix"
+                        $psKey = "PS:$($runner.DisplayName)#$($runner.ShortId)$pidSuffix"
                         # 새 runner 감지 시 소스 추가
                         if (-not $logConfig.ContainsKey($prKey)) {
                             Write-Host "[$prKey] === New runner detected: $($runner.RunnerId) ===" -ForegroundColor Green
