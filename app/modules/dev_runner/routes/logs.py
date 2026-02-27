@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
-from app.modules.dev_runner.schemas import LogResponse
+from app.modules.dev_runner.schemas import LogResponse, RunHistoryResponse, FullLogResponse
 from app.modules.dev_runner.services.log_service import log_service
 
 router = APIRouter()
@@ -37,6 +37,33 @@ async def stream_logs(
 async def get_diagnostics():
     """파이프라인 진단 (1회성) — LogViewer 시작 시 호출"""
     return log_service.run_diagnostics()
+
+
+@router.get("/logs/history", response_model=RunHistoryResponse)
+async def get_run_history(
+    limit: int = Query(20, ge=1, le=100, description="최대 반환 수"),
+    offset: int = Query(0, ge=0, description="페이지 오프셋"),
+):
+    """실행 이력 조회 (Redis active_runners + 로그 파일 스캔)"""
+    return log_service.get_run_history(limit=limit, offset=offset)
+
+
+@router.get("/logs/full", response_model=FullLogResponse)
+async def get_full_log(
+    runner_id: str = Query(..., description="runner ID"),
+    offset: int = Query(0, ge=0, description="시작 라인 오프셋"),
+    limit: int = Query(500, ge=1, le=5000, description="최대 라인 수"),
+):
+    """종료된 Runner 전체 로그 조회 (offset/limit 청크)"""
+    return log_service.get_full_log(runner_id=runner_id, offset=offset, limit=limit)
+
+
+@router.get("/logs/system", response_model=LogResponse)
+async def get_system_log(
+    lines: int = Query(200, ge=1, le=2000, description="tail 줄 수"),
+):
+    """Listener 시스템 로그 조회 (가장 최신 plan-runner-*.log)"""
+    return log_service.get_system_log(lines=lines)
 
 
 __all__ = ['router']

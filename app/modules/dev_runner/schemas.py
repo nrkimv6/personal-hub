@@ -177,6 +177,33 @@ class LogResponse(BaseModel):
     total_lines: int
 
 
+class RunHistoryItem(BaseModel):
+    """실행 이력 항목 스키마"""
+    runner_id: str
+    plan_file: Optional[str] = None
+    engine: Optional[str] = None
+    status: str = "completed"  # "running" | "completed" | "unknown"
+    pid: Optional[int] = None
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    log_file: Optional[str] = None
+    has_log: bool = False
+
+
+class RunHistoryResponse(BaseModel):
+    """실행 이력 목록 응답 스키마"""
+    runs: List[RunHistoryItem]
+    total: int
+
+
+class FullLogResponse(BaseModel):
+    """전체 로그 응답 스키마 (offset/limit 기반 페이지네이션)"""
+    lines: List[str]
+    total_lines: int
+    offset: int
+    has_more: bool
+
+
 class CurrentTrackingResponse(BaseModel):
     """현재 TaskTracker 추적 중인 체크박스 응답 스키마 (Redis 기반)"""
     text: str
@@ -228,4 +255,7 @@ __all__ = [
     'VerifyResult',
     'MergeQueueItem',
     'MergeStatusResponse',
+    'RunHistoryItem',
+    'RunHistoryResponse',
+    'FullLogResponse',
 ]

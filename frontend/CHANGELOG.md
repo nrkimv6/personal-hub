@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.69.0] - 2026-02-27
+### Added
+- Dev Runner Logs 탭: Automation 페이지에 실행 이력 조회 + 로그 뷰어 + Listener 시스템 로그 서브탭 추가
+- 백엔드 API: `/logs/history`, `/logs/full`, `/logs/system` 엔드포인트 추가
+- `RunHistoryPanel.svelte`, `LogsTab.svelte` 신규 컴포넌트
+
 ## [2.68.0] - 2026-02-27
 ### Added
 - 시스템 메모리 대시보드: `/system` 페이지에 `💾 메모리` 탭 추가

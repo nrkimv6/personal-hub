@@ -335,6 +335,32 @@ export interface DiagStep {
 	detail: string;
 }
 
+// ── Run History types ──
+
+export interface RunHistoryItem {
+	runner_id: string;
+	plan_file: string | null;
+	engine: string | null;
+	status: 'running' | 'completed' | 'unknown';
+	pid: number | null;
+	start_time: string | null;
+	end_time: string | null;
+	log_file: string | null;
+	has_log: boolean;
+}
+
+export interface RunHistoryResponse {
+	runs: RunHistoryItem[];
+	total: number;
+}
+
+export interface FullLogResponse {
+	lines: string[];
+	total_lines: number;
+	offset: number;
+	has_more: boolean;
+}
+
 export const devRunnerLogApi = {
 	recent: (runnerId: string, lines: number = 100) =>
 		devRunnerRequest<LogResponse>(`/logs/recent?runner_id=${runnerId}&lines=${lines}`),
@@ -344,7 +370,16 @@ export const devRunnerLogApi = {
 
 	connectStream: (runnerId: string): EventSource => {
 		return new EventSource(`${DEV_RUNNER_BASE}/logs/stream?runner_id=${runnerId}`);
-	}
+	},
+
+	history: (limit: number = 20, offset: number = 0) =>
+		devRunnerRequest<RunHistoryResponse>(`/logs/history?limit=${limit}&offset=${offset}`),
+
+	full: (runnerId: string, offset: number = 0, limit: number = 500) =>
+		devRunnerRequest<FullLogResponse>(`/logs/full?runner_id=${runnerId}&offset=${offset}&limit=${limit}`),
+
+	system: (lines: number = 200) =>
+		devRunnerRequest<LogResponse>(`/logs/system?lines=${lines}`),
 };
 
 // ============================================================
