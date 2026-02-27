@@ -18,6 +18,25 @@ BASE_URL = "/api/v1/dev-runner"
 def api_client():
     return TestClient(app)
 
+def _cleanup_test_worktree():
+    """테스트용 worktree/branch 정리 (중복 실행 방지)"""
+    try:
+        worktree_path = Path(".worktrees/test_e2e_plan")
+        subprocess.run(
+            ["git", "worktree", "remove", str(worktree_path), "--force"],
+            capture_output=True, cwd=str(Path("."))
+        )
+    except Exception:
+        pass
+    try:
+        subprocess.run(
+            ["git", "branch", "-D", "plan/test_e2e_plan"],
+            capture_output=True, cwd=str(Path("."))
+        )
+    except Exception:
+        pass
+
+
 @pytest.fixture(scope="module")
 def background_listener():
     r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
@@ -25,6 +44,8 @@ def background_listener():
     r.delete("plan-runner:state:status")
     r.delete("plan-runner:state:pid")
     r.delete("plan-runner:listener:heartbeat")
+    # 이전 테스트 실행에서 남은 stale worktree 정리
+    _cleanup_test_worktree()
     
     script_path = Path("scripts/dev-runner-command-listener.py")
     process = subprocess.Popen(
@@ -45,6 +66,8 @@ def background_listener():
     if process.poll() is None:
         process.terminate()
         process.wait(timeout=5)
+    # 테스트 완료 후 worktree 정리
+    _cleanup_test_worktree()
 
 class TestHttpE2EChain:
     def test_http_start_to_process_execution(self, api_client, background_listener):
