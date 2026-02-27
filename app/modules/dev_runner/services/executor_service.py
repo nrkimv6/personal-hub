@@ -28,6 +28,8 @@ COMMANDS_KEY = "plan-runner:commands"
 RESULTS_KEY = "plan-runner:command_results"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
+RECENT_RUNNERS_KEY = "plan-runner:recent_runners"  # sorted set: score=종료 timestamp
+RECENT_RUNNERS_TTL = 86400  # 24시간 (초)
 COMMAND_TIMEOUT = 30  # 명령 결과 대기 타임아웃 (초) — worktree 생성 시간 고려
 
 
@@ -199,30 +201,36 @@ class ExecutorService:
             raise HTTPException(status_code=500, detail=f"Failed to start: {str(e)}")
 
     def _force_cleanup_state(self, runner_id: str = ""):
-        """Redis 상태 강제 정리 (listener 무응답 시 fallback)"""
+        """Redis 상태 강제 정리 (listener 무응답 시 fallback)
+
+        종료된 runner는 즉시 삭제하지 않고 RECENT_RUNNERS_KEY에 보존하여
+        다른 클라이언트에서도 탭을 복원할 수 있도록 한다.
+        """
         try:
             if runner_id:
-                self.redis_client.delete(
-                    f"{RUNNER_KEY_PREFIX}:{runner_id}:status",
-                    f"{RUNNER_KEY_PREFIX}:{runner_id}:pid",
-                    f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file",
-                    f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time",
-                    f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path",
-                    f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path",
-                )
+                # status를 "stopped"으로 설정 (삭제 대신 TTL 설정)
+                self.redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
+                # per-runner 키에 TTL 24h 설정 (삭제 대신 만료)
+                for key_suffix in ("status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path", "engine", "worktree_path", "merge_status", "current_cycle"):
+                    full_key = f"{RUNNER_KEY_PREFIX}:{runner_id}:{key_suffix}"
+                    if self.redis_client.exists(full_key):
+                        self.redis_client.expire(full_key, RECENT_RUNNERS_TTL)
+                # ACTIVE_RUNNERS_KEY에서 제거
                 self.redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
+                # RECENT_RUNNERS_KEY에 추가 (score=현재 timestamp)
+                stop_ts = time.time()
+                self.redis_client.zadd(RECENT_RUNNERS_KEY, {runner_id: stop_ts})
             else:
                 # 모든 active runner 정리 (레거시 fallback)
                 runner_ids = self.redis_client.smembers(ACTIVE_RUNNERS_KEY)
+                stop_ts = time.time()
                 for rid in runner_ids:
-                    self.redis_client.delete(
-                        f"{RUNNER_KEY_PREFIX}:{rid}:status",
-                        f"{RUNNER_KEY_PREFIX}:{rid}:pid",
-                        f"{RUNNER_KEY_PREFIX}:{rid}:plan_file",
-                        f"{RUNNER_KEY_PREFIX}:{rid}:start_time",
-                        f"{RUNNER_KEY_PREFIX}:{rid}:log_file_path",
-                        f"{RUNNER_KEY_PREFIX}:{rid}:stream_log_path",
-                    )
+                    self.redis_client.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
+                    for key_suffix in ("status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path", "engine", "worktree_path", "merge_status", "current_cycle"):
+                        full_key = f"{RUNNER_KEY_PREFIX}:{rid}:{key_suffix}"
+                        if self.redis_client.exists(full_key):
+                            self.redis_client.expire(full_key, RECENT_RUNNERS_TTL)
+                    self.redis_client.zadd(RECENT_RUNNERS_KEY, {rid: stop_ts})
                 self.redis_client.delete(ACTIVE_RUNNERS_KEY)
         except Exception:
             pass
@@ -374,12 +382,20 @@ class ExecutorService:
         )
 
     def get_all_runners(self) -> list:
-        """활성 runner 목록 조회"""
+        """활성 runner + 최근 종료 runner 목록 조회 (탭 복원 지원)"""
         from app.modules.dev_runner.schemas import RunnerListItem
         try:
-            runner_ids = self.redis_client.smembers(ACTIVE_RUNNERS_KEY)
+            # 24시간 이상 된 최근 종료 runner 자동 정리
+            cutoff_ts = time.time() - RECENT_RUNNERS_TTL
+            self.redis_client.zremrangebyscore(RECENT_RUNNERS_KEY, "-inf", cutoff_ts)
+
+            # ACTIVE_RUNNERS_KEY + RECENT_RUNNERS_KEY 합집합으로 runner 목록 구성
+            active_ids = self.redis_client.smembers(ACTIVE_RUNNERS_KEY)
+            recent_ids_with_scores = self.redis_client.zrange(RECENT_RUNNERS_KEY, 0, -1)
+            all_ids = set(active_ids) | set(recent_ids_with_scores)
+
             result = []
-            for rid in runner_ids:
+            for rid in all_ids:
                 status = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{rid}:status")
                 pid_str = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{rid}:pid")
                 plan_file = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file")
@@ -408,6 +424,20 @@ class ExecutorService:
             return result
         except redis.ConnectionError:
             return []
+
+    def dismiss_runner(self, runner_id: str) -> bool:
+        """종료된 runner를 탭에서 제거 (RECENT_RUNNERS_KEY에서 삭제 + per-runner 키 즉시 삭제)"""
+        try:
+            # RECENT_RUNNERS_KEY에서 제거
+            self.redis_client.zrem(RECENT_RUNNERS_KEY, runner_id)
+            # per-runner 키 즉시 삭제
+            for key_suffix in ("status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path", "engine", "worktree_path", "merge_status", "current_cycle"):
+                self.redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:{key_suffix}")
+            # ACTIVE_RUNNERS_KEY에서도 제거 (혹시 남아있다면)
+            self.redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
+            return True
+        except Exception:
+            return False
 
     def _is_pid_alive(self, pid: int) -> bool:
         """PID가 실제로 살아있는지 확인 (Windows: GetExitCodeProcess로 검증)"""
@@ -576,4 +606,4 @@ class ExecutorService:
 # 싱글톤 인스턴스
 executor_service = ExecutorService()
 
-__all__ = ['executor_service', 'ExecutorService', 'ACTIVE_RUNNERS_KEY', 'RUNNER_KEY_PREFIX']
+__all__ = ['executor_service', 'ExecutorService', 'ACTIVE_RUNNERS_KEY', 'RECENT_RUNNERS_KEY', 'RUNNER_KEY_PREFIX', 'RECENT_RUNNERS_TTL']

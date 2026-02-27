@@ -47,6 +47,7 @@ class RunnerListItem(BaseModel):
     worktree_path: Optional[str] = None
     branch: Optional[str] = None
     merge_status: Optional[str] = None
+    visible: bool = True  # 탭 표시 여부 (dismiss 전까지 True)
 
 
 class PlanProgressResponse(BaseModel):

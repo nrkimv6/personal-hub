@@ -270,6 +270,13 @@
 	}
 
 	function handleCloseTab(runnerId: string) {
+		// running이 아닌 탭은 서버에 dismiss 요청하여 다른 기기에서도 사라지게 함
+		const tab = runnerTabs.find(t => t.id === runnerId);
+		if (tab && !tab.running) {
+			devRunnerRunnerApi.dismissTab(runnerId).catch(() => {
+				// dismiss 실패해도 로컬 탭은 닫음
+			});
+		}
 		runnerTabs = runnerTabs.filter(t => t.id !== runnerId);
 		if (activeTabId === runnerId) {
 			activeTabId = runnerTabs.length > 0 ? runnerTabs[runnerTabs.length - 1].id : null;

@@ -74,6 +74,15 @@ async def cleanup_worktree(runner_id: str):
     return await executor_service.send_runner_command(runner_id, "cleanup-worktree")
 
 
+@router.delete("/runners/{runner_id}/tab")
+async def dismiss_runner_tab(runner_id: str):
+    """종료된 runner 탭 dismiss — RECENT_RUNNERS_KEY에서 제거 + per-runner 키 즉시 삭제"""
+    success = executor_service.dismiss_runner(runner_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="dismiss 실패")
+    return {"success": True, "runner_id": runner_id}
+
+
 @router.get("/merge-queue", response_model=list[MergeQueueItem])
 async def get_merge_queue():
     """Merge Queue 목록 조회"""

@@ -44,6 +44,7 @@ export interface RunnerListItem {
 	worktree_path: string | null;
 	branch: string | null;
 	merge_status: string | null;
+	visible: boolean;
 }
 
 export interface PlanProgressResponse {
@@ -249,7 +250,13 @@ export const devRunnerRunnerApi = {
 			{ method: 'DELETE' }
 		),
 
-	stopAll: () => devRunnerRequest<{ stopped: number }>('/stop-all', { method: 'POST' })
+	stopAll: () => devRunnerRequest<{ stopped: number }>('/stop-all', { method: 'POST' }),
+
+	dismissTab: (runnerId: string) =>
+		devRunnerRequest<{ success: boolean; runner_id: string }>(
+			`/runners/${runnerId}/tab`,
+			{ method: 'DELETE' }
+		)
 };
 
 // ============================================================
