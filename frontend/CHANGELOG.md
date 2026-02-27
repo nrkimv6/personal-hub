@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.74.0] - 2026-02-27
+### Added
+- MergeQueue 완전 구현: Redis 큐 기반 순차 머지 (`plan-runner:merge-queue`)
+- `_enqueue_merge_request()` 함수: plan-runner 성공 후 자동으로 머지 큐에 추가
+- `merge_workflow.py`: `_publish_log()` (SSE 로그) + `_update_queue_status()` (큐 상태 갱신) 헬퍼 추가
+- 백엔드 API: `GET /api/dev-runner/merge-log/stream` SSE 엔드포인트 추가
+- `RunRequest` 스키마에 `worktree: bool` 필드 추가 (기본값 True)
+- 프론트엔드: DevRunnerTab 좌측에 🔀 Merge 고정탭 추가
+- 프론트엔드: MergeQueuePanel에 클릭→SSE 로그 뷰어 통합
+- 프론트엔드: RunControl에 Worktree 모드 토글 추가
+
 ## [2.69.0] - 2026-02-27
 ### Added
 - Dev Runner Logs 탭: Automation 페이지에 실행 이력 조회 + 로그 뷰어 + Listener 시스템 로그 서브탭 추가
