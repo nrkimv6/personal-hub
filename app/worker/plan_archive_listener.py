@@ -167,9 +167,9 @@ class PlanArchiveListener(BaseWorker):
 
         except Exception as e:
             logger.error(f"[{self.name}] _handle_archived 오류 ({archive_path}): {e}", exc_info=True)
-            self._fail_counts[filename_hash if 'filename_hash' in dir() else archive_path] = (
-                self._fail_counts.get(archive_path, 0) + 1
-            )
+            # 실패 카운트 증가 — filename_hash 확보 전 실패 시 archive_path를 키로 사용
+            fail_key = filename_hash if "filename_hash" in locals() else archive_path
+            self._fail_counts[fail_key] = self._fail_counts.get(fail_key, 0) + 1
             db.rollback()
         finally:
             db.close()
