@@ -409,7 +409,7 @@ def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner
 
     # 로그 파일 생성
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    log_file = LOG_DIR / f"plan-runner-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
+    log_file = LOG_DIR / f"plan-runner-{runner_id}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
 
     try:
         # subprocess 실행 및 stdout을 PIPE로 받아 스레드에서 파일+Redis 동시 기록

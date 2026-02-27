@@ -179,9 +179,27 @@ if ($Target -eq "list") {
 
     # Plan-runner logs (별도 디렉토리)
     Write-Host "[Plan-Runner Logs] ($planRunnerLogDir)" -ForegroundColor Yellow
+    if ($useRedis) {
+        $activeRunners = Get-ActivePlanRunners -LogDir $planRunnerLogDir
+        if ($activeRunners.Count -gt 0) {
+            Write-Host "  [Active Runners via Redis]" -ForegroundColor Cyan
+            foreach ($runner in $activeRunners) {
+                $shortId = $runner.ShortId
+                $name    = $runner.DisplayName
+                $logName = if ($runner.LogPath)    { [System.IO.Path]::GetFileName($runner.LogPath) }    else { "(no log)" }
+                $strName = if ($runner.StreamPath) { [System.IO.Path]::GetFileName($runner.StreamPath) } else { "(no stream)" }
+                Write-Host "  [$name#$shortId] runner=$($runner.RunnerId)"
+                Write-Host "    log:    $logName"
+                Write-Host "    stream: $strName"
+            }
+        } else {
+            Write-Host "  (no active runners in Redis)" -ForegroundColor Gray
+        }
+    }
     if (Test-Path $planRunnerLogDir) {
         $anLogs = Get-ChildItem -Path $planRunnerLogDir -Filter "plan-runner-*.log" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
         if ($anLogs) {
+            Write-Host "  [Recent Log Files]" -ForegroundColor DarkGray
             foreach ($log in $anLogs | Select-Object -First 5) {
                 $size = "{0:N2} KB" -f ($log.Length / 1KB)
                 $date = $log.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")
@@ -267,6 +285,68 @@ if (Test-Path $planRunnerLogDir) {
         Sort-Object Name -Descending | Select-Object -First 1
     if ($found) { $planRunnerStreamLogFile = $found.FullName }
 }
+
+# Plan-runner 표시 이름 추출: "2026-02-25_smart-push-auto-rebase.md" → "smart-push"
+function Get-PlanRunnerDisplayName {
+    param([string]$PlanFile)
+    if (-not $PlanFile) { return "unknown" }
+    $basename = [System.IO.Path]::GetFileNameWithoutExtension($PlanFile)
+    # 날짜 prefix 제거 (YYYY-MM-DD_ 패턴)
+    $basename = $basename -replace '^\d{4}-\d{2}-\d{2}_', ''
+    # 첫 2단어 (하이픈 구분) 추출
+    $parts = $basename -split '-'
+    if ($parts.Count -ge 2) {
+        return "$($parts[0])-$($parts[1])"
+    }
+    return $parts[0]
+}
+
+# Redis에서 활성 plan-runner 목록 조회
+function Get-ActivePlanRunners {
+    param([string]$LogDir)
+    $result = @()
+
+    # Redis 연결 확인
+    $pingOut = & redis-cli PING 2>$null
+    if ($pingOut -ne "PONG") {
+        return $result
+    }
+
+    # 활성 runner_id 목록
+    $runnerIds = & redis-cli SMEMBERS "plan-runner:active_runners" 2>$null
+    if (-not $runnerIds) { return $result }
+
+    foreach ($rid in $runnerIds) {
+        $rid = $rid.Trim()
+        if (-not $rid) { continue }
+
+        $logPath    = & redis-cli GET "plan-runner:runners:${rid}:log_file_path" 2>$null
+        $planFile   = & redis-cli GET "plan-runner:runners:${rid}:plan_file"    2>$null
+        $streamPath = & redis-cli GET "plan-runner:runners:${rid}:stream_log_path" 2>$null
+
+        $logPath    = if ($logPath)    { $logPath.Trim()    } else { $null }
+        $planFile   = if ($planFile)   { $planFile.Trim()   } else { $null }
+        $streamPath = if ($streamPath) { $streamPath.Trim() } else { $null }
+
+        $displayName = Get-PlanRunnerDisplayName -PlanFile ([System.IO.Path]::GetFileName($planFile))
+        $shortId = $rid.Substring(0, [Math]::Min(4, $rid.Length))
+
+        $result += @{
+            RunnerId    = $rid
+            ShortId     = $shortId
+            DisplayName = $displayName
+            LogPath     = $logPath
+            StreamPath  = $streamPath
+            PlanFile    = $planFile
+        }
+    }
+    return $result
+}
+
+# Redis 연결 여부 + 활성 runner 캐시 (초기화 시)
+$useRedis = $false
+$pingOut = & redis-cli PING 2>$null
+if ($pingOut -eq "PONG") { $useRedis = $true }
 
 # Check if log files are stale (created more than 1 hour before the latest API log)
 function Test-StaleLogFile {
@@ -458,8 +538,27 @@ function Start-CombinedLogTail {
         "CRAWL-WD"    = @{ Path = $CrawlWatchdogLog;  Color = "DarkYellow";  Tail = 2 }
         "CMD-WD"      = @{ Path = $CommandListenerWatchdogLog; Color = "DarkYellow"; Tail = 2 }
         "DEV-RUNNER"  = @{ Path = $DevRunnerLog;           Color = "DarkCyan";    Tail = 10 }
-        "PLAN-RUNNER"   = @{ Path = $planRunnerLogFile;    Color = "White";       Tail = 10 }
-        "PR-STREAM"   = @{ Path = $planRunnerStreamLogFile; Color = "DarkGray"; Tail = 5 }
+    }
+
+    # Plan-runner 소스 동적 추가 (Redis 활성 runner 기반)
+    if ($useRedis) {
+        $activeRunners = Get-ActivePlanRunners -LogDir $planRunnerLogDir
+        if ($activeRunners.Count -gt 0) {
+            foreach ($runner in $activeRunners) {
+                $prKey = "PR:$($runner.DisplayName)#$($runner.ShortId)"
+                $psKey = "PS:$($runner.DisplayName)#$($runner.ShortId)"
+                $logConfig[$prKey] = @{ Path = $runner.LogPath;    Color = "White";    Tail = 10 }
+                $logConfig[$psKey] = @{ Path = $runner.StreamPath; Color = "DarkGray"; Tail = 5  }
+            }
+        } else {
+            # 활성 runner 없음 — 폴백: 최신 파일 1개
+            $logConfig["PLAN-RUNNER"] = @{ Path = $planRunnerLogFile;       Color = "White";    Tail = 10 }
+            $logConfig["PR-STREAM"]   = @{ Path = $planRunnerStreamLogFile; Color = "DarkGray"; Tail = 5  }
+        }
+    } else {
+        # Redis 없음 — 폴백: 최신 파일 1개
+        $logConfig["PLAN-RUNNER"] = @{ Path = $planRunnerLogFile;       Color = "White";    Tail = 10 }
+        $logConfig["PR-STREAM"]   = @{ Path = $planRunnerStreamLogFile; Color = "DarkGray"; Tail = 5  }
     }
 
     # Sources that only show errors/warnings (suppress verbose output)
@@ -564,29 +663,63 @@ function Start-CombinedLogTail {
         return $latestLog
     }
 
-    # Plan-runner 로그 전용 패턴 (별도 디렉토리)
+    # Plan-runner 로그 전용 패턴 (폴백 전용 — Redis 미연결 시)
     $planRunnerLogPatterns = @{
         "PLAN-RUNNER" = @{ Dir = $planRunnerLogDir; Filter = "plan-runner-*.log"; Exclude = "stream" }
         "PR-STREAM" = @{ Dir = $planRunnerLogDir; Filter = "plan-runner-stream-*.log"; Exclude = $null }
     }
 
+    # Redis runner 재조회 타이머
+    $lastRunnerRefresh = [DateTime]::MinValue
+    $runnerRefreshInterval = 10  # 초
+
     try {
         while ($true) {
-            # Plan-runner 로그 자동 감지 (별도 디렉토리)
-            foreach ($source in $planRunnerLogPatterns.Keys) {
-                $cfg = $planRunnerLogPatterns[$source]
-                if (-not (Test-Path $cfg.Dir)) { continue }
-                $candidates = Get-ChildItem -Path $cfg.Dir -Filter $cfg.Filter -ErrorAction SilentlyContinue
-                if ($cfg.Exclude) { $candidates = $candidates | Where-Object { $_.Name -notmatch $cfg.Exclude } }
-                $latest = $candidates | Sort-Object Name -Descending | Select-Object -First 1
-                if ($latest) {
-                    $currentName = $logFileNames[$source]
-                    if ($latest.Name -ne $currentName) {
-                        Write-Host "[$source] === Switched to new log: $($latest.Name) ===" -ForegroundColor Yellow
-                        $logFiles[$source] = $latest.FullName
-                        $logFileNames[$source] = $latest.Name
-                        $logColors[$source] = $logConfig[$source].Color
-                        $filePositions[$source] = 0
+            # Plan-runner 로그 자동 감지
+            if ($useRedis) {
+                # Redis 기반: 10초마다 active_runners 재조회
+                $now = [DateTime]::Now
+                if (($now - $lastRunnerRefresh).TotalSeconds -ge $runnerRefreshInterval) {
+                    $lastRunnerRefresh = $now
+                    $currentRunners = Get-ActivePlanRunners -LogDir $planRunnerLogDir
+                    foreach ($runner in $currentRunners) {
+                        $prKey = "PR:$($runner.DisplayName)#$($runner.ShortId)"
+                        $psKey = "PS:$($runner.DisplayName)#$($runner.ShortId)"
+                        # 새 runner 감지 시 소스 추가
+                        if (-not $logConfig.ContainsKey($prKey)) {
+                            Write-Host "[$prKey] === New runner detected: $($runner.RunnerId) ===" -ForegroundColor Green
+                            $logConfig[$prKey] = @{ Path = $runner.LogPath;    Color = "White";    Tail = 10 }
+                            $logConfig[$psKey] = @{ Path = $runner.StreamPath; Color = "DarkGray"; Tail = 5  }
+                            $logFiles[$prKey]      = $runner.LogPath
+                            $logFileNames[$prKey]  = [System.IO.Path]::GetFileName($runner.LogPath)
+                            $logColors[$prKey]     = "White"
+                            $filePositions[$prKey] = 0
+                            if ($runner.StreamPath) {
+                                $logFiles[$psKey]      = $runner.StreamPath
+                                $logFileNames[$psKey]  = [System.IO.Path]::GetFileName($runner.StreamPath)
+                                $logColors[$psKey]     = "DarkGray"
+                                $filePositions[$psKey] = 0
+                            }
+                        }
+                    }
+                }
+            } else {
+                # 폴백: 최신 파일 1개 추적 (기존 방식)
+                foreach ($source in $planRunnerLogPatterns.Keys) {
+                    $cfg = $planRunnerLogPatterns[$source]
+                    if (-not (Test-Path $cfg.Dir)) { continue }
+                    $candidates = Get-ChildItem -Path $cfg.Dir -Filter $cfg.Filter -ErrorAction SilentlyContinue
+                    if ($cfg.Exclude) { $candidates = $candidates | Where-Object { $_.Name -notmatch $cfg.Exclude } }
+                    $latest = $candidates | Sort-Object Name -Descending | Select-Object -First 1
+                    if ($latest) {
+                        $currentName = $logFileNames[$source]
+                        if ($latest.Name -ne $currentName) {
+                            Write-Host "[$source] === Switched to new log: $($latest.Name) ===" -ForegroundColor Yellow
+                            $logFiles[$source] = $latest.FullName
+                            $logFileNames[$source] = $latest.Name
+                            $logColors[$source] = $logConfig[$source].Color
+                            $filePositions[$source] = 0
+                        }
                     }
                 }
             }
@@ -723,6 +856,25 @@ if ($Follow) {
             Show-LogContent -FilePath $apiLogFile -Label "API Server" -Color Cyan -TailLines $Lines
             if ($Admin) {
                 Show-LogContent -FilePath $workerLogFile -Label "Worker" -Color Magenta -TailLines $Lines
+                # Plan-runner 로그: Redis 활성 runner 또는 최신 1개 표시
+                if ($useRedis) {
+                    $activeRunners = Get-ActivePlanRunners -LogDir $planRunnerLogDir
+                    if ($activeRunners.Count -gt 0) {
+                        foreach ($runner in $activeRunners) {
+                            $label = "PR:$($runner.DisplayName)#$($runner.ShortId)"
+                            Show-LogContent -FilePath $runner.LogPath -Label $label -Color White -TailLines $Lines
+                            if ($runner.StreamPath) {
+                                Show-LogContent -FilePath $runner.StreamPath -Label "PS:$($runner.DisplayName)#$($runner.ShortId)" -Color DarkGray -TailLines ([Math]::Min($Lines, 20))
+                            }
+                        }
+                    } else {
+                        Show-LogContent -FilePath $planRunnerLogFile -Label "PLAN-RUNNER" -Color White -TailLines $Lines
+                        Show-LogContent -FilePath $planRunnerStreamLogFile -Label "PR-STREAM" -Color DarkGray -TailLines ([Math]::Min($Lines, 20))
+                    }
+                } else {
+                    Show-LogContent -FilePath $planRunnerLogFile -Label "PLAN-RUNNER" -Color White -TailLines $Lines
+                    Show-LogContent -FilePath $planRunnerStreamLogFile -Label "PR-STREAM" -Color DarkGray -TailLines ([Math]::Min($Lines, 20))
+                }
             }
             Show-LogContent -FilePath $frontendLogFile -Label "Frontend" -Color Green -TailLines $Lines
         }
