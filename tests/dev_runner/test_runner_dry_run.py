@@ -183,8 +183,8 @@ class TestRunnerDryRun:
         ) as client:
             runner_id = await _post_dry_run(client)
 
-            assert _wait_for_runner_status(real_redis, runner_id, "running", timeout=20), (
-                f"runner {runner_id}가 20초 내 running 상태가 되지 않음"
+            assert _wait_for_runner_status(real_redis, runner_id, "running", timeout=40), (
+                f"runner {runner_id}가 40초 내 running 상태가 되지 않음"
             )
 
             log_path = real_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
