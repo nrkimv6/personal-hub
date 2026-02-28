@@ -40,8 +40,9 @@ if (-not (Test-Path $PidDir)) {
     New-Item -ItemType Directory -Path $PidDir -Force | Out-Null
 }
 
-# Service-specific log file (separate from app logs)
-$serviceLogFile = Join-Path $LogDir "service_runner.log"
+# Service-specific log file (separate from app logs) — 타임스탬프 기반 파일명
+$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$serviceLogFile = Join-Path $LogDir "service_runner_$timestamp.log"
 
 function Write-ServiceLog {
     param([string]$Message)

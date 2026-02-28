@@ -69,7 +69,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler(log_dir / "dev_runner_command_listener.log", encoding="utf-8"),
+        logging.FileHandler(log_dir / f"dev_runner_command_listener_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log", encoding="utf-8"),
         logging.StreamHandler(),
     ],
 )
