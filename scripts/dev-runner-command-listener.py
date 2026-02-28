@@ -570,8 +570,11 @@ def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner
     if command.get("ignored_plans"):
         cmd.extend(["--ignored-plans", command["ignored_plans"]])
 
-    if command.get("worktree"):
+    if command.get("worktree") or worktree_path:
         cmd.append("--worktree")
+
+    if command.get("pipeline"):
+        cmd.extend(["--pipeline", str(command["pipeline"])])
 
     # 로그 파일 생성
     LOG_DIR.mkdir(parents=True, exist_ok=True)
