@@ -159,3 +159,60 @@ class TestMergeQueueHTTP:
         first = data[0]
         for key in ("runner_id", "branch", "plan_file", "status"):
             assert key in first, f"필드 누락: {key}"
+
+    # ── Phase T4 신규 TC ────────────────────────────────────────────────────
+
+    def test_http_post_retry_merge_with_plan_file(self, api_client):
+        """T4-28: POST /merge/{runner_id}/retry → send_runner_command에 retry-merge 명령 전달, 200 응답"""
+        captured = {}
+
+        async def mock_send(runner_id, command, **kwargs):
+            captured["runner_id"] = runner_id
+            captured["command"] = command
+            return {"success": True, "message": "retry-merge sent"}
+
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.send_runner_command",
+            new=mock_send
+        ):
+            resp = api_client.post(f"{BASE_URL}/merge/plan_runner_001/retry")
+
+        assert resp.status_code == 200
+        assert captured.get("runner_id") == "plan_runner_001"
+        assert captured.get("command") == "retry-merge"
+
+    def test_http_get_merge_queue_item_has_plan_branch_field(self, api_client):
+        """T4-29: GET /merge-queue 응답의 branch 필드가 plan/{stem} 형태 반환 검증"""
+        item = make_queue_item_dict("r002")
+        item["branch"] = "plan/2026-02-27_foo-bar"  # plan/ 접두사
+
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.get_merge_queue",
+            new=AsyncMock(return_value=[item])
+        ):
+            resp = api_client.get(f"{BASE_URL}/merge-queue")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) >= 1
+        branch = data[0]["branch"]
+        assert branch.startswith("plan/"), f"branch가 plan/ 아님: {branch}"
+
+    def test_http_get_merge_status_reflects_actual_state(self, api_client):
+        """T4-30: GET /merge/{id} → status 필드가 mock 반환값과 일치 검증"""
+        for status_val in ("conflict", "merged", "testing", "failed"):
+            status_dict = {
+                "runner_id": "chk_runner",
+                "status": status_val,
+                "test_passed": None,
+                "fix_attempts": 0,
+                "message": "",
+            }
+            with patch(
+                "app.modules.dev_runner.services.executor_service.executor_service.get_merge_status",
+                new=AsyncMock(return_value=status_dict)
+            ):
+                resp = api_client.get(f"{BASE_URL}/merge/chk_runner")
+
+            assert resp.status_code == 200
+            assert resp.json()["status"] == status_val, f"status 불일치: {status_val}"
