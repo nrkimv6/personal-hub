@@ -82,6 +82,14 @@ def apply_migrations(db_path: Path) -> None:
     conn.close()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _set_testing_env():
+    """테스트 세션 동안 TESTING=1 환경변수 설정 → lifespan 초기화 스킵으로 QueuePool 고갈 방지"""
+    os.environ["TESTING"] = "1"
+    yield
+    os.environ.pop("TESTING", None)
+
+
 @pytest.fixture(scope="session")
 def test_db_engine():
     """
