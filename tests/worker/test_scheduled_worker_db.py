@@ -4,8 +4,7 @@ TC: scheduled_worker._dispatch_scheduled_runs() DB 세션 누수 방지
 - ERROR: 내부 예외 발생 시에도 db.close() 호출 검증
 - PERFORMANCE: 루프 반복 후 pool 연결 수 증가 없음 검증
 """
-import asyncio
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -25,7 +24,8 @@ def worker():
         return w
 
 
-def test_dispatch_scheduled_runs_right_db_closed_after_success(worker):
+@pytest.mark.asyncio
+async def test_dispatch_scheduled_runs_right_db_closed_after_success(worker):
     """R: 정상 실행 후 db.close() 반드시 호출됨"""
     mock_db = MagicMock()
     mock_service = MagicMock()
@@ -35,12 +35,13 @@ def test_dispatch_scheduled_runs_right_db_closed_after_success(worker):
         patch("app.worker.scheduled_worker.SessionLocal", return_value=mock_db),
         patch("app.worker.scheduled_worker.TaskScheduleService", return_value=mock_service),
     ):
-        asyncio.get_event_loop().run_until_complete(worker._dispatch_scheduled_runs())
+        await worker._dispatch_scheduled_runs()
 
     mock_db.close.assert_called_once()
 
 
-def test_dispatch_scheduled_runs_error_db_closed_after_exception(worker):
+@pytest.mark.asyncio
+async def test_dispatch_scheduled_runs_error_db_closed_after_exception(worker):
     """E: get_schedules_by_type에서 예외 발생해도 db.close() 반드시 호출됨"""
     mock_db = MagicMock()
     mock_service = MagicMock()
@@ -50,12 +51,13 @@ def test_dispatch_scheduled_runs_error_db_closed_after_exception(worker):
         patch("app.worker.scheduled_worker.SessionLocal", return_value=mock_db),
         patch("app.worker.scheduled_worker.TaskScheduleService", return_value=mock_service),
     ):
-        asyncio.get_event_loop().run_until_complete(worker._dispatch_scheduled_runs())
+        await worker._dispatch_scheduled_runs()
 
     mock_db.close.assert_called_once()
 
 
-def test_dispatch_no_pool_exhaustion_after_repeated_calls(worker):
+@pytest.mark.asyncio
+async def test_dispatch_no_pool_exhaustion_after_repeated_calls(worker):
     """P: 10회 반복 호출 후 db.close() 호출 횟수 = 10 (누수 없음)"""
     mock_db = MagicMock()
     mock_service = MagicMock()
@@ -65,8 +67,7 @@ def test_dispatch_no_pool_exhaustion_after_repeated_calls(worker):
         patch("app.worker.scheduled_worker.SessionLocal", return_value=mock_db),
         patch("app.worker.scheduled_worker.TaskScheduleService", return_value=mock_service),
     ):
-        loop = asyncio.get_event_loop()
         for _ in range(10):
-            loop.run_until_complete(worker._dispatch_scheduled_runs())
+            await worker._dispatch_scheduled_runs()
 
     assert mock_db.close.call_count == 10
