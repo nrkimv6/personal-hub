@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { planRecordsApi, archiveApi, type PlanRecord, type ArchivePreviewItem, type DuplicateItem } from '$lib/api/plan-records';
+  import { planRecordsApi, archiveApi, type PlanRecord, type ImportArchivedResult, type ArchivePreviewItem, type DuplicateItem } from '$lib/api/plan-records';
   import { devRunnerPlanApi } from '$lib/api/dev-runner';
   import MemoEditor from './MemoEditor.svelte';
   import PlanViewer from './PlanViewer.svelte';
@@ -30,6 +30,7 @@
   let skip = 0;
   const limit = 50;
   let hasMore = false;
+  let filterCategory = '';
 
   // ── 선택/벌크 ─────────────────────────────────────────────
   let selectedIds = new Set<number>();
@@ -42,6 +43,39 @@
   let organizeLoading = false;
   let previewDirs: Array<{ archive_dir: string; items: ArchivePreviewItem[] }> = [];
   let organizeResult: string = '';
+
+  // ── DB 이관 ───────────────────────────────────────────────
+  let importLoading = false;
+  let importResult: ImportArchivedResult | null = null;
+
+  async function runImportArchived() {
+    importLoading = true;
+    importResult = null;
+    try {
+      const res = await planRecordsApi.importArchived();
+      importResult = res;
+      showToast(`DB 이관 완료: ${res.created}개 생성, ${res.updated}개 갱신, ${res.skipped}개 스킵`);
+      loadRecords();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'DB 이관 실패');
+    } finally {
+      importLoading = false;
+    }
+  }
+
+  // LLM 처리 현황 (DB 레코드 통계)
+  let llmStats: { total: number; processed: number; pending: number } | null = null;
+
+  async function loadLlmStats() {
+    try {
+      const all = await planRecordsApi.list({ status: 'archived', limit: 1000 });
+      const total = all.length;
+      const processed = all.filter(r => r.llm_processed_at != null).length;
+      llmStats = { total, processed, pending: total - processed };
+    } catch (e) {
+      // 통계 로드 실패는 무시
+    }
+  }
 
   // ── 중복 감지 ─────────────────────────────────────────────
   let showDuplicatesModal = false;
@@ -63,7 +97,7 @@
     loading = true;
     error = '';
     try {
-      const data = await planRecordsApi.list({ status: 'archived', skip: append ? skip : 0, limit });
+      const data = await planRecordsApi.list({ status: 'archived', category: filterCategory || undefined, skip: append ? skip : 0, limit });
       if (append) {
         records = [...records, ...data];
         skip += data.length;
@@ -190,7 +224,10 @@
     return new Date(iso).toLocaleDateString('ko-KR');
   }
 
-  onMount(() => loadRecords());
+  onMount(() => {
+    loadRecords();
+    loadLlmStats();
+  });
 </script>
 
 <!-- 토스트 -->
@@ -205,8 +242,33 @@
   <div class="flex-1 flex flex-col min-w-0">
     <!-- 헤더 -->
     <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
-      <h2 class="text-sm font-semibold text-foreground">아카이브된 계획서</h2>
       <div class="flex items-center gap-2">
+        <h2 class="text-sm font-semibold text-foreground">아카이브된 계획서</h2>
+        <select
+          class="border border-border rounded px-2 py-0.5 text-xs bg-background text-foreground"
+          bind:value={filterCategory}
+          onchange={() => loadRecords()}
+        >
+          <option value="">전체 카테고리</option>
+          {#each ['naver-booking','instagram','google-search','activity','claude-worker','video','infra','writing','common'] as cat}
+            <option value={cat}>{cat}</option>
+          {/each}
+        </select>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap">
+        {#if llmStats}
+          <span class="text-xs text-muted-foreground">
+            LLM: {llmStats.processed}/{llmStats.total}
+            {#if llmStats.pending > 0}
+              <span class="text-yellow-600 dark:text-yellow-400">(미처리 {llmStats.pending})</span>
+            {/if}
+          </span>
+        {/if}
+        <button
+          class="px-3 py-1 text-xs rounded bg-green-100 hover:bg-green-200 text-green-700 dark:bg-green-900 dark:hover:bg-green-800 dark:text-green-200 disabled:opacity-50"
+          onclick={runImportArchived}
+          disabled={importLoading}
+        >{importLoading ? 'DB 이관 중...' : 'DB 이관'}</button>
         <button
           class="px-3 py-1 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground"
           onclick={openDuplicatesModal}
@@ -293,9 +355,12 @@
                   {record.file_path.split(/[\\/]/).pop() ?? record.file_path}
                 </td>
                 <td class="py-2 pr-3">
-                  <span class="inline-block px-1.5 py-0.5 text-xs rounded bg-muted text-muted-foreground">
-                    {getCategoryFromPath(record.file_path)}
+                  <span class="inline-block px-1.5 py-0.5 text-xs rounded {record.category ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200' : 'bg-muted text-muted-foreground'}">
+                    {record.category ?? getCategoryFromPath(record.file_path)}
                   </span>
+                  {#if record.llm_processed_at}
+                    <span class="inline-block ml-1 px-1 py-0.5 text-xs rounded bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200" title="LLM 분석 완료">✓</span>
+                  {/if}
                 </td>
                 <td class="py-2 pr-4 text-muted-foreground text-xs whitespace-nowrap">
                   {formatDate(record.archived_at)}

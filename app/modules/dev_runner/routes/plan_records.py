@@ -1,9 +1,10 @@
 """
 Plan Records API Routes
-GET    /api/v1/plans/records         - 레코드 목록 (project, status 필터, skip/limit)
+GET    /api/v1/plans/records         - 레코드 목록 (project, status, category, tags 필터, skip/limit)
 GET    /api/v1/plans/records/{id}    - 레코드 상세 (events 포함)
 PATCH  /api/v1/plans/records/{id}/memo - 메모 업데이트 (draft/confirm/rollback)
 POST   /api/v1/plans/records/sync   - 수동 동기화 (등록된 경로 전체 스캔)
+POST   /api/v1/plans/records/import-archived - archived plan 일괄 DB 이관
 GET    /api/v1/plans/events         - 이벤트 목록 (타임라인용)
 GET    /api/v1/plans/records/by-path - file_path로 get_or_create
 """
@@ -19,7 +20,7 @@ from app.modules.dev_runner.services.plan_record_service import PlanRecordServic
 from app.modules.dev_runner.services.plan_service import plan_service as _plan_service
 from app.modules.dev_runner.schemas import (
     PlanRecordResponse, PlanRecordWithEventsResponse,
-    PlanEventResponse, MemoUpdateRequest
+    PlanEventResponse, MemoUpdateRequest, ImportArchivedResponse
 )
 
 logger = logging.getLogger(__name__)
@@ -41,12 +42,15 @@ def get_record_by_path(file_path: str, db: Session = Depends(get_db)):
 def list_records(
     project: Optional[str] = None,
     status: Optional[str] = None,
+    category: Optional[str] = None,
+    tags: Optional[str] = None,
     skip: int = 0,
     limit: int = 50,
     db: Session = Depends(get_db),
 ):
+    tags_list = [t.strip() for t in tags.split(",")] if tags else None
     svc = PlanRecordService(db)
-    return svc.list_records(project=project, status=status, skip=skip, limit=limit)
+    return svc.list_records(project=project, status=status, category=category, tags=tags_list, skip=skip, limit=limit)
 
 
 @router.get("/records/{record_id}", response_model=PlanRecordWithEventsResponse)
@@ -74,6 +78,29 @@ def update_memo(record_id: int, req: MemoUpdateRequest, db: Session = Depends(ge
     db.commit()
     db.refresh(record)
     return record
+
+
+@router.post("/records/import-archived", response_model=ImportArchivedResponse)
+def import_archived(archive_dir: Optional[str] = None, db: Session = Depends(get_db)):
+    """archived plan 파일 일괄 DB 이관"""
+    if not archive_dir:
+        # 등록된 archive 경로 자동 감지
+        registered = _plan_service.list_registered_paths()
+        archive_dirs = [r.path for r in registered if getattr(r, "path_type", "") == "archive"]
+        if not archive_dirs:
+            archive_dirs = ["docs/archive"]
+    else:
+        archive_dirs = [archive_dir]
+
+    total = {"created": 0, "updated": 0, "skipped": 0, "errors": []}
+    svc = PlanRecordService(db)
+    for d in archive_dirs:
+        result = svc.bulk_import_archived(d)
+        total["created"] += result["created"]
+        total["updated"] += result["updated"]
+        total["skipped"] += result["skipped"]
+        total["errors"].extend(result["errors"])
+    return total
 
 
 @router.post("/records/sync")

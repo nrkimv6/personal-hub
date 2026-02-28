@@ -66,6 +66,7 @@ try:
     from app.worker.video_download_worker import VideoDownloadWorker
     from app.worker.file_search_worker import FileSearchWorker
     from app.modules.git_repos.worker import GitRepoWorker
+    from app.worker.plan_archive_listener import PlanArchiveListener
 
     # 크롤러 및 워커 관련 로거들이 워커 로거와 같은 핸들러를 사용하도록 설정
     worker_handlers = logger.handlers
@@ -216,6 +217,11 @@ async def run_with_orchestrator(
             git_worker = GitRepoWorker()
             orchestrator.register_worker("git_repos", git_worker)
             logger.info("GitRepoWorker 등록됨")
+
+        # PlanArchiveListener는 항상 등록 (Redis 미연결 시 자동 비활성)
+        plan_archive_listener = PlanArchiveListener()
+        orchestrator.register_worker("plan_archive_listener", plan_archive_listener)
+        logger.info("PlanArchiveListener 등록됨")
 
         if not orchestrator.workers:
             logger.error("실행할 워커가 없습니다.")

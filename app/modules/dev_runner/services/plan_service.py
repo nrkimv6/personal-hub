@@ -904,6 +904,15 @@ class PlanService:
             except Exception as db_err:
                 logger.warning(f"plan_record DB 기록 실패 (무시): {db_err}")
 
+            # Redis pub/sub 트리거: plan:archived 채널에 아카이브 경로 발행
+            try:
+                _publish_log("plan", f"archived: {archive_path}")
+                r = _get_redis()
+                if r:
+                    r.publish("plan:archived", str(archive_path))
+            except Exception as redis_err:
+                logger.debug(f"plan:archived publish 실패 (무시): {redis_err}")
+
             return {
                 "success": True,
                 "message": "완료 처리 성공",

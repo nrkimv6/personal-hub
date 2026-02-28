@@ -22,6 +22,11 @@ class PlanRecord(Base):
     memo = Column(Text)                                          # 확정 메모
     memo_draft = Column(Text)                                    # 임시저장 메모
     archived_at = Column(DateTime)                               # 아카이브 완료 시각
+    category = Column(String)                                    # 모듈 기반 분류 (naver-booking, instagram 등)
+    tags = Column(JSON)                                          # 태그 목록 (feat, fix 등)
+    summary = Column(Text)                                       # LLM 생성 요약
+    superseded_by = Column(String)                               # 대체한 plan의 filename_hash
+    llm_processed_at = Column(DateTime)                          # LLM 분석 완료 시각
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -30,6 +35,7 @@ class PlanRecord(Base):
     __table_args__ = (
         Index("ix_plan_records_project", "project"),
         Index("ix_plan_records_status", "status"),
+        Index("ix_plan_records_category", "category"),
     )
 
     def __repr__(self):

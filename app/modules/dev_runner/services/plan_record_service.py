@@ -127,6 +127,8 @@ class PlanRecordService:
         self,
         project: Optional[str] = None,
         status: Optional[str] = None,
+        category: Optional[str] = None,
+        tags: Optional[List[str]] = None,
         skip: int = 0,
         limit: int = 50,
     ) -> List[PlanRecord]:
@@ -139,6 +141,12 @@ class PlanRecordService:
                 q = q.filter(PlanRecord.archived_at.isnot(None))
             else:
                 q = q.filter(PlanRecord.status == status)
+        if category:
+            q = q.filter(PlanRecord.category == category)
+        if tags:
+            from sqlalchemy import func
+            for tag in tags:
+                q = q.filter(PlanRecord.tags.contains(tag))
         q = q.order_by(PlanRecord.updated_at.desc())
         return q.offset(skip).limit(limit).all()
 
@@ -160,6 +168,87 @@ class PlanRecordService:
             q = q.filter(PlanEvent.created_at <= date_to)
         q = q.order_by(PlanEvent.created_at.desc())
         return q.offset(skip).limit(limit).all()
+
+    @staticmethod
+    def _extract_title_from_md(file_path: str) -> Optional[str]:
+        """파일 첫 줄 `# ` 파싱하여 title 반환"""
+        try:
+            with open(file_path, encoding="utf-8", errors="replace") as f:
+                first_line = f.readline().strip()
+            if first_line.startswith("# "):
+                return first_line[2:].strip()
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _detect_project_from_path(file_path: str) -> Optional[str]:
+        """경로에서 프로젝트명 추출 (docs/archive/{project}/... 패턴)"""
+        parts = Path(file_path).parts
+        for i, part in enumerate(parts):
+            if part == "archive" and i + 1 < len(parts):
+                return parts[i + 1]
+        return None
+
+    def bulk_import_archived(self, archive_dir: str) -> dict:
+        """archived plan 파일 일괄 DB 이관
+
+        archive_dir 하위 모든 .md 파일을 스캔하여 plan_records에 등록.
+        이미 존재하는 레코드는 category만 UPDATE.
+
+        Returns:
+            {"created": int, "updated": int, "skipped": int, "errors": list}
+        """
+        created = updated = skipped = 0
+        errors: List[str] = []
+
+        archive_path = Path(archive_dir)
+        if not archive_path.exists():
+            return {"created": 0, "updated": 0, "skipped": 0, "errors": [f"archive_dir not found: {archive_dir}"]}
+
+        md_files = list(archive_path.rglob("*.md"))
+
+        for f in md_files:
+            try:
+                file_str = str(f)
+                filename_hash = _compute_filename_hash(file_str)
+                category = self._detect_project_from_path(file_str)
+                title = self._extract_title_from_md(file_str)
+
+                existing = self.db.query(PlanRecord).filter_by(filename_hash=filename_hash).first()
+                if existing:
+                    if existing.category != category:
+                        existing.category = category
+                        existing.updated_at = datetime.now()
+                        updated += 1
+                    else:
+                        skipped += 1
+                else:
+                    project = self._detect_project_from_path(file_str)
+                    record = PlanRecord(
+                        filename_hash=filename_hash,
+                        file_path=file_str,
+                        title=title,
+                        project=project,
+                        category=category,
+                        archived_at=datetime.now(),
+                        status="archived",
+                    )
+                    self.db.add(record)
+                    self.db.flush()
+                    _add_event(self.db, record, "created", {"file_path": file_str, "source": "bulk_import"})
+                    created += 1
+            except Exception as e:
+                errors.append(f"{f}: {e}")
+                logger.warning(f"bulk_import_archived error for {f}: {e}")
+
+        try:
+            self.db.commit()
+        except Exception as e:
+            self.db.rollback()
+            errors.append(f"commit error: {e}")
+
+        return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
 
     def sync_all(self, registered_paths: List[dict]) -> dict:
         """수동 동기화: 등록된 폴더 전체 스캔 → 신규/이동/missing 감지

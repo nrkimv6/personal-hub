@@ -55,6 +55,11 @@ try:
     from app.modules.claude_worker.services.llm_service import LLMService
     logger.debug("llm_service import 완료")
 
+    from app.modules.claude_worker.services.plan_analyze_handler import (
+        save_plan_archive_result, save_requirements_sync_result
+    )
+    logger.debug("plan_analyze_handler import 완료")
+
     logger.info("모든 모듈 import 완료")
 
 except Exception as e:
@@ -1519,6 +1524,10 @@ class LLMWorker:
                     save_report_result(db, request, result)
                 elif request.caller_type == "pytest_fix":
                     save_pytest_fix_result(db, request, result)
+                elif request.caller_type == "plan_archive_analyze":
+                    save_plan_archive_result(db, request, result)
+                elif request.caller_type == "plan_requirements_sync":
+                    save_requirements_sync_result(db, request, result)
             else:
                 # JSON 파싱 실패지만 raw_response가 있는 경우
                 if "raw_response" in result and result.get("raw_response"):

@@ -24,9 +24,21 @@ export interface PlanRecord {
 	memo: string | null;
 	memo_draft: string | null;
 	archived_at: string | null;
+	category: string | null;
+	tags: string[] | null;
+	summary: string | null;
+	superseded_by: string | null;
+	llm_processed_at: string | null;
 	created_at: string;
 	updated_at: string;
 	events?: PlanEvent[];
+}
+
+export interface ImportArchivedResult {
+	created: number;
+	updated: number;
+	skipped: number;
+	errors: string[];
 }
 
 // ============================================================
@@ -70,10 +82,19 @@ export const planRecordsApi = {
 	/**
 	 * 레코드 목록 조회
 	 */
-	list: (params?: { project?: string; status?: string; skip?: number; limit?: number }) => {
+	list: (params?: {
+		project?: string;
+		status?: string;
+		category?: string;
+		tags?: string;
+		skip?: number;
+		limit?: number;
+	}) => {
 		const q = new URLSearchParams();
 		if (params?.project) q.set('project', params.project);
 		if (params?.status) q.set('status', params.status);
+		if (params?.category) q.set('category', params.category);
+		if (params?.tags) q.set('tags', params.tags);
 		if (params?.skip != null) q.set('skip', String(params.skip));
 		if (params?.limit != null) q.set('limit', String(params.limit));
 		const qs = q.toString();
@@ -108,6 +129,15 @@ export const planRecordsApi = {
 		planRecordsRequest<{ created: number; updated: number; missing: number }>('/records/sync', {
 			method: 'POST'
 		}),
+
+	/**
+	 * archived plan 일괄 DB 이관
+	 */
+	importArchived: (archiveDir?: string) =>
+		planRecordsRequest<ImportArchivedResult>(
+			`/records/import-archived${archiveDir ? '?archive_dir=' + encodeURIComponent(archiveDir) : ''}`,
+			{ method: 'POST' }
+		),
 
 	/**
 	 * 이벤트 목록 조회 (타임라인용)
