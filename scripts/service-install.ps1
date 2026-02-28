@@ -128,17 +128,9 @@ function Install-MonitorService {
     nssm set $svc.Name AppStdoutCreationDisposition 4  # Append
     nssm set $svc.Name AppStderrCreationDisposition 4  # Append
 
-    # Log rotation (10MB) — online rotation so running service also rotates
-    # 기존 서비스에 수동 적용:
-    #   nssm set MonitorPage-Public AppRotateFiles 1
-    #   nssm set MonitorPage-Public AppRotateBytes 5242880
-    #   nssm set MonitorPage-Public AppRotateOnline 1
-    #   nssm set MonitorPage-Admin  AppRotateFiles 1
-    #   nssm set MonitorPage-Admin  AppRotateBytes 5242880
-    #   nssm set MonitorPage-Admin  AppRotateOnline 1
+    # Log rotation (10MB)
     nssm set $svc.Name AppRotateFiles 1
-    nssm set $svc.Name AppRotateBytes 5242880
-    nssm set $svc.Name AppRotateOnline 1
+    nssm set $svc.Name AppRotateBytes 10485760
 
     # Set restart throttle (10 seconds delay between restarts)
     # Prevents port conflict when service restarts too quickly

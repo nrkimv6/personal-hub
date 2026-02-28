@@ -34,14 +34,7 @@ $Patterns = @(
     "cloudflared_*.log",
     "cloudflared_err-*.log",
     "cloudflared-*.log",
-    "cloudflared_err_*.log",
-    "api_death_*.log",
-    "service_MonitorPage*.log",
-    "test_results*.log",
-    "test_std*.log",
-    "llm_worker_*.log",
-    "crawl_worker_*.log",
-    "dev_runner_command_listener_*.log"
+    "cloudflared_err_*.log"
 )
 
 $CutoffDate = (Get-Date).AddDays(-$RetentionDays)
