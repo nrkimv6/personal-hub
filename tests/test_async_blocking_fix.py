@@ -12,30 +12,23 @@ import logging
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import redis
-import redis.asyncio as aioredis
-
-from app.modules.dev_runner.services.executor_service import (
-    ExecutorService,
-    RUNNER_KEY_PREFIX,
-    ACTIVE_RUNNERS_KEY,
-    RECENT_RUNNERS_KEY,
-    RESULTS_KEY,
-)
-
 
 # ---------------------------------------------------------------------------
-# Fixture
+# Fixture — Redis 연결 없이 ExecutorService 인스턴스 생성
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
 def service():
     """async_redis를 AsyncMock으로 패치한 ExecutorService 인스턴스 (Redis 연결 없이)"""
-    svc = ExecutorService.__new__(ExecutorService)
-    svc.redis_client = MagicMock()
-    svc.async_redis = AsyncMock()
-    return svc
+    with (
+        patch("redis.Redis"),
+        patch("redis.asyncio.Redis"),
+    ):
+        from app.modules.dev_runner.services.executor_service import ExecutorService
+        svc = ExecutorService()
+        svc.async_redis = AsyncMock()
+        return svc
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +70,6 @@ async def test_send_force_stop_timeout(service, caplog):
 async def test_reset_running_state_async(service):
     """R: reset_running_state가 async로 정상 동작하고 _force_cleanup_state 호출"""
     service.async_redis.brpop.return_value = ("key", json.dumps({"message": "ok"}))
-    service.redis_client.smembers.return_value = set()
 
     with patch.object(service, "_force_cleanup_state") as mock_cleanup:
         result = await service.reset_running_state()
@@ -95,6 +87,8 @@ async def test_reset_running_state_async(service):
 @pytest.mark.asyncio
 async def test_get_all_runners_async(service):
     """R: get_all_runners가 async_redis로 runner 목록 반환"""
+    from app.modules.dev_runner.services.executor_service import RUNNER_KEY_PREFIX
+
     service.async_redis.zremrangebyscore.return_value = 0
     service.async_redis.smembers.return_value = {"runner1"}
     service.async_redis.zrange.return_value = []
@@ -135,7 +129,8 @@ async def test_get_all_runners_empty(service):
 @pytest.mark.asyncio
 async def test_get_all_runners_redis_down(service):
     """E: Redis 장애 시 빈 리스트 반환"""
-    service.async_redis.zremrangebyscore.side_effect = redis.ConnectionError("Connection refused")
+    import redis as sync_redis
+    service.async_redis.zremrangebyscore.side_effect = sync_redis.ConnectionError("Connection refused")
 
     result = await service.get_all_runners()
 
@@ -164,7 +159,8 @@ async def test_get_process_status_async(service):
 @pytest.mark.asyncio
 async def test_get_process_status_redis_down(service):
     """E: Redis 장애 시 redis_connected=False 반환"""
-    service.async_redis.ping.side_effect = redis.ConnectionError("Connection refused")
+    import redis as sync_redis
+    service.async_redis.ping.side_effect = sync_redis.ConnectionError("Connection refused")
 
     result = await service.get_process_status()
 
@@ -199,7 +195,11 @@ async def test_dismiss_runner_async(service):
 
 def test_restart_listener_uses_to_thread():
     """R: runner.py의 restart_listener가 async def + asyncio.to_thread 사용"""
-    from app.modules.dev_runner.routes import runner as runner_module
+    with (
+        patch("redis.Redis"),
+        patch("redis.asyncio.Redis"),
+    ):
+        from app.modules.dev_runner.routes import runner as runner_module
 
     handler = runner_module.restart_listener
 
@@ -218,7 +218,9 @@ def test_redis_socket_timeout_set():
     """Co: 동기 Redis 클라이언트에 socket_timeout=10 설정 확인"""
     with patch("redis.Redis") as mock_redis_cls, patch("redis.asyncio.Redis"):
         mock_redis_cls.return_value = MagicMock()
-        ExecutorService()
+        with patch("redis.Redis", mock_redis_cls):
+            from app.modules.dev_runner.services.executor_service import ExecutorService
+            ExecutorService()
         call_kwargs = mock_redis_cls.call_args[1]
         assert call_kwargs.get("socket_timeout") == 10, (
             f"socket_timeout should be 10, got {call_kwargs.get('socket_timeout')}"
