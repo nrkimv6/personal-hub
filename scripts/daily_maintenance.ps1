@@ -50,6 +50,43 @@ Write-Log "============================================"
 Write-Log "일별 유지보수 시작"
 Write-Log "============================================"
 
+# cloudflared_err.log 날짜별 분리 (오늘 로그만 원본 유지, 나머지 날짜별 파일 생성)
+$SplitCloudflaredScript = Join-Path $PSScriptRoot "split-cloudflared-log.ps1"
+if (Test-Path $SplitCloudflaredScript) {
+    Write-Log "cloudflared 로그 분리 실행 중..."
+    try {
+        if ($DryRun) {
+            & $SplitCloudflaredScript -DryRun
+        } else {
+            & $SplitCloudflaredScript
+        }
+        Write-Log "cloudflared 로그 분리 완료"
+    } catch {
+        Write-Log "cloudflared 로그 분리 실패 (비치명적): $($_.Exception.Message)" "WARN"
+    }
+} else {
+    Write-Log "split-cloudflared-log.ps1 미발견 — cloudflared 로그 분리 건너뜀" "WARN"
+}
+
+# 로그 정리 (Task Scheduler LogCleanup 미등록 시 fallback)
+# Task Scheduler에 LogCleanup 태스크가 등록되어 있으면 이 호출은 중복이지만 무해함
+$CleanupScript = Join-Path $PSScriptRoot "cleanup-logs.ps1"
+if (Test-Path $CleanupScript) {
+    Write-Log "로그 파일 정리 실행 중..."
+    try {
+        if ($DryRun) {
+            & $CleanupScript -DryRun
+        } else {
+            & $CleanupScript
+        }
+        Write-Log "로그 파일 정리 완료"
+    } catch {
+        Write-Log "로그 파일 정리 실패 (비치명적): $($_.Exception.Message)" "WARN"
+    }
+} else {
+    Write-Log "cleanup-logs.ps1 미발견 — 로그 정리 건너뜀" "WARN"
+}
+
 # API 서버 상태 확인
 $ApiUrl = "http://localhost:8000/api/v1/system/health"
 try {
