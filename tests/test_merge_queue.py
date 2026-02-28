@@ -445,3 +445,74 @@ class TestCleanupProcessState:
              patch.object(mod, "WORKTREE_BASE_DIR", Path("/tmp/worktrees")):
             fn("runner_none", r)
             mock_wm.remove.assert_called_once()
+
+
+# ══════════════════════════════════════════════
+# 6. retry_merge() plan_file 전달 TC
+# ══════════════════════════════════════════════
+
+class TestRetryMergePlanFile:
+    """retry_merge() — plan_file Redis 조회 후 wf.run() 전달 검증"""
+
+    def _import_fn(self):
+        mod = _load_listener_module()
+        return mod.retry_merge
+
+    def _run_with_mock_wf(self, fn, runner_id, r, expected_plan_file):
+        """retry_merge()의 로컬 import MergeWorkflow를 sys.modules 패치로 mock."""
+        mock_wf_cls = MagicMock()
+        mock_wf_instance = MagicMock()
+        mock_wf_cls.return_value = mock_wf_instance
+        mock_result = MagicMock()
+        mock_result.merged = True
+        mock_result.conflict = False
+        mock_result.message = "성공"
+        mock_wf_instance.run.return_value = mock_result
+
+        mod = _load_listener_module()
+        mock_merge_workflow_mod = MagicMock()
+        mock_merge_workflow_mod.MergeWorkflow = mock_wf_cls
+
+        with patch.dict(sys.modules, {"merge_workflow": mock_merge_workflow_mod}), \
+             patch.object(mod, "PROJECT_ROOT", Path("/proj")), \
+             patch.object(mod, "PLAN_RUNNER_PYTHON", Path("/python")), \
+             patch.object(mod, "WORKTREE_BASE_DIR", Path("/tmp/worktrees")):
+            fn(runner_id, r)
+
+        mock_wf_instance.run.assert_called_once()
+        call_kwargs = mock_wf_instance.run.call_args
+        passed = call_kwargs.kwargs.get("plan_file", call_kwargs.args[3] if len(call_kwargs.args) >= 4 else "NOT_FOUND")
+        return passed
+
+    def test_retry_merge_right_passes_plan_file(self):
+        """R: Redis에 plan_file="2026-02-27_foo.md" 설정 → wf.run(plan_file="2026-02-27_foo.md") 전달."""
+        fn = self._import_fn()
+        runner_id = "rid_foo"
+        r = make_redis(get_map={
+            f"plan-runner:runners:{runner_id}:worktree_path": "/tmp/wt/rid_foo",
+            f"plan-runner:runners:{runner_id}:plan_file": "2026-02-27_foo.md",
+        })
+        passed = self._run_with_mock_wf(fn, runner_id, r, "2026-02-27_foo.md")
+        assert passed == "2026-02-27_foo.md"
+
+    def test_retry_merge_boundary_plan_file_all(self):
+        """B: Redis plan_file="ALL" → wf.run(plan_file=None) 전달 (parallel 모드 placeholder)."""
+        fn = self._import_fn()
+        runner_id = "rid_all"
+        r = make_redis(get_map={
+            f"plan-runner:runners:{runner_id}:worktree_path": "/tmp/wt/rid_all",
+            f"plan-runner:runners:{runner_id}:plan_file": "ALL",
+        })
+        passed = self._run_with_mock_wf(fn, runner_id, r, None)
+        assert passed is None
+
+    def test_retry_merge_boundary_no_plan_file_key(self):
+        """B: Redis에 plan_file 키 없음(None 반환) → wf.run(plan_file=None) 전달."""
+        fn = self._import_fn()
+        runner_id = "rid_nokey"
+        r = make_redis(get_map={
+            f"plan-runner:runners:{runner_id}:worktree_path": "/tmp/wt/rid_nokey",
+            # plan_file 키 없음
+        })
+        passed = self._run_with_mock_wf(fn, runner_id, r, None)
+        assert passed is None
