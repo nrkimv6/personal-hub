@@ -206,6 +206,8 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
         except Exception as e:
             logger.error(f"[{self.name}] 스케줄 디스패치 오류: {e}", exc_info=True)
+        finally:
+            db.close()
 
     async def _check_plan_archive_schedule(self):
         """02:10 ± 5분 안전망 — 미처리 plan archive LLM 큐 등록"""
