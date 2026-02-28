@@ -33,7 +33,7 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
     # WAL 모드: 읽기/쓰기 동시 접근 허용
     cursor.execute("PRAGMA journal_mode=WAL")
     # busy_timeout: 잠금 시 30초 대기 (밀리초)
-    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.execute("PRAGMA busy_timeout=30000")
     # synchronous=NORMAL: 성능과 안정성 균형
     cursor.execute("PRAGMA synchronous=NORMAL")
     # foreign_keys: 외래키 제약 활성화
