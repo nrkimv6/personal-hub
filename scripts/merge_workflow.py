@@ -40,7 +40,8 @@ class MergeWorkflow:
         self.python_path = python_path or "python"
 
     def _publish_log(self, runner_id: str, tag: str, message: str) -> None:
-        """Redis pub/sub으로 머지 진행 로그를 SSE 스트림에 전달한다."""
+        """Redis pub/sub으로 머지 진행 로그를 SSE 스트림에 전달한다. 파일 로그에도 동시 기록."""
+        logger.info(f"[MERGE][{tag}] {message}")
         try:
             self.redis_client.publish(
                 f"plan-runner:merge-log:{runner_id}",
@@ -65,7 +66,7 @@ class MergeWorkflow:
         except Exception:
             pass
 
-    def run(self, runner_id: str, worktree_path: Path, base_dir: Path) -> WorkflowResult:
+    def run(self, runner_id: str, worktree_path: Path, base_dir: Path, plan_file: str = None) -> WorkflowResult:
         from worktree_manager import WorktreeManager
 
         # 1. 변경사항 커밋
@@ -80,7 +81,7 @@ class MergeWorkflow:
         # 2. 머지
         self._update_queue_status(runner_id, "merging")
         self._publish_log(runner_id, "MERGE", "main 브랜치에 머지 중...")
-        merge_result = WorktreeManager.merge_to_main(runner_id, base_dir, self.project_root)
+        merge_result = WorktreeManager.merge_to_main(runner_id, base_dir, self.project_root, plan_file=plan_file)
         if not merge_result.success:
             self._publish_log(runner_id, "ERROR", f"머지 충돌: {merge_result.message[:200]}")
             self._update_queue_status(runner_id, "failed")
@@ -122,7 +123,7 @@ class MergeWorkflow:
         self._publish_log(runner_id, "TEST", "테스트 통과")
 
         # 4. worktree 정리
-        WorktreeManager.remove(runner_id, base_dir)
+        WorktreeManager.remove(runner_id, base_dir, plan_file=plan_file)
         self._update_queue_status(runner_id, "done")
         self._publish_log(runner_id, "DONE", "worktree 정리 완료")
         self._publish_log(runner_id, "DONE", "__MERGE_COMPLETED__")

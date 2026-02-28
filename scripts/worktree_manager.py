@@ -110,9 +110,13 @@ class WorktreeManager:
             return True  # 멱등 처리
 
     @staticmethod
-    def merge_to_main(runner_id: str, base_dir: Path, project_root: Path) -> MergeResult:
+    def merge_to_main(runner_id: str, base_dir: Path, project_root: Path, plan_file: Optional[str] = None) -> MergeResult:
         """worktree 변경사항을 main 브랜치에 머지"""
-        branch = f"runner/{runner_id}"
+        if plan_file:
+            stem = Path(plan_file).stem
+            branch = f"plan/{stem}"
+        else:
+            branch = f"runner/{runner_id}"
         try:
             # main 체크아웃
             subprocess.run(["git", "checkout", "main"], capture_output=True, cwd=str(project_root))

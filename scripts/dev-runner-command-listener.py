@@ -828,9 +828,13 @@ def retry_merge(runner_id: str, redis_client: redis.Redis) -> Dict:
     try:
         from merge_workflow import MergeWorkflow
         worktree_path = Path(worktree_path_str)
+        plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+        if plan_file == "ALL":
+            plan_file = None
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "pending_merge")
         wf = MergeWorkflow(PROJECT_ROOT, redis_client, str(PLAN_RUNNER_PYTHON))
-        result = wf.run(runner_id, worktree_path, WORKTREE_BASE_DIR)
+        result = wf.run(runner_id, worktree_path, WORKTREE_BASE_DIR, plan_file=plan_file)
+        logger.info(f"[retry_merge] 결과: merged={result.merged}, conflict={result.conflict}, message={result.message[:200]}")
         return {"success": result.merged, "message": result.message, "conflict": result.conflict}
     except Exception as e:
         logger.error(f"[retry_merge] 실패: {e}")
