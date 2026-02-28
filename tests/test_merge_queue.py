@@ -516,3 +516,103 @@ class TestRetryMergePlanFile:
         })
         passed = self._run_with_mock_wf(fn, runner_id, r, None)
         assert passed is None
+
+
+# ══════════════════════════════════════════════
+# 7. _launch_plan_runner_process() branch 저장 + _enqueue_merge_request() branch 사용 TC
+# ══════════════════════════════════════════════
+
+class TestLaunchPlanRunnerBranchSave:
+    """_launch_plan_runner_process() — branch 키를 Redis에 저장하는지 검증 (Phase 4 수정)"""
+
+    def test_launch_plan_runner_saves_branch_to_redis_with_plan_file(self):
+        """T4-37: branch="plan/2026-02-27_foo" 전달 시 Redis에 ...:{runner_id}:branch 저장."""
+        mod = _load_listener_module()
+        fn = mod._launch_plan_runner_process
+
+        runner_id = "launch_rid_1"
+        r = MagicMock()
+        r.set = MagicMock()
+
+        mock_process = MagicMock()
+        mock_process.pid = 12345
+
+        with patch("subprocess.Popen", return_value=mock_process), \
+             patch("threading.Thread"), \
+             patch.object(mod, "RUNNER_KEY_PREFIX", "plan-runner:runners"), \
+             patch.object(mod, "ACTIVE_RUNNERS_KEY", "plan-runner:active"), \
+             patch.object(mod, "PLAN_RUNNER_PYTHON", Path("/python")), \
+             patch.object(mod, "PLAN_RUNNER_MODULE_PATH", Path("/plan-runner")), \
+             patch.object(mod, "LOG_DIR", Path("/tmp/logs")), \
+             patch("builtins.open", MagicMock()):
+            fn(
+                command={},
+                redis_client=r,
+                runner_id=runner_id,
+                worktree_path=Path("/tmp/wt/launch_rid_1"),
+                plan_file="2026-02-27_foo.md",
+                engine="claude",
+                branch="plan/2026-02-27_foo",
+            )
+
+        set_calls = {call[0][0]: call[0][1] for call in r.set.call_args_list if len(call[0]) >= 2}
+        branch_key = f"plan-runner:runners:{runner_id}:branch"
+        assert branch_key in set_calls, f"branch 키 미저장. 저장된 키: {list(set_calls.keys())}"
+        assert set_calls[branch_key] == "plan/2026-02-27_foo"
+
+    def test_launch_plan_runner_saves_branch_runner_fallback(self):
+        """T4-38: branch="" 전달(parallel 모드) 시 Redis에 runner/{runner_id} 저장."""
+        mod = _load_listener_module()
+        fn = mod._launch_plan_runner_process
+
+        runner_id = "launch_rid_2"
+        r = MagicMock()
+        r.set = MagicMock()
+
+        mock_process = MagicMock()
+        mock_process.pid = 99999
+
+        with patch("subprocess.Popen", return_value=mock_process), \
+             patch("threading.Thread"), \
+             patch.object(mod, "RUNNER_KEY_PREFIX", "plan-runner:runners"), \
+             patch.object(mod, "ACTIVE_RUNNERS_KEY", "plan-runner:active"), \
+             patch.object(mod, "PLAN_RUNNER_PYTHON", Path("/python")), \
+             patch.object(mod, "PLAN_RUNNER_MODULE_PATH", Path("/plan-runner")), \
+             patch.object(mod, "LOG_DIR", Path("/tmp/logs")), \
+             patch("builtins.open", MagicMock()):
+            fn(
+                command={"parallel": True},
+                redis_client=r,
+                runner_id=runner_id,
+                worktree_path=Path("/tmp/wt/launch_rid_2"),
+                plan_file=None,
+                engine="claude",
+                branch="",
+            )
+
+        set_calls = {call[0][0]: call[0][1] for call in r.set.call_args_list if len(call[0]) >= 2}
+        branch_key = f"plan-runner:runners:{runner_id}:branch"
+        assert branch_key in set_calls, f"branch 키 미저장"
+        assert set_calls[branch_key] == f"runner/{runner_id}"
+
+
+class TestEnqueueMergeRequestBranchFromRedis:
+    """_enqueue_merge_request() — Redis의 branch 키를 올바르게 사용하는지 검증"""
+
+    def test_enqueue_uses_branch_from_redis_when_set(self):
+        """T4-39: Redis에 branch="plan/2026-02-27_foo" 저장 시 큐 항목의 branch 필드가 해당 값."""
+        mod = _load_listener_module()
+        fn = mod._enqueue_merge_request
+
+        runner_id = "eq_rid_1"
+        r = make_redis(get_map={
+            f"plan-runner:runners:{runner_id}:worktree_path": "/tmp/wt/eq_rid_1",
+            f"plan-runner:runners:{runner_id}:plan_file": "2026-02-27_foo.md",
+            f"plan-runner:runners:{runner_id}:branch": "plan/2026-02-27_foo",
+        })
+
+        fn(runner_id, r)
+
+        raw = r.lpush.call_args[0][1]
+        item = json.loads(raw)
+        assert item["branch"] == "plan/2026-02-27_foo", f"branch 불일치: {item['branch']}"

@@ -630,6 +630,7 @@ def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner
         redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid", process.pid)
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file or "ALL")
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", branch or f"runner/{runner_id}")
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", datetime.now().isoformat())
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine", command.get("engine", "claude"))
