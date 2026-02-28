@@ -653,7 +653,7 @@ function Start-CombinedLogTail {
         "CRAWL-WD"    = @("crawl_watchdog_*.log")
         "CMD-WD"      = @("command_listener_watchdog_*.log")
         "API-WD"      = @("api_watchdog_*.log")
-        "DEV-RUNNER"  = @("dev_runner_command_listener*.log", "merge-orchestrator.log")
+        "DEV-RUNNER"  = @("dev_runner_command_listener*.log")
         "TUNNEL"      = @("cloudflared_err_*.log", "cloudflared_err-*.log", "cloudflared_*.log")
     }
 
