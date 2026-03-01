@@ -12,7 +12,7 @@ API(Session 0)에서 Redis 큐에 적재된 파일 검색 요청을 처리합니
     - Redis 큐(file_search:requests)에서 검색 요청 수신
     - ripgrep / Everything 실행 → 결과를 DB에 저장
     - Redis 큐(file_search:open)에서 파일 열기 요청 처리
-    - 30초마다 도구 상태 체크 → file_search_status 테이블 캐싱
+    - 도구 상태 체크: 워커 시작 시 1회 + 검색 요청 시 온디맨드 (30초 경과 시)
     - Redis 미연결 시 DB 폴링 fallback (5초 간격)
     - 시작 시 stale 요청(10분 이상 pending/processing) → failed 처리
 
@@ -100,8 +100,10 @@ class FileSearchWorker(BaseWorker):
         return 0.1 if self.use_redis else 1.0
 
     async def _initialize(self):
-        """워커 초기화 — stale 요청 정리."""
+        """워커 초기화 — stale 요청 정리 + 도구 상태 1회 체크."""
         await self._cleanup_stale_requests()
+        await self._safe_execute("check_tool_status", self._check_tool_status)
+        self._last_status_check = time.time()
 
     async def _main_loop_iteration(self):
         """메인 루프 한 사이클.
@@ -109,7 +111,6 @@ class FileSearchWorker(BaseWorker):
         1. Redis 초기화 (최초 1회)
         2. 검색 요청 처리 (Redis 또는 DB 폴링)
         3. 파일 열기 요청 처리
-        4. 도구 상태 체크 (30초 간격)
         """
         # Redis 초기화 (첫 번째 호출 시)
         await self._setup_redis()
@@ -124,12 +125,6 @@ class FileSearchWorker(BaseWorker):
             if now - self._last_db_poll >= DB_POLL_INTERVAL:
                 await self._safe_execute("process_db_pending", self._process_db_pending)
                 self._last_db_poll = now
-
-        # 도구 상태 체크 (30초 간격)
-        now = time.time()
-        if now - self._last_status_check >= STATUS_CHECK_INTERVAL:
-            await self._safe_execute("check_tool_status", self._check_tool_status)
-            self._last_status_check = now
 
     # ========== Redis 큐 처리 ==========
 
@@ -214,12 +209,20 @@ class FileSearchWorker(BaseWorker):
         DB status를 processing으로 변경 → SearchService.search() 실행 →
         결과를 result_json에 저장 → status=completed 또는 failed.
 
+        도구 상태가 30초 이상 지났으면 체크 후 갱신.
+
         Args:
             req: FileSearchRequest DB 모델 인스턴스
             db: DB 세션
         """
         from app.modules.file_search.schemas import SearchRequest
         from app.modules.file_search.services.search_service import SearchService
+
+        # 온디맨드 도구 상태 체크 (마지막 체크로부터 STATUS_CHECK_INTERVAL 경과 시)
+        now = time.time()
+        if now - self._last_status_check >= STATUS_CHECK_INTERVAL:
+            await self._safe_execute("check_tool_status", self._check_tool_status)
+            self._last_status_check = time.time()
 
         logger.info(f"[{self.name}] 검색 시작: search_id={req.search_id}")
 
