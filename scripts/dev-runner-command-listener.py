@@ -82,6 +82,7 @@ _running_processes: dict = {}
 _running_log_files: dict = {}
 _stream_threads: dict = {}
 _merge_orchestrator_process: Optional[subprocess.Popen] = None
+_merge_orchestrator_log_path: Optional[Path] = None
 
 
 def _is_pid_alive(pid: int) -> bool:
@@ -845,7 +846,7 @@ def cleanup_worktree(runner_id: str, redis_client: redis.Redis) -> Dict:
 
 def start_merge_orchestrator(redis_client: redis.Redis) -> Dict:
     """plan-runner merge-orchestrator 프로세스 시작"""
-    global _merge_orchestrator_process
+    global _merge_orchestrator_process, _merge_orchestrator_log_path
     if _merge_orchestrator_process and _merge_orchestrator_process.poll() is None:
         return {"success": False, "message": f"이미 실행 중 (PID: {_merge_orchestrator_process.pid})"}
 
@@ -855,17 +856,41 @@ def start_merge_orchestrator(redis_client: redis.Redis) -> Dict:
         LOGS_DIR.mkdir(parents=True, exist_ok=True)
         from datetime import datetime as _dt
         _ts = _dt.now().strftime('%Y%m%d_%H%M%S')
-        log_file = open(str(LOGS_DIR / f"merge-orchestrator_{_ts}.log"), "w", encoding="utf-8")
+        log_path = LOGS_DIR / f"merge-orchestrator_{_ts}.log"
+        log_file = open(str(log_path), "w", encoding="utf-8")
+        _merge_orchestrator_log_path = log_path
         import os as _os
         env = _os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONUTF8"] = "1"
+        env["PYTHONUNBUFFERED"] = "1"
         _merge_orchestrator_process = subprocess.Popen(
             cmd, stdout=log_file, stderr=log_file,
             cwd=str(PLAN_RUNNER_MODULE_PATH), env=env
         )
-        logger.info(f"Merge Orchestrator 시작 (PID: {_merge_orchestrator_process.pid})")
-        return {"success": True, "message": f"Orchestrator 시작 (PID: {_merge_orchestrator_process.pid})"}
+        pid = _merge_orchestrator_process.pid
+        logger.info(f"Merge Orchestrator 시작 (PID: {pid}, log: {log_path})")
+
+        # 2초 대기 후 생존 확인
+        time.sleep(2)
+        rc = _merge_orchestrator_process.poll()
+        if rc is not None:
+            # 즉시 종료됨 — 로그 파일 내용 읽어서 원인 보고
+            log_file.close()
+            try:
+                content = log_path.read_text(encoding="utf-8").strip()
+            except Exception:
+                content = "(로그 파일 읽기 실패)"
+            log_tail = content[-500:] if len(content) > 500 else content
+            logger.error(f"[MergeOrch] 즉시 종료 (PID: {pid}, exit code: {rc})")
+            if log_tail:
+                logger.error(f"[MergeOrch] 로그 내용:\n{log_tail}")
+            else:
+                logger.error("[MergeOrch] 로그 파일 비어있음 — 프로세스 시작 자체 실패")
+            _merge_orchestrator_process = None
+            return {"success": False, "message": f"Orchestrator 즉시 종료 (exit code: {rc}): {log_tail[:200]}"}
+
+        return {"success": True, "message": f"Orchestrator 시작 (PID: {pid})"}
     except Exception as e:
         logger.error(f"Merge Orchestrator 시작 실패: {e}")
         return {"success": False, "message": str(e)}
@@ -995,6 +1020,20 @@ def main():
                             # 프로세스가 종료되었는데 전역변수가 남아있는 경우 즉시 cleanup
                             logger.warning(f"heartbeat: 프로세스 종료 감지 (runner_id: {rid}, exit code: {proc.returncode}), 상태 정리")
                             _cleanup_process_state(rid, r)
+                    # Orchestrator health check
+                    if _merge_orchestrator_process and _merge_orchestrator_process.poll() is not None:
+                        rc = _merge_orchestrator_process.returncode
+                        logger.warning(f"[MergeOrch] 비정상 종료 감지 (exit code: {rc})")
+                        if _merge_orchestrator_log_path and _merge_orchestrator_log_path.exists():
+                            try:
+                                lines = _merge_orchestrator_log_path.read_text(encoding="utf-8").strip().splitlines()
+                                tail = lines[-5:] if len(lines) > 5 else lines
+                                if tail:
+                                    logger.warning(f"[MergeOrch] 마지막 로그:\n" + "\n".join(tail))
+                            except Exception:
+                                pass
+                        _merge_orchestrator_process = None
+
                     last_heartbeat = now
 
                 result = r.brpop(COMMANDS_KEY, timeout=HEARTBEAT_INTERVAL)
