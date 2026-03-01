@@ -88,5 +88,3 @@ function Send-TelegramAlert {
     }
 }
 
-# Export function for use in other scripts
-Export-ModuleMember -Function Send-TelegramAlert, Get-TelegramConfig -ErrorAction SilentlyContinue
