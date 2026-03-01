@@ -82,6 +82,7 @@ _running_processes: dict = {}
 _running_log_files: dict = {}
 _stream_threads: dict = {}
 _merge_orchestrator_process: Optional[subprocess.Popen] = None
+_merge_orchestrator_log_file = None
 
 
 def _is_pid_alive(pid: int) -> bool:
@@ -845,15 +846,18 @@ def cleanup_worktree(runner_id: str, redis_client: redis.Redis) -> Dict:
 
 def start_merge_orchestrator(redis_client: redis.Redis) -> Dict:
     """plan-runner merge-orchestrator 프로세스 시작"""
-    global _merge_orchestrator_process
+    global _merge_orchestrator_process, _merge_orchestrator_log_file
     if _merge_orchestrator_process and _merge_orchestrator_process.poll() is None:
         return {"success": False, "message": f"이미 실행 중 (PID: {_merge_orchestrator_process.pid})"}
 
     try:
         cmd = [str(PLAN_RUNNER_PYTHON), "-m", "plan_runner", "merge-orchestrator"]
-        LOGS_DIR = PROJECT_ROOT / "logs" / "dev"
+        LOGS_DIR = PROJECT_ROOT / "logs" / "admin"
         LOGS_DIR.mkdir(parents=True, exist_ok=True)
-        log_file = open(str(LOGS_DIR / "merge-orchestrator.log"), "a", encoding="utf-8")
+        from datetime import datetime as _dt
+        _ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        log_file = open(str(LOGS_DIR / f"merge-orchestrator_{_ts}.log"), "w", encoding="utf-8")
+        _merge_orchestrator_log_file = log_file
         import os as _os
         env = _os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
@@ -871,7 +875,7 @@ def start_merge_orchestrator(redis_client: redis.Redis) -> Dict:
 
 def stop_merge_orchestrator(redis_client: redis.Redis) -> Dict:
     """plan-runner merge-orchestrator 프로세스 종료"""
-    global _merge_orchestrator_process
+    global _merge_orchestrator_process, _merge_orchestrator_log_file
     if not _merge_orchestrator_process or _merge_orchestrator_process.poll() is not None:
         return {"success": False, "message": "Orchestrator가 실행 중이 아님"}
     try:
@@ -879,6 +883,12 @@ def stop_merge_orchestrator(redis_client: redis.Redis) -> Dict:
         _merge_orchestrator_process.wait(timeout=5)
         logger.info("Merge Orchestrator 종료")
         _merge_orchestrator_process = None
+        if _merge_orchestrator_log_file:
+            try:
+                _merge_orchestrator_log_file.close()
+            except Exception:
+                pass
+            _merge_orchestrator_log_file = None
         return {"success": True, "message": "Orchestrator 종료"}
     except Exception as e:
         logger.error(f"Merge Orchestrator 종료 실패: {e}")
