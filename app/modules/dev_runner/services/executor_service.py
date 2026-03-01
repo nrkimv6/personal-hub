@@ -197,6 +197,7 @@ class ExecutorService:
             if result is None:
                 # cleanup
                 await self.async_redis.delete(result_key)
+                self._force_cleanup_state(runner_id)
                 raise HTTPException(
                     status_code=504,
                     detail="Command timeout - listener may not be responding"
