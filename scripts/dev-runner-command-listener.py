@@ -102,31 +102,6 @@ def _is_pid_alive(pid: int) -> bool:
         return False
 
 
-def _enqueue_merge_request(runner_id: str, redis_client: redis.Redis) -> None:
-    """plan-runner 성공 후 MergeQueue에 머지 요청을 추가한다."""
-    try:
-        worktree_path = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
-        plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
-        branch = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch") or f"runner/{runner_id}"
-
-        if plan_file == "ALL":
-            plan_file = None
-
-        item = {
-            "runner_id": runner_id,
-            "branch": branch,
-            "worktree_path": worktree_path,
-            "plan_file": plan_file,
-            "project": PROJECT_ROOT.name,
-            "timestamp": datetime.now().isoformat(),
-            "status": "pending",
-        }
-        redis_client.lpush("plan-runner:merge-queue", json.dumps(item))
-        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
-        logger.info(f"[MergeQueue] 머지 요청 추가 (runner_id: {runner_id}, branch: {branch})")
-    except Exception as e:
-        logger.error(f"[MergeQueue] 머지 요청 추가 실패 (runner_id: {runner_id}): {e}")
-
 
 def _cleanup_process_state(runner_id: str, redis_client: redis.Redis):
     """전역 프로세스 변수 + Redis 상태 정리 (per-runner)"""
@@ -417,10 +392,8 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
             pass
         logger.info(f"Output streaming thread finished (exit code: {process.returncode})")
 
-        if process.returncode == 0 and runner_id:
-            worktree_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
-            if worktree_path_str:
-                _enqueue_merge_request(runner_id, redis_client)
+        # 이중 큐잉 방지: runner 내부 _publish_merge_request()가 이미 큐잉하므로
+        # command-listener에서는 큐잉하지 않음
 
         _cleanup_process_state(runner_id, redis_client)
 
