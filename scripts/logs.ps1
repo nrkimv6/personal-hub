@@ -219,11 +219,20 @@ if ($Target -eq "list") {
 function Get-LatestLogFileMultiPattern {
     param([string[]]$Prefixes)
 
+    # Admin 모드: base logs/ 디렉토리도 탐색 (워커들이 logs/에 직접 기록)
+    $searchDirs = @($LogDir)
+    if ($Admin) {
+        $baseLogDir = Join-Path $ProjectRoot "logs"
+        if ($baseLogDir -ne $LogDir) { $searchDirs += $baseLogDir }
+    }
+
     $allCandidates = @()
-    foreach ($prefix in $Prefixes) {
-        $pattern = Join-Path $LogDir "$prefix*.log"
-        $found = Get-ChildItem $pattern -ErrorAction SilentlyContinue
-        if ($found) { $allCandidates += $found }
+    foreach ($dir in $searchDirs) {
+        foreach ($prefix in $Prefixes) {
+            $pattern = Join-Path $dir "$prefix*.log"
+            $found = Get-ChildItem $pattern -ErrorAction SilentlyContinue
+            if ($found) { $allCandidates += $found }
+        }
     }
     $latest = $allCandidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($latest) { return $latest.FullName }
@@ -657,7 +666,7 @@ function Start-CombinedLogTail {
         "TUNNEL"      = @("cloudflared_err_*.log", "cloudflared_err-*.log", "cloudflared_*.log")
     }
 
-    # Admin 전용 소스 — Production에서 제외 (Worker는 항상 APP_MODE=development로 실행되어 logs/admin/에 기록됨)
+    # Admin 전용 소스 — Production에서 제외 (Worker 로그는 logs/ 또는 logs/admin/에 기록됨)
     $devOnlySources = @("WORKER", "IG-WORKER", "LLM", "VIDEO-DL", "CRAWL",
                          "IG-WD", "CLAUDE-WD", "VIDEO-DL-WD", "CRAWL-WD", "CMD-WD", "API-WD",
                          "WATCHDOG", "DEV-RUNNER", "PLAN-RUNNER", "PR-STREAM")
