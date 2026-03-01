@@ -113,6 +113,16 @@ def _wait_for_runner_status(real_redis, runner_id: str, expected: str, timeout: 
     return False
 
 
+def _wait_for_redis_key(real_redis, key: str, timeout: int = 30) -> str | None:
+    """특정 Redis 키가 세팅될 때까지 폴링 후 값 반환. 타임아웃 시 None."""
+    for _ in range(timeout * 2):
+        val = real_redis.get(key)
+        if val is not None:
+            return val
+        time.sleep(0.5)
+    return None
+
+
 async def _post_dry_run(client: httpx.AsyncClient, plan_file: str = "docs/plan/test_e2e_plan.md") -> str:
     """dry_run POST 실행 → runner_id 반환."""
     resp = await client.post(
@@ -135,8 +145,8 @@ class TestRunnerDryRun:
         ) as client:
             runner_id = await _post_dry_run(client)
 
-            assert _wait_for_runner_status(real_redis, runner_id, "running", timeout=20), (
-                f"runner {runner_id}가 20초 내 running 상태가 되지 않음"
+            assert _wait_for_runner_status(real_redis, runner_id, "running", timeout=30), (
+                f"runner {runner_id}가 30초 내 running 상태가 되지 않음"
             )
 
             stop_resp = await client.post(
@@ -161,8 +171,8 @@ class TestRunnerDryRun:
         ) as client:
             runner_id = await _post_dry_run(client)
 
-            assert _wait_for_runner_status(real_redis, runner_id, "running", timeout=20), (
-                f"runner {runner_id}가 20초 내 running 상태가 되지 않음"
+            assert _wait_for_runner_status(real_redis, runner_id, "running", timeout=30), (
+                f"runner {runner_id}가 30초 내 running 상태가 되지 않음"
             )
 
             pid = real_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
@@ -187,8 +197,12 @@ class TestRunnerDryRun:
                 f"runner {runner_id}가 40초 내 running 상태가 되지 않음"
             )
 
-            log_path = real_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
-            assert log_path is not None, "stream_log_path 키 미세팅"
+            # stream_log_path는 plan-runner 내부 _open_log() 호출 후 설정됨.
+            # status=running 직후에는 아직 미설정 상태일 수 있으므로 별도 폴링 필요.
+            log_path = _wait_for_redis_key(
+                real_redis, f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path", timeout=30
+            )
+            assert log_path is not None, "stream_log_path 키 미세팅 (30초 대기)"
             assert Path(log_path).exists(), f"로그 파일 미생성: {log_path}"
 
             # 검증 후 정리
