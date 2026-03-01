@@ -19,6 +19,7 @@ from app.main import app
 from app.modules.dev_runner.config import DevRunnerConfig
 from tests.dev_runner.conftest_e2e import (
     e2e_redis_cleanup,
+    e2e_worktree_cleanup,
     listener_process,
     real_redis,
 )
@@ -46,12 +47,14 @@ def _delete_test_branches():
                 ["git", "worktree", "remove", "--force", str(worktree_path)],
                 capture_output=True,
                 cwd=str(_PROJECT_ROOT),
+                timeout=10,
             )
         # 브랜치 삭제 (plan/ 접두어)
         subprocess.run(
             ["git", "branch", "-D", f"plan/{suffix}"],
             capture_output=True,
             cwd=str(_PROJECT_ROOT),
+            timeout=10,
         )
 
 
@@ -138,7 +141,7 @@ async def _post_dry_run(client: httpx.AsyncClient, plan_file: str = "docs/plan/t
 class TestRunnerDryRun:
     """Level 2: dry_run으로 Runner 기동/종료 파이프라인 검증"""
 
-    async def test_dry_run_lifecycle(self, listener_process, real_redis, e2e_redis_cleanup):
+    async def test_dry_run_lifecycle(self, listener_process, real_redis, e2e_redis_cleanup, e2e_worktree_cleanup):
         """POST /run (dry_run) → running=True → stop → running=False"""
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -164,7 +167,7 @@ class TestRunnerDryRun:
             time.sleep(0.5)
         assert stopped, f"runner {runner_id}가 10초 내 stopped 상태가 되지 않음"
 
-    async def test_dry_run_redis_keys(self, listener_process, real_redis, e2e_redis_cleanup):
+    async def test_dry_run_redis_keys(self, listener_process, real_redis, e2e_redis_cleanup, e2e_worktree_cleanup):
         """dry_run 실행 후 per-runner Redis 키 (status/pid/plan_file/start_time) 세팅 확인"""
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -186,7 +189,7 @@ class TestRunnerDryRun:
             # 검증 후 정리
             await client.post("/api/v1/dev-runner/stop", json={"runner_id": runner_id})
 
-    async def test_dry_run_log_file_created(self, listener_process, real_redis, e2e_redis_cleanup):
+    async def test_dry_run_log_file_created(self, listener_process, real_redis, e2e_redis_cleanup, e2e_worktree_cleanup):
         """dry_run 실행 후 stream_log_path 파일 생성 확인"""
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -208,7 +211,7 @@ class TestRunnerDryRun:
             # 검증 후 정리
             await client.post("/api/v1/dev-runner/stop", json={"runner_id": runner_id})
 
-    async def test_concurrent_dry_run(self, listener_process, real_redis, e2e_redis_cleanup, cleanup_test_branches):
+    async def test_concurrent_dry_run(self, listener_process, real_redis, e2e_redis_cleanup, cleanup_test_branches, e2e_worktree_cleanup):
         """2개 동시 dry_run 실행 → 각각 독립 runner_id + 상태
 
         서로 다른 plan_file 사용 — 동일 plan_file이면 WorktreeManager 브랜치명 충돌 발생
