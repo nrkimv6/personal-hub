@@ -407,11 +407,15 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
     runner_id = command.get("runner_id")
 
     def _set_error_status(message: str):
-        """실패 시 per-runner 상태를 Redis에 기록"""
+        """실패 시 per-runner 상태를 Redis에 기록 + 라이브 로그 채널에 publish"""
         if runner_id:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "error")
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", message)
             logger.error(f"[_do_start_plan_runner] 실패 상태 기록 (runner_id: {runner_id}): {message}")
+            try:
+                redis_client.publish(f"{LOG_CHANNEL_PREFIX}:{runner_id}", f"[ERROR] {message}")
+            except Exception as pub_err:
+                logger.warning(f"[_set_error_status] publish 실패 (무시): {pub_err}")
 
     # 명령어 구성
     plan_file = command.get("plan_file")
