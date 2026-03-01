@@ -77,7 +77,7 @@ class EventService:
     def _build_status_payload(self, runner_id: str) -> Optional[dict]:
         """특정 runner의 현재 상태를 Redis에서 읽어 dict로 반환"""
         try:
-            fields = ["status", "pid", "current_cycle", "start_time", "plan_file"]
+            fields = ["status", "pid", "current_cycle", "start_time", "plan_file", "engine"]
             values = self._sync.mget([f"{RUNNER_KEY_PREFIX}:{runner_id}:{f}" for f in fields])
             data = dict(zip(fields, values))
             data["runner_id"] = runner_id

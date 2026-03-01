@@ -206,7 +206,12 @@
 					const runnerMap = new Map(runners.map(r => [r.runner_id, r]));
 					runnerTabs = runnerTabs.map(tab => {
 						const runner = runnerMap.get(tab.id);
-						return runner ? { ...tab, running: runner.status === 'running' } : { ...tab, running: false };
+						return runner ? {
+							...tab,
+							running: runner.status === 'running',
+							plan_file: runner.plan_file ?? tab.plan_file,
+							start_time: runner.start_time ?? tab.start_time,
+						} : { ...tab, running: false };
 					});
 					// SSE로 발견된 신규 runner 탭 추가
 					for (const runner of runners) {
