@@ -20,7 +20,7 @@ def list_runner_branches() -> list[str]:
         capture_output=True, text=True, cwd=str(PROJECT_ROOT),
         timeout=30,
     )
-    return [line.strip().lstrip("* ") for line in result.stdout.splitlines() if line.strip()]
+    return [line.strip().lstrip("+* ") for line in result.stdout.splitlines() if line.strip()]
 
 
 def list_test_branches() -> list[str]:
@@ -30,7 +30,7 @@ def list_test_branches() -> list[str]:
         capture_output=True, text=True, cwd=str(PROJECT_ROOT),
         timeout=30,
     )
-    return [line.strip().lstrip("* ") for line in result.stdout.splitlines() if line.strip()]
+    return [line.strip().lstrip("+* ") for line in result.stdout.splitlines() if line.strip()]
 
 
 def list_worktrees() -> list[dict]:
