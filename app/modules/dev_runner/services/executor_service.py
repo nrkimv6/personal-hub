@@ -92,17 +92,17 @@ class ExecutorService:
             pid_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:pid")
             if not pid_str:
                 # PID 정보 없음 → stale
-                self._force_cleanup_state(rid)
+                await self._force_cleanup_state(rid)
                 cleaned += 1
                 continue
             try:
                 pid = int(pid_str)
             except ValueError:
-                self._force_cleanup_state(rid)
+                await self._force_cleanup_state(rid)
                 cleaned += 1
                 continue
             if not self._is_pid_alive(pid):
-                self._force_cleanup_state(rid)
+                await self._force_cleanup_state(rid)
                 cleaned += 1
 
         if cleaned:
@@ -197,7 +197,7 @@ class ExecutorService:
             if result is None:
                 # cleanup
                 await self.async_redis.delete(result_key)
-                self._force_cleanup_state(runner_id)
+                await self._force_cleanup_state(runner_id)
                 raise HTTPException(
                     status_code=504,
                     detail="Command timeout - listener may not be responding"
@@ -246,38 +246,35 @@ class ExecutorService:
             logger.error(f"[dev-runner] start 실패: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Failed to start: {str(e)}")
 
-    def _force_cleanup_state(self, runner_id: str = ""):
+    async def _force_cleanup_state(self, runner_id: str = ""):
         """Redis 상태 강제 정리 (listener 무응답 시 fallback)
 
         종료된 runner는 즉시 삭제하지 않고 RECENT_RUNNERS_KEY에 보존하여
         다른 클라이언트에서도 탭을 복원할 수 있도록 한다.
         """
+        KEY_SUFFIXES = ("status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path", "engine", "worktree_path", "merge_status", "current_cycle")
         try:
             if runner_id:
-                # status를 "stopped"으로 설정 (삭제 대신 TTL 설정)
-                self.redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
-                # per-runner 키에 TTL 24h 설정 (삭제 대신 만료)
-                for key_suffix in ("status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path", "engine", "worktree_path", "merge_status", "current_cycle"):
+                await self.async_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
+                pipe = self.async_redis.pipeline()
+                for key_suffix in KEY_SUFFIXES:
                     full_key = f"{RUNNER_KEY_PREFIX}:{runner_id}:{key_suffix}"
-                    if self.redis_client.exists(full_key):
-                        self.redis_client.expire(full_key, RECENT_RUNNERS_TTL)
-                # ACTIVE_RUNNERS_KEY에서 제거
-                self.redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
-                # RECENT_RUNNERS_KEY에 추가 (score=현재 timestamp)
-                stop_ts = time.time()
-                self.redis_client.zadd(RECENT_RUNNERS_KEY, {runner_id: stop_ts})
+                    pipe.expire(full_key, RECENT_RUNNERS_TTL)
+                pipe.srem(ACTIVE_RUNNERS_KEY, runner_id)
+                pipe.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
+                await pipe.execute()
             else:
-                # 모든 active runner 정리 (레거시 fallback)
-                runner_ids = self.redis_client.smembers(ACTIVE_RUNNERS_KEY)
+                runner_ids = await self.async_redis.smembers(ACTIVE_RUNNERS_KEY)
                 stop_ts = time.time()
                 for rid in runner_ids:
-                    self.redis_client.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
-                    for key_suffix in ("status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path", "engine", "worktree_path", "merge_status", "current_cycle"):
+                    await self.async_redis.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
+                    pipe = self.async_redis.pipeline()
+                    for key_suffix in KEY_SUFFIXES:
                         full_key = f"{RUNNER_KEY_PREFIX}:{rid}:{key_suffix}"
-                        if self.redis_client.exists(full_key):
-                            self.redis_client.expire(full_key, RECENT_RUNNERS_TTL)
-                    self.redis_client.zadd(RECENT_RUNNERS_KEY, {rid: stop_ts})
-                self.redis_client.delete(ACTIVE_RUNNERS_KEY)
+                        pipe.expire(full_key, RECENT_RUNNERS_TTL)
+                    pipe.zadd(RECENT_RUNNERS_KEY, {rid: stop_ts})
+                    await pipe.execute()
+                await self.async_redis.delete(ACTIVE_RUNNERS_KEY)
         except Exception:
             pass
 
@@ -316,7 +313,7 @@ class ExecutorService:
             await self._send_force_stop()
 
             # 1. Redis 상태 정리 (모든 runner)
-            self._force_cleanup_state()
+            await self._force_cleanup_state()
             logger.info("[dev-runner] Redis 상태 정리 완료")
 
             return {"success": True, "reset_count": 0, "full_reset": full_reset}
@@ -367,7 +364,7 @@ class ExecutorService:
                 # listener 무응답 → 프로세스가 죽었을 가능성 → 상태 강제 정리
                 logger.warning("[dev-runner] listener 무응답, Redis 상태 강제 정리")
                 await self.async_redis.delete(result_key)
-                self._force_cleanup_state(runner_id)
+                await self._force_cleanup_state(runner_id)
                 return {"message": "Force cleaned (listener not responding)"}
 
             _, raw_result = result
@@ -376,7 +373,7 @@ class ExecutorService:
 
             if not result_data.get("success"):
                 # stop 실패해도 상태 정리
-                self._force_cleanup_state(runner_id)
+                await self._force_cleanup_state(runner_id)
                 return {"message": f"Force cleaned: {result_data.get('message', '')}"}
 
             return {"message": "Stopped successfully"}
@@ -387,13 +384,13 @@ class ExecutorService:
                 detail="Redis connection failed - command listener may not be running"
             )
         except json.JSONDecodeError:
-            self._force_cleanup_state(runner_id)
+            await self._force_cleanup_state(runner_id)
             return {"message": "Force cleaned (invalid listener response)"}
         except HTTPException:
             raise
         except Exception as e:
             logger.error(f"[dev-runner] stop 실패: {traceback.format_exc()}")
-            self._force_cleanup_state(runner_id)
+            await self._force_cleanup_state(runner_id)
             raise HTTPException(status_code=500, detail=f"Failed to stop: {str(e)}")
 
     async def get_runner_status(self, runner_id: str) -> RunStatusResponse:
@@ -408,7 +405,7 @@ class ExecutorService:
         # PID stale 감지
         if running and pid_str and not self._is_pid_alive(int(pid_str)):
             logger.warning(f"[dev-runner] runner {runner_id} PID {pid_str} 종료됨 → stale 정리")
-            self._force_cleanup_state(runner_id)
+            await self._force_cleanup_state(runner_id)
             running = False
             pid_str = None
 

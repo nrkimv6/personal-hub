@@ -800,14 +800,16 @@ def force_kill_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
     return {"success": True, "message": msg}
 
 
-def retry_merge(runner_id: str, redis_client: redis.Redis) -> Dict:
-    """머지 충돌 후 재머지 시도"""
-    if not runner_id:
-        return {"success": False, "message": "runner_id required"}
-    worktree_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
-    if not worktree_path_str:
-        return {"success": False, "message": f"worktree_path not found for runner {runner_id}"}
+def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str) -> None:
+    """retry-merge 실제 작업 (백그라운드 스레드에서 실행)"""
+    result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
     try:
+        worktree_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
+        if not worktree_path_str:
+            result = {"success": False, "message": f"worktree_path not found for runner {runner_id}"}
+            redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
+            redis_client.expire(result_key, 60)
+            return
         from merge_workflow import MergeWorkflow
         worktree_path = Path(worktree_path_str)
         plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
@@ -815,18 +817,45 @@ def retry_merge(runner_id: str, redis_client: redis.Redis) -> Dict:
             plan_file = None
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "pending_merge")
         wf = MergeWorkflow(PROJECT_ROOT, redis_client, str(PLAN_RUNNER_PYTHON))
-        result = wf.run(runner_id, worktree_path, WORKTREE_BASE_DIR, plan_file=plan_file)
-        logger.info(f"[retry_merge] 결과: merged={result.merged}, conflict={result.conflict}, message={result.message[:200]}")
-        return {"success": result.merged, "message": result.message, "conflict": result.conflict}
+        merge_result = wf.run(runner_id, worktree_path, WORKTREE_BASE_DIR, plan_file=plan_file)
+        logger.info(f"[retry_merge] 결과: merged={merge_result.merged}, conflict={merge_result.conflict}, message={merge_result.message[:200]}")
+        result = {"success": merge_result.merged, "message": merge_result.message, "conflict": merge_result.conflict, "action": "retry-merge"}
     except Exception as e:
         logger.error(f"[retry_merge] 실패: {e}")
-        return {"success": False, "message": str(e)}
+        result = {"success": False, "message": str(e), "action": "retry-merge"}
+    redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
+    redis_client.expire(result_key, 60)
 
 
-def cleanup_worktree(runner_id: str, redis_client: redis.Redis) -> Dict:
-    """worktree 수동 정리"""
+def retry_merge(command: Dict, redis_client: redis.Redis) -> None:
+    """머지 충돌 후 재머지 시도 — 즉시 accepted 반환, 실제 작업은 백그라운드 스레드"""
+    runner_id = command.get("runner_id", "")
+    command_id = command.get("command_id", "")
     if not runner_id:
         return {"success": False, "message": "runner_id required"}
+    result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
+    accepted = {
+        "success": True,
+        "message": "accepted",
+        "runner_id": runner_id,
+        "action": "retry-merge",
+        "executed_at": datetime.now().isoformat(),
+    }
+    redis_client.lpush(result_key, json.dumps(accepted, ensure_ascii=False))
+    redis_client.expire(result_key, 60)
+    logger.info(f"[retry_merge] accepted 응답 즉시 반환 (runner_id: {runner_id})")
+    thread = threading.Thread(
+        target=_do_retry_merge,
+        args=(runner_id, redis_client, command_id),
+        daemon=True,
+    )
+    thread.start()
+    return None
+
+
+def _do_cleanup_worktree(runner_id: str, redis_client: redis.Redis, command_id: str) -> None:
+    """cleanup-worktree 실제 작업 (백그라운드 스레드에서 실행)"""
+    result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
     try:
         plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
         # "ALL"은 parallel 모드 placeholder이므로 plan_file로 취급하지 않음
@@ -838,10 +867,38 @@ def cleanup_worktree(runner_id: str, redis_client: redis.Redis) -> Dict:
             f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status",
         )
         logger.info(f"[cleanup_worktree] 정리 완료: {runner_id}")
-        return {"success": True, "message": f"worktree {runner_id} 정리 완료"}
+        result = {"success": True, "message": f"worktree {runner_id} 정리 완료", "action": "cleanup-worktree"}
     except Exception as e:
         logger.error(f"[cleanup_worktree] 실패: {e}")
-        return {"success": False, "message": str(e)}
+        result = {"success": False, "message": str(e), "action": "cleanup-worktree"}
+    redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
+    redis_client.expire(result_key, 60)
+
+
+def cleanup_worktree(command: Dict, redis_client: redis.Redis) -> None:
+    """worktree 수동 정리 — 즉시 accepted 반환, 실제 작업은 백그라운드 스레드"""
+    runner_id = command.get("runner_id", "")
+    command_id = command.get("command_id", "")
+    if not runner_id:
+        return {"success": False, "message": "runner_id required"}
+    result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
+    accepted = {
+        "success": True,
+        "message": "accepted",
+        "runner_id": runner_id,
+        "action": "cleanup-worktree",
+        "executed_at": datetime.now().isoformat(),
+    }
+    redis_client.lpush(result_key, json.dumps(accepted, ensure_ascii=False))
+    redis_client.expire(result_key, 60)
+    logger.info(f"[cleanup_worktree] accepted 응답 즉시 반환 (runner_id: {runner_id})")
+    thread = threading.Thread(
+        target=_do_cleanup_worktree,
+        args=(runner_id, redis_client, command_id),
+        daemon=True,
+    )
+    thread.start()
+    return None
 
 
 def start_merge_orchestrator(redis_client: redis.Redis) -> Dict:
@@ -938,11 +995,9 @@ def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
     elif action == "status":
         return get_status(redis_client)
     elif action == "retry-merge":
-        runner_id = command.get("runner_id", "")
-        return retry_merge(runner_id, redis_client)
+        return retry_merge(command, redis_client)
     elif action == "cleanup-worktree":
-        runner_id = command.get("runner_id", "")
-        return cleanup_worktree(runner_id, redis_client)
+        return cleanup_worktree(command, redis_client)
     elif action == "start-orchestrator":
         return start_merge_orchestrator(redis_client)
     elif action == "stop-orchestrator":
