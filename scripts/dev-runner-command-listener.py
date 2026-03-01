@@ -851,9 +851,11 @@ def start_merge_orchestrator(redis_client: redis.Redis) -> Dict:
 
     try:
         cmd = [str(PLAN_RUNNER_PYTHON), "-m", "plan_runner", "merge-orchestrator"]
-        LOGS_DIR = PROJECT_ROOT / "logs" / "dev"
+        LOGS_DIR = PROJECT_ROOT / "logs" / "admin"
         LOGS_DIR.mkdir(parents=True, exist_ok=True)
-        log_file = open(str(LOGS_DIR / "merge-orchestrator.log"), "a", encoding="utf-8")
+        from datetime import datetime as _dt
+        _ts = _dt.now().strftime('%Y%m%d_%H%M%S')
+        log_file = open(str(LOGS_DIR / f"merge-orchestrator_{_ts}.log"), "w", encoding="utf-8")
         import os as _os
         env = _os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
