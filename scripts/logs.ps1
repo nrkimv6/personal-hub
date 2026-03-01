@@ -665,10 +665,18 @@ function Start-CombinedLogTail {
         foreach ($source in $devOnlySources) {
             $logConfig.Remove($source)
             $timestampedLogPatterns.Remove($source)
+            $logFiles.Remove($source)
+            $logColors.Remove($source)
+            $filePositions.Remove($source)
         }
         # PR:xxx / PS:xxx 형태 동적 plan-runner key 제거 (Admin 아닐 때)
         $prKeys = @($logConfig.Keys | Where-Object { $_ -like "PR:*" -or $_ -like "PS:*" })
-        foreach ($key in $prKeys) { $logConfig.Remove($key) }
+        foreach ($key in $prKeys) {
+            $logConfig.Remove($key)
+            $logFiles.Remove($key)
+            $logColors.Remove($key)
+            $filePositions.Remove($key)
+        }
     }
 
     # Helper to find latest log from multiple patterns
@@ -710,6 +718,15 @@ function Start-CombinedLogTail {
                 if (($now - $lastRunnerRefresh).TotalSeconds -ge $runnerRefreshInterval) {
                     $lastRunnerRefresh = $now
                     $currentRunners = Get-ActivePlanRunners -LogDir $planRunnerLogDir
+                    # 폴백 키(#없는 PR:/PS:) → Redis 키로 전환 시 정리
+                    $fallbackKeys = @($logFiles.Keys | Where-Object { ($_ -like "PR:*" -or $_ -like "PS:*") -and $_ -notlike "*#*" })
+                    foreach ($fk in $fallbackKeys) {
+                        $logFiles.Remove($fk)
+                        $logColors.Remove($fk)
+                        $filePositions.Remove($fk)
+                        $logFileNames.Remove($fk)
+                    }
+
                     foreach ($runner in $currentRunners) {
                         $pidSuffix = if ($runner.PID) { "|PID:$($runner.PID)" } else { "" }
                         $prKey = "PR:$($runner.DisplayName)#$($runner.ShortId)$pidSuffix"
