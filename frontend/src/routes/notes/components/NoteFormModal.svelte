@@ -20,6 +20,7 @@
   let { mode, note, onSave, onClose: _onClose }: Props = $props();
 
   function onClose() {
+    clearDraft();
     _onClose();
   }
 
@@ -314,18 +315,13 @@
 
   onMount(() => {
     loadTags();
-    // draft 복원 (create/edit 모드 공통)
-    const raw = sessionStorage.getItem(draftKey);
-    if (raw) {
-      try {
-        const draft = JSON.parse(raw) as { title: string; content: string };
-        if (draft.title || draft.content) {
-          // edit 모드: draft가 서버 데이터와 동일하면 복원 안내 생략
-          const sameAsServer =
-            mode === 'edit' &&
-            draft.title === (note?.title ?? '') &&
-            draft.content === (note?.content ?? '');
-          if (!sameAsServer) {
+    // draft 복원 (create 모드만)
+    if (mode === 'create') {
+      const raw = sessionStorage.getItem(draftKey);
+      if (raw) {
+        try {
+          const draft = JSON.parse(raw) as { title: string; content: string };
+          if (draft.title || draft.content) {
             if (confirm('임시 저장된 내용을 복원하시겠습니까?')) {
               title = draft.title ?? '';
               content = draft.content ?? '';
@@ -333,9 +329,9 @@
               clearDraft();
             }
           }
+        } catch {
+          sessionStorage.removeItem(draftKey);
         }
-      } catch {
-        sessionStorage.removeItem(draftKey);
       }
     }
   });
