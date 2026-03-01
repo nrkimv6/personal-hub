@@ -5,10 +5,10 @@
 
 	interface Props {
 		planPath?: string | null;
-		isRunning?: boolean;
+		refreshTick?: number;
 	}
 
-	let { planPath = null, isRunning = false }: Props = $props();
+	let { planPath = null, refreshTick = 0 }: Props = $props();
 
 	let detail = $state<PlanDetailResponse | null>(null);
 	let loading = $state(false);
@@ -37,13 +37,13 @@
 		}
 	});
 
-	// 실행 중 체크박스 주기 갱신 (5초 폴링)
+	// 외부 refresh 트리거 (SSE plan_changed 이벤트)
 	$effect(() => {
-		if (isRunning && planPath) {
-			const interval = setInterval(() => { void fetchItems(planPath!); }, 5000);
-			return () => clearInterval(interval);
+		if (refreshTick > 0 && planPath) {
+			void fetchItems(planPath);
 		}
 	});
+
 </script>
 
 <div class="flex flex-col gap-2 h-full min-h-0 overflow-y-auto">
