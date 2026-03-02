@@ -542,3 +542,73 @@ class TestCommandListenerMaxCycles:
         """max_cycles 키가 없으면 --max-cycles가 CLI에 포함되지 않아야 함"""
         cmd = self._build_cmd({"plan_file": "test.md"})
         assert "--max-cycles" not in cmd
+
+
+# ========== get_merge_history TC (RIGHT-BICEP) ==========
+
+class TestGetMergeHistory:
+    """get_merge_history() — RIGHT-BICEP 원칙"""
+
+    REDIS_KEY = "plan-runner:merge-results"
+
+    def _make_item(self, runner_id: str = "r1") -> dict:
+        return {
+            "runner_id": runner_id,
+            "branch": "impl/test",
+            "plan_file": "docs/plan/test.md",
+            "project": "monitor-page",
+            "timestamp": "2026-03-03T12:00:00",
+            "worktree_path": ".worktrees/impl-test",
+            "status": "done",
+            "success": True,
+            "test_passed": True,
+            "fix_attempts": 0,
+            "message": "완료",
+        }
+
+    @pytest.mark.asyncio
+    async def test_get_merge_history_right_returns_parsed_items(self, executor, fake_async_redis):
+        """R(Right): 2건 LPUSH 후 get_merge_history() 호출 → 길이 2 + runner_id 필드 존재"""
+        await fake_async_redis.lpush(self.REDIS_KEY, json.dumps(self._make_item("r1")))
+        await fake_async_redis.lpush(self.REDIS_KEY, json.dumps(self._make_item("r2")))
+        result = await executor.get_merge_history()
+        assert len(result) == 2
+        assert "runner_id" in result[0]
+
+    @pytest.mark.asyncio
+    async def test_get_merge_history_right_order_newest_first(self, executor, fake_async_redis):
+        """R(Right): LPUSH 순서로 최신 항목이 결과 앞에 위치"""
+        await fake_async_redis.lpush(self.REDIS_KEY, json.dumps(self._make_item("first")))
+        await fake_async_redis.lpush(self.REDIS_KEY, json.dumps(self._make_item("second")))
+        result = await executor.get_merge_history()
+        assert result[0]["runner_id"] == "second"
+
+    @pytest.mark.asyncio
+    async def test_get_merge_history_boundary_empty_list(self, executor, fake_async_redis):
+        """B(Boundary): merge-results 키 없는 상태 → 빈 리스트 반환"""
+        result = await executor.get_merge_history()
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_merge_history_boundary_limit_one(self, executor, fake_async_redis):
+        """B(Boundary): 3건 LPUSH 후 limit=1 → 길이 1 반환"""
+        for i in range(3):
+            await fake_async_redis.lpush(self.REDIS_KEY, json.dumps(self._make_item(f"r{i}")))
+        result = await executor.get_merge_history(limit=1)
+        assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_get_merge_history_error_invalid_json_skipped(self, executor, fake_async_redis):
+        """E(Error): 깨진 JSON 항목은 skip, 유효한 항목만 반환"""
+        await fake_async_redis.lpush(self.REDIS_KEY, "NOT_JSON{{")
+        await fake_async_redis.lpush(self.REDIS_KEY, json.dumps(self._make_item("valid")))
+        result = await executor.get_merge_history()
+        assert len(result) == 1
+        assert result[0]["runner_id"] == "valid"
+
+    @pytest.mark.asyncio
+    async def test_get_merge_history_error_redis_connection_fail(self, executor):
+        """E(Error): Redis 연결 실패 시 예외 전파 없이 빈 리스트 반환"""
+        executor.async_redis.lrange = AsyncMock(side_effect=Exception("conn error"))
+        result = await executor.get_merge_history()
+        assert result == []

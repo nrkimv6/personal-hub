@@ -249,6 +249,21 @@ class MergeStatusResponse(BaseModel):
     message: str = ""
 
 
+class MergeHistoryItem(BaseModel):
+    """Merge 실행 이력 항목 스키마"""
+    runner_id: str
+    branch: str = ""
+    plan_file: str = ""
+    project: str = ""
+    timestamp: str = ""
+    worktree_path: str = ""
+    status: str
+    success: bool
+    test_passed: Optional[bool] = None
+    fix_attempts: int = 0
+    message: str = ""
+
+
 class DevRunnerSettingsResponse(BaseModel):
     """Dev Runner 설정 응답 스키마"""
     max_concurrent_runners: int
@@ -283,6 +298,7 @@ __all__ = [
     'VerifyResult',
     'MergeQueueItem',
     'MergeStatusResponse',
+    'MergeHistoryItem',
     'RunHistoryItem',
     'RunHistoryResponse',
     'FullLogResponse',
