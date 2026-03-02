@@ -62,14 +62,15 @@ PLAN_RUNNER_PYTHON = PLAN_RUNNER_MODULE_PATH / ".venv/Scripts/python.exe"
 LOG_DIR = WTOOLS_BASE_DIR / "common/logs"
 
 # 로깅 설정
-log_dir = PROJECT_ROOT / "logs" / "dev"
+log_dir = PROJECT_ROOT / "logs" / "admin"
 log_dir.mkdir(parents=True, exist_ok=True)
+_log_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler(log_dir / "dev_runner_command_listener.log", encoding="utf-8"),
+        logging.FileHandler(log_dir / f"dev_runner_command_listener_{_log_timestamp}.log", encoding="utf-8"),
         logging.StreamHandler(),
     ],
 )
