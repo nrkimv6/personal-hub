@@ -377,56 +377,58 @@ $useRedis = $false
 $pingOut = & redis-cli PING 2>$null
 if ($pingOut -eq "PONG") { $useRedis = $true }
 
-# Check if log files are stale (created more than 1 hour before the latest API log)
+# Check if log files are stale — 파일명 날짜(_YYYYMMDD_) 기반: 오늘 날짜 파일이면 항상 유효
 function Test-StaleLogFile {
     param([string]$FilePath, [string]$ReferenceFile)
 
-    if (-not $FilePath -or -not $ReferenceFile) { return $false }
-    if (-not (Test-Path $FilePath) -or -not (Test-Path $ReferenceFile)) { return $false }
+    if (-not $FilePath -or -not (Test-Path $FilePath)) { return $false }
 
+    # 파일명에서 날짜 추출 (_YYYYMMDD_ 패턴)
+    $fileName = Split-Path $FilePath -Leaf
+    if ($fileName -match '_(\d{8})_') {
+        return $matches[1] -ne (Get-Date).ToString("yyyyMMdd")
+    }
+
+    # 날짜 패턴 없는 파일: LastWriteTime fallback (1시간 기준)
+    if (-not $ReferenceFile -or -not (Test-Path $ReferenceFile)) { return $false }
     $fileTime = (Get-Item $FilePath).LastWriteTime
-    $refTime = (Get-Item $ReferenceFile).LastWriteTime
-
-    # If the file was last modified more than 1 hour before the reference file, it's stale
+    $refTime  = (Get-Item $ReferenceFile).LastWriteTime
     return ($refTime - $fileTime).TotalHours -gt 1
 }
 
-# Warn about potentially stale log files and exclude them
-if ($apiLogFile) {
-    # Timestamped log files (worker, frontend, ig-worker, claude)
-    $timestampedLogs = @(
-        @{ Name = "Worker"; Var = "workerLogFile" },
-        @{ Name = "IG-Worker"; Var = "igWorkerLogFile" },
-        @{ Name = "Claude Worker"; Var = "claudeWorkerLogFile" },
-        @{ Name = "Video Download"; Var = "videoDownloadWorkerLogFile" },
-        @{ Name = "Crawl Worker"; Var = "crawlWorkerLogFile" }
-    )
+# Warn about potentially stale log files and exclude them — apiLogFile 유무와 무관하게 항상 실행
+$timestampedLogs = @(
+    @{ Name = "Worker"; Var = "workerLogFile" },
+    @{ Name = "IG-Worker"; Var = "igWorkerLogFile" },
+    @{ Name = "Claude Worker"; Var = "claudeWorkerLogFile" },
+    @{ Name = "Video Download"; Var = "videoDownloadWorkerLogFile" },
+    @{ Name = "Crawl Worker"; Var = "crawlWorkerLogFile" }
+)
 
-    foreach ($log in $timestampedLogs) {
-        $logFile = Get-Variable -Name $log.Var -ValueOnly -ErrorAction SilentlyContinue
-        if ($logFile -and (Test-StaleLogFile $logFile $apiLogFile)) {
-            Write-Host "[!] $($log.Name) log may be stale (from previous session)" -ForegroundColor Yellow
-            Set-Variable -Name $log.Var -Value $null
-        }
+foreach ($log in $timestampedLogs) {
+    $logFile = Get-Variable -Name $log.Var -ValueOnly -ErrorAction SilentlyContinue
+    if ($logFile -and (Test-StaleLogFile $logFile $apiLogFile)) {
+        Write-Host "[!] $($log.Name) log may be stale (from previous session)" -ForegroundColor Yellow
+        Set-Variable -Name $log.Var -Value $null
     }
+}
 
-    # Watchdog/Service 로그도 타임스탬프 기반으로 전환됨 — stale 체크 통일
-    $extraTimestampedLogs = @(
-        @{ Name = "Watchdog"; Var = "watchdogLogFile" },
-        @{ Name = "Claude-Watchdog"; Var = "claudeWatchdogLogFile" },
-        @{ Name = "Video-DL-Watchdog"; Var = "videoDownloadWatchdogLogFile" },
-        @{ Name = "Crawl-Watchdog"; Var = "crawlWatchdogLogFile" },
-        @{ Name = "Service Runner"; Var = "serviceRunnerLogFile" },
-        @{ Name = "CMD-Watchdog"; Var = "commandListenerWatchdogLogFile" },
-        @{ Name = "API-Watchdog"; Var = "apiWatchdogLogFile" }
-    )
+# Watchdog/Service 로그도 타임스탬프 기반으로 전환됨 — stale 체크 통일
+$extraTimestampedLogs = @(
+    @{ Name = "Watchdog"; Var = "watchdogLogFile" },
+    @{ Name = "Claude-Watchdog"; Var = "claudeWatchdogLogFile" },
+    @{ Name = "Video-DL-Watchdog"; Var = "videoDownloadWatchdogLogFile" },
+    @{ Name = "Crawl-Watchdog"; Var = "crawlWatchdogLogFile" },
+    @{ Name = "Service Runner"; Var = "serviceRunnerLogFile" },
+    @{ Name = "CMD-Watchdog"; Var = "commandListenerWatchdogLogFile" },
+    @{ Name = "API-Watchdog"; Var = "apiWatchdogLogFile" }
+)
 
-    foreach ($log in $extraTimestampedLogs) {
-        $logFile = Get-Variable -Name $log.Var -ValueOnly -ErrorAction SilentlyContinue
-        if ($logFile -and (Test-StaleLogFile $logFile $apiLogFile)) {
-            Write-Host "[!] $($log.Name) log may be stale (from previous session)" -ForegroundColor Yellow
-            Set-Variable -Name $log.Var -Value $null
-        }
+foreach ($log in $extraTimestampedLogs) {
+    $logFile = Get-Variable -Name $log.Var -ValueOnly -ErrorAction SilentlyContinue
+    if ($logFile -and (Test-StaleLogFile $logFile $apiLogFile)) {
+        Write-Host "[!] $($log.Name) log may be stale (from previous session)" -ForegroundColor Yellow
+        Set-Variable -Name $log.Var -Value $null
     }
 }
 
@@ -582,8 +584,9 @@ function Start-CombinedLogTail {
                 $pidSuffix = if ($runner.PID) { "|PID:$($runner.PID)" } else { "" }
                 $prKey = "PR:$($runner.DisplayName)#$($runner.ShortId)$pidSuffix"
                 $psKey = "PS:$($runner.DisplayName)#$($runner.ShortId)$pidSuffix"
-                $logConfig[$prKey] = @{ Path = $runner.LogPath;    Color = "White";    Tail = 10 }
-                $logConfig[$psKey] = @{ Path = $runner.StreamPath; Color = "DarkGray"; Tail = 5  }
+                $psPath = if ($runner.StreamPath) { $runner.StreamPath } else { $planRunnerStreamLogFile }
+                $logConfig[$prKey] = @{ Path = $runner.LogPath; Color = "White";    Tail = 10 }
+                $logConfig[$psKey] = @{ Path = $psPath;         Color = "DarkGray"; Tail = 5  }
             }
         } else {
             # 활성 runner 없음 — 폴백: 최신 파일 1개 (파일명 타임스탬프 식별자 사용)
