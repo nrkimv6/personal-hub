@@ -260,6 +260,30 @@ class DevRunnerSettingsUpdateRequest(BaseModel):
     max_concurrent_runners: int = Field(..., ge=1, le=10, description="최대 동시 실행 수 (1~10)")
 
 
+class WorkflowResponse(BaseModel):
+    """워크플로우 응답 스키마"""
+    id: int
+    slug: str
+    plan_file: Optional[str] = None
+    branch: Optional[str] = None
+    runner_id: Optional[str] = None
+    status: str
+    engine: Optional[str] = None
+    error_message: Optional[str] = None
+    commit_hash: Optional[str] = None
+    worktree_path: Optional[str] = None
+    created_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    merged_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+
+
+class WorkflowCreateRequest(BaseModel):
+    """워크플로우 수동 생성 요청 스키마"""
+    plan_file: Optional[str] = None
+    slug: Optional[str] = None
+
+
 __all__ = [
     'PlanEventResponse',
     'PlanRecordResponse',
@@ -288,4 +312,6 @@ __all__ = [
     'FullLogResponse',
     'DevRunnerSettingsResponse',
     'DevRunnerSettingsUpdateRequest',
+    'WorkflowResponse',
+    'WorkflowCreateRequest',
 ]

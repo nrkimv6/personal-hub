@@ -13,6 +13,7 @@ from .plans import router as plans_router
 from .engines import router as engines_router
 from .events import router as events_router
 from .settings import router as settings_router
+from .workflows import router as workflows_router
 
 router.include_router(tasks_router)
 router.include_router(runner_router)
@@ -21,5 +22,6 @@ router.include_router(plans_router)
 router.include_router(engines_router, prefix="/engines")
 router.include_router(events_router)
 router.include_router(settings_router, prefix="/settings")
+router.include_router(workflows_router, prefix="/workflows")
 
 __all__ = ['router']

@@ -38,6 +38,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 from listener_noise_filter import NOISE_BLOCK_MARKERS as _NOISE_BLOCK_MARKERS, is_noise_line as _is_noise_line
 from worktree_manager import WorktreeManager, WorktreeError
+from workflow_manager import WorkflowManager
 
 # 설정
 REDIS_HOST = "localhost"
@@ -84,6 +85,9 @@ _running_log_files: dict = {}
 _stream_threads: dict = {}
 _merge_orchestrator_process: Optional[subprocess.Popen] = None
 _merge_orchestrator_log_path: Optional[Path] = None
+
+# WorkflowManager (main()에서 초기화)
+_wf_manager: Optional[WorkflowManager] = None
 
 
 def _is_pid_alive(pid: int) -> bool:
@@ -392,10 +396,27 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
             process.wait(timeout=10)
         except Exception:
             pass
-        logger.info(f"Output streaming thread finished (exit code: {process.returncode})")
+        exit_code = process.returncode
+        logger.info(f"Output streaming thread finished (exit code: {exit_code})")
 
         # 이중 큐잉 방지: runner 내부 _publish_merge_request()가 이미 큐잉하므로
         # command-listener에서는 큐잉하지 않음
+
+        # Workflow 상태 업데이트: 정상 종료(0) → merge_pending, 비정상 → failed
+        if _wf_manager and runner_id:
+            try:
+                wf = _wf_manager.get_by_runner_id(runner_id)
+                if wf:
+                    if exit_code == 0:
+                        # merge-queue에 올라갈 것이므로 merge_pending
+                        _wf_manager.update_status(wf["id"], "merge_pending")
+                    elif exit_code is not None and exit_code != 0:
+                        _wf_manager.update_status(
+                            wf["id"], "failed",
+                            error_message=f"Process exited with code {exit_code}",
+                        )
+            except Exception as wf_err:
+                logger.warning(f"[_stream_output] workflow update 실패 (무시): {wf_err}")
 
         _cleanup_process_state(runner_id, redis_client)
 
@@ -407,6 +428,7 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
     실패 시 runner 상태를 Redis에 기록.
     """
     runner_id = command.get("runner_id")
+    _wf_id: Optional[int] = None
 
     def _set_error_status(message: str):
         """실패 시 per-runner 상태를 Redis에 기록 + 라이브 로그 채널에 publish"""
@@ -418,6 +440,12 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
                 redis_client.publish(f"{LOG_CHANNEL_PREFIX}:{runner_id}", f"[ERROR] {message}")
             except Exception as pub_err:
                 logger.warning(f"[_set_error_status] publish 실패 (무시): {pub_err}")
+            # Workflow 실패 상태 업데이트
+            if _wf_manager and _wf_id:
+                try:
+                    _wf_manager.update_status(_wf_id, "failed", error_message=message)
+                except Exception as wf_err:
+                    logger.warning(f"[_set_error_status] workflow update 실패 (무시): {wf_err}")
 
     # 명령어 구성
     plan_file = command.get("plan_file")
@@ -429,6 +457,22 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
         logger.error(f"worktree 생성 실패 (runner_id: {runner_id}): {e}")
         _set_error_status(f"worktree 생성 실패: {e}")
         return
+
+    # Workflow 레코드 생성
+    if _wf_manager and runner_id:
+        try:
+            slug = (
+                WorkflowManager._slug_from_plan_file(plan_file)
+                if plan_file
+                else WorkflowManager._slug_from_runner_id(runner_id)
+            )
+            # slug 중복 방지: 이미 존재하면 runner_id prefix 추가
+            if _wf_manager.get_by_slug(slug):
+                slug = f"{slug}-{runner_id[:4]}"
+            _wf_id = _wf_manager.create(slug, plan_file)
+        except Exception as wf_err:
+            logger.warning(f"[_do_start_plan_runner] workflow create 실패 (무시): {wf_err}")
+
     engine = command.get("engine")
     is_parallel = command.get("parallel", False)
     if not plan_file and not is_parallel:
@@ -438,6 +482,19 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
     result = _launch_plan_runner_process(command, redis_client, runner_id, worktree_path, plan_file, engine, branch=branch)
     if not result.get("success"):
         _set_error_status(result.get("message", "Unknown error"))
+    else:
+        # Workflow running 상태 업데이트
+        if _wf_manager and _wf_id:
+            try:
+                _wf_manager.update_status(
+                    _wf_id, "running",
+                    runner_id=runner_id,
+                    branch=branch,
+                    worktree_path=str(worktree_path),
+                    engine=engine or "claude",
+                )
+            except Exception as wf_err:
+                logger.warning(f"[_do_start_plan_runner] workflow running update 실패 (무시): {wf_err}")
 
 
 def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
@@ -817,7 +874,7 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str) 
         if plan_file == "ALL":
             plan_file = None
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "pending_merge")
-        wf = MergeWorkflow(PROJECT_ROOT, redis_client, str(PLAN_RUNNER_PYTHON))
+        wf = MergeWorkflow(PROJECT_ROOT, redis_client, str(PLAN_RUNNER_PYTHON), workflow_manager=_wf_manager)
         merge_result = wf.run(runner_id, worktree_path, WORKTREE_BASE_DIR, plan_file=plan_file)
         logger.info(f"[retry_merge] 결과: merged={merge_result.merged}, conflict={merge_result.conflict}, message={merge_result.message[:200]}")
         result = {"success": merge_result.merged, "message": merge_result.message, "conflict": merge_result.conflict, "action": "retry-merge"}
@@ -1009,7 +1066,8 @@ def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
 
 def main():
     """메인 루프: Redis BRPOP으로 명령 대기 및 실행."""
-    global _merge_orchestrator_process
+    global _merge_orchestrator_process, _wf_manager
+    _wf_manager = WorkflowManager(PROJECT_ROOT / "data" / "monitor.db")
     logger.info("=" * 50)
     logger.info("Dev Runner Command Listener 시작")
     logger.info(f"Redis: {REDIS_HOST}:{REDIS_PORT}")

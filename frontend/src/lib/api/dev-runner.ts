@@ -460,3 +460,50 @@ export const devRunnerSettingsApi = {
 			body: JSON.stringify({ max_concurrent_runners: maxRunners }),
 		}),
 };
+
+
+export interface WorkflowResponse {
+	id: number;
+	slug: string;
+	plan_file: string | null;
+	branch: string | null;
+	runner_id: string | null;
+	status: string;
+	engine: string | null;
+	error_message: string | null;
+	commit_hash: string | null;
+	worktree_path: string | null;
+	created_at: string | null;
+	started_at: string | null;
+	merged_at: string | null;
+	finished_at: string | null;
+}
+
+export interface WorkflowCreateRequest {
+	plan_file?: string;
+	slug?: string;
+}
+
+export const devRunnerWorkflowApi = {
+	list: (params?: { status?: string; limit?: number; offset?: number }): Promise<WorkflowResponse[]> => {
+		const qs = new URLSearchParams();
+		if (params?.status) qs.set('status', params.status);
+		if (params?.limit !== undefined) qs.set('limit', String(params.limit));
+		if (params?.offset !== undefined) qs.set('offset', String(params.offset));
+		const query = qs.toString() ? `?${qs.toString()}` : '';
+		return devRunnerRequest<WorkflowResponse[]>(`/workflows${query}`);
+	},
+
+	get: (id: number): Promise<WorkflowResponse> =>
+		devRunnerRequest<WorkflowResponse>(`/workflows/${id}`),
+
+	create: (req: WorkflowCreateRequest): Promise<WorkflowResponse> =>
+		devRunnerRequest<WorkflowResponse>('/workflows', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(req),
+		}),
+
+	cancel: (id: number): Promise<WorkflowResponse> =>
+		devRunnerRequest<WorkflowResponse>(`/workflows/${id}/cancel`, { method: 'PATCH' }),
+};
