@@ -9,6 +9,7 @@
 	import MergeQueuePanel from '$lib/components/dev-runner/MergeQueuePanel.svelte';
 	import UnifiedLogsView from '$lib/components/dev-runner/UnifiedLogsView.svelte';
 	import DevRunnerSettingsPanel from '$lib/components/dev-runner/DevRunnerSettingsPanel.svelte';
+	import RunStatusBar from '$lib/components/dev-runner/RunStatusBar.svelte';
 	import { createSmartPolling } from '$lib/utils/smart-polling';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
 	import {
@@ -36,7 +37,7 @@
 	let justCompleted = $state(false);
 	let completedTimer: ReturnType<typeof setTimeout> | null = null;
 	let lastStartTime = $state<string | null>(null);
-	let panelOpen = $state(true);
+	let showExecutionModal = $state(false);
 	let taskHistoryOpen = $state(false);
 	let taskHistoryTab = $state<'tasks' | 'plans' | 'settings'>('plans');
 	let currentTracking = $state<CurrentTrackingResponse | null>(null);
@@ -320,8 +321,9 @@
                 // 초기 로드
                 await Promise.all([pollStatus(), fetchPlans()]);
 
+                // 모바일: 실행 중이면 패널 닫기 (panelOpen 제거됨 - taskHistoryOpen으로 대체)
                 if (window.innerWidth < 640) {
-                        panelOpen = !runStatus?.running;
+                        taskHistoryOpen = !runStatus?.running;
                 }
                 loading = false;
                 error = null;
@@ -386,7 +388,6 @@
 		// 시작 감지 (runningCount 0 → 1+)
 		if (!prevRunning && runningCount > 0) {
 			lastPlanFile = null;
-			if (window.innerWidth < 640) panelOpen = false;
 		}
 
 		// 종료 감지 → 모든 runner 종료 시만 plans 갱신
@@ -395,7 +396,6 @@
 			if (completedTimer) clearTimeout(completedTimer);
 			completedTimer = setTimeout(() => { justCompleted = false; }, 10000);
 			void fetchPlans();
-			if (window.innerWidth < 640) panelOpen = true;
 		}
 
 		// elapsed 타이머 관리 (활성 탭 기준)
@@ -438,81 +438,55 @@
 				<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
 			</div>
 		{:else}
-			<!-- Collapsible Control Panel -->
-			<div class="border-b">
-				<!-- Collapsible trigger bar (always visible) -->
-				<button
-					onclick={() => (panelOpen = !panelOpen)}
-					class="flex items-center justify-between w-full px-4 py-2.5 hover:bg-gray-50 transition-colors"
+			<!-- RunStatusBar -->
+			<RunStatusBar
+				runners={runnerTabs}
+				{sseConnected}
+				{runStatus}
+				{elapsed}
+				onSync={fetchPlans}
+				onExecute={() => { showExecutionModal = true; }}
+				onStopAll={runningCount > 0 ? async () => {
+					for (const t of runnerTabs.filter(r => r.running)) {
+						await devRunnerRunnerApi.stop(t.id).catch(() => {});
+					}
+					void pollStatus();
+				} : undefined}
+			/>
+
+			<!-- CurrentTrackingCard (실행 중 + 추적 정보 있을 때만) -->
+			{#if activeTabRunner?.running && currentTracking}
+				<div class="px-4 py-2 border-b bg-gray-50 shrink-0">
+					<CurrentTrackingCard tracking={currentTracking} />
+				</div>
+			{/if}
+
+			<!-- 실행 모달 -->
+			{#if showExecutionModal}
+				<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+				<div
+					class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+					onclick={(e) => { if (e.target === e.currentTarget) showExecutionModal = false; }}
 				>
-					<div class="flex items-center gap-4 min-w-0">
-						<!-- Status indicator -->
-						<div class="flex items-center gap-2 shrink-0">
-							{#if activeTabRunner?.running}
-								<div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-								<span class="text-xs font-medium">실행 중</span>
-								{#if runningCount > 1}
-									<span class="text-[10px] bg-green-100 text-green-700 px-1 rounded">{runningCount}개</span>
-								{/if}
-								<span class="text-[10px] text-gray-500 font-mono">{elapsed}</span>
-							{:else if runStatus?.crashed}
-								<div class="w-2 h-2 rounded-full bg-red-500"></div>
-								<span class="text-xs font-medium text-red-700">비정상 종료</span>
-							{:else if justCompleted}
-								<div class="w-2 h-2 rounded-full bg-blue-500"></div>
-								<span class="text-xs font-medium text-blue-700">완료됨</span>
-							{:else}
-								<div class="w-2 h-2 rounded-full bg-gray-400"></div>
-								<span class="text-xs font-medium text-gray-600">대기</span>
-							{/if}
+					<div class="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 p-5">
+						<div class="flex items-center justify-between mb-4">
+							<h3 class="text-sm font-semibold">실행 설정</h3>
+							<button
+								onclick={() => { showExecutionModal = false; }}
+								class="text-gray-400 hover:text-gray-600 text-lg leading-none"
+							>×</button>
 						</div>
-
-						<!-- Collapsed inline info -->
-						{#if !panelOpen}
-							<div class="flex items-center gap-3 min-w-0 overflow-hidden">
-								<div class="h-3.5 w-px bg-gray-200 shrink-0"></div>
-
-								<!-- Current plan -->
-								{#if activePlan}
-									<div class="flex items-center gap-1.5 shrink-0">
-										<svg class="w-3 h-3 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-										<span class="text-xs text-gray-500 font-mono truncate max-w-[200px]">{activePlan.filename}</span>
-										<span class="bg-blue-100 text-blue-700 border border-blue-200 text-[10px] px-1.5 py-0 h-4 inline-flex items-center rounded">
-											{activePlan.progress.done}/{activePlan.progress.total}
-										</span>
-									</div>
-								{:else if effectivePlanFile === 'ALL'}
-									<span class="text-xs text-gray-500">전체 실행</span>
-								{:else if effectivePlanFile}
-									<div class="flex items-center gap-1.5 shrink-0">
-										<svg class="w-3 h-3 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-										<span class="text-xs text-gray-500 font-mono truncate max-w-[200px]">
-											{effectivePlanFile.split(/[\\/]/).pop()}
-										</span>
-									</div>
-								{/if}
-							</div>
-						{/if}
+						<RunControl
+							status={runStatus}
+							{plans}
+							onStatusChange={async () => { showExecutionModal = false; await handleRunStatusChange(); }}
+							onStart={(r) => { showExecutionModal = false; handleRunStart(r); }}
+							bind:selectedPlan={selectedPlanPath}
+							runnerTabs={runnerTabs.map(t => ({ id: t.id, running: t.running }))}
+						/>
 					</div>
-					<svg
-						class="w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform {panelOpen ? '' : 'rotate-180'}"
-						viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-					>
-						<path d="M18 15l-6-6-6 6" />
-					</svg>
-				</button>
-
-				<!-- Expanded panel content -->
-				{#if panelOpen}
-					<div class="px-4 pb-4 flex flex-col gap-4 bg-gray-50">
-						<!-- RunControl - full width card -->
-						<div class="bg-white border rounded-lg p-4">
-							<RunControl status={runStatus} {plans} onStatusChange={handleRunStatusChange} onStart={handleRunStart} bind:selectedPlan={selectedPlanPath} runnerTabs={runnerTabs.map(t => ({ id: t.id, running: t.running }))} />
-						</div>
-
-					</div>
-				{/if}
-			</div>
+				</div>
+			{/if}
 
 			<!-- Runner 탭 바 (항상 표시) -->
 			<div class="flex items-center gap-1 border-b px-2 py-1 overflow-x-auto shrink-0">
