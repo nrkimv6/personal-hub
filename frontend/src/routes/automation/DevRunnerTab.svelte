@@ -10,7 +10,6 @@
 	import UnifiedLogsView from '$lib/components/dev-runner/UnifiedLogsView.svelte';
 	import DevRunnerSettingsPanel from '$lib/components/dev-runner/DevRunnerSettingsPanel.svelte';
 	import RunStatusBar from '$lib/components/dev-runner/RunStatusBar.svelte';
-	import { createSmartPolling } from '$lib/utils/smart-polling';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
 	import {
 		devRunnerTaskApi,
@@ -31,12 +30,8 @@
 	let plans = $state<DevRunnerPlanFileResponse[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
-	let pollingController: ReturnType<typeof createSmartPolling> | null = null;
 	let prevRunning = $state(false);
 	let prevCycle = $state<number | null>(null);
-	let justCompleted = $state(false);
-	let completedTimer: ReturnType<typeof setTimeout> | null = null;
-	let lastStartTime = $state<string | null>(null);
 	let showExecutionModal = $state(false);
 	let taskHistoryOpen = $state(false);
 	let taskHistoryTab = $state<'tasks' | 'plans' | 'merge' | 'settings'>('plans');
@@ -85,16 +80,8 @@
 			const status = await devRunnerRunnerApi.status();
 			runStatus = status;
 
-			if (status.running && status.start_time) {
-				lastStartTime = status.start_time;
-				if (status.plan_file) {
-					lastPlanFile = status.plan_file;
-				}
-			} else if (!status.running) {
-				if (status.plan_file) {
-					lastPlanFile = status.plan_file;
-				}
-				lastStartTime = null;
+			if (status.plan_file) {
+				lastPlanFile = status.plan_file;
 			}
 
 			// runner 탭 running 상태 동기화 + 신규 runner 추가
@@ -364,11 +351,6 @@
 		}
 		sseConnected = false;
 
-		// 레거시 폴링 정리 (혹시 남아있다면)
-		if (pollingController) {
-			pollingController.cleanup();
-			pollingController = null;
-		}
 		if (elapsedInterval) {
 			clearInterval(elapsedInterval);
 			elapsedInterval = null;
@@ -392,9 +374,6 @@
 
 		// 종료 감지 → 모든 runner 종료 시만 plans 갱신
 		if (prevRunning && runningCount === 0) {
-			justCompleted = true;
-			if (completedTimer) clearTimeout(completedTimer);
-			completedTimer = setTimeout(() => { justCompleted = false; }, 10000);
 			void fetchPlans();
 		}
 
@@ -417,7 +396,6 @@
 	// 파생 데이터
 	let activeTabRunner = $derived(runnerTabs.find(t => t.id === activeTabId) ?? null);
 	let runningCount = $derived(runnerTabs.filter(t => t.running).length);
-	let activePlan = $derived(plans?.find(p => p.path === activeTabRunner?.plan_file) ?? null);
 	let effectivePlanFile = $derived(activeTabRunner?.plan_file ?? lastPlanFile);
 	// TaskList에 표시할 plan path (활성 탭의 plan 또는 사용자가 선택한 plan)
 	let taskListPlanPath = $derived(effectivePlanFile ?? selectedPlanPath ?? null);
