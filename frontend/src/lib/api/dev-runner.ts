@@ -429,9 +429,26 @@ export interface MergeStatusResponse {
 	message: string;
 }
 
+export interface MergeHistoryItem {
+	runner_id: string;
+	branch: string;
+	plan_file: string;
+	project: string;
+	timestamp: string;
+	worktree_path: string;
+	status: string;
+	success: boolean;
+	test_passed: boolean | null;
+	fix_attempts: number;
+	message: string;
+}
+
 export const devRunnerMergeApi = {
 	queue: (): Promise<MergeQueueItem[]> =>
 		devRunnerRequest<MergeQueueItem[]>('/merge-queue'),
+
+	history: (limit?: number): Promise<MergeHistoryItem[]> =>
+		devRunnerRequest<MergeHistoryItem[]>(`/merge-history${limit ? `?limit=${limit}` : ''}`),
 
 	status: (runnerId: string): Promise<MergeStatusResponse> =>
 		devRunnerRequest<MergeStatusResponse>(`/merge/${runnerId}`),

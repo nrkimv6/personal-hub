@@ -558,6 +558,21 @@ class ExecutorService:
         except Exception:
             return None
 
+    async def get_merge_history(self, limit: int = 50) -> list:
+        """Redis merge-results 이력 조회 → list[MergeHistoryItem] (최신순)"""
+        try:
+            raw_items = await self.async_redis.lrange("plan-runner:merge-results", 0, limit - 1)
+            result = []
+            for raw in raw_items:
+                try:
+                    item = json.loads(raw)
+                    result.append(item)
+                except Exception:
+                    pass
+            return result
+        except Exception:
+            return []
+
     async def send_runner_command(self, runner_id: str, action: str) -> dict:
         """runner에 명령 전송 (retry-merge, cleanup-worktree 등)"""
         try:
