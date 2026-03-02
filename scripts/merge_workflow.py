@@ -34,10 +34,11 @@ class WorkflowResult:
 
 
 class MergeWorkflow:
-    def __init__(self, project_root: Path, redis_client, python_path: str = None):
+    def __init__(self, project_root: Path, redis_client, python_path: str = None, workflow_manager=None):
         self.project_root = project_root
         self.redis_client = redis_client
         self.python_path = python_path or "python"
+        self.workflow_manager = workflow_manager
 
     def _publish_log(self, runner_id: str, tag: str, message: str) -> None:
         """Redis pub/sub으로 머지 진행 로그를 SSE 스트림에 전달한다. 파일 로그에도 동시 기록."""
@@ -66,8 +67,22 @@ class MergeWorkflow:
         except Exception:
             pass
 
+    def _wf_update(self, runner_id: str, status: str, **kwargs) -> None:
+        """workflow_manager가 있을 때 안전하게 상태 업데이트"""
+        if not self.workflow_manager:
+            return
+        try:
+            wf = self.workflow_manager.get_by_runner_id(runner_id)
+            if wf:
+                self.workflow_manager.update_status(wf["id"], status, **kwargs)
+        except Exception as e:
+            logger.warning(f"[MergeWorkflow._wf_update] workflow update 실패 (무시): {e}")
+
     def run(self, runner_id: str, worktree_path: Path, base_dir: Path, plan_file: str = None) -> WorkflowResult:
         from worktree_manager import WorktreeManager
+
+        # Workflow: merging 상태로 전이
+        self._wf_update(runner_id, "merging")
 
         # 1. 변경사항 커밋
         self._publish_log(runner_id, "COMMIT", "변경사항 커밋 중...")
@@ -92,6 +107,7 @@ class MergeWorkflow:
                     )
                 except Exception:
                     pass
+            self._wf_update(runner_id, "failed", error_message=f"머지 충돌: {merge_result.message[:500]}")
             return WorkflowResult(
                 merged=False,
                 tests_passed=False,
@@ -114,6 +130,7 @@ class MergeWorkflow:
                     )
                 except Exception:
                     pass
+            self._wf_update(runner_id, "failed", error_message=f"테스트 실패: {test_result.output[:500]}")
             return WorkflowResult(
                 merged=True,
                 tests_passed=False,
@@ -121,6 +138,17 @@ class MergeWorkflow:
                 message=test_result.output[:500]
             )
         self._publish_log(runner_id, "TEST", "테스트 통과")
+
+        # 머지 커밋 해시 조회
+        commit_hash = ""
+        try:
+            result = subprocess.run(
+                ["git", "log", "-1", "--format=%H"],
+                capture_output=True, text=True, cwd=str(self.project_root)
+            )
+            commit_hash = result.stdout.strip()
+        except Exception:
+            pass
 
         # 4. worktree 정리
         WorktreeManager.remove(runner_id, base_dir, plan_file=plan_file)
@@ -134,6 +162,9 @@ class MergeWorkflow:
                 )
             except Exception:
                 pass
+
+        # Workflow: merged 상태로 전이
+        self._wf_update(runner_id, "merged", commit_hash=commit_hash)
 
         return WorkflowResult(merged=True, tests_passed=True, conflict=False, message="성공")
 

@@ -9,6 +9,7 @@
 	import MergeQueuePanel from '$lib/components/dev-runner/MergeQueuePanel.svelte';
 	import UnifiedLogsView from '$lib/components/dev-runner/UnifiedLogsView.svelte';
 	import DevRunnerSettingsPanel from '$lib/components/dev-runner/DevRunnerSettingsPanel.svelte';
+	import WorkflowList from '$lib/components/dev-runner/WorkflowList.svelte';
 	import { createSmartPolling } from '$lib/utils/smart-polling';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
 	import {
@@ -38,7 +39,7 @@
 	let lastStartTime = $state<string | null>(null);
 	let panelOpen = $state(true);
 	let taskHistoryOpen = $state(false);
-	let taskHistoryTab = $state<'tasks' | 'plans' | 'settings'>('plans');
+	let taskHistoryTab = $state<'tasks' | 'plans' | 'workflows' | 'settings'>('plans');
 	let currentTracking = $state<CurrentTrackingResponse | null>(null);
 	let selectedPlanPath = $state('');
 	let taskListRefreshTick = $state(0);
@@ -637,6 +638,7 @@
 								tabs={[
 									{ id: 'tasks', label: 'Tasks' },
 									{ id: 'plans', label: 'Plans' },
+									{ id: 'workflows', label: '이력' },
 									{ id: 'settings', label: '설정' },
 								]}
 								bind:activeTab={taskHistoryTab}
@@ -658,6 +660,10 @@
 							{:else if taskHistoryTab === 'plans'}
 								<div class="px-4 pb-4 h-full overflow-hidden flex flex-col">
 									<PlanList {plans} onPlansChange={fetchPlans} runningPlanFile={runStatus?.plan_file ?? null} {lastPlanFile} {batchPlans} onPlanSelect={(path) => { selectedPlanPath = path; }} />
+								</div>
+							{:else if taskHistoryTab === 'workflows'}
+								<div class="px-4 pb-4 h-full overflow-auto">
+									<WorkflowList />
 								</div>
 							{:else if taskHistoryTab === 'settings'}
 								<div class="px-4 pb-4 h-full overflow-auto">
