@@ -111,6 +111,7 @@ class BrowserWorkerManager:
         self.worker_pid_files = [
             f"unified_worker{self.pid_suffix}.pid",
             f"claude_worker{self.pid_suffix}.pid",
+            f"command_listener{self.pid_suffix}.pid",
         ]
 
         # Legacy PID 파일
