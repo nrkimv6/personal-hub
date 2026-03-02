@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { devRunnerMergeApi, type MergeQueueItem } from '$lib/api/dev-runner';
+	import { devRunnerMergeApi, type MergeQueueItem, type MergeHistoryItem } from '$lib/api/dev-runner';
 
 	let items: MergeQueueItem[] = $state([]);
+	let historyItems: MergeHistoryItem[] = $state([]);
 	let loading = $state(false);
 	let error = $state('');
 	let actionLoading: Record<string, boolean> = $state({});
@@ -42,7 +43,10 @@
 		loading = true;
 		error = '';
 		try {
-			items = await devRunnerMergeApi.queue();
+			[items, historyItems] = await Promise.all([
+				devRunnerMergeApi.queue(),
+				devRunnerMergeApi.history(),
+			]);
 		} catch (e: unknown) {
 			error = e instanceof Error ? e.message : '불러오기 실패';
 		} finally {
@@ -78,7 +82,7 @@
 		}
 	}
 
-	function planName(item: MergeQueueItem): string {
+	function planName(item: MergeQueueItem | MergeHistoryItem): string {
 		if (!item.plan_file) return item.project || item.runner_id;
 		const parts = item.plan_file.replace(/\\/g, '/').split('/');
 		return parts[parts.length - 1] || item.runner_id;
@@ -169,6 +173,40 @@
 									</button>
 								</div>
 							{/if}
+						</div>
+					</div>
+				</div>
+			{/each}
+		</div>
+	{/if}
+
+	{#if historyItems.length > 0}
+		<hr class="my-3 border-gray-100" />
+		<p class="mb-2 text-center text-xs text-gray-300">— 실행 이력 —</p>
+		<div class="space-y-2">
+			{#each historyItems as item (item.runner_id)}
+				<!-- svelte-ignore a11y_click_events_have_key_events -->
+				<!-- svelte-ignore a11y_interactive_supports_focus -->
+				<div
+					class="rounded border border-gray-100 bg-gray-50 p-3 opacity-40 grayscale cursor-pointer {selectedRunnerId === item.runner_id ? 'border-blue-300' : ''}"
+					role="button"
+					onclick={() => { selectedRunnerId = item.runner_id; connectMergeLog(item.runner_id); }}
+				>
+					<div class="flex items-start justify-between gap-2">
+						<div class="min-w-0 flex-1">
+							<p class="truncate text-xs font-medium text-gray-800">{planName(item)}</p>
+							<p class="truncate text-xs text-gray-400">{item.project} · {item.branch}</p>
+							<p class="text-xs text-gray-400">{item.timestamp.slice(0, 16).replace('T', ' ')}</p>
+						</div>
+						<div class="flex items-center gap-1">
+							{#if item.status === 'done'}
+								<span class="text-green-600 text-xs font-bold">✓</span>
+							{:else if item.status === 'failed'}
+								<span class="text-red-600 text-xs font-bold">✗</span>
+							{/if}
+							<span class="rounded px-2 py-0.5 text-xs font-medium {STATUS_CLASS[item.status] ?? 'bg-gray-100 text-gray-700'}">
+								{STATUS_LABEL[item.status] ?? item.status}
+							</span>
 						</div>
 					</div>
 				</div>
