@@ -1,40 +1,45 @@
 <!doctype html>
 <html lang="ko">
-	<head>
-		<meta charset="utf-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<meta name="theme-color" content="#5B6FBF" />
-		<link rel="manifest" href="/manifest.json" />
-		<link rel="apple-touch-icon" href="/icons/icon-192.png" />
-		<!-- Fonts: Pretendard + Fira Code -->
-		<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
-		<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/firacode@6.2.0/distr/fira_code.css" />
-		<!-- Kakao SDK -->
-		<script src="https://t1.kakaocdn.net/kakao_js_sdk/2.7.4/kakao.min.js" defer></script>
-		
-		<link rel="modulepreload" href="/_app/immutable/entry/start.B562zWlB.js">
-		<link rel="modulepreload" href="/_app/immutable/chunks/rgsq1z6O.js">
-		<link rel="modulepreload" href="/_app/immutable/chunks/DE-ZpUTG.js">
-		<link rel="modulepreload" href="/_app/immutable/chunks/CaAQ_QyT.js">
-		<link rel="modulepreload" href="/_app/immutable/chunks/CYgJF_JY.js">
-		<link rel="modulepreload" href="/_app/immutable/chunks/DwqbQPm8.js">
-		<link rel="modulepreload" href="/_app/immutable/chunks/B17Q6ahh.js">
-		<link rel="modulepreload" href="/_app/immutable/chunks/u0KrHBJo.js">
-		<link rel="modulepreload" href="/_app/immutable/entry/app.BusJapre.js">
-		<link rel="modulepreload" href="/_app/immutable/chunks/CHdC8FvS.js">
-		<link rel="modulepreload" href="/_app/immutable/chunks/Bql_ZUQg.js">
-		<link rel="modulepreload" href="/_app/immutable/chunks/olOvvyL4.js">
-		<link rel="modulepreload" href="/_app/immutable/chunks/D91PzWyf.js">
-		<link rel="modulepreload" href="/_app/immutable/chunks/CuDcuQiV.js">
-		<link rel="modulepreload" href="/_app/immutable/chunks/S9ZPVbJh.js">
-		<link rel="modulepreload" href="/_app/immutable/chunks/BKLmTdYY.js">
+
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta name="theme-color" content="#2E4AB8" />
+	<link rel="manifest" href="/manifest.json" />
+	<link rel="icon" href="/favicon.png" type="image/png" />
+	<link rel="icon" href="/favicon.ico" sizes="any" />
+	<link rel="apple-touch-icon" href="/icons/icon-192.png" />
+	<!-- Fonts: Pretendard + Fira Code -->
+	<link rel="stylesheet"
+		href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
+	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/firacode@6.2.0/distr/fira_code.css" />
+	<!-- Kakao SDK -->
+	<script src="https://t1.kakaocdn.net/kakao_js_sdk/2.7.4/kakao.min.js" defer></script>
+	
+		<link rel="modulepreload" href="/_app/immutable/entry/start.DkgJ_81M.js">
+		<link rel="modulepreload" href="/_app/immutable/chunks/BDs9y5So.js">
+		<link rel="modulepreload" href="/_app/immutable/chunks/SVVWGV4z.js">
+		<link rel="modulepreload" href="/_app/immutable/chunks/BKSfLtjS.js">
+		<link rel="modulepreload" href="/_app/immutable/chunks/D0iwhpLH.js">
+		<link rel="modulepreload" href="/_app/immutable/chunks/CvT8ifyw.js">
+		<link rel="modulepreload" href="/_app/immutable/entry/app.BSv3-wSw.js">
+		<link rel="modulepreload" href="/_app/immutable/chunks/DwVCJAD1.js">
+		<link rel="modulepreload" href="/_app/immutable/chunks/r_Jga7G7.js">
+		<link rel="modulepreload" href="/_app/immutable/chunks/CIdYNS1y.js">
+		<link rel="modulepreload" href="/_app/immutable/chunks/DsnmJJEf.js">
+		<link rel="modulepreload" href="/_app/immutable/chunks/KjCnoAk4.js">
+		<link rel="modulepreload" href="/_app/immutable/chunks/Di3Tedgn.js">
+		<link rel="modulepreload" href="/_app/immutable/chunks/B2m23lUI.js">
+		<link rel="modulepreload" href="/_app/immutable/chunks/AaRTRqre.js">
+		<link rel="modulepreload" href="/_app/immutable/chunks/DHs1SCww.js">
 		<link rel="modulepreload" href="/_app/env.js">
-	</head>
-	<body data-sveltekit-preload-data="hover">
-		<div style="display: contents">
+</head>
+
+<body data-sveltekit-preload-data="hover">
+	<div style="display: contents">
 			<script>
 				{
-					__sveltekit_lyyb3v = {
+					__sveltekit_1j9bw56 = {
 						base: "",
 						env: null
 					};
@@ -42,23 +47,18 @@
 					const element = document.currentScript.parentElement;
 
 					import("/_app/env.js").then(({ env }) => {
-						__sveltekit_lyyb3v.env = env;
+						__sveltekit_1j9bw56.env = env;
 
 						Promise.all([
-							import("/_app/immutable/entry/start.B562zWlB.js"),
-							import("/_app/immutable/entry/app.BusJapre.js")
+							import("/_app/immutable/entry/start.DkgJ_81M.js"),
+							import("/_app/immutable/entry/app.BSv3-wSw.js")
 						]).then(([kit, app]) => {
 							kit.start(app, element);
 						});
 					});
-
-					if ('serviceWorker' in navigator) {
-						addEventListener('load', function () {
-							navigator.serviceWorker.register('/service-worker.js');
-						});
-					}
 				}
 			</script>
 		</div>
-	</body>
+</body>
+
 </html>
