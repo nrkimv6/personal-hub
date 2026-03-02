@@ -1,0 +1,37 @@
+FAILED tests/dev_runner/test_command_listener_process.py::TestLaunchPlanRunnerProcess::test_launch_creates_subprocess - AssertionError: assert 2 == 1
+FAILED tests/dev_runner/test_e2e.py::test_e2e_full_lifecycle - AssertionError: Listener never processed the run command
+FAILED tests/dev_runner/test_e2e_multi_runner_scenarios.py::TestE2EScenario1::test_e2e_scenario1_two_runners_two_tabs - TypeError: object of type 'coroutine' has no len()
+FAILED tests/dev_runner/test_e2e_multi_runner_scenarios.py::TestE2EScenario2::test_e2e_scenario2_runner_stop_tab_remains - TypeError: 'coroutine' object is not subscriptable
+FAILED tests/dev_runner/test_e2e_multi_runner_scenarios.py::TestE2EScenario4::test_e2e_scenario4_stop_all_remaining - assert <coroutine object AsyncMockMixin._execute_mock_call at 0x0000014FDB9B2840> == []
+FAILED tests/dev_runner/test_executor_service.py::TestCORRECTConformance::test_engine_parameter_passing - AttributeError: 'coroutine' object has no attribute 'engine'
+FAILED tests/dev_runner/test_executor_service.py::TestCORRECTConformance::test_get_process_status_fallback_to_claude - AttributeError: 'coroutine' object has no attribute 'engine'
+FAILED tests/dev_runner/test_executor_service.py::TestCORRECTConformance::test_get_process_status_returns_engine_when_not_running - AttributeError: 'coroutine' object has no attribute 'running'. Did you mean: 'cr_running'?
+FAILED tests/dev_runner/test_executor_service.py::TestGetProcessStatus::test_current_cycle_key_absent_returns_none - AttributeError: 'coroutine' object has no attribute 'running'. Did you mean: 'cr_running'?
+FAILED tests/dev_runner/test_executor_service.py::TestGetProcessStatus::test_current_cycle_key_present_returns_int - AttributeError: 'coroutine' object has no attribute 'running'. Did you mean: 'cr_running'?
+FAILED tests/dev_runner/test_executor_service.py::TestGetProcessStatus::test_status_not_running - AttributeError: 'coroutine' object has no attribute 'running'. Did you mean: 'cr_running'?
+FAILED tests/dev_runner/test_executor_service.py::TestGetProcessStatus::test_status_redis_down_returns_not_running - AttributeError: 'coroutine' object has no attribute 'running'. Did you mean: 'cr_running'?
+FAILED tests/dev_runner/test_executor_service.py::TestGetProcessStatus::test_status_running_no_heartbeat_auto_cleanup - AttributeError: 'coroutine' object has no attribute 'running'. Did you mean: 'cr_running'?
+FAILED tests/dev_runner/test_executor_service.py::TestGetProcessStatus::test_status_running_with_heartbeat - AttributeError: 'coroutine' object has no attribute 'running'. Did you mean: 'cr_running'?
+FAILED tests/dev_runner/test_executor_service.py::TestStopDevRunner::test_stop_json_decode_force_cleanup - AssertionError: assert 'stopped' is None
+FAILED tests/dev_runner/test_full_e2e_real.py::TestFullE2E::test_batch_run_2plans - RuntimeError: Event loop is closed
+FAILED tests/dev_runner/test_full_e2e_real.py::TestFullE2E::test_single_plan_with_merge - RuntimeError: Event loop is closed
+FAILED tests/dev_runner/test_gemini_integration.py::TestBugFixEngineReporting::test_get_process_status_fallback_to_claude - AttributeError: 'coroutine' object has no attribute 'engine'
+FAILED tests/dev_runner/test_gemini_integration.py::TestBugFixEngineReporting::test_get_process_status_returns_engine_from_redis - AttributeError: 'coroutine' object has no attribute 'engine'
+FAILED tests/dev_runner/test_gemini_integration.py::TestGeminiDeepValidation::test_status_reporting_with_stale_pid - AttributeError: 'coroutine' object has no attribute 'running'. Did you mean: 'cr_running'?
+FAILED tests/dev_runner/test_noise_filter_76.py::TestStreamOutputFilter::test_attach_console_not_published - assert not True
+FAILED tests/dev_runner/test_noise_filter_76.py::TestStreamOutputFilter::test_xterm_noise_not_published - AssertionError: xterm.js 줄 publish 안 됨
+FAILED tests/dev_runner/test_plan_records_api.py::TestImportArchived::test_import_archived_endpoint - assert 0 >= 2
+FAILED tests/dev_runner/test_plan_records_api.py::TestImportArchived::test_list_records_category_filter_http - sqlalchemy.exc.IntegrityError: (sqlite3.IntegrityError) UNIQUE constraint failed: plan_records.filename_hash
+FAILED tests/dev_runner/test_plan_records_api.py::TestImportArchived::test_list_records_tags_filter_http - sqlalchemy.exc.IntegrityError: (sqlite3.IntegrityError) UNIQUE constraint failed: plan_records.filename_hash
+FAILED tests/dev_runner/test_plan_records_api.py::TestMemoUpdate::test_memo_invalid_action - sqlalchemy.exc.IntegrityError: (sqlite3.IntegrityError) UNIQUE constraint failed: plan_records.filename_hash
+FAILED tests/dev_runner/test_runner_limit.py::TestRunnerLimit::test_boundary_max0_rejects_all - AssertionError: assert 504 == 429
+FAILED tests/dev_runner/test_runner_limit.py::TestRunnerLimit::test_boundary_max1_second_rejected - AssertionError: assert 504 == 429
+FAILED tests/dev_runner/test_runner_limit.py::TestRunnerLimit::test_boundary_over_limit_raises_429 - AssertionError: assert 504 == 429
+FAILED tests/dev_runner/test_runner_limit_e2e.py::TestRunnerLimitE2E::test_e2e_1_third_start_rejected_when_max2 - AssertionError: assert 504 == 429
+FAILED tests/dev_runner/test_worktree_e2e.py::TestWorktreeE2E::test_e2e_1_full_lifecycle - AttributeError: 'tuple' object has no attribute 'is_dir'
+FAILED tests/dev_runner/test_worktree_e2e.py::TestWorktreeE2E::test_e2e_2_two_worktrees_sequential_merge - TypeError: unsupported operand type(s) for /: 'tuple' and 'str'
+FAILED tests/dev_runner/test_worktree_e2e.py::TestWorktreeE2E::test_e2e_3_conflict_on_second_merge - TypeError: unsupported operand type(s) for /: 'tuple' and 'str'
+FAILED tests/dev_runner/test_worktree_manager.py::TestWorktreeManagerCreate::test_boundary_nonexistent_base_dir_auto_create - AttributeError: 'tuple' object has no attribute 'is_dir'
+FAILED tests/dev_runner/test_worktree_manager.py::TestWorktreeManagerCreate::test_correct_conformance_path_pattern - AssertionError: assert (WindowsPath('C:/Users/Narang/AppData/Local/Temp/pytest-of-Narang/pytest-1096/test_correct_conformance_path_0/.worktrees/pattest'), 'runner/pattest') == (WindowsPath('C:/Users/Narang/AppData/Local/Temp/pytest-of-Narang/pytest-1096/test_correct_conformance_path_0/.worktrees') / 'pattest')
+FAILED tests/dev_runner/test_worktree_manager.py::TestWorktreeManagerCreate::test_right_creates_directory - AttributeError: 'tuple' object has no attribute 'is_dir'
+FAILED tests/dev_runner/test_worktree_manager.py::TestWorktreeManagerCreate::test_right_returns_absolute_path - AttributeError: 'tuple' object has no attribute 'is_absolute'
