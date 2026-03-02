@@ -280,6 +280,7 @@ $videoDownloadWatchdogLogFile = Get-LatestLogFileMultiPattern @("video_download_
 $crawlWatchdogLogFile = Get-LatestLogFileMultiPattern @("crawl_watchdog_")
 $commandListenerWatchdogLogFile = Get-LatestLogFileMultiPattern @("command_listener_watchdog_")
 $apiWatchdogLogFile = Get-LatestLogFileMultiPattern @("api_watchdog_")
+$workerCommandListenerLogFile = Get-LatestLogFileMultiPattern @("worker_command_listener_")
 $devRunnerLogFile = Get-LatestLogFileMultiPattern @("dev_runner_command_listener")
 $mergeOrchestratorLogFile = Get-LatestLogFileMultiPattern @("merge-orchestrator_")
 $cloudflaredLogFile = Get-LatestLogFileMultiPattern @("cloudflared_err", "cloudflared")
@@ -445,6 +446,7 @@ if (-not $Admin) {
     $crawlWatchdogLogFile = $null
     $commandListenerWatchdogLogFile = $null
     $apiWatchdogLogFile = $null
+    $workerCommandListenerLogFile = $null
     $devRunnerLogFile = $null
     $planRunnerLogFile = $null
     $planRunnerStreamLogFile = $null
@@ -572,6 +574,7 @@ function Start-CombinedLogTail {
         "CRAWL-WD"    = @{ Path = $CrawlWatchdogLog;  Color = "DarkYellow";  Tail = 2 }
         "CMD-WD"      = @{ Path = $CommandListenerWatchdogLog; Color = "DarkYellow"; Tail = 2 }
         "API-WD"      = @{ Path = $ApiWatchdogLog;          Color = "DarkYellow"; Tail = 3 }
+        "CMD-LISTENER" = @{ Path = $workerCommandListenerLogFile; Color = "DarkCyan"; Tail = 5 }
         "DEV-RUNNER"  = @{ Path = $DevRunnerLog;           Color = "DarkCyan";    Tail = 10 }
         "MERGE-ORCH"  = @{ Path = $mergeOrchestratorLogFile; Color = "Cyan";       Tail = 10 }
     }
@@ -667,6 +670,7 @@ function Start-CombinedLogTail {
         "CRAWL-WD"    = @("crawl_watchdog_*.log")
         "CMD-WD"      = @("command_listener_watchdog_*.log")
         "API-WD"      = @("api_watchdog_*.log")
+        "CMD-LISTENER" = @("worker_command_listener_*.log")
         "DEV-RUNNER"  = @("dev_runner_command_listener*.log")
         "MERGE-ORCH"  = @("merge-orchestrator_*.log")
         "TUNNEL"      = @("cloudflared_err_*.log", "cloudflared_err-*.log", "cloudflared_*.log")
@@ -675,7 +679,7 @@ function Start-CombinedLogTail {
     # Admin 전용 소스 — Production에서 제외 (Worker 로그는 logs/ 또는 logs/admin/에 기록됨)
     $devOnlySources = @("WORKER", "IG-WORKER", "LLM", "VIDEO-DL", "CRAWL",
                          "IG-WD", "CLAUDE-WD", "VIDEO-DL-WD", "CRAWL-WD", "CMD-WD", "API-WD",
-                         "WATCHDOG", "DEV-RUNNER", "MERGE-ORCH", "PLAN-RUNNER", "PR-STREAM")
+                         "WATCHDOG", "CMD-LISTENER", "DEV-RUNNER", "MERGE-ORCH", "PLAN-RUNNER", "PR-STREAM")
     if (-not $Admin) {
         foreach ($source in $devOnlySources) {
             $logConfig.Remove($source)

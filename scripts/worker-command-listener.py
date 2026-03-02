@@ -37,14 +37,15 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 BROWSER_WORKERS_SCRIPT = SCRIPT_DIR / "browser-workers.ps1"
 
 # 로깅 설정
-log_dir = PROJECT_ROOT / "logs" / "dev"
+log_dir = PROJECT_ROOT / "logs" / "admin"
 log_dir.mkdir(parents=True, exist_ok=True)
+_log_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler(log_dir / "worker_command_listener.log", encoding="utf-8"),
+        logging.FileHandler(log_dir / f"worker_command_listener_{_log_timestamp}.log", encoding="utf-8"),
         logging.StreamHandler(),
     ],
 )
