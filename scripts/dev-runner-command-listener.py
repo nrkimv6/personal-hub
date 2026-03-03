@@ -108,9 +108,42 @@ def _is_pid_alive(pid: int) -> bool:
         return False
 
 
+def _poll_merge_results(redis_client: redis.Redis):
+    """plan-runner:merge-results 큐에서 MergeOrchestrator 결과를 소비하여 Workflow DB에 반영"""
+    if not _wf_manager:
+        return
+    while True:
+        try:
+            raw = redis_client.lpop("plan-runner:merge-results")
+            if raw is None:
+                break
+            try:
+                result = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                logger.warning(f"[_poll_merge_results] JSON 파싱 실패 (무시): {raw!r:.200}")
+                continue
+            runner_id = result.get("runner_id")
+            if not runner_id:
+                continue
+            wf = _wf_manager.get_by_runner_id(runner_id)
+            if not wf or wf["status"] != "merge_pending":
+                continue
+            if result.get("success"):
+                _wf_manager.update_status(wf["id"], "merged")
+                logger.info(f"[_poll_merge_results] workflow {wf['id']} → merged (runner: {runner_id})")
+            else:
+                _wf_manager.update_status(
+                    wf["id"], "failed",
+                    error_message=result.get("message", "merge failed")[:500],
+                )
+                logger.info(f"[_poll_merge_results] workflow {wf['id']} → failed (runner: {runner_id})")
+        except Exception as e:
+            logger.warning(f"[_poll_merge_results] 처리 오류 (무시): {e}")
+            break
 
-def _cleanup_process_state(runner_id: str, redis_client: redis.Redis):
-    """전역 프로세스 변수 + Redis 상태 정리 (per-runner)"""
+
+def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: str = "process_cleanup"):
+    """전역 프로세스 변수 + Redis 상태 정리 (per-runner) + Workflow DB 갱신"""
     global _running_processes, _running_log_files, _stream_threads
 
     # cleanup 직전 SSE 클라이언트에 완료 신호 publish
@@ -154,6 +187,16 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis):
         redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
     except Exception:
         pass
+
+    # Workflow DB: running 상태인 경우 failed로 전이
+    try:
+        if _wf_manager:
+            wf = _wf_manager.get_by_runner_id(runner_id)
+            if wf and wf["status"] == "running":
+                _wf_manager.update_status(wf["id"], "failed", error_message=f"Cleanup: {reason}")
+                logger.info(f"[cleanup] workflow {wf['id']} → failed (reason: {reason})")
+    except Exception as e:
+        logger.warning(f"[cleanup] workflow DB 갱신 실패 (무시): {e}")
 
 
 class _DummyProcess:
@@ -219,7 +262,7 @@ def _monitor_pid_until_exit(runner_id: str, pid: int, redis_client: redis.Redis)
             break
         if not _is_pid_alive(pid):
             logger.info(f"[monitor_pid] runner {runner_id} PID {pid} 종료 감지 → cleanup")
-            _cleanup_process_state(runner_id, redis_client)
+            _cleanup_process_state(runner_id, redis_client, reason="pid_exit_detected")
             break
         time.sleep(1)
 
@@ -235,7 +278,7 @@ def _attach_to_running_process(runner_id: str, pid: int, redis_client: redis.Red
         log_file_path = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
     if not log_file_path or not Path(log_file_path).exists():
         logger.warning(f"[attach] runner {runner_id} 로그 파일 없음 → cleanup")
-        _cleanup_process_state(runner_id, redis_client)
+        _cleanup_process_state(runner_id, redis_client, reason="no_log_file")
         return
 
     # _DummyProcess 등록 (기존 heartbeat 루프의 proc.poll() 호환)
@@ -280,13 +323,13 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
         pid_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
         if not pid_str:
             logger.info(f"[listener] runner {runner_id} PID 정보 없음 → cleanup")
-            _cleanup_process_state(runner_id, redis_client)
+            _cleanup_process_state(runner_id, redis_client, reason="reconnect_orphan")
             continue
         try:
             pid = int(pid_str)
         except ValueError:
             logger.warning(f"[reconnect] runner {runner_id} 잘못된 PID 값: {pid_str!r} → cleanup")
-            _cleanup_process_state(runner_id, redis_client)
+            _cleanup_process_state(runner_id, redis_client, reason="reconnect_orphan")
             continue
 
         # 이미 _running_processes에 등록된 경우(Redis 재연결 상황) 스킵
@@ -297,7 +340,7 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
             _attach_to_running_process(runner_id, pid, redis_client)
         else:
             logger.info(f"[listener] 재시작 감지: runner {runner_id} PID {pid} 종료됨 → cleanup")
-            _cleanup_process_state(runner_id, redis_client)
+            _cleanup_process_state(runner_id, redis_client, reason="reconnect_orphan")
 
 
 def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Redis, runner_id: str = ""):
@@ -414,6 +457,13 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                         _wf_manager.update_status(
                             wf["id"], "failed",
                             error_message=f"Process exited with code {exit_code}",
+                        )
+                    else:
+                        # exit_code is None: 프로세스가 kill/OOM 등으로 비정상 종료
+                        logger.warning(f"[_stream_output] exit_code=None → workflow {wf['id']} failed 처리")
+                        _wf_manager.update_status(
+                            wf["id"], "failed",
+                            error_message="Process terminated unexpectedly (exit_code=None)",
                         )
             except Exception as wf_err:
                 logger.warning(f"[_stream_output] workflow update 실패 (무시): {wf_err}")
@@ -1134,7 +1184,7 @@ def main():
                         else:
                             # 프로세스가 종료되었는데 전역변수가 남아있는 경우 즉시 cleanup
                             logger.warning(f"heartbeat: 프로세스 종료 감지 (runner_id: {rid}, exit code: {proc.returncode}), 상태 정리")
-                            _cleanup_process_state(rid, r)
+                            _cleanup_process_state(rid, r, reason="heartbeat_dead_process")
                     # Orchestrator health check
                     if _merge_orchestrator_process and _merge_orchestrator_process.poll() is not None:
                         rc = _merge_orchestrator_process.returncode
@@ -1148,6 +1198,9 @@ def main():
                             except Exception:
                                 pass
                         _merge_orchestrator_process = None
+
+                    # merge-results 큐 소비 → Workflow DB 업데이트
+                    _poll_merge_results(r)
 
                     last_heartbeat = now
 
