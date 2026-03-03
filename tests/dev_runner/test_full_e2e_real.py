@@ -23,7 +23,7 @@ from app.modules.dev_runner.config import DevRunnerConfig
 from tests.dev_runner.conftest_e2e import (
     e2e_redis_cleanup,
     listener_process,
-    real_redis,
+    isolated_redis,
 )
 
 pytestmark = pytest.mark.full_e2e
@@ -65,11 +65,11 @@ def _post_run(http_client, plan_file: str, max_cycles: int = 1) -> str:
     return runner_id
 
 
-def _wait_until_not_running(real_redis, runner_id: str, timeout: int = 600) -> bool:
+def _wait_until_not_running(isolated_redis, runner_id: str, timeout: int = 600) -> bool:
     """status != 'running' 될 때까지 최대 timeout초 대기. 성공 여부 반환."""
     key = f"{RUNNER_KEY_PREFIX}:{runner_id}:status"
     for _ in range(timeout * 2):
-        status = real_redis.get(key)
+        status = isolated_redis.get(key)
         if status != "running":
             return True
         time.sleep(0.5)
@@ -80,7 +80,7 @@ def _wait_until_not_running(real_redis, runner_id: str, timeout: int = 600) -> b
 class TestFullE2E:
     """Level 3: 실제 LLM 1 cycle 실행 → merge까지 전체 파이프라인"""
 
-    def test_single_plan_1cycle(self, http_client, listener_process, real_redis, e2e_redis_cleanup):
+    def test_single_plan_1cycle(self, http_client, listener_process, isolated_redis, e2e_redis_cleanup):
         """단일 plan 파일로 1 cycle 실행 → 완료까지 대기
 
         검증:
@@ -90,15 +90,15 @@ class TestFullE2E:
         plan_file = str(FIXTURES_DIR / "test_minimal_plan.md")
         runner_id = _post_run(http_client, plan_file, max_cycles=1)
 
-        assert _wait_until_not_running(real_redis, runner_id, timeout=600), (
+        assert _wait_until_not_running(isolated_redis, runner_id, timeout=600), (
             f"runner {runner_id}가 10분 내 완료되지 않음"
         )
 
-        log_path = real_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
+        log_path = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
         if log_path and Path(log_path).exists():
             assert Path(log_path).stat().st_size > 0, "로그 파일이 비어 있음"
 
-    def test_single_plan_with_merge(self, http_client, listener_process, real_redis, e2e_redis_cleanup):
+    def test_single_plan_with_merge(self, http_client, listener_process, isolated_redis, e2e_redis_cleanup):
         """1 cycle 실행 후 merge queue 진입 → 상태 확인
 
         검증:
@@ -108,21 +108,21 @@ class TestFullE2E:
         plan_file = str(FIXTURES_DIR / "test_minimal_plan.md")
         runner_id = _post_run(http_client, plan_file, max_cycles=1)
 
-        assert _wait_until_not_running(real_redis, runner_id, timeout=600), (
+        assert _wait_until_not_running(isolated_redis, runner_id, timeout=600), (
             f"runner {runner_id}가 10분 내 완료되지 않음"
         )
 
         # worktree 생성 여부 확인 (생성된 경우)
-        worktree_path = real_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
+        worktree_path = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
         if worktree_path:
             # worktree가 생성됐다면 merge 처리 후 정리됐거나 merge 중
-            merge_status = real_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+            merge_status = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
             # merge_status는 pending_merge, conflict, merged, 또는 None
             assert merge_status in (None, "pending_merge", "conflict", "merged"), (
                 f"예상치 못한 merge_status: {merge_status}"
             )
 
-    def test_batch_run_2plans(self, http_client, listener_process, real_redis, e2e_redis_cleanup):
+    def test_batch_run_2plans(self, http_client, listener_process, isolated_redis, e2e_redis_cleanup):
         """2개 plan 순차 실행 → 각각 독립 로그 파일 생성
 
         검증:
@@ -137,14 +137,14 @@ class TestFullE2E:
 
         # 두 runner 모두 완료 대기
         for rid in (runner_id_1, runner_id_2):
-            assert _wait_until_not_running(real_redis, rid, timeout=600), (
+            assert _wait_until_not_running(isolated_redis, rid, timeout=600), (
                 f"runner {rid}가 10분 내 완료되지 않음"
             )
 
         # 각각 독립 로그 파일 확인
         log_paths = set()
         for rid in (runner_id_1, runner_id_2):
-            log_path = real_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:stream_log_path")
+            log_path = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:stream_log_path")
             if log_path:
                 log_paths.add(log_path)
 

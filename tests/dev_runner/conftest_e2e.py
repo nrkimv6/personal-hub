@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 import redis as redis_lib
 
+REDIS_TEST_DB = 15
 HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
 PLAN_RUNNER_KEY_PATTERN = "plan-runner:*"
 LISTENER_SCRIPT = Path("D:/work/project/tools/monitor-page/scripts/dev-runner-command-listener.py")
@@ -36,11 +37,25 @@ def real_redis():
 
 
 @pytest.fixture
+def isolated_redis():
+    """테스트 전용 Redis db=15 — 격리된 DB 사용으로 운영 DB 오염 방지"""
+    try:
+        r = redis_lib.Redis(host="localhost", port=6379, db=REDIS_TEST_DB, decode_responses=True)
+        r.ping()
+    except Exception:
+        pytest.skip("Redis not available")
+    r.flushdb()
+    yield r
+    r.flushdb()
+    r.close()
+
+
+@pytest.fixture
 def listener_process(real_redis):
     """Listener 프로세스 lifecycle 관리
 
     1. 기존 heartbeat 키 삭제 (잔여 상태 초기화)
-    2. Listener 프로세스 spawn
+    2. Listener 프로세스 spawn (db=REDIS_TEST_DB 격리)
     3. heartbeat 키 최대 10초 대기
     4. yield
     5. SIGTERM → 정리
@@ -49,7 +64,7 @@ def listener_process(real_redis):
 
     python = str(PYTHON_EXE) if PYTHON_EXE.exists() else "python"
     process = subprocess.Popen(
-        [python, str(LISTENER_SCRIPT)],
+        [python, str(LISTENER_SCRIPT), "--redis-db", str(REDIS_TEST_DB)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -146,15 +161,16 @@ def e2e_worktree_cleanup():
 
 
 @pytest.fixture
-def e2e_redis_cleanup(real_redis):
+def e2e_redis_cleanup(isolated_redis):
     """plan-runner:* 키 패턴 cleanup (before + after)
 
+    isolated_redis(db=15)를 사용하여 운영 DB 오염 방지.
     heartbeat 키는 삭제하지 않음 — Listener 프로세스가 활성 중임을 API가 확인해야 함.
     """
     def _cleanup():
-        for key in real_redis.scan_iter("plan-runner:*"):
+        for key in isolated_redis.scan_iter("plan-runner:*"):
             if key not in _PRESERVE_KEYS:
-                real_redis.delete(key)
+                isolated_redis.delete(key)
 
     _cleanup_test_worktrees()
     _cleanup()

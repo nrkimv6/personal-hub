@@ -37,19 +37,21 @@ def _cleanup_test_worktree():
         pass
 
 
+REDIS_TEST_DB = 15
+
 @pytest.fixture(scope="module")
 def background_listener():
-    r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+    r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB, decode_responses=True)
     # FORCE CLEANUP
     r.delete("plan-runner:state:status")
     r.delete("plan-runner:state:pid")
     r.delete("plan-runner:listener:heartbeat")
     # 이전 테스트 실행에서 남은 stale worktree 정리
     _cleanup_test_worktree()
-    
+
     script_path = Path("scripts/dev-runner-command-listener.py")
     process = subprocess.Popen(
-        ["python", str(script_path)],
+        ["python", str(script_path), "--redis-db", str(REDIS_TEST_DB)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True
@@ -71,7 +73,7 @@ def background_listener():
 
 class TestHttpE2EChain:
     def test_http_start_to_process_execution(self, api_client, background_listener):
-        r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+        r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB, decode_responses=True)
 
         payload = {
             "engine": "gemini",
@@ -106,7 +108,7 @@ class TestHttpE2EChain:
         print(f"\n[SUCCESS] HTTP E2E Start Chain Verified (runner_id: {runner_id}, PID: {r.get(f'{RUNNER_KEY_PREFIX}:{runner_id}:pid')})")
 
     def test_http_stop_to_process_cleanup(self, api_client, background_listener):
-        r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+        r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB, decode_responses=True)
         from app.modules.dev_runner.services.executor_service import RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY
 
         # active runners 확인 후 stop
