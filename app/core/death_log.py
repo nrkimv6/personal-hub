@@ -39,6 +39,19 @@ def _ensure_log_dir() -> None:
     _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
+def _trim_log(keep: int = 500) -> None:
+    """파일 줄 수가 keep 초과 시 앞쪽 줄 제거 (no-op if ≤ keep or file absent)."""
+    try:
+        if not _LOG_PATH.exists():
+            return
+        lines = _LOG_PATH.read_text(encoding="utf-8").splitlines()
+        if len(lines) <= keep:
+            return
+        _LOG_PATH.write_text("\n".join(lines[-keep:]) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _write_entry(entry: dict[str, Any]) -> None:
     """JSONL 형식으로 한 줄 기록 (예외 무시)."""
     try:
@@ -66,6 +79,7 @@ def set_last_request(path: str) -> None:
 def record_start() -> None:
     """프로세스 시작 이벤트를 기록합니다."""
     global _START_TIME
+    _trim_log()
     _START_TIME = time.time()
     _write_entry({
         "timestamp": datetime.now().isoformat(timespec="seconds"),

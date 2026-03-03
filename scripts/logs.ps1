@@ -262,7 +262,6 @@ $apiLogFile = $apiCandidates | Sort-Object LastWriteTime -Descending | Select-Ob
 if ($apiLogFile) { $apiLogFile = $apiLogFile.FullName }
 $workerLogFile = Get-LatestLogFileMultiPattern @("stdout_worker_", "worker_", "unified_worker_")
 $frontendLogFile = Get-LatestLogFileMultiPattern @("frontend_2")
-$igWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_instagram_", "instagram_")
 $claudeWorkerLogFile = Get-LatestLogFileMultiPattern @("llm_worker_")
 $videoDownloadWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_video_download_worker_", "video_download_worker_")
 $crawlWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_crawl_", "crawl_worker_")
@@ -400,7 +399,6 @@ function Test-StaleLogFile {
 # Warn about potentially stale log files and exclude them — apiLogFile 유무와 무관하게 항상 실행
 $timestampedLogs = @(
     @{ Name = "Worker"; Var = "workerLogFile" },
-    @{ Name = "IG-Worker"; Var = "igWorkerLogFile" },
     @{ Name = "Claude Worker"; Var = "claudeWorkerLogFile" },
     @{ Name = "Video Download"; Var = "videoDownloadWorkerLogFile" },
     @{ Name = "Crawl Worker"; Var = "crawlWorkerLogFile" }
@@ -436,7 +434,6 @@ foreach ($log in $extraTimestampedLogs) {
 # Public 모드: 워커/watchdog/dev-runner 로그 제외 (Admin 아닐 때)
 if (-not $Admin) {
     $workerLogFile = $null
-    $igWorkerLogFile = $null
     $claudeWorkerLogFile = $null
     $videoDownloadWorkerLogFile = $null
     $crawlWorkerLogFile = $null
@@ -536,7 +533,6 @@ function Start-CombinedLogTail {
         [string]$ApiLog,
         [string]$WorkerLog,
         [string]$FrontendLog,
-        [string]$IgWorkerLog,
         [string]$ClaudeWorkerLog,
         [string]$VideoDownloadLog,
         [string]$CrawlWorkerLog,
@@ -563,7 +559,6 @@ function Start-CombinedLogTail {
         "TUNNEL"      = @{ Path = $CloudflaredLog;    Color = "DarkGray";    Tail = 3 }
         "API"         = @{ Path = $ApiLog;            Color = "Cyan";        Tail = 5 }
         "WORKER"      = @{ Path = $WorkerLog;         Color = "Magenta";     Tail = 5 }
-        "IG-WORKER"   = @{ Path = $IgWorkerLog;       Color = "DarkMagenta"; Tail = 3 }
         "LLM"         = @{ Path = $ClaudeWorkerLog;   Color = "Blue";        Tail = 3 }
         "VIDEO-DL"    = @{ Path = $VideoDownloadLog;  Color = "DarkGreen";   Tail = 5 }
         "CRAWL"       = @{ Path = $CrawlWorkerLog;    Color = "DarkBlue";    Tail = 5 }
@@ -658,7 +653,6 @@ function Start-CombinedLogTail {
     $timestampedLogPatterns = @{
         "API"         = @("stdout_api_*.log", "api_*.log")
         "WORKER"      = @("stdout_worker_*.log", "worker_*.log", "unified_worker_*.log")
-        "IG-WORKER"   = @("stdout_instagram_*.log", "instagram_*.log")
         "LLM"         = @("llm_worker_*.log")
         "VIDEO-DL"    = @("stdout_video_download_worker_*.log", "video_download_worker_*.log")
         "CRAWL"       = @("stdout_crawl_*.log", "crawl_worker_*.log")
@@ -677,8 +671,8 @@ function Start-CombinedLogTail {
     }
 
     # Admin 전용 소스 — Production에서 제외 (Worker 로그는 logs/ 또는 logs/admin/에 기록됨)
-    $devOnlySources = @("WORKER", "IG-WORKER", "LLM", "VIDEO-DL", "CRAWL",
-                         "IG-WD", "CLAUDE-WD", "VIDEO-DL-WD", "CRAWL-WD", "CMD-WD", "API-WD",
+    $devOnlySources = @("WORKER", "LLM", "VIDEO-DL", "CRAWL",
+                         "CLAUDE-WD", "VIDEO-DL-WD", "CRAWL-WD", "CMD-WD", "API-WD",
                          "WATCHDOG", "CMD-LISTENER", "DEV-RUNNER", "MERGE-ORCH", "PLAN-RUNNER", "PR-STREAM")
     if (-not $Admin) {
         foreach ($source in $devOnlySources) {
@@ -926,7 +920,6 @@ if ($Follow) {
                 -ApiLog $apiLogFile `
                 -WorkerLog $workerLogFile `
                 -FrontendLog $frontendLogFile `
-                -IgWorkerLog $igWorkerLogFile `
                 -ClaudeWorkerLog $claudeWorkerLogFile `
                 -VideoDownloadLog $videoDownloadWorkerLogFile `
                 -CrawlWorkerLog $crawlWorkerLogFile `
