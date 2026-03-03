@@ -76,7 +76,7 @@ def mock_worktree(listener_mod, tmp_path):
     """WorktreeManager.create mock — start_plan_runner 테스트용"""
     worktree_path = tmp_path / "worktree"
     worktree_path.mkdir()
-    with patch.object(listener_mod.WorktreeManager, 'create', return_value=worktree_path):
+    with patch.object(listener_mod.WorktreeManager, 'create', return_value=(worktree_path, "runner/test1234")):
         yield worktree_path
 
 
@@ -120,8 +120,8 @@ class TestLaunchPlanRunnerProcess:
             mock_thread.return_value = MagicMock()
             result = listener_mod._launch_plan_runner_process(command, fr, RUNNER_ID, mock_worktree, "common/docs/plan/test.md", None)
 
-        assert mp.call_count == 1
-        cmd = mp.call_args[0][0]
+        assert mp.call_count >= 1  # plan runner + optional merge orchestrator
+        cmd = mp.call_args_list[0][0][0]
         assert "run" in cmd
         assert "--plan-file" in cmd
         assert "common/docs/plan/test.md" in cmd

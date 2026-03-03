@@ -59,8 +59,8 @@ class TestWorktreeE2E:
         base_dir, repo = worktrees_base
 
         # 2개 worktree 생성
-        wt1, _ = WorktreeManager.create("e2e_a", base_dir)
-        wt2, _ = WorktreeManager.create("e2e_b", base_dir)
+        wt1, _b1 = WorktreeManager.create("e2e_a", base_dir)
+        wt2, _b2 = WorktreeManager.create("e2e_b", base_dir)
 
         # 각각 다른 파일 수정
         (wt1 / "file_a.py").write_text("A = 1")
@@ -85,8 +85,8 @@ class TestWorktreeE2E:
         """E2E-3: 동일 파일 수정 → 첫 번째 머지 성공, 두 번째 충돌 확인"""
         base_dir, repo = worktrees_base
 
-        wt1, _ = WorktreeManager.create("e2e_c1", base_dir)
-        wt2, _ = WorktreeManager.create("e2e_c2", base_dir)
+        wt1, _b1 = WorktreeManager.create("e2e_c1", base_dir)
+        wt2, _b2 = WorktreeManager.create("e2e_c2", base_dir)
 
         # 두 worktree에서 같은 파일 다르게 수정
         (wt1 / "shared.py").write_text("value = 'from_wt1'")

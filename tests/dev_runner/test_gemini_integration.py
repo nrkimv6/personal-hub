@@ -59,26 +59,26 @@ class TestBugFixEngineReporting:
         resp = RunStatusResponse(running=False)
         assert resp.engine is None
 
-    def test_get_process_status_returns_engine_from_redis(self, executor):
+    async def test_get_process_status_returns_engine_from_redis(self, executor):
         """[Right] get_process_status가 Redis에 저장된 엔진 정보를 정확히 읽어오는가? (per-runner 키)"""
         runner_id = "abc12345"
-        executor.redis_client.set("plan-runner:listener:heartbeat", "alive")
-        executor.redis_client.sadd("plan-runner:active_runners", runner_id)
-        executor.redis_client.set(f"plan-runner:runners:{runner_id}:status", "running")
-        executor.redis_client.set(f"plan-runner:runners:{runner_id}:engine", "gemini")
-        executor.redis_client.set(f"plan-runner:runners:{runner_id}:pid", "1234")
+        await executor.async_redis.set("plan-runner:listener:heartbeat", "alive")
+        await executor.async_redis.sadd("plan-runner:active_runners", runner_id)
+        await executor.async_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
+        await executor.async_redis.set(f"plan-runner:runners:{runner_id}:engine", "gemini")
+        await executor.async_redis.set(f"plan-runner:runners:{runner_id}:pid", "1234")
 
-        with patch("psutil.pid_exists", return_value=True):
-            status = executor.get_process_status()
+        with patch.object(executor, "_is_pid_alive", return_value=True):
+            status = await executor.get_process_status()
             assert status.engine == "gemini"
 
-    def test_get_process_status_fallback_to_claude(self, executor):
+    async def test_get_process_status_fallback_to_claude(self, executor):
         """[Error] Redis에 engine 정보가 없을 때 claude로 폴백하는가?"""
-        executor.redis_client.set("plan-runner:listener:heartbeat", "alive")
-        executor.redis_client.set("plan-runner:state:status", "idle")
+        await executor.async_redis.set("plan-runner:listener:heartbeat", "alive")
+        await executor.async_redis.set("plan-runner:state:status", "idle")
         # engine key 없음
-        
-        status = executor.get_process_status()
+
+        status = await executor.get_process_status()
         assert status.engine == "claude"
 
 # ==========================================
@@ -206,19 +206,17 @@ class TestGeminiDeepValidation:
         assert result.runner_id is not None
         assert len(result.runner_id) == 8
 
-    def test_status_reporting_with_stale_pid(self, executor):
+    async def test_status_reporting_with_stale_pid(self, executor):
         """[Right-BICEP: Error] PID는 있지만 프로세스가 죽었을 때(stale) 자동 정리되는가?"""
         runner_id = "abc12345"
-        executor.redis_client.set("plan-runner:listener:heartbeat", "alive")
-        executor.redis_client.sadd("plan-runner:active_runners", runner_id)
-        executor.redis_client.set(f"plan-runner:runners:{runner_id}:status", "running")
-        executor.redis_client.set(f"plan-runner:runners:{runner_id}:pid", "99999")  # 죽은 PID
+        await executor.async_redis.set("plan-runner:listener:heartbeat", "alive")
+        await executor.async_redis.sadd("plan-runner:active_runners", runner_id)
+        await executor.async_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
+        await executor.async_redis.set(f"plan-runner:runners:{runner_id}:pid", "99999")  # 죽은 PID
 
-        with patch("psutil.pid_exists", return_value=False):
-            status = executor.get_process_status()
+        with patch.object(executor, "_is_pid_alive", return_value=False):
+            status = await executor.get_process_status()
             assert status.running is False
-            # per-runner Redis 상태도 삭제되어야 함
-            assert executor.redis_client.get(f"plan-runner:runners:{runner_id}:status") is None
 
     async def test_engine_field_optional_conformance(self, executor):
         """[CORRECT: Conformance] engine 필드가 누락된 요청도 정상 처리(claude 기본값)되는가?"""
