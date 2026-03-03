@@ -39,6 +39,12 @@ if str(_SCRIPTS_DIR) not in sys.path:
 from listener_noise_filter import NOISE_BLOCK_MARKERS as _NOISE_BLOCK_MARKERS, is_noise_line as _is_noise_line
 from worktree_manager import WorktreeManager, WorktreeError
 from workflow_manager import WorkflowManager
+from plan_worktree_helpers import (
+    is_plan_in_progress as _is_plan_in_progress,
+    parse_plan_worktree_info as _parse_plan_worktree_info,
+    write_plan_worktree_info as _write_plan_worktree_info,
+    remove_plan_header_fields as _remove_plan_header_fields,
+)
 
 # 설정
 REDIS_HOST = "localhost"
@@ -164,28 +170,33 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     try:
         # worktree 정리 (머지 완료 또는 실패로 정리 필요한 경우)
         merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+        plan_file_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+        if plan_file_val == "ALL":
+            plan_file_val = None
+
+        # 구현중 plan은 워크트리 보존 (재실행 시 이어서 작업 가능)
+        _preserve_worktree = False
+        if plan_file_val and _is_plan_in_progress(plan_file_val):
+            _preserve_worktree = True
+            logger.info(f"워크트리 보존 (plan 구현중): {runner_id}")
+
         # merge_status가 없거나 "merged"가 아닌 경우에만 worktree 정리 시도
         # (머지 워크플로가 별도로 관리하는 경우 스킵)
-        if merge_status not in ("pending_merge", "conflict", "queued"):
+        if not _preserve_worktree and merge_status not in ("pending_merge", "conflict", "queued"):
             try:
-                plan_file_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
-                if plan_file_val == "ALL":
-                    plan_file_val = None
                 WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file_val or None)
             except Exception as wt_e:
                 logger.warning(f"worktree 정리 실패 (runner_id: {runner_id}): {wt_e}")
-        elif merge_status in ("merging", "testing"):
+        elif not _preserve_worktree and merge_status in ("merging", "testing"):
             # 프로세스가 죽은 상태에서 중간 상태로 남은 경우 — stale worktree 정리
             try:
-                plan_file_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
-                if plan_file_val == "ALL":
-                    plan_file_val = None
                 WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file_val or None)
                 logger.info(f"stale 중간 상태 worktree 정리: {runner_id} (merge_status={merge_status})")
             except Exception as wt_e:
                 logger.warning(f"stale worktree 정리 실패 (runner_id: {runner_id}): {wt_e}")
 
-        redis_client.delete(
+        # worktree_path 키: 보존 시 삭제하지 않음 (재실행 시 재사용)
+        keys_to_delete = [
             f"{RUNNER_KEY_PREFIX}:{runner_id}:status",
             f"{RUNNER_KEY_PREFIX}:{runner_id}:pid",
             f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file",
@@ -193,8 +204,10 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
             f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path",
             f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path",
             f"{RUNNER_KEY_PREFIX}:{runner_id}:engine",
-            f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path",
-        )
+        ]
+        if not _preserve_worktree:
+            keys_to_delete.append(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
+        redis_client.delete(*keys_to_delete)
         redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
     except Exception:
         pass
@@ -593,9 +606,28 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
     # 명령어 구성
     plan_file = command.get("plan_file")
 
-    # worktree 생성 (시간이 걸릴 수 있음)
+    # worktree 생성 또는 재사용 (시간이 걸릴 수 있음)
     try:
-        worktree_path, branch = WorktreeManager.create(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file)
+        _reused_worktree = False
+        if plan_file:
+            existing_branch, existing_wt_rel = _parse_plan_worktree_info(plan_file)
+            if existing_branch and existing_wt_rel:
+                existing_wt_path = PROJECT_ROOT / existing_wt_rel
+                if existing_wt_path.is_dir():
+                    worktree_path = existing_wt_path
+                    branch = existing_branch
+                    _reused_worktree = True
+                    logger.info(f"기존 워크트리 재사용: {worktree_path} (branch: {branch})")
+                else:
+                    # 경로 없음 → plan 헤더에서 필드 제거 후 신규 생성
+                    _remove_plan_header_fields(plan_file)
+                    logger.info(f"워크트리 경로 없음, 신규 생성: {existing_wt_rel}")
+        if not _reused_worktree:
+            worktree_path, branch = WorktreeManager.create(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file)
+            # Phase 4: plan 헤더에 branch/worktree 기록 (수동 /implement와 동일 패턴)
+            if plan_file:
+                worktree_rel = str(worktree_path.relative_to(PROJECT_ROOT)).replace("\\", "/")
+                _write_plan_worktree_info(plan_file, branch, worktree_rel)
     except WorktreeError as e:
         logger.error(f"worktree 생성 실패 (runner_id: {runner_id}): {e}")
         _set_error_status(f"worktree 생성 실패: {e}")

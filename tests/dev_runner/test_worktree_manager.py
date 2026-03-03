@@ -58,14 +58,33 @@ class TestWorktreeManagerCreate:
         path, _branch = WorktreeManager.create("xyz789", base_dir)
         assert path.is_dir()
 
-    def test_error_duplicate_runner_id_retries(self, worktrees_dir):
-        """TC-Error: 동일 runner_id로 두 번 create() → 잔여 worktree 제거 후 재생성 성공"""
+    def test_error_duplicate_runner_id_reuses(self, worktrees_dir):
+        """TC-Error: 동일 runner_id로 두 번 create() → 기존 워크트리 재사용 (커밋 보존)"""
         base_dir, repo = worktrees_dir
         path1, branch1 = WorktreeManager.create("dup001", base_dir)
-        # 두 번째 호출: 기존 worktree 제거 후 재생성 (WorktreeError 아님)
+        # worktree에 커밋 추가
+        (path1 / "test.txt").write_text("hello")
+        subprocess.run(["git", "add", "."], capture_output=True, cwd=str(path1))
+        subprocess.run(["git", "commit", "-m", "test commit"], capture_output=True, cwd=str(path1))
+        # 두 번째 호출: 기존 워크트리 재사용 (커밋 보존)
         path2, branch2 = WorktreeManager.create("dup001", base_dir)
         assert path2.is_dir()
         assert branch1 == branch2
+        assert path1 == path2
+        log = subprocess.run(["git", "log", "--oneline"], capture_output=True, text=True, cwd=str(path2))
+        assert "test commit" in log.stdout
+
+    def test_create_prune_dangling_then_recreate(self, worktrees_dir):
+        """TC-Error: 워크트리 디렉토리 없고 브랜치만 남은 경우 → prune 후 재생성"""
+        import shutil
+        base_dir, repo = worktrees_dir
+        path1, branch1 = WorktreeManager.create("prune001", base_dir)
+        # 디렉토리 강제 삭제 (git worktree remove 없이 → dangling 참조 발생)
+        shutil.rmtree(str(path1))
+        # 두 번째 호출: dangling 정리 후 재생성
+        path2, branch2 = WorktreeManager.create("prune001", base_dir)
+        assert path2.is_dir()
+        assert branch2 == branch1
 
     def test_error_not_a_git_repo(self, tmp_path):
         """TC-Error: git 저장소가 아닌 디렉토리 → WorktreeError"""
