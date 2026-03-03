@@ -39,6 +39,11 @@ def _run_stream(lines: list):
     _redis_mock = um.MagicMock()
     sys.modules.setdefault("redis", _redis_mock)
 
+    # 다른 테스트가 오염시킨 listener_noise_filter mock을 sys.modules에서 제거
+    # (test_command_listener_multi_runner.py가 is_noise_line=lambda: False로 mock 오염)
+    sys.modules.pop("listener_noise_filter", None)
+    sys.modules.pop("_listener_under_test", None)
+
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "_listener_under_test",

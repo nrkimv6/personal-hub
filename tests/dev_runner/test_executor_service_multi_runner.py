@@ -117,17 +117,19 @@ class TestStartDevRunnerRight:
 class TestGetAllRunners:
     """TC-Boundary: get_all_runners()"""
 
-    def test_empty_active_runners_returns_empty_list(self, executor):
+    @pytest.mark.asyncio
+    async def test_empty_active_runners_returns_empty_list(self, executor):
         """active_runners Set 비어있을 때 빈 [] 반환"""
-        executor.redis_client.smembers = MagicMock(return_value=set())
-        result = executor.get_all_runners()
+        executor.async_redis.smembers = AsyncMock(return_value=set())
+        result = await executor.get_all_runners()
         assert result == []
 
-    def test_returns_runner_list_items(self, executor):
+    @pytest.mark.asyncio
+    async def test_returns_runner_list_items(self, executor):
         """active runner 있을 때 RunnerListItem 목록 반환"""
-        executor.redis_client.smembers = MagicMock(return_value={"abc12345"})
+        executor.async_redis.smembers = AsyncMock(return_value={"abc12345"})
 
-        def get_side_effect(key):
+        async def get_side_effect(key):
             mapping = {
                 f"{RUNNER_KEY_PREFIX}:abc12345:status": "running",
                 f"{RUNNER_KEY_PREFIX}:abc12345:pid": "1234",
@@ -137,9 +139,10 @@ class TestGetAllRunners:
             }
             return mapping.get(key)
 
-        executor.redis_client.get = MagicMock(side_effect=get_side_effect)
+        executor.async_redis.get = get_side_effect
 
-        result = executor.get_all_runners()
+        with patch.object(executor, "_is_pid_alive", return_value=True):
+            result = await executor.get_all_runners()
         assert len(result) == 1
         assert result[0].runner_id == "abc12345"
         assert result[0].running is True
@@ -179,11 +182,12 @@ class TestStopDevRunner:
 class TestGetRunnerStatus:
     """TC-Cross: get_runner_status() 결과가 Redis 값과 일치"""
 
-    def test_status_matches_redis_values(self, executor):
+    @pytest.mark.asyncio
+    async def test_status_matches_redis_values(self, executor):
         """get_runner_status 결과가 RUNNER_KEY_PREFIX:{runner_id}:* 키 값과 일치"""
         start_time = datetime.now().isoformat()
 
-        def get_side_effect(key):
+        async def get_side_effect(key):
             mapping = {
                 f"{RUNNER_KEY_PREFIX}:abc12345:status": "running",
                 f"{RUNNER_KEY_PREFIX}:abc12345:pid": "5678",
@@ -193,11 +197,10 @@ class TestGetRunnerStatus:
             }
             return mapping.get(key)
 
-        executor.redis_client.get = MagicMock(side_effect=get_side_effect)
+        executor.async_redis.get = get_side_effect
 
-        # _is_pid_alive는 ctypes.windll를 사용하므로 executor_service 모듈에서 직접 패치
         with patch.object(executor, "_is_pid_alive", return_value=True):
-            result = executor.get_runner_status("abc12345")
+            result = await executor.get_runner_status("abc12345")
 
         assert result.runner_id == "abc12345"
         assert result.running is True
@@ -205,14 +208,16 @@ class TestGetRunnerStatus:
         assert result.plan_file == "my_plan.md"
         assert result.engine == "gemini"
 
-    def test_redis_connection_error_returns_not_running(self):
+    @pytest.mark.asyncio
+    async def test_redis_connection_error_returns_not_running(self):
         """Redis 연결 실패 시 running=False 반환 (예외 전파 없음)"""
+        import redis.asyncio as aioredis
         svc = ExecutorService.__new__(ExecutorService)
         svc.redis_client = MagicMock()
-        svc.redis_client.ping = MagicMock(side_effect=redis_module.ConnectionError("connection refused"))
-        svc.async_redis = MagicMock()
+        svc.async_redis = AsyncMock()
+        svc.async_redis.ping = AsyncMock(side_effect=aioredis.ConnectionError("connection refused"))
 
-        result = svc.get_process_status()
+        result = await svc.get_process_status()
         assert result.running is False
         assert result.redis_connected is False
 
@@ -221,13 +226,17 @@ class TestForceCleanupState:
     """TC-Error: _force_cleanup_state()"""
 
     def test_cleanup_specific_runner(self, executor):
-        """특정 runner_id cleanup → SREM + 해당 키 삭제"""
+        """특정 runner_id cleanup → status=stopped, SREM 확인"""
+        executor.redis_client.exists = MagicMock(return_value=True)
+        executor.redis_client.expire = MagicMock()
+        executor.redis_client.zadd = MagicMock()
         executor._force_cleanup_state("abc12345")
 
         executor.redis_client.srem.assert_called_once_with(ACTIVE_RUNNERS_KEY, "abc12345")
-        # delete 호출에 per-runner 키 포함
-        call_args = executor.redis_client.delete.call_args[0]
-        assert any("abc12345" in k for k in call_args)
+        # status가 "stopped"으로 설정됐는지 확인
+        executor.redis_client.set.assert_called_with(
+            f"{RUNNER_KEY_PREFIX}:abc12345:status", "stopped"
+        )
 
     def test_cleanup_all_runners(self, executor):
         """runner_id 없이 cleanup → active_runners 전체 정리"""
