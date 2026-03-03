@@ -48,7 +48,7 @@ def require_full_env():
         pytest.skip(f"plan-runner venv not found: {_config.PLAN_RUNNER_PYTHON}")
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="function")
 def http_client():
     return TestClient(app)
 
