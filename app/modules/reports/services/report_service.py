@@ -73,10 +73,11 @@ class ReportService:
         date_str = date.strftime("%Y%m%d")
         prev_date_str = (date - timedelta(days=1)).strftime("%Y%m%d")
 
-        # service_runner.log - 최근 100줄 (해당 날짜 필터링)
+        # service_runner_*.log - 최신 파일 찾기 (타임스탬프 파일명 대응)
         service_log = ""
-        service_log_path = log_dir / "service_runner.log"
-        if service_log_path.exists():
+        service_runner_files = sorted(log_dir.glob("service_runner_*.log"))
+        service_log_path = service_runner_files[-1] if service_runner_files else None
+        if service_log_path and service_log_path.exists():
             try:
                 lines = service_log_path.read_text(encoding="utf-8").splitlines()
                 # 전날 23시 ~ 당일 07시 사이 로그만 필터링
