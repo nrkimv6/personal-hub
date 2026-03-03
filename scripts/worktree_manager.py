@@ -71,7 +71,25 @@ class WorktreeManager:
                 capture_output=True, text=True, cwd=str(base_dir.parent)
             )
             if result.returncode != 0:
-                raise WorktreeError(f"git worktree add 실패: {result.stderr}")
+                if "already exists" in result.stderr:
+                    # 잔여 worktree/branch 제거 후 1회 재시도
+                    subprocess.run(
+                        ["git", "worktree", "remove", str(worktree_path), "--force"],
+                        capture_output=True, cwd=str(base_dir.parent),
+                    )
+                    subprocess.run(
+                        ["git", "branch", "-D", branch],
+                        capture_output=True, cwd=str(base_dir.parent),
+                    )
+                    result = subprocess.run(
+                        ["git", "worktree", "add", str(worktree_path), "-b", branch],
+                        capture_output=True, text=True, cwd=str(base_dir.parent),
+                    )
+                    if result.returncode != 0:
+                        raise WorktreeError(f"git worktree add 실패 (재시도 후): {result.stderr}")
+                    logger.warning(f"[WorktreeManager] 잔여 worktree 제거 후 재생성: {branch}")
+                else:
+                    raise WorktreeError(f"git worktree add 실패: {result.stderr}")
             logger.info(f"[WorktreeManager] 생성: {worktree_path} (브랜치: {branch})")
             return worktree_path, branch
         except WorktreeError:
