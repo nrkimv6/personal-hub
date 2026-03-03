@@ -257,8 +257,8 @@ class MergeHistoryItem(BaseModel):
     project: str = ""
     timestamp: str = ""
     worktree_path: str = ""
-    status: str
-    success: bool
+    status: str = ""
+    success: bool = False
     test_passed: Optional[bool] = None
     fix_attempts: int = 0
     message: str = ""

@@ -566,6 +566,9 @@ class ExecutorService:
             for raw in raw_items:
                 try:
                     item = json.loads(raw)
+                    # status 필드 보정: 없으면 success 값으로 유추
+                    if "status" not in item:
+                        item["status"] = "completed" if item.get("success") else "failed"
                     result.append(item)
                 except Exception:
                     pass
