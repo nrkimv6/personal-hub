@@ -342,6 +342,9 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
     Redis active_runners 목록을 순회하여:
     - PID가 살아있으면 → _attach_to_running_process() 로 재연결
     - PID가 죽어있거나 없으면 → _cleanup_process_state() 로 정리
+
+    추가로 scan_iter("plan-runner:runners:*:status")로 전체 runner 키를 탐색하여
+    active_runners set에 없는 고아 키도 정리한다.
     """
     try:
         runner_ids = redis_client.smembers(ACTIVE_RUNNERS_KEY)
@@ -371,6 +374,41 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
         else:
             logger.info(f"[listener] 재시작 감지: runner {runner_id} PID {pid} 종료됨 → cleanup")
             _cleanup_process_state(runner_id, redis_client, reason="reconnect_orphan")
+
+    # --- 고아 키 탐색: active_runners set에 없지만 runners:*:status 키가 존재하는 경우 ---
+    try:
+        for key in redis_client.scan_iter(f"{RUNNER_KEY_PREFIX}:*:status"):
+            # key 형태: "plan-runner:runners:{runner_id}:status"
+            # RUNNER_KEY_PREFIX = "plan-runner:runners"
+            prefix = f"{RUNNER_KEY_PREFIX}:"
+            suffix = ":status"
+            if not (key.startswith(prefix) and key.endswith(suffix)):
+                continue
+            orphan_id = key[len(prefix):-len(suffix)]
+            if not orphan_id:
+                continue
+            if orphan_id in runner_ids:
+                continue  # active_runners에 이미 있음 → 위에서 처리됨
+            logger.info(f"[reconnect] orphan key found (not in active_runners): {orphan_id}")
+            pid_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:pid")
+            if not pid_str:
+                logger.info(f"[reconnect] orphan {orphan_id} PID 없음 → cleanup")
+                _cleanup_process_state(orphan_id, redis_client, reason="reconnect_orphan_scan")
+                continue
+            try:
+                pid = int(pid_str)
+            except ValueError:
+                logger.warning(f"[reconnect] orphan {orphan_id} 잘못된 PID: {pid_str!r} → cleanup")
+                _cleanup_process_state(orphan_id, redis_client, reason="reconnect_orphan_scan")
+                continue
+            if _is_pid_alive(pid):
+                logger.info(f"[reconnect] orphan {orphan_id} PID {pid} 생존 → 재연결")
+                _attach_to_running_process(orphan_id, pid, redis_client)
+            else:
+                logger.info(f"[reconnect] orphan {orphan_id} PID {pid} 종료됨 → cleanup")
+                _cleanup_process_state(orphan_id, redis_client, reason="reconnect_orphan_scan")
+    except Exception as e:
+        logger.warning(f"[reconnect] orphan scan 실패: {e}")
 
 
 def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Redis, runner_id: str = ""):
