@@ -966,6 +966,7 @@ if ($Follow) {
             Show-LogContent -FilePath $apiLogFile -Label "API Server" -Color Cyan -TailLines $Lines
             if ($Admin) {
                 Show-LogContent -FilePath $workerLogFile -Label "Worker" -Color Magenta -TailLines $Lines
+                Show-LogContent -FilePath $claudeWorkerLogFile -Label "LLM (Claude Worker)" -Color Blue -TailLines $Lines
                 # Plan-runner 로그: Redis 활성 runner 또는 최신 1개 표시
                 if ($useRedis) {
                     $activeRunners = Get-ActivePlanRunners -LogDir $planRunnerLogDir
