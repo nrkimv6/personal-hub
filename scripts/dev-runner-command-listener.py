@@ -773,6 +773,7 @@ def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner
         env["PLAN_RUNNER_WORK_DIR"] = str(worktree_path)
         env["PLAN_RUNNER_WORKTREE_PATH"] = str(worktree_path)
         env["PLAN_RUNNER_RUNNER_ID"] = runner_id
+        env["REDIS_DB"] = str(REDIS_DB)  # 테스트 격리: plan-runner가 동일 DB 사용
         # 로그 prefix 식별자: plan명(날짜 제거, 첫 2단어) + runner_id 앞 4자
         _plan_basename = os.path.splitext(os.path.basename(plan_file or ""))[0]
         _plan_basename = __import__('re').sub(r'^\d{4}-\d{2}-\d{2}[_-]', '', _plan_basename)
