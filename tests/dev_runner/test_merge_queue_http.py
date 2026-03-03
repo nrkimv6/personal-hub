@@ -216,3 +216,85 @@ class TestMergeQueueHTTP:
 
             assert resp.status_code == 200
             assert resp.json()["status"] == status_val, f"status 불일치: {status_val}"
+
+    # ── Pipeline E2E HTTP TC ─────────────────────────────────────────────
+
+    def test_h1_post_run_worktree_returns_accepted(self, api_client):
+        """H1: POST /run (worktree=true) → runner_id 포함 응답"""
+        mock_response = {
+            "running": True,
+            "engine": "claude",
+            "listener_alive": True,
+            "redis_connected": True,
+            "pid": 12345,
+            "plan_file": "docs/plan/test.md",
+            "runner_id": "h1_runner",
+        }
+
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.start_dev_runner",
+            new=AsyncMock(return_value=mock_response)
+        ):
+            resp = api_client.post(f"{BASE_URL}/run", json={
+                "plan_file": "docs/plan/test.md",
+                "worktree": True,
+            })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["running"] is True
+        assert data["runner_id"] == "h1_runner"
+
+    def test_h2_merge_queue_status_polling(self, api_client):
+        """H2: GET /merge-queue 폴링 → status 변화 추적"""
+        # 1차: pending
+        pending_item = make_queue_item_dict("h2_runner", status="pending")
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.get_merge_queue",
+            new=AsyncMock(return_value=[pending_item])
+        ):
+            resp1 = api_client.get(f"{BASE_URL}/merge-queue")
+        assert resp1.json()[0]["status"] == "pending"
+
+        # 2차: merging
+        merging_item = make_queue_item_dict("h2_runner", status="merging")
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.get_merge_queue",
+            new=AsyncMock(return_value=[merging_item])
+        ):
+            resp2 = api_client.get(f"{BASE_URL}/merge-queue")
+        assert resp2.json()[0]["status"] == "merging"
+
+        # 3차: done
+        done_item = make_queue_item_dict("h2_runner", status="done")
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.get_merge_queue",
+            new=AsyncMock(return_value=[done_item])
+        ):
+            resp3 = api_client.get(f"{BASE_URL}/merge-queue")
+        assert resp3.json()[0]["status"] == "done"
+
+    def test_h3_retry_then_status_change(self, api_client):
+        """H3: POST /merge/{id}/retry 후 GET /merge/{id} → status 변화"""
+        # retry 요청
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.send_runner_command",
+            new=AsyncMock(return_value={"success": True, "message": "retry-merge sent"})
+        ):
+            resp_retry = api_client.post(f"{BASE_URL}/merge/h3_runner/retry")
+        assert resp_retry.status_code == 200
+
+        # status 변경 확인
+        with patch(
+            "app.modules.dev_runner.services.executor_service.executor_service.get_merge_status",
+            new=AsyncMock(return_value={
+                "runner_id": "h3_runner",
+                "status": "merging",
+                "test_passed": None,
+                "fix_attempts": 0,
+                "message": "retry in progress",
+            })
+        ):
+            resp_status = api_client.get(f"{BASE_URL}/merge/h3_runner")
+        assert resp_status.status_code == 200
+        assert resp_status.json()["status"] == "merging"

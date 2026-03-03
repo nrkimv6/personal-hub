@@ -2,11 +2,12 @@
 MergeQueue 관련 단위 테스트
 
 대상 함수:
-- _enqueue_merge_request() (dev-runner-command-listener.py)
+- _do_retry_merge() (dev-runner-command-listener.py)
 - MergeWorkflow._update_queue_status() (merge_workflow.py)
 - MergeWorkflow._publish_log() (merge_workflow.py)
 - LogService.stream_merge_log() (log_service.py)
 - _cleanup_process_state() 내 queued 조건 (dev-runner-command-listener.py)
+- _launch_plan_runner_process() branch 저장 (dev-runner-command-listener.py)
 
 RIGHT-BICEP:
 - Right: 정상 경로 결과 검증
@@ -69,115 +70,8 @@ def make_redis(*, get_map=None, lrange_result=None):
     return r
 
 
-# ══════════════════════════════════════════════
-# 1. _enqueue_merge_request() 테스트
-# ══════════════════════════════════════════════
-
-class TestEnqueueMergeRequest:
-    """_enqueue_merge_request() 단위 테스트"""
-
-    def _import_fn(self):
-        mod = _load_listener_module()
-        return mod._enqueue_merge_request
-
-    def test_enqueue_merge_request_right(self):
-        """R: exit=0 + worktree_path 존재 시 올바른 JSON 항목이 큐에 추가된다."""
-        fn = self._import_fn()
-        runner_id = "abc123"
-        r = make_redis(get_map={
-            "plan-runner:runners:abc123:worktree_path": "/tmp/wt/abc123",
-            "plan-runner:runners:abc123:plan_file": "docs/plan/feat.md",
-            "plan-runner:runners:abc123:branch": "runner/abc123",
-        })
-
-        fn(runner_id, r)
-
-        assert r.lpush.call_count == 1
-        call_args = r.lpush.call_args
-        queue_name, raw = call_args[0]
-        assert queue_name == "plan-runner:merge-queue"
-        item = json.loads(raw)
-        assert item["runner_id"] == runner_id
-        assert item["branch"] == "runner/abc123"
-        assert item["worktree_path"] == "/tmp/wt/abc123"
-        assert item["plan_file"] == "docs/plan/feat.md"
-        assert item["status"] == "pending"
-        assert "timestamp" in item
-        assert "project" in item
-
-    def test_enqueue_merge_request_sets_queued(self):
-        """R: merge_status Redis 키가 "queued"로 SET된다."""
-        fn = self._import_fn()
-        runner_id = "abc123"
-        r = make_redis(get_map={
-            "plan-runner:runners:abc123:worktree_path": "/tmp/wt/abc123",
-            "plan-runner:runners:abc123:plan_file": "docs/plan/feat.md",
-        })
-
-        fn(runner_id, r)
-
-        r.set.assert_called_once_with(
-            "plan-runner:runners:abc123:merge_status", "queued"
-        )
-
-    def test_enqueue_merge_request_boundary_no_worktree(self):
-        """B: worktree_path가 None이어도 lpush는 여전히 호출된다 (None 값으로 저장)."""
-        fn = self._import_fn()
-        runner_id = "no_wt"
-        r = make_redis(get_map={
-            "plan-runner:runners:no_wt:worktree_path": None,
-            "plan-runner:runners:no_wt:plan_file": "docs/plan/feat.md",
-        })
-
-        # worktree_path가 None이어도 예외 없이 실행되어야 한다
-        fn(runner_id, r)
-        # lpush는 호출됨 (None 값 포함)
-        assert r.lpush.call_count == 1
-        raw = r.lpush.call_args[0][1]
-        item = json.loads(raw)
-        assert item["worktree_path"] is None
-
-    def test_enqueue_merge_request_boundary_no_branch(self):
-        """B: branch 키 없을 때 "runner/{runner_id}" 기본값이 사용된다."""
-        fn = self._import_fn()
-        runner_id = "nb_runner"
-        r = make_redis(get_map={
-            "plan-runner:runners:nb_runner:worktree_path": "/tmp/wt",
-            "plan-runner:runners:nb_runner:plan_file": "docs/plan/feat.md",
-            # branch 키 없음 → None → fallback
-        })
-
-        fn(runner_id, r)
-
-        raw = r.lpush.call_args[0][1]
-        item = json.loads(raw)
-        assert item["branch"] == f"runner/{runner_id}"
-
-    def test_enqueue_merge_request_boundary_plan_file_all(self):
-        """B: plan_file == "ALL"일 때 None으로 치환된다."""
-        fn = self._import_fn()
-        runner_id = "all_runner"
-        r = make_redis(get_map={
-            "plan-runner:runners:all_runner:worktree_path": "/tmp/wt",
-            "plan-runner:runners:all_runner:plan_file": "ALL",
-        })
-
-        fn(runner_id, r)
-
-        raw = r.lpush.call_args[0][1]
-        item = json.loads(raw)
-        assert item["plan_file"] is None
-
-    def test_enqueue_merge_request_error_redis_down(self):
-        """E: Redis lpush 실패 시 예외 전파 없이 종료된다."""
-        fn = self._import_fn()
-        runner_id = "err_runner"
-        r = MagicMock()
-        r.get.return_value = "/tmp/wt"
-        r.lpush.side_effect = Exception("Redis connection refused")
-
-        # 예외가 밖으로 전파되면 안 된다
-        fn(runner_id, r)  # should not raise
+## TestEnqueueMergeRequest 삭제됨 — 큐잉은 plan-runner CLI(_publish_merge_request)가 담당
+## 이 프로젝트(monitor-page)의 TC 대상이 아님 (wtools 프로젝트 TC로 이동)
 
 
 # ══════════════════════════════════════════════
@@ -452,14 +346,18 @@ class TestCleanupProcessState:
 # ══════════════════════════════════════════════
 
 class TestRetryMergePlanFile:
-    """retry_merge() — plan_file Redis 조회 후 wf.run() 전달 검증"""
+    """_do_retry_merge() — plan_file Redis 조회 후 wf.run() 전달 검증
+
+    retry_merge(command: Dict, redis)는 백그라운드 스레드로 _do_retry_merge()를 호출.
+    여기서는 _do_retry_merge()를 직접 테스트하여 plan_file 전달을 검증한다.
+    """
 
     def _import_fn(self):
         mod = _load_listener_module()
-        return mod.retry_merge
+        return mod._do_retry_merge
 
-    def _run_with_mock_wf(self, fn, runner_id, r, expected_plan_file):
-        """retry_merge()의 로컬 import MergeWorkflow를 sys.modules 패치로 mock."""
+    def _run_with_mock_wf(self, fn, runner_id, r):
+        """_do_retry_merge()의 로컬 import MergeWorkflow를 sys.modules 패치로 mock."""
         mock_wf_cls = MagicMock()
         mock_wf_instance = MagicMock()
         mock_wf_cls.return_value = mock_wf_instance
@@ -477,7 +375,7 @@ class TestRetryMergePlanFile:
              patch.object(mod, "PROJECT_ROOT", Path("/proj")), \
              patch.object(mod, "PLAN_RUNNER_PYTHON", Path("/python")), \
              patch.object(mod, "WORKTREE_BASE_DIR", Path("/tmp/worktrees")):
-            fn(runner_id, r)
+            fn(runner_id, r, "test_cmd_id")
 
         mock_wf_instance.run.assert_called_once()
         call_kwargs = mock_wf_instance.run.call_args
@@ -492,7 +390,7 @@ class TestRetryMergePlanFile:
             f"plan-runner:runners:{runner_id}:worktree_path": "/tmp/wt/rid_foo",
             f"plan-runner:runners:{runner_id}:plan_file": "2026-02-27_foo.md",
         })
-        passed = self._run_with_mock_wf(fn, runner_id, r, "2026-02-27_foo.md")
+        passed = self._run_with_mock_wf(fn, runner_id, r)
         assert passed == "2026-02-27_foo.md"
 
     def test_retry_merge_boundary_plan_file_all(self):
@@ -503,7 +401,7 @@ class TestRetryMergePlanFile:
             f"plan-runner:runners:{runner_id}:worktree_path": "/tmp/wt/rid_all",
             f"plan-runner:runners:{runner_id}:plan_file": "ALL",
         })
-        passed = self._run_with_mock_wf(fn, runner_id, r, None)
+        passed = self._run_with_mock_wf(fn, runner_id, r)
         assert passed is None
 
     def test_retry_merge_boundary_no_plan_file_key(self):
@@ -514,7 +412,7 @@ class TestRetryMergePlanFile:
             f"plan-runner:runners:{runner_id}:worktree_path": "/tmp/wt/rid_nokey",
             # plan_file 키 없음
         })
-        passed = self._run_with_mock_wf(fn, runner_id, r, None)
+        passed = self._run_with_mock_wf(fn, runner_id, r)
         assert passed is None
 
 
@@ -596,23 +494,5 @@ class TestLaunchPlanRunnerBranchSave:
         assert set_calls[branch_key] == f"runner/{runner_id}"
 
 
-class TestEnqueueMergeRequestBranchFromRedis:
-    """_enqueue_merge_request() — Redis의 branch 키를 올바르게 사용하는지 검증"""
-
-    def test_enqueue_uses_branch_from_redis_when_set(self):
-        """T4-39: Redis에 branch="plan/2026-02-27_foo" 저장 시 큐 항목의 branch 필드가 해당 값."""
-        mod = _load_listener_module()
-        fn = mod._enqueue_merge_request
-
-        runner_id = "eq_rid_1"
-        r = make_redis(get_map={
-            f"plan-runner:runners:{runner_id}:worktree_path": "/tmp/wt/eq_rid_1",
-            f"plan-runner:runners:{runner_id}:plan_file": "2026-02-27_foo.md",
-            f"plan-runner:runners:{runner_id}:branch": "plan/2026-02-27_foo",
-        })
-
-        fn(runner_id, r)
-
-        raw = r.lpush.call_args[0][1]
-        item = json.loads(raw)
-        assert item["branch"] == "plan/2026-02-27_foo", f"branch 불일치: {item['branch']}"
+## TestEnqueueMergeRequestBranchFromRedis 삭제됨 — _enqueue_merge_request()는 listener에서 삭제됨
+## 큐잉은 plan-runner CLI(_publish_merge_request)가 담당, wtools 프로젝트 TC 대상
