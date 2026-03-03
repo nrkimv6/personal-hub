@@ -308,10 +308,15 @@
 				</button>
 			{/if}
 			<button
-				class="h-6 px-2 text-[10px] rounded text-gray-500 hover:bg-gray-100 transition-colors"
+				class="h-6 w-6 flex items-center justify-center rounded text-gray-500 hover:bg-gray-100 transition-colors"
 				onclick={toggleIgnored}
+				title={showIgnored ? '활성 plan 보기' : '무시 목록 보기'}
 			>
-				{showIgnored ? '활성 보기' : '무시 목록'}
+				{#if showIgnored}
+					<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+				{:else}
+					<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+				{/if}
 			</button>
 			<button
 				class="h-6 px-2 text-[10px] rounded text-gray-500 hover:bg-gray-100 transition-colors inline-flex items-center gap-1"
@@ -412,7 +417,7 @@
 					{@const batchStatus = getBatchStatus(plan)}
 					<button
 						onclick={() => handlePlanSelect(plan)}
-						class="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors w-full
+						class="group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors w-full
 							{batchStatus === 'done' ? 'opacity-40' : batchStatus === 'running' ? 'border border-cyan-300 bg-cyan-50' : isRunning ? 'border border-green-300 bg-green-50' : isLastRun ? 'bg-gray-50 opacity-60' : isDone ? 'hover:bg-gray-50 opacity-50' : 'hover:bg-gray-50'}"
 					>
 						<!-- Running indicator dot -->
@@ -428,9 +433,9 @@
 						<span class="text-xs font-medium truncate flex-1 min-w-0 {batchStatus === 'done' ? 'text-gray-400 line-through' : batchStatus === 'running' ? 'text-cyan-700' : isRunning ? 'text-green-800' : isLastRun ? 'text-gray-400 line-through' : isDone ? 'text-gray-400' : ''}">{plan.filename}</span>
 
 						{#if plan.status === '구현완료'}
-							<span class="text-[10px] px-1.5 py-0 h-4 inline-flex items-center rounded {statusBadge('구현완료')}">구현완료</span>
+							<span class="w-[70px] text-[10px] font-mono uppercase inline-flex items-center justify-center rounded {statusBadge('구현완료')}">구현완료</span>
 						{:else if showIgnored && plan.status === '보류'}
-							<span class="text-[10px] px-1.5 py-0 h-4 inline-flex items-center rounded {statusBadge('보류')}">보류</span>
+							<span class="w-[70px] text-[10px] font-mono uppercase inline-flex items-center justify-center rounded {statusBadge('보류')}">보류</span>
 						{/if}
 
 						{#if batchStatus === 'running'}
@@ -443,7 +448,7 @@
 						<!-- Done button: canDone OR lastPlanFile -->
 						{#if canDone(plan) || (isLastRun && !plan.path.includes('archive'))}
 							<button
-								class="shrink-0 p-1 rounded hover:bg-green-100 disabled:opacity-50"
+								class="shrink-0 p-1 rounded hover:bg-green-100 disabled:opacity-50 opacity-0 group-hover:opacity-100 transition-opacity"
 								onclick={(e) => handleDone(e, plan)}
 								disabled={doneLoadingPath === plan.path}
 								title="완료 처리 (아카이브, TODO→DONE, 커밋)"
@@ -459,7 +464,7 @@
 						<!-- Hold button (활성 목록에서만, 무시 목록 아닐 때) -->
 						{#if !showIgnored && !isRunning && plan.status !== '보류'}
 							<button
-								class="shrink-0 p-1 rounded hover:bg-yellow-100"
+								class="shrink-0 p-1 rounded hover:bg-yellow-100 opacity-0 group-hover:opacity-100 transition-opacity"
 								onclick={(e) => handleHold(e, plan)}
 								title="보류"
 							>
@@ -470,7 +475,7 @@
 						<!-- Unhold button (무시 목록에서 보류 상태일 때) -->
 						{#if showIgnored && plan.status === '보류'}
 							<button
-								class="shrink-0 p-1 rounded hover:bg-blue-100"
+								class="shrink-0 p-1 rounded hover:bg-blue-100 opacity-0 group-hover:opacity-100 transition-opacity"
 								onclick={(e) => handleUnhold(e, plan)}
 								title="보류 해제"
 							>
