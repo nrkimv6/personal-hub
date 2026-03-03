@@ -51,16 +51,16 @@ def isolated_redis():
 
 
 @pytest.fixture
-def listener_process(real_redis):
+def listener_process(isolated_redis):
     """Listener 프로세스 lifecycle 관리
 
     1. 기존 heartbeat 키 삭제 (잔여 상태 초기화)
     2. Listener 프로세스 spawn (db=REDIS_TEST_DB 격리)
-    3. heartbeat 키 최대 10초 대기
+    3. heartbeat 키 최대 10초 대기 (db=15에서 확인)
     4. yield
     5. SIGTERM → 정리
     """
-    real_redis.delete(HEARTBEAT_KEY)
+    isolated_redis.delete(HEARTBEAT_KEY)
 
     python = str(PYTHON_EXE) if PYTHON_EXE.exists() else "python"
     process = subprocess.Popen(
@@ -70,9 +70,9 @@ def listener_process(real_redis):
         text=True,
     )
 
-    # heartbeat 대기 (최대 10초)
+    # heartbeat 대기 (최대 10초) — db=15에서 확인
     for _ in range(20):
-        if real_redis.get(HEARTBEAT_KEY):
+        if isolated_redis.get(HEARTBEAT_KEY):
             break
         time.sleep(0.5)
     else:

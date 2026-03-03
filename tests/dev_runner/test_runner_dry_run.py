@@ -88,6 +88,7 @@ async def reset_executor_async_redis():
     svc.async_redis = aioredis.Redis(
         host="localhost",
         port=6379,
+        db=15,
         decode_responses=True,
         socket_connect_timeout=5,
         socket_timeout=35,
