@@ -740,12 +740,17 @@ function Start-CombinedLogTail {
                         $logFileNames.Remove($fk)
                     }
 
+                    # 현재 활성 runner 키 수집 (종료된 runner 정리용)
+                    $activeKeys = @{}
                     foreach ($runner in $currentRunners) {
                         $pidSuffix = if ($runner.PID) { "|PID:$($runner.PID)" } else { "" }
                         $prKey = "PR:$($runner.DisplayName)#$($runner.ShortId)$pidSuffix"
                         $psKey = "PS:$($runner.DisplayName)#$($runner.ShortId)$pidSuffix"
-                        # 새 runner 감지 시 소스 추가
+                        $activeKeys[$prKey] = $true
+                        $activeKeys[$psKey] = $true
+
                         if (-not $logConfig.ContainsKey($prKey)) {
+                            # 새 runner 감지
                             Write-Host "[$prKey] === New runner detected: $($runner.RunnerId) ===" -ForegroundColor Green
                             $logConfig[$prKey] = @{ Path = $runner.LogPath;    Color = "White";    Tail = 10 }
                             $logConfig[$psKey] = @{ Path = $runner.StreamPath; Color = "DarkGray"; Tail = 5  }
@@ -753,13 +758,25 @@ function Start-CombinedLogTail {
                             $logFileNames[$prKey]  = [System.IO.Path]::GetFileName($runner.LogPath)
                             $logColors[$prKey]     = "White"
                             $filePositions[$prKey] = 0
-                            if ($runner.StreamPath) {
-                                $logFiles[$psKey]      = $runner.StreamPath
-                                $logFileNames[$psKey]  = [System.IO.Path]::GetFileName($runner.StreamPath)
-                                $logColors[$psKey]     = "DarkGray"
-                                $filePositions[$psKey] = 0
-                            }
                         }
+                        # StreamPath 지연 등록: 초기에 null이었지만 이후 설정된 경우
+                        if ($runner.StreamPath -and -not $logFiles.ContainsKey($psKey)) {
+                            Write-Host "[$psKey] === Stream log detected: $([System.IO.Path]::GetFileName($runner.StreamPath)) ===" -ForegroundColor Green
+                            $logConfig[$psKey] = @{ Path = $runner.StreamPath; Color = "DarkGray"; Tail = 5  }
+                            $logFiles[$psKey]      = $runner.StreamPath
+                            $logFileNames[$psKey]  = [System.IO.Path]::GetFileName($runner.StreamPath)
+                            $logColors[$psKey]     = "DarkGray"
+                            $filePositions[$psKey] = 0
+                        }
+                    }
+                    # 종료된 runner 정리 (active_runners에서 빠진 PR:#/PS:# 키 제거)
+                    $staleKeys = @($logFiles.Keys | Where-Object { ($_ -like "PR:*#*" -or $_ -like "PS:*#*") -and -not $activeKeys.ContainsKey($_) })
+                    foreach ($sk in $staleKeys) {
+                        $logFiles.Remove($sk)
+                        $logColors.Remove($sk)
+                        $filePositions.Remove($sk)
+                        $logFileNames.Remove($sk)
+                        $logConfig.Remove($sk)
                     }
                 }
             } else {
