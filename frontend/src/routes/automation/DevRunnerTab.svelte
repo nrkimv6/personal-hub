@@ -596,8 +596,6 @@
 							<span>Merge</span>
 						</div>
 					</div>
-						</div>
-					</div>
 
 					<!-- Runner 콘텐츠 -->
 					<div class="flex-1 min-h-0 overflow-hidden">
