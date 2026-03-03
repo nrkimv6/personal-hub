@@ -806,3 +806,96 @@ input[type="checkbox"] {
   border-radius: 0.5rem;
   margin: 0.5rem 0;
 }
+
+/* ─── Dev Runner 전용 CSS 유틸리티 ───────────────────────────────────────── */
+
+@layer base {
+  :root {
+    /* 로그 태그 색상 */
+    --dr-tag-ai: 142 71% 45%;       /* green */
+    --dr-tag-tool: 221 83% 53%;     /* blue */
+    --dr-tag-plan: 262 83% 58%;     /* purple */
+    --dr-tag-task: 38 92% 50%;      /* amber */
+    --dr-tag-build: 199 89% 48%;    /* cyan */
+    --dr-tag-test: 338 71% 52%;     /* pink */
+    --dr-tag-error: 0 72% 51%;      /* red */
+    --dr-tag-warn: 32 95% 44%;      /* orange */
+    --dr-tag-info: 199 89% 48%;     /* sky */
+    --dr-tag-debug: 220 14% 60%;    /* slate */
+
+    /* 상태 색상 */
+    --dr-status-running: 142 71% 45%;  /* green */
+    --dr-status-stopped: 220 14% 60%;  /* gray */
+    --dr-status-crashed: 0 72% 51%;    /* red */
+    --dr-status-done: 221 83% 53%;     /* blue */
+  }
+}
+
+/* 로그 라인 기본 스타일 */
+.dr-log-line {
+  font-family: 'Fira Code', Consolas, Monaco, monospace;
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+  border-left: 2px solid transparent;
+}
+
+/* 태그별 좌측 보더 색상 */
+.dr-log-line-ai    { border-left-color: hsl(var(--dr-tag-ai)); }
+.dr-log-line-tool  { border-left-color: hsl(var(--dr-tag-tool)); }
+.dr-log-line-plan  { border-left-color: hsl(var(--dr-tag-plan)); }
+.dr-log-line-task  { border-left-color: hsl(var(--dr-tag-task)); }
+.dr-log-line-build { border-left-color: hsl(var(--dr-tag-build)); }
+.dr-log-line-test  { border-left-color: hsl(var(--dr-tag-test)); }
+.dr-log-line-error { border-left-color: hsl(var(--dr-tag-error)); }
+.dr-log-line-warn  { border-left-color: hsl(var(--dr-tag-warn)); }
+.dr-log-line-info  { border-left-color: hsl(var(--dr-tag-info)); }
+.dr-log-line-debug { border-left-color: hsl(var(--dr-tag-debug)); }
+
+/* 태그 배지 */
+.dr-tag-badge {
+  font-family: 'Fira Code', Consolas, Monaco, monospace;
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  min-width: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.25rem;
+  border-radius: 0.25rem;
+}
+
+/* 펄스 도트 */
+.dr-pulse-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  animation: dr-pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes dr-pulse-glow {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.85); }
+}
+
+/* 씬 스크롤바 */
+.dr-scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+
+.dr-scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.dr-scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.dr-scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--border));
+  border-radius: 3px;
+}
