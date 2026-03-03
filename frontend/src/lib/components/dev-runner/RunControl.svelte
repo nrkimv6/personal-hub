@@ -270,7 +270,7 @@
 		<!-- Mode & Engine Select -->
 		<div class="flex items-center gap-2">
 			<select
-				class="border rounded px-2 py-1.5 text-xs h-8 w-[120px]"
+				class="border rounded px-2 py-1 text-xs h-7 w-[120px] font-mono"
 				bind:value={mode}
 				disabled={anyRunning}
 			>
@@ -279,7 +279,7 @@
 			</select>
 
 			<select
-				class="border rounded px-2 py-1.5 text-xs h-8 w-[100px] font-medium"
+				class="border rounded px-2 py-1 text-xs h-7 w-[100px] font-mono font-medium"
 				class:text-orange-700={selectedEngine === 'gemini'}
 				class:bg-orange-50={selectedEngine === 'gemini'}
 				bind:value={selectedEngine}
@@ -370,9 +370,6 @@
 				min="0"
 				placeholder="∞"
 			/>
-		</div>
-
-		<div class="flex items-center gap-2">
 			<label for="end-time" class="text-gray-500 text-xs">End Time</label>
 			<input
 				id="end-time"
@@ -383,7 +380,7 @@
 		</div>
 
 		<div class="flex items-center gap-2">
-			<label class="relative inline-flex items-center cursor-pointer">
+			<label class="relative inline-flex items-center cursor-pointer scale-90">
 				<input type="checkbox" bind:checked={dryRun} class="sr-only peer" />
 				<div class="w-8 h-4 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-500"></div>
 			</label>
@@ -394,7 +391,7 @@
 		</div>
 
 		<div class="flex items-center gap-2">
-			<label class="relative inline-flex items-center cursor-pointer">
+			<label class="relative inline-flex items-center cursor-pointer scale-90">
 				<input type="checkbox" bind:checked={worktree} class="sr-only peer" />
 				<div class="w-8 h-4 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-green-500"></div>
 			</label>
