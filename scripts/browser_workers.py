@@ -16,6 +16,7 @@ import sys
 import time
 import urllib.request
 import urllib.error
+from datetime import datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -155,14 +156,33 @@ class BrowserWorkerManager:
 
             cprint(f"Starting {w['name']}...")
             env = {**os.environ, **w["env"]}
+
+            stderr_file = None
+            if w["name"] == "Dev Runner Command Listener":
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                stderr_log_path = PROJECT_ROOT / "logs" / "admin" / f"dev_runner_stderr_{ts}.log"
+                stderr_log_path.parent.mkdir(parents=True, exist_ok=True)
+                stderr_file = open(str(stderr_log_path), "w", encoding="utf-8")
+
             proc = subprocess.Popen(
                 w["cmd"],
                 cwd=str(PROJECT_ROOT),
                 env=env,
                 creationflags=subprocess.CREATE_NO_WINDOW,
+                stderr=stderr_file,
             )
             write_pid_file(pid_path, proc.pid)
             cprint(f"{w['name']} started (PID: {proc.pid})", GREEN)
+
+            if w["name"] == "Dev Runner Command Listener":
+                time.sleep(0.5)
+                if not is_process_alive(proc.pid):
+                    stderr_file.flush()
+                    stderr_content = stderr_log_path.read_text(encoding="utf-8", errors="replace") if stderr_log_path.exists() else ""
+                    cprint(f"{w['name']}: process died immediately — check {stderr_log_path.name}", RED)
+                    if stderr_content.strip():
+                        cprint(f"  stderr: {stderr_content[:300]}", RED)
+
             started += 1
 
         if started > 0:
