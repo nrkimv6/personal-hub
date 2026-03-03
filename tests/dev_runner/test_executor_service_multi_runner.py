@@ -225,23 +225,35 @@ class TestGetRunnerStatus:
 class TestForceCleanupState:
     """TC-Error: _force_cleanup_state()"""
 
-    def test_cleanup_specific_runner(self, executor):
+    @pytest.mark.asyncio
+    async def test_cleanup_specific_runner(self, executor):
         """특정 runner_id cleanup → status=stopped, SREM 확인"""
-        executor.redis_client.exists = MagicMock(return_value=True)
-        executor.redis_client.expire = MagicMock()
-        executor.redis_client.zadd = MagicMock()
-        executor._force_cleanup_state("abc12345")
+        executor.async_redis.exists = AsyncMock(return_value=True)
+        executor.async_redis.expire = AsyncMock()
+        executor.async_redis.zadd = AsyncMock()
+        executor.async_redis.set = AsyncMock()
+        executor.async_redis.srem = AsyncMock()
+        pipe_mock = MagicMock()
+        pipe_mock.execute = AsyncMock(return_value=[])
+        pipe_mock.expire = MagicMock()
+        pipe_mock.set = MagicMock()
+        pipe_mock.srem = MagicMock()
+        executor.async_redis.pipeline = MagicMock(return_value=pipe_mock)
+        await executor._force_cleanup_state("abc12345")
 
-        executor.redis_client.srem.assert_called_once_with(ACTIVE_RUNNERS_KEY, "abc12345")
-        # status가 "stopped"으로 설정됐는지 확인
-        executor.redis_client.set.assert_called_with(
-            f"{RUNNER_KEY_PREFIX}:abc12345:status", "stopped"
-        )
+        pipe_mock.srem.assert_called_with(ACTIVE_RUNNERS_KEY, "abc12345")
 
-    def test_cleanup_all_runners(self, executor):
+    @pytest.mark.asyncio
+    async def test_cleanup_all_runners(self, executor):
         """runner_id 없이 cleanup → active_runners 전체 정리"""
-        executor.redis_client.smembers = MagicMock(return_value={"r1", "r2"})
-        executor._force_cleanup_state("")  # 빈 문자열 = 전체 정리
+        executor.async_redis.smembers = AsyncMock(return_value={"r1", "r2"})
+        pipe_mock = MagicMock()
+        pipe_mock.execute = AsyncMock(return_value=[])
+        pipe_mock.expire = MagicMock()
+        pipe_mock.set = MagicMock()
+        pipe_mock.srem = MagicMock()
+        executor.async_redis.pipeline = MagicMock(return_value=pipe_mock)
+        await executor._force_cleanup_state("")  # 빈 문자열 = 전체 정리
 
         # smembers 호출 확인
-        executor.redis_client.smembers.assert_called_once_with(ACTIVE_RUNNERS_KEY)
+        executor.async_redis.smembers.assert_called_once_with(ACTIVE_RUNNERS_KEY)

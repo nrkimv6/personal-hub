@@ -58,12 +58,14 @@ class TestWorktreeManagerCreate:
         path, _branch = WorktreeManager.create("xyz789", base_dir)
         assert path.is_dir()
 
-    def test_error_duplicate_runner_id_raises(self, worktrees_dir):
-        """TC-Error: 동일 runner_id로 두 번 create() → 두 번째 WorktreeError"""
+    def test_error_duplicate_runner_id_retries(self, worktrees_dir):
+        """TC-Error: 동일 runner_id로 두 번 create() → 잔여 worktree 제거 후 재생성 성공"""
         base_dir, repo = worktrees_dir
-        WorktreeManager.create("dup001", base_dir)
-        with pytest.raises(WorktreeError):
-            WorktreeManager.create("dup001", base_dir)
+        path1, branch1 = WorktreeManager.create("dup001", base_dir)
+        # 두 번째 호출: 기존 worktree 제거 후 재생성 (WorktreeError 아님)
+        path2, branch2 = WorktreeManager.create("dup001", base_dir)
+        assert path2.is_dir()
+        assert branch1 == branch2
 
     def test_error_not_a_git_repo(self, tmp_path):
         """TC-Error: git 저장소가 아닌 디렉토리 → WorktreeError"""

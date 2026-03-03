@@ -59,8 +59,9 @@ class TestRunnerLimit:
         for i in range(2):
             await fake_async.sadd(ACTIVE_RUNNERS_KEY, f"runner{i:03d}")
 
-        # _check_redis_and_listener bypass
-        with patch.object(svc, "_check_redis_and_listener", new_callable=AsyncMock):
+        # _check_redis_and_listener + _cleanup_stale_runners bypass (stale 정리가 fake runner 삭제 방지)
+        with patch.object(svc, "_check_redis_and_listener", new_callable=AsyncMock), \
+             patch.object(svc, "_cleanup_stale_runners", new_callable=AsyncMock, return_value=0):
             with patch("app.modules.dev_runner.services.executor_service.settings_service", _mock_settings(2)):
                 with pytest.raises(HTTPException) as exc_info:
                     await svc.start_dev_runner(RunRequest())
@@ -71,7 +72,8 @@ class TestRunnerLimit:
         """TC-Boundary: MAX=1, 1개 start → 성공, 2번째 → 429"""
         await fake_async.sadd(ACTIVE_RUNNERS_KEY, "existing001")
 
-        with patch.object(svc, "_check_redis_and_listener", new_callable=AsyncMock):
+        with patch.object(svc, "_check_redis_and_listener", new_callable=AsyncMock), \
+             patch.object(svc, "_cleanup_stale_runners", new_callable=AsyncMock, return_value=0):
             with patch("app.modules.dev_runner.services.executor_service.settings_service", _mock_settings(1)):
                 with pytest.raises(HTTPException) as exc_info:
                     await svc.start_dev_runner(RunRequest())
@@ -80,7 +82,8 @@ class TestRunnerLimit:
     @pytest.mark.asyncio
     async def test_boundary_max0_rejects_all(self, svc, fake_async):
         """TC-Boundary: MAX=0 → 모든 start 거부"""
-        with patch.object(svc, "_check_redis_and_listener", new_callable=AsyncMock):
+        with patch.object(svc, "_check_redis_and_listener", new_callable=AsyncMock), \
+             patch.object(svc, "_cleanup_stale_runners", new_callable=AsyncMock, return_value=0):
             with patch("app.modules.dev_runner.services.executor_service.settings_service", _mock_settings(0)):
                 with pytest.raises(HTTPException) as exc_info:
                     await svc.start_dev_runner(RunRequest())
@@ -92,7 +95,8 @@ class TestRunnerLimit:
         for i in range(3):
             await fake_async.sadd(ACTIVE_RUNNERS_KEY, f"r{i}")
 
-        with patch.object(svc, "_check_redis_and_listener", new_callable=AsyncMock):
+        with patch.object(svc, "_check_redis_and_listener", new_callable=AsyncMock), \
+             patch.object(svc, "_cleanup_stale_runners", new_callable=AsyncMock, return_value=0):
             with patch("app.modules.dev_runner.services.executor_service.settings_service", _mock_settings(3)):
                 with pytest.raises(HTTPException) as exc_info:
                     await svc.start_dev_runner(RunRequest())

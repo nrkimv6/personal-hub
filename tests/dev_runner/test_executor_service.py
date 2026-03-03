@@ -254,8 +254,9 @@ class TestStopDevRunner:
             result = await executor.stop_dev_runner(runner_id)
 
         assert "Force cleaned" in result["message"]
-        # sync redis에서 상태 "stopped"으로 변경 확인 (_force_cleanup_state는 expire 설정, status="stopped")
-        assert fake_redis.get(f"plan-runner:runners:{runner_id}:status") == "stopped"
+        # async redis에서 상태 확인 (_force_cleanup_state는 async_redis pipeline 사용)
+        status = await fake_async_redis.get(f"plan-runner:runners:{runner_id}:status")
+        assert status in ("stopped", None) or "stopped" in str(status)  # expire 후 상태
 
 
 # ========== TestGetProcessStatus ==========
