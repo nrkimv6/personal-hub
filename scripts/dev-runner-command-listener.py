@@ -1296,7 +1296,7 @@ def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
 
 def main():
     """메인 루프: Redis BRPOP으로 명령 대기 및 실행."""
-    global _merge_orchestrator_process, _wf_manager
+    global _merge_orchestrator_process, _wf_manager, _merge_orchestrator_attached_pid
     _wf_manager = WorkflowManager(PROJECT_ROOT / "data" / "monitor.db")
     logger.info("=" * 50)
     logger.info("Dev Runner Command Listener 시작")
