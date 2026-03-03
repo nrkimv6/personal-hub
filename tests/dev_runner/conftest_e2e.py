@@ -104,6 +104,47 @@ _PRESERVE_KEYS = {
 }
 
 
+def _snapshot_worktrees() -> dict[str, str]:
+    """git worktree list --porcelain 파싱 → {path: branch} 딕셔너리 반환"""
+    result = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=15,
+    )
+    snapshot: dict[str, str] = {}
+    current_path = None
+    for line in result.stdout.splitlines():
+        if line.startswith("worktree "):
+            current_path = line[9:]
+        elif line.startswith("branch ") and current_path is not None:
+            branch = line[7:].replace("refs/heads/", "")
+            snapshot[current_path] = branch
+            current_path = None
+    return snapshot
+
+
+@pytest.fixture
+def e2e_worktree_cleanup():
+    """테스트 실행 중 생성된 신규 워크트리를 yield 후 자동 정리
+
+    before snapshot → yield → after snapshot → diff → 신규 항목 제거
+    """
+    before = _snapshot_worktrees()
+    yield
+    after = _snapshot_worktrees()
+    new_paths = set(after.keys()) - set(before.keys())
+    for path in new_paths:
+        branch = after[path]
+        subprocess.run(
+            ["git", "worktree", "remove", "--force", path],
+            capture_output=True, cwd=str(PROJECT_ROOT), timeout=10,
+        )
+        if branch:
+            subprocess.run(
+                ["git", "branch", "-D", branch],
+                capture_output=True, cwd=str(PROJECT_ROOT), timeout=10,
+            )
+
+
 @pytest.fixture
 def e2e_redis_cleanup(real_redis):
     """plan-runner:* 키 패턴 cleanup (before + after)

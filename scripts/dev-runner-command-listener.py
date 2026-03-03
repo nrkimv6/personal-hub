@@ -173,6 +173,16 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
                 WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file_val or None)
             except Exception as wt_e:
                 logger.warning(f"worktree 정리 실패 (runner_id: {runner_id}): {wt_e}")
+        elif merge_status in ("merging", "testing"):
+            # 프로세스가 죽은 상태에서 중간 상태로 남은 경우 — stale worktree 정리
+            try:
+                plan_file_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+                if plan_file_val == "ALL":
+                    plan_file_val = None
+                WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file_val or None)
+                logger.info(f"stale 중간 상태 worktree 정리: {runner_id} (merge_status={merge_status})")
+            except Exception as wt_e:
+                logger.warning(f"stale worktree 정리 실패 (runner_id: {runner_id}): {wt_e}")
 
         redis_client.delete(
             f"{RUNNER_KEY_PREFIX}:{runner_id}:status",
