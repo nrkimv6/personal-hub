@@ -245,7 +245,19 @@ def _tail_log_and_publish(runner_id: str, log_path: str, redis_client: redis.Red
                     # 더 읽을 내용 없음 — PID가 죽었는지 확인
                     proc = _running_processes.get(runner_id)
                     if proc is not None and proc.poll() is not None:
-                        # 프로세스 종료 후 잔여 내용 없음 → 스레드 종료
+                        # 프로세스 종료 후 파일에 추가된 잔여 라인을 한 번 더 드레인
+                        # (plan-runner가 종료 직전 _log()로 기록한 FAIL 로그 등)
+                        time.sleep(0.3)  # 파일 flush 대기
+                        while True:
+                            remaining = f.readline()
+                            if not remaining:
+                                break
+                            _stripped = remaining.rstrip('\n')
+                            if _stripped:
+                                try:
+                                    redis_client.publish(log_channel, _ANSI_ESCAPE.sub('', _stripped))
+                                except redis.ConnectionError:
+                                    pass
                         break
                     time.sleep(0.2)
     except FileNotFoundError:
@@ -261,7 +273,14 @@ def _monitor_pid_until_exit(runner_id: str, pid: int, redis_client: redis.Redis)
         if runner_id not in _running_processes:
             break
         if not _is_pid_alive(pid):
-            logger.info(f"[monitor_pid] runner {runner_id} PID {pid} 종료 감지 → cleanup")
+            logger.info(f"[monitor_pid] runner {runner_id} PID {pid} 종료 감지 → tail 스레드 완료 대기")
+            # tail 스레드가 파일 끝까지 drain 하도록 최대 5초 대기
+            # (plan-runner 종료 직전 _log("FAIL", ...) 등 마지막 로그가 publish된 후
+            # __COMPLETED__가 발행되도록 순서를 보장함)
+            tail_thread = _stream_threads.get(runner_id)
+            if tail_thread and tail_thread.is_alive():
+                tail_thread.join(timeout=5)
+            logger.info(f"[monitor_pid] runner {runner_id} → cleanup")
             _cleanup_process_state(runner_id, redis_client, reason="pid_exit_detected")
             break
         time.sleep(1)
@@ -444,6 +463,31 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
 
         # 이중 큐잉 방지: runner 내부 _publish_merge_request()가 이미 큐잉하므로
         # command-listener에서는 큐잉하지 않음
+
+        # stdout 버퍼 drain: 로그 파일에 기록된 잔여 라인을 publish
+        # (process.stdout 루프 종료 후 파일에 기록되었지만 아직 publish되지 않은 내용)
+        log_file_path = _running_log_files.get(runner_id) if runner_id else None
+        if log_file_path and runner_id:
+            log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+            try:
+                with open(str(log_file_path), "r", encoding="utf-8", errors="replace") as _drain_f:
+                    # 파일 끝으로 이동한 뒤 마지막 2KB만 확인 (종료 직전 로그가 주 대상)
+                    _drain_f.seek(0, 2)
+                    end_pos = _drain_f.tell()
+                    # 최대 8KB 역방향으로 재읽기
+                    start_pos = max(0, end_pos - 8192)
+                    _drain_f.seek(start_pos)
+                    tail_lines = _drain_f.readlines()
+                    # 마지막 50줄만 대상
+                    for _tail_line in tail_lines[-50:]:
+                        _stripped = _tail_line.rstrip('\n')
+                        if _stripped:
+                            try:
+                                redis_client.publish(log_channel, _ANSI_ESCAPE.sub('', _stripped))
+                            except redis.ConnectionError:
+                                pass
+            except Exception as _drain_err:
+                logger.debug(f"[_stream_output] stdout drain 실패 (무시): {_drain_err}")
 
         # Workflow 상태 업데이트: 정상 종료(0) → merge_pending, 비정상 → failed
         if _wf_manager and runner_id:
