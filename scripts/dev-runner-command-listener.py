@@ -1015,6 +1015,82 @@ def retry_merge(command: Dict, redis_client: redis.Redis) -> None:
     return None
 
 
+def _do_resolve_conflict(runner_id: str, redis_client: redis.Redis, command_id: str) -> None:
+    """resolve-conflict 실제 작업 (백그라운드 스레드에서 실행)"""
+    result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
+    try:
+        worktree_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
+        if not worktree_path_str:
+            result = {"success": False, "message": f"worktree_path not found for runner {runner_id}"}
+            redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
+            redis_client.expire(result_key, 60)
+            return
+        plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+        if plan_file == "ALL":
+            plan_file = None
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "resolving")
+        from conflict_resolver import ConflictResolver
+        resolver = ConflictResolver(PROJECT_ROOT, redis_client)
+        # 이전 충돌 상태 정리 (실패 무시)
+        subprocess.run(["git", "merge", "--abort"], capture_output=True, cwd=str(PROJECT_ROOT))
+        # branch 계산
+        if plan_file:
+            branch = f"plan/{Path(plan_file).stem}"
+        else:
+            branch = f"runner/{runner_id}"
+        # 충돌 상태 재현
+        subprocess.run(
+            ["git", "merge", branch, "--no-ff"],
+            capture_output=True,
+            cwd=str(PROJECT_ROOT),
+        )
+        resolve_result = resolver.try_resolve(runner_id, branch)
+        if resolve_result.success:
+            commit_proc = subprocess.run(
+                ["git", "commit", "--no-edit", "-m", f"merge: {branch} (auto-resolved)"],
+                capture_output=True,
+                text=True,
+                cwd=str(PROJECT_ROOT),
+            )
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+            result = {"success": True, "message": "충돌 자동 해결 완료", "action": "resolve-conflict"}
+        else:
+            subprocess.run(["git", "merge", "--abort"], capture_output=True, cwd=str(PROJECT_ROOT))
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
+            result = {"success": False, "reason": resolve_result.reason, "action": "resolve-conflict"}
+    except Exception as e:
+        logger.error(f"[resolve_conflict] 실패: {e}")
+        result = {"success": False, "message": str(e), "action": "resolve-conflict"}
+    redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
+    redis_client.expire(result_key, 60)
+
+
+def resolve_conflict(command: Dict, redis_client: redis.Redis) -> None:
+    """충돌 자동 해결 — 즉시 accepted 반환, 실제 작업은 백그라운드 스레드"""
+    runner_id = command.get("runner_id", "")
+    command_id = command.get("command_id", "")
+    if not runner_id:
+        return {"success": False, "message": "runner_id required"}
+    result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
+    accepted = {
+        "success": True,
+        "message": "accepted",
+        "runner_id": runner_id,
+        "action": "resolve-conflict",
+        "executed_at": datetime.now().isoformat(),
+    }
+    redis_client.lpush(result_key, json.dumps(accepted, ensure_ascii=False))
+    redis_client.expire(result_key, 60)
+    logger.info(f"[resolve_conflict] accepted 응답 즉시 반환 (runner_id: {runner_id})")
+    thread = threading.Thread(
+        target=_do_resolve_conflict,
+        args=(runner_id, redis_client, command_id),
+        daemon=True,
+    )
+    thread.start()
+    return None
+
+
 def _do_cleanup_worktree(runner_id: str, redis_client: redis.Redis, command_id: str) -> None:
     """cleanup-worktree 실제 작업 (백그라운드 스레드에서 실행)"""
     result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
@@ -1158,6 +1234,8 @@ def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
         return get_status(redis_client)
     elif action == "retry-merge":
         return retry_merge(command, redis_client)
+    elif action == "resolve-conflict":
+        return resolve_conflict(command, redis_client)
     elif action == "cleanup-worktree":
         return cleanup_worktree(command, redis_client)
     elif action == "start-orchestrator":

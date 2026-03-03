@@ -25,6 +25,7 @@
 	let killing = $state(false);
 	let stopError = $state<string | null>(null);
 	let retryingMerge = $state(false);
+	let resolvingConflict = $state(false);
 	let mergeError = $state<string | null>(null);
 	let intervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -91,6 +92,18 @@
 		}
 	}
 
+	async function handleResolveConflict() {
+		resolvingConflict = true;
+		mergeError = null;
+		try {
+			await devRunnerRunnerApi.resolveConflict(runnerId);
+		} catch (e) {
+			mergeError = e instanceof Error ? e.message : '자동 해결 실패';
+		} finally {
+			resolvingConflict = false;
+		}
+	}
+
 	async function handleCleanupWorktree() {
 		if (!confirm('worktree를 정리하시겠습니까? 미저장 변경사항이 삭제됩니다.')) return;
 		try {
@@ -134,6 +147,8 @@
 			<span class="px-1.5 py-0.5 rounded text-[10px] bg-green-100 text-green-700">머지됨</span>
 		{:else if mergeStatus === 'conflict'}
 			<span class="px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700">충돌</span>
+		{:else if mergeStatus === 'resolving'}
+			<span class="px-1.5 py-0.5 rounded text-[10px] bg-yellow-100 text-yellow-700">해결중</span>
 		{/if}
 
 		{#if elapsed}
@@ -171,9 +186,24 @@
 		<div class="px-3 py-1 text-xs text-red-600 bg-red-50 border-b border-red-100">{stopError}</div>
 	{/if}
 
-	{#if mergeStatus === 'conflict'}
+	{#if mergeStatus === 'resolving'}
+		<div class="flex items-center gap-2 px-3 py-2 bg-yellow-50 border-b border-yellow-200 text-xs">
+			<svg class="animate-spin h-3 w-3 text-yellow-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+				<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+				<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+			</svg>
+			<span class="text-yellow-700 font-medium">충돌 자동 해결 중...</span>
+		</div>
+	{:else if mergeStatus === 'conflict'}
 		<div class="flex items-center gap-2 px-3 py-2 bg-red-50 border-b border-red-200 text-xs">
 			<span class="text-red-700 font-medium">머지 충돌이 발생했습니다.</span>
+			<button
+				class="px-2 py-0.5 rounded border border-blue-300 text-blue-700 hover:bg-blue-100 disabled:opacity-50 transition-colors"
+				onclick={handleResolveConflict}
+				disabled={resolvingConflict}
+			>
+				{resolvingConflict ? '해결 중...' : '자동 해결'}
+			</button>
 			<button
 				class="px-2 py-0.5 rounded border border-red-300 text-red-700 hover:bg-red-100 disabled:opacity-50 transition-colors"
 				onclick={handleRetryMerge}

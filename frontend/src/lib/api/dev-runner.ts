@@ -245,6 +245,12 @@ export const devRunnerRunnerApi = {
 			{ method: 'POST' }
 		),
 
+	resolveConflict: (runnerId: string) =>
+		devRunnerRequest<{ success: boolean; message: string }>(
+			`/runners/${runnerId}/resolve-conflict`,
+			{ method: 'POST' }
+		),
+
 	cleanupWorktree: (runnerId: string) =>
 		devRunnerRequest<{ success: boolean; message: string }>(
 			`/runners/${runnerId}/worktree`,

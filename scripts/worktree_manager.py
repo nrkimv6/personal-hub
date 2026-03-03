@@ -128,7 +128,7 @@ class WorktreeManager:
             return True  # 멱등 처리
 
     @staticmethod
-    def merge_to_main(runner_id: str, base_dir: Path, project_root: Path, plan_file: Optional[str] = None) -> MergeResult:
+    def merge_to_main(runner_id: str, base_dir: Path, project_root: Path, plan_file: Optional[str] = None, auto_resolve: bool = False, redis_client=None) -> MergeResult:
         """worktree 변경사항을 main 브랜치에 머지"""
         if plan_file:
             stem = Path(plan_file).stem
@@ -146,6 +146,27 @@ class WorktreeManager:
                 logger.info(f"[WorktreeManager] 머지 성공: {branch}")
                 return MergeResult(success=True, conflict=False, message="머지 성공")
             else:
+                # auto_resolve 시도
+                if auto_resolve and redis_client is not None:
+                    try:
+                        if redis_client:
+                            redis_client.set(f"plan-runner:runners:{runner_id}:merge_status", "resolving")
+                        from conflict_resolver import ConflictResolver
+                        resolver = ConflictResolver(project_root, redis_client)
+                        resolve_result = resolver.try_resolve(runner_id, branch)
+                        if resolve_result.success:
+                            # 자동 해결 성공 → 머지 커밋
+                            commit_proc = subprocess.run(
+                                ["git", "commit", "--no-edit", "-m", f"merge: {branch} (auto-resolved)"],
+                                capture_output=True,
+                                text=True,
+                                cwd=str(project_root),
+                            )
+                            if commit_proc.returncode == 0:
+                                logger.info(f"[WorktreeManager] 자동 해결 성공: {branch}")
+                                return MergeResult(success=True, conflict=False, message="auto-resolved")
+                    except Exception as e:
+                        logger.warning(f"[WorktreeManager] auto_resolve 실패 (abort 진행): {e}")
                 # 충돌 abort
                 subprocess.run(["git", "merge", "--abort"], capture_output=True, cwd=str(project_root))
                 return MergeResult(success=False, conflict=True, message=result.stderr)

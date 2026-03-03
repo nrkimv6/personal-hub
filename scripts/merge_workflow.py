@@ -78,7 +78,7 @@ class MergeWorkflow:
         except Exception as e:
             logger.warning(f"[MergeWorkflow._wf_update] workflow update 실패 (무시): {e}")
 
-    def run(self, runner_id: str, worktree_path: Path, base_dir: Path, plan_file: str = None) -> WorkflowResult:
+    def run(self, runner_id: str, worktree_path: Path, base_dir: Path, plan_file: str = None, auto_resolve: bool = True) -> WorkflowResult:
         from worktree_manager import WorktreeManager
 
         # Workflow: merging 상태로 전이
@@ -96,8 +96,8 @@ class MergeWorkflow:
 
             # 2. 머지
             self._update_queue_status(runner_id, "merging")
-            self._publish_log(runner_id, "MERGE", "main 브랜치에 머지 중...")
-            merge_result = WorktreeManager.merge_to_main(runner_id, base_dir, self.project_root, plan_file=plan_file)
+            self._publish_log(runner_id, "MERGE", f"main 브랜치에 머지 중... (auto_resolve={auto_resolve})")
+            merge_result = WorktreeManager.merge_to_main(runner_id, base_dir, self.project_root, plan_file=plan_file, auto_resolve=auto_resolve, redis_client=self.redis_client)
             if not merge_result.success:
                 # conflict/test_failed: worktree 보존 (수동 해결 대기)
                 self._publish_log(runner_id, "ERROR", f"머지 충돌: {merge_result.message[:200]}")
