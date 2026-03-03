@@ -54,6 +54,7 @@
 		engine: string | null;
 		running: boolean;
 		start_time: string | null;
+		branch?: string | null;
 	}
 	let runnerTabs = $state<RunnerTab[]>([]);
 	let activeTabId = $state<string | null>(null);
@@ -104,6 +105,7 @@
 							engine: runner.engine,
 							running: runner.running,
 							start_time: runner.start_time ? new Date(runner.start_time).toISOString() : null,
+							branch: runner.branch ?? null,
 						}];
 					}
 				}
@@ -432,14 +434,9 @@
 					}
 					void pollStatus();
 				} : undefined}
+			onStopRunner={async (id) => { await devRunnerRunnerApi.stop(id).catch(() => {}); void pollStatus(); }}
+			onKillRunner={async (id) => { await devRunnerRunnerApi.kill(id).catch(() => {}); void pollStatus(); }}
 			/>
-
-			<!-- CurrentTrackingCard (실행 중 + 추적 정보 있을 때만) -->
-			{#if activeTabRunner?.running && currentTracking}
-				<div class="px-4 py-2 border-b bg-gray-50 shrink-0">
-					<CurrentTrackingCard tracking={currentTracking} />
-				</div>
-			{/if}
 
 			<!-- 실행 모달 -->
 			{#if showExecutionModal}
@@ -448,7 +445,7 @@
 					class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
 					onclick={(e) => { if (e.target === e.currentTarget) showExecutionModal = false; }}
 				>
-					<div class="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 p-5">
+					<div class="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-5">
 						<div class="flex items-center justify-between mb-4">
 							<h3 class="text-sm font-semibold">실행 설정</h3>
 							<button
@@ -512,7 +509,7 @@
 					<div class="flex-1 min-h-0 overflow-hidden">
 						{#if taskHistoryTab === 'tasks'}
 							<div class="px-4 pb-4 h-full flex flex-col">
-								{#if activeTabRunner?.running && currentTracking}
+								{#if currentTracking}
 									<CurrentTrackingCard tracking={currentTracking} />
 								{/if}
 								<div class="flex-1 min-h-0 overflow-hidden">
@@ -554,13 +551,17 @@
 						{#each runnerTabs as tab (tab.id)}
 							<!-- svelte-ignore a11y_interactive_supports_focus -->
 							<div
-								class="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono whitespace-nowrap transition-colors cursor-pointer {activeTabId === tab.id ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-gray-600 hover:bg-gray-100'}"
+								class="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono whitespace-nowrap transition-colors cursor-pointer {activeTabId === tab.id ? 'bg-primary/20 text-primary border border-primary/30' : 'text-gray-600 hover:bg-gray-100'}"
 								role="tab"
 								aria-selected={activeTabId === tab.id}
 								onclick={() => { activeTabId = tab.id; }}
 								onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { activeTabId = tab.id; } }}
 							>
-								<span>{tab.running ? '⏳' : '✅'}</span>
+								{#if tab.running}
+\t\t\t\t\t\t\t\t\t<svg class="w-3 h-3 text-amber-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+\t\t\t\t\t\t\t\t{:else}
+\t\t\t\t\t\t\t\t\t<svg class="w-3 h-3 text-emerald-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+\t\t\t\t\t\t\t\t{/if}
 								<span class="max-w-[120px] truncate">{tab.plan_file ? tab.plan_file.split(/[\/]/).pop() : '전체 실행'}</span>
 								<button
 									class="ml-0.5 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-300 text-gray-400 hover:text-gray-600 text-[10px]"
@@ -572,27 +573,27 @@
 						<!-- 고정 Logs 버튼 -->
 						<!-- svelte-ignore a11y_interactive_supports_focus -->
 						<div
-							class="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono whitespace-nowrap transition-colors cursor-pointer {activeTabId === '__logs__' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-gray-500 hover:bg-gray-100'}"
+							class="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono whitespace-nowrap transition-colors cursor-pointer {activeTabId === '__logs__' ? 'bg-primary/20 text-primary border border-primary/30' : 'text-gray-500 hover:bg-gray-100'}"
 							role="tab"
 							aria-selected={activeTabId === '__logs__'}
 							onclick={() => { activeTabId = '__logs__'; }}
 							onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { activeTabId = '__logs__'; } }}
 							title="통합 실행 로그"
 						>
-							<span>📋</span>
+							<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
 							<span>Logs</span>
 						</div>
 						<!-- 고정 Merge Queue 버튼 -->
 						<!-- svelte-ignore a11y_interactive_supports_focus -->
 						<div
-							class="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono whitespace-nowrap transition-colors cursor-pointer ml-auto {activeTabId === '__merge__' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-gray-500 hover:bg-gray-100'}"
+							class="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono whitespace-nowrap transition-colors cursor-pointer ml-auto {activeTabId === '__merge__' ? 'bg-primary/20 text-primary border border-primary/30' : 'text-gray-500 hover:bg-gray-100'}"
 							role="tab"
 							aria-selected={activeTabId === '__merge__'}
 							onclick={() => { activeTabId = '__merge__'; }}
 							onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { activeTabId = '__merge__'; } }}
 							title="Merge Queue"
 						>
-							<span>🔀</span>
+							<svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>
 							<span>Merge</span>
 						</div>
 					</div>
