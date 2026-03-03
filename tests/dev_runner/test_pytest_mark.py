@@ -14,7 +14,8 @@ class TestPytestMarkInfra:
         """TC-Right: pytest.ini에 http marker 등록 → --markers 출력에 http 표시"""
         result = subprocess.run(
             [PYTHON, "-m", "pytest", "--markers"],
-            capture_output=True, text=True, cwd=str(PROJECT_ROOT)
+            capture_output=True, text=True, encoding="utf-8",
+            cwd=str(PROJECT_ROOT)
         )
         assert "http" in result.stdout, f"http marker not found in: {result.stdout[:500]}"
 
@@ -38,8 +39,8 @@ class TestPytestMarkInfra:
         result = subprocess.run(
             [PYTHON, "-m", "pytest", "tests/dev_runner/test_pytest_mark.py",
              "--collect-only", "-m", "not http", "-q", "--no-header"],
-            capture_output=True, text=True, cwd=str(PROJECT_ROOT),
-            timeout=20
+            capture_output=True, text=True, encoding="utf-8",
+            cwd=str(PROJECT_ROOT), timeout=20
         )
         # 이 파일 자체는 http mark 없으므로 수집되어야 함
         assert result.returncode == 0
