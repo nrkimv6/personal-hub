@@ -109,5 +109,5 @@ async def test_e2e_full_lifecycle(dev_runner_listener, executor_service):
         assert getattr(e, "status_code", 500) == 404
 
     # 4. Status should be clean now
-    final_status = executor_service.get_runner_status(runner_id)
+    final_status = await executor_service.get_runner_status(runner_id)
     assert final_status.running is False

@@ -99,8 +99,8 @@ class TestE2EScenario1:
             _make_runner_item(result1.runner_id, running=True),
             _make_runner_item(result2.runner_id, running=True),
         ]
-        with patch.object(executor, "get_all_runners", return_value=runners_mock):
-            runners = executor.get_all_runners()
+        with patch.object(executor, "get_all_runners", new_callable=AsyncMock, return_value=runners_mock):
+            runners = await executor.get_all_runners()
         assert len(runners) == 2
         runner_ids = {r.runner_id for r in runners}
         assert result1.runner_id in runner_ids
@@ -121,14 +121,14 @@ class TestE2EScenario2:
 
         # stop 전: running=True
         runners_before = [_make_runner_item(runner_id, running=True)]
-        with patch.object(executor, "get_all_runners", return_value=runners_before):
-            runners = executor.get_all_runners()
+        with patch.object(executor, "get_all_runners", new_callable=AsyncMock, return_value=runners_before):
+            runners = await executor.get_all_runners()
         assert runners[0].running is True
 
         # stop 후: running=False (탭은 유지)
         runners_after = [_make_runner_item(runner_id, running=False)]
-        with patch.object(executor, "get_all_runners", return_value=runners_after):
-            runners = executor.get_all_runners()
+        with patch.object(executor, "get_all_runners", new_callable=AsyncMock, return_value=runners_after):
+            runners = await executor.get_all_runners()
 
         assert len(runners) == 1
         assert runners[0].runner_id == runner_id
@@ -191,7 +191,7 @@ class TestE2EScenario4:
             stopped_count.append(runner_id)
             return {"message": "Stopped successfully"}
 
-        with patch.object(executor, "get_all_runners", return_value=runners), \
+        with patch.object(executor, "get_all_runners", new_callable=AsyncMock, return_value=runners), \
              patch.object(executor, "stop_dev_runner", side_effect=mock_stop):
             result = await executor.stop_all_runners()
 
@@ -202,8 +202,8 @@ class TestE2EScenario4:
 
         # stop-all 이후 get_all_runners → 빈 목록 시뮬레이션
         empty_runners = []
-        with patch.object(executor, "get_all_runners", return_value=empty_runners):
-            remaining = executor.get_all_runners()
+        with patch.object(executor, "get_all_runners", new_callable=AsyncMock, return_value=empty_runners):
+            remaining = await executor.get_all_runners()
         assert remaining == []
 
 

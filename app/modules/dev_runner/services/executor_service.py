@@ -586,7 +586,7 @@ class ExecutorService:
         """모든 active runner 일괄 중지 - asyncio.gather 병렬 호출"""
         import asyncio
 
-        runners = self.get_all_runners()
+        runners = await self.get_all_runners()
         runner_ids = [r.runner_id for r in runners if r.running]
 
         if not runner_ids:

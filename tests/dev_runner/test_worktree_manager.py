@@ -36,13 +36,13 @@ class TestWorktreeManagerCreate:
     def test_right_creates_directory(self, worktrees_dir):
         """TC-Right: create() 후 worktree 디렉토리 존재 + git worktree list에 표시"""
         base_dir, repo = worktrees_dir
-        path = WorktreeManager.create("abc123", base_dir)
+        path, _branch = WorktreeManager.create("abc123", base_dir)
         assert path.is_dir(), "worktree 디렉토리가 존재해야 한다"
 
     def test_right_returns_absolute_path(self, worktrees_dir):
         """TC-Right: 반환값이 절대경로이고 Path.is_dir() == True"""
         base_dir, repo = worktrees_dir
-        path = WorktreeManager.create("abc456", base_dir)
+        path, _branch = WorktreeManager.create("abc456", base_dir)
         assert path.is_absolute()
         assert path.is_dir()
 
@@ -55,7 +55,7 @@ class TestWorktreeManagerCreate:
     def test_boundary_nonexistent_base_dir_auto_create(self, tmp_git_repo):
         """TC-Boundary: base_dir 미존재 → 자동 생성"""
         base_dir = tmp_git_repo / "new" / "nested" / "worktrees"
-        path = WorktreeManager.create("xyz789", base_dir)
+        path, _branch = WorktreeManager.create("xyz789", base_dir)
         assert path.is_dir()
 
     def test_error_duplicate_runner_id_raises(self, worktrees_dir):
@@ -85,8 +85,9 @@ class TestWorktreeManagerCreate:
     def test_correct_conformance_path_pattern(self, worktrees_dir):
         """TC-CORRECT-Conformance: 반환 경로가 {base_dir}/{runner_id} 패턴 준수"""
         base_dir, repo = worktrees_dir
-        path = WorktreeManager.create("pattest", base_dir)
+        path, branch = WorktreeManager.create("pattest", base_dir)
         assert path == base_dir / "pattest"
+        assert branch == "runner/pattest"
 
     def test_correct_reference_branch_name(self, worktrees_dir):
         """TC-CORRECT-Reference: 생성된 브랜치가 runner/{runner_id} 이름 준수"""
