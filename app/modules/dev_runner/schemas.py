@@ -204,6 +204,9 @@ class RunHistoryItem(BaseModel):
     end_time: Optional[datetime] = None
     log_file: Optional[str] = None
     has_log: bool = False
+    worktree_path: Optional[str] = None
+    branch: Optional[str] = None
+    merge_status: Optional[str] = None
 
 
 class RunHistoryResponse(BaseModel):

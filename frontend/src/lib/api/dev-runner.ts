@@ -361,6 +361,9 @@ export interface RunHistoryItem {
 	end_time: string | null;
 	log_file: string | null;
 	has_log: boolean;
+	worktree_path: string | null;
+	branch: string | null;
+	merge_status: string | null;
 }
 
 export interface RunHistoryResponse {

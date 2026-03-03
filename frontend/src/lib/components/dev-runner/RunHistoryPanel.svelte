@@ -96,7 +96,17 @@
 							<span class="ml-auto text-[10px] text-gray-500 flex-shrink-0">{item.engine}</span>
 						{/if}
 					</div>
-					<!-- plan_file -->
+					<!-- branch -->
+					<div class="text-[10px] pl-3 truncate {item.branch ? 'text-blue-400' : 'text-gray-600'}">
+						{item.branch ?? 'main'}
+						{#if item.merge_status}
+							<span class="ml-1 px-1 rounded text-[9px] {
+								item.merge_status === 'merged' ? 'bg-green-900 text-green-300' :
+								item.merge_status === 'pending' ? 'bg-yellow-900 text-yellow-300' :
+								'bg-gray-700 text-gray-400'
+							}">{item.merge_status}</span>
+						{/if}
+					</div>
 					{#if item.plan_file}
 						<div class="text-[10px] text-gray-500 truncate pl-3" title={item.plan_file}>
 							{item.plan_file.split('/').pop() ?? item.plan_file}

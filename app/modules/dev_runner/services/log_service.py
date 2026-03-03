@@ -259,6 +259,8 @@ class LogService:
                 start_time_str = self.redis_client.get(f"{prefix}:start_time")
                 stream_log = self.redis_client.get(f"{prefix}:stream_log_path")
                 log_file_path = stream_log or self.redis_client.get(f"{prefix}:log_file_path")
+                worktree_path = self.redis_client.get(f"{prefix}:worktree_path")
+                merge_status = self.redis_client.get(f"{prefix}:merge_status")
 
                 start_time = None
                 if start_time_str:
@@ -275,6 +277,7 @@ class LogService:
                         pass
 
                 has_log = bool(log_file_path and Path(log_file_path).exists())
+                branch = f"runner/{runner_id}" if worktree_path else None
                 runs[runner_id] = RunHistoryItem(
                     runner_id=runner_id,
                     plan_file=plan_file,
@@ -285,6 +288,9 @@ class LogService:
                     end_time=None,
                     log_file=log_file_path,
                     has_log=has_log,
+                    worktree_path=worktree_path,
+                    branch=branch,
+                    merge_status=merge_status,
                 )
         except redis.ConnectionError:
             pass
