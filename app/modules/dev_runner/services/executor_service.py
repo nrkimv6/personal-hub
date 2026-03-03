@@ -533,6 +533,22 @@ class ExecutorService:
             raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")
 
 
+    async def enqueue_merge(self, branch: str, plan_file: str = "", project: str = "monitor-page", worktree_path: str = "") -> dict:
+        """Merge Queue에 항목 직접 투입 (테스트/수동용)"""
+        runner_id = "manual-" + uuid.uuid4().hex[:8]
+        timestamp = datetime.now().isoformat()
+        item = {
+            "runner_id": runner_id,
+            "branch": branch,
+            "plan_file": plan_file,
+            "project": project,
+            "worktree_path": worktree_path,
+            "status": "pending",
+            "timestamp": timestamp,
+        }
+        await self.async_redis.lpush("plan-runner:merge-queue", json.dumps(item, ensure_ascii=False))
+        return {"runner_id": runner_id, "queued": True}
+
     async def get_merge_queue(self) -> list:
         """Redis merge-queue 조회 → list[MergeQueueItem]"""
         try:

@@ -299,6 +299,14 @@ class WorkflowCreateRequest(BaseModel):
     slug: Optional[str] = None
 
 
+class MergeQueueEnqueueRequest(BaseModel):
+    """Merge Queue 직접 투입 요청 스키마 (테스트/수동용)"""
+    branch: str = Field(..., description="머지할 브랜치명 (필수)")
+    plan_file: str = Field(default="", description="Plan 파일 경로")
+    project: str = Field(default="monitor-page", description="대상 프로젝트명")
+    worktree_path: str = Field(default="", description="워크트리 경로 (빈 값 허용)")
+
+
 __all__ = [
     'PlanEventResponse',
     'PlanRecordResponse',
@@ -330,4 +338,5 @@ __all__ = [
     'DevRunnerSettingsUpdateRequest',
     'WorkflowResponse',
     'WorkflowCreateRequest',
+    'MergeQueueEnqueueRequest',
 ]

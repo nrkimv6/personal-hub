@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, HTTPException
 
-from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse, RunnerListItem, MergeQueueItem, MergeStatusResponse, MergeHistoryItem
+from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse, RunnerListItem, MergeQueueItem, MergeStatusResponse, MergeHistoryItem, MergeQueueEnqueueRequest
 from app.modules.dev_runner.services.executor_service import executor_service
 
 router = APIRouter()
@@ -94,6 +94,14 @@ async def dismiss_runner_tab(runner_id: str):
 async def get_merge_queue():
     """Merge Queue 목록 조회"""
     return await executor_service.get_merge_queue()
+
+
+@router.post("/merge-queue")
+async def enqueue_merge(request: MergeQueueEnqueueRequest):
+    """Merge Queue에 항목 직접 투입 (테스트/수동용, Admin 포트 전용)"""
+    return await executor_service.enqueue_merge(
+        request.branch, request.plan_file, request.project, request.worktree_path
+    )
 
 
 @router.get("/merge-history", response_model=list[MergeHistoryItem])
