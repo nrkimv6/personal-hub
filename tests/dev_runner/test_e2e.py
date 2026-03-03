@@ -54,6 +54,18 @@ def dev_runner_listener():
         process.terminate()
         process.wait(timeout=5)
 
+    # worktree 잔여물 정리
+    _root = Path("D:/work/project/tools/monitor-page")
+    for _stem in ["test_plan_e2e_mock"]:
+        subprocess.run(
+            ["git", "worktree", "remove", str(_root / ".worktrees" / _stem), "--force"],
+            capture_output=True, cwd=str(_root),
+        )
+        subprocess.run(
+            ["git", "branch", "-D", f"plan/{_stem}"],
+            capture_output=True, cwd=str(_root),
+        )
+
 @pytest.fixture
 def executor_service():
     """Actual executor service connecting to real local Redis"""

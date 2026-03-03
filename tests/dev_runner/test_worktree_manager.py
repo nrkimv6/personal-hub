@@ -36,13 +36,13 @@ class TestWorktreeManagerCreate:
     def test_right_creates_directory(self, worktrees_dir):
         """TC-Right: create() 후 worktree 디렉토리 존재 + git worktree list에 표시"""
         base_dir, repo = worktrees_dir
-        path = WorktreeManager.create("abc123", base_dir)
+        path, _branch = WorktreeManager.create("abc123", base_dir)
         assert path.is_dir(), "worktree 디렉토리가 존재해야 한다"
 
     def test_right_returns_absolute_path(self, worktrees_dir):
         """TC-Right: 반환값이 절대경로이고 Path.is_dir() == True"""
         base_dir, repo = worktrees_dir
-        path = WorktreeManager.create("abc456", base_dir)
+        path, _branch = WorktreeManager.create("abc456", base_dir)
         assert path.is_absolute()
         assert path.is_dir()
 
@@ -55,15 +55,22 @@ class TestWorktreeManagerCreate:
     def test_boundary_nonexistent_base_dir_auto_create(self, tmp_git_repo):
         """TC-Boundary: base_dir 미존재 → 자동 생성"""
         base_dir = tmp_git_repo / "new" / "nested" / "worktrees"
-        path = WorktreeManager.create("xyz789", base_dir)
+        path, _branch = WorktreeManager.create("xyz789", base_dir)
         assert path.is_dir()
 
-    def test_error_duplicate_runner_id_raises(self, worktrees_dir):
-        """TC-Error: 동일 runner_id로 두 번 create() → 두 번째 WorktreeError"""
+    def test_error_duplicate_runner_id_replaces(self, worktrees_dir):
+        """TC-Error: 동일 runner_id로 두 번 create() → 잔여 worktree 제거 후 재생성 (에러 없음)
+
+        "already exists" 방어 코드 적용 후 변경된 동작:
+        중복 호출 시 기존 worktree를 제거하고 새로 생성한다.
+        """
         base_dir, repo = worktrees_dir
-        WorktreeManager.create("dup001", base_dir)
-        with pytest.raises(WorktreeError):
-            WorktreeManager.create("dup001", base_dir)
+        path1, _ = WorktreeManager.create("dup001", base_dir)
+        assert path1.is_dir()
+        # 두 번째 호출은 에러 없이 새 worktree 생성
+        path2, branch2 = WorktreeManager.create("dup001", base_dir)
+        assert path2.is_dir()
+        assert branch2 == "runner/dup001"
 
     def test_error_not_a_git_repo(self, tmp_path):
         """TC-Error: git 저장소가 아닌 디렉토리 → WorktreeError"""
@@ -85,7 +92,7 @@ class TestWorktreeManagerCreate:
     def test_correct_conformance_path_pattern(self, worktrees_dir):
         """TC-CORRECT-Conformance: 반환 경로가 {base_dir}/{runner_id} 패턴 준수"""
         base_dir, repo = worktrees_dir
-        path = WorktreeManager.create("pattest", base_dir)
+        path, _branch = WorktreeManager.create("pattest", base_dir)
         assert path == base_dir / "pattest"
 
     def test_correct_reference_branch_name(self, worktrees_dir):
@@ -97,6 +104,47 @@ class TestWorktreeManagerCreate:
             capture_output=True, text=True, cwd=str(repo)
         )
         assert "runner/brtest" in result.stdout
+
+    def test_create_recovers_from_existing_branch_right(self, worktrees_dir):
+        """TC-Right: 브랜치가 이미 존재할 때 create()가 worktree를 성공적으로 생성한다"""
+        base_dir, repo = worktrees_dir
+        # 브랜치만 먼저 생성 (worktree 없이)
+        subprocess.run(
+            ["git", "branch", "plan/test-dup"],
+            capture_output=True, cwd=str(repo),
+        )
+        # create() 호출 — "already exists" 방어 로직으로 복구되어야 함
+        worktree_path, branch = WorktreeManager.create("r1", base_dir, plan_file="test-dup.md")
+        assert worktree_path.is_dir(), "worktree 디렉토리가 존재해야 한다"
+        assert branch == "plan/test-dup"
+
+    def test_create_recovers_no_stale_content_right(self, worktrees_dir):
+        """TC-Right: 재시도 후 생성된 worktree가 main HEAD와 동일한 커밋을 가리킨다"""
+        base_dir, repo = worktrees_dir
+        # 브랜치만 먼저 생성
+        subprocess.run(
+            ["git", "branch", "plan/test-dup2"],
+            capture_output=True, cwd=str(repo),
+        )
+        worktree_path, _ = WorktreeManager.create("r2", base_dir, plan_file="test-dup2.md")
+        # main HEAD 커밋
+        main_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, cwd=str(repo),
+        ).stdout.strip()
+        # worktree HEAD 커밋
+        wt_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, cwd=str(worktree_path),
+        ).stdout.strip()
+        assert wt_head == main_head, "worktree HEAD가 main HEAD와 동일해야 한다"
+
+    def test_create_fresh_branch_still_works_right(self, worktrees_dir):
+        """TC-Right: 브랜치가 없는 정상 경우 기존 동작이 깨지지 않는다 (회귀)"""
+        base_dir, repo = worktrees_dir
+        worktree_path, branch = WorktreeManager.create("fresh", base_dir, plan_file="fresh-plan.md")
+        assert worktree_path.is_dir()
+        assert branch == "plan/fresh-plan"
 
 
 # ── remove() ─────────────────────────────────────────────────────────────────

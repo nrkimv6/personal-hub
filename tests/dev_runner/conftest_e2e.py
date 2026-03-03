@@ -18,6 +18,9 @@ HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
 PLAN_RUNNER_KEY_PATTERN = "plan-runner:*"
 LISTENER_SCRIPT = Path("D:/work/project/tools/monitor-page/scripts/dev-runner-command-listener.py")
 PYTHON_EXE = Path("D:/work/project/tools/monitor-page/.venv/Scripts/python.exe")
+PROJECT_ROOT = Path("D:/work/project/tools/monitor-page")
+WORKTREE_BASE = PROJECT_ROOT / ".worktrees"
+TEST_PLAN_STEMS = ["test_minimal_plan", "test_plan_e2e_mock"]
 
 
 @pytest.fixture
@@ -83,6 +86,19 @@ def test_plan_file(tmp_path):
     return plan
 
 
+def _cleanup_test_worktrees() -> None:
+    """테스트 고정 plan 파일의 worktree/branch 잔여물 제거 (멱등)"""
+    for stem in TEST_PLAN_STEMS:
+        subprocess.run(
+            ["git", "worktree", "remove", str(WORKTREE_BASE / stem), "--force"],
+            capture_output=True, cwd=str(PROJECT_ROOT),
+        )
+        subprocess.run(
+            ["git", "branch", "-D", f"plan/{stem}"],
+            capture_output=True, cwd=str(PROJECT_ROOT),
+        )
+
+
 _PRESERVE_KEYS = {
     "plan-runner:listener:heartbeat",  # Listener 활성 상태 유지
 }
@@ -99,6 +115,8 @@ def e2e_redis_cleanup(real_redis):
             if key not in _PRESERVE_KEYS:
                 real_redis.delete(key)
 
+    _cleanup_test_worktrees()
     _cleanup()
     yield
+    _cleanup_test_worktrees()
     _cleanup()
