@@ -85,6 +85,7 @@ _running_log_files: dict = {}
 _stream_threads: dict = {}
 _merge_orchestrator_process: Optional[subprocess.Popen] = None
 _merge_orchestrator_log_path: Optional[Path] = None
+_merge_orchestrator_attached_pid: Optional[int] = None  # listener 재시작 후 재연결된 PID (Popen 없이 관리)
 
 # WorkflowManager (main()에서 초기화)
 _wf_manager: Optional[WorkflowManager] = None
@@ -1141,9 +1142,12 @@ def cleanup_worktree(command: Dict, redis_client: redis.Redis) -> None:
 
 def start_merge_orchestrator(redis_client: redis.Redis) -> Dict:
     """plan-runner merge-orchestrator 프로세스 시작"""
-    global _merge_orchestrator_process, _merge_orchestrator_log_path
+    global _merge_orchestrator_process, _merge_orchestrator_log_path, _merge_orchestrator_attached_pid
     if _merge_orchestrator_process and _merge_orchestrator_process.poll() is None:
         return {"success": False, "message": f"이미 실행 중 (PID: {_merge_orchestrator_process.pid})"}
+    # listener 재시작 후 재연결된 고아 프로세스가 살아있으면 중복 시작 방지
+    if _merge_orchestrator_attached_pid and _is_pid_alive(_merge_orchestrator_attached_pid):
+        return {"success": False, "message": f"이미 실행 중 (재연결 PID: {_merge_orchestrator_attached_pid})"}
 
     try:
         cmd = [str(PLAN_RUNNER_PYTHON), "-m", "plan_runner", "merge-orchestrator"]
@@ -1185,15 +1189,58 @@ def start_merge_orchestrator(redis_client: redis.Redis) -> Dict:
             _merge_orchestrator_process = None
             return {"success": False, "message": f"Orchestrator 즉시 종료 (exit code: {rc}): {log_tail[:200]}"}
 
+        # PID를 Redis에 저장 (listener 재시작 시 재연결용)
+        redis_client.set("plan-runner:merge-orchestrator:pid", pid)
         return {"success": True, "message": f"Orchestrator 시작 (PID: {pid})"}
     except Exception as e:
         logger.error(f"Merge Orchestrator 시작 실패: {e}")
         return {"success": False, "message": str(e)}
 
 
+def _reconnect_surviving_merge_orchestrator(redis_client: redis.Redis):
+    """listener 시작(또는 재시작) 시 기존 MergeOrchestrator 프로세스 재연결.
+
+    Redis에 저장된 PID를 확인하여:
+    - PID가 살아있으면 → _merge_orchestrator_attached_pid에 기록 (중복 시작 방지)
+    - PID가 죽어있으면 → Redis 키 정리
+    """
+    global _merge_orchestrator_attached_pid
+    pid_str = redis_client.get("plan-runner:merge-orchestrator:pid")
+    if not pid_str:
+        return
+    try:
+        pid = int(pid_str)
+    except (ValueError, TypeError):
+        redis_client.delete("plan-runner:merge-orchestrator:pid")
+        return
+
+    if _is_pid_alive(pid):
+        _merge_orchestrator_attached_pid = pid
+        logger.info(f"[MergeOrch] 기존 프로세스 재연결 (PID: {pid})")
+    else:
+        logger.info(f"[MergeOrch] 기존 프로세스 종료됨 (PID: {pid}) → Redis 정리")
+        redis_client.delete("plan-runner:merge-orchestrator:pid")
+
+
 def stop_merge_orchestrator(redis_client: redis.Redis) -> Dict:
     """plan-runner merge-orchestrator 프로세스 종료"""
-    global _merge_orchestrator_process
+    global _merge_orchestrator_process, _merge_orchestrator_attached_pid
+    # 재연결된 고아 프로세스 종료
+    if _merge_orchestrator_attached_pid and _is_pid_alive(_merge_orchestrator_attached_pid):
+        import ctypes
+        try:
+            kernel32 = ctypes.windll.kernel32
+            PROCESS_TERMINATE = 0x0001
+            handle = kernel32.OpenProcess(PROCESS_TERMINATE, False, _merge_orchestrator_attached_pid)
+            if handle:
+                kernel32.TerminateProcess(handle, 0)
+                kernel32.CloseHandle(handle)
+                logger.info(f"Merge Orchestrator (재연결 PID: {_merge_orchestrator_attached_pid}) 종료")
+        except Exception as e:
+            logger.error(f"재연결 Orchestrator 종료 실패: {e}")
+        _merge_orchestrator_attached_pid = None
+        redis_client.delete("plan-runner:merge-orchestrator:pid")
+        return {"success": True, "message": f"Orchestrator (재연결) 종료"}
     if not _merge_orchestrator_process or _merge_orchestrator_process.poll() is not None:
         return {"success": False, "message": "Orchestrator가 실행 중이 아님"}
     try:
@@ -1201,6 +1248,7 @@ def stop_merge_orchestrator(redis_client: redis.Redis) -> Dict:
         _merge_orchestrator_process.wait(timeout=5)
         logger.info("Merge Orchestrator 종료")
         _merge_orchestrator_process = None
+        redis_client.delete("plan-runner:merge-orchestrator:pid")
         return {"success": True, "message": "Orchestrator 종료"}
     except Exception as e:
         logger.error(f"Merge Orchestrator 종료 실패: {e}")
@@ -1281,6 +1329,8 @@ def main():
 
             # listener 시작/재시작 시 생존 plan-runner 재연결 (고아 프로세스 처리)
             _reconnect_surviving_runners(r)
+            # listener 시작/재시작 시 생존 MergeOrchestrator 재연결
+            _reconnect_surviving_merge_orchestrator(r)
 
             # Redis 재연결 시 현재 프로세스 상태 복원
             # (Redis 캐시 등으로 데이터가 날아갈 경우 status: running 복원)
@@ -1330,6 +1380,12 @@ def main():
                             except Exception:
                                 pass
                         _merge_orchestrator_process = None
+                        r.delete("plan-runner:merge-orchestrator:pid")
+                    # 재연결 PID 생존 확인
+                    if _merge_orchestrator_attached_pid and not _is_pid_alive(_merge_orchestrator_attached_pid):
+                        logger.warning(f"[MergeOrch] 재연결 PID {_merge_orchestrator_attached_pid} 종료 감지 → 정리")
+                        _merge_orchestrator_attached_pid = None
+                        r.delete("plan-runner:merge-orchestrator:pid")
 
                     # merge-results 큐 소비 → Workflow DB 업데이트
                     _poll_merge_results(r)
