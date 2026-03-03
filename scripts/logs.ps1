@@ -332,24 +332,24 @@ function Get-ActivePlanRunners {
     param([string]$LogDir)
     $result = @()
 
-    # Redis 연결 확인
-    $pingOut = & redis-cli PING 2>$null
+    # Redis 연결 확인 (2초 타임아웃)
+    $pingOut = & redis-cli -t 2 PING 2>$null
     if ($pingOut -ne "PONG") {
         return $result
     }
 
-    # 활성 runner_id 목록
-    $runnerIds = & redis-cli SMEMBERS "plan-runner:active_runners" 2>$null
+    # 활성 runner_id 목록 (2초 타임아웃)
+    $runnerIds = & redis-cli -t 2 SMEMBERS "plan-runner:active_runners" 2>$null
     if (-not $runnerIds) { return $result }
 
     foreach ($rid in $runnerIds) {
         $rid = $rid.Trim()
         if (-not $rid) { continue }
 
-        $logPath    = & redis-cli GET "plan-runner:runners:${rid}:log_file_path" 2>$null
-        $planFile   = & redis-cli GET "plan-runner:runners:${rid}:plan_file"    2>$null
-        $streamPath = & redis-cli GET "plan-runner:runners:${rid}:stream_log_path" 2>$null
-        $pidVal     = & redis-cli GET "plan-runner:runners:${rid}:pid"          2>$null
+        $logPath    = & redis-cli -t 2 GET "plan-runner:runners:${rid}:log_file_path" 2>$null
+        $planFile   = & redis-cli -t 2 GET "plan-runner:runners:${rid}:plan_file"    2>$null
+        $streamPath = & redis-cli -t 2 GET "plan-runner:runners:${rid}:stream_log_path" 2>$null
+        $pidVal     = & redis-cli -t 2 GET "plan-runner:runners:${rid}:pid"          2>$null
 
         $logPath    = if ($logPath)    { $logPath.Trim()    } else { $null }
         $planFile   = if ($planFile)   { $planFile.Trim()   } else { $null }
@@ -722,6 +722,9 @@ function Start-CombinedLogTail {
     $lastRunnerRefresh = [DateTime]::MinValue
     $runnerRefreshInterval = 10  # 초
 
+    # 종료 runner grace period 추적 (키 → 감지 시각)
+    $staleDetectedAt = @{}
+
     try {
         while ($true) {
             # Plan-runner 로그 자동 감지
@@ -758,6 +761,13 @@ function Start-CombinedLogTail {
                             $logFileNames[$prKey]  = [System.IO.Path]::GetFileName($runner.LogPath)
                             $logColors[$prKey]     = "White"
                             $filePositions[$prKey] = 0
+                        } elseif ((-not $logFiles[$prKey]) -and $runner.LogPath) {
+                            # null 경로 → 유효 경로로 복구 (race condition 대응)
+                            Write-Host "[$prKey] === Log path resolved: $([System.IO.Path]::GetFileName($runner.LogPath)) ===" -ForegroundColor Green
+                            $logConfig[$prKey].Path = $runner.LogPath
+                            $logFiles[$prKey]      = $runner.LogPath
+                            $logFileNames[$prKey]  = [System.IO.Path]::GetFileName($runner.LogPath)
+                            $filePositions[$prKey] = 0
                         }
                         # StreamPath 지연 등록: 초기에 null이었지만 이후 설정된 경우
                         if ($runner.StreamPath -and -not $logFiles.ContainsKey($psKey)) {
@@ -769,14 +779,29 @@ function Start-CombinedLogTail {
                             $filePositions[$psKey] = 0
                         }
                     }
-                    # 종료된 runner 정리 (active_runners에서 빠진 PR:#/PS:# 키 제거)
+                    # 종료된 runner 정리 (30초 grace period — 마지막 버퍼 flush 대기)
                     $staleKeys = @($logFiles.Keys | Where-Object { ($_ -like "PR:*#*" -or $_ -like "PS:*#*") -and -not $activeKeys.ContainsKey($_) })
                     foreach ($sk in $staleKeys) {
-                        $logFiles.Remove($sk)
-                        $logColors.Remove($sk)
-                        $filePositions.Remove($sk)
-                        $logFileNames.Remove($sk)
-                        $logConfig.Remove($sk)
+                        if (-not $staleDetectedAt.ContainsKey($sk)) {
+                            $staleDetectedAt[$sk] = [DateTime]::Now
+                        }
+                    }
+                    # grace period 만료된 키만 실제 삭제
+                    $expiredKeys = @($staleDetectedAt.Keys | Where-Object {
+                        ([DateTime]::Now - $staleDetectedAt[$_]).TotalSeconds -ge 30
+                    })
+                    foreach ($ek in $expiredKeys) {
+                        $logFiles.Remove($ek)
+                        $logColors.Remove($ek)
+                        $filePositions.Remove($ek)
+                        $logFileNames.Remove($ek)
+                        $logConfig.Remove($ek)
+                        $staleDetectedAt.Remove($ek)
+                    }
+                    # 다시 active가 된 키는 stale 추적에서 제거
+                    $revivedKeys = @($staleDetectedAt.Keys | Where-Object { $activeKeys.ContainsKey($_) })
+                    foreach ($rk in $revivedKeys) {
+                        $staleDetectedAt.Remove($rk)
                     }
                 }
             } else {
