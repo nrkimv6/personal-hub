@@ -65,7 +65,47 @@ class TestMergeWorkflowRun:
                 with patch.object(wm.WorktreeManager, "remove", return_value=True) as mock_remove:
                     workflow.run("wt002", wt_path, base_dir)
 
-        mock_remove.assert_called_once_with("wt002", base_dir, plan_file=None)
+        mock_remove.assert_called_once_with("wt002", base_dir, plan_file=None, branch=None)
+
+    def test_workflow_run_passes_branch_to_merge(self, workflow, tmp_path):
+        """TC-Right: branch='plan/x' 전달 시 merge_to_main(branch='plan/x') 호출"""
+        wt_path = tmp_path / "wt_branch1"
+        wt_path.mkdir()
+        base_dir = tmp_path / ".worktrees"
+        base_dir.mkdir()
+
+        with patch("subprocess.run") as mock_run, \
+             patch.object(workflow, "run_post_merge_tests") as mock_tests:
+            mock_tests.return_value = TestResult(passed=True, output="", exit_code=0)
+            mock_run.return_value = MagicMock(returncode=0)
+            import worktree_manager as wm
+            with patch.object(wm.WorktreeManager, "merge_to_main",
+                               return_value=MergeResult(success=True, conflict=False, message="ok")) as mock_merge:
+                with patch.object(wm.WorktreeManager, "remove", return_value=True):
+                    workflow.run("wt_branch1", wt_path, base_dir, branch="plan/x")
+
+        # merge_to_main에 branch="plan/x" 전달 확인
+        call_kwargs = mock_merge.call_args[1]
+        assert call_kwargs.get("branch") == "plan/x", f"branch 전달 오류: {call_kwargs}"
+
+    def test_workflow_run_passes_branch_to_remove(self, workflow, tmp_path):
+        """TC-Right: 머지 성공 후 remove(branch='plan/x') 호출 확인"""
+        wt_path = tmp_path / "wt_branch2"
+        wt_path.mkdir()
+        base_dir = tmp_path / ".worktrees"
+        base_dir.mkdir()
+
+        with patch("subprocess.run") as mock_run, \
+             patch.object(workflow, "run_post_merge_tests") as mock_tests:
+            mock_tests.return_value = TestResult(passed=True, output="", exit_code=0)
+            mock_run.return_value = MagicMock(returncode=0)
+            import worktree_manager as wm
+            with patch.object(wm.WorktreeManager, "merge_to_main",
+                               return_value=MergeResult(success=True, conflict=False, message="ok")):
+                with patch.object(wm.WorktreeManager, "remove", return_value=True) as mock_remove:
+                    workflow.run("wt_branch2", wt_path, base_dir, branch="plan/x")
+
+        mock_remove.assert_called_once_with("wt_branch2", base_dir, plan_file=None, branch="plan/x")
 
     def test_error_merge_conflict_stores_redis(self, workflow, fake_redis, tmp_path):
         """TC-Error: 머지 충돌 → Redis merge_status='conflict' 저장"""

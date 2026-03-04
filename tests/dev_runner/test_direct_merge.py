@@ -135,6 +135,61 @@ class TestDoDirectMerge:
 
 
 # ---------------------------------------------------------------------------
+# _do_inline_merge Redis branch 읽기 TC
+# ---------------------------------------------------------------------------
+
+class TestInlineMergeBranchFromRedis:
+    def _run_inline_merge_with_mock(self, tmp_path, runner_id, branch_value=None):
+        """_do_inline_merge 호출 헬퍼 — merge_lock/MergeWorkflow 모킹"""
+        import fakeredis
+        import sys
+        import types
+        import merge_workflow as mw
+        from unittest.mock import patch, MagicMock
+        from merge_workflow import WorkflowResult
+
+        cl = _load_listener()
+
+        worktree = tmp_path / f"wt_{runner_id}"
+        worktree.mkdir()
+
+        redis = fakeredis.FakeRedis(decode_responses=True)
+        redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path", str(worktree))
+        if branch_value is not None:
+            redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", branch_value)
+        redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
+
+        captured = {}
+
+        def mock_workflow_run(self_, runner_id=None, worktree_path=None, base_dir=None, plan_file=None, branch=None, auto_resolve=True):
+            captured["branch"] = branch
+            return WorkflowResult(merged=True, tests_passed=True, conflict=False, message="ok")
+
+        # merge_lock 모듈 모킹
+        mock_merge_lock = types.ModuleType("merge_lock")
+        mock_merge_lock.acquire_merge_lock = MagicMock(return_value=True)
+        mock_merge_lock.release_merge_lock = MagicMock(return_value=True)
+
+        with patch.dict(sys.modules, {"merge_lock": mock_merge_lock}):
+            with patch.object(mw.MergeWorkflow, "run", mock_workflow_run):
+                with patch.object(cl, "_cleanup_process_state", MagicMock()):
+                    cl._do_inline_merge(runner_id, redis)
+
+        return captured
+
+    def test_inline_merge_reads_branch_from_redis(self, tmp_path):
+        """R(Right): Redis에 {runner_id}:branch 세팅 후 workflow.run(branch=...) 전달 확인"""
+        captured = self._run_inline_merge_with_mock(tmp_path, "dm-testbranch", branch_value="plan/test-plan")
+        assert captured.get("branch") == "plan/test-plan", f"branch 전달 오류: {captured}"
+
+    def test_inline_merge_branch_none_when_redis_missing(self, tmp_path):
+        """E(Error/Boundary): Redis에 branch 키 없을 때 workflow.run(branch=None) 전달"""
+        captured = self._run_inline_merge_with_mock(tmp_path, "dm-nobranch", branch_value=None)
+        assert captured.get("branch") is None, f"branch가 None이어야 함: {captured}"
+
+
+# ---------------------------------------------------------------------------
 # API executor_service 단위 테스트
 # ---------------------------------------------------------------------------
 

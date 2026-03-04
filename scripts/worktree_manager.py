@@ -102,12 +102,16 @@ class WorktreeManager:
             raise WorktreeError(f"worktree 생성 중 오류: {e}")
 
     @staticmethod
-    def remove(runner_id: str, base_dir: Path, plan_file: Optional[str] = None) -> bool:
+    def remove(runner_id: str, base_dir: Path, plan_file: Optional[str] = None, branch: Optional[str] = None) -> bool:
         """git worktree remove + git branch -D
 
-        plan_file 지정 시 slug 기반 경로/브랜치 사용, 미지정 시 runner_id 기반
+        우선순위: branch 파라미터 > plan_file > runner_id 기반
         """
-        if plan_file:
+        if branch:
+            # branch 파라미터가 있으면 그대로 사용, worktree_path는 base_dir/{branch_slug}로 추론
+            branch_slug = branch.replace("/", "_")
+            worktree_path = base_dir / branch_slug
+        elif plan_file:
             stem = Path(plan_file).stem
             worktree_path = base_dir / stem
             branch = f"plan/{stem}"
@@ -132,9 +136,14 @@ class WorktreeManager:
             return True  # 멱등 처리
 
     @staticmethod
-    def merge_to_main(runner_id: str, base_dir: Path, project_root: Path, plan_file: Optional[str] = None, auto_resolve: bool = False, redis_client=None) -> MergeResult:
-        """worktree 변경사항을 main 브랜치에 머지"""
-        if plan_file:
+    def merge_to_main(runner_id: str, base_dir: Path, project_root: Path, plan_file: Optional[str] = None, branch: Optional[str] = None, auto_resolve: bool = False, redis_client=None) -> MergeResult:
+        """worktree 변경사항을 main 브랜치에 머지
+
+        우선순위: branch 파라미터 > plan_file > runner_id 기반
+        """
+        if branch:
+            pass  # 그대로 사용
+        elif plan_file:
             stem = Path(plan_file).stem
             branch = f"plan/{stem}"
         else:

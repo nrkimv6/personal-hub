@@ -754,12 +754,14 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
             pass
         _pub("merge lock 획득 완료 — merge 시작")
 
-        # worktree 경로 및 plan_file 조회
+        # worktree 경로, plan_file, branch 조회
         worktree_path_str = None
         plan_file_str = None
+        branch_str = None
         try:
             worktree_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
             plan_file_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+            branch_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
         except Exception:
             pass
 
@@ -786,6 +788,7 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
             worktree_path=worktree_path,
             base_dir=WORKTREE_BASE_DIR,
             plan_file=plan_file,
+            branch=branch_str,
         )
 
         # 3/4. 결과 처리
