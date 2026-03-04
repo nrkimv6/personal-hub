@@ -140,14 +140,14 @@ class TestRunPostMergeTests:
                 pass
 
     def test_correct_reference_command(self, workflow, tmp_path):
-        """TC-CORRECT-Reference: 실행 명령에 pytest -m http 포함 (timeout은 pytest.ini에서 설정)"""
+        """TC-CORRECT-Reference: 실행 명령에 pytest -m http --timeout=120 포함"""
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             workflow.run_post_merge_tests()
         args = mock_run.call_args[0][0]  # cmd list
         assert "-m" in args
         assert "http" in args
-        assert "--timeout=120" not in args
+        assert "--timeout=120" in args
 
 
 # ── merge_to_main() — plan_file 파라미터 ────────────────────────────────────
