@@ -188,3 +188,78 @@ class TestDirectMergeFullFlow:
 
         sadd_calls = [str(c) for c in redis.sadd.call_args_list]
         assert any(ACTIVE_RUNNERS_KEY in c for c in sadd_calls), "active_runners SADD 없음"
+
+
+class TestDirectMergeConflictResolverCrashSafe:
+    """E2E: direct-merge 시 ConflictResolver crash-safe 확인"""
+
+    def test_direct_merge_conflict_resolver_crash_safe(self, tmp_path):
+        """
+        E2E: _do_direct_merge → _do_inline_merge → MergeWorkflow conflict →
+        ConflictResolver.try_resolve mock (내부 _verify_resolution stdout=None) →
+        merge_status="conflict" 전이 + 크래시 없음
+        """
+        cl = _load_listener()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        branch = "plan/test"
+        redis = make_redis_mock(worktree_path=str(worktree))
+
+        # merge_status 전이 추적
+        merge_status_sequence = []
+
+        def track_set(key, value, *args, **kwargs):
+            if "merge_status" in key:
+                merge_status_sequence.append(value)
+            return True
+
+        redis.set.side_effect = track_set
+
+        # redis.get에 branch도 반환하도록 확장
+        original_get = redis.get.side_effect
+
+        def extended_get(key):
+            if "branch" in key:
+                return branch
+            if "worktree_path" in key:
+                return str(worktree)
+            return original_get(key) if original_get else None
+
+        redis.get.side_effect = extended_get
+
+        # ConflictResolver mock — _verify_resolution에서 stdout=None 상황 시뮬레이션
+        from conflict_resolver import ResolveResult
+        mock_resolve_result = ResolveResult(
+            success=False,
+            failed_files=["a.py"],
+            reason="stdout=None crash-safe test",
+        )
+
+        mock_merge_lock = types.ModuleType("merge_lock")
+        mock_merge_lock.acquire_merge_lock = MagicMock(return_value=True)
+        mock_merge_lock.release_merge_lock = MagicMock(return_value=True)
+
+        # MergeWorkflow → conflict 반환
+        conflict_result = make_merge_result(merged=False, tests_passed=False, conflict=True, message="conflict")
+
+        with patch.dict(sys.modules, {"merge_lock": mock_merge_lock}), \
+             patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
+             patch("conflict_resolver.ConflictResolver") as mock_cr_cls, \
+             patch.object(cl, "_cleanup_process_state", MagicMock()):
+
+            mock_wf = MagicMock()
+            mock_wf.run.return_value = conflict_result
+            mock_wf_cls.return_value = mock_wf
+
+            mock_cr = MagicMock()
+            mock_cr.try_resolve.return_value = mock_resolve_result
+            mock_cr_cls.return_value = mock_cr
+
+            # 크래시 없이 실행 완료되어야 함
+            cl._do_inline_merge("dm-crash-test", redis)
+
+        # merge_status가 "conflict"로 전이
+        assert "conflict" in merge_status_sequence, \
+            f"merge_status에 'conflict' 없음: {merge_status_sequence}"
+        # 크래시 없이 여기까지 도달 = success
