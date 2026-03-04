@@ -57,6 +57,41 @@
 		branch?: string | null;
 		orphan?: boolean;
 	}
+
+	interface RunnerSource {
+		runner_id: string;
+		plan_file?: string | null;
+		engine?: string | null;
+		running?: boolean;
+		status?: string;
+		start_time?: string | null;
+		branch?: string | null;
+		orphan?: boolean;
+	}
+
+	function createRunnerTab(runner: RunnerSource): RunnerTab {
+		return {
+			id: runner.runner_id,
+			plan_file: runner.plan_file ?? null,
+			engine: runner.engine ?? null,
+			running: runner.running ?? runner.status === 'running',
+			start_time: runner.start_time ? new Date(runner.start_time).toISOString() : null,
+			branch: runner.branch ?? null,
+			orphan: runner.orphan ?? false,
+		};
+	}
+
+	function updateRunnerTab(tab: RunnerTab, runner: RunnerSource): RunnerTab {
+		return {
+			...tab,
+			running: runner.running ?? runner.status === 'running',
+			plan_file: runner.plan_file ?? tab.plan_file,
+			engine: runner.engine ?? tab.engine,
+			start_time: runner.start_time ?? tab.start_time,
+			orphan: runner.orphan ?? tab.orphan ?? false,
+		};
+	}
+
 	let runnerTabs = $state<RunnerTab[]>([]);
 	let activeTabId = $state<string | null>(null);
 
@@ -95,20 +130,12 @@
 				// 기존 탭 상태 갱신
 				runnerTabs = runnerTabs.map(tab => {
 					const runner = runnerMap.get(tab.id);
-					return runner ? { ...tab, running: runner.running, orphan: runner.orphan ?? false } : { ...tab, running: false };
+					return runner ? updateRunnerTab(tab, runner) : { ...tab, running: false };
 				});
 				// 신규 runner 탭 추가 (페이지 로드 시 또는 외부에서 시작된 runner)
 				for (const runner of runners) {
 					if (!runnerTabs.some(t => t.id === runner.runner_id)) {
-						runnerTabs = [...runnerTabs, {
-							id: runner.runner_id,
-							plan_file: runner.plan_file,
-							engine: runner.engine,
-							running: runner.running,
-							start_time: runner.start_time ? new Date(runner.start_time).toISOString() : null,
-							branch: runner.branch ?? null,
-							orphan: runner.orphan ?? false,
-						}];
+						runnerTabs = [...runnerTabs, createRunnerTab(runner)];
 					}
 				}
 				// activeTabId가 없으면 마지막 탭 선택
@@ -175,7 +202,7 @@
 		// status 이벤트: runner 상태 변경
 		eventSource.addEventListener('status', (e: MessageEvent) => {
 			try {
-				const data = JSON.parse(e.data) as { runners: { runner_id: string; status: string; pid: string | null; current_cycle: string | null; start_time: string | null; plan_file: string | null }[] };
+				const data = JSON.parse(e.data) as { runners: { runner_id: string; status: string; pid: string | null; current_cycle: string | null; start_time: string | null; plan_file: string | null; engine: string | null }[] };
 				// runners 배열에서 첫 번째 running runner로 runStatus 갱신
 				const runners = data.runners ?? [];
 				const runningRunner = runners.find(r => r.status === 'running');
@@ -200,23 +227,12 @@
 					const runnerMap = new Map(runners.map(r => [r.runner_id, r]));
 					runnerTabs = runnerTabs.map(tab => {
 						const runner = runnerMap.get(tab.id);
-						return runner ? {
-							...tab,
-							running: runner.status === 'running',
-							plan_file: runner.plan_file ?? tab.plan_file,
-							start_time: runner.start_time ?? tab.start_time,
-						} : { ...tab, running: false };
+						return runner ? updateRunnerTab(tab, runner) : { ...tab, running: false };
 					});
 					// SSE로 발견된 신규 runner 탭 추가
 					for (const runner of runners) {
 						if (!runnerTabs.some(t => t.id === runner.runner_id)) {
-							runnerTabs = [...runnerTabs, {
-								id: runner.runner_id,
-								plan_file: runner.plan_file ?? null,
-								engine: null,
-								running: runner.status === 'running',
-								start_time: runner.start_time ?? null,
-							}];
+							runnerTabs = [...runnerTabs, createRunnerTab(runner)];
 						}
 					}
 					// activeTabId가 없으면 마지막 탭 선택
@@ -249,13 +265,7 @@
 		if (!response.runner_id) return;
 		// runStatus 즉시 업데이트 (시작 API 응답에서 확보) — 상단 바 "실행 중" 즉시 표시
 		runStatus = response;
-		const newTab: RunnerTab = {
-			id: response.runner_id,
-			plan_file: response.plan_file,
-			engine: response.engine ?? null,
-			running: true,
-			start_time: response.start_time,
-		};
+		const newTab: RunnerTab = { ...createRunnerTab({ runner_id: response.runner_id, plan_file: response.plan_file, engine: response.engine, start_time: response.start_time }), running: true };
 		runnerTabs = [...runnerTabs, newTab];
 		activeTabId = response.runner_id;
 		if (window.innerWidth < 640) {
