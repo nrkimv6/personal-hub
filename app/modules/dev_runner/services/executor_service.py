@@ -638,6 +638,33 @@ class ExecutorService:
         await self.async_redis.delete(result_key)
         return json.loads(raw)
 
+    async def send_direct_merge_command(self, branch: str, worktree_path: str | None, plan_file: str | None) -> dict:
+        """direct-merge 명령 전송 — runner_id 없이 branch/worktree만으로 머지 실행"""
+        try:
+            await self.async_redis.ping()
+        except (redis.ConnectionError, ConnectionRefusedError, OSError):
+            raise HTTPException(status_code=503, detail="Redis에 연결할 수 없습니다.")
+
+        command_id = uuid.uuid4().hex[:8]
+        command = {
+            "action": "direct-merge",
+            "branch": branch,
+            "worktree_path": worktree_path,
+            "plan_file": plan_file,
+            "command_id": command_id,
+            "source": "monitor-page-api",
+            "timestamp": datetime.now().isoformat(),
+        }
+        result_key = f"{RESULTS_KEY}:{command_id}"
+        await self.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
+        result = await self.async_redis.brpop(result_key, timeout=COMMAND_TIMEOUT)
+        if result is None:
+            await self.async_redis.delete(result_key)
+            return {"success": False, "message": "Command timeout"}
+        _, raw = result
+        await self.async_redis.delete(result_key)
+        return json.loads(raw)
+
     async def stop_all_runners(self) -> dict:
         """모든 active runner 일괄 중지 - asyncio.gather 병렬 호출"""
         import asyncio

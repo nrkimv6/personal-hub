@@ -1,0 +1,169 @@
+"""
+TC: direct_merge() / _do_direct_merge() — 임시 runner_id, worktree 검증, _do_inline_merge 위임
+"""
+import json
+import sys
+import importlib
+import importlib.util
+import types
+import pytest
+from pathlib import Path
+from unittest.mock import MagicMock, patch, AsyncMock
+
+_SCRIPT_PATH = Path(__file__).parent.parent.parent / "scripts" / "dev-runner-command-listener.py"
+
+_mock_noise = types.ModuleType("listener_noise_filter")
+_mock_noise.NOISE_BLOCK_MARKERS = []
+_mock_noise.is_noise_line = lambda line: False
+
+RUNNER_KEY_PREFIX = "plan-runner:runners"
+ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
+RESULTS_KEY = "plan-runner:command_results"
+
+
+def _load_listener():
+    sys.modules["listener_noise_filter"] = _mock_noise
+    spec = importlib.util.spec_from_file_location("_listener_direct", _SCRIPT_PATH)
+    mod = importlib.util.module_from_spec(spec)
+    mod._running_processes = {}
+    mod._running_log_files = {}
+    mod._stream_threads = {}
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def make_redis_mock():
+    redis = MagicMock()
+    redis.set.return_value = True
+    redis.lpush.return_value = 1
+    redis.expire.return_value = True
+    redis.sadd.return_value = 1
+    redis.get.return_value = "merged"
+    return redis
+
+
+# ---------------------------------------------------------------------------
+# _do_direct_merge 단위 테스트
+# ---------------------------------------------------------------------------
+
+class TestDoDirectMerge:
+    def test_direct_merge_creates_temp_runner_id(self, tmp_path):
+        """R(Right): dm- 접두사 runner_id + Redis 키 세팅 + active_runners SADD"""
+        cl = _load_listener()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        redis = make_redis_mock()
+
+        with patch.object(cl, "_do_inline_merge") as mock_inline:
+            cl._do_direct_merge("runner/abc123", str(worktree), None, redis, "cmd001")
+
+        # active_runners SADD 확인
+        sadd_calls = redis.sadd.call_args_list
+        assert any(ACTIVE_RUNNERS_KEY in str(c) for c in sadd_calls), "active_runners SADD 없음"
+
+        # dm- 접두사 runner_id 확인
+        set_calls = [str(c) for c in redis.set.call_args_list]
+        assert any("dm-" in c for c in set_calls), "dm- 접두사 runner_id 없음"
+
+        # _do_inline_merge 호출 + dm- runner_id
+        mock_inline.assert_called_once()
+        assert mock_inline.call_args[0][0].startswith("dm-"), "임시 runner_id 형식 오류"
+
+    def test_direct_merge_validates_worktree_exists(self, tmp_path):
+        """E(Error): 존재하지 않는 worktree_path → 에러 LPUSH + _do_inline_merge 미호출"""
+        cl = _load_listener()
+
+        redis = make_redis_mock()
+        non_existent = str(tmp_path / "nonexistent" / "worktree")
+
+        with patch.object(cl, "_do_inline_merge") as mock_inline:
+            cl._do_direct_merge("runner/abc123", non_existent, None, redis, "cmd002")
+
+        push_calls = redis.lpush.call_args_list
+        assert push_calls, "결과 LPUSH 없음"
+        result = json.loads(push_calls[-1][0][1])
+        assert result.get("success") is False
+        mock_inline.assert_not_called()
+
+    def test_direct_merge_missing_branch_returns_error(self):
+        """B(Boundary): branch 미제공 시 즉시 에러 반환 (direct_merge 공개 함수)"""
+        cl = _load_listener()
+
+        redis = make_redis_mock()
+        command = {"branch": "", "command_id": "cmd003"}
+
+        result = cl.direct_merge(command, redis)
+
+        assert result is not None
+        assert result.get("success") is False
+        assert "branch required" in result.get("message", "")
+
+    def test_direct_merge_calls_inline_merge(self, tmp_path):
+        """R(Right): 유효한 worktree → _do_inline_merge(runner_id, redis) 호출"""
+        cl = _load_listener()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        redis = make_redis_mock()
+
+        with patch.object(cl, "_do_inline_merge") as mock_inline:
+            cl._do_direct_merge("runner/test001", str(worktree), None, redis, "cmd004")
+
+        mock_inline.assert_called_once()
+        args = mock_inline.call_args[0]
+        assert args[0].startswith("dm-"), f"첫 번째 인자가 임시 runner_id여야 함: {args[0]}"
+        assert args[1] is redis, "두 번째 인자가 redis여야 함"
+
+    def test_direct_merge_sets_minimum_redis_keys(self, tmp_path):
+        """R(Right): status/worktree_path/branch/merge_status 키 세팅"""
+        cl = _load_listener()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        redis = make_redis_mock()
+        branch = "runner/mytest"
+
+        with patch.object(cl, "_do_inline_merge"):
+            cl._do_direct_merge(branch, str(worktree), None, redis, "cmd005")
+
+        set_calls = [str(c) for c in redis.set.call_args_list]
+        assert any("status" in c and "running" in c for c in set_calls), "status=running 없음"
+        assert any("branch" in c and branch in c for c in set_calls), "branch 세팅 없음"
+        assert any("worktree_path" in c for c in set_calls), "worktree_path 없음"
+        assert any("merge_status" in c and "queued" in c for c in set_calls), "merge_status=queued 없음"
+
+
+# ---------------------------------------------------------------------------
+# API executor_service 단위 테스트
+# ---------------------------------------------------------------------------
+
+class TestDirectMergeEndpoint:
+    @pytest.mark.asyncio
+    async def test_direct_merge_endpoint_sends_command(self):
+        """R(Right): send_direct_merge_command → Redis에 action=direct-merge + branch 전송"""
+        from app.modules.dev_runner.services.executor_service import ExecutorService
+
+        svc = ExecutorService.__new__(ExecutorService)
+        svc.async_redis = AsyncMock()
+        svc.async_redis.ping = AsyncMock(return_value=True)
+
+        captured_command = {}
+
+        async def fake_lpush(key, value):
+            captured_command.update(json.loads(value))
+            return 1
+
+        async def fake_brpop(key, timeout=None):
+            result = {"success": True, "message": "accepted", "action": "direct-merge"}
+            return (key, json.dumps(result).encode())
+
+        svc.async_redis.lpush = fake_lpush
+        svc.async_redis.brpop = fake_brpop
+        svc.async_redis.delete = AsyncMock()
+
+        await svc.send_direct_merge_command("runner/test123", "/worktree/path", None)
+
+        assert captured_command.get("action") == "direct-merge"
+        assert captured_command.get("branch") == "runner/test123"
+        assert "command_id" in captured_command

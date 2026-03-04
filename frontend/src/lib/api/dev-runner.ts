@@ -258,6 +258,16 @@ export const devRunnerRunnerApi = {
 			{ method: 'DELETE' }
 		),
 
+	directMerge: (branch: string, worktreePath?: string, planFile?: string) =>
+		devRunnerRequest<{ success: boolean; message: string; runner_id?: string }>(
+			'/merge/direct',
+			{
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ branch, worktree_path: worktreePath ?? null, plan_file: planFile ?? null }),
+			}
+		),
+
 	stopAll: () => devRunnerRequest<{ stopped: number }>('/stop-all', { method: 'POST' }),
 
 	dismissTab: (runnerId: string) =>

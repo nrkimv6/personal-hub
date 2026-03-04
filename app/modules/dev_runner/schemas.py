@@ -311,6 +311,13 @@ class MergeQueueEnqueueRequest(BaseModel):
     worktree_path: str = Field(default="", description="워크트리 경로 (빈 값 허용)")
 
 
+class DirectMergeRequest(BaseModel):
+    """직접 머지 요청 스키마 — 러너 없이 branch/worktree만으로 머지 실행"""
+    branch: str = Field(..., description="머지할 브랜치명 (필수)")
+    worktree_path: Optional[str] = Field(default=None, description="워크트리 경로 (없으면 branch로 추론)")
+    plan_file: Optional[str] = Field(default=None, description="Plan 파일 경로 (없으면 전체 실행)")
+
+
 __all__ = [
     'PlanEventResponse',
     'PlanRecordResponse',
@@ -343,4 +350,5 @@ __all__ = [
     'WorkflowResponse',
     'WorkflowCreateRequest',
     'MergeQueueEnqueueRequest',
+    'DirectMergeRequest',
 ]

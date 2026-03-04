@@ -1467,30 +1467,122 @@ def force_kill_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
 
 
 def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str) -> None:
-    """retry-merge 실제 작업 (백그라운드 스레드에서 실행)"""
+    """retry-merge 실제 작업 (백그라운드 스레드에서 실행) — _do_inline_merge와 동일한 흐름"""
+    from merge_lock import acquire_merge_lock, release_merge_lock
+    from merge_workflow import MergeWorkflow
+
     result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
+    log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+
+    def _pub(msg: str) -> None:
+        logger.info(f"[RETRY-MERGE] {msg}")
+        try:
+            redis_client.publish(log_channel, f"[MERGE] {msg}")
+        except Exception:
+            pass
+
+    result = {"success": False, "message": "unknown error", "action": "retry-merge"}
     try:
         worktree_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
         if not worktree_path_str:
-            result = {"success": False, "message": f"worktree_path not found for runner {runner_id}"}
-            redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
-            redis_client.expire(result_key, 60)
+            result = {"success": False, "message": f"worktree_path not found for runner {runner_id}", "action": "retry-merge"}
             return
-        from merge_workflow import MergeWorkflow
+
         worktree_path = Path(worktree_path_str)
+        if not worktree_path.is_dir():
+            result = {"success": False, "message": f"worktree dir not found: {worktree_path_str}", "action": "retry-merge"}
+            return
+
         plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
         if plan_file == "ALL":
             plan_file = None
-        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "pending_merge")
-        wf = MergeWorkflow(PROJECT_ROOT, redis_client, str(PLAN_RUNNER_PYTHON), workflow_manager=_wf_manager)
-        merge_result = wf.run(runner_id, worktree_path, WORKTREE_BASE_DIR, plan_file=plan_file)
-        logger.info(f"[retry_merge] 결과: merged={merge_result.merged}, conflict={merge_result.conflict}, message={merge_result.message[:200]}")
-        result = {"success": merge_result.merged, "message": merge_result.message, "conflict": merge_result.conflict, "action": "retry-merge"}
+
+        # 1. merge_status = "queued" + lock 대기
+        try:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
+        except Exception:
+            pass
+        _pub("merge lock 대기 중...")
+
+        lock_acquired = acquire_merge_lock(redis_client, runner_id, timeout=600)
+        if not lock_acquired:
+            _pub("merge lock 획득 실패 (timeout) — merge 중단")
+            try:
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+            except Exception:
+                pass
+            result = {"success": False, "message": "merge lock 획득 실패 (timeout)", "action": "retry-merge"}
+            return
+
+        # 2. lock 획득 후 merge 실행
+        try:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merging")
+        except Exception:
+            pass
+        _pub("merge lock 획득 완료 — merge 시작")
+
+        try:
+            workflow = MergeWorkflow(
+                project_root=PROJECT_ROOT,
+                redis_client=redis_client,
+                workflow_manager=_wf_manager,
+            )
+            merge_result = workflow.run(
+                runner_id=runner_id,
+                worktree_path=worktree_path,
+                base_dir=WORKTREE_BASE_DIR,
+                plan_file=plan_file,
+            )
+
+            # 3. 결과 처리
+            if merge_result.merged and merge_result.tests_passed:
+                _pub("merge 성공 — 완료")
+                try:
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+                except Exception:
+                    pass
+                result = {"success": True, "message": merge_result.message, "action": "retry-merge"}
+            elif merge_result.conflict:
+                _pub(f"merge 충돌 발생 — worktree 보존: {merge_result.message[:200]}")
+                try:
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
+                except Exception:
+                    pass
+                result = {"success": False, "message": merge_result.message, "conflict": True, "action": "retry-merge"}
+            elif merge_result.merged and not merge_result.tests_passed:
+                _pub(f"merge 후 테스트 실패 — worktree 보존: {merge_result.message[:200]}")
+                try:
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "test_failed")
+                except Exception:
+                    pass
+                result = {"success": False, "message": merge_result.message, "action": "retry-merge"}
+            else:
+                _pub(f"merge 실패: {merge_result.message[:200]}")
+                try:
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+                except Exception:
+                    pass
+                result = {"success": False, "message": merge_result.message, "action": "retry-merge"}
+
+        finally:
+            release_merge_lock(redis_client, runner_id)
+
     except Exception as e:
         logger.error(f"[retry_merge] 실패: {e}")
+        try:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+        except Exception:
+            pass
+        try:
+            release_merge_lock(redis_client, runner_id)
+        except Exception:
+            pass
         result = {"success": False, "message": str(e), "action": "retry-merge"}
-    redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
-    redis_client.expire(result_key, 60)
+
+    finally:
+        _cleanup_process_state(runner_id, redis_client)
+        redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
+        redis_client.expire(result_key, 60)
 
 
 def retry_merge(command: Dict, redis_client: redis.Redis) -> None:
@@ -1513,6 +1605,118 @@ def retry_merge(command: Dict, redis_client: redis.Redis) -> None:
     thread = threading.Thread(
         target=_do_retry_merge,
         args=(runner_id, redis_client, command_id),
+        daemon=True,
+    )
+    thread.start()
+    return None
+
+
+def _do_direct_merge(branch: str, worktree_path_str: str | None, plan_file: str | None, redis_client: redis.Redis, command_id: str) -> None:
+    """direct-merge 실제 작업 (백그라운드 스레드에서 실행) — 임시 runner_id로 _do_inline_merge 호출"""
+    result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
+    from uuid import uuid4
+
+    runner_id = f"dm-{uuid4().hex[:8]}"
+    result = {"success": False, "message": "unknown error", "action": "direct-merge", "runner_id": runner_id}
+
+    try:
+        # worktree_path 결정
+        if worktree_path_str:
+            worktree_path = Path(worktree_path_str)
+        else:
+            # branch 이름으로 추론 (runner/{id} → runner_{id} 변환)
+            branch_slug = branch.replace("/", "_")
+            worktree_path = WORKTREE_BASE_DIR / branch_slug
+            if not worktree_path.is_dir():
+                # git worktree list --porcelain 으로 branch 매칭
+                proc = subprocess.run(
+                    ["git", "worktree", "list", "--porcelain"],
+                    capture_output=True, text=True, cwd=str(PROJECT_ROOT)
+                )
+                worktree_path_str = None
+                lines = proc.stdout.splitlines()
+                i = 0
+                while i < len(lines):
+                    if lines[i].startswith("worktree "):
+                        wt_path = lines[i][len("worktree "):]
+                        branch_line = lines[i + 2] if i + 2 < len(lines) else ""
+                        if f"branch refs/heads/{branch}" in branch_line:
+                            worktree_path_str = wt_path
+                            break
+                    i += 1
+                if worktree_path_str:
+                    worktree_path = Path(worktree_path_str)
+                else:
+                    result = {"success": False, "message": f"worktree not found for branch: {branch}", "action": "direct-merge", "runner_id": runner_id}
+                    return
+
+        if not worktree_path.is_dir():
+            result = {"success": False, "message": f"worktree dir not found: {worktree_path}", "action": "direct-merge", "runner_id": runner_id}
+            return
+
+        # 최소 Redis 키 세팅
+        now_iso = datetime.now().isoformat()
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path", str(worktree_path))
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", branch)
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", now_iso)
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
+        if plan_file:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file)
+        # TTL 설정 (24시간)
+        for suffix in ("status", "worktree_path", "branch", "start_time", "merge_status", "plan_file"):
+            redis_client.expire(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}", RECENT_RUNNERS_TTL)
+        # SSE가 감지하도록 active_runners 등록
+        redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+        logger.info(f"[direct_merge] 임시 runner {runner_id} 생성, branch={branch}, worktree={worktree_path}")
+
+        # _do_inline_merge 호출 (lock+cleanup+로그 발행 포함)
+        _do_inline_merge(runner_id, redis_client)
+
+        # 머지 결과 읽기
+        final_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status") or "unknown"
+        success = final_status == "merged"
+        result = {
+            "success": success,
+            "message": f"direct-merge 완료: {final_status}",
+            "merge_status": final_status,
+            "action": "direct-merge",
+            "runner_id": runner_id,
+        }
+
+    except Exception as e:
+        logger.error(f"[direct_merge] 실패: {e}")
+        result = {"success": False, "message": str(e), "action": "direct-merge", "runner_id": runner_id}
+    finally:
+        redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
+        redis_client.expire(result_key, 60)
+
+
+def direct_merge(command: Dict, redis_client: redis.Redis) -> None:
+    """branch/worktree 기반 직접 머지 — 러너 없이 머지 재시도. 즉시 accepted 반환, 실제 작업은 백그라운드 스레드"""
+    branch = command.get("branch", "")
+    if not branch:
+        return {"success": False, "message": "branch required"}
+
+    worktree_path = command.get("worktree_path")
+    plan_file = command.get("plan_file")
+    command_id = command.get("command_id", "")
+
+    result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
+    accepted = {
+        "success": True,
+        "message": "accepted",
+        "branch": branch,
+        "action": "direct-merge",
+        "executed_at": datetime.now().isoformat(),
+    }
+    redis_client.lpush(result_key, json.dumps(accepted, ensure_ascii=False))
+    redis_client.expire(result_key, 60)
+    logger.info(f"[direct_merge] accepted 응답 즉시 반환 (branch: {branch})")
+    thread = threading.Thread(
+        target=_do_direct_merge,
+        args=(branch, worktree_path, plan_file, redis_client, command_id),
         daemon=True,
     )
     thread.start()
@@ -1687,6 +1891,8 @@ def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
         return get_status(redis_client)
     elif action == "retry-merge":
         return retry_merge(command, redis_client)
+    elif action == "direct-merge":
+        return direct_merge(command, redis_client)
     elif action == "resolve-conflict":
         return resolve_conflict(command, redis_client)
     elif action == "cleanup-worktree":

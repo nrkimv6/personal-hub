@@ -27,6 +27,7 @@
 	let stopError = $state<string | null>(null);
 	let retryingMerge = $state(false);
 	let resolvingConflict = $state(false);
+	let directMerging = $state(false);
 	let mergeError = $state<string | null>(null);
 	let intervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -123,6 +124,19 @@
 		}
 	}
 
+	async function handleDirectMerge() {
+		if (!branch) return;
+		directMerging = true;
+		mergeError = null;
+		try {
+			await devRunnerRunnerApi.directMerge(branch, worktreePath ?? undefined);
+		} catch (e) {
+			mergeError = e instanceof Error ? e.message : '직접 머지 실패';
+		} finally {
+			directMerging = false;
+		}
+	}
+
 	async function handleCleanupWorktree() {
 		if (!confirm('worktree를 정리하시겠습니까? 미저장 변경사항이 삭제됩니다.')) return;
 		try {
@@ -170,6 +184,10 @@
 			<span class="px-1.5 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700 animate-pulse">머지 중</span>
 		{:else if mergeStatus === 'conflict'}
 			<span class="px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700">충돌</span>
+		{:else if mergeStatus === 'test_failed'}
+			<span class="px-1.5 py-0.5 rounded text-[10px] bg-orange-100 text-orange-700">테스트 실패</span>
+		{:else if mergeStatus === 'error'}
+			<span class="px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700">머지 오류</span>
 		{:else if mergeStatus === 'resolving'}
 			<span class="px-1.5 py-0.5 rounded text-[10px] bg-yellow-100 text-yellow-700">해결중</span>
 		{/if}
@@ -217,16 +235,22 @@
 			</svg>
 			<span class="text-yellow-700 font-medium">충돌 자동 해결 중...</span>
 		</div>
-	{:else if mergeStatus === 'conflict'}
+	{:else if ['conflict', 'test_failed', 'error'].includes(mergeStatus ?? '')}
 		<div class="flex items-center gap-2 px-3 py-2 bg-red-50 border-b border-red-200 text-xs">
-			<span class="text-red-700 font-medium">머지 충돌이 발생했습니다.</span>
-			<button
-				class="px-2 py-0.5 rounded border border-blue-300 text-blue-700 hover:bg-blue-100 disabled:opacity-50 transition-colors"
-				onclick={handleResolveConflict}
-				disabled={resolvingConflict}
-			>
-				{resolvingConflict ? '해결 중...' : '자동 해결'}
-			</button>
+			<span class="text-red-700 font-medium">
+				{#if mergeStatus === 'conflict'}머지 충돌이 발생했습니다.
+				{:else if mergeStatus === 'test_failed'}머지 후 테스트가 실패했습니다.
+				{:else}머지 중 오류가 발생했습니다.{/if}
+			</span>
+			{#if mergeStatus === 'conflict'}
+				<button
+					class="px-2 py-0.5 rounded border border-blue-300 text-blue-700 hover:bg-blue-100 disabled:opacity-50 transition-colors"
+					onclick={handleResolveConflict}
+					disabled={resolvingConflict}
+				>
+					{resolvingConflict ? '해결 중...' : '자동 해결'}
+				</button>
+			{/if}
 			<button
 				class="px-2 py-0.5 rounded border border-red-300 text-red-700 hover:bg-red-100 disabled:opacity-50 transition-colors"
 				onclick={handleRetryMerge}
@@ -239,6 +263,19 @@
 				onclick={handleCleanupWorktree}
 			>
 				Worktree 정리
+			</button>
+		</div>
+	{/if}
+
+	{#if !running && branch && worktreePath && !['conflict', 'test_failed', 'error', 'resolving'].includes(mergeStatus ?? '')}
+		<div class="flex items-center gap-2 px-3 py-1.5 bg-gray-50 border-b border-gray-200 text-xs">
+			<button
+				class="px-2 py-0.5 rounded border border-purple-300 text-purple-700 hover:bg-purple-100 disabled:opacity-50 transition-colors"
+				onclick={handleDirectMerge}
+				disabled={directMerging}
+				title="worktree가 살아있을 때 직접 머지 실행"
+			>
+				{directMerging ? '머지 중...' : '직접 머지'}
 			</button>
 		</div>
 	{/if}
