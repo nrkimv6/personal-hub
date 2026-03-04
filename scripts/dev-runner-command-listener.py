@@ -1661,6 +1661,7 @@ def _do_direct_merge(branch: str, worktree_path_str: str | None, plan_file: str 
 
     runner_id = f"dm-{uuid4().hex[:8]}"
     result = {"success": False, "message": "unknown error", "action": "direct-merge", "runner_id": runner_id}
+    logger.info(f"[direct_merge] _do_direct_merge 스레드 진입: runner_id={runner_id}, branch={branch}, worktree={worktree_path_str}")
 
     try:
         # worktree_path 결정
@@ -1729,7 +1730,8 @@ def _do_direct_merge(branch: str, worktree_path_str: str | None, plan_file: str 
         }
 
     except Exception as e:
-        logger.error(f"[direct_merge] 실패: {e}")
+        import traceback
+        logger.error(f"[direct_merge] 실패: {e}\n{traceback.format_exc()}")
         result = {"success": False, "message": str(e), "action": "direct-merge", "runner_id": runner_id}
     finally:
         redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
