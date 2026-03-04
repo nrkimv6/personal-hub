@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, HTTPException
 
-from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse, RunnerListItem, MergeQueueItem, MergeStatusResponse, MergeHistoryItem, MergeQueueEnqueueRequest
+from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse, RunnerListItem, MergeQueueItem, MergeStatusResponse, MergeHistoryItem, MergeQueueEnqueueRequest, DirectMergeRequest
 from app.modules.dev_runner.services.executor_service import executor_service
 
 router = APIRouter()
@@ -129,6 +129,14 @@ async def retry_merge_request(runner_id: str):
 async def revert_merge_request(runner_id: str):
     """Merge 되돌리기 요청"""
     return await executor_service.send_runner_command(runner_id, "revert-merge")
+
+
+@router.post("/merge/direct")
+async def direct_merge(request: DirectMergeRequest):
+    """직접 머지 — 러너 없이 branch/worktree만으로 머지 실행 (삭제된 러너 재시도용)"""
+    return await executor_service.send_direct_merge_command(
+        request.branch, request.worktree_path, request.plan_file
+    )
 
 
 __all__ = ['router']
