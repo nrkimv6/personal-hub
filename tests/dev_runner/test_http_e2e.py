@@ -1,4 +1,5 @@
-﻿import json
+import os
+import signal
 import time
 import pytest
 import subprocess
@@ -41,6 +42,9 @@ REDIS_TEST_DB = 15
 
 @pytest.fixture(scope="module")
 def background_listener():
+    import redis.asyncio as aioredis
+    from app.modules.dev_runner.services import executor_service as es_module
+
     r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB, decode_responses=True)
     # FORCE CLEANUP
     r.delete("plan-runner:state:status")
@@ -56,15 +60,29 @@ def background_listener():
         stderr=subprocess.PIPE,
         text=True
     )
-    
+
     # Wait for heartbeat
     for _ in range(20):
         if r.get("plan-runner:listener:heartbeat"):
             break
         time.sleep(0.5)
-    
+
+    # executor_service의 Redis 클라이언트를 db=15로 교체 (API-Listener 격리 일치)
+    old_redis = es_module.executor_service.redis_client
+    old_async_redis = es_module.executor_service.async_redis
+    new_redis = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB, decode_responses=True,
+                            socket_connect_timeout=5, socket_timeout=10)
+    new_async_redis = aioredis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB, decode_responses=True,
+                                     socket_connect_timeout=5, socket_timeout=35)
+    es_module.executor_service.redis_client = new_redis
+    es_module.executor_service.async_redis = new_async_redis
+
     yield process
-    
+
+    # 원래 Redis 클라이언트 복원
+    es_module.executor_service.redis_client = old_redis
+    es_module.executor_service.async_redis = old_async_redis
+
     if process.poll() is None:
         process.terminate()
         process.wait(timeout=5)
@@ -73,18 +91,42 @@ def background_listener():
 
 class TestHttpE2EChain:
     @pytest.fixture(autouse=True)
-    def cleanup_redis_after_test(self):
-        """각 테스트 메서드 종료 후 plan-runner:* Redis 키 자동 정리."""
+    def cleanup_redis_after_test(self, api_client):
+        """각 테스트 메서드 종료 후 active runner stop + PID kill + Redis 키 자동 정리."""
         yield
         try:
+            from app.modules.dev_runner.services.executor_service import RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY
             r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB, decode_responses=True)
+
+            # 1. active runner_id 목록 조회
+            active = r.smembers(ACTIVE_RUNNERS_KEY)
+
+            # 2. 각 runner에 stop 요청 (API 레벨)
+            for runner_id in active:
+                try:
+                    api_client.post(f"{BASE_URL}/stop/{runner_id}")
+                except Exception:
+                    pass
+
+            # 3. PID kill (stop이 실패하거나 늦을 경우 안전망)
+            for runner_id in active:
+                pid_str = r.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
+                if pid_str:
+                    try:
+                        os.kill(int(pid_str), signal.SIGTERM)
+                    except (ProcessLookupError, ValueError, OSError):
+                        pass
+
+            # 4. Redis 키 전체 삭제
             stale_keys = r.keys("plan-runner:*")
             if stale_keys:
                 r.delete(*stale_keys)
         except Exception:
             pass
 
-    def test_http_start_to_process_execution(self, api_client, background_listener):
+    def test_http_start_and_stop_lifecycle(self, api_client, background_listener):
+        """E2E: POST /run → running 확인 → POST /stop → active_runners 비어짐 확인"""
+        from app.modules.dev_runner.services.executor_service import RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY
         r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB, decode_responses=True)
 
         payload = {
@@ -93,6 +135,7 @@ class TestHttpE2EChain:
             "dry_run": True
         }
 
+        # 1. Start runner
         runner_id = None
         try:
             response = api_client.post(f"{BASE_URL}/run", json=payload)
@@ -105,8 +148,7 @@ class TestHttpE2EChain:
 
         assert runner_id is not None, "API가 runner_id를 반환하지 않음 (500/504 오류)"
 
-        # VERIFY REDIS — per-runner 키 확인
-        from app.modules.dev_runner.services.executor_service import RUNNER_KEY_PREFIX
+        # 2. running 상태 확인
         executed = False
         for _ in range(20):
             status = r.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
@@ -117,24 +159,15 @@ class TestHttpE2EChain:
             time.sleep(1)
 
         assert executed is True, f"E2E Failed: runner {runner_id} status={r.get(f'{RUNNER_KEY_PREFIX}:{runner_id}:status')}"
-        print(f"\n[SUCCESS] HTTP E2E Start Chain Verified (runner_id: {runner_id}, PID: {r.get(f'{RUNNER_KEY_PREFIX}:{runner_id}:pid')})")
+        print(f"\n[START OK] runner_id={runner_id}, PID={r.get(f'{RUNNER_KEY_PREFIX}:{runner_id}:pid')}")
 
-    def test_http_stop_to_process_cleanup(self, api_client, background_listener):
-        r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB, decode_responses=True)
-        from app.modules.dev_runner.services.executor_service import RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY
+        # 3. Stop runner
+        resp = api_client.post(f"{BASE_URL}/stop/{runner_id}")
+        if resp.status_code == 404:
+            # dry_run이 이미 완료 → active_runners에서 직접 제거
+            r.srem(ACTIVE_RUNNERS_KEY, runner_id)
 
-        # active runners 확인 후 stop
-        active = r.smembers(ACTIVE_RUNNERS_KEY)
-        for runner_id in active:
-            try:
-                resp = api_client.post(f"{BASE_URL}/stop/{runner_id}")
-                # 404: 이미 종료됨 → active_runners에서 직접 제거 (stale 정리)
-                if resp.status_code == 404:
-                    r.srem(ACTIVE_RUNNERS_KEY, runner_id)
-            except Exception:
-                pass
-
-        # active_runners가 비어질 때까지 대기 (running 중인 runner는 listener가 정리)
+        # 4. active_runners 비어짐 확인
         cleaned = False
         for _ in range(10):
             if not r.smembers(ACTIVE_RUNNERS_KEY):
@@ -142,5 +175,5 @@ class TestHttpE2EChain:
                 break
             time.sleep(1)
 
-        assert cleaned is True
-        print("\n[SUCCESS] HTTP E2E Stop Chain Verified")
+        assert cleaned is True, "active_runners가 10초 내 비워지지 않음"
+        print("\n[STOP OK] HTTP E2E Start+Stop Lifecycle Verified")

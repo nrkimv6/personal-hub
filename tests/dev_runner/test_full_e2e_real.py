@@ -11,6 +11,8 @@
 
 주의: 과금 발생 가능 (LLM API 호출)
 """
+import os
+import signal
 import time
 from pathlib import Path
 
@@ -53,8 +55,8 @@ def http_client():
     return TestClient(app)
 
 
-def _post_run(http_client, plan_file: str, max_cycles: int = 1) -> str:
-    """POST /run → runner_id 반환"""
+def _post_run(http_client, plan_file: str, max_cycles: int = 1, tracker=None) -> str:
+    """POST /run → runner_id 반환. tracker 리스트 지정 시 runner_id 자동 등록."""
     resp = http_client.post(
         f"{BASE_URL}/run",
         json={"plan_file": plan_file, "max_cycles": max_cycles},
@@ -62,6 +64,8 @@ def _post_run(http_client, plan_file: str, max_cycles: int = 1) -> str:
     assert resp.status_code == 200, f"POST /run 실패: {resp.status_code} {resp.text}"
     runner_id = resp.json().get("runner_id")
     assert runner_id, f"runner_id 미반환: {resp.json()}"
+    if tracker is not None:
+        tracker.append(runner_id)
     return runner_id
 
 
@@ -80,6 +84,31 @@ def _wait_until_not_running(isolated_redis, runner_id: str, timeout: int = 600) 
 class TestFullE2E:
     """Level 3: 실제 LLM 1 cycle 실행 → merge까지 전체 파이프라인"""
 
+    @pytest.fixture(autouse=True)
+    def force_kill_runners(self, isolated_redis):
+        """테스트 후 시작된 모든 runner 프로세스를 강제 정리하는 안전망 fixture.
+
+        self-termination에 의존하지 않고, teardown에서 명시적으로 PID kill을 수행한다.
+        """
+        self._started_runners = []
+        yield
+        # teardown: 각 runner PID kill
+        for rid in self._started_runners:
+            pid_str = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:pid")
+            if pid_str:
+                try:
+                    os.kill(int(pid_str), signal.SIGTERM)
+                except (ProcessLookupError, ValueError, OSError):
+                    pass
+        # Redis 키 정리
+        for rid in self._started_runners:
+            for suffix in (
+                "status", "pid", "plan_file", "start_time", "engine",
+                "stream_log_path", "worktree_path", "merge_status", "current_cycle",
+            ):
+                isolated_redis.delete(f"{RUNNER_KEY_PREFIX}:{rid}:{suffix}")
+            isolated_redis.srem("plan-runner:active_runners", rid)
+
     def test_single_plan_1cycle(self, http_client, listener_process, isolated_redis, e2e_redis_cleanup):
         """단일 plan 파일로 1 cycle 실행 → 완료까지 대기
 
@@ -88,7 +117,7 @@ class TestFullE2E:
         - 로그 파일에 내용이 기록됨 (size > 0)
         """
         plan_file = str(FIXTURES_DIR / "test_minimal_plan.md")
-        runner_id = _post_run(http_client, plan_file, max_cycles=1)
+        runner_id = _post_run(http_client, plan_file, max_cycles=1, tracker=self._started_runners)
 
         assert _wait_until_not_running(isolated_redis, runner_id, timeout=600), (
             f"runner {runner_id}가 10분 내 완료되지 않음"
@@ -106,7 +135,7 @@ class TestFullE2E:
         - 완료 후 merge_status 또는 None 확인 (merge 성공/실패)
         """
         plan_file = str(FIXTURES_DIR / "test_minimal_plan.md")
-        runner_id = _post_run(http_client, plan_file, max_cycles=1)
+        runner_id = _post_run(http_client, plan_file, max_cycles=1, tracker=self._started_runners)
 
         assert _wait_until_not_running(isolated_redis, runner_id, timeout=600), (
             f"runner {runner_id}가 10분 내 완료되지 않음"
@@ -130,8 +159,8 @@ class TestFullE2E:
         - 각 runner_id 독립 로그 파일 생성
         """
         plan_file = str(FIXTURES_DIR / "test_minimal_plan.md")
-        runner_id_1 = _post_run(http_client, plan_file, max_cycles=1)
-        runner_id_2 = _post_run(http_client, plan_file, max_cycles=1)
+        runner_id_1 = _post_run(http_client, plan_file, max_cycles=1, tracker=self._started_runners)
+        runner_id_2 = _post_run(http_client, plan_file, max_cycles=1, tracker=self._started_runners)
 
         assert runner_id_1 != runner_id_2, "2개 실행 시 runner_id가 동일하면 안 됨"
 

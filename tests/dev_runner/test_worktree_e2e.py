@@ -81,6 +81,10 @@ class TestWorktreeE2E:
         assert (repo / "file_a.py").exists()
         assert (repo / "file_b.py").exists()
 
+        # worktree 정리
+        WorktreeManager.remove("e2e_a", base_dir)
+        WorktreeManager.remove("e2e_b", base_dir)
+
     def test_e2e_3_conflict_on_second_merge(self, worktrees_base):
         """E2E-3: 동일 파일 수정 → 첫 번째 머지 성공, 두 번째 충돌 확인"""
         base_dir, repo = worktrees_base
@@ -111,6 +115,10 @@ class TestWorktreeE2E:
         r2 = WorktreeManager.merge_to_main("e2e_c2", base_dir, repo)
         assert r2.success is False
         assert r2.conflict is True
+
+        # worktree 정리 (conflict 상태도 force 제거 가능)
+        WorktreeManager.remove("e2e_c1", base_dir)
+        WorktreeManager.remove("e2e_c2", base_dir)
 
     def test_e2e_4_remove_cleans_directory_and_branch(self, worktrees_base):
         """E2E-4: remove 후 디렉토리 + 브랜치 완전 삭제 확인"""

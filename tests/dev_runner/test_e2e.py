@@ -76,10 +76,14 @@ def dev_runner_listener():
         pass
 
 @pytest.fixture
-def executor_service():
+async def executor_service():
     """Actual executor service connecting to real local Redis"""
     svc = ExecutorService()
-    return svc
+    yield svc
+    try:
+        await svc.async_redis.aclose()
+    except Exception:
+        pass
 
 @pytest.mark.e2e
 @pytest.mark.asyncio
