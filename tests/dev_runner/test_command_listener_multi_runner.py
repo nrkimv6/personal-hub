@@ -90,14 +90,14 @@ class TestCleanupProcessState:
         r.srem.assert_called_once_with(listener.ACTIVE_RUNNERS_KEY, "abc12345")
 
     def test_cleanup_deletes_per_runner_redis_keys(self):
-        """cleanup 시 per-runner Redis 키 삭제"""
+        """cleanup 시 per-runner Redis 키에 expire 설정 (즉시 삭제 대신 TTL 만료)"""
         listener = _load_listener()
         r = _make_redis_mock()
         listener._cleanup_process_state("abc12345", r)
 
-        deleted_keys = r.delete.call_args[0]
-        assert any("abc12345:status" in k for k in deleted_keys)
-        assert any("abc12345:pid" in k for k in deleted_keys)
+        expire_calls = [str(c) for c in r.expire.call_args_list]
+        assert any("abc12345:status" in c for c in expire_calls)
+        assert any("abc12345:pid" in c for c in expire_calls)
 
 
 class TestStreamOutput:

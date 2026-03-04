@@ -228,6 +228,7 @@ class TestForceCleanupState:
     @pytest.mark.asyncio
     async def test_cleanup_specific_runner(self, executor):
         """특정 runner_id cleanup → status=stopped, SREM 확인"""
+        executor.async_redis.get = AsyncMock(return_value=b"active")
         executor.async_redis.exists = AsyncMock(return_value=True)
         executor.async_redis.expire = AsyncMock()
         executor.async_redis.zadd = AsyncMock()
