@@ -690,6 +690,7 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
             pass
         exit_code = process.returncode
         logger.info(f"Output streaming thread finished (exit code: {exit_code})")
+        logger.info(f"[_stream_output] finally 분기 시작 (runner_id={runner_id!r}, exit_code={exit_code})")
 
         # 이중 큐잉 방지: runner 내부 _publish_merge_request()가 이미 큐잉하므로
         # command-listener에서는 큐잉하지 않음
@@ -719,27 +720,28 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
             except Exception as _drain_err:
                 logger.debug(f"[_stream_output] stdout drain 실패 (무시): {_drain_err}")
 
-        # Workflow 상태 업데이트: 정상 종료(0) → merge_pending or merge 흐름, 비정상 → failed
+        # merge_requested 플래그 확인 (1회) — 이후 workflow 상태 업데이트 + 분기 모두에 재사용
+        _merge_requested = False
+        if runner_id and exit_code == 0:
+            try:
+                _flag = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+                _merge_requested = bool(_flag)
+            except Exception as e:
+                logger.warning(f"[_stream_output] merge_requested 플래그 조회 실패 (runner_id={runner_id}): {e}")
+        logger.info(f"[_stream_output] merge 분기 판정: _merge_requested={_merge_requested} (runner_id={runner_id})")
+
+        # Workflow 상태 업데이트: 정상 종료(0) → merge_pending or completed, 비정상 → failed
         if _wf_manager and runner_id:
             try:
                 wf = _wf_manager.get_by_runner_id(runner_id)
                 if wf:
                     if exit_code == 0:
-                        # merge_requested 플래그 확인 — 있으면 merge 흐름, 없으면 merge_pending
-                        merge_requested_val = None
-                        try:
-                            merge_requested_val = redis_client.get(
-                                f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested"
-                            )
-                        except Exception:
-                            pass
-
-                        if merge_requested_val:
+                        if _merge_requested:
                             logger.info(f"[_stream_output] merge_requested 플래그 감지 (runner_id={runner_id}) → merge 흐름 진입")
                             _wf_manager.update_status(wf["id"], "merge_pending")
                         else:
-                            logger.info(f"[_stream_output] merge_requested 플래그 없음 (runner_id={runner_id}) → 기존 cleanup 유지")
-                            _wf_manager.update_status(wf["id"], "merge_pending")
+                            logger.info(f"[_stream_output] merge_requested 플래그 없음 (runner_id={runner_id}) → completed 처리")
+                            _wf_manager.update_status(wf["id"], "completed")
                     elif exit_code is not None and exit_code != 0:
                         _wf_manager.update_status(
                             wf["id"], "failed",
@@ -754,17 +756,6 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                         )
             except Exception as wf_err:
                 logger.warning(f"[_stream_output] workflow update 실패 (무시): {wf_err}")
-
-        # merge_requested 플래그 여부에 따라 분기:
-        # - 플래그 있음 → _do_inline_merge() 호출 (merge 완료 후 cleanup)
-        # - 플래그 없음 → 기존대로 바로 cleanup
-        _merge_requested = False
-        if runner_id and exit_code == 0:
-            try:
-                _flag = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
-                _merge_requested = bool(_flag)
-            except Exception:
-                pass
 
         if _merge_requested:
             # merge 흐름 — cleanup은 merge 완료/실패 후 _do_inline_merge 내부에서 호출
