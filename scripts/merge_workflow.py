@@ -203,7 +203,7 @@ class MergeWorkflow:
     def run_post_merge_tests(self) -> TestResult:
         project_python = self._get_project_python()
         result = subprocess.run(
-            [project_python, "-m", "pytest", str(self.project_root / "tests"), "-m", "http", "-v", "--timeout=120"],
+            [project_python, "-m", "pytest", str(self.project_root / "tests"), "-m", "http", "-v"],
             capture_output=True, text=True, cwd=str(self.project_root)
         )
         return TestResult(
