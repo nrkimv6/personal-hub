@@ -570,12 +570,12 @@
 								onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { activeTabId = tab.id; } }}
 							>
 								{#if tab.running}
-\t\t\t\t\t\t\t\t\t<svg class="w-3 h-3 text-amber-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-\t\t\t\t\t\t\t\t{:else if tab.orphan}
-\t\t\t\t\t\t\t\t\t<span class="w-2 h-2 rounded-full bg-orange-500 shrink-0" title="고아 워크플로우"></span>
-\t\t\t\t\t\t\t\t{:else}
-\t\t\t\t\t\t\t\t\t<svg class="w-3 h-3 text-emerald-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-\t\t\t\t\t\t\t\t{/if}
+								<svg class="w-3 h-3 text-amber-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+							{:else if tab.orphan}
+								<span class="w-2 h-2 rounded-full bg-orange-500 shrink-0" title="고아 워크플로우"></span>
+							{:else}
+								<svg class="w-3 h-3 text-emerald-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+							{/if}
 								<span class="max-w-[120px] truncate">{tab.plan_file ? tab.plan_file.split(/[\\/]/).pop() : '전체 실행'}</span>
 								<button
 									class="ml-0.5 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-300 text-gray-400 hover:text-gray-600 text-[10px]"
