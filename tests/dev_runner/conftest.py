@@ -21,15 +21,18 @@ def redis_cleanup():
         yield
         return
 
-    before_members = r.smembers("plan-runner:active_runners") or set()
+    before_active = r.smembers("plan-runner:active_runners") or set()
+    before_recent = set(r.zrange("plan-runner:recent_runners", 0, -1) or [])
 
     yield
 
     try:
-        after_members = r.smembers("plan-runner:active_runners") or set()
-        new_members = after_members - before_members
-        for runner_id in new_members:
+        after_active = r.smembers("plan-runner:active_runners") or set()
+        after_recent = set(r.zrange("plan-runner:recent_runners", 0, -1) or [])
+        new_ids = (after_active - before_active) | (after_recent - before_recent)
+        for runner_id in new_ids:
             r.srem("plan-runner:active_runners", runner_id)
+            r.zrem("plan-runner:recent_runners", runner_id)
             keys = r.keys(f"plan-runner:runners:{runner_id}:*")
             if keys:
                 r.delete(*keys)
