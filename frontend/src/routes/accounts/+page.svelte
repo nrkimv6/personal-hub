@@ -596,7 +596,7 @@
 
 <!-- 생성/수정 모달 -->
 {#if showCreateModal}
-  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick={closeModal}>
+  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onclick={closeModal} role="presentation">
     <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4" onclick={(e) => e.stopPropagation()}>
       <h2 class="text-xl font-bold mb-4">
         {editingAccount ? '계정 수정' : '계정 추가'}
@@ -604,10 +604,11 @@
 
       <form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }} class="space-y-4">
         <div>
-          <label class="block text-sm font-medium text-foreground mb-1">
+          <label for="form_name" class="block text-sm font-medium text-foreground mb-1">
             계정명 <span class="text-error">*</span>
           </label>
           <input
+            id="form_name"
             type="text"
             bind:value={formData.name}
             class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-transparent"
@@ -617,10 +618,11 @@
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-foreground mb-1">
+          <label for="form_profile_dir" class="block text-sm font-medium text-foreground mb-1">
             프로필 디렉토리 <span class="text-error">*</span>
           </label>
           <input
+            id="form_profile_dir"
             type="text"
             bind:value={formData.profile_dir}
             class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-transparent"
@@ -632,10 +634,11 @@
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-foreground mb-1">
+          <label for="form_email" class="block text-sm font-medium text-foreground mb-1">
             이메일 (선택)
           </label>
           <input
+            id="form_email"
             type="email"
             bind:value={formData.email}
             class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-transparent"
@@ -644,10 +647,11 @@
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-foreground mb-1">
+          <label for="form_description" class="block text-sm font-medium text-foreground mb-1">
             설명 (선택)
           </label>
           <textarea
+            id="form_description"
             bind:value={formData.description}
             class="w-full px-3 py-2 border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-transparent"
             rows="2"
