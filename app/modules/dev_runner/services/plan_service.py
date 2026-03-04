@@ -55,6 +55,8 @@ class PlanService:
     def __init__(self):
         self._registered_paths: List[dict] = []  # {"path": str, "type": "plan"|"archive"}
         self._ignored_plans: List[str] = []
+        # archive 캐시: {dir_path: {"mtime": float, "results": [PlanFileResponse]}}
+        self._archive_cache: dict[str, dict] = {}
         self._migrate_to_registered_paths()
         self._load_registered_paths()
         self._load_ignored_plans()
@@ -266,6 +268,13 @@ class PlanService:
         # docs/plan 패턴 없음 → 폴더명 자체
         return path.name or "unknown"
 
+    def _get_dir_fingerprint(self, plan_dir: Path) -> float:
+        """디렉토리 mtime 반환 (캐시 무효화용, 가벼운 단일 stat)"""
+        try:
+            return plan_dir.stat().st_mtime
+        except Exception:
+            return 0.0
+
     def _scan_plan_dir(
         self,
         plan_dir: Path,
@@ -288,7 +297,23 @@ class PlanService:
         if not plan_dir.exists():
             return
 
+        # archive 디렉토리는 캐시 사용 (파일 변경이 거의 없음)
+        if recursive:
+            cache_key = str(plan_dir)
+            cached = self._archive_cache.get(cache_key)
+            if cached:
+                cur_mtime = self._get_dir_fingerprint(plan_dir)
+                if cached["mtime"] == cur_mtime:
+                    # 캐시 히트: seen 업데이트 + 필터링된 결과 추가
+                    for item in cached["results"]:
+                        if item.path not in seen:
+                            seen.add(item.path)
+                            if include_ignored or not item.ignored:
+                                results.append(item)
+                    return
+
         source = self._resolve_source(plan_dir)
+        scanned_items: List[PlanFileResponse] = []
 
         glob_fn = plan_dir.rglob if recursive else plan_dir.glob
         for plan_file in glob_fn("*.md"):
@@ -308,18 +333,26 @@ class PlanService:
             progress = self.get_plan_progress(plan_file)
             is_ignored = self._is_ignored_plan(plan_file, status, progress)
 
+            item = PlanFileResponse(
+                path=str(plan_file),
+                filename=plan_file.name,
+                status=status,
+                progress=progress,
+                source=source,
+                ignored=is_ignored,
+                path_type=path_type,
+            )
+            scanned_items.append(item)
+
             if include_ignored or not is_ignored:
-                results.append(
-                    PlanFileResponse(
-                        path=str(plan_file),
-                        filename=plan_file.name,
-                        status=status,
-                        progress=progress,
-                        source=source,
-                        ignored=is_ignored,
-                        path_type=path_type,
-                    )
-                )
+                results.append(item)
+
+        # archive 디렉토리 결과를 캐시에 저장
+        if recursive:
+            self._archive_cache[str(plan_dir)] = {
+                "mtime": self._get_dir_fingerprint(plan_dir),
+                "results": scanned_items,
+            }
 
     # 자동 무시 대상 상태 (정확히 일치해야 함)
     _IGNORED_STATUSES = {"보류"}

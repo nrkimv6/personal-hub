@@ -1,5 +1,6 @@
 """plan 문서 관리 API"""
 
+import asyncio
 import base64
 import logging
 from pathlib import Path
@@ -29,13 +30,13 @@ def _decode_path(encoded: str) -> str:
 @router.get("/plans", response_model=List[PlanFileResponse])
 async def get_plans():
     """plan 목록 조회 (등록된 경로 탐색)"""
-    return plan_service.list_plans()
+    return await asyncio.to_thread(plan_service.list_plans)
 
 
 @router.get("/plans/ignored", response_model=List[PlanFileResponse])
 async def get_ignored_plans():
     """무시된(완료/빈) plan 목록 조회"""
-    return plan_service.list_ignored_plans()
+    return await asyncio.to_thread(plan_service.list_ignored_plans)
 
 
 @router.get("/plans/paths", response_model=List[RegisteredPathResponse])
