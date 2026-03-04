@@ -32,6 +32,13 @@ ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 RECENT_RUNNERS_KEY = "plan-runner:recent_runners"  # sorted set: score=종료 timestamp
 RECENT_RUNNERS_TTL = 86400  # 24시간 (초)
 COMMAND_TIMEOUT = 30  # 명령 결과 대기 타임아웃 (초) — worktree 생성 시간 고려
+# per-runner 키 suffix 전체 목록 (listener와 공유되는 단일 진실 원천)
+# scripts/dev-runner-command-listener.py도 동일 상수를 별도 정의하여 참조
+RUNNER_KEY_SUFFIXES = (
+    "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
+    "engine", "worktree_path", "branch", "merge_status", "merge_requested",
+    "current_cycle", "quota_stopped", "error", "restart_after_merge",
+)
 
 
 class ExecutorService:
@@ -254,13 +261,20 @@ class ExecutorService:
 
         종료된 runner는 즉시 삭제하지 않고 RECENT_RUNNERS_KEY에 보존하여
         다른 클라이언트에서도 탭을 복원할 수 있도록 한다.
+
+        방어 로직: status 키가 없는 runner (listener가 이미 정리 완료)는 RECENT에 등록하지 않는다.
+        이를 통해 listener cleanup 후 API cleanup이 중복 호출될 때 plan_file=None 유령 탭 생성을 방지.
         """
-        KEY_SUFFIXES = ("status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path", "engine", "worktree_path", "merge_status", "current_cycle")
         try:
             if runner_id:
+                existing_status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
+                if existing_status is None:
+                    # listener가 이미 cleanup 완료 (키 삭제됨) → RECENT 등록 스킵
+                    await self.async_redis.srem(ACTIVE_RUNNERS_KEY, runner_id)
+                    return
                 await self.async_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
                 pipe = self.async_redis.pipeline()
-                for key_suffix in KEY_SUFFIXES:
+                for key_suffix in RUNNER_KEY_SUFFIXES:
                     full_key = f"{RUNNER_KEY_PREFIX}:{runner_id}:{key_suffix}"
                     pipe.expire(full_key, RECENT_RUNNERS_TTL)
                 pipe.srem(ACTIVE_RUNNERS_KEY, runner_id)
@@ -270,9 +284,14 @@ class ExecutorService:
                 runner_ids = await self.async_redis.smembers(ACTIVE_RUNNERS_KEY)
                 stop_ts = time.time()
                 for rid in runner_ids:
+                    existing_status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:status")
+                    if existing_status is None:
+                        # listener가 이미 cleanup 완료 → RECENT 등록 스킵, ACTIVE만 정리
+                        await self.async_redis.srem(ACTIVE_RUNNERS_KEY, rid)
+                        continue
                     await self.async_redis.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
                     pipe = self.async_redis.pipeline()
-                    for key_suffix in KEY_SUFFIXES:
+                    for key_suffix in RUNNER_KEY_SUFFIXES:
                         full_key = f"{RUNNER_KEY_PREFIX}:{rid}:{key_suffix}"
                         pipe.expire(full_key, RECENT_RUNNERS_TTL)
                     pipe.zadd(RECENT_RUNNERS_KEY, {rid: stop_ts})
@@ -494,7 +513,7 @@ class ExecutorService:
             # RECENT_RUNNERS_KEY에서 제거
             await self.async_redis.zrem(RECENT_RUNNERS_KEY, runner_id)
             # per-runner 키 즉시 삭제
-            for key_suffix in ("status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path", "engine", "worktree_path", "merge_status", "current_cycle"):
+            for key_suffix in RUNNER_KEY_SUFFIXES:
                 await self.async_redis.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:{key_suffix}")
             # ACTIVE_RUNNERS_KEY에서도 제거 (혹시 남아있다면)
             await self.async_redis.srem(ACTIVE_RUNNERS_KEY, runner_id)
@@ -688,4 +707,4 @@ class ExecutorService:
 # 싱글톤 인스턴스
 executor_service = ExecutorService()
 
-__all__ = ['executor_service', 'ExecutorService', 'ACTIVE_RUNNERS_KEY', 'RECENT_RUNNERS_KEY', 'RUNNER_KEY_PREFIX', 'RECENT_RUNNERS_TTL']
+__all__ = ['executor_service', 'ExecutorService', 'ACTIVE_RUNNERS_KEY', 'RECENT_RUNNERS_KEY', 'RUNNER_KEY_PREFIX', 'RECENT_RUNNERS_TTL', 'RUNNER_KEY_SUFFIXES']

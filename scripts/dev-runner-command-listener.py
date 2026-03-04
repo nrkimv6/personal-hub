@@ -54,6 +54,14 @@ COMMANDS_KEY = "plan-runner:commands"
 RESULTS_KEY = "plan-runner:command_results"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
+RECENT_RUNNERS_KEY = "plan-runner:recent_runners"  # sorted set: score=종료 timestamp
+RECENT_RUNNERS_TTL = 86400  # 24시간 (초) — executor_service.py의 RECENT_RUNNERS_TTL과 동일하게 유지
+# per-runner 키 suffix 전체 목록 — app/modules/dev_runner/services/executor_service.py의 RUNNER_KEY_SUFFIXES와 동일
+RUNNER_KEY_SUFFIXES = (
+    "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
+    "engine", "worktree_path", "branch", "merge_status", "merge_requested",
+    "current_cycle", "quota_stopped", "error", "restart_after_merge",
+)
 HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
 HEARTBEAT_INTERVAL = 10  # heartbeat 갱신 주기 (초)
 HEARTBEAT_TTL = 30  # heartbeat 만료 시간 (초, 3회 미갱신 시 만료)
@@ -177,20 +185,17 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
             except Exception as wt_e:
                 logger.warning(f"stale worktree 정리 실패 (runner_id: {runner_id}): {wt_e}")
 
-        # worktree_path 키: 보존 시 삭제하지 않음 (재실행 시 재사용)
-        keys_to_delete = [
-            f"{RUNNER_KEY_PREFIX}:{runner_id}:status",
-            f"{RUNNER_KEY_PREFIX}:{runner_id}:pid",
-            f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file",
-            f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time",
-            f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path",
-            f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path",
-            f"{RUNNER_KEY_PREFIX}:{runner_id}:engine",
-        ]
-        if not _preserve_worktree:
-            keys_to_delete.append(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
-        redis_client.delete(*keys_to_delete)
+        # 종료된 runner를 RECENT_RUNNERS에 등록하여 탭 이력 보존
+        # 키는 즉시 삭제 대신 EXPIRE 설정 — TTL 만료 후 자동 소멸
+        # _preserve_worktree=True 시 worktree_path 키만 TTL 없이 보존 (재실행 시 재사용)
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
+        for suffix in RUNNER_KEY_SUFFIXES:
+            if _preserve_worktree and suffix == "worktree_path":
+                continue  # 워크트리 보존 시 worktree_path는 TTL 설정 스킵
+            key = f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}"
+            redis_client.expire(key, RECENT_RUNNERS_TTL)
         redis_client.srem(ACTIVE_RUNNERS_KEY, runner_id)
+        redis_client.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
     except Exception:
         pass
 
