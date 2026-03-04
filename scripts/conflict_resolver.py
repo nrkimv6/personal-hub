@@ -1,6 +1,11 @@
 """
-conflict_resolver.py — 머지 충돌 자동 해결 모듈
-Claude 에이전트(auto-conflict-resolver)를 호출하여 conflict markers를 분석/병합한다.
+[DEPRECATED] conflict_resolver.py — plan-runner resolve 서브커맨드로 대체됨 (2026-03-05).
+ConflictAnalyzer, ResolveResult, _record_resolution은 계속 사용.
+try_resolve()의 claude --print 호출은 사용 중단.
+
+이 모듈의 try_resolve()는 claude --print 모드를 사용하는데, --print 모드는
+Read/Edit/Bash tool 사용이 불가능하여 conflict markers를 실제로 수정할 수 없다.
+plan-runner resolve 서브커맨드(--dangerously-skip-permissions + stream-json)로 대체.
 """
 from __future__ import annotations
 
@@ -214,7 +219,8 @@ class ConflictResolver:
             self.logger.warning(f"[ConflictResolver] 이력 기록 실패 (무시): {e}")
 
     def try_resolve(self, runner_id: str, branch: str) -> ResolveResult:
-        """충돌 자동 해결 메인 진입점"""
+        """[DEPRECATED] claude --print 모드는 tool(Read/Edit/Bash) 사용 불가.
+        plan-runner resolve 서브커맨드 사용할 것. 이 메서드는 호환성 유지만."""
         start_time = time.time()
         try:
             # 1. 충돌 파일 목록

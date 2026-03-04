@@ -699,6 +699,63 @@ def _restart_plan_runner_after_merge(plan_file: str, redis_client: redis.Redis, 
         logger.error(f"[RESTART-AFTER-MERGE] plan-runner 재시작 실패: {e}")
 
 
+def _launch_conflict_resolver_process(runner_id: str, branch: str, worktree_path: Path, redis_client, pub_fn=None) -> dict:
+    """plan-runner resolve 서브커맨드로 conflict 자동 해결 프로세스를 실행한다.
+
+    _launch_plan_runner_process와 유사하지만 동기 실행(subprocess.run + timeout)으로
+    _do_inline_merge가 이미 백그라운드 스레드이므로 blocking이 허용됨.
+
+    Returns:
+        {"success": True/False, "message": str}
+    """
+    import os
+    cmd = [
+        str(PLAN_RUNNER_PYTHON),
+        "-m",
+        "plan_runner",
+        "resolve",
+        "--branch", branch,
+        "--project-dir", str(PROJECT_ROOT),
+    ]
+
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONUNBUFFERED"] = "1"
+    env.pop("CLAUDECODE", None)
+    env["PLAN_RUNNER_WORK_DIR"] = str(worktree_path)
+    env["PLAN_RUNNER_RUNNER_ID"] = runner_id
+    env["REDIS_DB"] = str(REDIS_DB)
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(PLAN_RUNNER_MODULE_PATH),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            timeout=300,
+        )
+        output = (proc.stdout or "") + (proc.stderr or "")
+        if pub_fn and output:
+            pub_fn(f"[RESOLVE] {output[-500:]}")
+        if proc.returncode == 0:
+            logger.info(f"[conflict-resolver] auto-resolve 성공 (runner_id={runner_id})")
+            return {"success": True, "message": "auto-resolve 성공"}
+        else:
+            msg = (proc.stderr or "")[-200:]
+            logger.warning(f"[conflict-resolver] auto-resolve 실패 (returncode={proc.returncode}): {msg}")
+            return {"success": False, "message": msg}
+    except subprocess.TimeoutExpired:
+        logger.error(f"[conflict-resolver] resolve timeout (300s, runner_id={runner_id})")
+        return {"success": False, "message": "resolve timeout (300s)"}
+    except Exception as e:
+        logger.error(f"[conflict-resolver] 실행 오류: {e}")
+        return {"success": False, "message": str(e)}
+
+
 def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
     """merge_requested 플래그가 있을 때 _stream_output finally에서 호출되는 인라인 merge 함수.
 
@@ -832,11 +889,31 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                 except Exception as e:
                     _pub(f"재시작 플래그 설정 실패: {e}")
         elif result.conflict:
-            _pub(f"merge 충돌 발생 — worktree 보존: {result.message[:200]}")
+            _pub(f"merge 충돌 발생 — plan-runner resolve 시도 중...")
             try:
-                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "resolving")
             except Exception:
                 pass
+
+            # auto-resolve: plan-runner resolve 서브커맨드 실행
+            _resolve_branch = branch_str or (f"plan/{Path(plan_file).stem}" if plan_file else f"runner/{runner_id}")
+            resolve_result = _launch_conflict_resolver_process(
+                runner_id, _resolve_branch, worktree_path, redis_client, pub_fn=_pub
+            )
+
+            if resolve_result["success"]:
+                _pub("auto-resolve 성공 — merge 완료")
+                try:
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+                except Exception:
+                    pass
+                _cleanup_process_state(runner_id, redis_client)
+            else:
+                _pub(f"auto-resolve 실패 — worktree 보존: {resolve_result['message'][:200]}")
+                try:
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
+                except Exception:
+                    pass
         elif result.merged and not result.tests_passed:
             _pub(f"merge 후 테스트 실패 — worktree 보존: {result.message[:200]}")
             try:
@@ -1775,7 +1852,9 @@ def direct_merge(command: Dict, redis_client: redis.Redis) -> None:
 
 
 def _do_resolve_conflict(runner_id: str, redis_client: redis.Redis, command_id: str) -> None:
-    """resolve-conflict 실제 작업 (백그라운드 스레드에서 실행)"""
+    """resolve-conflict 실제 작업 (백그라운드 스레드에서 실행).
+    plan-runner resolve 서브커맨드를 통해 auto-conflict-resolver 에이전트를 실행한다.
+    """
     result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
     try:
         worktree_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
@@ -1784,39 +1863,32 @@ def _do_resolve_conflict(runner_id: str, redis_client: redis.Redis, command_id: 
             redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
             redis_client.expire(result_key, 60)
             return
+
         plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
         if plan_file == "ALL":
             plan_file = None
-        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "resolving")
-        from conflict_resolver import ConflictResolver
-        resolver = ConflictResolver(PROJECT_ROOT, redis_client)
-        # 이전 충돌 상태 정리 (실패 무시)
-        subprocess.run(["git", "merge", "--abort"], capture_output=True, cwd=str(PROJECT_ROOT))
+
         # branch 계산
-        if plan_file:
+        branch_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
+        if branch_str:
+            branch = branch_str
+        elif plan_file:
             branch = f"plan/{Path(plan_file).stem}"
         else:
             branch = f"runner/{runner_id}"
-        # 충돌 상태 재현
-        subprocess.run(
-            ["git", "merge", branch, "--no-ff"],
-            capture_output=True,
-            cwd=str(PROJECT_ROOT),
+
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "resolving")
+
+        resolve_result = _launch_conflict_resolver_process(
+            runner_id, branch, Path(worktree_path_str), redis_client
         )
-        resolve_result = resolver.try_resolve(runner_id, branch)
-        if resolve_result.success:
-            commit_proc = subprocess.run(
-                ["git", "commit", "--no-edit", "-m", f"merge: {branch} (auto-resolved)"],
-                capture_output=True,
-                text=True,
-                cwd=str(PROJECT_ROOT),
-            )
+
+        if resolve_result["success"]:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
             result = {"success": True, "message": "충돌 자동 해결 완료", "action": "resolve-conflict"}
         else:
-            subprocess.run(["git", "merge", "--abort"], capture_output=True, cwd=str(PROJECT_ROOT))
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
-            result = {"success": False, "reason": resolve_result.reason, "action": "resolve-conflict"}
+            result = {"success": False, "message": resolve_result["message"], "action": "resolve-conflict"}
     except Exception as e:
         logger.error(f"[resolve_conflict] 실패: {e}")
         result = {"success": False, "message": str(e), "action": "resolve-conflict"}
