@@ -116,6 +116,7 @@ export interface DoneResponse {
 	remaining_tasks: number;
 	total_tasks: number;
 	plan_status: string;
+	plans?: PlanFileResponse[];
 }
 
 export interface BatchDoneResultItem {

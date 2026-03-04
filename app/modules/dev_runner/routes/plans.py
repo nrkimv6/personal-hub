@@ -177,7 +177,8 @@ async def ignore_plan(encoded_path: str):
         raise HTTPException(status_code=400, detail=f"Invalid encoded path: {str(e)}")
 
     added = plan_service.add_to_ignore(decoded_path)
-    return {"success": added, "path": decoded_path}
+    plans = plan_service.list_plans()
+    return {"success": added, "path": decoded_path, "plans": [p.model_dump() for p in plans]}
 
 
 @router.delete("/plans/{encoded_path}/ignore")
@@ -191,7 +192,8 @@ async def unignore_plan(encoded_path: str):
     removed = plan_service.remove_from_ignore(decoded_path)
     if not removed:
         raise HTTPException(status_code=404, detail="Plan not in ignore list")
-    return {"success": True}
+    plans = plan_service.list_plans()
+    return {"success": True, "plans": [p.model_dump() for p in plans]}
 
 
 @router.post("/plans/{encoded_path}/done", response_model=DoneResponse)
@@ -210,7 +212,8 @@ async def run_plan_done(encoded_path: str):
         raise HTTPException(status_code=404, detail="Plan file not found")
 
     result = await plan_service.run_done(decoded_path)
-    return DoneResponse(**result)
+    plans = plan_service.list_plans()
+    return {**result, "plans": [p.model_dump() for p in plans]}
 
 
 @router.post("/plans/batch-done", response_model=BatchDoneResponse)
@@ -294,7 +297,8 @@ async def hold_plan(encoded_path: str):
     success = plan_service.set_plan_status(decoded_path, "보류")
     if not success:
         raise HTTPException(status_code=404, detail="Plan file not found or no title")
-    return {"success": True}
+    plans = plan_service.list_plans()
+    return {"success": True, "plans": [p.model_dump() for p in plans]}
 
 
 @router.delete("/plans/{encoded_path}/hold")
@@ -311,7 +315,8 @@ async def unhold_plan(encoded_path: str):
     success = plan_service.set_plan_status(decoded_path, "구현중")
     if not success:
         raise HTTPException(status_code=404, detail="Plan file not found or no title")
-    return {"success": True}
+    plans = plan_service.list_plans()
+    return {"success": True, "plans": [p.model_dump() for p in plans]}
 
 
 @router.post("/plans/sync")
@@ -342,7 +347,8 @@ async def update_plan_status(encoded_path: str, body: UpdateStatusRequest):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    return {"path": decoded_path, "status": new_status}
+    plans = plan_service.list_plans()
+    return {"path": decoded_path, "status": new_status, "plans": [p.model_dump() for p in plans]}
 
 
 # ── Archive 정리 ──────────────────────────────────────────────
