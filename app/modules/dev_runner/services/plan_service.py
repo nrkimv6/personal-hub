@@ -56,6 +56,7 @@ class PlanService:
         self._registered_paths: List[dict] = []  # {"path": str, "type": "plan"|"archive"}
         self._ignored_plans: List[str] = []
         # archive 캐시: {dir_path: {"mtime": float, "results": [PlanFileResponse]}}
+        # include_ignored=True 경로에서만 활용 (기본 리스트는 archive 스캔 자체를 스킵)
         self._archive_cache: dict[str, dict] = {}
         # plan 전체 목록 캐시 (startup 시 빌드, mutation 시 무효화)
         self._plans_cache: Optional[List[PlanFileResponse]] = None
@@ -222,6 +223,9 @@ class PlanService:
 
         for entry in self._registered_paths:
             is_archive = entry.get("type") == "archive"
+            # archive 경로는 include_ignored=True 시에만 스캔 (기본 리스트에서 제외)
+            if is_archive and not include_ignored:
+                continue
             reg_path = entry["path"]
             p = Path(reg_path)
             if not p.exists():
@@ -236,15 +240,14 @@ class PlanService:
                 if str(p) not in seen:
                     seen.add(str(p))
                     status = self.get_plan_status(p)
-                    progress = self.get_plan_progress(p)
-                    is_ignored = self._is_ignored_plan(p, status, progress)
+                    is_ignored = self._is_ignored_plan(p, status)
                     if include_ignored or not is_ignored:
                         results.append(
                             PlanFileResponse(
                                 path=str(p),
                                 filename=p.name,
                                 status=status,
-                                progress=progress,
+                                progress=None,
                                 source=self._resolve_source(p.parent),
                                 ignored=is_ignored,
                                 path_type="file",
@@ -353,14 +356,13 @@ class PlanService:
             seen.add(key)
 
             status = self.get_plan_status(plan_file)
-            progress = self.get_plan_progress(plan_file)
-            is_ignored = self._is_ignored_plan(plan_file, status, progress)
+            is_ignored = self._is_ignored_plan(plan_file, status)
 
             item = PlanFileResponse(
                 path=str(plan_file),
                 filename=plan_file.name,
                 status=status,
-                progress=progress,
+                progress=None,
                 source=source,
                 ignored=is_ignored,
                 path_type=path_type,
@@ -382,7 +384,7 @@ class PlanService:
     # 완료 계열 상태 (아카이브 허용 + 목록 숨김)
     _DONE_STATUSES = {"구현완료", "완료", "수정 완료", "배포완료", "수정완료"}
 
-    def _is_ignored_plan(self, path: Path, status: str, progress: PlanProgressResponse) -> bool:
+    def _is_ignored_plan(self, path: Path, status: str, progress: Optional[PlanProgressResponse] = None) -> bool:
         """plan이 무시 대상인지 판단"""
         # 수동 무시 목록
         if str(path.resolve()) in self._ignored_plans:
@@ -393,8 +395,8 @@ class PlanService:
         # 완료 계열 상태
         if status in self._DONE_STATUSES:
             return True
-        # 모든 체크박스 완료
-        if progress.total > 0 and progress.done == progress.total:
+        # 모든 체크박스 완료 (progress가 제공된 경우에만 확인)
+        if progress is not None and progress.total > 0 and progress.done == progress.total:
             return True
         return False
 

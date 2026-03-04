@@ -65,7 +65,7 @@ class PlanFileResponse(BaseModel):
     path: str
     filename: str
     status: str
-    progress: PlanProgressResponse
+    progress: Optional[PlanProgressResponse] = None  # 리스트 API에서는 None, 상세 조회 시 포함
     source: str = "common"  # 경로 기반 자동 결정 (common, 프로젝트명, 폴더명)
     ignored: bool = False  # 완료/빈 plan
     path_type: Optional[str] = None  # "file" | "folder" | None (등록된 경로일 때만 설정)

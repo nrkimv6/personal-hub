@@ -79,7 +79,7 @@
 	function canDone(plan: DevRunnerPlanFileResponse): boolean {
 		if (plan.path.includes('archive')) return false;
 		const doneStatuses = ['구현완료', '완료', '수정 완료', '배포완료', '수정완료', '검토완료'];
-		return (plan.progress.total > 0 && plan.progress.done === plan.progress.total)
+		return (plan.progress != null && plan.progress.total > 0 && plan.progress.done === plan.progress.total)
 			|| doneStatuses.includes(plan.status);
 	}
 
@@ -263,8 +263,7 @@
 	}
 
 	let displayPlans = $derived.by(() => {
-		const list = (showIgnored ? ignoredPlans : (plans ?? []))
-			.filter(p => !/[\\/]archive[\\/]/i.test(p.path));
+		const list = (showIgnored ? ignoredPlans : (plans ?? []));
 		return [...list].sort((a, b) => {
 			const aDone = a.status === '구현완료' ? 1 : 0;
 			const bDone = b.status === '구현완료' ? 1 : 0;
@@ -443,7 +442,7 @@
 						{:else if batchStatus === 'done'}
 							<span class="text-[10px] text-gray-400">✓</span>
 						{/if}
-						<span class="text-[10px] font-mono shrink-0 {plan.progress.done === plan.progress.total && plan.progress.total > 0 ? 'text-emerald-600' : batchStatus === 'running' ? 'text-cyan-600' : isRunning ? 'text-green-600' : 'text-gray-400'}">{plan.progress.total > 0 ? `${plan.progress.done}/${plan.progress.total}` : '—'}</span>
+						<span class="text-[10px] font-mono shrink-0 {plan.progress != null && plan.progress.done === plan.progress.total && plan.progress.total > 0 ? 'text-emerald-600' : batchStatus === 'running' ? 'text-cyan-600' : isRunning ? 'text-green-600' : 'text-gray-400'}">{plan.progress != null && plan.progress.total > 0 ? `${plan.progress.done}/${plan.progress.total}` : '—'}</span>
 
 						<!-- Done button: canDone OR lastPlanFile -->
 						{#if canDone(plan) || (isLastRun && !plan.path.includes('archive'))}

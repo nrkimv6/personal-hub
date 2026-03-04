@@ -16,7 +16,6 @@
 	import {
 		devRunnerTaskApi,
 		devRunnerRunnerApi,
-		devRunnerPlanApi,
 		devRunnerEventApi
 	} from '$lib/api';
 	import type {
@@ -25,11 +24,12 @@
 		DevRunnerPlanFileResponse,
 		CurrentTrackingResponse
 	} from '$lib/api';
+	import { fetchPlans as storeFetchPlans, plansStore } from '$lib/stores/devRunnerPlans';
 
 	let { initialPlan = '' }: { initialPlan?: string } = $props();
 
 	let runStatus = $state<DevRunnerRunStatusResponse | null>(null);
-	let plans = $state<DevRunnerPlanFileResponse[]>([]);
+	let plans = $derived($plansStore);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let prevRunning = $state(false);
@@ -296,7 +296,7 @@
 
 	async function fetchPlans() {
 		try {
-			plans = await devRunnerPlanApi.list();
+			await storeFetchPlans();
 		} catch (e) {
 			console.warn('[DevRunner] plans API 호출 실패', e);
 		}
