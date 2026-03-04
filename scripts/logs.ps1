@@ -700,7 +700,7 @@ function Start-CombinedLogTail {
     # Helper to find latest log from multiple patterns
     # Admin 모드일 때 base logs/ 디렉토리도 탐색 (API 앱의 LOG_DIR가 logs/ 고정)
     function Get-LatestLogFromPatterns {
-        param([string[]]$Patterns)
+        param([string[]]$Patterns, [switch]$IncludeEmpty)
         $searchDirs = @($LogDir)
         if ($Admin) {
             $baseLogDir = Join-Path $ProjectRoot "logs"
@@ -713,10 +713,14 @@ function Start-CombinedLogTail {
                 if ($found) { $allCandidates += $found }
             }
         }
-        # LastWriteTime 기준 최신 파일 — 0바이트 파일 우선 제외 (잔존 빈 파일 오선택 방지)
-        $nonEmpty = $allCandidates | Where-Object { $_.Length -gt 0 }
-        if ($nonEmpty) {
-            return $nonEmpty | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        # LastWriteTime 기준 최신 파일
+        # $IncludeEmpty=true: 파일명 기준 새 파일 감지용 (0바이트도 포함)
+        # $IncludeEmpty=false(기본): 초기 파일 선택용 — 0바이트 우선 제외
+        if (-not $IncludeEmpty) {
+            $nonEmpty = $allCandidates | Where-Object { $_.Length -gt 0 }
+            if ($nonEmpty) {
+                return $nonEmpty | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            }
         }
         return $allCandidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     }
@@ -861,9 +865,10 @@ function Start-CombinedLogTail {
             }
 
             # Check for new log files (service restart detection)
+            # 파일명 비교(새 파일 감지)는 0바이트 포함 전체 후보 중 최신으로 — 새 세션 파일이 처음엔 0바이트여도 전환 감지 필요
             foreach ($source in $timestampedLogPatterns.Keys) {
                 $patterns = $timestampedLogPatterns[$source]
-                $latestLog = Get-LatestLogFromPatterns $patterns
+                $latestLog = Get-LatestLogFromPatterns $patterns -IncludeEmpty
 
                 if ($latestLog) {
                     $currentName = $logFileNames[$source]
