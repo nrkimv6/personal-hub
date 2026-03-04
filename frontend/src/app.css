@@ -880,6 +880,26 @@ input[type="checkbox"] {
   50% { opacity: 0.6; transform: scale(0.85); }
 }
 
+/* phase-separator: 로그 Phase 구분선 */
+.phase-separator {
+  position: relative;
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+
+.phase-separator::before,
+.phase-separator::after {
+  content: '';
+  flex: 1 1 0%;
+  height: 1px;
+  background-color: hsl(var(--border));
+}
+
 /* 씬 스크롤바 */
 .dr-scrollbar-thin {
   scrollbar-width: thin;
