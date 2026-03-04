@@ -191,13 +191,15 @@ class TestDirectMergeFullFlow:
 
 
 class TestDirectMergeConflictResolverCrashSafe:
-    """E2E: direct-merge 시 ConflictResolver crash-safe 확인"""
+    """E2E: direct-merge 시 plan-runner resolve 실패 → conflict 유지 확인"""
 
     def test_direct_merge_conflict_resolver_crash_safe(self, tmp_path):
         """
         E2E: _do_direct_merge → _do_inline_merge → MergeWorkflow conflict →
-        ConflictResolver.try_resolve mock (내부 _verify_resolution stdout=None) →
+        _launch_conflict_resolver_process 실패 (plan-runner resolve 실패 시뮬레이션) →
         merge_status="conflict" 전이 + 크래시 없음
+
+        (구버전: ConflictResolver.try_resolve mock → 신버전: _launch_conflict_resolver_process mock)
         """
         cl = _load_listener()
 
@@ -228,14 +230,6 @@ class TestDirectMergeConflictResolverCrashSafe:
 
         redis.get.side_effect = extended_get
 
-        # ConflictResolver mock — _verify_resolution에서 stdout=None 상황 시뮬레이션
-        from conflict_resolver import ResolveResult
-        mock_resolve_result = ResolveResult(
-            success=False,
-            failed_files=["a.py"],
-            reason="stdout=None crash-safe test",
-        )
-
         mock_merge_lock = types.ModuleType("merge_lock")
         mock_merge_lock.acquire_merge_lock = MagicMock(return_value=True)
         mock_merge_lock.release_merge_lock = MagicMock(return_value=True)
@@ -245,16 +239,13 @@ class TestDirectMergeConflictResolverCrashSafe:
 
         with patch.dict(sys.modules, {"merge_lock": mock_merge_lock}), \
              patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
-             patch("conflict_resolver.ConflictResolver") as mock_cr_cls, \
+             patch.object(cl, "_launch_conflict_resolver_process",
+                          return_value={"success": False, "message": "resolve 실패 시뮬레이션"}), \
              patch.object(cl, "_cleanup_process_state", MagicMock()):
 
             mock_wf = MagicMock()
             mock_wf.run.return_value = conflict_result
             mock_wf_cls.return_value = mock_wf
-
-            mock_cr = MagicMock()
-            mock_cr.try_resolve.return_value = mock_resolve_result
-            mock_cr_cls.return_value = mock_cr
 
             # 크래시 없이 실행 완료되어야 함
             cl._do_inline_merge("dm-crash-test", redis)
