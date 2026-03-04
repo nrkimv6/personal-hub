@@ -122,6 +122,19 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     """전역 프로세스 변수 + Redis 상태 정리 (per-runner) + Workflow DB 갱신"""
     global _running_processes, _running_log_files, _stream_threads
 
+    # 🔴 머지 보호 가드: reconnect_* / heartbeat_* 계열 reason이면 머지 진행 중 cleanup 거부
+    if reason and reason.startswith(("reconnect_", "heartbeat_")):
+        try:
+            merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+            if merge_status in ("queued", "merging"):
+                logger.warning(
+                    f"[cleanup] 머지 진행중 runner {runner_id} cleanup 거부 "
+                    f"(reason={reason}, merge_status={merge_status})"
+                )
+                return
+        except Exception as _guard_err:
+            logger.debug(f"[cleanup] 머지 가드 조회 실패 (무시): {_guard_err}")
+
     # cleanup 직전 SSE 클라이언트에 완료 신호 publish
     try:
         log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
@@ -318,6 +331,51 @@ def _attach_to_running_process(runner_id: str, pid: int, redis_client: redis.Red
     logger.info(f"[listener] 재시작 감지: runner {runner_id} PID {pid} 생존 → 재연결")
 
 
+def _recover_pending_merge(runner_id: str, redis_client: redis.Redis, merge_status: str | None) -> None:
+    """리스너 재시작 시 미완료 머지 복구.
+
+    _stream_output 스레드가 없는 상태에서 merge_requested 또는 merge_status 활성인 러너에 대해
+    _do_inline_merge()를 재호출하여 머지를 완료한다.
+
+    Args:
+        runner_id: 복구할 러너 ID
+        redis_client: Redis 클라이언트
+        merge_status: 현재 merge_status 값 (None 포함)
+    """
+    from merge_lock import acquire_merge_lock, release_merge_lock  # noqa: F401 (import used in _do_inline_merge)
+
+    logger.info(f"[recover_merge] runner {runner_id} 머지 복구 시작 (merge_status={merge_status})")
+
+    try:
+        if merge_status == "merging":
+            # stale lock 해제 후 queued로 재설정
+            try:
+                release_merge_lock(redis_client, runner_id)
+                logger.info(f"[recover_merge] runner {runner_id} stale merge lock 해제")
+            except Exception as _e:
+                logger.debug(f"[recover_merge] lock 해제 실패 (무시): {_e}")
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
+            # merge_requested 플래그가 없으면 새로 설정 (재진입 용)
+            _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+            if not _mr:
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")
+
+        elif merge_status in ("queued", "pending_merge") or merge_status is None:
+            # merge_requested가 있으면 그대로 _do_inline_merge 호출
+            _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+            if not _mr:
+                # merge_requested 없으면 새로 설정
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")
+        else:
+            logger.info(f"[recover_merge] runner {runner_id} merge_status={merge_status} → 복구 불필요")
+            return
+
+        _do_inline_merge(runner_id, redis_client)
+
+    except Exception as e:
+        logger.warning(f"[recover_merge] runner {runner_id} 머지 복구 실패: {e}")
+
+
 def _reconnect_surviving_runners(redis_client: redis.Redis):
     """listener 시작(또는 재시작) 시 한 번 호출.
 
@@ -354,8 +412,30 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
         if _is_pid_alive(pid):
             _attach_to_running_process(runner_id, pid, redis_client)
         else:
-            logger.info(f"[listener] 재시작 감지: runner {runner_id} PID {pid} 종료됨 → cleanup")
-            _cleanup_process_state(runner_id, redis_client, reason="reconnect_orphan")
+            # PID 사망 전 머지 상태 확인 — merge_requested 또는 merge_status 활성 상태면 cleanup 스킵
+            try:
+                _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+                _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+            except Exception:
+                _mr, _ms = None, None
+
+            if _mr or _ms in ("queued", "merging", "pending_merge"):
+                logger.warning(
+                    f"[reconnect] runner {runner_id} PID {pid} 죽었으나 머지 대기중 "
+                    f"(merge_requested={bool(_mr)}, merge_status={_ms}) → cleanup 스킵"
+                )
+                # _stream_output 스레드가 없는 경우(리스너 재시작) 머지 복구 실행
+                if not (runner_id in _stream_threads and _stream_threads[runner_id].is_alive()):
+                    import threading
+                    t = threading.Thread(
+                        target=_recover_pending_merge,
+                        args=(runner_id, redis_client, _ms),
+                        daemon=True,
+                    )
+                    t.start()
+            else:
+                logger.info(f"[listener] 재시작 감지: runner {runner_id} PID {pid} 종료됨 → cleanup")
+                _cleanup_process_state(runner_id, redis_client, reason="reconnect_orphan")
 
     # --- 고아 키 탐색: active_runners set에 없지만 runners:*:status 키가 존재하는 경우 ---
     try:
@@ -387,8 +467,29 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
                 logger.info(f"[reconnect] orphan {orphan_id} PID {pid} 생존 → 재연결")
                 _attach_to_running_process(orphan_id, pid, redis_client)
             else:
-                logger.info(f"[reconnect] orphan {orphan_id} PID {pid} 종료됨 → cleanup")
-                _cleanup_process_state(orphan_id, redis_client, reason="reconnect_orphan_scan")
+                # PID 사망 전 머지 상태 확인
+                try:
+                    _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:merge_requested")
+                    _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:merge_status")
+                except Exception:
+                    _mr, _ms = None, None
+
+                if _mr or _ms in ("queued", "merging", "pending_merge"):
+                    logger.warning(
+                        f"[reconnect] orphan {orphan_id} PID {pid} 죽었으나 머지 대기중 "
+                        f"(merge_requested={bool(_mr)}, merge_status={_ms}) → cleanup 스킵"
+                    )
+                    if not (orphan_id in _stream_threads and _stream_threads[orphan_id].is_alive()):
+                        import threading
+                        t = threading.Thread(
+                            target=_recover_pending_merge,
+                            args=(orphan_id, redis_client, _ms),
+                            daemon=True,
+                        )
+                        t.start()
+                else:
+                    logger.info(f"[reconnect] orphan {orphan_id} PID {pid} 종료됨 → cleanup")
+                    _cleanup_process_state(orphan_id, redis_client, reason="reconnect_orphan_scan")
     except Exception as e:
         logger.warning(f"[reconnect] orphan scan 실패: {e}")
 
@@ -406,6 +507,18 @@ def _detect_orphan_workflows(redis_client: redis.Redis) -> int:
                 if not runner_id:
                     continue
                 if redis_client.sismember(ACTIVE_RUNNERS_KEY, runner_id):
+                    continue
+                # 머지 대기중인 러너는 failed 전이 스킵
+                try:
+                    _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+                    _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+                except Exception:
+                    _mr, _ms = None, None
+                if _mr or _ms in ("queued", "merging", "pending_merge"):
+                    logger.info(
+                        f"[orphan] workflow {wf['id']} slug={wf.get('slug', '?')} (runner={runner_id}) "
+                        f"머지 대기중 (merge_requested={bool(_mr)}, merge_status={_ms}) → failed 전이 스킵"
+                    )
                     continue
                 _wf_manager.update_status(
                     wf["id"], "failed",
@@ -1652,9 +1765,20 @@ def main():
                                 r.sadd(ACTIVE_RUNNERS_KEY, rid)
                                 logger.info(f"heartbeat: Redis 상태 복원 (runner_id: {rid}, PID: {proc.pid})")
                         else:
-                            # 프로세스가 종료되었는데 전역변수가 남아있는 경우 즉시 cleanup
-                            logger.warning(f"heartbeat: 프로세스 종료 감지 (runner_id: {rid}, exit code: {proc.returncode}), 상태 정리")
-                            _cleanup_process_state(rid, r, reason="heartbeat_dead_process")
+                            # 프로세스가 종료되었는데 전역변수가 남아있는 경우 — 머지 진행 중 여부 확인 후 cleanup
+                            try:
+                                _hb_mr = r.get(f"{RUNNER_KEY_PREFIX}:{rid}:merge_requested")
+                                _hb_ms = r.get(f"{RUNNER_KEY_PREFIX}:{rid}:merge_status")
+                            except Exception:
+                                _hb_mr, _hb_ms = None, None
+                            if _hb_mr or _hb_ms in ("queued", "merging", "pending_merge"):
+                                logger.info(
+                                    f"heartbeat: runner {rid} 프로세스 종료 but 머지 진행중 "
+                                    f"(merge_requested={bool(_hb_mr)}, merge_status={_hb_ms}) → cleanup 스킵"
+                                )
+                            else:
+                                logger.warning(f"heartbeat: 프로세스 종료 감지 (runner_id: {rid}, exit code: {proc.returncode}), 상태 정리")
+                                _cleanup_process_state(rid, r, reason="heartbeat_dead_process")
                     # MergeOrchestrator health check 제거됨 — 인라인 merge로 대체
 
                     last_heartbeat = now

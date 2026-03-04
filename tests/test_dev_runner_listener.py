@@ -279,3 +279,266 @@ class TestCleanupProcessStateDB:
         """ERROR: wf_manager가 None일 때 에러 없이 진행"""
         # 에러 없이 완료
         _cleanup_db_update_impl("r1", None, reason="test")
+
+
+# ============================================================
+# Phase T1 (NEW): 머지 보호 / orphan 강제종료 버그 수정 테스트
+# ============================================================
+
+# 테스트용 인라인 구현 — 실제 코드의 핵심 분기 로직을 재현
+
+def _cleanup_guard_impl(runner_id: str, redis_client, reason: str = "process_cleanup"):
+    """_cleanup_process_state() 머지 보호 가드 로직 재현"""
+    if reason and reason.startswith(("reconnect_", "heartbeat_")):
+        try:
+            merge_status = redis_client.get(f"plan-runner:runners:{runner_id}:merge_status")
+            if merge_status in ("queued", "merging"):
+                return "guarded"  # 테스트용: 거부됨을 표현
+        except Exception:
+            pass
+    return "allowed"
+
+
+def _reconnect_phase_a_decision(runner_id: str, redis_client, is_alive: bool):
+    """Phase A: PID 죽었을 때 cleanup/skip 결정 로직 재현"""
+    if is_alive:
+        return "attach"
+    _mr = redis_client.get(f"plan-runner:runners:{runner_id}:merge_requested")
+    _ms = redis_client.get(f"plan-runner:runners:{runner_id}:merge_status")
+    if _mr or _ms in ("queued", "merging", "pending_merge"):
+        return "skip"
+    return "cleanup"
+
+
+def _detect_orphan_decision(runner_id: str, redis_client, in_active_runners: bool):
+    """_detect_orphan_workflows 분기 로직 재현 — runner_id별 처리 방향 반환"""
+    if in_active_runners:
+        return "skip"
+    _mr = redis_client.get(f"plan-runner:runners:{runner_id}:merge_requested")
+    _ms = redis_client.get(f"plan-runner:runners:{runner_id}:merge_status")
+    if _mr or _ms in ("queued", "merging", "pending_merge"):
+        return "skip_merge_pending"
+    return "failed"
+
+
+def _heartbeat_decision(runner_id: str, redis_client, proc_dead: bool):
+    """heartbeat 루프의 cleanup/skip 결정 로직 재현"""
+    if not proc_dead:
+        return "alive"
+    _mr = redis_client.get(f"plan-runner:runners:{runner_id}:merge_requested")
+    _ms = redis_client.get(f"plan-runner:runners:{runner_id}:merge_status")
+    if _mr or _ms in ("queued", "merging", "pending_merge"):
+        return "skip"
+    return "cleanup"
+
+
+def _recover_pending_merge_decision(merge_status: str | None, merge_requested: bool):
+    """_recover_pending_merge 분기 결정 재현"""
+    if merge_status == "merging":
+        return "release_lock_then_merge"
+    elif merge_status in ("queued", "pending_merge") or merge_requested:
+        return "merge"
+    else:
+        return "skip"
+
+
+class TestCleanupMergeGuard:
+    """_cleanup_process_state() 머지 보호 가드 테스트"""
+
+    def test_cleanup_guard_rejects_reconnect_with_active_merge(self):
+        """RIGHT: reason=reconnect_orphan, merge_status=queued → cleanup 거부"""
+        redis_mock = MagicMock()
+        redis_mock.get.return_value = "queued"
+        result = _cleanup_guard_impl("r1", redis_mock, reason="reconnect_orphan")
+        assert result == "guarded"
+
+    def test_cleanup_guard_rejects_heartbeat_with_merging(self):
+        """RIGHT: reason=heartbeat_dead_process, merge_status=merging → cleanup 거부"""
+        redis_mock = MagicMock()
+        redis_mock.get.return_value = "merging"
+        result = _cleanup_guard_impl("r1", redis_mock, reason="heartbeat_dead_process")
+        assert result == "guarded"
+
+    def test_cleanup_guard_allows_normal_cleanup(self):
+        """RIGHT: reason=process_cleanup → 가드 통과 (정상 cleanup)"""
+        redis_mock = MagicMock()
+        redis_mock.get.return_value = "queued"  # merge 진행 중이어도 reason이 다름
+        result = _cleanup_guard_impl("r1", redis_mock, reason="process_cleanup")
+        assert result == "allowed"
+
+    def test_cleanup_guard_allows_completed_merge(self):
+        """BOUNDARY: reason=reconnect_orphan, merge_status=merged → 가드 통과 (완료됨)"""
+        redis_mock = MagicMock()
+        redis_mock.get.return_value = "merged"
+        result = _cleanup_guard_impl("r1", redis_mock, reason="reconnect_orphan")
+        assert result == "allowed"
+
+    def test_cleanup_guard_error_reason(self):
+        """ERROR: reason=None → 가드 통과 (에러 없이)"""
+        redis_mock = MagicMock()
+        redis_mock.get.return_value = "queued"
+        result = _cleanup_guard_impl("r1", redis_mock, reason=None)
+        assert result == "allowed"
+
+    def test_cleanup_guard_reconnect_orphan_scan(self):
+        """RIGHT: reason=reconnect_orphan_scan, merge_status=merging → cleanup 거부"""
+        redis_mock = MagicMock()
+        redis_mock.get.return_value = "merging"
+        result = _cleanup_guard_impl("r1", redis_mock, reason="reconnect_orphan_scan")
+        assert result == "guarded"
+
+
+class TestReconnectMergeProtection:
+    """_reconnect_surviving_runners() Phase A/B 머지 보호 테스트"""
+
+    def test_reconnect_phase_a_skips_merge_pending_runner(self):
+        """RIGHT: merge_requested=1, PID 죽은 러너 → cleanup 스킵"""
+        redis_mock = MagicMock()
+        redis_mock.get.side_effect = lambda key: "1" if "merge_requested" in key else None
+        result = _reconnect_phase_a_decision("r1", redis_mock, is_alive=False)
+        assert result == "skip"
+
+    def test_reconnect_phase_a_cleans_non_merge_dead_runner(self):
+        """RIGHT: merge_requested 없고 PID 죽은 러너 → cleanup"""
+        redis_mock = MagicMock()
+        redis_mock.get.return_value = None
+        result = _reconnect_phase_a_decision("r1", redis_mock, is_alive=False)
+        assert result == "cleanup"
+
+    def test_reconnect_phase_a_attaches_alive_runner(self):
+        """RIGHT: PID 살아있는 러너 → attach"""
+        redis_mock = MagicMock()
+        result = _reconnect_phase_a_decision("r1", redis_mock, is_alive=True)
+        assert result == "attach"
+
+    def test_reconnect_phase_b_skips_merge_pending_orphan(self):
+        """RIGHT: Phase B scan에서도 merge_status=queued → cleanup 스킵"""
+        redis_mock = MagicMock()
+        redis_mock.get.side_effect = lambda key: (
+            None if "merge_requested" in key else "queued"
+        )
+        result = _reconnect_phase_a_decision("orphan1", redis_mock, is_alive=False)
+        assert result == "skip"
+
+    def test_reconnect_merge_status_boundary(self):
+        """BOUNDARY: merge_status=merged/error/conflict/None → cleanup 진행"""
+        for ms in ("merged", "error", "conflict", None):
+            redis_mock = MagicMock()
+            redis_mock.get.side_effect = lambda key, _ms=ms: (
+                None if "merge_requested" in key else _ms
+            )
+            result = _reconnect_phase_a_decision("r1", redis_mock, is_alive=False)
+            assert result == "cleanup", f"merge_status={ms}이면 cleanup 진행해야 함"
+
+
+class TestHeartbeatMergeProtection:
+    """heartbeat 루프 머지 보호 테스트"""
+
+    def test_heartbeat_skips_merging_runner(self):
+        """RIGHT: merge_status=merging, proc dead → cleanup 미호출"""
+        redis_mock = MagicMock()
+        redis_mock.get.side_effect = lambda key: (
+            None if "merge_requested" in key else "merging"
+        )
+        result = _heartbeat_decision("r1", redis_mock, proc_dead=True)
+        assert result == "skip"
+
+    def test_heartbeat_skips_queued_runner(self):
+        """RIGHT: merge_status=queued → cleanup 미호출"""
+        redis_mock = MagicMock()
+        redis_mock.get.side_effect = lambda key: (
+            None if "merge_requested" in key else "queued"
+        )
+        result = _heartbeat_decision("r1", redis_mock, proc_dead=True)
+        assert result == "skip"
+
+    def test_heartbeat_cleans_dead_non_merge_runner(self):
+        """RIGHT: merge 무관 러너 → cleanup"""
+        redis_mock = MagicMock()
+        redis_mock.get.return_value = None
+        result = _heartbeat_decision("r1", redis_mock, proc_dead=True)
+        assert result == "cleanup"
+
+    def test_heartbeat_merge_status_none(self):
+        """BOUNDARY: merge_status=None, merge_requested=None → cleanup"""
+        redis_mock = MagicMock()
+        redis_mock.get.return_value = None
+        result = _heartbeat_decision("r1", redis_mock, proc_dead=True)
+        assert result == "cleanup"
+
+    def test_heartbeat_alive_process_not_cleaned(self):
+        """RIGHT: proc 살아있으면 cleanup 방향 아님"""
+        redis_mock = MagicMock()
+        result = _heartbeat_decision("r1", redis_mock, proc_dead=False)
+        assert result == "alive"
+
+
+class TestDetectOrphanMergeProtection:
+    """_detect_orphan_workflows() 머지 보호 테스트"""
+
+    def test_detect_orphan_skips_merge_requested(self):
+        """RIGHT: merge_requested 키 존재 → failed 전이 스킵"""
+        redis_mock = MagicMock()
+        redis_mock.get.side_effect = lambda key: "1" if "merge_requested" in key else None
+        result = _detect_orphan_decision("r1", redis_mock, in_active_runners=False)
+        assert result == "skip_merge_pending"
+
+    def test_detect_orphan_skips_merge_status_queued(self):
+        """RIGHT: merge_status=queued → failed 전이 스킵"""
+        redis_mock = MagicMock()
+        redis_mock.get.side_effect = lambda key: (
+            None if "merge_requested" in key else "queued"
+        )
+        result = _detect_orphan_decision("r1", redis_mock, in_active_runners=False)
+        assert result == "skip_merge_pending"
+
+    def test_detect_orphan_cleans_no_merge_runner(self):
+        """RIGHT: 머지 무관 러너 → failed 전이"""
+        redis_mock = MagicMock()
+        redis_mock.get.return_value = None
+        result = _detect_orphan_decision("r1", redis_mock, in_active_runners=False)
+        assert result == "failed"
+
+    def test_detect_orphan_merge_status_error(self):
+        """BOUNDARY: merge_status=error → 보호 대상 아님, failed 전이"""
+        redis_mock = MagicMock()
+        redis_mock.get.side_effect = lambda key: (
+            None if "merge_requested" in key else "error"
+        )
+        result = _detect_orphan_decision("r1", redis_mock, in_active_runners=False)
+        assert result == "failed"
+
+    def test_detect_orphan_in_active_runners_skipped(self):
+        """RIGHT: active_runners 멤버 → 정상 처리됨(skip)"""
+        redis_mock = MagicMock()
+        result = _detect_orphan_decision("r1", redis_mock, in_active_runners=True)
+        assert result == "skip"
+
+
+class TestRecoverPendingMerge:
+    """_recover_pending_merge() 머지 복구 로직 테스트"""
+
+    def test_recover_pending_merge_queued(self):
+        """RIGHT: merge_status=queued → merge 실행"""
+        result = _recover_pending_merge_decision("queued", merge_requested=False)
+        assert result == "merge"
+
+    def test_recover_pending_merge_merging_stale_lock(self):
+        """RIGHT: merge_status=merging → lock release 후 merge 실행"""
+        result = _recover_pending_merge_decision("merging", merge_requested=False)
+        assert result == "release_lock_then_merge"
+
+    def test_recover_pending_merge_with_merge_requested(self):
+        """RIGHT: merge_requested=True, merge_status=None → merge 실행"""
+        result = _recover_pending_merge_decision(None, merge_requested=True)
+        assert result == "merge"
+
+    def test_recover_does_not_fire_for_completed_merge(self):
+        """BOUNDARY: merge_status=merged → 복구 불필요(skip)"""
+        result = _recover_pending_merge_decision("merged", merge_requested=False)
+        assert result == "skip"
+
+    def test_recover_pending_merge_pending_merge_status(self):
+        """RIGHT: merge_status=pending_merge → merge 실행"""
+        result = _recover_pending_merge_decision("pending_merge", merge_requested=False)
+        assert result == "merge"
