@@ -1042,10 +1042,13 @@ class PlanService:
         """plan이 done 처리 가능한지 판단 — 체크박스 전체 완료 OR 상태 헤더 완료 계열 OR 체크박스 없음"""
         if "archive" in plan.path:
             return False
+        progress = plan.progress
+        if progress is None:
+            progress = self.get_plan_progress(Path(plan.path))
         # 체크박스 없는 문서(분석서, 보고서 등): 아카이브 허용
-        if plan.progress.total == 0:
+        if progress.total == 0:
             return True
-        if plan.progress.total > 0 and plan.progress.done == plan.progress.total:
+        if progress.total > 0 and progress.done == progress.total:
             return True
         if plan.status in self._DONE_STATUSES:
             return True

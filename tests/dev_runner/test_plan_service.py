@@ -1042,3 +1042,40 @@ class TestUpdatePlanStatus:
         import pytest
         with pytest.raises(FileNotFoundError):
             svc.update_plan_status(str(tmp_path / "missing.md"), "초안")
+
+
+# ========== _can_done() ==========
+
+class TestCanDone:
+
+    def _make_plan(self, path: str, status: str = "초안", progress=None):
+        from app.modules.dev_runner.schemas import PlanFileResponse
+        return PlanFileResponse(path=path, filename="plan.md", status=status, progress=progress)
+
+    def test__can_done_with_none_progress(self, svc, tmp_path):
+        """progress=None인 PlanFileResponse → lazy 파싱 후 에러 없이 동작"""
+        content = "# 테스트\n\n- [x] 완료 항목\n"
+        f = tmp_path / "plan.md"
+        f.write_text(content, encoding="utf-8")
+        plan = self._make_plan(str(f), progress=None)
+        # AttributeError 없이 bool 반환
+        result = svc._can_done(plan)
+        assert isinstance(result, bool)
+
+    def test__can_done_with_all_completed(self, svc, tmp_path):
+        """모든 체크박스 완료 시 True 반환"""
+        from app.modules.dev_runner.schemas import PlanProgressResponse
+        f = tmp_path / "plan.md"
+        f.write_text("# 테스트\n", encoding="utf-8")
+        progress = PlanProgressResponse(done=3, total=3, percent=100)
+        plan = self._make_plan(str(f), progress=progress)
+        assert svc._can_done(plan) is True
+
+    def test__can_done_with_zero_total(self, svc, tmp_path):
+        """체크박스 없는 문서 → True 반환"""
+        from app.modules.dev_runner.schemas import PlanProgressResponse
+        f = tmp_path / "plan.md"
+        f.write_text("# 분석 보고서\n내용만 있고 체크박스 없음\n", encoding="utf-8")
+        progress = PlanProgressResponse(done=0, total=0, percent=0)
+        plan = self._make_plan(str(f), progress=progress)
+        assert svc._can_done(plan) is True
