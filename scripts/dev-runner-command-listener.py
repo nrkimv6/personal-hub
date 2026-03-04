@@ -216,7 +216,7 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     try:
         if _wf_manager:
             wf = _wf_manager.get_by_runner_id(runner_id)
-            if wf and wf["status"] == "running":
+            if wf and wf["status"] in ("running", "merge_pending", "merging"):
                 _wf_manager.update_status(wf["id"], "failed", error_message=f"Cleanup: {reason}")
                 logger.info(f"[cleanup] workflow {wf['id']} → failed (reason: {reason})")
     except Exception as e:
@@ -422,6 +422,72 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
                 _cleanup_process_state(orphan_id, redis_client, reason="reconnect_orphan_scan")
     except Exception as e:
         logger.warning(f"[reconnect] orphan scan 실패: {e}")
+
+
+def _detect_orphan_workflows(redis_client: redis.Redis) -> int:
+    """listener 시작 시 DB↔Redis 교차검증: running/merge_pending 워크플로우 중 active_runners에 없는 것을 failed로 전이"""
+    if _wf_manager is None:
+        return 0
+    cleaned = 0
+    try:
+        for status in ("running", "merge_pending"):
+            workflows = _wf_manager.list_workflows(status=status)
+            for wf in workflows:
+                runner_id = wf.get("runner_id")
+                if not runner_id:
+                    continue
+                if redis_client.sismember(ACTIVE_RUNNERS_KEY, runner_id):
+                    continue
+                _wf_manager.update_status(
+                    wf["id"], "failed",
+                    error_message="orphan: listener 재시작 시 active_runners에 없음"
+                )
+                logger.warning(f"[orphan] workflow {wf['id']} slug={wf.get('slug', '?')} (runner={runner_id}) → failed")
+                cleaned += 1
+    except Exception as e:
+        logger.warning(f"[orphan] workflow 고아 탐지 실패: {e}")
+    return cleaned
+
+
+def _detect_orphan_plans(redis_client: redis.Redis) -> int:
+    """plan 파일 '> 상태: 구현중' 교차검증: Workflow DB에 대응 running 레코드가 없으면 경고"""
+    import re as _re
+
+    if _wf_manager is None:
+        return 0
+    warnings_count = 0
+    plan_dir = PROJECT_ROOT / "docs" / "plan"
+    if not plan_dir.is_dir():
+        return 0
+    try:
+        all_workflows = _wf_manager.list_workflows()
+        for plan_file in plan_dir.glob("*.md"):
+            try:
+                with open(plan_file, "r", encoding="utf-8") as f:
+                    head_lines = [f.readline() for _ in range(20)]
+            except Exception:
+                continue
+            is_impl = any(_re.search(r">\s*상태:\s*구현중", line) for line in head_lines if line)
+            if not is_impl:
+                continue
+            filename = plan_file.name
+            # Workflow DB에서 이 plan에 대한 running 레코드 찾기
+            matching = [
+                w for w in all_workflows
+                if w.get("plan_file") and filename in w["plan_file"] and w.get("status") == "running"
+            ]
+            if not matching:
+                logger.warning(f"[orphan-plan] {filename}: 상태=구현중이지만 Workflow DB에 running 레코드 없음")
+                warnings_count += 1
+            else:
+                for w in matching:
+                    rid = w.get("runner_id")
+                    if rid and not redis_client.sismember(ACTIVE_RUNNERS_KEY, rid):
+                        logger.warning(f"[orphan-plan] {filename}: runner {rid}가 active_runners에 없음")
+                        warnings_count += 1
+    except Exception as e:
+        logger.warning(f"[orphan-plan] plan 고아 탐지 실패: {e}")
+    return warnings_count
 
 
 def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Redis, runner_id: str = ""):
@@ -1403,6 +1469,11 @@ def main():
 
             # listener 시작/재시작 시 생존 plan-runner 재연결 (고아 프로세스 처리)
             _reconnect_surviving_runners(r)
+            # listener 시작/재시작 시 DB↔Redis 교차검증으로 고아 워크플로우 탐지
+            orphan_wf_count = _detect_orphan_workflows(r)
+            orphan_plan_count = _detect_orphan_plans(r)
+            if orphan_wf_count or orphan_plan_count:
+                logger.warning(f"[orphan] 고아 탐지 완료: workflow {orphan_wf_count}개 정리, plan {orphan_plan_count}개 경고")
             # listener 시작/재시작 시 생존 MergeOrchestrator 재연결
             _reconnect_surviving_merge_orchestrator(r)
 
