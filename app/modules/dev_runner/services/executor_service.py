@@ -551,33 +551,18 @@ class ExecutorService:
 
 
     async def enqueue_merge(self, branch: str, plan_file: str = "", project: str = "monitor-page", worktree_path: str = "") -> dict:
-        """Merge Queue에 항목 직접 투입 (테스트/수동용)"""
-        runner_id = "manual-" + uuid.uuid4().hex[:8]
-        timestamp = datetime.now().isoformat()
-        item = {
-            "runner_id": runner_id,
-            "branch": branch,
-            "plan_file": plan_file,
-            "project": project,
-            "worktree_path": worktree_path,
-            "status": "pending",
-            "timestamp": timestamp,
-        }
-        await self.async_redis.lpush("plan-runner:merge-queue", json.dumps(item, ensure_ascii=False))
-        return {"runner_id": runner_id, "queued": True}
+        """[DEPRECATED] merge는 이제 _stream_output finally 블록에서 인라인으로 처리됨.
+
+        이 메서드는 호환성 유지용으로 보존되지만 실제 merge 큐에 투입하지 않는다.
+        merge_requested 플래그를 직접 설정하여 runner 완료 시 자동 merge가 트리거되게 한다.
+        """
+        return {"runner_id": "deprecated", "queued": False, "message": "enqueue_merge is deprecated. Use merge_requested flag on runner instead."}
 
     async def get_merge_queue(self) -> list:
-        """Redis merge-queue 조회 → list[MergeQueueItem]"""
+        """merge 대기 큐 조회 → plan-runner:merge-wait-queue (merge lock 대기 중인 runner 목록)"""
         try:
-            raw_items = await self.async_redis.lrange("plan-runner:merge-queue", 0, -1)
-            result = []
-            for raw in raw_items:
-                try:
-                    item = json.loads(raw)
-                    result.append(item)
-                except Exception:
-                    pass
-            return result
+            raw_items = await self.async_redis.lrange("plan-runner:merge-wait-queue", 0, -1)
+            return [{"runner_id": rid, "status": "waiting"} for rid in raw_items]
         except Exception:
             return []
 
