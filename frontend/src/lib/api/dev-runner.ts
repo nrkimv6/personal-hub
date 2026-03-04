@@ -59,7 +59,7 @@ export interface PlanFileResponse {
 	path: string;
 	filename: string;
 	status: string;
-	progress: PlanProgressResponse;
+	progress: PlanProgressResponse | null;  // 리스트 API에서는 null, 상세 조회 시 포함
 	source: string;
 	ignored: boolean;
 	path_type: 'file' | 'folder' | null;

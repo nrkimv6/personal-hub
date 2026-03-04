@@ -352,7 +352,7 @@
 				>
 					<option value="">Plan 선택...</option>
 					{#each plans as plan}
-						<option value={plan.path}>{plan.filename} ({plan.progress.percent}%)</option>
+						<option value={plan.path}>{plan.filename}{plan.progress != null ? ` (${plan.progress.percent}%)` : ''}</option>
 					{/each}
 				</select>
 			</div>
