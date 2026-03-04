@@ -400,8 +400,28 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
     for runner_id in runner_ids:
         pid_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
         if not pid_str:
-            logger.info(f"[listener] runner {runner_id} PID 정보 없음 → cleanup")
-            _cleanup_process_state(runner_id, redis_client, reason="reconnect_orphan")
+            # PID 없는 경우에도 merge_status 확인 — dm-* 러너는 PID를 세팅하지 않으므로
+            try:
+                _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+                _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+            except Exception:
+                _mr, _ms = None, None
+            if _mr or _ms in ("queued", "merging", "pending_merge"):
+                logger.warning(
+                    f"[reconnect] runner {runner_id} PID 없으나 머지 대기중 "
+                    f"(merge_requested={bool(_mr)}, merge_status={_ms}) → _recover_pending_merge"
+                )
+                if not (runner_id in _stream_threads and _stream_threads[runner_id].is_alive()):
+                    import threading
+                    t = threading.Thread(
+                        target=_recover_pending_merge,
+                        args=(runner_id, redis_client, _ms),
+                        daemon=True,
+                    )
+                    t.start()
+            else:
+                logger.info(f"[listener] runner {runner_id} PID 정보 없음 → cleanup")
+                _cleanup_process_state(runner_id, redis_client, reason="reconnect_orphan")
             continue
         try:
             pid = int(pid_str)
@@ -459,8 +479,28 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
             logger.info(f"[reconnect] orphan key found (not in active_runners): {orphan_id}")
             pid_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:pid")
             if not pid_str:
-                logger.info(f"[reconnect] orphan {orphan_id} PID 없음 → cleanup")
-                _cleanup_process_state(orphan_id, redis_client, reason="reconnect_orphan_scan")
+                # PID 없는 경우에도 merge_status 확인 — dm-* 러너는 PID를 세팅하지 않으므로
+                try:
+                    _mr = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:merge_requested")
+                    _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:merge_status")
+                except Exception:
+                    _mr, _ms = None, None
+                if _mr or _ms in ("queued", "merging", "pending_merge"):
+                    logger.warning(
+                        f"[reconnect] orphan {orphan_id} PID 없으나 머지 대기중 "
+                        f"(merge_requested={bool(_mr)}, merge_status={_ms}) → _recover_pending_merge"
+                    )
+                    if not (orphan_id in _stream_threads and _stream_threads[orphan_id].is_alive()):
+                        import threading
+                        t = threading.Thread(
+                            target=_recover_pending_merge,
+                            args=(orphan_id, redis_client, _ms),
+                            daemon=True,
+                        )
+                        t.start()
+                else:
+                    logger.info(f"[reconnect] orphan {orphan_id} PID 없음 → cleanup")
+                    _cleanup_process_state(orphan_id, redis_client, reason="reconnect_orphan_scan")
                 continue
             try:
                 pid = int(pid_str)
