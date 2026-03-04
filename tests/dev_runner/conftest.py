@@ -31,6 +31,14 @@ def redis_cleanup():
         after_recent = set(r.zrange("plan-runner:recent_runners", 0, -1) or [])
         new_ids = (after_active - before_active) | (after_recent - before_recent)
         for runner_id in new_ids:
+            # PID kill (프로세스 잔류 방지)
+            pid_str = r.get(f"plan-runner:runners:{runner_id}:pid")
+            if pid_str:
+                try:
+                    import os, signal
+                    os.kill(int(pid_str), signal.SIGTERM)
+                except (ProcessLookupError, ValueError, OSError):
+                    pass
             r.srem("plan-runner:active_runners", runner_id)
             r.zrem("plan-runner:recent_runners", runner_id)
             keys = r.keys(f"plan-runner:runners:{runner_id}:*")

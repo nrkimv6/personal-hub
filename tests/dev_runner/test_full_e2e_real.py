@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.modules.dev_runner.config import DevRunnerConfig
+from app.modules.dev_runner.services.executor_service import RUNNER_KEY_SUFFIXES, ACTIVE_RUNNERS_KEY
 from tests.dev_runner.conftest_e2e import (
     e2e_redis_cleanup,
     listener_process,
@@ -49,6 +50,18 @@ def require_full_env():
 
     if not _config.PLAN_RUNNER_PYTHON.exists():
         pytest.skip(f"plan-runner venv not found: {_config.PLAN_RUNNER_PYTHON}")
+
+
+@pytest.fixture(scope="class")
+def real_redis_db0():
+    """db=0 Redis — API/프로덕션 리스너와 동일 DB. PID 조회 전용."""
+    try:
+        r = redis_lib.Redis(host="localhost", port=6379, db=0, decode_responses=True)
+        r.ping()
+    except Exception:
+        pytest.skip("Redis not available")
+    yield r
+    r.close()
 
 
 @pytest.fixture(scope="class")
@@ -94,29 +107,28 @@ class TestFullE2E:
     """Level 3: 실제 LLM 1 cycle 실행 → merge까지 전체 파이프라인"""
 
     @pytest.fixture(autouse=True)
-    def force_kill_runners(self, isolated_redis):
+    def force_kill_runners(self, isolated_redis, real_redis_db0):
         """테스트 후 시작된 모든 runner 프로세스를 강제 정리하는 안전망 fixture.
 
         self-termination에 의존하지 않고, teardown에서 명시적으로 PID kill을 수행한다.
+        PID는 API가 사용하는 db=0에 저장되므로 real_redis_db0으로 조회한다.
         """
         self._started_runners = []
         yield
-        # teardown: 각 runner PID kill
+        # teardown: 각 runner PID kill (db=0에서 PID 조회)
         for rid in self._started_runners:
-            pid_str = isolated_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:pid")
+            pid_str = real_redis_db0.get(f"{RUNNER_KEY_PREFIX}:{rid}:pid")
             if pid_str:
                 try:
                     os.kill(int(pid_str), signal.SIGTERM)
                 except (ProcessLookupError, ValueError, OSError):
                     pass
-        # Redis 키 정리
+        # Redis 키 정리 (db=0)
         for rid in self._started_runners:
-            for suffix in (
-                "status", "pid", "plan_file", "start_time", "engine",
-                "stream_log_path", "worktree_path", "merge_status", "current_cycle",
-            ):
-                isolated_redis.delete(f"{RUNNER_KEY_PREFIX}:{rid}:{suffix}")
-            isolated_redis.srem("plan-runner:active_runners", rid)
+            for suffix in RUNNER_KEY_SUFFIXES:
+                real_redis_db0.delete(f"{RUNNER_KEY_PREFIX}:{rid}:{suffix}")
+            real_redis_db0.srem(ACTIVE_RUNNERS_KEY, rid)
+            real_redis_db0.zrem("plan-runner:recent_runners", rid)
 
     def test_single_plan_1cycle(self, http_client, listener_process, isolated_redis, e2e_redis_cleanup):
         """단일 plan 파일로 1 cycle 실행 → 완료까지 대기
