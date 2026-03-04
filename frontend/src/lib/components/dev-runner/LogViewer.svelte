@@ -7,10 +7,16 @@
 		planFile?: string;
 		currentPlanName?: string;
 		running?: boolean;
+		mergeStatus?: string | null;
 		onBatchPlansChange?: (plans: BatchPlanItem[]) => void;
 	}
 
-	let { runnerId, planFile, currentPlanName, running = false, onBatchPlansChange }: Props = $props();
+	let { runnerId, planFile, currentPlanName, running = false, mergeStatus = null, onBatchPlansChange }: Props = $props();
+
+	// 머지 진행 중 상태 판별
+	let isMerging = $derived(
+		mergeStatus === 'merge_pending' || mergeStatus === 'merging' || mergeStatus === 'testing'
+	);
 
 	// Phase 2: 전체실행 시 Plan 파일 리스트 추적
 	interface BatchPlanItem {
@@ -67,6 +73,9 @@
 		PHASE: { text: 'text-indigo-400', bg: 'bg-indigo-500/20' },
 		TRACK: { text: 'text-purple-400', bg: 'bg-purple-500/20' },
 		CYCLE: { text: 'text-white', bg: 'bg-gray-600' },
+		MERGE: { text: 'text-teal-400', bg: 'bg-teal-500/20' },
+		COMMIT: { text: 'text-green-400', bg: 'bg-green-500/20' },
+		TEST: { text: 'text-cyan-400', bg: 'bg-cyan-500/20' },
 		SKIP: { text: 'text-gray-500', bg: 'bg-gray-500/20' },
 		GIT: { text: 'text-orange-400', bg: 'bg-orange-500/20' },
 		BATCH: { text: 'text-teal-400', bg: 'bg-teal-500/20' },
@@ -75,11 +84,17 @@
 
 	const LINE_PATTERN = /^\s*\[?(\d{2}:\d{2}:\d{2})\]?\s*\[(\w+)\]\s*(.*)/;
 	const DIAG_PATTERN = /^\[(\w+)\]\s*(.*)/;
+	const MERGE_TAG_PATTERN = /^\[MERGE\]\[(\w+)\]\s*(.*)/;
 
 	function parseLine(text: string, isStale: boolean): ParsedLine {
 		const match = text.match(LINE_PATTERN);
 		if (match) {
 			return { timestamp: match[1], tag: match[2], message: match[3], raw: text, isStale };
+		}
+		// [MERGE][TAG] message 형식 (머지 로그)
+		const mergeMatch = text.match(MERGE_TAG_PATTERN);
+		if (mergeMatch) {
+			return { timestamp: '', tag: mergeMatch[1], message: mergeMatch[2], raw: text, isStale };
 		}
 		const diagMatch = text.match(DIAG_PATTERN);
 		if (diagMatch) {
@@ -226,7 +241,9 @@
 		// SSE 연결 전 status API로 실행 상태 + Redis 상태 확인
 		await fetchStatus();
 
-		eventSource = devRunnerLogApi.connectStream(runnerId);
+		eventSource = isMerging
+			? devRunnerLogApi.connectMergeStream(runnerId)
+			: devRunnerLogApi.connectStream(runnerId);
 		eventSource.onopen = () => {
 			connected = 'connected';
 			sseStarted = true;
@@ -333,6 +350,17 @@
 	// batchPlans 변경 시 부모에 알림
 	$effect(() => {
 		onBatchPlansChange?.(batchPlans);
+	});
+
+	// mergeStatus 전환 시 SSE 재연결 (runner → merge stream 또는 반대)
+	let prevMerging: boolean | undefined;
+	$effect(() => {
+		const cur = isMerging;
+		if (prevMerging !== undefined && prevMerging !== cur) {
+			addLine(cur ? '[MERGE] 머지 로그 스트림으로 전환...' : '[MERGE] 러너 로그 스트림으로 복귀...', false);
+			connectSSE();
+		}
+		prevMerging = cur;
 	});
 
 </script>

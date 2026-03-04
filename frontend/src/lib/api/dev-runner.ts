@@ -395,6 +395,10 @@ export const devRunnerLogApi = {
 		return new EventSource(`${DEV_RUNNER_BASE}/logs/stream?runner_id=${runnerId}`);
 	},
 
+	connectMergeStream: (runnerId: string): EventSource => {
+		return new EventSource(`${DEV_RUNNER_BASE}/merge-log/stream?runner_id=${runnerId}`);
+	},
+
 	history: (limit: number = 20, offset: number = 0) =>
 		devRunnerRequest<RunHistoryResponse>(`/logs/history?limit=${limit}&offset=${offset}`),
 

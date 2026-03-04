@@ -145,6 +145,10 @@
 
 		{#if mergeStatus === 'merged'}
 			<span class="px-1.5 py-0.5 rounded text-[10px] bg-green-100 text-green-700">머지됨</span>
+		{:else if mergeStatus === 'merge_pending'}
+			<span class="px-1.5 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700 animate-pulse">머지 대기</span>
+		{:else if mergeStatus === 'merging' || mergeStatus === 'testing'}
+			<span class="px-1.5 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700 animate-pulse">머지 중</span>
 		{:else if mergeStatus === 'conflict'}
 			<span class="px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700">충돌</span>
 		{:else if mergeStatus === 'resolving'}
@@ -226,6 +230,6 @@
 
 	<!-- 로그 뷰어 -->
 	<div class="flex-1 min-h-0">
-		<LogViewer {runnerId} planFile={planFile ?? undefined} {running} {onBatchPlansChange} />
+		<LogViewer {runnerId} planFile={planFile ?? undefined} {running} {mergeStatus} {onBatchPlansChange} />
 	</div>
 </div>
