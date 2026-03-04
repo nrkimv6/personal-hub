@@ -12,6 +12,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+import traceback as _tb
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -150,9 +151,9 @@ class ConflictResolver:
                     cwd=str(self.project_root),
                     timeout=10,
                 )
-                if log_result.stdout.strip():
+                if (log_result.stdout or "").strip():
                     lines.append(f"### 최근 커밋 ({branch})")
-                    lines.append(log_result.stdout.strip())
+                    lines.append((log_result.stdout or "").strip())
             except Exception:
                 pass
             lines.append("")
@@ -176,7 +177,7 @@ class ConflictResolver:
             text=True,
             cwd=str(self.project_root),
         )
-        if grep.returncode == 0 and grep.stdout.strip():
+        if grep.returncode == 0 and (grep.stdout or "").strip():
             return False
         return True
 
@@ -263,6 +264,10 @@ class ConflictResolver:
             )
             if not match:
                 self.logger.warning("[ConflictResolver] 결과 블록 없음")
+                early_result = ResolveResult(success=False, failed_files=files, reason="Claude 에이전트 결과 블록 없음")
+                duration_ms = int((time.time() - start_time) * 1000)
+                self._record_resolution(runner_id, branch, files, early_result, duration_ms)
+                return early_result
 
             # 7. 해결 검증
             if self._verify_resolution():
@@ -279,7 +284,7 @@ class ConflictResolver:
             return result
 
         except Exception as e:
-            self.logger.error(f"[ConflictResolver] 예외: {e}")
+            self.logger.error(f"[ConflictResolver] 예외: {e}\n{_tb.format_exc()}")
             result = ResolveResult(success=False, reason=str(e))
             duration_ms = int((time.time() - start_time) * 1000)
             try:

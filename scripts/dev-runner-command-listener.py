@@ -714,12 +714,18 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
     from merge_workflow import MergeWorkflow
 
     log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+    log_list_key = f"plan-runner:logs:list:{runner_id}"
 
     def _pub(msg: str) -> None:
-        """runner 로그 채널에 merge 로그 publish"""
+        """runner 로그 채널에 merge 로그 publish + Redis list에 히스토리 저장"""
         logger.info(f"[MERGE] {msg}")
         try:
             redis_client.publish(log_channel, f"[MERGE] {msg}")
+        except Exception:
+            pass
+        try:
+            redis_client.rpush(log_list_key, f"[MERGE] {msg}")
+            redis_client.expire(log_list_key, 86400)
         except Exception:
             pass
 

@@ -80,6 +80,15 @@ class LogService:
                     total_lines=1
                 )
 
+        # fallback: Redis list에서 merge 로그 히스토리 조회 (dm-* runner 등 로그 파일 없는 경우)
+        try:
+            log_list_key = f"plan-runner:logs:list:{runner_id}"
+            logs = self.redis_client.lrange(log_list_key, -n_lines, -1)
+            if logs:
+                return LogResponse(lines=logs, total_lines=len(logs))
+        except Exception:
+            pass
+
         return LogResponse(lines=[], total_lines=0)
 
     async def stream_log_file(self, runner_id: str) -> AsyncGenerator[str, None]:

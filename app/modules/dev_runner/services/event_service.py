@@ -77,13 +77,13 @@ class EventService:
     def _build_status_payload(self, runner_id: str) -> Optional[dict]:
         """특정 runner의 현재 상태를 Redis에서 읽어 dict로 반환"""
         try:
-            fields = ["status", "pid", "current_cycle", "start_time", "plan_file", "engine"]
+            fields = ["status", "pid", "current_cycle", "start_time", "plan_file", "engine", "branch"]
             values = self._sync.mget([f"{RUNNER_KEY_PREFIX}:{runner_id}:{f}" for f in fields])
             data = dict(zip(fields, values))
             data["runner_id"] = runner_id
-            # plan_file이 None(Redis 키 미설정)이면 "ALL" fallback
+            # plan_file이 None(Redis 키 미설정)이면 branch 또는 "ALL" fallback
             if not data.get("plan_file"):
-                data["plan_file"] = "ALL"
+                data["plan_file"] = data.get("branch") or "ALL"
             return data
         except Exception:
             return None
