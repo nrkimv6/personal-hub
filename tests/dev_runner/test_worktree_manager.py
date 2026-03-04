@@ -168,6 +168,33 @@ class TestWorktreeManagerRemove:
         assert WorktreeManager.remove("idem01", base_dir) is True
         assert WorktreeManager.remove("idem01", base_dir) is True
 
+    def test_remove_branch_param_priority(self, worktrees_dir):
+        """TC-Right(branch 우선순위): branch='plan/foo' 전달 시 해당 브랜치/경로 삭제"""
+        base_dir, repo = worktrees_dir
+        # plan/foo 브랜치 + plan_foo slug 경로로 worktree 생성
+        wt_path = base_dir / "plan_foo"
+        subprocess.run(["git", "worktree", "add", str(wt_path), "-b", "plan/foo"], capture_output=True, cwd=str(repo))
+        assert wt_path.is_dir()
+        result = WorktreeManager.remove("any-runner", base_dir, branch="plan/foo")
+        assert result is True
+        assert not wt_path.exists()
+        # 브랜치도 삭제 확인
+        branch_list = subprocess.run(
+            ["git", "branch", "--list", "plan/foo"],
+            capture_output=True, text=True, cwd=str(repo)
+        ).stdout
+        assert "plan/foo" not in branch_list
+
+    def test_remove_no_branch_falls_back(self, worktrees_dir):
+        """TC-Boundary: branch=None 시 기존 plan_file/runner_id 로직 유지 (회귀)"""
+        base_dir, repo = worktrees_dir
+        WorktreeManager.create("fallback01", base_dir)
+        wt_path = base_dir / "fallback01"
+        assert wt_path.is_dir()
+        result = WorktreeManager.remove("fallback01", base_dir, branch=None)
+        assert result is True
+        assert not wt_path.exists()
+
 
 # ── merge_to_main() ───────────────────────────────────────────────────────────
 
@@ -221,6 +248,42 @@ class TestWorktreeManagerMergeToMain:
         result = WorktreeManager.merge_to_main("conflict2", base_dir, repo)
         assert result.success is False
         assert result.conflict is True
+
+    def test_merge_to_main_branch_param_priority(self, worktrees_dir):
+        """TC-Right(branch 우선순위): branch='plan/foo' + plan_file='bar.md' → git merge plan/foo 사용"""
+        base_dir, repo = worktrees_dir
+        # plan/foo 브랜치를 가진 worktree 생성
+        wt_path = base_dir / "foo"
+        subprocess.run(["git", "worktree", "add", str(wt_path), "-b", "plan/foo"], capture_output=True, cwd=str(repo))
+        (wt_path / "branch_priority.py").write_text("ok = True")
+        subprocess.run(["git", "add", "-A"], cwd=str(wt_path), capture_output=True)
+        subprocess.run(["git", "commit", "-m", "feat: branch priority test"], cwd=str(wt_path), capture_output=True)
+        # branch 파라미터가 plan_file보다 우선해야 한다
+        result = WorktreeManager.merge_to_main("any-runner", base_dir, repo, plan_file="bar.md", branch="plan/foo")
+        assert result.success is True
+
+    def test_merge_to_main_branch_none_falls_back_plan_file(self, worktrees_dir):
+        """TC-Boundary: branch=None + plan_file 지정 시 plan/{stem} 브랜치 사용"""
+        base_dir, repo = worktrees_dir
+        stem = "2026-01-01_test"
+        wt_path = base_dir / stem
+        subprocess.run(["git", "worktree", "add", str(wt_path), "-b", f"plan/{stem}"], capture_output=True, cwd=str(repo))
+        (wt_path / "plan_fallback.py").write_text("x = 1")
+        subprocess.run(["git", "add", "-A"], cwd=str(wt_path), capture_output=True)
+        subprocess.run(["git", "commit", "-m", "feat: plan fallback"], cwd=str(wt_path), capture_output=True)
+        result = WorktreeManager.merge_to_main("any-runner", base_dir, repo, plan_file=f"{stem}.md", branch=None)
+        assert result.success is True
+
+    def test_merge_to_main_no_branch_no_plan_uses_runner_id(self, worktrees_dir):
+        """TC-Boundary: branch=None + plan_file=None → runner/{runner_id} 브랜치 사용 (회귀)"""
+        base_dir, repo = worktrees_dir
+        runner_id = "regrtest1"
+        wt_path, branch = WorktreeManager.create(runner_id, base_dir)
+        (wt_path / "regr.py").write_text("x = 2")
+        subprocess.run(["git", "add", "-A"], cwd=str(wt_path), capture_output=True)
+        subprocess.run(["git", "commit", "-m", "feat: regr"], cwd=str(wt_path), capture_output=True)
+        result = WorktreeManager.merge_to_main(runner_id, base_dir, repo, plan_file=None, branch=None)
+        assert result.success is True
 
     def test_correct_cardinality_one_merge_commit(self, worktrees_dir):
         """TC-CORRECT-Cardinality: 머지 커밋이 정확히 1개 생성"""
