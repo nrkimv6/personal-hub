@@ -1,15 +1,20 @@
 """워크플로우 API — dev-runner 브랜치/계획서/runner 생명주기 이력 조회"""
 
 import os
+import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, List
 
+import redis as sync_redis
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.workflow import Workflow
 from app.modules.dev_runner.schemas import WorkflowResponse, WorkflowCreateRequest
+
+ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 
 router = APIRouter()
 
@@ -46,6 +51,23 @@ async def list_workflows(
         query = query.filter(Workflow.status == status)
     workflows = query.order_by(Workflow.created_at.desc()).offset(offset).limit(limit).all()
     return [_to_response(wf) for wf in workflows]
+
+
+@router.get("/orphans", response_model=List[WorkflowResponse])
+async def list_orphan_workflows(db: Session = Depends(get_db)):
+    """고아 워크플로우 조회 — DB에 running/merge_pending이지만 Redis active_runners에 없는 항목"""
+    r = sync_redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=True)
+    try:
+        workflows = db.query(Workflow).filter(
+            Workflow.status.in_(["running", "merge_pending"])
+        ).all()
+        orphans = []
+        for wf in workflows:
+            if wf.runner_id and not r.sismember(ACTIVE_RUNNERS_KEY, wf.runner_id):
+                orphans.append(_to_response(wf))
+        return orphans
+    finally:
+        r.close()
 
 
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
@@ -106,3 +128,56 @@ async def cancel_workflow(workflow_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(wf)
     return _to_response(wf)
+
+
+@router.patch("/{workflow_id}/reset", response_model=WorkflowResponse)
+async def reset_workflow(workflow_id: int, cleanup_worktree: bool = False, db: Session = Depends(get_db)):
+    """고아 워크플로우 개별 리셋 — running/merge_pending/merging/planned → failed"""
+    wf = db.query(Workflow).filter(Workflow.id == workflow_id).first()
+    if not wf:
+        raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+
+    if wf.status not in ("running", "merge_pending", "merging", "planned"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot reset workflow in status '{wf.status}'"
+        )
+
+    wf.status = "failed"
+    wf.error_message = "수동 리셋"
+    wf.finished_at = datetime.now()
+
+    if cleanup_worktree and wf.worktree_path:
+        try:
+            scripts_dir = str(Path(__file__).resolve().parents[4] / "scripts")
+            if scripts_dir not in sys.path:
+                sys.path.insert(0, scripts_dir)
+            from worktree_manager import WorktreeManager
+            WorktreeManager.remove(wf.runner_id, Path(wf.worktree_path).parent)
+        except Exception:
+            pass
+
+    db.commit()
+    db.refresh(wf)
+    return _to_response(wf)
+
+
+@router.post("/reset-all-orphans")
+async def reset_all_orphans(db: Session = Depends(get_db)):
+    """고아 워크플로우 일괄 리셋"""
+    r = sync_redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=True)
+    try:
+        workflows = db.query(Workflow).filter(
+            Workflow.status.in_(["running", "merge_pending"])
+        ).all()
+        count = 0
+        for wf in workflows:
+            if wf.runner_id and not r.sismember(ACTIVE_RUNNERS_KEY, wf.runner_id):
+                wf.status = "failed"
+                wf.error_message = "일괄 리셋"
+                wf.finished_at = datetime.now()
+                count += 1
+        db.commit()
+        return {"reset_count": count}
+    finally:
+        r.close()

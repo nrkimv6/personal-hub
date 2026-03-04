@@ -440,34 +440,51 @@ class ExecutorService:
             recent_ids_with_scores = await self.async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1)
             all_ids = set(active_ids) | set(recent_ids_with_scores)
 
-            result = []
-            for rid in all_ids:
-                status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:status")
-                pid_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:pid")
-                plan_file = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file")
-                engine = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:engine")
-                start_time_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:start_time")
-                worktree_path = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:worktree_path")
-                merge_status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:merge_status")
-                branch = f"runner/{rid}" if worktree_path else None
-                start_time = None
-                if start_time_str:
-                    try:
-                        start_time = datetime.fromisoformat(start_time_str)
-                    except ValueError:
-                        pass
-                result.append(RunnerListItem(
-                    runner_id=rid,
-                    running=status == "running",
-                    plan_file=plan_file,
-                    engine=engine,
-                    start_time=start_time,
-                    pid=int(pid_str) if pid_str else None,
-                    worktree_path=worktree_path,
-                    branch=branch,
-                    merge_status=merge_status,
-                ))
-            return result
+            # orphan 판별을 위한 DB 세션
+            from app.database import SessionLocal
+            from app.models.workflow import Workflow
+            db = SessionLocal()
+            try:
+                result = []
+                for rid in all_ids:
+                    status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:status")
+                    pid_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:pid")
+                    plan_file = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file")
+                    engine = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:engine")
+                    start_time_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:start_time")
+                    worktree_path = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:worktree_path")
+                    merge_status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:merge_status")
+                    branch = f"runner/{rid}" if worktree_path else None
+                    start_time = None
+                    if start_time_str:
+                        try:
+                            start_time = datetime.fromisoformat(start_time_str)
+                        except ValueError:
+                            pass
+                    # orphan: runner가 실행 중이 아닌데 DB에 running/merge_pending 워크플로우가 있는 경우
+                    is_orphan = False
+                    if status != "running":
+                        orphan_wf = db.query(Workflow).filter(
+                            Workflow.runner_id == rid,
+                            Workflow.status.in_(["running", "merge_pending"])
+                        ).first()
+                        if orphan_wf:
+                            is_orphan = True
+                    result.append(RunnerListItem(
+                        runner_id=rid,
+                        running=status == "running",
+                        plan_file=plan_file,
+                        engine=engine,
+                        start_time=start_time,
+                        pid=int(pid_str) if pid_str else None,
+                        worktree_path=worktree_path,
+                        branch=branch,
+                        merge_status=merge_status,
+                        orphan=is_orphan,
+                    ))
+                return result
+            finally:
+                db.close()
         except (redis.ConnectionError, aioredis.ConnectionError):
             return []
 
