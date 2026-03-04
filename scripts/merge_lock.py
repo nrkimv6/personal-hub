@@ -16,7 +16,7 @@ MERGE_WAIT_QUEUE_KEY = "plan-runner:merge-wait-queue"
 MERGE_LOCK_TTL = 600  # seconds
 
 
-def acquire_merge_lock(redis_client, runner_id: str, timeout: int = 600) -> bool:
+def acquire_merge_lock(redis_client, runner_id: str, timeout: int = 600, lock_ttl: int = None) -> bool:
     """
     Merge lock을 획득한다 (SETNX + FIFO 대기 큐 조합).
 
@@ -29,10 +29,12 @@ def acquire_merge_lock(redis_client, runner_id: str, timeout: int = 600) -> bool
         redis_client: Redis 클라이언트 인스턴스
         runner_id: 현재 runner의 고유 ID (문자열)
         timeout: 최대 대기 시간 (초, 기본 600)
+        lock_ttl: lock TTL (초, 기본 MERGE_LOCK_TTL=600). 테스트 시 짧게 지정 가능.
 
     Returns:
         True if lock acquired, False if timed out
     """
+    _ttl = lock_ttl if lock_ttl is not None else MERGE_LOCK_TTL
     # 대기 큐에 등록 (중복 방지: 이미 있으면 RPUSH 안 함)
     queue: list = redis_client.lrange(MERGE_WAIT_QUEUE_KEY, 0, -1)
     queue_str = [item.decode() if isinstance(item, bytes) else item for item in queue]
@@ -50,7 +52,7 @@ def acquire_merge_lock(redis_client, runner_id: str, timeout: int = 600) -> bool
 
         if front == runner_id:
             # 내 차례 — lock 획득 시도
-            acquired = redis_client.set(MERGE_LOCK_KEY, runner_id, nx=True, ex=MERGE_LOCK_TTL)
+            acquired = redis_client.set(MERGE_LOCK_KEY, runner_id, nx=True, ex=_ttl)
             if acquired:
                 # 큐에서 제거
                 redis_client.lrem(MERGE_WAIT_QUEUE_KEY, 1, runner_id)

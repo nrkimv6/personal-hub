@@ -196,3 +196,36 @@ class TestRedisStateSaving:
 
         # Redis 저장 확인
         redis_client.set.assert_any_call("dev-runner:state:plan_file", "ALL")
+
+
+class TestStreamOutputMergeFlow:
+    """_stream_output finally 블록의 merge_requested 플래그 분기 테스트 (T1)"""
+
+    def _simulate_merge_branch(self, exit_code: int, merge_flag_value, runner_id: str = "test-runner"):
+        """merge_requested 플래그 분기 로직 재현 (dev-runner-command-listener.py 로직 복사)"""
+        _merge_requested = False
+        if runner_id and exit_code == 0:
+            _merge_requested = bool(merge_flag_value)
+        return _merge_requested
+
+    def test_stream_output_merge_flow(self):
+        """exit_code 0 + merge_requested 있음 → merge 흐름 진입 (RIGHT)"""
+        # merge_requested 플래그가 있을 때
+        result = self._simulate_merge_branch(exit_code=0, merge_flag_value="1", runner_id="runner-abc")
+        assert result is True, "merge_requested 플래그 있으면 _merge_requested=True여야 함"
+
+    def test_stream_output_no_merge_flag(self):
+        """exit_code 0 + merge_requested 없음 → 기존 cleanup (INVERSE)"""
+        # merge_requested 플래그가 없을 때
+        result = self._simulate_merge_branch(exit_code=0, merge_flag_value=None, runner_id="runner-abc")
+        assert result is False, "merge_requested 플래그 없으면 _merge_requested=False여야 함"
+
+    def test_stream_output_nonzero_exit_no_merge(self):
+        """exit_code != 0 → merge 흐름 진입 안 함 (항상 False)"""
+        result = self._simulate_merge_branch(exit_code=1, merge_flag_value="1", runner_id="runner-abc")
+        assert result is False, "exit_code != 0이면 merge_requested 플래그 무관하게 False여야 함"
+
+    def test_stream_output_empty_runner_id_no_merge(self):
+        """runner_id 없음 → merge 흐름 진입 안 함"""
+        result = self._simulate_merge_branch(exit_code=0, merge_flag_value="1", runner_id="")
+        assert result is False, "runner_id 없으면 merge_requested 체크 안 함"

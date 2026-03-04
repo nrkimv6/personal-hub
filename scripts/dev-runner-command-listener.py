@@ -89,9 +89,8 @@ LOG_CHANNEL_PREFIX = "plan-runner:logs"
 _running_processes: dict = {}
 _running_log_files: dict = {}
 _stream_threads: dict = {}
-_merge_orchestrator_process: Optional[subprocess.Popen] = None
-_merge_orchestrator_log_path: Optional[Path] = None
-_merge_orchestrator_attached_pid: Optional[int] = None  # listener 재시작 후 재연결된 PID (Popen 없이 관리)
+# MergeOrchestrator 전역변수 — 인라인 merge로 대체됨 (Phase 3에서 제거)
+# (제거됨: _merge_orchestrator_process, _merge_orchestrator_log_path, _merge_orchestrator_attached_pid)
 
 # WorkflowManager (main()에서 초기화)
 _wf_manager: Optional[WorkflowManager] = None
@@ -115,38 +114,8 @@ def _is_pid_alive(pid: int) -> bool:
         return False
 
 
-def _poll_merge_results(redis_client: redis.Redis):
-    """plan-runner:merge-results 큐에서 MergeOrchestrator 결과를 소비하여 Workflow DB에 반영"""
-    if not _wf_manager:
-        return
-    while True:
-        try:
-            raw = redis_client.lpop("plan-runner:merge-results")
-            if raw is None:
-                break
-            try:
-                result = json.loads(raw)
-            except (json.JSONDecodeError, TypeError):
-                logger.warning(f"[_poll_merge_results] JSON 파싱 실패 (무시): {raw!r:.200}")
-                continue
-            runner_id = result.get("runner_id")
-            if not runner_id:
-                continue
-            wf = _wf_manager.get_by_runner_id(runner_id)
-            if not wf or wf["status"] != "merge_pending":
-                continue
-            if result.get("success"):
-                _wf_manager.update_status(wf["id"], "merged")
-                logger.info(f"[_poll_merge_results] workflow {wf['id']} → merged (runner: {runner_id})")
-            else:
-                _wf_manager.update_status(
-                    wf["id"], "failed",
-                    error_message=result.get("message", "merge failed")[:500],
-                )
-                logger.info(f"[_poll_merge_results] workflow {wf['id']} → failed (runner: {runner_id})")
-        except Exception as e:
-            logger.warning(f"[_poll_merge_results] 처리 오류 (무시): {e}")
-            break
+# [DEPRECATED] _poll_merge_results — MergeOrchestrator 제거로 불필요
+# merge 결과는 _do_inline_merge에서 직접 workflow_manager를 통해 처리됨
 
 
 def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: str = "process_cleanup"):
@@ -490,6 +459,139 @@ def _detect_orphan_plans(redis_client: redis.Redis) -> int:
     return warnings_count
 
 
+def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
+    """merge_requested 플래그가 있을 때 _stream_output finally에서 호출되는 인라인 merge 함수.
+
+    실행 순서:
+      1. merge_status = "queued" 설정 + acquire_merge_lock() (blocking)
+      2. lock 획득 후 merge_status = "merging" + MergeWorkflow.run()
+      3. 성공 → merge_status = "merged", workflow = "merged" + release_merge_lock()
+      4. 실패 → merge_status = "conflict"/"test_failed" + release_merge_lock() + worktree 보존
+      5. merge 로그를 runner 로그 채널(plan-runner:log:{id})에 publish
+      6. merge 완료/실패 후 _cleanup_process_state() 호출
+    """
+    from merge_lock import acquire_merge_lock, release_merge_lock
+    from merge_workflow import MergeWorkflow
+
+    log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+
+    def _pub(msg: str) -> None:
+        """runner 로그 채널에 merge 로그 publish"""
+        logger.info(f"[MERGE] {msg}")
+        try:
+            redis_client.publish(log_channel, f"[MERGE] {msg}")
+        except Exception:
+            pass
+
+    try:
+        # merge_requested 플래그 삭제 (중복 진입 방지)
+        try:
+            redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+        except Exception:
+            pass
+
+        # 1. merge_status = "queued" + lock 대기
+        try:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
+        except Exception:
+            pass
+        _pub("merge lock 대기 중...")
+
+        lock_acquired = acquire_merge_lock(redis_client, runner_id, timeout=600)
+        if not lock_acquired:
+            _pub("merge lock 획득 실패 (timeout) — merge 중단")
+            try:
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+            except Exception:
+                pass
+            _cleanup_process_state(runner_id, redis_client)
+            return
+
+        # 2. lock 획득 후 merge 실행
+        try:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merging")
+        except Exception:
+            pass
+        _pub("merge lock 획득 완료 — merge 시작")
+
+        # worktree 경로 및 plan_file 조회
+        worktree_path_str = None
+        plan_file_str = None
+        try:
+            worktree_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
+            plan_file_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+        except Exception:
+            pass
+
+        worktree_path = Path(worktree_path_str) if worktree_path_str else None
+        plan_file = plan_file_str if (plan_file_str and plan_file_str != "ALL") else None
+
+        if not worktree_path or not worktree_path.is_dir():
+            _pub(f"worktree 경로 없음 또는 유효하지 않음: {worktree_path_str} — merge 중단")
+            try:
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+            except Exception:
+                pass
+            release_merge_lock(redis_client, runner_id)
+            _cleanup_process_state(runner_id, redis_client)
+            return
+
+        workflow = MergeWorkflow(
+            project_root=PROJECT_ROOT,
+            redis_client=redis_client,
+            workflow_manager=_wf_manager,
+        )
+        result = workflow.run(
+            runner_id=runner_id,
+            worktree_path=worktree_path,
+            base_dir=WORKTREE_BASE_DIR,
+            plan_file=plan_file,
+        )
+
+        # 3/4. 결과 처리
+        if result.merged and result.tests_passed:
+            _pub("merge 성공 — 완료")
+            try:
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+            except Exception:
+                pass
+        elif result.conflict:
+            _pub(f"merge 충돌 발생 — worktree 보존: {result.message[:200]}")
+            try:
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
+            except Exception:
+                pass
+        elif result.merged and not result.tests_passed:
+            _pub(f"merge 후 테스트 실패 — worktree 보존: {result.message[:200]}")
+            try:
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "test_failed")
+            except Exception:
+                pass
+        else:
+            _pub(f"merge 실패: {result.message[:200]}")
+            try:
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+            except Exception:
+                pass
+
+        release_merge_lock(redis_client, runner_id)
+
+    except Exception as e:
+        logger.error(f"[_do_inline_merge] 예외 발생 (runner_id={runner_id}): {e}")
+        try:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+        except Exception:
+            pass
+        try:
+            release_merge_lock(redis_client, runner_id)
+        except Exception:
+            pass
+
+    finally:
+        # merge 완료/실패 후 cleanup (merge 흐름에서는 여기서만 cleanup)
+        _cleanup_process_state(runner_id, redis_client)
+
+
 def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Redis, runner_id: str = ""):
     """프로세스 stdout을 라인별로 읽어 파일 기록 + Redis publish 동시 수행
 
@@ -617,14 +719,27 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
             except Exception as _drain_err:
                 logger.debug(f"[_stream_output] stdout drain 실패 (무시): {_drain_err}")
 
-        # Workflow 상태 업데이트: 정상 종료(0) → merge_pending, 비정상 → failed
+        # Workflow 상태 업데이트: 정상 종료(0) → merge_pending or merge 흐름, 비정상 → failed
         if _wf_manager and runner_id:
             try:
                 wf = _wf_manager.get_by_runner_id(runner_id)
                 if wf:
                     if exit_code == 0:
-                        # merge-queue에 올라갈 것이므로 merge_pending
-                        _wf_manager.update_status(wf["id"], "merge_pending")
+                        # merge_requested 플래그 확인 — 있으면 merge 흐름, 없으면 merge_pending
+                        merge_requested_val = None
+                        try:
+                            merge_requested_val = redis_client.get(
+                                f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested"
+                            )
+                        except Exception:
+                            pass
+
+                        if merge_requested_val:
+                            logger.info(f"[_stream_output] merge_requested 플래그 감지 (runner_id={runner_id}) → merge 흐름 진입")
+                            _wf_manager.update_status(wf["id"], "merge_pending")
+                        else:
+                            logger.info(f"[_stream_output] merge_requested 플래그 없음 (runner_id={runner_id}) → 기존 cleanup 유지")
+                            _wf_manager.update_status(wf["id"], "merge_pending")
                     elif exit_code is not None and exit_code != 0:
                         _wf_manager.update_status(
                             wf["id"], "failed",
@@ -640,7 +755,22 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
             except Exception as wf_err:
                 logger.warning(f"[_stream_output] workflow update 실패 (무시): {wf_err}")
 
-        _cleanup_process_state(runner_id, redis_client)
+        # merge_requested 플래그 여부에 따라 분기:
+        # - 플래그 있음 → _do_inline_merge() 호출 (merge 완료 후 cleanup)
+        # - 플래그 없음 → 기존대로 바로 cleanup
+        _merge_requested = False
+        if runner_id and exit_code == 0:
+            try:
+                _flag = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+                _merge_requested = bool(_flag)
+            except Exception:
+                pass
+
+        if _merge_requested:
+            # merge 흐름 — cleanup은 merge 완료/실패 후 _do_inline_merge 내부에서 호출
+            _do_inline_merge(runner_id, redis_client)
+        else:
+            _cleanup_process_state(runner_id, redis_client)
 
 
 def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
@@ -921,10 +1051,7 @@ def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner
 
         logger.info(f"plan-runner started (PID: {process.pid}, log: {log_file})")
 
-        # orchestrator가 미실행이면 항상 자동 spawn
-        if not _merge_orchestrator_process or _merge_orchestrator_process.poll() is not None:
-            orch_result = start_merge_orchestrator(redis_client)
-            logger.info(f"Merge Orchestrator 자동 시작: {orch_result.get('message', '')}")
+        # MergeOrchestrator 자동 spawn 제거됨 — 인라인 merge로 대체
 
         return {
             "success": True,
@@ -1277,122 +1404,21 @@ def cleanup_worktree(command: Dict, redis_client: redis.Redis) -> None:
     return None
 
 
+# [DEPRECATED] start_merge_orchestrator — 인라인 merge(_do_inline_merge)로 대체됨
+# Phase 3에서 제거됨. stop_merge_orchestrator는 API 라우트 호환성 유지용으로 잠시 보존.
 def start_merge_orchestrator(redis_client: redis.Redis) -> Dict:
-    """plan-runner merge-orchestrator 프로세스 시작"""
-    global _merge_orchestrator_process, _merge_orchestrator_log_path, _merge_orchestrator_attached_pid
-    if _merge_orchestrator_process and _merge_orchestrator_process.poll() is None:
-        return {"success": False, "message": f"이미 실행 중 (PID: {_merge_orchestrator_process.pid})"}
-    # listener 재시작 후 재연결된 고아 프로세스가 살아있으면 중복 시작 방지
-    if _merge_orchestrator_attached_pid and _is_pid_alive(_merge_orchestrator_attached_pid):
-        return {"success": False, "message": f"이미 실행 중 (재연결 PID: {_merge_orchestrator_attached_pid})"}
-
-    try:
-        cmd = [str(PLAN_RUNNER_PYTHON), "-m", "plan_runner", "merge-orchestrator"]
-        LOGS_DIR = PROJECT_ROOT / "logs" / "admin"
-        LOGS_DIR.mkdir(parents=True, exist_ok=True)
-        from datetime import datetime as _dt
-        _ts = _dt.now().strftime('%Y%m%d_%H%M%S')
-        log_path = LOGS_DIR / f"merge-orchestrator_{_ts}.log"
-        log_file = open(str(log_path), "w", encoding="utf-8")
-        _merge_orchestrator_log_path = log_path
-        import os as _os
-        env = _os.environ.copy()
-        env["PYTHONIOENCODING"] = "utf-8"
-        env["PYTHONUTF8"] = "1"
-        env["PYTHONUNBUFFERED"] = "1"
-        _merge_orchestrator_process = subprocess.Popen(
-            cmd, stdout=log_file, stderr=log_file,
-            cwd=str(PLAN_RUNNER_MODULE_PATH), env=env
-        )
-        pid = _merge_orchestrator_process.pid
-        logger.info(f"Merge Orchestrator 시작 (PID: {pid}, log: {log_path})")
-
-        # 2초 대기 후 생존 확인
-        time.sleep(2)
-        rc = _merge_orchestrator_process.poll()
-        if rc is not None:
-            # 즉시 종료됨 — 로그 파일 내용 읽어서 원인 보고
-            log_file.close()
-            try:
-                content = log_path.read_text(encoding="utf-8").strip()
-            except Exception:
-                content = "(로그 파일 읽기 실패)"
-            log_tail = content[-500:] if len(content) > 500 else content
-            logger.error(f"[MergeOrch] 즉시 종료 (PID: {pid}, exit code: {rc})")
-            if log_tail:
-                logger.error(f"[MergeOrch] 로그 내용:\n{log_tail}")
-            else:
-                logger.error("[MergeOrch] 로그 파일 비어있음 — 프로세스 시작 자체 실패")
-            _merge_orchestrator_process = None
-            if log_path.exists() and log_path.stat().st_size == 0:
-                log_path.unlink(missing_ok=True)
-                logger.debug(f"[MergeOrch] 0바이트 로그 파일 삭제: {log_path}")
-            return {"success": False, "message": f"Orchestrator 즉시 종료 (exit code: {rc}): {log_tail[:200]}"}
-
-        # PID를 Redis에 저장 (listener 재시작 시 재연결용)
-        redis_client.set("plan-runner:merge-orchestrator:pid", pid)
-        return {"success": True, "message": f"Orchestrator 시작 (PID: {pid})"}
-    except Exception as e:
-        logger.error(f"Merge Orchestrator 시작 실패: {e}")
-        return {"success": False, "message": str(e)}
+    """[DEPRECATED] merge 로직이 _stream_output finally 블록으로 인라인화됨."""
+    return {"success": False, "message": "Deprecated: merge is now handled inline in _stream_output"}
 
 
 def _reconnect_surviving_merge_orchestrator(redis_client: redis.Redis):
-    """listener 시작(또는 재시작) 시 기존 MergeOrchestrator 프로세스 재연결.
-
-    Redis에 저장된 PID를 확인하여:
-    - PID가 살아있으면 → _merge_orchestrator_attached_pid에 기록 (중복 시작 방지)
-    - PID가 죽어있으면 → Redis 키 정리
-    """
-    global _merge_orchestrator_attached_pid
-    pid_str = redis_client.get("plan-runner:merge-orchestrator:pid")
-    if not pid_str:
-        return
-    try:
-        pid = int(pid_str)
-    except (ValueError, TypeError):
-        redis_client.delete("plan-runner:merge-orchestrator:pid")
-        return
-
-    if _is_pid_alive(pid):
-        _merge_orchestrator_attached_pid = pid
-        logger.info(f"[MergeOrch] 기존 프로세스 재연결 (PID: {pid})")
-    else:
-        logger.info(f"[MergeOrch] 기존 프로세스 종료됨 (PID: {pid}) → Redis 정리")
-        redis_client.delete("plan-runner:merge-orchestrator:pid")
+    """[DEPRECATED] MergeOrchestrator 제거됨 — 아무것도 하지 않음."""
+    pass
 
 
 def stop_merge_orchestrator(redis_client: redis.Redis) -> Dict:
-    """plan-runner merge-orchestrator 프로세스 종료"""
-    global _merge_orchestrator_process, _merge_orchestrator_attached_pid
-    # 재연결된 고아 프로세스 종료
-    if _merge_orchestrator_attached_pid and _is_pid_alive(_merge_orchestrator_attached_pid):
-        import ctypes
-        try:
-            kernel32 = ctypes.windll.kernel32
-            PROCESS_TERMINATE = 0x0001
-            handle = kernel32.OpenProcess(PROCESS_TERMINATE, False, _merge_orchestrator_attached_pid)
-            if handle:
-                kernel32.TerminateProcess(handle, 0)
-                kernel32.CloseHandle(handle)
-                logger.info(f"Merge Orchestrator (재연결 PID: {_merge_orchestrator_attached_pid}) 종료")
-        except Exception as e:
-            logger.error(f"재연결 Orchestrator 종료 실패: {e}")
-        _merge_orchestrator_attached_pid = None
-        redis_client.delete("plan-runner:merge-orchestrator:pid")
-        return {"success": True, "message": f"Orchestrator (재연결) 종료"}
-    if not _merge_orchestrator_process or _merge_orchestrator_process.poll() is not None:
-        return {"success": False, "message": "Orchestrator가 실행 중이 아님"}
-    try:
-        _merge_orchestrator_process.terminate()
-        _merge_orchestrator_process.wait(timeout=5)
-        logger.info("Merge Orchestrator 종료")
-        _merge_orchestrator_process = None
-        redis_client.delete("plan-runner:merge-orchestrator:pid")
-        return {"success": True, "message": "Orchestrator 종료"}
-    except Exception as e:
-        logger.error(f"Merge Orchestrator 종료 실패: {e}")
-        return {"success": False, "message": str(e)}
+    """[DEPRECATED] MergeOrchestrator 제거됨 — 인라인 merge로 대체. 호환성 유지용."""
+    return {"success": False, "message": "Deprecated: MergeOrchestrator removed, merge is now inline"}
 
 
 def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
@@ -1486,11 +1512,7 @@ def main():
                     r.sadd(ACTIVE_RUNNERS_KEY, rid)
                     logger.info(f"Redis 재연결: 프로세스 상태 복원 (runner_id: {rid}, PID: {proc.pid})")
 
-            # 시작/재시작 시 pending 머지 큐가 있으면 orchestrator 자동 시작
-            pending_count = r.llen("plan-runner:merge-queue")
-            if pending_count > 0:
-                logger.info(f"[MergeQueue] pending 항목 {pending_count}개 감지 → Orchestrator 자동 시작")
-                start_merge_orchestrator(r)
+            # merge-queue 기반 orchestrator 자동 시작 제거됨 — 인라인 merge로 대체
 
             # BRPOP 루프 (블로킹 대기)
             while True:
@@ -1512,28 +1534,7 @@ def main():
                             # 프로세스가 종료되었는데 전역변수가 남아있는 경우 즉시 cleanup
                             logger.warning(f"heartbeat: 프로세스 종료 감지 (runner_id: {rid}, exit code: {proc.returncode}), 상태 정리")
                             _cleanup_process_state(rid, r, reason="heartbeat_dead_process")
-                    # Orchestrator health check
-                    if _merge_orchestrator_process and _merge_orchestrator_process.poll() is not None:
-                        rc = _merge_orchestrator_process.returncode
-                        logger.warning(f"[MergeOrch] 비정상 종료 감지 (exit code: {rc})")
-                        if _merge_orchestrator_log_path and _merge_orchestrator_log_path.exists():
-                            try:
-                                lines = _merge_orchestrator_log_path.read_text(encoding="utf-8").strip().splitlines()
-                                tail = lines[-5:] if len(lines) > 5 else lines
-                                if tail:
-                                    logger.warning(f"[MergeOrch] 마지막 로그:\n" + "\n".join(tail))
-                            except Exception:
-                                pass
-                        _merge_orchestrator_process = None
-                        r.delete("plan-runner:merge-orchestrator:pid")
-                    # 재연결 PID 생존 확인
-                    if _merge_orchestrator_attached_pid and not _is_pid_alive(_merge_orchestrator_attached_pid):
-                        logger.warning(f"[MergeOrch] 재연결 PID {_merge_orchestrator_attached_pid} 종료 감지 → 정리")
-                        _merge_orchestrator_attached_pid = None
-                        r.delete("plan-runner:merge-orchestrator:pid")
-
-                    # merge-results 큐 소비 → Workflow DB 업데이트
-                    _poll_merge_results(r)
+                    # MergeOrchestrator health check 제거됨 — 인라인 merge로 대체
 
                     last_heartbeat = now
 
