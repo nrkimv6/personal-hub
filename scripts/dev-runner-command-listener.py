@@ -459,6 +459,88 @@ def _detect_orphan_plans(redis_client: redis.Redis) -> int:
     return warnings_count
 
 
+def _restart_plan_runner_after_merge(plan_file: str, redis_client: redis.Redis, remaining: int) -> None:
+    """merge 완료 후 plan에 잔여 항목이 있을 때 non-worktree 모드로 plan-runner 재시작.
+
+    worktree 없이 PROJECT_ROOT에서 직접 실행하여 남은 TODO 항목을 계속 처리한다.
+    """
+    import os as _os
+    runner_id = uuid.uuid4().hex[:8]
+    cmd = [
+        str(PLAN_RUNNER_PYTHON),
+        "-m",
+        "plan_runner",
+        "run",
+        "--plan-file",
+        plan_file,
+    ]
+    # --worktree 플래그 미포함 — non-worktree 모드로 실행
+
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_filename = f"plan-runner-restart-{runner_id}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
+    log_file = LOG_DIR / log_filename
+
+    try:
+        env = _os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONUNBUFFERED"] = "1"
+        env.pop("CLAUDECODE", None)
+        env["PLAN_RUNNER_RUNNER_ID"] = runner_id
+        env["PLAN_RUNNER_WORK_DIR"] = str(PROJECT_ROOT)
+        env["PLAN_RUNNER_WORKTREE_PATH"] = str(PROJECT_ROOT)
+        env["REDIS_DB"] = str(REDIS_DB)
+        # 로그 prefix 식별자
+        _plan_basename = __import__('os').path.splitext(__import__('os').path.basename(plan_file or ""))[0]
+        _plan_basename = __import__('re').sub(r'^\d{4}-\d{2}-\d{2}[_-]', '', _plan_basename)
+        _plan_parts = _plan_basename.replace('_', '-').split('-')
+        _plan_short = '-'.join(_plan_parts[:2]) if len(_plan_parts) >= 2 else _plan_parts[0]
+        env["PLAN_RUNNER_NAME"] = f"PLAN-RUNNER#{_plan_short}@{runner_id[:4]}"
+
+        log_handle = open(log_file, "w", encoding="utf-8")
+        process = subprocess.Popen(
+            cmd,
+            cwd=str(PLAN_RUNNER_MODULE_PATH),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+        )
+
+        _running_processes[runner_id] = process
+        _running_log_files[runner_id] = log_file
+
+        thread = threading.Thread(
+            target=_stream_output,
+            args=(process, log_handle, redis_client, runner_id),
+            daemon=True,
+        )
+        thread.start()
+        _stream_threads[runner_id] = thread
+
+        # Redis per-runner 상태 등록
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path", str(log_file))
+        redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid", process.pid)
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file)
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", "main")
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", datetime.now().isoformat())
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine", "claude")
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path", str(PROJECT_ROOT))
+        redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:quota_stopped")
+        redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+        logger.info(
+            f"[RESTART-AFTER-MERGE] plan-runner 재시작: {plan_file} "
+            f"(잔여 {remaining}개, runner_id={runner_id}, PID={process.pid})"
+        )
+    except Exception as e:
+        logger.error(f"[RESTART-AFTER-MERGE] plan-runner 재시작 실패: {e}")
+
+
 def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
     """merge_requested 플래그가 있을 때 _stream_output finally에서 호출되는 인라인 merge 함수.
 
@@ -555,6 +637,33 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
             except Exception:
                 pass
+
+            # plan 잔여 항목 확인 — 잔여 있으면 재시작 플래그 설정
+            remaining_count = 0
+            if plan_file:
+                try:
+                    plan_path = Path(plan_file)
+                    if plan_path.is_file():
+                        content = plan_path.read_text(encoding="utf-8")
+                        remaining = re.findall(r'- \[ \]', content)
+                        remaining_count = len(remaining)
+                        _pub(f"plan 잔여 항목 확인: {remaining_count}개")
+                    else:
+                        _pub(f"plan 파일 없음 (잔여 확인 불가): {plan_file}")
+                except Exception as e:
+                    _pub(f"plan 잔여 항목 확인 실패: {e}")
+            else:
+                _pub("plan_file 미지정 — 잔여 항목 확인 생략")
+
+            if remaining_count > 0:
+                try:
+                    redis_client.set(
+                        f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge",
+                        plan_file,
+                    )
+                    _pub(f"[RESTART-FLAG] plan 잔여 {remaining_count}개 → 재시작 플래그 설정: {plan_file}")
+                except Exception as e:
+                    _pub(f"재시작 플래그 설정 실패: {e}")
         elif result.conflict:
             _pub(f"merge 충돌 발생 — worktree 보존: {result.message[:200]}")
             try:
@@ -589,7 +698,28 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
 
     finally:
         # merge 완료/실패 후 cleanup (merge 흐름에서는 여기서만 cleanup)
+        # 재시작 플래그 읽기 (cleanup 전 — cleanup이 다른 per-runner 키를 삭제하지만
+        # restart_after_merge 키는 삭제하지 않으므로 cleanup 전후 모두 가능)
+        _restart_plan_file = None
+        _restart_remaining = 0
+        try:
+            _restart_plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge")
+            if _restart_plan_file:
+                # remaining 수 재계산 (플래그 설정 시점과 다를 수 있음)
+                try:
+                    _content = Path(_restart_plan_file).read_text(encoding="utf-8")
+                    _restart_remaining = len(re.findall(r'- \[ \]', _content))
+                except Exception:
+                    _restart_remaining = 1  # 파일 읽기 실패 시 재시작은 허용
+                redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge")
+        except Exception as e:
+            logger.warning(f"[_do_inline_merge] restart_after_merge 플래그 읽기 실패: {e}")
+
         _cleanup_process_state(runner_id, redis_client)
+
+        # 재시작 (cleanup 완료 후 — 새 runner_id로 시작하므로 기존 상태와 충돌 없음)
+        if _restart_plan_file and _restart_remaining > 0:
+            _restart_plan_runner_after_merge(_restart_plan_file, redis_client, _restart_remaining)
 
 
 def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Redis, runner_id: str = ""):
