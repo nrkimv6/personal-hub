@@ -138,3 +138,81 @@ def test_verify_resolution_markers_remain_E(tmp_path):
     subprocess.run(["git", "add", "a.py"], cwd=tmp_path, capture_output=True)
     resolver = ConflictResolver(tmp_path)
     assert resolver._verify_resolution() is False
+
+
+def test_verify_resolution_none_stdout_E(tmp_path, monkeypatch):
+    """_verify_resolution에서 subprocess stdout이 None이면 AttributeError 없이 정상 반환"""
+    from conflict_resolver import ConflictResolver
+    make_git_repo(tmp_path)
+    (tmp_path / "a.py").write_text("x = 1\n")
+    subprocess.run(["git", "add", "a.py"], cwd=tmp_path, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, capture_output=True)
+    resolver = ConflictResolver(tmp_path)
+
+    original_run = subprocess.run
+
+    def mock_run(*args, **kwargs):
+        cmd = args[0] if args else kwargs.get("args", [])
+        result = original_run(*args, **kwargs)
+        # git grep 호출에서 stdout=None 시뮬레이션
+        if isinstance(cmd, list) and "grep" in cmd:
+            result.stdout = None
+            result.returncode = 0
+        return result
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+    # AttributeError 없이 정상 반환해야 함 (stdout=None → 마커 없음 → True)
+    assert resolver._verify_resolution() is True
+
+
+def test_try_resolve_no_result_block_returns_failure_B(tmp_path, monkeypatch):
+    """Claude 에이전트가 결과 블록 없이 빈 stdout 반환 시 success=False + reason 포함"""
+    from conflict_resolver import ConflictResolver, ConflictAnalyzer
+    repo = make_conflict_repo(tmp_path)
+    resolver = ConflictResolver(repo)
+
+    # Claude subprocess를 빈 stdout으로 mock
+    original_run = subprocess.run
+
+    def mock_run(cmd, *args, **kwargs):
+        if cmd and cmd[0] == "claude":
+            return subprocess.CompletedProcess(cmd, returncode=0, stdout="no result block here", stderr="")
+        return original_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+
+    # DB 기록을 mock (테이블 없을 수 있으므로)
+    monkeypatch.setattr(resolver, "_record_resolution", lambda *a, **kw: None)
+
+    result = resolver.try_resolve("test-runner", "feat")
+    assert result.success is False
+    assert "결과 블록 없음" in result.reason
+
+
+def test_try_resolve_traceback_in_error_log_R(tmp_path, monkeypatch, caplog):
+    """예외 발생 시 로그에 traceback이 포함되는지 확인"""
+    import logging
+    from conflict_resolver import ConflictResolver
+
+    resolver = ConflictResolver(tmp_path)
+
+    # _build_prompt에서 예외 발생시키기 위해 get_conflict_files를 mock
+    def mock_get_files(project_root):
+        return ["a.py"]
+
+    def mock_is_resolvable(files):
+        return True, ""
+
+    def mock_parse(file_path):
+        raise ValueError("test traceback error")
+
+    from conflict_resolver import ConflictAnalyzer
+    monkeypatch.setattr(ConflictAnalyzer, "get_conflict_files", staticmethod(mock_get_files))
+    monkeypatch.setattr(ConflictAnalyzer, "is_resolvable", staticmethod(mock_is_resolvable))
+    monkeypatch.setattr(ConflictAnalyzer, "parse_conflict_markers", staticmethod(mock_parse))
+
+    with caplog.at_level(logging.ERROR):
+        result = resolver.try_resolve("test-runner", "feat")
+
+    assert result.success is False
+    assert any("Traceback" in r.message for r in caplog.records)

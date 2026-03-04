@@ -222,3 +222,45 @@ class TestDirectMergeEndpoint:
         assert captured_command.get("action") == "direct-merge"
         assert captured_command.get("branch") == "runner/test123"
         assert "command_id" in captured_command
+
+
+# ---------------------------------------------------------------------------
+# _pub() Redis list 이중 기록 TC
+# ---------------------------------------------------------------------------
+
+class TestPubWritesToLogList:
+    def test_pub_writes_to_log_list_R(self):
+        """R(Right): _pub() 호출 시 redis.rpush(log_list_key, ...) 호출 확인"""
+        cl = _load_listener()
+        redis = make_redis_mock()
+        runner_id = "dm-test123"
+
+        # _do_inline_merge 내부의 _pub을 직접 테스트할 수 없으므로
+        # 실제 _do_inline_merge를 호출하되 merge 단계 전에 _pub이 실행되는지 확인
+        # → _pub은 closure이므로 _do_inline_merge 호출 시 rpush 호출 여부로 검증
+
+        # merge_requested 삭제 + merge_lock 등을 mock
+        import types
+        mock_merge_lock = types.ModuleType("merge_lock")
+        mock_merge_lock.acquire_merge_lock = MagicMock(return_value=True)
+        mock_merge_lock.release_merge_lock = MagicMock(return_value=True)
+
+        redis.get.side_effect = lambda key: {
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path": "/tmp/wt",
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:branch": "plan/test",
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status": "queued",
+        }.get(key)
+
+        with patch.dict(sys.modules, {"merge_lock": mock_merge_lock}):
+            with patch("merge_workflow.MergeWorkflow") as mock_wf_cls:
+                mock_wf = MagicMock()
+                mock_wf.run.return_value = MagicMock(merged=True, tests_passed=True, conflict=False, message="ok")
+                mock_wf_cls.return_value = mock_wf
+                with patch.object(cl, "_cleanup_process_state", MagicMock()):
+                    cl._do_inline_merge(runner_id, redis)
+
+        # rpush가 log_list_key로 호출되었는지 확인
+        rpush_calls = redis.rpush.call_args_list
+        log_list_key = f"plan-runner:logs:list:{runner_id}"
+        assert any(log_list_key in str(c) for c in rpush_calls), \
+            f"rpush({log_list_key}, ...) 호출 없음. calls: {rpush_calls}"

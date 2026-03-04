@@ -32,7 +32,7 @@ class TestBuildStatusPayloadPlanFileNullDefense:
         svc = _make_service()
 
         # mget: [status, pid, current_cycle, start_time, plan_file=None, engine]
-        svc._sync.mget.return_value = ["running", "1234", "1", "2026-03-04T00:00:00", None, "claude"]
+        svc._sync.mget.return_value = ["running", "1234", "1", "2026-03-04T00:00:00", None, "claude", None]
 
         payload = svc._build_status_payload("test-runner-id")
 
@@ -45,7 +45,7 @@ class TestBuildStatusPayloadPlanFileNullDefense:
         Boundary 케이스: 빈 문자열도 falsy이므로 "ALL"로 변환되어야 함.
         """
         svc = _make_service()
-        svc._sync.mget.return_value = ["running", "1234", "1", "2026-03-04T00:00:00", "", "claude"]
+        svc._sync.mget.return_value = ["running", "1234", "1", "2026-03-04T00:00:00", "", "claude", None]
 
         payload = svc._build_status_payload("test-runner-id")
 
@@ -56,7 +56,7 @@ class TestBuildStatusPayloadPlanFileNullDefense:
         """Redis에 plan_file="docs/plan/2026-03-04_test.md" → 그대로 반환 (Right)"""
         svc = _make_service()
         plan = "docs/plan/2026-03-04_test.md"
-        svc._sync.mget.return_value = ["running", "1234", "1", "2026-03-04T00:00:00", plan, "claude"]
+        svc._sync.mget.return_value = ["running", "1234", "1", "2026-03-04T00:00:00", plan, "claude", None]
 
         payload = svc._build_status_payload("test-runner-id")
 
@@ -66,9 +66,29 @@ class TestBuildStatusPayloadPlanFileNullDefense:
     def test_plan_file_ALL_string_preserved(self):
         """Redis에 plan_file="ALL" → "ALL" 그대로 반환 (Right)"""
         svc = _make_service()
-        svc._sync.mget.return_value = ["running", "1234", "1", "2026-03-04T00:00:00", "ALL", "claude"]
+        svc._sync.mget.return_value = ["running", "1234", "1", "2026-03-04T00:00:00", "ALL", "claude", None]
 
         payload = svc._build_status_payload("test-runner-id")
 
+        assert payload is not None
+        assert payload["plan_file"] == "ALL"
+
+
+class TestBuildStatusPayloadBranchFallback:
+    """dm-* runner: plan_file=None + branch 존재 시 branch로 fallback"""
+
+    def test_dm_runner_branch_as_plan_file_R(self):
+        """plan_file=None, branch="plan/test" → plan_file="plan/test" (Right)"""
+        svc = _make_service()
+        svc._sync.mget.return_value = ["running", None, None, "2026-03-04T00:00:00", None, None, "plan/test"]
+        payload = svc._build_status_payload("dm-abc123")
+        assert payload is not None
+        assert payload["plan_file"] == "plan/test"
+
+    def test_normal_runner_no_branch_falls_back_ALL_B(self):
+        """plan_file=None, branch=None → plan_file="ALL" (Boundary/회귀)"""
+        svc = _make_service()
+        svc._sync.mget.return_value = ["running", "1234", "1", "2026-03-04T00:00:00", None, "claude", None]
+        payload = svc._build_status_payload("normal-runner")
         assert payload is not None
         assert payload["plan_file"] == "ALL"
