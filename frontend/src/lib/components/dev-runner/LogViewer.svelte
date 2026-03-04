@@ -52,6 +52,8 @@
 	let pendingStale = $state(false);
 	let completedBanner = $state(false); // runner 정상 완료 배너
 	const MAX_LINES = 500;
+	let resultQueue: ParsedLine[] = [];
+	let resultDrainInterval: ReturnType<typeof setInterval> | null = null;
 	const SEPARATOR_PATTERN = '════════════════';
 
 	const BASE_DELAY = 3000;
@@ -59,9 +61,9 @@
 	// Tag colors for dark background
 	const tagColors: Record<string, { text: string; bg: string }> = {
 		AI: { text: 'text-blue-400', bg: 'bg-blue-500/20' },
-		TOOL: { text: 'text-yellow-400', bg: 'bg-yellow-500/20' },
+		TOOL: { text: 'text-yellow-700', bg: 'bg-yellow-900/20' },
 		DONE: { text: 'text-green-400', bg: 'bg-green-500/20' },
-		RESULT: { text: 'text-emerald-400', bg: 'bg-emerald-500/20' },
+		RESULT: { text: 'text-emerald-700', bg: 'bg-emerald-900/20' },
 		ERROR: { text: 'text-red-400', bg: 'bg-red-500/20' },
 		INFO: { text: 'text-gray-500', bg: 'bg-transparent' },
 		SYSTEM: { text: 'text-purple-400', bg: 'bg-purple-500/20' },
@@ -171,6 +173,27 @@
 			return;
 		}
 
+		// RESULT 라인(실시간)은 큐에 넣고 순차 출력
+		if (parsed.tag === 'RESULT' && !isStale) {
+			resultQueue.push(parsed);
+			if (!resultDrainInterval) {
+				resultDrainInterval = setInterval(() => {
+					const next = resultQueue.shift();
+					if (next) {
+						pushLine(next);
+					} else {
+						clearInterval(resultDrainInterval!);
+						resultDrainInterval = null;
+					}
+				}, 40);
+			}
+			return;
+		}
+
+		pushLine(parsed);
+	}
+
+	function pushLine(parsed: ParsedLine) {
 		lines.push(parsed);
 		if (lines.length > MAX_LINES) {
 			lines = lines.slice(lines.length - MAX_LINES);
@@ -341,6 +364,10 @@
                         if (noiseTimer) clearTimeout(noiseTimer);
 			eventSource = null;
 		}
+		if (resultDrainInterval) {
+			clearInterval(resultDrainInterval);
+			resultDrainInterval = null;
+		}
 	});
 
 	function getTagStyle(tag: string) {
@@ -472,6 +499,37 @@
 						<span class="flex-1 min-w-0 break-all text-indigo-300 font-medium">
 							{line.message}
 						</span>
+					</div>
+				{:else if line.tag === 'TOOL'}
+					{@const style = getTagStyle(line.tag)}
+					<div class="dr-log-line dr-log-line-tool flex items-start gap-2 py-0.5 leading-5 opacity-40 {line.isStale ? 'opacity-20' : ''}">
+						<span class="text-xs text-gray-600 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
+						<span class="shrink-0 w-[42px] text-right {style.text}">
+							<span class="dr-tag-badge {style.bg}">{line.tag}</span>
+						</span>
+						<span class="flex-1 min-w-0 truncate text-gray-500">
+							{line.message}
+						</span>
+					</div>
+				{:else if line.tag === 'RESULT'}
+					{@const style = getTagStyle(line.tag)}
+					{@const resultMatch = line.message.match(/^(\d+)→\s?(.*)/)}
+					<div class="dr-log-line dr-log-line-result flex items-start gap-0 py-0 leading-5 {line.isStale ? 'opacity-20' : 'opacity-60'}">
+						{#if resultMatch}
+							<span class="text-xs text-gray-600 shrink-0 w-[56px] tabular-nums select-none text-right pr-1">{line.timestamp}</span>
+							<span class="shrink-0 w-[42px] text-right {style.text}">
+								<span class="dr-tag-badge {style.bg}">{line.tag}</span>
+							</span>
+							<span class="shrink-0 w-[36px] text-right pr-1 text-gray-600 tabular-nums select-none text-xs">{resultMatch[1]}</span>
+							<span class="text-gray-600 select-none text-xs pr-1">→</span>
+							<span class="flex-1 min-w-0 truncate text-gray-400 text-xs">{resultMatch[2]}</span>
+						{:else}
+							<span class="text-xs text-gray-600 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
+							<span class="shrink-0 w-[42px] text-right {style.text}">
+								<span class="dr-tag-badge {style.bg}">{line.tag}</span>
+							</span>
+							<span class="flex-1 min-w-0 truncate text-gray-400 text-xs">{line.message}</span>
+						{/if}
 					</div>
 				{:else if line.tag}
 					{@const style = getTagStyle(line.tag)}
