@@ -555,6 +555,33 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
             except Exception:
                 pass
+
+            # plan 잔여 항목 확인 — 잔여 있으면 재시작 플래그 설정
+            remaining_count = 0
+            if plan_file:
+                try:
+                    plan_path = Path(plan_file)
+                    if plan_path.is_file():
+                        content = plan_path.read_text(encoding="utf-8")
+                        remaining = re.findall(r'- \[ \]', content)
+                        remaining_count = len(remaining)
+                        _pub(f"plan 잔여 항목 확인: {remaining_count}개")
+                    else:
+                        _pub(f"plan 파일 없음 (잔여 확인 불가): {plan_file}")
+                except Exception as e:
+                    _pub(f"plan 잔여 항목 확인 실패: {e}")
+            else:
+                _pub("plan_file 미지정 — 잔여 항목 확인 생략")
+
+            if remaining_count > 0:
+                try:
+                    redis_client.set(
+                        f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge",
+                        plan_file,
+                    )
+                    _pub(f"[RESTART-FLAG] plan 잔여 {remaining_count}개 → 재시작 플래그 설정: {plan_file}")
+                except Exception as e:
+                    _pub(f"재시작 플래그 설정 실패: {e}")
         elif result.conflict:
             _pub(f"merge 충돌 발생 — worktree 보존: {result.message[:200]}")
             try:
