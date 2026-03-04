@@ -7,6 +7,37 @@ from unittest.mock import patch, MagicMock
 
 
 @pytest.fixture(autouse=True)
+def redis_cleanup():
+    """테스트 전후 실제 Redis에 남은 plan-runner:* 키를 자동 정리.
+
+    - 테스트 시작 전 active_runners 스냅샷을 기록
+    - 테스트 종료 후 새로 추가된 runner_id와 관련 키를 삭제
+    """
+    try:
+        import redis as redis_lib
+        r = redis_lib.Redis(host="localhost", port=6379, decode_responses=True)
+        r.ping()
+    except Exception:
+        yield
+        return
+
+    before_members = r.smembers("plan-runner:active_runners") or set()
+
+    yield
+
+    try:
+        after_members = r.smembers("plan-runner:active_runners") or set()
+        new_members = after_members - before_members
+        for runner_id in new_members:
+            r.srem("plan-runner:active_runners", runner_id)
+            keys = r.keys(f"plan-runner:runners:{runner_id}:*")
+            if keys:
+                r.delete(*keys)
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def dev_runner_config_isolation(tmp_path):
     """모든 dev_runner 테스트에서 config를 tmp 경로로 격리.
 
