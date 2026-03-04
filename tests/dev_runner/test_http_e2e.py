@@ -1,5 +1,6 @@
 import os
 import signal
+import sys
 import time
 import pytest
 import subprocess
@@ -55,17 +56,22 @@ def background_listener():
 
     script_path = Path("scripts/dev-runner-command-listener.py")
     process = subprocess.Popen(
-        ["python", str(script_path), "--redis-db", str(REDIS_TEST_DB)],
+        [sys.executable, str(script_path), "--redis-db", str(REDIS_TEST_DB)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True
     )
 
-    # Wait for heartbeat
-    for _ in range(20):
+    # Wait for heartbeat (최대 15초)
+    heartbeat_ok = False
+    for _ in range(30):
         if r.get("plan-runner:listener:heartbeat"):
+            heartbeat_ok = True
             break
         time.sleep(0.5)
+    if not heartbeat_ok:
+        process.terminate()
+        pytest.fail("background_listener가 15초 안에 heartbeat를 설정하지 못했습니다.")
 
     # executor_service의 Redis 클라이언트를 db=15로 교체 (API-Listener 격리 일치)
     old_redis = es_module.executor_service.redis_client
