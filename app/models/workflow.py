@@ -41,6 +41,8 @@ class Workflow(Base):
         Index("ix_workflows_status", "status"),
         Index("ix_workflows_slug", "slug"),
         Index("ix_workflows_created_at", "created_at"),
+        Index("ix_workflows_plan_file", "plan_file"),
+        Index("ix_workflows_runner_id", "runner_id"),
     )
 
     def mark_running(self, runner_id: str, branch: str, worktree_path: str) -> None:

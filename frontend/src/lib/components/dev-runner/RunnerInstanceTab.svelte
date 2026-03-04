@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { devRunnerRunnerApi } from '$lib/api';
+	import { devRunnerRunnerApi, devRunnerWorkflowApi } from '$lib/api';
 	import type { DevRunnerRunStatusResponse } from '$lib/api';
 	import LogViewer from './LogViewer.svelte';
 
@@ -13,12 +13,13 @@
 		worktreePath?: string | null;
 		branch?: string | null;
 		mergeStatus?: string | null;
+		orphan?: boolean;
 		onStop: () => void;
 		onClose: () => void;
 		onBatchPlansChange?: (plans: { name: string; status: 'pending' | 'running' | 'done' }[]) => void;
 	}
 
-	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, onStop, onClose, onBatchPlansChange }: Props = $props();
+	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, orphan = false, onStop, onClose, onBatchPlansChange }: Props = $props();
 
 	let elapsed = $state('');
 	let stopping = $state(false);
@@ -28,6 +29,24 @@
 	let resolvingConflict = $state(false);
 	let mergeError = $state<string | null>(null);
 	let intervalId: ReturnType<typeof setInterval> | null = null;
+
+	async function handleOrphanReset() {
+		try {
+			const workflows = await devRunnerWorkflowApi.list({ status: 'running' });
+			const wf = workflows.find(w => w.runner_id === runnerId);
+			if (wf) {
+				await devRunnerWorkflowApi.reset(wf.id);
+			} else {
+				// merge_pending도 확인
+				const mpWorkflows = await devRunnerWorkflowApi.list({ status: 'merge_pending' });
+				const mpWf = mpWorkflows.find(w => w.runner_id === runnerId);
+				if (mpWf) await devRunnerWorkflowApi.reset(mpWf.id);
+			}
+			onClose();
+		} catch (e) {
+			mergeError = e instanceof Error ? e.message : '고아 리셋 실패';
+		}
+	}
 
 	function formatElapsed(startIso: string | null): string {
 		if (!startIso) return '';
@@ -226,6 +245,13 @@
 
 	{#if mergeError}
 		<div class="px-3 py-1 text-xs text-red-600 bg-red-50 border-b border-red-100">{mergeError}</div>
+	{/if}
+
+	{#if orphan}
+		<div class="flex items-center gap-2 px-3 py-2 bg-orange-50 border-b border-orange-200 text-xs">
+			<span class="text-orange-700 font-medium">⚠ 프로세스 종료 후 워크플로우가 정리되지 않았습니다.</span>
+			<button class="px-2 py-0.5 rounded border border-orange-300 text-orange-700 hover:bg-orange-100 transition-colors" onclick={handleOrphanReset}>리셋</button>
+		</div>
 	{/if}
 
 	<!-- 로그 뷰어 -->

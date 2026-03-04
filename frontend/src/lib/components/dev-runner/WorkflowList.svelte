@@ -4,6 +4,7 @@
 	let workflows = $state<WorkflowResponse[]>([]);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
+	let resetLoading = $state(false);
 	let statusFilter = $state('');
 	let selectedId = $state<number | null>(null);
 
@@ -26,6 +27,18 @@
 			error = String(e);
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function resetAllOrphans() {
+		resetLoading = true;
+		try {
+			const result = await devRunnerWorkflowApi.resetAllOrphans();
+			if (result.reset_count > 0) await load();
+		} catch (err) {
+			error = `고아 리셋 실패: ${err}`;
+		} finally {
+			resetLoading = false;
 		}
 	}
 
@@ -69,6 +82,13 @@
 					<option value={val}>{label}</option>
 				{/each}
 			</select>
+			<button
+				onclick={resetAllOrphans}
+				class="rounded px-2 py-1 text-xs text-orange-600 hover:bg-orange-100 disabled:opacity-50"
+				disabled={resetLoading}
+			>
+				{resetLoading ? '리셋 중...' : '고아 일괄 리셋'}
+			</button>
 			<button
 				onclick={load}
 				class="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded"

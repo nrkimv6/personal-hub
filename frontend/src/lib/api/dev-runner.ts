@@ -46,6 +46,7 @@ export interface RunnerListItem {
 	branch: string | null;
 	merge_status: string | null;
 	visible: boolean;
+	orphan: boolean;
 }
 
 export interface PlanProgressResponse {
@@ -536,4 +537,10 @@ export const devRunnerWorkflowApi = {
 
 	cancel: (id: number): Promise<WorkflowResponse> =>
 		devRunnerRequest<WorkflowResponse>(`/workflows/${id}/cancel`, { method: 'PATCH' }),
+
+	reset: (id: number, cleanupWorktree?: boolean): Promise<WorkflowResponse> =>
+		devRunnerRequest<WorkflowResponse>(`/workflows/${id}/reset${cleanupWorktree ? '?cleanup_worktree=true' : ''}`, { method: 'PATCH' }),
+
+	resetAllOrphans: (): Promise<{ reset_count: number }> =>
+		devRunnerRequest<{ reset_count: number }>('/workflows/reset-all-orphans', { method: 'POST' }),
 };
