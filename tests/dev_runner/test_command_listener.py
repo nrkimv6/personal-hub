@@ -182,3 +182,17 @@ class TestRedisStateSaving:
 
         assert state["plan_file"] == "test.md"
         redis_client.set.assert_any_call("dev-runner:state:plan_file", "test.md")
+
+    def test_empty_string_plan_file_saves_ALL(self):
+        """plan_file="" (빈 문자열) → Redis에 "ALL" 저장 (Boundary)
+
+        빈 문자열은 Python의 `or` 연산자에서 falsy로 처리되므로 "ALL"로 변환되어야 함.
+        """
+        redis_client = MagicMock()
+        state = self._save_state(plan_file="", redis_client=redis_client)
+
+        # state dict 확인
+        assert state["plan_file"] == "ALL", "빈 문자열 plan_file은 'ALL'로 변환되어야 함"
+
+        # Redis 저장 확인
+        redis_client.set.assert_any_call("dev-runner:state:plan_file", "ALL")

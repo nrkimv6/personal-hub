@@ -81,6 +81,9 @@ class EventService:
             values = self._sync.mget([f"{RUNNER_KEY_PREFIX}:{runner_id}:{f}" for f in fields])
             data = dict(zip(fields, values))
             data["runner_id"] = runner_id
+            # plan_file이 None(Redis 키 미설정)이면 "ALL" fallback
+            if not data.get("plan_file"):
+                data["plan_file"] = "ALL"
             return data
         except Exception:
             return None

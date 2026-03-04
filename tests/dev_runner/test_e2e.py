@@ -66,6 +66,15 @@ def dev_runner_listener():
             capture_output=True, cwd=str(_root),
         )
 
+    # Redis plan-runner:* stale 키 정리
+    try:
+        r_cleanup = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+        stale_keys = r_cleanup.keys("plan-runner:*")
+        if stale_keys:
+            r_cleanup.delete(*stale_keys)
+    except Exception:
+        pass
+
 @pytest.fixture
 def executor_service():
     """Actual executor service connecting to real local Redis"""

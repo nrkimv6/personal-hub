@@ -72,6 +72,18 @@ def background_listener():
     _cleanup_test_worktree()
 
 class TestHttpE2EChain:
+    @pytest.fixture(autouse=True)
+    def cleanup_redis_after_test(self):
+        """각 테스트 메서드 종료 후 plan-runner:* Redis 키 자동 정리."""
+        yield
+        try:
+            r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB, decode_responses=True)
+            stale_keys = r.keys("plan-runner:*")
+            if stale_keys:
+                r.delete(*stale_keys)
+        except Exception:
+            pass
+
     def test_http_start_to_process_execution(self, api_client, background_listener):
         r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_TEST_DB, decode_responses=True)
 
