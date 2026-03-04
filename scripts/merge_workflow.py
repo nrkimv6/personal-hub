@@ -188,9 +188,22 @@ class MergeWorkflow:
             self._wf_update(runner_id, "failed", error_message=str(e))
             return WorkflowResult(merged=False, tests_passed=False, conflict=False, message=str(e))
 
+    def _get_project_python(self) -> str:
+        """project_root의 venv Python 경로를 반환한다. 없으면 self.python_path 사용."""
+        candidates = [
+            self.project_root / ".venv" / "Scripts" / "python.exe",
+            self.project_root / "venv" / "Scripts" / "python.exe",
+            self.project_root / ".venv" / "bin" / "python",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return str(candidate)
+        return self.python_path
+
     def run_post_merge_tests(self) -> TestResult:
+        project_python = self._get_project_python()
         result = subprocess.run(
-            [self.python_path, "-m", "pytest", str(self.project_root / "tests"), "-m", "http", "-v", "--timeout=120"],
+            [project_python, "-m", "pytest", str(self.project_root / "tests"), "-m", "http", "-v", "--timeout=120"],
             capture_output=True, text=True, cwd=str(self.project_root)
         )
         return TestResult(
