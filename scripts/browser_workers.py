@@ -239,7 +239,7 @@ class BrowserWorkerManager:
         print(f"  (Hot reload disabled - manual restart){RESET}")
         print(f"{YELLOW}{'=' * 40}{RESET}\n")
 
-        url = f"http://localhost:{self.api_port}/api/v1/system/self-restart?delay=2"
+        url = f"http://localhost:{self.api_port}/api/v1/system/self-restart?delay=2&reason=browser_workers_py"
 
         # 1순위: Self-Restart API
         try:

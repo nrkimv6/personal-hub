@@ -380,7 +380,7 @@ function Restart-ApiServer {
     $serviceName = "Monitor Page (Development)"
 
     # 1순위: Self-Restart API (graceful, 포트 정상 해제)
-    $selfRestartEndpoint = "http://localhost:${apiPort}/api/v1/system/self-restart?delay=2"
+    $selfRestartEndpoint = "http://localhost:${apiPort}/api/v1/system/self-restart?delay=2&reason=browser_workers_ps1"
     try {
         $response = Invoke-WebRequest -Uri $selfRestartEndpoint -Method POST -TimeoutSec 5 -UseBasicParsing
         if ($response.StatusCode -eq 200) {

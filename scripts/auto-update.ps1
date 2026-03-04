@@ -148,7 +148,7 @@ if ($restartApi) {
     Write-Log "API self-restart 호출 중 (port: $ApiPort, delay: ${ShutdownDelay}s)..."
 
     try {
-        $uri = "http://localhost:$ApiPort/api/v1/system/self-restart?delay=$ShutdownDelay"
+        $uri = "http://localhost:$ApiPort/api/v1/system/self-restart?delay=$ShutdownDelay&reason=auto_update"
         $response = Invoke-RestMethod -Uri $uri -Method POST -TimeoutSec 10
         Write-Log "API self-restart 응답: $($response.message)"
         Write-Log "API가 ${ShutdownDelay}초 후 종료됩니다. NSSM이 ~10초 후 자동 재시작합니다."
