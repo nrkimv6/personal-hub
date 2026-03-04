@@ -50,9 +50,17 @@ def require_full_env():
         pytest.skip(f"plan-runner venv not found: {_config.PLAN_RUNNER_PYTHON}")
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="class")
 def http_client():
-    return TestClient(app)
+    """TestClient를 context manager로 사용 — 동일 event loop 유지 (BRPOP 연결 재사용 안전)
+
+    context manager 없이 TestClient를 쓰면 요청마다 새 anyio event loop가 생성되어
+    executor_service.async_redis 연결 풀이 이전 (닫힌) loop의 연결을 재사용하려다
+    RuntimeError: Event loop is closed 발생.
+    scope="class"로 동일 TestClient 인스턴스를 클래스 내 모든 테스트가 공유.
+    """
+    with TestClient(app) as client:
+        yield client
 
 
 def _post_run(http_client, plan_file: str, max_cycles: int = 1, tracker=None) -> str:

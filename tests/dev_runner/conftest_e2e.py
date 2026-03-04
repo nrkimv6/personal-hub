@@ -36,9 +36,13 @@ def real_redis():
     r.close()
 
 
-@pytest.fixture
+@pytest.fixture(scope="class")
 def isolated_redis():
-    """테스트 전용 Redis db=15 — 격리된 DB 사용으로 운영 DB 오염 방지"""
+    """테스트 전용 Redis db=15 — 격리된 DB 사용으로 운영 DB 오염 방지
+
+    scope="class": http_client(scope="class")와 scope 일치 필요.
+    listener_process가 isolated_redis에 의존하므로 scope 통일.
+    """
     try:
         r = redis_lib.Redis(host="localhost", port=6379, db=REDIS_TEST_DB, decode_responses=True)
         r.ping()
@@ -50,9 +54,12 @@ def isolated_redis():
     r.close()
 
 
-@pytest.fixture
+@pytest.fixture(scope="class")
 def listener_process(isolated_redis):
     """Listener 프로세스 lifecycle 관리
+
+    scope="class": isolated_redis(scope="class")와 scope 일치.
+    클래스 내 모든 테스트가 하나의 Listener 프로세스를 공유 — 재기동 비용 절감.
 
     1. 기존 heartbeat 키 삭제 (잔여 상태 초기화)
     2. Listener 프로세스 spawn (db=REDIS_TEST_DB 격리)
@@ -160,10 +167,11 @@ def e2e_worktree_cleanup():
             )
 
 
-@pytest.fixture
+@pytest.fixture(scope="class")
 def e2e_redis_cleanup(isolated_redis):
     """plan-runner:* 키 패턴 cleanup (before + after)
 
+    scope="class": isolated_redis(scope="class")와 scope 일치.
     isolated_redis(db=15)를 사용하여 운영 DB 오염 방지.
     heartbeat 키는 삭제하지 않음 — Listener 프로세스가 활성 중임을 API가 확인해야 함.
     """
