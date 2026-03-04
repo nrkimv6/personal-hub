@@ -234,7 +234,12 @@ function Get-LatestLogFileMultiPattern {
             if ($found) { $allCandidates += $found }
         }
     }
-    $latest = $allCandidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    $nonEmpty = $allCandidates | Where-Object { $_.Length -gt 0 }
+    $latest = if ($nonEmpty) {
+        $nonEmpty | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    } else {
+        $allCandidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    }
     if ($latest) { return $latest.FullName }
     return $null
 }
@@ -708,7 +713,11 @@ function Start-CombinedLogTail {
                 if ($found) { $allCandidates += $found }
             }
         }
-        # LastWriteTime 기준 최신 파일 (파일명 비교 시 prefix 차이로 오판 방지)
+        # LastWriteTime 기준 최신 파일 — 0바이트 파일 우선 제외 (잔존 빈 파일 오선택 방지)
+        $nonEmpty = $allCandidates | Where-Object { $_.Length -gt 0 }
+        if ($nonEmpty) {
+            return $nonEmpty | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        }
         return $allCandidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     }
 

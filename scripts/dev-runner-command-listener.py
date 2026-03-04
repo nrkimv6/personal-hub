@@ -1258,6 +1258,9 @@ def start_merge_orchestrator(redis_client: redis.Redis) -> Dict:
             else:
                 logger.error("[MergeOrch] 로그 파일 비어있음 — 프로세스 시작 자체 실패")
             _merge_orchestrator_process = None
+            if log_path.exists() and log_path.stat().st_size == 0:
+                log_path.unlink(missing_ok=True)
+                logger.debug(f"[MergeOrch] 0바이트 로그 파일 삭제: {log_path}")
             return {"success": False, "message": f"Orchestrator 즉시 종료 (exit code: {rc}): {log_tail[:200]}"}
 
         # PID를 Redis에 저장 (listener 재시작 시 재연결용)
