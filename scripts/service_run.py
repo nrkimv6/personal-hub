@@ -84,9 +84,10 @@ class ServiceRunner:
             self.log.info("KeyboardInterrupt received")
         except Exception as e:
             self.log.error(f"Service failed: {e}", exc_info=True)
+            self._exit_code = 1
         finally:
             self.cleanup()
-            sys.exit(1)
+            sys.exit(getattr(self, '_exit_code', 0))
 
     # ── 환경 진단 ────────────────────────────────────────────────
     def log_environment(self):
