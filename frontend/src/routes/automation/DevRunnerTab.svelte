@@ -55,6 +55,7 @@
 		running: boolean;
 		start_time: string | null;
 		branch?: string | null;
+		orphan?: boolean;
 	}
 	let runnerTabs = $state<RunnerTab[]>([]);
 	let activeTabId = $state<string | null>(null);
@@ -94,7 +95,7 @@
 				// 기존 탭 상태 갱신
 				runnerTabs = runnerTabs.map(tab => {
 					const runner = runnerMap.get(tab.id);
-					return runner ? { ...tab, running: runner.running } : { ...tab, running: false };
+					return runner ? { ...tab, running: runner.running, orphan: runner.orphan ?? false } : { ...tab, running: false };
 				});
 				// 신규 runner 탭 추가 (페이지 로드 시 또는 외부에서 시작된 runner)
 				for (const runner of runners) {
@@ -106,6 +107,7 @@
 							running: runner.running,
 							start_time: runner.start_time ? new Date(runner.start_time).toISOString() : null,
 							branch: runner.branch ?? null,
+							orphan: runner.orphan ?? false,
 						}];
 					}
 				}
@@ -559,6 +561,8 @@
 							>
 								{#if tab.running}
 \t\t\t\t\t\t\t\t\t<svg class="w-3 h-3 text-amber-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+\t\t\t\t\t\t\t\t{:else if tab.orphan}
+\t\t\t\t\t\t\t\t\t<span class="w-2 h-2 rounded-full bg-orange-500 shrink-0" title="고아 워크플로우"></span>
 \t\t\t\t\t\t\t\t{:else}
 \t\t\t\t\t\t\t\t\t<svg class="w-3 h-3 text-emerald-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
 \t\t\t\t\t\t\t\t{/if}
@@ -617,6 +621,7 @@
 										running={tab.running}
 										engine={tab.engine}
 										startTime={tab.start_time}
+										orphan={tab.orphan}
 										onStop={() => handleTabStop(tab.id)}
 										onClose={() => handleCloseTab(tab.id)}
 										onBatchPlansChange={(plans) => { batchPlans = plans; }}
