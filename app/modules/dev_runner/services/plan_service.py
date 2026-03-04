@@ -57,6 +57,9 @@ class PlanService:
         self._ignored_plans: List[str] = []
         # archive 캐시: {dir_path: {"mtime": float, "results": [PlanFileResponse]}}
         self._archive_cache: dict[str, dict] = {}
+        # plan 전체 목록 캐시 (startup 시 빌드, mutation 시 무효화)
+        self._plans_cache: Optional[List[PlanFileResponse]] = None
+        self._plans_cache_with_ignored: Optional[List[PlanFileResponse]] = None
         self._migrate_to_registered_paths()
         self._load_registered_paths()
         self._load_ignored_plans()
@@ -164,6 +167,7 @@ class PlanService:
         if resolved not in self._ignored_plans:
             self._ignored_plans.append(resolved)
             self._save_ignored_plans()
+            self.invalidate_plans_cache()
             return True
         return False
 
@@ -173,6 +177,7 @@ class PlanService:
         if resolved in self._ignored_plans:
             self._ignored_plans.remove(resolved)
             self._save_ignored_plans()
+            self.invalidate_plans_cache()
             return True
         return False
 
@@ -188,6 +193,7 @@ class PlanService:
         if resolved not in existing_paths:
             self._registered_paths.append({"path": resolved, "type": path_type})
             self._save_registered_paths()
+            self.invalidate_plans_cache()
             return True
         return False
 
@@ -198,17 +204,19 @@ class PlanService:
             if entry["path"] == resolved:
                 self._registered_paths.pop(i)
                 self._save_registered_paths()
+                self.invalidate_plans_cache()
                 return True
         return False
 
     # ========== plan 목록 ==========
 
-    def list_plans(self, include_ignored: bool = False) -> List[PlanFileResponse]:
-        """
-        plan 목록 조회 — 등록된 경로(폴더/파일) 순회
+    def invalidate_plans_cache(self):
+        """plan 목록 캐시 무효화 — mutation 후 호출"""
+        self._plans_cache = None
+        self._plans_cache_with_ignored = None
 
-        모든 경로를 동등하게 취급 (고정/외부 구분 없음)
-        """
+    def _scan_all_plans(self, include_ignored: bool = False) -> List[PlanFileResponse]:
+        """실제 파일시스템 스캔 (캐시 미스 시 호출)"""
         seen: set[str] = set()
         results: List[PlanFileResponse] = []
 
@@ -245,6 +253,21 @@ class PlanService:
 
         results.sort(key=lambda x: x.filename, reverse=True)
         return results
+
+    def list_plans(self, include_ignored: bool = False) -> List[PlanFileResponse]:
+        """
+        plan 목록 조회 — 캐시 우선, 미스 시 파일시스템 스캔
+
+        모든 경로를 동등하게 취급 (고정/외부 구분 없음)
+        """
+        if include_ignored:
+            if self._plans_cache_with_ignored is None:
+                self._plans_cache_with_ignored = self._scan_all_plans(include_ignored=True)
+            return self._plans_cache_with_ignored
+        else:
+            if self._plans_cache is None:
+                self._plans_cache = self._scan_all_plans(include_ignored=False)
+            return self._plans_cache
 
     def list_ignored_plans(self) -> List[PlanFileResponse]:
         """무시된(완료/빈) plan 목록만 조회"""
@@ -1095,6 +1118,7 @@ class PlanService:
 
         if found:
             path.write_text("".join(lines), encoding="utf-8")
+            self.invalidate_plans_cache()
         return found
 
     # ========== 동기화 ==========
@@ -1105,8 +1129,10 @@ class PlanService:
         old_plans = {p.path: p for p in self.list_plans(include_ignored=True)}
         old_keys = set(old_plans.keys())
 
-        # 디스크에서 다시 스캔 (캐시 무효화)
+        # 디스크에서 다시 스캔 (캐시 + archive 캐시 모두 무효화)
         self._load_registered_paths()
+        self.invalidate_plans_cache()
+        self._archive_cache.clear()
         new_plans_list = self.list_plans(include_ignored=True)
         new_plans = {p.path: p for p in new_plans_list}
         new_keys = set(new_plans.keys())
@@ -1227,22 +1253,27 @@ class PlanService:
         status_pattern = re.compile(r"^> 상태: .+")
 
         # 상단 20줄에서 `> 상태:` 라인 교체
+        found = False
         for i, line in enumerate(lines[:20]):
             if status_pattern.match(line.rstrip("\n\r")):
                 lines[i] = f"> 상태: {new_status}\n"
-                file_path.write_text("".join(lines), encoding="utf-8")
-                return new_status
+                found = True
+                break
 
-        # `> 상태:` 라인 없음 → 첫 번째 `#` 제목 다음 줄에 삽입
-        for i, line in enumerate(lines):
-            if line.startswith("#"):
-                lines.insert(i + 1, f"> 상태: {new_status}\n")
-                file_path.write_text("".join(lines), encoding="utf-8")
-                return new_status
+        if not found:
+            # `> 상태:` 라인 없음 → 첫 번째 `#` 제목 다음 줄에 삽입
+            for i, line in enumerate(lines):
+                if line.startswith("#"):
+                    lines.insert(i + 1, f"> 상태: {new_status}\n")
+                    found = True
+                    break
 
-        # 제목도 없으면 파일 맨 앞에 삽입
-        lines.insert(0, f"> 상태: {new_status}\n")
+        if not found:
+            # 제목도 없으면 파일 맨 앞에 삽입
+            lines.insert(0, f"> 상태: {new_status}\n")
+
         file_path.write_text("".join(lines), encoding="utf-8")
+        self.invalidate_plans_cache()
         return new_status
 
 
