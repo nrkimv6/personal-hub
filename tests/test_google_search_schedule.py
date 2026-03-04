@@ -562,5 +562,108 @@ class TestScheduledCrawlWorkerGoogleSearch:
             assert "CAPTCHA" in result["error_message"]
 
 
+class TestExecuteGoogleSearch:
+    """_execute_google_search 단위 테스트 (schedule_id 오타 버그 회귀).
+
+    SessionLocal을 mock으로 대체하여 SQLite UUID 호환 문제를 우회.
+    """
+
+    def _make_mock_db(self, saved_search=None):
+        """mock DB 세션 생성 헬퍼."""
+        mock_db = Mock()
+        mock_query = Mock()
+        mock_db.query.return_value = mock_query
+        mock_query.filter_by.return_value = mock_query
+        mock_query.first.return_value = saved_search
+        return mock_db
+
+    @pytest.mark.asyncio
+    async def test_execute_google_search_right_creates_queue(self):
+        """R(정상): 정상 실행 시 GoogleSearchQueue에 올바른 schedule_id가 저장되는지 검증."""
+        from app.worker.scheduled_worker import ScheduledCrawlWorker
+
+        worker = ScheduledCrawlWorker()
+        mock_service = Mock()
+
+        # saved_search mock
+        mock_saved_search = Mock()
+        mock_saved_search.name = "테스트 검색"
+        mock_saved_search.query = "Python"
+        mock_saved_search.date_filter = "1w"
+        mock_saved_search.max_pages = 2
+        mock_saved_search.service_account_id = None
+
+        mock_db = self._make_mock_db(saved_search=mock_saved_search)
+        added_items = []
+        mock_db.add.side_effect = lambda x: added_items.append(x)
+
+        with patch("app.worker.scheduled_worker.SessionLocal", return_value=mock_db):
+            with patch("app.worker.scheduled_worker.TaskScheduleService", return_value=mock_service):
+                with patch.object(worker, "_update_worker_state"):
+                    await worker._execute_google_search(
+                        schedule_id=99,
+                        run_id=1,
+                        saved_search_id=1,
+                    )
+
+        # 추가된 GoogleSearchQueue의 schedule_id가 99인지 확인
+        assert len(added_items) == 1
+        queue_item = added_items[0]
+        assert isinstance(queue_item, GoogleSearchQueue)
+        assert queue_item.schedule_id == 99
+
+    @pytest.mark.asyncio
+    async def test_execute_google_search_boundary_missing_saved_search(self):
+        """B(경계): saved_search가 없는 경우 fail_run 호출 확인."""
+        from app.worker.scheduled_worker import ScheduledCrawlWorker
+
+        worker = ScheduledCrawlWorker()
+        mock_service = Mock()
+        mock_db = self._make_mock_db(saved_search=None)  # 검색 없음
+
+        with patch("app.worker.scheduled_worker.SessionLocal", return_value=mock_db):
+            with patch("app.worker.scheduled_worker.TaskScheduleService", return_value=mock_service):
+                with patch.object(worker, "_update_worker_state"):
+                    await worker._execute_google_search(
+                        schedule_id=1,
+                        run_id=10,
+                        saved_search_id=99999,
+                    )
+
+        mock_service.fail_run.assert_called_once_with(10, "저장된 검색을 찾을 수 없습니다")
+        mock_db.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_execute_google_search_error_db_commit_fail(self):
+        """E(에러): DB commit 실패 시 fail_run 호출 확인."""
+        from app.worker.scheduled_worker import ScheduledCrawlWorker
+
+        worker = ScheduledCrawlWorker()
+        mock_service = Mock()
+
+        mock_saved_search = Mock()
+        mock_saved_search.name = "검색"
+        mock_saved_search.query = "test"
+        mock_saved_search.date_filter = None
+        mock_saved_search.max_pages = 1
+        mock_saved_search.service_account_id = None
+
+        mock_db = self._make_mock_db(saved_search=mock_saved_search)
+        mock_db.commit.side_effect = Exception("DB 연결 오류")
+
+        with patch("app.worker.scheduled_worker.SessionLocal", return_value=mock_db):
+            with patch("app.worker.scheduled_worker.TaskScheduleService", return_value=mock_service):
+                with patch.object(worker, "_update_worker_state"):
+                    await worker._execute_google_search(
+                        schedule_id=1,
+                        run_id=5,
+                        saved_search_id=1,
+                    )
+
+        mock_service.fail_run.assert_called_once()
+        run_id_called = mock_service.fail_run.call_args[0][0]
+        assert run_id_called == 5
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
