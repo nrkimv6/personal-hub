@@ -68,6 +68,9 @@ HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
 HEARTBEAT_INTERVAL = 10  # heartbeat 갱신 주기 (초)
 HEARTBEAT_TTL = 30  # heartbeat 만료 시간 (초, 3회 미갱신 시 만료)
 
+# merge 활성 상태 — cleanup 보호 가드 및 reconnect 복구 조건에 사용
+MERGE_ACTIVE_STATUSES = ("queued", "merging", "pending_merge", "resolving")
+
 QUOTA_ERROR_MARKERS = ["TerminalQuotaError", "exhausted your capacity", "[QUOTA]"]
 
 SCRIPT_DIR = Path(__file__).parent
@@ -136,7 +139,7 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     if reason and reason.startswith(("reconnect_", "heartbeat_")):
         try:
             merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
-            if merge_status in ("queued", "merging"):
+            if merge_status in MERGE_ACTIVE_STATUSES:
                 logger.warning(
                     f"[cleanup] 머지 진행중 runner {runner_id} cleanup 거부 "
                     f"(reason={reason}, merge_status={merge_status})"
@@ -354,11 +357,11 @@ def _recover_pending_merge(runner_id: str, redis_client: redis.Redis, merge_stat
     logger.info(f"[recover_merge] runner {runner_id} 머지 복구 시작 (merge_status={merge_status})")
 
     try:
-        if merge_status == "merging":
+        if merge_status in ("merging", "resolving"):
             # stale lock 해제 후 queued로 재설정
             try:
                 release_merge_lock(redis_client, runner_id)
-                logger.info(f"[recover_merge] runner {runner_id} stale merge lock 해제")
+                logger.info(f"[recover_merge] runner {runner_id} stale merge lock 해제 (merge_status={merge_status})")
             except Exception as _e:
                 logger.debug(f"[recover_merge] lock 해제 실패 (무시): {_e}")
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
@@ -408,7 +411,7 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
                 _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
             except Exception:
                 _mr, _ms = None, None
-            if _mr or _ms in ("queued", "merging", "pending_merge"):
+            if _mr or _ms in MERGE_ACTIVE_STATUSES:
                 logger.warning(
                     f"[reconnect] runner {runner_id} PID 없으나 머지 대기중 "
                     f"(merge_requested={bool(_mr)}, merge_status={_ms}) → _recover_pending_merge"
@@ -446,7 +449,7 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
             except Exception:
                 _mr, _ms = None, None
 
-            if _mr or _ms in ("queued", "merging", "pending_merge"):
+            if _mr or _ms in MERGE_ACTIVE_STATUSES:
                 logger.warning(
                     f"[reconnect] runner {runner_id} PID {pid} 죽었으나 머지 대기중 "
                     f"(merge_requested={bool(_mr)}, merge_status={_ms}) → cleanup 스킵"
@@ -487,7 +490,7 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
                     _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{orphan_id}:merge_status")
                 except Exception:
                     _mr, _ms = None, None
-                if _mr or _ms in ("queued", "merging", "pending_merge"):
+                if _mr or _ms in MERGE_ACTIVE_STATUSES:
                     logger.warning(
                         f"[reconnect] orphan {orphan_id} PID 없으나 머지 대기중 "
                         f"(merge_requested={bool(_mr)}, merge_status={_ms}) → _recover_pending_merge"
@@ -521,7 +524,7 @@ def _reconnect_surviving_runners(redis_client: redis.Redis):
                 except Exception:
                     _mr, _ms = None, None
 
-                if _mr or _ms in ("queued", "merging", "pending_merge"):
+                if _mr or _ms in MERGE_ACTIVE_STATUSES:
                     logger.warning(
                         f"[reconnect] orphan {orphan_id} PID {pid} 죽었으나 머지 대기중 "
                         f"(merge_requested={bool(_mr)}, merge_status={_ms}) → cleanup 스킵"
@@ -561,7 +564,7 @@ def _detect_orphan_workflows(redis_client: redis.Redis) -> int:
                     _ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
                 except Exception:
                     _mr, _ms = None, None
-                if _mr or _ms in ("queued", "merging", "pending_merge"):
+                if _mr or _ms in MERGE_ACTIVE_STATUSES:
                     logger.info(
                         f"[orphan] workflow {wf['id']} slug={wf.get('slug', '?')} (runner={runner_id}) "
                         f"머지 대기중 (merge_requested={bool(_mr)}, merge_status={_ms}) → failed 전이 스킵"
@@ -737,11 +740,83 @@ def _restart_plan_runner_after_merge(plan_file: str, redis_client: redis.Redis, 
         logger.error(f"[RESTART-AFTER-MERGE] plan-runner 재시작 실패: {e}")
 
 
+def _run_subprocess_streaming(cmd: list, env: dict, cwd: str, pub_fn, tag: str, timeout: int = 300) -> dict:
+    """서브프로세스를 실행하며 stdout을 라인별로 실시간 pub_fn에 전달한다.
+
+    capture_output=True 방식 대신 Popen + 라인 스트리밍으로 교체하여
+    장시간 실행 중에도 로그 채널이 끊기지 않도록 한다.
+
+    Returns:
+        {"success": bool, "message": str, "output": str}
+    """
+    import os as _os
+    output_lines: list[str] = []
+    timed_out = False
+    _timer = None
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+        )
+
+        def _kill_on_timeout():
+            nonlocal timed_out
+            timed_out = True
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+        _timer = threading.Timer(timeout, _kill_on_timeout)
+        _timer.start()
+
+        for line in proc.stdout:
+            stripped = line.rstrip()
+            output_lines.append(stripped)
+            if pub_fn and stripped:
+                try:
+                    pub_fn(f"[{tag}] {stripped}")
+                except Exception:
+                    pass
+
+        proc.wait()
+
+    except Exception as e:
+        if _timer:
+            _timer.cancel()
+        return {"success": False, "message": str(e), "output": "\n".join(output_lines)}
+    finally:
+        if _timer:
+            _timer.cancel()
+
+    if timed_out:
+        return {"success": False, "message": f"{tag} timeout ({timeout}s)", "output": "\n".join(output_lines)}
+
+    output_text = "\n".join(output_lines)
+    if proc.returncode == 0:
+        return {"success": True, "message": f"{tag} 성공", "output": output_text}
+
+    # 실패 시 핵심 에러 라인 추출 (마지막 Error/Exception 라인 우선)
+    error_lines = [l.strip() for l in output_lines if l.strip() and ("Error" in l or "Exception" in l)]
+    if error_lines:
+        msg = error_lines[-1][:300]
+    else:
+        non_empty = [l.strip() for l in output_lines if l.strip() and not l.strip().startswith(("│", "┌", "└", "├", "─"))]
+        msg = "; ".join(non_empty[-3:])[:300] if non_empty else f"exit code {proc.returncode}"
+    return {"success": False, "message": msg, "output": output_text}
+
+
 def _launch_conflict_resolver_process(runner_id: str, branch: str, worktree_path: Path, redis_client, pub_fn=None) -> dict:
     """plan-runner resolve 서브커맨드로 conflict 자동 해결 프로세스를 실행한다.
 
-    _launch_plan_runner_process와 유사하지만 동기 실행(subprocess.run + timeout)으로
-    _do_inline_merge가 이미 백그라운드 스레드이므로 blocking이 허용됨.
+    stdout을 라인별로 실시간 pub_fn에 전달하여 로그 끊김을 방지한다.
 
     Returns:
         {"success": True/False, "message": str}
@@ -765,50 +840,30 @@ def _launch_conflict_resolver_process(runner_id: str, branch: str, worktree_path
     env["PLAN_RUNNER_RUNNER_ID"] = runner_id
     env["REDIS_DB"] = str(REDIS_DB)
 
-    try:
-        proc = subprocess.run(
-            cmd,
-            cwd=str(PLAN_RUNNER_MODULE_PATH),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-            timeout=300,
-        )
-        output = (proc.stdout or "") + (proc.stderr or "")
-        if pub_fn and output:
-            pub_fn(f"[RESOLVE] {output[-500:]}")
-        if proc.returncode == 0:
-            logger.info(f"[conflict-resolver] auto-resolve 성공 (runner_id={runner_id})")
-            return {"success": True, "message": "auto-resolve 성공"}
-        else:
-            # stderr에서 핵심 에러 라인 추출 (마지막 Error/Exception 라인 우선)
-            stderr_text = (proc.stderr or "").strip()
-            error_lines = [l.strip() for l in stderr_text.splitlines() if l.strip() and ("Error" in l or "Exception" in l)]
-            if error_lines:
-                msg = error_lines[-1][:300]
-            else:
-                # fallback: 마지막 비어있지 않은 줄들
-                non_empty = [l.strip() for l in stderr_text.splitlines() if l.strip() and not l.strip().startswith(("│", "┌", "└", "├", "─"))]
-                msg = "; ".join(non_empty[-3:])[:300] if non_empty else f"exit code {proc.returncode}"
-            logger.warning(f"[conflict-resolver] auto-resolve 실패 (returncode={proc.returncode}): {msg}")
-            return {"success": False, "message": msg}
-    except subprocess.TimeoutExpired:
-        logger.error(f"[conflict-resolver] resolve timeout (300s, runner_id={runner_id})")
-        return {"success": False, "message": "resolve timeout (300s)"}
-    except Exception as e:
-        logger.error(f"[conflict-resolver] 실행 오류: {e}")
-        return {"success": False, "message": str(e)}
+    result = _run_subprocess_streaming(
+        cmd=cmd,
+        env=env,
+        cwd=str(PLAN_RUNNER_MODULE_PATH),
+        pub_fn=pub_fn,
+        tag="RESOLVE",
+        timeout=300,
+    )
+    if result["success"]:
+        logger.info(f"[conflict-resolver] auto-resolve 성공 (runner_id={runner_id})")
+    else:
+        logger.warning(f"[conflict-resolver] auto-resolve 실패 (runner_id={runner_id}): {result['message']}")
+    return {"success": result["success"], "message": result["message"]}
 
 
 def _launch_auto_fix_process(runner_id: str, test_output: str, targets: dict, redis_client, pub_fn=None) -> dict:
     """plan-runner auto-fix 서브커맨드로 자동 수정 프로세스를 실행한다.
 
+    stdout을 라인별로 실시간 pub_fn에 전달하여 로그 끊김을 방지한다.
+
     Returns:
         {"success": bool, "message": str}
     """
-    import os, tempfile
+    import os
     # test_output을 임시 파일에 기록
     error_file_path = PROJECT_ROOT / "logs" / f"auto-fix-{runner_id}.log"
     try:
@@ -839,39 +894,19 @@ def _launch_auto_fix_process(runner_id: str, test_output: str, targets: dict, re
     env["PLAN_RUNNER_RUNNER_ID"] = runner_id
     env["REDIS_DB"] = str(REDIS_DB)
 
-    try:
-        proc = subprocess.run(
-            cmd,
-            cwd=str(PLAN_RUNNER_MODULE_PATH),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-            timeout=300,
-        )
-        output = (proc.stdout or "") + (proc.stderr or "")
-        if pub_fn and output:
-            pub_fn(f"[AUTO-FIX] {output[-500:]}")
-        if proc.returncode == 0:
-            logger.info(f"[auto-fix] 성공 (runner_id={runner_id})")
-            return {"success": True, "message": "auto-fix 성공"}
-        else:
-            stderr_text = (proc.stderr or "").strip()
-            error_lines = [l.strip() for l in stderr_text.splitlines() if l.strip() and ("Error" in l or "Exception" in l)]
-            if error_lines:
-                msg = error_lines[-1][:300]
-            else:
-                non_empty = [l.strip() for l in stderr_text.splitlines() if l.strip() and not l.strip().startswith(("│", "┌", "└", "├", "─"))]
-                msg = "; ".join(non_empty[-3:])[:300] if non_empty else f"exit code {proc.returncode}"
-            logger.warning(f"[auto-fix] 실패 (returncode={proc.returncode}): {msg}")
-            return {"success": False, "message": msg}
-    except subprocess.TimeoutExpired:
-        logger.error(f"[auto-fix] timeout (300s, runner_id={runner_id})")
-        return {"success": False, "message": "auto-fix timeout (300s)"}
-    except Exception as e:
-        logger.error(f"[auto-fix] 실행 오류: {e}")
-        return {"success": False, "message": str(e)}
+    result = _run_subprocess_streaming(
+        cmd=cmd,
+        env=env,
+        cwd=str(PLAN_RUNNER_MODULE_PATH),
+        pub_fn=pub_fn,
+        tag="AUTO-FIX",
+        timeout=300,
+    )
+    if result["success"]:
+        logger.info(f"[auto-fix] 성공 (runner_id={runner_id})")
+    else:
+        logger.warning(f"[auto-fix] 실패 (runner_id={runner_id}): {result['message']}")
+    return {"success": result["success"], "message": result["message"]}
 
 
 def _post_merge_pipeline(runner_id: str, redis_client, pub_fn) -> bool:
@@ -2037,7 +2072,7 @@ def retry_merge(command: Dict, redis_client: redis.Redis) -> None:
     thread = threading.Thread(
         target=_do_retry_merge,
         args=(runner_id, redis_client, command_id, command),
-        daemon=True,
+        daemon=False,
     )
     thread.start()
     return None
@@ -2055,7 +2090,7 @@ def _do_direct_merge(branch: str, worktree_path_str: str | None, plan_file: str 
     try:
         # worktree_path 결정
         if worktree_path_str:
-            worktree_path = Path(worktree_path_str)
+            worktree_path = Path(worktree_path_str).resolve()
         else:
             # branch 이름으로 추론 (runner/{id} → runner_{id} 변환)
             branch_slug = branch.replace("/", "_")
@@ -2080,10 +2115,12 @@ def _do_direct_merge(branch: str, worktree_path_str: str | None, plan_file: str 
                 if worktree_path_str:
                     worktree_path = Path(worktree_path_str)
                 else:
+                    logger.error(f"[direct_merge] worktree not found for branch: {branch}")
                     result = {"success": False, "message": f"worktree not found for branch: {branch}", "action": "direct-merge", "runner_id": runner_id}
                     return
 
         if not worktree_path.is_dir():
+            logger.error(f"[direct_merge] worktree dir not found: {worktree_path} (원본: {worktree_path_str})")
             result = {"success": False, "message": f"worktree dir not found: {worktree_path}", "action": "direct-merge", "runner_id": runner_id}
             return
 
@@ -2123,6 +2160,22 @@ def _do_direct_merge(branch: str, worktree_path_str: str | None, plan_file: str 
         logger.error(f"[direct_merge] 실패: {e}\n{traceback.format_exc()}")
         result = {"success": False, "message": str(e), "action": "direct-merge", "runner_id": runner_id}
     finally:
+        # merge_status Redis 키 보장 (스레드 실패 시에도 상태 추적 가능)
+        try:
+            current_ms = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+            if current_ms and current_ms not in ("merged", "conflict", "test_failed"):
+                final_ms = "error" if not result.get("success") else current_ms
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", final_ms)
+                redis_client.expire(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", RECENT_RUNNERS_TTL)
+        except Exception:
+            pass
+        # SSE 채널에 최종 결과 publish
+        try:
+            log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+            status_msg = result.get("message", "unknown")
+            redis_client.publish(log_channel, f"[MERGE] direct-merge 최종 결과: {status_msg}")
+        except Exception:
+            pass
         redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
         redis_client.expire(result_key, 60)
 
@@ -2151,7 +2204,7 @@ def direct_merge(command: Dict, redis_client: redis.Redis) -> None:
     thread = threading.Thread(
         target=_do_direct_merge,
         args=(branch, worktree_path, plan_file, redis_client, command_id),
-        daemon=True,
+        daemon=False,
     )
     thread.start()
     return None
@@ -2222,7 +2275,7 @@ def resolve_conflict(command: Dict, redis_client: redis.Redis) -> None:
     thread = threading.Thread(
         target=_do_resolve_conflict,
         args=(runner_id, redis_client, command_id),
-        daemon=True,
+        daemon=False,
     )
     thread.start()
     return None
@@ -2270,7 +2323,7 @@ def cleanup_worktree(command: Dict, redis_client: redis.Redis) -> None:
     thread = threading.Thread(
         target=_do_cleanup_worktree,
         args=(runner_id, redis_client, command_id),
-        daemon=True,
+        daemon=False,
     )
     thread.start()
     return None
