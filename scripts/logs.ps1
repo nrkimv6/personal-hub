@@ -843,6 +843,11 @@ function Start-CombinedLogTail {
                 if (($now - $lastRunnerRefresh).TotalSeconds -ge $runnerRefreshInterval) {
                     $lastRunnerRefresh = $now
                     $currentRunners = Get-ActivePlanRunners -LogDir $planRunnerLogDir
+                    # [진단] runner 조회 결과 출력
+                    Write-Host "[DIAG] runners=$($currentRunners.Count)" -ForegroundColor DarkGray
+                    foreach ($r in $currentRunners) {
+                        Write-Host "[DIAG]   rid=$($r.RunnerId) logPath=$($r.LogPath) streamPath=$($r.StreamPath)" -ForegroundColor DarkGray
+                    }
                     # 폴백 키(#없는 PR:/PS:) → Redis 키로 전환 시 정리
                     $fallbackKeys = @($logFiles.Keys | Where-Object { ($_ -like "PR:*" -or $_ -like "PS:*") -and $_ -notlike "*#*" })
                     foreach ($fk in $fallbackKeys) {
