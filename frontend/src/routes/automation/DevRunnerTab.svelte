@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import TaskList from '$lib/components/dev-runner/TaskList.svelte';
@@ -669,7 +669,7 @@
 						{:else if activeTabId === '__merge__'}
 							<MergeQueuePanel />
 						{:else if runnerTabs.length === 0}
-							<div class="flex items-center justify-center h-full text-sm text-gray-400">
+							<div class="flex items-center justify-center h-full text-muted-foreground font-mono text-xs">
 								실행 버튼을 눌러 plan-runner를 시작하세요
 							</div>
 						{:else}
