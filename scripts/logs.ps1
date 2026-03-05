@@ -244,6 +244,39 @@ function Get-LatestLogFileMultiPattern {
     return $null
 }
 
+# 다중 파일 반환 버전 — static 모드에서 최대 N개 파일 반환
+# 선택 로직: LastWriteTime DESC 정렬 → 빈 파일(0바이트)은 포함 후 계속, 비어있지 않은 파일 만나면 포함 후 중단
+# 반환: FullName 배열 (LastWriteTime ASC, 오래된→최신 출력용)
+function Get-LatestLogFilesMultiPattern {
+    param([string[]]$Prefixes, [int]$MaxCount = 3)
+
+    $searchDirs = @($LogDir)
+    if ($Admin) {
+        $baseLogDir = Join-Path $ProjectRoot "logs"
+        if ($baseLogDir -ne $LogDir) { $searchDirs += $baseLogDir }
+    }
+
+    $allCandidates = @()
+    foreach ($dir in $searchDirs) {
+        foreach ($prefix in $Prefixes) {
+            $pattern = Join-Path $dir "$prefix*.log"
+            $found = Get-ChildItem $pattern -ErrorAction SilentlyContinue
+            if ($found) { $allCandidates += $found }
+        }
+    }
+    if (-not $allCandidates) { return @() }
+
+    $sorted = $allCandidates | Sort-Object LastWriteTime -Descending
+    $result = @()
+    foreach ($f in $sorted) {
+        $result += $f
+        if ($result.Count -ge $MaxCount) { break }
+        if ($f.Length -gt 0) { break }  # 비어있지 않은 파일 만나면 중단
+    }
+    # 오래된→최신 순으로 재정렬 후 FullName 반환
+    return ($result | Sort-Object LastWriteTime -Ascending | ForEach-Object { $_.FullName })
+}
+
 # API 로그: 모든 후보에서 LastWriteTime이 가장 최신인 파일 선택
 # Python 마이그레이션 후 API 앱은 LOG_DIR="logs" (하드코딩)에 api_*.log를 기록.
 # Admin 모드: $LogDir=logs/admin/ (stdout_api_*, NSSM log) + logs/ (api_*)
@@ -454,45 +487,101 @@ if (-not $Admin) {
     $planRunnerStreamLogFile = $null
 }
 
+# 오늘 날짜 plan-runner 로그 최대 5개 표시 (Redis 미연결/활성 runner 없을 때 fallback)
+function Show-TodayPlanRunnerLogs {
+    param([int]$TailLines)
+    if (-not (Test-Path $planRunnerLogDir)) {
+        Write-Host "[PR] (plan-runner log dir not found)" -ForegroundColor Gray
+        return
+    }
+    $todayStr = (Get-Date).ToString("yyyyMMdd")
+    $todayFiles = Get-ChildItem -Path $planRunnerLogDir -Filter "plan-runner-*.log" -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notmatch "stream" -and $_.Name -match $todayStr } |
+        Sort-Object Name -Descending | Select-Object -First 5
+    if (-not $todayFiles) {
+        # 오늘 날짜 없으면 최신 1개 폴백
+        $todayFiles = Get-ChildItem -Path $planRunnerLogDir -Filter "plan-runner-*.log" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notmatch "stream" } |
+            Sort-Object Name -Descending | Select-Object -First 1
+    }
+    foreach ($lf in ($todayFiles | Sort-Object Name -Ascending)) {
+        $prFileId = Get-PlanRunnerFileId -FileName $lf.Name
+        Show-LogContent -FilePath $lf.FullName -Label "PR:$prFileId" -Color White -TailLines $TailLines
+        # 동일 runner ID로 stream 파일 탐색
+        $streamFile = Get-ChildItem -Path $planRunnerLogDir -Filter "plan-runner-stream-*${prFileId}*.log" -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending | Select-Object -First 1
+        if (-not $streamFile) {
+            # ID 매칭 없으면 같은 날짜 최신 stream 파일
+            $streamFile = Get-ChildItem -Path $planRunnerLogDir -Filter "plan-runner-stream-*${todayStr}*.log" -ErrorAction SilentlyContinue |
+                Sort-Object Name -Descending | Select-Object -First 1
+        }
+        if ($streamFile) {
+            Show-LogContent -FilePath $streamFile.FullName -Label "PS:$prFileId" -Color DarkGray -TailLines ([Math]::Min($TailLines, 20))
+        }
+    }
+}
+
 # Show log content function
+# $FilePath: 단일 파일 (하위 호환)
+# $FilePaths: 다중 파일 배열 (오래된→최신 순 전달 권장)
 function Show-LogContent {
     param(
         [string]$FilePath,
+        [string[]]$FilePaths,
         [string]$Label,
         [ConsoleColor]$Color,
         [int]$TailLines
     )
 
-    if (-not $FilePath -or -not (Test-Path $FilePath)) {
+    # 하위 호환: $FilePath가 주어지면 $FilePaths로 병합
+    if ($FilePath) {
+        if ($FilePaths) { $FilePaths = @($FilePath) + $FilePaths }
+        else { $FilePaths = @($FilePath) }
+    }
+
+    # 유효 파일만 필터
+    $validPaths = @($FilePaths | Where-Object { $_ -and (Test-Path $_) })
+
+    if ($validPaths.Count -eq 0) {
         Write-Host "[$Label] Log file not found" -ForegroundColor Gray
         return
     }
 
+    # 헤더
     Write-Host "`n========================================" -ForegroundColor $Color
     Write-Host "  $Label Log" -ForegroundColor $Color
-    Write-Host "  File: $(Split-Path $FilePath -Leaf)" -ForegroundColor $Color
+    if ($validPaths.Count -eq 1) {
+        Write-Host "  File: $(Split-Path $validPaths[0] -Leaf)" -ForegroundColor $Color
+    } else {
+        Write-Host "  Files ($($validPaths.Count)): $(($validPaths | ForEach-Object { Split-Path $_ -Leaf }) -join ', ')" -ForegroundColor $Color
+    }
     Write-Host "========================================" -ForegroundColor $Color
     Write-Host ""
 
-    # Read last N lines
-    $content = Get-Content $FilePath -Tail $TailLines -Encoding UTF8 -ErrorAction SilentlyContinue
-    if ($content) {
-        foreach ($line in $content) {
-            # Color based on log level
-            $lineColor = "White"
-            if ($line -match "ERROR|CRITICAL") {
-                $lineColor = "Red"
-            } elseif ($line -match "WARNING") {
-                $lineColor = "Yellow"
-            } elseif ($line -match "INFO") {
-                $lineColor = "Green"
-            } elseif ($line -match "DEBUG") {
-                $lineColor = "Gray"
-            }
-            Write-Host $line -ForegroundColor $lineColor
+    $multiFile = $validPaths.Count -gt 1
+
+    foreach ($fp in $validPaths) {
+        if ($multiFile) {
+            Write-Host "--- $(Split-Path $fp -Leaf) ---" -ForegroundColor DarkGray
         }
-    } else {
-        Write-Host "(no content)" -ForegroundColor Gray
+        $content = Get-Content $fp -Tail $TailLines -Encoding UTF8 -ErrorAction SilentlyContinue
+        if ($content) {
+            foreach ($line in $content) {
+                $lineColor = "White"
+                if ($line -match "ERROR|CRITICAL") {
+                    $lineColor = "Red"
+                } elseif ($line -match "WARNING") {
+                    $lineColor = "Yellow"
+                } elseif ($line -match "INFO") {
+                    $lineColor = "Green"
+                } elseif ($line -match "DEBUG") {
+                    $lineColor = "Gray"
+                }
+                Write-Host $line -ForegroundColor $lineColor
+            }
+        } else {
+            Write-Host "(no content)" -ForegroundColor Gray
+        }
     }
 }
 
@@ -1019,11 +1108,14 @@ if ($Follow) {
             }
         }
         default {
-            Show-LogContent -FilePath $apiLogFile -Label "API Server" -Color Cyan -TailLines $Lines
+            $apiLogFiles = Get-LatestLogFilesMultiPattern @("stdout_api_", "api_")
+            Show-LogContent -FilePaths $apiLogFiles -Label "API Server" -Color Cyan -TailLines $Lines
             if ($Admin) {
-                Show-LogContent -FilePath $workerLogFile -Label "Worker" -Color Magenta -TailLines $Lines
-                Show-LogContent -FilePath $claudeWorkerLogFile -Label "LLM (Claude Worker)" -Color Blue -TailLines $Lines
-                # Plan-runner 로그: Redis 활성 runner 또는 최신 1개 표시
+                $workerLogFiles = Get-LatestLogFilesMultiPattern @("stdout_worker_", "worker_", "unified_worker_")
+                Show-LogContent -FilePaths $workerLogFiles -Label "Worker" -Color Magenta -TailLines $Lines
+                $claudeWorkerLogFiles = Get-LatestLogFilesMultiPattern @("llm_worker_")
+                Show-LogContent -FilePaths $claudeWorkerLogFiles -Label "LLM (Claude Worker)" -Color Blue -TailLines $Lines
+                # Plan-runner 로그: Redis 활성 runner 또는 오늘 날짜 파일 최대 5개 표시
                 if ($useRedis) {
                     $activeRunners = Get-ActivePlanRunners -LogDir $planRunnerLogDir
                     if ($activeRunners.Count -gt 0) {
@@ -1035,17 +1127,16 @@ if ($Follow) {
                             }
                         }
                     } else {
-                        $prFileId = Get-PlanRunnerFileId -FileName ([System.IO.Path]::GetFileName($planRunnerLogFile))
-                        Show-LogContent -FilePath $planRunnerLogFile -Label "PR:$prFileId" -Color White -TailLines $Lines
-                        Show-LogContent -FilePath $planRunnerStreamLogFile -Label "PS:$prFileId" -Color DarkGray -TailLines ([Math]::Min($Lines, 20))
+                        # 활성 runner 없음 — 오늘 날짜 파일 최대 5개 표시
+                        Show-TodayPlanRunnerLogs -TailLines $Lines
                     }
                 } else {
-                    $prFileId = Get-PlanRunnerFileId -FileName ([System.IO.Path]::GetFileName($planRunnerLogFile))
-                    Show-LogContent -FilePath $planRunnerLogFile -Label "PR:$prFileId" -Color White -TailLines $Lines
-                    Show-LogContent -FilePath $planRunnerStreamLogFile -Label "PS:$prFileId" -Color DarkGray -TailLines ([Math]::Min($Lines, 20))
+                    # Redis 미연결 — 오늘 날짜 파일 최대 5개 표시
+                    Show-TodayPlanRunnerLogs -TailLines $Lines
                 }
             }
-            Show-LogContent -FilePath $frontendLogFile -Label "Frontend" -Color Green -TailLines $Lines
+            $frontendLogFiles = Get-LatestLogFilesMultiPattern @("frontend_2")
+            Show-LogContent -FilePaths $frontendLogFiles -Label "Frontend" -Color Green -TailLines $Lines
         }
     }
 }
