@@ -1195,6 +1195,27 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
         except Exception as wt_pre_err:
             _pub(f"[pre-merge] worktree 사전 제거 실패 (무시, merge 계속): {wt_pre_err}")
 
+        # [Phase 2-5] branch divergence 시 rebase 시도 — merge 전 branch를 main 위로 rebase
+        if branch_str:
+            try:
+                _pub(f"[pre-merge] rebase 시도: git rebase main {branch_str}")
+                rebase_result = subprocess.run(
+                    ["git", "rebase", "main", branch_str],
+                    capture_output=True, text=True, cwd=str(PROJECT_ROOT),
+                )
+                if rebase_result.returncode == 0:
+                    _pub(f"[pre-merge] rebase 성공")
+                else:
+                    rebase_msg = (rebase_result.stderr.strip() or rebase_result.stdout.strip())[:300]
+                    _pub(f"[pre-merge] rebase 실패 (무시, merge 강행): {rebase_msg}")
+                    # rebase 실패 시 abort하여 상태 복원
+                    subprocess.run(
+                        ["git", "rebase", "--abort"],
+                        capture_output=True, text=True, cwd=str(PROJECT_ROOT),
+                    )
+            except Exception as rebase_err:
+                _pub(f"[pre-merge] rebase 예외 (무시, merge 강행): {rebase_err}")
+
         workflow = MergeWorkflow(
             project_root=PROJECT_ROOT,
             redis_client=redis_client,
