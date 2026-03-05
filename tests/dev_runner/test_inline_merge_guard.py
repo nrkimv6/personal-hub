@@ -919,3 +919,44 @@ class TestStreamOutputExit0MergeRequested:
 
         # Assert: _cleanup_process_state 미호출 (_do_inline_merge가 내부에서 처리)
         mock_cleanup.assert_not_called()
+
+
+# ========== TC #29: R(Right) — stream_log_path 파일에 append 확인 ==========
+
+class TestPubAndLogFileAppend:
+    """test_pub_and_log_file_append: stream_log_path 파일에 메시지가 append되는지 확인"""
+
+    def test_pub_and_log_file_append(self, cl, tmp_path):
+        """R(Right): stream_log_path 파일이 존재할 때 _pub_and_log() 호출 → 파일 내용에 메시지 포함"""
+        # Arrange
+        log_file = tmp_path / "stream.log"
+        log_file.write_text("기존 내용\n", encoding="utf-8")
+
+        runner_id = "test-runner-29"
+        msg = "merge 시작 — test-runner-29"
+        tag = "MERGE"
+
+        store = {
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path": str(log_file),
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path": None,
+        }
+
+        redis = MagicMock()
+        redis.get.side_effect = lambda key: store.get(key)
+        redis.publish.return_value = 0
+        redis.rpush.return_value = 1
+        redis.expire.return_value = True
+
+        # Act
+        cl._pub_and_log(runner_id, msg, redis, tag)
+
+        # Assert: 파일에 포맷된 메시지가 append됐는지 확인
+        content = log_file.read_text(encoding="utf-8")
+        expected_line = f"[{tag}] {msg}"
+        assert expected_line in content, (
+            f"파일에 '{expected_line}' 포함 기대\n실제 내용: {content!r}"
+        )
+        # 기존 내용이 보존되어야 함 (overwrite 아닌 append)
+        assert "기존 내용" in content, (
+            f"기존 내용이 보존되어야 함\n실제 내용: {content!r}"
+        )
