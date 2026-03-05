@@ -95,6 +95,13 @@ def listener_process(isolated_redis):
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             process.kill()
+    # Windows: 프로세스 트리 전체 kill (자식 프로세스 포함)
+    import sys as _sys
+    if _sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            capture_output=True,
+        )
 
 
 @pytest.fixture
@@ -176,9 +183,16 @@ def e2e_redis_cleanup(isolated_redis):
     heartbeat 키는 삭제하지 않음 — Listener 프로세스가 활성 중임을 API가 확인해야 함.
     """
     def _cleanup():
-        for key in isolated_redis.scan_iter("plan-runner:*"):
-            if key not in _PRESERVE_KEYS:
-                isolated_redis.delete(key)
+        keys_to_del = [key for key in isolated_redis.scan_iter("plan-runner:*") if key not in _PRESERVE_KEYS]
+        for key in keys_to_del:
+            isolated_redis.delete(key)
+        # active_runners set도 명시적으로 비움 (키 삭제만으로는 set 항목이 남을 수 있음)
+        try:
+            members = isolated_redis.smembers("plan-runner:active_runners") or set()
+            for member in members:
+                isolated_redis.srem("plan-runner:active_runners", member)
+        except Exception:
+            pass
 
     _cleanup_test_worktrees()
     _cleanup()

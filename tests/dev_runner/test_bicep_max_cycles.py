@@ -276,7 +276,7 @@ class TestErrorConditions:
         with patch.object(executor.async_redis, "lpush", side_effect=auto_seed_result):
             result = await executor.start_dev_runner(RunRequest(plan_file="test.md", max_cycles=0))
         assert result.runner_id is not None  # 새 runner_id 발급됨
-        assert len(result.runner_id) == 8
+        assert result.runner_id.startswith("t-bicep_max_cycles-")  # test_source 포함 형식
 
     async def test_listener_dead_raises_503_regardless_of_max_cycles(self, executor, fake_async_redis):
         """listener 없을 때 max_cycles=0 요청도 503 반환"""

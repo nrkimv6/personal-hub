@@ -96,8 +96,8 @@ class TestCleanupProcessState:
         listener._cleanup_process_state("abc12345", r)
 
         expire_calls = [str(c) for c in r.expire.call_args_list]
-        assert any("abc12345:status" in c for c in expire_calls)
-        assert any("abc12345:pid" in c for c in expire_calls)
+        assert any("t-clmulti-abc1:status" in c for c in expire_calls)
+        assert any("t-clmulti-abc1:pid" in c for c in expire_calls)
 
 
 class TestStreamOutput:
@@ -121,7 +121,7 @@ class TestStreamOutput:
         call_args_list = r.publish.call_args_list
         assert len(call_args_list) > 0
         channel = call_args_list[-1][0][0]
-        assert channel == f"{listener.LOG_CHANNEL_PREFIX}:abc12345"
+        assert channel == f"{listener.LOG_CHANNEL_PREFIX}:t-clmulti-abc1"
 
 
 class TestStartPlanRunner:

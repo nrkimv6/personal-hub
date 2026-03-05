@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -37,7 +38,7 @@ COMMAND_TIMEOUT = 30  # 명령 결과 대기 타임아웃 (초) — worktree 생
 RUNNER_KEY_SUFFIXES = (
     "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
     "engine", "worktree_path", "branch", "merge_status", "merge_requested",
-    "current_cycle", "quota_stopped", "error", "restart_after_merge",
+    "current_cycle", "quota_stopped", "error", "restart_after_merge", "test_source",
 )
 
 
@@ -134,7 +135,12 @@ class ExecutorService:
             )
 
         # 새 runner_id 생성 (멀티 실행 지원 - 409 체크 없음)
-        runner_id = uuid.uuid4().hex[:8]
+        # test_source가 있으면 TC 추적용 접두사 포함 (t-{source}-{4hex})
+        if request.test_source:
+            _src = re.sub(r'[^a-zA-Z0-9_]', '', request.test_source)[:20]
+            runner_id = f"t-{_src}-{uuid.uuid4().hex[:4]}"
+        else:
+            runner_id = uuid.uuid4().hex[:8]
 
         # per-command 결과 키 (레이스 컨디션 방지)
         command_id = uuid.uuid4().hex[:8]
@@ -183,6 +189,9 @@ class ExecutorService:
 
         if request.pipeline:
             command["pipeline"] = request.pipeline
+
+        if request.test_source:
+            command["test_source"] = request.test_source
 
         # registered_paths에서 wtools 외부 경로 추출 (asyncio.to_thread로 이벤트 루프 블로킹 방지)
         if request.parallel:
