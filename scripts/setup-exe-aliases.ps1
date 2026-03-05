@@ -33,9 +33,10 @@ $Aliases = [ordered]@{
     "monitorpage-dev"         = "API 서버 (dev 전용)"
     "monitorpage-worker"      = "통합 브라우저 워커"
     "monitorpage-claude"      = "Claude Worker"
-    "monitorpage-cmdlistener" = "Redis Command Listener"
-    "monitorpage-classifier"  = "Image Classifier"
-    "monitorpage-proxy"       = "Proxy Manager"
+    "monitorpage-cmdlistener"     = "Redis Command Listener"
+    "monitorpage-chat-executor"   = "Chat Executor"
+    "monitorpage-classifier"      = "Image Classifier"
+    "monitorpage-proxy"           = "Proxy Manager"
 }
 
 # 역할별 exe alias 정의 (PowerShell)
@@ -46,6 +47,7 @@ $PsAliases = [ordered]@{
     "monitorpage-wdog-worker"   = "Worker Watchdog (unified)"
     "monitorpage-wdog-claude"   = "Claude Worker Watchdog"
     "monitorpage-wdog-cmd"      = "Command Listener Watchdog"
+    "monitorpage-wdog-chat"     = "Chat Executor Watchdog"
 }
 
 Write-Host ""
