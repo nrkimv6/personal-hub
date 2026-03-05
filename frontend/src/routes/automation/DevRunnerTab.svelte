@@ -81,11 +81,14 @@
 		};
 	}
 
+	const isAllPlansSentinel = (f: string | null | undefined) =>
+		!f || f === '__ALL_PLANS__' || f === 'ALL';
+
 	function updateRunnerTab(tab: RunnerTab, runner: RunnerSource): RunnerTab {
 		return {
 			...tab,
 			running: runner.running ?? runner.status === 'running',
-			plan_file: runner.plan_file ?? tab.plan_file,
+			plan_file: isAllPlansSentinel(runner.plan_file) ? tab.plan_file : runner.plan_file,
 			engine: runner.engine ?? tab.engine,
 			start_time: runner.start_time ?? tab.start_time,
 			orphan: runner.orphan ?? tab.orphan ?? false,

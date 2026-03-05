@@ -90,6 +90,41 @@ class TestBuildStatusPayload:
         assert payload["status"] is None
         assert payload["pid"] is None
 
+    def test_build_status_payload_stopped_runner_plan_file_none_returns_none(self, event_service, sync_redis):
+        """R: status=stopped + plan_file 키 없음 → plan_file is None (sentinel 아님)"""
+        runner_id = "stopped01"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
+        payload = event_service._build_status_payload(runner_id)
+        assert payload is not None
+        assert payload["plan_file"] is None
+
+    def test_build_status_payload_running_runner_plan_file_none_returns_sentinel(self, event_service, sync_redis):
+        """R: status=running + plan_file 키 없음 → PLAN_FILE_ALL 반환"""
+        from app.modules.dev_runner.services.event_service import PLAN_FILE_ALL
+        runner_id = "running01"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        payload = event_service._build_status_payload(runner_id)
+        assert payload is not None
+        assert payload["plan_file"] == PLAN_FILE_ALL
+
+    def test_build_status_payload_running_runner_plan_file_set_returns_value(self, event_service, sync_redis):
+        """R: status=running + plan_file 정상값 → 그대로 반환"""
+        runner_id = "running02"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "feature-x.md")
+        payload = event_service._build_status_payload(runner_id)
+        assert payload is not None
+        assert payload["plan_file"] == "feature-x.md"
+
+    def test_build_status_payload_stopped_runner_branch_set_still_none(self, event_service, sync_redis):
+        """B: status=stopped + branch 있음 + plan_file 없음 → plan_file is None (branch로 fallback 안 됨)"""
+        runner_id = "stopped02"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", "impl/some-feature")
+        payload = event_service._build_status_payload(runner_id)
+        assert payload is not None
+        assert payload["plan_file"] is None
+
 
 # ─── _build_tracking_payload 테스트 ─────────────────────────────────────────
 
