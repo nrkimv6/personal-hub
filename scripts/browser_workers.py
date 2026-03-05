@@ -106,6 +106,13 @@ class BrowserWorkerManager:
                         str(self.scripts_dir / "dev-runner-command-listener.py")],
                 "env": {},
             },
+            {
+                "name": "Chat Executor Watchdog",
+                "pid_file": f"chat_executor_watchdog{self.pid_suffix}.pid",
+                "cmd": [_ps_alias("monitorpage-wdog-chat.exe"), "-ExecutionPolicy", "Bypass", "-File",
+                        str(self.scripts_dir / "llm-chat-executor-watchdog.ps1")],
+                "env": {"APP_MODE": "admin"},
+            },
         ]
 
         # 실제 워커 프로세스 PID 파일 (stop 시 정리)
@@ -113,6 +120,7 @@ class BrowserWorkerManager:
             f"unified_worker{self.pid_suffix}.pid",
             f"claude_worker{self.pid_suffix}.pid",
             f"command_listener{self.pid_suffix}.pid",
+            f"chat_executor_admin.pid",
         ]
 
         # Legacy PID 파일

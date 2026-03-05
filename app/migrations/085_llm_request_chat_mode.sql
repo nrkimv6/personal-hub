@@ -1,5 +1,5 @@
--- Migration 085: LLMRequest chat mode columns
--- LLM Worker 듀얼 모드 (Single-shot + Chat) 지원을 위한 컬럼 추가
+-- Migration 085: LLMRequest에 chat 모드 관련 컬럼 추가
+-- dual-mode 계획: single-shot + chat 세션 분리
 
 ALTER TABLE llm_requests ADD COLUMN mode VARCHAR(20) NOT NULL DEFAULT 'single';
 ALTER TABLE llm_requests ADD COLUMN chat_session_id VARCHAR(100);
