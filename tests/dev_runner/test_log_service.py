@@ -62,3 +62,86 @@ class TestTailLogFileRedisListFallback:
 
         assert result.lines == []
         assert result.total_lines == 0
+
+
+class TestFindCurrentLog:
+    """_find_current_log() stream_log_path 우선순위 + 유효성 검증 테스트"""
+
+    def test_find_current_log_right_prefers_logfile_over_empty_stream(self, tmp_path):
+        """R: stream_log_path 200B 이하(START 마커만) + log_file_path 정상 → log_file_path 반환"""
+        svc = _make_log_service()
+
+        stream_file = tmp_path / "stream.log"
+        stream_file.write_bytes(b"[START] " + b"x" * 100)  # 108B — 200B 이하
+        log_file = tmp_path / "log.log"
+        log_file.write_text("[20:00:00] [INFO] 실제 로그\n" * 10, encoding="utf-8")
+
+        svc.redis_client.get.side_effect = lambda key: (
+            str(stream_file) if "stream_log_path" in key else
+            str(log_file) if "log_file_path" in key else None
+        )
+
+        result = svc._find_current_log("test-runner")
+        assert result == log_file
+
+    def test_find_current_log_right_returns_stream_when_valid(self, tmp_path):
+        """R: stream_log_path 1KB 이상 → stream_log_path 반환 (기존 동작 유지)"""
+        svc = _make_log_service()
+
+        stream_file = tmp_path / "stream.log"
+        stream_file.write_bytes(b"[20:00:00] [INFO] log line\n" * 50)  # ~1.3KB
+        log_file = tmp_path / "log.log"
+        log_file.write_text("다른 로그\n", encoding="utf-8")
+
+        svc.redis_client.get.side_effect = lambda key: (
+            str(stream_file) if "stream_log_path" in key else
+            str(log_file) if "log_file_path" in key else None
+        )
+
+        result = svc._find_current_log("test-runner")
+        assert result == stream_file
+
+    def test_find_current_log_boundary_empty_stream_no_logfile(self, tmp_path):
+        """B: stream_log_path 200B 이하 + log_file_path 없음 → None 반환"""
+        svc = _make_log_service()
+
+        stream_file = tmp_path / "stream.log"
+        stream_file.write_bytes(b"[START] marker only")  # 소형
+
+        svc.redis_client.get.side_effect = lambda key: (
+            str(stream_file) if "stream_log_path" in key else
+            str(tmp_path / "nonexistent.log") if "log_file_path" in key else None
+        )
+
+        result = svc._find_current_log("test-runner")
+        assert result is None
+
+
+class TestTailLogFileE2E:
+    """tail_log_file E2E 흐름 — stream_log_path 소형일 때 log_file_path 내용 반환"""
+
+    def test_tail_log_file_e2e_prefers_logfile_when_stream_empty(self, tmp_path):
+        """T3 E2E: stream_log 200B 이하 + log_file 정상 → tail_log_file()이 log_file 내용 반환"""
+        svc = _make_log_service()
+
+        stream_file = tmp_path / "stream.log"
+        stream_file.write_bytes(b"[2026-03-05T20:18:13.479897] START | log_path=...\n")  # 50B
+
+        log_file = tmp_path / "log.log"
+        log_file.write_text(
+            "[20:18:13] [PLAN-RUNNER] [INFO] Plan-Runner 시작\n"
+            "[20:18:13] [PLAN-RUNNER] [WARN] Plan이 스킵 가능\n"
+            "[20:18:13] [PLAN-RUNNER] [DONE] Plan-Runner 종료\n",
+            encoding="utf-8",
+        )
+
+        svc.redis_client.get.side_effect = lambda key: (
+            str(stream_file) if "stream_log_path" in key else
+            str(log_file) if "log_file_path" in key else None
+        )
+
+        result = svc.tail_log_file("runner-abc123", n_lines=100)
+
+        assert len(result.lines) == 3
+        assert "Plan-Runner 시작" in result.lines[0]
+        assert "Plan-Runner 종료" in result.lines[2]

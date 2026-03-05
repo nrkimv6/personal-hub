@@ -97,7 +97,7 @@ class TestPostRun:
         """POST /run 성공 응답 JSON에 runner_id 필드 존재 + 8자 hex"""
         mock_response = RunStatusResponse(
             running=True,
-            runner_id="t-apimulti-ab12",
+            runner_id="ab12ef34",
             engine="claude",
             listener_alive=True,
             redis_connected=True,
@@ -120,7 +120,7 @@ class TestPostRun:
         assert resp.status_code == 200
         data = resp.json()
         assert "runner_id" in data
-        assert data["runner_id"] == "t-apimulti-ab12"
+        assert data["runner_id"] == "ab12ef34"
         assert len(data["runner_id"]) == 8
         assert all(c in "0123456789abcdef" for c in data["runner_id"])
 
@@ -145,3 +145,27 @@ class TestGetRecentLogs:
         """runner_id 누락 → 422 (Query 필수 파라미터 검증)"""
         resp = client.get(f"{BASE_URL}/logs/recent?lines=10")
         assert resp.status_code == 422
+
+    def test_get_recent_logs_uses_logfile_when_stream_too_small(self, client, tmp_path):
+        """T4: stream_log_path 소형(200B 이하) + log_file_path 정상 → log_file 내용 반환
+        (stream_log 우선순위 수정 후 HTTP 레벨 동작 검증)
+        """
+        stream_file = tmp_path / "stream.log"
+        stream_file.write_bytes(b"[2026-03-05T20:18:13] START | log_path=...\n")  # 43B
+
+        log_file = tmp_path / "log.log"
+        log_file.write_text(
+            "[20:18:13] [PLAN-RUNNER] [INFO] Plan-Runner 시작\n"
+            "[20:18:13] [PLAN-RUNNER] [DONE] Plan-Runner 종료\n",
+            encoding="utf-8",
+        )
+
+        from app.modules.dev_runner.services.log_service import log_service
+
+        with patch.object(log_service, "_find_current_log", return_value=log_file):
+            resp = client.get(f"{BASE_URL}/logs/recent?runner_id=test-stream-fix&lines=10")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["lines"]) == 2
+        assert "Plan-Runner 시작" in data["lines"][0]
