@@ -136,11 +136,12 @@ class WorktreeManager:
             return True  # 멱등 처리
 
     @staticmethod
-    def merge_to_main(runner_id: str, base_dir: Path, project_root: Path, plan_file: Optional[str] = None, branch: Optional[str] = None) -> MergeResult:
+    def merge_to_main(runner_id: str, base_dir: Path, project_root: Path, plan_file: Optional[str] = None, branch: Optional[str] = None, keep_conflict: bool = False) -> MergeResult:
         """worktree 변경사항을 main 브랜치에 머지
 
         우선순위: branch 파라미터 > plan_file > runner_id 기반
-        conflict 시 항상 abort 후 MergeResult(conflict=True) 반환. 자동 해결은 호출자 책임.
+        conflict 시 keep_conflict=False(기본값)이면 abort 후 MergeResult(conflict=True) 반환.
+        keep_conflict=True이면 abort 없이 충돌 상태 유지 — 호출자가 resolve 후 commit 책임.
         """
         if branch:
             pass  # 그대로 사용
@@ -160,9 +161,18 @@ class WorktreeManager:
                 logger.info(f"[WorktreeManager] 머지 성공: {branch}")
                 return MergeResult(success=True, conflict=False, message="머지 성공")
             else:
-                # 충돌 abort — 자동 해결은 호출자(_do_inline_merge)가 처리
-                subprocess.run(["git", "merge", "--abort"], capture_output=True, cwd=str(project_root))
-                return MergeResult(success=False, conflict=True, message=result.stderr)
+                conflict = "CONFLICT" in result.stdout or "CONFLICT" in result.stderr
+                # CONFLICT 줄만 추출하여 message에 포함 (resolve에서 컨텍스트로 활용)
+                conflict_lines = [l.strip() for l in result.stdout.splitlines() if l.strip().startswith("CONFLICT")]
+                detail = "\n".join(conflict_lines) if conflict_lines else (result.stderr[:500] or result.stdout[:500])
+                if keep_conflict and conflict:
+                    # 충돌 상태 유지 — 호출자가 resolve + commit 책임
+                    logger.info(f"[WorktreeManager] 머지 충돌 (keep_conflict=True, 상태 유지): {branch}")
+                    return MergeResult(success=False, conflict=True, message=detail)
+                else:
+                    # 충돌 abort — 호출자(_do_inline_merge)가 resolve 처리
+                    subprocess.run(["git", "merge", "--abort"], capture_output=True, cwd=str(project_root))
+                    return MergeResult(success=False, conflict=conflict, message=detail)
         except Exception as e:
             return MergeResult(success=False, conflict=False, message=str(e))
 
