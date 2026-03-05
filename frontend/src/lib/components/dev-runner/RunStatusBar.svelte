@@ -19,6 +19,7 @@
 		runStatus: RunStatus | null;
 		elapsed: string;
 		onStopAll?: () => void;
+		onForceStop?: () => void;
 		onSync?: () => void;
 		onReset?: () => void;
 		onExecute?: () => void;
@@ -32,6 +33,7 @@
 		runStatus,
 		elapsed,
 		onStopAll,
+		onForceStop,
 		onSync,
 		onReset,
 		onExecute,
@@ -86,42 +88,68 @@
 			</div>
 		</div>
 
-		<!-- 우측: 액션 버튼들 -->
-		<div class="flex items-center gap-1 shrink-0">
+		<!-- 우측: 액션 버튼들 (아이콘 전용 ghost) -->
+		<div class="flex items-center gap-0.5 shrink-0">
+			{#if anyRunning && onStopAll}
+				<button
+					onclick={onStopAll}
+					class="h-6 w-6 flex items-center justify-center text-destructive rounded-md hover:bg-secondary transition-colors"
+					title="Stop all"
+				>
+					<!-- Square icon -->
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
+						<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+					</svg>
+				</button>
+			{/if}
+
+			{#if onForceStop}
+				<button
+					onclick={onForceStop}
+					class="h-6 w-6 flex items-center justify-center rounded-md hover:bg-secondary transition-colors"
+					title="Force stop"
+				>
+					<!-- Power icon -->
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M18.36 6.64a9 9 0 1 1-12.73 0"/>
+						<line x1="12" y1="2" x2="12" y2="12"/>
+					</svg>
+				</button>
+			{/if}
+
 			{#if onSync}
 				<button
 					onclick={onSync}
-					class="px-2 py-1 text-[11px] font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
-					title="Plan 동기화"
+					class="h-6 w-6 flex items-center justify-center rounded-md hover:bg-secondary transition-colors"
+					title="Sync"
 				>
-					Sync
+					<!-- RefreshCw icon -->
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<polyline points="23 4 23 10 17 10"/>
+						<polyline points="1 20 1 14 7 14"/>
+						<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+					</svg>
 				</button>
 			{/if}
 
 			{#if onReset}
 				<button
 					onclick={onReset}
-					class="px-2 py-1 text-[11px] font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
-					title="상태 초기화"
+					class="h-6 w-6 flex items-center justify-center rounded-md hover:bg-secondary transition-colors"
+					title="Full reset"
 				>
-					Reset
-				</button>
-			{/if}
-
-			{#if anyRunning && onStopAll}
-				<button
-					onclick={onStopAll}
-					class="px-2 py-1 text-[11px] font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded transition-colors"
-					title="모두 정지"
-				>
-					Stop
+					<!-- RotateCcw icon -->
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<polyline points="1 4 1 10 7 10"/>
+						<path d="M3.51 15a9 9 0 1 0 .49-3.51"/>
+					</svg>
 				</button>
 			{/if}
 
 			{#if onExecute}
 				<button
 					onclick={onExecute}
-					class="px-2.5 py-1 text-[11px] font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded transition-colors"
+					class="px-2.5 py-1 text-[11px] font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
 					title="실행"
 				>
 					Execute
