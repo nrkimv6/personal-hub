@@ -216,3 +216,74 @@ def test_try_resolve_traceback_in_error_log_R(tmp_path, monkeypatch, caplog):
 
     assert result.success is False
     assert any("Traceback" in r.message for r in caplog.records)
+
+
+# ---- T1-2: agent 프롬프트 내용 검증 TC ----
+
+def _agent_md_path() -> Path:
+    """auto-conflict-resolver.md 경로 (프로젝트 루트 기준)"""
+    return Path(__file__).parent.parent / ".claude" / "agents" / "auto-conflict-resolver.md"
+
+
+def test_conflict_resolver_agent_has_dedup_rule_R():
+    """R(Right): agent md에 dedup/하나만 유지 문구 포함 확인"""
+    content = _agent_md_path().read_text(encoding="utf-8")
+    assert "하나만 유지" in content
+
+
+def test_conflict_resolver_agent_has_verification_step_R():
+    """R(Right): agent md에 '해결 후 검증' 문구 포함 확인"""
+    content = _agent_md_path().read_text(encoding="utf-8")
+    assert "해결 후 검증" in content
+
+
+def test_conflict_resolver_agent_model_is_opus_R():
+    """R(Right): frontmatter에 model: opus 존재 확인"""
+    import re
+    content = _agent_md_path().read_text(encoding="utf-8")
+    assert re.search(r"^model:\s*opus", content, re.MULTILINE), \
+        "frontmatter에 'model: opus'가 없습니다"
+
+
+def test_conflict_resolver_agent_has_5_strategies_R():
+    """R(Right): 전략 (a)~(e) 5개 모두 존재 확인"""
+    content = _agent_md_path().read_text(encoding="utf-8")
+    for label in ["(a)", "(b)", "(c)", "(d)", "(e)"]:
+        assert label in content, f"전략 {label}이 agent md에 없습니다"
+
+
+# ---- T1-3: 3-way diff TC ----
+
+def test_get_base_content_returns_merge_base_R(tmp_path):
+    """R(Right): merge 충돌 상태에서 base 버전 내용 반환"""
+    from conflict_resolver import ConflictAnalyzer
+    repo = make_conflict_repo(tmp_path)
+    base = ConflictAnalyzer.get_base_content(repo, "a.py")
+    assert base == "line = 1\n"
+
+
+def test_get_base_content_new_file_returns_empty_B(tmp_path):
+    """B(Boundary): merge base에 없는 신규 파일 → 빈 문자열 반환"""
+    from conflict_resolver import ConflictAnalyzer
+    repo = make_conflict_repo(tmp_path)
+    base = ConflictAnalyzer.get_base_content(repo, "nonexistent_new_file.py")
+    assert base == ""
+
+
+def test_get_base_content_no_merge_returns_empty_E(tmp_path):
+    """E(Error): merge 중이 아닌 일반 repo → 빈 문자열 반환, 예외 없음"""
+    from conflict_resolver import ConflictAnalyzer
+    make_git_repo(tmp_path)
+    (tmp_path / "x.py").write_text("x = 1\n")
+    subprocess.run(["git", "add", "x.py"], cwd=tmp_path, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, capture_output=True)
+    base = ConflictAnalyzer.get_base_content(tmp_path, "x.py")
+    assert base == ""
+
+
+def test_get_base_content_nonexistent_file_returns_empty_E(tmp_path):
+    """E(Error): 존재하지 않는 파일 경로 → 빈 문자열 반환, 예외 없음"""
+    from conflict_resolver import ConflictAnalyzer
+    repo = make_conflict_repo(tmp_path)
+    base = ConflictAnalyzer.get_base_content(repo, "totally_wrong_path/nothing.py")
+    assert base == ""
