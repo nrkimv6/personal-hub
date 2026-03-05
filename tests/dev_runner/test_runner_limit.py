@@ -64,7 +64,7 @@ class TestRunnerLimit:
              patch.object(svc, "_cleanup_stale_runners", new_callable=AsyncMock, return_value=0):
             with patch("app.modules.dev_runner.services.executor_service.settings_service", _mock_settings(2)):
                 with pytest.raises(HTTPException) as exc_info:
-                    await svc.start_dev_runner(RunRequest())
+                    await svc.start_dev_runner(RunRequest(test_source="runner_limit", ))
         assert exc_info.value.status_code == 429
 
     @pytest.mark.asyncio
@@ -76,7 +76,7 @@ class TestRunnerLimit:
              patch.object(svc, "_cleanup_stale_runners", new_callable=AsyncMock, return_value=0):
             with patch("app.modules.dev_runner.services.executor_service.settings_service", _mock_settings(1)):
                 with pytest.raises(HTTPException) as exc_info:
-                    await svc.start_dev_runner(RunRequest())
+                    await svc.start_dev_runner(RunRequest(test_source="runner_limit", ))
         assert exc_info.value.status_code == 429
 
     @pytest.mark.asyncio
@@ -86,7 +86,7 @@ class TestRunnerLimit:
              patch.object(svc, "_cleanup_stale_runners", new_callable=AsyncMock, return_value=0):
             with patch("app.modules.dev_runner.services.executor_service.settings_service", _mock_settings(0)):
                 with pytest.raises(HTTPException) as exc_info:
-                    await svc.start_dev_runner(RunRequest())
+                    await svc.start_dev_runner(RunRequest(test_source="runner_limit", ))
         assert exc_info.value.status_code == 429
 
     @pytest.mark.asyncio
@@ -99,6 +99,6 @@ class TestRunnerLimit:
              patch.object(svc, "_cleanup_stale_runners", new_callable=AsyncMock, return_value=0):
             with patch("app.modules.dev_runner.services.executor_service.settings_service", _mock_settings(3)):
                 with pytest.raises(HTTPException) as exc_info:
-                    await svc.start_dev_runner(RunRequest())
+                    await svc.start_dev_runner(RunRequest(test_source="runner_limit", ))
         detail = exc_info.value.detail
         assert "3" in detail  # 최대 수 포함

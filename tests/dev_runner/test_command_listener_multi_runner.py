@@ -71,29 +71,29 @@ class TestCleanupProcessState:
         mock_proc = MagicMock()
         mock_thread = MagicMock()
         mock_thread.is_alive.return_value = False
-        listener._running_processes["abc12345"] = mock_proc
-        listener._running_log_files["abc12345"] = Path("/tmp/test.log")
-        listener._stream_threads["abc12345"] = mock_thread
+        listener._running_processes["t-clmulti-abc1"] = mock_proc
+        listener._running_log_files["t-clmulti-abc1"] = Path("/tmp/test.log")
+        listener._stream_threads["t-clmulti-abc1"] = mock_thread
 
         r = _make_redis_mock()
-        listener._cleanup_process_state("abc12345", r)
+        listener._cleanup_process_state("t-clmulti-abc1", r)
 
-        assert "abc12345" not in listener._running_processes
-        assert "abc12345" not in listener._running_log_files
-        assert "abc12345" not in listener._stream_threads
+        assert "t-clmulti-abc1" not in listener._running_processes
+        assert "t-clmulti-abc1" not in listener._running_log_files
+        assert "t-clmulti-abc1" not in listener._stream_threads
 
     def test_cleanup_calls_redis_srem(self):
         """cleanup 시 ACTIVE_RUNNERS_KEY에서 runner_id SREM 호출"""
         listener = _load_listener()
         r = _make_redis_mock()
-        listener._cleanup_process_state("abc12345", r)
-        r.srem.assert_called_once_with(listener.ACTIVE_RUNNERS_KEY, "abc12345")
+        listener._cleanup_process_state("t-clmulti-abc1", r)
+        r.srem.assert_called_once_with(listener.ACTIVE_RUNNERS_KEY, "t-clmulti-abc1")
 
     def test_cleanup_deletes_per_runner_redis_keys(self):
         """cleanup 시 per-runner Redis 키에 expire 설정 (즉시 삭제 대신 TTL 만료)"""
         listener = _load_listener()
         r = _make_redis_mock()
-        listener._cleanup_process_state("abc12345", r)
+        listener._cleanup_process_state("t-clmulti-abc1", r)
 
         expire_calls = [str(c) for c in r.expire.call_args_list]
         assert any("t-clmulti-abc1:status" in c for c in expire_calls)
@@ -116,7 +116,7 @@ class TestStreamOutput:
         r = _make_redis_mock()
 
         with patch.object(listener, "_cleanup_process_state"):
-            listener._stream_output(mock_process, mock_log_handle, r, "abc12345")
+            listener._stream_output(mock_process, mock_log_handle, r, "t-clmulti-abc1")
 
         call_args_list = r.publish.call_args_list
         assert len(call_args_list) > 0
@@ -140,7 +140,7 @@ class TestStartPlanRunner:
         r = _make_redis_mock()
         command = {
             "action": "run",
-            "runner_id": "abc12345",
+            "runner_id": "t-clmulti-abc1",
             "plan_file": "test.md",
             "engine": "claude",
         }
@@ -167,7 +167,7 @@ class TestStartPlanRunner:
         mock_proc = MagicMock()
         mock_proc.pid = 9999
         mock_proc.poll.return_value = None  # 실행 중
-        listener._running_processes["dup11111"] = mock_proc
+        listener._running_processes["t-clmulti-dup1"] = mock_proc
 
         fake_worktree = Path("/tmp/worktrees/dup11111")
         with patch.object(listener, "_is_pid_alive", return_value=True), \
@@ -175,7 +175,7 @@ class TestStartPlanRunner:
             r = _make_redis_mock()
             command = {
                 "action": "run",
-                "runner_id": "dup11111",
+                "runner_id": "t-clmulti-dup1",
                 "plan_file": "test.md",
                 "engine": "claude",
             }
@@ -231,13 +231,13 @@ class TestExecuteCommand:
         listener = _load_listener()
         r = _make_redis_mock()
         with patch.object(listener, "stop_plan_runner", return_value={"success": True, "message": "ok"}) as mock_stop:
-            listener.execute_command({"action": "stop", "runner_id": "abc12345"}, r)
-            mock_stop.assert_called_once_with("abc12345", r)
+            listener.execute_command({"action": "stop", "runner_id": "t-clmulti-abc1"}, r)
+            mock_stop.assert_called_once_with("t-clmulti-abc1", r)
 
     def test_cross_force_stop_passes_runner_id(self):
         """TC-Cross: execute_command force-stop → force_stop_plan_runner에 runner_id 전달"""
         listener = _load_listener()
         r = _make_redis_mock()
         with patch.object(listener, "force_stop_plan_runner", return_value={"success": True, "message": "ok"}) as mock_fs:
-            listener.execute_command({"action": "force-stop", "runner_id": "abc12345"}, r)
-            mock_fs.assert_called_once_with("abc12345", r)
+            listener.execute_command({"action": "force-stop", "runner_id": "t-clmulti-abc1"}, r)
+            mock_fs.assert_called_once_with("t-clmulti-abc1", r)

@@ -179,7 +179,7 @@ class TestInlineMergeConflictAutoRetry:
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
-        runner_id = "runner-retry-01"
+        runner_id = "t-conflict-01"
         redis = make_redis_mock(worktree_path=str(worktree), branch="plan/test")
 
         from merge_workflow import WorkflowResult
@@ -203,7 +203,7 @@ class TestInlineMergeConflictAutoRetry:
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
-        runner_id = "runner-retry-02"
+        runner_id = "t-conflict-02"
         redis = make_redis_mock(worktree_path=str(worktree), branch="plan/test")
 
         merge_status_sequence = []
@@ -245,7 +245,7 @@ class TestInlineMergeConflictAutoRetry:
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
-        runner_id = "runner-retry-03"
+        runner_id = "t-conflict-03"
         redis = make_redis_mock(worktree_path=str(worktree), branch="plan/test")
 
         merge_status_sequence = []
@@ -278,7 +278,7 @@ class TestInlineMergeConflictAutoRetry:
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
-        runner_id = "runner-retry-04"
+        runner_id = "t-conflict-04"
         redis = make_redis_mock(worktree_path=str(worktree), branch="plan/test")
 
         from merge_workflow import WorkflowResult
@@ -312,7 +312,7 @@ class TestInlineMergeConflictAutoRetry:
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
-        runner_id = "runner-retry-05"
+        runner_id = "t-conflict-05"
         redis = make_redis_mock(worktree_path=str(worktree), branch="plan/test")
 
         merge_status_sequence = []
@@ -352,7 +352,7 @@ class TestInlineMergeConflictAutoRetry:
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
-        runner_id = "runner-retry-06"
+        runner_id = "t-conflict-06"
         redis = make_redis_mock(worktree_path=str(worktree), branch="plan/test")
 
         from merge_workflow import WorkflowResult

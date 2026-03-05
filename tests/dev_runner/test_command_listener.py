@@ -214,18 +214,18 @@ class TestStreamOutputMergeFlow:
     def test_stream_output_merge_flow(self):
         """exit_code 0 + merge_requested 있음 → merge 흐름 진입 (RIGHT)"""
         # merge_requested 플래그가 있을 때
-        result = self._simulate_merge_branch(exit_code=0, merge_flag_value="1", runner_id="runner-abc")
+        result = self._simulate_merge_branch(exit_code=0, merge_flag_value="1", runner_id="t-cmdlstn-abc")
         assert result is True, "merge_requested 플래그 있으면 _merge_requested=True여야 함"
 
     def test_stream_output_no_merge_flag(self):
         """exit_code 0 + merge_requested 없음 → 기존 cleanup (INVERSE)"""
         # merge_requested 플래그가 없을 때
-        result = self._simulate_merge_branch(exit_code=0, merge_flag_value=None, runner_id="runner-abc")
+        result = self._simulate_merge_branch(exit_code=0, merge_flag_value=None, runner_id="t-cmdlstn-abc")
         assert result is False, "merge_requested 플래그 없으면 _merge_requested=False여야 함"
 
     def test_stream_output_nonzero_exit_no_merge(self):
         """exit_code != 0 → merge 흐름 진입 안 함 (항상 False)"""
-        result = self._simulate_merge_branch(exit_code=1, merge_flag_value="1", runner_id="runner-abc")
+        result = self._simulate_merge_branch(exit_code=1, merge_flag_value="1", runner_id="t-cmdlstn-abc")
         assert result is False, "exit_code != 0이면 merge_requested 플래그 무관하게 False여야 함"
 
     def test_stream_output_empty_runner_id_no_merge(self):

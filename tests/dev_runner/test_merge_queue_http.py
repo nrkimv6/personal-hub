@@ -23,7 +23,7 @@ def mock_executor_merge_queue():
     return []
 
 
-def make_queue_item_dict(runner_id: str = "abc12345", status: str = "pending") -> dict:
+def make_queue_item_dict(runner_id: str = "t-mqhttp-abc1", status: str = "pending") -> dict:
     return {
         "runner_id": runner_id,
         "branch": f"runner/{runner_id}",
@@ -64,7 +64,7 @@ class TestMergeQueueHTTP:
     def test_http3_get_merge_status_existing_runner(self, api_client):
         """HTTP-3: GET /merge/{runner_id} → 200, MergeStatusResponse 스키마"""
         status_dict = {
-            "runner_id": "abc12345",
+            "runner_id": "t-mqhttp-abc1",
             "status": "testing",
             "test_passed": None,
             "fix_attempts": 0,
@@ -79,7 +79,7 @@ class TestMergeQueueHTTP:
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data["runner_id"] == "abc12345"
+        assert data["runner_id"] == "t-mqhttp-abc1"
         assert data["status"] == "testing"
 
     def test_http4_get_merge_status_nonexistent_returns_404(self, api_client):
@@ -117,7 +117,7 @@ class TestMergeQueueHTTP:
         from app.modules.dev_runner.schemas import MergeQueueItem
 
         item = MergeQueueItem(
-            runner_id="abc12345",
+            runner_id="t-mqhttp-abc1",
             branch="runner/abc12345",
             plan_file="/work/plan.md",
             project="monitor-page",
@@ -133,7 +133,7 @@ class TestMergeQueueHTTP:
         from app.modules.dev_runner.schemas import MergeStatusResponse
 
         resp = MergeStatusResponse(
-            runner_id="abc12345",
+            runner_id="t-mqhttp-abc1",
             status="done",
             test_passed=True,
             fix_attempts=1,

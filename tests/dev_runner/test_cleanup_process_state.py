@@ -73,7 +73,7 @@ class TestCleanupProcessState:
         """R: cleanup 후 모든 15개 suffix 키에 TTL이 설정돼야 한다 (preserve_worktree=False)"""
         RUNNER_KEY_SUFFIXES, RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY, RECENT_RUNNERS_KEY, RECENT_RUNNERS_TTL = self._import_listener_constants()
         r = make_fake_redis()
-        runner_id = "test-expire-001"
+        runner_id = "t-clnproc-expire"
         seed_runner_keys(r, runner_id, RUNNER_KEY_SUFFIXES)
 
         # cleanup 로직 직접 실행 (함수 import 대신 로직을 재현)
@@ -102,7 +102,7 @@ class TestCleanupProcessState:
         """R: cleanup 후 status 키가 'stopped'여야 한다"""
         RUNNER_KEY_SUFFIXES, RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY, RECENT_RUNNERS_KEY, RECENT_RUNNERS_TTL = self._import_listener_constants()
         r = make_fake_redis()
-        runner_id = "test-stopped-001"
+        runner_id = "t-clnproc-stopped"
         r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
         r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
 
@@ -121,7 +121,7 @@ class TestCleanupProcessState:
         """R: cleanup 후 runner_id가 RECENT_RUNNERS sorted set에 존재해야 한다"""
         RUNNER_KEY_SUFFIXES, RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY, RECENT_RUNNERS_KEY, RECENT_RUNNERS_TTL = self._import_listener_constants()
         r = make_fake_redis()
-        runner_id = "test-recent-001"
+        runner_id = "t-clnproc-recent"
         seed_runner_keys(r, runner_id, RUNNER_KEY_SUFFIXES)
 
         _preserve_worktree = False
@@ -140,7 +140,7 @@ class TestCleanupProcessState:
         """R: cleanup 후 runner_id가 ACTIVE_RUNNERS set에 없어야 한다"""
         RUNNER_KEY_SUFFIXES, RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY, RECENT_RUNNERS_KEY, RECENT_RUNNERS_TTL = self._import_listener_constants()
         r = make_fake_redis()
-        runner_id = "test-active-001"
+        runner_id = "t-clnproc-active"
         seed_runner_keys(r, runner_id, RUNNER_KEY_SUFFIXES)
         assert r.sismember(ACTIVE_RUNNERS_KEY, runner_id)
 
@@ -159,7 +159,7 @@ class TestCleanupProcessState:
         """B: _preserve_worktree=True 시 worktree_path 키만 TTL 없이 보존돼야 한다"""
         RUNNER_KEY_SUFFIXES, RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY, RECENT_RUNNERS_KEY, RECENT_RUNNERS_TTL = self._import_listener_constants()
         r = make_fake_redis()
-        runner_id = "test-preserve-001"
+        runner_id = "t-clnproc-preserv"
         seed_runner_keys(r, runner_id, RUNNER_KEY_SUFFIXES)
 
         _preserve_worktree = True
@@ -187,7 +187,7 @@ class TestCleanupProcessState:
         """B: cleanup 후 TTL이 없는(-1) per-runner 키가 없어야 한다 (preserve_worktree=False)"""
         RUNNER_KEY_SUFFIXES, RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY, RECENT_RUNNERS_KEY, RECENT_RUNNERS_TTL = self._import_listener_constants()
         r = make_fake_redis()
-        runner_id = "test-orphan-001"
+        runner_id = "t-clnproc-orphan"
         seed_runner_keys(r, runner_id, RUNNER_KEY_SUFFIXES)
 
         _preserve_worktree = False
@@ -236,7 +236,7 @@ class TestForceCleanupStateDefense:
             RUNNER_KEY_PREFIX, RECENT_RUNNERS_KEY, ACTIVE_RUNNERS_KEY,
         )
         svc, fake_r = executor_service_with_fake_redis
-        runner_id = "ghost-runner-001"
+        runner_id = "t-clnproc-ghost"
         # status 키 없이 ACTIVE에만 등록 (listener가 이미 키 정리한 상황)
         await fake_r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
 
@@ -256,7 +256,7 @@ class TestForceCleanupStateDefense:
             RUNNER_KEY_PREFIX, RECENT_RUNNERS_KEY, ACTIVE_RUNNERS_KEY,
         )
         svc, fake_r = executor_service_with_fake_redis
-        runner_id = "valid-runner-001"
+        runner_id = "t-clnproc-valid"
         await fake_r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
         await fake_r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
 

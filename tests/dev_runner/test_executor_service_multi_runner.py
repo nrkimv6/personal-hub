@@ -80,7 +80,7 @@ class TestStartDevRunnerRight:
         executor.async_redis.get = mock_get
 
         with patch.object(executor, "_check_redis_and_listener", new_callable=AsyncMock):
-            request = RunRequest(plan_file="test.md", engine="claude")
+            request = RunRequest(test_source="executor_svc_multi", plan_file="test.md", engine="claude")
             result = await executor.start_dev_runner(request)
 
         assert result.runner_id is not None
@@ -107,7 +107,7 @@ class TestStartDevRunnerRight:
         )
 
         with patch.object(executor, "_check_redis_and_listener", new_callable=AsyncMock):
-            request = RunRequest(plan_file="test.md", engine="claude")
+            request = RunRequest(test_source="executor_svc_multi", plan_file="test.md", engine="claude")
             result1 = await executor.start_dev_runner(request)
             result2 = await executor.start_dev_runner(request)
 

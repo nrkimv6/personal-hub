@@ -71,7 +71,7 @@ class TestRetryMergeFullFlow:
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
-        runner_id = "runner-e2e-01"
+        runner_id = "t-mretry-e2e01"
         command_id = "cmd-e2e-001"
         redis = make_redis_mock(worktree_path=str(worktree))
         merge_result = make_merge_result(merged=True, tests_passed=True)
@@ -106,7 +106,7 @@ class TestRetryMergeFullFlow:
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
-        runner_id = "runner-e2e-02"
+        runner_id = "t-mretry-e2e02"
         redis = make_redis_mock(worktree_path=str(worktree))
         merge_result = make_merge_result(merged=True, tests_passed=True)
 

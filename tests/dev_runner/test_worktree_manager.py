@@ -277,7 +277,7 @@ class TestWorktreeManagerMergeToMain:
     def test_merge_to_main_no_branch_no_plan_uses_runner_id(self, worktrees_dir):
         """TC-Boundary: branch=None + plan_file=None → runner/{runner_id} 브랜치 사용 (회귀)"""
         base_dir, repo = worktrees_dir
-        runner_id = "regrtest1"
+        runner_id = "t-wtmgr-regr1"
         wt_path, branch = WorktreeManager.create(runner_id, base_dir)
         (wt_path / "regr.py").write_text("x = 2")
         subprocess.run(["git", "add", "-A"], cwd=str(wt_path), capture_output=True)

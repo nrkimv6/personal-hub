@@ -15,7 +15,7 @@ def test_external_plan_path_accepted():
     svc = ExecutorService()
 
     external_plan = "D:/work/project/tools/monitor-page/docs/plan/test_stub.md"
-    req = RunRequest(plan_file=external_plan, engine="claude")
+    req = RunRequest(test_source="path_isolation", plan_file=external_plan, engine="claude")
 
     # listener heartbeat 있음 + status not running
     mock_r = MagicMock()

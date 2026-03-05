@@ -79,13 +79,13 @@ class TestConformance:
 
     def test_max_cycles_zero_is_integer_in_schema(self):
         """RunRequest.max_cycles=0 → int 타입"""
-        r = RunRequest(max_cycles=0)
+        r = RunRequest(test_source="correct_max_cycles", max_cycles=0)
         assert isinstance(r.max_cycles, int)
         assert r.max_cycles == 0
 
     def test_max_cycles_zero_serializes_as_integer_in_json(self):
         """RunRequest.max_cycles=0 → JSON 직렬화 시 정수 0 (문자열 "0" 아님)"""
-        r = RunRequest(plan_file="test.md", max_cycles=0)
+        r = RunRequest(test_source="correct_max_cycles", plan_file="test.md", max_cycles=0)
         d = r.model_dump()
         assert d["max_cycles"] == 0
         assert not isinstance(d["max_cycles"], str)
@@ -93,7 +93,7 @@ class TestConformance:
     async def test_command_max_cycles_zero_is_int_type(self, executor, fake_async_redis):
         """Redis command에 기록된 max_cycles가 int 0"""
         await _setup_idle(fake_async_redis)
-        cmd = await _capture(executor, fake_async_redis, RunRequest(plan_file="test.md", max_cycles=0))
+        cmd = await _capture(executor, fake_async_redis, RunRequest(test_source="correct_max_cycles", plan_file="test.md", max_cycles=0))
         assert isinstance(cmd["max_cycles"], int)
         assert cmd["max_cycles"] == 0
 
@@ -109,12 +109,12 @@ class TestConformance:
 
     def test_max_cycles_schema_default_is_zero(self):
         """RunRequest 기본값: max_cycles=0 (무제한)"""
-        r = RunRequest()
+        r = RunRequest(test_source="correct_max_cycles", )
         assert r.max_cycles == 0
 
     def test_max_tokens_schema_default_is_zero(self):
         """RunRequest 기본값: max_tokens=0 (무제한)"""
-        r = RunRequest()
+        r = RunRequest(test_source="correct_max_cycles", )
         assert r.max_tokens == 0
 
 
@@ -126,7 +126,7 @@ class TestOrdering:
     async def test_max_cycles_field_order_in_command(self, executor, fake_async_redis):
         """command dict에 action이 먼저, max_cycles가 그 이후에 추가됨"""
         await _setup_idle(fake_async_redis)
-        cmd = await _capture(executor, fake_async_redis, RunRequest(plan_file="test.md", max_cycles=0))
+        cmd = await _capture(executor, fake_async_redis, RunRequest(test_source="correct_max_cycles", plan_file="test.md", max_cycles=0))
 
         keys = list(cmd.keys())
         assert "action" in keys
@@ -138,7 +138,7 @@ class TestOrdering:
         await _setup_idle(fake_async_redis)
         cmd = await _capture(
             executor, fake_async_redis,
-            RunRequest(plan_file="test.md", max_cycles=0, max_tokens=0, until="20:00", dry_run=True)
+            RunRequest(test_source="correct_max_cycles", plan_file="test.md", max_cycles=0, max_tokens=0, until="20:00", dry_run=True)
         )
         assert cmd["max_cycles"] == 0
         assert cmd["max_tokens"] == 0
@@ -153,24 +153,24 @@ class TestRange:
 
     def test_max_cycles_zero_valid(self):
         """max_cycles=0 유효"""
-        r = RunRequest(max_cycles=0)
+        r = RunRequest(test_source="correct_max_cycles", max_cycles=0)
         assert r.max_cycles == 0
 
     def test_max_cycles_positive_valid(self):
         """max_cycles=100 유효"""
-        r = RunRequest(max_cycles=100)
+        r = RunRequest(test_source="correct_max_cycles", max_cycles=100)
         assert r.max_cycles == 100
 
     def test_max_cycles_string_invalid(self):
         """max_cycles 문자열 → ValidationError"""
         with pytest.raises(ValidationError):
-            RunRequest(max_cycles="infinite")
+            RunRequest(test_source="correct_max_cycles", max_cycles="infinite")
 
     def test_max_cycles_float_coerced_or_rejected(self):
         """max_cycles=3.0 → int로 강제 변환 또는 오류 (pydantic 동작 확인)"""
         # pydantic v2: float → int 강제 변환 가능
         try:
-            r = RunRequest(max_cycles=3)
+            r = RunRequest(test_source="correct_max_cycles", max_cycles=3)
             assert r.max_cycles == 3
         except ValidationError:
             pass  # 거부도 허용
@@ -202,7 +202,7 @@ class TestReference:
             return await orig(key, *vals)
 
         with patch.object(executor.async_redis, "lpush", side_effect=cap):
-            await executor.start_dev_runner(RunRequest(plan_file="test.md", max_cycles=0))
+            await executor.start_dev_runner(RunRequest(test_source="correct_max_cycles", plan_file="test.md", max_cycles=0))
 
         assert any("command" in k for k in pushed_keys), f"command 큐 키 없음: {pushed_keys}"
 
@@ -224,27 +224,27 @@ class TestExistence:
     async def test_max_cycles_zero_exists_in_command(self, executor, fake_async_redis):
         """max_cycles=0 → command에 키 존재"""
         await _setup_idle(fake_async_redis)
-        cmd = await _capture(executor, fake_async_redis, RunRequest(plan_file="test.md", max_cycles=0))
+        cmd = await _capture(executor, fake_async_redis, RunRequest(test_source="correct_max_cycles", plan_file="test.md", max_cycles=0))
         assert "max_cycles" in cmd
 
     async def test_max_cycles_default_zero_exists_in_command(self, executor, fake_async_redis):
-        """RunRequest() 기본값(max_cycles=0) → command에 키 존재"""
+        """RunRequest(test_source="correct_max_cycles", ) 기본값(max_cycles=0) → command에 키 존재"""
         await _setup_idle(fake_async_redis)
         # 기본값이 0이므로 명시 안 해도 포함되어야 함
-        cmd = await _capture(executor, fake_async_redis, RunRequest(plan_file="test.md"))
+        cmd = await _capture(executor, fake_async_redis, RunRequest(test_source="correct_max_cycles", plan_file="test.md"))
         assert "max_cycles" in cmd
         assert cmd["max_cycles"] == 0
 
     async def test_max_cycles_none_absent_from_command(self, executor, fake_async_redis):
         """max_cycles=None → command에 키 부재"""
         await _setup_idle(fake_async_redis)
-        cmd = await _capture(executor, fake_async_redis, RunRequest(plan_file="test.md", max_cycles=None))
+        cmd = await _capture(executor, fake_async_redis, RunRequest(test_source="correct_max_cycles", plan_file="test.md", max_cycles=None))
         assert "max_cycles" not in cmd
 
     async def test_action_always_exists_in_command(self, executor, fake_async_redis):
         """command에는 항상 action 키가 존재"""
         await _setup_idle(fake_async_redis)
-        cmd = await _capture(executor, fake_async_redis, RunRequest(plan_file="test.md", max_cycles=0))
+        cmd = await _capture(executor, fake_async_redis, RunRequest(test_source="correct_max_cycles", plan_file="test.md", max_cycles=0))
         assert "action" in cmd
         assert cmd["action"] == "run"
 
@@ -273,7 +273,7 @@ class TestCardinality:
             return await orig(key, *vals)
 
         with patch.object(executor.async_redis, "lpush", side_effect=cap):
-            await executor.start_dev_runner(RunRequest(plan_file="test.md", max_cycles=0))
+            await executor.start_dev_runner(RunRequest(test_source="correct_max_cycles", plan_file="test.md", max_cycles=0))
 
         assert len(captured) == 1, f"command가 {len(captured)}개 푸시됨 (1개여야 함)"
 
@@ -296,7 +296,7 @@ class TestCardinality:
             return await orig(key, *vals)
 
         with patch.object(executor.async_redis, "lpush", side_effect=cap):
-            await executor.start_dev_runner(RunRequest(plan_file="test.md", max_cycles=0))
+            await executor.start_dev_runner(RunRequest(test_source="correct_max_cycles", plan_file="test.md", max_cycles=0))
 
         raw = captured_raw[0]
         count = raw.count('"max_cycles"')
@@ -311,7 +311,7 @@ class TestTime:
     async def test_command_has_timestamp(self, executor, fake_async_redis):
         """command에 timestamp 필드가 존재"""
         await _setup_idle(fake_async_redis)
-        cmd = await _capture(executor, fake_async_redis, RunRequest(plan_file="test.md", max_cycles=0))
+        cmd = await _capture(executor, fake_async_redis, RunRequest(test_source="correct_max_cycles", plan_file="test.md", max_cycles=0))
         assert "timestamp" in cmd
 
     async def test_command_timestamp_is_recent(self, executor, fake_async_redis):
@@ -319,7 +319,7 @@ class TestTime:
         import time as _time
         await _setup_idle(fake_async_redis)
         before = datetime.now()
-        cmd = await _capture(executor, fake_async_redis, RunRequest(plan_file="test.md", max_cycles=0))
+        cmd = await _capture(executor, fake_async_redis, RunRequest(test_source="correct_max_cycles", plan_file="test.md", max_cycles=0))
         after = datetime.now()
 
         ts = datetime.fromisoformat(cmd["timestamp"])
