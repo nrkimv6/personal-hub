@@ -1107,21 +1107,9 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
     from merge_workflow import MergeWorkflow
     from plan_runner.core.pipeline import pre_merge_gate, auto_commit_stage
 
-    log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
-    log_list_key = f"plan-runner:logs:list:{runner_id}"
-
     def _pub(msg: str) -> None:
-        """runner 로그 채널에 merge 로그 publish + Redis list에 히스토리 저장"""
-        logger.info(f"[MERGE] {msg}")
-        try:
-            redis_client.publish(log_channel, f"[MERGE] {msg}")
-        except Exception:
-            pass
-        try:
-            redis_client.rpush(log_list_key, f"[MERGE] {msg}")
-            redis_client.expire(log_list_key, 86400)
-        except Exception:
-            pass
+        """runner 로그 채널에 merge 로그 publish + Redis list + 파일에 기록 (stream_log_path 우선)"""
+        _pub_and_log(runner_id, msg, redis_client, "MERGE")
 
     try:
         # 1. merge_status = "queued" 설정 (merge_requested 삭제 전에 — heartbeat 경쟁 조건 방지)
@@ -2126,14 +2114,9 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
     from plan_runner.core.pipeline import pre_merge_gate, auto_commit_stage
 
     result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
-    log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
-
     def _pub(msg: str) -> None:
-        logger.info(f"[RETRY-MERGE] {msg}")
-        try:
-            redis_client.publish(log_channel, f"[MERGE] {msg}")
-        except Exception:
-            pass
+        """retry-merge 로그 채널에 merge 로그 publish + Redis list + 파일에 기록 (stream_log_path 우선)"""
+        _pub_and_log(runner_id, msg, redis_client, "MERGE")
 
     result = {"success": False, "message": "unknown error", "action": "retry-merge"}
     try:
@@ -2428,11 +2411,10 @@ def _do_direct_merge(branch: str, worktree_path_str: str | None, plan_file: str 
                 redis_client.expire(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", RECENT_RUNNERS_TTL)
         except Exception:
             pass
-        # SSE 채널에 최종 결과 publish
+        # SSE 채널에 최종 결과 publish (stream_log_path 파일에도 기록)
         try:
-            log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
             status_msg = result.get("message", "unknown")
-            redis_client.publish(log_channel, f"[MERGE] direct-merge 최종 결과: {status_msg}")
+            _pub_and_log(runner_id, f"direct-merge 최종 결과: {status_msg}", redis_client, "MERGE")
         except Exception:
             pass
         redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
