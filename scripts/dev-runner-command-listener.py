@@ -71,7 +71,7 @@ HEARTBEAT_INTERVAL = 10  # heartbeat 갱신 주기 (초)
 HEARTBEAT_TTL = 30  # heartbeat 만료 시간 (초, 3회 미갱신 시 만료)
 
 # merge 활성 상태 — cleanup 보호 가드 및 reconnect 복구 조건에 사용
-MERGE_ACTIVE_STATUSES = ("queued", "merging", "pending_merge", "resolving", "testing", "fixing")
+MERGE_ACTIVE_STATUSES = ("pre_merge", "queued", "merging", "pending_merge", "resolving", "testing", "fixing")
 
 QUOTA_ERROR_MARKERS = ["TerminalQuotaError", "exhausted your capacity", "[QUOTA]"]
 
@@ -198,6 +198,16 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         if plan_file_val and _is_plan_in_progress(plan_file_val):
             _preserve_worktree = True
             logger.info(f"워크트리 보존 (plan 구현중): {runner_id}")
+
+        # merge 시그널 보호: merge_requested 또는 merge 활성 상태면 worktree 보존
+        if not _preserve_worktree:
+            try:
+                _merge_req = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+            except Exception:
+                _merge_req = None
+            if _merge_req or merge_status in MERGE_ACTIVE_STATUSES:
+                _preserve_worktree = True
+                logger.info(f"워크트리 보존 (merge 시그널: req={bool(_merge_req)}, status={merge_status}): {runner_id}")
 
         # merge_status가 없거나 "merged"가 아닌 경우에만 worktree 정리 시도
         # (머지 워크플로가 별도로 관리하는 경우 스킵)
@@ -1168,12 +1178,22 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
             branch_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
         except Exception:
             pass
+        _pub(f"[DEBUG] worktree keys: wt={worktree_path_str!r}, plan={plan_file_str!r}, branch={branch_str!r}")
+
+        # fallback: Redis worktree_path 키 없을 때 plan 파일 헤더에서 직접 추출
+        if not worktree_path_str and plan_file_str:
+            _resolved = _resolve_todo_file(plan_file_str)
+            if _resolved:
+                _, _wt_rel = _parse_plan_worktree_info(_resolved)
+                if _wt_rel:
+                    worktree_path_str = str(PROJECT_ROOT / _wt_rel)
+                    _pub(f"[fallback] plan 헤더에서 worktree 경로 복구: {worktree_path_str}")
 
         worktree_path = Path(worktree_path_str) if worktree_path_str else None
         plan_file = plan_file_str if (plan_file_str and plan_file_str not in (PLAN_FILE_ALL, _LEGACY_ALL)) else None
 
         if not worktree_path or not worktree_path.is_dir():
-            _pub(f"worktree 경로 없음 또는 유효하지 않음: {worktree_path_str} — merge 중단")
+            _pub(f"worktree 경로 없음 또는 유효하지 않음: {worktree_path_str!r} — merge 중단")
             try:
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
             except Exception:
@@ -1493,11 +1513,14 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
                 logger.debug(f"[_stream_output] stdout drain 실패 (무시): {_drain_err}")
 
         # merge_requested 플래그 확인 (1회) — 이후 workflow 상태 업데이트 + 분기 모두에 재사용
+        # merge 보호 시그널 조기 설정: heartbeat이 cleanup을 시도하기 전에 pre_merge 상태를 설정
         _merge_requested = False
         if runner_id and exit_code == 0:
             try:
                 _flag = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
                 _merge_requested = bool(_flag)
+                if _merge_requested:
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "pre_merge")
             except Exception as e:
                 logger.warning(f"[_stream_output] merge_requested 플래그 조회 실패 (runner_id={runner_id}): {e}")
         logger.info(f"[_stream_output] merge 분기 판정: _merge_requested={_merge_requested} (runner_id={runner_id})")
@@ -1812,6 +1835,7 @@ def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path", str(worktree_path))
         redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:quota_stopped")
         redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+        logger.info(f"[launch] Redis per-runner 키 설정 완료: worktree_path={worktree_path!r}, runner_id={runner_id}")
 
         # 별도 스레드에서 stdout 을 파일 + Redis publish
         thread = threading.Thread(

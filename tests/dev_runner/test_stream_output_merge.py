@@ -186,3 +186,75 @@ def test_stream_output_workflow_status_no_merge(listener_mod, fr):
         listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
 
     wf_mgr.update_status.assert_called_with(wf["id"], "completed")
+
+
+def test_stream_output_sets_pre_merge_status(listener_mod, fr):
+    """R(Right): merge_requested=1 + exit_code=0 시 merge_status='pre_merge' 즉시 설정 (Fix 4)"""
+    runner_id = "t-premrg-aabb"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")
+
+    process = _make_process(returncode=0)
+    log_handle = _make_log_handle()
+
+    with patch.object(listener_mod, "_wf_manager", None), \
+         patch.object(listener_mod, "_do_inline_merge"), \
+         patch.object(listener_mod, "_cleanup_process_state"), \
+         patch.object(listener_mod, "_running_log_files", {}):
+        listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
+
+    merge_status = fr.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+    assert merge_status == "pre_merge", f"merge_status가 'pre_merge'여야 함, 실제: {merge_status!r}"
+
+
+def test_stream_output_no_pre_merge_when_no_flag(listener_mod, fr):
+    """B(Boundary): merge_requested 없음 + exit_code=0 → merge_status 설정 안 됨 (Fix 4)"""
+    runner_id = "t-premrg-ccdd"
+    # merge_requested 미설정
+
+    process = _make_process(returncode=0)
+    log_handle = _make_log_handle()
+
+    with patch.object(listener_mod, "_wf_manager", None), \
+         patch.object(listener_mod, "_do_inline_merge"), \
+         patch.object(listener_mod, "_cleanup_process_state"), \
+         patch.object(listener_mod, "_running_log_files", {}):
+        listener_mod._stream_output(process, log_handle, fr, runner_id=runner_id)
+
+    merge_status = fr.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+    assert merge_status is None, f"merge_status가 설정되지 않아야 함, 실제: {merge_status!r}"
+
+
+def test_cleanup_preserves_worktree_when_merge_requested(listener_mod, fr):
+    """R(Right): merge_requested 키 존재 시 _cleanup_process_state가 worktree 삭제 안 함 (Fix 3)"""
+    runner_id = "t-clnup-aabb"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "docs/plan/test.md")
+
+    mock_wt = MagicMock()
+    with patch.object(listener_mod, "_running_processes", {}), \
+         patch.object(listener_mod, "_running_log_files", {}), \
+         patch.object(listener_mod, "_stream_threads", {}), \
+         patch.object(listener_mod, "_wf_manager", None), \
+         patch.object(listener_mod, "_is_plan_in_progress", return_value=False), \
+         patch.object(listener_mod, "WorktreeManager", mock_wt):
+        listener_mod._cleanup_process_state(runner_id, fr, reason="test")
+
+    mock_wt.remove.assert_not_called(), "merge_requested 있을 때 worktree 삭제 금지"
+
+
+def test_cleanup_allows_worktree_removal_without_merge_signal(listener_mod, fr):
+    """E(Error): merge_requested 없고 merge_status 없음 → WorktreeManager.remove 호출됨 (기존 동작)"""
+    runner_id = "t-clnup-eeff"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "docs/plan/test.md")
+    # merge_requested/merge_status 미설정
+
+    mock_wt = MagicMock()
+    with patch.object(listener_mod, "_running_processes", {}), \
+         patch.object(listener_mod, "_running_log_files", {}), \
+         patch.object(listener_mod, "_stream_threads", {}), \
+         patch.object(listener_mod, "_wf_manager", None), \
+         patch.object(listener_mod, "_is_plan_in_progress", return_value=False), \
+         patch.object(listener_mod, "WorktreeManager", mock_wt):
+        listener_mod._cleanup_process_state(runner_id, fr, reason="test")
+
+    mock_wt.remove.assert_called_once(), "merge 시그널 없으면 WorktreeManager.remove 호출되어야 함"
