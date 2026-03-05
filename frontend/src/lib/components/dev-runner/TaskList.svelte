@@ -29,9 +29,12 @@
 		}
 	}
 
+	const isRealPlanPath = (p: string | null) =>
+		!!p && p !== '__ALL_PLANS__' && p !== 'ALL';
+
 	$effect(() => {
-		if (planPath) {
-			void fetchItems(planPath);
+		if (isRealPlanPath(planPath)) {
+			void fetchItems(planPath!);
 		} else {
 			detail = null;
 		}
@@ -39,8 +42,8 @@
 
 	// 외부 refresh 트리거 (SSE plan_changed 이벤트)
 	$effect(() => {
-		if (refreshTick > 0 && planPath) {
-			void fetchItems(planPath);
+		if (refreshTick > 0 && isRealPlanPath(planPath)) {
+			void fetchItems(planPath!);
 		}
 	});
 

@@ -119,7 +119,7 @@
 			const status = await devRunnerRunnerApi.status();
 			runStatus = status;
 
-			if (status.plan_file) {
+			if (status.plan_file && status.plan_file !== '__ALL_PLANS__' && status.plan_file !== 'ALL') {
 				lastPlanFile = status.plan_file;
 			}
 
