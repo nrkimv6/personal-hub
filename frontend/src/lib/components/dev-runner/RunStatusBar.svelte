@@ -52,9 +52,9 @@
 			<!-- SSE 연결 상태 dot -->
 			<div class="flex items-center gap-1.5 shrink-0">
 				{#if sseConnected}
-					<div class="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+					<div class="pulse-dot bg-status-running"></div>
 				{:else}
-					<div class="w-1.5 h-1.5 rounded-full bg-gray-300 animate-pulse"></div>
+					<div class="pulse-dot bg-status-failed animate-pulse"></div>
 				{/if}
 			</div>
 
@@ -63,26 +63,25 @@
 				<div class="flex items-center gap-1 shrink-0">
 					{#each runners as runner (runner.id)}
 						{#if runner.running}
-							<div class="dr-pulse-dot bg-green-500" title="{runner.plan_file?.split(/[\\/]/).pop() ?? '전체 실행'} - 실행 중"></div>
+							<div class="pulse-dot bg-status-running" title="{runner.plan_file?.split(/[\\/]/).pop() ?? '전체 실행'} - 실행 중"></div>
 						{:else}
-							<div class="w-2 h-2 rounded-full bg-gray-300" title="{runner.plan_file?.split(/[\\/]/).pop() ?? '전체 실행'} - 중지"></div>
+							<div class="w-2 h-2 rounded-full bg-muted-foreground/30" title="{runner.plan_file?.split(/[\\/]/).pop() ?? '전체 실행'} - 중지"></div>
 						{/if}
 					{/each}
 				</div>
 			{/if}
 
-			<!-- 상태 텍스트 -->
-			<div class="flex items-center gap-2 text-xs shrink-0">
-				{#if anyRunning}
-					<span class="font-medium text-green-700">실행 중</span>
-					{#if runningCount > 1}
-						<span class="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">{runningCount}개</span>
-					{/if}
-					<span class="text-gray-400 font-mono">{elapsed}</span>
-				{:else if anyCrashed}
-					<span class="font-medium text-red-600">비정상 종료</span>
-				{:else}
-					<span class="text-gray-500">대기</span>
+			<!-- Zap 아이콘 + runner count + elapsed -->
+			<div class="flex items-center gap-1.5 shrink-0">
+				<!-- Zap SVG 아이콘 -->
+				<svg class="w-3.5 h-3.5 text-primary" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+					<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+				</svg>
+				<span class="font-mono font-semibold text-xs">
+					{runningCount} runner{runningCount !== 1 ? 's' : ''}
+				</span>
+				{#if anyRunning && elapsed}
+					<span class="text-[10px] font-mono text-muted-foreground">{elapsed}</span>
 				{/if}
 			</div>
 		</div>
