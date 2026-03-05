@@ -62,7 +62,7 @@ RECENT_RUNNERS_TTL = 86400  # 24시간 (초) — executor_service.py의 RECENT_R
 RUNNER_KEY_SUFFIXES = (
     "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
     "engine", "worktree_path", "branch", "merge_status", "merge_requested",
-    "current_cycle", "quota_stopped", "error", "restart_after_merge",
+    "current_cycle", "quota_stopped", "error", "restart_after_merge", "test_source",
 )
 HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
 HEARTBEAT_INTERVAL = 10  # heartbeat 갱신 주기 (초)
@@ -1473,6 +1473,14 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
     """
     runner_id = command.get("runner_id")
     _wf_id: Optional[int] = None
+
+    # test_source가 있으면 Redis에 저장 (pytest TC 추적용)
+    test_source = command.get("test_source")
+    if runner_id and test_source:
+        try:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_source", test_source)
+        except Exception:
+            pass
 
     def _set_error_status(message: str):
         """실패 시 per-runner 상태를 Redis에 기록 + 라이브 로그 채널에 publish"""

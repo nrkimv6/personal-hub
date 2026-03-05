@@ -1,9 +1,58 @@
 """dev_runner 테스트 공통 conftest - config 격리로 hang 방지"""
 
 import json
+import sys
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
+
+
+def _try_connect_redis():
+    """Redis 연결 시도. 실패 시 None 반환."""
+    try:
+        import redis as redis_lib
+        r = redis_lib.Redis(host="localhost", port=6379, decode_responses=True)
+        r.ping()
+        return r
+    except Exception:
+        return None
+
+
+@pytest.fixture(autouse=True, scope="session")
+def runner_cleanup_report():
+    """세션 종료 시 잔류 러너 리포트를 콘솔에 출력.
+
+    - 세션 시작 전 active_runners 스냅샷 저장
+    - 세션 종료 후 신규 잔류 러너 목록 출력
+    - test_source가 없는 러너 = (unknown) 표시 → 미수정 TC 식별 단서
+    """
+    r = _try_connect_redis()
+    if r is None:
+        yield
+        return
+
+    before_active = r.smembers("plan-runner:active_runners") or set()
+    yield
+
+    try:
+        after_active = r.smembers("plan-runner:active_runners") or set()
+        remaining = after_active - before_active
+        sep = "=" * 43
+        if not remaining:
+            sys.stderr.write(f"\n{sep}\n[CLEAN] 잔류 러너 0건\n{sep}\n")
+        else:
+            lines = [f"\n{sep}", f"[DIRTY] 잔류 러너 {len(remaining)}건:"]
+            for rid in sorted(remaining):
+                plan_file = r.get(f"plan-runner:runners:{rid}:plan_file") or "(none)"
+                engine    = r.get(f"plan-runner:runners:{rid}:engine")    or "(none)"
+                pid       = r.get(f"plan-runner:runners:{rid}:pid")       or "(none)"
+                source    = r.get(f"plan-runner:runners:{rid}:test_source") or "(unknown)"
+                lines.append(f"  - {rid:<22} | plan: {plan_file:<30} | engine: {engine:<8} | pid: {pid:<8} | source: {source}")
+            lines.append(sep)
+            sys.stderr.write("\n".join(lines) + "\n")
+        sys.stderr.flush()
+    except Exception:
+        pass
 
 
 @pytest.fixture(autouse=True)
@@ -13,11 +62,10 @@ def redis_cleanup():
     - 테스트 시작 전 active_runners 스냅샷을 기록
     - 테스트 종료 후 새로 추가된 runner_id와 관련 키를 삭제
     """
-    try:
-        import redis as redis_lib
-        r = redis_lib.Redis(host="localhost", port=6379, decode_responses=True)
-        r.ping()
-    except Exception:
+    import os as _os, signal as _signal, time as _time, sys as _sys, subprocess as _subprocess
+
+    r = _try_connect_redis()
+    if r is None:
         yield
         return
 
@@ -31,8 +79,8 @@ def redis_cleanup():
         after_recent = set(r.zrange("plan-runner:recent_runners", 0, -1) or [])
         new_ids = (after_active - before_active) | (after_recent - before_recent)
         for runner_id in new_ids:
+            test_source = r.get(f"plan-runner:runners:{runner_id}:test_source") or "(unknown)"
             # PID kill (프로세스 잔류 방지) — PID 기록 지연 대응: 최대 5초 retry
-            import os as _os, signal as _signal, time as _time, sys as _sys, subprocess as _subprocess
             pid_str = None
             for _ in range(10):  # 최대 5초 대기
                 pid_str = r.get(f"plan-runner:runners:{runner_id}:pid")
@@ -43,18 +91,22 @@ def redis_cleanup():
                 try:
                     _os.kill(int(pid_str), _signal.SIGTERM)
                     _time.sleep(2)
-                    # 강제종료 fallback
+                    # 강제종료 fallback — /T 플래그로 프로세스 트리 전체 kill
                     if _sys.platform == "win32":
-                        _subprocess.run(["taskkill", "/F", "/PID", str(pid_str)], capture_output=True)
+                        _subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid_str)], capture_output=True)
                     else:
                         _os.kill(int(pid_str), _signal.SIGKILL)
                 except (ProcessLookupError, ValueError, OSError):
                     pass
+            print(f"[redis_cleanup] 정리: {runner_id} (source: {test_source})")
             r.srem("plan-runner:active_runners", runner_id)
             r.zrem("plan-runner:recent_runners", runner_id)
             keys = r.keys(f"plan-runner:runners:{runner_id}:*")
             if keys:
                 r.delete(*keys)
+            # 재확인: active_runners에 아직 남아있으면 재삭제
+            if r.sismember("plan-runner:active_runners", runner_id):
+                r.srem("plan-runner:active_runners", runner_id)
     except Exception:
         pass
 
