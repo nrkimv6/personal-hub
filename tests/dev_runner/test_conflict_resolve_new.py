@@ -72,6 +72,8 @@ class TestInlineMergeConflictAutoRetry:
     def test_inline_merge_conflict_auto_retry_success_R(self, tmp_path):
         """R(Right): resolve 성공 → merge_status='merged' 전이"""
         cl = _load_listener()
+        print(f"DEBUG: PROJECT_ROOT={cl.PROJECT_ROOT}")
+        print(f"DEBUG: WORKTREE_BASE_DIR={cl.WORKTREE_BASE_DIR}")
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
