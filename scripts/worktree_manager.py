@@ -103,10 +103,11 @@ class WorktreeManager:
             raise WorktreeError(f"worktree 생성 중 오류: {e}")
 
     @staticmethod
-    def remove(runner_id: str, base_dir: Path, plan_file: Optional[str] = None, branch: Optional[str] = None) -> bool:
-        """git worktree remove + git branch -D
+    def remove(runner_id: str, base_dir: Path, plan_file: Optional[str] = None, branch: Optional[str] = None, delete_branch: bool = True) -> bool:
+        """git worktree remove + (선택적) git branch -D
 
         우선순위: branch 파라미터 > plan_file > runner_id 기반
+        delete_branch=False: worktree 디렉토리만 제거, branch는 보존 (merge 전 사전 제거 시 사용)
         """
         if branch:
             # branch 파라미터가 있으면 그대로 사용, worktree_path는 base_dir/{branch_slug}로 추론
@@ -126,11 +127,12 @@ class WorktreeManager:
             )
             if result.returncode != 0 and "is not a working tree" not in result.stderr:
                 logger.warning(f"[WorktreeManager] worktree 삭제 경고: {result.stderr}")
-            subprocess.run(
-                ["git", "branch", "-D", branch],
-                capture_output=True, text=True, cwd=str(base_dir.parent)
-            )
-            logger.info(f"[WorktreeManager] 제거: {runner_id}")
+            if delete_branch:
+                subprocess.run(
+                    ["git", "branch", "-D", branch],
+                    capture_output=True, text=True, cwd=str(base_dir.parent)
+                )
+            logger.info(f"[WorktreeManager] 제거: {runner_id} (delete_branch={delete_branch})")
             return True
         except Exception as e:
             logger.error(f"[WorktreeManager] 제거 실패: {e}")
@@ -153,7 +155,11 @@ class WorktreeManager:
             branch = f"runner/{runner_id}"
         try:
             # main 체크아웃
-            subprocess.run(["git", "checkout", "main"], capture_output=True, cwd=str(project_root))
+            checkout_result = subprocess.run(["git", "checkout", "main"], capture_output=True, text=True, cwd=str(project_root))
+            if checkout_result.returncode != 0:
+                err_msg = checkout_result.stderr[:300] if checkout_result.stderr else "unknown"
+                logger.error(f"[WorktreeManager] git checkout main 실패: {err_msg}")
+                return MergeResult(success=False, conflict=False, message=f"git checkout main 실패: {err_msg}")
             # is-ancestor 사전 체크 — 이미 머지된 브랜치면 skip
             ancestor_check = subprocess.run(
                 ["git", "merge-base", "--is-ancestor", branch, "HEAD"],
@@ -173,7 +179,7 @@ class WorktreeManager:
                 conflict = "CONFLICT" in result.stdout or "CONFLICT" in result.stderr
                 # CONFLICT 줄만 추출하여 message에 포함 (resolve에서 컨텍스트로 활용)
                 conflict_lines = [l.strip() for l in result.stdout.splitlines() if l.strip().startswith("CONFLICT")]
-                detail = "\n".join(conflict_lines) if conflict_lines else (result.stderr[:500] or result.stdout[:500])
+                detail = "\n".join(conflict_lines) if conflict_lines else (result.stderr.strip() + "\n" + result.stdout.strip()).strip()[:500]
                 if keep_conflict and conflict:
                     # 충돌 상태 유지 — 호출자가 resolve + commit 책임
                     logger.info(f"[WorktreeManager] 머지 충돌 (keep_conflict=True, 상태 유지): {branch}")
