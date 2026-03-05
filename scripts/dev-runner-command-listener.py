@@ -1493,8 +1493,8 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
             # 4. 직전 억제 요약 먼저 publish
             if suppressed_count > 0:
                 try:
-                    redis_client.publish(log_channel, f"[NOISE] {suppressed_count} lines suppressed")
-                except redis.ConnectionError:
+                    _pub_and_log(runner_id, f"{suppressed_count} lines suppressed", redis_client, "NOISE")
+                except Exception:
                     pass
                 suppressed_count = 0
 
@@ -1502,7 +1502,7 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
             if any(marker in stripped for marker in QUOTA_ERROR_MARKERS):
                 logger.warning("[DEV-RUNNER] quota 에러 감지, plan-runner 자동 종료")
                 try:
-                    redis_client.publish(log_channel, "[DEV-RUNNER] quota 에러 감지. 자동 종료.")
+                    _pub_and_log(runner_id, "quota 에러 감지. 자동 종료.", redis_client, "DEV-RUNNER")
                     redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:quota_stopped", "1", ex=3600)
                 except redis.ConnectionError:
                     pass
@@ -1517,10 +1517,9 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
 
         # 루프 종료 후 잔여 억제 요약
         if suppressed_count > 0:
-            log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}" if runner_id else LOG_CHANNEL_PREFIX
             try:
-                redis_client.publish(log_channel, f"[NOISE] {suppressed_count} lines suppressed")
-            except redis.ConnectionError:
+                _pub_and_log(runner_id, f"{suppressed_count} lines suppressed", redis_client, "NOISE")
+            except Exception:
                 pass
 
     except Exception as e:
@@ -1669,7 +1668,7 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", message)
             logger.error(f"[_do_start_plan_runner] 실패 상태 기록 (runner_id: {runner_id}): {message}")
             try:
-                redis_client.publish(f"{LOG_CHANNEL_PREFIX}:{runner_id}", f"[ERROR] {message}")
+                _pub_and_log(runner_id, f"{message}", redis_client, "ERROR")
             except Exception as pub_err:
                 logger.warning(f"[_set_error_status] publish 실패 (무시): {pub_err}")
             # Workflow 실패 상태 업데이트
