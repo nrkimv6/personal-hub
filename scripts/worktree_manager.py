@@ -155,7 +155,11 @@ class WorktreeManager:
             branch = f"runner/{runner_id}"
         try:
             # main 체크아웃
-            subprocess.run(["git", "checkout", "main"], capture_output=True, cwd=str(project_root))
+            checkout_result = subprocess.run(["git", "checkout", "main"], capture_output=True, text=True, cwd=str(project_root))
+            if checkout_result.returncode != 0:
+                err_msg = checkout_result.stderr[:300] if checkout_result.stderr else "unknown"
+                logger.error(f"[WorktreeManager] git checkout main 실패: {err_msg}")
+                return MergeResult(success=False, conflict=False, message=f"git checkout main 실패: {err_msg}")
             # is-ancestor 사전 체크 — 이미 머지된 브랜치면 skip
             ancestor_check = subprocess.run(
                 ["git", "merge-base", "--is-ancestor", branch, "HEAD"],
