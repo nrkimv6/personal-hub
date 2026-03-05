@@ -974,6 +974,11 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
                         except Exception:
                             pass
+                        try:
+                            WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file, branch=branch_str)
+                            _pub("worktree/branch 정리 완료")
+                        except Exception as wt_err:
+                            _pub(f"worktree 정리 실패 (무시): {wt_err}")
                         _cleanup_process_state(runner_id, redis_client)
                 except Exception as verify_err:
                     _pub(f"auto-resolve merge commit 검증 실패 ({verify_err}) — merged로 처리")
@@ -981,6 +986,11 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
                     except Exception:
                         pass
+                    try:
+                        WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file, branch=branch_str)
+                        _pub("worktree/branch 정리 완료")
+                    except Exception as wt_err:
+                        _pub(f"worktree 정리 실패 (무시): {wt_err}")
                     _cleanup_process_state(runner_id, redis_client)
             else:
                 _pub(f"auto-resolve 실패 — clean 상태로 복원 후 worktree 보존: {resolve_result['message'][:200]}")
