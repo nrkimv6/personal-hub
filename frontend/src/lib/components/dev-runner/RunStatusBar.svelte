@@ -160,46 +160,57 @@
 
 	<!-- Runner 목록 행 (runner가 1개 이상일 때) -->
 	{#if runners.length > 0}
-		<div class="divide-y border-t">
+		<div class="divide-y divide-border">
 			{#each runners as runner (runner.id)}
-				<div class="flex items-center gap-2 px-3 py-1.5 text-xs group hover:bg-gray-50">
+				<div class="flex items-center gap-2 px-3 py-1.5 text-xs group hover:bg-secondary/50">
 					<!-- 상태 dot -->
 					{#if runner.running}
-						<div class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse shrink-0"></div>
+						<div class="pulse-dot bg-status-running shrink-0"></div>
 					{:else}
-						<div class="w-1.5 h-1.5 rounded-full bg-gray-300 shrink-0"></div>
+						<div class="w-1.5 h-1.5 rounded-full bg-muted-foreground shrink-0"></div>
 					{/if}
 
 					<!-- plan 파일명 -->
-					<span class="truncate flex-1 min-w-0 font-mono text-[11px] text-gray-700" title={runner.plan_file ?? ''}>
+					<span class="truncate flex-1 min-w-0 font-mono text-[11px] text-foreground" title={runner.plan_file ?? ''}>
 						{runner.plan_file ? runner.plan_file.split(/[/\\]/).pop() : '전체 실행'}
 					</span>
 
 					<!-- engine (sm 이상) -->
 					{#if runner.engine}
-						<span class="hidden sm:block text-[10px] text-gray-400 shrink-0 font-mono">{runner.engine}</span>
+						<span class="hidden sm:block text-[10px] text-muted-foreground shrink-0 font-mono">{runner.engine}</span>
 					{/if}
 
 					<!-- worktree branch (md 이상) -->
 					{#if runner.branch}
-						<span class="hidden md:block text-[10px] text-gray-400 shrink-0 font-mono truncate max-w-[120px]" title={runner.branch}>{runner.branch}</span>
+						<span class="hidden md:block text-[10px] text-muted-foreground shrink-0 font-mono truncate max-w-[120px]" title={runner.branch}>{runner.branch}</span>
 					{/if}
 
-					<!-- Stop/Kill 버튼 (hover 시 표시) -->
+					<!-- Stop/Kill 아이콘 버튼 (hover 시 표시) -->
 					<div class="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
 						{#if runner.running && onStopRunner}
 							<button
 								onclick={() => onStopRunner?.(runner.id)}
-								class="px-1.5 py-0.5 text-[10px] font-medium text-red-600 hover:bg-red-50 rounded transition-colors"
+								class="h-5 w-5 flex items-center justify-center rounded-md hover:bg-secondary transition-colors"
 								title="정지"
-							>Stop</button>
+							>
+								<!-- Square icon -->
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+									<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+								</svg>
+							</button>
 						{/if}
 						{#if onKillRunner}
 							<button
 								onclick={() => onKillRunner?.(runner.id)}
-								class="px-1.5 py-0.5 text-[10px] font-medium text-gray-500 hover:bg-gray-100 rounded transition-colors"
+								class="h-5 w-5 flex items-center justify-center rounded-md hover:bg-secondary transition-colors text-destructive"
 								title="강제 종료"
-							>Kill</button>
+							>
+								<!-- Power icon -->
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+									<path d="M18.36 6.64a9 9 0 1 1-12.73 0"/>
+									<line x1="12" y1="2" x2="12" y2="12"/>
+								</svg>
+							</button>
 						{/if}
 					</div>
 				</div>
