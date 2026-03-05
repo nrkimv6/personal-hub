@@ -26,12 +26,13 @@ from app.modules.dev_runner.services.state import get_state
 # Redis 설정
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
+REDIS_DB = int(os.environ.get("PLAN_RUNNER_REDIS_DB", "0"))
 COMMANDS_KEY = "plan-runner:commands"
 RESULTS_KEY = "plan-runner:command_results"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 RECENT_RUNNERS_KEY = "plan-runner:recent_runners"  # sorted set: score=종료 timestamp
-RECENT_RUNNERS_TTL = 86400  # 24시간 (초)
+RECENT_RUNNERS_TTL = 3600  # 1시간 (초) — cleanup 후 분석용 보관 (변경: 86400→3600)
 COMMAND_TIMEOUT = 30  # 명령 결과 대기 타임아웃 (초) — worktree 생성 시간 고려
 # per-runner 키 suffix 전체 목록 (listener와 공유되는 단일 진실 원천)
 # scripts/dev-runner-command-listener.py도 동일 상수를 별도 정의하여 참조
@@ -47,9 +48,18 @@ class ExecutorService:
 
     def __init__(self):
         """Redis 클라이언트 초기화"""
+        self.reconnect()
+
+    def reconnect(self):
+        """환경변수를 반영하여 Redis 클라이언트를 재연결합니다."""
+        # 상수 재갱신 (테스트에서 os.environ 변경 시 반영을 위함)
+        global REDIS_DB
+        REDIS_DB = int(os.environ.get("PLAN_RUNNER_REDIS_DB", "0"))
+
         self.redis_client = redis.Redis(
             host=REDIS_HOST,
             port=REDIS_PORT,
+            db=REDIS_DB,
             decode_responses=True,
             socket_connect_timeout=5,
             socket_timeout=10,
@@ -58,10 +68,12 @@ class ExecutorService:
         self.async_redis = aioredis.Redis(
             host=REDIS_HOST,
             port=REDIS_PORT,
+            db=REDIS_DB,
             decode_responses=True,
             socket_connect_timeout=5,
             socket_timeout=COMMAND_TIMEOUT + 5,  # BRPOP 무한 대기 방지
         )
+        logger.info(f"[executor-service] Redis 재연결 완료 (db={REDIS_DB})")
 
     async def _check_redis_and_listener(self):
         """Redis 연결 + command listener 존재 여부 사전 확인"""

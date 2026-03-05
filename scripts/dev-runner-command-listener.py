@@ -59,7 +59,7 @@ ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 RECENT_RUNNERS_KEY = "plan-runner:recent_runners"  # sorted set: score=종료 timestamp
 PLAN_FILE_ALL = "__ALL_PLANS__"  # 전체실행 sentinel — plan_file 미지정 시 Redis에 저장
 _LEGACY_ALL = "ALL"  # 하위 호환: 이전 버전에서 저장된 "ALL" 값 인식용
-RECENT_RUNNERS_TTL = 86400  # 24시간 (초) — executor_service.py의 RECENT_RUNNERS_TTL과 동일하게 유지
+RECENT_RUNNERS_TTL = 3600  # 1시간 (초) — cleanup 후 분석용 보관 (변경: 86400→3600)
 # per-runner 키 suffix 전체 목록 — app/modules/dev_runner/services/executor_service.py의 RUNNER_KEY_SUFFIXES와 동일
 RUNNER_KEY_SUFFIXES = (
     "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
@@ -1797,16 +1797,9 @@ def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner
         _running_processes[runner_id] = process
         _running_log_files[runner_id] = log_file
 
-        # 별도 스레드에서 stdout 을 파일 + Redis publish
-        thread = threading.Thread(
-            target=_stream_output,
-            args=(process, log_handle, redis_client, runner_id),
-            daemon=True,
-        )
-        thread.start()
-        _stream_threads[runner_id] = thread
-
-        # Redis에 상태 저장 (per-runner 키)
+        # Redis에 상태 저장 (per-runner 키) — 스레드 시작 전 설정 필수
+        # Race Condition 방지: plan이 빠르게 끝날 경우 스레드 finally에서 merge 시도 시
+        # worktree_path 등 키가 설정되어 있어야 함
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path", str(log_file))
         # stream_log_path는 executor._open_log() 실행 후 per-runner 키로 갱신됨 (초기엔 빈 값)
         redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
@@ -1819,6 +1812,15 @@ def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path", str(worktree_path))
         redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:quota_stopped")
         redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+        # 별도 스레드에서 stdout 을 파일 + Redis publish
+        thread = threading.Thread(
+            target=_stream_output,
+            args=(process, log_handle, redis_client, runner_id),
+            daemon=True,
+        )
+        thread.start()
+        _stream_threads[runner_id] = thread
 
         logger.info(f"plan-runner started (PID: {process.pid}, log: {log_file})")
 
