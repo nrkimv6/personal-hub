@@ -95,7 +95,7 @@ class TestBoundary:
 
     def test_incomplete_runner_no_pid_detected(self):
         r = make_redis()
-        runner_id = "t-clnrun-incomp"
+        runner_id = "runner-incomplete-1"
         r.set(f"{KEY_PREFIX}{runner_id}:branch", "test_branch")
         r.set(f"{KEY_PREFIX}{runner_id}:status", "running")
         incomplete = scan_incomplete_runners(r)
@@ -115,7 +115,7 @@ class TestBoundary:
 
     def test_incomplete_not_in_dead_scan(self):
         r = make_redis()
-        runner_id = "t-clnrun-nopid"
+        runner_id = "runner-nopid-1"
         r.set(f"{KEY_PREFIX}{runner_id}:branch", "test_foo")
         r.set(f"{KEY_PREFIX}{runner_id}:status", "running")
         dead = scan_dead_runners(r)

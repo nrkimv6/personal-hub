@@ -54,7 +54,7 @@ class TestRunnerLimitE2E:
              patch.object(svc, "_cleanup_stale_runners", new_callable=AsyncMock, return_value=0):
             with patch("app.modules.dev_runner.services.executor_service.settings_service", _mock_settings(2)):
                 with pytest.raises(HTTPException) as exc_info:
-                    await svc.start_dev_runner(RunRequest(test_source="runner_limit_e2e", ))
+                    await svc.start_dev_runner(RunRequest())
 
         assert exc_info.value.status_code == 429
         assert "2" in exc_info.value.detail

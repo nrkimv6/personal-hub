@@ -41,7 +41,7 @@ class TestGetRunners:
         """Redis mock → 200 + list 형식 응답"""
         mock_items = [
             RunnerListItem(
-                runner_id="t-apimulti-abc1",
+                runner_id="abc12345",
                 running=True,
                 plan_file="test.md",
                 engine="claude",
@@ -56,7 +56,7 @@ class TestGetRunners:
         data = resp.json()
         assert isinstance(data, list)
         assert len(data) == 1
-        assert data[0]["runner_id"] == "t-apimulti-abc1"
+        assert data[0]["runner_id"] == "abc12345"
         assert data[0]["running"] is True
 
     def test_get_runners_redis_unavailable_returns_empty_list(self, client):
@@ -97,7 +97,7 @@ class TestPostRun:
         """POST /run 성공 응답 JSON에 runner_id 필드 존재 + 8자 hex"""
         mock_response = RunStatusResponse(
             running=True,
-            runner_id="t-apimulti-ab12",
+            runner_id="ab123456",
             engine="claude",
             listener_alive=True,
             redis_connected=True,
@@ -120,7 +120,7 @@ class TestPostRun:
         assert resp.status_code == 200
         data = resp.json()
         assert "runner_id" in data
-        assert data["runner_id"] == "t-apimulti-ab12"
+        assert data["runner_id"] == "ab123456"
         assert len(data["runner_id"]) == 8
         assert all(c in "0123456789abcdef" for c in data["runner_id"])
 

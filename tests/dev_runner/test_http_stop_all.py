@@ -101,7 +101,7 @@ class TestHttpStartWhileRunning:
 
     def test_http_start_while_running_200(self, client):
         """runner 실행 중 POST /run → 200 + 새 runner_id (409 아님)"""
-        with _mock_executor_start(runner_id="t-stopall-new"):
+        with _mock_executor_start(runner_id="newrunner"):
             response = client.post(
                 f"{BASE_URL}/run",
                 json={"plan_file": "test.md", "engine": "claude"},
@@ -109,7 +109,7 @@ class TestHttpStartWhileRunning:
 
         assert response.status_code == 200
         data = response.json()
-        assert data.get("runner_id") == "t-stopall-new"
+        assert data.get("runner_id") == "newrunner"
         assert data.get("running") is True
 
 
@@ -123,7 +123,7 @@ class TestHttpRunnersListAfterTwoStarts:
 
         mock_runners = [
             RunnerListItem(
-                runner_id="t-stopall-01",
+                runner_id="runner01",
                 running=True,
                 plan_file="plan_a.md",
                 engine="claude",
@@ -134,7 +134,7 @@ class TestHttpRunnersListAfterTwoStarts:
                 merge_status=None,
             ),
             RunnerListItem(
-                runner_id="t-stopall-02",
+                runner_id="runner02",
                 running=True,
                 plan_file="plan_b.md",
                 engine="claude",
@@ -154,8 +154,8 @@ class TestHttpRunnersListAfterTwoStarts:
         assert isinstance(data, list)
         assert len(data) == 2
         runner_ids = {r["runner_id"] for r in data}
-        assert "t-stopall-01" in runner_ids
-        assert "t-stopall-02" in runner_ids
+        assert "runner01" in runner_ids
+        assert "runner02" in runner_ids
 
 
 class TestHttpStopIndividualThenStopAll:

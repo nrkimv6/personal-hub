@@ -234,7 +234,7 @@ class TestPubWritesToLogList:
         """R(Right): _pub() 호출 시 redis.rpush(log_list_key, ...) 호출 확인"""
         cl = _load_listener()
         redis = make_redis_mock()
-        runner_id = "t-dmerge-test123"
+        runner_id = "dm-test123"
 
         # _do_inline_merge 내부의 _pub을 직접 테스트할 수 없으므로
         # 실제 _do_inline_merge를 호출하되 merge 단계 전에 _pub이 실행되는지 확인

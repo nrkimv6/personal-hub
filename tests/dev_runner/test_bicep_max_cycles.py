@@ -86,27 +86,27 @@ class TestRight:
     async def test_max_cycles_zero_is_in_command(self, executor, fake_async_redis):
         """max_cycles=0 → command["max_cycles"] == 0"""
         await _setup_idle(fake_async_redis)
-        cmd = await _capture_command(executor, fake_async_redis, RunRequest(test_source="bicep_max_cycles", plan_file="test.md", max_cycles=0))
+        cmd = await _capture_command(executor, fake_async_redis, RunRequest(plan_file="test.md", max_cycles=0))
         assert "max_cycles" in cmd
         assert cmd["max_cycles"] == 0
 
     async def test_max_cycles_positive_is_in_command(self, executor, fake_async_redis):
         """max_cycles=5 → command["max_cycles"] == 5"""
         await _setup_idle(fake_async_redis)
-        cmd = await _capture_command(executor, fake_async_redis, RunRequest(test_source="bicep_max_cycles", plan_file="test.md", max_cycles=5))
+        cmd = await _capture_command(executor, fake_async_redis, RunRequest(plan_file="test.md", max_cycles=5))
         assert cmd["max_cycles"] == 5
 
     async def test_max_tokens_zero_is_in_command(self, executor, fake_async_redis):
         """max_tokens=0 (무제한) → command["max_tokens"] == 0 (동일 버그 패턴)"""
         await _setup_idle(fake_async_redis)
-        cmd = await _capture_command(executor, fake_async_redis, RunRequest(test_source="bicep_max_cycles", plan_file="test.md", max_tokens=0))
+        cmd = await _capture_command(executor, fake_async_redis, RunRequest(plan_file="test.md", max_tokens=0))
         assert "max_tokens" in cmd
         assert cmd["max_tokens"] == 0
 
     async def test_max_cycles_none_absent_from_command(self, executor, fake_async_redis):
         """max_cycles=None → command에 max_cycles 키 없음"""
         await _setup_idle(fake_async_redis)
-        cmd = await _capture_command(executor, fake_async_redis, RunRequest(test_source="bicep_max_cycles", plan_file="test.md", max_cycles=None))
+        cmd = await _capture_command(executor, fake_async_redis, RunRequest(plan_file="test.md", max_cycles=None))
         assert "max_cycles" not in cmd
 
 
@@ -118,13 +118,13 @@ class TestBoundary:
     async def test_max_cycles_1_minimum_finite(self, executor, fake_async_redis):
         """max_cycles=1 → 최소 유한값, command에 포함"""
         await _setup_idle(fake_async_redis)
-        cmd = await _capture_command(executor, fake_async_redis, RunRequest(test_source="bicep_max_cycles", plan_file="test.md", max_cycles=1))
+        cmd = await _capture_command(executor, fake_async_redis, RunRequest(plan_file="test.md", max_cycles=1))
         assert cmd["max_cycles"] == 1
 
     async def test_max_cycles_large_value(self, executor, fake_async_redis):
         """max_cycles=9999 → 큰 값도 그대로 전달"""
         await _setup_idle(fake_async_redis)
-        cmd = await _capture_command(executor, fake_async_redis, RunRequest(test_source="bicep_max_cycles", plan_file="test.md", max_cycles=9999))
+        cmd = await _capture_command(executor, fake_async_redis, RunRequest(plan_file="test.md", max_cycles=9999))
         assert cmd["max_cycles"] == 9999
 
     async def test_max_cycles_zero_and_tokens_zero_both_present(self, executor, fake_async_redis):
@@ -132,7 +132,7 @@ class TestBoundary:
         await _setup_idle(fake_async_redis)
         cmd = await _capture_command(
             executor, fake_async_redis,
-            RunRequest(test_source="bicep_max_cycles", plan_file="test.md", max_cycles=0, max_tokens=0)
+            RunRequest(plan_file="test.md", max_cycles=0, max_tokens=0)
         )
         assert cmd["max_cycles"] == 0
         assert cmd["max_tokens"] == 0
@@ -142,7 +142,7 @@ class TestBoundary:
         await _setup_idle(fake_async_redis)
         cmd = await _capture_command(
             executor, fake_async_redis,
-            RunRequest(test_source="bicep_max_cycles", plan_file="test.md", max_cycles=None, max_tokens=None)
+            RunRequest(plan_file="test.md", max_cycles=None, max_tokens=None)
         )
         assert "max_cycles" not in cmd
         assert "max_tokens" not in cmd
@@ -166,7 +166,7 @@ class TestInverse:
         await _setup_idle(fake_async_redis)
         cmd = await _capture_command(
             executor, fake_async_redis,
-            RunRequest(test_source="bicep_max_cycles", plan_file="test.md", max_cycles=value)
+            RunRequest(plan_file="test.md", max_cycles=value)
         )
         assert ("max_cycles" in cmd) == should_exist, (
             f"max_cycles={value}: command 포함={should_exist}이어야 하지만 포함={'max_cycles' in cmd}"
@@ -183,7 +183,7 @@ class TestInverse:
         await _setup_idle(fake_async_redis)
         cmd = await _capture_command(
             executor, fake_async_redis,
-            RunRequest(test_source="bicep_max_cycles", plan_file="test.md", max_tokens=value)
+            RunRequest(plan_file="test.md", max_tokens=value)
         )
         assert ("max_tokens" in cmd) == should_exist
 
@@ -214,7 +214,7 @@ class TestCrossCheck:
             return await original(key, *values)
 
         with patch.object(executor.async_redis, "lpush", side_effect=capture):
-            await executor.start_dev_runner(RunRequest(test_source="bicep_max_cycles", plan_file="test.md", max_cycles=0))
+            await executor.start_dev_runner(RunRequest(plan_file="test.md", max_cycles=0))
 
         # JSON 문자열에서 직접 검증
         raw_json = raw_captured[0]
@@ -274,7 +274,7 @@ class TestErrorConditions:
             return res
 
         with patch.object(executor.async_redis, "lpush", side_effect=auto_seed_result):
-            result = await executor.start_dev_runner(RunRequest(test_source="bicep_max_cycles", plan_file="test.md", max_cycles=0))
+            result = await executor.start_dev_runner(RunRequest(plan_file="test.md", max_cycles=0))
         assert result.runner_id is not None  # 새 runner_id 발급됨
         assert len(result.runner_id) == 8
 
@@ -285,14 +285,14 @@ class TestErrorConditions:
         executor.async_redis = AsyncMock()
         executor.async_redis.ping = AsyncMock(side_effect=redis_lib.exceptions.ConnectionError("no conn"))
         with pytest.raises(HTTPException) as exc:
-            await executor.start_dev_runner(RunRequest(test_source="bicep_max_cycles", plan_file="test.md", max_cycles=0))
+            await executor.start_dev_runner(RunRequest(plan_file="test.md", max_cycles=0))
         assert exc.value.status_code == 503
 
     def test_schema_rejects_non_integer_max_cycles(self):
         """max_cycles에 문자열 전달 시 ValidationError 발생"""
         from pydantic import ValidationError
         with pytest.raises(ValidationError):
-            RunRequest(test_source="bicep_max_cycles", max_cycles="unlimited")
+            RunRequest(max_cycles="unlimited")
 
 
 # ========== P - Performance ==========
@@ -305,7 +305,7 @@ class TestPerformance:
         await _setup_idle(fake_async_redis)
 
         start = time.perf_counter()
-        await _capture_command(executor, fake_async_redis, RunRequest(test_source="bicep_max_cycles", plan_file="test.md", max_cycles=0))
+        await _capture_command(executor, fake_async_redis, RunRequest(plan_file="test.md", max_cycles=0))
         elapsed_ms = (time.perf_counter() - start) * 1000
 
         assert elapsed_ms < 100, f"Command 빌드 {elapsed_ms:.1f}ms — 100ms 초과"

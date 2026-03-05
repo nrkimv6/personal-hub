@@ -49,7 +49,7 @@ class TestBugFixEngineReporting:
 
         captured = []
         with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(executor.async_redis, captured, {"success": True, "pid": 5555})):
-            req = RunRequest(test_source="gemini_integration", engine="gemini", plan_file="test.md")
+            req = RunRequest(engine="gemini", plan_file="test.md")
             result = await executor.start_dev_runner(req)
 
         assert result.engine == "gemini"
@@ -61,7 +61,7 @@ class TestBugFixEngineReporting:
 
     async def test_get_process_status_returns_engine_from_redis(self, executor):
         """[Right] get_process_status가 Redis에 저장된 엔진 정보를 정확히 읽어오는가? (per-runner 키)"""
-        runner_id = "t-gemini-abc1"
+        runner_id = "abc12345"
         await executor.async_redis.set("plan-runner:listener:heartbeat", "alive")
         await executor.async_redis.sadd("plan-runner:active_runners", runner_id)
         await executor.async_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
@@ -191,7 +191,7 @@ class TestGeminiDeepValidation:
 
         captured = []
         with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(executor.async_redis, captured)):
-            await executor.start_dev_runner(RunRequest(test_source="gemini_integration", engine="gemini"))
+            await executor.start_dev_runner(RunRequest(engine="gemini"))
 
         command = json.loads(captured[0])
         assert command["engine"] == "gemini"
@@ -202,13 +202,13 @@ class TestGeminiDeepValidation:
 
         captured = []
         with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(executor.async_redis, captured)):
-            result = await executor.start_dev_runner(RunRequest(test_source="gemini_integration", engine="claude"))
+            result = await executor.start_dev_runner(RunRequest(engine="claude"))
         assert result.runner_id is not None
         assert len(result.runner_id) == 8
 
     async def test_status_reporting_with_stale_pid(self, executor):
         """[Right-BICEP: Error] PID는 있지만 프로세스가 죽었을 때(stale) 자동 정리되는가?"""
-        runner_id = "t-gemini-abc1"
+        runner_id = "abc12345"
         await executor.async_redis.set("plan-runner:listener:heartbeat", "alive")
         await executor.async_redis.sadd("plan-runner:active_runners", runner_id)
         await executor.async_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
@@ -222,7 +222,7 @@ class TestGeminiDeepValidation:
         """[CORRECT: Conformance] engine 필드가 누락된 요청도 정상 처리(claude 기본값)되는가?"""
         await executor.async_redis.set("plan-runner:listener:heartbeat", "alive")
 
-        req = RunRequest(test_source="gemini_integration", plan_file="test.md")
+        req = RunRequest(plan_file="test.md")
         assert req.engine == "claude"
 
         captured = []
@@ -270,7 +270,7 @@ class TestGeminiDeepValidation:
         captured = []
         with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(executor.async_redis, captured, {"success": False, "message": "Invalid model"})):
             with pytest.raises(HTTPException) as exc:
-                await executor.start_dev_runner(RunRequest(test_source="gemini_integration", engine="gemini", max_cycles=1))
+                await executor.start_dev_runner(RunRequest(engine="gemini", max_cycles=1))
         assert exc.value.status_code == 500
 
     def test_boundary_empty_prompt(self, executor):

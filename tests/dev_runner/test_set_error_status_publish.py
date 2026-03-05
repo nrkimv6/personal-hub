@@ -29,7 +29,7 @@ class TestSetErrorStatusPublish:
 
     def test_set_error_status_publishes_to_log_channel(self):
         """_set_error_status 호출 시 plan-runner:logs:{runner_id} 채널에 에러 메시지 publish"""
-        runner_id = "t-errpub-abc1"
+        runner_id = "abc123"
         redis = MagicMock()
         fn = _make_set_error_status(runner_id, redis)
 
@@ -42,7 +42,7 @@ class TestSetErrorStatusPublish:
 
     def test_set_error_status_still_sets_redis_keys(self):
         """publish 추가 후에도 기존 status=error, error=message SET 키가 정상 저장되는지 회귀 검증"""
-        runner_id = "t-errpub-abc1"
+        runner_id = "abc123"
         redis = MagicMock()
         fn = _make_set_error_status(runner_id, redis)
 
@@ -53,7 +53,7 @@ class TestSetErrorStatusPublish:
 
     def test_set_error_status_publish_failure_does_not_raise(self):
         """Redis publish가 예외를 던져도 _set_error_status가 조용히 처리하는지 검증"""
-        runner_id = "t-errpub-abc1"
+        runner_id = "abc123"
         redis = MagicMock()
         redis.publish.side_effect = ConnectionError("Redis 연결 끊김")
         fn = _make_set_error_status(runner_id, redis)
@@ -76,7 +76,7 @@ class TestSetErrorStatusPublish:
 
     def test_set_error_status_error_message_prefixed_with_error_tag(self):
         """publish 메시지가 [ERROR] 접두사를 포함하는지 확인"""
-        runner_id = "t-errpub-xyz1"
+        runner_id = "xyz"
         redis = MagicMock()
         fn = _make_set_error_status(runner_id, redis)
 

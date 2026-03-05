@@ -41,12 +41,12 @@ def executor(fake_redis, fake_async_redis):
 
 @pytest.fixture
 def run_request_single():
-    return RunRequest(test_source="executor_service", plan_file="common/docs/plan/test.md")
+    return RunRequest(plan_file="common/docs/plan/test.md")
 
 
 @pytest.fixture
 def run_request_parallel():
-    return RunRequest(test_source="executor_service", parallel=True, plan_file=None)
+    return RunRequest(parallel=True, plan_file=None)
 
 
 async def _setup_listener_success(fake_async_redis, plan_file="common/docs/plan/test.md"):
@@ -115,7 +115,7 @@ class TestStartDevRunner:
 
     async def test_start_all_options(self, executor, fake_async_redis):
         """Right - 모든 옵션 command에 반영"""
-        request = RunRequest(test_source="executor_service", 
+        request = RunRequest(
             plan_file="test.md", max_cycles=5, max_tokens=100000,
             until="18:00", dry_run=True, skip_plan=True,
             projects="activity-hub,wtools"
@@ -206,7 +206,7 @@ class TestStopDevRunner:
 
     async def test_stop_success(self, executor, fake_async_redis):
         """Right - 정상 stop"""
-        runner_id = "t-execsvc-abc1"
+        runner_id = "abc12345"
         await fake_async_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
         result_data = {"success": True, "message": "Stopped"}
 
@@ -218,7 +218,7 @@ class TestStopDevRunner:
 
     async def test_stop_listener_timeout_force_cleanup(self, executor, fake_async_redis):
         """Error - listener 무응답 → Redis 상태 강제 정리"""
-        runner_id = "t-execsvc-abc1"
+        runner_id = "abc12345"
         await fake_async_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
         await fake_async_redis.set(f"plan-runner:runners:{runner_id}:pid", "12345")
 
@@ -239,7 +239,7 @@ class TestStopDevRunner:
 
     async def test_stop_json_decode_force_cleanup(self, executor, fake_async_redis, fake_redis):
         """Phase3 - stop시 JSON decode 실패 → force cleanup"""
-        runner_id = "t-execsvc-abc1"
+        runner_id = "abc12345"
         await fake_async_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
         await fake_async_redis.sadd("plan-runner:active_runners", runner_id)
         fake_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
@@ -270,7 +270,7 @@ class TestGetProcessStatus:
 
     async def test_status_running_with_heartbeat(self, executor, fake_async_redis):
         """Right - running + heartbeat 있음 → running=True (호환 래퍼 경유)"""
-        runner_id = "t-execsvc-abc1"
+        runner_id = "abc12345"
         await fake_async_redis.set("plan-runner:listener:heartbeat", "alive")
         await fake_async_redis.sadd("plan-runner:active_runners", runner_id)
         await fake_async_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
@@ -305,7 +305,7 @@ class TestGetProcessStatus:
 
     async def test_current_cycle_key_absent_returns_none(self, executor, fake_async_redis):
         """Phase 2 TC3 - current_cycle Redis key 없음 → current_cycle=None (0 아님)"""
-        runner_id = "t-execsvc-abc1"
+        runner_id = "abc12345"
         await fake_async_redis.set("plan-runner:listener:heartbeat", "alive")
         await fake_async_redis.sadd("plan-runner:active_runners", runner_id)
         await fake_async_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
@@ -320,7 +320,7 @@ class TestGetProcessStatus:
 
     async def test_current_cycle_key_present_returns_int(self, executor, fake_async_redis):
         """Phase 2 TC3 - current_cycle Redis key 존재 → int 값 반환"""
-        runner_id = "t-execsvc-abc1"
+        runner_id = "abc12345"
         await fake_async_redis.set("plan-runner:listener:heartbeat", "alive")
         await fake_async_redis.sadd("plan-runner:active_runners", runner_id)
         await fake_async_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
@@ -389,7 +389,7 @@ class TestCORRECTConformance:
     def test_run_request_invalid_schema(self):
         """RunRequest 필드 타입 오류 → Pydantic 에러"""
         with pytest.raises(Exception):
-            RunRequest(test_source="executor_service", max_cycles="invalid")
+            RunRequest(max_cycles="invalid")
 
     async def test_plan_file_none_vs_empty(self, executor, fake_async_redis):
         """plan_file=None vs '' → 둘 다 command에 미포함"""
@@ -398,7 +398,7 @@ class TestCORRECTConformance:
             captured = []
 
             with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(fake_async_redis, captured)):
-                await executor.start_dev_runner(RunRequest(test_source="executor_service", plan_file=plan_val))
+                await executor.start_dev_runner(RunRequest(plan_file=plan_val))
 
             command = json.loads(captured[0])
             assert "plan_file" not in command, f"plan_file={plan_val!r} should not be in command"
@@ -411,13 +411,13 @@ class TestCORRECTConformance:
         captured = []
 
         with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(fake_async_redis, captured)):
-            await executor.start_dev_runner(RunRequest(test_source="executor_service", engine="gemini"))
+            await executor.start_dev_runner(RunRequest(engine="gemini"))
 
         command = json.loads(captured[0])
         assert command["engine"] == "gemini"
 
         # 2. Status 조회 시 engine 포함 확인 (per-runner 키)
-        runner_id = "t-execsvc-abc1"
+        runner_id = "abc12345"
         await fake_async_redis.set("plan-runner:listener:heartbeat", "alive")
         await fake_async_redis.sadd("plan-runner:active_runners", runner_id)
         await fake_async_redis.set(f"plan-runner:runners:{runner_id}:status", "running")
@@ -434,7 +434,7 @@ class TestCORRECTConformance:
         await fake_async_redis.set("plan-runner:state:engine", "claude")
 
         captured = []
-        request = RunRequest(test_source="executor_service", engine="gemini", plan_file="test.md")
+        request = RunRequest(engine="gemini", plan_file="test.md")
 
         with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(fake_async_redis, captured)):
             result = await executor.start_dev_runner(request)
@@ -473,7 +473,7 @@ class TestMaxCyclesZeroBugFix:
     async def test_max_cycles_zero_included_in_command(self, executor, fake_async_redis):
         """max_cycles=0 (무제한)이 Redis command에 포함되어야 함"""
         await _setup_listener_success(fake_async_redis, "test.md")
-        request = RunRequest(test_source="executor_service", plan_file="test.md", max_cycles=0)
+        request = RunRequest(plan_file="test.md", max_cycles=0)
 
         captured = []
 
@@ -487,7 +487,7 @@ class TestMaxCyclesZeroBugFix:
     async def test_max_cycles_positive_included_in_command(self, executor, fake_async_redis):
         """max_cycles=3 (유한)이 Redis command에 포함되어야 함 (기존 동작 유지)"""
         await _setup_listener_success(fake_async_redis, "test.md")
-        request = RunRequest(test_source="executor_service", plan_file="test.md", max_cycles=3)
+        request = RunRequest(plan_file="test.md", max_cycles=3)
 
         captured = []
 
@@ -500,7 +500,7 @@ class TestMaxCyclesZeroBugFix:
     async def test_max_cycles_none_not_included_in_command(self, executor, fake_async_redis):
         """max_cycles=None (미지정)은 command에 포함되지 않아야 함"""
         await _setup_listener_success(fake_async_redis, "test.md")
-        request = RunRequest(test_source="executor_service", plan_file="test.md", max_cycles=None)
+        request = RunRequest(plan_file="test.md", max_cycles=None)
 
         captured = []
 

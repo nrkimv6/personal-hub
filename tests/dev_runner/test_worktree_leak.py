@@ -208,7 +208,7 @@ class TestCleanupStateIntermediateStatus:
     def test_cleanup_state_handles_intermediate_status(self):
         """Right: merge_status='merging'이면 WorktreeManager.remove() 호출"""
         fake_redis = fakeredis.FakeRedis(decode_responses=True)
-        runner_id = "t-wtleak-interm"
+        runner_id = "test_intermediate"
         fake_redis.set(f"plan-runner:runners:{runner_id}:merge_status", "merging")
         fake_redis.set(f"plan-runner:runners:{runner_id}:plan_file", "some_plan.md")
 
@@ -225,7 +225,7 @@ class TestCleanupStateIntermediateStatus:
     def test_cleanup_state_handles_testing_status(self):
         """Right: merge_status='testing'이면 WorktreeManager.remove() 호출"""
         fake_redis = fakeredis.FakeRedis(decode_responses=True)
-        runner_id = "t-wtleak-tststs"
+        runner_id = "test_testing_status"
         fake_redis.set(f"plan-runner:runners:{runner_id}:merge_status", "testing")
         fake_redis.set(f"plan-runner:runners:{runner_id}:plan_file", "some_plan.md")
 
@@ -242,7 +242,7 @@ class TestCleanupStateIntermediateStatus:
     def test_cleanup_state_conflict_preserves_worktree(self):
         """Boundary: merge_status='conflict'이면 worktree 보존 (remove 미호출)"""
         fake_redis = fakeredis.FakeRedis(decode_responses=True)
-        runner_id = "t-wtleak-cnflct"
+        runner_id = "test_conflict_preserve"
         fake_redis.set(f"plan-runner:runners:{runner_id}:merge_status", "conflict")
 
         listener_mod = _load_listener_mod()

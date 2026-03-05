@@ -75,7 +75,7 @@ def _run_stream(lines: list):
     mock_redis = MagicMock()
     mock_redis.publish.side_effect = lambda ch, msg: published.append(msg)
 
-    _stream_output(proc, mock_log, mock_redis, runner_id="t-noise-runner")
+    _stream_output(proc, mock_log, mock_redis, runner_id="test_runner")
     return published, written
 
 

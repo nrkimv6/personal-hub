@@ -72,7 +72,7 @@ RUNNER_KEY_PREFIX = "plan-runner:runners"
 
 def test_stream_output_finally_merge_requested_flag(listener_mod, fr):
     """R(Right): merge_requested 플래그 있으면 _do_inline_merge() 호출"""
-    runner_id = "t-stream-aabb"
+    runner_id = "aabbccdd"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")
 
     process = _make_process(returncode=0)
@@ -91,7 +91,7 @@ def test_stream_output_finally_merge_requested_flag(listener_mod, fr):
 
 def test_stream_output_finally_no_merge_flag(listener_mod, fr):
     """R(Right): merge_requested 플래그 없으면 _cleanup_process_state() 호출"""
-    runner_id = "t-stream-eeff"
+    runner_id = "eeff0011"
     # 플래그 미설정
 
     process = _make_process(returncode=0)
@@ -125,7 +125,7 @@ def test_stream_output_finally_empty_runner_id(listener_mod, fr):
 
 def test_stream_output_finally_nonzero_exit(listener_mod, fr):
     """B(Boundary): exit_code=1 이면 workflow failed + cleanup 호출"""
-    runner_id = "t-stream-dead"
+    runner_id = "deadbeef"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")  # 플래그 있어도 머지 안 됨
 
     process = _make_process(returncode=1)
@@ -145,7 +145,7 @@ def test_stream_output_finally_nonzero_exit(listener_mod, fr):
 
 def test_stream_output_finally_redis_error(listener_mod, fr):
     """E(Error): Redis get 실패 시 warning 로그 출력 후 cleanup fallback"""
-    runner_id = "t-stream-cafe"
+    runner_id = "cafebabe"
 
     process = _make_process(returncode=0)
     log_handle = _make_log_handle()
@@ -172,7 +172,7 @@ def test_stream_output_finally_redis_error(listener_mod, fr):
 
 def test_stream_output_workflow_status_no_merge(listener_mod, fr):
     """R(Right): merge_requested 없는 정상 종료 시 workflow status=completed"""
-    runner_id = "t-stream-1122"
+    runner_id = "11223344"
     # 플래그 미설정
 
     process = _make_process(returncode=0)

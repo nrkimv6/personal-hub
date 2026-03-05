@@ -64,7 +64,7 @@ class TestReconnectDmOrphan:
     def test_reconnect_dm_orphan_queued_calls_recover(self):
         """R(Right): active_runners에 dm-* runner, pid 없음, merge_status=queued → _recover_pending_merge 호출"""
         cl = _load_listener()
-        runner_id = "t-reconn-abcd"
+        runner_id = "dm-abcd1234"
         redis = make_redis_for_reconnect(runner_id, pid=None, merge_status="queued")
 
         started_threads = []
@@ -91,7 +91,7 @@ class TestReconnectDmOrphan:
     def test_reconnect_dm_orphan_merging_calls_recover(self):
         """R(Right): merge_status=merging → _recover_pending_merge 호출"""
         cl = _load_listener()
-        runner_id = "t-reconn-beef"
+        runner_id = "dm-beef5678"
         redis = make_redis_for_reconnect(runner_id, pid=None, merge_status="merging")
 
         with patch.object(cl, "_cleanup_process_state") as mock_cleanup, \
@@ -109,7 +109,7 @@ class TestReconnectDmOrphan:
     def test_reconnect_dm_orphan_no_merge_status_cleanup(self):
         """B(Boundary): pid 없음 + merge_status 없음 → cleanup 호출"""
         cl = _load_listener()
-        runner_id = "t-reconn-dead"
+        runner_id = "dm-dead0000"
         redis = make_redis_for_reconnect(runner_id, pid=None, merge_status=None)
 
         with patch.object(cl, "_cleanup_process_state") as mock_cleanup, \

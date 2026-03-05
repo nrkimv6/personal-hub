@@ -87,7 +87,7 @@ class TestWorktreeResumeHTTP:
     def test_t4_1_stop_in_progress_plan_accepted(self, api_client, plan_file):
         """T4-1: stop 명령 시 구현중 plan → 200 수락"""
         client, fake_sync, fake_async = api_client
-        runner_id = "t-wtresume-01"
+        runner_id = "runner-t4-01"
         _seed_runner(fake_sync, runner_id, plan_file, "/tmp/.worktrees/test-feature")
 
         with patch(
@@ -104,7 +104,7 @@ class TestWorktreeResumeHTTP:
     def test_t4_2_runners_api_returns_worktree_path(self, api_client, plan_file):
         """T4-2: GET /runners → worktree_path 필드 포함"""
         client, fake_sync, fake_async = api_client
-        runner_id = "t-wtresume-02"
+        runner_id = "runner-t4-02"
         _seed_runner(fake_sync, runner_id, plan_file, "/tmp/.worktrees/test-feature")
 
         response = client.get(f"{BASE_URL}/runners")
@@ -121,7 +121,7 @@ class TestWorktreeResumeHTTP:
 
         from app.modules.dev_runner.schemas import RunStatusResponse
         mock_resp = RunStatusResponse(
-            running=True, runner_id="t-wtresume-new01", status="running",
+            running=True, runner_id="runner-new-01", status="running",
             plan_file=plan_file, current_plan_name=None
         )
         with patch(
@@ -139,7 +139,7 @@ class TestWorktreeResumeHTTP:
     def test_t4_4_stop_done_plan_still_accepted(self, api_client, done_plan_file):
         """T4-4: 완료 상태 plan runner stop → 200 수락"""
         client, fake_sync, fake_async = api_client
-        runner_id = "t-wtresume-04"
+        runner_id = "runner-t4-04"
         _seed_runner(fake_sync, runner_id, done_plan_file, "/tmp/.worktrees/done-feature")
 
         with patch(

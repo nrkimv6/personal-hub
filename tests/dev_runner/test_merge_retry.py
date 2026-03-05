@@ -95,7 +95,7 @@ class TestDoRetryMerge:
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
-        runner_id = "t-mretry-02"
+        runner_id = "runner02"
         redis = make_redis_mock(worktree_path=str(worktree))
         merge_result = make_merge_result(merged=True, tests_passed=True)
 

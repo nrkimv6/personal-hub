@@ -83,10 +83,10 @@ class TestE2EScenario1:
         executor.async_redis.get = mock_get
 
         with patch.object(executor, "_check_redis_and_listener", new_callable=AsyncMock):
-            req = RunRequest(test_source="multi_runner_scenarios", plan_file="plan_a.md", engine="claude")
+            req = RunRequest(plan_file="plan_a.md", engine="claude")
             result1 = await executor.start_dev_runner(req)
 
-            req2 = RunRequest(test_source="multi_runner_scenarios", plan_file="plan_b.md", engine="claude")
+            req2 = RunRequest(plan_file="plan_b.md", engine="claude")
             result2 = await executor.start_dev_runner(req2)
 
         # 서로 다른 runner_id 확인
@@ -117,7 +117,7 @@ class TestE2EScenario2:
         runner를 stop한 후에도 runner_id는 목록에 유지되나
         running 상태가 false로 변경되는 것을 시뮬레이션.
         """
-        runner_id = "t-multi-run1"
+        runner_id = "testrun1"
 
         # stop 전: running=True
         runners_before = [_make_runner_item(runner_id, running=True)]
@@ -157,7 +157,7 @@ class TestE2EScenario3:
 
         with patch.object(executor, "_check_redis_and_listener", new_callable=AsyncMock):
             # 첫 번째 실행
-            req = RunRequest(test_source="multi_runner_scenarios", plan_file="plan.md", engine="claude")
+            req = RunRequest(plan_file="plan.md", engine="claude")
             result1 = await executor.start_dev_runner(req)
 
             # 두 번째 실행 (이미 하나 실행 중)
