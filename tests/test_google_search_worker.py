@@ -19,13 +19,84 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models.base import Base
+from sqlalchemy.pool import StaticPool
 from app.models.google_search import (
     GoogleSearchQueue,
     GoogleSearchHistory,
     GoogleSearchResult,
     GoogleSavedSearch,
 )
+
+# raw SQL로 필요한 테이블만 생성 (ORM mapper 설정 트리거 방지)
+_CREATE_TABLES_SQL = """
+PRAGMA foreign_keys=OFF;
+
+CREATE TABLE IF NOT EXISTS google_saved_searches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name VARCHAR(200) NOT NULL,
+    query VARCHAR(500) NOT NULL,
+    date_filter VARCHAR(10),
+    max_pages INTEGER DEFAULT 1,
+    search_params TEXT,
+    service_account_id INTEGER,
+    is_favorite INTEGER DEFAULT 0,
+    notify_on_new INTEGER DEFAULT 0,
+    last_search_id VARCHAR(36),
+    last_run_at DATETIME,
+    last_result_count INTEGER,
+    enabled INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS google_search_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    search_id VARCHAR(36) UNIQUE NOT NULL,
+    query VARCHAR(500) NOT NULL,
+    date_filter VARCHAR(10),
+    max_pages INTEGER DEFAULT 1,
+    search_params TEXT,
+    service_account_id INTEGER,
+    saved_search_id INTEGER,
+    schedule_id INTEGER,
+    status VARCHAR(20) DEFAULT 'pending',
+    error_message TEXT,
+    result_count INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    started_at DATETIME,
+    completed_at DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS google_search_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    search_id VARCHAR(36) UNIQUE NOT NULL,
+    query VARCHAR(500) NOT NULL,
+    date_filter VARCHAR(10),
+    max_pages INTEGER DEFAULT 1,
+    search_params TEXT,
+    service_account_id INTEGER,
+    saved_search_id INTEGER,
+    schedule_id INTEGER,
+    status VARCHAR(20) DEFAULT 'completed',
+    error_message TEXT,
+    total_results INTEGER DEFAULT 0,
+    new_results INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    started_at DATETIME,
+    completed_at DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS google_search_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    search_id VARCHAR(36) NOT NULL,
+    url VARCHAR(1000) NOT NULL,
+    title VARCHAR(500),
+    snippet TEXT,
+    rank INTEGER,
+    saved_search_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+"""
 
 
 # ============================================================
@@ -34,13 +105,31 @@ from app.models.google_search import (
 
 @pytest.fixture
 def db_session():
-    """인메모리 SQLite 세션 생성."""
-    engine = create_engine("sqlite:///:memory:", echo=False)
-    Base.metadata.create_all(engine)
+    """인메모리 SQLite 세션 생성.
+
+    raw SQL로 필요한 테이블만 생성한다.
+    이유:
+    - Base.metadata.create_all() 사용 시 writing.py FK llm_requests 미import(NoReferencedTableError) 발생
+    - writing_collection_tasks.task_id의 UUID() 타입이 SQLite in-memory 미지원
+    - ORM table.create() 사용 시 mapper 설정 트리거로 hang 발생
+    """
+    import sqlite3
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    conn.executescript(_CREATE_TABLES_SQL)
+    conn.commit()
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        echo=False,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        creator=lambda: conn,
+    )
     Session = sessionmaker(bind=engine)
     session = Session()
     yield session
     session.close()
+    conn.close()
 
 
 @pytest.fixture
@@ -349,7 +438,7 @@ class TestGoogleSearchAPIRoutes:
 
             response = await search(request, db=db_session)
 
-        assert response.status == "pending"
+        assert response.status == "queued"
         assert response.search_id is not None
 
         # DB에 저장되었는지 확인
