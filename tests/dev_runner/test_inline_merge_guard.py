@@ -759,3 +759,80 @@ class TestStreamOutputExit1MergeRequestedNoCommits:
 
         # Assert: _cleanup_process_state 호출됨 (merge 스킵 시 cleanup 수행)
         mock_cleanup.assert_called()
+
+
+# ========== TC #27: R(Right) — exit_code=1 + merge_requested 없음 → cleanup (기존 동작) ==========
+
+class TestStreamOutputExit1NoMergeRequested:
+    """test_stream_output_exit1_no_merge_requested:
+    exit_code=1 + merge_requested 미설정(None) → merge 시도 없이 _cleanup_process_state 호출"""
+
+    def test_stream_output_exit1_no_merge_requested(self, cl, tmp_path):
+        """R(Right): exit_code=1 + merge_requested 없음 → _do_inline_merge 미호출, _cleanup_process_state 호출"""
+        from unittest.mock import patch, MagicMock
+
+        runner_id = "test-runner-27"
+        branch = "plan/test-branch-27"
+
+        # Redis store — merge_requested 키가 없음 (None 반환)
+        store = {
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:branch": branch,
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path": None,
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path": None,
+        }
+
+        redis = MagicMock()
+
+        def _get(key):
+            return store.get(key)  # merge_requested 키 없음 → None 반환
+
+        redis.get.side_effect = _get
+        redis.set.return_value = True
+        redis.delete.return_value = 1
+        redis.publish.return_value = 0
+        redis.rpush.return_value = 1
+        redis.lpush.return_value = 1
+        redis.expire.return_value = True
+
+        # 프로세스 mock: stdout 빈 iterator + returncode=1
+        mock_process = MagicMock()
+        mock_process.stdout = iter([])
+        mock_process.returncode = 1
+        mock_process.wait.return_value = None
+
+        # log_handle mock
+        log_handle = MagicMock()
+        log_handle.flush.return_value = None
+        log_handle.close.return_value = None
+
+        # subprocess.run mock: git log → 빈 출력 (커밋 유무와 무관하게 merge_requested 없으면 스킵)
+        def fake_subprocess_run(cmd, **kwargs):
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        # _running_log_files에 해당 runner_id 없음 → drain 스킵
+        cl._running_log_files = {}
+
+        inline_merge_calls = []
+
+        def fake_do_inline_merge(rid, rc):
+            inline_merge_calls.append(rid)
+
+        with patch.object(cl, "_do_inline_merge", side_effect=fake_do_inline_merge), \
+             patch.object(cl, "_cleanup_process_state") as mock_cleanup, \
+             patch("subprocess.run", side_effect=fake_subprocess_run):
+
+            original_wf_manager = getattr(cl, "_wf_manager", None)
+            cl._wf_manager = None
+
+            try:
+                cl._stream_output(mock_process, log_handle, redis, runner_id)
+            finally:
+                if original_wf_manager is not None:
+                    cl._wf_manager = original_wf_manager
+
+        # Assert: _do_inline_merge 미호출 (merge_requested 없음)
+        assert len(inline_merge_calls) == 0, \
+            f"_do_inline_merge 미호출 기대 (merge_requested 없음), 실제 {len(inline_merge_calls)}회 호출됨"
+
+        # Assert: _cleanup_process_state 호출됨 (기존 동작 — merge 없이 cleanup)
+        mock_cleanup.assert_called()
