@@ -54,14 +54,24 @@ def _kill_by_cmdline(pattern: str) -> int:
     """커맨드라인에 pattern이 포함된 프로세스를 찾아 종료한다. 종료된 수 반환.
 
     PID 파일 분실 시 잔류 프로세스 정리 용도 (2차 안전망).
-    자기 자신(현재 PID)은 제외한다.
+    자기 자신과 조상 프로세스(부모/조부모 등)는 제외한다.
     """
     self_pid = os.getpid()
+    # 자기 자신과 모든 조상 PID 수집 (browser_workers.py 실행 컨텍스트 보호)
+    excluded_pids = {self_pid}
+    try:
+        for parent in psutil.Process(self_pid).parents():
+            excluded_pids.add(parent.pid)
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        pass
+
     killed = 0
     for proc in psutil.process_iter(["pid", "cmdline"]):
         try:
+            if proc.pid in excluded_pids:
+                continue
             cmdline = proc.info.get("cmdline") or []
-            if any(pattern in arg for arg in cmdline) and proc.pid != self_pid:
+            if any(pattern in arg for arg in cmdline):
                 proc.kill()
                 killed += 1
         except (psutil.NoSuchProcess, psutil.AccessDenied):

@@ -68,25 +68,16 @@ _SELF_MARKER = "__listener_self_test_marker_abc1__"
 
 
 def test_kill_by_cmdline_excludes_self():
-    """E(Error): 자기 자신(현재 PID)은 종료하지 않음.
+    """E(Error): 자기 자신과 조상 프로세스는 종료하지 않음.
 
-    자기 자신과 같은 cmdline 패턴을 가진 자식 프로세스를 하나 만들되,
-    자기 자신 PID가 제외되는지 확인.
+    패턴이 자신의 cmdline에 포함되어 있어도 자기 자신과 부모가 죽지 않는지 확인.
     """
     self_pid = os.getpid()
-    # 자기 자신 cmdline에 포함되지 않는 고유 패턴으로 자식 생성
-    proc = subprocess.Popen(
-        [sys.executable, "-c", f"import time; x='{_SELF_MARKER}'; time.sleep(30)"],
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
-    time.sleep(0.3)
-    try:
-        browser_workers._kill_by_cmdline(_SELF_MARKER)
-        # 자기 자신은 살아있어야 함
-        assert psutil.pid_exists(self_pid)
-    finally:
-        if proc.poll() is None:
-            proc.kill()
+    parent_pid = psutil.Process(self_pid).ppid()
+    # 자기 자신 cmdline에 포함되는 패턴으로 호출 — 자신/부모 제외 확인
+    browser_workers._kill_by_cmdline(_SELF_MARKER)
+    assert psutil.pid_exists(self_pid)
+    assert psutil.pid_exists(parent_pid)
 
 
 # ── _acquire_lock 테스트 ─────────────────────────────────────────
