@@ -492,10 +492,10 @@
 				<!-- 좌측 패널: Plans/Tasks/Merge/설정 (모바일=오버레이, 데스크톱=고정) -->
 				<div class="
 					{taskHistoryOpen ? 'flex' : 'hidden'} sm:flex
-					flex-col border-r overflow-hidden
+					flex-col overflow-hidden
 					w-[300px] sm:w-[340px] shrink-0
 					fixed sm:static inset-y-0 left-0 z-50 sm:z-auto
-					bg-white
+					bg-card rounded-md border border-border
 				">
 					<!-- 탭 바 -->
 					<div class="px-4 pt-2 pb-2 shrink-0 border-b flex items-center gap-2">
