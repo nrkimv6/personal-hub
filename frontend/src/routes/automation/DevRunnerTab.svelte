@@ -549,7 +549,7 @@
 				</div>
 
 				<!-- 우측 영역: Runner 탭 바 + Runner/Logs/Merge 콘텐츠 -->
-				<div class="flex-1 min-h-0 flex flex-col overflow-hidden">
+				<div class="flex-1 min-h-0 flex flex-col overflow-hidden bg-card rounded-md border border-border">
 					<!-- Runner 탭 바 -->
 					<div class="flex items-center gap-1 border-b px-2 py-1 overflow-x-auto shrink-0">
 						<!-- 모바일: 좌측 패널 토글 버튼 -->
