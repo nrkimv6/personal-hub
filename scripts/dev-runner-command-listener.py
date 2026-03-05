@@ -1204,7 +1204,7 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
         # Phase 2a: worktree 사전 제거 (branch는 보존 — "not something we can merge" 방지)
         _wt_branch = branch_str or (f"plan/{Path(plan_file).stem}" if plan_file else f"runner/{runner_id}")
         try:
-            WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file, branch=branch_str)
+            WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file, branch=branch_str, delete_branch=False)
             _pub(f"merge 전 worktree 사전 제거 완료: {worktree_path}")
         except Exception as _wt_err:
             _pub(f"worktree 사전 제거 실패 (무시, merge 강행): {_wt_err}")
