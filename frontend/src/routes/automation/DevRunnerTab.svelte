@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import TaskList from '$lib/components/dev-runner/TaskList.svelte';
@@ -483,13 +483,12 @@
 					class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
 					onclick={(e) => { if (e.target === e.currentTarget) showExecutionModal = false; }}
 				>
-					<div class="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-5">
+					<div class="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-5">
 						<div class="flex items-center justify-between mb-4">
-							<h3 class="text-sm font-semibold">실행 설정</h3>
+							<h3 class="text-sm font-mono font-semibold">실행 설정</h3>
 							<button
 								onclick={() => { showExecutionModal = false; }}
-								class="text-gray-400 hover:text-gray-600 text-lg leading-none"
-							>×</button>
+								class="p-1 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground"><svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
 						</div>
 						<RunControl
 							status={runStatus}
