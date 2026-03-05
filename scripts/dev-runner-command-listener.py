@@ -2222,6 +2222,27 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
         redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
         redis_client.expire(result_key, 60)
 
+        # [Phase 4-10] merge-results Redis list에 결과 push (merge history API 용)
+        try:
+            _final_merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+            _merge_success = _final_merge_status == "merged"
+            _plan_file_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+            _branch_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
+            _merge_result_payload = json.dumps({
+                "runner_id": runner_id,
+                "branch": _branch_val,
+                "plan_file": _plan_file_val,
+                "timestamp": datetime.now().isoformat(),
+                "status": "completed" if _merge_success else "failed",
+                "success": _merge_success,
+                "message": f"merge_status={_final_merge_status}",
+            }, ensure_ascii=False)
+            redis_client.lpush("plan-runner:merge-results", _merge_result_payload)
+            redis_client.expire("plan-runner:merge-results", 86400 * 7)
+            logger.info(f"[_do_retry_merge] merge-results push 완료 (runner_id={runner_id}, success={_merge_success})")
+        except Exception as _mr_err:
+            logger.warning(f"[_do_retry_merge] merge-results push 실패 (무시): {_mr_err}")
+
 
 def retry_merge(command: Dict, redis_client: redis.Redis) -> None:
     """머지 충돌 후 재머지 시도 — 즉시 accepted 반환, 실제 작업은 백그라운드 스레드"""
