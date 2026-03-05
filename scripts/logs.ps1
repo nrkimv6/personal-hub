@@ -377,27 +377,30 @@ function Get-ActivePlanRunners {
     $py = Join-Path (Split-Path -Parent $PSScriptRoot) ".venv\Scripts\python.exe"
     if (-not (Test-Path $py)) { return $result }
 
-    $pyCode = @'
+    # 임시 파일로 Python 코드 전달 (PowerShell -c 인자 전달 시 따옴표 제거 방지)
+    $tmpPy = [System.IO.Path]::GetTempFileName() + ".py"
+    @'
 import json, sys
 try:
     import redis
     r = redis.Redis(socket_timeout=2)
     r.ping()
     runners = []
-    for rid in r.smembers("plan-runner:active_runners"):
-        rid = rid.decode()
-        def g(k): v = r.get(k); return v.decode() if v else None
+    for rid_b in r.smembers("plan-runner:active_runners"):
+        rid = rid_b.decode()
+        def g(k, _r=r): v = _r.get(k); return v.decode() if v else None
         runners.append({"rid": rid,
-            "logPath":    g(f"plan-runner:runners:{rid}:log_file_path"),
-            "streamPath": g(f"plan-runner:runners:{rid}:stream_log_path"),
-            "planFile":   g(f"plan-runner:runners:{rid}:plan_file"),
-            "pid":        g(f"plan-runner:runners:{rid}:pid")})
+            "logPath":    g("plan-runner:runners:" + rid + ":log_file_path"),
+            "streamPath": g("plan-runner:runners:" + rid + ":stream_log_path"),
+            "planFile":   g("plan-runner:runners:" + rid + ":plan_file"),
+            "pid":        g("plan-runner:runners:" + rid + ":pid")})
     print(json.dumps(runners))
 except Exception:
     print("[]")
-'@
+'@ | Set-Content -Path $tmpPy -Encoding UTF8
 
-    $jsonOut = & $py -c $pyCode 2>$null
+    $jsonOut = & $py $tmpPy 2>$null
+    Remove-Item $tmpPy -ErrorAction SilentlyContinue
     if (-not $jsonOut) { return $result }
 
     $runners = $jsonOut | ConvertFrom-Json
