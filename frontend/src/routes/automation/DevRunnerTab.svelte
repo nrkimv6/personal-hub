@@ -640,15 +640,7 @@
 				<div class="flex-1 min-h-0 flex flex-col overflow-hidden bg-card rounded-md border border-border">
 					<!-- Runner 탭 바 -->
 					<div class="flex items-center gap-1 border-b border-border px-2 py-1 overflow-x-auto shrink-0">
-						<!-- 모바일: 좌측 패널 토글 버튼 -->
-						<button
-							onclick={() => { taskHistoryOpen = !taskHistoryOpen; }}
-							class="sm:hidden flex items-center justify-center w-7 h-7 rounded hover:bg-gray-100 text-gray-500 shrink-0 mr-1"
-							title="패널 열기"
-						>
-							<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-						</button>
-						{#each runnerTabs as tab (tab.id)}
+	{#each runnerTabs as tab (tab.id)}
 							<!-- svelte-ignore a11y_interactive_supports_focus -->
 							<div
 								class="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono whitespace-nowrap transition-colors cursor-pointer {activeTabId === tab.id ? 'bg-primary/20 text-primary border border-primary/30' : 'text-gray-600 hover:bg-gray-100'}"
