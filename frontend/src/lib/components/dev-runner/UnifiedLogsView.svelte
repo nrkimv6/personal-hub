@@ -127,9 +127,7 @@
 				<!-- 세션 구분선 (최신 = idx 0은 정상 색상, 이전은 grayout) -->
 				<div class="sticky top-0 z-10 flex items-center gap-2 px-3 py-1.5 border-b {idx === 0 ? 'bg-gray-900 border-gray-700' : 'bg-gray-950 border-gray-800'}">
 					<!-- 상태 배지 -->
-					<span class="text-[10px] font-mono {idx === 0 ? 'text-blue-400' : 'text-gray-600'}">
-						{item.run.status === 'running' ? '⏳' : item.run.status === 'completed' ? '✅' : '❓'}
-					</span>
+					<span class="inline-block w-2 h-2 rounded-full flex-shrink-0 {item.run.status === 'running' ? 'bg-status-running pulse-dot' : item.run.status === 'completed' ? 'bg-muted-foreground' : 'bg-status-queued'}"></span>
 					<!-- plan 파일명 -->
 					<span class="text-[11px] font-mono font-semibold {idx === 0 ? 'text-gray-200' : 'text-gray-500'}">
 						{item.run.plan_file ? item.run.plan_file.split(/[\\/]/).pop() : '전체 실행'}
