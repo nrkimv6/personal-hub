@@ -376,7 +376,7 @@ function Get-ActivePlanRunners {
 
     # Redis 연결 확인 (2초 타임아웃)
     $pingOut = & redis-cli -t 2 PING 2>$null
-    if ($pingOut -ne "PONG") {
+    if (-not $pingOut -or $pingOut.Trim() -ne "PONG") {
         return $result
     }
 
@@ -417,7 +417,7 @@ function Get-ActivePlanRunners {
 # Redis 연결 여부 + 활성 runner 캐시 (초기화 시)
 $useRedis = $false
 $pingOut = & redis-cli PING 2>$null
-if ($pingOut -eq "PONG") { $useRedis = $true }
+if ($pingOut -and $pingOut.Trim() -eq "PONG") { $useRedis = $true }
 
 # Check if log files are stale — 파일명 날짜(_YYYYMMDD_) 기반: 오늘 날짜 파일이면 항상 유효
 function Test-StaleLogFile {
@@ -837,7 +837,6 @@ function Start-CombinedLogTail {
     try {
         while ($true) {
             # Plan-runner 로그 자동 감지
-            Write-Host "[DIAG-LOOP] useRedis=$useRedis elapsed=$(([DateTime]::Now - $lastRunnerRefresh).TotalSeconds)s" -ForegroundColor DarkMagenta
             if ($useRedis) {
                 # Redis 기반: 10초마다 active_runners 재조회
                 $now = [DateTime]::Now
@@ -930,7 +929,7 @@ function Start-CombinedLogTail {
                 if (Test-Path $cfg.Dir) {
                     $candidates = Get-ChildItem -Path $cfg.Dir -Filter $cfg.Filter -ErrorAction SilentlyContinue
                     if ($cfg.Exclude) { $candidates = $candidates | Where-Object { $_.Name -notmatch $cfg.Exclude } }
-                    $latest = $candidates | Sort-Object Name -Descending | Select-Object -First 1
+                    $latest = $candidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
                     if ($latest) {
                         $newFileId = Get-PlanRunnerFileId -FileName $latest.Name
                         $newPrKey  = "PR:$newFileId"
