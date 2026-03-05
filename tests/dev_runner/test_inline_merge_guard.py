@@ -286,3 +286,64 @@ class TestPreMergeGateInlineNotMain:
 
         # Assert: _cleanup_process_state 호출됨
         mock_cleanup.assert_called()
+
+
+# ========== TC #21: E(Error) — git checkout main 실패 시 MergeResult ==========
+
+class TestMergeToMainCheckoutFail:
+    """test_merge_to_main_checkout_fail: git checkout main returncode=1 → MergeResult(success=False) + stderr 포함"""
+
+    def test_merge_to_main_checkout_fail(self, tmp_path):
+        """E(Error): git checkout main 실패(returncode=1) → MergeResult(success=False, conflict=False, stderr 포함)"""
+        from unittest.mock import patch, MagicMock
+        import sys
+        import importlib.util
+        from pathlib import Path
+
+        wm_path = Path(__file__).parent.parent.parent / "scripts" / "worktree_manager.py"
+        if not wm_path.exists():
+            pytest.skip(f"worktree_manager.py not found: {wm_path}")
+
+        spec = importlib.util.spec_from_file_location("worktree_manager_tc21", wm_path)
+        wm_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(wm_mod)
+        WorktreeManager = wm_mod.WorktreeManager
+        MergeResult = wm_mod.MergeResult
+
+        project_root = tmp_path / "repo"
+        project_root.mkdir()
+        base_dir = tmp_path / "worktrees"
+        base_dir.mkdir()
+
+        # git checkout main 실패 mock (returncode=1, stderr 포함)
+        checkout_fail = MagicMock()
+        checkout_fail.returncode = 1
+        checkout_fail.stdout = ""
+        checkout_fail.stderr = "error: Your local changes would be overwritten by checkout."
+
+        def fake_subprocess_run(cmd, **kwargs):
+            if cmd[:2] == ["git", "checkout"]:
+                return checkout_fail
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=fake_subprocess_run):
+            result = WorktreeManager.merge_to_main(
+                runner_id="test-runner",
+                base_dir=base_dir,
+                project_root=project_root,
+                branch="plan/test-branch",
+            )
+
+        # Assert: success=False
+        assert result.success is False, \
+            f"checkout 실패 시 success=False 기대, 실제: {result.success}"
+
+        # Assert: conflict=False (checkout 단계 실패이므로 merge 충돌 아님)
+        assert result.conflict is False, \
+            f"checkout 실패 시 conflict=False 기대, 실제: {result.conflict}"
+
+        # Assert: message에 stderr 내용 포함
+        assert "git checkout main 실패" in result.message, \
+            f"message에 'git checkout main 실패' 포함 기대, 실제: '{result.message}'"
+        assert "overwritten" in result.message, \
+            f"message에 stderr 텍스트('overwritten') 포함 기대, 실제: '{result.message}'"
