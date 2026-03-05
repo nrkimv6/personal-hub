@@ -1360,9 +1360,7 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
         release_merge_lock(redis_client, runner_id)
 
     except Exception as e:
-        import traceback
-        print(f"DEBUG: [_do_inline_merge] 예외 발생 (runner_id={runner_id}): {e}")
-        print(traceback.format_exc())
+        logger.error(f"[_do_inline_merge] 예외 발생 (runner_id={runner_id}): {e}")
         try:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
         except Exception:
