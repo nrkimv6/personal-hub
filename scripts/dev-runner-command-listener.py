@@ -603,11 +603,15 @@ def _detect_orphan_plans(redis_client: redis.Redis) -> int:
             if not is_impl:
                 continue
             filename = plan_file.name
-            # Workflow DB에서 이 plan에 대한 running 레코드 찾기
-            matching = [
+            # Workflow DB에서 이 plan에 대한 레코드 찾기 (dev-runner가 시작한 plan만 검증)
+            any_record = [
                 w for w in all_workflows
-                if w.get("plan_file") and filename in w["plan_file"] and w.get("status") == "running"
+                if w.get("plan_file") and filename in w["plan_file"]
             ]
+            if not any_record:
+                # dev-runner를 통하지 않은 plan → 검증 대상 아님
+                continue
+            matching = [w for w in any_record if w.get("status") == "running"]
             if not matching:
                 logger.warning(f"[orphan-plan] {filename}: 상태=구현중이지만 Workflow DB에 running 레코드 없음")
                 warnings_count += 1
