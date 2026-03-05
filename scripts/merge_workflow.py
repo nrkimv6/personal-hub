@@ -88,11 +88,50 @@ class MergeWorkflow:
             # 1. 변경사항 커밋
             self._publish_log(runner_id, "COMMIT", "변경사항 커밋 중...")
             subprocess.run(["git", "add", "-A"], cwd=str(worktree_path), capture_output=True)
-            subprocess.run(
+            commit_result = subprocess.run(
                 ["git", "commit", "-m", f"feat: runner/{runner_id} 구현 완료"],
                 cwd=str(worktree_path), capture_output=True
             )
+            self._publish_log(runner_id, "COMMIT", f"commit rc={commit_result.returncode}")
             self._publish_log(runner_id, "COMMIT", "커밋 완료")
+
+            # 1-1. 빈 커밋 skip 체크: main..{branch} 커밋 수 + diff 확인
+            branch_str = branch
+            if not branch_str and plan_file:
+                branch_str = f"plan/{Path(plan_file).stem}"
+            if not branch_str:
+                branch_str = f"runner/{runner_id}"
+
+            try:
+                log_result = subprocess.run(
+                    ["git", "log", f"main..{branch_str}", "--oneline"],
+                    capture_output=True, text=True, cwd=str(self.project_root)
+                )
+                log_output = log_result.stdout.strip()
+                commit_count = len([l for l in log_output.splitlines() if l.strip()])
+
+                if commit_count == 0:
+                    diff_result = subprocess.run(
+                        ["git", "diff", f"main..{branch_str}"],
+                        capture_output=True, text=True, cwd=str(self.project_root)
+                    )
+                    if not diff_result.stdout.strip():
+                        self._publish_log(runner_id, "SKIP", f"변경사항 없음 (branch={branch_str}) — merge skip")
+                        self._update_queue_status(runner_id, "done")
+                        self._wf_update(runner_id, "merged")
+                        try:
+                            self.redis_client.set(
+                                f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged"
+                            )
+                        except Exception:
+                            pass
+                        return WorkflowResult(merged=True, tests_passed=True, conflict=False, message="변경사항 없음 — skip")
+                    else:
+                        self._publish_log(runner_id, "COMMIT", f"커밋 0개이나 diff 존재 — merge 진행 (branch={branch_str})")
+                else:
+                    self._publish_log(runner_id, "COMMIT", f"worktree 커밋 {commit_count}개 확인 (branch={branch_str})")
+            except Exception as e:
+                self._publish_log(runner_id, "WARN", f"커밋 수 확인 실패 (무시, merge 진행): {e}")
 
             # 2. 머지
             self._update_queue_status(runner_id, "merging")
