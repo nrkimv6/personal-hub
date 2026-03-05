@@ -226,7 +226,7 @@
 		{/if}
 		<!-- 시작 버튼: 항상 표시 -->
 		<button
-			class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 disabled:opacity-50 transition-colors"
+			class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-mono font-semibold bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 disabled:opacity-50 transition-colors"
 			onclick={handleStart}
 			disabled={actionLoading || (mode === 'single' && !selectedPlan)}
 		>
@@ -304,7 +304,7 @@
 			<span class="text-[10px] font-bold text-gray-400 uppercase shrink-0 w-full sm:w-auto">Phase Models:</span>
 			{#each ['plan', 'impl', 'done'] as phase}
 				<div class="flex items-center gap-1.5 flex-1 sm:flex-none">
-					<label class="text-[10px] text-gray-500 uppercase shrink-0">{phase}</label>
+					<label class="text-[10px] font-mono uppercase text-muted-foreground w-10 shrink-0">{phase}</label>
 					<select
 						class="border rounded px-1.5 py-0.5 flex-1 sm:w-40 h-6 text-[10px] font-mono bg-white"
 						value={engineConfigs[selectedEngine].models[phase]}
