@@ -46,17 +46,30 @@ class LogService:
             socket_connect_timeout=5,
         )
 
+    # stream_log_path 파일이 이 크기 이하이면 START 마커만 있는 빈 파일로 간주 → log_file_path로 fallback
+    _STREAM_LOG_MIN_BYTES = 200
+
     def _find_current_log(self, runner_id: str) -> Optional[Path]:
-        """특정 runner의 stream 로그 파일 (Redis에서 조회)"""
+        """특정 runner의 stream 로그 파일 (Redis에서 조회)
+
+        stream_log_path 우선 조회하되, 파일이 너무 작으면(START 마커만 있는 경우)
+        실제 로그가 담긴 log_file_path로 fallback한다.
+        """
         try:
-            # stream 로그 경로 우선 (executor가 직접 기록한 파일)
-            log_path = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
-            if log_path and Path(log_path).exists():
-                return Path(log_path)
-            # fallback: 기존 log_file_path
-            log_path = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path")
-            if log_path and Path(log_path).exists():
-                return Path(log_path)
+            stream_path_str = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
+            log_path_str = self.redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path")
+
+            # stream_log_path 유효성 검증: 존재 + 의미있는 크기여야 사용
+            if stream_path_str:
+                stream_path = Path(stream_path_str)
+                if stream_path.exists() and stream_path.stat().st_size > self._STREAM_LOG_MIN_BYTES:
+                    return stream_path
+
+            # fallback: 실제 로그가 기록된 log_file_path
+            if log_path_str:
+                log_path = Path(log_path_str)
+                if log_path.exists():
+                    return log_path
         except redis.ConnectionError:
             pass
         return None
