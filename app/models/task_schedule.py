@@ -52,6 +52,8 @@ class TaskSchedule(Base):
     TARGET_TYPE_TOPIC_EXTRACT = "topic_extract"  # 소재 자동 추출
     TARGET_TYPE_REPORT = "report"  # LLM 보고서 생성
     TARGET_TYPE_PYTEST_RUN = "pytest_run"  # pytest 자동 실행
+    TARGET_TYPE_PLAN_ARCHIVE_ANALYZE = "plan_archive_analyze"  # plan LLM 분석
+    TARGET_TYPE_PLAN_REQUIREMENTS_SYNC = "plan_requirements_sync"  # 요구사항 문서 생성
 
     SCHEDULE_TYPE_CRON = "cron"
     SCHEDULE_TYPE_INTERVAL = "interval"

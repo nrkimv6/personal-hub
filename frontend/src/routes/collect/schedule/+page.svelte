@@ -38,6 +38,13 @@
 	let pytestLlmModel = '';
 	let pytestCronTime = '02:00';
 
+	// plan_archive_analyze / plan_requirements_sync cron 시간
+	let planArchiveCronTime = '02:10';
+	let planRequirementsCronTime = '03:30';
+
+	// 수정 모달 cron 시간 (pytest / plan 타입 공용)
+	let editCronTime = '02:00';
+
 	// Google 검색 새 검색어 입력 폼
 	let newSearchQuery = '';
 	let newSearchName = '';
@@ -83,7 +90,9 @@
 		{ value: 'instagram_feed', label: 'Instagram 피드', icon: '📸', color: 'pink' },
 		{ value: 'google_search', label: 'Google 검색', icon: '🔍', color: 'yellow' },
 		{ value: 'writing_task', label: '글쓰기 태스크', icon: '✍️', color: 'purple' },
-		{ value: 'pytest_run', label: 'pytest 자동 실행', icon: '🧪', color: 'green' }
+		{ value: 'pytest_run', label: 'pytest 자동 실행', icon: '🧪', color: 'green' },
+		{ value: 'plan_archive_analyze', label: 'Plan Archive LLM 분석', icon: '🗂️', color: 'blue' },
+		{ value: 'plan_requirements_sync', label: 'Plan 요구사항 동기화', icon: '📋', color: 'indigo' }
 	];
 
 	const dateFilterOptions = [
@@ -165,6 +174,12 @@
 			return;
 		}
 
+		if (type === 'plan_archive_analyze' || type === 'plan_requirements_sync') {
+			// cron 시간만 입력 (step 2)
+			addStep = 2;
+			return;
+		}
+
 		if (type === 'google_search') {
 			// Google 검색은 항상 새 검색어 입력 폼으로 이동
 			addStep = 2;
@@ -213,17 +228,23 @@
 		error = null;
 
 		try {
-			const data: {
+			const isCronType = selectedType === 'pytest_run' || selectedType === 'plan_archive_analyze' || selectedType === 'plan_requirements_sync';
+		const cronTime =
+			selectedType === 'pytest_run' ? pytestCronTime :
+			selectedType === 'plan_archive_analyze' ? planArchiveCronTime :
+			selectedType === 'plan_requirements_sync' ? planRequirementsCronTime : '';
+
+		const data: {
 				target_type: string;
 				target_config?: Record<string, unknown>;
 				schedule_type: string;
 				schedule_value: Record<string, unknown>;
 			} = {
 				target_type: selectedType,
-				schedule_type: selectedType === 'pytest_run' ? 'cron' : 'time_window',
+				schedule_type: isCronType ? 'cron' : 'time_window',
 				schedule_value:
-					selectedType === 'pytest_run'
-						? { time: pytestCronTime }
+					isCronType
+						? { time: cronTime }
 						: {
 								daily_runs: scheduleTimes.length,
 								time_windows: scheduleTimes.map((t) => ({ start: t, end: t }))
@@ -284,6 +305,14 @@
 			const detail = await collectApi.getScheduleDetail(schedule.id);
 
 			editDisplayName = detail.display_name || '';
+
+			// cron 타입 (pytest_run, plan_archive_analyze, plan_requirements_sync) cron 시간 복원
+			const isCronSchedule = ['pytest_run', 'plan_archive_analyze', 'plan_requirements_sync'].includes(schedule.target_type);
+			if (isCronSchedule && detail.schedule_value?.time) {
+				editCronTime = detail.schedule_value.time as string;
+			} else {
+				editCronTime = '02:00';
+			}
 
 			// 시간 설정 복원
 			if (detail.schedule_value?.time_windows) {
@@ -355,11 +384,14 @@
 				updateData.display_name = editDisplayName.trim();
 			}
 
-			// 시간 설정
-			updateData.schedule_value = {
-				daily_runs: editTimes.length,
-				time_windows: editTimes.map((t) => ({ start: t, end: t }))
-			};
+			// 시간 설정 (cron 타입 vs time_window 타입)
+			const isEditCronType = ['pytest_run', 'plan_archive_analyze', 'plan_requirements_sync'].includes(editSchedule.target_type);
+			updateData.schedule_value = isEditCronType
+				? { time: editCronTime }
+				: {
+						daily_runs: editTimes.length,
+						time_windows: editTimes.map((t) => ({ start: t, end: t }))
+					};
 
 			// Google 검색 파라미터
 			if (editSchedule.target_type === 'google_search') {
@@ -509,6 +541,10 @@
 				return { class: 'bg-purple-light text-purple-800', text: '글쓰기' };
 			case 'pytest_run':
 				return { class: 'bg-green-100 text-green-800', text: 'pytest' };
+			case 'plan_archive_analyze':
+				return { class: 'bg-blue-100 text-blue-800', text: 'Plan분석' };
+			case 'plan_requirements_sync':
+				return { class: 'bg-indigo-100 text-indigo-800', text: 'Plan요구사항' };
 			default:
 				return { class: 'bg-muted text-foreground', text: type };
 		}
@@ -853,7 +889,31 @@
 								</button>
 							</div>
 						</div>
-					{:else if selectedType === 'instagram_feed'}
+					{:else if selectedType === 'plan_archive_analyze' || selectedType === 'plan_requirements_sync'}
+				<!-- plan archive / requirements sync: cron 시간만 입력 -->
+				<p class="text-muted-foreground mb-4">매일 실행할 시각을 설정하세요</p>
+				<div class="space-y-4">
+					<div>
+						<label for="plan-cron-time" class="block text-sm font-medium text-foreground mb-1">실행 시각 (매일)</label>
+						<input
+							id="plan-cron-time"
+							type="time"
+							bind:value={selectedType === 'plan_archive_analyze' ? planArchiveCronTime : planRequirementsCronTime}
+							class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+						/>
+						<p class="text-xs text-muted-foreground mt-1">매일 1회 실행 (±5분 허용)</p>
+					</div>
+					<div class="flex justify-end">
+						<button
+							onclick={createSchedule}
+							disabled={creating}
+							class="btn btn-primary"
+						>
+							{#if creating}생성 중...{:else}생성{/if}
+						</button>
+					</div>
+				</div>
+			{:else if selectedType === 'instagram_feed'}
 						<p class="text-muted-foreground mb-4">수집할 Instagram 계정을 선택하세요</p>
 						{#if serviceAccounts.length === 0}
 							<p class="text-muted-foreground text-center py-4">등록된 계정이 없습니다</p>
@@ -1219,34 +1279,44 @@
 						<!-- 실행 시간 설정 -->
 						<div class="border-t border-border pt-4">
 							<h3 class="font-medium text-foreground mb-3">실행 시간</h3>
-							<div class="space-y-3 mb-3">
-								{#each editTimes as time, i}
-									<div class="flex items-center gap-2">
-										<input
-											type="time"
-											bind:value={editTimes[i]}
-											class="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
-										/>
-										{#if editTimes.length > 1}
-											<button
-												onclick={() => editRemoveTime(i)}
-												class="p-2 text-error hover:bg-error-light rounded-lg"
-												title="삭제"
-											>
-												✕
-											</button>
-										{/if}
-									</div>
-								{/each}
-							</div>
-							<button
-								onclick={editAddTime}
-								class="w-full py-2 border-2 border-dashed border-border rounded-lg text-muted-foreground hover:border-blue-500 hover:text-primary transition-colors text-sm"
-							>
-								+ 시간 추가
-							</button>
+							{#if editSchedule && ['pytest_run', 'plan_archive_analyze', 'plan_requirements_sync'].includes(editSchedule.target_type)}
+								<div>
+									<input
+										type="time"
+										bind:value={editCronTime}
+										class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+									/>
+									<p class="text-xs text-muted-foreground mt-1">매일 1회 실행 (±5분 허용)</p>
+								</div>
+							{:else}
+								<div class="space-y-3 mb-3">
+									{#each editTimes as time, i}
+										<div class="flex items-center gap-2">
+											<input
+												type="time"
+												bind:value={editTimes[i]}
+												class="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+											/>
+											{#if editTimes.length > 1}
+												<button
+													onclick={() => editRemoveTime(i)}
+													class="p-2 text-error hover:bg-error-light rounded-lg"
+													title="삭제"
+												>
+													✕
+												</button>
+											{/if}
+										</div>
+									{/each}
+								</div>
+								<button
+									onclick={editAddTime}
+									class="w-full py-2 border-2 border-dashed border-border rounded-lg text-muted-foreground hover:border-blue-500 hover:text-primary transition-colors text-sm"
+								>
+									+ 시간 추가
+								</button>
+							{/if}
 						</div>
-
 						<!-- 저장 버튼 -->
 						<div class="flex justify-end gap-2 pt-2">
 							<Button variant="secondary" on:click={closeEditModal}>
