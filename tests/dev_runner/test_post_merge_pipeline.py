@@ -51,6 +51,29 @@ def fake_redis():
     return fakeredis.FakeRedis(decode_responses=True)
 
 
+def make_redis_mock(worktree_path=None, plan_file=None, branch=None):
+    """test_conflict_resolve_new.py의 make_redis_mock 복제 — _do_inline_merge 통합 TC용"""
+    redis = MagicMock()
+
+    def redis_get(key):
+        if "worktree_path" in key:
+            return worktree_path
+        if "plan_file" in key:
+            return plan_file
+        if "branch" in key:
+            return branch
+        return None
+
+    redis.get.side_effect = redis_get
+    redis.set.return_value = True
+    redis.lpush.return_value = 1
+    redis.expire.return_value = True
+    redis.publish.return_value = 1
+    redis.sadd.return_value = 1
+    redis.delete.return_value = 1
+    return redis
+
+
 def _pub_noop(msg):
     pass
 
