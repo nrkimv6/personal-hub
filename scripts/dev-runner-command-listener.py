@@ -1182,6 +1182,19 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
             _cleanup_process_state(runner_id, redis_client)
             return
 
+        # [Phase 2-4] merge 전 worktree 사전 제거 — git merge 충돌 방지 (branch는 보존)
+        try:
+            _pub(f"[pre-merge] worktree 사전 제거 시작: {worktree_path}")
+            WorktreeManager.remove(
+                runner_id, WORKTREE_BASE_DIR,
+                plan_file=plan_file,
+                branch=branch_str,
+                delete_branch=False,  # branch 보존 — merge 대상 branch가 필요
+            )
+            _pub("[pre-merge] worktree 사전 제거 완료")
+        except Exception as wt_pre_err:
+            _pub(f"[pre-merge] worktree 사전 제거 실패 (무시, merge 계속): {wt_pre_err}")
+
         workflow = MergeWorkflow(
             project_root=PROJECT_ROOT,
             redis_client=redis_client,

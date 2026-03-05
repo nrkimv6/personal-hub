@@ -103,10 +103,11 @@ class WorktreeManager:
             raise WorktreeError(f"worktree 생성 중 오류: {e}")
 
     @staticmethod
-    def remove(runner_id: str, base_dir: Path, plan_file: Optional[str] = None, branch: Optional[str] = None) -> bool:
-        """git worktree remove + git branch -D
+    def remove(runner_id: str, base_dir: Path, plan_file: Optional[str] = None, branch: Optional[str] = None, delete_branch: bool = True) -> bool:
+        """git worktree remove + (선택적) git branch -D
 
         우선순위: branch 파라미터 > plan_file > runner_id 기반
+        delete_branch=False: worktree 디렉토리만 제거, branch는 보존 (merge 전 사전 제거 시 사용)
         """
         if branch:
             # branch 파라미터가 있으면 그대로 사용, worktree_path는 base_dir/{branch_slug}로 추론
@@ -126,11 +127,12 @@ class WorktreeManager:
             )
             if result.returncode != 0 and "is not a working tree" not in result.stderr:
                 logger.warning(f"[WorktreeManager] worktree 삭제 경고: {result.stderr}")
-            subprocess.run(
-                ["git", "branch", "-D", branch],
-                capture_output=True, text=True, cwd=str(base_dir.parent)
-            )
-            logger.info(f"[WorktreeManager] 제거: {runner_id}")
+            if delete_branch:
+                subprocess.run(
+                    ["git", "branch", "-D", branch],
+                    capture_output=True, text=True, cwd=str(base_dir.parent)
+                )
+            logger.info(f"[WorktreeManager] 제거: {runner_id} (delete_branch={delete_branch})")
             return True
         except Exception as e:
             logger.error(f"[WorktreeManager] 제거 실패: {e}")
