@@ -179,7 +179,7 @@ class WorktreeManager:
                 conflict = "CONFLICT" in result.stdout or "CONFLICT" in result.stderr
                 # CONFLICT 줄만 추출하여 message에 포함 (resolve에서 컨텍스트로 활용)
                 conflict_lines = [l.strip() for l in result.stdout.splitlines() if l.strip().startswith("CONFLICT")]
-                detail = "\n".join(conflict_lines) if conflict_lines else (result.stderr[:500] or result.stdout[:500])
+                detail = "\n".join(conflict_lines) if conflict_lines else (result.stderr.strip() + "\n" + result.stdout.strip()).strip()[:500]
                 if keep_conflict and conflict:
                     # 충돌 상태 유지 — 호출자가 resolve + commit 책임
                     logger.info(f"[WorktreeManager] 머지 충돌 (keep_conflict=True, 상태 유지): {branch}")
