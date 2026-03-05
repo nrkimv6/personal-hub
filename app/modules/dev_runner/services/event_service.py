@@ -24,6 +24,8 @@ REDIS_PORT = 6379
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 REDIS_STATE_KEY = "plan-runner:state"
+PLAN_FILE_ALL = "__ALL_PLANS__"  # 전체실행 sentinel (command-listener와 공유)
+_LEGACY_ALL = "ALL"  # 하위 호환
 
 # keyspace notification 채널 (DB 0)
 KEYEVENT_CHANNEL = "__keyevent@0__:set"
@@ -81,9 +83,9 @@ class EventService:
             values = self._sync.mget([f"{RUNNER_KEY_PREFIX}:{runner_id}:{f}" for f in fields])
             data = dict(zip(fields, values))
             data["runner_id"] = runner_id
-            # plan_file이 None(Redis 키 미설정)이면 branch 또는 "ALL" fallback
+            # plan_file이 None(Redis 키 미설정)이면 branch 또는 PLAN_FILE_ALL fallback
             if not data.get("plan_file"):
-                data["plan_file"] = data.get("branch") or "ALL"
+                data["plan_file"] = data.get("branch") or PLAN_FILE_ALL
             return data
         except Exception:
             return None

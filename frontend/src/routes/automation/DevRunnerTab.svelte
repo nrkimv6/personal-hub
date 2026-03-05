@@ -576,7 +576,7 @@
 							{:else}
 								<svg class="w-3 h-3 text-emerald-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
 							{/if}
-								<span class="max-w-[120px] truncate">{tab.plan_file && tab.plan_file !== 'ALL' ? tab.plan_file.split(/[\\/]/).pop()?.replace(/^\d{4}-\d{2}-\d{2}_/, '') : '전체 실행'}</span>
+								<span class="max-w-[120px] truncate">{tab.plan_file && tab.plan_file !== '__ALL_PLANS__' && tab.plan_file !== 'ALL' ? tab.plan_file.split(/[\\/]/).pop()?.replace(/^\d{4}-\d{2}-\d{2}_/, '') : '전체 실행'}</span>
 								<button
 									class="ml-0.5 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-300 text-gray-400 hover:text-gray-600 text-[10px]"
 									onclick={(e) => { e.stopPropagation(); handleCloseTab(tab.id); }}

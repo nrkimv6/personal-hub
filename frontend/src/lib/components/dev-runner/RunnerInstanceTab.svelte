@@ -146,8 +146,11 @@
 		}
 	}
 
+	const isAllPlans = (f: string | null | undefined) =>
+		!f || f === '__ALL_PLANS__' || f === 'ALL';
+
 	let planBasename = $derived(
-		planFile ? planFile.split(/[\\/]/).pop() ?? planFile : '전체 실행'
+		isAllPlans(planFile) ? '전체 실행' : planFile!.split(/[\\/]/).pop() ?? planFile!
 	);
 
 	let statusIcon = $derived(running ? '⏳' : '✅');
@@ -158,7 +161,7 @@
 	<div class="flex items-center gap-2 px-3 py-1.5 bg-gray-50 border-b border-gray-200 text-xs shrink-0">
 		<span class="text-base leading-none">{statusIcon}</span>
 
-		<span class="font-mono font-medium text-gray-700 truncate max-w-[160px]" title={planFile ?? '전체 실행'}>
+		<span class="font-mono font-medium text-gray-700 truncate max-w-[160px]" title={isAllPlans(planFile) ? '전체 실행' : planFile!}>
 			{planBasename}
 		</span>
 

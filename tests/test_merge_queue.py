@@ -393,12 +393,23 @@ class TestRetryMergePlanFile:
         passed = self._run_with_mock_wf(fn, runner_id, r)
         assert passed == "2026-02-27_foo.md"
 
-    def test_retry_merge_boundary_plan_file_all(self):
-        """B: Redis plan_file="ALL" → wf.run(plan_file=None) 전달 (parallel 모드 placeholder)."""
+    def test_retry_merge_boundary_plan_file_sentinel(self):
+        """B: Redis plan_file="__ALL_PLANS__" → wf.run(plan_file=None) 전달 (parallel 모드 sentinel)."""
         fn = self._import_fn()
         runner_id = "rid_all"
         r = make_redis(get_map={
             f"plan-runner:runners:{runner_id}:worktree_path": "/tmp/wt/rid_all",
+            f"plan-runner:runners:{runner_id}:plan_file": "__ALL_PLANS__",
+        })
+        passed = self._run_with_mock_wf(fn, runner_id, r)
+        assert passed is None
+
+    def test_retry_merge_boundary_plan_file_legacy_all(self):
+        """B: 기존 Redis plan_file="ALL" → wf.run(plan_file=None) 전달 (하위 호환)."""
+        fn = self._import_fn()
+        runner_id = "rid_all_legacy"
+        r = make_redis(get_map={
+            f"plan-runner:runners:{runner_id}:worktree_path": "/tmp/wt/rid_all_legacy",
             f"plan-runner:runners:{runner_id}:plan_file": "ALL",
         })
         passed = self._run_with_mock_wf(fn, runner_id, r)

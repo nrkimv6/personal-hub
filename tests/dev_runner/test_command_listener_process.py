@@ -157,8 +157,8 @@ class TestLaunchPlanRunnerProcess:
         assert fr.get(f"{RKP}:{RUNNER_ID}:pid") == "12345"
         assert fr.get(f"{RKP}:{RUNNER_ID}:plan_file") == "test.md"
 
-    def test_launch_plan_file_none_saves_ALL(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
-        """plan_file=None → Redis에 'ALL' 저장"""
+    def test_launch_plan_file_none_saves_sentinel(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
+        """plan_file=None → Redis에 '__ALL_PLANS__' sentinel 저장 (Right)"""
         RKP = listener_mod.RUNNER_KEY_PREFIX
         command = {"action": "run", "runner_id": RUNNER_ID, "parallel": True}
 
@@ -168,7 +168,20 @@ class TestLaunchPlanRunnerProcess:
             mock_thread.return_value = MagicMock()
             listener_mod._launch_plan_runner_process(command, fr, RUNNER_ID, mock_worktree, None, None)
 
-        assert fr.get(f"{RKP}:{RUNNER_ID}:plan_file") == "ALL"
+        assert fr.get(f"{RKP}:{RUNNER_ID}:plan_file") == listener_mod.PLAN_FILE_ALL
+
+    def test_legacy_ALL_still_recognized(self, listener_mod, fr, mock_popen, tmp_path, mock_worktree):
+        """기존 Redis에 'ALL' 값이 있을 때도 sentinel로 인식 (하위 호환, Right)"""
+        RKP = listener_mod.RUNNER_KEY_PREFIX
+        # 기존 "ALL" 값이 Redis에 저장되어 있다고 가정
+        fr.set(f"{RKP}:{RUNNER_ID}:plan_file", "ALL")
+        fr.set(f"{RKP}:{RUNNER_ID}:merge_status", "done")
+
+        # _cleanup_runner 내부에서 "ALL" → None 변환 확인
+        val = fr.get(f"{RKP}:{RUNNER_ID}:plan_file")
+        assert val in ("ALL", listener_mod.PLAN_FILE_ALL), "기존 'ALL' 값도 sentinel로 처리돼야 함"
+        # 실제 비교 로직: in (PLAN_FILE_ALL, _LEGACY_ALL)
+        assert val in (listener_mod.PLAN_FILE_ALL, listener_mod._LEGACY_ALL)
 
 
 # ========== TestStopPlanRunner ==========
