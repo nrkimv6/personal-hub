@@ -112,6 +112,25 @@ class ConflictAnalyzer:
 
         return True, ""
 
+    @staticmethod
+    def get_base_content(project_root: Path, file_path: str) -> str:
+        """git merge base 스테이지(:1:)에서 파일 내용 반환.
+
+        신규 파일이거나 merge 중이 아닌 경우 빈 문자열 반환 (예외 없음).
+        """
+        try:
+            result = subprocess.run(
+                ["git", "show", f":1:{file_path}"],
+                cwd=project_root,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                return result.stdout
+            return ""
+        except Exception:
+            return ""
+
 
 class ConflictResolver:
     def __init__(
