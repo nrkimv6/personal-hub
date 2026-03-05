@@ -12,7 +12,6 @@
 	import WorkflowList from '$lib/components/dev-runner/WorkflowList.svelte';
 	import { createSmartPolling } from '$lib/utils/smart-polling';
 	import RunStatusBar from '$lib/components/dev-runner/RunStatusBar.svelte';
-	import TabNav from '$lib/components/layout/TabNav.svelte';
 	import {
 		devRunnerTaskApi,
 		devRunnerRunnerApi,
@@ -503,23 +502,31 @@
 					bg-card rounded-md border border-border
 				">
 					<!-- 탭 바 -->
-					<div class="px-4 pt-2 pb-2 shrink-0 border-b flex items-center gap-2">
-						<TabNav
-							tabs={[
-								{ id: 'plans', label: 'Plans' },
-								{ id: 'tasks', label: 'Tasks' },
-								{ id: 'workflows', label: '이력' },
-								{ id: 'merge', label: 'Merge' },
-								{ id: 'settings', label: '설정' },
-							]}
-							bind:activeTab={taskHistoryTab}
-							variant="primary"
-							size="compact"
-						/>
+					<div class="flex items-center border-b border-border shrink-0">
+						<button
+							onclick={() => { taskHistoryTab = 'plans'; }}
+							class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-mono transition-colors border-b-2 {taskHistoryTab === 'plans' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+						>Plans</button>
+						<button
+							onclick={() => { taskHistoryTab = 'tasks'; }}
+							class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-mono transition-colors border-b-2 {taskHistoryTab === 'tasks' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+						>Tasks</button>
+						<button
+							onclick={() => { taskHistoryTab = 'workflows'; }}
+							class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-mono transition-colors border-b-2 {taskHistoryTab === 'workflows' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+						>이력</button>
+						<button
+							onclick={() => { taskHistoryTab = 'merge'; }}
+							class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-mono transition-colors border-b-2 {taskHistoryTab === 'merge' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+						>Merge</button>
+						<button
+							onclick={() => { taskHistoryTab = 'settings'; }}
+							class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-mono transition-colors border-b-2 {taskHistoryTab === 'settings' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+						>설정</button>
 						<!-- 모바일 닫기 버튼 -->
 						<button
 							onclick={() => { taskHistoryOpen = false; }}
-							class="sm:hidden ml-auto text-gray-400 hover:text-gray-600 text-lg leading-none"
+							class="sm:hidden ml-auto text-gray-400 hover:text-gray-600 text-lg leading-none px-2 shrink-0"
 						>×</button>
 					</div>
 					<!-- 탭 콘텐츠 -->
