@@ -1380,6 +1380,7 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
     repeat_start = 0.0
     BURST_WINDOW = 0.5   # 초
     BURST_LIMIT = 10     # 같은 내용 N회 이상이면 억제
+    _first_line = True   # T4-2: 첫 라인 감지용
 
     try:
         for line in process.stdout:
@@ -1388,6 +1389,23 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
             # 1. 파일 기록 (노이즈 포함 전체 보존)
             log_handle.write(line)
             log_handle.flush()
+
+            # T4-2: 첫 라인 수신 시점 = 로그 파일이 실제로 생성된 시점
+            # stream_log_path 가 Redis 에 미기록 상태이면 지금 갱신 (안전망)
+            if _first_line and runner_id:
+                _first_line = False
+                try:
+                    _stream_key = f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path"
+                    if not redis_client.exists(_stream_key):
+                        _log_path_for_redis = getattr(log_handle, "name", None)
+                        if _log_path_for_redis:
+                            redis_client.set(_stream_key, str(_log_path_for_redis))
+                            logger.debug(
+                                f"[_stream_output] T4-2: stream_log_path 갱신 "
+                                f"(runner_id={runner_id}, path={_log_path_for_redis})"
+                            )
+                except Exception as _t42_err:
+                    logger.warning(f"[_stream_output] T4-2: stream_log_path 갱신 실패 (무시): {_t42_err}")
 
             # 2. 노이즈 필터: 억제 대상이면 카운트 후 skip
             if _is_noise_line(stripped):
