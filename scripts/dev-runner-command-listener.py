@@ -69,7 +69,7 @@ HEARTBEAT_INTERVAL = 10  # heartbeat 갱신 주기 (초)
 HEARTBEAT_TTL = 30  # heartbeat 만료 시간 (초, 3회 미갱신 시 만료)
 
 # merge 활성 상태 — cleanup 보호 가드 및 reconnect 복구 조건에 사용
-MERGE_ACTIVE_STATUSES = ("queued", "merging", "pending_merge", "resolving")
+MERGE_ACTIVE_STATUSES = ("queued", "merging", "pending_merge", "resolving", "testing", "fixing")
 
 QUOTA_ERROR_MARKERS = ["TerminalQuotaError", "exhausted your capacity", "[QUOTA]"]
 
@@ -1064,15 +1064,17 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
             pass
 
     try:
-        # merge_requested 플래그 삭제 (중복 진입 방지)
+        # 1. merge_status = "queued" 설정 (merge_requested 삭제 전에 — heartbeat 경쟁 조건 방지)
+        # merge_requested 삭제 후 merge_status 설정 전에 heartbeat가 실행되면
+        # 둘 다 없는 상태로 판단하여 조기 cleanup 가능
         try:
-            redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
         except Exception:
             pass
 
-        # 1. merge_status = "queued" + lock 대기
+        # merge_requested 플래그 삭제 (중복 진입 방지, merge_status가 이미 설정된 후)
         try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
+            redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
         except Exception:
             pass
         _pub("merge lock 대기 중...")
