@@ -45,6 +45,7 @@ class MergeResult:
     success: bool
     conflict: bool
     message: str
+    already_merged: bool = False
 
 
 class WorktreeManager:
@@ -153,6 +154,14 @@ class WorktreeManager:
         try:
             # main 체크아웃
             subprocess.run(["git", "checkout", "main"], capture_output=True, cwd=str(project_root))
+            # is-ancestor 사전 체크 — 이미 머지된 브랜치면 skip
+            ancestor_check = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", branch, "HEAD"],
+                capture_output=True, cwd=str(project_root)
+            )
+            if ancestor_check.returncode == 0:
+                logger.info(f"[WorktreeManager] 이미 머지됨 — skip: {branch}")
+                return MergeResult(success=True, conflict=False, already_merged=True, message="이미 머지됨 — skip")
             result = subprocess.run(
                 ["git", "merge", branch, "--no-ff", "-m", f"merge: {branch}"],
                 capture_output=True, text=True, cwd=str(project_root)

@@ -318,6 +318,13 @@ class DirectMergeRequest(BaseModel):
     plan_file: Optional[str] = Field(default=None, description="Plan 파일 경로 (없으면 전체 실행)")
 
 
+class RetryMergeRequest(BaseModel):
+    """retry-merge Redis 키 재발급용 요청 스키마 — Redis 키가 만료됐을 때 payload로 재설정"""
+    worktree_path: Optional[str] = Field(default=None, description="워크트리 경로")
+    plan_file: Optional[str] = Field(default=None, description="Plan 파일 경로")
+    branch: Optional[str] = Field(default=None, description="브랜치명")
+
+
 __all__ = [
     'PlanEventResponse',
     'PlanRecordResponse',
@@ -351,4 +358,5 @@ __all__ = [
     'WorkflowCreateRequest',
     'MergeQueueEnqueueRequest',
     'DirectMergeRequest',
+    'RetryMergeRequest',
 ]

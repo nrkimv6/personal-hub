@@ -613,8 +613,11 @@ class ExecutorService:
         except Exception:
             return []
 
-    async def send_runner_command(self, runner_id: str, action: str) -> dict:
-        """runner에 명령 전송 (retry-merge, cleanup-worktree 등)"""
+    async def send_runner_command(self, runner_id: str, action: str, extra: dict | None = None) -> dict:
+        """runner에 명령 전송 (retry-merge, cleanup-worktree 등)
+
+        extra: 추가 payload — command dict에 병합되어 Redis에 전송됨 (retry-merge Redis 키 재발급 등에 활용)
+        """
         try:
             await self.async_redis.ping()
         except (redis.ConnectionError, ConnectionRefusedError, OSError):
@@ -628,6 +631,8 @@ class ExecutorService:
             "source": "monitor-page-api",
             "timestamp": datetime.now().isoformat(),
         }
+        if extra:
+            command.update(extra)
         result_key = f"{RESULTS_KEY}:{command_id}"
         await self.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
         result = await self.async_redis.brpop(result_key, timeout=COMMAND_TIMEOUT)

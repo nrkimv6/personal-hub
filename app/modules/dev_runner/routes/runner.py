@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, HTTPException
 
-from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse, RunnerListItem, MergeQueueItem, MergeStatusResponse, MergeHistoryItem, MergeQueueEnqueueRequest, DirectMergeRequest
+from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse, RunnerListItem, MergeQueueItem, MergeStatusResponse, MergeHistoryItem, MergeQueueEnqueueRequest, DirectMergeRequest, RetryMergeRequest
 from app.modules.dev_runner.services.executor_service import executor_service
 
 router = APIRouter()
@@ -120,9 +120,9 @@ async def get_merge_status(runner_id: str):
 
 
 @router.post("/merge/{runner_id}/retry")
-async def retry_merge_request(runner_id: str):
-    """Merge 재시도 요청"""
-    return await executor_service.send_runner_command(runner_id, "retry-merge")
+async def retry_merge_request(runner_id: str, request: RetryMergeRequest = RetryMergeRequest()):
+    """Merge 재시도 요청 — Redis 키 만료 시 payload로 재발급 가능"""
+    return await executor_service.send_runner_command(runner_id, "retry-merge", extra=request.model_dump(exclude_none=True))
 
 
 @router.post("/merge/{runner_id}/revert")

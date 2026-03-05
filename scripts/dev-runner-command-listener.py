@@ -619,6 +619,42 @@ def _detect_orphan_plans(redis_client: redis.Redis) -> int:
     return warnings_count
 
 
+def _resolve_todo_file(plan_file_str: str | None) -> str | None:
+    """mode B plan의 실제 TODO 파일 경로 반환.
+
+    archive에 보관된 plan 문서나 체크박스가 없는 plan 문서를 받으면
+    대응하는 _todo.md 파일 경로를 반환한다.
+    """
+    if plan_file_str is None:
+        return None
+    # sentinel 값은 그대로 반환 (전체실행 모드)
+    if plan_file_str in (PLAN_FILE_ALL, _LEGACY_ALL):
+        return plan_file_str
+
+    plan_path = Path(plan_file_str)
+    todo_candidate = plan_path.parent.parent / "plan" / f"{plan_path.stem}_todo.md"
+
+    # archive 경로인 경우 → _todo.md 시도
+    if "docs/archive" in plan_file_str.replace("\\", "/") or "docs\\archive" in plan_file_str:
+        if todo_candidate.is_file():
+            logger.debug(f"[resolve-todo] archive path → {todo_candidate}")
+            return str(todo_candidate)
+        return plan_file_str
+
+    # plan 폴더이지만 체크박스가 0개인 경우 → _todo.md 시도
+    try:
+        if plan_path.is_file():
+            content = plan_path.read_text(encoding="utf-8")
+            if not re.search(r'- \[ \]', content):
+                if todo_candidate.is_file():
+                    logger.debug(f"[resolve-todo] no checkboxes → {todo_candidate}")
+                    return str(todo_candidate)
+    except Exception:
+        pass
+
+    return plan_file_str
+
+
 def _restart_plan_runner_after_merge(plan_file: str, redis_client: redis.Redis, remaining: int) -> None:
     """merge 완료 후 plan에 잔여 항목이 있을 때 non-worktree 모드로 plan-runner 재시작.
 
@@ -865,17 +901,18 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                 pass
 
             # plan 잔여 항목 확인 — 잔여 있으면 재시작 플래그 설정
+            resolved_plan_file = _resolve_todo_file(plan_file)
             remaining_count = 0
-            if plan_file:
+            if resolved_plan_file:
                 try:
-                    plan_path = Path(plan_file)
+                    plan_path = Path(resolved_plan_file)
                     if plan_path.is_file():
                         content = plan_path.read_text(encoding="utf-8")
                         remaining = re.findall(r'- \[ \]', content)
                         remaining_count = len(remaining)
-                        _pub(f"plan 잔여 항목 확인: {remaining_count}개")
+                        _pub(f"plan 잔여 항목 확인 (resolved: {resolved_plan_file}): {remaining_count}개")
                     else:
-                        _pub(f"plan 파일 없음 (잔여 확인 불가): {plan_file}")
+                        _pub(f"plan 파일 없음 (잔여 확인 불가): {resolved_plan_file}")
                 except Exception as e:
                     _pub(f"plan 잔여 항목 확인 실패: {e}")
             else:
@@ -885,9 +922,9 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                 try:
                     redis_client.set(
                         f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge",
-                        plan_file,
+                        resolved_plan_file,
                     )
-                    _pub(f"[RESTART-FLAG] plan 잔여 {remaining_count}개 → 재시작 플래그 설정: {plan_file}")
+                    _pub(f"[RESTART-FLAG] plan 잔여 {remaining_count}개 → 재시작 플래그 설정: {resolved_plan_file}")
                 except Exception as e:
                     _pub(f"재시작 플래그 설정 실패: {e}")
         elif result.conflict:
@@ -984,6 +1021,8 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
         try:
             _restart_plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge")
             if _restart_plan_file:
+                # _todo.md 재확인 (플래그 저장 시점과 실행 시점 불일치 방지)
+                _restart_plan_file = _resolve_todo_file(_restart_plan_file)
                 # remaining 수 재계산 (플래그 설정 시점과 다를 수 있음)
                 try:
                     _content = Path(_restart_plan_file).read_text(encoding="utf-8")
@@ -1627,7 +1666,7 @@ def force_kill_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
     return {"success": True, "message": msg}
 
 
-def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str) -> None:
+def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, command: Dict | None = None) -> None:
     """retry-merge 실제 작업 (백그라운드 스레드에서 실행) — _do_inline_merge와 동일한 흐름"""
     from merge_lock import acquire_merge_lock, release_merge_lock
     from merge_workflow import MergeWorkflow
@@ -1645,6 +1684,19 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str) 
     result = {"success": False, "message": "unknown error", "action": "retry-merge"}
     try:
         worktree_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
+        # Redis 키 만료 시 command payload로 재발급
+        if not worktree_path_str and command:
+            _wt = command.get("worktree_path")
+            _pf = command.get("plan_file")
+            _br = command.get("branch")
+            if _wt:
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path", _wt, ex=3600)
+                if _pf:
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", _pf, ex=3600)
+                if _br:
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", _br, ex=3600)
+                worktree_path_str = _wt
+                _pub(f"[RETRY-MERGE] Redis 키 재발급: worktree={_wt}, plan={_pf}, branch={_br}")
         if not worktree_path_str:
             result = {"success": False, "message": f"worktree_path not found for runner {runner_id}", "action": "retry-merge"}
             return
@@ -1657,6 +1709,7 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str) 
         plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
         if plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
             plan_file = None
+        plan_file = _resolve_todo_file(plan_file)
 
         # 1. merge_status = "queued" + lock 대기
         try:
@@ -1765,7 +1818,7 @@ def retry_merge(command: Dict, redis_client: redis.Redis) -> None:
     logger.info(f"[retry_merge] accepted 응답 즉시 반환 (runner_id: {runner_id})")
     thread = threading.Thread(
         target=_do_retry_merge,
-        args=(runner_id, redis_client, command_id),
+        args=(runner_id, redis_client, command_id, command),
         daemon=True,
     )
     thread.start()
