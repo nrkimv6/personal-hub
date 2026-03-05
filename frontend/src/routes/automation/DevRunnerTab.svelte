@@ -18,6 +18,7 @@
 		devRunnerPlanApi,
 		devRunnerEventApi
 	} from '$lib/api';
+	import { devRunnerMergeApi } from '$lib/api/dev-runner';
 	import type {
 		DevRunnerRunStatusResponse,
 		DevRunnerRunnerListItem,
@@ -42,6 +43,19 @@
 
 	// Phase 4: 종료 시 상태 보존
 	let lastPlanFile = $state<string | null>(null);
+
+	// Merge 탭 대기 건수 뱃지
+	let mergeQueuedCount = $state(0);
+	let mergeQueuePollInterval: ReturnType<typeof setInterval> | null = null;
+
+	async function pollMergeQueueCount() {
+		try {
+			const items = await devRunnerMergeApi.queue();
+			mergeQueuedCount = items.length;
+		} catch {
+			// 폴링 실패 시 무시
+		}
+	}
 
 	// Batch plan 상태 (LogViewer SSE에서 수신)
 	let batchPlans = $state<{ name: string; status: 'pending' | 'running' | 'done' }[]>([]);
@@ -348,6 +362,10 @@
 
 		// SSE 연결 (폴링 대체)
 		connectSSE();
+
+		// Merge 큐 건수 폴링 시작
+		pollMergeQueueCount();
+		mergeQueuePollInterval = setInterval(pollMergeQueueCount, 10000);
 	});
 
 	onDestroy(() => {
@@ -369,6 +387,10 @@
 		if (elapsedInterval) {
 			clearInterval(elapsedInterval);
 			elapsedInterval = null;
+		}
+		if (mergeQueuePollInterval) {
+			clearInterval(mergeQueuePollInterval);
+			mergeQueuePollInterval = null;
 		}
 		});
 
@@ -530,6 +552,7 @@
 						>
 							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>
 							Merge
+							{#if mergeQueuedCount > 0}<span class="bg-primary text-primary-foreground text-[8px] font-bold rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5">{mergeQueuedCount}</span>{/if}
 						</button>
 						<button
 							onclick={() => { taskHistoryTab = 'settings'; }}
