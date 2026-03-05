@@ -388,14 +388,32 @@ function Get-ActivePlanRunners {
     $runnerIds = & redis-cli -t 2 SMEMBERS "plan-runner:active_runners" 2>$null
     if (-not $runnerIds) { return $result }
 
+    # runner_id 목록 정리
+    $cleanIds = @()
     foreach ($rid in $runnerIds) {
-        $rid = $rid.Trim()
-        if (-not $rid) { continue }
+        $r = $rid.Trim()
+        if ($r) { $cleanIds += $r }
+    }
+    if ($cleanIds.Count -eq 0) { return $result }
 
-        $logPath    = & redis-cli -t 2 GET "plan-runner:runners:${rid}:log_file_path" 2>$null
-        $planFile   = & redis-cli -t 2 GET "plan-runner:runners:${rid}:plan_file"    2>$null
-        $streamPath = & redis-cli -t 2 GET "plan-runner:runners:${rid}:stream_log_path" 2>$null
-        $pidVal     = & redis-cli -t 2 GET "plan-runner:runners:${rid}:pid"          2>$null
+    # 모든 runner 키를 MGET 배치로 한 번에 조회 (runner당 개별 GET 4회 → 1회 MGET)
+    $keys = @()
+    foreach ($rid in $cleanIds) {
+        $keys += "plan-runner:runners:${rid}:log_file_path"
+        $keys += "plan-runner:runners:${rid}:plan_file"
+        $keys += "plan-runner:runners:${rid}:stream_log_path"
+        $keys += "plan-runner:runners:${rid}:pid"
+    }
+    $allVals = & redis-cli -t 2 MGET @keys 2>$null
+
+    for ($i = 0; $i -lt $cleanIds.Count; $i++) {
+        $rid  = $cleanIds[$i]
+        $base = $i * 4
+
+        $logPath    = if ($allVals.Count -gt $base)     { $allVals[$base]     } else { $null }
+        $planFile   = if ($allVals.Count -gt $base + 1) { $allVals[$base + 1] } else { $null }
+        $streamPath = if ($allVals.Count -gt $base + 2) { $allVals[$base + 2] } else { $null }
+        $pidVal     = if ($allVals.Count -gt $base + 3) { $allVals[$base + 3] } else { $null }
 
         $logPath    = if (Test-RedisValue $logPath)    { $logPath.Trim()    } else { $null }
         $planFile   = if (Test-RedisValue $planFile)   { $planFile.Trim()   } else { $null }
