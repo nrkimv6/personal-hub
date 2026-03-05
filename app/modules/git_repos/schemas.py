@@ -138,3 +138,24 @@ class GitTaskResult(BaseModel):
     status: str
     result: Optional[OperationResult] = None
     completed_at: Optional[str] = None
+
+
+# ───────────────────────────────────────────
+# Auto Cleanup 스키마
+# ───────────────────────────────────────────
+
+class AutoCleanupRequest(BaseModel):
+    patterns: List[str] = ["tmp_*"]
+    provider: Literal["claude", "gemini"] = "claude"
+
+
+class AutoCleanupTaskResponse(BaseModel):
+    request_id: int
+    status: str = "pending"
+
+
+class AutoCleanupResult(BaseModel):
+    success: bool
+    moved: List[str] = []
+    commits: List[dict] = []
+    error: str = ""
