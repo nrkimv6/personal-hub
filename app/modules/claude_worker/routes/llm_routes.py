@@ -44,6 +44,7 @@ class LLMRequestResponse(BaseModel):
     request_source: Optional[str] = None
     provider: str = "claude"
     model: str = ""
+    mode: str = "single"
     queue_name: str = "utility"
     requested_at: Optional[datetime] = None
     processed_at: Optional[datetime] = None
@@ -130,6 +131,7 @@ def _to_response(request, include_raw: bool = False) -> LLMRequestResponse:
         request_source=request.request_source,
         provider=getattr(request, "provider", "claude"),
         model=getattr(request, "model", ""),
+        mode=getattr(request, "mode", "single"),
         queue_name=getattr(request, "queue_name", "utility"),
         requested_at=request.requested_at,
         processed_at=request.processed_at,
