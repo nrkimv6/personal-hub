@@ -24,8 +24,8 @@ def conflict_repo(tmp_path):
     """충돌이 발생하는 git 저장소 환경 생성.
 
     구조:
-      - main: shared.py = 'main'
-      - feature 브랜치: shared.py = 'feature'
+      - main: shared.py = 'main_modified'
+      - feature/test 브랜치: shared.py = 'feature'
       → merge 시 충돌 발생
     """
     repo = tmp_path / "repo"
@@ -34,10 +34,11 @@ def conflict_repo(tmp_path):
     run(["git", "init"])
     run(["git", "config", "user.email", "t@t.com"])
     run(["git", "config", "user.name", "T"])
-    # 초기 커밋 (main)
-    (repo / "shared.py").write_text("value = 'main'")
+    # 초기 커밋 후 브랜치명 main으로 통일 (기본값이 master일 수 있음)
+    (repo / "shared.py").write_text("value = 'base'")
     run(["git", "add", "."])
     run(["git", "commit", "-m", "init"])
+    run(["git", "branch", "-m", "main"])  # master → main 리네임
     # feature 브랜치에서 같은 파일 수정
     run(["git", "checkout", "-b", "feature/test"])
     (repo / "shared.py").write_text("value = 'feature'")
@@ -63,6 +64,7 @@ def no_conflict_repo(tmp_path):
     (repo / "file.py").write_text("x = 1")
     run(["git", "add", "."])
     run(["git", "commit", "-m", "init"])
+    run(["git", "branch", "-m", "main"])  # master → main 리네임
     run(["git", "checkout", "-b", "feature/clean"])
     (repo / "new_file.py").write_text("y = 2")
     run(["git", "add", "."])
