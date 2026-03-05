@@ -61,6 +61,10 @@ def save_plan_archive_result(db: Session, request, result: dict) -> None:
         record.updated_at = datetime.now()
         db.commit()
         logger.info(f"save_plan_archive_result: updated record id={record.id} category={category}")
+
+        # requirements_sync 트리거 판단
+        if category:
+            _maybe_queue_requirements_sync(db, category)
     except Exception as e:
         logger.error(f"save_plan_archive_result error: {e}", exc_info=True)
 
@@ -175,3 +179,79 @@ def build_requirements_sync_prompt(category: str, plan_summaries: List[dict]) ->
 
 JSON만 출력하세요."""
     return prompt
+
+
+def _maybe_queue_requirements_sync(db: Session, category: str) -> bool:
+    """category별 processed 5개+ 조건 충족 시 plan_requirements_sync LLM 큐 등록.
+
+    Args:
+        db: SQLAlchemy Session
+        category: 카테고리명
+
+    Returns:
+        True if LLMRequest가 새로 등록됨, False otherwise
+    """
+    try:
+        from app.modules.claude_worker.models.llm_request import LLMRequest
+        from sqlalchemy import and_
+
+        # processed 개수 확인
+        processed_count = db.query(PlanRecord).filter(
+            and_(
+                PlanRecord.category == category,
+                PlanRecord.llm_processed_at.isnot(None),
+            )
+        ).count()
+
+        if processed_count < 5:
+            return False
+
+        # 24시간 내 중복 요청 확인
+        cutoff = datetime.now()
+        from datetime import timedelta
+        cutoff = cutoff - timedelta(hours=24)
+        existing = db.query(LLMRequest).filter(
+            and_(
+                LLMRequest.caller_type == "plan_requirements_sync",
+                LLMRequest.caller_id == category,
+                LLMRequest.created_at > cutoff,
+            )
+        ).first()
+
+        if existing:
+            return False
+
+        # summaries 최신 50개
+        records = db.query(PlanRecord).filter(
+            and_(
+                PlanRecord.category == category,
+                PlanRecord.llm_processed_at.isnot(None),
+                PlanRecord.summary.isnot(None),
+            )
+        ).order_by(PlanRecord.llm_processed_at.desc()).limit(50).all()
+
+        plan_summaries = [
+            {
+                "filename": r.filename or "",
+                "summary": r.summary or "",
+                "tags": r.tags or [],
+                "date": r.archived_at.strftime("%Y-%m-%d") if r.archived_at else "",
+            }
+            for r in records
+        ]
+
+        prompt = build_requirements_sync_prompt(category, plan_summaries)
+        llm_req = LLMRequest(
+            caller_type="plan_requirements_sync",
+            caller_id=category,
+            prompt=prompt,
+            queue_name="utility",
+            requested_by="scheduler",
+        )
+        db.add(llm_req)
+        db.commit()
+        logger.info(f"_maybe_queue_requirements_sync: queued for category={category}")
+        return True
+    except Exception as e:
+        logger.error(f"_maybe_queue_requirements_sync error: {e}", exc_info=True)
+        return False

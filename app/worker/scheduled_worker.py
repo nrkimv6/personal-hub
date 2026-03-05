@@ -118,9 +118,6 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         # 스케줄 기반 실행 디스패치
         await self._dispatch_scheduled_runs()
 
-        # 02:10 안전망: 미처리 plan archive LLM 큐 등록
-        await self._safe_execute("check_plan_archive_schedule", self._check_plan_archive_schedule)
-
     def _cleanup_stale_requests(self):
         """오래된 running 상태 실행 정리."""
         db = SessionLocal()
@@ -204,29 +201,171 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             for schedule in pytest_schedules:
                 await self._process_pytest_schedule(db, schedule, schedule_service)
 
+            # plan_archive_analyze 타입의 활성 스케줄 조회
+            plan_archive_schedules = schedule_service.get_schedules_by_type(
+                TaskSchedule.TARGET_TYPE_PLAN_ARCHIVE_ANALYZE,
+                enabled_only=True
+            )
+            for schedule in plan_archive_schedules:
+                await self._process_plan_archive_schedule(db, schedule, schedule_service)
+
+            # plan_requirements_sync 타입의 활성 스케줄 조회
+            plan_req_sync_schedules = schedule_service.get_schedules_by_type(
+                TaskSchedule.TARGET_TYPE_PLAN_REQUIREMENTS_SYNC,
+                enabled_only=True
+            )
+            for schedule in plan_req_sync_schedules:
+                await self._process_plan_requirements_sync_schedule(db, schedule, schedule_service)
+
         except Exception as e:
             logger.error(f"[{self.name}] 스케줄 디스패치 오류: {e}", exc_info=True)
         finally:
             db.close()
 
-    async def _check_plan_archive_schedule(self):
-        """02:10 ± 5분 안전망 — 미처리 plan archive LLM 큐 등록"""
-        now = datetime.now()
-        # 02:10 ± 5분 범위 확인
-        target_minutes = 2 * 60 + 10  # 130분
-        current_minutes = now.hour * 60 + now.minute
-        if abs(current_minutes - target_minutes) > 5:
-            return
+    async def _process_plan_archive_schedule(
+        self,
+        db,
+        schedule: TaskSchedule,
+        schedule_service: TaskScheduleService
+    ):
+        """plan_archive_analyze 스케줄 처리."""
+        try:
+            last_run = schedule_service.get_latest_run(schedule.id)
+            last_run_at = last_run.started_at if last_run else None
 
-        # 오늘 이미 실행했는지 확인
-        today_key = f"_plan_archive_schedule_last_run_{now.date()}"
-        if getattr(self, today_key, None):
-            return
+            if not self._should_run_cron(schedule, last_run_at):
+                return
 
-        count = await asyncio.get_event_loop().run_in_executor(None, self._process_unprocessed_plans)
-        setattr(self, today_key, True)
-        if count > 0:
-            logger.info(f"[{self.name}] plan archive 안전망: {count}개 LLM 큐 등록")
+            logger.info(f"[{self.name}] plan_archive_analyze 실행 시간 도래: schedule_id={schedule.id}")
+
+            if schedule_service.has_active_run(schedule.id):
+                logger.info(f"[{self.name}] 이미 활성 실행 존재, 스킵")
+                return
+
+            run = schedule_service.start_run(
+                schedule_id=schedule.id,
+                worker_id=self.name,
+                config_snapshot={}
+            )
+
+            task_name = f"plan_archive_analyze_{schedule.id}_run_{run.id}"
+            if not self._is_task_running(task_name):
+                self._create_task(
+                    self._execute_plan_archive_run(schedule, run),
+                    task_name
+                )
+                logger.info(f"[{self.name}] plan_archive_analyze 태스크 시작: run_id={run.id}")
+
+        except Exception as e:
+            logger.error(
+                f"[{self.name}] plan_archive_analyze 스케줄 처리 오류: schedule_id={schedule.id}, error={e}",
+                exc_info=True
+            )
+
+    async def _execute_plan_archive_run(
+        self,
+        schedule: TaskSchedule,
+        run: TaskScheduleRun,
+    ):
+        """미처리 plan_records → LLM 큐 등록 후 실행 완료 기록."""
+        db = SessionLocal()
+        try:
+            schedule_service = TaskScheduleService(db)
+            loop = asyncio.get_event_loop()
+            count = await loop.run_in_executor(None, self._process_unprocessed_plans)
+            schedule_service.complete_run(run.id, result={"queued": count})
+            schedule_service.update_schedule_after_run(schedule.id)
+            logger.info(f"[{self.name}] plan_archive_analyze 완료: {count}개 LLM 큐 등록, run_id={run.id}")
+        except Exception as e:
+            logger.error(f"[{self.name}] _execute_plan_archive_run 오류: {e}", exc_info=True)
+            try:
+                schedule_service = TaskScheduleService(db)
+                schedule_service.fail_run(run.id, error_message=str(e))
+            except Exception:
+                pass
+        finally:
+            db.close()
+
+    async def _process_plan_requirements_sync_schedule(
+        self,
+        db,
+        schedule: TaskSchedule,
+        schedule_service: TaskScheduleService
+    ):
+        """plan_requirements_sync 스케줄 처리."""
+        try:
+            last_run = schedule_service.get_latest_run(schedule.id)
+            last_run_at = last_run.started_at if last_run else None
+
+            if not self._should_run_cron(schedule, last_run_at):
+                return
+
+            logger.info(f"[{self.name}] plan_requirements_sync 실행 시간 도래: schedule_id={schedule.id}")
+
+            if schedule_service.has_active_run(schedule.id):
+                logger.info(f"[{self.name}] 이미 활성 실행 존재, 스킵")
+                return
+
+            run = schedule_service.start_run(
+                schedule_id=schedule.id,
+                worker_id=self.name,
+                config_snapshot={}
+            )
+
+            task_name = f"plan_requirements_sync_{schedule.id}_run_{run.id}"
+            if not self._is_task_running(task_name):
+                self._create_task(
+                    self._execute_plan_requirements_sync_run(schedule, run),
+                    task_name
+                )
+                logger.info(f"[{self.name}] plan_requirements_sync 태스크 시작: run_id={run.id}")
+
+        except Exception as e:
+            logger.error(
+                f"[{self.name}] plan_requirements_sync 스케줄 처리 오류: schedule_id={schedule.id}, error={e}",
+                exc_info=True
+            )
+
+    async def _execute_plan_requirements_sync_run(
+        self,
+        schedule: TaskSchedule,
+        run: TaskScheduleRun,
+    ):
+        """category별 requirements_sync LLM 큐 등록 후 실행 완료 기록."""
+        from app.modules.claude_worker.services.plan_analyze_handler import _maybe_queue_requirements_sync
+        db = SessionLocal()
+        try:
+            schedule_service = TaskScheduleService(db)
+            from app.models.plan_record import PlanRecord
+            loop = asyncio.get_event_loop()
+
+            def _process():
+                categories = [
+                    row[0]
+                    for row in db.query(PlanRecord.category).filter(
+                        PlanRecord.category.isnot(None),
+                        PlanRecord.llm_processed_at.isnot(None),
+                    ).distinct().all()
+                ]
+                queued = 0
+                for category in categories:
+                    if _maybe_queue_requirements_sync(db, category):
+                        queued += 1
+                return queued
+
+            count = await loop.run_in_executor(None, _process)
+            schedule_service.complete_run(run.id, result={"queued_categories": count})
+            schedule_service.update_schedule_after_run(schedule.id)
+            logger.info(f"[{self.name}] plan_requirements_sync 완료: {count}개 카테고리 큐 등록, run_id={run.id}")
+        except Exception as e:
+            logger.error(f"[{self.name}] _execute_plan_requirements_sync_run 오류: {e}", exc_info=True)
+            try:
+                schedule_service = TaskScheduleService(db)
+                schedule_service.fail_run(run.id, error_message=str(e))
+            except Exception:
+                pass
+        finally:
+            db.close()
 
     def _process_unprocessed_plans(self) -> int:
         """DB에서 미처리 plan_records 조회 → LLM 큐 등록.
