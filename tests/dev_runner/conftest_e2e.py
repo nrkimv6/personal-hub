@@ -7,6 +7,7 @@ fakeredis 기반 단위 테스트와 분리하여 관리.
     from tests.dev_runner.conftest_e2e import real_redis, listener_process, test_plan_file
 """
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -44,7 +45,13 @@ def isolated_redis():
 
     scope="class": http_client(scope="class")와 scope 일치 필요.
     listener_process가 isolated_redis에 의존하므로 scope 통일.
+    API(executor_service)가 이 DB를 사용하도록 환경변수 주입 + reconnect.
     """
+    from app.modules.dev_runner.services.executor_service import executor_service
+    old_db = os.environ.get("PLAN_RUNNER_REDIS_DB")
+    os.environ["PLAN_RUNNER_REDIS_DB"] = str(REDIS_TEST_DB)
+    executor_service.reconnect()
+
     try:
         r = redis_lib.Redis(host="localhost", port=6379, db=REDIS_TEST_DB, decode_responses=True)
         r.ping()
@@ -54,6 +61,12 @@ def isolated_redis():
     yield r
     r.flushdb()
     r.close()
+
+    if old_db is not None:
+        os.environ["PLAN_RUNNER_REDIS_DB"] = old_db
+    else:
+        os.environ.pop("PLAN_RUNNER_REDIS_DB", None)
+    executor_service.reconnect()
 
 
 @pytest.fixture(scope="class")

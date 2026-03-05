@@ -70,18 +70,13 @@ class TestLaunchConflictResolverProcess:
         cl = _load_listener()
         redis = make_redis_mock(worktree_path=str(tmp_path))
 
-        mock_proc = MagicMock()
-        mock_proc.returncode = 0
-        mock_proc.stdout = "ok"
-        mock_proc.stderr = ""
-
-        with patch("subprocess.run", return_value=mock_proc) as mock_run:
+        with patch.object(cl, "_run_subprocess_streaming", return_value={"success": True, "message": "ok", "output": "ok"}) as mock_run:
             result = cl._launch_conflict_resolver_process(
                 "runner-01", "plan/test", tmp_path, redis
             )
 
         assert result["success"] is True
-        call_args = mock_run.call_args[0][0]
+        call_args = mock_run.call_args[1].get("cmd")
         assert "resolve" in call_args
         assert "--branch" in call_args
         assert "plan/test" in call_args
@@ -92,12 +87,7 @@ class TestLaunchConflictResolverProcess:
         cl = _load_listener()
         redis = make_redis_mock()
 
-        mock_proc = MagicMock()
-        mock_proc.returncode = 0
-        mock_proc.stdout = ""
-        mock_proc.stderr = ""
-
-        with patch("subprocess.run", return_value=mock_proc) as mock_run:
+        with patch.object(cl, "_run_subprocess_streaming", return_value={"success": True, "message": "ok", "output": ""}) as mock_run:
             cl._launch_conflict_resolver_process("runner-01", "plan/test", tmp_path, redis)
 
         call_kwargs = mock_run.call_args[1]
@@ -112,12 +102,7 @@ class TestLaunchConflictResolverProcess:
         cl = _load_listener()
         redis = make_redis_mock()
 
-        mock_proc = MagicMock()
-        mock_proc.returncode = 0
-        mock_proc.stdout = "auto-resolve 성공"
-        mock_proc.stderr = ""
-
-        with patch("subprocess.run", return_value=mock_proc):
+        with patch.object(cl, "_run_subprocess_streaming", return_value={"success": True, "message": "ok", "output": "auto-resolve 성공"}):
             result = cl._launch_conflict_resolver_process("r01", "plan/test", tmp_path, redis)
 
         assert result["success"] is True
@@ -127,12 +112,7 @@ class TestLaunchConflictResolverProcess:
         cl = _load_listener()
         redis = make_redis_mock()
 
-        mock_proc = MagicMock()
-        mock_proc.returncode = 1
-        mock_proc.stdout = ""
-        mock_proc.stderr = "conflict markers remain"
-
-        with patch("subprocess.run", return_value=mock_proc):
+        with patch.object(cl, "_run_subprocess_streaming", return_value={"success": False, "message": "conflict markers remain", "output": ""}):
             result = cl._launch_conflict_resolver_process("r01", "plan/test", tmp_path, redis)
 
         assert result["success"] is False
@@ -143,7 +123,7 @@ class TestLaunchConflictResolverProcess:
         cl = _load_listener()
         redis = make_redis_mock()
 
-        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="plan_runner", timeout=300)):
+        with patch.object(cl, "_run_subprocess_streaming", return_value={"success": False, "message": "RESOLVE timeout (300s)", "output": ""}):
             result = cl._launch_conflict_resolver_process("r01", "plan/test", tmp_path, redis)
 
         assert result["success"] is False
@@ -155,12 +135,11 @@ class TestLaunchConflictResolverProcess:
         redis = make_redis_mock()
         pub_fn = MagicMock()
 
-        mock_proc = MagicMock()
-        mock_proc.returncode = 0
-        mock_proc.stdout = "resolve log output"
-        mock_proc.stderr = ""
+        def mock_run_streaming(cmd, env, cwd, pub_fn, tag, timeout):
+            pub_fn(f"[{tag}] resolve log output")
+            return {"success": True, "message": "ok", "output": "resolve log output"}
 
-        with patch("subprocess.run", return_value=mock_proc):
+        with patch.object(cl, "_run_subprocess_streaming", side_effect=mock_run_streaming):
             cl._launch_conflict_resolver_process("r01", "plan/test", tmp_path, redis, pub_fn=pub_fn)
 
         pub_fn.assert_called()
@@ -188,6 +167,7 @@ class TestInlineMergeConflictAutoRetry:
         with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
+             patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": False, "message": "fail"}) as mock_resolve, \
              patch.object(cl, "_cleanup_process_state"):
             mock_wf = MagicMock()
@@ -207,7 +187,6 @@ class TestInlineMergeConflictAutoRetry:
         redis = make_redis_mock(worktree_path=str(worktree), branch="plan/test")
 
         merge_status_sequence = []
-        orig_set = redis.set.side_effect
 
         def track_set(key, value, *args, **kwargs):
             if "merge_status" in key:
@@ -226,6 +205,7 @@ class TestInlineMergeConflictAutoRetry:
         with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
+             patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
              patch.object(cl, "_post_merge_pipeline", return_value=True), \
              patch.object(cl, "_cleanup_process_state"), \
@@ -263,6 +243,7 @@ class TestInlineMergeConflictAutoRetry:
         with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
+             patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": False, "message": "markers remain"}), \
              patch.object(cl, "_cleanup_process_state"):
             mock_wf = MagicMock()
@@ -291,6 +272,7 @@ class TestInlineMergeConflictAutoRetry:
         with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
+             patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
              patch.object(cl, "_post_merge_pipeline", return_value=True), \
              patch.object(cl, "_cleanup_process_state"), \
@@ -334,6 +316,7 @@ class TestInlineMergeConflictAutoRetry:
         with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
+             patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
              patch.object(cl, "_post_merge_pipeline", return_value=True), \
              patch.object(cl, "_cleanup_process_state"), \
@@ -361,6 +344,7 @@ class TestInlineMergeConflictAutoRetry:
         with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
+             patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
              patch.object(cl, "_post_merge_pipeline", return_value=True), \
              patch.object(cl, "_cleanup_process_state"), \
@@ -436,10 +420,14 @@ class TestWorktreeManagerMergeWorkflowCleanup:
         from worktree_manager import WorktreeManager
 
         with patch("subprocess.run") as mock_run:
-            # checkout main: returncode=0, merge: returncode=1, abort: returncode=0
+            # 1. checkout main
+            # 2. is-ancestor
+            # 3. merge (fail)
+            # 4. merge --abort
             mock_run.side_effect = [
                 MagicMock(returncode=0),  # git checkout main
-                MagicMock(returncode=1, stderr="conflict", stdout=""),  # git merge → fail
+                MagicMock(returncode=1),  # git merge-base --is-ancestor (not ancestor)
+                MagicMock(returncode=1, stderr="conflict", stdout="CONFLICT (content): Merge conflict in a.py"),  # git merge → fail
                 MagicMock(returncode=0),  # git merge --abort
             ]
             result = WorktreeManager.merge_to_main("runner-01", tmp_path, tmp_path)
@@ -449,8 +437,8 @@ class TestWorktreeManagerMergeWorkflowCleanup:
         abort_calls = [c for c in mock_run.call_args_list if "--abort" in str(c)]
         assert abort_calls
 
-    def test_merge_workflow_no_merge_status_set_R(self, tmp_path):
-        """R(Right): MergeWorkflow.run()이 merge_status를 직접 설정하지 않음"""
+    def test_merge_workflow_sets_merge_status_R(self, tmp_path):
+        """R(Right): MergeWorkflow.run()이 merge_status를 직접 설정함"""
         from merge_workflow import MergeWorkflow
 
         redis = MagicMock()
@@ -463,7 +451,7 @@ class TestWorktreeManagerMergeWorkflowCleanup:
             wf.run("runner-01", tmp_path, tmp_path)
 
         set_calls = [c for c in redis.set.call_args_list if "merge_status" in str(c)]
-        assert len(set_calls) == 0, f"MergeWorkflow이 merge_status를 직접 설정함: {set_calls}"
+        assert any("conflict" in str(c) for c in set_calls), f"MergeWorkflow가 conflict 상태를 설정하지 않음: {set_calls}"
 
     def test_conflict_analyzer_preserved_R(self, tmp_path):
         """R(Right): ConflictAnalyzer 유틸 기능 유지 확인 (회귀)"""
