@@ -274,7 +274,6 @@
 			<select
 				class="border rounded px-2 py-1 text-xs h-7 w-[120px] font-mono"
 				bind:value={mode}
-				disabled={anyRunning}
 			>
 				<option value="single">단일 Plan</option>
 				<option value="all">전체 실행</option>
@@ -285,7 +284,6 @@
 				class:text-orange-700={selectedEngine === 'gemini'}
 				class:bg-orange-50={selectedEngine === 'gemini'}
 				bind:value={selectedEngine}
-				disabled={anyRunning}
 			>
 				<option value="claude">Claude</option>
 				<option value="gemini">Gemini</option>
@@ -311,7 +309,6 @@
 						class="border rounded px-1.5 py-0.5 flex-1 sm:w-40 h-6 text-[10px] font-mono bg-white"
 						value={engineConfigs[selectedEngine].models[phase]}
 						onchange={(e) => updateModel(phase as any, e.currentTarget.value)}
-						disabled={anyRunning}
 					>
 						<!-- 사전 정의된 모델 목록 -->
 						{#each PREDEFINED_MODELS[selectedEngine] || [] as model}
@@ -330,21 +327,8 @@
 	{/if}
 
 	<!-- Options Row -->
-	<div class="flex items-center gap-4 flex-wrap text-xs {anyRunning ? 'opacity-50 pointer-events-none' : ''}">
-		{#if anyRunning}
-			<!-- 실행 중: Plan 선택 대신 실행 정보 표시 -->
-			<div class="flex items-center gap-2 opacity-100 pointer-events-none" style="opacity:1">
-				<span class="text-gray-500 text-xs">Running</span>
-				<span class="inline-flex items-center gap-1.5 border rounded px-2 py-1 text-xs font-mono h-7 {runningEngine === 'gemini' ? 'border-orange-200 bg-orange-50 text-orange-700' : 'border-green-200 bg-green-50 text-green-700'}">
-					<span class="w-1.5 h-1.5 rounded-full animate-pulse shrink-0 {runningEngine === 'gemini' ? 'bg-orange-500' : 'bg-green-500'}"></span>
-					<span class="uppercase text-[10px] font-bold opacity-70">[{runningEngine}]</span>
-					{runningPlanName}
-					{#if runningPlanProgress}
-						<span class="opacity-70">({runningPlanProgress.done}/{runningPlanProgress.total})</span>
-					{/if}
-				</span>
-			</div>
-		{:else if mode === 'single'}
+	<div class="flex items-center gap-4 flex-wrap text-xs">
+		{#if mode === 'single'}
 			<div class="flex items-center gap-2">
 				<label for="plan-select" class="text-gray-500 text-xs">Plan</label>
 				<select
@@ -409,7 +393,7 @@
 	</div>
 
 	{#if (mode === 'single' && parallel) || mode === 'all'}
-		<div class="flex items-center gap-2 text-xs {anyRunning ? 'opacity-50 pointer-events-none' : ''}">
+		<div class="flex items-center gap-2 text-xs">
 			<label class="text-gray-500 shrink-0" for="projects-input">프로젝트:</label>
 			<input
 				id="projects-input"
