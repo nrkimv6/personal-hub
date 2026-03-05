@@ -50,6 +50,25 @@ def cprint(msg: str, color: str = RESET):
     print(f"{GRAY}[{ts}]{RESET} {color}{msg}{RESET}")
 
 
+def _kill_by_cmdline(pattern: str) -> int:
+    """커맨드라인에 pattern이 포함된 프로세스를 찾아 종료한다. 종료된 수 반환.
+
+    PID 파일 분실 시 잔류 프로세스 정리 용도 (2차 안전망).
+    자기 자신(현재 PID)은 제외한다.
+    """
+    self_pid = os.getpid()
+    killed = 0
+    for proc in psutil.process_iter(["pid", "cmdline"]):
+        try:
+            cmdline = proc.info.get("cmdline") or []
+            if any(pattern in arg for arg in cmdline) and proc.pid != self_pid:
+                proc.kill()
+                killed += 1
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    return killed
+
+
 class BrowserWorkerManager:
     def __init__(self):
         self.pid_dir = PROJECT_ROOT / ".pids"
@@ -229,8 +248,13 @@ class BrowserWorkerManager:
 
         self._cleanup_legacy()
 
-        if stopped > 0:
-            cprint(f"{stopped} process(es) stopped", GREEN)
+        # 2차 안전망: PID 파일 분실 시 잔류 프로세스 커맨드라인 기반 정리
+        leaked = _kill_by_cmdline("dev-runner-command-listener")
+        if leaked:
+            cprint(f"잔류 프로세스 {leaked}개 정리됨 (PID 파일 누락)", YELLOW)
+
+        if stopped > 0 or leaked > 0:
+            cprint(f"{stopped + leaked} process(es) stopped", GREEN)
         else:
             cprint("No watchdogs were running", YELLOW)
 
