@@ -204,7 +204,8 @@ class TestGeminiDeepValidation:
         with patch.object(executor.async_redis, 'lpush', side_effect=_make_capture_lpush(executor.async_redis, captured)):
             result = await executor.start_dev_runner(RunRequest(test_source="gemini_integration", engine="claude"))
         assert result.runner_id is not None
-        assert len(result.runner_id) == 8
+        # test_source가 있으면 t-{source}-{4hex} 형식이므로 8자보다 길어짐
+        assert len(result.runner_id) >= 8
 
     async def test_status_reporting_with_stale_pid(self, executor):
         """[Right-BICEP: Error] PID는 있지만 프로세스가 죽었을 때(stale) 자동 정리되는가?"""
