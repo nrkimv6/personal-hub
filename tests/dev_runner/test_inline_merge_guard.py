@@ -347,3 +347,72 @@ class TestMergeToMainCheckoutFail:
             f"message에 'git checkout main 실패' 포함 기대, 실제: '{result.message}'"
         assert "overwritten" in result.message, \
             f"message에 stderr 텍스트('overwritten') 포함 기대, 실제: '{result.message}'"
+
+
+# ========== TC #22: R(Right) — merge 실패 시 stderr+stdout 모두 포함 ==========
+
+class TestMergeToMainStderrStdoutBoth:
+    """test_merge_to_main_stderr_stdout_both: merge 실패 시 stderr+stdout 둘 다 message에 포함"""
+
+    def test_merge_to_main_stderr_stdout_both(self, tmp_path):
+        """R(Right): merge 실패 mock — stderr='error A', stdout='output B' → message에 둘 다 포함"""
+        from unittest.mock import patch, MagicMock
+        import sys
+        import importlib.util
+        from pathlib import Path
+
+        wm_path = Path(__file__).parent.parent.parent / "scripts" / "worktree_manager.py"
+        if not wm_path.exists():
+            pytest.skip(f"worktree_manager.py not found: {wm_path}")
+
+        spec = importlib.util.spec_from_file_location("worktree_manager_tc22", wm_path)
+        wm_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(wm_mod)
+        WorktreeManager = wm_mod.WorktreeManager
+        MergeResult = wm_mod.MergeResult
+
+        project_root = tmp_path / "repo"
+        project_root.mkdir()
+        base_dir = tmp_path / "worktrees"
+        base_dir.mkdir()
+
+        # git checkout main 성공, git merge 실패 (returncode=1, stderr+stdout 모두 있음)
+        checkout_ok = MagicMock()
+        checkout_ok.returncode = 0
+        checkout_ok.stdout = ""
+        checkout_ok.stderr = ""
+
+        merge_fail = MagicMock()
+        merge_fail.returncode = 1
+        merge_fail.stdout = "output B"
+        merge_fail.stderr = "error A"
+
+        def fake_subprocess_run(cmd, **kwargs):
+            if cmd[:2] == ["git", "checkout"]:
+                return checkout_ok
+            if "merge-base" in cmd:
+                # not an ancestor → proceed with actual merge
+                not_ancestor = MagicMock()
+                not_ancestor.returncode = 1
+                return not_ancestor
+            if "merge" in cmd:
+                return merge_fail
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("subprocess.run", side_effect=fake_subprocess_run):
+            result = WorktreeManager.merge_to_main(
+                runner_id="test-runner",
+                base_dir=base_dir,
+                project_root=project_root,
+                branch="plan/test-branch",
+            )
+
+        # Assert: success=False (merge 실패)
+        assert result.success is False, \
+            f"merge 실패 시 success=False 기대, 실제: {result.success}"
+
+        # Assert: message에 stderr("error A")와 stdout("output B") 모두 포함
+        assert "error A" in result.message, \
+            f"message에 stderr 텍스트('error A') 포함 기대, 실제: '{result.message}'"
+        assert "output B" in result.message, \
+            f"message에 stdout 텍스트('output B') 포함 기대, 실제: '{result.message}'"
