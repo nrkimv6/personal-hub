@@ -937,6 +937,41 @@ def _launch_auto_fix_process(runner_id: str, test_output: str, targets: dict, re
     return {"success": result["success"], "message": result["message"]}
 
 
+def _pub_and_log(runner_id: str, msg: str, redis_client, tag: str = "MERGE") -> None:
+    """Redis Pub/Sub + list + 파일 모두에 로그를 기록하는 공통 헬퍼.
+
+    동작:
+    1. logger.info 기록
+    2. Redis Pub/Sub 채널 publish (실패 시 무시)
+    3. Redis list rpush + expire 86400 (실패 시 무시)
+    4. stream_log_path (없으면 log_file_path fallback) 파일에 append (실패 시 무시)
+    """
+    formatted = f"[{tag}] {msg}"
+    logger.info(formatted)
+
+    try:
+        redis_client.publish(f"{LOG_CHANNEL_PREFIX}:{runner_id}", formatted)
+    except Exception:
+        pass
+
+    try:
+        list_key = f"plan-runner:logs:list:{runner_id}"
+        redis_client.rpush(list_key, formatted)
+        redis_client.expire(list_key, 86400)
+    except Exception:
+        pass
+
+    try:
+        log_path = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
+        if not log_path:
+            log_path = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path")
+        if log_path and Path(log_path).exists():
+            with open(log_path, "a", encoding="utf-8") as _f:
+                _f.write(formatted + "\n")
+    except Exception as _e:
+        logger.debug(f"[_pub_and_log] 파일 기록 실패: {_e}")
+
+
 def _post_merge_pipeline(runner_id: str, redis_client, pub_fn) -> bool:
     """merge 성공 후 서비스 재시작 → HTTP/빌드 테스트 → auto-fix 파이프라인.
 
