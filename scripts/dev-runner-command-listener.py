@@ -783,7 +783,15 @@ def _launch_conflict_resolver_process(runner_id: str, branch: str, worktree_path
             logger.info(f"[conflict-resolver] auto-resolve 성공 (runner_id={runner_id})")
             return {"success": True, "message": "auto-resolve 성공"}
         else:
-            msg = (proc.stderr or "")[-200:]
+            # stderr에서 핵심 에러 라인 추출 (마지막 Error/Exception 라인 우선)
+            stderr_text = (proc.stderr or "").strip()
+            error_lines = [l.strip() for l in stderr_text.splitlines() if l.strip() and ("Error" in l or "Exception" in l)]
+            if error_lines:
+                msg = error_lines[-1][:300]
+            else:
+                # fallback: 마지막 비어있지 않은 줄들
+                non_empty = [l.strip() for l in stderr_text.splitlines() if l.strip() and not l.strip().startswith(("│", "┌", "└", "├", "─"))]
+                msg = "; ".join(non_empty[-3:])[:300] if non_empty else f"exit code {proc.returncode}"
             logger.warning(f"[conflict-resolver] auto-resolve 실패 (returncode={proc.returncode}): {msg}")
             return {"success": False, "message": msg}
     except subprocess.TimeoutExpired:
