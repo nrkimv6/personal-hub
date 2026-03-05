@@ -898,20 +898,53 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                 pass
 
             # auto-resolve: plan-runner resolve 서브커맨드 실행
+            # 전제: MergeWorkflow가 keep_conflict=True로 merge_to_main을 호출했으므로
+            # project_root working tree에 충돌 마커가 남아있는 상태임
             _resolve_branch = branch_str or (f"plan/{Path(plan_file).stem}" if plan_file else f"runner/{runner_id}")
             resolve_result = _launch_conflict_resolver_process(
                 runner_id, _resolve_branch, worktree_path, redis_client, pub_fn=_pub
             )
 
             if resolve_result["success"]:
-                _pub("auto-resolve 성공 — merge 완료")
+                # merge commit이 실제로 생성됐는지 검증
                 try:
-                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
-                except Exception:
-                    pass
-                _cleanup_process_state(runner_id, redis_client)
+                    log_proc = subprocess.run(
+                        ["git", "log", "-1", "--format=%s"],
+                        capture_output=True, text=True, cwd=str(PROJECT_ROOT)
+                    )
+                    last_subject = log_proc.stdout.strip()
+                    if "merge:" not in last_subject.lower() and _resolve_branch.lower() not in last_subject.lower():
+                        _pub(f"auto-resolve 경고: merge commit 미확인 (last: {last_subject[:100]}) — conflict로 처리")
+                        try:
+                            subprocess.run(["git", "merge", "--abort"], capture_output=True, cwd=str(PROJECT_ROOT))
+                        except Exception:
+                            pass
+                        try:
+                            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
+                        except Exception:
+                            pass
+                    else:
+                        _pub("auto-resolve 성공 — merge 완료")
+                        try:
+                            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+                        except Exception:
+                            pass
+                        _cleanup_process_state(runner_id, redis_client)
+                except Exception as verify_err:
+                    _pub(f"auto-resolve merge commit 검증 실패 ({verify_err}) — merged로 처리")
+                    try:
+                        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+                    except Exception:
+                        pass
+                    _cleanup_process_state(runner_id, redis_client)
             else:
-                _pub(f"auto-resolve 실패 — worktree 보존: {resolve_result['message'][:200]}")
+                _pub(f"auto-resolve 실패 — clean 상태로 복원 후 worktree 보존: {resolve_result['message'][:200]}")
+                # 충돌 상태(keep_conflict=True로 유지됨)를 abort하여 main을 clean 상태로 복원
+                try:
+                    subprocess.run(["git", "merge", "--abort"], capture_output=True, cwd=str(PROJECT_ROOT))
+                    _pub("git merge --abort 완료 (main clean 복원)")
+                except Exception as abort_err:
+                    _pub(f"merge --abort 실패 (무시): {abort_err}")
                 try:
                     redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
                 except Exception:

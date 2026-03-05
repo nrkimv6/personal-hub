@@ -97,7 +97,7 @@ class MergeWorkflow:
             # 2. 머지
             self._update_queue_status(runner_id, "merging")
             self._publish_log(runner_id, "MERGE", "main 브랜치에 머지 중...")
-            merge_result = WorktreeManager.merge_to_main(runner_id, base_dir, self.project_root, plan_file=plan_file, branch=branch)
+            merge_result = WorktreeManager.merge_to_main(runner_id, base_dir, self.project_root, plan_file=plan_file, branch=branch, keep_conflict=True)
             if not merge_result.success:
                 # conflict: worktree 보존, 호출자(_do_inline_merge)가 auto-resolve 처리
                 self._publish_log(runner_id, "ERROR", f"머지 충돌: {merge_result.message[:200]}")
