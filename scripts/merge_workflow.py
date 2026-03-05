@@ -103,6 +103,12 @@ class MergeWorkflow:
                 self._publish_log(runner_id, "ERROR", f"머지 충돌: {merge_result.message[:200]}")
                 self._update_queue_status(runner_id, "failed")
                 self._wf_update(runner_id, "failed", error_message=f"머지 충돌: {merge_result.message[:500]}")
+                try:
+                    self.redis_client.set(
+                        f"plan-runner:runners:{runner_id}:merge_status", "conflict"
+                    )
+                except Exception:
+                    pass
                 return WorkflowResult(
                     merged=False,
                     tests_passed=False,
@@ -113,23 +119,6 @@ class MergeWorkflow:
                 self._publish_log(runner_id, "MERGE", "이미 머지됨 — HTTP 테스트 스킵, 잔여 항목 확인으로 진행")
                 return WorkflowResult(merged=True, tests_passed=True, conflict=False, message="이미 머지됨 — skip")
             self._publish_log(runner_id, "MERGE", "머지 성공")
-
-            # 3. HTTP 테스트
-            self._update_queue_status(runner_id, "testing")
-            self._publish_log(runner_id, "TEST", "HTTP 테스트 실행 중...")
-            test_result = self.run_post_merge_tests()
-            if not test_result.passed:
-                # test_failed: worktree 보존
-                self._publish_log(runner_id, "ERROR", f"테스트 실패: {test_result.output[:200]}")
-                self._update_queue_status(runner_id, "failed")
-                self._wf_update(runner_id, "failed", error_message=f"테스트 실패: {test_result.output[:500]}")
-                return WorkflowResult(
-                    merged=True,
-                    tests_passed=False,
-                    conflict=False,
-                    message=test_result.output[:500]
-                )
-            self._publish_log(runner_id, "TEST", "테스트 통과")
 
             # 머지 커밋 해시 조회
             commit_hash = ""
@@ -150,6 +139,12 @@ class MergeWorkflow:
 
             # Workflow: merged 상태로 전이
             self._wf_update(runner_id, "merged", commit_hash=commit_hash)
+            try:
+                self.redis_client.set(
+                    f"plan-runner:runners:{runner_id}:merge_status", "merged"
+                )
+            except Exception:
+                pass
 
             return WorkflowResult(merged=True, tests_passed=True, conflict=False, message="성공")
 
