@@ -19,8 +19,6 @@ API 서버(Session 0)에서 Redis를 통해 전달된 명령을 수신하고 실
 import argparse
 import json
 import logging
-import msvcrt
-import os
 import re
 import subprocess
 import sys
@@ -64,14 +62,14 @@ RECENT_RUNNERS_TTL = 86400  # 24시간 (초) — executor_service.py의 RECENT_R
 RUNNER_KEY_SUFFIXES = (
     "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
     "engine", "worktree_path", "branch", "merge_status", "merge_requested",
-    "current_cycle", "quota_stopped", "error", "restart_after_merge", "test_source",
+    "current_cycle", "quota_stopped", "error", "restart_after_merge",
 )
 HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
 HEARTBEAT_INTERVAL = 10  # heartbeat 갱신 주기 (초)
 HEARTBEAT_TTL = 30  # heartbeat 만료 시간 (초, 3회 미갱신 시 만료)
 
 # merge 활성 상태 — cleanup 보호 가드 및 reconnect 복구 조건에 사용
-MERGE_ACTIVE_STATUSES = ("queued", "merging", "pending_merge", "resolving", "testing", "fixing")
+MERGE_ACTIVE_STATUSES = ("queued", "merging", "pending_merge", "resolving")
 
 QUOTA_ERROR_MARKERS = ["TerminalQuotaError", "exhausted your capacity", "[QUOTA]"]
 
@@ -99,28 +97,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 LOG_CHANNEL_PREFIX = "plan-runner:logs"
-
-# ── lock file (중복 실행 방지) ──────────────────────────────────
-_LOCK_FILE_PATH = PROJECT_ROOT / ".pids" / "dev_runner_listener.lock"
-_lock_fd = None  # 열린 fd를 전역에 보관 → 프로세스 종료 시 OS가 자동 해제
-
-
-def _acquire_lock() -> bool:
-    """exclusive lock file 획득. 이미 다른 인스턴스가 실행 중이면 False 반환."""
-    global _lock_fd
-    _LOCK_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        _lock_fd = open(str(_LOCK_FILE_PATH), "w", encoding="utf-8")
-        msvcrt.locking(_lock_fd.fileno(), msvcrt.LK_NBLCK, 1)
-        _lock_fd.write(str(os.getpid()))
-        _lock_fd.flush()
-        return True
-    except OSError:
-        if _lock_fd:
-            _lock_fd.close()
-            _lock_fd = None
-        return False
-
 
 # 전역 프로세스 관리
 _running_processes: dict = {}
@@ -183,7 +159,7 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     _running_log_files.pop(runner_id, None)
     if runner_id in _stream_threads:
         t = _stream_threads.pop(runner_id)
-        if t.is_alive() and t is not threading.current_thread():
+        if t.is_alive():
             t.join(timeout=3)
 
     try:
@@ -627,15 +603,11 @@ def _detect_orphan_plans(redis_client: redis.Redis) -> int:
             if not is_impl:
                 continue
             filename = plan_file.name
-            # Workflow DB에서 이 plan에 대한 레코드 찾기 (dev-runner가 시작한 plan만 검증)
-            any_record = [
+            # Workflow DB에서 이 plan에 대한 running 레코드 찾기
+            matching = [
                 w for w in all_workflows
-                if w.get("plan_file") and filename in w["plan_file"]
+                if w.get("plan_file") and filename in w["plan_file"] and w.get("status") == "running"
             ]
-            if not any_record:
-                # dev-runner를 통하지 않은 plan → 검증 대상 아님
-                continue
-            matching = [w for w in any_record if w.get("status") == "running"]
             if not matching:
                 logger.warning(f"[orphan-plan] {filename}: 상태=구현중이지만 Workflow DB에 running 레코드 없음")
                 warnings_count += 1
@@ -937,41 +909,6 @@ def _launch_auto_fix_process(runner_id: str, test_output: str, targets: dict, re
     return {"success": result["success"], "message": result["message"]}
 
 
-def _pub_and_log(runner_id: str, msg: str, redis_client, tag: str = "MERGE") -> None:
-    """Redis Pub/Sub + list + 파일 모두에 로그를 기록하는 공통 헬퍼.
-
-    동작:
-    1. logger.info 기록
-    2. Redis Pub/Sub 채널 publish (실패 시 무시)
-    3. Redis list rpush + expire 86400 (실패 시 무시)
-    4. stream_log_path (없으면 log_file_path fallback) 파일에 append (실패 시 무시)
-    """
-    formatted = f"[{tag}] {msg}"
-    logger.info(formatted)
-
-    try:
-        redis_client.publish(f"{LOG_CHANNEL_PREFIX}:{runner_id}", formatted)
-    except Exception:
-        pass
-
-    try:
-        list_key = f"plan-runner:logs:list:{runner_id}"
-        redis_client.rpush(list_key, formatted)
-        redis_client.expire(list_key, 86400)
-    except Exception:
-        pass
-
-    try:
-        log_path = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
-        if not log_path:
-            log_path = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path")
-        if log_path and Path(log_path).exists():
-            with open(log_path, "a", encoding="utf-8") as _f:
-                _f.write(formatted + "\n")
-    except Exception as _e:
-        logger.debug(f"[_pub_and_log] 파일 기록 실패: {_e}")
-
-
 def _post_merge_pipeline(runner_id: str, redis_client, pub_fn) -> bool:
     """merge 성공 후 서비스 재시작 → HTTP/빌드 테스트 → auto-fix 파이프라인.
 
@@ -1092,6 +1029,42 @@ def _post_merge_pipeline(runner_id: str, redis_client, pub_fn) -> bool:
     return False
 
 
+def _pub_and_log(runner_id: str, msg: str, redis_client: redis.Redis, tag: str = "MERGE") -> None:
+    """Pub/Sub + Redis list + stream_log_path 파일에 통합 기록하는 헬퍼.
+
+    Args:
+        runner_id: plan-runner ID
+        msg: 기록할 메시지 (태그 미포함)
+        redis_client: Redis 클라이언트
+        tag: 로그 태그 (기본값: MERGE)
+    """
+    tagged = f"[{tag}] {msg}"
+    logger.info(tagged)
+    log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+    log_list_key = f"plan-runner:logs:list:{runner_id}"
+    try:
+        redis_client.publish(log_channel, tagged)
+    except Exception:
+        pass
+    try:
+        redis_client.rpush(log_list_key, tagged)
+        redis_client.expire(log_list_key, 86400)
+    except Exception:
+        pass
+    # stream_log_path → fallback: log_file_path 파일에 append
+    try:
+        log_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
+        if not log_path_str:
+            log_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path")
+        if log_path_str:
+            log_path = Path(log_path_str)
+            if log_path.exists():
+                with open(str(log_path), "a", encoding="utf-8") as _f:
+                    _f.write(tagged + "\n")
+    except Exception as _e:
+        logger.debug(f"[_pub_and_log] 파일 기록 실패 (무시): {_e}")
+
+
 def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
     """merge_requested 플래그가 있을 때 _stream_output finally에서 호출되는 인라인 merge 함수.
 
@@ -1105,24 +1078,31 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
     """
     from merge_lock import acquire_merge_lock, release_merge_lock
     from merge_workflow import MergeWorkflow
-    from plan_runner.core.pipeline import pre_merge_gate, auto_commit_stage
 
-    def _pub(msg: str) -> None:
-        """runner 로그 채널에 merge 로그 publish + Redis list + 파일에 기록 (stream_log_path 우선)"""
-        _pub_and_log(runner_id, msg, redis_client, "MERGE")
+    # _rebase_branch_onto_main: wtools plan-runner core/merge.py
+    try:
+        import sys as _sys
+        if str(PLAN_RUNNER_MODULE_PATH) not in _sys.path:
+            _sys.path.insert(0, str(PLAN_RUNNER_MODULE_PATH))
+        from core.merge import _rebase_branch_onto_main
+    except ImportError:
+        def _rebase_branch_onto_main(branch, project_dir):  # type: ignore[misc]
+            return {"success": False, "message": "import 실패 — rebase 스킵"}
+
+    def _pub(msg: str, tag: str = "MERGE") -> None:
+        """runner 로그 채널에 merge 로그 publish + Redis list + 파일 기록"""
+        _pub_and_log(runner_id, msg, redis_client, tag)
 
     try:
-        # 1. merge_status = "queued" 설정 (merge_requested 삭제 전에 — heartbeat 경쟁 조건 방지)
-        # merge_requested 삭제 후 merge_status 설정 전에 heartbeat가 실행되면
-        # 둘 다 없는 상태로 판단하여 조기 cleanup 가능
+        # merge_requested 플래그 삭제 (중복 진입 방지)
         try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
+            redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
         except Exception:
             pass
 
-        # merge_requested 플래그 삭제 (중복 진입 방지, merge_status가 이미 설정된 후)
+        # 1. merge_status = "queued" + lock 대기
         try:
-            redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
         except Exception:
             pass
         _pub("merge lock 대기 중...")
@@ -1137,32 +1117,54 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
             _cleanup_process_state(runner_id, redis_client)
             return
 
-        # 2. lock 획득 후 merge 실행
+        # 2. lock 획득 후 pre_merge_gate + auto_commit_stage
         try:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merging")
         except Exception:
             pass
-        _pub("merge lock 획득 완료 — merge 시작")
+        _pub("merge lock 획득 완료 — pre_merge_gate 확인 중...")
 
-        # 2-1. pre_merge_gate: main 브랜치 확인 + git clean 확인
-        # 이미 lock을 획득했으므로 "다른 머지" 메시지는 무시 (lock already held)
-        gate_ok, gate_msg = pre_merge_gate(PROJECT_ROOT, redis_client)
-        if not gate_ok:
-            if "다른 머지" in gate_msg:
-                # lock이 이미 우리가 획득함 — 정상 (pre_merge_gate 내부에서 lock 재획득 실패한 것)
-                _pub("[pre-merge] lock already held — proceeding")
-            elif "dirty" in gate_msg:
-                # dirty 상태 — 안전망 커밋 후 gate 재검사 (최대 3회)
-                for attempt in range(3):
-                    _pub(f"[pre-merge] dirty 감지 — 안전망 커밋 시도 ({attempt + 1}/3): {gate_msg}")
-                    committed = auto_commit_stage(PROJECT_ROOT, "chore: pre-merge safety commit")
-                    _pub(f"[pre-merge] 안전망 커밋 결과: {'성공' if committed else '변경없음/실패'}")
-                    gate_ok, gate_msg = pre_merge_gate(PROJECT_ROOT, redis_client)
-                    if gate_ok or "dirty" not in gate_msg:
-                        # 성공하거나 dirty 외 다른 이유 실패 시 루프 중단
-                        break
-                if not gate_ok:
-                    _pub(f"[pre-merge] gate 실패 (3회 재시도 후): {gate_msg}")
+        # pre_merge_gate: main 브랜치 확인 + git clean 확인
+        # Redis lock은 이미 acquire_merge_lock으로 획득됐으므로 redis_client=None 전달 (lock 중복 방지)
+        try:
+            import sys as _sys
+            if str(PLAN_RUNNER_MODULE_PATH) not in _sys.path:
+                _sys.path.insert(0, str(PLAN_RUNNER_MODULE_PATH))
+            from core.pipeline import pre_merge_gate as _pre_merge_gate, auto_commit_stage as _auto_commit_stage
+            _gate_ok, _gate_msg = _pre_merge_gate(PROJECT_ROOT, redis_client=None)
+            if not _gate_ok:
+                if "dirty" in _gate_msg:
+                    # dirty → auto_commit_stage 최대 3회 재시도
+                    _committed = False
+                    for _attempt in range(1, 4):
+                        _pub(f"git dirty 감지 ({_gate_msg[:100]}) — 안전망 커밋 시도 {_attempt}/3")
+                        _commit_ok = _auto_commit_stage(PROJECT_ROOT, "chore: pre-merge safety commit")
+                        if _commit_ok:
+                            _gate_ok2, _gate_msg2 = _pre_merge_gate(PROJECT_ROOT, redis_client=None)
+                            if _gate_ok2:
+                                _pub(f"안전망 커밋 성공 ({_attempt}회) — merge 계속")
+                                _committed = True
+                                break
+                            else:
+                                _gate_msg = _gate_msg2
+                        else:
+                            _pub(f"안전망 커밋 실패 ({_attempt}회): 이미 clean이거나 커밋 스크립트 실패")
+                            _gate_ok2, _gate_msg2 = _pre_merge_gate(PROJECT_ROOT, redis_client=None)
+                            if _gate_ok2:
+                                _committed = True
+                                break
+                    if not _committed:
+                        _pub(f"pre-merge gate 실패 (3회 재시도 후): {_gate_msg[:200]}")
+                        try:
+                            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+                        except Exception:
+                            pass
+                        release_merge_lock(redis_client, runner_id)
+                        _cleanup_process_state(runner_id, redis_client)
+                        return
+                else:
+                    # main 아님 등 — 즉시 중단
+                    _pub(f"pre-merge gate 실패: {_gate_msg[:200]}")
                     try:
                         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
                     except Exception:
@@ -1171,15 +1173,9 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                     _cleanup_process_state(runner_id, redis_client)
                     return
             else:
-                # main 브랜치 아님 등 기타 실패
-                _pub(f"[pre-merge] gate 실패: {gate_msg}")
-                try:
-                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
-                except Exception:
-                    pass
-                release_merge_lock(redis_client, runner_id)
-                _cleanup_process_state(runner_id, redis_client)
-                return
+                _pub("pre-merge gate 통과 — merge 시작")
+        except ImportError as _ie:
+            _pub(f"pre_merge_gate import 실패 (무시하고 계속): {_ie}")
 
         # worktree 경로, plan_file, branch 조회
         worktree_path_str = None
@@ -1205,39 +1201,23 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
             _cleanup_process_state(runner_id, redis_client)
             return
 
-        # [Phase 2-4] merge 전 worktree 사전 제거 — git merge 충돌 방지 (branch는 보존)
+        # Phase 2a: worktree 사전 제거 (branch는 보존 — "not something we can merge" 방지)
+        _wt_branch = branch_str or (f"plan/{Path(plan_file).stem}" if plan_file else f"runner/{runner_id}")
         try:
-            _pub(f"[pre-merge] worktree 사전 제거 시작: {worktree_path}")
-            WorktreeManager.remove(
-                runner_id, WORKTREE_BASE_DIR,
-                plan_file=plan_file,
-                branch=branch_str,
-                delete_branch=False,  # branch 보존 — merge 대상 branch가 필요
-            )
-            _pub("[pre-merge] worktree 사전 제거 완료")
-        except Exception as wt_pre_err:
-            _pub(f"[pre-merge] worktree 사전 제거 실패 (무시, merge 계속): {wt_pre_err}")
+            WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file, branch=branch_str)
+            _pub(f"merge 전 worktree 사전 제거 완료: {worktree_path}")
+        except Exception as _wt_err:
+            _pub(f"worktree 사전 제거 실패 (무시, merge 강행): {_wt_err}")
 
-        # [Phase 2-5] branch divergence 시 rebase 시도 — merge 전 branch를 main 위로 rebase
-        if branch_str:
-            try:
-                _pub(f"[pre-merge] rebase 시도: git rebase main {branch_str}")
-                rebase_result = subprocess.run(
-                    ["git", "rebase", "main", branch_str],
-                    capture_output=True, text=True, cwd=str(PROJECT_ROOT),
-                )
-                if rebase_result.returncode == 0:
-                    _pub(f"[pre-merge] rebase 성공")
-                else:
-                    rebase_msg = (rebase_result.stderr.strip() or rebase_result.stdout.strip())[:300]
-                    _pub(f"[pre-merge] rebase 실패 (무시, merge 강행): {rebase_msg}")
-                    # rebase 실패 시 abort하여 상태 복원
-                    subprocess.run(
-                        ["git", "rebase", "--abort"],
-                        capture_output=True, text=True, cwd=str(PROJECT_ROOT),
-                    )
-            except Exception as rebase_err:
-                _pub(f"[pre-merge] rebase 예외 (무시, merge 강행): {rebase_err}")
+        # Phase 2b: branch divergence 시 rebase 시도
+        try:
+            _rebase_result = _rebase_branch_onto_main(_wt_branch, PROJECT_ROOT)
+            if _rebase_result.get("success"):
+                _pub(f"rebase 완료: {_rebase_result['message']}")
+            else:
+                _pub(f"rebase 실패 — merge 강행: {_rebase_result.get('message', '')[:200]}")
+        except Exception as _rb_err:
+            _pub(f"rebase 시도 실패 (무시, merge 강행): {_rb_err}")
 
         workflow = MergeWorkflow(
             project_root=PROJECT_ROOT,
@@ -1391,30 +1371,34 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
             pass
 
     finally:
-        # merge 완료/실패 후 cleanup + 재시작
-        # 순서: 재시작 플래그 읽기 → 재시작 실행 → cleanup
-        # (cleanup이 WorktreeManager.remove 등에서 hang될 경우에도 재시작 보장)
-        logger.info(f"[_do_inline_merge] finally 블록 진입 (runner_id={runner_id})")
-
-        # [Phase 4-9] merge-results Redis list에 결과 push (merge history API 용)
+        # Phase 4: merge-results Redis list에 결과 push (merge history API 연동)
         try:
-            _final_merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
-            _merge_success = _final_merge_status == "merged"
-            _merge_result_payload = json.dumps({
+            _merge_status_final = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status") or "unknown"
+            _is_success = _merge_status_final in ("merged", "merging")
+            try:
+                _final_branch = branch_str  # type: ignore[name-defined]
+            except NameError:
+                _final_branch = None
+            try:
+                _final_plan = plan_file  # type: ignore[name-defined]
+            except NameError:
+                _final_plan = None
+            redis_client.lpush("plan-runner:merge-results", __import__("json").dumps({
                 "runner_id": runner_id,
-                "branch": locals().get("branch_str"),
-                "plan_file": locals().get("plan_file_str"),
-                "timestamp": datetime.now().isoformat(),
-                "status": "completed" if _merge_success else "failed",
-                "success": _merge_success,
-                "message": f"merge_status={_final_merge_status}",
-            }, ensure_ascii=False)
-            redis_client.lpush("plan-runner:merge-results", _merge_result_payload)
+                "branch": _final_branch,
+                "plan_file": _final_plan,
+                "timestamp": __import__("time").time(),
+                "status": "done" if _is_success else "failed",
+                "success": _is_success,
+                "message": f"merge_status={_merge_status_final}",
+            }, ensure_ascii=False))
             redis_client.expire("plan-runner:merge-results", 86400 * 7)
-            logger.info(f"[_do_inline_merge] merge-results push 완료 (runner_id={runner_id}, success={_merge_success})")
         except Exception as _mr_err:
-            logger.warning(f"[_do_inline_merge] merge-results push 실패 (무시): {_mr_err}")
+            logger.debug(f"[_do_inline_merge] merge-results push 실패 (무시): {_mr_err}")
 
+        # merge 완료/실패 후 cleanup (merge 흐름에서는 여기서만 cleanup)
+        # 재시작 플래그 읽기 (cleanup 전 — cleanup이 다른 per-runner 키를 삭제하지만
+        # restart_after_merge 키는 삭제하지 않으므로 cleanup 전후 모두 가능)
         _restart_plan_file = None
         _restart_remaining = 0
         try:
@@ -1429,16 +1413,14 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                 except Exception:
                     _restart_remaining = 1  # 파일 읽기 실패 시 재시작은 허용
                 redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge")
-                logger.info(f"[_do_inline_merge] 재시작 플래그 확인: plan={_restart_plan_file}, remaining={_restart_remaining}")
         except Exception as e:
             logger.warning(f"[_do_inline_merge] restart_after_merge 플래그 읽기 실패: {e}")
 
-        # 재시작 (cleanup 전에 실행 — cleanup hang 시에도 재시작 보장)
+        _cleanup_process_state(runner_id, redis_client)
+
+        # 재시작 (cleanup 완료 후 — 새 runner_id로 시작하므로 기존 상태와 충돌 없음)
         if _restart_plan_file and _restart_remaining > 0:
             _restart_plan_runner_after_merge(_restart_plan_file, redis_client, _restart_remaining)
-
-        _cleanup_process_state(runner_id, redis_client)
-        logger.info(f"[_do_inline_merge] finally 블록 완료 (runner_id={runner_id})")
 
 
 def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Redis, runner_id: str = ""):
@@ -1493,8 +1475,8 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
             # 4. 직전 억제 요약 먼저 publish
             if suppressed_count > 0:
                 try:
-                    _pub_and_log(runner_id, f"{suppressed_count} lines suppressed", redis_client, "NOISE")
-                except Exception:
+                    redis_client.publish(log_channel, f"[NOISE] {suppressed_count} lines suppressed")
+                except redis.ConnectionError:
                     pass
                 suppressed_count = 0
 
@@ -1502,7 +1484,7 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
             if any(marker in stripped for marker in QUOTA_ERROR_MARKERS):
                 logger.warning("[DEV-RUNNER] quota 에러 감지, plan-runner 자동 종료")
                 try:
-                    _pub_and_log(runner_id, "quota 에러 감지. 자동 종료.", redis_client, "DEV-RUNNER")
+                    redis_client.publish(log_channel, "[DEV-RUNNER] quota 에러 감지. 자동 종료.")
                     redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:quota_stopped", "1", ex=3600)
                 except redis.ConnectionError:
                     pass
@@ -1517,9 +1499,10 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
 
         # 루프 종료 후 잔여 억제 요약
         if suppressed_count > 0:
+            log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}" if runner_id else LOG_CHANNEL_PREFIX
             try:
-                _pub_and_log(runner_id, f"{suppressed_count} lines suppressed", redis_client, "NOISE")
-            except Exception:
+                redis_client.publish(log_channel, f"[NOISE] {suppressed_count} lines suppressed")
+            except redis.ConnectionError:
                 pass
 
     except Exception as e:
@@ -1568,46 +1551,44 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
             except Exception as _drain_err:
                 logger.debug(f"[_stream_output] stdout drain 실패 (무시): {_drain_err}")
 
-        # merge_requested 플래그 확인 (1회) — 이후 workflow 상태 업데이트 + 분기 모두에 재사용
+        # merge_requested 플래그 확인 (1회) — exit_code != 0이어도 worktree 커밋이 있으면 merge 시도
         _merge_requested = False
         if runner_id:
             try:
                 _flag = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
-                _merge_requested = bool(_flag)
+                if _flag:
+                    if exit_code == 0:
+                        _merge_requested = True
+                    else:
+                        # exit_code != 0: worktree 커밋 유무로 merge 여부 결정
+                        _branch_for_check = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
+                        if _branch_for_check:
+                            try:
+                                _log_proc = subprocess.run(
+                                    ["git", "log", f"main..{_branch_for_check}", "--oneline"],
+                                    capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=15,
+                                )
+                                _commit_count = len([l for l in _log_proc.stdout.splitlines() if l.strip()])
+                                if _commit_count > 0:
+                                    _merge_requested = True
+                                    logger.info(
+                                        f"[_stream_output] exit_code={exit_code}이지만 worktree 커밋 {_commit_count}개 존재 "
+                                        f"(runner_id={runner_id}, branch={_branch_for_check}) — merge 시도"
+                                    )
+                                else:
+                                    logger.info(
+                                        f"[_stream_output] exit_code={exit_code}, worktree 커밋 없음 "
+                                        f"(runner_id={runner_id}, branch={_branch_for_check}) — merge 스킵"
+                                    )
+                            except Exception as _git_err:
+                                logger.warning(f"[_stream_output] git log 커밋 수 확인 실패: {_git_err} — merge 스킵")
+                        else:
+                            logger.info(f"[_stream_output] exit_code={exit_code}, branch 키 없음 — merge 스킵")
             except Exception as e:
                 logger.warning(f"[_stream_output] merge_requested 플래그 조회 실패 (runner_id={runner_id}): {e}")
-
-        # exit_code != 0인 경우: merge_requested가 있어도 커밋 수를 확인해 판정
-        if runner_id and _merge_requested and exit_code != 0:
-            try:
-                branch = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
-                if branch:
-                    _git_log = subprocess.run(
-                        ["git", "log", f"main..{branch}", "--oneline"],
-                        capture_output=True, text=True, cwd=str(PROJECT_ROOT)
-                    )
-                    commit_lines = [l for l in _git_log.stdout.splitlines() if l.strip()]
-                    count = len(commit_lines)
-                    if count > 0:
-                        logger.info(
-                            f"[_stream_output] exit_code={exit_code}이지만 worktree 커밋 {count}개 존재 — merge 시도"
-                        )
-                    else:
-                        _merge_requested = False
-                        logger.info(
-                            f"[_stream_output] exit_code={exit_code}, worktree 커밋 없음 — merge 스킵"
-                        )
-                else:
-                    _merge_requested = False
-                    logger.info(
-                        f"[_stream_output] exit_code={exit_code}, branch 정보 없음 — merge 스킵"
-                    )
-            except Exception as e:
-                _merge_requested = False
-                logger.warning(f"[_stream_output] exit_code!=0 커밋 수 확인 실패 — merge 스킵: {e}")
-
         logger.info(
-            f"[_stream_output] merge 판정: exit_code={exit_code}, merge_requested={_merge_requested}, runner_id={runner_id}"
+            f"[_stream_output] merge 분기 판정: _merge_requested={_merge_requested}, "
+            f"exit_code={exit_code} (runner_id={runner_id})"
         )
 
         # Workflow 상태 업데이트: 정상 종료(0) → merge_pending or completed, 비정상 → failed
@@ -1653,14 +1634,6 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
     runner_id = command.get("runner_id")
     _wf_id: Optional[int] = None
 
-    # test_source가 있으면 Redis에 저장 (pytest TC 추적용)
-    test_source = command.get("test_source")
-    if runner_id and test_source:
-        try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_source", test_source)
-        except Exception:
-            pass
-
     def _set_error_status(message: str):
         """실패 시 per-runner 상태를 Redis에 기록 + 라이브 로그 채널에 publish"""
         if runner_id:
@@ -1668,7 +1641,7 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:error", message)
             logger.error(f"[_do_start_plan_runner] 실패 상태 기록 (runner_id: {runner_id}): {message}")
             try:
-                _pub_and_log(runner_id, f"{message}", redis_client, "ERROR")
+                redis_client.publish(f"{LOG_CHANNEL_PREFIX}:{runner_id}", f"[ERROR] {message}")
             except Exception as pub_err:
                 logger.warning(f"[_set_error_status] publish 실패 (무시): {pub_err}")
             # Workflow 실패 상태 업데이트
@@ -2110,11 +2083,10 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
     """retry-merge 실제 작업 (백그라운드 스레드에서 실행) — _do_inline_merge와 동일한 흐름"""
     from merge_lock import acquire_merge_lock, release_merge_lock
     from merge_workflow import MergeWorkflow
-    from plan_runner.core.pipeline import pre_merge_gate, auto_commit_stage
 
     result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
+
     def _pub(msg: str) -> None:
-        """retry-merge 로그 채널에 merge 로그 publish + Redis list + 파일에 기록 (stream_log_path 우선)"""
         _pub_and_log(runner_id, msg, redis_client, "MERGE")
 
     result = {"success": False, "message": "unknown error", "action": "retry-merge"}
@@ -2164,49 +2136,46 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
             result = {"success": False, "message": "merge lock 획득 실패 (timeout)", "action": "retry-merge"}
             return
 
-        # 2. lock 획득 후 merge 실행
+        # 2. lock 획득 후 pre_merge_gate + merge 실행
         try:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merging")
         except Exception:
             pass
-        _pub("merge lock 획득 완료 — merge 시작")
+        _pub("merge lock 획득 완료 — pre_merge_gate 확인 중...")
 
-        # 2-1. pre_merge_gate: main 브랜치 확인 + git clean 확인
-        # 이미 lock을 획득했으므로 "다른 머지" 메시지는 무시 (lock already held)
-        gate_ok, gate_msg = pre_merge_gate(PROJECT_ROOT, redis_client)
-        if not gate_ok:
-            if "다른 머지" in gate_msg:
-                # lock이 이미 우리가 획득함 — 정상 (pre_merge_gate 내부에서 lock 재획득 실패한 것)
-                _pub("[pre-merge] lock already held — proceeding")
-            elif "dirty" in gate_msg:
-                # dirty 상태 — 안전망 커밋 후 gate 재검사 (최대 3회)
-                for attempt in range(3):
-                    _pub(f"[pre-merge] dirty 감지 — 안전망 커밋 시도 ({attempt + 1}/3): {gate_msg}")
-                    committed = auto_commit_stage(PROJECT_ROOT, "chore: pre-merge safety commit")
-                    _pub(f"[pre-merge] 안전망 커밋 결과: {'성공' if committed else '변경없음/실패'}")
-                    gate_ok, gate_msg = pre_merge_gate(PROJECT_ROOT, redis_client)
-                    if gate_ok or "dirty" not in gate_msg:
-                        # 성공하거나 dirty 외 다른 이유 실패 시 루프 중단
-                        break
-                if not gate_ok:
-                    _pub(f"[pre-merge] gate 실패 (3회 재시도 후): {gate_msg}")
-                    result = {"success": False, "message": f"pre-merge gate 실패: {gate_msg}", "action": "retry-merge"}
-                    try:
+        try:
+            import sys as _sys2
+            if str(PLAN_RUNNER_MODULE_PATH) not in _sys2.path:
+                _sys2.path.insert(0, str(PLAN_RUNNER_MODULE_PATH))
+            from core.pipeline import pre_merge_gate as _pmg2, auto_commit_stage as _acs2
+            _gate_ok2, _gate_msg2 = _pmg2(PROJECT_ROOT, redis_client=None)
+            if not _gate_ok2:
+                if "dirty" in _gate_msg2:
+                    _committed2 = False
+                    for _attempt2 in range(1, 4):
+                        _pub(f"git dirty 감지 — 안전망 커밋 시도 {_attempt2}/3")
+                        _acs2(PROJECT_ROOT, "chore: pre-merge safety commit")
+                        _ok, _msg = _pmg2(PROJECT_ROOT, redis_client=None)
+                        if _ok:
+                            _committed2 = True
+                            break
+                        _gate_msg2 = _msg
+                    if not _committed2:
+                        _pub(f"pre-merge gate 실패 (3회 재시도 후): {_gate_msg2[:200]}")
                         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
-                    except Exception:
-                        pass
+                        release_merge_lock(redis_client, runner_id)
+                        result = {"success": False, "message": f"pre-merge gate 실패: {_gate_msg2}", "action": "retry-merge"}
+                        return
+                else:
+                    _pub(f"pre-merge gate 실패: {_gate_msg2[:200]}")
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
                     release_merge_lock(redis_client, runner_id)
+                    result = {"success": False, "message": f"pre-merge gate 실패: {_gate_msg2}", "action": "retry-merge"}
                     return
             else:
-                # main 브랜치 아님 등 기타 실패
-                _pub(f"[pre-merge] gate 실패: {gate_msg}")
-                result = {"success": False, "message": f"pre-merge gate 실패: {gate_msg}", "action": "retry-merge"}
-                try:
-                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
-                except Exception:
-                    pass
-                release_merge_lock(redis_client, runner_id)
-                return
+                _pub("pre-merge gate 통과 — merge 시작")
+        except ImportError:
+            _pub("pre_merge_gate import 실패 (무시하고 계속)")
 
         try:
             workflow = MergeWorkflow(
@@ -2223,21 +2192,22 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
 
             # 3. 결과 처리
             if merge_result.merged:
-                _pub("merge 성공 — 완료")
+                _pub("merge 성공 — pipeline 실행 중...")
                 pipeline_ok = _post_merge_pipeline(runner_id, redis_client, _pub)
                 if pipeline_ok:
+                    _pub("merge 성공 — 완료")
                     try:
                         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
                     except Exception:
                         pass
                     result = {"success": True, "message": merge_result.message, "action": "retry-merge"}
                 else:
-                    _pub("post-merge pipeline 실패 — test_failed")
+                    _pub("pipeline 실패 — merge 완료 but pipeline 오류")
                     try:
                         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "test_failed")
                     except Exception:
                         pass
-                    result = {"success": False, "message": "post-merge pipeline 실패", "action": "retry-merge"}
+                    result = {"success": False, "message": "pipeline 실패", "action": "retry-merge"}
             elif merge_result.conflict:
                 _pub(f"merge 충돌 발생 — worktree 보존: {merge_result.message[:200]}")
                 try:
@@ -2269,30 +2239,25 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
         result = {"success": False, "message": str(e), "action": "retry-merge"}
 
     finally:
+        # merge-results Redis list push (merge history API 연동)
+        try:
+            _retry_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status") or "unknown"
+            redis_client.lpush("plan-runner:merge-results", __import__("json").dumps({
+                "runner_id": runner_id,
+                "branch": redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch"),
+                "plan_file": redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file"),
+                "timestamp": __import__("time").time(),
+                "status": "done" if result.get("success") else "failed",
+                "success": result.get("success", False),
+                "message": result.get("message", ""),
+            }, ensure_ascii=False))
+            redis_client.expire("plan-runner:merge-results", 86400 * 7)
+        except Exception as _mr_err2:
+            logger.debug(f"[_do_retry_merge] merge-results push 실패 (무시): {_mr_err2}")
+
         _cleanup_process_state(runner_id, redis_client)
         redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
         redis_client.expire(result_key, 60)
-
-        # [Phase 4-10] merge-results Redis list에 결과 push (merge history API 용)
-        try:
-            _final_merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
-            _merge_success = _final_merge_status == "merged"
-            _plan_file_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
-            _branch_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
-            _merge_result_payload = json.dumps({
-                "runner_id": runner_id,
-                "branch": _branch_val,
-                "plan_file": _plan_file_val,
-                "timestamp": datetime.now().isoformat(),
-                "status": "completed" if _merge_success else "failed",
-                "success": _merge_success,
-                "message": f"merge_status={_final_merge_status}",
-            }, ensure_ascii=False)
-            redis_client.lpush("plan-runner:merge-results", _merge_result_payload)
-            redis_client.expire("plan-runner:merge-results", 86400 * 7)
-            logger.info(f"[_do_retry_merge] merge-results push 완료 (runner_id={runner_id}, success={_merge_success})")
-        except Exception as _mr_err:
-            logger.warning(f"[_do_retry_merge] merge-results push 실패 (무시): {_mr_err}")
 
 
 def retry_merge(command: Dict, redis_client: redis.Redis) -> None:
@@ -2412,10 +2377,11 @@ def _do_direct_merge(branch: str, worktree_path_str: str | None, plan_file: str 
                 redis_client.expire(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", RECENT_RUNNERS_TTL)
         except Exception:
             pass
-        # SSE 채널에 최종 결과 publish (stream_log_path 파일에도 기록)
+        # SSE 채널에 최종 결과 publish
         try:
+            log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
             status_msg = result.get("message", "unknown")
-            _pub_and_log(runner_id, f"direct-merge 최종 결과: {status_msg}", redis_client, "MERGE")
+            redis_client.publish(log_channel, f"[MERGE] direct-merge 최종 결과: {status_msg}")
         except Exception:
             pass
         redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
@@ -2631,10 +2597,6 @@ def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
 
 def main():
     """메인 루프: Redis BRPOP으로 명령 대기 및 실행."""
-    if not _acquire_lock():
-        logger.error("다른 listener 인스턴스가 이미 실행 중 — 중복 실행 방지로 종료")
-        sys.exit(1)
-
     global _merge_orchestrator_process, _wf_manager, _merge_orchestrator_attached_pid
     _wf_manager = WorkflowManager(PROJECT_ROOT / "data" / "monitor.db")
     logger.info("=" * 50)
