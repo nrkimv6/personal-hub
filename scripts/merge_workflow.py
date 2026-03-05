@@ -117,6 +117,7 @@ class MergeWorkflow:
                 )
             if merge_result.already_merged:
                 self._publish_log(runner_id, "MERGE", "이미 머지됨 — HTTP 테스트 스킵, 잔여 항목 확인으로 진행")
+                self._wf_update(runner_id, "merged")
                 return WorkflowResult(merged=True, tests_passed=True, conflict=False, message="이미 머지됨 — skip")
             self._publish_log(runner_id, "MERGE", "머지 성공")
 

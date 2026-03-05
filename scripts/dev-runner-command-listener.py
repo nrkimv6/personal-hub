@@ -159,7 +159,7 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     _running_log_files.pop(runner_id, None)
     if runner_id in _stream_threads:
         t = _stream_threads.pop(runner_id)
-        if t.is_alive():
+        if t.is_alive() and t is not threading.current_thread():
             t.join(timeout=3)
 
     try:
@@ -1270,9 +1270,10 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
             pass
 
     finally:
-        # merge 완료/실패 후 cleanup (merge 흐름에서는 여기서만 cleanup)
-        # 재시작 플래그 읽기 (cleanup 전 — cleanup이 다른 per-runner 키를 삭제하지만
-        # restart_after_merge 키는 삭제하지 않으므로 cleanup 전후 모두 가능)
+        # merge 완료/실패 후 cleanup + 재시작
+        # 순서: 재시작 플래그 읽기 → 재시작 실행 → cleanup
+        # (cleanup이 WorktreeManager.remove 등에서 hang될 경우에도 재시작 보장)
+        logger.info(f"[_do_inline_merge] finally 블록 진입 (runner_id={runner_id})")
         _restart_plan_file = None
         _restart_remaining = 0
         try:
@@ -1287,14 +1288,16 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                 except Exception:
                     _restart_remaining = 1  # 파일 읽기 실패 시 재시작은 허용
                 redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge")
+                logger.info(f"[_do_inline_merge] 재시작 플래그 확인: plan={_restart_plan_file}, remaining={_restart_remaining}")
         except Exception as e:
             logger.warning(f"[_do_inline_merge] restart_after_merge 플래그 읽기 실패: {e}")
 
-        _cleanup_process_state(runner_id, redis_client)
-
-        # 재시작 (cleanup 완료 후 — 새 runner_id로 시작하므로 기존 상태와 충돌 없음)
+        # 재시작 (cleanup 전에 실행 — cleanup hang 시에도 재시작 보장)
         if _restart_plan_file and _restart_remaining > 0:
             _restart_plan_runner_after_merge(_restart_plan_file, redis_client, _restart_remaining)
+
+        _cleanup_process_state(runner_id, redis_client)
+        logger.info(f"[_do_inline_merge] finally 블록 완료 (runner_id={runner_id})")
 
 
 def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Redis, runner_id: str = ""):
