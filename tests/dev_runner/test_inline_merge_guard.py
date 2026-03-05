@@ -676,3 +676,86 @@ class TestStreamOutputExit1MergeRequestedWithCommits:
 
         # Assert: _cleanup_process_state 미호출 (_do_inline_merge가 내부에서 처리)
         mock_cleanup.assert_not_called()
+
+
+# ========== TC #26: B(Boundary) — exit_code=1 + merge_requested=1 + 커밋 없음 → merge 스킵 ==========
+
+class TestStreamOutputExit1MergeRequestedNoCommits:
+    """test_stream_output_exit1_merge_requested_no_commits:
+    exit_code=1 + merge_requested=1 이어도 worktree 커밋이 없으면 merge 스킵 → _cleanup_process_state 호출"""
+
+    def test_stream_output_exit1_merge_requested_no_commits(self, cl, tmp_path):
+        """B(Boundary): exit_code=1 + merge_requested=1 + git log 빈 출력 → _do_inline_merge 미호출, _cleanup_process_state 호출"""
+        import io
+        from unittest.mock import patch, MagicMock
+
+        runner_id = "test-runner-26"
+        branch = "plan/test-branch-26"
+
+        # Redis store
+        store = {
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested": "1",
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:branch": branch,
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path": None,
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path": None,
+        }
+
+        redis = MagicMock()
+
+        def _get(key):
+            return store.get(key)
+
+        redis.get.side_effect = _get
+        redis.set.return_value = True
+        redis.delete.return_value = 1
+        redis.publish.return_value = 0
+        redis.rpush.return_value = 1
+        redis.lpush.return_value = 1
+        redis.expire.return_value = True
+
+        # 프로세스 mock: stdout 빈 iterator + returncode=1
+        mock_process = MagicMock()
+        mock_process.stdout = iter([])          # 빈 stdout → 루프 즉시 종료
+        mock_process.returncode = 1
+        mock_process.wait.return_value = None
+
+        # log_handle mock
+        log_handle = MagicMock()
+        log_handle.flush.return_value = None
+        log_handle.close.return_value = None
+
+        # subprocess.run mock: git log main..{branch} → 빈 출력 (커밋 0개)
+        def fake_subprocess_run(cmd, **kwargs):
+            cmd_list = list(cmd)
+            if cmd_list[:2] == ["git", "log"] and "--oneline" in cmd_list:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        # _running_log_files에 해당 runner_id 없음 → drain 스킵
+        cl._running_log_files = {}
+
+        inline_merge_calls = []
+
+        def fake_do_inline_merge(rid, rc):
+            inline_merge_calls.append(rid)
+
+        with patch.object(cl, "_do_inline_merge", side_effect=fake_do_inline_merge), \
+             patch.object(cl, "_cleanup_process_state") as mock_cleanup, \
+             patch("subprocess.run", side_effect=fake_subprocess_run):
+
+            # _wf_manager 없음으로 설정 (workflow 상태 업데이트 스킵)
+            original_wf_manager = getattr(cl, "_wf_manager", None)
+            cl._wf_manager = None
+
+            try:
+                cl._stream_output(mock_process, log_handle, redis, runner_id)
+            finally:
+                if original_wf_manager is not None:
+                    cl._wf_manager = original_wf_manager
+
+        # Assert: _do_inline_merge 미호출 (커밋이 없으므로 merge 스킵)
+        assert len(inline_merge_calls) == 0, \
+            f"_do_inline_merge 미호출 기대 (커밋 없음), 실제 {len(inline_merge_calls)}회 호출됨"
+
+        # Assert: _cleanup_process_state 호출됨 (merge 스킵 시 cleanup 수행)
+        mock_cleanup.assert_called()
