@@ -370,6 +370,10 @@ function Get-PlanRunnerFileId {
 }
 
 # Redis에서 활성 plan-runner 목록 조회
+function Test-RedisValue($val) {
+    return ($val -and $val.Trim() -ne "" -and $val.Trim() -ne "(nil)")
+}
+
 function Get-ActivePlanRunners {
     param([string]$LogDir)
     $result = @()
@@ -393,10 +397,10 @@ function Get-ActivePlanRunners {
         $streamPath = & redis-cli -t 2 GET "plan-runner:runners:${rid}:stream_log_path" 2>$null
         $pidVal     = & redis-cli -t 2 GET "plan-runner:runners:${rid}:pid"          2>$null
 
-        $logPath    = if ($logPath)    { $logPath.Trim()    } else { $null }
-        $planFile   = if ($planFile)   { $planFile.Trim()   } else { $null }
-        $streamPath = if ($streamPath) { $streamPath.Trim() } else { $null }
-        $pidVal     = if ($pidVal)     { $pidVal.Trim()     } else { $null }
+        $logPath    = if (Test-RedisValue $logPath)    { $logPath.Trim()    } else { $null }
+        $planFile   = if (Test-RedisValue $planFile)   { $planFile.Trim()   } else { $null }
+        $streamPath = if (Test-RedisValue $streamPath) { $streamPath.Trim() } else { $null }
+        $pidVal     = if (Test-RedisValue $pidVal)     { $pidVal.Trim()     } else { $null }
 
         $displayName = Get-PlanRunnerDisplayName -PlanFile ([System.IO.Path]::GetFileName($planFile))
         $shortId = $rid.Substring(0, [Math]::Min(4, $rid.Length))
