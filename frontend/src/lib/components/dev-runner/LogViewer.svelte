@@ -464,14 +464,9 @@
 					</div>
 				{:else if line.tag === 'PHASE'}
 					{@const style = getTagStyle(line.tag)}
-					<div class="dr-log-line dr-log-line-phase flex items-start gap-2 py-0.5 leading-5 mt-1.5 border-t border-indigo-900/40 {line.isStale ? 'opacity-30' : ''}">
-						<span class="text-xs text-gray-400/60 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
-						<span class="shrink-0 w-[42px] text-right {style.text}">
-							<span class="dr-tag-badge {style.bg}">{line.tag}</span>
-						</span>
-						<span class="flex-1 min-w-0 break-all text-indigo-300 font-medium">
-							{line.message}
-						</span>
+					<div class="phase-separator {line.isStale ? 'opacity-30' : ''}">
+						<span class="dr-tag-badge {style.bg}">{line.tag}</span>
+						<span class="font-mono text-[10px] text-muted-foreground">{line.message}</span>
 					</div>
 				{:else if line.tag}
 					{@const style = getTagStyle(line.tag)}
