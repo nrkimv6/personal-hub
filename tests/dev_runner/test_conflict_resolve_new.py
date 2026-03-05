@@ -265,6 +265,104 @@ class TestInlineMergeConflictAutoRetry:
 
         assert merge_status_sequence[-1] == "conflict"
 
+    def test_inline_merge_conflict_resolve_success_removes_worktree_R(self, tmp_path):
+        """R(Right): auto-resolve 성공 시 WorktreeManager.remove() 호출됨"""
+        cl = _load_listener()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        runner_id = "runner-retry-04"
+        redis = make_redis_mock(worktree_path=str(worktree), branch="plan/test")
+
+        from merge_workflow import WorkflowResult
+        mock_result = WorkflowResult(merged=False, tests_passed=False, conflict=True, message="conflict")
+
+        mock_proc = MagicMock()
+        mock_proc.stdout = "merge: plan/test"
+        mock_proc.returncode = 0
+
+        with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
+             patch("merge_lock.acquire_merge_lock", return_value=True), \
+             patch("merge_lock.release_merge_lock"), \
+             patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
+             patch.object(cl, "_cleanup_process_state"), \
+             patch("subprocess.run", return_value=mock_proc), \
+             patch("worktree_manager.WorktreeManager.remove") as mock_remove:
+            mock_wf = MagicMock()
+            mock_wf.run.return_value = mock_result
+            mock_wf_cls.return_value = mock_wf
+            cl._do_inline_merge(runner_id, redis)
+
+        mock_remove.assert_called_once()
+        call_kwargs = mock_remove.call_args
+        assert call_kwargs[0][0] == runner_id
+        assert call_kwargs[1].get("branch") == "plan/test"
+
+    def test_inline_merge_conflict_resolve_success_remove_failure_ignored_E(self, tmp_path):
+        """E(Error): WorktreeManager.remove() 예외 시 merge_status 여전히 'merged'"""
+        cl = _load_listener()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        runner_id = "runner-retry-05"
+        redis = make_redis_mock(worktree_path=str(worktree), branch="plan/test")
+
+        merge_status_sequence = []
+
+        def track_set(key, value, *args, **kwargs):
+            if "merge_status" in key:
+                merge_status_sequence.append(value)
+            return True
+
+        redis.set.side_effect = track_set
+
+        from merge_workflow import WorkflowResult
+        mock_result = WorkflowResult(merged=False, tests_passed=False, conflict=True, message="conflict")
+
+        mock_proc = MagicMock()
+        mock_proc.stdout = "merge: plan/test"
+        mock_proc.returncode = 0
+
+        with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
+             patch("merge_lock.acquire_merge_lock", return_value=True), \
+             patch("merge_lock.release_merge_lock"), \
+             patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
+             patch.object(cl, "_cleanup_process_state"), \
+             patch("subprocess.run", return_value=mock_proc), \
+             patch("worktree_manager.WorktreeManager.remove", side_effect=Exception("rm fail")):
+            mock_wf = MagicMock()
+            mock_wf.run.return_value = mock_result
+            mock_wf_cls.return_value = mock_wf
+            cl._do_inline_merge(runner_id, redis)
+
+        assert "merged" in merge_status_sequence
+
+    def test_inline_merge_conflict_verify_exception_removes_worktree_B(self, tmp_path):
+        """B(Boundary): verify 예외 경로에서도 WorktreeManager.remove() 호출됨"""
+        cl = _load_listener()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        runner_id = "runner-retry-06"
+        redis = make_redis_mock(worktree_path=str(worktree), branch="plan/test")
+
+        from merge_workflow import WorkflowResult
+        mock_result = WorkflowResult(merged=False, tests_passed=False, conflict=True, message="conflict")
+
+        with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
+             patch("merge_lock.acquire_merge_lock", return_value=True), \
+             patch("merge_lock.release_merge_lock"), \
+             patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
+             patch.object(cl, "_cleanup_process_state"), \
+             patch("subprocess.run", side_effect=Exception("verify fail")), \
+             patch("worktree_manager.WorktreeManager.remove") as mock_remove:
+            mock_wf = MagicMock()
+            mock_wf.run.return_value = mock_result
+            mock_wf_cls.return_value = mock_wf
+            cl._do_inline_merge(runner_id, redis)
+
+        mock_remove.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # Phase T1-3: _do_resolve_conflict 전환
