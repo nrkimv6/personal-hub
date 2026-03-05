@@ -19,6 +19,8 @@ API 서버(Session 0)에서 Redis를 통해 전달된 명령을 수신하고 실
 import argparse
 import json
 import logging
+import msvcrt
+import os
 import re
 import subprocess
 import sys
@@ -97,6 +99,28 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 LOG_CHANNEL_PREFIX = "plan-runner:logs"
+
+# ── lock file (중복 실행 방지) ──────────────────────────────────
+_LOCK_FILE_PATH = PROJECT_ROOT / ".pids" / "dev_runner_listener.lock"
+_lock_fd = None  # 열린 fd를 전역에 보관 → 프로세스 종료 시 OS가 자동 해제
+
+
+def _acquire_lock() -> bool:
+    """exclusive lock file 획득. 이미 다른 인스턴스가 실행 중이면 False 반환."""
+    global _lock_fd
+    _LOCK_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        _lock_fd = open(str(_LOCK_FILE_PATH), "w", encoding="utf-8")
+        msvcrt.locking(_lock_fd.fileno(), msvcrt.LK_NBLCK, 1)
+        _lock_fd.write(str(os.getpid()))
+        _lock_fd.flush()
+        return True
+    except OSError:
+        if _lock_fd:
+            _lock_fd.close()
+            _lock_fd = None
+        return False
+
 
 # 전역 프로세스 관리
 _running_processes: dict = {}
@@ -2406,6 +2430,10 @@ def execute_command(command: Dict, redis_client: redis.Redis) -> Dict:
 
 def main():
     """메인 루프: Redis BRPOP으로 명령 대기 및 실행."""
+    if not _acquire_lock():
+        logger.error("다른 listener 인스턴스가 이미 실행 중 — 중복 실행 방지로 종료")
+        sys.exit(1)
+
     global _merge_orchestrator_process, _wf_manager, _merge_orchestrator_attached_pid
     _wf_manager = WorkflowManager(PROJECT_ROOT / "data" / "monitor.db")
     logger.info("=" * 50)
