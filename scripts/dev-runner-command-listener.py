@@ -1070,6 +1070,7 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
     """
     from merge_lock import acquire_merge_lock, release_merge_lock
     from merge_workflow import MergeWorkflow
+    from plan_runner.core.pipeline import pre_merge_gate, auto_commit_stage
 
     log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
     log_list_key = f"plan-runner:logs:list:{runner_id}"
@@ -1119,6 +1120,43 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
         except Exception:
             pass
         _pub("merge lock 획득 완료 — merge 시작")
+
+        # 2-1. pre_merge_gate: main 브랜치 확인 + git clean 확인
+        # 이미 lock을 획득했으므로 "다른 머지" 메시지는 무시 (lock already held)
+        gate_ok, gate_msg = pre_merge_gate(PROJECT_ROOT, redis_client)
+        if not gate_ok:
+            if "다른 머지" in gate_msg:
+                # lock이 이미 우리가 획득함 — 정상 (pre_merge_gate 내부에서 lock 재획득 실패한 것)
+                _pub("[pre-merge] lock already held — proceeding")
+            elif "dirty" in gate_msg:
+                # dirty 상태 — 안전망 커밋 후 gate 재검사 (최대 3회)
+                for attempt in range(3):
+                    _pub(f"[pre-merge] dirty 감지 — 안전망 커밋 시도 ({attempt + 1}/3): {gate_msg}")
+                    committed = auto_commit_stage(PROJECT_ROOT, "chore: pre-merge safety commit")
+                    _pub(f"[pre-merge] 안전망 커밋 결과: {'성공' if committed else '변경없음/실패'}")
+                    gate_ok, gate_msg = pre_merge_gate(PROJECT_ROOT, redis_client)
+                    if gate_ok or "dirty" not in gate_msg:
+                        # 성공하거나 dirty 외 다른 이유 실패 시 루프 중단
+                        break
+                if not gate_ok:
+                    _pub(f"[pre-merge] gate 실패 (3회 재시도 후): {gate_msg}")
+                    try:
+                        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+                    except Exception:
+                        pass
+                    release_merge_lock(redis_client, runner_id)
+                    _cleanup_process_state(runner_id, redis_client)
+                    return
+            else:
+                # main 브랜치 아님 등 기타 실패
+                _pub(f"[pre-merge] gate 실패: {gate_msg}")
+                try:
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+                except Exception:
+                    pass
+                release_merge_lock(redis_client, runner_id)
+                _cleanup_process_state(runner_id, redis_client)
+                return
 
         # worktree 경로, plan_file, branch 조회
         worktree_path_str = None
