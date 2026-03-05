@@ -960,3 +960,44 @@ class TestPubAndLogFileAppend:
         assert "기존 내용" in content, (
             f"기존 내용이 보존되어야 함\n실제 내용: {content!r}"
         )
+
+
+# ========== TC #30: B(Boundary) — stream_log_path 없을 때 log_file_path fallback ==========
+
+class TestPubAndLogFallbackLogFilePath:
+    """test_pub_and_log_fallback_log_file_path: stream_log_path=None, log_file_path 존재 → fallback 파일에 append"""
+
+    def test_pub_and_log_fallback_log_file_path(self, cl, tmp_path):
+        """B(Boundary): stream_log_path=None 이고 log_file_path 존재 시 fallback 파일에 append"""
+        # Arrange
+        fallback_file = tmp_path / "fallback.log"
+        fallback_file.write_text("기존 fallback 내용\n", encoding="utf-8")
+
+        runner_id = "test-runner-30"
+        msg = "fallback 경로 로그 기록 — test-runner-30"
+        tag = "MERGE"
+
+        store = {
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path": None,          # stream_log_path 없음
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path": str(fallback_file),  # fallback 경로 존재
+        }
+
+        redis = MagicMock()
+        redis.get.side_effect = lambda key: store.get(key)
+        redis.publish.return_value = 0
+        redis.rpush.return_value = 1
+        redis.expire.return_value = True
+
+        # Act
+        cl._pub_and_log(runner_id, msg, redis, tag)
+
+        # Assert: fallback 파일에 메시지가 append됐는지 확인
+        content = fallback_file.read_text(encoding="utf-8")
+        expected_line = f"[{tag}] {msg}"
+        assert expected_line in content, (
+            f"fallback 파일에 '{expected_line}' 포함 기대\n실제 내용: {content!r}"
+        )
+        # 기존 내용 보존 (overwrite 아닌 append)
+        assert "기존 fallback 내용" in content, (
+            f"기존 내용이 보존되어야 함\n실제 내용: {content!r}"
+        )
