@@ -27,15 +27,13 @@ def workflow(fake_redis, tmp_path):
 
 class TestMergeWorkflowRun:
     def test_right_success_calls_merge_and_tests(self, workflow, tmp_path):
-        """TC-Right: runner 성공 → 머지 성공 → 테스트 실행 → WorkflowResult(merged=True, tests_passed=True)"""
+        """TC-Right: runner 성공 → 머지 성공 → WorkflowResult(merged=True, tests_passed=True)"""
         wt_path = tmp_path / "wt001"
         wt_path.mkdir()
         base_dir = tmp_path / ".worktrees"
         base_dir.mkdir()
 
-        with patch("subprocess.run") as mock_run, \
-             patch.object(workflow, "run_post_merge_tests") as mock_tests:
-            mock_tests.return_value = TestResult(passed=True, output="", exit_code=0)
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
             import worktree_manager as wm
             with patch.object(wm.WorktreeManager, "merge_to_main",
@@ -44,7 +42,6 @@ class TestMergeWorkflowRun:
 
         assert result.merged is True
         assert result.tests_passed is True
-        mock_tests.assert_called_once()
 
     def test_right_success_calls_remove(self, workflow, tmp_path):
         """TC-Right: 머지 성공 + 테스트 통과 → WorktreeManager.remove() 호출"""
@@ -53,9 +50,7 @@ class TestMergeWorkflowRun:
         base_dir = tmp_path / ".worktrees"
         base_dir.mkdir()
 
-        with patch("subprocess.run") as mock_run, \
-             patch.object(workflow, "run_post_merge_tests") as mock_tests:
-            mock_tests.return_value = TestResult(passed=True, output="", exit_code=0)
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
 
             # WorktreeManager는 scripts/ sys.path로 import됨
@@ -74,9 +69,7 @@ class TestMergeWorkflowRun:
         base_dir = tmp_path / ".worktrees"
         base_dir.mkdir()
 
-        with patch("subprocess.run") as mock_run, \
-             patch.object(workflow, "run_post_merge_tests") as mock_tests:
-            mock_tests.return_value = TestResult(passed=True, output="", exit_code=0)
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
             import worktree_manager as wm
             with patch.object(wm.WorktreeManager, "merge_to_main",
@@ -95,9 +88,7 @@ class TestMergeWorkflowRun:
         base_dir = tmp_path / ".worktrees"
         base_dir.mkdir()
 
-        with patch("subprocess.run") as mock_run, \
-             patch.object(workflow, "run_post_merge_tests") as mock_tests:
-            mock_tests.return_value = TestResult(passed=True, output="", exit_code=0)
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
             import worktree_manager as wm
             with patch.object(wm.WorktreeManager, "merge_to_main",
@@ -125,25 +116,6 @@ class TestMergeWorkflowRun:
         assert result.conflict is True
         status = fake_redis.get("plan-runner:runners:wt003:merge_status")
         assert status == "conflict"
-
-    def test_error_tests_fail_returns_correct_result(self, workflow, tmp_path):
-        """TC-Error: HTTP 테스트 실패 → WorkflowResult(merged=True, tests_passed=False)"""
-        wt_path = tmp_path / "wt004"
-        wt_path.mkdir()
-        base_dir = tmp_path / ".worktrees"
-        base_dir.mkdir()
-
-        with patch("subprocess.run") as mock_run, \
-             patch.object(workflow, "run_post_merge_tests") as mock_tests:
-            mock_tests.return_value = TestResult(passed=False, output="FAILED", exit_code=1)
-            mock_run.return_value = MagicMock(returncode=0)
-            import worktree_manager as wm
-            with patch.object(wm.WorktreeManager, "merge_to_main",
-                               return_value=MergeResult(success=True, conflict=False, message="ok")):
-                result = workflow.run("wt004", wt_path, base_dir)
-
-        assert result.merged is True
-        assert result.tests_passed is False
 
 
 # ── run_post_merge_tests() ────────────────────────────────────────────────────
@@ -206,7 +178,11 @@ class TestMergeToMainPlanFile:
     def test_merge_to_main_right_with_plan_file(self, tmp_path):
         """TC-Right: plan_file 전달 시 plan/{stem} 브랜치로 git merge 실행"""
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            mock_run.side_effect = [
+                MagicMock(returncode=0),  # git checkout main
+                MagicMock(returncode=1),  # git merge-base --is-ancestor (not ancestor, proceed)
+                MagicMock(returncode=0, stdout="", stderr=""),  # git merge (success)
+            ]
             WorktreeManager.merge_to_main(
                 "abc123", tmp_path / ".worktrees", tmp_path,
                 plan_file="2026-02-27_foo-bar.md"
@@ -218,7 +194,11 @@ class TestMergeToMainPlanFile:
     def test_merge_to_main_right_without_plan_file(self, tmp_path):
         """TC-Right: plan_file 미지정 시 runner/{id} 브랜치로 git merge 실행 (기존 동작 유지)"""
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            mock_run.side_effect = [
+                MagicMock(returncode=0),  # git checkout main
+                MagicMock(returncode=1),  # git merge-base --is-ancestor (not ancestor, proceed)
+                MagicMock(returncode=0, stdout="", stderr=""),  # git merge (success)
+            ]
             WorktreeManager.merge_to_main("abc123", tmp_path / ".worktrees", tmp_path)
         branch = _find_merge_branch(mock_run.call_args_list)
         assert branch is not None
@@ -227,7 +207,11 @@ class TestMergeToMainPlanFile:
     def test_merge_to_main_boundary_plan_file_empty_string(self, tmp_path):
         """TC-Boundary: plan_file='' 전달 시 falsy → runner/{id} fallback"""
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            mock_run.side_effect = [
+                MagicMock(returncode=0),  # git checkout main
+                MagicMock(returncode=1),  # git merge-base --is-ancestor (not ancestor, proceed)
+                MagicMock(returncode=0, stdout="", stderr=""),  # git merge (success)
+            ]
             WorktreeManager.merge_to_main("abc123", tmp_path / ".worktrees", tmp_path, plan_file="")
         branch = _find_merge_branch(mock_run.call_args_list)
         assert branch is not None
@@ -238,7 +222,8 @@ class TestMergeToMainPlanFile:
         with patch("subprocess.run") as mock_run:
             mock_run.side_effect = [
                 MagicMock(returncode=0),  # git checkout main
-                MagicMock(returncode=1, stdout="", stderr="CONFLICT"),  # git merge
+                MagicMock(returncode=1),  # git merge-base --is-ancestor (not ancestor, proceed)
+                MagicMock(returncode=1, stdout="", stderr="CONFLICT"),  # git merge (conflict)
                 MagicMock(returncode=0),  # git merge --abort
             ]
             result = WorktreeManager.merge_to_main("abc123", tmp_path / ".worktrees", tmp_path)
@@ -266,10 +251,8 @@ class TestMergeWorkflowRunPlanFile:
         base_dir = tmp_path / ".worktrees"
         base_dir.mkdir()
 
-        with patch("subprocess.run") as mock_run, \
-             patch.object(workflow, "run_post_merge_tests") as mock_tests:
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
-            mock_tests.return_value = TestResult(passed=True, output="", exit_code=0)
             import worktree_manager as wm
             with patch.object(wm.WorktreeManager, "merge_to_main",
                                return_value=MergeResult(success=True, conflict=False, message="ok")) as mock_merge, \
@@ -287,10 +270,8 @@ class TestMergeWorkflowRunPlanFile:
         base_dir = tmp_path / ".worktrees"
         base_dir.mkdir()
 
-        with patch("subprocess.run") as mock_run, \
-             patch.object(workflow, "run_post_merge_tests") as mock_tests:
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
-            mock_tests.return_value = TestResult(passed=True, output="", exit_code=0)
             import worktree_manager as wm
             with patch.object(wm.WorktreeManager, "merge_to_main",
                                return_value=MergeResult(success=True, conflict=False, message="ok")), \
@@ -308,10 +289,8 @@ class TestMergeWorkflowRunPlanFile:
         base_dir = tmp_path / ".worktrees"
         base_dir.mkdir()
 
-        with patch("subprocess.run") as mock_run, \
-             patch.object(workflow, "run_post_merge_tests") as mock_tests:
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
-            mock_tests.return_value = TestResult(passed=True, output="", exit_code=0)
             import worktree_manager as wm
             with patch.object(wm.WorktreeManager, "merge_to_main",
                                return_value=MergeResult(success=True, conflict=False, message="ok")) as mock_merge, \
@@ -355,10 +334,8 @@ class TestMergeWorkflowE2E:
         base_dir = tmp_path / ".worktrees"
         base_dir.mkdir()
 
-        with patch("subprocess.run") as mock_run, \
-             patch.object(workflow, "run_post_merge_tests") as mock_tests:
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-            mock_tests.return_value = TestResult(passed=True, output="", exit_code=0)
             import worktree_manager as wm
             with patch.object(wm.WorktreeManager, "merge_to_main",
                                return_value=MergeResult(success=True, conflict=False, message="ok")) as mock_merge, \
@@ -400,10 +377,8 @@ class TestMergeWorkflowE2E:
         assert fake_redis.get("plan-runner:runners:ccc123:merge_status") == "conflict"
 
         # 2차: retry (plan_file 재전달)
-        with patch("subprocess.run") as mock_run, \
-             patch.object(workflow, "run_post_merge_tests") as mock_tests:
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0)
-            mock_tests.return_value = TestResult(passed=True, output="", exit_code=0)
             with patch.object(wm.WorktreeManager, "merge_to_main",
                                return_value=MergeResult(success=True, conflict=False, message="ok")) as mock_merge2, \
                  patch.object(wm.WorktreeManager, "remove", return_value=True):

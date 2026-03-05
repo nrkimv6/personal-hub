@@ -219,11 +219,18 @@ class TestInlineMergeConflictAutoRetry:
         from merge_workflow import WorkflowResult
         mock_result = WorkflowResult(merged=False, tests_passed=False, conflict=True, message="conflict")
 
+        mock_proc = MagicMock()
+        mock_proc.stdout = "merge: plan/test"
+        mock_proc.returncode = 0
+
         with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
-             patch.object(cl, "_cleanup_process_state"):
+             patch.object(cl, "_post_merge_pipeline", return_value=True), \
+             patch.object(cl, "_cleanup_process_state"), \
+             patch("subprocess.run", return_value=mock_proc), \
+             patch("worktree_manager.WorktreeManager.remove", return_value=True):
             mock_wf = MagicMock()
             mock_wf.run.return_value = mock_result
             mock_wf_cls.return_value = mock_wf
@@ -285,6 +292,7 @@ class TestInlineMergeConflictAutoRetry:
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
+             patch.object(cl, "_post_merge_pipeline", return_value=True), \
              patch.object(cl, "_cleanup_process_state"), \
              patch("subprocess.run", return_value=mock_proc), \
              patch("worktree_manager.WorktreeManager.remove") as mock_remove:
@@ -327,6 +335,7 @@ class TestInlineMergeConflictAutoRetry:
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
+             patch.object(cl, "_post_merge_pipeline", return_value=True), \
              patch.object(cl, "_cleanup_process_state"), \
              patch("subprocess.run", return_value=mock_proc), \
              patch("worktree_manager.WorktreeManager.remove", side_effect=Exception("rm fail")):
@@ -353,6 +362,7 @@ class TestInlineMergeConflictAutoRetry:
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
+             patch.object(cl, "_post_merge_pipeline", return_value=True), \
              patch.object(cl, "_cleanup_process_state"), \
              patch("subprocess.run", side_effect=Exception("verify fail")), \
              patch("worktree_manager.WorktreeManager.remove") as mock_remove:

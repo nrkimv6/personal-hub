@@ -174,7 +174,8 @@ class TestInlineMergeBranchFromRedis:
         with patch.dict(sys.modules, {"merge_lock": mock_merge_lock}):
             with patch.object(mw.MergeWorkflow, "run", mock_workflow_run):
                 with patch.object(cl, "_cleanup_process_state", MagicMock()):
-                    cl._do_inline_merge(runner_id, redis)
+                    with patch.object(cl, "_post_merge_pipeline", return_value=True):
+                        cl._do_inline_merge(runner_id, redis)
 
         return captured
 

@@ -802,6 +802,198 @@ def _launch_conflict_resolver_process(runner_id: str, branch: str, worktree_path
         return {"success": False, "message": str(e)}
 
 
+def _launch_auto_fix_process(runner_id: str, test_output: str, targets: dict, redis_client, pub_fn=None) -> dict:
+    """plan-runner auto-fix 서브커맨드로 자동 수정 프로세스를 실행한다.
+
+    Returns:
+        {"success": bool, "message": str}
+    """
+    import os, tempfile
+    # test_output을 임시 파일에 기록
+    error_file_path = PROJECT_ROOT / "logs" / f"auto-fix-{runner_id}.log"
+    try:
+        error_file_path.parent.mkdir(parents=True, exist_ok=True)
+        error_file_path.write_text(test_output, encoding="utf-8")
+    except Exception as e:
+        if pub_fn:
+            pub_fn(f"[AUTO-FIX] error-file 기록 실패: {e}")
+
+    target_args = []
+    for t in targets:
+        target_args += ["--target", t]
+
+    cmd = [
+        str(PLAN_RUNNER_PYTHON), "-m", "plan_runner", "auto-fix",
+        str(PROJECT_ROOT),
+        *target_args,
+        "--max-attempts", "1",
+        "--skip-test",
+        "--error-file", str(error_file_path),
+    ]
+
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONUNBUFFERED"] = "1"
+    env.pop("CLAUDECODE", None)
+    env["PLAN_RUNNER_RUNNER_ID"] = runner_id
+    env["REDIS_DB"] = str(REDIS_DB)
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(PLAN_RUNNER_MODULE_PATH),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            timeout=300,
+        )
+        output = (proc.stdout or "") + (proc.stderr or "")
+        if pub_fn and output:
+            pub_fn(f"[AUTO-FIX] {output[-500:]}")
+        if proc.returncode == 0:
+            logger.info(f"[auto-fix] 성공 (runner_id={runner_id})")
+            return {"success": True, "message": "auto-fix 성공"}
+        else:
+            stderr_text = (proc.stderr or "").strip()
+            error_lines = [l.strip() for l in stderr_text.splitlines() if l.strip() and ("Error" in l or "Exception" in l)]
+            if error_lines:
+                msg = error_lines[-1][:300]
+            else:
+                non_empty = [l.strip() for l in stderr_text.splitlines() if l.strip() and not l.strip().startswith(("│", "┌", "└", "├", "─"))]
+                msg = "; ".join(non_empty[-3:])[:300] if non_empty else f"exit code {proc.returncode}"
+            logger.warning(f"[auto-fix] 실패 (returncode={proc.returncode}): {msg}")
+            return {"success": False, "message": msg}
+    except subprocess.TimeoutExpired:
+        logger.error(f"[auto-fix] timeout (300s, runner_id={runner_id})")
+        return {"success": False, "message": "auto-fix timeout (300s)"}
+    except Exception as e:
+        logger.error(f"[auto-fix] 실행 오류: {e}")
+        return {"success": False, "message": str(e)}
+
+
+def _post_merge_pipeline(runner_id: str, redis_client, pub_fn) -> bool:
+    """merge 성공 후 서비스 재시작 → HTTP/빌드 테스트 → auto-fix 파이프라인.
+
+    Returns:
+        True: 모든 테스트 통과 (또는 변경 대상 없음)
+        False: fix 실패 → revert 완료
+    """
+    import sys as _sys
+    _sys.path.insert(0, str(PLAN_RUNNER_MODULE_PATH))
+    from plan_runner.core.merge import (
+        detect_restart_targets, restart_services, revert_merge,
+        run_http_tests, run_frontend_build,
+    )
+
+    python_path = str(PROJECT_ROOT / ".venv" / "Scripts" / "python.exe")
+
+    try:
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "testing")
+    except Exception:
+        pass
+
+    # 1. 변경 대상 감지
+    try:
+        targets = detect_restart_targets(PROJECT_ROOT)
+    except Exception as e:
+        pub_fn(f"[PIPELINE] detect_restart_targets 오류: {e} — 테스트 스킵")
+        return True
+
+    if not targets:
+        pub_fn("[PIPELINE] 변경 대상 없음 — 테스트 스킵")
+        return True
+
+    # 2. 서비스 재시작
+    try:
+        restart_services(PROJECT_ROOT, python_path, targets)
+        pub_fn(f"[PIPELINE] 서비스 재시작 완료 (targets: {list(targets.keys())})")
+    except Exception as e:
+        pub_fn(f"[PIPELINE] 서비스 재시작 실패: {e}")
+
+    test_output = ""
+    test_passed = True
+
+    # 3. 테스트/빌드
+    if targets.get("frontend"):
+        try:
+            build_result = run_frontend_build(PROJECT_ROOT)
+            if not build_result.passed:
+                test_output = build_result.output
+                test_passed = False
+                pub_fn(f"[PIPELINE] frontend 빌드 실패: {build_result.output[:200]}")
+        except Exception as e:
+            test_output = str(e)
+            test_passed = False
+            pub_fn(f"[PIPELINE] frontend 빌드 오류: {e}")
+
+    if test_passed and (targets.get("api") or targets.get("worker")):
+        try:
+            http_result = run_http_tests(PROJECT_ROOT, python_path)
+            if not http_result.passed:
+                test_output = http_result.output
+                test_passed = False
+                pub_fn(f"[PIPELINE] HTTP 테스트 실패: {http_result.output[:200]}")
+        except Exception as e:
+            test_output = str(e)
+            test_passed = False
+            pub_fn(f"[PIPELINE] HTTP 테스트 오류: {e}")
+
+    if test_passed:
+        pub_fn("[PIPELINE] post-merge 검증 통과")
+        return True
+
+    # 4. auto-fix 시도
+    try:
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "fixing")
+    except Exception:
+        pass
+    pub_fn("[PIPELINE] auto-fix 시도 중...")
+    fix_result = _launch_auto_fix_process(runner_id, test_output, targets, redis_client, pub_fn=pub_fn)
+
+    if fix_result["success"]:
+        # fix 후 재테스트
+        retry_passed = True
+        if targets.get("frontend"):
+            try:
+                retry_result = run_frontend_build(PROJECT_ROOT)
+                if not retry_result.passed:
+                    retry_passed = False
+                    pub_fn(f"[PIPELINE] fix 후 빌드 재실패: {retry_result.output[:200]}")
+            except Exception as e:
+                retry_passed = False
+        if retry_passed and (targets.get("api") or targets.get("worker")):
+            try:
+                retry_http = run_http_tests(PROJECT_ROOT, python_path)
+                if not retry_http.passed:
+                    retry_passed = False
+                    pub_fn(f"[PIPELINE] fix 후 HTTP 재실패: {retry_http.output[:200]}")
+            except Exception as e:
+                retry_passed = False
+        if retry_passed:
+            pub_fn("[PIPELINE] auto-fix 후 검증 통과")
+            return True
+
+    # 5. 최종 실패 → revert
+    pub_fn("[PIPELINE] fix 실패 — revert 진행")
+    try:
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "test_failed")
+    except Exception:
+        pass
+    try:
+        revert_merge(PROJECT_ROOT)
+        pub_fn("[PIPELINE] revert 완료")
+    except Exception as e:
+        pub_fn(f"[PIPELINE] revert 실패: {e}")
+    try:
+        restart_services(PROJECT_ROOT, python_path, targets)
+    except Exception:
+        pass
+    return False
+
+
 def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
     """merge_requested 플래그가 있을 때 _stream_output finally에서 호출되는 인라인 merge 함수.
 
@@ -901,12 +1093,17 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
         )
 
         # 3/4. 결과 처리
-        if result.merged and result.tests_passed:
-            _pub("merge 성공 — 완료")
+        if result.merged:
+            _pub("merge 성공 — post-merge 파이프라인 실행")
+            pipeline_ok = _post_merge_pipeline(runner_id, redis_client, _pub)
+            if not pipeline_ok:
+                _pub("post-merge 파이프라인 실패 — worktree 보존 (이미 revert 완료)")
+                return
             try:
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
             except Exception:
                 pass
+            _pub("merge 성공 — 완료")
 
             # plan 잔여 항목 확인 — 잔여 있으면 재시작 플래그 설정
             resolved_plan_file = _resolve_todo_file(plan_file)
@@ -969,28 +1166,37 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                         except Exception:
                             pass
                     else:
-                        _pub("auto-resolve 성공 — merge 완료")
-                        try:
-                            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
-                        except Exception:
-                            pass
+                        _pub("auto-resolve 성공 — post-merge 파이프라인 실행")
+                        pipeline_ok = _post_merge_pipeline(runner_id, redis_client, _pub)
                         try:
                             WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file, branch=branch_str)
                             _pub("worktree/branch 정리 완료")
                         except Exception as wt_err:
                             _pub(f"worktree 정리 실패 (무시): {wt_err}")
+                        if not pipeline_ok:
+                            _pub("post-merge 파이프라인 실패 (이미 revert 완료)")
+                            _cleanup_process_state(runner_id, redis_client)
+                            return
+                        try:
+                            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+                        except Exception:
+                            pass
                         _cleanup_process_state(runner_id, redis_client)
                 except Exception as verify_err:
-                    _pub(f"auto-resolve merge commit 검증 실패 ({verify_err}) — merged로 처리")
-                    try:
-                        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
-                    except Exception:
-                        pass
+                    _pub(f"auto-resolve merge commit 검증 실패 ({verify_err}) — merged로 처리, pipeline 실행")
+                    pipeline_ok = _post_merge_pipeline(runner_id, redis_client, _pub)
                     try:
                         WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file, branch=branch_str)
                         _pub("worktree/branch 정리 완료")
                     except Exception as wt_err:
                         _pub(f"worktree 정리 실패 (무시): {wt_err}")
+                    if not pipeline_ok:
+                        _cleanup_process_state(runner_id, redis_client)
+                        return
+                    try:
+                        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+                    except Exception:
+                        pass
                     _cleanup_process_state(runner_id, redis_client)
             else:
                 _pub(f"auto-resolve 실패 — clean 상태로 복원 후 worktree 보존: {resolve_result['message'][:200]}")
@@ -1004,12 +1210,6 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                     redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
                 except Exception:
                     pass
-        elif result.merged and not result.tests_passed:
-            _pub(f"merge 후 테스트 실패 — worktree 보존: {result.message[:200]}")
-            try:
-                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "test_failed")
-            except Exception:
-                pass
         else:
             _pub(f"merge 실패: {result.message[:200]}")
             try:
