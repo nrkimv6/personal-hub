@@ -17,7 +17,12 @@ from unittest.mock import MagicMock, patch, call
 import fakeredis
 import pytest
 
-_SCRIPT_PATH = Path(__file__).parent.parent.parent / "scripts" / "dev-runner-command-listener.py"
+# scripts/ 디렉토리를 sys.path에 추가 — merge_workflow, worktree_manager 등 import용
+_SCRIPTS_DIR = Path(__file__).parent.parent.parent / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+_SCRIPT_PATH = _SCRIPTS_DIR / "dev-runner-command-listener.py"
 _mock_noise = types.ModuleType("listener_noise_filter")
 _mock_noise.NOISE_BLOCK_MARKERS = []
 _mock_noise.is_noise_line = lambda line: False
@@ -467,7 +472,6 @@ class TestMergeWorkflowRegression:
     def test_merge_workflow_run_no_longer_calls_tests_R(self, tmp_path):
         """R(Right): MergeWorkflow.run() 호출 후 run_post_merge_tests 미호출"""
         import fakeredis
-        sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
         from merge_workflow import MergeWorkflow, TestResult
         import worktree_manager as wm
 
