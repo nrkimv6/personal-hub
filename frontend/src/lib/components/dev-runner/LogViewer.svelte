@@ -367,7 +367,7 @@
 
 <div class="flex flex-col h-full min-h-0">
 	<!-- Toolbar -->
-	<div class="flex items-center justify-between px-3 py-2 border-b border-gray-700 shrink-0 bg-gray-900">
+	<div class="flex items-center justify-between px-3 py-2 border-b border-border shrink-0 bg-gray-900">
 		<div class="flex items-center gap-2">
 			<span class="text-xs font-medium uppercase tracking-wider text-gray-300">Live Logs</span>
 			<div class="flex items-center gap-1">
