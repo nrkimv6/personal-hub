@@ -71,6 +71,7 @@ class LLMService:
         model: str = "",
         cli_options: dict = None,
         queue_name: str = "utility",
+        mode: str = "single",
     ) -> LLMRequest:
         """요청을 큐에 추가 (non-blocking).
 
@@ -116,13 +117,21 @@ class LLMService:
             model=model,
             cli_options=json.dumps(cli_options, ensure_ascii=False) if cli_options else None,
             queue_name=queue_name,
+            mode=mode,
         )
         self.db.add(request)
         self.db.commit()
         self.db.refresh(request)
 
-        logger.info(f"LLM 요청 생성: id={request.id}, caller={caller_type}:{caller_id}, queue={queue_name}, by={requested_by}")
+        logger.info(f"LLM 요청 생성: id={request.id}, caller={caller_type}:{caller_id}, queue={queue_name}, mode={mode}, by={requested_by}")
         return request
+
+    def update_chat_session(self, request_id: int, chat_session_id: str) -> None:
+        """chat_session_id DB 업데이트."""
+        request = self.db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+        if request:
+            request.chat_session_id = chat_session_id
+            self.db.commit()
 
     def get_result(
         self,

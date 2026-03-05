@@ -1435,14 +1435,48 @@ class LLMWorker:
             if request:
                 logger.info(
                     f"Pending 요청 발견: id={request.id}, queue={request.queue_name}, "
-                    f"caller={request.caller_type}:{request.caller_id}"
+                    f"caller={request.caller_type}:{request.caller_id}, mode={getattr(request, 'mode', 'single')}"
                 )
-                await self._execute_request(request, db, service)
+                if getattr(request, "mode", "single") == "chat":
+                    await self._delegate_to_chat_executor(request, service)
+                else:
+                    await self._execute_request(request, db, service)
 
         except Exception as e:
             logger.error(f"Pending 요청 처리 오류: {e}", exc_info=True)
         finally:
             db.close()
+
+    async def _delegate_to_chat_executor(self, request: LLMRequest, service: LLMService):
+        """Chat 요청을 Chat Executor에 위임 (Redis LPUSH)."""
+        from app.shared.redis.client import RedisClient
+
+        service.mark_processing(request.id)
+        self._update_worker_state("processing", request.id)
+
+        chat_session_id = f"llm-chat:stream:{request.id}"
+        service.update_chat_session(request.id, chat_session_id)
+
+        command = {
+            "action": "execute",
+            "request_id": request.id,
+            "prompt": request.prompt,
+            "provider": request.provider,
+            "model": request.model,
+            "cli_options": json.loads(request.cli_options) if request.cli_options else {},
+            "chat_session_id": chat_session_id,
+            "timestamp": datetime.now().isoformat(),
+        }
+
+        redis_client = await RedisClient.get_client()
+        if redis_client:
+            await redis_client.lpush("llm-chat:commands", json.dumps(command, ensure_ascii=False))
+            logger.info(f"Chat 요청 위임: id={request.id} → llm-chat:commands")
+        else:
+            logger.error(f"Redis 연결 없음. chat 요청 위임 실패: id={request.id}")
+            service.mark_failed(request.id, error_message="Redis 연결 없음 — chat 위임 실패")
+
+        self._update_worker_state("idle", None)
 
     async def _execute_request(
         self,
