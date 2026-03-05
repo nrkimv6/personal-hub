@@ -137,35 +137,38 @@ class TestExecutorServiceCommand:
         assert "plan_file" not in cmd
 
 
+SENTINEL = "__ALL_PLANS__"
+
+
 class TestRedisStateSaving:
-    """Redis 상태 저장 로직 테스트 (plan_file None → "ALL" 변환)"""
+    """Redis 상태 저장 로직 테스트 (plan_file None → SENTINEL 변환)"""
 
     def _save_state(self, plan_file: str | None, redis_client: MagicMock) -> dict:
-        """command listener 148~159행의 Redis 저장 로직 재현"""
+        """command listener Redis 저장 로직 재현"""
         state = {
             "pid": 12345,
-            "plan_file": plan_file or "ALL",
+            "plan_file": plan_file or SENTINEL,
             "log_file_path": "/tmp/test.log",
             "start_time": "2026-02-14T00:00:00",
             "status": "running",
         }
         redis_client.set("dev-runner:state:log_file_path", state["log_file_path"])
         redis_client.set("dev-runner:state:pid", state["pid"])
-        redis_client.set("dev-runner:state:plan_file", plan_file or "ALL")
+        redis_client.set("dev-runner:state:plan_file", plan_file or SENTINEL)
         redis_client.set("dev-runner:state:start_time", state["start_time"])
         redis_client.set("dev-runner:state:status", state["status"])
         return state
 
-    def test_parallel_mode_saves_ALL_as_plan_file(self):
-        """parallel=True, plan_file=None → Redis에 "ALL" 저장"""
+    def test_parallel_mode_saves_sentinel_as_plan_file(self):
+        """parallel=True, plan_file=None → Redis에 "__ALL_PLANS__" sentinel 저장"""
         redis_client = MagicMock()
         state = self._save_state(plan_file=None, redis_client=redis_client)
 
         # state dict 확인
-        assert state["plan_file"] == "ALL"
+        assert state["plan_file"] == SENTINEL
 
         # Redis 저장 확인
-        redis_client.set.assert_any_call("dev-runner:state:plan_file", "ALL")
+        redis_client.set.assert_any_call("dev-runner:state:plan_file", SENTINEL)
 
     def test_single_mode_saves_actual_plan_file(self):
         """plan_file="test.md" → Redis에 "test.md" 저장"""
@@ -183,19 +186,19 @@ class TestRedisStateSaving:
         assert state["plan_file"] == "test.md"
         redis_client.set.assert_any_call("dev-runner:state:plan_file", "test.md")
 
-    def test_empty_string_plan_file_saves_ALL(self):
-        """plan_file="" (빈 문자열) → Redis에 "ALL" 저장 (Boundary)
+    def test_empty_string_plan_file_saves_sentinel(self):
+        """plan_file="" (빈 문자열) → Redis에 "__ALL_PLANS__" sentinel 저장 (Boundary)
 
-        빈 문자열은 Python의 `or` 연산자에서 falsy로 처리되므로 "ALL"로 변환되어야 함.
+        빈 문자열은 Python의 `or` 연산자에서 falsy로 처리되므로 sentinel로 변환되어야 함.
         """
         redis_client = MagicMock()
         state = self._save_state(plan_file="", redis_client=redis_client)
 
         # state dict 확인
-        assert state["plan_file"] == "ALL", "빈 문자열 plan_file은 'ALL'로 변환되어야 함"
+        assert state["plan_file"] == SENTINEL, f"빈 문자열 plan_file은 '{SENTINEL}'로 변환되어야 함"
 
         # Redis 저장 확인
-        redis_client.set.assert_any_call("dev-runner:state:plan_file", "ALL")
+        redis_client.set.assert_any_call("dev-runner:state:plan_file", SENTINEL)
 
 
 class TestStreamOutputMergeFlow:

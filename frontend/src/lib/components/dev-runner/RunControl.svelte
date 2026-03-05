@@ -20,15 +20,17 @@
 	let showModelSettings = $state(false);
 	let maxCycles = $state(0);
 
+	const ALL_PLANS_SENTINEL = '__ALL_PLANS__';
+
 	// 실행 중인 plan 표시 정보
 	let runningPlanName = $derived(
 		!status?.running ? '' :
-		status.plan_file === 'ALL' ? '전체 실행' :
-		status.plan_file ? status.plan_file.split(/[\\/]/).pop() ?? '' : '실행 중'
+		(!status.plan_file || status.plan_file === ALL_PLANS_SENTINEL || status.plan_file === 'ALL') ? '전체 실행' :
+		status.plan_file.split(/[\\/]/).pop() ?? ''
 	);
 	let runningEngine = $derived(status?.engine ?? 'claude');
 	let runningPlanProgress = $derived(
-		status?.running && status.plan_file && status.plan_file !== 'ALL'
+		status?.running && status.plan_file && status.plan_file !== ALL_PLANS_SENTINEL && status.plan_file !== 'ALL'
 			? (plans.find(p => p.path === status!.plan_file)?.progress ?? null)
 			: null
 	);

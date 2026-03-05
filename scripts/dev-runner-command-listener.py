@@ -55,6 +55,8 @@ RESULTS_KEY = "plan-runner:command_results"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 ACTIVE_RUNNERS_KEY = "plan-runner:active_runners"
 RECENT_RUNNERS_KEY = "plan-runner:recent_runners"  # sorted set: score=종료 timestamp
+PLAN_FILE_ALL = "__ALL_PLANS__"  # 전체실행 sentinel — plan_file 미지정 시 Redis에 저장
+_LEGACY_ALL = "ALL"  # 하위 호환: 이전 버전에서 저장된 "ALL" 값 인식용
 RECENT_RUNNERS_TTL = 86400  # 24시간 (초) — executor_service.py의 RECENT_RUNNERS_TTL과 동일하게 유지
 # per-runner 키 suffix 전체 목록 — app/modules/dev_runner/services/executor_service.py의 RUNNER_KEY_SUFFIXES와 동일
 RUNNER_KEY_SUFFIXES = (
@@ -161,7 +163,7 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         # worktree 정리 (머지 완료 또는 실패로 정리 필요한 경우)
         merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
         plan_file_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
-        if plan_file_val == "ALL":
+        if plan_file_val in (PLAN_FILE_ALL, _LEGACY_ALL):
             plan_file_val = None
 
         # 구현중 plan은 워크트리 보존 (재실행 시 이어서 작업 가능)
@@ -829,7 +831,7 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
             pass
 
         worktree_path = Path(worktree_path_str) if worktree_path_str else None
-        plan_file = plan_file_str if (plan_file_str and plan_file_str != "ALL") else None
+        plan_file = plan_file_str if (plan_file_str and plan_file_str not in (PLAN_FILE_ALL, _LEGACY_ALL)) else None
 
         if not worktree_path or not worktree_path.is_dir():
             _pub(f"worktree 경로 없음 또는 유효하지 않음: {worktree_path_str} — merge 중단")
@@ -1405,7 +1407,7 @@ def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner
         # stream_log_path는 executor._open_log() 실행 후 per-runner 키로 갱신됨 (초기엔 빈 값)
         redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid", process.pid)
-        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file or "ALL")
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file or PLAN_FILE_ALL)
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", branch or f"runner/{runner_id}")
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", datetime.now().isoformat())
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
@@ -1620,7 +1622,7 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str) 
             return
 
         plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
-        if plan_file == "ALL":
+        if plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
             plan_file = None
 
         # 1. merge_status = "queued" + lock 대기
@@ -1865,7 +1867,7 @@ def _do_resolve_conflict(runner_id: str, redis_client: redis.Redis, command_id: 
             return
 
         plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
-        if plan_file == "ALL":
+        if plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
             plan_file = None
 
         # branch 계산
@@ -1927,8 +1929,8 @@ def _do_cleanup_worktree(runner_id: str, redis_client: redis.Redis, command_id: 
     result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
     try:
         plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
-        # "ALL"은 parallel 모드 placeholder이므로 plan_file로 취급하지 않음
-        if plan_file == "ALL":
+        # PLAN_FILE_ALL/__ALL_PLANS__은 parallel 모드 sentinel이므로 plan_file로 취급하지 않음
+        if plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
             plan_file = None
         WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file or None)
         redis_client.delete(
