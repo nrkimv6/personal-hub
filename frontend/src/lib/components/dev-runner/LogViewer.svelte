@@ -467,7 +467,7 @@
 		{:else}
 			{#each lines as line, i}
 				{#if line.tag === 'NOISE'}
-					<div class="py-0.5 leading-5 {line.isStale ? 'opacity-30' : ''}">
+					<div class="py-0.5 leading-5">
 						{#if expandedNoiseIndices.includes(i)}
 							<span class="text-gray-600 text-xs italic">[NOISE] {line.noiseCount} lines suppressed</span>
 							<button
@@ -482,16 +482,16 @@
 						{/if}
 					</div>
 				{:else if isSeparator(line.raw)}
-					<div class="py-2 text-center select-none {line.isStale ? 'opacity-25' : 'opacity-60'}">
+					<div class="py-2 text-center select-none opacity-60">
 						<span class="text-gray-500 text-[10px]">{extractSeparatorText(line.raw)}</span><!-- separator -->
 					</div>
 				{:else if line.tag === 'CYCLE'}
-					<div class="py-1.5 -mx-3 px-3 mt-2 bg-gray-700/60 border-l-2 border-gray-400 {line.isStale ? 'opacity-30' : ''}">
+					<div class="py-1.5 -mx-3 px-3 mt-2 bg-gray-700/60 border-l-2 border-gray-400">
 						<span class="font-bold text-white text-xs tracking-wider">{line.message}</span>
 					</div>
 				{:else if line.tag === 'PHASE'}
 					{@const style = getTagStyle(line.tag)}
-					<div class="dr-log-line dr-log-line-phase flex items-start gap-2 py-0.5 leading-5 mt-1.5 border-t border-indigo-900/40 {line.isStale ? 'opacity-30' : ''}">
+					<div class="dr-log-line dr-log-line-phase flex items-start gap-2 py-0.5 leading-5 mt-1.5 border-t border-indigo-900/40">
 						<span class="text-xs text-gray-400/60 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
 						<span class="shrink-0 w-[42px] text-right {style.text}">
 							<span class="dr-tag-badge {style.bg}">{line.tag}</span>
@@ -502,7 +502,7 @@
 					</div>
 				{:else if line.tag === 'TOOL'}
 					{@const style = getTagStyle(line.tag)}
-					<div class="dr-log-line dr-log-line-tool flex items-start gap-2 py-0.5 leading-5 opacity-40 {line.isStale ? 'opacity-20' : ''}">
+					<div class="dr-log-line dr-log-line-tool flex items-start gap-2 py-0.5 leading-5 opacity-40">
 						<span class="text-xs text-gray-600 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
 						<span class="shrink-0 w-[42px] text-right {style.text}">
 							<span class="dr-tag-badge {style.bg}">{line.tag}</span>
@@ -514,7 +514,7 @@
 				{:else if line.tag === 'RESULT'}
 					{@const style = getTagStyle(line.tag)}
 					{@const resultMatch = line.message.match(/^(\d+)→\s?(.*)/)}
-					<div class="dr-log-line dr-log-line-result flex items-start gap-0 py-0 leading-5 {line.isStale ? 'opacity-20' : 'opacity-60'}">
+					<div class="dr-log-line dr-log-line-result flex items-start gap-0 py-0 leading-5 opacity-60">
 						{#if resultMatch}
 							<span class="text-xs text-gray-600 shrink-0 w-[56px] tabular-nums select-none text-right pr-1">{line.timestamp}</span>
 							<span class="shrink-0 w-[42px] text-right {style.text}">
@@ -533,7 +533,7 @@
 					</div>
 				{:else if line.tag}
 					{@const style = getTagStyle(line.tag)}
-					<div class="dr-log-line dr-log-line-{line.tag.toLowerCase()} flex items-start gap-2 py-0.5 leading-5 {line.isStale ? 'opacity-30' : ''} {line.tag === 'ERROR' ? 'bg-red-950/50 -mx-3 px-3 rounded' : ''}">
+					<div class="dr-log-line dr-log-line-{line.tag.toLowerCase()} flex items-start gap-2 py-0.5 leading-5 {line.tag === 'ERROR' ? 'bg-red-950/50 -mx-3 px-3 rounded' : ''}">
 						<span class="text-xs text-gray-400/60 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
 						<span class="shrink-0 w-[42px] text-right {style.text}">
 							<span class="dr-tag-badge {style.bg}">{line.tag}</span>
@@ -543,7 +543,7 @@
 						</span>
 					</div>
 				{:else}
-					<div class="py-0.5 leading-5 {line.isStale ? 'opacity-30' : ''} text-gray-400 break-all whitespace-pre-wrap max-h-[120px] overflow-y-auto">
+					<div class="py-0.5 leading-5 text-gray-400 break-all whitespace-pre-wrap max-h-[120px] overflow-y-auto">
 						{line.raw}
 					</div>
 				{/if}
