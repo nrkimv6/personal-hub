@@ -49,7 +49,7 @@ def test_merge_lock_acquire_release(redis_client):
     - release 후 lock 키 삭제 확인
     - 재획득 가능 확인
     """
-    runner_id = "test-runner-001"
+    runner_id = "t-mlock-001"
 
     # 1. lock 획득
     acquired = acquire_merge_lock(redis_client, runner_id, timeout=10)

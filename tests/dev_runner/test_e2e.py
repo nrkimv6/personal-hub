@@ -94,7 +94,8 @@ async def test_e2e_full_lifecycle(dev_runner_listener, executor_service):
     req = RunRequest(
         engine="gemini",
         dry_run=True,
-        plan_file="test_plan_e2e_mock.md"
+        plan_file="test_plan_e2e_mock.md",
+        test_source="test_e2e",
     )
     
     # 1. Start execution

@@ -460,7 +460,7 @@ class TestDoInlineMergeIntegration:
         redis = self._make_redis(worktree_path=wt_path)
         set_calls = []
 
-        runner_id = "r_seq"
+        runner_id = "t-postmrg-seq"
         RUNNER_KEY_PREFIX = cl.RUNNER_KEY_PREFIX
 
         def pipeline_side(*a, **kw):

@@ -31,7 +31,7 @@ class TestTransmissionPayload:
     @pytest.mark.asyncio
     async def test_transmission_payload_format(self, executor_service):
         """Mock Send - 실제 LLM API 호출(또는 실행 명령 전파) 전 생성되는 Payload 검증"""
-        request = RunRequest(
+        request = RunRequest(test_source="transmission", 
             engine="gemini",
             plan_file="test_plan.md",
             max_cycles=3
