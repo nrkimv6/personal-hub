@@ -128,3 +128,60 @@ class TestPreMergeGateInlineRightClean:
         all_args = list(args) + list(kwargs.values())
         assert "test-runner" in all_args or kwargs.get("runner_id") == "test-runner", \
             f"runner_id가 MergeWorkflow.run() 인자에 없음. args={args}, kwargs={kwargs}"
+
+
+# ========== TC #18: R(Right) — dirty 시 auto_commit_stage 호출 후 merge 진행 ==========
+
+class TestPreMergeGateInlineDirtyAutoCommit:
+    """test_pre_merge_gate_inline_dirty_auto_commit: dirty 상태 1회 → auto_commit_stage 호출 → 2차 gate 통과 → merge 진행"""
+
+    def test_pre_merge_gate_inline_dirty_auto_commit(self, cl, tmp_path):
+        """R(Right): pre_merge_gate 1차 (False, dirty), 2차 (True, OK) → auto_commit_stage 1회 호출, merge 진행"""
+        # Arrange
+        worktree_dir = tmp_path / "worktree"
+        worktree_dir.mkdir()
+
+        redis, store = _make_redis(str(worktree_dir), branch="plan/test-branch")
+
+        mock_wf_result = MagicMock()
+        mock_wf_result.merged = True
+        mock_wf_result.tests_passed = True
+        mock_wf_result.conflict = False
+        mock_wf_result.message = "merge 성공"
+
+        mock_workflow_instance = MagicMock()
+        mock_workflow_instance.run.return_value = mock_wf_result
+
+        mock_MergeWorkflow = MagicMock(return_value=mock_workflow_instance)
+
+        # pre_merge_gate: 1차 dirty 반환, 2차 OK 반환
+        gate_side_effects = [
+            (False, "git dirty 상태: M app/foo.py"),
+            (True, "OK"),
+        ]
+
+        # Act
+        with patch.object(cl, "_cleanup_process_state"), \
+             patch("merge_lock.acquire_merge_lock", return_value=True), \
+             patch("merge_lock.release_merge_lock", return_value=True), \
+             patch("plan_runner.core.pipeline.pre_merge_gate", side_effect=gate_side_effects) as mock_gate, \
+             patch("plan_runner.core.pipeline.auto_commit_stage", return_value=True) as mock_auto_commit, \
+             patch("merge_workflow.MergeWorkflow", mock_MergeWorkflow), \
+             patch("worktree_manager.WorktreeManager.remove", return_value=None), \
+             patch("subprocess.run") as mock_subproc:
+
+            mock_subproc.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+            cl._do_inline_merge("test-runner", redis)
+
+        # Assert: pre_merge_gate 2회 호출 (1차 dirty, 2차 OK)
+        assert mock_gate.call_count == 2, \
+            f"pre_merge_gate 호출 횟수 기대 2, 실제 {mock_gate.call_count}"
+
+        # Assert: auto_commit_stage 1회 호출됨
+        mock_auto_commit.assert_called_once(), \
+            "dirty 감지 후 auto_commit_stage가 호출되지 않음"
+
+        # Assert: 2차 gate 통과 후 merge 진행 (MergeWorkflow.run() 호출됨)
+        mock_MergeWorkflow.assert_called_once()
+        mock_workflow_instance.run.assert_called_once()
