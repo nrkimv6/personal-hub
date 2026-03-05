@@ -44,7 +44,7 @@
 	let anyCrashed = $derived(!anyRunning && !!runStatus?.crashed);
 </script>
 
-<div class="border-b bg-white shrink-0">
+<div class="bg-card border border-border rounded-md shrink-0 overflow-hidden">
 	<!-- 상단 바: 연결 상태 + runner 상태 + elapsed + 액션 버튼 -->
 	<div class="flex items-center justify-between px-3 py-2">
 		<!-- 좌측: 연결 상태 + runner 상태 + elapsed -->
