@@ -841,6 +841,18 @@ function Start-CombinedLogTail {
     try {
         while ($true) {
             # Plan-runner 로그 자동 감지
+            # $useRedis 주기적 재평가 — Redis가 나중에 시작된 경우 자동 전환
+            if (-not $useRedis) {
+                $now = [DateTime]::Now
+                if (($now - $lastRunnerRefresh).TotalSeconds -ge $runnerRefreshInterval) {
+                    $rePing = & redis-cli -t 1 PING 2>$null
+                    if ($rePing -eq "PONG") {
+                        $useRedis = $true
+                        $lastRunnerRefresh = [DateTime]::MinValue  # 즉시 runner 재조회 트리거
+                        Write-Host "[SYSTEM] Redis connected — switching to Redis-based runner detection" -ForegroundColor Green
+                    }
+                }
+            }
             if ($useRedis) {
                 # Redis 기반: 10초마다 active_runners 재조회
                 $now = [DateTime]::Now
