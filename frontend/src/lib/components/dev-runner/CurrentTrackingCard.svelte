@@ -22,7 +22,7 @@
 </script>
 
 {#if tracking}
-	<div class="mb-3 rounded-lg border border-purple-500/20 bg-purple-500/10 px-3 py-2">
+	<div class="bg-card mb-3 rounded-md border border-primary/20 px-3 py-2">
 		<div class="mb-1 flex items-center gap-2">
 			<span class="text-xs font-medium text-purple-400">추적 중</span>
 			<span
