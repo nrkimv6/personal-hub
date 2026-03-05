@@ -749,7 +749,7 @@ def _restart_plan_runner_after_merge(plan_file: str, redis_client: redis.Redis, 
 
         # Redis per-runner 상태 등록
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path", str(log_file))
-        redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path", str(log_file))  # PS: 소스 감지용 (delete→set)
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid", process.pid)
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file)
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", "main")
@@ -1808,8 +1808,8 @@ def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner
 
         # Redis에 상태 저장 (per-runner 키)
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path", str(log_file))
-        # stream_log_path는 executor._open_log() 실행 후 per-runner 키로 갱신됨 (초기엔 빈 값)
-        redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
+        # executor._open_log()가 stream_log_path를 갱신하지 않으므로 listener 단계에서 직접 설정 (PS: 소스 대응)
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path", str(log_file))
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid", process.pid)
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file or PLAN_FILE_ALL)
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", branch or f"runner/{runner_id}")
