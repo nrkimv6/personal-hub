@@ -498,3 +498,96 @@ class TestWorkflowRunNoCommitsSkip:
         # Assert: conflict=False
         assert result.conflict is False, \
             f"conflict=False 기대 (skip), 실제: {result.conflict}"
+
+
+# ========== TC #24: R(Right) — 커밋 있을 때 정상 merge (회귀) ==========
+
+class TestWorkflowRunWithCommitsMerge:
+    """test_workflow_run_with_commits_merge: worktree 커밋 있을 때 merge_to_main() 호출 확인 (회귀)"""
+
+    def test_workflow_run_with_commits_merge(self, tmp_path):
+        """R(Right): git log main..{branch} 출력 'abc123 commit msg' → merge_to_main() 호출 확인"""
+        import sys
+        import importlib.util
+        from pathlib import Path
+        from unittest.mock import patch, MagicMock
+
+        scripts_dir = Path(__file__).parent.parent.parent / "scripts"
+        wf_path = scripts_dir / "merge_workflow.py"
+        if not wf_path.exists():
+            pytest.skip(f"merge_workflow.py not found: {wf_path}")
+
+        scripts_dir_str = str(scripts_dir)
+        if scripts_dir_str not in sys.path:
+            sys.path.insert(0, scripts_dir_str)
+
+        spec = importlib.util.spec_from_file_location("merge_workflow_tc24", wf_path)
+        wf_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(wf_mod)
+        MergeWorkflow = wf_mod.MergeWorkflow
+        WorkflowResult = wf_mod.WorkflowResult
+
+        project_root = tmp_path / "repo"
+        project_root.mkdir()
+        worktree_path = tmp_path / "worktree"
+        worktree_path.mkdir()
+        base_dir = tmp_path / "worktrees"
+        base_dir.mkdir()
+
+        redis = MagicMock()
+        redis.publish.return_value = 0
+        redis.lrange.return_value = []
+        redis.set.return_value = True
+
+        # merge_to_main 성공 mock
+        mock_merge_result = MagicMock()
+        mock_merge_result.success = True
+        mock_merge_result.conflict = False
+        mock_merge_result.already_merged = False
+        mock_merge_result.message = "merge 성공"
+
+        merge_to_main_calls = []
+
+        def fake_subprocess_run(cmd, **kwargs):
+            cmd_list = list(cmd)
+            if cmd_list[:2] == ["git", "add"]:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            if cmd_list[:2] == ["git", "commit"]:
+                return MagicMock(returncode=0, stdout="[plan/test-branch abc123] commit", stderr="")
+            # git log main..branch --oneline → 커밋 1개 있음
+            if cmd_list[:2] == ["git", "log"] and "--oneline" in cmd_list:
+                return MagicMock(returncode=0, stdout="abc123 commit msg", stderr="")
+            # git log -1 --format=%H (commit hash 조회)
+            if cmd_list[:2] == ["git", "log"] and "--format=%H" in cmd_list:
+                return MagicMock(returncode=0, stdout="abc123deadbeef", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        wf = MergeWorkflow(project_root=project_root, redis_client=redis)
+
+        with patch("subprocess.run", side_effect=fake_subprocess_run), \
+             patch("worktree_manager.WorktreeManager.merge_to_main",
+                   return_value=mock_merge_result) as mock_merge_to_main, \
+             patch("worktree_manager.WorktreeManager.remove", return_value=None):
+
+            result = wf.run(
+                runner_id="test-runner",
+                worktree_path=worktree_path,
+                base_dir=base_dir,
+                branch="plan/test-branch",
+            )
+
+        # Assert: merge_to_main() 호출됨 (커밋이 있으므로 skip되지 않고 merge 진행)
+        mock_merge_to_main.assert_called_once(), \
+            "커밋 있을 때 merge_to_main()이 호출되어야 함"
+
+        # Assert: merged=True (성공)
+        assert result.merged is True, \
+            f"merged=True 기대, 실제: {result.merged}"
+
+        # Assert: conflict=False
+        assert result.conflict is False, \
+            f"conflict=False 기대, 실제: {result.conflict}"
+
+        # Assert: skip 메시지 아님 (정상 merge 경로)
+        assert "변경사항 없음" not in result.message, \
+            f"커밋 있는 경우 skip 메시지 미포함 기대, 실제: '{result.message}'"
