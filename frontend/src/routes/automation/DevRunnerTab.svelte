@@ -502,6 +502,45 @@
 				</div>
 			{/if}
 
+			<!-- 모바일 액션 바 (sm 미만에서만 표시) -->
+			<div class="flex items-center gap-1 sm:hidden shrink-0 px-2 pb-1">
+				<!-- Plans -->
+				<button
+					onclick={() => { taskHistoryOpen = true; taskHistoryTab = 'plans'; }}
+					class="flex items-center justify-center h-7 w-7 border border-border rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
+					title="Plans"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+				</button>
+				<!-- Execute -->
+				<button
+					onclick={() => { showExecutionModal = true; }}
+					class="flex items-center justify-center h-7 w-7 border border-border rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
+					title="Execute"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+				</button>
+				<!-- Tasks -->
+				<button
+					onclick={() => { taskHistoryOpen = true; taskHistoryTab = 'tasks'; }}
+					class="flex items-center justify-center h-7 w-7 border border-border rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
+					title="Tasks"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><polyline points="3 6 4 7 6 5"/><polyline points="3 12 4 13 6 11"/><polyline points="3 18 4 19 6 17"/></svg>
+				</button>
+				<!-- Merge (+ 대기 건수 뱃지) -->
+				<button
+					onclick={() => { taskHistoryOpen = true; taskHistoryTab = 'merge'; }}
+					class="relative flex items-center justify-center h-7 w-7 border border-border rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
+					title="Merge"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>
+					{#if mergeQueuedCount > 0}
+						<span class="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[8px] font-bold rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5">{mergeQueuedCount}</span>
+					{/if}
+				</button>
+			</div>
+
 			<!-- 모바일: 좌측 패널 오버레이 -->
 			{#if taskHistoryOpen}
 				<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
