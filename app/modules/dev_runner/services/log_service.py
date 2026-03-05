@@ -1,8 +1,11 @@
 """로그 스트리밍 서비스 - Redis Pub/Sub 기반 실시간 로그"""
 
 import asyncio
+import logging
 import time
 import re
+
+logger = logging.getLogger(__name__)
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -94,6 +97,7 @@ class LogService:
                 )
 
         # fallback: Redis list에서 merge 로그 히스토리 조회 (dm-* runner 등 로그 파일 없는 경우)
+        logger.warning(f"[tail_log_file] runner {runner_id}: 로그 파일 미탐지 → Redis list fallback")
         try:
             log_list_key = f"plan-runner:logs:list:{runner_id}"
             logs = self.redis_client.lrange(log_list_key, -n_lines, -1)

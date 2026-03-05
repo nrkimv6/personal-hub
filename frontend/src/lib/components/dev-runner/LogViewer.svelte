@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { devRunnerLogApi } from '$lib/api';
 
@@ -240,6 +240,9 @@
 
 	function manualReconnect() {
 		reconnectCount = 0;
+		if (lines.length <= 3) {
+			void loadRecent();
+		}
 		connectSSE();
 	}
 
@@ -305,6 +308,17 @@
 		};
 	}
 
+	async function loadFull() {
+		try {
+			const res = await devRunnerLogApi.full(runnerId, 0, 500);
+			if (res.lines.length > 0) {
+				lines = res.lines.map((text: string) => parseLine(text, true));
+			}
+		} catch {
+			// full 로그 없을 수 있음
+		}
+	}
+
 	async function loadRecent() {
 		try {
 			const res = await devRunnerLogApi.recent(runnerId, 100);
@@ -327,6 +341,12 @@
 			}
 
 			lines = parsed;
+
+			// 醫낅즺 runner 濡쒓렇 ?뚯씪 誘명깘吏 ??full ?붾뱶?ъ씤?몃줈 ?꾪솚
+			const allMerge = parsed.length > 0 && parsed.every((l: ParsedLine) => l.tag === 'MERGE');
+			if (!running && (parsed.length === 0 || allMerge)) {
+				await loadFull();
+			}
 
 			// Phase 3: 로드된 lines에 SEPARATOR가 있으면 pendingStale = true로 초기화
 			// → 다음 SSE SEPARATOR 수신 시 이전 로그를 정상적으로 grayout 처리하기 위함

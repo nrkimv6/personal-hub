@@ -84,8 +84,12 @@ class EventService:
             data = dict(zip(fields, values))
             data["runner_id"] = runner_id
             # plan_file이 None(Redis 키 미설정)이면 branch 또는 PLAN_FILE_ALL fallback
+            # 단, 정지 runner는 sentinel 반환 억제 (프론트엔드 제목 덮어씌움 방지)
             if not data.get("plan_file"):
-                data["plan_file"] = data.get("branch") or PLAN_FILE_ALL
+                if data.get("status") == "stopped":
+                    data["plan_file"] = None
+                else:
+                    data["plan_file"] = data.get("branch") or PLAN_FILE_ALL
             return data
         except Exception:
             return None
