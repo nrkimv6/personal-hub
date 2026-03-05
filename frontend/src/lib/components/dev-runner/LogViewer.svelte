@@ -459,8 +459,10 @@
 						<span class="text-gray-500 text-[10px]">{extractSeparatorText(line.raw)}</span><!-- separator -->
 					</div>
 				{:else if line.tag === 'CYCLE'}
-					<div class="py-1.5 -mx-3 px-3 mt-2 bg-gray-700/60 border-l-2 border-gray-400 {line.isStale ? 'opacity-30' : ''}">
-						<span class="font-bold text-white text-xs tracking-wider">{line.message}</span>
+					{@const style = getTagStyle(line.tag)}
+					<div class="phase-separator {line.isStale ? 'opacity-30' : ''}">
+						<span class="dr-tag-badge {style.bg}">{line.tag}</span>
+						<span class="font-mono text-[10px] text-muted-foreground">{line.message}</span>
 					</div>
 				{:else if line.tag === 'PHASE'}
 					{@const style = getTagStyle(line.tag)}
