@@ -56,6 +56,15 @@ class LLMRequest(Base):
     # 큐 구분 — 'utility'(기존 자동화 기본값) / 'system'(시스템/개발 우선순위 높음)
     queue_name = Column(String(30), default="utility", nullable=False, index=True)
 
+    # Chat 모드 관련
+    mode = Column(String(20), default="single", nullable=False)
+    # "single": 기존 claude -p 방식 (결과 대기 후 반환)
+    # "chat": 채팅형 세션 (스트리밍 출력)
+    chat_session_id = Column(String(100), nullable=True)
+    # chat 모드에서 세션 식별자 (Redis Pub/Sub 채널명: llm-chat:stream:{request_id})
+    stream_log_path = Column(String(500), nullable=True)
+    # chat 모드에서 스트리밍 로그 파일 경로
+
     # Soft delete
     deleted_at = Column(DateTime)
 
