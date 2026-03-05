@@ -11,9 +11,12 @@
 
 주의: 과금 발생 가능 (LLM API 호출)
 """
+import ctypes
 import os
 import re
 import signal
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -36,6 +39,86 @@ BASE_URL = "/api/v1/dev-runner"
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 _config = DevRunnerConfig()
+
+
+def _is_pid_alive(pid: int) -> bool:
+    """프로세스 생존 여부 확인.
+
+    Windows: OpenProcess(SYNCHRONIZE) — handle != 0이면 살아있음
+    POSIX: os.kill(pid, 0) — ProcessLookupError이면 죽음
+    """
+    if sys.platform == "win32":
+        SYNCHRONIZE = 0x00100000
+        handle = ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE, False, pid)
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        return False
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except OSError:
+            return True
+
+
+def _force_kill(pid: int) -> None:
+    """강제 종료. 실패해도 무시."""
+    try:
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/F", "/PID", str(pid)],
+                capture_output=True,
+            )
+        else:
+            os.kill(pid, signal.SIGKILL)
+    except Exception:
+        pass
+
+
+def _wait_pid_and_kill(redis_conn, runner_id: str, timeout: int = 30) -> None:
+    """Redis에서 PID가 기록될 때까지 대기 후 SIGTERM → 확인 → 강제종료.
+
+    PID 기록 전 teardown이 실행되는 타이밍 문제를 해결하기 위해
+    최대 timeout초 동안 PID 조회를 재시도한다.
+    """
+    try:
+        deadline = time.monotonic() + timeout
+        pid = None
+        while time.monotonic() < deadline:
+            # status가 None/stopped/error이면 프로세스 이미 종료
+            status = redis_conn.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:status")
+            if status in (None, "stopped", "error"):
+                return
+
+            pid_str = redis_conn.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:pid")
+            if pid_str:
+                try:
+                    pid = int(pid_str)
+                    break
+                except ValueError:
+                    return
+            time.sleep(0.5)
+
+        if pid is None:
+            return
+
+        # SIGTERM 전송
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, OSError):
+            return
+
+        # 최대 5초 대기 후 살아있으면 강제종료
+        for _ in range(10):
+            time.sleep(0.5)
+            if not _is_pid_alive(pid):
+                return
+        _force_kill(pid)
+    except Exception:
+        pass
 
 
 @pytest.fixture(autouse=True)
@@ -117,12 +200,7 @@ class TestFullE2E:
         yield
         # teardown: 각 runner PID kill (db=0에서 PID 조회)
         for rid in self._started_runners:
-            pid_str = real_redis_db0.get(f"{RUNNER_KEY_PREFIX}:{rid}:pid")
-            if pid_str:
-                try:
-                    os.kill(int(pid_str), signal.SIGTERM)
-                except (ProcessLookupError, ValueError, OSError):
-                    pass
+            _wait_pid_and_kill(real_redis_db0, rid, timeout=30)
         # Redis 키 정리 (db=0)
         for rid in self._started_runners:
             for suffix in RUNNER_KEY_SUFFIXES:
@@ -208,3 +286,61 @@ class TestFullE2E:
 
         # 두 runner가 동일한 로그 파일을 공유하지 않아야 함 (1개이면 공유 = 버그)
         assert len(log_paths_set) != 1, f"두 runner가 같은 로그 파일 공유: {log_paths_set}"
+
+
+class TestWaitPidAndKill:
+    """_wait_pid_and_kill 헬퍼 단위 테스트 (full_e2e 마크 없음 — 빠른 단위 TC)"""
+
+    def test_wait_pid_and_kill_delayed_pid(self):
+        """R(Right): 처음 3회 None → 4회째 PID → SIGTERM 호출 확인"""
+        from unittest.mock import MagicMock, patch
+
+        call_count = [0]
+
+        def side_effect(key):
+            if ":pid" in key:
+                call_count[0] += 1
+                return "12345" if call_count[0] > 3 else None
+            return "running"  # status
+
+        redis_mock = MagicMock()
+        redis_mock.get.side_effect = side_effect
+
+        with patch("tests.dev_runner.test_full_e2e_real.os.kill") as mock_kill, \
+             patch("tests.dev_runner.test_full_e2e_real._is_pid_alive", return_value=False), \
+             patch("tests.dev_runner.test_full_e2e_real.time.sleep"):
+            _wait_pid_and_kill(redis_mock, "abc123", timeout=5)
+
+        mock_kill.assert_any_call(12345, signal.SIGTERM)
+
+    def test_wait_pid_and_kill_already_stopped(self):
+        """B(Boundary): status=stopped 즉시 → os.kill 미호출"""
+        from unittest.mock import MagicMock, patch
+
+        redis_mock = MagicMock()
+        redis_mock.get.side_effect = lambda key: "stopped" if ":status" in key else None
+
+        with patch("tests.dev_runner.test_full_e2e_real.os.kill") as mock_kill:
+            _wait_pid_and_kill(redis_mock, "abc123", timeout=5)
+
+        mock_kill.assert_not_called()
+
+    def test_wait_pid_and_kill_force_kill_on_timeout(self):
+        """E(Error): SIGTERM 후 계속 alive → _force_kill 호출"""
+        from unittest.mock import MagicMock, patch
+
+        redis_mock = MagicMock()
+        redis_mock.get.return_value = "99999"
+
+        with patch("tests.dev_runner.test_full_e2e_real.os.kill"), \
+             patch("tests.dev_runner.test_full_e2e_real._is_pid_alive", return_value=True), \
+             patch("tests.dev_runner.test_full_e2e_real._force_kill") as mock_force, \
+             patch("tests.dev_runner.test_full_e2e_real.time.sleep"):
+            _wait_pid_and_kill(redis_mock, "abc123", timeout=1)
+
+        mock_force.assert_called_once_with(99999)
+
+    def test_is_pid_alive_dead_process(self):
+        """R(Right): 존재하지 않는 PID → False"""
+        result = _is_pid_alive(999999999)
+        assert result is False

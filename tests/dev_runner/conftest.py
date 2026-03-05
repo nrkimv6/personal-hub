@@ -31,12 +31,23 @@ def redis_cleanup():
         after_recent = set(r.zrange("plan-runner:recent_runners", 0, -1) or [])
         new_ids = (after_active - before_active) | (after_recent - before_recent)
         for runner_id in new_ids:
-            # PID kill (프로세스 잔류 방지)
-            pid_str = r.get(f"plan-runner:runners:{runner_id}:pid")
+            # PID kill (프로세스 잔류 방지) — PID 기록 지연 대응: 최대 5초 retry
+            import os as _os, signal as _signal, time as _time, sys as _sys, subprocess as _subprocess
+            pid_str = None
+            for _ in range(10):  # 최대 5초 대기
+                pid_str = r.get(f"plan-runner:runners:{runner_id}:pid")
+                if pid_str:
+                    break
+                _time.sleep(0.5)
             if pid_str:
                 try:
-                    import os, signal
-                    os.kill(int(pid_str), signal.SIGTERM)
+                    _os.kill(int(pid_str), _signal.SIGTERM)
+                    _time.sleep(2)
+                    # 강제종료 fallback
+                    if _sys.platform == "win32":
+                        _subprocess.run(["taskkill", "/F", "/PID", str(pid_str)], capture_output=True)
+                    else:
+                        _os.kill(int(pid_str), _signal.SIGKILL)
                 except (ProcessLookupError, ValueError, OSError):
                     pass
             r.srem("plan-runner:active_runners", runner_id)
