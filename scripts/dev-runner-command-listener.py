@@ -1372,6 +1372,26 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
         # 순서: 재시작 플래그 읽기 → 재시작 실행 → cleanup
         # (cleanup이 WorktreeManager.remove 등에서 hang될 경우에도 재시작 보장)
         logger.info(f"[_do_inline_merge] finally 블록 진입 (runner_id={runner_id})")
+
+        # [Phase 4-9] merge-results Redis list에 결과 push (merge history API 용)
+        try:
+            _final_merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+            _merge_success = _final_merge_status == "merged"
+            _merge_result_payload = json.dumps({
+                "runner_id": runner_id,
+                "branch": locals().get("branch_str"),
+                "plan_file": locals().get("plan_file_str"),
+                "timestamp": datetime.now().isoformat(),
+                "status": "completed" if _merge_success else "failed",
+                "success": _merge_success,
+                "message": f"merge_status={_final_merge_status}",
+            }, ensure_ascii=False)
+            redis_client.lpush("plan-runner:merge-results", _merge_result_payload)
+            redis_client.expire("plan-runner:merge-results", 86400 * 7)
+            logger.info(f"[_do_inline_merge] merge-results push 완료 (runner_id={runner_id}, success={_merge_success})")
+        except Exception as _mr_err:
+            logger.warning(f"[_do_inline_merge] merge-results push 실패 (무시): {_mr_err}")
+
         _restart_plan_file = None
         _restart_remaining = 0
         try:
