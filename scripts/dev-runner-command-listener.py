@@ -1548,13 +1548,45 @@ def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Re
 
         # merge_requested 플래그 확인 (1회) — 이후 workflow 상태 업데이트 + 분기 모두에 재사용
         _merge_requested = False
-        if runner_id and exit_code == 0:
+        if runner_id:
             try:
                 _flag = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
                 _merge_requested = bool(_flag)
             except Exception as e:
                 logger.warning(f"[_stream_output] merge_requested 플래그 조회 실패 (runner_id={runner_id}): {e}")
-        logger.info(f"[_stream_output] merge 분기 판정: _merge_requested={_merge_requested} (runner_id={runner_id})")
+
+        # exit_code != 0인 경우: merge_requested가 있어도 커밋 수를 확인해 판정
+        if runner_id and _merge_requested and exit_code != 0:
+            try:
+                branch = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
+                if branch:
+                    _git_log = subprocess.run(
+                        ["git", "log", f"main..{branch}", "--oneline"],
+                        capture_output=True, text=True, cwd=str(PROJECT_ROOT)
+                    )
+                    commit_lines = [l for l in _git_log.stdout.splitlines() if l.strip()]
+                    count = len(commit_lines)
+                    if count > 0:
+                        logger.info(
+                            f"[_stream_output] exit_code={exit_code}이지만 worktree 커밋 {count}개 존재 — merge 시도"
+                        )
+                    else:
+                        _merge_requested = False
+                        logger.info(
+                            f"[_stream_output] exit_code={exit_code}, worktree 커밋 없음 — merge 스킵"
+                        )
+                else:
+                    _merge_requested = False
+                    logger.info(
+                        f"[_stream_output] exit_code={exit_code}, branch 정보 없음 — merge 스킵"
+                    )
+            except Exception as e:
+                _merge_requested = False
+                logger.warning(f"[_stream_output] exit_code!=0 커밋 수 확인 실패 — merge 스킵: {e}")
+
+        logger.info(
+            f"[_stream_output] merge 판정: exit_code={exit_code}, merge_requested={_merge_requested}, runner_id={runner_id}"
+        )
 
         # Workflow 상태 업데이트: 정상 종료(0) → merge_pending or completed, 비정상 → failed
         if _wf_manager and runner_id:
