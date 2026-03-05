@@ -11,11 +11,12 @@ def _try_connect_redis():
     """Redis 연결 시도. 실패 시 None 반환."""
     try:
         import redis as redis_lib
-        r = redis_lib.Redis(host="localhost", port=6379, decode_responses=True)
+        r = redis_lib.Redis(host="localhost", port=6379, decode_responses=True, socket_connect_timeout=1)
         r.ping()
         return r
     except Exception:
         return None
+
 
 
 @pytest.fixture(autouse=True, scope="session")

@@ -3,7 +3,7 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { gitReposApi } from '$lib/api/gitRepos';
-  import type { GitRepo, GitStatus, GitLogEntry, OperationLog } from '$lib/types/gitRepos';
+  import type { GitRepo, GitStatus, GitLogEntry, OperationLog, AutoCleanupResult } from '$lib/types/gitRepos';
 
   // URL params
   const repoId = $derived(Number($page.params.id));
@@ -26,6 +26,12 @@
   let commitMsg = $state('');
   let generatingMsg = $state(false);
   let llmProvider = $state<'claude' | 'gemini'>('claude');
+
+  // 자동 정리
+  let cleanupRequestId = $state<number | null>(null);
+  let cleanupLogs = $state<string[]>([]);
+  let cleanupDone = $state(false);
+  let cleanupResult = $state<AutoCleanupResult | null>(null);
 
   // 선택된 파일
   let selectedStaged: Set<string> = $state(new Set());
@@ -217,6 +223,55 @@
     }
   }
 
+  async function handleAutoCleanup() {
+    if (!confirm('미커밋 파일을 자동 분류·커밋하시겠습니까?\n(tmp_* 패턴 파일은 archive로 이동됩니다)')) return;
+    
+    working = true;
+    cleanupRequestId = null;
+    cleanupLogs = [];
+    cleanupDone = false;
+    cleanupResult = null;
+    
+    try {
+      const res = await gitReposApi.autoCleanup(repoId, { provider: llmProvider });
+      cleanupRequestId = res.request_id;
+      
+      const eventSource = new EventSource(`/api/v1/llm/chat/${cleanupRequestId}/stream`);
+      
+      eventSource.onmessage = (e) => {
+        cleanupLogs = [...cleanupLogs, e.data];
+      };
+      
+      eventSource.addEventListener('completed', async () => {
+        eventSource.close();
+        cleanupDone = true;
+        await loadCleanupResult();
+        await loadAll();
+      });
+      
+      eventSource.onerror = () => {
+        eventSource.close();
+        working = false;
+      };
+      
+    } catch (e) {
+      showToast('자동 정리 시작 실패', 'error');
+      working = false;
+    }
+  }
+
+  async function loadCleanupResult() {
+    if (!cleanupRequestId) return;
+    try {
+      const res = await gitReposApi.getCleanupResult(repoId, cleanupRequestId);
+      cleanupResult = res;
+    } catch (e) {
+      // ignore
+    } finally {
+      working = false;
+    }
+  }
+
   async function showFileDiff(file: string, staged: boolean) {
     diffFile = file;
     try {
@@ -269,6 +324,7 @@
       <button class="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50" onclick={handleFetch} disabled={working}>페치</button>
       <button class="px-3 py-1.5 text-sm rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50" onclick={handlePull} disabled={working}>풀</button>
       <button class="px-3 py-1.5 text-sm rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50" onclick={handlePush} disabled={working}>푸시</button>
+      <button class="px-3 py-1.5 text-sm rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50" onclick={handleAutoCleanup} disabled={working}>🧹 자동 정리</button>
       {#if repo?.last_ahead != null && repo.last_ahead > 0}
         <span class="text-xs text-green-600 dark:text-green-400 self-center">↑{repo.last_ahead} ahead</span>
       {/if}
@@ -276,6 +332,42 @@
         <span class="text-xs text-red-500 dark:text-red-400 self-center">↓{repo.last_behind} behind</span>
       {/if}
     </div>
+
+    <!-- 자동 정리 로그 패널 -->
+    {#if cleanupRequestId}
+      <div class="mb-6 p-4 rounded-xl bg-gray-900 text-gray-100 font-mono text-xs overflow-hidden border border-amber-500/30">
+        <div class="flex justify-between items-center mb-2 border-b border-gray-800 pb-2">
+          <span class="text-amber-400 font-bold">🧹 Git 자동 정리 로그 (ID: {cleanupRequestId})</span>
+          {#if cleanupDone}
+            <span class="text-green-400 font-bold">✅ 정리 완료</span>
+          {:else}
+            <span class="animate-pulse text-amber-500">⏳ 진행 중...</span>
+          {/if}
+        </div>
+        <pre class="max-h-48 overflow-y-auto whitespace-pre-wrap">{cleanupLogs.join('\n')}</pre>
+        
+        {#if cleanupResult}
+          <div class="mt-3 pt-3 border-t border-gray-800 text-gray-300">
+            {#if cleanupResult.success}
+              <p class="text-green-400 mb-1">성공적으로 정리되었습니다.</p>
+              {#if cleanupResult.moved.length > 0}
+                <p>📦 이동된 파일 ({cleanupResult.moved.length}개): {cleanupResult.moved.join(', ')}</p>
+              {/if}
+              {#if cleanupResult.commits.length > 0}
+                <p>📝 생성된 커밋 ({cleanupResult.commits.length}개):</p>
+                <ul class="list-disc list-inside ml-2">
+                  {#each cleanupResult.commits as commit}
+                    <li>{commit.message} ({commit.files.length}개 파일)</li>
+                  {/each}
+                </ul>
+              {/if}
+            {:else}
+              <p class="text-red-400">정리 실패: {cleanupResult.error || '알 수 없는 오류'}</p>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    {/if}
 
     <!-- 탭 -->
     <div class="flex gap-1 mb-5 border-b border-gray-200 dark:border-gray-700">

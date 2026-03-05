@@ -87,3 +87,11 @@ export interface GitTaskResult {
   result?: OperationResult;
   completed_at?: string;
 }
+
+export interface AutoCleanupResult {
+  success: boolean;
+  moved: string[];
+  commits: { files: string[]; message: string }[];
+  error?: string;
+  status?: string; // pending, processing 등 상태 표시용 (API 응답 호환)
+}

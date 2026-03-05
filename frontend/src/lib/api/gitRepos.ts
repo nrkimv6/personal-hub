@@ -14,6 +14,7 @@ import type {
   DiscoverResult,
   GitTaskResponse,
   GitTaskResult,
+  AutoCleanupResult,
 } from '../types/gitRepos';
 
 const BASE = '/git-repos';
@@ -174,6 +175,22 @@ export const gitReposApi = {
   /** 작업 이력 조회 */
   getOperations(id: number, limit = 50): Promise<OperationLog[]> {
     return request<OperationLog[]>(`${BASE}/${id}/operations?limit=${limit}`);
+  },
+
+  /** 자동 정리 실행 (큐 발행) */
+  autoCleanup(
+    id: number,
+    opts?: { patterns?: string[]; provider?: string }
+  ): Promise<{ request_id: number; status: string }> {
+    return request<{ request_id: number; status: string }>(`${BASE}/${id}/auto-cleanup`, {
+      method: 'POST',
+      body: JSON.stringify(opts ?? {}),
+    });
+  },
+
+  /** 자동 정리 결과 조회 */
+  getCleanupResult(id: number, requestId: number): Promise<AutoCleanupResult> {
+    return request<AutoCleanupResult>(`${BASE}/${id}/cleanup-result?request_id=${requestId}`);
   },
 
   // ─────────────────────────────────────────────
