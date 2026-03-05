@@ -487,7 +487,7 @@
 			{/if}
 
 			<!-- 2컬럼 레이아웃: 좌측 패널 + 우측 Runner 영역 -->
-			<div class="flex-1 min-h-0 flex gap-0 overflow-hidden">
+			<div class="flex-1 min-h-0 flex gap-2 p-2 sm:p-3 overflow-hidden">
 
 				<!-- 좌측 패널: Plans/Tasks/Merge/설정 (모바일=오버레이, 데스크톱=고정) -->
 				<div class="
