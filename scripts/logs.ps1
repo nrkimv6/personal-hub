@@ -374,50 +374,56 @@ function Get-ActivePlanRunners {
     param([string]$LogDir)
     $result = @()
 
-    # Redis 연결 확인 (2초 타임아웃)
-    $pingOut = & redis-cli -t 2 PING 2>$null
-    if (-not $pingOut -or $pingOut.Trim() -ne "PONG") {
-        return $result
-    }
+    $py = Join-Path (Split-Path -Parent $PSScriptRoot) ".venv\Scripts\python.exe"
+    if (-not (Test-Path $py)) { return $result }
 
-    # 활성 runner_id 목록 (2초 타임아웃)
-    $runnerIds = & redis-cli -t 2 SMEMBERS "plan-runner:active_runners" 2>$null
-    if (-not $runnerIds) { return $result }
+    $pyCode = @'
+import json, sys
+try:
+    import redis
+    r = redis.Redis(socket_timeout=2)
+    r.ping()
+    runners = []
+    for rid in r.smembers("plan-runner:active_runners"):
+        rid = rid.decode()
+        def g(k): v = r.get(k); return v.decode() if v else None
+        runners.append({"rid": rid,
+            "logPath":    g(f"plan-runner:runners:{rid}:log_file_path"),
+            "streamPath": g(f"plan-runner:runners:{rid}:stream_log_path"),
+            "planFile":   g(f"plan-runner:runners:{rid}:plan_file"),
+            "pid":        g(f"plan-runner:runners:{rid}:pid")})
+    print(json.dumps(runners))
+except Exception:
+    print("[]")
+'@
 
-    foreach ($rid in $runnerIds) {
-        $rid = $rid.Trim()
-        if (-not $rid) { continue }
+    $jsonOut = & $py -c $pyCode 2>$null
+    if (-not $jsonOut) { return $result }
 
-        $logPath    = & redis-cli -t 2 GET "plan-runner:runners:${rid}:log_file_path" 2>$null
-        $planFile   = & redis-cli -t 2 GET "plan-runner:runners:${rid}:plan_file"    2>$null
-        $streamPath = & redis-cli -t 2 GET "plan-runner:runners:${rid}:stream_log_path" 2>$null
-        $pidVal     = & redis-cli -t 2 GET "plan-runner:runners:${rid}:pid"          2>$null
-
-        $logPath    = if ($logPath)    { $logPath.Trim()    } else { $null }
-        $planFile   = if ($planFile)   { $planFile.Trim()   } else { $null }
-        $streamPath = if ($streamPath) { $streamPath.Trim() } else { $null }
-        $pidVal     = if ($pidVal)     { $pidVal.Trim()     } else { $null }
-
-        $displayName = Get-PlanRunnerDisplayName -PlanFile ([System.IO.Path]::GetFileName($planFile))
-        $shortId = $rid.Substring(0, [Math]::Min(4, $rid.Length))
-
+    $runners = $jsonOut | ConvertFrom-Json
+    foreach ($r in $runners) {
+        $displayName = Get-PlanRunnerDisplayName -PlanFile ([System.IO.Path]::GetFileName($r.planFile))
+        $shortId = $r.rid.Substring(0, [Math]::Min(4, $r.rid.Length))
         $result += @{
-            RunnerId    = $rid
+            RunnerId    = $r.rid
             ShortId     = $shortId
             DisplayName = $displayName
-            LogPath     = $logPath
-            StreamPath  = $streamPath
-            PlanFile    = $planFile
-            PID         = $pidVal
+            LogPath     = $r.logPath
+            StreamPath  = $r.streamPath
+            PlanFile    = $r.planFile
+            PID         = $r.pid
         }
     }
     return $result
 }
 
-# Redis 연결 여부 + 활성 runner 캐시 (초기화 시)
+# Redis 연결 여부 — redis-cli 대신 Python redis 클라이언트 사용 (redis-cli PATH 의존 제거)
 $useRedis = $false
-$pingOut = & redis-cli PING 2>$null
-if ($pingOut -and $pingOut.Trim() -eq "PONG") { $useRedis = $true }
+$_py = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+if (Test-Path $_py) {
+    $pingOut = & $_py -c "import redis; r=redis.Redis(socket_timeout=2); print(r.ping())" 2>$null
+    if ($pingOut -and $pingOut.Trim() -eq "True") { $useRedis = $true }
+}
 
 # Check if log files are stale — 파일명 날짜(_YYYYMMDD_) 기반: 오늘 날짜 파일이면 항상 유효
 function Test-StaleLogFile {
