@@ -2222,13 +2222,22 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
             )
 
             # 3. 결과 처리
-            if merge_result.merged and merge_result.tests_passed:
+            if merge_result.merged:
                 _pub("merge 성공 — 완료")
-                try:
-                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
-                except Exception:
-                    pass
-                result = {"success": True, "message": merge_result.message, "action": "retry-merge"}
+                pipeline_ok = _post_merge_pipeline(runner_id, redis_client, _pub)
+                if pipeline_ok:
+                    try:
+                        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+                    except Exception:
+                        pass
+                    result = {"success": True, "message": merge_result.message, "action": "retry-merge"}
+                else:
+                    _pub("post-merge pipeline 실패 — test_failed")
+                    try:
+                        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "test_failed")
+                    except Exception:
+                        pass
+                    result = {"success": False, "message": "post-merge pipeline 실패", "action": "retry-merge"}
             elif merge_result.conflict:
                 _pub(f"merge 충돌 발생 — worktree 보존: {merge_result.message[:200]}")
                 try:
@@ -2236,13 +2245,6 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
                 except Exception:
                     pass
                 result = {"success": False, "message": merge_result.message, "conflict": True, "action": "retry-merge"}
-            elif merge_result.merged and not merge_result.tests_passed:
-                _pub(f"merge 후 테스트 실패 — worktree 보존: {merge_result.message[:200]}")
-                try:
-                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "test_failed")
-                except Exception:
-                    pass
-                result = {"success": False, "message": merge_result.message, "action": "retry-merge"}
             else:
                 _pub(f"merge 실패: {merge_result.message[:200]}")
                 try:
