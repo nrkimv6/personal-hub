@@ -297,7 +297,7 @@ def _monitor_pid_until_exit(runner_id: str, pid: int, redis_client: redis.Redis)
             if tail_thread and tail_thread.is_alive():
                 tail_thread.join(timeout=5)
             logger.info(f"[monitor_pid] runner {runner_id} → cleanup")
-            _cleanup_process_state(runner_id, redis_client, reason="pid_exit_detected")
+            _cleanup_process_state(runner_id, redis_client, reason="heartbeat_pid_exit")
             break
         time.sleep(1)
 
@@ -2672,13 +2672,13 @@ def main():
                                 _hb_ms = r.get(f"{RUNNER_KEY_PREFIX}:{rid}:merge_status")
                             except Exception:
                                 _hb_mr, _hb_ms = None, None
-                            if _hb_mr or _hb_ms in ("queued", "merging", "pending_merge"):
+                            if _hb_mr or _hb_ms in MERGE_ACTIVE_STATUSES:
                                 logger.info(
                                     f"heartbeat: runner {rid} 프로세스 종료 but 머지 진행중 "
                                     f"(merge_requested={bool(_hb_mr)}, merge_status={_hb_ms}) → cleanup 스킵"
                                 )
                             else:
-                                logger.warning(f"heartbeat: 프로세스 종료 감지 (runner_id: {rid}, exit code: {proc.returncode}), 상태 정리")
+                                logger.warning(f"heartbeat: 프로세스 종료 감지 (runner_id: {rid}, exit code: {proc.returncode}, merge_status={_hb_ms}), 상태 정리")
                                 _cleanup_process_state(rid, r, reason="heartbeat_dead_process")
                     # MergeOrchestrator health check 제거됨 — 인라인 merge로 대체
 
