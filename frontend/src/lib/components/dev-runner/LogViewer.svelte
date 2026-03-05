@@ -396,7 +396,8 @@
 				</button>
 			{/if}
 			<button
-				class="h-6 px-2 text-[10px] rounded transition-colors inline-flex items-center gap-1 {autoScroll ? 'text-blue-400' : 'text-gray-400'} hover:bg-gray-700"
+				class="relative h-6 w-6 rounded transition-colors inline-flex items-center justify-center {autoScroll ? 'text-primary' : 'text-muted-foreground'} hover:bg-gray-700"
+				title={autoScroll ? 'Pin (auto-scroll on)' : 'Unpin (auto-scroll off)'}
 				onclick={() => {
 					if (autoScroll) {
 						autoScroll = false;
@@ -408,13 +409,13 @@
 				}}
 			>
 				{#if autoScroll}
-					<svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-					Pause
+					<!-- Pin icon -->
+					<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
 				{:else}
-					<svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-					Resume
+					<!-- PinOff icon -->
+					<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="2" x2="22" y2="22"/><line x1="12" y1="17" x2="12" y2="22"/><path d="M9 9v1.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h12"/><path d="M15 9.34V6h1a2 2 0 0 0 0-4H7.89"/></svg>
 					{#if pauseBuffer.length > 0}
-						<span class="ml-0.5 text-[9px] bg-yellow-500/30 text-yellow-300 px-1 rounded-full leading-none py-0.5">
+						<span class="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] font-bold rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5 leading-none">
 							{pauseBuffer.length}
 						</span>
 					{/if}
