@@ -67,7 +67,6 @@ try:
     from app.worker.file_search_worker import FileSearchWorker
     from app.worker.plan_archive_listener import PlanArchiveListener
     from app.modules.git_repos.worker import GitRepoWorker
-    from app.worker.plan_archive_listener import PlanArchiveListener
 
     # 크롤러 및 워커 관련 로거들이 워커 로거와 같은 핸들러를 사용하도록 설정
     worker_handlers = logger.handlers
