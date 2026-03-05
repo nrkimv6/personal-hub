@@ -875,7 +875,7 @@ function Start-CombinedLogTail {
                         $activeKeys[$prKey] = $true
                         $activeKeys[$psKey] = $true
 
-                        if (-not $logConfig.ContainsKey($prKey)) {
+                        if (-not $logConfig.Contains($prKey)) {
                             # 새 runner 감지
                             Write-Host "[$prKey] === New runner detected: $($runner.RunnerId) ===" -ForegroundColor Green
                             $logConfig[$prKey] = @{ Path = $runner.LogPath;    Color = "White";    Tail = 10 }
