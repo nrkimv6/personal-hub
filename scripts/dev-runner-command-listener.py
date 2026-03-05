@@ -1387,7 +1387,7 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                 "runner_id": runner_id,
                 "branch": _final_branch,
                 "plan_file": _final_plan,
-                "timestamp": __import__("time").time(),
+                "timestamp": __import__("datetime").datetime.now().isoformat(),
                 "status": "done" if _is_success else "failed",
                 "success": _is_success,
                 "message": f"merge_status={_merge_status_final}",

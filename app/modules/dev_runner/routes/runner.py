@@ -105,6 +105,7 @@ async def enqueue_merge(request: MergeQueueEnqueueRequest):
 
 
 @router.get("/merge-history", response_model=list[MergeHistoryItem])
+@router.get("/merge/history", response_model=list[MergeHistoryItem])
 async def get_merge_history(limit: int = 50):
     """Merge 실행 이력 조회 (최신순, 기본 50건)"""
     return await executor_service.get_merge_history(limit=limit)
