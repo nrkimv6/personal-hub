@@ -185,3 +185,56 @@ class TestPreMergeGateInlineDirtyAutoCommit:
         # Assert: 2차 gate 통과 후 merge 진행 (MergeWorkflow.run() 호출됨)
         mock_MergeWorkflow.assert_called_once()
         mock_workflow_instance.run.assert_called_once()
+
+
+# ========== TC #19: B(Boundary) — 3회 재시도 후에도 dirty → merge 중단 ==========
+
+class TestPreMergeGateInlineDirty3xFail:
+    """test_pre_merge_gate_inline_dirty_3x_fail: dirty 상태 3회 재시도 후에도 실패 → merge 중단"""
+
+    def test_pre_merge_gate_inline_dirty_3x_fail(self, cl, tmp_path):
+        """B(Boundary): pre_merge_gate 4회 모두 (False, dirty) → merge_status='error', _cleanup_process_state 호출"""
+        # Arrange
+        worktree_dir = tmp_path / "worktree"
+        worktree_dir.mkdir()
+
+        redis, store = _make_redis(str(worktree_dir), branch="plan/test-branch")
+
+        mock_MergeWorkflow = MagicMock()
+
+        # pre_merge_gate: 4회 모두 dirty 반환 (1차 초기 + 3회 재시도)
+        gate_side_effects = [
+            (False, "git dirty 상태: M app/foo.py"),
+            (False, "git dirty 상태: M app/foo.py"),
+            (False, "git dirty 상태: M app/foo.py"),
+            (False, "git dirty 상태: M app/foo.py"),
+        ]
+
+        # Act
+        with patch.object(cl, "_cleanup_process_state") as mock_cleanup, \
+             patch("merge_lock.acquire_merge_lock", return_value=True), \
+             patch("merge_lock.release_merge_lock", return_value=True), \
+             patch("plan_runner.core.pipeline.pre_merge_gate", side_effect=gate_side_effects) as mock_gate, \
+             patch("plan_runner.core.pipeline.auto_commit_stage", return_value=True) as mock_auto_commit, \
+             patch("merge_workflow.MergeWorkflow", mock_MergeWorkflow), \
+             patch("worktree_manager.WorktreeManager.remove", return_value=None), \
+             patch("subprocess.run") as mock_subproc:
+
+            mock_subproc.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+            cl._do_inline_merge("test-runner", redis)
+
+        # Assert: auto_commit_stage 3회 호출 (재시도 3회)
+        assert mock_auto_commit.call_count == 3, \
+            f"auto_commit_stage 호출 횟수 기대 3, 실제 {mock_auto_commit.call_count}"
+
+        # Assert: merge_status가 "error"로 설정됨
+        merge_status = store.get(f"{RUNNER_KEY_PREFIX}:test-runner:merge_status")
+        assert merge_status == "error", \
+            f"merge_status 기대 'error', 실제 '{merge_status}'"
+
+        # Assert: MergeWorkflow.run() 미호출 (merge 중단)
+        mock_MergeWorkflow.assert_not_called()
+
+        # Assert: _cleanup_process_state 호출됨 (early return 시 + finally 블록에서 각 1회, 총 2회 이상)
+        mock_cleanup.assert_called()
