@@ -16,9 +16,16 @@ def _load_listener():
     script_path = Path(__file__).parent.parent.parent / "scripts" / "dev-runner-command-listener.py"
     spec = importlib.util.spec_from_file_location("dev_runner_command_listener", str(script_path))
     module = importlib.util.module_from_spec(spec)
-    # Mock some module-level constants that might fail during exec_module
+    # Mock some module-level constants
     module.PROJECT_ROOT = Path(__file__).parent.parent.parent
     module.WORKTREE_BASE_DIR = module.PROJECT_ROOT / ".worktrees"
+    # D:/work/project/tools/monitor-page -> D:/work/project -> D:/work/project/service/wtools/...
+    module.PLAN_RUNNER_MODULE_PATH = module.PROJECT_ROOT.parent.parent / "service/wtools/common/tools/plan-runner"
+    
+    # Ensure PLAN_RUNNER_MODULE_PATH is in sys.path so patches work
+    if str(module.PLAN_RUNNER_MODULE_PATH) not in sys.path:
+        sys.path.insert(0, str(module.PLAN_RUNNER_MODULE_PATH))
+        
     spec.loader.exec_module(module)
     return module
 
@@ -61,7 +68,7 @@ class TestInlineMergeConflictAutoRetry:
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
-             patch("plan_runner.core.merge._rebase_branch_onto_main", return_value={"success": True}), \
+             patch("core.merge._rebase_branch_onto_main", return_value={"success": True}), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": False, "message": "fail"}) as mock_resolve, \
              patch.object(cl, "_cleanup_process_state"), \
              patch.object(cl.WorktreeManager, "remove", return_value=True):
@@ -82,32 +89,26 @@ class TestInlineMergeConflictAutoRetry:
         redis = make_redis_mock(worktree_path=str(worktree), branch="plan/test")
 
         merge_status_sequence = []
-
         def track_set(key, value, *args, **kwargs):
-            if "merge_status" in key:
-                merge_status_sequence.append(value)
+            if "merge_status" in key: merge_status_sequence.append(value)
             return True
-
         redis.set.side_effect = track_set
 
         from merge_workflow import WorkflowResult
         mock_result = WorkflowResult(merged=False, tests_passed=False, conflict=True, message="conflict")
 
-        # git log -1 및 기타 서브프로세스 대응
         def mock_run_fn(cmd, *args, **kwargs):
             m = MagicMock()
             m.returncode = 0
-            if "log" in cmd:
-                m.stdout = "merge: plan/test"
-            else:
-                m.stdout = ""
+            if "log" in cmd: m.stdout = "merge: plan/test"
+            else: m.stdout = ""
             return m
 
         with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
-             patch.object(cl, "_rebase_branch_onto_main", return_value={"success": True}), \
+             patch("core.merge._rebase_branch_onto_main", return_value={"success": True}), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
              patch.object(cl, "_post_merge_pipeline", return_value=True), \
              patch.object(cl, "_cleanup_process_state"), \
@@ -131,12 +132,9 @@ class TestInlineMergeConflictAutoRetry:
         redis = make_redis_mock(worktree_path=str(worktree), branch="plan/test")
 
         merge_status_sequence = []
-
         def track_set(key, value, *args, **kwargs):
-            if "merge_status" in key:
-                merge_status_sequence.append(value)
+            if "merge_status" in key: merge_status_sequence.append(value)
             return True
-
         redis.set.side_effect = track_set
 
         from merge_workflow import WorkflowResult
@@ -146,7 +144,7 @@ class TestInlineMergeConflictAutoRetry:
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
-             patch.object(cl, "_rebase_branch_onto_main", return_value={"success": True}), \
+             patch("core.merge._rebase_branch_onto_main", return_value={"success": True}), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": False, "message": "markers remain"}), \
              patch.object(cl, "_cleanup_process_state"), \
              patch("subprocess.run", return_value=MagicMock(returncode=0)), \
@@ -181,7 +179,7 @@ class TestInlineMergeConflictAutoRetry:
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
-             patch.object(cl, "_rebase_branch_onto_main", return_value={"success": True}), \
+             patch("core.merge._rebase_branch_onto_main", return_value={"success": True}), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
              patch.object(cl, "_post_merge_pipeline", return_value=True), \
              patch.object(cl, "_cleanup_process_state"), \
@@ -223,7 +221,7 @@ class TestInlineMergeConflictAutoRetry:
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
-             patch.object(cl, "_rebase_branch_onto_main", return_value={"success": True}), \
+             patch("core.merge._rebase_branch_onto_main", return_value={"success": True}), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
              patch.object(cl, "_post_merge_pipeline", return_value=True), \
              patch.object(cl, "_cleanup_process_state"), \
@@ -257,7 +255,7 @@ class TestInlineMergeConflictAutoRetry:
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
-             patch.object(cl, "_rebase_branch_onto_main", return_value={"success": True}), \
+             patch("core.merge._rebase_branch_onto_main", return_value={"success": True}), \
              patch.object(cl, "_launch_conflict_resolver_process", return_value={"success": True, "message": "ok"}), \
              patch.object(cl, "_post_merge_pipeline", return_value=True), \
              patch.object(cl, "_cleanup_process_state"), \
