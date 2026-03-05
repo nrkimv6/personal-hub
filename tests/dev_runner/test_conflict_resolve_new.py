@@ -103,7 +103,7 @@ class TestInlineMergeConflictAutoRetry:
                 m.stdout = ""
             return m
 
-        with patch.object(cl, "MergeWorkflow") as mock_wf_cls, \
+        with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
@@ -142,7 +142,7 @@ class TestInlineMergeConflictAutoRetry:
         from merge_workflow import WorkflowResult
         mock_result = WorkflowResult(merged=False, tests_passed=False, conflict=True, message="conflict")
 
-        with patch.object(cl, "MergeWorkflow") as mock_wf_cls, \
+        with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
@@ -177,7 +177,7 @@ class TestInlineMergeConflictAutoRetry:
             else: m.stdout = ""
             return m
 
-        with patch.object(cl, "MergeWorkflow") as mock_wf_cls, \
+        with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
@@ -219,7 +219,7 @@ class TestInlineMergeConflictAutoRetry:
             else: m.stdout = ""
             return m
 
-        with patch.object(cl, "MergeWorkflow") as mock_wf_cls, \
+        with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
@@ -253,7 +253,7 @@ class TestInlineMergeConflictAutoRetry:
                 raise Exception("verify fail")
             return MagicMock(returncode=0, stdout="")
 
-        with patch.object(cl, "MergeWorkflow") as mock_wf_cls, \
+        with patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
              patch("merge_lock.acquire_merge_lock", return_value=True), \
              patch("merge_lock.release_merge_lock"), \
              patch("plan_runner.core.pipeline.pre_merge_gate", return_value=(True, "ok")), \
