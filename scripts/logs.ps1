@@ -90,6 +90,9 @@ function Get-LatestLogFile {
     return $null
 }
 
+# Plan-runner 로그 디렉토리 (list 블록에서도 사용하므로 여기서 먼저 정의)
+$planRunnerLogDir = "D:\work\project\service\wtools\common\logs"
+
 # List log files
 if ($Target -eq "list") {
     Write-Host "`n========================================" -ForegroundColor Cyan
@@ -274,7 +277,9 @@ function Get-LatestLogFilesMultiPattern {
         if ($f.Length -gt 0) { break }  # 비어있지 않은 파일 만나면 중단
     }
     # 오래된→최신 순으로 재정렬 후 FullName 반환
-    return ($result | Sort-Object LastWriteTime -Ascending | ForEach-Object { $_.FullName })
+    # LastWriteTime 오름차순(오래된→최신) 재정렬 후 FullName 반환
+    # Sort-Object는 기본이 오름차순이므로 -Ascending 생략
+    return ($result | Sort-Object LastWriteTime | ForEach-Object { $_.FullName })
 }
 
 # API 로그: 모든 후보에서 LastWriteTime이 가장 최신인 파일 선택
@@ -322,8 +327,7 @@ $devRunnerLogFile = Get-LatestLogFileMultiPattern @("dev_runner_command_listener
 $mergeOrchestratorLogFile = Get-LatestLogFileMultiPattern @("merge-orchestrator_")
 $cloudflaredLogFile = Get-LatestLogFileMultiPattern @("cloudflared_err", "cloudflared")
 
-# Plan-runner 로그: wtools/common/logs/ 에서 최신 파일
-$planRunnerLogDir = "D:\work\project\service\wtools\common\logs"
+# Plan-runner 로그: wtools/common/logs/ 에서 최신 파일 ($planRunnerLogDir는 상단에서 이미 정의)
 $planRunnerLogFile = $null
 if (Test-Path $planRunnerLogDir) {
     $found = Get-ChildItem -Path $planRunnerLogDir -Filter "plan-runner-*.log" -ErrorAction SilentlyContinue |
@@ -504,7 +508,7 @@ function Show-TodayPlanRunnerLogs {
             Where-Object { $_.Name -notmatch "stream" } |
             Sort-Object Name -Descending | Select-Object -First 1
     }
-    foreach ($lf in ($todayFiles | Sort-Object Name -Ascending)) {
+    foreach ($lf in ($todayFiles | Sort-Object Name)) {
         $prFileId = Get-PlanRunnerFileId -FileName $lf.Name
         Show-LogContent -FilePath $lf.FullName -Label "PR:$prFileId" -Color White -TailLines $TailLines
         # 동일 runner ID로 stream 파일 탐색
