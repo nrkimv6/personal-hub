@@ -21,7 +21,9 @@ LISTENER_SCRIPT = Path("D:/work/project/tools/monitor-page/scripts/dev-runner-co
 PYTHON_EXE = Path("D:/work/project/tools/monitor-page/.venv/Scripts/python.exe")
 PROJECT_ROOT = Path("D:/work/project/tools/monitor-page")
 WORKTREE_BASE = PROJECT_ROOT / ".worktrees"
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
 TEST_PLAN_STEMS = ["test_minimal_plan", "test_plan_e2e_mock"]
+RUNNER_KEY_PREFIX = "plan-runner:runners"
 
 
 @pytest.fixture
@@ -118,14 +120,19 @@ def test_plan_file(tmp_path):
 def _cleanup_test_worktrees() -> None:
     """테스트 고정 plan 파일의 worktree/branch 잔여물 제거 (멱등)"""
     for stem in TEST_PLAN_STEMS:
-        subprocess.run(
+        res1 = subprocess.run(
             ["git", "worktree", "remove", str(WORKTREE_BASE / stem), "--force"],
             capture_output=True, cwd=str(PROJECT_ROOT),
         )
-        subprocess.run(
+        if res1.returncode != 0 and b"not a worktree" not in res1.stderr:
+            print(f"[cleanup] git worktree remove failed for {stem}: {res1.stderr.decode('utf-8', errors='ignore').strip()}")
+
+        res2 = subprocess.run(
             ["git", "branch", "-D", f"plan/{stem}"],
             capture_output=True, cwd=str(PROJECT_ROOT),
         )
+        if res2.returncode != 0 and b"not found" not in res2.stderr:
+            print(f"[cleanup] git branch remove failed for {stem}: {res2.stderr.decode('utf-8', errors='ignore').strip()}")
 
 
 _PRESERVE_KEYS = {
@@ -194,8 +201,10 @@ def e2e_redis_cleanup(isolated_redis):
         except Exception:
             pass
 
+    # setup: 이전 잔여물 제거
     _cleanup_test_worktrees()
     _cleanup()
     yield
+    # teardown: 테스트 생성 아티팩트 제거
     _cleanup_test_worktrees()
     _cleanup()

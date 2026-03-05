@@ -31,12 +31,13 @@ from tests.dev_runner.conftest_e2e import (
     e2e_redis_cleanup,
     listener_process,
     isolated_redis,
+    RUNNER_KEY_PREFIX,
+    _cleanup_test_worktrees,
 )
 
 pytestmark = pytest.mark.full_e2e
 
 BASE_URL = "/api/v1/dev-runner"
-RUNNER_KEY_PREFIX = "plan-runner:runners"
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 _config = DevRunnerConfig()
 
@@ -207,6 +208,7 @@ class TestFullE2E:
                 real_redis_db0.delete(f"{RUNNER_KEY_PREFIX}:{rid}:{suffix}")
             real_redis_db0.srem(ACTIVE_RUNNERS_KEY, rid)
             real_redis_db0.zrem("plan-runner:recent_runners", rid)
+        _cleanup_test_worktrees()  # ← 추가: worktree/branch 잔류 보장 제거
 
     def test_single_plan_1cycle(self, http_client, listener_process, isolated_redis, e2e_redis_cleanup):
         """단일 plan 파일로 1 cycle 실행 → 완료까지 대기
