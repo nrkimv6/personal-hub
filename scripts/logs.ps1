@@ -837,6 +837,7 @@ function Start-CombinedLogTail {
     try {
         while ($true) {
             # Plan-runner 로그 자동 감지
+            Write-Host "[DIAG-LOOP] useRedis=$useRedis elapsed=$(([DateTime]::Now - $lastRunnerRefresh).TotalSeconds)s" -ForegroundColor DarkMagenta
             if ($useRedis) {
                 # Redis 기반: 10초마다 active_runners 재조회
                 $now = [DateTime]::Now
@@ -887,8 +888,6 @@ function Start-CombinedLogTail {
                             $logFiles[$prKey]      = $runner.LogPath
                             $logFileNames[$prKey]  = [System.IO.Path]::GetFileName($runner.LogPath)
                             $filePositions[$prKey] = 0
-                        } else {
-                            Write-Host "[$prKey] === SKIP(already tracked: $($logFiles[$prKey])) ===" -ForegroundColor DarkGray
                         }
                         # StreamPath 지연 등록: 초기에 null이었거나 파일 미존재였지만 이후 설정된 경우
                         if ($runner.StreamPath -and (-not $logFiles.ContainsKey($psKey) -or ($logFiles.ContainsKey($psKey) -and $logFiles[$psKey] -and -not (Test-Path $logFiles[$psKey])))) {
