@@ -506,23 +506,38 @@
 						<button
 							onclick={() => { taskHistoryTab = 'plans'; }}
 							class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-mono transition-colors border-b-2 {taskHistoryTab === 'plans' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-						>Plans</button>
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+							Plans
+						</button>
 						<button
 							onclick={() => { taskHistoryTab = 'tasks'; }}
 							class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-mono transition-colors border-b-2 {taskHistoryTab === 'tasks' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-						>Tasks</button>
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><polyline points="3 6 4 7 6 5"/><polyline points="3 12 4 13 6 11"/><polyline points="3 18 4 19 6 17"/></svg>
+							Tasks
+						</button>
 						<button
 							onclick={() => { taskHistoryTab = 'workflows'; }}
 							class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-mono transition-colors border-b-2 {taskHistoryTab === 'workflows' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-						>이력</button>
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+							이력
+						</button>
 						<button
 							onclick={() => { taskHistoryTab = 'merge'; }}
 							class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-mono transition-colors border-b-2 {taskHistoryTab === 'merge' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-						>Merge</button>
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>
+							Merge
+						</button>
 						<button
 							onclick={() => { taskHistoryTab = 'settings'; }}
 							class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-mono transition-colors border-b-2 {taskHistoryTab === 'settings' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-						>설정</button>
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="M2 12h2"/><path d="M20 12h2"/></svg>
+							설정
+						</button>
 						<!-- 모바일 닫기 버튼 -->
 						<button
 							onclick={() => { taskHistoryOpen = false; }}
