@@ -416,3 +416,85 @@ class TestMergeToMainStderrStdoutBoth:
             f"message에 stderr 텍스트('error A') 포함 기대, 실제: '{result.message}'"
         assert "output B" in result.message, \
             f"message에 stdout 텍스트('output B') 포함 기대, 실제: '{result.message}'"
+
+
+# ========== TC #23: B(Boundary) — worktree 커밋 0개 → skip ==========
+
+class TestWorkflowRunNoCommitsSkip:
+    """test_workflow_run_no_commits_skip: worktree 커밋 0개 + diff 없음 → WorkflowResult(merged=True, message="변경사항 없음 — skip")"""
+
+    def test_workflow_run_no_commits_skip(self, tmp_path):
+        """B(Boundary): git log main..{branch} 빈 출력 + git diff 빈 출력 → merge skip 반환"""
+        import sys
+        import importlib.util
+        from pathlib import Path
+        from unittest.mock import patch, MagicMock
+
+        scripts_dir = Path(__file__).parent.parent.parent / "scripts"
+        wf_path = scripts_dir / "merge_workflow.py"
+        if not wf_path.exists():
+            pytest.skip(f"merge_workflow.py not found: {wf_path}")
+
+        # scripts 디렉토리를 sys.path에 추가하여 worktree_manager 등 import 가능하게 함
+        scripts_dir_str = str(scripts_dir)
+        if scripts_dir_str not in sys.path:
+            sys.path.insert(0, scripts_dir_str)
+
+        spec = importlib.util.spec_from_file_location("merge_workflow_tc23", wf_path)
+        wf_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(wf_mod)
+        MergeWorkflow = wf_mod.MergeWorkflow
+        WorkflowResult = wf_mod.WorkflowResult
+
+        project_root = tmp_path / "repo"
+        project_root.mkdir()
+        worktree_path = tmp_path / "worktree"
+        worktree_path.mkdir()
+        base_dir = tmp_path / "worktrees"
+        base_dir.mkdir()
+
+        redis = MagicMock()
+        redis.publish.return_value = 0
+        redis.lrange.return_value = []
+        redis.set.return_value = True
+
+        def fake_subprocess_run(cmd, **kwargs):
+            cmd_list = list(cmd)
+            # git add, git commit → 성공 (nothing to commit)
+            if cmd_list[:2] == ["git", "add"]:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            if cmd_list[:2] == ["git", "commit"]:
+                return MagicMock(returncode=1, stdout="nothing to commit", stderr="")
+            # git log main..branch --oneline → 빈 출력 (커밋 0개)
+            if cmd_list[:2] == ["git", "log"] and "--oneline" in cmd_list:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            # git diff main..branch → 빈 출력 (변경사항 없음)
+            if cmd_list[:2] == ["git", "diff"]:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        wf = MergeWorkflow(project_root=project_root, redis_client=redis)
+
+        with patch("subprocess.run", side_effect=fake_subprocess_run):
+            result = wf.run(
+                runner_id="test-runner",
+                worktree_path=worktree_path,
+                base_dir=base_dir,
+                branch="plan/test-branch",
+            )
+
+        # Assert: merged=True (skip이지만 성공으로 처리)
+        assert result.merged is True, \
+            f"merged=True 기대 (skip), 실제: {result.merged}"
+
+        # Assert: message에 "변경사항 없음" 포함
+        assert "변경사항 없음" in result.message, \
+            f"message에 '변경사항 없음' 포함 기대, 실제: '{result.message}'"
+
+        # Assert: skip 키워드 포함
+        assert "skip" in result.message, \
+            f"message에 'skip' 포함 기대, 실제: '{result.message}'"
+
+        # Assert: conflict=False
+        assert result.conflict is False, \
+            f"conflict=False 기대 (skip), 실제: {result.conflict}"
