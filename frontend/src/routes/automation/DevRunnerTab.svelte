@@ -450,6 +450,11 @@
 			onKillRunner={async (id) => { await devRunnerRunnerApi.kill(id).catch(() => {}); void pollStatus(); }}
 			/>
 
+			<!-- CurrentTask (RunStatusBar 아래 독립 카드) -->
+			{#if currentTracking}
+				<CurrentTrackingCard tracking={currentTracking} />
+			{/if}
+
 			<!-- 실행 모달 -->
 			{#if showExecutionModal}
 				<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
