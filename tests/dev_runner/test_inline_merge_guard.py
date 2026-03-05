@@ -238,3 +238,51 @@ class TestPreMergeGateInlineDirty3xFail:
 
         # Assert: _cleanup_process_state 호출됨 (early return 시 + finally 블록에서 각 1회, 총 2회 이상)
         mock_cleanup.assert_called()
+
+
+# ========== TC #20: E(Error) — main 브랜치 아닐 때 merge 중단 ==========
+
+class TestPreMergeGateInlineNotMain:
+    """test_pre_merge_gate_inline_not_main: main 브랜치 아닐 때 즉시 에러 처리"""
+
+    def test_pre_merge_gate_inline_not_main(self, cl, tmp_path):
+        """E(Error): pre_merge_gate (False, 'main 브랜치가 아님') → merge_status='error', MergeWorkflow 미호출"""
+        # Arrange
+        worktree_dir = tmp_path / "worktree"
+        worktree_dir.mkdir()
+
+        redis, store = _make_redis(str(worktree_dir), branch="plan/test-branch")
+
+        mock_MergeWorkflow = MagicMock()
+
+        # Act
+        with patch.object(cl, "_cleanup_process_state") as mock_cleanup, \
+             patch("merge_lock.acquire_merge_lock", return_value=True), \
+             patch("merge_lock.release_merge_lock", return_value=True), \
+             patch("plan_runner.core.pipeline.pre_merge_gate",
+                   return_value=(False, "main 브랜치가 아님")) as mock_gate, \
+             patch("plan_runner.core.pipeline.auto_commit_stage") as mock_auto_commit, \
+             patch("merge_workflow.MergeWorkflow", mock_MergeWorkflow), \
+             patch("worktree_manager.WorktreeManager.remove", return_value=None), \
+             patch("subprocess.run") as mock_subproc:
+
+            mock_subproc.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+            cl._do_inline_merge("test-runner", redis)
+
+        # Assert: pre_merge_gate 1회만 호출 (재시도 없이 즉시 중단)
+        mock_gate.assert_called_once()
+
+        # Assert: auto_commit_stage 미호출 (dirty 아닌 경우 커밋 시도 안 함)
+        mock_auto_commit.assert_not_called()
+
+        # Assert: MergeWorkflow.run() 미호출 (merge 중단)
+        mock_MergeWorkflow.assert_not_called()
+
+        # Assert: merge_status가 "error"로 설정됨
+        merge_status = store.get(f"{RUNNER_KEY_PREFIX}:test-runner:merge_status")
+        assert merge_status == "error", \
+            f"merge_status 기대 'error', 실제 '{merge_status}'"
+
+        # Assert: _cleanup_process_state 호출됨
+        mock_cleanup.assert_called()
