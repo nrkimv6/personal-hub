@@ -692,109 +692,48 @@ class ExecutorService:
         stopped = sum(1 for r in results if r)
         return {"stopped": stopped}
 
-    @staticmethod
-    def _is_pid_alive(pid: int) -> bool:
-        """PID가 실행 중인지 확인 (Windows 호환)"""
-        try:
-            if sys.platform == "win32":
-                import ctypes
-                kernel32 = ctypes.windll.kernel32
-                PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-                handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-                if handle:
-                    kernel32.CloseHandle(handle)
-                    return True
-                return False
-            else:
-                os.kill(pid, 0)
-                return True
-        except Exception:
-            return False
-
     def restart_listener(self) -> dict:
         """command-listener 프로세스를 재시작합니다.
 
-        1. 기존 listener PID를 kill → watchdog이 자동 재시작
-        2. watchdog이 죽어있으면 watchdog을 spawn
-        3. 최대 15초 동안 heartbeat 키 갱신 감지
+        1. Redis에서 기존 PID 조회 → 존재 시 SIGTERM 전송
+        2. 새 listener 프로세스 spawn
+        3. 최대 10초 동안 heartbeat 키 감지 대기
         """
+        LISTENER_SCRIPT = Path(__file__).parent.parent.parent.parent / "scripts" / "dev-runner-command-listener.py"
         HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
         PID_KEY = "plan-runner:listener:pid"
-        PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent
-        WATCHDOG_SCRIPT = PROJECT_ROOT / "scripts" / "command-listener-watchdog.ps1"
-        PID_DIR = PROJECT_ROOT / ".pids"
-        # admin PID 파일 우선 확인 (listener는 항상 admin 모드에서 실행됨)
-        listener_pid_file_admin = PID_DIR / "command_listener_admin.pid"
-        listener_pid_file_default = PID_DIR / "command_listener.pid"
-        listener_pid_file = listener_pid_file_admin if listener_pid_file_admin.is_file() else listener_pid_file_default
-        watchdog_pid_file_admin = PID_DIR / "command_listener_watchdog_admin.pid"
-        watchdog_pid_file_default = PID_DIR / "command_listener_watchdog.pid"
-        watchdog_pid_file = watchdog_pid_file_admin if watchdog_pid_file_admin.is_file() else watchdog_pid_file_default
-        is_admin = listener_pid_file == listener_pid_file_admin
 
-        old_hb = self.redis_client.get(HEARTBEAT_KEY)
-
-        # 1. 기존 listener kill
-        old_pid = None
+        # 기존 PID 종료
         old_pid_str = self.redis_client.get(PID_KEY)
-        if not old_pid_str and listener_pid_file.is_file():
-            old_pid_str = listener_pid_file.read_text().strip()
         if old_pid_str:
             try:
                 old_pid = int(old_pid_str)
-                os.kill(old_pid, signal.SIGTERM)
-                logger.info(f"[restart-listener] 기존 listener PID {old_pid} 종료 요청")
-            except (ProcessLookupError, PermissionError, ValueError, OSError) as e:
-                logger.warning(f"[restart-listener] listener kill 실패 (PID {old_pid_str}): {e}")
-            self.redis_client.delete(PID_KEY)
-
-        # 2. watchdog 생존 확인 → 죽어있으면 spawn
-        watchdog_alive = False
-        if watchdog_pid_file.is_file():
-            try:
-                wdog_pid = int(watchdog_pid_file.read_text().strip())
-                watchdog_alive = self._is_pid_alive(wdog_pid)
-                if watchdog_alive:
-                    logger.info(f"[restart-listener] watchdog 생존 확인: PID {wdog_pid}")
+                if sys.platform == "win32":
+                    os.kill(old_pid, signal.SIGTERM)
                 else:
-                    logger.info(f"[restart-listener] watchdog PID {wdog_pid} 파일은 있으나 프로세스 없음")
-            except (ValueError, OSError):
-                watchdog_alive = False
-
-        if not watchdog_alive:
-            # watchdog이 없으면 listener를 직접 spawn (watchdog은 Session 1에서만 실행 가능)
-            logger.warning("[restart-listener] watchdog 미실행 — listener 직접 spawn")
-            LISTENER_SCRIPT = PROJECT_ROOT / "scripts" / "dev-runner-command-listener.py"
-            listener_alias = PROJECT_ROOT / ".venv" / "Scripts" / "monitorpage-cmdlistener.exe"
-            python_exe = str(listener_alias) if listener_alias.is_file() else str(PROJECT_ROOT / ".venv" / "Scripts" / "python.exe")
-            logger.info(f"[restart-listener] python_exe={python_exe}, script={LISTENER_SCRIPT}")
-            try:
-                proc = subprocess.Popen(
-                    [python_exe, str(LISTENER_SCRIPT)],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    cwd=str(PROJECT_ROOT),
-                )
-                logger.info(f"[restart-listener] listener 직접 spawn: PID {proc.pid}")
-            except FileNotFoundError as e:
-                logger.error(f"[restart-listener] spawn 실패: {e}, python_exe={python_exe}")
-                raise
-
-        # 3. heartbeat 갱신 대기 (최대 15초)
-        time.sleep(1)  # listener 종료 + watchdog 감지 여유
-        deadline = time.time() + 14
-        while time.time() < deadline:
-            hb = self.redis_client.get(HEARTBEAT_KEY)
-            if hb and hb != old_hb:
-                new_pid_str = self.redis_client.get(PID_KEY)
-                new_pid = int(new_pid_str) if new_pid_str else None
-                logger.info(f"[restart-listener] 재시작 완료: new PID {new_pid}")
-                return {"success": True, "new_pid": new_pid, "message": "listener restarted"}
+                    os.kill(old_pid, signal.SIGTERM)
+                self.redis_client.delete(PID_KEY)
+            except (ProcessLookupError, PermissionError):
+                pass
             time.sleep(1)
 
-        new_pid_str = self.redis_client.get(PID_KEY)
-        new_pid = int(new_pid_str) if new_pid_str else None
-        return {"success": False, "new_pid": new_pid, "message": "heartbeat not detected within 15s"}
+        # 새 프로세스 spawn
+        python_exe = sys.executable
+        proc = subprocess.Popen(
+            [python_exe, str(LISTENER_SCRIPT)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        # heartbeat 감지 대기 (최대 10초)
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            hb = self.redis_client.get(HEARTBEAT_KEY)
+            if hb:
+                return {"success": True, "new_pid": proc.pid, "message": "listener restarted"}
+            time.sleep(0.5)
+
+        return {"success": False, "new_pid": proc.pid, "message": "heartbeat not detected within 10s"}
 
 
 # 싱글톤 인스턴스
