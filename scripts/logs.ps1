@@ -831,6 +831,9 @@ function Start-CombinedLogTail {
     # 종료 runner grace period 추적 (키 → 감지 시각)
     $staleDetectedAt = @{}
 
+    # [진단] PR:/PS: 키 최초 출력 여부 (1회성)
+    $diagPrinted = $false
+
     try {
         while ($true) {
             # Plan-runner 로그 자동 감지
@@ -863,20 +866,27 @@ function Start-CombinedLogTail {
                             Write-Host "[$prKey] === New runner detected: $($runner.RunnerId) ===" -ForegroundColor Green
                             $logConfig[$prKey] = @{ Path = $runner.LogPath;    Color = "White";    Tail = 10 }
                             $logConfig[$psKey] = @{ Path = $runner.StreamPath; Color = "DarkGray"; Tail = 5  }
-                            $logFiles[$prKey]      = $runner.LogPath
-                            $logFileNames[$prKey]  = [System.IO.Path]::GetFileName($runner.LogPath)
-                            $logColors[$prKey]     = "White"
-                            $filePositions[$prKey] = 0
-                        } elseif ((-not $logFiles[$prKey]) -and $runner.LogPath) {
-                            # null 경로 → 유효 경로로 복구 (race condition 대응)
+                            if ($runner.LogPath) {
+                                # LogPath가 유효한 경우에만 $logFiles에 등록 (null이면 다음 refresh에서 재시도)
+                                $logFiles[$prKey]      = $runner.LogPath
+                                $logFileNames[$prKey]  = [System.IO.Path]::GetFileName($runner.LogPath)
+                                $logColors[$prKey]     = "White"
+                                $filePositions[$prKey] = 0
+                            } else {
+                                Write-Host "[$prKey] === LogPath null — 다음 refresh에서 재시도 ===" -ForegroundColor DarkGray
+                            }
+                        } elseif ((-not $logFiles[$prKey] -or ($logFiles[$prKey] -and -not (Test-Path $logFiles[$prKey]))) -and $runner.LogPath) {
+                            # null 경로 또는 파일 미존재 → 유효 경로로 복구 (race condition 대응)
                             Write-Host "[$prKey] === Log path resolved: $([System.IO.Path]::GetFileName($runner.LogPath)) ===" -ForegroundColor Green
                             $logConfig[$prKey].Path = $runner.LogPath
                             $logFiles[$prKey]      = $runner.LogPath
                             $logFileNames[$prKey]  = [System.IO.Path]::GetFileName($runner.LogPath)
                             $filePositions[$prKey] = 0
+                        } else {
+                            Write-Host "[$prKey] === SKIP(already tracked: $($logFiles[$prKey])) ===" -ForegroundColor DarkGray
                         }
-                        # StreamPath 지연 등록: 초기에 null이었지만 이후 설정된 경우
-                        if ($runner.StreamPath -and -not $logFiles.ContainsKey($psKey)) {
+                        # StreamPath 지연 등록: 초기에 null이었거나 파일 미존재였지만 이후 설정된 경우
+                        if ($runner.StreamPath -and (-not $logFiles.ContainsKey($psKey) -or ($logFiles.ContainsKey($psKey) -and $logFiles[$psKey] -and -not (Test-Path $logFiles[$psKey])))) {
                             Write-Host "[$psKey] === Stream log detected: $([System.IO.Path]::GetFileName($runner.StreamPath)) ===" -ForegroundColor Green
                             $logConfig[$psKey] = @{ Path = $runner.StreamPath; Color = "DarkGray"; Tail = 5  }
                             $logFiles[$psKey]      = $runner.StreamPath
@@ -922,7 +932,7 @@ function Start-CombinedLogTail {
                         $newPrKey  = "PR:$newFileId"
                         $newPsKey  = "PS:$newFileId"
                         # 현재 추적 중인 PR: key 탐색
-                        $currentPrKey = ($logFiles.Keys | Where-Object { $_ -like "PR:*" -and $_ -notlike "PR:*#*" } | Select-Object -First 1)
+                        $currentPrKey = (@($logFiles.Keys) | Where-Object { $_ -like "PR:*" -and $_ -notlike "PR:*#*" } | Select-Object -First 1)
                         if ($currentPrKey -ne $newPrKey) {
                             $oldId = if ($currentPrKey) { $currentPrKey } else { "(없음)" }
                             Write-Host "[$newPrKey] === Switched: $oldId → $newPrKey ($($latest.Name)) ===" -ForegroundColor Yellow
@@ -959,7 +969,7 @@ function Start-CombinedLogTail {
 
             # Check for new log files (service restart detection)
             # 파일명 비교(새 파일 감지)는 0바이트 포함 전체 후보 중 최신으로 — 새 세션 파일이 처음엔 0바이트여도 전환 감지 필요
-            foreach ($source in $timestampedLogPatterns.Keys) {
+            foreach ($source in @($timestampedLogPatterns.Keys)) {
                 $patterns = $timestampedLogPatterns[$source]
                 $latestLog = Get-LatestLogFromPatterns $patterns -IncludeEmpty
 
@@ -986,7 +996,19 @@ function Start-CombinedLogTail {
                 }
             }
 
-            foreach ($source in $logFiles.Keys) {
+            # [진단] PR:/PS: 키 최초 출력 — 어떤 키가 등록됐는지 확인
+            if (-not $diagPrinted) {
+                $prPsKeys = @($logFiles.Keys | Where-Object { $_ -like "PR:*" -or $_ -like "PS:*" })
+                if ($prPsKeys.Count -gt 0) {
+                    Write-Host "[DIAG] 등록된 PR:/PS: 키 목록:" -ForegroundColor DarkGray
+                    foreach ($k in $prPsKeys) {
+                        Write-Host "[DIAG]   $k → $($logFiles[$k])" -ForegroundColor DarkGray
+                    }
+                    $diagPrinted = $true
+                }
+            }
+
+            foreach ($source in @($logFiles.Keys)) {
                 $filePath = $logFiles[$source]
                 $item = Get-Item $filePath -ErrorAction SilentlyContinue
                 if (-not $item) { continue }
