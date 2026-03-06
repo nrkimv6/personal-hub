@@ -148,6 +148,12 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         except Exception as _guard_err:
             logger.debug(f"[cleanup] 머지 가드 조회 실패 (무시): {_guard_err}")
 
+    # 대기 큐에서 이 runner 제거 (crash/정상종료 모두, 고아 엔트리 방지)
+    try:
+        redis_client.lrem("plan-runner:merge-wait-queue", 0, runner_id)
+    except Exception:
+        pass
+
     # cleanup 직전 SSE 클라이언트에 완료 신호 publish
     try:
         log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
@@ -827,28 +833,27 @@ def _pub_and_log(runner_id: str, msg: str, redis_client: redis.Redis, tag: str =
         logger.debug(f"[_pub_and_log] 파일 기록 실패 (무시): {_e}")
 
 
-def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
-    """merge_requested 플래그가 있을 때 _stream_output finally에서 호출되는 인라인 merge 함수.
+def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_name: str = "inline-merge") -> dict:
+    """lock acquire → plan-runner post-merge subprocess → exit code 분기 → merge-results push 공통 헬퍼.
 
-    plan-runner post-merge 서브커맨드를 subprocess로 호출한다.
+    _do_inline_merge, _do_retry_merge에서 공유하는 lock+subprocess+결과 패턴을 통합한다.
+
     exit code 규약: 0=merged, 1=error, 2=test_failed, 3=conflict
+
+    Returns:
+        dict: {"success": bool, "message": str, "merge_status": str, "action": action_name}
     """
     from merge_lock import acquire_merge_lock, release_merge_lock
 
-    def _pub(msg: str, tag: str = "MERGE") -> None:
-        """runner 로그 채널에 merge 로그 publish + Redis list + 파일 기록"""
-        _pub_and_log(runner_id, msg, redis_client, tag)
+    def _pub(msg: str) -> None:
+        _pub_and_log(runner_id, msg, redis_client, "MERGE")
 
     branch_str = None
     plan_file = None
     lock_acquired = False
-    try:
-        # merge_requested 플래그 삭제 (중복 진입 방지)
-        try:
-            redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
-        except Exception:
-            pass
+    result = {"success": False, "message": "unknown error", "merge_status": "error", "action": action_name}
 
+    try:
         # 1. merge_status = "queued" + lock 대기
         try:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
@@ -863,8 +868,9 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
             except Exception:
                 pass
-            _cleanup_process_state(runner_id, redis_client)
-            return
+            result["message"] = "merge lock 획득 실패 (timeout)"
+            result["merge_status"] = "error"
+            return result
 
         try:
             branch_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
@@ -896,31 +902,36 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
             except Exception:
                 pass
             _pub("merge 성공 (exit_code=0)")
+            result = {"success": True, "message": "merged", "merge_status": "merged", "action": action_name}
         elif exit_code == 2:
             try:
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "test_failed")
             except Exception:
                 pass
             _pub(f"post-merge 테스트 실패 (exit_code={exit_code})")
+            result = {"success": False, "message": "test_failed", "merge_status": "test_failed", "action": action_name}
         elif exit_code == 3:
             try:
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
             except Exception:
                 pass
             _pub(f"merge 충돌 (exit_code={exit_code})")
+            result = {"success": False, "message": "conflict", "conflict": True, "merge_status": "conflict", "action": action_name}
         else:
             try:
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
             except Exception:
                 pass
             _pub(f"merge 실패 (exit_code={exit_code})")
+            result = {"success": False, "message": f"exit_code={exit_code}", "merge_status": "error", "action": action_name}
 
     except Exception as e:
-        logger.error(f"[_do_inline_merge] 예외 발생 (runner_id={runner_id}): {e}")
+        logger.error(f"[_execute_merge_with_lock] 예외 발생 (runner_id={runner_id}, action={action_name}): {e}")
         try:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
         except Exception:
             pass
+        result = {"success": False, "message": str(e), "merge_status": "error", "action": action_name}
 
     finally:
         if lock_acquired:
@@ -931,7 +942,7 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
         # merge-results Redis list에 결과 push (merge history API 연동)
         try:
             _merge_status_final = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status") or "unknown"
-            _is_success = _merge_status_final in ("merged", "merging")
+            _is_success = result.get("success", False)
             redis_client.lpush("plan-runner:merge-results", __import__("json").dumps({
                 "runner_id": runner_id,
                 "branch": branch_str,
@@ -939,13 +950,28 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                 "timestamp": __import__("datetime").datetime.now().isoformat(),
                 "status": "done" if _is_success else "failed",
                 "success": _is_success,
-                "message": f"merge_status={_merge_status_final}",
+                "message": result.get("message", f"merge_status={_merge_status_final}"),
             }, ensure_ascii=False))
             redis_client.expire("plan-runner:merge-results", 86400 * 7)
         except Exception as _mr_err:
-            logger.debug(f"[_do_inline_merge] merge-results push 실패 (무시): {_mr_err}")
+            logger.debug(f"[_execute_merge_with_lock] merge-results push 실패 (무시): {_mr_err}")
 
-        _cleanup_process_state(runner_id, redis_client)
+    return result
+
+
+def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
+    """merge_requested 플래그가 있을 때 _stream_output finally에서 호출되는 인라인 merge 함수.
+
+    _execute_merge_with_lock()으로 공통 로직을 위임하고, cleanup만 처리한다.
+    """
+    # merge_requested 플래그 삭제 (중복 진입 방지)
+    try:
+        redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+    except Exception:
+        pass
+
+    _execute_merge_with_lock(runner_id, redis_client, action_name="inline-merge")
+    _cleanup_process_state(runner_id, redis_client)
 
 
 def _stream_output(process: subprocess.Popen, log_handle, redis_client: redis.Redis, runner_id: str = ""):
@@ -1510,8 +1536,12 @@ def get_status(redis_client: redis.Redis) -> Dict:
         else:
             stale_runners.append(rid)
 
-    # stale 정리
+    # stale 정리 (merge-wait-queue에서도 제거 — cleanup 머지 가드로 거부될 수 있으므로 명시적 LREM)
     for rid in stale_runners:
+        try:
+            redis_client.lrem("plan-runner:merge-wait-queue", 0, rid)
+        except Exception:
+            pass
         _cleanup_process_state(rid, redis_client)
 
     return {
@@ -1605,20 +1635,16 @@ def force_kill_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
 
 
 def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, command: Dict | None = None) -> None:
-    """retry-merge 실제 작업 (백그라운드 스레드에서 실행) — _do_inline_merge와 동일한 흐름.
+    """retry-merge 실제 작업 (백그라운드 스레드에서 실행).
 
-    plan-runner post-merge 서브커맨드를 subprocess로 호출한다.
-    exit code 규약: 0=merged, 1=error, 2=test_failed, 3=conflict
+    Redis 키 재발급 전처리 후 _execute_merge_with_lock()에 위임한다.
     """
-    from merge_lock import acquire_merge_lock, release_merge_lock
-
     result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
 
     def _pub(msg: str) -> None:
         _pub_and_log(runner_id, msg, redis_client, "MERGE")
 
     result = {"success": False, "message": "unknown error", "action": "retry-merge"}
-    lock_acquired = False
     try:
         # Redis 키 만료 시 command payload로 재발급
         worktree_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
@@ -1638,98 +1664,15 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
             result = {"success": False, "message": f"worktree_path not found for runner {runner_id}", "action": "retry-merge"}
             return
 
-        # 1. merge_status = "queued" + lock 대기
-        try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "queued")
-        except Exception:
-            pass
-        _pub("merge lock 대기 중...")
-
-        lock_acquired = acquire_merge_lock(redis_client, runner_id, timeout=600)
-        if not lock_acquired:
-            _pub("merge lock 획득 실패 (timeout) — merge 중단")
-            try:
-                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
-            except Exception:
-                pass
-            result = {"success": False, "message": "merge lock 획득 실패 (timeout)", "action": "retry-merge"}
-            return
-
-        # 2. lock 획득 후 merge_status = "merging"
-        try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merging")
-        except Exception:
-            pass
-        _pub("merge lock 획득 완료 — plan-runner post-merge 실행 중...")
-
-        # 3. subprocess로 plan-runner post-merge 호출
-        proc = subprocess.run(
-            [str(PLAN_RUNNER_PYTHON), "-m", "plan_runner", "post-merge",
-             "--runner-id", runner_id, "--redis-db", str(REDIS_DB)],
-            cwd=str(PLAN_RUNNER_MODULE_PATH),
-        )
-        exit_code = proc.returncode
-
-        # 4. exit code 분기: 0=merged, 1=error, 2=test_failed, 3=conflict
-        if exit_code == 0:
-            try:
-                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
-            except Exception:
-                pass
-            _pub("merge 성공 (exit_code=0)")
-            result = {"success": True, "message": "merged", "action": "retry-merge"}
-        elif exit_code == 2:
-            try:
-                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "test_failed")
-            except Exception:
-                pass
-            _pub(f"post-merge 테스트 실패 (exit_code={exit_code})")
-            result = {"success": False, "message": "test_failed", "action": "retry-merge"}
-        elif exit_code == 3:
-            try:
-                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
-            except Exception:
-                pass
-            _pub(f"merge 충돌 (exit_code={exit_code})")
-            result = {"success": False, "message": "conflict", "conflict": True, "action": "retry-merge"}
-        else:
-            try:
-                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
-            except Exception:
-                pass
-            _pub(f"merge 실패 (exit_code={exit_code})")
-            result = {"success": False, "message": f"exit_code={exit_code}", "action": "retry-merge"}
+        # lock + subprocess + 결과 처리는 공통 헬퍼에 위임
+        merge_result = _execute_merge_with_lock(runner_id, redis_client, action_name="retry-merge")
+        result = merge_result
 
     except Exception as e:
-        logger.error(f"[retry_merge] 실패: {e}")
-        try:
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
-        except Exception:
-            pass
+        logger.error(f"[_do_retry_merge] 실패: {e}")
         result = {"success": False, "message": str(e), "action": "retry-merge"}
 
     finally:
-        if lock_acquired:
-            try:
-                release_merge_lock(redis_client, runner_id)
-            except Exception:
-                pass
-        # merge-results Redis list push (merge history API 연동)
-        try:
-            _retry_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status") or "unknown"
-            redis_client.lpush("plan-runner:merge-results", __import__("json").dumps({
-                "runner_id": runner_id,
-                "branch": redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch"),
-                "plan_file": redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file"),
-                "timestamp": __import__("time").time(),
-                "status": "done" if result.get("success") else "failed",
-                "success": result.get("success", False),
-                "message": result.get("message", ""),
-            }, ensure_ascii=False))
-            redis_client.expire("plan-runner:merge-results", 86400 * 7)
-        except Exception as _mr_err2:
-            logger.debug(f"[_do_retry_merge] merge-results push 실패 (무시): {_mr_err2}")
-
         _cleanup_process_state(runner_id, redis_client)
         redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
         redis_client.expire(result_key, 60)
