@@ -51,6 +51,30 @@ function Write-Log {
     Add-Content -Path $script:watchdogLogFile -Value $logMessage -Encoding UTF8
 }
 
+function Get-DuplicateProcesses {
+    # PID 파일에 기록된 PID를 "정본"으로 간주, 나머지를 중복으로 반환
+    $canonicalPid = $null
+    if (Test-Path $WorkerPidFile) {
+        $savedPid = Get-Content $WorkerPidFile -ErrorAction SilentlyContinue
+        if ($savedPid) {
+            $canonicalPid = [int]$savedPid
+        }
+    }
+
+    $allMatching = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match 'command-listener' }
+
+    if (-not $allMatching) {
+        return @()
+    }
+
+    $duplicates = $allMatching | Where-Object {
+        $_.ProcessId -ne $canonicalPid
+    }
+
+    return @($duplicates)
+}
+
 function Start-CommandListener {
     $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $stdoutLogFile = Join-Path $LogDir "stdout_command_listener_$Timestamp.log"
