@@ -664,10 +664,12 @@
 							{/if}
 								<span class="max-w-[120px] truncate">{tab.plan_file && tab.plan_file !== '__ALL_PLANS__' && tab.plan_file !== 'ALL' ? tab.plan_file.split(/[\\/]/).pop()?.replace(/^\d{4}-\d{2}-\d{2}_/, '') : '전체 실행'}</span>
 								<button
-									class="ml-0.5 w-4 h-4 flex items-center justify-center rounded hover:bg-gray-300 text-gray-400 hover:text-gray-600 text-[10px]"
+									class="ml-0.5 p-0.5 flex items-center justify-center rounded-md hover:bg-gray-300/50 text-muted-foreground hover:text-foreground transition-colors"
 									onclick={(e) => { e.stopPropagation(); handleCloseTab(tab.id); }}
 									title="탭 닫기"
-								>×</button>
+								>
+									<svg xmlns="http://www.w3.org/2000/svg" class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+								</button>
 							</div>
 						{/each}
 						<!-- 고정 Logs 버튼 -->
