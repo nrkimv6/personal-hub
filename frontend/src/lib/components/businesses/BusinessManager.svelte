@@ -5,6 +5,7 @@
   import { businessApi, itemApi, scheduleApi, serviceAccountApi } from '$lib/api';
   import type { Business, BusinessWithItems, BizItem, MonitorSchedule, ServiceAccountWithProfile } from '$lib/types';
   import SlotCheckModal from '$lib/components/SlotCheckModal.svelte';
+  import { Pencil, Trash2, Search, User, X } from 'lucide-svelte';
 
   let businesses: Business[] = [];
   let accounts: ServiceAccountWithProfile[] = [];
@@ -427,14 +428,14 @@
                         onclick={(e) => { e.stopPropagation(); { editBusiness = {...business }}; showEditBusinessModal = true; }}
                         title="수정"
                       >
-                        ✏
+                        <Pencil size={12} />
                       </Button>
                       <Button
                         variant="destructive" size="xs"
                         onclick={(e) => { e.stopPropagation(); handleDeleteBusiness(business) }}
                         title="삭제"
                       >
-                        🗑
+                        <Trash2 size={12} />
                       </Button>
                     </div>
                   </td>
@@ -513,20 +514,20 @@
                           showSlotCheckModal = true; }}}
                         title="슬롯 조회"
                       >
-                        🔍
+                        <Search size={12} />
                       </Button>
                       <Button variant="secondary" size="xs"
                         onclick={(e) => { e.stopPropagation(); { editItem = {...item }}; showEditItemModal = true; }}
                         title="수정"
                       >
-                        ✏
+                        <Pencil size={12} />
                       </Button>
                       <Button
                         variant="destructive" size="xs"
                         onclick={(e) => { e.stopPropagation(); handleDeleteItem(item) }}
                         title="삭제"
                       >
-                        🗑
+                        <Trash2 size={12} />
                       </Button>
                     </div>
                   </td>
@@ -576,7 +577,7 @@
                     <div class="text-xs text-muted-foreground">{schedule.times.join(', ')}</div>
                   {/if}
                   {#if schedule.account_name}
-                    <Badge variant="info" class="text-xs">👤 {schedule.account_name}</Badge>
+                    <Badge variant="info" class="text-xs"><User size={12} class="inline mr-1" /> {schedule.account_name}</Badge>
                   {/if}
                 </div>
               </div>

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { ThumbsUp, ThumbsDown, Check, X, Circle } from 'lucide-svelte';
 	import { writingApi, keywordApi, type GeneratedWriting, type WritingStats, type WritingSource, type KeywordStats, type KeywordStatsResponse, type Stopword, type WritingElement, type WritingElementStats, type WritingBatch, type WritingBatchStatus } from '$lib/api';
 	import { Button } from '$lib/components/ui';
 	import { createOffsetPagination, createPagePagination } from '$lib/utils/pagination.svelte';
@@ -582,10 +583,10 @@
 		fetchBatches();
 	}
 
-	function getRatingIcon(rating: number | null): string {
-		if (rating === 1) return '👍';
-		if (rating === -1) return '👎';
-		return '-';
+	function getRatingComponent(rating: number | null) {
+		if (rating === 1) return ThumbsUp;
+		if (rating === -1) return ThumbsDown;
+		return null;
 	}
 
 	onMount(() => {
@@ -737,7 +738,17 @@
 									</span>
 								</td>
 								<td class="px-4 py-3 text-sm text-foreground max-w-md truncate">{writing.preview}</td>
-								<td class="px-4 py-3 text-lg">{getRatingIcon(writing.rating)}</td>
+								<td class="px-4 py-3">
+									{#if getRatingComponent(writing.rating)}
+										<svelte:component
+											this={getRatingComponent(writing.rating)}
+											size={18}
+											class={writing.rating === 1 ? 'text-success' : 'text-error'}
+										/>
+									{:else}
+										<span class="text-muted-foreground">-</span>
+									{/if}
+								</td>
 								<td class="px-4 py-3 text-sm text-muted-foreground">{formatDateTime(writing.created_at)}</td>
 							</tr>
 						{/each}
@@ -1267,13 +1278,13 @@
 										<td class="px-3 py-2 text-muted-foreground">{req.caller_id.split('_')[0]}</td>
 										<td class="px-3 py-2 text-center">
 											{#if req.status === 'completed'}
-												<span class="text-success">✓</span>
+												<span class="text-success"><Check size={14} /></span>
 											{:else if req.status === 'failed'}
-												<span class="text-error" title={req.error || ''}>✗</span>
+												<span class="text-error" title={req.error || ''}><X size={14} /></span>
 											{:else if req.status === 'processing'}
-												<span class="text-primary animate-pulse">●</span>
+												<span class="text-primary animate-pulse"><Circle size={10} fill="currentColor" /></span>
 											{:else}
-												<span class="text-muted-foreground">○</span>
+												<span class="text-muted-foreground"><Circle size={10} /></span>
 											{/if}
 										</td>
 									</tr>
@@ -1350,9 +1361,19 @@
 						<span class="text-muted-foreground">소스 ID:</span>
 						<span class="ml-1">{selectedWriting.source_ids?.join(', ') || '-'}</span>
 					</div>
-					<div>
+					<div class="flex items-center">
 						<span class="text-muted-foreground">평가:</span>
-						<span class="ml-1 text-lg">{getRatingIcon(selectedWriting.rating)}</span>
+						<span class="ml-2">
+							{#if getRatingComponent(selectedWriting.rating)}
+								<svelte:component
+									this={getRatingComponent(selectedWriting.rating)}
+									size={18}
+									class={selectedWriting.rating === 1 ? 'text-success' : 'text-error'}
+								/>
+							{:else}
+								-
+							{/if}
+						</span>
 					</div>
 				</div>
 
@@ -1362,15 +1383,17 @@
 						on:click={() => rateWriting(1)}
 						variant={selectedWriting.rating === 1 ? 'primary' : 'secondary'}
 						size="sm"
+						class="flex items-center gap-1"
 					>
-						👍 추천
+						<ThumbsUp size={16} /> 추천
 					</Button>
 					<Button
 						on:click={() => rateWriting(-1)}
 						variant={selectedWriting.rating === -1 ? 'destructive' : 'secondary'}
 						size="sm"
+						class="flex items-center gap-1"
 					>
-						👎 비추천
+						<ThumbsDown size={16} /> 비추천
 					</Button>
 					{#if selectedWriting.rating !== null}
 						<Button

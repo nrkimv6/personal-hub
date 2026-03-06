@@ -45,10 +45,10 @@
 	}
 
 	const autoTabs = [
-		{ id: 'dev-runner', label: '🚀 Dev Runner' },
+		{ id: 'dev-runner', label: 'Dev Runner' },
 		{ id: 'sleep-now', label: 'Sleep Now' },
-		{ id: 'git-repos', label: '📂 Git 관리' },
-		{ id: 'plans', label: '📋 계획서' },
+		{ id: 'git-repos', label: 'Git 관리' },
+		{ id: 'plans', label: '계획서' },
 	];
 
 	function setMainTab(tab: MainTab) {

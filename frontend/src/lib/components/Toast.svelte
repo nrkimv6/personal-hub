@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { toast, type Toast } from '$lib/stores/toast';
+	import { Check, X, AlertTriangle, AlertCircle, Info } from 'lucide-svelte';
 
 	let toasts = $state<Toast[]>([]);
 
@@ -10,16 +11,16 @@
 		return () => unsubscribe();
 	});
 
-	function getIcon(type: Toast['type']) {
+	function getIconComponent(type: Toast['type']) {
 		switch (type) {
 			case 'success':
-				return '✓';
+				return Check;
 			case 'error':
-				return '✕';
+				return AlertCircle;
 			case 'warning':
-				return '⚠';
+				return AlertTriangle;
 			default:
-				return 'ℹ';
+				return Info;
 		}
 	}
 
@@ -56,14 +57,14 @@
 			<div
 				class="flex items-center gap-3 px-4 py-3 rounded-lg shadow-modal {getColorClass(t.type)} {getTextClass(t.type)} animate-slide-in-right"
 			>
-				<span class="font-bold">{getIcon(t.type)}</span>
+				<svelte:component this={getIconComponent(t.type)} size={20} strokeWidth={2.5} />
 				<span>{t.message}</span>
 				<button
 					onclick={() => toast.dismiss(t.id)}
-					class="ml-2 opacity-70 hover:opacity-100"
+					class="ml-2 opacity-70 hover:opacity-100 flex items-center justify-center"
 					aria-label="닫기"
 				>
-					✕
+					<X size={18} />
 				</button>
 			</div>
 		{/each}

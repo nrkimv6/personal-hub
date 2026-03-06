@@ -10,8 +10,8 @@
 	let mainTab: MainTab = $state('writings');
 
 	const writingTabs = [
-		{ id: 'writings', label: '✍️ 글쓰기' },
-		{ id: 'reports', label: '📋 보고서' }
+		{ id: 'writings', label: '글쓰기' },
+		{ id: 'reports', label: '보고서' }
 	];
 
 	// URL 파라미터에서 탭 읽기 (?tab=llm 은 /llm으로 리다이렉트, 하위호환)

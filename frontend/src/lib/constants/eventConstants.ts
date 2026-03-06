@@ -21,10 +21,10 @@ export const UNKNOWN_PERIOD_OPTIONS = [
 
 // 정렬 옵션
 export const SORT_OPTIONS = [
-	{ value: 'event_end', label: '마감일', icon: '📅' },
-	{ value: 'event_start', label: '시작일', icon: '🗓️' },
-	{ value: 'created_at', label: '수집일', icon: '📥' },
-	{ value: 'announcement_date', label: '발표일', icon: '📢' }
+	{ value: 'event_end', label: '마감일' },
+	{ value: 'event_start', label: '시작일' },
+	{ value: 'created_at', label: '수집일' },
+	{ value: 'announcement_date', label: '발표일' }
 ] as const;
 
 // 출처 유형 옵션
@@ -40,19 +40,16 @@ export const QUICK_FILTER_PRESETS = [
 	{
 		id: 'urgent',
 		label: '급한 것 먼저',
-		icon: '🔥',
 		filters: { eventStatus: 'ongoing', sortBy: 'event_end', sortOrder: 'asc', unknownPeriodFilter: 'exclude' }
 	},
 	{
 		id: 'new',
 		label: '새로 수집된',
-		icon: '✨',
 		filters: { eventStatus: '', sortBy: 'created_at', sortOrder: 'desc', unknownPeriodFilter: 'include' }
 	},
 	{
 		id: 'unknown',
 		label: '기간미정 정리',
-		icon: '❓',
 		filters: { eventStatus: '', sortBy: 'created_at', sortOrder: 'desc', unknownPeriodFilter: 'only' }
 	}
 ] as const;

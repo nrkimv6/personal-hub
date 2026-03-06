@@ -4,10 +4,10 @@
 
 // 빠른 필터 탭 옵션
 export const RESULT_FILTER_TABS = [
-	{ value: 'all', label: '전체', icon: '📋' },
-	{ value: 'new', label: '신규만', icon: '🆕' },
-	{ value: 'bookmarked', label: '북마크', icon: '⭐' },
-	{ value: 'disappeared', label: '사라진 결과', icon: '👻' }
+	{ value: 'all', label: '전체' },
+	{ value: 'new', label: '신규만' },
+	{ value: 'bookmarked', label: '북마크' },
+	{ value: 'disappeared', label: '사라진 결과' }
 ] as const;
 
 // 정렬 옵션

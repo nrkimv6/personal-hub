@@ -25,29 +25,29 @@
   const systemTabs = $derived([
     {
       id: 'status',
-      label: '🖥️ 서비스 상태',
+      label: '서비스 상태',
       count: serviceStatus ? serviceStatus.running : undefined,
     },
     {
       id: 'errors',
-      label: '⚠️ 에러 로그',
+      label: '에러 로그',
       count: unresolvedErrors ?? undefined,
       countVariant: 'error' as const,
     },
     {
       id: 'integrity',
-      label: '🔍 데이터 정합성',
+      label: '데이터 정합성',
       count: integrityIssues ?? undefined,
       countVariant: 'warning' as const,
     },
-    { id: 'browsers', label: '🌐 브라우저/프록시' },
-    { id: 'settings', label: '⚙️ 설정' },
+    { id: 'browsers', label: '브라우저/프록시' },
+    { id: 'settings', label: '설정' },
     {
       id: 'memory',
-      label: '💾 메모리',
+      label: '메모리',
       countVariant: memoryDangerLevel === 'critical' ? ('error' as const) : memoryDangerLevel === 'warning' ? ('warning' as const) : undefined,
     },
-    { id: 'diagnostic', label: '🩺 진단' },
+    { id: 'diagnostic', label: '진단' },
   ]);
 
   // 콜백 함수들

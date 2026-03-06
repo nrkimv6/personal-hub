@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { AlertCircle, AlertTriangle, CheckCircle, X, HelpCircle } from 'lucide-svelte';
 
   interface DiagnosticResult {
     timestamp: string;
@@ -31,11 +32,11 @@
     ok: ''
   };
 
-  const severityIcons: Record<string, string> = {
-    critical: '🔴',
-    error: '🟠',
-    warning: '🟡',
-    ok: '🟢'
+  const severityIcons: Record<string, any> = {
+    critical: AlertCircle,
+    error: AlertTriangle,
+    warning: AlertTriangle,
+    ok: CheckCircle
   };
 
   async function fetchDiagnostics() {
@@ -67,10 +68,12 @@
 
 {#if diagnostic && diagnostic.status !== 'api_healthy' && !dismissed}
   {@const colors = severityColors[diagnostic.severity] || severityColors.error}
-  {@const icon = severityIcons[diagnostic.severity] || '❓'}
+  {@const Icon = severityIcons[diagnostic.severity] || HelpCircle}
   <div class="px-4 py-3 border-b {colors} flex items-center justify-between gap-3">
     <div class="flex items-center gap-3 min-w-0">
-      <span class="text-lg flex-shrink-0">{icon}</span>
+      <div class="flex-shrink-0 flex items-center">
+        <Icon size={20} strokeWidth={2.5} />
+      </div>
       <div class="min-w-0">
         <span class="font-semibold">{diagnostic.status}</span>
         <span class="mx-1">—</span>
@@ -82,10 +85,10 @@
     </div>
     <button
       onclick={() => (dismissed = true)}
-      class="flex-shrink-0 opacity-70 hover:opacity-100 transition-opacity"
+      class="flex-shrink-0 opacity-70 hover:opacity-100 transition-opacity flex items-center justify-center"
       aria-label="닫기"
     >
-      ✕
+      <X size={18} />
     </button>
   </div>
 {/if}

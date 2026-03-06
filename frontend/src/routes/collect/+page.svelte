@@ -10,8 +10,8 @@
 	let mainTab: MainTab = $state('posts');
 
 	const mainTabs = [
-		{ id: 'posts', label: '📥 포스트 수집' },
-		{ id: 'videos', label: '🎬 비디오 다운로드' }
+		{ id: 'posts', label: '포스트 수집' },
+		{ id: 'videos', label: '비디오 다운로드' }
 	];
 
 	// URL 파라미터에서 탭 읽기

@@ -9,6 +9,7 @@
 		type NavGroup,
 		type NavSingleItem
 	} from '$lib/navigation';
+	import { iconMap } from '$lib/iconMap';
 	import { authStore, isAdmin, isLoggedIn, isAuthLoading } from '$lib/stores/auth';
 	import { hiddenItems, collapsedGroups } from '$lib/stores/sidebarPrefs';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
@@ -130,7 +131,7 @@
 						: 'text-sidebar-foreground hover:bg-sidebar-accent'}"
 				>
 					<span class="flex items-center gap-2">
-						<span class="text-lg">{entry.icon}</span>
+						<svelte:component this={iconMap[entry.icon]} size={18} />
 						<span>{entry.label}</span>
 					</span>
 					<svg
@@ -161,7 +162,6 @@
 										? 'bg-sidebar-primary text-sidebar-primary-foreground'
 										: 'text-sidebar-foreground hover:bg-sidebar-accent'}"
 								>
-									<span>{item.icon}</span>
 									<span>{item.label}</span>
 								</a>
 							</li>
@@ -171,19 +171,15 @@
 			{:else}
 				<!-- 접힌 사이드바: 그룹 아이콘만 표시 -->
 				<div class="flex flex-col items-center gap-1 my-1">
-					{#each entry.items as item}
-						<a
-							href={item.href}
-							onclick={handleNavClick}
-							class="flex items-center justify-center w-10 h-10 rounded-lg transition-colors
-								{isActive(item.href, $page.url.pathname)
-								? 'bg-sidebar-primary text-sidebar-primary-foreground'
-								: 'text-sidebar-foreground hover:bg-sidebar-accent'}"
-							title={item.label}
-						>
-							<span class="text-lg">{item.icon}</span>
-						</a>
-					{/each}
+					<div
+						class="flex items-center justify-center w-10 h-10 rounded-lg transition-colors
+							{groupActive
+							? 'bg-sidebar-primary/20 text-sidebar-primary'
+							: 'text-sidebar-foreground hover:bg-sidebar-accent'}"
+						title={entry.label}
+					>
+						<svelte:component this={iconMap[entry.icon]} size={20} />
+					</div>
 					<div class="border-t border-sidebar-border/30 w-6 my-1"></div>
 				</div>
 			{/if}
@@ -203,7 +199,7 @@
 							: 'text-sidebar-foreground hover:bg-sidebar-accent'}"
 						title={collapsed ? entry.label : ''}
 					>
-						<span class="text-lg">{entry.icon}</span>
+						<svelte:component this={iconMap[entry.icon]} size={20} />
 						<span class={collapsed ? 'lg:hidden' : ''}>{entry.label}</span>
 					</a>
 
