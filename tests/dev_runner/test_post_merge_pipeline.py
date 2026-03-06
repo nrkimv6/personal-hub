@@ -300,3 +300,97 @@ class TestDeletedFunctions:
         """R(Right): RUNNER_KEY_SUFFIXES에서 restart_after_merge 제거됨"""
         assert "restart_after_merge" not in cl.RUNNER_KEY_SUFFIXES, \
             "restart_after_merge should be removed from RUNNER_KEY_SUFFIXES"
+
+
+# ── Phase T3: E2E 테스트 ──────────────────────────────────────────────────────
+
+class TestInlineMergeE2ESubprocessFlow:
+    def test_inline_merge_e2e_subprocess_flow(self, cl):
+        """T3-E2E: _do_inline_merge 전체 흐름 — subprocess mock → exit_code=0
+        → merge_status='merged' → merge-results push → _cleanup_process_state 호출 확인
+        """
+        import fakeredis as _fakeredis
+        import types as _types
+
+        fake_r = _fakeredis.FakeRedis(decode_responses=True)
+        runner_id = "e2e-inline-01"
+        prefix = cl.RUNNER_KEY_PREFIX
+
+        # per-runner 키 사전 설정
+        fake_r.set(f"{prefix}:{runner_id}:merge_requested", "1")
+        fake_r.set(f"{prefix}:{runner_id}:plan_file", "docs/plan/test.md")
+        fake_r.set(f"{prefix}:{runner_id}:branch", "impl/test")
+        fake_r.set(f"{prefix}:{runner_id}:worktree_path", "D:/tmp/wt")
+
+        mock_lock_mod = _types.ModuleType("merge_lock")
+        mock_lock_mod.acquire_merge_lock = MagicMock(return_value=True)
+        mock_lock_mod.release_merge_lock = MagicMock()
+
+        proc_result = MagicMock()
+        proc_result.returncode = 0
+
+        with patch.dict("sys.modules", {"merge_lock": mock_lock_mod}), \
+             patch("subprocess.run", return_value=proc_result), \
+             patch.object(cl, "_cleanup_process_state") as mock_cleanup:
+            cl._do_inline_merge(runner_id, fake_r)
+
+        # merge_status = "merged" 확인
+        assert fake_r.get(f"{prefix}:{runner_id}:merge_status") == "merged"
+
+        # merge-results push 확인
+        results = fake_r.lrange("plan-runner:merge-results", 0, 0)
+        assert len(results) > 0
+        result_data = json.loads(results[0])
+        assert result_data["runner_id"] == runner_id
+        assert result_data["success"] is True
+
+        # _cleanup_process_state 호출 확인
+        mock_cleanup.assert_called_once_with(runner_id, fake_r)
+
+    def test_retry_merge_e2e_subprocess_flow(self, cl):
+        """T3-E2E: _do_retry_merge 전체 흐름 — subprocess mock → exit_code=0
+        → merge_status='merged' → merge-results push → _cleanup_process_state 호출 확인
+        _do_inline_merge와 동일 패턴이지만 진입 경로가 다르므로 별도 검증
+        """
+        import fakeredis as _fakeredis
+        import types as _types
+
+        fake_r = _fakeredis.FakeRedis(decode_responses=True)
+        runner_id = "e2e-retry-01"
+        prefix = cl.RUNNER_KEY_PREFIX
+
+        fake_r.set(f"{prefix}:{runner_id}:worktree_path", "D:/tmp/wt_retry")
+        fake_r.set(f"{prefix}:{runner_id}:plan_file", "docs/plan/test.md")
+        fake_r.set(f"{prefix}:{runner_id}:branch", "impl/test")
+
+        mock_lock_mod = _types.ModuleType("merge_lock")
+        mock_lock_mod.acquire_merge_lock = MagicMock(return_value=True)
+        mock_lock_mod.release_merge_lock = MagicMock()
+
+        proc_result = MagicMock()
+        proc_result.returncode = 0
+
+        with patch.dict("sys.modules", {"merge_lock": mock_lock_mod}), \
+             patch("subprocess.run", return_value=proc_result), \
+             patch.object(cl, "_cleanup_process_state") as mock_cleanup:
+            cl._do_retry_merge(runner_id, fake_r, "cmd_e2e")
+
+        # merge_status = "merged" 확인
+        assert fake_r.get(f"{prefix}:{runner_id}:merge_status") == "merged"
+
+        # merge-results push 확인
+        results = fake_r.lrange("plan-runner:merge-results", 0, 0)
+        assert len(results) > 0
+        result_data = json.loads(results[0])
+        assert result_data["runner_id"] == runner_id
+        assert result_data["success"] is True
+
+        # _cleanup_process_state 호출 확인
+        mock_cleanup.assert_called_once_with(runner_id, fake_r)
+
+        # result_key에 push된 결과 확인
+        result_key = f"{cl.RESULTS_KEY}:cmd_e2e"
+        pushed = fake_r.lrange(result_key, 0, 0)
+        assert len(pushed) > 0
+        pushed_data = json.loads(pushed[0])
+        assert pushed_data["success"] is True

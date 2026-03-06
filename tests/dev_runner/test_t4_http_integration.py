@@ -38,3 +38,30 @@ class TestMergeQueueEndpoint:
         # worktree=False 설정 확인
         req_false = RunRequest(engine="gemini", plan_file="test.md", worktree=False)
         assert req_false.worktree is False
+
+
+class TestMergeStatusTransitionHttp:
+    """T4: merge_status 전이 HTTP 엔드포인트 검증 (todo-4)"""
+
+    def test_runner_merge_status_transition_http(self, client):
+        """GET /api/v1/dev-runner/merge/{runner_id} — status 필드가 queued/merging/merged 전이 흐름 확인
+
+        executor_service.get_merge_status()를 mock하여 각 상태값이 HTTP 응답에 올바르게
+        반영되는지 확인한다. 실제 Redis 의존 없이 API 레이어 전이 흐름을 검증.
+        """
+        from unittest.mock import patch, AsyncMock
+        from app.modules.dev_runner import routes as dev_runner_routes
+
+        runner_id = "t4-merge-status-01"
+
+        for expected_status in ("queued", "merging", "merged"):
+            mock_result = {"runner_id": runner_id, "status": expected_status, "fix_attempts": 0, "message": ""}
+            with patch(
+                "app.modules.dev_runner.routes.runner.executor_service.get_merge_status",
+                new=AsyncMock(return_value=mock_result),
+            ):
+                r = client.get(f"/api/v1/dev-runner/merge/{runner_id}")
+            assert r.status_code == 200, f"status={expected_status}: HTTP {r.status_code}"
+            body = r.json()
+            assert body["status"] == expected_status, f"expected {expected_status}, got {body['status']}"
+            assert body["runner_id"] == runner_id
