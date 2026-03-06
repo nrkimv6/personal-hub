@@ -643,7 +643,7 @@ class TestRunDone:
         plan = tmp_plan_dir / "done_test.md"
         plan.write_text("> 상태: 구현완료\n\n1. [x] task", encoding="utf-8")
 
-        with patch.object(svc, "_archive_plan", return_value=tmp_plan_dir / "archive" / "done_test.md") as mock_arc, \
+        with patch.object(svc, "_archive_plan", new=AsyncMock(return_value=(tmp_plan_dir / "archive" / "done_test.md", None))) as mock_arc, \
              patch.object(svc, "_update_todo_done"), \
              patch.object(svc, "_archive_done_if_needed"), \
              patch.object(svc, "_git_commit", new=AsyncMock(return_value="commit ok")), \
@@ -704,7 +704,7 @@ class TestRunDone:
         plan = tmp_plan_dir / "timeout_test.md"
         plan.write_text("content", encoding="utf-8")
 
-        with patch.object(svc, "_archive_plan", return_value=tmp_plan_dir / "archive.md"), \
+        with patch.object(svc, "_archive_plan", new=AsyncMock(return_value=(tmp_plan_dir / "archive.md", None))), \
              patch.object(svc, "_update_todo_done"), \
              patch.object(svc, "_archive_done_if_needed"), \
              patch.object(svc, "_resolve_project_dir", return_value=tmp_plan_dir), \
@@ -922,6 +922,8 @@ class TestBatchDoneRedisPublish:
         s = PlanService.__new__(PlanService)
         s._registered_paths = [{"path": str(tmp_plan_dir), "type": "plan"}]
         s._ignored_plans = []
+        s._cache = {}
+        s._plans_cache_with_ignored = None
         return s
 
     @pytest.fixture
