@@ -719,10 +719,13 @@ def _get_fix_engine(redis_client, runner_id: str) -> str:
     return "claude"
 
 
-def _launch_conflict_resolver_process(runner_id: str, branch: str, worktree_path: Path, redis_client, pub_fn=None, engine: str = "claude") -> dict:
+def _launch_conflict_resolver_process(runner_id: str, branch: str, worktree_path: Path, redis_client, pub_fn=None, engine: str = "claude", needs_remerge: bool = False) -> dict:
     """plan-runner resolve 서브커맨드로 conflict 자동 해결 프로세스를 실행한다.
 
     stdout을 라인별로 실시간 pub_fn에 전달하여 로그 끊김을 방지한다.
+
+    Args:
+        needs_remerge: True → --needs-remerge 플래그 전달 (abort 후 재머지로 conflict 생성)
 
     Returns:
         {"success": True/False, "message": str}
@@ -737,6 +740,8 @@ def _launch_conflict_resolver_process(runner_id: str, branch: str, worktree_path
         "--project-dir", str(PROJECT_ROOT),
         "--engine", engine,
     ]
+    if needs_remerge:
+        cmd.append("--needs-remerge")
 
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
@@ -814,6 +819,52 @@ def _launch_auto_fix_process(runner_id: str, test_output: str, targets: dict, re
         logger.info(f"[auto-fix] 성공 (runner_id={runner_id})")
     else:
         logger.warning(f"[auto-fix] 실패 (runner_id={runner_id}): {result['message']}")
+    return {"success": result["success"], "message": result["message"]}
+
+
+def _launch_general_merge_resolver_process(runner_id: str, branch: str, error_msg: str, redis_client, pub_fn=None, engine: str = "claude") -> dict:
+    """plan-runner resolve --mode=general-merge-error 서브커맨드로 일반 머지 실패를 자동 복구한다.
+
+    CONFLICT/overwritten 아닌 알 수 없는 에러(exit_code 1 등)에 대해 AI 에이전트가
+    git 상태를 분석하고 복구를 시도한다.
+
+    Returns:
+        {"success": True/False, "message": str}
+    """
+    import os
+    cmd = [
+        str(PLAN_RUNNER_PYTHON),
+        "-m",
+        "plan_runner",
+        "resolve",
+        "--branch", branch,
+        "--project-dir", str(PROJECT_ROOT),
+        "--engine", engine,
+        "--mode", "general-merge-error",
+    ]
+
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONUNBUFFERED"] = "1"
+    env.pop("CLAUDECODE", None)
+    env["PLAN_RUNNER_WORK_DIR"] = str(PROJECT_ROOT)
+    env["PLAN_RUNNER_RUNNER_ID"] = runner_id
+    env["REDIS_DB"] = str(REDIS_DB)
+    env["PLAN_RUNNER_MERGE_ERROR"] = error_msg[:2000]
+
+    result = _run_subprocess_streaming(
+        cmd=cmd,
+        env=env,
+        cwd=str(PLAN_RUNNER_MODULE_PATH),
+        pub_fn=pub_fn,
+        tag="GENERAL-RESOLVE",
+        timeout=300,
+    )
+    if result["success"]:
+        logger.info(f"[general-resolver] 성공 (runner_id={runner_id})")
+    else:
+        logger.warning(f"[general-resolver] 실패 (runner_id={runner_id}): {result['message']}")
     return {"success": result["success"], "message": result["message"]}
 
 
@@ -935,15 +986,58 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
             except Exception:
                 pass
-            _pub(f"merge 충돌 (exit_code={exit_code})")
-            result = {"success": False, "message": "conflict", "conflict": True, "merge_status": "conflict", "action": action_name}
+            _pub(f"merge 충돌 (exit_code={exit_code}) — conflict resolver 자동 실행")
+            # conflict resolver 자동 실행 (needs_remerge=True: post-merge가 abort했으므로 재머지 필요)
+            engine = _get_runner_engine(runner_id, redis_client)
+            worktree_path_str = ""
+            try:
+                worktree_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path") or ""
+            except Exception:
+                pass
+            _resolve_result = _launch_conflict_resolver_process(
+                runner_id=runner_id,
+                branch=branch_str or "",
+                worktree_path=Path(worktree_path_str) if worktree_path_str else PROJECT_ROOT / ".worktrees" / runner_id,
+                redis_client=redis_client,
+                pub_fn=_pub,
+                engine=engine,
+                needs_remerge=True,
+            )
+            if _resolve_result["success"]:
+                _pub("conflict resolver 성공 — merge 완료")
+                try:
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+                except Exception:
+                    pass
+                result = {"success": True, "message": "conflict resolved", "merge_status": "merged", "action": action_name}
+            else:
+                _pub(f"conflict resolver 실패: {_resolve_result['message']}")
+                result = {"success": False, "message": "conflict", "conflict": True, "merge_status": "conflict", "action": action_name}
         else:
             try:
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
             except Exception:
                 pass
-            _pub(f"merge 실패 (exit_code={exit_code})")
-            result = {"success": False, "message": f"exit_code={exit_code}", "merge_status": "error", "action": action_name}
+            _pub(f"merge 실패 (exit_code={exit_code}) — general resolver 실행")
+            engine = _get_runner_engine(runner_id, redis_client)
+            _general_result = _launch_general_merge_resolver_process(
+                runner_id=runner_id,
+                branch=branch_str or "",
+                error_msg=f"exit_code={exit_code}",
+                redis_client=redis_client,
+                pub_fn=_pub,
+                engine=engine,
+            )
+            if _general_result["success"]:
+                _pub("general resolver 성공 — merge 완료")
+                try:
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "merged")
+                except Exception:
+                    pass
+                result = {"success": True, "message": "general resolver merged", "merge_status": "merged", "action": action_name}
+            else:
+                _pub(f"general resolver 실패: {_general_result['message']}")
+                result = {"success": False, "message": f"exit_code={exit_code}", "merge_status": "error", "action": action_name}
 
     except Exception as e:
         logger.error(f"[_execute_merge_with_lock] 예외 발생 (runner_id={runner_id}, action={action_name}): {e}")
