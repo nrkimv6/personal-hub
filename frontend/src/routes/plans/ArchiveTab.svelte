@@ -359,7 +359,7 @@
                     {record.category ?? getCategoryFromPath(record.file_path)}
                   </span>
                   {#if record.llm_processed_at}
-                    <span class="inline-block ml-1 px-1 py-0.5 text-xs rounded bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200" title="LLM 분석 완료">✓</span>
+                    <span class="inline-block ml-1 px-1 py-0.5 text-xs rounded bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200" title="LLM 분석 완료">LLM</span>
                   {/if}
                 </td>
                 <td class="py-2 pr-4 text-muted-foreground text-xs whitespace-nowrap">

@@ -73,10 +73,10 @@
 	// 출처 유형 아이콘
 	function getSourceTypeIcon(type: string): string {
 		switch (type) {
-			case 'instagram': return '📷';
-			case 'web': return '🌐';
-			case 'manual': return '✏️';
-			default: return '📄';
+			case 'instagram': return 'IG';
+			case 'web': return 'WEB';
+			case 'manual': return '직접';
+			default: return '기타';
 		}
 	}
 
@@ -202,7 +202,7 @@
 										class="p-1 text-warning hover:bg-warning-light rounded"
 										title="대표 출처로 설정"
 									>
-										⭐
+										★
 									</button>
 								{/if}
 								<button
@@ -210,7 +210,7 @@
 									class="p-1 text-error hover:bg-error-light rounded"
 									title="삭제"
 								>
-									🗑️
+									삭제
 								</button>
 							</div>
 						{/if}

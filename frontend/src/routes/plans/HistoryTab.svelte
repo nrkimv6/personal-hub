@@ -13,11 +13,11 @@
   const EVENT_TYPES = ['created', 'archived', 'memo_updated', 'path_changed', 'missing'];
 
   const typeIcon: Record<string, string> = {
-    created: '🟢',
-    archived: '🔵',
-    memo_updated: '🟡',
-    path_changed: '🟠',
-    missing: '🔴',
+    created: '●',
+    archived: '●',
+    memo_updated: '●',
+    path_changed: '●',
+    missing: '●',
   };
 
   const typeLabel: Record<string, string> = {
@@ -121,7 +121,7 @@
             <div class="space-y-1 ml-4 border-l border-border pl-4">
               {#each group.events as event (event.id)}
                 <div class="flex items-start gap-3 text-xs">
-                  <span class="mt-0.5">{typeIcon[event.event_type] ?? '⚪'}</span>
+                  <span class="mt-0.5">{typeIcon[event.event_type] ?? '·'}</span>
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2">
                       <span class="text-foreground font-medium">{typeLabel[event.event_type] ?? event.event_type}</span>

@@ -162,7 +162,7 @@
 									: 'text-gray-400 hover:text-green-500'}"
 								title={result.is_read ? '읽지 않음으로 표시' : '읽음으로 표시'}
 							>
-								{result.is_read ? '✓' : '○'}
+								{result.is_read ? '읽음' : '○'}
 							</button>
 						</div>
 					</td>

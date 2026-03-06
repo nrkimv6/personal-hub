@@ -338,7 +338,7 @@
 											<span class="text-muted-foreground">-</span>
 										{/if}
 									</td>
-									<td class="py-1.5 text-center">{note.is_daily_note ? '✓' : ''}</td>
+									<td class="py-1.5 text-center">{note.is_daily_note ? 'Y' : ''}</td>
 									<td class="py-1.5 text-center text-muted-foreground">{note.status}</td>
 								</tr>
 							{/each}
@@ -442,8 +442,8 @@
 											<span class="text-muted-foreground">미분류</span>
 										{/if}
 									</td>
-									<td class="py-1.5 text-center">{note.is_daily_note ? '✓' : ''}</td>
-									<td class="py-1.5 text-center">{note.has_frontmatter ? '✓' : ''}</td>
+									<td class="py-1.5 text-center">{note.is_daily_note ? 'Y' : ''}</td>
+									<td class="py-1.5 text-center">{note.has_frontmatter ? 'Y' : ''}</td>
 									<td class="py-1.5 text-center text-muted-foreground">{note.status}</td>
 								</tr>
 							{/each}

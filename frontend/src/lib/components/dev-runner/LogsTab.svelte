@@ -56,7 +56,7 @@
 			{:else}
 				<div class="flex items-center justify-center h-full text-gray-600 text-sm">
 					<div class="text-center">
-						<div class="text-4xl mb-3">📋</div>
+						<div class="mb-3"></div>
 						<div>왼쪽 목록에서 실행 이력을 선택하세요</div>
 					</div>
 				</div>

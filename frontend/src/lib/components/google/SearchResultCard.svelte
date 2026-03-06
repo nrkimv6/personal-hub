@@ -60,7 +60,7 @@
 							: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 						title={result.is_read ? '읽지 않음으로 표시' : '읽음으로 표시'}
 					>
-						{result.is_read ? '✓' : '○'}
+						{result.is_read ? '읽음' : '○'}
 					</button>
 				</div>
 			</div>
@@ -89,10 +89,10 @@
 
 			<!-- 하단: 날짜 + 출처 -->
 			<div class="flex justify-between items-center text-xs text-muted-foreground border-t border-border pt-2 mt-2">
-				<span>📅 {formatRelativeDate(result.created_at)}</span>
+				<span>{formatRelativeDate(result.created_at)}</span>
 				{#if result.saved_search_name || result.schedule_name}
 					<span class="truncate max-w-[50%]">
-						🔍 {result.saved_search_name || result.schedule_name}
+						{result.saved_search_name || result.schedule_name}
 					</span>
 				{/if}
 			</div>

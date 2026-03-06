@@ -192,7 +192,7 @@
 	{#if shareCompleted}
 		<!-- 공유 완료 (창 닫기 실패 시) -->
 		<div class="bg-success-light border border-green-200 rounded-lg p-6 text-center">
-			<div class="text-success text-4xl mb-3">✓</div>
+			<div class="text-success text-4xl mb-3"></div>
 			<p class="text-success font-medium text-lg mb-2">수집 요청 완료</p>
 			<p class="text-sm text-success mb-4">이전 앱으로 돌아가세요</p>
 			<button
@@ -223,7 +223,7 @@
 	{:else if autoSubmitDone}
 		<div class="bg-success-light border border-green-200 rounded-lg p-4">
 			<div class="flex items-center gap-2 mb-2">
-				<span class="text-success text-xl">✓</span>
+				<span class="text-success text-xl"></span>
 				<p class="text-success font-medium">크롤링 요청이 등록되었습니다.</p>
 			</div>
 			<p class="text-sm text-success">잠시 후 홈으로 이동합니다...</p>

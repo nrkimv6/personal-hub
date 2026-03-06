@@ -142,7 +142,7 @@
         model: 'opus',
         cli_options: { cwd: 'D:/work/project/tools/monitor-page', parse_json: false, allowed_tools: ['Read', 'Edit', 'Write', 'Glob', 'Grep'] }
       });
-      planRequestMessage = '✅ 계획서 작성 요청 완료 — /llm 페이지에서 확인';
+      planRequestMessage = '계획서 작성 요청 완료 — /llm 페이지에서 확인';
     } catch (e) {
       planRequestMessage = e instanceof Error ? e.message : '요청 실패';
     } finally {
@@ -263,7 +263,7 @@
         onclick={createPlanRequest}
       >{planRequestLoading ? '요청 중...' : '계획서 작성하기'}</button>
       {#if planRequestMessage}
-        <p class="text-xs mt-1 {planRequestMessage.startsWith('✅') ? 'text-green-600' : 'text-red-500'}">{planRequestMessage}</p>
+        <p class="text-xs mt-1 text-green-600">{planRequestMessage}</p>
       {/if}
     </div>
 

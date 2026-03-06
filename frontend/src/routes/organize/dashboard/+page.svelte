@@ -179,7 +179,7 @@
 					 isDone ? 'border-green-500/30 bg-green-500/10 text-green-600' :
 					 'border-border text-muted-foreground'}">
 					{PIPELINE_STAGE_LABELS[stage]}
-					{#if isDone && !isCurrent}✓{/if}
+					{#if isDone && !isCurrent}완{/if}
 				</div>
 			{/each}
 		</div>

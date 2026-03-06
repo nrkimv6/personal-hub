@@ -243,7 +243,7 @@
                       on:click={() => openEditModal(schedule)}
                       title="수정"
                     >
-                      ✏
+                      수정
                     </Button>
                     <Button variant="secondary" size="xs"
                       on:click={() => handleResetBookingCount(schedule)}
@@ -304,7 +304,7 @@
               {#if filterTest.result.filtered_slots.length > 0}
                 <ul class="mt-2 space-y-1">
                   {#each filterTest.result.filtered_slots as slot}
-                    <li class="text-success">✓ {slot}</li>
+                    <li class="text-success">{slot}</li>
                   {/each}
                 </ul>
               {:else}

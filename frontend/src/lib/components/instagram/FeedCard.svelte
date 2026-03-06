@@ -687,7 +687,7 @@
 									>
 										{tag.display_name}
 										{#if editTagIds.includes(tag.id)}
-											<span class="ml-1">✓</span>
+											<span class="ml-1">선택됨</span>
 										{/if}
 									</button>
 								{/each}

@@ -78,7 +78,7 @@
 						{#each phase.items as item}
 							<!-- 상위 항목 -->
 							<div class="flex items-start gap-2 {item.checked ? 'opacity-50' : ''}">
-								<span class="text-xs mt-0.5 shrink-0">{item.checked ? '✓' : '○'}</span>
+								<span class="text-xs mt-0.5 shrink-0">{item.checked ? '완' : '○'}</span>
 								<span class="text-sm {item.checked ? 'line-through text-gray-400' : 'font-medium'}">
 									{item.text}
 								</span>
@@ -86,7 +86,7 @@
 							<!-- 하위 항목 -->
 							{#each item.children as child}
 								<div class="flex items-start gap-2 ml-5 {child.checked ? 'opacity-50' : ''}">
-									<span class="text-xs mt-0.5 shrink-0">{child.checked ? '✓' : '○'}</span>
+									<span class="text-xs mt-0.5 shrink-0">{child.checked ? '완' : '○'}</span>
 									<span class="text-xs {child.checked ? 'line-through text-gray-400' : 'text-gray-700'}">
 										{child.text}
 									</span>

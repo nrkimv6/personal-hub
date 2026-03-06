@@ -591,7 +591,7 @@
                   onclick={() => handleDeleteSchedule(schedule)}
                   title="삭제"
                 >
-                  ✕
+                  ×
                 </button>
               </div>
             </div>

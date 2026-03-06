@@ -306,11 +306,11 @@
   }
 
   // 선택된 메뉴의 icon+label 조회 (NavGroup 내부 아이템 포함)
-  function getMenuInfo(id: string | null): { icon: string; label: string } | null {
+  function getMenuInfo(id: string | null): { label: string } | null {
     if (!id) return null;
     const item = flattenNavEntries().find((e) => e.id === id);
     if (!item) return null;
-    return { icon: item.icon, label: item.label };
+    return { label: item.label };
   }
 
   onMount(() => {
@@ -389,7 +389,7 @@
                 : 'border-border text-muted-foreground hover:text-foreground hover:bg-muted'}"
             title="미리보기 토글 (Ctrl+P)"
           >
-            👁 미리보기
+            미리보기
           </button>
         </div>
         <div class="{showPreview ? 'grid grid-cols-2 gap-3' : ''}">
@@ -459,7 +459,6 @@
           >
             {#if linkedMenuId && getMenuInfo(linkedMenuId)}
               {@const info = getMenuInfo(linkedMenuId)!}
-              <span>{info.icon}</span>
               <span>{info.label}</span>
             {:else}
               <span class="text-muted-foreground">메뉴 선택...</span>
@@ -499,7 +498,7 @@
               >
                 <option value="">탭 선택 (선택)</option>
                 {#each tabOptions as opt}
-                  <option value={opt.label}>{opt.icon} {opt.label}</option>
+                  <option value={opt.label}>{opt.label}</option>
                 {/each}
               </select>
               <button
@@ -507,7 +506,7 @@
                 onclick={() => { linkedTabCustom = true; linkedTab = ''; }}
                 class="px-2 py-1 text-xs rounded-lg border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                 title="직접 입력"
-              >✏️</button>
+              >직접입력</button>
             </div>
           {:else}
             <!-- NavSingleItem이거나 직접 입력 모드 -->
@@ -525,7 +524,7 @@
                   onclick={() => { linkedTabCustom = false; linkedTab = ''; }}
                   class="px-2 py-1 text-xs rounded-lg border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                   title="목록에서 선택"
-                >📋</button>
+                >목록선택</button>
               {/if}
             </div>
           {/if}
