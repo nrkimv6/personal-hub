@@ -393,6 +393,169 @@ class TestWorktreeManagerList:
             assert "runner_id" in wt
 
 
+# ── TestMergeToMainStash: Phase 2 stash-pop 로직 검증 ────────────────────────
+
+class TestMergeToMainStash:
+    """MergeResult 신규 필드 + merge_to_main() stash/pop 로직 검증 (RIGHT-BICEP)"""
+
+    @pytest.fixture
+    def git_repo_with_main(self, tmp_path):
+        """main 브랜치를 가진 임시 git 저장소"""
+        subprocess.run(["git", "init", str(tmp_path)], capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], capture_output=True, cwd=str(tmp_path))
+        subprocess.run(["git", "config", "user.name", "Test"], capture_output=True, cwd=str(tmp_path))
+        subprocess.run(["git", "config", "commit.gpgsign", "false"], capture_output=True, cwd=str(tmp_path))
+        (tmp_path / "README.md").write_text("init")
+        subprocess.run(["git", "add", "."], capture_output=True, cwd=str(tmp_path))
+        subprocess.run(["git", "commit", "-m", "init"], capture_output=True, cwd=str(tmp_path))
+        subprocess.run(["git", "branch", "-m", "main"], capture_output=True, cwd=str(tmp_path))
+        return tmp_path
+
+    def _make_feature_branch(self, repo: Path, branch: str, filename: str, content: str) -> None:
+        """feature 브랜치 생성 후 파일 추가 커밋"""
+        subprocess.run(["git", "checkout", "-b", branch], capture_output=True, cwd=str(repo))
+        (repo / filename).write_text(content)
+        subprocess.run(["git", "add", filename], capture_output=True, cwd=str(repo))
+        subprocess.run(["git", "commit", "-m", f"add {filename}"], capture_output=True, cwd=str(repo))
+        subprocess.run(["git", "checkout", "main"], capture_output=True, cwd=str(repo))
+
+    def test_RIGHT_stash_pop_dirty_merge_success(self, git_repo_with_main):
+        """R(Right): dirty working tree + merge 성공 + stash pop 성공 → success=True, stash_pop_conflict=False"""
+        repo = git_repo_with_main
+        self._make_feature_branch(repo, "runner/feat1", "feat1.txt", "feat1")
+        # dirty 상태 만들기 (uncommitted 변경)
+        (repo / "dirty.txt").write_text("dirty work")
+        result = WorktreeManager.merge_to_main("feat1", repo / ".wt", repo, branch="runner/feat1")
+        assert result.success is True
+        assert result.stash_pop_conflict is False
+        # stash pop 후 dirty 파일이 복원됐는지 확인
+        assert (repo / "dirty.txt").exists()
+
+    def test_RIGHT_case_a_stash_pop_conflict(self, git_repo_with_main):
+        """R(Right): merge 성공 + stash pop 충돌 → success=True, stash_pop_conflict=True
+        시나리오: shared.txt base="base" → feature에서 "branch" → 머지 성공
+                  main에 uncommitted "main dirty" → stash → pop 시 충돌"""
+        repo = git_repo_with_main
+        # base에 shared.txt 추가
+        (repo / "shared.txt").write_text("base")
+        subprocess.run(["git", "add", "shared.txt"], capture_output=True, cwd=str(repo))
+        subprocess.run(["git", "commit", "-m", "add shared"], capture_output=True, cwd=str(repo))
+        # feature 브랜치: shared.txt를 "branch"로 변경
+        subprocess.run(["git", "checkout", "-b", "runner/feat2"], capture_output=True, cwd=str(repo))
+        (repo / "shared.txt").write_text("branch version")
+        subprocess.run(["git", "add", "shared.txt"], capture_output=True, cwd=str(repo))
+        subprocess.run(["git", "commit", "-m", "branch shared"], capture_output=True, cwd=str(repo))
+        subprocess.run(["git", "checkout", "main"], capture_output=True, cwd=str(repo))
+        # main에서 shared.txt를 uncommitted "main dirty" 로 수정 → stash 대상
+        (repo / "shared.txt").write_text("main dirty version")
+        result = WorktreeManager.merge_to_main("feat2", repo / ".wt", repo, branch="runner/feat2")
+        # merge는 stash 후 성공하지만 pop 시 충돌 발생
+        assert result.success is True
+        assert result.stash_pop_conflict is True
+
+    def test_RIGHT_case_b_conflict_abort_pop(self, git_repo_with_main):
+        """R(Right): merge 자체 CONFLICT → abort + pop → success=False, conflict=True"""
+        repo = git_repo_with_main
+        # 같은 파일을 main과 브랜치 양쪽에서 수정 → conflict
+        (repo / "shared.txt").write_text("main line")
+        subprocess.run(["git", "add", "shared.txt"], capture_output=True, cwd=str(repo))
+        subprocess.run(["git", "commit", "-m", "main shared"], capture_output=True, cwd=str(repo))
+        subprocess.run(["git", "checkout", "-b", "runner/feat3"], capture_output=True, cwd=str(repo))
+        (repo / "shared.txt").write_text("branch line")
+        subprocess.run(["git", "add", "shared.txt"], capture_output=True, cwd=str(repo))
+        subprocess.run(["git", "commit", "-m", "branch shared"], capture_output=True, cwd=str(repo))
+        subprocess.run(["git", "checkout", "main"], capture_output=True, cwd=str(repo))
+        (repo / "shared.txt").write_text("main conflict line")
+        subprocess.run(["git", "add", "shared.txt"], capture_output=True, cwd=str(repo))
+        subprocess.run(["git", "commit", "-m", "main conflict"], capture_output=True, cwd=str(repo))
+        result = WorktreeManager.merge_to_main("feat3", repo / ".wt", repo, branch="runner/feat3")
+        assert result.success is False
+        assert result.conflict is True
+        assert result.overwritten is False
+        # abort 후 클린 상태인지 확인
+        status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, cwd=str(repo))
+        assert "<<<" not in status.stdout
+
+    def test_BOUNDARY_clean_no_stash(self, git_repo_with_main):
+        """B(Boundary): clean working tree → stash 없이 바로 merge → success=True"""
+        repo = git_repo_with_main
+        self._make_feature_branch(repo, "runner/feat4", "feat4.txt", "feat4 content")
+        result = WorktreeManager.merge_to_main("feat4", repo / ".wt", repo, branch="runner/feat4")
+        assert result.success is True
+        assert result.stash_pop_conflict is False
+
+    def test_BOUNDARY_overwritten_detection(self, git_repo_with_main, monkeypatch):
+        """B(Boundary): 'would be overwritten' 에러 → overwritten=True"""
+        import subprocess as sp_module
+        original_run = sp_module.run
+        call_count = {"n": 0}
+
+        def mock_run(cmd, **kwargs):
+            call_count["n"] += 1
+            # git merge 호출 시 overwritten 에러 시뮬레이션
+            if isinstance(cmd, list) and "merge" in cmd and "--no-ff" in cmd:
+                class FakeResult:
+                    returncode = 1
+                    stdout = ""
+                    stderr = "error: Your local changes to the following files would be overwritten by merge"
+                return FakeResult()
+            return original_run(cmd, **kwargs)
+
+        monkeypatch.setattr(sp_module, "run", mock_run)
+        repo = git_repo_with_main
+        result = WorktreeManager.merge_to_main("feat5", repo / ".wt", repo, branch="runner/feat5")
+        assert result.overwritten is True
+        assert result.success is False
+
+    def test_ERROR_stash_pop_fail_drops(self, git_repo_with_main, monkeypatch, caplog):
+        """E(Error): merge 성공 후 stash pop 실패 → drop 실행 + warning 로그"""
+        import subprocess as sp_module
+        import logging
+        original_run = sp_module.run
+
+        def mock_run(cmd, **kwargs):
+            if isinstance(cmd, list) and cmd[:2] == ["git", "stash"] and len(cmd) > 2:
+                if cmd[2] == "pop":
+                    class FakePopResult:
+                        returncode = 1
+                        stdout = ""
+                        stderr = "pop conflict"
+                    return FakePopResult()
+            return original_run(cmd, **kwargs)
+
+        repo = git_repo_with_main
+        self._make_feature_branch(repo, "runner/feat6", "feat6.txt", "feat6")
+        # dirty 상태 만들기 → stash 발생
+        (repo / "stash_me.txt").write_text("stash target")
+        monkeypatch.setattr(sp_module, "run", mock_run)
+        with caplog.at_level(logging.WARNING):
+            result = WorktreeManager.merge_to_main("feat6", repo / ".wt", repo, branch="runner/feat6")
+        assert result.stash_pop_conflict is True
+        assert any("stash pop" in r.message.lower() or "drop" in r.message.lower() for r in caplog.records)
+
+    def test_ERROR_python_exception_propagates(self, git_repo_with_main, monkeypatch):
+        """E(Error): subprocess.run이 Exception → MergeResult(exception=str(e))"""
+        import subprocess as sp_module
+
+        def mock_run_raise(cmd, **kwargs):
+            if isinstance(cmd, list) and "checkout" in cmd:
+                raise RuntimeError("mock checkout failure")
+            return sp_module.run.__wrapped__(cmd, **kwargs) if hasattr(sp_module.run, "__wrapped__") else sp_module.run(cmd, **kwargs)
+
+        monkeypatch.setattr(sp_module, "run", mock_run_raise)
+        repo = git_repo_with_main
+        result = WorktreeManager.merge_to_main("feat7", repo / ".wt", repo, branch="runner/feat7")
+        assert result.success is False
+        assert "mock checkout failure" in result.exception
+
+    def test_ERROR_merge_result_fields_default(self):
+        """E(Error): 기존 호출자가 새 필드 없이도 동작 — 기본값 확인"""
+        r = MergeResult(success=True, conflict=False, message="ok")
+        assert r.stash_pop_conflict is False
+        assert r.overwritten is False
+        assert r.exception == ""
+
+
 # ── 헬퍼: repo 기준으로 list_worktrees() 실행 ─────────────────────────────────
 
 def _list_worktrees_in_repo(repo: Path) -> list:

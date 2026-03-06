@@ -46,6 +46,9 @@ class MergeResult:
     conflict: bool
     message: str
     already_merged: bool = False
+    stash_pop_conflict: bool = False
+    overwritten: bool = False
+    exception: str = ""
 
 
 class WorktreeManager:
@@ -173,12 +176,11 @@ class WorktreeManager:
             return True  # 멱등 처리
 
     @staticmethod
-    def merge_to_main(runner_id: str, base_dir: Path, project_root: Path, plan_file: Optional[str] = None, branch: Optional[str] = None, keep_conflict: bool = False) -> MergeResult:
+    def merge_to_main(runner_id: str, base_dir: Path, project_root: Path, plan_file: Optional[str] = None, branch: Optional[str] = None) -> MergeResult:
         """worktree 변경사항을 main 브랜치에 머지
 
         우선순위: branch 파라미터 > plan_file > runner_id 기반
-        conflict 시 keep_conflict=False(기본값)이면 abort 후 MergeResult(conflict=True) 반환.
-        keep_conflict=True이면 abort 없이 충돌 상태 유지 — 호출자가 resolve 후 commit 책임.
+        dirty working tree는 merge 전 stash, 결과에 따라 pop.
         """
         if branch:
             pass  # 그대로 사용
@@ -202,28 +204,47 @@ class WorktreeManager:
             if ancestor_check.returncode == 0:
                 logger.info(f"[WorktreeManager] 이미 머지됨 — skip: {branch}")
                 return MergeResult(success=True, conflict=False, already_merged=True, message="이미 머지됨 — skip")
+            # pre-merge stash: dirty working tree 감지
+            status_r = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, cwd=str(project_root))
+            stashed = False
+            if status_r.stdout.strip():
+                stash_r = subprocess.run(
+                    ["git", "stash", "push", "--include-untracked"],
+                    capture_output=True, text=True, cwd=str(project_root)
+                )
+                stashed = stash_r.returncode == 0 and "No local changes to save" not in stash_r.stdout
+                logger.info(f"[WorktreeManager] pre-merge stash: rc={stash_r.returncode}, stashed={stashed}")
             result = subprocess.run(
                 ["git", "merge", branch, "--no-ff", "-m", f"merge: {branch}"],
                 capture_output=True, text=True, cwd=str(project_root)
             )
             if result.returncode == 0:
+                # 머지 성공 → stash pop (있으면)
+                stash_pop_conflict = False
+                if stashed:
+                    pop_r = subprocess.run(["git", "stash", "pop"], capture_output=True, text=True, cwd=str(project_root))
+                    if pop_r.returncode != 0:
+                        stash_pop_conflict = True
+                        logger.warning(f"[WorktreeManager] stash pop 충돌 — drop 실행: {pop_r.stderr[:200]}")
+                        subprocess.run(["git", "stash", "drop"], capture_output=True, cwd=str(project_root))
                 logger.info(f"[WorktreeManager] 머지 성공: {branch}")
-                return MergeResult(success=True, conflict=False, message="머지 성공")
+                return MergeResult(success=True, conflict=False, stash_pop_conflict=stash_pop_conflict, message="머지 성공")
             else:
                 conflict = "CONFLICT" in result.stdout or "CONFLICT" in result.stderr
+                overwritten = "would be overwritten" in result.stderr or "would be overwritten" in result.stdout
                 # CONFLICT 줄만 추출하여 message에 포함 (resolve에서 컨텍스트로 활용)
                 conflict_lines = [l.strip() for l in result.stdout.splitlines() if l.strip().startswith("CONFLICT")]
                 detail = "\n".join(conflict_lines) if conflict_lines else (result.stderr.strip() + "\n" + result.stdout.strip()).strip()[:500]
-                if keep_conflict and conflict:
-                    # 충돌 상태 유지 — 호출자가 resolve + commit 책임
-                    logger.info(f"[WorktreeManager] 머지 충돌 (keep_conflict=True, 상태 유지): {branch}")
-                    return MergeResult(success=False, conflict=True, message=detail)
-                else:
-                    # 충돌 abort — 호출자(_do_inline_merge)가 resolve 처리
-                    subprocess.run(["git", "merge", "--abort"], capture_output=True, cwd=str(project_root))
-                    return MergeResult(success=False, conflict=conflict, message=detail)
+                # 항상 abort 후 stash pop
+                subprocess.run(["git", "merge", "--abort"], capture_output=True, cwd=str(project_root))
+                if stashed:
+                    pop_r = subprocess.run(["git", "stash", "pop"], capture_output=True, text=True, cwd=str(project_root))
+                    if pop_r.returncode != 0:
+                        logger.warning(f"[WorktreeManager] abort 후 stash pop 실패 — drop: {pop_r.stderr[:200]}")
+                        subprocess.run(["git", "stash", "drop"], capture_output=True, cwd=str(project_root))
+                return MergeResult(success=False, conflict=conflict, overwritten=overwritten, message=detail)
         except Exception as e:
-            return MergeResult(success=False, conflict=False, message=str(e))
+            return MergeResult(success=False, conflict=False, exception=str(e), message=str(e))
 
     @staticmethod
     def list_worktrees() -> list:
