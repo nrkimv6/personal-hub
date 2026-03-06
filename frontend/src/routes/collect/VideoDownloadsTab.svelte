@@ -40,10 +40,10 @@
   $: canNextPage = page < totalPages;
 
   // 타입별 스타일
-  const typeStyles: Record<VideoDownloadType, { icon: string; label: string; color: string }> = {
-    youtube: { icon: '▶', label: 'YouTube', color: 'text-error bg-error-light' },
-    youtube_stream: { icon: '🔴', label: 'YouTube Live', color: 'text-error bg-red-200' },
-    vimeo: { icon: '🎬', label: 'Vimeo', color: 'text-primary bg-primary-light' },
+  const typeStyles: Record<VideoDownloadType, { label: string; color: string }> = {
+    youtube: { label: 'YouTube', color: 'text-error bg-error-light' },
+    youtube_stream: { label: 'YouTube Live', color: 'text-error bg-red-200' },
+    vimeo: { label: 'Vimeo', color: 'text-primary bg-primary-light' },
   };
 
   // 상태별 스타일
@@ -400,7 +400,13 @@
             <tr class="hover:bg-muted">
               <td class="px-4 py-3">
                 <span class="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium {typeStyles[download.download_type]?.color || 'text-muted-foreground bg-muted'}">
-                  {typeStyles[download.download_type]?.icon || '?'}
+                  {#if download.download_type === 'youtube'}
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+                  {:else if download.download_type === 'youtube_stream'}
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>
+                  {:else if download.download_type === 'vimeo'}
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.2 6 3 11l-.9-2.4c-.3-.7-.1-1.4.5-1.7l15.4-4.5c.7-.2 1.4.1 1.7.9l.5 2.7Z"/><path d="M4 11v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10l-16 1Z"/></svg>
+                  {/if}
                   {typeStyles[download.download_type]?.label || download.download_type}
                 </span>
               </td>

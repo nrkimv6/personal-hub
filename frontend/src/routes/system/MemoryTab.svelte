@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { HardDrive, Cpu, FileText, BarChart3, AlertTriangle, Circle, RefreshCw } from 'lucide-svelte';
 
   interface MemoryInfo {
     total_mb: number;
@@ -86,9 +87,9 @@
   }
 
   function dangerLabel(level: 'normal' | 'warning' | 'critical') {
-    if (level === 'critical') return '🔴 위험';
-    if (level === 'warning') return '🟡 경고';
-    return '🟢 정상';
+    if (level === 'critical') return '위험';
+    if (level === 'warning') return '경고';
+    return '정상';
   }
 
   function fmtMb(mb: number): string {
@@ -102,9 +103,12 @@
   <!-- 헤더 -->
   <div class="flex items-center justify-between">
     <div class="flex items-center gap-3">
-      <h2 class="text-lg font-semibold">💾 메모리 현황</h2>
+      <h2 class="text-lg font-semibold flex items-center gap-2">
+        <HardDrive class="w-5 h-5" /> 메모리 현황
+      </h2>
       {#if data}
-        <span class="px-3 py-1 rounded-full text-sm font-medium {dangerBg(data.danger_level)}">
+        <span class="px-3 py-1 rounded-full text-sm font-medium {dangerBg(data.danger_level)} flex items-center gap-1.5">
+          <Circle class="w-2.5 h-2.5 fill-current" />
           {dangerLabel(data.danger_level)}
         </span>
       {/if}
@@ -115,8 +119,9 @@
       {/if}
       <button
         onclick={fetchMemory}
-        class="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium transition-colors"
+        class="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium transition-colors flex items-center gap-1"
       >
+        <RefreshCw class="w-3 h-3 {loading ? 'animate-spin' : ''}" />
         새로고침
       </button>
     </div>
@@ -132,9 +137,12 @@
 
   <!-- 에러 -->
   {:else if error}
-    <div class="p-4 rounded-lg bg-red-50 border border-red-200 text-red-700">
-      <p class="font-medium">⚠️ 메모리 정보 조회 실패</p>
-      <p class="text-sm mt-1">{error}</p>
+    <div class="p-4 rounded-lg bg-red-50 border border-red-200 text-red-700 flex items-start gap-2">
+      <AlertTriangle class="w-5 h-5 shrink-0 mt-0.5" />
+      <div>
+        <p class="font-medium">메모리 정보 조회 실패</p>
+        <p class="text-sm mt-1">{error}</p>
+      </div>
     </div>
 
   <!-- 데이터 -->
@@ -143,7 +151,9 @@
     <!-- RAM 게이지 -->
     <div class="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
       <div class="flex items-center justify-between mb-3">
-        <h3 class="font-semibold text-gray-800">🧠 RAM (물리 메모리)</h3>
+        <h3 class="font-semibold text-gray-800 flex items-center gap-2">
+          <Cpu class="w-5 h-5 text-gray-400" /> RAM (물리 메모리)
+        </h3>
         <span class="text-sm {dangerColor(data.danger_level)} font-medium">
           {data.ram.percent.toFixed(1)}% 사용
         </span>
@@ -164,7 +174,9 @@
     <!-- PageFile 게이지 -->
     <div class="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
       <div class="flex items-center justify-between mb-3">
-        <h3 class="font-semibold text-gray-800">📄 PageFile (가상 메모리)</h3>
+        <h3 class="font-semibold text-gray-800 flex items-center gap-2">
+          <FileText class="w-5 h-5 text-gray-400" /> PageFile (가상 메모리)
+        </h3>
         <span class="text-sm text-gray-600 font-medium">
           {data.pagefile.percent.toFixed(1)}% 사용
         </span>
@@ -189,7 +201,9 @@
     <!-- 프로세스 Top 15 테이블 -->
     <div class="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
       <div class="px-5 py-4 border-b border-gray-200">
-        <h3 class="font-semibold text-gray-800">📊 프로세스별 메모리 (Top {data.top_processes.length})</h3>
+        <h3 class="font-semibold text-gray-800 flex items-center gap-2">
+          <BarChart3 class="w-5 h-5 text-gray-400" /> 프로세스별 메모리 (Top {data.top_processes.length})
+        </h3>
       </div>
       {#if data.top_processes.length === 0}
         <p class="p-5 text-sm text-gray-500 italic">프로세스 정보 없음</p>

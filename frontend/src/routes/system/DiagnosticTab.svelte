@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { CheckCircle2, XCircle, Circle } from 'lucide-svelte';
 
   interface ZombieProcess {
     pid: number;
@@ -81,8 +82,6 @@
       { label: 'app.main import', status: det.import_ok === null ? 'skip' : det.import_ok ? 'pass' : 'fail' }
     ];
   }
-
-  const stepIcons: Record<StepStatus, string> = { pass: '✅', fail: '❌', skip: '⬜' };
 
   async function fetchProcessStatus() {
     try {
@@ -177,7 +176,15 @@
       <div class="space-y-2">
         {#each getSteps(diagnostic) as step}
           <div class="flex items-center gap-3 py-1.5 px-3 rounded {step.status === 'fail' ? 'bg-red-50 dark:bg-red-900/10' : ''}">
-            <span>{stepIcons[step.status]}</span>
+            <span>
+              {#if step.status === 'pass'}
+                <CheckCircle2 class="w-4 h-4 text-green-500" />
+              {:else if step.status === 'fail'}
+                <XCircle class="w-4 h-4 text-red-500" />
+              {:else}
+                <Circle class="w-4 h-4 text-gray-300" />
+              {/if}
+            </span>
             <span class="text-sm text-foreground">{step.label}</span>
           </div>
         {/each}

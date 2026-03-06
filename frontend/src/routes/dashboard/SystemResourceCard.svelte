@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Monitor } from 'lucide-svelte';
   import type { SystemResource } from '$lib/types';
 
   interface Props {
@@ -23,7 +24,7 @@
 
 <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
   <h2 class="text-lg font-semibold text-foreground dark:text-white mb-4 flex items-center gap-2">
-    <span class="text-xl">💻</span>
+    <Monitor size={20} class="text-primary" />
     시스템 리소스
   </h2>
 

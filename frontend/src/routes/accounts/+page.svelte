@@ -2,6 +2,11 @@
   import { onMount, onDestroy } from 'svelte';
   import PageHeader from '$lib/components/layout/PageHeader.svelte';
   import { fetchWithTimeout } from '$lib/api/client';
+  import { 
+    Circle, ChevronUp, ChevronDown, RefreshCw, AlertTriangle, 
+    Lock, Mail, Folder, MessageSquare, Clock, Globe, X, 
+    Pause, Play, Check 
+  } from 'lucide-svelte';
 
   interface Account {
     id: number;
@@ -260,7 +265,7 @@
         throw new Error(data.detail || '브라우저 열기 실패');
       }
       const result = await res.json();
-      showCommandMessage(`✓ ${result.message}`, 'success');
+      showCommandMessage(result.message, 'success');
       // 명령 이력 새로고침
       if (showCommands) await loadBrowserCommands();
     } catch (e) {
@@ -282,7 +287,7 @@
         throw new Error(data.detail || '네이버 로그인 페이지 열기 실패');
       }
       const result = await res.json();
-      showCommandMessage(`✓ ${result.message}`, 'success');
+      showCommandMessage(result.message, 'success');
       if (showCommands) await loadBrowserCommands();
     } catch (e) {
       showCommandMessage(e instanceof Error ? e.message : '알 수 없는 오류', 'error');
@@ -303,7 +308,7 @@
         throw new Error(data.detail || '상태 확인 실패');
       }
       const result = await res.json();
-      showCommandMessage(`✓ ${result.message}`, 'success');
+      showCommandMessage(result.message, 'success');
       if (showCommands) await loadBrowserCommands();
     } catch (e) {
       showCommandMessage(e instanceof Error ? e.message : '알 수 없는 오류', 'error');
@@ -324,7 +329,7 @@
         throw new Error(data.detail || '브라우저 종료 실패');
       }
       const result = await res.json();
-      showCommandMessage(`✓ ${result.message}`, 'success');
+      showCommandMessage(result.message, 'success');
       if (showCommands) await loadBrowserCommands();
     } catch (e) {
       showCommandMessage(e instanceof Error ? e.message : '알 수 없는 오류', 'error');
@@ -381,8 +386,14 @@
           : 'bg-warning-light border-yellow-200'}">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
-            <span class="text-lg">
-              {browserStatus.available ? '🟢' : browserStatus.permanently_failed ? '🔴' : '🟡'}
+            <span class="flex items-center">
+              {#if browserStatus.available}
+                <Circle class="w-4 h-4 fill-success text-success" />
+              {:else if browserStatus.permanently_failed}
+                <Circle class="w-4 h-4 fill-error text-error" />
+              {:else}
+                <Circle class="w-4 h-4 fill-warning text-warning" />
+              {/if}
             </span>
             <span class="font-medium">
               브라우저 서비스:
@@ -398,9 +409,13 @@
           </div>
           <button
             onclick={toggleCommands}
-            class="px-3 py-1 text-sm bg-card border border-border rounded hover:bg-muted transition-colors"
+            class="px-3 py-1 text-sm bg-card border border-border rounded hover:bg-muted transition-colors flex items-center gap-1"
           >
-            {showCommands ? '▲ 명령 이력 닫기' : '▼ 명령 이력 보기'}
+            {#if showCommands}
+              <ChevronUp class="w-4 h-4" /> 명령 이력 닫기
+            {:else}
+              <ChevronDown class="w-4 h-4" /> 명령 이력 보기
+            {/if}
           </button>
         </div>
       </div>
@@ -423,9 +438,13 @@
           <button
             onclick={loadBrowserCommands}
             disabled={commandsLoading}
-            class="px-2 py-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50"
+            class="px-2 py-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 flex items-center gap-1"
           >
-            {commandsLoading ? '로딩...' : '🔄 새로고침'}
+            {#if commandsLoading}
+              로딩...
+            {:else}
+              <RefreshCw class="w-3 h-3" /> 새로고침
+            {/if}
           </button>
         </div>
         {#if browserCommands.length === 0}
@@ -484,8 +503,8 @@
         <p class="mt-2 text-muted-foreground">로딩 중...</p>
       </div>
     {:else if error}
-      <div class="bg-error-light border border-red-200 rounded-lg p-4 text-error">
-        ⚠️ {error}
+      <div class="bg-error-light border border-red-200 rounded-lg p-4 text-error flex items-center gap-2">
+        <AlertTriangle class="w-5 h-5" /> {error}
       </div>
     {:else if accounts.length === 0}
       <div class="text-center py-12 bg-background rounded-lg">
@@ -494,7 +513,7 @@
           onclick={openCreateModal}
           class="mt-4 text-primary hover:underline"
         >
-          첫 계정 추가하기 →
+          첫 계정 추가하기
         </button>
       </div>
     {:else}
@@ -509,22 +528,22 @@
                     {account.is_active ? '활성' : '비활성'}
                   </span>
                   {#if account.is_logged_in}
-                    <span class="px-2 py-1 text-xs rounded-full bg-primary-light text-primary">
-                      🔐 로그인됨
+                    <span class="px-2 py-1 text-xs rounded-full bg-primary-light text-primary flex items-center gap-1">
+                      <Lock class="w-3 h-3" /> 로그인됨
                     </span>
                   {/if}
                 </div>
 
                 <div class="mt-2 space-y-1 text-sm text-muted-foreground">
                   {#if account.email}
-                    <p>📧 {account.email}</p>
+                    <p class="flex items-center gap-1.5"><Mail class="w-4 h-4" /> {account.email}</p>
                   {/if}
-                  <p>📁 프로필: <code class="bg-muted px-2 py-0.5 rounded">{account.profile_dir}</code></p>
+                  <p class="flex items-center gap-1.5"><Folder class="w-4 h-4" /> 프로필: <code class="bg-muted px-2 py-0.5 rounded">{account.profile_dir}</code></p>
                   {#if account.description}
-                    <p>💬 {account.description}</p>
+                    <p class="flex items-center gap-1.5"><MessageSquare class="w-4 h-4" /> {account.description}</p>
                   {/if}
                   {#if account.last_used_at}
-                    <p>🕐 마지막 사용: {formatDate(account.last_used_at)}</p>
+                    <p class="flex items-center gap-1.5"><Clock class="w-4 h-4" /> 마지막 사용: {formatDate(account.last_used_at)}</p>
                   {/if}
                 </div>
 
@@ -533,34 +552,50 @@
                   <button
                     onclick={() => openBrowser(account)}
                     disabled={!!browserLoading[account.id]}
-                    class="px-3 py-1.5 text-sm bg-slate-100 text-slate-700 rounded hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                    class="px-3 py-1.5 text-sm bg-slate-100 text-slate-700 rounded hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-wait flex items-center gap-1"
                     title="브라우저 열기"
                   >
-                    {browserLoading[account.id] === 'open' ? '...' : '🌐 브라우저'}
+                    {#if browserLoading[account.id] === 'open'}
+                      <RefreshCw class="w-4 h-4 animate-spin" />
+                    {:else}
+                      <Globe class="w-4 h-4" /> 브라우저
+                    {/if}
                   </button>
                   <button
                     onclick={() => openNaverLogin(account)}
                     disabled={!!browserLoading[account.id]}
-                    class="px-3 py-1.5 text-sm bg-success-light text-success rounded hover:bg-green-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                    class="px-3 py-1.5 text-sm bg-success-light text-success rounded hover:bg-green-200 transition-colors disabled:opacity-50 disabled:cursor-wait flex items-center gap-1"
                     title="네이버 로그인 페이지 열기"
                   >
-                    {browserLoading[account.id] === 'login' ? '...' : '🔐 네이버 로그인'}
+                    {#if browserLoading[account.id] === 'login'}
+                      <RefreshCw class="w-4 h-4 animate-spin" />
+                    {:else}
+                      <Lock class="w-4 h-4" /> 네이버 로그인
+                    {/if}
                   </button>
                   <button
                     onclick={() => checkLoginStatus(account)}
                     disabled={!!browserLoading[account.id]}
-                    class="px-3 py-1.5 text-sm bg-primary-light text-primary rounded hover:bg-blue-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                    class="px-3 py-1.5 text-sm bg-primary-light text-primary rounded hover:bg-blue-200 transition-colors disabled:opacity-50 disabled:cursor-wait flex items-center gap-1"
                     title="로그인 상태 확인"
                   >
-                    {browserLoading[account.id] === 'check' ? '...' : '🔄 상태 확인'}
+                    {#if browserLoading[account.id] === 'check'}
+                      <RefreshCw class="w-4 h-4 animate-spin" />
+                    {:else}
+                      <RefreshCw class="w-4 h-4" /> 상태 확인
+                    {/if}
                   </button>
                   <button
                     onclick={() => closeBrowser(account)}
                     disabled={!!browserLoading[account.id]}
-                    class="px-3 py-1.5 text-sm bg-warning-light text-warning rounded hover:bg-orange-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                    class="px-3 py-1.5 text-sm bg-warning-light text-warning rounded hover:bg-orange-200 transition-colors disabled:opacity-50 disabled:cursor-wait flex items-center gap-1"
                     title="브라우저 세션 종료"
                   >
-                    {browserLoading[account.id] === 'close' ? '...' : '✕ 세션 종료'}
+                    {#if browserLoading[account.id] === 'close'}
+                      <RefreshCw class="w-4 h-4 animate-spin" />
+                    {:else}
+                      <X class="w-4 h-4" /> 세션 종료
+                    {/if}
                   </button>
                 </div>
               </div>
@@ -568,10 +603,14 @@
               <div class="flex items-start gap-2">
                 <button
                   onclick={() => toggleActive(account)}
-                  class="px-3 py-1.5 text-sm border border-border rounded hover:bg-muted transition-colors"
+                  class="p-2 border border-border rounded hover:bg-muted transition-colors"
                   title={account.is_active ? '비활성화' : '활성화'}
                 >
-                  {account.is_active ? '⏸️' : '▶️'}
+                  {#if account.is_active}
+                    <Pause class="w-4 h-4" />
+                  {:else}
+                    <Play class="w-4 h-4" />
+                  {/if}
                 </button>
                 <button
                   onclick={() => openEditModal(account)}

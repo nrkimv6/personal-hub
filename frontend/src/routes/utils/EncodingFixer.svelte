@@ -1,6 +1,7 @@
 <script lang="ts">
 	// 인코딩 감지 & 변환 유틸
 	// 브라우저의 TextDecoder API를 사용해 EUC-KR / CP949 → UTF-8로 변환
+	import { FileText, Check, X, ChevronUp, ChevronDown, ArrowRight } from 'lucide-svelte';
 
 	const ENCODINGS = [
 		{ value: 'euc-kr', label: 'EUC-KR / CP949 (한국어)' },
@@ -291,7 +292,7 @@
 		{/if}
 
 		<div class="flex items-center gap-1.5 text-xs text-muted-foreground">
-			<span>→</span>
+			<ArrowRight class="w-3 h-3" />
 			<span class="px-2 py-1 bg-muted/40 rounded">UTF-8 출력</span>
 		</div>
 	</div>
@@ -306,7 +307,9 @@
 		ondragleave={() => { isDragging = false; }}
 		ondrop={handleDrop}
 	>
-		<div class="text-4xl mb-3">📄</div>
+		<div class="flex justify-center mb-3">
+			<FileText class="w-12 h-12 text-muted-foreground" />
+		</div>
 		<p class="text-sm text-muted-foreground mb-3">
 			파일을 여기에 드래그하거나 클릭해서 선택하세요
 		</p>
@@ -357,9 +360,9 @@
 					<div class="flex flex-wrap items-center gap-3 px-4 py-2.5 bg-muted/30">
 						<div class="flex items-center gap-2 flex-1 min-w-0">
 							{#if result.status === 'ok'}
-								<span class="text-success text-sm shrink-0">✓</span>
+								<Check class="text-success w-4 h-4 shrink-0" />
 							{:else}
-								<span class="text-destructive text-sm shrink-0">✗</span>
+								<X class="text-destructive w-4 h-4 shrink-0" />
 							{/if}
 							<span class="text-sm font-medium truncate">{result.name}</span>
 						</div>
@@ -429,9 +432,13 @@
 							<!-- 접기/펼치기 -->
 							<button
 								onclick={() => toggleExpand(idx)}
-								class="mt-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+								class="mt-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
 							>
-								{result.expanded ? '▲ 접기' : '▼ 더 보기 (최대 3000자)'}
+								{#if result.expanded}
+									<ChevronUp class="w-3 h-3" /> 접기
+								{:else}
+									<ChevronDown class="w-3 h-3" /> 더 보기 (최대 3000자)
+								{/if}
 							</button>
 						</div>
 					{:else}

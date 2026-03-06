@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { RecentAlert } from '$lib/types';
+  import { Bell, AlertTriangle, CheckCircle2, XCircle, Info, Circle } from 'lucide-svelte';
 
   interface Props {
     alerts: RecentAlert[];

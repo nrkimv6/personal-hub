@@ -1,5 +1,6 @@
 <script lang="ts">
   import { integrityApi } from '$lib/api';
+  import { RefreshCw, Eye, Wrench, CheckCircle2, AlertCircle, AlertTriangle, Info, Circle } from 'lucide-svelte';
 
   // Props
   interface Props {
@@ -139,14 +140,9 @@
     }
   }
 
-  // 심각도별 아이콘
-  function getSeverityIcon(severity: string): string {
-    switch (severity) {
-      case 'critical': return '🔴';
-      case 'warning': return '🟡';
-      case 'info': return '🔵';
-      default: return '⚪';
-    }
+  // 심각도별 아이콘 (제거됨 - 템플릿에서 직접 사용)
+  function getSeverityIcon(severity: string) {
+    return null;
   }
 
   // 심각도별 색상 클래스
@@ -176,9 +172,15 @@
     <button
       onclick={runCheck}
       disabled={loading}
-      class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover disabled:opacity-50"
+      class="px-4 py-2 bg-primary text-white rounded hover:bg-primary-hover disabled:opacity-50 flex items-center gap-2"
     >
-      {loading ? '검사 중...' : '🔄 검사 실행'}
+      {#if loading}
+        <RefreshCw class="w-4 h-4 animate-spin" />
+        <span>검사 중...</span>
+      {:else}
+        <RefreshCw class="w-4 h-4" />
+        <span>검사 실행</span>
+      {/if}
     </button>
   </div>
 
@@ -220,16 +222,18 @@
         <button
           onclick={() => fixAll(true)}
           disabled={fixingAll}
-          class="px-4 py-2 bg-muted dark:bg-gray-700 text-foreground dark:text-gray-300 rounded hover:bg-secondary dark:hover:bg-gray-600 disabled:opacity-50"
+          class="px-4 py-2 bg-muted dark:bg-gray-700 text-foreground dark:text-gray-300 rounded hover:bg-secondary dark:hover:bg-gray-600 disabled:opacity-50 flex items-center gap-2"
         >
-          {fixingAll ? '처리 중...' : '👁️ 미리보기 (전체)'}
+          <Eye class="w-4 h-4" />
+          <span>{fixingAll ? '처리 중...' : '미리보기 (전체)'}</span>
         </button>
         <button
           onclick={() => fixAll(false)}
           disabled={fixingAll}
-          class="px-4 py-2 bg-success text-white rounded hover:bg-success/90 disabled:opacity-50"
+          class="px-4 py-2 bg-success text-white rounded hover:bg-success/90 disabled:opacity-50 flex items-center gap-2"
         >
-          {fixingAll ? '처리 중...' : '🔧 자동 수정 (전체)'}
+          <Wrench class="w-4 h-4" />
+          <span>{fixingAll ? '처리 중...' : '자동 수정 (전체)'}</span>
         </button>
       </div>
     {/if}
@@ -252,8 +256,17 @@
             {#each checkResult.issues as issue}
               <tr class="hover:bg-muted dark:hover:bg-gray-700/50">
                 <td class="px-4 py-3">
-                  <span class="px-2 py-1 rounded text-sm {getSeverityClass(issue.severity)}">
-                    {getSeverityIcon(issue.severity)} {issue.severity}
+                  <span class="px-2 py-1 rounded text-sm flex items-center gap-1 w-fit {getSeverityClass(issue.severity)}">
+                    {#if issue.severity === 'critical'}
+                      <AlertCircle class="w-3.5 h-3.5" />
+                    {:else if issue.severity === 'warning'}
+                      <AlertTriangle class="w-3.5 h-3.5" />
+                    {:else if issue.severity === 'info'}
+                      <Info class="w-3.5 h-3.5" />
+                    {:else}
+                      <Circle class="w-3.5 h-3.5" />
+                    {/if}
+                    {issue.severity}
                   </span>
                 </td>
                 <td class="px-4 py-3 font-mono text-sm text-foreground dark:text-white">{issue.table}</td>
@@ -268,13 +281,17 @@
                         disabled={fixingTable === `${issue.table}/${issue.issue_type}`}
                         class="px-2 py-1 text-xs bg-muted dark:bg-gray-700 text-muted-foreground dark:text-gray-300 rounded hover:bg-secondary dark:hover:bg-gray-600 disabled:opacity-50"
                         title="미리보기"
-                      >👁️</button>
+                      >
+                        <Eye class="w-3.5 h-3.5" />
+                      </button>
                       <button
                         onclick={() => fixSpecific(issue.table, issue.issue_type, false)}
                         disabled={fixingTable === `${issue.table}/${issue.issue_type}`}
                         class="px-2 py-1 text-xs bg-success-light dark:bg-green-900/30 text-success dark:text-green-400 rounded hover:bg-green-200 dark:hover:bg-green-900/50 disabled:opacity-50"
                         title="수정"
-                      >🔧</button>
+                      >
+                        <Wrench class="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   {:else}
                     <span class="text-xs text-muted-foreground dark:text-muted-foreground">수동 처리</span>
@@ -297,8 +314,9 @@
         </table>
       </div>
     {:else}
-      <div class="bg-success-light dark:bg-green-900/20 p-6 rounded text-center text-success dark:text-green-400">
-        ✅ 모든 정합성 검사를 통과했습니다!
+      <div class="bg-success-light dark:bg-green-900/20 p-6 rounded text-center text-success dark:text-green-400 flex items-center justify-center gap-2">
+        <CheckCircle2 class="w-5 h-5" />
+        <span>모든 정합성 검사를 통과했습니다!</span>
       </div>
     {/if}
   {/if}

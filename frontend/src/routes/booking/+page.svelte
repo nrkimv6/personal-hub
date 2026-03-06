@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Badge, Button } from '$lib/components/ui';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
+	import { Pencil, Pause, Play, Check } from 'lucide-svelte';
 
   import { onMount } from 'svelte';
   import { scheduleApi, bookingApi, itemApi } from '$lib/api';
@@ -245,7 +246,7 @@
                       onclick={() => openEditModal(schedule)}
                       title="수정"
                     >
-                      ✏
+                      <Pencil class="w-3 h-3" />
                     </Button>
                     <Button variant="secondary" size="xs"
                       onclick={() => handleResetBookingCount(schedule)}
@@ -259,7 +260,11 @@
                       onclick={() => handleToggleAutoBooking(schedule)}
                       title={schedule.auto_booking_enabled ? '자동예약 중지' : '자동예약 활성화'}
                     >
-                      {schedule.auto_booking_enabled ? '⏸' : '▶'}
+                      {#if schedule.auto_booking_enabled}
+                        <Pause class="w-3 h-3" />
+                      {:else}
+                        <Play class="w-3 h-3" />
+                      {/if}
                     </Button>
                   </div>
                 </td>
@@ -306,7 +311,9 @@
               {#if filterTest.result.filtered_slots.length > 0}
                 <ul class="mt-2 space-y-1">
                   {#each filterTest.result.filtered_slots as slot}
-                    <li class="text-success">✓ {slot}</li>
+                    <li class="text-success flex items-center gap-1">
+                      <Check class="w-3 h-3" /> {slot}
+                    </li>
                   {/each}
                 </ul>
               {:else}

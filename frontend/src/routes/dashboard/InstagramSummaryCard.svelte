@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { InstagramSummary } from '$lib/types';
+  import { Instagram, Circle } from 'lucide-svelte';
 
   interface Props {
     summary: InstagramSummary;
@@ -49,7 +50,7 @@
 
 <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
   <h2 class="text-lg font-semibold text-foreground dark:text-white mb-4 flex items-center gap-2">
-    <span class="text-xl">📸</span>
+    <Instagram class="w-5 h-5 text-purple-500" />
     Instagram
   </h2>
 
@@ -58,7 +59,7 @@
     <div class="flex justify-between items-center">
       <span class="text-muted-foreground dark:text-muted-foreground">워커</span>
       <span class="flex items-center gap-2">
-        <span class="text-lg {getWorkerStatusColor(summary.worker_status)}">●</span>
+        <div class="w-2.5 h-2.5 rounded-full {getWorkerStatusColor(summary.worker_status).replace('text-', 'bg-')}"></div>
         <span class="px-2 py-0.5 text-sm rounded {getWorkerStatusBg(summary.worker_status)} {getWorkerStatusColor(summary.worker_status)}">
           {getWorkerStatusLabel(summary.worker_status)}
         </span>
