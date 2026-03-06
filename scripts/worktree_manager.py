@@ -50,6 +50,22 @@ class MergeResult:
 
 class WorktreeManager:
     @staticmethod
+    def _apply_sparse_checkout(worktree_path: Path) -> None:
+        """worktree에 sparse-checkout 적용: docs/plan/, docs/archive/ 제외"""
+        # sparse-checkout 활성화 (이미 활성이어도 멱등)
+        subprocess.run(
+            ["git", "sparse-checkout", "init", "--no-cone"],
+            cwd=str(worktree_path), capture_output=True
+        )
+        # 패턴 설정: 전체 포함, docs/plan/ + docs/archive/ 제외
+        subprocess.run(
+            ["git", "sparse-checkout", "set", "--no-cone",
+             "/*", "!/docs/plan/", "!/docs/archive/"],
+            cwd=str(worktree_path), capture_output=True
+        )
+        logger.info(f"[WorktreeManager] sparse-checkout 적용: {worktree_path} (docs/plan, docs/archive 제외)")
+
+    @staticmethod
     def create(runner_id: str, base_dir: Path, plan_file: Optional[str] = None) -> tuple:
         """git worktree add 실행 후 (worktree_path, branch) 반환
 
@@ -76,6 +92,7 @@ class WorktreeManager:
                     # 워크트리 디렉토리가 실제로 존재하면 재사용 (커밋 보존)
                     if worktree_path.is_dir():
                         logger.info(f"[WorktreeManager] 기존 worktree 재사용: {branch}")
+                        WorktreeManager._apply_sparse_checkout(worktree_path)
                         return worktree_path, branch
                     # 디렉토리 없음 + 브랜치만 남은 경우: 미머지 커밋 확인 후 분기
                     subprocess.run(
@@ -111,6 +128,7 @@ class WorktreeManager:
                         logger.warning(f"[WorktreeManager] dangling 브랜치 정리 후 재생성: {branch}")
                 else:
                     raise WorktreeError(f"git worktree add 실패: {result.stderr}")
+            WorktreeManager._apply_sparse_checkout(worktree_path)
             logger.info(f"[WorktreeManager] 생성: {worktree_path} (브랜치: {branch})")
             return worktree_path, branch
         except WorktreeError:
