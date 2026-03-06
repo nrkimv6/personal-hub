@@ -6,6 +6,7 @@ import logging
 import re
 import redis
 import shutil
+import subprocess
 from datetime import date
 from pathlib import Path
 from typing import List, Optional
@@ -380,7 +381,7 @@ class PlanService:
             }
 
     # 자동 무시 대상 상태 (정확히 일치해야 함)
-    _IGNORED_STATUSES = {"보류"}
+    _IGNORED_STATUSES = {"보류", "가이드"}
     # 완료 계열 상태 (아카이브 허용 + 목록 숨김)
     _DONE_STATUSES = {"구현완료", "완료", "수정 완료", "배포완료", "수정완료"}
 
@@ -457,6 +458,11 @@ class PlanService:
             stem = path.stem.lower()
             if '-report' in stem or '-postmortem' in stem:
                 return "완료"
+            # 가이드/아이디어/개요 문서 유형 감지
+            if doc_type and re.search(r'가이드|guide|아이디어|idea|개요|overview|설계|design', doc_type, re.IGNORECASE):
+                return "가이드"
+            if any(kw in stem for kw in ('-guide', '-overview', '-idea', '-design', '-spec')):
+                return "가이드"
             return "unknown"
         except Exception:
             return "unknown"
@@ -752,8 +758,12 @@ class PlanService:
         )
         return content
 
-    async def _archive_plan(self, plan_path: str, content: str) -> Path:
-        """완료일 헤더 삽입 후 git mv로 archive 디렉토리로 이동"""
+    async def _archive_plan(self, plan_path: str, content: str) -> tuple[Path, Optional[Path]]:
+        """완료일 헤더 삽입 후 git mv로 archive 디렉토리로 이동.
+
+        Returns:
+            (archive_path, todo_archive_path) — todo_archive_path는 companion _todo.md가 없으면 None
+        """
         p = Path(plan_path)
         today = date.today().isoformat()
 
@@ -793,7 +803,24 @@ class PlanService:
             archive_path.write_text(final_content, encoding="utf-8")
             p.unlink()
 
-        return archive_path
+        # 4. companion _todo.md 아카이브 처리
+        todo_archive_path: Optional[Path] = None
+        todo_file = self._find_todo_file(p)
+        if todo_file and todo_file.exists():
+            todo_archive_path = archive_dir / todo_file.name
+            todo_mv_proc = await asyncio.create_subprocess_exec(
+                "git", "mv", str(todo_file), str(todo_archive_path),
+                cwd=str(todo_file.parent),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await todo_mv_proc.communicate()
+            if todo_mv_proc.returncode != 0:
+                # fallback: 파일시스템 이동
+                todo_archive_path.write_text(todo_file.read_text(encoding="utf-8"), encoding="utf-8")
+                todo_file.unlink()
+
+        return archive_path, todo_archive_path
 
     @staticmethod
     def _update_todo_done(project_dir: Path, plan_title: str) -> None:
@@ -928,7 +955,7 @@ class PlanService:
                 has_manual = True
 
             # 3. 아카이브 이동
-            archive_path = await self._archive_plan(plan_path, updated_content)
+            archive_path, todo_archive_path = await self._archive_plan(plan_path, updated_content)
 
             # 4. TODO.md / DONE.md 업데이트
             if project_dir:
@@ -938,6 +965,8 @@ class PlanService:
 
             # 5. git commit
             files_to_commit: List[Path] = [archive_path]
+            if todo_archive_path:
+                files_to_commit.append(todo_archive_path)
             if project_dir:
                 files_to_commit += [
                     project_dir / "TODO.md",
@@ -1038,13 +1067,58 @@ class PlanService:
             can_done=can_done,
         )
 
+    def _check_branch_exists(self, branch: str) -> bool:
+        """git branch가 존재하는지 확인. subprocess 실패 시 False (안전 기본값)"""
+        try:
+            result = subprocess.run(
+                ["git", "branch", "--list", branch],
+                capture_output=True, text=True, timeout=5
+            )
+            return bool(result.stdout.strip())
+        except Exception:
+            return False
+
+    def _check_worktree_exists(self, worktree_path: str) -> bool:
+        """git worktree가 존재하는지 확인. subprocess 실패 시 False (안전 기본값)"""
+        try:
+            result = subprocess.run(
+                ["git", "worktree", "list", "--porcelain"],
+                capture_output=True, text=True, timeout=5
+            )
+            return worktree_path in result.stdout
+        except Exception:
+            return False
+
     def _can_done(self, plan: PlanFileResponse) -> bool:
         """plan이 done 처리 가능한지 판단 — 체크박스 전체 완료 OR 상태 헤더 완료 계열 OR 체크박스 없음"""
         if "archive" in plan.path:
             return False
+
+        # worktree/branch 존재 여부 확인 — 살아있으면 done 불가
+        try:
+            p = Path(plan.path)
+            if p.exists():
+                top20 = ""
+                with open(p, "r", encoding="utf-8", errors="ignore") as f:
+                    for i, line in enumerate(f):
+                        if i >= 20:
+                            break
+                        top20 += line
+                branch_match = re.search(r'^>\s*branch:\s*(.+)', top20, re.MULTILINE)
+                if branch_match and self._check_branch_exists(branch_match.group(1).strip()):
+                    return False
+                worktree_match = re.search(r'^>\s*worktree:\s*(.+)', top20, re.MULTILINE)
+                if worktree_match and self._check_worktree_exists(worktree_match.group(1).strip()):
+                    return False
+        except Exception:
+            pass  # 파일 읽기 실패 시 기존 로직으로 진행
+
         progress = plan.progress
         if progress is None:
             progress = self.get_plan_progress(Path(plan.path))
+        # 가이드 문서는 done 불가
+        if plan.status == "가이드":
+            return False
         # 체크박스 없는 문서(분석서, 보고서 등): 아카이브 허용
         if progress.total == 0:
             return True

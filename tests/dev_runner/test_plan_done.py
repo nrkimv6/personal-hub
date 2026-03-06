@@ -162,7 +162,7 @@ class TestArchivePlan:
         plan_file = plan_dir / "2026-01-01-test.md"
         plan_file.write_text("# 테스트\n> 상태: 구현완료\n", encoding="utf-8")
 
-        archive_path = await svc._archive_plan(str(plan_file), plan_file.read_text(encoding="utf-8"))
+        archive_path, _ = await svc._archive_plan(str(plan_file), plan_file.read_text(encoding="utf-8"))
 
         assert archive_path.exists()
         assert archive_path.parent.name == "archive"
@@ -185,7 +185,7 @@ class TestArchivePlan:
         plan_file = plan_dir / "plan.md"
         plan_file.write_text("# 테스트\n> 상태: 구현완료\n", encoding="utf-8")
 
-        archive_path = await svc._archive_plan(str(plan_file), plan_file.read_text(encoding="utf-8"))
+        archive_path, _ = await svc._archive_plan(str(plan_file), plan_file.read_text(encoding="utf-8"))
 
         archived_content = archive_path.read_text(encoding="utf-8")
         assert f"> 완료일: {today}" in archived_content
