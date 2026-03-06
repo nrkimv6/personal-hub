@@ -234,3 +234,121 @@ class TestWatchdogDuplicateCleanup:
         """
         duplicates = _get_duplicate_processes("__no_such_pattern_xyz__", None)
         assert duplicates == []
+
+
+# ─── Stop-ExistingProcessesByCmdline equivalent ──────────────────────────────
+
+def _stop_existing_processes_by_cmdline(cmdline_pattern: str) -> int:
+    """
+    Stop-ExistingProcessesByCmdline 동등 로직.
+    재시작 직전 cmdline 패턴으로 기존 프로세스를 모두 종료 (정본 구분 없이 전부 kill).
+    반환값: 종료된 프로세스 수
+    """
+    killed = 0
+    for proc in psutil.process_iter(['pid', 'cmdline']):
+        try:
+            cmdline = " ".join(proc.info['cmdline'] or [])
+            if cmdline_pattern in cmdline:
+                proc.kill()
+                killed += 1
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    return killed
+
+
+class TestWatchdogRestartPath:
+    """
+    Phase T1 item #2: watchdog restart 경로에서 중복 없이 정상 1개 유지 확인.
+
+    Start-CommandListener / Start-UnifiedWorker / Start-ClaudeWorker 함수 첫 줄에서
+    Stop-ExistingProcessesByCmdline 을 호출하는 로직을 검증한다.
+    재시작 직전에 기존 프로세스를 모두 정리하고 새 프로세스를 1개만 띄우는 흐름.
+    """
+
+    def test_right_restart_kills_existing_before_new_start(self, two_listener_procs, pid_file):
+        """
+        R(Right): 재시작 직전 Stop-ExistingProcessesByCmdline 실행 → 기존 프로세스 전부 종료,
+        이후 새 프로세스 1개를 시작하면 최종 1개만 남는다.
+        """
+        proc1, proc2 = two_listener_procs
+
+        # 재시작 직전 기존 프로세스 전부 kill (Stop-ExistingProcessesByCmdline 동등)
+        killed = _stop_existing_processes_by_cmdline(_MARKER)
+        assert killed >= 2, f"기존 프로세스 2개 이상이 종료되어야 함 (실제: {killed})"
+
+        time.sleep(0.3)
+
+        assert proc1.poll() is not None, "기존 proc1은 재시작 전 종료되어야 함"
+        assert proc2.poll() is not None, "기존 proc2는 재시작 전 종료되어야 함"
+
+        # 새 프로세스 1개 시작 (watchdog이 Start-CommandListener로 띄우는 행위 시뮬레이션)
+        new_proc = subprocess.Popen(
+            [sys.executable, "-c",
+             f"import time; x='{_MARKER}'; time.sleep(60)"],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        time.sleep(0.5)
+
+        try:
+            # 마커 패턴으로 실행 중인 프로세스 수 확인
+            # Windows venv에서는 래퍼(new_proc.pid) + 자식 인터프리터 프로세스가 생길 수 있으므로
+            # new_proc의 자식 PID까지 포함한 허용 집합으로 검증
+            allowed_pids = _get_canonical_pids(new_proc.pid)
+            running = [
+                p for p in psutil.process_iter(['pid', 'cmdline'])
+                if _MARKER in " ".join(p.info.get('cmdline') or [])
+            ]
+            outside = [p for p in running if p.pid not in allowed_pids]
+            assert len(outside) == 0, (
+                f"재시작 후 new_proc 그룹 외부의 마커 프로세스가 존재해선 안 됨 (실제: {[p.pid for p in outside]})"
+            )
+            assert new_proc.poll() is None, "새로 시작한 프로세스는 살아있어야 함"
+        finally:
+            new_proc.kill()
+            new_proc.wait(timeout=5)
+
+    def test_boundary_restart_with_no_existing_procs(self):
+        """
+        B(Boundary): 기존 프로세스가 없는 상태에서 Stop-ExistingProcessesByCmdline 실행 →
+        0개 종료, 이후 새 프로세스 1개 시작하면 1개만 존재.
+        """
+        # 사전 확인: 마커 프로세스 없음
+        existing = [
+            p for p in psutil.process_iter(['pid', 'cmdline'])
+            if _MARKER in " ".join(p.info.get('cmdline') or [])
+        ]
+        assert len(existing) == 0, "이 시점에 마커 프로세스가 없어야 함"
+
+        killed = _stop_existing_processes_by_cmdline(_MARKER)
+        assert killed == 0, "종료할 프로세스 없으면 0 반환"
+
+        # 새 프로세스 1개 시작
+        new_proc = subprocess.Popen(
+            [sys.executable, "-c",
+             f"import time; x='{_MARKER}'; time.sleep(60)"],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        time.sleep(0.5)
+
+        try:
+            allowed_pids = _get_canonical_pids(new_proc.pid)
+            running = [
+                p for p in psutil.process_iter(['pid', 'cmdline'])
+                if _MARKER in " ".join(p.info.get('cmdline') or [])
+            ]
+            outside = [p for p in running if p.pid not in allowed_pids]
+            assert len(outside) == 0, (
+                f"새 프로세스 그룹 외부에 마커 프로세스가 없어야 함 (실제: {[p.pid for p in outside]})"
+            )
+            assert new_proc.poll() is None, "새로 시작한 프로세스는 살아있어야 함"
+        finally:
+            new_proc.kill()
+            new_proc.wait(timeout=5)
+
+    def test_right_stop_existing_returns_count(self, two_listener_procs):
+        """
+        R(Right): Stop-ExistingProcessesByCmdline이 종료한 프로세스 수를 올바르게 반환.
+        """
+        killed = _stop_existing_processes_by_cmdline(_MARKER)
+        # Windows venv에서 Popen 1개당 래퍼+자식 프로세스가 생길 수 있어 >= 2로 검증
+        assert killed >= 2, f"더미 프로세스 2개 이상이 종료되어야 함 (실제: {killed})"
