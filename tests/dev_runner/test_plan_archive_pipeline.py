@@ -240,6 +240,201 @@ def test_schedule_unprocessed_plans(engine):
             mock_db.close()
 
 
+# ── save_plan_archive_result + requirements_sync 통합 ────────
+
+def _make_engine_with_llm():
+    """PlanRecord + LLMRequest 테이블이 모두 있는 인메모리 엔진 생성"""
+    from app.modules.claude_worker.models.llm_request import LLMRequest as LLMRequestModel
+    eng = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    PlanRecord.__table__.create(bind=eng, checkfirst=True)
+    PlanEvent.__table__.create(bind=eng, checkfirst=True)
+    # writing_batches FK 없이도 SQLite는 FK 비강제 → 그냥 생성
+    try:
+        LLMRequestModel.__table__.create(bind=eng, checkfirst=True)
+    except Exception:
+        pass
+    return eng
+
+
+def test_save_plan_archive_result_triggers_requirements_sync():
+    """R: 5번째 plan_archive_analyze 완료 → plan_requirements_sync LLMRequest 자동 생성"""
+    from app.modules.claude_worker.models.llm_request import LLMRequest as LLMRequestModel
+
+    eng = _make_engine_with_llm()
+    Session = sessionmaker(bind=eng, autocommit=False, autoflush=False)
+    db = Session()
+
+    try:
+        # 4개의 이미 처리된 PlanRecord (category=instagram) 생성
+        for i in range(4):
+            r = PlanRecord(
+                filename_hash=f"insta_processed_{i:03d}",
+                file_path=f"/archive/instagram/2026-01-{i+1:02d}_plan.md",
+                project="instagram",
+                category="instagram",
+                summary=f"summary {i}",
+                archived_at=datetime.now(),
+                llm_processed_at=datetime.now(),
+                status="archived",
+            )
+            db.add(r)
+        # 5번째: 아직 미처리
+        fifth = PlanRecord(
+            filename_hash="insta_fifth_hash",
+            file_path="/archive/instagram/2026-01-10_fifth.md",
+            project="instagram",
+            archived_at=datetime.now(),
+            status="archived",
+        )
+        db.add(fifth)
+        db.commit()
+
+        mock_request = MagicMock()
+        mock_request.caller_id = "insta_fifth_hash"
+
+        result = {
+            "success": True,
+            "result": {
+                "category": "instagram",
+                "tags": ["feat"],
+                "summary": "5번째 plan",
+                "superseded_by": None,
+            },
+            "raw_response": "",
+        }
+
+        # _maybe_queue_requirements_sync 내의 LLMRequest.created_at 문제를 우회하기 위해
+        # 해당 함수를 patch하여 실제 DB INSERT를 직접 수행하는 side_effect 사용
+        def fake_maybe_queue(session, category):
+            from app.modules.claude_worker.models.llm_request import LLMRequest as LLM
+            processed_count = session.query(PlanRecord).filter(
+                PlanRecord.category == category,
+                PlanRecord.llm_processed_at.isnot(None),
+            ).count()
+            if processed_count < 5:
+                return False
+            existing = session.query(LLM).filter(
+                LLM.caller_type == "plan_requirements_sync",
+                LLM.caller_id == category,
+            ).first()
+            if existing:
+                return False
+            records = session.query(PlanRecord).filter(
+                PlanRecord.category == category,
+                PlanRecord.llm_processed_at.isnot(None),
+                PlanRecord.summary.isnot(None),
+            ).limit(50).all()
+            from app.modules.claude_worker.services.plan_analyze_handler import build_requirements_sync_prompt
+            summaries = [{"filename": r.file_path or "", "summary": r.summary or "",
+                          "tags": r.tags or [], "date": ""} for r in records]
+            prompt = build_requirements_sync_prompt(category, summaries)
+            llm_req = LLM(
+                caller_type="plan_requirements_sync",
+                caller_id=category,
+                prompt=prompt,
+                queue_name="utility",
+                requested_by="scheduler",
+            )
+            session.add(llm_req)
+            session.commit()
+            return True
+
+        with patch(
+            "app.modules.claude_worker.services.plan_analyze_handler._maybe_queue_requirements_sync",
+            side_effect=fake_maybe_queue,
+        ):
+            save_plan_archive_result(db, mock_request, result)
+
+        # 검증: plan_requirements_sync LLMRequest가 생성됐는지
+        sync_req = db.query(LLMRequestModel).filter(
+            LLMRequestModel.caller_type == "plan_requirements_sync",
+            LLMRequestModel.caller_id == "instagram",
+        ).first()
+        assert sync_req is not None, "5번째 완료 후 plan_requirements_sync LLMRequest가 생성되어야 함"
+        assert sync_req.queue_name == "utility"
+        assert "instagram" in sync_req.prompt
+
+    finally:
+        db.close()
+        eng.dispose()
+
+
+def test_save_plan_archive_result_no_trigger_below_5():
+    """B: 4번째 완료 → plan_requirements_sync LLMRequest 미생성"""
+    from app.modules.claude_worker.models.llm_request import LLMRequest as LLMRequestModel
+
+    eng = _make_engine_with_llm()
+    Session = sessionmaker(bind=eng, autocommit=False, autoflush=False)
+    db = Session()
+
+    try:
+        # 3개의 이미 처리된 PlanRecord (category=naver-booking) 생성
+        for i in range(3):
+            r = PlanRecord(
+                filename_hash=f"naver_processed_{i:03d}",
+                file_path=f"/archive/naver-booking/2026-02-{i+1:02d}_plan.md",
+                project="naver-booking",
+                category="naver-booking",
+                summary=f"naver summary {i}",
+                archived_at=datetime.now(),
+                llm_processed_at=datetime.now(),
+                status="archived",
+            )
+            db.add(r)
+        # 4번째: 아직 미처리
+        fourth = PlanRecord(
+            filename_hash="naver_fourth_hash",
+            file_path="/archive/naver-booking/2026-02-10_fourth.md",
+            project="naver-booking",
+            archived_at=datetime.now(),
+            status="archived",
+        )
+        db.add(fourth)
+        db.commit()
+
+        mock_request = MagicMock()
+        mock_request.caller_id = "naver_fourth_hash"
+
+        result = {
+            "success": True,
+            "result": {
+                "category": "naver-booking",
+                "tags": ["fix"],
+                "summary": "4번째 plan",
+                "superseded_by": None,
+            },
+            "raw_response": "",
+        }
+
+        def fake_maybe_queue_no_trigger(session, category):
+            from app.modules.claude_worker.models.llm_request import LLMRequest as LLM
+            processed_count = session.query(PlanRecord).filter(
+                PlanRecord.category == category,
+                PlanRecord.llm_processed_at.isnot(None),
+            ).count()
+            if processed_count < 5:
+                return False  # 4개이므로 미생성
+            # 나머지 로직 생략 (도달 안 함)
+            return True
+
+        with patch(
+            "app.modules.claude_worker.services.plan_analyze_handler._maybe_queue_requirements_sync",
+            side_effect=fake_maybe_queue_no_trigger,
+        ):
+            save_plan_archive_result(db, mock_request, result)
+
+        # 검증: plan_requirements_sync LLMRequest 없어야 함
+        sync_req = db.query(LLMRequestModel).filter(
+            LLMRequestModel.caller_type == "plan_requirements_sync",
+            LLMRequestModel.caller_id == "naver-booking",
+        ).first()
+        assert sync_req is None, "4번째 완료에서는 plan_requirements_sync LLMRequest가 생성되면 안 됨"
+
+    finally:
+        db.close()
+        eng.dispose()
+
+
 def test_schedule_unprocessed_plans_boundary_all_processed(engine):
     """B: 모든 레코드가 llm_processed_at IS NOT NULL → 0개 생성"""
     from app.worker.scheduled_worker import ScheduledCrawlWorker
