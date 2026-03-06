@@ -52,86 +52,12 @@ $lastRestartTime = Get-Date
 # Watchdog 로그 파일 (스크립트 시작 시 1회 결정)
 $script:watchdogLogFile = Join-Path $LogDir "unified_watchdog_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 
-function Write-Log {
-    param([string]$Message, [string]$Level = "INFO")
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logMessage = "[$timestamp] [$Level] $Message"
-    Write-Host $logMessage -ForegroundColor $(
-        switch ($Level) {
-            "ERROR" { "Red" }
-            "WARN"  { "Yellow" }
-            "INFO"  { "Cyan" }
-            default { "White" }
-        }
-    )
-    # Also log to file
-    Add-Content -Path $script:watchdogLogFile -Value $logMessage -Encoding UTF8
-}
-
-function Get-DuplicateWorkers {
-    # PID 파일에 기록된 PID를 "정본"으로 간주, 나머지를 중복으로 반환
-    $canonicalPid = $null
-    if (Test-Path $WorkerPidFile) {
-        $savedPid = Get-Content $WorkerPidFile -ErrorAction SilentlyContinue
-        if ($savedPid) {
-            $canonicalPid = [int]$savedPid
-        }
-    }
-
-    $allMatching = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -match 'app\.worker\.main' }
-
-    if (-not $allMatching) {
-        return @()
-    }
-
-    $duplicates = $allMatching | Where-Object {
-        $_.ProcessId -ne $canonicalPid
-    }
-
-    return @($duplicates)
-}
-
-function Remove-DuplicateWorkers {
-    $duplicates = Get-DuplicateWorkers
-    if (-not $duplicates -or $duplicates.Count -eq 0) {
-        return
-    }
-
-    $pids = $duplicates | ForEach-Object { $_.ProcessId }
-    $pidList = $pids -join ", "
-    Write-Log "중복 worker $($duplicates.Count)개 감지, 정리함 (PIDs: $pidList)" "WARN"
-
-    foreach ($dup in $duplicates) {
-        try {
-            Stop-Process -Id $dup.ProcessId -Force -ErrorAction SilentlyContinue
-            Write-Log "중복 프로세스 종료: PID $($dup.ProcessId)" "WARN"
-        }
-        catch {
-            Write-Log "중복 프로세스 종료 실패: PID $($dup.ProcessId) — $_" "ERROR"
-        }
-    }
-}
+# 공통 유틸리티 함수 로드 (Write-Log, Get-DuplicateProcesses, Remove-DuplicateProcesses, Stop-ExistingProcessesByCmdline)
+. (Join-Path $ScriptDir "watchdog-utils.ps1")
 
 function Start-UnifiedWorker {
-    # 재시작 직전: cmdline에 'app.worker.main'이 포함된 기존 프로세스를 모두 종료
-    # 이렇게 하면 stop()을 거치지 않는 watchdog 재시작 경로에서도 중복이 생기지 않는다
-    $existingProcs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -match 'app\.worker\.main' }
-    if ($existingProcs) {
-        $pidList = ($existingProcs | ForEach-Object { $_.ProcessId }) -join ", "
-        Write-Log "재시작 전 기존 unified worker 프로세스 정리 (PIDs: $pidList)" "WARN"
-        foreach ($ep in $existingProcs) {
-            try {
-                Stop-Process -Id $ep.ProcessId -Force -ErrorAction SilentlyContinue
-                Write-Log "기존 프로세스 종료: PID $($ep.ProcessId)" "WARN"
-            }
-            catch {
-                Write-Log "기존 프로세스 종료 실패: PID $($ep.ProcessId) — $_" "ERROR"
-            }
-        }
-        Start-Sleep -Milliseconds 500
-    }
+    # 재시작 직전: cmdline 패턴으로 기존 프로세스 정리 (watchdog-utils.ps1 공통 함수 사용)
+    Stop-ExistingProcessesByCmdline -Label "unified worker" -CmdlinePattern 'app\.worker\.main'
 
     $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $stdoutLogFile = Join-Path $LogDir "stdout_unified_worker_$Timestamp.log"
@@ -277,7 +203,7 @@ try {
             $lastRestartTime = Get-Date
         } else {
             # 프로세스가 살아있는 경우에도 중복 감지 및 정리
-            Remove-DuplicateWorkers
+            Remove-DuplicateProcesses -Label "worker" -CmdlinePattern 'app\.worker\.main' -PidFile $WorkerPidFile
         }
     }
 }
