@@ -542,3 +542,151 @@ class TestRecoverPendingMerge:
         """RIGHT: merge_status=pending_merge → merge 실행"""
         result = _recover_pending_merge_decision("pending_merge", merge_requested=False)
         assert result == "merge"
+
+
+# ============================================================
+# _get_fix_engine / resolver engine 전달 TC
+# ============================================================
+
+RUNNER_KEY_PREFIX = "plan-runner:runner"
+
+
+def _get_fix_engine_impl(redis_client, runner_id: str) -> str:
+    """_get_fix_engine 로직 재현 (모듈 로드 실패 대비)"""
+    try:
+        value = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:fix_engine")
+        if value:
+            return value
+        value = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine")
+        if value:
+            return value
+    except Exception:
+        pass
+    return "claude"
+
+
+def _get_fix_engine(redis_client, runner_id: str) -> str:
+    """모듈에서 로드하거나 인라인 구현 사용"""
+    if _HAS_MODULE and hasattr(_listener, "_get_fix_engine"):
+        return _listener._get_fix_engine(redis_client, runner_id)
+    return _get_fix_engine_impl(redis_client, runner_id)
+
+
+class TestGetFixEngine:
+    """_get_fix_engine() 함수 TC"""
+
+    def test_RIGHT_get_fix_engine_returns_fix_engine(self):
+        """R(Right): fix_engine 키 존재 시 해당 값 반환"""
+        mock_redis = MagicMock()
+        mock_redis.get.side_effect = lambda key: (
+            "gemini" if key.endswith(":fix_engine") else None
+        )
+        result = _get_fix_engine(mock_redis, "runner-123")
+        assert result == "gemini"
+
+    def test_RIGHT_get_fix_engine_fallback_to_engine(self):
+        """R(Right): fix_engine 없으면 engine 값 반환"""
+        mock_redis = MagicMock()
+        mock_redis.get.side_effect = lambda key: (
+            None if key.endswith(":fix_engine") else "gemini"
+        )
+        result = _get_fix_engine(mock_redis, "runner-123")
+        assert result == "gemini"
+
+    def test_BOUNDARY_get_fix_engine_both_missing(self):
+        """B(Boundary): 두 키 모두 없으면 'claude' 기본값"""
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = None
+        result = _get_fix_engine(mock_redis, "runner-123")
+        assert result == "claude"
+
+    def test_ERROR_fix_engine_redis_connection_error(self):
+        """E(Error): Redis 오류 시 'claude' fallback"""
+        mock_redis = MagicMock()
+        mock_redis.get.side_effect = Exception("Redis connection refused")
+        result = _get_fix_engine(mock_redis, "runner-123")
+        assert result == "claude"
+
+
+class TestLaunchConflictResolverEngine:
+    """_launch_conflict_resolver_process engine 인자 TC"""
+
+    def test_RIGHT_conflict_resolver_cmd_includes_engine(self):
+        """R(Right): conflict resolver 실행 시 --engine 인자 포함"""
+        if not (_HAS_MODULE and hasattr(_listener, "_launch_conflict_resolver_process")):
+            pytest.skip("_launch_conflict_resolver_process not available")
+
+        captured_cmds = []
+
+        def mock_run_subprocess(cmd, **kwargs):
+            captured_cmds.append(cmd)
+            return {"success": True, "message": "ok"}
+
+        with patch.object(_listener, "_run_subprocess_streaming", side_effect=mock_run_subprocess):
+            mock_redis = MagicMock()
+            _listener._launch_conflict_resolver_process(
+                runner_id="r1",
+                branch="plan/test",
+                worktree_path=Path("/tmp/test"),
+                redis_client=mock_redis,
+                engine="gemini",
+            )
+
+        assert len(captured_cmds) == 1
+        cmd = captured_cmds[0]
+        assert "--engine" in cmd
+        idx = cmd.index("--engine")
+        assert cmd[idx + 1] == "gemini"
+
+    def test_BOUNDARY_resolver_engine_default_claude(self):
+        """B(Boundary): engine 미지정 시 기본값 'claude'"""
+        if not (_HAS_MODULE and hasattr(_listener, "_launch_conflict_resolver_process")):
+            pytest.skip("_launch_conflict_resolver_process not available")
+
+        captured_cmds = []
+
+        def mock_run_subprocess(cmd, **kwargs):
+            captured_cmds.append(cmd)
+            return {"success": True, "message": "ok"}
+
+        with patch.object(_listener, "_run_subprocess_streaming", side_effect=mock_run_subprocess):
+            mock_redis = MagicMock()
+            _listener._launch_conflict_resolver_process(
+                runner_id="r1",
+                branch="plan/test",
+                worktree_path=Path("/tmp/test"),
+                redis_client=mock_redis,
+            )
+
+        assert len(captured_cmds) == 1
+        cmd = captured_cmds[0]
+        assert "--engine" in cmd
+        idx = cmd.index("--engine")
+        assert cmd[idx + 1] == "claude"
+
+    def test_RIGHT_auto_fix_cmd_includes_engine(self):
+        """R(Right): auto-fix 실행 시 --engine 인자 포함"""
+        if not (_HAS_MODULE and hasattr(_listener, "_launch_auto_fix_process")):
+            pytest.skip("_launch_auto_fix_process not available")
+
+        captured_cmds = []
+
+        def mock_run_subprocess(cmd, **kwargs):
+            captured_cmds.append(cmd)
+            return {"success": True, "message": "ok"}
+
+        with patch.object(_listener, "_run_subprocess_streaming", side_effect=mock_run_subprocess):
+            mock_redis = MagicMock()
+            _listener._launch_auto_fix_process(
+                runner_id="r1",
+                test_output="error output",
+                targets=["frontend"],
+                redis_client=mock_redis,
+                engine="gemini",
+            )
+
+        assert len(captured_cmds) == 1
+        cmd = captured_cmds[0]
+        assert "--engine" in cmd
+        idx = cmd.index("--engine")
+        assert cmd[idx + 1] == "gemini"

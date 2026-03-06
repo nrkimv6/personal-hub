@@ -16,6 +16,7 @@
 
 	let mode = $state<'single' | 'all'>('single');
 	let selectedEngine = $state('claude');
+	let selectedFixEngine = $state('claude');
 	let engineConfigs = $state<AllEnginesConfig | null>(null);
 	let showModelSettings = $state(false);
 	let maxCycles = $state(0);
@@ -99,6 +100,7 @@
 			const response = await devRunnerRunnerApi.start({
 				plan_file: mode === 'single' ? selectedPlan : null,
 				engine: selectedEngine,
+				fix_engine: selectedFixEngine,
 				max_cycles: maxCycles || 0,
 				until: until || null,
 				dry_run: dryRun,
@@ -288,6 +290,18 @@
 				<option value="claude">Claude</option>
 				<option value="gemini">Gemini</option>
 			</select>
+			<div class="flex items-center gap-1">
+				<span class="text-[10px] text-gray-400 font-medium">Fix</span>
+				<select
+					class="border rounded px-2 py-1 text-xs h-7 w-[100px] font-mono font-medium"
+					class:text-orange-700={selectedFixEngine === 'gemini'}
+					class:bg-orange-50={selectedFixEngine === 'gemini'}
+					bind:value={selectedFixEngine}
+				>
+					<option value="claude">Claude</option>
+					<option value="gemini">Gemini</option>
+				</select>
+			</div>
 
 			<button
 				class="h-8 px-2 rounded border border-gray-200 text-[10px] font-medium hover:bg-gray-50 transition-colors {showModelSettings ? 'bg-blue-50 text-blue-600 border-blue-200' : 'text-gray-500'}"
