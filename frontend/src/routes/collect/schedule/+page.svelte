@@ -895,12 +895,21 @@
 				<div class="space-y-4">
 					<div>
 						<label for="plan-cron-time" class="block text-sm font-medium text-foreground mb-1">실행 시각 (매일)</label>
-						<input
-							id="plan-cron-time"
-							type="time"
-							bind:value={selectedType === 'plan_archive_analyze' ? planArchiveCronTime : planRequirementsCronTime}
-							class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
-						/>
+						{#if selectedType === 'plan_archive_analyze'}
+							<input
+								id="plan-cron-time"
+								type="time"
+								bind:value={planArchiveCronTime}
+								class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+							/>
+						{:else}
+							<input
+								id="plan-cron-time"
+								type="time"
+								bind:value={planRequirementsCronTime}
+								class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+							/>
+						{/if}
 						<p class="text-xs text-muted-foreground mt-1">매일 1회 실행 (±5분 허용)</p>
 					</div>
 					<div class="flex justify-end">
