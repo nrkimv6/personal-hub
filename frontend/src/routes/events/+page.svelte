@@ -17,6 +17,7 @@
 	import { toast } from '$lib/stores/toast';
 	import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
 	import { localParticipation } from '$lib/stores/localParticipation';
+	import { Link } from 'lucide-svelte';
 
 	// 컴포넌트 import
 	import EventListCard from '$lib/components/events/EventListCard.svelte';
@@ -745,7 +746,7 @@
 			<div class="flex gap-2">
 				<Button variant="primary" size="sm" on:click={openCreateModal}> + 새 이벤트 </Button>
 				<button onclick={openUrlImportModal} class="btn btn-outline btn-sm" title="URL에서 이벤트 가져오기">
-					🔗 URL 가져오기
+					<Link size={16} /> URL 가져오기
 				</button>
 			</div>
 		{/if}

@@ -6,6 +6,22 @@
 	import { collectApi } from '$lib/api';
 	import type { CrawlSchedule, ServiceAccountWithProfile } from '$lib/types';
 	import InstagramCrawlSettings from '$lib/components/InstagramCrawlSettings.svelte';
+	import { 
+		Instagram, 
+		Search, 
+		Pencil, 
+		FlaskConical, 
+		FolderArchive, 
+		ClipboardList, 
+		ArrowLeft, 
+		X, 
+		ChevronDown, 
+		ChevronRight,
+		Clock,
+		BarChart3,
+		Trash2,
+		Plus
+	} from 'lucide-svelte';
 
 	let schedules: CrawlSchedule[] = [];
 	let loading = true;
@@ -87,12 +103,12 @@
 	const LLM_TARGET_TYPES = ['instagram_feed', 'writing_task', 'topic_extract'];
 
 	const scheduleTypes = [
-		{ value: 'instagram_feed', label: 'Instagram 피드', icon: '📸', color: 'pink' },
-		{ value: 'google_search', label: 'Google 검색', icon: '🔍', color: 'yellow' },
-		{ value: 'writing_task', label: '글쓰기 태스크', icon: '✍️', color: 'purple' },
-		{ value: 'pytest_run', label: 'pytest 자동 실행', icon: '🧪', color: 'green' },
-		{ value: 'plan_archive_analyze', label: 'Plan Archive LLM 분석', icon: '🗂️', color: 'blue' },
-		{ value: 'plan_requirements_sync', label: 'Plan 요구사항 동기화', icon: '📋', color: 'indigo' }
+		{ value: 'instagram_feed', label: 'Instagram 피드', icon: Instagram, color: 'pink' },
+		{ value: 'google_search', label: 'Google 검색', icon: Search, color: 'yellow' },
+		{ value: 'writing_task', label: '글쓰기 태스크', icon: Pencil, color: 'purple' },
+		{ value: 'pytest_run', label: 'pytest 자동 실행', icon: FlaskConical, color: 'green' },
+		{ value: 'plan_archive_analyze', label: 'Plan Archive LLM 분석', icon: FolderArchive, color: 'blue' },
+		{ value: 'plan_requirements_sync', label: 'Plan 요구사항 동기화', icon: ClipboardList, color: 'indigo' }
 	];
 
 	const dateFilterOptions = [
@@ -574,7 +590,7 @@
 	<!-- 헤더 -->
 	<PageHeader title="스케줄 설정" subtitle="수집 스케줄을 관리합니다">
 		<Button variant="primary" on:click={openAddModal}>
-			+ 스케줄 추가
+			<Plus size={18} class="mr-1" /> 스케줄 추가
 		</Button>
 	</PageHeader>
 
@@ -648,17 +664,17 @@
 							<!-- 실행 이력 버튼 -->
 							<a
 								href="/crawl/schedules/{schedule.id}/runs"
-								class="btn btn-secondary btn-sm"
+								class="btn btn-secondary btn-sm flex items-center gap-1"
 								title="실행 이력 보기"
 							>
-								이력
+								<BarChart3 size={14} /> 이력
 							</a>
 
 							<!-- 수정 버튼 (모든 타입) -->
 							<Button variant="secondary" size="sm" on:click={() => openEditModal(schedule)}
 								title="스케줄 수정"
 							>
-								수정
+								<Pencil size={14} /> 수정
 							</Button>
 
 							<!-- Instagram 상세 설정 버튼 -->
@@ -674,10 +690,10 @@
 							{#if schedule.target_type === 'pytest_run'}
 								<a
 									href="/collect/test-runs"
-									class="btn btn-secondary btn-sm"
+									class="btn btn-secondary btn-sm flex items-center gap-1"
 									title="테스트 실행 결과 보기"
 								>
-									🧪 결과
+									<FlaskConical size={14} /> 결과
 								</a>
 							{/if}
 
@@ -699,10 +715,10 @@
 							<!-- 삭제 버튼 -->
 							<button
 								onclick={() => openDeleteModal(schedule)}
-								class="btn btn-sm text-error hover:bg-error-light border border-red-200"
+								class="btn btn-sm text-error hover:bg-error-light border border-red-200 flex items-center gap-1"
 								title="스케줄 삭제"
 							>
-								삭제
+								<Trash2 size={14} /> 삭제
 							</button>
 						</div>
 					</div>
@@ -748,9 +764,9 @@
 									addStep = addStep - 1;
 								}
 							}}
-							class="text-sm text-primary hover:text-primary-hover"
+							class="text-sm text-primary hover:text-primary-hover flex items-center gap-1"
 						>
-							&#8592; 이전
+							<ArrowLeft size={14} /> 이전
 						</button>
 					{/if}
 				</div>
@@ -773,7 +789,9 @@
 								disabled={loadingTargets}
 								class="flex items-center gap-3 p-4 border-2 rounded-lg hover:border-blue-500 hover:bg-primary-light transition-colors text-left"
 							>
-								<span class="text-2xl">{st.icon}</span>
+								<span class="text-primary">
+									<svelte:component this={st.icon} size={24} />
+								</span>
 								<div>
 									<div class="font-medium text-foreground">{st.label}</div>
 									<div class="text-sm text-muted-foreground">
@@ -934,7 +952,7 @@
 										class="w-full flex items-center gap-3 p-3 border rounded-lg hover:border-blue-500 hover:bg-primary-light transition-colors text-left"
 									>
 										<div class="w-10 h-10 bg-pink-light rounded-full flex items-center justify-center text-pink">
-											📸
+											<Instagram size={20} />
 										</div>
 										<div>
 											<div class="font-medium text-foreground">{account.profile_name || account.identifier}</div>
@@ -1003,7 +1021,11 @@
 									onclick={() => (showAdvancedOptions = !showAdvancedOptions)}
 									class="text-sm text-primary hover:text-primary-hover flex items-center gap-1"
 								>
-									{showAdvancedOptions ? '▼' : '▶'} 고급 검색 옵션
+									{#if showAdvancedOptions}
+										<ChevronDown size={14} />
+									{:else}
+										<ChevronRight size={14} />
+									{/if} 고급 검색 옵션
 								</button>
 
 								{#if showAdvancedOptions}
@@ -1088,7 +1110,7 @@
 										class="p-2 text-error hover:bg-error-light rounded-lg"
 										title="삭제"
 									>
-										✕
+										<X size={18} />
 									</button>
 								{/if}
 							</div>
@@ -1097,9 +1119,9 @@
 
 					<button
 						onclick={addTime}
-						class="w-full py-2 border-2 border-dashed border-border rounded-lg text-muted-foreground hover:border-blue-500 hover:text-primary transition-colors"
+						class="w-full py-2 border-2 border-dashed border-border rounded-lg text-muted-foreground hover:border-blue-500 hover:text-primary transition-colors flex items-center justify-center gap-1"
 					>
-						+ 시간 추가
+						<Plus size={16} /> 시간 추가
 					</button>
 
 					<div class="mt-6 flex justify-end gap-2">
@@ -1210,7 +1232,11 @@
 										onclick={() => (editShowAdvanced = !editShowAdvanced)}
 										class="text-sm text-primary hover:text-primary-hover flex items-center gap-1"
 									>
-										{editShowAdvanced ? '▼' : '▶'} 고급 검색 옵션
+										{#if editShowAdvanced}
+											<ChevronDown size={14} />
+										{:else}
+											<ChevronRight size={14} />
+										{/if} 고급 검색 옵션
 									</button>
 
 									{#if editShowAdvanced}
@@ -1312,7 +1338,7 @@
 													class="p-2 text-error hover:bg-error-light rounded-lg"
 													title="삭제"
 												>
-													✕
+													<X size={18} />
 												</button>
 											{/if}
 										</div>
@@ -1320,9 +1346,9 @@
 								</div>
 								<button
 									onclick={editAddTime}
-									class="w-full py-2 border-2 border-dashed border-border rounded-lg text-muted-foreground hover:border-blue-500 hover:text-primary transition-colors text-sm"
+									class="w-full py-2 border-2 border-dashed border-border rounded-lg text-muted-foreground hover:border-blue-500 hover:text-primary transition-colors text-sm flex items-center justify-center gap-1"
 								>
-									+ 시간 추가
+									<Plus size={14} /> 시간 추가
 								</button>
 							{/if}
 						</div>

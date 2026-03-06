@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { openFile } from '$lib/api/fileSearch';
 	import type { FileMatch, ContentMatch } from '$lib/types/fileSearch';
+	import { AlertTriangle, FileText, ClipboardList, ChevronRight } from 'lucide-svelte';
 
 	interface Props {
 		results: FileMatch[];
@@ -86,8 +87,8 @@
 				· <span>{searchTimeMs}ms</span>
 			</span>
 			{#if truncated}
-				<span class="rounded bg-warning/20 px-2 py-0.5 text-warning font-medium">
-					⚠️ 더 많은 결과가 있을 수 있습니다
+				<span class="rounded bg-warning/20 px-2 py-0.5 text-warning font-medium flex items-center gap-1">
+					<AlertTriangle size={14} /> 더 많은 결과가 있을 수 있습니다
 				</span>
 			{/if}
 		</div>
@@ -103,8 +104,12 @@
 					   hover:bg-muted/50 transition-colors group"
 			>
 				<!-- 아이콘 + 파일명 -->
-				<span class="text-base shrink-0">
-					{file.matches.length > 0 ? '📄' : '📋'}
+				<span class="shrink-0 text-muted-foreground">
+					{#if file.matches.length > 0}
+						<FileText size={18} />
+					{:else}
+						<ClipboardList size={18} />
+					{/if}
 				</span>
 				<div class="flex-1 min-w-0">
 					<div class="flex items-center gap-2 flex-wrap">
@@ -135,7 +140,7 @@
 					{#if file.file_size}
 						<span>{formatSize(file.file_size)}</span>
 					{/if}
-					<span class="transition-transform {collapsed[file.file_path] ? '' : 'rotate-90'}">▶</span>
+					<ChevronRight size={16} class="transition-transform {collapsed[file.file_path] ? '' : 'rotate-90'}" />
 				</div>
 			</button>
 

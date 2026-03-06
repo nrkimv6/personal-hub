@@ -4,6 +4,23 @@
   import { goto } from '$app/navigation';
   import { gitReposApi } from '$lib/api/gitRepos';
   import type { GitRepo, GitStatus, GitLogEntry, OperationLog, AutoCleanupResult } from '$lib/types/gitRepos';
+  import { 
+    ArrowLeft, 
+    GitBranch, 
+    Eraser, 
+    CheckCircle, 
+    Loader2, 
+    Package, 
+    GitCommit, 
+    Sparkles,
+    RefreshCw,
+    Download,
+    Upload,
+    ChevronDown,
+    ChevronRight,
+    Search,
+    FileEdit
+  } from 'lucide-svelte';
 
   // URL params
   const repoId = $derived(Number($page.params.id));
@@ -297,9 +314,11 @@
   <!-- 뒤로가기 + 헤더 -->
   <div class="flex items-center gap-3 mb-6">
     <button
-      class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+      class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 flex items-center gap-1"
       onclick={() => goto('/git-repos')}
-    >← 목록</button>
+    >
+      <ArrowLeft size={16} /> 목록
+    </button>
     {#if repo}
       {@const r = repo as GitRepo}
       <h1 class="text-xl font-bold text-gray-800 dark:text-gray-100">
@@ -307,24 +326,35 @@
       </h1>
       <span class="text-sm text-gray-400 dark:text-gray-500 truncate">{r.path}</span>
       {#if r.last_branch}
-        <span class="ml-auto font-mono text-xs bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-gray-600 dark:text-gray-300">
-          🌿 {r.last_branch}
+        <span class="ml-auto font-mono text-xs bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-gray-600 dark:text-gray-300 flex items-center gap-1">
+          <GitBranch size={12} /> {r.last_branch}
         </span>
       {/if}
     {/if}
   </div>
 
   {#if loading}
-    <div class="text-center py-16 text-gray-400">로딩 중…</div>
+    <div class="text-center py-16 text-gray-400">
+      <Loader2 size={32} class="animate-spin mx-auto mb-2" />
+      로딩 중…
+    </div>
   {:else if error}
     <div class="p-4 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400">{error}</div>
   {:else}
     <!-- 상단 액션 버튼 -->
     <div class="flex gap-2 mb-5">
-      <button class="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50" onclick={handleFetch} disabled={working}>페치</button>
-      <button class="px-3 py-1.5 text-sm rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50" onclick={handlePull} disabled={working}>풀</button>
-      <button class="px-3 py-1.5 text-sm rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50" onclick={handlePush} disabled={working}>푸시</button>
-      <button class="px-3 py-1.5 text-sm rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50" onclick={handleAutoCleanup} disabled={working}>🧹 자동 정리</button>
+      <button class="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1" onclick={handleFetch} disabled={working}>
+        <RefreshCw size={14} /> 페치
+      </button>
+      <button class="px-3 py-1.5 text-sm rounded-lg bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-50 flex items-center gap-1" onclick={handlePull} disabled={working}>
+        <Download size={14} /> 풀
+      </button>
+      <button class="px-3 py-1.5 text-sm rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1" onclick={handlePush} disabled={working}>
+        <Upload size={14} /> 푸시
+      </button>
+      <button class="px-3 py-1.5 text-sm rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 flex items-center gap-1" onclick={handleAutoCleanup} disabled={working}>
+        <Eraser size={14} /> 자동 정리
+      </button>
       {#if repo?.last_ahead != null && repo.last_ahead > 0}
         <span class="text-xs text-green-600 dark:text-green-400 self-center">↑{repo.last_ahead} ahead</span>
       {/if}
@@ -337,11 +367,17 @@
     {#if cleanupRequestId}
       <div class="mb-6 p-4 rounded-xl bg-gray-900 text-gray-100 font-mono text-xs overflow-hidden border border-amber-500/30">
         <div class="flex justify-between items-center mb-2 border-b border-gray-800 pb-2">
-          <span class="text-amber-400 font-bold">🧹 Git 자동 정리 로그 (ID: {cleanupRequestId})</span>
+          <span class="text-amber-400 font-bold flex items-center gap-2">
+            <Eraser size={14} /> Git 자동 정리 로그 (ID: {cleanupRequestId})
+          </span>
           {#if cleanupDone}
-            <span class="text-green-400 font-bold">✅ 정리 완료</span>
+            <span class="text-green-400 font-bold flex items-center gap-1">
+              <CheckCircle size={14} /> 정리 완료
+            </span>
           {:else}
-            <span class="animate-pulse text-amber-500">⏳ 진행 중...</span>
+            <span class="text-amber-500 flex items-center gap-1">
+              <Loader2 size={14} class="animate-spin" /> 진행 중...
+            </span>
           {/if}
         </div>
         <pre class="max-h-48 overflow-y-auto whitespace-pre-wrap">{cleanupLogs.join('\n')}</pre>
@@ -351,10 +387,14 @@
             {#if cleanupResult.success}
               <p class="text-green-400 mb-1">성공적으로 정리되었습니다.</p>
               {#if cleanupResult.moved.length > 0}
-                <p>📦 이동된 파일 ({cleanupResult.moved.length}개): {cleanupResult.moved.join(', ')}</p>
+                <p class="flex items-center gap-1">
+                  <Package size={14} /> 이동된 파일 ({cleanupResult.moved.length}개): {cleanupResult.moved.join(', ')}
+                </p>
               {/if}
               {#if cleanupResult.commits.length > 0}
-                <p>📝 생성된 커밋 ({cleanupResult.commits.length}개):</p>
+                <p class="flex items-center gap-1">
+                  <GitCommit size={14} /> 생성된 커밋 ({cleanupResult.commits.length}개):
+                </p>
                 <ul class="list-disc list-inside ml-2">
                   {#each cleanupResult.commits as commit}
                     <li>{commit.message} ({commit.files.length}개 파일)</li>
@@ -449,11 +489,17 @@
                 <option value="gemini">Gemini Flash</option>
               </select>
               <button
-                class="px-3 py-2 text-sm rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 disabled:opacity-50"
+                class="px-3 py-2 text-sm rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 disabled:opacity-50 flex items-center justify-center"
                 onclick={handleGenerateMessage}
                 disabled={generatingMsg}
                 title="LLM으로 커밋 메시지 자동 생성"
-              >{generatingMsg ? '…' : '✨'}</button>
+              >
+                {#if generatingMsg}
+                  <Loader2 size={16} class="animate-spin" />
+                {:else}
+                  <Sparkles size={16} />
+                {/if}
+              </button>
             </div>
             <button
               class="w-full py-2 rounded-lg bg-green-600 text-white text-sm hover:bg-green-700 disabled:opacity-50"

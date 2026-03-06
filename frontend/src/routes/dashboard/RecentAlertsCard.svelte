@@ -19,17 +19,6 @@
     }
   }
 
-  function getAlertIcon(type: string) {
-    switch (type) {
-      case 'recovery':
-        return '🟢';
-      case 'failure':
-        return '🔴';
-      default:
-        return '⚪';
-    }
-  }
-
   function formatTimestamp(timestamp: string) {
     try {
       const date = new Date(timestamp);
@@ -53,7 +42,7 @@
 
 <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-4">
   <h2 class="text-lg font-semibold text-foreground dark:text-white mb-4 flex items-center gap-2">
-    <span class="text-xl">⚠️</span>
+    <AlertTriangle size={20} class="text-warning" />
     최근 알림
   </h2>
 
@@ -65,7 +54,15 @@
     <div class="space-y-2 max-h-48 overflow-y-auto">
       {#each alerts as alert}
         <div class="flex items-start gap-3 p-2 rounded hover:bg-muted dark:hover:bg-gray-700/50 transition-colors">
-          <span class="text-lg flex-shrink-0">{getAlertIcon(alert.type)}</span>
+          <span class="flex-shrink-0 pt-0.5">
+            {#if alert.type === 'recovery'}
+              <Circle size={16} class="fill-success text-success" />
+            {:else if alert.type === 'failure'}
+              <Circle size={16} class="fill-error text-error" />
+            {:else}
+              <Circle size={16} class="fill-muted-foreground/30 text-muted-foreground/30" />
+            {/if}
+          </span>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2">
               <span class="text-xs text-muted-foreground dark:text-muted-foreground">

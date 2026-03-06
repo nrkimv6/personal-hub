@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { SearchMode } from '$lib/types/fileSearch';
+	import { Search, Clock } from 'lucide-svelte';
 
 	interface Props {
 		query: string;
@@ -124,7 +125,7 @@
 						   shadow-sm transition-colors hover:bg-primary/90
 						   disabled:cursor-not-allowed disabled:opacity-50"
 				>
-					🔎 검색
+					<Search size={16} class="inline-block mr-1" /> 검색
 				</button>
 			{/if}
 		</div>
@@ -141,7 +142,7 @@
 						onclick={() => selectHistory(item)}
 						class="w-full px-3 py-2 text-left text-sm hover:bg-muted transition-colors truncate"
 					>
-						🕐 {item}
+						<Clock size={14} class="inline-block mr-1 text-muted-foreground/70" /> {item}
 					</button>
 				{/each}
 			</div>

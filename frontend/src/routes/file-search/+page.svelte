@@ -3,13 +3,14 @@
 	import { onDestroy } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import { search, pollSearchResult, getPresets, getStatus } from '$lib/api/fileSearch';
-	import type {
+	import {
 		FileMatch,
 		Preset,
 		SearchMode,
 		SearchResponse,
 		StatusResponse
 	} from '$lib/types/fileSearch';
+	import { Search, Languages, XCircle, Loader2, Inbox, AlertTriangle, ChevronRight } from 'lucide-svelte';
 
 	import SearchForm from './SearchForm.svelte';
 	import PresetBar from './PresetBar.svelte';
@@ -227,19 +228,19 @@
 	<div class="flex items-center gap-1 border-b border-border pb-2">
 		<button
 			onclick={() => setPageTab('search')}
-			class="px-3 py-1.5 text-sm font-medium rounded-t transition-colors {pageTab === 'search'
+			class="flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-t transition-colors {pageTab === 'search'
 				? 'bg-primary/10 text-primary'
 				: 'text-muted-foreground hover:text-foreground hover:bg-muted/40'}"
 		>
-			🔎 파일 검색
+			<Search size={16} /> 파일 검색
 		</button>
 		<button
 			onclick={() => setPageTab('encoding')}
-			class="px-3 py-1.5 text-sm font-medium rounded-t transition-colors {pageTab === 'encoding'
+			class="flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-t transition-colors {pageTab === 'encoding'
 				? 'bg-primary/10 text-primary'
 				: 'text-muted-foreground hover:text-foreground hover:bg-muted/40'}"
 		>
-			🔠 인코딩 변환
+			<Languages size={16} /> 인코딩 변환
 		</button>
 	</div>
 
@@ -274,20 +275,23 @@
 
 	<!-- 도구 문제 경고 -->
 	{#if status && (!status.everything_ok || !status.ripgrep_ok)}
-		<div class="rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
-			{#if !status.everything_ok}
-				⚠️ Everything HTTP 서버에 연결할 수 없습니다 ({status.everything_message}). 파일명 검색이 불가합니다.
-			{/if}
-			{#if !status.ripgrep_ok}
-				⚠️ ripgrep이 설치되지 않았습니다. 내용 검색이 불가합니다. (<code>winget install BurntSushi.ripgrep.MSVC</code>)
-			{/if}
+		<div class="rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning flex items-start gap-2">
+			<AlertTriangle size={18} class="shrink-0 mt-0.5" />
+			<div>
+				{#if !status.everything_ok}
+					<p>Everything HTTP 서버에 연결할 수 없습니다 ({status.everything_message}). 파일명 검색이 불가합니다.</p>
+				{/if}
+				{#if !status.ripgrep_ok}
+					<p>ripgrep이 설치되지 않았습니다. 내용 검색이 불가합니다. (<code>winget install BurntSushi.ripgrep.MSVC</code>)</p>
+				{/if}
+			</div>
 		</div>
 	{/if}
 
 	<!-- 검색 에러 -->
 	{#if error}
 		<div class="flex items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-			<span class="shrink-0">❌</span>
+			<XCircle size={18} class="shrink-0" />
 			<span class="flex-1">{error}</span>
 			<button onclick={() => (error = '')} class="shrink-0 opacity-60 hover:opacity-100">×</button>
 		</div>
@@ -312,7 +316,7 @@
 				   hover:bg-muted/50 transition-colors"
 		>
 			<span>필터 & 범위</span>
-			<span class="text-muted-foreground text-xs transition-transform {showFilters ? 'rotate-90' : ''}">▶</span>
+			<ChevronRight size={14} class="text-muted-foreground transition-transform {showFilters ? 'rotate-90' : ''}" />
 		</button>
 
 		{#if showFilters}
@@ -360,7 +364,7 @@
 			<div class="space-y-2">
 				{#if pollStatus}
 					<div class="flex items-center gap-2 text-sm text-muted-foreground px-2 py-1">
-						<span class="animate-spin text-base">⏳</span>
+						<Loader2 size={16} class="animate-spin" />
 						<span>{POLL_STATUS_LABELS[pollStatus] ?? pollStatus}</span>
 					</div>
 				{/if}
@@ -371,14 +375,14 @@
 		{:else if !hasSearched}
 			<!-- 초기 상태 -->
 			<div class="flex flex-col items-center justify-center py-20 text-center text-muted-foreground">
-				<div class="text-5xl mb-4">🔎</div>
+				<Search size={48} class="mb-4 opacity-20" />
 				<p class="text-sm">검색어를 입력하고 Enter를 눌러 검색하세요</p>
 				<p class="text-xs mt-1 opacity-70">파일명 검색 (Everything) + 내용 검색 (ripgrep)</p>
 			</div>
 		{:else if results.length === 0}
 			<!-- 빈 결과 -->
 			<div class="flex flex-col items-center justify-center py-20 text-center text-muted-foreground">
-				<div class="text-5xl mb-4">📭</div>
+				<Inbox size={48} class="mb-4 opacity-20" />
 				<p class="text-sm font-medium">검색 결과가 없습니다</p>
 				<p class="text-xs mt-1 opacity-70">검색어나 필터 조건을 변경해 보세요</p>
 			</div>

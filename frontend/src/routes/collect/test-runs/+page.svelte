@@ -2,6 +2,17 @@
 	import { onMount } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import { testRunsApi, type TestRunItem, type TestResultItem } from '$lib/api';
+	import { 
+		FlaskConical, 
+		ChevronDown, 
+		ChevronRight, 
+		Check, 
+		X, 
+		AlertCircle, 
+		Ban, 
+		Bot, 
+		RefreshCw 
+	} from 'lucide-svelte';
 
 	let runs: TestRunItem[] = [];
 	let loading = true;
@@ -144,9 +155,11 @@
 				<option value="completed">완료</option>
 				<option value="failed">실패</option>
 			</select>
-			<button onclick={fetchRuns} class="btn btn-secondary btn-sm">새로고침</button>
-			<button onclick={() => (showTriggerModal = true)} class="btn btn-primary btn-sm">
-				🧪 수동 실행
+			<button onclick={fetchRuns} class="btn btn-secondary btn-sm flex items-center gap-1">
+				<RefreshCw size={14} /> 새로고침
+			</button>
+			<button onclick={() => (showTriggerModal = true)} class="btn btn-primary btn-sm flex items-center gap-1">
+				<FlaskConical size={14} /> 수동 실행
 			</button>
 		</div>
 	</PageHeader>
@@ -168,7 +181,9 @@
 		</div>
 	{:else if runs.length === 0}
 		<div class="card text-center py-12">
-			<p class="text-2xl mb-2">🧪</p>
+			<div class="flex justify-center mb-2 text-muted-foreground">
+				<FlaskConical size={48} />
+			</div>
 			<p class="text-muted-foreground">실행 이력이 없습니다</p>
 			<p class="text-sm text-muted-foreground mt-1">스케줄을 등록하거나 수동 실행하세요</p>
 		</div>
@@ -184,7 +199,13 @@
 							onclick={() => toggleExpand(run.id)}
 						>
 						<div class="flex items-center gap-3">
-							<span class="text-lg">{expanded ? '▼' : '▶'}</span>
+							<span class="text-muted-foreground">
+								{#if expanded}
+									<ChevronDown size={18} />
+								{:else}
+									<ChevronRight size={18} />
+								{/if}
+							</span>
 							<div>
 								<div class="flex items-center gap-2">
 									<span class="font-medium text-foreground text-sm">{run.test_path}</span>
@@ -207,17 +228,25 @@
 
 						<!-- 통계 -->
 						<div class="flex items-center gap-3 text-sm">
-							<span class="text-green-700 font-medium">✓ {run.passed}</span>
+							<div class="flex items-center gap-0.5 text-green-700 font-medium">
+								<Check size={14} /> {run.passed}
+							</div>
 							{#if run.failed > 0}
-								<span class="text-red-700 font-medium">✗ {run.failed}</span>
+								<div class="flex items-center gap-0.5 text-red-700 font-medium">
+									<X size={14} /> {run.failed}
+								</div>
 							{/if}
 							{#if run.errors > 0}
-								<span class="text-orange-700 font-medium">! {run.errors}</span>
+								<div class="flex items-center gap-0.5 text-orange-700 font-medium">
+									<AlertCircle size={14} /> {run.errors}
+								</div>
 							{/if}
 							{#if run.skipped > 0}
-								<span class="text-gray-500">⊘ {run.skipped}</span>
+								<div class="flex items-center gap-0.5 text-gray-500">
+									<Ban size={14} /> {run.skipped}
+								</div>
 							{/if}
-							<span class="text-muted-foreground">/ {run.total_tests}</span>
+							<span class="text-muted-foreground ml-1">/ {run.total_tests}</span>
 							<button
 								onclick={(e) => { e.stopPropagation(); showLog(run); }}
 								class="btn btn-sm text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded ml-1"
@@ -244,7 +273,9 @@
 										{/if}
 										{#if result.fix_plan}
 											<details class="mt-1">
-												<summary class="text-xs text-primary cursor-pointer">🤖 수정계획 보기</summary>
+												<summary class="text-xs text-primary cursor-pointer flex items-center gap-1">
+													<Bot size={12} /> 수정계획 보기
+												</summary>
 												<div class="mt-2 p-3 bg-blue-50 rounded text-xs font-mono whitespace-pre-wrap break-words text-foreground">
 													{result.fix_plan}
 												</div>
@@ -273,7 +304,9 @@
 	<div class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
 		<div class="bg-white rounded-xl shadow-2xl max-w-md w-full">
 			<div class="flex items-center justify-between px-6 py-4 border-b border-border">
-				<h2 class="text-lg font-bold text-foreground">🧪 테스트 수동 실행</h2>
+				<h2 class="text-lg font-bold text-foreground flex items-center gap-2">
+					<FlaskConical size={20} /> 테스트 수동 실행
+				</h2>
 				<button onclick={() => (showTriggerModal = false)} class="text-muted-foreground text-2xl leading-none">&times;</button>
 			</div>
 			<div class="p-6 space-y-4">

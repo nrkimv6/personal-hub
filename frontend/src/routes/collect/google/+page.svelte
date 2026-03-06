@@ -611,10 +611,21 @@
 
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
+	import { 
+		Search, 
+		ClipboardList, 
+		Star, 
+		Pencil, 
+		Clock, 
+		BarChart3, 
+		X, 
+		ChevronUp, 
+		ChevronDown 
+	} from 'lucide-svelte';
 
 	const googleMainTabs = [
-		{ id: 'search', label: '🔎 검색 실행' },
-		{ id: 'results', label: '📋 검색결과 관리' }
+		{ id: 'search', label: '검색 실행', icon: Search },
+		{ id: 'results', label: '검색결과 관리', icon: ClipboardList }
 	];
 
 	onMount(() => {
@@ -682,9 +693,13 @@
 			<button
 				onclick={search}
 				disabled={loading || !query.trim()}
-				class="rounded-lg bg-primary px-6 py-2 text-white hover:bg-primary-hover disabled:opacity-50"
+				class="rounded-lg bg-primary px-6 py-2 text-white hover:bg-primary-hover disabled:opacity-50 flex items-center gap-2"
 			>
-				{loading ? '검색 중...' : '검색'}
+				{#if loading}
+					<span class="animate-spin"><Clock size={18} /></span> 검색 중...
+				{:else}
+					<Search size={18} /> 검색
+				{/if}
 			</button>
 
 			<button
@@ -703,9 +718,13 @@
 		<!-- 고급 옵션 토글 -->
 		<button
 			onclick={() => (showAdvancedOptions = !showAdvancedOptions)}
-			class="mt-3 text-sm text-muted-foreground hover:text-foreground"
+			class="mt-3 text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"
 		>
-			{showAdvancedOptions ? '▼ 고급 옵션' : '▶ 고급 옵션'}
+			{#if showAdvancedOptions}
+				<ChevronDown size={14} />
+			{:else}
+				<ChevronUp size={14} />
+			{/if} 고급 옵션
 		</button>
 
 		<!-- 고급 옵션 패널 -->
@@ -806,7 +825,7 @@
 											<button onclick={() => runSavedSearch(saved)} class="flex-1 text-left">
 												<div class="flex items-center gap-2">
 													{#if saved.is_favorite}
-														<span class="text-warning">★</span>
+														<Star size={14} class="fill-warning text-warning" />
 													{/if}
 													<span class="text-sm font-medium">{saved.name}</span>
 												</div>
@@ -820,25 +839,21 @@
 													class="p-1 text-muted-foreground hover:text-warning"
 													title="즐겨찾기"
 												>
-													{saved.is_favorite ? '★' : '☆'}
+													<Star size={16} class={saved.is_favorite ? 'fill-warning text-warning' : ''} />
 												</button>
 												<button
 													onclick={(e) => openEditModal(saved, e)}
 													class="p-1 text-muted-foreground hover:text-primary"
 													title="수정"
 												>
-													✏️
+													<Pencil size={16} />
 												</button>
 												<button
 													onclick={(e) => openScheduleModal(saved, e)}
 													class="p-1 text-muted-foreground hover:text-success"
 													title="스케줄 설정"
 												>
-													{#if getScheduleForSaved(saved.id)}
-														<span class="text-success">⏰</span>
-													{:else}
-														⏰
-													{/if}
+													<Clock size={16} class={getScheduleForSaved(saved.id) ? 'text-success' : ''} />
 												</button>
 												{#if getScheduleForSaved(saved.id)}
 													<button
@@ -846,7 +861,7 @@
 														class="p-1 text-xs text-muted-foreground hover:text-purple-500"
 														title="실행 이력"
 													>
-														📊
+														<BarChart3 size={16} />
 													</button>
 												{/if}
 												{#if saved.last_search_id}
@@ -855,7 +870,7 @@
 														class="p-1 text-xs text-muted-foreground hover:text-primary"
 														title="마지막 결과 보기"
 													>
-														📋
+														<ClipboardList size={16} />
 													</button>
 												{/if}
 												<button
@@ -863,7 +878,7 @@
 													class="p-1 text-muted-foreground hover:text-error"
 													title="삭제"
 												>
-													✕
+													<X size={16} />
 												</button>
 											</div>
 										</div>
@@ -878,8 +893,8 @@
 											<span>{saved.max_pages}p</span>
 											{#if getScheduleForSaved(saved.id)}
 												{@const schedule = getScheduleForSaved(saved.id)!}
-												<span class="text-success">
-													⏰ {formatScheduleTime(schedule)}
+												<span class="text-success flex items-center gap-1">
+													<Clock size={12} /> {formatScheduleTime(schedule)}
 													{schedule.enabled ? '' : '(중지)'}
 												</span>
 											{/if}
@@ -952,7 +967,11 @@
 												</span>
 											</div>
 											<span class="text-xs text-muted-foreground">
-												{expandedScheduleId === item.schedule_id ? '▲' : '▼'}
+												{#if expandedScheduleId === item.schedule_id}
+													<ChevronUp size={14} />
+												{:else}
+													<ChevronDown size={14} />
+												{/if}
 											</span>
 										</div>
 										<div class="mt-1 text-xs text-muted-foreground">{item.query}</div>
@@ -1126,9 +1145,13 @@
 					<!-- 수정 모드: 고급 옵션 -->
 					<button
 						onclick={() => (showAdvancedOptions = !showAdvancedOptions)}
-						class="text-sm text-muted-foreground hover:text-foreground"
+						class="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"
 					>
-						{showAdvancedOptions ? '▼ 고급 옵션' : '▶ 고급 옵션'}
+						{#if showAdvancedOptions}
+							<ChevronDown size={14} />
+						{:else}
+							<ChevronUp size={14} />
+						{/if} 고급 옵션
 					</button>
 					{#if showAdvancedOptions}
 						<div class="flex flex-wrap gap-3">

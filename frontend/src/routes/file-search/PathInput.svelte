@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { browseDirectory } from '$lib/api/fileSearch';
 	import type { DirectoryItem } from '$lib/types/fileSearch';
+	import { Folder, X } from 'lucide-svelte';
 
 	interface Props {
 		path: string;
@@ -67,7 +68,7 @@
 			   transition-colors hover:bg-muted"
 		title="폴더 브라우저 열기"
 	>
-		📁
+		<Folder size={18} />
 	</button>
 	{#if path}
 		<button
@@ -76,7 +77,7 @@
 				   text-muted-foreground transition-colors hover:text-destructive"
 			title="경로 지우기"
 		>
-			×
+			<X size={16} />
 		</button>
 	{/if}
 </div>
@@ -92,7 +93,9 @@
 			<!-- 헤더 -->
 			<div class="flex items-center justify-between border-b border-border px-4 py-3">
 				<h3 class="font-medium">폴더 선택</h3>
-				<button onclick={closeModal} class="text-muted-foreground hover:text-foreground text-lg leading-none">×</button>
+				<button onclick={closeModal} class="text-muted-foreground hover:text-foreground text-lg leading-none">
+					<X size={20} />
+				</button>
 			</div>
 
 			<!-- 현재 경로 -->
@@ -114,7 +117,7 @@
 							class="flex w-full items-center gap-2 px-4 py-2 text-sm text-muted-foreground
 								   hover:bg-muted transition-colors"
 						>
-							📁 <span class="font-mono">../</span>
+							<Folder size={16} /> <span class="font-mono">../</span>
 						</button>
 					{/if}
 
@@ -127,7 +130,7 @@
 								class="flex w-full items-center gap-2 px-4 py-2 text-sm
 									   hover:bg-muted transition-colors truncate"
 							>
-								📁 <span class="font-mono">{dir.name}</span>
+								<Folder size={16} /> <span class="font-mono">{dir.name}</span>
 							</button>
 						{/each}
 					{/if}

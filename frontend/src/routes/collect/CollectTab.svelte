@@ -9,6 +9,22 @@
   import { toast } from '$lib/stores/toast';
   import { fetchQuotaStatus, getQuotaWarning } from '$lib/stores/quotaStore';
   import { createPagePagination } from '$lib/utils/pagination.svelte';
+  import { 
+    Camera, 
+    Clapperboard, 
+    User, 
+    Video, 
+    Hash, 
+    Flame, 
+    Clock, 
+    HelpCircle, 
+    FileText, 
+    Search,
+    LayoutGrid,
+    List,
+    X,
+    MoreHorizontal
+  } from 'lucide-svelte';
 
   let posts: CollectedPost[] = [];
   let loading = true;
@@ -57,15 +73,15 @@
   let urlCrawlScrollCount = 3;
 
   // URL 타입별 스타일
-  const urlTypeStyles: Record<string, { icon: string; color: string; bgColor: string }> = {
-    single_post: { icon: '📷', color: 'text-primary', bgColor: 'bg-primary-light' },
-    single_reel: { icon: '🎬', color: 'text-purple', bgColor: 'bg-purple-light' },
-    account_profile: { icon: '👤', color: 'text-success', bgColor: 'bg-success-light' },
-    account_reels: { icon: '🎥', color: 'text-pink', bgColor: 'bg-pink-light' },
-    hashtag: { icon: '#', color: 'text-warning', bgColor: 'bg-warning-light' },
-    reels_explore: { icon: '🔥', color: 'text-error', bgColor: 'bg-error-light' },
-    story: { icon: '⏰', color: 'text-foreground', bgColor: 'bg-muted' },
-    unknown: { icon: '❓', color: 'text-foreground', bgColor: 'bg-muted' },
+  const urlTypeStyles: Record<string, { icon: any; color: string; bgColor: string }> = {
+    single_post: { icon: Camera, color: 'text-primary', bgColor: 'bg-primary-light' },
+    single_reel: { icon: Clapperboard, color: 'text-purple', bgColor: 'bg-purple-light' },
+    account_profile: { icon: User, color: 'text-success', bgColor: 'bg-success-light' },
+    account_reels: { icon: Video, color: 'text-pink', bgColor: 'bg-pink-light' },
+    hashtag: { icon: Hash, color: 'text-warning', bgColor: 'bg-warning-light' },
+    reels_explore: { icon: Flame, color: 'text-error', bgColor: 'bg-error-light' },
+    story: { icon: Clock, color: 'text-foreground', bgColor: 'bg-muted' },
+    unknown: { icon: HelpCircle, color: 'text-foreground', bgColor: 'bg-muted' },
   };
 
   // 피드 타입인지 (추가 옵션 표시용)
@@ -585,18 +601,14 @@
           class="px-3 py-1.5 text-sm {viewMode === 'grid' ? 'bg-primary text-white' : 'bg-white text-muted-foreground hover:bg-muted'}"
           title="그리드 뷰"
         >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-          </svg>
+          <LayoutGrid size={16} />
         </button>
         <button
           onclick={() => setViewMode('list')}
           class="px-3 py-1.5 text-sm {viewMode === 'list' ? 'bg-primary text-white' : 'bg-white text-muted-foreground hover:bg-muted'}"
           title="리스트 뷰"
         >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-          </svg>
+          <List size={16} />
         </button>
       </div>
 
@@ -675,8 +687,12 @@
               </div>
             {:else}
               <div class="aspect-square bg-secondary rounded-lg mb-2 md:mb-3 flex items-center justify-center relative">
-                <span class="text-2xl md:text-4xl text-muted-foreground">
-                  {post.source_type === 'instagram' ? '📷' : '📄'}
+                <span class="text-muted-foreground">
+                  {#if post.source_type === 'instagram'}
+                    <Camera size={32} />
+                  {:else}
+                    <FileText size={32} />
+                  {/if}
                 </span>
                 <!-- 배지 오버레이 -->
                 <div class="absolute top-1 right-1 flex gap-1">
@@ -746,8 +762,12 @@
                   loading="lazy"
                 />
               {:else}
-                <div class="w-full h-full flex items-center justify-center text-2xl text-muted-foreground">
-                  {post.source_type === 'instagram' ? '📷' : '📄'}
+                <div class="w-full h-full flex items-center justify-center text-muted-foreground">
+                  {#if post.source_type === 'instagram'}
+                    <Camera size={24} />
+                  {:else}
+                    <FileText size={24} />
+                  {/if}
                 </div>
               {/if}
             </div>
@@ -1005,7 +1025,9 @@
         {@const style = urlTypeStyles[parsedUrl.url_type] || urlTypeStyles.unknown}
         <div class="mb-4 p-3 rounded-lg {style.bgColor}">
           <div class="flex items-center gap-2">
-            <span class="text-xl">{style.icon}</span>
+            <span class="{style.color}">
+              <svelte:component this={style.icon} size={20} />
+            </span>
             <div>
               <span class="font-medium {style.color}">{parsedUrl.url_type_description}</span>
               {#if parsedUrl.username}

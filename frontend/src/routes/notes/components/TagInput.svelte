@@ -113,8 +113,8 @@
               >Add</button>
               <button
                 onclick={() => (showCreateForm = false)}
-                class="px-2 py-0.5 text-xs rounded bg-muted text-muted-foreground"
-              >✕</button>
+                class="px-2 py-0.5 text-xs rounded bg-muted text-muted-foreground flex items-center justify-center"
+              ><X size={14} /></button>
             </div>
           {:else}
             <button
@@ -135,8 +135,8 @@
       <!-- 닫기 버튼 -->
       <button
         onclick={() => (showDropdown = false)}
-        class="w-full text-xs text-muted-foreground border-t border-border px-3 py-1.5 hover:bg-muted text-center transition-colors"
-      >닫기</button>
+        class="w-full text-xs text-muted-foreground border-t border-border px-3 py-1.5 hover:bg-muted text-center transition-colors flex items-center justify-center gap-1"
+      ><X size={12} /> 닫기</button>
     </div>
   {/if}
 </div>

@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Note } from '$lib/api/notes';
   import { notesApi } from '$lib/api/notes';
-  import { Pin, Star, Copy, Pencil, Archive, Trash2 } from 'lucide-svelte';
+  import { Pin, Star, Copy, Pencil, Archive, Trash2, Link as LinkIcon, Paperclip } from 'lucide-svelte';
   import TagBadge from './TagBadge.svelte';
   import { extractUrls, getDomain } from '../utils/url';
   import { navEntries, isNavGroup, type NavSingleItem } from '$lib/navigation';
@@ -159,12 +159,14 @@
         <span
           class="inline-flex items-center gap-0.5 underline cursor-pointer hover:text-blue-700"
           onclick={(e) => { e.stopPropagation(); window.open(firstUrl, '_blank', 'noopener,noreferrer'); }}
-        >🔗 {getDomain(firstUrl)}</span>
+        ><LinkIcon size={12} class="mr-0.5" /> {getDomain(firstUrl)}</span>
       </p>
     {:else}
-      <p class="text-info text-xs mb-2 truncate max-w-[120px]">📎 {note.remark}</p>
+      <p class="text-info text-xs mb-2 truncate max-w-[120px] flex items-center gap-1">
+        <Paperclip size={12} /> {note.remark}
+      </p>
     {/if}
-  {/if}
+{/if}
 
   <!-- 태그 -->
   {#if note.tags.length > 0}
@@ -185,9 +187,9 @@
       onclick={(e) => { e.stopPropagation(); window.location.href = menuInfo.href; }}
       title={menuInfo.href}
     >
-      🔗 {menuInfo.icon} {menuInfo.label}{note.linked_tab ? ` > ${note.linked_tab}` : ''}
+      <LinkIcon size={12} /> {menuInfo.icon} {menuInfo.label}{note.linked_tab ? ` > ${note.linked_tab}` : ''}
     </span>
-  {/if}
+{/if}
 
   <!-- 날짜 -->
   <div class="flex items-center justify-between mt-auto">

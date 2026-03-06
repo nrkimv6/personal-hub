@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { collectApi, type CrawlHistoryItem, type CrawlHistoryFilters } from '$lib/api';
 	import { Button } from '$lib/components/ui';
+	import { Search } from 'lucide-svelte';
 
 	let items: CrawlHistoryItem[] = [];
 	let loading = true;
@@ -349,8 +350,8 @@
 									{#if item.history_type === 'schedule_run'}
 										<span class="font-medium">{item.schedule_name || '-'}</span>
 									{:else if item.history_type === 'google_search'}
-										<span class="text-xs truncate max-w-[180px] block" title={item.url}>
-											🔍 {extractGoogleQuery(item.url)}
+										<span class="text-xs truncate max-w-[180px] flex items-center gap-1" title={item.url}>
+											<Search size={12} class="text-muted-foreground" /> {extractGoogleQuery(item.url)}
 										</span>
 									{:else}
 										<span class="text-xs truncate max-w-[180px] block" title={item.url}>

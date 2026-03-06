@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { flattenNavEntries, type FlatNavItem } from '$lib/navigation';
+  import { X } from 'lucide-svelte';
 
   export let selectedMenuId: string | null = null;
   export let onSelect: (menuId: string | null) => void = () => {};
@@ -100,7 +101,7 @@
           class="mobile-close"
           aria-label="닫기"
           onclick={() => onSelect(selectedMenuId)}
-        >✕</button>
+        ><X size={18} /></button>
       </div>
 
       <!-- 검색 -->
@@ -125,7 +126,7 @@
           onclick={() => selectItem(null)}
           onmouseenter={() => (focusedIndex = 0)}
         >
-          <span class="item-icon">✕</span>
+          <span class="item-icon"><X size={14} /></span>
           <span class="item-label">연결 해제</span>
         </li>
 
@@ -188,7 +189,7 @@
         onclick={() => selectItem(null)}
         onmouseenter={() => (focusedIndex = 0)}
       >
-        <span class="item-icon">✕</span>
+        <span class="item-icon"><X size={14} /></span>
         <span class="item-label">연결 해제</span>
       </li>
 
