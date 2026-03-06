@@ -77,22 +77,38 @@ class WorktreeManager:
                     if worktree_path.is_dir():
                         logger.info(f"[WorktreeManager] 기존 worktree 재사용: {branch}")
                         return worktree_path, branch
-                    # 디렉토리 없음 + 브랜치만 남은 경우: prune 후 재생성
+                    # 디렉토리 없음 + 브랜치만 남은 경우: 미머지 커밋 확인 후 분기
                     subprocess.run(
                         ["git", "worktree", "prune"],
                         capture_output=True, cwd=str(base_dir.parent),
                     )
-                    subprocess.run(
-                        ["git", "branch", "-D", branch],
-                        capture_output=True, cwd=str(base_dir.parent),
-                    )
-                    result = subprocess.run(
-                        ["git", "worktree", "add", str(worktree_path), "-b", branch],
+                    unmerged = subprocess.run(
+                        ["git", "log", f"main..{branch}", "--oneline"],
                         capture_output=True, text=True, cwd=str(base_dir.parent),
                     )
-                    if result.returncode != 0:
-                        raise WorktreeError(f"git worktree add 실패 (재시도 후): {result.stderr}")
-                    logger.warning(f"[WorktreeManager] dangling 브랜치 정리 후 재생성: {branch}")
+                    has_unmerged = unmerged.returncode == 0 and unmerged.stdout.strip()
+                    if has_unmerged:
+                        # 미머지 커밋 있음: branch -D 스킵, 기존 브랜치로 워크트리 연결
+                        result = subprocess.run(
+                            ["git", "worktree", "add", str(worktree_path), branch],
+                            capture_output=True, text=True, cwd=str(base_dir.parent),
+                        )
+                        if result.returncode != 0:
+                            raise WorktreeError(f"git worktree add 실패 (기존 브랜치 재사용 시도): {result.stderr}")
+                        logger.warning(f"[WorktreeManager] 미머지 커밋 보존 — 기존 브랜치 재사용: {branch}")
+                    else:
+                        # 미머지 커밋 없음(이미 머지됨 or 빈 브랜치): 기존 동작 유지
+                        subprocess.run(
+                            ["git", "branch", "-D", branch],
+                            capture_output=True, cwd=str(base_dir.parent),
+                        )
+                        result = subprocess.run(
+                            ["git", "worktree", "add", str(worktree_path), "-b", branch],
+                            capture_output=True, text=True, cwd=str(base_dir.parent),
+                        )
+                        if result.returncode != 0:
+                            raise WorktreeError(f"git worktree add 실패 (재시도 후): {result.stderr}")
+                        logger.warning(f"[WorktreeManager] dangling 브랜치 정리 후 재생성: {branch}")
                 else:
                     raise WorktreeError(f"git worktree add 실패: {result.stderr}")
             logger.info(f"[WorktreeManager] 생성: {worktree_path} (브랜치: {branch})")

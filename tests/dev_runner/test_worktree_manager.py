@@ -120,6 +120,59 @@ class TestWorktreeManagerCreate:
         )
         assert "runner/brtest" in result.stdout
 
+    def test_create_E_already_exists_with_unmerged_commits_reuses_branch(self, worktrees_dir):
+        """E(에러): worktree add 1차 실패(already exists) + 디렉토리 미존재 + 미머지 커밋 있음
+        → branch -D 미호출, 기존 브랜치로 worktree 재연결, 미머지 커밋 보존."""
+        base_dir, repo = worktrees_dir
+        # worktree_manager.py가 'main..{branch}'로 비교하므로 기본 브랜치명이 main이어야 함
+        subprocess.run(["git", "branch", "-m", "main"], capture_output=True, cwd=str(repo))
+        # 워크트리 생성 + 미머지 커밋 추가
+        path1, branch1 = WorktreeManager.create("unmerged001", base_dir)
+        (path1 / "unmerged.txt").write_text("unmerged work")
+        subprocess.run(["git", "add", "."], capture_output=True, cwd=str(path1))
+        subprocess.run(["git", "commit", "-m", "unmerged commit"], capture_output=True, cwd=str(path1))
+        # 워크트리 디렉토리만 강제 삭제 (브랜치는 유지, 미머지 커밋 있음)
+        subprocess.run(["git", "worktree", "remove", str(path1), "--force"],
+                       capture_output=True, cwd=str(repo))
+        assert not path1.exists()
+
+        # create() 재호출 — 미머지 커밋 보호 로직이 동작해야 함
+        path2, branch2 = WorktreeManager.create("unmerged001", base_dir)
+
+        assert path2.is_dir()
+        assert branch2 == branch1
+        # 미머지 커밋이 보존됐는지 확인
+        log = subprocess.run(["git", "log", "--oneline"], capture_output=True, text=True, cwd=str(path2))
+        assert "unmerged commit" in log.stdout
+
+    def test_create_C_already_exists_no_unmerged_commits_deletes_branch(self, worktrees_dir):
+        """C(교차): worktree add 1차 실패(already exists) + 디렉토리 미존재 + 미머지 커밋 없음
+        (이미 main에 머지됨) → branch -D 후 -b 플래그로 새 브랜치 재생성."""
+        import shutil
+        base_dir, repo = worktrees_dir
+        # 워크트리 생성 (커밋 없음 — main과 동일)
+        path1, branch1 = WorktreeManager.create("merged001", base_dir)
+        # 워크트리 디렉토리만 강제 삭제 (브랜치 유지, 미머지 커밋 없음)
+        subprocess.run(["git", "worktree", "remove", str(path1), "--force"],
+                       capture_output=True, cwd=str(repo))
+        assert not path1.exists()
+
+        # create() 재호출 — branch -D 후 새 브랜치로 재생성해야 함
+        path2, branch2 = WorktreeManager.create("merged001", base_dir)
+
+        assert path2.is_dir()
+        assert branch2 == branch1
+        # 브랜치가 재생성됐는지: git log에서 merge commit 없이 clean 상태
+        log = subprocess.run(
+            ["git", "log", f"main..{branch2}", "--oneline"],
+            capture_output=True, text=True, cwd=str(repo)
+        )
+        # 새로 생성된 브랜치는 main과 동일 → 미머지 커밋 없음
+        assert log.stdout.strip() == ""
+
+    # TC-14: B(경계) — already exists + 디렉토리 존재 → 재사용
+    # test_error_duplicate_runner_id_reuses (L61-75)와 동일 시나리오, 스킵
+
 
 # ── remove() ─────────────────────────────────────────────────────────────────
 
