@@ -191,6 +191,9 @@ try {
             Start-CommandListener
             $restartCount++
             $lastRestartTime = Get-Date
+        } else {
+            # 프로세스가 살아있는 경우에도 중복 감지 및 정리
+            Remove-DuplicateProcesses
         }
     }
 }
