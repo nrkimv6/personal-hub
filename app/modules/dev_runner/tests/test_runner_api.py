@@ -257,6 +257,45 @@ class TestStartRun:
         })
         assert response.status_code == 504
 
+    async def test_start_run_fix_engine_stored_in_command(self, client, mock_executor_redis):
+        """T4.1: fix_engine 필드가 Redis command에 포함되는지 확인"""
+        fake_async = mock_executor_redis["async"]
+        fake_sync = mock_executor_redis["sync"]
+        now = datetime.now().isoformat()
+
+        await fake_async.set("plan-runner:listener:heartbeat", now)
+        brpop_result = ("plan-runner:command_results:abc123", json.dumps({"success": True, "message": "Started"}))
+        with patch.object(fake_async, 'brpop', new=AsyncMock(return_value=brpop_result)):
+            response = await client.post("/api/v1/dev-runner/run", json={
+                "plan_file": "test-plan.md",
+                "fix_engine": "gemini",
+            })
+
+        assert response.status_code == 200
+        # Redis command queue에 fix_engine이 포함됐는지 확인 (async_redis로 push됨)
+        raw = await fake_async.lrange("plan-runner:commands", 0, -1)
+        assert len(raw) > 0, "command queue에 항목 없음"
+        command = json.loads(raw[0])
+        assert command.get("fix_engine") == "gemini", f"fix_engine 미포함: {command}"
+
+    async def test_start_run_fix_engine_default_claude(self, client, mock_executor_redis):
+        """T4.2: fix_engine 미전달 시 기본값 claude"""
+        fake_async = mock_executor_redis["async"]
+        now = datetime.now().isoformat()
+
+        await fake_async.set("plan-runner:listener:heartbeat", now)
+        brpop_result = ("plan-runner:command_results:abc123", json.dumps({"success": True, "message": "Started"}))
+        with patch.object(fake_async, 'brpop', new=AsyncMock(return_value=brpop_result)):
+            response = await client.post("/api/v1/dev-runner/run", json={
+                "plan_file": "test-plan.md",
+            })
+
+        assert response.status_code == 200
+        raw = await fake_async.lrange("plan-runner:commands", 0, -1)
+        assert len(raw) > 0, "command queue에 항목 없음"
+        command = json.loads(raw[0])
+        assert command.get("fix_engine") == "claude", f"fix_engine 기본값 오류: {command}"
+
 
 class TestStopRun:
     async def test_stop_not_running_returns_404(self, client, mock_executor_redis):
