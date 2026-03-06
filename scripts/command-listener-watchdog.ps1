@@ -97,6 +97,25 @@ function Remove-DuplicateProcesses {
 }
 
 function Start-CommandListener {
+    # 재시작 직전: cmdline에 'command-listener'가 포함된 기존 프로세스를 모두 종료
+    # 이렇게 하면 stop()을 거치지 않는 watchdog 재시작 경로에서도 중복이 생기지 않는다
+    $existingProcs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match 'command-listener' }
+    if ($existingProcs) {
+        $pidList = ($existingProcs | ForEach-Object { $_.ProcessId }) -join ", "
+        Write-Log "재시작 전 기존 command-listener 프로세스 정리 (PIDs: $pidList)" "WARN"
+        foreach ($ep in $existingProcs) {
+            try {
+                Stop-Process -Id $ep.ProcessId -Force -ErrorAction SilentlyContinue
+                Write-Log "기존 프로세스 종료: PID $($ep.ProcessId)" "WARN"
+            }
+            catch {
+                Write-Log "기존 프로세스 종료 실패: PID $($ep.ProcessId) — $_" "ERROR"
+            }
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
     $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $stdoutLogFile = Join-Path $LogDir "stdout_command_listener_$Timestamp.log"
     $stderrLogFile = Join-Path $LogDir "stderr_command_listener_$Timestamp.log"
