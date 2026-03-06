@@ -61,7 +61,7 @@ RECENT_RUNNERS_TTL = 86400  # 24시간 (초) — executor_service.py의 RECENT_R
 # per-runner 키 suffix 전체 목록 — app/modules/dev_runner/services/executor_service.py의 RUNNER_KEY_SUFFIXES와 동일
 RUNNER_KEY_SUFFIXES = (
     "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
-    "engine", "worktree_path", "branch", "merge_status", "merge_requested",
+    "engine", "fix_engine", "worktree_path", "branch", "merge_status", "merge_requested",
     "current_cycle", "quota_stopped", "error",
 )
 HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
@@ -701,7 +701,25 @@ def _run_subprocess_streaming(cmd: list, env: dict, cwd: str, pub_fn, tag: str, 
     return {"success": False, "message": msg, "output": output_text}
 
 
-def _launch_conflict_resolver_process(runner_id: str, branch: str, worktree_path: Path, redis_client, pub_fn=None) -> dict:
+def _get_fix_engine(redis_client, runner_id: str) -> str:
+    """runner의 fix_engine 값을 Redis에서 읽어 반환한다.
+
+    우선순위: fix_engine 키 > engine 키 > "claude" 기본값
+    Redis 오류 시 "claude" fallback.
+    """
+    try:
+        value = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:fix_engine")
+        if value:
+            return value
+        value = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine")
+        if value:
+            return value
+    except Exception:
+        pass
+    return "claude"
+
+
+def _launch_conflict_resolver_process(runner_id: str, branch: str, worktree_path: Path, redis_client, pub_fn=None, engine: str = "claude") -> dict:
     """plan-runner resolve 서브커맨드로 conflict 자동 해결 프로세스를 실행한다.
 
     stdout을 라인별로 실시간 pub_fn에 전달하여 로그 끊김을 방지한다.
@@ -717,6 +735,7 @@ def _launch_conflict_resolver_process(runner_id: str, branch: str, worktree_path
         "resolve",
         "--branch", branch,
         "--project-dir", str(PROJECT_ROOT),
+        "--engine", engine,
     ]
 
     env = os.environ.copy()
@@ -743,7 +762,7 @@ def _launch_conflict_resolver_process(runner_id: str, branch: str, worktree_path
     return {"success": result["success"], "message": result["message"]}
 
 
-def _launch_auto_fix_process(runner_id: str, test_output: str, targets: dict, redis_client, pub_fn=None) -> dict:
+def _launch_auto_fix_process(runner_id: str, test_output: str, targets: dict, redis_client, pub_fn=None, engine: str = "claude") -> dict:
     """plan-runner auto-fix 서브커맨드로 자동 수정 프로세스를 실행한다.
 
     stdout을 라인별로 실시간 pub_fn에 전달하여 로그 끊김을 방지한다.
@@ -772,6 +791,7 @@ def _launch_auto_fix_process(runner_id: str, test_output: str, targets: dict, re
         "--max-attempts", "1",
         "--skip-test",
         "--error-file", str(error_file_path),
+        "--engine", engine,
     ]
 
     env = os.environ.copy()
@@ -1448,6 +1468,7 @@ def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", datetime.now().isoformat())
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine", command.get("engine", "claude"))
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:fix_engine", command.get("fix_engine", "claude"))
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path", str(worktree_path))
         redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:quota_stopped")
         redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
@@ -1865,7 +1886,8 @@ def _do_resolve_conflict(runner_id: str, redis_client: redis.Redis, command_id: 
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "resolving")
 
         resolve_result = _launch_conflict_resolver_process(
-            runner_id, branch, Path(worktree_path_str), redis_client
+            runner_id, branch, Path(worktree_path_str), redis_client,
+            engine=_get_fix_engine(redis_client, runner_id)
         )
 
         if resolve_result["success"]:
