@@ -250,3 +250,50 @@ def test_check_branch_exists_subprocess_error_boundary(service):
         result = service._check_branch_exists("any-branch")
 
     assert result is False
+
+
+# ===========================================================================
+# Phase T4: HTTP 통합 테스트
+# ===========================================================================
+
+import pytest
+import requests
+
+
+ADMIN_API = "http://localhost:8001"
+
+
+def test_batch_done_endpoint_responds_http():
+    """T4: POST /api/v1/dev-runner/plans/batch-done — 엔드포인트 존재 및 응답 스키마 확인"""
+    try:
+        r = requests.post(f"{ADMIN_API}/api/v1/dev-runner/plans/batch-done", timeout=10)
+    except requests.exceptions.ConnectionError:
+        pytest.skip("Admin API (port 8001) not available — skip T4")
+
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text[:200]}"
+    body = r.json()
+    assert "total" in body, f"'total' field missing: {body}"
+    assert "success" in body
+    assert "failed" in body
+    assert "results" in body
+
+
+def test_batch_done_skips_live_worktree_http():
+    """T4: batch-done API — worktree/branch 필드가 있는 plan은 _can_done()에서 False → results 미포함
+    (단위 테스트 TC16/TC17로 직접 검증, HTTP 레이어 응답 스키마 확인)
+    """
+    try:
+        r = requests.post(f"{ADMIN_API}/api/v1/dev-runner/plans/batch-done", timeout=10)
+    except requests.exceptions.ConnectionError:
+        pytest.skip("Admin API (port 8001) not available — skip T4")
+
+    assert r.status_code == 200
+    body = r.json()
+    # 현재 실행 중인 impl/improve-done-skill branch plan은 results에서 제외되어야 함
+    results = body.get("results", [])
+    live_plan = next(
+        (x for x in results if "improve-done-skill" in x.get("filename", "")),
+        None
+    )
+    assert live_plan is None or live_plan.get("success") is False, \
+        "현재 활성 worktree plan이 batch-done에서 처리됐으면 안 됨"
