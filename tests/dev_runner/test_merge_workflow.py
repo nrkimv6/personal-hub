@@ -119,7 +119,9 @@ class TestMergeWorkflowRun:
 
 
 # ── run_post_merge_tests() ────────────────────────────────────────────────────
+# [DEPRECATED] run_post_merge_tests() 메서드가 삭제됨 (unify-merge-pipeline todo-4)
 
+@pytest.mark.skip(reason="MergeWorkflow.run_post_merge_tests() 삭제됨 — plan-runner post-merge subprocess로 대체")
 class TestRunPostMergeTests:
     def test_right_passed_returns_true(self, workflow):
         """TC-Right: pytest -m http 통과 → TestResult(passed=True, exit_code=0)"""

@@ -51,6 +51,7 @@ def make_redis_mock(worktree_path=None, branch=None, plan_file=None):
 # Phase T1-2: _do_inline_merge conflict auto-retry
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skip(reason="_do_inline_merge가 plan-runner post-merge subprocess로 교체됨 (unify-merge-pipeline todo-4). conflict 처리는 plan-runner 내부에서 수행. exit_code=3→conflict는 test_post_merge_pipeline.py에서 커버.")
 class TestInlineMergeConflictAutoRetry:
     def test_inline_merge_conflict_auto_retry_R(self, tmp_path):
         """R(Right): conflict 시 _launch_conflict_resolver_process 자동 호출"""

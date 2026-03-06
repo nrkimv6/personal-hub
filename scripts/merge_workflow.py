@@ -1,11 +1,8 @@
 """
-MergeWorkflow — plan-runner worktree 완료 후 머지 워크플로우
+[DEPRECATED] plan-runner handle_merge_stage로 대체됨.
+_do_inline_merge에서 직접 호출하지 않음.
 
-실행 순서:
-  1. worktree에서 변경사항 커밋
-  2. main 브랜치에 머지
-  3. HTTP 테스트 실행
-  4. 성공 시 worktree 정리
+MergeWorkflow — plan-runner worktree 완료 후 머지 워크플로우
 """
 import json
 import subprocess
@@ -33,6 +30,7 @@ class WorkflowResult:
     message: str
 
 
+# [DEPRECATED] plan-runner handle_merge_stage로 대체됨. _do_inline_merge에서 직접 호출하지 않음.
 class MergeWorkflow:
     def __init__(self, project_root: Path, redis_client, python_path: str = None, workflow_manager=None):
         self.project_root = project_root
@@ -217,14 +215,3 @@ class MergeWorkflow:
                 return str(candidate)
         return self.python_path
 
-    def run_post_merge_tests(self) -> TestResult:
-        project_python = self._get_project_python()
-        result = subprocess.run(
-            [project_python, "-m", "pytest", str(self.project_root / "tests"), "-m", "http", "-v", "--timeout=120"],
-            capture_output=True, text=True, cwd=str(self.project_root)
-        )
-        return TestResult(
-            passed=result.returncode == 0,
-            output=result.stdout + result.stderr,
-            exit_code=result.returncode
-        )
