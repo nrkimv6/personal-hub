@@ -841,6 +841,7 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
 
     branch_str = None
     plan_file = None
+    lock_acquired = False
     try:
         # merge_requested 플래그 삭제 (중복 진입 방지)
         try:
@@ -914,20 +915,19 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                 pass
             _pub(f"merge 실패 (exit_code={exit_code})")
 
-        release_merge_lock(redis_client, runner_id)
-
     except Exception as e:
         logger.error(f"[_do_inline_merge] 예외 발생 (runner_id={runner_id}): {e}")
         try:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
         except Exception:
             pass
-        try:
-            release_merge_lock(redis_client, runner_id)
-        except Exception:
-            pass
 
     finally:
+        if lock_acquired:
+            try:
+                release_merge_lock(redis_client, runner_id)
+            except Exception:
+                pass
         # merge-results Redis list에 결과 push (merge history API 연동)
         try:
             _merge_status_final = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status") or "unknown"
@@ -1618,6 +1618,7 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
         _pub_and_log(runner_id, msg, redis_client, "MERGE")
 
     result = {"success": False, "message": "unknown error", "action": "retry-merge"}
+    lock_acquired = False
     try:
         # Redis 키 만료 시 command payload로 재발급
         worktree_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
@@ -1699,21 +1700,20 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
             _pub(f"merge 실패 (exit_code={exit_code})")
             result = {"success": False, "message": f"exit_code={exit_code}", "action": "retry-merge"}
 
-        release_merge_lock(redis_client, runner_id)
-
     except Exception as e:
         logger.error(f"[retry_merge] 실패: {e}")
         try:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
         except Exception:
             pass
-        try:
-            release_merge_lock(redis_client, runner_id)
-        except Exception:
-            pass
         result = {"success": False, "message": str(e), "action": "retry-merge"}
 
     finally:
+        if lock_acquired:
+            try:
+                release_merge_lock(redis_client, runner_id)
+            except Exception:
+                pass
         # merge-results Redis list push (merge history API 연동)
         try:
             _retry_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status") or "unknown"
