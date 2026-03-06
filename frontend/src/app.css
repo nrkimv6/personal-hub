@@ -837,34 +837,39 @@ input[type="checkbox"] {
 }
 
 /* 로그 라인 기본 스타일 */
-.dr-log-line {
+.dr-log-line,
+.log-line {
   font-family: 'Fira Code', Consolas, Monaco, monospace;
   font-size: 0.75rem;
   line-height: 1.25rem;
   padding-left: 0.75rem;
   padding-right: 0.75rem;
+  padding-top: 0;
+  padding-bottom: 0;
   border-left: 2px solid transparent;
 }
 
 /* 태그별 좌측 보더 색상 */
-.dr-log-line-ai    { border-left-color: hsl(var(--dr-tag-ai)); }
-.dr-log-line-tool  { border-left-color: hsl(var(--dr-tag-tool)); }
-.dr-log-line-plan  { border-left-color: hsl(var(--dr-tag-plan)); }
-.dr-log-line-task  { border-left-color: hsl(var(--dr-tag-task)); }
-.dr-log-line-build { border-left-color: hsl(var(--dr-tag-build)); }
-.dr-log-line-test  { border-left-color: hsl(var(--dr-tag-test)); }
-.dr-log-line-error { border-left-color: hsl(var(--dr-tag-error)); }
-.dr-log-line-warn  { border-left-color: hsl(var(--dr-tag-warn)); }
-.dr-log-line-info  { border-left-color: hsl(var(--dr-tag-info)); }
-.dr-log-line-debug { border-left-color: hsl(var(--dr-tag-debug)); }
+.dr-log-line-ai, .log-line-ai    { border-left-color: hsl(var(--dr-tag-ai)); }
+.dr-log-line-tool, .log-line-tool  { border-left-color: hsl(var(--dr-tag-tool)); }
+.dr-log-line-plan, .log-line-plan  { border-left-color: hsl(var(--dr-tag-plan)); }
+.dr-log-line-task, .log-line-task  { border-left-color: hsl(var(--dr-tag-task)); }
+.dr-log-line-build, .log-line-build { border-left-color: hsl(var(--dr-tag-build)); }
+.dr-log-line-test, .log-line-test  { border-left-color: hsl(var(--dr-tag-test)); }
+.dr-log-line-error, .log-line-error { border-left-color: hsl(var(--dr-tag-error)); }
+.dr-log-line-warn, .log-line-warn  { border-left-color: hsl(var(--dr-tag-warn)); }
+.dr-log-line-info, .log-line-info  { border-left-color: hsl(var(--dr-tag-info)); }
+.dr-log-line-debug, .log-line-debug { border-left-color: hsl(var(--dr-tag-debug)); }
 
 /* 태그 배지 */
-.dr-tag-badge {
+.dr-tag-badge,
+.tag-badge {
   font-family: 'Fira Code', Consolas, Monaco, monospace;
   font-size: 0.625rem;
   font-weight: 600;
   text-transform: uppercase;
   min-width: 42px;
+  text-align: center;
   display: inline-flex;
   align-items: center;
   justify-content: center;

@@ -101,9 +101,9 @@
 		return {
 			...tab,
 			running: runner.running ?? runner.status === 'running',
-			plan_file: isAllPlansSentinel(runner.plan_file) ? tab.plan_file : runner.plan_file,
-			engine: runner.engine ?? tab.engine,
-			start_time: runner.start_time ?? tab.start_time,
+			plan_file: isAllPlansSentinel(runner.plan_file) ? tab.plan_file : (runner.plan_file ?? null),
+			engine: (runner.engine ?? tab.engine) ?? null,
+			start_time: (runner.start_time ?? tab.start_time) ?? null,
 			orphan: runner.orphan ?? tab.orphan ?? false,
 		};
 	}
@@ -605,8 +605,11 @@
 						<!-- 모바일 닫기 버튼 -->
 						<button
 							onclick={() => { taskHistoryOpen = false; }}
-							class="sm:hidden ml-auto text-gray-400 hover:text-gray-600 text-lg leading-none px-2 shrink-0"
-						>×</button>
+							class="sm:hidden ml-auto p-1 rounded-md hover:bg-secondary text-muted-foreground transition-colors shrink-0"
+							title="Close"
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+						</button>
 					</div>
 					<!-- 탭 콘텐츠 -->
 					<div class="flex-1 min-h-0 overflow-hidden">
