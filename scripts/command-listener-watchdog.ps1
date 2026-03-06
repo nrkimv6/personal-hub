@@ -75,6 +75,27 @@ function Get-DuplicateProcesses {
     return @($duplicates)
 }
 
+function Remove-DuplicateProcesses {
+    $duplicates = Get-DuplicateProcesses
+    if (-not $duplicates -or $duplicates.Count -eq 0) {
+        return
+    }
+
+    $pids = $duplicates | ForEach-Object { $_.ProcessId }
+    $pidList = $pids -join ", "
+    Write-Log "중복 listener $($duplicates.Count)개 감지, 정리함 (PIDs: $pidList)" "WARN"
+
+    foreach ($dup in $duplicates) {
+        try {
+            Stop-Process -Id $dup.ProcessId -Force -ErrorAction SilentlyContinue
+            Write-Log "중복 프로세스 종료: PID $($dup.ProcessId)" "WARN"
+        }
+        catch {
+            Write-Log "중복 프로세스 종료 실패: PID $($dup.ProcessId) — $_" "ERROR"
+        }
+    }
+}
+
 function Start-CommandListener {
     $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $stdoutLogFile = Join-Path $LogDir "stdout_command_listener_$Timestamp.log"
