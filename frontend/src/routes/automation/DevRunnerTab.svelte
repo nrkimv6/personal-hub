@@ -12,12 +12,12 @@
 	import WorkflowList from '$lib/components/dev-runner/WorkflowList.svelte';
 	import { createSmartPolling } from '$lib/utils/smart-polling';
 	import RunStatusBar from '$lib/components/dev-runner/RunStatusBar.svelte';
-	import TabNav from '$lib/components/layout/TabNav.svelte';
 	import {
 		devRunnerTaskApi,
 		devRunnerRunnerApi,
 		devRunnerEventApi
 	} from '$lib/api';
+	import { devRunnerMergeApi } from '$lib/api/dev-runner';
 	import type {
 		DevRunnerRunStatusResponse,
 		DevRunnerRunnerListItem,
@@ -43,6 +43,19 @@
 
 	// Phase 4: 종료 시 상태 보존
 	let lastPlanFile = $state<string | null>(null);
+
+	// Merge 탭 대기 건수 뱃지
+	let mergeQueuedCount = $state(0);
+	let mergeQueuePollInterval: ReturnType<typeof setInterval> | null = null;
+
+	async function pollMergeQueueCount() {
+		try {
+			const items = await devRunnerMergeApi.queue();
+			mergeQueuedCount = items.length;
+		} catch {
+			// 폴링 실패 시 무시
+		}
+	}
 
 	// Batch plan 상태 (LogViewer SSE에서 수신)
 	let batchPlans = $state<{ name: string; status: 'pending' | 'running' | 'done' }[]>([]);
@@ -352,6 +365,10 @@
 
 		// SSE 연결 (폴링 대체)
 		connectSSE();
+
+		// Merge 큐 건수 폴링 시작
+		pollMergeQueueCount();
+		mergeQueuePollInterval = setInterval(pollMergeQueueCount, 10000);
 	});
 
 	onDestroy(() => {
@@ -373,6 +390,10 @@
 		if (elapsedInterval) {
 			clearInterval(elapsedInterval);
 			elapsedInterval = null;
+		}
+		if (mergeQueuePollInterval) {
+			clearInterval(mergeQueuePollInterval);
+			mergeQueuePollInterval = null;
 		}
 		});
 
@@ -453,6 +474,11 @@
 			onKillRunner={async (id) => { await devRunnerRunnerApi.kill(id).catch(() => {}); void pollStatus(); }}
 			/>
 
+			<!-- CurrentTask (RunStatusBar 아래 독립 카드) -->
+			{#if currentTracking}
+				<CurrentTrackingCard tracking={currentTracking} />
+			{/if}
+
 			<!-- 실행 모달 -->
 			{#if showExecutionModal}
 				<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -460,13 +486,12 @@
 					class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
 					onclick={(e) => { if (e.target === e.currentTarget) showExecutionModal = false; }}
 				>
-					<div class="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-5">
+					<div class="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-5">
 						<div class="flex items-center justify-between mb-4">
-							<h3 class="text-sm font-semibold">실행 설정</h3>
+							<h3 class="text-sm font-mono font-semibold">실행 설정</h3>
 							<button
 								onclick={() => { showExecutionModal = false; }}
-								class="text-gray-400 hover:text-gray-600 text-lg leading-none"
-							>×</button>
+								class="p-1 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground"><svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
 						</div>
 						<RunControl
 							status={runStatus}
@@ -480,6 +505,45 @@
 				</div>
 			{/if}
 
+			<!-- 모바일 액션 바 (sm 미만에서만 표시) -->
+			<div class="flex items-center gap-1 sm:hidden shrink-0 px-2 pb-1">
+				<!-- Plans -->
+				<button
+					onclick={() => { taskHistoryOpen = true; taskHistoryTab = 'plans'; }}
+					class="flex items-center justify-center h-7 w-7 border border-border rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
+					title="Plans"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+				</button>
+				<!-- Execute -->
+				<button
+					onclick={() => { showExecutionModal = true; }}
+					class="flex items-center justify-center h-7 w-7 border border-border rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
+					title="Execute"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+				</button>
+				<!-- Tasks -->
+				<button
+					onclick={() => { taskHistoryOpen = true; taskHistoryTab = 'tasks'; }}
+					class="flex items-center justify-center h-7 w-7 border border-border rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
+					title="Tasks"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><polyline points="3 6 4 7 6 5"/><polyline points="3 12 4 13 6 11"/><polyline points="3 18 4 19 6 17"/></svg>
+				</button>
+				<!-- Merge (+ 대기 건수 뱃지) -->
+				<button
+					onclick={() => { taskHistoryOpen = true; taskHistoryTab = 'merge'; }}
+					class="relative flex items-center justify-center h-7 w-7 border border-border rounded-md hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
+					title="Merge"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>
+					{#if mergeQueuedCount > 0}
+						<span class="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[8px] font-bold rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5">{mergeQueuedCount}</span>
+					{/if}
+				</button>
+			</div>
+
 			<!-- 모바일: 좌측 패널 오버레이 -->
 			{#if taskHistoryOpen}
 				<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -490,34 +554,58 @@
 			{/if}
 
 			<!-- 2컬럼 레이아웃: 좌측 패널 + 우측 Runner 영역 -->
-			<div class="flex-1 min-h-0 flex gap-0 overflow-hidden">
+			<div class="flex-1 min-h-0 flex gap-2 p-2 sm:p-3 overflow-hidden">
 
 				<!-- 좌측 패널: Plans/Tasks/Merge/설정 (모바일=오버레이, 데스크톱=고정) -->
 				<div class="
 					{taskHistoryOpen ? 'flex' : 'hidden'} sm:flex
-					flex-col border-r overflow-hidden
+					flex-col overflow-hidden
 					w-[300px] sm:w-[340px] shrink-0
 					fixed sm:static inset-y-0 left-0 z-50 sm:z-auto
-					bg-white
+					bg-card rounded-md border border-border
 				">
 					<!-- 탭 바 -->
-					<div class="px-4 pt-2 pb-2 shrink-0 border-b flex items-center gap-2">
-						<TabNav
-							tabs={[
-								{ id: 'plans', label: 'Plans' },
-								{ id: 'tasks', label: 'Tasks' },
-								{ id: 'workflows', label: '이력' },
-								{ id: 'merge', label: 'Merge' },
-								{ id: 'settings', label: '설정' },
-							]}
-							bind:activeTab={taskHistoryTab}
-							variant="primary"
-							size="compact"
-						/>
+					<div class="flex items-center border-b border-border shrink-0">
+						<button
+							onclick={() => { taskHistoryTab = 'plans'; }}
+							class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-mono transition-colors border-b-2 {taskHistoryTab === 'plans' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+							Plans
+						</button>
+						<button
+							onclick={() => { taskHistoryTab = 'tasks'; }}
+							class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-mono transition-colors border-b-2 {taskHistoryTab === 'tasks' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><polyline points="3 6 4 7 6 5"/><polyline points="3 12 4 13 6 11"/><polyline points="3 18 4 19 6 17"/></svg>
+							Tasks
+						</button>
+						<button
+							onclick={() => { taskHistoryTab = 'workflows'; }}
+							class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-mono transition-colors border-b-2 {taskHistoryTab === 'workflows' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+							이력
+						</button>
+						<button
+							onclick={() => { taskHistoryTab = 'merge'; }}
+							class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-mono transition-colors border-b-2 {taskHistoryTab === 'merge' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg>
+							Merge
+							{#if mergeQueuedCount > 0}<span class="bg-primary text-primary-foreground text-[8px] font-bold rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5">{mergeQueuedCount}</span>{/if}
+						</button>
+						<button
+							onclick={() => { taskHistoryTab = 'settings'; }}
+							class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs font-mono transition-colors border-b-2 {taskHistoryTab === 'settings' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M4.93 4.93a10 10 0 0 0 0 14.14"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="M2 12h2"/><path d="M20 12h2"/></svg>
+							설정
+						</button>
 						<!-- 모바일 닫기 버튼 -->
 						<button
 							onclick={() => { taskHistoryOpen = false; }}
-							class="sm:hidden ml-auto text-gray-400 hover:text-gray-600 text-lg leading-none"
+							class="sm:hidden ml-auto text-gray-400 hover:text-gray-600 text-lg leading-none px-2 shrink-0"
 						>×</button>
 					</div>
 					<!-- 탭 콘텐츠 -->
@@ -552,18 +640,10 @@
 				</div>
 
 				<!-- 우측 영역: Runner 탭 바 + Runner/Logs/Merge 콘텐츠 -->
-				<div class="flex-1 min-h-0 flex flex-col overflow-hidden">
+				<div class="flex-1 min-h-0 flex flex-col overflow-hidden bg-card rounded-md border border-border">
 					<!-- Runner 탭 바 -->
-					<div class="flex items-center gap-1 border-b px-2 py-1 overflow-x-auto shrink-0">
-						<!-- 모바일: 좌측 패널 토글 버튼 -->
-						<button
-							onclick={() => { taskHistoryOpen = !taskHistoryOpen; }}
-							class="sm:hidden flex items-center justify-center w-7 h-7 rounded hover:bg-gray-100 text-gray-500 shrink-0 mr-1"
-							title="패널 열기"
-						>
-							<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-						</button>
-						{#each runnerTabs as tab (tab.id)}
+					<div class="flex items-center gap-1 border-b border-border px-2 py-1 overflow-x-auto shrink-0">
+	{#each runnerTabs as tab (tab.id)}
 							<!-- svelte-ignore a11y_interactive_supports_focus -->
 							<div
 								class="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono whitespace-nowrap transition-colors cursor-pointer {activeTabId === tab.id ? 'bg-primary/20 text-primary border border-primary/30' : 'text-gray-600 hover:bg-gray-100'}"
@@ -622,7 +702,7 @@
 						{:else if activeTabId === '__merge__'}
 							<MergeQueuePanel />
 						{:else if runnerTabs.length === 0}
-							<div class="flex items-center justify-center h-full text-sm text-gray-400">
+							<div class="flex items-center justify-center h-full text-muted-foreground font-mono text-xs">
 								실행 버튼을 눌러 plan-runner를 시작하세요
 							</div>
 						{:else}

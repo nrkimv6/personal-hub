@@ -828,6 +828,11 @@ input[type="checkbox"] {
     --dr-status-stopped: 220 14% 60%;  /* gray */
     --dr-status-crashed: 0 72% 51%;    /* red */
     --dr-status-done: 221 83% 53%;     /* blue */
+
+    /* 글로벌 상태 색상 (pulse-dot 등에서 사용) */
+    --status-running: 142 71% 45%;   /* green */
+    --status-queued: 38 92% 50%;     /* orange/amber */
+    --status-failed: 0 72% 51%;      /* red */
   }
 }
 
@@ -880,7 +885,60 @@ input[type="checkbox"] {
   50% { opacity: 0.6; transform: scale(0.85); }
 }
 
+/* 글로벌 pulse-dot 클래스 */
+.pulse-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  animation: dr-pulse-glow 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+/* 상태 색상 bg 유틸리티 */
+.bg-status-running { background-color: hsl(var(--status-running)); }
+.bg-status-queued  { background-color: hsl(var(--status-queued)); }
+.bg-status-failed  { background-color: hsl(var(--status-failed)); }
+
+/* phase-separator: 로그 Phase 구분선 */
+.phase-separator {
+  position: relative;
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+
+.phase-separator::before,
+.phase-separator::after {
+  content: '';
+  flex: 1 1 0%;
+  height: 1px;
+  background-color: hsl(var(--border));
+}
+
 /* 씬 스크롤바 */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--border));
+  border-radius: 3px;
+}
+
 .dr-scrollbar-thin {
   scrollbar-width: thin;
   scrollbar-color: hsl(var(--border)) transparent;

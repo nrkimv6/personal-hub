@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.79.0] - 2026-03-06
+### Added
+- RunStatusBar 좌측 영역 리디자인: Zap SVG 아이콘 + `{N} runner(s)` 카운트 + elapsed 표시
+- SSE 연결 상태 dot에 `pulse-dot` 클래스 적용 (`bg-status-running` / `bg-status-failed`)
+- runner 상태 dot에 `pulse-dot bg-status-running` 적용
+- `app.css`: `.pulse-dot`, `.bg-status-running`, `.bg-status-queued`, `.bg-status-failed` 유틸리티 추가
+- "실행 중"/"대기"/"비정상 종료" 한글 텍스트 제거, runner count 숫자 표기로 대체
+
 ## [2.75.0] - 2026-02-28
 ### Added
 - dev-runner 최대 동시 실행 수 설정 UI 구현

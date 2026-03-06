@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { devRunnerLogApi } from '$lib/api';
 
@@ -414,7 +414,7 @@
 
 <div class="flex flex-col h-full min-h-0">
 	<!-- Toolbar -->
-	<div class="flex items-center justify-between px-3 py-2 border-b border-gray-700 shrink-0 bg-gray-900">
+	<div class="flex items-center justify-between px-3 py-2 border-b border-border shrink-0 bg-gray-900">
 		<div class="flex items-center gap-2">
 			<span class="text-xs font-medium uppercase tracking-wider text-gray-300">Live Logs</span>
 			<div class="flex items-center gap-1">
@@ -435,15 +435,16 @@
 		<div class="flex items-center gap-1">
 			{#if connected !== 'connected' || !redisAvailable}
 				<button
-					class="h-6 px-2 text-[10px] text-gray-500 hover:bg-gray-700 rounded transition-colors inline-flex items-center gap-1"
+					class="h-6 w-6 rounded transition-colors inline-flex items-center justify-center hover:bg-gray-700"
+					title="재연결"
 					onclick={manualReconnect}
 				>
-					<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v6h6"/><path d="M3 13a9 9 0 1 0 3-7.7L3 8"/></svg>
-					재연결
+					<svg class="h-3 w-3 text-status-failed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.56 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
 				</button>
 			{/if}
 			<button
-				class="h-6 px-2 text-[10px] rounded transition-colors inline-flex items-center gap-1 {autoScroll ? 'text-blue-400' : 'text-gray-400'} hover:bg-gray-700"
+				class="relative h-6 w-6 rounded transition-colors inline-flex items-center justify-center {autoScroll ? 'text-primary' : 'text-muted-foreground'} hover:bg-gray-700"
+				title={autoScroll ? 'Pin (auto-scroll on)' : 'Unpin (auto-scroll off)'}
 				onclick={() => {
 					if (autoScroll) {
 						autoScroll = false;
@@ -455,13 +456,13 @@
 				}}
 			>
 				{#if autoScroll}
-					<svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-					Pause
+					<!-- Pin icon -->
+					<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
 				{:else}
-					<svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-					Resume
+					<!-- PinOff icon -->
+					<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="2" x2="22" y2="22"/><line x1="12" y1="17" x2="12" y2="22"/><path d="M9 9v1.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h12"/><path d="M15 9.34V6h1a2 2 0 0 0 0-4H7.89"/></svg>
 					{#if pauseBuffer.length > 0}
-						<span class="ml-0.5 text-[9px] bg-yellow-500/30 text-yellow-300 px-1 rounded-full leading-none py-0.5">
+						<span class="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] font-bold rounded-full min-w-[14px] h-[14px] flex items-center justify-center px-0.5 leading-none">
 							{pauseBuffer.length}
 						</span>
 					{/if}
@@ -506,19 +507,16 @@
 						<span class="text-gray-500 text-[10px]">{extractSeparatorText(line.raw)}</span><!-- separator -->
 					</div>
 				{:else if line.tag === 'CYCLE'}
-					<div class="py-1.5 -mx-3 px-3 mt-2 bg-gray-700/60 border-l-2 border-gray-400">
-						<span class="font-bold text-white text-xs tracking-wider">{line.message}</span>
+					{@const style = getTagStyle(line.tag)}
+					<div class="phase-separator {line.isStale ? 'opacity-30' : ''}">
+						<span class="dr-tag-badge {style.bg}">{line.tag}</span>
+						<span class="font-mono text-[10px] text-muted-foreground">{line.message}</span>
 					</div>
 				{:else if line.tag === 'PHASE'}
 					{@const style = getTagStyle(line.tag)}
-					<div class="dr-log-line dr-log-line-phase flex items-start gap-2 py-0.5 leading-5 mt-1.5 border-t border-indigo-900/40">
-						<span class="text-xs text-gray-400/60 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
-						<span class="shrink-0 w-[42px] text-right {style.text}">
-							<span class="dr-tag-badge {style.bg}">{line.tag}</span>
-						</span>
-						<span class="flex-1 min-w-0 break-all text-indigo-300 font-medium">
-							{line.message}
-						</span>
+					<div class="phase-separator {line.isStale ? 'opacity-30' : ''}">
+						<span class="dr-tag-badge {style.bg}">{line.tag}</span>
+						<span class="font-mono text-[10px] text-muted-foreground">{line.message}</span>
 					</div>
 				{:else if line.tag === 'TOOL'}
 					{@const style = getTagStyle(line.tag)}

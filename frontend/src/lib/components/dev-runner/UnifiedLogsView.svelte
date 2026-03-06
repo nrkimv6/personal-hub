@@ -100,14 +100,15 @@
 <div class="flex flex-col h-full overflow-hidden bg-gray-950 text-gray-200">
 	<!-- 헤더: 타이틀 + 새로고침 -->
 	<div class="flex items-center gap-2 px-3 py-2 border-b border-gray-800 shrink-0">
-		<span class="text-xs font-semibold text-gray-300 uppercase tracking-wider">📋 통합 실행 로그</span>
+		<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5 text-gray-400"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>
+		<span class="text-xs font-semibold text-gray-300 uppercase tracking-wider">통합 실행 로그</span>
 		<span class="text-[10px] text-gray-500 ml-1">최근 10개 실행</span>
 		<button
 			onclick={loadAll}
-			class="ml-auto text-[10px] text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 rounded border border-gray-700 hover:border-gray-500"
+			class="ml-auto h-6 w-6 flex items-center justify-center text-gray-500 hover:text-gray-300 transition-colors rounded hover:bg-gray-800"
 			title="새로고침"
 		>
-			↺ 새로고침
+			<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3 w-3"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
 		</button>
 	</div>
 
@@ -126,9 +127,7 @@
 				<!-- 세션 구분선 (최신 = idx 0은 정상 색상, 이전은 grayout) -->
 				<div class="sticky top-0 z-10 flex items-center gap-2 px-3 py-1.5 border-b {idx === 0 ? 'bg-gray-900 border-gray-700' : 'bg-gray-950 border-gray-800'}">
 					<!-- 상태 배지 -->
-					<span class="text-[10px] font-mono {idx === 0 ? 'text-blue-400' : 'text-gray-600'}">
-						{item.run.status === 'running' ? '⏳' : item.run.status === 'completed' ? '✅' : '❓'}
-					</span>
+					<span class="inline-block w-2 h-2 rounded-full flex-shrink-0 {item.run.status === 'running' ? 'bg-status-running pulse-dot' : item.run.status === 'completed' ? 'bg-muted-foreground' : 'bg-status-queued'}"></span>
 					<!-- plan 파일명 -->
 					<span class="text-[11px] font-mono font-semibold {idx === 0 ? 'text-gray-200' : 'text-gray-500'}">
 						{item.run.plan_file ? item.run.plan_file.split(/[\\/]/).pop() : '전체 실행'}
