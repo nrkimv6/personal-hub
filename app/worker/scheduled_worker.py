@@ -118,6 +118,9 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
         # 스케줄 기반 실행 디스패치
         await self._dispatch_scheduled_runs()
 
+        # 03:30 안전망: plan_requirements_sync 미생성 category 일괄 처리
+        self._check_requirements_sync_schedule()
+
     def _cleanup_stale_requests(self):
         """오래된 running 상태 실행 정리."""
         db = SessionLocal()
@@ -1755,4 +1758,63 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                 pass
         finally:
             self._update_worker_state("idle")
+            db.close()
+
+    def _check_requirements_sync_schedule(self) -> None:
+        """03:30 ± 5분 안전망: 오늘 미실행인 경우 미생성 category 일괄 처리.
+
+        TaskSchedule DB 설정과 무관하게, 매일 03:30 ± 5분 창에서 한 번만
+        _process_unqueued_requirements_sync()를 실행한다.
+        """
+        now = datetime.now()
+        target_hour = 3
+        target_minute = 30
+        window_minutes = 5
+
+        # 03:25 ~ 03:35 범위 내인지 확인
+        total_now = now.hour * 60 + now.minute
+        total_target = target_hour * 60 + target_minute
+        if abs(total_now - total_target) > window_minutes:
+            return
+
+        # 오늘 이미 실행했는지 확인
+        today_key = f"_requirements_sync_ran_{now.date()}"
+        if getattr(self, today_key, False):
+            return
+
+        logger.info(f"[{self.name}] 03:30 안전망 requirements_sync 실행 ({now.strftime('%H:%M')})")
+        setattr(self, today_key, True)
+        self._process_unqueued_requirements_sync()
+
+    def _process_unqueued_requirements_sync(self) -> None:
+        """모든 category에 대해 _maybe_queue_requirements_sync() 호출.
+
+        DB에서 처리 완료된 category 목록을 조회하고, 조건 미충족 category는
+        _maybe_queue_requirements_sync 내부에서 자동 스킵된다.
+        """
+        from app.modules.claude_worker.services.plan_analyze_handler import _maybe_queue_requirements_sync
+        from app.models.plan_record import PlanRecord
+
+        db = SessionLocal()
+        try:
+            categories = [
+                row[0]
+                for row in db.query(PlanRecord.category).filter(
+                    PlanRecord.category.isnot(None),
+                    PlanRecord.llm_processed_at.isnot(None),
+                ).distinct().all()
+            ]
+
+            queued = 0
+            for category in categories:
+                if _maybe_queue_requirements_sync(db, category):
+                    queued += 1
+
+            logger.info(
+                f"[{self.name}] _process_unqueued_requirements_sync 완료: "
+                f"{len(categories)}개 category 확인, {queued}개 큐 등록"
+            )
+        except Exception as e:
+            logger.error(f"[{self.name}] _process_unqueued_requirements_sync 오류: {e}", exc_info=True)
+        finally:
             db.close()
