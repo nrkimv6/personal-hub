@@ -210,7 +210,7 @@
 						? 'bg-yellow-50 text-yellow-600'
 						: ''}"
 				>
-					{result.is_bookmarked ? '★ 북마크됨' : '☆ 북마크'}
+					{result.is_bookmarked ? '북마크됨' : '북마크'}
 				</button>
 				<button
 					onclick={onReadToggle}
@@ -218,7 +218,7 @@
 						? 'bg-green-50 text-green-600'
 						: ''}"
 				>
-					{result.is_read ? '✓ 읽음' : '○ 읽음 표시'}
+					{result.is_read ? '읽음' : '읽음 표시'}
 				</button>
 			</div>
 		</div>

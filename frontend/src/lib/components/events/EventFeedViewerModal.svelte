@@ -414,7 +414,7 @@
 								? 'bg-warning-light text-warning-foreground'
 								: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 						>
-							{getBookmarked() ? '★ 북마크됨' : '☆ 북마크'}
+							{getBookmarked() ? '북마크됨' : '북마크'}
 						</button>
 						{#if type === 'event' && onParticipateToggle}
 							<button
@@ -423,7 +423,7 @@
 									? 'bg-success-light text-success'
 									: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 							>
-								{isParticipated ? '✓ 참여완료' : '참여체크'}
+								{isParticipated ? '참여완료' : '참여체크'}
 							</button>
 						{:else if type === 'popup' && onVisitToggle}
 							<button
@@ -432,7 +432,7 @@
 									? 'bg-success-light text-success'
 									: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 							>
-								{getVisited() ? '✓ 방문완료' : '방문하기'}
+								{getVisited() ? '방문완료' : '방문하기'}
 							</button>
 						{/if}
 					</div>
@@ -445,7 +445,7 @@
 								? 'bg-success-light text-success hover:bg-green-200'
 								: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 						>
-							{event.is_offline ? '📍 오프라인 이벤트' : '🌐 온라인 이벤트'} (클릭하여 변경)
+							{event.is_offline ? '오프라인 이벤트' : '온라인 이벤트'} (클릭하여 변경)
 						</button>
 					{/if}
 
@@ -765,7 +765,7 @@
 									? 'bg-warning-light text-warning-foreground'
 									: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 							>
-								{getBookmarked() ? '★ 북마크됨' : '☆ 북마크'}
+								{getBookmarked() ? '북마크됨' : '북마크'}
 							</button>
 							{#if type === 'event' && onParticipateToggle}
 								<button
@@ -774,7 +774,7 @@
 										? 'bg-success-light text-success'
 										: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 								>
-									{isParticipated ? '✓ 참여완료' : '참여체크'}
+									{isParticipated ? '참여완료' : '참여체크'}
 								</button>
 							{:else if type === 'popup' && onVisitToggle}
 								<button
@@ -783,7 +783,7 @@
 										? 'bg-success-light text-success'
 										: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 								>
-									{getVisited() ? '✓ 방문완료' : '방문하기'}
+									{getVisited() ? '방문완료' : '방문하기'}
 								</button>
 							{/if}
 						</div>
@@ -796,7 +796,7 @@
 									? 'bg-success-light text-success hover:bg-green-200'
 									: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 							>
-								{event.is_offline ? '📍 오프라인 이벤트' : '🌐 온라인 이벤트'} (클릭하여 변경)
+								{event.is_offline ? '오프라인 이벤트' : '온라인 이벤트'} (클릭하여 변경)
 							</button>
 						{/if}
 

@@ -145,7 +145,6 @@
               onclick={() => selectItem(item.id)}
               onmouseenter={() => (focusedIndex = flatIdx)}
             >
-              <span class="item-icon">{item.icon}</span>
               <span class="item-label">{item.label}</span>
             </li>
           {/each}
@@ -209,7 +208,6 @@
             onclick={() => selectItem(item.id)}
             onmouseenter={() => (focusedIndex = flatIdx)}
           >
-            <span class="item-icon">{item.icon}</span>
             <span class="item-label">{item.label}</span>
           </li>
         {/each}

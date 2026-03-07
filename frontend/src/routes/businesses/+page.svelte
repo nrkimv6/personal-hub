@@ -424,14 +424,14 @@
                           onclick={(e) => { e.stopPropagation(); editBusiness = {...business}; showEditBusinessModal = true; }}
                           title="수정"
                         >
-                          ✏
+                          수정
                         </Button>
                         <button
                           class="btn btn-danger btn-xs"
                           onclick={(e) => { e.stopPropagation(); handleDeleteBusiness(business) }}
                           title="삭제"
                         >
-                          🗑
+                          삭제
                         </button>
                       </div>
                     </td>
@@ -510,20 +510,20 @@
                             showSlotCheckModal = true; }}}
                           title="슬롯 조회"
                         >
-                          🔍
+                          조회
                         </Button>
                         <Button variant="secondary" size="xs"
                           onclick={(e) => { e.stopPropagation(); { editItem = {...item }}; showEditItemModal = true; }}
                           title="수정"
                         >
-                          ✏
+                          수정
                         </Button>
                         <button
                           class="btn btn-danger btn-xs"
                           onclick={(e) => { e.stopPropagation(); handleDeleteItem(item) }}
                           title="삭제"
                         >
-                          🗑
+                          삭제
                         </button>
                       </div>
                     </td>
@@ -573,7 +573,7 @@
                       <div class="text-xs text-muted-foreground">{schedule.times.join(', ')}</div>
                     {/if}
                     {#if schedule.account_name}
-                      <Badge variant="info" class="text-xs">👤 {schedule.account_name}</Badge>
+                      <Badge variant="info" class="text-xs">{schedule.account_name}</Badge>
                     {/if}
                   </div>
                 </div>
@@ -587,7 +587,7 @@
                     onclick={() => handleDeleteSchedule(schedule)}
                     title="삭제"
                   >
-                    ✕
+                    ×
                   </button>
                 </div>
               </div>

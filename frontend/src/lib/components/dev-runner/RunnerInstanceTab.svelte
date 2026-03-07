@@ -153,7 +153,7 @@
 		isAllPlans(planFile) ? '전체 실행' : planFile!.split(/[\\/]/).pop() ?? planFile!
 	);
 
-	let statusIcon = $derived(running ? '⏳' : '✅');
+	let statusIcon = $derived(running ? '실행중' : '완료');
 </script>
 
 <div class="flex flex-col h-full">
@@ -289,7 +289,7 @@
 
 	{#if orphan}
 		<div class="flex items-center gap-2 px-3 py-2 bg-orange-50 border-b border-orange-200 text-xs">
-			<span class="text-orange-700 font-medium">⚠ 프로세스 종료 후 워크플로우가 정리되지 않았습니다.</span>
+			<span class="text-orange-700 font-medium">프로세스 종료 후 워크플로우가 정리되지 않았습니다.</span>
 			<button class="px-2 py-0.5 rounded border border-orange-300 text-orange-700 hover:bg-orange-100 transition-colors" onclick={handleOrphanReset}>리셋</button>
 		</div>
 	{/if}

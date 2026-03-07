@@ -22,12 +22,8 @@
 	let linkedMenuLabel = $state<string | null>(null);
 
 	// 메뉴 아이콘 조회
-	function getMenuIcon(menuId: string | null): string {
-		if (!menuId) return '';
-		const item = navEntries
-			.filter((e): e is NavSingleItem => !isNavGroup(e))
-			.find((e) => e.id === menuId);
-		return item?.icon ?? '';
+	function getMenuIcon(_menuId: string | null): string {
+		return '';
 	}
 
 	// store 변경 시 로컬 상태 동기화
@@ -151,10 +147,10 @@
 		<!-- 헤더 -->
 		<div class="flex items-center justify-between px-4 py-3 border-b border-border">
 			<div class="flex items-center gap-2">
-				<span class="font-semibold text-foreground text-sm">⚡ 빠른 메모</span>
+				<span class="font-semibold text-foreground text-sm">빠른 메모</span>
 				{#if linkedMenuId}
 					<span class="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full flex items-center gap-1">
-						🔗 {getMenuIcon(linkedMenuId)}{linkedMenuLabel}
+						{getMenuIcon(linkedMenuId)}{linkedMenuLabel}
 					</span>
 				{/if}
 			</div>
@@ -162,7 +158,7 @@
 				onclick={closeQuickMemo}
 				class="text-muted-foreground hover:text-foreground w-6 h-6 flex items-center justify-center rounded"
 				aria-label="닫기"
-			>✕</button>
+			>×</button>
 		</div>
 
 		<!-- 본문 -->

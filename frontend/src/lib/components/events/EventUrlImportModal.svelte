@@ -398,9 +398,9 @@
 						{#if crawlResult}
 							<div class="p-4 bg-background border border-border rounded-lg space-y-2">
 								<div class="flex items-center gap-4 text-sm">
-									<span class="text-success font-medium">✓ 등록: {crawlResult.created}개</span>
+									<span class="text-success font-medium">등록: {crawlResult.created}개</span>
 									{#if crawlResult.skipped > 0}
-										<span class="text-warning-foreground">⚠ 스킵: {crawlResult.skipped}개</span>
+										<span class="text-warning-foreground">스킵: {crawlResult.skipped}개</span>
 									{/if}
 								</div>
 								{#if crawlResult.errors.length > 0}

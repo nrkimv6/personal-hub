@@ -425,7 +425,7 @@
 	async function discardAll(groupId: number) {
 		const detail = groupDetails[groupId];
 		const count = detail?.members?.length ?? '?';
-		if (!confirm(`이 그룹의 모든 이미지(${count}개)를 휴지통으로 이동하시겠습니까?\n\n⚠️ 보관하는 파일 없이 전부 삭제됩니다.`)) return;
+		if (!confirm(`이 그룹의 모든 이미지(${count}개)를 휴지통으로 이동하시겠습니까?\n\n보관하는 파일 없이 전부 삭제됩니다.`)) return;
 
 		try {
 			const res = await fetchWithTimeout(`/api/ic/duplicates/${groupId}/discard-all`, { method: 'POST' });

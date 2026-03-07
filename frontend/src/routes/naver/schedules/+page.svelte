@@ -1656,7 +1656,7 @@
           </div>
           {#if recurringUrlParsed && recurringParsedInfo.business_name}
             <div class="mt-2 p-2 bg-success-light border border-green-200 rounded text-sm text-success">
-              ✓ {recurringParsedInfo.business_name} - {recurringParsedInfo.item_name}
+              {recurringParsedInfo.business_name} - {recurringParsedInfo.item_name}
             </div>
           {/if}
         </div>

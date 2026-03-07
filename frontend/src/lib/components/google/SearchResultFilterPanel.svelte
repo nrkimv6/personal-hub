@@ -67,7 +67,7 @@
 					: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 				onclick={() => onTabChange(tab.value)}
 			>
-				{tab.icon} {tab.label}
+				{tab.label}
 			</button>
 		{/each}
 	</div>

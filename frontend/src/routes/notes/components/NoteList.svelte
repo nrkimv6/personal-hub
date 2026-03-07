@@ -348,12 +348,12 @@
           {#if group.category}
             <optgroup label={group.category}>
               {#each group.items as item}
-                <option value={item.id}>{item.icon} {item.label}</option>
+                <option value={item.id}>{item.label}</option>
               {/each}
             </optgroup>
           {:else}
             {#each group.items as item}
-              <option value={item.id}>{item.icon} {item.label}</option>
+              <option value={item.id}>{item.label}</option>
             {/each}
           {/if}
         {/each}

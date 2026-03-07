@@ -234,7 +234,6 @@
 							onclick={() => applyQuickFilter(preset)}
 							class="px-3 py-1.5 text-sm rounded-full bg-gradient-to-r from-gray-100 to-gray-50 text-foreground hover:from-blue-100 hover:to-blue-50 hover:text-primary-hover transition-colors flex items-center gap-1"
 						>
-							<span>{preset.icon}</span>
 							<span>{preset.label}</span>
 						</button>
 					{/each}
@@ -309,7 +308,6 @@
 							? 'bg-primary-light text-primary ring-2 ring-offset-1 ring-blue-400'
 							: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 					>
-						<span>{opt.icon}</span>
 						<span>{opt.label}</span>
 						{#if isActive}
 							<span class="text-xs">{sortOrder === 'asc' ? '↑' : '↓'}</span>
@@ -455,7 +453,6 @@
 						class="px-3 py-1.5 text-sm rounded-full bg-gradient-to-r from-gray-100 to-gray-50 text-foreground hover:from-blue-100 hover:to-blue-50 hover:text-primary-hover transition-colors flex items-center gap-1 whitespace-nowrap"
 						title={preset.label}
 					>
-						<span>{preset.icon}</span>
 						<span class="hidden lg:inline">{preset.label}</span>
 					</button>
 				{/each}
@@ -505,7 +502,6 @@
 					? 'bg-primary-light text-primary ring-1 ring-blue-400'
 					: 'bg-muted text-muted-foreground hover:bg-secondary'}"
 			>
-				<span>{opt.icon}</span>
 				<span>{opt.label}</span>
 				{#if isActive}
 					<span>{sortOrder === 'asc' ? '↑' : '↓'}</span>

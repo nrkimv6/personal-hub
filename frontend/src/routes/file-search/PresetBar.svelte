@@ -20,7 +20,6 @@
 				? 'border-primary bg-primary text-primary-foreground shadow-sm'
 				: 'border-border bg-background text-muted-foreground hover:border-primary/50 hover:text-foreground'}"
 		>
-			<span>{preset.icon}</span>
 			<span>{preset.name}</span>
 		</button>
 	{/each}

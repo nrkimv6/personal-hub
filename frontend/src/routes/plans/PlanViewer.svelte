@@ -49,7 +49,7 @@
 	</div>
 {:else if error}
 	<div class="text-red-500 text-sm py-4 px-2">
-		⚠️ {error}
+		{error}
 	</div>
 {:else}
 	<div class="prose prose-sm overflow-auto max-h-[60vh] px-1">{@html html}</div>

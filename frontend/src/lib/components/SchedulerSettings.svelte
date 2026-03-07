@@ -105,7 +105,7 @@
 
 	function getResultIcon(result: number | null): string {
 		if (result === null) return '';
-		return result === 0 ? '✅' : '❌';
+		return result === 0 ? 'OK' : 'NG';
 	}
 
 	onMount(fetchData);

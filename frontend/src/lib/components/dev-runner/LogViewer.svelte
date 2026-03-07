@@ -362,7 +362,7 @@
 		try {
 			const diag = await devRunnerLogApi.diagnostics();
 			for (const s of diag.steps) {
-				const icon = s.ok ? '✓' : '✗';
+				const icon = s.ok ? 'OK' : 'NG';
 				addLine(`[DIAG] ${s.step}. ${s.name} ... ${icon} ${s.detail}`, false);
 			}
 		} catch {
@@ -473,7 +473,7 @@
 
 	{#if completedBanner}
 		<div class="px-3 py-1.5 bg-green-900/40 border-b border-green-700/50 text-xs text-green-300 shrink-0 flex items-center gap-2">
-			<span>✅ 실행 완료 — 로그 파일에서 계속 볼 수 있습니다</span>
+			<span>실행 완료 — 로그 파일에서 계속 볼 수 있습니다</span>
 		</div>
 	{/if}
 
