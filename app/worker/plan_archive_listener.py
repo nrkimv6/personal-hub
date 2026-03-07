@@ -222,7 +222,8 @@ class PlanArchiveListener(BaseWorker):
         try:
             content = Path(filename).read_text(encoding="utf-8")
         except Exception:
-            content = f"(파일 읽기 실패: {filename})"
+            content = ""
+            logger.warning(f"plan 파일 읽기 실패: {filename}")
 
         return (
             f"다음 plan 문서를 분석하여 JSON으로 응답하세요.\n"
