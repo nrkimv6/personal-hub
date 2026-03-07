@@ -1326,13 +1326,15 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
             existing_branch, existing_wt_rel = _parse_plan_worktree_info(plan_file)
             if existing_branch and existing_wt_rel:
                 existing_wt_path = PROJECT_ROOT / existing_wt_rel
-                if existing_wt_path.is_dir():
+                if existing_wt_path.is_dir() and WorktreeManager.validate(existing_wt_path):
                     worktree_path = existing_wt_path
                     branch = existing_branch
                     _reused_worktree = True
                     logger.info(f"기존 워크트리 재사용: {worktree_path} (branch: {branch})")
                 else:
-                    # 경로 없음 → plan 헤더에서 필드 제거 후 신규 생성
+                    # 경로 없음 또는 worktree 검증 실패 → plan 헤더에서 필드 제거 후 신규 생성
+                    if existing_wt_path.is_dir():
+                        logger.warning(f"워크트리 검증 실패, 신규 생성: {existing_wt_rel}")
                     _remove_plan_header_fields(plan_file)
                     logger.info(f"워크트리 경로 없음, 신규 생성: {existing_wt_rel}")
         if not _reused_worktree:
