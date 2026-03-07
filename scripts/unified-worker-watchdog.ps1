@@ -52,23 +52,13 @@ $lastRestartTime = Get-Date
 # Watchdog 로그 파일 (스크립트 시작 시 1회 결정)
 $script:watchdogLogFile = Join-Path $LogDir "unified_watchdog_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 
-function Write-Log {
-    param([string]$Message, [string]$Level = "INFO")
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logMessage = "[$timestamp] [$Level] $Message"
-    Write-Host $logMessage -ForegroundColor $(
-        switch ($Level) {
-            "ERROR" { "Red" }
-            "WARN"  { "Yellow" }
-            "INFO"  { "Cyan" }
-            default { "White" }
-        }
-    )
-    # Also log to file
-    Add-Content -Path $script:watchdogLogFile -Value $logMessage -Encoding UTF8
-}
+# 공통 유틸리티 함수 로드 (Write-Log, Get-DuplicateProcesses, Remove-DuplicateProcesses, Stop-ExistingProcessesByCmdline)
+. (Join-Path $ScriptDir "watchdog-utils.ps1")
 
 function Start-UnifiedWorker {
+    # 재시작 직전: cmdline 패턴으로 기존 프로세스 정리 (watchdog-utils.ps1 공통 함수 사용)
+    Stop-ExistingProcessesByCmdline -Label "unified worker" -CmdlinePattern 'app\.worker\.main'
+
     $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $stdoutLogFile = Join-Path $LogDir "stdout_unified_worker_$Timestamp.log"
     $stderrLogFile = Join-Path $LogDir "stderr_unified_worker_$Timestamp.log"
@@ -211,6 +201,9 @@ try {
             Start-UnifiedWorker
             $restartCount++
             $lastRestartTime = Get-Date
+        } else {
+            # 프로세스가 살아있는 경우에도 중복 감지 및 정리
+            Remove-DuplicateProcesses -Label "worker" -CmdlinePattern 'app\.worker\.main' -PidFile $WorkerPidFile
         }
     }
 }

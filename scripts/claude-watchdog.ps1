@@ -38,22 +38,13 @@ $lastRestartTime = Get-Date
 
 $script:watchdogLogFile = Join-Path $LogDir "claude_watchdog_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 
-function Write-Log {
-    param([string]$Message, [string]$Level = "INFO")
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logMessage = "[$timestamp] [$Level] $Message"
-    Write-Host $logMessage -ForegroundColor $(
-        switch ($Level) {
-            "ERROR" { "Red" }
-            "WARN"  { "Yellow" }
-            "INFO"  { "Cyan" }
-            default { "White" }
-        }
-    )
-    Add-Content -Path $script:watchdogLogFile -Value $logMessage -Encoding UTF8
-}
+# 공통 유틸리티 함수 로드 (Write-Log, Get-DuplicateProcesses, Remove-DuplicateProcesses, Stop-ExistingProcessesByCmdline)
+. (Join-Path $ScriptDir "watchdog-utils.ps1")
 
 function Start-ClaudeWorker {
+    # 재시작 직전: cmdline 패턴으로 기존 프로세스 정리 (watchdog-utils.ps1 공통 함수 사용)
+    Stop-ExistingProcessesByCmdline -Label "claude worker" -CmdlinePattern 'claude_worker\.worker\.worker'
+
     $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $stderrLogFile = Join-Path $LogDir "stderr_llm_worker_$Timestamp.log"
 
@@ -157,6 +148,9 @@ try {
             Start-ClaudeWorker
             $restartCount++
             $lastRestartTime = Get-Date
+        } else {
+            # 프로세스가 살아있는 경우에도 중복 감지 및 정리
+            Remove-DuplicateProcesses -Label "claude worker" -CmdlinePattern 'claude_worker\.worker\.worker' -PidFile $WorkerPidFile
         }
     }
 }
