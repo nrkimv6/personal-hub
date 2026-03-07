@@ -988,7 +988,7 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
                 pass
             _pub(f"merge 충돌 (exit_code={exit_code}) — conflict resolver 자동 실행")
             # conflict resolver 자동 실행 (needs_remerge=True: post-merge가 abort했으므로 재머지 필요)
-            engine = _get_runner_engine(runner_id, redis_client)
+            engine = _get_fix_engine(redis_client, runner_id)
             worktree_path_str = ""
             try:
                 worktree_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path") or ""
@@ -1019,7 +1019,7 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
             except Exception:
                 pass
             _pub(f"merge 실패 (exit_code={exit_code}) — general resolver 실행")
-            engine = _get_runner_engine(runner_id, redis_client)
+            engine = _get_fix_engine(redis_client, runner_id)
             _general_result = _launch_general_merge_resolver_process(
                 runner_id=runner_id,
                 branch=branch_str or "",
