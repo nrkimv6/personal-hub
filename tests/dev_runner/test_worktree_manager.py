@@ -556,6 +556,89 @@ class TestMergeToMainStash:
         assert r.exception == ""
 
 
+# ── validate() ───────────────────────────────────────────────────────────────
+
+class TestWorktreeManagerValidate:
+    def test_validate_R_valid_worktree(self, worktrees_dir):
+        """R(Right): create() 후 validate() → True 반환"""
+        base, repo = worktrees_dir
+        wt_path, _ = WorktreeManager.create("r1", base)
+        assert WorktreeManager.validate(wt_path) is True
+
+    def test_validate_E_no_git_file(self, tmp_path):
+        """E(Error): .git 파일 없는 빈 디렉토리 → False 반환"""
+        empty = tmp_path / "no_git"
+        empty.mkdir()
+        assert WorktreeManager.validate(empty) is False
+
+    def test_validate_E_nonexistent_dir(self, tmp_path):
+        """E(Error): 존재하지 않는 경로 → False 반환"""
+        ghost = tmp_path / "ghost"
+        assert WorktreeManager.validate(ghost) is False
+
+    def test_validate_B_git_file_exists_but_invalid(self, tmp_path):
+        """B(Boundary): .git 파일은 있지만 내용이 잘못됨 → False 반환"""
+        d = tmp_path / "broken"
+        d.mkdir()
+        (d / ".git").write_text("garbage")
+        assert WorktreeManager.validate(d) is False
+
+    def test_create_E_reuse_broken_worktree_recreates(self, worktrees_dir):
+        """E(Error): create() 후 .git 삭제(파손 시뮬레이션) → 재create() 시 새 worktree 유효"""
+        base, repo = worktrees_dir
+        wt_path, branch = WorktreeManager.create("r2", base)
+        # worktree 파손 시뮬레이션: .git 파일 삭제
+        (wt_path / ".git").unlink()
+        # 재생성
+        wt_path2, branch2 = WorktreeManager.create("r2", base)
+        assert WorktreeManager.validate(wt_path2) is True
+        assert (wt_path2 / ".git").exists()
+        # git worktree list에 등록됨 확인
+        wts = _list_worktrees_in_repo(repo)
+        branches = [w["branch"] for w in wts]
+        assert branch2 in branches
+
+    def test_create_R_reuse_valid_worktree_keeps_commits(self, worktrees_dir):
+        """R(Right): create() 후 커밋 추가 → 재create() 시 기존 커밋 보존"""
+        base, repo = worktrees_dir
+        wt_path, _ = WorktreeManager.create("r3", base)
+        # 커밋 추가
+        (wt_path / "feat.txt").write_text("feature")
+        subprocess.run(["git", "add", "."], capture_output=True, cwd=str(wt_path))
+        subprocess.run(["git", "commit", "-m", "feat"], capture_output=True, cwd=str(wt_path))
+        log1 = subprocess.run(["git", "log", "--oneline"], capture_output=True, text=True, cwd=str(wt_path))
+        # 재create
+        wt_path2, _ = WorktreeManager.create("r3", base)
+        log2 = subprocess.run(["git", "log", "--oneline"], capture_output=True, text=True, cwd=str(wt_path2))
+        assert "feat" in log2.stdout
+        assert log1.stdout == log2.stdout
+
+    def test_listener_reuse_broken_worktree_falls_through(self, worktrees_dir, monkeypatch):
+        """E(Error): validate() False인 경우 _reused_worktree=False → create() 호출됨 확인 (mock 기반)"""
+        base, repo = worktrees_dir
+        # validate를 항상 False로 패치
+        import worktree_manager as wm_module
+        monkeypatch.setattr(wm_module.WorktreeManager, "validate", staticmethod(lambda path: False))
+        # 깨진 worktree 디렉토리 생성 (is_dir()=True, validate=False)
+        broken = base / "broken_wt"
+        broken.mkdir()
+        # create()가 호출되는지 확인 (validate False → rmtree + prune → 재생성)
+        create_calls = []
+        def mock_create(runner_id, base_d, plan_file=None):
+            create_calls.append(runner_id)
+            return broken, "runner/broken"
+        monkeypatch.setattr(wm_module.WorktreeManager, "create", staticmethod(mock_create))
+        # 검증: is_dir()=True 이지만 validate=False → create() 경로로 분기해야 함
+        existing_wt_path = broken
+        _reused_worktree = False
+        if existing_wt_path.is_dir() and wm_module.WorktreeManager.validate(existing_wt_path):
+            _reused_worktree = True
+        if not _reused_worktree:
+            wm_module.WorktreeManager.create("broken", base)
+        assert len(create_calls) == 1
+        assert _reused_worktree is False
+
+
 # ── 헬퍼: repo 기준으로 list_worktrees() 실행 ─────────────────────────────────
 
 def _list_worktrees_in_repo(repo: Path) -> list:

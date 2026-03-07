@@ -3,6 +3,7 @@ WorktreeManager — git worktree 생명주기 관리 유틸리티
 
 각 plan-runner 인스턴스를 격리된 git worktree에서 실행하기 위한 헬퍼 클래스.
 """
+import shutil
 import subprocess
 import logging
 from pathlib import Path
@@ -53,6 +54,27 @@ class MergeResult:
 
 class WorktreeManager:
     @staticmethod
+    def validate(worktree_path: Path) -> bool:
+        """worktree가 실제로 유효한지 검증.
+
+        유효 조건:
+        1. 디렉토리 존재
+        2. .git 파일(worktree 링크) 존재
+        3. git rev-parse --git-dir 성공
+
+        깨진 worktree(디렉토리만 있고 .git 없음)는 False 반환.
+        """
+        if not worktree_path.is_dir():
+            return False
+        if not (worktree_path / ".git").exists():
+            return False
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-dir"],
+            capture_output=True, cwd=str(worktree_path)
+        )
+        return result.returncode == 0
+
+    @staticmethod
     def _apply_sparse_checkout(worktree_path: Path) -> None:
         """worktree에 sparse-checkout 적용: docs/plan/, docs/archive/ 제외"""
         # sparse-checkout 활성화 (이미 활성이어도 멱등)
@@ -94,9 +116,17 @@ class WorktreeManager:
                 if "already exists" in result.stderr:
                     # 워크트리 디렉토리가 실제로 존재하면 재사용 (커밋 보존)
                     if worktree_path.is_dir():
-                        logger.info(f"[WorktreeManager] 기존 worktree 재사용: {branch}")
-                        WorktreeManager._apply_sparse_checkout(worktree_path)
-                        return worktree_path, branch
+                        if WorktreeManager.validate(worktree_path):
+                            logger.info(f"[WorktreeManager] 기존 worktree 재사용: {branch}")
+                            WorktreeManager._apply_sparse_checkout(worktree_path)
+                            return worktree_path, branch
+                        # .git 없는 깨진 worktree → 정리 후 재생성
+                        logger.warning(f"[WorktreeManager] 깨진 worktree 정리 후 재생성: {branch} ({worktree_path})")
+                        shutil.rmtree(str(worktree_path))
+                        subprocess.run(
+                            ["git", "worktree", "prune"],
+                            capture_output=True, cwd=str(base_dir.parent),
+                        )
                     # 디렉토리 없음 + 브랜치만 남은 경우: 미머지 커밋 확인 후 분기
                     subprocess.run(
                         ["git", "worktree", "prune"],
@@ -132,6 +162,8 @@ class WorktreeManager:
                 else:
                     raise WorktreeError(f"git worktree add 실패: {result.stderr}")
             WorktreeManager._apply_sparse_checkout(worktree_path)
+            if not WorktreeManager.validate(worktree_path):
+                raise WorktreeError(f"worktree 생성 후 검증 실패 (.git 누락): {worktree_path}")
             logger.info(f"[WorktreeManager] 생성: {worktree_path} (브랜치: {branch})")
             return worktree_path, branch
         except WorktreeError:
