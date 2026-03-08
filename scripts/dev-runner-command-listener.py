@@ -37,7 +37,7 @@ _SCRIPTS_DIR = Path(__file__).parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 from listener_noise_filter import NOISE_BLOCK_MARKERS as _NOISE_BLOCK_MARKERS, is_noise_line as _is_noise_line
-from worktree_manager import WorktreeManager, WorktreeError
+from worktree_manager import WorktreeManager, WorktreeError, ensure_main_branch
 from workflow_manager import WorkflowManager
 from plan_worktree_helpers import (
     is_plan_in_progress as _is_plan_in_progress,
@@ -1321,6 +1321,7 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
 
     # worktree 생성 또는 재사용 (시간이 걸릴 수 있음)
     try:
+        ensure_main_branch(PROJECT_ROOT)
         _reused_worktree = False
         if plan_file:
             existing_branch, existing_wt_rel = _parse_plan_worktree_info(plan_file)

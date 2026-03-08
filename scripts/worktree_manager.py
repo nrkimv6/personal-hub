@@ -17,6 +17,28 @@ class WorktreeError(Exception):
     pass
 
 
+def ensure_main_branch(project_root: Path) -> None:
+    """메인 레포가 main 브랜치인지 확인하고, 아니면 main으로 복귀.
+
+    main이면 즉시 return (no-op).
+    uncommitted changes가 있어 checkout 불가능하면 WorktreeError 발생.
+    """
+    result = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True, text=True, encoding="utf-8", cwd=str(project_root)
+    )
+    branch = result.stdout.strip()
+    if branch == "main":
+        return
+    logger.warning(f"[WorktreeManager] 메인 레포가 {branch}에 있음, main으로 복귀")
+    checkout = subprocess.run(
+        ["git", "checkout", "main"],
+        capture_output=True, text=True, encoding="utf-8", cwd=str(project_root)
+    )
+    if checkout.returncode != 0:
+        raise WorktreeError(f"메인 레포를 main으로 복귀 실패 (현재: {branch}): {checkout.stderr}")
+
+
 def parse_plan_filename(plan_file: str) -> tuple:
     """plan 파일명에서 날짜와 slug 분리
 
@@ -108,9 +130,10 @@ class WorktreeManager:
             branch = f"runner/{runner_id}"
         try:
             base_dir.mkdir(parents=True, exist_ok=True)
+            ensure_main_branch(base_dir.parent)
             result = subprocess.run(
                 ["git", "worktree", "add", str(worktree_path), "-b", branch],
-                capture_output=True, text=True, cwd=str(base_dir.parent)
+                capture_output=True, text=True, encoding="utf-8", cwd=str(base_dir.parent)
             )
             if result.returncode != 0:
                 if "already exists" in result.stderr:
@@ -134,14 +157,14 @@ class WorktreeManager:
                     )
                     unmerged = subprocess.run(
                         ["git", "log", f"main..{branch}", "--oneline"],
-                        capture_output=True, text=True, cwd=str(base_dir.parent),
+                        capture_output=True, text=True, encoding="utf-8", cwd=str(base_dir.parent),
                     )
                     has_unmerged = unmerged.returncode == 0 and unmerged.stdout.strip()
                     if has_unmerged:
                         # 미머지 커밋 있음: branch -D 스킵, 기존 브랜치로 워크트리 연결
                         result = subprocess.run(
                             ["git", "worktree", "add", str(worktree_path), branch],
-                            capture_output=True, text=True, cwd=str(base_dir.parent),
+                            capture_output=True, text=True, encoding="utf-8", cwd=str(base_dir.parent),
                         )
                         if result.returncode != 0:
                             raise WorktreeError(f"git worktree add 실패 (기존 브랜치 재사용 시도): {result.stderr}")
@@ -154,7 +177,7 @@ class WorktreeManager:
                         )
                         result = subprocess.run(
                             ["git", "worktree", "add", str(worktree_path), "-b", branch],
-                            capture_output=True, text=True, cwd=str(base_dir.parent),
+                            capture_output=True, text=True, encoding="utf-8", cwd=str(base_dir.parent),
                         )
                         if result.returncode != 0:
                             raise WorktreeError(f"git worktree add 실패 (재시도 후): {result.stderr}")
@@ -192,14 +215,14 @@ class WorktreeManager:
         try:
             result = subprocess.run(
                 ["git", "worktree", "remove", str(worktree_path), "--force"],
-                capture_output=True, text=True, cwd=str(base_dir.parent)
+                capture_output=True, text=True, encoding="utf-8", cwd=str(base_dir.parent)
             )
             if result.returncode != 0 and "is not a working tree" not in result.stderr:
                 logger.warning(f"[WorktreeManager] worktree 삭제 경고: {result.stderr}")
             if delete_branch:
                 subprocess.run(
                     ["git", "branch", "-D", branch],
-                    capture_output=True, text=True, cwd=str(base_dir.parent)
+                    capture_output=True, text=True, encoding="utf-8", cwd=str(base_dir.parent)
                 )
             logger.info(f"[WorktreeManager] 제거: {runner_id} (delete_branch={delete_branch})")
             return True
@@ -213,6 +236,7 @@ class WorktreeManager:
 
         우선순위: branch 파라미터 > plan_file > runner_id 기반
         dirty working tree는 merge 전 stash, 결과에 따라 pop.
+        예외 발생 시에도 finally에서 main 브랜치 복귀 보장.
         """
         if branch:
             pass  # 그대로 사용
@@ -221,13 +245,10 @@ class WorktreeManager:
             branch = f"plan/{stem}"
         else:
             branch = f"runner/{runner_id}"
+        stashed = False
         try:
             # main 체크아웃
-            checkout_result = subprocess.run(["git", "checkout", "main"], capture_output=True, text=True, cwd=str(project_root))
-            if checkout_result.returncode != 0:
-                err_msg = checkout_result.stderr[:300] if checkout_result.stderr else "unknown"
-                logger.error(f"[WorktreeManager] git checkout main 실패: {err_msg}")
-                return MergeResult(success=False, conflict=False, message=f"git checkout main 실패: {err_msg}")
+            ensure_main_branch(project_root)
             # is-ancestor 사전 체크 — 이미 머지된 브랜치면 skip
             ancestor_check = subprocess.run(
                 ["git", "merge-base", "--is-ancestor", branch, "HEAD"],
@@ -237,28 +258,28 @@ class WorktreeManager:
                 logger.info(f"[WorktreeManager] 이미 머지됨 — skip: {branch}")
                 return MergeResult(success=True, conflict=False, already_merged=True, message="이미 머지됨 — skip")
             # pre-merge stash: dirty working tree 감지
-            status_r = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, cwd=str(project_root))
-            stashed = False
+            status_r = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, encoding="utf-8", cwd=str(project_root))
             if status_r.stdout.strip():
                 stash_r = subprocess.run(
                     ["git", "stash", "push", "--include-untracked"],
-                    capture_output=True, text=True, cwd=str(project_root)
+                    capture_output=True, text=True, encoding="utf-8", cwd=str(project_root)
                 )
                 stashed = stash_r.returncode == 0 and "No local changes to save" not in stash_r.stdout
                 logger.info(f"[WorktreeManager] pre-merge stash: rc={stash_r.returncode}, stashed={stashed}")
             result = subprocess.run(
                 ["git", "merge", branch, "--no-ff", "-m", f"merge: {branch}"],
-                capture_output=True, text=True, cwd=str(project_root)
+                capture_output=True, text=True, encoding="utf-8", cwd=str(project_root)
             )
             if result.returncode == 0:
                 # 머지 성공 → stash pop (있으면)
                 stash_pop_conflict = False
                 if stashed:
-                    pop_r = subprocess.run(["git", "stash", "pop"], capture_output=True, text=True, cwd=str(project_root))
+                    pop_r = subprocess.run(["git", "stash", "pop"], capture_output=True, text=True, encoding="utf-8", cwd=str(project_root))
                     if pop_r.returncode != 0:
                         stash_pop_conflict = True
                         logger.warning(f"[WorktreeManager] stash pop 충돌 — drop 실행: {pop_r.stderr[:200]}")
                         subprocess.run(["git", "stash", "drop"], capture_output=True, cwd=str(project_root))
+                    stashed = False
                 logger.info(f"[WorktreeManager] 머지 성공: {branch}")
                 return MergeResult(success=True, conflict=False, stash_pop_conflict=stash_pop_conflict, message="머지 성공")
             else:
@@ -270,13 +291,21 @@ class WorktreeManager:
                 # 항상 abort 후 stash pop
                 subprocess.run(["git", "merge", "--abort"], capture_output=True, cwd=str(project_root))
                 if stashed:
-                    pop_r = subprocess.run(["git", "stash", "pop"], capture_output=True, text=True, cwd=str(project_root))
+                    pop_r = subprocess.run(["git", "stash", "pop"], capture_output=True, text=True, encoding="utf-8", cwd=str(project_root))
                     if pop_r.returncode != 0:
                         logger.warning(f"[WorktreeManager] abort 후 stash pop 실패 — drop: {pop_r.stderr[:200]}")
                         subprocess.run(["git", "stash", "drop"], capture_output=True, cwd=str(project_root))
+                    stashed = False
                 return MergeResult(success=False, conflict=conflict, overwritten=overwritten, message=detail)
         except Exception as e:
             return MergeResult(success=False, conflict=False, exception=str(e), message=str(e))
+        finally:
+            # 예외 발생 시에도 main 복귀 보장 (stash pop은 위에서 이미 처리)
+            # 예외는 억제 — 이미 except에서 MergeResult를 반환했거나 상위로 전파 중
+            try:
+                subprocess.run(["git", "checkout", "main"], capture_output=True, cwd=str(project_root))
+            except Exception:
+                pass
 
     @staticmethod
     def list_worktrees() -> list:
@@ -284,7 +313,7 @@ class WorktreeManager:
         try:
             result = subprocess.run(
                 ["git", "worktree", "list", "--porcelain"],
-                capture_output=True, text=True
+                capture_output=True, text=True, encoding="utf-8"
             )
             worktrees = []
             current: dict = {}
