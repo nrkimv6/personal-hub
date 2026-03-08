@@ -1,11 +1,5 @@
 # Changelog
 
-## [2.83.0] - 2026-03-08
-### Added
-- plan 클릭 시 인라인 팝업 대신 별도 모달창(요약 + 단일 실행) 표시
-- RunControl에 `forcedMode` prop 추가 (single/all 모드 고정)
-- Execute 버튼을 전체실행 전용으로 분리 (`forcedMode='all'`)
-
 ## [2.79.0] - 2026-03-06
 ### Added
 - RunStatusBar 좌측 영역 리디자인: Zap SVG 아이콘 + `{N} runner(s)` 카운트 + elapsed 표시

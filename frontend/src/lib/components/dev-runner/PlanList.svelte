@@ -111,10 +111,10 @@
 		lastPlanFile?: string | null;
 		batchPlans?: BatchPlanItem[];
 		onPlanSelect?: (path: string) => void;
-		onPlanClick?: (plan: DevRunnerPlanFileResponse) => void;
+		onExecute?: (path: string) => void;
 	}
 
-	let { plans, onPlansChange, runningPlanFile = null, lastPlanFile = null, batchPlans = [], onPlanSelect, onPlanClick }: Props = $props();
+	let { plans, onPlansChange, runningPlanFile = null, lastPlanFile = null, batchPlans = [], onPlanSelect, onExecute }: Props = $props();
 
 	// batch plan name → status 매핑
 	let batchStatusMap = $derived.by(() => {
@@ -144,9 +144,30 @@
 	let registeredPaths = $state<DevRunnerRegisteredPathResponse[]>([]);
 	let registeredPathsLoading = $state(false);
 
+	// Plan 인라인 팝업
+	let selectedPopupPlan = $state<DevRunnerPlanFileResponse | null>(null);
+	let summaryGeneratingPath = $state<string | null>(null);
+
 	function handlePlanSelect(plan: DevRunnerPlanFileResponse) {
-		onPlanClick?.(plan);
-		onPlanSelect?.(plan.path);
+		if (selectedPopupPlan?.path === plan.path) {
+			selectedPopupPlan = null;
+		} else {
+			selectedPopupPlan = plan;
+			onPlanSelect?.(plan.path);
+		}
+	}
+
+	async function handleGenerateSummary(e: Event, plan: DevRunnerPlanFileResponse) {
+		e.stopPropagation();
+		summaryGeneratingPath = plan.path;
+		try {
+			await devRunnerPlanApi.generateSummary(encodePathToBase64(plan.path));
+			onPlansChange?.();
+		} catch {
+			// ignore
+		} finally {
+			summaryGeneratingPath = null;
+		}
 	}
 
 	async function loadIgnored() {
@@ -485,6 +506,37 @@
 							>×</button>
 						{/if}
 					</button>
+
+					<!-- 인라인 팝업: 요약 + Execute -->
+					{#if selectedPopupPlan?.path === plan.path}
+						<div class="mx-1 mb-1 rounded-md border border-gray-200 bg-white shadow-sm p-2.5 flex flex-col gap-2">
+							<p class="text-xs text-gray-600 leading-relaxed">
+								{#if plan.summary}
+									{plan.summary}
+								{:else}
+									<span class="text-gray-400 italic">요약 없음</span>
+								{/if}
+							</p>
+							<div class="flex items-center gap-2">
+								<button
+									class="flex-1 text-xs font-medium py-1 px-2 rounded bg-blue-500 hover:bg-blue-600 text-white transition-colors"
+									onclick={(e) => { e.stopPropagation(); onExecute?.(plan.path); selectedPopupPlan = null; }}
+								>Execute</button>
+								{#if !plan.summary}
+									<button
+										class="text-xs py-1 px-2 rounded border border-gray-300 hover:bg-gray-50 text-gray-600 transition-colors disabled:opacity-50 flex items-center gap-1"
+										onclick={(e) => handleGenerateSummary(e, plan)}
+										disabled={summaryGeneratingPath === plan.path}
+									>
+										{#if summaryGeneratingPath === plan.path}
+											<svg class="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-dasharray="31.4 31.4" stroke-dashoffset="10"/></svg>
+										{/if}
+										요약 생성
+									</button>
+								{/if}
+							</div>
+						</div>
+					{/if}
 
 					{/each}
 			</div>

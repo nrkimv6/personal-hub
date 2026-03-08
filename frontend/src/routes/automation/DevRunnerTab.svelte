@@ -15,11 +15,9 @@
 	import {
 		devRunnerTaskApi,
 		devRunnerRunnerApi,
-		devRunnerEventApi,
-		devRunnerPlanApi
+		devRunnerEventApi
 	} from '$lib/api';
 	import { devRunnerMergeApi } from '$lib/api/dev-runner';
-	import { encodePathToBase64 } from '$lib/utils/encoding';
 	import type {
 		DevRunnerRunStatusResponse,
 		DevRunnerRunnerListItem,
@@ -37,9 +35,6 @@
 	let prevRunning = $state(false);
 	let prevCycle = $state<number | null>(null);
 	let showExecutionModal = $state(false);
-	let showPlanModal = $state(false);
-	let selectedModalPlan = $state<DevRunnerPlanFileResponse | null>(null);
-	let summaryGenerating = $state(false);
 	let taskHistoryOpen = $state(false);
 	let taskHistoryTab = $state<'tasks' | 'plans' | 'merge'>('plans');
 	let currentTracking = $state<CurrentTrackingResponse | null>(null);
@@ -505,66 +500,6 @@
 							onStart={(r) => { showExecutionModal = false; handleRunStart(r); }}
 							bind:selectedPlan={selectedPlanPath}
 							runnerTabs={runnerTabs.map(t => ({ id: t.id, running: t.running }))}
-							forcedMode="all"
-						/>
-					</div>
-				</div>
-			{/if}
-
-			<!-- Plan 선택 모달 -->
-			{#if showPlanModal && selectedModalPlan}
-				<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-				<div
-					class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-					onclick={(e) => { if (e.target === e.currentTarget) showPlanModal = false; }}
-				>
-					<div class="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-5 flex flex-col gap-4">
-						<div class="flex items-center justify-between">
-							<h3 class="text-sm font-mono font-semibold truncate">{selectedModalPlan.filename}</h3>
-							<button
-								onclick={() => { showPlanModal = false; }}
-								class="p-1 rounded-md hover:bg-secondary text-muted-foreground hover:text-foreground shrink-0"
-							><svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-						</div>
-						<!-- 요약 섹션 -->
-						<div class="text-xs text-gray-600 leading-relaxed">
-							{#if selectedModalPlan.summary}
-								<p>{selectedModalPlan.summary}</p>
-							{:else}
-								<div class="flex items-center gap-2">
-									<span class="text-gray-400 italic">요약 없음</span>
-									<button
-										class="text-xs py-0.5 px-2 rounded border border-gray-300 hover:bg-gray-50 text-gray-600 transition-colors disabled:opacity-50 flex items-center gap-1"
-										disabled={summaryGenerating}
-										onclick={async () => {
-											summaryGenerating = true;
-											try {
-												await devRunnerPlanApi.generateSummary(encodePathToBase64(selectedModalPlan!.path));
-												await fetchPlans();
-												const updated = plans.find(p => p.path === selectedModalPlan!.path);
-												if (updated) selectedModalPlan = updated;
-											} catch { /* ignore */ } finally {
-												summaryGenerating = false;
-											}
-										}}
-									>
-										{#if summaryGenerating}
-											<svg class="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-dasharray="31.4 31.4" stroke-dashoffset="10"/></svg>
-										{/if}
-										요약 생성
-									</button>
-								</div>
-							{/if}
-						</div>
-						<!-- RunControl: 단일 plan 고정 -->
-						<RunControl
-							status={runStatus}
-							{plans}
-							onStatusChange={async () => { showPlanModal = false; await handleRunStatusChange(); }}
-							onStart={(r) => { showPlanModal = false; handleRunStart(r); }}
-							bind:selectedPlan={selectedPlanPath}
-							runnerTabs={runnerTabs.map(t => ({ id: t.id, running: t.running }))}
-							forcedMode="single"
 						/>
 					</div>
 				</div>
@@ -675,7 +610,7 @@
 							</div>
 						{:else if taskHistoryTab === 'plans'}
 							<div class="px-4 pb-4 h-full overflow-hidden flex flex-col">
-								<PlanList {plans} onPlansChange={fetchPlans} runningPlanFile={runStatus?.plan_file ?? null} {lastPlanFile} {batchPlans} onPlanSelect={(path) => { selectedPlanPath = path; }} onPlanClick={(plan) => { selectedModalPlan = plan; selectedPlanPath = plan.path; showPlanModal = true; }} />
+								<PlanList {plans} onPlansChange={fetchPlans} runningPlanFile={runStatus?.plan_file ?? null} {lastPlanFile} {batchPlans} onPlanSelect={(path) => { selectedPlanPath = path; }} onExecute={(path) => { selectedPlanPath = path; showExecutionModal = true; }} />
 							</div>
 						{:else if taskHistoryTab === 'merge'}
 							<div class="h-full overflow-hidden">

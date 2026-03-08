@@ -10,12 +10,11 @@
 		onStart?: (response: DevRunnerRunStatusResponse) => void;
 		selectedPlan?: string;
 		runnerTabs?: { id: string; running: boolean }[];
-		forcedMode?: 'single' | 'all';
 	}
 
-	let { status, plans, onStatusChange, onStart, selectedPlan = $bindable(''), runnerTabs = [], forcedMode }: Props = $props();
+	let { status, plans, onStatusChange, onStart, selectedPlan = $bindable(''), runnerTabs = [] }: Props = $props();
 
-	let mode = $state<'single' | 'all'>(forcedMode ?? 'single');
+	let mode = $state<'single' | 'all'>('single');
 	let selectedEngine = $state('claude');
 	let selectedFixEngine = $state('claude');
 	let engineConfigs = $state<AllEnginesConfig | null>(null);
@@ -274,7 +273,6 @@
 
 		<!-- Mode & Engine Select -->
 		<div class="flex items-center gap-2">
-			{#if !forcedMode}
 			<select
 				class="border rounded px-2 py-1 text-xs h-7 w-[120px] font-mono"
 				bind:value={mode}
@@ -282,7 +280,6 @@
 				<option value="single">단일 Plan</option>
 				<option value="all">전체 실행</option>
 			</select>
-			{/if}
 
 			<select
 				class="border rounded px-2 py-1 text-xs h-7 w-[100px] font-mono font-medium"
@@ -337,7 +334,6 @@
 	<!-- Options Row -->
 	<div class="flex items-center gap-4 flex-wrap text-xs">
 		{#if mode === 'single'}
-			{#if !forcedMode}
 			<div class="flex items-center gap-2">
 				<label for="plan-select" class="text-gray-500 text-xs">Plan</label>
 				<select
@@ -353,7 +349,6 @@
 			</div>
 			{#if planSummary}
 				<p class="text-[10px] text-gray-500 font-mono leading-relaxed col-span-full mt-0.5 line-clamp-2">{planSummary}</p>
-			{/if}
 			{/if}
 		{:else}
 			<span class="text-gray-400 text-xs">모든 미완료 Plan 자동 실행</span>
