@@ -93,7 +93,7 @@ function Start-CrawlWorker {
     $workerProcess = Start-Process -FilePath $VenvPython `
         -ArgumentList "-m", "app.worker.main" `
         -WorkingDirectory $ProjectRoot `
-        -WindowStyle Hidden `
+        -NoNewWindow `
         -RedirectStandardOutput $stdoutLogFile `
         -RedirectStandardError $stderrLogFile `
         -PassThru

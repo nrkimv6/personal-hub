@@ -72,21 +72,27 @@ function Start-ClaudeWorker {
     $env:APP_MODE = if ($isAdmin) { "admin" } else { "public" }
 
     # Start python directly (NOT via cmd.exe) to get correct PID
+    # -NoNewWindow: conhost.exe 중간 프로세스 없이 직접 실행 → PassThru PID = 실제 Python PID
     $workerProcess = Start-Process -FilePath $VenvPython `
         -ArgumentList "-m", "app.modules.claude_worker.worker.worker" `
         -WorkingDirectory $ProjectRoot `
-        -WindowStyle Hidden `
+        -NoNewWindow `
         -RedirectStandardError $stderrLogFile `
         -PassThru
 
-    # Save PID - this is now the actual python process PID
-    $workerProcess.Id | Out-File $WorkerPidFile -Encoding ascii
+    # PID 검증: conhost 중간 프로세스 생성 여부 확인 후 실제 PID 확정
+    $actualPid = Confirm-ProcessPid -ProcessId $workerProcess.Id `
+        -NamePattern 'monitorpage-claude|python' `
+        -CmdlinePattern 'claude_worker\.worker\.worker'
+
+    # Save verified PID
+    $actualPid | Out-File $WorkerPidFile -Encoding ascii
 
     # Register process in ProcessRegistry
-    & $VenvPython "$ProjectRoot\scripts\register_process.py" --pid $workerProcess.Id --ppid $PID --name "claude-worker" --exe $VenvPython --role "claude" -ErrorAction SilentlyContinue
+    & $VenvPython "$ProjectRoot\scripts\register_process.py" --pid $actualPid --ppid $PID --name "claude-worker" --exe $VenvPython --role "claude" -ErrorAction SilentlyContinue
 
-    Write-Log "Claude worker started with PID: $($workerProcess.Id)"
-    return $workerProcess.Id
+    Write-Log "Claude worker started with PID: $actualPid"
+    return $actualPid
 }
 
 function Test-ClaudeWorkerRunning {

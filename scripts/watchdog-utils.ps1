@@ -131,3 +131,54 @@ function Stop-ExistingProcessesByCmdline {
         Start-Sleep -Milliseconds 500
     }
 }
+
+# ─────────────────────────────────────────────────
+# Confirm-ProcessPid
+#   Start-Process -PassThru 반환 PID가 실제 Python 프로세스 PID인지 검증.
+#   Windows에서 -WindowStyle Hidden + -RedirectStandard* 조합 시 conhost.exe
+#   중간 프로세스가 생성되어 PassThru PID가 실제 PID와 다를 수 있음.
+#   -NoNewWindow 사용 시에는 이 문제가 없지만, 안전망으로 유지.
+#
+# 파라미터:
+#   -ProcessId        : Start-Process -PassThru 로 받은 PID
+#   -NamePattern      : 기대하는 프로세스명 정규식 (예: 'monitorpage-|python')
+#   -CmdlinePattern   : cmdline 기반 재탐색용 패턴 (예: 'claude_worker\.worker\.worker')
+#
+# 반환:
+#   검증된 실제 PID (int). 불일치 시 cmdline으로 재탐색한 PID 반환.
+#   재탐색 실패 시 원래 PID 반환.
+# ─────────────────────────────────────────────────
+function Confirm-ProcessPid {
+    param(
+        [int]$ProcessId,
+        [string]$NamePattern,
+        [string]$CmdlinePattern
+    )
+
+    # 잠시 대기 후 확인 (프로세스 초기화 시간)
+    Start-Sleep -Milliseconds 300
+
+    $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if ($null -eq $proc) {
+        Write-Log "PID $ProcessId 가 이미 종료됨 — cmdline 패턴으로 재탐색" "WARN"
+    } elseif ($proc.Name -match $NamePattern) {
+        # PID 정상 — 그대로 반환
+        return $ProcessId
+    } else {
+        Write-Log "PID $ProcessId 프로세스명 '$($proc.Name)' 이 기대 패턴('$NamePattern')과 불일치 — cmdline 재탐색" "WARN"
+    }
+
+    # cmdline 패턴으로 실제 Python 프로세스 탐색
+    $realProc = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match $CmdlinePattern } |
+        Sort-Object ProcessId -Descending |
+        Select-Object -First 1
+
+    if ($realProc) {
+        Write-Log "실제 프로세스 발견: PID $($realProc.ProcessId) (이름: $($realProc.Name))" "INFO"
+        return $realProc.ProcessId
+    }
+
+    Write-Log "cmdline 재탐색 실패 — 원래 PID $ProcessId 유지" "WARN"
+    return $ProcessId
+}

@@ -87,21 +87,27 @@ function Start-UnifiedWorker {
     $env:APP_MODE = if ($isAdmin) { "admin" } else { "public" }
 
     # Start python directly - runs all workers via WorkerOrchestrator
+    # -NoNewWindow: conhost.exe 중간 프로세스 없이 직접 실행 → PassThru PID = 실제 Python PID
     $workerProcess = Start-Process -FilePath $VenvPython `
         -ArgumentList "-m", "app.worker.main" `
         -WorkingDirectory $ProjectRoot `
-        -WindowStyle Hidden `
+        -NoNewWindow `
         -RedirectStandardOutput $stdoutLogFile `
         -RedirectStandardError $stderrLogFile `
         -PassThru
 
-    # Save PID
-    $workerProcess.Id | Out-File $WorkerPidFile -Encoding ascii
+    # PID 검증: conhost 중간 프로세스 생성 여부 확인 후 실제 PID 확정
+    $actualPid = Confirm-ProcessPid -ProcessId $workerProcess.Id `
+        -NamePattern 'monitorpage-worker|python' `
+        -CmdlinePattern 'app\.worker\.main'
+
+    # Save verified PID
+    $actualPid | Out-File $WorkerPidFile -Encoding ascii
 
     # Register process in ProcessRegistry
-    & $VenvPython "$ProjectRoot\scripts\register_process.py" --pid $workerProcess.Id --ppid $PID --name "unified-worker" --exe $VenvPython --role "worker" -ErrorAction SilentlyContinue
+    & $VenvPython "$ProjectRoot\scripts\register_process.py" --pid $actualPid --ppid $PID --name "unified-worker" --exe $VenvPython --role "worker" -ErrorAction SilentlyContinue
 
-    Write-Log "Unified worker started with PID: $($workerProcess.Id)"
+    Write-Log "Unified worker started with PID: $actualPid"
     Write-Log "  -> NaverMonitorWorker"
     Write-Log "  -> ScheduledCrawlWorker"
     Write-Log "  -> OnDemandCrawlWorker"

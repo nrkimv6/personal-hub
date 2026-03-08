@@ -95,7 +95,7 @@ class ServiceRunner:
         self.log.info(f"PID: {os.getpid()} | Session: {session_id} | Python: {sys.version.split()[0]}")
         self.log.info(f"CWD: {os.getcwd()}")
         if session_id == 0:
-            self.log.warning("Session 0 detected — Telegram/Desktop notifications will be disabled by API")
+            self.log.warning("Session 0 detected - Telegram/Desktop notifications will be disabled by API")
         # DNS 테스트
         import socket
         try:

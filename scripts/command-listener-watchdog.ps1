@@ -68,21 +68,27 @@ function Start-CommandListener {
 
     $env:PYTHONIOENCODING = "utf-8"
 
+    # -NoNewWindow: conhost.exe 중간 프로세스 없이 직접 실행 → PassThru PID = 실제 Python PID
     $proc = Start-Process -FilePath $VenvPython `
         -ArgumentList "scripts\worker-command-listener.py" `
         -WorkingDirectory $ProjectRoot `
-        -WindowStyle Hidden `
+        -NoNewWindow `
         -RedirectStandardOutput $stdoutLogFile `
         -RedirectStandardError $stderrLogFile `
         -PassThru
 
-    $proc.Id | Out-File $WorkerPidFile -Encoding ascii
+    # PID 검증: conhost 중간 프로세스 생성 여부 확인 후 실제 PID 확정
+    $actualPid = Confirm-ProcessPid -ProcessId $proc.Id `
+        -NamePattern 'monitorpage-cmdlistener|python' `
+        -CmdlinePattern 'command-listener'
+
+    $actualPid | Out-File $WorkerPidFile -Encoding ascii
 
     # Register process in ProcessRegistry
-    & $VenvPython "$ProjectRoot\scripts\register_process.py" --pid $proc.Id --ppid $PID --name "command-listener" --exe $VenvPython --role "listener" -ErrorAction SilentlyContinue
+    & $VenvPython "$ProjectRoot\scripts\register_process.py" --pid $actualPid --ppid $PID --name "command-listener" --exe $VenvPython --role "listener" -ErrorAction SilentlyContinue
 
-    Write-Log "Command listener started with PID: $($proc.Id)"
-    return $proc.Id
+    Write-Log "Command listener started with PID: $actualPid"
+    return $actualPid
 }
 
 function Test-CommandListenerRunning {

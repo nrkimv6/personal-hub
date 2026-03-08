@@ -93,7 +93,7 @@ function Start-WorkerProcess {
     $workerProcess = Start-Process -FilePath $VenvPython `
         -ArgumentList "-m", "app.worker.monitor_worker" `
         -WorkingDirectory $ProjectRoot `
-        -WindowStyle Hidden `
+        -NoNewWindow `
         -RedirectStandardOutput $stdoutLogFile `
         -RedirectStandardError $stderrLogFile `
         -PassThru
