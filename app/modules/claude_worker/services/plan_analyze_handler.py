@@ -214,7 +214,7 @@ def _maybe_queue_requirements_sync(db: Session, category: str) -> bool:
             and_(
                 LLMRequest.caller_type == "plan_requirements_sync",
                 LLMRequest.caller_id == category,
-                LLMRequest.created_at > cutoff,
+                LLMRequest.requested_at > cutoff,
             )
         ).first()
 
@@ -232,10 +232,12 @@ def _maybe_queue_requirements_sync(db: Session, category: str) -> bool:
 
         plan_summaries = [
             {
-                "filename": r.filename or "",
+                "filename": Path(r.file_path).name if r.file_path else "",
                 "summary": r.summary or "",
                 "tags": r.tags or [],
-                "date": r.archived_at.strftime("%Y-%m-%d") if r.archived_at else "",
+                "date": r.archived_at.strftime("%Y-%m-%d") if r.archived_at else (
+                    r.llm_processed_at.strftime("%Y-%m-%d") if r.llm_processed_at else ""
+                ),
             }
             for r in records
         ]

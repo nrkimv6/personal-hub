@@ -200,37 +200,26 @@ class PlanArchiveListener(BaseWorker):
     def _build_prompt(self, filename: str) -> str:
         """LLM 분석 프롬프트 생성.
 
-        plan_analyze_handler.build_plan_analyze_prompt()가 구현되면
-        해당 함수로 교체할 수 있도록 간단한 초기 프롬프트를 사용.
-
         Args:
             filename: archive 파일 경로
 
         Returns:
             str: LLM 프롬프트
         """
-        try:
-            from app.modules.claude_worker.services.plan_analyze_handler import (
-                build_plan_analyze_prompt,
-            )
-            return build_plan_analyze_prompt(filename)
-        except (ImportError, Exception):
-            pass
-
-        # fallback 프롬프트
         from pathlib import Path
         try:
-            content = Path(filename).read_text(encoding="utf-8")
-        except Exception:
+            path = Path(filename)
+            content = path.read_text(encoding="utf-8", errors="replace")
+            filename_only = path.name
+        except Exception as e:
             content = ""
-            logger.warning(f"plan 파일 읽기 실패: {filename}")
+            filename_only = filename
+            logger.warning(f"[{self.name}] plan 파일 읽기 실패: {filename} ({e})")
 
-        return (
-            f"다음 plan 문서를 분석하여 JSON으로 응답하세요.\n"
-            f"응답 형식: {{\"category\": string, \"tags\": [string], \"summary\": string}}\n"
-            f"category는 naver-booking/instagram/google-search/activity/claude-worker/video/infra/common 중 하나.\n\n"
-            f"파일: {filename}\n\n{content}"
+        from app.modules.claude_worker.services.plan_analyze_handler import (
+            build_plan_analyze_prompt,
         )
+        return build_plan_analyze_prompt(file_content=content, filename=filename_only)
 
     async def _cleanup(self):
         """종료 시 Redis 연결 해제."""

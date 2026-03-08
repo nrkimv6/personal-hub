@@ -17,7 +17,7 @@
 		devRunnerRunnerApi,
 		devRunnerEventApi
 	} from '$lib/api';
-	import { devRunnerMergeApi } from '$lib/api/dev-runner';
+	import { devRunnerMergeApi, devRunnerPlanApi } from '$lib/api/dev-runner';
 	import type {
 		DevRunnerRunStatusResponse,
 		DevRunnerRunnerListItem,
@@ -318,6 +318,15 @@
 		}
 	}
 
+	async function handleSync() {
+		try {
+			await devRunnerPlanApi.sync();
+			await fetchPlans();
+		} catch (e) {
+			console.warn('[DevRunner] sync 실패', e);
+		}
+	}
+
 	async function loadData() {
 		await Promise.all([pollStatus(), fetchPlans()]);
 		error = null;
@@ -462,7 +471,7 @@
 				{sseConnected}
 				{runStatus}
 				{elapsed}
-				onSync={fetchPlans}
+				onSync={handleSync}
 				onExecute={() => { showExecutionModal = true; }}
 				onStopAll={runningCount > 0 ? async () => {
 					for (const t of runnerTabs.filter(r => r.running)) {

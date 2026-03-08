@@ -25,20 +25,6 @@ def _make_listener():
         return listener
 
 
-def _force_fallback_build_prompt(listener, filename: str) -> str:
-    """build_plan_analyze_prompt import를 실패시켜 fallback 경로 강제 실행."""
-    import builtins
-    original_import = builtins.__import__
-
-    def mock_import(name, *args, **kwargs):
-        if "plan_analyze_handler" in str(name):
-            raise ImportError("forced for test")
-        return original_import(name, *args, **kwargs)
-
-    with patch("builtins.__import__", side_effect=mock_import):
-        return listener._build_prompt(filename)
-
-
 # ──────────────────────────────────────────────────────────────
 # R: 정상 케이스
 # ──────────────────────────────────────────────────────────────
@@ -46,10 +32,6 @@ def _force_fallback_build_prompt(listener, filename: str) -> str:
 class TestBuildPromptRight:
     """R: 정상 케이스 — 파일 내용 읽기 및 프롬프트 포함"""
 
-    @pytest.mark.xfail(
-        reason="Bug 1 미수정: _build_prompt()가 file_content 대신 경로를 전달함. Phase 1 수정 후 통과 예정",
-        strict=False,
-    )
     def test_build_prompt_right_reads_file_content(self, tmp_path):
         """R: 임시 md 파일 생성 → _build_prompt(path) → 프롬프트에 파일 내용 포함 확인.
 
@@ -133,25 +115,6 @@ class TestBuildPromptRight:
 class TestBuildPromptBoundary:
     """B: 경계 케이스"""
 
-    def test_build_prompt_boundary_empty_file(self, tmp_path):
-        """B: 빈 파일 → 프롬프트에 빈 content, 에러 없음."""
-        # Arrange
-        plan_file = tmp_path / "2026-01-01_empty.md"
-        plan_file.write_text("", encoding="utf-8")
-
-        listener = _make_listener()
-
-        # Act: fallback 경로로 테스트 (항상 동작하는 경로)
-        result = _force_fallback_build_prompt(listener, str(plan_file))
-
-        # Assert: 예외 없이 문자열 반환
-        assert isinstance(result, str)
-        assert len(result) > 0  # 최소한 프롬프트 템플릿은 있어야 함
-
-    @pytest.mark.xfail(
-        reason="Bug 1 미수정: file_content에 파일 경로가 전달되는 버그. Phase 1 수정 후 통과 예정",
-        strict=False,
-    )
     def test_build_prompt_boundary_empty_file_main_path(self, tmp_path):
         """B: 빈 파일 → build_plan_analyze_prompt가 빈 content로 호출됨."""
         # Arrange
@@ -178,9 +141,7 @@ class TestBuildPromptBoundary:
 
         # Bug 1 수정 후: file_content가 빈 문자열이어야 함 (None이나 경로가 아님)
         if captured.get("file_content") is not None:
-            assert str(plan_file) not in captured["file_content"], (
-                "빈 파일이어도 file_content에 경로 문자열이 들어가면 안 됨"
-            )
+            assert captured["file_content"] == "", "빈 파일의 file_content는 빈 문자열이어야 함"
 
 
 # ──────────────────────────────────────────────────────────────
@@ -189,27 +150,6 @@ class TestBuildPromptBoundary:
 
 class TestBuildPromptError:
     """E: 오류 케이스"""
-
-    def test_build_prompt_error_missing_file(self):
-        """E: 존재하지 않는 경로 → fallback 빈 문자열, 예외 없음."""
-        # Arrange
-        nonexistent_path = "/nonexistent/path/2026-01-01_missing.md"
-        listener = _make_listener()
-
-        # Act — 예외가 발생하면 안 됨
-        try:
-            result = _force_fallback_build_prompt(listener, nonexistent_path)
-            exception_raised = False
-        except Exception as e:
-            result = None
-            exception_raised = True
-            exc_str = str(e)
-
-        # Assert
-        assert not exception_raised, (
-            f"존재하지 않는 파일 처리 시 예외가 발생하면 안 됨: {exc_str if exception_raised else ''}"
-        )
-        assert isinstance(result, str), "결과는 문자열이어야 함"
 
     def test_build_prompt_error_missing_file_main_path(self):
         """E: 존재하지 않는 경로 → build_plan_analyze_prompt가 빈 content로 호출되거나 fallback 처리."""
@@ -241,7 +181,7 @@ class TestBuildPromptError:
 
         # Bug 1 수정 후: file_content가 "" (빈 문자열, fallback) 이어야 함
         if captured.get("file_content") is not None:
-            assert captured["file_content"] == "" or isinstance(captured["file_content"], str), (
+            assert captured["file_content"] == "", (
                 "존재하지 않는 파일의 file_content는 빈 문자열이어야 함"
             )
 
@@ -251,51 +191,10 @@ class TestBuildPromptError:
         listener = _make_listener()
 
         with caplog.at_level(logging.WARNING, logger="app.worker.plan_archive_listener"):
-            _force_fallback_build_prompt(listener, nonexistent_path)
+            listener._build_prompt(nonexistent_path)
 
         # Assert: warning 로그가 찍혀야 함
         warning_msgs = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
         assert any("읽기 실패" in m or "plan 파일" in m or nonexistent_path in m for m in warning_msgs), (
             f"파일 읽기 실패 시 warning 로그가 찍혀야 함. 실제 logs: {warning_msgs}"
         )
-
-
-# ──────────────────────────────────────────────────────────────
-# Fallback 경로 전용 (항상 통과해야 하는 기본 동작)
-# ──────────────────────────────────────────────────────────────
-
-class TestBuildPromptFallback:
-    """fallback 경로 전용 테스트 — ImportError 시 파일 내용 직접 읽기."""
-
-    def test_fallback_reads_file_content(self, tmp_path):
-        """R(fallback): build_plan_analyze_prompt import 실패 시 파일 내용을 fallback 프롬프트에 포함."""
-        plan_file = tmp_path / "2026-03-01_naver-fix.md"
-        content = "## Phase 1\n- [x] 네이버 예약 수정\n- [ ] 테스트 추가\n"
-        plan_file.write_text(content, encoding="utf-8")
-
-        listener = _make_listener()
-        result = _force_fallback_build_prompt(listener, str(plan_file))
-
-        assert "네이버 예약 수정" in result, "fallback: 파일 내용이 프롬프트에 포함되어야 함"
-        assert "테스트 추가" in result
-
-    def test_fallback_empty_file_no_error(self, tmp_path):
-        """B(fallback): 빈 파일 → 예외 없이 프롬프트 반환."""
-        plan_file = tmp_path / "2026-01-01_empty.md"
-        plan_file.write_text("", encoding="utf-8")
-
-        listener = _make_listener()
-        result = _force_fallback_build_prompt(listener, str(plan_file))
-
-        assert isinstance(result, str)
-
-    def test_fallback_missing_file_no_error(self):
-        """E(fallback): 존재하지 않는 파일 → 예외 없이 프롬프트 반환 (빈 content)."""
-        listener = _make_listener()
-        result = _force_fallback_build_prompt(
-            listener, "/does/not/exist/2026-01-01_missing.md"
-        )
-
-        assert isinstance(result, str)
-        # 빈 content fallback이므로 경로 자체가 content로 들어가면 안 됨
-        # (fallback은 파일명만 포함하고 content="" 처리)
