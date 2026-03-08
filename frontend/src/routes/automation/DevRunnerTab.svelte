@@ -36,7 +36,7 @@
 	let prevCycle = $state<number | null>(null);
 	let showExecutionModal = $state(false);
 	let taskHistoryOpen = $state(false);
-	let taskHistoryTab = $state<'tasks' | 'plans' | 'workflows' | 'merge' | 'settings'>('plans');
+	let taskHistoryTab = $state<'tasks' | 'plans' | 'merge'>('plans');
 	let currentTracking = $state<CurrentTrackingResponse | null>(null);
 	let selectedPlanPath = $state('');
 	let taskListRefreshTick = $state(0);

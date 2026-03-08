@@ -1,4 +1,6 @@
 <script lang="ts">
+	import DevRunnerSettingsPanel from './DevRunnerSettingsPanel.svelte';
+
 	interface RunnerTab {
 		id: string;
 		plan_file: string | null;
@@ -44,11 +46,12 @@
 	let runningCount = $derived(runners.filter(r => r.running).length);
 	let anyRunning = $derived(runningCount > 0);
 	let anyCrashed = $derived(!anyRunning && !!runStatus?.crashed);
+	let showSettings = $state(false);
 </script>
 
 <div class="bg-card border border-border rounded-md shrink-0 overflow-hidden">
 	<!-- 상단 바: 연결 상태 + runner 상태 + elapsed + 액션 버튼 -->
-	<div class="flex items-center justify-between px-3 py-2">
+	<div class="flex items-center justify-between px-3 py-1.5">
 		<!-- 좌측: 연결 상태 + runner 상태 + elapsed -->
 		<div class="flex items-center gap-3 min-w-0">
 			<!-- SSE 연결 상태 dot -->
@@ -89,7 +92,7 @@
 		</div>
 
 		<!-- 우측: 액션 버튼들 (아이콘 전용 ghost) -->
-		<div class="flex items-center gap-0.5 shrink-0">
+		<div class="flex items-center gap-0.5 shrink-0 relative">
 			{#if anyRunning && onStopAll}
 				<button
 					onclick={onStopAll}
@@ -145,6 +148,22 @@
 					</svg>
 				</button>
 			{/if}
+
+			<!-- 설정 버튼 + 팝오버 -->
+			<div class="relative">
+				<button
+					onclick={() => showSettings = !showSettings}
+					class="px-2 py-1 text-[11px] font-medium text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors {showSettings ? 'bg-gray-100 text-gray-800' : ''}"
+					title="설정"
+				>
+					⚙
+				</button>
+				{#if showSettings}
+					<div class="absolute right-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-lg w-64">
+						<DevRunnerSettingsPanel compact />
+					</div>
+				{/if}
+			</div>
 
 			{#if onExecute}
 				<button

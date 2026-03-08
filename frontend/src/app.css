@@ -822,6 +822,21 @@ input[type="checkbox"] {
     --dr-tag-warn: 32 95% 44%;      /* orange */
     --dr-tag-info: 199 89% 48%;     /* sky */
     --dr-tag-debug: 220 14% 60%;    /* slate */
+    --dr-tag-done: 142 60% 50%;     /* green */
+    --dr-tag-system: 215 12% 50%;   /* gray */
+    --dr-tag-phase: 240 60% 65%;    /* indigo */
+    --dr-tag-cycle: 30 80% 55%;     /* orange */
+    --dr-tag-commit: 187 80% 52%;   /* cyan */
+    --dr-tag-merge: 270 60% 65%;    /* purple */
+    --dr-tag-result: 158 64% 52%;   /* emerald */
+    --dr-tag-stderr: 0 72% 56%;     /* red */
+    --dr-tag-diag: 187 80% 52%;     /* cyan */
+    --dr-tag-think: 265 60% 65%;    /* violet */
+    --dr-tag-track: 270 60% 65%;    /* purple */
+    --dr-tag-skip: 220 14% 60%;     /* gray */
+    --dr-tag-git: 32 95% 44%;       /* orange */
+    --dr-tag-batch: 187 80% 52%;    /* teal */
+    --dr-tag-noise: 220 14% 40%;    /* dark gray */
 
     /* 상태 색상 */
     --dr-status-running: 142 71% 45%;  /* green */
@@ -850,16 +865,31 @@ input[type="checkbox"] {
 }
 
 /* 태그별 좌측 보더 색상 */
-.dr-log-line-ai, .log-line-ai    { border-left-color: hsl(var(--dr-tag-ai)); }
-.dr-log-line-tool, .log-line-tool  { border-left-color: hsl(var(--dr-tag-tool)); }
-.dr-log-line-plan, .log-line-plan  { border-left-color: hsl(var(--dr-tag-plan)); }
-.dr-log-line-task, .log-line-task  { border-left-color: hsl(var(--dr-tag-task)); }
+.dr-log-line-ai, .log-line-ai       { border-left-color: hsl(var(--dr-tag-ai)); }
+.dr-log-line-tool, .log-line-tool   { border-left-color: hsl(var(--dr-tag-tool)); }
+.dr-log-line-plan, .log-line-plan   { border-left-color: hsl(var(--dr-tag-plan)); }
+.dr-log-line-task, .log-line-task   { border-left-color: hsl(var(--dr-tag-task)); }
 .dr-log-line-build, .log-line-build { border-left-color: hsl(var(--dr-tag-build)); }
-.dr-log-line-test, .log-line-test  { border-left-color: hsl(var(--dr-tag-test)); }
+.dr-log-line-test, .log-line-test   { border-left-color: hsl(var(--dr-tag-test)); }
 .dr-log-line-error, .log-line-error { border-left-color: hsl(var(--dr-tag-error)); }
-.dr-log-line-warn, .log-line-warn  { border-left-color: hsl(var(--dr-tag-warn)); }
-.dr-log-line-info, .log-line-info  { border-left-color: hsl(var(--dr-tag-info)); }
+.dr-log-line-warn, .log-line-warn   { border-left-color: hsl(var(--dr-tag-warn)); }
+.dr-log-line-info, .log-line-info   { border-left-color: hsl(var(--dr-tag-info)); }
 .dr-log-line-debug, .log-line-debug { border-left-color: hsl(var(--dr-tag-debug)); }
+.dr-log-line-done   { border-left-color: hsl(var(--dr-tag-done)); }
+.dr-log-line-system { border-left-color: hsl(var(--dr-tag-system)); }
+.dr-log-line-phase  { border-left-color: hsl(var(--dr-tag-phase)); }
+.dr-log-line-cycle  { border-left-color: hsl(var(--dr-tag-cycle)); }
+.dr-log-line-commit { border-left-color: hsl(var(--dr-tag-commit)); }
+.dr-log-line-merge  { border-left-color: hsl(var(--dr-tag-merge)); }
+.dr-log-line-result { border-left-color: hsl(var(--dr-tag-result)); }
+.dr-log-line-stderr { border-left-color: hsl(var(--dr-tag-stderr)); }
+.dr-log-line-diag   { border-left-color: hsl(var(--dr-tag-diag)); }
+.dr-log-line-think  { border-left-color: hsl(var(--dr-tag-think)); }
+.dr-log-line-track  { border-left-color: hsl(var(--dr-tag-track)); }
+.dr-log-line-skip   { border-left-color: hsl(var(--dr-tag-skip)); }
+.dr-log-line-git    { border-left-color: hsl(var(--dr-tag-git)); }
+.dr-log-line-batch  { border-left-color: hsl(var(--dr-tag-batch)); }
+.dr-log-line-noise  { border-left-color: hsl(var(--dr-tag-noise)); }
 
 /* 태그 배지 */
 .dr-tag-badge,

@@ -120,7 +120,7 @@
 				<!-- Phase 항목 목록 -->
 				<div class="px-4 pb-2">
 					{#each phase.items as item}
-						<div class="flex items-start gap-2.5 min-h-[44px] py-2.5 {item.checked ? 'opacity-50' : ''}">
+						<div class="flex items-start gap-2 min-h-[32px] py-1 {item.checked ? 'opacity-50' : ''}">
 							{#if item.checked}
 								<svg class="w-3.5 h-3.5 shrink-0 text-green-500 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
 									<polyline points="20 6 9 17 4 12" />
@@ -130,7 +130,7 @@
 									<rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
 								</svg>
 							{/if}
-							<span class="text-sm leading-snug {item.checked ? 'line-through text-gray-400' : 'text-gray-800'}">
+							<span class="text-xs leading-snug {item.checked ? 'line-through text-gray-400' : 'text-gray-800'}">
 								{item.text}
 							</span>
 						</div>

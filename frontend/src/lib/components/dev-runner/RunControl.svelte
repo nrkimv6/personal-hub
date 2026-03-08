@@ -18,7 +18,6 @@
 	let selectedEngine = $state('claude');
 	let selectedFixEngine = $state('claude');
 	let engineConfigs = $state<AllEnginesConfig | null>(null);
-	let showModelSettings = $state(false);
 	let maxCycles = $state(0);
 
 	const ALL_PLANS_SENTINEL = '__ALL_PLANS__';
@@ -40,6 +39,7 @@
 	let worktree = $state(true);
 	let parallel = $state(false);
 	let projects = $state('');
+	let planSummary = $derived((plans.find(p => p.path === selectedPlan) as any)?.summary as string | undefined ?? '');
 	let anyRunning = $derived(runnerTabs.some(t => t.running));
 	let actionLoading = $state(false);
 	let actionError = $state<string | null>(null);
@@ -303,18 +303,11 @@
 				</select>
 			</div>
 
-			<button
-				class="h-8 px-2 rounded border border-gray-200 text-[10px] font-medium hover:bg-gray-50 transition-colors {showModelSettings ? 'bg-blue-50 text-blue-600 border-blue-200' : 'text-gray-500'}"
-				onclick={() => (showModelSettings = !showModelSettings)}
-				title="AI 모델 설정"
-			>
-				AI Settings
-			</button>
 		</div>
 	</div>
 
-	{#if showModelSettings && engineConfigs && engineConfigs[selectedEngine]}
-		<div class="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2 bg-gray-50 rounded-lg border border-gray-100 animate-in fade-in slide-in-from-top-1 duration-200">
+	{#if engineConfigs && engineConfigs[selectedEngine]}
+		<div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-3 py-2 bg-gray-50 rounded-lg border border-gray-100">
 			<span class="text-[10px] font-bold text-gray-400 uppercase shrink-0 w-full sm:w-auto">Phase Models:</span>
 			{#each ['plan', 'impl', 'done'] as phase}
 				<div class="flex items-center gap-1.5 flex-1 sm:flex-none">
@@ -324,11 +317,9 @@
 						value={engineConfigs[selectedEngine].models[phase]}
 						onchange={(e) => updateModel(phase as any, e.currentTarget.value)}
 					>
-						<!-- 사전 정의된 모델 목록 -->
 						{#each PREDEFINED_MODELS[selectedEngine] || [] as model}
 							<option value={model}>{model}</option>
 						{/each}
-						<!-- 현재 설정된 값이 리스트에 없으면 추가 표시 -->
 						{#if !PREDEFINED_MODELS[selectedEngine]?.includes(engineConfigs[selectedEngine].models[phase])}
 							<option value={engineConfigs[selectedEngine].models[phase]}>
 								{engineConfigs[selectedEngine].models[phase]} (Custom)
@@ -356,6 +347,9 @@
 					{/each}
 				</select>
 			</div>
+			{#if planSummary}
+				<p class="text-[10px] text-gray-500 font-mono leading-relaxed col-span-full mt-0.5 line-clamp-2">{planSummary}</p>
+			{/if}
 		{:else}
 			<span class="text-gray-400 text-xs">모든 미완료 Plan 자동 실행</span>
 		{/if}
