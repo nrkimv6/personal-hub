@@ -7,18 +7,20 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts"))
 
-from worktree_manager import WorktreeManager, WorktreeError, MergeResult
+from worktree_manager import WorktreeManager, WorktreeError, MergeResult, ensure_main_branch
 
 
 @pytest.fixture
 def tmp_git_repo(tmp_path):
-    """임시 git 저장소 생성"""
+    """임시 git 저장소 생성 (main 브랜치)"""
     subprocess.run(["git", "init", str(tmp_path)], capture_output=True)
     subprocess.run(["git", "config", "user.email", "test@test.com"], capture_output=True, cwd=str(tmp_path))
     subprocess.run(["git", "config", "user.name", "Test"], capture_output=True, cwd=str(tmp_path))
+    subprocess.run(["git", "config", "commit.gpgsign", "false"], capture_output=True, cwd=str(tmp_path))
     (tmp_path / "README.md").write_text("test")
     subprocess.run(["git", "add", "."], capture_output=True, cwd=str(tmp_path))
     subprocess.run(["git", "commit", "-m", "init"], capture_output=True, cwd=str(tmp_path))
+    subprocess.run(["git", "branch", "-m", "main"], capture_output=True, cwd=str(tmp_path))
     return tmp_path
 
 
@@ -534,19 +536,20 @@ class TestMergeToMainStash:
         assert any("stash pop" in r.message.lower() or "drop" in r.message.lower() for r in caplog.records)
 
     def test_ERROR_python_exception_propagates(self, git_repo_with_main, monkeypatch):
-        """E(Error): subprocess.run이 Exception → MergeResult(exception=str(e))"""
+        """E(Error): git merge 단계에서 RuntimeError → MergeResult(exception=str(e))"""
         import subprocess as sp_module
+        original_run = sp_module.run
 
         def mock_run_raise(cmd, **kwargs):
-            if isinstance(cmd, list) and "checkout" in cmd:
-                raise RuntimeError("mock checkout failure")
-            return sp_module.run.__wrapped__(cmd, **kwargs) if hasattr(sp_module.run, "__wrapped__") else sp_module.run(cmd, **kwargs)
+            if isinstance(cmd, list) and len(cmd) > 1 and cmd[0] == "git" and cmd[1] == "merge" and "--no-ff" in cmd:
+                raise RuntimeError("mock merge failure")
+            return original_run(cmd, **kwargs)
 
         monkeypatch.setattr(sp_module, "run", mock_run_raise)
         repo = git_repo_with_main
         result = WorktreeManager.merge_to_main("feat7", repo / ".wt", repo, branch="runner/feat7")
         assert result.success is False
-        assert "mock checkout failure" in result.exception
+        assert "mock merge failure" in result.exception
 
     def test_ERROR_merge_result_fields_default(self):
         """E(Error): 기존 호출자가 새 필드 없이도 동작 — 기본값 확인"""
@@ -637,6 +640,118 @@ class TestWorktreeManagerValidate:
             wm_module.WorktreeManager.create("broken", base)
         assert len(create_calls) == 1
         assert _reused_worktree is False
+
+
+# ── TestEnsureMainBranch: Phase 1 ensure_main_branch() 검증 ──────────────────
+
+class TestEnsureMainBranch:
+    """ensure_main_branch() 단위 테스트 — RIGHT-BICEP"""
+
+    @pytest.fixture
+    def git_repo_main(self, tmp_path):
+        """main 브랜치를 가진 임시 git 저장소"""
+        subprocess.run(["git", "init", str(tmp_path)], capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], capture_output=True, cwd=str(tmp_path))
+        subprocess.run(["git", "config", "user.name", "Test"], capture_output=True, cwd=str(tmp_path))
+        subprocess.run(["git", "config", "commit.gpgsign", "false"], capture_output=True, cwd=str(tmp_path))
+        (tmp_path / "README.md").write_text("init")
+        subprocess.run(["git", "add", "."], capture_output=True, cwd=str(tmp_path))
+        subprocess.run(["git", "commit", "-m", "init"], capture_output=True, cwd=str(tmp_path))
+        subprocess.run(["git", "branch", "-m", "main"], capture_output=True, cwd=str(tmp_path))
+        return tmp_path
+
+    def test_ensure_main_branch_on_plan_branch(self, git_repo_main):
+        """R(Right): plan 브랜치에서 ensure_main_branch() 호출 → main으로 복귀"""
+        repo = git_repo_main
+        subprocess.run(["git", "checkout", "-b", "plan/test-plan"], capture_output=True, cwd=str(repo))
+        # 현재 plan 브랜치 확인
+        cur = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=str(repo))
+        assert cur.stdout.strip() == "plan/test-plan"
+        # ensure_main_branch 호출
+        ensure_main_branch(repo)
+        # main으로 복귀됐는지 확인
+        cur2 = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=str(repo))
+        assert cur2.stdout.strip() == "main"
+
+    def test_ensure_main_branch_already_main(self, git_repo_main):
+        """B(Boundary): main 상태에서 호출 → no-op, 예외 없음"""
+        repo = git_repo_main
+        ensure_main_branch(repo)  # 예외 없어야 함
+        cur = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=str(repo))
+        assert cur.stdout.strip() == "main"
+
+    def test_ensure_main_branch_checkout_fail_raises(self, git_repo_main, monkeypatch):
+        """E(Error): git checkout main 실패 (returncode != 0) → WorktreeError 발생"""
+        import subprocess as sp_module
+        repo = git_repo_main
+        subprocess.run(["git", "checkout", "-b", "plan/dirty-plan"], capture_output=True, cwd=str(repo))
+        original_run = sp_module.run
+
+        def mock_checkout_fail(cmd, **kwargs):
+            if isinstance(cmd, list) and cmd[:2] == ["git", "checkout"]:
+                class FakeResult:
+                    returncode = 1
+                    stdout = ""
+                    stderr = "error: mock checkout failure"
+                return FakeResult()
+            return original_run(cmd, **kwargs)
+
+        monkeypatch.setattr(sp_module, "run", mock_checkout_fail)
+        with pytest.raises(WorktreeError, match="main으로 복귀 실패"):
+            ensure_main_branch(repo)
+
+    def test_create_calls_ensure_main_branch(self, git_repo_main):
+        """R(Right): plan 브랜치 상태에서 create() 호출 → ensure_main_branch 자동 실행, 성공"""
+        repo = git_repo_main
+        base_dir = repo / ".worktrees"
+        base_dir.mkdir()
+        # plan 브랜치로 이동
+        subprocess.run(["git", "checkout", "-b", "plan/other-plan"], capture_output=True, cwd=str(repo))
+        # create() 호출 — ensure_main_branch가 main으로 복귀 후 worktree 생성해야 함
+        path, branch = WorktreeManager.create("create-from-plan", base_dir)
+        assert path.is_dir()
+        # create 후 메인 레포는 main이어야 함
+        cur = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=str(repo))
+        assert cur.stdout.strip() == "main"
+
+    def test_create_branch_already_exists_reuse(self, git_repo_main):
+        """R(Right): 기존 브랜치 있고 디렉토리 없는 상태에서 create() → 기존 브랜치 재사용"""
+        repo = git_repo_main
+        base_dir = repo / ".worktrees"
+        base_dir.mkdir()
+        # 첫 번째 create
+        path1, branch1 = WorktreeManager.create("reuse-test", base_dir)
+        # 워크트리만 제거 (브랜치 유지)
+        subprocess.run(["git", "worktree", "remove", str(path1), "--force"], capture_output=True, cwd=str(repo))
+        assert not path1.exists()
+        # 두 번째 create — 기존 브랜치 재사용 또는 재생성
+        path2, branch2 = WorktreeManager.create("reuse-test", base_dir)
+        assert path2.is_dir()
+        assert branch2 == branch1
+
+    def test_merge_to_main_finally_restores_main(self, git_repo_main):
+        """E(Error): 머지 실패 시에도 finally에서 main 브랜치 복귀 보장"""
+        repo = git_repo_main
+        base_dir = repo / ".worktrees"
+        base_dir.mkdir()
+        # 충돌 상황 만들기: 같은 파일을 main과 브랜치 양쪽에서 수정
+        (repo / "conflict.txt").write_text("main content")
+        subprocess.run(["git", "add", "conflict.txt"], capture_output=True, cwd=str(repo))
+        subprocess.run(["git", "commit", "-m", "main conflict base"], capture_output=True, cwd=str(repo))
+        subprocess.run(["git", "checkout", "-b", "runner/conflict-test"], capture_output=True, cwd=str(repo))
+        (repo / "conflict.txt").write_text("branch content")
+        subprocess.run(["git", "add", "conflict.txt"], capture_output=True, cwd=str(repo))
+        subprocess.run(["git", "commit", "-m", "branch conflict"], capture_output=True, cwd=str(repo))
+        subprocess.run(["git", "checkout", "main"], capture_output=True, cwd=str(repo))
+        (repo / "conflict.txt").write_text("main diverged content")
+        subprocess.run(["git", "add", "conflict.txt"], capture_output=True, cwd=str(repo))
+        subprocess.run(["git", "commit", "-m", "main diverged"], capture_output=True, cwd=str(repo))
+        # merge 실패 시도
+        result = WorktreeManager.merge_to_main("conflict-test", base_dir, repo, branch="runner/conflict-test")
+        assert result.success is False
+        # finally로 main 복귀 보장됐는지 확인
+        cur = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=str(repo))
+        assert cur.stdout.strip() == "main"
 
 
 # ── 헬퍼: repo 기준으로 list_worktrees() 실행 ─────────────────────────────────
