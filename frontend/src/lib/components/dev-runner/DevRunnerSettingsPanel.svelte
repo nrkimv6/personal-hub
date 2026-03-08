@@ -13,7 +13,7 @@
   let toastTimer: ReturnType<typeof setTimeout>;
   let activeRunnerCount = 0;
   let loading = true;
-  let error = '';
+  let error = $state('');
 
   onMount(async () => {
     try {

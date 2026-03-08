@@ -21,7 +21,7 @@
 	let onlyWithoutSuccess = false;
 
 	let loading = true;
-	let error: string | null = null;
+	let error = $state<string | null>(null);
 
 	// 페이지네이션
 	let currentPage = 1;
@@ -75,7 +75,7 @@
 		userInput: ''
 	});
 	let createLoading = false;
-	let createError: string | null = null;
+	let createError = $state<string | null>(null);
 	let createSuccess = false;
 
 	// Provider별 모델 목록

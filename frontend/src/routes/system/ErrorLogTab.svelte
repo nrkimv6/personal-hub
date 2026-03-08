@@ -194,8 +194,9 @@
   <div class="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">
     <div class="flex flex-wrap gap-4 items-end">
       <div>
-        <label class="block text-xs text-muted-foreground dark:text-muted-foreground mb-1">소스</label>
+        <label for="error-log-source" class="block text-xs text-muted-foreground dark:text-muted-foreground mb-1">소스</label>
         <select
+          id="error-log-source"
           bind:value={source}
           onchange={handleFilterChange}
           class="px-3 py-2 border border-border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-foreground dark:text-white text-sm"
@@ -207,8 +208,9 @@
         </select>
       </div>
       <div>
-        <label class="block text-xs text-muted-foreground dark:text-muted-foreground mb-1">심각도</label>
+        <label for="error-log-severity" class="block text-xs text-muted-foreground dark:text-muted-foreground mb-1">심각도</label>
         <select
+          id="error-log-severity"
           bind:value={severity}
           onchange={handleFilterChange}
           class="px-3 py-2 border border-border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-foreground dark:text-white text-sm"
@@ -220,8 +222,9 @@
         </select>
       </div>
       <div>
-        <label class="block text-xs text-muted-foreground dark:text-muted-foreground mb-1">해결 상태</label>
+        <label for="error-log-resolved" class="block text-xs text-muted-foreground dark:text-muted-foreground mb-1">해결 상태</label>
         <select
+          id="error-log-resolved"
           bind:value={resolved}
           onchange={handleFilterChange}
           class="px-3 py-2 border border-border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-foreground dark:text-white text-sm"
@@ -232,8 +235,9 @@
         </select>
       </div>
       <div class="flex-1">
-        <label class="block text-xs text-muted-foreground dark:text-muted-foreground mb-1">검색</label>
+        <label for="error-log-search" class="block text-xs text-muted-foreground dark:text-muted-foreground mb-1">검색</label>
         <input
+          id="error-log-search"
           type="text"
           bind:value={search}
           onkeyup={(e) => e.key === 'Enter' && handleFilterChange()}
@@ -369,12 +373,14 @@
 
 <!-- 상세 모달 -->
 {#if detailModal}
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onclick={() => detailModal = null}>
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div class="bg-white dark:bg-gray-800 rounded-lg max-w-3xl w-full max-h-[80vh] overflow-auto m-4" onclick={(e) => e.stopPropagation()}>
       <div class="p-6">
         <div class="flex justify-between items-start mb-4">
           <h2 class="text-lg font-bold text-foreground dark:text-white">에러 상세</h2>
-          <button onclick={() => detailModal = null} class="text-muted-foreground hover:text-foreground dark:text-muted-foreground dark:hover:text-gray-200">
+          <button onclick={() => detailModal = null} class="text-muted-foreground hover:text-foreground dark:text-muted-foreground dark:hover:text-gray-200" aria-label="닫기">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
             </svg>

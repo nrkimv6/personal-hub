@@ -412,9 +412,13 @@
 					{@const isLastRun = !isRunning && lastPlanFile === plan.path}
 					{@const isDone = plan.status === '구현완료'}
 					{@const batchStatus = getBatchStatus(plan)}
-					<button
+					<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div
 						onclick={() => handlePlanSelect(plan)}
-						class="group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors w-full
+						onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePlanSelect(plan); } }}
+						role="button"
+						tabindex="0"
+						class="group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors w-full cursor-pointer
 							{batchStatus === 'done' ? 'opacity-40' : batchStatus === 'running' ? 'border border-cyan-300 bg-cyan-50' : isRunning ? 'border border-green-300 bg-green-50' : isLastRun ? 'bg-gray-50 opacity-60' : isDone ? 'hover:bg-gray-50 opacity-50' : 'hover:bg-gray-50'}"
 					>
 						<!-- Running indicator dot -->
@@ -505,7 +509,7 @@
 								title="등록 해제"
 							>×</button>
 						{/if}
-					</button>
+					</div>
 
 					<!-- 인라인 팝업: 요약 + Execute -->
 					{#if selectedPopupPlan?.path === plan.path}
