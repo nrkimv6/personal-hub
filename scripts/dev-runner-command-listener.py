@@ -983,7 +983,7 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
             result = {"success": False, "message": "test_failed", "merge_status": "test_failed", "action": action_name}
         elif exit_code == 3:
             try:
-                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "resolving")
             except Exception:
                 pass
             _pub(f"merge 충돌 (exit_code={exit_code}) — conflict resolver 자동 실행")
@@ -1755,8 +1755,14 @@ def force_kill_plan_runner(runner_id: str, redis_client: redis.Redis) -> Dict:
 def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, command: Dict | None = None) -> None:
     """retry-merge 실제 작업 (백그라운드 스레드에서 실행).
 
-    Redis 키 재발급 전처리 후 _execute_merge_with_lock()에 위임한다.
+    Redis 키 재발급 전처리 → pre_merge_gate + auto_commit_stage → _execute_merge_with_lock()에 위임.
     """
+    import sys as _sys
+    _plan_runner_path = str(PLAN_RUNNER_MODULE_PATH)
+    if _plan_runner_path not in _sys.path:
+        _sys.path.insert(0, _plan_runner_path)
+    from plan_runner.core.stages import pre_merge_gate, auto_commit_stage  # noqa: E402
+
     result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
 
     def _pub(msg: str) -> None:
@@ -1781,6 +1787,43 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
         if not worktree_path_str:
             result = {"success": False, "message": f"worktree_path not found for runner {runner_id}", "action": "retry-merge"}
             return
+
+        # pre_merge_gate + auto_commit_stage (최대 3회 재시도)
+        gate_ok, gate_msg = pre_merge_gate(PROJECT_ROOT)
+        if not gate_ok:
+            if "다른 머지" in gate_msg or "lock" in gate_msg.lower():
+                # 이미 lock이 잡혀있는 경우 — 진행 허용
+                _pub(f"[RETRY-MERGE] pre_merge_gate: lock already held, proceeding ({gate_msg})")
+            elif "dirty" in gate_msg or "git dirty" in gate_msg:
+                # dirty 상태 → auto_commit_stage 최대 3회 재시도
+                _pub(f"[RETRY-MERGE] pre_merge_gate dirty 감지 — auto_commit_stage 시도: {gate_msg}")
+                committed = False
+                for attempt in range(1, 4):
+                    if auto_commit_stage(PROJECT_ROOT, f"chore: pre-merge safety commit (retry-merge attempt {attempt})"):
+                        _pub(f"[RETRY-MERGE] auto_commit_stage 성공 (attempt {attempt})")
+                        committed = True
+                        break
+                    # 이미 clean이면 auto_commit_stage가 False 반환 → gate 재확인
+                    gate_ok2, gate_msg2 = pre_merge_gate(PROJECT_ROOT)
+                    if gate_ok2:
+                        _pub(f"[RETRY-MERGE] pre_merge_gate 재확인 통과 (attempt {attempt})")
+                        committed = True
+                        break
+                    _pub(f"[RETRY-MERGE] auto_commit_stage attempt {attempt} 실패: {gate_msg2}")
+                if not committed:
+                    # 3회 모두 실패
+                    _pub(f"[RETRY-MERGE] pre_merge_gate 3회 실패 — merge 중단: {gate_msg}")
+                    try:
+                        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "error")
+                    except Exception:
+                        pass
+                    result = {"success": False, "message": f"pre_merge_gate 3회 실패: {gate_msg}", "merge_status": "error", "action": "retry-merge"}
+                    return
+            else:
+                # main 브랜치가 아님 등 — gate 실패 그대로 전달하되 진행 (merge_to_main이 자체 처리)
+                _pub(f"[RETRY-MERGE] pre_merge_gate 경고: {gate_msg} — 계속 진행")
+        else:
+            _pub(f"[RETRY-MERGE] pre_merge_gate 통과 — merge 진행")
 
         # lock + subprocess + 결과 처리는 공통 헬퍼에 위임
         merge_result = _execute_merge_with_lock(runner_id, redis_client, action_name="retry-merge")

@@ -247,6 +247,19 @@ class WorktreeManager:
             branch = f"runner/{runner_id}"
         stashed = False
         try:
+            # dirty 방어: merge 전 uncommitted changes 자동 커밋 (안전망)
+            porcelain = subprocess.run(
+                ["git", "status", "--porcelain"],
+                capture_output=True, text=True, encoding="utf-8", cwd=str(project_root)
+            ).stdout.strip()
+            if porcelain:
+                logger.warning(f"[merge_to_main] dirty 상태 감지, 안전망 커밋 실행: {porcelain[:200]}")
+                subprocess.run(["git", "add", "-A"], cwd=str(project_root), capture_output=True)
+                subprocess.run(
+                    ["git", "commit", "-m", "chore: pre-merge safety commit"],
+                    cwd=str(project_root), capture_output=True
+                )
+                # 커밋 실패(nothing to commit 등)는 무시 — merge 자체의 성패가 최종 판단
             # main 체크아웃
             ensure_main_branch(project_root)
             # is-ancestor 사전 체크 — 이미 머지된 브랜치면 skip
@@ -285,6 +298,32 @@ class WorktreeManager:
             else:
                 conflict = "CONFLICT" in result.stdout or "CONFLICT" in result.stderr
                 overwritten = "would be overwritten" in result.stderr or "would be overwritten" in result.stdout
+                # "overwritten" 감지 시 auto-commit 후 1회 retry
+                if overwritten and not conflict:
+                    logger.warning(f"[merge_to_main] 'overwritten' 감지 — auto-commit 후 retry")
+                    subprocess.run(["git", "add", "-A"], cwd=str(project_root), capture_output=True)
+                    subprocess.run(
+                        ["git", "commit", "-m", "chore: pre-merge safety commit (retry)"],
+                        cwd=str(project_root), capture_output=True
+                    )
+                    result = subprocess.run(
+                        ["git", "merge", branch, "--no-ff", "-m", f"merge: {branch}"],
+                        capture_output=True, text=True, encoding="utf-8", cwd=str(project_root)
+                    )
+                    if result.returncode == 0:
+                        stash_pop_conflict = False
+                        if stashed:
+                            pop_r = subprocess.run(["git", "stash", "pop"], capture_output=True, text=True, encoding="utf-8", cwd=str(project_root))
+                            if pop_r.returncode != 0:
+                                stash_pop_conflict = True
+                                logger.warning(f"[WorktreeManager] stash pop 충돌 — drop 실행: {pop_r.stderr[:200]}")
+                                subprocess.run(["git", "stash", "drop"], capture_output=True, cwd=str(project_root))
+                            stashed = False
+                        logger.info(f"[WorktreeManager] 머지 성공 (auto-commit 후 retry): {branch}")
+                        return MergeResult(success=True, conflict=False, stash_pop_conflict=stash_pop_conflict, message="머지 성공 (auto-commit 후 retry)")
+                    # retry도 실패 시 아래 conflict/error 처리 계속
+                    conflict = "CONFLICT" in result.stdout or "CONFLICT" in result.stderr
+                    overwritten = "would be overwritten" in result.stderr or "would be overwritten" in result.stdout
                 # CONFLICT 줄만 추출하여 message에 포함 (resolve에서 컨텍스트로 활용)
                 conflict_lines = [l.strip() for l in result.stdout.splitlines() if l.strip().startswith("CONFLICT")]
                 detail = "\n".join(conflict_lines) if conflict_lines else (result.stderr.strip() + "\n" + result.stdout.strip()).strip()[:500]
