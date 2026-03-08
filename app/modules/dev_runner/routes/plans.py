@@ -107,6 +107,25 @@ async def get_plan_items(encoded_path: str):
     return plan_service.parse_plan_items(path)
 
 
+@router.post("/plans/{encoded_path}/summary", status_code=202)
+async def generate_plan_summary(encoded_path: str, db: Session = Depends(get_db)):
+    """plan 요약 생성 — LLM Worker 큐에 투입 후 202 반환"""
+    try:
+        decoded_path = _decode_path(encoded_path)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid encoded path: {str(e)}")
+
+    if not plan_service.validate_path(decoded_path):
+        raise HTTPException(status_code=403, detail="Path not allowed")
+
+    path = Path(decoded_path)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Plan file not found")
+
+    request_id = await plan_service.generate_summary(path, db)
+    return {"request_id": request_id}
+
+
 class AddPathRequest(BaseModel):
     """경로 등록 요청"""
     path: str
