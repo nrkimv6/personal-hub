@@ -31,6 +31,14 @@ function Write-Log {
 
 Write-Log "Startup API watchdog script started"
 
+# 관리자 권한 확인
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if ($isAdmin) {
+    Write-Log "INFO: Running with Administrator privileges - NSSM process access allowed"
+} else {
+    Write-Log "WARN: Running WITHOUT Administrator privileges - may fail to access Session 0 processes"
+}
+
 # API 서버가 응답할 때까지 대기 (최대 5분)
 $apiUrl = "http://localhost:8001/api/v1/system/status"
 $maxWait = 300  # 5분

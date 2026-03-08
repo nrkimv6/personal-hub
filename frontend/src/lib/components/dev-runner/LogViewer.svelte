@@ -277,6 +277,8 @@
 			consecutiveErrors = 0;
 		};
 		eventSource.onmessage = (event) => {
+			// 메인 채널로 흘러오는 merge 종료 신호는 화면에 표시하지 않음
+			if (event.data === '__MERGE_COMPLETED__') return;
 			addLine(event.data, false);
 		};
 		// Redis 연결 끊김 이벤트 처리

@@ -79,18 +79,60 @@ switch ($Action) {
             Write-Host "    Target:   $ExeStartup" -ForegroundColor Gray
         }
 
-        # API Watchdog 바로가기 생성 (옵션)
+        # API Watchdog Task Scheduler 등록 (옵션) — 관리자 권한 필요
         if ($IncludeApiWatchdog) {
-            $ApiWatchdogShortcut = $WshShell.CreateShortcut($ApiWatchdogShortcutPath)
-            $ApiWatchdogShortcut.TargetPath = $ExeApiWatchdog
-            $ApiWatchdogShortcut.Arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ApiWatchdogStartupScript`""
-            $ApiWatchdogShortcut.WorkingDirectory = $ProjectRoot
-            $ApiWatchdogShortcut.Description = "Monitor Page - API Watchdog (hang detection + staged recovery)"
-            $ApiWatchdogShortcut.Save()
+            # 잔존 시작 프로그램 바로가기 자동 정리
+            if (Test-Path $ApiWatchdogShortcutPath) {
+                Remove-Item $ApiWatchdogShortcutPath -Force
+                Write-Host "[!] Removed legacy startup shortcut: $ApiWatchdogShortcutName" -ForegroundColor Yellow
+            }
 
-            Write-Host "[+] API Watchdog startup registered" -ForegroundColor Green
-            Write-Host "    Location: $ApiWatchdogShortcutPath" -ForegroundColor Gray
-            Write-Host "    Target:   $ExeApiWatchdog" -ForegroundColor Gray
+            $TaskName = "MonitorPage-APIWatchdog"
+
+            # 기존 태스크 제거 후 재등록
+            $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+            if ($existingTask) {
+                Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+                Write-Host "[!] Removed existing Task Scheduler entry: $TaskName" -ForegroundColor Yellow
+            }
+
+            # Action: monitorpage-apiwatchdog.exe (또는 powershell.exe fallback)
+            $TaskAction = New-ScheduledTaskAction `
+                -Execute $ExeApiWatchdog `
+                -Argument "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ApiWatchdogStartupScript`"" `
+                -WorkingDirectory $ProjectRoot
+
+            # Trigger: AtLogOn + 30초 지연
+            $TaskTrigger = New-ScheduledTaskTrigger -AtLogOn
+            $TaskTrigger.Delay = "PT30S"
+
+            # Principal: 현재 사용자, RunLevel Highest (관리자 권한)
+            $CurrentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+            $TaskPrincipal = New-ScheduledTaskPrincipal `
+                -UserId $CurrentUser `
+                -RunLevel Highest `
+                -LogonType Interactive
+
+            # Settings
+            $TaskSettings = New-ScheduledTaskSettingsSet `
+                -ExecutionTimeLimit (New-TimeSpan -Hours 0) `
+                -MultipleInstances IgnoreNew `
+                -StartWhenAvailable
+
+            Register-ScheduledTask `
+                -TaskName $TaskName `
+                -Action $TaskAction `
+                -Trigger $TaskTrigger `
+                -Principal $TaskPrincipal `
+                -Settings $TaskSettings `
+                -Description "Monitor Page - API Watchdog (hang detection + staged recovery, runs as admin)" `
+                -Force | Out-Null
+
+            Write-Host "[+] API Watchdog registered in Task Scheduler" -ForegroundColor Green
+            Write-Host "    Task:     $TaskName" -ForegroundColor Gray
+            Write-Host "    Trigger:  AtLogOn + 30s delay" -ForegroundColor Gray
+            Write-Host "    RunLevel: Highest (Administrator)" -ForegroundColor Gray
+            Write-Host "    Execute:  $ExeApiWatchdog" -ForegroundColor Gray
         }
 
         Write-Host ""
@@ -127,12 +169,20 @@ switch ($Action) {
         }
 
         if ($IncludeApiWatchdog) {
-            if (Test-Path $ApiWatchdogShortcutPath) {
-                Remove-Item $ApiWatchdogShortcutPath -Force
-                Write-Host "[+] API Watchdog startup removed" -ForegroundColor Green
+            $TaskName = "MonitorPage-APIWatchdog"
+            $taskExists = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+            if ($taskExists) {
+                Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+                Write-Host "[+] API Watchdog Task Scheduler entry removed: $TaskName" -ForegroundColor Green
                 $removed = $true
             } else {
-                Write-Host "[!] API Watchdog startup not registered" -ForegroundColor Yellow
+                Write-Host "[!] API Watchdog Task Scheduler entry not found: $TaskName" -ForegroundColor Yellow
+            }
+            # 잔존 바로가기도 함께 정리
+            if (Test-Path $ApiWatchdogShortcutPath) {
+                Remove-Item $ApiWatchdogShortcutPath -Force
+                Write-Host "[+] Legacy API Watchdog startup shortcut removed" -ForegroundColor Green
+                $removed = $true
             }
         }
     }
@@ -156,12 +206,22 @@ switch ($Action) {
             Write-Host "    [-] Not registered" -ForegroundColor Yellow
         }
 
-        # API Watchdog
-        Write-Host "  API Watchdog:" -ForegroundColor White
-        if (Test-Path $ApiWatchdogShortcutPath) {
-            Write-Host "    [+] Registered" -ForegroundColor Green
+        # API Watchdog (Task Scheduler)
+        Write-Host "  API Watchdog (Task Scheduler):" -ForegroundColor White
+        $TaskName = "MonitorPage-APIWatchdog"
+        $scheduledTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        if ($scheduledTask) {
+            $taskState = $scheduledTask.State
+            $color = if ($taskState -eq "Ready" -or $taskState -eq "Running") { "Green" } else { "Yellow" }
+            Write-Host "    [+] Registered (State: $taskState)" -ForegroundColor $color
+            $principal = $scheduledTask.Principal
+            Write-Host "        RunLevel: $($principal.RunLevel)" -ForegroundColor Gray
         } else {
             Write-Host "    [-] Not registered" -ForegroundColor Yellow
+        }
+        # 잔존 바로가기 경고
+        if (Test-Path $ApiWatchdogShortcutPath) {
+            Write-Host "    [!] Legacy shortcut still exists: $ApiWatchdogShortcutPath" -ForegroundColor Red
         }
         Write-Host ""
 
