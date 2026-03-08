@@ -617,7 +617,8 @@
 								<MergeQueuePanel />
 							<div class="border-t border-gray-200 mt-2"><WorkflowList /></div>
 							</div>
-																	</div>
+						{/if}
+					</div>
 				</div>
 
 				<!-- 우측 영역: Runner 탭 바 + Runner/Logs/Merge 콘텐츠 -->
