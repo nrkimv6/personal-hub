@@ -983,7 +983,7 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
             result = {"success": False, "message": "test_failed", "merge_status": "test_failed", "action": action_name}
         elif exit_code == 3:
             try:
-                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "conflict")
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "resolving")
             except Exception:
                 pass
             _pub(f"merge 충돌 (exit_code={exit_code}) — conflict resolver 자동 실행")
