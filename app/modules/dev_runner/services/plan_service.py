@@ -243,6 +243,11 @@ class PlanService:
                     status = self.get_plan_status(p)
                     is_ignored = self._is_ignored_plan(p, status)
                     if include_ignored or not is_ignored:
+                        try:
+                            content = p.read_text(encoding="utf-8")
+                            summary = self._extract_summary(content)
+                        except Exception:
+                            summary = None
                         results.append(
                             PlanFileResponse(
                                 path=str(p),
@@ -252,6 +257,7 @@ class PlanService:
                                 source=self._resolve_source(p.parent),
                                 ignored=is_ignored,
                                 path_type="file",
+                                summary=summary,
                             )
                         )
 
@@ -359,6 +365,12 @@ class PlanService:
             status = self.get_plan_status(plan_file)
             is_ignored = self._is_ignored_plan(plan_file, status)
 
+            try:
+                content = plan_file.read_text(encoding="utf-8")
+                summary = self._extract_summary(content)
+            except Exception:
+                summary = None
+
             item = PlanFileResponse(
                 path=str(plan_file),
                 filename=plan_file.name,
@@ -367,6 +379,7 @@ class PlanService:
                 source=source,
                 ignored=is_ignored,
                 path_type=path_type,
+                summary=summary,
             )
             scanned_items.append(item)
 
@@ -1354,6 +1367,90 @@ class PlanService:
         file_path.write_text("".join(lines), encoding="utf-8")
         self.invalidate_plans_cache()
         return new_status
+
+    def _insert_summary_to_plan(self, path: Path, summary_text: str) -> None:
+        """plan 파일의 헤더 블록쿼트에 `> 요약:` 줄을 삽입(또는 교체)한다."""
+        content = path.read_text(encoding="utf-8")
+        lines = content.split("\n")
+
+        # 기존 `> 요약:` 줄 교체
+        for i, line in enumerate(lines):
+            if re.match(r'^>\s*요약:', line):
+                lines[i] = f"> 요약: {summary_text}"
+                path.write_text("\n".join(lines), encoding="utf-8")
+                self.invalidate_plans_cache()
+                return
+
+        # 없으면 첫 번째 블록쿼트 줄 뒤에 삽입 (없으면 h1 제목 다음에 삽입)
+        insert_idx = None
+        for i, line in enumerate(lines):
+            if line.startswith(">"):
+                insert_idx = i + 1
+                break
+        if insert_idx is None:
+            for i, line in enumerate(lines):
+                if line.startswith("# "):
+                    insert_idx = i + 1
+                    break
+        if insert_idx is None:
+            insert_idx = 0
+        lines.insert(insert_idx, f"> 요약: {summary_text}")
+        path.write_text("\n".join(lines), encoding="utf-8")
+        self.invalidate_plans_cache()
+
+    async def generate_summary(self, path: Path, db) -> int:
+        """plan 파일 내용을 LLM으로 요약하여 `> 요약:` 헤더에 삽입한다.
+
+        Returns:
+            LLMRequest.id (request_id)
+        """
+        from app.modules.claude_worker.services.llm_service import LLMService
+
+        content = path.read_text(encoding="utf-8")
+        prompt = (
+            "다음 plan 문서를 읽고 1-2 문장으로 핵심 목적을 한국어로 요약해줘. "
+            "코드블록 없이 일반 텍스트만 출력해.\n\n"
+            f"{content[:3000]}"
+        )
+
+        llm_svc = LLMService(db)
+        request = llm_svc.enqueue(
+            caller_type="dev_runner",
+            caller_id=str(path),
+            prompt=prompt,
+            requested_by="api",
+            request_source="plan_summary",
+            provider="claude",
+            model="",
+            queue_name="utility",
+        )
+        db.commit()
+
+        # 백그라운드에서 완료 후 plan 파일에 요약 삽입
+        plan_path = path
+        request_id = request.id
+        plan_svc = self
+
+        async def _write_back():
+            import asyncio
+            from app.database import SessionLocal
+            for _ in range(60):  # 최대 5분 대기 (5초 x 60)
+                await asyncio.sleep(5)
+                with SessionLocal() as bg_db:
+                    from app.modules.claude_worker.models.llm_request import LLMRequest
+                    req = bg_db.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+                    if req and req.status == "completed" and req.raw_response:
+                        summary_text = req.raw_response.strip()
+                        if summary_text:
+                            plan_svc._insert_summary_to_plan(plan_path, summary_text)
+                        return
+                    if req and req.status in ("failed", "cancelled"):
+                        return
+
+        import asyncio
+        asyncio.create_task(_write_back())
+
+        return request_id
 
 
 # 싱글톤 인스턴스

@@ -71,6 +71,7 @@ class PlanFileResponse(BaseModel):
     source: str = "common"  # 경로 기반 자동 결정 (common, 프로젝트명, 폴더명)
     ignored: bool = False  # 완료/빈 plan
     path_type: Optional[str] = None  # "file" | "folder" | None (등록된 경로일 때만 설정)
+    summary: Optional[str] = None  # > 요약: 헤더에서 추출한 요약 텍스트
 
 
 class RegisteredPathResponse(BaseModel):

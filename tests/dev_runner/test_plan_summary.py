@@ -1,9 +1,9 @@
 """
-plan_service._extract_summary 단위 테스트
+plan_service._extract_summary + list_plans summary 단위 테스트
 """
 import pytest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock, AsyncMock
 from app.modules.dev_runner.services.plan_service import PlanService
 
 
@@ -211,3 +211,100 @@ def test_parse_summary_TODO_OVERRIDE(tmp_path):
 
     assert detail.summary is not None
     assert "원본 파일에만 있는 요약" in detail.summary
+
+# ============================================================
+# 신규 TC: list_plans summary 포함 확인 + generate_summary
+# ============================================================
+
+def test_plan_service_extract_summary_right():
+    """R: > 요약: 패턴이 있는 content에서 정상 summary 문자열 추출."""
+    content = "# Plan\n\n> 요약: 이것은 요약입니다.\n\n## 내용\n"
+    result = PlanService._extract_summary(content)
+    assert result == "이것은 요약입니다."
+
+
+def test_plan_service_extract_summary_boundary_empty():
+    """B: 요약 헤더가 없는 plan content에서 None 반환."""
+    content = "# Plan\n\n## Phase 1\n\n1. [ ] 작업\n"
+    result = PlanService._extract_summary(content)
+    assert result is None
+
+
+def test_plan_service_extract_summary_error_malformed():
+    """E: 빈 문자열 및 None에 준하는 content 처리 — 예외 없이 None 반환."""
+    assert PlanService._extract_summary("") is None
+    assert PlanService._extract_summary("   ") is None
+
+
+def test_plan_service_list_plans_includes_summary(tmp_path):
+    """R: _scan_all_plans() 결과의 각 PlanFileResponse에 summary 필드 포함."""
+    plan_file = tmp_path / "2026-03-08_test_plan.md"
+    plan_file.write_text(
+        "# Test Plan\n\n> 요약: 테스트 요약 텍스트\n\n## Phase 1\n\n- [ ] 작업\n",
+        encoding="utf-8",
+    )
+
+    service = PlanService()
+    service._registered_paths = [{"path": str(tmp_path), "type": "plan"}]
+    results = service._scan_all_plans(include_ignored=True)
+
+    matching = [r for r in results if r.filename == plan_file.name]
+    assert len(matching) == 1
+    assert matching[0].summary == "테스트 요약 텍스트"
+
+
+def test_plan_service_list_plans_no_summary_returns_none(tmp_path):
+    """B: 요약 없는 plan에서 summary 필드가 None."""
+    plan_file = tmp_path / "2026-03-08_no_summary.md"
+    plan_file.write_text(
+        "# No Summary Plan\n\n## Phase 1\n\n- [ ] 작업\n",
+        encoding="utf-8",
+    )
+
+    service = PlanService()
+    service._registered_paths = [{"path": str(tmp_path), "type": "plan"}]
+    results = service._scan_all_plans(include_ignored=True)
+
+    matching = [r for r in results if r.filename == plan_file.name]
+    assert len(matching) == 1
+    assert matching[0].summary is None
+
+
+def test_insert_summary_to_plan_right(tmp_path):
+    """R: _insert_summary_to_plan이 > 요약: 줄을 삽입한다."""
+    plan_file = tmp_path / "test.md"
+    plan_file.write_text("# Plan\n\n> 상태: 초안\n\n## 내용\n", encoding="utf-8")
+
+    service = PlanService()
+    service._insert_summary_to_plan(plan_file, "새 요약 텍스트")
+
+    content = plan_file.read_text(encoding="utf-8")
+    assert "> 요약: 새 요약 텍스트" in content
+
+
+def test_insert_summary_to_plan_boundary_already_exists(tmp_path):
+    """B: 이미 > 요약: 있을 때 기존 줄을 교체한다."""
+    plan_file = tmp_path / "test.md"
+    plan_file.write_text("# Plan\n\n> 요약: 기존 요약\n\n## 내용\n", encoding="utf-8")
+
+    service = PlanService()
+    service._insert_summary_to_plan(plan_file, "업데이트된 요약")
+
+    content = plan_file.read_text(encoding="utf-8")
+    assert "> 요약: 업데이트된 요약" in content
+    assert "기존 요약" not in content
+    assert content.count("> 요약:") == 1
+
+
+def test_generate_summary_error_file_not_found():
+    """E: 존재하지 않는 plan 경로 시 FileNotFoundError 발생 (read_text에서)."""
+    import asyncio
+
+    service = PlanService()
+    non_existent = Path("/nonexistent/path/plan.md")
+    mock_db = MagicMock()
+
+    with pytest.raises(FileNotFoundError):
+        asyncio.get_event_loop().run_until_complete(
+            service.generate_summary(non_existent, mock_db)
+        )

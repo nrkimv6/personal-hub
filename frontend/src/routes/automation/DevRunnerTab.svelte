@@ -610,7 +610,7 @@
 							</div>
 						{:else if taskHistoryTab === 'plans'}
 							<div class="px-4 pb-4 h-full overflow-hidden flex flex-col">
-								<PlanList {plans} onPlansChange={fetchPlans} runningPlanFile={runStatus?.plan_file ?? null} {lastPlanFile} {batchPlans} onPlanSelect={(path) => { selectedPlanPath = path; }} />
+								<PlanList {plans} onPlansChange={fetchPlans} runningPlanFile={runStatus?.plan_file ?? null} {lastPlanFile} {batchPlans} onPlanSelect={(path) => { selectedPlanPath = path; }} onExecute={(path) => { selectedPlanPath = path; showExecutionModal = true; }} />
 							</div>
 						{:else if taskHistoryTab === 'merge'}
 							<div class="h-full overflow-hidden">

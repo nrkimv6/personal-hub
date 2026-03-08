@@ -63,6 +63,7 @@ export interface PlanFileResponse {
 	source: string;
 	ignored: boolean;
 	path_type: 'file' | 'folder' | null;
+	summary?: string | null;  // > 요약: 헤더에서 추출한 요약 텍스트
 }
 
 export interface RegisteredPathResponse {
@@ -353,7 +354,10 @@ export const devRunnerPlanApi = {
 		devRunnerRequest<{ path: string; status: string }>(`/plans/${encodedPath}/status`, {
 			method: 'PATCH',
 			body: JSON.stringify({ status })
-		})
+		}),
+
+	generateSummary: (encodedPath: string) =>
+		devRunnerRequest<{ request_id: number }>(`/plans/${encodedPath}/summary`, { method: 'POST' })
 };
 
 // ============================================================
