@@ -1,11 +1,12 @@
 <script lang="ts">
-  export let striped: boolean = false;
-  export let hoverable: boolean = true;
+  import type { Snippet } from 'svelte';
+
+  let { children }: { children: Snippet } = $props();
 </script>
 
 <div class="overflow-x-auto rounded-md border border-border">
   <table class="w-full border-collapse">
-    <slot />
+    {@render children()}
   </table>
 </div>
 
