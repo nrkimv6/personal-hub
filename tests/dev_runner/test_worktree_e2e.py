@@ -11,13 +11,15 @@ from worktree_manager import WorktreeManager, MergeResult
 
 @pytest.fixture
 def tmp_git_repo(tmp_path):
-    """임시 git 저장소 생성"""
+    """임시 git 저장소 생성 (main 브랜치)"""
     subprocess.run(["git", "init", str(tmp_path)], capture_output=True)
     subprocess.run(["git", "config", "user.email", "test@test.com"], capture_output=True, cwd=str(tmp_path))
     subprocess.run(["git", "config", "user.name", "Test"], capture_output=True, cwd=str(tmp_path))
+    subprocess.run(["git", "config", "commit.gpgsign", "false"], capture_output=True, cwd=str(tmp_path))
     (tmp_path / "README.md").write_text("test")
     subprocess.run(["git", "add", "."], capture_output=True, cwd=str(tmp_path))
     subprocess.run(["git", "commit", "-m", "init"], capture_output=True, cwd=str(tmp_path))
+    subprocess.run(["git", "branch", "-m", "main"], capture_output=True, cwd=str(tmp_path))
     return tmp_path
 
 
@@ -146,3 +148,66 @@ class TestWorktreeE2E:
             capture_output=True, text=True, cwd=str(repo)
         )
         assert "runner/e2e_rm" not in br_after.stdout
+
+    def test_e2e_5_create_while_on_plan_branch(self, worktrees_base):
+        """E2E-5: 메인 레포가 plan 브랜치인 상태에서 create() → ensure_main_branch 자동 복구 → worktree 정상 생성"""
+        base_dir, repo = worktrees_base
+        # 메인 레포를 plan 브랜치로 이동
+        subprocess.run(["git", "checkout", "-b", "plan/drift-test"], capture_output=True, cwd=str(repo))
+        cur = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=str(repo))
+        assert cur.stdout.strip() == "plan/drift-test"
+        # create() 호출 — ensure_main_branch가 자동 복구해야 함
+        wt_path, branch = WorktreeManager.create("e2e_drift", base_dir)
+        assert wt_path.is_dir()
+        # 메인 레포는 main으로 복귀됐어야 함
+        cur2 = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=str(repo))
+        assert cur2.stdout.strip() == "main"
+
+    def test_e2e_6_full_lifecycle_after_branch_drift(self, worktrees_base):
+        """E2E-6: plan 브랜치 상태에서 전체 lifecycle (create→커밋→merge→remove) + 최종 main 확인"""
+        base_dir, repo = worktrees_base
+        # plan 브랜치로 drift
+        subprocess.run(["git", "checkout", "-b", "plan/lifecycle-drift"], capture_output=True, cwd=str(repo))
+        # create
+        wt_path, branch = WorktreeManager.create("e2e_lifecycle", base_dir)
+        assert wt_path.is_dir()
+        # 파일 추가 + 커밋
+        (wt_path / "lifecycle.py").write_text("x = 1")
+        subprocess.run(["git", "add", "lifecycle.py"], capture_output=True, cwd=str(wt_path))
+        subprocess.run(["git", "commit", "-m", "add lifecycle.py"], capture_output=True, cwd=str(wt_path))
+        # merge
+        result = WorktreeManager.merge_to_main("e2e_lifecycle", base_dir, repo)
+        assert result.success is True
+        # main에 파일 반영 확인
+        assert (repo / "lifecycle.py").exists()
+        # remove
+        WorktreeManager.remove("e2e_lifecycle", base_dir)
+        assert not wt_path.exists()
+        # 최종 main 브랜치 확인
+        cur = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=str(repo))
+        assert cur.stdout.strip() == "main"
+
+    def test_e2e_7_merge_failure_restores_main(self, worktrees_base):
+        """E2E-7: 머지 충돌 발생 시에도 finally로 main 브랜치 복귀 보장"""
+        base_dir, repo = worktrees_base
+        # 충돌 상황: main과 branch 모두 같은 파일 수정
+        (repo / "conflict.txt").write_text("main v1")
+        subprocess.run(["git", "add", "conflict.txt"], capture_output=True, cwd=str(repo))
+        subprocess.run(["git", "commit", "-m", "main v1"], capture_output=True, cwd=str(repo))
+        # branch 생성 후 다르게 수정
+        subprocess.run(["git", "checkout", "-b", "runner/e2e_conflict"], capture_output=True, cwd=str(repo))
+        (repo / "conflict.txt").write_text("branch v2")
+        subprocess.run(["git", "add", "conflict.txt"], capture_output=True, cwd=str(repo))
+        subprocess.run(["git", "commit", "-m", "branch v2"], capture_output=True, cwd=str(repo))
+        subprocess.run(["git", "checkout", "main"], capture_output=True, cwd=str(repo))
+        # main에서 같은 파일 다르게 수정
+        (repo / "conflict.txt").write_text("main v3 diverged")
+        subprocess.run(["git", "add", "conflict.txt"], capture_output=True, cwd=str(repo))
+        subprocess.run(["git", "commit", "-m", "main v3 diverged"], capture_output=True, cwd=str(repo))
+        # merge → 충돌
+        result = WorktreeManager.merge_to_main("e2e_conflict", base_dir, repo, branch="runner/e2e_conflict")
+        assert result.success is False
+        assert result.conflict is True
+        # finally 보호: main 브랜치에 있어야 함
+        cur = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=str(repo))
+        assert cur.stdout.strip() == "main"
