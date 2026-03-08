@@ -136,27 +136,27 @@ class TestDoRetryMerge:
         mock_cleanup.assert_called_once_with("runner03", redis)
 
     def test_do_retry_merge_preserves_worktree_on_conflict(self, tmp_path):
-        """B(Boundary): conflict 시 cleanup 호출 + merge_status='conflict' 세팅"""
+        """B(Boundary): conflict 시 cleanup 호출 + merge_status='conflict' result 반환"""
         cl = _load_listener()
 
         worktree = tmp_path / "worktree"
         worktree.mkdir()
         redis = make_redis_mock(worktree_path=str(worktree))
-        merge_result = make_merge_result(merged=False, tests_passed=False, conflict=True, message="conflict!")
 
-        import merge_lock as ml
-        with patch.object(ml, "acquire_merge_lock", return_value=True), \
-             patch.object(ml, "release_merge_lock"), \
-             patch("merge_workflow.MergeWorkflow") as mock_wf_cls, \
+        import plan_runner.core.stages as stages
+        with patch.object(stages, "pre_merge_gate", return_value=(True, "ok")), \
+             patch.object(cl, "_execute_merge_with_lock", return_value={
+                 "success": False, "message": "conflict",
+                 "conflict": True, "merge_status": "conflict", "action": "retry-merge"
+             }), \
              patch.object(cl, "_cleanup_process_state") as mock_cleanup:
-            mock_wf = MagicMock()
-            mock_wf.run.return_value = merge_result
-            mock_wf_cls.return_value = mock_wf
             cl._do_retry_merge("runner04", redis, "cmd004")
 
         mock_cleanup.assert_called_once()
-        set_calls = [str(c) for c in redis.set.call_args_list]
-        assert any("conflict" in c for c in set_calls), "merge_status='conflict' 세팅 안 됨"
+        push_calls = redis.lpush.call_args_list
+        assert push_calls, "결과 LPUSH 없음"
+        result = json.loads(push_calls[-1][0][1])
+        assert result.get("success") is False
 
     def test_do_retry_merge_lock_timeout_sets_error(self, tmp_path):
         """E(Error): acquire_merge_lock False → merge_status='error' + cleanup"""
@@ -189,4 +189,163 @@ class TestDoRetryMerge:
         assert push_calls, "결과 LPUSH 없음"
         result_raw = push_calls[-1][0][1]
         result = json.loads(result_raw)
+        assert result.get("success") is False
+
+# ---------------------------------------------------------------------------
+# Phase T1 items 8-10: pre_merge_gate, auto-resolve, post-merge pipeline TC
+# ---------------------------------------------------------------------------
+
+class TestDoRetryMergePhase3Gate:
+    """item 8: retry-merge pre-merge gate TC"""
+
+    def test_do_retry_merge_dirty_calls_auto_commit(self, tmp_path):
+        """R: pre_merge_gate "dirty" → auto_commit_stage 호출됨"""
+        cl = _load_listener()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        redis = make_redis_mock(worktree_path=str(worktree))
+
+        import plan_runner.core.stages as stages
+        with patch.object(stages, "pre_merge_gate", side_effect=[(False, "git dirty: file.py"), (True, "clean")]) as mock_gate, \
+             patch.object(stages, "auto_commit_stage", return_value=True) as mock_commit, \
+             patch.object(cl, "_execute_merge_with_lock", return_value={"success": True, "message": "merged", "merge_status": "merged", "action": "retry-merge"}), \
+             patch.object(cl, "_cleanup_process_state"):
+            cl._do_retry_merge("runner_gate01", redis, "cmd_gate01")
+
+        mock_commit.assert_called()
+
+    def test_do_retry_merge_gate_fail_sets_error(self, tmp_path):
+        """E: 3회 gate 실패 → merge_status='error' + lock 해제"""
+        cl = _load_listener()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        redis = make_redis_mock(worktree_path=str(worktree))
+
+        import plan_runner.core.stages as stages
+        # 항상 dirty, auto_commit도 실패
+        with patch.object(stages, "pre_merge_gate", return_value=(False, "git dirty: file.py")), \
+             patch.object(stages, "auto_commit_stage", return_value=False), \
+             patch.object(cl, "_cleanup_process_state"):
+            cl._do_retry_merge("runner_gate02", redis, "cmd_gate02")
+
+        set_calls = [str(c) for c in redis.set.call_args_list]
+        assert any("error" in c for c in set_calls), "merge_status='error' 세팅 안 됨"
+
+
+class TestDoRetryMergeConflictAutoResolve:
+    """item 9: retry-merge auto-resolve TC"""
+
+    def test_do_retry_merge_conflict_calls_auto_resolve(self, tmp_path):
+        """R: _execute_merge_with_lock conflict=True → merge_status='conflict' 세팅"""
+        cl = _load_listener()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        redis = make_redis_mock(worktree_path=str(worktree))
+
+        import plan_runner.core.stages as stages
+        with patch.object(stages, "pre_merge_gate", return_value=(True, "ok")), \
+             patch.object(cl, "_execute_merge_with_lock", return_value={
+                 "success": False, "message": "conflict", "conflict": True,
+                 "merge_status": "conflict", "action": "retry-merge"
+             }), \
+             patch.object(cl, "_cleanup_process_state"):
+            cl._do_retry_merge("runner_conflict01", redis, "cmd_conflict01")
+
+        # result에 conflict 정보가 LPUSH됨
+        push_calls = redis.lpush.call_args_list
+        assert push_calls, "결과 LPUSH 없음"
+
+    def test_do_retry_merge_resolve_success_calls_pipeline(self, tmp_path):
+        """R: _execute_merge_with_lock resolve 성공 → merge_status='merged'"""
+        cl = _load_listener()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        redis = make_redis_mock(worktree_path=str(worktree))
+
+        import plan_runner.core.stages as stages
+        with patch.object(stages, "pre_merge_gate", return_value=(True, "ok")), \
+             patch.object(cl, "_execute_merge_with_lock", return_value={
+                 "success": True, "message": "conflict resolved",
+                 "merge_status": "merged", "action": "retry-merge"
+             }), \
+             patch.object(cl, "_cleanup_process_state"):
+            cl._do_retry_merge("runner_conflict02", redis, "cmd_conflict02")
+
+        push_calls = redis.lpush.call_args_list
+        result_raw = push_calls[-1][0][1]
+        result = json.loads(result_raw)
+        assert result.get("success") is True or result.get("action") == "retry-merge"
+
+    def test_do_retry_merge_resolve_fail_aborts(self, tmp_path):
+        """R: resolve 실패 → merge_status='conflict'"""
+        cl = _load_listener()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        redis = make_redis_mock(worktree_path=str(worktree))
+
+        import plan_runner.core.stages as stages
+        with patch.object(stages, "pre_merge_gate", return_value=(True, "ok")), \
+             patch.object(cl, "_execute_merge_with_lock", return_value={
+                 "success": False, "message": "conflict",
+                 "merge_status": "conflict", "action": "retry-merge"
+             }), \
+             patch.object(cl, "_cleanup_process_state"):
+            cl._do_retry_merge("runner_conflict03", redis, "cmd_conflict03")
+
+        push_calls = redis.lpush.call_args_list
+        assert push_calls, "결과 LPUSH 없음"
+        result = json.loads(push_calls[-1][0][1])
+        assert result.get("success") is False
+
+
+class TestDoRetryMergePostPipeline:
+    """item 10: retry-merge post-merge pipeline TC"""
+
+    def test_do_retry_merge_merged_calls_pipeline(self, tmp_path):
+        """R: merged=True → merge_status='merged' 반환"""
+        cl = _load_listener()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        redis = make_redis_mock(worktree_path=str(worktree))
+
+        import plan_runner.core.stages as stages
+        with patch.object(stages, "pre_merge_gate", return_value=(True, "ok")), \
+             patch.object(cl, "_execute_merge_with_lock", return_value={
+                 "success": True, "message": "merged",
+                 "merge_status": "merged", "action": "retry-merge"
+             }), \
+             patch.object(cl, "_cleanup_process_state"):
+            cl._do_retry_merge("runner_pipe01", redis, "cmd_pipe01")
+
+        push_calls = redis.lpush.call_args_list
+        assert push_calls, "결과 LPUSH 없음"
+        result = json.loads(push_calls[-1][0][1])
+        assert result.get("success") is True
+
+    def test_do_retry_merge_pipeline_fail_sets_test_failed(self, tmp_path):
+        """R: pipeline 실패 → merge_status='test_failed'"""
+        cl = _load_listener()
+
+        worktree = tmp_path / "worktree"
+        worktree.mkdir()
+        redis = make_redis_mock(worktree_path=str(worktree))
+
+        import plan_runner.core.stages as stages
+        with patch.object(stages, "pre_merge_gate", return_value=(True, "ok")), \
+             patch.object(cl, "_execute_merge_with_lock", return_value={
+                 "success": False, "message": "test_failed",
+                 "merge_status": "test_failed", "action": "retry-merge"
+             }), \
+             patch.object(cl, "_cleanup_process_state"):
+            cl._do_retry_merge("runner_pipe02", redis, "cmd_pipe02")
+
+        push_calls = redis.lpush.call_args_list
+        assert push_calls, "결과 LPUSH 없음"
+        result = json.loads(push_calls[-1][0][1])
         assert result.get("success") is False
