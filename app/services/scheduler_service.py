@@ -22,6 +22,7 @@ class SchedulerService:
         "DailyMaintenance",
         "WeeklyVacuum",
         "LogCleanup",
+        "APIWatchdog",
     ])
 
     def _validate_task_name(self, name: str) -> None:
