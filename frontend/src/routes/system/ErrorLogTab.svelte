@@ -373,10 +373,8 @@
 
 <!-- 상세 모달 -->
 {#if detailModal}
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onclick={() => detailModal = null}>
-    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-    <div class="bg-white dark:bg-gray-800 rounded-lg max-w-3xl w-full max-h-[80vh] overflow-auto m-4" onclick={(e) => e.stopPropagation()}>
+  <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" role="button" tabindex="-1" onclick={() => detailModal = null} onkeydown={(e) => { if (e.key === 'Escape') detailModal = null; }}>
+    <div class="bg-white dark:bg-gray-800 rounded-lg max-w-3xl w-full max-h-[80vh] overflow-auto m-4" role="dialog" onclick={(e) => e.stopPropagation()}>
       <div class="p-6">
         <div class="flex justify-between items-start mb-4">
           <h2 class="text-lg font-bold text-foreground dark:text-white">에러 상세</h2>
