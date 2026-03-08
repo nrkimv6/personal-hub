@@ -157,3 +157,79 @@ class TestWorktreeHTTP:
         data = response.json()
         assert "runner_id" in data
         assert data["running"] is True
+
+    def test_http_run_with_plan_on_wrong_branch(self, api_client):
+        """HTTP T4-1: POST /run with plan_file → lpush 인자 JSON에 plan_file 포함 확인"""
+        client, fake_sync, fake_async = api_client
+
+        captured_commands = []
+
+        with patch(
+            "app.modules.dev_runner.services.executor_service.ExecutorService._check_redis_and_listener",
+            new_callable=AsyncMock
+        ):
+            with patch("app.modules.dev_runner.services.executor_service.config") as mock_cfg:
+                mock_cfg.MAX_CONCURRENT_RUNNERS = 3
+
+                async def fake_scard(key):
+                    return 0
+
+                async def fake_lpush(key, value):
+                    captured_commands.append((key, value))
+                    return 1
+
+                async def fake_brpop(key, timeout=0):
+                    return (key, json.dumps({"success": True}))
+
+                async def fake_get(key):
+                    if ":pid" in key:
+                        return "12345"
+                    if ":plan_file" in key:
+                        return "test-branch.md"
+                    if ":start_time" in key:
+                        return "2026-03-08T00:00:00"
+                    return None
+
+                with patch.object(type(fake_async), "scard", side_effect=fake_scard), \
+                     patch.object(type(fake_async), "lpush", side_effect=fake_lpush), \
+                     patch.object(type(fake_async), "brpop", side_effect=fake_brpop), \
+                     patch.object(type(fake_async), "get", side_effect=fake_get):
+                    response = client.post(
+                        "/api/v1/dev-runner/run",
+                        json={"plan_file": "test-branch.md"}
+                    )
+
+        assert response.status_code == 200
+
+        # lpush가 한 번 이상 호출되었는지 확인
+        assert len(captured_commands) >= 1, "lpush가 호출되지 않음"
+
+        # 첫 번째 lpush 인자(Redis command JSON)에 plan_file이 포함되는지 확인
+        _key, raw_value = captured_commands[0]
+        command = json.loads(raw_value)
+        assert command.get("plan_file") == "test-branch.md", (
+            f"plan_file이 Redis command에 없거나 다름: {command}"
+        )
+
+    def test_http_get_runners_branch_field_populated(self, api_client):
+        """HTTP T4-2: GET /runners → branch 필드가 Redis 값으로 반환되는지 확인"""
+        client, fake_sync, fake_async = api_client
+
+        # active runner + branch 키 세팅
+        fake_sync.sadd("plan-runner:active_runners", "brtest")
+        fake_sync.set("plan-runner:runners:brtest:status", "running")
+        fake_sync.set("plan-runner:runners:brtest:branch", "plan/2026-03-08_test")
+        fake_sync.set("plan-runner:runners:brtest:worktree_path", "/tmp/wt/brtest")
+
+        response = client.get("/api/v1/dev-runner/runners")
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) >= 1
+
+        # brtest runner 찾기
+        runner = next((r for r in data if r.get("runner_id") == "brtest"), None)
+        assert runner is not None, f"brtest runner가 응답에 없음: {data}"
+        assert runner.get("branch") == "plan/2026-03-08_test", (
+            f"branch 필드가 올바르지 않음: {runner.get('branch')}"
+        )
