@@ -79,24 +79,24 @@ function Write-WatchdogLog {
 function Write-ProcessStatus {
     param(
         [bool]$Healthy,
-        [int]$Pid = 0
+        [int]$ProcessId = 0
     )
 
     try {
         $status = @{
             timestamp = (Get-Date -Format "yyyy-MM-ddTHH:mm:ss")
             healthy = $Healthy
-            pid = $Pid
+            pid = $ProcessId
             connections = @{ listen = 0; established = 0; close_wait = 0; time_wait = 0 }
             memory_mb = 0
             cpu_seconds = 0
             uptime_hours = 0
         }
 
-        if ($Pid -gt 0) {
+        if ($ProcessId -gt 0) {
             # TCP 연결 상태 수집
             try {
-                $conns = Get-NetTCPConnection -OwningProcess $Pid -ErrorAction SilentlyContinue
+                $conns = Get-NetTCPConnection -OwningProcess $ProcessId -ErrorAction SilentlyContinue
                 if ($conns) {
                     $grouped = $conns | Group-Object State
                     foreach ($g in $grouped) {
@@ -114,7 +114,7 @@ function Write-ProcessStatus {
 
             # 프로세스 정보 수집
             try {
-                $proc = Get-Process -Id $Pid -ErrorAction SilentlyContinue
+                $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
                 if ($proc) {
                     $status.memory_mb = [math]::Round($proc.WorkingSet64 / 1MB, 1)
                     $status.cpu_seconds = [math]::Round($proc.CPU, 1)
@@ -258,9 +258,13 @@ while ($true) {
 
     # 프로세스 상태 JSON 기록 (성공/실패 무관)
     $apiPid = 0
-    $conn = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue | Where-Object { $_.State -eq 'Listen' } | Select-Object -First 1
-    if ($conn) { $apiPid = $conn.OwningProcess }
-    Write-ProcessStatus -Healthy $isHealthy -Pid $apiPid
+    try {
+        $conn = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue | Where-Object { $_.State -eq 'Listen' } | Select-Object -First 1
+        if ($conn) { $apiPid = $conn.OwningProcess }
+    } catch {
+        Write-WatchdogLog "Port $port connection query failed: $_" "DEBUG"
+    }
+    Write-ProcessStatus -Healthy $isHealthy -ProcessId $apiPid
 
     if ($isHealthy) {
         if ($failureCount -gt 0) {
