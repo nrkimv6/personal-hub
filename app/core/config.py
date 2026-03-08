@@ -102,6 +102,14 @@ class Settings(BaseSettings):
     TAB_WAIT_RETRY_INTERVAL: int = 5  # 탭 요청 재시도 간격 (초)
     TOTAL_MAX_TABS: int = 5  # 전체 브라우저에서 사용할 최대 탭 수
 
+    # 프로세스 트리 추적 설정
+    PROCESS_SCAN_INTERVAL: int = 60  # 프로세스 스캔 주기 (초)
+    MEMORY_CAUTION_MB: int = 4096   # 주의 임계값 (MB)
+    MEMORY_WARNING_MB: int = 2048   # 경고 임계값 (MB)
+    MEMORY_CRITICAL_MB: int = 1024  # 위험 임계값 (MB)
+    MEMORY_EMERGENCY_MB: int = 512  # 긴급 임계값 (MB)
+    MEMORY_FATAL_MB: int = 256      # 강제 재부팅 임계값 (MB)
+
     # bizItems API 캐싱 설정 (REQ-MON-006)
     BIZ_ITEMS_CACHE_TTL_NORMAL: int = 300  # 정상 운영 시 캐시 TTL (초) - 5분
     BIZ_ITEMS_CACHE_TTL_CLOSED: int = 1800  # 비공개/운영중지 시 캐시 TTL (초) - 30분

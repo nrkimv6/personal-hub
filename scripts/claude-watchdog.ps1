@@ -82,6 +82,9 @@ function Start-ClaudeWorker {
     # Save PID - this is now the actual python process PID
     $workerProcess.Id | Out-File $WorkerPidFile -Encoding ascii
 
+    # Register process in ProcessRegistry
+    & $VenvPython "$ProjectRoot\scripts\register_process.py" --pid $workerProcess.Id --ppid $PID --name "claude-worker" --exe $VenvPython --role "claude" -ErrorAction SilentlyContinue
+
     Write-Log "Claude worker started with PID: $($workerProcess.Id)"
     return $workerProcess.Id
 }

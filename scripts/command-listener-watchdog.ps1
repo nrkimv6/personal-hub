@@ -78,6 +78,9 @@ function Start-CommandListener {
 
     $proc.Id | Out-File $WorkerPidFile -Encoding ascii
 
+    # Register process in ProcessRegistry
+    & $VenvPython "$ProjectRoot\scripts\register_process.py" --pid $proc.Id --ppid $PID --name "command-listener" --exe $VenvPython --role "listener" -ErrorAction SilentlyContinue
+
     Write-Log "Command listener started with PID: $($proc.Id)"
     return $proc.Id
 }

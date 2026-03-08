@@ -9,6 +9,7 @@ Usage:
   python scripts/browser_workers.py restart-frontend
 """
 import argparse
+import asyncio
 import os
 import shutil
 import subprocess
@@ -23,6 +24,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 os.chdir(PROJECT_ROOT)
 
+from app.shared.process.tracked_popen import tracked_popen_sync
 from scripts.service_utils import (
     find_pids_on_port,
     is_port_listening,
@@ -113,6 +115,7 @@ class BrowserWorkerManager:
                 "cmd": [_ps_alias("monitorpage-wdog-worker.exe"), "-ExecutionPolicy", "Bypass", "-File",
                         str(self.scripts_dir / "unified-worker-watchdog.ps1")],
                 "env": {"APP_MODE": "admin"},
+                "role": "watchdog",
             },
             {
                 "name": "Claude Worker Watchdog",
@@ -120,6 +123,7 @@ class BrowserWorkerManager:
                 "cmd": [_ps_alias("monitorpage-wdog-claude.exe"), "-ExecutionPolicy", "Bypass", "-File",
                         str(self.scripts_dir / "claude-watchdog.ps1")],
                 "env": {"APP_MODE": "admin"},
+                "role": "claude_watchdog",
             },
             {
                 "name": "Command Listener Watchdog",
@@ -127,6 +131,7 @@ class BrowserWorkerManager:
                 "cmd": [_ps_alias("monitorpage-wdog-cmd.exe"), "-ExecutionPolicy", "Bypass", "-File",
                         str(self.scripts_dir / "command-listener-watchdog.ps1")],
                 "env": {"APP_MODE": "admin"},
+                "role": "listener",
             },
             {
                 "name": "Dev Runner Command Listener",
@@ -134,6 +139,7 @@ class BrowserWorkerManager:
                 "cmd": [str(self.python_exe),
                         str(self.scripts_dir / "dev-runner-command-listener.py")],
                 "env": {},
+                "role": "dev_listener",
             },
             {
                 "name": "Chat Executor Watchdog",
@@ -141,6 +147,7 @@ class BrowserWorkerManager:
                 "cmd": [_ps_alias("monitorpage-wdog-chat.exe"), "-ExecutionPolicy", "Bypass", "-File",
                         str(self.scripts_dir / "llm-chat-executor-watchdog.ps1")],
                 "env": {"APP_MODE": "admin"},
+                "role": "watchdog",
             },
         ]
 
@@ -201,8 +208,9 @@ class BrowserWorkerManager:
                 stderr_log_path.parent.mkdir(parents=True, exist_ok=True)
                 stderr_file = open(str(stderr_log_path), "w", encoding="utf-8")
 
-            proc = subprocess.Popen(
+            proc = tracked_popen_sync(
                 w["cmd"],
+                role=w.get("role", "watchdog"),
                 cwd=str(PROJECT_ROOT),
                 env=env,
                 creationflags=subprocess.CREATE_NO_WINDOW,
@@ -241,6 +249,11 @@ class BrowserWorkerManager:
             pid = read_pid_file(pid_path)
             if pid and is_process_alive(pid):
                 cprint(f"Stopping {w['name']} (PID: {pid})...")
+                try:
+                    from app.shared.process.registry import ProcessRegistry
+                    asyncio.run(ProcessRegistry().unregister(pid))
+                except Exception:
+                    pass
                 kill_pid(pid)
                 cprint(f"{w['name']} stopped", GREEN)
                 stopped += 1
@@ -252,6 +265,11 @@ class BrowserWorkerManager:
             pid = read_pid_file(pid_path)
             if pid and is_process_alive(pid):
                 cprint(f"Stopping worker process (PID: {pid})...")
+                try:
+                    from app.shared.process.registry import ProcessRegistry
+                    asyncio.run(ProcessRegistry().unregister(pid))
+                except Exception:
+                    pass
                 kill_pid(pid)
                 stopped += 1
             remove_pid_file(pid_path)
@@ -365,8 +383,9 @@ class BrowserWorkerManager:
         stdout_log = open(self.log_dir / f"frontend_{timestamp}.log", "w", encoding="utf-8")
         stderr_log = open(self.log_dir / f"frontend_err_{timestamp}.log", "w", encoding="utf-8")
 
-        proc = subprocess.Popen(
+        proc = tracked_popen_sync(
             ["npm.cmd", "run", "dev", "--", "--host", "--port", str(self.frontend_port)],
+            role="frontend",
             cwd=str(self.frontend_dir),
             stdout=stdout_log,
             stderr=stderr_log,

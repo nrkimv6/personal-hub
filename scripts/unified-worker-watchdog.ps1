@@ -98,6 +98,9 @@ function Start-UnifiedWorker {
     # Save PID
     $workerProcess.Id | Out-File $WorkerPidFile -Encoding ascii
 
+    # Register process in ProcessRegistry
+    & $VenvPython "$ProjectRoot\scripts\register_process.py" --pid $workerProcess.Id --ppid $PID --name "unified-worker" --exe $VenvPython --role "worker" -ErrorAction SilentlyContinue
+
     Write-Log "Unified worker started with PID: $($workerProcess.Id)"
     Write-Log "  -> NaverMonitorWorker"
     Write-Log "  -> ScheduledCrawlWorker"

@@ -2,6 +2,7 @@
 
 service_run.py, browser_workers.py에서 공유하는 프로세스/포트/PID 관리 함수.
 """
+import asyncio
 import ctypes
 import logging
 import os
@@ -14,6 +15,12 @@ from datetime import datetime
 from pathlib import Path
 
 import psutil
+
+# 프로젝트 루트를 sys.path에 추가 (ProcessRegistry 임포트용)
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _SCRIPT_DIR.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 
 # ── Session 0 감지 ──────────────────────────────────────────────
@@ -50,6 +57,15 @@ def find_pids_on_port(port: int) -> list[int]:
 
 
 # ── 프로세스 유틸 ───────────────────────────────────────────────
+def _unregister_pid_safe(pid: int) -> None:
+    """ProcessRegistry에서 pid를 안전하게 해제 (실패 시 무시)."""
+    try:
+        from app.shared.process.registry import ProcessRegistry
+        asyncio.run(ProcessRegistry().unregister(pid))
+    except Exception:
+        pass
+
+
 def kill_pid(pid: int, timeout: int = 5, logger: logging.Logger | None = None) -> bool:
     """PID를 graceful → force 순서로 종료한다. 성공 시 True."""
     log = logger.info if logger else (lambda m: None)
@@ -59,13 +75,16 @@ def kill_pid(pid: int, timeout: int = 5, logger: logging.Logger | None = None) -
         try:
             proc.wait(timeout=timeout)
             log(f"PID {pid} ({proc.name()}) terminated gracefully")  # type: ignore[arg-type]
+            _unregister_pid_safe(pid)
             return True
         except psutil.TimeoutExpired:
             proc.kill()
             proc.wait(timeout=3)
             log(f"PID {pid} force killed")  # type: ignore[arg-type]
+            _unregister_pid_safe(pid)
             return True
     except psutil.NoSuchProcess:
+        _unregister_pid_safe(pid)
         return True  # 이미 종료됨
     except (psutil.AccessDenied, PermissionError):
         # 권한 부족 시 taskkill /F fallback (NSSM 서비스 프로세스 등)
@@ -76,6 +95,7 @@ def kill_pid(pid: int, timeout: int = 5, logger: logging.Logger | None = None) -
             )
             if logger:
                 logger.info(f"PID {pid} killed via taskkill fallback")
+            _unregister_pid_safe(pid)
             return True
         except Exception as e2:
             if logger:

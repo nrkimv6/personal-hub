@@ -29,6 +29,8 @@ from app.shared.browser.browser_manager import BrowserManager
 from app.shared.worker.base_worker import BaseWorker
 from app.shared.worker.exceptions import WorkerCriticalError
 from app.shared.redis import RedisClient
+from app.shared.process.orphan_detector import OrphanDetector
+from app.shared.process.registry import ProcessRegistry
 
 if TYPE_CHECKING:
     pass
@@ -80,6 +82,7 @@ class WorkerOrchestrator:
         self.restart_times: Dict[str, List[float]] = defaultdict(list)
 
         self._initialized = False
+        self._orphan_task: Optional[asyncio.Task] = None
 
     async def initialize(self):
         """브라우저 매니저, Redis 및 워커 초기화.
@@ -156,6 +159,13 @@ class WorkerOrchestrator:
                 self._run_worker_with_supervision(name, worker),
                 name=f"worker_{name}"
             )
+
+        # OrphanDetector 태스크 시작
+        from app.core.config import settings
+        self._orphan_task = asyncio.create_task(
+            OrphanDetector(ProcessRegistry()).run_periodic(settings.PROCESS_SCAN_INTERVAL),
+            name="orphan_detector",
+        )
 
         # 모든 태스크 완료 대기
         try:
@@ -331,6 +341,14 @@ class WorkerOrchestrator:
         """
         logger.info("[Orchestrator] 종료 시작")
         self.shutdown_event.set()
+
+        # OrphanDetector 태스크 취소
+        if self._orphan_task and not self._orphan_task.done():
+            self._orphan_task.cancel()
+            try:
+                await self._orphan_task
+            except asyncio.CancelledError:
+                pass
 
         # 모든 워커에 종료 신호
         for worker in self.workers.values():
