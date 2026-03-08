@@ -1236,9 +1236,13 @@ class PlanService:
         for key in old_keys & new_keys:
             old_p = old_plans[key]
             new_p = new_plans[key]
+            old_done = old_p.progress.done if old_p.progress else 0
+            old_total = old_p.progress.total if old_p.progress else 0
+            new_done = new_p.progress.done if new_p.progress else 0
+            new_total = new_p.progress.total if new_p.progress else 0
             if (old_p.status != new_p.status
-                    or old_p.progress.done != new_p.progress.done
-                    or old_p.progress.total != new_p.progress.total):
+                    or old_done != new_done
+                    or old_total != new_total):
                 updated += 1
 
         return {
