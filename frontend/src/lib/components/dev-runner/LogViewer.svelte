@@ -460,25 +460,25 @@
 	<div
 		bind:this={logContainer}
 		onscroll={handleScroll}
-		class="flex-1 min-h-0 overflow-y-auto font-mono text-sm p-3 bg-gray-950 text-gray-300 dr-scrollbar-thin"
+		class="flex-1 min-h-0 overflow-y-auto font-mono text-xs p-1.5 bg-gray-950 text-gray-300 dr-scrollbar-thin"
 	>
 		{#if lines.length === 0}
 			<span class="text-gray-600">로그가 없습니다</span>
 		{:else}
 			{#each lines as line, i}
 				{#if line.tag === 'NOISE'}
-					<div class="py-0.5 leading-5 {line.isStale ? 'opacity-30' : ''}">
+					<div class="dr-log-line dr-log-line-noise flex items-center py-0 leading-5 {line.isStale ? 'opacity-30' : ''}">
 						{#if expandedNoiseIndices.includes(i)}
-							<span class="text-gray-600 text-xs italic">[NOISE] {line.noiseCount} lines suppressed</span>
+							<span class="text-gray-600 italic">··· {line.noiseCount} hidden lines ···</span>
 							<button
 								onclick={() => expandedNoiseIndices = expandedNoiseIndices.filter(n => n !== i)}
-								class="ml-1 text-gray-700 hover:text-gray-500 text-xs"
+								class="ml-2 text-gray-600 hover:text-gray-400"
 							>▲</button>
 						{:else}
 							<button
 								onclick={() => expandedNoiseIndices = [...expandedNoiseIndices, i]}
-								class="text-gray-700 hover:text-gray-500 text-xs italic"
-							>... ({line.noiseCount} lines suppressed)</button>
+								class="text-gray-600 hover:text-gray-400 italic w-full text-left"
+							>··· {line.noiseCount} hidden lines ···</button>
 						{/if}
 					</div>
 				{:else if isSeparator(line.raw)}
@@ -491,7 +491,7 @@
 					</div>
 				{:else if line.tag === 'PHASE'}
 					{@const style = getTagStyle(line.tag)}
-					<div class="dr-log-line dr-log-line-phase flex items-start gap-2 py-0.5 leading-5 mt-1.5 border-t border-indigo-900/40 {line.isStale ? 'opacity-30' : ''}">
+					<div class="dr-log-line dr-log-line-phase flex items-start gap-2 py-0 leading-5 mt-1.5 border-t border-indigo-900/40 {line.isStale ? 'opacity-30' : ''}">
 						<span class="text-xs text-gray-400/60 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
 						<span class="shrink-0 w-[42px] text-right {style.text}">
 							<span class="dr-tag-badge {style.bg}">{line.tag}</span>
@@ -502,7 +502,7 @@
 					</div>
 				{:else if line.tag === 'TOOL'}
 					{@const style = getTagStyle(line.tag)}
-					<div class="dr-log-line dr-log-line-tool flex items-start gap-2 py-0.5 leading-5 opacity-40 {line.isStale ? 'opacity-20' : ''}">
+					<div class="dr-log-line dr-log-line-tool flex items-start gap-2 py-0 leading-5 opacity-40 {line.isStale ? 'opacity-20' : ''}">
 						<span class="text-xs text-gray-600 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
 						<span class="shrink-0 w-[42px] text-right {style.text}">
 							<span class="dr-tag-badge {style.bg}">{line.tag}</span>
@@ -533,7 +533,7 @@
 					</div>
 				{:else if line.tag}
 					{@const style = getTagStyle(line.tag)}
-					<div class="dr-log-line dr-log-line-{line.tag.toLowerCase()} flex items-start gap-2 py-0.5 leading-5 {line.isStale ? 'opacity-30' : ''} {line.tag === 'ERROR' ? 'bg-red-950/50 -mx-3 px-3 rounded' : ''}">
+					<div class="dr-log-line dr-log-line-{line.tag.toLowerCase()} flex items-start gap-2 py-0 leading-5 {line.isStale ? 'opacity-30' : ''} {line.tag === 'ERROR' ? 'bg-red-950/50 -mx-3 px-3 rounded' : ''}">
 						<span class="text-xs text-gray-400/60 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
 						<span class="shrink-0 w-[42px] text-right {style.text}">
 							<span class="dr-tag-badge {style.bg}">{line.tag}</span>

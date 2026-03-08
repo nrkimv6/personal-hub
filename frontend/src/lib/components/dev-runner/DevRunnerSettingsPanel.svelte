@@ -3,6 +3,9 @@
   import { devRunnerSettingsApi, type DevRunnerSettings } from '$lib/api/dev-runner';
   import { devRunnerRunnerApi } from '$lib/api/dev-runner';
 
+  interface Props { compact?: boolean; }
+  let { compact = false }: Props = $props();
+
   let settings: DevRunnerSettings | null = null;
   let inputValue = 3;
   let saving = false;
@@ -16,11 +19,11 @@
     try {
       const [s, runners] = await Promise.all([
         devRunnerSettingsApi.get(),
-        devRunnerRunnerApi.list(),
+        devRunnerRunnerApi.runners(),
       ]);
       settings = s;
       inputValue = s.max_concurrent_runners;
-      activeRunnerCount = runners.filter((r) => r.running).length;
+      activeRunnerCount = runners.filter((r: any) => r.running).length;
     } catch (e) {
       error = '설정 불러오기 실패';
     } finally {
@@ -48,8 +51,8 @@
   }
 </script>
 
-<div class="settings-panel">
-  <h3 class="title">Dev Runner 설정</h3>
+<div class="settings-panel" class:compact>
+  {#if !compact}<h3 class="title">Dev Runner 설정</h3>{/if}
 
   {#if loading}
     <p class="muted">불러오는 중...</p>
@@ -89,6 +92,10 @@
   .settings-panel {
     padding: 1rem;
     max-width: 400px;
+  }
+  .settings-panel.compact {
+    padding: 0.625rem;
+    max-width: 100%;
   }
   .title {
     font-size: 1rem;
