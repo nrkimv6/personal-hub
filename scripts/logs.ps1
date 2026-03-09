@@ -121,6 +121,7 @@ if ($Target -eq "list") {
 
     # API logs
     Write-Host "[API Server Logs]" -ForegroundColor Yellow
+    # stdout_api_*.log: 레거시 (NSSM stdout 캡처, service_*.log로 전환됨)
     $apiLogs = Get-LogsMultiPattern @("stdout_api_*.log", "api_*.log", "service_MonitorPage-Admin.log", "service_MonitorPage-Public.log")
     if ($apiLogs) {
         foreach ($log in $apiLogs) {
@@ -136,7 +137,9 @@ if ($Target -eq "list") {
 
     # Worker logs
     Write-Host "[Worker Logs]" -ForegroundColor Yellow
-    $workerLogs = Get-LogsMultiPattern @("stdout_worker_*.log", "worker_*.log", "unified_worker_*.log")
+    # stdout_worker_*.log: 레거시 (구형 worker-watchdog.ps1, dev/에만 존재)
+    # stdout_unified_worker_*.log: 현재 활성 (unified-worker-watchdog.ps1이 stdout 캡처)
+    $workerLogs = Get-LogsMultiPattern @("stdout_unified_worker_*.log", "stdout_worker_*.log", "worker_*.log", "unified_worker_*.log")
     if ($workerLogs) {
         foreach ($log in $workerLogs) {
             $size = "{0:N2} KB" -f ($log.Length / 1KB)
@@ -287,7 +290,7 @@ function Get-LatestLogFilesMultiPattern {
 # Admin 모드: $LogDir=logs/admin/ (stdout_api_*, NSSM log) + logs/ (api_*)
 # 운영 모드: $LogDir=logs/ (stdout_api_*, api_*, NSSM log) 모두 동일 디렉토리
 $apiCandidates = @()
-# 1) $LogDir 내 stdout_api_*, api_*
+# 1) $LogDir 내 stdout_api_*(레거시, NSSM→service_*.log 전환), api_*
 foreach ($prefix in @("stdout_api_*.log", "api_*.log")) {
     $found = Get-ChildItem (Join-Path $LogDir $prefix) -ErrorAction SilentlyContinue
     if ($found) { $apiCandidates += $found }
@@ -303,10 +306,14 @@ if ($Admin) {
 # LastWriteTime이 가장 최신인 파일 선택
 $apiLogFile = $apiCandidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if ($apiLogFile) { $apiLogFile = $apiLogFile.FullName }
-$workerLogFile = Get-LatestLogFileMultiPattern @("stdout_worker_", "worker_", "unified_worker_")
+# stdout_worker_: 레거시 (구형 worker-watchdog.ps1, dev/에만 존재)
+# stdout_unified_worker_: 현재 활성 (unified-worker-watchdog.ps1이 stdout 캡처)
+$workerLogFile = Get-LatestLogFileMultiPattern @("stdout_unified_worker_", "stdout_worker_", "worker_", "unified_worker_")
 $frontendLogFile = Get-LatestLogFileMultiPattern @("frontend_2")
 $claudeWorkerLogFile = Get-LatestLogFileMultiPattern @("llm_worker_")
+# stdout_video_download_worker_: 레거시 (Python 앱 자체 로깅으로 전환됨)
 $videoDownloadWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_video_download_worker_", "video_download_worker_")
+# stdout_crawl_: 레거시 (Python 앱 자체 로깅으로 전환됨)
 $crawlWorkerLogFile = Get-LatestLogFileMultiPattern @("stdout_crawl_", "crawl_worker_")
 
 # Watchdog/Service 로그도 타임스탬프 파일명으로 전환됨 — 패턴 탐색으로 최신 파일 선택
@@ -766,12 +773,15 @@ function Start-CombinedLogTail {
     }
 
     # Define timestamped log patterns for auto-refresh (multiple patterns per source)
+    # 레거시 패턴: stdout_api_*(NSSM→service로 전환), stdout_worker_*(구형 watchdog, dev/에만 존재),
+    #             stdout_video_download_worker_*, stdout_crawl_* (Python 앱 자체 로깅으로 전환됨)
+    # 활성 패턴: stdout_unified_worker_*(unified-worker-watchdog.ps1이 stdout 캡처)
     $timestampedLogPatterns = @{
-        "API"         = @("stdout_api_*.log", "api_*.log")
-        "WORKER"      = @("stdout_worker_*.log", "worker_*.log", "unified_worker_*.log")
+        "API"         = @("stdout_api_*.log", "api_*.log")  # stdout_api_*: 레거시
+        "WORKER"      = @("stdout_unified_worker_*.log", "stdout_worker_*.log", "worker_*.log", "unified_worker_*.log")  # stdout_worker_*: 레거시
         "LLM"         = @("llm_worker_*.log")
-        "VIDEO-DL"    = @("stdout_video_download_worker_*.log", "video_download_worker_*.log")
-        "CRAWL"       = @("stdout_crawl_*.log", "crawl_worker_*.log")
+        "VIDEO-DL"    = @("stdout_video_download_worker_*.log", "video_download_worker_*.log")  # stdout_video_download_worker_*: 레거시
+        "CRAWL"       = @("stdout_crawl_*.log", "crawl_worker_*.log")  # stdout_crawl_*: 레거시
         "FRONTEND"    = @("frontend_2*.log")
         "SERVICE"     = @("service_runner_*.log")
         "WATCHDOG"    = @("watchdog_*.log", "unified_watchdog_*.log")
@@ -1161,10 +1171,13 @@ if ($Follow) {
             }
         }
         default {
+            # stdout_api_: 레거시 (NSSM stdout→service_*.log 전환됨)
             $apiLogFiles = Get-LatestLogFilesMultiPattern @("stdout_api_", "api_")
             Show-LogContent -FilePaths $apiLogFiles -Label "API Server" -Color Cyan -TailLines $Lines
             if ($Admin) {
-                $workerLogFiles = Get-LatestLogFilesMultiPattern @("stdout_worker_", "worker_", "unified_worker_")
+                # stdout_worker_: 레거시 (구형 watchdog, dev/에만 존재)
+                # stdout_unified_worker_: 활성 (unified-worker-watchdog.ps1이 stdout 캡처)
+                $workerLogFiles = Get-LatestLogFilesMultiPattern @("stdout_unified_worker_", "stdout_worker_", "worker_", "unified_worker_")
                 Show-LogContent -FilePaths $workerLogFiles -Label "Worker" -Color Magenta -TailLines $Lines
                 $claudeWorkerLogFiles = Get-LatestLogFilesMultiPattern @("llm_worker_")
                 Show-LogContent -FilePaths $claudeWorkerLogFiles -Label "LLM (Claude Worker)" -Color Blue -TailLines $Lines
