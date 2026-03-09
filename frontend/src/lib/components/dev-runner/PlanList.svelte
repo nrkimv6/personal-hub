@@ -125,6 +125,12 @@
 		return { date: null, name: filename };
 	}
 
+	function formatDate(date: string): string {
+		const match = date.match(/^\d{4}-(\d{2})-(\d{2})$/);
+		if (!match) return date;
+		return `${parseInt(match[1])}/${parseInt(match[2])}`;
+	}
+
 	function getPlanItemBg(plan: DevRunnerPlanFileResponse, isRunning: boolean, isLastRun: boolean, batchStatus: string | null) {
 		if (batchStatus === 'running') return 'border border-cyan-300 bg-cyan-50';
 		if (isRunning) return 'border border-green-300 bg-green-50';
@@ -449,16 +455,14 @@
 							<svg class="w-3.5 h-3.5 shrink-0 {isLastRun ? 'text-gray-300' : 'text-gray-400'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
 						{/if}
 
-						<!-- Compact 1-line: filename (date + name) + status badge + done/total -->
+						<!-- filename (name + date below) -->
 						<div class="flex flex-col flex-1 min-w-0">
-							<div class="flex items-center gap-1.5 min-w-0">
-								{#if parsedFilename.date}
-									<span class="text-[9px] text-gray-400 font-mono shrink-0">{parsedFilename.date}</span>
-								{/if}
-								<span class="text-xs font-medium truncate {batchStatus === 'done' ? 'text-gray-400 line-through' : batchStatus === 'running' ? 'text-cyan-700' : isRunning ? 'text-green-800' : isLastRun ? 'text-gray-400 line-through' : isDone ? 'text-gray-400' : ''}">
-									{parsedFilename.name}
-								</span>
-							</div>
+							<span class="text-xs font-medium truncate {batchStatus === 'done' ? 'text-gray-400 line-through' : batchStatus === 'running' ? 'text-cyan-700' : isRunning ? 'text-green-800' : isLastRun ? 'text-gray-400 line-through' : isDone ? 'text-gray-400' : ''}">
+								{parsedFilename.name}
+							</span>
+							{#if parsedFilename.date}
+								<span class="text-[9px] text-gray-400 font-mono">{formatDate(parsedFilename.date)}</span>
+							{/if}
 						</div>
 
 						{#if plan.status === '구현완료'}
