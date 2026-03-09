@@ -322,7 +322,8 @@ $videoDownloadWatchdogLogFile = Get-LatestLogFileMultiPattern @("video_download_
 $crawlWatchdogLogFile = Get-LatestLogFileMultiPattern @("crawl_watchdog_")
 $commandListenerWatchdogLogFile = Get-LatestLogFileMultiPattern @("command_listener_watchdog_")
 $apiWatchdogLogFile = Get-LatestLogFileMultiPattern @("api_watchdog_")
-$startupApiWatchdogLogFile = Get-LatestLogFileMultiPattern @("startup_api_watchdog")
+$startupApiWatchdogLogFile = Get-LatestLogFileMultiPattern @("startup_api_watchdog_")
+$startupBrowserWorkersLogFile = Get-LatestLogFileMultiPattern @("startup_browser_workers_")
 $workerCommandListenerLogFile = Get-LatestLogFileMultiPattern @("worker_command_listener_")
 $devRunnerLogFile = Get-LatestLogFileMultiPattern @("dev_runner_command_listener")
 $mergeOrchestratorLogFile = Get-LatestLogFileMultiPattern @("merge-orchestrator_")
@@ -473,7 +474,8 @@ $extraTimestampedLogs = @(
     @{ Name = "Service Runner"; Var = "serviceRunnerLogFile" },
     @{ Name = "CMD-Watchdog"; Var = "commandListenerWatchdogLogFile" },
     @{ Name = "API-Watchdog"; Var = "apiWatchdogLogFile" },
-    @{ Name = "Startup-API-WD"; Var = "startupApiWatchdogLogFile" }
+    @{ Name = "Startup-API-WD"; Var = "startupApiWatchdogLogFile" },
+    @{ Name = "Startup-Workers"; Var = "startupBrowserWorkersLogFile" }
 )
 
 foreach ($log in $extraTimestampedLogs) {
@@ -654,6 +656,7 @@ function Start-CombinedLogTail {
         [string]$CommandListenerWatchdogLog,
         [string]$ApiWatchdogLog,
         [string]$StartupApiWatchdogLog,
+        [string]$StartupBrowserWorkersLog,
         [string]$DevRunnerLog,
         [string]$CloudflaredLog
     )
@@ -681,6 +684,7 @@ function Start-CombinedLogTail {
         "CMD-WD"      = @{ Path = $CommandListenerWatchdogLog; Color = "DarkYellow"; Tail = 2 }
         "API-WD"      = @{ Path = $ApiWatchdogLog;          Color = "DarkYellow"; Tail = 3 }
         "STARTUP-API-WD" = @{ Path = $StartupApiWatchdogLog; Color = "DarkYellow"; Tail = 3 }
+        "STARTUP-WORKERS" = @{ Path = $StartupBrowserWorkersLog; Color = "DarkYellow"; Tail = 3 }
         "CMD-LISTENER" = @{ Path = $workerCommandListenerLogFile; Color = "DarkCyan"; Tail = 5 }
         "DEV-RUNNER"  = @{ Path = $DevRunnerLog;           Color = "DarkCyan";    Tail = 10 }
         "MERGE-ORCH"  = @{ Path = $mergeOrchestratorLogFile; Color = "Cyan";       Tail = 10 }
@@ -776,7 +780,8 @@ function Start-CombinedLogTail {
         "CRAWL-WD"    = @("crawl_watchdog_*.log")
         "CMD-WD"      = @("command_listener_watchdog_*.log")
         "API-WD"      = @("api_watchdog_*.log")
-        "STARTUP-API-WD" = @("startup_api_watchdog*.log")
+        "STARTUP-API-WD" = @("startup_api_watchdog_*.log")
+        "STARTUP-WORKERS" = @("startup_browser_workers_*.log")
         "CMD-LISTENER" = @("worker_command_listener_*.log")
         "DEV-RUNNER"  = @("dev_runner_command_listener*.log")
         "MERGE-ORCH"  = @("merge-orchestrator_*.log")
@@ -1102,7 +1107,8 @@ if ($Follow) {
                     -CrawlWatchdogLog $crawlWatchdogLogFile `
                     -CommandListenerWatchdogLog $commandListenerWatchdogLogFile `
                     -ApiWatchdogLog $apiWatchdogLogFile `
-                    -StartupApiWatchdogLog $startupApiWatchdogLogFile
+                    -StartupApiWatchdogLog $startupApiWatchdogLogFile `
+                    -StartupBrowserWorkersLog $startupBrowserWorkersLogFile
             }
         }
         default {
@@ -1121,6 +1127,7 @@ if ($Follow) {
                 -CommandListenerWatchdogLog $commandListenerWatchdogLogFile `
                 -ApiWatchdogLog $apiWatchdogLogFile `
                 -StartupApiWatchdogLog $startupApiWatchdogLogFile `
+                -StartupBrowserWorkersLog $startupBrowserWorkersLogFile `
                 -DevRunnerLog $devRunnerLogFile `
                 -CloudflaredLog $cloudflaredLogFile
         }
