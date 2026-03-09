@@ -104,7 +104,7 @@ async def get_plan_items(encoded_path: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="Plan file not found")
 
-    return plan_service.parse_plan_items(path)
+    return await asyncio.to_thread(plan_service.parse_plan_items, path)
 
 
 @router.post("/plans/{encoded_path}/summary", status_code=202)

@@ -609,7 +609,23 @@ class ExecutorService:
         """merge 대기 큐 조회 → plan-runner:merge-wait-queue (merge lock 대기 중인 runner 목록)"""
         try:
             raw_items = await self.async_redis.lrange("plan-runner:merge-wait-queue", 0, -1)
-            return [{"runner_id": rid, "status": "waiting"} for rid in raw_items]
+            result = []
+            for rid in raw_items:
+                # runner별 Redis 키에서 상세 정보 조회
+                plan_file = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file") or ""
+                branch = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:branch") or ""
+                worktree_path = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:worktree_path") or ""
+                start_time_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:start_time") or ""
+                result.append({
+                    "runner_id": rid,
+                    "branch": branch,
+                    "plan_file": plan_file,
+                    "project": "monitor-page",
+                    "status": "waiting",
+                    "timestamp": start_time_str,
+                    "worktree_path": worktree_path,
+                })
+            return result
         except Exception:
             return []
 
