@@ -87,18 +87,21 @@
 	const LINE_PATTERN = /^\s*\[?(\d{2}:\d{2}:\d{2})\]?\s*\[(\w+)\]\s*(.*)/;
 	const DIAG_PATTERN = /^\[(\w+)\]\s*(.*)/;
 	const MERGE_TAG_PATTERN = /^\[MERGE\]\[(\w+)\]\s*(.*)/;
+	const PR_PREFIX_PATTERN = /^\[PR:[^\]]+\]\s*/;
 
 	function parseLine(text: string, isStale: boolean): ParsedLine {
-		const match = text.match(LINE_PATTERN);
-		if (match) {
-			return { timestamp: match[1], tag: match[2], message: match[3], raw: text, isStale };
+		// [PR:name#hash|PID:12345] prefix 제거 후 일반 파싱
+		const stripped = text.replace(PR_PREFIX_PATTERN, '');
+		const finalMatch = stripped.match(LINE_PATTERN);
+		if (finalMatch) {
+			return { timestamp: finalMatch[1], tag: finalMatch[2], message: finalMatch[3], raw: text, isStale };
 		}
 		// [MERGE][TAG] message 형식 (머지 로그)
-		const mergeMatch = text.match(MERGE_TAG_PATTERN);
+		const mergeMatch = stripped.match(MERGE_TAG_PATTERN);
 		if (mergeMatch) {
 			return { timestamp: '', tag: mergeMatch[1], message: mergeMatch[2], raw: text, isStale };
 		}
-		const diagMatch = text.match(DIAG_PATTERN);
+		const diagMatch = stripped.match(DIAG_PATTERN);
 		if (diagMatch) {
 			const tag = diagMatch[1];
 			const message = diagMatch[2];
@@ -539,21 +542,23 @@
 				{:else if line.tag === 'RESULT'}
 					{@const style = getTagStyle(line.tag)}
 					{@const resultMatch = line.message.match(/^(\d+)→\s?(.*)/)}
-					<div class="dr-log-line dr-log-line-result flex items-start gap-0 py-0 leading-5 opacity-60">
+					<div class="dr-log-line dr-log-line-result flex items-start gap-0 py-0 leading-5 opacity-60 {line.isStale ? 'opacity-20' : ''}">
 						{#if resultMatch}
 							<span class="text-xs text-gray-600 shrink-0 w-[56px] tabular-nums select-none text-right pr-1">{line.timestamp}</span>
-							<span class="shrink-0 w-[42px] text-right {style.text}">
+							<span class="shrink-0 w-[42px] text-right {style.text} mr-1">
 								<span class="dr-tag-badge {style.bg}">{line.tag}</span>
 							</span>
-							<span class="shrink-0 w-[36px] text-right pr-1 text-gray-600 tabular-nums select-none text-xs">{resultMatch[1]}</span>
-							<span class="text-gray-600 select-none text-xs pr-1">→</span>
-							<span class="flex-1 min-w-0 truncate text-gray-400 text-xs">{resultMatch[2]}</span>
+							<span class="flex-1 min-w-0 flex items-baseline bg-gray-900/60 rounded px-1 font-mono">
+								<span class="shrink-0 w-[28px] text-right pr-1.5 text-gray-600 tabular-nums select-none text-[10px]">{resultMatch[1]}</span>
+								<span class="text-gray-500 select-none text-[10px] pr-1">→</span>
+								<span class="flex-1 min-w-0 break-all text-emerald-300/80 text-[11px]">{resultMatch[2]}</span>
+							</span>
 						{:else}
 							<span class="text-xs text-gray-600 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
 							<span class="shrink-0 w-[42px] text-right {style.text}">
 								<span class="dr-tag-badge {style.bg}">{line.tag}</span>
 							</span>
-							<span class="flex-1 min-w-0 truncate text-gray-400 text-xs">{line.message}</span>
+							<span class="flex-1 min-w-0 break-all text-gray-400 text-xs">{line.message}</span>
 						{/if}
 					</div>
 				{:else if line.tag}
