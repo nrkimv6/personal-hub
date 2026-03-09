@@ -89,6 +89,35 @@ PLAN_RUNNER_MODULE_PATH = WTOOLS_BASE_DIR / "common/tools/plan-runner"
 PLAN_RUNNER_PYTHON = PLAN_RUNNER_MODULE_PATH / ".venv/Scripts/python.exe"
 LOG_DIR = WTOOLS_BASE_DIR / "common/logs"
 
+
+def get_plan_git_root(plan_file: str) -> Path:
+    """plan 파일의 git root를 동적으로 감지한다.
+
+    wtools plan (D:/work/project/service/wtools/...) → wtools git root 반환
+    monitor-page plan (D:/work/project/tools/monitor-page/...) → PROJECT_ROOT 반환
+    git 오류 또는 경로 없음 → PROJECT_ROOT fallback
+
+    Args:
+        plan_file: plan 파일 절대 경로 문자열
+
+    Returns:
+        git root Path (감지 실패 시 PROJECT_ROOT fallback)
+    """
+    try:
+        plan_path = Path(plan_file)
+        cwd = str(plan_path.parent) if plan_path.parent.is_dir() else str(plan_path.parent.parent)
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, encoding="utf-8",
+            cwd=cwd, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return Path(result.stdout.strip())
+    except Exception as e:
+        logger.warning(f"get_plan_git_root: git rev-parse 실패 (plan={plan_file}): {e}")
+    logger.warning(f"get_plan_git_root: fallback to PROJECT_ROOT (plan={plan_file})")
+    return PROJECT_ROOT
+
 # 로깅 설정
 log_dir = PROJECT_ROOT / "logs" / "admin"
 log_dir.mkdir(parents=True, exist_ok=True)
@@ -182,6 +211,8 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         plan_file_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
         if plan_file_val in (PLAN_FILE_ALL, _LEGACY_ALL):
             plan_file_val = None
+        # plan 파일의 git root 결정 (wtools 등 외부 레포 워크트리 정리 지원)
+        _cleanup_worktree_base = (get_plan_git_root(plan_file_val) / ".worktrees") if plan_file_val else WORKTREE_BASE_DIR
 
         # 구현중 plan은 워크트리 보존 (재실행 시 이어서 작업 가능)
         _preserve_worktree = False
@@ -193,13 +224,13 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         # (머지 워크플로가 별도로 관리하는 경우 스킵)
         if not _preserve_worktree and merge_status not in ("pending_merge", "conflict", "queued"):
             try:
-                WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file_val or None)
+                WorktreeManager.remove(runner_id, _cleanup_worktree_base, plan_file=plan_file_val or None)
             except Exception as wt_e:
                 logger.warning(f"worktree 정리 실패 (runner_id: {runner_id}): {wt_e}")
         elif not _preserve_worktree and merge_status in ("merging", "testing"):
             # 프로세스가 죽은 상태에서 중간 상태로 남은 경우 — stale worktree 정리
             try:
-                WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file_val or None)
+                WorktreeManager.remove(runner_id, _cleanup_worktree_base, plan_file=plan_file_val or None)
                 logger.info(f"stale 중간 상태 worktree 정리: {runner_id} (merge_status={merge_status})")
             except Exception as wt_e:
                 logger.warning(f"stale worktree 정리 실패 (runner_id: {runner_id}): {wt_e}")
@@ -660,7 +691,8 @@ def _cleanup_orphan_plans(redis_client: redis.Redis) -> int:
                             else:
                                 # 독자 커밋 없음 → 안전하게 정리
                                 try:
-                                    WorktreeManager.remove("", WORKTREE_BASE_DIR, plan_file=str(plan_file))
+                                    _orphan_base = get_plan_git_root(str(plan_file)) / ".worktrees"
+                                    WorktreeManager.remove("", _orphan_base, plan_file=str(plan_file))
                                     _remove_plan_header_fields(str(plan_file))
                                     logger.info(f"[orphan-plan] {filename}: worktree/branch 정리 완료 (branch={branch})")
                                     cleaned_count += 1
@@ -1441,13 +1473,19 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
             _set_error_status(f"archived plan은 실행할 수 없습니다: {plan_file}")
             return
 
+    # plan 파일의 git root 결정 (wtools 등 외부 레포 지원)
+    plan_project_root = get_plan_git_root(plan_file) if plan_file else PROJECT_ROOT
+    plan_worktree_base = plan_project_root / ".worktrees"
+    if plan_project_root != PROJECT_ROOT:
+        logger.info(f"외부 레포 plan 감지: project_root={plan_project_root}")
+
     # worktree 생성 또는 재사용 (시간이 걸릴 수 있음)
     try:
-        ensure_main_branch(PROJECT_ROOT)
+        ensure_main_branch(plan_project_root)
         _reused_worktree = False
         if plan_file:
             from plan_worktree_helpers import is_worktree_active
-            _active, existing_branch, existing_wt_abs = is_worktree_active(plan_file, PROJECT_ROOT)
+            _active, existing_branch, existing_wt_abs = is_worktree_active(plan_file, plan_project_root)
             if _active:
                     worktree_path = Path(existing_wt_abs)
                     branch = existing_branch
@@ -1458,10 +1496,10 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
                     _remove_plan_header_fields(plan_file)
                     logger.info(f"워크트리 없음 또는 검증 실패, 신규 생성: plan={plan_file}")
         if not _reused_worktree:
-            worktree_path, branch = WorktreeManager.create(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file)
+            worktree_path, branch = WorktreeManager.create(runner_id, plan_worktree_base, plan_file=plan_file)
             # Phase 4: plan 헤더에 branch/worktree 기록 (수동 /implement와 동일 패턴)
             if plan_file:
-                worktree_rel = str(worktree_path.relative_to(PROJECT_ROOT)).replace("\\", "/")
+                worktree_rel = str(worktree_path.relative_to(plan_project_root)).replace("\\", "/")
                 _write_plan_worktree_info(plan_file, branch, worktree_rel)
     except WorktreeError as e:
         logger.error(f"worktree 생성 실패 (runner_id: {runner_id}): {e}")
@@ -1489,7 +1527,7 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
         _set_error_status("plan_file required (use parallel mode for batch execution)")
         return
 
-    result = _launch_plan_runner_process(command, redis_client, runner_id, worktree_path, plan_file, engine, branch=branch)
+    result = _launch_plan_runner_process(command, redis_client, runner_id, worktree_path, plan_file, engine, branch=branch, project_root=plan_project_root)
     if not result.get("success"):
         _set_error_status(result.get("message", "Unknown error"))
     else:
@@ -1573,7 +1611,7 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
     return None  # sentinel: main loop에서 결과 push 스킵 (이미 위에서 push)
 
 
-def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner_id: str, worktree_path: Path, plan_file: str, engine: str, branch: str = "") -> Dict:
+def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner_id: str, worktree_path: Path, plan_file: str, engine: str, branch: str = "", project_root: Path = PROJECT_ROOT) -> Dict:
     """plan-runner CLI 프로세스 실행 (worktree 생성 이후 호출)"""
 
     cmd = [
@@ -1639,7 +1677,7 @@ def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner
         env.pop("CLAUDECODE", None)  # 중첩 세션 감지 방지
         env["PLAN_RUNNER_WORK_DIR"] = str(worktree_path)
         env["PLAN_RUNNER_WORKTREE_PATH"] = str(worktree_path)
-        env["PLAN_RUNNER_PROJECT_ROOT"] = str(PROJECT_ROOT)
+        env["PLAN_RUNNER_PROJECT_ROOT"] = str(project_root)
         env["PLAN_RUNNER_RUNNER_ID"] = runner_id
         env["REDIS_DB"] = str(REDIS_DB)  # 테스트 격리: plan-runner가 동일 DB 사용
         # 로그 prefix 식별자: plan명(날짜 제거, 첫 2단어) + runner_id 앞 4자
@@ -2003,22 +2041,26 @@ def _do_direct_merge(branch: str, worktree_path_str: str | None, plan_file: str 
             branch_slug = branch.replace("/", "_")
             worktree_path = WORKTREE_BASE_DIR / branch_slug
             if not worktree_path.is_dir():
-                # git worktree list --porcelain 으로 branch 매칭
-                proc = subprocess.run(
-                    ["git", "worktree", "list", "--porcelain"],
-                    capture_output=True, text=True, cwd=str(PROJECT_ROOT)
-                )
+                # git worktree list --porcelain 으로 branch 매칭 (monitor-page + wtools 모두 스캔)
                 worktree_path_str = None
-                lines = proc.stdout.splitlines()
-                i = 0
-                while i < len(lines):
-                    if lines[i].startswith("worktree "):
-                        wt_path = lines[i][len("worktree "):]
-                        branch_line = lines[i + 2] if i + 2 < len(lines) else ""
-                        if f"branch refs/heads/{branch}" in branch_line:
-                            worktree_path_str = wt_path
-                            break
-                    i += 1
+                _scan_roots = [PROJECT_ROOT, WTOOLS_BASE_DIR]
+                for _scan_root in _scan_roots:
+                    proc = subprocess.run(
+                        ["git", "worktree", "list", "--porcelain"],
+                        capture_output=True, text=True, cwd=str(_scan_root)
+                    )
+                    lines = proc.stdout.splitlines()
+                    i = 0
+                    while i < len(lines):
+                        if lines[i].startswith("worktree "):
+                            wt_path = lines[i][len("worktree "):]
+                            branch_line = lines[i + 2] if i + 2 < len(lines) else ""
+                            if f"branch refs/heads/{branch}" in branch_line:
+                                worktree_path_str = wt_path
+                                break
+                        i += 1
+                    if worktree_path_str:
+                        break
                 if worktree_path_str:
                     worktree_path = Path(worktree_path_str)
                 else:
@@ -2197,7 +2239,8 @@ def _do_cleanup_worktree(runner_id: str, redis_client: redis.Redis, command_id: 
         # PLAN_FILE_ALL/__ALL_PLANS__은 parallel 모드 sentinel이므로 plan_file로 취급하지 않음
         if plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
             plan_file = None
-        WorktreeManager.remove(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file or None)
+        _cw_base = (get_plan_git_root(plan_file) / ".worktrees") if plan_file else WORKTREE_BASE_DIR
+        WorktreeManager.remove(runner_id, _cw_base, plan_file=plan_file or None)
         redis_client.delete(
             f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path",
             f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status",
