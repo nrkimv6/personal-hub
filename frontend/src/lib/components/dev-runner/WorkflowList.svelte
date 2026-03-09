@@ -68,114 +68,130 @@
 	});
 </script>
 
-<div class="flex flex-col gap-3">
+<div class="flex flex-col gap-3 p-4 h-full overflow-hidden">
 	<!-- 헤더 -->
-	<div class="flex items-center justify-between">
-		<h3 class="text-sm font-semibold text-gray-700">워크플로우 이력</h3>
-		<div class="flex items-center gap-2">
+	<div class="flex items-center justify-between shrink-0">
+		<h3 class="text-[11px] font-bold text-gray-500 uppercase tracking-wider">Workflows</h3>
+		<div class="flex items-center gap-1.5">
 			<select
 				bind:value={statusFilter}
-				class="text-xs border border-gray-300 rounded px-2 py-1"
+				class="text-[10px] border border-gray-200 rounded bg-white px-1 py-0.5 outline-none focus:border-primary"
 			>
-				<option value="">전체</option>
+				<option value="">All</option>
 				{#each Object.entries(STATUS_BADGE) as [val, { label }]}
 					<option value={val}>{label}</option>
 				{/each}
 			</select>
 			<button
 				onclick={resetAllOrphans}
-				class="rounded px-2 py-1 text-xs text-orange-600 hover:bg-orange-100 disabled:opacity-50"
+				class="p-1 rounded hover:bg-orange-50 text-orange-500 transition-colors disabled:opacity-50"
 				disabled={resetLoading}
+				title="Reset Orphans"
 			>
-				{resetLoading ? '리셋 중...' : '고아 일괄 리셋'}
+				<svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
 			</button>
 			<button
 				onclick={load}
-				class="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded"
-			>↻ 새로고침</button>
+				class="p-1 rounded hover:bg-gray-100 text-gray-400 transition-colors"
+				title="Refresh"
+			>
+				<svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 {loading ? 'animate-spin' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+			</button>
 		</div>
 	</div>
 
-	<!-- 테이블 -->
-	{#if loading}
-		<div class="text-xs text-gray-400 text-center py-4">로딩 중...</div>
-	{:else if error}
-		<div class="text-xs text-red-500 text-center py-4">{error}</div>
-	{:else if workflows.length === 0}
-		<div class="text-xs text-gray-400 text-center py-4">워크플로우 없음</div>
-	{:else}
-		<div class="overflow-x-auto">
-			<table class="w-full text-xs border-collapse">
-				<thead>
-					<tr class="bg-gray-50 text-gray-500">
-						<th class="px-2 py-1.5 text-left font-medium">슬러그</th>
-						<th class="px-2 py-1.5 text-left font-medium">상태</th>
-						<th class="px-2 py-1.5 text-left font-medium">엔진</th>
-						<th class="px-2 py-1.5 text-left font-medium">브랜치</th>
-						<th class="px-2 py-1.5 text-left font-medium">생성</th>
-						<th class="px-2 py-1.5 text-left font-medium">완료</th>
-						<th class="px-2 py-1.5 text-left font-medium"></th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each workflows as wf}
-						{@const badge = STATUS_BADGE[wf.status] ?? { label: wf.status, cls: 'bg-gray-100 text-gray-500' }}
-						<tr
-							class="border-t border-gray-100 hover:bg-gray-50 cursor-pointer {selectedId === wf.id ? 'bg-blue-50' : ''}"
+	<!-- 리스트 -->
+	<div class="flex-1 min-h-0 overflow-y-auto pr-0.5 custom-scrollbar">
+		{#if loading && workflows.length === 0}
+			<div class="flex items-center justify-center py-10">
+				<div class="animate-spin rounded-full h-5 w-5 border-b-2 border-primary"></div>
+			</div>
+		{:else if error}
+			<div class="bg-red-50 border border-red-100 text-red-600 text-[10px] p-2 rounded mb-3">{error}</div>
+		{:else if workflows.length === 0}
+			<div class="flex flex-col items-center justify-center py-10 text-gray-400">
+				<svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8 mb-2 opacity-20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+				<p class="text-[11px] italic">No workflows found</p>
+			</div>
+		{:else}
+			<div class="space-y-2 pb-2">
+				{#each workflows as wf}
+					{@const badge = STATUS_BADGE[wf.status] ?? { label: wf.status, cls: 'bg-gray-100 text-gray-500' }}
+					<div 
+						class="rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden flex flex-col transition-all hover:border-gray-300 {selectedId === wf.id ? 'ring-1 ring-primary/30 border-primary/30' : ''}"
+					>
+						<!-- 요약 정보 행 -->
+						<!-- svelte-ignore a11y_click_events_have_key_events -->
+						<div 
+							class="px-3 py-2.5 cursor-pointer hover:bg-gray-50 transition-colors flex flex-col gap-1.5"
 							onclick={() => selectedId = selectedId === wf.id ? null : wf.id}
+							role="button"
+							tabindex="0"
 						>
-							<td class="px-2 py-1.5 font-mono truncate max-w-[180px]" title={wf.slug}>{wf.slug}</td>
-							<td class="px-2 py-1.5">
-								<span class="px-1.5 py-0.5 rounded text-[10px] font-medium {badge.cls}">{badge.label}</span>
-							</td>
-							<td class="px-2 py-1.5 text-gray-500">{wf.engine ?? '-'}</td>
-							<td class="px-2 py-1.5 font-mono text-gray-500 truncate max-w-[120px]" title={wf.branch ?? ''}>{wf.branch ?? '-'}</td>
-							<td class="px-2 py-1.5 text-gray-400 whitespace-nowrap">{formatDt(wf.created_at)}</td>
-							<td class="px-2 py-1.5 text-gray-400 whitespace-nowrap">{formatDt(wf.finished_at)}</td>
-							<td class="px-2 py-1.5">
-								{#if wf.status === 'planned' || wf.status === 'running'}
-									<button
-										onclick={(e) => cancel(wf.id, e)}
-										class="text-[10px] px-1.5 py-0.5 bg-red-50 text-red-500 hover:bg-red-100 rounded"
-									>취소</button>
-								{/if}
-							</td>
-						</tr>
-						<!-- 상세 행 -->
+							<div class="flex items-center justify-between gap-2">
+								<span class="text-[11px] font-mono font-bold text-gray-700 truncate flex-1">{wf.slug}</span>
+								<span class="rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase shrink-0 {badge.cls}">
+									{badge.label}
+								</span>
+							</div>
+							
+							<div class="flex items-center justify-between">
+								<div class="flex items-center gap-2 text-[9px] text-gray-400">
+									<span class="flex items-center gap-1"><svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>{formatDt(wf.created_at)}</span>
+									{#if wf.engine}
+										<span class="bg-gray-100 px-1 rounded text-gray-500 font-mono">{wf.engine}</span>
+									{/if}
+								</div>
+								
+								<div class="flex items-center gap-1.5">
+									{#if wf.status === 'planned' || wf.status === 'running'}
+										<button
+											onclick={(e) => cancel(wf.id, e)}
+											class="p-1 rounded hover:bg-red-50 text-red-400 transition-colors"
+											title="Cancel"
+										>
+											<svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+										</button>
+									{/if}
+									<svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3 text-gray-300 transition-transform {selectedId === wf.id ? 'rotate-180' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+								</div>
+							</div>
+						</div>
+
+						<!-- 상세 정보 (선택 시) -->
 						{#if selectedId === wf.id}
-							<tr class="bg-blue-50 border-t border-blue-100">
-								<td colspan="7" class="px-3 py-2">
-									<div class="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
-										{#if wf.plan_file}
-											<div><span class="text-gray-500">계획서:</span> <span class="font-mono">{wf.plan_file}</span></div>
-										{/if}
-										{#if wf.runner_id}
-											<div><span class="text-gray-500">runner_id:</span> <span class="font-mono">{wf.runner_id}</span></div>
-										{/if}
-										{#if wf.worktree_path}
-											<div><span class="text-gray-500">worktree:</span> <span class="font-mono truncate">{wf.worktree_path}</span></div>
-										{/if}
-										{#if wf.commit_hash}
-											<div><span class="text-gray-500">커밋:</span> <span class="font-mono">{wf.commit_hash.slice(0, 8)}</span></div>
-										{/if}
-										{#if wf.started_at}
-											<div><span class="text-gray-500">시작:</span> {formatDt(wf.started_at)}</div>
-										{/if}
-										{#if wf.merged_at}
-											<div><span class="text-gray-500">머지:</span> {formatDt(wf.merged_at)}</div>
-										{/if}
-										{#if wf.error_message}
-											<div class="col-span-2 text-red-600 bg-red-50 px-2 py-1 rounded">
-												<span class="text-gray-500">오류:</span> {wf.error_message.slice(0, 300)}
-											</div>
-										{/if}
+							<div class="px-3 py-3 border-t border-gray-100 bg-gray-50/50 flex flex-col gap-2 text-[10px]">
+								{#if wf.plan_file}
+									<div class="flex flex-col gap-0.5">
+										<span class="text-gray-400 font-bold uppercase text-[8px] tracking-tighter">Plan File</span>
+										<span class="font-mono text-gray-600 break-all">{wf.plan_file}</span>
 									</div>
-								</td>
-							</tr>
+								{/if}
+								<div class="grid grid-cols-2 gap-2">
+									{#if wf.branch}
+										<div class="flex flex-col gap-0.5">
+											<span class="text-gray-400 font-bold uppercase text-[8px] tracking-tighter">Branch</span>
+											<span class="font-mono text-blue-600 truncate">{wf.branch}</span>
+										</div>
+									{/if}
+									{#if wf.commit_hash}
+										<div class="flex flex-col gap-0.5">
+											<span class="text-gray-400 font-bold uppercase text-[8px] tracking-tighter">Commit</span>
+											<span class="font-mono text-gray-600">{wf.commit_hash.slice(0, 8)}</span>
+										</div>
+									{/if}
+								</div>
+								{#if wf.error_message}
+									<div class="mt-1 p-2 bg-red-50 border border-red-100 rounded text-red-600 break-words leading-relaxed">
+										<span class="font-bold uppercase text-[8px] block mb-0.5 opacity-70">Error Message</span>
+										{wf.error_message}
+									</div>
+								{/if}
+							</div>
 						{/if}
-					{/each}
-				</tbody>
-			</table>
-		</div>
-	{/if}
+					</div>
+				{/each}
+			</div>
+		{/if}
+	</div>
 </div>

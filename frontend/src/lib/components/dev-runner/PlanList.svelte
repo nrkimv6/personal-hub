@@ -112,9 +112,31 @@
 		batchPlans?: BatchPlanItem[];
 		onPlanSelect?: (path: string) => void;
 		onExecute?: (path: string) => void;
+		onPlanModalOpen?: (plan: DevRunnerPlanFileResponse) => void;
 	}
 
-	let { plans, onPlansChange, runningPlanFile = null, lastPlanFile = null, batchPlans = [], onPlanSelect, onExecute }: Props = $props();
+	let { plans, onPlansChange, runningPlanFile = null, lastPlanFile = null, batchPlans = [], onPlanSelect, onExecute, onPlanModalOpen }: Props = $props();
+
+	function parsePlanFilename(filename: string) {
+		const match = filename.match(/^(\d{4}-\d{2}-\d{2})_(.+)$/);
+		if (match) {
+			return { date: match[1], name: match[2] };
+		}
+		return { date: null, name: filename };
+	}
+
+	function getPlanItemBg(plan: DevRunnerPlanFileResponse, isRunning: boolean, isLastRun: boolean, batchStatus: string | null) {
+		if (batchStatus === 'running') return 'border border-cyan-300 bg-cyan-50';
+		if (isRunning) return 'border border-green-300 bg-green-50';
+		if (batchStatus === 'done' || isLastRun) return 'bg-gray-50 opacity-60';
+		
+		const status = plan.status;
+		if (status === '구현중') return 'bg-blue-50/50 hover:bg-blue-100/50';
+		if (['구현완료', '완료', '수정 완료', '배포완료', '수정완료'].includes(status)) return 'bg-gray-200 opacity-60 hover:opacity-100';
+		if (status === '완료' || status === '배포완료') return 'bg-gray-600 text-white hover:bg-gray-700';
+		
+		return 'bg-white hover:bg-gray-50';
+	}
 
 	// batch plan name → status 매핑
 	let batchStatusMap = $derived.by(() => {
@@ -144,17 +166,12 @@
 	let registeredPaths = $state<DevRunnerRegisteredPathResponse[]>([]);
 	let registeredPathsLoading = $state(false);
 
-	// Plan 인라인 팝업
-	let selectedPopupPlan = $state<DevRunnerPlanFileResponse | null>(null);
+	// Plan 인라인 팝업 제거 (모달로 대체)
 	let summaryGeneratingPath = $state<string | null>(null);
 
 	function handlePlanSelect(plan: DevRunnerPlanFileResponse) {
-		if (selectedPopupPlan?.path === plan.path) {
-			selectedPopupPlan = null;
-		} else {
-			selectedPopupPlan = plan;
-			onPlanSelect?.(plan.path);
-		}
+		onPlanModalOpen?.(plan);
+		onPlanSelect?.(plan.path);
 	}
 
 	async function handleGenerateSummary(e: Event, plan: DevRunnerPlanFileResponse) {
@@ -412,14 +429,16 @@
 					{@const isLastRun = !isRunning && lastPlanFile === plan.path}
 					{@const isDone = plan.status === '구현완료'}
 					{@const batchStatus = getBatchStatus(plan)}
+					{@const parsedFilename = parsePlanFilename(plan.filename)}
 					<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<div
+					<div
 						onclick={() => handlePlanSelect(plan)}
 						onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePlanSelect(plan); } }}
 						role="button"
 						tabindex="0"
+						title={plan.path}
 						class="group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors w-full cursor-pointer
-							{batchStatus === 'done' ? 'opacity-40' : batchStatus === 'running' ? 'border border-cyan-300 bg-cyan-50' : isRunning ? 'border border-green-300 bg-green-50' : isLastRun ? 'bg-gray-50 opacity-60' : isDone ? 'hover:bg-gray-50 opacity-50' : 'hover:bg-gray-50'}"
+							{getPlanItemBg(plan, isRunning, isLastRun, batchStatus)}"
 					>
 						<!-- Running indicator dot -->
 						{#if isRunning}
@@ -430,8 +449,17 @@
 							<svg class="w-3.5 h-3.5 shrink-0 {isLastRun ? 'text-gray-300' : 'text-gray-400'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
 						{/if}
 
-						<!-- Compact 1-line: filename + status badge + done/total -->
-						<span class="text-xs font-medium truncate flex-1 min-w-0 {batchStatus === 'done' ? 'text-gray-400 line-through' : batchStatus === 'running' ? 'text-cyan-700' : isRunning ? 'text-green-800' : isLastRun ? 'text-gray-400 line-through' : isDone ? 'text-gray-400' : ''}">{plan.filename}</span>
+						<!-- Compact 1-line: filename (date + name) + status badge + done/total -->
+						<div class="flex flex-col flex-1 min-w-0">
+							<div class="flex items-center gap-1.5 min-w-0">
+								{#if parsedFilename.date}
+									<span class="text-[9px] text-gray-400 font-mono shrink-0">{parsedFilename.date}</span>
+								{/if}
+								<span class="text-xs font-medium truncate {batchStatus === 'done' ? 'text-gray-400 line-through' : batchStatus === 'running' ? 'text-cyan-700' : isRunning ? 'text-green-800' : isLastRun ? 'text-gray-400 line-through' : isDone ? 'text-gray-400' : ''}">
+									{parsedFilename.name}
+								</span>
+							</div>
+						</div>
 
 						{#if plan.status === '구현완료'}
 							<span class="w-[70px] text-[10px] font-mono uppercase inline-flex items-center justify-center rounded {statusBadge('구현완료')}">구현완료</span>
@@ -510,37 +538,6 @@
 							>×</button>
 						{/if}
 					</div>
-
-					<!-- 인라인 팝업: 요약 + Execute -->
-					{#if selectedPopupPlan?.path === plan.path}
-						<div class="mx-1 mb-1 rounded-md border border-gray-200 bg-white shadow-sm p-2.5 flex flex-col gap-2">
-							<p class="text-xs text-gray-600 leading-relaxed">
-								{#if plan.summary}
-									{plan.summary}
-								{:else}
-									<span class="text-gray-400 italic">요약 없음</span>
-								{/if}
-							</p>
-							<div class="flex items-center gap-2">
-								<button
-									class="flex-1 text-xs font-medium py-1 px-2 rounded bg-blue-500 hover:bg-blue-600 text-white transition-colors"
-									onclick={(e) => { e.stopPropagation(); onExecute?.(plan.path); selectedPopupPlan = null; }}
-								>Execute</button>
-								{#if !plan.summary}
-									<button
-										class="text-xs py-1 px-2 rounded border border-gray-300 hover:bg-gray-50 text-gray-600 transition-colors disabled:opacity-50 flex items-center gap-1"
-										onclick={(e) => handleGenerateSummary(e, plan)}
-										disabled={summaryGeneratingPath === plan.path}
-									>
-										{#if summaryGeneratingPath === plan.path}
-											<svg class="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-dasharray="31.4 31.4" stroke-dashoffset="10"/></svg>
-										{/if}
-										요약 생성
-									</button>
-								{/if}
-							</div>
-						</div>
-					{/if}
 
 					{/each}
 			</div>
