@@ -132,15 +132,16 @@
 	}
 
 	function getPlanItemBg(plan: DevRunnerPlanFileResponse, isRunning: boolean, isLastRun: boolean, batchStatus: string | null) {
+		if (plan.path_type === 'archive') return 'bg-gray-100 opacity-50 cursor-not-allowed';
 		if (batchStatus === 'running') return 'border border-cyan-300 bg-cyan-50';
 		if (isRunning) return 'border border-green-300 bg-green-50';
 		if (batchStatus === 'done' || isLastRun) return 'bg-gray-50 opacity-60';
-		
+
 		const status = plan.status;
 		if (status === '구현중') return 'bg-blue-50/50 hover:bg-blue-100/50';
 		if (['구현완료', '완료', '수정 완료', '배포완료', '수정완료'].includes(status)) return 'bg-gray-200 opacity-60 hover:opacity-100';
 		if (status === '완료' || status === '배포완료') return 'bg-gray-600 text-white hover:bg-gray-700';
-		
+
 		return 'bg-white hover:bg-gray-50';
 	}
 
@@ -431,6 +432,7 @@
 		<div class="flex-1 overflow-y-auto -mx-1 px-1">
 			<div class="flex flex-col gap-1">
 				{#each displayPlans as plan}
+					{@const isArchive = plan.path_type === 'archive'}
 					{@const isRunning = runningPlanFile === plan.path}
 					{@const isLastRun = !isRunning && lastPlanFile === plan.path}
 					{@const isDone = plan.status === '구현완료'}
@@ -438,12 +440,13 @@
 					{@const parsedFilename = parsePlanFilename(plan.filename)}
 					<!-- svelte-ignore a11y_no_static_element_interactions -->
 					<div
-						onclick={() => handlePlanSelect(plan)}
-						onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePlanSelect(plan); } }}
+						onclick={() => { if (!isArchive) handlePlanSelect(plan); }}
+						onkeydown={(e) => { if (!isArchive && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); handlePlanSelect(plan); } }}
 						role="button"
-						tabindex="0"
-						title={plan.path}
-						class="group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors w-full cursor-pointer
+						tabindex={isArchive ? -1 : 0}
+						title={isArchive ? `아카이브됨: ${plan.path}` : plan.path}
+						class="group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors w-full
+							{isArchive ? '' : 'cursor-pointer'}
 							{getPlanItemBg(plan, isRunning, isLastRun, batchStatus)}"
 					>
 						<!-- Running indicator dot -->
@@ -452,7 +455,7 @@
 						{:else if plan.path_type === 'folder'}
 							<svg class="w-3.5 h-3.5 shrink-0 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
 						{:else}
-							<svg class="w-3.5 h-3.5 shrink-0 {isLastRun ? 'text-gray-300' : 'text-gray-400'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+							<svg class="w-3.5 h-3.5 shrink-0 {isArchive ? 'text-gray-300' : isLastRun ? 'text-gray-300' : 'text-gray-400'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
 						{/if}
 
 						<!-- filename (name + date below) -->
@@ -465,7 +468,9 @@
 							{/if}
 						</div>
 
-						{#if plan.status === '구현완료'}
+						{#if isArchive}
+							<span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-200 text-gray-400">아카이브</span>
+						{:else if plan.status === '구현완료'}
 							<span class="w-[70px] text-[10px] font-mono uppercase inline-flex items-center justify-center rounded {statusBadge('구현완료')}">구현완료</span>
 						{:else if showIgnored && plan.status === '보류'}
 							<span class="w-[70px] text-[10px] font-mono uppercase inline-flex items-center justify-center rounded {statusBadge('보류')}">보류</span>
