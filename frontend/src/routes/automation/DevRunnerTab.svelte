@@ -131,7 +131,7 @@
 	let elapsedInterval: ReturnType<typeof setInterval> | null = null;
 
 	// SSE 연결 상태
-	let eventSource: EventSource | null = null;
+	let eventSource: { close: () => void } | null = null;
 	let sseConnected = $state(false);
 	let sseReconnectDelay = 1000; // 지수 백오프 초기값
 	let sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -183,59 +183,40 @@
 
 	// ── SSE 연결 ────────────────────────────────────────────────────────────
 
-	function connectSSE() {
-		if (eventSource) {
-			eventSource.close();
-			eventSource = null;
-		}
+	function handleSSEError() {
+		sseConnected = false;
+		eventSource?.close();
+		eventSource = null;
 
-		eventSource = devRunnerEventApi.connectEvents();
+		// 지수 백오프 재연결
+		if (sseReconnectTimer) clearTimeout(sseReconnectTimer);
+		sseReconnectTimer = setTimeout(() => {
+			sseReconnectDelay = Math.min(sseReconnectDelay * 2, 30000);
+			connectSSE();
+		}, sseReconnectDelay);
 
-		eventSource.onopen = () => {
-			sseConnected = true;
-			sseReconnectDelay = 1000; // 성공 시 delay 리셋
-			// fallback 폴링 중단
-			if (fallbackTimer) {
-				clearInterval(fallbackTimer);
-				fallbackTimer = null;
-			}
-		};
-
-		eventSource.onerror = () => {
-			sseConnected = false;
-			eventSource?.close();
-			eventSource = null;
-
-			// 지수 백오프 재연결
-			if (sseReconnectTimer) clearTimeout(sseReconnectTimer);
-			sseReconnectTimer = setTimeout(() => {
-				sseReconnectDelay = Math.min(sseReconnectDelay * 2, 30000);
-				connectSSE();
-			}, sseReconnectDelay);
-
-			// fallback 폴링 시작 (10초 후)
-			if (!fallbackTimer) {
-				fallbackTimer = setInterval(async () => {
-					if (!sseConnected) {
-						void pollStatus();
-					} else {
-						if (fallbackTimer) {
-							clearInterval(fallbackTimer);
-							fallbackTimer = null;
-						}
+		// fallback 폴링 시작 (10초 후)
+		if (!fallbackTimer) {
+			fallbackTimer = setInterval(async () => {
+				if (!sseConnected) {
+					void pollStatus();
+				} else {
+					if (fallbackTimer) {
+						clearInterval(fallbackTimer);
+						fallbackTimer = null;
 					}
-				}, 30000);
-				// 첫 fallback은 10초 후
-				setTimeout(() => { if (!sseConnected) void pollStatus(); }, 10000);
-			}
-		};
+				}
+			}, 30000);
+			// 첫 fallback은 10초 후
+			setTimeout(() => { if (!sseConnected) void pollStatus(); }, 10000);
+		}
+	}
 
-		// status 이벤트: runner 상태 변경
-		eventSource.addEventListener('status', (e: MessageEvent) => {
+	function handleSSEEvent(eventName: string, data: string) {
+		if (eventName === 'status') {
 			try {
-				const data = JSON.parse(e.data) as { runners: { runner_id: string; status: string; pid: string | null; current_cycle: string | null; start_time: string | null; plan_file: string | null; engine: string | null }[] };
-				// runners 배열에서 첫 번째 running runner로 runStatus 갱신
-				const runners = data.runners ?? [];
+				const parsed = JSON.parse(data) as { runners: { runner_id: string; status: string; pid: string | null; current_cycle: string | null; start_time: string | null; plan_file: string | null; engine: string | null }[] };
+				const runners = parsed.runners ?? [];
 				const runningRunner = runners.find(r => r.status === 'running');
 				const anyRunner = runners[0];
 				const r = runningRunner ?? anyRunner;
@@ -250,23 +231,19 @@
 						runner_id: r.runner_id,
 					} as DevRunnerRunStatusResponse;
 				} else if (runners.length === 0 && runStatus) {
-					// 모든 runner 종료
 					runStatus = { ...runStatus, running: false };
 				}
-				// runner 탭 running 상태 동기화 + 신규 runner 탭 추가
 				if (runners.length > 0) {
 					const runnerMap = new Map(runners.map(r => [r.runner_id, r]));
 					runnerTabs = runnerTabs.map(tab => {
 						const runner = runnerMap.get(tab.id);
 						return runner ? updateRunnerTab(tab, runner) : { ...tab, running: false };
 					});
-					// SSE로 발견된 신규 runner 탭 추가
 					for (const runner of runners) {
 						if (!runnerTabs.some(t => t.id === runner.runner_id)) {
 							runnerTabs = [...runnerTabs, createRunnerTab(runner)];
 						}
 					}
-					// activeTabId가 없으면 마지막 탭 선택
 					if (!activeTabId && runnerTabs.length > 0) {
 						activeTabId = runnerTabs[runnerTabs.length - 1].id;
 					}
@@ -274,21 +251,35 @@
 			} catch {
 				// JSON 파싱 오류 무시
 			}
-		});
-
-		// tracking 이벤트: 현재 추적 태스크 변경
-		eventSource.addEventListener('tracking', (e: MessageEvent) => {
+		} else if (eventName === 'tracking') {
 			try {
-				currentTracking = JSON.parse(e.data) as CurrentTrackingResponse;
+				currentTracking = JSON.parse(data) as CurrentTrackingResponse;
 			} catch {
 				// 무시
 			}
-		});
-
-		// plan_changed 이벤트: plan_file 변경 → plan 목록 갱신
-		eventSource.addEventListener('plan_changed', () => {
+		} else if (eventName === 'plan_changed') {
 			void fetchPlans();
 			taskListRefreshTick++;
+		}
+	}
+
+	function connectSSE() {
+		if (eventSource) {
+			eventSource.close();
+			eventSource = null;
+		}
+
+		eventSource = devRunnerEventApi.connectEvents({
+			onOpen: () => {
+				sseConnected = true;
+				sseReconnectDelay = 1000; // 성공 시 delay 리셋
+				if (fallbackTimer) {
+					clearInterval(fallbackTimer);
+					fallbackTimer = null;
+				}
+			},
+			onError: handleSSEError,
+			onEvent: handleSSEEvent
 		});
 	}
 

@@ -429,10 +429,21 @@ export const devRunnerLogApi = {
 // Events API (SSE — Redis keyspace notifications 기반)
 // ============================================================
 
+import { createFetchSSE } from '$lib/utils/sse-fetch';
+
+export interface EventsSSEOptions {
+	onEvent?: (eventName: string, data: string) => void;
+	onOpen?: () => void;
+	onError?: (err: unknown) => void;
+}
+
 export const devRunnerEventApi = {
 	/** Redis keyspace notifications 기반 실시간 SSE 스트림에 연결 */
-	connectEvents: (): EventSource => {
-		return new EventSource(`${DEV_RUNNER_BASE}/events`);
+	connectEvents: (options: EventsSSEOptions = {}): { close: () => void } => {
+		return createFetchSSE({
+			url: `${DEV_RUNNER_BASE}/events`,
+			...options
+		});
 	}
 };
 
