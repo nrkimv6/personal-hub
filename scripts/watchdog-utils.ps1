@@ -84,6 +84,17 @@ function Remove-DuplicateProcesses {
         return
     }
 
+    # 중복 종료 전 PID 파일의 정본 프로세스가 실제로 살아있는지 재확인
+    $canonicalPid = $null
+    if (Test-Path $PidFile) {
+        $savedPid = Get-Content $PidFile -ErrorAction SilentlyContinue
+        if ($savedPid) { $canonicalPid = [int]$savedPid }
+    }
+    if ($canonicalPid -and -not (Get-Process -Id $canonicalPid -ErrorAction SilentlyContinue)) {
+        Write-Log "정본 PID $canonicalPid 가 이미 죽어 있음 — 중복 정리 건너뜀" "WARN"
+        return
+    }
+
     $pids = $duplicates | ForEach-Object { $_.ProcessId }
     $pidList = $pids -join ", "
     Write-Log "중복 $Label $($duplicates.Count)개 감지, 정리함 (PIDs: $pidList)" "WARN"
@@ -128,7 +139,20 @@ function Stop-ExistingProcessesByCmdline {
                 Write-Log "기존 프로세스 종료 실패: PID $($ep.ProcessId) — $_" "ERROR"
             }
         }
-        Start-Sleep -Milliseconds 500
+        # 프로세스가 완전히 종료될 때까지 최대 5초 대기
+        $deadline = (Get-Date).AddSeconds(5)
+        while ((Get-Date) -lt $deadline) {
+            $still = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+                Where-Object { $_.CommandLine -match $CmdlinePattern }
+            if (-not $still) { break }
+            Start-Sleep -Milliseconds 300
+        }
+        $remaining = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -match $CmdlinePattern }
+        if ($remaining) {
+            $pidList2 = ($remaining | ForEach-Object { $_.ProcessId }) -join ", "
+            Write-Log "경고: 기존 $Label 프로세스가 아직 살아있음 (PIDs: $pidList2)" "WARN"
+        }
     }
 }
 
