@@ -5,15 +5,17 @@ Session 1 (사용자 세션)에서 실행되는 워커 명령 리스너입니다
 API 서버(Session 0)에서 Redis를 통해 전달된 명령을 수신하고 실행합니다.
 
 동작 방식:
-    - BRPOP으로 worker:commands 키를 블로킹 대기 (CPU 0%)
-    - 명령 수신 시 browser-workers.ps1 호출
+    - BRPOP으로 worker:commands 및 monitor:notification:desktop 키를 블로킹 대기 (CPU 0%)
+    - 워커 명령 수신 시 browser-workers.ps1 호출
+    - Desktop 알림 수신 시 plyer.notification.notify() 호출 (Session 0 릴레이)
     - 결과를 worker:command_results에 반환
 
 사용법:
     python scripts/worker-command-listener.py
 
 아키텍처:
-    API (Session 0) → Redis LPUSH → [이 리스너 (Session 1)] → browser-workers.ps1
+    API (Session 0) → Redis LPUSH worker:commands → [이 리스너 (Session 1)] → browser-workers.ps1
+    notification_service (Session 0) → Redis LPUSH monitor:notification:desktop → [이 리스너 (Session 1)] → plyer.notification
 """
 import json
 import logging
@@ -30,7 +32,8 @@ REDIS_HOST = "localhost"
 REDIS_PORT = 6379
 COMMANDS_KEY = "worker:commands"
 RESULTS_KEY = "worker:command_results"
-BRPOP_TIMEOUT = 0  # 0 = 무한 대기
+DESKTOP_NOTIFICATION_KEY = "monitor:notification:desktop"  # Session 0 → Session 1 Desktop 알림 릴레이
+BRPOP_TIMEOUT = 30  # 초 (0 = 무한 대기, 양수 = 타임아웃 후 루프 재시작)
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
@@ -119,6 +122,37 @@ def execute_worker_action(action: str) -> dict:
         return {"success": False, "message": f"워커 {action} 예외: {str(e)}"}
 
 
+def send_desktop_notification(message: str) -> bool:
+    """Desktop 알림을 표시합니다 (Session 0에서 릴레이된 알림).
+
+    Args:
+        message: 표시할 알림 메시지
+
+    Returns:
+        bool: 성공 여부
+    """
+    try:
+        from plyer import notification
+
+        # Windows 알림 시스템 메시지 길이 제한 (256자)
+        if len(message) > 256:
+            message = message[:253] + "..."
+
+        notification.notify(
+            title="알림",
+            message=message,
+            timeout=10,
+        )
+        logger.info(f"Desktop 알림 표시 완료: {message[:50]}...")
+        return True
+    except ImportError:
+        logger.warning("plyer 미설치 — Desktop 알림 표시 불가 (pip install plyer)")
+        return False
+    except Exception as e:
+        logger.error(f"Desktop 알림 표시 실패: {e}")
+        return False
+
+
 def main():
     """메인 루프: Redis BRPOP으로 명령 대기 및 실행."""
     logger.info("=" * 50)
@@ -126,6 +160,7 @@ def main():
     logger.info(f"Redis: {REDIS_HOST}:{REDIS_PORT}")
     logger.info(f"명령 키: {COMMANDS_KEY}")
     logger.info(f"결과 키: {RESULTS_KEY}")
+    logger.info(f"Desktop 알림 키: {DESKTOP_NOTIFICATION_KEY}")
     logger.info(f"스크립트: {BROWSER_WORKERS_SCRIPT}")
     logger.info("=" * 50)
 
@@ -144,19 +179,35 @@ def main():
             logger.info("Redis 연결 성공")
             reconnect_delay = 1  # 연결 성공 시 리셋
 
-            # BRPOP 루프 (블로킹 대기)
+            # BRPOP 루프 (블로킹 대기) — worker:commands + notification:desktop 동시 대기
             while True:
-                result = r.brpop(COMMANDS_KEY, timeout=BRPOP_TIMEOUT)
+                result = r.brpop([COMMANDS_KEY, DESKTOP_NOTIFICATION_KEY], timeout=BRPOP_TIMEOUT)
 
                 if result is None:
+                    # timeout 경과 — 루프 계속 (연결 유지 확인)
                     continue
 
-                _, raw_command = result
+                queue_key, raw_data = result
 
+                # Desktop 알림 처리
+                if queue_key == DESKTOP_NOTIFICATION_KEY:
+                    try:
+                        payload = json.loads(raw_data)
+                        message = payload.get("message", "")
+                        if message:
+                            logger.info(f"Desktop 알림 수신: {message[:80]}")
+                            send_desktop_notification(message)
+                        else:
+                            logger.warning(f"Desktop 알림 페이로드에 message 없음: {raw_data}")
+                    except json.JSONDecodeError:
+                        logger.warning(f"잘못된 Desktop 알림 형식: {raw_data}")
+                    continue
+
+                # 워커 명령 처리 (기존 로직)
                 try:
-                    command = json.loads(raw_command)
+                    command = json.loads(raw_data)
                 except json.JSONDecodeError:
-                    logger.warning(f"잘못된 명령 형식: {raw_command}")
+                    logger.warning(f"잘못된 명령 형식: {raw_data}")
                     continue
 
                 action = command.get("action")
