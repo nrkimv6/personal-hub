@@ -305,11 +305,43 @@ class NotificationService:
             logger.error(f"텔레그램 알림 전송 실패: {str(e)}")
             return False
 
+    async def _relay_desktop_via_redis(self, message: str) -> bool:
+        """Session 0에서 Desktop 알림을 Redis를 통해 Session 1로 릴레이합니다.
+
+        Args:
+            message: 릴레이할 알림 메시지
+
+        Returns:
+            bool: 릴레이 성공 여부
+        """
+        try:
+            import redis.asyncio as aioredis
+            from app.shared.redis.queue import DESKTOP_NOTIFICATION_QUEUE
+            from app.core.config import settings as _settings
+
+            queue_name = f"{_settings.REDIS_QUEUE_PREFIX}:{DESKTOP_NOTIFICATION_QUEUE}"
+            payload = json.dumps({"message": message})
+
+            client = aioredis.Redis(host=_settings.REDIS_HOST, port=_settings.REDIS_PORT, decode_responses=True)
+            try:
+                await client.lpush(queue_name, payload)
+                logger.info(f"Desktop 알림 Redis 릴레이 성공: {queue_name}")
+                return True
+            finally:
+                await client.aclose()
+        except Exception as e:
+            logger.warning(f"Desktop 알림 Redis 릴레이 실패 (알림 무시): {str(e)}")
+            return False
+
     async def _send_desktop(self, message: str):
         """데스크톱 알림을 전송합니다."""
         if not self.enable_desktop:
             return
-            
+
+        # Session 0에서는 plyer.notification이 hang할 수 있으므로 Redis 릴레이로 우회
+        if _IN_SESSION_0:
+            return await self._relay_desktop_via_redis(message)
+
         # 중복 메시지 확인
         combined_message = f"{message}"
         if self._is_duplicate_message(combined_message):
@@ -320,7 +352,7 @@ class NotificationService:
             # Windows 알림 시스템은 메시지 길이에 256자 제한이 있으므로 메시지를 잘라냅니다
             if len(message) > 256:
                 message = message[:253] + "..."
-                
+
             notification.notify(
                 title="알림",
                 message=message,

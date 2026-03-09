@@ -22,6 +22,7 @@ LLM_REQUEST_QUEUE = "llm:requests"
 GIT_REPOS_TASK_QUEUE = "git_repos:tasks"
 FILE_SEARCH_QUEUE = "file_search:requests"
 FILE_SEARCH_OPEN_QUEUE = "file_search:open"  # fire-and-forget (VSCode 파일 열기)
+DESKTOP_NOTIFICATION_QUEUE = "notification:desktop"  # Session 0 → Session 1 Desktop 알림 릴레이
 
 
 class RedisQueue:
