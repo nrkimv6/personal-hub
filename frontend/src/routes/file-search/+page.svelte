@@ -3,7 +3,7 @@
 	import { onDestroy } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import { search, pollSearchResult, getPresets, getStatus } from '$lib/api/fileSearch';
-	import {
+	import type {
 		FileMatch,
 		Preset,
 		SearchMode,
