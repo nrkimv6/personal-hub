@@ -169,6 +169,8 @@ class ExecutorService:
         logger.info(f"[dev-runner] Request engine: {request.engine}, runner_id: {runner_id}")
 
         if request.plan_file:
+            if "docs/archive/" in request.plan_file.replace("\\", "/"):
+                raise HTTPException(status_code=400, detail="archived plan은 실행할 수 없습니다")
             command["plan_file"] = request.plan_file
 
         if request.engine:

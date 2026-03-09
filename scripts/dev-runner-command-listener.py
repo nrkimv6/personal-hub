@@ -587,45 +587,82 @@ def _detect_orphan_workflows(redis_client: redis.Redis) -> int:
     return cleaned
 
 
-def _detect_orphan_plans(redis_client: redis.Redis) -> int:
-    """plan 파일 '> 상태: 구현중' 교차검증: Workflow DB에 대응 running 레코드가 없으면 경고"""
+def _cleanup_orphan_plans(redis_client: redis.Redis) -> int:
+    """plan 파일 교차검증: Workflow DB에 running 레코드 없으면 경고 + 독자 커밋 없는 worktree/branch 자동 삭제"""
     import re as _re
+    from plan_worktree_helpers import is_worktree_active, has_unmerged_commits
 
     if _wf_manager is None:
         return 0
-    warnings_count = 0
+    cleaned_count = 0
+    scan_dirs = []
     plan_dir = PROJECT_ROOT / "docs" / "plan"
-    if not plan_dir.is_dir():
+    archive_dir = PROJECT_ROOT / "docs" / "archive"
+    if plan_dir.is_dir():
+        scan_dirs.append(plan_dir)
+    if archive_dir.is_dir():
+        scan_dirs.append(archive_dir)
+    if not scan_dirs:
         return 0
     try:
         all_workflows = _wf_manager.list_workflows()
-        for plan_file in plan_dir.glob("*.md"):
-            try:
-                with open(plan_file, "r", encoding="utf-8") as f:
-                    head_lines = [f.readline() for _ in range(20)]
-            except Exception:
-                continue
-            is_impl = any(_re.search(r">\s*상태:\s*구현중", line) for line in head_lines if line)
-            if not is_impl:
-                continue
-            filename = plan_file.name
-            # Workflow DB에서 이 plan에 대한 running 레코드 찾기
-            matching = [
-                w for w in all_workflows
-                if w.get("plan_file") and filename in w["plan_file"] and w.get("status") == "running"
-            ]
-            if not matching:
-                logger.warning(f"[orphan-plan] {filename}: 상태=구현중이지만 Workflow DB에 running 레코드 없음")
-                warnings_count += 1
-            else:
-                for w in matching:
-                    rid = w.get("runner_id")
-                    if rid and not redis_client.sismember(ACTIVE_RUNNERS_KEY, rid):
-                        logger.warning(f"[orphan-plan] {filename}: runner {rid}가 active_runners에 없음")
-                        warnings_count += 1
+        for scan_dir in scan_dirs:
+            for plan_file in scan_dir.glob("*.md"):
+                try:
+                    with open(plan_file, "r", encoding="utf-8") as f:
+                        head_lines = [f.readline() for _ in range(20)]
+                except Exception:
+                    continue
+                is_impl = any(_re.search(r">\s*상태:\s*(구현중|구현완료)", line) for line in head_lines if line)
+                if not is_impl:
+                    continue
+                filename = plan_file.name
+                # Workflow DB에서 이 plan에 대한 running 레코드 찾기
+                matching = [
+                    w for w in all_workflows
+                    if w.get("plan_file") and filename in w["plan_file"] and w.get("status") == "running"
+                ]
+                is_orphan = False
+                if not matching:
+                    logger.warning(f"[orphan-plan] {filename}: 상태=구현중/완료이지만 Workflow DB에 running 레코드 없음")
+                    is_orphan = True
+                else:
+                    for w in matching:
+                        rid = w.get("runner_id")
+                        if rid and not redis_client.sismember(ACTIVE_RUNNERS_KEY, rid):
+                            logger.warning(f"[orphan-plan] {filename}: runner {rid}가 active_runners에 없음")
+                            is_orphan = True
+
+                # orphan이면 worktree/branch 정리 시도
+                if is_orphan:
+                    try:
+                        active, branch, wt_abs = is_worktree_active(str(plan_file), PROJECT_ROOT)
+                        if active and branch:
+                            if has_unmerged_commits(branch, PROJECT_ROOT):
+                                # git log로 커밋 수 추정
+                                import subprocess as _sp
+                                r = _sp.run(
+                                    ["git", "log", f"main..{branch}", "--oneline"],
+                                    capture_output=True, text=True, cwd=str(PROJECT_ROOT)
+                                )
+                                n = len(r.stdout.strip().splitlines()) if r.stdout.strip() else "?"
+                                logger.warning(
+                                    f"[orphan-plan] {filename}: 독자 커밋 {n}개 존재 — 수동 확인 필요 (branch={branch})"
+                                )
+                            else:
+                                # 독자 커밋 없음 → 안전하게 정리
+                                try:
+                                    WorktreeManager.remove("", WORKTREE_BASE_DIR, plan_file=str(plan_file))
+                                    _remove_plan_header_fields(str(plan_file))
+                                    logger.info(f"[orphan-plan] {filename}: worktree/branch 정리 완료 (branch={branch})")
+                                    cleaned_count += 1
+                                except Exception as rm_err:
+                                    logger.warning(f"[orphan-plan] {filename}: 정리 실패 — {rm_err}")
+                    except Exception as check_err:
+                        logger.warning(f"[orphan-plan] {filename}: worktree 확인 중 오류 — {check_err}")
     except Exception as e:
         logger.warning(f"[orphan-plan] plan 고아 탐지 실패: {e}")
-    return warnings_count
+    return cleaned_count
 
 
 def _run_subprocess_streaming(cmd: list, env: dict, cwd: str, pub_fn, tag: str, timeout: int = 300) -> dict:
@@ -1319,25 +1356,29 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
     # 명령어 구성
     plan_file = command.get("plan_file")
 
+    # archive 경로 방어: archive된 plan은 실행 거부
+    if plan_file:
+        from plan_worktree_helpers import is_plan_archived
+        if is_plan_archived(plan_file):
+            _set_error_status(f"archived plan은 실행할 수 없습니다: {plan_file}")
+            return
+
     # worktree 생성 또는 재사용 (시간이 걸릴 수 있음)
     try:
         ensure_main_branch(PROJECT_ROOT)
         _reused_worktree = False
         if plan_file:
-            existing_branch, existing_wt_rel = _parse_plan_worktree_info(plan_file)
-            if existing_branch and existing_wt_rel:
-                existing_wt_path = PROJECT_ROOT / existing_wt_rel
-                if existing_wt_path.is_dir() and WorktreeManager.validate(existing_wt_path):
-                    worktree_path = existing_wt_path
+            from plan_worktree_helpers import is_worktree_active
+            _active, existing_branch, existing_wt_abs = is_worktree_active(plan_file, PROJECT_ROOT)
+            if _active:
+                    worktree_path = Path(existing_wt_abs)
                     branch = existing_branch
                     _reused_worktree = True
                     logger.info(f"기존 워크트리 재사용: {worktree_path} (branch: {branch})")
-                else:
+            else:
                     # 경로 없음 또는 worktree 검증 실패 → plan 헤더에서 필드 제거 후 신규 생성
-                    if existing_wt_path.is_dir():
-                        logger.warning(f"워크트리 검증 실패, 신규 생성: {existing_wt_rel}")
                     _remove_plan_header_fields(plan_file)
-                    logger.info(f"워크트리 경로 없음, 신규 생성: {existing_wt_rel}")
+                    logger.info(f"워크트리 없음 또는 검증 실패, 신규 생성: plan={plan_file}")
         if not _reused_worktree:
             worktree_path, branch = WorktreeManager.create(runner_id, WORKTREE_BASE_DIR, plan_file=plan_file)
             # Phase 4: plan 헤더에 branch/worktree 기록 (수동 /implement와 동일 패턴)
@@ -1520,6 +1561,7 @@ def _launch_plan_runner_process(command: Dict, redis_client: redis.Redis, runner
         env.pop("CLAUDECODE", None)  # 중첩 세션 감지 방지
         env["PLAN_RUNNER_WORK_DIR"] = str(worktree_path)
         env["PLAN_RUNNER_WORKTREE_PATH"] = str(worktree_path)
+        env["PLAN_RUNNER_PROJECT_ROOT"] = str(PROJECT_ROOT)
         env["PLAN_RUNNER_RUNNER_ID"] = runner_id
         env["REDIS_DB"] = str(REDIS_DB)  # 테스트 격리: plan-runner가 동일 DB 사용
         # 로그 prefix 식별자: plan명(날짜 제거, 첫 2단어) + runner_id 앞 4자
@@ -2212,9 +2254,9 @@ def main():
             _reconnect_surviving_runners(r)
             # listener 시작/재시작 시 DB↔Redis 교차검증으로 고아 워크플로우 탐지
             orphan_wf_count = _detect_orphan_workflows(r)
-            orphan_plan_count = _detect_orphan_plans(r)
+            orphan_plan_count = _cleanup_orphan_plans(r)
             if orphan_wf_count or orphan_plan_count:
-                logger.warning(f"[orphan] 고아 탐지 완료: workflow {orphan_wf_count}개 정리, plan {orphan_plan_count}개 경고")
+                logger.warning(f"[orphan] 고아 탐지 완료: workflow {orphan_wf_count}개 정리, plan {orphan_plan_count}개 정리")
             # listener 시작/재시작 시 생존 MergeOrchestrator 재연결
             _reconnect_surviving_merge_orchestrator(r)
 

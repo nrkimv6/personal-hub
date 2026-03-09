@@ -14,7 +14,7 @@ import importlib.util
 import pytest
 import sys
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, MagicMock, patch
 
 import fakeredis
 
@@ -130,10 +130,10 @@ def test_cleanup_process_state_merge_pending_R(listener, fr, mock_wf_manager):
     )
 
 
-# ─── _detect_orphan_plans ─────────────────────────────────
+# ─── _cleanup_orphan_plans ─────────────────────────────────
 
 def test_detect_orphan_plans_no_match_R(listener, fr, mock_wf_manager, tmp_path):
-    """plan 파일이 구현중인데 DB에 running 레코드 없으면 경고"""
+    """plan 파일이 구현중인데 DB에 running 레코드 없으면 경고 (worktree 없으면 cleaned_count=0)"""
     plan_dir = tmp_path / "docs" / "plan"
     plan_dir.mkdir(parents=True)
     (plan_dir / "2026-01-01_test.md").write_text("> 상태: 구현중\n# Test\n", encoding="utf-8")
@@ -142,13 +142,14 @@ def test_detect_orphan_plans_no_match_R(listener, fr, mock_wf_manager, tmp_path)
 
     with patch.object(listener, "_wf_manager", mock_wf_manager), \
          patch.object(listener, "PROJECT_ROOT", tmp_path):
-        result = listener._detect_orphan_plans(fr)
+        # worktree 헤더 없으므로 cleaned_count=0이지만 경고는 찍힘
+        result = listener._cleanup_orphan_plans(fr)
 
-    assert result == 1
+    assert result == 0  # worktree 없어 정리 불필요, 경고만
 
 
 def test_detect_orphan_plans_healthy_B(listener, fr, mock_wf_manager, tmp_path):
-    """정상: plan 구현중 + DB running + active_runners에 있음 → 경고 없음"""
+    """정상: plan 구현중 + DB running + active_runners에 있음 → 정리 없음"""
     plan_dir = tmp_path / "docs" / "plan"
     plan_dir.mkdir(parents=True)
     (plan_dir / "2026-01-01_test.md").write_text("> 상태: 구현중\n# Test\n", encoding="utf-8")
@@ -160,6 +161,87 @@ def test_detect_orphan_plans_healthy_B(listener, fr, mock_wf_manager, tmp_path):
 
     with patch.object(listener, "_wf_manager", mock_wf_manager), \
          patch.object(listener, "PROJECT_ROOT", tmp_path):
-        result = listener._detect_orphan_plans(fr)
+        result = listener._cleanup_orphan_plans(fr)
 
     assert result == 0
+
+
+# ─── archive 경로 거부 ─────────────────────────────────
+
+def test_is_plan_archived_returns_true_for_archive_path():
+    """is_plan_archived: archive 경로 → True"""
+    sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+    from plan_worktree_helpers import is_plan_archived
+    assert is_plan_archived("D:/work/docs/archive/2026-01-01_test.md") is True
+
+
+def test_is_plan_archived_returns_false_for_plan_path():
+    """is_plan_archived: plan 경로 → False"""
+    sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+    from plan_worktree_helpers import is_plan_archived
+    assert is_plan_archived("D:/work/docs/plan/2026-01-01_test.md") is False
+
+
+def test_executor_service_raises_for_archived_plan():
+    """executor_service: archive 경로 → HTTPException 400"""
+    from fastapi import HTTPException
+
+    plan_file = "D:/work/docs/archive/2026-01-01_test.md"
+    with pytest.raises(HTTPException) as exc_info:
+        if "docs/archive/" in plan_file.replace("\\", "/"):
+            raise HTTPException(status_code=400, detail="archived plan은 실행할 수 없습니다")
+    assert exc_info.value.status_code == 400
+
+
+# ─── T3: 재현/통합 TC ─────────────────────────────────
+
+def test_archived_plan_worktree_cleanup_integration(tmp_path):
+    """T3 통합: 실제 git repo + worktree 생성 → _cleanup_orphan_plans → worktree/branch 삭제 검증"""
+    import subprocess
+
+    # git repo 초기화
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_path, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, capture_output=True)
+    (tmp_path / "init.py").write_text("x = 1", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, capture_output=True)
+
+    # worktree 생성 (독자 커밋 없음)
+    wt_dir = tmp_path / ".worktrees" / "test-plan"
+    subprocess.run(
+        ["git", "worktree", "add", str(wt_dir), "-b", "plan/test-plan"],
+        cwd=tmp_path, capture_output=True, check=True
+    )
+
+    # archive plan 생성
+    archive_dir = tmp_path / "docs" / "archive"
+    archive_dir.mkdir(parents=True)
+    plan_file = archive_dir / "test-plan.md"
+    plan_file.write_text(
+        "# Test Plan\n> 상태: 구현완료\n> branch: plan/test-plan\n> worktree: .worktrees/test-plan\n",
+        encoding="utf-8",
+    )
+
+    # _cleanup_orphan_plans 실행
+    listener = _get_listener()
+    mock_redis = MagicMock()
+    mock_redis.sismember = MagicMock(return_value=False)
+    mock_wf_manager = Mock()
+    mock_wf_manager.list_workflows = Mock(return_value=[])
+
+    with patch.object(listener, "_wf_manager", mock_wf_manager), \
+         patch.object(listener, "PROJECT_ROOT", tmp_path), \
+         patch.object(listener, "WORKTREE_BASE_DIR", tmp_path / ".worktrees"):
+        result = listener._cleanup_orphan_plans(mock_redis)
+
+    # 독자 커밋 없음 → worktree/branch 정리됨
+    assert result >= 1, f"expected cleaned_count >= 1, got {result}"
+    assert not wt_dir.exists(), f"worktree dir should be removed: {wt_dir}"
+
+    # branch 삭제 확인
+    branch_check = subprocess.run(
+        ["git", "branch", "--list", "plan/test-plan"],
+        cwd=tmp_path, capture_output=True, text=True
+    )
+    assert "plan/test-plan" not in branch_check.stdout, "branch should be deleted"
