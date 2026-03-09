@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.83.0] - 2026-03-09
+### Added
+- **dev-runner UI 전면 개편** (Phase 1-4)
+  - Plans 목록 가독성 개선 (파일명 날짜 분리, 상태별 배경색)
+  - Plan 선택 모달 도입 (Execute 버튼 통합, 요약 표시)
+  - Runner 리스트 카드 (멀티 러너 관리, 접기 기능, 상태 아이콘)
+  - Runner 탭 바 제거 및 로그/머지 탭 바로가기 통합
+  - TaskList 텍스트 줄바꿈 개선 및 Summary 카드 보완
+  - WorkflowList 아이콘화 및 모바일 UX 최적화
+- Svelte 컴파일러 경고(50+건) 전체 해소
+- file-search `+page.svelte` 런타임 타입 에러 수정 (`import type` 누락)
+
 ## [2.79.0] - 2026-03-06
 ### Added
 - RunStatusBar 좌측 영역 리디자인: Zap SVG 아이콘 + `{N} runner(s)` 카운트 + elapsed 표시
