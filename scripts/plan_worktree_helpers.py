@@ -161,6 +161,43 @@ def write_plan_worktree_info(plan_file: str, branch: str, worktree_rel: str):
         logger.warning(f"[write_plan_worktree_info] 기록 실패 (무시): {e}")
 
 
+def get_plan_completion(plan_file: str | None) -> tuple[int, int]:
+    """plan 파일의 체크박스 완료율 계산.
+
+    코드블럭(``` 내부) 체크박스는 카운트 제외.
+
+    Args:
+        plan_file: plan 파일 경로. None이거나 파일 없으면 (0, 0) 반환.
+
+    Returns:
+        (done_count, total_count)
+    """
+    if not plan_file:
+        return (0, 0)
+    try:
+        with open(plan_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except Exception:
+        return (0, 0)
+
+    done = 0
+    total = 0
+    in_codeblock = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_codeblock = not in_codeblock
+            continue
+        if in_codeblock:
+            continue
+        if re.search(r"-\s\[x\]", stripped, re.IGNORECASE):
+            done += 1
+            total += 1
+        elif re.search(r"-\s\[ \]", stripped):
+            total += 1
+    return (done, total)
+
+
 def remove_plan_header_fields(plan_file: str):
     """plan 파일에서 '> branch:' / '> worktree:' 줄 제거"""
     try:

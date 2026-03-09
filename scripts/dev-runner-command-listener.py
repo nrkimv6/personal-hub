@@ -19,6 +19,7 @@ API 서버(Session 0)에서 Redis를 통해 전달된 명령을 수신하고 실
 import argparse
 import json
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -27,6 +28,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict
+from urllib.parse import quote as _url_quote
+
+import requests
 
 _ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
@@ -44,6 +48,7 @@ from plan_worktree_helpers import (
     parse_plan_worktree_info as _parse_plan_worktree_info,
     write_plan_worktree_info as _write_plan_worktree_info,
     remove_plan_header_fields as _remove_plan_header_fields,
+    get_plan_completion as _get_plan_completion,
 )
 
 # 설정
@@ -58,11 +63,14 @@ RECENT_RUNNERS_KEY = "plan-runner:recent_runners"  # sorted set: score=종료 ti
 PLAN_FILE_ALL = "__ALL_PLANS__"  # 전체실행 sentinel — plan_file 미지정 시 Redis에 저장
 _LEGACY_ALL = "ALL"  # 하위 호환: 이전 버전에서 저장된 "ALL" 값 인식용
 RECENT_RUNNERS_TTL = 86400  # 24시간 (초) — executor_service.py의 RECENT_RUNNERS_TTL과 동일하게 유지
+ADMIN_API_PORT = int(os.environ.get("ADMIN_API_PORT", "8001"))
+ADMIN_API_BASE = f"http://localhost:{ADMIN_API_PORT}/api"
+
 # per-runner 키 suffix 전체 목록 — app/modules/dev_runner/services/executor_service.py의 RUNNER_KEY_SUFFIXES와 동일
 RUNNER_KEY_SUFFIXES = (
     "status", "pid", "plan_file", "start_time", "log_file_path", "stream_log_path",
     "engine", "fix_engine", "worktree_path", "branch", "merge_status", "merge_requested",
-    "current_cycle", "quota_stopped", "error",
+    "current_cycle", "quota_stopped", "error", "restart_after_merge",
 )
 HEARTBEAT_KEY = "plan-runner:listener:heartbeat"
 HEARTBEAT_INTERVAL = 10  # heartbeat 갱신 주기 (초)
@@ -1011,6 +1019,21 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
                 pass
             _pub("merge 성공 (exit_code=0)")
             result = {"success": True, "message": "merged", "merge_status": "merged", "action": action_name}
+
+            # 5. 자동 done 분기: 완료율 체크 → done API 호출 or main 추가 사이클 예약
+            if plan_file and plan_file not in (PLAN_FILE_ALL, _LEGACY_ALL):
+                done_count, total_count = _get_plan_completion(plan_file)
+                if total_count > 0 and done_count == total_count:
+                    _pub(f"완료율 100% ({done_count}/{total_count}) — 자동 done 처리 시작")
+                    _call_done_api(plan_file, runner_id, _pub)
+                else:
+                    _pub(f"미완료 태스크 있음 ({done_count}/{total_count}) — main 추가 사이클 예약")
+                    try:
+                        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge", "1")
+                    except Exception:
+                        pass
+            else:
+                _pub("plan_file 없음(--all 모드) — done 스킵")
         elif exit_code == 2:
             try:
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "test_failed")
@@ -1110,6 +1133,32 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
     return result
 
 
+def _call_done_api(plan_file: str, runner_id: str, pub_fn) -> bool:
+    """plan_file 경로에 대해 Admin API /plans/{path}/done 를 호출한다.
+
+    Args:
+        plan_file: plan 파일 절대 경로
+        runner_id: 로깅용 runner ID
+        pub_fn: 로그 publish 함수 (msg: str) -> None
+
+    Returns:
+        True if done API returned 200, False otherwise
+    """
+    try:
+        encoded = _url_quote(plan_file, safe="")
+        url = f"{ADMIN_API_BASE}/plans/{encoded}/done"
+        resp = requests.post(url, timeout=60)
+        if resp.status_code == 200:
+            return True
+        pub_fn(f"done API 실패 (status={resp.status_code}) — 수동 처리 필요")
+        logger.warning(f"[_call_done_api] done API 실패: runner={runner_id}, status={resp.status_code}, url={url}")
+        return False
+    except requests.exceptions.RequestException as e:
+        pub_fn(f"done API 연결 실패: {e} — 수동 처리 필요")
+        logger.warning(f"[_call_done_api] done API 연결 실패: runner={runner_id}, error={e}")
+        return False
+
+
 def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
     """merge_requested 플래그가 있을 때 _stream_output finally에서 호출되는 인라인 merge 함수.
 
@@ -1122,6 +1171,35 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
         pass
 
     _execute_merge_with_lock(runner_id, redis_client, action_name="inline-merge")
+
+    # restart_after_merge 플래그 감지 → main 추가 사이클 트리거
+    try:
+        _flag = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge")
+        if _flag:
+            redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge")
+            plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+            engine = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine") or "claude"
+            log_channel = f"{LOG_CHANNEL_PREFIX}:{runner_id}"
+            try:
+                redis_client.publish(log_channel, f"main 추가 사이클 시작 (plan={plan_file}, engine={engine})")
+            except Exception:
+                pass
+            if plan_file and plan_file not in (PLAN_FILE_ALL, _LEGACY_ALL):
+                import uuid as _uuid
+                new_runner_id = _uuid.uuid4().hex[:8]
+                command = {
+                    "action": "run",
+                    "runner_id": new_runner_id,
+                    "plan_file": plan_file,
+                    "engine": engine,
+                }
+                redis_client.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
+                logger.info(f"[_do_inline_merge] main 추가 사이클 큐잉: runner={new_runner_id}, plan={plan_file}")
+    except redis.ConnectionError:
+        logger.warning(f"[_do_inline_merge] restart_after_merge 감지 중 Redis 연결 실패 (무시)")
+    except Exception as _re:
+        logger.warning(f"[_do_inline_merge] restart_after_merge 처리 실패 (무시): {_re}")
+
     _cleanup_process_state(runner_id, redis_client)
 
 
