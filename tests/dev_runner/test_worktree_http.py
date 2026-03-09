@@ -13,13 +13,18 @@ BASE_URL = "/api/v1/dev-runner"
 
 
 @pytest.fixture
-def fake_sync():
-    return fakeredis.FakeRedis(decode_responses=True)
+def fake_server():
+    return fakeredis.FakeServer()
 
 
 @pytest.fixture
-def fake_async():
-    return fakeredis.aioredis.FakeRedis(decode_responses=True)
+def fake_sync(fake_server):
+    return fakeredis.FakeRedis(server=fake_server, decode_responses=True)
+
+
+@pytest.fixture
+def fake_async(fake_server):
+    return fakeredis.aioredis.FakeRedis(server=fake_server, decode_responses=True)
 
 
 @pytest.fixture

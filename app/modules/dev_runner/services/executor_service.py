@@ -499,7 +499,9 @@ class ExecutorService:
                     start_time_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:start_time")
                     worktree_path = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:worktree_path")
                     merge_status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:merge_status")
-                    branch = f"runner/{rid}" if worktree_path else None
+                    branch = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:branch")
+                    if branch is None and worktree_path:
+                        branch = f"runner/{rid}"
                     start_time = None
                     if start_time_str:
                         try:
