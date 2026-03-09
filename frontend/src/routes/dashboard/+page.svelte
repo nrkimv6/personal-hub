@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import PageHeader from '$lib/components/layout/PageHeader.svelte';
   import { dashboardApi } from '$lib/api';
+  import { waitForApiReady } from '$lib/api/system';
   import { ApiConnectionError } from '$lib/api/client';
   import type { UnifiedDashboard } from '$lib/types';
   import ServiceHealthCard from './ServiceHealthCard.svelte';
@@ -37,7 +38,9 @@
     }
   }
 
-  onMount(() => {
+  onMount(async () => {
+    // API startup 완료 대기 후 데이터 요청 (콜드 스타트 대응)
+    await waitForApiReady();
     fetchData();
     const interval = setInterval(fetchData, REFRESH_INTERVAL);
     return () => clearInterval(interval);

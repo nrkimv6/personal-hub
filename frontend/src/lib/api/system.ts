@@ -152,6 +152,27 @@ export const dashboardApi = {
   unified: () => request<UnifiedDashboard>('/dashboard/unified')
 };
 
+/**
+ * API startup 완료까지 폴링하며 대기합니다.
+ * timeoutMs 초과 시 에러 없이 resolve (타임아웃 후 그냥 진행).
+ */
+export async function waitForApiReady(timeoutMs = 30000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`${API_BASE}/ready`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ready === true) return;
+      }
+    } catch {
+      // fetch 실패 (서버 아직 안 뜸) — 다음 루프에서 재시도
+    }
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  // 타임아웃 — 그냥 진행
+}
+
 // ============================================================
 // Event API (독립 이벤트 관리)
 // ============================================================
