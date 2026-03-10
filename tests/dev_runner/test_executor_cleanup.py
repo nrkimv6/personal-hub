@@ -4,6 +4,7 @@
       ExecutorService.cleanup_stale_runners()
 
 Mock: fakeredis.aioredis (실제 Redis 불필요)
+통합(integration): 실제 Redis 연결 필요 (pytest -m integration)
 """
 
 import os
@@ -11,6 +12,8 @@ import time
 import pytest
 import fakeredis
 import fakeredis.aioredis
+import redis
+import redis.asyncio as aioredis
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
@@ -253,3 +256,67 @@ class TestCleanupStaleRunnersDoubleCount:
             result = await svc.cleanup_stale_runners()
 
         assert result["bugs"] == 0
+
+
+# ─────────────────── T3: 통합 TC (실제 Redis) ────────────────────
+
+INTEGRATION_REDIS_DB = 14  # 테스트 전용 DB (운영 DB와 충돌 방지)
+
+
+@pytest.fixture
+def real_redis_sync():
+    """실제 Redis 동기 클라이언트 (DB 14, 테스트 전용)"""
+    try:
+        r = redis.Redis(host="localhost", port=6379, db=INTEGRATION_REDIS_DB, decode_responses=True)
+        r.ping()
+        yield r
+        r.flushdb()
+        r.close()
+    except (redis.ConnectionError, ConnectionRefusedError):
+        pytest.skip("실제 Redis 연결 불가 — 통합 테스트 스킵")
+
+
+@pytest.fixture
+async def real_redis_async(real_redis_sync):
+    """실제 Redis 비동기 클라이언트 (DB 14, 테스트 전용)"""
+    r = aioredis.Redis(host="localhost", port=6379, db=INTEGRATION_REDIS_DB, decode_responses=True)
+    yield r
+    await r.aclose()
+
+
+@pytest.fixture
+def real_svc(real_redis_sync, real_redis_async):
+    """실제 Redis가 주입된 ExecutorService"""
+    service = ExecutorService()
+    service.redis_client = real_redis_sync
+    service.async_redis = real_redis_async
+    return service
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_cleanup_stale_real_redis(real_svc, real_redis_async, tmp_path):
+    """실제 Redis: recent_runners에 더미 stale runner 추가 → cleanup → cleaned_recent >= 1 (T3)"""
+    plan_dir = tmp_path / "docs" / "plan"
+    plan_dir.mkdir(parents=True)
+    plan_file_path = str(plan_dir / "2026-01-01_dummy_stale.md")
+
+    rid = "integration-test-runner-001"
+
+    await real_redis_async.zadd(RECENT_RUNNERS_KEY, {rid: time.time()})
+    await real_redis_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "stopped")
+    await real_redis_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file", plan_file_path)
+
+    try:
+        result = await real_svc.cleanup_stale_runners()
+
+        assert result["cleaned_recent"] >= 1, f"cleaned_recent가 0: {result}"
+        assert result["total"] >= 1
+
+        remaining = await real_redis_async.zrange(RECENT_RUNNERS_KEY, 0, -1)
+        assert rid not in remaining, f"더미 runner가 recent_runners에 여전히 존재: {remaining}"
+
+    finally:
+        await real_redis_async.zrem(RECENT_RUNNERS_KEY, rid)
+        for suffix in RUNNER_KEY_SUFFIXES:
+            await real_redis_async.delete(f"{RUNNER_KEY_PREFIX}:{rid}:{suffix}")
