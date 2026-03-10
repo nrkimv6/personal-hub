@@ -87,6 +87,20 @@ async def cleanup_worktree(runner_id: str):
     return await executor_service.send_runner_command(runner_id, "cleanup-worktree")
 
 
+@router.post("/runners/cleanup-stale")
+async def cleanup_stale_runners():
+    """plan 파일 없는 stale runner를 Redis에서 정리 (멱등, 여러 번 호출 안전)"""
+    result = await executor_service.cleanup_stale_runners()
+    return {
+        "success": True,
+        "cleaned": result["total"],
+        "detail": {
+            "cleaned_active": result["cleaned_active"],
+            "cleaned_recent": result["cleaned_recent"],
+        },
+    }
+
+
 @router.delete("/runners/{runner_id}/tab")
 async def dismiss_runner_tab(runner_id: str):
     """종료된 runner 탭 dismiss — RECENT_RUNNERS_KEY에서 제거 + per-runner 키 즉시 삭제"""
