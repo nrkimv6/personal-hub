@@ -1,175 +1,255 @@
-"""
-test_executor_cleanup.py
-- cleanup_stale_runners() 중복 카운트 버그 수정 TC
+"""cleanup_stale_runners() 단위 테스트 — RIGHT-BICEP 원칙 + 중복 카운트 버그 수정 TC
 
-TC 목록:
-  R: test_cleanup_stale_dead_pid_no_double_count
-  B: test_cleanup_stale_dead_pid_not_a_bug
-  Re: test_cleanup_dead_pid_double_count_root_cause
+대상: app/modules/dev_runner/services/executor_service.py
+      ExecutorService.cleanup_stale_runners()
+
+Mock: fakeredis.aioredis (실제 Redis 불필요)
 """
+
+import os
+import time
 import pytest
-from pathlib import Path
+import fakeredis
+import fakeredis.aioredis
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
-try:
-    import fakeredis
-    import fakeredis.aioredis as fake_aioredis
-    HAS_FAKEREDIS = True
-except ImportError:
-    HAS_FAKEREDIS = False
-
-pytestmark = pytest.mark.skipif(not HAS_FAKEREDIS, reason="fakeredis 미설치")
-
-
-# ──────────────────────────────────────────────
-# 헬퍼
-# ──────────────────────────────────────────────
-
-def _make_executor_service():
-    """fakeredis를 주입한 ExecutorService 인스턴스 반환 (sync + async 모두 세팅)"""
-    from app.modules.dev_runner.services.executor_service import ExecutorService
-
-    fake_async_r = fake_aioredis.FakeRedis(decode_responses=True)
-    fake_sync_r = fakeredis.FakeRedis(decode_responses=True)
-    svc = ExecutorService.__new__(ExecutorService)
-    svc.async_redis = fake_async_r
-    svc.redis_client = fake_sync_r
-    return svc, fake_async_r
+from app.modules.dev_runner.services.executor_service import (
+    ExecutorService,
+    ACTIVE_RUNNERS_KEY,
+    RECENT_RUNNERS_KEY,
+    RUNNER_KEY_PREFIX,
+    RUNNER_KEY_SUFFIXES,
+)
 
 
-async def _seed_active_runner_dead_pid(fake_r, runner_id: str):
-    """ACTIVE_RUNNERS에 dead-PID runner를 심는다. plan_file Redis 키는 있으나 파일시스템에는 없음."""
-    from app.modules.dev_runner.services.executor_service import (
-        RUNNER_KEY_PREFIX,
-        ACTIVE_RUNNERS_KEY,
+# ─────────────────────────── Fixtures ────────────────────────────
+
+@pytest.fixture
+def fake_redis():
+    return fakeredis.FakeRedis(decode_responses=True)
+
+
+@pytest.fixture
+def fake_async_redis():
+    return fakeredis.aioredis.FakeRedis(decode_responses=True)
+
+
+@pytest.fixture
+def svc(fake_redis, fake_async_redis):
+    """fakeredis 주입된 ExecutorService"""
+    service = ExecutorService()
+    service.redis_client = fake_redis
+    service.async_redis = fake_async_redis
+    return service
+
+
+# ─────────────────────────── helpers ─────────────────────────────
+
+async def _seed_recent(r, rid, *, status, plan_file, start_time_iso=None):
+    """recent_runners에 runner 시드"""
+    await r.zadd(RECENT_RUNNERS_KEY, {rid: time.time()})
+    await r.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", status)
+    if plan_file:
+        await r.set(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file", plan_file)
+    if start_time_iso:
+        await r.set(f"{RUNNER_KEY_PREFIX}:{rid}:start_time", start_time_iso)
+
+
+async def _seed_active(r, rid, *, pid):
+    """active_runners에 runner 시드"""
+    await r.sadd(ACTIVE_RUNNERS_KEY, rid)
+    await r.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", str(pid))
+    await r.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
+
+
+# ─────────────────────── Right (정상) TC ─────────────────────────
+
+@pytest.mark.asyncio
+async def test_cleanup_stale_archived_plan(svc, fake_async_redis, tmp_path):
+    """plan 없음 + archive 있음 → stale 정리 + reason=archived, bugs=0 (R)"""
+    archive_file = tmp_path / "archive" / "2026-01-01_foo.md"
+    archive_file.parent.mkdir(parents=True)
+    archive_file.write_text("archived plan")
+
+    plan_path = str(tmp_path / "plan" / "2026-01-01_foo.md")
+    plan_dir = tmp_path / "docs" / "plan"
+    plan_dir.mkdir(parents=True)
+    plan_file_path = str(plan_dir / "2026-01-01_foo.md")
+
+    archive_dir = tmp_path / "docs" / "archive"
+    archive_dir.mkdir(parents=True)
+    archive_file2 = archive_dir / "2026-01-01_foo.md"
+    archive_file2.write_text("archived")
+
+    rid = "t-arch-001"
+    await _seed_recent(fake_async_redis, rid, status="stopped", plan_file=plan_file_path)
+
+    result = await svc.cleanup_stale_runners()
+
+    assert result["cleaned_recent"] == 1
+    assert result["bugs"] == 0
+    assert result["total"] == 1
+
+    remaining = await fake_async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1)
+    assert rid not in remaining
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stale_file_lost(svc, fake_async_redis, tmp_path):
+    """plan 없음 + archive도 없음 + stopped → stale 정리 + reason=file_lost + bugs=1 (R)"""
+    plan_dir = tmp_path / "docs" / "plan"
+    plan_dir.mkdir(parents=True)
+    plan_file_path = str(plan_dir / "2026-02-01_lost.md")
+
+    rid = "t-lost-001"
+    await _seed_recent(fake_async_redis, rid, status="stopped", plan_file=plan_file_path)
+
+    result = await svc.cleanup_stale_runners()
+
+    assert result["cleaned_recent"] == 1
+    assert result["bugs"] == 1
+    assert result["total"] == 1
+
+    remaining = await fake_async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1)
+    assert rid not in remaining
+
+
+@pytest.mark.asyncio
+async def test_cleanup_stale_running_old_file_lost(svc, fake_async_redis, tmp_path):
+    """plan 없음 + archive 없음 + running + 10분+ → 정리 + bugs=1 (R)"""
+    plan_dir = tmp_path / "docs" / "plan"
+    plan_dir.mkdir(parents=True)
+    plan_file_path = str(plan_dir / "2026-02-01_zombie.md")
+
+    old_start = (datetime.now() - timedelta(minutes=20)).isoformat()
+
+    rid = "t-zombie-001"
+    await _seed_recent(
+        fake_async_redis, rid,
+        status="running",
+        plan_file=plan_file_path,
+        start_time_iso=old_start,
     )
-    prefix = f"{RUNNER_KEY_PREFIX}:{runner_id}"
-    # dead PID (존재하지 않는 PID)
-    await fake_r.set(f"{prefix}:pid", "999999999")
-    await fake_r.set(f"{prefix}:status", "running")
-    # plan_file: Redis에는 값이 있지만 실제 파일시스템에는 존재하지 않는 경로
-    await fake_r.set(f"{prefix}:plan_file", "/nonexistent/plan/file.md")
-    await fake_r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+    result = await svc.cleanup_stale_runners()
+
+    assert result["cleaned_recent"] == 1
+    assert result["bugs"] == 1
+
+    remaining = await fake_async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1)
+    assert rid not in remaining
 
 
-async def _seed_active_runner_dead_pid_no_plan_file(fake_r, runner_id: str):
-    """ACTIVE_RUNNERS에 dead-PID runner를 심는다. plan_file Redis 키 자체가 없음 (근본 원인 재현용).
+# ──────────────────────── Boundary TC ────────────────────────────
 
-    _force_cleanup_state()는 plan_file 키를 삭제하지 않고 TTL만 설정한다.
-    따라서 Phase 1 정리 후 RECENT_RUNNERS_KEY에 남은 runner가 Phase 2에서
-    plan_file 파일시스템 체크 시 "없는 파일"로 판단되어 bugs++ 오탐이 발생한다.
-    이 헬퍼는 plan_file 키 없이 시드하여 해당 경로를 재현한다.
-    """
-    from app.modules.dev_runner.services.executor_service import (
-        RUNNER_KEY_PREFIX,
-        ACTIVE_RUNNERS_KEY,
+@pytest.mark.asyncio
+async def test_cleanup_stale_running_new_skipped(svc, fake_async_redis, tmp_path):
+    """plan 없음 + archive 없음 + running + 10분 미만 → 유예 (스킵) (B)"""
+    plan_dir = tmp_path / "docs" / "plan"
+    plan_dir.mkdir(parents=True)
+    plan_file_path = str(plan_dir / "2026-02-01_new.md")
+
+    recent_start = (datetime.now() - timedelta(minutes=2)).isoformat()
+
+    rid = "t-new-001"
+    await _seed_recent(
+        fake_async_redis, rid,
+        status="running",
+        plan_file=plan_file_path,
+        start_time_iso=recent_start,
     )
-    prefix = f"{RUNNER_KEY_PREFIX}:{runner_id}"
-    # dead PID (존재하지 않는 PID)
-    await fake_r.set(f"{prefix}:pid", "999999999")
-    await fake_r.set(f"{prefix}:status", "running")
-    # plan_file 키 없음 — _force_cleanup_state 후 파일시스템 체크 불가 상태 재현
-    await fake_r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+
+    result = await svc.cleanup_stale_runners()
+
+    assert result["cleaned_recent"] == 0
+    assert result["bugs"] == 0
+
+    remaining = await fake_async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1)
+    assert rid in remaining
 
 
-# ──────────────────────────────────────────────
-# TC
-# ──────────────────────────────────────────────
+@pytest.mark.asyncio
+async def test_cleanup_stale_plan_exists_skipped(svc, fake_async_redis, tmp_path):
+    """plan 파일 존재 → 정리 안 됨 (B)"""
+    plan_dir = tmp_path / "docs" / "plan"
+    plan_dir.mkdir(parents=True)
+    plan_file = plan_dir / "2026-02-01_exists.md"
+    plan_file.write_text("# Active plan")
+
+    rid = "t-exist-001"
+    await _seed_recent(
+        fake_async_redis, rid,
+        status="stopped",
+        plan_file=str(plan_file),
+    )
+
+    result = await svc.cleanup_stale_runners()
+
+    assert result["cleaned_recent"] == 0
+    assert result["total"] == 0
+
+    remaining = await fake_async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1)
+    assert rid in remaining
+
+
+# ─────────────────── active_runners PID 죽음 TC ──────────────────
+
+@pytest.mark.asyncio
+async def test_cleanup_stale_dead_pid_active(svc, fake_async_redis):
+    """active_runners PID 죽음 → 정리 (R)"""
+    rid = "t-dead-pid-001"
+    await _seed_active(fake_async_redis, rid, pid=999999999)
+
+    with patch.object(svc, "_is_pid_alive", return_value=False):
+        result = await svc.cleanup_stale_runners()
+
+    assert result["cleaned_active"] == 1
+    assert result["total"] >= 1
+
+    active_members = await fake_async_redis.smembers(ACTIVE_RUNNERS_KEY)
+
+
+# ──────────────────────── Error/Empty TC ─────────────────────────
+
+@pytest.mark.asyncio
+async def test_cleanup_stale_empty_returns_zero(svc, fake_async_redis):
+    """정리 대상 없을 때 0 반환 (E)"""
+    result = await svc.cleanup_stale_runners()
+
+    assert result == {
+        "cleaned_active": 0,
+        "cleaned_recent": 0,
+        "bugs": 0,
+        "total": 0,
+    }
+
+
+# ──────────────── Phase1→Phase2 중복 카운트 수정 TC ───────────────
 
 class TestCleanupStaleRunnersDoubleCount:
     """cleanup_stale_runners Phase1→Phase2 중복 카운트 수정 검증"""
 
     @pytest.mark.asyncio
-    async def test_cleanup_stale_dead_pid_no_double_count(self):
-        """R: dead-PID runner는 Phase1에서 정리되고, Phase2에서 중복 카운트되지 않아야 한다.
-
-        기대: cleaned_active=1, cleaned_recent=0, bugs=0
-        """
-        svc, fake_r = _make_executor_service()
-        runner_id = "t-clnstale-nodbl"
-
-        await _seed_active_runner_dead_pid(fake_r, runner_id)
+    async def test_cleanup_stale_dead_pid_no_double_count(self, svc, fake_async_redis):
+        """R: dead-PID runner는 Phase1에서 정리되고, Phase2에서 중복 카운트되지 않아야 한다."""
+        rid = "t-clnstale-nodbl"
+        await _seed_active(fake_async_redis, rid, pid=999999999)
 
         with patch.object(svc, "_is_pid_alive", return_value=False):
             result = await svc.cleanup_stale_runners()
 
-        assert result["cleaned_active"] == 1, (
-            f"cleaned_active는 1이어야 하는데 {result['cleaned_active']}. "
-            "Phase1에서 dead-PID runner를 정리하지 못했거나 카운트 누락."
-        )
-        assert result["cleaned_recent"] == 0, (
-            f"cleaned_recent는 0이어야 하는데 {result['cleaned_recent']}. "
-            "Phase1에서 이미 정리한 runner가 Phase2에서 중복 카운트됨 — double-count 버그."
-        )
-        assert result["bugs"] == 0, (
-            f"bugs는 0이어야 하는데 {result['bugs']}. "
-            "Phase1에서 정상 정리된 runner가 오탐 bugs로 카운트됨."
-        )
+        assert result["cleaned_active"] == 1
+        assert result["cleaned_recent"] == 0
+        assert result["bugs"] == 0
 
     @pytest.mark.asyncio
-    async def test_cleanup_stale_dead_pid_not_a_bug(self):
-        """B: dead-PID runner가 Phase1에서 정리된 경우 bugs는 반드시 0이어야 한다.
-
-        Phase1 처리 ID가 오탐 bugs 카운트에 포함되지 않음 확인.
-        """
-        svc, fake_r = _make_executor_service()
-        runner_id = "t-clnstale-nobug"
-
-        await _seed_active_runner_dead_pid(fake_r, runner_id)
+    async def test_cleanup_stale_dead_pid_not_a_bug(self, svc, fake_async_redis):
+        """B: dead-PID runner가 Phase1에서 정리된 경우 bugs는 반드시 0이어야 한다."""
+        rid = "t-clnstale-nobug"
+        await _seed_active(fake_async_redis, rid, pid=999999999)
 
         with patch.object(svc, "_is_pid_alive", return_value=False):
             result = await svc.cleanup_stale_runners()
 
-        assert result["bugs"] == 0, (
-            f"bugs == {result['bugs']}. "
-            "Phase1에서 정리된 dead-PID runner가 Phase2에서 'running 상태 오탐'으로 "
-            "bugs++ 됐을 가능성 있음. cleaned_active_ids 스킵 로직이 동작하지 않는 상태."
-        )
-
-
-class TestCleanupStaleRunnersRootCause:
-    """중복 카운트 근본 원인 재현 TC (T3 통합 TC)
-
-    수정 전 코드: plan_file 키 없는 dead-PID runner가 Phase1 정리 후
-    Phase2에서 다시 정리 대상으로 판단되어 bugs=1 오탐 발생.
-    수정 후 코드: cleaned_active_ids 스킵으로 bugs=0 보장.
-    """
-
-    @pytest.mark.asyncio
-    async def test_cleanup_dead_pid_double_count_root_cause(self):
-        """Re: 수정 전이라면 bugs=1이 발생했을 케이스 — 수정 후 bugs=0 검증 (참조 무결성).
-
-        시드 조건:
-        - ACTIVE_RUNNERS_KEY에 dead-PID runner 등록
-        - plan_file Redis 키 없음 (Phase2 파일시스템 체크 시 '파일 없음'으로 판단되는 경로)
-        - _is_pid_alive=False mock
-
-        수정 전 동작:
-        1. Phase1: PID 죽음 → _force_cleanup_state → RECENT_RUNNERS_KEY zadd → cleaned_active=1
-        2. Phase2: 동일 runner가 RECENT_RUNNERS_KEY에 존재 → plan_file 없음 → bugs++ → bugs=1 (오탐)
-
-        수정 후 기대:
-        - cleaned_active_ids에 runner_id 추가 → Phase2 스킵 → bugs=0
-        """
-        svc, fake_r = _make_executor_service()
-        runner_id = "t-clnstale-rootcause"
-
-        # plan_file 키 없이 시드 — 근본 원인 재현
-        await _seed_active_runner_dead_pid_no_plan_file(fake_r, runner_id)
-
-        with patch.object(svc, "_is_pid_alive", return_value=False):
-            result = await svc.cleanup_stale_runners()
-
-        assert result["bugs"] == 0, (
-            f"bugs == {result['bugs']} (기대: 0). "
-            "수정 전 코드라면 Phase1 정리 후 Phase2에서 동일 runner를 다시 정리해 bugs=1 오탐 발생. "
-            "cleaned_active_ids 스킵 로직이 동작하지 않는 상태 — Phase 2 스킵 미적용."
-        )
-        assert result["cleaned_active"] == 1, (
-            f"cleaned_active == {result['cleaned_active']} (기대: 1). "
-            "Phase1에서 dead-PID runner가 정리되지 않음."
-        )
-        assert result["cleaned_recent"] == 0, (
-            f"cleaned_recent == {result['cleaned_recent']} (기대: 0). "
-            "Phase1에서 정리된 runner가 Phase2에서 중복 카운트됨 — double-count 재현."
-        )
+        assert result["bugs"] == 0
