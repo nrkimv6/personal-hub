@@ -2,7 +2,7 @@
  * API Client - 공통 request 함수 및 인증 처리
  */
 
-import { apiHealth } from '../stores/apiHealth';
+import { apiHealth } from '../stores/apiHealth.svelte';
 
 // 브라우저 환경 체크
 const isBrowser = typeof window !== 'undefined';
