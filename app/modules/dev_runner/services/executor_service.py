@@ -434,6 +434,114 @@ class ExecutorService:
             logger.warning(f"[dev-runner] force-stop 전송 실패: {e}")
             return False
 
+    async def cleanup_stale_runners(self) -> Dict:
+        """active_runners + recent_runners 중 stale 항목을 정리하는 public 메서드.
+
+        stale 판단 기준:
+        - active_runners: PID 없거나 죽어있음 → 기존 _cleanup_stale_runners() 로직 재활용
+        - recent_runners: plan_file 없음 + (archive 있음 or stopped or running+10분+) → 정리
+          - plan_file 있음 → 스킵
+          - plan_file 없음 + archive 있음 → stale (정상완료, reason=archived)
+          - plan_file 없음 + archive 없음 + stopped → stale (파일소실, reason=file_lost)
+          - plan_file 없음 + archive 없음 + running + 10분+ → stale (좀비+파일소실, reason=file_lost)
+          - plan_file 없음 + archive 없음 + running + 10분 미만 → 유예 (방금 시작, 스킵)
+
+        Returns:
+            {"cleaned_active": int, "cleaned_recent": int, "bugs": int, "total": int}
+        """
+        cleaned_active = 0
+        cleaned_recent = 0
+        bugs = 0
+
+        # 1. active_runners 정리 (기존 _cleanup_stale_runners 로직)
+        try:
+            runner_ids = await self.async_redis.smembers(ACTIVE_RUNNERS_KEY)
+        except Exception:
+            runner_ids = set()
+
+        for rid in runner_ids:
+            pid_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:pid")
+            should_clean = False
+            if not pid_str:
+                should_clean = True
+            else:
+                try:
+                    pid = int(pid_str)
+                    if not self._is_pid_alive(pid):
+                        should_clean = True
+                except ValueError:
+                    should_clean = True
+
+            if should_clean:
+                await self._force_cleanup_state(rid)
+                cleaned_active += 1
+
+        # 2. recent_runners 정리
+        try:
+            recent_ids = await self.async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1)
+        except Exception:
+            recent_ids = []
+
+        now = datetime.now()
+        GRACE_SECONDS = 600  # 10분
+
+        for rid in recent_ids:
+            plan_file = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file")
+
+            # plan_file 있으면 스킵
+            if plan_file and Path(plan_file).exists():
+                continue
+
+            # plan_file 없는 경우: archive 확인
+            reason = None
+            if plan_file:
+                # archive 경로 계산: docs/plan/ → docs/archive/
+                archive_path = plan_file.replace("docs/plan/", "docs/archive/").replace("docs\\plan\\", "docs\\archive\\")
+                if Path(archive_path).exists():
+                    reason = "archived"
+                else:
+                    reason = "file_lost"
+            else:
+                reason = "file_lost"
+
+            # status + start_time 기반 판단
+            status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:status")
+            start_time_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:start_time")
+
+            if status == "running" and reason == "file_lost":
+                # 10분 유예 확인
+                if start_time_str:
+                    try:
+                        start_time = datetime.fromisoformat(start_time_str)
+                        elapsed = (now - start_time).total_seconds()
+                        if elapsed < GRACE_SECONDS:
+                            # 방금 시작한 runner, 유예
+                            continue
+                    except ValueError:
+                        pass
+
+            # 정리 실행: per-runner 키 삭제 + zrem
+            for key_suffix in RUNNER_KEY_SUFFIXES:
+                await self.async_redis.delete(f"{RUNNER_KEY_PREFIX}:{rid}:{key_suffix}")
+            await self.async_redis.zrem(RECENT_RUNNERS_KEY, rid)
+            await self.async_redis.srem(ACTIVE_RUNNERS_KEY, rid)
+            cleaned_recent += 1
+
+            if reason == "file_lost":
+                bugs += 1
+                logger.warning(f"[dev-runner] cleanup: runner {rid} plan 파일 소실 (file_lost)")
+
+        total = cleaned_active + cleaned_recent
+        if total:
+            logger.info(f"[dev-runner] cleanup_stale_runners: active={cleaned_active}, recent={cleaned_recent}, bugs={bugs}")
+
+        return {
+            "cleaned_active": cleaned_active,
+            "cleaned_recent": cleaned_recent,
+            "bugs": bugs,
+            "total": total,
+        }
+
     async def reset_running_state(self, full_reset: bool = False) -> Dict:
         """RUNNING 상태 강제 초기화 - Redis 정리만 수행"""
         try:
