@@ -2,6 +2,8 @@
  * API Client - 공통 request 함수 및 인증 처리
  */
 
+import { apiHealth } from '../stores/apiHealth';
+
 // 브라우저 환경 체크
 const isBrowser = typeof window !== 'undefined';
 
@@ -106,6 +108,7 @@ export async function fetchWithTimeout(
       signal: mergedSignal
     });
     clearTimeout(timeoutId);
+    apiHealth.reportConnectionSuccess();
     return response;
   } catch (error) {
     clearTimeout(timeoutId);
@@ -159,6 +162,14 @@ export async function request<T>(
     throw new Error('인증이 만료되었습니다');
   }
 
+  // disconnected/reconnecting 상태에서 API 호출 차단 (/ready 엔드포인트는 예외 — 폴링이 차단되지 않도록)
+  if (
+    (apiHealth.state === 'disconnected' || apiHealth.state === 'reconnecting') &&
+    !endpoint.endsWith('/ready')
+  ) {
+    throw new ApiConnectionError('서버 재연결 대기 중');
+  }
+
   // 인증 헤더 추가
   const token = getAuthToken();
   const headers: HeadersInit = {
@@ -183,6 +194,7 @@ export async function request<T>(
       'API 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요.',
       error
     );
+    apiHealth.reportConnectionError();
     globalErrorHandler?.(connError.message, 'connection');
     throw connError;
   }
