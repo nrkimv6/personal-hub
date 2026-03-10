@@ -162,6 +162,14 @@ export async function request<T>(
     throw new Error('인증이 만료되었습니다');
   }
 
+  // disconnected/reconnecting 상태에서 API 호출 차단 (/ready 엔드포인트는 예외 — 폴링이 차단되지 않도록)
+  if (
+    (apiHealth.state === 'disconnected' || apiHealth.state === 'reconnecting') &&
+    !endpoint.endsWith('/ready')
+  ) {
+    throw new ApiConnectionError('서버 재연결 대기 중');
+  }
+
   // 인증 헤더 추가
   const token = getAuthToken();
   const headers: HeadersInit = {
