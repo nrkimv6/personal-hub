@@ -23,6 +23,7 @@
 		onStopAll?: () => void;
 		onForceStop?: () => void;
 		onSync?: () => void;
+		onCleanup?: () => void;
 		onReset?: () => void;
 		onExecute?: () => void;
 		onStopRunner?: (id: string) => void;
@@ -43,6 +44,7 @@
 		onStopAll,
 		onForceStop,
 		onSync,
+		onCleanup,
 		onReset,
 		onExecute,
 		onStopRunner,
@@ -151,6 +153,23 @@
 						<polyline points="23 4 23 10 17 10"/>
 						<polyline points="1 20 1 14 7 14"/>
 						<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+					</svg>
+				</button>
+			{/if}
+
+			{#if onCleanup}
+				<button
+					onclick={onCleanup}
+					class="h-6 w-6 flex items-center justify-center rounded-md hover:bg-secondary transition-colors"
+					title="Redis 잔존 상태 정리"
+				>
+					<!-- Trash2 icon -->
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<polyline points="3 6 5 6 21 6"/>
+						<path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+						<path d="M10 11v6"/>
+						<path d="M14 11v6"/>
+						<path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
 					</svg>
 				</button>
 			{/if}

@@ -3,6 +3,7 @@
 ## [2.87.0] - 2026-03-13
 ### Added
 - apiHealth 스토어: `ApiHealthState`에 `'dead'` 추가, `lastDeath` 상태 필드 및 getter 추가
+- **RunStatusBar에 onCleanup prop 추가** — Trash2 아이콘 버튼으로 Redis 잔존 상태 정리 기능
 
 ## [2.86.0] - 2026-03-12
 ### Added
