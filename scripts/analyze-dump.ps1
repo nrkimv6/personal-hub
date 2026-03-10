@@ -35,7 +35,7 @@ Write-Host "출력: $outFile"
 Write-Host "심볼 다운로드 중 (첫 실행 시 수 분 소요)..."
 
 # 분석 명령 파일 생성
-$cmdFile = [System.IO.Path]::GetTempFileName() + ".txt"
+$cmdFile = Join-Path $env:TEMP ("analyze_cmd_{0}.txt" -f [guid]::NewGuid().ToString("N").Substring(0,8))
 @"
 !analyze -v
 lm t n

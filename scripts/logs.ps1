@@ -387,7 +387,7 @@ function Get-ActivePlanRunners {
     if (-not (Test-Path $py)) { return $result }
 
     # 임시 파일로 Python 코드 전달 (PowerShell -c 인자 전달 시 따옴표 제거 방지)
-    $tmpPy = [System.IO.Path]::GetTempFileName() + ".py"
+    $tmpPy = Join-Path $env:TEMP ("logs_planrunner_{0}.py" -f [guid]::NewGuid().ToString("N").Substring(0,8))
     @'
 import json, sys
 try:

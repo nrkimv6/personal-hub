@@ -159,8 +159,8 @@ function Test-WithTimeout {
 
     Write-DiagLog "  $Label (timeout: ${TimeoutSeconds}s)..." "STEP"
 
-    $tempFile = [System.IO.Path]::GetTempFileName()
-    $errFile = [System.IO.Path]::GetTempFileName()
+    $tempFile = Join-Path $env:TEMP ("diag_out_{0}.tmp" -f [guid]::NewGuid().ToString("N").Substring(0,8))
+    $errFile = Join-Path $env:TEMP ("diag_err_{0}.tmp" -f [guid]::NewGuid().ToString("N").Substring(0,8))
 
     try {
         $process = Start-Process -FilePath $PythonExe `
