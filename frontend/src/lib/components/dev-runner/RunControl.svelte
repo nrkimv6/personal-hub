@@ -124,6 +124,8 @@
 				onStatusChange();
 				actionError = msg;
 				forceStopNeeded = true;
+			} else if (msg.includes('archived plan') || msg.includes('archive')) {
+				actionError = '이 Plan은 아카이브되어 실행할 수 없습니다. Plans 탭에서 아카이브 목록을 확인하세요.';
 			} else if (msg.includes('Redis') || msg.includes('listener') || msg.includes('503') || msg.includes('504')) {
 				actionError = `${msg} — Redis와 dev-runner listener가 실행 중인지 확인하세요.`;
 			} else {
