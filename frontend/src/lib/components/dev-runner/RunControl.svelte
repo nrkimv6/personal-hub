@@ -93,6 +93,13 @@
 			actionError = 'Plan 파일을 선택하세요';
 			return;
 		}
+		if (mode === 'single' && selectedPlan) {
+			const selected = plans.find(p => p.path === selectedPlan);
+			if (selected?.path_type === 'archive' || selectedPlan.includes('/archive/') || selectedPlan.includes('\\archive\\')) {
+				actionError = '아카이브된 Plan은 실행할 수 없습니다.';
+				return;
+			}
+		}
 		actionLoading = true;
 		actionError = null;
 		forceStopNeeded = false;
@@ -117,6 +124,8 @@
 				onStatusChange();
 				actionError = msg;
 				forceStopNeeded = true;
+			} else if (msg.includes('archived plan') || msg.includes('archive')) {
+				actionError = '이 Plan은 아카이브되어 실행할 수 없습니다. Plans 탭에서 아카이브 목록을 확인하세요.';
 			} else if (msg.includes('Redis') || msg.includes('listener') || msg.includes('503') || msg.includes('504')) {
 				actionError = `${msg} — Redis와 dev-runner listener가 실행 중인지 확인하세요.`;
 			} else {
