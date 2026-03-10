@@ -2,6 +2,8 @@
  * API Client - 공통 request 함수 및 인증 처리
  */
 
+import { apiHealth } from '../stores/apiHealth';
+
 // 브라우저 환경 체크
 const isBrowser = typeof window !== 'undefined';
 
@@ -106,6 +108,7 @@ export async function fetchWithTimeout(
       signal: mergedSignal
     });
     clearTimeout(timeoutId);
+    apiHealth.reportConnectionSuccess();
     return response;
   } catch (error) {
     clearTimeout(timeoutId);
@@ -183,6 +186,7 @@ export async function request<T>(
       'API 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요.',
       error
     );
+    apiHealth.reportConnectionError();
     globalErrorHandler?.(connError.message, 'connection');
     throw connError;
   }
