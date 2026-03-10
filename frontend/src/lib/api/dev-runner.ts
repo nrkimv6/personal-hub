@@ -284,6 +284,12 @@ export const devRunnerRunnerApi = {
 		devRunnerRequest<{ success: boolean; message: string }>(
 			`/runners/${runnerId}/kill`,
 			{ method: 'POST' }
+		),
+
+	cleanupStale: () =>
+		devRunnerRequest<{ success: boolean; cleaned: number; detail: { cleaned_active: number; cleaned_recent: number } }>(
+			'/runners/cleanup-stale',
+			{ method: 'POST' }
 		)
 };
 
