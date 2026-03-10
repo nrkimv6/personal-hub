@@ -103,7 +103,7 @@ class MemoryPressureResponder:
             logger.warning("Telegram 알림 전송 실패: %s", exc)
 
     async def _on_caution(self, available_mb: float) -> None:
-        """주의 단계 대응."""
+        """주의 단계 대응 — 로그만 (1GB 이상이므로 Telegram 알림 없음)."""
         if not self._should_alert("caution"):
             return
         top5 = self._get_top_processes(5)
@@ -113,11 +113,10 @@ class MemoryPressureResponder:
             f"상위 프로세스: {top5_str}"
         )
         logger.warning(msg)
-        await self._send_telegram(msg)
         self._record_alert("caution")
 
     async def _on_warning(self, available_mb: float) -> None:
-        """경고 단계 대응 — 고아 프로세스 정리."""
+        """경고 단계 대응 — 고아 프로세스 정리 (1GB 이상이므로 Telegram 알림 없음)."""
         if not self._should_alert("warning"):
             return
         top5 = self._get_top_processes(5)
@@ -127,7 +126,6 @@ class MemoryPressureResponder:
             f"고아 프로세스 정리 실행...\n상위: {top5_str}"
         )
         logger.warning(msg)
-        await self._send_telegram(msg)
         self._record_alert("warning")
 
         orphans = await self.orphan_detector.scan()
