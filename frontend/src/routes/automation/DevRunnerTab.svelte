@@ -409,6 +409,35 @@
 		}
 	}
 
+	async function handleCleanup() {
+		try {
+			const result = await devRunnerRunnerApi.cleanupStale();
+			await fetchRunners();
+			const msg = `정리 완료: ${result.cleaned}개 항목 제거`;
+			console.info('[DevRunner]', msg, result.detail);
+		} catch (e) {
+			console.warn('[DevRunner] cleanup 실패', e);
+		}
+	}
+
+	async function fetchRunners() {
+		try {
+			const runners = await devRunnerRunnerApi.runners();
+			const runnerMap = new Map(runners.map(r => [r.runner_id, r]));
+			runnerTabs = runnerTabs.map(tab => {
+				const runner = runnerMap.get(tab.id);
+				return runner ? updateRunnerTab(tab, runner) : { ...tab, running: false };
+			});
+			for (const runner of runners) {
+				if (!runnerTabs.some(t => t.id === runner.runner_id)) {
+					runnerTabs = [...runnerTabs, createRunnerTab(runner)];
+				}
+			}
+		} catch (e) {
+			console.warn('[DevRunner] fetchRunners 실패', e);
+		}
+	}
+
 	async function loadData() {
 		await Promise.all([pollStatus(), fetchPlans()]);
 		error = null;
@@ -556,6 +585,7 @@
 				{runStatus}
 				{elapsed}
 				onSync={handleSync}
+				onCleanup={handleCleanup}
 				onExecute={() => { showExecutionModal = true; }}
 				onStopAll={runningCount > 0 ? async () => {
 					for (const t of runnerTabs.filter(r => r.running)) {
