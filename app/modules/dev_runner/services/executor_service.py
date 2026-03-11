@@ -129,6 +129,76 @@ class ExecutorService:
             logger.info(f"[dev-runner] stale 정리: {cleaned}개 제거")
         return cleaned
 
+    async def cleanup_stale_runners(self) -> Dict:
+        """active_runners + recent_runners 중 stale 항목 일괄 정리 (API 엔드포인트용).
+
+        Phase 1: ACTIVE_RUNNERS_KEY 순회 → PID 죽은 runner → _force_cleanup_state → cleaned_active 카운트
+        Phase 2: RECENT_RUNNERS_KEY 순회 → plan_file 없거나 파일시스템에 없는 경우 → 정리 → cleaned_recent 카운트
+                  단, Phase 1에서 이미 정리한 ID는 스킵 (cleaned_active_ids 세트로 판별)
+
+        Returns:
+            {"cleaned_active": int, "cleaned_recent": int, "bugs": int}
+        """
+        cleaned_active = 0
+        cleaned_recent = 0
+        bugs = 0
+        cleaned_active_ids: set = set()
+
+        try:
+            # Phase 1: active runners 정리 (dead PID)
+            try:
+                runner_ids = await self.async_redis.smembers(ACTIVE_RUNNERS_KEY)
+            except Exception:
+                runner_ids = []
+
+            for rid in runner_ids:
+                pid_str = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:pid")
+                should_clean = False
+                if not pid_str:
+                    should_clean = True
+                else:
+                    try:
+                        pid = int(pid_str)
+                        if not self._is_pid_alive(pid):
+                            should_clean = True
+                    except ValueError:
+                        should_clean = True
+                if should_clean:
+                    await self._force_cleanup_state(rid)
+                    cleaned_active_ids.add(rid)
+                    cleaned_active += 1
+
+            # Phase 2: recent runners 정리 (stale 항목)
+            try:
+                recent_ids = await self.async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1)
+            except Exception:
+                recent_ids = []
+
+            for rid in recent_ids:
+                if rid in cleaned_active_ids:
+                    continue
+                plan_file = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file")
+                if plan_file and Path(plan_file).exists():
+                    continue
+                # plan_file 없거나 파일시스템에 없는 경우 → 정리 대상
+                status = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:status")
+                if status == "running":
+                    # 아직 실행 중인 runner는 건드리지 않음
+                    bugs += 1
+                    continue
+                await self.async_redis.zrem(RECENT_RUNNERS_KEY, rid)
+                for key_suffix in RUNNER_KEY_SUFFIXES:
+                    await self.async_redis.delete(f"{RUNNER_KEY_PREFIX}:{rid}:{key_suffix}")
+                cleaned_recent += 1
+
+        except Exception:
+            logger.error(f"[dev-runner] cleanup_stale_runners 실패: {traceback.format_exc()}")
+
+        if cleaned_active or cleaned_recent:
+            logger.info(f"[dev-runner] cleanup_stale_runners: active={cleaned_active}, recent={cleaned_recent}, bugs={bugs}")
+
+        return {"cleaned_active": cleaned_active, "cleaned_recent": cleaned_recent, "bugs": bugs}
+
     async def start_dev_runner(self, request: RunRequest) -> RunStatusResponse:
         """plan-runner 실행 시작 - Redis 명령 전송 (비동기, 멀티 runner 지원)"""
         # Redis + listener 사전 확인
