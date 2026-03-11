@@ -165,6 +165,7 @@ class ExecutorService:
                         should_clean = True
                 if should_clean:
                     await self._force_cleanup_state(rid)
+                    cleaned_active_ids.add(rid)
                     cleaned_active += 1
 
             # Phase 2: recent runners 정리 (stale 항목)

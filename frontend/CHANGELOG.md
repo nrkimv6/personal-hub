@@ -1,5 +1,9 @@
 # Changelog
 
+## [2.85.1] - 2026-03-11
+### Fixed
+- cleanup_stale_runners Phase 1 루프에서 정리된 runner ID를 cleaned_active_ids에 수집 (중복 카운트 방지)
+
 ## [2.85.0] - 2026-03-11
 ### Added
 - 통합 모달 내 요약생성 버튼 추가 (spinner, 완료 아이콘, modalPlan summary 갱신)
