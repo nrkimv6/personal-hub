@@ -175,6 +175,8 @@ class ExecutorService:
                 recent_ids = []
 
             for rid in recent_ids:
+                if rid in cleaned_active_ids:
+                    continue
                 plan_file = await self.async_redis.get(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file")
                 if plan_file and Path(plan_file).exists():
                     continue
