@@ -36,6 +36,12 @@ async def stop_all_runners():
     return await executor_service.stop_all_runners()
 
 
+@router.post("/runners/cleanup-stale")
+async def cleanup_stale_runners():
+    """dead PID stale runner 일괄 정리 (active + recent)"""
+    return await executor_service.cleanup_stale_runners()
+
+
 @router.post("/stop")
 async def stop_run():
     """plan-runner 실행 중지 (하위호환 — 첫 번째 active runner 종료)"""
