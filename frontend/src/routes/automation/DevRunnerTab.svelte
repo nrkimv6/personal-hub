@@ -18,6 +18,7 @@
 		devRunnerEventApi
 	} from '$lib/api';
 	import { devRunnerMergeApi, devRunnerPlanApi } from '$lib/api/dev-runner';
+	import { encodePathToBase64 } from '$lib/utils/encoding';
 	import type {
 		DevRunnerRunStatusResponse,
 		DevRunnerRunnerListItem,
@@ -46,6 +47,27 @@
 	let modalPlan = $state<DevRunnerPlanFileResponse | null>(null);
 	let modalSelectedPlan = $state<string>('');
 	let modalMode = $state<'single' | 'all'>('single');
+	let summaryGenerating = $state(false);
+	let summaryGenerated = $state(false);
+
+	async function handleGenerateSummary() {
+		if (!modalPlan || summaryGenerating) return;
+		summaryGenerating = true;
+		summaryGenerated = false;
+		try {
+			await devRunnerPlanApi.generateSummary(encodePathToBase64(modalPlan.path));
+			await fetchPlans();
+			// modalPlan summary 갱신
+			const updated = $plansStore.find(p => p.path === modalPlan!.path);
+			if (updated) modalPlan = updated;
+			summaryGenerated = true;
+			setTimeout(() => { summaryGenerated = false; }, 2000);
+		} catch (e) {
+			console.warn('[DevRunner] generateSummary 실패', e);
+		} finally {
+			summaryGenerating = false;
+		}
+	}
 
 	// Phase 3: Runner 영역 구조 개편
 	let runnerCardCollapsed = $state(false);
@@ -56,6 +78,8 @@
 	function handlePlanModalOpen(plan: DevRunnerPlanFileResponse) {
 		modalPlan = plan;
 		modalSelectedPlan = plan.path;
+		summaryGenerating = false;
+		summaryGenerated = false;
 		showPlanModal = true;
 		if (window.innerWidth < 640) {
 			taskHistoryOpen = false;
@@ -760,7 +784,26 @@
 					<div class="p-5 space-y-4 overflow-y-auto">
 						{#if modalMode !== 'all'}
 						<div class="bg-blue-50 border border-blue-100 rounded-lg p-3">
-							<div class="text-[10px] text-blue-400 font-bold uppercase mb-1">Summary</div>
+							<div class="flex items-center justify-between mb-1">
+								<div class="text-[10px] text-blue-400 font-bold uppercase">Summary</div>
+								<button
+									onclick={handleGenerateSummary}
+									disabled={summaryGenerating}
+									class="flex items-center gap-1 text-[10px] text-blue-500 hover:text-blue-700 disabled:opacity-50 transition-colors"
+									title="요약 생성"
+								>
+									{#if summaryGenerating}
+										<svg class="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+										<span>생성중...</span>
+									{:else if summaryGenerated}
+										<svg class="w-3 h-3 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+										<span class="text-green-600">완료</span>
+									{:else}
+										<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+										<span>요약생성</span>
+									{/if}
+								</button>
+							</div>
 							<p class="text-xs text-blue-900 leading-relaxed">
 								{modalPlan.summary || '요약 정보가 없습니다.'}
 							</p>
