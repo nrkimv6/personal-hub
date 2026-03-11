@@ -45,6 +45,7 @@
 	let showPlanModal = $state(false);
 	let modalPlan = $state<DevRunnerPlanFileResponse | null>(null);
 	let modalSelectedPlan = $state<string>('');
+	let modalMode = $state<'single' | 'all'>('single');
 
 	// Phase 3: Runner 영역 구조 개편
 	let runnerCardCollapsed = $state(false);
@@ -744,25 +745,27 @@
 			<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 			<div
 				class="fixed inset-0 z-[60] flex items-center justify-center bg-black/40"
-				onclick={(e) => { if (e.target === e.currentTarget) { showPlanModal = false; modalSelectedPlan = ''; } }}
+				onclick={(e) => { if (e.target === e.currentTarget) { showPlanModal = false; modalSelectedPlan = ''; modalMode = 'single'; } }}
 			>
 				<div class="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden flex flex-col max-h-[90vh]">
 					<div class="p-4 border-b border-gray-100 flex items-center justify-between shrink-0">
 						<h3 class="text-sm font-semibold truncate flex-1 pr-4">{modalPlan.filename}</h3>
 						<button
-							onclick={() => { showPlanModal = false; modalSelectedPlan = ''; }}
+							onclick={() => { showPlanModal = false; modalSelectedPlan = ''; modalMode = 'single'; }}
 							class="text-gray-400 hover:text-gray-600 transition-colors"
 						>
 							<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 						</button>
 					</div>
 					<div class="p-5 space-y-4 overflow-y-auto">
+						{#if modalMode !== 'all'}
 						<div class="bg-blue-50 border border-blue-100 rounded-lg p-3">
 							<div class="text-[10px] text-blue-400 font-bold uppercase mb-1">Summary</div>
 							<p class="text-xs text-blue-900 leading-relaxed">
 								{modalPlan.summary || '요약 정보가 없습니다.'}
 							</p>
 						</div>
+						{/if}
 
 						<div class="grid grid-cols-2 gap-3 text-[11px]">
 							<div class="bg-gray-50 rounded p-2">
@@ -781,9 +784,10 @@
 							<RunControl
 								status={runStatus}
 								{plans}
-								onStatusChange={async () => { showPlanModal = false; modalSelectedPlan = ''; await handleRunStatusChange(); }}
-								onStart={(r) => { showPlanModal = false; modalSelectedPlan = ''; handleRunStart(r); }}
+								onStatusChange={async () => { showPlanModal = false; modalSelectedPlan = ''; modalMode = 'single'; await handleRunStatusChange(); }}
+								onStart={(r) => { showPlanModal = false; modalSelectedPlan = ''; modalMode = 'single'; handleRunStart(r); }}
 								bind:selectedPlan={modalSelectedPlan}
+								bind:mode={modalMode}
 								runnerTabs={runnerTabs.map(t => ({ id: t.id, running: t.running }))}
 							/>
 						</div>
