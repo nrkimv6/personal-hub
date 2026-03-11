@@ -1,5 +1,9 @@
 # Changelog
 
+## [2.85.0] - 2026-03-11
+### Added
+- 통합 모달 내 요약생성 버튼 추가 (spinner, 완료 아이콘, modalPlan summary 갱신)
+
 ## [2.83.0] - 2026-03-09
 ### Added
 - **dev-runner UI 전면 개편** (Phase 1-4)

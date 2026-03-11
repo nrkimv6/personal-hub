@@ -9,12 +9,11 @@
 		onStatusChange: () => void;
 		onStart?: (response: DevRunnerRunStatusResponse) => void;
 		selectedPlan?: string;
+		mode?: 'single' | 'all';
 		runnerTabs?: { id: string; running: boolean }[];
 	}
 
-	let { status, plans, onStatusChange, onStart, selectedPlan = $bindable(''), runnerTabs = [] }: Props = $props();
-
-	let mode = $state<'single' | 'all'>('single');
+	let { status, plans, onStatusChange, onStart, selectedPlan = $bindable(''), mode = $bindable('single'), runnerTabs = [] }: Props = $props();
 	let selectedEngine = $state('claude');
 	let selectedFixEngine = $state('claude');
 	let engineConfigs = $state<AllEnginesConfig | null>(null);

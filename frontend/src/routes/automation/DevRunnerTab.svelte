@@ -18,6 +18,7 @@
 		devRunnerEventApi
 	} from '$lib/api';
 	import { devRunnerMergeApi, devRunnerPlanApi } from '$lib/api/dev-runner';
+	import { encodePathToBase64 } from '$lib/utils/encoding';
 	import type {
 		DevRunnerRunStatusResponse,
 		DevRunnerRunnerListItem,
@@ -44,6 +45,29 @@
 	// Phase 2: Plan 상세 모달
 	let showPlanModal = $state(false);
 	let modalPlan = $state<DevRunnerPlanFileResponse | null>(null);
+	let modalSelectedPlan = $state<string>('');
+	let modalMode = $state<'single' | 'all'>('single');
+	let summaryGenerating = $state(false);
+	let summaryGenerated = $state(false);
+
+	async function handleGenerateSummary() {
+		if (!modalPlan || summaryGenerating) return;
+		summaryGenerating = true;
+		summaryGenerated = false;
+		try {
+			await devRunnerPlanApi.generateSummary(encodePathToBase64(modalPlan.path));
+			await fetchPlans();
+			// modalPlan summary 갱신
+			const updated = $plansStore.find(p => p.path === modalPlan!.path);
+			if (updated) modalPlan = updated;
+			summaryGenerated = true;
+			setTimeout(() => { summaryGenerated = false; }, 2000);
+		} catch (e) {
+			console.warn('[DevRunner] generateSummary 실패', e);
+		} finally {
+			summaryGenerating = false;
+		}
+	}
 
 	// Phase 3: Runner 영역 구조 개편
 	let runnerCardCollapsed = $state(false);
@@ -53,6 +77,9 @@
 
 	function handlePlanModalOpen(plan: DevRunnerPlanFileResponse) {
 		modalPlan = plan;
+		modalSelectedPlan = plan.path;
+		summaryGenerating = false;
+		summaryGenerated = false;
 		showPlanModal = true;
 		if (window.innerWidth < 640) {
 			taskHistoryOpen = false;
@@ -737,31 +764,52 @@
 			</div>
 		{/if}
 
-		<!-- Plan 상세 모달 -->
+		<!-- Plan 상세 모달 (통합: 상세 + RunControl) -->
 		{#if showPlanModal && modalPlan}
 			<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 			<div
 				class="fixed inset-0 z-[60] flex items-center justify-center bg-black/40"
-				onclick={(e) => { if (e.target === e.currentTarget) showPlanModal = false; }}
+				onclick={(e) => { if (e.target === e.currentTarget) { showPlanModal = false; modalSelectedPlan = ''; modalMode = 'single'; } }}
 			>
-				<div class="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 overflow-hidden flex flex-col">
-					<div class="p-4 border-b border-gray-100 flex items-center justify-between">
+				<div class="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 overflow-hidden flex flex-col max-h-[90vh]">
+					<div class="p-4 border-b border-gray-100 flex items-center justify-between shrink-0">
 						<h3 class="text-sm font-semibold truncate flex-1 pr-4">{modalPlan.filename}</h3>
 						<button
-							onclick={() => { showPlanModal = false; }}
+							onclick={() => { showPlanModal = false; modalSelectedPlan = ''; modalMode = 'single'; }}
 							class="text-gray-400 hover:text-gray-600 transition-colors"
 						>
 							<svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 						</button>
 					</div>
-					<div class="p-5 space-y-4">
+					<div class="p-5 space-y-4 overflow-y-auto">
+						{#if modalMode !== 'all'}
 						<div class="bg-blue-50 border border-blue-100 rounded-lg p-3">
-							<div class="text-[10px] text-blue-400 font-bold uppercase mb-1">Summary</div>
+							<div class="flex items-center justify-between mb-1">
+								<div class="text-[10px] text-blue-400 font-bold uppercase">Summary</div>
+								<button
+									onclick={handleGenerateSummary}
+									disabled={summaryGenerating}
+									class="flex items-center gap-1 text-[10px] text-blue-500 hover:text-blue-700 disabled:opacity-50 transition-colors"
+									title="요약 생성"
+								>
+									{#if summaryGenerating}
+										<svg class="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+										<span>생성중...</span>
+									{:else if summaryGenerated}
+										<svg class="w-3 h-3 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+										<span class="text-green-600">완료</span>
+									{:else}
+										<svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+										<span>요약생성</span>
+									{/if}
+								</button>
+							</div>
 							<p class="text-xs text-blue-900 leading-relaxed">
 								{modalPlan.summary || '요약 정보가 없습니다.'}
 							</p>
 						</div>
-						
+						{/if}
+
 						<div class="grid grid-cols-2 gap-3 text-[11px]">
 							<div class="bg-gray-50 rounded p-2">
 								<div class="text-gray-400 mb-0.5">Status</div>
@@ -775,23 +823,16 @@
 							</div>
 						</div>
 
-						<div class="flex gap-2 pt-2">
-							<button
-								class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded-lg transition-colors text-sm"
-								onclick={() => {
-									selectedPlanPath = modalPlan!.path;
-									showExecutionModal = true;
-									showPlanModal = false;
-								}}
-							>
-								Execute
-							</button>
-							<button
-								class="px-4 border border-gray-200 hover:bg-gray-50 text-gray-600 font-medium py-2 rounded-lg transition-colors text-sm"
-								onclick={() => { showPlanModal = false; }}
-							>
-								Close
-							</button>
+						<div class="border-t border-gray-100 pt-4">
+							<RunControl
+								status={runStatus}
+								{plans}
+								onStatusChange={async () => { showPlanModal = false; modalSelectedPlan = ''; modalMode = 'single'; await handleRunStatusChange(); }}
+								onStart={(r) => { showPlanModal = false; modalSelectedPlan = ''; modalMode = 'single'; handleRunStart(r); }}
+								bind:selectedPlan={modalSelectedPlan}
+								bind:mode={modalMode}
+								runnerTabs={runnerTabs.map(t => ({ id: t.id, running: t.running }))}
+							/>
 						</div>
 					</div>
 				</div>
