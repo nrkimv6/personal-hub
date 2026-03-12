@@ -1,5 +1,9 @@
 # Changelog
 
+## [2.86.0] - 2026-03-12
+### Added
+- vite.config.ts에 serverStatusPlugin 추가: `/__local/server-status` 미들웨어로 death_log.json 파싱 및 API 서버 사망 감지 엔드포인트 제공
+
 ## [2.85.1] - 2026-03-11
 ### Fixed
 - cleanup_stale_runners Phase 1 루프에서 정리된 runner ID를 cleaned_active_ids에 수집 (중복 카운트 방지)
