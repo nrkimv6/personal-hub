@@ -178,3 +178,44 @@ class TestSyncPlansIntegration:
         assert result["synced"] == 2
         # archive 수(5) < total scanned 이어야 함 (이전처럼 7이 아님)
         assert result["synced"] < 7
+
+
+# ---------------------------------------------------------------------------
+# Phase T5: HTTP 통합 테스트
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def api_client():
+    from app.main import app
+    from fastapi.testclient import TestClient
+    return TestClient(app)
+
+
+class TestSyncPlansHTTP:
+    """POST /api/v1/dev-runner/plans/sync HTTP 통합 테스트"""
+
+    def test_http_post_sync_plans_response_structure(self, api_client):
+        """T5: POST /plans/sync → 200 응답, 필수 키 존재 확인"""
+        resp = api_client.post("/api/v1/dev-runner/plans/sync")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "synced" in data
+        assert "added" in data
+        assert "removed" in data
+        assert "updated" in data
+        assert isinstance(data["synced"], int)
+
+    def test_http_post_sync_plans_excludes_archive_count(self, api_client):
+        """T5: POST /plans/sync → synced 값이 GET /plans 활성 count와 일치 (archive 미포함)"""
+        # GET /plans 로 활성 plan 수 확인
+        get_resp = api_client.get("/api/v1/dev-runner/plans")
+        assert get_resp.status_code == 200
+        active_count = len(get_resp.json())
+
+        # sync 실행
+        sync_resp = api_client.post("/api/v1/dev-runner/plans/sync")
+        assert sync_resp.status_code == 200
+        synced_count = sync_resp.json()["synced"]
+
+        # synced는 활성 plan 수와 같아야 함 (archive 포함 시 훨씬 클 것)
+        assert synced_count == active_count
