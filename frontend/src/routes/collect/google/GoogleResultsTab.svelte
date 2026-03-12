@@ -40,8 +40,34 @@
 	// 총 페이지 수
 	let totalPages = $derived(Math.ceil(total / pageSize));
 
+	// 필터 상태를 URL params에 동기화
+	function syncFiltersToUrl() {
+		const params = new URLSearchParams(window.location.search);
+
+		// tab 파라미터 유지 (상위 페이지에서 관리)
+		if (activeTab !== 'all') {
+			params.set('activeTab', activeTab);
+		} else {
+			params.delete('activeTab');
+		}
+
+		if (query) params.set('query', query); else params.delete('query');
+		if (search) params.set('search', search); else params.delete('search');
+		if (dateFrom) params.set('dateFrom', dateFrom); else params.delete('dateFrom');
+		if (dateTo) params.set('dateTo', dateTo); else params.delete('dateTo');
+		if (isRead !== '') params.set('isRead', isRead); else params.delete('isRead');
+		if (sortBy !== 'created_at') params.set('sortBy', sortBy); else params.delete('sortBy');
+		if (sortOrder !== 'desc') params.set('sortOrder', sortOrder); else params.delete('sortOrder');
+		if (page !== 1) params.set('page', String(page)); else params.delete('page');
+		if (pageSize !== 20) params.set('pageSize', String(pageSize)); else params.delete('pageSize');
+
+		const newUrl = window.location.pathname + '?' + params.toString();
+		window.history.replaceState(null, '', newUrl);
+	}
+
 	// 데이터 로드
 	async function loadResults() {
+		syncFiltersToUrl();
 		loading = true;
 		error = null;
 
@@ -167,6 +193,12 @@
 		sortBy = 'created_at';
 		sortOrder = 'desc';
 		page = 1;
+		// tab 파라미터만 유지하고 나머지 필터 제거
+		const params = new URLSearchParams(window.location.search);
+		const tabParam = params.get('tab');
+		const newParams = new URLSearchParams();
+		if (tabParam) newParams.set('tab', tabParam);
+		window.history.replaceState(null, '', window.location.pathname + '?' + newParams.toString());
 		loadResults();
 	}
 
@@ -245,6 +277,46 @@
 	});
 
 	onMount(() => {
+		const params = new URLSearchParams(window.location.search);
+
+		const tabParam = params.get('activeTab');
+		if (tabParam && ['all', 'new', 'bookmarked', 'disappeared'].includes(tabParam)) {
+			activeTab = tabParam as ResultFilterTabValue;
+		}
+
+		const queryParam = params.get('query');
+		if (queryParam !== null) query = queryParam;
+
+		const searchParam = params.get('search');
+		if (searchParam !== null) search = searchParam;
+
+		const dateFromParam = params.get('dateFrom');
+		if (dateFromParam !== null) dateFrom = dateFromParam;
+
+		const dateToParam = params.get('dateTo');
+		if (dateToParam !== null) dateTo = dateToParam;
+
+		const isReadParam = params.get('isRead');
+		if (isReadParam !== null && ['', 'true', 'false'].includes(isReadParam)) isRead = isReadParam;
+
+		const sortByParam = params.get('sortBy');
+		if (sortByParam !== null) sortBy = sortByParam;
+
+		const sortOrderParam = params.get('sortOrder');
+		if (sortOrderParam !== null && ['asc', 'desc'].includes(sortOrderParam)) sortOrder = sortOrderParam;
+
+		const pageParam = params.get('page');
+		if (pageParam !== null) {
+			const pageNum = parseInt(pageParam, 10);
+			if (!isNaN(pageNum) && pageNum >= 1) page = pageNum;
+		}
+
+		const pageSizeParam = params.get('pageSize');
+		if (pageSizeParam !== null) {
+			const ps = parseInt(pageSizeParam, 10);
+			if ([10, 20, 50, 100].includes(ps)) pageSize = ps;
+		}
+
 		loadResults();
 	});
 </script>
