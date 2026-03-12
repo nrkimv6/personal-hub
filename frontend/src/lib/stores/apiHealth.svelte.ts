@@ -35,7 +35,7 @@ function createApiHealthStore() {
 					if (statusRes.ok) {
 						const status = await statusRes.json();
 						if (status.alive === false) {
-							stopReconnectPolling();
+							// 폴링은 유지 — API 복귀 시 자동으로 connected로 전환되어야 함
 							state = 'dead';
 							lastDeath = status.lastEvent ?? null;
 						}
