@@ -1,6 +1,9 @@
 # Changelog
 
-## [2.85.2] - 2026-03-13
+## [2.86.0] - 2026-03-13
+### Added
+- vite.config.ts에 serverStatusPlugin 추가: `/__local/server-status` 미들웨어로 death_log.json 파싱 및 API 서버 사망 감지 엔드포인트 제공
+
 ### Fixed
 - GoogleResultsTab: onMount에서 URL searchParams → 필터 상태 복원 (새로고침 시 필터 유지)
 
