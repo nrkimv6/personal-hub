@@ -1052,6 +1052,10 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
             _pub("merge 성공 (exit_code=0)")
             result = {"success": True, "message": "merged", "merge_status": "merged", "action": action_name}
 
+            # plan 헤더에서 branch/worktree 필드 제거 — 잔존 시 auto-done 에이전트가 /done 2.5단계에서 차단됨
+            if plan_file and plan_file not in (PLAN_FILE_ALL, _LEGACY_ALL):
+                _remove_plan_header_fields(plan_file)
+
             # 5. 자동 done 분기: 완료율 체크 → done API 호출 or main 추가 사이클 예약
             if plan_file and plan_file not in (PLAN_FILE_ALL, _LEGACY_ALL):
                 done_count, total_count = _get_plan_completion(plan_file)
