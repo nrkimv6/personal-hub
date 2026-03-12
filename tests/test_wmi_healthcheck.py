@@ -44,3 +44,22 @@ class TestCheckWmiHealth:
             result = mgr._check_wmi_health()
 
         assert result is False
+
+
+class TestFixWmi:
+    def test_fix_wmi_calls_powershell(self):
+        """_fix_wmi()가 Restart-Service winmgmt -Force 명령을 호출하는지 확인."""
+        mgr = _make_manager()
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            result = mgr._fix_wmi()
+
+        assert result is True
+        mock_run.assert_called_once_with(
+            ["powershell", "-Command", "Restart-Service winmgmt -Force"],
+            timeout=15,
+            capture_output=True,
+        )
