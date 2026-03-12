@@ -1,6 +1,10 @@
 # Changelog
 
-## [2.86.0] - 2026-03-13
+## [2.87.0] - 2026-03-13
+### Added
+- apiHealth 스토어: `ApiHealthState`에 `'dead'` 추가, `lastDeath` 상태 필드 및 getter 추가
+
+## [2.86.0] - 2026-03-12
 ### Added
 - vite.config.ts에 serverStatusPlugin 추가: `/__local/server-status` 미들웨어로 death_log.json 파싱 및 API 서버 사망 감지 엔드포인트 제공
 
