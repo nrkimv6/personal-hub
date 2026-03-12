@@ -9,11 +9,12 @@
 
 const API_BASE = '/api/v1';
 
-type ApiHealthState = 'connected' | 'disconnected' | 'reconnecting';
+type ApiHealthState = 'connected' | 'disconnected' | 'reconnecting' | 'dead';
 
 function createApiHealthStore() {
 	let state = $state<ApiHealthState>('connected');
 	let disconnectedAt = $state<number | null>(null);
+	let lastDeath = $state<{ timestamp: string; cause: string; details: string } | null>(null);
 
 	let errorCount = 0;
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -67,6 +68,9 @@ function createApiHealthStore() {
 		},
 		get disconnectedAt() {
 			return disconnectedAt;
+		},
+		get lastDeath() {
+			return lastDeath;
 		},
 		reportConnectionError,
 		reportConnectionSuccess
