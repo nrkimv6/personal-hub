@@ -29,7 +29,21 @@ function createApiHealthStore() {
 					reportConnectionSuccess();
 				}
 			} catch {
-				// 아직 연결 안 됨 — 계속 폴링
+				// API 연결 실패 — death_log 확인
+				try {
+					const statusRes = await fetch('/__local/server-status');
+					if (statusRes.ok) {
+						const status = await statusRes.json();
+						if (status.alive === false) {
+							stopReconnectPolling();
+							state = 'dead';
+							lastDeath = status.lastEvent ?? null;
+						}
+						// alive === true: 재시작 중으로 판단, reconnecting 유지
+					}
+				} catch {
+					// server-status 엔드포인트 오류 무시 — reconnecting 유지
+				}
 			}
 		}, 2000);
 	}
@@ -52,9 +66,10 @@ function createApiHealthStore() {
 
 	function reportConnectionSuccess() {
 		errorCount = 0;
-		if (state === 'disconnected' || state === 'reconnecting') {
+		if (state === 'disconnected' || state === 'reconnecting' || state === 'dead') {
 			stopReconnectPolling();
 			state = 'connected';
+			lastDeath = null;
 			if (typeof window !== 'undefined') {
 				window.dispatchEvent(new Event('api:reconnected'));
 			}
