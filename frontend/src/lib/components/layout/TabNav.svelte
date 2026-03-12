@@ -11,12 +11,13 @@
    */
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
+  import type { Component } from 'svelte';
 
   type Tab = {
     id: string;
     label: string;
     href?: string;
-    icon?: string;
+    icon?: string | Component;
     count?: number;
     color?: string;
     countVariant?: 'default' | 'error' | 'warning';
@@ -128,7 +129,7 @@
           data-sveltekit-preload-data
           class="py-1.5 px-3 rounded-md text-sm font-medium transition-colors {getStyles(isTabActive(tab), tab)}"
         >
-          {#if tab.icon}<span class="mr-1">{tab.icon}</span>{/if}
+          {#if tab.icon}<span class="mr-1">{#if typeof tab.icon === 'string'}{tab.icon}{:else}<svelte:component this={tab.icon} size={16} />{/if}</span>{/if}
           {tab.label}
           {#if tab.count !== undefined}
             <span class={getCountStyles(tab)}>{tab.count}</span>
@@ -139,7 +140,7 @@
           onclick={() => handleTabClick(tab)}
           class="py-1.5 px-3 rounded-md text-sm font-medium transition-colors {getStyles(isTabActive(tab), tab)}"
         >
-          {#if tab.icon}<span class="mr-1">{tab.icon}</span>{/if}
+          {#if tab.icon}<span class="mr-1">{#if typeof tab.icon === 'string'}{tab.icon}{:else}<svelte:component this={tab.icon} size={16} />{/if}</span>{/if}
           {tab.label}
           {#if tab.count !== undefined}
             <span class={getCountStyles(tab)}>{tab.count}</span>
@@ -158,7 +159,7 @@
             data-sveltekit-preload-data
             class="{sizeClass} border-b-2 font-medium transition-colors {getStyles(isTabActive(tab), tab)}"
           >
-            {#if tab.icon}<span class="mr-2">{tab.icon}</span>{/if}
+            {#if tab.icon}<span class="mr-2">{#if typeof tab.icon === 'string'}{tab.icon}{:else}<svelte:component this={tab.icon} size={16} />{/if}</span>{/if}
             {tab.label}
             {#if tab.count !== undefined}
               <span class={getCountStyles(tab)}>{tab.count}</span>
@@ -169,7 +170,7 @@
             onclick={() => handleTabClick(tab)}
             class="{sizeClass} border-b-2 font-medium transition-colors {getStyles(isTabActive(tab), tab)}"
           >
-            {#if tab.icon}<span class="mr-2">{tab.icon}</span>{/if}
+            {#if tab.icon}<span class="mr-2">{#if typeof tab.icon === 'string'}{tab.icon}{:else}<svelte:component this={tab.icon} size={16} />{/if}</span>{/if}
             {tab.label}
             {#if tab.count !== undefined}
               <span class={getCountStyles(tab)}>{tab.count}</span>
